@@ -613,6 +613,7 @@ impl VulkanGpu {
             clear_stencil_with_pass: true,
             cpu_rasterizer: properties.device_type == vk::PhysicalDeviceType::CPU,
             max_line_width: line_widths.map_or(1.0, |(_, max)| max),
+            binds_vertex_buffers: false,
         };
         // At least two, so that the CPU writes the next batch's while the
         // GPU runs the last.
@@ -2290,7 +2291,13 @@ impl Gpu for VulkanGpu {
             let (buffer, texture) = self.lookup();
             let sampler = |id| self.samplers.contains_key(id);
             let lookup = Lookup { buffer: &buffer, texture: &texture, sampler: &sampler };
-            validation::check_bindings(desc, &shader.reads, self.caps.buffer_offset_alignment, &lookup)?
+            validation::check_bindings(
+                desc,
+                &shader.reads,
+                self.caps.buffer_offset_alignment,
+                self.caps.binds_vertex_buffers,
+                &lookup,
+            )?
         };
         let sets = self.descriptor_sets(desc.shader, desc.entries)?;
         let mut handles = vec![[vk::DescriptorSet::null(); DescriptorSetType::COUNT]; self.window_count];

@@ -46,20 +46,21 @@ pub struct MapOptions {
     pub event_mask: EventMask,
     /// JSON text of the font faces that the map falls back to for the text
     /// that the style's fonts don't draw, as `Map::set_fallback_font_faces`
-    /// takes it: the text that glyph PBFs can't shape, and the glyphs that
-    /// come from local fonts, before the system's. Without it, the map
-    /// falls back to the system's fonts for the scripts that need shaping,
-    /// unless `system_fonts` is off.
+    /// takes it: the text that glyph PBFs can't shape, all the text of a
+    /// style without them, and the glyphs that come from local fonts, before
+    /// the system's. With it, the map shapes no text with the system's fonts.
     pub fallback_font_faces: Option<String>,
     /// Whether the map draws from the system's fonts what the style's fonts
-    /// and `fallback_font_faces` don't: the scripts that need complex
-    /// shaping (`mln_system_fonts::fallback_font_faces`), and the glyphs of
-    /// a style without glyph PBFs, those its PBFs lack, and with
-    /// `local_ideographs`, CJK (`mln_system_fonts::SystemGlyphRasterizer`).
-    /// On by default. The first map that uses them waits for the platform's
-    /// font matcher to load. In the browser, which has no font files to
-    /// read, the browser draws those glyphs in the font stack's families,
-    /// then its sans-serif font, as MapLibre GL JS does.
+    /// and `fallback_font_faces` don't. It shapes with them the scripts that
+    /// glyph PBFs can't shape, and all the text of a style without PBFs
+    /// (`mln_system_fonts::font_face`), from the fonts the labels'
+    /// `text-font` names first; and draws from them the glyphs a style's
+    /// PBFs lack, and with `local_ideographs`, CJK
+    /// (`mln_system_fonts::SystemGlyphRasterizer`). On by default. The first
+    /// map that uses them waits for the platform's font matcher to load. In
+    /// the browser, which has no font files to read, the browser draws each
+    /// glyph of that text in the font stack's families, then its sans-serif
+    /// font, as MapLibre GL JS does, unshaped.
     pub system_fonts: bool,
     /// Whether CJK ideographs, kana and hangul come from local fonts (the
     /// fallback font faces, then the system's) before glyph PBFs, as
@@ -1006,7 +1007,7 @@ impl Map {
         let key = selector.key(true)?;
         self.query(move |map| {
             let feature_id = key.feature_id.as_deref().unwrap_or_default();
-            Ok(map.get_feature_state(&key.source_id, Some(&key.source_layer_id), feature_id))
+            Ok(map.feature_state(&key.source_id, Some(&key.source_layer_id), feature_id))
         })
     }
 
@@ -1643,7 +1644,7 @@ pub(crate) fn create(
             return outbox.resolve(resolver, Err(error));
         }
     } else if options.system_fonts {
-        map.set_fallback_font_face_list(mln_system_fonts::fallback_font_face_list());
+        map.set_fallback_font_face_list(mln_system_fonts::font_face().into_iter().collect());
     }
     let _ = published.updates.set(map.update_reader());
     let _ = published.frame_clock.set(map.frame_clock());

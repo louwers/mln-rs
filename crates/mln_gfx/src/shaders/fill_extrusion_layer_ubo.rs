@@ -16,7 +16,12 @@ pub struct FillExtrusionDrawableUBO {
     /*  96 */ pub color_t: f32,
     /* 100 */ pub pattern_from_t: f32,
     /* 104 */ pub pattern_to_t: f32,
-    /* 108 */ pub pad1: f32,
+    /// Where `FillExtrusionPulledShader` finds a vertex's paint values in
+    /// the buffer it reads them from, in words, a byte each from the
+    /// lowest: how many a vertex takes, then the offset in them of its
+    /// base, its height and its color.
+    /* 108 */
+    pub paint_layout: u32,
     /* 112 */
 }
 const _: () = assert!(size_of::<FillExtrusionDrawableUBO>() == 7 * 16);

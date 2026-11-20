@@ -437,10 +437,8 @@ enum Finish {
     Glide,
 }
 
-/// The gesture recognizers for one map: MapLibre Compose's gesture set, with
-/// maplibre-native-ffi's browser demo's rates and releases where it has the
-/// gesture and GL JS's elsewhere, continued by the map's momentum. The
-/// crate's README says where each comes from.
+/// Recognizes gestures for one map and continues their releases with the
+/// map's momentum.
 ///
 /// - Drag to pan, or with the [`Modes`] the host selects, rotate and tilt or
 ///   zoom to a box.

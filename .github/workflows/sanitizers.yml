@@ -17,6 +17,9 @@ on:
 permissions:
   contents: read
 
+env:
+  MISE_LOCKED: "1"
+
 jobs:
   # On the Vulkan backend on lavapipe, under Vulkan's validation layer, as
   # the ci workflow's vulkan leg runs them. No Rust cache: the build is a

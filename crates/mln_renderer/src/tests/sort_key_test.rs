@@ -128,6 +128,7 @@ fn create_bucket(properties: &Arc<dyn ErasedEvaluatedLayer>, shape: Shape) -> Bo
             &mut LayoutParameters {
                 bucket_parameters: &bucket_parameters,
                 font_faces: None,
+                glyph_pbfs: true,
                 glyph_dependencies: &mut glyph_dependencies,
                 image_dependencies: &mut image_dependencies,
                 available_images: &available_images,

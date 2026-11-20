@@ -199,7 +199,7 @@ impl<K: TilesetKind> TileOrigin for TilesetOrigin<K> {
         if is_vector::<K>() {
             // Past the tileset's last zoom, tiles are cut from its tiles until
             // the last few zooms the map can reach, which draw them scaled up.
-            let max_zoom = parameters.transform_state.get_max_zoom().floor() as i32 - i32::from(OVERSCALED_ZOOMS);
+            let max_zoom = parameters.max_zoom.floor() as i32 - i32::from(OVERSCALED_ZOOMS);
             zoom_range.max = zoom_range.max.max(max_zoom.clamp(0, i32::from(u8::MAX)) as u8);
         }
         Some(Cover { tile_size, zoom_range, bounds: tileset.bounds })

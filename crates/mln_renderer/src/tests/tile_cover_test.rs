@@ -3,7 +3,7 @@
 
 use geo_types::{Geometry, LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 use mln_map::transform::Transform;
-use mln_map_types::{CameraOptions, ConstrainMode, TileLodMode, ViewportMode};
+use mln_map_types::{CameraLimits, CameraOptions, ConstrainMode, TileLodMode, ViewportMode};
 use mln_style_types::ProjectionDefinition;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID, UnwrappedTileID};
 use mln_util::constants;
@@ -65,7 +65,7 @@ fn transform(width: u32, height: u32) -> Transform {
 }
 
 fn params(transform: &Transform) -> TileCoverParameters {
-    TileCoverParameters::new(transform.get_state().clone())
+    TileCoverParameters::new(transform.view().clone())
 }
 
 /// gtest's `ASSERT_NEAR(val1, val2, abs_error)`.
@@ -229,7 +229,7 @@ mod tile_cover {
             ..Default::default()
         });
         // Top padding of 376 leads to capped pitch. See Transform::getMaxPitchForEdgeInsets.
-        assert!(transform.get_pitch() + 0.001 <= mln_math::deg2rad(60.0));
+        assert!(transform.view().pitch() + 0.001 <= mln_math::deg2rad(60.0));
 
         assert_eq!(
             vec![os(3, 4, 3), os(3, 3, 3), os(3, 4, 4), os(3, 3, 4)],
@@ -772,7 +772,9 @@ mod tile_cover {
     fn set_up_globe(transform: &mut Transform, size: Size, center: LatLng, zoom: f64, pitch: f64, bearing: f64) {
         transform.resize(size).unwrap();
         transform.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));
-        transform.set_max_pitch(80.0);
+        transform
+            .set_limits(CameraLimits { max_pitch: mln_math::deg2rad(80.0), ..*transform.state().limits() })
+            .unwrap();
         transform.jump_to(&CameraOptions {
             center: Some(center),
             zoom: Some(zoom),
@@ -780,7 +782,7 @@ mod tile_cover {
             bearing: Some(bearing),
             ..Default::default()
         });
-        assert!(transform.get_state().is_globe_rendering());
+        assert!(transform.view().is_globe());
     }
 
     // The globe cases of GL JS `covering_tiles.test.ts`, same cameras, same tiles in the same order.
@@ -957,7 +959,7 @@ mod tile_cover {
             // As TilePyramid asks for them.
             let covering_zoom: i32 = covering_zoom_level(c.zoom, c.raster, c.tile_size);
             let ideal_zoom = std::cmp::min(i32::from(c.max_zoom), covering_zoom) as u8;
-            let mut parameters = TileCoverParameters::new(transform.get_state().clone());
+            let mut parameters = TileCoverParameters::new(transform.view().clone());
             parameters.requested_zoom = Some(c.zoom + (512.0 / f64::from(c.tile_size)).log2());
             parameters.round_zoom = c.raster;
             let tiles = tile_cover(
@@ -982,7 +984,7 @@ mod tile_cover {
     fn globe_around_the_pole() {
         let mut transform = new_transform();
         set_up_globe(&mut transform, Size::new(512, 512), ll(-90.0, 0.0), 1.6, 0.0, 0.0);
-        assert_eq!(-90.0, transform.get_lat_lng(WrapMode::Wrapped).latitude());
+        assert_eq!(-90.0, transform.view().center(WrapMode::Wrapped).latitude());
         assert_eq!(
             vec![
                 os(5, 16, 31),
@@ -1069,7 +1071,7 @@ mod tile_cover {
     fn globe_below_zoom_zero() {
         let mut transform = new_transform();
         set_up_globe(&mut transform, Size::new(128, 128), ll(80.0, 0.0), -0.5, 0.0, 0.0);
-        assert_eq!(0, transform.get_state().get_integer_zoom());
+        assert_eq!(0, transform.view().integer_zoom());
         assert_eq!(vec![os(0, 0, 0)], tile_cover(&params(&transform), 0, Range::new(0, 0), None));
     }
 
@@ -1139,7 +1141,7 @@ mod tile_cover {
                 ..Default::default()
             });
         }
-        assert_near(740.0, transform.get_state().get_lat_lng(WrapMode::Unwrapped).longitude(), 1e-9);
+        assert_near(740.0, transform.view().center(WrapMode::Unwrapped).longitude(), 1e-9);
         let spun = tile_cover(&params(&transform), 6, Range::new(0, 14), None);
         assert_eq!(home.len(), spun.len());
         for i in 0..home.len() {

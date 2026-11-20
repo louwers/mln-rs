@@ -8,8 +8,8 @@
 //! to write the same depth, so the depth of a frame means one thing on every
 //! backend.
 
+use glam::{DMat4, DVec3};
 pub use mln_map_types::{ClipDepthRange, FrameProjection};
-use mln_util::mat4::{Mat4, matrix};
 use mln_util::projection::Projection;
 
 use crate::paint_parameters::TransformParameters;
@@ -23,23 +23,23 @@ pub(crate) fn compute(
     depth_range_size: f32,
     clip_depth_range: ClipDepthRange,
 ) -> FrameProjection {
-    let state = &transform.state;
-    let world_size = Projection::world_size(state.get_scale());
-    let mut world_to_clip: Mat4 = [0.0; 16];
-    matrix::scale(&mut world_to_clip, &transform.near_clipped_proj_matrix, world_size, world_size, 1.0);
+    let state = &transform.view;
+    let world_size = Projection::world_size(state.scale());
+    let mut world_to_clip =
+        transform.near_clipped_proj_matrix * DMat4::from_scale(DVec3::new(world_size, world_size, 1.0));
     let far_depth = f64::from(depth_range_size);
     // Clip z over w from 0 to 1 is the 3D layers' depth over `far_depth`:
     // scale it to the depth, and on OpenGL map it to -1 to 1 again.
-    for column in 0..4 {
-        let z = world_to_clip[column * 4 + 2];
-        let w = world_to_clip[column * 4 + 3];
-        world_to_clip[column * 4 + 2] = match clip_depth_range {
+    let (z, w) = (world_to_clip.row(2), world_to_clip.row(3));
+    world_to_clip.set_row(
+        2,
+        match clip_depth_range {
             ClipDepthRange::ZeroToOne => far_depth * z,
             ClipDepthRange::NegativeOneToOne => 2.0 * far_depth * z - w,
-        };
-    }
+        },
+    );
     let near = transform.near_clipped_near_z;
-    let far = state.get_far_z();
+    let far = state.far_z();
     FrameProjection {
         matrix: world_to_clip,
         clip_depth_range,
@@ -47,7 +47,7 @@ pub(crate) fn compute(
         near_distance: 2.0 * near * far / (far + near),
         far_distance: far,
         far_depth,
-        globe: state.is_globe_rendering(),
+        globe: state.is_globe(),
     }
 }
 
@@ -55,10 +55,8 @@ pub(crate) fn compute(
 /// D3D12 and WebGPU do with it: clip z from -w to w becomes `2z - w`, so that
 /// OpenGL clips what was below 0 and writes the depth range times the old z
 /// over w.
-pub(crate) fn zero_to_one_clip_z(matrix: &mut Mat4) {
-    for column in 0..4 {
-        matrix[column * 4 + 2] = 2.0 * matrix[column * 4 + 2] - matrix[column * 4 + 3];
-    }
+pub(crate) fn zero_to_one_clip_z(matrix: &mut DMat4) {
+    matrix.set_row(2, 2.0 * matrix.row(2) - matrix.row(3));
 }
 
 #[cfg(test)]
@@ -66,7 +64,6 @@ mod tests {
     use mln_map_types::{Camera, LogicalExtent, MapView, ProjectionMode, Viewport};
     use mln_style_types::ProjectionDefinition;
     use mln_util::geo::{EdgeInsets, LatLng};
-    use mln_util::mat4::matrix;
     use mln_util::size::Size;
 
     use super::*;
@@ -91,15 +88,13 @@ mod tests {
             viewport: Viewport::default(),
             projection: ProjectionDefinition::default(),
         };
-        TransformParameters::new(&view.to_state().unwrap())
+        TransformParameters::new(&view.to_view().unwrap())
     }
 
     /// `point`, of x and y in Web Mercator's 0 to 1 and z in meters, through
     /// `matrix`: its pixel from the top left, and its clip z over w.
-    fn project(matrix: &Mat4, point: [f64; 3]) -> (f64, f64, f64) {
-        let mut clip = [0.0; 4];
-        matrix::transform_mat4(&mut clip, &[point[0], point[1], point[2], 1.0], matrix);
-        let (x, y, z) = (clip[0] / clip[3], clip[1] / clip[3], clip[2] / clip[3]);
+    fn project(matrix: &DMat4, point: [f64; 3]) -> (f64, f64, f64) {
+        let DVec3 { x, y, z } = matrix.project_point3(DVec3::from_array(point));
         (f64::midpoint(x, 1.0) * f64::from(SIZE.width), (1.0 - y) / 2.0 * f64::from(SIZE.height), z)
     }
 
@@ -116,7 +111,7 @@ mod tests {
         for (lat, lng) in [(40.7, -74.0), (40.703, -73.996), (40.698, -74.004), (40.705, -74.001)] {
             let lat_lng = LatLng::new(lat, lng).unwrap();
             // The state counts its screen points from the bottom.
-            let mut expected = transform.state.lat_lng_to_screen_coordinate(&lat_lng);
+            let mut expected = transform.view.lat_lng_to_screen_coordinate(&lat_lng);
             expected.y = f64::from(SIZE.height) - expected.y;
             let (x, y, _) = project(&projection.matrix, mercator(&lat_lng));
             assert!(
@@ -143,9 +138,8 @@ mod tests {
         let far_depth = zero_to_one.far_depth;
         // A 3D layer's OpenGL matrix, as Metal, Vulkan, D3D12 and WebGPU draw
         // it, and as OpenGL does through `zero_to_one_clip_z`.
-        let world_size = Projection::world_size(transform.state.get_scale());
-        let mut layer = [0.0; 16];
-        matrix::scale(&mut layer, &transform.near_clipped_proj_matrix, world_size, world_size, 1.0);
+        let world_size = Projection::world_size(transform.view.scale());
+        let layer = transform.near_clipped_proj_matrix * DMat4::from_scale(DVec3::new(world_size, world_size, 1.0));
         let mut gl_layer = layer;
         zero_to_one_clip_z(&mut gl_layer);
         let center = mercator(&LatLng::new(40.7, -74.0).unwrap());
@@ -185,12 +179,12 @@ mod tests {
             viewport: Viewport::default(),
             projection: ProjectionDefinition::default(),
         };
-        let transform = TransformParameters::new(&view.to_state().unwrap());
+        let transform = TransformParameters::new(&view.to_view().unwrap());
         let projection = compute(&transform, 1.0, ClipDepthRange::ZeroToOne);
-        assert_eq!(transform.state.get_far_z(), projection.far_distance);
+        assert_eq!(transform.view.far_z(), projection.far_distance);
         // The ground north of the center: what is drawn below the horizon
         // is nearer than the far depth, and what is drawn above it is past.
-        let horizon_row = f64::from(SIZE.height) / 2.0 - transform.state.get_mercator_horizon();
+        let horizon_row = f64::from(SIZE.height) / 2.0 - transform.view.mercator_horizon();
         let mut past = 0;
         for step in 0..8500 {
             let (_, row, depth) =

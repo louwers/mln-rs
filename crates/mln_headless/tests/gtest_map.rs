@@ -379,15 +379,15 @@ fn free_camera_options_place_the_camera_and_cancel_commands() {
     });
     assert!(test.map().snapshot().transition_in_progress);
 
-    let position = [0.25, 0.25, 0.01];
+    let position = glam::dvec3(0.25, 0.25, 0.01);
     test.map().set_free_camera_options(&mln_map::FreeCameraOptions { position: Some(position), orientation: None });
     let ended: Vec<_> =
         test.map().drain_command_ends().filter(|end| end.command == command).map(|end| end.end.outcome).collect();
     assert_eq!(ended, [mln_map::TransitionOutcome::Cancelled]);
     assert!(!test.map().snapshot().transition_in_progress);
     let placed = test.map().snapshot().free_camera.position;
-    for (placed, wanted) in placed.iter().zip(position) {
-        assert_near(*placed, wanted, 1e-9);
+    for (placed, wanted) in placed.to_array().into_iter().zip(position.to_array()) {
+        assert_near(placed, wanted, 1e-9);
     }
     // Looking straight down from a quarter of the world's width and height:
     // the center is 90° W, north of the equator.
@@ -397,7 +397,7 @@ fn free_camera_options_place_the_camera_and_cancel_commands() {
 
     // A NaN position is ignored.
     test.map().set_free_camera_options(&mln_map::FreeCameraOptions {
-        position: Some([f64::NAN, 0.0, 0.0]),
+        position: Some(glam::dvec3(f64::NAN, 0.0, 0.0)),
         orientation: None,
     });
     assert_near(CameraOptions::from(test.map().snapshot().view.camera).center.unwrap().longitude(), -90.0, 1e-6);
@@ -3388,7 +3388,7 @@ fn globe_hand_off_keeps_tiles() {
     map.jump_to(&CameraOptions { center: Some(center), zoom: Some(10.5), ..Default::default() });
     frontend.render(&mut map).unwrap_or_else(|e| panic!("render: {e}"));
     map.drain_events().into_iter().for_each(|event| observer.dispatch(event));
-    assert!(map.get_transform_state().is_globe_rendering());
+    assert!(map.transform_state().view().is_globe());
     let first_visit = std::mem::take(&mut *parsed.borrow_mut());
     assert_ne!(first_visit, Vec::<OverscaledTileID>::new());
 
@@ -3397,7 +3397,7 @@ fn globe_hand_off_keeps_tiles() {
     map.jump_to(&CameraOptions { center: Some(center), zoom: Some(12.5), ..Default::default() });
     frontend.render(&mut map).unwrap_or_else(|e| panic!("render: {e}"));
     map.drain_events().into_iter().for_each(|event| observer.dispatch(event));
-    assert!(!map.get_transform_state().is_globe_rendering());
+    assert!(!map.transform_state().view().is_globe());
     let parsed = parsed.borrow();
     let reparsed: Vec<&OverscaledTileID> = parsed.iter().filter(|id| first_visit.contains(id)).collect();
     assert!(
@@ -3509,7 +3509,7 @@ fn globe_keeps_its_tiles_across_the_antimeridian() {
 
     test.map().jump_to(&CameraOptions { center: Some(ll(0.0, 179.0)), zoom: Some(0.0), ..Default::default() });
     test.render();
-    assert!(test.map().get_transform_state().is_globe_rendering());
+    assert!(test.map().transform_state().view().is_globe());
     {
         let mut parsed = parsed.borrow_mut();
         assert!(!parsed.is_empty());
@@ -3521,7 +3521,7 @@ fn globe_keeps_its_tiles_across_the_antimeridian() {
 
     test.map().jump_to(&CameraOptions { center: Some(ll(0.0, 181.0)), ..Default::default() });
     test.render();
-    assert_near(181.0, test.map().get_transform_state().get_lat_lng(WrapMode::Unwrapped).longitude(), 1e-9);
+    assert_near(181.0, test.map().transform_state().view().center(WrapMode::Unwrapped).longitude(), 1e-9);
     let parsed = parsed.borrow();
     assert!(parsed.is_empty(), "{} tiles parsed again, the first {}", parsed.len(), parsed[0]);
 }
@@ -3765,7 +3765,7 @@ fn globe_bounded_source_loads_finer_tiles() {
     map.jump_to(&CameraOptions { center: Some(ll(37.8, -122.5)), zoom: Some(10.95), ..Default::default() });
     frontend.render(&mut map).unwrap_or_else(|e| panic!("render: {e}"));
     map.drain_events().into_iter().for_each(|event| observer.dispatch(event));
-    assert!(map.get_transform_state().is_globe_rendering());
+    assert!(map.transform_state().view().is_globe());
 
     let parsed = parsed.borrow();
     assert!(parsed.iter().any(|id| id.canonical.z == 11), "{} tiles parsed, none at zoom 11", parsed.len());

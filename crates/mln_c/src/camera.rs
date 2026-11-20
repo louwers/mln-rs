@@ -1026,18 +1026,18 @@ fn free_camera_options(options: &mln_free_camera_options) -> Result<FreeCameraOp
     )?;
     let position = fields
         .get(MLN_FREE_CAMERA_OPTION_POSITION, options.position)
-        .map(|position| [position.x, position.y, position.z]);
-    if position.is_some_and(|position| !position.iter().all(|value| value.is_finite())) {
+        .map(|position| glam::DVec3::new(position.x, position.y, position.z));
+    if position.is_some_and(|position| !position.is_finite()) {
         return Err(Error::invalid_argument("free camera position values must be finite"));
     }
     let orientation = fields
         .get(MLN_FREE_CAMERA_OPTION_ORIENTATION, options.orientation)
-        .map(|orientation| [orientation.x, orientation.y, orientation.z, orientation.w]);
+        .map(|orientation| glam::DQuat::from_xyzw(orientation.x, orientation.y, orientation.z, orientation.w));
     if let Some(orientation) = orientation {
-        if !orientation.iter().all(|value| value.is_finite()) {
+        if !orientation.is_finite() {
             return Err(Error::invalid_argument("free camera orientation values must be finite"));
         }
-        if orientation.iter().all(|value| *value == 0.0) {
+        if orientation.length_squared() == 0.0 {
             return Err(Error::invalid_argument("free camera orientation must not be zero length"));
         }
     }

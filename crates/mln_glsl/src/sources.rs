@@ -69,6 +69,17 @@ vec2 unpack_float(const float packedValue) {
     return vec2(v0, packedIntValue - v0 * 256);
 }
 
+// The normal at the end of a fill extrusion wall from its outline vertex's
+// packed decimals_ed.x: the one the walls there share, whose angle from -pi
+// its bits 2 to 15 hold where bit 1 is set, or else `own`, the wall's.
+vec2 wall_normal(const uint bits, const vec2 own) {
+    if ((bits & 2u) == 0u) {
+        return own;
+    }
+    const float angle = float(bits >> 2u) * (6.283185307179586 / 16384.0) - 3.141592653589793;
+    return vec2(cos(angle), sin(angle));
+}
+
 vec2 unpack_opacity(const float packedOpacity) {
     int intOpacity = int(packedOpacity) / 2;
     return vec2(float(intOpacity) / 127.0, mod(packedOpacity, 2.0));
@@ -2544,9 +2555,7 @@ void main() {
     const vec3 normal = vec3(0.0, 0.0, 1.0);
     const float t = 1.0;
     const float z = t > 0.0 ? height : base;
-    const vec2 decimals = unpack_float(floor(in_decimals_ed.x / 2)) / 128.0;
-
-    gl_Position = projectTileFor3D(vec2(in_position) + decimals, z, projectionVector.projection_ubo[constant.ubo_index]);
+    gl_Position = projectTileFor3D(vec2(in_position), z, projectionVector.projection_ubo[constant.ubo_index]);
 
 #if defined(OVERDRAW_INSPECTOR)
     frag_color = vec4(1.0);
@@ -2707,11 +2716,12 @@ void main() {
     const vec2 nextInstancePos = vec2(in_next_outline_pos);
     const vec2 nextInstanceDecimalsEd = vec2(in_next_decimals_ed);
 
-    const vec2 p1 = instancePos + unpack_float(floor(instanceDecimalsEd.x / 2)) / 128.0;
-    const vec2 p2 = nextInstancePos + unpack_float(floor(nextInstanceDecimalsEd.x / 2)) / 128.0;
+    const vec2 p1 = instancePos;
+    const vec2 p2 = nextInstancePos;
     const vec2 edgevector = normalize(p2 - p1);
+    const vec2 own = vec2(-edgevector.y, edgevector.x);
 
-    const vec3 normal = vec3(-edgevector.y, edgevector.x, 0.0);
+    const vec3 normal = vec3(in_position.x == 0.0 ? wall_normal(in_decimals_ed.x, own) : wall_normal(in_next_decimals_ed.x, own), 0.0);
     const float t = float(in_position.y);
     const float z = t > 0.0 ? height : base;
 
@@ -2881,9 +2891,7 @@ void main() {
     const vec3 normal = vec3(0.0, 0.0, 1.0);
     const float t = 1.0;
     const float z = t > 0.0 ? height : base;
-    const vec2 decimals = unpack_float(floor(in_decimals_ed.x / 2)) / 128.0;
-
-    gl_Position = projectTileFor3D(vec2(in_position) + decimals, z, projectionVector.projection_ubo[constant.ubo_index]);
+    gl_Position = projectTileFor3D(vec2(in_position), z, projectionVector.projection_ubo[constant.ubo_index]);
 
 #if defined(OVERDRAW_INSPECTOR)
     frag_lighting = vec4(1.0);
@@ -3175,11 +3183,12 @@ void main() {
     const vec2 nextInstancePos = vec2(in_next_outline_pos);
     const vec2 nextInstanceDecimalsEd = vec2(in_next_decimals_ed);
 
-    const vec2 p1 = instancePos + unpack_float(floor(instanceDecimalsEd.x / 2)) / 128.0;
-    const vec2 p2 = nextInstancePos + unpack_float(floor(nextInstanceDecimalsEd.x / 2)) / 128.0;
+    const vec2 p1 = instancePos;
+    const vec2 p2 = nextInstancePos;
     const vec2 edgevector = normalize(p2 - p1);
+    const vec2 own = vec2(-edgevector.y, edgevector.x);
 
-    const vec3 normal = vec3(-edgevector.y, edgevector.x, 0.0);
+    const vec3 normal = vec3(in_position.x == 0.0 ? wall_normal(in_decimals_ed.x, own) : wall_normal(in_next_decimals_ed.x, own), 0.0);
     const float edgedistance = in_position.x == 0.0 ? nextInstanceDecimalsEd.y : instanceDecimalsEd.y;
     const float t = float(in_position.y);
     const float z = t > 0.0 ? height : base;

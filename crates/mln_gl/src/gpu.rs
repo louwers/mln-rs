@@ -506,6 +506,7 @@ impl GlGpu {
                 clear_stencil_with_pass: false,
                 cpu_rasterizer: renderer.contains("llvmpipe") || renderer.contains("softpipe"),
                 max_line_width,
+                binds_vertex_buffers: false,
             };
             (caps, anisotropic, line_widths[0].min(1.0)..=max_line_width, renderer)
         };
@@ -1377,7 +1378,13 @@ impl Gpu for GlGpu {
             let (buffer, texture) = self.lookup();
             let sampler = |id| self.samplers.contains_key(id);
             let lookup = Lookup { buffer: &buffer, texture: &texture, sampler: &sampler };
-            validation::check_bindings(desc, &reads, self.caps.buffer_offset_alignment, &lookup)?
+            validation::check_bindings(
+                desc,
+                &reads,
+                self.caps.buffer_offset_alignment,
+                self.caps.binds_vertex_buffers,
+                &lookup,
+            )?
         };
         let invalid = |block: &Block, problem: &str| {
             GpuError::Invalid(format!("{}: {} block {}: {problem}", desc.label, program.name, block.id))

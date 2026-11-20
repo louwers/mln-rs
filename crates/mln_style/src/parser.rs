@@ -200,7 +200,6 @@ impl Parser {
             self.glyph_url = glyphs.to_owned();
         }
 
-        // symbols: "font-faces" (MLN_TEXT_SHAPING_HARFBUZZ).
         if let Some(faces) = member(object, "font-faces")
             && let Some(faces) = faces.as_object()
         {
@@ -541,7 +540,7 @@ pub fn parse_fallback_font_faces(json: &str) -> Result<mln_text::glyph::FontFace
 
 /// The "font-faces" block of `Parser::parse` (`MLN_TEXT_SHAPING_HARFBUZZ`).
 fn parse_font_faces(faces: &JsonObject<'_>) -> mln_text::glyph::FontFaces {
-    use mln_text::glyph::{FontFace, gen_new_glyph_id_type};
+    use mln_text::glyph::{FontFace, face_type};
     let mut font_faces = mln_text::glyph::FontFaces::new();
     for (face_name, face_value) in members(faces) {
         if let Some(files) = face_value.as_array() {
@@ -560,8 +559,7 @@ fn parse_font_faces(faces: &JsonObject<'_>) -> mln_text::glyph::FontFaces {
                 // If valid, generate a unique glyph ID type for this font
                 // face and add it to the font faces list.
                 if font_face.valid() {
-                    font_face.type_ =
-                        gen_new_glyph_id_type(&font_face.url, &vec![font_face.name.clone()], &font_face.ranges);
+                    font_face.type_ = face_type(&font_face.url, &font_face.name, &font_face.ranges);
                     font_faces.push(font_face);
                 } else {
                     Log::warning(Event::ParseStyle, format!("Invalid font-face definition for: {face_name}"));
@@ -569,7 +567,7 @@ fn parse_font_faces(faces: &JsonObject<'_>) -> mln_text::glyph::FontFaces {
             }
         } else if let Some(url) = face_value.as_str() {
             let mut font_face = FontFace::new(face_name, url, vec![(0, 0x0010_FFFF)]);
-            font_face.type_ = gen_new_glyph_id_type(&font_face.url, &vec![font_face.name.clone()], &font_face.ranges);
+            font_face.type_ = face_type(&font_face.url, &font_face.name, &font_face.ranges);
             font_faces.push(font_face);
         } else {
             Log::warning(Event::ParseStyle, "font-face must be an object or array");

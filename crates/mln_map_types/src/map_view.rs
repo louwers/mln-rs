@@ -4,13 +4,16 @@
 use mln_style_types::ProjectionDefinition;
 use mln_util::constants;
 use mln_util::error::Error;
-use mln_util::geo::{EdgeInsets, LatLng, NorthOrientation};
+use mln_util::geo::{EdgeInsets, LatLng, NorthOrientation, WrapMode};
+use mln_util::projection::Projection;
 use mln_util::size::Size;
 
 use crate::camera::CameraOptions;
+use crate::camera_limits::{CameraLimits, MAX_FIELD_OF_VIEW, MIN_FIELD_OF_VIEW};
 use crate::mode::{ConstrainMode, ViewportMode};
 use crate::projection_mode::ProjectionMode;
 use crate::transform_state::TransformState;
+use crate::view::{View, ViewParams, map_offset, zoom_scale};
 
 /// A camera with every member set: the camera that a map has, where
 /// [`CameraOptions`] is a change to one.
@@ -81,7 +84,7 @@ pub struct MapView {
     pub camera: Camera,
     pub extent: LogicalExtent,
     /// Sets every member when it comes from a map. A member that a view leaves
-    /// unset takes the default of [`TransformState`].
+    /// unset takes the default of [`View`].
     pub projection_mode: ProjectionMode,
     pub viewport: Viewport,
     /// The style's projection at the camera's zoom. A view from a map never
@@ -91,27 +94,6 @@ pub struct MapView {
 }
 
 impl MapView {
-    /// The view that `state` shows, at `scale_factor` physical pixels in each
-    /// logical pixel.
-    pub fn from_state(state: &TransformState, scale_factor: f64) -> MapView {
-        MapView {
-            camera: state.camera(),
-            extent: LogicalExtent { size: state.get_size(), scale_factor },
-            projection_mode: ProjectionMode {
-                axonometric: Some(state.get_axonometric()),
-                x_skew: Some(state.get_x_skew()),
-                y_skew: Some(state.get_y_skew()),
-            },
-            viewport: Viewport {
-                north_orientation: state.get_north_orientation(),
-                constrain_mode: state.get_constrain_mode(),
-                viewport_mode: state.get_viewport_mode(),
-                frustum_offset: state.get_frustum_offset(),
-            },
-            projection: state.get_projection_definition(),
-        }
-    }
-
     /// A transform state that shows exactly this view, to convert coordinates
     /// for it.
     ///
@@ -127,35 +109,43 @@ impl MapView {
         self.validate()?;
         let camera = &self.camera;
         let viewport = &self.viewport;
-        let mut state = TransformState::new(ConstrainMode::None, viewport.viewport_mode);
-        // First, so that the camera takes the projection's range of zooms
-        // and latitudes.
-        state.set_projection_definition(&self.projection.at_zoom(camera.zoom));
-        state.set_max_zoom(constants::MAX_ZOOM);
-        state.set_max_pitch(constants::PITCH_MAX);
-        state.set_size(self.extent.size);
-        state.set_north_orientation(viewport.north_orientation);
-        state.set_frustum_offset(&viewport.frustum_offset);
-        state.set_edge_insets(&camera.padding);
-        state.set_lat_lng_zoom(&camera.center, camera.zoom);
-        state.set_center_altitude(camera.center_altitude);
-        state.set_bearing(-mln_math::deg2rad(camera.bearing));
-        state.set_pitch(mln_math::deg2rad(camera.pitch));
-        state.set_roll(mln_math::deg2rad(camera.roll));
-        state.set_field_of_view(mln_math::deg2rad(camera.fov));
-        let mode = &self.projection_mode;
-        if let Some(axonometric) = mode.axonometric {
-            state.set_axonometric(axonometric);
-        }
-        if let Some(x_skew) = mode.x_skew {
-            state.set_x_skew(x_skew);
-        }
-        if let Some(y_skew) = mode.y_skew {
-            state.set_y_skew(y_skew);
-        }
-        // Last, so that no constraint applies while the members are set.
-        state.set_constrain_mode(viewport.constrain_mode);
-        Ok(state)
+        let projection = self.projection.at_zoom(camera.zoom);
+        let projection_transition = projection.transition_state();
+        let scale = zoom_scale(camera.zoom);
+        let (x, y) = map_offset(&camera.center, scale, projection_transition > 0.0);
+        let mut params = ViewParams {
+            size: self.extent.size,
+            frustum_offset: viewport.frustum_offset,
+            north_orientation: viewport.north_orientation,
+            viewport_mode: viewport.viewport_mode,
+            constrain_mode: viewport.constrain_mode,
+            projection_definition: projection,
+            projection_transition,
+            padding: camera.padding,
+            x,
+            y,
+            z: 0.0,
+            scale,
+            angle: -mln_math::deg2rad(camera.bearing),
+            pitch: mln_math::deg2rad(camera.pitch),
+            roll: mln_math::deg2rad(camera.roll),
+            fov: mln_math::deg2rad(camera.fov),
+            x_skew: self.projection_mode.x_skew.unwrap_or(0.0),
+            y_skew: self.projection_mode.y_skew.unwrap_or(1.0),
+            axonometric: self.projection_mode.axonometric.unwrap_or(false),
+            center_wrap: WrapMode::Unwrapped,
+        };
+        // The altitude in pixels at the center as the view places it.
+        let placed = View::new(params);
+        params.z = camera.center_altitude
+            / Projection::meters_per_pixel_at_latitude(placed.center(WrapMode::Unwrapped).latitude(), placed.zoom());
+        Ok(TransformState::from_parts(params, CameraLimits::widest()))
+    }
+
+    /// The view that this describes, to draw it or convert coordinates for
+    /// it. `Err`: as [`to_state`](Self::to_state).
+    pub fn to_view(&self) -> Result<View, Error> {
+        Ok(self.to_state()?.view().clone())
     }
 
     fn validate(&self) -> Result<(), Error> {
@@ -171,12 +161,11 @@ impl MapView {
         let limits = TransformState::default();
         // The globe lets the zoom fall below the minimum toward the poles.
         let globe = projection.at_zoom(camera.zoom).transition_state() > 0.0;
-        let min_zoom = limits.get_min_zoom_at_latitude_with(camera.center.latitude(), globe);
+        let min_zoom = limits.min_zoom_at_latitude_with(camera.center.latitude(), globe);
         if !(min_zoom..=constants::MAX_ZOOM).contains(&camera.zoom)
             || !(mln_math::rad2deg(constants::PITCH_MIN)..=mln_math::rad2deg(constants::PITCH_MAX))
                 .contains(&camera.pitch)
-            || !(mln_math::rad2deg(limits.get_min_field_of_view())..=mln_math::rad2deg(limits.get_max_field_of_view()))
-                .contains(&camera.fov)
+            || !(mln_math::rad2deg(MIN_FIELD_OF_VIEW)..=mln_math::rad2deg(MAX_FIELD_OF_VIEW)).contains(&camera.fov)
         {
             return Err(Error::invalid_argument(
                 "view camera zoom, pitch and field of view must be within the limits of a map",

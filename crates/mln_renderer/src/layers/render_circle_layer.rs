@@ -11,7 +11,7 @@ use mln_gfx::shaders::shader_defines::{
     ID_CIRCLE_POS_VERTEX_ATTRIBUTE, ID_PROJECTION_UBO,
 };
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
-use mln_map_types::{TileProjector, TransformState};
+use mln_map_types::{TileProjector, View};
 use mln_style::expression::EvaluationContext;
 use mln_style::layer_type::LayerStyle;
 use mln_style::layers::Circle;
@@ -206,7 +206,7 @@ impl RenderCircleLayer {
         const IN_VIEWPORT_PIXEL_UNITS: bool = false;
         const NEAR_CLIPPED: bool = false;
         let evaluated = &layer.paint;
-        let zoom = parameters.state.get_zoom() as f32;
+        let zoom = parameters.view.zoom() as f32;
         let tile_id = tile_id.to_unwrapped();
         let projection = projection_data(
             &tile_id,
@@ -221,7 +221,7 @@ impl RenderCircleLayer {
 
         let pitch_with_map = *evaluated.circle_pitch_alignment.uniform() == AlignmentType::Map;
         let pixels_to_tile_units = tile_id.pixels_to_tile_units(1.0, zoom);
-        let latitude_scale = parameters.state.get_projection().circle_radius_correction(parameters.state);
+        let latitude_scale = parameters.view.projection().circle_radius_correction(parameters.view);
         CircleUniforms {
             draw_ubo: CircleDrawableUBO {
                 matrix: cast_matrix(&projection.fallback_matrix),
@@ -412,7 +412,7 @@ impl RenderLayer for RenderCircleLayer {
         feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
         geometry: &mln_tile_id::geometry_tile_data::GeometryCollection,
         zoom: f32,
-        transform_state: &TransformState,
+        view: &View,
         pixels_to_tile_units: f32,
         projector: &TileProjector<'_>,
         feature_state: &mln_style::expression::expression::FeatureState,
@@ -425,7 +425,7 @@ impl RenderLayer for RenderCircleLayer {
             query_geometry,
             *evaluated.circle_translate.uniform(),
             *evaluated.circle_translate_anchor.uniform(),
-            transform_state.get_bearing() as f32,
+            view.angle() as f32,
             pixels_to_tile_units,
         );
         let translated_query_geometry = translated.as_ref().unwrap_or(query_geometry);
@@ -454,7 +454,7 @@ impl RenderLayer for RenderCircleLayer {
         let transformed_query_geometry = if align_with_map {
             translated_query_geometry
         } else {
-            projected = project_query_geometry(translated_query_geometry, projector, transform_state.get_size());
+            projected = project_query_geometry(translated_query_geometry, projector, view.size());
             &projected
         };
         let transformed_size = if align_with_map { size * pixels_to_tile_units } else { size };
@@ -463,14 +463,14 @@ impl RenderLayer for RenderCircleLayer {
         // draws it: translated, and through the projection as blended. The
         // query finds none there either.
         let drawn_translation = RenderTile::tile_unit_translation(
-            projector.get_tile_id(),
+            projector.tile_id(),
             *evaluated.circle_translate.uniform(),
             *evaluated.circle_translate_anchor.uniform(),
-            transform_state,
+            view,
         );
         for ring in geometry.iter() {
             for point in ring {
-                if transform_state.is_globe_rendering()
+                if view.is_globe()
                     && projector
                         .project_as_drawn(
                             &Point::new(
@@ -484,7 +484,7 @@ impl RenderLayer for RenderCircleLayer {
                     continue;
                 }
                 let transformed_point =
-                    if align_with_map { *point } else { project_point(*point, projector, transform_state.get_size()) };
+                    if align_with_map { *point } else { project_point(*point, projector, view.size()) };
 
                 let projected = projector.project(&Point::new(f64::from(point.x), f64::from(point.y)), 0.0);
                 let mut adjusted_size = transformed_size;
@@ -494,11 +494,11 @@ impl RenderLayer for RenderCircleLayer {
                 if *pitch_scale.uniform() == CirclePitchScaleType::Viewport
                     && *pitch_alignment.uniform() == AlignmentType::Map
                 {
-                    adjusted_size *= (w / f64::from(transform_state.get_camera_to_center_distance())) as f32;
+                    adjusted_size *= (w / view.camera_to_center_distance()) as f32;
                 } else if *pitch_scale.uniform() == CirclePitchScaleType::Map
                     && *pitch_alignment.uniform() == AlignmentType::Viewport
                 {
-                    adjusted_size *= (f64::from(transform_state.get_camera_to_center_distance()) / w) as f32;
+                    adjusted_size *= (view.camera_to_center_distance() / w) as f32;
                 }
 
                 if mln_util::intersection_tests::polygon_intersects_buffered_point(

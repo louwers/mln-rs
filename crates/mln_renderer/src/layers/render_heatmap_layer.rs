@@ -6,6 +6,7 @@ use std::mem::offset_of;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use glam::dcamera::rh::proj::opengl::orthographic;
 use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::heatmap_layer_ubo::{HeatmapDrawableUBO, HeatmapEvaluatedPropsUBO};
@@ -29,7 +30,6 @@ use mln_style_types::TranslateAnchorType;
 use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
-use mln_util::mat4::{Mat4, matrix};
 use mln_util::size::Size;
 
 use super::render_line_layer::apply_color_ramp;
@@ -320,10 +320,10 @@ impl TypedLayer for RenderHeatmapLayer {
         _atlases: &Atlases,
         render_tiles: &[FrameTile<'_, Heatmap>],
     ) {
-        let (static_data, state) = (paint_parameters.static_data, paint_parameters.state);
+        let (static_data, state) = (paint_parameters.static_data, paint_parameters.view);
         let shaders = &static_data.shaders;
 
-        let viewport_size = state.get_size();
+        let viewport_size = state.size();
         let size = Size::new(viewport_size.width / 2, viewport_size.height / 2);
         let render_target = self.render_target.get_or_insert_with(|| {
             RenderTarget::new(paint_parameters.context, size, TextureChannelDataType::HalfFloat)
@@ -480,7 +480,7 @@ impl RenderHeatmapLayer {
     ) -> HeatmapUniforms {
         const NEAR_CLIPPED: bool = false;
         const IN_VIEWPORT_PIXEL_UNITS: bool = false;
-        let zoom = parameters.state.get_zoom() as f32;
+        let zoom = parameters.view.zoom() as f32;
         let tile_id = tile_id.to_unwrapped();
         let projection = projection_data(
             &tile_id,
@@ -492,7 +492,7 @@ impl RenderHeatmapLayer {
             None,
             false,
         );
-        let latitude_scale = parameters.state.get_projection().circle_radius_correction(parameters.state);
+        let latitude_scale = parameters.view.projection().circle_radius_correction(parameters.view);
         HeatmapUniforms {
             draw_ubo: HeatmapDrawableUBO {
                 matrix: cast_matrix(&projection.fallback_matrix),
@@ -612,9 +612,8 @@ impl RenderHeatmapLayer {
         };
         let frame_draw = FrameDraw { depth: DrawDepth::Off, ..draw.frame_draw(None) };
         frame.push(frame_draw);
-        let mut m: Mat4 = [0.0; 16];
         let size = paint_parameters.renderable_size;
-        matrix::ortho(&mut m, 0.0, f64::from(size.width), f64::from(size.height), 0.0, -1.0, 1.0);
+        let m = orthographic(0.0, f64::from(size.width), f64::from(size.height), 0.0, -1.0, 1.0);
         let props = HeatmapTexturePropsUBO {
             matrix: cast_matrix(&m),
             opacity: *values.evaluated.paint.heatmap_opacity.uniform(),

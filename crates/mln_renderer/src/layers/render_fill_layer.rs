@@ -11,11 +11,12 @@ use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
     ID_FILL_COLOR_VERTEX_ATTRIBUTE, ID_FILL_DRAWABLE_UBO, ID_FILL_EVALUATED_PROPS_UBO, ID_FILL_IMAGE_TEXTURE,
-    ID_FILL_OUTLINE_END_ATTRIBUTE, ID_FILL_OUTLINE_POS_ATTRIBUTE, ID_FILL_POS_VERTEX_ATTRIBUTE, ID_FILL_TILE_PROPS_UBO,
-    ID_PROJECTION_UBO,
+    ID_FILL_OPACITY_VERTEX_ATTRIBUTE, ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE, ID_FILL_OUTLINE_END_ATTRIBUTE,
+    ID_FILL_OUTLINE_ENDS, ID_FILL_OUTLINE_PAINT, ID_FILL_OUTLINE_POS_ATTRIBUTE, ID_FILL_OUTLINE_VERTICES,
+    ID_FILL_POS_VERTEX_ATTRIBUTE, ID_FILL_TILE_PROPS_UBO, ID_PROJECTION_UBO,
 };
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
-use mln_map_types::TransformState;
+use mln_map_types::View;
 use mln_style::PropertyEvaluationParameters;
 use mln_style::layer_type::LayerStyle;
 use mln_style::layers::Fill;
@@ -61,6 +62,7 @@ const FILL_PATTERN_SHADER_NAME: &str = "FillPatternShader";
 const FILL_OUTLINE_PATTERN_SHADER_NAME: &str = "FillOutlinePatternShader";
 const FILL_OUTLINE_INSTANCED_SHADER_NAME: &str = "FillOutlineInstancedShader";
 const FILL_OUTLINE_PATTERN_INSTANCED_SHADER_NAME: &str = "FillOutlinePatternInstancedShader";
+const FILL_OUTLINE_PULLED_SHADER_NAME: &str = "FillOutlinePulledShader";
 
 /// The outlines' line width, which the style spec doesn't give. The render
 /// tests' expected images have outlines of 1 px and of 2 px; the outline
@@ -70,13 +72,56 @@ const FILL_OUTLINE_PATTERN_INSTANCED_SHADER_NAME: &str = "FillOutlinePatternInst
 /// of a quad, which the instanced outline shaders lay over the pixels such a
 /// line covers. One that rasterizes on the CPU, where an instance costs about
 /// as much as a draw, draws its 1 px lines instead.
+///
+/// A device that binds vertex buffers for shaders to read as storage buffers
+/// draws the quads without instances, four vertices a segment without
+/// attributes: the shader reads the segment's ends and paint values from the
+/// buffers the instances would, by the vertex's index. A layer with a
+/// pattern draws instances there too.
 const LINE_WIDTH: f32 = 2.0;
 
-/// Whether the layer draws the outlines as instanced quads, which read the
-/// buckets' outline ends, rather than as lines (`LINE_WIDTH`).
+/// Whether the layer draws the outlines as quads, which read the buckets'
+/// outline ends, rather than as lines (`LINE_WIDTH`).
 pub(crate) fn draws_outline_quads(context: &Context) -> bool {
     let caps = context.caps();
     caps.max_line_width < LINE_WIDTH && !caps.cpu_rasterizer
+}
+
+/// How a layer's outlines draw.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Outlines {
+    /// The bucket's lines.
+    Lines,
+    /// Instances of a quad, one per bucket vertex.
+    Instanced,
+    /// Quads without attributes, whose shader reads the bucket's vertices,
+    /// their outline ends and paint values by vertex index.
+    Pulled,
+}
+
+impl Outlines {
+    /// How the outlines of a layer draw on `context`'s device.
+    fn of(context: &Context, pattern: bool) -> Outlines {
+        if !draws_outline_quads(context) {
+            Outlines::Lines
+        } else if context.caps().binds_vertex_buffers && !pattern {
+            Outlines::Pulled
+        } else {
+            Outlines::Instanced
+        }
+    }
+}
+
+/// Where the shader of the pulled outlines finds a vertex's paint values in
+/// the vertices that `attrs`, the paint attributes, read
+/// (`FillOutlineDrawableUBO::paint_layout`).
+pub(crate) fn outline_paint_layout(attrs: &VertexAttributeArray) -> u32 {
+    let (color, opacity) = (ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE, ID_FILL_OPACITY_VERTEX_ATTRIBUTE);
+    let shared = |id: usize| attrs.get(id).and_then(|attribute| attribute.shared());
+    let words = |bytes: u32| (bytes / 4) & 0xff;
+    let offset = |id: usize| shared(id).map_or(0, |attribute| words(attribute.offset));
+    let stride = [color, opacity].into_iter().find_map(shared).map_or(0, |attribute| words(attribute.stride));
+    stride | offset(color) << 8 | offset(opacity) << 16
 }
 
 /// The pass the layer's draws draw in.
@@ -90,6 +135,9 @@ struct FillDraw {
     /// The sub-layer of the layer's depth the draw is at.
     sub_layer: u8,
     depth: DepthMaskType,
+    /// Of a pulled outline, where its shader finds a vertex's paint values
+    /// (`FillOutlineDrawableUBO::paint_layout`).
+    paint_layout: Option<u32>,
 }
 
 impl FillDraw {
@@ -105,7 +153,7 @@ impl FillDraw {
         let textures = atlases.map(|atlases| atlases.textures(&shader)).unwrap_or_default();
         let objects =
             DrawObjects::new(shader, ColorMode::alpha_blended(), CullFaceMode::disabled(), geometry, textures);
-        FillDraw { id: SimpleIdentity::new(), objects, sub_layer, depth }
+        FillDraw { id: SimpleIdentity::new(), objects, sub_layer, depth, paint_layout: None }
     }
 }
 
@@ -213,8 +261,11 @@ struct TileBuilder<'a> {
     /// Whether the layer's outline color is its fill color.
     outline_is_fill_color: bool,
     projection_variant: ProjectionVariant,
-    /// The quad of the instanced outlines, on a device that draws them.
+    /// The quad of the instanced outlines, where the layer draws them.
     outline_quad: Option<&'a OutlineQuad>,
+    /// The triangles of the pulled outlines' quads
+    /// (`RenderStaticData::wall_indexes`), where the layer draws them.
+    pulled_indexes: Option<&'a SharedIndexes>,
     /// The depth mask of the fills without a pattern, which the first tile
     /// they are built for sets.
     fill_depth: Option<DepthMaskType>,
@@ -297,10 +348,28 @@ impl TileBuilder<'_> {
             FillDraw::new(fill_shader, 1, fill_depth, fill_geometry, atlases.as_ref())
         });
 
-        // The bucket's lines, or an instance of the quad for each vertex,
-        // from it to its outline end.
+        // The bucket's lines, or a quad for each vertex, from it to its
+        // outline end.
         let outline = outline_shader.filter(|_| !bucket.basic_lines.is_empty()).and_then(|shader| {
-            if let Some(quad) = self.outline_quad {
+            if let Some(indexes) = self.pulled_indexes {
+                let quad_geometry = fill_geometry(
+                    VertexAttributeArray::new(),
+                    4 * fill_vertex_count,
+                    DrawMode::Triangles(),
+                    DrawIndexes::Shared(indexes.clone()),
+                    &RenderStaticData::fill_extrusion_wall_segments(fill_vertex_count),
+                );
+                let mut draw =
+                    FillDraw::new(shader, outline_sub_layer, DepthMaskType::ReadOnly, quad_geometry, atlases.as_ref());
+                for (id, vertices) in
+                    [(ID_FILL_OUTLINE_VERTICES, &bucket.vertices), (ID_FILL_OUTLINE_ENDS, &bucket.outline_ends)]
+                {
+                    draw.objects.read_as_storage(id, Some(bucket_vertices(geometry, vertices)?));
+                }
+                draw.objects.read_as_storage(ID_FILL_OUTLINE_PAINT, paint.clone());
+                draw.paint_layout = Some(outline_paint_layout(&vertex_attrs));
+                Some(draw)
+            } else if let Some(quad) = self.outline_quad {
                 let stride = size_of::<FillLayoutVertex>() as u32;
                 let mut instance_attrs = VertexAttributeArray::new();
                 read_fill_attributes(&mut instance_attrs, binders, paint.as_ref(), evaluated, &mut Default::default());
@@ -434,8 +503,12 @@ pub(crate) struct RenderFillLayer {
     outline_pattern_shader_group: Option<ShaderGroupPtr>,
 
     /// The instanced outlines' quad (`RenderStaticData::fill_outline_vertices`),
-    /// from the first update on a device that draws them.
+    /// from the first update that draws them.
     outline_quad: Option<OutlineQuad>,
+    /// The triangles of the pulled outlines' quads
+    /// (`RenderStaticData::wall_indexes`), from the first update that draws
+    /// them.
+    pulled_indexes: Option<SharedIndexes>,
 }
 
 impl RenderFillLayer {
@@ -451,6 +524,7 @@ impl RenderFillLayer {
             pattern_shader_group: None,
             outline_pattern_shader_group: None,
             outline_quad: None,
+            pulled_indexes: None,
         }
     }
 
@@ -477,7 +551,7 @@ impl RenderFillLayer {
         const IN_VIEWPORT_PIXEL_UNITS: bool = false;
         const NEAR_CLIPPED: bool = false;
         let evaluated = &layer.paint;
-        let zoom = parameters.state.get_zoom() as f32;
+        let zoom = parameters.view.zoom() as f32;
         let tile_id = tile.id().to_unwrapped();
 
         let projection = projection_data(
@@ -503,7 +577,7 @@ impl RenderFillLayer {
                     matrix,
                     outline_color_t: binders.fill_outline_color.interpolation_factor(zoom),
                     opacity_t: binders.fill_opacity.interpolation_factor(zoom),
-                    pad1: 0.0,
+                    paint_layout: draw.paint_layout.unwrap_or(0),
                     pad2: 0.0,
                 });
             } else {
@@ -520,14 +594,14 @@ impl RenderFillLayer {
 
         // Where the tile is in pixels at the nearest integer zoom, which the
         // pattern is laid out over.
-        let state = parameters.state;
-        let int_zoom = state.get_integer_zoom();
+        let state = parameters.view;
+        let int_zoom = state.integer_zoom();
         let tile_ratio = 1.0f32 / tile_id.pixels_to_tile_units(1.0, f32::from(int_zoom));
         let tile_size_at_nearest_zoom =
-            (TILE_SIZE_D * state.zoom_scale(f64::from(int_zoom) - f64::from(tile_id.canonical.z))) as i32;
+            (TILE_SIZE_D * mln_map_types::zoom_scale(f64::from(int_zoom) - f64::from(tile_id.canonical.z))) as i32;
         let pixel_x = (f64::from(tile_size_at_nearest_zoom)
             * (f64::from(tile_id.canonical.x)
-                + f64::from(tile_id.wrap) * state.zoom_scale(f64::from(tile_id.canonical.z))))
+                + f64::from(tile_id.wrap) * mln_map_types::zoom_scale(f64::from(tile_id.canonical.z))))
             as i32;
         let pixel_y = tile_size_at_nearest_zoom.wrapping_mul(tile_id.canonical.y as i32);
         uniforms.draw_ubo.set_fill_pattern(&FillPatternDrawableUBO {
@@ -636,12 +710,16 @@ impl TypedLayer for RenderFillLayer {
     ) {
         let shaders = &paint_parameters.static_data.shaders;
 
-        let outline_quads = draws_outline_quads(paint_parameters.context);
         let pattern = !self.values.unevaluated.fill_pattern.is_undefined();
-        let (outline_name, outline_pattern_name) = if outline_quads {
-            (FILL_OUTLINE_INSTANCED_SHADER_NAME, FILL_OUTLINE_PATTERN_INSTANCED_SHADER_NAME)
-        } else {
-            (FILL_OUTLINE_SHADER_NAME, FILL_OUTLINE_PATTERN_SHADER_NAME)
+        let outlines = Outlines::of(paint_parameters.context, pattern);
+        let outline_name = match Outlines::of(paint_parameters.context, false) {
+            Outlines::Lines => FILL_OUTLINE_SHADER_NAME,
+            Outlines::Instanced => FILL_OUTLINE_INSTANCED_SHADER_NAME,
+            Outlines::Pulled => FILL_OUTLINE_PULLED_SHADER_NAME,
+        };
+        let outline_pattern_name = match Outlines::of(paint_parameters.context, true) {
+            Outlines::Lines => FILL_OUTLINE_PATTERN_SHADER_NAME,
+            Outlines::Instanced | Outlines::Pulled => FILL_OUTLINE_PATTERN_INSTANCED_SHADER_NAME,
         };
         let (fill_group, fill_name, outline_group, outline_name) = if pattern {
             let outline = &mut self.outline_pattern_shader_group;
@@ -660,8 +738,11 @@ impl TypedLayer for RenderFillLayer {
             return;
         };
 
-        if outline_quads && self.outline_quad.is_none() {
+        if outlines == Outlines::Instanced && self.outline_quad.is_none() {
             self.outline_quad = Some(OutlineQuad::new(paint_parameters.context));
+        }
+        if outlines == Outlines::Pulled && self.pulled_indexes.is_none() {
+            self.pulled_indexes = Some(paint_parameters.static_data.wall_indexes(paint_parameters.context));
         }
 
         let mut builder = TileBuilder {
@@ -670,7 +751,8 @@ impl TypedLayer for RenderFillLayer {
             pattern,
             outline_is_fill_color: self.values.unevaluated.fill_outline_color.is_undefined(),
             projection_variant: self.base.projection_variant,
-            outline_quad: self.outline_quad.as_ref().filter(|_| outline_quads),
+            outline_quad: self.outline_quad.as_ref().filter(|_| outlines == Outlines::Instanced),
+            pulled_indexes: self.pulled_indexes.as_ref().filter(|_| outlines == Outlines::Pulled),
             fill_depth: None,
         };
 
@@ -703,22 +785,35 @@ impl TypedLayer for RenderFillLayer {
             let context = &mut *paint_parameters.context;
             if let Some(cached) = entry.value.as_mut() {
                 let geometry = render_data.geometry();
+                // Reads the paint attributes, and returns the vertices they
+                // read.
                 let mut refresh = |attrs: &mut VertexAttributeArray| {
                     let buffer = &binders.interleaved_vertex_buffer;
                     let paint = paint_vertices(context, geometry, buffer, binders.depends_on_feature_state());
                     read_fill_attributes(attrs, binders, paint.as_ref(), evaluated, &mut Default::default());
+                    paint
                 };
                 if let Some(fill) = &mut cached.fill {
-                    refresh_paint_attributes(&mut fill.objects, changes, &mut refresh);
+                    refresh_paint_attributes(&mut fill.objects, changes, |attrs| drop(refresh(attrs)));
                 }
                 if let Some(outline) = &mut cached.outline {
                     match &cached.fill {
+                        // A pulled outline has no attributes: it reads the
+                        // paint values' vertices themselves.
+                        _ if outline.paint_layout.is_some() => {
+                            if changes.paint {
+                                let mut attrs = VertexAttributeArray::new();
+                                let paint = refresh(&mut attrs);
+                                outline.objects.read_as_storage(ID_FILL_OUTLINE_PAINT, paint);
+                                outline.paint_layout = Some(outline_paint_layout(&attrs));
+                            }
+                        }
                         // A line outline reads the fill's attributes, and so
                         // binds the buffers the fill uploads.
                         Some(fill) if changes.paint && !outline.objects.has_instances() => {
                             outline.objects.share_vertex_attributes(&fill.objects);
                         }
-                        _ => refresh_paint_attributes(&mut outline.objects, changes, refresh),
+                        _ => refresh_paint_attributes(&mut outline.objects, changes, |attrs| drop(refresh(attrs))),
                     }
                 }
             } else if let Some(built) = builder.build(context, render_data, binders, evaluated) {
@@ -776,7 +871,7 @@ impl RenderLayer for RenderFillLayer {
         _feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
         geometry: &mln_tile_id::geometry_tile_data::GeometryCollection,
         _zoom: f32,
-        transform_state: &TransformState,
+        view: &View,
         pixels_to_tile_units: f32,
         _projector: &mln_map_types::TileProjector<'_>,
         _feature_state: &mln_style::expression::expression::FeatureState,
@@ -786,7 +881,7 @@ impl RenderLayer for RenderFillLayer {
             query_geometry,
             *evaluated.fill_translate.uniform(),
             *evaluated.fill_translate_anchor.uniform(),
-            transform_state.get_bearing() as f32,
+            view.angle() as f32,
             pixels_to_tile_units,
         );
 

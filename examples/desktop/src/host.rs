@@ -83,6 +83,7 @@ pub(crate) enum Message {
     Key {
         code: KeyCode,
         pressed: bool,
+        repeat: bool,
         modifiers: ModifiersState,
         at: Instant,
     },
@@ -456,6 +457,7 @@ impl ApplicationHandler<UserEvent> for Host {
                     open.inbox.send(Message::Key {
                         code,
                         pressed: event.state == ElementState::Pressed,
+                        repeat: event.repeat,
                         modifiers: open.modifiers,
                         at: Instant::now(),
                     });

@@ -1,6 +1,6 @@
 //! What a frame's update hands its encode.
 
-use mln_map_types::{MapDebugOptions, TransformState};
+use mln_map_types::{MapDebugOptions, View};
 use mln_util::Color;
 use mln_util::time::Instant;
 use mln_vec_map::VecMap;
@@ -20,6 +20,8 @@ pub(crate) struct FrameLayer {
 /// that the whole frame draws with, and the layers it draws.
 pub(crate) struct Frame {
     pub(crate) transform: TransformParameters,
+    /// Whether a gesture or an animation moves the camera.
+    pub(crate) camera_moving: bool,
     pub(crate) debug_options: MapDebugOptions,
     pub(crate) light: EvaluatedLight,
     pub(crate) sky: Option<EvaluatedSky>,
@@ -51,10 +53,11 @@ pub(crate) struct Frame {
 
 impl Frame {
     /// A frame of `state` that draws no layers, started now.
-    pub(crate) fn new(state: &TransformState, debug_options: MapDebugOptions) -> Self {
+    pub(crate) fn new(state: &View, camera_moving: bool, debug_options: MapDebugOptions) -> Self {
         let started = Instant::now();
         Frame {
             transform: TransformParameters::new(state),
+            camera_moving,
             debug_options,
             light: EvaluatedLight::default(),
             sky: None,

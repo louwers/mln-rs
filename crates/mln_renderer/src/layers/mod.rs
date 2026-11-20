@@ -41,6 +41,6 @@ pub(crate) fn refresh_paint_attributes(
 }
 
 #[must_use]
-pub(crate) fn cast_matrix(m: &[f64; 16]) -> [f32; 16] {
-    std::array::from_fn(|i| m[i] as f32)
+pub(crate) fn cast_matrix(m: &glam::DMat4) -> [f32; 16] {
+    m.as_mat4().to_cols_array()
 }

@@ -61,17 +61,21 @@ pub struct Lookup<'a> {
 
 /// Checks `desc`, whose shader reads `reads`: its entries name live
 /// resources, buffers of [`Uniform`](BufferUsage::Uniform) or
-/// [`Storage`](BufferUsage::Storage) usage bound from an offset that
+/// [`Storage`](BufferUsage::Storage) usage, or with `vertex_buffers` of
+/// [`Vertex`](BufferUsage::Vertex) usage, bound from an offset that
 /// `alignment` aligns, over a range inside the buffer that isn't empty, and
 /// [`sampled`](TextureUsage::sampled) textures; no two entries bind one id;
 /// and an entry binds each of `reads`, a buffer range of at least the bytes
-/// the shader reads. Returns how many elements of the storage buffers the
-/// shader reads that the entries bind, the global indices a draw may have:
-/// `u32::MAX` where it reads none.
+/// the shader reads. Returns how many elements of the
+/// [`Storage`](BufferUsage::Storage) buffers the shader reads that the
+/// entries bind, the global indices a draw may have: `u32::MAX` where it
+/// reads none. A vertex buffer's elements don't count, which a shader reads
+/// by vertex index.
 pub fn check_bindings(
     desc: &BindingsDesc<'_>,
     reads: &[ShaderBinding],
     alignment: u32,
+    vertex_buffers: bool,
     lookup: &Lookup<'_>,
 ) -> Result<u32, GpuError> {
     let label = desc.label;
@@ -83,7 +87,12 @@ pub fn check_bindings(
             BindGroupEntry::Buffer { id, buffer, offset, size } => {
                 let info = (lookup.buffer)(buffer).ok_or(GpuError::UnknownId("buffer"))?;
                 let invalid = |problem: String| GpuError::Invalid(format!("{label}: buffer id {id}: {problem}"));
-                if !matches!(info.usage, BufferUsage::Uniform | BufferUsage::Storage) {
+                let binds = match info.usage {
+                    BufferUsage::Uniform | BufferUsage::Storage => true,
+                    BufferUsage::Vertex => vertex_buffers,
+                    BufferUsage::Index => false,
+                };
+                if !binds {
                     return Err(invalid(format!("a {:?} buffer", info.usage)));
                 }
                 if size == 0 {
@@ -518,7 +527,12 @@ mod tests {
         let check = |buffers: &SlotMap<BufferId, BufferInfo>, entries: &[BindGroupEntry], reads: &[ShaderBinding]| {
             let buffer = lookup(buffers);
             let lookup = Lookup { buffer: &buffer, texture: &|_| None, sampler: &|_| false };
-            check_bindings(&BindingsDesc { label: "test", shader, entries }, reads, 256, &lookup)
+            check_bindings(&BindingsDesc { label: "test", shader, entries }, reads, 256, false, &lookup)
+        };
+        let check_vertex_buffers = |entries: &[BindGroupEntry], reads: &[ShaderBinding]| {
+            let buffer = lookup(&buffers);
+            let lookup = Lookup { buffer: &buffer, texture: &|_| None, sampler: &|_| false };
+            check_bindings(&BindingsDesc { label: "test", shader, entries }, reads, 256, true, &lookup)
         };
         let entry = |buffer, offset, size| BindGroupEntry::Buffer { id: 2, buffer, offset, size };
         assert_eq!(check(&buffers, &[entry(uniform, 256, 256)], &[]).ok(), Some(u32::MAX));
@@ -528,6 +542,11 @@ mod tests {
         let overflow = check(&buffers, &[entry(uniform, u64::MAX - 255, 512)], &[]);
         assert!(matches!(overflow, Err(GpuError::Invalid(_))), "overflows");
         assert!(matches!(check(&buffers, &[entry(vertex, 0, 16)], &[]), Err(GpuError::Invalid(_))), "vertex");
+        // A backend that binds vertex buffers: their elements bound no
+        // global index.
+        let words = [ShaderBinding::Buffer { id: 2, min_size: 4 }];
+        assert_eq!(check_vertex_buffers(&[entry(vertex, 0, 16)], &words).ok(), Some(u32::MAX));
+        assert!(matches!(check_vertex_buffers(&[entry(vertex, 16, 16)], &words), Err(GpuError::Invalid(_))));
         let twice = [entry(uniform, 0, 16), entry(uniform, 256, 16)];
         assert!(matches!(check(&buffers, &twice, &[]), Err(GpuError::Invalid(_))), "one id twice");
 

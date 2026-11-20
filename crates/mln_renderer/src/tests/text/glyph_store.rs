@@ -14,15 +14,15 @@ use std::time::Duration;
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{FileSource, Kind, Resource, Response};
-use mln_text::HBShapeAdjust;
 use mln_text::glyph::{
     FontData, FontFace, GLYPH_RANGES_PER_FONT_STACK, GLYPHS_PER_GLYPH_RANGE, Glyph, GlyphDependencies, GlyphID,
-    GlyphIDType, GlyphIDs, GlyphMap, GlyphMetrics, GlyphRange, HBShapeRequests,
-    NON_IDEOGRAPH_GLYPH_RANGES_PER_FONT_STACK,
+    GlyphIDType, GlyphIDs, GlyphMap, GlyphMetrics, GlyphRange, NON_IDEOGRAPH_GLYPH_RANGES_PER_FONT_STACK,
+    ShapeRequests,
 };
 use mln_text::glyph_cache::GlyphCache;
-use mln_text::local_glyph_rasterizer::{LocalGlyphRasterizer, LocalGlyphs};
+use mln_text::local_glyph_rasterizer::{LocalFont, LocalGlyphRasterizer, LocalGlyphs};
 use mln_text::tagged_string::font_stack_hash;
+use mln_text::{GlyphAdjust, ShapedText};
 use mln_util::error::Error;
 use mln_util::font_stack::FontStack;
 use mln_util::i18n;
@@ -37,7 +37,7 @@ use super::glyph_store_bitmaps::{SDF_BITMAP, STUB_BITMAP};
 use super::{SquelchLog, read_file};
 use crate::renderer_event::RendererEvent;
 use crate::text::font_face_engine::{FontFaceEngine, FontFaceShaper};
-use crate::text::glyph_store::{GlyphStore, GlyphWait, HBShapeResults};
+use crate::text::glyph_store::{GlyphStore, GlyphWait, ShapeResults};
 use crate::tile::inbox::{Inbox, TileEvent};
 
 fn stub_glyph(glyph_id: GlyphID) -> Glyph {
@@ -125,7 +125,7 @@ type OnGlyphsAvailable = Rc<dyn Fn(GlyphMap)>;
 struct StubGlyphRequestor {
     glyphs_available: RefCell<Option<OnGlyphsAvailable>>,
     /// The shaping of the last answer.
-    shaping: RefCell<Option<HBShapeResults>>,
+    shaping: RefCell<Option<ShapeResults>>,
     /// Whether the last answer lacked glyphs of a failed range.
     failed: Cell<bool>,
 }
@@ -327,7 +327,7 @@ impl GlyphStoreTest {
         *self.requestor.glyphs_available.borrow_mut() = Some(Rc::new(move |_: GlyphMap| run_loop.stop()));
         let ids: GlyphIDs = chars.iter().map(|c| gid(*c)).collect();
         let dependencies =
-            GlyphDependencies { glyphs: VecMap::from([(font_stack, ids)]), shapes: HBShapeRequests::default() };
+            GlyphDependencies { glyphs: VecMap::from([(font_stack, ids)]), shapes: ShapeRequests::default() };
         self.run("test/fixtures/resources/glyphs.pbf", dependencies);
     }
 }
@@ -338,7 +338,7 @@ fn test_stack() -> FontStack {
 
 fn dependencies(chars: &[char]) -> GlyphDependencies {
     let ids: GlyphIDs = chars.iter().map(|c| GlyphID::new(*c as u32)).collect();
-    GlyphDependencies { glyphs: VecMap::from([(test_stack(), ids)]), shapes: HBShapeRequests::default() }
+    GlyphDependencies { glyphs: VecMap::from([(test_stack(), ids)]), shapes: ShapeRequests::default() }
 }
 
 fn gid(c: char) -> GlyphID {
@@ -661,7 +661,7 @@ fn a_wait_requests_the_font_stacks_evicted_while_it_waits_again() {
     let ids: GlyphIDs = [gid('a')].into_iter().collect();
     let dependencies = GlyphDependencies {
         glyphs: VecMap::from([(loaded_stack.clone(), ids.clone()), (test_stack(), ids)]),
-        shapes: HBShapeRequests::default(),
+        shapes: ShapeRequests::default(),
     };
     test.request_glyphs(dependencies);
 
@@ -996,7 +996,7 @@ impl FontFaceEngine for DeferredEngine {
         self.ready.lock().push(ready);
     }
 
-    fn load(&self, _type: GlyphIDType, data: FontData) -> Option<Box<dyn FontFaceShaper>> {
+    fn load(&self, _type: GlyphIDType, data: FontData, _weight: u16) -> Option<Box<dyn FontFaceShaper>> {
         self.loads.fetch_add(1, Ordering::SeqCst);
         (data.as_bytes() == b"font").then(|| -> Box<dyn FontFaceShaper> { Box::new(FakeShaper) })
     }
@@ -1006,15 +1006,15 @@ impl FontFaceEngine for DeferredEngine {
 struct FakeShaper;
 
 impl FontFaceShaper for FakeShaper {
-    fn shape(&self, text: &[char], _rtl: bool, glyph_ids: &mut Vec<GlyphID>, adjusts: &mut Vec<HBShapeAdjust>) {
+    fn shape(&self, text: &[char], _rtl: bool, shaped: &mut ShapedText) {
         for &c in text {
-            glyph_ids.push(GlyphID::with_type(u32::from(c) as u16, FONT_FACE));
-            adjusts.push(HBShapeAdjust::new(0.0, 0.0, 10.0));
+            shaped.glyphs.push(GlyphID::with_type(u32::from(c) as u16, FONT_FACE));
+            shaped.adjusts.push(GlyphAdjust::new(0.0, 0.0, 10.0));
         }
     }
 
-    fn rasterize(&self, glyph: &GlyphID) -> Glyph {
-        stub_glyph(*glyph)
+    fn rasterize(&self, glyph: GlyphID) -> Glyph {
+        stub_glyph(glyph)
     }
 }
 
@@ -1065,7 +1065,7 @@ fn request_font_face(test: &GlyphStoreTest) -> Rc<RefCell<Option<GlyphMap>>> {
 fn shaped(test: &GlyphStoreTest) -> Vec<u16> {
     let shaping = test.requestor.shaping.borrow();
     let shaping = shaping.as_ref().expect("an answer");
-    shaping[&test_stack()][&FONT_FACE][&vec!['\u{5}', '\u{6}']].glyphs.clone()
+    shaping[&test_stack()][&FONT_FACE][&vec!['\u{5}', '\u{6}']].glyphs.iter().map(|glyph| glyph.code).collect()
 }
 
 #[test]
@@ -1245,4 +1245,127 @@ fn a_fallback_face_draws_local_glyphs_before_the_platform() {
     assert_eq!(glyphs[&gid('中')].as_ref().expect("the face's glyph").id, gid('中'));
     assert_eq!(engine.loads.load(Ordering::SeqCst), 1);
     assert!(glyphs[&gid('テ')].is_some(), "the platform's glyph");
+}
+
+/// The device's fonts as three: one for Hebrew, one for Arabic and one for
+/// everything else but marks, which none has on its own.
+struct ScriptFonts;
+
+impl LocalGlyphRasterizer for ScriptFonts {
+    fn rasterize_glyph(&self, _font_stack: &FontStack, _glyph_id: GlyphID) -> Option<Glyph> {
+        None
+    }
+
+    fn font(&self, _font_stack: &FontStack, c: char) -> Option<LocalFont> {
+        let key = match c {
+            '\u{0300}'..='\u{036F}' => return None,
+            '\u{0590}'..='\u{05FF}' => "hebrew",
+            '\u{0600}'..='\u{06FF}' => "arabic",
+            _ => "latin",
+        };
+        Some(LocalFont { key: Arc::from(key), data: FontData::from(key.as_bytes().to_vec()), weight: 400 })
+    }
+}
+
+/// Loads each font as a shaper that draws each character as the glyph of
+/// that index, in its font's type, reversed for right-to-left text.
+struct LetterEngine;
+
+impl FontFaceEngine for LetterEngine {
+    fn prepare(&self, ready: Box<dyn FnOnce(Result<(), String>) + Send>) {
+        ready(Ok(()));
+    }
+
+    fn load(&self, type_: GlyphIDType, _data: FontData, _weight: u16) -> Option<Box<dyn FontFaceShaper>> {
+        Some(Box::new(LetterShaper(type_)))
+    }
+}
+
+struct LetterShaper(GlyphIDType);
+
+impl FontFaceShaper for LetterShaper {
+    fn shape(&self, text: &[char], rtl: bool, shaped: &mut ShapedText) {
+        let mut glyphs: Vec<GlyphID> = text.iter().map(|&c| GlyphID::with_type(c as u16, self.0)).collect();
+        if rtl {
+            glyphs.reverse();
+        }
+        shaped.adjusts.extend(glyphs.iter().map(|_| GlyphAdjust::new(0.0, 0.0, 10.0)));
+        shaped.glyphs.extend(glyphs);
+    }
+
+    fn rasterize(&self, glyph: GlyphID) -> Glyph {
+        stub_glyph(glyph)
+    }
+}
+
+/// The glyphs that the device's fonts shape `text` as, by character and
+/// font.
+fn shape_with_system_fonts(text: &str) -> Vec<(char, GlyphIDType)> {
+    let test =
+        GlyphStoreTest::with_all(local(ScriptFonts), ResponseType::Synchronous, Arc::default(), Arc::new(LetterEngine));
+    let text: Vec<char> = text.chars().collect();
+    let shapes = VecMap::from([(test_stack(), VecMap::from([(GlyphIDType::SYSTEM, [text.clone()].into())]))]);
+    test.request_glyphs(GlyphDependencies { glyphs: VecMap::new(), shapes });
+    let shaping = test.requestor.shaping.borrow();
+    let shaped = &shaping.as_ref().expect("an answer")[&test_stack()][&GlyphIDType::SYSTEM][&text];
+    shaped.glyphs.iter().map(|glyph| (char::from_u32(u32::from(glyph.code)).unwrap(), glyph.type_)).collect()
+}
+
+#[test]
+fn the_devices_fonts_shape_each_piece_with_its_font() {
+    let glyphs = shape_with_system_fonts("ab \u{05D0}\u{05D1}\u{062C} c\u{0301}");
+    let chars: String = glyphs.iter().map(|(c, _)| *c).collect();
+    // The right-to-left run's pieces in visual order: the Arabic after the
+    // Hebrew comes first; the mark stays with the letter before it.
+    assert_eq!(chars, "ab \u{062C}\u{05D1}\u{05D0} c\u{0301}");
+    let type_of = |c: char| glyphs.iter().find(|(glyph, _)| *glyph == c).unwrap().1;
+    assert_eq!(type_of('a'), type_of('c'));
+    assert_eq!(type_of('\u{0301}'), type_of('c'));
+    assert_ne!(type_of('\u{05D0}'), type_of('a'));
+    assert_ne!(type_of('\u{062C}'), type_of('\u{05D0}'));
+    assert!(glyphs.iter().all(|(_, type_)| ![GlyphIDType::FontPBF, GlyphIDType::SYSTEM].contains(type_)));
+}
+
+/// The device's fonts as one font file, "font".
+struct OneFont;
+
+impl LocalGlyphRasterizer for OneFont {
+    fn rasterize_glyph(&self, _font_stack: &FontStack, _glyph_id: GlyphID) -> Option<Glyph> {
+        None
+    }
+
+    fn font(&self, _font_stack: &FontStack, _c: char) -> Option<LocalFont> {
+        Some(LocalFont { key: Arc::from("font"), data: FontData::from(b"font".to_vec()), weight: 400 })
+    }
+}
+
+#[test]
+fn the_devices_fonts_wait_for_the_engine() {
+    let engine = Arc::new(DeferredEngine::default());
+    let test = GlyphStoreTest::with_all(
+        local(OneFont),
+        ResponseType::Synchronous,
+        Arc::default(),
+        Arc::<DeferredEngine>::clone(&engine),
+    );
+    let available: Rc<RefCell<Option<GlyphMap>>> = Rc::default();
+    let a = Rc::clone(&available);
+    *test.requestor.glyphs_available.borrow_mut() = Some(Rc::new(move |glyphs: GlyphMap| {
+        *a.borrow_mut() = Some(glyphs);
+    }));
+    let text = vec!['\u{5}', '\u{6}'];
+    let shapes = VecMap::from([(test_stack(), VecMap::from([(GlyphIDType::SYSTEM, [text.clone()].into())]))]);
+    test.request_glyphs(GlyphDependencies { glyphs: VecMap::new(), shapes });
+    test.run_loop.run_once(&mut test.local());
+    assert!(available.borrow().is_none());
+    assert_eq!(engine.loads.load(Ordering::SeqCst), 0);
+
+    engine.report(&Ok(()));
+    test.run_loop.run_once(&mut test.local());
+    test.run_loop.run_once(&mut test.local());
+    assert!(available.borrow().is_some());
+    assert_eq!(engine.loads.load(Ordering::SeqCst), 1);
+    let shaping = test.requestor.shaping.borrow();
+    let shaped = &shaping.as_ref().expect("an answer")[&test_stack()][&GlyphIDType::SYSTEM][&text];
+    assert_eq!(shaped.glyphs.iter().map(|glyph| glyph.code).collect::<Vec<_>>(), [5, 6]);
 }

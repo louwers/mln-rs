@@ -43,10 +43,12 @@ const ALL_BUILT_INS: &[BuiltIn] = &[
     BuiltIn::FillPatternShader,
     BuiltIn::FillOutlinePatternShader,
     BuiltIn::FillOutlineInstancedShader,
+    BuiltIn::FillOutlinePulledShader,
     BuiltIn::FillOutlinePatternInstancedShader,
     BuiltIn::FillOutlineTriangulatedShader,
     BuiltIn::FillExtrusionShader,
     BuiltIn::FillExtrusionInstancedShader,
+    BuiltIn::FillExtrusionPulledShader,
     BuiltIn::FillExtrusionPatternShader,
     BuiltIn::FillExtrusionPatternInstancedShader,
     BuiltIn::HeatmapShader,
@@ -179,7 +181,7 @@ fn every_shader_source_compiles() {
 /// values; the `<layer>UBOCount` enumerator is also where its vertex buffers
 /// start.
 fn ubo_ids(source: &ShaderSource) -> Vec<(&'static str, usize)> {
-    let first_vertex_buffer = source.attributes.iter().map(|attr| attr.buffer_index).min().unwrap();
+    let first_vertex_buffer = source.attributes.iter().map(|attr| attr.buffer_index).min();
     let mut ids = vec![
         ("idGlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
         ("idGlobalUBOIndex", ID_GLOBAL_UBO_INDEX),
@@ -227,6 +229,7 @@ fn ubo_ids(source: &ShaderSource) -> Vec<(&'static str, usize)> {
         | "FillPatternShader"
         | "FillOutlinePatternShader"
         | "FillOutlineInstancedShader"
+        | "FillOutlinePulledShader"
         | "FillOutlinePatternInstancedShader"
         | "FillOutlineTriangulatedShader" => (
             &[
@@ -238,6 +241,7 @@ fn ubo_ids(source: &ShaderSource) -> Vec<(&'static str, usize)> {
         ),
         "FillExtrusionShader"
         | "FillExtrusionInstancedShader"
+        | "FillExtrusionPulledShader"
         | "FillExtrusionPatternShader"
         | "FillExtrusionPatternInstancedShader" => (
             &[
@@ -301,7 +305,22 @@ fn ubo_ids(source: &ShaderSource) -> Vec<(&'static str, usize)> {
         name => panic!("no UBO ids for {name}"),
     };
     ids.extend_from_slice(layer);
-    ids.push((count, first_vertex_buffer));
+    if let Some(first_vertex_buffer) = first_vertex_buffer {
+        ids.push((count, first_vertex_buffer));
+    }
+    // The vertex buffers that the pulled shaders read as storage buffers.
+    ids.extend_from_slice(match source.name {
+        "FillExtrusionPulledShader" => &[
+            ("idFillExtrusionWallVertices", ID_FILL_EXTRUSION_WALL_VERTICES),
+            ("idFillExtrusionWallPaint", ID_FILL_EXTRUSION_WALL_PAINT),
+        ],
+        "FillOutlinePulledShader" => &[
+            ("idFillOutlineVertices", ID_FILL_OUTLINE_VERTICES),
+            ("idFillOutlineEnds", ID_FILL_OUTLINE_ENDS),
+            ("idFillOutlinePaint", ID_FILL_OUTLINE_PAINT),
+        ],
+        _ => &[],
+    });
     ids
 }
 
@@ -481,7 +500,9 @@ fn pipelines_build_with_the_tables_vertex_layout() {
             let function = |name: &str| library.newFunctionWithName(&NSString::from_str(name)).unwrap();
             let vertex = function(source.msl.vertex_main_function);
             let fragment = function(source.msl.fragment_main_function);
-            for attribute in vertex.vertexAttributes().unwrap().iter().filter(|attribute| attribute.isActive()) {
+            // A vertex function without `[[stage_in]]` has no attributes.
+            let attributes = vertex.vertexAttributes().map(|attributes| attributes.to_vec()).unwrap_or_default();
+            for attribute in attributes.iter().filter(|attribute| attribute.isActive()) {
                 if !all_attributes(source).any(|attr| attr.index == attribute.attributeIndex()) {
                     failures.push(format!(
                         "{} ({variant}): [[attribute({})]] {} has no table entry",

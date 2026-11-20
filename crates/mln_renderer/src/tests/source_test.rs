@@ -54,14 +54,16 @@ struct SourceTest {
 /// The tile parameters for `map_mode`, from a transform state the caller
 /// owns.
 fn tile_parameters(
-    transform_state: &TransformState,
+    state: &TransformState,
     map_mode: MapMode,
     file_source: Option<Arc<dyn FileSource>>,
 ) -> TileParameters<'_> {
     TileParameters {
         pixel_ratio: 1.0,
         debug_options: MapDebugOptions::NO_DEBUG,
-        transform_state,
+        view: state.view(),
+        min_zoom: state.min_zoom(),
+        max_zoom: state.limits().max_zoom,
         file_source,
         mode: map_mode,
         prefetch_zoom_delta: 0,
@@ -74,6 +76,7 @@ fn tile_parameters(
         global_state: None,
         is_update_synchronous: false,
         font_faces: None,
+        glyph_pbfs: true,
         placement_commits: 0,
     }
 }
@@ -96,7 +99,7 @@ impl SourceTest {
     }
 
     fn tile_parameters_with(&self, map_mode: MapMode, file_source: Option<Arc<dyn FileSource>>) -> TileParameters<'_> {
-        tile_parameters(self.transform.get_state(), map_mode, file_source)
+        tile_parameters(self.transform.state(), map_mode, file_source)
     }
 
     /// A tile store whose jobs run on the thread pool.

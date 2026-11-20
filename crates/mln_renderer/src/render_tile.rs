@@ -6,11 +6,10 @@
 // by the tile's slot and id (`FrameTile`); the store changes them only in
 // the frame's update, before the layers read them.
 
-use glam::Vec2;
-use mln_map_types::{MapDebugOptions, ProjectionData, TransformState};
+use glam::{DMat4, Vec2};
+use mln_map_types::{MapDebugOptions, ProjectionData, View};
 use mln_style_types::TranslateAnchorType;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
-use mln_util::mat4::Mat4;
 
 use crate::buckets::debug_bucket::DebugBucket;
 use crate::buckets::hillshade_bucket::HillshadeBucket;
@@ -26,7 +25,7 @@ pub(crate) struct RenderTile {
     pub(crate) id: UnwrappedTileID,
     /// The projection contract for this tile; `matrix` is its main matrix.
     pub(crate) projection: ProjectionData,
-    pub(crate) matrix: Mat4,
+    pub(crate) matrix: DMat4,
     /// The tile's debug overlay, when the map's debug options show one.
     pub(crate) debug_bucket: Option<Box<DebugBucket>>,
 
@@ -53,7 +52,7 @@ impl RenderTile {
             id,
             projection: ProjectionData::default(),
             // `set_projection` sets it.
-            matrix: [0.0; 16],
+            matrix: DMat4::ZERO,
             tile_id,
             tile_hold_for_fade: hold_for_fade,
             slot: None,
@@ -67,14 +66,14 @@ impl RenderTile {
         id: &UnwrappedTileID,
         translation: [f32; 2],
         anchor: TranslateAnchorType,
-        state: &TransformState,
+        state: &View,
     ) -> [f32; 2] {
         if translation[0] == 0.0 && translation[1] == 0.0 {
             return [0.0, 0.0];
         }
-        let angle = if anchor == TranslateAnchorType::Viewport { (-state.get_bearing()) as f32 } else { 0.0f32 };
+        let angle = if anchor == TranslateAnchorType::Viewport { (-state.angle()) as f32 } else { 0.0f32 };
         let translate = Vec2::from_angle(angle).rotate(Vec2::new(translation[0], translation[1]));
-        let zoom = state.get_zoom() as f32;
+        let zoom = state.zoom() as f32;
         [id.pixels_to_tile_units(translate.x, zoom), id.pixels_to_tile_units(translate.y, zoom)]
     }
 
@@ -135,7 +134,7 @@ impl RenderTile {
 
     /// Sets the tile's projection and its standard matrix for `transform`.
     pub(crate) fn set_projection(&mut self, transform: &TransformParameters) {
-        self.projection = transform.state.get_projection_data_with(&self.id, &transform.proj_matrix);
+        self.projection = transform.view.projection_data_with(&self.id, &transform.proj_matrix);
         self.matrix = self.projection.main_matrix;
     }
 }

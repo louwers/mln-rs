@@ -1,14 +1,14 @@
 use std::any::Any;
 
+use glam::DMat4;
 use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, Gpu, GpuError, LoadOp, PassDesc, Scissor, TargetFormats};
 use mln_gfx::stencil_mode::Test;
 use mln_gfx::types::{DepthFunctionType, StencilOpType};
 use mln_gfx::{DepthMaskType, DepthMode, ScissorRect, StencilMode};
-use mln_map_types::{MapDebugOptions, ProjectionData, TransformState, ViewportMode};
+use mln_map_types::{MapDebugOptions, ProjectionData, View, ViewportMode};
 use mln_tile_id::UnwrappedTileID;
 use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, Log};
-use mln_util::mat4::Mat4;
 use mln_util::range::Range;
 use mln_util::size::Size;
 use mln_vec_map::VecMap;
@@ -58,38 +58,38 @@ impl Composited {
 }
 
 pub(crate) struct TransformParameters {
-    pub(crate) proj_matrix: Mat4,
-    pub(crate) aligned_proj_matrix: Mat4,
-    pub(crate) near_clipped_proj_matrix: Mat4,
+    pub(crate) proj_matrix: DMat4,
+    pub(crate) aligned_proj_matrix: DMat4,
+    pub(crate) near_clipped_proj_matrix: DMat4,
     /// The near plane of `near_clipped_proj_matrix`, in pixels.
     pub(crate) near_clipped_near_z: f64,
-    pub(crate) state: TransformState,
+    pub(crate) view: View,
 }
 
 impl TransformParameters {
-    pub(crate) fn new(state: &TransformState) -> Self {
-        let state = state.clone();
+    pub(crate) fn new(view: &View) -> Self {
+        let state = view.clone();
         // Update the default matrices to the current viewport dimensions.
-        let proj_matrix = state.get_proj_matrix(1, false);
+        let proj_matrix = state.projection_matrix_with(1, false);
 
         // Also compute a projection matrix that aligns with the current pixel
         // grid, taking into account odd viewport sizes.
-        let aligned_proj_matrix = state.get_proj_matrix(1, true);
+        let aligned_proj_matrix = state.projection_matrix_with(1, true);
 
         // Calculate a second projection matrix with the near plane moved
         // further, to a tenth of the far value, so as not to waste depth
         // buffer precision on very close empty space, for layer types
         // (fill-extrusion) that use the depth buffer to emulate real-world
         // space.
-        let near_z = (0.1 * f64::from(state.get_camera_to_center_distance())) as u16;
-        let near_clipped_proj_matrix = state.get_proj_matrix(near_z, false);
+        let near_z = (0.1 * state.camera_to_center_distance()) as u16;
+        let near_clipped_proj_matrix = state.projection_matrix_with(near_z, false);
 
         TransformParameters {
             proj_matrix,
             aligned_proj_matrix,
             near_clipped_proj_matrix,
             near_clipped_near_z: f64::from(near_z),
-            state,
+            view: state,
         }
     }
 
@@ -97,8 +97,7 @@ impl TransformParameters {
     /// aligned to the pixel grid or not.
     #[must_use]
     pub(crate) fn projection_data_for_tile(&self, tile_id: &UnwrappedTileID, aligned: bool) -> ProjectionData {
-        self.state
-            .get_projection_data_with(tile_id, if aligned { &self.aligned_proj_matrix } else { &self.proj_matrix })
+        self.view.projection_data_with(tile_id, if aligned { &self.aligned_proj_matrix } else { &self.proj_matrix })
     }
 }
 
@@ -152,7 +151,10 @@ pub(crate) struct PaintParameters<'a> {
     open_pass: Option<OpenPass>,
 
     pub(crate) transform_params: &'a TransformParameters,
-    pub(crate) state: &'a TransformState,
+    pub(crate) view: &'a View,
+    /// Whether a gesture or an animation moves the camera: draws favor speed
+    /// over crispness then.
+    pub(crate) camera_moving: bool,
     /// The light of the frame.
     pub(crate) light: &'a crate::render_light::EvaluatedLight,
     pub(crate) static_data: &'a RenderStaticData,
@@ -209,10 +211,10 @@ impl<'a> PaintParameters<'a> {
         scissor_rect: ScissorRect,
     ) -> Self {
         let transform_params = &frame.transform;
-        let state = &transform_params.state;
-        let mut pixels_to_gl_units = [2.0f32 / state.get_size().width as f32, -2.0f32 / state.get_size().height as f32];
+        let state = &transform_params.view;
+        let mut pixels_to_gl_units = [2.0f32 / state.size().width as f32, -2.0f32 / state.size().height as f32];
 
-        if state.get_viewport_mode() == ViewportMode::FlippedY {
+        if state.viewport_mode() == ViewportMode::FlippedY {
             pixels_to_gl_units[1] *= -1.0;
         }
 
@@ -220,7 +222,8 @@ impl<'a> PaintParameters<'a> {
             context,
             open_pass: None,
             transform_params,
-            state,
+            view: state,
+            camera_moving: frame.camera_moving,
             static_data,
             light: &frame.light,
             pass: RenderPass::Opaque,
@@ -385,7 +388,7 @@ impl<'a> PaintParameters<'a> {
     pub(crate) fn depth_mode_for_sublayer(&self, n: u8, mask: DepthMaskType) -> DepthMode {
         // On the globe, 2D layers are ordered by draw order alone; their Z is
         // the back-hemisphere clip.
-        if self.current_layer < self.opaque_pass_cutoff || self.state.is_globe_rendering() {
+        if self.current_layer < self.opaque_pass_cutoff || self.view.is_globe() {
             return DepthMode::disabled();
         }
 

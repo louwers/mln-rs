@@ -7,7 +7,7 @@
 use std::num::NonZeroU16;
 
 use crate::glyph::{FontData, GlyphIDType};
-use crate::{FreeTypeLibrary, HBShaper};
+use crate::{ShapedText, Shaper};
 
 const COLLECTION: &[u8] = include_bytes!("../../tests/fixtures/collection.ttc");
 
@@ -15,14 +15,17 @@ const COLLECTION: &[u8] = include_bytes!("../../tests/fixtures/collection.ttc");
 /// with ink, or `None` when it has no such face.
 fn inked_glyphs(index: u32, text: &str) -> Option<usize> {
     let data = FontData::from(COLLECTION.to_vec()).with_face_index(index);
-    let shaper = HBShaper::new(GlyphIDType::face(NonZeroU16::MIN), data, &FreeTypeLibrary::new());
+    let shaper = Shaper::new(GlyphIDType::face(NonZeroU16::MIN), data);
     if !shaper.valid() {
         return None;
     }
     let text: Vec<char> = text.chars().collect();
-    let (mut ids, mut adjusts) = (Vec::new(), Vec::new());
-    shaper.create_complex_glyph_ids(&text, false, &mut ids, &mut adjusts);
-    Some(ids.iter().filter(|id| id.code != 0 && shaper.rasterize_glyph(id).bitmap.data.iter().any(|&a| a > 0)).count())
+    let mut shaped = ShapedText::default();
+    shaper.shape(&text, false, &mut shaped);
+    let ids = shaped.glyphs;
+    Some(
+        ids.iter().filter(|id| id.code != 0 && shaper.rasterize_glyph(**id).bitmap.data.iter().any(|&a| a > 0)).count(),
+    )
 }
 
 #[test]
@@ -37,13 +40,8 @@ fn each_face_of_a_collection_draws_its_own_glyphs() {
 #[test]
 fn a_single_font_has_only_face_zero() {
     let khmer = include_bytes!("../../tests/fixtures/khmer.ttf").to_vec();
-    let face = |index| {
-        HBShaper::new(
-            GlyphIDType::face(NonZeroU16::MIN),
-            FontData::from(khmer.clone()).with_face_index(index),
-            &FreeTypeLibrary::new(),
-        )
-    };
+    let face =
+        |index| Shaper::new(GlyphIDType::face(NonZeroU16::MIN), FontData::from(khmer.clone()).with_face_index(index));
     assert!(face(0).valid());
     assert!(!face(1).valid());
 }

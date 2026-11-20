@@ -91,7 +91,9 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn ErasedEvaluatedLayer>]) -> Outcome {
         &TileParameters {
             pixel_ratio: 1.0,
             debug_options: MapDebugOptions::NO_DEBUG,
-            transform_state: transform.get_state(),
+            view: transform.view(),
+            min_zoom: transform.state().min_zoom(),
+            max_zoom: transform.state().limits().max_zoom,
             file_source: Some(file_source),
             mode: MapMode::Continuous,
             prefetch_zoom_delta: 0,
@@ -104,6 +106,7 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn ErasedEvaluatedLayer>]) -> Outcome {
             global_state: None,
             is_update_synchronous: false,
             font_faces: None,
+            glyph_pbfs: true,
             placement_commits: 0,
         },
     );

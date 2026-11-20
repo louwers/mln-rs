@@ -27,7 +27,7 @@ impl SubdivisionGranularityExpression {
     /// square of its length, so this keeps that distance about the same in
     /// pixels at every zoom level. A tile gets the finer of the two.
     #[must_use]
-    pub fn get_granularity_for_zoom_level(&self, zoom: u8) -> u32 {
+    pub fn granularity_for_zoom_level(&self, zoom: u8) -> u32 {
         let base = self.base_zoom_granularity.checked_shr(u32::from(zoom)).unwrap_or(0);
         let surface = self.surface_granularity.checked_shr(u32::from(zoom / 2)).unwrap_or(0);
         base.max(surface).max(self.min_granularity).max(1)

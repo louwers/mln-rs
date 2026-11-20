@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
 
 use mln_gfx::{ConsumerSync, GpuSync, Handoff, SyncKind};
-use mln_map::{MapView, RenderMode};
+use mln_map::RenderMode;
 use mln_renderer::text::font_face_engine::FontFaceEngine;
 use mln_renderer::{Registry, Renderer, RendererEvent, RendererEvents, Update, UpdateReader};
 use mln_style::source_type::SourceData;
@@ -1056,7 +1056,7 @@ impl Worker {
                     generation,
                     frame_generation,
                     needs_repaint: report.needs_repaint,
-                    view: Some(MapView::from_state(&update.parameters.transform_state, self.scale_factor)),
+                    view: Some(update.parameters.view.map_view(self.scale_factor)),
                     mode: report.mode,
                     projection,
                 }

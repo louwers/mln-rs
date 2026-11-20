@@ -26,8 +26,8 @@ use std::any::Any;
 use std::sync::Arc;
 
 use mln_util::Color;
+pub use mln_util::clip_depth::ClipDepthRange;
 use mln_util::logging::{Event, Log};
-pub use mln_util::mat4::ClipDepthRange;
 use mln_util::size::Size;
 
 pub use self::ids::{
@@ -88,6 +88,11 @@ pub struct Caps {
     /// The widest line in pixels that a pipeline of line primitives draws
     /// ([`DynamicState::line_width`]): 1 on a device without wide lines.
     pub max_line_width: f32,
+    /// Whether bindings bind [`Vertex`](BufferUsage::Vertex) buffers too,
+    /// which shaders read as storage buffers. The renderer draws the walls
+    /// of fill extrusions there as quads whose vertex shader reads the
+    /// bucket's vertices by vertex index, rather than as instances.
+    pub binds_vertex_buffers: bool,
 }
 
 /// How a buffer is bound.
@@ -414,7 +419,8 @@ impl PipelineKey {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum BindGroupEntry {
     /// `size` bytes of `buffer` from `offset`, at uniform or storage buffer
-    /// id `id`.
+    /// id `id`. A shader reads a [`Vertex`](BufferUsage::Vertex) buffer as
+    /// a storage buffer ([`Caps::binds_vertex_buffers`]).
     Buffer { id: u32, buffer: BufferId, offset: u64, size: u64 },
     /// `texture`, sampled with `sampler`, at texture id `id`.
     Texture { id: u32, texture: TextureId, sampler: SamplerId },
@@ -587,7 +593,9 @@ pub trait Gpu {
     /// Makes the bindings of `desc`'s entries that its shader reads. Fails
     /// as [`validation::check_bindings`] does: for an entry of a buffer of
     /// another usage than [`Uniform`](BufferUsage::Uniform) or
-    /// [`Storage`](BufferUsage::Storage), a range outside its buffer or at
+    /// [`Storage`](BufferUsage::Storage), or
+    /// [`Vertex`](BufferUsage::Vertex) where
+    /// [`Caps::binds_vertex_buffers`] says, a range outside its buffer or at
     /// an offset the backend doesn't align, a texture that isn't
     /// [`sampled`](TextureUsage::sampled), two entries of one id, or a
     /// buffer or texture the shader reads and no entry binds.

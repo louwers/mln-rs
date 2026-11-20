@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use mln_gfx::gpu::Gpu;
-use mln_map_types::{MapMode, TransformState};
+use mln_map_types::{MapMode, View};
 use mln_style::diff::{ItemChanges, LayerChange, LayerChanges, StyleDiff, sources_by_id};
 use mln_style::expression::{Dependency, GlobalStateMap};
 use mln_style::layer_type::{ErasedLayerStyle, SourceKind};
@@ -140,7 +140,7 @@ pub(crate) struct RenderOrchestrator {
     zoom_history: ZoomHistory,
     /// The still image request the last update was for.
     still_image_request_id: u64,
-    transform_state: TransformState,
+    view: View,
 
     /// The sources' tiles, with the glyph and image stores their layouts
     /// resolve through and the atlas they pack them into.
@@ -225,7 +225,7 @@ impl RenderOrchestrator {
             events: Vec::new(),
             zoom_history: ZoomHistory::default(),
             still_image_request_id: 0,
-            transform_state: TransformState::default(),
+            view: View::default(),
             tile_store,
             cross_tile_symbol_index: crate::text::cross_tile_symbol_index::CrossTileSymbolIndex::default(),
             placement_controller: crate::text::placement::PlacementController::new(),
@@ -283,7 +283,8 @@ impl RenderOrchestrator {
     /// only what draws it on the GPU, uploading the atlases and the tiles'
     /// buckets and making the layers' draws.
     pub(crate) fn update(&mut self, update_parameters: &Arc<UpdateParameters>) -> Option<Frame> {
-        let mut frame = Frame::new(&update_parameters.transform_state, update_parameters.debug_options);
+        let mut frame =
+            Frame::new(&update_parameters.view, update_parameters.camera_moving, update_parameters.debug_options);
         let mut clock = self.advance_clock(update_parameters);
         let style = &update_parameters.style;
 
@@ -337,7 +338,7 @@ impl RenderOrchestrator {
             // again, which requests the range again.
             self.tile_store.retry_failed();
         }
-        self.transform_state = update_parameters.transform_state.clone();
+        self.view = update_parameters.view.clone();
 
         let will_render = self.update_sources(
             update_parameters,
@@ -359,8 +360,7 @@ impl RenderOrchestrator {
         // The sources' tiles are in other world copies once the center has
         // crossed the antimeridian (`SourceTiles::handle_wrap_jump`), and
         // the layers' draws go with them.
-        let longitude =
-            update_parameters.transform_state.get_lat_lng(mln_util::geo::WrapMode::Unwrapped).longitude() as f32;
+        let longitude = update_parameters.view.center(mln_util::geo::WrapMode::Unwrapped).longitude() as f32;
         let wrap_delta = ((longitude - self.longitude) / 360.0).round() as i16;
         self.longitude = longitude;
         for (layer, will_render) in self.layers.iter_mut().zip(will_render) {
@@ -402,7 +402,7 @@ impl RenderOrchestrator {
         for &index in placed.leaders.iter().rev() {
             placement.update_layer_buckets(
                 &*self.layers[index],
-                &frame.transform.state,
+                &frame.transform.view,
                 update_symbol_opacities,
                 &mut changed_buckets,
                 &mut self.tile_store,
@@ -411,7 +411,7 @@ impl RenderOrchestrator {
         for &index in &placed.followers {
             placement.update_follower_buckets(
                 &*self.layers[index],
-                &frame.transform.state,
+                &frame.transform.view,
                 &mut changed_buckets,
                 &mut self.tile_store,
             );
@@ -476,7 +476,7 @@ impl RenderOrchestrator {
             let source_contents = contents.of(source, &self.tile_store);
             let source = source.map(|(_, source)| source);
             render_layer.update(&mut LayerUpdateParameters {
-                state: &frame.transform.state,
+                view: &frame.transform.view,
                 update_parameters,
                 source,
                 contents: source_contents,
@@ -509,8 +509,7 @@ impl RenderOrchestrator {
             self.zoom_history.first = true;
         }
 
-        let zoom_changed =
-            self.zoom_history.update(update_parameters.transform_state.get_zoom() as f32, update_parameters.time_point);
+        let zoom_changed = self.zoom_history.update(update_parameters.view.zoom() as f32, update_parameters.time_point);
 
         let style = &update_parameters.style;
         let transition_options = if continuous { style.get_transition_options() } else { TransitionOptions::default() };
@@ -813,7 +812,9 @@ impl RenderOrchestrator {
         let mut tile_parameters = TileParameters {
             pixel_ratio: update_parameters.pixel_ratio,
             debug_options: update_parameters.debug_options,
-            transform_state: &update_parameters.transform_state,
+            view: &update_parameters.view,
+            min_zoom: update_parameters.min_zoom,
+            max_zoom: update_parameters.max_zoom,
             file_source: update_parameters.file_source.clone(),
             mode: update_parameters.mode,
             prefetch_zoom_delta: update_parameters.prefetch_zoom_delta,
@@ -826,6 +827,7 @@ impl RenderOrchestrator {
             global_state: self.global_state.clone(),
             is_update_synchronous: false,
             font_faces: update_parameters.style.get_font_faces().cloned(),
+            glyph_pbfs: !update_parameters.style.get_glyph_url().is_empty(),
             placement_commits: self.placement_controller.commits(),
         };
 
@@ -918,7 +920,7 @@ impl RenderOrchestrator {
                     // backdrop, so it stays a layer.
                     if self.background_layer_as_color
                         && frame.sky.is_none()
-                        && !update_parameters.transform_state.is_globe_rendering()
+                        && !update_parameters.view.is_globe()
                         && layers.first().is_some_and(|first| Arc::ptr_eq(style, first.style()))
                     {
                         let solid_background = layer.solid_background();
@@ -968,13 +970,12 @@ impl RenderOrchestrator {
         let mut symbol_buckets_changed = false;
         let mut symbol_buckets_added = false;
         let mut used_symbol_layers: VecSet<String> = VecSet::new();
-        let longitude =
-            update_parameters.transform_state.get_lat_lng(mln_util::geo::WrapMode::Unwrapped).longitude() as f32;
+        let longitude = update_parameters.view.center(mln_util::geo::WrapMode::Unwrapped).longitude() as f32;
         for layer in layers_need_placement.iter().rev() {
             let result = self.cross_tile_symbol_index.index_layer(
                 *layer,
                 longitude,
-                &update_parameters.transform_state,
+                &update_parameters.view,
                 &mut self.tile_store,
             );
             if continuous {
@@ -991,7 +992,7 @@ impl RenderOrchestrator {
             frame.symbol_fade_change = 1.0;
             frame.needs_repaint = self.has_transitions(update_parameters.time_point);
         } else if continuous {
-            let tilted_view = update_parameters.transform_state.get_pitch() != 0.0;
+            let tilted_view = update_parameters.view.pitch() != 0.0;
             let mut placement_update_period_override: Option<Duration> = None;
             if symbol_buckets_added && !tilted_view {
                 // In a flat view, new symbols show soon: placement runs
@@ -1010,10 +1011,9 @@ impl RenderOrchestrator {
             // would show the same.
             let inputs = PlacementInputs::new(update_parameters, &layers_need_placement, &self.tile_store);
             let stale = self.placement_controller.is_stale(&inputs) || self.tile_store.has_fading_tiles();
-            let next_placement_at = self.placement_controller.next_placement_at(
-                update_parameters.transform_state.get_zoom() as f32,
-                placement_update_period_override,
-            );
+            let next_placement_at = self
+                .placement_controller
+                .next_placement_at(update_parameters.view.zoom() as f32, placement_update_period_override);
             let due = match (next_placement_at, update_parameters.time_point) {
                 (Some(at), Some(now)) => now >= at,
                 _ => true,
@@ -1299,7 +1299,7 @@ impl RenderOrchestrator {
             render_layer.update_draws(gpu, paint_parameters, &self.atlases, layer_source);
             needs_globe_depth = needs_globe_depth || render_layer.needs_globe_depth();
         }
-        let (static_data, state) = (paint_parameters.static_data, paint_parameters.state);
+        let (static_data, state) = (paint_parameters.static_data, paint_parameters.view);
         let shaders = &static_data.shaders;
         let (renderable_size, pixel_ratio) = (paint_parameters.renderable_size, paint_parameters.pixel_ratio);
         let context = &mut *paint_parameters.context;
@@ -1439,14 +1439,14 @@ impl RenderOrchestrator {
             source_ids.insert(layer.base().style.base().source.clone());
         }
 
-        let proj_matrix = self.transform_state.get_proj_matrix(1, false);
+        let proj_matrix = self.view.projection_matrix_with(1, false);
 
         let mut results_by_layer = crate::geometry::feature_index::QueryResults::default();
         for source_id in &source_ids {
             if let Some(source) = self.source_tiles(source_id) {
                 let source_results = source.query_rendered_features(
                     geometry,
-                    &self.transform_state,
+                    &self.view,
                     &filtered_layers,
                     options,
                     self.global_state.as_deref(),

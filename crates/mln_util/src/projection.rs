@@ -56,7 +56,7 @@ impl Projection {
     }
 
     #[must_use]
-    pub fn get_meters_per_pixel_at_latitude(lat: f64, zoom: f64) -> f64 {
+    pub fn meters_per_pixel_at_latitude(lat: f64, zoom: f64) -> f64 {
         let constrained_zoom = clamp_f64(zoom, MIN_ZOOM, MAX_ZOOM);
         let constrained_scale = 2.0f64.powf(constrained_zoom);
         let constrained_latitude = clamp_f64(lat, -LATITUDE_MAX, LATITUDE_MAX);

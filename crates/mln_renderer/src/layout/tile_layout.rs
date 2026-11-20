@@ -25,7 +25,7 @@ use crate::group_by_layout::group_layers;
 use crate::layer_type::{ErasedEvaluatedLayer, ErasedLayout};
 use crate::layout::filter_groups::FilterGroups;
 use crate::layout::layout::{BuildParams, LayoutParameters, SourceLayer};
-use crate::text::glyph_store::HBShapeResults;
+use crate::text::glyph_store::ShapeResults;
 use crate::tile::contents::LayoutBuckets;
 
 /// How a tile is laid out, apart from its style and data.
@@ -48,6 +48,8 @@ pub(crate) struct LayoutInput<'a> {
     pub(crate) layers: &'a [Arc<dyn ErasedEvaluatedLayer>],
     pub(crate) global_state: Option<&'a Arc<GlobalStateMap>>,
     pub(crate) font_faces: Option<&'a Arc<FontFaces>>,
+    /// Whether the style has a `glyphs` URL.
+    pub(crate) glyph_pbfs: bool,
     /// The images that exist, which `image` expressions branch on.
     pub(crate) available_images: &'a VecSet<String>,
     pub(crate) params: LayoutParams,
@@ -116,7 +118,7 @@ impl Dependencies {
 pub(crate) struct Resolved {
     /// `None` for a glyph that no font has, or whose range failed.
     pub(crate) glyphs: GlyphPositions,
-    pub(crate) shaping: HBShapeResults,
+    pub(crate) shaping: ShapeResults,
     #[wire(with = "sorted::map")]
     pub(crate) icons: ImagePositions,
     #[wire(with = "sorted::map")]
@@ -177,6 +179,7 @@ pub(crate) fn discover(input: &LayoutInput<'_>) -> Result<Discovered, Error> {
                 &mut LayoutParameters {
                     bucket_parameters: &bucket_parameters,
                     font_faces: input.font_faces.cloned(),
+                    glyph_pbfs: input.glyph_pbfs,
                     glyph_dependencies: &mut discovered.dependencies.glyphs,
                     image_dependencies: &mut discovered.dependencies.images,
                     available_images: input.available_images,
@@ -233,6 +236,7 @@ pub(crate) fn build(discovered: Discovered, input: &LayoutInput<'_>, resolved: &
                 &mut LayoutParameters {
                     bucket_parameters: &bucket_parameters,
                     font_faces: input.font_faces.cloned(),
+                    glyph_pbfs: input.glyph_pbfs,
                     glyph_dependencies: &mut GlyphDependencies::default(),
                     image_dependencies: &mut ImageDependencies::default(),
                     available_images: input.available_images,

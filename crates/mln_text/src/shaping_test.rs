@@ -10,9 +10,9 @@ use mln_util::size::Size;
 
 use crate::glyph::{
     GlyphID, GlyphIDType, GlyphMetrics, GlyphPosition, GlyphPositions, PositionedGlyph, PositionedLine, Shaping,
-    WritingModeType, gen_new_glyph_id_type,
+    WritingModeType, face_type,
 };
-use crate::harfbuzz::{HBShapeAdjust, HBShapedText};
+use crate::shaper::{GlyphAdjust, ShapedText};
 use crate::shaping::{PositionedIcon, get_shaping};
 use crate::tagged_string::{FontStackHash, SectionOptions, TaggedString, font_stack_hash};
 
@@ -20,13 +20,7 @@ fn u(s: &str) -> Vec<char> {
     s.chars().collect()
 }
 
-fn add_stub_glyph(
-    glyph_positions: &mut GlyphPositions,
-    font_stack_hash: FontStackHash,
-    code_point: u16,
-    type_: GlyphIDType,
-) {
-    let glyph_id = GlyphID::with_type(code_point, type_);
+fn add_stub_glyph(glyph_positions: &mut GlyphPositions, font_stack_hash: FontStackHash, glyph_id: GlyphID) {
     let metrics = GlyphMetrics { width: 10, height: 18, left: 1.0, top: -8.0, advance: 12, ..Default::default() };
     let position = GlyphPosition { metrics, ..Default::default() };
     glyph_positions.entry(font_stack_hash).or_default().insert(glyph_id, Some(position));
@@ -38,17 +32,17 @@ fn add_stub_glyphs(string: &TaggedString, glyph_positions: &mut GlyphPositions) 
         if section.image_id.is_some() {
             continue;
         }
-        let codes = match &section.shaped {
+        let glyphs = match &section.shaped {
             Some(shaped) => shaped.glyphs.clone(),
             None => std::iter::once(string.char_at(i))
                 .chain(
                     i18n::verticalize_punctuation(string.char_at(i)).filter(|_| section.type_ == GlyphIDType::FontPBF),
                 )
-                .map(|c| u16::try_from(u32::from(c)).unwrap())
+                .map(|c| GlyphID::from_char(c).unwrap())
                 .collect(),
         };
-        for code in codes {
-            add_stub_glyph(glyph_positions, section.font_stack_hash, code, section.type_);
+        for glyph in glyphs {
+            add_stub_glyph(glyph_positions, section.font_stack_hash, glyph);
         }
     }
 }
@@ -621,7 +615,7 @@ fn vertical_glyph_orientation_delimits_inline_images() {
 #[test]
 fn vertical_glyph_orientation_delimits_native_glyph_sections() {
     let font_stack: FontStack = vec!["font-stack".to_string()];
-    let native_type = gen_new_glyph_id_type("shaping-test-native", &font_stack, &[(0, 0xffff)]);
+    let native_type = face_type("shaping-test-native", "font-stack", &[(0, 0xffff)]);
     let mut text = TaggedString::default();
     text.add_text_section(&u("AB"), 1.0, &font_stack, GlyphIDType::FontPBF, true, None, VerticalAlign::Bottom);
     text.add_text_section(&u("C"), 1.0, &font_stack, native_type, true, None, VerticalAlign::Bottom);
@@ -635,14 +629,16 @@ fn vertical_glyph_orientation_delimits_native_glyph_sections() {
 
 /// A label with a section of glyphs that HarfBuzz laid out, standing in as
 /// "XY", between sections drawn from glyph PBFs.
-fn label_with_shaped_section(before: &str, rtl: bool, after: &str, adjusts: Vec<HBShapeAdjust>) -> TaggedString {
+fn label_with_shaped_section(before: &str, rtl: bool, after: &str, adjusts: Vec<GlyphAdjust>) -> TaggedString {
     let font_stack: FontStack = vec!["font-stack".to_string()];
-    let shaped_type = gen_new_glyph_id_type("shaping-test-shaped", &font_stack, &[(0, 0xffff)]);
+    let shaped_type = face_type("shaping-test-shaped", "font-stack", &[(0, 0xffff)]);
     let mut text = TaggedString::default();
     if !before.is_empty() {
         text.add_text_section(&u(before), 1.0, &font_stack, GlyphIDType::FontPBF, true, None, VerticalAlign::Bottom);
     }
-    let shaped = Arc::new(HBShapedText { glyphs: vec![u16::from(b'X'), u16::from(b'Y')], adjusts });
+    let glyphs =
+        vec![GlyphID::with_type(u16::from(b'X'), shaped_type), GlyphID::with_type(u16::from(b'Y'), shaped_type)];
+    let shaped = Arc::new(ShapedText { glyphs, adjusts });
     text.add_shaped_section(&shaped, 1.0, &font_stack, shaped_type, rtl, true, None, VerticalAlign::Bottom);
     if !after.is_empty() {
         text.add_text_section(&u(after), 1.0, &font_stack, GlyphIDType::FontPBF, true, None, VerticalAlign::Bottom);
@@ -694,7 +690,7 @@ fn left_to_right_shaped_section_keeps_its_place() {
 // gtest: Shaping.ShapedSectionKeepsItsAdjustmentsWhenItMoves
 #[test]
 fn shaped_section_keeps_its_adjustments_when_it_moves() {
-    let adjusts = vec![HBShapeAdjust::new(0.0, 0.0, 5.0), HBShapeAdjust::new(0.0, 0.0, 7.0)];
+    let adjusts = vec![GlyphAdjust::new(0.0, 0.0, 5.0), GlyphAdjust::new(0.0, 0.0, 7.0)];
     let shaping = shape_horizontal(&label_with_shaped_section("", true, " 12", adjusts));
     assert_eq!(shaping.positioned_lines.len(), 1);
     let glyphs = &shaping.positioned_lines[0].positioned_glyphs;
@@ -702,6 +698,44 @@ fn shaped_section_keeps_its_adjustments_when_it_moves() {
     // "1", "2", and the space advance 12 each, and X its own 5.
     assert_eq!(glyphs[3].glyph.code, 'X' as u16);
     assert_eq!(glyphs[4].x - glyphs[3].x, 5.0);
+}
+
+#[test]
+fn a_label_holds_more_than_256_sections() {
+    let font_stack: FontStack = vec!["font-stack".to_string()];
+    let face = face_type("shaping-test-sections", "font-stack", &[(0, 0xffff)]);
+    let mut text = TaggedString::default();
+    for i in 0..300 {
+        let type_ = if i % 2 == 0 { GlyphIDType::FontPBF } else { face };
+        text.add_text_section(&['a'], 1.0, &font_stack, type_, true, None, VerticalAlign::Bottom);
+    }
+    assert_eq!(text.get_section_index(299), 299);
+    assert_eq!(text.get_section(299).type_, face);
+}
+
+// Line breaking measures a shaped section by its shaping.
+#[test]
+fn shaped_glyphs_take_up_their_width_on_a_line() {
+    let adjusts = vec![GlyphAdjust::new(0.0, 0.0, 100.0), GlyphAdjust::new(0.0, 0.0, 100.0)];
+    let text = label_with_shaped_section("", false, " ab", adjusts);
+    let mut glyph_positions = GlyphPositions::new();
+    add_stub_glyphs(&text, &mut glyph_positions);
+    let shaping = get_shaping(
+        &text,
+        150.0,
+        ONE_EM,
+        SymbolAnchorType::TopLeft,
+        TextJustifyType::Left,
+        0.0,
+        &[0.0, 0.0],
+        WritingModeType::Horizontal,
+        &glyph_positions,
+        &ImagePositions::default(),
+        ONE_EM,
+        ONE_EM,
+        false,
+    );
+    assert_eq!(shaping.positioned_lines.len(), 2);
 }
 
 fn setup_shaped_text(shaped_text: &mut Shaping, text_size: f32) {

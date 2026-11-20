@@ -68,7 +68,7 @@ fn from_lat_lng() {
             assert_near(from_lat_lng.p.y, tile_point.y * max_tiles_per_axis, 1.0e-7);
 
             let from_screen_coordinate =
-                TileCoordinate::from_screen_coordinate(transform.get_state(), zoom as u8, screen_coordinate);
+                TileCoordinate::from_screen_coordinate(transform.view(), zoom as u8, screen_coordinate);
             assert_double_eq(from_screen_coordinate.z, from_lat_lng.z);
             assert_near(from_screen_coordinate.p.x, from_lat_lng.p.x, 0.99);
             assert_near(from_screen_coordinate.p.y, from_lat_lng.p.y, 0.99);

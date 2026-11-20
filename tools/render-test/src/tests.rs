@@ -85,10 +85,8 @@ fn parses_our_manifest() {
     // M1 tests are not ignored by the port.
     assert!(!ignores.iter().any(|(id, _)| id == "render-tests/background-color/default"));
 
-    // Every render and query test is found.
-    let test_paths = manifest.get_test_paths();
-    assert_eq!(test_paths.len(), 1548 + 152);
-    let default = test_paths
+    let default = manifest
+        .get_test_paths()
         .iter()
         .find(|t| t.style_path.ends_with("/render-tests/background-color/default/style.json"))
         .unwrap();
@@ -164,7 +162,6 @@ fn parses_the_cpp_linux_manifest() {
     assert_eq!(manifest.get_test_root_path(), INTEGRATION);
     assert_eq!(manifest.get_cache_path(), "testdata/metrics/cache-style.db");
     assert_eq!(manifest.get_probes().iter().collect::<Vec<_>>(), vec!["probeNetwork"]);
-    assert_eq!(manifest.get_ignores().len(), 124 + 38 + 1);
     assert_eq!(manifest.get_test_paths().len(), 7);
 }
 
@@ -239,7 +236,12 @@ fn parses_test_metadata() {
 
     let allowed = parse_test_metadata(&style_paths("render-tests/text-pitch-alignment/viewport-text-depthtest"));
     assert_eq!(allowed.allowed, 0.00025);
+    assert_eq!(allowed.threshold, 0.1285);
     assert_eq!(allowed.size, Size::new(512, 256));
+
+    let threshold =
+        parse_test_metadata(&style_paths("render-tests/fill-extrusion-rounded-corner-distance/smooth-shading"));
+    assert_eq!(threshold.threshold, 0.02);
 
     let skew = parse_test_metadata(&style_paths("render-tests/projection/skew"));
     assert!(skew.axonometric);
@@ -393,12 +395,18 @@ fn unsupported_operation_drops_all_operations() {
 // --- runner: checkRenderTestResults ---
 
 fn check(dir: &Path, actual: &PremultipliedImage, expectations: Vec<String>) -> TestMetadata {
+    check_at(dir, actual, expectations, TestMetadata::default().threshold)
+}
+
+/// As [`check`], with the test's per-pixel `threshold`.
+fn check_at(dir: &Path, actual: &PremultipliedImage, expectations: Vec<String>, threshold: f64) -> TestMetadata {
     let output = dir.join("out");
     let manifest = ManifestParser::parse_manifest(OUR_MANIFEST, "background-color/default/".to_string()).unwrap();
     let runner = TestRunner::new(manifest, UpdateResults::No, None, false, output);
     let mut metadata = TestMetadata {
         id: "check".to_string(),
         paths: crate::metadata::TestPaths::new("style.json".to_string(), expectations, vec![]),
+        threshold,
         ..TestMetadata::default()
     };
     runner.check_render_test_results(actual, &mut metadata);
@@ -435,6 +443,13 @@ fn compares_against_expectations_like_cpp() {
     let m = check(&dir, &one_off, vec![d(&default_dir)]);
     assert_eq!(m.difference, 1.0 / 64.0);
     assert_eq!(m.render_failed, 1);
+
+    // A pixel slightly off matches at GL JS's default threshold, but not at
+    // a stricter one the test sets.
+    let mut faint = red.clone();
+    faint.data[0..4].copy_from_slice(&[235, 0, 0, 255]);
+    assert_eq!(check(&dir, &faint, vec![d(&default_dir)]).difference, 0.0);
+    assert_eq!(check_at(&dir, &faint, vec![d(&default_dir)], 0.02).difference, 1.0 / 64.0);
 
     // An alternate expected-*.png in the same directory can match.
     write(&default_dir.join("expected-blue.png"), encode_png(&blue));

@@ -65,12 +65,12 @@ impl AtlasBinding {
     /// samplers of the atlases, which the tile's draws share, to filter as
     /// the frame's view asks.
     pub(crate) fn bind(&self, objects: &mut DrawObjects, parameters: &mut PaintParameters<'_>) {
-        let state = parameters.state;
-        let transformed = self.rotation_alignment == AlignmentType::Map || state.get_pitch() != 0.0;
+        let state = parameters.view;
+        let transformed = self.rotation_alignment == AlignmentType::Map || state.pitch() != 0.0;
         let linear_filter_for_icons = if self.is_text {
-            state.is_changing() || transformed || !self.text_size_is_zoom_constant
+            parameters.camera_moving || transformed || !self.text_size_is_zoom_constant
         } else {
-            self.sdf_icons || state.is_changing() || self.icon_scaled || transformed
+            self.sdf_icons || parameters.camera_moving || self.icon_scaled || transformed
         };
         if self.glyph_texture_id.is_some()
             && let Some((glyph, icon)) = &self.atlases

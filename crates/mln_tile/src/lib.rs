@@ -23,8 +23,8 @@ mod tile_data;
 
 pub use error::TileError;
 pub use geometry_tile_data::{
-    classify_rings, convert_feature, convert_geometry, convert_geometry_to_tile, limit_holes, round_polygon_corners,
-    to_geometry_collection,
+    classify_rings, convert_feature, convert_geometry, convert_geometry_to_tile, is_boundary_edge, is_entirely_outside,
+    limit_holes, round_polygon_corners, to_geometry_collection,
 };
 pub use mlt::{MltFeature, MltLayer, MltTile};
 pub use mvt::{MvtFeature, MvtLayer, MvtTile};

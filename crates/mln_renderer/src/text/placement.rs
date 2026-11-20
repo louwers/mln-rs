@@ -17,8 +17,8 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use geometry::Point;
-use glam::Vec2;
-use mln_map_types::{MapDebugOptions, MapMode, ProjectionData, TileProjector, TransformState};
+use glam::{DMat4, Vec2};
+use mln_map_types::{MapDebugOptions, MapMode, ProjectionData, TileProjector, View};
 use mln_math::{fmaxf, fminf};
 use mln_style::TransitionOptions;
 use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
@@ -32,7 +32,6 @@ use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::constants::{DEFAULT_TRANSITION_DURATION, EXTENT, ONE_EM, TILE_SIZE_D};
 use mln_util::grid_index::BBox;
 use mln_util::hash::{HashMap, HashSet};
-use mln_util::mat4::Mat4;
 use mln_util::time::Instant;
 use mln_vec_map::VecMap;
 
@@ -234,12 +233,7 @@ pub struct PlacedSymbolData {
 }
 
 /// A symbol layer's `*-translate` in the tile's units, as a point.
-fn translation_point(
-    tile_id: &UnwrappedTileID,
-    translate: &SymbolTranslate,
-    state: &TransformState,
-    screen_space: bool,
-) -> Vec2 {
+fn translation_point(tile_id: &UnwrappedTileID, translate: &SymbolTranslate, state: &View, screen_space: bool) -> Vec2 {
     // A screen-space symbol takes its translate in the screen matrix.
     if screen_space {
         return Vec2::ZERO;
@@ -251,7 +245,7 @@ fn translation_point(
 /// The projection without the horizon plane, so nothing on it counts as
 /// hidden behind the planet.
 fn without_horizon(mut data: ProjectionData) -> ProjectionData {
-    data.clipping_plane = [0.0, 0.0, 0.0, 0.0];
+    data.clipping_plane = glam::DVec4::ZERO;
     data
 }
 
@@ -330,7 +324,7 @@ impl<'a> PlacementContext<'a> {
         params: &BucketPlacementData,
         bucket: &'a SymbolBucket,
         just_reloaded: bool,
-        state: &TransformState,
+        state: &View,
         placement_zoom: f32,
         collision_group: CollisionGroup,
         avoid_edges: Option<CollisionBoundaries>,
@@ -377,7 +371,7 @@ impl<'a> PlacementContext<'a> {
             bucket,
             just_reloaded,
             tile: params.tile,
-            bearing: state.get_bearing(),
+            bearing: state.angle(),
             pixels_to_tile_units,
             scale,
             pixel_ratio,
@@ -402,7 +396,7 @@ impl<'a> PlacementContext<'a> {
     }
 
     /// The context's projectors through `state`, the collision index's.
-    pub(crate) fn projectors<'s>(&self, state: &'s TransformState) -> PlacementProjectors<'s> {
+    pub(crate) fn projectors<'s>(&self, state: &'s View) -> PlacementProjectors<'s> {
         let tile_projector = TileProjector::with_data(state, &self.tile().id, self.tile_projection);
         PlacementProjectors {
             text_label_plane: LabelPlaneProjector::new(
@@ -456,7 +450,7 @@ impl<'a> PlacementContext<'a> {
 #[derive(Clone, PartialEq)]
 pub(crate) struct PlacementInputs {
     mode: MapMode,
-    transform_state: TransformState,
+    view: View,
     transition_options: TransitionOptions,
     cross_source_collisions: bool,
     show_collision_boxes: bool,
@@ -498,7 +492,7 @@ impl PlacementInputs {
         });
         PlacementInputs {
             mode: update_parameters.mode,
-            transform_state: update_parameters.transform_state.clone(),
+            view: update_parameters.view.clone(),
             transition_options: update_parameters.style.get_transition_options(),
             cross_source_collisions: update_parameters.cross_source_collisions,
             show_collision_boxes: update_parameters.debug_options.contains(MapDebugOptions::COLLISION),
@@ -924,7 +918,7 @@ impl Placement {
         Placement {
             kind: PlacementKind::Continuous,
             inputs: None,
-            collision_index: CollisionIndex::new(&TransformState::default(), MapMode::Static),
+            collision_index: CollisionIndex::new(&View::default(), MapMode::Static),
             transition_options: TransitionOptions::default(),
             fade_start_time: None,
             commit_time: None,
@@ -956,11 +950,11 @@ impl Placement {
         let previous_collision_index = prev_placement.as_mut().and_then(|prev| prev.spare_collision_index.take());
         Placement {
             kind,
-            collision_index: CollisionIndex::reusing(&inputs.transform_state, inputs.mode, previous_collision_index),
+            collision_index: CollisionIndex::reusing(&inputs.view, inputs.mode, previous_collision_index),
             transition_options: inputs.transition_options,
             fade_start_time: None,
             commit_time: time_point,
-            placement_zoom: inputs.transform_state.get_zoom() as f32,
+            placement_zoom: inputs.view.zoom() as f32,
             prev_zoom_adjustment: 0.0,
             placements: HashMap::default(),
             opacities: HashMap::default(),
@@ -1006,7 +1000,7 @@ impl Placement {
     }
 
     fn is_tilted_view(&self) -> bool {
-        self.inputs().transform_state.get_pitch() != 0.0
+        self.inputs().view.pitch() != 0.0
     }
 
     pub(crate) fn collision_index(&self) -> &CollisionIndex {
@@ -1072,13 +1066,13 @@ impl Placement {
             params,
             symbol_bucket,
             just_reloaded(reloaded_placed, &params.bucket, symbol_bucket),
-            self.collision_index.transform_state(),
+            self.collision_index.view(),
             self.placement_zoom,
             collision_group,
             avoid_edges,
         );
-        let transform_state = self.collision_index.transform_state().clone();
-        let projectors = ctx.projectors(&transform_state);
+        let view = self.collision_index.view().clone();
+        let projectors = ctx.projectors(&view);
         let state = &symbol_bucket.state;
         for symbol_index in self.placement_order(params, symbol_bucket, state, ctx.pixel_ratio) {
             let symbol = &state.symbol_instances[symbol_index];
@@ -1473,7 +1467,7 @@ impl Placement {
         placed_symbol: &PlacedSymbol,
         pools: &PlacedSymbolPools,
         font_size: f32,
-        pos_matrix: &Mat4,
+        pos_matrix: &DMat4,
         variable_text_anchors: &[SymbolAnchorType],
         do_variable_icon_placement: bool,
         shift: &Cell<Vec2>,
@@ -1625,12 +1619,8 @@ impl Placement {
         state: &SymbolBucketState,
         _pixel_ratio: f32,
     ) -> Vec<usize> {
-        let mut sorted_symbols = bucket_symbols(
-            bucket,
-            state,
-            params.sort_key_range.as_ref(),
-            self.collision_index.transform_state().get_bearing(),
-        );
+        let mut sorted_symbols =
+            bucket_symbols(bucket, state, params.sort_key_range.as_ref(), self.collision_index.view().angle());
         if let Some(previous_placement) = self.prev_placement()
             && self.is_tilted_view()
         {
@@ -1736,7 +1726,7 @@ impl Placement {
     pub(crate) fn update_layer_buckets(
         &mut self,
         layer: &dyn RenderLayer,
-        state: &TransformState,
+        state: &View,
         update_opacities: bool,
         changed: &mut ChangedBuckets,
         buckets: &mut impl SymbolBuckets,
@@ -1764,7 +1754,7 @@ impl Placement {
     pub(crate) fn update_follower_buckets(
         &self,
         layer: &dyn RenderLayer,
-        state: &TransformState,
+        state: &View,
         changed: &mut ChangedBuckets,
         buckets: &mut impl SymbolBuckets,
     ) {
@@ -1785,7 +1775,7 @@ impl Placement {
     pub(crate) fn update_bucket_dynamic_attribute_data(
         &self,
         bucket: &mut SymbolBucket,
-        state: &TransformState,
+        state: &View,
         data: &BucketPlacementData,
         layer_id: Option<&str>,
     ) -> bool {
@@ -1887,11 +1877,11 @@ impl Placement {
         } else if has_variable_anchors {
             let mut has_variable_placement = false;
 
-            let partially_evaluated_size = bucket.text_size_binder.evaluate_for_zoom(state.get_zoom() as f32);
-            let tile_scale = 2f64.powf(state.get_zoom() - f64::from(tile.overscaled_id.overscaled_z)) as f32;
+            let partially_evaluated_size = bucket.text_size_binder.evaluate_for_zoom(state.zoom() as f32);
+            let tile_scale = 2f64.powf(state.zoom() - f64::from(tile.overscaled_id.overscaled_z)) as f32;
             let rotate_with_map = *layout.text_rotation_alignment.uniform() == TextRotationAlignmentType::Map;
             let pitch_with_map = *layout.text_pitch_alignment.uniform() == AlignmentType::Map;
-            let pixels_to_tile_units = tile.id.pixels_to_tile_units(1.0, state.get_zoom() as f32);
+            let pixels_to_tile_units = tile.id.pixels_to_tile_units(1.0, state.zoom() as f32);
             // The shader leaves the translation to us for variable anchors,
             // so the shifted anchor carries it.
             let translation = text_translation;
@@ -1908,8 +1898,8 @@ impl Placement {
             let mut vec_south = Vec2::new(0.0f32, 1.0);
             if pitch_with_map && !rotate_with_map {
                 let (east, south) = tile_skew_vectors(state);
-                vec_east = Vec2::new(east[0] as f32, east[1] as f32);
-                vec_south = Vec2::new(south[0] as f32, south[1] as f32);
+                vec_east = east.as_vec2();
+                vec_south = south.as_vec2();
             }
             let mut placed_text_shifts: HashMap<usize, (usize, Vec2)> = HashMap::default();
 
@@ -1945,7 +1935,7 @@ impl Placement {
                         let projected_anchor = Vec2::new(projected.point.x as f32, projected.point.y as f32);
                         let perspective_ratio = 0.5
                             + 0.5
-                                * (state.get_camera_to_center_distance()
+                                * (state.camera_to_center_distance() as f32
                                     / projected.signed_distance_from_camera as f32);
                         let mut render_text_size =
                             evaluate_size_for_feature(&partially_evaluated_size, symbol) * perspective_ratio / ONE_EM;
@@ -2070,7 +2060,7 @@ impl Placement {
     pub(crate) fn update_bucket_opacities(
         &self,
         bucket: &mut SymbolBucket,
-        state: &TransformState,
+        state: &View,
         seen_cross_tile_ids: &mut BTreeSet<NonZeroU32>,
     ) -> bool {
         let variable_placement = bucket.has_variable_text_anchors();
@@ -2250,7 +2240,7 @@ impl Placement {
                                 variable_offset.text_box_scale,
                                 rotate_with_map,
                                 pitch_with_map,
-                                state.get_bearing() as f32,
+                                state.angle() as f32,
                             );
                         } else {
                             // No offset -> this symbol hasn't been placed since coming
@@ -2347,7 +2337,7 @@ impl Placement {
                 );
             }
         }
-        bucket.sort_features(state.get_bearing() as f32)
+        bucket.sort_features(state.angle() as f32)
     }
 
     /// How far the symbols' fade has come at `now`, from 0 to 1 and past
@@ -2484,7 +2474,7 @@ impl Placement {
 
     /// The tile borders that `bucket`'s symbols stay inside, in tile mode,
     /// where the bucket avoids its tile's edges or places along lines.
-    fn avoid_edges(&mut self, bucket: &SymbolBucket, pos_matrix: &Mat4) -> Option<CollisionBoundaries> {
+    fn avoid_edges(&mut self, bucket: &SymbolBucket, pos_matrix: &DMat4) -> Option<CollisionBoundaries> {
         let PlacementKind::Tile(tile) = &mut self.kind else {
             return None;
         };
@@ -2506,7 +2496,7 @@ impl Placement {
         anchor: SymbolAnchorType,
         shift: Vec2,
         anchors: &[SymbolAnchorType],
-        pos_matrix: &Mat4,
+        pos_matrix: &DMat4,
         text_pixel_ratio: f32,
     ) -> bool {
         let PlacementKind::Tile(tile) = &self.kind else {
@@ -2600,7 +2590,7 @@ impl Placement {
                 .then(a.anchor_point.x.total_cmp(&b.anchor_point.x))
         });
         // Place intersections.
-        let transform_state = self.collision_index.transform_state().clone();
+        let view = self.collision_index.view().clone();
         for &i in &order {
             let intersection = &intersections[i];
             let ctx = &contexts[intersection.ctx];
@@ -2610,7 +2600,7 @@ impl Placement {
             if symbol.cross_tile_id().is_some_and(|id| seen_cross_tile_ids.contains(&id)) {
                 continue;
             }
-            let projectors = ctx.projectors(&transform_state);
+            let projectors = ctx.projectors(&view);
             let placement = self.place_symbol(intersection.symbol_index, symbol, state, ctx, &projectors);
             if self.should_retry_placement(placement, ctx) {
                 continue;
@@ -2645,7 +2635,7 @@ impl Placement {
         /// Keeps the data necessary to find a feature location according to a tile.
         struct NeighborTileData {
             shift: Vec2,
-            matrix: Mat4,
+            matrix: DMat4,
             borders: CollisionBoundaries,
         }
 
@@ -2662,7 +2652,7 @@ impl Placement {
             params,
             bucket,
             just_reloaded(reloaded_placed, &params.bucket, bucket),
-            self.collision_index.transform_state(),
+            self.collision_index.view(),
             self.placement_zoom,
             collision_group,
             avoid_edges,
@@ -2672,15 +2662,11 @@ impl Placement {
         // In this case we first try to place symbols, which intersects the tile
         // borders, so that those symbols will remain even if each tile is handled
         // independently.
-        let symbol_instances = bucket_symbols(
-            bucket,
-            state,
-            params.sort_key_range.as_ref(),
-            self.collision_index.transform_state().get_bearing(),
-        );
+        let symbol_instances =
+            bucket_symbols(bucket, state, params.sort_key_range.as_ref(), self.collision_index.view().angle());
 
         let neighbor_tile_data = |collision_index: &CollisionIndex, id: UnwrappedTileID, shift: Vec2| {
-            let m = collision_index.transform_state().get_projection_data(&id).fallback_matrix;
+            let m = collision_index.view().projection_data(&id).fallback_matrix;
             let borders = collision_index.project_tile_boundaries(&m);
             NeighborTileData { shift, matrix: m, borders }
         };
@@ -2845,7 +2831,7 @@ impl SymbolBucket {
         &mut self,
         placement: &Placement,
         update_opacities: bool,
-        state: &TransformState,
+        state: &View,
         data: &BucketPlacementData,
         seen_ids: &mut BTreeSet<NonZeroU32>,
     ) -> BucketChanges {
@@ -2864,7 +2850,7 @@ impl SymbolBucket {
     pub(crate) fn update_layer_vertices(
         &mut self,
         placement: &Placement,
-        state: &TransformState,
+        state: &View,
         data: &BucketPlacementData,
         layer_id: &str,
     ) -> bool {
@@ -2906,7 +2892,7 @@ mod tests {
     fn inputs() -> PlacementInputs {
         PlacementInputs {
             mode: MapMode::Continuous,
-            transform_state: TransformState::default(),
+            view: View::default(),
             transition_options: TransitionOptions::default(),
             cross_source_collisions: true,
             show_collision_boxes: false,

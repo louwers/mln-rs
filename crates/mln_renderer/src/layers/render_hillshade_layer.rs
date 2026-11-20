@@ -10,6 +10,8 @@ use std::mem::offset_of;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use glam::dcamera::rh::proj::opengl::orthographic;
+use glam::{DMat4, DVec3};
 use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::hillshade_layer_ubo::{
@@ -37,7 +39,6 @@ use mln_util::constants::{self, EXTENT};
 use mln_util::geo::LatLng;
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::identity::SimpleIdentity;
-use mln_util::mat4::{Mat4, matrix};
 use mln_util::size::Size;
 
 use super::cast_matrix;
@@ -590,11 +591,9 @@ impl BucketTarget {
         let objects =
             DrawObjects::new(Rc::clone(shader), ColorMode::unblended(), CullFaceMode::disabled(), geometry, textures);
         let mut prepare = SingleDraw::new(objects, FrameDraw::new(None, SimpleIdentity::new()));
-        let mut m: Mat4 = [0.0; 16];
         let extent = f64::from(EXTENT);
-        matrix::ortho(&mut m, 0.0, extent, -extent, 0.0, -1.0, 1.0);
-        let a = m;
-        matrix::translate(&mut m, &a, 0.0, -extent, 0.0);
+        let m =
+            orthographic(0.0, extent, -extent, 0.0, -1.0, 1.0) * DMat4::from_translation(DVec3::new(0.0, -extent, 0.0));
         bind_no_projection(gpu, &mut prepare.frame.uniform_buffers, context);
         let draw_ubo = HillshadePrepareDrawableUBO { matrix: cast_matrix(&m) };
         prepare.write_pod(gpu, ID_HILLSHADE_PREPARE_DRAWABLE_UBO, &draw_ubo, context);
@@ -653,7 +652,7 @@ impl RenderHillshadeLayer {
         let evaluated = &layer.paint;
         let mut illumination = illumination_properties(evaluated);
         if *evaluated.hillshade_illumination_anchor.uniform() == HillshadeIlluminationAnchorType::Viewport {
-            let bearing = parameters.state.get_bearing() as f32;
+            let bearing = parameters.view.angle() as f32;
             for azimuth in &mut illumination.direction_radians {
                 *azimuth -= bearing;
             }

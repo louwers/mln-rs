@@ -134,7 +134,7 @@ fn snapshot_reports_every_member() {
         CameraBounds { bounds: Some(bounds), min_zoom: 1.0, max_zoom: 18.0, min_pitch: 5.0, max_pitch: 50.0 }
     );
 
-    let free_camera = map.get_transform_state().get_free_camera_options();
+    let free_camera = map.transform_state().view().free_camera_options();
     assert_eq!(
         snapshot.free_camera,
         FreeCamera { position: free_camera.position.unwrap(), orientation: free_camera.orientation.unwrap() }
@@ -168,6 +168,25 @@ fn snapshot_reports_every_member() {
 }
 
 #[test]
+fn bounds_that_cross_the_current_limits_change_nothing() {
+    let run_loop = Queue::<()>::new();
+    let mut map = map(MapOptions { size: Size::new(256, 256), ..Default::default() }, &run_loop);
+    map.set_bounds(&BoundOptions { min_zoom: Some(2.0), max_zoom: Some(10.0), ..Default::default() }).unwrap();
+    let generation = map.generation();
+
+    // A minimum above the maximum that stays.
+    assert!(map.set_bounds(&BoundOptions { min_zoom: Some(12.0), ..Default::default() }).is_err());
+    let bounds = map.snapshot().bounds;
+    assert_eq!((2.0, 10.0), (bounds.min_zoom, bounds.max_zoom));
+    assert_eq!(generation, map.generation());
+
+    // Both at once move the range.
+    map.set_bounds(&BoundOptions { min_zoom: Some(12.0), max_zoom: Some(14.0), ..Default::default() }).unwrap();
+    let bounds = map.snapshot().bounds;
+    assert_eq!((12.0, 14.0), (bounds.min_zoom, bounds.max_zoom));
+}
+
+#[test]
 fn generation_grows_with_each_change() {
     let run_loop = Queue::<()>::new();
     let mut map = map(MapOptions { size: Size::new(256, 256), ..Default::default() }, &run_loop);
@@ -184,7 +203,7 @@ fn generation_grows_with_each_change() {
         last = generation;
     };
 
-    map.snapshot();
+    let _ = map.snapshot();
     assert_changed(&map, false, "reading");
 
     map.jump_to(&CameraOptions { zoom: Some(3.0), ..Default::default() });
@@ -206,7 +225,7 @@ fn generation_grows_with_each_change() {
     assert_changed(&map, false, "enable_rendering_stats_view when enabled");
     map.load_style_json(r#"{"version":8,"sources":{},"layers":[]}"#);
     assert_changed(&map, true, "load_json");
-    map.set_free_camera_options(&FreeCameraOptions { position: Some([0.4, 0.4, 0.1]), orientation: None });
+    map.set_free_camera_options(&FreeCameraOptions { position: Some(glam::dvec3(0.4, 0.4, 0.1)), orientation: None });
     assert_changed(&map, true, "set_free_camera_options");
 }
 
@@ -305,7 +324,7 @@ fn projection_from_a_view_matches_the_map() {
         assert!((actual.x - expected.x).abs() < 1e-6 && (actual.y - expected.y).abs() < 1e-6, "{lat_lng:?}");
     }
 
-    let round_trip = MapView::from_state(&view.to_state().unwrap(), view.extent.scale_factor);
+    let round_trip = view.to_view().unwrap().map_view(view.extent.scale_factor);
     assert_eq!(round_trip.extent, view.extent);
     assert_eq!(round_trip.viewport, view.viewport);
     assert_eq!(round_trip.projection_mode, view.projection_mode);

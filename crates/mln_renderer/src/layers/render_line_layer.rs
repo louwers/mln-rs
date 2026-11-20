@@ -17,7 +17,7 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
-use mln_map_types::TransformState;
+use mln_map_types::View;
 use mln_style::expression::{Dependency, EvaluationContext, GlobalStateMap, global_state_refs_intersect};
 use mln_style::layer_type::LayerStyle;
 use mln_style::layers::Line;
@@ -616,7 +616,7 @@ impl RenderLayer for RenderLineLayer {
         feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
         geometry: &mln_tile_id::geometry_tile_data::GeometryCollection,
         zoom: f32,
-        transform_state: &TransformState,
+        view: &View,
         pixels_to_tile_units: f32,
         _projector: &mln_map_types::TileProjector<'_>,
         feature_state: &mln_style::expression::expression::FeatureState,
@@ -627,7 +627,7 @@ impl RenderLayer for RenderLineLayer {
             query_geometry,
             *evaluated.line_translate.uniform(),
             *evaluated.line_translate_anchor.uniform(),
-            transform_state.get_bearing() as f32,
+            view.angle() as f32,
             pixels_to_tile_units,
         );
         let query = translated_query_geometry.as_ref().unwrap_or(query_geometry);
@@ -801,10 +801,10 @@ impl RenderLineLayer {
         const IN_VIEWPORT_PIXEL_UNITS: bool = false;
         let evaluated = &layer.paint;
         let crossfade = layer.crossfade;
-        let state = parameters.state;
-        let zoom = state.get_zoom() as f32;
-        let int_zoom = state.get_integer_zoom();
-        let pixel_scale = state.get_projection().pixel_scale(state) as f32;
+        let state = parameters.view;
+        let zoom = state.zoom() as f32;
+        let int_zoom = state.integer_zoom();
+        let pixel_scale = state.projection().pixel_scale(state) as f32;
 
         let projection = projection_data(
             &tile_id,

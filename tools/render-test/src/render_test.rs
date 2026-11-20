@@ -431,8 +431,9 @@ pub(crate) fn finish_test(metadata: &mut TestMetadata, ignore_reason: Option<&st
         if passed {
             metadata.status = "ignored passed".to_string();
             metadata.color = "#E8A408".to_string();
-            println!("{ANSI_COLOR_YELLOW}* ignore {id} ({ignore_reason}){ANSI_COLOR_RESET}");
-            log::info(Event::General, &format!("* ignore {id} ({ignore_reason})"));
+            // A stale ignore: say so, so a run's log names it.
+            println!("{ANSI_COLOR_YELLOW}* ignored passed {id} ({ignore_reason}){ANSI_COLOR_RESET}");
+            log::info(Event::General, &format!("* ignored passed {id} ({ignore_reason})"));
         } else {
             metadata.status = "ignored failed".to_string();
             metadata.color = "#9E9E9E".to_string();

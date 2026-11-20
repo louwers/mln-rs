@@ -1516,7 +1516,7 @@ struct FillExtrusionDrawableUBO {
     color_t: f32,
     pattern_from_t: f32,
     pattern_to_t: f32,
-    pad1: f32,
+    paint_layout: u32,
 };
 
 struct FillExtrusionPropsUBO {
@@ -1944,7 +1944,7 @@ struct FillOutlineDrawableUBO {
     matrix: mat4x4<f32>,
     outline_color_t: f32,
     opacity_t: f32,
-    pad1: f32,
+    paint_layout: u32,
     pad2: f32,
 };
 

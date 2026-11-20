@@ -59,6 +59,7 @@ impl shared::Kind for SharedSourceStyle {
         }
         style.global_state.write(w);
         style.font_faces.write(w);
+        style.glyph_pbfs.write(w);
     }
 
     fn read(r: &mut Reader<'_>) -> Option<Arc<SourceStyle>> {
@@ -68,7 +69,13 @@ impl shared::Kind for SharedSourceStyle {
         for _ in 0..len {
             layers.push(shared::read::<SharedEvaluatedLayer>(r)?);
         }
-        Some(Arc::new(SourceStyle { version, layers, global_state: Wire::read(r)?, font_faces: Wire::read(r)? }))
+        Some(Arc::new(SourceStyle {
+            version,
+            layers,
+            global_state: Wire::read(r)?,
+            font_faces: Wire::read(r)?,
+            glyph_pbfs: Wire::read(r)?,
+        }))
     }
 }
 

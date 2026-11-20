@@ -36,6 +36,16 @@ float2 unpack_float(const float packedValue) {
     const int v0 = packedIntValue / 256;
     return float2(v0, packedIntValue - v0 * 256);
 }
+// The normal at the end of a fill extrusion wall from its outline vertex's
+// packed decimals_ed.x: the one the walls there share, whose angle from -pi
+// its bits 2 to 15 hold where bit 1 is set, or else `own`, the wall's.
+float2 wall_normal(const uint bits, const float2 own) {
+    if ((bits & 2u) == 0u) {
+        return own;
+    }
+    const float angle = float(bits >> 2) * (2.0 * M_PI_F / 16384.0) - M_PI_F;
+    return float2(metal::cos(angle), metal::sin(angle));
+}
 float2 unpack_opacity(const float packedOpacity) {
     return float2(float(int(packedOpacity) / 2) / 127.0, glMod(packedOpacity, 2.0));
 }
@@ -1413,84 +1423,11 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-pub(crate) const FILL_EXTRUSION_INSTANCED_SHADER: MslShaderSource = MslShaderSource {
-    vertex_main_function: r"vertexMain",
-    fragment_main_function: r"fragmentMain",
-    prelude: r#"
-
-enum {
-    idFillExtrusionDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idFillExtrusionTilePropsUBO = drawableReservedUBOCount,
-    idFillExtrusionPropsUBO,
-    fillExtrusionUBOCount
-};
-
-struct alignas(16) FillExtrusionDrawableUBO {
-    /*   0 */ float4x4 matrix;
-    /*  64 */ float2 pixel_coord_upper;
-    /*  72 */ float2 pixel_coord_lower;
-    /*  80 */ float height_factor;
-    /*  84 */ float tile_ratio;
-
-    // Interpolations
-    /*  88 */ float base_t;
-    /*  92 */ float height_t;
-    /*  96 */ float color_t;
-    /* 100 */ float pattern_from_t;
-    /* 104 */ float pattern_to_t;
-    /* 108 */ float pad1;
-    /* 112 */
-};
-static_assert(sizeof(FillExtrusionDrawableUBO) == 7 * 16, "wrong size");
-
-struct alignas(16) FillExtrusionTilePropsUBO {
-    /*  0 */ float4 pattern_from;
-    /* 16 */ float4 pattern_to;
-    /* 32 */ float2 texsize;
-    /* 40 */ float pad1;
-    /* 44 */ float pad2;
-    /* 48 */
-};
-static_assert(sizeof(FillExtrusionTilePropsUBO) == 3 * 16, "wrong size");
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) FillExtrusionPropsUBO {
-    /*  0 */ float4 color;
-    /* 16 */ float4 light_color_pad;
-    /* 32 */ float4 light_position_base;
-    /* 48 */ float height;
-    /* 52 */ float light_intensity;
-    /* 56 */ float vertical_gradient;
-    /* 60 */ float opacity;
-    /* 64 */ float fade;
-    /* 68 */ float from_scale;
-    /* 72 */ float to_scale;
-    /* 76 */ float pad2;
-    /* 80 */
-};
-static_assert(sizeof(FillExtrusionPropsUBO) == 5 * 16, "wrong size");
-
-"#,
-    source: r"
-
-struct VertexStage {
-    short2 pos [[attribute(0)]];
-    short2 outline_pos [[attribute(1)]];
-    ushort2 decimals_ed [[attribute(2)]];
-    short2 next_outline_pos [[attribute(6)]];
-    ushort2 next_decimals_ed [[attribute(7)]];
-
-#if !defined(HAS_UNIFORM_u_color)
-    float4 color [[attribute(3)]];
-#endif
-#if !defined(HAS_UNIFORM_u_base)
-    float2 base [[attribute(4)]];
-#endif
-#if !defined(HAS_UNIFORM_u_height)
-    float2 height [[attribute(5)]];
-#endif
-};
-
+// The walls' fragment stage, and `wall`, the vertex of a wall, which reads
+// the instanced walls' attributes as the fields of `vertx`.
+macro_rules! extrusion_wall {
+    () => {
+        r"
 struct FragmentStage {
     float4 position [[position, invariant]];
     half4 color;
@@ -1501,11 +1438,11 @@ struct FragmentOutput {
     //float depth [[depth(less)]]; // Write depth value if it's less than what's already there
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const FillExtrusionDrawableUBO* drawableVector [[buffer(idFillExtrusionDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
-                                device const FillExtrusionPropsUBO& props [[buffer(idFillExtrusionPropsUBO)]]) {
+template <typename Vertex>
+FragmentStage wall(thread const Vertex& vertx,
+                   device const FillExtrusionDrawableUBO& drawable,
+                   device const ProjectionUBO& projection,
+                   device const FillExtrusionPropsUBO& props) {
 
     bool isDiscarded = glMod(float(vertx.decimals_ed.x), 2.0) > 0.0;
     if (isDiscarded) {
@@ -1514,8 +1451,6 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
             .color    = half4(0.0),
         };
     }
-
-    device const FillExtrusionDrawableUBO& drawable = drawableVector[uboIndex];
 
 #if defined(HAS_UNIFORM_u_base)
     const auto base   = max(props.light_position_base.w, 0.0);
@@ -1528,15 +1463,16 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const auto height = max(unpack_mix_float(vertx.height, drawable.height_t), 0.0);
 #endif
 
-    const float2 p1 = float2(vertx.outline_pos) + unpack_float(float(vertx.decimals_ed.x / 2)) / 128.0;
-    const float2 p2 = float2(vertx.next_outline_pos) + unpack_float(float(vertx.next_decimals_ed.x / 2)) / 128.0;
+    const float2 p1 = float2(vertx.outline_pos);
+    const float2 p2 = float2(vertx.next_outline_pos);
     const float2 edgevector = normalize(p2 - p1);
+    const float2 own = float2(-edgevector.y, edgevector.x);
 
-    const float3 normal = float3(-edgevector.y, edgevector.x, 0.0);
+    const float3 normal = float3(vertx.pos.x == 0 ? wall_normal(vertx.decimals_ed.x, own) : wall_normal(vertx.next_decimals_ed.x, own), 0.0);
     const float t = float(vertx.pos.y);
     const float z = (t != 0.0) ? height : base;     // TODO: This would come out wrong on GL for negative values, check it...
 
-    const float4 position = projectTileFor3D(vertx.pos.x == 0.0 ? p1 : p2, z, projectionVector[uboIndex]);
+    const float4 position = projectTileFor3D(vertx.pos.x == 0.0 ? p1 : p2, z, projection);
 
 #if defined(OVERDRAW_INSPECTOR)
     return {
@@ -1595,7 +1531,183 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]]) {
     return { in.color/*, in.position.z*/ };
 }
+"
+    };
+}
+
+pub(crate) const FILL_EXTRUSION_INSTANCED_SHADER: MslShaderSource = MslShaderSource {
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
+    prelude: r#"
+
+enum {
+    idFillExtrusionDrawableUBO = idDrawableReservedVertexOnlyUBO,
+    idFillExtrusionTilePropsUBO = drawableReservedUBOCount,
+    idFillExtrusionPropsUBO,
+    fillExtrusionUBOCount
+};
+
+struct alignas(16) FillExtrusionDrawableUBO {
+    /*   0 */ float4x4 matrix;
+    /*  64 */ float2 pixel_coord_upper;
+    /*  72 */ float2 pixel_coord_lower;
+    /*  80 */ float height_factor;
+    /*  84 */ float tile_ratio;
+
+    // Interpolations
+    /*  88 */ float base_t;
+    /*  92 */ float height_t;
+    /*  96 */ float color_t;
+    /* 100 */ float pattern_from_t;
+    /* 104 */ float pattern_to_t;
+    /* 108 */ uint32_t paint_layout;
+    /* 112 */
+};
+static_assert(sizeof(FillExtrusionDrawableUBO) == 7 * 16, "wrong size");
+
+struct alignas(16) FillExtrusionTilePropsUBO {
+    /*  0 */ float4 pattern_from;
+    /* 16 */ float4 pattern_to;
+    /* 32 */ float2 texsize;
+    /* 40 */ float pad1;
+    /* 44 */ float pad2;
+    /* 48 */
+};
+static_assert(sizeof(FillExtrusionTilePropsUBO) == 3 * 16, "wrong size");
+
+/// Evaluated properties that do not depend on the tile
+struct alignas(16) FillExtrusionPropsUBO {
+    /*  0 */ float4 color;
+    /* 16 */ float4 light_color_pad;
+    /* 32 */ float4 light_position_base;
+    /* 48 */ float height;
+    /* 52 */ float light_intensity;
+    /* 56 */ float vertical_gradient;
+    /* 60 */ float opacity;
+    /* 64 */ float fade;
+    /* 68 */ float from_scale;
+    /* 72 */ float to_scale;
+    /* 76 */ float pad2;
+    /* 80 */
+};
+static_assert(sizeof(FillExtrusionPropsUBO) == 5 * 16, "wrong size");
+
+"#,
+    source: concat!(
+        r"
+
+struct VertexStage {
+    short2 pos [[attribute(0)]];
+    short2 outline_pos [[attribute(1)]];
+    ushort2 decimals_ed [[attribute(2)]];
+    short2 next_outline_pos [[attribute(6)]];
+    ushort2 next_decimals_ed [[attribute(7)]];
+
+#if !defined(HAS_UNIFORM_u_color)
+    float4 color [[attribute(3)]];
+#endif
+#if !defined(HAS_UNIFORM_u_base)
+    float2 base [[attribute(4)]];
+#endif
+#if !defined(HAS_UNIFORM_u_height)
+    float2 height [[attribute(5)]];
+#endif
+};
+
 ",
+        extrusion_wall!(),
+        r"
+FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
+                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
+                                device const FillExtrusionDrawableUBO* drawableVector [[buffer(idFillExtrusionDrawableUBO)]],
+                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
+                                device const FillExtrusionPropsUBO& props [[buffer(idFillExtrusionPropsUBO)]]) {
+    return wall(vertx, drawableVector[uboIndex], projectionVector[uboIndex], props);
+}
+
+"
+    ),
+};
+
+pub(crate) const FILL_EXTRUSION_PULLED_SHADER: MslShaderSource = MslShaderSource {
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
+    prelude: FILL_EXTRUSION_INSTANCED_SHADER.prelude,
+    source: concat!(
+        r"
+
+enum {
+    idFillExtrusionWallVertices = 7,
+    idFillExtrusionWallPaint
+};
+
+// A vertex of the bucket, which the walls read by index.
+struct BucketVertex {
+    short2 pos;
+    ushort2 decimals_ed;
+};
+
+// What the instanced walls read as attributes.
+struct WallVertex {
+    short2 pos;
+    short2 outline_pos;
+    ushort2 decimals_ed;
+    short2 next_outline_pos;
+    ushort2 next_decimals_ed;
+#if !defined(HAS_UNIFORM_u_color)
+    float4 color;
+#endif
+#if !defined(HAS_UNIFORM_u_base)
+    float2 base;
+#endif
+#if !defined(HAS_UNIFORM_u_height)
+    float2 height;
+#endif
+};
+",
+        extrusion_wall!(),
+        r"
+FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]],
+                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
+                                device const FillExtrusionDrawableUBO* drawableVector [[buffer(idFillExtrusionDrawableUBO)]],
+                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
+                                device const FillExtrusionPropsUBO& props [[buffer(idFillExtrusionPropsUBO)]],
+                                device const BucketVertex* wallVertices [[buffer(idFillExtrusionWallVertices)]],
+                                device const float* wallPaint [[buffer(idFillExtrusionWallPaint)]]) {
+    device const FillExtrusionDrawableUBO& drawable = drawableVector[uboIndex];
+
+    // Four vertices a wall, in the order of the static quad's corners.
+    const uint wall_index = vertex_id / 4;
+    const uint corner = vertex_id % 4;
+    const BucketVertex outline = wallVertices[wall_index];
+    const BucketVertex next = wallVertices[wall_index + 1];
+
+    WallVertex vertx;
+    vertx.pos = short2(corner < 2 ? 1 : 0, corner & 1);
+    vertx.outline_pos = outline.pos;
+    vertx.decimals_ed = outline.decimals_ed;
+    vertx.next_outline_pos = next.pos;
+    vertx.next_decimals_ed = next.decimals_ed;
+
+    // The wall's paint values are its outline vertex's, where the drawable's
+    // `paint_layout` says: the floats a vertex takes, then the offsets of
+    // base, height and color, a byte each from the lowest.
+    const uint paint_layout = drawable.paint_layout;
+    device const float* paint = wallPaint + wall_index * (paint_layout & 0xff);
+#if !defined(HAS_UNIFORM_u_base)
+    vertx.base = float2(*(device const packed_float2*)(paint + ((paint_layout >> 8) & 0xff)));
+#endif
+#if !defined(HAS_UNIFORM_u_height)
+    vertx.height = float2(*(device const packed_float2*)(paint + ((paint_layout >> 16) & 0xff)));
+#endif
+#if !defined(HAS_UNIFORM_u_color)
+    vertx.color = float4(*(device const packed_float4*)(paint + (paint_layout >> 24)));
+#endif
+
+    return wall(vertx, drawable, projectionVector[uboIndex], props);
+}
+"
+    ),
 };
 
 pub(crate) const FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: MslShaderSource = MslShaderSource {
@@ -1623,7 +1735,7 @@ struct alignas(16) FillExtrusionDrawableUBO {
     /*  96 */ float color_t;
     /* 100 */ float pattern_from_t;
     /* 104 */ float pattern_to_t;
-    /* 108 */ float pad1;
+    /* 108 */ uint32_t paint_layout;
     /* 112 */
 };
 static_assert(sizeof(FillExtrusionDrawableUBO) == 7 * 16, "wrong size");
@@ -1737,11 +1849,12 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const auto height = max(unpack_mix_float(vertx.height, drawable.height_t), 0.0);
 #endif
 
-    const float2 p1 = float2(vertx.outline_pos) + unpack_float(float(vertx.decimals_ed.x / 2)) / 128.0;
-    const float2 p2 = float2(vertx.next_outline_pos) + unpack_float(float(vertx.next_decimals_ed.x / 2)) / 128.0;
+    const float2 p1 = float2(vertx.outline_pos);
+    const float2 p2 = float2(vertx.next_outline_pos);
     const float2 edgevector = normalize(p2 - p1);
+    const float2 own = float2(-edgevector.y, edgevector.x);
 
-    const float3 normal = float3(-edgevector.y, edgevector.x, 0.0);
+    const float3 normal = float3(vertx.pos.x == 0 ? wall_normal(vertx.decimals_ed.x, own) : wall_normal(vertx.next_decimals_ed.x, own), 0.0);
     const float edgedistance = vertx.pos.x == 0 ? vertx.next_decimals_ed.y : vertx.decimals_ed.y;
     const float t = float(vertx.pos.y);
     const float z = (t != 0.0) ? height : base;     // TODO: This would come out wrong on GL for negative values, check it...
@@ -1894,7 +2007,7 @@ struct alignas(16) FillExtrusionDrawableUBO {
     /*  96 */ float color_t;
     /* 100 */ float pattern_from_t;
     /* 104 */ float pattern_to_t;
-    /* 108 */ float pad1;
+    /* 108 */ uint32_t paint_layout;
     /* 112 */
 };
 static_assert(sizeof(FillExtrusionDrawableUBO) == 7 * 16, "wrong size");
@@ -1991,9 +2104,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float3 normal = float3(0.0, 0.0, 1.0);
     const float t = 1.0;
     const float z = (t != 0.0) ? height : base;     // TODO: This would come out wrong on GL for negative values, check it...
-    const float2 decimals = unpack_float(float(vertx.decimals_ed.x / 2)) / 128.0;
-
-    const float4 position = projectTileFor3D(float2(vertx.pos) + decimals, z, projectionVector[uboIndex]);
+    const float4 position = projectTileFor3D(float2(vertx.pos), z, projectionVector[uboIndex]);
 
 #if defined(OVERDRAW_INSPECTOR)
     return {
@@ -2139,7 +2250,7 @@ struct alignas(16) FillExtrusionDrawableUBO {
     /*  96 */ float color_t;
     /* 100 */ float pattern_from_t;
     /* 104 */ float pattern_to_t;
-    /* 108 */ float pad1;
+    /* 108 */ uint32_t paint_layout;
     /* 112 */
 };
 static_assert(sizeof(FillExtrusionDrawableUBO) == 7 * 16, "wrong size");
@@ -2221,9 +2332,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float3 normal = float3(0.0, 0.0, 1.0);
     const float t = 1.0;
     const float z = (t != 0.0) ? height : base;     // TODO: This would come out wrong on GL for negative values, check it...
-    const float2 decimals = unpack_float(float(vertx.decimals_ed.x / 2)) / 128.0;
-
-    const float4 position = projectTileFor3D(float2(vertx.pos) + decimals, z, projectionVector[uboIndex]);
+    const float4 position = projectTileFor3D(float2(vertx.pos), z, projectionVector[uboIndex]);
 
 #if defined(OVERDRAW_INSPECTOR)
     return {
@@ -2383,7 +2492,7 @@ struct alignas(16) FillOutlineDrawableUBO {
     // Interpolations
     /* 64 */ float outline_color_t;
     /* 68 */ float opacity_t;
-    /* 72 */ float pad1;
+    /* 72 */ uint32_t paint_layout;
     /* 76 */ float pad2;
     /* 80 */
 };
@@ -2680,6 +2789,55 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 };
 
 /// The fill outline, drawn as an instance of a quad per segment.
+// The outlines' fragment stage, and the corner of a segment's quad
+// (`outline_corner`).
+macro_rules! outline_stages {
+    () => {
+        concat!(
+            r"
+struct FragmentStage {
+    float4 position [[position, invariant]];
+    float2 pos;
+#if !defined(HAS_UNIFORM_u_outline_color)
+    half4 outline_color;
+#endif
+#if !defined(HAS_UNIFORM_u_opacity)
+    half opacity;
+#endif
+};
+",
+            outline_corner!(),
+            r"
+half4 fragment fragmentMain(FragmentStage in [[stage_in]],
+                            device const FillEvaluatedPropsUBO& props [[buffer(idFillEvaluatedPropsUBO)]]) {
+#if defined(OVERDRAW_INSPECTOR)
+    return half4(1.0);
+#endif
+
+    // The outline fades over a pixel from the line, as in the GL and Vulkan
+    // shaders; the C++ Metal source leaves `alpha` out here.
+    const float dist = length(in.pos - in.position.xy);
+    const float alpha = 1.0 - smoothstep(0.0, 1.0, dist);
+
+#if defined(HAS_UNIFORM_u_outline_color)
+    const half4 color = half4(props.outline_color);
+#else
+    const half4 color = in.outline_color;
+#endif
+
+#if defined(HAS_UNIFORM_u_opacity)
+    const half opacity = props.opacity;
+#else
+    const half opacity = in.opacity;
+#endif
+
+    return half4(color * opacity * half(alpha));
+}
+"
+        )
+    };
+}
+
 pub(crate) const FILL_OUTLINE_INSTANCED_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
@@ -2716,7 +2874,7 @@ struct alignas(16) FillOutlineDrawableUBO {
     // Interpolations
     /* 64 */ float outline_color_t;
     /* 68 */ float opacity_t;
-    /* 72 */ float pad1;
+    /* 72 */ uint32_t paint_layout;
     /* 76 */ float pad2;
     /* 80 */
 };
@@ -2837,18 +2995,8 @@ struct VertexStage {
     short2 outline_end [[attribute(4)]];
 };
 
-struct FragmentStage {
-    float4 position [[position, invariant]];
-    float2 pos;
-#if !defined(HAS_UNIFORM_u_outline_color)
-    half4 outline_color;
-#endif
-#if !defined(HAS_UNIFORM_u_opacity)
-    half opacity;
-#endif
-};
 ",
-        outline_corner!(),
+        outline_stages!(),
         r"
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
@@ -2875,30 +3023,63 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     };
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const FillEvaluatedPropsUBO& props [[buffer(idFillEvaluatedPropsUBO)]]) {
-#if defined(OVERDRAW_INSPECTOR)
-    return half4(1.0);
+"
+    ),
+};
+
+pub(crate) const FILL_OUTLINE_PULLED_SHADER: MslShaderSource = MslShaderSource {
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
+    prelude: FILL_OUTLINE_INSTANCED_SHADER.prelude,
+    source: concat!(
+        r"
+
+enum {
+    idFillOutlineVertices = 7,
+    idFillOutlineEnds,
+    idFillOutlinePaint
+};
+",
+        outline_stages!(),
+        r"
+FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]],
+                                device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
+                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
+                                device const FillDrawableUnionUBO* drawableVector [[buffer(idFillDrawableUBO)]],
+                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
+                                device const short2* outlineVertices [[buffer(idFillOutlineVertices)]],
+                                device const short2* outlineEnds [[buffer(idFillOutlineEnds)]],
+                                device const float* outlinePaint [[buffer(idFillOutlinePaint)]]) {
+
+    device const FillOutlineDrawableUBO& drawable = drawableVector[uboIndex].fillOutlineDrawableUBO;
+
+    // Four vertices a segment, in the order of the instanced quad's corners:
+    // a vertex of the fill and the end of the segment that starts there.
+    const uint segment = vertex_id / 4;
+    const uint quad_corner = vertex_id % 4;
+    const float2 start = float2(outlineVertices[segment]);
+    const float2 end = float2(outlineEnds[segment]);
+    const OutlineCorner corner = outline_corner(projectTile(start, start, projectionVector[uboIndex]),
+                                                projectTile(end, end, projectionVector[uboIndex]),
+                                                short2(quad_corner >> 1, quad_corner & 1), paintParams.world_size);
+
+    // The segment's paint values are its start's, where the drawable's
+    // `paint_layout` says: the floats a vertex takes, then the offsets of
+    // the outline color and the opacity, a byte each from the lowest.
+    const uint paint_layout = drawable.paint_layout;
+    device const float* paint = outlinePaint + segment * (paint_layout & 0xff);
+    return {
+        .position       = corner.position,
+        .pos            = corner.pos,
+#if !defined(HAS_UNIFORM_u_outline_color)
+        .outline_color  = half4(unpack_mix_color(float4(*(device const packed_float4*)(paint + ((paint_layout >> 8) & 0xff))),
+                                                 drawable.outline_color_t)),
 #endif
-
-    // The outline fades over a pixel from the line, as in the GL and Vulkan
-    // shaders; the C++ Metal source leaves `alpha` out here.
-    const float dist = length(in.pos - in.position.xy);
-    const float alpha = 1.0 - smoothstep(0.0, 1.0, dist);
-
-#if defined(HAS_UNIFORM_u_outline_color)
-    const half4 color = half4(props.outline_color);
-#else
-    const half4 color = in.outline_color;
+#if !defined(HAS_UNIFORM_u_opacity)
+        .opacity        = half(unpack_mix_float(float2(*(device const packed_float2*)(paint + ((paint_layout >> 16) & 0xff))),
+                                                drawable.opacity_t)),
 #endif
-
-#if defined(HAS_UNIFORM_u_opacity)
-    const half opacity = props.opacity;
-#else
-    const half opacity = in.opacity;
-#endif
-
-    return half4(color * opacity * half(alpha));
+    };
 }
 "
     ),
@@ -2940,7 +3121,7 @@ struct alignas(16) FillOutlineDrawableUBO {
     // Interpolations
     /* 64 */ float outline_color_t;
     /* 68 */ float opacity_t;
-    /* 72 */ float pad1;
+    /* 72 */ uint32_t paint_layout;
     /* 76 */ float pad2;
     /* 80 */
 };
@@ -3156,7 +3337,7 @@ struct alignas(16) FillOutlineDrawableUBO {
     // Interpolations
     /* 64 */ float outline_color_t;
     /* 68 */ float opacity_t;
-    /* 72 */ float pad1;
+    /* 72 */ uint32_t paint_layout;
     /* 76 */ float pad2;
     /* 80 */
 };
@@ -3461,7 +3642,7 @@ struct alignas(16) FillOutlineDrawableUBO {
     // Interpolations
     /* 64 */ float outline_color_t;
     /* 68 */ float opacity_t;
-    /* 72 */ float pad1;
+    /* 72 */ uint32_t paint_layout;
     /* 76 */ float pad2;
     /* 80 */
 };

@@ -30,7 +30,12 @@ pub struct FillOutlineDrawableUBO {
     // Interpolations
     /* 64 */ pub outline_color_t: f32,
     /* 68 */ pub opacity_t: f32,
-    /* 72 */ pub pad1: f32,
+    /// Where `FillOutlinePulledShader` finds a vertex's paint values in the
+    /// buffer it reads them from, in words, a byte each from the lowest:
+    /// how many a vertex takes, then the offset in them of its outline
+    /// color and its opacity.
+    /* 72 */
+    pub paint_layout: u32,
     /* 76 */ pub pad2: f32,
     /* 80 */
 }

@@ -19,7 +19,7 @@ doctest = false
 
 [features]
 default = ["font-face-shaper"]
-# The style's font faces shaped in-process with mln_text's HBShaper
+# The style's font faces shaped in-process with mln_text's Shaper
 # (HarfRust), the default FontFaceEngine (src/text/font_face_engine.rs). The
 # workspace's packages depend on this crate without its default features,
 # and those that render (mln-rs, examples/desktop, tools/render-test,

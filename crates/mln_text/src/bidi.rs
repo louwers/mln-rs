@@ -18,7 +18,7 @@ use mln_vec_map::VecSet;
 use unicode_bidi::{BidiClass, BidiInfo};
 
 use crate::bidi_mirroring::BIDI_MIRRORING_GLYPH;
-use crate::tagged_string::StyledText;
+use crate::tagged_string::{SectionIndex, StyledText};
 
 /// Whether the first character in `text` with a strong direction runs right
 /// to left.
@@ -180,16 +180,6 @@ pub(crate) fn reorder_styled_lines(input: &StyledText, line_breaks: VecSet<usize
     reorder_styled_lines_with_blocks(input, line_breaks, &input.text, &[])
 }
 
-/// Splits text in logical order into lines at `line_breaks` and at the ends
-/// of paragraphs, without reordering it.
-pub(crate) fn split_styled_lines(input: &StyledText, line_breaks: VecSet<usize>) -> Vec<StyledText> {
-    let mut utf8 = String::new();
-    Analysis::new(&input.text, &mut utf8)
-        .lines(line_breaks)
-        .map(|line| StyledText { text: input.text[line.clone()].to_vec(), styles: input.styles[line].to_vec() })
-        .collect()
-}
-
 /// Like [`reorder_styled_lines`], but the bidi analysis reads `bidi_text`,
 /// which is as long as the input's text, and a right-to-left run keeps the
 /// order of the text in the styles that `block_styles` marks, which a shaper
@@ -203,7 +193,7 @@ pub(crate) fn reorder_styled_lines_with_blocks(
     debug_assert_eq!(bidi_text.len(), input.text.len());
     let input_text = &input.text;
     let style_indices = &input.styles;
-    let is_block = |style: u8| block_styles.get(style as usize).copied().unwrap_or(false);
+    let is_block = |style: SectionIndex| block_styles.get(style as usize).copied().unwrap_or(false);
 
     let mut utf8 = String::new();
     let analysis = Analysis::new(bidi_text, &mut utf8);
@@ -221,7 +211,7 @@ pub(crate) fn reorder_styled_lines_with_blocks(
                 //
                 let mut style_run_start = logical_end;
                 let mut current_style_index = style_indices[style_run_start - 1];
-                let mut add_chunk = |start: usize, end: usize, style: u8| {
+                let mut add_chunk = |start: usize, end: usize, style: SectionIndex| {
                     // A block's text is already in visual order.
                     let mut reversed = Vec::new();
                     if is_block(style) {
@@ -310,7 +300,7 @@ mod bidi_test {
         v.iter().copied().collect()
     }
 
-    fn styled(text: Vec<char>, styles: Vec<u8>) -> StyledText {
+    fn styled(text: Vec<char>, styles: Vec<SectionIndex>) -> StyledText {
         StyledText { text, styles }
     }
 
@@ -402,15 +392,6 @@ mod bidi_test {
         assert_eq!(lines.len(), 1);
         assert_eq!(lines[0].text, u("Erbil XY"));
         assert_eq!(lines[0].styles, vec![1, 1, 1, 1, 1, 1, 0, 0]);
-    }
-
-    // gtest: BiDi.SplitStyledTextKeepsLogicalOrder
-    #[test]
-    fn split_styled_text_keeps_logical_order() {
-        let lines = split_styled_lines(&styled(u("سلام\nabc"), vec![0, 0, 0, 0, 0, 1, 1, 1]), set(&[]));
-        assert_eq!(lines.len(), 2);
-        assert_eq!(lines[0].text, u("سلام\n"));
-        assert_eq!(lines[1].text, u("abc"));
     }
 
     // gtest: BiDi.BlockAtTheStartOfARunTakesOnlyItsOwnText

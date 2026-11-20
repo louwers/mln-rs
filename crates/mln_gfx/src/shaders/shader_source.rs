@@ -22,12 +22,20 @@ pub enum BuiltIn {
     FillOutlinePatternShader,
     FillOutlineInstancedShader,
     FillOutlinePatternInstancedShader,
+    /// Port-only: the outlines of `FillOutlineInstancedShader` as quads
+    /// without vertex attributes. A vertex reads its segment's ends and
+    /// paint values from storage buffers, by its index.
+    FillOutlinePulledShader,
     FillOutlineTriangulatedShader,
     FillExtrusionShader,
     FillExtrusionInstancedShader,
     /// Port-only: the walls of `FillExtrusionInstancedShader` with every
     /// attribute per vertex, for walls whose quads are in the vertex buffer.
     FillExtrusionWallShader,
+    /// Port-only: the walls of `FillExtrusionInstancedShader` as quads
+    /// without vertex attributes. A vertex reads its wall's outline vertices
+    /// and paint values from storage buffers, by its index.
+    FillExtrusionPulledShader,
     FillExtrusionPatternShader,
     FillExtrusionPatternInstancedShader,
     /// Port-only: `FillExtrusionWallShader` of the pattern walls.

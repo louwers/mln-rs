@@ -1,6 +1,7 @@
 use mln_gfx::gpu::conformance::{
     clip_mask_and_background, custom_layers, depth_only, foreign_ids, imported_textures, instanced_walls,
-    invalid_calls, readbacks, resources_in_use, topologies, transparent_replace, vertex_layouts, wall_quads,
+    invalid_calls, pulled_walls, readbacks, resources_in_use, topologies, transparent_replace, vertex_layouts,
+    wall_quads,
 };
 use mln_gfx::gpu::{Gpu, TextureDesc, TextureFormat, TextureRegion, TextureUsage};
 use mln_util::size::Size;
@@ -99,6 +100,13 @@ fn wall_quads_through_gpu() {
     let device = Device::new(None).expect("WebGPU device");
     let mut gpu = WebGpu::new(&device);
     wall_quads(&mut gpu).expect("the frame");
+}
+
+#[test]
+fn pulled_walls_through_gpu() {
+    let device = Device::new(None).expect("WebGPU device");
+    let mut gpu = WebGpu::new(&device);
+    pulled_walls(&mut gpu).expect("the frame");
 }
 
 #[test]

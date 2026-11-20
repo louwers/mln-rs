@@ -779,6 +779,7 @@ mod tests {
                 clear_stencil_with_pass: false,
                 cpu_rasterizer: false,
                 max_line_width: 1.0,
+                binds_vertex_buffers: false,
             };
             &CAPS
         }

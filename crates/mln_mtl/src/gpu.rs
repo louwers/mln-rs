@@ -350,6 +350,9 @@ impl MetalGpu {
             clear_stencil_with_pass: false,
             cpu_rasterizer: false,
             max_line_width: 1.0,
+            // The pulled quads draw in segments of their index buffer, past
+            // the first at a base vertex, which older GPUs don't take.
+            binds_vertex_buffers: modern,
         };
         MetalGpu {
             device: device.clone(),
@@ -1377,7 +1380,13 @@ impl Gpu for MetalGpu {
             let texture = |id| self.textures.get(id).map(texture_info);
             let sampler = |id| self.samplers.contains_key(id);
             let lookup = Lookup { buffer: &buffer, texture: &texture, sampler: &sampler };
-            validation::check_bindings(desc, &table.reads, self.caps.buffer_offset_alignment, &lookup)?
+            validation::check_bindings(
+                desc,
+                &table.reads,
+                self.caps.buffer_offset_alignment,
+                self.caps.binds_vertex_buffers,
+                &lookup,
+            )?
         };
         let missing =
             |what: &str, id: u32| GpuError::Invalid(format!("{name} reads {what} {id}, which no entry binds"));

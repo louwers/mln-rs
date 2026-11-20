@@ -6,9 +6,10 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use geo_types::Geometry;
+use glam::{DMat4, DVec3};
 use mln_map_types::{
-    AnimationOptions, BoundOptions, CameraDelta, CameraError, CameraOptions, CameraUpdate, MapDebugOptions, MapMode,
-    MapView, ProjectionMode, TileLodMode, TransformState, VerticalPerspectiveProjection, Viewport,
+    AnimationOptions, BoundOptions, CameraDelta, CameraError, CameraLimits, CameraOptions, CameraUpdate,
+    MapDebugOptions, MapMode, ProjectionMode, TileLodMode, TransformState, VerticalPerspectiveProjection, Viewport,
 };
 use mln_renderer::{
     Registry, RendererEvent, RendererEvents, RenderingStats, UpdateParameters, UpdateReader, UpdateSlot,
@@ -24,12 +25,10 @@ use mln_util::event_queue::{EventQueue, Waker};
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
 use mln_util::geometry::for_each_point;
 use mln_util::logging::{Event, Log};
-use mln_util::mat4::Mat4;
 use mln_util::pool::Pool;
 use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::time::Instant;
-use mln_util::vectors::Vec3;
 
 use crate::feature_state::FeatureStateStore;
 use crate::map_event::{MapEvent, RenderFrameStatus};
@@ -215,11 +214,13 @@ impl Map {
     // MARK: - Renderer
 
     /// A reader of the updates that the map publishes for its renderer.
+    #[must_use]
     pub fn update_reader(&self) -> UpdateReader {
         self.updates.reader()
     }
 
     /// The queue that the map's renderer reports its events to.
+    #[must_use]
     pub fn renderer_events(&self) -> RendererEvents {
         self.renderer_events.clone()
     }
@@ -240,6 +241,7 @@ impl Map {
     }
 
     /// How many command groups are open.
+    #[must_use]
     pub fn command_group_depth(&self) -> u32 {
         self.updates.group_depth()
     }
@@ -577,7 +579,7 @@ impl Map {
         };
 
         self.transform.update_transitions(time_point);
-        let projection = self.projection_at(self.transform.get_zoom());
+        let projection = self.projection_at(self.transform.view().zoom());
         self.transform.set_projection_definition(&projection);
 
         let params = UpdateParameters {
@@ -586,7 +588,10 @@ impl Map {
             pixel_ratio: self.pixel_ratio,
             debug_options: self.debug_options,
             time_point,
-            transform_state: self.transform.get_state().clone(),
+            view: self.transform.state().view().clone(),
+            min_zoom: self.transform.state().min_zoom(),
+            max_zoom: self.transform.state().limits().max_zoom,
+            camera_moving: self.transform.is_camera_moving(),
             style: Arc::clone(&self.style),
             sprite_loaded: self.loader.sprites_loaded(),
             feature_states: self.feature_state.shared(),
@@ -616,7 +621,7 @@ impl Map {
         self.camera_mutated = true;
         // The style's projection decides how the camera is constrained, so it
         // has to be in place first.
-        let zoom = camera.zoom.unwrap_or_else(|| self.transform.get_zoom());
+        let zoom = camera.zoom.unwrap_or_else(|| self.transform.view().zoom());
         let projection = self.projection_at(zoom);
         self.transform.set_projection_definition(&projection);
         self.transform.jump_to(camera);
@@ -729,7 +734,8 @@ impl Map {
 
     /// The state of the feature `feature_id` of the source `source_id`, in
     /// its source layer `source_layer_id`, empty when it has none.
-    pub fn get_feature_state(
+    #[must_use]
+    pub fn feature_state(
         &self,
         source_id: &str,
         source_layer_id: Option<&str>,
@@ -771,6 +777,7 @@ impl Map {
     // MARK: - Style
 
     /// The map's style.
+    #[must_use]
     pub fn style(&self) -> &Arc<Style> {
         &self.style
     }
@@ -931,9 +938,10 @@ impl Map {
     }
 
     /// Sets the font faces that every font stack falls back to, for the
-    /// style documents that load after this call. They draw the text that
-    /// glyph PBFs can't shape, and the glyphs that come from local fonts
-    /// (`LocalGlyphs`) before the platform's fonts do.
+    /// style documents that load after this call. They shape the text that
+    /// glyph PBFs can't shape, or all the text of a style without glyph
+    /// PBFs, and draw the glyphs that come from local fonts (`LocalGlyphs`)
+    /// before the platform's fonts do.
     ///
     /// `json` is an array of font files, each an object with a `url` and an
     /// optional `unicode-range`, as in a font face of a style's `font-faces`.
@@ -948,7 +956,8 @@ impl Map {
 
     /// [`set_fallback_font_faces`](Self::set_fallback_font_faces) with faces
     /// an app has made, such as `FontFace::fallback(url, ranges).with_data(bytes)`
-    /// for a font file it holds in memory.
+    /// for a font file it holds in memory, or `FontFace::system`, for the
+    /// fonts of the renderer's `LocalGlyphs`.
     pub fn set_fallback_font_face_list(&mut self, faces: mln_text::glyph::FontFaces) {
         self.loader.set_fallback_font_faces(Some(Arc::new(faces)));
     }
@@ -1069,11 +1078,11 @@ impl Map {
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a camera whose
     /// corners have no `LatLng`.
     pub fn lat_lng_bounds_for_camera(&self, camera: &CameraOptions) -> Result<LatLngBounds, Error> {
-        let mut shallow = Transform::from_state(self.transform.get_state().clone());
-        let size = shallow.get_state().get_size();
+        let mut shallow = Transform::from_state(self.transform.state().clone());
+        let size = shallow.state().view().size();
 
         shallow.jump_to(camera);
-        if shallow.get_state().is_globe_rendering() {
+        if shallow.state().view().is_globe() {
             return globe_bounds(&shallow);
         }
         Ok(LatLngBounds::hull(
@@ -1130,13 +1139,13 @@ impl Map {
             return camera_for_lat_lngs(lat_lngs, &self.transform, padding);
         }
 
-        let mut transform = Transform::from_state(self.transform.get_state().clone());
+        let mut transform = Transform::from_state(self.transform.state().clone());
 
         transform.jump_to(&CameraOptions { bearing, pitch, ..Default::default() });
 
         Ok(CameraOptions {
-            bearing: Some(mln_math::rad2deg(-transform.get_bearing())),
-            pitch: Some(mln_math::rad2deg(transform.get_pitch())),
+            bearing: Some(mln_math::rad2deg(-transform.view().angle())),
+            pitch: Some(mln_math::rad2deg(transform.view().pitch())),
             ..camera_for_lat_lngs(lat_lngs, &transform, padding)?
         })
     }
@@ -1164,11 +1173,11 @@ impl Map {
     /// antimeridian. Fails as
     /// [`lat_lng_bounds_for_camera`](Self::lat_lng_bounds_for_camera) does.
     pub fn lat_lng_bounds_for_camera_unwrapped(&self, camera: &CameraOptions) -> Result<LatLngBounds, Error> {
-        let mut shallow = Transform::from_state(self.transform.get_state().clone());
-        let size = shallow.get_state().get_size();
+        let mut shallow = Transform::from_state(self.transform.state().clone());
+        let size = shallow.state().view().size();
 
         shallow.jump_to(camera);
-        if shallow.get_state().is_globe_rendering() {
+        if shallow.state().view().is_globe() {
             return globe_bounds(&shallow);
         }
         let width = f64::from(size.width);
@@ -1193,57 +1202,47 @@ impl Map {
     // MARK: - Bounds
 
     pub fn set_bounds(&mut self, options: &BoundOptions) -> Result<(), Error> {
+        let current = *self.transform.state().limits();
+        let limits = CameraLimits {
+            bounds: options.bounds.unwrap_or(current.bounds),
+            min_zoom: options.min_zoom.unwrap_or(current.min_zoom),
+            max_zoom: options.max_zoom.unwrap_or(current.max_zoom),
+            min_pitch: options.min_pitch.map_or(current.min_pitch, mln_math::deg2rad),
+            max_pitch: options.max_pitch.map_or(current.max_pitch, mln_math::deg2rad),
+        };
+        self.transform.set_limits(limits)?;
         if *options != BoundOptions::default() {
             self.changed();
         }
-        let mut change_camera = false;
+
+        // The camera moves inside the limits that changed.
+        let state = self.transform.state();
+        let view = state.view();
+        let limits = *state.limits();
         let mut camera_options = CameraOptions::default();
-
-        {
-            let transform = &mut self.transform;
-
-            if let Some(bounds) = options.bounds {
+        let mut change_camera = options.bounds.is_some();
+        if options.min_zoom.is_some() {
+            // On the globe the lowest zoom falls with latitude; on Mercator it
+            // is the minimum.
+            let latitude_term =
+                state.min_zoom_at_latitude(view.center(WrapMode::Unwrapped).latitude()) - state.min_zoom();
+            let min_zoom = limits.min_zoom + latitude_term;
+            if view.zoom() < min_zoom {
                 change_camera = true;
-                transform.set_lat_lng_bounds(bounds)?;
+                camera_options.zoom = Some(min_zoom);
             }
-
-            if let Some(min_zoom) = options.min_zoom {
-                transform.set_min_zoom(min_zoom);
-                // On the globe the lowest zoom falls with latitude; on
-                // Mercator it is the minimum.
-                let state = transform.get_state();
-                let latitude_term = state.get_min_zoom_at_latitude(state.get_lat_lng(WrapMode::Unwrapped).latitude())
-                    - state.get_min_zoom();
-                let min_zoom = min_zoom + latitude_term;
-                if transform.get_zoom() < min_zoom {
-                    change_camera = true;
-                    camera_options = CameraOptions { zoom: Some(min_zoom), ..camera_options };
-                }
-            }
-
-            if let Some(max_zoom) = options.max_zoom {
-                transform.set_max_zoom(max_zoom);
-                if transform.get_zoom() > max_zoom {
-                    change_camera = true;
-                    camera_options = CameraOptions { zoom: options.max_zoom, ..camera_options };
-                }
-            }
-
-            if let Some(max_pitch) = options.max_pitch {
-                transform.set_max_pitch(max_pitch);
-                if transform.get_pitch() > transform.get_state().get_max_pitch() {
-                    change_camera = true;
-                    camera_options = CameraOptions { pitch: options.max_pitch, ..camera_options };
-                }
-            }
-
-            if let Some(min_pitch) = options.min_pitch {
-                transform.set_min_pitch(min_pitch);
-                if transform.get_pitch() < transform.get_state().get_min_pitch() {
-                    change_camera = true;
-                    camera_options = CameraOptions { pitch: options.min_pitch, ..camera_options };
-                }
-            }
+        }
+        if options.max_zoom.is_some() && view.zoom() > limits.max_zoom {
+            change_camera = true;
+            camera_options.zoom = Some(limits.max_zoom);
+        }
+        if options.max_pitch.is_some() && view.pitch() > limits.max_pitch {
+            change_camera = true;
+            camera_options.pitch = Some(mln_math::rad2deg(limits.max_pitch));
+        }
+        if options.min_pitch.is_some() && view.pitch() < limits.min_pitch {
+            change_camera = true;
+            camera_options.pitch = Some(mln_math::rad2deg(limits.min_pitch));
         }
 
         if change_camera {
@@ -1257,12 +1256,12 @@ impl Map {
     /// Sets how the map orients and constrains its view, every setting at
     /// once.
     pub fn set_viewport(&mut self, viewport: &Viewport) {
-        let state = self.transform.get_state();
+        let state = self.transform.state();
         let (orientation, constrain_mode, viewport_mode, frustum_offset) = (
-            state.get_north_orientation(),
-            state.get_constrain_mode(),
-            state.get_viewport_mode(),
-            state.get_frustum_offset(),
+            state.view().north_orientation(),
+            state.constrain_mode(),
+            state.view().viewport_mode(),
+            state.view().frustum_offset(),
         );
         if viewport.north_orientation != orientation {
             self.transform.set_north_orientation(viewport.north_orientation);
@@ -1316,8 +1315,10 @@ impl Map {
 
     // MARK: - Transform
 
-    pub fn get_transform_state(&self) -> TransformState {
-        self.transform.get_state().clone()
+    /// The camera, the viewport and the limits the camera moves within.
+    #[must_use]
+    pub fn transform_state(&self) -> &TransformState {
+        self.transform.state()
     }
 
     // MARK: - Tile settings
@@ -1335,9 +1336,10 @@ impl Map {
     // gtests-core: projection and prefetch zoom delta (test/map, test/api).
     // MARK: - Projection
 
+    #[must_use]
     pub fn pixel_for_lat_lng(&self, lat_lng: &LatLng) -> ScreenCoordinate {
         let transform = &self.transform;
-        transform.lat_lng_to_screen_coordinate(&transform.get_state().lat_lng_near_center(lat_lng))
+        transform.lat_lng_to_screen_coordinate(&transform.state().view().lat_lng_near_center(lat_lng))
     }
 
     /// The location under `pixel`. Fails with
@@ -1400,12 +1402,14 @@ impl Map {
 
     /// Grows with each change to the map's state: each call that changes it,
     /// and each change that loading, rendering and animations make.
+    #[must_use]
     pub fn generation(&self) -> u64 {
         self.generation
     }
 
     /// Counts the updates that the map has published for its renderer.
     /// An update that a command group holds back counts when it shows.
+    #[must_use]
     pub fn update_generation(&self) -> u64 {
         self.updates.generation()
     }
@@ -1414,16 +1418,18 @@ impl Map {
     /// [`update_generation`](Self::update_generation), or while a command
     /// group holds an update back, the one that the outermost group's end
     /// shows.
+    #[must_use]
     pub fn pending_update_generation(&self) -> u64 {
         self.updates.pending_generation()
     }
 
     /// Copies the map's state.
+    #[must_use]
     pub fn snapshot(&self) -> MapSnapshot {
         let transform = &self.transform;
-        let state = transform.get_state();
-        let bounds = state.get_lat_lng_bounds();
-        let free_camera = state.get_free_camera_options();
+        let state = transform.state();
+        let bounds = state.limits().bounds;
+        let free_camera = state.view().free_camera_options();
         MapSnapshot {
             generation: self.generation,
             update_generation: self.updates.generation(),
@@ -1435,17 +1441,17 @@ impl Map {
             tile: self.tile,
             bounds: CameraBounds {
                 bounds: (bounds != LatLngBounds::infinite()).then_some(bounds),
-                min_zoom: state.get_min_zoom(),
-                max_zoom: state.get_max_zoom(),
-                min_pitch: mln_math::rad2deg(state.get_min_pitch()),
-                max_pitch: mln_math::rad2deg(state.get_max_pitch()),
+                min_zoom: state.min_zoom(),
+                max_zoom: state.limits().max_zoom,
+                min_pitch: mln_math::rad2deg(state.limits().min_pitch),
+                max_pitch: mln_math::rad2deg(state.limits().max_pitch),
             },
             free_camera: FreeCamera {
                 position: free_camera.position.unwrap_or_default(),
                 orientation: free_camera.orientation.unwrap_or_default(),
             },
-            view: MapView::from_state(state, f64::from(self.pixel_ratio)),
-            globe_rendering: state.is_globe_rendering(),
+            view: state.view().map_view(f64::from(self.pixel_ratio)),
+            globe_rendering: state.view().is_globe(),
             globe_free_bearing: transform.is_globe_free_bearing(),
         }
     }
@@ -1492,7 +1498,7 @@ pub(crate) fn camera_for_lat_lngs(
     if lat_lngs.is_empty() {
         return Ok(CameraOptions::default());
     }
-    if transform.get_state().is_globe_rendering() {
+    if transform.state().view().is_globe() {
         camera_for_lat_lngs_on_globe(lat_lngs, transform, padding)
     } else {
         camera_for_lat_lngs_on_screen(lat_lngs, transform, padding)
@@ -1505,7 +1511,7 @@ fn camera_for_lat_lngs_on_screen(
     transform: &Transform,
     padding: &EdgeInsets,
 ) -> Result<CameraOptions, Error> {
-    let size = transform.get_state().get_size();
+    let size = transform.state().view().size();
     // Calculate the bounds of the possibly rotated shape with respect to the viewport.
     let mut ne_pixel = ScreenCoordinate::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
     let mut sw_pixel = ScreenCoordinate::new(f64::INFINITY, f64::INFINITY);
@@ -1530,12 +1536,12 @@ fn camera_for_lat_lngs_on_screen(
         min_scale = mln_math::fmin(scale_x, scale_y);
     }
 
-    let mut zoom = transform.get_zoom();
+    let mut zoom = transform.view().zoom();
     if min_scale > 0.0 {
         zoom = mln_math::clamp_f64(
             zoom + min_scale.log2(),
-            transform.get_state().get_min_zoom(),
-            transform.get_state().get_max_zoom(),
+            transform.state().min_zoom(),
+            transform.state().limits().max_zoom,
         );
     } else {
         Log::error(
@@ -1562,23 +1568,20 @@ fn camera_for_lat_lngs_on_screen(
 /// degenerates. Zooming out also moves the camera along `to_center`, so the
 /// point solved for is `vector * t + to_center * (1 - t)`.
 fn globe_scale_for_clip_target(
-    vector: &Vec3,
-    to_center: &Vec3,
-    projection: &Mat4,
+    vector: DVec3,
+    to_center: DVec3,
+    projection: &DMat4,
     x_axis: bool,
     target: f64,
 ) -> Option<f64> {
-    let column: [f64; 4] = if x_axis {
-        [projection[0], projection[4], projection[8], projection[12]]
-    } else {
-        [projection[1], projection[5], projection[9], projection[13]]
-    };
-    let column_z: [f64; 4] = [projection[3], projection[7], projection[11], projection[15]];
+    // The rows of the clip axis and of w.
+    let column = projection.row(usize::from(!x_axis));
+    let column_z = projection.row(3);
 
-    let vector_dot = vector[0] * column[0] + vector[1] * column[1] + vector[2] * column[2];
-    let vector_dot_z = vector[0] * column_z[0] + vector[1] * column_z[1] + vector[2] * column_z[2];
-    let to_center_dot = to_center[0] * column[0] + to_center[1] * column[1] + to_center[2] * column[2];
-    let to_center_dot_z = to_center[0] * column_z[0] + to_center[1] * column_z[1] + to_center[2] * column_z[2];
+    let vector_dot = vector.dot(column.truncate());
+    let vector_dot_z = vector.dot(column_z.truncate());
+    let to_center_dot = to_center.dot(column.truncate());
+    let to_center_dot_z = to_center.dot(column_z.truncate());
 
     if to_center_dot + target * vector_dot_z == vector_dot + target * to_center_dot_z
         || column_z[3] * (vector_dot - to_center_dot)
@@ -1612,7 +1615,7 @@ fn camera_for_lat_lngs_on_globe(
     transform: &Transform,
     padding: &EdgeInsets,
 ) -> Result<CameraOptions, Error> {
-    let mut flat = Transform::from_state(transform.get_state().clone());
+    let mut flat = Transform::from_state(transform.state().clone());
     flat.set_projection_definition(&ProjectionDefinition::new(ProjectionType::Mercator));
     flat.jump_to(&CameraOptions { pitch: Some(0.0), roll: Some(0.0), ..Default::default() });
     let fit = camera_for_lat_lngs_on_screen(lat_lngs, &flat, padding)?;
@@ -1621,7 +1624,7 @@ fn camera_for_lat_lngs_on_globe(
     };
 
     // Solve with the padding the returned camera is shown with.
-    let mut globe = Transform::from_state(transform.get_state().clone());
+    let mut globe = Transform::from_state(transform.state().clone());
     globe.jump_to(&CameraOptions {
         center: Some(fit_center),
         zoom: Some(fit_zoom),
@@ -1630,9 +1633,9 @@ fn camera_for_lat_lngs_on_globe(
         roll: Some(0.0),
         ..Default::default()
     });
-    let state = globe.get_state();
-    let matrix = state.get_globe_view_projection_matrix();
-    let size = state.get_size();
+    let state = globe.state();
+    let matrix = state.view().globe_view_projection_matrix();
+    let size = state.view().size();
     let width = f64::from(size.width);
     let height = f64::from(size.height);
     let left = padding.left() / width * 2.0 - 1.0;
@@ -1666,19 +1669,16 @@ fn camera_for_lat_lngs_on_globe(
     for sample in &samples {
         let vector = VerticalPerspectiveProjection::surface_vector(sample);
         if left < 0.0 {
-            keep_smallest_scale(&mut smallest, globe_scale_for_clip_target(&vector, &to_center, &matrix, true, left));
+            keep_smallest_scale(&mut smallest, globe_scale_for_clip_target(vector, to_center, &matrix, true, left));
         }
         if right > 0.0 {
-            keep_smallest_scale(&mut smallest, globe_scale_for_clip_target(&vector, &to_center, &matrix, true, right));
+            keep_smallest_scale(&mut smallest, globe_scale_for_clip_target(vector, to_center, &matrix, true, right));
         }
         if top > 0.0 {
-            keep_smallest_scale(&mut smallest, globe_scale_for_clip_target(&vector, &to_center, &matrix, false, top));
+            keep_smallest_scale(&mut smallest, globe_scale_for_clip_target(vector, to_center, &matrix, false, top));
         }
         if bottom < 0.0 {
-            keep_smallest_scale(
-                &mut smallest,
-                globe_scale_for_clip_target(&vector, &to_center, &matrix, false, bottom),
-            );
+            keep_smallest_scale(&mut smallest, globe_scale_for_clip_target(vector, to_center, &matrix, false, bottom));
         }
     }
     if !smallest.is_finite() || smallest == 0.0 {
@@ -1686,7 +1686,7 @@ fn camera_for_lat_lngs_on_globe(
         return Ok(fit);
     }
     Ok(CameraOptions {
-        zoom: Some(f64::min(globe.get_zoom() + state.scale_zoom(smallest), state.get_max_zoom())),
+        zoom: Some(f64::min(globe.view().zoom() + mln_map_types::scale_zoom(smallest), state.limits().max_zoom)),
         ..fit
     })
 }
@@ -1696,9 +1696,9 @@ fn camera_for_lat_lngs_on_globe(
 /// every longitude when a pole is on screen.
 /// Fails as `Map::lat_lng_bounds_for_camera` does.
 fn globe_bounds(transform: &Transform) -> Result<LatLngBounds, Error> {
-    let width = f64::from(transform.get_state().get_size().width);
-    let height = f64::from(transform.get_state().get_size().height);
-    let center = transform.get_lat_lng(WrapMode::Wrapped);
+    let width = f64::from(transform.state().view().size().width);
+    let height = f64::from(transform.state().view().size().height);
+    let center = transform.view().center(WrapMode::Wrapped);
     let mut west = 0.0;
     let mut east = 0.0;
     let mut south = 0.0;
@@ -1731,12 +1731,12 @@ fn globe_bounds(transform: &Transform) -> Result<LatLngBounds, Error> {
     let on_screen = |pole: &LatLng| {
         // In front of the camera and inside its depth range, as GL JS's
         // isSurfacePointOnScreen asks.
-        let (_, clip) = VerticalPerspectiveProjection::lat_lng_to_screen_coordinate(transform.get_state(), pole);
+        let (_, clip) = VerticalPerspectiveProjection::lat_lng_to_screen_coordinate(transform.state().view(), pole);
         if clip[3] <= 0.0 || (clip[2] / clip[3]).abs() >= 1.0 {
             return false;
         }
         let point = transform.lat_lng_to_screen_coordinate(pole);
-        !transform.get_state().is_location_occluded(pole)
+        !transform.state().view().is_location_occluded(pole)
             && point.x > 0.0
             && point.x < width
             && point.y > 0.0

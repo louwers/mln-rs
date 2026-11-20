@@ -3,15 +3,15 @@ use std::num::NonZeroU16;
 use std::sync::Arc;
 
 use mln_style_types::image::RectU16;
-use mln_util::font_stack::{FontStack, font_stack_to_string};
+use mln_util::font_stack::FontStack;
 use mln_util::image::AlphaImage;
 use mln_vec_map::VecMap;
 use parking_lot::Mutex;
 
 use crate::tagged_string::FontStackHash;
 
-/// Where a glyph comes from: glyph PBFs, or a HarfBuzz-shaped font face with a
-/// type generated at runtime (`gen_new_glyph_id_type`).
+/// Where a glyph comes from: glyph PBFs, or a font file that shapes text,
+/// with a type numbered at runtime ([`face_type`]).
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default, mln_wire::Wire)]
 pub enum GlyphIDType {
     #[default]
@@ -20,13 +20,20 @@ pub enum GlyphIDType {
 }
 
 impl GlyphIDType {
+    /// Text that the device's fonts shape ([`FontFace::system`]): the glyph
+    /// store picks a font for each of its characters, and its glyphs have
+    /// those fonts' types. No glyph has this type, and no face its number.
+    /// A constant rather than a variant, so that a type stays a `u16`.
+    pub const SYSTEM: GlyphIDType = GlyphIDType::Face(NonZeroU16::MAX);
+
     /// The type of the font face numbered `id`.
     #[must_use]
     pub const fn face(id: NonZeroU16) -> Self {
         GlyphIDType::Face(id)
     }
 
-    /// The type's number as stored in a glyph ID's upper half: 0 for `FontPBF`.
+    /// The type's number as stored in a glyph ID's upper half: 0 for
+    /// `FontPBF`.
     #[must_use]
     pub const fn id(self) -> u16 {
         match self {
@@ -356,17 +363,18 @@ impl PartialEq for FontData {
     }
 }
 
-/// A font face that the style defines. A face without a name is a fallback,
-/// which every font stack uses after the faces that name one of its fonts.
+/// A font file that draws a font's characters in `ranges`, from a style's
+/// `font-faces` or an app's fallback faces. A face without a name is a
+/// fallback, which every font stack uses after the faces that name one of
+/// its fonts: in a style with glyph PBFs, for the text they can't shape.
 #[derive(Clone, Debug, Default, PartialEq, mln_wire::Wire)]
 pub struct FontFace {
-    /// an unique glyph id
+    /// The type of the face's glyphs.
     pub type_: GlyphIDType,
-    /// font face name
+    /// The `text-font` name it draws, or "" for a fallback.
     pub name: String,
-    /// font file url
     pub url: String,
-    /// unicode ranges
+    /// The code points it draws, first and last.
     pub ranges: Vec<FontFaceRange>,
     /// The font file itself, which the map then uses instead of fetching
     /// `url`. Left out of the faces that workers get, which don't read
@@ -386,8 +394,19 @@ impl FontFace {
     #[must_use]
     pub fn fallback(url: &str, ranges: Vec<FontFaceRange>) -> Self {
         let mut face = FontFace::new("", url, ranges);
-        face.type_ = gen_new_glyph_id_type(&face.url, &FontStack::new(), &face.ranges);
+        face.type_ = face_type(&face.url, "", &face.ranges);
         face
+    }
+
+    /// The device's fonts, as a fallback face: in a style with glyph PBFs,
+    /// for the text in `ranges` (the scripts the PBFs can't shape that the
+    /// device has fonts for); in a style without, for all the text the
+    /// style's own faces don't draw. For each character, the glyph store
+    /// takes the first font the label's `text-font` names that the device has
+    /// and that has it, else the font the device picks for it.
+    #[must_use]
+    pub fn system(ranges: Vec<FontFaceRange>) -> Self {
+        FontFace { type_: GlyphIDType::SYSTEM, ..FontFace::new("", "", ranges) }
     }
 
     /// The face with its font file in memory, so that `url` only names it.
@@ -406,12 +425,12 @@ impl FontFace {
 pub type FontFaces = Vec<FontFace>;
 
 /// The texts that each font face of each font stack shapes.
-pub type HBShapeRequests = VecMap<FontStack, VecMap<GlyphIDType, BTreeSet<Vec<char>>>>;
+pub type ShapeRequests = VecMap<FontStack, VecMap<GlyphIDType, BTreeSet<Vec<char>>>>;
 
 #[derive(Clone, Debug, Default, PartialEq, mln_wire::Wire)]
 pub struct GlyphDependencies {
     pub glyphs: VecMap<FontStack, GlyphIDs>,
-    pub shapes: HBShapeRequests,
+    pub shapes: ShapeRequests,
 }
 
 /// Where a glyph is in an atlas, and its metrics. A glyph without a bitmap
@@ -426,46 +445,32 @@ pub struct GlyphPosition {
 /// whose range failed to load.
 pub type GlyphPositions = VecMap<FontStackHash, BTreeMap<GlyphID, Option<GlyphPosition>>>;
 
-/// Advances the process-wide glyph type counter, skipping zero when it wraps.
-fn gen_new_glyph_id_type_counter(counter: &mut u16) -> NonZeroU16 {
-    let id = NonZeroU16::new(counter.wrapping_add(1)).unwrap_or(NonZeroU16::MIN);
-    *counter = id.get();
-    id
+/// The font file, font and ranges a glyph type was handed out for.
+type FaceKey = (String, String, Vec<FontFaceRange>);
+
+/// The glyph types handed out, a few for each style: by what they were for,
+/// and the last one.
+struct FaceTypes {
+    last: u16,
+    types: Vec<(FaceKey, NonZeroU16)>,
 }
 
-struct GlyphTypes {
-    counter: u16,
-    types: VecMap<String, VecMap<String, VecMap<usize, NonZeroU16>>>,
-}
+static FACE_TYPES: Mutex<FaceTypes> = Mutex::new(FaceTypes { last: 0, types: Vec::new() });
 
-static GLYPH_TYPES: Mutex<GlyphTypes> = Mutex::new(GlyphTypes { counter: 0, types: VecMap::new() });
-
-/// Boost's `hash_combine`, with libstdc++'s identity `std::hash<uint32_t>`.
-fn hash_combine(seed: &mut usize, v: u32) {
-    *seed ^= (v as usize).wrapping_add(0x9e37_79b9).wrapping_add(*seed << 6).wrapping_add(*seed >> 2);
-}
-
-/// A glyph type for (`url`, `font_stack`, `pairs` of unicode ranges), stable
-/// for the process.
-pub fn gen_new_glyph_id_type(url: &str, font_stack: &FontStack, pairs: &[(u32, u32)]) -> GlyphIDType {
-    let mut hash = 0usize;
-    for pair in pairs {
-        hash_combine(&mut hash, pair.0);
-        hash_combine(&mut hash, pair.1);
+/// The glyph type of the face of the font file at `url` that draws `font`'s
+/// `ranges`: the same for the same three for the life of the process, and
+/// a new one otherwise, which after `u16::MAX - 1` types repeats the first.
+pub fn face_type(url: &str, font: &str, ranges: &[FontFaceRange]) -> GlyphIDType {
+    let mut types = FACE_TYPES.lock();
+    let found = types.types.iter().find(|((u, f, r), _)| u == url && f == font && r == ranges);
+    if let Some(&(_, id)) = found {
+        return GlyphIDType::Face(id);
     }
-    let family = font_stack_to_string(font_stack);
-
-    let mut state = GLYPH_TYPES.lock();
-    let state = &mut *state;
-    let entry = state
-        .types
-        .entry(url.to_string())
-        .or_default()
-        .entry(family)
-        .or_default()
-        .entry(hash)
-        .or_insert_with(|| gen_new_glyph_id_type_counter(&mut state.counter));
-    GlyphIDType::Face(*entry)
+    // Neither 0 (`FontPBF`) nor `u16::MAX` (`SYSTEM`).
+    types.last = if types.last >= u16::MAX - 1 { 1 } else { types.last + 1 };
+    let id = NonZeroU16::new(types.last).unwrap_or(NonZeroU16::MIN);
+    types.types.push(((url.to_owned(), font.to_owned(), ranges.to_vec()), id));
+    GlyphIDType::Face(id)
 }
 
 #[cfg(test)]
@@ -491,12 +496,19 @@ mod tests {
         assert_eq!((r.first, r.second), (65280, 65535));
     }
 
+    // Layouts compare and hash glyph IDs by the million.
     #[test]
-    fn new_glyph_id_types_are_stable_per_key() {
-        let fs = vec!["Noto Sans Regular".to_string()];
-        let a = gen_new_glyph_id_type("local://a.ttf", &fs, &[(0x1780, 0x17FF)]);
-        let b = gen_new_glyph_id_type("local://a.ttf", &fs, &[(0x1780, 0x17FF)]);
-        let c = gen_new_glyph_id_type("local://b.ttf", &fs, &[(0x1780, 0x17FF)]);
+    fn a_glyph_id_is_two_u16s() {
+        assert_eq!(size_of::<GlyphIDType>(), 2);
+        assert_eq!(size_of::<GlyphID>(), 4);
+    }
+
+    #[test]
+    fn face_types_are_stable_per_key() {
+        let fs = "Noto Sans Regular";
+        let a = face_type("local://a.ttf", fs, &[(0x1780, 0x17FF)]);
+        let b = face_type("local://a.ttf", fs, &[(0x1780, 0x17FF)]);
+        let c = face_type("local://b.ttf", fs, &[(0x1780, 0x17FF)]);
         assert_eq!(a, b);
         assert_ne!(a, c);
         assert_ne!(a, GlyphIDType::FontPBF);

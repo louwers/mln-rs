@@ -333,6 +333,7 @@ pub(crate) fn style(
         layers: layers.to_vec(),
         global_state: None,
         font_faces: None,
+        glyph_pbfs: true,
     })
 }
 

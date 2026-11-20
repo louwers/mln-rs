@@ -57,7 +57,13 @@ export type Input =
       modifiers: number;
       time: number;
     }
-  | { kind: "key"; key: string; modifiers: number; time: number }
+  | {
+      kind: "key";
+      key: string;
+      modifiers: number;
+      repeat: boolean;
+      time: number;
+    }
   // A modifier key went down or up: the modifiers held now.
   | { kind: "modifiers"; modifiers: number; time: number }
   | { kind: "blur"; time: number };

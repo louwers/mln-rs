@@ -644,7 +644,7 @@ impl View {
         }
         match message {
             Message::Input { input, at } => self.gesture(input, at),
-            Message::Key { code, pressed, modifiers, at } => self.on_key(code, pressed, modifiers, at),
+            Message::Key { code, pressed, repeat, modifiers, at } => self.on_key(code, pressed, repeat, modifiers, at),
             Message::Ui(input) => match &mut self.ui_input {
                 Some(pending) => pending.append(input),
                 None => self.ui_input = Some(input),
@@ -726,7 +726,8 @@ impl View {
     /// The keys the map takes, which the controls didn't, each repeating
     /// while held: the arrows pan 100 px (Shift: turn 15° and tilt 10°),
     /// `+` and `-` zoom a level (Shift: two), and Escape drops a drag.
-    fn on_key(&mut self, code: KeyCode, pressed: bool, modifiers: ModifiersState, at: Instant) {
+    /// Repeats move half as far as the initial press.
+    fn on_key(&mut self, code: KeyCode, pressed: bool, repeat: bool, modifiers: ModifiersState, at: Instant) {
         if !pressed {
             return;
         }
@@ -746,13 +747,14 @@ impl View {
             (KeyCode::ArrowDown, false) => ((0.0, -100.0), 0.0, 0.0, 0.0),
             _ => return,
         };
+        let factor = if repeat { 0.5 } else { 1.0 };
         let input = Input::Delta {
             position: self.center(),
             discrete: true,
-            pan: ScreenCoordinate::new(pan.0, pan.1),
-            zoom,
-            bearing,
-            pitch,
+            pan: ScreenCoordinate::new(pan.0 * factor, pan.1 * factor),
+            zoom: zoom * factor,
+            bearing: bearing * factor,
+            pitch: pitch * factor,
         };
         self.gesture(input, at);
     }
@@ -1165,7 +1167,13 @@ impl View {
             time += Duration::from_millis(16);
         }
         for code in keys {
-            self.handle(Message::Key { code, pressed: true, modifiers: ModifiersState::default(), at: time });
+            self.handle(Message::Key {
+                code,
+                pressed: true,
+                repeat: false,
+                modifiers: ModifiersState::default(),
+                at: time,
+            });
         }
         for action in actions {
             self.apply(action, time);

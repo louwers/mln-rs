@@ -67,7 +67,7 @@ fn a_command_group_holds_its_updates_until_the_outermost_group_ends() {
     assert_eq!(wakes.load(Ordering::SeqCst), 1);
     let update = reader.latest().expect("an update");
     assert_eq!(update.generation, before + 1);
-    assert_near(update.parameters.transform_state.get_zoom(), 3.0);
+    assert_near(update.parameters.view.zoom(), 3.0);
     assert_eq!(update.parameters.prefetch_zoom_delta, 1);
 
     let error = map.end_command_group().expect_err("no group is open");
@@ -139,7 +139,7 @@ fn feature_state_changes_publish_updates_that_carry_the_state() {
     assert!(map.set_feature_state("points", None, "1", hover(true)));
     assert_eq!(map.update_generation(), before + 1);
     assert_eq!(carried_hover(&reader), Some(Value::Bool(true)));
-    assert_eq!(map.get_feature_state("points", Some(""), "1"), hover(true));
+    assert_eq!(map.feature_state("points", Some(""), "1"), hover(true));
 
     // What changes nothing publishes nothing.
     assert!(!map.set_feature_state("points", None, "1", hover(true)));
@@ -177,8 +177,8 @@ fn a_style_load_clears_the_feature_state_that_it_publishes() {
         r#"{"version":8,"sources":{"points":{"type":"geojson","data":{"type":"FeatureCollection","features":[]}}},"layers":[]}"#,
     );
     map.process_events();
-    assert!(map.get_feature_state("points", None, "1").is_empty());
-    assert!(map.get_feature_state("other", None, "1").is_empty());
+    assert!(map.feature_state("points", None, "1").is_empty());
+    assert!(map.feature_state("other", None, "1").is_empty());
     let update = reader.latest().expect("an update");
     assert!(update.parameters.feature_states.is_empty());
     assert_eq!(1, update.parameters.style.get_sources().len());
@@ -263,7 +263,7 @@ fn an_update_reaches_a_reader_on_another_thread() {
     })));
     let thread = std::thread::spawn(move || {
         receiver.recv().expect("a wake");
-        reader.latest().map(|update| update.parameters.transform_state.get_zoom())
+        reader.latest().map(|update| update.parameters.view.zoom())
     });
     map.jump_to(&CameraOptions { zoom: Some(4.0), ..Default::default() });
     let zoom = thread.join().expect("the reader thread").expect("an update");

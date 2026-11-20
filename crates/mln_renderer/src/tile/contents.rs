@@ -8,6 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
+use glam::DMat4;
 use mln_style::expression::GlobalStateMap;
 use mln_style::layer_type::ErasedLayerStyle;
 use mln_style_types::image::{ImagePositions, ImageType};
@@ -19,7 +20,6 @@ use mln_util::feature::Feature;
 use mln_util::hash::HashMap;
 use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, Log};
-use mln_util::mat4::Mat4;
 use mln_util::pool::TaskGroup;
 use mln_vec_map::{VecMap, VecSet};
 
@@ -37,7 +37,7 @@ use crate::query::{RenderedQueryOptions, SourceQueryOptions};
 use crate::render_layer::ErasedLayerBucket;
 use crate::render_orchestrator::drop_on_workers;
 use crate::source_state::SourceFeatureState;
-use crate::text::glyph_store::HBShapeResults;
+use crate::text::glyph_store::ShapeResults;
 use crate::tile_mask::TileMask;
 use crate::tile_render_data::TileAtlasTextures;
 
@@ -294,7 +294,7 @@ impl Answer {
         let resolved = &*self.resolved;
         let atlases = self.atlases.as_ref()?;
 
-        let mut shaping = HBShapeResults::new();
+        let mut shaping = ShapeResults::new();
         for (font_stack, types) in &deps.glyphs.shapes {
             let Some(shaped) = resolved.shaping.get(font_stack) else {
                 continue;
@@ -318,12 +318,8 @@ impl Answer {
         }
         for (font_stack, types) in &shaping {
             let ids = wanted.entry(font_stack_hash(font_stack)).or_default();
-            for (type_, texts) in types {
-                ids.extend(
-                    texts
-                        .values()
-                        .flat_map(|shaped| shaped.glyphs.iter().map(|code| GlyphID { code: *code, type_: *type_ })),
-                );
+            for texts in types.values() {
+                ids.extend(texts.values().flat_map(|shaped| shaped.glyphs.iter().copied()));
             }
         }
         let mut glyphs = GlyphPositions::new();
@@ -347,7 +343,7 @@ impl Answer {
             resolved.missing_images.iter().filter(|id| deps.images.contains_key(*id)).cloned().collect();
 
         let glyph_count = |positions: &GlyphPositions| positions.values().map(BTreeMap::len).sum::<usize>();
-        let shaping_count = |shaping: &HBShapeResults| {
+        let shaping_count = |shaping: &ShapeResults| {
             shaping.values().flat_map(|types| types.values()).map(BTreeMap::len).sum::<usize>()
         };
         if glyph_count(&glyphs) == glyph_count(&resolved.glyphs)
@@ -472,11 +468,11 @@ impl GeometryContents {
         id: &OverscaledTileID,
         result: &mut QueryResults,
         query_geometry: &mln_tile_id::geometry_tile_data::GeometryCoordinates,
-        transform_state: &mln_map_types::TransformState,
+        view: &mln_map_types::View,
         layers: &QueryLayers<'_>,
         options: &RenderedQueryOptions,
         global_state: Option<&GlobalStateMap>,
-        proj_matrix: &Mat4,
+        proj_matrix: &DMat4,
         feature_state: &SourceFeatureState,
     ) -> Result<(), Error> {
         if self.result.feature_index.data().is_none() {
@@ -484,22 +480,22 @@ impl GeometryContents {
         }
         let query_padding = self.query_padding(layers);
         let projector = mln_map_types::TileProjector::with_data(
-            transform_state,
+            view,
             &id.to_unwrapped(),
-            transform_state.get_projection_data_with(&id.to_unwrapped(), proj_matrix),
+            view.projection_data_with(&id.to_unwrapped(), proj_matrix),
         );
         self.result.feature_index.query(
             result,
             query_geometry,
-            transform_state,
+            view,
             &projector,
             mln_util::constants::TILE_SIZE_D * f64::from(id.overscale_factor()),
-            2f64.powf(transform_state.get_zoom() - f64::from(id.overscaled_z)),
+            2f64.powf(view.zoom() - f64::from(id.overscaled_z)),
             options,
             global_state,
             id,
             layers,
-            query_padding * transform_state.max_pitch_scale_factor(),
+            query_padding * view.max_pitch_scale_factor() as f32,
             feature_state,
         )
     }

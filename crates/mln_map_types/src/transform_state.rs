@@ -1,52 +1,21 @@
-// The matrices are computed when a getter first needs them and cached in a
-// `OnceLock`, which each change that moves them clears, so a state shared
-// between threads reads them without locks. The camera follows from the
-// other fields, so it is computed where it's needed rather than cached.
-//
-// `updateMatricesIfNeeded` throws `std::runtime_error` when a matrix can't be
-// inverted; nothing catches it on the paths that run, so the port panics
-// with the same message.
-
 use std::f64::consts::PI;
-use std::sync::OnceLock;
 
 use geometry::Point;
+use glam::{DQuat, DVec3};
 use mln_style_types::ProjectionDefinition;
-use mln_tile_id::UnwrappedTileID;
 use mln_util::constants;
-use mln_util::constants::{DEFAULT_FOV, DEFAULT_MAX_ZOOM, DEFAULT_PITCH_MAX, M2PI, PITCH_MAX, TILE_SIZE_D};
+use mln_util::constants::{M2PI, TILE_SIZE_D};
 use mln_util::error::Error;
-pub use mln_util::geo::NorthOrientation;
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
-use mln_util::interpolate::interpolate;
-use mln_util::logging::{Event, Log};
-use mln_util::mat4::{Mat4, matrix};
 use mln_util::projection::Projection;
-use mln_util::quaternion::Quaternion;
 use mln_util::size::Size;
-use mln_util::vectors::{Vec3, Vec4};
 
 use crate::camera::{CameraOptions, FreeCameraOptions};
-use crate::map_view::Camera as MapCamera;
+use crate::camera_limits::CameraLimits;
+use crate::camera_pose::CameraPose;
 use crate::mode::{ConstrainMode, ViewportMode};
-use crate::projection::{ProjectionData, mercator_tile_matrix};
-use crate::tile_coordinate::TileCoordinate;
-use crate::util_camera::Camera;
 use crate::vertical_perspective_projection::VerticalPerspectiveProjection;
-
-/// The maximum angle to use for the Mercator horizon. This must be less than
-/// 90 to prevent errors in `MercatorTransform::_calcMatrices()`. It shouldn't
-/// be too close to 90, or the distance to the horizon will become very large,
-/// unnecessarily increasing the number of tiles needed to render the map.
-fn max_mercator_horizon_angle() -> f64 {
-    mln_math::deg2rad(89.25)
-}
-
-/// A `LatLng` from coordinates the transform state keeps valid, saturating
-/// any that aren't (see [`LatLng::saturating`]).
-fn lat_lng(lat: f64, lon: f64, mode: WrapMode) -> LatLng {
-    LatLng::saturating(lat, lon, mode)
-}
+use crate::view::{NorthOrientation, View, ViewParams, map_offset, max_mercator_horizon_angle, scale_zoom, zoom_scale};
 
 fn lat_lng_from_mercator(mercator_coordinate: Point<f64>, wrap_mode: WrapMode) -> Result<LatLng, Error> {
     LatLng::with_mode(
@@ -56,106 +25,14 @@ fn lat_lng_from_mercator(mercator_coordinate: Point<f64>, wrap_mode: WrapMode) -
     )
 }
 
-const K_EPSILON: f64 = 1e-9;
-
-/// To avoid flickering issue due to "zoom = 13.9999999..".
-fn round_for_accuracy(x: f64) -> f64 {
-    let round_x = x.round();
-    let diff = (round_x - x).abs();
-    if diff < K_EPSILON && diff > 0.0 { round_x } else { x }
-}
-
-/// The fractional part of `x`, with the sign of `x`, as `std::modf` returns
-/// it.
-fn modf_fraction(x: f64) -> f64 {
-    if x.is_infinite() {
-        return 0.0f64.copysign(x);
-    }
-    (x - x.trunc()).copysign(x)
-}
-
-/// The camera and view a map is drawn with.
+/// A map's camera with the limits that constrain it: the [`View`] it shows
+/// now, and the bounds, zoom, pitch and field of view it may move within.
 ///
-/// Setters ignore numbers that aren't finite, and a camera whose projection
-/// can't be inverted shows nothing, as an empty size does.
+/// Setters ignore numbers that aren't finite.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TransformState {
-    bounds: LatLngBounds,
-
-    // Limit the amount of zooming possible on the map.
-    min_scale: f64,
-    max_scale: f64,
-
-    // Limit the amount of pitch
-    min_pitch: f64,
-    max_pitch: f64,
-    min_fov: f64,
-    max_fov: f64,
-
-    orientation: NorthOrientation,
-
-    // logical dimensions
-    size: Size,
-    frustum_offset: EdgeInsets,
-
-    /// The style's projection that the state draws, as it was last set.
-    projection_definition: ProjectionDefinition,
-    projection_transition: f64,
-
-    constrain_mode: ConstrainMode,
-    viewport_mode: ViewportMode,
-
-    // animation state
-    rotating: bool,
-    scaling: bool,
-    panning: bool,
-    gesture_in_progress: bool,
-
-    // map position
-    x: f64,
-    y: f64,
-    z: f64,
-    bearing: f64,
-    scale: f64,
-    fov: f64,
-    pitch: f64,
-    roll: f64,
-    x_skew: f64,
-    y_skew: f64,
-    axonometric: bool,
-
-    edge_insets: EdgeInsets,
-
-    // cache values for spherical mercator math
-    bc: f64,
-    cc: f64,
-
-    matrices: MatrixCache,
-}
-
-/// The matrices a state computes from its other fields when a getter first
-/// needs them. Two states compare equal whatever their caches hold.
-#[derive(Clone, Debug, Default)]
-struct MatrixCache(OnceLock<Matrices>);
-
-impl PartialEq for MatrixCache {
-    fn eq(&self, _: &Self) -> bool {
-        true
-    }
-}
-
-/// The matrices of a state, zero while its size is empty. The globe's are
-/// zero unless it renders the globe.
-#[derive(Clone, Copy, Debug, Default)]
-struct Matrices {
-    projection: Mat4,
-    inv_projection: Mat4,
-    coord: Mat4,
-    inverted: Mat4,
-    globe_view_projection: Mat4,
-    inv_globe_view_projection: Mat4,
-    globe_clipping_plane: Vec4,
-    globe_camera_position: Vec3,
+    view: View,
+    limits: CameraLimits,
 }
 
 impl Default for TransformState {
@@ -167,1105 +44,398 @@ impl Default for TransformState {
 impl TransformState {
     #[must_use]
     pub fn new(constrain_mode: ConstrainMode, viewport_mode: ViewportMode) -> Self {
-        let scale = 1.0;
         TransformState {
-            bounds: LatLngBounds::default(),
-            min_scale: 2.0f64.powf(0.0),
-            max_scale: 2.0f64.powf(f64::from(DEFAULT_MAX_ZOOM)),
-            min_pitch: constants::PITCH_MIN,
-            max_pitch: DEFAULT_PITCH_MAX,
-            min_fov: mln_math::deg2rad(0.1),
-            max_fov: mln_math::deg2rad(150.0),
-            orientation: NorthOrientation::Upwards,
-            size: Size::default(),
-            frustum_offset: EdgeInsets::default(),
-            projection_definition: ProjectionDefinition::default(),
-            projection_transition: 0.0,
-            constrain_mode,
-            viewport_mode,
-            rotating: false,
-            scaling: false,
-            panning: false,
-            gesture_in_progress: false,
-            x: 0.0,
-            y: 0.0,
-            z: 0.0,
-            bearing: 0.0,
-            scale,
-            fov: DEFAULT_FOV,
-            pitch: 0.0,
-            roll: 0.0,
-            x_skew: 0.0,
-            y_skew: 1.0,
-            axonometric: false,
-            edge_insets: EdgeInsets::default(),
-            bc: Projection::world_size(scale) / constants::DEGREES_MAX,
-            cc: Projection::world_size(scale) / M2PI,
-            matrices: MatrixCache::default(),
+            view: View::new(ViewParams::new(constrain_mode, viewport_mode)),
+            limits: CameraLimits::default(),
+        }
+    }
+
+    /// A state that shows `params` within `limits`, as they are.
+    pub(crate) fn from_parts(params: ViewParams, limits: CameraLimits) -> Self {
+        let mut state = TransformState { view: View::new(params), limits };
+        state.update(|_| ());
+        state
+    }
+
+    /// The view the camera shows now.
+    #[must_use]
+    pub fn view(&self) -> &View {
+        &self.view
+    }
+
+    /// Changes the view's parameters with `change`, and remakes the view if
+    /// they changed.
+    fn update(&mut self, change: impl FnOnce(&mut ViewParams)) {
+        let mut params = *self.view.params();
+        change(&mut params);
+        params.center_wrap = if params.projection_transition > 0.0 && self.limits.bounds == LatLngBounds::default() {
+            WrapMode::Wrapped
+        } else {
+            WrapMode::Unwrapped
+        };
+        if params != *self.view.params() {
+            self.view = View::new(params);
         }
     }
 
     // MARK: - Projection
 
     pub fn set_projection_definition(&mut self, definition: &ProjectionDefinition) {
-        self.projection_definition = *definition;
         let transition = definition.transition_state();
-        if transition == self.projection_transition {
-            return;
-        }
-        let leaves_globe = transition == 0.0 && self.projection_transition > 0.0;
-        self.projection_transition = transition;
-        self.invalidate_matrices();
+        let previous = self.view.projection_transition();
+        self.update(|p| {
+            p.projection_definition = *definition;
+            p.projection_transition = transition;
+        });
         // As GL JS's `migrateProjection` does: the globe allows lower zooms,
         // latitudes past Mercator's and a center on another world copy, so
         // Mercator's limits and its wrapped center apply again.
-        if leaves_globe && !self.size.is_empty() {
+        let leaves_globe = transition == 0.0 && previous > 0.0;
+        if leaves_globe && !self.view.size().is_empty() {
             let wrap_mode =
-                if self.bounds == LatLngBounds::default() { WrapMode::Wrapped } else { WrapMode::Unwrapped };
-            let center = self.get_lat_lng(wrap_mode);
-            let zoom = self.get_zoom();
+                if self.limits.bounds == LatLngBounds::default() { WrapMode::Wrapped } else { WrapMode::Unwrapped };
+            let center = self.view.center(wrap_mode);
+            let zoom = self.view.zoom();
             self.set_lat_lng_zoom(&center, zoom);
         }
     }
 
-    /// The definition that [`set_projection_definition`](Self::set_projection_definition)
-    /// last set.
-    pub(crate) fn get_projection_definition(&self) -> ProjectionDefinition {
-        self.projection_definition
-    }
+    // MARK: - Free camera
 
-    /// 0 is Mercator, 1 is the globe, in between is the transition.
-    pub fn get_projection_transition(&self) -> f64 {
-        self.projection_transition
-    }
+    fn update_state_from_camera(&mut self, camera: &CameraPose) {
+        let position = camera.position;
+        let DVec3 { x: dx, y: dy, z: dz } = camera.forward();
 
-    pub fn is_globe_rendering(&self) -> bool {
-        self.projection_transition > 0.0
-    }
+        let (new_roll, mut new_pitch, new_bearing) = camera.orientation_angles();
+        new_pitch = mln_math::clamp_f64(new_pitch, self.limits.min_pitch, self.limits.max_pitch);
 
-    // MARK: - Matrix
-
-    /// The tile-to-world matrix of a tile at the state's scale.
-    pub fn matrix_for(&self, tile_id: &UnwrappedTileID) -> Mat4 {
-        let mut matrix = [0.0; 16];
-        mercator_tile_matrix(&mut matrix, tile_id, self.scale);
-        matrix
-    }
-
-    /// The globe while [`is_globe_rendering`](Self::is_globe_rendering),
-    /// Mercator otherwise.
-    pub fn get_projection(&self) -> crate::Projection {
-        if self.is_globe_rendering() { crate::Projection::VerticalPerspective } else { crate::Projection::Mercator }
-    }
-
-    pub fn get_projection_data_with(&self, tile_id: &UnwrappedTileID, proj_matrix: &Mat4) -> ProjectionData {
-        let mut mercator_matrix: Mat4 = [0.0; 16];
-        mercator_tile_matrix(&mut mercator_matrix, tile_id, self.scale);
-        let a = mercator_matrix;
-        matrix::multiply(&mut mercator_matrix, proj_matrix, &a);
-        self.get_projection().get_projection_data(self, tile_id, &mercator_matrix)
-    }
-
-    pub fn get_projection_data(&self, tile_id: &UnwrappedTileID) -> ProjectionData {
-        self.get_projection_data_with(tile_id, &self.get_projection_matrix())
-    }
-
-    pub fn get_projection_data_for_matrix(&self, tile_id: &UnwrappedTileID, mercator_matrix: &Mat4) -> ProjectionData {
-        self.get_projection().get_projection_data(self, tile_id, mercator_matrix)
-    }
-
-    /// The distance from the camera to the far plane of
-    /// [`get_proj_matrix`](Self::get_proj_matrix), in pixels at the zoom:
-    /// past the farthest point of the ground that the view shows.
-    pub fn get_far_z(&self) -> f64 {
-        let camera_to_center_distance = f64::from(self.get_camera_to_center_distance());
-        let offset = self.get_center_offset();
-
-        let limited_pitch = mln_math::clamp_f64(self.get_pitch(), 0.0, max_mercator_horizon_angle());
-        let camera_to_sea_level_distance = camera_to_center_distance + self.z.abs() / limited_pitch.cos();
-
-        // Find the Z distance from the viewport center point
-        // [width/2 + offset.x, height/2 + offset.y] to the top edge; to point
-        // [width/2 + offset.x, 0] in Z units.
-        // 1 Z unit is equivalent to 1 horizontal px at the center of the map
-        // (the distance between[width/2, height/2] and [width/2 + 1, height/2])
-        // See https://github.com/mapbox/mapbox-gl-native/pull/15195 for details.
-        // See TransformState::fov description: fov = 2 * arctan((height / 2) / (height * 1.5)).
-        let width = f64::from(self.size.width);
-        let height = f64::from(self.size.height);
-        let tan_fov_above_center = (0.5 + (offset.y - self.frustum_offset.top) / height)
-            * 2.0
-            * (self.fov / 2.0).tan()
-            * (self.roll.cos().abs() + self.roll.sin().abs() * width / height);
-        let tan_multiple = mln_math::clamp_f64(tan_fov_above_center * limited_pitch.tan(), 0.0, 0.99);
-        debug_assert!(tan_multiple < 1.0);
-
-        // The map ends at the horizon, where the sky starts, as in GL JS's
-        // `_calculateNearFarZ`: at high pitch it is below the top of the view.
-        let horizon = self.get_mercator_horizon();
-        let horizon_angle = (horizon / camera_to_center_distance).atan();
-        let min_horizon_angle = PI / 2.0 - max_mercator_horizon_angle();
-        let fov_center_to_horizon = if horizon_angle > min_horizon_angle {
-            2.0 * horizon_angle * (0.5 + offset.y / (horizon * 2.0))
-        } else {
-            min_horizon_angle
-        };
-        let horizon_multiple = mln_math::clamp_f64(fov_center_to_horizon.tan() * limited_pitch.tan(), 0.0, 0.99);
-
-        // Calculate z distance of the farthest fragment that should be rendered.
-        let furthest_distance = camera_to_sea_level_distance / (1.0 - tan_multiple.min(horizon_multiple));
-        // Add a bit extra to avoid precision problems when a fragment's
-        // distance is exactly `furthestDistance`
-        furthest_distance * 1.01
-    }
-
-    /// The projection matrix with its near plane at `near_z`, aligned to the
-    /// pixel grid if `aligned`; zero while the size is empty.
-    pub fn get_proj_matrix(&self, near_z: u16, aligned: bool) -> Mat4 {
-        let mut proj_matrix = [0.0; 16];
-        if self.size.is_empty() {
-            return proj_matrix;
-        }
-
-        let offset = self.get_center_offset();
-        let width = f64::from(self.size.width);
-        let height = f64::from(self.size.height);
-        let far_z = self.get_far_z();
-
-        let camera = self.camera_state();
-        let world_to_camera = camera.get_world_to_camera(self.scale, self.viewport_mode == ViewportMode::FlippedY);
-        // getFieldOfView() returns float.
-        let mut camera_to_clip = camera.get_camera_to_clip_perspective(
-            f64::from(self.get_field_of_view()),
-            width / height,
-            f64::from(near_z),
-            far_z,
-        );
-
-        // Move the center of perspective to center of specified edgeInsets.
-        // Values are in range [-1, 1] where the upper and lower range values
-        // position viewport center to the screen edges. This is overridden
-        // if using axonometric perspective (not in public API yet, Issue
-        // #11882).
-        // TODO(astojilj): Issue #11882 should take edge insets into account, too.
-        if !self.axonometric {
-            camera_to_clip[8] = -offset.x * 2.0 / width;
-            camera_to_clip[9] = offset.y * 2.0 / height;
-        }
-
-        // Apply north orientation angle
-        if self.get_north_orientation() != NorthOrientation::Upwards {
-            let a = camera_to_clip;
-            matrix::rotate_z(&mut camera_to_clip, &a, -self.get_north_orientation_angle());
-        }
-
-        matrix::multiply(&mut proj_matrix, &camera_to_clip, &world_to_camera);
-
-        if self.axonometric {
-            // mat[11] controls perspective
-            proj_matrix[11] = 0.0;
-
-            // mat[8], mat[9] control x-skew, y-skew
-            let pixels_per_meter = 1.0
-                / Projection::get_meters_per_pixel_at_latitude(
-                    self.get_lat_lng(WrapMode::Unwrapped).latitude(),
-                    self.get_zoom(),
-                );
-            proj_matrix[8] = self.x_skew * pixels_per_meter;
-            proj_matrix[9] = self.y_skew * pixels_per_meter;
-        }
-
-        // Make a second projection matrix that is aligned to a pixel grid for
-        // rendering raster tiles. We're rounding the (floating point) x/y
-        // values to achieve to avoid rendering raster images to fractional
-        // coordinates. Additionally, we adjust by half a pixel in either
-        // direction in case that viewport dimension is an odd integer to
-        // preserve rendering to the pixel grid. We're rotating this shift
-        // based on the angle of the transformation so that 0°, 90°, 180°, and
-        // 270° rasters are crisp, and adjust the shift so that it is always
-        // <= 0.5 pixels.
-
-        if aligned {
-            let world_size = Projection::world_size(self.scale);
-            let dx = self.x - 0.5 * world_size;
-            let dy = self.y - 0.5 * world_size;
-
-            let x_shift = f64::from(self.size.width % 2) / 2.0;
-            let y_shift = f64::from(self.size.height % 2) / 2.0;
-            let bearing_cos = self.bearing.cos();
-            let bearing_sin = self.bearing.sin();
-            let dxa = -modf_fraction(dx) + bearing_cos * x_shift + bearing_sin * y_shift;
-            let dya = -modf_fraction(dy) + bearing_cos * y_shift + bearing_sin * x_shift;
-            let a = proj_matrix;
-            matrix::translate(
-                &mut proj_matrix,
-                &a,
-                if dxa > 0.5 { dxa - 1.0 } else { dxa },
-                if dya > 0.5 { dya - 1.0 } else { dya },
-                0.0,
-            );
-        }
-        proj_matrix
-    }
-
-    /// The camera that the state's position and orientation describe, or the
-    /// default camera while the state isn't valid.
-    fn camera_state(&self) -> Camera {
-        let mut camera = Camera::new();
-        if !self.valid() {
-            return camera;
-        }
-
-        let world_size = Projection::world_size(self.scale);
-        let camera_to_center_distance = f64::from(self.get_camera_to_center_distance());
-
-        // x & y tracks the center of the map in pixels. However as rendering
-        // is done in pixel coordinates the rendering origo is actually in the
-        // middle of the map (0.5 * worldSize). x&y positions have to be
-        // negated because it defines position of the map, not the camera.
-        // Moving map 10 units left has the same effect as moving camera 10
-        // units to the right.
-        let dx = 0.5 * world_size - self.x;
-        let dy = 0.5 * world_size - self.y;
-
-        // Set camera orientation and move it to a proper distance from the map
-        camera.set_orientation(self.get_roll(), self.get_pitch(), self.get_bearing());
-
-        let forward = camera.forward();
-        let orbit_position: Vec3 = [
-            -forward[0] * camera_to_center_distance,
-            -forward[1] * camera_to_center_distance,
-            -forward[2] * camera_to_center_distance,
-        ];
-        let mut camera_position: Vec3 = [dx + orbit_position[0], dy + orbit_position[1], self.z + orbit_position[2]];
-
-        camera_position[0] /= world_size;
-        camera_position[1] /= world_size;
-        camera_position[2] /= world_size;
-
-        camera.set_position(&camera_position);
-        camera
-    }
-
-    fn update_state_from_camera(&mut self, camera: &Camera) {
-        let position = camera.get_position();
-        let forward = camera.forward();
-
-        let dx = forward[0];
-        let dy = forward[1];
-        let dz = forward[2];
-
-        // Compute bearing and pitch
-        let (new_roll, mut new_pitch, new_bearing) = camera.get_orientation_angles();
-        new_pitch = mln_math::clamp_f64(new_pitch, self.min_pitch, self.max_pitch);
-
-        // Compute zoom level from the camera altitude
-        let center_distance = f64::from(self.get_camera_to_center_distance());
+        // The zoom from the camera's altitude, and how far along its line of
+        // sight the ground is.
+        let center_distance = self.view.camera_to_center_distance();
         let zoom;
         let travel;
-        if dz < -1.0e-9 && position[2] > 1.0e-9 && new_pitch <= max_mercator_horizon_angle() {
-            zoom = (center_distance / (position[2] / new_pitch.cos() * TILE_SIZE_D)).log2();
-            travel = -position[2] / dz;
+        if dz < -1.0e-9 && position.z > 1.0e-9 && new_pitch <= max_mercator_horizon_angle() {
+            zoom = (center_distance / (position.z / new_pitch.cos() * TILE_SIZE_D)).log2();
+            travel = -position.z / dz;
         } else {
             zoom = 14.0;
-            let new_scale = mln_math::clamp_f64(2.0f64.powf(zoom), self.min_scale, self.max_scale);
+            let new_scale = mln_math::clamp_f64(2.0f64.powf(zoom), self.min_scale(), self.max_scale());
             travel = center_distance / new_scale / TILE_SIZE_D;
         }
 
-        // Compute center point of the map
-        let mercator_point = Point::new(position[0] + dx * travel, position[1] + dy * travel);
+        let mercator_point = Point::new(position.x + dx * travel, position.y + dy * travel);
         let Ok(center) = lat_lng_from_mercator(mercator_point, WrapMode::Unwrapped) else {
             return;
         };
-        let zoom = f64::min(zoom, self.scale_zoom(self.max_scale));
+        let zoom = f64::min(zoom, self.limits.max_zoom);
         self.set_lat_lng_zoom(&center, zoom);
 
-        let mercator_z = position[2] + dz * travel;
+        let mercator_z = position.z + dz * travel;
         let alt_m = mercator_z
-            * Projection::get_meters_per_pixel_at_latitude(self.get_lat_lng(WrapMode::Unwrapped).latitude(), 0.0)
+            * Projection::meters_per_pixel_at_latitude(self.view.center(WrapMode::Unwrapped).latitude(), 0.0)
             * TILE_SIZE_D;
         self.set_center_altitude(alt_m);
-        self.set_bearing(new_bearing);
+        self.set_angle(new_bearing);
         self.set_pitch(new_pitch);
         self.set_roll(new_roll);
     }
 
-    pub fn get_free_camera_options(&self) -> FreeCameraOptions {
-        let camera = self.camera_state();
-        FreeCameraOptions { position: Some(camera.get_position()), orientation: Some(camera.get_orientation().m()) }
+    /// `position` with its altitude clamped to the zoom range, or `None` for
+    /// a position that isn't a number.
+    fn constrained_camera_position(&self, position: DVec3) -> Option<DVec3> {
+        if position.is_nan() {
+            return None;
+        }
+        let max_world_size = Projection::world_size(2.0f64.powf(self.limits.max_zoom));
+        let min_world_size = Projection::world_size(2.0f64.powf(self.min_zoom()));
+        let dist_to_center = self.view.camera_to_center_distance();
+        Some(DVec3::new(
+            position.x,
+            position.y,
+            mln_math::clamp_f64(position.z, dist_to_center / max_world_size, dist_to_center / min_world_size),
+        ))
     }
 
-    fn set_camera_position(&self, camera: &mut Camera, position: &Vec3) -> bool {
-        if position[0].is_nan() || position[1].is_nan() || position[2].is_nan() {
-            return false;
+    /// `orientation` without the twist that a map's camera can't take, or
+    /// `None` for an orientation that isn't a rotation or that looks along
+    /// its up direction.
+    fn constrained_camera_orientation(orientation: DQuat) -> Option<DQuat> {
+        if orientation.is_nan() || orientation.length() == 0.0 {
+            return None;
         }
-
-        let max_world_size = Projection::world_size(2.0f64.powf(self.get_max_zoom()));
-        let min_world_size = Projection::world_size(2.0f64.powf(self.get_min_zoom()));
-        let dist_to_center = f64::from(self.get_camera_to_center_distance());
-
-        let updated_pos: Vec3 = [
-            position[0],
-            position[1],
-            mln_math::clamp_f64(position[2], dist_to_center / max_world_size, dist_to_center / min_world_size),
-        ];
-
-        camera.set_position(&updated_pos);
-        true
-    }
-
-    fn set_camera_orientation(camera: &mut Camera, orientation: &Quaternion) -> bool {
-        let c = orientation.m();
-        if c[0].is_nan() || c[1].is_nan() || c[2].is_nan() || c[3].is_nan() {
-            return false;
-        }
-
-        // Zero-length quaternions are not valid
-        if orientation.length() == 0.0 {
-            return false;
-        }
-
-        let unit_quat = orientation.normalized();
-        let forward = unit_quat.transform(&[0.0, 0.0, -1.0]);
-        let up = unit_quat.transform(&[0.0, -1.0, 0.0]);
-
-        let Some(updated_orientation) = Camera::orientation_from_frame(&forward, &up) else {
-            return false;
-        };
-
-        camera.set_orientation_quaternion(&updated_orientation);
-        true
+        let unit_quat = orientation.normalize();
+        CameraPose::orientation_from_frame(unit_quat * DVec3::NEG_Z, unit_quat * DVec3::NEG_Y)
     }
 
     pub fn set_free_camera_options(&mut self, options: &FreeCameraOptions) {
-        if !self.valid() {
+        if !self.is_valid() {
             return;
         }
 
-        if options.position.is_none() && options.orientation.is_none() {
-            return;
-        }
-
-        let mut camera = self.camera_state();
+        let mut camera = self.view.camera_pose();
         let mut changed = false;
         if let Some(orientation) = options.orientation
-            && orientation != camera.get_orientation().m()
+            && orientation != camera.orientation
+            && let Some(orientation) = Self::constrained_camera_orientation(orientation)
         {
-            changed |= Self::set_camera_orientation(&mut camera, &Quaternion::from_vec4(&orientation));
+            camera.orientation = orientation;
+            changed = true;
         }
 
         if let Some(position) = options.position
-            && position != camera.get_position()
+            && position != camera.position
+            && let Some(position) = self.constrained_camera_position(position)
         {
-            changed |= self.set_camera_position(&mut camera, &position);
+            camera.position = position;
+            changed = true;
         }
 
         if changed {
             self.update_state_from_camera(&camera);
-            self.invalidate_matrices();
         }
-    }
-
-    fn matrices(&self) -> &Matrices {
-        self.matrices.0.get_or_init(|| {
-            if self.size.is_empty() {
-                return Matrices::default();
-            }
-            let projection = self.get_proj_matrix(1, false);
-            let coord = self.coordinate_point_matrix(&projection);
-
-            let mut inv_projection = [0.0; 16];
-            let mut inverted = [0.0; 16];
-            // `invert` returns true when the matrix is singular.
-            if matrix::invert(&mut inv_projection, &projection) || matrix::invert(&mut inverted, &coord) {
-                return Matrices::default();
-            }
-            let mut matrices = Matrices { projection, inv_projection, coord, inverted, ..Matrices::default() };
-            // The globe's projections read only the state's fields, never
-            // these matrices, so they can run while the lock initializes.
-            if self.is_globe_rendering() {
-                let globe_radius = VerticalPerspectiveProjection::globe_radius_pixels(
-                    Projection::world_size(self.scale),
-                    self.get_lat_lng(WrapMode::Unwrapped).latitude(),
-                );
-                let globe_view_projection =
-                    VerticalPerspectiveProjection::globe_view_projection_matrix(self, globe_radius);
-                let mut inv_globe_view_projection = [0.0; 16];
-                if matrix::invert(&mut inv_globe_view_projection, &globe_view_projection) {
-                    matrix::identity(&mut inv_globe_view_projection);
-                }
-                matrices.globe_view_projection = globe_view_projection;
-                matrices.inv_globe_view_projection = inv_globe_view_projection;
-                matrices.globe_clipping_plane = VerticalPerspectiveProjection::clipping_plane(self, globe_radius);
-                matrices.globe_camera_position = VerticalPerspectiveProjection::camera_position(self, globe_radius);
-            }
-            matrices
-        })
-    }
-
-    /// The globe's view projection for the current camera, valid while
-    /// `is_globe_rendering()`; cached with the matrices, as are the globe
-    /// getters below.
-    pub fn get_globe_view_projection_matrix(&self) -> Mat4 {
-        self.matrices().globe_view_projection
-    }
-
-    pub fn get_inverse_globe_view_projection_matrix(&self) -> Mat4 {
-        self.matrices().inv_globe_view_projection
-    }
-
-    pub fn get_globe_clipping_plane(&self) -> Vec4 {
-        self.matrices().globe_clipping_plane
-    }
-
-    pub fn get_globe_camera_position(&self) -> Vec3 {
-        self.matrices().globe_camera_position
-    }
-
-    /// Clears the matrices after a change that moves them.
-    fn invalidate_matrices(&mut self) {
-        self.matrices.0.take();
-    }
-
-    pub fn get_projection_matrix(&self) -> Mat4 {
-        self.matrices().projection
-    }
-
-    pub fn get_inv_projection_matrix(&self) -> Mat4 {
-        self.matrices().inv_projection
-    }
-
-    fn get_coord_matrix(&self) -> Mat4 {
-        self.matrices().coord
-    }
-
-    fn get_inverted_matrix(&self) -> Mat4 {
-        self.matrices().inverted
     }
 
     // MARK: - Dimensions
 
-    pub fn get_size(&self) -> Size {
-        self.size
-    }
-
     pub fn set_size(&mut self, size: Size) {
-        if self.size != size {
-            self.size = size;
-            self.invalidate_matrices();
-        }
-    }
-
-    pub fn get_frustum_offset(&self) -> EdgeInsets {
-        self.frustum_offset
+        self.update(|p| p.size = size);
     }
 
     pub fn set_frustum_offset(&mut self, frustum_offset: &EdgeInsets) {
-        if self.frustum_offset != *frustum_offset {
-            self.frustum_offset = *frustum_offset;
-            self.invalidate_matrices();
-        }
+        self.update(|p| p.frustum_offset = *frustum_offset);
     }
 
-    // MARK: - North Orientation
-
-    pub fn get_north_orientation(&self) -> NorthOrientation {
-        self.orientation
+    pub fn set_north_orientation(&mut self, orientation: NorthOrientation) {
+        self.update(|p| p.north_orientation = orientation);
     }
 
-    pub fn set_north_orientation(&mut self, val: NorthOrientation) {
-        if self.orientation != val {
-            self.orientation = val;
-            self.invalidate_matrices();
-        }
+    #[must_use]
+    pub fn constrain_mode(&self) -> ConstrainMode {
+        self.view.params().constrain_mode
     }
 
-    pub fn get_north_orientation_angle(&self) -> f64 {
-        let mut angle_orientation = 0.0;
-        if self.orientation == NorthOrientation::Rightwards {
-            angle_orientation += PI / 2.0;
-        } else if self.orientation == NorthOrientation::Downwards {
-            angle_orientation += PI;
-        } else if self.orientation == NorthOrientation::Leftwards {
-            angle_orientation -= PI / 2.0;
-        }
-        angle_orientation
+    pub fn set_constrain_mode(&mut self, mode: ConstrainMode) {
+        self.update(|p| p.constrain_mode = mode);
     }
 
-    // MARK: - Constrain mode
-
-    pub fn get_constrain_mode(&self) -> ConstrainMode {
-        self.constrain_mode
+    pub fn set_viewport_mode(&mut self, mode: ViewportMode) {
+        self.update(|p| p.viewport_mode = mode);
     }
 
-    pub fn set_constrain_mode(&mut self, val: ConstrainMode) {
-        if self.constrain_mode != val {
-            self.constrain_mode = val;
-            self.invalidate_matrices();
-        }
-    }
-
-    // MARK: - ViewportMode
-
-    pub fn get_viewport_mode(&self) -> ViewportMode {
-        self.viewport_mode
-    }
-
-    pub fn set_viewport_mode(&mut self, val: ViewportMode) {
-        if self.viewport_mode != val {
-            self.viewport_mode = val;
-            self.invalidate_matrices();
-        }
+    pub fn set_padding(&mut self, padding: &EdgeInsets) {
+        self.update(|p| p.padding = *padding);
     }
 
     // MARK: - Camera options
 
-    pub fn get_camera_options(&self, padding: Option<EdgeInsets>) -> CameraOptions {
-        let camera = MapCamera { padding: padding.unwrap_or(self.edge_insets), ..self.camera() };
+    /// The camera, with `padding` in place of its own if given.
+    #[must_use]
+    pub fn camera_options(&self, padding: Option<EdgeInsets>) -> CameraOptions {
+        let mut camera = self.view.camera();
+        if let Some(padding) = padding {
+            camera.padding = padding;
+        }
         CameraOptions::from(camera)
-    }
-
-    /// The camera. The globe keeps the center on the world copy nearest the
-    /// previous one, which its coordinate conversions do not depend on, and
-    /// reports it wrapped. Mercator's conversions use the copy the transform
-    /// is on, and bounds across the antimeridian keep the center in their
-    /// range, past 180 degrees: both report the center as it is.
-    pub fn camera(&self) -> MapCamera {
-        let wrap_mode = if self.is_globe_rendering() && self.bounds == LatLngBounds::default() {
-            WrapMode::Wrapped
-        } else {
-            WrapMode::Unwrapped
-        };
-        MapCamera {
-            center: self.get_lat_lng(wrap_mode),
-            center_altitude: self.get_center_altitude(),
-            padding: self.edge_insets,
-            zoom: self.get_zoom(),
-            bearing: mln_math::rad2deg(-self.bearing),
-            pitch: mln_math::rad2deg(self.pitch),
-            roll: mln_math::rad2deg(self.roll),
-            fov: mln_math::rad2deg(self.fov),
-        }
-    }
-
-    // MARK: - EdgeInsets
-
-    pub fn get_edge_insets(&self) -> EdgeInsets {
-        self.edge_insets
-    }
-
-    pub fn set_edge_insets(&mut self, val: &EdgeInsets) {
-        if self.edge_insets != *val {
-            self.edge_insets = *val;
-            self.invalidate_matrices();
-        }
-    }
-
-    // MARK: - Position
-
-    pub fn get_lat_lng(&self, wrap_mode: WrapMode) -> LatLng {
-        lat_lng(mln_math::rad2deg(2.0 * (self.y / self.cc).exp().atan() - 0.5 * PI), -self.x / self.bc, wrap_mode)
-    }
-
-    /// The world copy of `location` nearest the center, which bounds can keep
-    /// past the antimeridian.
-    pub fn lat_lng_near_center(&self, location: &LatLng) -> LatLng {
-        let center = self.get_lat_lng(WrapMode::Unwrapped);
-        let wrapped_center = center.wrapped();
-        let mut nearest = location.wrapped();
-        nearest.unwrap_for_shortest_path(&wrapped_center);
-        lat_lng(
-            nearest.latitude(),
-            nearest.longitude() + center.longitude() - wrapped_center.longitude(),
-            WrapMode::Unwrapped,
-        )
-    }
-
-    pub fn get_center_altitude(&self) -> f64 {
-        self.z
-            * Projection::get_meters_per_pixel_at_latitude(
-                self.get_lat_lng(WrapMode::Unwrapped).latitude(),
-                self.get_zoom(),
-            )
     }
 
     // MARK: - Zoom
 
-    pub fn get_zoom(&self) -> f64 {
-        self.scale_zoom(self.scale)
-    }
-
     /// Lowest zoom allowed with the map centered at this latitude: the globe
-    /// lets the zoom fall below `get_min_zoom()` toward the poles by the
+    /// lets the zoom fall below `min_zoom()` toward the poles by the
     /// anchored-zoom adjustment, so the planet keeps its size on screen.
-    pub fn get_min_zoom_at_latitude(&self, latitude: f64) -> f64 {
-        self.get_min_zoom_at_latitude_with(latitude, self.is_globe_rendering())
+    #[must_use]
+    pub fn min_zoom_at_latitude(&self, latitude: f64) -> f64 {
+        self.min_zoom_at_latitude_with(latitude, self.view.is_globe())
     }
 
-    /// [`get_min_zoom_at_latitude`](Self::get_min_zoom_at_latitude) for a
+    /// [`min_zoom_at_latitude`](Self::min_zoom_at_latitude) for a
     /// camera on the globe or not, whatever the current projection.
-    pub fn get_min_zoom_at_latitude_with(&self, latitude: f64, globe: bool) -> f64 {
+    #[must_use]
+    pub fn min_zoom_at_latitude_with(&self, latitude: f64, globe: bool) -> f64 {
         if !globe {
-            return self.get_min_zoom();
+            return self.min_zoom();
         }
         // The globe's constraint never raises the scale, whichever projection
         // the map is in now.
-        self.scale_zoom(self.min_scale) + VerticalPerspectiveProjection::zoom_adjustment(0.0, latitude)
+        scale_zoom(self.min_scale()) + VerticalPerspectiveProjection::zoom_adjustment(0.0, latitude)
     }
 
     /// The center `constrain` would settle on for this one at this zoom: on
     /// the globe the zoom decides how close to a pole the center can be.
+    #[must_use]
     pub fn constrained_center(&self, lat_lng: &LatLng, zoom: f64) -> LatLng {
-        if self.constrain_mode == ConstrainMode::None || !self.is_globe_rendering() {
+        if self.constrain_mode() == ConstrainMode::None || !self.view.is_globe() {
             return *lat_lng;
         }
         let max_latitude = VerticalPerspectiveProjection::max_latitude(
-            self,
-            mln_math::clamp_f64(zoom, self.get_min_zoom_at_latitude(lat_lng.latitude()), self.get_max_zoom()),
+            &self.view,
+            mln_math::clamp_f64(zoom, self.min_zoom_at_latitude(lat_lng.latitude()), self.limits.max_zoom),
         );
-        self::lat_lng(
+        LatLng::saturating(
             mln_math::clamp_f64(lat_lng.latitude(), -max_latitude, max_latitude),
             lat_lng.longitude(),
             WrapMode::Unwrapped,
         )
     }
 
-    /// The zoom level, rounded down and clamped to the `u8` range.
-    pub fn get_integer_zoom(&self) -> u8 {
-        f64::max(0.0, self.get_zoom()) as u8
+    // MARK: - Limits
+
+    /// The limits the camera moves within.
+    #[must_use]
+    pub fn limits(&self) -> &CameraLimits {
+        &self.limits
     }
 
-    pub fn get_zoom_fraction(&self) -> f64 {
-        self.get_zoom() - f64::from(self.get_integer_zoom())
-    }
-
-    // MARK: - Bounds
-
-    pub fn set_lat_lng_bounds(&mut self, bounds: LatLngBounds) {
-        if bounds != self.bounds {
-            self.bounds = bounds;
-            let lat_lng = self.get_lat_lng(WrapMode::Unwrapped);
-            let zoom = self.get_zoom();
+    /// Sets the limits the camera moves within, clamped to what any map
+    /// allows (see [`CameraLimits::validated`]), and moves the center into
+    /// new bounds. `Err`, changing nothing, for limits that leave the camera
+    /// nowhere to go.
+    pub fn set_limits(&mut self, limits: CameraLimits) -> Result<(), Error> {
+        let limits = limits.validated()?;
+        // The view can't zoom out past the zoom at which the world fills it.
+        let least_scale = self.constrain(zoom_scale(limits.min_zoom), self.view.x(), self.view.y()).0;
+        if zoom_scale(limits.max_zoom) < least_scale {
+            return Err(Error::invalid_argument("the maximum zoom must be at least the least zoom the view allows"));
+        }
+        let bounds_changed = limits.bounds != self.limits.bounds;
+        self.limits = limits;
+        if bounds_changed {
+            let lat_lng = self.view.center(WrapMode::Unwrapped);
+            let zoom = self.view.zoom();
             self.set_lat_lng_zoom(&lat_lng, zoom);
+            self.update(|_| ());
         }
+        Ok(())
     }
 
-    pub fn get_lat_lng_bounds(&self) -> LatLngBounds {
-        self.bounds
+    fn min_scale(&self) -> f64 {
+        zoom_scale(self.limits.min_zoom)
     }
 
-    pub fn set_min_zoom(&mut self, min_zoom: f64) {
-        if min_zoom <= self.get_max_zoom() {
-            self.min_scale = self.zoom_scale(mln_math::clamp_f64(min_zoom, constants::MIN_ZOOM, constants::MAX_ZOOM));
-        }
+    fn max_scale(&self) -> f64 {
+        zoom_scale(self.limits.max_zoom)
     }
 
-    pub fn get_min_zoom(&self) -> f64 {
-        self.scale_zoom(self.constrained_min_scale())
+    /// The lowest zoom the constrain mode allows: the minimum zoom, raised
+    /// so that the view shows no area off the world.
+    #[must_use]
+    pub fn min_zoom(&self) -> f64 {
+        scale_zoom(self.constrained_min_scale())
     }
 
     fn constrained_min_scale(&self) -> f64 {
-        self.constrain(self.min_scale, self.x, self.y).0
-    }
-
-    pub fn set_max_zoom(&mut self, max_zoom: f64) {
-        if max_zoom >= self.get_min_zoom() {
-            self.max_scale = self.zoom_scale(mln_math::clamp_f64(max_zoom, constants::MIN_ZOOM, constants::MAX_ZOOM));
-        }
-    }
-
-    pub fn get_max_zoom(&self) -> f64 {
-        self.scale_zoom(self.max_scale)
-    }
-
-    pub fn set_min_pitch(&mut self, pitch: f64) {
-        if pitch <= self.max_pitch {
-            self.min_pitch = mln_math::clamp_f64(pitch, constants::PITCH_MIN, self.max_pitch);
-        } else {
-            Log::warning(Event::General, "Trying to set minimum pitch to larger than maximum pitch, no changes made.");
-        }
-    }
-
-    pub fn get_min_pitch(&self) -> f64 {
-        self.min_pitch
-    }
-
-    pub fn set_max_pitch(&mut self, pitch: f64) {
-        if pitch >= self.min_pitch {
-            self.max_pitch = mln_math::clamp_f64(pitch, self.min_pitch, PITCH_MAX);
-        } else {
-            Log::warning(Event::General, "Trying to set maximum pitch to smaller than minimum pitch, no changes made.");
-        }
-    }
-
-    pub fn get_max_pitch(&self) -> f64 {
-        self.max_pitch
-    }
-
-    pub fn get_min_field_of_view(&self) -> f64 {
-        self.min_fov
-    }
-
-    pub fn get_max_field_of_view(&self) -> f64 {
-        self.max_fov
-    }
-
-    // MARK: - Scale
-
-    pub fn get_scale(&self) -> f64 {
-        self.scale
-    }
-
-    pub fn set_scale(&mut self, val: f64) {
-        if val.is_finite() && self.scale != val {
-            self.scale = val;
-            self.invalidate_matrices();
-        }
-    }
-
-    // MARK: - Positions
-
-    pub fn get_x(&self) -> f64 {
-        self.x
-    }
-
-    pub fn set_x(&mut self, val: f64) {
-        if val.is_finite() && self.x != val {
-            self.x = val;
-            self.invalidate_matrices();
-        }
-    }
-
-    pub fn get_y(&self) -> f64 {
-        self.y
-    }
-
-    pub fn set_y(&mut self, val: f64) {
-        if val.is_finite() && self.y != val {
-            self.y = val;
-            self.invalidate_matrices();
-        }
+        self.constrain(self.min_scale(), self.view.x(), self.view.y()).0
     }
 
     // MARK: - Rotation
 
-    pub fn get_bearing(&self) -> f64 {
-        self.bearing
-    }
-
-    pub fn set_bearing(&mut self, val: f64) {
-        if val.is_finite() && self.bearing != val {
-            self.bearing = val;
-            self.invalidate_matrices();
+    /// Sets the map's rotation, in radians counterclockwise: the negated
+    /// bearing.
+    pub fn set_angle(&mut self, angle: f64) {
+        if angle.is_finite() {
+            self.update(|p| p.angle = angle);
         }
     }
 
-    /// Returns float, as C++ does.
-    pub fn get_field_of_view(&self) -> f32 {
-        self.fov as f32
-    }
-
-    pub fn set_field_of_view(&mut self, val: f64) {
-        if val.is_finite() && self.fov != val {
-            self.fov = val;
-            self.invalidate_matrices();
+    pub fn set_fov(&mut self, fov: f64) {
+        if fov.is_finite() {
+            self.update(|p| p.fov = fov);
         }
     }
 
-    pub fn get_roll(&self) -> f64 {
-        self.roll
-    }
-
-    pub fn set_roll(&mut self, val: f64) {
-        if val.is_finite() && self.roll != val {
-            self.roll = val;
-            self.invalidate_matrices();
+    pub fn set_roll(&mut self, roll: f64) {
+        if roll.is_finite() {
+            self.update(|p| p.roll = roll);
         }
     }
 
-    /// Returns float, as C++ does.
-    pub fn get_camera_to_center_distance(&self) -> f32 {
-        (0.5 * f64::from(self.size.height) / (self.fov / 2.0).tan()) as f32
-    }
-
-    /// GL JS's `getMercatorHorizon`: how far above the center of the view,
-    /// in pixels, the map ends and the sky starts. It is 0.85 of the way to
-    /// the flat map's geometric horizon, and never past 89.25 degrees from
-    /// straight down; at a pitch past that it is negative.
-    pub fn get_mercator_horizon(&self) -> f64 {
-        f64::from(self.get_camera_to_center_distance())
-            * f64::min((PI / 2.0 - self.pitch).tan() * 0.85, (max_mercator_horizon_angle() - self.pitch).tan())
-    }
-
-    pub fn get_pitch(&self) -> f64 {
-        self.pitch
-    }
-
-    pub fn set_pitch(&mut self, val: f64) {
-        if val.is_finite() && self.pitch != val {
-            self.pitch = val;
-            self.invalidate_matrices();
+    pub fn set_pitch(&mut self, pitch: f64) {
+        if pitch.is_finite() {
+            self.update(|p| p.pitch = pitch);
         }
     }
 
-    pub fn get_x_skew(&self) -> f64 {
-        self.x_skew
-    }
-
-    pub fn set_x_skew(&mut self, val: f64) {
-        if val.is_finite() && self.x_skew != val {
-            self.x_skew = val;
-            self.invalidate_matrices();
+    pub fn set_x_skew(&mut self, skew: f64) {
+        if skew.is_finite() {
+            self.update(|p| p.x_skew = skew);
         }
     }
 
-    pub fn get_y_skew(&self) -> f64 {
-        self.y_skew
-    }
-
-    pub fn set_y_skew(&mut self, val: f64) {
-        if val.is_finite() && self.y_skew != val {
-            self.y_skew = val;
-            self.invalidate_matrices();
+    pub fn set_y_skew(&mut self, skew: f64) {
+        if skew.is_finite() {
+            self.update(|p| p.y_skew = skew);
         }
     }
 
-    pub fn get_axonometric(&self) -> bool {
-        self.axonometric
+    pub fn set_axonometric(&mut self, axonometric: bool) {
+        self.update(|p| p.axonometric = axonometric);
     }
 
-    pub fn set_axonometric(&mut self, val: bool) {
-        if self.axonometric != val {
-            self.axonometric = val;
-            self.invalidate_matrices();
-        }
-    }
+    // MARK: - Validity
 
-    // MARK: - State
-
-    pub fn is_changing(&self) -> bool {
-        self.rotating || self.scaling || self.panning || self.gesture_in_progress
-    }
-
-    pub fn is_rotating(&self) -> bool {
-        self.rotating
-    }
-
-    pub fn set_rotating_in_progress(&mut self, val: bool) {
-        self.rotating = val;
-    }
-
-    pub fn is_scaling(&self) -> bool {
-        self.scaling
-    }
-
-    pub fn set_scaling_in_progress(&mut self, val: bool) {
-        self.scaling = val;
-    }
-
-    pub fn is_panning(&self) -> bool {
-        self.panning
-    }
-
-    pub fn set_panning_in_progress(&mut self, val: bool) {
-        self.panning = val;
-    }
-
-    pub fn is_gesture_in_progress(&self) -> bool {
-        self.gesture_in_progress
-    }
-
-    pub fn set_gesture_in_progress(&mut self, val: bool) {
-        self.gesture_in_progress = val;
-    }
-
-    // MARK: - Projection
-
-    pub fn zoom_scale(&self, zoom: f64) -> f64 {
-        round_for_accuracy(2.0f64.powf(zoom))
-    }
-
-    pub fn scale_zoom(&self, s: f64) -> f64 {
-        round_for_accuracy(s.log2())
-    }
-
-    /// Toward the poles the globe goes below the minimum scale;
+    /// Whether the view shows anything and its scale is within the zoom
+    /// range. Toward the poles the globe goes below the minimum scale;
     /// `set_lat_lng_zoom` holds it to the floor there.
-    pub fn valid(&self) -> bool {
-        !self.size.is_empty()
-            && (if self.is_globe_rendering() { self.scale > 0.0 } else { self.scale >= self.min_scale })
-            && self.scale <= self.max_scale
+    #[must_use]
+    pub fn is_valid(&self) -> bool {
+        let scale = self.view.scale();
+        self.view.is_valid()
+            && (if self.view.is_globe() { scale > 0.0 } else { scale >= self.min_scale() })
+            && scale <= self.max_scale()
     }
 
-    pub fn lat_lng_to_screen_coordinate(&self, lat_lng: &LatLng) -> ScreenCoordinate {
-        self.lat_lng_to_screen_coordinate_with_clip(lat_lng).0
-    }
-
-    /// The screen point of a location and its clip-space position, whose w
-    /// is negative behind the camera. Both are zero while the size is empty.
-    pub fn lat_lng_to_screen_coordinate_with_clip(&self, lat_lng: &LatLng) -> (ScreenCoordinate, Vec4) {
-        if self.size.is_empty() {
-            return (ScreenCoordinate::new(0.0, 0.0), [0.0; 4]);
-        }
-
-        if self.is_globe_rendering() {
-            return VerticalPerspectiveProjection::lat_lng_to_screen_coordinate(self, lat_lng);
-        }
-
-        let pt = Projection::project(lat_lng, self.scale);
-        let pt = Point::new(pt.x / TILE_SIZE_D, pt.y / TILE_SIZE_D);
-        let c: Vec4 = [pt.x, pt.y, 0.0, 1.0];
-        let p = matrix::transform_mat4_value(&c, &self.get_coord_matrix());
-        (ScreenCoordinate::new(p[0] / p[3], f64::from(self.size.height) - p[1] / p[3]), p)
-    }
-
-    /// Whether the globe hides a location from the camera; a Mercator map
-    /// hides nothing.
-    pub fn is_location_occluded(&self, lat_lng: &LatLng) -> bool {
-        if self.size.is_empty() || !self.is_globe_rendering() {
-            return false;
-        }
-        let surface = VerticalPerspectiveProjection::surface_vector(lat_lng);
-        let plane = self.get_globe_clipping_plane();
-        plane[0] * surface[0] + plane[1] * surface[1] + plane[2] * surface[2] + plane[3] < 0.0
-    }
-
-    /// Implements mapbox-gl-js `pointCoordinate()` : `MercatorCoordinate`.
-    pub fn screen_coordinate_to_tile_coordinate(&self, point: &ScreenCoordinate, at_zoom: u8) -> TileCoordinate {
-        if self.size.is_empty() {
-            return TileCoordinate { p: Point::new(0.0, 0.0), z: 0.0 };
-        }
-
-        if self.is_globe_rendering() {
-            return match VerticalPerspectiveProjection::screen_coordinate_to_lat_lng(self, point, WrapMode::Unwrapped) {
-                Some(lat_lng) => TileCoordinate::from_lat_lng(f64::from(at_zoom), &lat_lng),
-                None => TileCoordinate { p: Point::new(0.0, 0.0), z: 0.0 },
-            };
-        }
-
-        self.mercator_screen_coordinate_to_tile_coordinate(point, at_zoom)
-    }
-
-    fn mercator_screen_coordinate_to_tile_coordinate(&self, point: &ScreenCoordinate, at_zoom: u8) -> TileCoordinate {
-        let target_z: f32 = 0.0;
-
-        let flipped_y = f64::from(self.size.height) - point.y;
-
-        // since we don't know the correct projected z value for the point,
-        // unproject two points to get a line and then find the point on that
-        // line with z=0
-
-        let mut coord0: Vec4 = [0.0; 4];
-        let mut coord1: Vec4 = [0.0; 4];
-        let point0: Vec4 = [point.x, flipped_y, 0.0, 1.0];
-        let point1: Vec4 = [point.x, flipped_y, 1.0, 1.0];
-        let inverted = self.get_inverted_matrix();
-        matrix::transform_mat4(&mut coord0, &point0, &inverted);
-        matrix::transform_mat4(&mut coord1, &point1, &inverted);
-
-        let w0 = coord0[3];
-        let w1 = coord1[3];
-
-        let p0 = Point::new(coord0[0] / w0, coord0[1] / w0);
-        let p1 = Point::new(coord1[0] / w1, coord1[1] / w1);
-
-        let z0 = coord0[2] / w0;
-        let z1 = coord1[2] / w1;
-        let t = if z0 <= z1 { 0.0 } else { (f64::from(target_z) - z0) / (z1 - z0) };
-
-        let p = interpolate(&p0, &p1, t);
-        // C++ `static_cast<double>(1 << atZoom)`: an int shift.
-        let factor = f64::from(1i32.wrapping_shl(u32::from(at_zoom)));
-        TileCoordinate { p: Point::new(p.x / self.scale * factor, p.y / self.scale * factor), z: f64::from(at_zoom) }
-    }
-
-    /// The location under `point`, measured from the bottom edge (y up).
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
-    /// NaN or infinite point.
-    pub fn screen_coordinate_to_lat_lng(&self, point: &ScreenCoordinate, wrap_mode: WrapMode) -> Result<LatLng, Error> {
-        // Without a size the point is Mercator's, as the tile coordinate is.
-        if self.is_globe_rendering() && !self.size.is_empty() {
-            if point.x.is_nan() || point.y.is_nan() {
-                return Err(Error::invalid_argument("screen coordinate must not be NaN"));
-            }
-            if !point.x.is_finite() || !point.y.is_finite() {
-                return Err(Error::invalid_argument("screen coordinate must not be infinite"));
-            }
-            return VerticalPerspectiveProjection::screen_coordinate_to_lat_lng(self, point, wrap_mode)
-                .ok_or_else(|| Error::invalid_argument("the camera shows no location"));
-        }
-        let coord = self.screen_coordinate_to_tile_coordinate(point, 0);
-        Projection::unproject(&coord.p, 1.0 / TILE_SIZE_D, wrap_mode)
-    }
-
-    fn coordinate_point_matrix(&self, proj_matrix: &Mat4) -> Mat4 {
-        let mut proj = *proj_matrix;
-        let a = proj;
-        matrix::scale(&mut proj, &a, TILE_SIZE_D, TILE_SIZE_D, 1.0);
-        let b = proj;
-        matrix::multiply(&mut proj, &self.get_pixel_matrix(), &b);
-        proj
-    }
-
-    fn get_pixel_matrix(&self) -> Mat4 {
-        let mut m: Mat4 = [0.0; 16];
-        matrix::identity(&mut m);
-        let a = m;
-        matrix::scale(&mut m, &a, f64::from(self.size.width) / 2.0, -f64::from(self.size.height) / 2.0, 1.0);
-        let a = m;
-        matrix::translate(&mut m, &a, 1.0, -1.0, 0.0);
-        m
-    }
-
-    // MARK: - (private helper functions)
+    // MARK: - Constraints
 
     fn rotated_north(&self) -> bool {
-        self.orientation == NorthOrientation::Leftwards || self.orientation == NorthOrientation::Rightwards
+        matches!(self.view.north_orientation(), NorthOrientation::Leftwards | NorthOrientation::Rightwards)
     }
 
     /// In [`ConstrainMode::Screen`], the scale and center that keep the
     /// lat/lng bounds on the screen at `scale`: the center only if it had to
     /// move. Other modes return `scale` unchanged and no center.
+    #[must_use]
     pub fn constrain_screen(&self, scale: f64) -> (f64, Option<LatLng>) {
-        if self.constrain_mode != ConstrainMode::Screen {
+        if self.constrain_mode() != ConstrainMode::Screen {
             return (scale, None);
         }
-        let mut zoom = self.scale_zoom(scale);
+        let mut zoom = scale_zoom(scale);
         let mut options = CameraOptions::default();
         self.constrain_camera_and_zoom_to_bounds(&mut options, &mut zoom);
-        (self.zoom_scale(zoom), options.center)
+        (zoom_scale(zoom), options.center)
     }
 
     /// The `(scale, x, y)` nearest the given ones that the constrain mode
     /// allows.
+    #[must_use]
     pub fn constrain(&self, mut scale: f64, mut x: f64, mut y: f64) -> (f64, f64, f64) {
-        if self.constrain_mode == ConstrainMode::None || self.constrain_mode == ConstrainMode::Screen {
+        let constrain_mode = self.constrain_mode();
+        if constrain_mode == ConstrainMode::None || constrain_mode == ConstrainMode::Screen {
             return (scale, x, y);
         }
 
         // The globe has no off-world area: the center goes past the Mercator
         // range toward a pole as far as the zoom allows.
-        if self.is_globe_rendering() {
-            let max_latitude = VerticalPerspectiveProjection::max_latitude(self, self.scale_zoom(scale));
+        if self.view.is_globe() {
+            let max_latitude = VerticalPerspectiveProjection::max_latitude(&self.view, scale_zoom(scale));
             let max_y = Projection::world_size(scale) / M2PI * mln_math::deg2rad(max_latitude).tan().asinh();
             y = mln_math::clamp_f64(y, -max_y, max_y);
             return (scale, x, y);
         }
 
-        let width = f64::from(self.size.width);
-        let height = f64::from(self.size.height);
+        let size = self.view.size();
+        let width = f64::from(size.width);
+        let height = f64::from(size.height);
 
         // Constrain scale to avoid zooming out far enough to show off-world
         // areas on the Y axis.
         let ratio_y = (if self.rotated_north() { width } else { height }) / TILE_SIZE_D;
-        // util::max: fmax
         scale = mln_math::fmax(scale, ratio_y);
 
         // Constrain min/max pan to avoid showing off-world areas on the Y axis.
         let max_y = (scale * TILE_SIZE_D - (if self.rotated_north() { width } else { height })) / 2.0;
         y = f64::max(-max_y, f64::min(y, max_y));
 
-        if self.constrain_mode == ConstrainMode::WidthAndHeight {
+        if constrain_mode == ConstrainMode::WidthAndHeight {
             // Constrain min/max pan to avoid showing off-world areas on the X axis.
             let max_x = (scale * TILE_SIZE_D - (if self.rotated_north() { height } else { width })) / 2.0;
             x = f64::max(-max_x, f64::min(x, max_x));
@@ -1273,37 +443,44 @@ impl TransformState {
         (scale, x, y)
     }
 
+    /// Moves the camera to the position nearest its own at `scale` that the
+    /// constrain mode allows.
+    pub fn constrain_position(&mut self, scale: f64) {
+        let (scale, x, y) = self.constrain(scale, self.view.x(), self.view.y());
+        if scale.is_finite() && x.is_finite() && y.is_finite() {
+            self.update(|p| {
+                p.scale = scale;
+                p.x = x;
+                p.y = y;
+            });
+        }
+    }
+
     pub fn constrain_camera_and_zoom_to_bounds(&self, requested_camera: &mut CameraOptions, requested_zoom: &mut f64) {
-        if self.constrain_mode != ConstrainMode::Screen || self.get_lat_lng_bounds() == LatLngBounds::default() {
+        if self.constrain_mode() != ConstrainMode::Screen || self.limits.bounds == LatLngBounds::default() {
             return;
         }
 
-        let mut center_lat_lng = self.get_lat_lng(WrapMode::Unwrapped);
-
-        if let Some(center) = requested_camera.center {
-            center_lat_lng = center;
-        }
+        let view = &self.view;
+        let current_center = view.center(WrapMode::Unwrapped);
+        let center_lat_lng = requested_camera.center.unwrap_or(current_center);
 
         let mut anchor_offset = Point::new(0.0, 0.0);
-        let requested_scale = self.zoom_scale(*requested_zoom);
+        let requested_scale = zoom_scale(*requested_zoom);
 
-        // Since the transition calculations will include any specified anchor
-        // in the result we need to do the same when testing if the requested
-        // center and zoom is outside the bounds or not.
+        // The transition will move the camera so that the anchor's location
+        // stays under it: the requested center is tested from where that
+        // leaves it.
         if let Some(mut anchor) = requested_camera.anchor {
-            anchor.y = f64::from(self.get_size().height) - anchor.y;
-            // The screenCoordinateToLatLng function requires the matrices
-            // inside the state to reflect the requested scale. So we create a
-            // copy and set the requested zoom before the conversion. This will
-            // give us the same result as the transition calculations.
+            anchor.y = f64::from(view.size().height) - anchor.y;
+            // The location under the anchor at the requested scale.
             let mut state = self.clone();
-            state.set_lat_lng_zoom(&self.get_lat_lng(WrapMode::Unwrapped), self.scale_zoom(requested_scale));
-            // C++ throws std::domain_error out of the camera change for an
-            // anchor that has no LatLng; the port ignores the anchor, as
-            // Transform::startTransition does.
+            state.set_lat_lng_zoom(&current_center, scale_zoom(requested_scale));
+            // An anchor with no location is ignored, as the transition
+            // ignores it.
             if let (Ok(anchor_lat_lng), Ok(screen_lat_lng)) = (
-                self.screen_coordinate_to_lat_lng(&anchor, WrapMode::Unwrapped),
-                state.screen_coordinate_to_lat_lng(&anchor, WrapMode::Unwrapped),
+                view.screen_coordinate_to_lat_lng(&anchor, WrapMode::Unwrapped),
+                state.view.screen_coordinate_to_lat_lng(&anchor, WrapMode::Unwrapped),
             ) {
                 let lat_lng_coord = Projection::project(&anchor_lat_lng, requested_scale);
                 let anchor_coord = Projection::project(&screen_lat_lng, requested_scale);
@@ -1311,11 +488,11 @@ impl TransformState {
             }
         }
 
-        let current_bounds = self.get_lat_lng_bounds();
+        let current_bounds = self.limits.bounds;
         let ne_bounds = Projection::project(&current_bounds.northeast(), requested_scale);
         let sw_bounds = Projection::project(&current_bounds.southwest(), requested_scale);
         let center = Projection::project(&center_lat_lng, requested_scale);
-        let current_center = Projection::project(&self.get_lat_lng(WrapMode::Unwrapped), requested_scale);
+        let current_center = Projection::project(&current_center, requested_scale);
 
         let min_y = ne_bounds.y;
         let max_y = sw_bounds.y;
@@ -1328,8 +505,8 @@ impl TransformState {
         let mut result_x = start_x;
         let mut result_y = start_y;
 
-        let screen_width = self.get_size().width;
-        let screen_height = self.get_size().height;
+        let screen_width = view.size().width;
+        let screen_height = view.size().height;
 
         let h2 = f64::from(screen_height) / 2.0;
         if start_y - h2 + anchor_offset.y < min_y {
@@ -1366,7 +543,7 @@ impl TransformState {
         // instabilities we add small amount to the check to make sure we
         // don't try to scale when we don't actually need it.
         if max_scale > 1.000_001 {
-            *requested_zoom += self.scale_zoom(max_scale);
+            *requested_zoom += scale_zoom(max_scale);
 
             if scale_y > scale_x {
                 // If we scaled the y direction we want the resulting x
@@ -1413,61 +590,57 @@ impl TransformState {
     /// lat/lng bounds fill the screen, which
     /// [`constrain_camera_and_zoom_to_bounds`](Self::constrain_camera_and_zoom_to_bounds)
     /// raises lower zooms to. `None` in the other modes or without bounds.
-    pub fn get_min_zoom_for_screen_bounds(&self) -> Option<f64> {
-        if self.constrain_mode != ConstrainMode::Screen || self.bounds == LatLngBounds::default() {
+    #[must_use]
+    pub fn min_zoom_for_screen_bounds(&self) -> Option<f64> {
+        if self.constrain_mode() != ConstrainMode::Screen || self.limits.bounds == LatLngBounds::default() {
             return None;
         }
         // The bounds' extent on screen grows with the scale alone, so they
         // fill the screen at the same zoom wherever the center is.
-        let ne = Projection::project(&self.bounds.northeast(), 1.0);
-        let sw = Projection::project(&self.bounds.southwest(), 1.0);
-        let scale_x = f64::from(self.size.width) / (ne.x - sw.x);
-        let scale_y = f64::from(self.size.height) / (sw.y - ne.y);
-        Some(self.scale_zoom(f64::max(scale_x, scale_y)))
+        let ne = Projection::project(&self.limits.bounds.northeast(), 1.0);
+        let sw = Projection::project(&self.limits.bounds.southwest(), 1.0);
+        let size = self.view.size();
+        let scale_x = f64::from(size.width) / (ne.x - sw.x);
+        let scale_y = f64::from(size.height) / (sw.y - ne.y);
+        Some(scale_zoom(f64::max(scale_x, scale_y)))
     }
 
-    /// Viewport center offset, from [size.width / 2, size.height / 2],
-    /// defined by |edgeInsets| in screen coordinates, with top left origin.
-    pub(crate) fn get_center_offset(&self) -> ScreenCoordinate {
-        ScreenCoordinate::new(
-            0.5 * (self.edge_insets.left - self.edge_insets.right),
-            0.5 * (self.edge_insets.top - self.edge_insets.bottom),
-        )
-    }
+    // MARK: - Moving the camera
 
     /// Recenter the map so that the given coordinate is located at the given
     /// point on screen.
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
     /// NaN or infinite anchor.
     pub fn move_lat_lng(&mut self, lat_lng: &LatLng, anchor: &ScreenCoordinate) -> Result<(), Error> {
-        if self.is_globe_rendering() {
-            if let Some(center) = VerticalPerspectiveProjection::center_for_location_at_point(self, lat_lng, anchor) {
-                let target = self.constrained_center(&center, self.get_zoom());
-                let zoom = self.get_zoom()
+        let view = &self.view;
+        if view.is_globe() {
+            if let Some(center) = VerticalPerspectiveProjection::center_for_location_at_point(view, lat_lng, anchor) {
+                let target = self.constrained_center(&center, view.zoom());
+                let zoom = view.zoom()
                     + VerticalPerspectiveProjection::zoom_adjustment(
-                        self.get_lat_lng(WrapMode::Unwrapped).latitude(),
+                        view.center(WrapMode::Unwrapped).latitude(),
                         target.latitude(),
                     );
                 self.set_lat_lng_zoom(&target, zoom);
             }
             return Ok(());
         }
-        let center_coord = Projection::project(&self.get_lat_lng(WrapMode::Unwrapped), self.scale);
-        let lat_lng_coord = Projection::project(lat_lng, self.scale);
-        let anchor_coord =
-            Projection::project(&self.screen_coordinate_to_lat_lng(anchor, WrapMode::Unwrapped)?, self.scale);
+        let scale = view.scale();
+        let center_coord = Projection::project(&view.center(WrapMode::Unwrapped), scale);
+        let lat_lng_coord = Projection::project(lat_lng, scale);
+        let anchor_coord = Projection::project(&view.screen_coordinate_to_lat_lng(anchor, WrapMode::Unwrapped)?, scale);
         let center = Projection::unproject(
             &Point::new(
                 center_coord.x + lat_lng_coord.x - anchor_coord.x,
                 center_coord.y + lat_lng_coord.y - anchor_coord.y,
             ),
-            self.scale,
+            scale,
             WrapMode::Unwrapped,
         )?;
         // Wrapped, as easeTo and GL JS's setLocationAtPoint leave it, unless
         // bounds keep it in their range.
-        let target = if self.bounds == LatLngBounds::default() { center.wrapped() } else { center };
-        let zoom = self.get_zoom();
+        let target = if self.limits.bounds == LatLngBounds::default() { center.wrapped() } else { center };
+        let zoom = view.zoom();
         self.set_lat_lng_zoom(&target, zoom);
         Ok(())
     }
@@ -1476,27 +649,29 @@ impl TransformState {
         if !zoom.is_finite() {
             return;
         }
+        let globe = self.view.is_globe();
         let mut requested = *lat_lng;
         // Globe centers arrive wrapped, and bounds across the antimeridian
         // reach past 180 degrees: take the copy of the longitude nearest the
         // bounds before constraining it.
-        if self.is_globe_rendering() && self.bounds != LatLngBounds::default() {
-            let turns = ((self.bounds.center().longitude() - lat_lng.longitude()) / constants::DEGREES_MAX).round();
-            requested = self::lat_lng(
+        if globe && self.limits.bounds != LatLngBounds::default() {
+            let turns =
+                ((self.limits.bounds.center().longitude() - lat_lng.longitude()) / constants::DEGREES_MAX).round();
+            requested = LatLng::saturating(
                 lat_lng.latitude(),
                 lat_lng.longitude() + turns * constants::DEGREES_MAX,
                 WrapMode::Unwrapped,
             );
         }
-        let mut constrained = self.bounds.constrain(&requested);
+        let mut constrained = self.limits.bounds.constrain(&requested);
         // The globe's tile cover picks each tile's wrap from the center, so a
         // center that jumped a whole world at the antimeridian would re-key
         // every tile; keep it on the copy nearest the current one.
-        if self.is_globe_rendering() && self.bounds == LatLngBounds::default() {
-            let current = self.get_lat_lng(WrapMode::Unwrapped).longitude();
+        if globe && self.limits.bounds == LatLngBounds::default() {
+            let current = self.view.center(WrapMode::Unwrapped).longitude();
             if current.is_finite() {
                 let turns = ((current - constrained.longitude()) / constants::DEGREES_MAX).round();
-                constrained = self::lat_lng(
+                constrained = LatLng::saturating(
                     constrained.latitude(),
                     constrained.longitude() + turns * constants::DEGREES_MAX,
                     WrapMode::Unwrapped,
@@ -1504,268 +679,37 @@ impl TransformState {
             }
         }
 
-        let min_scale = if self.is_globe_rendering() {
-            self.zoom_scale(self.get_min_zoom_at_latitude(constrained.latitude()))
+        let min_scale = if globe {
+            zoom_scale(self.min_zoom_at_latitude(constrained.latitude()))
         } else {
             self.constrained_min_scale()
         };
-        let new_scale = mln_math::clamp_f64(self.zoom_scale(zoom), min_scale, self.max_scale);
-        let new_world_size = new_scale * TILE_SIZE_D;
-        let bc = new_world_size / constants::DEGREES_MAX;
-        let cc = new_world_size / M2PI;
-
-        // The globe's center can be on a pole, which the clamped sine stops
-        // short of.
-        let latitude = mln_math::deg2rad(constrained.latitude());
-        let m = 1.0 - 1e-15;
-        let f = mln_math::clamp_f64(latitude.sin(), -m, m);
-
-        let point = ScreenCoordinate::new(
-            -constrained.longitude() * bc,
-            if self.is_globe_rendering() {
-                cc * latitude.tan().asinh()
-            } else {
-                0.5 * cc * ((1.0 + f) / (1.0 - f)).ln()
-            },
-        );
-        self.set_scale_point(new_scale, &point);
+        let new_scale = mln_math::clamp_f64(zoom_scale(zoom), min_scale, self.max_scale());
+        let (x, y) = map_offset(&constrained, new_scale, globe);
+        // A far unwrapped longitude can overflow the point.
+        if !x.is_finite() || !y.is_finite() {
+            return;
+        }
+        let (scale, x, y) = self.constrain(new_scale, x, y);
+        self.update(|p| {
+            p.scale = scale;
+            p.x = x;
+            p.y = y;
+        });
     }
 
+    /// Sets the center's altitude, in meters.
     pub fn set_center_altitude(&mut self, alt_m: f64) {
         if !alt_m.is_finite() {
             return;
         }
-        self.z = alt_m
-            / Projection::get_meters_per_pixel_at_latitude(
-                self.get_lat_lng(WrapMode::Unwrapped).latitude(),
-                self.get_zoom(),
-            );
-        self.invalidate_matrices();
-    }
-
-    fn set_scale_point(&mut self, new_scale: f64, point: &ScreenCoordinate) {
-        // A far unwrapped longitude can overflow the point.
-        if !point.x.is_finite() || !point.y.is_finite() {
-            return;
-        }
-        (self.scale, self.x, self.y) = self.constrain(new_scale, point.x, point.y);
-        self.bc = Projection::world_size(self.scale) / constants::DEGREES_MAX;
-        self.cc = Projection::world_size(self.scale) / M2PI;
-        self.invalidate_matrices();
-    }
-
-    pub fn max_pitch_scale_factor(&self) -> f32 {
-        if self.size.is_empty() {
-            return 0.0;
-        }
-        // The globe pads queries with the Mercator factor, as GL JS does, from
-        // the corner's unclamped Mercator position. C++ builds the point from
-        // `static_cast<float>(height)`.
-        let corner = self.mercator_screen_coordinate_to_tile_coordinate(
-            &ScreenCoordinate::new(0.0, f64::from(self.get_size().height as f32)),
-            0,
-        );
-        // A point on the screen has a LatLng unless the state holds NaN,
-        // where C++ throws; the port renders without the pitch factor.
-        let Ok(lat_lng) = Projection::unproject(&corner.p, 1.0 / TILE_SIZE_D, WrapMode::Unwrapped) else {
-            return 0.0;
-        };
-
-        let pt = if self.is_globe_rendering() {
-            Point::new(corner.p.x * self.scale, corner.p.y * self.scale)
-        } else {
-            let pt = Projection::project(&lat_lng, self.scale);
-            Point::new(pt.x / TILE_SIZE_D, pt.y / TILE_SIZE_D)
-        };
-        let p: Vec4 = [pt.x, pt.y, 0.0, 1.0];
-        let mut top_point: Vec4 = [0.0; 4];
-        matrix::transform_mat4(&mut top_point, &p, &self.get_coord_matrix());
-        top_point[3] as f32 / self.get_camera_to_center_distance()
+        let view = &self.view;
+        let z =
+            alt_m / Projection::meters_per_pixel_at_latitude(view.center(WrapMode::Unwrapped).latitude(), view.zoom());
+        self.update(|p| p.z = z);
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use mln_style_types::ProjectionDefinition;
-    use mln_util::constants::{DEFAULT_FOV, LATITUDE_MAX};
-    use mln_util::geo::LatLng;
-    use mln_util::mat4::matrix;
-    use mln_util::projection::Projection;
-    use mln_util::size::Size;
-
-    use super::TransformState;
-    use crate::{Camera, LogicalExtent, MapView, ProjectionMode, Viewport};
-
-    /// A 512 by 512 view at `pitch` degrees, looking north.
-    fn pitched(pitch: f64) -> TransformState {
-        MapView {
-            camera: Camera {
-                center: LatLng::new(0.0, -60.0).unwrap(),
-                zoom: 5.0,
-                pitch,
-                fov: mln_math::rad2deg(DEFAULT_FOV),
-                ..Camera::default()
-            },
-            extent: LogicalExtent::new(Size::new(512, 512), 1.0),
-            projection_mode: ProjectionMode::default(),
-            viewport: Viewport::default(),
-            projection: ProjectionDefinition::default(),
-        }
-        .to_state()
-        .unwrap()
-    }
-
-    /// The ground north of the center through `state`'s projection matrix,
-    /// every hundredth of a degree up to 85 degrees north: each point's row
-    /// from the top of the view, and its clip z over w.
-    fn meridian(state: &TransformState) -> Vec<(f64, f64)> {
-        let proj_matrix = state.get_proj_matrix(1, false);
-        let height = f64::from(state.get_size().height);
-        (0..8500)
-            .map(|step| {
-                let lat_lng = LatLng::new(f64::from(step) / 100.0, -60.0).unwrap();
-                let point = Projection::project(&lat_lng, state.get_scale());
-                let mut clip = [0.0; 4];
-                matrix::transform_mat4(&mut clip, &[point.x, point.y, 0.0, 1.0], &proj_matrix);
-                ((1.0 - clip[1] / clip[3]) / 2.0 * height, clip[2] / clip[3])
-            })
-            .collect()
-    }
-
-    /// At high pitch the far plane ends the map at GL JS's horizon, below
-    /// the top of the view: the ground drawn below the horizon is nearer
-    /// than the far plane, and the ground drawn above it, up to the flat
-    /// map's geometric horizon, is past it.
-    #[test]
-    fn the_map_ends_at_the_horizon() {
-        let state = pitched(85.0);
-        let horizon_row = 256.0 - state.get_mercator_horizon();
-        let ground = meridian(&state);
-        assert!(ground.iter().filter(|(row, _)| *row > horizon_row).all(|(_, depth)| *depth < 1.0));
-        let past: Vec<_> = ground.iter().filter(|(row, _)| *row < horizon_row - 1.0).collect();
-        assert_ne!(past.len(), 0);
-        assert!(past.iter().all(|(row, depth)| *row > 0.0 && *depth > 1.0));
-    }
-
-    /// Below about 68 degrees of pitch the horizon is above the top of the
-    /// view, and the far plane reaches the ground at the top.
-    #[test]
-    fn the_map_fills_the_view_at_lower_pitch() {
-        let state = pitched(60.0);
-        assert!(state.get_mercator_horizon() > 256.0);
-        let ground = meridian(&state);
-        assert!(ground.iter().filter(|(row, _)| *row >= 0.0).all(|(_, depth)| *depth < 1.0));
-        assert!(ground.iter().any(|(row, _)| *row < 0.0));
-    }
-
-    /// The globe's `asinh(tan(φ))` and the Mercator branch's
-    /// `0.5 * ln((1 + sin φ) / (1 - sin φ))` give the same y inside the
-    /// Mercator range, so the center doesn't jump when the projection
-    /// changes.
-    #[test]
-    fn globe_and_mercator_latitude_to_y_agree() {
-        for latitude in [-LATITUDE_MAX, -60.0, -1e-9, 0.0, 30.0, 80.0, LATITUDE_MAX] {
-            let phi = mln_math::deg2rad(latitude);
-            let globe = phi.tan().asinh();
-            let f = phi.sin();
-            let mercator = 0.5 * ((1.0 + f) / (1.0 - f)).ln();
-            assert!((globe - mercator).abs() <= 1e-12, "{latitude}: {globe} vs {mercator}");
-        }
-    }
-
-    #[test]
-    fn a_center_too_far_to_place_leaves_the_camera_unchanged() {
-        use mln_util::geo::WrapMode;
-
-        let mut state = pitched(30.0);
-        let center = state.get_lat_lng(WrapMode::Unwrapped);
-        let zoom = state.get_zoom();
-        let projection = state.get_projection_matrix();
-        state.set_lat_lng_zoom(&LatLng::with_mode(0.0, f64::MAX, WrapMode::Unwrapped).unwrap(), 22.0);
-        assert_eq!(center, state.get_lat_lng(WrapMode::Unwrapped));
-        assert_eq!(zoom, state.get_zoom());
-        assert_eq!(projection, state.get_projection_matrix());
-    }
-
-    /// Every setter that takes a number, given NaN, infinities and extreme
-    /// finite values, on a flat map and a globe: the state's reads that
-    /// return locations and matrices still don't panic.
-    #[test]
-    fn numbers_out_of_range_do_not_panic() {
-        use mln_style_types::ProjectionType;
-        use mln_util::geo::{EdgeInsets, ScreenCoordinate, WrapMode};
-
-        use crate::FreeCameraOptions;
-
-        type Setter = (&'static str, fn(&mut TransformState, f64));
-        let values =
-            [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, f64::MAX, -f64::MAX, f64::MIN_POSITIVE, 0.0, 1e300, -1e300];
-        let setters: &[Setter] = &[
-            ("scale", |s, v| s.set_scale(v)),
-            ("x", |s, v| s.set_x(v)),
-            ("y", |s, v| s.set_y(v)),
-            ("bearing", |s, v| s.set_bearing(v)),
-            ("field of view", |s, v| s.set_field_of_view(v)),
-            ("roll", |s, v| s.set_roll(v)),
-            ("pitch", |s, v| s.set_pitch(v)),
-            ("x skew", |s, v| {
-                s.set_axonometric(true);
-                s.set_x_skew(v);
-            }),
-            ("y skew", |s, v| {
-                s.set_axonometric(true);
-                s.set_y_skew(v);
-            }),
-            ("min zoom", |s, v| s.set_min_zoom(v)),
-            ("max zoom", |s, v| s.set_max_zoom(v)),
-            ("min pitch", |s, v| s.set_min_pitch(v)),
-            ("max pitch", |s, v| s.set_max_pitch(v)),
-            ("center altitude", |s, v| s.set_center_altitude(v)),
-            ("zoom", |s, v| s.set_lat_lng_zoom(&LatLng::new(10.0, 10.0).unwrap(), v)),
-            ("longitude", |s, v| {
-                if let Ok(lat_lng) = LatLng::with_mode(0.0, v, WrapMode::Unwrapped) {
-                    s.set_lat_lng_zoom(&lat_lng, 22.0);
-                }
-            }),
-            ("free camera position", |s, v| {
-                s.set_free_camera_options(&FreeCameraOptions { position: Some([v, v, v]), orientation: None });
-            }),
-            ("free camera altitude", |s, v| {
-                s.set_free_camera_options(&FreeCameraOptions { position: Some([0.5, 0.5, v]), orientation: None });
-            }),
-            ("free camera orientation", |s, v| {
-                s.set_free_camera_options(&FreeCameraOptions { position: None, orientation: Some([v, 0.0, 0.0, 1.0]) });
-            }),
-            ("edge insets", |s, v| s.set_edge_insets(&EdgeInsets { top: v, left: v, bottom: v, right: v })),
-            ("frustum offset", |s, v| {
-                s.set_frustum_offset(&EdgeInsets { top: v, left: v, bottom: v, right: v });
-            }),
-            ("move anchor", |s, v| {
-                let _ = s.move_lat_lng(&LatLng::new(1.0, 1.0).unwrap(), &ScreenCoordinate::new(v, v));
-            }),
-        ];
-        for globe in [false, true] {
-            for (name, set) in setters {
-                for &value in &values {
-                    let mut state = pitched(30.0);
-                    if globe {
-                        state.set_projection_definition(&ProjectionDefinition::new(ProjectionType::Globe));
-                    }
-                    let read = std::panic::catch_unwind(move || {
-                        set(&mut state, value);
-                        let center = state.get_lat_lng(WrapMode::Unwrapped);
-                        let _ = state.lat_lng_near_center(&LatLng::new(1.0, 1.0).unwrap());
-                        let _ = state.constrained_center(&center, state.get_zoom());
-                        let _ = state.get_center_altitude();
-                        let _ = state.get_projection_matrix();
-                        let _ = state.get_free_camera_options();
-                        let _ = state.lat_lng_to_screen_coordinate(&center);
-                        let _ = state
-                            .screen_coordinate_to_lat_lng(&ScreenCoordinate::new(256.0, 256.0), WrapMode::Unwrapped);
-                    });
-                    assert!(read.is_ok(), "globe: {globe}, {name}: {value:e}");
-                }
-            }
-        }
-    }
-}
+#[path = "transform_state_test.rs"]
+mod transform_state_test;

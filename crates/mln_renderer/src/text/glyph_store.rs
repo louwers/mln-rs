@@ -23,11 +23,14 @@
 // lacks. Either way the glyph keeps its PBF glyph ID, so the layout doesn't
 // change.
 //
-// Font faces (MLN_TEXT_SHAPING_HARFBUZZ): the style's "font-faces" are
-// fetched as font files (`Resource::font_face`), or read from the bytes a
-// face holds (an app's fallback faces can), and shaped here, on the render
-// thread, with the `FontFaceEngine` (font_face_engine.rs): mln_text's
-// HBShaper (HarfRust) natively, ready at once. An engine that needs time to
+// Font faces: the style's "font-faces" are fetched as font files
+// (`Resource::font_face`), or read from the bytes a face holds (an app's
+// fallback faces can), and shaped here, on the render thread, with the
+// `FontFaceEngine` (font_face_engine.rs): mln_text's Shaper (HarfRust)
+// natively, ready at once. Text that the device's fonts shape
+// (`GlyphIDType::SYSTEM`) is shaped the same way, a piece at a time: each
+// piece with the font that `LocalGlyphs`' rasterizer gives for its first
+// character. An engine that needs time to
 // get ready (the browser build loads its shaper as a second wasm module) is
 // asked to as soon as the style has font faces; a font file that arrives
 // before it is ready waits, parsed in the update after the engine reports
@@ -39,14 +42,15 @@ use std::sync::Arc;
 
 use mln_storage::{FileSource, Request, Resource, Response};
 use mln_text::glyph::{
-    FontData, FontFaces, Glyph, GlyphDependencies, GlyphID, GlyphIDType, GlyphMap, GlyphRange, HBShapeRequests,
-    get_glyph_range,
+    FontData, FontFaces, Glyph, GlyphDependencies, GlyphID, GlyphIDType, GlyphMap, GlyphRange, ShapeRequests,
+    face_type, get_glyph_range,
 };
 use mln_text::glyph_cache::{GlyphCache, GlyphCacheRange};
 use mln_text::glyph_pbf::parse_glyph_pbf;
 use mln_text::local_glyph_rasterizer::LocalGlyphs;
 use mln_text::tagged_string::font_stack_hash;
-use mln_text::{HBShapedText, visual_runs};
+use mln_text::weight::REGULAR_WEIGHT;
+use mln_text::{BiDiRun, ShapedText, visual_runs};
 use mln_util::error::Error;
 use mln_util::font_stack::FontStack;
 use mln_util::hash::HashMap;
@@ -62,7 +66,7 @@ use crate::text::font_face_engine::{FontFaceEngine, FontFaceShaper};
 use crate::tile::inbox::{InboxSender, TileEvent, Waker};
 
 /// Each font-face text of each font stack, shaped by its face.
-pub(crate) type HBShapeResults = VecMap<FontStack, VecMap<GlyphIDType, BTreeMap<Vec<char>, Arc<HBShapedText>>>>;
+pub(crate) type ShapeResults = VecMap<FontStack, VecMap<GlyphIDType, BTreeMap<Vec<char>, Arc<ShapedText>>>>;
 
 /// What a glyph range's response brought.
 pub(crate) enum GlyphData {
@@ -96,7 +100,8 @@ enum RangeState {
 #[derive(Default)]
 struct Entry {
     ranges: VecMap<GlyphRange, RangeState>,
-    /// Local and HarfBuzz glyphs. PBF glyphs are in the ranges.
+    /// Local glyphs and the glyphs of font files. PBF glyphs are in the
+    /// ranges.
     glyphs: BTreeMap<GlyphID, Arc<Glyph>>,
     /// The PBF glyph IDs that no local font has.
     no_local: BTreeSet<GlyphID>,
@@ -117,8 +122,11 @@ impl Entry {
     }
 }
 
+/// One of the device's fonts loaded for shaping, with the type of its glyphs.
+type SystemShaper = (GlyphIDType, Rc<dyn FontFaceShaper>);
+
 /// The loaded HarfBuzz shapers of each font stack, by font face type.
-type HBShapers = VecMap<FontStack, VecMap<GlyphIDType, Rc<dyn FontFaceShaper>>>;
+type Shapers = VecMap<FontStack, VecMap<GlyphIDType, Rc<dyn FontFaceShaper>>>;
 
 /// What the font-face engine's `prepare` reported, and whether a font file
 /// waits for it, so that the report asks for an update; shared with its
@@ -144,7 +152,7 @@ pub(crate) struct ResolvedGlyphs {
     /// one that no font has or whose range failed.
     pub(crate) glyphs: GlyphMap,
     /// The shaping of the font-face text.
-    pub(crate) shaping: HBShapeResults,
+    pub(crate) shaping: ShapeResults,
     /// Whether a range they needed failed, so that a retry lays the tile out
     /// again.
     pub(crate) failed: bool,
@@ -180,7 +188,12 @@ pub(crate) struct GlyphStore {
     /// Font files that arrived before the engine was ready, with the
     /// request each answers.
     deferred_responses: Vec<(FontData, FontStack, GlyphRange, u64)>,
-    hb_shapers: HBShapers,
+    shapers: Shapers,
+    /// The device's fonts that shaped text, a few, by `LocalFont::key`:
+    /// `None` for one the engine can't read.
+    system_shapers: Vec<(Arc<str>, Option<SystemShaper>)>,
+    /// Whether text of the device's fonts waits for the engine.
+    system_waits: bool,
 }
 
 impl GlyphStore {
@@ -211,7 +224,9 @@ impl GlyphStore {
             engine_prepared: false,
             engine_readiness: Arc::default(),
             deferred_responses: Vec::new(),
-            hb_shapers: VecMap::new(),
+            shapers: VecMap::new(),
+            system_shapers: Vec::new(),
+            system_waits: false,
         }
     }
 
@@ -240,8 +255,13 @@ impl GlyphStore {
     }
 
     /// Takes in the font files that waited for the engine once it reported
-    /// back.
+    /// back, and has the text of the device's fonts that waited for it
+    /// resolve again.
     pub(crate) fn update(&mut self) {
+        if self.system_waits && self.engine_readiness.lock().result.is_some() {
+            self.system_waits = false;
+            self.revision += 1;
+        }
         if !self.deferred_responses.is_empty() && self.engine_readiness.lock().result.is_some() {
             for (data, font_stack, range, id) in std::mem::take(&mut self.deferred_responses) {
                 if self.is_loading(&font_stack, range, id) {
@@ -317,6 +337,10 @@ impl GlyphStore {
             if waits {
                 return None;
             }
+        }
+
+        if self.waits_for_engine(&dependencies.shapes) {
+            return None;
         }
 
         let mut glyphs = GlyphMap::new();
@@ -397,7 +421,9 @@ impl GlyphStore {
         let code = u32::from(glyph_id.code);
         let faces: Vec<GlyphIDType> = (self.font_faces.iter().flat_map(|faces| faces.iter()))
             .filter(|face| {
-                face.name.is_empty() && face.ranges.iter().any(|&(first, last)| (first..=last).contains(&code))
+                face.name.is_empty()
+                    && face.type_ != GlyphIDType::SYSTEM
+                    && face.ranges.iter().any(|&(first, last)| (first..=last).contains(&code))
             })
             .map(|face| face.type_)
             .collect();
@@ -433,39 +459,38 @@ impl GlyphStore {
     /// The glyph of the character that the PBF glyph `glyph_id` names, from
     /// the loaded font face of `type_`, unshaped.
     fn face_glyph(&self, font_stack: &FontStack, type_: GlyphIDType, glyph_id: GlyphID) -> Option<Glyph> {
-        let shaper = self.hb_shaper(font_stack, type_)?;
+        let shaper = self.shaper(font_stack, type_)?;
         let c = glyph_id.char()?;
-        let (mut ids, mut adjusts) = (Vec::new(), Vec::new());
-        shaper.shape(&[c], false, &mut ids, &mut adjusts);
-        let [id] = ids[..] else { return None };
+        let mut shaped = ShapedText::default();
+        shaper.shape(&[c], false, &mut shaped);
+        let [id] = shaped.glyphs[..] else { return None };
         if id.code == 0 {
             return None;
         }
-        let mut glyph = shaper.rasterize(&id);
+        let mut glyph = shaper.rasterize(id);
         glyph.bitmap = transform_raster_to_sdf(&glyph.bitmap, 8.0, 0.25);
         Some(glyph)
     }
 
-    /// Shapes each font-face text with its font, and adds the glyphs it
-    /// shaped to `glyphs`.
-    fn shape(&mut self, requests: &HBShapeRequests, glyphs: &mut GlyphMap) -> HBShapeResults {
-        let mut results = HBShapeResults::new();
+    /// Shapes each font-face text with its font, and the device's fonts'
+    /// text with theirs, and adds the glyphs it shaped to `glyphs`.
+    fn shape(&mut self, requests: &ShapeRequests, glyphs: &mut GlyphMap) -> ShapeResults {
+        let mut results = ShapeResults::new();
         for (font_stack, font_types) in requests {
             let font_stack_hash = font_stack_hash(font_stack);
             for (type_, strs) in font_types {
-                let shaper = self.hb_shaper(font_stack, *type_);
+                let shaper = self.shaper(font_stack, *type_);
                 for str_ in strs {
-                    let mut shaped_glyph_ids = Vec::new();
-                    let mut shaped_adjusts = Vec::new();
+                    let mut shaped = ShapedText::default();
                     // Shapes each run in its own direction, in visual order.
-                    if let Some(shaper) = &shaper {
-                        for run in visual_runs(str_) {
-                            shaper.shape(&run.text, run.rtl, &mut shaped_glyph_ids, &mut shaped_adjusts);
+                    for run in visual_runs(str_) {
+                        if *type_ == GlyphIDType::SYSTEM {
+                            self.shape_with_system_fonts(font_stack, &run, &mut shaped);
+                        } else if let Some(shaper) = &shaper {
+                            shaper.shape(&run.text, run.rtl, &mut shaped);
                         }
                     }
-                    let mut shaped_glyphs: Vec<u16> = Vec::with_capacity(shaped_glyph_ids.len());
-                    for glyph_id in &shaped_glyph_ids {
-                        shaped_glyphs.push(glyph_id.code);
+                    for glyph_id in &shaped.glyphs {
                         let need_shape =
                             !glyphs.get(&font_stack_hash).is_some_and(|glyphs| glyphs.contains_key(glyph_id));
                         if need_shape {
@@ -475,14 +500,78 @@ impl GlyphStore {
                         }
                     }
 
-                    results.entry(font_stack.clone()).or_default().entry(*type_).or_default().insert(
-                        str_.clone(),
-                        Arc::new(HBShapedText { glyphs: shaped_glyphs, adjusts: shaped_adjusts }),
-                    );
+                    results
+                        .entry(font_stack.clone())
+                        .or_default()
+                        .entry(*type_)
+                        .or_default()
+                        .insert(str_.clone(), Arc::new(shaped));
                 }
             }
         }
         results
+    }
+
+    /// Shapes `run` with the device's fonts, a piece at a time: each piece
+    /// the characters that one font draws, with the marks and joiners after
+    /// them. A character that no font has is left out.
+    fn shape_with_system_fonts(&mut self, font_stack: &FontStack, run: &BiDiRun, shaped: &mut ShapedText) {
+        let mut pieces: Vec<(Rc<dyn FontFaceShaper>, Vec<char>)> = Vec::new();
+        for &c in &run.text {
+            if i18n::extends_previous(c)
+                && let Some((_, piece)) = pieces.last_mut()
+            {
+                piece.push(c);
+                continue;
+            }
+            let Some(shaper) = self.system_shaper(font_stack, c) else { continue };
+            match pieces.last_mut() {
+                Some((last, piece)) if Rc::ptr_eq(last, &shaper) => piece.push(c),
+                _ => pieces.push((shaper, vec![c])),
+            }
+        }
+        // A right-to-left run's later pieces lie to the left of its earlier
+        // ones.
+        if run.rtl {
+            pieces.reverse();
+        }
+        for (shaper, piece) in pieces {
+            shaper.shape(&piece, run.rtl, shaped);
+        }
+    }
+
+    /// Whether `shapes` has text of the device's fonts, which load with the
+    /// engine, and the engine isn't ready yet: then it has `update` answer
+    /// once it is.
+    fn waits_for_engine(&mut self, shapes: &ShapeRequests) -> bool {
+        if !shapes.values().any(|types| types.contains_key(&GlyphIDType::SYSTEM)) {
+            return false;
+        }
+        self.prepare_engine();
+        let mut readiness = self.engine_readiness.lock();
+        if readiness.result.is_some() {
+            return false;
+        }
+        readiness.waiting = true;
+        self.system_waits = true;
+        true
+    }
+
+    /// The shaper of the device's font that draws `c` for a label in
+    /// `font_stack`, loaded the first time.
+    fn system_shaper(&mut self, font_stack: &FontStack, c: char) -> Option<Rc<dyn FontFaceShaper>> {
+        let font = self.local.rasterizer.as_ref()?.font(font_stack, c)?;
+        if let Some((_, loaded)) = self.system_shapers.iter().find(|(key, _)| *key == font.key) {
+            return loaded.as_ref().map(|(_, shaper)| Rc::clone(shaper));
+        }
+        let type_ = face_type(&font.key, "", &[]);
+        let loaded = matches!(self.engine_readiness.lock().result, Some(Ok(())))
+            .then(|| self.engine.load(type_, font.data, font.weight))
+            .flatten()
+            .map(|shaper| (type_, Rc::<dyn FontFaceShaper>::from(shaper)));
+        let shaper = loaded.as_ref().map(|(_, shaper)| Rc::clone(shaper));
+        self.system_shapers.push((font.key, loaded));
+        shaper
     }
 
     fn request_range(
@@ -508,7 +597,7 @@ impl GlyphStore {
             let url = self.font_face_url(range.type_);
             if url.is_empty() {
                 // The request of an empty URL fails, as the glyphs do.
-                Log::error(Event::Style, "Try download a glyph doesn't in current faces");
+                Log::error(Event::Style, format!("font face {} has no URL", range.type_.id()));
             }
             Resource::font_face(&url)
         };
@@ -568,7 +657,7 @@ impl GlyphStore {
                 if self.defer_until_engine_ready(&data, font_stack, range, id) {
                     return;
                 }
-                if self.load_hb_shaper(font_stack, range.type_, data) {
+                if self.load_shaper(font_stack, range.type_, data) {
                     let id = GlyphID::with_type(0, range.type_);
                     let entry = self.entries.entry(font_stack.clone()).or_default();
                     entry.glyphs.insert(id, Arc::new(Glyph { id, ..Glyph::default() }));
@@ -621,9 +710,9 @@ impl GlyphStore {
         }
 
         if glyph_id.type_ != GlyphIDType::FontPBF
-            && let Some(shaper) = self.hb_shaper(font_stack, glyph_id.type_)
+            && let Some(shaper) = self.shaper(font_stack, glyph_id.type_)
         {
-            let mut glyph = shaper.rasterize(&glyph_id);
+            let mut glyph = shaper.rasterize(glyph_id);
             glyph.bitmap = transform_raster_to_sdf(&glyph.bitmap, 8.0, 0.25);
             let glyph = Arc::new(glyph);
             self.entries.entry(font_stack.clone()).or_default().glyphs.insert(glyph_id, Arc::clone(&glyph));
@@ -683,20 +772,24 @@ impl GlyphStore {
         true
     }
 
-    fn hb_shaper(&self, font_stack: &FontStack, type_: GlyphIDType) -> Option<Rc<dyn FontFaceShaper>> {
-        self.hb_shapers.get(font_stack).and_then(|shapers| shapers.get(&type_)).cloned()
+    /// The shaper of a style or fallback face of `font_stack`, or of one of
+    /// the device's fonts, by the type of its glyphs.
+    fn shaper(&self, font_stack: &FontStack, type_: GlyphIDType) -> Option<Rc<dyn FontFaceShaper>> {
+        let face = self.shapers.get(font_stack).and_then(|shapers| shapers.get(&type_));
+        let system = || self.system_shapers.iter().filter_map(|(_, loaded)| loaded.as_ref()).find(|(t, _)| *t == type_);
+        face.or_else(|| system().map(|(_, shaper)| shaper)).cloned()
     }
 
     /// Loads the font face `data` for `font_stack`; false, as for an invalid
     /// font, when the engine failed to get ready.
-    fn load_hb_shaper(&mut self, font_stack: &FontStack, type_: GlyphIDType, data: FontData) -> bool {
+    fn load_shaper(&mut self, font_stack: &FontStack, type_: GlyphIDType, data: FontData) -> bool {
         if !matches!(self.engine_readiness.lock().result, Some(Ok(()))) {
             return false;
         }
-        let Some(shaper) = self.engine.load(type_, data) else {
+        let Some(shaper) = self.engine.load(type_, data, REGULAR_WEIGHT as u16) else {
             return false;
         };
-        self.hb_shapers.entry(font_stack.clone()).or_default().insert(type_, Rc::from(shaper));
+        self.shapers.entry(font_stack.clone()).or_default().insert(type_, Rc::from(shaper));
         true
     }
 

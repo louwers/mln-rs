@@ -81,10 +81,7 @@ pub enum InvalidGestureOptions {
 /// level and flat); and a double tap zooms in a level and a two-finger tap
 /// out.
 ///
-/// The recognizer's rates and thresholds come from maplibre-native-ffi's
-/// browser demo where it has the gesture and GL JS's handlers elsewhere; the
-/// crate's README compares each. Distances are in logical pixels, and times
-/// in milliseconds (`_ms`).
+/// Distances are in logical pixels, and times in milliseconds (`_ms`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct GestureOptions {
     pub pan: PanOptions,

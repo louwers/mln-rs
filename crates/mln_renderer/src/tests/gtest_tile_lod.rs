@@ -2,7 +2,7 @@ use mln_math::deg2rad;
 
 use crate::util::tile_lod::{self, TileZoomFunction};
 
-// TransformState's default field of view, in degrees.
+// A view's default field of view, in degrees.
 const FOV: f64 = 36.869_897_645_844_02;
 
 /// gtest's `EXPECT_DOUBLE_EQ`: equal within 4 ULPs.

@@ -31,7 +31,7 @@ use crate::bucket::Bucket;
 use crate::bucket_geometry::{BucketGeometry, GeometryUpload, bucket_indexes, bucket_vertices, paint_vertices};
 use crate::buckets::circle_bucket::CircleBucket;
 use crate::buckets::fill_bucket::FillBucket;
-use crate::buckets::fill_extrusion_bucket::FillExtrusionBucket;
+use crate::buckets::fill_extrusion_bucket::{FillExtrusionBucket, tile_units_per_meter};
 use crate::buckets::line_bucket::{LineBucket, LineLayoutVertex};
 use crate::buckets::raster_bucket::{RasterBucket, RasterLayoutVertex};
 use crate::buckets::symbol_bucket::SymbolBucket;
@@ -137,13 +137,13 @@ fn fill_bucket() {
     assert!(!bucket.needs_upload());
 }
 
-/// The vertices of a fill-extrusion bucket holding `polygon` extruded with
-/// `fill-extrusion-rounded-corner-distance` set to `distance`.
-fn fill_extrusion_vertex_count(polygon: &GeometryCollection, distance: f32) -> usize {
+/// The vertices of a fill-extrusion bucket of `tile` holding `polygon`
+/// extruded with `fill-extrusion-rounded-corner-distance` set to `meters`.
+fn fill_extrusion_vertex_count(polygon: &GeometryCollection, meters: f32, tile: CanonicalTileID) -> usize {
     let layout = FillExtrusionLayoutProperties::PossiblyEvaluated {
-        fill_extrusion_rounded_corner_distance: Evaluated::Constant(distance),
+        fill_extrusion_rounded_corner_distance: Evaluated::Constant(meters),
     };
-    let mut bucket = FillExtrusionBucket::new(layout, &VecMap::new(), 16.0, 1);
+    let mut bucket = FillExtrusionBucket::new(layout, &VecMap::new(), f32::from(tile.z), 1);
     bucket
         .add_feature(
             &feature(FeatureType::Polygon, polygon),
@@ -151,7 +151,7 @@ fn fill_extrusion_vertex_count(polygon: &GeometryCollection, distance: f32) -> u
             &ImagePositions::default(),
             &PatternLayerMap::default(),
             0,
-            &CanonicalTileID::new(0, 0, 0),
+            &tile,
         )
         .unwrap();
     assert!(bucket.has_data());
@@ -159,13 +159,72 @@ fn fill_extrusion_vertex_count(polygon: &GeometryCollection, distance: f32) -> u
 }
 
 #[test]
-fn fill_extrusion_bucket_rounds_corners() {
-    let square = collection(&[&[(0, 0), (100, 0), (100, 100), (0, 100), (0, 0)]]);
+fn fill_extrusion_bucket_rounds_corners_in_meters() {
+    let square = collection(&[&[(0, 0), (1000, 0), (1000, 1000), (0, 1000), (0, 0)]]);
+    let z16 = CanonicalTileID::new(16, 32768, 32768);
 
     // A ring of n points has n vertices, each the roof's and a wall's.
-    assert_eq!(fill_extrusion_vertex_count(&square, 0.0), 5);
-    // Rounding replaces each of the 4 corners with 5 points.
-    assert_eq!(fill_extrusion_vertex_count(&square, 10.0), 21);
+    assert_eq!(fill_extrusion_vertex_count(&square, 0.0, z16), 5);
+    // Rounding replaces each of the 4 corners with 4 points.
+    assert_eq!(fill_extrusion_vertex_count(&square, 2.0, z16), 17);
+    // At z0 a tile unit is about 5 km, and 2 m rounds to nothing.
+    assert_eq!(fill_extrusion_vertex_count(&square, 2.0, CanonicalTileID::new(0, 0, 0)), 5);
+}
+
+#[test]
+fn fill_extrusion_walls_on_clip_lines_leave_the_pattern_where_it_was() {
+    // The edge from (-64, 100) to (-64, 0) is a clip line, and has no wall
+    // to wrap the pattern around: the wall after it starts where the one
+    // before it ended.
+    let square = collection(&[&[(100, 100), (-64, 100), (-64, 0), (100, 0), (100, 100)]]);
+    let layout = FillExtrusionLayoutProperties::PossiblyEvaluated {
+        fill_extrusion_rounded_corner_distance: Evaluated::Constant(0.0),
+    };
+    let mut bucket = FillExtrusionBucket::new(layout, &VecMap::new(), 16.0, 1);
+    bucket
+        .add_feature(
+            &feature(FeatureType::Polygon, &square),
+            &square,
+            &ImagePositions::default(),
+            &PatternLayerMap::default(),
+            0,
+            &CanonicalTileID::new(16, 32768, 32768),
+        )
+        .unwrap();
+    let edge_distances: Vec<u16> = bucket.vertices.get_mut().iter().map(|v| v.a2[1]).collect();
+    assert_eq!(edge_distances, [0, 164, 164, 328, 428]);
+}
+
+#[test]
+fn fill_extrusion_bucket_skips_polygons_rounded_off_the_tile() {
+    // Only the corner at (0, 100) is on the tile, and rounding cuts it off.
+    let triangle = collection(&[&[(0, 100), (-10, 90), (-10, 110), (0, 100)]]);
+    let layout = FillExtrusionLayoutProperties::PossiblyEvaluated {
+        fill_extrusion_rounded_corner_distance: Evaluated::Constant(100.0),
+    };
+    let mut bucket = FillExtrusionBucket::new(layout, &VecMap::new(), 16.0, 1);
+    bucket
+        .add_feature(
+            &feature(FeatureType::Polygon, &triangle),
+            &triangle,
+            &ImagePositions::default(),
+            &PatternLayerMap::default(),
+            0,
+            &CanonicalTileID::new(16, 32768, 32768),
+        )
+        .unwrap();
+    assert!(!bucket.has_data());
+}
+
+#[test]
+fn tile_units_per_meter_grows_with_zoom_and_latitude() {
+    // A z16 tile at the equator spans about 611 m.
+    let equator = tile_units_per_meter(&CanonicalTileID::new(16, 32768, 32768));
+    assert!((equator - 8192.0 / 611.5).abs() < 0.01, "{equator}");
+    assert!((tile_units_per_meter(&CanonicalTileID::new(17, 65536, 65536)) / equator - 2.0).abs() < 1e-3);
+    // Near 60° N a meter is twice as many units.
+    let north = tile_units_per_meter(&CanonicalTileID::new(16, 32768, 19031));
+    assert!((north / equator - 2.0).abs() < 0.01, "{north}");
 }
 
 /// A fill bucket whose "fill-color" is the given data-driven expression, with
@@ -882,6 +941,125 @@ fn a_draw_writes_an_update_of_the_vertices_it_binds() {
         // Without an update, an upload writes nothing.
         objects.upload(gpu, context);
         assert_eq!(context.rendering_stats().buffer_updates, uploaded + 3);
+    });
+}
+
+// A draw binds the buffer of the vertices it reads as a storage buffer as a
+// buffer of its own, which its uploads write the vertices' updates to.
+#[test]
+fn a_draw_binds_the_vertices_it_reads_as_a_storage_buffer() {
+    use mln_gfx::shaders::shader_defines::ID_FILL_EXTRUSION_WALL_VERTICES as ID;
+    use mln_gfx::{ColorMode, CullFaceMode, DrawMode};
+
+    use crate::draw::{DrawGeometry, DrawObjects};
+    use crate::gfx::shader_registry::ShaderRegistry;
+    use crate::gfx::vertex_attribute::VertexAttributeArray;
+
+    with_context(|gpu, context| {
+        let registry = ShaderRegistry::new(&mln_gfx::shaders::program_parameters::ProgramParameters::new(1.0, false));
+        let shader = registry
+            .shader("FillExtrusionPulledShader", mln_gfx::projection_variant::ProjectionVariant::Mercator)
+            .expect("the pulled wall shader");
+        let typed = context.add_dynamic_vertices(&[[0u32; 2], [1; 2]]);
+        let geometry = DrawGeometry {
+            vertices: VertexAttributeArray::new(),
+            vertex_count: 4,
+            mode: DrawMode::Triangles(),
+            indexes: DrawIndexes::new(vec![0, 2, 1, 1, 2, 3]),
+            segments: vec![SegmentBase::new(0, 0)],
+            instances: None,
+        };
+        let mut objects = DrawObjects::new(
+            shader,
+            ColorMode::alpha_blended(),
+            CullFaceMode::back_ccw(),
+            geometry,
+            Default::default(),
+        );
+        objects.read_as_storage(ID, Some(typed.shared().clone()));
+        assert!(objects.storage_buffer(ID).is_none(), "bound before the upload");
+
+        objects.upload(gpu, context);
+        let buffer = context.upload_vertices(gpu, typed.shared()).expect("uploads");
+        assert!(buffer.is_some() && objects.storage_buffer(ID) == buffer);
+        let uploaded = context.rendering_stats().buffer_updates;
+
+        // An update goes to the same buffer.
+        assert!(context.update_vertices(&typed, &[[2; 2], [3; 2]]));
+        objects.upload(gpu, context);
+        assert_eq!(context.rendering_stats().buffer_updates, uploaded + 1);
+        assert_eq!(objects.storage_buffer(ID), buffer);
+
+        objects.read_as_storage(ID, None);
+        objects.upload(gpu, context);
+        assert!(objects.storage_buffer(ID).is_none());
+    });
+}
+
+// The pulled walls' shader finds a vertex's paint values where the paint
+// attributes read them.
+#[test]
+fn the_paint_layout_of_pulled_walls_is_the_paint_attributes() {
+    use mln_gfx::AttributeDataType::{Float, Float4};
+    use mln_gfx::shaders::shader_defines::{
+        ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE,
+        ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE,
+    };
+
+    use crate::gfx::vertex_attribute::{SharedAttribute, VertexAttributeArray};
+    use crate::layers::render_fill_extrusion_layer::paint_layout;
+
+    with_context(|_, context| {
+        let mut attrs = VertexAttributeArray::new();
+        assert_eq!(paint_layout(&attrs), 0, "every property a uniform");
+
+        // A vertex's base, its color's four floats, then its height.
+        let paint = context.add_vertices(vec![[0f32; 6]]);
+        for (id, data_type, offset) in [
+            (ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE, Float, 0),
+            (ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE, Float4, 4),
+            (ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE, Float, 20),
+        ] {
+            attrs.set_shared(id, SharedAttribute::new(paint.clone(), data_type, offset, 24));
+        }
+        // Six words a vertex: the base at 0, the height at 5, the color at 1.
+        assert_eq!(paint_layout(&attrs), 0x0105_0006);
+    });
+}
+
+// The pulled outlines' shader finds a vertex's paint values where the paint
+// attributes read them.
+#[test]
+fn the_paint_layout_of_pulled_outlines_is_the_paint_attributes() {
+    use mln_gfx::AttributeDataType::{Float, Float2, Float4};
+    use mln_gfx::shaders::shader_defines::{
+        ID_FILL_COLOR_VERTEX_ATTRIBUTE, ID_FILL_OPACITY_VERTEX_ATTRIBUTE, ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE,
+    };
+
+    use crate::gfx::vertex_attribute::{SharedAttribute, VertexAttributeArray};
+    use crate::layers::render_fill_layer::outline_paint_layout;
+
+    with_context(|_, context| {
+        let mut attrs = VertexAttributeArray::new();
+        assert_eq!(outline_paint_layout(&attrs), 0, "every property a uniform");
+
+        // A vertex's fill color, its opacity, then its outline color.
+        let paint = context.add_vertices(vec![[0f32; 5]]);
+        for (id, data_type, offset) in [
+            (ID_FILL_COLOR_VERTEX_ATTRIBUTE, Float2, 0),
+            (ID_FILL_OPACITY_VERTEX_ATTRIBUTE, Float, 8),
+            (ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE, Float2, 12),
+        ] {
+            attrs.set_shared(id, SharedAttribute::new(paint.clone(), data_type, offset, 20));
+        }
+        // Five words a vertex: the outline color at 3, the opacity at 2.
+        assert_eq!(outline_paint_layout(&attrs), 0x0002_0305);
+
+        // An interpolated outline color alone.
+        let mut attrs = VertexAttributeArray::new();
+        let paint = context.add_vertices(vec![[0f32; 4]]);
+        attrs.set_shared(ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE, SharedAttribute::new(paint, Float4, 0, 16));
+        assert_eq!(outline_paint_layout(&attrs), 4);
     });
 }
 

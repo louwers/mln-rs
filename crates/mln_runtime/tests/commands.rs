@@ -367,7 +367,7 @@ fn with_core_runs_on_the_map_in_its_place() {
     let runtime = runtime();
     let map = map(&runtime);
     drop(map.resize(extent(128, 64)).unwrap());
-    let size = wait(map.with_core(|core| core.get_transform_state().get_size()));
+    let size = wait(map.with_core(|core| core.transform_state().view().size()));
     assert_eq!(Size::new(128, 64), size);
 }
 

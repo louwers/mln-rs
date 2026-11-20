@@ -36,7 +36,7 @@ use crate::paint_parameters::TransformParameters;
 use crate::render_layer::{LayerParts, RenderLayer};
 use crate::render_tile::RenderTile;
 use crate::text::cross_tile_symbol_index::CrossTileSymbolIndex;
-use crate::text::glyph_store::HBShapeResults;
+use crate::text::glyph_store::ShapeResults;
 use crate::text::placement::{Placement, PlacementInputs};
 use crate::tile::contents::LayoutResult;
 use crate::tile::job::{
@@ -121,6 +121,7 @@ impl TileLayout {
                 layers,
                 global_state: Some(Arc::clone(style.get_global_state())),
                 font_faces: style.get_font_faces().cloned(),
+                glyph_pbfs: !style.get_glyph_url().is_empty(),
             }),
             available_images: Arc::new(style.get_images().iter().map(|image| image.id.clone()).collect()),
             params: LayoutParams {
@@ -222,7 +223,7 @@ impl SymbolView {
         let mut state = TransformState::default();
         state.set_size(Size::new(width, height));
         state.set_lat_lng_zoom(&center, zoom);
-        let transform = TransformParameters::new(&state);
+        let transform = TransformParameters::new(state.view());
         let render_tiles: Rc<Vec<RenderTile>> = Rc::new(
             tiles
                 .iter()
@@ -264,7 +265,10 @@ impl SymbolView {
             pixel_ratio: 1.0,
             debug_options: MapDebugOptions::NO_DEBUG,
             time_point: Some(Instant::now()),
-            transform_state: state,
+            view: state.view().clone(),
+            min_zoom: state.min_zoom(),
+            max_zoom: state.limits().max_zoom,
+            camera_moving: false,
             style: Arc::new(style.clone()),
             sprite_loaded: true,
             feature_states: Arc::default(),
@@ -290,10 +294,10 @@ impl SymbolView {
     /// drops the buckets of each layer that the view no longer has. Returns
     /// how many layers added a bucket.
     pub fn index(&self, index: &mut SymbolIndex) -> Result<usize, Error> {
-        let longitude = self.update.transform_state.get_lat_lng(mln_util::geo::WrapMode::Unwrapped).longitude() as f32;
+        let longitude = self.update.view.center(mln_util::geo::WrapMode::Unwrapped).longitude() as f32;
         let mut added = 0;
         for layer in self.layers.iter().rev() {
-            let result = index.0.add_layer(layer, longitude, &self.update.transform_state);
+            let result = index.0.add_layer(layer, longitude, &self.update.view);
             if result.buckets_added {
                 added += 1;
             }
@@ -440,7 +444,7 @@ fn resolve(
     let image_page = atlas.pack_images(&icons, &patterns);
     Ok(Resolved {
         glyphs: glyph_page.positions,
-        shaping: HBShapeResults::new(),
+        shaping: ShapeResults::new(),
         icons: image_page.icons,
         patterns: image_page.patterns,
         missing_images,

@@ -234,7 +234,9 @@ impl Scene {
         let parameters = TileParameters {
             pixel_ratio: 1.0,
             debug_options: MapDebugOptions::NO_DEBUG,
-            transform_state: self.transform.get_state(),
+            view: self.transform.view(),
+            min_zoom: self.transform.state().min_zoom(),
+            max_zoom: self.transform.state().limits().max_zoom,
             file_source: Some(file_source),
             mode: MapMode::Continuous,
             // The map's default.
@@ -248,6 +250,7 @@ impl Scene {
             global_state: None,
             is_update_synchronous: false,
             font_faces: None,
+            glyph_pbfs: true,
             placement_commits: 0,
         };
         // The first frame lays the tiles out.

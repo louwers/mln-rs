@@ -9,8 +9,8 @@
 use std::cell::RefCell;
 
 use mln_renderer::text::font_face_engine::{FontFaceEngine, FontFaceShaper};
-use mln_text::HBShapeAdjust;
 use mln_text::glyph::{FontData, Glyph, GlyphID, GlyphIDType, GlyphMetrics};
+use mln_text::{GlyphAdjust, ShapedText};
 use mln_util::image::AlphaImage;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
@@ -26,7 +26,13 @@ extern "C" {
     type ShaperModule;
 
     #[wasm_bindgen(method, catch, js_name = openFace)]
-    fn open_face(this: &ShaperModule, type_: u16, data: &[u8], face_index: u32) -> Result<Option<Face>, JsValue>;
+    fn open_face(
+        this: &ShaperModule,
+        type_: u16,
+        data: &[u8],
+        face_index: u32,
+        weight: u16,
+    ) -> Result<Option<Face>, JsValue>;
 
     /// A font file it opened.
     type Face;
@@ -161,9 +167,9 @@ impl FontFaceEngine for ShaperModuleEngine {
         });
     }
 
-    fn load(&self, type_: GlyphIDType, data: FontData) -> Option<Box<dyn FontFaceShaper>> {
+    fn load(&self, type_: GlyphIDType, data: FontData, weight: u16) -> Option<Box<dyn FontFaceShaper>> {
         let opened = MODULE.with(|module| match &*module.borrow() {
-            Some(Module::Loaded(module)) => module.open_face(type_.id(), data.as_bytes(), data.face_index()),
+            Some(Module::Loaded(module)) => module.open_face(type_.id(), data.as_bytes(), data.face_index(), weight),
             _ => Err(JsValue::from_str("the shaper module isn't loaded")),
         });
         match opened {
@@ -183,20 +189,20 @@ struct ShaperFace {
 }
 
 impl FontFaceShaper for ShaperFace {
-    fn shape(&self, text: &[char], rtl: bool, glyph_ids: &mut Vec<GlyphID>, adjusts: &mut Vec<HBShapeAdjust>) {
+    fn shape(&self, text: &[char], rtl: bool, shaped: &mut ShapedText) {
         match self.face.shape(&text.iter().collect::<String>(), rtl) {
-            Ok(shaped) => {
-                for glyph in shaped.as_chunks::<4>().0 {
-                    glyph_ids.push(GlyphID::with_type(glyph[0] as u16, self.type_));
-                    adjusts.push(HBShapeAdjust::new(glyph[1], glyph[2], glyph[3]));
+            Ok(glyphs) => {
+                for glyph in glyphs.as_chunks::<4>().0 {
+                    shaped.glyphs.push(GlyphID::with_type(glyph[0] as u16, self.type_));
+                    shaped.adjusts.push(GlyphAdjust::new(glyph[1], glyph[2], glyph[3]));
                 }
             }
             Err(error) => Log::error(Event::Glyph, format!("shaping with a font face failed: {}", message(&error))),
         }
     }
 
-    fn rasterize(&self, glyph: &GlyphID) -> Glyph {
-        let empty = Glyph { id: *glyph, ..Glyph::default() };
+    fn rasterize(&self, glyph: GlyphID) -> Glyph {
+        let empty = Glyph { id: glyph, ..Glyph::default() };
         let parts = match self.face.rasterize(glyph.code) {
             Ok(parts) => parts,
             Err(error) => {
@@ -213,7 +219,7 @@ impl FontFaceShaper for ShaperFace {
             return empty;
         };
         Glyph {
-            id: *glyph,
+            id: glyph,
             bitmap,
             metrics: GlyphMetrics {
                 width: width as u32,

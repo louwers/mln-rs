@@ -22,6 +22,9 @@ concurrency:
   group: pages
   cancel-in-progress: false
 
+env:
+  MISE_LOCKED: "1"
+
 jobs:
   deploy:
     runs-on: ubuntu-26.04

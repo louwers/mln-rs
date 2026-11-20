@@ -1,9 +1,9 @@
 //! A copy of a map's state, which [`Map::snapshot`](crate::Map::snapshot)
 //! takes.
 
+use glam::{DQuat, DVec3};
 use mln_map_types::{BoundOptions, FreeCameraOptions, MapDebugOptions, MapView, TileLodMode};
 use mln_util::geo::LatLngBounds;
-use mln_util::vectors::{Vec3, Vec4};
 
 /// A map's state at one moment.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -82,10 +82,10 @@ pub struct FreeCamera {
     /// The position in Web Mercator units, where the world is 1 wide, (0, 0)
     /// is its northwest corner and (1, 1) its southeast corner. `z` is the
     /// altitude in the same units.
-    pub position: Vec3,
+    pub position: DVec3,
     /// The rotation from looking straight down with north at the top of the
-    /// screen, as a unit quaternion `[x, y, z, w]`.
-    pub orientation: Vec4,
+    /// screen, as a unit quaternion.
+    pub orientation: DQuat,
 }
 
 impl From<FreeCamera> for FreeCameraOptions {

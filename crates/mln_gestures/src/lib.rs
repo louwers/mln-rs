@@ -12,14 +12,9 @@
 //! of the camera, whether gestures move it, how its release glides, where it
 //! settles, and where it has notches.
 //!
-//! MapLibre Native has no counterpart: each of its platform SDKs recognizes
-//! gestures itself. This is ported from Orbis's orb-camera input, which has
-//! MapLibre Compose's gesture set, with maplibre-native-ffi's browser demo's
-//! rates and release velocities where it has the gesture and GL JS's rates
-//! and thresholds elsewhere (the README compares each). It is
-//! host-independent: hosts feed [`Input`]s with their timestamps and call
-//! [`GestureRecognizer::tick`] when it asks, and it keeps no clock or thread
-//! of its own, so it runs in the browser too.
+//! Hosts feed [`Input`]s with their timestamps and call
+//! [`GestureRecognizer::tick`] when it asks. The recognizer keeps no clock
+//! or thread of its own.
 //!
 //! Hosts read two clocks each frame: the recognizer's, in milliseconds on any
 //! clock their input events use (`performance.now()`, an `Instant`), which

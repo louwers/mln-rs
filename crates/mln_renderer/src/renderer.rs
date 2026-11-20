@@ -7,7 +7,7 @@ use mln_gfx::shaders::layer_ubo::GlobalPaintParamsUBO;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::shaders::shader_defines::ID_GLOBAL_PAINT_PARAMS_UBO;
 use mln_gfx::{FrameImage, Handoff, ScissorRect};
-use mln_map_types::{MapDebugOptions, MapView};
+use mln_map_types::MapDebugOptions;
 use mln_style::layers::CustomLayerFrame;
 use mln_text::GlyphCache;
 use mln_text::local_glyph_rasterizer::LocalGlyphs;
@@ -545,9 +545,9 @@ impl Encoder {
         }
         emit(events, RendererEvent::RenderFrameStarted);
 
-        let state = &frame.transform.state;
+        let state = &frame.transform.view;
         let renderable_size = image.size;
-        let frustum_offset = state.get_frustum_offset();
+        let frustum_offset = state.frustum_offset();
         let pixel_ratio = f64::from(self.pixel_ratio);
         let scissor_rect = ScissorRect {
             x: (frustum_offset.left * pixel_ratio) as i32,
@@ -594,12 +594,12 @@ impl Encoder {
         // - DRAW UPLOAD ---------------------------------------------------
         orchestrator.upload_draws(gpu, parameters.context);
         let draw_groups = DrawGroups::of(orchestrator, &parameters);
-        let (proj_state, transform) = (parameters.state, parameters.transform_params);
+        let (proj_state, transform) = (parameters.view, parameters.transform_params);
         parameters.clip_masks.update(
             gpu,
             parameters.context,
             &static_data.shaders,
-            proj_state.is_globe_rendering(),
+            proj_state.is_globe(),
             &draw_groups.clip_tiles,
             |tile| to_projection_ubo(&transform.projection_data_for_tile(tile, false)),
         );
@@ -617,11 +617,11 @@ impl Encoder {
             pattern_atlas_texsize: [atlas_size.width as f32, atlas_size.height as f32],
             units_to_pixels: [1.0 / parameters.pixels_to_gl_units[0], 1.0 / parameters.pixels_to_gl_units[1]],
             world_size: [renderable_size.width as f32, renderable_size.height as f32],
-            camera_to_center_distance: state.get_camera_to_center_distance(),
+            camera_to_center_distance: state.camera_to_center_distance() as f32,
             symbol_fade_change: parameters.symbol_fade_change,
-            aspect_ratio: state.get_size().aspect_ratio(),
+            aspect_ratio: state.size().aspect_ratio(),
             pixel_ratio: parameters.pixel_ratio,
-            map_zoom: state.get_zoom() as f32,
+            map_zoom: state.zoom() as f32,
             pad1: 0.0,
         };
         parameters.context.write_global_uniform_buffer(gpu, ID_GLOBAL_PAINT_PARAMS_UBO, &global_paint_params_ubo);
@@ -640,7 +640,7 @@ impl Encoder {
         let frame_projection =
             frame_projection::compute(&frame.transform, depth_range_size, parameters.context.caps().clip_depth);
         parameters.custom_layer_frame = Some(CustomLayerFrame {
-            view: MapView::from_state(state, pixel_ratio),
+            view: state.map_view(pixel_ratio),
             projection: frame_projection,
             width: renderable_size.width,
             height: renderable_size.height,
@@ -836,7 +836,7 @@ fn draw(
     // globe, where 2D layers carry no depth and are painted bottom to top.
     parameters.pass = RenderPass::Opaque;
     parameters.depth_range_size = depth_range_size;
-    if frame.transform.state.is_globe_rendering() {
+    if frame.transform.view.is_globe() {
         parameters.current_layer = (num_draw_groups as u32).wrapping_sub(1);
         orchestrator.render_draw_groups(gpu, parameters, DrawOrder::BottomUp);
     } else {

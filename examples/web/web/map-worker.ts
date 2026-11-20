@@ -645,7 +645,7 @@ function applyInput(map: WebMap, input: Input) {
       );
       break;
     case "key":
-      map.key(input.key, input.modifiers, time);
+      map.key(input.key, input.modifiers, input.repeat, time);
       break;
     case "modifiers":
       map.modifiers(input.modifiers, time);

@@ -297,8 +297,8 @@ fn from_snapshot(snapshot: &MapSnapshot, event_mask: mln_runtime_event_flags) ->
     let tile = &snapshot.tile;
     let bounds = &snapshot.bounds;
     let area = bounds.bounds.unwrap_or_else(LatLngBounds::world);
-    let [x, y, z] = snapshot.free_camera.position;
-    let [qx, qy, qz, qw] = snapshot.free_camera.orientation;
+    let [x, y, z] = snapshot.free_camera.position.to_array();
+    let [qx, qy, qz, qw] = snapshot.free_camera.orientation.to_array();
     mln_map_snapshot {
         size: size_of::<mln_map_snapshot>() as u32,
         debug_flags: snapshot.debug.0,

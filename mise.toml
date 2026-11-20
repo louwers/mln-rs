@@ -9,15 +9,20 @@ min_version = "2026.10.0"
 experimental = true
 pin = true
 lockfile = true
-lockfile_mode = "merge"
+# Default from mise 2026.10.19 (merge mode is removed in 2027.10.0).
+lockfile_mode = "generate"
 # Rust comes from rust-toolchain.toml, which rustup and CI also read; mise
 # installs that toolchain through rustup.
 idiomatic_version_file_enable_tools = ["rust"]
-# Node.js and Python install as prebuilt archives and never build from source,
-# which mise would otherwise do on NixOS and Alpine, or when it finds no
-# archive.
-node.compile = false
-python.compile = false
+# Adopt upcoming mise defaults early:
+# Default in mise 2027.5.0 (removes arg/option/flag template functions in run
+# scripts).
+task.disable_spec_from_run_scripts = true
+# Default in mise 2027.7.0.
+cargo.binstall_native = true
+# Default on all platforms in mise 2027.8.0 (otherwise true on NixOS and
+# Alpine, which would build Node.js and Python from source).
+all_compile = false
 
 [tools]
 # The test runner, which ends a test that hangs (.config/nextest.toml).
