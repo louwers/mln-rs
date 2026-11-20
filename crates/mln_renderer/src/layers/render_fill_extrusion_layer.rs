@@ -409,6 +409,12 @@ impl RenderFillExtrusionLayer {
     }
 }
 
+/// The layer's opacity: as `fill-extrusion-opacity` is the same for every
+/// extrusion, both opacities apply to the layer drawn as one surface.
+fn opacity(evaluated: &EvaluatedLayer<FillExtrusion>) -> f32 {
+    evaluated.paint.fill_extrusion_layer_opacity.uniform() * evaluated.paint.fill_extrusion_opacity.uniform()
+}
+
 impl TypedLayer for RenderFillExtrusionLayer {
     type Type = FillExtrusion;
     type Drawing = TileDraws<ExtrusionTile>;
@@ -422,7 +428,7 @@ impl TypedLayer for RenderFillExtrusionLayer {
     }
 
     fn passes(&self, evaluated: &EvaluatedLayer<FillExtrusion>) -> RenderPass {
-        if *evaluated.paint.fill_extrusion_opacity.uniform() > 0.0 { RenderPass::Translucent } else { RenderPass::None }
+        if opacity(evaluated) > 0.0 { RenderPass::Translucent } else { RenderPass::None }
     }
 
     /// Makes the frame's draws of the layer, those of each of its tiles,
@@ -470,7 +476,7 @@ impl TypedLayer for RenderFillExtrusionLayer {
             return;
         };
 
-        let opacity = *self.values.evaluated.paint.fill_extrusion_opacity.uniform();
+        let opacity = opacity(&self.values.evaluated);
         let composite = (opacity < 1.0 && !has_pattern && paint_parameters.composites_with_frame_depth)
             .then_some(Composite { opacity, blend: LayerBlendType::Normal, frame_depth: true });
 

@@ -3416,6 +3416,12 @@
         },
         "hcl": {
           "doc": "Use the HCL color space to interpolate color values, interpolating the Hue, Chroma, and Luminance channels individually."
+        },
+        "oklch": {
+          "doc": "Use the OKLCH color space to interpolate color values, interpolating the Lightness, Chroma, and Hue channels individually."
+        },
+        "oklab": {
+          "doc": "Use the OKLAB color space to interpolate color values, interpolating the Lightness, a, and b channels individually."
         }
       },
       "doc": "The color space in which colors interpolated. Interpolating colors in perceptual color spaces like LAB and HCL tend to produce color ramps that look more consistent and produce colors that can be differentiated more easily than those interpolated in RGB space.",
@@ -4053,6 +4059,84 @@
             "js": "0.49.0",
             "ios": "https://github.com/maplibre/maplibre-native/issues/2784",
             "android": "https://github.com/maplibre/maplibre-native/issues/2784"
+          }
+        }
+      },
+      "interpolate-oklch": {
+        "doc": "Produces continuous, smooth results by interpolating between pairs of input and output values (\"stops\"). Works like [`interpolate`](expressions/#interpolate), but the output type must be `color` or `array<color>`, and the interpolation is performed in the OKLCH color space as [CSS Color 4](https://www.w3.org/TR/css-color-4/#interpolation) does it: hue takes the shorter way around, a gray stop takes the other stop's hue, and lightness and chroma are premultiplied by alpha. A result outside sRGB is clipped like an `oklch()` color.",
+        "syntax": {
+          "overloads": [
+            {
+              "parameters": ["interpolation_type", "input", "stop_input_1", "stop_output_1", "...", "stop_input_n", "stop_output_n"],
+              "output-type": ["color", "array<color>"]
+            }
+          ],
+          "parameters": [
+            {
+              "name": "interpolation_type",
+              "type": "interpolation",
+              "doc": "The interpolation type."
+            },
+            {
+              "name": "input",
+              "type": "number"
+            },
+            {
+              "name": "stop_input_i",
+              "type": "number literal"
+            },
+            {
+              "name": "stop_output_i",
+              "type": ["color", "array<color>"]
+            }
+          ]
+        },
+        "example": ["interpolate-oklch", ["linear"], ["zoom"], 15, "#f00", 15.05, "#00f"],
+        "group": "Ramps, scales, curves",
+        "sdk-support": {
+          "basic functionality": {
+            "js": "https://github.com/maplibre/maplibre-gl-js/issues/9011",
+            "android": "https://github.com/maplibre/maplibre-native/issues/4970",
+            "ios": "https://github.com/maplibre/maplibre-native/issues/4970"
+          }
+        }
+      },
+      "interpolate-oklab": {
+        "doc": "Produces continuous, smooth results by interpolating between pairs of input and output values (\"stops\"). Works like [`interpolate`](expressions/#interpolate), but the output type must be `color` or `array<color>`, and the interpolation is performed in the OKLAB color space as [CSS Color 4](https://www.w3.org/TR/css-color-4/#interpolation) does it: lightness, a and b are premultiplied by alpha. A result outside sRGB is clipped like an `oklab()` color.",
+        "syntax": {
+          "overloads": [
+            {
+              "parameters": ["interpolation_type", "input", "stop_input_1", "stop_output_1", "...", "stop_input_n", "stop_output_n"],
+              "output-type": ["color", "array<color>"]
+            }
+          ],
+          "parameters": [
+            {
+              "name": "interpolation_type",
+              "type": "interpolation",
+              "doc": "The interpolation type."
+            },
+            {
+              "name": "input",
+              "type": "number"
+            },
+            {
+              "name": "stop_input_i",
+              "type": "number literal"
+            },
+            {
+              "name": "stop_output_i",
+              "type": ["color", "array<color>"]
+            }
+          ]
+        },
+        "example": ["interpolate-oklab", ["linear"], ["zoom"], 15, "#f00", 15.05, "#00f"],
+        "group": "Ramps, scales, curves",
+        "sdk-support": {
+          "basic functionality": {
+            "js": "https://github.com/maplibre/maplibre-gl-js/issues/9051",
+            "android": "https://github.com/maplibre/maplibre-native/issues/5000",
+            "ios": "https://github.com/maplibre/maplibre-native/issues/5000"
           }
         }
       },
@@ -6830,7 +6914,7 @@
       "default": 1,
       "minimum": 0,
       "maximum": 1,
-      "doc": "The opacity of the entire fill extrusion layer. This is rendered on a per-layer, not per-feature, basis, and data-driven styling is not available.",
+      "doc": "The opacity of each extrusion. Extrusions at `1` show through the others. Where several extrusions below `1` overlap on screen, only the surface closest to the camera is drawn, so they don't show through each other. Use [`fill-extrusion-layer-opacity`](layers/#fill-extrusion-layer-opacity) to fade the layer as a whole.\n\n![fill-extrusion-opacity vs. fill-extrusion-layer-opacity](assets/fill-extrusion-opacity.svg)",
       "transition": true,
       "sdk-support": {
         "basic functionality": {
@@ -6842,12 +6926,47 @@
           "js": "5.6.0",
           "android": "13.7.1",
           "ios": "7.0.0"
+        },
+        "data-driven styling": {
+          "js": "https://github.com/maplibre/maplibre-gl-js/issues/4492",
+          "android": "https://github.com/maplibre/maplibre-native/issues/5047",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/5047"
         }
       },
       "expression": {
         "interpolated": true,
         "parameters": [
-          "zoom"
+          "zoom",
+          "feature",
+          "feature-state"
+        ]
+      },
+      "property-type": "data-driven"
+    },
+    "fill-extrusion-layer-opacity": {
+      "type": "number",
+      "default": 1,
+      "minimum": 0,
+      "maximum": 1,
+      "doc": "Opacity applied to the layer as a whole, multiplied with [`fill-extrusion-opacity`](layers/#fill-extrusion-opacity). The extrusions at a `fill-extrusion-opacity` of `1` appear as a single surface at the given opacity and still show through the others. This property affects only the layer it is set on.\n\n![fill-extrusion-opacity vs. fill-extrusion-layer-opacity](assets/fill-extrusion-opacity.svg)",
+      "transition": true,
+      "sdk-support": {
+        "basic functionality": {
+          "js": "https://github.com/maplibre/maplibre-gl-js/issues/4492",
+          "android": "https://github.com/maplibre/maplibre-native/issues/5047",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/5047"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "https://github.com/maplibre/maplibre-gl-js/issues/4492",
+          "android": "https://github.com/maplibre/maplibre-native/issues/5047",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/5047"
+        }
+      },
+      "expression": {
+        "interpolated": true,
+        "parameters": [
+          "zoom",
+          "global-state"
         ]
       },
       "property-type": "data-constant"
@@ -6855,7 +6974,7 @@
     "fill-extrusion-color": {
       "type": "color",
       "default": "#000000",
-      "doc": "The base color of the extruded fill. The extrusion's surfaces will be shaded differently based on this color in combination with the root `light` settings. If this color is specified as `rgba` with an alpha component, the alpha component will be ignored; use [`fill-extrusion-opacity`](layers/#fill-extrusion-opacity) to set layer opacity.",
+      "doc": "The base color of the extruded fill. The extrusion's surfaces will be shaded differently based on this color in combination with the root `light` settings. If this color is specified as `rgba` with an alpha component, the alpha component will be ignored; use [`fill-extrusion-opacity`](layers/#fill-extrusion-opacity) to set the opacity.",
       "transition": true,
       "requires": [
         {
@@ -9416,6 +9535,16 @@
             "js": "0.49.0",
             "ios": "https://github.com/maplibre/maplibre-native/issues/2784",
             "android": "https://github.com/maplibre/maplibre-native/issues/2784"
+          },
+          "interpolate-oklch": {
+            "js": "https://github.com/maplibre/maplibre-gl-js/issues/9011",
+            "android": "https://github.com/maplibre/maplibre-native/issues/4970",
+            "ios": "https://github.com/maplibre/maplibre-native/issues/4970"
+          },
+          "interpolate-oklab": {
+            "js": "https://github.com/maplibre/maplibre-gl-js/issues/9051",
+            "android": "https://github.com/maplibre/maplibre-native/issues/5000",
+            "ios": "https://github.com/maplibre/maplibre-native/issues/5000"
           }
         }
       },
@@ -9457,6 +9586,16 @@
             "js": "0.49.0",
             "ios": "https://github.com/maplibre/maplibre-native/issues/2784",
             "android": "https://github.com/maplibre/maplibre-native/issues/2784"
+          },
+          "interpolate-oklch": {
+            "js": "https://github.com/maplibre/maplibre-gl-js/issues/9011",
+            "android": "https://github.com/maplibre/maplibre-native/issues/4970",
+            "ios": "https://github.com/maplibre/maplibre-native/issues/4970"
+          },
+          "interpolate-oklab": {
+            "js": "https://github.com/maplibre/maplibre-gl-js/issues/9051",
+            "android": "https://github.com/maplibre/maplibre-native/issues/5000",
+            "ios": "https://github.com/maplibre/maplibre-native/issues/5000"
           }
         }
       },
@@ -9519,6 +9658,16 @@
             "js": "0.49.0",
             "ios": "https://github.com/maplibre/maplibre-native/issues/2784",
             "android": "https://github.com/maplibre/maplibre-native/issues/2784"
+          },
+          "interpolate-oklch": {
+            "js": "https://github.com/maplibre/maplibre-gl-js/issues/9011",
+            "android": "https://github.com/maplibre/maplibre-native/issues/4970",
+            "ios": "https://github.com/maplibre/maplibre-native/issues/4970"
+          },
+          "interpolate-oklab": {
+            "js": "https://github.com/maplibre/maplibre-gl-js/issues/9051",
+            "android": "https://github.com/maplibre/maplibre-native/issues/5000",
+            "ios": "https://github.com/maplibre/maplibre-native/issues/5000"
           }
         }
       }

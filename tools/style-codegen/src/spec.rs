@@ -73,6 +73,11 @@ pub(crate) fn load(text: &str) -> Result<Value, String> {
     // https://github.com/maplibre/maplibre-native/issues/4517
     zoom_only(&mut spec, "layout_symbol", "icon-rotation-alignment", "data-constant")?;
 
+    // Each extrusion's own opacity needs translucent extrusions sorted or
+    // resolved per pixel; one opacity for the layer is drawn as one surface.
+    // https://github.com/maplibre/maplibre-native/issues/5047
+    zoom_only(&mut spec, "paint_fill-extrusion", "fill-extrusion-opacity", "data-constant")?;
+
     // internal use
     spec["layout_symbol"]["symbol-screen-space"] = json!({
         "type": "boolean",
@@ -93,7 +98,8 @@ fn remove(spec: &mut Value, path: &[&str], key: &str) -> Result<(), String> {
     object.shift_remove(key).map(|_| ()).ok_or_else(|| format!("spec has no {}.{key}", path.join(".")))
 }
 
-/// Makes a data-driven property follow zoom only, as `property_type`.
+/// Makes a data-driven property follow zoom (and global state) only, as
+/// `property_type`.
 fn zoom_only(spec: &mut Value, group: &str, property: &str, property_type: &str) -> Result<(), String> {
     let entry = spec
         .get_mut(group)
@@ -106,7 +112,7 @@ fn zoom_only(spec: &mut Value, group: &str, property: &str, property_type: &str)
         .and_then(|e| e.get_mut("parameters"))
         .and_then(Value::as_array_mut)
         .ok_or_else(|| format!("{group}.{property} has no expression parameters"))?;
-    parameters.retain(|p| p != "feature");
+    parameters.retain(|p| p != "feature" && p != "feature-state");
     Ok(())
 }
 
