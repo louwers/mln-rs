@@ -170,7 +170,6 @@ fn a_frame_waiting_for_a_placement_asks_for_no_update_until_then() {
         repaint_at,
         placement_changed: false,
         still_image_request_id: 0,
-        ground_generation: 0,
         stats: Arc::default(),
     };
     let finished = |map: &mut Map| {
@@ -222,7 +221,6 @@ fn a_frame_report_adds_no_update_while_the_frame_clock_samples_an_animation() {
         repaint_at: None,
         placement_changed: false,
         still_image_request_id: 0,
-        ground_generation: 0,
         stats: Arc::default(),
     };
     let moving =
@@ -342,7 +340,6 @@ fn a_still_image_completes_with_a_full_frame() {
         repaint_at: None,
         placement_changed: false,
         still_image_request_id,
-        ground_generation: 0,
         stats: Arc::clone(&stats),
     };
     report(&map, frame(mln_renderer::RenderMode::Partial, 1));

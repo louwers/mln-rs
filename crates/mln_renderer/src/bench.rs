@@ -279,7 +279,7 @@ impl SymbolView {
             cross_source_collisions: true,
             fast_pfor_enabled: false,
             terrain_skirt_length: TerrainSkirtLength::Auto,
-            ground_generation: 0,
+            elevation: None,
             tile_lod_min_radius: 3.0,
             tile_lod_scale: 1.0,
             tile_lod_pitch_threshold: mln_math::deg2rad(60.0),

@@ -358,8 +358,8 @@ impl RenderOrchestrator {
             &mut frame,
         );
         let (store, render_sources) = (&self.tile_store, &self.render_sources);
-        let grounded = update_parameters.view.terrain_min_elevation().is_some();
-        self.terrain.bind(|id| store.source(render_sources.get(id)?.tiles()?), grounded, &mut self.events);
+        let seen = update_parameters.elevation.as_ref();
+        let grounded = self.terrain.bind(|id| store.source(render_sources.get(id)?.tiles()?), seen, &mut self.events);
 
         // A synchronous source's tile laid out by its answer isn't in this
         // update's render tiles yet: the next update has it.
@@ -387,7 +387,10 @@ impl RenderOrchestrator {
             }
         }
 
-        frame.loaded = update_parameters.style_loaded && !answered && self.is_loaded();
+        // A frame whose camera hasn't stood on the terrain's current ground
+        // isn't complete: the map answers the new ground with an update, and
+        // a still image draws only that update's frame.
+        frame.loaded = update_parameters.style_loaded && !answered && grounded && self.is_loaded();
         if !clock.continuous && !frame.loaded {
             return None;
         }

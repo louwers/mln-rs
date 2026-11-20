@@ -125,15 +125,6 @@ impl RingSlot {
     }
 }
 
-/// The frame of a still image that waits for the map to end the image on
-/// it, which the host can neither drain nor acquire until then. Its ring
-/// slot stays marked as rendering, so that no other frame takes it, and the
-/// image's next frame, if the map asks for one, draws over it.
-pub(crate) struct StillFrame {
-    pub(crate) slot: Option<(usize, Option<Published>)>,
-    pub(crate) result: FrameResult,
-}
-
 /// Work sent to a session's thread, whose completion an abandon can fail at
 /// once instead of waiting for the thread to run it.
 pub(crate) trait PendingWork: Any + Send {
@@ -168,8 +159,6 @@ pub(crate) struct SessionState {
     pub(crate) has_target: bool,
     /// The frame results that wait for a drain.
     pub(crate) results: Vec<FrameResult>,
-    /// The still image's frame that waits for the map to end the image.
-    pub(crate) still_frame: Option<StillFrame>,
     /// Whether the frame wake ran since the last drain.
     pub(crate) frame_woken: bool,
     /// Whether the redraw wake may run: from the last demand until it runs.
@@ -228,33 +217,6 @@ impl SessionState {
         let id = WorkId(self.next_work);
         self.pending.insert(id, Box::new(resolver));
         id
-    }
-
-    /// Publishes a frame: ends the ring `slot` it rendered into, with what
-    /// the host may acquire of it, and queues its result. Returns whether
-    /// the host is to be woken: it wasn't since its last drain.
-    pub(crate) fn publish_frame(&mut self, slot: Option<(usize, Option<Published>)>, result: &FrameResult) -> bool {
-        if let Some((slot, published)) = slot
-            && let Some(entry) = self.ring.get_mut(slot)
-        {
-            entry.rendering = false;
-            entry.frame = published;
-        }
-        self.results.push(*result);
-        self.frame_generation = self.frame_generation.max(result.frame_generation);
-        !std::mem::replace(&mut self.frame_woken, true)
-    }
-
-    /// Publishes the still image's frame that waits for the map, as the
-    /// newest frame: frames of the host's demands may have come since it
-    /// rendered. Returns whether the host is to be woken.
-    pub(crate) fn publish_still_frame(&mut self) -> bool {
-        let Some(StillFrame { mut slot, mut result }) = self.still_frame.take() else { return false };
-        result.frame_generation = self.frame_generation + 1;
-        if let Some((_, Some(published))) = &mut slot {
-            published.result.frame_generation = result.frame_generation;
-        }
-        self.publish_frame(slot, &result)
     }
 
     /// What an end of the session completes, once the state is unlocked.
@@ -382,14 +344,6 @@ pub(crate) struct SessionShared {
 }
 
 impl SessionShared {
-    /// Publishes the still image's frame that waits for the map, once the
-    /// map ended the image on it, before the image completes. Returns the
-    /// wake to run once nothing is locked, if the host is to be woken.
-    pub(crate) fn publish_still_frame(&self) -> Option<Wake> {
-        let wake = self.state.lock().publish_still_frame();
-        wake.then(|| self.frame_wake.clone()).flatten()
-    }
-
     /// A completion that the session's thread resolves.
     fn completion<T: Send + 'static>(&self) -> (Completion<T>, Resolver<T>) {
         Completion::at(Home::Later(Arc::clone(&self.thread), self.runtime_thread))
@@ -962,7 +916,6 @@ fn attach_unlocked<R>(
             failure: None,
             has_target: true,
             results: Vec::new(),
-            still_frame: None,
             frame_woken: false,
             redraw_armed: true,
             pacing: None,
@@ -1036,7 +989,7 @@ fn attach_unlocked<R>(
         }
     }
     let session = RenderSession { handle: Arc::new(SessionHandle { shared, thread_end }) };
-    if let Err(error) = map.bind_session(id, queue, Arc::clone(session.shared()), size) {
+    if let Err(error) = map.bind_session(id, queue, Arc::clone(&session.shared().awaited_command), size) {
         // The map was released meanwhile: the session lets go of it. Its
         // drop waits for its thread, which waits for the sending lock.
         drop(held);

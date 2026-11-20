@@ -44,7 +44,8 @@ pub(crate) struct Frame {
     /// When, without `needs_repaint`, the map changes next on its own: a
     /// symbol placement that isn't due yet.
     pub(crate) repaint_at: Option<Instant>,
-    /// Whether every source, image and tile the frame needs had loaded.
+    /// Whether the frame is complete: every source, image and tile it needs
+    /// had loaded, and its camera stood on the terrain's current ground.
     pub(crate) loaded: bool,
     pub(crate) placement_changed: bool,
     /// The layers the frame draws, by their index in the drawing order.

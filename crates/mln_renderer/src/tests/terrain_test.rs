@@ -80,7 +80,7 @@ fn update_parameters(style: Style, transform: &Transform, mode: MapMode) -> Upda
         cross_source_collisions: true,
         fast_pfor_enabled: false,
         terrain_skirt_length: TerrainSkirtLength::Auto,
-        ground_generation: 0,
+        elevation: None,
         tile_lod_min_radius: 3.0,
         tile_lod_scale: 1.0,
         tile_lod_pitch_threshold: mln_math::deg2rad(60.0),
@@ -247,6 +247,11 @@ struct TerrainLoad {
     errors: usize,
     /// What the terrain told the map.
     events: Vec<RendererEvent>,
+    /// The ground that the updates' camera stands on.
+    seen: Option<Arc<dyn Elevation>>,
+    /// Whether the last update's camera stood on the terrain's current
+    /// ground.
+    grounded: bool,
 }
 
 impl TerrainLoad {
@@ -279,6 +284,8 @@ impl TerrainLoad {
             relayout: true,
             errors: 0,
             events: Vec::new(),
+            seen: None,
+            grounded: false,
         }
     }
 
@@ -321,7 +328,8 @@ impl TerrainLoad {
         let relayout = std::mem::take(&mut self.relayout);
         self.render_source.update(&mut self.store, self.source.clone(), &[], false, relayout, &tile_parameters);
         let (store, render_source) = (&self.store, &self.render_source);
-        self.terrain.bind(|_| store.source(render_source.tiles()?), false, &mut self.events);
+        self.grounded =
+            self.terrain.bind(|_| store.source(render_source.tiles()?), self.seen.as_ref(), &mut self.events);
         self.store.drive();
         self.errors +=
             self.store.take_events().iter().filter(|event| matches!(event, StoreEvent::Error { .. })).count();
@@ -550,6 +558,39 @@ fn the_ground_the_map_stands_on_is_the_height_rule_on_the_drawn_dem() {
     assert!(matches!(load.ground_events()[..], [None]));
 }
 
+/// An update's camera stands on the terrain's current ground only when the
+/// update carries the snapshot of it that the terrain last told the map of,
+/// which a still image waits for: not one that came before, and not none
+/// while terrain draws. Without terrain, an update that carries none does.
+#[test]
+fn an_update_stands_on_the_current_ground_when_it_carries_its_snapshot() {
+    let mut load = TerrainLoad::new((0, 14), 1.0);
+    load.frame();
+    assert!(!load.grounded, "the update carries no ground");
+    let loading = load.ground_events().pop().flatten().expect("the ground while it loads");
+    load.seen = Some(Arc::clone(&loading));
+    load.frame();
+    assert!(load.grounded);
+
+    load.answer(|_| Some(terrarium_png(100)));
+    assert!(load.is_loaded());
+    assert!(!load.grounded, "the ground changed as the DEM loaded");
+    let loaded = load.ground_events().pop().flatten().expect("the loaded ground");
+    load.frame();
+    assert!(!load.grounded, "the update carries the ground from before");
+    load.seen = Some(loaded);
+    load.frame();
+    assert!(load.grounded);
+    assert!(load.ground_events().is_empty());
+
+    load.style.apply(Edit::SetTerrain(None)).unwrap();
+    load.update();
+    assert!(!load.grounded, "the update carries a ground that is gone");
+    load.seen = None;
+    load.update();
+    assert!(load.grounded);
+}
+
 /// A camera far below raised ground looks over it, which culls every tile;
 /// the tile under the center still loads its DEM, which the camera stands
 /// on.
@@ -633,8 +674,8 @@ fn the_terrain_lets_go_of_the_map_data() {
 }
 
 /// A renderer that doesn't draw terrain tells the map that there is no
-/// ground for each update whose camera stands on terrain, though it never
-/// drew any: another renderer may have.
+/// ground for each update that carries one, though it never drew any:
+/// another renderer may have.
 #[test]
 fn a_renderer_without_terrain_tells_a_grounded_map_there_is_no_ground() {
     let pool = crate::tests::pool();
@@ -647,9 +688,10 @@ fn a_renderer_without_terrain_tells_a_grounded_map_there_is_no_ground() {
         Arc::new(|| {}),
         &pool,
     );
-    let mut ground = |transform: &Transform| -> Vec<bool> {
+    let mut ground = |elevation: Option<Arc<dyn Elevation>>| -> Vec<bool> {
         let style = style_with(crate::tests::ready(raster_dem_source("dem", None, tiles(), 256)));
-        orchestrator.update(&Arc::new(update_parameters(style, transform, MapMode::Tile)));
+        let parameters = UpdateParameters { elevation, ..update_parameters(style, &transform(), MapMode::Tile) };
+        orchestrator.update(&Arc::new(parameters));
         orchestrator
             .take_events()
             .into_iter()
@@ -659,9 +701,22 @@ fn a_renderer_without_terrain_tells_a_grounded_map_there_is_no_ground() {
             })
             .collect()
     };
-    let mut transform = transform();
-    assert_eq!(Vec::<bool>::new(), ground(&transform));
-    transform.set_ground(Some(500.0), Some(300.0));
-    assert_eq!(vec![false], ground(&transform));
-    assert_eq!(vec![false], ground(&transform));
+    assert_eq!(Vec::<bool>::new(), ground(None));
+    let elsewhere: Arc<dyn Elevation> = Arc::new(Nowhere);
+    assert_eq!(vec![false], ground(Some(Arc::clone(&elsewhere))));
+    assert_eq!(vec![false], ground(Some(elsewhere)));
+}
+
+/// Ground that another renderer drew.
+#[derive(Debug)]
+struct Nowhere;
+
+impl Elevation for Nowhere {
+    fn at(&self, _: LatLng) -> Option<f64> {
+        None
+    }
+
+    fn min_at(&self, _: LatLng) -> Option<f64> {
+        None
+    }
 }

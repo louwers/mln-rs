@@ -83,11 +83,9 @@ pub struct Map {
     center_clamped_to_ground: bool,
     terrain_skirt_length: TerrainSkirtLength,
     /// The ground of the terrain as the renderer last drew it, while
-    /// terrain draws.
+    /// terrain draws. Each update carries it, and the renderer completes a
+    /// frame only of an update that carries its newest.
     elevation: Option<Arc<dyn Elevation>>,
-    /// Counts the terrain's moves of the camera. Only a frame of the latest
-    /// completes a still image or leaves the map idle.
-    ground_generation: u64,
     /// The terrain's moves of the camera while the still image waits.
     ground_moves: u32,
 
@@ -193,7 +191,6 @@ impl Map {
             center_clamped_to_ground: map_options.center_clamped_to_ground,
             terrain_skirt_length: map_options.terrain_skirt_length,
             elevation: None,
-            ground_generation: 0,
             ground_moves: 0,
             debug_options: MapDebugOptions::NO_DEBUG,
             rendering_stats_view: None,
@@ -471,25 +468,17 @@ impl Map {
                 repaint_at,
                 placement_changed,
                 still_image_request_id,
-                ground_generation,
                 stats,
             } => {
                 self.repaint_at = repaint_at.filter(|_| continuous && !needs_repaint);
-                let grounded = ground_generation == self.ground_generation;
-                self.on_render_frame_finished(
-                    mode,
-                    needs_repaint,
-                    placement_changed,
-                    still_image_request_id,
-                    grounded,
-                    stats,
-                );
+                self.on_render_frame_finished(mode, needs_repaint, placement_changed, still_image_request_id, stats);
             }
+            // The renderer completes a frame only of an update that carries
+            // its newest ground, so the map answers each with one, whether
+            // or not the camera moves onto it (`follow_terrain`).
             RendererEvent::TerrainElevation(elevation) => {
                 self.elevation = elevation;
-                if self.follow_terrain() {
-                    self.on_update();
-                }
+                self.on_update();
             }
             RendererEvent::RenderMapStarted => {
                 if continuous {
@@ -539,17 +528,15 @@ impl Map {
         }
     }
 
-    /// Handles the end of a frame: `grounded` when it drew the camera on
-    /// the terrain's latest ground. A frame drawn before the terrain moved
-    /// the camera neither completes a still image nor leaves the map idle:
-    /// the move's update draws another.
+    /// Handles the end of a frame. Only a `Full` frame completes a still
+    /// image or leaves the map idle; one whose camera hadn't stood on the
+    /// terrain's newest ground isn't `Full`.
     fn on_render_frame_finished(
         &mut self,
         mode: mln_renderer::RenderMode,
         needs_repaint: bool,
         placement_changed: bool,
         still_image_request_id: u64,
-        grounded: bool,
         stats: Arc<RenderingStats>,
     ) {
         let fully_loaded = mode == mln_renderer::RenderMode::Full;
@@ -576,11 +563,10 @@ impl Map {
             let animating = self.transform.in_transition();
             if needs_repaint || (animating && self.transform.frame_time().is_none()) {
                 self.on_update();
-            } else if !animating && self.renderer_fully_loaded && grounded && self.repaint_at.is_none() {
+            } else if !animating && self.renderer_fully_loaded && self.repaint_at.is_none() {
                 self.emit(MapEvent::Idle);
             }
         } else if self.renderer_fully_loaded
-            && grounded
             && still_image_request_id == self.still_image_request_id
             && self.still_image == StillImage::Pending
         {
@@ -608,6 +594,8 @@ impl Map {
 
         // Don't load/render anything in still mode until explicitly requested.
         if self.mode != MapMode::Continuous && self.still_image != StillImage::Pending {
+            // The camera stands on the ground all the same.
+            self.follow_terrain();
             return;
         }
 
@@ -646,7 +634,7 @@ impl Map {
             cross_source_collisions: self.cross_source_collisions,
             fast_pfor_enabled: self.fast_pfor_enabled,
             terrain_skirt_length: self.terrain_skirt_length,
-            ground_generation: self.ground_generation,
+            elevation: self.elevation.clone(),
             tile_lod_min_radius: self.tile.lod_min_radius,
             tile_lod_scale: self.tile.lod_scale,
             tile_lod_pitch_threshold: mln_math::deg2rad(self.tile.lod_pitch_threshold),
@@ -1446,11 +1434,11 @@ impl Map {
     /// the style has none, the planes fit the flat map again, and a clamped
     /// center goes back to sea level.
     ///
-    /// The moves report no camera change, and each counts in
-    /// `ground_generation`; a still image stops following the terrain after
-    /// [`MAX_GROUND_MOVES_PER_STILL`] of them, though it still goes back to
-    /// the flat map. Returns whether the view changed.
-    fn follow_terrain(&mut self) -> bool {
+    /// The moves report no camera change. A still image stops following
+    /// the terrain after [`MAX_GROUND_MOVES_PER_STILL`] of them, though it
+    /// still goes back to the flat map, and its updates still carry the
+    /// newest ground, so its frame draws.
+    fn follow_terrain(&mut self) {
         // The renderer tells of the ground only after it draws an update
         // without it, so the map, which owns the style, lets go first.
         if self.style.get_terrain().is_none() {
@@ -1475,19 +1463,15 @@ impl Map {
             }
             None => false,
         };
-        if moved {
-            self.ground_generation += 1;
-            if still && self.elevation.is_some() {
-                self.ground_moves += 1;
-                if self.ground_moves == MAX_GROUND_MOVES_PER_STILL {
-                    Log::warning(
-                        Event::Render,
-                        "The camera didn't settle on the terrain: the still image shows it where it last moved",
-                    );
-                }
+        if moved && still && self.elevation.is_some() {
+            self.ground_moves += 1;
+            if self.ground_moves == MAX_GROUND_MOVES_PER_STILL {
+                Log::warning(
+                    Event::Render,
+                    "The camera didn't settle on the terrain: the still image shows it where it last moved",
+                );
             }
         }
-        moved
     }
 
     // MARK: - Debug

@@ -17,7 +17,7 @@ pub(crate) use drapes::Drapes;
 pub(crate) use elevation::TerrainElevation;
 use mln_gfx::gpu::Gpu;
 use mln_gfx::shaders::terrain_ubo::TerrainPropsUBO;
-use mln_map_types::{MapMode, TerrainSkirtLength};
+use mln_map_types::{Elevation, MapMode, TerrainSkirtLength};
 use mln_style::source_type::SourceData;
 use mln_style::sources::RasterDemSourceType;
 use mln_util::constants;
@@ -142,29 +142,39 @@ impl RenderTerrain {
     /// ([`RendererEvent::TerrainElevation`]), before the frame finishes:
     /// the tiles, the DEM data they read, or how it decodes. While terrain
     /// doesn't draw, it tells the map that there is no ground once it
-    /// stops, and for each update whose view `grounded` on terrain, which
-    /// another renderer may have drawn.
+    /// stops, and for each update whose camera stood on a ground (`seen`),
+    /// which another renderer may have drawn.
+    ///
+    /// Returns whether `seen`, the ground of the update's camera
+    /// ([`UpdateParameters::elevation`]), is the ground the tiles now draw,
+    /// as the snapshot the renderer last told the map of: both `None` while
+    /// terrain doesn't draw.
     pub(crate) fn bind<'a>(
         &mut self,
         dem: impl FnOnce(&str) -> Option<&'a SourceTiles>,
-        grounded: bool,
+        seen: Option<&Arc<dyn Elevation>>,
         events: &mut Vec<RendererEvent>,
-    ) {
+    ) -> bool {
         let Some(cover) = &mut self.cover else {
-            if self.elevation.take().is_some() || grounded {
+            if self.elevation.take().is_some() || seen.is_some() {
                 events.push(RendererEvent::TerrainElevation(None));
             }
-            return;
+            return seen.is_none();
         };
         let tiles = dem(&cover.source_id);
         cover.bind(tiles);
         let (unpack, exaggeration) = (self.surface.unpack(), self.surface.props.exaggeration);
-        if self.elevation.as_ref().is_some_and(|drawn| drawn.draws_as(cover, tiles, unpack, exaggeration)) {
-            return;
-        }
-        let elevation = Arc::new(TerrainElevation::new(cover, tiles, unpack, exaggeration));
-        self.elevation = Some(Arc::clone(&elevation));
-        events.push(RendererEvent::TerrainElevation(Some(elevation)));
+        let drawn = match &self.elevation {
+            Some(drawn) if drawn.draws_as(cover, tiles, unpack, exaggeration) => drawn,
+            _ => {
+                let elevation = Arc::new(TerrainElevation::new(cover, tiles, unpack, exaggeration));
+                events.push(RendererEvent::TerrainElevation(Some(Arc::<TerrainElevation>::clone(&elevation))));
+                self.elevation.insert(elevation)
+            }
+        };
+        // The same snapshot, compared by its address: the map holds the one
+        // the renderer sent.
+        seen.is_some_and(|seen| std::ptr::addr_eq(Arc::as_ptr(drawn), Arc::as_ptr(seen)))
     }
 
     /// How the surface of the last update's cover draws.

@@ -1,5 +1,6 @@
-//! How the camera stands on the terrain its renderer drew, and how stills
-//! and idle wait for it to settle.
+//! How the camera stands on the terrain its renderer drew, and how the
+//! map's updates carry that ground back to the renderer, which completes a
+//! frame only of an update that carries its newest.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -58,8 +59,12 @@ impl Elevation for Restless {
     }
 }
 
-fn flat(height: Option<f64>, min: f64) -> RendererEvent {
-    RendererEvent::TerrainElevation(Some(Arc::new(Flat { height, min })))
+fn flat(height: Option<f64>, min: f64) -> Arc<dyn Elevation> {
+    Arc::new(Flat { height, min })
+}
+
+fn ground_event(elevation: &Arc<dyn Elevation>) -> RendererEvent {
+    RendererEvent::TerrainElevation(Some(Arc::clone(elevation)))
 }
 
 fn map(mode: MapMode, run_loop: &Queue<()>) -> Map {
@@ -83,19 +88,22 @@ fn ground(map: &Map) -> (f64, Option<f64>) {
     (view.center_altitude(), view.terrain_min_elevation())
 }
 
-/// The ground generation of the map's latest update.
-fn ground_generation(map: &Map) -> u64 {
-    map.update_reader().latest().expect("an update").parameters.ground_generation
+/// Whether the map's latest update carries `elevation` as its ground.
+fn carries(map: &Map, elevation: Option<&Arc<dyn Elevation>>) -> bool {
+    let update = map.update_reader().latest().expect("an update");
+    match (update.parameters.elevation.as_ref(), elevation) {
+        (Some(carried), Some(elevation)) => std::ptr::addr_eq(Arc::as_ptr(carried), Arc::as_ptr(elevation)),
+        (carried, elevation) => carried.is_none() && elevation.is_none(),
+    }
 }
 
-fn frame(still_image_request_id: u64, ground_generation: u64) -> RendererEvent {
+fn frame(mode: RenderMode, still_image_request_id: u64) -> RendererEvent {
     RendererEvent::RenderFrameFinished {
-        mode: RenderMode::Full,
+        mode,
         needs_repaint: false,
         repaint_at: None,
         placement_changed: false,
         still_image_request_id,
-        ground_generation,
         stats: Arc::default(),
     }
 }
@@ -105,7 +113,7 @@ fn camera_events(events: &[MapEvent]) -> usize {
 }
 
 /// A camera at rest stands on the ground under its center, which the
-/// update that the move publishes shows, without camera events. One that an
+/// update that answers the ground shows, without camera events. One that an
 /// animation moves keeps its altitude, though the planes fit the terrain,
 /// until it comes to rest.
 #[test]
@@ -115,15 +123,12 @@ fn a_camera_at_rest_stands_on_the_ground_and_a_moving_one_holds() {
     map.drain_events();
 
     let updates = map.update_generation();
-    report(&mut map, flat(Some(500.0), 300.0));
-    assert_eq!((500.0, Some(300.0)), ground(&map));
-    assert_eq!(updates + 1, map.update_generation(), "the move's update");
-    assert_eq!(1, ground_generation(&map));
+    let ground = flat(Some(500.0), 300.0);
+    report(&mut map, ground_event(&ground));
+    assert_eq!((500.0, Some(300.0)), self::ground(&map));
+    assert_eq!(updates + 1, map.update_generation(), "the answer's update");
+    assert!(carries(&map, Some(&ground)));
     assert_eq!(0, camera_events(&map.drain_events()));
-
-    // Ground that stays the same moves nothing.
-    report(&mut map, flat(Some(500.0), 300.0));
-    assert_eq!(1, ground_generation(&map));
 
     map.update_camera(&CameraUpdate {
         mode: CameraUpdateMode::Ease,
@@ -131,14 +136,41 @@ fn a_camera_at_rest_stands_on_the_ground_and_a_moving_one_holds() {
         animation: AnimationOptions { duration: Some(Duration::from_secs(60)), ..Default::default() },
         ..Default::default()
     });
-    report(&mut map, flat(Some(800.0), 700.0));
-    let (altitude, floor) = ground(&map);
+    report(&mut map, ground_event(&flat(Some(800.0), 700.0)));
+    let (altitude, floor) = self::ground(&map);
     assert!((altitude - 500.0).abs() < 1e-6, "{altitude}");
     assert_eq!(Some(700.0), floor);
 
     map.cancel_transitions();
-    let (altitude, _) = ground(&map);
+    let (altitude, _) = self::ground(&map);
     assert!((altitude - 800.0).abs() < 1e-6, "{altitude}");
+}
+
+/// The map answers each ground the renderer tells of with an update that
+/// carries it, though the camera doesn't move: the renderer completes a
+/// frame only of such an update.
+#[test]
+fn each_ground_gets_an_update_that_carries_it() {
+    let run_loop = Queue::<()>::new();
+    for mode in [MapMode::Continuous, MapMode::Static] {
+        let mut map = map(mode, &run_loop);
+        if mode == MapMode::Static {
+            map.render_still().unwrap();
+        }
+        let first = flat(Some(500.0), 300.0);
+        report(&mut map, ground_event(&first));
+        assert!(carries(&map, Some(&first)), "{mode:?}");
+
+        let updates = map.update_generation();
+        let same = flat(Some(500.0), 300.0);
+        report(&mut map, ground_event(&same));
+        assert_eq!((500.0, Some(300.0)), ground(&map), "{mode:?}: nothing moved");
+        assert_eq!(updates + 1, map.update_generation(), "{mode:?}");
+        assert!(carries(&map, Some(&same)), "{mode:?}");
+
+        report(&mut map, RendererEvent::TerrainElevation(None));
+        assert!(carries(&map, None), "{mode:?}");
+    }
 }
 
 /// With its center unclamped, the camera keeps the altitude it was given,
@@ -149,7 +181,7 @@ fn an_unclamped_center_keeps_its_altitude() {
     let mut map = map(MapMode::Continuous, &run_loop);
     map.set_center_clamped_to_ground(false);
     map.jump_to(&CameraOptions { center_altitude: Some(2000.0), ..Default::default() });
-    report(&mut map, flat(Some(500.0), 300.0));
+    report(&mut map, ground_event(&flat(Some(500.0), 300.0)));
     let (altitude, floor) = ground(&map);
     assert!((altitude - 2000.0).abs() < 1e-6, "{altitude}");
     assert_eq!(Some(300.0), floor);
@@ -164,8 +196,8 @@ fn an_unclamped_center_keeps_its_altitude() {
 fn loading_ground_keeps_the_altitude() {
     let run_loop = Queue::<()>::new();
     let mut map = map(MapMode::Continuous, &run_loop);
-    report(&mut map, flat(Some(500.0), 300.0));
-    report(&mut map, flat(None, 0.0));
+    report(&mut map, ground_event(&flat(Some(500.0), 300.0)));
+    report(&mut map, ground_event(&flat(None, 0.0)));
     assert_eq!((500.0, Some(0.0)), ground(&map));
 }
 
@@ -175,7 +207,7 @@ fn loading_ground_keeps_the_altitude() {
 fn the_camera_returns_to_sea_level_once_terrain_stops() {
     let run_loop = Queue::<()>::new();
     let mut map = map(MapMode::Continuous, &run_loop);
-    report(&mut map, flat(Some(500.0), 300.0));
+    report(&mut map, ground_event(&flat(Some(500.0), 300.0)));
     let flat_view = {
         let mut state = map.transform_state().clone();
         state.set_terrain_min_elevation(None);
@@ -186,90 +218,99 @@ fn the_camera_returns_to_sea_level_once_terrain_stops() {
     report(&mut map, RendererEvent::TerrainElevation(None));
     assert_eq!((0.0, None), ground(&map));
     assert_eq!(flat_view, *map.transform_state().view());
-    assert_eq!(2, ground_generation(&map));
 
     map.jump_to(&CameraOptions { center_altitude: Some(100.0), ..Default::default() });
     map.trigger_repaint();
     let (altitude, _) = ground(&map);
     assert!((altitude - 100.0).abs() < 1e-6, "{altitude}");
-    assert_eq!(2, ground_generation(&map));
 }
 
-/// A complete frame drawn before the terrain moved the camera neither
-/// completes a still image nor leaves a continuous map idle: the move's
-/// update draws another, which does.
+/// A still map that waits for no still image publishes no update, but its
+/// camera stands on the ground all the same, and the next still image's
+/// first update carries it.
 #[test]
-fn a_frame_of_an_earlier_ground_ends_no_still_and_no_idle() {
+fn a_still_map_between_images_stands_on_the_ground() {
+    let run_loop = Queue::<()>::new();
+    let mut map = map(MapMode::Static, &run_loop);
+    let ground_ = flat(Some(500.0), 300.0);
+    report(&mut map, ground_event(&ground_));
+    assert_eq!((500.0, Some(300.0)), ground(&map));
+    map.render_still().unwrap();
+    assert!(carries(&map, Some(&ground_)));
+    report(&mut map, RendererEvent::TerrainElevation(None));
+    assert_eq!((0.0, None), ground(&map));
+}
+
+/// Only a complete frame ends a still image or leaves a continuous map
+/// idle: the renderer reports one of an update that carries an earlier
+/// ground as partial.
+#[test]
+fn a_partial_frame_ends_no_still_and_no_idle() {
     let run_loop = Queue::<()>::new();
     let mut map = map(MapMode::Static, &run_loop);
     map.render_still().unwrap();
-    report(&mut map, flat(Some(500.0), 300.0));
-    report(&mut map, frame(1, 0));
+    report(&mut map, frame(RenderMode::Partial, 1));
     assert_eq!(None, map.take_still_image());
-    let latest = ground_generation(&map);
-    report(&mut map, frame(1, latest));
+    report(&mut map, frame(RenderMode::Full, 1));
     assert_eq!(Some(Ok(())), map.take_still_image());
 
     let mut map = self::map(MapMode::Continuous, &run_loop);
-    report(&mut map, flat(Some(500.0), 300.0));
     map.drain_events();
     let idle = |events: Vec<MapEvent>| events.iter().any(|event| matches!(event, MapEvent::Idle));
-    report(&mut map, frame(0, 0));
+    report(&mut map, frame(RenderMode::Partial, 0));
     assert!(!idle(map.drain_events()));
-    let latest = ground_generation(&map);
-    report(&mut map, frame(0, latest));
+    report(&mut map, frame(RenderMode::Full, 0));
     assert!(idle(map.drain_events()));
 }
 
 /// A camera whose ground changes with each move stops following it after
-/// eight moves in a still image, which the next complete frame then ends.
+/// eight moves in a still image, though the map still answers each ground
+/// with an update that carries it, so the renderer completes the image.
 #[test]
 fn a_still_image_stops_following_ground_that_never_settles() {
     let run_loop = Queue::<()>::new();
     let mut map = map(MapMode::Static, &run_loop);
     map.render_still().unwrap();
     let restless: Arc<dyn Elevation> = Arc::new(Restless::default());
+    let mut altitudes = Vec::new();
     for _ in 0..20 {
-        report(&mut map, RendererEvent::TerrainElevation(Some(Arc::clone(&restless))));
-        let earlier = ground_generation(&map).saturating_sub(1);
-        report(&mut map, frame(1, earlier));
-        assert_eq!(None, map.take_still_image());
+        let updates = map.update_generation();
+        report(&mut map, ground_event(&restless));
+        assert_eq!(updates + 1, map.update_generation(), "an answer to each");
+        assert!(carries(&map, Some(&restless)));
+        altitudes.push(ground(&map).0);
     }
-    assert_eq!(8, ground_generation(&map));
-    report(&mut map, frame(1, 8));
+    let mut moves = [100.0, 200.0].repeat(4);
+    moves.extend([200.0; 12]);
+    assert_eq!(moves, altitudes);
+    report(&mut map, frame(RenderMode::Full, 1));
     assert_eq!(Some(Ok(())), map.take_still_image());
 
     // The next still image follows the ground again.
     map.render_still().unwrap();
-    report(&mut map, RendererEvent::TerrainElevation(Some(restless)));
-    assert!(ground_generation(&map) > 8);
+    assert_eq!(100.0, ground(&map).0);
 }
 
 /// A style that drops its terrain while a still image waits takes the
 /// camera back to the flat map at once, before the renderer has drawn the
-/// style without terrain; the still image then waits for a frame of the
-/// flat map.
+/// style without terrain, and its updates carry no ground.
 #[test]
 fn a_style_without_terrain_lets_go_of_the_ground() {
     let run_loop = Queue::<()>::new();
     let mut map = map(MapMode::Static, &run_loop);
     map.render_still().unwrap();
-    report(&mut map, flat(Some(500.0), 300.0));
+    let ground_ = flat(Some(500.0), 300.0);
+    report(&mut map, ground_event(&ground_));
     assert_eq!((500.0, Some(300.0)), ground(&map));
-    let grounded = ground_generation(&map);
 
     map.edit_style(|style| style.apply(Edit::SetTerrain(None))).unwrap();
     assert_eq!((0.0, None), ground(&map));
-    let flat_map = ground_generation(&map);
-    assert_eq!(grounded + 1, flat_map);
-    // A snapshot the renderer sent before it drew the flat map doesn't
-    // ground the camera again.
-    report(&mut map, flat(Some(500.0), 300.0));
+    assert!(carries(&map, None));
+    // A ground the renderer sent before it drew the flat map doesn't ground
+    // the camera again.
+    report(&mut map, ground_event(&ground_));
     assert_eq!((0.0, None), ground(&map));
-    report(&mut map, frame(1, grounded));
-    assert_eq!(None, map.take_still_image());
-    report(&mut map, frame(1, flat_map));
-    assert_eq!(Some(Ok(())), map.take_still_image());
+    assert!(carries(&map, None));
 }
 
 /// A still image that used up its moves on ground that never settles still
@@ -281,14 +322,12 @@ fn the_camera_returns_to_sea_level_after_a_still_image_used_its_moves() {
     map.render_still().unwrap();
     let restless: Arc<dyn Elevation> = Arc::new(Restless::default());
     for _ in 0..10 {
-        report(&mut map, RendererEvent::TerrainElevation(Some(Arc::clone(&restless))));
+        report(&mut map, ground_event(&restless));
     }
-    assert_eq!(8, ground_generation(&map));
+    assert!(ground(&map).0 > 0.0);
     report(&mut map, RendererEvent::TerrainElevation(None));
     assert_eq!((0.0, None), ground(&map));
-    assert_eq!(9, ground_generation(&map));
-    report(&mut map, frame(1, 9));
-    assert_eq!(Some(Ok(())), map.take_still_image());
+    assert!(carries(&map, None));
 }
 
 /// An animation of the pitch alone, or of the altitude alone, holds the
@@ -301,7 +340,7 @@ fn a_pitch_or_altitude_animation_holds_the_altitude() {
     ] {
         let run_loop = Queue::<()>::new();
         let mut map = map(MapMode::Continuous, &run_loop);
-        report(&mut map, flat(Some(500.0), 300.0));
+        report(&mut map, ground_event(&flat(Some(500.0), 300.0)));
         map.update_camera(&CameraUpdate {
             mode: CameraUpdateMode::Ease,
             camera,
@@ -310,7 +349,7 @@ fn a_pitch_or_altitude_animation_holds_the_altitude() {
         });
         map.trigger_repaint();
         let held = ground(&map).0;
-        report(&mut map, flat(Some(800.0), 700.0));
+        report(&mut map, ground_event(&flat(Some(800.0), 700.0)));
         let (altitude, floor) = ground(&map);
         assert!((altitude - held).abs() < 1e-6 && (altitude - 800.0).abs() > 1.0, "{camera:?}: {altitude}");
         assert_eq!(Some(700.0), floor);

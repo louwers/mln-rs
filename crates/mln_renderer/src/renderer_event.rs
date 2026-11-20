@@ -36,7 +36,11 @@ pub enum RendererEvent {
     RenderFrameStarted,
     /// The renderer drew a frame.
     RenderFrameFinished {
-        /// `Full` when everything the frame shows has loaded.
+        /// `Full` when everything the frame shows has loaded, and its camera
+        /// stood on the terrain's current ground
+        /// ([`UpdateParameters::elevation`]).
+        ///
+        /// [`UpdateParameters::elevation`]: crate::UpdateParameters::elevation
         mode: RenderMode,
         /// The frame has transitions still running.
         needs_repaint: bool,
@@ -50,17 +54,17 @@ pub enum RendererEvent {
         /// updates completes it, not one of an earlier update that a renderer
         /// on another thread drew late.
         still_image_request_id: u64,
-        /// The `ground_generation` of the update that the frame drew. Only
-        /// a frame of the map's latest ground completes a still image or
-        /// leaves the map idle: one drawn before the camera moved onto the
-        /// terrain doesn't.
-        ground_generation: u64,
         /// The context's counters after the frame.
         stats: Arc<RenderingStats>,
     },
     /// The ground of the terrain changed: the tiles that draw it, or the DEM
-    /// data they read. The map's camera stands on it. `None` once terrain
-    /// stops drawing. It comes before the frame of its update finishes.
+    /// data they read. `None` once terrain stops drawing, and for an update
+    /// that carries a ground while terrain doesn't draw. It comes before the
+    /// frame of its update finishes. The map's camera stands on it, and the
+    /// map answers it with an update that carries it
+    /// ([`UpdateParameters::elevation`]), which a still image waits for.
+    ///
+    /// [`UpdateParameters::elevation`]: crate::UpdateParameters::elevation
     TerrainElevation(Option<Arc<dyn Elevation>>),
     /// The renderer drew its first frame with everything loaded.
     RenderMapFinished,

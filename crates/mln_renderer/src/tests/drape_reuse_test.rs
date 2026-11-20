@@ -11,7 +11,7 @@ use mln_gfx::frame::FrameTarget;
 use mln_gfx::offscreen_target::OffscreenTarget;
 use mln_map::transform::Transform;
 use mln_map_types::{
-    CameraOptions, ConstrainMode, MapDebugOptions, MapMode, TerrainSkirtLength, TileLodMode, ViewportMode,
+    CameraOptions, ConstrainMode, Elevation, MapDebugOptions, MapMode, TerrainSkirtLength, TileLodMode, ViewportMode,
 };
 use mln_storage::{FileSource, Resource, Responder, Response};
 use mln_style::expression::expression::FeatureState;
@@ -149,6 +149,9 @@ struct DrapedMap {
     style: Arc<Style>,
     transform: Transform,
     camera_moving: bool,
+    /// The ground the renderer last told of, which the updates carry, as a
+    /// map's do.
+    elevation: Option<Arc<dyn Elevation>>,
     work: TileWork,
     _pool: mln_util::pool::Pool,
 }
@@ -221,6 +224,7 @@ impl DrapedMap {
             style: Arc::new(style()),
             transform,
             camera_moving: false,
+            elevation: None,
             work: TileWork::default(),
             _pool: pool,
         }
@@ -248,7 +252,7 @@ impl DrapedMap {
             cross_source_collisions: true,
             fast_pfor_enabled: false,
             terrain_skirt_length: TerrainSkirtLength::Auto,
-            ground_generation: 0,
+            elevation: self.elevation.clone(),
             tile_lod_min_radius: 3.0,
             tile_lod_scale: 1.0,
             tile_lod_pitch_threshold: mln_math::deg2rad(60.0),
@@ -272,6 +276,7 @@ impl DrapedMap {
         for event in self.events.take() {
             match event {
                 RendererEvent::RenderFrameFinished { mode, .. } => full = mode == RenderMode::Full,
+                RendererEvent::TerrainElevation(elevation) => self.elevation = elevation,
                 RendererEvent::TileAction { op, id, source_id } => self.work.record(op, (source_id, id)),
                 _ => {}
             }

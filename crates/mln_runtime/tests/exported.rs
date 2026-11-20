@@ -268,10 +268,9 @@ fn dropped_and_released_frames_free_their_slots() {
     }
 }
 
-/// A still image whose camera stands on the terrain that its first frame
-/// loaded draws its second frame over the first, which the host never
-/// gets: a host that holds each frame it gets of a ring of one image until
-/// the image completes doesn't hold up the image.
+/// A still image over terrain draws one frame, of the camera standing on
+/// the ground: a host that holds each frame it gets of a ring of one image
+/// until the image completes doesn't hold up the image.
 #[test]
 fn a_still_image_over_terrain_gives_the_host_one_frame_of_a_ring_of_one() {
     let runtime = runtime();

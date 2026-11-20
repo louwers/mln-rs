@@ -342,7 +342,7 @@ pub type mln_map_load_error = u32;
 pub const MLN_RENDER_MODE_PARTIAL: mln_render_mode = 0;
 pub const MLN_RENDER_MODE_FULL: mln_render_mode = 1;
 /** Whether a frame drew the map complete, or lacked resources that are still
- loading.*/
+ loading or showed the camera before it settled on the terrain.*/
 pub type mln_render_mode = u32;
 pub const MLN_TILE_OPERATION_REQUESTED_FROM_CACHE: mln_tile_operation = 0;
 pub const MLN_TILE_OPERATION_REQUESTED_FROM_NETWORK: mln_tile_operation = 1;
