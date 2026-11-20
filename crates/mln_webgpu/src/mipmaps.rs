@@ -80,13 +80,15 @@ impl Mipmapper {
 
     /// Records into `encoder` a pass for each of `levels`, single-level
     /// views of a texture of `format` from level 0, after the first, which
-    /// draws it from the level before.
+    /// draws it from the level before. In a benchmark's build, `queries`
+    /// measure each pass as they do the renderer's.
     pub(crate) fn generate(
         &mut self,
         device: &wgpu::Device,
         encoder: &mut wgpu::CommandEncoder,
         format: wgpu::TextureFormat,
         levels: &[wgpu::TextureView],
+        #[cfg(feature = "bench")] mut queries: Option<&mut crate::bench::Queries>,
     ) {
         let pipeline = self.pipelines.entry(format).or_insert_with(|| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -132,13 +134,22 @@ impl Mipmapper {
                     },
                 })],
                 depth_stencil_attachment: None,
+                #[cfg(feature = "bench")]
+                timestamp_writes: queries.as_deref().and_then(crate::bench::Queries::timestamp_writes),
+                #[cfg(not(feature = "bench"))]
                 timestamp_writes: None,
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
+            #[cfg(feature = "bench")]
+            let counted = queries.as_deref_mut().is_some_and(|queries| queries.begin(&mut pass));
             pass.set_pipeline(pipeline);
             pass.set_bind_group(0, &group, &[]);
             pass.draw(0..3, 0..1);
+            #[cfg(feature = "bench")]
+            if counted {
+                crate::bench::Queries::end(&mut pass);
+            }
         }
     }
 }

@@ -748,7 +748,14 @@ impl Gpu for WebGpu {
             device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("frame") })
         });
         let mipmapper = self.mipmapper.get_or_insert_with(|| Mipmapper::new(device));
-        mipmapper.generate(device, encoder, texture.texture.format(), &texture.levels);
+        mipmapper.generate(
+            device,
+            encoder,
+            texture.texture.format(),
+            &texture.levels,
+            #[cfg(feature = "bench")]
+            self.queries.as_mut(),
+        );
         Ok(())
     }
 
