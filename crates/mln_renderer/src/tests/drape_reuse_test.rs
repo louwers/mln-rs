@@ -1,6 +1,8 @@
 // A continuous map over terrain draws a drape again only when what it
 // shows changed: its layers' values, the tiles or image they draw, their
-// feature state, or, once the camera rests, the zoom.
+// feature state, or, once the camera rests, the zoom. A hillshade, over
+// terrain or not, prepares a DEM tile's slopes again only when its border
+// changed.
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -86,27 +88,30 @@ fn png(side: u32, pixel: [u8; 4]) -> Response {
 }
 
 /// Answers every tile request at once: sea level for the DEM, or 25 km up if
-/// `high`, and grey for the raster source, except a raster tile that waits
-/// while it is held.
+/// `high`, and grey for the raster source, except a tile that waits while it
+/// is held, that of the source whose URLs start with the held prefix.
 #[derive(Default)]
 struct Tiles {
     high: bool,
-    held: Mutex<Option<CanonicalTileID>>,
-    waiting: Mutex<Vec<Responder>>,
+    held: Mutex<Option<(&'static str, CanonicalTileID)>>,
+    waiting: Mutex<Vec<(Responder, Response)>>,
 }
 
 impl FileSource for Tiles {
     fn load(&self, resource: &Resource, responder: Responder) {
         let data = resource.tile_data.as_ref().expect("only tiles are requested");
         let tile = CanonicalTileID::new(data.z as u8, data.x as u32, data.y as u32);
-        if data.url_template.starts_with("dem/") {
+        let response = if data.url_template.starts_with("dem/") {
             // (1 · 65536 + 134 · 256 + 160) · 0.1 − 10000 = 0 m, and
             // (5 · 65536 + 87 · 256 + 48) · 0.1 − 10000 = 25000 m.
-            responder.send(png(256, if self.high { [5, 87, 48, 255] } else { [1, 134, 160, 255] }));
-        } else if *self.held.lock() == Some(tile) {
-            self.waiting.lock().push(responder);
+            png(256, if self.high { [5, 87, 48, 255] } else { [1, 134, 160, 255] })
         } else {
-            responder.send(png(256, [128, 128, 128, 255]));
+            png(256, [128, 128, 128, 255])
+        };
+        if self.held.lock().is_some_and(|(prefix, held)| held == tile && data.url_template.starts_with(prefix)) {
+            self.waiting.lock().push((responder, response));
+        } else {
+            responder.send(response);
         }
     }
 
@@ -119,8 +124,8 @@ impl Tiles {
     /// Answers the held tile.
     fn release(&self) {
         *self.held.lock() = None;
-        for responder in std::mem::take(&mut *self.waiting.lock()) {
-            responder.send(png(256, [128, 128, 128, 255]));
+        for (responder, response) in std::mem::take(&mut *self.waiting.lock()) {
+            responder.send(response);
         }
     }
 }
@@ -624,7 +629,7 @@ fn a_new_image_draws_every_drape_again() {
 #[test]
 fn a_new_source_tile_draws_the_drapes_it_overlaps_again() {
     let held = CanonicalTileID::new(3, 3, 3);
-    let tiles = Tiles { held: Mutex::new(Some(held)), ..Tiles::default() };
+    let tiles = Tiles { held: Mutex::new(Some(("raster/", held))), ..Tiles::default() };
     let (mut map, _) = settled(tiles);
     assert!(!map.tiles.waiting.lock().is_empty(), "the held tile was requested");
     map.tiles.release();
@@ -700,6 +705,41 @@ fn a_rotation_draws_a_viewport_lit_hillshade_again_at_rest() {
     map.camera_moving = false;
     assert_eq!(drapes, map.frame().1, "the drapes drawn again at rest");
     assert!(map.frame().1.is_empty());
+}
+
+/// Draws a frame, and returns its render passes.
+fn render_passes(map: &mut DrapedMap) -> i32 {
+    map.frame();
+    map.renderer.rendering_stats().num_render_passes
+}
+
+/// A hillshade on a map without terrain prepares the slopes of each DEM
+/// tile once, in a pass of its own: a map at rest draws its frame's pass
+/// only, and a DEM tile that arrives prepares its own slopes and those of
+/// its three neighbours again, whose borders it fills.
+#[test]
+fn a_hillshade_prepares_a_dem_tile_once_and_again_when_its_border_arrives() {
+    // The north-west one of the four DEM tiles the view sees.
+    let held = CanonicalTileID::new(3, 3, 3);
+    let mut map = DrapedMap::new(Tiles { held: Mutex::new(Some(("dem/", held))), ..Tiles::default() });
+    map.edit(Edit::SetTerrain(None));
+    map.edit(hillshade());
+    map.settle();
+    assert_eq!(1, map.tiles.waiting.lock().len(), "the held tile was requested");
+    assert_eq!(1, render_passes(&mut map), "a map at rest prepares nothing");
+
+    map.tiles.release();
+    let mut prepared = 0;
+    for _ in 0..1000 {
+        prepared += render_passes(&mut map) - 1;
+        if map.work.idle(0) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    prepared += render_passes(&mut map) - 1;
+    assert_eq!(4, prepared, "the new tile and its neighbours prepared");
+    assert_eq!(1, render_passes(&mut map), "a map at rest prepares nothing");
 }
 
 /// The corners of a box of 10° a side whose north-west corner is at `lat`,

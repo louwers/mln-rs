@@ -3,7 +3,9 @@
 // The layer keeps the render targets per bucket id
 // (`bucket_render_targets`), with the bucket's prepare generation (see
 // hillshade_bucket.rs), and a tile's draw takes the bucket's masked geometry
-// again only when it changed.
+// again only when it changed. The slopes depend on nothing but the bucket's
+// DEM and its tile's zoom, so each target is prepared once, by the first
+// frame that draws it.
 
 use std::collections::hash_map::Entry;
 use std::mem::offset_of;
@@ -89,6 +91,8 @@ struct BucketTarget {
     prepare: SingleDraw,
     /// The bucket's prepare generation the target was made at.
     generation: u64,
+    /// Whether the target holds the slopes, which a pass drew.
+    prepared: bool,
 }
 
 /// What the layer keeps of a tile: the draw that shades the slopes of its
@@ -497,25 +501,27 @@ impl TypedLayer for RenderHillshadeLayer {
 impl RenderLayer for RenderHillshadeLayer {
     fn upload_render_targets(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
         if self.base.is_renderable {
-            for target in self.bucket_render_targets.values_mut() {
+            for target in self.bucket_render_targets.values_mut().filter(|target| !target.prepared) {
                 target.prepare.upload(gpu, context);
             }
         }
     }
 
+    /// Prepares the slopes of the targets that don't hold them yet.
     fn render_targets(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
         if !self.base.is_renderable {
             return;
         }
-        for BucketTarget { render_target, prepare, .. } in self.bucket_render_targets.values_mut() {
+        for target in self.bucket_render_targets.values_mut().filter(|target| !target.prepared) {
             parameters.current_layer = 0;
-            let Some(mut passes) = render_target.begin(gpu, parameters) else {
+            let Some(mut passes) = target.render_target.begin(gpu, parameters) else {
                 continue;
             };
             while passes.next(parameters) {
-                prepare.render(gpu, parameters);
+                target.prepare.render(gpu, parameters);
             }
             passes.end(gpu, parameters);
+            target.prepared = true;
         }
     }
 }
@@ -586,7 +592,13 @@ impl BucketTarget {
         };
         prepare.write_pod(gpu, ID_HILLSHADE_PREPARE_TILE_PROPS_UBO, &tile_props, context);
 
-        BucketTarget { render_target, _dem: dem, prepare, generation: bucket.render_target_generation() }
+        BucketTarget {
+            render_target,
+            _dem: dem,
+            prepare,
+            generation: bucket.render_target_generation(),
+            prepared: false,
+        }
     }
 }
 
