@@ -10,7 +10,7 @@ use mln_vec_map::VecSet;
 use unicode_linebreak::{BreakOpportunity, linebreaks};
 
 use crate::glyph::GlyphPositions;
-use crate::shaping::get_glyph_advance;
+use crate::shaping::glyph_advances;
 use crate::tagged_string::{SHAPED_GLYPH, TaggedString};
 
 /// Zero width space, which suggests where a label may break, as in Japanese
@@ -39,9 +39,9 @@ fn is_mandatory_break(c: char) -> bool {
 
 /// The text of `text` as line breaking reads it.
 fn line_text(text: &TaggedString) -> String {
-    (0..text.length())
-        .map(|i| match text.char_at(i) {
-            SHAPED_GLYPH if text.get_section(i).shaped.is_some() => SHAPED_GLYPH_STAND_IN,
+    (0..text.len())
+        .map(|i| match text.text()[i] {
+            SHAPED_GLYPH if text.section_of(i).shaped.is_some() => SHAPED_GLYPH_STAND_IN,
             c => c,
         })
         .collect()
@@ -52,14 +52,14 @@ fn line_text(text: &TaggedString) -> String {
 /// break, after an image, and before an opening parenthesis that follows a
 /// word, as in "Freiburg(Breisgau)".
 fn opportunities<'a>(text: &'a TaggedString, line: &'a str) -> impl Iterator<Item = Opportunity> + 'a {
-    let len = text.length();
+    let len = text.len();
     let mut uax14 = linebreaks(line).peekable();
     let mut previous = None;
     line.char_indices().enumerate().filter_map(move |(index, (byte_offset, c))| {
         let before = previous.replace(c)?;
         let uax14_break = uax14.next_if(|&(offset, _)| offset == byte_offset);
         let breaks = uax14_break.is_some()
-            || text.get_section(index - 1).image_id.is_some()
+            || text.section_of(index - 1).image_id.is_some()
             || (c == '(' && index + 1 < len && before.is_alphanumeric());
         let mandatory = uax14_break.is_some_and(|(_, opportunity)| opportunity == BreakOpportunity::Mandatory);
         breaks.then_some(Opportunity { index, mandatory })
@@ -133,13 +133,14 @@ pub(crate) fn determine_line_breaks(
     image_positions: &ImagePositions,
     layout_text_size: f32,
 ) -> VecSet<usize> {
-    if max_width == 0.0 || text.empty() {
+    if max_width == 0.0 || text.is_empty() {
         return VecSet::new();
     }
 
-    let chars = text.raw_text();
-    let advance = |i: usize| get_glyph_advance(text, i, glyphs, image_positions, layout_text_size, spacing);
-    let total_width: f32 = (0..chars.len()).map(advance).sum();
+    let chars = text.text();
+    let advances: Vec<f32> = glyph_advances(text, spacing, glyphs, image_positions, layout_text_size).collect();
+    let advance = |i: usize| advances[i];
+    let total_width: f32 = advances.iter().sum();
     // An infinite quotient saturates.
     let line_count = (total_width / max_width).ceil().max(1.0) as i32;
     // Text that fits on one line, without a line that must break, stays on
@@ -191,7 +192,7 @@ mod tests {
     fn indices(text: &str) -> Vec<usize> {
         let text = TaggedString::new(
             text.chars().collect(),
-            SectionOptions::new(1.0, vec!["font".to_string()], GlyphIDType::FontPBF, 0, None),
+            SectionOptions::new(1.0, vec!["font".to_string()], GlyphIDType::FontPBF, None),
         );
         opportunities(&text, &line_text(&text)).map(|opportunity| opportunity.index).collect()
     }
@@ -223,10 +224,8 @@ mod tests {
     fn breaks_after_zero_width_spaces_and_newlines() {
         // Not before one.
         assert_eq!(indices("中\u{200B}中\u{200B}"), [2]);
-        let text = TaggedString::new(
-            "a\nb".chars().collect(),
-            SectionOptions::new(1.0, vec![], GlyphIDType::FontPBF, 0, None),
-        );
+        let text =
+            TaggedString::new("a\nb".chars().collect(), SectionOptions::new(1.0, vec![], GlyphIDType::FontPBF, None));
         assert!(opportunities(&text, &line_text(&text)).eq([Opportunity { index: 2, mandatory: true }]));
     }
 
@@ -234,7 +233,7 @@ mod tests {
     fn breaks_after_images() {
         let mut text = TaggedString::default();
         text.add_image_section("icon", VerticalAlign::Bottom);
-        text.add_text_section(&['a', 'b'], 1.0, &vec![], GlyphIDType::FontPBF, true, None, VerticalAlign::Bottom);
+        text.add_text_section(&['a', 'b'], SectionOptions::new(1.0, vec![], GlyphIDType::FontPBF, None));
         assert!(opportunities(&text, &line_text(&text)).eq([Opportunity { index: 1, mandatory: false }]));
     }
 }

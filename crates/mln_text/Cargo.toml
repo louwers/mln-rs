@@ -19,6 +19,7 @@ doctest = false
 ab_glyph_rasterizer.workspace = true
 buffa.workspace = true
 flate2.workspace = true
+glam.workspace = true
 harfrust.workspace = true
 mln_math.workspace = true
 mln_style_types.workspace = true

@@ -4,7 +4,7 @@ use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 use mln_style_types::image::{ImagePosition, ImagePositions, ImageStretch, RectU16};
 use mln_style_types::{SymbolPlacementType, TextRotationAlignmentType};
 use mln_text::PositionedIcon;
-use mln_text::glyph::{Shaping, WritingModeType};
+use mln_text::glyph::Shaping;
 use mln_util::constants::ONE_EM;
 
 /// A glyph's or an icon's quad, relative to its symbol's anchor.
@@ -22,7 +22,6 @@ pub(crate) struct SymbolQuad {
     pub(crate) pixel_offset_br: Vec2,
     /// The glyph's offset along a line it follows.
     pub(crate) glyph_offset: Vec2,
-    pub(crate) writing_mode: WritingModeType,
     pub(crate) is_sdf: bool,
     pub(crate) section_index: usize,
     /// The smallest scale of a stretched icon, where its fixed parts fill it.
@@ -137,7 +136,7 @@ impl<'a> StretchAxis<'a> {
 /// part, so that only the stretchable ones stretch.
 #[must_use]
 pub(crate) fn icon_quads(shaped_icon: &PositionedIcon, icon_rotate: f32, has_icon_text_fit: bool) -> SymbolQuads {
-    let image = shaped_icon.image();
+    let image = &shaped_icon.image;
     let pixel_ratio = image.pixel_ratio;
     let image_width = f32::from(image.padded_rect.w - 2 * BORDER);
     let image_height = f32::from(image.padded_rect.h - 2 * BORDER);
@@ -147,28 +146,10 @@ pub(crate) fn icon_quads(shaped_icon: &PositionedIcon, icon_rotate: f32, has_ico
     let stretch_y = if image.stretch_y.is_empty() { &full_y[..] } else { &image.stretch_y };
 
     let content = image.content.filter(|_| has_icon_text_fit);
-    let fitted;
-    let icon = if content.is_some() && (image.text_fit_width.is_some() || image.text_fit_height.is_some()) {
-        fitted = shaped_icon.apply_text_fit();
-        &fitted
-    } else {
-        shaped_icon
-    };
+    let bounds = if has_icon_text_fit { shaped_icon.text_fit_bounds() } else { shaped_icon.bounds };
 
-    let x = StretchAxis::new(
-        stretch_x,
-        image_width,
-        content.map(|c| (c.left, c.right)),
-        icon.left(),
-        icon.right() - icon.left(),
-    );
-    let y = StretchAxis::new(
-        stretch_y,
-        image_height,
-        content.map(|c| (c.top, c.bottom)),
-        icon.top(),
-        icon.bottom() - icon.top(),
-    );
+    let x = StretchAxis::new(stretch_x, image_width, content.map(|c| (c.left, c.right)), bounds.left, bounds.width());
+    let y = StretchAxis::new(stretch_y, image_height, content.map(|c| (c.top, c.bottom)), bounds.top, bounds.height());
 
     let rotation = (icon_rotate != 0.0).then(|| Vec2::from_angle(deg2radf(icon_rotate)));
     let rotate = |p: Vec2| rotation.map_or(p, |rotation| rotation.rotate(p));
@@ -193,7 +174,6 @@ pub(crate) fn icon_quads(shaped_icon: &PositionedIcon, icon_rotate: f32, has_ico
             pixel_offset_tl: Vec2::new(x.px(left), y.px(top)) / pixel_ratio,
             pixel_offset_br: Vec2::new(x.px(right), y.px(bottom)) / pixel_ratio,
             glyph_offset: Vec2::ZERO,
-            writing_mode: WritingModeType::None,
             is_sdf: image.sdf,
             section_index: 0,
             min_font_scale,
@@ -236,8 +216,8 @@ pub(crate) fn glyph_quads(
 
     let mut quads = SymbolQuads::new();
 
-    for line in &shaped_text.positioned_lines {
-        for glyph in &line.positioned_glyphs {
+    for line in &shaped_text.lines {
+        for glyph in &line.glyphs {
             let rect = glyph.rect;
             if rect.w == 0 || rect.h == 0 {
                 continue;
@@ -298,7 +278,7 @@ pub(crate) fn glyph_quads(
                 // along the x axis. The y coordinate includes the baseline's
                 // y offset, which needs to be accounted for when the glyph is
                 // rotated and translated.
-                let center = Vec2::new(-half_advance, half_advance - Shaping::Y_OFFSET as f32);
+                let center = Vec2::new(-half_advance, half_advance - Shaping::Y_OFFSET);
 
                 // The x half-width offset correction is the difference
                 // between full-width and half-width advance: 0 for full-width
@@ -306,10 +286,8 @@ pub(crate) fn glyph_quads(
                 let x_half_width_offset_correction = ONE_EM / 2.0 - half_advance;
                 let y_image_offset_correction =
                     if glyph.image_id.is_some() { x_half_width_offset_correction } else { 0.0 };
-                let offset_correction = Vec2::new(
-                    5.0 - Shaping::Y_OFFSET as f32 - x_half_width_offset_correction,
-                    -y_image_offset_correction,
-                );
+                let offset_correction =
+                    Vec2::new(5.0 - Shaping::Y_OFFSET - x_half_width_offset_correction, -y_image_offset_correction);
 
                 corners = corners.map(|p| {
                     // A quarter turn counter-clockwise, with y down.
@@ -332,7 +310,6 @@ pub(crate) fn glyph_quads(
                 pixel_offset_tl: Vec2::ZERO,
                 pixel_offset_br: Vec2::ZERO,
                 glyph_offset,
-                writing_mode: shaped_text.writing_mode,
                 is_sdf,
                 section_index: glyph.section_index,
                 min_font_scale: Vec2::ZERO,
@@ -347,7 +324,7 @@ pub(crate) fn glyph_quads(
 mod tests {
     use mln_style_types::image::Impl as ImageImpl;
     use mln_style_types::{IconTextFitType, SymbolAnchorType};
-    use mln_text::glyph::{GlyphID, GlyphMetrics, PositionedGlyph, PositionedLine};
+    use mln_text::glyph::{Bounds, GlyphID, GlyphMetrics, PositionedGlyph, PositionedLine};
     use mln_util::image::PremultipliedImage;
     use mln_util::size::Size;
 
@@ -384,7 +361,7 @@ mod tests {
     }
 
     fn positioned_glyph(code: u32, rect: RectU16, metrics: GlyphMetrics) -> PositionedGlyph {
-        PositionedGlyph::new(GlyphID::new(code), 0.0, 0.0, false, 0, 1.0, rect, metrics, None, 0)
+        PositionedGlyph { glyph: GlyphID::new(code), scale: 1.0, rect, metrics, ..Default::default() }
     }
 
     // Atlas padding is not scaled with the texture scale, so a 2x glyph quad
@@ -403,21 +380,21 @@ mod tests {
 
         // Rects reflect the real DynamicTextureAtlas output: bitmap.size + 2 *
         // ImagePosition::padding (= 2). 1x bitmap 30 -> rect 32; 2x bitmap 60 -> rect 62.
-        let mut shaped_text1x = Shaping::default();
-        shaped_text1x.positioned_lines.push(PositionedLine::default());
-        shaped_text1x.positioned_lines.last_mut().unwrap().positioned_glyphs.push(positioned_glyph(
-            'A' as u32,
-            rect(0, 0, 32, 32),
-            metrics1x,
-        ));
+        let shaped_text1x = Shaping {
+            lines: vec![PositionedLine {
+                glyphs: vec![positioned_glyph('A' as u32, rect(0, 0, 32, 32), metrics1x)],
+                line_offset: 0.0,
+            }],
+            ..Default::default()
+        };
 
-        let mut shaped_text2x = Shaping::default();
-        shaped_text2x.positioned_lines.push(PositionedLine::default());
-        shaped_text2x.positioned_lines.last_mut().unwrap().positioned_glyphs.push(positioned_glyph(
-            'A' as u32,
-            rect(0, 0, 62, 62),
-            metrics2x,
-        ));
+        let shaped_text2x = Shaping {
+            lines: vec![PositionedLine {
+                glyphs: vec![positioned_glyph('A' as u32, rect(0, 0, 62, 62), metrics2x)],
+                line_offset: 0.0,
+            }],
+            ..Default::default()
+        };
 
         let layout = SymbolLayoutProperties::Values::default();
         let image_map = ImagePositions::default();
@@ -445,7 +422,7 @@ mod tests {
     fn icon_quads_normal() {
         let image = ImagePosition::new(rect(0, 0, 15, 11), &test_image_impl());
 
-        let shaped_icon = PositionedIcon::shape_icon(&image, &[-6.5, -4.5], SymbolAnchorType::Center);
+        let shaped_icon = PositionedIcon::new(&image, [-6.5, -4.5], SymbolAnchorType::Center);
 
         let quads = icon_quads(&shaped_icon, 0.0, false);
 
@@ -477,17 +454,18 @@ mod tests {
     fn icon_quads_style() {
         let image = ImagePosition::new(rect(0, 0, 20, 20), &test_image_impl());
 
-        let mut shaped_text = Shaping { top: -10.0, bottom: 30.0, left: -60.0, right: 20.0, ..Default::default() };
-        shaped_text.positioned_lines.push(PositionedLine::default());
-        shaped_text.positioned_lines.last_mut().unwrap().positioned_glyphs.push(positioned_glyph(
-            32,
-            RectU16::default(),
-            GlyphMetrics::default(),
-        ));
+        let shaped_text = Shaping {
+            lines: vec![PositionedLine {
+                glyphs: vec![positioned_glyph(32, RectU16::default(), GlyphMetrics::default())],
+                line_offset: 0.0,
+            }],
+            bounds: Bounds { left: -60.0, top: -10.0, right: 20.0, bottom: 30.0 },
+            ..Default::default()
+        };
 
         let fit = |text_fit: IconTextFitType, padding: [f32; 4], font_scale: f32| {
-            let mut shaped_icon = PositionedIcon::shape_icon(&image, &[-9.5, -9.5], SymbolAnchorType::Center);
-            shaped_icon.fit_icon_to_text(&shaped_text, text_fit, &padding, &[0.0, 0.0], font_scale);
+            let mut shaped_icon = PositionedIcon::new(&image, [-9.5, -9.5], SymbolAnchorType::Center);
+            shaped_icon.fit_to_text(&shaped_text, text_fit, padding, [0.0, 0.0], font_scale);
             let quads = icon_quads(&shaped_icon, 0.0, false);
             assert_eq!(quads.len(), 1);
             quads[0].clone()
@@ -495,12 +473,12 @@ mod tests {
 
         // none
         {
-            let shaped_icon = PositionedIcon::shape_icon(&image, &[-9.5, -9.5], SymbolAnchorType::Center);
+            let shaped_icon = PositionedIcon::new(&image, [-9.5, -9.5], SymbolAnchorType::Center);
 
-            assert_float_eq(-18.5, shaped_icon.top());
-            assert_float_eq(-0.5, shaped_icon.right());
-            assert_float_eq(-0.5, shaped_icon.bottom());
-            assert_float_eq(-18.5, shaped_icon.left());
+            assert_float_eq(-18.5, shaped_icon.bounds.top);
+            assert_float_eq(-0.5, shaped_icon.bounds.right);
+            assert_float_eq(-0.5, shaped_icon.bounds.bottom);
+            assert_float_eq(-18.5, shaped_icon.bounds.left);
 
             let quads = icon_quads(&shaped_icon, 0.0, false);
 
@@ -608,7 +586,7 @@ mod tests {
         )
         .expect("valid image");
         let position = ImagePosition::new(rect(20, 30, 12, 12), &image);
-        let shaped_icon = PositionedIcon::shape_icon(&position, &[0.0, 0.0], SymbolAnchorType::Center);
+        let shaped_icon = PositionedIcon::new(&position, [0.0, 0.0], SymbolAnchorType::Center);
 
         let quads = icon_quads(&shaped_icon, 0.0, true);
 

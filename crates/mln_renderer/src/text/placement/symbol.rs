@@ -5,8 +5,7 @@ use std::num::NonZeroU32;
 
 use glam::Vec2;
 use mln_style_types::{SymbolAnchorType, TextWritingModeType};
-use mln_text::AnchorAlignment;
-use mln_text::glyph::WritingModeType;
+use mln_text::anchor_alignment;
 
 use super::context::PlacementContext;
 use super::{CircleKey, JointPlacement, Placement, VariableOffset};
@@ -18,11 +17,7 @@ use crate::text::collision_index::{LabelRun, OverlapMode, PlacedFeatureResult};
 impl VariableOffset {
     /// The shift of the label from its anchor, along the label's own axes.
     pub(crate) fn layout_shift(&self) -> Vec2 {
-        let alignment = AnchorAlignment::get_anchor_alignment(self.anchor);
-        let shift = Vec2::new(
-            -(alignment.horizontal_align - 0.5) * self.width,
-            -(alignment.vertical_align - 0.5) * self.height,
-        );
+        let shift = -(anchor_alignment(self.anchor) - 0.5) * Vec2::new(self.width, self.height);
         shift + Vec2::from(self.offset) * self.text_box_scale
     }
 
@@ -39,11 +34,7 @@ impl VariableOffset {
 
     /// The shift the label draws at, at `text_size`.
     pub(crate) fn render_shift(&self, text_size: f32) -> Vec2 {
-        let alignment = AnchorAlignment::get_anchor_alignment(self.anchor);
-        let shift = Vec2::new(
-            -(alignment.horizontal_align - 0.5) * self.width,
-            -(alignment.vertical_align - 0.5) * self.height,
-        );
+        let shift = -(anchor_alignment(self.anchor) - 0.5) * Vec2::new(self.width, self.height);
         (shift / self.text_box_scale + Vec2::from(self.offset)) * text_size
     }
 }
@@ -250,9 +241,7 @@ impl Placement {
         mut place: impl FnMut(&mut Self, bool) -> PlacedText,
     ) -> PlacedText {
         let bucket = ctx.bucket;
-        if !bucket.allow_vertical_placement
-            || text.runs.writing_modes() & WritingModeType::Vertical == WritingModeType::None
-        {
+        if !bucket.allow_vertical_placement || !text.runs.writing_modes().vertical {
             return place(self, false);
         }
         debug_assert_ne!(bucket.placement_modes.as_slice(), []);

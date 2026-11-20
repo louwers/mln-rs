@@ -5,8 +5,8 @@ use std::num::NonZeroU32;
 use std::sync::Arc;
 
 use mln_style_types::{SymbolAnchorType, TextJustifyType, VariableAnchorOffsetCollection};
-use mln_text::get_anchor_justification;
-use mln_text::glyph::{Shaping, WritingModeType};
+use mln_text::anchor_justification;
+use mln_text::glyph::Shaping;
 use mln_tile_id::geometry_tile_data::GeometryCoordinates;
 use mln_util::serialization::payload::pod;
 
@@ -14,6 +14,19 @@ use crate::geometry::anchor::Anchor;
 use crate::text::collision_feature::{CollisionBox, CollisionFeature};
 use crate::text::quads::SymbolQuads;
 use crate::util::pool::PoolRange;
+
+/// The writing modes that a symbol's text, or a run of its quads, shows in.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, mln_wire::Wire)]
+pub(crate) struct WritingModes {
+    pub(crate) horizontal: bool,
+    pub(crate) vertical: bool,
+}
+
+impl WritingModes {
+    pub(crate) const NONE: WritingModes = WritingModes { horizontal: false, vertical: false };
+    pub(crate) const VERTICAL: WritingModes = WritingModes { horizontal: false, vertical: true };
+    pub(crate) const BOTH: WritingModes = WritingModes { horizontal: true, vertical: true };
+}
 
 /// The collision boxes and keys of a bucket's symbol instances, which they
 /// hold ranges of.
@@ -50,7 +63,7 @@ impl Justification {
 
     /// The justification `text-justify: auto` takes at `anchor`.
     pub(crate) fn of_anchor(anchor: SymbolAnchorType) -> Self {
-        Self::of(get_anchor_justification(anchor)).unwrap_or(Justification::Center)
+        Self::of(anchor_justification(anchor)).unwrap_or(Justification::Center)
     }
 
     /// `justify`, unless it is `auto`.
@@ -96,7 +109,7 @@ impl ShapedTextOrientations {
     /// The first horizontal shaping there is. The justifications share one
     /// collision box, so any stands for all.
     pub(crate) fn any_horizontal(&self) -> Option<&Shaping> {
-        self.horizontal.iter().find(|shaping| shaping.is_some())
+        self.horizontal.iter().find(|shaping| !shaping.is_empty())
     }
 
     /// The shaping the text's collision box is made from: a horizontal one,
@@ -121,19 +134,15 @@ pub(crate) struct SymbolQuadSet {
 
 impl SymbolQuadSet {
     pub(crate) fn has_text(&self) -> bool {
-        self.text_writing_modes() != WritingModeType::None
+        self.text_writing_modes() != WritingModes::NONE
     }
 
     /// The writing modes the text has quads in.
-    pub(crate) fn text_writing_modes(&self) -> WritingModeType {
-        let mut modes = WritingModeType::None;
-        if self.horizontal.iter().any(|quads| !quads.is_empty()) {
-            modes = modes | WritingModeType::Horizontal;
+    pub(crate) fn text_writing_modes(&self) -> WritingModes {
+        WritingModes {
+            horizontal: self.horizontal.iter().any(|quads| !quads.is_empty()),
+            vertical: !self.vertical.is_empty(),
         }
-        if !self.vertical.is_empty() {
-            modes = modes | WritingModeType::Vertical;
-        }
-        modes
     }
 }
 
@@ -183,15 +192,8 @@ impl TextRuns {
         self.horizontal().map(|run| (run, false)).chain(self.vertical.map(|run| (run as usize, true)))
     }
 
-    pub(crate) fn writing_modes(&self) -> WritingModeType {
-        let mut modes = WritingModeType::None;
-        if self.horizontal.iter().any(Option::is_some) {
-            modes = modes | WritingModeType::Horizontal;
-        }
-        if self.vertical.is_some() {
-            modes = modes | WritingModeType::Vertical;
-        }
-        modes
+    pub(crate) fn writing_modes(&self) -> WritingModes {
+        WritingModes { horizontal: self.horizontal.iter().any(Option::is_some), vertical: self.vertical.is_some() }
     }
 }
 

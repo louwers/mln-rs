@@ -18,7 +18,7 @@ fn text_ids(features: &[SymbolFeature]) -> Vec<Option<usize>> {
     features
         .iter()
         .map(|feature| {
-            let text = feature.formatted_text.as_ref()?.raw_text();
+            let text = feature.formatted_text.as_ref()?.text();
             let next = ids.len();
             Some(*ids.entry(text).or_insert(next))
         })
@@ -129,7 +129,7 @@ mod tests {
         let mut feature = SymbolFeature::new(&StubGeometryTileFeature, geometry);
         feature.formatted_text = Some(TaggedString::new(
             text.chars().collect(),
-            SectionOptions::new(1.0, Vec::new(), GlyphIDType::FontPBF, 0, None),
+            SectionOptions::new(1.0, Vec::new(), GlyphIDType::FontPBF, None),
         ));
         feature.icon = None;
         feature.index = 0;

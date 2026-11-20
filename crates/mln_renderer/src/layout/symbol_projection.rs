@@ -8,13 +8,13 @@ use std::iter;
 use geometry::Point;
 use glam::{DMat4, DVec2, DVec3, DVec4, Vec2};
 use mln_map_types::{ProjectedTilePoint, TileProjector, View};
-use mln_text::glyph::WritingModeType;
 use mln_tile_id::geometry_tile_data::GeometryCoordinate;
 use mln_util::constants::ONE_EM;
 
 use crate::buckets::symbol_bucket::{
     PlacedSymbol, PlacedSymbolPools, SymbolBucket, SymbolDynamicLayoutVertex, SymbolSizeBinder, ZoomEvaluatedSize,
 };
+use crate::layout::symbol_instance::WritingModes;
 
 /// The directions on screen that a pitched, unrotated label's east and south
 /// axes take, as unit vectors, or zero where an axis is edge-on.
@@ -257,7 +257,7 @@ pub(crate) struct LineLabel<'a> {
     glyph_offsets: &'a [f32],
     /// `text-offset` or `icon-offset`, in units of a `ONE_EM` font.
     line_offset: Vec2,
-    writing_modes: WritingModeType,
+    writing_modes: WritingModes,
 }
 
 impl<'a> LineLabel<'a> {
@@ -488,7 +488,7 @@ impl LabelPlacer<'_, '_> {
     /// itself could show both or neither.
     fn check_upright(&self, first: Vec2, last: Vec2) -> Result<(), Unplaced> {
         let writing_modes = self.label.writing_modes;
-        if writing_modes == (WritingModeType::Horizontal | WritingModeType::Vertical) {
+        if writing_modes == WritingModes::BOTH {
             let aspect_ratio = self.label_plane.viewport.x / self.label_plane.viewport.y;
             let rise = (last.y - first.y).abs();
             let run = (last.x - first.x).abs() * aspect_ratio;
@@ -496,7 +496,7 @@ impl LabelPlacer<'_, '_> {
                 return Err(Unplaced::UseVertical);
             }
         }
-        let upside_down = if writing_modes == WritingModeType::Vertical { first.y < last.y } else { first.x > last.x };
+        let upside_down = if writing_modes == WritingModes::VERTICAL { first.y < last.y } else { first.x > last.x };
         if upside_down { Err(Unplaced::NeedsFlipping) } else { Ok(()) }
     }
 }
@@ -572,7 +572,7 @@ pub(crate) fn reproject_line_labels(
     for symbol in symbols {
         let glyph_count = symbol.glyph_offsets.len();
         let vertical_shows = std::mem::take(&mut show_vertical);
-        if symbol.hidden || (symbol.writing_modes == WritingModeType::Vertical && !vertical_shows) {
+        if symbol.hidden || (symbol.writing_modes == WritingModes::VERTICAL && !vertical_shows) {
             hide_glyphs(glyph_count, vertices);
             continue;
         }
@@ -613,11 +613,10 @@ mod tests {
     use glam::Vec2;
     use mln_map::transform::Transform;
     use mln_map_types::{ConstrainMode, TileProjector, ViewportMode};
-    use mln_text::glyph::WritingModeType;
     use mln_tile_id::UnwrappedTileID;
     use mln_util::size::Size;
 
-    use super::{LabelPlaneProjector, LineLabel, LinePlacer, PlacedGlyph, TileDistance, Unplaced};
+    use super::{LabelPlaneProjector, LineLabel, LinePlacer, PlacedGlyph, TileDistance, Unplaced, WritingModes};
 
     /// A 512 px square map at zoom 0, where tile 0/0/0 fills the viewport
     /// and a pixel is 16 tile units.
@@ -640,7 +639,7 @@ mod tests {
             tile_distances,
             glyph_offsets,
             line_offset: Vec2::ZERO,
-            writing_modes: WritingModeType::Horizontal,
+            writing_modes: WritingModes { horizontal: true, vertical: false },
         }
     }
 

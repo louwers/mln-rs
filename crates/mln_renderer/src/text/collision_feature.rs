@@ -76,7 +76,8 @@ impl CollisionFeature {
         indexed_feature: &IndexedSubfeature,
         pool: &mut Vec<CollisionBox>,
     ) -> Self {
-        let label = LabelBox::new(shaped_text.left, shaped_text.top, shaped_text.right, shaped_text.bottom)
+        let bounds = shaped_text.bounds;
+        let label = LabelBox::new(bounds.left, bounds.top, bounds.right, bounds.bottom)
             .map(|label| label.scaled(layout.scale).padded(&layout.padding));
         Self::new(anchor, label, along_line, layout, indexed_feature, pool)
     }
@@ -95,18 +96,10 @@ impl CollisionFeature {
         pool: &mut Vec<CollisionBox>,
     ) -> Self {
         let label = shaped_icon.and_then(|shaped_icon| {
-            let image = shaped_icon.image();
-            let fitted;
-            let icon = if image.content.is_some() && (image.text_fit_width.is_some() || image.text_fit_height.is_some())
-            {
-                fitted = shaped_icon.apply_text_fit();
-                &fitted
-            } else {
-                shaped_icon
-            };
-            let collision_padding = shaped_icon.collision_padding();
+            let bounds = shaped_icon.text_fit_bounds();
+            let collision_padding = shaped_icon.collision_padding;
             let scale = layout.scale;
-            LabelBox::new(icon.left(), icon.top(), icon.right(), icon.bottom()).map(|label| {
+            LabelBox::new(bounds.left, bounds.top, bounds.right, bounds.bottom).map(|label| {
                 label.scaled(scale).padded(&layout.padding).padded(&Padding::new(
                     collision_padding.top * scale,
                     collision_padding.right * scale,

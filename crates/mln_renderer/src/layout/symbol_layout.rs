@@ -24,8 +24,8 @@ use mln_style_types::{
     TextJustifyType, TextRotationAlignmentType, TextTransformType, TextVariableAnchorType, TextWritingModeType,
     VariableAnchorOffsetCollection,
 };
-use mln_text::glyph::{GlyphID, GlyphIDType, GlyphPositions, Shaping, WritingModeType};
-use mln_text::shaping::{PositionedIcon, get_anchor_justification, get_shaping};
+use mln_text::glyph::{GlyphID, GlyphIDType, GlyphPositions, Shaping};
+use mln_text::shaping::{PositionedIcon, ShapingOptions, anchor_justification, shape_text};
 use mln_text::tagged_string::{SectionIndex, SectionOptions};
 use mln_text::{ShapedText, TaggedString, shape_arabic, starts_right_to_left};
 use mln_tile_id::CanonicalTileID;
@@ -52,7 +52,7 @@ use crate::layout::merge_lines::merge_lines;
 use crate::layout::symbol_feature::SymbolFeature;
 use crate::layout::symbol_instance::{
     IconPart, Justification, LaidOutSymbol, ShapedTextOrientations, SymbolInstance, SymbolInstancePools, SymbolQuadSet,
-    TextPart, TextRuns,
+    TextPart, TextRuns, WritingModes,
 };
 use crate::layout::tile_layout::Resolved;
 use crate::text::collision_feature::{AlongLine, BoxLayout, CollisionBox, CollisionFeature};
@@ -353,7 +353,7 @@ impl FeatureSymbols<'_> {
         } else {
             for justification in Justification::ALL {
                 let shaping = text.get(justification);
-                if shaping.is_some() {
+                if !shaping.is_empty() {
                     horizontal[justification as usize] = glyphs(shaping);
                 }
             }
@@ -362,7 +362,7 @@ impl FeatureSymbols<'_> {
             line,
             single_line: text.single_line,
             horizontal,
-            vertical: if text.vertical.is_some() { glyphs(&text.vertical) } else { SymbolQuads::new() },
+            vertical: if text.vertical.is_empty() { SymbolQuads::new() } else { glyphs(&text.vertical) },
             icon: self.shaped.icon.as_ref().map(icon),
             vertical_icon: self.shaped.icon.as_ref().and(self.vertical_icon).map(icon),
         })
@@ -385,7 +385,7 @@ impl FeatureSymbols<'_> {
             CollisionFeature::new_icon(&anchor, Some(icon), &layout, &self.indexed_feature, boxes)
         };
         let text = &self.shaped.text;
-        let vertical = self.allow_vertical_placement && text.vertical.is_some();
+        let vertical = self.allow_vertical_placement && !text.vertical.is_empty();
         let text_part = quads.has_text().then(|| TextPart {
             runs: TextRuns::default(),
             collision: text_feature(text.any(), self.values.text_rotate, &mut pools.collision_boxes),
@@ -402,7 +402,7 @@ impl FeatureSymbols<'_> {
             vertical_collision: self.vertical_icon.filter(|_| vertical).map(|icon| {
                 icon_feature(icon, self.values.icon_rotate + VERTICAL_ROTATION, &mut pools.collision_boxes)
             }),
-            sdf: icon.image().sdf,
+            sdf: icon.image.sdf,
         });
         LaidOutSymbol {
             symbol: SymbolInstance {
@@ -675,16 +675,16 @@ impl SymbolLayout {
                             {
                                 *sub_string = shaped;
                             }
-                            formatted_text.add_text_section(
-                                sub_string,
-                                section_scale,
-                                &section_font_stack,
+                            let mut options = SectionOptions::new(
+                                section_scale as f32,
+                                section_font_stack.clone(),
                                 sub_string_type,
-                                key_section,
                                 section.text_color,
-                                section.vertical_align.unwrap_or_default(),
                             );
-                            section_table.insert(formatted_text.get_sections().len() - 1, section_index);
+                            options.key_section = key_section;
+                            options.vertical_align = section.vertical_align.unwrap_or_default();
+                            formatted_text.add_text_section(sub_string, options);
+                            section_table.insert(formatted_text.sections().len() - 1, section_index);
                             if sub_string_type != GlyphIDType::FontPBF {
                                 layout_parameters
                                     .glyph_dependencies
@@ -719,9 +719,9 @@ impl SymbolLayout {
 
                 // Loop through all characters of this text and collect
                 // unique codepoints.
-                for j in 0..formatted_text.length() {
-                    let section_index = formatted_text.get_section_index(j) as usize;
-                    let section = &formatted_text.get_sections()[section_index];
+                for j in 0..formatted_text.len() {
+                    let section_index = usize::from(formatted_text.section_index(j));
+                    let section = &formatted_text.sections()[section_index];
                     if section.image_id.is_some() {
                         continue;
                     }
@@ -731,7 +731,7 @@ impl SymbolLayout {
                     let dependencies = layout_parameters.glyph_dependencies.glyphs.entry(font_stack).or_default();
                     if section.type_ == GlyphIDType::FontPBF {
                         // Glyph PBFs have no glyphs beyond the BMP.
-                        let c = formatted_text.char_at(j);
+                        let c = formatted_text.text()[j];
                         dependencies.extend(GlyphID::from_char(c));
                         if can_verticalize_text || (this.allow_vertical_placement && allows_vertical) {
                             dependencies.extend(i18n::verticalize_punctuation(c).and_then(GlyphID::from_char));
@@ -919,15 +919,15 @@ impl SymbolLayout {
             && has_icon_text_fit
         {
             let fit = |icon: &mut PositionedIcon, text: &Shaping| {
-                icon.fit_icon_to_text(
+                icon.fit_to_text(
                     text,
                     values.icon_text_fit,
-                    &values.icon_text_fit_padding,
-                    &values.icon_offset,
+                    values.icon_text_fit_padding,
+                    values.icon_offset,
                     font_scale,
                 );
             };
-            if self.allow_vertical_placement && shaped.text.vertical.is_some() {
+            if self.allow_vertical_placement && !shaped.text.vertical.is_empty() {
                 let mut vertical = icon.clone();
                 fit(&mut vertical, &shaped.text.vertical);
                 vertical_icon = Some(vertical);
@@ -970,10 +970,10 @@ impl SymbolLayout {
         };
 
         let text_shaping =
-            if shaped.text.vertical.is_some() { Some(&shaped.text.vertical) } else { shaped.text.any_horizontal() };
+            if shaped.text.vertical.is_empty() { shaped.text.any_horizontal() } else { Some(&shaped.text.vertical) };
         let line_label = LineLabel {
-            text_width: text_shaping.map_or(0.0, |text| text.right - text.left),
-            icon_width: shaped.icon.as_ref().map_or(0.0, |icon| icon.right() - icon.left()),
+            text_width: text_shaping.map_or(0.0, |text| text.bounds.width()),
+            icon_width: shaped.icon.as_ref().map_or(0.0, |icon| icon.bounds.width()),
             glyph_size: GLYPH_SIZE,
             box_scale: text_max_box_scale,
         };
@@ -1113,7 +1113,7 @@ struct RunInfo {
     height_offset: f32,
     size: Range<f32>,
     offset: [f32; 2],
-    writing_modes: WritingModeType,
+    writing_modes: WritingModes,
     angle: f32,
     line: PoolRange,
     tile_distances: PoolRange,
@@ -1132,7 +1132,7 @@ impl BucketWriter<'_> {
             size,
             offset,
             writing_modes,
-            angle: if allow_vertical_placement && writing_modes == WritingModeType::Vertical {
+            angle: if allow_vertical_placement && writing_modes == WritingModes::VERTICAL {
                 std::f32::consts::FRAC_PI_2
             } else {
                 0.0
@@ -1151,9 +1151,8 @@ impl BucketWriter<'_> {
                 let info = run(size, icon_offset, writing_modes, line, PoolRange::default());
                 add_run(buffer, &info, run_quads, |_, _| {})
             };
-            icon.run = add(quads.icon.as_deref().unwrap_or_default(), WritingModeType::None);
-            icon.vertical_run =
-                quads.vertical_icon.as_deref().map(|run_quads| add(run_quads, WritingModeType::Vertical));
+            icon.run = add(quads.icon.as_deref().unwrap_or_default(), WritingModes::NONE);
+            icon.vertical_run = quads.vertical_icon.as_deref().map(|run_quads| add(run_quads, WritingModes::VERTICAL));
             let length = buffer.attribute_data.len();
             for binders in self.paint_properties.values_mut() {
                 binders.icon_binders.populate_vertex_vectors(
@@ -1181,7 +1180,7 @@ impl BucketWriter<'_> {
 
             let mut section = None;
             let mut populate_section = |section: usize, length: usize| {
-                let section = section_options_to_value(formatted_text.section_at(section));
+                let section = section_options_to_value(&formatted_text.sections()[section]);
                 for binders in paint_properties.values_mut() {
                     binders.text_binders.populate_vertex_vectors(
                         feature,
@@ -1219,7 +1218,7 @@ impl BucketWriter<'_> {
                 }
             }
             if !quads.vertical.is_empty() {
-                text.runs.vertical = Some(add(&quads.vertical, WritingModeType::Vertical));
+                text.runs.vertical = Some(add(&quads.vertical, WritingModes::VERTICAL));
             }
             let length = buffer.attribute_data.len();
             populate_section(section.unwrap_or(0), length);
@@ -1383,8 +1382,8 @@ impl SymbolLayout {
 
             let mut shaped_string = TaggedString::default();
 
-            let sections = formatted_text.get_sections();
-            let style_text = formatted_text.get_styled_text();
+            let sections = formatted_text.sections();
+            let style_text = formatted_text.styled_text();
 
             let mut sub_string: Vec<char> = Vec::new();
             let mut section_index = style_text.styles.first().copied().unwrap_or(0);
@@ -1398,15 +1397,7 @@ impl SymbolLayout {
                     if let Some(image_id) = &section.image_id {
                         shaped_string.add_image_section(image_id, section.vertical_align);
                     } else if section.type_ == GlyphIDType::FontPBF {
-                        shaped_string.add_text_section(
-                            sub_string,
-                            section.scale,
-                            &section.font_stack,
-                            section.type_,
-                            section.key_section,
-                            section.text_color,
-                            section.vertical_align,
-                        );
+                        shaped_string.add_text_section(sub_string, section.clone());
                     } else {
                         let shaped = results
                             .get(&section.font_stack)
@@ -1414,16 +1405,7 @@ impl SymbolLayout {
                             .and_then(|strings| strings.get(sub_string))
                             .unwrap_or(&unshaped);
 
-                        shaped_string.add_shaped_section(
-                            shaped,
-                            section.scale,
-                            &section.font_stack,
-                            section.type_,
-                            starts_right_to_left(sub_string),
-                            section.key_section,
-                            section.text_color,
-                            section.vertical_align,
-                        );
+                        shaped_string.add_shaped_section(shaped, starts_right_to_left(sub_string), section.clone());
                     }
                 };
 
@@ -1516,26 +1498,24 @@ impl SymbolLayout {
 
                 let allow_vertical_placement = self.allow_vertical_placement;
                 let apply_shaping = |formatted_text: &TaggedString,
-                                     writing_mode: WritingModeType,
-                                     text_anchor: SymbolAnchorType,
-                                     text_justify: TextJustifyType,
-                                     text_offset: &[f32; 2]|
+                                     writing_mode: TextWritingModeType,
+                                     anchor: SymbolAnchorType,
+                                     justify: TextJustifyType,
+                                     offset: &[f32; 2]|
                  -> Shaping {
-                    get_shaping(
-                        formatted_text,
+                    let options = ShapingOptions {
                         max_width,
                         line_height,
-                        text_anchor,
-                        text_justify,
+                        anchor,
+                        justify,
                         spacing,
-                        text_offset,
+                        offset: *offset,
                         writing_mode,
-                        glyphs,
-                        icons,
-                        layout_text_size,
-                        layout_text_size_at_bucket_zoom_level,
                         allow_vertical_placement,
-                    )
+                        text_size: layout_text_size,
+                        text_size_at_bucket_zoom: layout_text_size_at_bucket_zoom_level,
+                    };
+                    shape_text(formatted_text, &options, glyphs, icons)
                 };
 
                 let formatted_text = feature.formatted_text.as_mut().expect("text");
@@ -1548,13 +1528,13 @@ impl SymbolLayout {
                     let mut justifications: Vec<TextJustifyType> = Vec::new();
                     if text_justify == TextJustifyType::Auto {
                         for anchor_offset in variable_anchor_offsets {
-                            justifications.push(get_anchor_justification(anchor_offset.anchor_type));
+                            justifications.push(anchor_justification(anchor_offset.anchor_type));
                         }
                     } else {
                         justifications.push(text_justify);
                     }
                     for justification in justifications.into_iter().filter_map(Justification::of) {
-                        if shaped_text_orientations.get(justification).is_some() {
+                        if !shaped_text_orientations.get(justification).is_empty() {
                             continue;
                         }
                         // If using text-variable-anchor for the layer, we use
@@ -1562,13 +1542,13 @@ impl SymbolLayout {
                         // offsets for the anchor in the placement step.
                         let shaping = apply_shaping(
                             formatted_text,
-                            WritingModeType::Horizontal,
+                            TextWritingModeType::Horizontal,
                             SymbolAnchorType::Center,
                             justification.into(),
                             &text_offset,
                         );
-                        if shaping.is_some() {
-                            let single = shaping.positioned_lines.len() == 1;
+                        if !shaping.is_empty() {
+                            let single = shaping.lines.len() == 1;
                             *shaped_text_orientations.get_mut(justification) = shaping;
                             if single {
                                 shaped_text_orientations.single_line = true;
@@ -1589,7 +1569,7 @@ impl SymbolLayout {
                         // other justifications.
                         shaped_text_orientations.vertical = apply_shaping(
                             formatted_text,
-                            WritingModeType::Vertical,
+                            TextWritingModeType::Vertical,
                             text_anchor,
                             TextJustifyType::Left,
                             &text_offset,
@@ -1597,18 +1577,18 @@ impl SymbolLayout {
                     }
                 } else {
                     if text_justify == TextJustifyType::Auto {
-                        text_justify = get_anchor_justification(text_anchor);
+                        text_justify = anchor_justification(text_anchor);
                     }
 
                     // Horizontal point or line label.
                     let shaping = apply_shaping(
                         formatted_text,
-                        WritingModeType::Horizontal,
+                        TextWritingModeType::Horizontal,
                         text_anchor,
                         text_justify,
                         &text_offset,
                     );
-                    if shaping.is_some() {
+                    if !shaping.is_empty() {
                         *shaped_text_orientations.get_mut(Justification::Right) = shaping;
                     }
 
@@ -1618,7 +1598,7 @@ impl SymbolLayout {
                         formatted_text.verticalize_punctuation();
                         shaped_text_orientations.vertical = apply_shaping(
                             formatted_text,
-                            WritingModeType::Vertical,
+                            TextWritingModeType::Vertical,
                             text_anchor,
                             TextJustifyType::Left,
                             &text_offset,
@@ -1630,7 +1610,7 @@ impl SymbolLayout {
                         formatted_text.verticalize_punctuation();
                         shaped_text_orientations.vertical = apply_shaping(
                             formatted_text,
-                            WritingModeType::Vertical,
+                            TextWritingModeType::Vertical,
                             text_anchor,
                             text_justify,
                             &text_offset,
@@ -1643,9 +1623,9 @@ impl SymbolLayout {
             if let Some(icon) = &feature.icon
                 && let Some(image) = icons.get(icon.id())
             {
-                shaped_icon = Some(PositionedIcon::shape_icon(
+                shaped_icon = Some(PositionedIcon::new(
                     image,
-                    &layout.icon_offset.evaluate(&feature_context(zoom, feature, &canonical)),
+                    layout.icon_offset.evaluate(&feature_context(zoom, feature, &canonical)),
                     layout.icon_anchor.evaluate(&feature_context(zoom, feature, &canonical)),
                 ));
                 if image.pixel_ratio != self.pixel_ratio || layout.icon_rotate.constant_or(&1.0) != 0.0 {

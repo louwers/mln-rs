@@ -20,7 +20,6 @@ use mln_style::property_expression::PropertyExpression;
 use mln_style::property_value::PropertyValue;
 use mln_style_types::TextWritingModeType;
 use mln_style_types::image::ImagePositions;
-use mln_text::glyph::WritingModeType;
 use mln_tile::TileLayer;
 use mln_tile_id::geometry_tile_data::{GeometryCoordinate, GeometryCoordinates, GeometryTileFeature};
 use mln_util::Color;
@@ -31,7 +30,7 @@ use mln_vec_map::VecMap;
 use crate::bucket::{Bucket, BucketBase, FeatureStates, UploadNeeds};
 use crate::bucket_geometry::{GeometryUpload, GeometryVec};
 use crate::layer_type::EvaluatedLayer;
-use crate::layout::symbol_instance::{SymbolInstance, SymbolInstancePools};
+use crate::layout::symbol_instance::{SymbolInstance, SymbolInstancePools, WritingModes};
 use crate::paint_property_binder::PaintPropertyBinder;
 use crate::text::quads::SymbolQuad;
 use crate::util::pool::PoolRange;
@@ -281,7 +280,7 @@ pub(crate) struct PlacedSymbol {
     pub(crate) lower_size: f32,
     pub(crate) upper_size: f32,
     pub(crate) line_offset: [f32; 2],
-    pub(crate) writing_modes: WritingModeType,
+    pub(crate) writing_modes: WritingModes,
     /// The line the symbol is placed along, in its buffer's `pools.lines`.
     pub(crate) line: PoolRange,
     /// The distance along `line` from the anchor to each vertex, in its
