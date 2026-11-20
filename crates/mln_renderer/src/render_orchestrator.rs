@@ -359,7 +359,8 @@ impl RenderOrchestrator {
             &mut frame,
         );
         let (store, render_sources) = (&self.tile_store, &self.render_sources);
-        self.terrain.bind(|id| store.source(render_sources.get(id)?.tiles()?), &mut self.events);
+        let grounded = update_parameters.view.terrain_min_elevation().is_some();
+        self.terrain.bind(|id| store.source(render_sources.get(id)?.tiles()?), grounded, &mut self.events);
 
         // A synchronous source's tile laid out by its answer isn't in this
         // update's render tiles yet: the next update has it.

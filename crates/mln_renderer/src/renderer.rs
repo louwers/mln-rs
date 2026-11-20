@@ -499,6 +499,7 @@ impl Renderer {
     pub fn clear_data(&mut self, gpu: &mut dyn Gpu) {
         self.orchestrator.clear_data();
         end_hosts(gpu, self.orchestrator.take_ended_hosts());
+        report(&mut self.orchestrator, self.events.as_ref());
     }
 
     /// Destroys the renderer's GPU objects on `gpu`, and tells its custom

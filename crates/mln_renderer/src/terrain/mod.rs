@@ -140,15 +140,18 @@ impl RenderTerrain {
     ///
     /// When the ground the tiles draw changed, it tells the map in `events`
     /// ([`RendererEvent::TerrainElevation`]), before the frame finishes:
-    /// the tiles, the DEM data they read, or how it decodes. Once terrain
-    /// stops drawing, it tells the map once.
+    /// the tiles, the DEM data they read, or how it decodes. While terrain
+    /// doesn't draw, it tells the map that there is no ground once it
+    /// stops, and for each update whose view `grounded` on terrain, which
+    /// another renderer may have drawn.
     pub(crate) fn bind<'a>(
         &mut self,
         dem: impl FnOnce(&str) -> Option<&'a SourceTiles>,
+        grounded: bool,
         events: &mut Vec<RendererEvent>,
     ) {
         let Some(cover) = &mut self.cover else {
-            if self.elevation.take().is_some() {
+            if self.elevation.take().is_some() || grounded {
                 events.push(RendererEvent::TerrainElevation(None));
             }
             return;

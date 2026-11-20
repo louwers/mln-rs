@@ -321,7 +321,7 @@ impl TerrainLoad {
         let relayout = std::mem::take(&mut self.relayout);
         self.render_source.update(&mut self.store, self.source.clone(), &[], false, relayout, &tile_parameters);
         let (store, render_source) = (&self.store, &self.render_source);
-        self.terrain.bind(|_| store.source(render_source.tiles()?), &mut self.events);
+        self.terrain.bind(|_| store.source(render_source.tiles()?), false, &mut self.events);
         self.store.drive();
         self.errors +=
             self.store.take_events().iter().filter(|event| matches!(event, StoreEvent::Error { .. })).count();
@@ -630,4 +630,38 @@ fn the_terrain_lets_go_of_the_map_data() {
     orchestrator.clear_data();
     assert!(orchestrator.terrain().cover().is_none());
     assert_eq!(vec![false], ground(orchestrator.take_events()));
+}
+
+/// A renderer that doesn't draw terrain tells the map that there is no
+/// ground for each update whose camera stands on terrain, though it never
+/// drew any: another renderer may have.
+#[test]
+fn a_renderer_without_terrain_tells_a_grounded_map_there_is_no_ground() {
+    let pool = crate::tests::pool();
+    let mut orchestrator = crate::render_orchestrator::RenderOrchestrator::new(
+        true,
+        mln_text::local_glyph_rasterizer::LocalGlyphs::default(),
+        Arc::default(),
+        crate::text::font_face_engine::default_engine(),
+        Registry::with_builtins(),
+        Arc::new(|| {}),
+        &pool,
+    );
+    let mut ground = |transform: &Transform| -> Vec<bool> {
+        let style = style_with(crate::tests::ready(raster_dem_source("dem", None, tiles(), 256)));
+        orchestrator.update(&Arc::new(update_parameters(style, transform, MapMode::Tile)));
+        orchestrator
+            .take_events()
+            .into_iter()
+            .filter_map(|event| match event {
+                RendererEvent::TerrainElevation(elevation) => Some(elevation.is_some()),
+                _ => None,
+            })
+            .collect()
+    };
+    let mut transform = transform();
+    assert_eq!(Vec::<bool>::new(), ground(&transform));
+    transform.set_ground(Some(500.0), Some(300.0));
+    assert_eq!(vec![false], ground(&transform));
+    assert_eq!(vec![false], ground(&transform));
 }

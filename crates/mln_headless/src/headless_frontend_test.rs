@@ -200,4 +200,11 @@ fn a_still_image_renders_again_once_the_camera_stands_on_the_terrain() {
     assert_eq!(2, result.stats.num_frames);
     let altitude = map.transform_state().view().center_altitude();
     assert!((altitude - 1000.0).abs() < 1e-6, "{altitude}");
+
+    // A renderer that lets go of its data tells the map at once that the
+    // ground it drew is gone.
+    frontend.clear_data();
+    map.process_events();
+    let view = map.transform_state().view();
+    assert_eq!((0.0, None), (view.center_altitude(), view.terrain_min_elevation()));
 }
