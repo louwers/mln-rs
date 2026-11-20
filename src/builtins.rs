@@ -4,9 +4,11 @@
 
 use std::sync::{Arc, LazyLock};
 
-use mln_runtime::registry::{RegisterError, Registry, RegistryBuilder};
+use mln_renderer::{RegisterError, Registry, RegistryBuilder};
+#[cfg(feature = "runtime")]
 use mln_runtime::{Runtime, RuntimeOptions};
 use mln_style::expression::functions::register_builtin_functions;
+#[cfg(feature = "runtime")]
 use mln_util::error::Error;
 
 /// Adds the built-in expression functions, layer types and source types.
@@ -36,6 +38,7 @@ pub fn builtin_registry() -> Arc<Registry> {
     Arc::clone(&BUILTINS)
 }
 
+#[cfg(feature = "runtime")]
 /// Starts a runtime and its thread with the built-in registrations:
 /// [`Runtime::new`] with [`builtin_registry`], and fails as it does.
 pub fn start_runtime(options: &RuntimeOptions) -> Result<Runtime, Error> {
