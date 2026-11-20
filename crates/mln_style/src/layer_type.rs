@@ -175,7 +175,10 @@ pub trait StyleLayerType: Sized + Send + Sync + 'static {
     /// set's `Transitionable`, or [`NoProperties`].
     type PaintProperties: PaintSet;
 
-    /// Data of a layer that isn't a property.
+    /// Data of a layer that isn't a property, which the render side keeps,
+    /// such as a custom layer's host. Layout doesn't read it: tile workers
+    /// get its `Default`, and a change to it alone doesn't lay the layer out
+    /// again. What layout reads belongs in a layout property.
     type Extra: Clone + Default + Send + Sync + 'static;
 
     /// Calls `visitor` with the field of the property in `slot` of
