@@ -38,5 +38,9 @@ serde_json.workspace = true
 name = "background"
 path = "tests/background.rs"
 
+[[test]]
+name = "declarations"
+path = "tests/declarations.rs"
+
 [lints]
 workspace = true

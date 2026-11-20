@@ -28,7 +28,7 @@ use crate::paint_property_binder::{CrossFadedPaintPropertyBinder, PaintPropertyB
 use crate::util::tessellator::Tessellator;
 
 crate::paint_property_binders!(
-    pub struct FillBinders for FillPaintProperties::PossiblyEvaluated {
+    pub(crate) struct FillBinders for FillPaintProperties::PossiblyEvaluated {
         fill_color: PaintPropertyBinder<Color> => [ID_FILL_COLOR_VERTEX_ATTRIBUTE],
         fill_opacity: PaintPropertyBinder<f32> => [ID_FILL_OPACITY_VERTEX_ATTRIBUTE],
         fill_outline_color: PaintPropertyBinder<Color> => [ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE],

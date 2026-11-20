@@ -15,6 +15,13 @@
 //! runs [`LayerType::make_draws`] with a [`DrawContext`]. The engine then
 //! uploads and draws the drawing's draws.
 //!
+//! The style half declares the type's properties with
+//! [`mln_style::properties!`]. A bucket binds the data-driven paint
+//! properties to its programs' vertex attributes with a struct that
+//! [`paint_property_binders!`](crate::paint_property_binders!) declares,
+//! with a [`PaintPropertyBinder`] or a [`CrossFadedPaintPropertyBinder`]
+//! for each property.
+//!
 //! A layer type that lays out makes a [`Bucket`] of each layer's features
 //! in a tile, which the engine moves between threads, uploads, rewrites for
 //! feature state and copies for the tile's other world copies; a type that
@@ -58,6 +65,7 @@ use crate::layer_drawing::LayerDrawing;
 pub use crate::layer_type::EvaluatedLayer;
 use crate::layout::layout::{Layout, LayoutParameters, SourceLayer};
 use crate::paint_parameters::PaintParameters;
+pub use crate::paint_property_binder::{CrossFadedPaintPropertyBinder, PaintPropertyBinder};
 pub use crate::render_layer::LayerBucket;
 use crate::render_layer::{Atlases, BucketPlacementData};
 pub use crate::render_pass::RenderPass;

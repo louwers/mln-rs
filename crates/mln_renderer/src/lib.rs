@@ -63,7 +63,6 @@ pub mod util;
 pub use bucket::LayerFeatureStates;
 pub use frame_projection::{ClipDepthRange, FrameProjection};
 pub use mln_style::expression::functions::RegisterError;
-pub(crate) use paint_property_binder::paint_property_binders;
 pub use registry::{Registry, RegistryBuilder};
 pub use renderer::{DrawnFrame, RenderTimings, Renderer, UpdatedFrame};
 pub use renderer_event::{
@@ -71,6 +70,17 @@ pub use renderer_event::{
 };
 pub use update_parameters::UpdateParameters;
 pub use update_slot::{Update, UpdateReader, UpdateSlot};
+
+/// The crates that the expansion of [`paint_property_binders!`] names, so
+/// that a crate that invokes it needn't depend on them.
+#[doc(hidden)]
+pub mod __private {
+    pub use mln_style;
+    pub use mln_style_types;
+    pub use mln_tile;
+    pub use mln_tile_id;
+    pub use mln_wire;
+}
 
 #[cfg(test)]
 mod tests;

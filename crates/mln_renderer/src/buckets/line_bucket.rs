@@ -32,7 +32,7 @@ use crate::util::subdivision::subdivide_vertex_line;
 use crate::util::tessellator::Tessellator;
 
 crate::paint_property_binders!(
-    pub struct LineBinders for LinePaintProperties::PossiblyEvaluated {
+    pub(crate) struct LineBinders for LinePaintProperties::PossiblyEvaluated {
         line_blur: PaintPropertyBinder<f32> => [ID_LINE_BLUR_VERTEX_ATTRIBUTE],
         line_color: PaintPropertyBinder<Color> => [ID_LINE_COLOR_VERTEX_ATTRIBUTE],
         line_floor_width: PaintPropertyBinder<f32> => [ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE],

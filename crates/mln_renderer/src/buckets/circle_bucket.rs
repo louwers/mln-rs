@@ -22,7 +22,7 @@ use crate::layer_type::EvaluatedLayer;
 use crate::paint_property_binder::PaintPropertyBinder;
 
 crate::paint_property_binders!(
-    pub struct CircleBinders for CirclePaintProperties::PossiblyEvaluated {
+    pub(crate) struct CircleBinders for CirclePaintProperties::PossiblyEvaluated {
         circle_blur: PaintPropertyBinder<f32> => [ID_CIRCLE_BLUR_VERTEX_ATTRIBUTE],
         circle_color: PaintPropertyBinder<Color> => [ID_CIRCLE_COLOR_VERTEX_ATTRIBUTE],
         circle_opacity: PaintPropertyBinder<f32> => [ID_CIRCLE_OPACITY_VERTEX_ATTRIBUTE],
