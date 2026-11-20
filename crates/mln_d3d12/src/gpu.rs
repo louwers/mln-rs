@@ -435,7 +435,10 @@ impl D3d12Gpu {
             clear_stencil_with_pass: true,
             cpu_rasterizer: device.is_software(),
             max_line_width: 1.0,
-            binds_vertex_buffers: false,
+            // A vertex buffer is a buffer in GPU memory that shaders may
+            // read: a root SRV reads it once the common state it rests in
+            // is promoted, as the input assembler does.
+            binds_vertex_buffers: true,
         };
         Ok(D3d12Gpu {
             compiler,
