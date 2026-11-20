@@ -290,3 +290,33 @@ fn the_camera_returns_to_sea_level_after_a_still_image_used_its_moves() {
     report(&mut map, frame(1, 9));
     assert_eq!(Some(Ok(())), map.take_still_image());
 }
+
+/// An animation of the pitch alone, or of the altitude alone, holds the
+/// altitude as any animation does, until it ends.
+#[test]
+fn a_pitch_or_altitude_animation_holds_the_altitude() {
+    for camera in [
+        CameraOptions { pitch: Some(40.0), ..Default::default() },
+        CameraOptions { center_altitude: Some(2000.0), ..Default::default() },
+    ] {
+        let run_loop = Queue::<()>::new();
+        let mut map = map(MapMode::Continuous, &run_loop);
+        report(&mut map, flat(Some(500.0), 300.0));
+        map.update_camera(&CameraUpdate {
+            mode: CameraUpdateMode::Ease,
+            camera: camera.clone(),
+            animation: AnimationOptions { duration: Some(Duration::from_secs(60)), ..Default::default() },
+            ..Default::default()
+        });
+        map.trigger_repaint();
+        let held = ground(&map).0;
+        report(&mut map, flat(Some(800.0), 700.0));
+        let (altitude, floor) = ground(&map);
+        assert!((altitude - held).abs() < 1e-6 && (altitude - 800.0).abs() > 1.0, "{camera:?}: {altitude}");
+        assert_eq!(Some(700.0), floor);
+
+        map.cancel_transitions();
+        let (altitude, _) = ground(&map);
+        assert!((altitude - 800.0).abs() < 1e-6, "{camera:?}: {altitude}");
+    }
+}

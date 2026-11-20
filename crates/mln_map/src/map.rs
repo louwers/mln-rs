@@ -1463,7 +1463,9 @@ impl Map {
             Some(elevation) => {
                 let center = self.transform.view().center(WrapMode::Wrapped);
                 let min = elevation.min_at(center).unwrap_or(0.0);
-                let at_rest = !self.transform.is_camera_moving();
+                // An animation of the pitch or the altitude alone doesn't count
+                // as moving the camera, but it holds the altitude too.
+                let at_rest = !self.transform.is_camera_moving() && !self.transform.in_transition();
                 let altitude = if clamped && at_rest { elevation.at(center) } else { None };
                 self.transform.set_ground(altitude, Some(min))
             }
