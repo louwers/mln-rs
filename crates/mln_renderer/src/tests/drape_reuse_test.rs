@@ -12,7 +12,7 @@ use std::time::Duration;
 use mln_gfx::RendererBackend as _;
 use mln_gfx::frame::FrameTarget;
 use mln_gfx::offscreen_target::OffscreenTarget;
-use mln_map::transform::Transform;
+use mln_map::transform::{TerrainGround, Transform};
 use mln_map_types::{
     CameraOptions, ConstrainMode, Elevation, MapDebugOptions, MapMode, TerrainSkirtLength, TileLodMode, ViewportMode,
 };
@@ -21,7 +21,7 @@ use mln_style::expression::expression::FeatureState;
 use mln_style::sources::{GeoJSONOptions, GeoJsonSourceType, ImageSourceType, image_source};
 use mln_style::{Edit, Style};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
-use mln_util::geo::{LatLng, WrapMode};
+use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
@@ -345,9 +345,8 @@ impl DrapedMap {
             let Some(elevation) = &self.elevation else {
                 return;
             };
-            let center = self.transform.view().center(WrapMode::Wrapped);
-            let (altitude, min) = (elevation.at(center), elevation.min_at(center).unwrap_or(0.0));
-            if !self.transform.set_ground(altitude, Some(min)) {
+            self.transform.set_terrain(Some(TerrainGround { elevation: Some(Arc::clone(elevation)), clamped: true }));
+            if !self.transform.follow_terrain() {
                 return;
             }
         }

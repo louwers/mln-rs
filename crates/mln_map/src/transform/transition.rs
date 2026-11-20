@@ -344,6 +344,10 @@ impl Transform {
                 }
             }
         }
+        // A gesture's camera stays where the user puts it.
+        if !self.gesture_in_progress {
+            self.keep_eye_above();
+        }
     }
 
     /// Records the fields the running commands move.

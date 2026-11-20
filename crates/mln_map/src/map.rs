@@ -37,7 +37,7 @@ use crate::map_options::{MapOptions, UnusedStyleImagePolicy};
 use crate::map_snapshot::{CameraBounds, FreeCamera, MapSnapshot, TileSettings};
 use crate::rendering_stats_view::{RenderingStatsView, RenderingStatsViewOptions};
 use crate::style_loader::{LoadEvent, StyleLoader};
-use crate::transform::{CameraCommandId, CommandEnd, FrameClock, Transform, TransformEvent};
+use crate::transform::{CameraCommandId, CommandEnd, FrameClock, TerrainGround, Transform, TransformEvent};
 
 /// How many times the terrain may move the camera while a still image
 /// waits, before the map stops following it for that image: a camera whose
@@ -1427,18 +1427,11 @@ impl Map {
         self.center_clamped_to_ground
     }
 
-    /// Moves the camera onto the terrain's ground as the renderer last drew
-    /// it. While terrain draws, the view's near and far planes fit the
-    /// lowest ground of the tile under the center, and a camera at rest
-    /// whose center is clamped to the ground stands on it, unless the
-    /// ground there is still loading. A camera that a gesture or an
-    /// animation moves keeps its altitude. Once terrain stops drawing, or
-    /// the style has none, the planes fit the flat map again, and a clamped
-    /// center goes back to sea level.
-    ///
-    /// It reads only the height and floor at the center, which are what the
-    /// renderer compares to tell whether a frame's camera stood on its newest
-    /// ground.
+    /// Hands the transform the terrain the camera stands on, and moves the
+    /// camera onto it ([`Transform::follow_terrain`]): the ground the
+    /// renderer last drew, while the style has terrain on a Mercator view
+    /// outside tile mode, where terrain draws; else none, which turns the
+    /// camera's rules over terrain off.
     ///
     /// The moves report no camera change. A still image stops following the
     /// terrain after [`MAX_GROUND_MOVES_PER_STILL`] of them, though it still
@@ -1450,26 +1443,17 @@ impl Map {
         if self.style.get_terrain().is_none() {
             self.elevation = None;
         }
+        let applies =
+            self.style.get_terrain().is_some() && self.mode != MapMode::Tile && !self.transform.view().is_globe();
+        let ground = applies
+            .then(|| TerrainGround { elevation: self.elevation.clone(), clamped: self.center_clamped_to_ground });
+        let grounded = ground.as_ref().is_some_and(|ground| ground.elevation.is_some());
+        self.transform.set_terrain(ground);
         let still = self.mode != MapMode::Continuous && self.still_image == StillImage::Pending;
-        let clamped = self.center_clamped_to_ground;
-        let moved = match &self.elevation {
-            Some(_) if still && self.ground_moves >= MAX_GROUND_MOVES_PER_STILL => false,
-            Some(elevation) => {
-                let center = self.transform.view().center(WrapMode::Wrapped);
-                let min = elevation.min_at(center).unwrap_or(0.0);
-                // An animation of the pitch or the altitude alone doesn't count
-                // as moving the camera, but it holds the altitude too.
-                let at_rest = !self.transform.is_camera_moving() && !self.transform.in_transition();
-                let altitude = if clamped && at_rest { elevation.at(center) } else { None };
-                self.transform.set_ground(altitude, Some(min))
-            }
-            // Terrain drew until now: the floor goes, once.
-            None if self.transform.view().terrain_min_elevation().is_some() => {
-                self.transform.set_ground(clamped.then_some(0.0), None)
-            }
-            None => false,
-        };
-        if moved && still && self.elevation.is_some() {
+        if still && grounded && self.ground_moves >= MAX_GROUND_MOVES_PER_STILL {
+            return;
+        }
+        if self.transform.follow_terrain() && still && grounded {
             self.ground_moves += 1;
             if self.ground_moves == MAX_GROUND_MOVES_PER_STILL {
                 Log::warning(

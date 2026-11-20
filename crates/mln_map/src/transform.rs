@@ -31,9 +31,11 @@ use parking_lot::Mutex;
 mod animation;
 mod gesture;
 mod momentum;
+mod terrain;
 mod transition;
 
 use gesture::GestureState;
+pub use terrain::TerrainGround;
 use transition::{FrameFn, JointEnd, Transition};
 
 use crate::map_event::{CameraChange, CameraChangeSource};
@@ -190,6 +192,11 @@ pub struct Transform {
     projection_for_zoom: Option<ProjectionForZoomFn>,
     globe_free_bearing: bool,
     globe_drag_hold: Option<GlobeDragHold>,
+    /// The terrain the camera stands on ([`Self::set_terrain`]).
+    terrain: Option<TerrainGround>,
+    /// Whether the last terrain clamped the center to its ground, which the
+    /// center leaves for sea level once the terrain goes.
+    clamped_to_ground: bool,
 }
 
 /// The location a drag on the globe holds under the cursor, from the step
@@ -227,6 +234,8 @@ impl Transform {
             projection_for_zoom: None,
             globe_free_bearing: false,
             globe_drag_hold: None,
+            terrain: None,
+            clamped_to_ground: false,
         }
     }
 
@@ -709,24 +718,6 @@ impl Transform {
         let mut flipped_point = *point;
         flipped_point.y = f64::from(self.state.view().size().height) - flipped_point.y;
         self.state.view().screen_coordinate_to_lat_lng(&flipped_point, wrap_mode)
-    }
-
-    /// Stands the camera on the terrain: puts the center at `altitude`
-    /// meters, unless `None`, and sets the lowest ground near it,
-    /// `min_elevation` meters, or `None` without terrain
-    /// ([`TransformState::set_terrain_min_elevation`]). The terrain moves
-    /// the camera, not a command, so this reports no camera change. Returns
-    /// whether the view changed.
-    pub fn set_ground(&mut self, altitude: Option<f64>, min_elevation: Option<f64>) -> bool {
-        let ground = |view: &View| (view.terrain_min_elevation(), view.center_altitude());
-        let before = ground(self.state.view());
-        if min_elevation != before.0 {
-            self.state.set_terrain_min_elevation(min_elevation);
-        }
-        if let Some(altitude) = altitude.filter(|&altitude| altitude != before.1) {
-            self.state.set_center_altitude(altitude);
-        }
-        ground(self.state.view()) != before
     }
 
     pub(crate) fn set_free_camera_options(&mut self, options: &FreeCameraOptions) {

@@ -1,5 +1,4 @@
 {
-  "gljs/render-tests/high-pitch/terrain-pitch95": "P2 (camera): terrain draws, without GL JS's camera rules over terrain",
   "gljs/render-tests/sky/fog-color/default": "P3 (fog): terrain draws without fog",
   "gljs/render-tests/sky/fog-color/function": "P3 (fog): terrain draws without fog",
   "gljs/render-tests/sky/fog-color/global-state": "P3 (fog): terrain draws without fog",

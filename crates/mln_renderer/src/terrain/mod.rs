@@ -135,8 +135,10 @@
 //!   with an update that carries it. A frame is loaded only for an update
 //!   whose camera wouldn't move on the renderer's current snapshot: the
 //!   two give the same height and floor ([`Elevation::at`] and
-//!   [`Elevation::min_at`]) at the view's center, which is all the camera
-//!   reads of them, or there is neither, without terrain. A still image
+//!   [`Elevation::min_at`]) at the view's center, which is all a camera at
+//!   rest reads of them, or there is neither, without terrain. A camera
+//!   reads more, such as the surface under its eye, only while a command
+//!   moves it, which no still waits on. A still image
 //!   draws only such an update's frame, and a continuous frame of any
 //!   other reports itself partial, so it doesn't make the map idle. A
 //!   snapshot that changes only away from the center holds no frame back.

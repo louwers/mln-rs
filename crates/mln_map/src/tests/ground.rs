@@ -11,10 +11,13 @@ use mln_map_types::Elevation;
 use mln_renderer::{RenderMode, RendererEvent};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style::Edit;
-use mln_util::geo::LatLng;
+use mln_util::geo::{LatLng, WrapMode};
 use mln_util::queue::Queue;
 
-use crate::{AnimationOptions, CameraOptions, CameraUpdate, CameraUpdateMode, Map, MapEvent, MapMode, MapOptions};
+use crate::{
+    AnimationOptions, BoundOptions, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase, Map, MapEvent,
+    MapMode, MapOptions,
+};
 
 const STYLE: &str = r#"{
     "version": 8,
@@ -68,6 +71,62 @@ impl Elevation for Restless {
     }
 }
 
+/// Sea level, with a plateau `height` meters high south of the world's `y`
+/// (Web Mercator at zoom 0), which only the surface shows.
+#[derive(Debug)]
+struct Plateau {
+    y: f64,
+    height: f64,
+}
+
+impl Elevation for Plateau {
+    fn at(&self, _: LatLng) -> Option<f64> {
+        Some(0.0)
+    }
+
+    fn min_at(&self, _: LatLng) -> Option<f64> {
+        Some(0.0)
+    }
+
+    fn surface_at(&self, world: DVec2) -> Option<f64> {
+        Some(if world.y > self.y { self.height } else { 0.0 })
+    }
+}
+
+/// Ground 500 m high with a floor of 300 m at `center`, as [`Flat`] gives,
+/// and far higher everywhere else, which counts the reads of anything but
+/// the height and floor at `center`.
+#[derive(Debug)]
+struct CenterOnly {
+    center: LatLng,
+    reads_elsewhere: AtomicU32,
+}
+
+impl CenterOnly {
+    fn read(&self, location: LatLng, at_center: f64) -> f64 {
+        if location == self.center {
+            return at_center;
+        }
+        self.reads_elsewhere.fetch_add(1, Ordering::SeqCst);
+        100_000.0
+    }
+}
+
+impl Elevation for CenterOnly {
+    fn at(&self, location: LatLng) -> Option<f64> {
+        Some(self.read(location, 500.0))
+    }
+
+    fn min_at(&self, location: LatLng) -> Option<f64> {
+        Some(self.read(location, 300.0))
+    }
+
+    fn surface_at(&self, _: DVec2) -> Option<f64> {
+        self.reads_elsewhere.fetch_add(1, Ordering::SeqCst);
+        Some(100_000.0)
+    }
+}
+
 fn flat(height: Option<f64>, min: f64) -> Arc<dyn Elevation> {
     Arc::new(Flat { height, min })
 }
@@ -83,6 +142,27 @@ fn map(mode: MapMode, run_loop: &Queue<()>) -> Map {
     map.load_style_json(STYLE);
     map.process_events();
     map
+}
+
+/// A 512 by 512 map of `style` that may pitch up to 180 degrees.
+fn pitchable(style: &str, run_loop: &Queue<()>) -> Map {
+    let file_source = StubFileSource::on_queue(run_loop, ResponseType::Asynchronous);
+    let options = MapOptions { size: mln_util::size::Size::new(512, 512), ..Default::default() };
+    let mut map = Map::with_file_source(file_source, options, &crate::tests::pool()).expect("map");
+    map.load_style_json(style);
+    map.process_events();
+    map.set_bounds(&BoundOptions { max_pitch: Some(180.0), ..Default::default() }).unwrap();
+    map
+}
+
+/// Where `location` is in Web Mercator at zoom 0.
+fn world(location: &LatLng) -> DVec2 {
+    let point = mln_util::projection::Projection::project(location, 1.0 / mln_util::constants::TILE_SIZE_D);
+    DVec2::new(point.x, point.y)
+}
+
+fn assert_near(expected: f64, actual: f64, tolerance: f64, what: &str) {
+    assert!((expected - actual).abs() <= tolerance, "{what}: {actual}, not {expected}");
 }
 
 /// Hands `event` to the map as its renderer would, and has the map handle it.
@@ -366,5 +446,136 @@ fn a_pitch_or_altitude_animation_holds_the_altitude() {
         map.cancel_transitions();
         let (altitude, _) = ground(&map);
         assert!((altitude - 800.0).abs() < 1e-6, "{camera:?}: {altitude}");
+    }
+}
+
+/// A jump that would put the eye below sea level before the renderer drew
+/// any ground raises it to sea level by pitch and zoom, with the eye where
+/// it was across the ground and the center where the jump put it, as in GL
+/// JS: the style's camera of `high-pitch/terrain-pitch95`.
+#[test]
+fn a_jump_below_sea_level_before_any_ground_looks_from_sea_level() {
+    let run_loop = Queue::<()>::new();
+    let mut map = pitchable(STYLE, &run_loop);
+    let center = LatLng::new(47.34487, 11.52517).unwrap();
+    map.jump_to(&CameraOptions {
+        center: Some(center),
+        zoom: Some(13.0),
+        pitch: Some(95.0),
+        center_altitude: Some(0.0),
+        ..Default::default()
+    });
+    let camera = map.transform_state().camera_options(None);
+    assert_near(90.0, camera.pitch.unwrap(), 1e-9, "pitch");
+    assert_near(13.0 + (1.0 / 95f64.to_radians().sin()).log2(), camera.zoom.unwrap(), 1e-9, "zoom");
+    let moved = map.transform_state().view().center(WrapMode::Unwrapped);
+    assert_near(center.latitude(), moved.latitude(), 1e-9, "latitude");
+    assert_near(center.longitude(), moved.longitude(), 1e-9, "longitude");
+    assert_eq!(0.0, camera.center_altitude.unwrap());
+}
+
+/// A jump that would put the eye, or the near plane, into raised ground is
+/// raised by pitch and zoom until both clear it, keeping the center, its
+/// altitude and the bearing. The eye would be about 2,300 m below the
+/// plateau.
+#[test]
+fn a_jump_into_raised_ground_keeps_the_eye_above_it() {
+    let run_loop = Queue::<()>::new();
+    let mut map = pitchable(STYLE, &run_loop);
+    map.set_center_clamped_to_ground(false);
+    let center = LatLng::new(20.0, 10.0).unwrap();
+    let plateau = Plateau { y: world(&center).y + 1e-6, height: 4000.0 };
+    let surface = |point: glam::DVec3| plateau.surface_at(point.truncate()).unwrap();
+    report(
+        &mut map,
+        ground_event(&{
+            let plateau: Arc<dyn Elevation> = Arc::new(Plateau { ..plateau });
+            plateau
+        }),
+    );
+    let jump = CameraOptions {
+        center: Some(center),
+        zoom: Some(14.0),
+        pitch: Some(70.0),
+        bearing: Some(30.0),
+        center_altitude: Some(500.0),
+        ..Default::default()
+    };
+    map.jump_to(&jump);
+
+    let view = map.transform_state().view();
+    let eye = view.eye_position();
+    assert!(eye.z >= surface(eye), "the eye at {eye}");
+    // Each raise turns the near plane down a little, so after GL JS's three
+    // the near plane may stay a few millimeters short, out of sight.
+    for point in view.near_plane_points() {
+        assert!(point.z >= surface(point) - 0.01, "the near plane at {point}");
+    }
+    let camera = map.transform_state().camera_options(None);
+    assert!(camera.pitch.unwrap() < 70.0 && camera.zoom.unwrap() < 14.0, "{camera:?}");
+    let moved = view.center(WrapMode::Unwrapped);
+    assert_near(center.latitude(), moved.latitude(), 1e-9, "latitude");
+    assert_near(center.longitude(), moved.longitude(), 1e-9, "longitude");
+    assert_eq!(500.0, camera.center_altitude.unwrap());
+    assert_near(30.0, camera.bearing.unwrap(), 1e-9, "bearing");
+}
+
+/// Without terrain, a jump keeps the pitch it was given, though the eye is
+/// below sea level.
+#[test]
+fn without_terrain_a_pitch_95_jump_stays_at_95() {
+    let run_loop = Queue::<()>::new();
+    let mut map = pitchable(r#"{"version": 8, "sources": {}, "layers": []}"#, &run_loop);
+    map.jump_to(&CameraOptions { zoom: Some(13.0), pitch: Some(95.0), ..Default::default() });
+    assert!(map.transform_state().view().eye_position().z < 0.0);
+    assert_near(95.0, map.transform_state().camera_options(None).pitch.unwrap(), 1e-9, "pitch");
+    assert_eq!(Some(13.0), map.transform_state().camera_options(None).zoom);
+}
+
+/// A gesture's camera stays where the gesture puts it, though the eye is
+/// below sea level.
+#[test]
+fn a_gesture_is_not_raised_yet() {
+    let run_loop = Queue::<()>::new();
+    let mut map = pitchable(STYLE, &run_loop);
+    map.jump_to(&CameraOptions { zoom: Some(13.0), ..Default::default() });
+    for (phase, pitch) in [(GesturePhase::Begin, 80.0), (GesturePhase::Update, 95.0)] {
+        map.update_camera(&CameraUpdate {
+            mode: CameraUpdateMode::Jump,
+            camera: CameraOptions { pitch: Some(pitch), ..Default::default() },
+            phase,
+            ..Default::default()
+        });
+        assert_near(pitch, map.transform_state().camera_options(None).pitch.unwrap(), 1e-9, "pitch");
+        assert_eq!(Some(13.0), map.transform_state().camera_options(None).zoom);
+    }
+    assert!(map.transform_state().view().eye_position().z < 0.0);
+}
+
+/// A camera at rest reads only the height and floor at its center, which
+/// is all the renderer compares to tell whether a frame's camera stood on
+/// its newest ground: on ground that differs everywhere but there, it
+/// doesn't move, though its eye is far below that ground.
+#[test]
+fn a_camera_at_rest_reads_only_the_center() {
+    let run_loop = Queue::<()>::new();
+    for mode in [MapMode::Continuous, MapMode::Static] {
+        let mut map = pitchable(STYLE, &run_loop);
+        if mode == MapMode::Static {
+            map = self::map(mode, &run_loop);
+            map.render_still().unwrap();
+        }
+        map.jump_to(&CameraOptions { zoom: Some(12.0), pitch: Some(60.0), ..Default::default() });
+        report(&mut map, ground_event(&flat(Some(500.0), 300.0)));
+        assert_eq!((500.0, Some(300.0)), ground(&map), "{mode:?}");
+        let view = map.transform_state().view().clone();
+
+        let center = view.center(WrapMode::Wrapped);
+        let elsewhere = Arc::new(CenterOnly { center, reads_elsewhere: AtomicU32::new(0) });
+        let ground_: Arc<dyn Elevation> = Arc::<CenterOnly>::clone(&elsewhere);
+        report(&mut map, ground_event(&ground_));
+        map.trigger_repaint();
+        assert_eq!(view, *map.transform_state().view(), "{mode:?}");
+        assert_eq!(0, elsewhere.reads_elsewhere.load(Ordering::SeqCst), "{mode:?}");
     }
 }
