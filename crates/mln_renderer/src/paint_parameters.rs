@@ -405,7 +405,9 @@ impl<'a> PaintParameters<'a> {
         {
             drawn = self.begin_pass(gpu, backdrop);
             if drawn.is_ok() {
-                self.copy_frame(gpu);
+                if let Err(error) = self.copy_frame(gpu) {
+                    Log::warning(Event::Render, format!("Copying the frame failed: {error}"));
+                }
                 drawn = self.end_pass(gpu);
             }
         }
@@ -421,9 +423,10 @@ impl<'a> PaintParameters<'a> {
     }
 
     /// Copies the layer composite's frame texture onto the open pass.
-    fn copy_frame(&mut self, gpu: &mut dyn Gpu) {
-        if let Some(target) = self.draw_target() {
-            self.layer_composite.copy_frame(gpu, target, self.context);
+    fn copy_frame(&mut self, gpu: &mut dyn Gpu) -> Result<(), GpuError> {
+        match self.draw_target() {
+            Some(target) => self.layer_composite.copy_frame(gpu, target, self.context),
+            None => Ok(()),
         }
     }
 
@@ -458,15 +461,13 @@ impl<'a> PaintParameters<'a> {
     /// Ends the frame's pass, which drew into the layer composite's frame
     /// texture, and begins `present`, which the texture is copied into.
     /// Does nothing where the frame drew into its target.
-    pub(crate) fn present_frame(&mut self, gpu: &mut dyn Gpu, present: OpenPass) {
+    pub(crate) fn present_frame(&mut self, gpu: &mut dyn Gpu, present: OpenPass) -> Result<(), GpuError> {
         if self.layer_composite.frame_texture().is_none() {
-            return;
+            return Ok(());
         }
-        if let Err(error) = self.end_pass(gpu).and_then(|()| self.begin_pass(gpu, present)) {
-            Log::error(Event::Render, format!("Beginning the frame's copy failed: {error}"));
-            return;
-        }
-        self.copy_frame(gpu);
+        self.end_pass(gpu)?;
+        self.begin_pass(gpu, present)?;
+        self.copy_frame(gpu)
     }
 
     /// Runs `f` with `gpu`'s, the context's, commands inside the pass

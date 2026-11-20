@@ -448,17 +448,22 @@ impl Drapes {
                     for layer in layers.iter_mut() {
                         layer.drawing.render(gpu, &mut drape_parameters, DrawOrder::BottomUp);
                     }
-                    if frame_texture.is_some() {
-                        let present = OpenPass {
-                            label: "drape",
-                            color: Some(ColorAttachment { texture: color, load: clear }),
-                            depth_stencil: None,
-                            size,
-                            targets: TargetFormats { color: Some(COLOR), depth_stencil: None },
-                        };
-                        drape_parameters.present_frame(gpu, present);
-                    }
-                    drape_parameters.end_pass(gpu)
+                    // A drape whose frame doesn't reach it failed, as one
+                    // whose pass did.
+                    let presented = match frame_texture {
+                        Some(_) => {
+                            let present = OpenPass {
+                                label: "drape",
+                                color: Some(ColorAttachment { texture: color, load: clear }),
+                                depth_stencil: None,
+                                size,
+                                targets: TargetFormats { color: Some(COLOR), depth_stencil: None },
+                            };
+                            drape_parameters.present_frame(gpu, present)
+                        }
+                        None => Ok(()),
+                    };
+                    drape_parameters.end_pass(gpu).and(presented)
                 });
                 match drawn_pass.and_then(|()| parameters.context.generate_mipmaps(gpu, texture)) {
                     Ok(()) => {

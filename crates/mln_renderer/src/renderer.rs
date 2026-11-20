@@ -844,16 +844,16 @@ fn draw(
 
     // The frame, where it drew into the layer composite's texture, copied
     // into the target.
-    parameters.present_frame(
-        gpu,
-        OpenPass {
-            label: "main buffer",
-            color: Some(ColorAttachment { texture: image.color, load: LoadOp::Clear(Color::new(0.0, 0.0, 0.0, 0.0)) }),
-            depth_stencil: None,
-            size: image.size,
-            targets: TargetFormats { color: image.targets.color, depth_stencil: None },
-        },
-    );
+    let present = OpenPass {
+        label: "main buffer",
+        color: Some(ColorAttachment { texture: image.color, load: LoadOp::Clear(Color::new(0.0, 0.0, 0.0, 0.0)) }),
+        depth_stencil: None,
+        size: image.size,
+        targets: TargetFormats { color: image.targets.color, depth_stencil: None },
+    };
+    if let Err(error) = parameters.present_frame(gpu, present) {
+        Log::error(Event::Render, format!("Copying the frame into its target failed: {error}"));
+    }
 }
 
 /// Pushes what `orchestrator` reported since the last call to `events`, the

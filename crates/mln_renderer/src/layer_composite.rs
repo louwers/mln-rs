@@ -423,15 +423,17 @@ impl LayerComposite {
     }
 
     /// Copies the frame's texture onto the open pass, over what it holds.
-    pub(crate) fn copy_frame(&mut self, gpu: &mut dyn Gpu, target: DrawTarget, context: &mut Context) {
+    pub(crate) fn copy_frame(
+        &mut self,
+        gpu: &mut dyn Gpu,
+        target: DrawTarget,
+        context: &mut Context,
+    ) -> Result<(), GpuError> {
         if self.frame.is_none() {
-            return;
+            return Ok(());
         }
         let slot = self.groups.len();
-        let blend = BlendFunction::Replace;
-        if let Err(error) = self.draw_quad(gpu, target, context, slot, blend, DepthMode::disabled()) {
-            Log::warning(Event::Render, format!("Copying the frame failed: {error}"));
-        }
+        self.draw_quad(gpu, target, context, slot, BlendFunction::Replace, DepthMode::disabled())
     }
 
     /// Draws the quad with the uniforms of `slot`: a group's, which reads the
