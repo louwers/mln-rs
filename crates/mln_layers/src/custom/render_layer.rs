@@ -8,9 +8,10 @@
 //   (`PaintParameters::lend_pass`, through `Gpu::lend`).
 // - A host that drew is told the renderer stopped once the layer leaves it,
 //   after the GPU finished the host's work, or that its graphics objects
-//   are lost (`Renderer::lose_layer_hosts`). A layer leaves
-//   (`LayerHost::leave`) without a `Gpu` at hand, so the engine keeps the
-//   `EndedHost` it returns until it can end it with one.
+//   are lost (`Renderer::lose_layer_hosts`, or a renderer dropped without
+//   its tear-down). A layer leaves (`LayerHost::leave`) without a `Gpu` at
+//   hand, so the engine keeps the `EndedHost` it returns until it can end
+//   it with one.
 
 use std::sync::Arc;
 
@@ -51,14 +52,6 @@ impl CustomDrawing {
         Some(Box::new(EndedCustomHost(self.take_host()?)))
     }
 
-    /// Lets go of the host, telling it that its graphics objects are lost if
-    /// it drew.
-    fn lose(&mut self) {
-        if let Some(host) = self.take_host() {
-            host.context_lost();
-        }
-    }
-
     /// In the translucent pass, lends the live pass to the host.
     fn lend_pass(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
         if parameters.pass() != RenderPass::TRANSLUCENT {
@@ -77,14 +70,6 @@ impl CustomDrawing {
             }
             Err(error) => Log::error(Event::Render, format!("Lending a custom layer the pass failed: {error}")),
         }
-    }
-}
-
-impl Drop for CustomDrawing {
-    /// A layer dropped without leaving, as with a renderer dropped without
-    /// its tear-down, loses its host's graphics objects.
-    fn drop(&mut self) {
-        self.lose();
     }
 }
 
@@ -212,6 +197,8 @@ impl LayerHost<Custom> for CustomDrawing {
     }
 
     fn lose_context(&mut self) {
-        self.lose();
+        if let Some(host) = self.take_host() {
+            host.context_lost();
+        }
     }
 }
