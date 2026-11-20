@@ -56,6 +56,8 @@ impl BucketBase {
 /// ([`upload`](Self::upload)), and copies it for the tile's other world
 /// copies. What a type does besides is its own.
 pub trait Bucket: Any + Send + BucketValue {
+    /// What the engine keeps of every bucket: its identity and whether it
+    /// uploaded.
     fn base(&self) -> &BucketBase;
 
     /// Re-evaluates the feature-state dependent paint values of the layer

@@ -993,9 +993,10 @@ impl SingleDraw {
     }
 
     /// Writes `value` to the frame's uniform buffer `id`, as
-    /// [`UniformBufferArray::write_pod`] does.
+    /// [`FrameDraws::write_pod`] does, dropping the draw's bindings where that
+    /// replaced the buffer.
     pub fn write_pod<T: bytemuck::Pod>(&mut self, gpu: &mut dyn Gpu, id: usize, value: &T, context: &mut Context) {
-        if self.frame.uniform_buffers.write_pod(gpu, id, value, context.device()) {
+        if self.frame.write_pod(gpu, id, value, context) {
             self.objects.drop_bindings();
         }
     }

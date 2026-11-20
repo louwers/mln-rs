@@ -21,6 +21,8 @@ struct Pattern {
     position: ImagePosition,
 }
 
+/// Pattern images packed into one texture, each with a padding that wraps
+/// it, which a frame uploads.
 pub struct PatternAtlas {
     allocator: BucketedAtlasAllocator,
     patterns: HashMap<String, Pattern>,
@@ -47,11 +49,14 @@ impl PatternAtlas {
         }
     }
 
+    /// Where the pattern `id` is in the atlas, if it holds it.
     #[must_use]
     pub fn pattern(&self, id: &str) -> Option<ImagePosition> {
         self.patterns.get(id).map(|pattern| pattern.position.clone())
     }
 
+    /// Adds `image` as a pattern, and returns where it is in the atlas;
+    /// `None` if the atlas holds it already or has no room for it.
     pub fn add_pattern(&mut self, image: &ImageImpl) -> Option<ImagePosition> {
         if self.patterns.contains_key(&image.id) {
             return None;

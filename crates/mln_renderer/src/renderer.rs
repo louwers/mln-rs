@@ -81,7 +81,8 @@ pub struct RenderTimings {
 ///
 /// [`tear_down`](Self::tear_down) frees the renderer's GPU objects. A
 /// renderer dropped without it leaves them to the `Gpu`, which frees them
-/// when it drops, and its custom layers' hosts hear that their graphics
+/// when it drops, and the hosts its layers draw through
+/// ([`LayerHost`](crate::layer::LayerHost)) hear that their graphics
 /// objects are lost.
 pub struct Renderer {
     orchestrator: RenderOrchestrator,
@@ -499,8 +500,8 @@ impl Renderer {
     }
 
     /// Lets go of the map's data: its sources, tiles and layers, which the
-    /// next update loads again. The custom layers that go hear through
-    /// `gpu` that the renderer stopped.
+    /// next update loads again. The hosts of the layers that go hear
+    /// through `gpu` that the renderer stopped.
     pub fn clear_data(&mut self, gpu: &mut dyn Gpu) {
         self.orchestrator.clear_data();
         end_hosts(gpu, self.orchestrator.take_ended_hosts());
@@ -512,7 +513,7 @@ impl Renderer {
     pub fn tear_down(self, gpu: &mut dyn Gpu) -> RenderingStats {
         let Renderer { mut orchestrator, mut encoder, .. } = self;
         // The layers' GPU objects go to the context's queue, and their
-        // custom layers' hosts to the ended ones.
+        // hosts to the ended ones.
         orchestrator.leave_layers();
         let ended = orchestrator.take_ended_hosts();
         drop(orchestrator);

@@ -33,6 +33,7 @@ impl Style {
     /// Fails as [`add_layer`](Self::add_layer) does, and with
     /// `InvalidArgument` if `json` isn't a valid layer.
     pub fn add_layer_json(&mut self, json: &str, before_layer_id: Option<&str>) -> Result<(), Error> {
+        // A missing `before_layer_id` fails before the JSON's errors do.
         self.check_before(before_layer_id)?;
         let value = parse(json, "style layer")?;
         let mut error = mln_conversion::Error::default();

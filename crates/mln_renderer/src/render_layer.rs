@@ -356,7 +356,9 @@ impl<'a> FrameSourceTiles<'a> {
 /// layers draw, and its encode uploads them and binds their textures.
 #[derive(Default)]
 pub struct Atlases {
+    /// The dash patterns of `line-dasharray`.
     pub line: LineAtlas,
+    /// The patterns of `background-pattern`.
     pub pattern: PatternAtlas,
 }
 
@@ -524,8 +526,8 @@ pub(crate) trait RenderLayer {
     /// type), the layer's, drops the draws, which were built for the
     /// previous style's values, and begins transitions to the new values.
     /// A style of another type leaves the layer's. The next encode builds
-    /// the draws again from the tiles' buckets. A custom layer's host that
-    /// drew and that the style replaced goes to `ended`.
+    /// the draws again from the tiles' buckets. A host the layer draws
+    /// through ([`LayerHost`](crate::layer::LayerHost)) that drew and that the style replaced goes to `ended`.
     fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn ErasedLayerStyle>, ended: &mut EndedHosts);
 
     /// Begins transitions for the paint values that changed since the last
