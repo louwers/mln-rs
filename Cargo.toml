@@ -148,6 +148,7 @@ i_overlay = { version = "4.5.2", default-features = false }
 glam = { version = "0.34.3", default-features = false, features = [
   "std",
   "f64",
+  "i64",
 ] }
 # The GeoJSON and feature geometry (mln-rs-feature's `Feature`, the GeoJSON
 # sources, queries, the `within` and `distance` expressions), in place of a
