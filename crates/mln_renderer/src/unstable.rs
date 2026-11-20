@@ -20,11 +20,12 @@ pub use crate::gfx::store::{SharedIndexes, SharedTexture};
 pub use crate::gfx::texture2d::Texture2D;
 pub use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 pub use crate::gfx::vertices::{SharedVertices, Vertices};
-pub use crate::globe_tile_mesh::raw_globe_tile_mesh;
+pub use crate::globe_tile_mesh::{GlobeTileMesh, GlobeTileMeshCache, raw_globe_tile_mesh};
 pub use crate::layer_composite::Composite;
 pub use crate::layer_drawing::{
     BucketChanges, DrawDepth, DrawGroup, DrawList, DrawObjectsMut, DrawOrder, DrawPriority, FrameDraw, FrameDraws,
-    KeptDraw, LayerDrawing, LayerDraws, TileDraws, TileMap, TileObjects, UniformWriter, finish_tiles, tile_objects,
+    KeptDraw, LayerDrawing, LayerDraws, SingleDraw, TileDraws, TileMap, TileObjects, UniformWriter, finish_tiles,
+    tile_objects,
 };
 pub use crate::layers::cast_matrix;
 pub use crate::line_atlas::{DashAtlas, DashEntry, DashPatternTexture, LineAtlas, LinePatternCap, LinePatternPos};

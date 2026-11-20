@@ -308,18 +308,14 @@ pub(crate) const fn entry<T: LayerType>() -> &'static dyn ErasedLayerType {
 #[cfg(test)]
 mod tests {
     use mln_style::evaluated::Evaluated;
-    use mln_style::layers::{Raster, RasterPaintProperties, Symbol};
+    use mln_style::layers::Symbol;
 
     use super::*;
-    use crate::tests::fixture_layer::{Dot, DotBucket};
+    use crate::tests::fixture_layer::{Dot, DotBucket, Tint, TintPaintProperties};
 
     fn raster() -> Arc<dyn ErasedEvaluatedLayer> {
-        let paint = RasterPaintProperties::PossiblyEvaluated {
-            raster_hue_rotate: Evaluated::Constant(90.0),
-            raster_opacity: Evaluated::Constant(0.5),
-            ..RasterPaintProperties::PossiblyEvaluated::default()
-        };
-        let style = Arc::new(LayerStyle::<Raster>::new("raster".to_owned(), "source".to_owned()));
+        let paint = TintPaintProperties::PossiblyEvaluated { tint_opacity: Evaluated::Constant(0.5) };
+        let style = Arc::new(LayerStyle::<Tint>::new("raster".to_owned(), "source".to_owned()));
         let crossfade = CrossfadeParameters { from_scale: 2.0, to_scale: 1.0, t: 0.25 };
         Arc::new(EvaluatedLayer { style, paint, crossfade, render_passes: 0 })
     }
@@ -327,10 +323,9 @@ mod tests {
     #[test]
     fn recover_keeps_the_allocation() {
         let layer = raster();
-        let recovered = EvaluatedLayer::<Raster>::recover(&layer).unwrap();
+        let recovered = EvaluatedLayer::<Tint>::recover(&layer).unwrap();
         assert!(std::ptr::addr_eq(Arc::as_ptr(&recovered), Arc::as_ptr(&layer)));
-        assert_eq!(*recovered.paint.raster_hue_rotate.uniform(), 90.0);
-        assert_eq!(*recovered.paint.raster_opacity.uniform(), 0.5);
+        assert_eq!(*recovered.paint.tint_opacity.uniform(), 0.5);
         assert_eq!(recovered.crossfade.t, 0.25);
         assert!(EvaluatedLayer::<Dot>::recover(&layer).is_none());
     }

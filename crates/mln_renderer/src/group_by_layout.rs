@@ -154,12 +154,12 @@ mod tests {
     use mln_style::filter::Filter;
     use mln_style::layer::Layer;
     use mln_style::layer_type::LayerStyle;
-    use mln_style::layers::{Raster, Symbol};
+    use mln_style::layers::Symbol;
 
     use super::*;
     use crate::Registry;
     use crate::layer::{EvaluatedLayer, LayerType};
-    use crate::tests::fixture_layer::Dot;
+    use crate::tests::fixture_layer::{Dot, Tint};
 
     /// A filter of its own, which shares no expression with another.
     fn filter(json: &str) -> Filter {
@@ -227,7 +227,7 @@ mod tests {
     /// them.
     #[test]
     fn groups_equal_filters_that_are_not_shared() {
-        let raster = |id: &str, json: &str| layer::<Raster>(id, "", Some(&filter(json)));
+        let raster = |id: &str, json: &str| layer::<Tint>(id, "", Some(&filter(json)));
         let layers = [
             raster("a", r#"["==", ["get", "rank"], 0]"#),
             raster("b", r#"["==", ["get", "rank"], 1]"#),

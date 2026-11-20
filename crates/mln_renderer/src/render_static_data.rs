@@ -42,8 +42,10 @@ impl RenderStaticData {
         vec![0, 1, 2, 1, 2, 3]
     }
 
+    /// The tile's four corners, each sampling the same corner of the tile's
+    /// data.
     #[must_use]
-    pub(crate) fn raster_vertices() -> Vec<RasterLayoutVertex> {
+    pub fn raster_vertices() -> Vec<RasterLayoutVertex> {
         use geometry::Point;
 
         let e = constants::EXTENT as i16;
@@ -56,8 +58,10 @@ impl RenderStaticData {
         ]
     }
 
+    /// The segment that draws the two triangles of
+    /// [`raster_vertices`](Self::raster_vertices).
     #[must_use]
-    pub(crate) fn raster_segments() -> Vec<SegmentBase> {
+    pub fn raster_segments() -> Vec<SegmentBase> {
         vec![SegmentBase::with_lengths(0, 0, 4, 6)]
     }
 

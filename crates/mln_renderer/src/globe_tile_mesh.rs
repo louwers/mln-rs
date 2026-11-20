@@ -20,10 +20,10 @@ use crate::util::tile_mesh::{TileMeshOptions, create_tile_mesh};
 /// is gridded like the tile it stands in for, so it meets that tile's
 /// neighbours edge to edge; texture positions stay inside the tile so the
 /// pole rows sample the tile's edge.
-pub(crate) struct GlobeTileMesh {
-    pub(crate) vertices: SharedVertices,
+pub struct GlobeTileMesh {
+    pub vertices: SharedVertices,
     indices: SharedIndexes,
-    pub(crate) segments: Vec<SegmentBase>,
+    pub segments: Vec<SegmentBase>,
 }
 
 /// The data of a [`GlobeTileMesh`]: its vertices, indices and segments.
@@ -52,7 +52,7 @@ impl GlobeTileMesh {
 
     /// The mesh's indexes, for a draw that shares them.
     #[must_use]
-    pub(crate) fn indexes(&self) -> DrawIndexes {
+    pub fn indexes(&self) -> DrawIndexes {
         DrawIndexes::Shared(self.indices.clone())
     }
 }
@@ -104,7 +104,7 @@ struct Entry {
 
 /// The grids a layer has built so far, one per zoom, pole row and mask: the
 /// mesh depends on nothing else.
-pub(crate) struct GlobeTileMeshCache<V: bytemuck::Pod> {
+pub struct GlobeTileMeshCache<V: bytemuck::Pod> {
     uses: u64,
     meshes: BTreeMap<(u8, bool, bool, TileMask), Entry>,
     vertex_type: PhantomData<fn() -> V>,
@@ -120,13 +120,13 @@ impl<V: bytemuck::Pod> GlobeTileMeshCache<V> {
     const MAX_MESHES: usize = 64;
 
     #[must_use]
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self::default()
     }
 
     /// The mesh of the parts of the tile `canonical` that `mask` keeps, of
     /// `layout_vertex`'s vertices, which `context`'s stores keep.
-    pub(crate) fn get(
+    pub fn get(
         &mut self,
         context: &mut Context,
         canonical: &CanonicalTileID,
@@ -152,7 +152,8 @@ impl<V: bytemuck::Pod> GlobeTileMeshCache<V> {
         &entry.mesh
     }
 
-    pub(crate) fn clear(&mut self) {
+    /// Drops the meshes.
+    pub fn clear(&mut self) {
         self.meshes.clear();
     }
 

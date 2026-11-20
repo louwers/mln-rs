@@ -17,7 +17,8 @@ mod types;
 mod writer;
 
 /// The layer types whose code is in `crates/mln_layers`, one module each.
-pub const LAYERS_CRATE_TYPES: &[&str] = &["background", "circle", "fill", "fill-extrusion", "heatmap", "line"];
+pub const LAYERS_CRATE_TYPES: &[&str] =
+    &["background", "circle", "color-relief", "fill", "fill-extrusion", "heatmap", "hillshade", "line", "raster"];
 
 /// Where a layer type's generated code goes, and the paths it names from
 /// there.

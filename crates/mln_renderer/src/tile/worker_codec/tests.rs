@@ -267,7 +267,7 @@ const LABELS_HALO: &str = r#"{"id": "labels-halo", "type": "symbol", "source": "
 fn every_geometry_layer_type_crosses() {
     // The layer types this crate's tests register. The built-in types of
     // mln_layers cross in its tests.
-    let types = ["symbol", "dot", "raster", "hillshade", "color-relief"];
+    let types = ["symbol", "dot", "tint", "shade"];
     let layers_of_type = [("symbol", vec![LABELS]), ("dot", vec![DOTS, LEGACY_DOTS, ADMIN_DOTS])];
     for type_ in types {
         let layer = convert(&format!(r#"{{"id": "l", "type": "{type_}", "source": "s", "source-layer": "sl"}}"#));

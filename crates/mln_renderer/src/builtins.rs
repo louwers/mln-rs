@@ -3,7 +3,7 @@
 //! expression functions and the types of `mln_layers` and `mln_sources`.
 
 use mln_style::expression::functions::RegisterError;
-use mln_style::layers::{ColorRelief, Custom, Hillshade, Raster, Symbol};
+use mln_style::layers::{Custom, Symbol};
 use mln_style::sources::{
     CustomGeometrySourceType, CustomVectorSourceType, GeoJsonSourceType, ImageSourceType, RasterDemSourceType,
     RasterSourceType, VectorSourceType,
@@ -16,9 +16,6 @@ use crate::RegistryBuilder;
 /// Fails for a name that an earlier call took.
 pub fn register_layer_types(builder: &mut RegistryBuilder) -> Result<(), RegisterError> {
     builder.add_layer_type::<Symbol>()?;
-    builder.add_layer_type::<Raster>()?;
-    builder.add_layer_type::<Hillshade>()?;
-    builder.add_layer_type::<ColorRelief>()?;
     builder.add_layer_type::<Custom>()
 }
 

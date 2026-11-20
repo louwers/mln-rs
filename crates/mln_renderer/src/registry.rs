@@ -111,6 +111,8 @@ impl Registry {
             mln_style::expression::functions::register_builtin_functions(builder.functions_mut()).unwrap();
             crate::builtins::register_layer_types(&mut builder).unwrap();
             builder.add_layer_type::<crate::tests::fixture_layer::Dot>().unwrap();
+            builder.add_layer_type::<crate::tests::fixture_layer::Tint>().unwrap();
+            builder.add_layer_type::<crate::tests::fixture_layer::Shade>().unwrap();
             crate::builtins::register_source_types(&mut builder).unwrap();
             builder.build()
         });
@@ -160,10 +162,10 @@ impl mln_wire::Context for &Registry {
 
 #[cfg(test)]
 mod tests {
-    use mln_style::layers::Raster;
     use mln_style::sources::GeoJsonSourceType;
 
     use super::*;
+    use crate::tests::fixture_layer::Tint;
 
     #[test]
     fn a_source_type_registers_once() {
@@ -175,7 +177,7 @@ mod tests {
     #[test]
     fn a_layer_type_registers_once() {
         let mut builder = RegistryBuilder::new();
-        builder.add_layer_type::<Raster>().unwrap();
-        assert_eq!(builder.add_layer_type::<Raster>(), Err(RegisterError::Duplicate("raster".to_owned())));
+        builder.add_layer_type::<Tint>().unwrap();
+        assert_eq!(builder.add_layer_type::<Tint>(), Err(RegisterError::Duplicate("tint".to_owned())));
     }
 }

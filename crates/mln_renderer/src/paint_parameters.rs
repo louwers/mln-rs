@@ -154,7 +154,7 @@ pub struct PaintParameters<'a> {
     pub view: &'a View,
     /// Whether a gesture or an animation moves the camera: draws favor speed
     /// over crispness then.
-    pub(crate) camera_moving: bool,
+    pub camera_moving: bool,
     /// The light of the frame.
     pub light: &'a crate::render_light::EvaluatedLight,
     pub static_data: &'a RenderStaticData,
@@ -379,8 +379,10 @@ impl<'a> PaintParameters<'a> {
         gpu.lend(f).map(|()| true)
     }
 
+    /// The projection of the tile `tile_id` in the frame, pixel-aligned if
+    /// `aligned`.
     #[must_use]
-    pub(crate) fn projection_data_for_tile(&self, tile_id: &UnwrappedTileID, aligned: bool) -> ProjectionData {
+    pub fn projection_data_for_tile(&self, tile_id: &UnwrappedTileID, aligned: bool) -> ProjectionData {
         self.transform_params.projection_data_for_tile(tile_id, aligned)
     }
 

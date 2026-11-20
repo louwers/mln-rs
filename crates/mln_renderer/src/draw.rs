@@ -512,7 +512,7 @@ impl DrawObjects {
 
     /// Replaces the geometry, whose attributes the next upload binds again
     /// even where they appear unchanged.
-    pub(crate) fn replace_geometry(&mut self, geometry: DrawGeometry) {
+    pub fn replace_geometry(&mut self, geometry: DrawGeometry) {
         let DrawGeometry { vertices, vertex_count, mode, indexes, segments, instances } = geometry;
         self.geometry = None;
         self.vertex_attributes = vertices;
