@@ -16,6 +16,7 @@ use mln_vec_map::VecMap;
 
 use crate::erased_layer::{ErasedLayerType, entry};
 use crate::layer::LayerType;
+use crate::render_tile::FindView;
 use crate::source_type::{self, ErasedSourceType, SourceType};
 
 /// What a [`Registry`] is built from.
@@ -47,7 +48,15 @@ impl RegistryBuilder {
     }
 
     /// Adds the layer type `T`. Fails for a name that an earlier type took.
+    /// A type whose [`View`](LayerType::View) is of another kind of source
+    /// than its style half's doesn't compile.
     pub fn add_layer_type<T: LayerType>(&mut self) -> Result<(), RegisterError> {
+        const {
+            assert!(
+                T::INFO.source as u8 == <T::View<'static> as FindView<'static>>::SOURCE as u8,
+                "a layer type's tile view is of another kind of source than its style half's",
+            );
+        }
         let name = T::INFO.name;
         if self.layer_types.contains_key(name) {
             return Err(RegisterError::Duplicate(name.to_owned()));

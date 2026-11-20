@@ -8,6 +8,7 @@
 
 use glam::{DMat4, Vec2};
 use mln_map_types::{MapDebugOptions, ProjectionData, View};
+use mln_style::layer_type::SourceKind;
 use mln_style_types::TranslateAnchorType;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 
@@ -179,6 +180,9 @@ impl<'a, V: Copy + FindView<'a>> TileView<'a> for V {}
 /// finds it by the layer's id once ([`find`](Self::find)), in its update,
 /// and its encode takes it again from where it was found ([`at`](Self::at)).
 pub(crate) trait FindView<'a>: Sized {
+    /// The kind of source whose tiles show the view.
+    const SOURCE: SourceKind;
+
     /// What `content` shows the layer `layer_id`, if anything, and where it
     /// is in it.
     fn find(content: TileContent<'a>, layer_id: &str) -> Option<(Self, ViewPlace)>;
@@ -222,6 +226,8 @@ impl<'a> RasterView<'a> {
 }
 
 impl<'a> FindView<'a> for RasterView<'a> {
+    const SOURCE: SourceKind = SourceKind::Raster;
+
     fn find(content: TileContent<'a>, _layer_id: &str) -> Option<(Self, ViewPlace)> {
         Some((Self::at(content, ViewPlace::Own)?, ViewPlace::Own))
     }
@@ -237,6 +243,8 @@ impl<'a> FindView<'a> for RasterView<'a> {
 }
 
 impl<'a> FindView<'a> for &'a DemContents {
+    const SOURCE: SourceKind = SourceKind::RasterDem;
+
     fn find(content: TileContent<'a>, _layer_id: &str) -> Option<(Self, ViewPlace)> {
         Some((Self::at(content, ViewPlace::Own)?, ViewPlace::Own))
     }
@@ -255,6 +263,8 @@ impl<'a> FindView<'a> for &'a DemContents {
 pub enum NoTileView {}
 
 impl FindView<'_> for NoTileView {
+    const SOURCE: SourceKind = SourceKind::None;
+
     fn find(_content: TileContent<'_>, _layer_id: &str) -> Option<(Self, ViewPlace)> {
         None
     }
