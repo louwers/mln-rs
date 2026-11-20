@@ -179,15 +179,19 @@ pub(crate) unsafe extern "C" fn mln_acquired_frame_get_producer_sync(
         // SAFETY: the caller's contract.
         unsafe { abi::check_out_size(out_sync) }?;
         let sync = with_live_frame(frame, |_, acquired| Ok(acquired.producer_sync()))?;
-        let sync = mln_gpu_sync {
-            size: size_of::<mln_gpu_sync>() as u32,
-            kind: crate::gpu_device::sync_kind_value(sync.kind),
-            handle: sync.handle,
-            value: sync.value,
-        };
         // SAFETY: the caller's contract.
-        unsafe { abi::write_sized(out_sync, &sync) }
+        unsafe { abi::write_sized(out_sync, &c_sync(sync)) }
     })
+}
+
+/// `sync` as the header's `mln_gpu_sync`.
+pub(crate) fn c_sync(sync: GpuSync) -> mln_gpu_sync {
+    mln_gpu_sync {
+        size: size_of::<mln_gpu_sync>() as u32,
+        kind: crate::gpu_device::sync_kind_value(sync.kind),
+        handle: sync.handle,
+        value: sync.value,
+    }
 }
 
 /// The descriptor of a sync file that `handle` names, an `int` widened with

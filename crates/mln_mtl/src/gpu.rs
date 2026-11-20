@@ -261,13 +261,13 @@ impl Uploads {
 /// unretained references until it runs its own handler, so a resource
 /// freed on the status alone can fail validation.
 #[derive(Default)]
-pub struct Completion {
+struct Completion {
     done: Mutex<bool>,
     changed: Condvar,
 }
 
 impl Completion {
-    pub(crate) fn is_done(&self) -> bool {
+    fn is_done(&self) -> bool {
         *self.done.lock()
     }
 
@@ -457,13 +457,6 @@ impl MetalGpu {
     /// Has the next flush present `drawable` once its commands are done.
     pub fn present_after_next_submit(&mut self, drawable: &ProtocolObject<dyn MTLDrawable>) {
         self.presents.push(drawable.retain());
-    }
-
-    /// What says when the command buffers committed so far have finished:
-    /// the last one's completion, as the queue runs them in order. `None`
-    /// before the first, or once every one finished.
-    pub(crate) fn last_submit(&self) -> Option<Arc<Completion>> {
-        self.in_flight.back().map(|(_, completion)| Arc::clone(completion))
     }
 
     /// The number of the last command buffer known to have finished, as

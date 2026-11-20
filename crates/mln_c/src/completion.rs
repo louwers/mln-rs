@@ -70,6 +70,16 @@ impl<T: Send + 'static> CompletionValue for Plain<T> {
     }
 }
 
+/// One C struct of the header's result type, or none: `value` points to a
+/// copy of it, or is null.
+impl<T: Send + 'static> CompletionValue for Option<Plain<T>> {
+    type Item = T;
+
+    fn lend<R>(&self, f: impl FnOnce(&[T]) -> R) -> R {
+        f(self.as_ref().map_or(&[], |plain| core::slice::from_ref(&plain.0)))
+    }
+}
+
 /// A count or a level: `value` is one `uint32_t`.
 impl CompletionValue for u32 {
     type Item = u32;

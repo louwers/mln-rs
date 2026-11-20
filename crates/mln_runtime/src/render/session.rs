@@ -22,7 +22,6 @@ use parking_lot::Mutex;
 
 use super::driver::DriverWork;
 use super::frame::{FrameDemand, FrameResult};
-use super::local::InFlight;
 use super::query::RenderedQueryGeometry;
 use super::target::{
     AttachOptions, BorrowedRing, ConsumerSync, Device, DeviceLease, Driver, ExportKind, FrameTexture, GpuSync,
@@ -1121,15 +1120,6 @@ impl RenderSession {
         &self,
         task: impl FnOnce(&mut Worker, &mut Outbox) -> Result<T, Error> + Send + 'static,
     ) -> Result<Completion<T>, Error> {
-        self.settled_operation(|worker, outbox| task(worker, outbox).map(|value| (value, false)))
-    }
-
-    /// Sends `task` as [`operation`](Self::operation) does, and completes
-    /// once the GPU work that it returns finishes.
-    fn settled_operation<T: Send + 'static>(
-        &self,
-        task: impl FnOnce(&mut Worker, &mut Outbox) -> Result<(T, InFlight), Error> + Send + 'static,
-    ) -> Result<Completion<T>, Error> {
         let shared = self.shared();
         with_unlocked_wakes(|| {
             let mut state = shared.state.lock();
@@ -1140,14 +1130,8 @@ impl RenderSession {
             worker::post(&shared.queue, move |worker, outbox| {
                 let task: worker::Task = Box::new(move |worker, outbox| {
                     let Some(resolver) = worker.take_work(work) else { return };
-                    match task(worker, outbox) {
-                        Ok((value, in_flight)) => worker.settle_then(
-                            in_flight,
-                            move |outbox, settled| outbox.resolve(resolver, settled.map(|()| value)),
-                            outbox,
-                        ),
-                        Err(error) => outbox.resolve(resolver, Err(error)),
-                    }
+                    let result = task(worker, outbox);
+                    outbox.resolve(resolver, result);
                 });
                 worker.after_earlier_work(resizes, task, outbox);
             });
@@ -1252,12 +1236,9 @@ impl RenderSession {
     }
 
     /// Gives a borrowed ring new textures, of `size` logical pixels: as many
-    /// as it has, of its format. Once the completion reports success, the
-    /// session's GPU work on the old textures has finished, and it no longer
-    /// uses them or the consumer syncs that they were given back with; the
-    /// host's own work on them is the host's to finish before it reuses or
-    /// destroys them. The session's thread polls that work on
-    /// its later turns without blocking. Frames wait for it meanwhile.
+    /// as it has, of its format. The completion reports the map's change and
+    /// the sync after which the host may use the old textures that the new
+    /// ring doesn't have, as [`release_target`](Self::release_target) says.
     ///
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a
     /// session without a borrowed ring, with
@@ -1266,7 +1247,7 @@ impl RenderSession {
     /// while the host holds one of the ring's frames. Completes with
     /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) for textures of
     /// another format or kind.
-    pub fn set_ring(&self, size: Size, ring: BorrowedRing) -> Result<Completion<Applied>, Error> {
+    pub fn set_ring(&self, size: Size, ring: BorrowedRing) -> Result<Completion<(Applied, GpuSync)>, Error> {
         let shared = Arc::clone(self.shared());
         {
             let mut state = shared.state.lock();
@@ -1293,9 +1274,9 @@ impl RenderSession {
         let guard = RetargetGuard(Arc::clone(&shared));
         // The guard goes with the closure, whether the closure runs or the
         // resize drops it.
-        self.resize_then(size, None, move |worker, size, scale_factor, outbox| {
+        self.resize_then(size, None, move |worker, size, scale_factor, applied, outbox| {
             let _guard = guard;
-            worker.set_ring(size, scale_factor, &ring, outbox)
+            Ok((applied, worker.set_ring(size, scale_factor, &ring, outbox)?))
         })
     }
 
@@ -1386,21 +1367,21 @@ impl RenderSession {
         if !scale_factor.is_finite() || scale_factor <= 0.0 {
             return Err(Error::invalid_argument(format!("scale factor {scale_factor} isn't finite and positive")));
         }
-        self.resize_then(size, Some(scale_factor), |worker, size, scale_factor, outbox| {
-            worker.resize(size, scale_factor, outbox).map(|()| false)
+        self.resize_then(size, Some(scale_factor), |worker, size, scale_factor, applied, outbox| {
+            worker.resize(size, scale_factor, outbox).map(|()| applied)
         })
     }
 
     /// Sends a map command that resizes the map to `size`, at
     /// `scale_factor` or the session's when that is `None`, then runs
-    /// `change` on the session's thread, which resizes or replaces the
-    /// target.
-    fn resize_then(
+    /// `change` on the session's thread with the map's change, which resizes
+    /// or replaces the target, and completes with its result.
+    fn resize_then<T: Send + 'static>(
         &self,
         size: Size,
         scale_factor: Option<f64>,
-        change: impl FnOnce(&mut Worker, Size, f64, &mut Outbox) -> Result<InFlight, Error> + Send + 'static,
-    ) -> Result<Completion<Applied>, Error> {
+        change: impl FnOnce(&mut Worker, Size, f64, Applied, &mut Outbox) -> Result<T, Error> + Send + 'static,
+    ) -> Result<Completion<T>, Error> {
         if size.is_empty() {
             return Err(Error::invalid_argument("the target's size must not be empty"));
         }
@@ -1419,18 +1400,9 @@ impl RenderSession {
             let landing = worker::ResizeLanding::new(shared.queue.clone());
             let sent =
                 map.resize_for_session(size, scale_factor, shared.queue.clone(), move |worker, result, outbox| {
-                    if let Some(resolver) = worker.take_work::<Applied>(work) {
-                        match result.and_then(|applied| Ok((applied, change(worker, size, scale_factor, outbox)?))) {
-                            // A replacement of a ring's textures completes
-                            // once the GPU work on those it let go of
-                            // finishes.
-                            Ok((applied, in_flight)) => worker.settle_then(
-                                in_flight,
-                                move |outbox, settled| outbox.resolve(resolver, settled.map(|()| applied)),
-                                outbox,
-                            ),
-                            Err(error) => outbox.resolve(resolver, Err(error)),
-                        }
+                    if let Some(resolver) = worker.take_work::<T>(work) {
+                        let result = result.and_then(|applied| change(worker, size, scale_factor, applied, outbox));
+                        outbox.resolve(resolver, result);
                     }
                     landing.land(worker, outbox);
                 });
@@ -1449,18 +1421,20 @@ impl RenderSession {
     /// [`set_surface`](Self::set_surface) gives the session a surface again,
     /// finish as [`FrameDisposition::TargetNotReady`](super::FrameDisposition).
     /// Once the release completes, the session no longer uses the surface or
-    /// the window it was made from, or a ring's textures: its GPU work on
-    /// them has finished, and it no longer uses the consumer syncs that the
-    /// textures were given back with; the host's own work on them is the
-    /// host's to finish before it reuses or destroys them. The session's
-    /// thread polls that work on its later turns without
-    /// blocking. The session keeps nothing of the released textures: one
-    /// that a later ring has again starts fresh, even one that the host gave
-    /// up.
+    /// the window it was made from. For a ring, it completes with a sync of
+    /// the session's producer kind, after which the host may use or destroy
+    /// the textures: the session's GPU work on them, and its waits for the
+    /// consumer syncs that they were given back with, end there. The session
+    /// keeps the objects that the sync names until its next release or
+    /// replacement of the target completes, or it ends. It keeps nothing of
+    /// the released textures: one that a later ring has again starts fresh,
+    /// even one that the host gave up.
     ///
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for an
     /// offscreen session or an exported ring, whose targets are their own.
-    pub fn release_target(&self) -> Result<Completion<()>, Error> {
+    /// Completes with [`ErrorKind::Native`](mln_util::ErrorKind) when a ring
+    /// can't submit its work on the textures, which it keeps then.
+    pub fn release_target(&self) -> Result<Completion<Option<GpuSync>>, Error> {
         if self.shared().capabilities.export_kind.is_some() {
             return Err(Error::unsupported("an exported ring keeps its images until the session ends"));
         }
@@ -1483,9 +1457,9 @@ impl RenderSession {
                 RetargetGuard(Arc::clone(&shared))
             })
         };
-        self.settled_operation(move |worker, outbox| {
+        self.operation(move |worker, outbox| {
             let _guard = guard;
-            worker.release_target(outbox).map(|in_flight| ((), in_flight))
+            worker.release_target(outbox)
         })
     }
 
@@ -1521,8 +1495,8 @@ impl RenderSession {
         }
         surface.check_area()?;
         let surface = SentSurface::new(surface, self.shared().id);
-        self.resize_then(size, None, move |worker, size, scale_factor, outbox| {
-            worker.set_surface(size, scale_factor, surface.receive()?, outbox).map(|()| false)
+        self.resize_then(size, None, move |worker, size, scale_factor, applied, outbox| {
+            worker.set_surface(size, scale_factor, surface.receive()?, outbox).map(|()| applied)
         })
     }
 

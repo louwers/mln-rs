@@ -400,9 +400,6 @@ pub struct VulkanGpu {
     pass: Option<OpenPass>,
     /// The serial of the last submit known to have finished.
     finished_serial: u64,
-    /// The serial of the last submit with passes, recorded commands, waits
-    /// or signals, 0 before the first.
-    work_serial: u64,
     in_flight: VecDeque<Submission>,
     free_command_buffers: Vec<vk::CommandBuffer>,
     free_fences: Vec<vk::Fence>,
@@ -666,7 +663,6 @@ impl VulkanGpu {
             drawn: Vec::new(),
             pass: None,
             finished_serial: 0,
-            work_serial: 0,
             in_flight: VecDeque::new(),
             free_command_buffers: Vec::new(),
             free_fences: Vec::new(),
@@ -1729,7 +1725,6 @@ impl VulkanGpu {
     /// since then, which release what they drew into to its queue family,
     /// then `recorded`, with the waits and signals of the next submit.
     fn submit_batch(&mut self, recorded: Option<vk::CommandBuffer>) -> Result<(), GpuError> {
-        let draws = self.frame.is_some() || recorded.is_some();
         let mut command_buffers = Vec::with_capacity(3);
         if let Some(uploads) = self.uploads.take() {
             memory_barrier(
@@ -1792,40 +1787,9 @@ impl VulkanGpu {
         self.signals.clear();
         self.timeline = false;
         let serial = self.next_serial;
-        if draws || !wait_semaphores.is_empty() || !signal_semaphores.is_empty() {
-            self.work_serial = serial;
-        }
         self.in_flight.push_back(Submission { serial, fence, command_buffers });
         self.next_serial = serial + 1;
         Ok(())
-    }
-
-    /// The serial of the last submit with passes, recorded commands, waits
-    /// or signals. One of writes alone, such as a new texture's layout, or
-    /// of nothing, as a flush with nothing to submit makes, touches no
-    /// ring's images, and may finish only after the work before it on a
-    /// queue that the host shares.
-    pub(crate) fn work_serial(&self) -> u64 {
-        self.work_serial
-    }
-
-    /// Whether the submit of `serial` has finished, which it checks without
-    /// blocking. Fails when Vulkan can't tell, such as once the device is
-    /// lost.
-    pub(crate) fn submit_finished(&mut self, serial: u64) -> Result<bool, GpuError> {
-        if serial <= self.finished_serial {
-            return Ok(true);
-        }
-        self.collect_garbage();
-        // The oldest submit that hasn't finished says why, if the device
-        // can't tell.
-        if let Some(submission) = self.in_flight.front()
-            && serial > self.finished_serial
-        {
-            // SAFETY: the fence is this backend's.
-            unsafe { self.vk().get_fence_status(submission.fence) }.map_err(vk_error("checking a submit"))?;
-        }
-        Ok(serial <= self.finished_serial)
     }
 
     /// Blocks until the submit of `serial` has finished.

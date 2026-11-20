@@ -23,7 +23,7 @@ mod renderer_backend;
 mod shaders;
 pub mod surface_target;
 
-pub use borrowed_target::{BorrowedTarget, BorrowedTextures, InFlight, MetalRing};
+pub use borrowed_target::{BorrowedTarget, BorrowedTextures, MetalRing};
 pub use custom_layer::{AttachmentFormats, CustomLayerEncoder, CustomLayerPass};
 pub use device::Device;
 pub use exported_target::{ExportedTarget, MetalExporter};

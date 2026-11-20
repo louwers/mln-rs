@@ -222,11 +222,6 @@ const DEPTH_STENCIL: TextureFormat = TextureFormat::Depth24PlusStencil8;
 /// its reads to the device's queue needs neither.
 pub type BorrowedTarget = ring::BorrowedTarget<D3d12Ring>;
 
-/// The end of a ring's work on the textures that it let go of: the device
-/// queue fence's value after it, which the host waits for before it uses or
-/// destroys the textures.
-pub type InFlight = ring::InFlight<D3d12Ring>;
-
 /// A [`BorrowedTarget`]'s part on D3D12: the shared fence that its frames
 /// signal, for a fence producer, and the host's fences that it opened.
 pub struct D3d12Ring {
@@ -263,7 +258,6 @@ impl RingBackend for D3d12Ring {
     /// A fence, and the value that the work to wait for reaches.
     type Wait = (ID3D12Fence, u64);
     type Handed = Infallible;
-    type Fence = (ID3D12Fence, u64);
 
     /// Fails as [`BorrowedTextures::check`] does, with
     /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) for another producer
@@ -352,23 +346,6 @@ impl RingBackend for D3d12Ring {
         let fence = self.fence.as_ref()?;
         let handle = fence.handle.as_raw_handle() as usize as u64;
         Some((GpuSync { kind: SyncKind::D3d12Fence, handle, value: self.fence_value }, None))
-    }
-
-    /// The fence that the backend's submits signal, and the value of the
-    /// last one's.
-    fn submitted(gpu: &D3d12Gpu) -> Option<Self::Fence> {
-        Some(gpu.last_submit())
-    }
-
-    /// A removed device's fences read `u64::MAX`, which fails the work.
-    fn finished(gpu: &mut D3d12Gpu, (fence, value): &Self::Fence) -> Result<bool, GpuError> {
-        // SAFETY: a plain query.
-        let completed = unsafe { fence.GetCompletedValue() };
-        if completed == u64::MAX {
-            let reason = gpu.device().removed_reason();
-            return Err(GpuError::Invalid(reason.unwrap_or_else(|| "the D3D12 device was removed".into())));
-        }
-        Ok(completed >= *value)
     }
 }
 

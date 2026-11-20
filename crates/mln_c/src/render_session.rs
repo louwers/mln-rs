@@ -20,7 +20,7 @@ use parking_lot::Mutex;
 
 use crate::abi::{self, Fields};
 use crate::callback::Wake;
-use crate::completion::{self, CompletionValue, Generations, PendingCompletion};
+use crate::completion::{self, CompletionValue, Generations, PendingCompletion, Plain};
 use crate::error::Error;
 use crate::generated::types::{
     MLN_CLIP_DEPTH_RANGE_NEGATIVE_ONE_TO_ONE, MLN_CLIP_DEPTH_RANGE_ZERO_TO_ONE, MLN_FRAME_DEMAND_FORCE,
@@ -43,7 +43,7 @@ use crate::generated::types::{
 };
 use crate::handles::{self, HandleKind, HandleTable};
 use crate::map::{self, MapObject};
-use crate::{buffer, events, projection, render_target};
+use crate::{acquired_frame, buffer, events, projection, render_target};
 
 abi::versioned!(
     mln_render_session_attach_options,
@@ -626,7 +626,11 @@ pub(crate) unsafe extern "C" fn mln_render_session_release_target(
 ) -> mln_status {
     export!(out_diagnostic, {
         // SAFETY: the caller's contract.
-        unsafe { operation(session, completion, RenderSession::release_target, |()| ()) }
+        unsafe {
+            operation(session, completion, RenderSession::release_target, |sync| {
+                sync.map(|sync| Plain(acquired_frame::c_sync(sync)))
+            })
+        }
     })
 }
 

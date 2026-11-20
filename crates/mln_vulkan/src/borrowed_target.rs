@@ -198,10 +198,6 @@ fn import_fence(device: &Device, handle: u64) -> Result<vk::Semaphore, Error> {
 /// Frames drawn into the host's images, each given back to the host.
 pub type BorrowedTarget = ring::BorrowedTarget<VulkanRing>;
 
-/// The end of a ring's work on the images that it let go of, after which
-/// the host may use or destroy them.
-pub type InFlight = ring::InFlight<VulkanRing>;
-
 /// A [`BorrowedTarget`]'s part on Vulkan: the semaphores that its frames
 /// signal. A tear-down destroys them once the frames are done, and dropping
 /// it without one once the target waited for them.
@@ -375,8 +371,6 @@ impl RingBackend for VulkanRing {
     type Textures = BorrowedImages;
     type Wait = ConsumerWait;
     type Handed = Handed;
-    /// The serial of a submit of the ring's `VulkanGpu`.
-    type Fence = u64;
 
     /// Fails as [`BorrowedImages::check`] does, with
     /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a producer kind
@@ -548,12 +542,6 @@ impl RingBackend for VulkanRing {
         }
     }
 
-    /// The serial of the last submit with work: of the ring's own, not of
-    /// the host's on a queue it shares.
-    fn submitted(gpu: &VulkanGpu) -> Option<u64> {
-        Some(gpu.work_serial()).filter(|serial| *serial != 0)
-    }
-
     /// The semaphores go once the frames that signal them are done.
     fn tear_down(&mut self, gpu: &mut VulkanGpu) {
         let semaphores = [
@@ -572,11 +560,6 @@ impl RingBackend for VulkanRing {
     /// Waits for the work submitted to the device's queue.
     fn wait_for_frames(&self, what: &str) {
         self.device.wait_idle(what);
-    }
-
-    /// A lost device finishes no submit; the session fails then.
-    fn finished(gpu: &mut VulkanGpu, serial: &u64) -> Result<bool, GpuError> {
-        gpu.submit_finished(*serial)
     }
 
     fn forget(wait: ConsumerWait) {

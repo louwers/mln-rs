@@ -12,7 +12,7 @@ use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
 
-use mln_gfx::{ConsumerSync, Handoff, SyncKind};
+use mln_gfx::{ConsumerSync, GpuSync, Handoff, SyncKind};
 use mln_map::{MapView, RenderMode};
 use mln_renderer::text::font_face_engine::FontFaceEngine;
 use mln_renderer::{Registry, Renderer, RendererEvent, RendererEvents, Update, UpdateReader};
@@ -29,7 +29,7 @@ use mln_util::queue::Queue;
 use mln_util::size::Size;
 
 use super::frame::{DemandMode, FrameDemand, FrameDisposition, FrameResult};
-use super::local::{InFlight, LocalTarget};
+use super::local::LocalTarget;
 use super::session::{Published, RenderSessionState, SessionShared, WorkId, physical_size};
 use super::target::{
     BorrowedRing, Device, DeviceLease, Driver, ExportKind, ExportedRing, SentSurface, Surface, SurfaceOverlay,
@@ -453,88 +453,6 @@ pub(crate) struct Worker {
     /// The target that a teardown keeps while views name their sync
     /// objects, until the last view ends.
     viewed: Option<LocalTarget>,
-    /// What runs as each release or replacement completes, in their order,
-    /// once the GPU work on the textures that it let go of finishes, which
-    /// the target keeps.
-    settling: VecDeque<SettleDone>,
-    /// The thread that has the session's thread poll `settling`.
-    ticker: Option<Ticker>,
-}
-
-/// How often the session's thread polls the ring's GPU work.
-#[cfg(not(target_family = "wasm"))]
-const SETTLE_POLL: std::time::Duration = std::time::Duration::from_millis(2);
-
-/// What runs once a release or replacement has settled, with its result.
-type SettleDone = Box<dyn FnOnce(&mut Outbox, Result<(), Error>)>;
-
-/// What has the session's thread poll the ring's GPU work, until it drops,
-/// which waits for its thread to end.
-struct Ticker {
-    stop: Arc<AtomicBool>,
-    #[cfg(not(target_family = "wasm"))]
-    thread: Option<std::thread::JoinHandle<()>>,
-}
-
-impl Drop for Ticker {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::SeqCst);
-        // It sleeps for no longer than `SETTLE_POLL`.
-        #[cfg(not(target_family = "wasm"))]
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
-        }
-    }
-}
-
-/// Starts a thread that has the session's thread poll the ring's GPU work on
-/// its later turns, until the returned ticker drops. It posts to the
-/// session's queue, so a caller-driven session's host gets a wake for each
-/// poll.
-#[cfg(target_family = "wasm")]
-fn start_ticker(queue: SessionQueue) -> Ticker {
-    // The browser's one thread polls in the pump's slices instead, which it
-    // asks for meanwhile.
-    let (stop, queued) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
-    let stopped = Arc::clone(&stop);
-    mln_web_host::pump::add(move || {
-        if stopped.load(Ordering::SeqCst) {
-            return false;
-        }
-        post_poll(&queue, &queued);
-        mln_web_host::pump::wake();
-        true
-    })
-    .detach();
-    Ticker { stop }
-}
-
-#[cfg(not(target_family = "wasm"))]
-fn start_ticker(queue: SessionQueue) -> Ticker {
-    let (stop, queued) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
-    let stopped = Arc::clone(&stop);
-    let spawned = mln_util::thread::spawn("RenderSessionSettle", move || {
-        while !stopped.load(Ordering::SeqCst) {
-            std::thread::sleep(SETTLE_POLL);
-            post_poll(&queue, &queued);
-        }
-    });
-    if spawned.is_err() {
-        Log::error(Event::Render, "Can't start the thread that polls the GPU work on released textures");
-    }
-    Ticker { stop, thread: spawned.ok() }
-}
-
-/// Posts a poll of the GPU work unless one that `queued` marks is on the
-/// queue, and clears the mark as the poll runs.
-fn post_poll(queue: &SessionQueue, queued: &Arc<AtomicBool>) {
-    if !queued.swap(true, Ordering::SeqCst) {
-        let queued = Arc::clone(queued);
-        post(queue, move |worker, outbox| {
-            queued.store(false, Ordering::SeqCst);
-            worker.poll_settling(outbox);
-        });
-    }
 }
 
 impl Drop for Worker {
@@ -619,8 +537,6 @@ impl Worker {
             demands_received: 0,
             behind: VecDeque::new(),
             viewed: None,
-            settling: VecDeque::new(),
-            ticker: None,
         }
     }
 
@@ -1242,10 +1158,6 @@ impl Worker {
         if state.ring.iter().all(|slot| slot.quarantined) {
             return RingPick::Quarantined;
         }
-        // No frame draws into the ring until its replacement completes.
-        if !self.settling.is_empty() {
-            return RingPick::Full;
-        }
         let free = state.ring.iter().enumerate().filter(|(_, slot)| !slot.busy());
         let index = free
             .clone()
@@ -1308,8 +1220,7 @@ impl Worker {
                 _ => false,
             }
         };
-        if let (true, Err(error)) = (failure, &released) {
-            self.end_settling(error, outbox);
+        if failure {
             self.end_demands(FrameDisposition::Failed, outbox);
             self.drop_gfx();
             return self.run_queued(outbox);
@@ -1334,7 +1245,7 @@ impl Worker {
         scale_factor: f64,
         ring: &BorrowedRing,
         outbox: &mut Outbox,
-    ) -> Result<InFlight, Error> {
+    ) -> Result<GpuSync, Error> {
         self.set_scale_factor(scale_factor)?;
         let same_size = self.size() == size;
         let gfx = self.gfx.as_mut().ok_or_else(target_lost)?;
@@ -1347,9 +1258,9 @@ impl Worker {
             for (_, seen) in &mut self.waiting {
                 *seen = latest;
             }
-            return Ok(false);
+            return Ok(GpuSync::of(SyncKind::CpuComplete));
         }
-        let in_flight = gfx.target.set_ring(ring.clone())?;
+        let sync = gfx.target.set_ring(ring.clone())?;
         let old = self.ring.replace(ring.clone());
         {
             let mut state = self.shared.state.lock();
@@ -1381,7 +1292,7 @@ impl Worker {
         // A still image that waits for a target gets its demand again, once
         // the replacement no longer counts as on its way.
         post(&self.shared.queue, Worker::still_image_changed);
-        Ok(in_flight)
+        Ok(sync)
     }
 
     // MARK: - Work
@@ -1449,7 +1360,7 @@ impl Worker {
                     // The map has the new size already, which the old images
                     // can't show.
                     Err(error) => {
-                        self.fail(&error, outbox);
+                        self.fail(error.clone(), outbox);
                         return Err(error);
                     }
                 }
@@ -1465,24 +1376,23 @@ impl Worker {
     fn fail_if_device_lost(&mut self, outbox: &mut Outbox) -> bool {
         let Some(error) = self.gfx.as_ref().and_then(|gfx| gfx.target.device().lost()) else { return false };
         Log::error(Event::Render, error.message.clone());
-        self.fail(&error, outbox);
+        self.fail(error, outbox);
         true
     }
 
     /// Fails the attached session with `error`, ending the demands on their
     /// way, and lets go of its renderer and target.
-    fn fail(&mut self, error: &Error, outbox: &mut Outbox) {
+    fn fail(&mut self, error: Error, outbox: &mut Outbox) {
         let failed = {
             let mut state = self.shared.state.lock();
             let attached = self.gfx.is_some() && state.lifecycle == RenderSessionState::Attached;
             if attached {
                 state.lifecycle = RenderSessionState::Failed;
-                state.failure = Some(error.clone());
+                state.failure = Some(error);
             }
             attached
         };
         if failed {
-            self.end_settling(error, outbox);
             self.end_demands(FrameDisposition::Failed, outbox);
             self.drop_gfx();
             self.run_queued(outbox);
@@ -1505,7 +1415,7 @@ impl Worker {
             state.attach.take()
         };
         if let Some(attach) = attach {
-            outbox.resolve(attach, Err(error.clone()));
+            outbox.resolve(attach, Err(error));
         }
         // These run on the state that the panic left, so they may panic too.
         let _ = mln_util::panic::catch(|| {
@@ -1513,7 +1423,6 @@ impl Worker {
                 let result = FrameResult::unrendered(Some(token), FrameDisposition::Failed, self.latest_generation());
                 self.publish(&result, outbox);
             }
-            self.end_settling(&error, outbox);
             self.end_demands(FrameDisposition::Failed, outbox);
             self.drop_gfx();
             self.run_queued(outbox);
@@ -1544,13 +1453,12 @@ impl Worker {
     }
 
     /// Lets go of a surface session's surface, or of a ring's textures, and
-    /// ends the demands on their way. Returns the work in flight on the
-    /// textures, which the release waits for. The host may destroy the
-    /// textures once it completes, so a new ring keeps nothing of the old
-    /// one: no texture of it stays quarantined.
-    pub(crate) fn release_target(&mut self, outbox: &mut Outbox) -> Result<InFlight, Error> {
+    /// ends the demands on their way. Returns, for a ring, the sync after
+    /// which the host may use or destroy the textures, so a new ring keeps
+    /// nothing of the old one: no texture of it stays quarantined.
+    pub(crate) fn release_target(&mut self, outbox: &mut Outbox) -> Result<Option<GpuSync>, Error> {
         let gfx = self.gfx.as_mut().ok_or_else(target_lost)?;
-        let in_flight = gfx.target.release_surface();
+        let sync = gfx.target.release_surface()?;
         self.has_frame = false;
         self.ring = None;
         {
@@ -1562,64 +1470,7 @@ impl Worker {
             }
         }
         self.end_demands(FrameDisposition::TargetNotReady, outbox);
-        Ok(in_flight)
-    }
-
-    // MARK: - The GPU work on released textures
-
-    /// Runs `done` once the GPU work of the release or replacement that was
-    /// just made finishes: at once when `in_flight` says there is none, and
-    /// else on a later turn of the session's thread, which polls it without
-    /// blocking. Frames wait for it meanwhile.
-    pub(crate) fn settle_then(
-        &mut self,
-        in_flight: InFlight,
-        done: impl FnOnce(&mut Outbox, Result<(), Error>) + 'static,
-        outbox: &mut Outbox,
-    ) {
-        if !in_flight {
-            return done(outbox, Ok(()));
-        }
-        self.settling.push_back(Box::new(done));
-        if self.ticker.is_none() {
-            self.ticker = Some(start_ticker(self.shared.queue.clone()));
-        }
-    }
-
-    /// Polls the GPU work that releases and replacements wait for, and
-    /// completes those whose work finished, in their order. Without graphics
-    /// objects, they end as the target is lost; work that failed, as on a
-    /// lost device, fails the session and ends them with its error.
-    fn poll_settling(&mut self, outbox: &mut Outbox) {
-        let Some(gfx) = self.gfx.as_mut() else { return self.end_settling(&target_lost(), outbox) };
-        let waiting = match gfx.target.in_flight() {
-            Ok(waiting) => waiting,
-            Err(error) => {
-                self.fail(&error, outbox);
-                return self.end_settling(&error, outbox);
-            }
-        };
-        let finished = self.settling.len().saturating_sub(waiting);
-        for done in self.settling.drain(..finished) {
-            done(outbox, Ok(()));
-        }
-        if self.settling.is_empty() {
-            self.stop_ticker();
-            self.pump(outbox);
-        }
-    }
-
-    fn stop_ticker(&mut self) {
-        self.ticker = None;
-    }
-
-    /// Ends the releases and replacements that wait for GPU work with
-    /// `error`.
-    fn end_settling(&mut self, error: &Error, outbox: &mut Outbox) {
-        self.stop_ticker();
-        for done in std::mem::take(&mut self.settling) {
-            done(outbox, Err(error.clone()));
-        }
+        Ok(sync)
     }
 
     /// Presents to `surface` from now on, at `size` logical pixels, after
@@ -1732,7 +1583,6 @@ impl Worker {
     /// Lets go of the map's updates and the graphics objects, and ends the
     /// demands on their way.
     pub(crate) fn tear_down(&mut self, outbox: &mut Outbox) {
-        self.end_settling(&target_lost(), outbox);
         self.end_demands(FrameDisposition::TargetNotReady, outbox);
         self.torn_down = true;
         if let Some(reader) = self.reader.take() {

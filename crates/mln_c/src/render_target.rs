@@ -5,8 +5,7 @@ use core::ffi::c_void;
 use core::ptr::NonNull;
 
 use ::mln_runtime::{
-    Applied, BorrowedRing, DmaBufFormat, ExportKind, ExportKinds, ExportedRing, RenderSession, RenderTarget, Surface,
-    SurfaceType,
+    BorrowedRing, DmaBufFormat, ExportKind, ExportKinds, ExportedRing, RenderTarget, Surface, SurfaceType,
 };
 use mln_util::ErrorKind;
 use mln_util::size::Size;
@@ -14,7 +13,7 @@ use raw_window_handle::{
     DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle, WindowHandle,
 };
 
-use crate::completion::{self, Generations, PendingCompletion};
+use crate::completion::{self, Generations, PendingCompletion, Plain};
 use crate::error::Error;
 use crate::generated::types::{
     MLN_RENDER_TARGET_KIND_ANDROID_WINDOW, MLN_RENDER_TARGET_KIND_D3D12_BORROWED_TEXTURES,
@@ -25,11 +24,11 @@ use crate::generated::types::{
     MLN_RENDER_TARGET_KIND_VULKAN_BORROWED_TEXTURES, MLN_RENDER_TARGET_KIND_VULKAN_SURFACE,
     MLN_RENDER_TARGET_KIND_WAYLAND_SURFACE, MLN_RENDER_TARGET_KIND_WEB_CANVAS,
     MLN_RENDER_TARGET_KIND_WEB_GPU_BORROWED_TEXTURES, MLN_RENDER_TARGET_KIND_WIN32_WINDOW,
-    MLN_RENDER_TARGET_KIND_XLIB_WINDOW, mln_completion, mln_diagnostic, mln_gpu_device, mln_logical_extent,
-    mln_logical_size, mln_map, mln_open_gl_context_provider_flags, mln_render_session,
+    MLN_RENDER_TARGET_KIND_XLIB_WINDOW, mln_completion, mln_diagnostic, mln_gpu_device, mln_gpu_sync,
+    mln_logical_extent, mln_logical_size, mln_map, mln_open_gl_context_provider_flags, mln_render_session,
     mln_render_session_attach_options, mln_render_target, mln_status,
 };
-use crate::{abi, gpu_device, handles, map, render_session};
+use crate::{abi, acquired_frame, gpu_device, handles, map, render_session};
 
 abi::versioned!(mln_render_target);
 
@@ -1080,10 +1079,6 @@ pub(crate) unsafe extern "C" fn mln_map_attach(
     })
 }
 
-/// Sends a session its new target, once its completion is ready for the
-/// result.
-type Replace = Box<dyn FnOnce(&RenderSession) -> Result<::mln_runtime::Completion<Applied>, mln_util::Error>>;
-
 /// `mln_render_session_set_target()`.
 ///
 /// # Safety
@@ -1114,28 +1109,34 @@ pub(crate) unsafe extern "C" fn mln_render_session_set_target(
         if let Some(size) = target.size() {
             physical_size(mln_logical_extent { width: size.width, height: size.height, scale_factor })?;
         }
-        let replace: Replace = match target {
+        let (size, surface) = match target {
             Target::Surface { size, kind, surface } => {
                 if !kind.presents_with_any() {
                     return Err(unsupported(format!("this build presents to no {kind:?} surface")));
                 }
                 // SAFETY: the caller's contract.
-                let surface = unsafe { surface.into_surface() }?;
-                Box::new(move |session| session.set_surface(size, surface))
+                (size, unsafe { surface.into_surface() }?)
             }
-            Target::HostSurface { size, surface } => Box::new(move |session| session.set_surface(size, surface)),
+            Target::HostSurface { size, surface } => (size, surface),
             #[cfg(target_family = "wasm")]
-            Target::WebCanvas { size, surface } => Box::new(move |session| session.set_surface(size, surface)),
+            Target::WebCanvas { size, surface } => (size, surface),
             #[cfg(backend_d3d12)]
             Target::Composition { size, composition } => {
                 // SAFETY: the caller's contract.
-                let surface = unsafe { composition.into_surface() }?;
-                Box::new(move |session| session.set_surface(size, surface))
+                (size, unsafe { composition.into_surface() }?)
             }
             Target::Borrowed { size, ring } => {
                 // SAFETY: the caller's contract.
                 let ring = unsafe { ring.into_ring() };
-                Box::new(move |session| session.set_ring(size, ring))
+                let map = object.map.clone();
+                return render_session::send_then(&object.session, |session| session.set_ring(size, ring), pending, {
+                    move |result| {
+                        let applied = result.as_ref().map(|(applied, _)| *applied).map_err(Clone::clone);
+                        let generations = map::generations(&map, &applied);
+                        let value = result.map(|(_, sync)| Some(Plain(acquired_frame::c_sync(sync))));
+                        (value.map_err(Error::from), generations)
+                    }
+                });
             }
             Target::Exported { .. } => {
                 return Err(unsupported("an exported ring is no replacement target: resize the session instead"));
@@ -1144,9 +1145,11 @@ pub(crate) unsafe extern "C" fn mln_render_session_set_target(
             Target::Offscreen(_) => return Err(unsupported("an offscreen target replaces no window")),
         };
         let map = object.map.clone();
-        render_session::send_then(&object.session, replace, pending, move |result| {
-            let generations = map::generations(&map, &result);
-            (result.map(drop).map_err(Error::from), generations)
+        render_session::send_then(&object.session, |session| session.set_surface(size, surface), pending, {
+            move |result| {
+                let generations = map::generations(&map, &result);
+                (result.map(|_| None::<Plain<mln_gpu_sync>>).map_err(Error::from), generations)
+            }
         })
     })
 }

@@ -31,7 +31,7 @@ mod shaders;
 mod surface_target;
 mod upload;
 
-pub use borrowed_target::{BorrowedTarget, BorrowedTextures, D3d12Ring, InFlight, depth_stencil_format};
+pub use borrowed_target::{BorrowedTarget, BorrowedTextures, D3d12Ring, depth_stencil_format};
 pub use custom_layer::{CustomLayerEncoder, CustomLayerPass};
 pub use device::Device;
 pub use exported_target::{D3d12Exporter, ExportedTarget};

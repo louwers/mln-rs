@@ -57,13 +57,10 @@ fn a_ring_of_images_of_no_size_or_too_large_is_rejected() {
         .expect("a ring of 4x4 images");
     let gpu = backend.gpu();
     for size in bad_sizes(&device) {
-        let error = target.replace(gpu, images(size)).err().expect("no ring of that size");
+        let error = target.replace(gpu, images(size)).expect_err("no ring of that size");
         assert_eq!(error.kind, ErrorKind::InvalidArgument, "{size:?}");
     }
-    // A replacement doesn't block: the old images are the host's again once
-    // the reads that it returns end.
-    let in_flight = target.replace(gpu, images(Size::new(8, 8))).expect("a ring of 8x8 images");
-    wait_for(&in_flight, gpu);
+    target.replace(gpu, images(Size::new(8, 8))).expect("a ring of 8x8 images");
     target.tear_down(gpu);
 }
 
@@ -146,26 +143,30 @@ impl Owned {
         semaphore
     }
 
-    /// Queues work of the host's on the device's queue that waits for
-    /// `semaphore`, a timeline, to reach `value`.
-    fn queue_host_work(&self, semaphore: vk::Semaphore, value: u64) {
-        let (semaphores, values, stages) = ([semaphore], [value], [vk::PipelineStageFlags::ALL_COMMANDS]);
-        let mut timeline = vk::TimelineSemaphoreSubmitInfo::default().wait_semaphore_values(&values);
-        let submit = vk::SubmitInfo::default()
-            .wait_semaphores(&semaphores)
-            .wait_dst_stage_mask(&stages)
-            .push_next(&mut timeline);
-        let device = self.device.shared.device();
-        // SAFETY: a submission of no commands that waits for a timeline of
-        // the device, on its queue, held for the call.
-        self.device.with_queue(|queue| unsafe { device.queue_submit(queue, &[submit], vk::Fence::null()) }).unwrap();
-    }
-
     /// Signals `semaphore`, a timeline, to `value` now, from the host's CPU.
     fn signal(&self, semaphore: vk::Semaphore, value: u64) {
         let info = vk::SemaphoreSignalInfo::default().semaphore(semaphore).value(value);
         // SAFETY: a timeline of the device, below `value`.
         unsafe { self.device.shared.device().signal_semaphore(&info) }.unwrap();
+    }
+
+    /// Whether the ring's timeline that `sync` names reached its value.
+    fn reached(&self, sync: mln_gfx::GpuSync) -> bool {
+        use ash::vk::Handle as _;
+        assert_eq!(SyncKind::VulkanTimelineSemaphore, sync.kind);
+        let semaphore = vk::Semaphore::from_raw(sync.handle);
+        // SAFETY: the ring's timeline, which it keeps until its next release
+        // or replacement.
+        unsafe { self.device.shared.device().get_semaphore_counter_value(semaphore) }.unwrap() >= sync.value
+    }
+
+    /// Waits until the ring's timeline that `sync` names reaches its value.
+    fn wait_for(&self, sync: mln_gfx::GpuSync) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !self.reached(sync) {
+            assert!(std::time::Instant::now() < deadline, "the ring's work never finished");
+            std::thread::yield_now();
+        }
     }
 }
 
@@ -227,30 +228,13 @@ fn sync_file(producer: &mut BorrowedTarget, gpu: &mut crate::VulkanGpu) -> mln_g
     mln_gfx::ConsumerSync { sync, sync_file: Some(file) }
 }
 
-/// Waits until the work `in_flight` finishes on `gpu`.
-fn wait_for(in_flight: &crate::InFlight, gpu: &mut crate::VulkanGpu) {
-    assert!(finishes(in_flight, gpu), "the work never finished");
-}
-
-/// Whether `in_flight` finishes within ten seconds.
-fn finishes(in_flight: &crate::InFlight, gpu: &mut crate::VulkanGpu) -> bool {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    while !in_flight.finished(gpu).expect("the work failed") {
-        if std::time::Instant::now() >= deadline {
-            return false;
-        }
-        std::thread::yield_now();
-    }
-    true
-}
-
 // A frame begun and drawn into, but not ended, is submitted with what its
 // slot waits for before the ring lets go of its images, and the semaphores
-// imported for the waits outlive that submit: on replacement and on
-// tear-down, for the host's sync files and timelines. Neither blocks: a host
-// that signals its timeline only once the call returned gets the images
-// back once the work that the call returned finishes. The host's reads of a
-// slot that no frame drew into hold nothing up.
+// imported for the waits outlive that submit: on replacement, on release and
+// on tear-down, for the host's sync files and timelines. None blocks: with a
+// timeline producer, a host that signals its timeline only once the call
+// returned gets the images back at the sync that the call returned. The
+// host's reads of a slot that no frame drew into hold nothing up.
 #[test]
 fn a_frame_drawn_and_not_ended_is_submitted_with_its_waits() {
     let (device, mut backend) = backend();
@@ -264,8 +248,8 @@ fn a_frame_drawn_and_not_ended_is_submitted_with_its_waits() {
     let mut producer = sync_files.then(|| {
         BorrowedTarget::new(&mut backend, owned.ring(1, size), SyncKind::SyncFd).expect("a sync file producer")
     });
-    let mut target =
-        BorrowedTarget::new(&mut backend, owned.ring(2, size), SyncKind::CpuComplete).expect("a ring of 8x8 images");
+    let kind = if timelines { SyncKind::VulkanTimelineSemaphore } else { SyncKind::CpuComplete };
+    let mut target = BorrowedTarget::new(&mut backend, owned.ring(2, size), kind).expect("a ring of 8x8 images");
     let gpu = backend.gpu();
     let timeline = timelines.then(|| owned.timeline());
 
@@ -278,8 +262,10 @@ fn a_frame_drawn_and_not_ended_is_submitted_with_its_waits() {
         target.release(gpu, 0, consumer).unwrap();
         target.select(0);
         draw_without_ending(&mut target, gpu);
-        let in_flight = target.replace(gpu, owned.ring(2, size)).expect("new images");
-        wait_for(&in_flight, gpu);
+        let sync = target.replace(gpu, owned.ring(2, size)).expect("new images");
+        if timelines {
+            owned.wait_for(sync);
+        }
     }
 
     if let Some(timeline) = timeline {
@@ -288,49 +274,42 @@ fn a_frame_drawn_and_not_ended_is_submitted_with_its_waits() {
         target.release(gpu, 0, timeline_sync(timeline, 1)).unwrap();
         target.select(0);
         draw_without_ending(&mut target, gpu);
-        let in_flight = target.replace(gpu, owned.ring(2, size)).expect("new images");
-        assert!(
-            !in_flight.finished(gpu).expect("the work failed"),
-            "the replacement's frame ran before the host's reads"
-        );
+        let sync = target.replace(gpu, owned.ring(2, size)).expect("new images");
+        assert!(!owned.reached(sync), "the replacement's frame ran before the host's reads");
         owned.signal(timeline, 1);
-        wait_for(&in_flight, gpu);
+        owned.wait_for(sync);
 
         // Both slots go back with a value that the host never signals, and a
-        // frame begins on slot 1 without drawing: the replacement waits for
-        // neither.
+        // frame begins on slot 1 without drawing: the replacement's work
+        // waits for neither.
         target.release(gpu, 0, timeline_sync(timeline, 10)).unwrap();
         target.release(gpu, 1, timeline_sync(timeline, 10)).unwrap();
         target.select(1);
         target.begin_frame(gpu).expect("a frame");
-        let in_flight = target.replace(gpu, owned.ring(2, size)).expect("new images");
-        wait_for(&in_flight, gpu);
+        let sync = target.replace(gpu, owned.ring(2, size)).expect("new images");
+        owned.wait_for(sync);
 
-        // Work of the host's queued after the ring's frame, on the queue
-        // that they share, waits for a value that the host signals only once
-        // the replacement completed: the replacement waits for the ring's
-        // work alone.
+        // Release with a frame drawn at slot 0 that waits for a timeline,
+        // which the host signals only once the release returned, then new
+        // images after it.
         target.release(gpu, 0, timeline_sync(timeline, 2)).unwrap();
         target.select(0);
         draw_without_ending(&mut target, gpu);
+        let sync = target.release_textures(gpu).expect("a release");
+        assert!(!owned.reached(sync), "the release's frame ran before the host's reads");
         owned.signal(timeline, 2);
-        mln_gfx::gpu::Gpu::flush(gpu, false).unwrap();
-        owned.queue_host_work(timeline, 3);
-        let in_flight = target.replace(gpu, owned.ring(2, size)).expect("new images");
-        // The host's work waits on the queue until the signal, so a
-        // replacement that waited for it fails here instead of hanging the
-        // cleanup.
-        let finished = finishes(&in_flight, gpu);
-        owned.signal(timeline, 3);
-        assert!(finished, "the replacement waited for the host's work");
+        owned.wait_for(sync);
+        target.tear_down(gpu);
+        target = BorrowedTarget::new(&mut backend, owned.ring(2, size), kind).expect("a ring of 8x8 images");
     }
+    let gpu = backend.gpu();
 
     // Tear-down with a frame drawn at slot 1, which waits for a timeline that
     // the host signals only once the tear-down returned, where the device
     // takes them, and otherwise a sync file.
     let signaled_after = if let Some(timeline) = timeline {
-        target.release(gpu, 1, timeline_sync(timeline, 4)).unwrap();
-        Some((timeline, 4))
+        target.release(gpu, 1, timeline_sync(timeline, 3)).unwrap();
+        Some((timeline, 3))
     } else {
         #[cfg(unix)]
         if let Some(producer) = &mut producer {
@@ -342,16 +321,10 @@ fn a_frame_drawn_and_not_ended_is_submitted_with_its_waits() {
     };
     target.select(1);
     draw_without_ending(&mut target, gpu);
-    let in_flight = target.in_flight(gpu);
     target.tear_down(gpu);
     if let Some((timeline, value)) = signaled_after {
-        assert!(
-            !in_flight.finished(gpu).expect("the work failed"),
-            "the tear-down's frame ran before the host's reads"
-        );
         owned.signal(timeline, value);
     }
-    wait_for(&in_flight, gpu);
     #[cfg(unix)]
     if let Some(mut producer) = producer {
         producer.tear_down(gpu);

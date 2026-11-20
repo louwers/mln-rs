@@ -65,7 +65,8 @@ fn host_texture(name: u32) -> Result<glow::NativeTexture, Error> {
 
 /// Frames drawn into the host's textures, each given back to the host.
 pub struct BorrowedTarget {
-    textures: BorrowedTextures,
+    /// `None` once the target let go of them.
+    textures: Option<BorrowedTextures>,
     /// Each slot's textures, imported into the backend's `GlGpu` at the
     /// first frame drawn into the slot, until the ring's textures are
     /// replaced or the target goes, so that the `GlGpu` keeps the slot's
@@ -82,6 +83,11 @@ pub struct BorrowedTarget {
     /// The fence of each slot's last frame, which the host may wait on
     /// until it gives the slot back.
     fences: Vec<Option<glow::NativeFence>>,
+    /// The fence of the last release or replacement of the textures, until
+    /// the next one or the target goes.
+    handed: Option<glow::NativeFence>,
+    /// How many textures the ring has.
+    depth: usize,
 }
 
 impl BorrowedTarget {
@@ -98,19 +104,21 @@ impl BorrowedTarget {
         textures.check()?;
         let depth = textures.textures.len();
         Ok(BorrowedTarget {
-            textures,
+            textures: Some(textures),
             imports: vec![None; depth],
             begun: None,
             depth_stencil: None,
             selected: 0,
             producer,
             fences: vec![None; depth],
+            handed: None,
+            depth,
         })
     }
 
     /// How many textures the ring has.
     pub(crate) fn depth(&self) -> usize {
-        self.textures.textures.len()
+        self.depth
     }
 
     /// Has the next frame draw into the texture at `slot`.
@@ -170,28 +178,72 @@ impl BorrowedTarget {
     }
 
     /// Draws into `textures` from now on, which must be as many, with depth
-    /// textures when the ring has them.
+    /// textures when the ring has them. Returns the sync after which the
+    /// host may use the old textures, as
+    /// [`release_textures`](Self::release_textures) does.
     ///
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for
-    /// another number of textures, and with
+    /// another number of textures, with
     /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) for depth textures
-    /// where the ring had none, or none where it had them.
-    pub fn replace(&mut self, gpu: &mut GlGpu, textures: BorrowedTextures) -> Result<(), Error> {
+    /// where the ring had none, or none where it had them, with
+    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) once the target let
+    /// go of its textures, and as [`release_textures`](Self::release_textures)
+    /// does. The target then keeps its textures.
+    pub fn replace(&mut self, gpu: &mut GlGpu, textures: BorrowedTextures) -> Result<GpuSync, Error> {
+        let Some(current) = &self.textures else {
+            return Err(Error::invalid_state("the ring let go of its textures"));
+        };
         if textures.textures.len() != self.depth() {
             return Err(Error::invalid_argument("a ring keeps its depth"));
         }
         textures.check()?;
-        if textures.depth_textures.is_empty() != self.textures.depth_textures.is_empty() {
+        if textures.depth_textures.is_empty() != current.depth_textures.is_empty() {
             return Err(Error::unsupported("a ring keeps its depth textures, or its lack of them"));
         }
+        let sync = self.end_work(gpu)?;
+        self.textures = Some(textures);
+        Ok(sync)
+    }
+
+    /// Lets go of the textures, and returns the sync after which the host
+    /// may use them, of the producer's kind. The target keeps the fence
+    /// that the sync names until its next release or replacement of
+    /// textures, or until it goes, and draws no frame until then.
+    ///
+    /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) once the
+    /// target let go of its textures, and with
+    /// [`ErrorKind::Native`](mln_util::ErrorKind) when it can't make the
+    /// fence, or finish its work for [`SyncKind::CpuComplete`]. It keeps
+    /// its textures then.
+    pub fn release_textures(&mut self, gpu: &mut GlGpu) -> Result<GpuSync, Error> {
+        if self.textures.is_none() {
+            return Err(Error::invalid_state("the ring let go of its textures"));
+        }
+        let sync = self.end_work(gpu)?;
+        self.textures = None;
+        Ok(sync)
+    }
+
+    /// Forgets the slots' fences and imports, and a frame begun on the
+    /// textures, and returns the sync that ends the context's commands so
+    /// far.
+    fn end_work(&mut self, gpu: &mut GlGpu) -> Result<GpuSync, Error> {
         for slot in 0..self.depth() {
             self.delete_fence(gpu, slot);
         }
-        // A frame begun on the old ring draws into the new one.
         self.begun = None;
         self.forget_imports(gpu);
-        self.textures = textures;
-        Ok(())
+        if let Some(fence) = self.handed.take() {
+            gpu.delete_sync(fence);
+        }
+        if self.producer == SyncKind::OpenGlFence {
+            let fence =
+                gpu.fence_sync().map_err(|error| Error::native(format!("Making a ring's fence failed: {error}")))?;
+            self.handed = Some(fence);
+            return Ok(GpuSync { kind: SyncKind::OpenGlFence, handle: fence.0 as usize as u64, value: 0 });
+        }
+        gpu.flush(true).map_err(|error| Error::native(format!("Finishing a ring's frames failed: {error}")))?;
+        Ok(GpuSync::of(SyncKind::CpuComplete))
     }
 }
 
@@ -212,7 +264,7 @@ impl BorrowedTarget {
     /// imported into `gpu` or the target's own, and whether the depth is
     /// imported.
     fn import(&mut self, gpu: &mut GlGpu, slot: usize) -> Result<(FrameImage, bool), Error> {
-        let textures = &self.textures;
+        let textures = self.textures.as_ref().ok_or_else(|| Error::invalid_state("the ring let go of its textures"))?;
         let size = textures.size;
         let desc = |label, format| TextureDesc {
             label,
@@ -263,7 +315,7 @@ impl FrameTarget for BorrowedTarget {
         // first, only once the context applies a change of framebuffer,
         // which it does at its next draw or clear. Without that, radeonsi
         // hands the host's context the compressed data of its depth texture.
-        if !self.textures.depth_textures.is_empty() {
+        if self.textures.as_ref().is_some_and(|textures| !textures.depth_textures.is_empty()) {
             let mut current = gpu.enter();
             let (gl, state) = current.context_mut().parts();
             state.bind_framebuffer(gl, None);
@@ -289,6 +341,9 @@ impl FrameTarget for BorrowedTarget {
     fn tear_down(&mut self, gpu: &mut GlGpu) {
         for slot in 0..self.depth() {
             self.delete_fence(gpu, slot);
+        }
+        if let Some(fence) = self.handed.take() {
+            gpu.delete_sync(fence);
         }
         self.forget_imports(gpu);
     }

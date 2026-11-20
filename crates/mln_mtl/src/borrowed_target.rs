@@ -7,7 +7,6 @@
 use std::convert::Infallible;
 use std::ffi::c_void;
 use std::ptr::NonNull;
-use std::sync::Arc;
 
 use mln_gfx::gpu::{GpuError, TargetFormats, TextureFormat, TextureId};
 use mln_gfx::ring::{self, RingBackend, RingTextures};
@@ -24,7 +23,7 @@ use objc2_metal::{
 
 use crate::Id;
 use crate::device::Device;
-use crate::gpu::{Completion, MetalGpu, texture_format};
+use crate::gpu::{MetalGpu, texture_format};
 use crate::renderer_backend::RendererBackend;
 
 /// A ring of the host's textures, all of `size` pixels, one pixel format and
@@ -190,9 +189,6 @@ const DEPTH_STENCIL: TextureFormat = TextureFormat::Depth32FloatStencil8;
 /// Frames drawn into the host's textures, each given back to the host.
 pub type BorrowedTarget = ring::BorrowedTarget<MetalRing>;
 
-/// The end of a ring's work on the textures that it let go of.
-pub type InFlight = ring::InFlight<MetalRing>;
-
 /// A [`BorrowedTarget`]'s part on Metal: the shared event that its frames
 /// signal, for a shared event producer.
 pub struct MetalRing {
@@ -208,8 +204,6 @@ impl RingBackend for MetalRing {
     /// The host's shared event, and the value its reads reach.
     type Wait = (SharedEvent, u64);
     type Handed = Infallible;
-    /// The last committed command buffer's completion.
-    type Fence = Arc<Completion>;
 
     /// Fails as [`BorrowedTextures::check`] does, with
     /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a producer kind
@@ -313,15 +307,5 @@ impl RingBackend for MetalRing {
         let event = self.event.as_ref()?;
         let handle = Retained::as_ptr(event) as usize as u64;
         Some((GpuSync { kind: SyncKind::MetalSharedEvent, handle, value: self.event_value }, None))
-    }
-
-    /// The command buffers committed so far: a frame's commands that wait
-    /// for the host's event can still draw into its texture until they run.
-    fn submitted(gpu: &MetalGpu) -> Option<Arc<Completion>> {
-        gpu.last_submit()
-    }
-
-    fn finished(_: &mut MetalGpu, fence: &Arc<Completion>) -> Result<bool, GpuError> {
-        Ok(fence.is_done())
     }
 }

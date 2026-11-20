@@ -211,9 +211,11 @@ MLN_API mln_status mln_map_attach(
  * borrowed ring takes only a ring of the kind it attached with, with as many
  * textures, with depth textures only when it attached with them, and with the
  * same formats, final layouts, and owner. Release every acquired frame of a
- * borrowed ring first. Once the replacement completes, the session is also
- * done with the textures that the new ring doesn't have and with their
- * consumer syncs, as mln_render_session_release_target() says.
+ * borrowed ring first. For a borrowed ring, the replacement completes with an
+ * mln_gpu_sync: wait for it before you reuse or destroy the textures that the
+ * new ring doesn't have, as mln_render_session_release_target() says. When it
+ * lets go of no textures, such as after a release, the sync is
+ * MLN_GPU_SYNC_CPU_COMPLETE. For another target, the completion has no value.
  *
  * Returns:
  * - MLN_STATUS_INVALID_ARGUMENT when a borrowed ring gets more or fewer
@@ -237,8 +239,12 @@ MLN_API mln_status mln_map_attach(
  *   the old ones in their formats, final layouts, or owner, or in having
  *   depth textures. Attach a new session instead.
  * - MLN_STATUS_NATIVE_ERROR when the library can't render to the new target.
+ *
+ * Lifetimes:
+ * The object that the sync names belongs to the session, as
+ * mln_render_session_release_target() says.
  */
-MLN_BINDING("execution=operation")
+MLN_BINDING("execution=operation;result=mln_gpu_sync;nullable=true")
 MLN_API mln_status mln_render_session_set_target(
   mln_render_session session, const mln_render_target* target,
   const mln_completion* completion, mln_diagnostic* out_diagnostic
@@ -556,17 +562,14 @@ MLN_API mln_status mln_render_session_resize(
  * you can destroy the old target. An Android or OpenHarmony window can go away
  * sooner, as mln_android_window_target and mln_ohos_window_target say.
  *
- * For a borrowed ring, a completed release also means that the session's GPU
- * work on the textures has finished and that it no longer uses the textures or
- * the consumer syncs that you released its frames with. Your own GPU work on
- * them is yours to finish before you reuse or destroy them. A frame that the
- * session drew into a texture after you released it waits for that release's
- * consumer sync, so signal it: the release completes after that frame. The
- * session checks its work without blocking a thread: keep servicing a session
- * driven by MLN_RENDER_DRIVER_CALLER_GRAPHICS_THREAD until the release
- * completes. The session keeps nothing of the released textures: a texture that
- * a later target gives it again is a new one, even one that you discarded a
- * frame of.
+ * For a borrowed ring, the release completes with an mln_gpu_sync of
+ * mln_render_session_capabilities.producer_sync_kind. Wait for it before you
+ * reuse or destroy the textures, as you wait for an acquired frame's producer
+ * sync. The session's GPU work on the textures, and its waits for the consumer
+ * syncs that you released its frames with, end there, so keep those syncs
+ * until then too. The session keeps nothing of the released textures: a
+ * texture that a later target gives it again is a new one, even one that you
+ * discarded a frame of. For another target, the completion has no value.
  *
  * Returns:
  * - MLN_STATUS_UNSUPPORTED when the session renders offscreen or into an
@@ -575,8 +578,16 @@ MLN_API mln_status mln_render_session_resize(
  * Completes with:
  * - MLN_STATUS_TARGET_LOST when the session loses its target before the
  *   release runs.
+ * - MLN_STATUS_NATIVE_ERROR when the session can't submit its work on a
+ *   borrowed ring's textures. It keeps them then.
+ *
+ * Lifetimes:
+ * The object that the sync names belongs to the session. It stays valid until
+ * the session's next release or replacement of its target completes, until a
+ * detach or release of the session completes, or until an abandon of it
+ * returns.
  */
-MLN_BINDING("execution=operation")
+MLN_BINDING("execution=operation;result=mln_gpu_sync;nullable=true")
 MLN_API mln_status mln_render_session_release_target(
   mln_render_session session, const mln_completion* completion,
   mln_diagnostic* out_diagnostic
