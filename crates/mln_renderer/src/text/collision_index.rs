@@ -6,7 +6,6 @@ use mln_style_types::IconOverlapType;
 use mln_tile_id::geometry_tile_data::GeometryCoordinates;
 use mln_util::constants::EXTENT;
 use mln_util::geo::ScreenLineString;
-use mln_util::grid_index::{BBox, GridIndex};
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::intersection_tests::polygon_intersects_polygon;
 
@@ -15,7 +14,8 @@ use crate::geometry::feature_index::IndexedSubfeature;
 use crate::layout::symbol_projection::{
     LabelPlaneProjector, LineProjectionCache, PlacedGlyph, TileDistance, place_first_and_last_glyph, tile_skew_vectors,
 };
-use crate::text::collision_feature::{CollisionBox, CollisionFeature, ProjectedCollisionBox};
+use crate::text::collision_feature::{CollisionBox, CollisionFeature};
+use crate::text::collision_grid::{Aabb, Grid, Shape};
 
 /// A box's edges: [x1, y1, x2, y2].
 pub(crate) type CollisionBoundaries = [f32; 4];
@@ -33,7 +33,7 @@ impl IntersectStatus {
     pub(crate) const VERTICAL_BORDERS: u8 = 1 << 1;
 }
 
-pub(crate) type CollisionGrid = GridIndex<IndexedSubfeature>;
+pub(crate) type CollisionGrid = Grid<IndexedSubfeature>;
 
 /// How a symbol's text or icon may overlap the symbols placed before it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -189,13 +189,14 @@ impl CollisionIndex {
         let height = size.height as f32;
         let grid_width = width + 2.0 * viewport_padding;
         let grid_height = height + 2.0 * viewport_padding;
+        let grid_size = Vec2::new(grid_width, grid_height);
         let reset = |mut grid: CollisionGrid| {
-            grid.reset(grid_width, grid_height, 25);
+            grid.reset(grid_size, 25.0);
             grid
         };
         let (collision_grid, ignored_grid) = match previous {
             Some(previous) => (reset(previous.collision_grid), reset(previous.ignored_grid)),
-            None => (CollisionGrid::new(grid_width, grid_height, 25), CollisionGrid::new(grid_width, grid_height, 25)),
+            None => (CollisionGrid::new(grid_size, 25.0), CollisionGrid::new(grid_size, 25.0)),
         };
         CollisionIndex {
             view: view.clone(),
@@ -332,7 +333,7 @@ impl CollisionIndex {
         boxes: &[CollisionBox],
         run: &LabelRun<'_>,
         shift: Option<Vec2>,
-        projected_boxes: &mut Vec<ProjectedCollisionBox>,
+        projected_boxes: &mut Vec<Option<Shape>>,
     ) -> PlacedFeatureResult {
         debug_assert_eq!(projected_boxes.as_slice(), []);
         if feature.along_line {
@@ -362,15 +363,13 @@ impl CollisionIndex {
             )
         };
         let [x1, y1, x2, y2] = collision_boundaries;
-        let projected_collision_box = ProjectedCollisionBox::new_box(x1, y1, x2, y2);
-        projected_boxes.push(projected_collision_box);
+        let projected_collision_box = Shape::Box(Aabb::new(Vec2::new(x1, y1), Vec2::new(x2, y2)));
+        projected_boxes.push(Some(projected_collision_box));
         if occluded
             || projected_point.perspective_ratio < PERSPECTIVE_RATIO_CUTOFF
             || part.avoid_edges.is_some_and(|edges| !Self::is_inside_tile(&collision_boundaries, edges))
             || !self.is_inside_grid(&collision_boundaries)
-            || self.collides(part.overlap_mode, part.collision_group, |grid, predicate| {
-                grid.hit_test(projected_collision_box.box_(), predicate)
-            })
+            || self.collides(part.overlap_mode, part.collision_group, &projected_collision_box)
         {
             return PlacedFeatureResult { placed: false, offscreen: false, occluded };
         }
@@ -383,7 +382,7 @@ impl CollisionIndex {
         part: &PartCollision<'_>,
         boxes: &[CollisionBox],
         run: &LabelRun<'_>,
-        projected_boxes: &mut Vec<ProjectedCollisionBox>,
+        projected_boxes: &mut Vec<Option<Shape>>,
     ) -> PlacedFeatureResult {
         let symbol = run.symbol;
         let tile_unit_anchor_point = symbol.anchor_point;
@@ -448,7 +447,7 @@ impl CollisionIndex {
             (reach(&first), reach(&last))
         }) else {
             // The label doesn't fit on its line.
-            projected_boxes.resize(boxes.len(), ProjectedCollisionBox::default());
+            projected_boxes.resize(boxes.len(), None);
             return PlacedFeatureResult { placed: false, offscreen: true, occluded: false };
         };
         let used = |circle: &CollisionBox| {
@@ -459,7 +458,7 @@ impl CollisionIndex {
         let mut in_grid = false;
         let mut entirely_offscreen = true;
         let mut previous_center: Option<Vec2> = None;
-        projected_boxes.resize(boxes.len(), ProjectedCollisionBox::default());
+        projected_boxes.resize(boxes.len(), None);
         for (i, circle) in boxes.iter().enumerate() {
             if !used(circle) {
                 // The label doesn't reach this far.
@@ -483,14 +482,13 @@ impl CollisionIndex {
             previous_center = Some(center);
 
             let collision_boundaries = [center.x - radius, center.y - radius, center.x + radius, center.y + radius];
-            projected_boxes[i] = ProjectedCollisionBox::new_circle(center.x, center.y, radius);
+            let circle = Shape::Circle { center, radius };
+            projected_boxes[i] = Some(circle);
             entirely_offscreen &= self.is_offscreen(&collision_boundaries);
             in_grid |= self.is_inside_grid(&collision_boundaries);
 
             if part.avoid_edges.is_some_and(|edges| !Self::is_inside_tile(&collision_boundaries, edges))
-                || self.collides(part.overlap_mode, part.collision_group, |grid, predicate| {
-                    grid.hit_test_circle(projected_boxes[i].circle(), predicate)
-                })
+                || self.collides(part.overlap_mode, part.collision_group, &circle)
             {
                 // Debug drawing shows which circles are used, so it keeps
                 // going.
@@ -506,59 +504,34 @@ impl CollisionIndex {
 
     /// Whether a box placed with `overlap_mode` collides with a symbol in the
     /// grid, where `hit_test` tests the grid with a predicate.
-    fn collides(
-        &self,
-        overlap_mode: OverlapMode,
-        collision_group: Option<u16>,
-        hit_test: impl FnOnce(&CollisionGrid, Option<&dyn Fn(&IndexedSubfeature) -> bool>) -> bool,
-    ) -> bool {
-        let in_group =
-            |feature: &IndexedSubfeature| collision_group.is_none_or(|group| feature.collision_group_id == group);
+    /// Whether `shape`, placed with `overlap_mode`, collides with a symbol in
+    /// the grid of `collision_group`, or of any group without one.
+    fn collides(&self, overlap_mode: OverlapMode, collision_group: Option<u16>, shape: &Shape) -> bool {
+        let in_group = |feature: &IndexedSubfeature| collision_group.is_none_or(|group| feature.collision_group_id == group);
         match overlap_mode {
-            OverlapMode::Never if collision_group.is_none() => hit_test(&self.collision_grid, None),
-            OverlapMode::Never => hit_test(&self.collision_grid, Some(&in_group)),
+            OverlapMode::Never => self.collision_grid.any(shape, in_group),
             OverlapMode::Always => false,
-            OverlapMode::Cooperative => hit_test(
-                &self.collision_grid,
-                Some(&|feature: &IndexedSubfeature| feature.overlap_mode == OverlapMode::Never && in_group(feature)),
-            ),
+            OverlapMode::Cooperative => {
+                self.collision_grid.any(shape, |feature| feature.overlap_mode == OverlapMode::Never && in_group(feature))
+            }
         }
     }
 
     pub(crate) fn insert_feature(
         &mut self,
         feature: &CollisionFeature,
-        projected_boxes: &[ProjectedCollisionBox],
+        projected_boxes: &[Option<Shape>],
         overlap_mode: OverlapMode,
         ignore_placement: bool,
         bucket_instance_id: u32,
         collision_group_id: u16,
     ) {
-        if feature.along_line {
-            for circle in projected_boxes {
-                if !circle.is_circle() {
-                    continue;
-                }
-
-                let subfeature =
-                    indexed_subfeature(&feature.indexed_feature, overlap_mode, bucket_instance_id, collision_group_id);
-                if ignore_placement {
-                    self.ignored_grid.insert_circle(subfeature, circle.circle());
-                } else {
-                    self.collision_grid.insert_circle(subfeature, circle.circle());
-                }
-            }
-        } else if !projected_boxes.is_empty() {
-            debug_assert_eq!(projected_boxes.len(), 1);
-            let box_ = &projected_boxes[0];
-            debug_assert!(box_.is_box());
+        debug_assert!(feature.along_line || projected_boxes.len() <= 1);
+        let grid = if ignore_placement { &mut self.ignored_grid } else { &mut self.collision_grid };
+        for shape in projected_boxes.iter().flatten() {
             let subfeature =
                 indexed_subfeature(&feature.indexed_feature, overlap_mode, bucket_instance_id, collision_group_id);
-            if ignore_placement {
-                self.ignored_grid.insert(subfeature, box_.box_());
-            } else {
-                self.collision_grid.insert(subfeature, box_.box_());
-            }
+            grid.insert(subfeature, *shape);
         }
     }
 
@@ -567,7 +540,7 @@ impl CollisionIndex {
         query_geometry: &ScreenLineString,
     ) -> HashMap<u32, Vec<IndexedSubfeature>> {
         let mut result: HashMap<u32, Vec<IndexedSubfeature>> = HashMap::default();
-        if query_geometry.is_empty() || (self.collision_grid.empty() && self.ignored_grid.empty()) {
+        if query_geometry.is_empty() || (self.collision_grid.is_empty() && self.ignored_grid.is_empty()) {
             return result;
         }
 
@@ -577,32 +550,29 @@ impl CollisionIndex {
         }
 
         // The bounding box of the query in the grid.
-        let mut envelope = BBox::new(grid_query[0], grid_query[0]);
+        let mut envelope = Aabb::new(Vec2::INFINITY, Vec2::NEG_INFINITY);
         for point in &grid_query {
-            envelope.min.x = envelope.min.x.min(point.x);
-            envelope.min.y = envelope.min.y.min(point.y);
-            envelope.max.x = envelope.max.x.max(point.x);
-            envelope.max.y = envelope.max.y.max(point.y);
+            let point = Vec2::new(point.x, point.y);
+            envelope.min = envelope.min.min(point);
+            envelope.max = envelope.max.max(point);
         }
+        let envelope = Shape::Box(envelope);
 
-        let mut features = self.collision_grid.query_with_boxes(&envelope);
-        let ignored_features = self.ignored_grid.query_with_boxes(&envelope);
-        features.extend(ignored_features);
-
+        let features = self.collision_grid.query(&envelope).chain(self.ignored_grid.query(&envelope));
         let mut seen_buckets: HashMap<u32, HashSet<usize>> = HashMap::default();
-        for (feature, bbox) in features {
+        for (feature, shape) in features {
             // Skip already seen features.
             let seen_features = seen_buckets.entry(feature.bucket_instance_id).or_default();
             if seen_features.contains(&feature.index) {
                 continue;
             }
 
-            if !polygon_intersects_box(&grid_query, &bbox) {
+            if !polygon_intersects_box(&grid_query, &shape.bounds()) {
                 continue;
             }
 
             seen_features.insert(feature.index);
-            result.entry(feature.bucket_instance_id).or_default().push(feature);
+            result.entry(feature.bucket_instance_id).or_default().push(feature.clone());
         }
 
         result
@@ -794,7 +764,7 @@ fn transform(pos_matrix: &DMat4, point: Vec2) -> DVec4 {
     *pos_matrix * DVec4::new(f64::from(point.x), f64::from(point.y), 0.0, 1.0)
 }
 
-fn polygon_intersects_box(polygon: &[Point<f32>], bbox: &BBox) -> bool {
+fn polygon_intersects_box(polygon: &[Point<f32>], bbox: &Aabb) -> bool {
     // The integer polygon test, whose conversion limits the query's accuracy
     // to a pixel.
     let mut integer_polygon = GeometryCoordinates::new();
@@ -848,13 +818,13 @@ mod tests {
     }
 
     fn insert(index: &mut CollisionIndex, overlap_mode: OverlapMode, collision_group_id: u16) {
-        let projected = [ProjectedCollisionBox::new_box(100.0, 100.0, 200.0, 200.0)];
+        let projected = [Some(Shape::Box(Aabb::new(Vec2::splat(100.0), Vec2::splat(200.0))))];
         index.insert_feature(&feature(0), &projected, overlap_mode, false, 1, collision_group_id);
     }
 
     fn collides(index: &CollisionIndex, overlap_mode: OverlapMode, group: Option<u16>) -> bool {
-        let projected = ProjectedCollisionBox::new_box(150.0, 150.0, 250.0, 250.0);
-        index.collides(overlap_mode, group, |grid, predicate| grid.hit_test(projected.box_(), predicate))
+        let projected = Shape::Box(Aabb::new(Vec2::splat(150.0), Vec2::splat(250.0)));
+        index.collides(overlap_mode, group, &projected)
     }
 
     #[test]

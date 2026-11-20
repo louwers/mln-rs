@@ -12,7 +12,6 @@
 "crates/mln_renderer/src/layers/render_symbol_layer.rs" = 1
 "crates/mln_renderer/src/layout/symbol_instance.rs" = 1
 "crates/mln_renderer/src/layout/symbol_layout.rs" = 3
-"crates/mln_renderer/src/text/collision_feature.rs" = 2
 "crates/mln_renderer/src/text/collision_index.rs" = 2
 "crates/mln_renderer/src/text/placement.rs" = 6
 "crates/mln_sprite/src/sprite_parser.rs" = 1

@@ -22,7 +22,7 @@ use mln_style::TransitionOptions;
 use mln_style_types::{SymbolAnchorType, TextWritingModeType};
 use mln_tile_id::OverscaledTileID;
 use mln_util::constants::DEFAULT_TRANSITION_DURATION;
-use mln_util::grid_index::BBox;
+use crate::text::collision_grid::Aabb;
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::time::Instant;
 
@@ -32,7 +32,7 @@ use crate::geometry::feature_index::FeatureIndex;
 use crate::layer_drawing::{BucketChanges, ChangedBuckets};
 use crate::layout::symbol_instance::SymbolInstance;
 use crate::render_layer::{BucketKey, BucketPlacementData, RenderLayer, SymbolBuckets};
-use crate::text::collision_feature::ProjectedCollisionBox;
+use crate::text::collision_grid::Shape;
 use crate::text::collision_index::CollisionIndex;
 use crate::update_parameters::UpdateParameters;
 
@@ -148,9 +148,9 @@ pub struct PlacedSymbolData {
     /// Contents of the label
     pub key: String,
     /// If symbol contains text, text collision box in viewport coordinates
-    pub text_collision_box: Option<BBox>,
+    pub text_collision_box: Option<Aabb>,
     /// If symbol contains icon, icon collision box in viewport coordinates
-    pub icon_collision_box: Option<BBox>,
+    pub icon_collision_box: Option<Aabb>,
     /// Symbol text was placed
     pub text_placed: bool,
     /// Symbol icon was placed
@@ -382,10 +382,10 @@ pub(crate) struct Placement {
 
     /// The projected boxes of the symbol being placed, kept between
     /// symbols for their allocations.
-    text_boxes: Vec<ProjectedCollisionBox>,
-    icon_boxes: Vec<ProjectedCollisionBox>,
+    text_boxes: Vec<Option<Shape>>,
+    icon_boxes: Vec<Option<Shape>>,
     /// The projected circles of line labels, for debug drawing.
-    collision_circles: HashMap<CircleKey, Vec<ProjectedCollisionBox>>,
+    collision_circles: HashMap<CircleKey, Vec<Option<Shape>>>,
 }
 
 impl Placement {

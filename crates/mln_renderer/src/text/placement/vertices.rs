@@ -165,7 +165,7 @@ impl Placement {
                     if let Some(circles) = self.collision_circles.get(&key) {
                         for circle in circles {
                             let vertex =
-                                SymbolBucket::collision_dynamic_vertex(placed, !circle.is_circle(), Vec2::ZERO);
+                                SymbolBucket::collision_dynamic_vertex(placed, circle.is_none(), Vec2::ZERO);
                             extend(&mut buffer.dynamic_vertices, 4, vertex);
                         }
                     } else {

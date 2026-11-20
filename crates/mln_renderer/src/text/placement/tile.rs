@@ -17,6 +17,7 @@ use crate::buckets::symbol_bucket::SymbolBucket;
 use crate::layout::symbol_instance::SymbolInstance;
 use crate::render_layer::{BucketKey, SymbolBuckets};
 use crate::text::collision_feature::CollisionBox;
+use crate::text::collision_grid::Shape;
 use crate::text::collision_index::{CollisionBoundaries, IntersectStatus, OverlapMode};
 
 /// What a tile placement keeps besides the placement's own state.
@@ -136,9 +137,12 @@ impl Placement {
             return;
         }
         // A point symbol's part has one box.
-        let first_box = |boxes: &[crate::text::collision_feature::ProjectedCollisionBox]| {
-            debug_assert!(boxes.len() <= 1);
-            boxes.first().map(|projected| *projected.box_())
+        let first_box = |shapes: &[Option<Shape>]| {
+            debug_assert!(shapes.len() <= 1);
+            match shapes.first() {
+                Some(Some(Shape::Box(aabb))) => Some(*aabb),
+                _ => None,
+            }
         };
         let text_collision_box = first_box(&self.text_boxes);
         let icon_collision_box = first_box(&self.icon_boxes);

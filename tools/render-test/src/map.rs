@@ -166,7 +166,7 @@ impl TestRunnerImpl for Impl {
     }
 
     fn get_placed_symbols_data(&mut self) -> Vec<crate::runner::PlacedSymbol> {
-        let to_box = |b: &mln_util::grid_index::BBox| [b.min.x, b.min.y, b.max.x, b.max.y];
+        let to_box = |b: &mln_renderer::text::Aabb| [b.min.x, b.min.y, b.max.x, b.max.y];
         self.frontend
             .renderer()
             .placed_symbols_data()

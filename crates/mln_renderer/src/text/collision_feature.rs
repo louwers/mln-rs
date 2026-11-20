@@ -1,89 +1,13 @@
-use geometry::Point;
 use glam::Vec2;
 use mln_math::deg2radf;
 use mln_text::PositionedIcon;
 use mln_text::glyph::Shaping;
 use mln_tile_id::geometry_tile_data::GeometryCoordinate;
 use mln_util::Padding;
-use mln_util::grid_index::{BBox, BCircle};
 
 use crate::geometry::anchor::{Anchor, segments, vertex_behind};
 use crate::geometry::feature_index::IndexedSubfeature;
 use crate::util::pool::PoolRange;
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) enum ProjectedCollisionBoxType {
-    #[default]
-    Unknown,
-    Box,
-    Circle,
-}
-
-/// A projected collision box or circle.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub(crate) struct ProjectedCollisionBox {
-    geometry: ProjectedCollisionBoxGeometry,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-enum ProjectedCollisionBoxGeometry {
-    #[default]
-    Unknown,
-    Box(BBox),
-    Circle(BCircle),
-}
-
-impl ProjectedCollisionBox {
-    #[must_use]
-    pub(crate) fn new_box(x1: f32, y1: f32, x2: f32, y2: f32) -> Self {
-        ProjectedCollisionBox {
-            geometry: ProjectedCollisionBoxGeometry::Box(BBox::new(Point::new(x1, y1), Point::new(x2, y2))),
-        }
-    }
-
-    #[must_use]
-    pub(crate) fn new_circle(x: f32, y: f32, r: f32) -> Self {
-        ProjectedCollisionBox { geometry: ProjectedCollisionBoxGeometry::Circle(BCircle::new(Point::new(x, y), r)) }
-    }
-
-    /// The box; panics if this is a circle.
-    #[must_use]
-    pub(crate) fn box_(&self) -> &BBox {
-        match &self.geometry {
-            ProjectedCollisionBoxGeometry::Box(b) => b,
-            _ => panic!("ProjectedCollisionBox::box: not a box"),
-        }
-    }
-
-    /// The circle; panics if this is a box.
-    #[must_use]
-    pub(crate) fn circle(&self) -> &BCircle {
-        match &self.geometry {
-            ProjectedCollisionBoxGeometry::Circle(c) => c,
-            _ => panic!("ProjectedCollisionBox::circle: not a circle"),
-        }
-    }
-
-    /// The `type` member.
-    #[must_use]
-    pub(crate) fn type_(&self) -> ProjectedCollisionBoxType {
-        match self.geometry {
-            ProjectedCollisionBoxGeometry::Unknown => ProjectedCollisionBoxType::Unknown,
-            ProjectedCollisionBoxGeometry::Box(_) => ProjectedCollisionBoxType::Box,
-            ProjectedCollisionBoxGeometry::Circle(_) => ProjectedCollisionBoxType::Circle,
-        }
-    }
-
-    #[must_use]
-    pub(crate) fn is_circle(&self) -> bool {
-        self.type_() == ProjectedCollisionBoxType::Circle
-    }
-
-    #[must_use]
-    pub(crate) fn is_box(&self) -> bool {
-        self.type_() == ProjectedCollisionBoxType::Box
-    }
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, mln_wire::Wire)]
 pub(crate) struct CollisionBox {
@@ -330,6 +254,8 @@ fn line_circles<'a>(
 
 #[cfg(test)]
 mod tests {
+    use geometry::Point;
+
     use super::*;
 
     #[test]

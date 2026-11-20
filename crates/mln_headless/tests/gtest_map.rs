@@ -2569,7 +2569,7 @@ fn keep_render_data() {
 #[test]
 #[ignore = "DISABLED_ in C++ (no symbol placement occurs in the MapTiler streets style fixture)"]
 fn disabled_placed_symbol_data() {
-    fn is_inside_tile(box_: &mln_util::grid_index::BBox, padding: f32, viewport_size: Size) -> bool {
+    fn is_inside_tile(box_: &mln_renderer::text::Aabb, padding: f32, viewport_size: Size) -> bool {
         if box_.min.x - padding < 0.0 {
             return false;
         }
