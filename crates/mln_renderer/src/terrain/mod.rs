@@ -27,13 +27,12 @@
 //! 3. The layers that drape (background, fill, line, hillshade, color
 //!    relief, and raster, an image source's too) make no draws in the
 //!    frame: they draw in each drape of their stack whose key changed
-//!    ([`RenderTerrain::begin_drapes`]). Every draped layer is in one stack.
-//!    The surface makes a draw per tile and stack
-//!    ([`RenderTerrain::update_draws`]).
+//!    ([`RenderTerrain::begin_drapes`]). The surface makes a draw per tile
+//!    and stack ([`RenderTerrain::update_draws`]).
 //! 4. The drapes draw into their textures before the frame's pass. The
-//!    frame clears to transparent, and its translucent pass draws the
-//!    surface after the globe's depth, then the layers that don't drape,
-//!    flat over it, with their layer depth off.
+//!    frame clears to transparent, and its translucent pass draws each
+//!    stack's surface where the stack's first layer draws, and the layers
+//!    that don't drape between the stacks, flat, with their layer depth off.
 //!
 //! # Contracts
 //!
@@ -58,9 +57,24 @@
 //!   DEM tiles it has, so a loaded frame draws each tile with its own. The
 //!   surface reads each DEM's bordered RGBA8 image texel by texel and
 //!   decodes it by the height rule of `mln_util::dem`, as the CPU does.
+//! - **The stacks** ([`DrapeStacks`]) are GL JS's: each a run of the
+//!   frame's layers that drape, ended by one of the frame's layers that
+//!   doesn't, such as a symbol, circle, heatmap, fill extrusion or custom
+//!   layer. A layer the frame doesn't draw, hidden or out of its zooms,
+//!   splits no stack. A style whose layers don't drape has no stack, and
+//!   then no drapes and no surface.
+//! - **The surface** draws once for each stack, its tiles nearest the
+//!   center first, testing and writing the 3D depth range with less or
+//!   equal and blending its drapes over what is under it. A stack above the
+//!   first draws where the first left the nearest ground. Where the first
+//!   stack's drape is translucent, a farther slope drawn before a nearer
+//!   one in the same draw shows through it, and skirts blend over the
+//!   neighbouring tiles, as in GL JS.
 //! - **The drapes** ([`Drapes`]): a texture for each drawn tile and stack,
 //!   which the stack's draped layers draw into with the map's camera,
-//!   through their own draw updates. A drape draws again only when its key
+//!   through their own draw updates. Each stack's drape of a tile keeps its
+//!   own key, so a change in one stack leaves the others' drapes as they
+//!   were. A drape draws again only when its key
 //!   differs from the one it was drawn from: its stack's layers' styles,
 //!   paint revisions and tiles, the overlapping tiles' buckets and
 //!   generations (an image source's bucket and quad, in each copy of the
@@ -107,6 +121,7 @@ mod drapes;
 mod draws;
 mod elevation;
 mod mesh;
+mod stacks;
 
 use std::sync::Arc;
 
@@ -125,6 +140,7 @@ use mln_util::dem::DemUnpack;
 use mln_util::geo::{LatLng, WrapMode};
 use mln_util::logging::{Event, Log};
 use mln_util::tileset::RasterEncoding;
+pub(crate) use stacks::DrapeStacks;
 
 use crate::gfx::context::Context;
 use crate::layer_drawing::ChangedBuckets;

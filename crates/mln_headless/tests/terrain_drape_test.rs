@@ -88,6 +88,45 @@ fn style(terrain: bool) -> String {
     )
 }
 
+/// A white map with a red square around the center, a green circle at the
+/// center, and a blue rectangle over the circle's east half, at an integer
+/// zoom, seen from above; with a terrain over flat ground if `terrain`. The
+/// circle splits the draped layers into two stacks.
+fn stacked_style(terrain: bool) -> String {
+    let terrain = if terrain { r#""terrain": {"source": "dem"},"# } else { "" };
+    format!(
+        r#"{{
+            "version": 8,
+            "center": [0, 0],
+            "zoom": 2,
+            {terrain}
+            "sources": {{
+                "dem": {{"type": "raster-dem", "tiles": ["dem/{{z}}/{{x}}/{{y}}.png"], "tileSize": 256, "maxzoom": 10}},
+                "red": {{
+                    "type": "geojson",
+                    "data": {{"type": "Polygon", "coordinates": [[[-8, -8], [8, -8], [8, 8], [-8, 8], [-8, -8]]]}}
+                }},
+                "point": {{"type": "geojson", "data": {{"type": "Point", "coordinates": [0, 0]}}}},
+                "blue": {{
+                    "type": "geojson",
+                    "data": {{"type": "Polygon", "coordinates": [[[-1, -5], [5, -5], [5, 5], [-1, 5], [-1, -5]]]}}
+                }}
+            }},
+            "layers": [
+                {{"id": "background", "type": "background", "paint": {{"background-color": "white"}}}},
+                {{"id": "red", "type": "fill", "source": "red", "paint": {{"fill-color": "red"}}}},
+                {{
+                    "id": "circle",
+                    "type": "circle",
+                    "source": "point",
+                    "paint": {{"circle-color": "lime", "circle-radius": 15, "circle-blur": 0}}
+                }},
+                {{"id": "blue", "type": "fill", "source": "blue", "paint": {{"fill-color": "blue"}}}}
+            ]
+        }}"#
+    )
+}
+
 /// The still image of `style` on WebGPU, the one backend with terrain's
 /// shaders yet, and the bytes of the textures that drew it; `None` without a
 /// WebGPU device.
@@ -159,5 +198,24 @@ fn a_flipped_viewport_shows_the_terrain() {
     assert_eq!([0, 0, 255, 255], pixel(&flipped, center, center + 57), "the line, south of the center");
     let differing =
         pixelmatch::pixelmatch(&flipped.data, &flat.data, SIDE as usize, SIDE as usize, None, 0.1285, false);
+    assert!(differing <= EDGE_PIXELS, "{differing} pixels differ from the map without terrain");
+}
+
+/// A circle between two fills stands between their stacks: the fill below
+/// shows under it, and the fill above covers it, as without terrain.
+#[test]
+fn a_circle_stands_between_two_stacks_of_draped_layers() {
+    let (Some((draped, _)), Some((flat, _))) =
+        (render(&stacked_style(true), ViewportMode::Default), render(&stacked_style(false), ViewportMode::Default))
+    else {
+        return;
+    };
+    let center = SIDE / 2;
+    assert_eq!([0, 0, 255, 255], pixel(&draped, center, center), "the blue fill over the circle's center");
+    // 1° is 5.7 px in the 2048 px of the world at zoom 2: the blue fill
+    // starts 6 px west of the center, and the circle reaches 15 px.
+    assert_eq!([0, 255, 0, 255], pixel(&draped, center - 11, center), "the circle west of the blue fill");
+    assert_eq!([255, 0, 0, 255], pixel(&draped, center - 30, center), "the red fill around the circle");
+    let differing = pixelmatch::pixelmatch(&draped.data, &flat.data, SIDE as usize, SIDE as usize, None, 0.1285, false);
     assert!(differing <= EDGE_PIXELS, "{differing} pixels differ from the map without terrain");
 }

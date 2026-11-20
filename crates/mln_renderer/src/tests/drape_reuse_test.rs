@@ -265,6 +265,13 @@ impl DrapedMap {
     /// Draws a frame, and returns whether everything it shows had loaded and
     /// the tiles of the drapes of the first stack it drew.
     fn frame(&mut self) -> (bool, BTreeSet<OverscaledTileID>) {
+        let (full, passes) = self.frame_passes();
+        (full, passes.into_iter().filter(|&(_, stack)| stack == 0).map(|(tile, _)| tile).collect())
+    }
+
+    /// Draws a frame, and returns whether everything it shows had loaded and
+    /// the tiles and stacks of the drapes it drew.
+    fn frame_passes(&mut self) -> (bool, BTreeSet<(OverscaledTileID, usize)>) {
         let parameters = Arc::new(self.update_parameters());
         let gpu = self.backend.gpu();
         let frame = self.renderer.update(gpu, &parameters).expect("a continuous map's frame");
@@ -284,7 +291,12 @@ impl DrapedMap {
         let passes = self.renderer.take_drape_passes();
         let unique: BTreeSet<(OverscaledTileID, usize)> = passes.iter().copied().collect();
         assert_eq!(unique.len(), passes.len(), "a drape drawn twice in a frame");
-        (full, unique.into_iter().filter(|&(_, stack)| stack == 0).map(|(tile, _)| tile).collect())
+        (full, unique)
+    }
+
+    /// The number of draws of the last frame.
+    fn draw_calls(&self) -> usize {
+        usize::try_from(self.renderer.rendering_stats().num_draw_calls).unwrap()
     }
 
     /// Draws frames until the renderer waits for nothing but the held tile,
@@ -349,8 +361,88 @@ fn a_map_of_one_stack_at_rest_draws_each_terrain_tile_once() {
     let (full, passes) = map.frame();
     assert!(full);
     assert!(passes.is_empty(), "drapes drawn again: {passes:?}");
-    let draw_calls = map.renderer.rendering_stats().num_draw_calls;
-    assert_eq!(drapes.len(), usize::try_from(draw_calls).unwrap());
+    assert_eq!(drapes.len(), map.draw_calls());
+}
+
+/// A layer of `json`, a style's, with its sources added to `map`'s style.
+fn add_layer(map: &mut DrapedMap, json: &str, before: Option<&str>) {
+    let parsed = Style::from_json(Registry::with_builtins().style(), json, None).expect("the style");
+    for source in parsed.get_sources().iter() {
+        map.edit(Edit::AddSource(crate::tests::ready(source.clone())));
+    }
+    let layer = parsed.get_layer_list().iter().next().expect("the layer").clone();
+    map.edit(Edit::AddLayer { layer, before: before.map(str::to_owned) });
+}
+
+/// A circle at one point, in the north-west drape's tile.
+const CIRCLE: &str = r#"{
+    "version": 8,
+    "sources": {
+        "point": {"type": "geojson", "data": {"type": "Point", "coordinates": [-75, 55]}}
+    },
+    "layers": [{"id": "circle", "type": "circle", "source": "point"}]
+}"#;
+
+/// [`STYLE`] with a circle under its line, which splits its layers into two
+/// stacks, settled, and its four drapes.
+fn two_stacks() -> (DrapedMap, BTreeSet<OverscaledTileID>) {
+    let (mut map, drapes) = settled(Tiles::default());
+    add_layer(&mut map, CIRCLE, Some("line"));
+    let both: BTreeSet<(OverscaledTileID, usize)> = drapes.iter().flat_map(|&tile| [(tile, 0), (tile, 1)]).collect();
+    let mut drawn = BTreeSet::new();
+    for _ in 0..1000 {
+        drawn.extend(map.frame_passes().1);
+        if drawn == both {
+            break;
+        }
+    }
+    assert_eq!(both, drawn, "both stacks' drapes drawn");
+    map.settle();
+    (map, drapes)
+}
+
+/// A map of two stacks at rest draws the surface once for each terrain tile
+/// and stack, and the circle between them.
+#[test]
+fn a_map_of_two_stacks_at_rest_draws_each_terrain_tile_once_a_stack() {
+    let (mut map, drapes) = two_stacks();
+    let (full, passes) = map.frame_passes();
+    assert!(full);
+    assert!(passes.is_empty(), "drapes drawn again: {passes:?}");
+    assert_eq!(2 * drapes.len() + 1, map.draw_calls());
+}
+
+/// A change of a layer in the second stack draws only that stack's drapes
+/// again.
+#[test]
+fn a_paint_change_in_a_stack_draws_only_its_drapes_again() {
+    let (mut map, drapes) = two_stacks();
+    map.edit(Edit::SetLayerProperty {
+        layer: "line".to_owned(),
+        name: "line-color".to_owned(),
+        value: serde_json::json!("green"),
+    });
+    let second: BTreeSet<(OverscaledTileID, usize)> = drapes.iter().map(|&tile| (tile, 1)).collect();
+    assert_eq!(second, map.frame_passes().1);
+    assert!(map.frame_passes().1.is_empty(), "the drapes are drawn again once only");
+}
+
+/// Without a draped layer, a map over terrain has no drape and draws no
+/// surface: only its circle.
+#[test]
+fn a_map_without_a_draped_layer_draws_no_surface() {
+    let (mut map, _) = settled(Tiles::default());
+    for layer in ["background", "raster", "fill", "line"] {
+        map.edit(Edit::RemoveLayer(layer.to_owned()));
+    }
+    add_layer(&mut map, CIRCLE, None);
+    let drawn = map.settle();
+    assert!(drawn.is_empty(), "drapes drawn: {drawn:?}");
+    let (full, passes) = map.frame_passes();
+    assert!(full);
+    assert!(passes.is_empty(), "drapes drawn: {passes:?}");
+    assert_eq!(4, map.drapes().len(), "terrain still covers the view");
+    assert_eq!(1, map.draw_calls());
 }
 
 #[test]

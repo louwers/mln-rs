@@ -38,11 +38,12 @@ use crate::line_atlas::LineAtlas;
 use crate::paint_parameters::PaintParameters;
 use crate::pattern_atlas::PatternAtlas;
 use crate::render_layer::{Atlases, FrameSourceTiles, LayerSource, LayerUpdateParameters, RenderLayer};
+use crate::render_pass::RenderPass;
 use crate::render_source::{self, RenderSource, RenderTileParameters, TileOrder};
 use crate::render_tile::{FoundTile, RenderTile};
 use crate::renderer_event::RendererEvent;
 use crate::sources::render_tile_source::{DebugLayer, DebugLayers};
-use crate::terrain::RenderTerrain;
+use crate::terrain::{DrapeStacks, RenderTerrain};
 use crate::text::glyph_store::GlyphStore;
 use crate::text::placement::{Placement, PlacementInputs};
 use crate::tile::contents::Contents;
@@ -193,6 +194,9 @@ pub(crate) struct RenderOrchestrator {
     globe_depth_pass: GlobeDepthPass,
     sky_pass: crate::sky_pass::SkyPass,
     terrain: RenderTerrain,
+    /// The frame's stacks of draped layers, whose surfaces the translucent
+    /// pass draws among the layers; none without terrain.
+    stacks: DrapeStacks,
 
     /// Last, so that it drops after the fields above: the render sources'
     /// tiles free their data on the thread pool (`drop_on_workers`).
@@ -253,6 +257,7 @@ impl RenderOrchestrator {
             globe_depth_pass: GlobeDepthPass::default(),
             sky_pass: crate::sky_pass::SkyPass::default(),
             terrain: RenderTerrain::default(),
+            stacks: DrapeStacks::default(),
             debug_layers: VecMap::new(),
         }
     }
@@ -1245,6 +1250,8 @@ impl RenderOrchestrator {
     /// Draws the pass's draws of the layers' draw groups into the open pass
     /// of `gpu`, the context's, in `order`, each at the depth of
     /// `parameters.current_layer`, which `order` steps after each group.
+    /// The translucent pass draws each stack's surface under the stack's
+    /// first layer, where it draws in the frame.
     pub(crate) fn render_draw_groups(
         &mut self,
         gpu: &mut dyn Gpu,
@@ -1252,6 +1259,15 @@ impl RenderOrchestrator {
         order: DrawOrder,
     ) {
         match order {
+            DrawOrder::BottomUp if parameters.pass == RenderPass::Translucent && !self.stacks.is_empty() => {
+                let mut starts = self.stacks.starts().enumerate().peekable();
+                for (index, layer) in self.layers.iter_mut().enumerate() {
+                    if let Some((stack, _)) = starts.next_if(|&(_, start)| start as usize == index) {
+                        self.terrain.render(stack, gpu, parameters);
+                    }
+                    layer.render(gpu, parameters, order);
+                }
+            }
             DrawOrder::BottomUp => {
                 for layer in &mut self.layers {
                     layer.render(gpu, parameters, order);
@@ -1325,7 +1341,6 @@ impl RenderOrchestrator {
     ) {
         let mut needs_globe_depth = false;
         let mut contents = SourceContents::default();
-        let mut draped: SmallVec<[u32; 16]> = SmallVec::new();
         for (&index, frame_layer) in &frame.layers {
             let render_layer = &mut self.layers[index as usize];
             let layer_source =
@@ -1333,35 +1348,46 @@ impl RenderOrchestrator {
             // Over terrain, a layer that drapes draws nothing onto the frame.
             if frame.terrain && render_layer.drapes() {
                 render_layer.remove_all_draws();
-                draped.push(index);
                 continue;
             }
             render_layer.update_draws(gpu, paint_parameters, &self.atlases, layer_source);
             needs_globe_depth = needs_globe_depth || render_layer.needs_globe_depth();
         }
-        // Every draped layer is in the one stack.
-        let stacks = usize::from(frame.terrain);
-        if let Some(drapes) = self.terrain.begin_drapes(gpu, paint_parameters, stacks) {
+        let drapes = |&index: &u32| (index, self.layers[index as usize].drapes());
+        self.stacks =
+            if frame.terrain { DrapeStacks::of(frame.layers.keys().map(drapes)) } else { DrapeStacks::default() };
+        if let Some(drapes) = self.terrain.begin_drapes(gpu, paint_parameters, self.stacks.len()) {
             let mut contents = SourceContents::default();
-            for &index in &draped {
-                let Some(frame_layer) = frame.layers.get(&index) else {
-                    continue;
-                };
-                let layer_source =
-                    layer_source(frame_layer, &self.render_sources, &self.tile_store, &self.found_tiles, &mut contents);
-                drapes.key_layer(0, &*self.layers[index as usize], layer_source);
+            for stack in 0..self.stacks.len() {
+                for index in self.stacks.layers(stack) {
+                    let layer_source = layer_source(
+                        &frame.layers[index],
+                        &self.render_sources,
+                        &self.tile_store,
+                        &self.found_tiles,
+                        &mut contents,
+                    );
+                    drapes.key_layer(stack, &*self.layers[*index as usize], layer_source);
+                }
             }
             drapes.choose(!paint_parameters.camera_moving);
-            for index in draped {
-                let Some(frame_layer) = frame.layers.get(&index) else {
-                    continue;
-                };
-                let layer_source =
-                    layer_source(frame_layer, &self.render_sources, &self.tile_store, &self.found_tiles, &mut contents);
-                let render_layer = &mut *self.layers[index as usize];
-                drapes.update_layer(0, gpu, paint_parameters, &self.atlases, render_layer, layer_source);
+            for stack in 0..self.stacks.len() {
+                for index in self.stacks.layers(stack) {
+                    let layer_source = layer_source(
+                        &frame.layers[index],
+                        &self.render_sources,
+                        &self.tile_store,
+                        &self.found_tiles,
+                        &mut contents,
+                    );
+                    let render_layer = &mut *self.layers[*index as usize];
+                    drapes.update_layer(stack, gpu, paint_parameters, &self.atlases, render_layer, layer_source);
+                }
             }
             drapes.finish_update();
+        } else {
+            // A backend without the terrain's shader draws no surface.
+            self.stacks = DrapeStacks::default();
         }
         let state = paint_parameters.view;
         let (renderable_size, pixel_ratio) = (paint_parameters.renderable_size, paint_parameters.pixel_ratio);
@@ -1400,8 +1426,7 @@ impl RenderOrchestrator {
         &mut self.globe_depth_pass
     }
 
-    /// The terrain, whose surface draws before the layers' translucent
-    /// draws.
+    /// The terrain, whose drapes draw before the frame's pass.
     pub(crate) fn terrain(&mut self) -> &mut RenderTerrain {
         &mut self.terrain
     }
