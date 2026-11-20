@@ -4,6 +4,7 @@ use std::collections::BTreeSet;
 use std::ops::Not;
 use std::sync::Arc;
 
+use glam::DVec2;
 use mln_map::transform::Transform;
 use mln_map_types::{
     CameraOptions, ConstrainMode, Elevation, MapDebugOptions, MapMode, TerrainSkirtLength, TileLodMode, ViewportMode,
@@ -628,8 +629,13 @@ fn the_ground_the_map_stands_on_is_the_height_rule_on_the_drawn_dem() {
     assert_eq!(Some(f64::from(height)), ground.at(center));
     assert!(height.fract() != 0.0, "{height} reads between pixels");
     assert_eq!(Some(f64::from(data.range().0 * 1.5)), ground.min_at(center));
+    // The surface drawn there, in any world copy.
+    assert_eq!(Some(f64::from(height)), ground.surface_at(DVec2::new(world.x, world.y)));
+    assert_eq!(Some(f64::from(height)), ground.surface_at(DVec2::new(world.x - 2.0, world.y)));
     // Ground far from the view, where no tile drew.
-    assert_eq!(None, ground.at(LatLng::new(-45.0, -170.0).unwrap()));
+    let far = LatLng::new(-45.0, -170.0).unwrap();
+    let far_world = mln_util::projection::Projection::project(&far, 1.0 / mln_util::constants::TILE_SIZE_D);
+    assert_eq!((None, None), (ground.at(far), ground.surface_at(DVec2::new(far_world.x, far_world.y))));
 
     load.seen = Some(ground);
     load.frame();
@@ -656,6 +662,11 @@ fn an_update_stands_on_the_current_ground_when_it_carries_its_height_and_floor()
     load.frame();
     assert!(!load.grounded, "the update carries no ground");
     let loading = load.ground_events().pop().flatten().expect("the ground while it loads");
+    // The tiles draw flat while their DEM loads, which the center doesn't
+    // stand on yet.
+    let center = load.transform.view().center(mln_util::geo::WrapMode::Wrapped);
+    let world = mln_util::projection::Projection::project(&center, 1.0 / mln_util::constants::TILE_SIZE_D);
+    assert_eq!((None, Some(0.0)), (loading.at(center), loading.surface_at(DVec2::new(world.x, world.y))));
     load.seen = Some(Arc::clone(&loading));
     load.frame();
     assert!(load.grounded);
@@ -694,7 +705,7 @@ fn an_update_stands_on_the_current_ground_when_it_carries_its_height_and_floor()
 
 /// A camera far below raised ground looks over it, which culls every tile;
 /// the tile under the center still loads its DEM, which the camera stands
-/// on.
+/// on, though it draws no surface.
 #[test]
 fn a_camera_below_the_ground_stands_on_the_dem_under_its_center() {
     let mut load = TerrainLoad::new((0, 14), 100.0);
@@ -706,7 +717,11 @@ fn a_camera_below_the_ground_stands_on_the_dem_under_its_center() {
     let center = cover.center.expect("the tile under the center");
     assert!(cover.dem_tiles.contains(&center.id.scaled_to(center.id.canonical.z - 1)));
     let ground = load.ground_events().pop().flatten().expect("the ground");
-    assert_eq!(Some(3_000_000.0), ground.at(LatLng::new(45.0, 10.0).unwrap()));
+    let center = LatLng::new(45.0, 10.0).unwrap();
+    assert_eq!(Some(3_000_000.0), ground.at(center));
+    // No surface drew there.
+    let world = mln_util::projection::Projection::project(&center, 1.0 / mln_util::constants::TILE_SIZE_D);
+    assert_eq!(None, ground.surface_at(DVec2::new(world.x, world.y)));
 }
 
 /// The coarse DEM tile a terrain tile reads for culling loads while its
@@ -823,5 +838,9 @@ impl Elevation for Uniform {
 
     fn min_at(&self, _: LatLng) -> Option<f64> {
         self.min_at
+    }
+
+    fn surface_at(&self, _: DVec2) -> Option<f64> {
+        self.at
     }
 }

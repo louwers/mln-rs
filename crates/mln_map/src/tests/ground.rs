@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
+use glam::DVec2;
 use mln_map_types::Elevation;
 use mln_renderer::{RenderMode, RendererEvent};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
@@ -40,6 +41,10 @@ impl Elevation for Flat {
     fn min_at(&self, _: LatLng) -> Option<f64> {
         Some(self.min)
     }
+
+    fn surface_at(&self, _: DVec2) -> Option<f64> {
+        Some(self.height.unwrap_or(0.0))
+    }
 }
 
 /// Ground whose height alternates between 100 m and 200 m with each read,
@@ -55,6 +60,10 @@ impl Elevation for Restless {
     }
 
     fn min_at(&self, _: LatLng) -> Option<f64> {
+        Some(100.0)
+    }
+
+    fn surface_at(&self, _: DVec2) -> Option<f64> {
         Some(100.0)
     }
 }

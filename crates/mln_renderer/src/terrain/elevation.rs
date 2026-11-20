@@ -3,6 +3,7 @@
 use std::fmt;
 use std::sync::Arc;
 
+use glam::DVec2;
 use mln_map_types::{Elevation, TileCoordinate};
 use mln_tile_id::OverscaledTileID;
 use mln_util::dem::{self, DemCoords, DemUnpack};
@@ -32,6 +33,9 @@ struct DrawnTile {
     /// Whether its own DEM tile is still loading, so that it reads an
     /// ancestor's or none.
     loading: bool,
+    /// Whether the frame drew it: all but the tile under the center that
+    /// the cover keeps undrawn ([`TerrainCover::center`]).
+    drawn: bool,
 }
 
 /// The terrain's tiles as a frame drew them, with the DEM data each read: the
@@ -75,18 +79,23 @@ impl TerrainElevation {
         unpack: DemUnpack,
         exaggeration: f32,
     ) -> TerrainElevation {
-        let tiles = cover
-            .tiles
-            .iter()
-            .chain(&cover.center)
-            .map(|tile| DrawnTile { id: tile.id, dem: drawn_dem(dem, tile.dem), loading: tile.dem_loading })
+        let drawn = cover.tiles.iter().map(|tile| (tile, true));
+        let tiles = drawn
+            .chain(cover.center.iter().map(|tile| (tile, false)))
+            .map(|(tile, drawn)| DrawnTile {
+                id: tile.id,
+                dem: drawn_dem(dem, tile.dem),
+                loading: tile.dem_loading,
+                drawn,
+            })
             .collect();
         TerrainElevation { tiles, unpack, exaggeration }
     }
 
     /// Whether `cover`'s tiles, binding their DEM from `dem`, draw the same
     /// ground, decoded by `unpack` and raised by `exaggeration`: the same
-    /// tiles reading the same DEM images in the same places.
+    /// tiles, drawn or kept under the center, reading the same DEM images in
+    /// the same places.
     pub(crate) fn draws_as(
         &self,
         cover: &TerrainCover,
@@ -110,9 +119,14 @@ impl TerrainElevation {
         self.unpack == unpack
             && self.exaggeration == exaggeration
             && self.tiles.len() == cover.tiles.len() + usize::from(cover.center.is_some())
-            && self.tiles.iter().zip(cover.tiles.iter().chain(&cover.center)).all(|(drawn, tile)| {
-                drawn.id == tile.id && drawn.loading == tile.dem_loading && same_dem(&drawn.dem, tile.dem)
-            })
+            && self.tiles.iter().zip(cover.tiles.iter().chain(&cover.center)).enumerate().all(
+                |(index, (drawn, tile))| {
+                    drawn.id == tile.id
+                        && drawn.loading == tile.dem_loading
+                        && drawn.drawn == (index < cover.tiles.len())
+                        && same_dem(&drawn.dem, tile.dem)
+                },
+            )
     }
 
     /// The bytes of the DEM images it holds, each once.
@@ -126,34 +140,53 @@ impl TerrainElevation {
             .sum()
     }
 
-    /// The tile drawn at `location`, and where in it, from 0 to 1 across,
-    /// y down. Every world copy of a tile reads the same DEM, so any does.
-    fn tile_at(&self, location: LatLng) -> Option<(&DrawnTile, [f32; 2])> {
-        let world = TileCoordinate::from_lat_lng(0.0, &location).p;
+    /// The tile at `world`, a Web Mercator point at zoom 0, and where in it,
+    /// from 0 to 1 across, y down. Every world copy of a tile reads the same
+    /// DEM, so any does.
+    fn tile_at(&self, world: DVec2) -> Option<(&DrawnTile, [f32; 2])> {
         self.tiles.iter().find_map(|tile| {
             let [u, v] = place_in(tile.id.canonical, [world.x, world.y])?;
             Some((tile, [u as f32, v as f32]))
         })
     }
-}
 
-impl Elevation for TerrainElevation {
-    fn at(&self, location: LatLng) -> Option<f64> {
-        let (tile, uv) = self.tile_at(location)?;
-        // A tile whose own DEM tile loads draws an ancestor's in its place,
-        // which the camera stands on meanwhile, as in GL JS.
-        let Some(dem) = &tile.dem else { return (!tile.loading).then_some(0.0) };
+    /// The tile at `location`, and where in it.
+    fn tile_at_location(&self, location: LatLng) -> Option<(&DrawnTile, [f32; 2])> {
+        let world = TileCoordinate::from_lat_lng(0.0, &location).p;
+        self.tile_at(DVec2::new(world.x, world.y))
+    }
+
+    /// The height that `dem` gives at `uv` by the height rule, in meters with
+    /// the exaggeration.
+    fn height(&self, dem: &DrawnDem, uv: [f32; 2]) -> f64 {
         let stride = dem.dim as usize + 2;
         let texel = |x: u32, y: u32| {
             let start = (y as usize * stride + x as usize) * 4;
             let texel: [u8; 4] = dem.image.data[start..start + 4].try_into().unwrap_or_default();
             self.unpack.decode(texel)
         };
-        Some(f64::from(dem::sample(dem.dim, dem.coords, uv, texel) * self.exaggeration))
+        f64::from(dem::sample(dem.dim, dem.coords, uv, texel) * self.exaggeration)
+    }
+}
+
+impl Elevation for TerrainElevation {
+    fn at(&self, location: LatLng) -> Option<f64> {
+        let (tile, uv) = self.tile_at_location(location)?;
+        // A tile whose own DEM tile loads draws an ancestor's in its place,
+        // which the camera stands on meanwhile, as in GL JS.
+        match &tile.dem {
+            Some(dem) => Some(self.height(dem, uv)),
+            None => (!tile.loading).then_some(0.0),
+        }
     }
 
     fn min_at(&self, location: LatLng) -> Option<f64> {
-        let (tile, _) = self.tile_at(location)?;
+        let (tile, _) = self.tile_at_location(location)?;
         Some(tile.dem.as_ref().map_or(0.0, |dem| f64::from(dem.min * self.exaggeration)))
+    }
+
+    fn surface_at(&self, world: DVec2) -> Option<f64> {
+        let (tile, uv) = self.tile_at(world).filter(|(tile, _)| tile.drawn)?;
+        Some(tile.dem.as_ref().map_or(0.0, |dem| self.height(dem, uv)))
     }
 }
