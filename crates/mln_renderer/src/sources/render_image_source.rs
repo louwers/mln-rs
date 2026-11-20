@@ -327,10 +327,19 @@ impl RenderSource for RenderImageSource {
             return;
         }
 
-        // Calculate Geometry Coordinates based on tile cover at ideal zoom
+        // The corners in the units of the cover's first tile, rounded to the
+        // nearest unit as GL JS rounds them, so that an edge falls on the
+        // pixels GL JS draws it on.
+        let tile = tile_cover_ids[0];
+        let scale = 2.0f64.powi(i32::from(tile.canonical.z));
+        let extent = f64::from(constants::EXTENT);
         let geom_coords: GeometryCoordinates = tile_coordinates
             .iter()
-            .map(|tile_coords| TileCoordinate::to_geometry_coordinate(&tile_cover_ids[0], tile_coords))
+            .map(|point| {
+                let x = point.x * scale - f64::from(tile.canonical.x) - f64::from(tile.wrap) * scale;
+                let y = point.y * scale - f64::from(tile.canonical.y);
+                Point::new(to_vertex_coordinate(x * extent), to_vertex_coordinate(y * extent))
+            })
             .collect();
 
         // A changed image gets a new bucket, whose id tells the layers to
