@@ -23,8 +23,6 @@
   "gljs/render-tests/terrain/image": "P1b (stacks and composites): an image source's raster doesn't drape over terrain yet; it draws on the frame as in 2D",
   "gljs/render-tests/terrain/image-projective": "P1b (stacks and composites): an image source's raster doesn't drape over terrain yet; it draws on the frame as in 2D",
   "gljs/render-tests/terrain/occlusion-debug": "P4 (standing layers): terrain draws, but doesn't occlude what stands behind it yet; its DEM source declares tileSize 256 for tiles/terrain-shading's 512 px tiles",
-  "gljs/render-tests/terrain/rtt-mipmap-minification/pitch-70": "P1a (surface and one drape stack): draws GL JS's filtered checkerboard, but anisotropic filtering of the drape's mips varies by GPU by more than the fixture allows (about 0.4% of pixels on RADV and 1.6% on lavapipe, 0.1% allowed); its DEM source declares tileSize 256 for tiles/terrain-shading's 512 px tiles",
-  "gljs/render-tests/terrain/skirts-none": "P1a (surface and one drape stack): draws as GL JS's, but how the drape's anisotropic filtering softens the edges of its translucent fill varies by GPU, by a few pixels more than the fixture allows on some (it passes on lavapipe, not on RADV); its tiles/terrain DEM tiles are Terrarium but it declares the default Mapbox encoding, so the Mapbox decode of them is about 850 km of relief",
   "gljs/render-tests/terrain/symbol": "P4 (standing layers): terrain draws, but symbols don't stand on it yet",
   "gljs/render-tests/terrain/symbol-add-terrain": "P4 (standing layers): terrain draws, but symbols don't stand on it yet",
   "gljs/render-tests/terrain/symbol-height-anchor-ground": "P4 (standing layers): terrain draws, but symbols don't stand on it yet",
