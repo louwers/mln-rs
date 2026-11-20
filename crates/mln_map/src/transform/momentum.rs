@@ -349,9 +349,13 @@ impl Transform {
                     self.step_scalar(i, delta, momentum.anchor(i));
                 }
             }
-            self.end_gesture_momentum(gesture);
+            // The gesture's end can move the center onto the terrain.
+            let recentered = self.end_gesture_momentum(gesture);
             self.end_unstarted(animation, TransitionOutcome::Completed);
-            if settling != 0 {
+            if settling == 0 && recentered {
+                self.emit(TransformEvent::CameraWillChange(momentum_change(CameraChangeMode::Immediate)));
+            }
+            if settling != 0 || recentered {
                 self.emit(TransformEvent::CameraDidChange(momentum_change(CameraChangeMode::Immediate)));
             }
             return;

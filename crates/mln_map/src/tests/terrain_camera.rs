@@ -17,10 +17,10 @@ use crate::{AnimationOptions, CameraOptions, CameraUpdate, CameraUpdateMode, Map
 
 /// How long each command in these tests runs, and a frame's length.
 const DURATION: Duration = Duration::from_secs(1);
-const FRAME: Duration = Duration::from_millis(16);
+pub(super) const FRAME: Duration = Duration::from_millis(16);
 
 /// Where the commands start from, and where they go.
-fn start() -> LatLng {
+pub(super) fn start() -> LatLng {
     LatLng::new(20.0, 10.0).unwrap()
 }
 
@@ -37,7 +37,7 @@ fn slope() -> Arc<dyn Elevation> {
 /// A 512 by 512 map over terrain, at rest at the start, zoom 12, pitched
 /// 40 degrees, with `ground` drawn if any, and its frame clock an hour
 /// ahead so that the test steps it.
-fn map_over(ground: Option<&Arc<dyn Elevation>>, run_loop: &Queue<()>) -> (Map, Instant) {
+pub(super) fn map_over(ground: Option<&Arc<dyn Elevation>>, run_loop: &Queue<()>) -> (Map, Instant) {
     let mut map = pitchable(STYLE, run_loop);
     let clock = Instant::now() + Duration::from_secs(3600);
     map.set_frame_time(Some(clock));
@@ -76,7 +76,7 @@ fn command(map: &mut Map, mode: CameraUpdateMode, camera: CameraOptions) {
 
 /// Steps the map's frames from `clock` up to `until` after it, calling
 /// `each` after each.
-fn frames(map: &mut Map, clock: Instant, until: Duration, mut each: impl FnMut(&mut Map, Duration)) {
+pub(super) fn frames(map: &mut Map, clock: Instant, until: Duration, mut each: impl FnMut(&mut Map, Duration)) {
     let mut elapsed = Duration::ZERO;
     while elapsed < until {
         elapsed = (elapsed + FRAME).min(until);
@@ -87,7 +87,7 @@ fn frames(map: &mut Map, clock: Instant, until: Duration, mut each: impl FnMut(&
 
 /// Where a point `height` meters up at the Web Mercator point `world`
 /// draws, in pixels.
-fn pixel(view: &View, world: DVec2, height: f64) -> DVec2 {
+pub(super) fn pixel(view: &View, world: DVec2, height: f64) -> DVec2 {
     let world_size = Projection::world_size(view.scale());
     let clip = view.projection_matrix() * DVec4::new(world.x * world_size, world.y * world_size, height, 1.0);
     let size = view.size();

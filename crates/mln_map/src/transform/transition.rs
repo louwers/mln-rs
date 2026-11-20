@@ -402,10 +402,7 @@ impl Transform {
                 }
             }
         }
-        // A gesture's camera stays where the user puts it.
-        if !self.gesture_in_progress {
-            self.keep_eye_above();
-        }
+        self.keep_clear_of_ground();
     }
 
     /// Where an anchored command's center ends: its camera at the end,
@@ -441,6 +438,8 @@ impl Transform {
 
     pub(super) fn finish_transitions(&mut self, finished: Vec<Transition>) {
         for transition in finished {
+            // The change that ends the command reports a gesture end's move
+            // onto the terrain too.
             self.end_gesture_momentum(transition.gesture);
             self.report_end(transition.command, transition.animation.transition_id, transition.end());
             // This notification ends a command, not necessarily all camera
@@ -468,6 +467,9 @@ impl Transform {
         }
         for index in 0..self.transitions.len() {
             self.advance_momentum(index, now);
+        }
+        if self.transitions.iter().any(|t| t.momentum.is_some()) {
+            self.keep_clear_of_ground();
         }
 
         let finished: Vec<_> = self.transitions.extract_if(.., |t| t.has_run_out(now) || t.fields == 0).collect();

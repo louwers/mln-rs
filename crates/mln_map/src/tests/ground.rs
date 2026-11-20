@@ -15,8 +15,7 @@ use mln_util::geo::{LatLng, WrapMode};
 use mln_util::queue::Queue;
 
 use crate::{
-    AnimationOptions, BoundOptions, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase, Map, MapEvent,
-    MapMode, MapOptions,
+    AnimationOptions, BoundOptions, CameraOptions, CameraUpdate, CameraUpdateMode, Map, MapEvent, MapMode, MapOptions,
 };
 
 pub(super) const STYLE: &str = r#"{
@@ -583,26 +582,6 @@ fn without_terrain_a_pitch_95_jump_stays_at_95() {
     assert!(map.transform_state().view().eye_position().z < 0.0);
     assert_near(95.0, map.transform_state().camera_options(None).pitch.unwrap(), 1e-9, "pitch");
     assert_eq!(Some(13.0), map.transform_state().camera_options(None).zoom);
-}
-
-/// A gesture's camera stays where the gesture puts it, though the eye is
-/// below sea level.
-#[test]
-fn a_gesture_is_not_raised_yet() {
-    let run_loop = Queue::<()>::new();
-    let mut map = pitchable(STYLE, &run_loop);
-    map.jump_to(&CameraOptions { zoom: Some(13.0), ..Default::default() });
-    for (phase, pitch) in [(GesturePhase::Begin, 80.0), (GesturePhase::Update, 95.0)] {
-        map.update_camera(&CameraUpdate {
-            mode: CameraUpdateMode::Jump,
-            camera: CameraOptions { pitch: Some(pitch), ..Default::default() },
-            phase,
-            ..Default::default()
-        });
-        assert_near(pitch, map.transform_state().camera_options(None).pitch.unwrap(), 1e-9, "pitch");
-        assert_eq!(Some(13.0), map.transform_state().camera_options(None).zoom);
-    }
-    assert!(map.transform_state().view().eye_position().z < 0.0);
 }
 
 /// A camera at rest reads only the height and floor at its center, which

@@ -149,7 +149,7 @@
 //!   [`Elevation::min_at`]) at the view's center, which is all a camera at
 //!   rest reads of them, or there is neither, without terrain. A camera
 //!   reads more, such as the surface under its eye, only while a command
-//!   moves it, which no still waits on. A still image
+//!   or a gesture moves it, which no still waits on. A still image
 //!   draws only such an update's frame, and a continuous frame of any
 //!   other reports itself partial, so it doesn't make the map idle. A
 //!   snapshot that changes only away from the center holds no frame back.
