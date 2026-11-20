@@ -1,6 +1,6 @@
 // The terrain's drapes: the projection that draws a tile's square of the map
-// into its drape, the scale of the drape's pixels, and the frame's tiles a
-// drape draws.
+// into its drape, the scale of the drape's pixels, and the frame's tiles and
+// image copies a drape draws.
 
 use glam::{DVec4, Vec2, Vec4};
 use mln_gfx::ScissorRect;
@@ -21,6 +21,7 @@ use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::render_layer::FrameSourceTiles;
 use crate::render_static_data::RenderStaticData;
 use crate::render_tile::{FoundTile, RenderTile};
+use crate::sources::render_image_source::ImageSourceRenderData;
 
 /// A camera pitched by `pitch` and turned to `bearing`, in degrees, over a
 /// 512 px view at a fractional zoom.
@@ -195,4 +196,70 @@ fn a_drape_draws_the_tiles_that_overlap_its_tile() {
     let drawn: Vec<UnwrappedTileID> =
         source.overlapping::<Fill>(&found, "fill", ids[0]).iter().map(|tile| tile.tile.id).collect();
     assert_eq!(&ids[..4], &drawn[..]);
+}
+
+/// An image drawn in the tiles `tile_ids` over the box `bounds` of their
+/// tile's units, which hasn't loaded.
+fn image_in(tile_ids: &[UnwrappedTileID], bounds: [i32; 4]) -> ImageSourceRenderData<'_> {
+    ImageSourceRenderData { bucket: None, tile_ids, bounds }
+}
+
+/// Each copy of an image overlaps the drapes of its own world copy.
+#[test]
+fn an_image_copy_overlaps_the_drapes_of_its_world_copy() {
+    let copies = [tile(0, 3, 5, 2), tile(-1, 3, 5, 2)];
+    let image = image_in(&copies, [1000, 1000, 7000, 7000]);
+    assert!(image.overlaps(&copies[0], &tile(0, 3, 5, 2)));
+    assert!(!image.overlaps(&copies[0], &tile(-1, 3, 5, 2)));
+    assert!(image.overlaps(&copies[1], &tile(-1, 3, 5, 2)));
+    assert!(!image.overlaps(&copies[1], &tile(0, 3, 5, 2)));
+}
+
+/// An image that reaches past its tile overlaps the drapes of the
+/// neighbors it reaches into, and not those of the neighbors it only
+/// touches.
+#[test]
+fn an_image_overlaps_the_drapes_past_its_tile_that_it_reaches() {
+    let copies = [tile(0, 3, 5, 2)];
+    // From the tile's west half to a quarter into its eastern neighbor, and
+    // down to its southern neighbor's edge.
+    let image = image_in(&copies, [EXTENT / 2, 0, EXTENT + EXTENT / 4, EXTENT]);
+    assert!(image.overlaps(&copies[0], &tile(0, 3, 5, 2)));
+    assert!(image.overlaps(&copies[0], &tile(0, 3, 6, 2)));
+    assert!(!image.overlaps(&copies[0], &tile(0, 3, 4, 2)));
+    assert!(!image.overlaps(&copies[0], &tile(0, 3, 5, 3)));
+    assert!(!image.overlaps(&copies[0], &tile(0, 3, 5, 1)));
+    // An image west of its tile, in the next world copy's westernmost tile,
+    // reaches into this copy's easternmost.
+    let copies = [tile(1, 3, 0, 2)];
+    let image = image_in(&copies, [-EXTENT / 4, 0, EXTENT / 4, EXTENT]);
+    assert!(image.overlaps(&copies[0], &tile(0, 3, 7, 2)));
+    assert!(image.overlaps(&copies[0], &tile(1, 3, 0, 2)));
+    assert!(!image.overlaps(&copies[0], &tile(1, 3, 7, 2)));
+}
+
+/// An image overlaps the drapes of coarser tiles that hold part of it, and
+/// of finer tiles that it covers part of.
+#[test]
+fn an_image_overlaps_the_drapes_at_coarser_and_finer_zooms() {
+    let copies = [tile(0, 3, 5, 2)];
+    // The tile's north-east quarter, and a sliver past its east edge.
+    let image = image_in(&copies, [EXTENT / 2, 0, EXTENT + 8, EXTENT / 2]);
+    // Its parent and the world hold it; so does the parent's eastern
+    // neighbor, which the sliver reaches.
+    assert!(image.overlaps(&copies[0], &tile(0, 2, 2, 1)));
+    assert!(image.overlaps(&copies[0], &tile(0, 0, 0, 0)));
+    assert!(image.overlaps(&copies[0], &tile(0, 2, 3, 1)));
+    assert!(!image.overlaps(&copies[0], &tile(0, 2, 2, 0)));
+    // Of the tile's children, only the north-east one; of the eastern
+    // neighbor's, only the north-west one, which the sliver reaches.
+    assert!(image.overlaps(&copies[0], &tile(0, 4, 11, 4)));
+    assert!(!image.overlaps(&copies[0], &tile(0, 4, 10, 4)));
+    assert!(!image.overlaps(&copies[0], &tile(0, 4, 11, 5)));
+    assert!(image.overlaps(&copies[0], &tile(0, 4, 12, 4)));
+    assert!(!image.overlaps(&copies[0], &tile(0, 4, 12, 5)));
+    // At zoom 10, the sliver is the first of eight columns of the eastern
+    // neighbor's tiles.
+    assert!(image.overlaps(&copies[0], &tile(0, 10, 6 * 128, 2 * 128)));
+    assert!(!image.overlaps(&copies[0], &tile(0, 10, 6 * 128 + 1, 2 * 128)));
 }

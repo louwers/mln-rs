@@ -1331,8 +1331,7 @@ impl RenderOrchestrator {
             let layer_source =
                 layer_source(frame_layer, &self.render_sources, &self.tile_store, &self.found_tiles, &mut contents);
             // Over terrain, a layer that drapes draws nothing onto the frame.
-            // An image source's raster doesn't drape.
-            if frame.terrain && render_layer.drapes() && !matches!(layer_source, Some(LayerSource::Image(_))) {
+            if frame.terrain && render_layer.drapes() {
                 render_layer.remove_all_draws();
                 draped.push(index);
                 continue;

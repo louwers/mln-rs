@@ -1,6 +1,6 @@
 // A continuous map over terrain draws a drape again only when what it
-// shows changed: its layers' values, the tiles they draw, their feature
-// state, or, once the camera rests, the zoom.
+// shows changed: its layers' values, the tiles or image they draw, their
+// feature state, or, once the camera rests, the zoom.
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -15,7 +15,7 @@ use mln_map_types::{
 };
 use mln_storage::{FileSource, Resource, Responder, Response};
 use mln_style::expression::expression::FeatureState;
-use mln_style::sources::{GeoJSONOptions, GeoJsonSourceType};
+use mln_style::sources::{GeoJSONOptions, GeoJsonSourceType, ImageSourceType, image_source};
 use mln_style::{Edit, Style};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::geo::LatLng;
@@ -506,4 +506,41 @@ fn a_rotation_draws_a_viewport_lit_hillshade_again_at_rest() {
     map.camera_moving = false;
     assert_eq!(drapes, map.frame().1, "the drapes drawn again at rest");
     assert!(map.frame().1.is_empty());
+}
+
+/// The corners of a box of 10° a side whose north-west corner is at `lat`,
+/// `lng`: top left, top right, bottom right, bottom left.
+fn corners(lat: f64, lng: f64) -> [LatLng; 4] {
+    [(lat, lng), (lat, lng + 10.0), (lat - 10.0, lng + 10.0), (lat - 10.0, lng)]
+        .map(|(lat, lng)| LatLng::new(lat, lng).unwrap())
+}
+
+/// An image source drapes: moving its image draws again the drapes that
+/// showed it and those that show it now, and no others.
+#[test]
+fn moving_an_image_draws_the_drapes_it_left_and_entered_again() {
+    let (mut map, drapes) = settled(Tiles::default());
+    // In the south-east drape's tile.
+    map.edit(Edit::AddSource(image_source("image", corners(-20.0, 20.0))));
+    map.edit(ImageSourceType::set_image(
+        "image",
+        PremultipliedImage::from_vec(Size::new(2, 2), [255, 0, 0, 255].repeat(4)),
+    ));
+    let json = r#"{
+        "version": 8,
+        "sources": {"image": {"type": "image", "coordinates": [[0, 0], [1, 0], [1, -1], [0, -1]]}},
+        "layers": [{"id": "image", "type": "raster", "source": "image", "paint": {"raster-fade-duration": 0}}]
+    }"#;
+    let parsed = Style::from_json(Registry::with_builtins().style(), json, None).expect("the style");
+    let layer = parsed.get_layer_list().iter().next().expect("the layer").clone();
+    map.edit(Edit::AddLayer { layer, before: None });
+    // A new layer draws every drape again.
+    assert_eq!(drapes, map.settle());
+    assert!(map.frame().1.is_empty());
+    // Into the south-west drape's tile.
+    map.edit(ImageSourceType::set_coordinates("image", corners(-20.0, -30.0)));
+    let south_west = OverscaledTileID::new(2, 0, CanonicalTileID::new(2, 1, 2));
+    let south_east = OverscaledTileID::new(2, 0, CanonicalTileID::new(2, 2, 2));
+    assert_eq!(BTreeSet::from([south_west, south_east]), map.settle());
+    assert_eq!(drapes, map.drapes());
 }

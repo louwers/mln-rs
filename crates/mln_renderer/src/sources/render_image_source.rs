@@ -166,7 +166,36 @@ fn build_image_mesh(bucket: &mut RasterBucket, corners: &GeometryCoordinates, ce
 #[derive(Clone, Copy)]
 pub(crate) struct ImageSourceRenderData<'a> {
     pub(crate) bucket: Option<&'a RasterBucket>,
+    /// The tile the image draws in, in each world copy it draws in: one
+    /// canonical tile under different wraps.
     pub(crate) tile_ids: &'a [UnwrappedTileID],
+    /// The box of the quad's corners, in the tile units of `tile_ids`'
+    /// canonical tile: min x, min y, max x, max y.
+    pub(crate) bounds: [i32; 4],
+}
+
+impl ImageSourceRenderData<'_> {
+    /// Whether the image drawn in `tile_id`, one of `tile_ids`, covers part
+    /// of the tile `drape`. An image that only touches its edge doesn't.
+    pub(crate) fn overlaps(&self, tile_id: &UnwrappedTileID, drape: &UnwrappedTileID) -> bool {
+        // Both boxes in the tile units of the finer of the two zooms, from
+        // the west edge of world copy 0.
+        let zoom = tile_id.canonical.z.max(drape.canonical.z);
+        let place = |id: &UnwrappedTileID| {
+            let scale = 1i64 << (zoom - id.canonical.z);
+            let extent = i64::from(constants::EXTENT) * scale;
+            let x = ((i64::from(id.wrap) << id.canonical.z) + i64::from(id.canonical.x)) * extent;
+            (x, i64::from(id.canonical.y) * extent, scale)
+        };
+        let (left, top, scale) = place(tile_id);
+        let [min_x, min_y, max_x, max_y] = self.bounds.map(|bound| i64::from(bound) * scale);
+        let (drape_left, drape_top, drape_scale) = place(drape);
+        let drape_extent = i64::from(constants::EXTENT) * drape_scale;
+        left + min_x < drape_left + drape_extent
+            && drape_left < left + max_x
+            && top + min_y < drape_top + drape_extent
+            && drape_top < top + max_y
+    }
 }
 
 pub(crate) struct RenderImageSource {
@@ -373,7 +402,12 @@ impl RenderSource for RenderImageSource {
 
     fn image_render_data(&self) -> Option<ImageSourceRenderData<'_>> {
         let tile_ids: &[UnwrappedTileID] = if self.loaded() { &self.tile_ids } else { &[] };
-        Some(ImageSourceRenderData { bucket: self.bucket.as_ref(), tile_ids })
+        let mut bounds = [i32::MAX, i32::MAX, i32::MIN, i32::MIN];
+        for corner in &self.mesh_corners {
+            let (x, y) = (i32::from(corner.x), i32::from(corner.y));
+            bounds = [bounds[0].min(x), bounds[1].min(y), bounds[2].max(x), bounds[3].max(y)];
+        }
+        Some(ImageSourceRenderData { bucket: self.bucket.as_ref(), tile_ids, bounds })
     }
 
     fn dump_debug_logs(&self) {

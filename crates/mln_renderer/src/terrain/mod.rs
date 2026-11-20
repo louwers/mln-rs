@@ -25,7 +25,7 @@
 //!    terrain tile's DEM and tells the map of the ground the tiles draw, if
 //!    it changed.
 //! 3. The layers that drape (background, fill, line, hillshade, color
-//!    relief, and raster but for an image source's) make no draws in the
+//!    relief, and raster, an image source's too) make no draws in the
 //!    frame: they draw in each drape whose key changed
 //!    ([`RenderTerrain::begin_drapes`]). The surface makes a draw per tile
 //!    ([`RenderTerrain::update_draws`]).
@@ -61,7 +61,9 @@
 //!   draped layers draw into with the map's camera, through their own draw
 //!   updates. A drape draws again only when its key differs from the one it
 //!   was drawn from: the draped layers' styles, paint revisions and tiles,
-//!   the overlapping tiles' buckets and generations, and, with the camera
+//!   the overlapping tiles' buckets and generations (an image source's
+//!   bucket and quad, in each copy of the image that overlaps the drape's
+//!   tile), and, with the camera
 //!   at rest, the layers' evaluated values, the zoom, and the bearing where
 //!   a layer draws by it. A change of the style's images, or of the feature
 //!   state of a bucket a drape shows, draws it again too. While the camera
