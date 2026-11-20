@@ -135,9 +135,9 @@ pub(crate) struct RenderHillshadeLayer {
     bucket_render_targets: HashMap<SimpleIdentity, BucketTarget>,
     /// The buckets of the frame's tiles, which keep their render targets.
     live_buckets: HashSet<SimpleIdentity>,
-    /// The illumination of the evaluation and the map's bearing the draws
-    /// last drew with, and its number of light sources.
-    illumination: Option<(Arc<EvaluatedLayer<Hillshade>>, f64, Illumination)>,
+    /// The illumination of the evaluation the draws last drew with, before
+    /// a viewport anchor turns it by the map's bearing.
+    illumination: Option<(Arc<EvaluatedLayer<Hillshade>>, Illumination)>,
 }
 
 impl RenderHillshadeLayer {
@@ -618,29 +618,32 @@ impl RenderHillshadeLayer {
     }
 
     /// The illumination of the layer's evaluation `layer` at the frame's
-    /// bearing, which a viewport anchor turns its lights by, kept in `cache`.
+    /// bearing, which a viewport anchor turns its lights by. The
+    /// evaluation's own is kept in `cache`, so that a turning map doesn't
+    /// compute it again.
     fn illumination(
-        cache: &mut Option<(Arc<EvaluatedLayer<Hillshade>>, f64, Illumination)>,
+        cache: &mut Option<(Arc<EvaluatedLayer<Hillshade>>, Illumination)>,
         layer: &Arc<EvaluatedLayer<Hillshade>>,
         parameters: &PaintParameters<'_>,
     ) -> Illumination {
-        let bearing = parameters.view.angle();
-        if let Some((cached_layer, cached_bearing, illumination)) = cache
-            && Arc::ptr_eq(cached_layer, layer)
-            && *cached_bearing == bearing
-        {
-            return *illumination;
-        }
         let evaluated = &layer.paint;
-        let mut illumination = illumination_properties(evaluated);
+        let mut illumination = match cache {
+            Some((cached_layer, illumination)) if Arc::ptr_eq(cached_layer, layer) => *illumination,
+            _ => {
+                let properties = illumination_properties(evaluated);
+                let props = pack_evaluated_props(&properties, evaluated.hillshade_accent_color.uniform());
+                let illumination = Illumination { props, num_lights: properties.direction_radians.len() };
+                *cache = Some((Arc::clone(layer), illumination));
+                illumination
+            }
+        };
         if *evaluated.hillshade_illumination_anchor.uniform() == HillshadeIlluminationAnchorType::Viewport {
-            for azimuth in &mut illumination.direction_radians {
-                *azimuth -= bearing as f32;
+            let bearing = parameters.view.angle() as f32;
+            let lights = illumination.num_lights.min(illumination.props.azimuths.len());
+            for azimuth in &mut illumination.props.azimuths[..lights] {
+                *azimuth -= bearing;
             }
         }
-        let props = pack_evaluated_props(&illumination, evaluated.hillshade_accent_color.uniform());
-        let illumination = Illumination { props, num_lights: illumination.direction_radians.len() };
-        *cache = Some((Arc::clone(layer), bearing, illumination));
         illumination
     }
 }
