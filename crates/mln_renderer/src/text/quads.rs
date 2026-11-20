@@ -7,8 +7,6 @@ use mln_text::PositionedIcon;
 use mln_text::glyph::{Shaping, WritingModeType};
 use mln_util::constants::ONE_EM;
 
-use crate::layout::symbol_instance::SymbolContent;
-
 /// A glyph's or an icon's quad, relative to its symbol's anchor.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct SymbolQuad {
@@ -138,12 +136,7 @@ impl<'a> StretchAxis<'a> {
 /// fitted to its text with stretchable parts is cut into a quad for each
 /// part, so that only the stretchable ones stretch.
 #[must_use]
-pub(crate) fn icon_quads(
-    shaped_icon: &PositionedIcon,
-    icon_rotate: f32,
-    icon_type: SymbolContent,
-    has_icon_text_fit: bool,
-) -> SymbolQuads {
+pub(crate) fn icon_quads(shaped_icon: &PositionedIcon, icon_rotate: f32, has_icon_text_fit: bool) -> SymbolQuads {
     let image = shaped_icon.image();
     let pixel_ratio = image.pixel_ratio;
     let image_width = f32::from(image.padded_rect.w - 2 * BORDER);
@@ -201,7 +194,7 @@ pub(crate) fn icon_quads(
             pixel_offset_br: Vec2::new(x.px(right), y.px(bottom)) / pixel_ratio,
             glyph_offset: Vec2::ZERO,
             writing_mode: WritingModeType::None,
-            is_sdf: icon_type == SymbolContent::IconSDF,
+            is_sdf: image.sdf,
             section_index: 0,
             min_font_scale,
         }
@@ -454,7 +447,7 @@ mod tests {
 
         let shaped_icon = PositionedIcon::shape_icon(&image, &[-6.5, -4.5], SymbolAnchorType::Center);
 
-        let quads = icon_quads(&shaped_icon, 0.0, SymbolContent::IconRGBA, false);
+        let quads = icon_quads(&shaped_icon, 0.0, false);
 
         assert_eq!(quads.len(), 1);
         let quad = &quads[0];
@@ -495,7 +488,7 @@ mod tests {
         let fit = |text_fit: IconTextFitType, padding: [f32; 4], font_scale: f32| {
             let mut shaped_icon = PositionedIcon::shape_icon(&image, &[-9.5, -9.5], SymbolAnchorType::Center);
             shaped_icon.fit_icon_to_text(&shaped_text, text_fit, &padding, &[0.0, 0.0], font_scale);
-            let quads = icon_quads(&shaped_icon, 0.0, SymbolContent::IconRGBA, false);
+            let quads = icon_quads(&shaped_icon, 0.0, false);
             assert_eq!(quads.len(), 1);
             quads[0].clone()
         };
@@ -509,7 +502,7 @@ mod tests {
             assert_float_eq(-0.5, shaped_icon.bottom());
             assert_float_eq(-18.5, shaped_icon.left());
 
-            let quads = icon_quads(&shaped_icon, 0.0, SymbolContent::IconRGBA, false);
+            let quads = icon_quads(&shaped_icon, 0.0, false);
 
             assert_eq!(quads.len(), 1);
             assert_quad(&quads[0], -19.5, -19.5, 0.5, 0.5);
@@ -617,7 +610,7 @@ mod tests {
         let position = ImagePosition::new(rect(20, 30, 12, 12), &image);
         let shaped_icon = PositionedIcon::shape_icon(&position, &[0.0, 0.0], SymbolAnchorType::Center);
 
-        let quads = icon_quads(&shaped_icon, 0.0, SymbolContent::IconRGBA, true);
+        let quads = icon_quads(&shaped_icon, 0.0, true);
 
         // Three columns and rows: fixed, stretched and fixed, which together
         // cover the padded image.

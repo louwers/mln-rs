@@ -36,17 +36,6 @@ impl SymbolInstancePools {
     }
 }
 
-/// Bit flags for what a symbol contains: text, an RGBA icon, an SDF icon.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, mln_wire::Wire)]
-pub(crate) struct SymbolContent(pub(crate) u8);
-
-#[expect(non_upper_case_globals, reason = "the bit flags read as the kinds of content they are")]
-impl SymbolContent {
-    pub(crate) const None: SymbolContent = SymbolContent(0);
-    pub(crate) const IconRGBA: SymbolContent = SymbolContent(1 << 1);
-    pub(crate) const IconSDF: SymbolContent = SymbolContent(1 << 2);
-}
-
 /// The justification of a horizontal text run.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Justification {

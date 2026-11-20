@@ -51,8 +51,8 @@ use crate::layout::layout::{BuildParams, Layout, LayoutParameters, SourceLayer, 
 use crate::layout::merge_lines::merge_lines;
 use crate::layout::symbol_feature::SymbolFeature;
 use crate::layout::symbol_instance::{
-    IconPart, Justification, LaidOutSymbol, ShapedTextOrientations, SymbolContent, SymbolInstance, SymbolInstancePools,
-    SymbolQuadSet, TextPart, TextRuns,
+    IconPart, Justification, LaidOutSymbol, ShapedTextOrientations, SymbolInstance, SymbolInstancePools, SymbolQuadSet,
+    TextPart, TextRuns,
 };
 use crate::layout::tile_layout::Resolved;
 use crate::text::collision_feature::{AlongLine, BoxLayout, CollisionBox, CollisionFeature};
@@ -299,7 +299,6 @@ fn feature_context<'a>(zoom: f32, feature: &'a SymbolFeature, canonical: &'a Can
 struct ShapedFeature {
     text: ShapedTextOrientations,
     icon: Option<PositionedIcon>,
-    icon_type: SymbolContent,
     text_offset: [f32; 2],
     /// `text-size` and `icon-size` a zoom level up, which size the symbols'
     /// collision boxes.
@@ -345,9 +344,7 @@ impl FeatureSymbols<'_> {
                 self.allow_vertical_placement,
             )
         };
-        let icon = |icon: &PositionedIcon| {
-            icon_quads(icon, self.values.icon_rotate, self.shaped.icon_type, self.has_icon_text_fit)
-        };
+        let icon = |icon: &PositionedIcon| icon_quads(icon, self.values.icon_rotate, self.has_icon_text_fit);
         let mut horizontal: [SymbolQuads; 3] = Default::default();
         if text.single_line {
             if let Some(shaping) = text.any_horizontal() {
@@ -405,7 +402,7 @@ impl FeatureSymbols<'_> {
             vertical_collision: self.vertical_icon.filter(|_| vertical).map(|icon| {
                 icon_feature(icon, self.values.icon_rotate + VERTICAL_ROTATION, &mut pools.collision_boxes)
             }),
-            sdf: self.shaped.icon_type == SymbolContent::IconSDF,
+            sdf: icon.image().sdf,
         });
         LaidOutSymbol {
             symbol: SymbolInstance {
@@ -1643,19 +1640,14 @@ impl SymbolLayout {
             }
 
             // if feature has icon, get sprite atlas position
-            let mut icon_type = SymbolContent::None;
             if let Some(icon) = &feature.icon
                 && let Some(image) = icons.get(icon.id())
             {
-                icon_type = SymbolContent::IconRGBA;
                 shaped_icon = Some(PositionedIcon::shape_icon(
                     image,
                     &layout.icon_offset.evaluate(&feature_context(zoom, feature, &canonical)),
                     layout.icon_anchor.evaluate(&feature_context(zoom, feature, &canonical)),
                 ));
-                if image.sdf {
-                    icon_type = SymbolContent::IconSDF;
-                }
                 if image.pixel_ratio != self.pixel_ratio || layout.icon_rotate.constant_or(&1.0) != 0.0 {
                     self.icons_need_linear = true;
                 }
@@ -1668,7 +1660,6 @@ impl SymbolLayout {
                 let shaped = ShapedFeature {
                     text: shaped_text_orientations,
                     icon: shaped_icon,
-                    icon_type,
                     text_offset,
                     text_size: layout_text_size,
                     icon_size: layout_icon_size,
