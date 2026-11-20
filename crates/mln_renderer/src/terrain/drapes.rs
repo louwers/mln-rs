@@ -17,15 +17,15 @@
 //! so a stack that draws nothing in a tile holds no memory there.
 //!
 //! A drape's side follows its tile's on screen ([`shown_size`]): GL JS's
-//! where the tile shows large, fewer texels where it shows small. A byte
-//! cap ([`BYTE_CAP`]) lowers the sides of the tiles that show smallest
-//! where the drapes that hold a texture, and what they draw with, would
-//! hold more; it never drops a tile. The frame's sides are settled once
-//! the layers have drawn the drapes that draw again, which tells which of
-//! them hold a texture ([`Drapes::finish_update`]). A drape whose side
-//! grows draws again once the camera rests, as one drawn at another zoom
-//! does, and one whose side shrinks at once, so that the cap holds while
-//! the camera moves.
+//! where the tile shows large, fewer texels where it shows small, and no
+//! more than the device's largest texture. A byte cap ([`BYTE_CAP`]) lowers
+//! the sides of the tiles that show smallest where the drapes that hold a
+//! texture, and what they draw with, would hold more; it never drops a
+//! tile. The frame's sides are settled once the layers have drawn the
+//! drapes that draw again, which tells which of them hold a texture
+//! ([`Drapes::finish_update`]). A drape whose side grows draws again once
+//! the camera rests, as one drawn at another zoom does, and one whose side
+//! shrinks at once, so that the cap holds while the camera moves.
 
 use std::sync::Arc;
 
@@ -65,10 +65,11 @@ const DEPTH_STENCIL: TextureFormat = TextureFormat::Depth24PlusStencil8;
 const MAX_ANISOTROPY: u8 = 16;
 
 /// The most texels a side of the drapes of terrain tiles of `tile_size`
-/// pixels: twice as wide, whatever the pixel ratio (GL JS's quality
-/// factor, the side of all of GL JS's drapes).
-pub(crate) fn drape_size(tile_size: u16) -> u32 {
-    u32::from(tile_size) * 2
+/// pixels, on a device whose textures have at most `max_texture_size`
+/// texels a side: twice as wide, whatever the pixel ratio (GL JS's quality
+/// factor, the side of all of GL JS's drapes), or the device's largest.
+pub(crate) fn drape_size(tile_size: u16, max_texture_size: u32) -> u32 {
+    (u32::from(tile_size) * 2).min(max_texture_size).max(1)
 }
 
 /// How many times a drape's side may halve the most for its tile's size
@@ -162,7 +163,7 @@ pub(crate) fn shown_size(shown: f64, pixel_ratio: f32, largest: u32) -> u32 {
     if texels.is_nan() || texels >= f64::from(largest) {
         return largest;
     }
-    (texels.ceil() as u32).next_power_of_two().clamp(largest >> SMALLEST_SHIFT, largest)
+    (texels.ceil() as u32).next_power_of_two().clamp((largest >> SMALLEST_SHIFT).max(1), largest)
 }
 
 /// Lowers `sizes`, each the side of the drapes of a tile that hold what
@@ -408,8 +409,8 @@ impl Drapes {
     /// `view`, whose projection is `projection`, on a target of
     /// `pixel_ratio`, and of `stacks` stacks: keeps the drapes of the tiles
     /// and stacks it had, and drops the others. Each tile's drapes draw at
-    /// the side its tile shows at ([`shown_size`]), which
-    /// [`choose`](Self::choose) and
+    /// the side its tile shows at ([`shown_size`]), at most
+    /// `max_texture_size`, which [`choose`](Self::choose) and
     /// [`finish_update`](Self::finish_update) lower where they would hold
     /// more than `byte_cap` bytes. The frame's draped layers then give their
     /// keys ([`key_layer`](Self::key_layer)), which choose the drapes that
@@ -420,9 +421,9 @@ impl Drapes {
         (view, projection, pixel_ratio): (&View, &DMat4, f32),
         cover: &TerrainCover,
         stacks: usize,
-        byte_cap: u64,
+        (byte_cap, max_texture_size): (u64, u32),
     ) {
-        let largest = drape_size(cover.tile_size);
+        let largest = drape_size(cover.tile_size, max_texture_size);
         if largest != self.largest {
             *self = Drapes { largest, ..Drapes::default() };
         }
@@ -976,6 +977,19 @@ mod tests {
         assert_eq!(256, shown_size(100.0, 1.0, 2048));
         assert_eq!(512, shown_size(129.0, 1.0, 2048));
         assert_eq!(2048, shown_size(f64::INFINITY, 1.0, 2048));
+    }
+
+    /// The largest side is GL JS's, or the device's largest texture's: a
+    /// DEM of 512 pixels makes terrain tiles of 1024 and drapes of 2048,
+    /// and one of 1024 or 2048 drapes of 4096 or 8192, larger than many
+    /// devices take.
+    #[test]
+    fn the_largest_drape_fits_the_device() {
+        assert_eq!(2048, drape_size(1024, 16384));
+        assert_eq!(2048, drape_size(2048, 2048));
+        assert_eq!(4096, drape_size(4096, 4096));
+        assert_eq!(1, drape_size(1024, 0));
+        assert_eq!(1, shown_size(0.0, 1.0, 8));
     }
 
     /// Three tiles, the first showing largest and the last smallest, with two

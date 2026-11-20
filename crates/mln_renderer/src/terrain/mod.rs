@@ -100,12 +100,12 @@
 //! - **The drapes' sides.** A tile's drapes take the power of two that
 //!   covers its longest side on screen, level with the view's center, at
 //!   two texels a logical pixel or one a physical pixel, whichever is
-//!   more: GL JS's side (twice the terrain tile's) where the tile shows at
-//!   half its size or larger, down to a sixteenth of it. Where the drapes
-//!   with a texture, with the depth and stencil of each side and the layer
-//!   composite of a side whose drapes composite, would hold more than a
-//!   byte cap (256 MiB on phones and in the browser, 384 MiB elsewhere),
-//!   the largest side
+//!   more: GL JS's side (twice the terrain tile's), or the device's largest
+//!   texture's if that is smaller, where the tile shows at half its size or
+//!   larger, down to a sixteenth of it. Where the drapes with a texture,
+//!   with the depth and stencil of each side and the layer composite of a
+//!   side whose drapes composite, would hold more than a byte cap (256 MiB
+//!   on phones and in the browser, 384 MiB elsewhere), the largest side
 //!   allowed falls a step at a time for the tiles that show smallest, below
 //!   a sixteenth if the cap needs it; no tile loses its drape. The frame's
 //!   sides are those of the drapes that hold a texture once its layers
@@ -395,7 +395,8 @@ impl RenderTerrain {
         #[cfg(test)]
         let byte_cap = self.drape_byte_cap.unwrap_or(drapes::BYTE_CAP);
         let camera = (parameters.view, &parameters.transform_params.proj_matrix, parameters.pixel_ratio);
-        self.drapes.begin(camera, cover, stacks, byte_cap);
+        let max_texture_size = parameters.context.caps().max_texture_size;
+        self.drapes.begin(camera, cover, stacks, (byte_cap, max_texture_size));
         Some(&mut self.drapes)
     }
 
