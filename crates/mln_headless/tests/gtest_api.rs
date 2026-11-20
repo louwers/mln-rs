@@ -3,14 +3,14 @@ use std::sync::{Arc, OnceLock};
 use geojson::{Feature, GeoJson, Geometry};
 use mln_headless::HeadlessFrontend;
 use mln_map::{CameraOptions, Map, MapMode, MapOptions};
+use mln_sources::CustomGeometrySourceHandle;
+use mln_sources::custom::geometry::{self, Options as CustomGeometrySourceOptions};
+use mln_sources::geojson::GeoJSONOptions;
 use mln_storage::ResourceOptions;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style::Edit;
 use mln_style::conversion::Convertible;
 use mln_style::layer::Layer;
-use mln_style::sources::CustomGeometrySourceHandle;
-use mln_style::sources::custom_geometry_source::{self, Options as CustomGeometrySourceOptions};
-use mln_style::sources::geojson::GeoJSONOptions;
 use mln_util::geo::{LatLng, LatLngBounds};
 use mln_util::pool::Pool;
 use serde_json::json;
@@ -85,7 +85,7 @@ fn grid() {
         ..Default::default()
     };
 
-    let source = custom_geometry_source::create("custom", options, &pool).unwrap();
+    let source = geometry::create("custom", options, &pool).unwrap();
     handle.set(CustomGeometrySourceHandle::of(&source).unwrap()).unwrap();
     map.add_source(source).unwrap();
 

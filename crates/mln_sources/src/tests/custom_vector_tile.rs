@@ -4,25 +4,20 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use mln_style::custom_tile_loader::{CustomProvider, CustomTileSubscriber, TileFunction};
+use mln_map_types::MapMode;
+use mln_renderer::source::{TileKind, TileNecessity};
+use mln_renderer::testing::OriginTiles;
 use mln_style::layer::Layer;
-use mln_style::layer_type::LayerStyle;
-use mln_style::sources::custom_vector_source::{CustomVectorProvider, CustomVectorTileData, TileDataFormat};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;
 use mln_util::geo::{LatLng, LatLngBounds};
 use parking_lot::Mutex;
 
-use super::RasterTileTest;
-use crate::Registry;
-use crate::builtins::custom::CustomOrigin;
-use crate::erased_layer::{ErasedEvaluatedLayer, EvaluatedLayer};
-use crate::query::SourceQueryOptions;
-use crate::tests::OneTile;
-use crate::tests::fixture_layer::Dot;
-use crate::tile::contents::Contents;
-use crate::tile::tile::{TileKind, TileNecessity};
-use crate::tile::tile_workers::InlineWorkers;
+use super::{TileTest, errors, registry};
+use crate::CustomVectorSourceType;
+use crate::custom::origin::CustomOrigin;
+use crate::custom::provider::{CustomProvider, CustomTileSubscriber, TileFunction};
+use crate::custom::{CustomVectorProvider, CustomVectorTileData, TileDataFormat};
 
 /// The provider, whose calls run on `pool`.
 fn loader(
@@ -53,10 +48,9 @@ fn recorder() -> (Arc<Mutex<Vec<CanonicalTileID>>>, TileFunction) {
 }
 
 /// Tiles `ids` of a custom vector source whose provider is `loader`.
-fn tiles(test: &RasterTileTest, ids: &[OverscaledTileID], loader: Arc<CustomVectorProvider>) -> OneTile {
-    let store = crate::tests::tile_store(&test.thread_pool, Box::new(InlineWorkers));
-    let origin = CustomOrigin::<mln_style::sources::CustomVectorSourceType>::with_loader(loader);
-    OneTile::with_origin(store, TileKind::Geometry, false, origin, ids, mln_map_types::MapMode::Static)
+fn tiles(test: &TileTest, ids: &[OverscaledTileID], loader: Arc<CustomVectorProvider>) -> OriginTiles {
+    let origin = CustomOrigin::<CustomVectorSourceType>::with_loader(loader);
+    OriginTiles::new(&test.thread_pool, TileKind::Geometry, false, origin, ids, MapMode::Static)
 }
 
 /// A subscriber that ignores what the loader sends it.
@@ -71,7 +65,7 @@ impl CustomTileSubscriber<CustomVectorTileData> for NullSubscriber {
 // gtest: CustomVectorTile.InvalidateFailedTile
 #[test]
 fn invalidate_failed_tile() {
-    let test = RasterTileTest::new();
+    let test = TileTest::new();
     let (fetches, fetch) = counter();
     let loader = loader(&test.local_pool, Some(fetch), None);
 
@@ -84,11 +78,11 @@ fn invalidate_failed_tile() {
     let id = CanonicalTileID::new(0, 0, 0);
     loader.set_tile_error(id, Error::native("failed"));
     test.local_pool.run_all();
-    tiles.store.receive();
+    tiles.receive();
 
     loader.invalidate_tile(id);
     test.local_pool.run_all();
-    tiles.store.receive();
+    tiles.receive();
 
     // The render source updates the necessity of a changed tile.
     tiles.set_necessity(&root, TileNecessity::Required);
@@ -99,7 +93,7 @@ fn invalidate_failed_tile() {
 // gtest: CustomVectorTile.FetchFailedTileAgain
 #[test]
 fn fetch_failed_tile_again() {
-    let test = RasterTileTest::new();
+    let test = TileTest::new();
     let (fetches, fetch) = counter();
     let loader = loader(&test.local_pool, Some(fetch), None);
 
@@ -119,7 +113,7 @@ fn fetch_failed_tile_again() {
 // gtest: CustomVectorTile.CancelOneCopy
 #[test]
 fn cancel_one_copy() {
-    let test = RasterTileTest::new();
+    let test = TileTest::new();
     let (fetches, fetch) = counter();
     let (cancels, cancel) = counter();
     let loader = loader(&test.local_pool, Some(fetch), Some(cancel));
@@ -146,7 +140,7 @@ fn cancel_one_copy() {
     let id = CanonicalTileID::new(0, 0, 0);
     loader.invalidate_tile(id);
     test.local_pool.run_all();
-    tiles.store.receive();
+    tiles.receive();
     tiles.set_necessity(&first, TileNecessity::Required);
     test.local_pool.run_all();
     assert_eq!(fetches.load(Ordering::SeqCst), 2);
@@ -155,7 +149,7 @@ fn cancel_one_copy() {
 // gtest: CustomVectorTile.InvalidateRegion
 #[test]
 fn invalidate_region() {
-    let test = RasterTileTest::new();
+    let test = TileTest::new();
     let (fetched, fetch) = recorder();
     let (cancelled, cancel) = recorder();
     let loader = loader(&test.local_pool, Some(fetch), Some(cancel));
@@ -184,14 +178,14 @@ fn invalidate_region() {
         loader.set_tile_data(id, (None, TileDataFormat::Mvt));
     }
     test.local_pool.run_all();
-    tiles.store.receive();
+    tiles.receive();
     fetched.lock().clear();
 
     // Northeast of the origin, so it intersects the root tile, 1/1/0, and 2/2/1.
     let bounds = LatLngBounds::hull(LatLng::new(10.0, 10.0).unwrap(), LatLng::new(20.0, 20.0).unwrap());
     loader.invalidate_region(bounds);
     test.local_pool.run_all();
-    tiles.store.receive();
+    tiles.receive();
 
     // The render source updates the necessity of a changed tile.
     for tile_id in &tile_ids {
@@ -211,16 +205,15 @@ fn invalidate_region() {
 // Port-only: a tile decodes MLT data as MLT (ffi patch 0052).
 #[test]
 fn set_mlt_tile_data() {
-    let test = RasterTileTest::new();
+    let test = TileTest::new();
     let loader = loader(&test.local_pool, None, None);
     let root = OverscaledTileID::from_zxy(0, 0, 0);
     let mut tiles = tiles(&test, &[root], Arc::clone(&loader));
 
-    let mut layer = Layer::new(Registry::with_builtins().style(), "dot", "water", "source").unwrap();
+    let registry = registry();
+    let mut layer = Layer::new(registry.style(), "circle", "water", "source").unwrap();
     layer.set_source_layer("water");
-    let layer_properties: Arc<dyn ErasedEvaluatedLayer> =
-        Arc::new(EvaluatedLayer::<Dot>::new(LayerStyle::recover(layer.style()).unwrap()));
-    tiles.set_style(&crate::tests::style(&[layer_properties]));
+    tiles.set_layers(&registry, &[layer]).unwrap();
     tiles.set_necessity(&root, TileNecessity::Required);
     test.local_pool.run_all();
 
@@ -228,16 +221,11 @@ fn set_mlt_tile_data() {
         .join("testdata/test/fixtures/map/issue12432/0-0-0.mlt");
     let data = Arc::new(std::fs::read(path).unwrap());
     loader.set_tile_data(root.canonical, (Some(data), TileDataFormat::Mlt));
-    while !tiles.tile().is_complete() {
+    while !tiles.is_complete(&root) {
         test.local_pool.run_all();
         tiles.update();
     }
 
-    let options = SourceQueryOptions { source_layers: Some(vec!["water".to_owned()]), filter: None };
-    let Some(Contents::Geometry(contents)) = tiles.tile().contents() else {
-        panic!("a layout");
-    };
-    let mut result = Vec::new();
-    contents.query_source_features(&root, false, &mut result, &options, None).unwrap();
-    assert_ne!(result, Vec::<mln_util::feature::Feature>::new());
+    assert_eq!(errors(&mut tiles), Vec::<String>::new());
+    assert_ne!(tiles.features(&root, "water").unwrap(), Vec::new());
 }

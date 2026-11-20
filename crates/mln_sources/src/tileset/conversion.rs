@@ -1,9 +1,8 @@
+use mln_conversion::Convertible;
 use mln_math::clamp_f64;
+use mln_style::layer_type::SourceKind;
 use mln_util::geo::{LatLng, LatLngBounds};
 use mln_util::tileset::{PartialTileset, RasterEncoding, Scheme, VectorEncoding};
-
-use super::Convertible;
-use crate::layer_type::SourceKind;
 
 /// The member `name` of `value` as `read` reads it, or `None` without one. The error names the
 /// member when `read` rejects it.

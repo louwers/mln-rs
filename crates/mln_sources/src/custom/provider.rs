@@ -1,8 +1,7 @@
 //! The provider of a custom source's tile data: [`CustomProvider`] asks the
 //! host for each canonical tile that a tile needs, and hands the host's
 //! answers to the tiles. It is generic over the data it hands them, and
-//! reaches a tile through [`CustomTileSubscriber`], since the tiles live in
-//! `mln_renderer`.
+//! reaches a tile through [`CustomTileSubscriber`].
 
 use std::sync::{Arc, Weak};
 

@@ -14,8 +14,8 @@ use crate::property_table::{PropertyTable, PropertyVisitor};
 use crate::style::Style;
 use crate::tests::fixture_layer::Plain;
 
-const EMPTY_GEOJSON_SOURCE: &str = r#"{"type":"geojson","data":{"type":"FeatureCollection","features":[]}}"#;
-const DEM_SOURCE: &str = r#"{"type":"raster-dem","tiles":["https://example.com/dem/{z}/{x}/{y}.png"],"tileSize":256}"#;
+const POINTS_SOURCE: &str = r#"{"type":"points"}"#;
+const HEIGHTS_SOURCE: &str = r#"{"type":"heights"}"#;
 const DOTS: &str = r#"{"id":"dots","type":"symbol","source":"points"}"#;
 
 fn loaded_style() -> Style {
@@ -28,7 +28,7 @@ fn loaded_style() -> Style {
 /// `dots` on it.
 fn style_with_dots() -> Style {
     let mut style = loaded_style();
-    style.add_source_json("points", EMPTY_GEOJSON_SOURCE);
+    style.add_source_json("points", POINTS_SOURCE);
     style.add_layer_json(DOTS, None).unwrap();
     style
 }
@@ -101,8 +101,8 @@ fn malformed_layers_are_invalid_arguments() {
 #[test]
 fn a_layer_requires_a_source_that_supports_its_type() {
     let mut style = loaded_style();
-    style.add_source_json("dem", DEM_SOURCE);
-    style.add_source_json("points", EMPTY_GEOJSON_SOURCE);
+    style.add_source_json("dem", HEIGHTS_SOURCE);
+    style.add_source_json("points", POINTS_SOURCE);
 
     let shade = r#"{"id":"shade","type":"shade","source":"dem"}"#;
     style.add_layer_json(shade, None).unwrap();

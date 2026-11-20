@@ -1,9 +1,9 @@
 use mln_conversion::Convertible;
+use mln_style::conversion::Error;
+use mln_style::expression::Functions;
 
-use super::util::parse_json;
-use crate::conversion::{Error, convert_geojson_options};
-use crate::expression::Functions;
-use crate::sources::geojson::GeoJSONOptions;
+use super::parse_json;
+use crate::geojson::{GeoJSONOptions, convert_geojson_options};
 
 fn convert_json(json: &str, error: &mut Error) -> Option<GeoJSONOptions> {
     let value = parse_json(json);
@@ -103,7 +103,7 @@ fn cluster_property_reduces_its_key() {
         .unwrap_or_else(|| panic!("{}", error.message));
     let (_, reduce) = &converted.cluster_properties[r#"a"b"#];
     assert_eq!(
-        super::util::value_to_json(&reduce.serialize()),
+        mln_conversion::value_to_json(&reduce.serialize()),
         serde_json::json!(["+", ["number", ["accumulated"]], ["number", ["get", r#"a"b"#]]])
     );
 }

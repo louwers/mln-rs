@@ -6,7 +6,6 @@ use mln_conversion::Convertible;
 use mln_style_types::{ProjectionDefinition, VisibilityType};
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
-use mln_util::tileset::PartialTileset;
 use mln_util::{Color, LatLng};
 
 use super::util::{FixtureLog, new_layer, parse_json};
@@ -17,7 +16,6 @@ use crate::layers::Symbol;
 use crate::projection::Projection;
 use crate::property_value::{PropertyValue, StyleValue as _};
 use crate::sky::Sky;
-use crate::sources::tileset::vector_source as tileset_vector_source;
 use crate::style::Style;
 use crate::transition_options::TransitionOptions;
 use crate::{StyleRegistry, image};
@@ -211,7 +209,7 @@ fn is_supported_script_of_a_literal_in_a_layout_property() {
     // REQUIRED_PROPS in mln_expression's parsing_context.rs).
     let mut style = stub_style();
     style.load_json(
-        r#"{"version":8,"sources":{"s":{"type":"geojson","data":{"type":"FeatureCollection","features":[]}}},
+        r#"{"version":8,"sources":{"s":{"type":"points"}},
         "layers":[{"id":"symbol","type":"symbol","source":"s",
         "layout":{"text-field":["case",["is-supported-script","မြန်မာ"],"local","fallback"]}}]}"#,
     );
@@ -560,18 +558,18 @@ fn sky_projection_and_global_state_coexist() {
     assert_eq!(Value::Bool(false), style.get_global_state()["showLabels"]);
 }
 
-fn vector_source(id: &str) -> crate::Source {
-    tileset_vector_source(id, Some("mptiler://tiles/contours".to_owned()), PartialTileset::default())
+fn shapes_source(id: &str) -> crate::Source {
+    crate::tests::fixture_source::source::<crate::tests::fixture_source::Shapes>(id)
 }
 
 #[test]
 fn sources_keep_the_order_they_were_added_in() {
     let mut style = stub_style();
     for id in ["c", "b", "a"] {
-        edit(&mut style, Edit::AddSource(vector_source(id)));
+        edit(&mut style, Edit::AddSource(shapes_source(id)));
     }
     assert_eq!(["c", "b", "a"], *ids_of(style.get_sources()));
-    let error = style.apply(Edit::AddSource(vector_source("b"))).unwrap_err();
+    let error = style.apply(Edit::AddSource(shapes_source("b"))).unwrap_err();
     assert_eq!(mln_util::ErrorKind::AlreadyExists, error.kind);
 
     // A changed source keeps its place.
@@ -604,7 +602,7 @@ fn an_edit_replaces_only_the_part_it_changes() {
         assert_eq!(parts, parts_that_differ(&before, &style));
     };
     case(Edit::SetLayerZoomRange { layer: "bg".to_owned(), min: 1.0, max: 2.0 }, &["layers"]);
-    case(Edit::AddSource(vector_source("s")), &["sources"]);
+    case(Edit::AddSource(shapes_source("s")), &["sources"]);
     case(Edit::AddImage(make_image("i")), &["images"]);
     case(Edit::SetLight(crate::light::Light::new()), &["light"]);
     case(Edit::SetSky(Some(Sky::new())), &["sky"]);

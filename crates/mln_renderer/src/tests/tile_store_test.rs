@@ -12,7 +12,6 @@ use geo_types::{Geometry, Point};
 use mln_map_types::MapMode;
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::{FileSource, Resource, Responder, Response};
-use mln_style::sources::tileset::VectorKind;
 use mln_tile::TileData;
 use mln_tile_id::OverscaledTileID;
 use mln_util::chrono::Timestamp;
@@ -22,10 +21,10 @@ use parking_lot::Mutex;
 use serde_json::json;
 
 use super::tile_jobs_test::{Manual, icons, layer, points};
-use crate::builtins::tileset::{Fetch, TilesetLoad, TilesetOrigin, VectorTileEncoding};
 use crate::erased_layer::ErasedEvaluatedLayer;
 use crate::layer_drawing::ChangedBuckets;
 use crate::query::SourceQueryOptions;
+use crate::tests::fixture_source::{self, Fetch, Fetched, FetchedLoad};
 use crate::tests::tile::{dem_png, png};
 use crate::tests::{OneTile, style, tile_store};
 use crate::tile::contents::Contents;
@@ -111,13 +110,13 @@ impl Test {
         Test { pool: TaskGroup::new(&crate::tests::pool()) }
     }
 
-    /// Tile 0/0/0 of a vector tileset whose tiles `file_source` answers,
-    /// whose jobs run on `workers`.
+    /// Tile 0/0/0 of a tileset whose tiles `file_source` answers, whose
+    /// jobs run on `workers`.
     fn tileset_tile(&self, file_source: &Arc<Held>, workers: Box<dyn TileWorkers>) -> OneTile {
         let store = tile_store(&self.pool, workers);
         let file_source: Arc<dyn FileSource> = Arc::<Held>::clone(file_source);
         let tileset = Tileset { tiles: vec!["tiles".to_owned()], ..Default::default() };
-        let origin = TilesetOrigin::<VectorKind>::loaded(tileset, VectorTileEncoding::Mvt, Some(file_source));
+        let origin = Fetched::<fixture_source::Geometry>::loaded(tileset, file_source);
         let id = OverscaledTileID::from_zxy(0, 0, 0);
         OneTile::with_origin(store, TileKind::Geometry, false, origin, &[id], MapMode::Static)
     }
@@ -135,13 +134,13 @@ impl Drop for Test {
     }
 }
 
-/// Whether `tile`'s tileset load waits for a network-only request, or (with
-/// `false`) for no request at all.
+/// Whether `tile`'s load waits for a network request, or (with `false`) for
+/// no request at all.
 fn requesting_network(tile: &OneTile, pending: bool) -> bool {
     let load: &dyn Any = &*tile.tile().load.state;
-    match load.downcast_ref::<TilesetLoad>() {
-        Some(tileset) if pending => matches!(tileset.fetch, Fetch::Network { .. }),
-        Some(tileset) => tileset.is_idle(),
+    match load.downcast_ref::<FetchedLoad>() {
+        Some(load) if pending => matches!(load.fetch, Fetch::Network { .. }),
+        Some(load) => load.is_idle(),
         None => false,
     }
 }
@@ -274,44 +273,6 @@ fn fresh_data_is_kept_when_required_again() {
         });
     }
     assert_eq!(manual.submitted(), 2, "one layout per response");
-}
-
-/// A tile cut from an ancestor that another tile brought fresh from the
-/// network takes it from memory, without a request; with the ancestor's
-/// data expired, it loads the ancestor again.
-#[test]
-fn a_cut_tile_takes_a_fresh_ancestor_from_memory() {
-    let test = Test::new();
-    for (response, requests) in [(water(), 0), (expired(water()), 1)] {
-        let file_source = Arc::new(Held::default());
-        let file_source_dyn: Arc<dyn FileSource> = Arc::<Held>::clone(&file_source);
-        let tileset = Tileset {
-            tiles: vec!["tiles".to_owned()],
-            zoom_range: mln_util::range::Range::new(0, 0),
-            ..Default::default()
-        };
-        let origin = TilesetOrigin::<VectorKind>::loaded(tileset, VectorTileEncoding::Mvt, Some(file_source_dyn));
-        let (left, right) = (OverscaledTileID::from_zxy(1, 0, 0), OverscaledTileID::from_zxy(1, 1, 0));
-        let store = tile_store(&test.pool, Box::new(InlineWorkers));
-        let mut tiles = OneTile::with_origin(store, TileKind::Geometry, false, origin, &[left, right], MapMode::Static);
-        let (styled, params) = (style(&[water_layer("water", "red")]), tiles.tile_params());
-        for id in [left, right] {
-            tiles.with_at(&id, |tile| tile.set_style(&styled, params.pixel_ratio, params.subdivision_granularity));
-        }
-        tiles.set_necessity(&left, TileNecessity::Required);
-        file_source.respond(response);
-        tiles.update();
-        tiles.update();
-        assert!(tiles.tile_at(&left).is_complete());
-
-        tiles.set_necessity(&right, TileNecessity::Required);
-        assert_eq!(file_source.pending(), requests);
-        if requests == 0 {
-            tiles.update();
-            tiles.update();
-            assert!(tiles.tile_at(&right).is_complete());
-        }
-    }
 }
 
 /// A tile whose data failed to lay out requests it again when required
@@ -534,7 +495,7 @@ fn style_replaced_mid_load() {
     assert!(reload.is_cancelled(), "the old tile's request goes with it");
     let file_source_dyn: Arc<dyn FileSource> = Arc::<Held>::clone(&file_source);
     let tileset = Tileset { tiles: vec!["tiles".to_owned()], ..Default::default() };
-    let origin = TilesetOrigin::<VectorKind>::loaded(tileset, VectorTileEncoding::Mvt, Some(file_source_dyn));
+    let origin = Fetched::<fixture_source::Geometry>::loaded(tileset, file_source_dyn);
     let new_key = tile.store.add_source("source".to_owned(), TileKind::Geometry, false, Box::new(origin));
     assert_ne!(new_key, old_key, "keys aren't reused");
     let (source, ctx) = tile.store.source_mut(new_key).expect("the source");

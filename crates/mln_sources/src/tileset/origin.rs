@@ -1,18 +1,20 @@
-//! Tileset sources: vector, raster and raster-dem tiles of a tileset, which
-//! the style lists or a TileJSON describes, loaded through the map's file
-//! source. A tile's first request only looks in the cache; a required tile
-//! then asks the network, unless it has fresh data from there.
+//! The render half of tileset sources: their tiles load through the map's
+//! file source. A tile's first request only looks in the cache; a required
+//! tile then asks the network, unless it has fresh data from there.
 
 use std::marker::PhantomData;
 use std::sync::{Arc, Weak};
 
 use mln_map_types::MapMode;
+use mln_renderer::source::{
+    Cover, DataOrigin, Freshness, LoadContext, NewTile, OriginUpdate, SourceType, Supply, TileInput, TileKind,
+    TileLoad, TileNecessity, TileOperation, TileUpdateParameters,
+};
 use mln_storage::response::Reason;
 use mln_storage::{Data, FileSource, LoadingMethod, Request, Resource, Response, StoragePolicy};
 use mln_style::Source;
 use mln_style::layer_type::SourceKind;
 use mln_style::source_type::SourceData;
-use mln_style::sources::tileset::{TilesetKind, TilesetSourceType};
 use mln_tile::TileData;
 use mln_tile::cut::{Ancestor, Cut, CutData};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
@@ -22,10 +24,7 @@ use mln_util::error::Error;
 use mln_util::hash::HashMap;
 use mln_util::tileset::{RasterEncoding, Tileset, VectorEncoding};
 
-use crate::source::{
-    Cover, DataOrigin, Freshness, LoadContext, NewTile, OriginUpdate, SourceType, Supply, TileInput, TileKind,
-    TileLoad, TileNecessity, TileOperation, TileUpdateParameters,
-};
+use super::{TilesetKind, TilesetSourceType};
 
 impl<K: TilesetKind> SourceType for TilesetSourceType<K> {
     fn supply(_source: &Source) -> Supply {
@@ -473,13 +472,13 @@ fn encoded(data: &TileData) -> Option<&[u8]> {
 /// the tile is required, one to the network.
 pub(crate) struct TilesetLoad {
     resource: Resource,
-    pub(crate) fetch: Fetch,
+    fetch: Fetch,
 }
 
 impl TileLoad for TilesetLoad {}
 
 /// The tile's request; dropping it cancels it.
-pub(crate) enum Fetch {
+enum Fetch {
     Idle,
     /// The last response was an error: `retry` asks again.
     Failed,
@@ -517,7 +516,7 @@ impl TilesetLoad {
         &self.resource
     }
 
-    pub(crate) fn is_idle(&self) -> bool {
+    fn is_idle(&self) -> bool {
         matches!(self.fetch, Fetch::Idle | Fetch::Failed)
     }
 

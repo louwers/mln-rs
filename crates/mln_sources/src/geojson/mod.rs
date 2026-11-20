@@ -5,9 +5,16 @@ use std::sync::{Arc, OnceLock};
 
 use feature::{Feature, PropertyMap, Value};
 use geojson::GeoJson;
+use mln_conversion::{Convertible, Error as ConversionError};
 use mln_expression::expression::evaluate_accumulated;
 use mln_geojson::{cluster, tile};
 use mln_storage::{Data, Resource};
+use mln_style::Edit;
+use mln_style::expression::{Expr, Functions, from_expression_value};
+use mln_style::layer_type::SourceKind;
+use mln_style::source_type::{
+    Described, Load, OfflineResources, Source, SourceData, SourceSummary, SourceTypeInfo, StyleSourceType,
+};
 use mln_tile_id::CanonicalTileID;
 use mln_util::constants;
 use mln_util::error::Error;
@@ -16,14 +23,11 @@ use mln_util::pool::{Pool, Respond, TaskGroup};
 use mln_util::range::Range;
 use mln_vec_map::VecMap;
 
-use crate::Edit;
-use crate::conversion::geojson::convert_json_geojson;
-use crate::conversion::{Convertible, Error as ConversionError};
-use crate::expression::{Expr, Functions, from_expression_value};
-use crate::layer_type::SourceKind;
-use crate::source_type::{
-    Described, Load, OfflineResources, Source, SourceData, SourceSummary, SourceTypeInfo, StyleSourceType,
-};
+pub use self::conversion::convert_geojson_options;
+use self::conversion::{convert_geojson_source, convert_json_geojson};
+
+pub(crate) mod conversion;
+mod origin;
 
 /// The features of tile `id`. A tile past the maximum zoom or the last row
 /// is logged, and empty.
@@ -371,7 +375,7 @@ impl StyleSourceType for GeoJsonSourceType {
         functions: &Arc<Functions>,
         error: &mut ConversionError,
     ) -> Option<SourceData<Self>> {
-        crate::conversion::source::convert_geojson_source(value, functions, error)
+        convert_geojson_source(value, functions, error)
     }
 
     /// The GeoJSON at the source's URL, if it has one.
@@ -396,11 +400,7 @@ impl StyleSourceType for GeoJsonSourceType {
     }
 
     fn summary(source: &SourceData<Self>) -> SourceSummary {
-        SourceSummary {
-            url: source.options.url.clone(),
-            geojson: Some(Arc::clone(&source.options.options)),
-            ..SourceSummary::default()
-        }
+        SourceSummary { url: source.options.url.clone(), ..SourceSummary::default() }
     }
 
     fn is_update_synchronous(source: &SourceData<Self>) -> bool {

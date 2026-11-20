@@ -11,22 +11,23 @@ use mln_storage::{FileSource, Kind, Response};
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
 use mln_style::layer_type::LayerStyle;
 use mln_style::layers::Symbol;
-use mln_style::sources::vector_source;
 use mln_style_types::image::Impl as ImageImpl;
 use mln_tile_id::OverscaledTileID;
+use mln_util::constants::TILE_SIZE_I;
 use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
 use mln_util::pool::TaskGroup;
 use mln_util::queue::Queue;
 use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
-use mln_util::tileset::PartialTileset;
+use mln_util::tileset::Tileset;
 use proptest::prelude::*;
 use serde_json::json;
 
 use crate::Registry;
 use crate::erased_layer::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::tests::fixture_layer::Dot;
+use crate::tests::fixture_source::{self, Geometry};
 use crate::tile::store::StoreEvent;
 use crate::tile_parameters::TileParameters;
 
@@ -53,7 +54,7 @@ fn layer(json: &serde_json::Value) -> Arc<dyn ErasedEvaluatedLayer> {
 /// Loads the z0 tile of a vector source whose tiles are `tile`, with
 /// `layers`, and returns what the render source reports.
 fn load(tile: Vec<u8>, layers: &[Arc<dyn ErasedEvaluatedLayer>]) -> Outcome {
-    let tileset = PartialTileset { tiles: Some(vec!["tiles".to_owned()]), ..Default::default() };
+    let tileset = Tileset { tiles: vec!["tiles".to_owned()], ..Default::default() };
     let run_loop = Queue::new();
     let thread_pool = TaskGroup::new(&crate::tests::pool());
     let mut transform = Transform::new(ConstrainMode::HeightOnly, ViewportMode::Default);
@@ -68,7 +69,7 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn ErasedEvaluatedLayer>]) -> Outcome {
         Some(response)
     });
 
-    let style_source = crate::tests::ready(vector_source("source", None, tileset));
+    let style_source = fixture_source::source::<Geometry>("source", tileset, TILE_SIZE_I);
     // A loaded sprite with the icon "v" answers the symbol layer's request,
     // and missing icons stay missing.
     let mut store = crate::tests::pool_store(&thread_pool);

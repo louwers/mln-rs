@@ -50,6 +50,9 @@ mod sky_pass;
 pub mod source;
 pub mod source_state;
 mod sources;
+#[cfg(any(test, feature = "testing"))]
+#[doc(hidden)]
+pub mod testing;
 pub mod text;
 pub mod tile;
 mod tile_mask;

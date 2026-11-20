@@ -1,3 +1,6 @@
+// The tiles of a GeoJSON source get features that the source cut from its
+// data; here the test gives them the features.
+
 use std::sync::Arc;
 
 use feature::Feature;
@@ -6,18 +9,16 @@ use mln_map_types::MapMode;
 use mln_style::layer::Layer;
 use mln_style::layer_type::LayerStyle;
 use mln_style::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
-use mln_style::sources::geojson::{Features, GeoJSONData, TileCallback, TileFeatures};
-use mln_tile_id::{CanonicalTileID, OverscaledTileID};
+use mln_tile::TileData;
+use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
 use mln_util::pool::TaskGroup;
 
 use crate::Registry;
-use crate::builtins::geojson::{self, GeoJsonOrigin};
 use crate::erased_layer::{ErasedEvaluatedLayer, EvaluatedLayer};
-use crate::source::LoadContext;
 use crate::tests::fixture_layer::Dot;
-use crate::tests::{OneTile, style};
-use crate::tile::tile::TileKind;
+use crate::tests::{Given, OneTile, style};
+use crate::tile::tile::{TileInput, TileKind};
 use crate::tile::tile_workers::TileWorkers;
 
 struct GeoJSONTileTest {
@@ -29,27 +30,17 @@ impl GeoJSONTileTest {
         GeoJSONTileTest { thread_pool: TaskGroup::new(&crate::tests::pool()) }
     }
 
-    /// Tiles `ids` of a GeoJSON source of `data`, whose jobs run on
+    /// Tiles `ids` of a source of one layer of features, whose jobs run on
     /// `workers`, or on this thread at once for a source with `synchronous`
-    /// updates; the tiles get their data before their style.
-    fn tiles(
-        &self,
-        data: Arc<dyn GeoJSONData>,
-        ids: &[OverscaledTileID],
-        workers: Box<dyn TileWorkers>,
-        synchronous: bool,
-    ) -> OneTile {
+    /// updates; the tiles get their features before their style.
+    fn tiles(&self, ids: &[OverscaledTileID], workers: Box<dyn TileWorkers>, synchronous: bool) -> OneTile {
         let store = crate::tests::tile_store(&self.thread_pool, workers);
-        let mut tiles = OneTile::with_origin(
-            store,
-            TileKind::Geometry,
-            true,
-            GeoJsonOrigin::with_data(data),
-            ids,
-            MapMode::Continuous,
-        );
+        let mut tiles = OneTile::with_origin(store, TileKind::Geometry, true, Given, ids, MapMode::Continuous);
         let key = tiles.key;
         tiles.store.source_mut(key).expect("the source").0.info.synchronous = synchronous;
+        for id in ids {
+            tiles.with_at(id, |tile| tile.take_input(point_features()));
+        }
         tiles
     }
 
@@ -64,32 +55,10 @@ impl Drop for GeoJSONTileTest {
     }
 }
 
-#[derive(Debug)]
-struct FakeGeoJSONData {
-    features: Arc<TileFeatures>,
-}
-
-impl GeoJSONData for FakeGeoJSONData {
-    fn get_tile(&self, _id: &CanonicalTileID, callback: TileCallback, _pool: Option<&mln_util::pool::Pool>) {
-        callback(Arc::clone(&self.features));
-    }
-
-    fn get_children(&self, _cluster_id: u32) -> Result<Features, Error> {
-        Ok(Features::new())
-    }
-
-    fn get_leaves(&self, _cluster_id: u32, _limit: u32, _offset: u32) -> Result<Features, Error> {
-        Ok(Features::new())
-    }
-
-    fn get_cluster_expansion_zoom(&self, _cluster_id: u32) -> Result<u8, Error> {
-        Ok(0)
-    }
-}
-
-fn point_data() -> Arc<dyn GeoJSONData> {
+/// A point's features, as a load delivers them.
+fn point_features() -> TileInput {
     let features = vec![Feature { geometry: Some(Point::new(0i16, 0).into()), ..Feature::default() }];
-    Arc::new(FakeGeoJSONData { features: Arc::new(features) })
+    TileInput::Geometry { data: Some(TileData::Features(Arc::new(features))), missing: false }
 }
 
 fn dot_layer_properties() -> Arc<dyn ErasedEvaluatedLayer> {
@@ -105,7 +74,7 @@ fn root() -> OverscaledTileID {
 #[test]
 fn synchronous_update() {
     let test = GeoJSONTileTest::new();
-    let mut tiles = test.tiles(point_data(), &[root()], Box::new(crate::tile::tile_workers::InlineWorkers), true);
+    let mut tiles = test.tiles(&[root()], Box::new(crate::tile::tile_workers::InlineWorkers), true);
     tiles.set_style(&style(&[dot_layer_properties()]));
     assert!(tiles.tile().is_complete());
     assert!(tiles.tile().is_renderable());
@@ -115,14 +84,13 @@ fn synchronous_update() {
 #[test]
 fn issue_7648() {
     let test = GeoJSONTileTest::new();
-    let data = point_data();
-    let mut tiles = test.tiles(Arc::clone(&data), &[root()], test.pool(), false);
+    let mut tiles = test.tiles(&[root()], test.pool(), false);
     let layer_properties = dot_layer_properties();
     tiles.set_style(&style(&[Arc::clone(&layer_properties)]));
     tiles.settle(&[root()]);
     assert!(tiles.changes() >= 1);
 
-    tiles.with(|tile| geojson::load(&data, false, &mut LoadContext::new(tile)));
+    tiles.with(|tile| tile.take_input(point_features()));
     // Once present, the bucket should never "disappear", which would cause
     // flickering.
     while !tiles.tile().is_complete() {
@@ -139,7 +107,7 @@ fn issue_7648() {
 #[test]
 fn issue_9927() {
     let test = GeoJSONTileTest::new();
-    let mut tiles = test.tiles(point_data(), &[root()], test.pool(), false);
+    let mut tiles = test.tiles(&[root()], test.pool(), false);
 
     let layer_properties = dot_layer_properties();
     tiles.set_style(&style(&[Arc::clone(&layer_properties)]));
@@ -180,7 +148,7 @@ fn update_through_the_codec() {
     let layer_properties = evaluated_dot_layer_properties();
     // Two tiles, so both instances get one.
     let ids = [OverscaledTileID::from_zxy(1, 0, 0), OverscaledTileID::from_zxy(1, 1, 0)];
-    let mut tiles = test.tiles(point_data(), &ids, workers, false);
+    let mut tiles = test.tiles(&ids, workers, false);
     let (style, params) = (style(std::slice::from_ref(&layer_properties)), tiles.params());
     for id in &ids {
         tiles.with_at(id, |tile| tile.set_style(&style, params.pixel_ratio, params.subdivision_granularity));
@@ -191,8 +159,7 @@ fn update_through_the_codec() {
         assert!(tiles.with_at(id, |tile| tile.parts().1.layer_properties_updated(&layer_properties)));
     }
 
-    let data = point_data();
-    tiles.with_at(&ids[0], |tile| geojson::load(&data, false, &mut LoadContext::new(tile)));
+    tiles.with_at(&ids[0], |tile| tile.take_input(point_features()));
     assert!(!tiles.tile_at(&ids[0]).is_complete());
     tiles.settle(&ids[..1]);
     assert!(tiles.tile_at(&ids[0]).is_renderable());

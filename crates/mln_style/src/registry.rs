@@ -39,32 +39,23 @@ impl StyleRegistry {
         StyleRegistry { functions, layer_types: layers_by_name, source_types: sources_by_name }
     }
 
-    /// The built-in expression functions, the built-in layer types and source
-    /// types of this crate and the tests' `plain` layer type, for this
-    /// crate's tests, which can't reach the facade's registry.
+    /// The built-in expression functions, the built-in layer type of this
+    /// crate, and the tests' `plain` and `shade` layer types and fixture
+    /// source types, for this crate's tests, which can't reach the facade's
+    /// registry.
     #[cfg(test)]
     pub(crate) fn with_builtins() -> Arc<Self> {
         use crate::layer_type::style_entry;
         use crate::layers::Symbol;
         use crate::source_type::style_source_entry;
-        use crate::sources::{
-            CustomGeometrySourceType, CustomVectorSourceType, GeoJsonSourceType, ImageSourceType, RasterDemSourceType,
-            RasterSourceType, VectorSourceType,
-        };
+        use crate::tests::fixture_source::{Heights, Points, Shapes};
         let layer_types = [
             style_entry::<Symbol>(),
             style_entry::<crate::tests::fixture_layer::Plain>(),
             style_entry::<crate::tests::fixture_layer::Shade>(),
         ];
-        let source_types = [
-            style_source_entry::<VectorSourceType>(),
-            style_source_entry::<RasterSourceType>(),
-            style_source_entry::<RasterDemSourceType>(),
-            style_source_entry::<GeoJsonSourceType>(),
-            style_source_entry::<ImageSourceType>(),
-            style_source_entry::<CustomGeometrySourceType>(),
-            style_source_entry::<CustomVectorSourceType>(),
-        ];
+        let source_types =
+            [style_source_entry::<Shapes>(), style_source_entry::<Points>(), style_source_entry::<Heights>()];
         Arc::new(StyleRegistry::new(Functions::with_builtins(), layer_types, source_types))
     }
 

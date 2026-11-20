@@ -120,24 +120,21 @@ mod versions {
 
     use mln_util::image::PremultipliedImage;
     use mln_util::size::Size;
-    use mln_util::tileset::PartialTileset;
 
     use crate::diff::{LayerChange, StyleDiff, sources_by_id};
-    use crate::sources::geojson::{GeoJSONOptions, geojson_source};
-    use crate::sources::tileset::vector_source;
+    use crate::tests::fixture_source::{Points, Shapes, source};
     use crate::{Edit, StyleRegistry, image};
 
     const STYLE: &str = r#"{"version":8,
-        "sources":{"c":{"type":"geojson","data":{"type":"FeatureCollection","features":[]}},
-                   "a":{"type":"geojson","data":{"type":"FeatureCollection","features":[]}}},
+        "sources":{"c":{"type":"points"},"a":{"type":"points"}},
         "layers":[{"id":"bg","type":"plain"},{"id":"dots","type":"symbol","source":"a"}]}"#;
 
     fn style() -> crate::Style {
         crate::Style::from_json(&StyleRegistry::with_builtins(), STYLE, None).unwrap()
     }
 
-    fn vector(id: &str) -> crate::Source {
-        vector_source(id, Some("mbtiles://tiles".to_owned()), PartialTileset::default())
+    fn shapes(id: &str) -> crate::Source {
+        source::<Shapes>(id)
     }
 
     fn image(id: &str) -> Arc<image::Impl> {
@@ -172,7 +169,7 @@ mod versions {
     #[test]
     fn the_source_pass_runs_in_id_order() {
         let mut style = style();
-        style.apply(Edit::AddSource(vector("b"))).unwrap();
+        style.apply(Edit::AddSource(shapes("b"))).unwrap();
         let ids: Vec<_> = style.get_sources().iter().map(|source| source.id().to_owned()).collect();
         assert_eq!(["c", "a", "b"], *ids);
         let sorted: Vec<_> = sources_by_id(style.get_sources()).iter().map(|source| source.id().to_owned()).collect();
@@ -183,8 +180,7 @@ mod versions {
     fn sources_differ_by_id_record_and_type() {
         let old = style();
         let mut new = old.clone();
-        let geojson_a = geojson_source("a", GeoJSONOptions::default_options());
-        for source in [vector("c"), geojson_a, vector("d")] {
+        for source in [shapes("c"), source::<Points>("a"), shapes("d")] {
             let _ = new.apply(Edit::RemoveSource(source.id().to_owned()));
             new.apply(Edit::AddSource(source)).unwrap();
         }

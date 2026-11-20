@@ -1,24 +1,23 @@
-//! GeoJSON sources: tiles cut from the source's data, on the renderer's
-//! pool or, for a source with synchronous updates, as they're asked for. New
-//! data loads every tile of the cover again.
+//! The render half of GeoJSON sources: tiles cut from the source's data, on
+//! the renderer's pool or, for a source with synchronous updates, as they're
+//! asked for. New data loads every tile of the cover again.
 
 use std::sync::Arc;
 
 use mln_map_types::MapMode;
+use mln_renderer::source::{
+    Cover, DataOrigin, FeatureExtensionValue, LoadContext, NewTile, OriginUpdate, Replier, SourceType, Supply,
+    TileInput, TileKind, TileLoad,
+};
 use mln_style::Source;
 use mln_style::source_type::SourceData;
-use mln_style::sources::GeoJsonSourceType;
-use mln_style::sources::geojson::{GeoJSONData, TileFeatures};
 use mln_tile::TileData;
 use mln_util::constants;
 use mln_util::error::Error;
 use mln_util::pool::Pool;
 use parking_lot::Mutex;
 
-use crate::source::{
-    Cover, DataOrigin, FeatureExtensionValue, LoadContext, NewTile, OriginUpdate, Replier, SourceType, Supply,
-    TileInput, TileKind, TileLoad,
-};
+use super::{GeoJSONData, GeoJsonSourceType, TileFeatures};
 
 impl SourceType for GeoJsonSourceType {
     fn supply(_source: &Source) -> Supply {
@@ -28,18 +27,9 @@ impl SourceType for GeoJsonSourceType {
 
 /// A GeoJSON source's tiles: the data they are cut from, and whether they
 /// were made with synchronous updates.
-pub(crate) struct GeoJsonOrigin {
+struct GeoJsonOrigin {
     data: Option<Arc<dyn GeoJSONData>>,
     synchronous: bool,
-}
-
-impl GeoJsonOrigin {
-    /// An origin whose tiles are cut from `data`, as if a source of it had
-    /// updated.
-    #[cfg(test)]
-    pub(crate) fn with_data(data: Arc<dyn GeoJSONData>) -> Self {
-        GeoJsonOrigin { data: Some(data), synchronous: false }
-    }
 }
 
 /// Whether `a` and `b` are both empty or both the same object.
@@ -52,7 +42,7 @@ fn same_data(a: Option<&Arc<dyn GeoJSONData>>, b: Option<&Arc<dyn GeoJSONData>>)
 }
 
 /// A GeoJSON tile's load: the engine keeps which is the latest.
-pub(crate) struct GeoJsonLoad;
+struct GeoJsonLoad;
 
 impl TileLoad for GeoJsonLoad {}
 
@@ -127,7 +117,7 @@ impl DataOrigin for GeoJsonOrigin {
 /// Loads the tile's features from `data`, cut on the renderer's pool unless
 /// the source's updates are synchronous. With `relayout`, the tile first
 /// drops its data and style.
-pub(crate) fn load(data: &Arc<dyn GeoJSONData>, relayout: bool, cx: &mut LoadContext<'_, '_, TileData>) {
+fn load(data: &Arc<dyn GeoJSONData>, relayout: bool, cx: &mut LoadContext<'_, '_, TileData>) {
     if relayout {
         cx.reset();
     }

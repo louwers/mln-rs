@@ -1,5 +1,7 @@
-// `dot`, the tests' layer type of a geometry source.
+// `dot`, `tint` and `shade`, the tests' layer types.
 pub(crate) mod fixture_layer;
+// `tiles`, `raster-tiles` and `dem-tiles`, the tests' source types.
+pub(crate) mod fixture_source;
 // Ports test/gl/bucket.test.cpp (symbol, raster; on the WebGPU headless
 // backend). mln_layers' tests port the circle, fill and line parts.
 mod bucket_test;
@@ -31,9 +33,10 @@ mod gtest_tile_range;
 // test/util/tile_cover.test.cpp: needs mln_map's Transform, which is above
 // this crate, so it is an integration test rather than a unit test.
 mod tile_cover_test;
-// test/tile/geojson_tile.test.cpp and the GeoJSON parts of
-// test/style/source.test.cpp: need mln_map's Transform (above this crate).
+// test/tile/geojson_tile.test.cpp, over features the test gives the tiles.
 mod geojson_tile_test;
+// test/style/source.test.cpp, but for the cases of the built-in source
+// types (in mln_sources): needs mln_map's Transform (above this crate).
 mod source_test;
 // Port-only: the renderer frees what it lets go of on its workers.
 mod drop_on_workers_test;
@@ -57,25 +60,7 @@ pub(crate) fn pool() -> mln_util::pool::Pool {
 
 /// Port-only: a tile store whose jobs run on `workers` and which frees and
 /// parses glyphs on `pool`, with no images and no sprite loaded.
-pub(crate) fn tile_store(
-    pool: &mln_util::pool::TaskGroup,
-    workers: Box<dyn crate::tile::tile_workers::TileWorkers>,
-) -> crate::tile::store::TileStore {
-    let glyphs = crate::text::glyph_store::GlyphStore::new(
-        mln_text::local_glyph_rasterizer::LocalGlyphs::default(),
-        std::sync::Arc::default(),
-        pool.clone(),
-        crate::text::font_face_engine::default_engine(),
-        std::sync::Arc::new(|| {}),
-    );
-    crate::tile::store::TileStore::new(
-        workers,
-        glyphs,
-        crate::image_store::ImageStore::default(),
-        pool.clone(),
-        std::sync::Arc::new(|| {}),
-    )
-}
+pub(crate) use crate::testing::tile_store;
 
 /// Port-only: a tile store whose jobs run on `pool`.
 pub(crate) fn pool_store(pool: &mln_util::pool::TaskGroup) -> crate::tile::store::TileStore {
@@ -86,11 +71,7 @@ pub(crate) fn pool_store(pool: &mln_util::pool::TaskGroup) -> crate::tile::store
 /// images asked for their update, takes in what arrived and starts the next
 /// jobs. Returns whether a tile of a source with synchronous updates laid
 /// out.
-pub(crate) fn update(store: &mut crate::tile::store::TileStore) -> bool {
-    store.images_mut().begin_update();
-    store.receive();
-    store.drive()
-}
+pub(crate) use crate::testing::update;
 
 /// Port-only: one tile of a source of its own in a store, driven as the
 /// renderer drives it, whose data the test gives it.
@@ -157,16 +138,6 @@ impl OneTile {
         necessity: crate::tile::tile::TileNecessity,
     ) {
         self.with_at(id, |tile| tile.set_necessity(necessity));
-    }
-
-    /// Moves tile `from` to id `to`, as a wrap jump does.
-    pub(crate) fn rekey(&mut self, from: &mln_tile_id::OverscaledTileID, to: mln_tile_id::OverscaledTileID) {
-        let (source, ctx) = self.store.source_mut(self.key).expect("the source");
-        assert!(source.tile(from).is_some(), "the tile");
-        source.rekey(from, to, ctx);
-        if self.id == *from {
-            self.id = to;
-        }
     }
 
     /// How many changes the store reported since the last call, after it
@@ -375,24 +346,13 @@ pub(crate) fn render_layer(
     layer_type.create_render_layer(style).expect("a layer of its type")
 }
 
-/// The render source of `source`, through the built-in registry.
+/// The render source of `source`, through the tests' registry.
 pub(crate) fn create_render_source(
     source: &mln_style::Source,
     store: &mut crate::tile::store::TileStore,
 ) -> Box<dyn crate::render_source::RenderSource> {
     crate::render_source::create(&crate::registry::Registry::with_builtins(), source, store)
-        .expect("a built-in source type")
-}
-
-/// `source` with the description that its type knows without a fetch, such
-/// as the tileset a style lists, as the map's loader gives it.
-pub(crate) fn ready(source: mln_style::Source) -> mln_style::Source {
-    match source.data().plan_load() {
-        mln_style::source_type::Load::Ready(description) => {
-            source.with_description(Some(description)).expect("a description of the source's type")
-        }
-        _ => source,
-    }
+        .expect("a source type of the tests")
 }
 
 /// Runs `f` with the `Gpu` of a headless WebGPU backend, which compiles the

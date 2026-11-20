@@ -1,12 +1,12 @@
 use mln_conversion::Convertible;
+use mln_style::conversion::Error;
+use mln_style::conversion::source::convert_source;
+use mln_style::layer_type::SourceKind;
+use mln_style::source_type::Source;
 use mln_util::tileset::{PartialTileset, RasterEncoding, VectorEncoding};
 
-use super::util::parse_json;
-use crate::conversion::Error;
-use crate::conversion::source::convert_source;
-use crate::conversion::tileset::convert_tileset;
-use crate::layer_type::SourceKind;
-use crate::source_type::Source;
+use super::{parse_json, style_registry};
+use crate::tileset::conversion::convert_tileset;
 
 fn convert_json(json: &str, tiles: SourceKind) -> Result<PartialTileset, String> {
     convert_tileset(&Convertible::from(&parse_json(json)), tiles)
@@ -14,7 +14,7 @@ fn convert_json(json: &str, tiles: SourceKind) -> Result<PartialTileset, String>
 
 fn convert_source_json(json: &str, error: &mut Error, id: &str) -> Option<Source> {
     let value = parse_json(json);
-    convert_source(&Convertible::from(&value), error, id, &crate::StyleRegistry::with_builtins())
+    convert_source(&Convertible::from(&value), error, id, &style_registry())
 }
 
 // gtest: SourceOptions.Basic

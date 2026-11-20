@@ -5,7 +5,7 @@ use std::hint::black_box;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use mln_style::sources::geojson::{GeoJSONOptions, TileFeatures, create_geojson_data};
+use mln_sources::geojson::{GeoJSONOptions, TileFeatures, create_geojson_data};
 use mln_tile_id::CanonicalTileID;
 
 use crate::scenario::{Bench, Kind, Scenario};

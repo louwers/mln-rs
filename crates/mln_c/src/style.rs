@@ -7,10 +7,10 @@ use std::time::Duration;
 
 use ::mln_runtime::{Applied, CustomSourceCallbacks, GeoJsonSourceOptions, LayerInfo, SourceInfo, SourceKind};
 use mln_expression::Functions;
+use mln_sources::TileDataFormat;
+use mln_sources::custom::geometry::TileOptions;
 use mln_style::TransitionOptions;
 use mln_style::image::{ImageContent, Impl as StyleImage, TextFit};
-use mln_style::sources::TileDataFormat;
-use mln_style::sources::custom_geometry_source::TileOptions;
 use mln_tile_id::CanonicalTileID;
 use mln_util::constants;
 use mln_util::geo::{LatLng, LatLngBounds};

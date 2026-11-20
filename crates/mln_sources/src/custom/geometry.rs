@@ -5,6 +5,7 @@
 use std::sync::{Arc, Weak};
 
 use geojson::GeoJson;
+use mln_style::source_type::{Source, SourceData};
 use mln_tile_id::CanonicalTileID;
 use mln_util::constants;
 use mln_util::error::Error;
@@ -13,11 +14,10 @@ use mln_util::logging::{Event, Log};
 use mln_util::pool::Pool;
 use mln_util::range::Range;
 
-pub use super::custom::{CustomGeometryProvider, TileOptions};
-use super::custom::{CustomGeometrySourceOptions, CustomGeometrySourceType};
-use super::geojson::TileFeatures;
-use crate::custom_tile_loader::{CustomProvider, TileFunction};
-use crate::source_type::{Source, SourceData};
+use super::provider::{CustomProvider, TileFunction};
+pub use super::{CustomGeometryProvider, TileOptions};
+use super::{CustomGeometrySourceOptions, CustomGeometrySourceType};
+use crate::geojson::TileFeatures;
 
 #[derive(Clone)]
 pub struct Options {

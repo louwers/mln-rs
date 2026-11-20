@@ -1,17 +1,24 @@
 //! Custom geometry and custom vector sources: tiles whose data the host
 //! gives on demand, through tile functions that run on a pool thread. Both
-//! types' sources hold a [`CustomProvider`] of their data.
+//! types' sources hold a [`CustomProvider`] of their data, and the host
+//! answers through a handle ([`geometry::CustomGeometrySourceHandle`],
+//! [`vector::CustomVectorSourceHandle`]).
 
 use std::sync::Arc;
 
 use mln_storage::Data;
+use mln_style::layer_type::SourceKind;
+use mln_style::source_type::{SourceTypeInfo, StyleSourceType};
 use mln_util::constants;
 use mln_util::range::Range;
 
-use super::geojson::TileFeatures;
-use crate::custom_tile_loader::CustomProvider;
-use crate::layer_type::SourceKind;
-use crate::source_type::{SourceData, SourceTypeInfo, StyleSourceType};
+use self::provider::CustomProvider;
+use crate::geojson::TileFeatures;
+
+pub mod geometry;
+pub(crate) mod origin;
+pub mod provider;
+pub mod vector;
 
 /// How the host's GeoJSON is cut into tiles, as for a GeoJSON source.
 #[derive(Clone, Debug, PartialEq)]
@@ -87,16 +94,6 @@ impl StyleSourceType for CustomGeometrySourceType {
     type Description = ();
 }
 
-impl SourceData<CustomGeometrySourceType> {
-    /// Whether tiles made for one source don't suit the other.
-    #[must_use]
-    pub fn differs(&self, other: &Self) -> bool {
-        !Arc::ptr_eq(&self.options.tile_options, &other.options.tile_options)
-            || self.options.zoom_range != other.options.zoom_range
-            || !Arc::ptr_eq(&self.options.provider, &other.options.provider)
-    }
-}
-
 /// The custom vector source type, whose tiles' encoded bytes the host gives.
 pub struct CustomVectorSourceType;
 
@@ -127,13 +124,4 @@ impl StyleSourceType for CustomVectorSourceType {
     type Options = CustomVectorSourceOptions;
     /// None: the provider gives the source's data.
     type Description = ();
-}
-
-impl SourceData<CustomVectorSourceType> {
-    /// Whether tiles made for one source don't suit the other.
-    #[must_use]
-    pub fn differs(&self, other: &Self) -> bool {
-        self.options.zoom_range != other.options.zoom_range
-            || !Arc::ptr_eq(&self.options.provider, &other.options.provider)
-    }
 }
