@@ -20,7 +20,6 @@ use mln_style_types::image::ImagePosition;
 use mln_style_types::{TranslateAnchorType, VisibilityType};
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::Color;
-use mln_util::identity::SimpleIdentity;
 use smallvec::SmallVec;
 
 use crate::bucket::Bucket;
@@ -451,10 +450,9 @@ pub(crate) struct RenderLayerBase {
     /// The projection variant this layer's draws are built with.
     pub(crate) projection_variant: ProjectionVariant,
 
-    /// A new identity with each evaluation of the layer's values for a
-    /// reason other than the map's zoom: a new style, a transition or a
-    /// global state.
-    pub(crate) paint_revision: SimpleIdentity,
+    /// Counts the evaluations of the layer's values for a reason other than
+    /// the map's zoom: a new style, a transition or a global state.
+    pub(crate) paint_revision: u64,
 
     /// Where the tiles the layer's update found are among the frame's
     /// ([`LayerUpdateParameters::found`]).
@@ -471,7 +469,7 @@ impl RenderLayerBase {
             style_dependencies: Dependency::NONE,
             is_renderable: false,
             projection_variant: ProjectionVariant::Mercator,
-            paint_revision: SimpleIdentity::new(),
+            paint_revision: 0,
             found: 0..0,
         }
     }

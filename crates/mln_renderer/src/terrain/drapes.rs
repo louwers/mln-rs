@@ -23,7 +23,6 @@ use mln_map_types::View;
 use mln_style::layer_type::ErasedLayerStyle;
 use mln_tile_id::OverscaledTileID;
 use mln_util::Color;
-use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
@@ -65,7 +64,7 @@ struct DrapeLayer {
 struct LayerKey {
     style: Arc<dyn ErasedLayerStyle>,
     /// The layer's [`paint_revision`](crate::render_layer::RenderLayerBase::paint_revision).
-    paint_revision: SimpleIdentity,
+    paint_revision: u64,
     evaluated: Arc<dyn ErasedEvaluatedLayer>,
     /// The number of the layer's tiles among the key's.
     tiles: usize,

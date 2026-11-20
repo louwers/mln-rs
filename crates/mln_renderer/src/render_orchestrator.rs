@@ -20,7 +20,6 @@ use mln_text::local_glyph_rasterizer::LocalGlyphs;
 use mln_util::constants::DEFAULT_TRANSITION_DURATION;
 use mln_util::error::Error;
 use mln_util::hash::{HashMap, HashSet};
-use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, Log};
 use mln_util::pool::{Pool, TaskGroup};
 use mln_util::time::Instant;
@@ -775,7 +774,7 @@ impl RenderOrchestrator {
                 // A drape drawn while the camera moves keeps values evaluated
                 // at another zoom, but not values of another revision.
                 if layer_added_or_changed || global_state_changed_and_matters || layer.has_transition() {
-                    layer.base_mut().paint_revision = SimpleIdentity::new();
+                    layer.base_mut().paint_revision += 1;
                 }
                 let previous_mask = layer.base().evaluated_properties.constants_mask();
                 layer.evaluate(&clock.evaluation);
