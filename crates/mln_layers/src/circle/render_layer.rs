@@ -28,8 +28,8 @@ use mln_util::error::Error;
 
 use super::bucket::{CircleBinders, CircleBucket, CircleLayoutVertex};
 use super::layout::CircleLayout;
+use super::ubo::{CircleDrawableUBO, CircleEvaluatedPropsUBO};
 use super::{Circle, programs};
-use crate::circle::ubo::{CircleDrawableUBO, CircleEvaluatedPropsUBO};
 use crate::refresh_paint_attributes;
 
 /// The pass the layer's draws draw in.

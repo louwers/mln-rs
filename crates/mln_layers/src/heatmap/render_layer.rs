@@ -41,9 +41,9 @@ use mln_util::size::Size;
 use super::bucket::{HeatmapBinders, HeatmapBucket, HeatmapLayoutVertex};
 use super::layout::HeatmapLayout;
 use super::properties::{HeatmapPaintProperties, default_heatmap_color};
+use super::ubo::{HeatmapDrawableUBO, HeatmapEvaluatedPropsUBO, HeatmapTexturePropsUBO};
 use super::{Heatmap, programs};
 use crate::color_ramp::apply_color_ramp;
-use crate::heatmap::ubo::{HeatmapDrawableUBO, HeatmapEvaluatedPropsUBO, HeatmapTexturePropsUBO};
 use crate::refresh_paint_attributes;
 
 /// The pass the layer's draws draw in, onto the frame and into its render

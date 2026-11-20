@@ -309,9 +309,9 @@ fn a_draw_writes_an_update_of_the_vertices_it_binds() {
     with_context(|gpu, context| {
         let variant = mln_gfx::projection_variant::ProjectionVariant::Mercator;
         let shader = context.shader_key(&mln_gfx::shaders::programs::CLIPPING_MASK, Uniforms::default(), variant);
-        let vertex = |x: i16| RasterLayoutVertex { a1: [x, x], a2: [0, 0] };
+        let vertex = |x: i16| [x, x];
         let typed = context.add_dynamic_vertices(&[vertex(0), vertex(1), vertex(2)]);
-        let stride = size_of::<RasterLayoutVertex>() as u32;
+        let stride = size_of::<[i16; 2]>() as u32;
         let mut attrs = VertexAttributeArray::new();
         attrs.set_shared(
             ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE,

@@ -44,8 +44,8 @@ use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
+use super::ubo::{ColorReliefDrawableUBO, ColorReliefEvaluatedPropsUBO, ColorReliefTilePropsUBO};
 use super::{ColorRelief, programs};
-use crate::color_relief::ubo::{ColorReliefDrawableUBO, ColorReliefEvaluatedPropsUBO, ColorReliefTilePropsUBO};
 
 /// What the layer keeps of a tile: the draw that colors its contents' DEM,
 /// with the generation of the contents' geometry and the DEM's properties it

@@ -38,12 +38,12 @@ use mln_util::size::Size;
 
 use super::bucket::{LineBinders, LineBucket};
 use super::properties::LinePaintProperties;
-use super::{Line, programs};
-use crate::color_ramp::apply_color_ramp;
-use crate::line::ubo::{
+use super::ubo::{
     LineDrawableUBO, LineDrawableUnionUBO, LineEvaluatedPropsUBO, LineGradientDrawableUBO, LinePatternDrawableUBO,
     LinePatternTilePropsUBO, LineSDFDrawableUBO, LineSDFTilePropsUBO, LineTilePropsUnionUBO,
 };
+use super::{Line, programs};
+use crate::color_ramp::apply_color_ramp;
 use crate::pattern_layout::{LineLayoutSpec, PatternLayout, uses_pattern};
 use crate::refresh_paint_attributes;
 

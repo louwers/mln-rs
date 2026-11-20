@@ -30,10 +30,11 @@ pub(crate) fn bind_no_projection(gpu: &mut dyn Gpu, layer_uniforms: &mut Uniform
     }
 }
 
-/// The matrix that draws geometry of the tile `tile_id` in `frame`: translated by `translation`, anchored as `anchor` says, in
-/// tile units or viewport pixels, from `origin` in the tile where it has
-/// one, and projected with the near-clipped or pixel-aligned projection
-/// matrix where those say so.
+/// The matrix that draws geometry of the tile `tile_id` in `frame`:
+/// translated by `translation`, anchored as `anchor` says, in tile units or
+/// viewport pixels, from `origin` in the tile where it has one, and
+/// projected with the near-clipped or pixel-aligned projection matrix where
+/// those say so.
 #[expect(
     clippy::too_many_arguments,
     reason = "the tile, the frame and the translation, origin, clipping and alignment options of its matrix"

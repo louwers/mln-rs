@@ -67,8 +67,8 @@ use super::bucket::{
     FillExtrusionStaticVertex, FillExtrusionWallVertex, WALL_CORNERS, WALL_STRIP_INDICES, wall_quad_paint,
 };
 use super::properties::FillExtrusionPaintProperties;
+use super::ubo::{FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO};
 use super::{FillExtrusion, programs};
-use crate::fill_extrusion::ubo::{FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO};
 use crate::pattern_layout::{PatternLayout, uses_pattern};
 
 /// The pass the layer's draws draw in.
