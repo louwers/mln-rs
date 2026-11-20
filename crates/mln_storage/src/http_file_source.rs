@@ -85,7 +85,7 @@ impl TransferRequest {
     /// finishes, such as cancelling the HTTP stack's task. It runs once, on
     /// the thread that drops the request, or right away if the request is
     /// already dropped; `finish` discards it.
-    #[cfg(any(target_vendor = "apple", target_os = "android"))]
+    #[cfg(any(target_family = "wasm", target_vendor = "apple", target_os = "android"))]
     pub(crate) fn set_cancel_handler(&self, handler: impl FnOnce() + Send + 'static) {
         self.responder.on_cancel(handler);
     }

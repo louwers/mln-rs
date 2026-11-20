@@ -7,7 +7,16 @@
 //! preflight. fetch follows a redirect with every header it was given, and
 //! can't drop them when the redirect leaves the origin, so a request with the
 //! host's headers doesn't follow redirects: a redirect fails it.
+//!
+//! Dropping a request aborts its fetch, which would otherwise keep loading
+//! beside the fetches that are still wanted.
 
+use std::future::poll_fn;
+use std::pin::pin;
+use std::sync::Arc;
+use std::task::{Poll, Waker};
+
+use parking_lot::Mutex;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 
@@ -46,20 +55,58 @@ impl FetchTransport {
     }
 
     /// Starts the transfer of `request` in a task of the browser's event
-    /// loop, which calls `request.finish` once it is done.
+    /// loop, which calls `request.finish` once it is done, or aborts the
+    /// fetch once the request is dropped.
     pub(crate) fn start(&self, request: TransferRequest) {
         let take = self.preloads.clone();
         wasm_bindgen_futures::spawn_local(async move {
             if request.is_cancelled() {
                 return;
             }
-            let transfer = fetch(&request, take).await;
-            request.finish(transfer);
+            let controller = web_sys::AbortController::new().ok();
+            let signal = controller.as_ref().map(web_sys::AbortController::signal);
+            match until_cancelled(&request, fetch(&request, take, signal.as_ref())).await {
+                Some(transfer) => request.finish(transfer),
+                None => {
+                    if let Some(controller) = controller {
+                        controller.abort();
+                    }
+                }
+            }
         });
     }
 }
 
-async fn fetch(request: &TransferRequest, take: Option<js_sys::Function>) -> Result<Transfer, Box<ResourceError>> {
+/// The output of `transfer`, or `None` once `request` is dropped, which
+/// drops `transfer`.
+async fn until_cancelled<T>(request: &TransferRequest, transfer: impl Future<Output = T>) -> Option<T> {
+    // The cancel handler must be `Send`, and the fetch's AbortController
+    // isn't: the handler wakes this task, whose caller aborts the fetch.
+    let waker: Arc<Mutex<Option<Waker>>> = Arc::default();
+    request.set_cancel_handler({
+        let waker = Arc::clone(&waker);
+        move || {
+            if let Some(waker) = waker.lock().take() {
+                waker.wake();
+            }
+        }
+    });
+    let mut transfer = pin!(transfer);
+    poll_fn(|cx| {
+        *waker.lock() = Some(cx.waker().clone());
+        if request.is_cancelled() {
+            return Poll::Ready(None);
+        }
+        transfer.as_mut().poll(cx).map(Some)
+    })
+    .await
+}
+
+async fn fetch(
+    request: &TransferRequest,
+    take: Option<js_sys::Function>,
+    signal: Option<&web_sys::AbortSignal>,
+) -> Result<Transfer, Box<ResourceError>> {
     let connection_error = |error: JsValue| {
         let message = error.as_string().unwrap_or_else(|| format!("{error:?}"));
         Box::new(ResourceError::new(Reason::Connection, message))
@@ -72,7 +119,7 @@ async fn fetch(request: &TransferRequest, take: Option<js_sys::Function>) -> Res
     };
     let response = match early {
         Some(response) => response,
-        None => send(url, range.as_deref(), request.headers()).await.map_err(connection_error)?,
+        None => send(url, range.as_deref(), request.headers(), signal).await.map_err(connection_error)?,
     };
     if response.type_() == web_sys::ResponseType::Opaqueredirect {
         return Err(Box::new(ResourceError::new(
@@ -102,8 +149,14 @@ async fn transfer(response: &web_sys::Response) -> Result<Transfer, JsValue> {
     Ok(Transfer { status, headers, body })
 }
 
-async fn send(url: &str, range: Option<&str>, extra: &[(String, String)]) -> Result<web_sys::Response, JsValue> {
+async fn send(
+    url: &str,
+    range: Option<&str>,
+    extra: &[(String, String)],
+    signal: Option<&web_sys::AbortSignal>,
+) -> Result<web_sys::Response, JsValue> {
     let init = web_sys::RequestInit::new();
+    init.set_signal(signal);
     if range.is_some() || !extra.is_empty() {
         let headers = web_sys::Headers::new()?;
         if let Some(range) = range {

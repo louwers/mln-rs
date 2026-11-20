@@ -354,6 +354,8 @@ js-sys = { version = "0.3.107" }
 wasm-bindgen = { version = "=0.2.130" }
 wasm-bindgen-futures = { version = "0.4.80" }
 web-sys = { version = "0.3.107", features = [
+  "AbortController",
+  "AbortSignal",
   "Blob",
   "Headers",
   "ImageBitmap",
