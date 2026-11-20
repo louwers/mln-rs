@@ -7,7 +7,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use glam::dcamera::rh::proj::opengl::orthographic;
-use mln_gfx::gpu::{Gpu, ShaderKey};
+use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::heatmap_layer_ubo::{HeatmapDrawableUBO, HeatmapEvaluatedPropsUBO};
 use mln_gfx::shaders::heatmap_texture_layer_ubo::HeatmapTexturePropsUBO;
@@ -325,8 +325,6 @@ impl RenderHeatmapLayer {
         let RenderHeatmapLayer { base, values, drawing, tile_draws, .. } = self;
 
         let evaluated = &values.evaluated.paint;
-        // The shader of the first tile this builds, which the others take.
-        let mut heatmap_shader: Option<ShaderKey> = None;
         for tile in render_tiles {
             let tile_id = tile.id();
 
@@ -369,8 +367,7 @@ impl RenderHeatmapLayer {
                 let mut uniforms = Uniforms::default();
                 let mut attrs = VertexAttributeArray::new();
                 binders.bind(evaluated, paint(context).as_ref(), &mut attrs, &mut uniforms);
-                let shader = heatmap_shader
-                    .get_or_insert_with(|| context.shader_key(&programs::HEATMAP, uniforms, base.projection_variant));
+                let shader = context.shader_key(&programs::HEATMAP, uniforms, base.projection_variant);
                 attrs.set_shared(
                     ID_HEATMAP_POS_VERTEX_ATTRIBUTE,
                     SharedAttribute::new(
@@ -389,7 +386,7 @@ impl RenderHeatmapLayer {
                     instances: None,
                 };
                 let objects = DrawObjects::new(
-                    shader.clone(),
+                    shader,
                     ColorMode::additive(),
                     CullFaceMode::disabled(),
                     geometry,

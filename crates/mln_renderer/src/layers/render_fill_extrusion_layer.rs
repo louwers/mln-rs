@@ -403,7 +403,7 @@ impl TypedLayer for RenderFillExtrusionLayer {
             let static_data = paint_parameters.static_data;
             &*self.wall_indices.get_or_insert_with(|| static_data.wall_indexes(context))
         };
-        let mut builder = TileBuilder {
+        let builder = TileBuilder {
             program,
             wall_program,
             projection_variant: self.base.projection_variant,
@@ -414,7 +414,6 @@ impl TypedLayer for RenderFillExtrusionLayer {
             // The layer draws into depth before it draws in color where it
             // is translucent or has a pattern, unless it composites.
             depth_pass: composite.is_none() && (opacity < 1.0 || has_pattern),
-            first_shaders: None,
         };
 
         let layer = &*self.values.evaluated;
@@ -523,9 +522,6 @@ struct TileBuilder<'a> {
     has_pattern: bool,
     /// Whether the layer draws into depth before it draws in color.
     depth_pass: bool,
-    /// The shaders of the roofs and walls of the first tile built, which the
-    /// others take.
-    first_shaders: Option<(ShaderKey, ShaderKey)>,
 }
 
 impl TileBuilder<'_> {
@@ -533,7 +529,7 @@ impl TileBuilder<'_> {
     /// values: of its roofs, then of its walls, each into depth, where the
     /// layer draws it, then in color.
     fn build(
-        &mut self,
+        &self,
         context: &mut Context,
         tile_bucket: LayerBucket<'_, FillExtrusion>,
         binders: &FillExtrusionBinders,
@@ -595,12 +591,8 @@ impl TileBuilder<'_> {
             (Some(instance_attrs), self.static_vertices.count(), segments)
         };
 
-        let (shader, wall_shader) = self.first_shaders.get_or_insert_with(|| {
-            (
-                context.shader_key(self.program, uniforms, self.projection_variant),
-                context.shader_key(self.wall_program, wall_uniforms, self.projection_variant),
-            )
-        });
+        let shader = context.shader_key(self.program, uniforms, self.projection_variant);
+        let wall_shader = context.shader_key(self.wall_program, wall_uniforms, self.projection_variant);
 
         let stride = size_of::<FillExtrusionLayoutVertex>() as u32;
         vertex_attrs.set_shared(
@@ -647,9 +639,9 @@ impl TileBuilder<'_> {
         };
         if !bucket.triangles.is_empty() && vertex_count > 0 {
             if self.depth_pass {
-                draws.push(extrusion_draw(shader, false, false, false, &roofs, atlases.as_ref()));
+                draws.push(extrusion_draw(&shader, false, false, false, &roofs, atlases.as_ref()));
             }
-            draws.push(extrusion_draw(shader, false, true, clip, &roofs, atlases.as_ref()));
+            draws.push(extrusion_draw(&shader, false, true, clip, &roofs, atlases.as_ref()));
         }
         // A tile with one vertex has no wall.
         let walls_geometry = SharedGeometry {
@@ -662,9 +654,9 @@ impl TileBuilder<'_> {
         };
         if walls > 0 && wall_vertex_count > 0 {
             if self.depth_pass {
-                draws.push(extrusion_draw(wall_shader, true, false, false, &walls_geometry, atlases.as_ref()));
+                draws.push(extrusion_draw(&wall_shader, true, false, false, &walls_geometry, atlases.as_ref()));
             }
-            draws.push(extrusion_draw(wall_shader, true, true, clip, &walls_geometry, atlases.as_ref()));
+            draws.push(extrusion_draw(&wall_shader, true, true, clip, &walls_geometry, atlases.as_ref()));
         }
         if self.walls == Walls::Pulled {
             for draw in draws.iter_mut().filter(|draw| draw.walls) {
