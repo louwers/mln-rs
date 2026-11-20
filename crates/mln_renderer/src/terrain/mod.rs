@@ -211,7 +211,13 @@ impl RenderTerrain {
     ) -> Option<&TerrainCover> {
         let mut ranges = self.cover.take().map(|cover| cover.ranges).unwrap_or_default();
         let style = &parameters.style;
-        let terrain = style.get_terrain()?;
+        let Some(terrain) = style.get_terrain() else {
+            // Layers count their paint revisions only for a style with
+            // terrain, so drapes kept from before can't tell what changes
+            // until the terrain is back.
+            self.drapes.redraw();
+            return None;
+        };
         if parameters.mode == MapMode::Tile {
             return None;
         }
