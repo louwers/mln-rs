@@ -83,6 +83,8 @@ use mln_gfx::shaders::shader_defines::{
     ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE, ID_SYMBOL_IMAGE_ICON_TEXTURE, ID_SYMBOL_IMAGE_TEXTURE,
     ID_SYMBOL_OPACITY_ATTRIBUTE, ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE, ID_SYMBOL_POS_OFFSET_ATTRIBUTE,
     ID_SYMBOL_PROJECTED_POS_ATTRIBUTE, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE, ID_SYMBOL_TILE_PROPS_UBO,
+    ID_TERRAIN_DEM_TEXTURE, ID_TERRAIN_DRAPE_TEXTURE, ID_TERRAIN_DRAWABLE_UBO, ID_TERRAIN_POS_VERTEX_ATTRIBUTE,
+    ID_TERRAIN_PROBE_DEM_COORDS_VERTEX_ATTRIBUTE, ID_TERRAIN_PROBE_POS_VERTEX_ATTRIBUTE, ID_TERRAIN_PROPS_UBO,
     ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE, ID_VERTEX_TEXEL_TEXTURE,
 };
 use mln_gfx::shaders::shader_source::BuiltIn;
@@ -90,6 +92,7 @@ use mln_gfx::shaders::sky_ubo::{AtmospherePropsUBO, SkyPropsUBO};
 use mln_gfx::shaders::symbol_layer_ubo::{
     CollisionDrawableUBO, CollisionTilePropsUBO, SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO,
 };
+use mln_gfx::shaders::terrain_ubo::{TerrainDrawableUBO, TerrainPropsUBO};
 
 use super::glsl_sources;
 
@@ -368,6 +371,34 @@ shader_source!(
     &[element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO)],
     &[attr("a_pos_texel", ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE)],
     &[tex("u_image", ID_VERTEX_TEXEL_TEXTURE)]
+);
+
+// Terrain
+shader_source!(
+    TERRAIN_SHADER,
+    "TerrainShader",
+    &[
+        element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
+        element::<TerrainDrawableUBO, TerrainDrawableUBO>("TerrainDrawableUBO", ID_TERRAIN_DRAWABLE_UBO),
+        block::<TerrainPropsUBO>("TerrainPropsUBO", ID_TERRAIN_PROPS_UBO),
+    ],
+    &[attr("a_pos", ID_TERRAIN_POS_VERTEX_ATTRIBUTE)],
+    &[tex("u_dem", ID_TERRAIN_DEM_TEXTURE), tex("u_drape", ID_TERRAIN_DRAPE_TEXTURE)]
+);
+
+// Terrain probe
+shader_source!(
+    TERRAIN_PROBE_SHADER,
+    "TerrainProbeShader",
+    &[
+        element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
+        block::<TerrainPropsUBO>("TerrainPropsUBO", ID_TERRAIN_PROPS_UBO),
+    ],
+    &[
+        attr("a_pos", ID_TERRAIN_PROBE_POS_VERTEX_ATTRIBUTE),
+        attr("a_dem_coords", ID_TERRAIN_PROBE_DEM_COORDS_VERTEX_ATTRIBUTE)
+    ],
+    &[tex("u_dem", ID_TERRAIN_DEM_TEXTURE)]
 );
 
 // Fill
@@ -979,6 +1010,8 @@ pub(crate) fn shader_source(shader_id: BuiltIn) -> Option<&'static ShaderSource>
         BuiltIn::SymbolTextAndIconShader => Some(&SYMBOL_TEXT_AND_ICON_SHADER),
         BuiltIn::LayerCompositeShader => Some(&LAYER_COMPOSITE_SHADER),
         BuiltIn::VertexTexelShader => Some(&VERTEX_TEXEL_SHADER),
+        BuiltIn::TerrainShader => Some(&TERRAIN_SHADER),
+        BuiltIn::TerrainProbeShader => Some(&TERRAIN_PROBE_SHADER),
         _ => None,
     }
 }
@@ -1025,4 +1058,6 @@ pub(crate) const REGISTERED_SHADERS: &[BuiltIn] = &[
     BuiltIn::SymbolTextAndIconShader,
     BuiltIn::LayerCompositeShader,
     BuiltIn::VertexTexelShader,
+    BuiltIn::TerrainShader,
+    BuiltIn::TerrainProbeShader,
 ];

@@ -61,6 +61,8 @@
 //   the current zoom, so its positions stay small.
 // - ClippingMaskProgram projects through the projection block as the other
 //   shaders do, and has a globe variant.
+// - The terrain shaders have no C++ counterpart: they are the port's own, with
+//   the WGSL's height rule.
 // - Fragment shaders declare the uniform blocks they share with their vertex
 //   shader first, in the vertex shader's order, which SwiftShader needs
 //   (maplibre/maplibre-native#4625, ffi patch 0011, and `line_gradient_sdf`).
@@ -2757,6 +2759,121 @@ void main() {
 
 void main() {
     fragColor = v_color;
+}
+",
+};
+
+/// The height rule of `mln_util::dem`, over the DEM tile a terrain tile
+/// reads: its RGBA8 texels behind a one-texel border, decoded by
+/// `TerrainPropsUBO`. A macro, so that `concat!` puts it in the vertex
+/// stages, which read the DEM with `texelFetch`.
+macro_rules! terrain_elevation {
+    () => {
+        r"layout (std140) uniform TerrainPropsUBO {
+    highp vec4 u_unpack;
+    highp float u_unpack_scale;
+    highp float u_exaggeration;
+    highp float u_skirt_length;
+    highp float u_props_pad;
+};
+
+uniform highp sampler2D u_dem;
+
+// The height in meters of the DEM's bordered texel at `texel`, clamped to the
+// texture.
+float terrain_texel_height(ivec2 texel) {
+    ivec2 last = textureSize(u_dem, 0) - 1;
+    vec3 rgb = round(texelFetch(u_dem, clamp(texel, ivec2(0), last), 0).rgb * 255.0);
+    return (rgb.r * u_unpack.x + rgb.g * u_unpack.y + rgb.b * u_unpack.z + u_unpack.w) * u_unpack_scale;
+}
+
+// The height in meters, exaggerated, at `pos` in tile units of a tile that
+// reads its DEM at `dem_coords`: the DEM uv's scale and offset, then the
+// DEM's width in pixels, 0 for flat ground.
+float terrain_elevation(vec2 pos, vec4 dem_coords) {
+    float dim = dem_coords.w;
+    if (dim == 0.0) {
+        return 0.0;
+    }
+    vec2 coord = (pos / 8192.0 * dem_coords.x + dem_coords.yz) * dim + 0.5;
+    vec2 first = floor(coord);
+    vec2 f = coord - first;
+    ivec2 texel = ivec2(first);
+    float tl = terrain_texel_height(texel);
+    float tr = terrain_texel_height(texel + ivec2(1, 0));
+    float bl = terrain_texel_height(texel + ivec2(0, 1));
+    float br = terrain_texel_height(texel + ivec2(1, 1));
+    float top = tl * (1.0 - f.x) + tr * f.x;
+    float bottom = bl * (1.0 - f.x) + br * f.x;
+    return (top * (1.0 - f.y) + bottom * f.y) * u_exaggeration;
+}
+
+"
+    };
+}
+
+/// The terrain's surface: a tile's grid, drawn with the tile's matrix,
+/// raised to the heights of the tile's DEM with its skirts lowered, in the
+/// colors of the tile's drape. GL stores the drape's rows bottom first, so
+/// the drape is sampled at `1 - v`.
+pub(crate) const TERRAIN_SHADER: GlslShaderSource = GlslShaderSource {
+    vertex: concat!(
+        terrain_elevation!(),
+        r"// x and y in tile units, whether the vertex is a skirt's lower edge, 0.
+layout (location = 0) in vec4 a_pos;
+
+layout (std140) uniform TerrainDrawableUBO {
+    highp mat4 u_matrix;
+    highp vec4 u_dem_coords;
+};
+
+out vec2 v_drape_pos;
+
+void main() {
+    float elevation = terrain_elevation(a_pos.xy, u_dem_coords) - a_pos.z * u_skirt_length;
+    gl_Position = u_matrix * vec4(a_pos.xy, elevation, 1.0);
+    v_drape_pos = vec2(a_pos.x, 8192.0 - a_pos.y) / 8192.0;
+}
+"
+    ),
+    fragment: r"in vec2 v_drape_pos;
+
+uniform sampler2D u_drape;
+
+void main() {
+    fragColor = texture(u_drape, v_drape_pos);
+}
+",
+};
+
+/// Port-only, for the backend conformance cases: probes of the terrain's
+/// height rule. Each probe is a quad at clip positions whose vertices read
+/// the height at a place of a tile, and whose fragments write that height's
+/// bits, least significant byte first, as the texel's channels.
+pub(crate) const TERRAIN_PROBE_SHADER: GlslShaderSource = GlslShaderSource {
+    vertex: concat!(
+        terrain_elevation!(),
+        r"// Clip x and y, then where the height is read, in tile units.
+layout (location = 0) in vec4 a_pos;
+// The DEM uv's scale and offset, then the DEM's width in pixels.
+layout (location = 1) in vec4 a_dem_coords;
+
+flat out highp float v_height;
+
+void main() {
+    v_height = terrain_elevation(a_pos.zw, a_dem_coords);
+    gl_Position = vec4(a_pos.xy, 0.0, 1.0);
+}
+"
+    ),
+    fragment: r"flat in highp float v_height;
+
+void main() {
+    // A fragment shader's integers are mediump unless said otherwise, which
+    // Mesa lowers to 16 bits.
+    highp uint bits = floatBitsToUint(v_height);
+    highp uvec4 bytes = uvec4(bits, bits >> 8u, bits >> 16u, bits >> 24u) & uvec4(255u);
+    fragColor = vec4(bytes) / 255.0;
 }
 ",
 };
