@@ -1,10 +1,11 @@
 //! The index of a tile's features by their bounding boxes, which
 //! `queryRenderedFeatures` searches. A tile worker fills a
 //! [`FeatureIndexBuilder`] as it lays the tile out and finishes it into a
-//! [`FeatureIndex`], which is only read after.
+//! [`FeatureIndex`], which is only read after. Most tiles are never queried,
+//! so the index builds its R-tree at its first query.
 
 use std::cmp::Reverse;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use geo_index::rtree::sort::HilbertSort;
 use geo_index::rtree::{RTree, RTreeBuilder, RTreeIndex};
@@ -153,8 +154,9 @@ impl FeatureIndexBuilder {
     #[must_use]
     pub(crate) fn finish(self) -> FeatureIndex {
         FeatureIndex {
-            tree: build_tree(&self.boxes),
+            tree: OnceLock::new(),
             entries: self.entries,
+            boxes: self.boxes,
             bucket_layer_ids: self.bucket_layer_ids,
             tile_data: self.tile_data,
         }
@@ -176,9 +178,12 @@ fn build_tree(boxes: &[Bounds]) -> Option<RTree<i16>> {
 
 /// A tile's features by their bounding boxes, and the tile data they are in.
 pub(crate) struct FeatureIndex {
-    /// Indexes `entries`; `None` when there are none.
-    tree: Option<RTree<i16>>,
+    /// Indexes `boxes`, once a query has built it; `None` when there are
+    /// none.
+    tree: OnceLock<Option<RTree<i16>>>,
+    /// The rings' entries and boxes, in insertion order.
     entries: Vec<Entry>,
+    boxes: Vec<Bounds>,
     bucket_layer_ids: HashMap<Arc<str>, Vec<String>>,
     tile_data: Option<TileData>,
 }
@@ -236,7 +241,10 @@ impl FeatureIndex {
         additional_query_padding: f32,
         source_feature_state: &SourceFeatureState,
     ) -> Result<(), Error> {
-        let (Some(tree), Some(_)) = (&self.tree, &self.tile_data) else {
+        if self.tile_data.is_none() {
+            return Ok(());
+        }
+        let Some(tree) = self.tree.get_or_init(|| build_tree(&self.boxes)) else {
             return Ok(());
         };
 
@@ -479,10 +487,8 @@ impl FeatureIndex {
 }
 
 /// A `FeatureIndex` as it crosses, for a tile worker in another wasm instance
-/// (`tile/worker_codec`): its boxes, each string once, and not its tile data,
-/// which the side that gets the index has (it sent it). The side that reads
-/// it builds the tree again, as the tree's own bytes are larger than the
-/// boxes and geo-index has no owned tree to read them into.
+/// (`tile/worker_codec`): its entries and boxes, each string once, and not
+/// its tile data, which the side that gets the index has (it sent it).
 #[derive(mln_wire::Wire)]
 struct WireIndex {
     strings: Vec<String>,
@@ -501,21 +507,6 @@ struct WireEntry {
 }
 
 impl FeatureIndex {
-    /// The boxes of `entries`, in their order.
-    fn boxes(&self) -> Vec<Bounds> {
-        let mut boxes = vec![[0; 4]; self.entries.len()];
-        if let Some(tree) = &self.tree {
-            // The tree's leaves come first, each with the index of its item.
-            let indices = tree.indices();
-            for (position, leaf) in tree.boxes().as_chunks::<4>().0.iter().take(self.entries.len()).enumerate() {
-                if let Some(bounds) = boxes.get_mut(indices.get(position)) {
-                    *bounds = *leaf;
-                }
-            }
-        }
-        boxes
-    }
-
     fn to_wire(&self) -> WireIndex {
         let mut strings: Vec<String> = Vec::new();
         let mut string_ids: HashMap<*const u8, u32> = HashMap::default();
@@ -528,13 +519,13 @@ impl FeatureIndex {
         let elements = self
             .entries
             .iter()
-            .zip(self.boxes())
+            .zip(&self.boxes)
             .map(|(entry, bounds)| WireEntry {
                 index: entry.index,
                 sort_index: entry.sort_index,
                 source_layer_name: intern(&entry.source_layer_name),
                 bucket_leader_id: intern(&entry.bucket_leader_id),
-                bounds,
+                bounds: *bounds,
             })
             .collect();
         WireIndex { strings, bucket_layer_ids: self.bucket_layer_ids(), elements }
@@ -644,8 +635,8 @@ mod tests {
         let encoded = index.encode_grid();
         let decoded: FeatureIndex = mln_wire::from_slice(&mln_wire::to_vec(&index).unwrap()).unwrap();
         assert_eq!(decoded.entries, index.entries);
-        assert_eq!(decoded.boxes(), index.boxes());
+        assert_eq!(decoded.boxes, index.boxes);
         assert_eq!(decoded.encode_grid(), encoded);
-        assert_eq!(index.boxes()[14], [560, 10, 565, 4000]);
+        assert_eq!(index.boxes[14], [560, 10, 565, 4000]);
     }
 }
