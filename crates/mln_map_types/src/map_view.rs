@@ -5,7 +5,6 @@ use mln_style_types::ProjectionDefinition;
 use mln_util::constants;
 use mln_util::error::Error;
 use mln_util::geo::{EdgeInsets, LatLng, NorthOrientation, WrapMode};
-use mln_util::projection::Projection;
 use mln_util::size::Size;
 
 use crate::camera::CameraOptions;
@@ -113,7 +112,7 @@ impl MapView {
         let projection_transition = projection.transition_state();
         let scale = zoom_scale(camera.zoom);
         let (x, y) = map_offset(&camera.center, scale, projection_transition > 0.0);
-        let mut params = ViewParams {
+        let params = ViewParams {
             size: self.extent.size,
             frustum_offset: viewport.frustum_offset,
             north_orientation: viewport.north_orientation,
@@ -124,7 +123,7 @@ impl MapView {
             padding: camera.padding,
             x,
             y,
-            z: 0.0,
+            center_altitude: camera.center_altitude,
             scale,
             angle: -mln_math::deg2rad(camera.bearing),
             pitch: mln_math::deg2rad(camera.pitch),
@@ -136,10 +135,6 @@ impl MapView {
             center_wrap: WrapMode::Unwrapped,
             terrain_min_elevation: None,
         };
-        // The altitude in pixels at the center as the view places it.
-        let placed = View::new(params);
-        params.z = camera.center_altitude
-            / Projection::altitude_meters_per_pixel(placed.center(WrapMode::Unwrapped).latitude(), placed.zoom());
         Ok(TransformState::from_parts(params, CameraLimits::widest()))
     }
 
