@@ -43,16 +43,21 @@ const LAYERS: &str = r#"[
 /// positions (and the binders' vertices) could differ between the worker
 /// behind the codec and the one run directly.
 fn style() -> Style {
-    let json = format!(
-        r#"{{"version": 8, "sources": {{"s": {{"type": "vector", "tiles": ["local://{{z}}-{{x}}-{{y}}.mvt"]}}}},
-        "layers": {LAYERS}}}"#
-    );
-    let mut style = Style::from_json(builtin_registry().style(), &json, None).unwrap();
+    let mut style = style_without_images();
     let mut pixels = PremultipliedImage::new(Size::new(4, 4));
     pixels.data.fill(255);
     let grass = ImageImpl::new("grass".to_owned(), pixels, 1.0, false, Vec::new(), Vec::new(), None, None, None);
     style.apply(Edit::AddImage(Arc::new(grass.unwrap()))).unwrap();
     style
+}
+
+/// The style of [`LAYERS`] without images, whose patterns draw nothing.
+fn style_without_images() -> Style {
+    let json = format!(
+        r#"{{"version": 8, "sources": {{"s": {{"type": "vector", "tiles": ["local://{{z}}-{{x}}-{{y}}.mvt"]}}}},
+        "layers": {LAYERS}}}"#
+    );
+    Style::from_json(builtin_registry().style(), &json, None).unwrap()
 }
 
 /// A polygon, a line and a point, each with properties that the layers read.
@@ -88,12 +93,21 @@ fn every_geometry_layer_type_lays_out() {
 }
 
 /// The buckets of a job behind the codec, the second time too, when the
-/// worker has the style's values, are those of the job run directly.
+/// worker has the style's values, are those of the job run directly, with
+/// the patterns of the style's image.
 #[test]
 fn layouts_cross_as_they_were_laid_out() {
     let (style, data) = (style(), data());
     let layout = TileLayout::new(&builtin_registry(), &style, "s", |_| true, (0, 0, 0), &data, |_| None).unwrap();
     let direct = layout.run(data.clone()).unwrap();
+    let without_images = style_without_images();
+    let without_patterns =
+        TileLayout::new(&builtin_registry(), &without_images, "s", |_| true, (0, 0, 0), &data, |_| None).unwrap();
+    assert_ne!(
+        without_patterns.run(data.clone()).unwrap().encoded().unwrap(),
+        direct.encoded().unwrap(),
+        "the layout draws the patterns of the style's image",
+    );
     let mut codec = Codec::new(builtin_registry());
     for _ in 0..2 {
         let reply = codec.send(&layout, data.clone()).unwrap().run();
