@@ -23,7 +23,6 @@ use crate::text::collision_index::{CollisionBoundaries, IntersectStatus, Overlap
 /// What a tile placement keeps besides the placement's own state.
 #[derive(Default)]
 pub(crate) struct TilePlacementState {
-    tile_borders: Option<CollisionBoundaries>,
     pub(super) placed_symbols_data: Vec<PlacedSymbolData>,
     /// Placing the symbols that cross the borders, before the rest.
     populate_intersections: bool,
@@ -59,18 +58,22 @@ impl Placement {
         }
     }
 
-    /// The tile borders that `bucket`'s symbols stay inside, in tile mode,
-    /// where the bucket avoids its tile's edges or places along lines.
-    pub(super) fn avoid_edges(&mut self, bucket: &SymbolBucket, matrix: &DMat4) -> Option<CollisionBoundaries> {
+    /// The borders of the tile whose matrix is `matrix`, in tile mode,
+    /// and those that `bucket`'s symbols stay inside, where it avoids its
+    /// tile's edges or places along lines.
+    pub(super) fn tile_borders(
+        &self,
+        bucket: &SymbolBucket,
+        matrix: &DMat4,
+    ) -> (Option<CollisionBoundaries>, Option<CollisionBoundaries>) {
         if !matches!(self.kind, PlacementKind::Tile(_)) {
-            return None;
+            return (None, None);
         }
         let borders = self.collision_index.project_tile_boundaries(matrix);
-        let tile = self.tile_state()?;
-        tile.tile_borders = Some(borders);
         let layout = &*bucket.layout;
-        (*layout.symbol_avoid_edges.uniform() || *layout.symbol_placement.uniform() == SymbolPlacementType::Line)
-            .then_some(borders)
+        let avoided =
+            *layout.symbol_avoid_edges.uniform() || *layout.symbol_placement.uniform() == SymbolPlacementType::Line;
+        (Some(borders), avoided.then_some(borders))
     }
 
     /// Whether a label at the variable anchor `anchor` of `anchors`, whose
@@ -89,7 +92,7 @@ impl Placement {
         let PlacementKind::Tile(tile) = &self.kind else {
             return true;
         };
-        let Some(borders) = &tile.tile_borders else {
+        let Some(borders) = &ctx.tile_borders else {
             return true;
         };
         let intersects = |shift| {
@@ -241,7 +244,7 @@ impl Placement {
         };
         let priority = tile.current_intersection_priority;
         tile.current_intersection_priority += 1;
-        let Some(tile_borders) = tile.tile_borders else {
+        let Some(tile_borders) = ctx.tile_borders else {
             return Vec::new();
         };
         let index = &self.collision_index;

@@ -55,7 +55,7 @@ struct VariableLabel<'a> {
     id: NonZeroU32,
     text: &'a TextPart,
     /// The collision feature of the icon fitted to the text, which must fit
-    /// at the anchor too; a vertical text's box stands for its icon's.
+    /// at the anchor too.
     icon_feature: Option<&'a CollisionFeature>,
     anchors: &'a [SymbolAnchorType],
     run: &'a LabelRun<'a>,
@@ -204,12 +204,12 @@ impl Placement {
                 if vertical && !(ctx.bucket.allow_vertical_placement && text.vertical_collision.is_some()) {
                     return PlacedText::default();
                 }
-                // A vertical text's box stands for its icon's.
+                // The box `place_icon` places the icon fitted to the text in.
                 let icon_feature = symbol
                     .icon
                     .as_ref()
                     .filter(|_| ctx.has_icon_text_fit && ctx.icon_overlap_mode == OverlapMode::Never)
-                    .map(|icon| if vertical { text.collision(true) } else { &icon.collision });
+                    .map(|icon| icon.collision(vertical));
                 let label = VariableLabel { id, text, icon_feature, anchors: &anchors, run: &label };
                 this.place_at_variable_anchors(&label, vertical, ctx)
             });
@@ -300,6 +300,9 @@ impl Placement {
         };
         let text_collision = ctx.text_collision();
         let icon_collision = ctx.icon_collision();
+        // An anchor that doesn't fit leaves its result, which says whether
+        // the text is hidden behind the planet.
+        let mut last = PlacedFeatureResult::default();
         for &overlap_mode in passes {
             for &anchor in anchors {
                 let offset = VariableOffset {
@@ -324,6 +327,7 @@ impl Placement {
                     Some(shift),
                     &mut self.text_boxes,
                 );
+                last = PlacedFeatureResult { placed: false, ..result };
                 if let Some(icon_feature) = icon_feature {
                     let icon = self.collision_index.place_feature(
                         &icon_collision,
@@ -347,7 +351,7 @@ impl Placement {
                 }
             }
         }
-        unplaced
+        PlacedText { result: last, ..unplaced }
     }
 
     /// Places `icon` beside `text`, which it follows to its variable anchor

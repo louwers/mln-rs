@@ -188,13 +188,14 @@ impl FeatureIndexBuilder {
 }
 
 /// An R-tree of `boxes`, whose items are their indices; `None` if there are
-/// none.
-fn build_tree(boxes: &[Bounds]) -> Option<RTree<i16>> {
+/// none. It holds the coordinates as `i32`, as sorting sums them.
+fn build_tree(boxes: &[Bounds]) -> Option<RTree<i32>> {
     if boxes.is_empty() {
         return None;
     }
     let mut builder = RTreeBuilder::new(boxes.len() as u32);
-    for &[min_x, min_y, max_x, max_y] in boxes {
+    for &bounds in boxes {
+        let [min_x, min_y, max_x, max_y] = bounds.map(i32::from);
         builder.add(min_x, min_y, max_x, max_y);
     }
     Some(builder.finish::<HilbertSort>())
@@ -204,7 +205,7 @@ fn build_tree(boxes: &[Bounds]) -> Option<RTree<i16>> {
 pub(crate) struct FeatureIndex {
     /// Indexes `boxes`, once a query has built it; `None` when there are
     /// none.
-    tree: OnceLock<Option<RTree<i16>>>,
+    tree: OnceLock<Option<RTree<i32>>>,
     /// The rings' entries and boxes, in insertion order.
     entries: Vec<Entry>,
     boxes: Vec<Bounds>,
@@ -280,8 +281,11 @@ impl FeatureIndex {
         {
             return Ok(());
         }
-        let mut features: Vec<&Entry> =
-            tree.search(min_x, min_y, max_x, max_y).into_iter().filter_map(|i| self.entries.get(i as usize)).collect();
+        let mut features: Vec<&Entry> = tree
+            .search(i32::from(min_x), i32::from(min_y), i32::from(max_x), i32::from(max_y))
+            .into_iter()
+            .filter_map(|i| self.entries.get(i as usize))
+            .collect();
         // Later features first, each once.
         features.sort_unstable_by_key(|feature| Reverse(feature.sort_index));
         features.dedup_by_key(|feature| feature.sort_index);
@@ -609,5 +613,12 @@ mod tests {
         assert_eq!(decoded.boxes, index.boxes);
         assert_eq!(decoded.encode_grid(), encoded);
         assert_eq!(index.boxes[14], [560, 10, 565, 4000]);
+    }
+
+    #[test]
+    fn indexes_boxes_whose_coordinates_overflow_i16_when_summed() {
+        let boxes: Vec<Bounds> = (0..20).map(|i| [-2000, i * 10, 31000, i * 10 + 5]).collect();
+        let tree = build_tree(&boxes).expect("boxes");
+        assert_eq!(tree.search(0, 0, 10, 10).len(), 2);
     }
 }

@@ -67,6 +67,8 @@ pub(crate) struct BucketOptions {
     /// The bucket's symbols skip their fade in.
     pub(crate) just_reloaded: bool,
     pub(crate) collision_group: Option<u16>,
+    /// The tile's borders, in tile mode.
+    pub(crate) tile_borders: Option<CollisionBoundaries>,
     pub(crate) avoid_edges: Option<CollisionBoundaries>,
     /// Debug drawing shows the collision boxes.
     pub(crate) debug: bool,
@@ -109,6 +111,8 @@ pub(crate) struct PlacementContext<'a> {
     pub(crate) always_show_text: bool,
     pub(crate) always_show_icon: bool,
     pub(crate) has_icon_text_fit: bool,
+    /// The tile's borders, in tile mode.
+    pub(crate) tile_borders: Option<CollisionBoundaries>,
     /// The tile borders the symbols stay inside, in tile mode.
     pub(crate) avoid_edges: Option<CollisionBoundaries>,
     debug: bool,
@@ -122,7 +126,7 @@ impl<'a> PlacementContext<'a> {
         placement_zoom: f32,
         options: BucketOptions,
     ) -> Self {
-        let BucketOptions { just_reloaded, collision_group, avoid_edges, debug } = options;
+        let BucketOptions { just_reloaded, collision_group, tile_borders, avoid_edges, debug } = options;
         let tile = &data.tile;
         let overscaled_id = tile.overscaled_id;
         let pixels_to_tile_units = tile.id.pixels_to_tile_units(1.0, placement_zoom);
@@ -173,6 +177,7 @@ impl<'a> PlacementContext<'a> {
             always_show_icon: icon_always
                 && (text_always || !bucket.has_text_data() || *layout.text_optional.uniform()),
             has_icon_text_fit: *layout.icon_text_fit.uniform() != IconTextFitType::None,
+            tile_borders,
             avoid_edges,
             debug,
         }

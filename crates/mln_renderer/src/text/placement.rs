@@ -499,10 +499,12 @@ impl Placement {
         bucket: &'a crate::buckets::symbol_bucket::SymbolBucket,
         reloaded_placed: &HashSet<BucketKey>,
     ) -> PlacementContext<'a> {
+        let (tile_borders, avoid_edges) = self.tile_borders(bucket, &data.tile.matrix);
         let options = BucketOptions {
             just_reloaded: bucket.state.just_reloaded && !reloaded_placed.contains(&data.bucket),
             collision_group: self.collision_groups.get(&data.source_id),
-            avoid_edges: self.avoid_edges(bucket, &data.tile.matrix),
+            tile_borders,
+            avoid_edges,
             debug: self.show_collision_boxes,
         };
         PlacementContext::new(data, bucket, &inputs.view, self.placement_zoom, options)

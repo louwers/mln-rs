@@ -123,7 +123,7 @@ impl<T> Grid<T> {
         let id = self.elements.len() as u32;
         let ((x1, y1), (x2, y2)) = self.cell_range(&shape.bounds());
         for y in y1..=y2 {
-            for cell in &mut self.cells[y * self.columns + x1..=y * self.columns + x2] {
+            for cell in self.cells[y * self.columns..][..self.columns].iter_mut().take(x2 + 1).skip(x1) {
                 cell.push(id);
             }
         }
@@ -170,11 +170,14 @@ impl<T> Grid<T> {
             return (0..self.elements.len() as u32).any(f);
         }
         let ((x1, y1), (x2, y2)) = self.cell_range(bounds);
-        (y1..=y2).any(|y| self.cells[y * self.columns + x1..=y * self.columns + x2].iter().flatten().any(|&id| f(id)))
+        (y1..=y2).any(|y| {
+            self.cells[y * self.columns..][..self.columns].iter().take(x2 + 1).skip(x1).flatten().any(|&id| f(id))
+        })
     }
 
     /// The columns and rows of the cells at `bounds`' corners, clamped to
-    /// the grid.
+    /// the grid. Reversed bounds, as negative padding makes, give an empty
+    /// range.
     fn cell_range(&self, bounds: &Aabb) -> ((usize, usize), (usize, usize)) {
         // Casting saturates: a negative or NaN coordinate is in the first
         // cell.
@@ -200,6 +203,14 @@ mod tests {
 
     fn query(grid: &Grid<i16>, shape: Shape) -> Vec<i16> {
         grid.query(&shape).map(|(value, _)| *value).collect()
+    }
+
+    #[test]
+    fn a_reversed_box_is_in_no_cell() {
+        let mut grid = Grid::new(Vec2::splat(100.0), 10.0);
+        grid.insert(0, aabb(60.0, 10.0, 20.0, 30.0));
+        assert!(!grid.any(&aabb(30.0, 15.0, 40.0, 25.0), |_| true));
+        assert_eq!(query(&grid, aabb(60.0, 10.0, 20.0, 30.0)), Vec::<i16>::new());
     }
 
     #[test]
