@@ -5,7 +5,6 @@
 //   include/mln/shaders/vulkan/collision.hpp
 //   include/mln/shaders/vulkan/color_relief.hpp
 //   include/mln/shaders/vulkan/common.hpp
-//   include/mln/shaders/vulkan/debug.hpp
 //   include/mln/shaders/vulkan/fill.hpp
 //   include/mln/shaders/vulkan/fill_extrusion.hpp
 //   include/mln/shaders/vulkan/globe_depth.hpp
@@ -1248,65 +1247,6 @@ void main() {
 ",
 };
 
-pub(crate) const DEBUG_SHADER_PRELUDE: &str = r"#define idDebugUBO  drawableUBOStartId + 3";
-
-pub(crate) const DEBUG_SHADER: GlslShaderSource = GlslShaderSource {
-    prelude: DEBUG_SHADER_PRELUDE,
-    vertex: r"
-
-layout(location = 0) in ivec2 in_position;
-
-layout(set = DRAWABLE_UBO_SET_INDEX, binding = idDebugUBO) uniform DebugUBO {
-    mat4 matrix;
-    vec4 color;
-    float overlay_scale;
-    float pad1;
-    float pad2;
-    float pad3;
-} debug;
-
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
-
-layout(location = 0) out vec2 frag_uv;
-
-void main() {
-
-    gl_Position = projectTile(in_position * debug.overlay_scale, projectionVector.projection_ubo[constant.ubo_index]);
-
-    // This vertex shader expects a EXTENT x EXTENT quad,
-    // The UV coordinates for the overlay texture can be calculated using that knowledge
-    frag_uv = in_position / 8192.0;
-}
-",
-    fragment: r"
-layout(location = 0) in vec2 frag_uv;
-layout(location = 0) out vec4 out_color;
-
-layout(set = DRAWABLE_UBO_SET_INDEX, binding = idDebugUBO) uniform DebugUBO {
-    mat4 matrix;
-    vec4 color;
-    float overlay_scale;
-    float pad1;
-    float pad2;
-    float pad3;
-} debug;
-
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image_sampler;
-
-void main() {
-    vec4 overlay_color = texture(sampler2D(image_texture, image_sampler), frag_uv);
-    out_color = mix(debug.color, overlay_color, overlay_color.a);
-}
-",
-};
-
 pub(crate) const FILL_SHADER_PRELUDE: &str = r"
 
 #define idFillDrawableUBO           idDrawableReservedVertexOnlyUBO
@@ -2425,114 +2365,6 @@ void main() {
 "
     ),
     fragment: FILL_OUTLINE_SHADER.fragment,
-};
-
-pub(crate) const FILL_OUTLINE_TRIANGULATED_SHADER: GlslShaderSource = GlslShaderSource {
-    prelude: FILL_SHADER_PRELUDE,
-    vertex: r"
-
-layout(location = 0) in ivec2 in_pos_normal;
-layout(location = 1) in uvec4 in_data;
-
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
-struct FillOutlineTriangulatedDrawableUBO {
-    mat4 matrix;
-    float ratio;
-    float pad1;
-    float pad2;
-    float pad3;
-    vec4 pad4;
-    vec4 pad5;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idFillDrawableUBO) readonly buffer FillOutlineTriangulatedDrawableUBOVector {
-    FillOutlineTriangulatedDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
-
-layout(location = 0) out float frag_width2;
-layout(location = 1) out vec2 frag_normal;
-layout(location = 2) out float frag_gamma_scale;
-
-void main() {
-    const FillOutlineTriangulatedDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
-
-    // the distance over which the line edge fades out.
-    // Retina devices need a smaller distance to avoid aliasing.
-    float ANTIALIASING = 1.0 / DEVICE_PIXEL_RATIO / 2.0;
-
-    const vec2 a_extrude = in_data.xy - 128.0;
-    const vec2 pos = floor(in_pos_normal * 0.5);
-
-    // x is 1 if it's a round cap, 0 otherwise
-    // y is 1 if the normal points up, and -1 if it points down
-    // We store these in the least significant bit of in_pos_normal
-    vec2 normal = in_pos_normal - 2.0 * pos;
-    frag_normal = vec2(normal.x, normal.y * 2.0 - 1.0);
-    frag_normal.y *= -1.0;
-
-    // these transformations used to be applied in the JS and native code bases.
-    // moved them into the shader for clarity and simplicity.
-    float width = 1.0;
-    float halfwidth = width / 2.0;
-    float outset = halfwidth + (halfwidth == 0.0 ? 0.0 : ANTIALIASING);
-
-    // Scale the extrusion vector down to a normal and then up by the line width
-    // of this vertex.
-    vec2 dist = outset * a_extrude * LINE_NORMAL_SCALE;
-
-    vec4 projected_extrude = projectionVector.projection_ubo[constant.ubo_index].fallback_matrix * vec4(dist / drawable.ratio, 0.0, 0.0);
-    gl_Position = projectTile(pos, pos, projectionVector.projection_ubo[constant.ubo_index]) + projected_extrude;
-
-    // calculate how much the perspective view squishes or stretches the extrude
-    float extrude_length_without_perspective = length(dist);
-    float extrude_length_with_perspective = length(projected_extrude.xy / gl_Position.w * paintParams.units_to_pixels);
-
-    frag_width2 = outset;
-    frag_gamma_scale = extrude_length_without_perspective / extrude_length_with_perspective;
-}
-",
-    fragment: r"
-
-layout(location = 0) in float frag_width2;
-layout(location = 1) in vec2 frag_normal;
-layout(location = 2) in float frag_gamma_scale;
-
-layout(location = 0) out vec4 out_color;
-
-layout(set = LAYER_SET_INDEX, binding = idFillEvaluatedPropsUBO) uniform FillEvaluatedPropsUBO {
-    vec4 color;
-    vec4 outline_color;
-    float opacity;
-    float fade;
-    float from_scale;
-    float to_scale;
-} props;
-
-void main() {
-
-#if defined(OVERDRAW_INSPECTOR)
-    out_color = vec4(1.0);
-    return;
-#endif
-
-    // Calculate the distance of the pixel from the line in pixels.
-    const float dist = length(frag_normal) * frag_width2;
-
-    // Calculate the antialiasing fade factor. This is either when fading in the
-    // line in case of an offset line (`v_width2.y`) or when fading out (`v_width2.x`)
-    const float blur2 = (1.0 / DEVICE_PIXEL_RATIO) * frag_gamma_scale;
-    const float alpha = clamp(min(dist + blur2, frag_width2 - dist) / blur2, 0.0, 1.0);
-
-    out_color = props.outline_color * alpha * props.opacity;
-}
-",
 };
 
 pub(crate) const FILL_EXTRUSION_SHADER_PRELUDE: &str = r"

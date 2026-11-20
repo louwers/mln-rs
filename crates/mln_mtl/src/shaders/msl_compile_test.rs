@@ -187,15 +187,13 @@ fn ubo_ids(program: &Program, source: &ShaderSource) -> Vec<(&'static str, usize
             ],
             "colorReliefUBOCount",
         ),
-        "DebugShader" => (&[("idDebugUBO", ID_DEBUG_UBO)], "debugUBOCount"),
         "FillShader"
         | "FillOutlineShader"
         | "FillPatternShader"
         | "FillOutlinePatternShader"
         | "FillOutlineInstancedShader"
         | "FillOutlinePulledShader"
-        | "FillOutlinePatternInstancedShader"
-        | "FillOutlineTriangulatedShader" => (
+        | "FillOutlinePatternInstancedShader" => (
             &[
                 ("idFillDrawableUBO", ID_FILL_DRAWABLE_UBO),
                 ("idFillTilePropsUBO", ID_FILL_TILE_PROPS_UBO),
@@ -312,7 +310,6 @@ const UBO_SIZES: &[(&str, usize)] = &[
     ("FillPatternTilePropsUBO", size_of::<fill_layer_ubo::FillPatternTilePropsUBO>()),
     ("FillOutlinePatternDrawableUBO", size_of::<fill_layer_ubo::FillOutlinePatternDrawableUBO>()),
     ("FillOutlinePatternTilePropsUBO", size_of::<fill_layer_ubo::FillOutlinePatternTilePropsUBO>()),
-    ("FillOutlineTriangulatedDrawableUBO", size_of::<fill_layer_ubo::FillOutlineTriangulatedDrawableUBO>()),
     ("FillEvaluatedPropsUBO", size_of::<fill_layer_ubo::FillEvaluatedPropsUBO>()),
     ("FillDrawableUnionUBO", size_of::<fill_layer_ubo::FillDrawableUnionUBO>()),
     ("FillTilePropsUnionUBO", size_of::<fill_layer_ubo::FillTilePropsUnionUBO>()),

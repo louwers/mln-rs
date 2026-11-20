@@ -131,9 +131,6 @@ impl Buffer {
     }
 }
 
-/// The size of the debug layer's UBO, which `mln_gfx` has no struct for.
-const DEBUG_UBO_SIZE: usize = 6 * 16;
-
 /// The buffers of each shader, with the size of what the renderer binds: a
 /// uniform buffer's struct, or an element of a storage buffer's vector (the
 /// union of the layer's drawable structs where it has several, a word of a
@@ -171,8 +168,7 @@ fn buffers(program: &Program) -> Vec<(Buffer, usize)> {
             (LayerStorage(ID_COLOR_RELIEF_TILE_PROPS_UBO), size_of::<ColorReliefTilePropsUBO>()),
             (LayerUniform(ID_COLOR_RELIEF_EVALUATED_PROPS_UBO), size_of::<ColorReliefEvaluatedPropsUBO>()),
         ],
-        "DebugShader" => vec![projection, (DrawableUniform(ID_DEBUG_UBO), DEBUG_UBO_SIZE)],
-        "FillShader" | "FillOutlineShader" | "FillOutlineInstancedShader" | "FillOutlineTriangulatedShader" => vec![
+        "FillShader" | "FillOutlineShader" | "FillOutlineInstancedShader" => vec![
             (LayerStorage(ID_FILL_DRAWABLE_UBO), size_of::<FillDrawableUnionUBO>()),
             projection,
             (LayerUniform(ID_FILL_EVALUATED_PROPS_UBO), size_of::<FillEvaluatedPropsUBO>()),
@@ -663,7 +659,6 @@ fn bindings_follow_from_the_packed_ids() {
     assert_eq!(drawable_uniform_binding(ID_COLLISION_DRAWABLE_UBO), Some(0));
     assert_eq!(drawable_uniform_binding(ID_COLLISION_PROJECTION_UBO), Some(2));
     assert_eq!(drawable_uniform_binding(ID_COLLISION_TILE_PROPS_UBO), Some(3));
-    assert_eq!(drawable_uniform_binding(ID_DEBUG_UBO), Some(3));
     assert_eq!(drawable_uniform_binding(ID_HILLSHADE_PREPARE_DRAWABLE_UBO), Some(0));
     assert_eq!(drawable_uniform_binding(ID_HILLSHADE_PREPARE_TILE_PROPS_UBO), Some(3));
     // The pulled shaders' vertex buffers, from drawableUBOStartId + 5.

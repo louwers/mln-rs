@@ -89,23 +89,6 @@ pub type FillOutlinePatternDrawableUBO = FillPatternDrawableUBO;
 /// `FillPatternTilePropsUBO`.
 pub type FillOutlinePatternTilePropsUBO = FillPatternTilePropsUBO;
 
-//
-// Fill outline triangulated
-
-/// The fill outline triangulated shader's per-draw uniform block (80
-/// bytes).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
-#[repr(C, align(16))]
-pub struct FillOutlineTriangulatedDrawableUBO {
-    /*  0 */ pub matrix: [f32; 4 * 4],
-    /* 64 */ pub ratio: f32,
-    /* 68 */ pub pad1: f32,
-    /* 72 */ pub pad2: f32,
-    /* 76 */ pub pad3: f32,
-    /* 80 */
-}
-const _: () = assert!(size_of::<FillOutlineTriangulatedDrawableUBO>() == 5 * 16);
-
 /// Evaluated properties that do not depend on the tile (48 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
