@@ -1,13 +1,17 @@
 //! The terrain under the camera: the ground a camera at rest stands on, the
-//! altitude a command eases onto the ground it ends on, and the eye kept
-//! above the ground while a command moves the camera.
+//! altitude a command eases onto the ground it ends on, the eye kept above
+//! the ground while a command moves the camera, and the conversions between
+//! screen points and the ground drawn under them.
 
 use std::sync::Arc;
 
-use glam::DVec3;
+use glam::{DVec2, DVec3};
 use mln_map_types::{Elevation, View};
-use mln_util::geo::{LatLng, WrapMode};
+use mln_util::constants::TILE_SIZE_D;
+use mln_util::error::Error;
+use mln_util::geo::{LatLng, ScreenCoordinate, WrapMode};
 use mln_util::interpolate::interpolate;
+use mln_util::projection::Projection;
 
 use super::Transform;
 use super::transition::AlongFn;
@@ -86,6 +90,11 @@ impl Transform {
         self.terrain = terrain;
     }
 
+    /// The ground the renderer last drew, while there is terrain.
+    pub(crate) fn ground(&self) -> Option<&Arc<dyn Elevation>> {
+        self.terrain.as_ref()?.elevation.as_ref()
+    }
+
     /// The ground at `location`, where the renderer drew it and it has
     /// loaded.
     pub(super) fn ground_at(&self, location: LatLng) -> Option<f64> {
@@ -146,6 +155,32 @@ impl Transform {
             }
         }
     }
+}
+
+/// The location under `point` of `view`, measured from the bottom edge (y
+/// up), over terrain: where its line of sight first meets `ground`, or the
+/// plane at the center's altitude where it meets no drawn ground or before
+/// any was drawn (GL JS's `screenPointToMercatorCoordinate` with terrain).
+/// Fails as [`View::screen_coordinate_to_lat_lng`].
+pub(crate) fn unproject_on_ground(
+    view: &View,
+    ground: Option<&dyn Elevation>,
+    point: &ScreenCoordinate,
+    wrap_mode: WrapMode,
+) -> Result<LatLng, Error> {
+    match ground.and_then(|ground| view.ground_under(point, ground)) {
+        Some(hit) => Ok(hit.location(wrap_mode)),
+        None => view.screen_coordinate_to_lat_lng_at(point, view.center_altitude(), wrap_mode),
+    }
+}
+
+/// The screen point of `lat_lng` on `view`, measured from the bottom edge
+/// (y up), standing on `ground`, or at sea level where none was drawn (GL
+/// JS's `locationToScreenPoint` with terrain).
+pub(crate) fn project_on_ground(view: &View, ground: Option<&dyn Elevation>, lat_lng: &LatLng) -> ScreenCoordinate {
+    let world = Projection::project(lat_lng, 1.0 / TILE_SIZE_D);
+    let height = ground.and_then(|ground| ground.surface_at(DVec2::new(world.x, world.y))).unwrap_or(0.0);
+    view.lat_lng_to_screen_coordinate_at(lat_lng, height)
 }
 
 /// How far the ground reaches above the eye of `view`, or above a point of

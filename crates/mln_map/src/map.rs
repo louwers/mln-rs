@@ -1376,14 +1376,21 @@ impl Map {
     // gtests-core: projection and prefetch zoom delta (test/map, test/api).
     // MARK: - Projection
 
+    /// The screen point of `lat_lng`, in the copy of the world nearest the
+    /// camera's center: while the style's terrain applies, standing on the
+    /// ground the renderer drew there ([`Self::ground`]), or at sea level
+    /// where it drew none.
     #[must_use]
     pub fn pixel_for_lat_lng(&self, lat_lng: &LatLng) -> ScreenCoordinate {
         let transform = &self.transform;
         transform.lat_lng_to_screen_coordinate(&transform.state().view().lat_lng_near_center(lat_lng))
     }
 
-    /// The location under `pixel`. Fails with
-    /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a NaN or infinite pixel.
+    /// The location under `pixel`: while the style's terrain applies, where
+    /// the line of sight first meets the ground the renderer drew
+    /// ([`Self::ground`]), or the plane at the center's altitude where it
+    /// meets none. Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind)
+    /// for a NaN or infinite pixel.
     pub fn lat_lng_for_pixel(&self, pixel: &ScreenCoordinate, wrap_mode: WrapMode) -> Result<LatLng, Error> {
         self.transform.screen_coordinate_to_lat_lng(pixel, wrap_mode)
     }
@@ -1395,6 +1402,8 @@ impl Map {
         self.transform.is_location_occluded(lat_lng)
     }
 
+    /// [`lat_lng_for_pixel`](Self::lat_lng_for_pixel) of each pixel. Fails
+    /// as that does for any of them.
     pub fn lat_lngs_for_pixels(
         &self,
         screen_coords: &[ScreenCoordinate],
@@ -1428,6 +1437,14 @@ impl Map {
     #[must_use]
     pub fn center_clamped_to_ground(&self) -> bool {
         self.center_clamped_to_ground
+    }
+
+    /// The ground the camera stands on: the terrain the renderer last drew,
+    /// while the style's terrain applies on a Mercator view outside tile
+    /// mode. `None` without terrain, and before the renderer drew any.
+    #[must_use]
+    pub fn ground(&self) -> Option<Arc<dyn Elevation>> {
+        self.transform.ground().cloned()
     }
 
     /// Hands the transform the terrain the camera stands on

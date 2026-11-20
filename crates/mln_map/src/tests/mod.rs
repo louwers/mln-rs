@@ -5,6 +5,7 @@ mod map_updates;
 mod style_loader;
 mod style_sources;
 mod terrain_camera;
+mod terrain_conversions;
 
 /// A pool for a test's map.
 fn pool() -> mln_util::pool::Pool {

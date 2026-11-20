@@ -36,6 +36,7 @@ mod transition;
 
 use gesture::GestureState;
 pub use terrain::TerrainGround;
+pub(crate) use terrain::{project_on_ground, unproject_on_ground};
 use transition::{FrameFn, JointEnd, Transition};
 
 use crate::map_event::{CameraChange, CameraChangeSource};
@@ -704,16 +705,30 @@ impl Transform {
 
     // MARK: Conversion and projection
 
+    /// The screen point (y down) of `lat_lng`: standing on the terrain's
+    /// ground while there is terrain ([`Self::set_terrain`]), at sea level
+    /// where none was drawn, and on the flat map without terrain.
     #[must_use]
     pub fn lat_lng_to_screen_coordinate(&self, lat_lng: &LatLng) -> ScreenCoordinate {
-        flip_y(self.view(), &self.view().lat_lng_to_screen_coordinate(lat_lng))
+        let point = match &self.terrain {
+            Some(terrain) => project_on_ground(self.view(), terrain.elevation.as_deref(), lat_lng),
+            None => self.view().lat_lng_to_screen_coordinate(lat_lng),
+        };
+        flip_y(self.view(), &point)
     }
 
-    /// The location under `point`, in screen coordinates (y down).
+    /// The location under `point`, in screen coordinates (y down): while
+    /// there is terrain ([`Self::set_terrain`]), where the line of sight
+    /// first meets the ground the renderer drew, or the plane at the center's
+    /// altitude where it meets none; without terrain, on the flat map.
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a NaN
     /// or infinite point.
     pub fn screen_coordinate_to_lat_lng(&self, point: &ScreenCoordinate, wrap_mode: WrapMode) -> Result<LatLng, Error> {
-        self.view().screen_coordinate_to_lat_lng(&flip_y(self.view(), point), wrap_mode)
+        let point = flip_y(self.view(), point);
+        match &self.terrain {
+            Some(terrain) => unproject_on_ground(self.view(), terrain.elevation.as_deref(), &point, wrap_mode),
+            None => self.view().screen_coordinate_to_lat_lng(&point, wrap_mode),
+        }
     }
 
     /// The screen point (y down) of `lat_lng` `height` meters above sea
