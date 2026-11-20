@@ -239,6 +239,19 @@ impl Renderer {
         self.orchestrator.release_shaders();
     }
 
+    /// The tiles of the terrain's drapes drawn since the last call.
+    #[cfg(test)]
+    pub(crate) fn take_drape_passes(&mut self) -> Vec<mln_tile_id::OverscaledTileID> {
+        self.orchestrator.terrain().take_drape_passes()
+    }
+
+    /// The tiles of the terrain's drapes, those of the last update's cover.
+    #[cfg(test)]
+    pub(crate) fn drape_tiles(&mut self) -> Vec<mln_tile_id::OverscaledTileID> {
+        let cover = self.orchestrator.terrain().cover();
+        cover.map(|cover| cover.tiles.iter().map(|tile| tile.id).collect()).unwrap_or_default()
+    }
+
     /// The device pixels per logical pixel the renderer draws at.
     #[must_use]
     pub fn pixel_ratio(&self) -> f32 {

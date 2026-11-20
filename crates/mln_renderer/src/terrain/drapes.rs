@@ -8,6 +8,10 @@
 //! draped layer keeps a drawing of its own in each drape, made by the
 //! layer's own draw update ([`LayerParts::update_drape_draws`]), with the
 //! drape's uniforms, clip masks and stencil.
+//!
+//! A drape draws again only when what its layers would draw it from
+//! differs from what they drew it from ([`DrapeKey`]); while the camera
+//! moves, a drape drawn at another zoom stays, as in GL JS.
 
 use std::sync::Arc;
 
@@ -19,6 +23,7 @@ use mln_map_types::View;
 use mln_style::layer_type::ErasedLayerStyle;
 use mln_tile_id::OverscaledTileID;
 use mln_util::Color;
+use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
@@ -29,9 +34,11 @@ use crate::gfx::resources::GpuTexture;
 use crate::gfx::store::SharedTexture;
 use crate::layer_composite::LayerComposite;
 use crate::layer_drawing::{ChangedBuckets, DrapeDrawing, DrawGroups, DrawOrder};
+use crate::layer_type::ErasedEvaluatedLayer;
 use crate::paint_parameters::{OpenPass, PaintParameters, TransformParameters};
 use crate::render_layer::{Atlases, LayerSource, RenderLayer};
 use crate::render_pass::RenderPass;
+use crate::render_tile::TileStamp;
 use crate::tile_matrix::to_projection_ubo;
 
 /// The format of a drape's texture.
@@ -54,6 +61,55 @@ struct DrapeLayer {
     drawing: DrapeDrawing,
 }
 
+/// What a draped layer draws a drape with.
+struct LayerKey {
+    style: Arc<dyn ErasedLayerStyle>,
+    /// The layer's [`paint_revision`](crate::render_layer::RenderLayerBase::paint_revision).
+    paint_revision: SimpleIdentity,
+    evaluated: Arc<dyn ErasedEvaluatedLayer>,
+    /// The number of the layer's tiles among the key's.
+    tiles: usize,
+}
+
+/// What a drape's layers draw it from: the layers, their values, what they
+/// draw of their tiles, and the map's zoom. A drape drawn from the same
+/// would get the same texels.
+///
+/// The images of the style, and the feature state of the tiles' buckets,
+/// aren't in it: a change of them makes the drapes they show in draw again
+/// ([`Drapes::redraw`], [`Drapes::mark_changed`]).
+#[derive(Default)]
+struct DrapeKey {
+    /// The draped layers, in drawing order.
+    layers: Vec<LayerKey>,
+    /// The layers' tiles, each layer's after the one before's.
+    tiles: Vec<TileStamp>,
+    zoom: f64,
+}
+
+impl DrapeKey {
+    /// Whether a drape drawn from `drawn` has the texels that this key would
+    /// draw: of the same layers, with the same styles and paint revisions,
+    /// from the same tiles, and `at_rest`, with the same values at the same
+    /// zoom. A camera that moves keeps drapes drawn at another zoom.
+    fn matches(&self, drawn: &DrapeKey, at_rest: bool) -> bool {
+        self.tiles == drawn.tiles
+            && self.layers.len() == drawn.layers.len()
+            && self.layers.iter().zip(&drawn.layers).all(|(layer, drawn)| {
+                Arc::ptr_eq(&layer.style, &drawn.style)
+                    && layer.paint_revision == drawn.paint_revision
+                    && layer.tiles == drawn.tiles
+                    && (!at_rest || Arc::ptr_eq(&layer.evaluated, &drawn.evaluated))
+            })
+            && (!at_rest || self.zoom == drawn.zoom)
+    }
+
+    /// Whether a bucket in `changed` is among the key's.
+    fn holds(&self, changed: &ChangedBuckets) -> bool {
+        self.tiles.iter().any(|tile| tile.bucket.is_some_and(|bucket| changed.contains(bucket)))
+    }
+}
+
 /// The drape of a terrain tile.
 struct Drape {
     tile: OverscaledTileID,
@@ -70,6 +126,13 @@ struct Drape {
     /// The number of draw groups of the layers' drawings, which sets the
     /// pass's depths.
     groups: DrawGroups,
+    /// What the layers last drew the texture from; `None` before they
+    /// first draw it, and once it is stale.
+    drawn: Option<DrapeKey>,
+    /// What the frame's layers would draw it from.
+    key: DrapeKey,
+    /// Whether the frame draws the drape again.
+    redraws: bool,
 }
 
 impl Drape {
@@ -97,6 +160,9 @@ impl Drape {
             layers: Vec::new(),
             previous: Vec::new(),
             groups: DrawGroups::default(),
+            drawn: None,
+            key: DrapeKey::default(),
+            redraws: false,
         }
     }
 }
@@ -109,12 +175,18 @@ pub(crate) struct Drapes {
     size: u32,
     /// The depth and stencil every drape draws with in turn, of `size`.
     depth_stencil: Option<GpuTexture>,
+    /// The tiles of the drapes drawn since the last [`take_passes`](Self::take_passes).
+    #[cfg(test)]
+    passes: Vec<OverscaledTileID>,
 }
 
 impl Drapes {
     /// Starts a frame's update of the drapes, those of `cover`'s tiles in
-    /// `view`: keeps the drapes of the tiles it had, with their drawings
-    /// for the layers to take, and drops the others.
+    /// `view`: keeps the drapes of the tiles it had, and drops the others.
+    /// The frame's draped layers then give their keys
+    /// ([`key_layer`](Self::key_layer)), which choose the drapes that draw
+    /// again ([`choose`](Self::choose)), whose drawings they then update
+    /// ([`update_layer`](Self::update_layer)).
     pub(crate) fn begin(&mut self, context: &mut Context, view: &View, cover: &TerrainCover) {
         let size = drape_size(cover.tile_size);
         if size != self.size {
@@ -131,14 +203,47 @@ impl Drapes {
                 }
                 None => Drape::new(context, view, tile.id, size),
             };
-            drape.previous = std::mem::take(&mut drape.layers);
+            drape.key.layers.clear();
+            drape.key.tiles.clear();
+            drape.key.zoom = view.zoom();
             self.drapes.push(drape);
         }
     }
 
+    /// Adds `layer`, a layer of the frame that drapes, which draws from
+    /// `source`, to every drape's key. The layers come in drawing order.
+    pub(crate) fn key_layer(&mut self, layer: &dyn RenderLayer, source: Option<LayerSource<'_>>) {
+        let base = layer.base();
+        for drape in &mut self.drapes {
+            let key = &mut drape.key;
+            let start = key.tiles.len();
+            layer.drape_stamps(source, drape.tile, &mut key.tiles);
+            key.layers.push(LayerKey {
+                style: Arc::clone(&base.style),
+                paint_revision: base.paint_revision,
+                evaluated: Arc::clone(&base.evaluated_properties),
+                tiles: key.tiles.len() - start,
+            });
+        }
+    }
+
+    /// Chooses the drapes the frame draws again, once every draped layer
+    /// gave its key: those not drawn yet or stale, and those whose key
+    /// doesn't [match](DrapeKey::matches) what they were drawn from, with
+    /// the camera `at_rest` or not. Their layers' drawings wait for the
+    /// layers to take them.
+    pub(crate) fn choose(&mut self, at_rest: bool) {
+        for drape in &mut self.drapes {
+            drape.redraws = drape.drawn.as_ref().is_none_or(|drawn| !drape.key.matches(drawn, at_rest));
+            if drape.redraws {
+                drape.previous = std::mem::take(&mut drape.layers);
+            }
+        }
+    }
+
     /// Makes the draws of `layer`, a layer of the frame that drapes, in
-    /// every drape, with the drape's `parameters`, from its `source`. The
-    /// layers update in drawing order.
+    /// every drape that draws again, with the drape's `parameters`, from its
+    /// `source`. The layers update in drawing order.
     pub(crate) fn update_layer(
         &mut self,
         gpu: &mut dyn Gpu,
@@ -151,7 +256,7 @@ impl Drapes {
         let style = &layer.base().style;
         let style = Arc::clone(style);
         let pattern_atlas_size = atlases.pattern.pixel_size();
-        for drape in &mut self.drapes {
+        for drape in self.drapes.iter_mut().filter(|drape| drape.redraws) {
             let Drape { tile, transform, clip_masks, layer_composite, layers, previous, .. } = drape;
             // A drawing made for another style of the layer goes, as the
             // layer's own draws do.
@@ -181,18 +286,36 @@ impl Drapes {
     }
 
     /// Records that the buckets in `changed` changed, for the drapes' draws
-    /// built from them.
+    /// built from them, and makes the drapes that show them draw again.
     pub(crate) fn mark_changed(&mut self, changed: &ChangedBuckets) {
         for drape in &mut self.drapes {
             for layer in &mut drape.layers {
                 layer.drawing.mark_changed(changed);
             }
+            if drape.drawn.as_ref().is_some_and(|drawn| drawn.holds(changed)) {
+                drape.drawn = None;
+            }
         }
     }
 
-    /// Makes the drapes' textures and what they draw with, and uploads
-    /// the GPU objects of their draws and the masks of the tiles they clip
-    /// to, through `gpu`, the context of `parameters`, the frame's.
+    /// Makes every drape draw again: what they show changed in a way that
+    /// their keys don't tell, such as the style's images.
+    pub(crate) fn redraw(&mut self) {
+        for drape in &mut self.drapes {
+            drape.drawn = None;
+        }
+    }
+
+    /// The tiles of the drapes drawn since the last call.
+    #[cfg(test)]
+    pub(crate) fn take_passes(&mut self) -> Vec<OverscaledTileID> {
+        std::mem::take(&mut self.passes)
+    }
+
+    /// Makes the textures of the drapes that draw again and what they draw
+    /// with, and uploads the GPU objects of their draws and the masks of the
+    /// tiles they clip to, through `gpu`, the context of `parameters`, the
+    /// frame's.
     pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
         if self.drapes.is_empty() {
             self.depth_stencil = None;
@@ -209,7 +332,7 @@ impl Drapes {
         }
         let shaders = &parameters.static_data.shaders;
         let stencil_clear_tile = parameters.stencil_clear_tile();
-        for drape in &mut self.drapes {
+        for drape in self.drapes.iter_mut().filter(|drape| drape.redraws) {
             let context = &mut *parameters.context;
             if let Err(error) = context.create_texture(gpu, &drape.texture) {
                 Log::error(Event::Render, format!("Making a drape's texture failed: {error}"));
@@ -233,17 +356,19 @@ impl Drapes {
         }
     }
 
-    /// Draws each drape into its texture, through `gpu`, the context of
-    /// `parameters`, the frame's, outside any pass, and then its texture's
-    /// mips: its layers' opaque draws front to back, then their translucent
-    /// ones back to front, over transparent texels.
+    /// Draws each drape that draws again into its texture, through `gpu`,
+    /// the context of `parameters`, the frame's, outside any pass, and then
+    /// its texture's mips: its layers' opaque draws front to back, then
+    /// their translucent ones back to front, over transparent texels.
     pub(crate) fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
         let Some(depth_stencil) = self.depth_stencil.as_ref().map(GpuTexture::id) else {
             return;
         };
         let size = Size::new(self.size, self.size);
-        for drape in &mut self.drapes {
-            let Drape { tile, texture, transform, clip_masks, layer_composite, layers, groups, .. } = drape;
+        for drape in self.drapes.iter_mut().filter(|drape| drape.redraws) {
+            let Drape { tile, texture, transform, clip_masks, layer_composite, layers, groups, drawn, key, .. } = drape;
+            // A drape that fails to draw draws again in the next frame.
+            *drawn = None;
             let color = match parameters.context.create_texture(gpu, texture) {
                 Ok(color) => color,
                 Err(error) => {
@@ -264,7 +389,7 @@ impl Drapes {
             };
             let mut drape_parameters =
                 parameters.drape(transform, clip_masks, layer_composite, size, tile.to_unwrapped());
-            let drawn = drape_parameters.begin_pass(gpu, pass).and_then(|()| {
+            let drawn_pass = drape_parameters.begin_pass(gpu, pass).and_then(|()| {
                 drape_parameters.depth_range_size = groups.depth_range_size();
                 drape_parameters.pass = RenderPass::Opaque;
                 drape_parameters.current_layer = 0;
@@ -278,8 +403,13 @@ impl Drapes {
                 }
                 drape_parameters.end_pass(gpu)
             });
-            if let Err(error) = drawn.and_then(|()| parameters.context.generate_mipmaps(gpu, texture)) {
-                Log::error(Event::Render, format!("Drawing a drape failed: {error}"));
+            match drawn_pass.and_then(|()| parameters.context.generate_mipmaps(gpu, texture)) {
+                Ok(()) => {
+                    *drawn = Some(std::mem::take(key));
+                    #[cfg(test)]
+                    self.passes.push(*tile);
+                }
+                Err(error) => Log::error(Event::Render, format!("Drawing a drape failed: {error}")),
             }
         }
     }

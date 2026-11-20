@@ -219,6 +219,18 @@ impl RenderTerrain {
         self.drapes.mark_changed(changed);
     }
 
+    /// Makes every drape draw again in the next frame, for a change that
+    /// their keys don't tell: the style's images.
+    pub(crate) fn redraw_drapes(&mut self) {
+        self.drapes.redraw();
+    }
+
+    /// The tiles of the drapes drawn since the last call.
+    #[cfg(test)]
+    pub(crate) fn take_drape_passes(&mut self) -> Vec<mln_tile_id::OverscaledTileID> {
+        self.drapes.take_passes()
+    }
+
     /// Drops the drapes once the map's center crossed the antimeridian: the
     /// tiles are the same ones under new ids.
     pub(crate) fn handle_wrap_jump(&mut self) {

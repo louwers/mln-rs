@@ -38,6 +38,8 @@ mod source_test;
 // The terrain's drapes: their projection, their pixels' scale, and the
 // tiles a drape draws.
 mod drape_test;
+// The drapes draw again only when what they show changed.
+mod drape_reuse_test;
 // Port-only: the renderer frees what it lets go of on its workers.
 mod drop_on_workers_test;
 // Port-only: malformed vector tiles become tile errors, not panics.

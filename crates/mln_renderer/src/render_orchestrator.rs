@@ -20,6 +20,7 @@ use mln_text::local_glyph_rasterizer::LocalGlyphs;
 use mln_util::constants::DEFAULT_TRANSITION_DURATION;
 use mln_util::error::Error;
 use mln_util::hash::{HashMap, HashSet};
+use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, Log};
 use mln_util::pool::{Pool, TaskGroup};
 use mln_util::time::Instant;
@@ -324,6 +325,9 @@ impl RenderOrchestrator {
         let layers = Arc::clone(style.get_layer_list());
 
         self.apply_image_diff(&image_diff, update_parameters.sprite_loaded);
+        if !(image_diff.added.is_empty() && image_diff.removed.is_empty() && image_diff.changed.is_empty()) {
+            self.terrain.redraw_drapes();
+        }
 
         let render_layers_remade = self.apply_layer_changes(&layer_changes, &layers, &clock);
         let constants_mask_changed = self.evaluate_layers(&layer_changes, render_layers_remade, &mut clock);
@@ -767,6 +771,11 @@ impl RenderOrchestrator {
                 || clock.evaluation.has_crossfade
                 || layer.has_transition()
             {
+                // A drape drawn while the camera moves keeps values evaluated
+                // at another zoom, but not values of another revision.
+                if layer_added_or_changed || global_state_changed_and_matters || layer.has_transition() {
+                    layer.base_mut().paint_revision = SimpleIdentity::new();
+                }
                 let previous_mask = layer.base().evaluated_properties.constants_mask();
                 layer.evaluate(&clock.evaluation);
                 if previous_mask != layer.base().evaluated_properties.constants_mask() {
@@ -1321,6 +1330,15 @@ impl RenderOrchestrator {
         }
         if let Some(drapes) = self.terrain.begin_drapes(gpu, paint_parameters, frame.terrain) {
             let mut contents = SourceContents::default();
+            for &index in &draped {
+                let Some(frame_layer) = frame.layers.get(&index) else {
+                    continue;
+                };
+                let layer_source =
+                    layer_source(frame_layer, &self.render_sources, &self.tile_store, &self.found_tiles, &mut contents);
+                drapes.key_layer(&*self.layers[index as usize], layer_source);
+            }
+            drapes.choose(!paint_parameters.camera_moving);
             for index in draped {
                 let Some(frame_layer) = frame.layers.get(&index) else {
                     continue;

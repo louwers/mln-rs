@@ -87,6 +87,12 @@ impl ChangedBuckets {
         self.0.is_empty()
     }
 
+    /// Whether the bucket `bucket` changed.
+    #[must_use]
+    pub(crate) fn contains(&self, bucket: SimpleIdentity) -> bool {
+        self.0.contains_key(&bucket)
+    }
+
     fn get(&self, bucket: SimpleIdentity) -> Option<BucketChanges> {
         self.0.get(&bucket).copied()
     }

@@ -36,6 +36,7 @@ use crate::layout::tile_layout::{Dependencies, Resolved};
 use crate::query::{RenderedQueryOptions, SourceQueryOptions};
 use crate::render_layer::ErasedLayerBucket;
 use crate::render_orchestrator::drop_on_workers;
+use crate::render_tile::ViewPlace;
 use crate::source_state::SourceFeatureState;
 use crate::text::glyph_store::ShapeResults;
 use crate::tile_mask::TileMask;
@@ -558,6 +559,23 @@ impl Contents {
         match self {
             Contents::Geometry(contents) => !contents.missing,
             Contents::Raster(_) | Contents::Dem(_) | Contents::Empty => true,
+        }
+    }
+
+    /// The bucket that these contents show at `place`, with the generations
+    /// of its geometry and of what is prepared from it, its DEM's border.
+    pub(crate) fn stamp(&self, place: ViewPlace) -> Option<(SimpleIdentity, [u64; 2])> {
+        match (self, place) {
+            (Contents::Geometry(contents), ViewPlace::Laid(index)) => {
+                Some((contents.result.layer_render_data.laid(index)?.bucket.id(), [0, 0]))
+            }
+            (Contents::Raster(bucket), ViewPlace::Own) => {
+                Some((bucket.base.bucket_id, [bucket.geometry().generation(), 0]))
+            }
+            (Contents::Dem(bucket), ViewPlace::Own) => {
+                Some((bucket.base.bucket_id, [bucket.geometry().generation(), bucket.render_target_generation()]))
+            }
+            _ => None,
         }
     }
 
