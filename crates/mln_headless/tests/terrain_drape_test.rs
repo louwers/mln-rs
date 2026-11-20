@@ -17,6 +17,11 @@ use mln_util::size::Size;
 
 const SIDE: u32 = 256;
 
+/// How many pixels a draped map may differ by from the same map drawn flat:
+/// the surface filters its drapes, so pixels on the shapes' edges differ, and
+/// how many depends on the GPU.
+const EDGE_PIXELS: u64 = 64;
+
 /// A DEM tile of sea level everywhere, in the Mapbox encoding: (1 · 65536 +
 /// 134 · 256 + 160) · 0.1 − 10000 = 0 m.
 fn sea_level_png() -> Vec<u8> {
@@ -138,7 +143,7 @@ fn a_fill_and_a_line_drape_over_flat_terrain() {
     assert_eq!([0, 0, 255, 255], pixel(&draped, center, center - 57), "the line");
     assert_eq!([255, 255, 255, 255], pixel(&draped, 4, 4), "the background");
     let differing = pixelmatch::pixelmatch(&draped.data, &flat.data, SIDE as usize, SIDE as usize, None, 0.1285, false);
-    assert_eq!(0, differing, "pixels that differ from the map without terrain");
+    assert!(differing <= EDGE_PIXELS, "{differing} pixels differ from the map without terrain");
 }
 
 /// A viewport flipped upside down, which turns the surface's triangles
@@ -154,5 +159,5 @@ fn a_flipped_viewport_shows_the_terrain() {
     assert_eq!([0, 0, 255, 255], pixel(&flipped, center, center + 57), "the line, south of the center");
     let differing =
         pixelmatch::pixelmatch(&flipped.data, &flat.data, SIDE as usize, SIDE as usize, None, 0.1285, false);
-    assert_eq!(0, differing, "pixels that differ from the map without terrain");
+    assert!(differing <= EDGE_PIXELS, "{differing} pixels differ from the map without terrain");
 }

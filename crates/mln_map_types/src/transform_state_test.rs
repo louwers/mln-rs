@@ -264,8 +264,17 @@ fn alpine(pitched: bool) -> TransformState {
     .unwrap()
 }
 
-/// Without terrain the planes and matrices are those of the flat map, to the
-/// bit, and a terrain that goes away restores them.
+/// Fails unless the numbers are the same but for the last bits, which differ
+/// by the target's math library.
+fn assert_same(expected: &[f64], actual: &[f64]) {
+    for (expected, actual) in expected.iter().zip(actual) {
+        let tolerance = 1e-12 * expected.abs().max(1.0);
+        assert!((expected - actual).abs() <= tolerance, "{actual} isn't {expected}");
+    }
+}
+
+/// Without terrain the planes and matrices are those of the flat map, and a
+/// terrain that goes away restores them.
 #[test]
 fn matrices_without_terrain_are_unchanged() {
     // Each view's far plane, projection matrix, and the z row of its matrix
@@ -323,11 +332,11 @@ fn matrices_without_terrain_are_unchanged() {
         for _ in 0..2 {
             let view = state.view();
             assert_eq!(1.0, view.near_z());
-            assert_eq!(far_z.to_bits(), view.far_z().to_bits());
-            assert_eq!(projection.map(f64::to_bits), view.projection_matrix().to_cols_array().map(f64::to_bits));
+            assert_same(&[far_z], &[view.far_z()]);
+            assert_same(&projection, &view.projection_matrix().to_cols_array());
             let near_clipped = f64::from((0.1 * view.camera_to_center_distance()) as u16);
             let clipped = view.projection_matrix_with(near_clipped, false).row(2).to_array();
-            assert_eq!(clipped_z.map(f64::to_bits), clipped.map(f64::to_bits));
+            assert_same(&clipped_z, &clipped);
 
             let before = view.clone();
             state.set_terrain_min_elevation(Some(-120.0));
