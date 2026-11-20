@@ -1496,7 +1496,9 @@ impl RenderOrchestrator {
         args: Option<&feature::PropertyMap>,
     ) -> Result<crate::query::FeatureExtensionValue, Error> {
         match self.render_sources.get(source_id) {
-            Some(source) => source.query_feature_extensions(feature, extension, extension_field, args),
+            Some(source) => {
+                source.query_feature_extensions(&self.tile_store, feature, extension, extension_field, args)
+            }
             None => Ok(crate::query::FeatureExtensionValue::default()),
         }
     }

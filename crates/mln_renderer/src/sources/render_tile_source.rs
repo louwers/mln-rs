@@ -34,6 +34,7 @@ use mln_vec_map::VecMap;
 
 use crate::draw_objects::{DrawGeometry, DrawObjects, Textures};
 use crate::erased_layer::ErasedEvaluatedLayer;
+use crate::erased_source::ErasedOrigin;
 use crate::gfx::context::Context;
 use crate::gfx::indexes::DrawIndexes;
 use crate::gfx::line_mesh::{LineLayoutVertex, LineOptions, LineScratch, add_line};
@@ -44,7 +45,6 @@ use crate::paint_parameters::PaintParameters;
 use crate::query::FeatureExtensionValue;
 use crate::render_source::{RenderSource, RenderSourceBase, RenderTileParameters, TileOrder};
 use crate::render_tile::RenderTile;
-use crate::source_type::{OriginUpdate, TileOrigin};
 use crate::tile::job::SourceKey;
 use crate::tile::source_tiles::{CoverUpdate, SourceTiles};
 use crate::tile::store::TileStore;
@@ -265,8 +265,10 @@ pub(crate) struct RenderTileSource {
     /// The source's id, which its debug overlays' draws carry.
     id: Rc<str>,
     key: SourceKey,
-    origin: Box<dyn TileOrigin>,
     fast_pfor_enabled: bool,
+    /// The highest zoom level that has tiles, as the origin knew at its
+    /// last update.
+    max_zoom: u8,
     render_tiles: Vec<RenderTile>,
     /// The render tiles in [`TileOrder::ById`], as indexes into them.
     order_by_id: Vec<usize>,
@@ -299,16 +301,17 @@ impl RenderTileSource {
         style_source: Source,
         kind: TileKind,
         single_layer: bool,
-        origin: Box<dyn TileOrigin>,
+        origin: Box<dyn ErasedOrigin>,
         store: &mut TileStore,
     ) -> Self {
-        let key = store.add_source(style_source.id().to_owned(), kind, single_layer);
+        let max_zoom = origin.max_zoom();
+        let key = store.add_source(style_source.id().to_owned(), kind, single_layer, origin);
         RenderTileSource {
             id: Rc::from(style_source.id()),
             base: RenderSourceBase::new(style_source),
             key,
-            origin,
             fast_pfor_enabled: false,
+            max_zoom,
             render_tiles: Vec::new(),
             order_by_id: Vec::new(),
             order_by_y: Vec::new(),
@@ -339,8 +342,16 @@ impl RenderSource for RenderTileSource {
         let Some((source, ctx)) = store.source_mut(self.key) else {
             return;
         };
-        let origin_update = OriginUpdate { parameters, needs_relayout, fast_pfor_enabled: self.fast_pfor_enabled };
-        let Some(cover) = self.origin.update(&previous, &self.base.style_source, source, ctx, &origin_update) else {
+        let cover = source.update_origin(
+            &previous,
+            &self.base.style_source,
+            ctx,
+            parameters,
+            needs_relayout,
+            self.fast_pfor_enabled,
+        );
+        self.max_zoom = source.max_zoom();
+        let Some(cover) = cover else {
             return;
         };
         let update = CoverUpdate {
@@ -526,12 +537,16 @@ impl RenderSource for RenderTileSource {
 
     fn query_feature_extensions(
         &self,
+        store: &TileStore,
         feature: &mln_util::feature::Feature,
         extension: &str,
         extension_field: &str,
         args: Option<&feature::PropertyMap>,
     ) -> Result<FeatureExtensionValue, Error> {
-        self.origin.query_feature_extensions(feature, extension, extension_field, args)
+        match store.source(self.key) {
+            Some(source) => source.query_feature_extensions(feature, extension, extension_field, args),
+            None => Ok(FeatureExtensionValue::default()),
+        }
     }
 
     fn set_fast_pfor_enabled(&mut self, enable: bool) {
@@ -541,6 +556,6 @@ impl RenderSource for RenderTileSource {
     fn dump_debug_logs(&self) {}
 
     fn max_zoom(&self) -> Option<u8> {
-        Some(self.origin.max_zoom())
+        Some(self.max_zoom)
     }
 }

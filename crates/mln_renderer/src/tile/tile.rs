@@ -19,7 +19,7 @@ use crate::tile::pipeline::{Layout, Pipeline};
 /// loading stale data from the cache; a required one loads it from the
 /// network and keeps it fresh.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum TileNecessity {
+pub enum TileNecessity {
     Optional,
     Required,
 }
@@ -85,23 +85,30 @@ pub enum TileOperation {
     NullOp,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct TileUpdateParameters {
-    pub(crate) minimum_update_interval: Duration,
-    pub(crate) is_volatile: bool,
+/// How a tile's network loads keep its data fresh, as its source says.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TileUpdateParameters {
+    /// How long a tile waits before it loads again after its data expires.
+    pub minimum_update_interval: Duration,
+    /// Whether the tile's data stays out of the offline cache.
+    pub is_volatile: bool,
 }
 
+/// The kinds of tiles: the engine lays out a geometry tile's features into
+/// its layers' buckets, and decodes a raster tile's image and a raster-dem
+/// tile's elevations, in the encoding it names.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) enum TileKind {
+pub enum TileKind {
     Geometry,
     Raster,
     Dem(mln_util::tileset::RasterEncoding),
 }
 
-/// What a load delivers. `data` is `None` for a tile without any (204, no
-/// tile in an archive); `missing`, the tileset has no tile here, so a tile
-/// of another zoom level draws in its place.
-pub(crate) enum TileInput {
+/// What a load delivers: a geometry tile's data or a raster or raster-dem
+/// tile's encoded image. `data` is `None` for a tile without any (204, no
+/// tile in an archive); `missing`, the source has no tile here, so a tile of
+/// another zoom level draws in its place.
+pub enum TileInput {
     Geometry { data: Option<TileData>, missing: bool },
     Image { data: Option<Data>, missing: bool },
 }

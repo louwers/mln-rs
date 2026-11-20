@@ -4,6 +4,7 @@
 // built from while newer data lays out; and a tile that leaves and comes
 // back, or a source replaced, never takes what was meant for the one before.
 
+use std::any::Any;
 use std::sync::Arc;
 
 use feature::{Feature, PropertyMap};
@@ -11,6 +12,7 @@ use geo_types::{Geometry, Point};
 use mln_map_types::MapMode;
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::{FileSource, Resource, Responder, Response};
+use mln_style::sources::tileset::VectorKind;
 use mln_tile::TileData;
 use mln_tile_id::OverscaledTileID;
 use mln_util::chrono::Timestamp;
@@ -20,6 +22,7 @@ use parking_lot::Mutex;
 use serde_json::json;
 
 use super::tile_jobs_test::{Manual, icons, layer, points};
+use crate::builtins::tileset::{Fetch, TilesetLoad, TilesetOrigin, VectorTileEncoding};
 use crate::erased_layer::ErasedEvaluatedLayer;
 use crate::layer_drawing::ChangedBuckets;
 use crate::query::SourceQueryOptions;
@@ -27,9 +30,8 @@ use crate::tests::tile::{dem_png, png};
 use crate::tests::{OneTile, style, tile_store};
 use crate::tile::contents::Contents;
 use crate::tile::dem::DemContents;
-use crate::tile::inbox::{SourceData, TileEvent};
+use crate::tile::inbox::TileEvent;
 use crate::tile::job::{DataInput, Job, Run, TileKey};
-use crate::tile::loading::{Ancestors, DataOrigin, Fetch, OriginLoad, VectorTileEncoding};
 use crate::tile::pipeline::LayoutWork;
 use crate::tile::tile::{TileKind, TileNecessity, TileOperation};
 use crate::tile::tile_workers::{InlineWorkers, TileWorkers};
@@ -114,12 +116,8 @@ impl Test {
     fn tileset_tile(&self, file_source: &Arc<Held>, workers: Box<dyn TileWorkers>) -> OneTile {
         let store = tile_store(&self.pool, workers);
         let file_source: Arc<dyn FileSource> = Arc::<Held>::clone(file_source);
-        let origin = DataOrigin::Tileset {
-            tileset: Tileset { tiles: vec!["tiles".to_owned()], ..Default::default() },
-            encoding: VectorTileEncoding::Mvt,
-            file_source: Some(file_source),
-            ancestors: Ancestors::default(),
-        };
+        let tileset = Tileset { tiles: vec!["tiles".to_owned()], ..Default::default() };
+        let origin = TilesetOrigin::<VectorKind>::loaded(tileset, VectorTileEncoding::Mvt, Some(file_source));
         let id = OverscaledTileID::from_zxy(0, 0, 0);
         OneTile::with_origin(store, TileKind::Geometry, false, origin, &[id], MapMode::Static)
     }
@@ -140,10 +138,11 @@ impl Drop for Test {
 /// Whether `tile`'s tileset load waits for a network-only request, or (with
 /// `false`) for no request at all.
 fn requesting_network(tile: &OneTile, pending: bool) -> bool {
-    match &tile.tile().load.origin {
-        OriginLoad::Tileset(tileset) if pending => matches!(tileset.fetch, Fetch::Network { .. }),
-        OriginLoad::Tileset(tileset) => tileset.is_idle(),
-        OriginLoad::GeoJson { .. } | OriginLoad::Custom(_) => false,
+    let load: &dyn Any = &*tile.tile().load.state;
+    match load.downcast_ref::<TilesetLoad>() {
+        Some(tileset) if pending => matches!(tileset.fetch, Fetch::Network { .. }),
+        Some(tileset) => tileset.is_idle(),
+        None => false,
     }
 }
 
@@ -151,9 +150,8 @@ fn requesting_network(tile: &OneTile, pending: bool) -> bool {
 /// returns it.
 fn start_geojson_load(tile: &mut OneTile) -> u64 {
     tile.with(|tile| {
-        let (info, tile) = tile.parts();
-        let load = info.next();
-        tile.load.origin = OriginLoad::GeoJson { load: Some(load) };
+        let load = tile.next();
+        tile.tile_mut().load.current = Some(load);
         load
     })
 }
@@ -272,8 +270,7 @@ fn fresh_data_is_kept_when_required_again() {
         assert!(tile.tile().is_complete());
         // Expired, so the next round requests it again.
         tile.with(|tile| {
-            let OriginLoad::Tileset(tileset) = &mut tile.parts().1.load.origin else { unreachable!() };
-            tileset.expires = Some(Timestamp::from_secs(0));
+            tile.tile_mut().load.freshness.expires = Some(Timestamp::from_secs(0));
         });
     }
     assert_eq!(manual.submitted(), 2, "one layout per response");
@@ -288,16 +285,12 @@ fn a_cut_tile_takes_a_fresh_ancestor_from_memory() {
     for (response, requests) in [(water(), 0), (expired(water()), 1)] {
         let file_source = Arc::new(Held::default());
         let file_source_dyn: Arc<dyn FileSource> = Arc::<Held>::clone(&file_source);
-        let origin = DataOrigin::Tileset {
-            tileset: Tileset {
-                tiles: vec!["tiles".to_owned()],
-                zoom_range: mln_util::range::Range::new(0, 0),
-                ..Default::default()
-            },
-            encoding: VectorTileEncoding::Mvt,
-            file_source: Some(file_source_dyn),
-            ancestors: Ancestors::default(),
+        let tileset = Tileset {
+            tiles: vec!["tiles".to_owned()],
+            zoom_range: mln_util::range::Range::new(0, 0),
+            ..Default::default()
         };
+        let origin = TilesetOrigin::<VectorKind>::loaded(tileset, VectorTileEncoding::Mvt, Some(file_source_dyn));
         let (left, right) = (OverscaledTileID::from_zxy(1, 0, 0), OverscaledTileID::from_zxy(1, 1, 0));
         let store = tile_store(&test.pool, Box::new(InlineWorkers));
         let mut tiles = OneTile::with_origin(store, TileKind::Geometry, false, origin, &[left, right], MapMode::Static);
@@ -485,15 +478,19 @@ fn source_data_racing_eviction() {
     let new_load = start_geojson_load(&mut tile);
 
     let inbox = tile.store.inbox().clone();
-    let event = |load, ids: &[u64]| TileEvent::Data {
+    let event = |load, ids: &[u64]| TileEvent::Load {
         tile: TileKey { source: key, id },
         load,
-        data: SourceData::Data(Some(features(ids))),
+        reply: Box::new(Some(features(ids))),
     };
     inbox.send(event(old_load, &[1]));
     tile.update();
     assert!(tile.layout().data.as_ref().is_none(), "the old tile's data goes nowhere");
-    inbox.send(TileEvent::Data { tile: TileKey { source: key, id }, load: old_load, data: SourceData::Stale });
+    inbox.send(TileEvent::Load {
+        tile: TileKey { source: key, id },
+        load: old_load,
+        reply: Box::new(None::<TileData>),
+    });
     inbox.send(event(new_load, &[2]));
     // One update starts the layout, whose reply the next takes in.
     tile.update();
@@ -535,16 +532,12 @@ fn style_replaced_mid_load() {
     tile.store.remove_source(old_key);
     assert!(old_job.superseded.load(std::sync::atomic::Ordering::Relaxed));
     assert!(reload.is_cancelled(), "the old tile's request goes with it");
-    let new_key = tile.store.add_source("source".to_owned(), TileKind::Geometry, false);
+    let file_source_dyn: Arc<dyn FileSource> = Arc::<Held>::clone(&file_source);
+    let tileset = Tileset { tiles: vec!["tiles".to_owned()], ..Default::default() };
+    let origin = TilesetOrigin::<VectorKind>::loaded(tileset, VectorTileEncoding::Mvt, Some(file_source_dyn));
+    let new_key = tile.store.add_source("source".to_owned(), TileKind::Geometry, false, Box::new(origin));
     assert_ne!(new_key, old_key, "keys aren't reused");
     let (source, ctx) = tile.store.source_mut(new_key).expect("the source");
-    let file_source_dyn: Arc<dyn FileSource> = Arc::<Held>::clone(&file_source);
-    source.info.origin = Some(DataOrigin::Tileset {
-        tileset: Tileset { tiles: vec!["tiles".to_owned()], ..Default::default() },
-        encoding: VectorTileEncoding::Mvt,
-        file_source: Some(file_source_dyn),
-        ancestors: Ancestors::default(),
-    });
     let new_tile = source.info.new_tile(id, params).expect("a tile");
     source.insert(new_tile);
     source.update(&id, ctx, |tile| {
@@ -555,7 +548,11 @@ fn style_replaced_mid_load() {
 
     // The old job's reply, and an old response sent before the cancel.
     manual.reply(InlineWorkers::run(old_job));
-    tile.store.inbox().send(TileEvent::Response { tile: TileKey { source: old_key, id }, load: 1, response: water() });
+    tile.store.inbox().send(TileEvent::Load {
+        tile: TileKey { source: old_key, id },
+        load: 1,
+        reply: Box::new(water()),
+    });
     tile.update();
     assert!(tile.store.source(old_key).is_none());
     assert!(
@@ -680,8 +677,8 @@ fn data_from_the_inbox_starts_a_job_at_once() {
     let inbox = tile.store.inbox().clone();
     // From another thread, as a GeoJSON source's tiles cut on a pool answer.
     std::thread::spawn(move || {
-        let data = SourceData::Data(Some(features(&[1])));
-        inbox.send(TileEvent::Data { tile: TileKey { source: key, id }, load, data });
+        let reply = Box::new(Some(features(&[1])));
+        inbox.send(TileEvent::Load { tile: TileKey { source: key, id }, load, reply });
     })
     .join()
     .unwrap();

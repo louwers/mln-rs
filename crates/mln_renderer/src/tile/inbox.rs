@@ -1,16 +1,14 @@
 //! The one channel through which what arrives for the tiles reaches the
-//! render thread: file responses, the data of GeoJSON and custom sources,
-//! the workers' replies and lost lanes, and glyph responses. Senders on any
+//! render thread: the replies to the tiles' loads, the workers' replies and
+//! lost lanes, and glyph responses. Senders on any
 //! thread push events and wake the renderer; the tile store takes them in
 //! when the renderer updates (`TileStore::receive`).
 
+use std::any::Any;
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
-use mln_storage::Response;
 use mln_text::glyph::GlyphRange;
-use mln_tile::TileData;
-use mln_util::error::Error;
 use mln_util::font_stack::FontStack;
 
 use crate::text::glyph_store::GlyphResult;
@@ -27,11 +25,9 @@ pub(crate) type Waker = Arc<dyn Fn() + Send + Sync>;
     expect(clippy::large_enum_variant, reason = "a reply moves its layout once, from the worker to the tile")
 )]
 pub(crate) enum TileEvent {
-    /// A response to the file request that tile load `load` made. It applies
-    /// only while the tile still waits for that load.
-    Response { tile: TileKey, load: u64, response: Response },
-    /// What a GeoJSON or custom source gave the tile for its load `load`.
-    Data { tile: TileKey, load: u64, data: SourceData },
+    /// A reply to the tile's load `load`, of its origin's reply type. It
+    /// applies only while that load is the tile's latest.
+    Load { tile: TileKey, load: u64, reply: Box<dyn Any + Send> },
     /// The reply to job `id`, which ran on `lane`.
     Reply { lane: Lane, id: JobId, body: ReplyBody, times: JobTimes },
     /// The worker of `lane` is gone, with every job it had.
@@ -41,17 +37,6 @@ pub(crate) enum TileEvent {
     /// The answer to the glyph store's request `id`, for a glyph range. It
     /// applies only while the range still waits for that request.
     Glyphs { font_stack: FontStack, range: GlyphRange, id: u64, result: GlyphResult },
-}
-
-/// What a GeoJSON or custom source gives a tile.
-pub(crate) enum SourceData {
-    /// The tile's data; `None` for a tile without any.
-    Data(Option<TileData>),
-    /// The source couldn't load the tile.
-    Error(Error),
-    /// The data the tile has is stale: it loads again when it is next
-    /// needed.
-    Stale,
 }
 
 /// The receiving end, which the tile store owns.

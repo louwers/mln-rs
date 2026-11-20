@@ -109,7 +109,7 @@ impl OneTile {
         id: mln_tile_id::OverscaledTileID,
         mode: mln_map_types::MapMode,
     ) -> Self {
-        let key = store.add_source("s".to_owned(), kind, false);
+        let key = store.add_source("s".to_owned(), kind, false, Box::new(Given));
         let mut tiles = OneTile { store, key, id, mode };
         tiles.add(id);
         tiles
@@ -132,15 +132,14 @@ impl OneTile {
         mut store: crate::tile::store::TileStore,
         kind: crate::tile::tile::TileKind,
         single_layer: bool,
-        origin: crate::tile::loading::DataOrigin,
+        origin: impl crate::source::DataOrigin,
         ids: &[mln_tile_id::OverscaledTileID],
         mode: mln_map_types::MapMode,
     ) -> Self {
-        let key = store.add_source("source".to_owned(), kind, single_layer);
+        let key = store.add_source("source".to_owned(), kind, single_layer, Box::new(origin));
         let mut tiles = OneTile { store, key, id: ids[0], mode };
         let params = tiles.params();
         let (source, ctx) = tiles.store.source_mut(key).expect("the source");
-        source.info.origin = Some(origin);
         for id in ids {
             let tile = source.info.new_tile(*id, params).expect("a tile");
             source.insert(tile);
@@ -186,10 +185,7 @@ impl OneTile {
         let params = self.params();
         let (source, _) = self.store.source_mut(self.key).expect("the source");
         let generation = source.info.next();
-        let load = crate::tile::loading::Load {
-            necessity: crate::tile::tile::TileNecessity::Optional,
-            origin: crate::tile::loading::OriginLoad::GeoJson { load: None },
-        };
+        let load = crate::tile::loading::Load::new(Box::new(GivenLoad), mln_storage::RequestOrder::default());
         let pipeline = crate::tile::pipeline::Pipeline::new(source.info.kind, generation, params);
         let tile = crate::tile::tile::Tile::new(id, load, pipeline);
         source.insert(tile);
@@ -320,6 +316,39 @@ impl OneTile {
     pub(crate) fn drop_tile_at(&mut self, id: &mln_tile_id::OverscaledTileID) {
         let (source, ctx) = self.store.source_mut(self.key).expect("the source");
         source.release(id, ctx);
+    }
+}
+
+/// Port-only: the origin of a test's tiles, which load nothing themselves:
+/// the test gives them their data, or sends it as the reply to a load it
+/// makes the tile's latest.
+pub(crate) struct Given;
+
+pub(crate) struct GivenLoad;
+
+impl crate::source::TileLoad for GivenLoad {}
+
+impl crate::source::DataOrigin for Given {
+    type Load = GivenLoad;
+    type Reply = Option<mln_tile::TileData>;
+
+    fn update(&mut self, _update: &mut crate::source::OriginUpdate<'_, Self>) -> Option<crate::source::Cover> {
+        None
+    }
+
+    fn new_load(&mut self, _tile: &crate::source::NewTile<'_>) -> Option<GivenLoad> {
+        Some(GivenLoad)
+    }
+
+    fn start(&mut self, _load: &mut GivenLoad, _cx: &mut crate::source::LoadContext<'_, '_, Self::Reply>) {}
+
+    fn receive(
+        &mut self,
+        _load: &mut GivenLoad,
+        data: Option<mln_tile::TileData>,
+        cx: &mut crate::source::LoadContext<'_, '_, Self::Reply>,
+    ) {
+        cx.deliver(crate::source::TileInput::Geometry { data, missing: false });
     }
 }
 

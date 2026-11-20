@@ -1,6 +1,7 @@
-//! The registrations of the built-in layer types and source types that are
-//! in the engine, which the facade crate `mln_rs` composes with the built-in
-//! expression functions and the types of `mln_layers` and `mln_sources`.
+//! The built-in layer types and source types that are in the engine, which
+//! the facade crate `mln_rs` composes with the built-in expression functions
+//! and the types of `mln_layers` and `mln_sources`. The source types' render
+//! halves use only the [source type contract](crate::source).
 
 use mln_style::expression::functions::RegisterError;
 use mln_style::layers::Symbol;
@@ -10,6 +11,11 @@ use mln_style::sources::{
 };
 
 use crate::RegistryBuilder;
+
+pub(crate) mod custom;
+pub(crate) mod geojson;
+mod image;
+pub(crate) mod tileset;
 
 /// Adds the layer types that are in the engine: the style specification's
 /// symbol layer type.

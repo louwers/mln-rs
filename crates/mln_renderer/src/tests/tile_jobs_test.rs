@@ -917,9 +917,11 @@ fn a_tiles_upload_frees_the_data_its_world_copy_copied() {
     tiles.set_style(&style(&[layer(json!({"id": "dots", "type": "dot"}))]));
     tiles.set_data(Some(points()));
     tiles.settle(&[id]);
-    tiles.add(copy_id);
+    let params = tiles.tile_params();
     let (source, ctx) = tiles.store.source_mut(tiles.key).expect("the source");
-    let copy = source.world_copy(&copy_id).expect("a copy of the tile");
+    let mut tile = source.info.new_tile(copy_id, params).expect("a tile");
+    let copy = source.world_copy(&mut tile).expect("a copy of the tile");
+    source.insert(tile);
     source.update(&copy_id, ctx, |tile| tile.start_as_copy(copy));
     // Whether the dots' vertices of tile `id` moved out of its bucket and
     // its data is gone, and the stored vertices they moved into.

@@ -12,6 +12,7 @@ use mln_style::property_value::PropertyValue;
 use mln_tile_id::tile_range::TileRange;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::constants;
+use mln_util::error::Error;
 use mln_util::geo::{LatLngBounds, WrapMode};
 use mln_util::hash::HashSet;
 use mln_util::logging::{Event, Log};
@@ -25,10 +26,13 @@ use crate::algorithm::update_renderables::{PrefetchedTile, RenderablesContext, u
 use crate::algorithm::update_tile_masks::update_tile_masks;
 use crate::bucket_geometry::BucketGeometry;
 use crate::erased_layer::ErasedEvaluatedLayer;
+use crate::erased_source::UpdateParts;
 use crate::gfx::context::Context;
 use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas;
 use crate::layer_drawing::ChangedBuckets;
 use crate::layout::tile_layout::LayoutParams;
+use crate::query::FeatureExtensionValue;
+use crate::source::Cover;
 use crate::tile::contents::Contents;
 use crate::tile::dem;
 use crate::tile::job::SourceStyle;
@@ -284,11 +288,11 @@ impl RenderablesContext for CoverContext<'_, '_, '_> {
             subdivision_granularity: parameters.subdivision_granularity,
             first_load: true,
         };
-        let tile = self.source.info.new_tile(*id, params)?;
+        let mut tile = self.source.info.new_tile(*id, params)?;
         // A flat map draws each world copy of a tile from a tile of its own,
         // which starts from a loaded copy rather than leave its world bare
         // until it has loaded and laid out the same data.
-        let copy = if parameters.view.is_globe() { None } else { self.source.world_copy(id) };
+        let copy = if parameters.view.is_globe() { None } else { self.source.world_copy(&mut tile) };
         self.source.insert(tile);
         let style = self.style;
         self.source.update(id, self.ctx, |tile| {
@@ -363,7 +367,7 @@ impl RenderablesContext for CoverContext<'_, '_, '_> {
     }
 
     fn has_tried_cache(&self, key: &OverscaledTileID) -> bool {
-        self.tile(key).is_some_and(|tile| tile.load.has_tried_cache())
+        self.tile(key).is_some_and(|tile| tile.load.cache_answered)
     }
 
     fn is_loaded(&self, key: &OverscaledTileID) -> bool {
@@ -963,17 +967,18 @@ impl SourceTiles {
         true
     }
 
-    /// A copy of a renderable tile that is `id` in another world copy. The
-    /// copy's buckets, copies of the tile's, draw the geometry that the
-    /// first of either to upload moves into the context's stores
-    /// (`upload_at`).
-    pub(crate) fn world_copy(&self, id: &OverscaledTileID) -> Option<WorldCopy> {
+    /// A copy, for `new`, of a renderable tile that is `new` in another
+    /// world copy. The copy's buckets, copies of the tile's, draw the
+    /// geometry that the first of either to upload moves into the context's
+    /// stores (`upload_at`).
+    pub(crate) fn world_copy(&self, new: &mut Tile) -> Option<WorldCopy> {
+        let id = new.id;
         let tile = self
-            .same_place(id)
+            .same_place(&id)
             .into_iter()
             .filter_map(|at| Some(&self.tiles.get_index(at)?.1.tile))
             .find(|tile| tile.id.wrap != id.wrap && tile.is_renderable())?;
-        WorldCopy::of(tile)
+        WorldCopy::of(tile, self.info.origin.as_deref(), &mut new.load)
     }
 
     /// Moves the tile cached under any wrap of `id` into the cover under
@@ -1069,7 +1074,7 @@ impl SourceTiles {
         options: &crate::query::RenderedQueryOptions,
         global_state: Option<&mln_style::expression::GlobalStateMap>,
         proj_matrix: &glam::DMat4,
-    ) -> Result<crate::geometry::feature_index::QueryResults, mln_util::error::Error> {
+    ) -> Result<crate::geometry::feature_index::QueryResults, Error> {
         use mln_map_types::tile_coordinate::TileCoordinate;
 
         let feature_state = &self.info.feature_state;
@@ -1316,7 +1321,7 @@ impl SourceTiles {
         &self,
         options: &crate::query::SourceQueryOptions,
         global_state: Option<&mln_style::expression::GlobalStateMap>,
-    ) -> Result<Vec<mln_util::feature::Feature>, mln_util::error::Error> {
+    ) -> Result<Vec<mln_util::feature::Feature>, Error> {
         let mut result = Vec::new();
         for tile in self.cover() {
             if let Some(contents) = tile.contents().and_then(Contents::geometry) {
@@ -1465,6 +1470,45 @@ impl SourceTiles {
                 self.style = Some(Arc::clone(&style));
                 style
             }
+        }
+    }
+
+    /// Has the origin take in `source`, which replaces `previous`, for an
+    /// update of `parameters`. Returns what the tiles cover, or `None`
+    /// while the source has nothing to make tiles from.
+    pub(crate) fn update_origin(
+        &mut self,
+        previous: &Source,
+        source: &Source,
+        ctx: &mut StoreContext,
+        parameters: &TileParameters<'_>,
+        needs_relayout: bool,
+        fast_pfor_enabled: bool,
+    ) -> Option<Cover> {
+        self.info.synchronous = parameters.is_update_synchronous;
+        let mut origin = self.info.origin.take()?;
+        let parts = UpdateParts { previous, source, tiles: self, ctx, parameters, needs_relayout, fast_pfor_enabled };
+        let cover = origin.update(parts);
+        self.info.origin = Some(origin);
+        cover
+    }
+
+    /// The highest zoom level that has tiles, as far as the origin knows.
+    pub(crate) fn max_zoom(&self) -> u8 {
+        self.info.origin.as_ref().map_or(constants::TERRAIN_RGB_MAXZOOM, |origin| origin.max_zoom())
+    }
+
+    /// [`DataOrigin::query_feature_extensions`](crate::source::DataOrigin::query_feature_extensions).
+    pub(crate) fn query_feature_extensions(
+        &self,
+        feature: &mln_util::feature::Feature,
+        extension: &str,
+        extension_field: &str,
+        args: Option<&feature::PropertyMap>,
+    ) -> Result<FeatureExtensionValue, Error> {
+        match &self.info.origin {
+            Some(origin) => origin.query_feature_extensions(feature, extension, extension_field, args),
+            None => Ok(FeatureExtensionValue::default()),
         }
     }
 

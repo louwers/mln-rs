@@ -18,12 +18,12 @@ use parking_lot::Mutex;
 
 use super::RasterTileTest;
 use crate::Registry;
+use crate::builtins::custom::CustomOrigin;
 use crate::erased_layer::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::query::SourceQueryOptions;
 use crate::tests::OneTile;
 use crate::tests::fixture_layer::Dot;
 use crate::tile::contents::Contents;
-use crate::tile::loading::DataOrigin;
 use crate::tile::store::StoreEvent;
 use crate::tile::tile::{TileKind, TileNecessity, TileOperation};
 use crate::tile::tile_workers::InlineWorkers;
@@ -59,7 +59,7 @@ fn recorder() -> (Arc<Mutex<Vec<CanonicalTileID>>>, TileFunction) {
 /// Tiles `ids` of a custom geometry source whose provider is `loader`.
 fn tiles(test: &RasterTileTest, ids: &[OverscaledTileID], loader: Arc<CustomGeometryProvider>) -> OneTile {
     let store = crate::tests::tile_store(&test.thread_pool, Box::new(InlineWorkers));
-    let origin = DataOrigin::Custom { loader, fast_pfor_enabled: false };
+    let origin = CustomOrigin::<mln_style::sources::CustomGeometrySourceType>::with_loader(loader);
     OneTile::with_origin(store, TileKind::Geometry, true, origin, ids, mln_map_types::MapMode::Static)
 }
 
