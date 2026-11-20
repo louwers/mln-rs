@@ -84,7 +84,6 @@ impl StyleLayerType for Custom {
     const INFO: LayerTypeInfo = LayerTypeInfo {
         name: "custom",
         source: SourceKind::None,
-        pass_3d: false,
         fading_tiles: false,
         cross_tile_index: false,
         from_json: false,

@@ -855,7 +855,6 @@ impl RenderOrchestrator {
             for (index, layer) in self.layers.iter().enumerate() {
                 let style = layer.style();
                 let layer_info = style.info();
-                frame.has_3d |= layer_info.pass_3d;
 
                 if layer_info.source != SourceKind::None {
                     // Every source's pass sees every layer, so the cheap
