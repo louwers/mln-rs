@@ -299,8 +299,8 @@ fn a_still_image_over_terrain_gives_the_host_one_frame_of_a_ring_of_one() {
             wait(map.set_style_json(
                 r#"{"version":8,"zoom":1,"terrain":{"source":"dem"},"sources":{"dem":{"type":"raster-dem","tiles":["custom://dem/{z}/{x}/{y}.png"],"maxzoom":0}},"layers":[{"id":"bg","type":"background","paint":{"background-color":"red"}}]}"#,
             ));
-            let session = attach(&map, ExportedRing { depth: 1, ..ring(&[kind]) }, Some(device), SyncKinds::NONE)
-                .unwrap();
+            let session =
+                attach(&map, ExportedRing { depth: 1, ..ring(&[kind]) }, Some(device), SyncKinds::NONE).unwrap();
             let (sender, receiver) = std::sync::mpsc::channel();
             map.request_still_image().unwrap().on_complete(move |result| {
                 let _ = sender.send(result);

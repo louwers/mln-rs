@@ -304,7 +304,7 @@ fn a_pitch_or_altitude_animation_holds_the_altitude() {
         report(&mut map, flat(Some(500.0), 300.0));
         map.update_camera(&CameraUpdate {
             mode: CameraUpdateMode::Ease,
-            camera: camera.clone(),
+            camera,
             animation: AnimationOptions { duration: Some(Duration::from_secs(60)), ..Default::default() },
             ..Default::default()
         });
