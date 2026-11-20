@@ -21,8 +21,8 @@ use mln_storage::network_status::{NetworkStatus, Status as NetworkStatusType};
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{
-    Cache, DatabaseFileSource, FileSource, Kind, Loader, LoadingMethod, OnlineFileSource, Resource, ResourceOptions,
-    Response, StoragePolicy,
+    Cache, DatabaseFileSource, FileSource, FileSourceExt, Kind, Loader, LoadingMethod, OnlineFileSource, Resource,
+    ResourceOptions, Response, StoragePolicy,
 };
 use mln_style::conversion::layer::convert_layer;
 use mln_style::conversion::{Convertible, Error as ConversionError};
@@ -1067,9 +1067,20 @@ fn style_loaded_signal() {
     assert!(!emitted.get());
 }
 
-fn online_file_source_test() -> MapTest<OnlineFileSource> {
+/// A map over an `OnlineFileSource` that has made one transfer from
+/// `server`. The process's first transfer sets up the platform's HTTP
+/// stack, and on Apple platforms that reads the test binary's directory,
+/// which holds every crate's object files and takes seconds to read on a
+/// busy machine. Doing it here keeps that out of the tests' timed waits.
+fn online_file_source_test(server: &HttpServer) -> MapTest<OnlineFileSource> {
     let run_loop = TestLoop::new();
     let file_source = Arc::new(OnlineFileSource::new(Arc::new(NetworkStatus::new())));
+    let (sent, received) = std::sync::mpsc::channel();
+    let _request = file_source.request(&Resource::source(&server.url("/test")), move |response| {
+        let _ = sent.send(response.error);
+    });
+    let error = received.recv_timeout(Duration::from_secs(60)).expect("the first transfer finishes within 60 s");
+    assert_eq!(None, error);
     MapTest::create(run_loop, file_source, 1.0, MapMode::Static)
 }
 
@@ -1078,7 +1089,7 @@ fn online_file_source_test() -> MapTest<OnlineFileSource> {
 #[test]
 fn style_network_error_retry() {
     let server = HttpServer::new();
-    let test = online_file_source_test();
+    let test = online_file_source_test(&server);
 
     test.map().load_style_url(&server.url("/style-fail-once-500"));
 
@@ -1092,7 +1103,7 @@ fn style_network_error_retry() {
 #[test]
 fn style_not_found() {
     let server = HttpServer::new();
-    let test = online_file_source_test();
+    let test = online_file_source_test(&server);
 
     test.map().load_style_url(&server.url("/style-fail-once-404"));
 
@@ -1105,6 +1116,7 @@ fn style_not_found() {
         let (timer, run_loop) = (Rc::clone(&timer), test.run_loop.handle());
         test.observer.did_fail_loading_map_callback.set(move |()| {
             let run_loop = run_loop.clone();
+            // Longer than the second a server error waits for its retry.
             timer.start(Duration::from_millis(1100), move || run_loop.stop());
         });
     }
