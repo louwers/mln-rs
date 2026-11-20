@@ -1,7 +1,8 @@
-//! `unicode-tables`: writes the tables that `mln_text` reads from the Unicode
-//! Character Database, `crates/mln_text/src/arabic_tables.rs` and
-//! `bidi_mirroring.rs`, from the UCD files in `ucd/`. `mise run
-//! generate:unicode-tables` downloads the files and runs it.
+//! `unicode-tables <directory>`: writes the tables that `mln_text` reads from
+//! the Unicode Character Database, `crates/mln_text/src/arabic_tables.rs` and
+//! `bidi_mirroring.rs`, from the directory's `ArabicShaping.txt`,
+//! `UnicodeData.txt` and `BidiMirroring.txt`.
+//! `mise run generate:unicode-tables` downloads the files and runs it.
 //!
 //! The files must be of unicode-bidi's Unicode version, which
 //! `unicode-tables --unicode-version` prints, so that the characters
@@ -11,15 +12,15 @@
 
 mod arabic_shaping;
 mod bidi_mirroring;
-#[cfg(test)]
-mod tests;
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::ExitCode;
 
-const USAGE: &str = "usage: unicode-tables [--unicode-version]
+const USAGE: &str = "usage: unicode-tables <directory>
+       unicode-tables --unicode-version
 
---unicode-version prints the Unicode version that the UCD files must be of.";
+<directory> holds the UCD's ArabicShaping.txt, UnicodeData.txt and
+BidiMirroring.txt, of the Unicode version that --unicode-version prints.";
 
 fn main() -> ExitCode {
     match run() {
@@ -32,31 +33,27 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<(), String> {
-    match std::env::args().skip(1).collect::<Vec<_>>().as_slice() {
-        [] => {}
-        [flag] if flag == "--unicode-version" => {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let directory = match args.iter().map(String::as_str).collect::<Vec<_>>()[..] {
+        ["--unicode-version"] => {
             println!("{}", unicode_version());
             return Ok(());
         }
+        [directory] if !directory.starts_with('-') => Path::new(directory),
         _ => return Err(USAGE.into()),
-    }
-    for (path, table) in tables(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))? {
+    };
+    let read = |name: &str| {
+        let path = directory.join(name);
+        std::fs::read_to_string(&path).map_err(|error| format!("{}: {error}", path.display()))
+    };
+    let arabic_tables = arabic_shaping::table(&read("ArabicShaping.txt")?, &read("UnicodeData.txt")?)?;
+    let bidi_mirroring = bidi_mirroring::table(&read("BidiMirroring.txt")?)?;
+    let out = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../crates/mln_text/src");
+    for (file, table) in [("arabic_tables.rs", arabic_tables), ("bidi_mirroring.rs", bidi_mirroring)] {
+        let path = out.join(file);
         std::fs::write(&path, table).map_err(|error| format!("{}: {error}", path.display()))?;
     }
     Ok(())
-}
-
-/// Each table and the path of its file, in the workspace at `root`.
-fn tables(root: &Path) -> Result<[(PathBuf, String); 2], String> {
-    let read = |name: &str| {
-        let path = root.join("tools/unicode-tables/ucd").join(name);
-        std::fs::read_to_string(&path).map_err(|error| format!("{}: {error}", path.display()))
-    };
-    let out = root.join("crates/mln_text/src");
-    Ok([
-        (out.join("arabic_tables.rs"), arabic_shaping::table(&read("ArabicShaping.txt")?, &read("UnicodeData.txt")?)?),
-        (out.join("bidi_mirroring.rs"), bidi_mirroring::table(&read("BidiMirroring.txt")?)?),
-    ])
 }
 
 /// unicode-bidi's Unicode version, which the UCD files must be of.

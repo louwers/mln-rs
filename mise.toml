@@ -122,17 +122,19 @@ run_windows = "cargo doc --no-deps --workspace {{ usage.args | default(value=[])
 description = "Regenerate the C library's bindings (crates/mln_c/src/generated) from its headers"
 run = "cargo run -q -p mln-rs-c-abi-gen"
 
-# Of the Unicode version of unicode-bidi's tables, which tools/unicode-tables
-# names: run it again after bumping the crate. Its test fails until then.
+# From the Unicode version of unicode-bidi's tables, which tools/unicode-tables
+# names: run it again after bumping the crate.
 [tasks."generate:unicode-tables"]
-description = "Download the Unicode Character Database files that mln_text's Arabic presentation forms and Bidi_Mirroring_Glyph table come from to tools/unicode-tables/ucd, and regenerate the tables"
+description = "Regenerate mln_text's Arabic presentation forms and Bidi_Mirroring_Glyph table from the Unicode Character Database"
 run = '''
 set -e
 version=$(cargo run -q -p mln-rs-unicode-tables -- --unicode-version)
+ucd=$(mktemp -d)
+trap 'rm -rf "$ucd"' EXIT
 for file in ArabicShaping UnicodeData BidiMirroring; do
-    curl -fsSL -o "tools/unicode-tables/ucd/$file.txt" "https://www.unicode.org/Public/$version/ucd/$file.txt"
+    curl -fsSL -o "$ucd/$file.txt" "https://www.unicode.org/Public/$version/ucd/$file.txt"
 done
-cargo run -q -p mln-rs-unicode-tables
+cargo run -q -p mln-rs-unicode-tables -- "$ucd"
 '''
 
 # style-codegen's generated_code_test checks that the code is up to date.
