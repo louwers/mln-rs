@@ -3,7 +3,7 @@ use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_style_types::AlignmentType;
 
-use crate::draw::{DrawObjects, Textures};
+use crate::draw_objects::{DrawObjects, Textures};
 use crate::gfx::context::Context;
 use crate::gfx::store::SharedTexture;
 use crate::paint_parameters::PaintParameters;
@@ -12,7 +12,7 @@ use crate::tile_render_data::TileAtlasTextures;
 /// Gives a draw the textures of its tile's glyph and icon atlases, which
 /// change after the draw is made.
 #[derive(Clone)]
-pub(crate) struct AtlasBinding {
+pub struct AtlasBinding {
     /// The textures of the tile's glyph and icon atlases, if it has
     /// atlases.
     atlases: Option<(Option<SharedTexture>, Option<SharedTexture>)>,
@@ -26,9 +26,14 @@ pub(crate) struct AtlasBinding {
 }
 
 impl AtlasBinding {
+    /// The binding of the tile's `atlases` to a draw's textures
+    /// `icon_texture_id` and `glyph_texture_id`, those it samples, for a
+    /// draw of text or icons (`is_text`) that samples them as the layer's
+    /// values say: SDF icons, aligned to the map or the viewport, scaled,
+    /// and of text whose size is the same at every zoom.
     #[expect(clippy::too_many_arguments, reason = "each argument is a field of the binding")]
     #[must_use]
-    pub(crate) fn new(
+    pub fn new(
         atlases: Option<TileAtlasTextures>,
         icon_texture_id: Option<usize>,
         glyph_texture_id: Option<usize>,
@@ -53,9 +58,10 @@ impl AtlasBinding {
     }
 
     /// The textures of a draw with `shader`: the atlases', in the slots the
-    /// shader samples them from. [`bind`](Self::bind) sets how they filter.
+    /// shader samples them from. The engine sets how they filter as the
+    /// frame's view asks before each draw.
     #[must_use]
-    pub(crate) fn textures(&self, shader: &ShaderKey) -> Textures {
+    pub fn textures(&self, shader: &ShaderKey) -> Textures {
         let mut textures = Textures::default();
         self.set_textures(self.samples_icon(shader), |id, texture| textures[id] = texture.cloned());
         textures
@@ -65,12 +71,12 @@ impl AtlasBinding {
     /// samplers of the atlases, which the tile's draws share, to filter as
     /// the frame's view asks.
     pub(crate) fn bind(&self, objects: &mut DrawObjects, parameters: &mut PaintParameters<'_>) {
-        let state = parameters.view;
+        let state = parameters.frame.view;
         let transformed = self.rotation_alignment == AlignmentType::Map || state.pitch() != 0.0;
         let linear_filter_for_icons = if self.is_text {
-            parameters.camera_moving || transformed || !self.text_size_is_zoom_constant
+            parameters.frame.camera_moving || transformed || !self.text_size_is_zoom_constant
         } else {
-            self.sdf_icons || parameters.camera_moving || self.icon_scaled || transformed
+            self.sdf_icons || parameters.frame.camera_moving || self.icon_scaled || transformed
         };
         if self.glyph_texture_id.is_some()
             && let Some((glyph, icon)) = &self.atlases

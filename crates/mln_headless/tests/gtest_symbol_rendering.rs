@@ -9,7 +9,6 @@ use std::time::{Duration, Instant};
 
 use mln_headless::{HeadlessFrontend, RenderResult};
 use mln_map::{CameraOptions, Map, MapMode, MapOptions, RenderMode};
-use mln_renderer::Registry;
 use mln_storage::Kind;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style::Edit;
@@ -116,9 +115,10 @@ impl SymbolRenderingTest {
         // A style URL never answers: the map keeps the style it has.
         file_source.set_response(Kind::Style, |_| None);
         let observer = Rc::new(StubMapObserver::default());
-        let mut map = Map::with_file_source(
+        let mut map = Map::new(
             file_source,
             MapOptions { map_mode: mode, size: Size::new(256, 256), ..Default::default() },
+            registry(),
             &pool,
         )
         .unwrap();
@@ -355,7 +355,7 @@ fn fully_hidden_layer_can_reappear() {
     let test = SymbolRenderingTest::new(256, 0.0, SymbolKind::Icon, MapMode::Static);
     let initial = test.render();
 
-    let mut blocker = Layer::new(Registry::with_builtins().style(), "symbol", "blocker", "points").unwrap();
+    let mut blocker = Layer::new(mln_rs::builtin_registry().style(), "symbol", "blocker", "points").unwrap();
     let error = blocker.set_property("icon-image", &Convertible::from(&serde_json::json!("marker")), None);
     assert!(error.is_none(), "{error:?}");
     test.map.borrow_mut().edit_style(|style| style.apply(Edit::AddLayer { layer: blocker, before: None })).unwrap();

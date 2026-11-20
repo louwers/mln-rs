@@ -36,17 +36,24 @@ mln_headless = { package = "mln-rs-headless", path = "../../crates/mln_headless"
 # The PNG files of the scenarios' last images (`mln-bench run --images`).
 mln_image = { package = "mln-rs-image", path = "../../crates/mln_image" }
 mln_map = { package = "mln-rs-map", path = "../../crates/mln_map" }
-# The renderer's internal stages, through its `bench` entry points, and the
-# font-face shaper that the packages that render turn on.
+# The renderer's internal stages, through its `bench` entry points.
 mln_renderer = { package = "mln-rs-renderer", path = "../../crates/mln_renderer", default-features = false, features = [
   "bench",
+] }
+# The built-in registrations, the devices of every backend, which
+# MLN_RENDER_BACKEND picks among, and the font-face shaper that the packages
+# that render turn on.
+mln_rs = { package = "mln-rs", path = "../..", default-features = false, features = [
+  "webgpu",
+  "metal",
+  "vulkan",
+  "d3d12",
+  "gl",
   "font-face-shaper",
 ] }
-# The devices of every backend, which MLN_RENDER_BACKEND picks among, and
-# the runtime's internal stages, through its `bench` entry points.
-mln_runtime = { package = "mln-rs-runtime", path = "../../crates/mln_runtime", features = [
+# The runtime's internal stages, through its `bench` entry points.
+mln_runtime = { package = "mln-rs-runtime", path = "../../crates/mln_runtime", default-features = false, features = [
   "bench",
-  "default",
 ] }
 # The file source that reads the fixtures (support/fixtures.rs).
 mln_storage = { package = "mln-rs-storage", path = "../../crates/mln_storage" }

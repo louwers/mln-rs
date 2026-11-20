@@ -161,7 +161,7 @@ pub const fn drawable_vertex_binding(id: usize) -> Option<u32> {
 }
 
 /// The binding in the image set of the texture at `index`
-/// (`TextureInfo::index`).
+/// (`glsl::Texture::index`).
 #[must_use]
 pub const fn image_texture_binding(index: usize) -> u32 {
     index as u32

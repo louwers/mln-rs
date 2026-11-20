@@ -39,32 +39,22 @@ impl StyleRegistry {
         StyleRegistry { functions, layer_types: layers_by_name, source_types: sources_by_name }
     }
 
-    /// The built-in expression functions, layer types and source types, for
-    /// this crate's tests, which can't reach the renderer's
-    /// `Registry::with_builtins`.
+    /// The built-in expression functions, the built-in layer types and source
+    /// types of this crate and the tests' `plain` layer type, for this
+    /// crate's tests, which can't reach the facade's registry.
     #[cfg(test)]
     pub(crate) fn with_builtins() -> Arc<Self> {
         use crate::layer_type::style_entry;
-        use crate::layers::{
-            Background, Circle, ColorRelief, Custom, Fill, FillExtrusion, Heatmap, Hillshade, Line, Raster, Symbol,
-        };
+        use crate::layers::Symbol;
         use crate::source_type::style_source_entry;
         use crate::sources::{
             CustomGeometrySourceType, CustomVectorSourceType, GeoJsonSourceType, ImageSourceType, RasterDemSourceType,
             RasterSourceType, VectorSourceType,
         };
         let layer_types = [
-            style_entry::<Fill>(),
-            style_entry::<Line>(),
-            style_entry::<Circle>(),
             style_entry::<Symbol>(),
-            style_entry::<Raster>(),
-            style_entry::<Background>(),
-            style_entry::<Hillshade>(),
-            style_entry::<ColorRelief>(),
-            style_entry::<FillExtrusion>(),
-            style_entry::<Heatmap>(),
-            style_entry::<Custom>(),
+            style_entry::<crate::tests::fixture_layer::Plain>(),
+            style_entry::<crate::tests::fixture_layer::Shade>(),
         ];
         let source_types = [
             style_source_entry::<VectorSourceType>(),

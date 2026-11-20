@@ -21,9 +21,10 @@ use crate::{
 };
 
 fn map(options: MapOptions, run_loop: &Queue<()>) -> Map {
-    Map::with_file_source(
+    Map::new(
         StubFileSource::on_queue(run_loop, ResponseType::Asynchronous),
         options,
+        crate::tests::registry(),
         &crate::tests::pool(),
     )
     .expect("map")

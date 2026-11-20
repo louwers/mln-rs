@@ -1,0 +1,22 @@
+[package]
+name = "mln-rs-sources"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+include.workspace = true
+
+[lib]
+name = "mln_sources"
+# The doc comments have no examples to run.
+doctest = false
+
+[dependencies]
+mln_renderer.workspace = true
+
+[lints]
+workspace = true

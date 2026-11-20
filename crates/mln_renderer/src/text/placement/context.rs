@@ -14,8 +14,8 @@ use mln_vec_map::VecMap;
 use crate::buckets::symbol_bucket::{SymbolBucket, ZoomEvaluatedSize, symbols_by_viewport_y};
 use crate::layout::symbol_projection::LabelPlaneProjector;
 use crate::render_layer::{BucketPlacementData, PlacedTile, SymbolTranslate};
-use crate::render_tile::RenderTile;
 use crate::text::collision_index::{CollisionBoundaries, OverlapMode, PartCollision};
+use crate::tile_matrix::tile_unit_translation;
 
 /// The collision groups of the sources: with cross-source collisions, every
 /// symbol collides with every other; without, only with its own source's.
@@ -51,7 +51,7 @@ pub(crate) fn translation(
     if screen_space {
         return Vec2::ZERO;
     }
-    Vec2::from(RenderTile::tile_unit_translation(tile_id, translate.offset, translate.anchor, view))
+    Vec2::from(tile_unit_translation(tile_id, translate.offset, translate.anchor, view))
 }
 
 /// The projection without the horizon plane, so nothing on it counts as

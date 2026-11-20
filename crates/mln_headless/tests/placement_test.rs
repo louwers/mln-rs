@@ -91,9 +91,10 @@ impl ContinuousMap {
             HeadlessFrontend::new(Size::new(256, 256), 1.0, run_loop.queue(), &pool).expect("a headless frontend");
         let file_source = StubFileSource::on_queue(run_loop.queue(), ResponseType::Asynchronous);
         let observer = Rc::new(StubMapObserver::default());
-        let mut map = Map::with_file_source(
+        let mut map = Map::new(
             file_source,
             MapOptions { map_mode: MapMode::Continuous, size: Size::new(256, 256), ..Default::default() },
+            registry(),
             &pool,
         )
         .unwrap();

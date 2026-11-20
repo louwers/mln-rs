@@ -42,10 +42,10 @@ use crate::buckets::symbol_bucket::{
     Buffer, PaintProperties, PlacedSymbol, QuadCorner, SortKeyRange, SymbolBucket, SymbolBucketState,
     SymbolBucketStyle, SymbolLayoutFlags, SymbolSizeBinder,
 };
+use crate::erased_layer::EvaluatedLayer;
 use crate::geometry::anchor::Anchor;
 use crate::geometry::feature_index::{FeatureIndexBuilder, IndexedSubfeature};
 use crate::gfx::mesh::Indexed;
-use crate::layer_type::EvaluatedLayer;
 use crate::layout::clip_lines::clip_lines;
 use crate::layout::layout::{BuildParams, Layout, LayoutParameters, SourceLayer, layers_by_id};
 use crate::layout::merge_lines::merge_lines;
@@ -422,7 +422,7 @@ impl FeatureSymbols<'_> {
     }
 }
 
-pub(crate) struct SymbolLayout {
+pub struct SymbolLayout {
     pub(crate) layer_paint_properties: VecMap<String, Arc<EvaluatedLayer<Symbol>>>,
     /// Shared by every symbol's `IndexedSubfeature`, which placement clones
     /// for each symbol it places.

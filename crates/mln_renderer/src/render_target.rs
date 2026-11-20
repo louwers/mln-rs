@@ -15,7 +15,7 @@ use crate::render_pass::RenderPass;
 /// A texture that a layer draws into ahead of the frame, which other draws
 /// sample, with the depth texture the backend draws it with
 /// (`Context::render_target_depth`). The layer that owns it draws it.
-pub(crate) struct RenderTarget {
+pub struct RenderTarget {
     texture: SharedTexture,
     size: Size,
     /// Made with the first pass, of the texture's size.
@@ -26,20 +26,20 @@ pub(crate) struct RenderTarget {
 
 impl RenderTarget {
     /// A render target of `size` with channel type `type_`.
-    pub(crate) fn new(context: &mut Context, size: Size, type_: TextureChannelDataType) -> Self {
+    pub fn new(context: &mut Context, size: Size, type_: TextureChannelDataType) -> Self {
         RenderTarget { texture: texture(context, size, type_), size, depth: None, type_ }
     }
 
     /// The texture the target draws into, which draws sample.
     #[must_use]
-    pub(crate) fn texture(&self) -> &SharedTexture {
+    pub fn texture(&self) -> &SharedTexture {
         &self.texture
     }
 
     /// Draws into a texture of `size` from now on: a texture of another size
     /// replaces the current one, and [`texture`](Self::texture) returns the
     /// new one.
-    pub(crate) fn set_size(&mut self, context: &mut Context, size: Size) {
+    pub fn set_size(&mut self, context: &mut Context, size: Size) {
         if self.size != size {
             self.texture = texture(context, size, self.type_);
             self.size = size;
@@ -51,7 +51,7 @@ impl RenderTarget {
     /// context's, in the passes that [`TargetPasses::next`] moves
     /// `parameters` to; [`TargetPasses::end`] ends what this begins. `None`
     /// where the pass didn't begin.
-    pub(crate) fn begin(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) -> Option<TargetPasses> {
+    pub fn begin(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) -> Option<TargetPasses> {
         let pass = match self.pass(gpu, parameters.context) {
             Ok(pass) => pass,
             Err(error) => {
@@ -65,7 +65,7 @@ impl RenderTarget {
         }
         let prev_scissor_rect = parameters.scissor_rect;
         parameters.scissor_rect = ScissorRect { x: 0, y: 0, width: pass.size.width, height: pass.size.height };
-        Some(TargetPasses { passes: [RenderPass::Opaque, RenderPass::Translucent].into_iter(), prev_scissor_rect })
+        Some(TargetPasses { passes: [RenderPass::OPAQUE, RenderPass::TRANSLUCENT].into_iter(), prev_scissor_rect })
     }
 
     /// The pass that clears the texture to opaque black and its depth to 1,
@@ -117,7 +117,7 @@ fn texture(context: &mut Context, size: Size, type_: TextureChannelDataType) -> 
 /// [`RenderTarget::begin`] to [`TargetPasses::end`], which every one that
 /// begins must reach.
 #[must_use = "the draws into a render target end with `TargetPasses::end`"]
-pub(crate) struct TargetPasses {
+pub struct TargetPasses {
     /// The passes not yet drawn.
     passes: std::array::IntoIter<RenderPass, 2>,
     /// The frame's scissor rect, which `end` restores.
@@ -128,7 +128,7 @@ impl TargetPasses {
     /// Moves `parameters` to the next pass, the opaque one, then the
     /// translucent one, both as the frame's first layer; false after the
     /// last.
-    pub(crate) fn next(&mut self, parameters: &mut PaintParameters<'_>) -> bool {
+    pub fn next(&mut self, parameters: &mut PaintParameters<'_>) -> bool {
         let Some(pass) = self.passes.next() else {
             return false;
         };
@@ -140,7 +140,7 @@ impl TargetPasses {
     }
 
     /// Ends the draws into the render target, through `gpu`, the context's.
-    pub(crate) fn end(self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+    pub fn end(self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
         if let Err(error) = parameters.end_pass(gpu) {
             Log::error(Event::Render, format!("Ending a render target's pass failed: {error}"));
         }

@@ -23,12 +23,11 @@ use smallvec::SmallVec;
 
 use crate::algorithm::update_renderables::{PrefetchedTile, RenderablesContext, update_renderables};
 use crate::algorithm::update_tile_masks::update_tile_masks;
-use crate::bucket::UploadNeeds;
 use crate::bucket_geometry::BucketGeometry;
+use crate::erased_layer::ErasedEvaluatedLayer;
 use crate::gfx::context::Context;
 use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas;
 use crate::layer_drawing::ChangedBuckets;
-use crate::layer_type::ErasedEvaluatedLayer;
 use crate::layout::tile_layout::LayoutParams;
 use crate::tile::contents::Contents;
 use crate::tile::dem;
@@ -431,7 +430,6 @@ impl SourceTiles {
         slot: Option<usize>,
         atlas: &DynamicTextureAtlas,
         context: &mut Context,
-        needs: UploadNeeds,
     ) {
         let Some(index) = self.index_at(id, slot) else {
             return;
@@ -447,14 +445,14 @@ impl SourceTiles {
                 }
                 Arc::clone(&geometry.result.feature_index)
             }
-            Some(Contents::Raster(bucket)) => return bucket.upload(context),
-            Some(Contents::Dem(bucket)) => return bucket.upload(context),
+            Some(Contents::Raster(raster)) => return raster.upload(context),
+            Some(Contents::Dem(dem)) => return dem.upload(context),
             Some(Contents::Empty) | None => return,
         };
         let mut same: SmallVec<[usize; 4]> = self.same_place(&id);
         same.retain(|&mut at| at != index);
         let slots = self.tiles.values_mut().into_slice();
-        upload_sharing(slots, index, &same, context, needs);
+        upload_sharing(slots, index, &same, context);
         for &copy in &same {
             let laid_out_alike =
                 slots.get(copy).and_then(|slot| slot.tile.contents()?.geometry()).is_some_and(|geometry| {
@@ -463,7 +461,7 @@ impl SourceTiles {
             if laid_out_alike {
                 let others: SmallVec<[usize; 4]> =
                     same.iter().copied().chain([index]).filter(|&other| other != copy).collect();
-                upload_sharing(slots, copy, &others, context, needs);
+                upload_sharing(slots, copy, &others, context);
             }
         }
     }
@@ -831,8 +829,7 @@ impl SourceTiles {
             };
             debug_assert!(tile.is_renderable());
             for layer_properties in update.layers {
-                let type_info = layer_properties.style().info();
-                if entry.is_held() && !type_info.fading_tiles {
+                if entry.is_held() && !layer_properties.entry().places_symbols() {
                     continue;
                 }
                 let updated = tile.layer_properties_updated(layer_properties);
@@ -884,7 +881,7 @@ impl SourceTiles {
         for layer in layers {
             match layer.style().content_elevation() {
                 Some(PropertyValue::Constant(height_offset)) => max = max.max(*height_offset),
-                Some(PropertyValue::Expression(_)) => expression_layers.push(layer.style()),
+                Some(PropertyValue::Expression(_)) => expression_layers.push(layer),
                 Some(PropertyValue::Undefined) | None => {}
             }
         }
@@ -892,8 +889,8 @@ impl SourceTiles {
             let contents = self.cover().filter_map(Tile::contents);
             for contents in contents {
                 for layer in &expression_layers {
-                    if let Some(bucket) = contents.bucket(*layer) {
-                        max = max.max(bucket.max_content_elevation());
+                    if let Some(bucket) = contents.bucket(layer.style()) {
+                        max = max.max(layer.entry().max_content_elevation(bucket));
                     }
                 }
             }
@@ -1491,7 +1488,7 @@ impl SourceTiles {
 /// Readies the buckets of the geometry tile at `at` of `slots` for the
 /// frame's draws, sharing what the buckets of the tiles at `copies`, its
 /// other world copies, moved into `context`'s stores.
-fn upload_sharing(slots: &mut [Slot], at: usize, copies: &[usize], context: &mut Context, needs: UploadNeeds) {
+fn upload_sharing(slots: &mut [Slot], at: usize, copies: &[usize], context: &mut Context) {
     let Some((before, rest)) = slots.split_at_mut_checked(at) else {
         return;
     };
@@ -1509,5 +1506,5 @@ fn upload_sharing(slots: &mut [Slot], at: usize, copies: &[usize], context: &mut
         })
         .filter_map(|slot| Some(&slot.tile.contents()?.geometry()?.bucket_geometry))
         .collect();
-    geometry.upload(&shared, context, needs);
+    geometry.upload(&shared, context);
 }

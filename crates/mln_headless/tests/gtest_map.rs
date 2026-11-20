@@ -16,13 +16,13 @@ use mln_map::{
     AnimationOptions, BoundOptions, CameraOptions, ConstrainMode, Map, MapMode, MapOptions, MapProjection,
     NorthOrientation, ProjectionMode, RenderFrameStatus, RenderMode, TileLodMode, TileSettings, Viewport, ViewportMode,
 };
-use mln_renderer::{OverscaledTileID, Registry, TileOperation, UpdateParameters, UpdateReader};
+use mln_renderer::{OverscaledTileID, TileOperation, UpdateParameters, UpdateReader};
 use mln_storage::network_status::{NetworkStatus, Status as NetworkStatusType};
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{
-    Cache, DatabaseFileSource, FileSource, Kind, Loader, LoadingMethod, OnlineFileSource, Resource, ResourceOptions,
-    Response, StoragePolicy,
+    Cache, DatabaseFileSource, FileSource, FileSourceExt, Kind, Loader, LoadingMethod, OnlineFileSource, Resource,
+    ResourceOptions, Response, StoragePolicy,
 };
 use mln_style::conversion::layer::convert_layer;
 use mln_style::conversion::{Convertible, Error as ConversionError};
@@ -77,7 +77,7 @@ pub(crate) fn style_image(id: &str, image: PremultipliedImage, pixel_ratio: f32)
 }
 
 fn red_background(id: &str) -> Layer {
-    let mut layer = Layer::new(Registry::with_builtins().style(), "background", id, "").unwrap();
+    let mut layer = Layer::new(mln_rs::builtin_registry().style(), "background", id, "").unwrap();
     set(&mut layer, "background-color", &json!("rgba(255,0,0,1)"));
     layer
 }
@@ -924,7 +924,7 @@ fn style_expired() {
     test.map()
         .edit_style(|style| {
             style.apply(Edit::AddLayer {
-                layer: Layer::new(Registry::with_builtins().style(), "background", "bg", "").unwrap(),
+                layer: Layer::new(mln_rs::builtin_registry().style(), "background", "bg", "").unwrap(),
                 before: None,
             })
         })
@@ -1008,7 +1008,7 @@ fn style_early_mutation() {
     test.map()
         .edit_style(|style| {
             style.apply(Edit::AddLayer {
-                layer: Layer::new(Registry::with_builtins().style(), "background", "bg", "").unwrap(),
+                layer: Layer::new(mln_rs::builtin_registry().style(), "background", "bg", "").unwrap(),
                 before: None,
             })
         })
@@ -1067,9 +1067,20 @@ fn style_loaded_signal() {
     assert!(!emitted.get());
 }
 
-fn online_file_source_test() -> MapTest<OnlineFileSource> {
+/// A map over an `OnlineFileSource` that has made one transfer from
+/// `server`. The process's first transfer sets up the platform's HTTP
+/// stack, and on Apple platforms that reads the test binary's directory,
+/// which holds every crate's object files and takes seconds to read on a
+/// busy machine. Doing it here keeps that out of the tests' timed waits.
+fn online_file_source_test(server: &HttpServer) -> MapTest<OnlineFileSource> {
     let run_loop = TestLoop::new();
     let file_source = Arc::new(OnlineFileSource::new(Arc::new(NetworkStatus::new())));
+    let (sent, received) = std::sync::mpsc::channel();
+    let _request = file_source.request(&Resource::source(&server.url("/test")), move |response| {
+        let _ = sent.send(response.error);
+    });
+    let error = received.recv_timeout(Duration::from_secs(60)).expect("the first transfer finishes within 60 s");
+    assert_eq!(None, error);
     MapTest::create(run_loop, file_source, 1.0, MapMode::Static)
 }
 
@@ -1078,7 +1089,7 @@ fn online_file_source_test() -> MapTest<OnlineFileSource> {
 #[test]
 fn style_network_error_retry() {
     let server = HttpServer::new();
-    let test = online_file_source_test();
+    let test = online_file_source_test(&server);
 
     test.map().load_style_url(&server.url("/style-fail-once-500"));
 
@@ -1092,7 +1103,7 @@ fn style_network_error_retry() {
 #[test]
 fn style_not_found() {
     let server = HttpServer::new();
-    let test = online_file_source_test();
+    let test = online_file_source_test(&server);
 
     test.map().load_style_url(&server.url("/style-fail-once-404"));
 
@@ -1105,6 +1116,7 @@ fn style_not_found() {
         let (timer, run_loop) = (Rc::clone(&timer), test.run_loop.handle());
         test.observer.did_fail_loading_map_callback.set(move |()| {
             let run_loop = run_loop.clone();
+            // Longer than the second a server error waits for its retry.
             timer.start(Duration::from_millis(1100), move || run_loop.stop());
         });
     }
@@ -1311,6 +1323,7 @@ fn continuous_rendering() {
             asset_path: cpp_root().join("test/fixtures/api/assets").to_str().unwrap().to_owned(),
             ..ResourceOptions::default()
         },
+        registry(),
         &pool,
     )
     .unwrap();
@@ -1646,7 +1659,7 @@ fn issue15216() {
     test.map()
         .edit_style(|style| {
             style.apply(Edit::AddLayer {
-                layer: Layer::new(Registry::with_builtins().style(), "raster", "RasterLayer", "ImageSource").unwrap(),
+                layer: Layer::new(mln_rs::builtin_registry().style(), "raster", "RasterLayer", "ImageSource").unwrap(),
                 before: None,
             })
         })
@@ -1671,7 +1684,7 @@ fn globe_image_source_below_zoom_zero() {
     test.map()
         .edit_style(|style| {
             style.apply(Edit::AddLayer {
-                layer: Layer::new(Registry::with_builtins().style(), "raster", "raster", "image").unwrap(),
+                layer: Layer::new(mln_rs::builtin_registry().style(), "raster", "raster", "image").unwrap(),
                 before: None,
             })
         })
@@ -1697,7 +1710,7 @@ fn image_source_beyond_mercator_latitudes() {
     test.map()
         .edit_style(|style| {
             style.apply(Edit::AddLayer {
-                layer: Layer::new(Registry::with_builtins().style(), "raster", "image", "image").unwrap(),
+                layer: Layer::new(mln_rs::builtin_registry().style(), "raster", "image", "image").unwrap(),
                 before: None,
             })
         })
@@ -2389,7 +2402,7 @@ fn expired_sprite_sheet() {
     let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0, run_loop.queue(), &pool).expect("a headless frontend");
     let options =
         MapOptions { map_mode: MapMode::Continuous, size: frontend.size(), pixel_ratio: 1.0, ..Default::default() };
-    let mut map = Map::with_file_source(file_source, options, &pool).unwrap();
+    let mut map = Map::new(file_source, options, registry(), &pool).unwrap();
     frontend.attach(&mut map);
     let updates = map.update_reader();
     let map = Rc::new(RefCell::new(map));
@@ -2902,7 +2915,7 @@ fn still_image_after_tile_error() {
     test.map()
         .edit_style(|style| {
             style.apply(Edit::AddLayer {
-                layer: Layer::new(Registry::with_builtins().style(), "line", "line", "mapbox").unwrap(),
+                layer: Layer::new(mln_rs::builtin_registry().style(), "line", "line", "mapbox").unwrap(),
                 before: None,
             })
         })
@@ -2940,7 +2953,7 @@ fn continuous_map_finishes_loading_when_its_tile_requests_fail() {
     test.map()
         .edit_style(|style| {
             style.apply(Edit::AddLayer {
-                layer: Layer::new(Registry::with_builtins().style(), "line", "line", "mapbox").unwrap(),
+                layer: Layer::new(mln_rs::builtin_registry().style(), "line", "line", "mapbox").unwrap(),
                 before: None,
             })
         })
@@ -2983,7 +2996,7 @@ fn stencil_overflow() {
     test.map()
         .edit_style(|style| {
             style.apply(Edit::AddLayer {
-                layer: Layer::new(Registry::with_builtins().style(), "fill", "fill", "custom").unwrap(),
+                layer: Layer::new(mln_rs::builtin_registry().style(), "fill", "fill", "custom").unwrap(),
                 before: None,
             })
         })
@@ -3124,12 +3137,13 @@ fn observe_tile_lifecycle() {
             asset_path: cpp_root().join("test/fixtures/api/assets").to_str().unwrap().to_owned(),
             ..ResourceOptions::default()
         },
+        registry(),
         &pool,
     )
     .unwrap();
     frontend.attach(&mut map);
     map.load_style_json(&read_file("test/fixtures/api/water.json"));
-    let mut layer = Layer::new(Registry::with_builtins().style(), "fill", "landcover", "mapbox").unwrap();
+    let mut layer = Layer::new(mln_rs::builtin_registry().style(), "fill", "landcover", "mapbox").unwrap();
     layer.set_source_layer("landcover");
     set(&mut layer, "fill-color", &json!("rgba(0,255,0,1)"));
     map.edit_style(|style| style.apply(Edit::AddLayer { layer, before: None })).unwrap();
@@ -3267,7 +3281,7 @@ fn immediate_style_replacement_retains_color() {
             "layers": [{"id": "underlay", "type": "background", "paint": {"background-color": "white"}}]
         }"#,
         );
-        let mut layer = Layer::new(Registry::with_builtins().style(), "background", "background", "").unwrap();
+        let mut layer = Layer::new(mln_rs::builtin_registry().style(), "background", "background", "").unwrap();
         set(&mut layer, "background-color", &json!("rgba(255,0,0,1)"));
         test.map().edit_style(|style| style.apply(Edit::AddLayer { layer, before: None })).unwrap();
 
@@ -3362,7 +3376,7 @@ fn globe_hand_off_keeps_tiles() {
         HeadlessFrontend::new(Size::new(512, 512), 1.0, run_loop.queue(), &pool).expect("a headless frontend");
     // C++ runs from the checkout's root; the asset path is relative to it.
     let asset_path = cpp_root().join("test/fixtures/api/assets");
-    let mut map = Map::with_file_source(
+    let mut map = Map::new(
         Arc::new(Loader::new(
             &ResourceOptions {
                 asset_path: asset_path.to_str().expect("asset path").to_owned(),
@@ -3371,6 +3385,7 @@ fn globe_hand_off_keeps_tiles() {
             &pool,
         )),
         MapOptions { map_mode: MapMode::Static, size: frontend.size(), ..Default::default() },
+        registry(),
         &pool,
     )
     .unwrap();
@@ -3451,7 +3466,7 @@ fn a_moved_layer_draws_in_its_new_place_without_a_relayout() {
         result.image
     };
 
-    let mut map = Map::with_file_source(Arc::clone(&file_source), options, &pool).unwrap();
+    let mut map = Map::new(Arc::clone(&file_source), options, registry(), &pool).unwrap();
     map.load_style_json(&water_layers_in(["fill", "line"]));
     map.jump_to(&camera);
     let before = render(&mut map);
@@ -3463,7 +3478,7 @@ fn a_moved_layer_draws_in_its_new_place_without_a_relayout() {
     assert_eq!(0, parses.get(), "moving a layer laid its tiles out again");
     assert_ne!(before, moved);
 
-    let mut reordered = Map::with_file_source(file_source, options, &pool).unwrap();
+    let mut reordered = Map::new(file_source, options, registry(), &pool).unwrap();
     reordered.load_style_json(&water_layers_in(["line", "fill"]));
     reordered.jump_to(&camera);
     assert_eq!(render(&mut reordered), moved);
@@ -3726,7 +3741,7 @@ fn globe_bounded_source_loads_finer_tiles() {
         HeadlessFrontend::new(Size::new(512, 512), 1.0, run_loop.queue(), &pool).expect("a headless frontend");
     // C++ runs from the checkout's root; the asset path is relative to it.
     let asset_path = cpp_root().join("test/fixtures/api/assets");
-    let mut map = Map::with_file_source(
+    let mut map = Map::new(
         Arc::new(Loader::new(
             &ResourceOptions {
                 asset_path: asset_path.to_str().expect("asset path").to_owned(),
@@ -3735,6 +3750,7 @@ fn globe_bounded_source_loads_finer_tiles() {
             &pool,
         )),
         MapOptions { map_mode: MapMode::Static, size: frontend.size(), ..Default::default() },
+        registry(),
         &pool,
     )
     .unwrap();
@@ -3776,7 +3792,7 @@ fn line_layer_depth_distribution() {
 
     test.map().jump_to(&CameraOptions { zoom: Some(0.0), pitch: Some(45.0), ..Default::default() });
 
-    let mut background_layer = Layer::new(Registry::with_builtins().style(), "background", "Background", "").unwrap();
+    let mut background_layer = Layer::new(mln_rs::builtin_registry().style(), "background", "Background", "").unwrap();
     set(&mut background_layer, "background-color", &json!("rgba(255,255,0,1)"));
     test.map().edit_style(|style| style.apply(Edit::AddLayer { layer: background_layer, before: None })).unwrap();
 
@@ -3804,7 +3820,7 @@ fn line_layer_depth_distribution() {
         test.map().add_source(get_source(i)).unwrap();
 
         let mut layer = Layer::new(
-            Registry::with_builtins().style(),
+            mln_rs::builtin_registry().style(),
             "line",
             &format!("LineLayer{i}"),
             &format!("GeoJSONSource_{i}"),
@@ -3892,7 +3908,7 @@ fn add_geojson_symbol(test: &MapTest, index: usize, longitude: f64, synchronous:
     );
     let layer_value: serde_json::Value = serde_json::from_str(&layer_json).unwrap();
     let mut error = ConversionError::default();
-    let layer = convert_layer(Registry::with_builtins().style(), &Convertible::from(&layer_value), &mut error);
+    let layer = convert_layer(mln_rs::builtin_registry().style(), &Convertible::from(&layer_value), &mut error);
     let layer = layer.unwrap_or_else(|| panic!("{}", error.message));
     test.map().edit_style(|style| style.apply(Edit::AddLayer { layer, before: None })).unwrap();
 }
@@ -4570,7 +4586,7 @@ fn layer_added_with_global_state_change_shows_new_state() {
     )
     .unwrap();
     let mut error = ConversionError::default();
-    let layer = convert_layer(Registry::with_builtins().style(), &Convertible::from(&layer_value), &mut error);
+    let layer = convert_layer(mln_rs::builtin_registry().style(), &Convertible::from(&layer_value), &mut error);
     let layer = layer.unwrap_or_else(|| panic!("{}", error.message));
     test.map().edit_style(|style| style.apply(Edit::AddLayer { layer, before: None })).unwrap();
 
@@ -4612,9 +4628,10 @@ fn tile_selection_options_publish_updates() {
 
     let run_loop = TestLoop::new();
     let pool = Pool::new(4);
-    let mut map = Map::with_file_source(
+    let mut map = Map::new(
         StubFileSource::on_queue(run_loop.queue(), ResponseType::Asynchronous),
         MapOptions { map_mode: MapMode::Continuous, ..Default::default() },
+        registry(),
         &pool,
     )
     .unwrap();
@@ -4825,7 +4842,7 @@ fn color_ramp_renders_current_state_after_unrelated_state_change(type_: &str) {
     );
     let layer_value: serde_json::Value = serde_json::from_str(&layer_json).unwrap();
     let mut error = ConversionError::default();
-    let layer = convert_layer(Registry::with_builtins().style(), &Convertible::from(&layer_value), &mut error);
+    let layer = convert_layer(mln_rs::builtin_registry().style(), &Convertible::from(&layer_value), &mut error);
     let layer = layer.unwrap_or_else(|| panic!("{}", error.message));
 
     // The layer joins the render tree in the same update as a write to a key its ramp does not read.
@@ -4871,9 +4888,10 @@ fn empty_size_is_an_error() {
     let run_loop = TestLoop::new();
     let pool = Pool::new(4);
     for size in [Size::new(0, 0), Size::new(256, 0), Size::new(0, 256)] {
-        let result = Map::with_file_source(
+        let result = Map::new(
             StubFileSource::on_queue(run_loop.queue(), ResponseType::Asynchronous),
             MapOptions { size, ..Default::default() },
+            registry(),
             &pool,
         );
         assert_eq!(

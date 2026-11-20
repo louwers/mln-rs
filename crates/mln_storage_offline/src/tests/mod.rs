@@ -5,6 +5,14 @@ mod database_file_source;
 mod offline_download;
 
 use std::path::PathBuf;
+use std::sync::Arc;
+
+use mln_style::StyleRegistry;
+
+/// The built-in registrations that the tests' styles parse against.
+pub(crate) fn registry() -> Arc<StyleRegistry> {
+    Arc::clone(mln_rs::builtin_registry().style())
+}
 
 /// A path of the C++ repository, in the copy of its files these tests read
 /// (testdata/).

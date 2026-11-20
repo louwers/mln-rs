@@ -28,9 +28,10 @@
 //!   of its type `T`; `layer_type::LayerBase` holds the members every layer
 //!   type has.
 //! - Each layer type is a marker type that implements
-//!   `layer_type::StyleLayerType`, such as `layers::Background`, with
-//!   property sets such as
-//!   `layers::BackgroundPaintProperties::{Transitionable, Unevaluated, PossiblyEvaluated, Evaluated}`.
+//!   `layer_type::StyleLayerType`, such as `layers::Symbol`, with
+//!   property sets that [`properties!`] declares, such as
+//!   `layers::SymbolPaintProperties::{Transitionable, Unevaluated, PossiblyEvaluated}`.
+//!   A crate outside this one declares a layer type the same way.
 //! - Each layer type, the light and the sky have a property table, which
 //!   `property_table` reads to get, set and serialize properties by name.
 //!   `layers/<type>_layer_properties.rs`, `light_properties.rs` and
@@ -60,7 +61,6 @@ pub mod parser;
 pub mod projection;
 pub mod properties;
 pub mod property_expression;
-#[doc(hidden)]
 pub mod property_table;
 pub mod property_value;
 pub mod registry;
@@ -82,11 +82,6 @@ pub use edit::Edit;
 pub use layer::Layer;
 pub use layer_list::LayerList;
 pub use layer_type::LayerTypeInfo;
-// The property macros, at the root so that the generated code and the
-// macros themselves name them as `crate::name!`.
-pub(crate) use properties::{
-    __possibly_evaluated_methods, __property_data_driven, __property_evaluation, __property_value, properties,
-};
 pub use property_value::{PropertyValue, StyleValue};
 pub use registry::StyleRegistry;
 pub use renderer::property_evaluation_parameters::{CrossfadeParameters, PropertyEvaluationParameters};
@@ -95,6 +90,14 @@ pub use source_list::SourceList;
 pub use source_type::{Source, SourceInstance, SourceTypeInfo};
 pub use style::{Style, StyleLoadError};
 pub use transition_options::TransitionOptions;
+
+/// The crates that the expansion of [`properties!`] names, so that a crate
+/// that invokes it needn't depend on them.
+#[doc(hidden)]
+pub mod __private {
+    pub use mln_vec_map;
+    pub use mln_wire;
+}
 
 #[cfg(test)]
 mod tests;

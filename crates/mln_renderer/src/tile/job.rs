@@ -29,8 +29,8 @@ use mln_util::time::Instant;
 use mln_vec_map::VecSet;
 use parking_lot::Mutex;
 
-use crate::geometry::dem_data::DEMData;
-use crate::layer_type::ErasedEvaluatedLayer;
+use crate::erased_layer::ErasedEvaluatedLayer;
+use crate::geometry::dem_data::DemData;
 use crate::layout::tile_layout::{Dependencies, Discovered, LayoutInput, LayoutParams, Resolved, build, discover};
 use crate::tile::contents::LayoutResult;
 use crate::tile::worker_codec::fields::{SharedAvailableImages, SharedSourceStyle};
@@ -173,7 +173,7 @@ pub(crate) enum JobResult {
     /// A raster tile's image.
     Raster(PremultipliedImage),
     /// A raster-dem tile's DEM, with its border filled from its own edges.
-    Dem(DEMData),
+    Dem(DemData),
     Failed(Error),
 }
 
@@ -219,7 +219,7 @@ pub(crate) fn run_job(
             guard.finish(result, JobTimes::default());
         }),
         Job::Dem { data, encoding } => decoder::decode(&data, move |image| {
-            let dem = image.and_then(|image| DEMData::new(&image, encoding).map_err(Error::native));
+            let dem = image.and_then(|image| DemData::new(&image, encoding).map_err(Error::native));
             guard.finish(dem.map_or_else(JobResult::Failed, JobResult::Dem), JobTimes::default());
         }),
     }

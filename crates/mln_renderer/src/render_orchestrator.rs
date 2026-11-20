@@ -27,24 +27,22 @@ use mln_vec_map::{VecMap, VecSet};
 use smallvec::SmallVec;
 
 use crate::Registry;
+use crate::erased_layer::ErasedEvaluatedLayer;
 use crate::frame::{Frame, FrameLayer};
 use crate::gfx::context::Context;
 use crate::globe_depth_pass::GlobeDepthPass;
 use crate::image_store::ImageStore;
 use crate::layer_drawing::{ChangedBuckets, DrawGroup, DrawOrder, SingleDraw};
-use crate::layer_type::ErasedEvaluatedLayer;
-use crate::layers::render_custom_layer::EndedHosts;
 use crate::line_atlas::LineAtlas;
 use crate::paint_parameters::PaintParameters;
 use crate::pattern_atlas::PatternAtlas;
-use crate::render_layer::{Atlases, FrameSourceTiles, LayerSource, LayerUpdateParameters, RenderLayer};
+use crate::render_layer::{Atlases, EndedHosts, FrameSourceTiles, LayerUpdate, RenderLayer};
 use crate::render_source::{self, RenderSource, RenderTileParameters, TileOrder};
-use crate::render_tile::{FoundTile, RenderTile};
+use crate::render_tile::{FoundTile, RenderTile, TileContent};
 use crate::renderer_event::RendererEvent;
 use crate::sources::render_tile_source::{DebugLayer, DebugLayers};
 use crate::text::glyph_store::GlyphStore;
 use crate::text::placement::{Placement, PlacementInputs};
-use crate::tile::contents::Contents;
 use crate::tile::inbox::Waker;
 use crate::tile::source_tiles::SourceTiles;
 use crate::tile::store::{StoreEvent, TileStore};
@@ -177,7 +175,7 @@ pub(crate) struct RenderOrchestrator {
     /// Whether the next update makes the render layers again, for new
     /// shaders.
     remake_render_layers: bool,
-    /// The hosts of the custom layers that left since the renderer last
+    /// The hosts of the layers that left since the renderer last
     /// [took them](Self::take_ended_hosts).
     ended_hosts: EndedHosts,
     filtered_layers_for_source: Vec<Arc<dyn ErasedEvaluatedLayer>>,
@@ -475,7 +473,7 @@ impl RenderOrchestrator {
             let source = source.map(|(id, source)| (id.as_str(), &**source));
             let source_contents = contents.of(source, &self.tile_store);
             let source = source.map(|(_, source)| source);
-            render_layer.update(&mut LayerUpdateParameters {
+            render_layer.update(&mut LayerUpdate {
                 view: &frame.transform.view,
                 update_parameters,
                 source,
@@ -654,7 +652,7 @@ impl RenderOrchestrator {
         let render_layers_remade = std::mem::take(&mut self.remake_render_layers);
         if render_layers_remade {
             for render_layer in &mut self.layers {
-                let style = Arc::clone(&render_layer.base().style);
+                let style = render_layer.shared_style();
                 let Some(mut new_layer) = create_render_layer(&self.registry, &style) else {
                     continue;
                 };
@@ -755,9 +753,9 @@ impl RenderOrchestrator {
                 || clock.evaluation.has_crossfade
                 || layer.has_transition()
             {
-                let previous_mask = layer.base().evaluated_properties.constants_mask();
+                let previous_mask = layer.evaluated().constants_mask();
                 layer.evaluate(&clock.evaluation);
-                if previous_mask != layer.base().evaluated_properties.constants_mask() {
+                if previous_mask != layer.evaluated().constants_mask() {
                     constants_mask_changed.insert(id);
                 }
             }
@@ -854,9 +852,8 @@ impl RenderOrchestrator {
             let render_source_id = style_source.as_ref().filter(|_| has_render_source).map(Source::id);
 
             for (index, layer) in self.layers.iter().enumerate() {
-                let style = &layer.base().style;
+                let style = layer.style();
                 let layer_info = style.info();
-                frame.has_3d |= layer_info.pass_3d;
 
                 if layer_info.source != SourceKind::None {
                     // Every source's pass sees every layer, so the cheap
@@ -871,11 +868,11 @@ impl RenderOrchestrator {
                         // this layer's source if one of the changed state
                         // properties is referenced by anything that is
                         // baked into the tile's buckets.
+                        let evaluated = layer.evaluated();
                         let global_state_requires_relayout = {
                             if !clock.global_state_changed
-                                || !(style.layout_dependencies()
-                                    | layer.base().evaluated_properties.evaluated_dependencies())
-                                .intersects(Dependency::GLOBAL_STATE)
+                                || !(style.layout_dependencies() | evaluated.evaluated_dependencies())
+                                    .intersects(Dependency::GLOBAL_STATE)
                             {
                                 false
                             } else if clock.changed_global_state_keys.is_none() {
@@ -883,7 +880,7 @@ impl RenderOrchestrator {
                             } else {
                                 let mut refs = VecSet::new();
                                 style.collect_layout_global_state_refs(&mut refs);
-                                layer.base().evaluated_properties.collect_evaluated_global_state_refs(&mut refs);
+                                evaluated.collect_evaluated_global_state_refs(&mut refs);
                                 mln_style::expression::global_state_refs_intersect(
                                     Some(&refs),
                                     clock.changed_global_state_keys.as_deref(),
@@ -895,7 +892,7 @@ impl RenderOrchestrator {
                             || layer_changes.get(&layer_id).is_some_and(LayerChange::relayouts)
                             || global_state_requires_relayout;
                         if layer_is_visible {
-                            self.filtered_layers_for_source.push(Arc::clone(&layer.base().evaluated_properties));
+                            self.filtered_layers_for_source.push(evaluated);
                             if zoom_fits_layer {
                                 source_needs_rendering = true;
                                 let source_id = style_source.id().to_owned();
@@ -923,7 +920,7 @@ impl RenderOrchestrator {
                         && frame.sky.is_none()
                         && !update_parameters.view.is_globe()
                         && !update_parameters.debug_options.contains(MapDebugOptions::OVERDRAW)
-                        && layers.first().is_some_and(|first| Arc::ptr_eq(style, first.style()))
+                        && layers.first().is_some_and(|first| std::ptr::addr_eq(style, Arc::as_ptr(first.style())))
                     {
                         let solid_background = layer.solid_background();
                         if let Some(solid_background) = solid_background {
@@ -1198,7 +1195,7 @@ impl RenderOrchestrator {
             atmosphere.upload(gpu, context);
         }
         for layer in &mut self.layers {
-            layer.upload_render_targets(gpu, context);
+            layer.upload_offscreen(gpu, context);
         }
         for debug in self.debug_layers.values_mut() {
             debug.upload(gpu, context);
@@ -1230,10 +1227,9 @@ impl RenderOrchestrator {
 
     /// Readies the buckets of the frame's sources for the frame's draws.
     pub(crate) fn upload_sources(&mut self, context: &mut Context) {
-        let needs = crate::layers::upload_needs(context);
         for source in self.render_sources.values_mut() {
             if source.is_enabled() {
-                source.upload(&mut self.tile_store, context, needs);
+                source.upload(&mut self.tile_store, context);
             }
         }
     }
@@ -1263,7 +1259,7 @@ impl RenderOrchestrator {
         }
     }
 
-    /// The hosts of the custom layers that left since the last call, which
+    /// The hosts of the layers that left since the last call, which
     /// drew and hear that the renderer stopped.
     pub(crate) fn take_ended_hosts(&mut self) -> EndedHosts {
         std::mem::take(&mut self.ended_hosts)
@@ -1292,17 +1288,13 @@ impl RenderOrchestrator {
             let source = frame_layer.source.as_ref().and_then(|id| self.render_sources.get_key_value(id));
             let source = source.map(|(id, source)| (id.as_str(), &**source));
             let source_contents = contents.of(source, &self.tile_store);
-            let layer_source = source.map(|(_, source)| match source.image_render_data() {
-                Some(image) => LayerSource::Image(image),
-                None => {
-                    LayerSource::Tiles(FrameSourceTiles::new(source.render_tiles(), source_contents), &self.found_tiles)
-                }
-            });
-            render_layer.update_draws(gpu, paint_parameters, &self.atlases, layer_source);
-            needs_globe_depth = needs_globe_depth || render_layer.needs_globe_depth();
+            let tiles = source.map(|(_, source)| FrameSourceTiles::new(source, source_contents));
+            render_layer.update_draws(gpu, paint_parameters, &self.atlases, tiles, &self.found_tiles);
+            needs_globe_depth = needs_globe_depth || render_layer.is_3d();
         }
-        let state = paint_parameters.view;
-        let (renderable_size, pixel_ratio) = (paint_parameters.renderable_size, paint_parameters.pixel_ratio);
+        let state = paint_parameters.frame.view;
+        let (renderable_size, pixel_ratio) =
+            (paint_parameters.frame.renderable_size, paint_parameters.frame.pixel_ratio);
         let context = &mut *paint_parameters.context;
         self.sky_pass.update(gpu, context, state, renderable_size, pixel_ratio, frame.sky.as_ref(), &frame.light);
         self.globe_depth_pass.update(
@@ -1367,11 +1359,8 @@ impl RenderOrchestrator {
         layers: &crate::geometry::feature_index::QueryLayers<'_>,
         options: &crate::query::RenderedQueryOptions,
     ) -> Result<(), Error> {
-        let cross_tile_symbol_index_layers: crate::geometry::feature_index::QueryLayers<'_> = layers
-            .iter()
-            .filter(|(_, layer)| layer.base().style.info().cross_tile_index)
-            .map(|(id, layer)| (id.clone(), *layer))
-            .collect();
+        let cross_tile_symbol_index_layers: crate::geometry::feature_index::QueryLayers<'_> =
+            layers.iter().filter(|(_, layer)| layer.places_symbols()).map(|(id, layer)| (id.clone(), *layer)).collect();
 
         if cross_tile_symbol_index_layers.is_empty() {
             return Ok(());
@@ -1428,7 +1417,7 @@ impl RenderOrchestrator {
                 continue;
             }
             filtered_layers.insert(id.clone(), *layer);
-            source_ids.insert(layer.base().style.base().source.clone());
+            source_ids.insert(layer.style().base().source.clone());
         }
 
         let proj_matrix = self.view.projection_matrix_with(1, false);
@@ -1586,27 +1575,36 @@ impl RenderOrchestrator {
     }
 }
 
-/// What the render tiles of a source show, at their indexes, for the layers
+/// What the render tiles of a source hold, at their indexes, for the layers
 /// of a phase of the frame, which go through their sources in runs.
 #[derive(Default)]
 struct SourceContents<'a> {
     source: Option<&'a str>,
-    contents: Vec<Option<&'a Contents>>,
+    contents: Vec<Option<TileContent<'a>>>,
 }
 
 impl<'a> SourceContents<'a> {
     /// What the render tiles of `source`, an id and its render source,
-    /// show, from `store`; none for no source.
-    fn of(&mut self, source: Option<(&'a str, &'a dyn RenderSource)>, store: &'a TileStore) -> &[Option<&'a Contents>] {
+    /// hold: an image source's image, or their contents in `store`; none for
+    /// no source.
+    fn of(
+        &mut self,
+        source: Option<(&'a str, &'a dyn RenderSource)>,
+        store: &'a TileStore,
+    ) -> &[Option<TileContent<'a>>] {
         let Some((id, source)) = source else {
             return &[];
         };
         if self.source != Some(id) {
             self.source = Some(id);
             self.contents.clear();
+            let image = source.image();
             let tiles = source.tiles().and_then(|key| store.source(key));
-            let contents_of = |tile: &RenderTile| tiles?.contents_at(tile.overscaled_tile_id(), tile.slot());
-            self.contents.extend(source.render_tiles().iter().map(contents_of));
+            let content_of = |tile: &RenderTile| match image {
+                Some(image) => Some(TileContent::Image(image)),
+                None => tiles?.contents_at(tile.overscaled_tile_id(), tile.slot()).map(TileContent::Tile),
+            };
+            self.contents.extend(source.render_tiles().iter().map(content_of));
         }
         &self.contents
     }
@@ -1650,10 +1648,14 @@ impl Drop for WaitOnDrop {
 
 impl Drop for RenderOrchestrator {
     fn drop(&mut self) {
-        // Hosts that left and that the renderer didn't take, as when it
-        // goes without its tear-down, lose their graphics objects.
+        // Without the renderer's tear-down, the hosts of the layers still
+        // here, and those that left and that the renderer didn't take, lose
+        // their graphics objects.
+        for layer in &mut self.layers {
+            layer.lose_context();
+        }
         for host in std::mem::take(&mut self.ended_hosts) {
-            host.context_lost();
+            host.lose();
         }
         self.tile_store.log_stats();
         // The render sources and their tiles go before the wait, since

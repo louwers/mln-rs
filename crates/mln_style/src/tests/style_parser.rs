@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 
 use feature::Value;
-use mln_util::logging::{Event, EventSeverity, Log};
 use mln_vec_map::VecSet;
 
 use super::util::FixtureLog;
@@ -12,70 +11,6 @@ use crate::style_property::Kind;
 
 fn fixtures_dir() -> PathBuf {
     std::path::Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("testdata/test/fixtures/style_parser")
-}
-
-/// The name of every `<name>.info.json` in the fixture directory.
-fn fixture_names() -> Vec<String> {
-    let mut names: Vec<String> = std::fs::read_dir(fixtures_dir())
-        .unwrap()
-        .filter_map(|entry| {
-            let name = entry.unwrap().file_name().into_string().unwrap();
-            name.strip_suffix(".info.json").map(str::to_owned)
-        })
-        .collect();
-    names.sort();
-    names
-}
-
-/// One `StyleParserTest.ParseStyle` instance. Returns the failure, if any.
-fn parse_style_fixture(name: &str) -> Result<(), String> {
-    let base = fixtures_dir().join(name);
-    let log = FixtureLog::new();
-
-    let info_doc: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(base.with_extension("info.json")).unwrap()).unwrap();
-    let style_json = std::fs::read_to_string(base.with_extension("style.json")).unwrap();
-
-    let mut parser = Parser::new(&StyleRegistry::with_builtins());
-    if let Err(error) = parser.parse(&style_json) {
-        Log::error(Event::ParseStyle, format!("Failed to parse style: {error}"));
-    }
-
-    for (property_name, value) in info_doc.as_object().unwrap() {
-        if let Some(js_log) = value.get("log") {
-            for js_entry in js_log.as_array().unwrap() {
-                let js_entry = js_entry.as_array().unwrap();
-                let count = js_entry[0].as_u64().unwrap() as usize;
-                let severity = js_entry[1].as_str().unwrap().parse::<EventSeverity>().unwrap();
-                let event = js_entry[2].as_str().unwrap().parse::<Event>().unwrap();
-                let msg = js_entry[3].as_str().unwrap();
-                let observed = log.count(severity, event, msg);
-                if count != observed {
-                    return Err(format!("{name}/{property_name}: Message: {msg}: expected {count}, got {observed}"));
-                }
-            }
-        }
-        let unchecked = log.unchecked();
-        if !unchecked.is_empty() {
-            return Err(format!("Unchecked Log Messages ({name}/{property_name}): {unchecked:?}"));
-        }
-    }
-    Ok(())
-}
-
-/// Runs the style parser test over every fixture.
-// gtest: StyleParserTest.ParseStyle
-#[test]
-fn parse_style() {
-    let names = fixture_names();
-    assert_ne!(names, Vec::<String>::new());
-    let mut failures = Vec::new();
-    for name in &names {
-        if let Err(failure) = parse_style_fixture(name) {
-            failures.push(failure);
-        }
-    }
-    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 // gtest: StyleParser.SpriteAsString
@@ -341,8 +276,8 @@ fn deepest_admitted_style_parses_on_a_1_mib_stack() {
             nest(r#"["interpolate", ["linear"], ["get", "a"], 0, X, 1, 0]"#, r#"["number", ["get", "a"]]"#, depth);
         format!(
             r#"{{"version": 8, "sources": {{"s": {{"type": "vector", "tiles": ["http://example.com/{{z}}/{{x}}/{{y}}"]}}}},
-                "layers": [{{"id": "c", "type": "circle", "source": "s", "source-layer": "l",
-                             "filter": {filter}, "paint": {{"circle-radius": {radius}}}}}]}}"#
+                "layers": [{{"id": "c", "type": "symbol", "source": "s", "source-layer": "l",
+                             "filter": {filter}, "paint": {{"text-halo-width": {radius}}}}}]}}"#
         )
     };
     let fits = |depth: usize| serde_json::from_str::<serde_json::Value>(&style(depth)).is_ok();
@@ -375,10 +310,10 @@ fn invalid_properties_are_skipped() {
         "version": 8,
         "sources": {"s": {"type": "geojson", "data": {"type": "FeatureCollection", "features": []}}},
         "layers": [
-            {"id": "a", "type": "circle", "source": "s",
-             "layout": {"visibility": "maybe", "circle-sort-key": 1},
-             "paint": {"circle-color": "not a color", "circle-foo": 1, "circle-radius": 5}},
-            {"id": "b", "ref": "a", "paint": {"circle-opacity": "opaque", "circle-radius": 7}}
+            {"id": "a", "type": "symbol", "source": "s",
+             "layout": {"visibility": "maybe", "symbol-sort-key": 1},
+             "paint": {"text-color": "not a color", "text-foo": 1, "text-halo-width": 5}},
+            {"id": "b", "ref": "a", "paint": {"text-opacity": "opaque", "text-halo-width": 7}}
         ]
     }"#,
         )
@@ -390,19 +325,19 @@ fn invalid_properties_are_skipped() {
         let property = parser.layers[layer].get_property(name);
         (property.get_kind(), property.get_value().clone())
     };
-    assert_eq!(property(0, "circle-radius"), (Kind::Constant, Value::Double(5.0)));
-    assert_eq!(property(0, "circle-sort-key"), (Kind::Constant, Value::Double(1.0)));
-    assert_eq!(property(0, "circle-color").0, Kind::Undefined);
+    assert_eq!(property(0, "text-halo-width"), (Kind::Constant, Value::Double(5.0)));
+    assert_eq!(property(0, "symbol-sort-key"), (Kind::Constant, Value::Double(1.0)));
+    assert_eq!(property(0, "text-color").0, Kind::Undefined);
     assert_eq!(property(0, "visibility").0, Kind::Undefined);
-    assert_eq!(property(1, "circle-radius"), (Kind::Constant, Value::Double(7.0)));
-    assert_eq!(property(1, "circle-opacity").0, Kind::Undefined);
+    assert_eq!(property(1, "text-halo-width"), (Kind::Constant, Value::Double(7.0)));
+    assert_eq!(property(1, "text-opacity").0, Kind::Undefined);
 
     let mut warnings: Vec<_> = log.messages().into_iter().map(|message| message.msg).collect();
     warnings.sort();
     assert_eq!(
         warnings,
         [
-            "layer 'a' doesn't support property 'circle-foo'",
+            "layer 'a' doesn't support property 'text-foo'",
             "value must be a number",
             "value must be a valid color",
             "value must be a valid enumeration value",

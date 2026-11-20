@@ -7,7 +7,6 @@ use mln_gfx::shaders::layer_ubo::GlobalPaintParamsUBO;
 use mln_gfx::shaders::shader_defines::ID_GLOBAL_PAINT_PARAMS_UBO;
 use mln_gfx::{FrameImage, Handoff, ScissorRect};
 use mln_map_types::MapDebugOptions;
-use mln_style::layers::CustomLayerFrame;
 use mln_text::GlyphCache;
 use mln_text::local_glyph_rasterizer::LocalGlyphs;
 use mln_tile_id::UnwrappedTileID;
@@ -25,8 +24,8 @@ use crate::frame_projection::{self, FrameProjection};
 use crate::gfx::context::Context;
 use crate::layer_composite::{Composite, LayerComposite};
 use crate::layer_drawing::DrawOrder;
-use crate::layers::render_custom_layer::end_hosts;
 use crate::paint_parameters::{OpenPass, PaintParameters};
+use crate::render_layer::end_hosts;
 use crate::render_orchestrator::RenderOrchestrator;
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
@@ -82,7 +81,8 @@ pub struct RenderTimings {
 ///
 /// [`tear_down`](Self::tear_down) frees the renderer's GPU objects. A
 /// renderer dropped without it leaves them to the `Gpu`, which frees them
-/// when it drops, and its custom layers' hosts hear that their graphics
+/// when it drops, and the hosts its layers draw through
+/// ([`LayerHost`](crate::layer::LayerHost)) hear that their graphics
 /// objects are lost.
 pub struct Renderer {
     orchestrator: RenderOrchestrator,
@@ -143,8 +143,12 @@ struct Encoder {
 }
 
 impl Renderer {
-    /// A renderer with a glyph cache of its own, which runs its background
-    /// work on `pool` and draws `local_glyphs` from the device's fonts.
+    /// A renderer with a glyph cache of its own, which draws the layer types
+    /// of `registry`, runs its background work on `pool` and draws
+    /// `local_glyphs` from the device's fonts.
+    ///
+    /// The map that the renderer draws must have a registry filled by the
+    /// same calls: a layer whose type `registry` lacks isn't drawn.
     ///
     /// `waker` runs, on any thread, when something the renderer waits for
     /// arrives, such as a tile's data or a font engine that got ready: the
@@ -154,36 +158,40 @@ impl Renderer {
     /// renderer.
     ///
     /// The renderer draws with `gpu` and only with it: every later call
-    /// that takes a `Gpu` takes this one.
-    pub fn new(gpu: &dyn Gpu, pixel_ratio: f32, local_glyphs: LocalGlyphs, waker: Waker, pool: &Pool) -> Self {
-        Self::with_glyph_cache(gpu, pixel_ratio, local_glyphs, Arc::default(), waker, pool)
+    /// that takes a `Gpu` takes this one. It adds `registry`'s shader sources
+    /// to `gpu` ([`Gpu::add_shader_sources`]).
+    pub fn new(
+        gpu: &mut dyn Gpu,
+        pixel_ratio: f32,
+        local_glyphs: LocalGlyphs,
+        registry: Arc<Registry>,
+        waker: Waker,
+        pool: &Pool,
+    ) -> Self {
+        Self::with_glyph_cache(gpu, pixel_ratio, local_glyphs, Arc::default(), registry, waker, pool)
     }
 
     /// A renderer that uses `glyph_cache`: renderers given the same
     /// `GlyphCache` share the glyphs they parse from glyph PBFs.
     pub fn with_glyph_cache(
-        gpu: &dyn Gpu,
+        gpu: &mut dyn Gpu,
         pixel_ratio: f32,
         local_glyphs: LocalGlyphs,
         glyph_cache: Arc<GlyphCache>,
+        registry: Arc<Registry>,
         waker: Waker,
         pool: &Pool,
     ) -> Self {
         let engine = crate::text::font_face_engine::default_engine();
-        let registry = Registry::with_builtins();
         Self::with_fonts(gpu, pixel_ratio, local_glyphs, glyph_cache, engine, registry, waker, pool)
     }
 
     /// A renderer that uses `glyph_cache`, loads the font files of a style's
     /// font faces with `font_face_engine` instead of
-    /// `font_face_engine::default_engine()`, and draws the layer types of
-    /// `registry` instead of the built-in ones.
-    ///
-    /// The map that the renderer draws must have a registry filled by the
-    /// same calls: a layer whose type `registry` lacks isn't drawn.
+    /// `font_face_engine::default_engine()`.
     #[expect(clippy::too_many_arguments, reason = "each argument is a part of the renderer that its host picks")]
     pub fn with_fonts(
-        gpu: &dyn Gpu,
+        gpu: &mut dyn Gpu,
         pixel_ratio: f32,
         local_glyphs: LocalGlyphs,
         glyph_cache: Arc<GlyphCache>,
@@ -192,6 +200,7 @@ impl Renderer {
         waker: Waker,
         pool: &Pool,
     ) -> Self {
+        gpu.add_shader_sources(registry.shader_sources());
         Renderer {
             orchestrator: RenderOrchestrator::new(
                 true,
@@ -278,8 +287,8 @@ impl Renderer {
     /// sources, tiles, layers and placement. Returns the frame to draw,
     /// which the host [renders](Self::render) into a frame of its target,
     /// or `None` when there is nothing to draw: a still image that hasn't
-    /// loaded yet. Custom layers that the update removed or gave a new host
-    /// end on `gpu`.
+    /// loaded yet. The hosts that layers the update removed or restyled let
+    /// go of end on `gpu`.
     pub fn update(&mut self, gpu: &mut dyn Gpu, update_parameters: &Arc<UpdateParameters>) -> Option<UpdatedFrame> {
         // The overdraw inspector takes shaders and color modes of its own.
         let overdraw = update_parameters.debug_options.contains(MapDebugOptions::OVERDRAW);
@@ -463,10 +472,11 @@ impl Renderer {
         self.orchestrator.tile_cache_enabled()
     }
 
-    /// Tells the hosts of the custom layers that the renderer's graphics
+    /// Tells the hosts that layers draw through
+    /// ([`LayerHost`](crate::layer::LayerHost)) that the renderer's graphics
     /// objects are lost, so that they forget theirs, and lets go of them.
     /// Call it before the renderer goes when its device or target went first.
-    pub fn lose_custom_layers(&mut self) {
+    pub fn lose_layer_hosts(&mut self) {
         self.orchestrator.visit_render_layers(|layer| layer.lose_context());
     }
 
@@ -492,8 +502,8 @@ impl Renderer {
     }
 
     /// Lets go of the map's data: its sources, tiles and layers, which the
-    /// next update loads again. The custom layers that go hear through
-    /// `gpu` that the renderer stopped.
+    /// next update loads again. The hosts of the layers that go hear
+    /// through `gpu` that the renderer stopped.
     pub fn clear_data(&mut self, gpu: &mut dyn Gpu) {
         self.orchestrator.clear_data();
         end_hosts(gpu, self.orchestrator.take_ended_hosts());
@@ -505,7 +515,7 @@ impl Renderer {
     pub fn tear_down(self, gpu: &mut dyn Gpu) -> RenderingStats {
         let Renderer { mut orchestrator, mut encoder, .. } = self;
         // The layers' GPU objects go to the context's queue, and their
-        // custom layers' hosts to the ended ones.
+        // hosts to the ended ones.
         orchestrator.leave_layers();
         let ended = orchestrator.take_ended_hosts();
         drop(orchestrator);
@@ -601,7 +611,7 @@ impl Encoder {
         // - DRAW UPLOAD ---------------------------------------------------
         orchestrator.upload_draws(gpu, parameters.context);
         let draw_groups = DrawGroups::of(orchestrator, &parameters);
-        let (proj_state, transform) = (parameters.view, parameters.transform_params);
+        let (proj_state, transform) = (parameters.frame.view, parameters.frame.transform);
         parameters.clip_masks.update(gpu, parameters.context, proj_state.is_globe(), &draw_groups.clip_tiles, |tile| {
             to_projection_ubo(&transform.projection_data_for_tile(tile, false))
         });
@@ -616,12 +626,15 @@ impl Encoder {
         let atlas_size = orchestrator.atlases().pattern.pixel_size();
         let global_paint_params_ubo = GlobalPaintParamsUBO {
             pattern_atlas_texsize: [atlas_size.width as f32, atlas_size.height as f32],
-            units_to_pixels: [1.0 / parameters.pixels_to_gl_units[0], 1.0 / parameters.pixels_to_gl_units[1]],
+            units_to_pixels: [
+                1.0 / parameters.frame.pixels_to_gl_units[0],
+                1.0 / parameters.frame.pixels_to_gl_units[1],
+            ],
             world_size: [renderable_size.width as f32, renderable_size.height as f32],
             camera_to_center_distance: state.camera_to_center_distance() as f32,
             symbol_fade_change: parameters.symbol_fade_change,
             aspect_ratio: state.size().aspect_ratio(),
-            pixel_ratio: parameters.pixel_ratio,
+            pixel_ratio: parameters.frame.pixel_ratio,
             map_zoom: state.zoom() as f32,
             pad1: 0.0,
         };
@@ -633,19 +646,15 @@ impl Encoder {
 
         // - DRAW ----------------------------------------------------------
         // The 3D layers draw into depth from 0 to the passes' depth range
-        // size, which the draw groups' count sets, and custom layers record
-        // their work with the projection that the frame's result reports.
+        // size, which the draw groups' count sets, and layers that draw
+        // through a host hand it the projection that the frame's result
+        // reports.
         let depth_range_size = 1.0
             - ((draw_groups.count + 2) * PaintParameters::NUM_SUBLAYERS as usize) as f32
                 * PaintParameters::DEPTH_EPSILON;
         let frame_projection =
             frame_projection::compute(&frame.transform, depth_range_size, parameters.context.caps().clip_depth);
-        parameters.custom_layer_frame = Some(CustomLayerFrame {
-            view: state.map_view(pixel_ratio),
-            projection: frame_projection,
-            width: renderable_size.width,
-            height: renderable_size.height,
-        });
+        parameters.frame_projection = Some(frame_projection);
         draw(orchestrator, gpu, &mut parameters, &frame, image, draw_groups.count, depth_range_size);
         let start_rendering = Instant::now();
         if let Err(error) = parameters.end_pass(gpu).and_then(|()| gpu.flush(false)) {
@@ -783,22 +792,12 @@ fn draw(
     num_draw_groups: usize,
     depth_range_size: f32,
 ) {
-    // Custom layers record their own work before the first pass.
+    // What the layers draw before the first pass, bottom to top, such as
+    // their render targets, which the passes sample, and what custom
+    // layers' hosts record.
     for &index in frame.layers.keys() {
-        orchestrator.layer_mut(index as usize).prerender(gpu, parameters);
+        orchestrator.layer_mut(index as usize).render_offscreen(gpu, parameters);
     }
-
-    // The 3D pass: the 3D layers draw bottom to top. No pass is open, so
-    // the draw groups draw nothing but into their own targets.
-    if frame.has_3d {
-        parameters.pass = RenderPass::Pass3D;
-        parameters.depth_range_size = depth_range_size;
-        parameters.current_layer = (num_draw_groups as u32).wrapping_sub(1);
-        orchestrator.render_draw_groups(gpu, parameters, DrawOrder::BottomUp);
-    }
-
-    // The layers' render targets, which the passes sample.
-    orchestrator.visit_render_layers(|layer| layer.render_targets(gpu, parameters));
 
     // The frame's pass, cleared to the backdrop, which shows where there are
     // no tiles.
@@ -827,7 +826,7 @@ fn draw(
 
     // The sky.
     if let Some(sky) = orchestrator.sky() {
-        parameters.pass = RenderPass::Translucent;
+        parameters.pass = RenderPass::TRANSLUCENT;
         parameters.depth_range_size = depth_range_size;
         parameters.current_layer = num_draw_groups as u32 + 1;
         sky.render(gpu, parameters);
@@ -835,7 +834,7 @@ fn draw(
 
     // The opaque pass: front to back with the depth buffer, except on the
     // globe, where 2D layers carry no depth and are painted bottom to top.
-    parameters.pass = RenderPass::Opaque;
+    parameters.pass = RenderPass::OPAQUE;
     parameters.depth_range_size = depth_range_size;
     if frame.transform.view.is_globe() {
         parameters.current_layer = (num_draw_groups as u32).wrapping_sub(1);
@@ -847,7 +846,7 @@ fn draw(
 
     // The translucent pass. The planet goes into the depth buffer first, so
     // 3D geometry behind the horizon stays hidden.
-    parameters.pass = RenderPass::Translucent;
+    parameters.pass = RenderPass::TRANSLUCENT;
     parameters.depth_range_size = depth_range_size;
     orchestrator.globe_depth().render(gpu, parameters);
     parameters.current_layer = (num_draw_groups as u32).wrapping_sub(1);
@@ -855,7 +854,7 @@ fn draw(
 
     // The atmosphere.
     if let Some(atmosphere) = orchestrator.atmosphere() {
-        parameters.pass = RenderPass::Translucent;
+        parameters.pass = RenderPass::TRANSLUCENT;
         parameters.depth_range_size = depth_range_size;
         parameters.current_layer = num_draw_groups as u32 + 1;
         atmosphere.render(gpu, parameters);

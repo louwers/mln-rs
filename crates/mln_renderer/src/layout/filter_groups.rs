@@ -74,7 +74,7 @@ struct Index {
 /// equality indexes, made on first use and shared by the filters over the
 /// same source layer that read the same keys or compare the same operand.
 #[derive(Default)]
-pub(crate) struct FilterGroups {
+pub struct FilterGroups {
     /// Per source layer and set of keys: its groups, or none when the layer
     /// gave none.
     sets: Vec<(String, Box<[String]>, Option<FeatureGroups>)>,
@@ -92,7 +92,7 @@ impl FilterGroups {
     /// once per group. `None` if the filter must evaluate each feature: it
     /// is neither, the layer has no groups, or a feature it evaluated was
     /// malformed.
-    pub(crate) fn select(
+    pub fn select(
         &mut self,
         name: &str,
         layer: &TileLayer<'_>,

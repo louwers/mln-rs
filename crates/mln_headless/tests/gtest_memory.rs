@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use mln_headless::HeadlessFrontend;
 use mln_map::{CameraOptions, Map, MapMode, MapOptions};
-use mln_renderer::Registry;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{Kind, Resource, Response};
 use mln_style::Edit;
@@ -62,9 +61,10 @@ impl MemoryTest {
     }
 
     fn map(&self, frontend: &mut HeadlessFrontend, ratio: f32) -> Map {
-        let mut map = Map::with_file_source(
+        let mut map = Map::new(
             Arc::<StubFileSource>::clone(&self.file_source),
             MapOptions { map_mode: MapMode::Static, size: frontend.size(), pixel_ratio: ratio, ..Default::default() },
+            crate::support::registry(),
             &self.pool,
         )
         .unwrap();
@@ -228,7 +228,7 @@ fn rendering_stats_count_live_resources() {
         "source-layer": "poi_label", "layout": {"text-field": "x", "text-allow-overlap": true}});
     let mut error = mln_style::conversion::Error::default();
     let labels = mln_style::conversion::layer::convert_layer(
-        Registry::with_builtins().style(),
+        mln_rs::builtin_registry().style(),
         &mln_style::conversion::Convertible::from(&labels),
         &mut error,
     );

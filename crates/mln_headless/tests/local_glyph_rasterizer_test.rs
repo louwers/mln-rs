@@ -91,9 +91,10 @@ impl LocalGlyphRasterizerTest {
         let mut frontend =
             HeadlessFrontend::new(Size::new(256, 256), 1.0, &run_loop, &pool).expect("a headless frontend");
         // `MapAdapter map{frontend, nullObserver, fileSource, MapOptions()...}`.
-        let mut map = Map::with_file_source(
+        let mut map = Map::new(
             file_source,
             MapOptions { map_mode: MapMode::Static, size: frontend.size(), ..Default::default() },
+            crate::support::registry(),
             &pool,
         )
         .unwrap();

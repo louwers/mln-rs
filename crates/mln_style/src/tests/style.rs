@@ -13,7 +13,7 @@ use super::util::{FixtureLog, new_layer, parse_json};
 use crate::edit::Edit;
 use crate::expression::Functions;
 use crate::layer_type::LayerStyle;
-use crate::layers::Line;
+use crate::layers::Symbol;
 use crate::projection::Projection;
 use crate::property_value::{PropertyValue, StyleValue as _};
 use crate::sky::Sky;
@@ -176,17 +176,17 @@ fn add_remove_remove_image() {
 fn layer_transition_refreshes_immutable_collection() {
     let mut style = stub_style();
     style.load_json(r#"{"version":8,"sources":{},"layers":[]}"#);
-    edit(&mut style, Edit::AddLayer { layer: new_layer("line", "line", "source"), before: None });
+    edit(&mut style, Edit::AddLayer { layer: new_layer("symbol", "symbol", "source"), before: None });
     let before = Arc::clone(style.get_layer_list());
 
     let transition = serde_json::json!({"duration": 123, "delay": 45});
-    set_layer_property(&mut style, "line", "line-color-transition", transition).unwrap();
+    set_layer_property(&mut style, "symbol", "text-color-transition", transition).unwrap();
     let after = Arc::clone(style.get_layer_list());
     assert!(!Arc::ptr_eq(&before, &after));
     assert_eq!(1, after.len());
-    let impl_ = LayerStyle::<Line>::recover_ref(&**after.first().unwrap().style()).unwrap();
-    assert_eq!(Some(Duration::from_millis(123)), impl_.paint.line_color.options.duration);
-    assert_eq!(Some(Duration::from_millis(45)), impl_.paint.line_color.options.delay);
+    let impl_ = LayerStyle::<Symbol>::recover_ref(&**after.first().unwrap().style()).unwrap();
+    assert_eq!(Some(Duration::from_millis(123)), impl_.paint.text_color.options.duration);
+    assert_eq!(Some(Duration::from_millis(45)), impl_.paint.text_color.options.delay);
 }
 
 // gtest: Style.ImageRemovalPublishesUpdates
@@ -246,33 +246,31 @@ fn transition_options_change_the_transition() {
 #[test]
 fn a_layer_edit_that_changes_nothing_keeps_the_layers() {
     let mut style = stub_style();
-    style.load_json(r#"{"version":8,"sources":{},"layers":[{"id":"bg","type":"background"}]}"#);
+    style.load_json(r#"{"version":8,"sources":{},"layers":[{"id":"bg","type":"plain"}]}"#);
 
     let before = Arc::clone(style.get_layer_list());
     let same = style.get_layer("bg").unwrap().clone();
     edit(&mut style, Edit::SetLayer(same));
     assert!(Arc::ptr_eq(&before, style.get_layer_list()));
 
-    set_layer_property(&mut style, "bg", "background-color", serde_json::json!("white")).unwrap();
+    set_layer_property(&mut style, "bg", "plain-color", serde_json::json!("white")).unwrap();
     assert!(!Arc::ptr_eq(&before, style.get_layer_list()));
 
-    let error = set_layer_property(&mut style, "absent", "background-color", serde_json::json!("white")).unwrap_err();
+    let error = set_layer_property(&mut style, "absent", "plain-color", serde_json::json!("white")).unwrap_err();
     assert_eq!(mln_util::ErrorKind::NotFound, error.kind);
 }
 
 #[test]
 fn layer_changes_leave_earlier_versions_unchanged() {
     let mut style = stub_style();
-    style.load_json(
-        r#"{"version":8,"sources":{},"layers":[{"id":"a","type":"background"},{"id":"b","type":"background"}]}"#,
-    );
+    style.load_json(r#"{"version":8,"sources":{},"layers":[{"id":"a","type":"plain"},{"id":"b","type":"plain"}]}"#);
     let ids = |layers: &crate::LayerList| layers.iter().map(|layer| layer.get_id().to_owned()).collect::<Vec<_>>();
     let loaded = style.clone();
     assert_eq!(["a", "b"], *ids(loaded.get_layer_list()));
 
-    edit(&mut style, Edit::AddLayer { layer: new_layer("line", "c", "source"), before: Some("b".to_owned()) });
+    edit(&mut style, Edit::AddLayer { layer: new_layer("symbol", "c", "source"), before: Some("b".to_owned()) });
     let error = style
-        .apply(Edit::AddLayer { layer: new_layer("line", "a", "source"), before: Some("b".to_owned()) })
+        .apply(Edit::AddLayer { layer: new_layer("symbol", "a", "source"), before: Some("b".to_owned()) })
         .unwrap_err();
     assert_eq!(mln_util::ErrorKind::AlreadyExists, error.kind);
     assert_eq!("Layer a already exists", error.message);
@@ -389,7 +387,7 @@ fn global_state_visibility() {
         "sources": {},
         "layers": [{
             "id": "background",
-            "type": "background",
+            "type": "plain",
             "layout": {
                 "visibility": ["case", ["to-boolean", ["global-state", "showBackground"]], "visible", "none"]
             }
@@ -429,7 +427,7 @@ fn visibility_expression_set_at_runtime() {
         "version": 8,
         "state": {"showBackground": {"default": false}},
         "sources": {},
-        "layers": [{"id": "background", "type": "background"}]
+        "layers": [{"id": "background", "type": "plain"}]
     }"#,
     );
 
@@ -458,13 +456,13 @@ fn layer_added_after_global_state_update_uses_current_state() {
     style.load_json(r#"{"version": 8, "sources": {}, "layers": []}"#);
     set_state(&mut style, "showLayer", Value::Bool(false));
 
-    let mut layer = new_layer("line", "line", "source");
+    let mut layer = new_layer("symbol", "symbol", "source");
     let json = parse_json(r#"["case", ["to-boolean", ["global-state", "showLayer"]], "visible", "none"]"#);
     assert!(layer.set_property("visibility", &Convertible::from(&json), None).is_none());
     assert_eq!(VisibilityType::Visible, layer.get_visibility());
 
     edit(&mut style, Edit::AddLayer { layer, before: None });
-    assert_eq!(VisibilityType::None, style.get_layer("line").unwrap().get_visibility());
+    assert_eq!(VisibilityType::None, style.get_layer("symbol").unwrap().get_visibility());
 }
 
 // gtest: Style.VisibilityExpressionRejectsOtherDependencies
@@ -476,7 +474,7 @@ fn visibility_expression_rejects_other_dependencies() {
         r#"{
         "version": 8,
         "sources": {},
-        "layers": [{"id": "background", "type": "background"}]
+        "layers": [{"id": "background", "type": "plain"}]
     }"#,
     );
 
@@ -599,7 +597,7 @@ fn sources_keep_the_order_they_were_added_in() {
 #[test]
 fn an_edit_replaces_only_the_part_it_changes() {
     let mut style = stub_style();
-    style.load_json(r#"{"version":8,"sources":{},"layers":[{"id":"bg","type":"background"}]}"#);
+    style.load_json(r#"{"version":8,"sources":{},"layers":[{"id":"bg","type":"plain"}]}"#);
     let mut case = |edit_to_make: Edit, parts: &[&str]| {
         let before = style.clone();
         edit(&mut style, edit_to_make);

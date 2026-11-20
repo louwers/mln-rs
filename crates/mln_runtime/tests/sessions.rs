@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::channel;
 
 use mln_map::{AnimationOptions, CameraOptions, CameraUpdate, CameraUpdateMode, MapEvent, MapMode, TileOperation};
+use mln_rs::mln_layers::Custom;
 use mln_runtime::{
     AttachOptions, DemandMode, Device, DeviceOptions, Driver, ErrorKind, EventMask, FrameDemand, FrameDisposition,
     FrameResult, LogicalExtent, Map, MapOptions, RenderSession, RenderSessionState, RenderTarget,
@@ -1666,8 +1667,8 @@ fn cluster_queries_read_a_clustered_source() {
 /// A custom layer whose drawing hits a bug.
 struct PanickingLayer;
 
-impl mln_style::layers::CustomLayerHost for PanickingLayer {
-    fn prerender(&self, _parameters: &mut mln_style::layers::CustomLayerPrerenderParameters<'_>) {
+impl mln_layers::CustomLayerHost for PanickingLayer {
+    fn prerender(&self, _parameters: &mut mln_layers::custom::CustomLayerPrerenderParameters<'_>) {
         panic!("a bug in the library");
     }
 }
@@ -1677,7 +1678,7 @@ fn a_panic_on_the_sessions_thread_fails_the_session() {
     let runtime = runtime();
     let map = red_map(&runtime);
     let session = attach(&map);
-    wait(map.add_custom_layer("panics", Arc::new(PanickingLayer), None));
+    wait(map.add_style_layer(Custom::layer(map.registry().style(), "panics", Arc::new(PanickingLayer)), None));
     demand(&session, DemandMode::Force, 1);
     let result = take_one(&session);
     assert_eq!((Some(1), FrameDisposition::Failed), (result.token, result.disposition));
@@ -1714,7 +1715,7 @@ fn a_runtime_that_a_panic_stopped_ends_the_work_of_its_sessions() {
 /// A custom layer whose teardown hits a bug.
 struct PanickingTeardown;
 
-impl mln_style::layers::CustomLayerHost for PanickingTeardown {
+impl mln_layers::CustomLayerHost for PanickingTeardown {
     fn deinitialize(&self) {
         panic!("a bug in the library");
     }
@@ -1725,7 +1726,7 @@ fn a_panic_in_a_detach_still_detaches_the_session() {
     let runtime = runtime();
     let map = red_map(&runtime);
     let session = attach(&map);
-    wait(map.add_custom_layer("panics", Arc::new(PanickingTeardown), None));
+    wait(map.add_style_layer(Custom::layer(map.registry().style(), "panics", Arc::new(PanickingTeardown)), None));
     demand(&session, DemandMode::Force, 1);
     assert_eq!(FrameDisposition::Rendered, take_one(&session).disposition);
     wait(session.detach());

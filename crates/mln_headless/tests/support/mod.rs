@@ -10,7 +10,7 @@
 // - test/include/mln/test/fixture_log_observer.hpp (`FixtureLog`, per
 //   thread: Rust runs tests on parallel threads of one process);
 // - the `MapTest` fixture of test/map/map.test.cpp (C++ `MapAdapter` is
-//   `Map::with_file_source`).
+//   `Map::new`).
 //
 // Fixtures are read from the copy of the C++ repository's files in
 // testdata/; paths are written as in C++, relative to the maplibre-native
@@ -676,7 +676,7 @@ impl<FS: FileSource + 'static> MapTest<FS> {
         let mut frontend =
             HeadlessFrontend::with_pixel_ratio(pixel_ratio, run_loop.queue(), &pool).expect("a headless frontend");
         let options = MapOptions { map_mode: mode, size: frontend.size(), pixel_ratio, ..Default::default() };
-        let mut map = Map::with_file_source(Arc::<FS>::clone(&file_source), options, &pool).unwrap();
+        let mut map = Map::new(Arc::<FS>::clone(&file_source), options, registry(), &pool).unwrap();
         frontend.attach(&mut map);
         let map = Rc::new(RefCell::new(map));
         let frontend = Rc::new(RefCell::new(frontend));
@@ -748,4 +748,10 @@ impl Drop for MapGuard<'_> {
         drop(self.map.take());
         self.observer.dispatch_events(self.cell);
     }
+}
+
+/// The built-in registrations that the tests' maps parse their styles
+/// against, as the frontend's renderer draws them.
+pub(crate) fn registry() -> Arc<mln_style::StyleRegistry> {
+    Arc::clone(mln_rs::builtin_registry().style())
 }

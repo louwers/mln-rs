@@ -5,12 +5,15 @@ mod algorithm;
 #[cfg(feature = "bench")]
 #[doc(hidden)]
 pub mod bench;
-pub mod bucket;
+mod bucket;
 mod bucket_geometry;
 mod bucket_parameters;
 mod buckets;
+pub mod builtins;
 mod clip_masks;
-mod draw;
+pub mod draw;
+mod draw_objects;
+mod erased_layer;
 mod frame;
 mod frame_projection;
 mod geometry;
@@ -19,9 +22,9 @@ mod globe_depth_pass;
 mod globe_tile_mesh;
 mod group_by_layout;
 mod image_store;
+pub mod layer;
 mod layer_composite;
 mod layer_drawing;
-mod layer_type;
 mod layers;
 mod layout;
 mod line_atlas;
@@ -52,19 +55,33 @@ mod tile_mask;
 mod tile_matrix;
 mod tile_parameters;
 mod tile_render_data;
+#[doc(hidden)]
+pub mod unstable;
 mod update_parameters;
 pub mod update_slot;
 pub mod util;
 
+pub use bucket::LayerFeatureStates;
 pub use frame_projection::{ClipDepthRange, FrameProjection};
-pub(crate) use paint_property_binder::paint_property_binders;
-pub use registry::{Registry, RegistryBuilder, register_builtins};
+pub use mln_style::expression::functions::RegisterError;
+pub use registry::{Registry, RegistryBuilder};
 pub use renderer::{DrawnFrame, RenderTimings, Renderer, UpdatedFrame};
 pub use renderer_event::{
     FontStack, GlyphRange, OverscaledTileID, RenderMode, RendererEvent, RendererEvents, RenderingStats, TileOperation,
 };
 pub use update_parameters::UpdateParameters;
 pub use update_slot::{Update, UpdateReader, UpdateSlot};
+
+/// The crates that the expansion of [`paint_property_binders!`] names, so
+/// that a crate that invokes it needn't depend on them.
+#[doc(hidden)]
+pub mod __private {
+    pub use mln_style;
+    pub use mln_style_types;
+    pub use mln_tile;
+    pub use mln_tile_id;
+    pub use mln_wire;
+}
 
 #[cfg(test)]
 mod tests;

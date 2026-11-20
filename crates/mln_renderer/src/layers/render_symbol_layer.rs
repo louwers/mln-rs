@@ -44,36 +44,33 @@ use mln_util::error::Error;
 use mln_util::hash::HashMap;
 use mln_util::identity::SimpleIdentity;
 
-use super::cast_matrix;
 use crate::bucket::Bucket;
 use crate::bucket_geometry::{BucketGeometry, bucket_vertices, copied_indexes, copied_vertices, paint_vertices};
 use crate::buckets::symbol_bucket::{
     Buffer, CollisionBoxDynamicVertex, CollisionBoxLayoutVertex, CollisionBuffer, PaintProperties, SymbolBucket,
     SymbolDynamicLayoutVertex, SymbolOpacityVertex,
 };
-use crate::draw::{DrawGeometry, DrawObjects, Textures, copy_shared_attributes};
+use crate::draw_objects::{DrawGeometry, DrawObjects, Textures, copy_shared_attributes};
 use crate::geometry::feature_index::FeatureIndex;
 use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
 use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::gfx::vertices::TypedVertices;
+use crate::layer::{DrawContext, EvaluatedLayer, LayerType, LayerValues, UpdateContext};
 use crate::layer_drawing::{
     BucketChanges, DrawDepth, DrawGroup, DrawList, DrawObjectsMut, DrawOrder, FrameDraw, KeptDraw, LayerDrawing,
     LayerDraws, TileMap, UniformWriter,
 };
-use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::layout::symbol_layout::SymbolLayout;
 use crate::layout::symbol_projection::{gl_coord_matrix, label_plane_matrix};
-use crate::paint_parameters::PaintParameters;
-use crate::render_layer::{
-    Atlases, BucketKey, BucketPlacementData, LayerBucket, LayerUpdateParameters, LayerValues, Parts, PartsMut,
-    PlacedTile, RenderLayer, RenderLayerBase, SymbolTranslate, TypedLayer,
-};
+use crate::paint_parameters::{DrawFrame, PaintParameters};
+use crate::render_layer::{BucketKey, BucketPlacementData, LayerBucket, PlacedTile, SymbolTranslate};
 use crate::render_pass::RenderPass;
 use crate::render_source::{RenderSource, TileOrder};
-use crate::render_tile::{FrameTile, RenderTile};
-use crate::tile_matrix::{projection_data, to_projection_ubo};
+#[cfg(feature = "bench")]
+use crate::render_tile::RenderTile;
+use crate::tile_matrix::{cast_matrix, projection_data, tile_unit_translation, to_projection_ubo};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SymbolType {
@@ -323,7 +320,7 @@ impl SymbolDraw {
 /// What the layer keeps of a tile: its draws, as they were built for the
 /// tile's bucket, and those of its collision boxes and circles.
 #[derive(Default)]
-pub(crate) struct SymbolTile {
+pub struct SymbolTile {
     draws: Vec<SymbolDraw>,
     collision: Vec<CollisionDraw>,
 }
@@ -333,7 +330,7 @@ pub(crate) struct SymbolTile {
 /// of the tiles' collision boxes and circles, from the first tile that has
 /// any, each of the collision draw at its index among its tile's.
 #[derive(Default)]
-pub(crate) struct SymbolDrawing {
+pub struct SymbolDrawing {
     tiles: TileMap<SymbolTile>,
     frame: Option<LayerDraws<usize>>,
     overlay: Option<LayerDraws<usize>>,
@@ -584,33 +581,8 @@ impl SegmentGroup {
     }
 }
 
-impl LayerType for Symbol {
-    type Layout = SymbolLayout;
-    type Bucket = SymbolBucket;
-    type TileBucket<'a> = LayerBucket<'a, Symbol>;
-
-    /// A symbol layout always waits for its glyphs and images.
-    fn layout_can_need_dependencies(_group: &[Arc<EvaluatedLayer<Symbol>>]) -> bool {
-        true
-    }
-
-    fn create_layout(
-        group: &[Arc<EvaluatedLayer<Symbol>>],
-        parameters: &mut LayoutParameters<'_>,
-        source_layer: SourceLayer,
-    ) -> Result<Option<SymbolLayout>, Error> {
-        SymbolLayout::new(parameters.bucket_parameters, group, source_layer, parameters).map(Some)
-    }
-
-    fn render_layer(style: Arc<LayerStyle<Symbol>>) -> Box<dyn RenderLayer> {
-        Box::new(RenderSymbolLayer::new(style))
-    }
-}
-
-pub(crate) struct RenderSymbolLayer {
-    base: RenderLayerBase,
-    values: LayerValues<Symbol>,
-    drawing: SymbolDrawing,
+/// What a symbol layer keeps besides its drawing.
+pub struct SymbolState {
     /// The frame's draws as the update makes them.
     draw_list: DrawList<SymbolUniforms, usize>,
     /// The overlay's draws as the update makes them.
@@ -625,9 +597,6 @@ pub(crate) struct RenderSymbolLayer {
     /// The layer's source, which its buckets' placement data shares.
     source_id: Arc<str>,
 
-    icon_size: f32,
-    text_size: f32,
-
     /// The passes the layer's draws were built for.
     draws_passes: RenderPass,
     /// The indexes of the buckets `HeldBuckets` holds for the layer.
@@ -636,7 +605,7 @@ pub(crate) struct RenderSymbolLayer {
 }
 
 #[cfg(feature = "bench")]
-impl Drop for RenderSymbolLayer {
+impl Drop for SymbolState {
     fn drop(&mut self) {
         for &index in &self.held {
             crate::render_layer::HeldBuckets::release(index);
@@ -644,34 +613,36 @@ impl Drop for RenderSymbolLayer {
     }
 }
 
-impl RenderSymbolLayer {
-    /// The translations of the layer's text and of its icons, as its
-    /// evaluated paint properties set them.
-    pub(crate) fn symbol_translates(&self) -> (SymbolTranslate, SymbolTranslate) {
-        let evaluated = &self.values.evaluated.paint;
-        let text_translate = SymbolTranslate {
-            offset: *evaluated.text_translate.uniform(),
-            anchor: *evaluated.text_translate_anchor.uniform(),
-        };
-        let icon_translate = SymbolTranslate {
-            offset: *evaluated.icon_translate.uniform(),
-            anchor: *evaluated.icon_translate_anchor.uniform(),
-        };
-        (text_translate, icon_translate)
-    }
+/// The translations of the text and of the icons of a layer with
+/// `layer`'s values.
+pub(crate) fn symbol_translates(layer: &EvaluatedLayer<Symbol>) -> (SymbolTranslate, SymbolTranslate) {
+    let evaluated = &layer.paint;
+    let text_translate = SymbolTranslate {
+        offset: *evaluated.text_translate.uniform(),
+        anchor: *evaluated.text_translate_anchor.uniform(),
+    };
+    let icon_translate = SymbolTranslate {
+        offset: *evaluated.icon_translate.uniform(),
+        anchor: *evaluated.icon_translate_anchor.uniform(),
+    };
+    (text_translate, icon_translate)
+}
 
-    /// Adds `bucket`, `key`'s, of `tile`, to what the layer places: when the
-    /// layer leads the bucket, to its placement data, with the tile's feature
-    /// index, in order of sort key; otherwise to its follower data.
+impl SymbolState {
+    /// Adds `bucket`, `key`'s, of `tile`, to what the layer of `style`
+    /// places: when the layer leads the bucket, to its placement data, with
+    /// the tile's feature index, in order of sort key; otherwise to its
+    /// follower data.
     pub(crate) fn add_bucket(
         &mut self,
+        style: &LayerStyle<Symbol>,
         tile: &PlacedTile,
         key: BucketKey,
         bucket: &SymbolBucket,
         feature_index: impl FnOnce() -> Option<Arc<FeatureIndex>>,
         (text_translate, icon_translate): (SymbolTranslate, SymbolTranslate),
     ) {
-        let source = &self.base.style.base().source;
+        let source = &style.source;
         if *self.source_id != **source {
             self.source_id = Arc::from(source.as_str());
         }
@@ -685,7 +656,7 @@ impl RenderSymbolLayer {
             text_translate,
             icon_translate,
         };
-        if *bucket.bucket_leader_id != *self.base.style.base().id {
+        if *bucket.bucket_leader_id != *style.id {
             let data = data(None, None);
             self.follower_data.push(data);
             return;
@@ -726,6 +697,7 @@ impl RenderSymbolLayer {
     #[cfg(feature = "bench")]
     pub(crate) fn add_placement_data(
         &mut self,
+        style: &LayerStyle<Symbol>,
         tiles: &[RenderTile],
         tile_index: usize,
         bucket: usize,
@@ -745,7 +717,7 @@ impl RenderSymbolLayer {
         };
         let held = HeldBuckets::take();
         if let Some(bucket) = held.get(&key) {
-            self.add_bucket(&PlacedTile::new(tile), key, bucket, feature_index, translates);
+            self.add_bucket(style, &PlacedTile::new(tile), key, bucket, feature_index, translates);
         }
         held.restore();
     }
@@ -756,54 +728,94 @@ impl RenderSymbolLayer {
         !self.placement_data.is_empty() || !self.follower_data.is_empty()
     }
 
-    pub(crate) fn new(impl_: Arc<LayerStyle<Symbol>>) -> Self {
-        let (base, values) = LayerValues::new(impl_);
-        RenderSymbolLayer {
-            base,
-            values,
-            drawing: SymbolDrawing::default(),
-            draw_list: DrawList::default(),
-            collision_list: DrawList::default(),
-            renderable_segments: Vec::new(),
-            placement_data: Vec::new(),
-            follower_data: Vec::new(),
-            source_id: Arc::from(""),
-            icon_size: 1.0,
-            text_size: 16.0,
-            draws_passes: RenderPass::None,
-            #[cfg(feature = "bench")]
-            held: Vec::new(),
-        }
-    }
-
-    /// Builds the tile's collision draws anew, and makes the overlay for the
-    /// first tile that has collision boxes or circles.
-    fn rebuild_collision(
+    /// Makes the frame's draws of `drawing`'s draws of the tiles of `cx` that
+    /// show any symbols, in the layer's passes, and of their collision boxes
+    /// and circles, and writes the buffers they read.
+    fn make_frame_draws(
         &mut self,
-        context: &mut Context,
-        tile_id: &OverscaledTileID,
-        bucket: &SymbolBucket,
-        evaluated: &SymbolPaintProperties::PossiblyEvaluated,
+        drawing: &mut SymbolDrawing,
+        gpu: &mut dyn Gpu,
+        cx: &mut DrawContext<'_, '_, Symbol>,
     ) {
-        let mut collision = Vec::new();
-        let mut has_collision = false;
-        for is_text in [false, true] {
-            has_collision |= self.add_collision_draws(context, &mut collision, bucket, evaluated, is_text);
-        }
-        if has_collision {
-            self.drawing.overlay.get_or_insert_default();
-            if let Some(entry) = self.drawing.tiles.entry(tile_id) {
-                entry.value.get_or_insert_with(SymbolTile::default).collision = collision;
+        let (layer, tiles, passes, frame) = (cx.layer, cx.tiles, cx.passes, &cx.frame);
+        let context = &mut *cx.context;
+        let layer_id = layer.id();
+        let layer = &*layer.evaluated;
+        for tile in tiles {
+            let tile_id = tile.id();
+            let Some(cached) = drawing.tiles.get_mut(&tile_id) else {
+                continue;
+            };
+            let bucket = tile.view().map(|bucket| bucket.bucket);
+            debug_assert!(bucket.is_some() || cached.draws.is_empty());
+            for (index, draw) in cached.draws.iter().enumerate().filter(|(_, draw)| draw.visible) {
+                let Some(uniforms) =
+                    bucket.and_then(|bucket| Self::uniforms(layer_id, layer, &tile_id, bucket, draw, context, frame))
+                else {
+                    continue;
+                };
+                let frame_draw = FrameDraw { pass: passes, ..FrameDraw::new(Some(tile_id), draw.id) };
+                self.draw_list.push_part(frame_draw, index, uniforms);
             }
-        } else if let Some(cached) = self.drawing.tiles.get_mut(tile_id) {
-            cached.collision.clear();
+            for (index, draw) in cached.collision.iter_mut().enumerate() {
+                write_collision_uniforms(gpu, context, draw, &tile_id, frame);
+                let frame_draw =
+                    FrameDraw { pass: passes, depth: DrawDepth::Off, ..FrameDraw::new(Some(tile_id), draw.draw.id) };
+                self.collision_list.push_part(frame_draw, index, ());
+            }
+        }
+
+        if let Some(draws) = &mut drawing.frame {
+            if self.draw_list.finish(draws, gpu, context, |writer| write_uniforms(&layer.paint, writer)) {
+                for draw in drawing.tiles.values_mut().flat_map(|tile| &mut tile.draws) {
+                    draw.objects.drop_bindings();
+                }
+            }
+        } else {
+            self.draw_list.clear();
+        }
+        // Each collision draw has its own GPU objects and buffers, so no two
+        // share an order, and the overlay's buffers are none.
+        if let Some(overlay) = &mut drawing.overlay {
+            let _ = self.collision_list.finish(overlay, gpu, context, |_| {});
+        } else {
+            self.collision_list.clear();
         }
     }
+}
 
+/// Builds the collision draws of the tile `tile_id` in `drawing` anew, in
+/// the projection `variant`, and makes the overlay for the first tile that
+/// has collision boxes or circles.
+fn rebuild_collision(
+    drawing: &mut SymbolDrawing,
+    variant: ProjectionVariant,
+    context: &mut Context,
+    tile_id: &OverscaledTileID,
+    bucket: &SymbolBucket,
+    evaluated: &SymbolPaintProperties::PossiblyEvaluated,
+) {
+    let mut collision = Vec::new();
+    let mut has_collision = false;
+    for is_text in [false, true] {
+        has_collision |= SymbolState::add_collision_draws(variant, context, &mut collision, bucket, evaluated, is_text);
+    }
+    if has_collision {
+        drawing.overlay.get_or_insert_default();
+        if let Some(entry) = drawing.tiles.entry(tile_id) {
+            entry.value.get_or_insert_with(SymbolTile::default).collision = collision;
+        }
+    } else if let Some(cached) = drawing.tiles.get_mut(tile_id) {
+        cached.collision.clear();
+    }
+}
+
+impl SymbolState {
     /// Adds the draws of the collision boxes and circles of the bucket's
-    /// text or icons to `collision`. Returns whether it has any.
+    /// text or icons to `collision`, in the projection `variant`. Returns
+    /// whether it has any.
     fn add_collision_draws(
-        &self,
+        variant: ProjectionVariant,
         context: &mut Context,
         collision: &mut Vec<CollisionDraw>,
         bucket: &SymbolBucket,
@@ -838,7 +850,7 @@ impl RenderSymbolLayer {
                 instances: None,
             };
             let objects = DrawObjects::new(
-                context.shader_key(program, Uniforms::default(), self.base.projection_variant),
+                context.shader_key(program, Uniforms::default(), variant),
                 ColorMode::alpha_blended(),
                 CullFaceMode::disabled(),
                 geometry,
@@ -875,9 +887,10 @@ impl RenderSymbolLayer {
         tile_id: &OverscaledTileID,
         bucket: &SymbolBucket,
         draw: &SymbolDraw,
-        parameters: &PaintParameters<'_>,
+        context: &Context,
+        frame: &DrawFrame<'_>,
     ) -> Option<SymbolUniforms> {
-        let state = parameters.view;
+        let state = frame.view;
         let evaluated = &layer.paint;
         let zoom = state.zoom() as f32;
         let paint_properties = bucket.paint_properties.get(layer_id)?;
@@ -900,7 +913,7 @@ impl RenderSymbolLayer {
             const IN_VIEWPORT_PIXEL_UNITS: bool = false;
             projection_data(
                 &tile_id,
-                parameters,
+                frame,
                 [0.0, 0.0],
                 *anchor.uniform(),
                 NEAR_CLIPPED,
@@ -915,7 +928,7 @@ impl RenderSymbolLayer {
         let tile_translation: [f32; 2] = if is_screen_space {
             [0.0, 0.0]
         } else {
-            RenderTile::tile_unit_translation(&tile_id, *translate.uniform(), *anchor.uniform(), state)
+            tile_unit_translation(&tile_id, *translate.uniform(), *anchor.uniform(), state)
         };
         projection.translate = glam::DVec2::ZERO;
         let matrix = projection.fallback_matrix;
@@ -969,8 +982,8 @@ impl RenderSymbolLayer {
                 matrix: cast_matrix(&matrix),
                 label_plane_matrix: cast_matrix(&label_plane_matrix),
                 coord_matrix: cast_matrix(&gl_coord_matrix),
-                texsize: texture_size(parameters.context, &draw.objects, ID_SYMBOL_IMAGE_TEXTURE),
-                texsize_icon: texture_size(parameters.context, &draw.objects, ID_SYMBOL_IMAGE_ICON_TEXTURE),
+                texsize: texture_size(context, &draw.objects, ID_SYMBOL_IMAGE_TEXTURE),
+                texsize_icon: texture_size(context, &draw.objects, ID_SYMBOL_IMAGE_ICON_TEXTURE),
                 is_text_prop: i32::from(is_text),
                 rotate_symbol: i32::from(rotate_in_shader),
                 pitch_with_map: i32::from(pitch_with_map),
@@ -999,63 +1012,6 @@ impl RenderSymbolLayer {
             },
             projection: to_projection_ubo(&projection),
         })
-    }
-
-    /// Makes the frame's draws of the layer's draws of `tiles` that show any
-    /// symbols, in `passes`, and of their collision boxes and circles, and
-    /// writes the buffers they read.
-    fn make_frame_draws(
-        &mut self,
-        gpu: &mut dyn Gpu,
-        tiles: &[FrameTile<'_, Symbol>],
-        passes: RenderPass,
-        paint_parameters: &mut PaintParameters<'_>,
-    ) {
-        let layer_id = self.base.style.base().id.as_str();
-        let layer = &*self.values.evaluated;
-        for tile in tiles {
-            let tile_id = tile.id();
-            let Some(cached) = self.drawing.tiles.get_mut(&tile_id) else {
-                continue;
-            };
-            let bucket = tile.bucket().map(|bucket| bucket.bucket);
-            debug_assert!(bucket.is_some() || cached.draws.is_empty());
-            for (index, draw) in cached.draws.iter().enumerate().filter(|(_, draw)| draw.visible) {
-                let Some(uniforms) =
-                    bucket.and_then(|bucket| Self::uniforms(layer_id, layer, &tile_id, bucket, draw, paint_parameters))
-                else {
-                    continue;
-                };
-                let frame_draw = FrameDraw { pass: passes, ..FrameDraw::new(Some(tile_id), draw.id) };
-                self.draw_list.push_part(frame_draw, index, uniforms);
-            }
-            for (index, draw) in cached.collision.iter_mut().enumerate() {
-                write_collision_uniforms(gpu, draw, &tile_id, paint_parameters);
-                let frame_draw =
-                    FrameDraw { pass: passes, depth: DrawDepth::Off, ..FrameDraw::new(Some(tile_id), draw.draw.id) };
-                self.collision_list.push_part(frame_draw, index, ());
-            }
-        }
-
-        if let Some(frame) = &mut self.drawing.frame {
-            if self
-                .draw_list
-                .finish(frame, gpu, paint_parameters.context, |writer| write_uniforms(&layer.paint, writer))
-            {
-                for draw in self.drawing.tiles.values_mut().flat_map(|tile| &mut tile.draws) {
-                    draw.objects.drop_bindings();
-                }
-            }
-        } else {
-            self.draw_list.clear();
-        }
-        // Each collision draw has its own GPU objects and buffers, so no two
-        // share an order, and the overlay's buffers are none.
-        if let Some(overlay) = &mut self.drawing.overlay {
-            let _ = self.collision_list.finish(overlay, gpu, paint_parameters.context, |_| {});
-        } else {
-            self.collision_list.clear();
-        }
     }
 }
 
@@ -1089,16 +1045,17 @@ fn write_uniforms(
 /// and the scale of its boxes' and circles' extrusions.
 fn write_collision_uniforms(
     gpu: &mut dyn Gpu,
+    context: &mut Context,
     draw: &mut CollisionDraw,
     tile_id: &OverscaledTileID,
-    parameters: &mut PaintParameters<'_>,
+    frame: &DrawFrame<'_>,
 ) {
     const NEAR_CLIPPED: bool = false;
     const IN_VIEWPORT_PIXEL_UNITS: bool = false;
     let unwrapped = tile_id.to_unwrapped();
     let projection = projection_data(
         &unwrapped,
-        parameters,
+        frame,
         draw.translate,
         draw.translate_anchor,
         NEAR_CLIPPED,
@@ -1107,18 +1064,15 @@ fn write_collision_uniforms(
         false,
     );
 
-    let zoom = parameters.view.zoom();
+    let zoom = frame.view.zoom();
     let pixel_ratio = unwrapped.pixels_to_tile_units(1.0, zoom as f32);
     let scale = 2f64.powf(zoom - f64::from(tile_id.overscaled_z)) as f32;
-    let extrude_scale = [
-        parameters.pixels_to_gl_units[0] / (pixel_ratio * scale),
-        parameters.pixels_to_gl_units[1] / (pixel_ratio * scale),
-    ];
+    let extrude_scale =
+        [frame.pixels_to_gl_units[0] / (pixel_ratio * scale), frame.pixels_to_gl_units[1] / (pixel_ratio * scale)];
     let draw_ubo = CollisionDrawableUBO { matrix: cast_matrix(&projection.fallback_matrix) };
     let tile_props_ubo =
         CollisionTilePropsUBO { extrude_scale, overscale_factor: tile_id.overscale_factor() as f32, pad1: 0.0 };
     let objects = &mut draw.draw.objects;
-    let context = &mut *parameters.context;
     objects.write_pod(gpu, ID_COLLISION_DRAWABLE_UBO, &draw_ubo, context);
     objects.write_pod(gpu, ID_COLLISION_TILE_PROPS_UBO, &tile_props_ubo, context);
     objects.write_pod(gpu, ID_COLLISION_PROJECTION_UBO, &to_projection_ubo(&projection), context);
@@ -1157,52 +1111,78 @@ fn collision_vertex_attributes(context: &mut Context, buffer: &CollisionBuffer) 
     attrs
 }
 
-impl TypedLayer for RenderSymbolLayer {
-    type Type = Symbol;
+impl LayerType for Symbol {
+    type Layout = SymbolLayout;
+    type Bucket = SymbolBucket;
+    type View<'a> = LayerBucket<'a, Symbol>;
     type Drawing = SymbolDrawing;
+    type State = SymbolState;
 
     /// Symbols draw the lower of two tiles' overlapping symbols over the
     /// higher's.
     const TILE_ORDER: TileOrder = TileOrder::ByY;
 
-    fn parts(&self) -> Parts<'_, Self> {
-        Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
+    const PLACES_SYMBOLS: bool = true;
+
+    /// A symbol layout always waits for its glyphs and images.
+    fn layout_can_need_dependencies(_group: &[Arc<EvaluatedLayer<Symbol>>]) -> bool {
+        true
     }
 
-    fn parts_mut(&mut self) -> PartsMut<'_, Self> {
-        PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
+    fn create_layout(
+        group: &[Arc<EvaluatedLayer<Symbol>>],
+        parameters: &mut LayoutParameters<'_>,
+        source_layer: SourceLayer,
+    ) -> Result<Option<SymbolLayout>, Error> {
+        SymbolLayout::new(parameters.bucket_parameters, group, source_layer, parameters).map(Some)
+    }
+
+    fn new_layer(_layer: &LayerValues<Symbol>) -> (SymbolState, SymbolDrawing) {
+        let state = SymbolState {
+            draw_list: DrawList::default(),
+            collision_list: DrawList::default(),
+            renderable_segments: Vec::new(),
+            placement_data: Vec::new(),
+            follower_data: Vec::new(),
+            source_id: Arc::from(""),
+            draws_passes: RenderPass::NONE,
+            #[cfg(feature = "bench")]
+            held: Vec::new(),
+        };
+        (state, SymbolDrawing::default())
     }
 
     /// The text of a `text-field` with format sections takes the values
     /// its sections override.
     fn complete_evaluation(
-        &mut self,
+        _state: &mut SymbolState,
+        layer: &LayerValues<Symbol>,
         parameters: &PropertyEvaluationParameters,
         evaluated: &mut EvaluatedLayer<Symbol>,
     ) {
-        if SymbolLayerPaintPropertyOverrides::has_overrides(&self.values.style.layout.text_field) {
+        if SymbolLayerPaintPropertyOverrides::has_overrides(&layer.style.layout.text_field) {
             mln_style::format_section_override::set_overrides(
-                &self.values.style.layout,
+                &layer.style.layout,
                 &mut evaluated.paint,
-                &self.values.unevaluated,
+                &layer.unevaluated,
                 &parameters.global_state,
             );
         }
     }
 
-    fn passes(&self, evaluated: &EvaluatedLayer<Symbol>) -> RenderPass {
+    fn passes(_layer: &LayerValues<Symbol>, evaluated: &EvaluatedLayer<Symbol>) -> RenderPass {
         let evaluated = &evaluated.paint;
         let has_icon_opacity = evaluated.icon_color.constant_or(&SymbolPaintProperties::Defaults::icon_color()).a > 0.0
             || evaluated.icon_halo_color.constant_or(&SymbolPaintProperties::Defaults::icon_halo_color()).a > 0.0;
         let has_text_opacity = evaluated.text_color.constant_or(&SymbolPaintProperties::Defaults::text_color()).a > 0.0
             || evaluated.text_halo_color.constant_or(&SymbolPaintProperties::Defaults::text_halo_color()).a > 0.0;
 
-        if (evaluated.icon_opacity.constant_or(&1.0) > 0.0 && has_icon_opacity && self.icon_size > 0.0)
-            || (evaluated.text_opacity.constant_or(&1.0) > 0.0 && has_text_opacity && self.text_size > 0.0)
+        if (evaluated.icon_opacity.constant_or(&1.0) > 0.0 && has_icon_opacity)
+            || (evaluated.text_opacity.constant_or(&1.0) > 0.0 && has_text_opacity)
         {
-            RenderPass::Translucent
+            RenderPass::TRANSLUCENT
         } else {
-            RenderPass::None
+            RenderPass::NONE
         }
     }
 
@@ -1210,12 +1190,11 @@ impl TypedLayer for RenderSymbolLayer {
     /// which it builds for a tile it keeps none of and refreshes where the
     /// tile's bucket changed, and the collision boxes and circles it draws
     /// over them, and writes the buffers they read.
-    fn update_draws(
-        &mut self,
+    fn make_draws(
+        state: &mut SymbolState,
+        drawing: &mut SymbolDrawing,
         gpu: &mut dyn Gpu,
-        paint_parameters: &mut PaintParameters<'_>,
-        _atlases: &Atlases,
-        render_tiles: &[FrameTile<'_, Symbol>],
+        cx: &mut DrawContext<'_, '_, Symbol>,
     ) {
         /// The atlases' textures given to one tile's draws.
         #[derive(Default)]
@@ -1224,14 +1203,15 @@ impl TypedLayer for RenderSymbolLayer {
             icon: Option<AtlasBinding>,
         }
 
-        let transform = paint_parameters.view;
-        let passes = self.base.passes;
-        if passes != self.draws_passes {
-            self.drawing.clear();
-            self.draws_passes = passes;
+        let render_tiles = cx.tiles;
+        let transform = cx.frame.view;
+        let passes = cx.passes;
+        if passes != state.draws_passes {
+            drawing.clear();
+            state.draws_passes = passes;
         }
 
-        let layout = &self.values.style.layout;
+        let layout = &cx.layer.style.layout;
         let sort_features_by_key = layout.symbol_sort_key.is_expression();
         let constant_sort_key = layout.symbol_sort_key.is_constant();
         // Screen-space symbols are drawn over the view, not projected onto
@@ -1242,21 +1222,21 @@ impl TypedLayer for RenderSymbolLayer {
             .copied()
             .unwrap_or_else(SymbolLayoutProperties::Defaults::symbol_screen_space);
         let symbol_projection_variant =
-            if is_screen_space { ProjectionVariant::Mercator } else { self.base.projection_variant };
+            if is_screen_space { ProjectionVariant::Mercator } else { cx.projection_variant };
         let is_offset = !layout.icon_offset.is_undefined();
 
         let current_zoom = transform.zoom() as f32;
 
-        let mut renderable_segments = std::mem::take(&mut self.renderable_segments);
+        let mut renderable_segments = std::mem::take(&mut state.renderable_segments);
         renderable_segments.clear();
 
         for (tile_index, tile) in render_tiles.iter().enumerate() {
             let tile_id = tile.id();
 
-            let Some(mut entry) = self.drawing.tiles.entry(&tile_id) else {
+            let Some(mut entry) = drawing.tiles.entry(&tile_id) else {
                 continue;
             };
-            let render_data = tile.bucket_for_pass(passes);
+            let render_data = tile.view_for_pass(passes);
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
                 *entry.value = None;
                 continue;
@@ -1280,11 +1260,11 @@ impl TypedLayer for RenderSymbolLayer {
             if let Some(cached) = entry.value.as_mut().filter(|cached| !cached.draws.is_empty()) {
                 // The draws that read the same attributes are next to each
                 // other, as the update builds them.
-                let (context, geometry) = (&mut *paint_parameters.context, render_data.geometry());
+                let (context, geometry) = (&mut *cx.context, render_data.geometry());
                 for draws in cached.draws.chunk_by_mut(|a, b| a.attributes_key() == b.attributes_key()) {
                     refresh_draws(context, draws, geometry, bucket, layer_id, evaluated, refresh);
                 }
-                self.rebuild_collision(paint_parameters.context, &tile_id, bucket, evaluated);
+                rebuild_collision(drawing, cx.projection_variant, cx.context, &tile_id, bucket, evaluated);
                 continue;
             }
 
@@ -1339,7 +1319,7 @@ impl TypedLayer for RenderSymbolLayer {
                 add_renderables(&state.text, SymbolType::Text);
             }
 
-            self.rebuild_collision(paint_parameters.context, &tile_id, bucket, evaluated);
+            rebuild_collision(drawing, cx.projection_variant, cx.context, &tile_id, bucket, evaluated);
         }
 
         // A stable sort keeps segments of the same order in the order they
@@ -1357,13 +1337,11 @@ impl TypedLayer for RenderSymbolLayer {
         // Renderables come across tiles, out of order, so the atlases' textures
         // given to a tile's draws are kept by tile.
         let mut tile_atlases: HashMap<UnwrappedTileID, TileAtlases> = HashMap::default();
-        let color_mode = paint_parameters.context.color_mode(
-            if (passes.underlying_type() & RenderPass::Translucent.underlying_type()) != 0 {
-                ColorMode::alpha_blended()
-            } else {
-                ColorMode::unblended()
-            },
-        );
+        let color_mode = cx.context.color_mode(if passes & RenderPass::TRANSLUCENT == RenderPass::NONE {
+            ColorMode::unblended()
+        } else {
+            ColorMode::alpha_blended()
+        });
 
         for group in &renderable_segments {
             let is_text = group.type_ == SymbolType::Text;
@@ -1373,7 +1351,7 @@ impl TypedLayer for RenderSymbolLayer {
                 continue;
             };
             let tile_id = tile.tile.id.overscale_to(group.overscaled_z);
-            let Some(render_data) = tile.bucket_for_pass(passes) else {
+            let Some(render_data) = tile.view_for_pass(passes) else {
                 continue;
             };
             let bucket = render_data.bucket;
@@ -1409,7 +1387,7 @@ impl TypedLayer for RenderSymbolLayer {
             let mut uniforms = Uniforms::default();
             let mut vertex_attribs = VertexAttributeArray::new();
             let placed = update_tile_attributes(
-                paint_parameters.context,
+                cx.context,
                 render_data.geometry(),
                 buffer,
                 layer_id,
@@ -1487,7 +1465,7 @@ impl TypedLayer for RenderSymbolLayer {
                     segments: segments.iter().map(SegmentBase::copy).collect(),
                     instances: None,
                 };
-                let shader = paint_parameters.context.shader_key(program, uniforms, symbol_projection_variant);
+                let shader = cx.context.shader_key(program, uniforms, symbol_projection_variant);
                 let textures = draw_atlases.textures(&shader);
                 let objects = DrawObjects::new(shader, color_mode, CullFaceMode::disabled(), geometry, textures);
 
@@ -1509,46 +1487,55 @@ impl TypedLayer for RenderSymbolLayer {
                     visible,
                     atlases: draw_atlases.clone(),
                 };
-                if let Some(entry) = self.drawing.tiles.entry(&tile_id) {
+                if let Some(entry) = drawing.tiles.entry(&tile_id) {
                     entry.value.get_or_insert_with(SymbolTile::default).draws.push(draw);
                 }
             }
         }
 
-        self.renderable_segments = renderable_segments;
-        self.make_frame_draws(gpu, render_tiles, passes, paint_parameters);
+        state.renderable_segments = renderable_segments;
+        state.make_frame_draws(drawing, gpu, cx);
     }
 
     /// Collects the symbol buckets of the tiles the layer places, and of
     /// those whose buckets another layer places and this one draws.
-    fn update(&mut self, params: &mut LayerUpdateParameters<'_>, tiles: &[FrameTile<'_, Symbol>]) {
-        self.placement_data.clear();
-        self.follower_data.clear();
-        let Some(source) = params.source.and_then(RenderSource::tiles) else {
+    fn update(state: &mut SymbolState, _drawing: &mut SymbolDrawing, cx: &mut UpdateContext<'_, '_, Symbol>) {
+        state.placement_data.clear();
+        state.follower_data.clear();
+        let Some(source) = cx.source.and_then(RenderSource::tiles) else {
             return;
         };
-        let translates = self.symbol_translates();
-        for tile in tiles {
-            let Some(bucket) = tile.bucket() else {
+        let translates = symbol_translates(&cx.layer.evaluated);
+        for tile in cx.tiles {
+            let Some(bucket) = tile.view() else {
                 continue;
             };
             let key = BucketKey { source, tile: tile.id(), slot: tile.tile.slot(), bucket: bucket.bucket_index };
             let feature_index = || Some(Arc::clone(bucket.feature_index()));
-            self.add_bucket(&PlacedTile::new(tile.tile), key, bucket.bucket, feature_index, translates);
+            state.add_bucket(
+                &cx.layer.style,
+                &PlacedTile::new(tile.tile),
+                key,
+                bucket.bucket,
+                feature_index,
+                translates,
+            );
         }
     }
 
-    fn release(&mut self) {
-        self.placement_data.clear();
-    }
-}
-
-impl RenderLayer for RenderSymbolLayer {
-    fn placement_data(&self) -> &[BucketPlacementData] {
-        &self.placement_data
+    fn release(state: &mut SymbolState) {
+        state.placement_data.clear();
     }
 
-    fn follower_data(&self) -> &[BucketPlacementData] {
-        &self.follower_data
+    fn max_content_elevation(bucket: &SymbolBucket) -> f32 {
+        bucket.max_height_offset
+    }
+
+    fn placement_data(state: &SymbolState) -> &[BucketPlacementData] {
+        &state.placement_data
+    }
+
+    fn follower_data(state: &SymbolState) -> &[BucketPlacementData] {
+        &state.follower_data
     }
 }

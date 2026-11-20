@@ -263,12 +263,13 @@ fn a_cache_file_that_cant_be_created_fails_the_runtime() {
     let dir = TempDir::new();
     let unwritable = dir.path("missing-directory").join("cache.db");
     let options = RuntimeOptions { cache_path: Some(unwritable.clone()), ..RuntimeOptions::default() };
-    let error = Runtime::new(&options).unwrap_err();
+    let error = mln_rs::start_runtime(&options).unwrap_err();
     assert_eq!(ErrorKind::InvalidArgument, error.kind);
     assert!(error.message.contains(unwritable.to_str().unwrap()), "{}", error.message);
 
     let writable = dir.path("cache.db");
-    let runtime = Runtime::new(&RuntimeOptions { cache_path: Some(writable.clone()), ..RuntimeOptions::default() });
+    let runtime =
+        mln_rs::start_runtime(&RuntimeOptions { cache_path: Some(writable.clone()), ..RuntimeOptions::default() });
     assert!(writable.exists());
     wait(runtime.unwrap().release());
 }
@@ -277,7 +278,8 @@ fn a_cache_file_that_cant_be_created_fails_the_runtime() {
 /// functions it registers.
 #[test]
 fn maps_parse_against_the_runtime_registry() {
-    use mln_runtime::registry::{RegistryBuilder, register_builtins};
+    use mln_rs::register_builtins;
+    use mln_runtime::registry::RegistryBuilder;
     use mln_style::expression::Type;
     use mln_style::expression::functions::{Eval, OverloadSpec, Params, Role};
 
@@ -292,8 +294,7 @@ fn maps_parse_against_the_runtime_registry() {
     };
     builder.functions_mut().add("seven", vec![seven]).unwrap();
     let registry = builder.build();
-    let custom =
-        crate::support::TestRuntime(Runtime::with_registry(&RuntimeOptions::default(), Arc::clone(&registry)).unwrap());
+    let custom = crate::support::TestRuntime(Runtime::new(&RuntimeOptions::default(), Arc::clone(&registry)).unwrap());
     assert!(Arc::ptr_eq(custom.registry(), &registry));
     let map = map(&custom);
     assert!(Arc::ptr_eq(map.registry(), &registry));

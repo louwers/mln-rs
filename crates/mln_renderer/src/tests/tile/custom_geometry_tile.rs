@@ -11,7 +11,6 @@ use geo_types::Point;
 use mln_style::custom_tile_loader::{CustomProvider, TileFunction};
 use mln_style::layer::Layer;
 use mln_style::layer_type::LayerStyle;
-use mln_style::layers::Circle;
 use mln_style::sources::custom_geometry_source::CustomGeometryProvider;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;
@@ -19,9 +18,10 @@ use parking_lot::Mutex;
 
 use super::RasterTileTest;
 use crate::Registry;
-use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
+use crate::erased_layer::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::query::SourceQueryOptions;
 use crate::tests::OneTile;
+use crate::tests::fixture_layer::Dot;
 use crate::tile::contents::Contents;
 use crate::tile::loading::DataOrigin;
 use crate::tile::store::StoreEvent;
@@ -176,9 +176,9 @@ fn invoke_tile_changed() {
     let loader = loader(&test.local_pool, None, None);
     let mut tiles = tiles(&test, &[root()], Arc::clone(&loader));
 
-    let layer = Layer::new(Registry::with_builtins().style(), "circle", "circle", "source").unwrap();
+    let layer = Layer::new(Registry::with_builtins().style(), "dot", "circle", "source").unwrap();
     let layer_properties: Arc<dyn ErasedEvaluatedLayer> =
-        Arc::new(EvaluatedLayer::<Circle>::new(LayerStyle::recover(layer.style()).unwrap()));
+        Arc::new(EvaluatedLayer::<Dot>::new(LayerStyle::recover(layer.style()).unwrap()));
 
     tiles.set_style(&crate::tests::style(std::slice::from_ref(&layer_properties)));
     assert!(tiles.tile().contents().is_none());

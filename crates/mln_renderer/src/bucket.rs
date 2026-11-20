@@ -1,34 +1,23 @@
-// A bucket is what a tile's layout makes of a layer's features for the
-// layer's draws: their vertices, indices and paint values. Workers build
-// buckets and send them to the render thread, which owns each one once, in
-// its tile's contents, and changes it only where it has the contents
-// mutably: feature state and symbol placement in a frame's update, the
-// upload that moves its geometry to the draws in the frame's encode. What
-// every bucket has is `BucketBase`; what each type does, the `Bucket` trait.
-
 use std::any::Any;
 
 use mln_style_types::image::ImagePositions;
 use mln_tile::TileLayer;
-use mln_tile_id::CanonicalTileID;
-use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature};
 use mln_util::identity::SimpleIdentity;
 use mln_wire::{Reader, Wire, Writer};
 
 use crate::bucket_geometry::GeometryUpload;
-use crate::layout::pattern_layout::PatternLayerMap;
-use crate::util::tessellator::Tessellator;
 
-pub(crate) type FeatureStates = mln_util::hash::HashMap<String, mln_style::expression::expression::FeatureState>;
+/// The state of each feature of a source layer, by the feature's id.
+pub type FeatureStates = mln_util::hash::HashMap<String, mln_style::expression::expression::FeatureState>;
 pub type LayerFeatureStates = mln_util::hash::HashMap<String, FeatureStates>;
 
-/// What every bucket has, whatever its type.
+/// What every bucket keeps for the engine: its identity, and whether its
+/// geometry is in its tile's draws as it is.
 ///
-/// The codec writes what a worker sets (`tile/worker_codec`); the upload flag
-/// and the id are the side's that has the bucket. A copy keeps the id: its
-/// draws are the same.
+/// The codec writes neither: a bucket read from a worker is new to the side
+/// that reads it. A copy keeps the identity: its draws are the same.
 #[derive(Clone, Debug, mln_wire::Wire)]
-pub(crate) struct BucketBase {
+pub struct BucketBase {
     #[wire(skip)]
     pub(crate) uploaded: bool,
     #[wire(skip, default = "SimpleIdentity::new")]
@@ -41,43 +30,40 @@ impl Default for BucketBase {
     }
 }
 
-/// What the frame's draws read of the buckets apart from their own
-/// geometry, which depends on the device.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct UploadNeeds {
-    /// Whether fill outlines draw as instanced quads, which read the fill
-    /// buckets' outline ends.
-    pub(crate) fill_outline_ends: bool,
-    /// Whether fill-extrusion walls draw as quads of their own, which their
-    /// buckets make of their vertices, rather than as instances of a static
-    /// quad.
-    pub(crate) wall_quads: bool,
-}
-
-pub(crate) trait Bucket: Any + Send + CloneBucket {
-    fn base(&self) -> &BucketBase;
-
-    /// Feature geometries are also used to populate the feature index.
-    /// Obtaining these is a costly operation, so we do it only once, and
-    /// pass-by-const-ref the geometries as a second parameter.
-    ///
-    /// A bucket that meshes lines or polygons keeps its scratch in
-    /// `tessellator`.
-    #[expect(clippy::too_many_arguments, reason = "the feature and what the layout lays it out with")]
-    fn add_feature(
-        &mut self,
-        _feature: &dyn GeometryTileFeature,
-        _geometries: &GeometryCollection,
-        _image_positions: &ImagePositions,
-        _patterns: &PatternLayerMap,
-        _index: usize,
-        _canonical: &CanonicalTileID,
-        _tessellator: &mut Tessellator,
-    ) {
+impl BucketBase {
+    /// The bucket's identity, which tells its draws' GPU objects apart.
+    #[must_use]
+    pub fn id(&self) -> SimpleIdentity {
+        self.bucket_id
     }
 
-    /// Re-evaluates the feature-state dependent attribute values of the
-    /// layer `layer_id`, and returns whether the bucket has any.
+    /// Records whether the bucket's geometry is in its tile's draws as it
+    /// is: true once [`Bucket::upload`] moved it there, false once the bucket
+    /// changed what its draws read, for the engine to upload it again.
+    pub fn set_uploaded(&mut self, uploaded: bool) {
+        self.uploaded = uploaded;
+    }
+}
+
+/// What the engine does with a bucket, whatever its type: the vertices,
+/// indices and paint values that a tile's layout made of a layer's features
+/// for the layer's draws.
+///
+/// Workers build buckets and send them, through the codec, to the render
+/// thread, which owns each one in its tile's contents: it rewrites a
+/// bucket's feature-state values ([`update`](Self::update)), moves its
+/// geometry into the stores that the tile's draws share
+/// ([`upload`](Self::upload)), and copies it for the tile's other world
+/// copies. What a type does besides is its own.
+pub trait Bucket: Any + Send + BucketValue {
+    /// What the engine keeps of every bucket: its identity and whether it
+    /// uploaded.
+    fn base(&self) -> &BucketBase;
+
+    /// Re-evaluates the feature-state dependent paint values of the layer
+    /// `layer_id` for `states`, and returns whether the bucket has any. A
+    /// bucket that rewrote some records that it needs an upload
+    /// ([`BucketBase::set_uploaded`]).
     fn update(
         &mut self,
         _states: &FeatureStates,
@@ -88,71 +74,73 @@ pub(crate) trait Bucket: Any + Send + CloneBucket {
         false
     }
 
-    /// How far above the ground the bucket's highest content is raised,
-    /// for a layer whose content elevation is an expression.
-    fn max_content_elevation(&self) -> f32 {
-        0.0
-    }
-
-    fn record_sdf_pattern(&mut self, _layer_id: &str, _sdf: bool) {}
-    fn is_sdf_pattern(&self, _layer_id: &str) -> bool {
-        false
-    }
-
     /// Readies the bucket for its tile's draws, once it has data and until
     /// it changes again: moves its vertices and indices into the context's
     /// stores through `geometry`, for the draws to share, all but the values
-    /// that feature state rewrites, which stay with the bucket. What else
-    /// the draws read, `needs` says.
-    fn upload(&mut self, geometry: &mut GeometryUpload<'_>, needs: UploadNeeds);
+    /// that feature state rewrites, which stay with the bucket, and records
+    /// that it did ([`BucketBase::set_uploaded`]).
+    fn upload(&mut self, geometry: &mut GeometryUpload<'_>);
 
+    /// Whether the bucket has anything to draw. A layout keeps no bucket
+    /// without.
     fn has_data(&self) -> bool;
+}
 
-    /// Writes the bucket for its layer type's
-    /// [`read_bucket`](crate::layer_type::ErasedLayerType::read_bucket).
-    /// A bucket that no layout makes fails `w`.
-    fn write_wire(&self, w: &mut Writer);
-
-    fn needs_upload(&self) -> bool {
+impl dyn Bucket {
+    /// Whether the bucket has data its tile's draws don't have yet.
+    pub fn needs_upload(&self) -> bool {
         !self.base().uploaded && self.has_data()
     }
 
-    fn id(&self) -> SimpleIdentity {
+    pub(crate) fn id(&self) -> SimpleIdentity {
         self.base().bucket_id
+    }
+
+    /// Downcasts to the bucket type `B`; `None` if it is another type.
+    #[cfg(test)]
+    pub(crate) fn downcast_ref<B: Bucket>(&self) -> Option<&B> {
+        let any: &dyn Any = self;
+        any.downcast_ref()
     }
 }
 
-/// A bucket's copy, for the tile in another world copy, which draws the
-/// same geometry: what the bucket moved to its tile's geometry, the copy
-/// finds in a copy of that.
-pub(crate) trait CloneBucket {
+/// What the engine does with a bucket as a value: copies it, for the tile
+/// in another world copy, which draws the same geometry, and writes it for
+/// its layer type's codec. Every bucket that is `Clone` and [`Wire`] has it.
+pub trait BucketValue {
+    /// The bucket's copy: what the bucket moved to its tile's geometry, the
+    /// copy finds in a copy of that.
     fn clone_bucket(&self) -> Box<dyn Bucket>;
+
+    /// Writes the bucket, which the layer type's codec reads as its
+    /// [`LayerType::Bucket`](crate::layer::LayerType::Bucket).
+    fn write_wire(&self, w: &mut Writer);
 }
 
-impl<B: Bucket + Clone> CloneBucket for B {
+impl<B: Bucket + Clone + Wire> BucketValue for B {
     fn clone_bucket(&self) -> Box<dyn Bucket> {
         Box::new(self.clone())
+    }
+
+    fn write_wire(&self, w: &mut Writer) {
+        self.write(w);
     }
 }
 
 /// The bucket of a layer type that doesn't lay out: there is no value.
 #[derive(Clone)]
-pub(crate) enum NoBucket {}
+pub enum NoBucket {}
 
 impl Bucket for NoBucket {
     fn base(&self) -> &BucketBase {
         match *self {}
     }
 
-    fn upload(&mut self, _geometry: &mut GeometryUpload<'_>, _needs: UploadNeeds) {
+    fn upload(&mut self, _geometry: &mut GeometryUpload<'_>) {
         match *self {}
     }
 
     fn has_data(&self) -> bool {
-        match *self {}
-    }
-
-    fn write_wire(&self, _w: &mut Writer) {
         match *self {}
     }
 }
@@ -164,15 +152,6 @@ impl Wire for NoBucket {
 
     fn read(r: &mut Reader<'_>) -> Option<Self> {
         r.fail("a bucket of a layer type that doesn't lay out")
-    }
-}
-
-#[cfg(test)]
-impl dyn Bucket {
-    /// Downcasts to the bucket type `B`; `None` if it is another type.
-    pub(crate) fn downcast_ref<B: Bucket>(&self) -> Option<&B> {
-        let any: &dyn Any = self;
-        any.downcast_ref()
     }
 }
 

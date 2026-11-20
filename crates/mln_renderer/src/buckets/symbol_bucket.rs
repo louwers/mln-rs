@@ -27,16 +27,16 @@ use mln_util::range::Range;
 use mln_util::serialization::payload::pod;
 use mln_vec_map::VecMap;
 
-use crate::bucket::{Bucket, BucketBase, FeatureStates, UploadNeeds};
+use crate::bucket::{Bucket, BucketBase, FeatureStates};
 use crate::bucket_geometry::{GeometryUpload, GeometryVec};
-use crate::layer_type::EvaluatedLayer;
+use crate::erased_layer::EvaluatedLayer;
 use crate::layout::symbol_instance::{SymbolInstance, SymbolInstancePools, WritingModes};
 use crate::paint_property_binder::PaintPropertyBinder;
 use crate::text::quads::SymbolQuad;
 use crate::util::pool::PoolRange;
 
 crate::paint_property_binders!(
-    pub struct SymbolIconBinders for SymbolPaintProperties::PossiblyEvaluated {
+    pub(crate) struct SymbolIconBinders for SymbolPaintProperties::PossiblyEvaluated {
         icon_opacity: PaintPropertyBinder<f32> => [ID_SYMBOL_OPACITY_ATTRIBUTE],
         icon_color: PaintPropertyBinder<Color> => [ID_SYMBOL_COLOR_ATTRIBUTE],
         icon_halo_color: PaintPropertyBinder<Color> => [ID_SYMBOL_HALO_COLOR_ATTRIBUTE],
@@ -46,7 +46,7 @@ crate::paint_property_binders!(
 );
 
 crate::paint_property_binders!(
-    pub struct SymbolTextBinders for SymbolPaintProperties::PossiblyEvaluated {
+    pub(crate) struct SymbolTextBinders for SymbolPaintProperties::PossiblyEvaluated {
         text_opacity: PaintPropertyBinder<f32> => [ID_SYMBOL_OPACITY_ATTRIBUTE],
         text_color: PaintPropertyBinder<Color> => [ID_SYMBOL_COLOR_ATTRIBUTE],
         text_halo_color: PaintPropertyBinder<Color> => [ID_SYMBOL_HALO_COLOR_ATTRIBUTE],
@@ -472,7 +472,7 @@ pub(crate) struct SymbolLayoutFlags {
 }
 
 #[derive(Clone, mln_wire::Wire)]
-pub(crate) struct SymbolBucket {
+pub struct SymbolBucket {
     pub(crate) base: BucketBase,
     pub(crate) layout: Arc<SymbolLayoutProperties::PossiblyEvaluated>,
     pub(crate) bucket_leader_id: Arc<str>,
@@ -749,11 +749,7 @@ impl Bucket for SymbolBucket {
         &self.base
     }
 
-    fn max_content_elevation(&self) -> f32 {
-        self.max_height_offset
-    }
-
-    fn upload(&mut self, geometry: &mut GeometryUpload<'_>, _needs: UploadNeeds) {
+    fn upload(&mut self, geometry: &mut GeometryUpload<'_>) {
         let state = &mut self.state;
         for buffer in [&mut state.text, &mut state.icon, &mut state.sdf_icon] {
             geometry.move_vertices(&mut buffer.attribute_data);
@@ -775,10 +771,6 @@ impl Bucket for SymbolBucket {
             || self.has_text_collision_box_data()
             || self.has_icon_collision_circle_data()
             || self.has_text_collision_circle_data()
-    }
-
-    fn write_wire(&self, w: &mut mln_wire::Writer) {
-        mln_wire::Wire::write(self, w);
     }
 
     fn update(

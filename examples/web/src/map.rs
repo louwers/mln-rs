@@ -166,7 +166,7 @@ impl WebMap {
             fetch_preloads: PRELOADS.with(|preloads| preloads.borrow().clone()),
             ..RuntimeOptions::default()
         };
-        let runtime = Runtime::with_registry(&options, crate::registry()).map_err(js_error)?;
+        let runtime = Runtime::new(&options, crate::registry()).map_err(js_error)?;
         let reports = Arc::new(Mutex::new(Reports::default()));
         let handler_reports = Arc::clone(&reports);
         sent(runtime.set_event_handler(move |events| handler_reports.lock().handle(events)));
@@ -558,7 +558,7 @@ impl WebMap {
         self.force = true;
     }
 
-    /// Starts `mln_gfx`'s conformance case of writes from JS arrays on a
+    /// Starts `mln_layers`' conformance case of writes from JS arrays on a
     /// `Gpu` of the map's backend made for the check, whose frame
     /// `take_gpu_check` checks. Only check/check.mjs asks for it.
     pub fn start_gpu_check(&self) {

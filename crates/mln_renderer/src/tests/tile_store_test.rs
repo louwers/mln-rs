@@ -20,13 +20,13 @@ use parking_lot::Mutex;
 use serde_json::json;
 
 use super::tile_jobs_test::{Manual, icons, layer, points};
-use crate::buckets::hillshade_bucket::HillshadeBucket;
+use crate::erased_layer::ErasedEvaluatedLayer;
 use crate::layer_drawing::ChangedBuckets;
-use crate::layer_type::ErasedEvaluatedLayer;
 use crate::query::SourceQueryOptions;
 use crate::tests::tile::{dem_png, png};
 use crate::tests::{OneTile, style, tile_store};
 use crate::tile::contents::Contents;
+use crate::tile::dem::DemContents;
 use crate::tile::inbox::{SourceData, TileEvent};
 use crate::tile::job::{DataInput, Job, Run, TileKey};
 use crate::tile::loading::{Ancestors, DataOrigin, Fetch, OriginLoad, VectorTileEncoding};
@@ -84,7 +84,7 @@ fn not_modified() -> Response {
 }
 
 fn water_layer(id: &str, color: &str) -> Arc<dyn ErasedEvaluatedLayer> {
-    layer(json!({"id": id, "type": "fill", "source-layer": "water", "paint": {"fill-color": color}}))
+    layer(json!({"id": id, "type": "dot", "source-layer": "water", "paint": {"dot-color": color}}))
 }
 
 /// Features with ids `ids`, at the middle of the tile.
@@ -354,7 +354,7 @@ fn eviction_and_revival_while_a_job_is_in_flight() {
     let manual = Manual::default();
     let mut tile = test.tile(Box::new(manual.clone()));
     let id = tile.id;
-    tile.set_style(&style(&[layer(json!({"id": "dots", "type": "circle"}))]));
+    tile.set_style(&style(&[layer(json!({"id": "dots", "type": "dot"}))]));
     tile.set_data(Some(features(&[1])));
     tile.update();
     let old = manual.take();
@@ -362,7 +362,7 @@ fn eviction_and_revival_while_a_job_is_in_flight() {
     tile.drop_tile();
     assert!(old.superseded.load(std::sync::atomic::Ordering::Relaxed), "a worker may skip it");
     tile.add(id);
-    tile.set_style(&style(&[layer(json!({"id": "dots", "type": "circle"}))]));
+    tile.set_style(&style(&[layer(json!({"id": "dots", "type": "dot"}))]));
     tile.set_data(Some(features(&[2])));
     tile.update();
     let new = manual.take();
@@ -427,7 +427,7 @@ fn queries_and_feature_state_read_the_shown_contents() {
     let test = Test::new();
     let manual = Manual::default();
     let mut tile = test.tile(Box::new(manual.clone()));
-    tile.set_style(&style(&[layer(json!({"id": "dots", "type": "circle"}))]));
+    tile.set_style(&style(&[layer(json!({"id": "dots", "type": "dot"}))]));
     tile.set_data(Some(features(&[1])));
     tile.update();
     manual.run();
@@ -476,12 +476,12 @@ fn source_data_racing_eviction() {
     let mut tile = test.tile(Box::new(InlineWorkers));
     let id = tile.id;
     let key = tile.key;
-    tile.set_style(&style(&[layer(json!({"id": "dots", "type": "circle"}))]));
+    tile.set_style(&style(&[layer(json!({"id": "dots", "type": "dot"}))]));
     // A load under way, as a GeoJSON source's `setData` starts.
     let old_load = start_geojson_load(&mut tile);
     tile.drop_tile();
     tile.add(id);
-    tile.set_style(&style(&[layer(json!({"id": "dots", "type": "circle"}))]));
+    tile.set_style(&style(&[layer(json!({"id": "dots", "type": "dot"}))]));
     let new_load = start_geojson_load(&mut tile);
 
     let inbox = tile.store.inbox().clone();
@@ -603,7 +603,7 @@ fn dem_backfill_as_dems_arrive() {
 }
 
 /// The DEMs of tiles `left` and `right`, neighbours in a row.
-fn dems<'a>(tiles: &'a OneTile, left: &OverscaledTileID, right: &OverscaledTileID) -> [&'a HillshadeBucket; 2] {
+fn dems<'a>(tiles: &'a OneTile, left: &OverscaledTileID, right: &OverscaledTileID) -> [&'a DemContents; 2] {
     [left, right].map(|id| match tiles.tile_at(id).contents() {
         Some(Contents::Dem(bucket)) => bucket,
         _ => panic!("a DEM"),
@@ -614,7 +614,7 @@ fn dems<'a>(tiles: &'a OneTile, left: &OverscaledTileID, right: &OverscaledTileI
 /// as its border.
 fn assert_borders_match(tiles: &OneTile, left: &OverscaledTileID, right: &OverscaledTileID) {
     let [left_dem, right_dem] = dems(tiles, left, right);
-    let (left_dem, right_dem) = (left_dem.dem_data(), right_dem.dem_data());
+    let (left_dem, right_dem) = (left_dem.dem(), right_dem.dem());
     for y in 0..16 {
         assert_eq!(left_dem.get(16, y), right_dem.get(0, y), "row {y} of the left tile's border");
         assert_eq!(right_dem.get(-1, y), left_dem.get(15, y), "row {y} of the right tile's border");
@@ -638,7 +638,7 @@ fn a_reloaded_dem_refills_both_borders() {
     assert_borders_match(&tiles, &left, &right);
     let edge = |tiles: &OneTile| -> Vec<i32> {
         let [_, right_dem] = dems(tiles, &left, &right);
-        (0..16).map(|y| right_dem.dem_data().get(0, y)).collect()
+        (0..16).map(|y| right_dem.dem().get(0, y)).collect()
     };
     let before = edge(&tiles);
 
@@ -675,7 +675,7 @@ fn data_from_the_inbox_starts_a_job_at_once() {
     let manual = Manual::default();
     let mut tile = test.tile(Box::new(manual.clone()));
     let (id, key) = (tile.id, tile.key);
-    tile.set_style(&style(&[layer(json!({"id": "dots", "type": "circle"}))]));
+    tile.set_style(&style(&[layer(json!({"id": "dots", "type": "dot"}))]));
     let load = start_geojson_load(&mut tile);
     let inbox = tile.store.inbox().clone();
     // From another thread, as a GeoJSON source's tiles cut on a pool answer.

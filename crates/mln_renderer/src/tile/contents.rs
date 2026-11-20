@@ -23,21 +23,21 @@ use mln_util::logging::{Event, Log};
 use mln_util::pool::TaskGroup;
 use mln_vec_map::{VecMap, VecSet};
 
-use crate::bucket::{Bucket, LayerFeatureStates, UploadNeeds};
+use crate::bucket::{Bucket, LayerFeatureStates};
 use crate::bucket_geometry::{BucketGeometry, GeometryUpload};
-use crate::buckets::hillshade_bucket::HillshadeBucket;
-use crate::buckets::raster_bucket::RasterBucket;
+use crate::erased_layer::ErasedEvaluatedLayer;
 use crate::geometry::feature_index::{FeatureIndex, FeatureSelection, QueryLayers, QueryRegion, QueryResults};
 use crate::gfx::context::Context;
 use crate::gfx::dynamic_texture_atlas::{AtlasLease, BinUse, DynamicTextureAtlas};
 use crate::layer_drawing::{BucketChanges, ChangedBuckets};
-use crate::layer_type::ErasedEvaluatedLayer;
 use crate::layout::tile_layout::{Dependencies, Resolved};
 use crate::query::{RenderedQueryOptions, SourceQueryOptions};
 use crate::render_layer::ErasedLayerBucket;
 use crate::render_orchestrator::drop_on_workers;
 use crate::source_state::SourceFeatureState;
 use crate::text::glyph_store::ShapeResults;
+use crate::tile::dem::DemContents;
+use crate::tile::raster::RasterContents;
 use crate::tile_mask::TileMask;
 use crate::tile_render_data::TileAtlasTextures;
 
@@ -414,18 +414,18 @@ impl GeometryContents {
 
     /// Whether a bucket is new or changed since its last upload.
     pub(crate) fn needs_upload(&self) -> bool {
-        self.result.layer_render_data.buckets().any(Bucket::needs_upload)
+        self.result.layer_render_data.buckets().any(<dyn Bucket>::needs_upload)
     }
 
     /// Readies the buckets that are new or changed since their last upload
     /// for the tile's draws ([`Bucket::upload`]), moving their geometry into
     /// `context`'s stores, where `copies`, the geometry of the tile's other
     /// world copies, hasn't some of it.
-    pub(crate) fn upload(&mut self, copies: &[&BucketGeometry], context: &mut Context, needs: UploadNeeds) {
+    pub(crate) fn upload(&mut self, copies: &[&BucketGeometry], context: &mut Context) {
         let mut upload = GeometryUpload::new(&mut self.bucket_geometry, copies, context);
         for bucket in self.result.layer_render_data.buckets_mut() {
             if bucket.needs_upload() {
-                bucket.upload(&mut upload, needs);
+                bucket.upload(&mut upload);
             }
         }
         self.bucket_geometry.shrink();
@@ -446,12 +446,12 @@ impl GeometryContents {
     pub(crate) fn query_padding(&self, layers: &QueryLayers<'_>) -> f32 {
         let mut query_padding: f32 = 0.0;
         for layer in layers.values() {
-            let Some(data) = self.result.layer_bucket(&*layer.base().style) else {
+            let Some(data) = self.result.layer_bucket(layer.style()) else {
                 continue;
             };
             if data.bucket.has_data() {
-                let evaluated = &layer.base().evaluated_properties;
-                query_padding = query_padding.max(evaluated.entry().query_radius(data.bucket, evaluated));
+                let evaluated = layer.evaluated();
+                query_padding = query_padding.max(evaluated.entry().query_radius(data.bucket, &evaluated));
             }
         }
         query_padding
@@ -542,9 +542,9 @@ impl GeometryContents {
 pub(crate) enum Contents {
     Geometry(GeometryContents),
     /// A raster tile's image.
-    Raster(RasterBucket),
+    Raster(RasterContents),
     /// A raster-dem tile's DEM.
-    Dem(HillshadeBucket),
+    Dem(DemContents),
     /// A raster tile without data: it draws nothing in its place.
     Empty,
 }
@@ -577,8 +577,8 @@ impl Contents {
     /// tiles its mask keeps rather than its whole extent.
     pub(crate) fn is_masked(&self) -> bool {
         match self {
-            Contents::Raster(bucket) => bucket.geometry().has_quads(),
-            Contents::Dem(bucket) => bucket.geometry().has_quads(),
+            Contents::Raster(raster) => raster.geometry().has_quads(),
+            Contents::Dem(dem) => dem.geometry().has_quads(),
             Contents::Geometry(_) | Contents::Empty => false,
         }
     }
@@ -587,16 +587,16 @@ impl Contents {
     /// the quads of its last mask, for a tile that stops drawing.
     pub(crate) fn unmask(&mut self) {
         match self {
-            Contents::Raster(bucket) => bucket.unmask(),
-            Contents::Dem(bucket) => bucket.unmask(),
+            Contents::Raster(raster) => raster.unmask(),
+            Contents::Dem(dem) => dem.unmask(),
             Contents::Geometry(_) | Contents::Empty => {}
         }
     }
 
     pub(crate) fn set_mask(&mut self, mask: TileMask) {
         match self {
-            Contents::Raster(bucket) => bucket.set_mask(mask),
-            Contents::Dem(bucket) => bucket.set_mask(mask),
+            Contents::Raster(raster) => raster.set_mask(mask),
+            Contents::Dem(dem) => dem.set_mask(mask),
             Contents::Geometry(_) | Contents::Empty => {}
         }
     }

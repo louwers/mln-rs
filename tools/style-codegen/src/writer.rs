@@ -103,8 +103,13 @@ pub(crate) fn layer_file_name(type_: &str) -> String {
     type_.replacen('-', "_", 1)
 }
 
-/// The `use` paths of the value types the properties mention.
-pub(crate) fn imports_for<'a>(properties: impl Iterator<Item = &'a Property>, with_color_ramp: bool) -> Vec<String> {
+/// The `use` paths of the value types the properties mention, where `style`
+/// is the style crate's path.
+pub(crate) fn imports_for<'a>(
+    style: &str,
+    properties: impl Iterator<Item = &'a Property>,
+    with_color_ramp: bool,
+) -> Vec<String> {
     let mut names = Vec::new();
     let mut color_ramp = false;
     for p in properties {
@@ -116,18 +121,18 @@ pub(crate) fn imports_for<'a>(properties: impl Iterator<Item = &'a Property>, wi
     }
     let mut paths = Vec::new();
     for name in names {
-        paths.push(type_path(&name));
+        paths.push(type_path(style, &name));
     }
     if color_ramp && with_color_ramp {
-        paths.push("crate::color_ramp_property_value::ColorRampPropertyValue".into());
+        paths.push(format!("{style}::color_ramp_property_value::ColorRampPropertyValue"));
     }
     paths
 }
 
-fn type_path(name: &str) -> String {
+fn type_path(style: &str, name: &str) -> String {
     match name {
         "Color" | "Padding" => format!("mln_util::{name}"),
-        "Image" | "Formatted" => format!("crate::expression::{name}"),
+        "Image" | "Formatted" => format!("{style}::expression::{name}"),
         _ => format!("mln_style_types::{name}"),
     }
 }

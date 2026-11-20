@@ -17,8 +17,6 @@
 //! `ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE`). Each backend maps them to its own
 //! slots, groups, descriptor sets or shader locations.
 
-#[cfg(feature = "gpu-conformance")]
-pub mod conformance;
 mod ids;
 pub mod validation;
 
@@ -39,6 +37,7 @@ use crate::cull_face_mode::CullFaceMode;
 use crate::depth_mode::DepthMode;
 use crate::gfx_types::{AttributeDataType, DrawModeType};
 use crate::shaders::program::Program;
+use crate::shaders::source::ShaderSources;
 use crate::stencil_mode::{StencilMode, Test};
 use crate::texture2d::SamplerState;
 use crate::types::{DepthFunctionType, DepthMaskType, StencilOpType};
@@ -273,8 +272,8 @@ pub struct VertexBufferLayout {
     pub attributes: Vec<VertexAttribute>,
 }
 
-/// A program and the defines it is compiled with, from the source the
-/// backend has registered for the program. Clones share the defines.
+/// A program and the defines it is compiled with, from the backend's source
+/// of the program. Clones share the defines.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ShaderKey {
     program: &'static Program,
@@ -586,6 +585,13 @@ pub trait Gpu {
 
     fn create_sampler(&mut self, state: &SamplerState) -> Result<SamplerId, GpuError>;
 
+    /// Adds the sources of `sources` in the backend's shading language to
+    /// the programs it compiles, in place of any it had for them. A
+    /// replacement applies to later compilations, not to shaders the backend
+    /// has already compiled. A backend has the engine's own programs' sources
+    /// itself
+    /// ([`programs`](crate::shaders::programs)).
+    fn add_shader_sources(&mut self, sources: &ShaderSources);
     /// Compiles the program of `key`. Fails with [`GpuError::Unsupported`]
     /// for a program the backend has no source for.
     fn create_shader(&mut self, key: &ShaderKey) -> Result<ShaderId, GpuError>;
@@ -699,10 +705,10 @@ mod tests {
 
     #[test]
     fn shader_keys_ignore_define_order_and_repeats() {
-        let key = |defines: &[&str]| ShaderKey::new(&programs::FILL, defines.iter().map(|&d| d.to_owned()));
+        let key = |defines: &[&str]| ShaderKey::new(&programs::SKY, defines.iter().map(|&d| d.to_owned()));
         assert_eq!(key(&["B", "A", "B"]), key(&["A", "B"]));
         assert_eq!(key(&["B", "A"]).defines(), ["A", "B"]);
-        assert_ne!(key(&["A"]), ShaderKey::new(&programs::LINE, ["A".to_owned()]));
+        assert_ne!(key(&["A"]), ShaderKey::new(&programs::ATMOSPHERE, ["A".to_owned()]));
         assert_eq!(key(&["B=2.0", "A"]).define_values().collect::<Vec<_>>(), [("A", ""), ("B", "2.0")]);
     }
 

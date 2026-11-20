@@ -37,7 +37,11 @@ use crate::gfx::uniform_buffer::UniformBufferArray;
 use crate::gfx::vertex_attribute::Uniforms;
 use crate::gfx::vertices::{SharedVertices, TypedVertices, VertexStore, Vertices};
 
-pub(crate) struct Context {
+/// The renderer's GPU state over its backend's `Gpu`: the device's caps,
+/// the keys of the programs' shaders, the color modes, and the stores of
+/// the textures, indexes and vertices that draws share. The renderer owns
+/// it and lends it to the frame's hooks.
+pub struct Context {
     device: Device,
     caps: Caps,
     global_uniform_buffers: UniformBufferArray,
@@ -75,8 +79,11 @@ pub(crate) struct Context {
 
 impl Context {
     /// The renderer's state over a `Gpu` of `caps`, for draws at
-    /// `pixel_ratio` device pixels per logical pixel.
-    pub(crate) fn new(caps: Caps, pixel_ratio: f32) -> Context {
+    /// `pixel_ratio` device pixels per logical pixel. Public for tests that
+    /// draw on a bare `Gpu`.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn new(caps: Caps, pixel_ratio: f32) -> Context {
         Context {
             device: Device::default(),
             caps,
@@ -103,7 +110,8 @@ impl Context {
     }
 
     /// What the backend's device allows, and how the renderer draws on it.
-    pub(crate) fn caps(&self) -> &Caps {
+    #[must_use]
+    pub fn caps(&self) -> &Caps {
         &self.caps
     }
 
@@ -187,7 +195,7 @@ impl Context {
 
     /// Keeps `indexes` for the draws that share them, while a clone of the
     /// returned handle lasts.
-    pub(crate) fn add_indexes(&mut self, indexes: Indexes) -> SharedIndexes {
+    pub fn add_indexes(&mut self, indexes: Indexes) -> SharedIndexes {
         self.indexes.add(indexes, &self.device.queue)
     }
 
@@ -204,7 +212,7 @@ impl Context {
 
     /// Keeps `vertices` for the draws that share them, while a clone of the
     /// returned handle lasts.
-    pub(crate) fn add_vertices<V: bytemuck::Pod>(&mut self, vertices: Vec<V>) -> SharedVertices {
+    pub fn add_vertices<V: bytemuck::Pod>(&mut self, vertices: Vec<V>) -> SharedVertices {
         self.vertices.add(vertices, &self.device.queue)
     }
 
@@ -227,7 +235,8 @@ impl Context {
     }
 
     /// The vertices of `shared`.
-    pub(crate) fn vertices(&self, shared: &SharedVertices) -> Option<&Vertices> {
+    #[must_use]
+    pub fn vertices(&self, shared: &SharedVertices) -> Option<&Vertices> {
         self.vertices.get(shared)
     }
 
@@ -246,8 +255,10 @@ impl Context {
 
     /// The buffer of the vertices of `shared`, made of them by their first
     /// upload and written over after an update, as [`Vertices::upload`]
-    /// says.
-    pub(crate) fn upload_vertices(
+    /// says. The engine uploads the vertices that draws bind; public for
+    /// tests.
+    #[doc(hidden)]
+    pub fn upload_vertices(
         &mut self,
         gpu: &mut dyn Gpu,
         shared: &SharedVertices,
@@ -255,28 +266,29 @@ impl Context {
         self.vertices.upload(gpu, &mut self.device, shared)
     }
 
-    /// A texture without a size, made by its first upload or
-    /// [`create_texture`](Self::create_texture), which the context keeps
-    /// while a clone of the returned handle lasts.
-    pub(crate) fn add_texture(&mut self) -> SharedTexture {
+    /// A texture without a size, made on the GPU by its first upload or the
+    /// first pass that draws into it, which the context keeps while a clone
+    /// of the returned handle lasts.
+    pub fn add_texture(&mut self) -> SharedTexture {
         self.add_texture_with(|_| {})
     }
 
     /// A texture that `setup` sets up, as [`add_texture`](Self::add_texture)
     /// makes it.
-    pub(crate) fn add_texture_with(&mut self, setup: impl FnOnce(&mut TextureMut<'_>)) -> SharedTexture {
+    pub fn add_texture_with(&mut self, setup: impl FnOnce(&mut TextureMut<'_>)) -> SharedTexture {
         let mut texture = Texture2D::new();
         setup(&mut TextureMut::new(&mut texture));
         self.textures.add(texture, &self.device.queue)
     }
 
     /// The texture of `handle`.
-    pub(crate) fn texture(&self, handle: &SharedTexture) -> Option<&Texture2D> {
+    #[must_use]
+    pub fn texture(&self, handle: &SharedTexture) -> Option<&Texture2D> {
         self.textures.get(handle)
     }
 
     /// The texture of `handle`, to set up.
-    pub(crate) fn texture_mut(&mut self, handle: &SharedTexture) -> Option<TextureMut<'_>> {
+    pub fn texture_mut(&mut self, handle: &SharedTexture) -> Option<TextureMut<'_>> {
         Some(TextureMut::new(self.textures.get_mut(handle)?))
     }
 
@@ -298,7 +310,7 @@ impl Context {
     /// to the whole texture of `handle`, first making it of that size. Empty
     /// `data` leaves the texels unspecified, and an empty size makes no
     /// texture.
-    pub(crate) fn upload_texture_data(
+    pub fn upload_texture_data(
         &mut self,
         gpu: &mut dyn Gpu,
         handle: &SharedTexture,
@@ -353,7 +365,7 @@ impl Context {
     /// The key of the variant of `program` that reads its properties of
     /// `uniforms` from their uniforms, for `projection`, at the context's
     /// pixel ratio.
-    pub(crate) fn shader_key(
+    pub fn shader_key(
         &mut self,
         program: &'static Program,
         uniforms: Uniforms,
@@ -385,7 +397,8 @@ impl Context {
 
     /// The color mode of a draw into the frame that blends with `mode`: the
     /// overdraw inspector's when it's on.
-    pub(crate) fn color_mode(&self, mode: ColorMode) -> ColorMode {
+    #[must_use]
+    pub fn color_mode(&self, mode: ColorMode) -> ColorMode {
         if self.overdraw { ColorMode::overdraw() } else { mode }
     }
 
@@ -507,9 +520,11 @@ impl Context {
     }
 
     /// Destroys what the context made and what the renderer released, and
-    /// tells the custom layers' hosts that it stopped. What drops later
-    /// still goes to the queue, and goes with the `Gpu`.
-    pub(crate) fn tear_down(&mut self, gpu: &mut dyn Gpu) {
+    /// tells the layers' hosts that it stopped. What drops later
+    /// still goes to the queue, and goes with the `Gpu`. Public for tests
+    /// that draw on a bare `Gpu`.
+    #[doc(hidden)]
+    pub fn tear_down(&mut self, gpu: &mut dyn Gpu) {
         self.global_uniform_buffers = UniformBufferArray::new();
         self.default_vertex_buffers.clear();
         self.textures.clear();

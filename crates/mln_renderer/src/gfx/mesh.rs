@@ -8,7 +8,7 @@ use mln_gfx::shaders::segment::{MAX_SEGMENT_VERTICES, SegmentBase};
 /// each of `points`, and indexes their triangles. `vertex` makes each
 /// corner from the point doubled, with the corner's right and top sides in
 /// the low bits.
-pub(crate) fn add_point_quads<V: Copy>(
+pub fn add_point_quads<V: Copy>(
     vertices: &mut Vec<V>,
     triangles: &mut Indexed<'_>,
     points: impl IntoIterator<Item = Point<i16>>,
@@ -27,9 +27,9 @@ pub(crate) fn add_point_quads<V: Copy>(
 ///
 /// Where a vertex buffer has per-vertex buffers beside it, a mesh larger
 /// than a segment, whose split copies vertices, must extend them after.
-pub(crate) struct Indexed<'a> {
-    pub(crate) indexes: &'a mut Vec<u16>,
-    pub(crate) segments: &'a mut Vec<SegmentBase>,
+pub struct Indexed<'a> {
+    pub indexes: &'a mut Vec<u16>,
+    pub segments: &'a mut Vec<SegmentBase>,
 }
 
 impl Indexed<'_> {
@@ -45,7 +45,7 @@ impl Indexed<'_> {
     /// and each later one draws copies, appended to `vertices`, of the
     /// vertices its primitives use. A mesh without primitives adds no
     /// segment.
-    pub(crate) fn add<V: Copy, const N: usize>(
+    pub fn add<V: Copy, const N: usize>(
         &mut self,
         vertices: &mut Vec<V>,
         first: usize,

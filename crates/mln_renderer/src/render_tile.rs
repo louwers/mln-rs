@@ -6,19 +6,19 @@
 // by the tile's slot and id (`FrameTile`); the store changes them only in
 // the frame's update, before the layers read them.
 
-use glam::{DMat4, Vec2};
-use mln_map_types::{MapDebugOptions, ProjectionData, View};
-use mln_style_types::TranslateAnchorType;
+use glam::DMat4;
+use mln_map_types::{MapDebugOptions, ProjectionData};
+use mln_style::layer_type::SourceKind;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 
 use crate::buckets::debug_bucket::DebugBucket;
-use crate::buckets::hillshade_bucket::HillshadeBucket;
-use crate::buckets::raster_bucket::RasterBucket;
-use crate::layer_type::LayerType;
+use crate::layer::LayerType;
 use crate::paint_parameters::TransformParameters;
 use crate::render_pass::RenderPass;
 use crate::render_source::RenderTileParameters;
 use crate::tile::contents::Contents;
+use crate::tile::dem::DemContents;
+use crate::tile::raster::RasterContents;
 use crate::tile::tile::Tile;
 
 pub(crate) struct RenderTile {
@@ -59,22 +59,6 @@ impl RenderTile {
             needs_rendering: false,
             debug_bucket: None,
         }
-    }
-
-    /// The layer's translation in tile units, rotated for its anchor.
-    pub(crate) fn tile_unit_translation(
-        id: &UnwrappedTileID,
-        translation: [f32; 2],
-        anchor: TranslateAnchorType,
-        state: &View,
-    ) -> [f32; 2] {
-        if translation[0] == 0.0 && translation[1] == 0.0 {
-            return [0.0, 0.0];
-        }
-        let angle = if anchor == TranslateAnchorType::Viewport { (-state.angle()) as f32 } else { 0.0f32 };
-        let translate = Vec2::from_angle(angle).rotate(Vec2::new(translation[0], translation[1]));
-        let zoom = state.zoom() as f32;
-        [id.pixels_to_tile_units(translate.x, zoom), id.pixels_to_tile_units(translate.y, zoom)]
     }
 
     #[must_use]
@@ -139,68 +123,118 @@ impl RenderTile {
     }
 }
 
-/// Where a tile's contents keep what they show a layer. The frame's found
+/// What a frame's tile holds, which a layer's [`TileView`] reads.
+#[derive(Clone, Copy)]
+pub(crate) enum TileContent<'a> {
+    /// The tile's contents in the tile store.
+    Tile(&'a Contents),
+    /// The image of an image source, which each of the source's tiles
+    /// shows.
+    Image(&'a RasterContents),
+}
+
+/// Where a tile's content keeps what it shows a layer. The frame's found
 /// tiles keep it for layers of every type in one list, so a place of one
-/// type's views can reach another's [`TileView::at`], which asserts that it
+/// type's views can reach another's [`FindView::at`], which asserts that it
 /// doesn't.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ViewPlace {
     /// The layer's place among the layers of the tile's layout.
     Laid(usize),
-    /// The tile's own bucket, a raster or raster-dem tile's, which every
-    /// layer of its source draws.
+    /// The tile's own data, a raster or raster-dem tile's contents or an
+    /// image source's image, which every layer of its source draws.
     Own,
 }
 
 /// What a frame's tile shows a layer of some type: its bucket in the tile's
-/// layout, or a raster or raster-dem tile's own bucket. A frame finds it by
-/// the layer's id once ([`find`](Self::find)), in its update, and its encode
-/// takes it again from where it was found ([`at`](Self::at)).
-pub(crate) trait TileView<'a>: Copy {
-    /// What `contents` show the layer `layer_id`, if anything, and where it
-    /// is in them.
-    fn find(contents: &'a Contents, layer_id: &str) -> Option<(Self, ViewPlace)>;
+/// layout ([`LayerBucket`](crate::layer::LayerBucket)), a raster tile's
+/// image or an image source's image ([`RasterView`]), a raster-dem tile's
+/// DEM (`&`[`DemContents`]), or nothing for a type without a source
+/// ([`NoTileView`]).
+/// The engine's kinds of tiles are the only ones, so these are the only
+/// views: a layer type takes the one of its source's kind.
+#[expect(private_bounds, reason = "the engine's views are the only ones: `FindView` seals the trait")]
+pub trait TileView<'a>: Copy + FindView<'a> {}
 
-    /// What `contents` show at `place`, where [`find`](Self::find) found
-    /// what they show a layer in the same contents.
-    fn at(contents: &'a Contents, place: ViewPlace) -> Option<Self>;
+impl<'a, V: Copy + FindView<'a>> TileView<'a> for V {}
+
+/// How the engine finds a layer's [`TileView`] in a frame's tile. A frame
+/// finds it by the layer's id once ([`find`](Self::find)), in its update,
+/// and its encode takes it again from where it was found ([`at`](Self::at)).
+pub(crate) trait FindView<'a>: Sized {
+    /// The kind of source whose tiles show the view.
+    const SOURCE: SourceKind;
+
+    /// What `content` shows the layer `layer_id`, if anything, and where it
+    /// is in it.
+    fn find(content: TileContent<'a>, layer_id: &str) -> Option<(Self, ViewPlace)>;
+
+    /// What `content` shows at `place`, where [`find`](Self::find) found
+    /// what it shows a layer in the same content.
+    fn at(content: TileContent<'a>, place: ViewPlace) -> Option<Self>;
 
     /// Whether this is what a tile shows the layer `layer_id`, rather than
     /// another layer.
-    fn is_for(self, _layer_id: &str) -> bool {
+    fn is_for(&self, _layer_id: &str) -> bool {
         true
     }
 
     /// The passes the bucket was laid out to draw in, which its layer draws
     /// in too; none for a bucket that isn't laid out.
     fn passes(self) -> RenderPass {
-        RenderPass::None
+        RenderPass::NONE
     }
 }
 
-impl<'a> TileView<'a> for &'a RasterBucket {
-    fn find(contents: &'a Contents, _layer_id: &str) -> Option<(Self, ViewPlace)> {
-        Some((Self::at(contents, ViewPlace::Own)?, ViewPlace::Own))
-    }
+/// What a frame's tile shows a layer of a raster source or an image source:
+/// a raster tile's image, or the image source's image, which each of its
+/// tiles shows.
+#[derive(Clone, Copy)]
+pub enum RasterView<'a> {
+    /// A raster tile's image.
+    Tile(&'a RasterContents),
+    /// An image source's image, drawn in the tile.
+    Image(&'a RasterContents),
+}
 
-    fn at(contents: &'a Contents, place: ViewPlace) -> Option<Self> {
-        debug_assert_eq!(place, ViewPlace::Own, "a laid-out layer's place for a tile's own bucket");
-        match contents {
-            Contents::Raster(bucket) => Some(bucket),
-            _ => None,
+impl<'a> RasterView<'a> {
+    /// The image and the geometry that draws it.
+    #[must_use]
+    pub fn contents(self) -> &'a RasterContents {
+        match self {
+            RasterView::Tile(contents) | RasterView::Image(contents) => contents,
         }
     }
 }
 
-impl<'a> TileView<'a> for &'a HillshadeBucket {
-    fn find(contents: &'a Contents, _layer_id: &str) -> Option<(Self, ViewPlace)> {
-        Some((Self::at(contents, ViewPlace::Own)?, ViewPlace::Own))
+impl<'a> FindView<'a> for RasterView<'a> {
+    const SOURCE: SourceKind = SourceKind::Raster;
+
+    fn find(content: TileContent<'a>, _layer_id: &str) -> Option<(Self, ViewPlace)> {
+        Some((Self::at(content, ViewPlace::Own)?, ViewPlace::Own))
     }
 
-    fn at(contents: &'a Contents, place: ViewPlace) -> Option<Self> {
-        debug_assert_eq!(place, ViewPlace::Own, "a laid-out layer's place for a tile's own bucket");
-        match contents {
-            Contents::Dem(bucket) => Some(bucket),
+    fn at(content: TileContent<'a>, place: ViewPlace) -> Option<Self> {
+        debug_assert_eq!(place, ViewPlace::Own, "a laid-out layer's place for a tile's own data");
+        match content {
+            TileContent::Tile(Contents::Raster(contents)) => Some(RasterView::Tile(contents)),
+            TileContent::Image(contents) => Some(RasterView::Image(contents)),
+            TileContent::Tile(_) => None,
+        }
+    }
+}
+
+impl<'a> FindView<'a> for &'a DemContents {
+    const SOURCE: SourceKind = SourceKind::RasterDem;
+
+    fn find(content: TileContent<'a>, _layer_id: &str) -> Option<(Self, ViewPlace)> {
+        Some((Self::at(content, ViewPlace::Own)?, ViewPlace::Own))
+    }
+
+    fn at(content: TileContent<'a>, place: ViewPlace) -> Option<Self> {
+        debug_assert_eq!(place, ViewPlace::Own, "a laid-out layer's place for a tile's own data");
+        match content {
+            TileContent::Tile(Contents::Dem(contents)) => Some(contents),
             _ => None,
         }
     }
@@ -208,21 +242,23 @@ impl<'a> TileView<'a> for &'a HillshadeBucket {
 
 /// What a tile shows a layer of a type without a source: nothing.
 #[derive(Clone, Copy)]
-pub(crate) enum NoTileBucket {}
+pub enum NoTileView {}
 
-impl TileView<'_> for NoTileBucket {
-    fn find(_contents: &Contents, _layer_id: &str) -> Option<(Self, ViewPlace)> {
+impl FindView<'_> for NoTileView {
+    const SOURCE: SourceKind = SourceKind::None;
+
+    fn find(_content: TileContent<'_>, _layer_id: &str) -> Option<(Self, ViewPlace)> {
         None
     }
 
-    fn at(_contents: &Contents, _place: ViewPlace) -> Option<Self> {
+    fn at(_content: TileContent<'_>, _place: ViewPlace) -> Option<Self> {
         None
     }
 }
 
 /// A layer's tile of a frame, as the frame's update found it: its index
 /// among its source's render tiles, and where what it shows the layer is in
-/// its contents ([`TileView::find`]).
+/// its contents ([`FindView::find`]).
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct FoundTile {
     pub(crate) tile: usize,
@@ -230,9 +266,9 @@ pub(crate) struct FoundTile {
 }
 
 /// A render tile of a frame, with what it shows a layer of the type `T`.
-pub(crate) struct FrameTile<'a, T: LayerType> {
+pub struct FrameTile<'a, T: LayerType> {
     pub(crate) tile: &'a RenderTile,
-    bucket: Option<T::TileBucket<'a>>,
+    view: Option<T::View<'a>>,
 }
 
 impl<T: LayerType> Clone for FrameTile<'_, T> {
@@ -244,47 +280,55 @@ impl<T: LayerType> Clone for FrameTile<'_, T> {
 impl<T: LayerType> Copy for FrameTile<'_, T> {}
 
 impl<'a, T: LayerType> FrameTile<'a, T> {
-    /// The tile `tile`, which shows `contents`, as the layer `layer_id`
+    /// The tile `tile`, which holds `content`, as the layer `layer_id`
     /// sees it, and where it found what the tile shows the layer.
     #[must_use]
     pub(crate) fn find(
         tile: &'a RenderTile,
-        contents: Option<&'a Contents>,
+        content: Option<TileContent<'a>>,
         layer_id: &str,
     ) -> (Self, Option<ViewPlace>) {
-        let found = contents.and_then(|contents| T::TileBucket::find(contents, layer_id));
-        (FrameTile { tile, bucket: found.map(|(bucket, _)| bucket) }, found.map(|(_, place)| place))
+        let found = content.and_then(|content| T::View::find(content, layer_id));
+        (FrameTile { tile, view: found.map(|(view, _)| view) }, found.map(|(_, place)| place))
     }
 
-    /// The tile `tile`, which shows `contents`, as the layer `layer_id`
-    /// sees it, with what it shows the layer at `view` in `contents`, where
+    /// The tile `tile`, which holds `content`, as the layer `layer_id`
+    /// sees it, with what it shows the layer at `place` in `content`, where
     /// [`find`](Self::find) found it.
     #[must_use]
     pub(crate) fn at(
         tile: &'a RenderTile,
-        contents: Option<&'a Contents>,
+        content: Option<TileContent<'a>>,
         layer_id: &str,
-        view: Option<ViewPlace>,
+        place: Option<ViewPlace>,
     ) -> Self {
-        let bucket = contents.zip(view).and_then(|(contents, place)| T::TileBucket::at(contents, place));
-        debug_assert_eq!(bucket.is_some(), view.is_some(), "a tile's contents changed since the frame's update");
-        debug_assert!(bucket.is_none_or(|bucket| bucket.is_for(layer_id)), "a layer found at another's place");
-        FrameTile { tile, bucket }
+        let view = content.zip(place).and_then(|(content, place)| T::View::at(content, place));
+        debug_assert_eq!(view.is_some(), place.is_some(), "a tile's contents changed since the frame's update");
+        debug_assert!(view.is_none_or(|view| view.is_for(layer_id)), "a layer found at another's place");
+        FrameTile { tile, view }
     }
 
     /// What the tile shows the layer, if anything.
-    pub(crate) fn bucket(self) -> Option<T::TileBucket<'a>> {
-        self.bucket
+    #[must_use]
+    pub fn view(self) -> Option<T::View<'a>> {
+        self.view
     }
 
-    /// [`bucket`](Self::bucket), if it was laid out to draw in `pass`.
-    pub(crate) fn bucket_for_pass(self, pass: RenderPass) -> Option<T::TileBucket<'a>> {
-        self.bucket.filter(|bucket| bucket.passes() & pass != RenderPass::None)
+    /// [`view`](Self::view), if it was laid out to draw in `pass`.
+    #[must_use]
+    pub fn view_for_pass(self, pass: RenderPass) -> Option<T::View<'a>> {
+        self.view.filter(|view| view.passes() & pass != RenderPass::NONE)
     }
 
     /// The tile's id.
     #[must_use]
-    pub(crate) fn id(self) -> OverscaledTileID {
+    pub fn id(self) -> OverscaledTileID {
         *self.tile.overscaled_tile_id()
+    }
+
+    /// The id the frame draws the tile at: its tile in its world copy.
+    #[must_use]
+    pub fn unwrapped_id(self) -> UnwrappedTileID {
+        self.tile.id
     }
 }

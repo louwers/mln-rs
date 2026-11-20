@@ -8,3 +8,8 @@ mod style_sources;
 fn pool() -> mln_util::pool::Pool {
     mln_util::pool::Pool::new(4)
 }
+
+/// The built-in registrations that a test's map parses its style against.
+fn registry() -> std::sync::Arc<mln_style::StyleRegistry> {
+    std::sync::Arc::clone(mln_rs::builtin_registry().style())
+}

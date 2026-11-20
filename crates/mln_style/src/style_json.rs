@@ -1,6 +1,8 @@
 //! The style's JSON-text entry points: they take and return style-spec JSON
 //! as text, so a caller on another thread hands over text and the style's
-//! own thread parses it.
+//! own thread parses it. Adding a layer that isn't JSON, such as a custom
+//! layer, checks it as adding one from JSON does
+//! ([`Style::add_layer`](crate::style::Style::add_layer)).
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -19,6 +21,7 @@ use crate::layer_type::SourceKind;
 use crate::light::Light;
 use crate::projection::Projection;
 use crate::property_table::{Properties, defined_properties};
+use crate::registry::StyleRegistry;
 use crate::style::Style;
 use crate::style_property::{Kind, StyleProperty};
 use crate::transition_options::TransitionOptions;
@@ -28,28 +31,35 @@ impl Style {
     /// that `json` describes, below the layer named `before_layer_id`, or
     /// above every layer when it is `None`.
     ///
-    /// Fails with [`ErrorKind::NotFound`](mln_util::ErrorKind) if the style has no layer named
-    /// `before_layer_id` or no source with the ID that the layer uses, with
-    /// `AlreadyExists` if the style has a layer with the new layer's ID, and
-    /// with `InvalidArgument` if `json` isn't a valid layer or its source
-    /// can't feed a layer of its type.
+    /// Fails as [`add_layer`](Self::add_layer) does, and with
+    /// `InvalidArgument` if `json` isn't a valid layer.
     pub fn add_layer_json(&mut self, json: &str, before_layer_id: Option<&str>) -> Result<(), Error> {
-        if let Some(before) = before_layer_id
-            && self.get_layer(before).is_none()
-        {
-            return Err(Error::not_found(format!("before_layer_id {} does not exist", quote(before))));
-        }
-
+        // A missing `before_layer_id` fails before the JSON's errors do.
+        self.check_before(before_layer_id)?;
         let value = parse(json, "style layer")?;
         let mut error = mln_conversion::Error::default();
         let Some(layer) = convert_layer(self.registry(), &Convertible::from(&value), &mut error) else {
             return Err(conversion_error("style layer", &error));
         };
+        self.add_layer(layer, before_layer_id)
+    }
 
+    /// Adds `layer` below the layer named `before_layer_id`, or above every
+    /// layer when it is `None`.
+    ///
+    /// Fails with [`ErrorKind::NotFound`](mln_util::ErrorKind) if the style has no layer named
+    /// `before_layer_id` or no source with the ID that the layer uses, with
+    /// `AlreadyExists` if the style has a layer with the new layer's ID, and
+    /// with `InvalidArgument` if the layer's type isn't the one that the
+    /// style's registry has by its name, or if the layer's source can't feed
+    /// a layer of its type. The style drops `layer` when it fails.
+    pub fn add_layer(&mut self, layer: Layer, before_layer_id: Option<&str>) -> Result<(), Error> {
+        self.check_before(before_layer_id)?;
         let id = layer.get_id();
         if self.get_layer(id).is_some() {
             return Err(Error::already_exists(format!("layer {} already exists", quote(id))));
         }
+        check_layer_type(self.registry(), &layer)?;
         let type_info = layer.info();
         if type_info.source != SourceKind::None {
             let source_id = layer.get_source_id();
@@ -72,28 +82,15 @@ impl Style {
         self.apply(Edit::AddLayer { layer, before: before_layer_id.map(str::to_owned) })
     }
 
-    /// Adds a custom layer named `id` that `host` draws, below the layer
-    /// named `before_layer_id`, or above every layer when it is `None`.
-    ///
-    /// Fails with [`ErrorKind::NotFound`](mln_util::ErrorKind) if the style has no layer named
-    /// `before_layer_id`, and with `AlreadyExists` if it has a layer named
-    /// `id`. The style drops `host` when it fails.
-    pub fn add_custom_layer(
-        &mut self,
-        id: &str,
-        host: Arc<dyn crate::layers::CustomLayerHost>,
-        before_layer_id: Option<&str>,
-    ) -> Result<(), Error> {
+    /// Fails with [`ErrorKind::NotFound`](mln_util::ErrorKind) if the style
+    /// has no layer named `before_layer_id`.
+    fn check_before(&self, before_layer_id: Option<&str>) -> Result<(), Error> {
         if let Some(before) = before_layer_id
             && self.get_layer(before).is_none()
         {
             return Err(Error::not_found(format!("before_layer_id {} does not exist", quote(before))));
         }
-        if self.get_layer(id).is_some() {
-            return Err(Error::already_exists(format!("layer {} already exists", quote(id))));
-        }
-        let layer = Layer::custom(self.registry(), id, host);
-        self.apply(Edit::AddLayer { layer, before: before_layer_id.map(str::to_owned) })
+        Ok(())
     }
 
     /// Moves the layer named `id` below the layer named `before_layer_id`,
@@ -443,4 +440,19 @@ fn layer_not_found(id: &str) -> Error {
 
 fn json_text(value: &Value) -> String {
     value_to_json(value).to_string()
+}
+
+/// Fails with `InvalidArgument` unless `registry`'s layer type of
+/// `layer`'s type name is `layer`'s own type, which the renderer and the
+/// tile workers look up by that name.
+pub(crate) fn check_layer_type(registry: &StyleRegistry, layer: &Layer) -> Result<(), Error> {
+    let name = layer.info().name;
+    if registry.layer_type(name).is_some_and(|registered| registered.is_type_of(&**layer.style())) {
+        return Ok(());
+    }
+    Err(Error::invalid_argument(format!(
+        "layer {} is of a layer type {} that the style's registry doesn't have",
+        quote(layer.get_id()),
+        quote(name)
+    )))
 }

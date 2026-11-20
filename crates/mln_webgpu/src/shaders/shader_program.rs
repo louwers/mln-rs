@@ -8,6 +8,7 @@ use std::borrow::Cow;
 use mln_gfx::color_mode::BlendFunction;
 use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
 use mln_gfx::gpu::{FixedState, GpuError, ShaderKey, VertexBufferLayout, VertexStep};
+use mln_gfx::shaders::source::wgsl;
 use mln_gfx::types::{
     ColorBlendEquationType, ColorBlendFactorType, CullFaceSideType, CullFaceWindingType, DepthFunctionType,
     StencilFunctionType, StencilOpType,
@@ -15,7 +16,7 @@ use mln_gfx::types::{
 use mln_util::hash::HashMap;
 use mln_vec_map::VecMap;
 
-use crate::shaders::shader_source::{AttributeInfo, ShaderSource, TextureInfo, prelude};
+use crate::shaders::shader_source::prelude;
 use crate::shaders::wgsl_preprocessor::{is_space, preprocess_wgsl};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -259,9 +260,9 @@ pub(crate) struct ShaderProgram {
     index_group: Option<u32>,
     pipeline_layout: wgpu::PipelineLayout,
     /// The shader locations of the per-vertex and per-instance inputs.
-    attributes: &'static [AttributeInfo],
-    instance_attributes: &'static [AttributeInfo],
-    textures: &'static [TextureInfo],
+    attributes: &'static [wgsl::Attribute],
+    instance_attributes: &'static [wgsl::Attribute],
+    textures: &'static [wgsl::Texture],
     bindings_per_group: Vec<Vec<BindingInfo>>,
     /// The bytes of each buffer the sources read (`buffer_sizes`).
     buffer_sizes: Vec<((u32, u32), u64)>,
@@ -304,7 +305,7 @@ impl ShaderProgram {
         vertex_source: &str,
         fragment_source: &str,
         name: &str,
-        source: &ShaderSource,
+        source: &wgsl::Source,
         pixel_ratio: f32,
     ) -> Result<Self, GpuError> {
         let index_group = index_group_of(&[vertex_source, fragment_source]);
@@ -648,7 +649,7 @@ impl BindingType {
 /// The texture of `textures` with the lowest id whose sampler is at
 /// `binding` if `sampler`, else whose texture is (see
 /// [`ShaderProgram::texture_at`]).
-fn texture_info_at(textures: &[TextureInfo], binding: u32, sampler: bool) -> Option<&TextureInfo> {
+fn texture_info_at(textures: &[wgsl::Texture], binding: u32, sampler: bool) -> Option<&wgsl::Texture> {
     textures
         .iter()
         .filter(|texture| {
@@ -772,7 +773,7 @@ pub(crate) fn compile(
     device: &wgpu::Device,
     index_layout: &wgpu::BindGroupLayout,
     key: &ShaderKey,
-    source: &ShaderSource,
+    source: &wgsl::Source,
 ) -> Result<ShaderProgram, GpuError> {
     // The common prelude goes through the preprocessor with the program, so
     // its `#ifdef`s see the defines.

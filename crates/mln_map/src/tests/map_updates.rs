@@ -19,9 +19,10 @@ use crate::{CameraOptions, ErrorKind, Map, MapOptions, TileSettings, UpdateReade
 
 fn map(run_loop: &Queue<()>) -> Map {
     let options = MapOptions { size: Size::new(256, 256), ..Default::default() };
-    Map::with_file_source(
+    Map::new(
         StubFileSource::on_queue(run_loop, ResponseType::Asynchronous),
         options,
+        crate::tests::registry(),
         &crate::tests::pool(),
     )
     .expect("map")
@@ -202,7 +203,7 @@ fn a_url_style_never_publishes_its_sources_with_the_old_feature_state() {
         Some(response)
     });
     let options = MapOptions { size: Size::new(256, 256), ..Default::default() };
-    let mut map = Map::with_file_source(file_source, options, &crate::tests::pool()).expect("map");
+    let mut map = Map::new(file_source, options, crate::tests::registry(), &crate::tests::pool()).expect("map");
     map.jump_to(&CameraOptions::default());
     map.set_feature_state("points", None, "1", hover(true));
 

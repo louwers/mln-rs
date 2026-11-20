@@ -1,0 +1,146 @@
+//! The programs of the `raster` layer type in MSL, for `mln_mtl`.
+
+use mln_gfx::gfx_types::AttributeDataType::Short2;
+use mln_gfx::shaders::program::Program;
+use mln_gfx::shaders::shader_defines::{
+    ID_RASTER_IMAGE0_TEXTURE, ID_RASTER_IMAGE1_TEXTURE, ID_RASTER_POS_VERTEX_ATTRIBUTE,
+    ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE, RASTER_LAYER_UBO_COUNT,
+};
+use mln_gfx::shaders::source::msl::{Attribute, Msl, Source, Texture};
+
+use super::programs;
+
+const RASTER_UBO_COUNT: usize = RASTER_LAYER_UBO_COUNT;
+
+const RASTER_ATTRIBUTES: &[Attribute] = &[
+    Attribute::new(0, Short2, RASTER_UBO_COUNT, ID_RASTER_POS_VERTEX_ATTRIBUTE),
+    Attribute::new(1, Short2, RASTER_UBO_COUNT, ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE),
+];
+static RASTER: Source = Source {
+    msl: &RASTER_SHADER,
+    attributes: RASTER_ATTRIBUTES,
+    instance_attributes: &[],
+    textures: &[Texture::new(0, ID_RASTER_IMAGE0_TEXTURE), Texture::new(1, ID_RASTER_IMAGE1_TEXTURE)],
+};
+
+/// The source of each of the type's programs.
+pub(super) static SOURCES: &[(&Program, &Source)] = &[(&programs::RASTER, &RASTER)];
+
+const RASTER_SHADER: Msl = Msl {
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
+    prelude: r#"
+
+enum {
+    idRasterDrawableUBO = idDrawableReservedVertexOnlyUBO,
+    idRasterEvaluatedPropsUBO = drawableReservedUBOCount,
+    rasterUBOCount
+};
+
+struct alignas(16) RasterDrawableUBO {
+    /*  0 */ float4x4 matrix;
+    /* 64 */
+};
+static_assert(sizeof(RasterDrawableUBO) == 4 * 16, "wrong size");
+
+/// Evaluated properties that do not depend on the tile
+struct alignas(16) RasterEvaluatedPropsUBO {
+    /*  0 */ float4 spin_weights;
+    /* 16 */ float2 tl_parent;
+    /* 24 */ float scale_parent;
+    /* 28 */ float buffer_scale;
+    /* 32 */ float fade_t;
+    /* 36 */ float opacity;
+    /* 40 */ float brightness_low;
+    /* 44 */ float brightness_high;
+    /* 48 */ float saturation_factor;
+    /* 52 */ float contrast_factor;
+    /* 56 */ float pad1;
+    /* 60 */ float pad2;
+    /* 64 */
+};
+static_assert(sizeof(RasterEvaluatedPropsUBO) == 4 * 16, "wrong size");
+
+"#,
+    source: r"
+
+struct VertexStage {
+    short2 pos [[attribute(0)]];
+    short2 texture_pos [[attribute(1)]];
+};
+
+struct FragmentStage {
+    float4 position [[position, invariant]];
+    float2 pos0;
+    float2 pos1;
+};
+
+FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
+                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
+                                device const RasterDrawableUBO* drawableVector [[buffer(idRasterDrawableUBO)]],
+                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
+                                device const RasterEvaluatedPropsUBO& props [[buffer(idRasterEvaluatedPropsUBO)]]) {
+
+    device const RasterDrawableUBO& drawable = drawableVector[uboIndex];
+
+    const float4 position = projectTile(float2(vertx.pos), float2(vertx.pos), projectionVector[uboIndex]);
+
+    // We are using Int16 for texture position coordinates to give us enough precision for
+    // fractional coordinates. We use 8192 to scale the texture coordinates in the buffer
+    // as an arbitrarily high number to preserve adequate precision when rendering.
+    // This is also the same value as the EXTENT we are using for our tile buffer pos coordinates,
+    // so math for modifying either is consistent.
+    const float2 pos0 = (((float2(vertx.texture_pos) / 8192.0) - 0.5) / props.buffer_scale ) + 0.5;
+    const float2 pos1 = (pos0 * props.scale_parent) + props.tl_parent;
+
+    return {
+        .position    = position,
+        .pos0        = pos0,
+        .pos1        = pos1,
+    };
+}
+
+half4 fragment fragmentMain(FragmentStage in [[stage_in]],
+                            device const RasterEvaluatedPropsUBO& props [[buffer(idRasterEvaluatedPropsUBO)]],
+                            texture2d<float, access::sample> image0 [[texture(0)]],
+                            texture2d<float, access::sample> image1 [[texture(1)]],
+                            sampler image0_sampler [[sampler(0)]],
+                            sampler image1_sampler [[sampler(1)]]) {
+#if defined(OVERDRAW_INSPECTOR)
+    return half4(1.0);
+#endif
+
+    // read and cross-fade colors from the main and parent tiles
+    float4 color0 = image0.sample(image0_sampler, in.pos0);
+    float4 color1 = image1.sample(image1_sampler, in.pos1);
+    if (color0.a > 0.0) {
+        color0.rgb = color0.rgb / color0.a;
+    }
+    if (color1.a > 0.0) {
+        color1.rgb = color1.rgb / color1.a;
+    }
+    float4 color = mix(color0, color1, props.fade_t);
+    color.a *= props.opacity;
+    float3 rgb = color.rgb;
+
+    // spin
+    rgb = float3(
+        dot(rgb, props.spin_weights.xyz),
+        dot(rgb, props.spin_weights.zxy),
+        dot(rgb, props.spin_weights.yzx));
+
+    // saturation
+    float average = (color.r + color.g + color.b) / 3.0;
+    rgb += (average - rgb) * props.saturation_factor;
+
+    // contrast
+    rgb = (rgb - 0.5) * props.contrast_factor + 0.5;
+
+    // brightness
+    float3 high_vec = float3(props.brightness_low, props.brightness_low, props.brightness_low);
+    float3 low_vec = float3(props.brightness_high, props.brightness_high, props.brightness_high);
+
+    return half4(half3(mix(high_vec, low_vec, rgb) * color.a), color.a);
+}
+",
+};

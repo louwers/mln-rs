@@ -8,8 +8,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use httpmock::MockServer;
 use mln_runtime::{
-    CacheDatabaseOperation, ErrorKind, EventMask, EventSource, ResourceProvider, ResourceRequest, Runtime,
-    RuntimeEventKind, RuntimeOptions,
+    CacheDatabaseOperation, ErrorKind, EventMask, EventSource, ResourceProvider, ResourceRequest, RuntimeEventKind,
+    RuntimeOptions,
 };
 use mln_storage::offline::{OfflineRegionDownloadState, OfflineTilePyramidRegionDefinition};
 use mln_storage::resource::Kind;
@@ -187,7 +187,7 @@ fn a_scheme_that_nothing_loads_fails_and_says_why() {
 fn a_not_modified_answer_delivers_the_cached_copy() {
     let dir = TempDir::new();
     let options = RuntimeOptions { cache_path: Some(dir.path("cache.db")), ..RuntimeOptions::default() };
-    let runtime = Runtime::new(&options).unwrap();
+    let runtime = mln_rs::start_runtime(&options).unwrap();
     let revalidations = Arc::new(AtomicUsize::new(0));
     let counted = Arc::clone(&revalidations);
     wait(runtime.set_resource_provider(move |request: ResourceRequest| {
@@ -294,7 +294,7 @@ fn cache_operations_change_what_the_ambient_cache_serves() {
     });
     let dir = TempDir::new();
     let options = RuntimeOptions { cache_path: Some(dir.path("cache.db")), ..RuntimeOptions::default() };
-    let runtime = Runtime::new(&options).unwrap();
+    let runtime = mln_rs::start_runtime(&options).unwrap();
     let bounds = LatLngBounds::hull(LatLng::new(1.0, 2.0).unwrap(), LatLng::new(3.0, 4.0).unwrap());
     let definition =
         OfflineTilePyramidRegionDefinition::new("custom://style.json", bounds, 0.0, 0.0, 1.0, false).unwrap().into();
@@ -341,7 +341,7 @@ fn cache_settings_sent_before_the_first_map_reach_its_requests() {
     });
     let dir = TempDir::new();
     let options = RuntimeOptions { cache_path: Some(dir.path("cache.db")), ..RuntimeOptions::default() };
-    let runtime = Runtime::new(&options).unwrap();
+    let runtime = mln_rs::start_runtime(&options).unwrap();
     // A cache of no size keeps nothing while the database has no regions.
     wait(runtime.set_maximum_ambient_cache_size(0));
     assert_eq!(0, wait(runtime.offline().regions()).len());
@@ -391,7 +391,8 @@ fn an_offline_operation_sent_before_a_release_completes_first() {
     let definition =
         OfflineTilePyramidRegionDefinition::new("custom://style.json", bounds, 0.0, 0.0, 1.0, false).unwrap().into();
     let runtime =
-        Runtime::new(&RuntimeOptions { cache_path: Some(cache.clone()), ..RuntimeOptions::default() }).unwrap();
+        mln_rs::start_runtime(&RuntimeOptions { cache_path: Some(cache.clone()), ..RuntimeOptions::default() })
+            .unwrap();
     // The gate holds the runtime's thread until the release is sent, so the
     // release reaches the thread before the database's answer: a replaced
     // provider is dropped there.
@@ -411,7 +412,8 @@ fn an_offline_operation_sent_before_a_release_completes_first() {
     let next = || order.recv_timeout(crate::support::TIMEOUT).unwrap();
     assert_eq!([Ok("created"), Ok("released")], [next(), next()]);
 
-    let reopened = Runtime::new(&RuntimeOptions { cache_path: Some(cache), ..RuntimeOptions::default() }).unwrap();
+    let reopened =
+        mln_rs::start_runtime(&RuntimeOptions { cache_path: Some(cache), ..RuntimeOptions::default() }).unwrap();
     assert_eq!(1, wait(reopened.offline().regions()).len());
     wait(reopened.release());
 }
@@ -424,7 +426,8 @@ fn a_merge_takes_only_a_readable_database_file() {
     let bounds = LatLngBounds::hull(LatLng::new(1.0, 2.0).unwrap(), LatLng::new(3.0, 4.0).unwrap());
     let definition =
         OfflineTilePyramidRegionDefinition::new("custom://style.json", bounds, 0.0, 0.0, 1.0, false).unwrap().into();
-    let writer = Runtime::new(&RuntimeOptions { cache_path: Some(side.clone()), ..RuntimeOptions::default() }).unwrap();
+    let writer =
+        mln_rs::start_runtime(&RuntimeOptions { cache_path: Some(side.clone()), ..RuntimeOptions::default() }).unwrap();
     wait(writer.offline().create_region(definition, b"side".to_vec()));
     wait(writer.release());
 
@@ -450,7 +453,7 @@ fn an_offline_region_downloads_and_reports_its_progress() {
     });
     let dir = TempDir::new();
     let options = RuntimeOptions { cache_path: Some(dir.path("cache.db")), ..RuntimeOptions::default() };
-    let runtime = Runtime::new(&options).unwrap();
+    let runtime = mln_rs::start_runtime(&options).unwrap();
     let log = EventLog::install(&runtime);
     let offline = runtime.offline();
 

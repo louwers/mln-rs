@@ -13,9 +13,7 @@ use mln_util::constants::{EXTENT, M2PI};
 
 use crate::gfx::context::Context;
 use crate::gfx::uniform_buffer::UniformBufferArray;
-use crate::layers::cast_matrix;
-use crate::paint_parameters::{PaintParameters, TransformParameters};
-use crate::render_tile::RenderTile;
+use crate::paint_parameters::{DrawFrame, TransformParameters};
 
 /// Gives `layer_uniforms`, of a layer whose draws draw without a
 /// projection, a projection block of zeros if they have none. GL's programs
@@ -32,18 +30,18 @@ pub(crate) fn bind_no_projection(gpu: &mut dyn Gpu, layer_uniforms: &mut Uniform
     }
 }
 
-/// The matrix that draws geometry of the tile `tile_id` in the frame of
-/// `parameters`: translated by `translation`, anchored as `anchor` says, in
-/// tile units or viewport pixels, from `origin` in the tile where it has
-/// one, and projected with the near-clipped or pixel-aligned projection
-/// matrix where those say so.
+/// The matrix that draws geometry of the tile `tile_id` in `frame`:
+/// translated by `translation`, anchored as `anchor` says, in tile units or
+/// viewport pixels, from `origin` in the tile where it has one, and
+/// projected with the near-clipped or pixel-aligned projection matrix where
+/// those say so.
 #[expect(
     clippy::too_many_arguments,
-    reason = "the tile, the paint parameters and the translation, origin, clipping and alignment options of its matrix"
+    reason = "the tile, the frame and the translation, origin, clipping and alignment options of its matrix"
 )]
 pub(crate) fn tile_matrix(
     tile_id: &UnwrappedTileID,
-    parameters: &PaintParameters<'_>,
+    frame: &DrawFrame<'_>,
     translation: [f32; 2],
     anchor: TranslateAnchorType,
     near_clipped: bool,
@@ -53,8 +51,8 @@ pub(crate) fn tile_matrix(
 ) -> DMat4 {
     tile_matrix_for(
         tile_id,
-        parameters.view,
-        parameters.transform_params,
+        frame.view,
+        frame.transform,
         translation,
         anchor,
         origin,
@@ -64,15 +62,19 @@ pub(crate) fn tile_matrix(
     )
 }
 
-/// The projection data for this tile, of geometry at `origin` in it: the
-/// tile matrix plus the per-tile projection fields.
+/// The projection of geometry of the tile `tile_id` in `frame`, at `origin`
+/// in the tile where it has one: the tile's matrix, translated by
+/// `translation` anchored as `anchor` says, in tile units or viewport pixels,
+/// and projected with the near-clipped or pixel-aligned projection matrix
+/// where those say so, plus the tile's other projection fields.
 #[expect(
     clippy::too_many_arguments,
-    reason = "the tile, the paint parameters and the translation, origin, clipping and alignment options of its projection"
+    reason = "the tile, the frame and the translation, origin, clipping and alignment options of its projection"
 )]
-pub(crate) fn projection_data(
+#[must_use]
+pub fn projection_data(
     tile_id: &UnwrappedTileID,
-    parameters: &PaintParameters<'_>,
+    frame: &DrawFrame<'_>,
     translation: [f32; 2],
     anchor: TranslateAnchorType,
     near_clipped: bool,
@@ -80,12 +82,12 @@ pub(crate) fn projection_data(
     origin: Option<Point<f64>>,
     aligned: bool,
 ) -> ProjectionData {
-    let mut data = parameters.view.projection_data_for_matrix(
+    let mut data = frame.view.projection_data_for_matrix(
         tile_id,
-        &tile_matrix(tile_id, parameters, translation, anchor, near_clipped, in_viewport_pixel_units, origin, aligned),
+        &tile_matrix(tile_id, frame, translation, anchor, near_clipped, in_viewport_pixel_units, origin, aligned),
     );
     if !in_viewport_pixel_units {
-        let translate = RenderTile::tile_unit_translation(tile_id, translation, anchor, parameters.view);
+        let translate = tile_unit_translation(tile_id, translation, anchor, frame.view);
         data.translate = DVec2::new(f64::from(translate[0]), f64::from(translate[1]));
     }
     // A draw's depth range keeps the layers apart, so the shader's depth
@@ -93,8 +95,33 @@ pub(crate) fn projection_data(
     data
 }
 
+/// A layer's `*-translate` of `translation` pixels, anchored as `anchor`
+/// says, in the units of the tile `id` in `view`.
 #[must_use]
-pub(crate) fn to_projection_ubo(data: &ProjectionData) -> ProjectionUBO {
+pub fn tile_unit_translation(
+    id: &UnwrappedTileID,
+    translation: [f32; 2],
+    anchor: TranslateAnchorType,
+    view: &View,
+) -> [f32; 2] {
+    if translation[0] == 0.0 && translation[1] == 0.0 {
+        return [0.0, 0.0];
+    }
+    let angle = if anchor == TranslateAnchorType::Viewport { (-view.angle()) as f32 } else { 0.0f32 };
+    let translate = Vec2::from_angle(angle).rotate(Vec2::new(translation[0], translation[1]));
+    let zoom = view.zoom() as f32;
+    [id.pixels_to_tile_units(translate.x, zoom), id.pixels_to_tile_units(translate.y, zoom)]
+}
+
+/// The column-major `f32` matrix of `m`, as a uniform block holds it.
+#[must_use]
+pub fn cast_matrix(m: &DMat4) -> [f32; 16] {
+    m.as_mat4().to_cols_array()
+}
+
+/// The uniform block of `data`, which the programs' projection reads.
+#[must_use]
+pub fn to_projection_ubo(data: &ProjectionData) -> ProjectionUBO {
     ProjectionUBO {
         matrix: cast_matrix(&data.main_matrix),
         fallback_matrix: cast_matrix(&data.fallback_matrix),
@@ -110,7 +137,7 @@ pub(crate) fn to_projection_ubo(data: &ProjectionData) -> ProjectionUBO {
 /// `latitude_scale` is the cosine of the center latitude on the globe and 1
 /// on Mercator.
 #[must_use]
-pub(crate) fn globe_extrude_scale(tile_id: &UnwrappedTileID, zoom: f32, latitude_scale: f64) -> f32 {
+pub fn globe_extrude_scale(tile_id: &UnwrappedTileID, zoom: f32, latitude_scale: f64) -> f32 {
     (f64::from(tile_id.pixels_to_tile_units(1.0, zoom)) / (f64::from(EXTENT) * (1u64 << tile_id.canonical.z) as f64)
         * M2PI
         * latitude_scale) as f32

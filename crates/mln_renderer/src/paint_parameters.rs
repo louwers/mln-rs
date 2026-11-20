@@ -15,8 +15,10 @@ use mln_vec_map::VecMap;
 
 use crate::clip_masks::ClipMasks;
 use crate::frame::Frame;
+use crate::frame_projection::FrameProjection;
 use crate::gfx::context::Context;
 use crate::layer_composite::LayerComposite;
+use crate::render_light::EvaluatedLight;
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 
@@ -142,38 +144,64 @@ impl OpenPass {
     }
 }
 
-/// The state of a frame's encode: the renderer's GPU state, which the
-/// encode changes, the frame's camera and values, and where its passes are.
-pub(crate) struct PaintParameters<'a> {
+/// The frame that a layer's draws are made for: its camera, the target it
+/// draws into, its light, and the static data that draws share.
+#[derive(Clone, Copy)]
+pub struct DrawFrame<'a> {
+    /// The frame's camera.
+    pub view: &'a View,
+    /// Whether a gesture or an animation moves the camera: draws favor speed
+    /// over crispness then.
+    pub camera_moving: bool,
+    /// The device pixels of the target per logical pixel of the view.
+    pub pixel_ratio: f32,
+    /// The size of the target, in device pixels.
+    pub renderable_size: Size,
+    /// The clip space units that a logical pixel of the view spans, in x
+    /// and y, where y's sign follows the viewport's orientation.
+    pub pixels_to_gl_units: [f32; 2],
+    /// The style's light, evaluated for the frame.
+    pub light: &'a EvaluatedLight,
+    /// The geometry that the layers' draws share.
+    pub static_data: &'a RenderStaticData,
+    /// Whether a layer drawn as a whole ([`Composite`](crate::draw::Composite))
+    /// can draw with the frame's depth and stencil: the frame has them, and
+    /// a pass can draw into them together with the layer composite's
+    /// texture.
+    pub composites_with_frame_depth: bool,
+    /// The frame's projection matrices.
+    pub(crate) transform: &'a TransformParameters,
+}
+
+impl DrawFrame<'_> {
+    /// The projection of the tile `tile_id` in the frame, pixel-aligned if
+    /// `aligned`.
+    #[must_use]
+    pub fn projection_data_for_tile(&self, tile_id: &UnwrappedTileID, aligned: bool) -> ProjectionData {
+        self.transform.projection_data_for_tile(tile_id, aligned)
+    }
+}
+
+/// The frame's encode, which a layer's drawing and its offscreen pass draw
+/// through and pass on to the draw services. Outside the engine, it says
+/// which pass draws, at which depth, and where the frame draws the map.
+pub struct PaintParameters<'a> {
+    /// The renderer's GPU state, which the encode changes.
     pub(crate) context: &'a mut Context,
     /// The pass of the backend's `Gpu` that draws draw into, while one
     /// is open.
     open_pass: Option<OpenPass>,
 
-    pub(crate) transform_params: &'a TransformParameters,
-    pub(crate) view: &'a View,
-    /// Whether a gesture or an animation moves the camera: draws favor speed
-    /// over crispness then.
-    pub(crate) camera_moving: bool,
-    /// The light of the frame.
-    pub(crate) light: &'a crate::render_light::EvaluatedLight,
-    pub(crate) static_data: &'a RenderStaticData,
+    /// The frame's camera and target.
+    pub(crate) frame: DrawFrame<'a>,
 
     pub(crate) pass: RenderPass,
     pub(crate) debug_options: MapDebugOptions,
-
-    pub(crate) pixel_ratio: f32,
-    pub(crate) renderable_size: Size,
-    pub(crate) pixels_to_gl_units: [f32; 2],
 
     /// The masks of the tiles that the frame's draw groups can clip to.
     pub(crate) clip_masks: &'a mut ClipMasks,
     /// What the frame's layers drawn as a whole draw into and composite with.
     pub(crate) layer_composite: &'a mut LayerComposite,
-    /// Whether a layer drawn as a whole can draw with the frame's depth and
-    /// stencil: the frame has them, and a pass can draw into them together
-    /// with the layer composite's texture.
-    pub(crate) composites_with_frame_depth: bool,
     /// The stencil value of each tile whose mask the stencil buffer holds.
     tile_clipping_mask_ids: VecMap<UnwrappedTileID, i32>,
     next_stencil_id: i32,
@@ -184,8 +212,9 @@ pub(crate) struct PaintParameters<'a> {
     pub(crate) symbol_fade_change: f32,
 
     pub(crate) scissor_rect: ScissorRect,
-    /// The frame that custom layers draw into, set before their prerender.
-    pub(crate) custom_layer_frame: Option<mln_style::layers::CustomLayerFrame>,
+    /// Where the frame draws the map, and the depth it writes there, once
+    /// the frame's draw groups are known, before the offscreen passes.
+    pub(crate) frame_projection: Option<FrameProjection>,
 }
 
 impl<'a> PaintParameters<'a> {
@@ -221,19 +250,21 @@ impl<'a> PaintParameters<'a> {
         PaintParameters {
             context,
             open_pass: None,
-            transform_params,
-            view: state,
-            camera_moving: frame.camera_moving,
-            static_data,
-            light: &frame.light,
-            pass: RenderPass::Opaque,
+            frame: DrawFrame {
+                view: state,
+                camera_moving: frame.camera_moving,
+                pixel_ratio,
+                renderable_size,
+                pixels_to_gl_units,
+                light: &frame.light,
+                static_data,
+                composites_with_frame_depth,
+                transform: transform_params,
+            },
+            pass: RenderPass::OPAQUE,
             debug_options: frame.debug_options,
-            pixel_ratio,
-            renderable_size,
-            pixels_to_gl_units,
             clip_masks,
             layer_composite,
-            composites_with_frame_depth,
             tile_clipping_mask_ids: VecMap::new(),
             next_stencil_id: 1,
             // The renderer sets these before use.
@@ -242,8 +273,14 @@ impl<'a> PaintParameters<'a> {
             opaque_pass_cutoff: frame.opaque_pass_cutoff,
             symbol_fade_change: frame.symbol_fade_change,
             scissor_rect,
-            custom_layer_frame: None,
+            frame_projection: None,
         }
+    }
+
+    /// The pass the frame draws in now.
+    #[must_use]
+    pub fn pass(&self) -> RenderPass {
+        self.pass
     }
 
     /// The size and formats of the attachments that draws draw into
@@ -370,18 +407,26 @@ impl<'a> PaintParameters<'a> {
     }
 
     /// Runs `f` with `gpu`'s, the context's, commands inside the pass
-    /// begun, after what drew there so far, as a custom layer draws: `f`
+    /// begun, after what drew there so far, as a layer's host draws: `f`
     /// gets the backend's `CustomLayerPass`. Returns whether `f` ran.
-    pub(crate) fn lend_pass(&self, gpu: &mut dyn Gpu, f: &mut dyn FnMut(&mut dyn Any)) -> Result<bool, GpuError> {
+    pub fn lend_pass(&self, gpu: &mut dyn Gpu, f: &mut dyn FnMut(&mut dyn Any)) -> Result<bool, GpuError> {
         if self.open_pass.is_none() {
             return Ok(false);
         }
         gpu.lend(f).map(|()| true)
     }
 
+    /// The frame's camera and target.
     #[must_use]
-    pub(crate) fn projection_data_for_tile(&self, tile_id: &UnwrappedTileID, aligned: bool) -> ProjectionData {
-        self.transform_params.projection_data_for_tile(tile_id, aligned)
+    pub fn frame(&self) -> DrawFrame<'a> {
+        self.frame
+    }
+
+    /// Where the frame draws the map, and the depth it writes there: known
+    /// once the frame's draw groups are, before the offscreen passes.
+    #[must_use]
+    pub fn frame_projection(&self) -> Option<FrameProjection> {
+        self.frame_projection
     }
 
     /// Whether the current layer draws in the opaque pass: front to back,
@@ -389,7 +434,7 @@ impl<'a> PaintParameters<'a> {
     /// their Z is the back-hemisphere clip.
     #[must_use]
     pub(crate) fn opaque_pass_enabled_for_layer(&self) -> bool {
-        self.current_layer >= self.opaque_pass_cutoff && !self.view.is_globe()
+        self.current_layer >= self.opaque_pass_cutoff && !self.frame.view.is_globe()
     }
 
     #[must_use]
@@ -408,7 +453,7 @@ impl<'a> PaintParameters<'a> {
     /// The depth of `depth_mode_for_sublayer(0, ..)` where 2D layers write
     /// depth, whether or not the current layer does.
     #[must_use]
-    pub(crate) fn layer_depth(&self) -> f32 {
+    pub fn layer_depth(&self) -> f32 {
         let steps = (1u32.wrapping_add(self.current_layer)).wrapping_mul(Self::NUM_SUBLAYERS as u32);
         self.depth_range_size + steps as f32 * Self::DEPTH_EPSILON
     }

@@ -62,16 +62,22 @@ mln_gl = { package = "mln-rs-gl", path = "crates/mln_gl", version = "=0.0.13" }
 mln_glsl = { package = "mln-rs-glsl", path = "crates/mln_glsl", version = "=0.0.13" }
 mln_headless = { package = "mln-rs-headless", path = "crates/mln_headless", version = "=0.0.13" }
 mln_image = { package = "mln-rs-image", path = "crates/mln_image", version = "=0.0.13" }
+mln_layers = { package = "mln-rs-layers", path = "crates/mln_layers", version = "=0.0.13" }
 mln_map = { package = "mln-rs-map", path = "crates/mln_map", version = "=0.0.13" }
 mln_map_types = { package = "mln-rs-map-types", path = "crates/mln_map_types", version = "=0.0.13" }
 mln_math = { package = "mln-rs-math", path = "crates/mln_math", version = "=0.0.13" }
 mln_mtl = { package = "mln-rs-mtl", path = "crates/mln_mtl", version = "=0.0.13" }
-# Without its default feature, the in-process font-face shaper: the packages
-# that render turn it on (crates/mln_renderer/Cargo.toml).
+# The facade, without its default features: the packages that depend on it
+# select their backends, and SQLite and the in-process font-face shaper
+# where they want them.
+mln_rs = { package = "mln-rs", path = ".", version = "=0.0.13", default-features = false }
+# Without its default feature, the in-process font-face shaper: the facade's
+# `font-face-shaper` feature turns it on (crates/mln_renderer/Cargo.toml).
 mln_renderer = { package = "mln-rs-renderer", path = "crates/mln_renderer", version = "=0.0.13", default-features = false }
 # Without its backends (its default features) unless a package asks for
 # them, so that a browser build of mln_c carries one.
 mln_runtime = { package = "mln-rs-runtime", path = "crates/mln_runtime", version = "=0.0.13", default-features = false }
+mln_sources = { package = "mln-rs-sources", path = "crates/mln_sources", version = "=0.0.13" }
 mln_sprite = { package = "mln-rs-sprite", path = "crates/mln_sprite", version = "=0.0.13" }
 # Without SQLite (its `sqlite` feature) unless a package asks for it, so
 # that examples/web leaves it out.
@@ -527,6 +533,32 @@ include = ["/src", "/LICENSE.md"]
 keywords = ["maplibre", "map", "vector-tiles", "gis", "rendering"]
 categories = ["graphics", "rendering::engine", "science::geo"]
 
+# The runtime's backends (crates/mln_runtime/Cargo.toml), each with its
+# crate and each turning on the runtime; the ambient cache, offline regions
+# and mbtiles:// sources, as in C++; and the style's font faces shaped
+# in-process (crates/mln_renderer/Cargo.toml). A browser build turns on one
+# backend and leaves SQLite and the shaper out; a native runtime always has
+# SQLite. Without a backend, the crate is the built-in registrations alone,
+# which engine crates' tests use.
+[features]
+default = [
+  "webgpu",
+  "metal",
+  "vulkan",
+  "d3d12",
+  "gl",
+  "sqlite",
+  "font-face-shaper",
+]
+webgpu = ["runtime", "mln_runtime/webgpu", "dep:mln_webgpu", "mln_layers/wgsl"]
+metal = ["runtime", "mln_runtime/metal", "dep:mln_mtl", "mln_layers/msl"]
+vulkan = ["runtime", "mln_runtime/vulkan", "dep:mln_vulkan", "mln_layers/glsl"]
+d3d12 = ["runtime", "mln_runtime/d3d12", "dep:mln_d3d12", "mln_layers/glsl"]
+gl = ["runtime", "mln_runtime/gl", "dep:mln_gl", "mln_layers/glsl-es"]
+sqlite = ["mln_storage/sqlite", "dep:mln_storage_offline"]
+font-face-shaper = ["mln_renderer/font-face-shaper"]
+runtime = ["dep:mln_runtime"]
+
 [dependencies]
 feature.workspace = true
 geo-types.workspace = true
@@ -534,24 +566,25 @@ geojson.workspace = true
 geometry.workspace = true
 glam.workspace = true
 mln_conversion.workspace = true
-mln_d3d12.workspace = true
+mln_d3d12 = { workspace = true, optional = true }
 mln_expression.workspace = true
 mln_frame_pacer.workspace = true
 mln_geojson.workspace = true
 mln_gestures.workspace = true
 mln_gfx.workspace = true
-mln_gl.workspace = true
+mln_gl = { workspace = true, optional = true }
 mln_image.workspace = true
+mln_layers.workspace = true
 mln_map.workspace = true
 mln_map_types.workspace = true
 mln_math.workspace = true
-mln_mtl.workspace = true
-mln_renderer = { workspace = true, features = ["font-face-shaper"] }
-mln_runtime = { workspace = true, features = ["default"] }
+mln_mtl = { workspace = true, optional = true }
+mln_renderer.workspace = true
+mln_runtime = { workspace = true, optional = true }
+mln_sources.workspace = true
 mln_sprite.workspace = true
-# The ambient cache, offline regions and mbtiles:// sources, as in C++.
-mln_storage = { workspace = true, features = ["sqlite"] }
-mln_storage_offline.workspace = true
+mln_storage.workspace = true
+mln_storage_offline = { workspace = true, optional = true }
 mln_style.workspace = true
 mln_style_types.workspace = true
 mln_system_fonts.workspace = true
@@ -560,9 +593,9 @@ mln_tile.workspace = true
 mln_tile_id.workspace = true
 mln_util.workspace = true
 mln_vec_map.workspace = true
-mln_vulkan.workspace = true
+mln_vulkan = { workspace = true, optional = true }
 mln_web_host.workspace = true
-mln_webgpu.workspace = true
+mln_webgpu = { workspace = true, optional = true }
 polylabel.workspace = true
 
 [lints]

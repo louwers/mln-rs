@@ -1,15 +1,23 @@
-use mln_gfx::gpu::conformance::{
+use mln_gfx::gpu::{Gpu as _, GpuError};
+use mln_gfx::projection_variant::ProjectionVariant;
+use mln_gfx::shaders::program::Program;
+use mln_gfx::shaders::program_parameters::ProgramParameters;
+use mln_gfx::shaders::source::glsl;
+use mln_glsl::BUILT_INS;
+use mln_layers::conformance::{
     clip_mask_and_background, custom_layers, depth_only, foreign_ids, imported_textures, instanced_walls,
     invalid_calls, pulled_walls, readbacks, resources_in_use, topologies, transparent_replace, vertex_layouts,
     wall_quads,
 };
-use mln_gfx::gpu::{Gpu as _, GpuError};
-use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::program_parameters::ProgramParameters;
-use mln_glsl::BUILT_INS;
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_UNKNOWN};
 
 use crate::{D3d12Gpu, Device};
+
+/// Each program with GLSL: the engine's and the built-in layer types'.
+fn programs() -> Vec<(&'static Program, &'static glsl::Source)> {
+    let layers = mln_layers::shader_sources();
+    BUILT_INS.iter().copied().chain(layers.of::<glsl::Source>().iter()).collect()
+}
 
 fn gpu() -> D3d12Gpu {
     let device = Device::new(None).expect("a D3D12 device");
@@ -109,8 +117,9 @@ fn imported_textures_through_gpu() {
 #[test]
 fn every_program_compiles_for_gpu() {
     let mut gpu = gpu();
+    gpu.add_shader_sources(&mln_layers::shader_sources());
     let parameters = ProgramParameters::new(1.0, false);
-    for &(program, _) in BUILT_INS {
+    for (program, _) in programs() {
         for variant in [ProjectionVariant::Mercator, ProjectionVariant::Globe] {
             for uniforms in [&[][..], program.properties] {
                 let key = program.variant_key(&parameters, uniforms, variant);

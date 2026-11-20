@@ -14,7 +14,6 @@ use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{FileSource, FileSourceExt, Kind, RequestOrder, Resource, Responder, Response};
 use mln_style::layer::Layer;
 use mln_style::layer_type::LayerStyle;
-use mln_style::layers::{Circle, Hillshade, Line, Raster};
 use mln_style::source_type::SourceData;
 use mln_style::sources::custom_geometry_source::{self, Options as CustomGeometrySourceOptions};
 use mln_style::sources::custom_vector_source::{self, Options as CustomVectorSourceOptions, TileDataFormat};
@@ -37,8 +36,9 @@ use mln_util::tileset::{PartialTileset, Tileset};
 use parking_lot::Mutex;
 
 use crate::Registry;
-use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
+use crate::erased_layer::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::render_source::RenderSource;
+use crate::tests::fixture_layer::{Dot, Shade, Tint};
 use crate::tile::source_tiles::SourceTiles;
 use crate::tile::store::{StoreEvent, TileStore};
 use crate::tile_parameters::TileParameters;
@@ -199,22 +199,22 @@ enum Tiled {
 }
 
 impl Tiled {
-    /// A raster, hillshade or line (source-layer "water") layer "id" on
-    /// "source", as evaluated values.
+    /// A tint, shade or dot (source-layer "water") layer "id" on "source",
+    /// as evaluated values.
     fn layers(self) -> Vec<Arc<dyn ErasedEvaluatedLayer>> {
         let properties: Arc<dyn ErasedEvaluatedLayer> = match self {
             Tiled::Raster => {
-                let layer = Layer::new(Registry::with_builtins().style(), "raster", "id", "source").unwrap();
-                Arc::new(EvaluatedLayer::<Raster>::new(LayerStyle::recover(layer.style()).unwrap()))
+                let layer = Layer::new(Registry::with_builtins().style(), "tint", "id", "source").unwrap();
+                Arc::new(EvaluatedLayer::<Tint>::new(LayerStyle::recover(layer.style()).unwrap()))
             }
             Tiled::RasterDEM => {
-                let layer = Layer::new(Registry::with_builtins().style(), "hillshade", "id", "source").unwrap();
-                Arc::new(EvaluatedLayer::<Hillshade>::new(LayerStyle::recover(layer.style()).unwrap()))
+                let layer = Layer::new(Registry::with_builtins().style(), "shade", "id", "source").unwrap();
+                Arc::new(EvaluatedLayer::<Shade>::new(LayerStyle::recover(layer.style()).unwrap()))
             }
             Tiled::Vector => {
-                let mut layer = Layer::new(Registry::with_builtins().style(), "line", "id", "source").unwrap();
+                let mut layer = Layer::new(Registry::with_builtins().style(), "dot", "id", "source").unwrap();
                 layer.set_source_layer("water");
-                Arc::new(EvaluatedLayer::<Line>::new(LayerStyle::recover(layer.style()).unwrap()))
+                Arc::new(EvaluatedLayer::<Dot>::new(LayerStyle::recover(layer.style()).unwrap()))
             }
         };
         vec![properties]
@@ -654,10 +654,10 @@ fn custom_geometry_case(test: &SourceTest, store: &mut TileStore) -> (Source, Bo
         custom_geometry_source::create("source", CustomGeometrySourceOptions::default(), test.thread_pool.pool())
             .unwrap();
 
-    let mut layer = Layer::new(Registry::with_builtins().style(), "line", "id", "source").unwrap();
+    let mut layer = Layer::new(Registry::with_builtins().style(), "dot", "id", "source").unwrap();
     layer.set_source_layer("water");
     let layer_properties: Arc<dyn ErasedEvaluatedLayer> =
-        Arc::new(EvaluatedLayer::<Line>::new(LayerStyle::recover(layer.style()).unwrap()));
+        Arc::new(EvaluatedLayer::<Dot>::new(LayerStyle::recover(layer.style()).unwrap()));
     let layers = vec![layer_properties];
 
     let mut render_source = crate::tests::create_render_source(&source, store);
@@ -728,10 +728,10 @@ fn custom_vector_source_set_tile_data() {
 
     let source = custom_vector_source::create("source", CustomVectorSourceOptions::default(), test.thread_pool.pool());
 
-    let mut layer = Layer::new(Registry::with_builtins().style(), "line", "id", "source").unwrap();
+    let mut layer = Layer::new(Registry::with_builtins().style(), "dot", "id", "source").unwrap();
     layer.set_source_layer("water");
     let layer_properties: Arc<dyn ErasedEvaluatedLayer> =
-        Arc::new(EvaluatedLayer::<Line>::new(LayerStyle::recover(layer.style()).unwrap()));
+        Arc::new(EvaluatedLayer::<Dot>::new(LayerStyle::recover(layer.style()).unwrap()));
 
     let mut store = test.store();
     let mut render_source = crate::tests::create_render_source(&source, &mut store);
@@ -818,9 +818,9 @@ fn geojson_source_tiles_after_data_reset() {
     let mut store = test.store();
     let mut render_source = crate::tests::create_render_source(&source, &mut store);
 
-    let layer = Layer::new(Registry::with_builtins().style(), "circle", "id", "source").unwrap();
+    let layer = Layer::new(Registry::with_builtins().style(), "dot", "id", "source").unwrap();
     let layer_properties: Arc<dyn ErasedEvaluatedLayer> =
-        Arc::new(EvaluatedLayer::<Circle>::new(LayerStyle::recover(layer.style()).unwrap()));
+        Arc::new(EvaluatedLayer::<Dot>::new(LayerStyle::recover(layer.style()).unwrap()));
     let layers = vec![layer_properties];
 
     let continuous = test.tile_parameters(MapMode::Continuous);
@@ -841,13 +841,13 @@ fn geojson_source_tiles_after_data_reset() {
     assert!(render_source.is_loaded(&store)); // Tiles are reset in static mode.
 }
 
-/// A circle layer "id" on "source", as evaluated values.
-fn circle_layers() -> Vec<Arc<dyn ErasedEvaluatedLayer>> {
-    let layer = Layer::new(Registry::with_builtins().style(), "circle", "id", "source").unwrap();
-    vec![Arc::new(EvaluatedLayer::<Circle>::new(LayerStyle::recover(layer.style()).unwrap()))]
+/// A dot layer "id" on "source", as evaluated values.
+fn dot_layers() -> Vec<Arc<dyn ErasedEvaluatedLayer>> {
+    let layer = Layer::new(Registry::with_builtins().style(), "dot", "id", "source").unwrap();
+    vec![Arc::new(EvaluatedLayer::<Dot>::new(LayerStyle::recover(layer.style()).unwrap()))]
 }
 
-/// A GeoJSON source rendered with a circle layer. Its data is clustered,
+/// A GeoJSON source rendered with a dot layer. Its data is clustered,
 /// which slices a tile within the call in either mode, so whether the tiles
 /// complete within an update shows only how they lay out.
 struct SynchronousUpdateSource {
@@ -865,7 +865,7 @@ impl SynchronousUpdateSource {
         let source = geojson_source("source", Arc::clone(&options));
         let mut store = test.store();
         let render_source = crate::tests::create_render_source(&source, &mut store);
-        SynchronousUpdateSource { options, source, store, render_source, layers: circle_layers() }
+        SynchronousUpdateSource { options, source, store, render_source, layers: dot_layers() }
     }
 
     fn is_loaded(&self) -> bool {
@@ -939,7 +939,7 @@ fn geojson_source_slices_inline_while_a_background_slice_runs() {
     source = edited(&source, GeoJsonSourceType::set_data("source", Some(data)));
     let mut store = crate::tests::pool_store(&TaskGroup::new(&pool));
     let mut render_source = crate::tests::create_render_source(&source, &mut store);
-    let layers = circle_layers();
+    let layers = dot_layers();
     let update = |render_source: &mut Box<dyn RenderSource>, store: &mut TileStore, source: &Source| {
         let mut parameters = test.tile_parameters(MapMode::Continuous);
         parameters.is_update_synchronous = source.data().is_update_synchronous();
@@ -1438,7 +1438,7 @@ fn globe_base_level_is_not_kept_where_it_is_large_or_out_of_reach() {
 }
 
 /// The DEM of `tile`, a raster-dem tile.
-fn dem(tile: &crate::tile::tile::Tile) -> &crate::buckets::hillshade_bucket::HillshadeBucket {
+fn dem(tile: &crate::tile::tile::Tile) -> &crate::tile::dem::DemContents {
     match tile.contents() {
         Some(crate::tile::contents::Contents::Dem(bucket)) => bucket,
         _ => panic!("a DEM"),
@@ -1500,7 +1500,7 @@ fn raster_dem_borders_across_a_world_wrap() {
     let (east, west) = (tile(3), tile(0));
     assert_eq!(west.id.wrap, east.id.wrap + 1);
     let (east, west) = (dem(east), dem(west));
-    let (east, west) = (east.dem_data(), west.dem_data());
+    let (east, west) = (east.dem(), west.dem());
     for y in 0..16 {
         assert_eq!(east.get(16, y), west.get(0, y), "row {y} of the east tile's border");
         assert_eq!(west.get(-1, y), east.get(15, y), "row {y} of the west tile's border");

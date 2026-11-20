@@ -4,6 +4,7 @@
 // shared, as it is while the style still holds the original, and leaves it
 // alone when the value doesn't change.
 
+use std::any::Any;
 use std::sync::Arc;
 
 use feature::{Value, ValueObject};
@@ -17,9 +18,7 @@ use crate::expression::{
     Dependency, EvaluationContext, Expr, Functions, GlobalStateMap, ParsingContext, Type, from_expression_value,
 };
 use crate::filter::Filter;
-use crate::layer_type::{ErasedLayerStyle, LayerBase, LayerStyle, LayerTypeInfo, SourceKind};
-use crate::layers::Custom;
-use crate::layers::custom_layer::CustomLayerHost;
+use crate::layer_type::{ErasedLayerStyle, LayerBase, LayerTypeInfo, SourceKind};
 use crate::property_table::SetPropertyError;
 use crate::registry::StyleRegistry;
 use crate::style_property::StyleProperty;
@@ -49,8 +48,8 @@ pub enum PropertyScope {
 pub struct Layer {
     style: Arc<dyn ErasedLayerStyle>,
     functions: Arc<Functions>,
-    /// A custom layer's host, which the style data only refers to.
-    host: Option<Arc<dyn CustomLayerHost>>,
+    /// What the style data refers to weakly, which the layer keeps.
+    kept: Option<Arc<dyn Any + Send + Sync>>,
 }
 
 impl Layer {
@@ -60,7 +59,8 @@ impl Layer {
     /// # Errors
     ///
     /// When `registry` has no layer type named `type_`, or one that only
-    /// another constructor makes, such as [`Layer::custom`].
+    /// another constructor makes, such as the custom layer type, whose
+    /// layers need a host.
     pub fn new(registry: &StyleRegistry, type_: &str, id: &str, source: &str) -> Result<Layer, mln_util::Error> {
         let Some(layer_type) = registry.layer_type(type_) else {
             return Err(mln_util::Error::invalid_argument(format!("unknown layer type '{type_}'")));
@@ -71,23 +71,25 @@ impl Layer {
         Ok(Layer::from_style(layer_type.create(id, source), Arc::clone(registry.functions())))
     }
 
-    /// A layer named `id` that `host` draws, whose filter and visibility
-    /// parse against `registry`'s functions.
-    #[must_use]
-    pub fn custom(registry: &StyleRegistry, id: &str, host: Arc<dyn CustomLayerHost>) -> Layer {
-        Layer {
-            style: Arc::new(LayerStyle::<Custom>::with_host(id.to_owned(), &host)),
-            functions: Arc::clone(registry.functions()),
-            host: Some(host),
-        }
-    }
-
     /// The layer of `style`, whose property values parse against
-    /// `functions`. A custom layer needs its host: [`Layer::custom`] makes
-    /// one.
+    /// `functions`.
     #[must_use]
     pub fn from_style(style: Arc<dyn ErasedLayerStyle>, functions: Arc<Functions>) -> Layer {
-        Layer { style, functions, host: None }
+        Layer { style, functions, kept: None }
+    }
+
+    /// The layer of `style`, as [`from_style`](Self::from_style) makes it,
+    /// which keeps `kept` while the layer or a copy of it lasts. Style data
+    /// that refers to something only weakly, such as a custom layer's host,
+    /// gives it to its layer to keep: a renderer leaked with copies of the
+    /// style data then doesn't keep it.
+    #[must_use]
+    pub fn from_style_keeping(
+        style: Arc<dyn ErasedLayerStyle>,
+        functions: Arc<Functions>,
+        kept: Arc<dyn Any + Send + Sync>,
+    ) -> Layer {
+        Layer { style, functions, kept: Some(kept) }
     }
 
     #[must_use]
@@ -155,13 +157,13 @@ impl Layer {
     }
 
     /// A layer named `id` with this layer's members and properties but its
-    /// paint properties. A custom layer's copy draws through the same host.
+    /// paint properties, which keeps what this layer keeps.
     #[must_use]
     pub fn clone_ref(&self, id: &str) -> Layer {
         Layer {
             style: self.style.copy_without_paint(id),
             functions: Arc::clone(&self.functions),
-            host: self.host.clone(),
+            kept: self.kept.clone(),
         }
     }
 

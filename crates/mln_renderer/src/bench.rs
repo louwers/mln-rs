@@ -28,12 +28,12 @@ use mln_vec_map::VecSet;
 
 use crate::Registry;
 use crate::bucket::LayerFeatureStates;
+use crate::erased_layer::ErasedEvaluatedLayer;
 use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas;
-use crate::layer_type::ErasedEvaluatedLayer;
-use crate::layers::render_symbol_layer::RenderSymbolLayer;
+use crate::layers::render_symbol_layer::symbol_translates;
 use crate::layout::tile_layout::{Dependencies, LayoutParams, Resolved};
 use crate::paint_parameters::TransformParameters;
-use crate::render_layer::{LayerParts, RenderLayer};
+use crate::render_layer::{Layer, RenderLayer};
 use crate::render_tile::RenderTile;
 use crate::text::cross_tile_symbol_index::CrossTileSymbolIndex;
 use crate::text::glyph_store::ShapeResults;
@@ -60,15 +60,16 @@ pub struct TileLayout {
 impl TileLayout {
     /// The layout of tile `z`/`x`/`y` of `source` in `style`, by those of
     /// the style's visible layers on `source` whose type `include` accepts,
-    /// evaluated at the tile's zoom as the renderer evaluates them, for a
-    /// continuous map at pixel ratio 1.
+    /// evaluated at the tile's zoom as the renderer evaluates them with the
+    /// layer types of `registry`, for a continuous map at pixel ratio 1.
     ///
     /// It lays `data` out once to find what the layout needs, and resolves
     /// that as the renderer would: glyph ranges from the style's glyph URL,
     /// whose bytes `load` gives, and images from the style's images, packed
-    /// into an atlas. Fails for a style without the source, a layer the
-    /// renderer has no type for, or a layout that fails.
+    /// into an atlas. Fails for a style without the source, a layer whose
+    /// type `registry` lacks, or a layout that fails.
     pub fn new(
+        registry: &Registry,
         style: &Style,
         source: &str,
         include: impl Fn(&str) -> bool,
@@ -76,14 +77,16 @@ impl TileLayout {
         data: &TileData,
         load: impl Fn(&str) -> Option<Vec<u8>>,
     ) -> Result<TileLayout, Error> {
-        TileLayout::overscaled(style, source, include, (z, x, y), z, data, load)
+        TileLayout::overscaled(registry, style, source, include, (z, x, y), z, data, load)
     }
 
     /// [`TileLayout::new`] for the tile shown at `overscaled_z`, a zoom
     /// at or above its own, as a map shows the tiles of its source's highest
     /// zoom when it zooms in further: the layers evaluated at that zoom, and
     /// the tile's features scaled to it.
+    #[expect(clippy::too_many_arguments, reason = "the arguments of `new`, and the zoom")]
     pub fn overscaled(
+        registry: &Registry,
         style: &Style,
         source: &str,
         include: impl Fn(&str) -> bool,
@@ -98,7 +101,6 @@ impl TileLayout {
         if overscaled_z < z {
             return Err(Error::invalid_argument(format!("tile {z}/{x}/{y} shown at zoom {overscaled_z}")));
         }
-        let registry = Registry::with_builtins();
         let parameters = PropertyEvaluationParameters::new(f32::from(overscaled_z));
         let mut layers: Vec<Arc<dyn ErasedEvaluatedLayer>> = Vec::new();
         for layer in style.get_layers() {
@@ -111,7 +113,7 @@ impl TileLayout {
                 .and_then(|layer_type| layer_type.create_render_layer(layer.style()))
                 .ok_or_else(|| Error::invalid_argument(format!("no render layer for {}", layer.get_id())))?;
             render_layer.evaluate(&parameters);
-            layers.push(Arc::clone(&render_layer.base().evaluated_properties));
+            layers.push(render_layer.evaluated());
         }
 
         let mut layout = TileLayout {
@@ -195,6 +197,15 @@ impl LaidOut {
     pub fn buckets(&self) -> usize {
         self.result.layer_render_data.len()
     }
+
+    /// The tile's id, and the wire forms of its buckets and its feature
+    /// index's grid, which are equal for equal layouts. Fails for a bucket
+    /// without a wire form.
+    pub fn encoded(&self) -> Result<(OverscaledTileID, [Vec<u8>; 2]), Error> {
+        let buckets = crate::tile::worker_codec::fields::encode_buckets(&self.result).map_err(Error::native)?;
+        let grid = self.result.feature_index.encode_grid().map_err(Error::native)?;
+        Ok((self.id, [buckets, grid]))
+    }
 }
 
 /// The symbols of laid-out tiles in a view, as a renderer finds which to
@@ -204,7 +215,7 @@ pub struct SymbolView {
     update: Arc<UpdateParameters>,
     /// The style's symbol layers that lead a bucket of the tiles, in the
     /// style's order.
-    layers: Vec<RenderSymbolLayer>,
+    layers: Vec<Layer<mln_style::layers::Symbol>>,
 }
 
 impl SymbolView {
@@ -244,17 +255,25 @@ impl SymbolView {
             }
             let style = mln_style::layer_type::LayerStyle::<mln_style::layers::Symbol>::recover(layer.style())
                 .ok_or_else(|| Error::invalid_argument(format!("no render layer for {}", layer.get_id())))?;
-            let mut render_layer = RenderSymbolLayer::new(style);
+            let mut render_layer = Layer::new(style);
             render_layer.evaluate(&parameters);
             // As the layer's update adds its tiles' buckets.
-            let translates = render_layer.symbol_translates();
+            let translates = symbol_translates(&render_layer.values().evaluated);
+            let style = Arc::clone(&render_layer.values().style);
             for (tile_index, laid_out) in tiles.iter().enumerate() {
                 let Some(render_data) = laid_out.result.layer_render_data.get(layer.get_id()) else { continue };
                 let Some(bucket) = crate::bucket::recover(&render_data.bucket) else { continue };
                 let feature_index = || Some(Arc::clone(&laid_out.result.feature_index));
-                render_layer.add_placement_data(&render_tiles, tile_index, bucket, feature_index, translates);
+                render_layer.state_mut().add_placement_data(
+                    &style,
+                    &render_tiles,
+                    tile_index,
+                    bucket,
+                    feature_index,
+                    translates,
+                );
             }
-            if render_layer.has_placement_data() {
+            if render_layer.state().has_placement_data() {
                 layers.push(render_layer);
             }
         }
@@ -345,14 +364,10 @@ pub struct WorkerJob(Run);
 pub struct WorkerReply(Reply);
 
 impl Codec {
-    /// The two sides of a new worker instance.
+    /// The two sides of a new worker instance, with `registry`.
     #[must_use]
-    pub fn new() -> Codec {
-        Codec {
-            map: MapCodec::new(Registry::with_builtins()),
-            worker: WorkerCodec::new(Registry::with_builtins()),
-            generation: 0,
-        }
+    pub fn new(registry: Arc<Registry>) -> Codec {
+        Codec { map: MapCodec::new(Arc::clone(&registry)), worker: WorkerCodec::new(registry), generation: 0 }
     }
 
     /// Sends `layout`'s job for `data` to the worker: the map side encodes
@@ -380,12 +395,6 @@ impl Codec {
                 Err(Error::native("the reply isn't a layout"))
             }
         }
-    }
-}
-
-impl Default for Codec {
-    fn default() -> Self {
-        Codec::new()
     }
 }
 
@@ -466,7 +475,7 @@ mod tests {
         Feature { geometry: Some(geometry), properties: Arc::new(properties), id: Identifier::Uint(id) }
     }
 
-    /// A style of a line layer whose color depends on feature state, and a
+    /// A style of a `dot` layer whose color depends on feature state, and a
     /// symbol layer, over source `s`.
     fn style() -> Style {
         Style::from_json(
@@ -476,8 +485,8 @@ mod tests {
                 "glyphs": "local://glyphs/{fontstack}/{range}.pbf",
                 "sources": {"s": {"type": "vector", "tiles": ["local://tiles/{z}-{x}-{y}.mvt"]}},
                 "layers": [
-                    {"id": "roads", "type": "line", "source": "s", "source-layer": "l",
-                     "paint": {"line-color": ["case", ["boolean", ["feature-state", "on"], false], "red", "blue"]}},
+                    {"id": "roads", "type": "dot", "source": "s", "source-layer": "l",
+                     "paint": {"dot-color": ["case", ["boolean", ["feature-state", "on"], false], "red", "blue"]}},
                     {"id": "names", "type": "symbol", "source": "s", "source-layer": "l",
                      "layout": {"text-field": ["get", "name"], "text-font": ["Test"]}}
                 ]
@@ -510,12 +519,22 @@ mod tests {
             Some(glyphs.clone())
         };
 
-        let layout = TileLayout::new(&style, "s", |_| true, (0, 0, 0), &data, load).unwrap();
+        let layout =
+            TileLayout::new(&Registry::with_builtins(), &style, "s", |_| true, (0, 0, 0), &data, load).unwrap();
         assert_eq!(*requested.borrow(), ["local://glyphs/Test/0-255.pbf"]);
         assert_eq!(layout.run(data.clone()).unwrap().buckets(), 2);
 
-        let lines = TileLayout::new(&style, "s", |type_| type_ == "line", (0, 0, 0), &data, |_| None).unwrap();
-        assert_eq!(lines.run(data).unwrap().buckets(), 1);
+        let dots = TileLayout::new(
+            &Registry::with_builtins(),
+            &style,
+            "s",
+            |type_| type_ == "dot",
+            (0, 0, 0),
+            &data,
+            |_| None,
+        )
+        .unwrap();
+        assert_eq!(dots.run(data).unwrap().buckets(), 1);
     }
 
     #[test]
@@ -523,6 +542,7 @@ mod tests {
         let (style, data, glyphs) = (style(), data(), glyphs());
         let symbols = |zoom| {
             let layout = TileLayout::overscaled(
+                &Registry::with_builtins(),
                 &style,
                 "s",
                 |type_| type_ == "symbol",
@@ -552,7 +572,16 @@ mod tests {
     #[test]
     fn feature_state_rewrites_the_buckets_that_depend_on_it() {
         let (style, data) = (style(), data());
-        let layout = TileLayout::new(&style, "s", |type_| type_ == "line", (0, 0, 0), &data, |_| None).unwrap();
+        let layout = TileLayout::new(
+            &Registry::with_builtins(),
+            &style,
+            "s",
+            |type_| type_ == "dot",
+            (0, 0, 0),
+            &data,
+            |_| None,
+        )
+        .unwrap();
         let mut laid_out = layout.run(data).unwrap();
         let patterns = &layout.resolved.patterns;
 
@@ -561,27 +590,29 @@ mod tests {
         let mut on = mln_style::expression::expression::FeatureState::new();
         on.insert("on".to_owned(), Value::Bool(true));
         states.entry("l".to_owned()).or_default().insert("1".to_owned(), on);
-        let roads = laid_out.result.layer_render_data.get("roads").unwrap().bucket.base().bucket_id;
+        let roads = laid_out.result.layer_render_data.get("roads").unwrap().bucket.base().id();
         assert_eq!(laid_out.result.set_feature_state(&states, patterns), [roads]);
     }
 
     #[test]
     fn a_layout_crosses_the_codec_as_it_was_laid_out() {
         let (style, data, glyphs) = (style(), data(), glyphs());
-        let layout = TileLayout::new(&style, "s", |_| true, (0, 0, 0), &data, |_| Some(glyphs.clone())).unwrap();
+        let layout = TileLayout::new(
+            &Registry::with_builtins(),
+            &style,
+            "s",
+            |_| true,
+            (0, 0, 0),
+            &data,
+            |_| Some(glyphs.clone()),
+        )
+        .unwrap();
         let direct = layout.run(data.clone()).unwrap();
-        let mut codec = Codec::new();
+        let mut codec = Codec::new(Registry::with_builtins());
         for _ in 0..2 {
             let reply = codec.send(&layout, data.clone()).unwrap().run();
             let crossed = codec.reply(&reply).unwrap();
-            assert_eq!(crossed.id, direct.id);
-            let comparable = |laid_out: &LaidOut| {
-                [
-                    crate::tile::worker_codec::fields::encode_buckets(&laid_out.result),
-                    laid_out.result.feature_index.encode_grid(),
-                ]
-            };
-            assert_eq!(comparable(&crossed), comparable(&direct));
+            assert_eq!(crossed.encoded().unwrap(), direct.encoded().unwrap());
         }
     }
 }

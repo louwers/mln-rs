@@ -5,7 +5,7 @@
 //! The buckets are the renderer's, reached through its `bench` entry points
 //! (`mln_renderer::bench`).
 
-use mln_renderer::bucket::LayerFeatureStates;
+use mln_renderer::LayerFeatureStates;
 use mln_style::Style;
 use mln_tile::TileData;
 use mln_tile_id::GeometryTileFeature;

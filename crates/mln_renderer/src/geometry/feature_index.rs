@@ -24,6 +24,7 @@ use mln_util::feature::{Feature, feature_id_to_string};
 use mln_util::hash::{HashMap, HashSet};
 use mln_vec_map::VecMap;
 
+use crate::layer::HitTest;
 use crate::query::RenderedQueryOptions;
 use crate::render_layer::RenderLayer;
 use crate::source_state::SourceFeatureState;
@@ -95,7 +96,7 @@ struct Entry {
 type Bounds = [i16; 4];
 
 /// A feature index as a tile's layout fills it.
-pub(crate) struct FeatureIndexBuilder {
+pub struct FeatureIndexBuilder {
     /// The rings' entries and boxes, in insertion order.
     entries: Vec<Entry>,
     boxes: Vec<Bounds>,
@@ -108,7 +109,7 @@ pub(crate) struct FeatureIndexBuilder {
 impl FeatureIndexBuilder {
     /// An empty index of `tile_data`'s features, sharing the tile data.
     #[must_use]
-    pub(crate) fn new(tile_data: Option<TileData>) -> Self {
+    pub fn new(tile_data: Option<TileData>) -> Self {
         FeatureIndexBuilder {
             entries: Vec::new(),
             boxes: Vec::new(),
@@ -146,7 +147,7 @@ impl FeatureIndexBuilder {
 
     /// Adds the feature at `index` of `source_layer_name`, with the box of
     /// each of its rings that reaches into the tile.
-    pub(crate) fn insert(
+    pub fn insert(
         &mut self,
         geometries: &GeometryCollection,
         index: usize,
@@ -386,22 +387,21 @@ impl FeatureIndex {
                 continue;
             };
 
-            let needs_cross_tile_index = render_layer.base().style.info().cross_tile_index;
             // we use the float camera zoom here, not the integer tile ID zoom,
             // because for the query we take into account the actual rendered
             // size of the geometry (#2781)
-            let intersects = needs_cross_tile_index
+            let intersects = render_layer.places_symbols()
                 || region.is_some_and(|region| {
-                    render_layer.query_intersects_feature(
-                        region.geometry,
-                        &feature,
-                        &geometry,
-                        region.view.zoom() as f32,
-                        region.view,
-                        region.pixels_to_tile_units,
-                        region.projector,
-                        &state,
-                    )
+                    render_layer.query_intersects_feature(&HitTest {
+                        query_geometry: region.geometry,
+                        feature: &feature,
+                        geometry: &geometry,
+                        feature_state: &state,
+                        zoom: region.view.zoom() as f32,
+                        view: region.view,
+                        pixels_to_tile_units: region.pixels_to_tile_units,
+                        projector: region.projector,
+                    })
                 });
             if !intersects {
                 continue;
@@ -418,7 +418,7 @@ impl FeatureIndex {
 
             let converted = mln_tile::convert_feature(&feature, &geometry, &tile_id.canonical)?;
             let mut converted = Feature::from(converted);
-            converted.source = render_layer.base().style.base().source.clone();
+            converted.source = render_layer.style().base().source.clone();
             converted.source_layer = source_layer_id.clone();
             converted.state = state.clone();
             result.entry(layer_id.clone()).or_default().push(converted);
@@ -513,9 +513,9 @@ impl FeatureIndex {
     }
 
     /// The index as it crosses, without its tile data.
-    #[cfg(test)]
-    pub(crate) fn encode_grid(&self) -> Vec<u8> {
-        mln_wire::to_vec(&self.to_wire()).unwrap()
+    #[cfg(any(test, feature = "bench"))]
+    pub(crate) fn encode_grid(&self) -> Result<Vec<u8>, String> {
+        mln_wire::to_vec(&self.to_wire())
     }
 }
 
@@ -607,11 +607,11 @@ mod tests {
             builder.insert(&GeometryCollection::from(vec![ring.clone(), ring]), i, "layer", "leader");
         }
         let index = builder.finish();
-        let encoded = index.encode_grid();
+        let encoded = index.encode_grid().unwrap();
         let decoded: FeatureIndex = mln_wire::from_slice(&mln_wire::to_vec(&index).unwrap()).unwrap();
         assert_eq!(decoded.entries, index.entries);
         assert_eq!(decoded.boxes, index.boxes);
-        assert_eq!(decoded.encode_grid(), encoded);
+        assert_eq!(decoded.encode_grid().unwrap(), encoded);
         assert_eq!(index.boxes[14], [560, 10, 565, 4000]);
     }
 

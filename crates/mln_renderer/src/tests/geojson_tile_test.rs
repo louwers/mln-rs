@@ -5,7 +5,6 @@ use geo_types::Point;
 use mln_map_types::MapMode;
 use mln_style::layer::Layer;
 use mln_style::layer_type::LayerStyle;
-use mln_style::layers::Circle;
 use mln_style::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
 use mln_style::sources::geojson::{Features, GeoJSONData, TileCallback, TileFeatures};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
@@ -13,7 +12,8 @@ use mln_util::error::Error;
 use mln_util::pool::TaskGroup;
 
 use crate::Registry;
-use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
+use crate::erased_layer::{ErasedEvaluatedLayer, EvaluatedLayer};
+use crate::tests::fixture_layer::Dot;
 use crate::tests::{OneTile, style};
 use crate::tile::loading::DataOrigin;
 use crate::tile::tile::TileKind;
@@ -85,9 +85,9 @@ fn point_data() -> Arc<dyn GeoJSONData> {
     Arc::new(FakeGeoJSONData { features: Arc::new(features) })
 }
 
-fn circle_layer_properties() -> Arc<dyn ErasedEvaluatedLayer> {
-    let layer = Layer::new(Registry::with_builtins().style(), "circle", "circle", "source").unwrap();
-    Arc::new(EvaluatedLayer::<Circle>::new(LayerStyle::recover(layer.style()).unwrap()))
+fn dot_layer_properties() -> Arc<dyn ErasedEvaluatedLayer> {
+    let layer = Layer::new(Registry::with_builtins().style(), "dot", "circle", "source").unwrap();
+    Arc::new(EvaluatedLayer::<Dot>::new(LayerStyle::recover(layer.style()).unwrap()))
 }
 
 fn root() -> OverscaledTileID {
@@ -99,7 +99,7 @@ fn root() -> OverscaledTileID {
 fn synchronous_update() {
     let test = GeoJSONTileTest::new();
     let mut tiles = test.tiles(point_data(), &[root()], Box::new(crate::tile::tile_workers::InlineWorkers), true);
-    tiles.set_style(&style(&[circle_layer_properties()]));
+    tiles.set_style(&style(&[dot_layer_properties()]));
     assert!(tiles.tile().is_complete());
     assert!(tiles.tile().is_renderable());
 }
@@ -110,7 +110,7 @@ fn issue_7648() {
     let test = GeoJSONTileTest::new();
     let data = point_data();
     let mut tiles = test.tiles(Arc::clone(&data), &[root()], test.pool(), false);
-    let layer_properties = circle_layer_properties();
+    let layer_properties = dot_layer_properties();
     tiles.set_style(&style(&[Arc::clone(&layer_properties)]));
     tiles.settle(&[root()]);
     assert!(tiles.changes() >= 1);
@@ -134,7 +134,7 @@ fn issue_9927() {
     let test = GeoJSONTileTest::new();
     let mut tiles = test.tiles(point_data(), &[root()], test.pool(), false);
 
-    let layer_properties = circle_layer_properties();
+    let layer_properties = dot_layer_properties();
     tiles.set_style(&style(&[Arc::clone(&layer_properties)]));
     tiles.settle(&[root()]);
 
@@ -155,13 +155,13 @@ fn issue_9927() {
     assert!(tiles.with(|tile| tile.parts().1.layer_properties_updated(&layer_properties)));
 }
 
-/// A circle layer as its render layer evaluates it, which records what the
+/// A dot layer as its render layer evaluates it, which records what the
 /// worker codec sends to evaluate it again.
-fn evaluated_circle_layer_properties() -> Arc<dyn ErasedEvaluatedLayer> {
-    let layer = Layer::new(Registry::with_builtins().style(), "circle", "circle", "source").unwrap();
+fn evaluated_dot_layer_properties() -> Arc<dyn ErasedEvaluatedLayer> {
+    let layer = Layer::new(Registry::with_builtins().style(), "dot", "circle", "source").unwrap();
     let mut render_layer = crate::tests::render_layer(layer.style());
     render_layer.evaluate(&PropertyEvaluationParameters::new(0.0));
-    Arc::clone(&render_layer.base().evaluated_properties)
+    render_layer.evaluated()
 }
 
 // Port-only: tiles whose workers are in worker instances on other threads
@@ -170,7 +170,7 @@ fn evaluated_circle_layer_properties() -> Arc<dyn ErasedEvaluatedLayer> {
 fn update_through_the_codec() {
     let test = GeoJSONTileTest::new();
     let workers = Box::new(crate::tests::tile::remote_workers(2));
-    let layer_properties = evaluated_circle_layer_properties();
+    let layer_properties = evaluated_dot_layer_properties();
     // Two tiles, so both instances get one.
     let ids = [OverscaledTileID::from_zxy(1, 0, 0), OverscaledTileID::from_zxy(1, 1, 0)];
     let mut tiles = test.tiles(point_data(), &ids, workers, false);

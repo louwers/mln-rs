@@ -26,18 +26,21 @@ crate-type = ["cdylib", "rlib"]
 # without WebGPU. `mise run web:build` builds both; the page loads one of the
 # two. Each carries only its backend and its shaders.
 default = ["webgpu"]
-webgpu = ["mln_runtime/webgpu", "dep:mln_webgpu"]
-webgl = ["mln_runtime/gl", "dep:mln_gl"]
+webgpu = ["mln_rs/webgpu", "dep:mln_webgpu"]
+webgl = ["mln_rs/gl", "dep:mln_gl"]
 
 # Only the browser target has anything to build.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys.workspace = true
 mln_gestures.workspace = true
+mln_gfx.workspace = true
 # gpu-conformance: the host writes case, which check/check.mjs runs on a
 # backend of the map's kind (src/gpu_check.rs).
-mln_gfx = { workspace = true, features = ["gpu-conformance"] }
+mln_layers = { workspace = true, features = ["gpu-conformance"] }
 mln_gl = { workspace = true, optional = true }
 mln_map.workspace = true
+# The built-in registrations, and the backend of the module's kind.
+mln_rs.workspace = true
 mln_runtime.workspace = true
 mln_storage.workspace = true
 mln_util.workspace = true

@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use mln_headless::HeadlessFrontend;
 use mln_map::{BoundOptions, Map, MapOptions, ProjectionMode};
-use mln_renderer::Registry;
 use mln_renderer::tile::worker_codec::{RemoteWorkers, ThreadWorkerInstances};
 use mln_storage::{FileSource, FileSourceExt};
 use mln_style::Edit;
@@ -50,7 +49,7 @@ impl Impl {
             cache_path: resource_options.cache_path.clone(),
             ..mln_storage::ResourceOptions::default()
         };
-        let registry = Registry::with_builtins();
+        let registry = mln_rs::builtin_registry();
         let mut frontend =
             HeadlessFrontend::new(metadata.size, metadata.pixel_ratio, queue, pool).map_err(|e| e.to_string())?;
         if impl_options.tile_worker_codec > 0 {
@@ -62,7 +61,7 @@ impl Impl {
             frontend.renderer().set_tile_workers(workers);
         }
         let file_source = proxy_loader(&resource_options, pool);
-        let mut map = Map::with_registry(
+        let mut map = Map::new(
             Arc::clone(&file_source),
             MapOptions {
                 map_mode: map_mode(metadata.map_mode),

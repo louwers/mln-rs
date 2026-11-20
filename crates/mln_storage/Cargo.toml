@@ -89,6 +89,8 @@ path = "tests/sync_file_source.rs"
 httpmock.workspace = true
 mln_headless = { package = "mln-rs-headless", path = "../mln_headless" }
 mln_map = { package = "mln-rs-map", path = "../mln_map" }
+# The built-in registrations of the tests' maps.
+mln_rs = { package = "mln-rs", path = "../..", default-features = false }
 mln_test_server = { package = "mln-rs-test-server", path = "../../tools/test-server" }
 
 [lints]

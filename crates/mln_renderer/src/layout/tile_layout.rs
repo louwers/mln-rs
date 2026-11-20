@@ -20,9 +20,9 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
 
 use crate::bucket_parameters::BucketParameters;
+use crate::erased_layer::{ErasedEvaluatedLayer, ErasedLayout};
 use crate::geometry::feature_index::FeatureIndexBuilder;
 use crate::group_by_layout::group_layers;
-use crate::layer_type::{ErasedEvaluatedLayer, ErasedLayout};
 use crate::layout::filter_groups::FilterGroups;
 use crate::layout::layout::{BuildParams, LayoutParameters, SourceLayer};
 use crate::text::glyph_store::ShapeResults;
@@ -115,14 +115,15 @@ impl Dependencies {
 /// in the atlas pages the render thread packed them into, and the shaping of
 /// the text that font faces draw. No bitmaps or pixels.
 #[derive(Debug, Default, mln_wire::Wire)]
-pub(crate) struct Resolved {
+pub struct Resolved {
     /// `None` for a glyph that no font has, or whose range failed.
     pub(crate) glyphs: GlyphPositions,
     pub(crate) shaping: ShapeResults,
     #[wire(with = "sorted::map")]
     pub(crate) icons: ImagePositions,
+    /// Where the patterns are.
     #[wire(with = "sorted::map")]
-    pub(crate) patterns: ImagePositions,
+    pub patterns: ImagePositions,
     /// The requested images that are missing, which a layout lays out
     /// without.
     pub(crate) missing_images: VecSet<String>,

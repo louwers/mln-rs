@@ -64,7 +64,7 @@ impl PropertyExpressionBase {
     }
 
     #[must_use]
-    pub(crate) fn is_runtime_constant(&self) -> bool {
+    pub fn is_runtime_constant(&self) -> bool {
         self.is_runtime_constant
     }
 

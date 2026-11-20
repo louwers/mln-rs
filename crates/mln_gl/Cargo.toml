@@ -58,7 +58,12 @@ web-sys = { workspace = true, features = [
 
 # The frame that `GlGpu`'s test draws.
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-mln_gfx = { workspace = true, features = ["gpu-conformance"] }
+# The layer types' programs and the conformance cases, which the tests compile
+# and draw.
+mln_layers = { package = "mln-rs-layers", path = "../mln_layers", features = [
+  "glsl-es",
+  "gpu-conformance",
+] }
 
 [lints]
 workspace = true

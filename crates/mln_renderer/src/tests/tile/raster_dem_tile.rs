@@ -5,10 +5,10 @@ use mln_util::size::Size;
 use mln_util::tileset::RasterEncoding;
 
 use super::{RasterTileTest, png};
-use crate::buckets::hillshade_bucket::HillshadeBucket;
-use crate::geometry::dem_data::DEMData;
+use crate::geometry::dem_data::DemData;
 use crate::tests::OneTile;
 use crate::tile::contents::Contents;
+use crate::tile::dem::DemContents;
 use crate::tile::job::JobResult;
 use crate::tile::tile::TileKind;
 use crate::tile::tile_workers::InlineWorkers;
@@ -20,7 +20,7 @@ fn tiles(test: &RasterTileTest) -> OneTile {
 }
 
 /// The bucket of the DEM tile `id` shows.
-fn dem<'a>(tiles: &'a OneTile, id: &OverscaledTileID) -> Option<&'a HillshadeBucket> {
+fn dem<'a>(tiles: &'a OneTile, id: &OverscaledTileID) -> Option<&'a DemContents> {
     match tiles.tile_at(id).contents() {
         Some(Contents::Dem(bucket)) => Some(bucket),
         _ => None,
@@ -56,7 +56,7 @@ fn on_error() {
 fn on_parsed() {
     let test = RasterTileTest::new();
     let mut tiles = tiles(&test);
-    let dem = DEMData::new(&PremultipliedImage::new(Size::new(16, 16)), RasterEncoding::Mapbox).expect("DEMData");
+    let dem = DemData::new(&PremultipliedImage::new(Size::new(16, 16)), RasterEncoding::Mapbox).expect("DemData");
     tiles.with(|tile| tile.apply_decode_now(JobResult::Dem(dem)));
     assert!(tiles.tile().is_renderable());
     assert!(tiles.tile().is_settled());
@@ -132,17 +132,17 @@ fn decode_and_backfill_through_the_codec() {
     for id in &ids {
         assert!(tiles.tile_at(id).is_renderable());
         let bucket = dem(&tiles, id).expect("a bucket");
-        let dem = bucket.dem_data();
+        let dem = bucket.dem();
         assert_eq!((dem.dim, dem.stride, dem.encoding), (16, 18, RasterEncoding::Mapbox));
     }
 
     let (left, right) = (dem(&tiles, &ids[0]).unwrap(), dem(&tiles, &ids[1]).unwrap());
     for y in 0..16 {
-        assert_eq!(left.dem_data().get(16, y), right.dem_data().get(0, y));
-        assert_eq!(right.dem_data().get(-1, y), left.dem_data().get(15, y));
+        assert_eq!(left.dem().get(16, y), right.dem().get(0, y));
+        assert_eq!(right.dem().get(-1, y), left.dem().get(15, y));
     }
 
-    // The DEMData constructor's error crosses as the tile's.
+    // The DemData constructor's error crosses as the tile's.
     tiles.set_image(&ids[1], Some(png(16, 8)));
     tiles.settle(&ids[1..]);
     assert_eq!(tiles.errors(), ["raster-dem tiles must be square."]);

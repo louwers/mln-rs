@@ -17,7 +17,7 @@ use mln_map_types::View;
 use mln_util::range::Range;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
-use crate::draw::{DrawGeometry, DrawObjects, Textures, raw_vertices};
+use crate::draw_objects::{DrawGeometry, DrawObjects, Textures, raw_vertices};
 use crate::gfx::context::Context;
 use crate::gfx::indexes::DrawIndexes;
 use crate::gfx::vertex_attribute::Uniforms;

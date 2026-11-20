@@ -17,7 +17,7 @@ use mln_vec_map::VecSet;
 use serde_json::json;
 
 use crate::Registry;
-use crate::layer_type::ErasedEvaluatedLayer;
+use crate::erased_layer::ErasedEvaluatedLayer;
 use crate::layout::tile_layout::{LayoutInput, LayoutParams, Resolved, build, discover};
 use crate::tile::job::{DataInput, DataKey, Job, JobId, JobResult, LayoutJob, Run, SourceKey, TileKey, run_job};
 use crate::tile::tile_workers::InlineWorkers;
@@ -31,7 +31,7 @@ fn layer(mut json: serde_json::Value) -> Arc<dyn ErasedEvaluatedLayer> {
         .unwrap_or_else(|| panic!("{}", error.message));
     let mut render_layer = crate::tests::render_layer(layer.style());
     render_layer.evaluate(&PropertyEvaluationParameters::new(0.0));
-    Arc::clone(&render_layer.base().evaluated_properties)
+    render_layer.evaluated()
 }
 
 /// Two squares.
@@ -77,9 +77,9 @@ fn input<'a>(
 #[test]
 fn discover_records_what_the_layouts_need() {
     let layers = [
-        layer(json!({"id": "outline", "type": "line"})),
-        layer(json!({"id": "dots", "type": "circle"})),
-        layer(json!({"id": "patterned", "type": "fill", "paint": {"fill-pattern": "stripes"}})),
+        layer(json!({"id": "outline", "type": "dot"})),
+        layer(json!({"id": "dots", "type": "dot"})),
+        layer(json!({"id": "patterned", "type": "dot", "paint": {"dot-pattern": "stripes"}})),
         layer(json!({"id": "labels", "type": "symbol", "layout": {
             "text-field": "ab",
             "text-font": ["Test"],
@@ -105,8 +105,9 @@ fn discover_records_what_the_layouts_need() {
 #[test]
 fn build_indexes_the_layouts_that_waited_last() {
     let layers = [
-        layer(json!({"id": "patterned", "type": "fill", "paint": {"fill-pattern": "stripes"}})),
-        layer(json!({"id": "outline", "type": "line"})),
+        layer(json!({"id": "patterned", "type": "dot", "paint": {"dot-pattern": "stripes"}})),
+        // A filter of its own puts the layer in a group of its own.
+        layer(json!({"id": "outline", "type": "dot", "filter": ["!", ["has", "missing"]]})),
     ];
     let data = data();
     let available = VecSet::new();
@@ -159,7 +160,7 @@ fn a_layout_waiting_only_for_unavailable_images_finishes() {
 /// reports that it needs none.
 #[test]
 fn a_layout_without_dependencies_takes_one_job() {
-    let layers = [layer(json!({"id": "outline", "type": "line"}))];
+    let layers = [layer(json!({"id": "outline", "type": "dot"}))];
     let JobResult::Laid(output) = run(&layers, &[], Resolved::default()) else {
         panic!("expected the layout");
     };
@@ -171,7 +172,7 @@ fn a_layout_without_dependencies_takes_one_job() {
 #[test]
 fn a_job_lays_out_the_layers_of_its_zoom() {
     let layers =
-        [layer(json!({"id": "outline", "type": "line"})), layer(json!({"id": "near", "type": "line", "minzoom": 4}))];
+        [layer(json!({"id": "outline", "type": "dot"})), layer(json!({"id": "near", "type": "dot", "minzoom": 4}))];
     let JobResult::Laid(output) = run(&layers, &[], Resolved::default()) else {
         panic!("expected the layout");
     };

@@ -514,7 +514,7 @@ trait Gfx {
     fn frames(&self) -> FramesKind;
     fn renderer(&self) -> Option<&Renderer>;
     fn renderer_mut(&mut self) -> Option<&mut Renderer>;
-    fn renderer_or(&mut self, make: &mut dyn FnMut(&dyn Gpu) -> Renderer) -> &mut Renderer;
+    fn renderer_or(&mut self, make: &mut dyn FnMut(&mut dyn Gpu) -> Renderer) -> &mut Renderer;
     fn with_gpu(&mut self, f: &mut dyn FnMut(&mut dyn Gpu, Option<&mut Renderer>));
     fn tear_down_renderer(&mut self) -> Option<RenderingStats>;
     fn render(&mut self, update: &Arc<UpdateParameters>) -> Option<Handoff>;
@@ -651,9 +651,9 @@ impl<B: LocalBackend> Gfx for BackendGfx<B> {
         self.renderer.as_mut()
     }
 
-    fn renderer_or(&mut self, make: &mut dyn FnMut(&dyn Gpu) -> Renderer) -> &mut Renderer {
+    fn renderer_or(&mut self, make: &mut dyn FnMut(&mut dyn Gpu) -> Renderer) -> &mut Renderer {
         let BackendGfx { backend, renderer, .. } = self;
-        renderer.get_or_insert_with(|| make(&*backend.gpu()))
+        renderer.get_or_insert_with(|| make(&mut *backend.gpu()))
     }
 
     fn with_gpu(&mut self, f: &mut dyn FnMut(&mut dyn Gpu, Option<&mut Renderer>)) {
@@ -1087,7 +1087,7 @@ impl LocalTarget {
     /// The renderer that draws into the target, which `make` makes with the
     /// backend's `Gpu` unless the target has one: the renderer draws with
     /// that `Gpu` only.
-    pub fn renderer_or(&mut self, mut make: impl FnMut(&dyn Gpu) -> Renderer) -> &mut Renderer {
+    pub fn renderer_or(&mut self, mut make: impl FnMut(&mut dyn Gpu) -> Renderer) -> &mut Renderer {
         self.gfx.renderer_or(&mut make)
     }
 

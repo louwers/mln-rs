@@ -13,31 +13,28 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::mem::size_of;
 
 use mln_gfx::gfx_types::AttributeDataType;
-use mln_gfx::shaders::background_layer_ubo::{
-    BackgroundDrawableUnionUBO, BackgroundPatternPropsUBO, BackgroundPropsUBO,
-};
-use mln_gfx::shaders::circle_layer_ubo::{CircleDrawableUBO, CircleEvaluatedPropsUBO};
-use mln_gfx::shaders::color_relief_layer_ubo::{
-    ColorReliefDrawableUBO, ColorReliefEvaluatedPropsUBO, ColorReliefTilePropsUBO,
-};
-use mln_gfx::shaders::fill_extrusion_layer_ubo::{
-    FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO,
-};
-use mln_gfx::shaders::fill_layer_ubo::{FillDrawableUnionUBO, FillEvaluatedPropsUBO, FillTilePropsUnionUBO};
-use mln_gfx::shaders::heatmap_layer_ubo::{HeatmapDrawableUBO, HeatmapEvaluatedPropsUBO};
-use mln_gfx::shaders::heatmap_texture_layer_ubo::HeatmapTexturePropsUBO;
-use mln_gfx::shaders::hillshade_layer_ubo::{HillshadeDrawableUBO, HillshadeEvaluatedPropsUBO, HillshadeTilePropsUBO};
-use mln_gfx::shaders::hillshade_prepare_layer_ubo::{HillshadePrepareDrawableUBO, HillshadePrepareTilePropsUBO};
 use mln_gfx::shaders::layer_composite_ubo::LayerCompositeUBO;
 use mln_gfx::shaders::layer_ubo::{GlobalPaintParamsUBO, ProjectionUBO};
-use mln_gfx::shaders::line_layer_ubo::{LineDrawableUnionUBO, LineEvaluatedPropsUBO, LineTilePropsUnionUBO};
 use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::raster_layer_ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
 use mln_gfx::shaders::shader_defines::*;
 use mln_gfx::shaders::sky_ubo::{AtmospherePropsUBO, SkyPropsUBO};
+use mln_gfx::shaders::source::glsl;
 use mln_gfx::shaders::symbol_layer_ubo::{
     CollisionDrawableUBO, CollisionTilePropsUBO, SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO,
 };
+use mln_gfx::shaders::tile_debug_ubo::{TileDebugDrawableElement, TileDebugPropsUBO};
+use mln_layers::background::ubo::{BackgroundDrawableUnionUBO, BackgroundPatternPropsUBO, BackgroundPropsUBO};
+use mln_layers::circle::ubo::{CircleDrawableUBO, CircleEvaluatedPropsUBO};
+use mln_layers::color_relief::ubo::{ColorReliefDrawableUBO, ColorReliefEvaluatedPropsUBO, ColorReliefTilePropsUBO};
+use mln_layers::fill::ubo::{FillDrawableUnionUBO, FillEvaluatedPropsUBO, FillTilePropsUnionUBO};
+use mln_layers::fill_extrusion::ubo::{FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO};
+use mln_layers::heatmap::ubo::{HeatmapDrawableUBO, HeatmapEvaluatedPropsUBO, HeatmapTexturePropsUBO};
+use mln_layers::hillshade::ubo::{
+    HillshadeDrawableUBO, HillshadeEvaluatedPropsUBO, HillshadePrepareDrawableUBO, HillshadePrepareTilePropsUBO,
+    HillshadeTilePropsUBO,
+};
+use mln_layers::line::ubo::{LineDrawableUnionUBO, LineEvaluatedPropsUBO, LineTilePropsUnionUBO};
+use mln_layers::raster::ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
 use naga::{AddressSpace, ArraySize, Binding, Interpolation, Module, ScalarKind, StorageAccess, TypeInner};
 
 use crate::front_end::parse;
@@ -48,10 +45,12 @@ use crate::layout::{
     image_texture_binding, layer_storage_binding, layer_uniform_binding,
 };
 use crate::variants::variants;
-use crate::{AttributeInfo, BUILT_INS, ShaderSource, Stage, sources};
+use crate::{BUILT_INS, Stage, compose, sources};
 
-fn programs() -> impl Iterator<Item = (&'static Program, &'static ShaderSource)> {
-    BUILT_INS.iter().copied()
+/// Each program with GLSL: the engine's and the built-in layer types'.
+fn programs() -> Vec<(&'static Program, &'static glsl::Source)> {
+    let layers = mln_layers::shader_sources();
+    BUILT_INS.iter().copied().chain(layers.of::<glsl::Source>().iter()).collect()
 }
 
 const STAGES: [Stage; 2] = [Stage::Vertex, Stage::Fragment];
@@ -81,7 +80,7 @@ fn every_program_declares_the_properties_its_glsl_reads_from_uniforms() {
 fn every_layer_program_shows_the_overdraw_inspector() {
     use mln_gfx::shaders::programs::{ATMOSPHERE, CLIPPING_MASK, COLLISION_BOX, COLLISION_CIRCLE, GLOBE_DEPTH, SKY};
     let not_layers = [&CLIPPING_MASK, &COLLISION_BOX, &COLLISION_CIRCLE, &GLOBE_DEPTH, &SKY, &ATMOSPHERE];
-    for &(program, source) in BUILT_INS {
+    for (program, source) in programs() {
         if !not_layers.contains(&program) {
             assert!(
                 [source.glsl.prelude, source.glsl.vertex, source.glsl.fragment]
@@ -95,8 +94,8 @@ fn every_layer_program_shows_the_overdraw_inspector() {
 }
 
 /// The module of a stage of `source` with `defines`, unvalidated.
-fn module(program: &Program, source: &ShaderSource, stage: Stage, defines: &str) -> Module {
-    parse(stage, &source.compose(stage, defines))
+fn module(program: &Program, source: &glsl::Source, stage: Stage, defines: &str) -> Module {
+    parse(stage, &compose(source, stage, defines))
         .unwrap_or_else(|error| panic!("{} ({stage:?}):\n{error}", program.name))
 }
 
@@ -110,7 +109,7 @@ fn every_stage_validates() {
     for (program, source) in programs() {
         for variant in variants(program, true) {
             for stage in STAGES {
-                match crate::Module::parse(stage, &source.compose(stage, &variant.defines)) {
+                match crate::Module::parse(stage, &compose(source, stage, &variant.defines)) {
                     Ok(_) => validated += 1,
                     Err(error) => failures.push(format!("{} ({}, {stage:?}):\n{error}", program.name, variant.name)),
                 }
@@ -245,6 +244,11 @@ fn buffers(program: &Program) -> Vec<(Buffer, usize)> {
         "HillshadePrepareShader" => vec![
             (DrawableUniform(ID_HILLSHADE_PREPARE_DRAWABLE_UBO), size_of::<HillshadePrepareDrawableUBO>()),
             (DrawableUniform(ID_HILLSHADE_PREPARE_TILE_PROPS_UBO), size_of::<HillshadePrepareTilePropsUBO>()),
+        ],
+        "TileDebugShader" => vec![
+            (LayerStorage(ID_LINE_DRAWABLE_UBO), size_of::<TileDebugDrawableElement>()),
+            projection,
+            (LayerUniform(ID_LINE_EVALUATED_PROPS_UBO), size_of::<TileDebugPropsUBO>()),
         ],
         "LineShader" | "LineGradientShader" => vec![
             (LayerStorage(ID_LINE_DRAWABLE_UBO), size_of::<LineDrawableUnionUBO>()),
@@ -544,7 +548,7 @@ fn stage_outputs(module: &Module) -> BTreeMap<u32, Varying> {
 }
 
 /// The vertex and instance attributes of a table.
-fn all_attributes(source: &ShaderSource) -> impl Iterator<Item = &AttributeInfo> {
+fn all_attributes(source: &glsl::Source) -> impl Iterator<Item = &glsl::Attribute> {
     source.attributes.iter().chain(source.instance_attributes)
 }
 
@@ -592,6 +596,7 @@ fn vertex_inputs_are_the_attribute_tables() {
 #[test]
 fn a_walls_next_outline_vertex_has_the_formats_of_its_outline_vertex() {
     let instanced: Vec<_> = programs()
+        .into_iter()
         .filter(|(program, source)| program.name.starts_with("FillExtrusion") && !source.instance_attributes.is_empty())
         .collect();
     assert_eq!(instanced.len(), 2);

@@ -43,7 +43,7 @@ use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
-use crate::draw::Entries;
+use crate::draw_objects::Entries;
 use crate::gfx::buffer::Buffer;
 use crate::gfx::context::Context;
 use crate::gfx::owned::Owned;
@@ -76,13 +76,15 @@ fn layout() -> VertexBufferLayout {
 /// How a draw group's draws composite onto the frame, after they draw
 /// into a texture of their own.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct Composite {
-    pub(crate) opacity: f32,
-    pub(crate) blend: LayerBlendType,
+pub struct Composite {
+    /// The opacity of the drawn texture.
+    pub opacity: f32,
+    /// How the drawn texture blends with the frame.
+    pub blend: LayerBlendType,
     /// Whether the draws test and write the frame's depth and stencil rather
     /// than the texture's own, as a 3D layer's do: they and the other
     /// layers' 3D draws then hide each other as they would on the frame.
-    pub(crate) frame_depth: bool,
+    pub frame_depth: bool,
 }
 
 impl Composite {
@@ -91,7 +93,7 @@ impl Composite {
     /// an opaque layer of the `normal` blend, which draws straight onto the
     /// frame.
     #[must_use]
-    pub(crate) fn of(opacity: f32, blend: LayerBlendType) -> Option<Composite> {
+    pub fn of(opacity: f32, blend: LayerBlendType) -> Option<Composite> {
         let composites = opacity < 1.0 || blend != LayerBlendType::Normal;
         composites.then_some(Composite { opacity, blend, frame_depth: false })
     }

@@ -3,7 +3,7 @@
 //! evaluated for a frame (`PossiblyEvaluated`, an [`Evaluated`] per
 //! property).
 //!
-//! `properties!` declares a set: one named field per
+//! [`properties!`](crate::properties!) declares a set: one named field per
 //! property, with its type, its default and how it evaluates.
 
 use std::fmt::Debug;
@@ -46,7 +46,9 @@ enum Stage {
 }
 
 impl<V: StyleValue> Transitioning<V> {
-    pub(crate) fn new(value: V) -> Self {
+    // Public for the expansion of `properties!`.
+    #[doc(hidden)]
+    pub fn new(value: V) -> Self {
         Transitioning { prior: None, start: None, delay: Duration::ZERO, duration: Duration::ZERO, value }
     }
 
@@ -83,8 +85,10 @@ impl<V: StyleValue> Transitioning<V> {
     ///
     /// Not inlined: the property sets call these once
     /// per property, so inlining copies them into every call.
+    // Public for the expansion of `properties!`.
+    #[doc(hidden)]
     #[inline(never)]
-    pub(crate) fn evaluate(
+    pub fn evaluate(
         &mut self,
         evaluation: Evaluation<V::Type>,
         parameters: &PropertyEvaluationParameters,
@@ -114,7 +118,9 @@ impl<V: StyleValue> Transitioning<V> {
         }
     }
 
-    pub(crate) fn has_transition(&self) -> bool {
+    // Public for the expansion of `properties!`.
+    #[doc(hidden)]
+    pub fn has_transition(&self) -> bool {
         self.prior.is_some()
     }
 
@@ -137,8 +143,10 @@ impl<V: StyleValue> Transitioning<V> {
 
     /// Evaluates the value if it may have changed since `previous`, or
     /// copies `previous`.
+    // Public for the expansion of `properties!`.
+    #[doc(hidden)]
     #[inline(never)]
-    pub(crate) fn evaluate_with_previous(
+    pub fn evaluate_with_previous(
         &mut self,
         evaluation: Evaluation<V::Type>,
         parameters: &PropertyEvaluationParameters,
@@ -167,12 +175,16 @@ impl<V: StyleValue> Transitioning<V> {
 #[derive(Clone, Debug, Default, PartialEq, mln_wire::Wire)]
 pub struct Transitionable<V> {
     pub value: V,
-    pub(crate) options: TransitionOptions,
+    /// The value's own transition, which the style's default transition
+    /// fills in.
+    pub options: TransitionOptions,
 }
 
 impl<V: StyleValue> Transitionable<V> {
+    // Public for the expansion of `properties!`.
+    #[doc(hidden)]
     #[inline(never)]
-    pub(crate) fn transition(&self, params: &TransitionParameters, mut prior: Transitioning<V>) -> Transitioning<V> {
+    pub fn transition(&self, params: &TransitionParameters, mut prior: Transitioning<V>) -> Transitioning<V> {
         if let Some(change) = &params.global_state_change {
             prior.retain_prior_global_state(change);
             if change.state_only && !self.value.transitions_on_global_state_change(Some(&change.changed_keys)) {
@@ -189,6 +201,8 @@ impl<V: StyleValue> Transitionable<V> {
 }
 
 /// The style value type of a property kind.
+#[doc(hidden)]
+#[macro_export]
 macro_rules! __property_value {
     (color_ramp, $t:ty) => {
         $crate::color_ramp_property_value::ColorRampPropertyValue
@@ -197,9 +211,10 @@ macro_rules! __property_value {
         $crate::property_value::PropertyValue<$t>
     };
 }
-pub(crate) use __property_value;
 
 /// How a property kind evaluates.
+#[doc(hidden)]
+#[macro_export]
 macro_rules! __property_evaluation {
     (integer_zoom) => {
         $crate::evaluated::Evaluated::integer_zoom
@@ -217,9 +232,10 @@ macro_rules! __property_evaluation {
         $crate::evaluated::Evaluated::plain
     };
 }
-pub(crate) use __property_evaluation;
 
 /// Whether a property kind may differ by feature.
+#[doc(hidden)]
+#[macro_export]
 macro_rules! __property_data_driven {
     (data_driven) => {
         true
@@ -237,18 +253,21 @@ macro_rules! __property_data_driven {
         false
     };
 }
-pub(crate) use __property_data_driven;
 
-/// Declares a property set as `mod $module`, one named field per property,
-/// followed by the paths its types and defaults need:
+/// Declares a property set: the paint or the layout properties of a layer
+/// type, as `mod $module`, one field per property with its kind, its
+/// evaluated type and its default, followed by the paths its types and
+/// defaults need:
 ///
 /// ```ignore
-/// properties!(
-///     pub mod FillPaintProperties: paint {
-///         fill_antialias: constant bool = true,
-///         fill_color: data_driven Color = Color::black(),
+/// mln_style::properties!(
+///     /// The paint properties of a `dot` layer.
+///     pub mod DotPaintProperties: paint {
+///         dot_color: data_driven Color = Color::black(),
+///         dot_opacity: constant f32 = 1.0,
+///         dot_pattern: cross_faded Image = Image::default(),
 ///     }
-///     use mln_util::Color;
+///     use mln_style::expression::Image, mln_util::Color;
 /// );
 /// ```
 ///
@@ -257,11 +276,29 @@ pub(crate) use __property_data_driven;
 /// or `integer_zoom` for a data-driven property that evaluates at the integer
 /// zoom below. `cross_faded_data_driven` is the patterns' kind;
 /// `cross_faded_or_data_driven`, `line-dasharray`'s, cross-fades a value that
-/// doesn't read the feature as `cross_faded` does. A `paint` set transitions; a `layout` set doesn't.
+/// doesn't read the feature as `cross_faded` does.
+///
+/// The module holds `Defaults`, with a function per property that returns
+/// its default, and the set at each stage:
+/// - A `paint` set transitions. `Transitionable` holds the values as the
+///   style sets them and is the set's [`PaintSet`](crate::layer_type::PaintSet);
+///   `Unevaluated` transitions from earlier values, and `PossiblyEvaluated`
+///   holds an [`Evaluated`] per property.
+/// - A `layout` set doesn't. `Unevaluated` holds the style's values and is
+///   the set's [`LayoutSet`](crate::layer_type::LayoutSet);
+///   `PossiblyEvaluated` holds an [`Evaluated`] per property, and `Values`
+///   each property's value for one feature.
 ///
 /// A paint set's `derived { field: kind T = default => source, }` values
 /// aren't style properties: each takes `source`'s value, and transitions with
 /// the style's default transition.
+///
+/// A layer type's [`StyleLayerType`](crate::layer_type::StyleLayerType)
+/// names its sets, and maps the slots of its
+/// [`PropertyTable`](crate::property_table::PropertyTable) to their fields.
+/// The expansion reaches everything else through `mln_style`, so it needs
+/// nothing in scope but the prelude and the `use` paths.
+#[macro_export]
 macro_rules! properties {
     ($(#[$meta:meta])* $vis:vis mod $module:ident: paint {
         $($field:ident: $kind:ident $t:ty = $default:expr),+ $(,)?
@@ -287,8 +324,8 @@ macro_rules! properties {
                 })+)?
             }
 
-            #[derive(Clone, Debug, Default, PartialEq, ::mln_wire::Wire)]
-            #[wire(default)]
+            #[derive(Clone, Debug, Default, PartialEq, $crate::__private::mln_wire::Wire)]
+            #[wire(crate = $crate::__private::mln_wire, default)]
             pub struct Transitionable {
                 $(pub $field: $crate::properties::Transitionable<$crate::__property_value!($kind, $t)>,)+
             }
@@ -299,8 +336,8 @@ macro_rules! properties {
                 $($(pub $dfield: $crate::properties::Transitioning<$crate::__property_value!($dkind, $dt)>,)+)?
             }
 
-            #[derive(Clone, Debug, Default, ::mln_wire::Wire)]
-            #[wire(default)]
+            #[derive(Clone, Debug, Default, $crate::__private::mln_wire::Wire)]
+            #[wire(crate = $crate::__private::mln_wire, default)]
             pub struct PossiblyEvaluated {
                 $(pub $field: $crate::evaluated::Evaluated<$t>,)+
                 $($(pub $dfield: $crate::evaluated::Evaluated<$dt>,)+)?
@@ -382,7 +419,7 @@ macro_rules! properties {
 
                 fn collect_evaluated_global_state_refs(
                     evaluated: &PossiblyEvaluated,
-                    refs: &mut mln_vec_map::VecSet<String>,
+                    refs: &mut $crate::__private::mln_vec_map::VecSet<String>,
                 ) {
                     evaluated.collect_global_state_refs(refs);
                 }
@@ -442,7 +479,7 @@ macro_rules! properties {
                     result
                 }
 
-                pub fn collect_global_state_refs(&self, refs: &mut mln_vec_map::VecSet<String>) {
+                pub fn collect_global_state_refs(&self, refs: &mut $crate::__private::mln_vec_map::VecSet<String>) {
                     $(if let Some(property_refs) = self.$field.get_value().get_global_state_refs() {
                         refs.extend(property_refs.iter().cloned());
                     })+
@@ -473,14 +510,14 @@ macro_rules! properties {
                 })+
             }
 
-            #[derive(Clone, Debug, Default, PartialEq, ::mln_wire::Wire)]
-            #[wire(default)]
+            #[derive(Clone, Debug, Default, PartialEq, $crate::__private::mln_wire::Wire)]
+            #[wire(crate = $crate::__private::mln_wire, default)]
             pub struct Unevaluated {
                 $(pub $field: $crate::__property_value!($kind, $t),)+
             }
 
-            #[derive(Clone, Debug, Default, ::mln_wire::Wire)]
-            #[wire(default)]
+            #[derive(Clone, Debug, Default, $crate::__private::mln_wire::Wire)]
+            #[wire(crate = $crate::__private::mln_wire, default)]
             pub struct PossiblyEvaluated {
                 $(pub $field: $crate::evaluated::Evaluated<$t>,)+
             }
@@ -526,7 +563,7 @@ macro_rules! properties {
                     result
                 }
 
-                pub fn collect_global_state_refs(&self, refs: &mut mln_vec_map::VecSet<String>) {
+                pub fn collect_global_state_refs(&self, refs: &mut $crate::__private::mln_vec_map::VecSet<String>) {
                     $(if let Some(property_refs) = self.$field.get_global_state_refs() {
                         refs.extend(property_refs.iter().cloned());
                     })+
@@ -538,7 +575,7 @@ macro_rules! properties {
                     self.get_dependencies()
                 }
 
-                fn collect_global_state_refs(&self, refs: &mut mln_vec_map::VecSet<String>) {
+                fn collect_global_state_refs(&self, refs: &mut $crate::__private::mln_vec_map::VecSet<String>) {
                     Unevaluated::collect_global_state_refs(self, refs);
                 }
             }
@@ -556,9 +593,10 @@ macro_rules! properties {
         }
     };
 }
-pub(crate) use properties;
 
 /// The methods of a set's `PossiblyEvaluated`.
+#[doc(hidden)]
+#[macro_export]
 macro_rules! __possibly_evaluated_methods {
     ($($field:ident: $kind:ident),+) => {
         impl PossiblyEvaluated {
@@ -569,7 +607,7 @@ macro_rules! __possibly_evaluated_methods {
                 result
             }
 
-            pub fn collect_global_state_refs(&self, refs: &mut mln_vec_map::VecSet<String>) {
+            pub fn collect_global_state_refs(&self, refs: &mut $crate::__private::mln_vec_map::VecSet<String>) {
                 $(if let Some(property_refs) = self.$field.global_state_refs() {
                     refs.extend(property_refs.iter().cloned());
                 })+
@@ -591,7 +629,6 @@ macro_rules! __possibly_evaluated_methods {
         }
     };
 }
-pub(crate) use __possibly_evaluated_methods;
 
 /// What an overridable property's override reads: whether a formatted
 /// section sets a text color.

@@ -14,7 +14,7 @@ pub(crate) const TIMEOUT: Duration = Duration::from_secs(10);
 pub(crate) const EMPTY_STYLE: &str = r#"{"version":8,"sources":{},"layers":[]}"#;
 
 pub(crate) fn runtime() -> TestRuntime {
-    TestRuntime(Runtime::new(&RuntimeOptions::default()).unwrap())
+    TestRuntime(mln_rs::start_runtime(&RuntimeOptions::default()).unwrap())
 }
 
 /// A runtime that shuts down fully when the test ends: once every map, and

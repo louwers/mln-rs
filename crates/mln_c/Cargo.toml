@@ -20,15 +20,15 @@ name = "maplibre_native_c"
 crate-type = ["cdylib", "staticlib", "rlib"]
 doctest = false
 
-# The runtime's backends (crates/mln_runtime/Cargo.toml). A browser build
-# turns on one of `webgpu` and `gl` (`mise run c-web:build`).
+# The runtime's backends (the facade's, in the root Cargo.toml). A browser
+# build turns on one of `webgpu` and `gl` (`mise run c-web:build`).
 [features]
 default = ["webgpu", "metal", "vulkan", "d3d12", "gl"]
-webgpu = ["mln_runtime/webgpu"]
-metal = ["mln_runtime/metal"]
-vulkan = ["mln_runtime/vulkan", "dep:mln_vulkan"]
-d3d12 = ["mln_runtime/d3d12", "dep:mln_d3d12"]
-gl = ["mln_runtime/gl", "dep:mln_gl"]
+webgpu = ["mln_rs/webgpu"]
+metal = ["mln_rs/metal"]
+vulkan = ["mln_rs/vulkan", "dep:mln_vulkan"]
+d3d12 = ["mln_rs/d3d12", "dep:mln_d3d12"]
+gl = ["mln_rs/gl", "dep:mln_gl"]
 
 [dependencies]
 feature.workspace = true
@@ -41,6 +41,8 @@ mln_frame_pacer.workspace = true
 mln_gestures.workspace = true
 mln_map.workspace = true
 mln_map_types.workspace = true
+# The built-in registrations, which the C API's runtimes have.
+mln_rs.workspace = true
 mln_runtime.workspace = true
 mln_storage.workspace = true
 mln_style.workspace = true
@@ -87,7 +89,7 @@ mln_d3d12 = { workspace = true, optional = true }
 # runtime: its atexit, which marks the start of process exit.
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 libc.workspace = true
-mln_renderer = { workspace = true, features = ["font-face-shaper"] }
+mln_rs = { workspace = true, features = ["font-face-shaper"] }
 
 # The X11 windows of the window target test.
 [target.'cfg(target_os = "linux")'.dev-dependencies]

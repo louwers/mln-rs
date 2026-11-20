@@ -37,6 +37,8 @@ parking_lot.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
+# The built-in registrations, for the tests' registry.
+mln_rs = { package = "mln-rs", path = "../..", default-features = false }
 mln_storage = { workspace = true, features = ["stub-file-source"] }
 
 [lints]

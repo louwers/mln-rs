@@ -1,12 +1,86 @@
-//! raster-dem: each DEM tile takes its border from its eight neighbours'
-//! edges, so that hillshading is seamless across tiles. Whenever a tile's
+//! A raster-dem tile's contents: its DEM, and the geometry that draws it,
+//! which the tile masks.
+//!
+//! Each DEM tile takes its border from its eight neighbours' edges, so that
+//! what the layers make of it is seamless across tiles. Whenever a tile's
 //! DEM arrives, the store backfills it and its renderable neighbours both
 //! ways, so a DEM that reloads refills its border and theirs.
 
 use mln_tile_id::OverscaledTileID;
+use mln_util::identity::SimpleIdentity;
 
-use crate::buckets::hillshade_bucket::HillshadeBucket;
+use crate::geometry::dem_data::DemData;
+use crate::gfx::context::Context;
 use crate::tile::contents::Contents;
+use crate::tile::raster::MaskedGeometry;
+use crate::tile_mask::TileMask;
+
+/// A raster-dem tile's DEM, which the tile backfills from its neighbours,
+/// and the geometry that draws it, which the tile masks.
+pub struct DemContents {
+    id: SimpleIdentity,
+    geometry: MaskedGeometry,
+    dem: DemData,
+    /// Counts the changes of the DEM's border.
+    dem_generation: u64,
+}
+
+impl DemContents {
+    #[must_use]
+    pub(crate) fn new(dem: DemData) -> Self {
+        DemContents { id: SimpleIdentity::new(), geometry: MaskedGeometry::default(), dem, dem_generation: 0 }
+    }
+
+    /// The contents' identity, which tells what the layers keep of them
+    /// apart. Contents of a new DEM have a new one.
+    #[must_use]
+    pub fn id(&self) -> SimpleIdentity {
+        self.id
+    }
+
+    /// The masked geometry.
+    #[must_use]
+    pub fn geometry(&self) -> &MaskedGeometry {
+        &self.geometry
+    }
+
+    /// The DEM, with the border it took from its neighbours.
+    #[must_use]
+    pub fn dem(&self) -> &DemData {
+        &self.dem
+    }
+
+    /// The number of times the DEM's border changed, after which the layers
+    /// make what they made of the DEM again.
+    #[must_use]
+    pub fn dem_generation(&self) -> u64 {
+        self.dem_generation
+    }
+
+    pub(crate) fn set_mask(&mut self, mask: TileMask) {
+        self.geometry.set_mask(mask);
+    }
+
+    /// [`MaskedGeometry::unmask`].
+    pub(crate) fn unmask(&mut self) {
+        self.geometry.unmask();
+    }
+
+    /// Whether there is a DEM to draw.
+    #[must_use]
+    pub fn has_data(&self) -> bool {
+        self.dem.image().valid()
+    }
+
+    /// Readies contents with a DEM for their draws, once and again after
+    /// their geometry changes: moves the geometry into `context`'s stores.
+    /// The layers make the DEM's textures.
+    pub(crate) fn upload(&mut self, context: &mut Context) {
+        if self.has_data() {
+            self.geometry.upload(context);
+        }
+    }
+}
 
 /// Where a neighbour is, in tiles: `dx` east and `dy` south.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -57,8 +131,7 @@ pub(crate) fn backfill_pair(tile: &mut Contents, border: &mut Contents, offset: 
 
 /// Copies the edge of `border`, `tile`'s neighbour at `offset`, into
 /// `tile`'s DEM border.
-fn backfill_border(tile: &mut HillshadeBucket, border: &HillshadeBucket, offset: Offset) {
-    tile.dem_data_mut().backfill_border(border.dem_data(), offset.dx, offset.dy);
-    // The bucket goes through the prepare pass again with the new border.
-    tile.reset_render_target_prepared();
+fn backfill_border(tile: &mut DemContents, border: &DemContents, offset: Offset) {
+    tile.dem.backfill_border(&border.dem, offset.dx, offset.dy);
+    tile.dem_generation += 1;
 }

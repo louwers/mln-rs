@@ -2,11 +2,29 @@
 //! and the generic access by style-spec name that the style JSON, the runtime
 //! and the C API use.
 //!
-//! A table lists each property's name, whether it is paint or layout, and how
-//! its value converts. A property's slot is its index in the table. The type
-//! that holds the values implements `Properties`, which maps a slot to the
-//! field that holds it, typed, so that reading, converting and comparing a
-//! value needs no downcast.
+//! A layer type declares its properties with [`properties!`](crate::properties!)
+//! sets and a [`PropertyTable`]. The table lists each property's style-spec
+//! name, whether it is paint or layout, and how its value converts
+//! ([`PropertyInfo`]); a property's slot is its index in the table. The
+//! type's [`StyleLayerType::visit_property`](crate::layer_type::StyleLayerType::visit_property)
+//! maps each slot to the field of its set that holds the value, typed, for a
+//! [`PropertyVisitor`], so that reading, converting and comparing a value
+//! needs no downcast:
+//!
+//! ```ignore
+//! static PROPERTIES: PropertyTable = PropertyTable::new(
+//!     &[PropertyInfo::paint("dot-color").data_driven(), PropertyInfo::paint("dot-opacity")],
+//!     &[0, 1],
+//! );
+//!
+//! fn visit_property<V: PropertyVisitor<LayerStyle<Dot>>>(slot: usize, visitor: V) -> Option<V::Output> {
+//!     Some(match slot {
+//!         0 => visitor.paint(|s| &s.paint.dot_color, |s| &mut s.paint.dot_color),
+//!         1 => visitor.paint(|s| &s.paint.dot_opacity, |s| &mut s.paint.dot_opacity),
+//!         _ => return None,
+//!     })
+//! }
+//! ```
 
 use std::sync::Arc;
 
@@ -22,7 +40,9 @@ use crate::property_value::StyleValue;
 use crate::style_property::{Kind, StyleProperty};
 use crate::transition_options::TransitionOptions;
 
-/// One property in a [`PropertyTable`].
+/// One property in a [`PropertyTable`]: its name, its scope, and the flags
+/// of its style-spec entry, which set how its values convert and when a
+/// change to one lays the layer out again.
 #[derive(Debug)]
 pub struct PropertyInfo {
     /// The style-spec name.
@@ -42,8 +62,9 @@ pub struct PropertyInfo {
 }
 
 impl PropertyInfo {
+    /// The paint property `name`, without flags.
     #[must_use]
-    pub(crate) const fn paint(name: &'static str) -> Self {
+    pub const fn paint(name: &'static str) -> Self {
         PropertyInfo {
             name,
             scope: PropertyScope::Paint,
@@ -54,8 +75,9 @@ impl PropertyInfo {
         }
     }
 
+    /// The layout property `name`, without flags.
     #[must_use]
-    pub(crate) const fn layout(name: &'static str) -> Self {
+    pub const fn layout(name: &'static str) -> Self {
         PropertyInfo {
             name,
             scope: PropertyScope::Layout,
@@ -66,23 +88,32 @@ impl PropertyInfo {
         }
     }
 
+    /// The property may be an expression that reads the feature: the
+    /// spec's `data-driven`, `cross-faded-data-driven` and data-driven
+    /// layout properties.
     #[must_use]
-    pub(crate) const fn data_driven(self) -> Self {
+    pub const fn data_driven(self) -> Self {
         PropertyInfo { data_driven: true, ..self }
     }
 
+    /// A string constant's `{token}`s become an expression: the spec's
+    /// `tokens`.
     #[must_use]
-    pub(crate) const fn tokens(self) -> Self {
+    pub const fn tokens(self) -> Self {
         PropertyInfo { tokens: true, ..self }
     }
 
+    /// A section of a formatted value can override the paint property's
+    /// value: the spec's `overridable`.
     #[must_use]
-    pub(crate) const fn overridable(self) -> Self {
+    pub const fn overridable(self) -> Self {
         PropertyInfo { overridable: true, ..self }
     }
 
+    /// The property is `cross-faded-data-driven`, so that a change to its
+    /// value lays the layer out again.
     #[must_use]
-    pub(crate) const fn cross_faded(self) -> Self {
+    pub const fn cross_faded(self) -> Self {
         PropertyInfo { cross_faded: true, ..self }
     }
 }
@@ -97,9 +128,27 @@ pub struct PropertyTable {
 }
 
 impl PropertyTable {
-    /// `by_name` lists the slots of `properties` sorted by name.
+    /// The table of `properties`, whose slots `by_name` lists sorted by
+    /// name.
+    ///
+    /// # Panics
+    ///
+    /// If `by_name` isn't each slot of `properties` once, sorted by name, or
+    /// two properties have the same name. In a `static`, that is a compile
+    /// error.
     #[must_use]
     pub const fn new(properties: &'static [PropertyInfo], by_name: &'static [u8]) -> Self {
+        assert!(by_name.len() == properties.len(), "`by_name` must list each slot once");
+        let mut i = 0;
+        while i < by_name.len() {
+            assert!((by_name[i] as usize) < properties.len(), "`by_name` lists a slot past the table's end");
+            // Strictly ascending names also make the slots distinct.
+            if i > 0 {
+                let previous = properties[by_name[i - 1] as usize].name;
+                assert!(name_less(previous, properties[by_name[i] as usize].name), "`by_name` must be sorted by name");
+            }
+            i += 1;
+        }
         PropertyTable { properties, by_name }
     }
 
@@ -121,17 +170,34 @@ impl PropertyTable {
     }
 }
 
+/// Whether `a` sorts before `b`, as `str`'s `Ord` sorts them.
+const fn name_less(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    let mut i = 0;
+    while i < a.len() && i < b.len() {
+        if a[i] != b[i] {
+            return a[i] < b[i];
+        }
+        i += 1;
+    }
+    a.len() < b.len()
+}
+
 /// What to do with the field that holds a property, given functions that
-/// borrow it from the properties' owner `S`.
+/// borrow it from the properties' owner `S`: a paint property's
+/// [`Transitionable`] or a layout property's value. A layer type's
+/// `visit_property` calls the method of the property's scope.
 pub trait PropertyVisitor<S> {
     type Output;
 
+    /// Visits a paint property, which `get` and `get_mut` borrow.
     fn paint<V: StyleValue>(
         self,
         get: fn(&S) -> &Transitionable<V>,
         get_mut: fn(&mut S) -> &mut Transitionable<V>,
     ) -> Self::Output;
 
+    /// Visits a layout property, which `get` and `get_mut` borrow.
     fn layout<V: StyleValue>(self, get: fn(&S) -> &V, get_mut: fn(&mut S) -> &mut V) -> Self::Output;
 }
 

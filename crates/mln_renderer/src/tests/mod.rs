@@ -1,5 +1,7 @@
-// Ports test/gl/bucket.test.cpp (circle, fill, line; on the WebGPU headless
-// backend) and test/renderer/fill_bucket.test.cpp.
+// `dot`, the tests' layer type of a geometry source.
+pub(crate) mod fixture_layer;
+// Ports test/gl/bucket.test.cpp (symbol, raster; on the WebGPU headless
+// backend). mln_layers' tests port the circle, fill and line parts.
 mod bucket_test;
 // Cameras that move faster than the network answers.
 mod fast_camera_test;
@@ -17,7 +19,6 @@ mod text;
 mod gtest_image_store;
 // gtests-core: test/renderer/dynamic_texture_atlas.test.cpp.
 mod gtest_dynamic_texture_atlas;
-mod gtest_fill_mesh;
 // gtests-core: test/renderer/pattern_atlas.test.cpp.
 mod gtest_pattern_atlas;
 mod gtest_tile_lod;
@@ -325,7 +326,7 @@ impl OneTile {
 /// Port-only: a source's style of `layers`, without global state or font
 /// faces.
 pub(crate) fn style(
-    layers: &[std::sync::Arc<dyn crate::layer_type::ErasedEvaluatedLayer>],
+    layers: &[std::sync::Arc<dyn crate::erased_layer::ErasedEvaluatedLayer>],
 ) -> std::sync::Arc<crate::tile::job::SourceStyle> {
     std::sync::Arc::new(crate::tile::job::SourceStyle {
         version: 0,
@@ -365,8 +366,8 @@ pub(crate) fn ready(source: mln_style::Source) -> mln_style::Source {
     }
 }
 
-/// Runs `f` with the `Gpu` of a headless WebGPU backend and a context over
-/// it, which it then tears down.
+/// Runs `f` with the `Gpu` of a headless WebGPU backend, which compiles the
+/// engine's programs, and a context over it, which it then tears down.
 fn with_context(f: impl FnOnce(&mut dyn mln_gfx::gpu::Gpu, &mut crate::gfx::context::Context)) {
     use mln_gfx::RendererBackend as _;
     use mln_gfx::gpu::Gpu as _;

@@ -2,21 +2,23 @@ use std::marker::PhantomData;
 
 use mln_util::Color;
 
-/// The value types a binder keeps statistics for: only `float` tracks a
-/// maximum (the C++ `PaintPropertyStatistics<float>` specialization).
-pub(crate) trait StatisticValue {
-    /// `Some(value)` for `float`, `None` for the types whose statistics are
-    /// the empty primary template.
+/// The value types a binder keeps statistics of: only `f32` tracks a
+/// maximum.
+pub trait StatisticValue {
+    /// The value that the statistics track: `Some(value)` for `f32`, `None`
+    /// for the types they don't track.
     fn statistic(&self) -> Option<f32>;
 }
 
 impl StatisticValue for f32 {
+    #[inline]
     fn statistic(&self) -> Option<f32> {
         Some(*self)
     }
 }
 
 impl StatisticValue for Color {
+    #[inline]
     fn statistic(&self) -> Option<f32> {
         None
     }

@@ -1,13 +1,12 @@
 //! What a program reads, the same on every backend. A backend compiles a
-//! program from the source registered for it.
+//! program from its source in the backend's shading language
+//! ([`source`](crate::shaders::source)).
 
 use std::hash::{Hash, Hasher};
 use std::{fmt, ptr};
 
-use mln_util::hash::HashMap;
-
 use crate::gfx_types::AttributeDataType;
-use crate::gpu::{GpuError, ShaderKey};
+use crate::gpu::ShaderKey;
 use crate::projection_variant::ProjectionVariant;
 use crate::shaders::program_parameters::ProgramParameters;
 
@@ -41,6 +40,15 @@ pub struct Property {
     pub name: &'static str,
     /// The id of the attribute a layer binds the property's values to.
     pub attribute: usize,
+}
+
+impl Property {
+    /// The property `u_<name>`, whose values a layer binds to attribute
+    /// `attribute`.
+    #[must_use]
+    pub const fn new(name: &'static str, attribute: usize) -> Property {
+        Property { name, attribute }
+    }
 }
 
 /// The define that compiles a program's globe variant.
@@ -86,36 +94,5 @@ impl Hash for Program {
 impl fmt::Debug for Program {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.name)
-    }
-}
-
-/// The source of type `S` that a backend compiles each program from.
-pub struct Sources<S: 'static> {
-    sources: HashMap<&'static Program, &'static S>,
-}
-
-impl<S> Sources<S> {
-    /// The sources with each of `built_ins` registered.
-    #[must_use]
-    pub fn new(built_ins: &[(&'static Program, &'static S)]) -> Sources<S> {
-        let mut sources = Sources { sources: HashMap::default() };
-        for &(program, source) in built_ins {
-            sources.register(program, source);
-        }
-        sources
-    }
-
-    /// Registers `source` as `program`'s, in place of any before.
-    pub fn register(&mut self, program: &'static Program, source: &'static S) {
-        self.sources.insert(program, source);
-    }
-
-    /// The source of `program`. Fails with [`GpuError::Unsupported`] if it
-    /// has none.
-    pub fn get(&self, program: &'static Program) -> Result<&'static S, GpuError> {
-        self.sources
-            .get(program)
-            .copied()
-            .ok_or_else(|| GpuError::Unsupported(format!("no source for {}", program.name)))
     }
 }

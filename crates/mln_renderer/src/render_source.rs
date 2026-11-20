@@ -9,15 +9,14 @@ use mln_map_types::MapDebugOptions;
 use mln_style::Source;
 use mln_util::error::Error;
 
-use crate::bucket::UploadNeeds;
+use crate::erased_layer::ErasedEvaluatedLayer;
 use crate::gfx::context::Context;
-use crate::layer_type::ErasedEvaluatedLayer;
 use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::registry::Registry;
 use crate::render_tile::RenderTile;
-use crate::sources::render_image_source::ImageSourceRenderData;
 use crate::sources::render_tile_source::DebugLayers;
 use crate::tile::job::SourceKey;
+use crate::tile::raster::RasterContents;
 use crate::tile::store::TileStore;
 use crate::tile_parameters::TileParameters;
 
@@ -44,7 +43,7 @@ impl RenderSourceBase {
 
 /// An order a layer draws its source's tiles in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum TileOrder {
+pub enum TileOrder {
     /// By tile id, without the tiles held for fade.
     ById,
     /// By opposite y position, so that the lower of two tiles' overlapping
@@ -71,9 +70,8 @@ pub(crate) trait RenderSource {
     fn update_render_tiles(&mut self, store: &mut TileStore, parameters: &RenderTileParameters<'_>);
 
     /// Readies the buckets the frame draws, before its layers make their
-    /// draws, which read what `needs` says, uploading their indexes through
-    /// `context`.
-    fn upload(&mut self, store: &mut TileStore, context: &mut Context, needs: UploadNeeds);
+    /// draws, uploading their indexes through `context`.
+    fn upload(&mut self, store: &mut TileStore, context: &mut Context);
 
     /// Updates the source's draws of the debug overlays; a no-op for the
     /// sources that have none (the image source).
@@ -99,10 +97,16 @@ pub(crate) trait RenderSource {
         None
     }
 
-    /// An image source's image, as the layers that draw it read it; `None`
-    /// for other sources.
-    fn image_render_data(&self) -> Option<ImageSourceRenderData<'_>> {
+    /// An image source's image, which each of its render tiles shows;
+    /// `None` for other sources and before the image arrives.
+    fn image(&self) -> Option<&RasterContents> {
         None
+    }
+
+    /// Whether the source is an image source, even before its image
+    /// arrives.
+    fn is_image(&self) -> bool {
+        false
     }
 
     /// Queries a feature extension; sources without extensions return a null

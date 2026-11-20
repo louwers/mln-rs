@@ -17,7 +17,7 @@ use mln_gfx::gpu::{
     PipelineDesc, PipelineId, ReadbackId, ResourceId, SamplerId, ShaderId, ShaderKey, SlotMap, StencilState,
     TextureDesc, TextureFormat, TextureId, TextureRegion, TextureUsage, VertexBufferLayout, VertexStep,
 };
-use mln_gfx::shaders::program::Sources;
+use mln_gfx::shaders::source::{ShaderSources, Sources, glsl_es};
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::texture2d::{MAX_ACTIVE_TEXTURE_UNITS, SamplerState};
 use mln_gfx::types::{DepthMaskType, TextureFilterType};
@@ -30,7 +30,7 @@ use crate::custom_layer::{CustomLayerEncoder, CustomLayerPass, lend_context};
 use crate::enums::{self, AttributeFormat};
 use crate::renderer_backend::GlContext;
 use crate::shaders::glsl_sources::PRELUDE;
-use crate::shaders::shader_source::{BUILT_INS, ShaderSource};
+use crate::shaders::shader_source::BUILT_INS;
 use crate::state::State;
 #[cfg(not(target_family = "wasm"))]
 use crate::types::FenceID;
@@ -443,7 +443,7 @@ pub struct GlGpu {
     textures: SlotMap<TextureId, Texture>,
     samplers: SlotMap<SamplerId, SamplerID>,
     /// The source each program compiles from.
-    sources: Sources<ShaderSource>,
+    sources: Sources<glsl_es::Source>,
     shaders: SlotMap<ShaderId, Program>,
     layout_tags: LayoutTags,
     pipelines: SlotMap<PipelineId, Pipeline>,
@@ -1333,6 +1333,10 @@ impl Gpu for GlGpu {
             }
         })?;
         Ok(self.samplers.insert(sampler))
+    }
+
+    fn add_shader_sources(&mut self, sources: &ShaderSources) {
+        self.sources.extend(sources.of::<glsl_es::Source>().iter());
     }
 
     fn create_shader(&mut self, key: &ShaderKey) -> Result<ShaderId, GpuError> {

@@ -6,7 +6,6 @@ use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::gpu::{Gpu, ShaderKey};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::programs;
-use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
     ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE, ID_ATMOSPHERE_PROPS_UBO, ID_SKY_POS_VERTEX_ATTRIBUTE, ID_SKY_PROPS_UBO,
 };
@@ -19,7 +18,7 @@ use mln_util::geo::WrapMode;
 use mln_util::identity::SimpleIdentity;
 use mln_util::size::Size;
 
-use crate::draw::{DrawGeometry, DrawObjects, Textures, raw_vertices};
+use crate::draw_objects::{DrawGeometry, DrawObjects, Textures, raw_vertices};
 use crate::gfx::context::Context;
 use crate::gfx::indexes::DrawIndexes;
 use crate::gfx::vertex_attribute::Uniforms;
@@ -39,7 +38,7 @@ fn fullscreen_draw(shader: ShaderKey, vertex_attribute: usize, depth: DrawDepth)
         vertex_count: corners.len(),
         mode: DrawMode::Triangles(),
         indexes: DrawIndexes::new(RenderStaticData::quad_triangle_indices()),
-        segments: vec![SegmentBase::with_lengths(0, 0, 4, 6)],
+        segments: RenderStaticData::quad_triangle_segments(),
         instances: None,
     };
     let objects =

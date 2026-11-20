@@ -1,7 +1,15 @@
+use mln_gfx::shaders::program::Program;
+use mln_gfx::shaders::source::glsl;
 use mln_glsl::variants::variants;
-use mln_glsl::{BUILT_INS, Stage};
+use mln_glsl::{BUILT_INS, Stage, compose};
 
 use crate::shaders::compile_program;
+
+/// Each program with GLSL: the engine's and the built-in layer types'.
+fn programs() -> Vec<(&'static Program, &'static glsl::Source)> {
+    let layers = mln_layers::shader_sources();
+    BUILT_INS.iter().copied().chain(layers.of::<glsl::Source>().iter()).collect()
+}
 
 /// The first word of a SPIR-V module.
 const SPIRV_MAGIC: u32 = 0x0723_0203;
@@ -13,11 +21,11 @@ const SPIRV_MAGIC: u32 = 0x0723_0203;
 fn every_program_compiles_to_spirv() {
     let mut failures = Vec::new();
     let mut compiled = 0;
-    for &(program, source) in BUILT_INS {
+    for (program, source) in programs() {
         for variant in variants(program, true) {
             for stage in [Stage::Vertex, Stage::Fragment] {
                 let at = format!("{} ({}, {stage:?})", program.name, variant.name);
-                match compile_program(stage, &source.compose(stage, &variant.defines)) {
+                match compile_program(stage, &compose(source, stage, &variant.defines)) {
                     Ok(compiled_stage) if compiled_stage.spirv.first() == Some(&SPIRV_MAGIC) => compiled += 1,
                     Ok(_) => failures.push(format!("{at}: no SPIR-V")),
                     Err(error) => failures.push(format!("{at}:\n{error}")),

@@ -43,7 +43,12 @@ libc.workspace = true
 # The conformance suite that `VulkanGpu`'s tests run, and the sets of defines
 # they compile the programs with.
 [target.'cfg(not(any(target_vendor = "apple", target_family = "wasm")))'.dev-dependencies]
-mln_gfx = { workspace = true, features = ["gpu-conformance"] }
+# The layer types' programs and the conformance cases, which the tests compile
+# and draw.
+mln_layers = { package = "mln-rs-layers", path = "../mln_layers", features = [
+  "glsl",
+  "gpu-conformance",
+] }
 mln_glsl = { workspace = true, features = ["variants"] }
 
 [lints]

@@ -2473,6 +2473,7 @@ dependencies = [
  "mln-rs-gfx",
  "mln-rs-gl",
  "mln-rs-image",
+ "mln-rs-layers",
  "mln-rs-map",
  "mln-rs-map-types",
  "mln-rs-math",
@@ -2480,6 +2481,7 @@ dependencies = [
  "mln-rs-polylabel",
  "mln-rs-renderer",
  "mln-rs-runtime",
+ "mln-rs-sources",
  "mln-rs-sprite",
  "mln-rs-storage",
  "mln-rs-storage-offline",
@@ -2501,6 +2503,7 @@ name = "mln-rs-bench"
 version = "0.0.13"
 dependencies = [
  "libc",
+ "mln-rs",
  "mln-rs-bench-workload",
  "mln-rs-conversion",
  "mln-rs-d3d12",
@@ -2565,6 +2568,7 @@ dependencies = [
  "glam",
  "js-sys",
  "libc",
+ "mln-rs",
  "mln-rs-conversion",
  "mln-rs-d3d12",
  "mln-rs-expression",
@@ -2575,7 +2579,6 @@ dependencies = [
  "mln-rs-map",
  "mln-rs-map-types",
  "mln-rs-mtl",
- "mln-rs-renderer",
  "mln-rs-runtime",
  "mln-rs-storage",
  "mln-rs-style",
@@ -2638,6 +2641,7 @@ dependencies = [
  "gpu-allocator",
  "mln-rs-gfx",
  "mln-rs-glsl",
+ "mln-rs-layers",
  "mln-rs-util",
  "naga",
  "parking_lot",
@@ -2654,6 +2658,7 @@ dependencies = [
  "egui-winit",
  "egui_extras",
  "egui_glow",
+ "mln-rs",
  "mln-rs-bench-workload",
  "mln-rs-d3d12",
  "mln-rs-frame-pacer",
@@ -2664,7 +2669,6 @@ dependencies = [
  "mln-rs-map",
  "mln-rs-math",
  "mln-rs-mtl",
- "mln-rs-renderer",
  "mln-rs-runtime",
  "mln-rs-storage",
  "mln-rs-util",
@@ -2818,6 +2822,7 @@ dependencies = [
  "libc",
  "libloading",
  "mln-rs-gfx",
+ "mln-rs-layers",
  "mln-rs-tile-id",
  "mln-rs-util",
  "parking_lot",
@@ -2832,6 +2837,7 @@ name = "mln-rs-glsl"
 version = "0.0.13"
 dependencies = [
  "mln-rs-gfx",
+ "mln-rs-layers",
  "naga",
 ]
 
@@ -2844,6 +2850,7 @@ dependencies = [
  "glam",
  "glow",
  "khronos-egl",
+ "mln-rs",
  "mln-rs-d3d12",
  "mln-rs-expression",
  "mln-rs-feature",
@@ -2891,12 +2898,45 @@ dependencies = [
 ]
 
 [[package]]
+name = "mln-rs-layers"
+version = "0.0.13"
+dependencies = [
+ "bytemuck",
+ "geo-types",
+ "glam",
+ "mln-rs",
+ "mln-rs-conversion",
+ "mln-rs-expression",
+ "mln-rs-feature",
+ "mln-rs-geometry",
+ "mln-rs-gfx",
+ "mln-rs-layers",
+ "mln-rs-map-types",
+ "mln-rs-math",
+ "mln-rs-renderer",
+ "mln-rs-style",
+ "mln-rs-style-types",
+ "mln-rs-text",
+ "mln-rs-tile",
+ "mln-rs-tile-id",
+ "mln-rs-util",
+ "mln-rs-vec-map",
+ "mln-rs-webgpu",
+ "mln-rs-wire",
+ "mlt-core",
+ "parking_lot",
+ "proptest",
+ "serde_json",
+]
+
+[[package]]
 name = "mln-rs-map"
 version = "0.0.13"
 dependencies = [
  "geo-types",
  "geojson",
  "glam",
+ "mln-rs",
  "mln-rs-feature",
  "mln-rs-geometry",
  "mln-rs-map-types",
@@ -2938,6 +2978,7 @@ dependencies = [
  "block2 0.6.2",
  "bytemuck",
  "mln-rs-gfx",
+ "mln-rs-layers",
  "mln-rs-tile-id",
  "mln-rs-util",
  "objc2 0.6.5",
@@ -2975,6 +3016,7 @@ version = "0.0.13"
 dependencies = [
  "fastrand",
  "geojson",
+ "mln-rs",
  "mln-rs-conversion",
  "mln-rs-expression",
  "mln-rs-feature",
@@ -3050,6 +3092,7 @@ dependencies = [
  "js-sys",
  "khronos-egl",
  "libc",
+ "mln-rs",
  "mln-rs-conversion",
  "mln-rs-d3d12",
  "mln-rs-feature",
@@ -3057,6 +3100,7 @@ dependencies = [
  "mln-rs-gestures",
  "mln-rs-gfx",
  "mln-rs-gl",
+ "mln-rs-layers",
  "mln-rs-map",
  "mln-rs-math",
  "mln-rs-mtl",
@@ -3084,6 +3128,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "mln-rs-sources"
+version = "0.0.13"
+dependencies = [
+ "mln-rs-renderer",
+]
+
+[[package]]
 name = "mln-rs-sprite"
 version = "0.0.13"
 dependencies = [
@@ -3107,6 +3158,7 @@ dependencies = [
  "httpmock",
  "jni",
  "js-sys",
+ "mln-rs",
  "mln-rs-feature",
  "mln-rs-headless",
  "mln-rs-map",
@@ -3133,6 +3185,7 @@ name = "mln-rs-storage-offline"
 version = "0.0.13"
 dependencies = [
  "httpmock",
+ "mln-rs",
  "mln-rs-feature",
  "mln-rs-headless",
  "mln-rs-map",
@@ -3154,11 +3207,13 @@ version = "0.0.13"
 dependencies = [
  "geo-types",
  "geojson",
+ "mln-rs",
  "mln-rs-conversion",
  "mln-rs-expression",
  "mln-rs-feature",
  "mln-rs-geojson",
  "mln-rs-image",
+ "mln-rs-layers",
  "mln-rs-map-types",
  "mln-rs-math",
  "mln-rs-storage",
@@ -3328,6 +3383,7 @@ dependencies = [
  "libc",
  "mln-rs-gfx",
  "mln-rs-glsl",
+ "mln-rs-layers",
  "mln-rs-tile-id",
  "mln-rs-util",
  "naga",
@@ -3348,9 +3404,11 @@ name = "mln-rs-web"
 version = "0.0.13"
 dependencies = [
  "js-sys",
+ "mln-rs",
  "mln-rs-gestures",
  "mln-rs-gfx",
  "mln-rs-gl",
+ "mln-rs-layers",
  "mln-rs-map",
  "mln-rs-runtime",
  "mln-rs-storage",
@@ -3391,6 +3449,7 @@ name = "mln-rs-webgpu"
 version = "0.0.13"
 dependencies = [
  "mln-rs-gfx",
+ "mln-rs-layers",
  "mln-rs-util",
  "mln-rs-vec-map",
  "parking_lot",

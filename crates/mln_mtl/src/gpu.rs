@@ -20,8 +20,9 @@ use mln_gfx::gpu::{
     TextureDesc, TextureFormat, TextureId, TextureRegion, TextureUsage, VertexAttribute as GpuVertexAttribute,
     VertexBufferLayout, VertexStep,
 };
-use mln_gfx::shaders::program::{Program, Sources};
+use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::shader_defines::ID_GLOBAL_UBO_INDEX;
+use mln_gfx::shaders::source::{ShaderSources, Sources, msl};
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{
@@ -51,7 +52,7 @@ use parking_lot::{Condvar, Mutex};
 use crate::custom_layer::{AttachmentFormats, CustomLayerEncoder, CustomLayerPass};
 use crate::readback::{buffer_bytes, encode_region_copy};
 use crate::shaders::msl_sources::PRELUDE;
-use crate::shaders::shader_source::{BUILT_INS, ShaderSource};
+use crate::shaders::shader_source::BUILT_INS;
 use crate::{Device, Id};
 
 /// The entries of a stage's buffer argument table.
@@ -100,7 +101,7 @@ struct Texture {
 /// them or its bindings reflected it.
 struct Shader {
     program: &'static Program,
-    source: &'static ShaderSource,
+    source: &'static msl::Source,
     vertex: Id<dyn MTLFunction>,
     /// The attribute indexes that `vertex` reads, by bit.
     active_attributes: u32,
@@ -307,7 +308,7 @@ pub struct MetalGpu {
     textures: SlotMap<TextureId, Texture>,
     samplers: SlotMap<SamplerId, Id<dyn MTLSamplerState>>,
     /// The source each program compiles from.
-    sources: Sources<ShaderSource>,
+    sources: Sources<msl::Source>,
     shaders: SlotMap<ShaderId, Shader>,
     layout_tags: LayoutTags,
     depth_stencil_states: HashMap<(DepthState, StencilState, Option<TextureFormat>), Id<dyn MTLDepthStencilState>>,
@@ -829,7 +830,7 @@ fn new_metal_buffer(
 /// tables' grouping of them.
 fn vertex_descriptor(
     name: &str,
-    source: &ShaderSource,
+    source: &msl::Source,
     active: u32,
     layouts: &[VertexBufferLayout],
 ) -> Result<(Retained<MTLVertexDescriptor>, Vec<Option<usize>>), GpuError> {
@@ -896,7 +897,7 @@ fn active_attributes(function: &ProtocolObject<dyn MTLFunction>) -> u32 {
 
 /// The lowest buffer index of `source`'s attribute tables, past the indexes
 /// of the shader's own buffers, where the vertex buffers bind from.
-fn first_vertex_buffer(source: &ShaderSource) -> Option<usize> {
+fn first_vertex_buffer(source: &msl::Source) -> Option<usize> {
     source.attributes.iter().chain(source.instance_attributes).map(|info| info.buffer_index).min()
 }
 
@@ -910,7 +911,7 @@ fn first_vertex_buffer(source: &ShaderSource) -> Option<usize> {
 fn shader_bindings(
     reflection: &MTLRenderPipelineReflection,
     name: &str,
-    source: &ShaderSource,
+    source: &msl::Source,
     vertex_buffer_indices: &[Option<usize>],
 ) -> Result<(Vec<Binding>, Vec<ShaderBinding>), GpuError> {
     let first_vertex_buffer = first_vertex_buffer(source);
@@ -1347,6 +1348,10 @@ impl Gpu for MetalGpu {
             .newSamplerStateWithDescriptor(&descriptor)
             .ok_or_else(|| GpuError::Invalid("Metal made no sampler".to_owned()))?;
         Ok(self.samplers.insert(sampler))
+    }
+
+    fn add_shader_sources(&mut self, sources: &ShaderSources) {
+        self.sources.extend(sources.of::<msl::Source>().iter());
     }
 
     fn create_shader(&mut self, key: &ShaderKey) -> Result<ShaderId, GpuError> {

@@ -1,4 +1,4 @@
-//! `style-codegen --spec <v8.json> --out <crates/mln_style/src> [--check]`
+//! `style-codegen --spec <v8.json> --out <crates> [--check]`
 //! writes (or with `--check` compares) the generated style code.
 //!
 //! `mise run generate:style` regenerates the checked-in files.
