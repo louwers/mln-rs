@@ -6,7 +6,6 @@ use std::sync::Arc;
 
 use mln_headless::HeadlessFrontend;
 use mln_map::{Map, MapMode, MapOptions, ViewportMode};
-use mln_runtime::{BackendType, Device, DeviceOptions};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{Kind, Resource, Response};
 use mln_util::error::ErrorKind;
@@ -127,20 +126,20 @@ fn stacked_style(terrain: bool) -> String {
     )
 }
 
-/// The still image of `style` on WebGPU, the one backend with terrain's
-/// shaders yet, and the bytes of the textures that drew it; `None` without a
-/// WebGPU device.
+/// The still image of `style` on the harness's device
+/// ([`mln_headless::harness_device`]), and the bytes of the textures that
+/// drew it; `None` where the machine has no such device.
 fn render(style: &str, viewport_mode: ViewportMode) -> Option<(PremultipliedImage, i32)> {
     let size = Size::new(SIDE, SIDE);
     let run_loop = Queue::new();
     let pool = Pool::new(4);
-    let device = match Device::with_backend(BackendType::WebGPU, DeviceOptions::default()) {
+    let device = match mln_headless::harness_device() {
         Ok(device) => device,
         Err(error) if error.kind == ErrorKind::Unsupported => {
-            eprintln!("skipped: no WebGPU device: {error}");
+            eprintln!("skipped: no device: {error}");
             return None;
         }
-        Err(error) => panic!("a WebGPU device: {error}"),
+        Err(error) => panic!("a device: {error}"),
     };
     let mut frontend =
         HeadlessFrontend::with_device(device, size, 1.0, Arc::default(), &run_loop, &pool).expect("a frontend");
