@@ -58,13 +58,6 @@ impl RenderStaticData {
         ]
     }
 
-    /// The segment that draws the two triangles of
-    /// [`raster_vertices`](Self::raster_vertices).
-    #[must_use]
-    pub fn raster_segments() -> Vec<SegmentBase> {
-        vec![SegmentBase::with_lengths(0, 0, 4, 6)]
-    }
-
     /// The triangles of the quads that a segment of
     /// [`quad_segments`](Self::quad_segments) draws, each quad's four
     /// vertices after the last's: of corners 0 and 1 above 2 and 3, the
@@ -88,8 +81,12 @@ impl RenderStaticData {
             .collect()
     }
 
+    /// The segment that draws the two triangles of
+    /// [`quad_triangle_indices`](Self::quad_triangle_indices) over a quad's
+    /// four vertices, such as [`tile_vertices`](Self::tile_vertices) or
+    /// [`raster_vertices`](Self::raster_vertices).
     #[must_use]
-    pub fn tile_triangle_segments() -> Vec<SegmentBase> {
+    pub fn quad_triangle_segments() -> Vec<SegmentBase> {
         vec![SegmentBase::with_lengths(0, 0, 4, 6)]
     }
 }

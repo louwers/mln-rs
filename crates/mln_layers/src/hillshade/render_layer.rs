@@ -378,7 +378,7 @@ impl LayerType for Hillshade {
                         static_data_shared_vertices.clone(),
                         4,
                         static_data_indices.clone().into(),
-                        RenderStaticData::raster_segments(),
+                        RenderStaticData::quad_triangle_segments(),
                     )
                 }
             };
@@ -526,7 +526,7 @@ impl DemTarget {
             vertex_count: 4,
             mode: DrawMode::Triangles(),
             indexes: indexes.clone().into(),
-            segments: RenderStaticData::raster_segments(),
+            segments: RenderStaticData::quad_triangle_segments(),
             instances: None,
         };
         let mut textures = Textures::default();
