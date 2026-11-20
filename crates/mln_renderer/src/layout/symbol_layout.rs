@@ -257,12 +257,6 @@ fn create_layout(
     layout
 }
 
-fn dist(ax: f32, ay: f32, bx: f32, by: f32) -> f32 {
-    let dx = bx - ax;
-    let dy = by - ay;
-    (dx * dx + dy * dy).sqrt()
-}
-
 // The radial offset is to the edge of the text box. In the horizontal
 // direction, the edge of the text box is where glyphs start. But in the
 // vertical direction, the glyphs appear to "start" at the baseline. We don't
@@ -293,6 +287,11 @@ fn evaluate_radial_offset(anchor: SymbolAnchorType, radial_offset: f32) -> [f32;
     }
 
     result
+}
+
+/// The context to evaluate `feature`'s layout at `zoom` in.
+fn feature_context<'a>(zoom: f32, feature: &'a SymbolFeature, canonical: &'a CanonicalTileID) -> EvaluationContext<'a> {
+    EvaluationContext::with_zoom_feature(zoom, Some(feature)).with_canonical_tile_id(Some(canonical))
 }
 
 /// What `prepare_symbols` made of a feature: its text shaped and its icon
@@ -858,7 +857,7 @@ impl SymbolLayout {
         // If style specifies text-variable-anchor-offset, just return it
         if !self.text_variable_anchor_offset.is_undefined() {
             let variable_anchor_offset = self.layout.text_variable_anchor_offset.evaluate(
-                &EvaluationContext::with_zoom_feature(zoom, Some(feature)).with_canonical_tile_id(Some(canonical)),
+                &feature_context(zoom, feature, canonical),
             );
             if variable_anchor_offset.is_empty() {
                 return None;
@@ -883,19 +882,19 @@ impl SymbolLayout {
         }
 
         let variable_text_anchor: Vec<TextVariableAnchorType> = self.layout.text_variable_anchor.evaluate(
-            &EvaluationContext::with_zoom_feature(zoom, Some(feature)).with_canonical_tile_id(Some(canonical)),
+            &feature_context(zoom, feature, canonical),
         );
         if variable_text_anchor.is_empty() {
             return None;
         }
         let (variable_text_offset, radial_offset) = if self.text_radial_offset.is_undefined() {
             let text_offset = self.layout.text_offset.evaluate(
-                &EvaluationContext::with_zoom_feature(zoom, Some(feature)).with_canonical_tile_id(Some(canonical)),
+                &feature_context(zoom, feature, canonical),
             );
             (Some([text_offset[0] * ONE_EM, text_offset[1] * ONE_EM]), 0.0)
         } else {
             let radial_offset = self.layout.text_radial_offset.evaluate(
-                &EvaluationContext::with_zoom_feature(zoom, Some(feature)).with_canonical_tile_id(Some(canonical)),
+                &feature_context(zoom, feature, canonical),
             );
             (None, radial_offset * ONE_EM)
         };
@@ -921,14 +920,13 @@ impl SymbolLayout {
     ) {
         const GLYPH_SIZE: f32 = 24.0;
         let layout = Arc::clone(&self.layout);
-        let context = EvaluationContext::with_zoom_feature(self.zoom, Some(feature))
-            .with_canonical_tile_id(Some(&self.canonical_id));
+        let context = feature_context(self.zoom, feature, &self.canonical_id);
         let values = layout.evaluate_all(&context);
 
         // A text size from a high zoom level, the same for every zoom, so
         // that labels keep their anchors as the map zooms.
         let text_max_size = layout.text_size.evaluate(
-            &EvaluationContext::with_zoom_feature(18.0, Some(feature)).with_canonical_tile_id(Some(&self.canonical_id)),
+            &feature_context(18.0, feature, &self.canonical_id),
         );
         let text_max_box_scale = self.tile_pixel_ratio * text_max_size / GLYPH_SIZE;
         let symbol_spacing = self.tile_pixel_ratio * *layout.symbol_spacing.uniform();
@@ -1106,56 +1104,36 @@ impl SymbolLayout {
         }
     }
 
+    /// Whether a label of `text` was added within `repeat_distance` of
+    /// `anchor`; if not, `anchor` counts from now on.
     fn anchor_is_too_close(&mut self, text: &str, repeat_distance: f32, anchor: &Anchor) -> bool {
-        if let Some(other_anchors) = self.compare_text.get(text) {
-            for other_anchor in other_anchors {
-                if dist(anchor.point.x, anchor.point.y, other_anchor.point.x, other_anchor.point.y) < repeat_distance {
-                    return true;
-                }
-            }
+        let anchors = self.compare_text.get_or_insert_with(text, Vec::new);
+        if anchors.iter().any(|other| anchor.point.distance(other.point) < repeat_distance) {
+            return true;
         }
-        self.compare_text.entry(text.to_owned()).or_default().push(*anchor);
+        anchors.push(*anchor);
         false
     }
 
-    /// Writes the tile distances of `line`'s vertices from `anchor` to
-    /// `tile_distances`, one for each vertex, along the line on either side
-    /// of the anchor. A line without an anchor segment leaves them as they
-    /// are.
-    pub(crate) fn calculate_tile_distances(line: &[GeometryCoordinate], anchor: &Anchor, tile_distances: &mut [f32]) {
-        debug_assert_eq!(line.len(), tile_distances.len());
-        if let Some(segment) = anchor.segment {
-            debug_assert!(segment < line.len());
-            let p = |i: usize| (f32::from(line[i].x), f32::from(line[i].y));
-            let mut sum_forward_length = if segment + 1 < line.len() {
-                let (x, y) = p(segment + 1);
-                dist(anchor.point.x, anchor.point.y, x, y)
-            } else {
-                0.0
-            };
-            let (sx, sy) = p(segment);
-            let mut sum_backward_length = dist(anchor.point.x, anchor.point.y, sx, sy);
-            for (i, tile_distance) in tile_distances.iter_mut().enumerate().skip(segment + 1) {
-                *tile_distance = sum_forward_length;
-                if i < line.len() - 1 {
-                    let (ax, ay) = p(i + 1);
-                    let (bx, by) = p(i);
-                    sum_forward_length += dist(ax, ay, bx, by);
-                }
+    /// The distance along `line` from `anchor` to each of its vertices, on
+    /// either side of the anchor's segment; zeros for an anchor without one.
+    pub(crate) fn tile_distances(line: &[GeometryCoordinate], anchor: &Anchor) -> Vec<f32> {
+        let mut distances = vec![0.0; line.len()];
+        let Some(segment) = anchor.segment.filter(|&segment| segment < line.len()) else {
+            return distances;
+        };
+        let point = |i: usize| Vec2::new(f32::from(line[i].x), f32::from(line[i].y));
+        let mut walk = |vertices: &mut dyn Iterator<Item = usize>| {
+            let (mut sum, mut previous) = (0.0, anchor.point);
+            for i in vertices {
+                sum += previous.distance(point(i));
+                distances[i] = sum;
+                previous = point(i);
             }
-            let mut i = segment;
-            loop {
-                tile_distances[i] = sum_backward_length;
-                if i != 0 {
-                    let (ax, ay) = p(i - 1);
-                    let (bx, by) = p(i);
-                    sum_backward_length += dist(ax, ay, bx, by);
-                    i -= 1;
-                } else {
-                    break; // Add break to avoid unsigned integer overflow when i==0
-                }
-            }
-        }
+        };
+        walk(&mut (segment + 1..line.len()));
+        walk(&mut (0..=segment).rev());
+        distances
     }
 }
 
@@ -1240,8 +1218,7 @@ impl BucketWriter<'_> {
             let BucketWriter { state, paint_properties, canonical, section_overrides, .. } = self;
             let buffer = &mut state.text;
             // The text's runs share its line and the distances along it.
-            let mut distances = vec![0.0; quads.line.len()];
-            SymbolLayout::calculate_tile_distances(&quads.line, &anchor, &mut distances);
+            let distances = SymbolLayout::tile_distances(&quads.line, &anchor);
             let tile_distances = PoolRange::extend(&mut buffer.pools.tile_distances, distances);
             let line = PoolRange::extend(&mut buffer.pools.lines, quads.line.iter().copied());
 
@@ -1535,15 +1512,13 @@ impl SymbolLayout {
             let mut shaped_icon: Option<PositionedIcon> = None;
             let mut text_offset = [0.0_f32, 0.0_f32];
             let layout_text_size = layout.text_size.evaluate(
-                &EvaluationContext::with_zoom_feature(zoom + 1.0, Some(feature))
-                    .with_canonical_tile_id(Some(&canonical)),
+                &feature_context(zoom + 1.0, feature, &canonical),
             );
             let layout_text_size_at_bucket_zoom_level = layout.text_size.evaluate(
-                &EvaluationContext::with_zoom_feature(zoom, Some(feature)).with_canonical_tile_id(Some(&canonical)),
+                &feature_context(zoom, feature, &canonical),
             );
             let layout_icon_size = layout.icon_size.evaluate(
-                &EvaluationContext::with_zoom_feature(zoom + 1.0, Some(feature))
-                    .with_canonical_tile_id(Some(&canonical)),
+                &feature_context(zoom + 1.0, feature, &canonical),
             );
 
             // if feature has text, shape the text
@@ -1552,16 +1527,14 @@ impl SymbolLayout {
                 let text = feature.formatted_text.as_ref().expect("text");
                 let spacing = if i18n::allows_letter_spacing(text.logical_text()) {
                     layout.text_letter_spacing.evaluate(
-                        &EvaluationContext::with_zoom_feature(zoom, Some(feature))
-                            .with_canonical_tile_id(Some(&canonical)),
+                        &feature_context(zoom, feature, &canonical),
                     ) * ONE_EM
                 } else {
                     0.0
                 };
                 let max_width = if is_point_placement {
                     layout.text_max_width.evaluate(
-                        &EvaluationContext::with_zoom_feature(zoom, Some(feature))
-                            .with_canonical_tile_id(Some(&canonical)),
+                        &feature_context(zoom, feature, &canonical),
                     ) * ONE_EM
                 } else {
                     0.0
@@ -1569,7 +1542,7 @@ impl SymbolLayout {
 
                 let variable_anchor_offsets = self.text_variable_anchor_offset(feature);
                 let text_anchor = layout.text_anchor.evaluate(
-                    &EvaluationContext::with_zoom_feature(zoom, Some(feature)).with_canonical_tile_id(Some(&canonical)),
+                    &feature_context(zoom, feature, &canonical),
                 );
                 if variable_anchor_offsets.as_ref().is_none_or(VariableAnchorOffsetCollection::is_empty) {
                     // Layers with variable anchors use the
@@ -1577,8 +1550,7 @@ impl SymbolLayout {
                     // vector is calculated at placement time instead of
                     // layout time
                     let radial_offset = layout.text_radial_offset.evaluate(
-                        &EvaluationContext::with_zoom_feature(zoom, Some(feature))
-                            .with_canonical_tile_id(Some(&canonical)),
+                        &feature_context(zoom, feature, &canonical),
                     );
                     if radial_offset > 0.0 {
                         // The style spec says don't use `text-offset` and
@@ -1588,8 +1560,7 @@ impl SymbolLayout {
                         text_offset = evaluate_radial_offset(text_anchor, radial_offset * ONE_EM);
                     } else {
                         let offset = layout.text_offset.evaluate(
-                            &EvaluationContext::with_zoom_feature(zoom, Some(feature))
-                                .with_canonical_tile_id(Some(&canonical)),
+                            &feature_context(zoom, feature, &canonical),
                         );
                         text_offset = [offset[0] * ONE_EM, offset[1] * ONE_EM];
                     }
@@ -1598,8 +1569,7 @@ impl SymbolLayout {
                     TextJustifyType::Center
                 } else {
                     layout.text_justify.evaluate(
-                        &EvaluationContext::with_zoom_feature(zoom, Some(feature))
-                            .with_canonical_tile_id(Some(&canonical)),
+                        &feature_context(zoom, feature, &canonical),
                     )
                 };
 
@@ -1737,12 +1707,10 @@ impl SymbolLayout {
                 shaped_icon = Some(PositionedIcon::shape_icon(
                     image,
                     &layout.icon_offset.evaluate(
-                        &EvaluationContext::with_zoom_feature(zoom, Some(feature))
-                            .with_canonical_tile_id(Some(&canonical)),
+                        &feature_context(zoom, feature, &canonical),
                     ),
                     layout.icon_anchor.evaluate(
-                        &EvaluationContext::with_zoom_feature(zoom, Some(feature))
-                            .with_canonical_tile_id(Some(&canonical)),
+                        &feature_context(zoom, feature, &canonical),
                     ),
                 ));
                 if image.sdf {
