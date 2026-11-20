@@ -33,7 +33,7 @@ const fn buffer_count() -> u32 {
     let mut index = 0;
     while index < BUFFER_SETS.len() {
         let shape = BUFFER_SETS[index].buffer_shape();
-        count += (shape.storage + shape.uniform) as u32;
+        count += shape.len() as u32;
         index += 1;
     }
     count
@@ -65,12 +65,12 @@ pub(crate) fn buffer_parameter(set: u32, binding: u32) -> Option<(u32, View)> {
         if type_.set_index() == set {
             let binding = binding as usize;
             return match binding {
-                _ if binding < shape.storage => Some((parameter + binding as u32, View::Shader)),
-                _ if binding < shape.storage + shape.uniform => Some((parameter + binding as u32, View::Constant)),
-                _ => None,
+                _ if binding >= shape.len() => None,
+                _ if shape.is_storage(binding) => Some((parameter + binding as u32, View::Shader)),
+                _ => Some((parameter + binding as u32, View::Constant)),
             };
         }
-        parameter += (shape.storage + shape.uniform) as u32;
+        parameter += shape.len() as u32;
     }
     None
 }
@@ -99,8 +99,8 @@ pub(crate) fn create(device: &ID3D12Device) -> Result<ID3D12RootSignature, GpuEr
     };
     for type_ in BUFFER_SETS {
         let shape = type_.buffer_shape();
-        for binding in 0..(shape.storage + shape.uniform) as u32 {
-            let kind = if (binding as usize) < shape.storage {
+        for binding in 0..shape.len() as u32 {
+            let kind = if shape.is_storage(binding as usize) {
                 D3D12_ROOT_PARAMETER_TYPE_SRV
             } else {
                 D3D12_ROOT_PARAMETER_TYPE_CBV

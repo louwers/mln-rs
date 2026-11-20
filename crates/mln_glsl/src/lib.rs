@@ -6,10 +6,11 @@
 //! is: a back end for a y-down clip space flips Y.
 //!
 //! The descriptor sets ([`layout`]) are the global uniform buffers, a layer's
-//! buffers, a drawable's uniform buffers and a drawable's textures. The
-//! renderer's buffer ids are packed: a layer's uniform buffer can have the id
-//! of another layer's storage buffer, so a buffer's binding follows from its
-//! id and from whether it is a storage buffer.
+//! buffers, a drawable's uniform buffers with the vertex buffers its shader
+//! reads as storage buffers, and a drawable's textures. The renderer's buffer
+//! ids are packed: a layer's uniform buffer can have the id of another layer's
+//! storage buffer, so a buffer's binding follows from its id and from whether
+//! it is a storage buffer.
 //!
 //! The crate is empty on Apple platforms and in the browser build.
 

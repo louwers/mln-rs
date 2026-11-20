@@ -41,9 +41,10 @@ use naga::{AddressSpace, ArraySize, Binding, Interpolation, Module, ScalarKind, 
 
 use crate::front_end::parse;
 use crate::layout::{
-    DRAWABLE_UNIFORM_COUNT, DescriptorSetType, GLOBAL_UNIFORM_COUNT, IMAGE_SAMPLER_START, IMAGE_TEXTURE_COUNT,
-    LAYER_STORAGE_COUNT, LAYER_UNIFORM_COUNT, UBO_INDEX_PUSH_CONSTANT_SIZE, drawable_uniform_binding,
-    global_uniform_binding, image_sampler_binding, image_texture_binding, layer_storage_binding, layer_uniform_binding,
+    DRAWABLE_UNIFORM_COUNT, DRAWABLE_VERTEX_COUNT, DescriptorSetType, GLOBAL_UNIFORM_COUNT, IMAGE_SAMPLER_START,
+    IMAGE_TEXTURE_COUNT, LAYER_STORAGE_COUNT, LAYER_UNIFORM_COUNT, UBO_INDEX_PUSH_CONSTANT_SIZE,
+    drawable_uniform_binding, drawable_vertex_binding, global_uniform_binding, image_sampler_binding,
+    image_texture_binding, layer_storage_binding, layer_uniform_binding,
 };
 use crate::variants::variants;
 use crate::{AttributeInfo, PROGRAMS, ShaderSource, Stage, sources};
@@ -89,6 +90,8 @@ enum Buffer {
     LayerStorage(usize),
     LayerUniform(usize),
     DrawableUniform(usize),
+    /// A vertex buffer that the shader reads as a storage buffer.
+    DrawableVertex(usize),
 }
 
 impl Buffer {
@@ -101,6 +104,9 @@ impl Buffer {
             Buffer::DrawableUniform(id) => {
                 (DescriptorSetType::DrawableUniform, drawable_uniform_binding(id).unwrap(), false)
             }
+            Buffer::DrawableVertex(id) => {
+                (DescriptorSetType::DrawableUniform, drawable_vertex_binding(id).unwrap(), true)
+            }
         }
     }
 }
@@ -110,9 +116,10 @@ const DEBUG_UBO_SIZE: usize = 6 * 16;
 
 /// The buffers of each shader, with the size of what the renderer binds: a
 /// uniform buffer's struct, or an element of a storage buffer's vector (the
-/// union of the layer's drawable structs where it has several).
+/// union of the layer's drawable structs where it has several, a word of a
+/// vertex buffer).
 fn buffers(source: &ShaderSource) -> Vec<(Buffer, usize)> {
-    use Buffer::{DrawableUniform, Global, LayerStorage, LayerUniform};
+    use Buffer::{DrawableUniform, DrawableVertex, Global, LayerStorage, LayerUniform};
     let projection = (LayerStorage(ID_PROJECTION_UBO), size_of::<ProjectionUBO>());
     let mut buffers = vec![(Global(ID_GLOBAL_PAINT_PARAMS_UBO), size_of::<GlobalPaintParamsUBO>())];
     let own: Vec<(Buffer, usize)> = match source.name {
@@ -150,6 +157,14 @@ fn buffers(source: &ShaderSource) -> Vec<(Buffer, usize)> {
             projection,
             (LayerUniform(ID_FILL_EVALUATED_PROPS_UBO), size_of::<FillEvaluatedPropsUBO>()),
         ],
+        "FillOutlinePulledShader" => vec![
+            (LayerStorage(ID_FILL_DRAWABLE_UBO), size_of::<FillDrawableUnionUBO>()),
+            projection,
+            (LayerUniform(ID_FILL_EVALUATED_PROPS_UBO), size_of::<FillEvaluatedPropsUBO>()),
+            (DrawableVertex(ID_FILL_OUTLINE_VERTICES), size_of::<u32>()),
+            (DrawableVertex(ID_FILL_OUTLINE_ENDS), size_of::<u32>()),
+            (DrawableVertex(ID_FILL_OUTLINE_PAINT), size_of::<f32>()),
+        ],
         "FillPatternShader" | "FillOutlinePatternShader" | "FillOutlinePatternInstancedShader" => vec![
             (LayerStorage(ID_FILL_DRAWABLE_UBO), size_of::<FillDrawableUnionUBO>()),
             projection,
@@ -160,6 +175,13 @@ fn buffers(source: &ShaderSource) -> Vec<(Buffer, usize)> {
             (LayerStorage(ID_FILL_EXTRUSION_DRAWABLE_UBO), size_of::<FillExtrusionDrawableUBO>()),
             projection,
             (LayerUniform(ID_FILL_EXTRUSION_PROPS_UBO), size_of::<FillExtrusionPropsUBO>()),
+        ],
+        "FillExtrusionPulledShader" => vec![
+            (LayerStorage(ID_FILL_EXTRUSION_DRAWABLE_UBO), size_of::<FillExtrusionDrawableUBO>()),
+            projection,
+            (LayerUniform(ID_FILL_EXTRUSION_PROPS_UBO), size_of::<FillExtrusionPropsUBO>()),
+            (DrawableVertex(ID_FILL_EXTRUSION_WALL_VERTICES), size_of::<u32>()),
+            (DrawableVertex(ID_FILL_EXTRUSION_WALL_PAINT), size_of::<f32>()),
         ],
         "FillExtrusionPatternShader" | "FillExtrusionPatternInstancedShader" | "FillExtrusionPatternWallShader" => {
             vec![
@@ -292,6 +314,9 @@ fn check_layout(set: u32, binding: u32, resource: Resource) -> Result<(), String
             (LAYER_STORAGE_COUNT..LAYER_STORAGE_COUNT + LAYER_UNIFORM_COUNT).contains(&binding)
         }
         (2, Resource::Uniform(_)) => binding < DRAWABLE_UNIFORM_COUNT,
+        (2, Resource::Storage(_)) => {
+            (DRAWABLE_UNIFORM_COUNT..DRAWABLE_UNIFORM_COUNT + DRAWABLE_VERTEX_COUNT).contains(&binding)
+        }
         (3, Resource::Texture) => binding < IMAGE_TEXTURE_COUNT,
         (3, Resource::Sampler) => (IMAGE_SAMPLER_START..IMAGE_SAMPLER_START + IMAGE_TEXTURE_COUNT).contains(&binding),
         _ => false,
@@ -620,6 +645,13 @@ fn bindings_follow_from_the_packed_ids() {
     assert_eq!(drawable_uniform_binding(ID_DEBUG_UBO), Some(3));
     assert_eq!(drawable_uniform_binding(ID_HILLSHADE_PREPARE_DRAWABLE_UBO), Some(0));
     assert_eq!(drawable_uniform_binding(ID_HILLSHADE_PREPARE_TILE_PROPS_UBO), Some(3));
+    // The pulled shaders' vertex buffers, from drawableUBOStartId + 5.
+    assert_eq!(DRAWABLE_UNIFORM_COUNT, 5);
+    assert_eq!(drawable_vertex_binding(ID_FILL_EXTRUSION_WALL_VERTICES), Some(5));
+    assert_eq!(drawable_vertex_binding(ID_FILL_EXTRUSION_WALL_PAINT), Some(6));
+    assert_eq!(drawable_vertex_binding(ID_FILL_OUTLINE_VERTICES), Some(5));
+    assert_eq!(drawable_vertex_binding(ID_FILL_OUTLINE_ENDS), Some(6));
+    assert_eq!(drawable_vertex_binding(ID_FILL_OUTLINE_PAINT), Some(7));
 
     // samplerBindingStartId.
     assert_eq!(IMAGE_SAMPLER_START, 3);

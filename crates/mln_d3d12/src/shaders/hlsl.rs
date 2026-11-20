@@ -42,7 +42,7 @@ fn options() -> hlsl::Options {
     for type_ in DescriptorSetType::ALL {
         let set = type_.set_index();
         let shape = type_.buffer_shape();
-        for binding in 0..(shape.storage + shape.uniform) as u32 {
+        for binding in 0..shape.len() as u32 {
             binding_map.insert(ResourceBinding { group: set, binding }, target(set as u8, binding));
         }
     }

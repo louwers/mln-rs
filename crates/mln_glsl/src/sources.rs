@@ -30,7 +30,9 @@
 //   collision boxes read `height_offset` too.
 // - A fill extrusion wall reads its outline vertex and the next one as
 //   instance attributes, where C++ indexes a storage buffer of the outline
-//   with `gl_InstanceIndex`.
+//   with `gl_InstanceIndex`. The port's pulled walls and outlines have no
+//   vertex inputs: they read the bucket's vertices from storage buffers in
+//   the drawable set, by `gl_VertexIndex`.
 // - Atlas positions go through `atlas_pos`, and the pattern rectangles reach
 //   the fragment stage flat.
 // - On the globe, a symbol vertex stage puts a screen-aligned label whose
@@ -1328,6 +1330,9 @@ pub(crate) const FILL_SHADER_PRELUDE: &str = r"
 #define idFillDrawableUBO           idDrawableReservedVertexOnlyUBO
 #define idFillTilePropsUBO          drawableReservedUBOCount
 #define idFillEvaluatedPropsUBO     layerUBOStartId + 1
+#define idFillOutlineVertices       drawableUBOStartId + 5
+#define idFillOutlineEnds           drawableUBOStartId + 6
+#define idFillOutlinePaint          drawableUBOStartId + 7
 
 ";
 
@@ -2348,6 +2353,112 @@ void main() {
     fragment: FILL_OUTLINE_PATTERN_SHADER.fragment,
 };
 
+/// Port-only: the outlines of the instanced outlines as quads without vertex
+/// inputs. A vertex reads its segment's ends and paint values from storage
+/// buffers, by its index.
+pub(crate) const FILL_OUTLINE_PULLED_SHADER: GlslShaderSource = GlslShaderSource {
+    built_in: "FillOutlinePulledShader",
+    name: "FillOutlinePulledShader",
+    prelude: FILL_SHADER_PRELUDE,
+    vertex: concat!(
+        r"
+
+layout(push_constant) uniform Constants {
+    int ubo_index;
+} constant;
+
+struct FillOutlineDrawableUBO {
+    mat4 matrix;
+    // Interpolations
+    float outline_color_t;
+    float opacity_t;
+    // Where a vertex's paint values are.
+    uint paint_layout;
+    float pad2;
+    vec4 pad3;
+    vec4 pad4;
+};
+
+layout(std140, set = LAYER_SET_INDEX, binding = idFillDrawableUBO) readonly buffer FillOutlineDrawableUBOVector {
+    FillOutlineDrawableUBO drawable_ubo[];
+} drawableVector;
+
+layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
+    ProjectionUBO projection_ubo[];
+} projectionVector;
+
+// The fill's vertices and the ends of the outline segments that start at
+// them, a word each: x and y in its halves.
+layout(std430, set = DRAWABLE_UBO_SET_INDEX, binding = idFillOutlineVertices) readonly buffer FillOutlineVertices {
+    uint vertices[];
+} outlineVertices;
+
+layout(std430, set = DRAWABLE_UBO_SET_INDEX, binding = idFillOutlineEnds) readonly buffer FillOutlineEnds {
+    uint ends[];
+} outlineEnds;
+
+#if !defined(HAS_UNIFORM_u_outline_color) || !defined(HAS_UNIFORM_u_opacity)
+// The fill's paint values, interleaved as the fill reads them.
+layout(std430, set = DRAWABLE_UBO_SET_INDEX, binding = idFillOutlinePaint) readonly buffer FillOutlinePaint {
+    float paint[];
+} outlinePaint;
+#endif
+
+#if !defined(HAS_UNIFORM_u_outline_color)
+layout(location = 0) out vec4 frag_color;
+#endif
+
+#if !defined(HAS_UNIFORM_u_opacity)
+layout(location = 1) out float frag_opacity;
+#endif
+
+layout(location = 2) out vec2 frag_position;
+
+vec2 tile_position(const uint word) {
+    return vec2(int(word << 16u) >> 16, int(word) >> 16);
+}
+",
+        outline_corner!(),
+        r"
+void main() {
+    const FillOutlineDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
+
+    // Four vertices a segment, in the order of the instanced quad's corners.
+    const uint segment = uint(gl_VertexIndex) / 4u;
+    const uint quad_corner = uint(gl_VertexIndex) % 4u;
+
+    // The segment's paint values are its start's.
+    const uint paint_layout = drawable.paint_layout;
+    const uint paint = segment * (paint_layout & 0xffu);
+#if !defined(HAS_UNIFORM_u_outline_color)
+    const uint color_at = paint + ((paint_layout >> 8u) & 0xffu);
+    const vec4 outline_color = vec4(outlinePaint.paint[color_at], outlinePaint.paint[color_at + 1u],
+                                    outlinePaint.paint[color_at + 2u], outlinePaint.paint[color_at + 3u]);
+    frag_color = vec4(unpack_mix_color(outline_color, drawable.outline_color_t));
+#endif
+
+#if !defined(HAS_UNIFORM_u_opacity)
+    const uint opacity_at = paint + ((paint_layout >> 16u) & 0xffu);
+    const vec2 opacity = vec2(outlinePaint.paint[opacity_at], outlinePaint.paint[opacity_at + 1u]);
+    frag_opacity = unpack_mix_float(opacity, drawable.opacity_t);
+#endif
+
+    const ProjectionUBO projection = projectionVector.projection_ubo[constant.ubo_index];
+    const vec2 start = tile_position(outlineVertices.vertices[segment]);
+    const vec2 end = tile_position(outlineEnds.ends[segment]);
+    const vec2 corner = vec2(float(quad_corner >> 1u), float(quad_corner & 1u));
+    vec2 pos;
+    float t;
+    gl_Position = outline_corner(projectTile(start, start, projection), projectTile(end, end, projection), corner, pos, t);
+
+    // From the top left, as gl_FragCoord is.
+    frag_position = vec2(pos.x, paintParams.world_size.y - pos.y);
+}
+"
+    ),
+    fragment: FILL_OUTLINE_SHADER.fragment,
+};
+
 pub(crate) const FILL_OUTLINE_TRIANGULATED_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "FillOutlineTriangulatedShader",
     name: "FillOutlineTriangulatedShader",
@@ -2463,6 +2574,8 @@ pub(crate) const FILL_EXTRUSION_SHADER_PRELUDE: &str = r"
 #define idFillExtrusionDrawableUBO              idDrawableReservedVertexOnlyUBO
 #define idFillExtrusionTilePropsUBO             drawableReservedUBOCount
 #define idFillExtrusionPropsUBO                 layerUBOStartId + 1
+#define idFillExtrusionWallVertices             drawableUBOStartId + 5
+#define idFillExtrusionWallPaint                drawableUBOStartId + 6
 
 ";
 
@@ -2611,34 +2724,10 @@ void main() {
 ",
 };
 
-pub(crate) const FILL_EXTRUSION_INSTANCED_SHADER: GlslShaderSource = GlslShaderSource {
-    built_in: "FillExtrusionInstancedShader",
-    name: "FillExtrusionInstancedShader",
-    prelude: FILL_EXTRUSION_SHADER_PRELUDE,
-    vertex: r"
-invariant gl_Position;
-
-layout(location = 0) in ivec2 in_position;
-
-// An instance: an outline vertex, and the one after it, which the same buffer
-// bound a vertex further on provides.
-layout(location = 1) in ivec2 in_outline_pos;
-layout(location = 2) in uvec2 in_decimals_ed;
-layout(location = 6) in ivec2 in_next_outline_pos;
-layout(location = 7) in uvec2 in_next_decimals_ed;
-
-#if !defined(HAS_UNIFORM_u_color)
-layout(location = 3) in vec4 in_color;
-#endif
-
-#if !defined(HAS_UNIFORM_u_base)
-layout(location = 4) in vec2 in_base;
-#endif
-
-#if !defined(HAS_UNIFORM_u_height)
-layout(location = 5) in vec2 in_height;
-#endif
-
+/// The declarations of the fill extrusion walls' vertex stages.
+macro_rules! fill_extrusion_wall_declarations {
+    () => {
+        r"
 layout(push_constant) uniform Constants {
     int ubo_index;
 } constant;
@@ -2655,7 +2744,8 @@ struct FillExtrusionDrawableUBO {
     float color_t;
     float pattern_from_t;
     float pattern_to_t;
-    float pad1;
+    // Where the pulled walls find a vertex's paint values.
+    uint paint_layout;
 };
 
 layout(std140, set = LAYER_SET_INDEX, binding = idFillExtrusionDrawableUBO) readonly buffer FillExtrusionDrawableUBOVector {
@@ -2682,7 +2772,17 @@ layout(set = LAYER_SET_INDEX, binding = idFillExtrusionPropsUBO) uniform FillExt
 
 layout(location = 0) out vec4 frag_color;
 
-void main() {
+"
+    };
+}
+
+/// The body of the fill extrusion walls' vertex stages, which reads its
+/// wall's corner, outline vertices and paint values from `in_position`,
+/// `in_outline_pos`, `in_decimals_ed`, `in_next_outline_pos`,
+/// `in_next_decimals_ed`, `in_color`, `in_base` and `in_height`.
+macro_rules! fill_extrusion_wall_main {
+    () => {
+        r"
 
     const vec2 instancePos = vec2(in_outline_pos);
     const vec2 instanceDecimalsEd = vec2(in_decimals_ed);
@@ -2768,8 +2868,48 @@ void main() {
     vcolor += vec4(clamp(color.rgb * directional * light_color.rgb, minLight, vec3(1.0)), 0.0);
 
     frag_color = vcolor * props.opacity;
+"
+    };
 }
+
+pub(crate) const FILL_EXTRUSION_INSTANCED_SHADER: GlslShaderSource = GlslShaderSource {
+    built_in: "FillExtrusionInstancedShader",
+    name: "FillExtrusionInstancedShader",
+    prelude: FILL_EXTRUSION_SHADER_PRELUDE,
+    vertex: concat!(
+        r"
+invariant gl_Position;
+
+layout(location = 0) in ivec2 in_position;
+
+// An instance: an outline vertex, and the one after it, which the same buffer
+// bound a vertex further on provides.
+layout(location = 1) in ivec2 in_outline_pos;
+layout(location = 2) in uvec2 in_decimals_ed;
+layout(location = 6) in ivec2 in_next_outline_pos;
+layout(location = 7) in uvec2 in_next_decimals_ed;
+
+#if !defined(HAS_UNIFORM_u_color)
+layout(location = 3) in vec4 in_color;
+#endif
+
+#if !defined(HAS_UNIFORM_u_base)
+layout(location = 4) in vec2 in_base;
+#endif
+
+#if !defined(HAS_UNIFORM_u_height)
+layout(location = 5) in vec2 in_height;
+#endif
+
 ",
+        fill_extrusion_wall_declarations!(),
+        r"
+void main() {
+",
+        fill_extrusion_wall_main!(),
+        r"}
+"
+    ),
     fragment: r"
 
 layout(location = 0) in vec4 frag_color;
@@ -2779,6 +2919,73 @@ void main() {
     out_color = frag_color;
 }
 ",
+};
+
+/// Port-only: the walls of the instanced walls as quads without vertex
+/// inputs. A vertex reads its wall's outline vertices and paint values from
+/// storage buffers, by its index.
+pub(crate) const FILL_EXTRUSION_PULLED_SHADER: GlslShaderSource = GlslShaderSource {
+    built_in: "FillExtrusionPulledShader",
+    name: "FillExtrusionPulledShader",
+    prelude: FILL_EXTRUSION_SHADER_PRELUDE,
+    vertex: concat!(
+        r"
+invariant gl_Position;
+
+",
+        fill_extrusion_wall_declarations!(),
+        r"
+// The bucket's vertices, two words each: the position's x and y in the
+// halves of the first, decimals_ed's in those of the second.
+layout(std430, set = DRAWABLE_UBO_SET_INDEX, binding = idFillExtrusionWallVertices) readonly buffer FillExtrusionWallVertices {
+    uint vertices[];
+} wallVertices;
+
+#if !defined(HAS_UNIFORM_u_color) || !defined(HAS_UNIFORM_u_base) || !defined(HAS_UNIFORM_u_height)
+// The bucket's paint values, interleaved as the roofs read them.
+layout(std430, set = DRAWABLE_UBO_SET_INDEX, binding = idFillExtrusionWallPaint) readonly buffer FillExtrusionWallPaint {
+    float paint[];
+} wallPaint;
+#endif
+
+void main() {
+    // Four vertices a wall, in the order of the static quad's corners.
+    const uint wall = uint(gl_VertexIndex) / 4u;
+    const uint corner = uint(gl_VertexIndex) % 4u;
+    const uint pos = wallVertices.vertices[2u * wall];
+    const uint decimals_ed = wallVertices.vertices[2u * wall + 1u];
+    const uint next_pos = wallVertices.vertices[2u * wall + 2u];
+    const uint next_decimals_ed = wallVertices.vertices[2u * wall + 3u];
+
+    // What the instanced walls read as vertex inputs.
+    const ivec2 in_position = ivec2(corner < 2u ? 1 : 0, int(corner & 1u));
+    const ivec2 in_outline_pos = ivec2(int(pos << 16u) >> 16, int(pos) >> 16);
+    const uvec2 in_decimals_ed = uvec2(decimals_ed & 0xffffu, decimals_ed >> 16u);
+    const ivec2 in_next_outline_pos = ivec2(int(next_pos << 16u) >> 16, int(next_pos) >> 16);
+    const uvec2 in_next_decimals_ed = uvec2(next_decimals_ed & 0xffffu, next_decimals_ed >> 16u);
+
+    // The wall's paint values are its outline vertex's.
+    const uint paint_layout = drawableVector.drawable_ubo[constant.ubo_index].paint_layout;
+    const uint paint = wall * (paint_layout & 0xffu);
+#if !defined(HAS_UNIFORM_u_base)
+    const uint base_at = paint + ((paint_layout >> 8u) & 0xffu);
+    const vec2 in_base = vec2(wallPaint.paint[base_at], wallPaint.paint[base_at + 1u]);
+#endif
+#if !defined(HAS_UNIFORM_u_height)
+    const uint height_at = paint + ((paint_layout >> 16u) & 0xffu);
+    const vec2 in_height = vec2(wallPaint.paint[height_at], wallPaint.paint[height_at + 1u]);
+#endif
+#if !defined(HAS_UNIFORM_u_color)
+    const uint color_at = paint + (paint_layout >> 24u);
+    const vec4 in_color = vec4(wallPaint.paint[color_at], wallPaint.paint[color_at + 1u],
+                               wallPaint.paint[color_at + 2u], wallPaint.paint[color_at + 3u]);
+#endif
+",
+        fill_extrusion_wall_main!(),
+        r"}
+"
+    ),
+    fragment: FILL_EXTRUSION_INSTANCED_SHADER.fragment,
 };
 
 pub(crate) const FILL_EXTRUSION_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
@@ -6970,10 +7177,12 @@ pub(crate) const ALL: &[&GlslShaderSource] = &[
     &FILL_OUTLINE_PATTERN_SHADER,
     &FILL_OUTLINE_INSTANCED_SHADER,
     &FILL_OUTLINE_PATTERN_INSTANCED_SHADER,
+    &FILL_OUTLINE_PULLED_SHADER,
     &FILL_OUTLINE_TRIANGULATED_SHADER,
     &FILL_EXTRUSION_SHADER,
     &FILL_EXTRUSION_INSTANCED_SHADER,
     &FILL_EXTRUSION_WALL_SHADER,
+    &FILL_EXTRUSION_PULLED_SHADER,
     &FILL_EXTRUSION_PATTERN_SHADER,
     &FILL_EXTRUSION_PATTERN_INSTANCED_SHADER,
     &FILL_EXTRUSION_PATTERN_WALL_SHADER,

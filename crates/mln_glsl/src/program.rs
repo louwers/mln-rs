@@ -375,6 +375,10 @@ shader_source!(
     FILL_EXTRUSION_PATTERN_TEXTURES
 );
 shader_source!(FILL_EXTRUSION_WALL_SHADER, "FillExtrusionWallShader", FILL_EXTRUSION_WALL_ATTRIBUTES, &[]);
+// The pulled walls and outlines have no vertex inputs: they read the
+// vertices from storage buffers.
+shader_source!(FILL_EXTRUSION_PULLED_SHADER, "FillExtrusionPulledShader", &[], &[]);
+shader_source!(FILL_OUTLINE_PULLED_SHADER, "FillOutlinePulledShader", &[], &[]);
 shader_source!(
     FILL_EXTRUSION_PATTERN_WALL_SHADER,
     "FillExtrusionPatternWallShader",
@@ -580,10 +584,12 @@ pub static PROGRAMS: &[(BuiltIn, &ShaderSource)] = &[
     (BuiltIn::FillOutlinePatternShader, &FILL_OUTLINE_PATTERN_SHADER),
     (BuiltIn::FillOutlineInstancedShader, &FILL_OUTLINE_INSTANCED_SHADER),
     (BuiltIn::FillOutlinePatternInstancedShader, &FILL_OUTLINE_PATTERN_INSTANCED_SHADER),
+    (BuiltIn::FillOutlinePulledShader, &FILL_OUTLINE_PULLED_SHADER),
     (BuiltIn::FillOutlineTriangulatedShader, &FILL_OUTLINE_TRIANGULATED_SHADER),
     (BuiltIn::FillExtrusionShader, &FILL_EXTRUSION_SHADER),
     (BuiltIn::FillExtrusionInstancedShader, &FILL_EXTRUSION_INSTANCED_SHADER),
     (BuiltIn::FillExtrusionWallShader, &FILL_EXTRUSION_WALL_SHADER),
+    (BuiltIn::FillExtrusionPulledShader, &FILL_EXTRUSION_PULLED_SHADER),
     (BuiltIn::FillExtrusionPatternShader, &FILL_EXTRUSION_PATTERN_SHADER),
     (BuiltIn::FillExtrusionPatternInstancedShader, &FILL_EXTRUSION_PATTERN_INSTANCED_SHADER),
     (BuiltIn::FillExtrusionPatternWallShader, &FILL_EXTRUSION_PATTERN_WALL_SHADER),
