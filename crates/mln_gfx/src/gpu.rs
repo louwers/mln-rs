@@ -586,8 +586,10 @@ pub trait Gpu {
     fn create_sampler(&mut self, state: &SamplerState) -> Result<SamplerId, GpuError>;
 
     /// Adds the sources of `sources` in the backend's shading language to
-    /// the programs it compiles, in place of any it had for them. A backend
-    /// has the engine's own programs' sources itself
+    /// the programs it compiles, in place of any it had for them. A
+    /// replacement applies to later compilations, not to shaders the backend
+    /// has already compiled. A backend has the engine's own programs' sources
+    /// itself
     /// ([`programs`](crate::shaders::programs)).
     fn add_shader_sources(&mut self, sources: &ShaderSources);
     /// Compiles the program of `key`. Fails with [`GpuError::Unsupported`]
