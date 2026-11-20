@@ -9,7 +9,7 @@ use std::collections::BTreeSet;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_map_types::{MapDebugOptions, MapMode, TerrainSkirtLength, TileLodMode, TransformState};
+use mln_map_types::MapMode;
 use mln_storage::Resource;
 use mln_style::Style;
 use mln_style::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
@@ -21,9 +21,6 @@ use mln_text::tagged_string::font_stack_hash;
 use mln_tile::TileData;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;
-use mln_util::geo::LatLng;
-use mln_util::size::Size;
-use mln_util::time::Instant;
 use mln_vec_map::VecSet;
 
 use crate::Registry;
@@ -208,22 +205,15 @@ pub struct SymbolView {
 }
 
 impl SymbolView {
-    /// A view of `size` pixels centered on `center` at `zoom`, of `tiles`
-    /// laid out by the visible symbol layers on `source` in `style`, for a
-    /// continuous map at pixel ratio 1. Fails for a layer the renderer has
-    /// no type for.
-    pub fn new(
-        style: &Style,
-        source: &str,
-        tiles: &[&LaidOut],
-        center: LatLng,
-        zoom: f64,
-        (width, height): (u32, u32),
-    ) -> Result<SymbolView, Error> {
-        let mut state = TransformState::default();
-        state.set_size(Size::new(width, height));
-        state.set_lat_lng_zoom(&center, zoom);
-        let transform = TransformParameters::new(state.view());
+    /// The view that `update` shows of `tiles`, laid out by the visible
+    /// symbol layers on `source` in `update`'s style. Fails for a layer the
+    /// renderer has no type for.
+    ///
+    /// The harness makes the update, since its fields are what a renderer
+    /// takes from a map: a comparison builds this module against libraries
+    /// whose updates have other fields.
+    pub fn new(source: &str, tiles: &[&LaidOut], update: UpdateParameters) -> Result<SymbolView, Error> {
+        let transform = TransformParameters::new(&update.view);
         let render_tiles: Rc<Vec<RenderTile>> = Rc::new(
             tiles
                 .iter()
@@ -235,9 +225,9 @@ impl SymbolView {
                 .collect(),
         );
 
-        let parameters = PropertyEvaluationParameters::new(zoom as f32);
+        let parameters = PropertyEvaluationParameters::new(update.view.zoom() as f32);
         let mut layers = Vec::new();
-        for layer in style.get_layers() {
+        for layer in update.style.get_layers() {
             let base = layer.style().base();
             if base.source != source || base.visibility == VisibilityType::None || layer.info().name != "symbol" {
                 continue;
@@ -259,34 +249,6 @@ impl SymbolView {
             }
         }
 
-        let update = UpdateParameters {
-            style_loaded: true,
-            mode: MapMode::Continuous,
-            pixel_ratio: 1.0,
-            debug_options: MapDebugOptions::NO_DEBUG,
-            time_point: Some(Instant::now()),
-            view: state.view().clone(),
-            min_zoom: state.min_zoom(),
-            max_zoom: state.limits().max_zoom,
-            camera_moving: false,
-            style: Arc::new(style.clone()),
-            sprite_loaded: true,
-            feature_states: Arc::default(),
-            file_source: None,
-            prefetch_zoom_delta: 0,
-            still_image_request: false,
-            still_image_request_id: 0,
-            cross_source_collisions: true,
-            fast_pfor_enabled: false,
-            terrain_skirt_length: TerrainSkirtLength::Auto,
-            elevation: None,
-            tile_lod_min_radius: 3.0,
-            tile_lod_scale: 1.0,
-            tile_lod_pitch_threshold: mln_math::deg2rad(60.0),
-            tile_lod_zoom_shift: 0.0,
-            tile_lod_mode: TileLodMode::Default,
-            subdivision_granularity: style.get_projection().get_subdivision_granularity(),
-        };
         Ok(SymbolView { update: Arc::new(update), layers })
     }
 
