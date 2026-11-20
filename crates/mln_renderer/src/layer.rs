@@ -4,7 +4,8 @@
 //! A layer type is a marker type that implements `mln_style`'s
 //! `StyleLayerType`, its style half, and [`LayerType`], its render half. A
 //! [`RegistryBuilder`](crate::RegistryBuilder) registers it by name with
-//! [`add_layer_type`](crate::RegistryBuilder::add_layer_type).
+//! [`add_layer_type`](crate::RegistryBuilder::add_layer_type), with the
+//! sources of its programs ([`LayerType::add_shader_sources`]).
 //!
 //! The engine holds each layer of the type: its values ([`LayerValues`]),
 //! which it transitions and evaluates, the passes it draws in, whether the
@@ -57,6 +58,7 @@ use std::sync::Arc;
 
 use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
+use mln_gfx::shaders::source::ShaderSources;
 use mln_map_types::{TileProjector, View};
 use mln_style::PropertyEvaluationParameters;
 use mln_style::expression::expression::FeatureState;
@@ -132,6 +134,12 @@ pub trait LayerType: StyleLayerType {
 
     /// The order a layer of the type gets its source's tiles in.
     const TILE_ORDER: TileOrder = TileOrder::ById;
+
+    /// Adds the sources of the programs the type draws with, in each
+    /// shading language it has them in, which a renderer's backend compiles
+    /// the programs from. [`add_layer_type`](crate::RegistryBuilder::add_layer_type)
+    /// calls it.
+    fn add_shader_sources(_sources: &mut ShaderSources) {}
 
     /// Whether the layout of `group` can need glyphs or images. A tile
     /// makes such a group's layout before the dependencies are resolved,

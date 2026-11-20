@@ -18,7 +18,7 @@ use mln_gfx::shaders::layer_ubo::{GlobalPaintParamsUBO, ProjectionUBO};
 use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::shader_defines::*;
 use mln_gfx::shaders::sky_ubo::{AtmospherePropsUBO, SkyPropsUBO};
-use mln_gfx::shaders::source::{ShaderSources, glsl};
+use mln_gfx::shaders::source::glsl;
 use mln_gfx::shaders::symbol_layer_ubo::{
     CollisionDrawableUBO, CollisionTilePropsUBO, SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO,
 };
@@ -49,8 +49,7 @@ use crate::{BUILT_INS, Stage, compose, sources};
 
 /// Each program with GLSL: the engine's and the built-in layer types'.
 fn programs() -> Vec<(&'static Program, &'static glsl::Source)> {
-    let mut layers = ShaderSources::default();
-    mln_layers::add_shader_sources(&mut layers);
+    let layers = mln_layers::shader_sources();
     BUILT_INS.iter().copied().chain(layers.of::<glsl::Source>().iter()).collect()
 }
 

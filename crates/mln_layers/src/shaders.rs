@@ -76,7 +76,7 @@ macro_rules! shader_sources {
             )),
             expect(unused_variables, reason = "a build without a shading language adds no sources")
         )]
-        pub(crate) fn add_shader_sources(sources: &mut mln_gfx::shaders::source::ShaderSources) {
+        fn add_shader_sources(sources: &mut mln_gfx::shaders::source::ShaderSources) {
             #[cfg(all(feature = "glsl", not(any(target_vendor = "apple", target_family = "wasm"))))]
             sources.add(glsl::SOURCES);
             #[cfg(feature = "glsl-es")]

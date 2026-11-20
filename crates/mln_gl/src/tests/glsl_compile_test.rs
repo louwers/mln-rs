@@ -14,7 +14,7 @@ use mln_gfx::gpu::Gpu as _;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
-use mln_gfx::shaders::source::{ShaderSources, glsl_es};
+use mln_gfx::shaders::source::glsl_es;
 use mln_util::hash::HashSet;
 
 use crate::shaders::glsl_sources::PRELUDE;
@@ -34,9 +34,7 @@ fn headless_backend(api: Api) -> Option<RendererBackend> {
     };
     match Device::with_options(options).and_then(|device| RendererBackend::new(&device)) {
         Ok(mut backend) => {
-            let mut sources = ShaderSources::default();
-            mln_layers::add_shader_sources(&mut sources);
-            backend.gpu().add_shader_sources(&sources);
+            backend.gpu().add_shader_sources(&mln_layers::shader_sources());
             Some(backend)
         }
         Err(error) if std::env::var("MLN_RENDER_BACKEND").is_ok_and(|backend| backend.eq_ignore_ascii_case(knob)) => {
@@ -51,8 +49,7 @@ fn headless_backend(api: Api) -> Option<RendererBackend> {
 
 /// Each program with GLSL: the engine's and the built-in layer types'.
 fn programs() -> Vec<(&'static Program, &'static glsl_es::Source)> {
-    let mut layers = ShaderSources::default();
-    mln_layers::add_shader_sources(&mut layers);
+    let layers = mln_layers::shader_sources();
     BUILT_INS.iter().copied().chain(layers.of::<glsl_es::Source>().iter()).collect()
 }
 

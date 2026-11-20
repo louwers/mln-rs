@@ -17,6 +17,7 @@ use mln_gfx::shaders::shader_defines::{
     ID_COLOR_RELIEF_EVALUATED_PROPS_UBO, ID_COLOR_RELIEF_IMAGE_TEXTURE, ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE,
     ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE, ID_COLOR_RELIEF_TILE_PROPS_UBO, ID_PROJECTION_UBO,
 };
+use mln_gfx::shaders::source::ShaderSources;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
@@ -264,6 +265,10 @@ impl LayerType for ColorRelief {
 
     type Drawing = TileDraws<ReliefTile>;
     type State = ReliefState;
+
+    fn add_shader_sources(sources: &mut ShaderSources) {
+        super::add_shader_sources(sources);
+    }
 
     fn new_layer(layer: &LayerValues<ColorRelief>) -> (ReliefState, TileDraws<ReliefTile>) {
         (ReliefState::new(layer), TileDraws::default())

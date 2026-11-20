@@ -15,6 +15,9 @@
 //! other cases draw one color over the whole target, as
 //! [`transparent_replace`] does to check that `Replace` doesn't blend. On
 //! wasm, [`host_writes`] checks writes from JS arrays.
+//!
+//! The cases draw with the engine's programs and this crate's, whose
+//! sources they add to the `Gpu` ([`shader_sources`](crate::shader_sources)).
 
 mod cases;
 
@@ -53,6 +56,13 @@ fn tile_matrix(x_max: f32) -> [f32; 16] {
     let sx = (x_max + 1.0) / EXTENT;
     let sy = 2.0 / EXTENT;
     [sx, 0.0, 0.0, 0.0, 0.0, sy, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, -1.0, -1.0, 0.0, 1.0]
+}
+
+/// The shader of `key`, a program of the engine's or this crate's, whose
+/// sources it adds to `gpu` first.
+fn create_shader(gpu: &mut (impl Gpu + ?Sized), key: &ShaderKey) -> Result<ShaderId, GpuError> {
+    gpu.add_shader_sources(&crate::shader_sources());
+    gpu.create_shader(key)
 }
 
 fn buffer(gpu: &mut (impl Gpu + ?Sized), usage: BufferUsage, data: &[u8]) -> Result<BufferId, GpuError> {
@@ -238,7 +248,7 @@ fn clipped_frame(gpu: &mut impl Gpu) -> Result<ClippedFrame, GpuError> {
         index_buffer: indices,
     })?;
 
-    let background_shader = gpu.create_shader(&ShaderKey::new(&background::programs::BACKGROUND, []))?;
+    let background_shader = create_shader(gpu, &ShaderKey::new(&background::programs::BACKGROUND, []))?;
     let background_layouts = [position_layout(ID_BACKGROUND_POS_VERTEX_ATTRIBUTE)];
     let background_pipeline = gpu.create_pipeline(&PipelineDesc {
         shader: background_shader,

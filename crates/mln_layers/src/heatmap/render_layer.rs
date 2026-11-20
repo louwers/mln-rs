@@ -15,6 +15,7 @@ use mln_gfx::shaders::shader_defines::{
     ID_HEATMAP_COLOR_RAMP_TEXTURE, ID_HEATMAP_DRAWABLE_UBO, ID_HEATMAP_EVALUATED_PROPS_UBO, ID_HEATMAP_IMAGE_TEXTURE,
     ID_HEATMAP_POS_VERTEX_ATTRIBUTE, ID_HEATMAP_TEXTURE_PROPS_UBO, ID_PROJECTION_UBO,
 };
+use mln_gfx::shaders::source::ShaderSources;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
@@ -192,6 +193,10 @@ impl LayerType for Heatmap {
     type View<'a> = LayerBucket<'a, Heatmap>;
     type Drawing = HeatmapDrawing;
     type State = HeatmapState;
+
+    fn add_shader_sources(sources: &mut ShaderSources) {
+        super::add_shader_sources(sources);
+    }
 
     fn create_layout(
         group: &[Arc<EvaluatedLayer<Heatmap>>],

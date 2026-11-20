@@ -43,13 +43,13 @@ pub use hillshade::{Hillshade, HillshadePaintProperties};
 pub use line::{Line, LineLayoutProperties, LinePaintProperties};
 use mln_gfx::shaders::source::ShaderSources;
 use mln_renderer::draw::{BucketChanges, DrawObjects, VertexAttributeArray};
+use mln_renderer::layer::LayerType;
 use mln_renderer::{RegisterError, RegistryBuilder};
 pub use raster::{Raster, RasterPaintProperties};
 
-/// Adds the layer types of this crate, with their programs' sources. Fails
-/// for a name that an earlier call took.
+/// Adds the layer types of this crate. Fails for a name that an earlier
+/// call took.
 pub fn register_layer_types(builder: &mut RegistryBuilder) -> Result<(), RegisterError> {
-    add_shader_sources(builder.shader_sources_mut());
     builder.add_layer_type::<Background>()?;
     builder.add_layer_type::<Fill>()?;
     builder.add_layer_type::<Line>()?;
@@ -62,19 +62,23 @@ pub fn register_layer_types(builder: &mut RegistryBuilder) -> Result<(), Registe
     builder.add_layer_type::<Custom>()
 }
 
-/// Adds the sources of this crate's programs in the shading languages of
-/// its features, which a `Gpu` that draws them without a registry takes too
+/// The sources of this crate's programs in the shading languages of its
+/// features, which [`register_layer_types`] adds to a registry, for a `Gpu`
+/// that draws them without one
 /// ([`Gpu::add_shader_sources`](mln_gfx::gpu::Gpu::add_shader_sources)).
-pub fn add_shader_sources(sources: &mut ShaderSources) {
-    background::add_shader_sources(sources);
-    circle::add_shader_sources(sources);
-    color_relief::add_shader_sources(sources);
-    fill::add_shader_sources(sources);
-    fill_extrusion::add_shader_sources(sources);
-    heatmap::add_shader_sources(sources);
-    hillshade::add_shader_sources(sources);
-    line::add_shader_sources(sources);
-    raster::add_shader_sources(sources);
+#[must_use]
+pub fn shader_sources() -> ShaderSources {
+    let mut sources = ShaderSources::default();
+    Background::add_shader_sources(&mut sources);
+    Fill::add_shader_sources(&mut sources);
+    Line::add_shader_sources(&mut sources);
+    Circle::add_shader_sources(&mut sources);
+    FillExtrusion::add_shader_sources(&mut sources);
+    Heatmap::add_shader_sources(&mut sources);
+    Raster::add_shader_sources(&mut sources);
+    Hillshade::add_shader_sources(&mut sources);
+    ColorRelief::add_shader_sources(&mut sources);
+    sources
 }
 
 /// Copies a bucket's data-driven attributes into a draw again where

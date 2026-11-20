@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
-use mln_gfx::shaders::source::{ShaderSources, wgsl};
+use mln_gfx::shaders::source::wgsl;
 
 use crate::Device;
 use crate::index_table::IndexTable;
@@ -17,8 +17,7 @@ use crate::shaders::shader_source::{BUILT_INS, prelude};
 
 /// Each program with WGSL: the engine's and the built-in layer types'.
 fn programs() -> Vec<(&'static Program, &'static wgsl::Source)> {
-    let mut layers = ShaderSources::default();
-    mln_layers::add_shader_sources(&mut layers);
+    let layers = mln_layers::shader_sources();
     BUILT_INS.iter().copied().chain(layers.of::<wgsl::Source>().iter()).collect()
 }
 
