@@ -906,4 +906,6 @@ fn a_test_is_in_the_suite_of_the_assets_beside_its_directory() {
     assert!(in_assets_suite("../testdata/metrics/integration/gljs/render-tests/terrain/a/style.json", assets));
     assert!(!in_assets_suite("../testdata/metrics/integration/render-tests/terrain/a/style.json", assets));
     assert!(!in_assets_suite("../testdata/metrics/integration/gljs2/render-tests/a/style.json", assets));
+    // A bare directory name has no parent that would hold every style.
+    assert!(!in_assets_suite("render-tests/a/style.json", "assets"));
 }

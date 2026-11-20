@@ -82,9 +82,13 @@ pub struct ResourceOptions {
 }
 
 /// Whether the test whose style is at `style_path` is in the suite that holds
-/// `asset_path`: under its parent directory.
+/// `asset_path`: under its parent directory. An `asset_path` without one, a
+/// bare directory name, has no suite.
 pub(crate) fn in_assets_suite(style_path: &str, asset_path: &str) -> bool {
-    std::path::Path::new(asset_path).parent().is_some_and(|suite| std::path::Path::new(style_path).starts_with(suite))
+    std::path::Path::new(asset_path)
+        .parent()
+        .filter(|suite| !suite.as_os_str().is_empty())
+        .is_some_and(|suite| std::path::Path::new(style_path).starts_with(suite))
 }
 
 /// A frontend, file source and map for one map mode, pixel ratio and
