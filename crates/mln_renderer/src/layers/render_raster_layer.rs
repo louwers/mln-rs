@@ -45,7 +45,7 @@ use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
-use crate::render_tile::{TileContent, TileView, ViewPlace};
+use crate::render_tile::{FindView, TileContent, ViewPlace};
 use crate::tile::contents::Contents;
 use crate::tile_matrix::{projection_data, to_projection_ubo};
 
@@ -181,7 +181,7 @@ impl<'a> RasterView<'a> {
     }
 }
 
-impl<'a> TileView<'a> for RasterView<'a> {
+impl<'a> FindView<'a> for RasterView<'a> {
     fn find(content: TileContent<'a>, _layer_id: &str) -> Option<(Self, ViewPlace)> {
         Some((Self::at(content, ViewPlace::Own)?, ViewPlace::Own))
     }
