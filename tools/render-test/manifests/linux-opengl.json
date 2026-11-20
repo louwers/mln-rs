@@ -12,7 +12,6 @@
     "../testdata/metrics/ignores/platform-linux-opengl.json",
     "../ignores/rust-port.json",
     "../ignores/rust-port-terrain.json",
-    "../ignores/rust-port-terrain-gl.json",
     "../ignores/rust-port-llvmpipe.json"
   ],
   "metric_path": "../testdata/metrics/linux-gcc8-release"

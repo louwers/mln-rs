@@ -1,3 +1,0 @@
-{
-  "gljs/render-tests/terrain/rtt-mipmap-minification/pitch-70": "OpenGL on llvmpipe: 1046 of 65536 pixels differ from GL JS's image (1.6%) where the fixture allows 0.6%; llvmpipe filters the drape's mips anisotropically differently from RADV (0.43%) and lavapipe (0.26%), which moves the moire's texels"
-}
