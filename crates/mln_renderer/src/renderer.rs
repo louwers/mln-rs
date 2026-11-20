@@ -626,6 +626,9 @@ impl Encoder {
         // The layers' draws of the frame, and those of the debug overlays.
         let uploaded = Instant::now();
         orchestrator.update_layer_draws(gpu, &update_parameters, &mut parameters, &frame);
+        // Drapes stale by the camera that wait for a later frame leave this
+        // one incomplete, and ask for the next.
+        let drapes_waiting = orchestrator.terrain().drapes_waiting();
         let layers_updated = Instant::now();
         orchestrator.update_debug_layers(gpu, &mut parameters);
 
@@ -682,8 +685,8 @@ impl Encoder {
         self.timings.upload = (uploaded - start) + (layers_uploaded - layers_updated);
         self.frame_projection = Some(frame_projection);
         DrawnFrame {
-            mode: if frame.loaded { RenderMode::Full } else { RenderMode::Partial },
-            needs_repaint: frame.needs_repaint,
+            mode: if frame.loaded && !drapes_waiting { RenderMode::Full } else { RenderMode::Partial },
+            needs_repaint: frame.needs_repaint || drapes_waiting,
             repaint_at: frame.repaint_at,
             placement_changed: frame.placement_changed,
             still_image_request_id: if update_parameters.still_image_request {

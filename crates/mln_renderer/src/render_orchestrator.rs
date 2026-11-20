@@ -1370,7 +1370,7 @@ impl RenderOrchestrator {
                     drapes.key_layer(stack, &*self.layers[*index as usize], layer_source);
                 }
             }
-            drapes.choose(!paint_parameters.camera_moving);
+            drapes.choose(!paint_parameters.camera_moving, update_parameters.mode == MapMode::Continuous);
             for stack in 0..self.stacks.len() {
                 for index in self.stacks.layers(stack) {
                     let layer_source = layer_source(

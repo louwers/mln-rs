@@ -11,17 +11,18 @@
 //!
 //! A drape draws again only when what its layers would draw it from
 //! differs from what they drew it from ([`DrapeKey`]); while the camera
-//! moves, a drape drawn at another zoom stays, as in GL JS. A drape whose
-//! layers make no draw has no texture, so a stack that draws nothing in a
-//! tile holds no memory there.
+//! moves, a drape drawn at another zoom stays, as in GL JS, and at rest a
+//! continuous map draws those stale only by the camera one tile a frame
+//! ([`Drapes::choose`]). A drape whose layers make no draw has no texture,
+//! so a stack that draws nothing in a tile holds no memory there.
 //!
 //! A drape's side follows its tile's on screen ([`shown_size`]): GL JS's
 //! where the tile shows large, fewer texels where it shows small. A byte
 //! cap ([`BYTE_CAP`]) lowers the sides of the tiles that show smallest
 //! where the drapes would hold more; it never drops a tile. A drape whose
-//! side changes draws again once the camera rests, as one drawn at another
-//! zoom does, or at once where it is larger, so that the cap holds while
-//! the camera moves.
+//! side grows draws again once the camera rests, as one drawn at another
+//! zoom does, and one whose side shrinks at once, so that the cap holds
+//! while the camera moves.
 
 use std::sync::Arc;
 
@@ -187,22 +188,45 @@ struct DrapeKey {
     bearing: Option<f64>,
 }
 
+/// How a drape's key differs from the one it was drawn from, least to most
+/// severe.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Difference {
+    None,
+    /// Only by the camera: the layers' values evaluated at another zoom,
+    /// the zoom, or the bearing a layer draws by.
+    Camera,
+    /// By what the drape shows: its layers, their styles, paint revisions
+    /// or tiles.
+    Content,
+}
+
 impl DrapeKey {
-    /// Whether a drape drawn from `drawn` has the texels that this key would
-    /// draw: of the same layers, with the same styles and paint revisions,
-    /// from the same tiles, and `at_rest`, with the same values at the same
-    /// zoom and bearing. A camera that moves keeps drapes drawn at another
-    /// zoom or bearing.
-    fn matches(&self, drawn: &DrapeKey, at_rest: bool) -> bool {
-        self.tiles == drawn.tiles
+    /// How the texels this key would draw differ from those of a drape
+    /// drawn from `drawn`: by its content unless it has the same layers,
+    /// with the same styles and paint revisions, from the same tiles, and
+    /// else by the camera unless they have the same values at the same zoom
+    /// and bearing.
+    fn difference(&self, drawn: &DrapeKey) -> Difference {
+        let same_content = self.tiles == drawn.tiles
             && self.layers.len() == drawn.layers.len()
             && self.layers.iter().zip(&drawn.layers).all(|(layer, drawn)| {
                 Arc::ptr_eq(&layer.style, &drawn.style)
                     && layer.paint_revision == drawn.paint_revision
                     && layer.tiles == drawn.tiles
-                    && (!at_rest || Arc::ptr_eq(&layer.evaluated, &drawn.evaluated))
-            })
-            && (!at_rest || (self.zoom == drawn.zoom && self.bearing == drawn.bearing))
+            });
+        let same_camera = self.zoom == drawn.zoom
+            && self.bearing == drawn.bearing
+            && self
+                .layers
+                .iter()
+                .zip(&drawn.layers)
+                .all(|(layer, drawn)| Arc::ptr_eq(&layer.evaluated, &drawn.evaluated));
+        match (same_content, same_camera) {
+            (false, _) => Difference::Content,
+            (true, false) => Difference::Camera,
+            (true, true) => Difference::None,
+        }
     }
 
     /// Whether a bucket in `changed` is among the key's.
@@ -232,6 +256,9 @@ struct StackDrape {
     key: DrapeKey,
     /// Whether the frame draws the drape again.
     redraws: bool,
+    /// Whether, at rest, its key differs from the one it was drawn from by
+    /// the camera only, or its texture is smaller than its tile's side.
+    camera_stale: bool,
 }
 
 /// A drape's texture, of `size` texels a side, with its mips.
@@ -269,6 +296,7 @@ impl StackDrape {
             drawn: None,
             key: DrapeKey::default(),
             redraws: false,
+            camera_stale: false,
         }
     }
 }
@@ -281,6 +309,8 @@ struct Drape {
     shown: f64,
     /// The side in texels its drapes draw at in the frame.
     size: u32,
+    /// The frame that last drew one of its drapes.
+    drawn_at: u64,
     stacks: Vec<StackDrape>,
 }
 
@@ -308,6 +338,10 @@ pub(crate) struct Drapes {
     byte_cap: usize,
     /// What the drapes draw with, for each side a drape's texture has.
     targets: Vec<Targets>,
+    /// The frames that [`choose`](Self::choose) chose drapes for.
+    frame: u64,
+    /// Whether drapes stale by the camera only wait for a later frame.
+    waiting: bool,
     /// The tiles and stacks of the drapes drawn since the last
     /// [`take_passes`](Self::take_passes).
     #[cfg(test)]
@@ -347,7 +381,7 @@ impl Drapes {
             let size = shown_size(shown, pixel_ratio, largest);
             let mut drape = match kept.iter().position(|drape| drape.tile == tile.id) {
                 Some(index) => Drape { transform, shown, size, ..kept.swap_remove(index) },
-                None => Drape { tile: tile.id, transform, shown, size, stacks: Vec::new() },
+                None => Drape { tile: tile.id, transform, shown, size, drawn_at: 0, stacks: Vec::new() },
             };
             drape.stacks.resize_with(stacks, StackDrape::new);
             for drape in &mut drape.stacks {
@@ -390,22 +424,34 @@ impl Drapes {
     }
 
     /// Chooses the drapes the frame draws again, once every draped layer
-    /// gave its key, and the side the drapes of each tile draw at: those not
-    /// drawn yet or stale, and those whose key doesn't
-    /// [match](DrapeKey::matches) what they were drawn from, with the camera
-    /// `at_rest` or not. Where the drapes with a texture and those that draw
-    /// again would hold more than the byte cap, the sides of the tiles
-    /// that show smallest go down ([`cap_sizes`]). A drape whose texture is
-    /// of another side draws again at rest, and while the camera moves where
-    /// its texture is larger, so that the cap holds. Their layers' drawings
+    /// gave its key, and the side the drapes of each tile draw at.
+    ///
+    /// A drape not drawn yet or stale, or whose key differs from the one it
+    /// was drawn from by its content ([`DrapeKey::difference`]), draws again
+    /// at once. With the camera `at_rest`, a drape whose key differs only by
+    /// the camera, or whose texture is smaller than its tile's side, draws
+    /// again too: `paced`, in a continuous map, only the drapes of one tile
+    /// a frame, and those of the tiles whose content changed, as in GL JS.
+    /// That tile is the one drawn longest ago, the nearest of those, so
+    /// that a camera that jumps every frame draws each tile in turn. The
+    /// others [wait](Self::waiting) for a later frame. While the camera
+    /// moves, a drape drawn at another zoom or bearing stays.
+    ///
+    /// Where the drapes with a texture and those stale would hold more than
+    /// the byte cap, the sides of the tiles that show smallest go down
+    /// ([`cap_sizes`]), and a drape whose texture is larger than its side
+    /// draws again at once, so that the cap holds. Their layers' drawings
     /// wait for the layers to take them.
-    pub(crate) fn choose(&mut self, at_rest: bool) {
+    pub(crate) fn choose(&mut self, at_rest: bool, paced: bool) {
+        self.frame += 1;
         let mut counts = Vec::with_capacity(self.drapes.len());
         for Drape { stacks, .. } in &mut self.drapes {
             let mut count = 0;
             for drape in stacks {
-                drape.redraws = drape.drawn.as_ref().is_none_or(|drawn| !drape.key.matches(drawn, at_rest));
-                count += usize::from(drape.redraws || drape.texture.is_some());
+                let difference = drape.drawn.as_ref().map_or(Difference::Content, |drawn| drape.key.difference(drawn));
+                drape.redraws = difference == Difference::Content;
+                drape.camera_stale = at_rest && difference == Difference::Camera;
+                count += usize::from(drape.redraws || drape.camera_stale || drape.texture.is_some());
             }
             counts.push(count);
         }
@@ -416,14 +462,40 @@ impl Drapes {
         for (Drape { size, stacks, .. }, capped) in self.drapes.iter_mut().zip(sizes) {
             *size = capped;
             for drape in stacks {
-                let resized =
-                    drape.texture.as_ref().is_some_and(|&(_, side)| side > capped || at_rest && side != capped);
-                drape.redraws |= resized;
+                if let Some(&(_, side)) = drape.texture.as_ref() {
+                    drape.redraws |= side > capped;
+                    drape.camera_stale |= at_rest && side < capped;
+                }
+            }
+        }
+        let redraws = |drape: &Drape| drape.stacks.iter().any(|drape| drape.redraws);
+        let next = (self.drapes.iter().enumerate())
+            .filter(|(_, drape)| paced && !redraws(drape) && drape.stacks.iter().any(|drape| drape.camera_stale))
+            .min_by_key(|&(index, drape)| (drape.drawn_at, index))
+            .map(|(index, _)| index);
+        self.waiting = false;
+        for (index, drape) in self.drapes.iter_mut().enumerate() {
+            let now = !paced || next == Some(index) || redraws(drape);
+            for drape in &mut drape.stacks {
+                if drape.camera_stale {
+                    drape.redraws |= now;
+                    self.waiting |= !now;
+                }
                 if drape.redraws {
                     drape.previous = std::mem::take(&mut drape.layers);
                 }
             }
+            if redraws(drape) {
+                drape.drawn_at = self.frame;
+            }
         }
+    }
+
+    /// Whether the last frame left drapes stale by the camera only for a
+    /// later frame to draw ([`choose`](Self::choose)): the map then isn't
+    /// done drawing.
+    pub(crate) fn waiting(&self) -> bool {
+        self.waiting
     }
 
     /// Makes the draws of `layer`, a layer of `stack` that drapes, in every

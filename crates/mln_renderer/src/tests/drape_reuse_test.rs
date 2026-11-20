@@ -1,6 +1,7 @@
 // A continuous map over terrain draws a drape again only when what it
 // shows changed: its layers' values, the tiles or image they draw, their
-// feature state, or, once the camera rests, the zoom. A hillshade, over
+// feature state, or, once the camera rests, the zoom, one tile a frame. A
+// still draws them all at once. A hillshade, over
 // terrain or not, prepares a DEM tile's slopes again only when its border
 // changed.
 
@@ -147,8 +148,10 @@ fn style() -> Style {
     style
 }
 
-/// A continuous map of [`style`] over WebGPU, drawn frame by frame.
+/// A map of [`style`] over WebGPU, drawn frame by frame, continuous unless
+/// its `mode` makes each frame a still.
 struct DrapedMap {
+    mode: MapMode,
     backend: mln_webgpu::RendererBackend,
     target: OffscreenTarget<mln_webgpu::WebGpu>,
     renderer: Renderer,
@@ -157,6 +160,8 @@ struct DrapedMap {
     style: Arc<Style>,
     transform: Transform,
     camera_moving: bool,
+    /// Whether the last frame asked for another.
+    needs_repaint: bool,
     /// The ground the renderer last told of, which the updates carry, as a
     /// map's do.
     elevation: Option<Arc<dyn Elevation>>,
@@ -224,6 +229,7 @@ impl DrapedMap {
             ..Default::default()
         });
         DrapedMap {
+            mode: MapMode::Continuous,
             backend,
             target: OffscreenTarget::new(Size::new(SIDE, SIDE)),
             renderer,
@@ -232,6 +238,7 @@ impl DrapedMap {
             style: Arc::new(style()),
             transform,
             camera_moving: false,
+            needs_repaint: false,
             elevation: None,
             work: TileWork::default(),
             _pool: pool,
@@ -242,7 +249,7 @@ impl DrapedMap {
         let file_source: Arc<dyn FileSource> = Arc::<Tiles>::clone(&self.tiles);
         UpdateParameters {
             style_loaded: true,
-            mode: MapMode::Continuous,
+            mode: self.mode,
             pixel_ratio: 1.0,
             debug_options: MapDebugOptions::NO_DEBUG,
             time_point: None,
@@ -255,7 +262,7 @@ impl DrapedMap {
             feature_states: Arc::default(),
             file_source: Some(file_source),
             prefetch_zoom_delta: 0,
-            still_image_request: false,
+            still_image_request: self.mode == MapMode::Static,
             still_image_request_id: 0,
             cross_source_collisions: true,
             fast_pfor_enabled: false,
@@ -278,19 +285,27 @@ impl DrapedMap {
     }
 
     /// Draws a frame, and returns whether everything it shows had loaded and
-    /// the tiles and stacks of the drapes it drew.
+    /// the tiles and stacks of the drapes it drew. A still that hasn't
+    /// loaded draws nothing.
     fn frame_passes(&mut self) -> (bool, BTreeSet<(OverscaledTileID, usize)>) {
         let parameters = Arc::new(self.update_parameters());
         let gpu = self.backend.gpu();
-        let frame = self.renderer.update(gpu, &parameters).expect("a continuous map's frame");
-        let image = self.target.begin_frame(gpu).expect("the frame's image");
-        let drawn = self.renderer.render(gpu, &image, frame);
-        let handoff = self.target.end_frame(gpu);
-        self.renderer.finish_frame(gpu, drawn, handoff);
+        let frame = self.renderer.update(gpu, &parameters);
+        assert!(frame.is_some() || self.mode == MapMode::Static, "a continuous map's frame");
+        if let Some(frame) = frame {
+            let image = self.target.begin_frame(gpu).expect("the frame's image");
+            let drawn = self.renderer.render(gpu, &image, frame);
+            let handoff = self.target.end_frame(gpu);
+            self.renderer.finish_frame(gpu, drawn, handoff);
+        }
         let mut full = false;
+        self.needs_repaint = false;
         for event in self.events.take() {
             match event {
-                RendererEvent::RenderFrameFinished { mode, .. } => full = mode == RenderMode::Full,
+                RendererEvent::RenderFrameFinished { mode, needs_repaint, .. } => {
+                    full = mode == RenderMode::Full;
+                    self.needs_repaint = needs_repaint;
+                }
                 RendererEvent::TerrainElevation(elevation) => self.elevation = elevation,
                 RendererEvent::TileAction { op, id, source_id } => self.work.record(op, (source_id, id)),
                 _ => {}
@@ -621,7 +636,7 @@ fn sides(map: &mut DrapedMap) -> BTreeSet<(OverscaledTileID, u32)> {
 /// A byte cap under what the drapes would hold lowers the sides of some,
 /// which draw again once, smaller; every tile keeps its drape. Raised again
 /// while the camera moves, it leaves them as they are until the camera
-/// rests, and then they draw again once at their whole side.
+/// rests, and then they draw again once at their whole side, one a frame.
 #[test]
 fn a_byte_cap_lowers_the_sides_of_some_drapes_which_draw_again_once() {
     let (mut map, drapes) = settled(Tiles::default());
@@ -645,7 +660,8 @@ fn a_byte_cap_lowers_the_sides_of_some_drapes_which_draw_again_once() {
     map.renderer.set_drape_byte_cap(usize::MAX);
     assert!(map.frame().1.is_empty(), "drapes drawn larger while the camera moves");
     map.camera_moving = false;
-    assert_eq!(lowered.iter().map(|&(tile, _)| tile).collect::<BTreeSet<_>>(), map.frame().1);
+    let lowered: BTreeSet<_> = lowered.iter().map(|&(tile, _)| tile).collect();
+    assert_one_a_frame(&lowered, &frames_until_full(&mut map));
     assert_eq!(whole, sides(&mut map));
     assert!(map.frame().1.is_empty(), "the drapes are drawn again once only");
 }
@@ -815,17 +831,107 @@ fn a_feature_state_change_draws_its_drapes_again() {
     assert!(map.frame().1.is_empty());
 }
 
+/// Draws frames until one is complete, and returns the tiles of the drapes
+/// of the first stack that each drew. Each frame before it asked for the
+/// next.
+fn frames_until_full(map: &mut DrapedMap) -> Vec<BTreeSet<OverscaledTileID>> {
+    let mut frames = Vec::new();
+    for _ in 0..100 {
+        let (full, drawn) = map.frame();
+        frames.push(drawn);
+        if full {
+            assert!(!map.needs_repaint, "a complete frame asks for another");
+            return frames;
+        }
+        assert!(map.needs_repaint, "an incomplete frame doesn't ask for another");
+    }
+    panic!("no frame was complete: {frames:?}");
+}
+
+/// Asserts that `frames` drew one tile's drapes each, `drapes` all in
+/// turn.
+fn assert_one_a_frame(drapes: &BTreeSet<OverscaledTileID>, frames: &[BTreeSet<OverscaledTileID>]) {
+    assert_eq!(drapes.len(), frames.len(), "{frames:?}");
+    assert!(frames.iter().all(|drawn| drawn.len() == 1), "one drape a frame: {frames:?}");
+    assert_eq!(*drapes, frames.iter().flatten().copied().collect::<BTreeSet<_>>());
+}
+
+/// A zoom change keeps the drapes while the camera moves. At rest, the
+/// drapes draw again one a frame, nearest the center first, and each frame
+/// until the last is incomplete and asks for the next.
 #[test]
-fn a_zoom_change_keeps_the_drapes_while_the_camera_moves_and_draws_them_at_rest() {
+fn a_zoom_change_keeps_the_drapes_while_the_camera_moves_and_draws_them_one_a_frame_at_rest() {
     let (mut map, drapes) = settled(Tiles::default());
     map.camera_moving = true;
     map.transform.jump_to(&CameraOptions { zoom: Some(2.05), ..Default::default() });
-    let (_, passes) = map.frame();
+    let (full, passes) = map.frame();
     assert!(passes.is_empty(), "drapes drawn while the camera moves: {passes:?}");
+    assert!(full, "a moving camera keeps its drapes");
     assert_eq!(drapes, map.drapes(), "the same drapes cover the view");
     map.camera_moving = false;
-    assert_eq!(drapes, map.frame().1, "the drapes drawn again at rest");
+    let frames = frames_until_full(&mut map);
+    assert_one_a_frame(&drapes, &frames);
+    let order: Vec<OverscaledTileID> = frames.iter().flatten().copied().collect();
+    assert_eq!(map.renderer.drape_tiles(), order, "nearest the center first, as the cover lists them");
     assert!(map.frame().1.is_empty());
+}
+
+/// A camera that jumps every frame rests in each: of its drapes stale by
+/// the zoom, it draws one a frame, each in turn, and none twice before it
+/// drew all, and its frames are incomplete. Once it stops, the drapes it
+/// left stale draw one a frame too.
+#[test]
+fn a_jump_every_frame_draws_one_drape_a_frame_each_in_turn() {
+    let (mut map, drapes) = settled(Tiles::default());
+    let mut frames = Vec::new();
+    for step in 1..=2 * drapes.len() {
+        let zoom = 2.0 + 0.01 * step as f64;
+        map.transform.jump_to(&CameraOptions { zoom: Some(zoom), ..Default::default() });
+        let (full, drawn) = map.frame();
+        assert!(!full && map.needs_repaint, "a frame with stale drapes is complete");
+        frames.push(drawn);
+    }
+    assert_eq!(drapes, map.drapes(), "the same drapes cover the view");
+    for turn in frames.chunks(drapes.len()) {
+        assert_one_a_frame(&drapes, turn);
+    }
+    let mut stale = drapes.clone();
+    stale.remove(frames.last().and_then(|drawn| drawn.first()).unwrap());
+    assert_one_a_frame(&stale, &frames_until_full(&mut map));
+}
+
+/// A drape whose content changed draws again at once, though the camera
+/// left the others stale by the zoom.
+#[test]
+fn a_paint_change_draws_every_drape_in_one_frame_while_the_camera_jumps() {
+    let (mut map, drapes) = settled(Tiles::default());
+    map.transform.jump_to(&CameraOptions { zoom: Some(2.05), ..Default::default() });
+    assert_eq!(1, map.frame().1.len());
+    map.transform.jump_to(&CameraOptions { zoom: Some(2.1), ..Default::default() });
+    map.edit(Edit::SetLayerProperty {
+        layer: "line".to_owned(),
+        name: "line-color".to_owned(),
+        value: serde_json::json!("green"),
+    });
+    let (full, drawn) = map.frame();
+    assert_eq!(drapes, drawn);
+    assert!(full);
+    assert!(map.frame().1.is_empty(), "the drapes are drawn again once only");
+}
+
+/// A still draws every drape stale by the zoom in its one frame.
+#[test]
+fn a_still_draws_every_drape_stale_by_the_zoom_at_once() {
+    let mut map = DrapedMap::new(Tiles::default());
+    map.mode = MapMode::Static;
+    map.settle();
+    let drapes = map.drapes();
+    assert_eq!(4, drapes.len(), "drapes: {drapes:?}");
+    map.transform.jump_to(&CameraOptions { zoom: Some(2.05), ..Default::default() });
+    let (full, drawn) = map.frame();
+    assert!(full);
+    assert_eq!(drapes, drawn);
+    assert_eq!(drapes, map.drapes(), "the same drapes cover the view");
 }
 
 /// A hillshade of the DEM, lit from the viewport, as its lights are by
@@ -854,7 +960,7 @@ fn a_rotation_keeps_drapes_that_draw_nothing_by_the_bearing() {
 
 /// A hillshade lit from the viewport turns its lights with the map: a
 /// rotation keeps its drapes while the camera moves, and draws them again
-/// once at rest.
+/// once at rest, one a frame.
 #[test]
 fn a_rotation_draws_a_viewport_lit_hillshade_again_at_rest() {
     let (mut map, drapes) = settled(Tiles::default());
@@ -866,7 +972,8 @@ fn a_rotation_draws_a_viewport_lit_hillshade_again_at_rest() {
     assert_eq!(drapes, map.drapes(), "the same drapes cover the view");
     assert!(passes.is_empty(), "drapes drawn while the camera moves: {passes:?}");
     map.camera_moving = false;
-    assert_eq!(drapes, map.frame().1, "the drapes drawn again at rest");
+    let frames = frames_until_full(&mut map);
+    assert_one_a_frame(&drapes, &frames);
     assert!(map.frame().1.is_empty());
 }
 

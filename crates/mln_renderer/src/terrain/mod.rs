@@ -88,7 +88,15 @@
 //!   the layers' evaluated values, the zoom, and the bearing where a layer
 //!   draws by it. A change of the style's images, or of the feature
 //!   state of a bucket a drape shows, draws it again too. While the camera
-//!   moves, a drape drawn at another zoom or bearing stays.
+//!   moves, a drape drawn at another zoom or bearing stays. At rest, a
+//!   continuous map draws the drapes stale only by the camera one tile a
+//!   frame, as GL JS does once the zoom settles: the tile drawn longest
+//!   ago, the nearest the center of those, so that a camera that jumps
+//!   every frame, at rest in each, draws its tiles in turn. A frame that
+//!   leaves such drapes for later asks for the next and reports itself
+//!   partial, so the map isn't idle until they have drawn. A drape whose
+//!   content changed draws at once, with the camera-stale drapes of its
+//!   tile, and a still draws them all.
 //! - **The drapes' sides.** A tile's drapes take the power of two that
 //!   covers its longest side on screen, level with the view's center, at
 //!   two texels a logical pixel or one a physical pixel, whichever is
@@ -97,9 +105,9 @@
 //!   with a texture and those that draw again would hold more than a byte
 //!   cap (256 MiB on phones and in the browser, 384 MiB elsewhere), the
 //!   largest side allowed falls a step at a time for the tiles that show
-//!   smallest; no tile loses its drape. A drape whose side changed draws
-//!   again at rest; while the camera moves, only one larger than its side
-//!   does, so the cap holds.
+//!   smallest; no tile loses its drape. A drape larger than its side draws
+//!   again at once, so the cap holds; one smaller draws again at rest, as
+//!   one stale by the camera does.
 //! - **The drape composite.** A draped layer with a layer opacity below 1
 //!   or a layer blend other than `normal` draws as a whole inside each
 //!   drape, as in 2D (`LayerComposite`): into a texture of the drape's
@@ -431,6 +439,13 @@ impl RenderTerrain {
     /// tiles are the same ones under new ids.
     pub(crate) fn handle_wrap_jump(&mut self) {
         self.drapes = Drapes::default();
+    }
+
+    /// Whether the frame left drapes stale by the camera only for a later
+    /// frame to draw ([`Drapes::choose`]), which the frame then asks for: a
+    /// frame that did isn't complete.
+    pub(crate) fn drapes_waiting(&self) -> bool {
+        self.drapes.waiting()
     }
 
     /// Uploads the GPU objects of the frame's draws.
