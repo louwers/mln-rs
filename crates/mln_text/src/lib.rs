@@ -18,6 +18,7 @@ pub mod font_name;
 pub mod glyph;
 pub mod glyph_cache;
 pub mod glyph_pbf;
+mod line_breaks;
 pub mod local_glyph_rasterizer;
 mod rasterize;
 mod shaper;

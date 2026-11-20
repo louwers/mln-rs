@@ -238,6 +238,8 @@ wasmparser = { version = "0.263.0", default-features = false, features = [
 # The Unicode bidi algorithm (mln_text's bidi.rs). mln_text's mirroring table
 # comes from the same Unicode version (`mise run generate:bidi-mirroring`).
 unicode-bidi = { version = "0.3.18" }
+# Where label text may break into lines (mln_text's line_breaks): UAX #14.
+unicode-linebreak = { version = "0.1.5" }
 # General_Category (mln_text's script runs, mln_util's i18n), in the Unicode
 # version of harfrust's own tables.
 unicode-properties = { version = "0.1.5", default-features = false, features = [

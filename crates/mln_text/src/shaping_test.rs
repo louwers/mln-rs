@@ -184,13 +184,13 @@ fn zwsp() {
         assert_eq!(shaping.writing_mode, WritingModeType::Horizontal);
     }
 
-    // 5 'new' lines.
+    // 1 empty line: a line never starts at a zero width space.
     {
         let string = TaggedString::new(u("\u{200b}\u{200b}\u{200b}\u{200b}\u{200b}"), section_options);
         let shaping = test_get_shaping(&string, 1);
-        assert_eq!(shaping.positioned_lines.len(), 5);
-        assert_eq!(shaping.top, -60.0);
-        assert_eq!(shaping.bottom, 60.0);
+        assert_eq!(shaping.positioned_lines.len(), 1);
+        assert_eq!(shaping.top, -12.0);
+        assert_eq!(shaping.bottom, 12.0);
         assert_eq!(shaping.left, 0.0);
         assert_eq!(shaping.right, 0.0);
         assert_eq!(shaping.writing_mode, WritingModeType::Horizontal);

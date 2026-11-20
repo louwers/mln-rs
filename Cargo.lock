@@ -3222,6 +3222,7 @@ dependencies = [
  "skrifa 0.49.0",
  "thiserror 2.0.21",
  "unicode-bidi",
+ "unicode-linebreak",
  "unicode-properties",
  "wasm-bindgen",
  "web-sys",
@@ -5530,6 +5531,12 @@ name = "unicode-ident"
 version = "1.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563"
+
+[[package]]
+name = "unicode-linebreak"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3b09c83c3c29d37506a3e260c08c03743a6bb66a9cd432c6934ab501a190571f"
 
 [[package]]
 name = "unicode-properties"

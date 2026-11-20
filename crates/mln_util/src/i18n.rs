@@ -167,31 +167,6 @@ fn vertical_punctuation_contains(chr: char) -> bool {
     vertical_punctuation_get(chr).is_some()
 }
 
-/// Returns whether a line break can be inserted after the character
-/// indicated by the given Unicode codepoint due to word breaking.
-#[must_use]
-pub fn allows_word_breaking(chr: char) -> bool {
-    chr == '\u{000A}' /* newline */
-        || chr == '\u{0020}' /* space */
-        || chr == '\u{0026}' /* ampersand */
-        || chr == '\u{0029}' /* close parenthesis */
-        || chr == '\u{002B}' /* plus sign */
-        || chr == '\u{002D}' /* hyphen-minus */
-        || chr == '\u{002F}' /* solidus */
-        || chr == '\u{00AD}' /* soft hyphen */
-        || chr == '\u{00B7}' /* middle dot */
-        || chr == '\u{200B}' /* zero-width space */
-        || chr == '\u{2010}' /* hyphen */
-        || chr == '\u{2013}' /* en dash */
-}
-
-/// Returns whether a line break can be inserted before the character
-/// indicated by the given Unicode codepoint due to word breaking.
-#[must_use]
-pub fn allows_word_breaking_before(chr: char) -> bool {
-    chr == '\u{0028}' /* open parenthesis */
-}
-
 /// Whether letter spacing applies to `chr` (it doesn't to Arabic).
 #[must_use]
 pub(crate) fn char_allows_letter_spacing(chr: char) -> bool {
@@ -207,46 +182,6 @@ pub(crate) fn char_allows_letter_spacing(chr: char) -> bool {
 #[must_use]
 pub fn allows_letter_spacing(string: &[char]) -> bool {
     string.iter().all(|&c| char_allows_letter_spacing(c))
-}
-
-/// Returns whether a line break can be inserted after the character
-/// indicated by the given Unicode codepoint due to ideographic breaking.
-#[must_use]
-pub fn allows_ideographic_breaking(chr: char) -> bool {
-    // Allow U+2027 "Interpunct" for hyphenation of Chinese words
-    if chr == '\u{2027}' {
-        return true;
-    }
-
-    // Return early for characters outside all ideographic ranges.
-    if chr < '\u{2E80}' {
-        return false;
-    }
-
-    is_in_bopomofo(chr)
-        || is_in_bopomofo_extended(chr)
-        || is_in_cjk_compatibility(chr)
-        || is_in_cjk_compatibility_forms(chr)
-        || is_in_cjk_compatibility_ideographs(chr)
-        || is_in_cjk_radicals_supplement(chr)
-        || is_in_cjk_strokes(chr)
-        || is_in_cjk_symbols_and_punctuation(chr)
-        || is_in_cjk_unified_ideographs(chr)
-        || is_in_cjk_unified_ideographs_extension_a(chr)
-        || is_in_enclosed_cjk_letters_and_months(chr)
-        || is_in_halfwidth_and_fullwidth_forms(chr)
-        || is_in_hiragana(chr)
-        || is_in_ideographic_description_characters(chr)
-        || is_in_kangxi_radicals(chr)
-        || is_in_katakana(chr)
-        || is_in_katakana_phonetic_extensions(chr)
-        || is_in_vertical_forms(chr)
-        || is_in_yi_radicals(chr)
-        || is_in_yi_syllables(chr)
-
-    // The following blocks also allow ideographic breaking; however, for other
-    // reasons, Mapbox GL lacks support for codepoints beyond U+FFFF.
-    // https://github.com/mapbox/mapbox-gl/issues/29
 }
 
 /// Conservative set of characters expected to have relatively fixed sizes
@@ -633,15 +568,23 @@ pub fn is_variation_selector(chr: char) -> bool {
     matches!(chr, '\u{180B}'..='\u{180D}' | '\u{180F}' | '\u{FE00}'..='\u{FE0F}' | '\u{E0100}'..='\u{E01EF}')
 }
 
-/// Whether line breaking or vertical writing places `chr` on its own: a
-/// line may break before or after it, or it stands upright in vertical
-/// text. Such a character loses no shaping drawn one at a time.
+/// Whether `chr` is drawn on its own rather than in a run that the device's
+/// fonts shape: a space, dash, slash or parenthesis that a line may break
+/// beside, or CJK text, which may break between any two characters or stand
+/// upright in vertical text. Such a character loses no shaping drawn one at a
+/// time.
 #[must_use]
 pub fn breaks_or_stands_upright(chr: char) -> bool {
-    allows_word_breaking(chr)
-        || allows_word_breaking_before(chr)
-        || allows_ideographic_breaking(chr)
-        || has_upright_vertical_orientation(chr)
+    matches!(
+        chr,
+        '\n' | ' ' | '&' | '(' | ')' | '+' | '-' | '/' | '\u{AD}' | '\u{B7}'
+            | '\u{200B}' | '\u{2010}' | '\u{2013}' | '\u{2027}'
+            // CJK radicals through CJK Unified Ideographs, Yi, CJK
+            // Compatibility Ideographs, Vertical Forms, CJK Compatibility
+            // Forms, and Halfwidth and Fullwidth Forms.
+            | '\u{2E80}'..='\u{A4CF}' | '\u{F900}'..='\u{FAFF}' | '\u{FE10}'..='\u{FE1F}'
+            | '\u{FE30}'..='\u{FE4F}' | '\u{FF00}'..='\u{FFEF}'
+    ) || has_upright_vertical_orientation(chr)
 }
 
 /// Whether `chr` belongs with the character before it, so that the font

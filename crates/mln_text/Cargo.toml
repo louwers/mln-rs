@@ -29,6 +29,7 @@ mln_wire.workspace = true
 skrifa.workspace = true
 thiserror.workspace = true
 unicode-bidi.workspace = true
+unicode-linebreak.workspace = true
 unicode-properties.workspace = true
 wuff.workspace = true
 

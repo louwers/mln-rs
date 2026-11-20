@@ -13,12 +13,9 @@ use crate::glyph::{
     Glyph, GlyphID, GlyphIDType, GlyphMetrics, GlyphPositions, PositionedGlyph, PositionedLine, Shaping,
     WritingModeType, pbf_code,
 };
+use crate::line_breaks::determine_line_breaks;
 use crate::shaper::GlyphAdjust;
 use crate::tagged_string::TaggedString;
-
-/// Zero width space that is used to suggest break points for Japanese
-/// labels.
-const ZWSP: char = '\u{200B}';
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AnchorAlignment {
@@ -316,7 +313,7 @@ impl LineContentSize {
 
 /// How far the character at `i` of `input` moves the pen: a shaped glyph by
 /// its shaping, a PBF glyph or an image by its size.
-fn get_glyph_advance(
+pub(crate) fn get_glyph_advance(
     input: &TaggedString,
     i: usize,
     glyphs: &GlyphPositions,
@@ -349,185 +346,6 @@ fn get_glyph_advance(
             image.display_size()[0] * section.scale as f32 * ONE_EM / layout_text_size + spacing
         }
     }
-}
-
-fn determine_average_line_width(
-    logical_input: &TaggedString,
-    spacing: f32,
-    max_width: f32,
-    glyphs: &GlyphPositions,
-    image_positions: &ImagePositions,
-    layout_text_size: f32,
-) -> f32 {
-    let mut total_width: f32 = 0.0;
-
-    for i in 0..logical_input.length() {
-        total_width += get_glyph_advance(logical_input, i, glyphs, image_positions, layout_text_size, spacing);
-    }
-
-    // static_cast<int32_t>(::fmax(1, std::ceil(totalWidth / maxWidth)))
-    // (an infinite quotient is UB in C++; `as` saturates)
-    let target_line_count = mln_math::fmax(1.0, f64::from((total_width / max_width).ceil())) as i32;
-    total_width / target_line_count as f32
-}
-
-fn calculate_badness(line_width: f32, target_width: f32, penalty: f32, is_last_break: bool) -> f32 {
-    // static_cast<float>(std::pow(lineWidth - targetWidth, 2)): pow of the
-    // float difference in double, which is exact for a square.
-    let d = f64::from(line_width - target_width);
-    let raggedness = (d * d) as f32;
-    if is_last_break {
-        // Favor finals lines shorter than average over longer than average
-        if line_width < target_width {
-            return raggedness / 2.0;
-        }
-        return raggedness * 2.0;
-    }
-    if penalty < 0.0 {
-        return raggedness - penalty * penalty;
-    }
-    raggedness + penalty * penalty
-}
-
-fn calculate_penalty(code_point: char, next_code_point: char, penalizable_ideographic_break: bool) -> f32 {
-    let mut penalty: f32 = 0.0;
-    // Force break on newline
-    if code_point == '\n' {
-        penalty -= 10000.0;
-    }
-
-    // Penalize open parenthesis at end of line
-    if code_point == '(' || code_point == '\u{FF08}' {
-        penalty += 50.0;
-    }
-
-    // Penalize close parenthesis at beginning of line
-    if next_code_point == ')' || next_code_point == '\u{FF09}' {
-        penalty += 50.0;
-    }
-
-    // Penalize breaks between characters that allow ideographic breaking
-    // because they are less preferable than breaks at spaces (or zero width
-    // spaces)
-    if penalizable_ideographic_break {
-        penalty += 150.0;
-    }
-
-    penalty
-}
-
-/// A line break candidate. `prior_break` is an index into the list.
-#[derive(Clone, Copy, Debug)]
-struct PotentialBreak {
-    index: usize,
-    x: f32,
-    prior_break: Option<usize>,
-    badness: f32,
-}
-
-fn evaluate_break(
-    break_index: usize,
-    break_x: f32,
-    target_width: f32,
-    potential_breaks: &[PotentialBreak],
-    penalty: f32,
-    is_last_break: bool,
-) -> PotentialBreak {
-    // We could skip evaluating breaks where the line length (breakX -
-    // priorBreak.x) > maxWidth ...but in fact we allow lines longer than
-    // maxWidth (if there's no break points) ...and when targetWidth and
-    // maxWidth are close, strictly enforcing maxWidth can give more
-    // lopsided results.
-
-    let mut best_prior_break = None;
-    let mut best_break_badness = calculate_badness(break_x, target_width, penalty, is_last_break);
-    for (k, potential_break) in potential_breaks.iter().enumerate() {
-        let line_width = break_x - potential_break.x;
-        let break_badness =
-            calculate_badness(line_width, target_width, penalty, is_last_break) + potential_break.badness;
-        if break_badness <= best_break_badness {
-            best_prior_break = Some(k);
-            best_break_badness = break_badness;
-        }
-    }
-
-    PotentialBreak { index: break_index, x: break_x, prior_break: best_prior_break, badness: best_break_badness }
-}
-
-fn least_bad_breaks(last_line_break: &PotentialBreak, potential_breaks: &[PotentialBreak]) -> VecSet<usize> {
-    let mut least_bad_breaks = VecSet::from([last_line_break.index]);
-    let mut prior_break = last_line_break.prior_break;
-    while let Some(k) = prior_break {
-        least_bad_breaks.insert(potential_breaks[k].index);
-        prior_break = potential_breaks[k].prior_break;
-    }
-    least_bad_breaks
-}
-
-/// Determines line breaks based on shaped text in logical order. Working in
-/// visual order would be more intuitive, but we can't do that because the
-/// visual order may be changed by line breaks!
-#[must_use]
-pub(crate) fn determine_line_breaks(
-    logical_input: &TaggedString,
-    spacing: f32,
-    max_width: f32,
-    glyphs: &GlyphPositions,
-    image_positions: &ImagePositions,
-    layout_text_size: f32,
-) -> VecSet<usize> {
-    if max_width == 0.0 {
-        return VecSet::new();
-    }
-
-    if logical_input.empty() {
-        return VecSet::new();
-    }
-
-    let target_width =
-        determine_average_line_width(logical_input, spacing, max_width, glyphs, image_positions, layout_text_size);
-
-    let mut potential_breaks: Vec<PotentialBreak> = Vec::new();
-    let mut current_x: f32 = 0.0;
-    // Find first occurrence of zero width space (ZWSP) character.
-    let has_server_suggested_breaks = logical_input.raw_text().contains(&ZWSP);
-
-    let length = logical_input.length();
-    for i in 0..length {
-        let section = logical_input.get_section(i);
-        let code_point = logical_input.char_at(i);
-        if !i18n::is_whitespace(code_point) {
-            current_x += get_glyph_advance(logical_input, i, glyphs, image_positions, layout_text_size, spacing);
-        }
-
-        // Ideographic characters, spaces, and word-breaking punctuation
-        // that often appear without surrounding spaces.
-        if i < length - 1 {
-            let allows_ideographic_break = i18n::allows_ideographic_breaking(code_point);
-            let allows_break_before_next =
-                i != length - 2 && i18n::allows_word_breaking_before(logical_input.char_at(i + 1));
-            if section.image_id.is_some()
-                || allows_ideographic_break
-                || i18n::allows_word_breaking(code_point)
-                || allows_break_before_next
-            {
-                let penalizable_ideographic_break = allows_ideographic_break && has_server_suggested_breaks;
-                let next_index = i + 1;
-                let b = evaluate_break(
-                    next_index,
-                    current_x,
-                    target_width,
-                    &potential_breaks,
-                    calculate_penalty(code_point, logical_input.char_at(next_index), penalizable_ideographic_break),
-                    false,
-                );
-                potential_breaks.push(b);
-            }
-        }
-    }
-
-    let last = evaluate_break(length, current_x, target_width, &potential_breaks, 0.0, true);
-    least_bad_breaks(&last, &potential_breaks)
 }
 
 const MAX_UPRIGHT_LETTER_RUN: usize = 3;
