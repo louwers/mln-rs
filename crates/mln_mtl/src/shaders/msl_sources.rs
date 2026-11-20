@@ -6033,6 +6033,176 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
+pub(crate) const TILE_DEBUG_SHADER: Msl = Msl {
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
+    prelude: r#"
+
+enum {
+    idTileDebugDrawableUBO = idDrawableReservedVertexOnlyUBO,
+    idTileDebugPropsUBO = drawableReservedUBOCount,
+    tileDebugUBOCount
+};
+
+struct alignas(16) TileDebugDrawableUBO {
+    /*  0 */ float4x4 matrix;
+    /* 64 */ float ratio;
+
+    // Interpolations
+    /* 68 */ float color_t;
+    /* 72 */ float blur_t;
+    /* 76 */ float opacity_t;
+    /* 80 */ float gapwidth_t;
+    /* 84 */ float offset_t;
+    /* 88 */ float width_t;
+    /* 92 */ float pad1;
+    /* 96 */
+};
+static_assert(sizeof(TileDebugDrawableUBO) == 6 * 16, "wrong size");
+
+// An element of the overlay's buffer of drawable UBOs.
+struct alignas(16) TileDebugDrawableElement {
+    TileDebugDrawableUBO drawable;
+    float4 pad[2];
+};
+static_assert(sizeof(TileDebugDrawableElement) == 8 * 16, "wrong size");
+
+/// Evaluated properties that do not depend on the tile
+struct alignas(16) TileDebugPropsUBO {
+    /*  0 */ float4 color;
+    /* 16 */ float blur;
+    /* 20 */ float opacity;
+    /* 24 */ float gapwidth;
+    /* 28 */ float offset;
+    /* 32 */ float width;
+    /* 36 */ float floorwidth;
+    /* 40 */ float pad0;
+    /* 44 */ float pad1;
+    /* 48 */
+};
+static_assert(sizeof(TileDebugPropsUBO) == 3 * 16, "wrong size");
+
+"#,
+    source: r"
+
+struct VertexStage {
+    short2 pos_normal [[attribute(0)]];
+    uchar4 data [[attribute(1)]];
+};
+
+struct FragmentStage {
+    float4 position [[position, invariant]];
+#if defined(PROJECTION_GLOBE)
+    float tile_x;
+#endif
+    float2 width2;
+    float2 normal;
+    half gamma_scale;
+};
+
+FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
+                                device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
+                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
+                                device const TileDebugDrawableElement* drawableVector [[buffer(idTileDebugDrawableUBO)]],
+                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
+                                device const TileDebugPropsUBO& props [[buffer(idTileDebugPropsUBO)]]) {
+
+    device const TileDebugDrawableUBO& drawable = drawableVector[uboIndex].drawable;
+
+    const auto gapwidth = props.gapwidth / 2;
+
+    const auto offset   = props.offset * -1;
+
+    const auto width    = props.width;
+
+    // the distance over which the line edge fades out.
+    // Retina devices need a smaller distance to avoid aliasing.
+    const float ANTIALIASING = 1.0 / DEVICE_PIXEL_RATIO / 2.0;
+
+    const float2 a_extrude = float2(vertx.data.xy) - 128.0;
+    const float a_direction = glMod(float(vertx.data.z), 4.0) - 1.0;
+    const float2 pos = floor(float2(vertx.pos_normal) * 0.5);
+
+    // x is 1 if it's a round cap, 0 otherwise
+    // y is 1 if the normal points up, and -1 if it points down
+    // We store these in the least significant bit of a_pos_normal
+    const float2 normal = float2(vertx.pos_normal) - 2.0 * pos;
+    const float2 v_normal = float2(normal.x, normal.y * 2.0 - 1.0);
+
+    const float halfwidth = width / 2.0;
+    const float inset = gapwidth + (gapwidth > 0.0 ? ANTIALIASING : 0.0);
+    const float outset = gapwidth + halfwidth * (gapwidth > 0.0 ? 2.0 : 1.0) + (halfwidth == 0.0 ? 0.0 : ANTIALIASING);
+
+    // Scale the extrusion vector down to a normal and then up by the line width of this vertex.
+    const float2 dist = outset * a_extrude * LINE_NORMAL_SCALE;
+
+    // Calculate the offset when drawing a line that is to the side of the actual line.
+    // We do this by creating a vector that points towards the extrude, but rotate
+    // it when we're drawing round end points (a_direction = -1 or 1) since their
+    // extrude vector points in another direction.
+    const float u = 0.5 * a_direction;
+    const float t = 1.0 - abs(u);
+    const float2 offset2 = offset * a_extrude * LINE_NORMAL_SCALE * v_normal.y * float2x2(t, -u, u, t);
+
+#if defined(PROJECTION_GLOBE)
+    const float adjustedThickness = projectLineThickness(pos.y, projectionVector[uboIndex]);
+    const float4 projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector[uboIndex]);
+    const float2 extrudedPos = pos + (offset2 + dist) / drawable.ratio * adjustedThickness;
+    const float4 position = projectTile(extrudedPos, projectionVector[uboIndex]);
+    const float4 projected_extrude = position - projected_no_extrude;
+#else
+    const float4 projected_extrude = drawable.matrix * float4(dist / drawable.ratio, 0.0, 0.0);
+    const float4 position = drawable.matrix * float4(pos + offset2 / drawable.ratio, 0.0, 1.0) + projected_extrude;
+#endif
+
+    // calculate how much the perspective view squishes or stretches the extrude
+    const float extrude_length_without_perspective = length(dist);
+    const float extrude_length_with_perspective = length(projected_extrude.xy / position.w * paintParams.units_to_pixels);
+
+    return {
+        .position    = position,
+#if defined(PROJECTION_GLOBE)
+        .tile_x      = antimeridianClipX(extrudedPos, projectionVector[uboIndex]),
+#endif
+        .width2      = float2(outset, inset),
+        .normal      = v_normal,
+        .gamma_scale = half(extrude_length_without_perspective / extrude_length_with_perspective),
+
+    };
+}
+
+half4 fragment fragmentMain(FragmentStage in [[stage_in]],
+                            device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
+                            device const TileDebugPropsUBO& props [[buffer(idTileDebugPropsUBO)]]) {
+#if defined(PROJECTION_GLOBE)
+    if (clippedAtAntimeridian(in.tile_x)) {
+        discard_fragment();
+    }
+#endif
+
+#if defined(OVERDRAW_INSPECTOR)
+    return half4(1.0);
+#endif
+
+    const auto color     = props.color;
+
+    const float blur = props.blur;
+
+    const float opacity = props.opacity;
+
+    // Calculate the distance of the pixel from the line in pixels.
+    const float dist = length(in.normal) * in.width2.x;
+
+    // Calculate the antialiasing fade factor. This is either when fading in the
+    // line in case of an offset line (v_width2.y) or when fading out (v_width2.x)
+    const float blur2 = (blur + 1.0 / DEVICE_PIXEL_RATIO) * in.gamma_scale;
+    const float alpha = clamp(min(dist - (in.width2.y - blur2), in.width2.x - dist) / blur2, 0.0, 1.0);
+
+    return half4(color * (alpha * opacity));
+}
+",
+};
+
 pub(crate) const RASTER_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",

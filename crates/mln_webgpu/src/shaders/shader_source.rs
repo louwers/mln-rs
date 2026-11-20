@@ -434,6 +434,10 @@ shader_source!(ATMOSPHERE_SHADER, ATMOSPHERE_SHADER, ATMOSPHERE_ATTRIBUTES, &[])
 const GLOBE_DEPTH_ATTRIBUTES: &[Attribute] = &[attr(0, ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE)];
 shader_source!(GLOBE_DEPTH_SHADER, GLOBE_DEPTH_SHADER, GLOBE_DEPTH_ATTRIBUTES, &[]);
 
+const TILE_DEBUG_ATTRIBUTES: &[Attribute] =
+    &[attr(4, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE), attr(5, ID_LINE_DATA_VERTEX_ATTRIBUTE)];
+shader_source!(TILE_DEBUG_SHADER, TILE_DEBUG_SHADER, TILE_DEBUG_ATTRIBUTES, &[]);
+
 const LAYER_COMPOSITE_ATTRIBUTES: &[Attribute] = &[attr(0, ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE)];
 const LAYER_COMPOSITE_TEXTURES: &[Texture] =
     &[tex(0, ID_LAYER_COMPOSITE_IMAGE_TEXTURE), tex(1, ID_LAYER_COMPOSITE_BACKDROP_TEXTURE)];
@@ -446,7 +450,7 @@ pub(crate) static BUILT_INS: &[(&Program, &Source)] = &[
     (&programs::SKY, &SKY_SHADER),
     (&programs::ATMOSPHERE, &ATMOSPHERE_SHADER),
     (&programs::LAYER_COMPOSITE, &LAYER_COMPOSITE_SHADER),
-    (&programs::TILE_DEBUG, &LINE_SHADER),
+    (&programs::TILE_DEBUG, &TILE_DEBUG_SHADER),
 ];
 
 /// The source of each program of the built-in layer types, which the

@@ -369,6 +369,11 @@ const LINE_GRADIENT_SDF_ATTRIBUTES: &[Attribute] = &[
 ];
 const LINE_IMAGE_TEXTURES: &[Texture] = &[tex(0, ID_LINE_IMAGE_TEXTURE)];
 shader_source!(LINE_SHADER, LINE_ATTRIBUTES, &[]);
+const TILE_DEBUG_ATTRIBUTES: &[Attribute] = &[
+    attr(0, Short2, LINE_UBO_COUNT, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
+    attr(1, UByte4, LINE_UBO_COUNT, ID_LINE_DATA_VERTEX_ATTRIBUTE),
+];
+shader_source!(TILE_DEBUG_SHADER, TILE_DEBUG_ATTRIBUTES, &[]);
 shader_source!(LINE_GRADIENT_SHADER, LINE_GRADIENT_ATTRIBUTES, LINE_IMAGE_TEXTURES);
 shader_source!(LINE_PATTERN_SHADER, LINE_PATTERN_ATTRIBUTES, LINE_IMAGE_TEXTURES);
 shader_source!(LINE_SDF_SHADER, LINE_SDF_ATTRIBUTES, LINE_IMAGE_TEXTURES);
@@ -458,7 +463,7 @@ pub(crate) static BUILT_INS: &[(&Program, &Source)] = &[
     (&programs::ATMOSPHERE, &ATMOSPHERE_SHADER),
     (&programs::GLOBE_DEPTH, &GLOBE_DEPTH_SHADER),
     (&programs::LAYER_COMPOSITE, &LAYER_COMPOSITE_SHADER),
-    (&programs::TILE_DEBUG, &LINE_SHADER),
+    (&programs::TILE_DEBUG, &TILE_DEBUG_SHADER),
 ];
 
 /// The source of each program of the built-in layer types, which the
