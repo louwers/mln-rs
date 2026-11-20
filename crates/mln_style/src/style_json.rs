@@ -59,7 +59,8 @@ impl Style {
             return Err(Error::already_exists(format!("layer {} already exists", quote(id))));
         }
         let type_info = layer.info();
-        if !self.registry().layer_type(type_info.name).is_some_and(|registered| registered.is_type_of(&**layer.style())) {
+        let registered = self.registry().layer_type(type_info.name);
+        if !registered.is_some_and(|registered| registered.is_type_of(&**layer.style())) {
             return Err(Error::invalid_argument(format!(
                 "layer {} is of a layer type {} that the style's registry doesn't have",
                 quote(id),
