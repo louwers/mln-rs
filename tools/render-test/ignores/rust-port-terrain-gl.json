@@ -1,24 +1,4 @@
 {
-  "gljs/render-tests/line-opacity/terrain": "P1a (GL GLSL ES port): the terrain's shaders have no GLSL ES yet, so terrain and the layers that drape over it draw nothing",
-  "gljs/render-tests/terrain-shading/default": "P1a (GL GLSL ES port): the terrain's shaders have no GLSL ES yet, so terrain and the layers that drape over it draw nothing",
-  "gljs/render-tests/terrain/default": "P1a (GL GLSL ES port): the terrain's shaders have no GLSL ES yet, so terrain and the layers that drape over it draw nothing",
-  "gljs/render-tests/terrain/dem-cell-centre-hillshade-peak": "P1a (GL GLSL ES port): the terrain's shaders have no GLSL ES yet, so terrain and the layers that drape over it draw nothing",
-  "gljs/render-tests/terrain/field-of-view": "P1a (GL GLSL ES port): the terrain's shaders have no GLSL ES yet, so terrain and the layers that drape over it draw nothing",
-  "gljs/render-tests/terrain/field-of-view-number": "P1a (GL GLSL ES port): the terrain's shaders have no GLSL ES yet, so terrain and the layers that drape over it draw nothing",
-  "gljs/render-tests/terrain/fill-outline": "P1a (GL GLSL ES port): the terrain's shaders have no GLSL ES yet, so terrain and the layers that drape over it draw nothing",
-  "gljs/render-tests/terrain/fog-no-sky-blend": "P1a (GL GLSL ES port): the terrain's shaders have no GLSL ES yet, so terrain and the layers that drape over it draw nothing",
-  "gljs/render-tests/terrain/fog-no-sky-blend-roll": "P1a (GL GLSL ES port): the terrain's shaders have no GLSL ES yet, so terrain and the layers that drape over it draw nothing",
-  "gljs/render-tests/terrain/image-wrap-eq-zl": "P1a (GL GLSL ES port): the terrain's shaders have no GLSL ES yet, so terrain and the layers that drape over it draw nothing",
-  "gljs/render-tests/terrain/image-wrap-higher-zl": "P1a (GL GLSL ES port): the terrain's shaders have no GLSL ES yet, so terrain and the layers that drape over it draw nothing",
-  "gljs/render-tests/terrain/image-wrap-lower-zl": "P1a (GL GLSL ES port): the terrain's shaders have no GLSL ES yet, so terrain and the layers that drape over it draw nothing",
-  "gljs/render-tests/terrain/low-zoom": "P1a (GL GLSL ES port): the terrain's shaders have no GLSL ES yet, so terrain and the layers that drape over it draw nothing",
-  "gljs/render-tests/terrain/pitched-world": "P1a (GL GLSL ES port): the terrain's shaders have no GLSL ES yet, so terrain and the layers that drape over it draw nothing",
-  "gljs/render-tests/terrain/rtt-mipmap-minification/pitch-70": "P1a (GL GLSL ES port): the terrain's shaders have no GLSL ES yet, so terrain and the layers that drape over it draw nothing",
-  "gljs/render-tests/terrain/skirts-auto": "P1a (GL GLSL ES port): the terrain's shaders have no GLSL ES yet, so terrain and the layers that drape over it draw nothing",
-  "gljs/render-tests/terrain/skirts-none": "P1a (GL GLSL ES port): the terrain's shaders have no GLSL ES yet, so terrain and the layers that drape over it draw nothing",
-  "gljs/render-tests/terrain/symbol-height-anchor-absolute": "P1a (GL GLSL ES port): the terrain's shaders have no GLSL ES yet, so terrain and the layers that drape over it draw nothing",
-  "gljs/render-tests/terrain/tile-stiching": "P1a (GL GLSL ES port): the terrain's shaders have no GLSL ES yet, so terrain and the layers that drape over it draw nothing",
-  "gljs/render-tests/terrain/tile-transparency-overlap-fill": "P1a (GL GLSL ES port): the terrain's shaders have no GLSL ES yet, so terrain and the layers that drape over it draw nothing",
-  "gljs/render-tests/terrain/tile-transparency-overlap-line": "P1a (GL GLSL ES port): the terrain's shaders have no GLSL ES yet, so terrain and the layers that drape over it draw nothing",
-  "render-tests/symbol-height-offset/elevated-symbol-above-horizon": "P1a (GL GLSL ES port): the terrain's shaders have no GLSL ES yet, so terrain and the layers that drape over it draw nothing"
+  "gljs/render-tests/terrain/rtt-mipmap-minification/pitch-70": "OpenGL on llvmpipe: 1046 of 65536 pixels differ from GL JS's image (1.6%) where the fixture allows 0.6%; llvmpipe filters the drape's mips anisotropically differently from RADV (0.43%) and lavapipe (0.26%), which moves the moire's texels",
+  "gljs/render-tests/terrain/skirts-auto": "OpenGL on llvmpipe: 67 pixels differ from GL JS's image where the fixture allows 65 (0.025%, measured 0.026%); the drape's translucent edges are softer by a fraction of a pixel, and radeonsi has 61"
 }
