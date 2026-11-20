@@ -94,7 +94,7 @@ Use Conventional Commits for commit titles and pull request titles.
 
 Open a PR as a draft until it's ready to merge.
 
-A PR that claims a performance change includes measurements in its description.
-A PR that adds or removes significant or third party code includes Wasm size
+A PR that could impact performance includes measurements in its description. A
+PR that adds or removes significant or third party code includes Wasm size
 measurements. A PR that changes what users see includes before and after
 screenshots, attached with `gh pr edit --attach` or `gh pr create --attach`.
