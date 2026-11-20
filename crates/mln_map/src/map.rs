@@ -1442,21 +1442,24 @@ impl Map {
     /// lowest ground of the tile under the center, and a camera at rest
     /// whose center is clamped to the ground stands on it, unless the
     /// ground there is still loading. A camera that a gesture or an
-    /// animation moves keeps its altitude. Once terrain stops drawing, the
-    /// planes fit the flat map again, and a clamped center goes back to sea
-    /// level.
+    /// animation moves keeps its altitude. Once terrain stops drawing, or
+    /// the style has none, the planes fit the flat map again, and a clamped
+    /// center goes back to sea level.
     ///
     /// The moves report no camera change, and each counts in
     /// `ground_generation`; a still image stops following the terrain after
-    /// [`MAX_GROUND_MOVES_PER_STILL`] of them. Returns whether the view
-    /// changed.
+    /// [`MAX_GROUND_MOVES_PER_STILL`] of them, though it still goes back to
+    /// the flat map. Returns whether the view changed.
     fn follow_terrain(&mut self) -> bool {
-        let still = self.mode != MapMode::Continuous && self.still_image == StillImage::Pending;
-        if still && self.ground_moves >= MAX_GROUND_MOVES_PER_STILL {
-            return false;
+        // The renderer tells of the ground only after it draws an update
+        // without it, so the map, which owns the style, lets go first.
+        if self.style.get_terrain().is_none() {
+            self.elevation = None;
         }
+        let still = self.mode != MapMode::Continuous && self.still_image == StillImage::Pending;
         let clamped = self.center_clamped_to_ground;
         let moved = match &self.elevation {
+            Some(_) if still && self.ground_moves >= MAX_GROUND_MOVES_PER_STILL => false,
             Some(elevation) => {
                 let center = self.transform.view().center(WrapMode::Wrapped);
                 let min = elevation.min_at(center).unwrap_or(0.0);
@@ -1472,7 +1475,7 @@ impl Map {
         };
         if moved {
             self.ground_generation += 1;
-            if still {
+            if still && self.elevation.is_some() {
                 self.ground_moves += 1;
                 if self.ground_moves == MAX_GROUND_MOVES_PER_STILL {
                     Log::warning(

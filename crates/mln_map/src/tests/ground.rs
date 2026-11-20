@@ -8,12 +8,20 @@ use std::time::Duration;
 use mln_map_types::Elevation;
 use mln_renderer::{RenderMode, RendererEvent};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
+use mln_style::Edit;
 use mln_util::geo::LatLng;
 use mln_util::queue::Queue;
 
 use crate::{AnimationOptions, CameraOptions, CameraUpdate, CameraUpdateMode, Map, MapEvent, MapMode, MapOptions};
 
-const STYLE: &str = r#"{"version": 8, "center": [10, 20], "zoom": 3, "sources": {}, "layers": []}"#;
+const STYLE: &str = r#"{
+    "version": 8,
+    "center": [10, 20],
+    "zoom": 3,
+    "terrain": {"source": "dem"},
+    "sources": {"dem": {"type": "raster-dem", "tiles": ["dem/{z}/{x}/{y}.png"]}},
+    "layers": []
+}"#;
 
 /// Ground of the same height everywhere, `None` where the heights are still
 /// loading.
@@ -235,4 +243,50 @@ fn a_still_image_stops_following_ground_that_never_settles() {
     map.render_still().unwrap();
     report(&mut map, RendererEvent::TerrainElevation(Some(restless)));
     assert!(ground_generation(&map) > 8);
+}
+
+/// A style that drops its terrain while a still image waits takes the
+/// camera back to the flat map at once, before the renderer has drawn the
+/// style without terrain; the still image then waits for a frame of the
+/// flat map.
+#[test]
+fn a_style_without_terrain_lets_go_of_the_ground() {
+    let run_loop = Queue::<()>::new();
+    let mut map = map(MapMode::Static, &run_loop);
+    map.render_still().unwrap();
+    report(&mut map, flat(Some(500.0), 300.0));
+    assert_eq!((500.0, Some(300.0)), ground(&map));
+    let grounded = ground_generation(&map);
+
+    map.edit_style(|style| style.apply(Edit::SetTerrain(None))).unwrap();
+    assert_eq!((0.0, None), ground(&map));
+    let flat_map = ground_generation(&map);
+    assert_eq!(grounded + 1, flat_map);
+    // A snapshot the renderer sent before it drew the flat map doesn't
+    // ground the camera again.
+    report(&mut map, flat(Some(500.0), 300.0));
+    assert_eq!((0.0, None), ground(&map));
+    report(&mut map, frame(1, grounded));
+    assert_eq!(None, map.take_still_image());
+    report(&mut map, frame(1, flat_map));
+    assert_eq!(Some(Ok(())), map.take_still_image());
+}
+
+/// A still image that used up its moves on ground that never settles still
+/// goes back to the flat map once terrain stops drawing.
+#[test]
+fn the_camera_returns_to_sea_level_after_a_still_image_used_its_moves() {
+    let run_loop = Queue::<()>::new();
+    let mut map = map(MapMode::Static, &run_loop);
+    map.render_still().unwrap();
+    let restless: Arc<dyn Elevation> = Arc::new(Restless::default());
+    for _ in 0..10 {
+        report(&mut map, RendererEvent::TerrainElevation(Some(Arc::clone(&restless))));
+    }
+    assert_eq!(8, ground_generation(&map));
+    report(&mut map, RendererEvent::TerrainElevation(None));
+    assert_eq!((0.0, None), ground(&map));
+    assert_eq!(9, ground_generation(&map));
+    report(&mut map, frame(1, 9));
+    assert_eq!(Some(Ok(())), map.take_still_image());
 }
