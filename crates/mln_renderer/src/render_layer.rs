@@ -308,6 +308,8 @@ pub(crate) struct FrameSourceTiles<'a> {
     tiles: &'a [RenderTile],
     /// What each of `tiles` holds, at its index.
     contents: &'a [Option<TileContent<'a>>],
+    /// Whether the source is an image source.
+    image: bool,
 }
 
 /// The tiles of a layer of the type `T` in a frame, each with what it shows
@@ -315,10 +317,11 @@ pub(crate) struct FrameSourceTiles<'a> {
 pub(crate) type FrameTiles<'a, T> = SmallVec<[FrameTile<'a, T>; 64]>;
 
 impl<'a> FrameSourceTiles<'a> {
-    /// The render tiles `tiles`, which hold `contents`, at their indexes.
+    /// The render tiles of `source`, which hold `contents`, at their
+    /// indexes.
     #[must_use]
-    pub(crate) fn new(tiles: &'a [RenderTile], contents: &'a [Option<TileContent<'a>>]) -> Self {
-        FrameSourceTiles { tiles, contents }
+    pub(crate) fn new(source: &'a dyn RenderSource, contents: &'a [Option<TileContent<'a>>]) -> Self {
+        FrameSourceTiles { tiles: source.render_tiles(), contents, image: source.is_image() }
     }
 
     /// The tiles at the indexes of `order`, in that order, as the layer
@@ -408,7 +411,7 @@ impl<'a> LayerUpdate<'a> {
     #[must_use]
     fn tiles(&self, order: TileOrder) -> Option<(FrameSourceTiles<'a>, &'a [usize])> {
         let source = self.source?;
-        Some((FrameSourceTiles::new(source.render_tiles(), self.contents), source.tile_order(order)?))
+        Some((FrameSourceTiles::new(source, self.contents), source.tile_order(order)?))
     }
 }
 
@@ -553,11 +556,12 @@ pub(crate) trait RenderLayer {
 
     /// The encode's update of the layer's draws: picks the shader variant
     /// for the frame's projection, dropping the draws when it changed; drops
-    /// the draws of a layer that has nothing to draw, and otherwise starts
-    /// its draws of the frame ([`LayerDrawing::begin_frame`]); drops them
-    /// again for a layer that draws in no pass, and otherwise runs the
-    /// type's [`LayerType::make_draws`] with the tiles of `source` that its
-    /// update found in `found`.
+    /// the draws of a layer that has nothing to draw (still starting the
+    /// frame of one on an image source), and otherwise starts its draws of
+    /// the frame ([`LayerDrawing::begin_frame`]); drops them again for a
+    /// layer that draws in no pass, and otherwise runs the type's
+    /// [`LayerType::make_draws`] with the tiles of `source` that its update
+    /// found in `found`.
     fn update_draws(
         &mut self,
         gpu: &mut dyn Gpu,
@@ -769,6 +773,13 @@ impl<T: LayerType> RenderLayer for Layer<T> {
             Some(source) if let Some(found) = found.get(self.found.clone()).filter(|found| !found.is_empty()) => {
                 let tiles = source.at::<T>(found, &self.values.style.id);
                 self.make_draws(gpu, paint, atlases, &tiles);
+            }
+            // A layer of an image source takes its place in the layers'
+            // order and depth from its first frame, whether or not the image
+            // has tiles to draw in yet.
+            Some(source) if source.image => {
+                self.remove_all_draws();
+                self.begin_frame();
             }
             _ => self.remove_all_draws(),
         }
