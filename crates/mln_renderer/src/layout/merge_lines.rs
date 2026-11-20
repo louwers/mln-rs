@@ -1,117 +1,94 @@
-// C++ keys the indices on `util::hash(text, x, y)` (a `size_t`); here the
-// key is the `(text, x, y)` tuple itself, which gives the same lookups
-// except where two C++ (libstdc++ `std::hash` + `hash_combine`) hashes
-// collide; C++ would then merge unrelated lines. The
-// `mergeFromRight`/`mergeFromLeft` helpers take the index of the feature
-// whose geometry C++ passes by reference, and the key the C++ iterator
-// points at.
-
 use mln_tile_id::geometry_tile_data::GeometryCoordinate;
 use mln_util::hash::HashMap;
 
 use crate::layout::symbol_feature::SymbolFeature;
 
-type Key = (Vec<char>, i16, i16);
+/// A line's end: the index of its feature's text among the distinct texts,
+/// and the end point.
+type End = (usize, i16, i16);
 
-/// Map of key -> index into features
-type Index = HashMap<Key, usize>;
-
-fn get_key(text: &[char], coord: GeometryCoordinate) -> Key {
-    (text.to_vec(), coord.x, coord.y)
+fn end(text: usize, point: GeometryCoordinate) -> End {
+    (text, point.x, point.y)
 }
 
-/// Appends `features[geom].geometry[0]` (minus the shared point) to the
-/// feature `left` points at.
-fn merge_from_right(
-    features: &mut [SymbolFeature],
-    right_index: &mut Index,
-    left: &Key,
-    right_key: Key,
-    geom: usize,
-) -> usize {
-    let index = right_index[left];
-    right_index.remove(left);
-    right_index.insert(right_key, index);
-    let geom0 = std::mem::take(&mut features[geom].geometry[0]);
-    let target = &mut features[index].geometry[0];
-    target.pop();
-    target.extend_from_slice(&geom0);
-    // `geom[0].clear()`: `geom0` was taken, leaving it empty.
-    index
+/// The index of each feature's text among the distinct texts, if it has
+/// one.
+fn text_ids(features: &[SymbolFeature]) -> Vec<Option<usize>> {
+    let mut ids: HashMap<&[char], usize> = HashMap::default();
+    features
+        .iter()
+        .map(|feature| {
+            let text = feature.formatted_text.as_ref()?.raw_text();
+            let next = ids.len();
+            Some(*ids.entry(text).or_insert(next))
+        })
+        .collect()
 }
 
-/// Prepends `features[geom].geometry[0]` (minus the shared point) to the
-/// feature `right` points at.
-fn merge_from_left(
-    features: &mut [SymbolFeature],
-    left_index: &mut Index,
-    right: &Key,
-    left_key: Key,
-    geom: usize,
-) -> usize {
-    let index = left_index[right];
-    left_index.remove(right);
-    left_index.insert(left_key, index);
-    let mut geom0 = std::mem::take(&mut features[geom].geometry[0]);
-    geom0.pop();
-    let mut other = std::mem::take(&mut features[index].geometry[0]);
-    geom0.extend_from_slice(&other);
-    other.clear();
-    // `std::swap(features[index].geometry[0], geom[0])`.
-    features[index].geometry[0] = geom0;
-    features[geom].geometry[0] = other;
-    index
+/// The first line of `features[index]`.
+fn first_line(features: &mut [SymbolFeature], index: usize) -> &mut Vec<GeometryCoordinate> {
+    &mut features[index].geometry[0]
 }
 
+/// Moves the first line of `features[from]` onto the end of the one of
+/// `features[to]`, which ends where it starts.
+fn append(features: &mut [SymbolFeature], to: usize, from: usize) {
+    let tail = std::mem::take(first_line(features, from));
+    let line = first_line(features, to);
+    line.pop();
+    line.extend(tail);
+}
+
+/// Moves the first line of `features[from]` onto the start of the one of
+/// `features[to]`, which starts where it ends.
+fn prepend(features: &mut [SymbolFeature], to: usize, from: usize) {
+    let mut head = std::mem::take(first_line(features, from));
+    head.pop();
+    first_line(features, to).splice(..0, head);
+}
+
+/// Joins the first lines of features with the same text where one ends and
+/// another starts. The joined line takes the place of one of them, and the
+/// others are left empty.
 pub(crate) fn merge_lines(features: &mut [SymbolFeature]) {
-    let mut left_index = Index::default();
-    let mut right_index = Index::default();
+    let text_ids = text_ids(features);
+    // The features whose lines start, and end, at an end.
+    let mut by_start: HashMap<End, usize> = HashMap::default();
+    let mut by_end: HashMap<End, usize> = HashMap::default();
 
-    for k in 0..features.len() {
-        let feature = &features[k];
-        let geometry = &feature.geometry;
-
-        let Some(formatted_text) = &feature.formatted_text else {
-            continue;
-        };
-        let Some(line) = geometry.first() else { continue };
-        let (Some(&first), Some(&last)) = (line.first(), line.last()) else { continue };
-
+    for (k, text) in text_ids.into_iter().enumerate() {
         // TODO: Key should include formatting options (see
         // https://github.com/mapbox/mapbox-gl-js/issues/3645)
+        let Some(text) = text else { continue };
+        let Some(line) = features[k].geometry.first() else { continue };
+        let (Some(&first), Some(&last)) = (line.first(), line.last()) else { continue };
+        let (start, finish) = (end(text, first), end(text, last));
 
-        let text = formatted_text.raw_text().to_vec();
-        let left_key = get_key(&text, first);
-        let right_key = get_key(&text, last);
-
-        let left = right_index.get(&left_key).copied();
-        let right = left_index.get(&right_key).copied();
-
-        match (left, right) {
-            (Some(left), Some(right)) if left != right => {
-                // found lines with the same text adjacent to both ends of the
-                // current line, merge all three
-                let j = merge_from_left(features, &mut left_index, &right_key, left_key.clone(), k);
-                let i = merge_from_right(features, &mut right_index, &left_key, right_key.clone(), j);
-
-                left_index.remove(&left_key);
-                right_index.remove(&right_key);
-                if let Some(&back) = features[i].geometry[0].last() {
-                    right_index.insert(get_key(&text, back), i);
+        match (by_end.get(&start).copied(), by_start.get(&finish).copied()) {
+            (Some(before), Some(after)) if before != after => {
+                // The line joins two others: join all three into the one
+                // before.
+                prepend(features, after, k);
+                append(features, before, after);
+                by_end.remove(&start);
+                by_start.remove(&finish);
+                if let Some(&last) = features[before].geometry[0].last() {
+                    by_end.insert(end(text, last), before);
                 }
             }
-            (Some(_), _) => {
-                // found mergeable line adjacent to the start of the current line, merge
-                merge_from_right(features, &mut right_index, &left_key, right_key, k);
+            (Some(before), _) => {
+                append(features, before, k);
+                by_end.remove(&start);
+                by_end.insert(finish, before);
             }
-            (None, Some(_)) => {
-                // found mergeable line adjacent to the end of the current line, merge
-                merge_from_left(features, &mut left_index, &right_key, left_key, k);
+            (None, Some(after)) => {
+                prepend(features, after, k);
+                by_start.remove(&finish);
+                by_start.insert(start, after);
             }
             (None, None) => {
-                // no adjacent lines, add as a new item
-                left_index.insert(left_key, k);
-                right_index.insert(right_key, k);
+                by_start.insert(start, k);
+                by_end.insert(finish, k);
             }
         }
     }
