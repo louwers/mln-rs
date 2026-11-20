@@ -849,15 +849,7 @@ enum {
 struct alignas(16) TileDebugDrawableUBO {
     /*  0 */ float4x4 matrix;
     /* 64 */ float ratio;
-
-    // Interpolations
-    /* 68 */ float color_t;
-    /* 72 */ float blur_t;
-    /* 76 */ float opacity_t;
-    /* 80 */ float gapwidth_t;
-    /* 84 */ float offset_t;
-    /* 88 */ float width_t;
-    /* 92 */ float pad1;
+    /* 68 */ float pad[7];
     /* 96 */
 };
 static_assert(sizeof(TileDebugDrawableUBO) == 6 * 16, "wrong size");
@@ -869,7 +861,6 @@ struct alignas(16) TileDebugDrawableElement {
 };
 static_assert(sizeof(TileDebugDrawableElement) == 8 * 16, "wrong size");
 
-/// Evaluated properties that do not depend on the tile
 struct alignas(16) TileDebugPropsUBO {
     /*  0 */ float4 color;
     /* 16 */ float blur;
@@ -877,9 +868,7 @@ struct alignas(16) TileDebugPropsUBO {
     /* 24 */ float gapwidth;
     /* 28 */ float offset;
     /* 32 */ float width;
-    /* 36 */ float floorwidth;
-    /* 40 */ float pad0;
-    /* 44 */ float pad1;
+    /* 36 */ float pad[3];
     /* 48 */
 };
 static_assert(sizeof(TileDebugPropsUBO) == 3 * 16, "wrong size");
