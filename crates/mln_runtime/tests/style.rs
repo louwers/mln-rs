@@ -427,7 +427,10 @@ fn root_properties_change_the_live_style_and_the_view() {
 
     wait(map.set_style_root_property("sky", r#"{"atmosphere-blend":0.25}"#));
     assert_eq!(wait(map.style_root_property("sky")).as_deref(), Some(r#"{"atmosphere-blend":0.25}"#));
-    assert_eq!(ErrorKind::Unsupported, wait_err(map.set_style_root_property("terrain", r#"{"source":"dem"}"#)).kind);
+    wait(map.set_style_root_property("terrain", r#"{"source":"dem","exaggeration":2}"#));
+    assert_eq!(wait(map.style_root_property("terrain")).as_deref(), Some(r#"{"source":"dem","exaggeration":2.0}"#));
+    wait(map.set_style_root_property("terrain", "null"));
+    assert_eq!(ErrorKind::Unsupported, wait_err(map.set_style_root_property("zoom", "4")).kind);
     assert_eq!(ErrorKind::InvalidArgument, wait_err(map.set_style_root_property("layers", "[]")).kind);
     assert_eq!(ErrorKind::InvalidArgument, wait_err(map.style_root_property("sources")).kind);
 

@@ -19,6 +19,7 @@ use crate::property_value::{PropertyValue, StyleValue as _};
 use crate::sky::Sky;
 use crate::sources::tileset::vector_source as tileset_vector_source;
 use crate::style::Style;
+use crate::terrain::Terrain;
 use crate::transition_options::TransitionOptions;
 use crate::{StyleRegistry, image};
 
@@ -532,6 +533,105 @@ fn sky_presence_and_replacement() {
     assert!(style.get_sky().is_none());
 }
 
+const TERRAIN_STYLE: &str = r#"{"version":8,"sources":{
+    "dem":{"type":"raster-dem","tiles":["https://example.com/{z}/{x}/{y}.png"]},
+    "points":{"type":"geojson","data":{"type":"FeatureCollection","features":[]}}},"layers":[]}"#;
+
+/// `TERRAIN_STYLE` with the root `terrain` set to the JSON `terrain`.
+fn terrain_style(terrain: &str) -> String {
+    TERRAIN_STYLE.replace(r#""layers":[]"#, &format!(r#""layers":[],"terrain":{terrain}"#))
+}
+
+fn terrain_of(style: &Style) -> Option<(&str, f32)> {
+    style.get_terrain().map(|terrain| (terrain.source.as_str(), terrain.exaggeration))
+}
+
+#[test]
+fn the_terrain_is_parsed_set_replaced_and_cleared() {
+    let mut style = stub_style();
+    style.load_json(TERRAIN_STYLE);
+    assert!(style.get_terrain().is_none());
+
+    style.load_json(&terrain_style(r#"{"source":"dem","exaggeration":3}"#));
+    assert_eq!(terrain_of(&style), Some(("dem", 3.0)));
+    style.load_json(&terrain_style(r#"{"source":"dem"}"#));
+    assert_eq!(terrain_of(&style), Some(("dem", 1.0)));
+    style.load_json(TERRAIN_STYLE);
+
+    edit(&mut style, Edit::SetTerrain(Some(Terrain::new("dem"))));
+    assert_eq!(terrain_of(&style), Some(("dem", 1.0)));
+    edit(&mut style, Edit::SetTerrain(Some(Terrain { source: "dem".to_owned(), exaggeration: 0.0 })));
+    assert_eq!(terrain_of(&style), Some(("dem", 0.0)));
+    edit(&mut style, Edit::SetTerrain(None));
+    assert!(style.get_terrain().is_none());
+}
+
+#[test]
+fn an_edit_that_sets_the_terrain_it_has_changes_nothing() {
+    let mut style = stub_style();
+    style.load_json(TERRAIN_STYLE);
+    edit(&mut style, Edit::SetTerrain(Some(Terrain::new("dem"))));
+
+    let before = style.clone();
+    edit(&mut style, Edit::SetTerrain(Some(Terrain::new("dem"))));
+    assert!(before.is_same_version(&style));
+
+    edit(&mut style, Edit::SetTerrain(Some(Terrain { source: "dem".to_owned(), exaggeration: 2.0 })));
+    assert!(!before.is_same_version(&style));
+    assert_eq!(["terrain"], *parts_that_differ(&before, &style));
+
+    edit(&mut style, Edit::SetTerrain(None));
+    let before = style.clone();
+    edit(&mut style, Edit::SetTerrain(None));
+    assert!(before.is_same_version(&style));
+}
+
+#[test]
+fn a_terrain_needs_a_raster_dem_source_if_the_style_has_the_source() {
+    let mut style = stub_style();
+    style.load_json(TERRAIN_STYLE);
+
+    let before = style.clone();
+    let error = style.apply(Edit::SetTerrain(Some(Terrain::new("points")))).unwrap_err();
+    assert_eq!(mln_util::ErrorKind::InvalidArgument, error.kind);
+    assert!(before.is_same_version(&style));
+
+    // A source the style lacks is accepted: the terrain waits for it.
+    edit(&mut style, Edit::SetTerrain(Some(Terrain::new("absent"))));
+    assert_eq!(terrain_of(&style), Some(("absent", 1.0)));
+}
+
+#[test]
+fn a_parsed_terrain_that_doesnt_fit_is_dropped() {
+    let mut style = stub_style();
+
+    let log = FixtureLog::new();
+    style.load_json(&terrain_style(r#"{"source":"points"}"#));
+    assert!(style.get_terrain().is_none());
+    assert!(log.messages().iter().any(|message| message.msg.contains("not a raster-dem source")));
+
+    for terrain in [r#"{"source":"absent"}"#, r#"{"source":"dem","exaggeration":2}"#] {
+        style.load_json(&terrain_style(terrain));
+        assert!(style.get_terrain().is_some(), "{terrain}");
+    }
+    for terrain in ["{}", r#"{"source":1}"#, r#"{"source":"dem","exaggeration":-1}"#, "[]", "null"] {
+        style.load_json(&terrain_style(terrain));
+        assert!(style.get_terrain().is_none(), "{terrain}");
+    }
+}
+
+#[test]
+fn removing_the_terrains_source_keeps_the_terrain() {
+    // As in GL JS, where only a layer stops a source from being removed: the
+    // terrain stays, and shows nothing until a source with its id is back.
+    let mut style = stub_style();
+    style.load_json(TERRAIN_STYLE);
+    edit(&mut style, Edit::SetTerrain(Some(Terrain::new("dem"))));
+
+    edit(&mut style, Edit::RemoveSource("dem".to_owned()));
+    assert_eq!(terrain_of(&style), Some(("dem", 1.0)));
+}
+
 // gtest: Style.SkyProjectionAndGlobalStateCoexist
 #[test]
 fn sky_projection_and_global_state_coexist() {
@@ -610,6 +710,7 @@ fn an_edit_replaces_only_the_part_it_changes() {
     case(Edit::AddImage(make_image("i")), &["images"]);
     case(Edit::SetLight(crate::light::Light::new()), &["light"]);
     case(Edit::SetSky(Some(Sky::new())), &["sky"]);
+    case(Edit::SetTerrain(Some(Terrain::new("absent"))), &["terrain"]);
     case(Edit::SetProjection(Projection::new()), &["projection"]);
     case(Edit::SetTransition(TransitionOptions::new(Some(Duration::from_millis(1)), None, true)), &["transition"]);
     case(Edit::SetGlobalState { name: "k".to_owned(), value: Value::Bool(true) }, &["global state"]);
@@ -627,12 +728,14 @@ fn an_edit_replaces_only_the_part_it_changes() {
 /// differs.
 fn parts_that_differ(a: &Style, b: &Style) -> Vec<&'static str> {
     let sky = |style: &Style| style.get_sky().map(Arc::as_ptr);
+    let terrain = |style: &Style| style.get_terrain().map(Arc::as_ptr);
     [
         ("layers", Arc::ptr_eq(a.get_layer_list(), b.get_layer_list())),
         ("sources", Arc::ptr_eq(a.get_sources(), b.get_sources())),
         ("images", Arc::ptr_eq(a.get_images(), b.get_images())),
         ("light", Arc::ptr_eq(a.get_light(), b.get_light())),
         ("sky", sky(a) == sky(b)),
+        ("terrain", terrain(a) == terrain(b)),
         ("projection", Arc::ptr_eq(a.get_projection(), b.get_projection())),
         ("transition", a.get_transition_options() == b.get_transition_options()),
         ("global state", Arc::ptr_eq(a.get_global_state(), b.get_global_state())),

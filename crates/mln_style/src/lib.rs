@@ -76,6 +76,7 @@ pub mod sprite;
 mod style;
 mod style_json;
 pub mod style_property;
+pub mod terrain;
 pub mod transition_options;
 
 pub use edit::Edit;

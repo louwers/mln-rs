@@ -14,7 +14,7 @@ use mln_util::logging::{Event, Log};
 use mln_vec_map::VecSet;
 
 use crate::conversion::layer::{InvalidProperty, convert_layer_with, set_paint_properties};
-use crate::conversion::{convert, convert_light, convert_projection, convert_sky, convert_source};
+use crate::conversion::{convert, convert_light, convert_projection, convert_sky, convert_source, convert_terrain};
 use crate::expression::GlobalStateMap;
 use crate::layer::{FontStack, Layer};
 use crate::light::Light;
@@ -23,6 +23,7 @@ use crate::registry::StyleRegistry;
 use crate::sky::Sky;
 use crate::source_type::Source;
 use crate::sprite::Sprite;
+use crate::terrain::Terrain;
 use crate::transition_options::TransitionOptions;
 
 /// What `Parser::parse` returns: a style that isn't one fails with
@@ -42,6 +43,7 @@ pub struct Parser {
     pub(crate) transition: TransitionOptions,
     pub(crate) light: Light,
     pub(crate) sky: Option<Sky>,
+    pub(crate) terrain: Option<Terrain>,
     pub(crate) projection: Projection,
 
     /// Default values of the root "state" property, keyed by state property
@@ -71,6 +73,7 @@ impl Parser {
             transition: TransitionOptions::with_duration(DEFAULT_TRANSITION_DURATION),
             light: Light::new(),
             sky: None,
+            terrain: None,
             projection: Projection::new(),
             global_state_defaults: GlobalStateMap::new(),
             name: String::new(),
@@ -170,6 +173,9 @@ impl Parser {
             self.parse_light(value);
         }
 
+        if let Some(value) = member(object, "terrain") {
+            self.parse_terrain(value);
+        }
         if let Some(value) = member(object, "sky") {
             self.parse_sky(value);
         }
@@ -240,6 +246,16 @@ impl Parser {
         };
 
         self.sky = Some(converted);
+    }
+
+    fn parse_terrain(&mut self, value: &Json<'_>) {
+        let mut error = Error::default();
+        let Some(converted) = convert_terrain(&Convertible::from(value), &mut error) else {
+            Log::warning(Event::ParseStyle, &error.message);
+            return;
+        };
+
+        self.terrain = Some(converted);
     }
 
     fn parse_projection(&mut self, value: &Json<'_>) {
