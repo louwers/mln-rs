@@ -62,4 +62,6 @@ pub enum BuiltIn {
     /// stage reads their color from a texture, by texel. The renderer
     /// doesn't draw with it.
     VertexTexelShader,
+    /// The terrain's surface: a grid over a tile, raised by its DEM.
+    TerrainShader,
 }

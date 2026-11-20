@@ -41,7 +41,8 @@ use crate::shaders::shader_defines::{
     ID_SYMBOL_HALO_COLOR_ATTRIBUTE, ID_SYMBOL_HALO_WIDTH_ATTRIBUTE, ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE,
     ID_SYMBOL_IMAGE_ICON_TEXTURE, ID_SYMBOL_IMAGE_TEXTURE, ID_SYMBOL_OPACITY_ATTRIBUTE,
     ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE, ID_SYMBOL_POS_OFFSET_ATTRIBUTE, ID_SYMBOL_PROJECTED_POS_ATTRIBUTE,
-    ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE, ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE, ID_VERTEX_TEXEL_TEXTURE,
+    ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE, ID_TERRAIN_POS_VERTEX_ATTRIBUTE, ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE,
+    ID_VERTEX_TEXEL_TEXTURE,
 };
 use crate::shaders::shader_source::BuiltIn;
 
@@ -100,6 +101,7 @@ pub const PROGRAMS: &[BuiltIn] = &[
     BuiltIn::SkyShader,
     BuiltIn::AtmosphereShader,
     BuiltIn::LayerCompositeShader,
+    BuiltIn::TerrainShader,
 ];
 
 /// What `program` reads, `None` for a program no backend has.
@@ -593,6 +595,13 @@ pub fn program_info(program: BuiltIn) -> Option<&'static ProgramInfo> {
             attributes: &[(ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE, Short4)],
             instance_attributes: &[],
             textures: &[ID_VERTEX_TEXEL_TEXTURE],
+        }),
+        BuiltIn::TerrainShader => Some(&ProgramInfo {
+            name: "TerrainShader",
+            program: BuiltIn::TerrainShader,
+            attributes: &[(ID_TERRAIN_POS_VERTEX_ATTRIBUTE, Short4)],
+            instance_attributes: &[],
+            textures: &[],
         }),
         _ => None,
     }

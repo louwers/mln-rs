@@ -31,7 +31,8 @@ use mln_gfx::shaders::shader_defines::{
     ID_SYMBOL_HALO_COLOR_ATTRIBUTE, ID_SYMBOL_HALO_WIDTH_ATTRIBUTE, ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE,
     ID_SYMBOL_IMAGE_ICON_TEXTURE, ID_SYMBOL_IMAGE_TEXTURE, ID_SYMBOL_OPACITY_ATTRIBUTE,
     ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE, ID_SYMBOL_POS_OFFSET_ATTRIBUTE, ID_SYMBOL_PROJECTED_POS_ATTRIBUTE,
-    ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE, ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE, ID_VERTEX_TEXEL_TEXTURE,
+    ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE, ID_TERRAIN_POS_VERTEX_ATTRIBUTE, ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE,
+    ID_VERTEX_TEXEL_TEXTURE,
 };
 use mln_gfx::shaders::shader_source::BuiltIn;
 
@@ -579,6 +580,9 @@ shader_source!(
     &[tex(0, ID_VERTEX_TEXEL_TEXTURE)]
 );
 
+const TERRAIN_ATTRIBUTES: &[AttributeInfo] = &[attr(0, ID_TERRAIN_POS_VERTEX_ATTRIBUTE)];
+shader_source!(TERRAIN_SHADER, TERRAIN_SHADER, "TerrainShader", TERRAIN_ATTRIBUTES, &[]);
+
 /// The WebGPU source of `shader_id`, or `None` for a shader without WGSL.
 #[must_use]
 pub(crate) fn shader_source(shader_id: BuiltIn) -> Option<&'static ShaderSource> {
@@ -624,6 +628,7 @@ pub(crate) fn shader_source(shader_id: BuiltIn) -> Option<&'static ShaderSource>
         BuiltIn::AtmosphereShader => Some(&ATMOSPHERE_SHADER),
         BuiltIn::LayerCompositeShader => Some(&LAYER_COMPOSITE_SHADER),
         BuiltIn::VertexTexelShader => Some(&VERTEX_TEXEL_SHADER),
+        BuiltIn::TerrainShader => Some(&TERRAIN_SHADER),
         _ => None,
     }
 }

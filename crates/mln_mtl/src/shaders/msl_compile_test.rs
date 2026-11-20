@@ -69,6 +69,7 @@ const ALL_BUILT_INS: &[BuiltIn] = &[
     BuiltIn::GlobeDepthShader,
     BuiltIn::LayerCompositeShader,
     BuiltIn::VertexTexelShader,
+    BuiltIn::TerrainShader,
 ];
 
 fn sources() -> impl Iterator<Item = &'static ShaderSource> {

@@ -161,6 +161,15 @@ pub const ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE: usize = 0;
 pub const ID_VERTEX_TEXEL_TEXTURE: usize = 0;
 pub const ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE: usize = 0;
 
+// --- terrain: a tile's grid, its DEM and the texture draped over it.
+/// A grid vertex: x and y in tile units, whether it is a skirt's lower edge,
+/// and 0.
+pub const ID_TERRAIN_POS_VERTEX_ATTRIBUTE: usize = 0;
+pub const ID_TERRAIN_DRAWABLE_UBO: usize = ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO; // SSBO
+pub const ID_TERRAIN_PROPS_UBO: usize = DRAWABLE_RESERVED_UBO_COUNT; // packed
+pub const ID_TERRAIN_DEM_TEXTURE: usize = 0;
+pub const ID_TERRAIN_DRAPE_TEXTURE: usize = 1;
+
 // --- sky (`idSkyPropsUBO` / `idAtmospherePropsUBO = getEnumValue(drawableReservedUBOCount, layerUBOStartId)`)
 pub const ID_SKY_PROPS_UBO: usize = DRAWABLE_RESERVED_UBO_COUNT; // packed
 pub const SKY_LAYER_UBO_COUNT: usize = ID_SKY_PROPS_UBO + 1;

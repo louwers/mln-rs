@@ -2860,6 +2860,49 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 /// Port-only, for the backend conformance cases: quads at clip positions,
 /// each vertex colored by the texel of `image_texture` it names, which the
 /// vertex stage loads.
+/// The terrain's surface: a tile's grid, drawn with the tile's matrix from
+/// `drawableVector`, flat at sea level and in one opaque grey.
+pub(crate) const TERRAIN_SHADER: WgslShaderSource = WgslShaderSource {
+    built_in: "TerrainShader",
+    name: r"TerrainShader",
+    vertex: Some(
+        r"
+struct VertexInput {
+    // x and y in tile units, whether the vertex is a skirt's lower edge, 0.
+    @location(0) pos: vec4<i32>,
+};
+
+struct TerrainDrawableUBO {
+    matrix: mat4x4<f32>,
+    dem_coords: vec4<f32>,
+};
+
+struct GlobalIndexUBO {
+    value: u32,
+    pad0: vec3<u32>,
+};
+
+@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
+@group(0) @binding(2) var<storage, read> drawableVector: array<TerrainDrawableUBO>;
+
+@vertex
+fn main(in: VertexInput) -> @builtin(position) vec4<f32> {
+    let drawable = drawableVector[globalIndex.value];
+    return drawable.matrix * vec4<f32>(vec2<f32>(in.pos.xy), 0.0, 1.0);
+}
+",
+    ),
+    fragment: Some(
+        r"
+@fragment
+fn main() -> @location(0) vec4<f32> {
+    return vec4<f32>(0.5, 0.5, 0.5, 1.0);
+}
+",
+    ),
+    prelude: None,
+};
+
 pub(crate) const VERTEX_TEXEL_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "VertexTexelShader",
     name: r"VertexTexelShader",
@@ -6578,6 +6621,7 @@ pub(crate) const ALL: &[&WgslShaderSource] = &[
     &SYMBOL_ICON_SHADER,
     &SYMBOL_SDF_SHADER,
     &SYMBOL_TEXT_AND_ICON_SHADER,
+    &TERRAIN_SHADER,
     &VERTEX_TEXEL_SHADER,
     &WIDE_VECTOR_SHADER,
 ];
