@@ -1,5 +1,6 @@
 //! The registrations that a runtime, its renderers and its tile workers
-//! share: the expression functions, the layer types and the source types.
+//! share: the expression functions, the layer types and their programs'
+//! shader sources, and the source types.
 //!
 //! An app fills a [`RegistryBuilder`] by explicit calls and builds the
 //! [`Registry`] once. Tile workers in other wasm instances make the same
@@ -7,6 +8,8 @@
 
 use std::sync::Arc;
 
+use mln_gfx::shaders::program::Program;
+use mln_gfx::shaders::source::{ShaderSource, ShaderSources};
 use mln_style::StyleRegistry;
 use mln_style::expression::Functions;
 use mln_style::expression::functions::RegisterError;
@@ -24,6 +27,7 @@ use crate::source_type::{self, ErasedSourceType, SourceType};
 pub struct RegistryBuilder {
     functions: Functions,
     layer_types: VecMap<&'static str, &'static dyn ErasedLayerType>,
+    shader_sources: ShaderSources,
     source_types: VecMap<&'static str, &'static dyn ErasedSourceType>,
 }
 
@@ -32,6 +36,7 @@ impl std::fmt::Debug for RegistryBuilder {
         f.debug_struct("RegistryBuilder")
             .field("functions", &self.functions)
             .field("layer_types", &self.layer_types.keys().collect::<Vec<_>>())
+            .field("shader_sources", &self.shader_sources)
             .field("source_types", &self.source_types.keys().collect::<Vec<_>>())
             .finish()
     }
@@ -65,6 +70,15 @@ impl RegistryBuilder {
         Ok(())
     }
 
+    /// Adds the source of each program of `table` in the shading language
+    /// of `S`, in place of any it had in that language: a layer type adds
+    /// those of the programs it draws with, in each language it has them in.
+    /// A renderer's backend compiles the programs from the sources in its
+    /// language.
+    pub fn add_shader_sources<S: ShaderSource>(&mut self, table: &[(&'static Program, &'static S)]) {
+        self.shader_sources.add(table);
+    }
+
     /// Adds the source type `T`. Fails for a name that an earlier type took.
     pub(crate) fn add_source_type<T: SourceType>(&mut self) -> Result<(), RegisterError> {
         let name = T::INFO.name;
@@ -77,7 +91,7 @@ impl RegistryBuilder {
 
     #[must_use]
     pub fn build(self) -> Arc<Registry> {
-        Registry::new(Arc::new(self.functions), self.layer_types, self.source_types)
+        Registry::new(Arc::new(self.functions), self.layer_types, self.shader_sources, self.source_types)
     }
 }
 
@@ -99,6 +113,7 @@ fn style_source_half(source_type: &'static dyn ErasedSourceType) -> &'static dyn
 pub struct Registry {
     style: Arc<StyleRegistry>,
     layer_types: VecMap<&'static str, &'static dyn ErasedLayerType>,
+    shader_sources: ShaderSources,
     source_types: VecMap<&'static str, &'static dyn ErasedSourceType>,
 }
 
@@ -131,12 +146,13 @@ impl Registry {
     fn new(
         functions: Arc<Functions>,
         layer_types: VecMap<&'static str, &'static dyn ErasedLayerType>,
+        shader_sources: ShaderSources,
         source_types: VecMap<&'static str, &'static dyn ErasedSourceType>,
     ) -> Arc<Registry> {
         let style_halves = layer_types.values().map(|&layer_type| style_half(layer_type));
         let style_source_halves = source_types.values().map(|&source_type| style_source_half(source_type));
         let style = StyleRegistry::new(functions, style_halves, style_source_halves);
-        Arc::new(Registry { style: Arc::new(style), layer_types, source_types })
+        Arc::new(Registry { style: Arc::new(style), layer_types, shader_sources, source_types })
     }
 
     #[must_use]
@@ -147,6 +163,13 @@ impl Registry {
     #[must_use]
     pub fn functions(&self) -> &Arc<Functions> {
         self.style.functions()
+    }
+
+    /// The sources of the programs of the layer types, which a renderer's
+    /// backend compiles them from.
+    #[must_use]
+    pub fn shader_sources(&self) -> &ShaderSources {
+        &self.shader_sources
     }
 
     pub(crate) fn layer_type(&self, name: &str) -> Option<&'static dyn ErasedLayerType> {

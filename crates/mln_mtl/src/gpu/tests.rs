@@ -14,70 +14,80 @@ use objc2_metal::MTLSharedEvent as _;
 
 use super::*;
 
+/// A `MetalGpu` on `device` that also compiles the built-in layer types'
+/// programs, which the conformance cases draw with.
+fn gpu(device: &Device) -> MetalGpu {
+    let mut gpu = MetalGpu::new(device);
+    let mut sources = ShaderSources::default();
+    sources.add(crate::LAYER_SOURCES);
+    gpu.add_shader_sources(&sources);
+    gpu
+}
+
 #[test]
 fn clip_mask_and_background_through_gpu() {
     let device = Device::new(None).expect("Metal device");
-    clip_mask_and_background(&mut MetalGpu::new(&device)).expect("the frame");
+    clip_mask_and_background(&mut gpu(&device)).expect("the frame");
 }
 
 #[test]
 fn invalid_calls_through_gpu() {
     let device = Device::new(None).expect("Metal device");
-    invalid_calls(&mut MetalGpu::new(&device)).expect("the valid calls");
+    invalid_calls(&mut gpu(&device)).expect("the valid calls");
 }
 
 #[test]
 fn foreign_ids_through_gpu() {
     let device = Device::new(None).expect("Metal device");
-    foreign_ids(&mut MetalGpu::new(&device), &mut MetalGpu::new(&device)).expect("the valid calls");
+    foreign_ids(&mut gpu(&device), &mut gpu(&device)).expect("the valid calls");
 }
 
 #[test]
 fn transparent_replace_through_gpu() {
     let device = Device::new(None).expect("Metal device");
-    transparent_replace(&mut MetalGpu::new(&device)).expect("the frame");
+    transparent_replace(&mut gpu(&device)).expect("the frame");
 }
 
 #[test]
 fn topologies_through_gpu() {
     let device = Device::new(None).expect("Metal device");
-    topologies(&mut MetalGpu::new(&device)).expect("the frames");
+    topologies(&mut gpu(&device)).expect("the frames");
 }
 
 #[test]
 fn readbacks_through_gpu() {
     let device = Device::new(None).expect("Metal device");
-    readbacks(&mut MetalGpu::new(&device)).expect("the readbacks");
+    readbacks(&mut gpu(&device)).expect("the readbacks");
 }
 
 #[test]
 fn resources_in_use_through_gpu() {
     let device = Device::new(None).expect("Metal device");
-    resources_in_use(&mut MetalGpu::new(&device)).expect("the frames");
+    resources_in_use(&mut gpu(&device)).expect("the frames");
 }
 
 #[test]
 fn depth_only_through_gpu() {
     let device = Device::new(None).expect("Metal device");
-    depth_only(&mut MetalGpu::new(&device)).expect("the frame");
+    depth_only(&mut gpu(&device)).expect("the frame");
 }
 
 #[test]
 fn vertex_layouts_through_gpu() {
     let device = Device::new(None).expect("Metal device");
-    vertex_layouts(&mut MetalGpu::new(&device)).expect("the frames");
+    vertex_layouts(&mut gpu(&device)).expect("the frames");
 }
 
 #[test]
 fn instanced_walls_through_gpu() {
     let device = Device::new(None).expect("Metal device");
-    instanced_walls(&mut MetalGpu::new(&device)).expect("the frame");
+    instanced_walls(&mut gpu(&device)).expect("the frame");
 }
 
 #[test]
 fn pulled_walls_through_gpu() {
     let device = Device::new(None).expect("Metal device");
-    pulled_walls(&mut MetalGpu::new(&device)).expect("the frame");
+    pulled_walls(&mut gpu(&device)).expect("the frame");
 }
 
 #[test]
@@ -95,7 +105,7 @@ vertex float4 vertexMain(VertexStage in [[stage_in]], device const short2* outli
 fragment half4 fragmentMain() { return half4(1.0); }
 ";
     let device = Device::new(None).expect("Metal device");
-    let mut gpu = MetalGpu::new(&device);
+    let mut gpu = gpu(&device);
     let program = &programs::FILL_EXTRUSION_INSTANCED;
     let (vertex, fragment) =
         compile(device.device(), "direct read", MSL, "vertexMain", "fragmentMain", []).expect("the MSL compiles");
@@ -133,7 +143,7 @@ fragment half4 fragmentMain() { return half4(1.0); }
 #[test]
 fn a_destroyed_buffer_stays_for_the_flushes_before() {
     let device = Device::new(None).expect("Metal device");
-    let mut gpu = MetalGpu::new(&device);
+    let mut gpu = gpu(&device);
     let buffer = gpu.create_buffer(&BufferDesc { label: "test", usage: BufferUsage::Uniform, size: 4 }).unwrap();
     gpu.write_buffer(buffer, 0, &[1, 2, 3, 4]).unwrap();
     let target = gpu
@@ -166,7 +176,7 @@ fn a_destroyed_buffer_stays_for_the_flushes_before() {
 #[test]
 fn a_flush_finishes_once_its_completed_handlers_run() {
     let device = Device::new(None).expect("Metal device");
-    let mut gpu = MetalGpu::new(&device);
+    let mut gpu = gpu(&device);
     // Holds up the completed handlers of the next flush's command buffer,
     // after it reports that it completed, with a handler of Metal's own
     // command buffer under API validation's wrappers, which runs before
@@ -205,7 +215,7 @@ fn a_flush_finishes_once_its_completed_handlers_run() {
 fn custom_layers_through_gpu() {
     let device = Device::new(None).expect("Metal device");
     custom_layers(
-        &mut MetalGpu::new(&device),
+        &mut gpu(&device),
         |lent| assert!(lent.is::<CustomLayerEncoder>()),
         |lent| {
             let lent = lent.downcast_mut::<CustomLayerPass>().expect("a Metal pass");
@@ -219,7 +229,7 @@ fn custom_layers_through_gpu() {
 #[test]
 fn imported_textures_through_gpu() {
     let device = Device::new(None).expect("Metal device");
-    imported_textures(&mut MetalGpu::new(&device), |gpu, texture| {
+    imported_textures(&mut gpu(&device), |gpu, texture| {
         let Texture { texture, format, .. } = gpu.texture(texture)?;
         let (texture, format) = (texture.clone(), *format);
         gpu.import_texture(&texture, format)
@@ -232,7 +242,7 @@ fn imported_textures_through_gpu() {
 #[test]
 fn flushes_wait_for_and_signal_events() {
     let device = Device::new(None).expect("Metal device");
-    let mut gpu = MetalGpu::new(&device);
+    let mut gpu = gpu(&device);
     let shared = device.device().newSharedEvent().expect("a shared event");
     let event = ProtocolObject::<dyn MTLEvent>::from_ref(&*shared);
     gpu.signal_after_next_submit(event, 1);

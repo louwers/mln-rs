@@ -1,5 +1,5 @@
-use mln_glsl::BUILT_INS;
 use mln_glsl::variants::variants;
+use mln_glsl::{BUILT_INS, LAYER_SOURCES};
 
 use crate::ShaderCompiler;
 
@@ -18,7 +18,7 @@ fn every_program_compiles_to_dxil() {
     let compiler = compiler();
     let mut failures = Vec::new();
     let mut compiled = 0;
-    for &(program, source) in BUILT_INS {
+    for &(program, source) in BUILT_INS.iter().chain(LAYER_SOURCES) {
         for variant in variants(program, true) {
             let at = format!("{} ({})", program.name, variant.name);
             match compiler.compile_source(program, source, &variant.defines) {
@@ -40,7 +40,7 @@ fn every_program_compiles_to_dxil() {
 #[test]
 fn only_the_pulled_programs_read_the_vertex_index() {
     let compiler = compiler();
-    for &(program, source) in BUILT_INS {
+    for &(program, source) in BUILT_INS.iter().chain(LAYER_SOURCES) {
         for variant in variants(program, false) {
             let compiled = compiler.compile_source(program, source, &variant.defines).expect("the program");
             let pulled = program.name.contains("Pulled");

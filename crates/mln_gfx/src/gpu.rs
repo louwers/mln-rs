@@ -39,6 +39,7 @@ use crate::cull_face_mode::CullFaceMode;
 use crate::depth_mode::DepthMode;
 use crate::gfx_types::{AttributeDataType, DrawModeType};
 use crate::shaders::program::Program;
+use crate::shaders::source::ShaderSources;
 use crate::stencil_mode::{StencilMode, Test};
 use crate::texture2d::SamplerState;
 use crate::types::{DepthFunctionType, DepthMaskType, StencilOpType};
@@ -273,8 +274,8 @@ pub struct VertexBufferLayout {
     pub attributes: Vec<VertexAttribute>,
 }
 
-/// A program and the defines it is compiled with, from the source the
-/// backend has registered for the program. Clones share the defines.
+/// A program and the defines it is compiled with, from the backend's source
+/// of the program. Clones share the defines.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ShaderKey {
     program: &'static Program,
@@ -586,6 +587,11 @@ pub trait Gpu {
 
     fn create_sampler(&mut self, state: &SamplerState) -> Result<SamplerId, GpuError>;
 
+    /// Adds the sources of `sources` in the backend's shading language to
+    /// the programs it compiles, in place of any it had for them. A backend
+    /// has the engine's own programs' sources itself
+    /// ([`programs`](crate::shaders::programs)).
+    fn add_shader_sources(&mut self, sources: &ShaderSources);
     /// Compiles the program of `key`. Fails with [`GpuError::Unsupported`]
     /// for a program the backend has no source for.
     fn create_shader(&mut self, key: &ShaderKey) -> Result<ShaderId, GpuError>;

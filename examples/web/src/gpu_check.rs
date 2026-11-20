@@ -44,6 +44,8 @@ impl GpuCheck {
         wasm_bindgen_futures::spawn_local(async move {
             let state = match backend().await {
                 Ok(mut backend) => {
+                    // The case draws with a built-in layer type's program.
+                    backend.gpu().add_shader_sources(mln_rs::builtin_registry().shader_sources());
                     let host = |bytes: &[u8]| mln_util::host_bytes::HostBytes::new(js_sys::Uint8Array::from(bytes));
                     let ran = conformance::host_writes(&mut *backend.gpu(), host);
                     match ran {

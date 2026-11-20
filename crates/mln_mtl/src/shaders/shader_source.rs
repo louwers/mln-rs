@@ -451,15 +451,21 @@ shader_source!(
     &[tex(0, ID_SYMBOL_IMAGE_TEXTURE), tex(1, ID_SYMBOL_IMAGE_ICON_TEXTURE)]
 );
 
-/// The source of each built-in program that has MSL: those the renderer
-/// draws with on Metal, which leaves out the fill outlines as lines, which
-/// Metal draws no wider than 1 px, and the fill extrusion walls of devices
-/// that rasterize on the CPU.
+/// The source of each of the engine's own programs.
 pub(crate) static BUILT_INS: &[(&Program, &Source)] = &[
+    (&programs::CLIPPING_MASK, &CLIPPING_MASK_PROGRAM),
+    (&programs::SKY, &SKY_SHADER),
+    (&programs::ATMOSPHERE, &ATMOSPHERE_SHADER),
+    (&programs::GLOBE_DEPTH, &GLOBE_DEPTH_SHADER),
+    (&programs::LAYER_COMPOSITE, &LAYER_COMPOSITE_SHADER),
+];
+
+/// The source of each program of the built-in layer types, which the
+/// registry that draws them adds.
+pub static LAYER_SOURCES: &[(&Program, &Source)] = &[
     (&programs::BACKGROUND, &BACKGROUND_SHADER),
     (&programs::BACKGROUND_PATTERN, &BACKGROUND_PATTERN_SHADER),
     (&programs::CIRCLE, &CIRCLE_SHADER),
-    (&programs::CLIPPING_MASK, &CLIPPING_MASK_PROGRAM),
     (&programs::COLLISION_BOX, &COLLISION_BOX_SHADER),
     (&programs::COLLISION_CIRCLE, &COLLISION_CIRCLE_SHADER),
     (&programs::COLOR_RELIEF, &COLOR_RELIEF_SHADER),
@@ -486,8 +492,4 @@ pub(crate) static BUILT_INS: &[(&Program, &Source)] = &[
     (&programs::SYMBOL_ICON, &SYMBOL_ICON_SHADER),
     (&programs::SYMBOL_SDF, &SYMBOL_SDF_SHADER),
     (&programs::SYMBOL_TEXT_AND_ICON, &SYMBOL_TEXT_AND_ICON_SHADER),
-    (&programs::SKY, &SKY_SHADER),
-    (&programs::ATMOSPHERE, &ATMOSPHERE_SHADER),
-    (&programs::GLOBE_DEPTH, &GLOBE_DEPTH_SHADER),
-    (&programs::LAYER_COMPOSITE, &LAYER_COMPOSITE_SHADER),
 ];

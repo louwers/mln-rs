@@ -31,6 +31,7 @@ pub use gpu::MetalGpu;
 pub use objc2;
 pub use objc2_metal;
 pub use renderer_backend::RendererBackend;
+pub use shaders::shader_source::LAYER_SOURCES;
 pub use surface_target::{Layer, SurfaceTarget};
 
 /// An `id<P>` that this side retains: a Metal object of the protocol `P`,

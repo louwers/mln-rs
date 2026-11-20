@@ -6,13 +6,19 @@
 use std::collections::BTreeSet;
 
 use mln_gfx::projection_variant::ProjectionVariant;
+use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::shaders::source::wgsl;
 
 use crate::Device;
 use crate::index_table::IndexTable;
 use crate::shaders::shader_program::compile;
-use crate::shaders::shader_source::{BUILT_INS, prelude};
+use crate::shaders::shader_source::{BUILT_INS, LAYER_SOURCES, prelude};
+
+/// Each program with WGSL: the engine's and the built-in layer types'.
+fn programs() -> impl Iterator<Item = (&'static Program, &'static wgsl::Source)> {
+    BUILT_INS.iter().chain(LAYER_SOURCES).copied()
+}
 
 /// The names after the `HAS_UNIFORM_u_` that `source`'s WGSL tests.
 fn uniforms(source: &wgsl::Source) -> BTreeSet<String> {
@@ -33,7 +39,7 @@ fn uniforms(source: &wgsl::Source) -> BTreeSet<String> {
 /// program declares it.
 #[test]
 fn every_program_declares_the_properties_its_wgsl_reads_from_uniforms() {
-    for &(program, source) in BUILT_INS {
+    for (program, source) in programs() {
         let declared: BTreeSet<String> = program.properties.iter().map(|property| property.name.to_owned()).collect();
         assert_eq!(uniforms(source), declared, "{}", program.name);
     }
@@ -45,7 +51,7 @@ fn every_program_declares_the_properties_its_wgsl_reads_from_uniforms() {
 fn every_layer_program_shows_the_overdraw_inspector() {
     use mln_gfx::shaders::programs::{ATMOSPHERE, CLIPPING_MASK, COLLISION_BOX, COLLISION_CIRCLE, GLOBE_DEPTH, SKY};
     let not_layers = [&CLIPPING_MASK, &COLLISION_BOX, &COLLISION_CIRCLE, &GLOBE_DEPTH, &SKY, &ATMOSPHERE];
-    for &(program, source) in BUILT_INS {
+    for (program, source) in programs() {
         if !not_layers.contains(&program) {
             assert!(
                 [source.wgsl.prelude, source.wgsl.vertex, source.wgsl.fragment]
@@ -66,7 +72,7 @@ fn every_program_compiles() {
     let index_table = IndexTable::new(device);
     let mut failed = Vec::new();
     let parameters = [false, true].map(|overdraw| ProgramParameters::new(1.0, overdraw));
-    for &(program, source) in BUILT_INS {
+    for (program, source) in programs() {
         for parameters in &parameters {
             for variant in [ProjectionVariant::Mercator, ProjectionVariant::Globe] {
                 for uniforms in [&[][..], program.properties] {
