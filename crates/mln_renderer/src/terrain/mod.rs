@@ -78,10 +78,10 @@
 //!   updates. Where their draw updates make no draw, as a stack of lines
 //!   does in a tile they don't cross, or one whose tiles haven't loaded,
 //!   the drape has no texture and draws no pass until its key changes.
-//!   Each stack's drape of a tile keeps its
-//!   own key, so a change in one stack leaves the others' drapes as they
-//!   were. A drape draws again only when its key
-//!   differs from the one it was drawn from: its stack's layers' styles,
+//!   Each stack's drape of a tile keeps its own key, so a change in one
+//!   stack leaves the others' drapes as they were. A drape draws again
+//!   only when its key differs from the one it was drawn from: its stack's
+//!   layers' styles,
 //!   paint revisions and tiles, the overlapping tiles' buckets and
 //!   generations (an image source's bucket and quad, in each copy of the
 //!   image that overlaps the drape's tile), and, with the camera at rest,
@@ -89,12 +89,24 @@
 //!   draws by it. A change of the style's images, or of the feature
 //!   state of a bucket a drape shows, draws it again too. While the camera
 //!   moves, a drape drawn at another zoom or bearing stays.
+//! - **The drapes' sides.** A tile's drapes take the power of two that
+//!   covers its longest side on screen, level with the view's center, at
+//!   two texels a logical pixel or one a physical pixel, whichever is
+//!   more: GL JS's side (twice the terrain tile's) where the tile shows at
+//!   half its size or larger, down to a sixteenth of it. Where the drapes
+//!   with a texture and those that draw again would hold more than a byte
+//!   cap (256 MiB on phones and in the browser, 384 MiB elsewhere), the
+//!   largest side allowed falls a step at a time for the tiles that show
+//!   smallest; no tile loses its drape. A drape whose side changed draws
+//!   again at rest; while the camera moves, only one larger than its side
+//!   does, so the cap holds.
 //! - **The drape composite.** A draped layer with a layer opacity below 1
 //!   or a layer blend other than `normal` draws as a whole inside each
 //!   drape, as in 2D (`LayerComposite`): into a texture of the drape's
-//!   size, composited onto the drape. The drapes share one such composite,
-//!   which the drapes that draw again in a frame use in turn, and which
-//!   drops its textures in a frame where none of them composites. A drape
+//!   size, composited onto the drape. The drapes of a side share one such
+//!   composite, which those that draw again in a frame use in turn, and
+//!   which drops its textures in a frame where none of them composites,
+//!   and a depth and stencil, kept while a drape has that side. A drape
 //!   with a layer that blends in the shader draws into the composite's
 //!   frame texture, which is copied into the drape before its mips. A
 //!   blend's backdrop is the drape's own texels.
@@ -226,6 +238,9 @@ pub(crate) struct RenderTerrain {
     elevation: Option<Arc<TerrainElevation>>,
     /// Whether it has logged that terrain doesn't draw on the globe.
     logged_globe: bool,
+    /// The drapes' byte cap in place of [`drapes::BYTE_CAP`].
+    #[cfg(test)]
+    pub(crate) drape_byte_cap: Option<usize>,
 }
 
 impl RenderTerrain {
@@ -355,7 +370,12 @@ impl RenderTerrain {
             self.drapes = Drapes::default();
             return None;
         };
-        self.drapes.begin(parameters.view, cover, stacks);
+        #[cfg(not(test))]
+        let byte_cap = drapes::BYTE_CAP;
+        #[cfg(test)]
+        let byte_cap = self.drape_byte_cap.unwrap_or(drapes::BYTE_CAP);
+        let camera = (parameters.view, &parameters.transform_params.proj_matrix, parameters.pixel_ratio);
+        self.drapes.begin(camera, cover, stacks, byte_cap);
         Some(&mut self.drapes)
     }
 
@@ -399,6 +419,12 @@ impl RenderTerrain {
     #[cfg(test)]
     pub(crate) fn take_drape_passes(&mut self) -> Vec<(mln_tile_id::OverscaledTileID, usize)> {
         self.drapes.take_passes()
+    }
+
+    /// The tiles of the drapes and the side their drapes draw at.
+    #[cfg(test)]
+    pub(crate) fn drape_sizes(&self) -> Vec<(mln_tile_id::OverscaledTileID, u32)> {
+        self.drapes.sizes()
     }
 
     /// Drops the drapes once the map's center crossed the antimeridian: the
@@ -461,7 +487,12 @@ impl RenderTerrain {
         if self.elevation.is_some() {
             events.push(RendererEvent::TerrainElevation(None));
         }
-        *self = RenderTerrain { logged_globe: self.logged_globe, ..RenderTerrain::default() };
+        *self = RenderTerrain {
+            logged_globe: self.logged_globe,
+            #[cfg(test)]
+            drape_byte_cap: self.drape_byte_cap,
+            ..RenderTerrain::default()
+        };
     }
 
     /// Drops the draws and the drapes, which hold the renderer's shaders;

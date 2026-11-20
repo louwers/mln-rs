@@ -608,6 +608,63 @@ fn the_rendering_stats_count_the_terrain() {
     assert_eq!(terrain.mem_drapes, at_rest.mem_drapes);
 }
 
+/// The bytes of a drape of `side` texels a side, with its mips.
+fn drape_bytes(side: usize) -> usize {
+    4 * side * side + 4 * side * side / 3
+}
+
+/// The sides of the last frame's drapes, by tile.
+fn sides(map: &mut DrapedMap) -> BTreeSet<(OverscaledTileID, u32)> {
+    map.renderer.drape_sizes().into_iter().collect()
+}
+
+/// A byte cap under what the drapes would hold lowers the sides of some,
+/// which draw again once, smaller; every tile keeps its drape. Raised again
+/// while the camera moves, it leaves them as they are until the camera
+/// rests, and then they draw again once at their whole side.
+#[test]
+fn a_byte_cap_lowers_the_sides_of_some_drapes_which_draw_again_once() {
+    let (mut map, drapes) = settled(Tiles::default());
+    let whole: BTreeSet<_> = drapes.iter().map(|&tile| (tile, 1024)).collect();
+    assert_eq!(whole, sides(&mut map), "the tiles show at 512 pixels, at two texels a pixel");
+
+    let cap = 3 * drape_bytes(1024);
+    map.renderer.set_drape_byte_cap(cap);
+    let (_, passes) = map.frame();
+    let lowered: BTreeSet<_> = sides(&mut map).into_iter().filter(|&(_, side)| side < 1024).collect();
+    assert!(!lowered.is_empty(), "{:?}", sides(&mut map));
+    assert!(lowered.iter().all(|&(_, side)| side == 512), "a step down: {lowered:?}");
+    assert_eq!(lowered.iter().map(|&(tile, _)| tile).collect::<BTreeSet<_>>(), passes, "the lowered drapes draw again");
+    let terrain = map.renderer.rendering_stats().terrain;
+    assert!(terrain.mem_drapes <= cap, "{} > {cap}", terrain.mem_drapes);
+    assert_eq!(drapes.len(), terrain.drapes, "every tile keeps its drape");
+    assert_eq!(drapes.len(), terrain.surface_draw_calls);
+    assert!(map.frame().1.is_empty(), "the drapes are drawn again once only");
+
+    map.camera_moving = true;
+    map.renderer.set_drape_byte_cap(usize::MAX);
+    assert!(map.frame().1.is_empty(), "drapes drawn larger while the camera moves");
+    map.camera_moving = false;
+    assert_eq!(lowered.iter().map(|&(tile, _)| tile).collect::<BTreeSet<_>>(), map.frame().1);
+    assert_eq!(whole, sides(&mut map));
+    assert!(map.frame().1.is_empty(), "the drapes are drawn again once only");
+}
+
+/// While the camera moves, a drape larger than the cap allows draws again
+/// smaller at once, so that the drapes hold no more than the cap.
+#[test]
+fn a_byte_cap_holds_while_the_camera_moves() {
+    let (mut map, drapes) = settled(Tiles::default());
+    map.camera_moving = true;
+    let cap = 3 * drape_bytes(1024);
+    map.renderer.set_drape_byte_cap(cap);
+    let (_, passes) = map.frame();
+    assert!(!passes.is_empty());
+    let terrain = map.renderer.rendering_stats().terrain;
+    assert!(terrain.mem_drapes <= cap, "{} > {cap}", terrain.mem_drapes);
+    assert_eq!(drapes.len(), terrain.drapes);
+}
+
 /// [`STYLE`]'s draped layers, removed, and a circle in their place.
 fn only_a_circle(map: &mut DrapedMap) {
     for layer in ["background", "raster", "fill", "line"] {

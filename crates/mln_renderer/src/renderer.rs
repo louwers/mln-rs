@@ -249,7 +249,6 @@ impl Renderer {
         self.orchestrator.terrain().take_drape_passes()
     }
 
-    /// The tiles of the terrain's drapes, those of the last update's cover.
     /// Whether the terrain's surface made its shader, and whether it holds
     /// draws, the grid or DEM textures.
     #[cfg(test)]
@@ -258,6 +257,19 @@ impl Renderer {
         (draws.has_shader(), draws.holds_draws())
     }
 
+    /// The tiles of the terrain's drapes and the side their drapes draw at.
+    #[cfg(test)]
+    pub(crate) fn drape_sizes(&mut self) -> Vec<(mln_tile_id::OverscaledTileID, u32)> {
+        self.orchestrator.terrain().drape_sizes()
+    }
+
+    /// Caps the bytes of the terrain's drapes at `bytes`.
+    #[cfg(test)]
+    pub(crate) fn set_drape_byte_cap(&mut self, bytes: usize) {
+        self.orchestrator.terrain().drape_byte_cap = Some(bytes);
+    }
+
+    /// The tiles of the terrain's drapes, those of the last update's cover.
     #[cfg(test)]
     pub(crate) fn drape_tiles(&mut self) -> Vec<mln_tile_id::OverscaledTileID> {
         let cover = self.orchestrator.terrain().cover();
