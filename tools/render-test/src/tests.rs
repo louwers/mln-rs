@@ -65,6 +65,7 @@ fn parses_our_manifest() {
     assert_eq!(manifest.get_result_path(), "manifests");
     assert_eq!(manifest.get_test_root_path(), INTEGRATION);
     assert_eq!(manifest.get_cache_path(), "manifests/../testdata/metrics/cache-style.db");
+    assert_eq!(manifest.get_asset_path(), "testdata/metrics/integration/gljs/assets");
     assert!(manifest.get_probes().is_empty());
 
     // Ignore files in manifest order, members in document order.
@@ -251,6 +252,12 @@ fn parses_test_metadata() {
     assert!(!query.render_test);
     assert_eq!(query.query_geometry_box.min.x, 1.0);
     assert_eq!(query.query_geometry_box.max.y, 120.0);
+
+    // GL JS's fixtures, as the importer copies them.
+    let slow = parse_test_metadata(&style_paths("gljs/render-tests/sky/fog-color/default"));
+    assert_eq!(slow.timeout, Some(std::time::Duration::from_secs(60)));
+    assert_eq!(slow.allowed, 0.00025);
+    assert_eq!(parse_test_metadata(&style_paths("render-tests/background-color/default")).timeout, None);
 
     let missing = parse_test_metadata(&style_paths("render-tests/does-not-exist"));
     assert!(missing.document_object_empty());
@@ -775,6 +782,64 @@ fn timeout_message_lists_the_pending_requests() {
     let many: Vec<_> = (0..7).map(|i| (format!("http://tiles/{i}.mvt"), Duration::from_secs(1))).collect();
     assert!(waiting_for(&many).starts_with("waiting for 7 requests: http://tiles/0.mvt (1.0 s), "));
     assert!(waiting_for(&many).ends_with("http://tiles/4.mvt (1.0 s), and 2 more"));
+}
+
+// --- GL JS's terrain fixtures ---
+
+/// The fixtures that call a map API the runner doesn't have an operation for
+/// yet, and the operation. The phase that adds the API adds the operation and
+/// empties this list.
+const LATER_OPERATIONS: [(&str, &str); 2] = [
+    ("gljs/render-tests/high-pitch/terrain-pitch95", "setCenterClampedToGround"),
+    ("gljs/render-tests/terrain/dem-cell-centre-hillshade-peak", "setCenterClampedToGround"),
+];
+
+/// The ids, relative to the integration directory, of the tests in `dir`.
+fn fixture_ids(dir: &Path) -> Vec<String> {
+    let root = Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join(INTEGRATION);
+    let mut ids = Vec::new();
+    let mut pending = vec![root.join(dir)];
+    while let Some(dir) = pending.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if path.file_name().is_some_and(|name| name == "style.json") {
+                ids.push(generic(path.parent().unwrap().strip_prefix(&root).unwrap()));
+            }
+        }
+    }
+    ids.sort();
+    ids
+}
+
+#[test]
+fn gljs_fixtures_parse_and_are_ignored_until_their_phase() {
+    let ids = fixture_ids(Path::new("gljs/render-tests"));
+    assert!(ids.len() > 40, "{ids:?}");
+
+    let manifest = ManifestParser::parse_manifest(OUR_MANIFEST, String::new()).unwrap();
+    let ignored: Vec<&str> =
+        manifest.get_ignores().iter().map(|(id, _)| id.as_str()).filter(|id| id.starts_with("gljs/")).collect();
+    let mut unsupported = Vec::new();
+    for id in &ids {
+        assert!(ignored.contains(&id.as_str()), "{id} isn't in ignores/rust-port-terrain.json");
+        let mut metadata = parse_test_metadata(&style_paths(id));
+        assert_eq!(metadata.error_message, "", "{id}");
+        parse_test_operations(&mut metadata);
+        if let Some(name) = metadata.error_message.strip_prefix("Unsupported operation: ") {
+            unsupported.push((id.as_str(), name.to_string()));
+        } else {
+            assert_eq!(metadata.error_message, "", "{id}");
+        }
+        // GL JS's tolerance, unless the fixture sets its own.
+        assert!(metadata.allowed >= 0.00025, "{id}");
+    }
+    let later: Vec<_> = LATER_OPERATIONS.iter().map(|(id, name)| (*id, (*name).to_string())).collect();
+    assert_eq!(unsupported, later);
+    for id in ignored {
+        assert!(ids.iter().any(|fixture| fixture == id), "{id} isn't a fixture");
+    }
 }
 
 /// A file source that records the URLs it is asked for.

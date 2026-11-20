@@ -18,6 +18,15 @@ The tests render on WebGPU, or on the backend that `MLN_RENDER_BACKEND` names:
 `gl`, `gl-desktop`, or `metal` (macOS). Each backend takes the expectations and
 ignores of its manifest in `manifests/`.
 
+The tests in `testdata/metrics/integration/gljs` are MapLibre GL JS's tests of
+terrain, with the tiles and images they load in `gljs/assets`: a manifest's
+`asset_path` names a directory whose files load in place of the cache's
+resources at the same `local://` paths.
+`mise run update:gljs-testdata <checkout>` copies them again, and
+`mise run update:testdata` leaves them alone. `ignores/rust-port-terrain.json`
+lists each with the phase of the terrain work (louwers/mln-rs#532) that will
+make it pass.
+
 Part of [mln-rs](https://github.com/louwers/mln-rs), a Rust port of the
 [MapLibre Native](https://github.com/maplibre/maplibre-native) map rendering
 core.
