@@ -1357,6 +1357,36 @@ fn a_still_image_that_fails_ends_its_demand() {
     assert_eq!((None, FrameDisposition::NoUpdate), (ended.token, ended.disposition));
 }
 
+/// A still image of a terrain publishes a frame that shows the camera's
+/// center at sea level, then one of the update that stands it on the ground
+/// that the first loaded, and completes with the second.
+#[test]
+fn a_still_image_over_terrain_completes_once_the_camera_stands_on_it() {
+    let runtime = runtime();
+    // DEM tiles of 1000 m everywhere, in the Mapbox encoding:
+    // (1 · 65536 + 173 · 256 + 176) · 0.1 − 10000.
+    let mut dem = mln_util::image::PremultipliedImage::new(Size::new(4, 4));
+    for pixel in dem.data.as_chunks_mut::<4>().0 {
+        pixel.copy_from_slice(&[1, 173, 176, 255]);
+    }
+    let dem = Arc::new(mln_image::encode_png(&dem));
+    wait(runtime.set_resource_provider(move |request: ResourceRequest| {
+        let _ = request.respond(Response { data: Some(Arc::clone(&dem)), ..Response::default() });
+    }));
+    let map = map_in_mode(&runtime, MapMode::Static);
+    // Seen from zoom 1, one terrain tile covers the world, and reads the one
+    // DEM tile, at zoom 0.
+    wait(map.set_style_json(
+        r##"{"version":8,"zoom":1,"terrain":{"source":"dem"},"sources":{"dem":{"type":"raster-dem","tiles":["custom://dem/{z}/{x}/{y}.png"],"maxzoom":0}},"layers":[{"id":"bg","type":"background","paint":{"background-color":"#ff0000"}}]}"##,
+    ));
+    let session = attach(&map);
+    wait(map.request_still_image());
+    let results = tokens_and_dispositions(&session.drain_frame_results().unwrap());
+    assert_eq!(vec![(None, FrameDisposition::Rendered), (None, FrameDisposition::Rendered)], results);
+    let altitude = wait(map.camera()).camera.center_altitude;
+    assert!((altitude - 1000.0).abs() < 1e-6, "{altitude}");
+}
+
 // MARK: - The tile cache
 
 /// One vector source with tiles up to zoom 14.

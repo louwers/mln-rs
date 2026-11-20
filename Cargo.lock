@@ -3042,6 +3042,7 @@ dependencies = [
  "mln-rs-gestures",
  "mln-rs-gfx",
  "mln-rs-gl",
+ "mln-rs-image",
  "mln-rs-map",
  "mln-rs-math",
  "mln-rs-mtl",

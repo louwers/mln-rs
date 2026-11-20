@@ -337,7 +337,7 @@ struct PendingDemand {
 }
 
 /// The demand that renders the map's still image while the image waits for
-/// a frame. Its result has no token.
+/// a frame. Its results have no token.
 struct StillDemand {
     /// The `still_image_request_id` of the image.
     request: u64,
@@ -345,6 +345,12 @@ struct StillDemand {
     /// resource that the image needs had yet to load. The demand waits for
     /// a newer one.
     tried: Option<u64>,
+    /// The `ground_generation` of the frame of the image that the demand
+    /// published. Its result ended the demand for the host, and the map
+    /// ends the image with it, unless the map's camera moves onto the
+    /// terrain that the frame loaded: only an update of a newer ground then
+    /// draws the image again.
+    rendered: Option<u64>,
 }
 
 /// A frame that the worker rendered, or tried to, and has yet to publish.
@@ -429,8 +435,8 @@ pub(crate) struct Worker {
     /// frame.
     still: Option<StillDemand>,
     /// The `still_image_request_id` of the last still image that the
-    /// session rendered.
-    still_rendered: u64,
+    /// session rendered a frame of, and the frame's `ground_generation`.
+    still_rendered: (u64, u64),
     /// The `still_image_request_id` of the still image that a resource error
     /// on its way to the map fails. The session draws no frame for it.
     still_failing: Cell<u64>,
@@ -526,7 +532,7 @@ impl Worker {
             rendered_update: 0,
             rendered_generation: 0,
             still: None,
-            still_rendered: 0,
+            still_rendered: (0, 0),
             still_failing: Cell::new(0),
             has_frame: false,
             sources: None,
@@ -876,20 +882,24 @@ impl Worker {
 
     /// Serves the map's still image: demands a frame for it while it waits
     /// for one, and renders the demand once the target can take a frame and
-    /// the map has an update that it hasn't tried. The demand finishes with
-    /// the image's frame. One that draws nothing, because a resource that
-    /// the image needs is still loading, waits for the map's next update,
-    /// and one that finds the ring full parks until the host releases a
-    /// frame. A host's demands neither replace nor wait for it. Ending the
+    /// the map has an update that it hasn't tried. The demand finishes once
+    /// the map ends the image, which a frame of it usually does. The map
+    /// may move its camera onto the terrain that the frame loaded instead:
+    /// the demand then renders the move's update too. One that draws
+    /// nothing, because a resource that the image needs is still loading,
+    /// waits for the map's next update, and one that finds the ring full
+    /// parks until the host releases a frame. A host's demands neither replace nor wait for it. Ending the
     /// demands on their way ends it too, until the session can render again:
     /// a barrier demands the image again once it ran, a new target once it
     /// lands, and the next session once it attaches.
     fn serve_still(&mut self, outbox: &mut Outbox) {
         let pending = self.pending_still_image();
         // The image completed or failed meanwhile, and the next one, if one
-        // waits, gets a demand of its own.
-        if self.still.as_ref().is_some_and(|still| still.request != pending) {
-            self.still = None;
+        // waits, gets a demand of its own. A demand that published a frame
+        // ended for the host with it.
+        if let Some(still) = self.still.take_if(|still| still.request != pending)
+            && still.rendered.is_none()
+        {
             let result = FrameResult::unrendered(None, FrameDisposition::NoUpdate, self.latest_generation());
             self.publish(&result, outbox);
         }
@@ -897,10 +907,14 @@ impl Worker {
             return;
         }
         if self.still.is_none() {
-            if pending <= self.still_rendered || !self.can_render() {
+            if !self.can_render() {
                 return;
             }
-            self.still = Some(StillDemand { request: pending, tried: None });
+            // A demand made again after a barrier draws the image again only
+            // as the last one would have.
+            let (rendered, ground) = self.still_rendered;
+            self.still =
+                Some(StillDemand { request: pending, tried: None, rendered: (rendered == pending).then_some(ground) });
         }
         // The demand ends once the map fails the image.
         if pending == self.still_failing.get() {
@@ -910,9 +924,10 @@ impl Worker {
         // The update that asks for the image comes before the map says that
         // the image waits.
         let asks = update.parameters.still_image_request && update.parameters.still_image_request_id == pending;
-        let tried = self.still.as_ref().and_then(|still| still.tried);
+        let (tried, rendered) = self.still.as_ref().map_or((None, None), |still| (still.tried, still.rendered));
         if !asks
             || tried == Some(update.generation)
+            || rendered.is_some_and(|ground| update.parameters.ground_generation <= ground)
             || self.retargeting()
             || !self.gfx.as_mut().is_some_and(|gfx| gfx.target.ready_for_frame())
         {
@@ -944,8 +959,9 @@ impl Worker {
                 self.forward(frame.events);
             }
             FrameDisposition::Rendered => {
-                self.still = None;
-                self.still_rendered = pending;
+                let ground = update.parameters.ground_generation;
+                self.still = Some(StillDemand { request: pending, tried: None, rendered: Some(ground) });
+                self.still_rendered = (pending, ground);
                 self.publish_rendered(frame, outbox);
             }
             disposition => {
@@ -1133,7 +1149,7 @@ impl Worker {
         for pending in pending {
             self.publish(&FrameResult::unrendered(Some(pending.demand.token), disposition, latest), outbox);
         }
-        if self.still.take().is_some() {
+        if self.still.take().is_some_and(|still| still.rendered.is_none()) {
             self.publish(&FrameResult::unrendered(None, disposition, latest), outbox);
         }
     }
@@ -1519,7 +1535,7 @@ impl Worker {
         gfx.target.with_renderer(|renderer, gpu| renderer.clear_data(gpu)).ok_or_else(target_lost)?;
         self.rendered_update = 0;
         // The renderer loads what the image needs again, once it tries.
-        if let Some(still) = self.still.as_mut() {
+        if let Some(still) = self.still.as_mut().filter(|still| still.rendered.is_none()) {
             still.tried = None;
             post(&self.shared.queue, Worker::still_image_changed);
         }
