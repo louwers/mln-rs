@@ -54,7 +54,7 @@ use crate::gfx::store::SharedTexture;
 use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::gfx::vertices::SharedVertices;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
-use crate::layer::{DrawContext, EvaluatedLayer, LayerType, LayerValues, UpdateContext};
+use crate::layer::{DrawContext, EvaluatedLayer, LayerType, LayerValues, OffscreenPass, UpdateContext};
 use crate::layer_drawing::{DrawList, DrawObjectsMut, FrameDraw, KeptDraw, SingleDraw, TileDraws, TileObjects};
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
@@ -280,11 +280,7 @@ impl LayerType for Hillshade {
     }
 
     fn passes(_layer: &LayerValues<Hillshade>, evaluated: &EvaluatedLayer<Hillshade>) -> RenderPass {
-        if *evaluated.paint.hillshade_exaggeration.uniform() > 0.0 {
-            RenderPass::Translucent
-        } else {
-            RenderPass::None
-        }
+        if *evaluated.paint.hillshade_exaggeration.uniform() > 0.0 { RenderPass::Translucent } else { RenderPass::None }
     }
 
     /// Makes the render target of each bucket it has none of, which prepares
@@ -469,24 +465,24 @@ impl LayerType for Hillshade {
         state.bucket_render_targets.clear();
     }
 
-    fn upload_render_targets(
-        state: &mut HillshadeState,
-        _drawing: &mut TileDraws<HillshadeTile>,
-        gpu: &mut dyn Gpu,
-        context: &mut Context,
-    ) {
-        for target in state.bucket_render_targets.values_mut() {
+    fn offscreen_pass<'a>(
+        state: &'a mut HillshadeState,
+        _drawing: &'a mut TileDraws<HillshadeTile>,
+    ) -> Option<&'a mut dyn OffscreenPass> {
+        Some(state)
+    }
+}
+
+/// The draws that prepare the buckets' render targets.
+impl OffscreenPass for HillshadeState {
+    fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
+        for target in self.bucket_render_targets.values_mut() {
             target.prepare.upload(gpu, context);
         }
     }
 
-    fn render_targets(
-        state: &mut HillshadeState,
-        _drawing: &mut TileDraws<HillshadeTile>,
-        gpu: &mut dyn Gpu,
-        parameters: &mut PaintParameters<'_>,
-    ) {
-        for BucketTarget { render_target, prepare, .. } in state.bucket_render_targets.values_mut() {
+    fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+        for BucketTarget { render_target, prepare, .. } in self.bucket_render_targets.values_mut() {
             parameters.current_layer = 0;
             let Some(mut passes) = render_target.begin(gpu, parameters) else {
                 continue;

@@ -831,8 +831,7 @@ impl SourceTiles {
             };
             debug_assert!(tile.is_renderable());
             for layer_properties in update.layers {
-                let type_info = layer_properties.style().info();
-                if entry.is_held() && !type_info.fading_tiles {
+                if entry.is_held() && !layer_properties.entry().places_symbols() {
                     continue;
                 }
                 let updated = tile.layer_properties_updated(layer_properties);
@@ -884,7 +883,7 @@ impl SourceTiles {
         for layer in layers {
             match layer.style().content_elevation() {
                 Some(PropertyValue::Constant(height_offset)) => max = max.max(*height_offset),
-                Some(PropertyValue::Expression(_)) => expression_layers.push(layer.style()),
+                Some(PropertyValue::Expression(_)) => expression_layers.push(layer),
                 Some(PropertyValue::Undefined) | None => {}
             }
         }
@@ -892,8 +891,8 @@ impl SourceTiles {
             let contents = self.cover().filter_map(Tile::contents);
             for contents in contents {
                 for layer in &expression_layers {
-                    if let Some(bucket) = contents.bucket(*layer) {
-                        max = max.max(bucket.max_content_elevation());
+                    if let Some(bucket) = contents.bucket(layer.style()) {
+                        max = max.max(layer.entry().max_content_elevation(bucket));
                     }
                 }
             }

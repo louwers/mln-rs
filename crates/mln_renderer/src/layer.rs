@@ -20,6 +20,14 @@
 //! tile's layout, a raster or raster-dem tile's own data, or an image
 //! source's image. A layer type without a source gets no tiles.
 //!
+//! What only some layer types do, a type declares as a capability: it
+//! draws 3D geometry ([`LayerType::IS_3D`]), clears the frame to a solid
+//! color ([`LayerType::solid_background`]), answers feature queries
+//! ([`FeatureQuery`]), draws into textures of its own before the frame's
+//! passes ([`OffscreenPass`]), or draws through a host outside the
+//! renderer ([`LayerHost`]). The engine asks for each, and does without it
+//! for a type that has none.
+//!
 //! The drawing types that the hooks name are in the engine's unstable
 //! module until they become part of the contract.
 
@@ -29,7 +37,10 @@ use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_map_types::{TileProjector, View};
 use mln_style::PropertyEvaluationParameters;
+use mln_style::expression::expression::FeatureState;
 use mln_style::layer_type::{LayerStyle, PaintSet, StyleLayerType};
+use mln_style_types::TranslateAnchorType;
+use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinates, GeometryTileFeature};
 use mln_util::Color;
 use mln_util::error::Error;
 use mln_wire::Wire;
@@ -39,7 +50,6 @@ use crate::gfx::context::Context;
 use crate::image_store::ImageStore;
 use crate::layer_drawing::LayerDrawing;
 pub use crate::layer_type::EvaluatedLayer;
-use crate::layers::render_custom_layer::EndedHosts;
 use crate::layout::layout::{Layout, LayoutParameters, SourceLayer};
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{Atlases, BucketPlacementData};
@@ -88,11 +98,6 @@ pub trait LayerType: StyleLayerType {
     /// The order a layer of the type gets its source's tiles in.
     const TILE_ORDER: TileOrder = TileOrder::ById;
 
-    /// Whether a layer of the type draws 3D geometry, whose depth it writes
-    /// in the range of `PaintParameters::depth_mode_for_3d`, and which the
-    /// planet's depth hides behind the horizon.
-    const IS_3D: bool = false;
-
     /// Whether the layout of `group` can need glyphs or images. A tile
     /// makes such a group's layout before the dependencies are resolved,
     /// and every other group's once they are.
@@ -109,12 +114,6 @@ pub trait LayerType: StyleLayerType {
         _source_layer: SourceLayer,
     ) -> Result<Option<Self::Layout>, Error> {
         Ok(None)
-    }
-
-    /// How far outside a feature of `bucket` a query still hits it, from
-    /// `layer`'s current values and the bucket's statistics of them.
-    fn query_radius(_bucket: &Self::Bucket, _layer: &EvaluatedLayer<Self>) -> f32 {
-        0.0
     }
 
     /// What a new layer with `layer`'s values, before they transition,
@@ -169,82 +168,173 @@ pub trait LayerType: StyleLayerType {
     /// it nothing.
     fn nothing_to_draw(_state: &mut Self::State) {}
 
-    /// Called when a layer's style changed to another of the same id and
-    /// type, now `layer`'s, before its values transition. A custom layer
-    /// whose host the style replaced puts the old host that drew in `ended`.
-    fn style_changed(_drawing: &mut Self::Drawing, _layer: &LayerValues<Self>, _ended: &mut EndedHosts) {}
+    /// How far above the ground `bucket`'s highest content is raised, for
+    /// a layer whose content elevation
+    /// ([`StyleLayerType::content_elevation`]) is an expression.
+    fn max_content_elevation(_bucket: &Self::Bucket) -> f32 {
+        0.0
+    }
 
-    /// A background layer's color, where it is a solid color the frame can
-    /// clear to instead of drawing the layer.
+    // The capabilities.
+
+    /// Whether a layer of the type draws 3D geometry, whose depth it writes
+    /// in the range of `PaintParameters::depth_mode_for_3d`, and which the
+    /// planet's depth hides behind the horizon.
+    const IS_3D: bool = false;
+
+    /// The color a layer with `evaluated` is, where it is one solid color,
+    /// which the frame can clear to instead of drawing the layer when the
+    /// layer is the style's bottom one.
     fn solid_background(_evaluated: &EvaluatedLayer<Self>) -> Option<Color> {
         None
     }
 
-    /// Uploads what draws into a layer's render targets, which draw before
-    /// the frame's passes, of a layer the frame draws.
-    fn upload_render_targets(
-        _state: &mut Self::State,
-        _drawing: &mut Self::Drawing,
-        _gpu: &mut dyn Gpu,
-        _context: &mut Context,
-    ) {
+    /// How the type's features answer rendered-feature queries; `None` for
+    /// a type whose features no query hits.
+    #[must_use]
+    fn feature_query() -> Option<&'static dyn FeatureQuery<Self>> {
+        None
     }
 
-    /// Draws a layer's render targets through `gpu`, the context's, ahead
-    /// of the frame's passes, which sample them, of a layer the frame draws.
-    fn render_targets(
-        _state: &mut Self::State,
-        _drawing: &mut Self::Drawing,
-        _gpu: &mut dyn Gpu,
-        _parameters: &mut PaintParameters<'_>,
-    ) {
+    /// What a layer draws into textures of its own before the frame's
+    /// passes, out of what it keeps; `None` for a type that draws nothing
+    /// there.
+    fn offscreen_pass<'a>(
+        _state: &'a mut Self::State,
+        _drawing: &'a mut Self::Drawing,
+    ) -> Option<&'a mut dyn OffscreenPass> {
+        None
     }
 
-    /// Runs a custom layer's prerender through `gpu`, the context's, after
-    /// the layers' draws upload and before the frame's first pass.
-    fn prerender(_drawing: &mut Self::Drawing, _gpu: &mut dyn Gpu, _parameters: &PaintParameters<'_>) {}
+    /// The host outside the renderer that a layer draws through, out of
+    /// its drawing; `None` for a type whose layers draw themselves.
+    fn host(_drawing: &mut Self::Drawing) -> Option<&mut dyn LayerHost<Self>> {
+        None
+    }
 
-    /// Lets go of a custom layer's host as the layer leaves the renderer: a
-    /// host that drew goes to `ended`, to hear that the renderer stopped.
-    fn leave(_drawing: &mut Self::Drawing, _ended: &mut EndedHosts) {}
+    /// Unstable: whether the type's layers take part in the engine's symbol
+    /// placement, which places them across tiles, keeps drawing them on
+    /// tiles that fade out, and answers their feature queries from the
+    /// collision index. Only the engine's symbol type does.
+    #[doc(hidden)]
+    const PLACES_SYMBOLS: bool = false;
 
-    /// Tells a custom layer's host that the renderer's graphics objects are
-    /// lost, and lets go of it.
-    fn lose_context(_drawing: &mut Self::Drawing) {}
-
-    /// The buckets a layer places, which only a symbol layer has.
+    /// Unstable: the buckets a layer places, with
+    /// [`PLACES_SYMBOLS`](Self::PLACES_SYMBOLS).
+    #[doc(hidden)]
     fn placement_data(_state: &Self::State) -> &[BucketPlacementData] {
         &[]
     }
 
-    /// The buckets that another layer places and a layer draws, at its own
-    /// translation.
+    /// Unstable: the buckets that another layer places and a layer draws,
+    /// at its own translation, with [`PLACES_SYMBOLS`](Self::PLACES_SYMBOLS).
+    #[doc(hidden)]
     fn follower_data(_state: &Self::State) -> &[BucketPlacementData] {
         &[]
     }
+}
 
-    /// Whether the feature `feature` with `geometry`, in a tile whose
-    /// `projector` projects it, intersects `query_geometry` as a layer with
-    /// `evaluated` draws it at `zoom`; false unless a layer type overrides
-    /// it.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the layer's values, the query geometry, the feature and its state, and the zoom, camera and \
-                  projector that test them"
-    )]
-    fn query_intersects_feature(
-        _evaluated: &EvaluatedLayer<Self>,
-        _query_geometry: &mln_tile_id::geometry_tile_data::GeometryCoordinates,
-        _feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
-        _geometry: &mln_tile_id::geometry_tile_data::GeometryCollection,
-        _zoom: f32,
-        _view: &View,
-        _pixels_to_tile_units: f32,
-        _projector: &TileProjector<'_>,
-        _feature_state: &mln_style::expression::expression::FeatureState,
-    ) -> bool {
-        false
+/// How the features of the layer type `T` answer rendered-feature queries:
+/// the capability of a type whose features queries hit, which the type
+/// returns from [`LayerType::feature_query`].
+pub trait FeatureQuery<T: LayerType> {
+    /// How far, in pixels, outside a feature of `bucket` a query still hits
+    /// it, from `layer`'s values and the bucket's statistics of them. A
+    /// tile's query geometry grows by its layers' largest radius.
+    fn query_radius(&self, bucket: &T::Bucket, layer: &EvaluatedLayer<T>) -> f32;
+
+    /// Whether `test`'s feature, as a layer with `layer`'s values draws it,
+    /// intersects the query's geometry.
+    fn intersects(&self, layer: &EvaluatedLayer<T>, test: &HitTest<'_>) -> bool;
+}
+
+/// A feature of a tile that a rendered-feature query tests a layer against:
+/// the query's geometry and the feature's, in the tile's coordinates, the
+/// feature's state, and the camera they are drawn with.
+pub struct HitTest<'a> {
+    /// The query's geometry.
+    pub query_geometry: &'a GeometryCoordinates,
+    pub feature: &'a dyn GeometryTileFeature,
+    /// The feature's geometry.
+    pub geometry: &'a GeometryCollection,
+    pub feature_state: &'a FeatureState,
+    /// The camera's zoom, not the tile's: a feature is as large as it is
+    /// drawn.
+    pub zoom: f32,
+    pub view: &'a View,
+    /// The tile units a pixel spans.
+    pub pixels_to_tile_units: f32,
+    /// What projects the tile's coordinates onto the screen.
+    pub projector: &'a TileProjector<'a>,
+}
+
+impl HitTest<'_> {
+    /// The query's geometry moved against a layer's `*-translate` of
+    /// `translate` pixels, anchored at `anchor`, as the layer's draws move
+    /// its features; `None` where the translation is zero.
+    #[must_use]
+    pub fn translated_query_geometry(
+        &self,
+        translate: [f32; 2],
+        anchor: TranslateAnchorType,
+    ) -> Option<GeometryCoordinates> {
+        crate::geometry::feature_index::FeatureIndex::translate_query_geometry(
+            self.query_geometry,
+            translate,
+            anchor,
+            self.view.angle() as f32,
+            self.pixels_to_tile_units,
+        )
     }
+}
+
+/// What a layer draws into textures of its own before the frame's passes,
+/// such as a render target that its draws in the passes sample: the
+/// capability of a type that does, whose layers return it from
+/// [`LayerType::offscreen_pass`]. The engine runs it for a layer the frame
+/// draws.
+pub trait OffscreenPass {
+    /// Uploads the GPU objects of what the pass draws, after the layers'
+    /// draws upload.
+    fn upload(&mut self, _gpu: &mut dyn Gpu, _context: &mut Context) {}
+
+    /// Draws through `gpu`, the context's, after the frame's uploads and
+    /// before its first pass, with no pass open: what it draws into, it
+    /// begins and ends a pass of its own for.
+    fn render(&mut self, gpu: &mut dyn Gpu, paint: &mut PaintParameters<'_>);
+}
+
+/// A host that drew through a layer and that the layer let go of, which
+/// hears that the renderer stopped drawing through it.
+pub trait EndedHost: Send {
+    /// Tells the host that the renderer stopped, once the GPU finished the
+    /// host's work.
+    fn end(self: Box<Self>);
+
+    /// Tells the host that the renderer's graphics objects are lost, where
+    /// the renderer goes without ending it.
+    fn lose(self: Box<Self>);
+}
+
+/// The host outside the renderer that a layer of the type `T` draws
+/// through, such as a custom layer's: the capability of a type whose layers
+/// do, which returns it from [`LayerType::host`]. A host that drew hears
+/// when the renderer stops drawing through it: once the GPU finished its
+/// work, through the [`EndedHost`] that the layer returns, or at once when
+/// the renderer's graphics objects are lost.
+pub trait LayerHost<T: LayerType> {
+    /// Called when the layer's style changed to `layer`'s, before its values
+    /// transition. Where the style replaced the host, the layer takes the
+    /// new one, and returns what ends the old one if it drew.
+    fn restyled(&mut self, layer: &LayerValues<T>) -> Option<Box<dyn EndedHost>>;
+
+    /// Lets go of the host as the layer leaves the renderer, and returns
+    /// what ends it if it drew.
+    fn leave(&mut self) -> Option<Box<dyn EndedHost>>;
+
+    /// Tells the host that the renderer's graphics objects are lost if it
+    /// drew, and lets go of it.
+    fn lose_context(&mut self);
 }
 
 /// A layer's values of its type `T`: its style, its paint values in

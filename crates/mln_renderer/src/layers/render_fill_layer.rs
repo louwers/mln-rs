@@ -18,7 +18,6 @@ use mln_gfx::shaders::shader_defines::{
     ID_PROJECTION_UBO,
 };
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
-use mln_map_types::View;
 use mln_style::PropertyEvaluationParameters;
 use mln_style::layers::Fill;
 use mln_style::layers::fill_layer_properties::FillPaintProperties;
@@ -39,7 +38,7 @@ use crate::gfx::context::Context;
 use crate::gfx::indexes::{DrawIndexes, Indexes, SharedIndexes};
 use crate::gfx::texture2d::Texture2D;
 use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
-use crate::layer::{DrawContext, EvaluatedLayer, LayerType, LayerValues};
+use crate::layer::{DrawContext, EvaluatedLayer, FeatureQuery, HitTest, LayerType, LayerValues};
 use crate::layer_composite::Composite;
 use crate::layer_drawing::{DrawDepth, DrawList, DrawObjectsMut, FrameDraw, TileDraws, TileObjects, UniformWriter};
 use crate::layout::layout::{LayoutParameters, SourceLayer};
@@ -583,9 +582,8 @@ impl LayerType for Fill {
         PatternLayout::new(parameters, group, source_layer).map(Some)
     }
 
-    fn query_radius(_bucket: &FillBucket, layer: &EvaluatedLayer<Fill>) -> f32 {
-        let translate = layer.paint.fill_translate.uniform();
-        (translate[0] * translate[0] + translate[1] * translate[1]).sqrt()
+    fn feature_query() -> Option<&'static dyn FeatureQuery<Fill>> {
+        Some(&Fill)
     }
 
     fn new_layer(_layer: &LayerValues<Fill>) -> (FillState, TileDraws<FillTile>) {
@@ -769,26 +767,19 @@ impl LayerType for Fill {
             FillState::write_uniforms(layer, writer);
         });
     }
+}
 
-    fn query_intersects_feature(
-        layer: &EvaluatedLayer<Fill>,
-        query_geometry: &mln_tile_id::geometry_tile_data::GeometryCoordinates,
-        _feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
-        geometry: &mln_tile_id::geometry_tile_data::GeometryCollection,
-        _zoom: f32,
-        view: &View,
-        pixels_to_tile_units: f32,
-        _projector: &mln_map_types::TileProjector<'_>,
-        _feature_state: &mln_style::expression::expression::FeatureState,
-    ) -> bool {
+impl FeatureQuery<Fill> for Fill {
+    fn query_radius(&self, _bucket: &FillBucket, layer: &EvaluatedLayer<Fill>) -> f32 {
+        let translate = layer.paint.fill_translate.uniform();
+        (translate[0] * translate[0] + translate[1] * translate[1]).sqrt()
+    }
+
+    fn intersects(&self, layer: &EvaluatedLayer<Fill>, test: &HitTest<'_>) -> bool {
+        let HitTest { query_geometry, geometry, .. } = *test;
         let evaluated = &layer.paint;
-        let translated_query_geometry = crate::geometry::feature_index::FeatureIndex::translate_query_geometry(
-            query_geometry,
-            *evaluated.fill_translate.uniform(),
-            *evaluated.fill_translate_anchor.uniform(),
-            view.angle() as f32,
-            pixels_to_tile_units,
-        );
+        let translated_query_geometry = test
+            .translated_query_geometry(*evaluated.fill_translate.uniform(), *evaluated.fill_translate_anchor.uniform());
 
         mln_util::intersection_tests::polygon_intersects_multi_polygon(
             translated_query_geometry.as_ref().unwrap_or(query_geometry),

@@ -88,12 +88,6 @@ pub trait Bucket: Any + Send + CloneBucket {
         false
     }
 
-    /// How far above the ground the bucket's highest content is raised,
-    /// for a layer whose content elevation is an expression.
-    fn max_content_elevation(&self) -> f32 {
-        0.0
-    }
-
     fn record_sdf_pattern(&mut self, _layer_id: &str, _sdf: bool) {}
     fn is_sdf_pattern(&self, _layer_id: &str) -> bool {
         false

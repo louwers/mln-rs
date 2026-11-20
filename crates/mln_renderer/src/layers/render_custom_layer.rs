@@ -1,15 +1,15 @@
 // How a custom layer differs from the others:
-// - The host's prerender runs in a step of its own after the layers' draws
-//   upload (`LayerType::prerender`), not in `make_draws`, so it gets the frame's
-//   final projection, whose depth range depends on how many draw groups the
-//   frame has.
+// - The host's prerender runs in the layer's offscreen pass, after the
+//   layers' draws upload, not in `make_draws`, so it gets the frame's final
+//   projection, whose depth range depends on how many draw groups the frame
+//   has.
 // - What it draws is a draw group of its own (`DrawGroup::Custom`), whose
 //   `render` lends the frame's pass to the host
 //   (`PaintParameters::lend_pass`, through `Gpu::lend`).
 // - A host that drew is told the renderer stopped once the layer leaves it,
 //   after the GPU finished the host's work (`Gpu::flush`), or that
 //   its graphics objects are lost (`Renderer::lose_custom_layers`). A layer
-//   leaves (`LayerType::leave`) without a `Gpu` at hand, so its host waits
+//   leaves (`LayerHost::leave`) without a `Gpu` at hand, so its host waits
 //   in the orchestrator's `EndedHosts` until the renderer ends it with one
 //   (`end_hosts`).
 
@@ -23,7 +23,7 @@ use mln_util::logging::{Event, Log};
 
 use crate::bucket::NoBucket;
 use crate::gfx::context::Context;
-use crate::layer::{DrawContext, EvaluatedLayer, LayerType, LayerValues};
+use crate::layer::{DrawContext, EndedHost, EvaluatedLayer, LayerHost, LayerType, LayerValues, OffscreenPass};
 use crate::layer_drawing::{DrawGroup, DrawOrder, LayerDrawing, TileMap};
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
@@ -45,29 +45,16 @@ pub struct CustomDrawing {
     updated: bool,
 }
 
-/// The hosts of custom layers that left the renderer after they drew, which
-/// [`end_hosts`] tells that it stopped.
-pub(crate) type EndedHosts = Vec<Arc<dyn CustomLayerHost>>;
-
-/// Tells `hosts`, which left the renderer after drawing with `gpu`, that it
-/// stopped, once `gpu` finished their work, so that they free what they drew
-/// with.
-pub(crate) fn end_hosts(gpu: &mut dyn Gpu, hosts: EndedHosts) {
-    if hosts.is_empty() {
-        return;
-    }
-    if let Err(error) = gpu.flush(true) {
-        Log::error(Event::Render, format!("Waiting for a custom layer's frames failed: {error}"));
-    }
-    for host in hosts {
-        host.deinitialize();
-    }
-}
-
 impl CustomDrawing {
     /// Lets go of the host, and returns it if it drew.
     fn take_host(&mut self) -> Option<Arc<dyn CustomLayerHost>> {
         self.host.take().filter(|_| std::mem::take(&mut self.used))
+    }
+
+    /// Lets go of the host, and returns what tells it that the renderer
+    /// stopped if it drew.
+    fn end_host(&mut self) -> Option<Box<dyn EndedHost>> {
+        Some(Box::new(EndedCustomHost(self.take_host()?)))
     }
 
     /// Lets go of the host, telling it that its graphics objects are lost if
@@ -167,36 +154,64 @@ impl LayerType for Custom {
     ) {
     }
 
-    /// A new host for the same layer ID is a new layer to the host: the old
-    /// one goes to `ended`, to hear that the renderer stopped.
-    fn style_changed(drawing: &mut CustomDrawing, layer: &LayerValues<Custom>, ended: &mut EndedHosts) {
-        let same = drawing.host.as_ref().is_some_and(|host| layer.style.has_host(host));
-        if !same {
-            ended.extend(drawing.take_host());
-            drawing.host = layer.style.host();
-        }
+    fn offscreen_pass<'a>(_state: &'a mut (), drawing: &'a mut CustomDrawing) -> Option<&'a mut dyn OffscreenPass> {
+        Some(drawing)
     }
 
-    fn prerender(drawing: &mut CustomDrawing, gpu: &mut dyn Gpu, parameters: &PaintParameters<'_>) {
+    fn host(drawing: &mut CustomDrawing) -> Option<&mut dyn LayerHost<Custom>> {
+        Some(drawing)
+    }
+}
+
+/// The host's prerender, with the frame's projection.
+impl OffscreenPass for CustomDrawing {
+    fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
         let Some(frame) = parameters.custom_layer_frame else {
             return;
         };
-        drawing.frame = Some(frame);
-        let Some(host) = &drawing.host else { return };
+        self.frame = Some(frame);
+        let Some(host) = &self.host else { return };
         let lent = gpu.lend(&mut |encoder| {
             host.prerender(&mut CustomLayerPrerenderParameters { encoder, frame: &frame });
         });
         match lent {
-            Ok(()) => drawing.used = true,
+            Ok(()) => self.used = true,
             Err(error) => Log::error(Event::Render, format!("Lending a custom layer the commands failed: {error}")),
         }
     }
+}
 
-    fn leave(drawing: &mut CustomDrawing, ended: &mut EndedHosts) {
-        ended.extend(drawing.take_host());
+/// A host that drew and that its layer let go of.
+struct EndedCustomHost(Arc<dyn CustomLayerHost>);
+
+impl EndedHost for EndedCustomHost {
+    fn end(self: Box<Self>) {
+        self.0.deinitialize();
     }
 
-    fn lose_context(drawing: &mut CustomDrawing) {
-        drawing.lose();
+    fn lose(self: Box<Self>) {
+        self.0.context_lost();
+    }
+}
+
+impl LayerHost<Custom> for CustomDrawing {
+    /// A new host for the same layer ID is a new layer to the host: the old
+    /// one ends.
+    fn restyled(&mut self, layer: &LayerValues<Custom>) -> Option<Box<dyn EndedHost>> {
+        let same = self.host.as_ref().is_some_and(|host| layer.style.has_host(host));
+        if same {
+            return None;
+        }
+        let ended = self.end_host();
+        self.host = layer.style.host();
+        ended
+    }
+
+    fn leave(&mut self) -> Option<Box<dyn EndedHost>> {
+        self.end_host()
+    }
+
+    fn lose_context(&mut self) {
+        self.lose();
     }
 }

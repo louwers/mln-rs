@@ -26,13 +26,7 @@ static PROPERTIES: PropertyTable = PropertyTable::new(
 pub(crate) struct Plain;
 
 impl StyleLayerType for Plain {
-    const INFO: LayerTypeInfo = LayerTypeInfo {
-        name: "plain",
-        source: SourceKind::None,
-        fading_tiles: false,
-        cross_tile_index: false,
-        from_json: true,
-    };
+    const INFO: LayerTypeInfo = LayerTypeInfo { name: "plain", source: SourceKind::None, from_json: true };
     const PROPERTIES: &'static PropertyTable = &PROPERTIES;
 
     type LayoutProperties = NoProperties;

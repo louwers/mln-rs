@@ -6,13 +6,7 @@ use crate::property_table::{PropertyTable, PropertyVisitor};
 pub struct Raster;
 
 impl StyleLayerType for Raster {
-    const INFO: LayerTypeInfo = LayerTypeInfo {
-        name: "raster",
-        source: SourceKind::Raster,
-        fading_tiles: false,
-        cross_tile_index: false,
-        from_json: true,
-    };
+    const INFO: LayerTypeInfo = LayerTypeInfo { name: "raster", source: SourceKind::Raster, from_json: true };
     const PROPERTIES: &'static PropertyTable = &raster_layer_properties::PROPERTIES;
 
     type LayoutProperties = NoProperties;

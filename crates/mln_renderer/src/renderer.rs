@@ -25,8 +25,8 @@ use crate::frame_projection::{self, FrameProjection};
 use crate::gfx::context::Context;
 use crate::layer_composite::{Composite, LayerComposite};
 use crate::layer_drawing::DrawOrder;
-use crate::layers::render_custom_layer::end_hosts;
 use crate::paint_parameters::{OpenPass, PaintParameters};
+use crate::render_layer::end_hosts;
 use crate::render_orchestrator::RenderOrchestrator;
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
@@ -790,13 +790,12 @@ fn draw(
     num_draw_groups: usize,
     depth_range_size: f32,
 ) {
-    // Custom layers record their own work before the first pass.
+    // What the layers draw before the first pass, bottom to top, such as
+    // their render targets, which the passes sample, and what custom
+    // layers' hosts record.
     for &index in frame.layers.keys() {
-        orchestrator.layer_mut(index as usize).prerender(gpu, parameters);
+        orchestrator.layer_mut(index as usize).render_offscreen(gpu, parameters);
     }
-
-    // The layers' render targets, which the passes sample.
-    orchestrator.visit_render_layers(|layer| layer.render_targets(gpu, parameters));
 
     // The frame's pass, cleared to the backdrop, which shows where there are
     // no tiles.

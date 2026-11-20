@@ -12,7 +12,7 @@ use std::sync::Arc;
 use glam::DMat4;
 use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_map_types::{ProjectionData, TileProjector, View};
+use mln_map_types::{ProjectionData, View};
 use mln_style::expression::Dependency;
 use mln_style::layer_type::{ErasedLayerStyle, LayerStyle, PaintSet, SourceKind};
 use mln_style::{PropertyEvaluationParameters, TransitionParameters};
@@ -27,10 +27,9 @@ use crate::bucket_geometry::BucketGeometry;
 use crate::buckets::symbol_bucket::SymbolBucket;
 use crate::geometry::feature_index::FeatureIndex;
 use crate::gfx::context::Context;
-use crate::layer::{DrawContext, LayerType, LayerValues, UpdateContext};
+use crate::layer::{DrawContext, EndedHost, HitTest, LayerType, LayerValues, UpdateContext};
 use crate::layer_drawing::{ChangedBuckets, DrawGroup, DrawOrder, LayerDrawing};
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
-use crate::layers::render_custom_layer::EndedHosts;
 use crate::line_atlas::LineAtlas;
 use crate::paint_parameters::PaintParameters;
 use crate::pattern_atlas::PatternAtlas;
@@ -359,6 +358,29 @@ pub struct Atlases {
     pub pattern: PatternAtlas,
 }
 
+/// The hosts that left the renderer after they drew through its layers
+/// ([`LayerHost`](crate::layer::LayerHost)), until [`end_hosts`] tells
+/// them that it stopped.
+pub(crate) type EndedHosts = Vec<Box<dyn EndedHost>>;
+
+/// Tells `hosts`, which left the renderer after drawing with `gpu`, that it
+/// stopped, once `gpu` finished their work, so that they free what they drew
+/// with.
+pub(crate) fn end_hosts(gpu: &mut dyn Gpu, hosts: EndedHosts) {
+    if hosts.is_empty() {
+        return;
+    }
+    if let Err(error) = gpu.flush(true) {
+        mln_util::logging::Log::error(
+            mln_util::logging::Event::Render,
+            format!("Waiting for the GPU before ending the layers' hosts failed: {error}"),
+        );
+    }
+    for host in hosts {
+        host.end();
+    }
+}
+
 /// What the engine reads of the frame in a layer's update, besides the
 /// layer.
 pub(crate) struct LayerUpdate<'a> {
@@ -597,21 +619,24 @@ pub(crate) trait RenderLayer {
     /// See [`LayerType::solid_background`].
     fn solid_background(&self) -> Option<Color>;
 
-    /// See [`LayerType::upload_render_targets`].
-    fn upload_render_targets(&mut self, gpu: &mut dyn Gpu, context: &mut Context);
+    /// Uploads what the layer draws in its [`OffscreenPass`](crate::layer::OffscreenPass),
+    /// if the frame draws it.
+    fn upload_offscreen(&mut self, gpu: &mut dyn Gpu, context: &mut Context);
 
-    /// See [`LayerType::render_targets`].
-    fn render_targets(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>);
+    /// Draws the layer's [`OffscreenPass`](crate::layer::OffscreenPass), if
+    /// the frame draws it.
+    fn render_offscreen(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>);
 
-    /// See [`LayerType::prerender`].
-    fn prerender(&mut self, gpu: &mut dyn Gpu, parameters: &PaintParameters<'_>);
-
-    /// See [`LayerType::leave`]. The orchestrator calls it before it drops
-    /// the layer.
+    /// Lets go of the layer's host ([`LayerHost::leave`](crate::layer::LayerHost::leave))
+    /// as the layer leaves the renderer: one that drew goes to `ended`. The
+    /// orchestrator calls it before it drops the layer.
     fn leave(&mut self, ended: &mut EndedHosts);
 
-    /// See [`LayerType::lose_context`].
+    /// See [`LayerHost::lose_context`](crate::layer::LayerHost::lose_context).
     fn lose_context(&mut self);
+
+    /// See [`LayerType::PLACES_SYMBOLS`].
+    fn places_symbols(&self) -> bool;
 
     /// Returns true if the layer has to be placed.
     fn needs_placement(&self) -> bool {
@@ -624,22 +649,10 @@ pub(crate) trait RenderLayer {
     /// See [`LayerType::follower_data`].
     fn follower_data(&self) -> &[BucketPlacementData];
 
-    /// See [`LayerType::query_intersects_feature`].
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the query geometry, the feature and its state, and the zoom, camera and projector that test them"
-    )]
-    fn query_intersects_feature(
-        &self,
-        query_geometry: &mln_tile_id::geometry_tile_data::GeometryCoordinates,
-        feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
-        geometry: &mln_tile_id::geometry_tile_data::GeometryCollection,
-        zoom: f32,
-        view: &View,
-        pixels_to_tile_units: f32,
-        projector: &TileProjector<'_>,
-        feature_state: &mln_style::expression::expression::FeatureState,
-    ) -> bool;
+    /// Whether `test`'s feature, as the layer draws it, intersects the
+    /// query's geometry ([`FeatureQuery::intersects`](crate::layer::FeatureQuery::intersects));
+    /// false for a type whose features no query hits.
+    fn query_intersects_feature(&self, test: &HitTest<'_>) -> bool;
 }
 
 impl<T: LayerType> RenderLayer for Layer<T> {
@@ -669,7 +682,9 @@ impl<T: LayerType> RenderLayer for Layer<T> {
         if let Some(recovered) = LayerStyle::recover(style) {
             self.values.style = recovered;
         }
-        T::style_changed(&mut self.drawing, &self.values, ended);
+        if let Some(host) = T::host(&mut self.drawing) {
+            ended.extend(host.restyled(&self.values));
+        }
         self.transition(parameters);
     }
 
@@ -823,28 +838,36 @@ impl<T: LayerType> RenderLayer for Layer<T> {
         T::solid_background(&self.values.evaluated)
     }
 
-    fn upload_render_targets(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
-        if self.renderable {
-            T::upload_render_targets(&mut self.state, &mut self.drawing, gpu, context);
+    fn upload_offscreen(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
+        if self.renderable
+            && let Some(pass) = T::offscreen_pass(&mut self.state, &mut self.drawing)
+        {
+            pass.upload(gpu, context);
         }
     }
 
-    fn render_targets(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        if self.renderable {
-            T::render_targets(&mut self.state, &mut self.drawing, gpu, parameters);
+    fn render_offscreen(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+        if self.renderable
+            && let Some(pass) = T::offscreen_pass(&mut self.state, &mut self.drawing)
+        {
+            pass.render(gpu, parameters);
         }
-    }
-
-    fn prerender(&mut self, gpu: &mut dyn Gpu, parameters: &PaintParameters<'_>) {
-        T::prerender(&mut self.drawing, gpu, parameters);
     }
 
     fn leave(&mut self, ended: &mut EndedHosts) {
-        T::leave(&mut self.drawing, ended);
+        if let Some(host) = T::host(&mut self.drawing) {
+            ended.extend(host.leave());
+        }
     }
 
     fn lose_context(&mut self) {
-        T::lose_context(&mut self.drawing);
+        if let Some(host) = T::host(&mut self.drawing) {
+            host.lose_context();
+        }
+    }
+
+    fn places_symbols(&self) -> bool {
+        T::PLACES_SYMBOLS
     }
 
     fn placement_data(&self) -> &[BucketPlacementData] {
@@ -855,27 +878,7 @@ impl<T: LayerType> RenderLayer for Layer<T> {
         T::follower_data(&self.state)
     }
 
-    fn query_intersects_feature(
-        &self,
-        query_geometry: &mln_tile_id::geometry_tile_data::GeometryCoordinates,
-        feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
-        geometry: &mln_tile_id::geometry_tile_data::GeometryCollection,
-        zoom: f32,
-        view: &View,
-        pixels_to_tile_units: f32,
-        projector: &TileProjector<'_>,
-        feature_state: &mln_style::expression::expression::FeatureState,
-    ) -> bool {
-        T::query_intersects_feature(
-            &self.values.evaluated,
-            query_geometry,
-            feature,
-            geometry,
-            zoom,
-            view,
-            pixels_to_tile_units,
-            projector,
-            feature_state,
-        )
+    fn query_intersects_feature(&self, test: &HitTest<'_>) -> bool {
+        T::feature_query().is_some_and(|query| query.intersects(&self.values.evaluated, test))
     }
 }
