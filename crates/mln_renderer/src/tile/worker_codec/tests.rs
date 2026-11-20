@@ -793,6 +793,8 @@ fn dem_decodes_cross() {
             panic!("not DEMs");
         };
         assert_eq!((through.dim, through.stride, through.encoding), (16, 18, encoding));
+        assert_eq!((through.min, through.max), (direct.min, direct.max));
+        assert!(direct.min < direct.max, "{encoding:?}: the pixels differ");
         assert_eq!(through.image().data, direct.image().data);
         assert_eq!(through.get(-1, 3), through.get(0, 3), "the border repeats the edge");
     }
@@ -819,7 +821,7 @@ fn malformed_dems_fail() {
         _NeedsDeps,
         _NeedsData,
         _Raster,
-        Dem(i32, i32, RasterEncoding, PremultipliedImage),
+        Dem(i32, i32, RasterEncoding, f32, f32, PremultipliedImage),
     }
 
     let image = |size, bytes| PremultipliedImage::from_vec(Size::new(size, size), vec![0; bytes]);
@@ -829,11 +831,20 @@ fn malformed_dems_fail() {
         (i32::MAX, 1, image(1, 4)),
         (32766, 32768, image(32768, 0)),
     ];
-    for (dim, stride, image) in dems {
+    let decode = |dim, stride, image| {
         let mut bytes = Vec::new();
-        envelope::append(&mut bytes, &Malformed::Dem(dim, stride, RasterEncoding::Mapbox, image), ()).unwrap();
-        let JobResult::Failed(_) = MapCodec::new(Registry::with_builtins()).decode_result(Encoded::from(bytes)) else {
+        envelope::append(&mut bytes, &Malformed::Dem(dim, stride, RasterEncoding::Mapbox, -1.5, 2.5, image), ())
+            .unwrap();
+        MapCodec::new(Registry::with_builtins()).decode_result(Encoded::from(bytes))
+    };
+    for (dim, stride, image) in dems {
+        let JobResult::Failed(_) = decode(dim, stride, image) else {
             panic!("dim {dim}, stride {stride}: not a failure");
         };
     }
+    // The members `new` makes read back, its range among them.
+    let JobResult::Dem(dem) = decode(2, 4, image(4, 4 * 4 * 4)) else {
+        panic!("a well-formed DEM fails");
+    };
+    assert_eq!((dem.dim, dem.min, dem.max), (2, -1.5, 2.5));
 }
