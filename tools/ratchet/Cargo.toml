@@ -16,8 +16,7 @@ path = "src/main.rs"
 
 [dependencies]
 regex.workspace = true
-# Reads baseline.toml. The workspace already builds it, with this feature,
-# for proc-macro-crate.
+# Reads baseline.toml.
 toml_edit = { version = "0.25.18", default-features = false, features = [
   "parse",
 ] }

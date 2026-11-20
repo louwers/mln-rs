@@ -19,6 +19,9 @@
 //! never raises a count or adds a file: a change that needs more raises the count
 //! by hand, where the review sees it. When a file moves, rename its key by hand.
 
+#[cfg(test)]
+mod tests;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::io::ErrorKind;
@@ -80,14 +83,9 @@ fn run(update: bool) -> Result<bool, String> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let baseline_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("baseline.toml");
     let current = scan(&root)?;
-    let baseline = read_baseline(&baseline_path)?;
+    let mut baseline = read_baseline(&baseline_path)?;
     let mut errors = Vec::new();
-    let mut lowered = Counts::default();
-    for (((rule, found), allowed), lowered) in RULES.iter().zip(&current).zip(&baseline).zip(&mut lowered) {
-        *lowered = allowed
-            .iter()
-            .filter_map(|(path, &limit)| found.get(path).map(|&have| (path.clone(), limit.min(have))))
-            .collect();
+    for ((rule, found), allowed) in RULES.iter().zip(&current).zip(&baseline) {
         for path in allowed.keys().chain(found.keys()).collect::<BTreeSet<_>>() {
             let have = found.get(path).copied().unwrap_or(0);
             let limit = allowed.get(path).copied().unwrap_or(0);
@@ -99,7 +97,15 @@ fn run(update: bool) -> Result<bool, String> {
         }
     }
     if update {
-        write_baseline(&baseline_path, &lowered)?;
+        for (allowed, found) in baseline.iter_mut().zip(&current) {
+            allowed.retain(|path, limit| {
+                found.get(path).is_some_and(|&have| {
+                    *limit = (*limit).min(have);
+                    true
+                })
+            });
+        }
+        write_baseline(&baseline_path, &baseline)?;
     }
     for error in &errors {
         eprintln!("error: {error}");

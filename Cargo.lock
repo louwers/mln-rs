@@ -2614,6 +2614,8 @@ name = "mln-rs-c-abi-test"
 version = "0.0.13"
 dependencies = [
  "regex",
+ "tempfile",
+ "wait-timeout",
 ]
 
 [[package]]
@@ -3278,6 +3280,9 @@ dependencies = [
 [[package]]
 name = "mln-rs-unicode-tables"
 version = "0.0.13"
+dependencies = [
+ "unicode-bidi",
+]
 
 [[package]]
 name = "mln-rs-util"

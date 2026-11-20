@@ -2,8 +2,8 @@
 # machine, as in `cargo nextest run --target x86_64-unknown-freebsd`. Select it
 # with `mise -E target-freebsd`, or in every command with
 # `env = ["target-freebsd"]` in an untracked .miserc.local.toml. The virtual
-# machine needs QEMU, UEFI firmware (the ovmf or edk2-ovmf package) and the
-# python3 that runs anyvm from the host.
+# machine needs from the host QEMU, UEFI firmware (the ovmf or edk2-ovmf
+# package) and a python3 for anyvm.
 
 [tools]
 # The C compiler and linker: Zig's clang (tools/zig-cc-freebsd.sh).

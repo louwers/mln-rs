@@ -238,8 +238,9 @@ thiserror = "2.0.21"
 wasmparser = { version = "0.263.0", default-features = false, features = [
   "std",
 ] }
-# The Unicode bidi algorithm (mln_text's bidi.rs). mln_text's mirroring table
-# comes from the same Unicode version (`mise run generate:bidi-mirroring`).
+# The Unicode bidi algorithm (mln_text's bidi.rs). mln_text's mirroring and
+# Arabic tables come from the same Unicode version
+# (`mise run generate:unicode-tables`).
 unicode-bidi = { version = "0.3.18" }
 # Where label text may break into lines (mln_text's line_breaks): UAX #14.
 unicode-linebreak = { version = "0.1.5" }

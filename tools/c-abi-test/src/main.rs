@@ -16,21 +16,25 @@
 //!
 //! The run fails when any case fails or any exit program doesn't pass.
 
+#[cfg(test)]
+mod tests;
+
 use std::collections::BTreeMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, ExitStatus, Stdio};
 use std::sync::LazyLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use regex::Regex;
+use wait_timeout::ChildExt as _;
 
 const USAGE: &str = "usage: c-abi-test <suite> [--exit-programs <dir>] [--jobs <n>]
 
 <suite> is the suite binary, mln_native_abi_tests. --exit-programs names the
 directory of the exit programs to run, and --jobs how many test files or exit
-programs to run at once (the number of CPUs by default).";
+programs to run at once (0, the default, for one per CPU).";
 
 const FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/tests/native/fixtures");
 /// The directory of the suite's test files, which its listing and results
@@ -83,21 +87,24 @@ fn main() -> ExitCode {
 fn parse_args() -> Result<Option<Args>, String> {
     let mut suite = None;
     let mut exit_programs = None;
-    let mut jobs = std::thread::available_parallelism().map_or(1, usize::from);
+    let mut jobs = 0;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
-        let (flag, value) = match arg.split_once('=') {
+        let (flag, mut inline) = match arg.split_once('=') {
             Some((flag, value)) if flag.starts_with("--") => (flag, Some(value.to_owned())),
             _ => (arg.as_str(), None),
         };
-        let mut value = || value.clone().or_else(|| args.next()).ok_or(USAGE);
+        let mut next_value = || inline.take().or_else(|| args.next()).ok_or(USAGE);
         match flag {
-            "--exit-programs" => exit_programs = Some(value()?.into()),
-            "--jobs" => jobs = value()?.parse().ok().filter(|&jobs| jobs > 0).ok_or(USAGE)?,
+            "--exit-programs" => exit_programs = Some(next_value()?.into()),
+            "--jobs" => jobs = next_value()?.parse().map_err(|_| USAGE)?,
             "-h" | "--help" => return Ok(None),
             _ if suite.is_none() && !flag.starts_with('-') => suite = Some(arg.into()),
             _ => return Err(USAGE.into()),
         }
+    }
+    if jobs == 0 {
+        jobs = std::thread::available_parallelism().map_or(1, usize::from);
     }
     Ok(Some(Args { suite: suite.ok_or(USAGE)?, exit_programs, jobs }))
 }
@@ -107,8 +114,16 @@ fn run(args: &Args) -> Result<bool, String> {
     let suite = args.suite.canonicalize().map_err(|error| format!("{}: {error}", args.suite.display()))?;
     let files = list_cases(&suite)?;
     let mut results = BTreeMap::new();
-    for file_results in parallel_map(&files, args.jobs, |(file, cases)| run_file(&suite, file, cases)) {
-        results.append(&mut file_results?);
+    // The cases after a failure, which run on their own once every file has.
+    let mut alone = Vec::new();
+    for ran in parallel_map(&files, args.jobs, |(file, cases)| run_file(&suite, file, cases)) {
+        let (mut outcomes, rest) = ran?;
+        results.append(&mut outcomes);
+        alone.extend(rest);
+    }
+    let outcomes = parallel_map(&alone, args.jobs, |key| run_case(&suite, key));
+    for (key, outcome) in alone.into_iter().zip(outcomes) {
+        results.insert(key, outcome?);
     }
     let failures: Vec<(&String, &String)> = results
         .iter()
@@ -135,7 +150,9 @@ fn run(args: &Args) -> Result<bool, String> {
         let failures: Vec<(String, String)> = programs
             .iter()
             .zip(parallel_map(&programs, args.jobs, |program| run_exit_program(program)))
-            .filter_map(|(program, why)| Some((format!("exit/{}.c", program.file_name()?.to_string_lossy()), why?)))
+            .filter_map(|(program, result)| {
+                result.err().map(|why| (format!("exit/{}.c", program.file_name().unwrap_or_default().display()), why))
+            })
             .collect();
         println!(
             "{} exit programs: {} passed, {} failed",
@@ -172,28 +189,27 @@ fn list_cases(suite: &Path) -> Result<Vec<(String, Vec<String>)>, String> {
     Ok(files.into_iter().collect())
 }
 
-/// The outcomes of the file's cases, keyed `<file>:<case>`. The run of the
-/// whole file gives them up to the first that fails, and each case after
-/// that runs on its own.
-fn run_file(suite: &Path, file: &str, cases: &[String]) -> Result<BTreeMap<String, Outcome>, String> {
+/// Runs the whole file: the outcomes of its cases up to the first that fails,
+/// keyed `<file>:<case>`, and the keys of the cases after it, which must each
+/// run on their own.
+fn run_file(suite: &Path, file: &str, cases: &[String]) -> Result<(BTreeMap<String, Outcome>, Vec<String>), String> {
     let mut together = run_suite(suite, &["-f", &format!("{PREFIX}{file}")])?;
-    let mut results = BTreeMap::new();
-    let mut cases = cases.iter();
-    for case in cases.by_ref() {
-        let key = format!("{file}:{case}");
+    let mut outcomes = BTreeMap::new();
+    let mut keys = cases.iter().map(|case| format!("{file}:{case}"));
+    for key in keys.by_ref() {
         let outcome = together.outcome(&key);
         let failed = matches!(outcome, Outcome::Fail(_));
-        results.insert(key, outcome);
+        outcomes.insert(key, outcome);
         if failed {
             break;
         }
     }
-    for case in cases {
-        let key = format!("{file}:{case}");
-        let outcome = run_suite(suite, &["-n", &format!("{PREFIX}{key}")])?.outcome(&key);
-        results.insert(key, outcome);
-    }
-    Ok(results)
+    Ok((outcomes, keys.collect()))
+}
+
+/// The outcome of the case `<file>:<case>`, run on its own.
+fn run_case(suite: &Path, key: &str) -> Result<Outcome, String> {
+    Ok(run_suite(suite, &["-n", &format!("{PREFIX}{key}")])?.outcome(key))
 }
 
 /// The outcomes that a run of the suite reported.
@@ -263,16 +279,14 @@ fn is_executable(path: &Path) -> bool {
     path.is_file()
 }
 
-/// Why the exit program failed, or `None` when it passed.
-fn run_exit_program(program: &Path) -> Option<String> {
-    let (output, status) = match run_with_timeout(command(program), EXIT_TIMEOUT) {
-        Ok(ran) => ran,
-        Err(error) => return Some(error),
-    };
-    let Some(status) = status else {
-        return Some(format!("didn't exit within {} s", EXIT_TIMEOUT.as_secs()));
-    };
-    (!status.success()).then(|| match output.trim() {
+/// Runs the exit program, and fails with why it didn't pass.
+fn run_exit_program(program: &Path) -> Result<(), String> {
+    let (output, status) = run_with_timeout(command(program), EXIT_TIMEOUT)?;
+    let status = status.ok_or_else(|| format!("didn't exit within {} s", EXIT_TIMEOUT.as_secs()))?;
+    if status.success() {
+        return Ok(());
+    }
+    Err(match output.trim() {
         "" => ending(status),
         output => format!("{}: {}", ending(status), output.replace('\n', "; ")),
     })
@@ -295,19 +309,12 @@ fn run_with_timeout(mut command: Command, timeout: Duration) -> Result<(String, 
     std::thread::scope(|scope| {
         let stdout = scope.spawn(|| read_all(stdout));
         let stderr = scope.spawn(|| read_all(stderr));
-        let deadline = Instant::now() + timeout;
-        let status = loop {
-            if let Some(status) = child.try_wait().map_err(error)? {
-                break Some(status);
-            }
-            if Instant::now() >= deadline {
-                // Gone already if it exited since try_wait.
-                let _ = child.kill();
-                child.wait().map_err(error)?;
-                break None;
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        };
+        let status = child.wait_timeout(timeout).map_err(error)?;
+        if status.is_none() {
+            // Gone already if it exited since the wait timed out.
+            let _ = child.kill();
+            child.wait().map_err(error)?;
+        }
         let mut output = stdout.join().unwrap_or_default();
         output.extend(stderr.join().unwrap_or_default());
         Ok((String::from_utf8_lossy(&output).into_owned(), status))

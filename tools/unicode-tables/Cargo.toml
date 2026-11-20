@@ -7,13 +7,16 @@ description.workspace = true
 license.workspace = true
 repository.workspace = true
 # Writes mln_text's tables from the Unicode Character Database
-# (`mise run generate:arabic-shaping`, `generate:bidi-mirroring`); never
-# released.
+# (`mise run generate:unicode-tables`); never released.
 publish = false
 
 [[bin]]
 name = "unicode-tables"
 path = "src/main.rs"
+
+[dependencies]
+# The Unicode version of its tables, which mln_text's must match.
+unicode-bidi.workspace = true
 
 [lints]
 workspace = true

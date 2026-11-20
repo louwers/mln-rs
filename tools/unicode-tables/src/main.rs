@@ -1,21 +1,25 @@
-//! `unicode-tables arabic-shaping <ArabicShaping.txt> <UnicodeData.txt>` and
-//! `unicode-tables bidi-mirroring <BidiMirroring.txt>`: write the tables that
-//! `mln_text` reads from the Unicode Character Database,
-//! `crates/mln_text/src/arabic_tables.rs` and `bidi_mirroring.rs`.
-//! `mise run generate:arabic-shaping` and `generate:bidi-mirroring` download
-//! the files and run it.
+//! `unicode-tables`: writes the tables that `mln_text` reads from the Unicode
+//! Character Database, `crates/mln_text/src/arabic_tables.rs` and
+//! `bidi_mirroring.rs`, from the UCD files in `ucd/`. `mise run
+//! generate:unicode-tables` downloads the files and runs it.
 //!
-//! The tables store UTF-16 code units, so every character in them must be in
-//! the BMP.
+//! The files must be of unicode-bidi's Unicode version, which
+//! `unicode-tables --unicode-version` prints, so that the characters
+//! unicode-bidi resolves as right to left and the ones that the tables mirror
+//! and shape come from one version. The tables store UTF-16 code units, so
+//! every character in them must be in the BMP.
 
 mod arabic_shaping;
 mod bidi_mirroring;
+#[cfg(test)]
+mod tests;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-const USAGE: &str = "usage: unicode-tables arabic-shaping <ArabicShaping.txt> <UnicodeData.txt>
-       unicode-tables bidi-mirroring <BidiMirroring.txt>";
+const USAGE: &str = "usage: unicode-tables [--unicode-version]
+
+--unicode-version prints the Unicode version that the UCD files must be of.";
 
 fn main() -> ExitCode {
     match run() {
@@ -28,28 +32,51 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<(), String> {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let (file, table) = match args.iter().map(String::as_str).collect::<Vec<_>>()[..] {
-        ["arabic-shaping", arabic_shaping, unicode_data] => {
-            ("arabic_tables.rs", arabic_shaping::table(&read(arabic_shaping)?, &read(unicode_data)?)?)
+    match std::env::args().skip(1).collect::<Vec<_>>().as_slice() {
+        [] => {}
+        [flag] if flag == "--unicode-version" => {
+            println!("{}", unicode_version());
+            return Ok(());
         }
-        ["bidi-mirroring", bidi_mirroring] => ("bidi_mirroring.rs", bidi_mirroring::table(&read(bidi_mirroring)?)?),
         _ => return Err(USAGE.into()),
+    }
+    for (path, table) in tables(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))? {
+        std::fs::write(&path, table).map_err(|error| format!("{}: {error}", path.display()))?;
+    }
+    Ok(())
+}
+
+/// Each table and the path of its file, in the workspace at `root`.
+fn tables(root: &Path) -> Result<[(PathBuf, String); 2], String> {
+    let read = |name: &str| {
+        let path = root.join("tools/unicode-tables/ucd").join(name);
+        std::fs::read_to_string(&path).map_err(|error| format!("{}: {error}", path.display()))
     };
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../crates/mln_text/src").join(file);
-    std::fs::write(&path, table).map_err(|error| format!("{}: {error}", path.display()))
+    let out = root.join("crates/mln_text/src");
+    Ok([
+        (out.join("arabic_tables.rs"), arabic_shaping::table(&read("ArabicShaping.txt")?, &read("UnicodeData.txt")?)?),
+        (out.join("bidi_mirroring.rs"), bidi_mirroring::table(&read("BidiMirroring.txt")?)?),
+    ])
 }
 
-fn read(path: &str) -> Result<String, String> {
-    std::fs::read_to_string(path).map_err(|error| format!("{path}: {error}"))
+/// unicode-bidi's Unicode version, which the UCD files must be of.
+fn unicode_version() -> String {
+    let (major, minor, update) = unicode_bidi::UNICODE_VERSION;
+    format!("{major}.{minor}.{update}")
 }
 
-/// The version that a UCD file's header line names: `# <name>-<version>.txt`.
-fn ucd_version<'a>(text: &'a str, name: &str) -> Option<&'a str> {
-    text.lines().find_map(|line| {
-        let version = line.strip_prefix("# ")?.strip_prefix(name)?.strip_prefix('-')?.strip_suffix(".txt")?;
-        (!version.is_empty() && version.bytes().all(|byte| byte.is_ascii_digit() || byte == b'.')).then_some(version)
-    })
+/// The version that a UCD file's header line names, `# <name>-<version>.txt`,
+/// if it's unicode-bidi's.
+fn ucd_version(text: &str, name: &str) -> Result<String, String> {
+    let version = text
+        .lines()
+        .find_map(|line| line.strip_prefix("# ")?.strip_prefix(name)?.strip_prefix('-')?.strip_suffix(".txt"))
+        .ok_or_else(|| format!("not a {name}.txt"))?;
+    let expected = unicode_version();
+    if version != expected {
+        return Err(format!("{name}.txt is of Unicode {version}, not unicode-bidi's {expected}"));
+    }
+    Ok(expected)
 }
 
 /// The fields of each line of a UCD file that holds data, without comments.
@@ -62,7 +89,7 @@ fn ucd_rows(text: &str) -> impl Iterator<Item = Vec<&str>> {
 
 /// A code point that a UCD file writes in hexadecimal.
 fn code_point(field: &str) -> Result<u32, String> {
-    u32::from_str_radix(field.trim(), 16).map_err(|_| format!("{field:?} isn't a code point"))
+    u32::from_str_radix(field, 16).map_err(|_| format!("{field:?} isn't a code point"))
 }
 
 /// The character as the tables store it.
