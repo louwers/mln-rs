@@ -1123,6 +1123,7 @@ impl RenderOrchestrator {
 
         self.tile_store.images_mut().clear();
         self.tile_store.glyphs().evict(&VecSet::new());
+        self.terrain.clear_data(&mut self.events);
     }
 
     /// Drops what holds the renderer's shaders: the sky and globe depth

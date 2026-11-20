@@ -247,6 +247,17 @@ impl RenderTerrain {
         self.draws.render(gpu, parameters);
     }
 
+    /// Drops all it made from the map's data, for the renderer's
+    /// `clear_data`: the cover, the drapes and the layers' drawings in them,
+    /// the draws and the DEM textures. If it had told the map of the ground,
+    /// it tells it in `events` that the ground is gone.
+    pub(crate) fn clear_data(&mut self, events: &mut Vec<RendererEvent>) {
+        if self.elevation.is_some() {
+            events.push(RendererEvent::TerrainElevation(None));
+        }
+        *self = RenderTerrain { logged_globe: self.logged_globe, ..RenderTerrain::default() };
+    }
+
     /// Drops the draws and the drapes, which hold the renderer's shaders;
     /// the next frame makes them again.
     pub(crate) fn release_shaders(&mut self) {

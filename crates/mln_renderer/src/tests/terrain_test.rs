@@ -593,3 +593,37 @@ fn a_dem_whose_zoom_levels_are_empty_draws_flat() {
     assert!(load.bindings().iter().all(|&binding| binding == (None, false)));
     assert_eq!(BTreeSet::new(), load.tiles.requested());
 }
+
+/// Nothing of the terrain outlives the data it was made from: once the
+/// renderer lets go of the map's data, the terrain has no cover, and it
+/// tells the map once that the ground is gone.
+#[test]
+fn the_terrain_lets_go_of_the_map_data() {
+    let pool = crate::tests::pool();
+    let mut orchestrator = crate::render_orchestrator::RenderOrchestrator::new(
+        true,
+        mln_text::local_glyph_rasterizer::LocalGlyphs::default(),
+        Arc::default(),
+        crate::text::font_face_engine::default_engine(),
+        Registry::with_builtins(),
+        Arc::new(|| {}),
+        &pool,
+    );
+    let ground = |events: Vec<RendererEvent>| -> Vec<bool> {
+        events
+            .into_iter()
+            .filter_map(|event| match event {
+                RendererEvent::TerrainElevation(elevation) => Some(elevation.is_some()),
+                _ => None,
+            })
+            .collect()
+    };
+    let style = style_with(crate::tests::ready(raster_dem_source("dem", None, tiles(), 256)));
+    orchestrator.update(&Arc::new(update_parameters(style, &transform(), MapMode::Static)));
+    assert!(orchestrator.terrain().cover().is_some());
+    assert_eq!(vec![true], ground(orchestrator.take_events()));
+
+    orchestrator.clear_data();
+    assert!(orchestrator.terrain().cover().is_none());
+    assert_eq!(vec![false], ground(orchestrator.take_events()));
+}
