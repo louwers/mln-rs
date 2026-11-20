@@ -9,10 +9,11 @@ use mln_gfx::color_mode::ColorMode;
 use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
+use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
-    ID_TERRAIN_DEM_TEXTURE, ID_TERRAIN_DRAPE_TEXTURE, ID_TERRAIN_DRAWABLE_UBO, ID_TERRAIN_POS_VERTEX_ATTRIBUTE,
-    ID_TERRAIN_PROPS_UBO,
+    ID_PROJECTION_UBO, ID_TERRAIN_DEM_TEXTURE, ID_TERRAIN_DRAPE_TEXTURE, ID_TERRAIN_DRAWABLE_UBO,
+    ID_TERRAIN_POS_VERTEX_ATTRIBUTE, ID_TERRAIN_PROPS_UBO,
 };
 use mln_gfx::shaders::terrain_ubo::TerrainDrawableUBO;
 use mln_gfx::types::CullFaceWindingType;
@@ -155,6 +156,9 @@ impl TerrainDraws {
         self.dem_textures.finish_frame();
         finish_tiles(&mut self.draw_list, &mut self.frame, &mut self.tiles, gpu, context, |writer| {
             writer.storage(ID_TERRAIN_DRAWABLE_UBO, |drawable| *drawable);
+            // GL's program declares the projection block whether it reads it
+            // or not, so every draw binds one of zeros.
+            writer.storage(ID_PROJECTION_UBO, |_| ProjectionUBO::default());
             writer.uniform(ID_TERRAIN_PROPS_UBO, &surface.props);
         });
     }

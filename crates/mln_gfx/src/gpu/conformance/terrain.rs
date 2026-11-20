@@ -15,9 +15,10 @@ use crate::gpu::{
     LoadOp, PassDesc, PipelineDesc, Scissor, ShaderId, ShaderKey, StencilState, TargetFormats, TextureDesc,
     TextureFormat, TextureRegion, TextureUsage, VertexAttribute, VertexBufferLayout, VertexStep, read_texels,
 };
+use crate::shaders::layer_ubo::ProjectionUBO;
 use crate::shaders::shader_defines::{
-    ID_TERRAIN_DEM_TEXTURE, ID_TERRAIN_PROBE_DEM_COORDS_VERTEX_ATTRIBUTE, ID_TERRAIN_PROBE_POS_VERTEX_ATTRIBUTE,
-    ID_TERRAIN_PROPS_UBO,
+    ID_PROJECTION_UBO, ID_TERRAIN_DEM_TEXTURE, ID_TERRAIN_PROBE_DEM_COORDS_VERTEX_ATTRIBUTE,
+    ID_TERRAIN_PROBE_POS_VERTEX_ATTRIBUTE, ID_TERRAIN_PROPS_UBO,
 };
 use crate::shaders::shader_source::BuiltIn;
 use crate::shaders::terrain_ubo::TerrainPropsUBO;
@@ -238,12 +239,18 @@ fn probe(
     };
     let props = bytemuck::bytes_of(&props);
     let props_buffer = buffer(gpu, BufferUsage::Uniform, props)?;
+    // GL's shaders declare the projection block, which must be bound though
+    // the probe doesn't read it.
+    let projection = [ProjectionUBO::default()];
+    let projection = bytemuck::cast_slice(&projection);
+    let projection_buffer = buffer(gpu, BufferUsage::Storage, projection)?;
     let bindings = gpu.create_bindings(&BindingsDesc {
         label: "terrain probes",
         shader,
         entries: &[
             BindGroupEntry::Texture { id: ID_TERRAIN_DEM_TEXTURE as u32, texture, sampler },
             whole(ID_TERRAIN_PROPS_UBO, props_buffer, props),
+            whole(ID_PROJECTION_UBO, projection_buffer, projection),
         ],
     })?;
 
