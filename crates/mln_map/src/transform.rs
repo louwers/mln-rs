@@ -550,7 +550,7 @@ impl Transform {
         let center = self.state.view().padding().center_in(size);
         let point_on_screen = ScreenCoordinate::new(center.x - center_offset.x, center.y - center_offset.y);
         // Use unwrapped LatLng to carry information about moveBy direction.
-        let center = self.screen_coordinate_to_lat_lng(&point_on_screen, WrapMode::Unwrapped)?;
+        let center = self.screen_coordinate_to_lat_lng_at(&point_on_screen, 0.0, WrapMode::Unwrapped)?;
         self.ease_to(&CameraOptions { center: Some(center), ..Default::default() }, animation);
         Ok(())
     }
@@ -706,24 +706,46 @@ impl Transform {
 
     #[must_use]
     pub fn lat_lng_to_screen_coordinate(&self, lat_lng: &LatLng) -> ScreenCoordinate {
-        let mut point = self.state.view().lat_lng_to_screen_coordinate(lat_lng);
-        point.y = f64::from(self.state.view().size().height) - point.y;
-        point
+        flip_y(self.view(), &self.view().lat_lng_to_screen_coordinate(lat_lng))
     }
 
     /// The location under `point`, in screen coordinates (y down).
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a NaN
     /// or infinite point.
     pub fn screen_coordinate_to_lat_lng(&self, point: &ScreenCoordinate, wrap_mode: WrapMode) -> Result<LatLng, Error> {
-        let mut flipped_point = *point;
-        flipped_point.y = f64::from(self.state.view().size().height) - flipped_point.y;
-        self.state.view().screen_coordinate_to_lat_lng(&flipped_point, wrap_mode)
+        self.view().screen_coordinate_to_lat_lng(&flip_y(self.view(), point), wrap_mode)
+    }
+
+    /// The screen point (y down) of `lat_lng` `height` meters above sea
+    /// level, whatever the terrain.
+    pub(crate) fn lat_lng_to_screen_coordinate_at(&self, lat_lng: &LatLng, height: f64) -> ScreenCoordinate {
+        flip_y(self.view(), &self.view().lat_lng_to_screen_coordinate_at(lat_lng, height))
+    }
+
+    /// Where the line of sight through `point` (y down) meets the plane
+    /// `height` meters above sea level, whatever the terrain: the camera's
+    /// own moves solve on planes, as the terrain under a point would move the
+    /// center by its parallax. Fails as
+    /// [`screen_coordinate_to_lat_lng`](Self::screen_coordinate_to_lat_lng).
+    pub(crate) fn screen_coordinate_to_lat_lng_at(
+        &self,
+        point: &ScreenCoordinate,
+        height: f64,
+        wrap_mode: WrapMode,
+    ) -> Result<LatLng, Error> {
+        self.view().screen_coordinate_to_lat_lng_at(&flip_y(self.view(), point), height, wrap_mode)
     }
 
     pub(crate) fn set_free_camera_options(&mut self, options: &FreeCameraOptions) {
         self.cancel_transitions();
         self.state.set_free_camera_options(options);
     }
+}
+
+/// `point` measured from the other edge of `view`'s height: a screen point
+/// (y down) as a view point (y up), or back.
+pub(crate) fn flip_y(view: &View, point: &ScreenCoordinate) -> ScreenCoordinate {
+    ScreenCoordinate::new(point.x, f64::from(view.size().height) - point.y)
 }
 
 /// `seconds` truncated to whole nanoseconds; `None`

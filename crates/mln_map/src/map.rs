@@ -1615,7 +1615,9 @@ fn camera_for_lat_lngs_on_screen(
     let mut ne_pixel = ScreenCoordinate::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
     let mut sw_pixel = ScreenCoordinate::new(f64::INFINITY, f64::INFINITY);
     for lat_lng in lat_lngs {
-        let pixel = transform.lat_lng_to_screen_coordinate(lat_lng);
+        // The camera fits the locations on the flat map, as GL JS's does,
+        // whatever the terrain.
+        let pixel = transform.lat_lng_to_screen_coordinate_at(lat_lng, 0.0);
         // std::min / std::max
         sw_pixel.x = if pixel.x < sw_pixel.x { pixel.x } else { sw_pixel.x };
         ne_pixel.x = if ne_pixel.x < pixel.x { pixel.x } else { ne_pixel.x };
@@ -1655,7 +1657,7 @@ fn camera_for_lat_lngs_on_screen(
         ScreenCoordinate::new(f64::midpoint(ne_pixel.x, sw_pixel.x), f64::midpoint(ne_pixel.y, sw_pixel.y));
 
     Ok(CameraOptions {
-        center: Some(transform.screen_coordinate_to_lat_lng(&center_pixel, WrapMode::Wrapped)?),
+        center: Some(transform.screen_coordinate_to_lat_lng_at(&center_pixel, 0.0, WrapMode::Wrapped)?),
         padding: Some(*padding),
         zoom: Some(zoom),
         ..Default::default()

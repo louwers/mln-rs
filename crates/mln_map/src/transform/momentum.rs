@@ -526,7 +526,7 @@ impl Transform {
             let center = self.state.view().padding().center_in(size);
             let point = ScreenCoordinate::new(center.x - step.x, center.y - step.y);
             // A step that has no LatLng is logged and stops.
-            let unwrapped = match self.screen_coordinate_to_lat_lng(&point, WrapMode::Unwrapped) {
+            let unwrapped = match self.screen_coordinate_to_lat_lng_at(&point, 0.0, WrapMode::Unwrapped) {
                 Ok(lat_lng) => lat_lng,
                 Err(e) => {
                     Log::error(Event::General, &e.message);
