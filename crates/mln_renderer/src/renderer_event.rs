@@ -37,7 +37,7 @@ pub enum RendererEvent {
     /// The renderer drew a frame.
     RenderFrameFinished {
         /// `Full` when everything the frame shows has loaded, and its camera
-        /// stood on the terrain's current ground
+        /// stood as it would on the terrain's current ground
         /// ([`UpdateParameters::elevation`]).
         ///
         /// [`UpdateParameters::elevation`]: crate::UpdateParameters::elevation
@@ -58,11 +58,13 @@ pub enum RendererEvent {
         stats: Arc<RenderingStats>,
     },
     /// The ground of the terrain changed: the tiles that draw it, or the DEM
-    /// data they read. `None` once terrain stops drawing, and for an update
-    /// that carries a ground while terrain doesn't draw. It comes before the
-    /// frame of its update finishes. The map's camera stands on it, and the
-    /// map answers it with an update that carries it
-    /// ([`UpdateParameters::elevation`]), which a still image waits for.
+    /// data they read; or it comes again for an update that carried a
+    /// ground that differs from it at the view's center. `None` once terrain
+    /// stops drawing, and for an update that carries a ground while terrain
+    /// doesn't draw. It comes before the frame of its update finishes. The
+    /// map's camera stands on it, and the map answers it with an update that
+    /// carries it ([`UpdateParameters::elevation`]), which a still image
+    /// waits for.
     ///
     /// [`UpdateParameters::elevation`]: crate::UpdateParameters::elevation
     TerrainElevation(Option<Arc<dyn Elevation>>),

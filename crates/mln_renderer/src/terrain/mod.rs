@@ -66,17 +66,20 @@
 //!   fixed camera over loaded tiles keeps one snapshot. It reaches the map
 //!   as [`RendererEvent::TerrainElevation`] before the frame of its update
 //!   finishes. The renderer sends its current one again for an update
-//!   that carries another, such as an update of a map that let go of the
-//!   ground when its style dropped the terrain.
+//!   whose snapshot differs from it at the view's center, such as an update
+//!   of a map that let go of the ground when its style dropped the terrain.
 //!   `None` reaches the map once terrain stops, and for an update that
 //!   carries a snapshot while terrain doesn't draw.
 //! - **Stills.** An update carries the snapshot the map's camera stands on
 //!   ([`UpdateParameters::elevation`]), and the map answers each new one
 //!   with an update that carries it. A frame is loaded only for an update
-//!   that carries the renderer's current snapshot, the same `Arc` (both
-//!   `None` without terrain): a still image draws only that update's frame,
-//!   and a continuous frame of any other reports itself partial, so it
-//!   doesn't make the map idle.
+//!   whose camera wouldn't move on the renderer's current snapshot: the
+//!   two give the same height and floor ([`Elevation::at`] and
+//!   [`Elevation::min_at`]) at the view's center, which is all the camera
+//!   reads of them, or there is neither, without terrain. A still image
+//!   draws only such an update's frame, and a continuous frame of any
+//!   other reports itself partial, so it doesn't make the map idle. A
+//!   snapshot that changes only away from the center holds no frame back.
 
 mod cover;
 mod dem_textures;
@@ -94,11 +97,12 @@ pub(crate) use drapes::Drapes;
 pub(crate) use elevation::TerrainElevation;
 use mln_gfx::gpu::Gpu;
 use mln_gfx::shaders::terrain_ubo::TerrainPropsUBO;
-use mln_map_types::{MapMode, TerrainSkirtLength};
+use mln_map_types::{Elevation, MapMode, TerrainSkirtLength};
 use mln_style::source_type::SourceData;
 use mln_style::sources::RasterDemSourceType;
 use mln_util::constants;
 use mln_util::dem::DemUnpack;
+use mln_util::geo::{LatLng, WrapMode};
 use mln_util::logging::{Event, Log};
 use mln_util::tileset::RasterEncoding;
 
@@ -116,6 +120,21 @@ fn skirt_length(length: TerrainSkirtLength, zoom: f64) -> Option<f64> {
     match length {
         TerrainSkirtLength::Auto => Some(constants::M2PI * constants::EARTH_MEAN_RADIUS_M / zoom.max(0.0).exp2() / 5.0),
         TerrainSkirtLength::None => None,
+    }
+}
+
+/// Whether a camera whose center is at `center` stands on the ground
+/// `seen` as it would on `drawn`: both give the same height and floor
+/// there, which is all the map's camera takes from the ground, or neither
+/// is there. Ground that differs elsewhere doesn't move the camera.
+fn stands_alike(seen: Option<&dyn Elevation>, drawn: Option<&dyn Elevation>, center: LatLng) -> bool {
+    match (seen, drawn) {
+        (None, None) => true,
+        (Some(seen), Some(drawn)) => {
+            std::ptr::addr_eq(seen, drawn)
+                || (seen.at(center) == drawn.at(center) && seen.min_at(center) == drawn.min_at(center))
+        }
+        _ => false,
     }
 }
 
@@ -219,16 +238,16 @@ impl RenderTerrain {
     /// ([`RendererEvent::TerrainElevation`]), before the frame finishes:
     /// the tiles, the DEM data they read, or how it decodes. It tells the
     /// map again, though the ground didn't change, when the camera of the
-    /// update ([`UpdateParameters::elevation`]) stands on another ground, as
-    /// the camera of a map that let go of the ground when its style dropped
-    /// the terrain does.
+    /// update ([`UpdateParameters::elevation`]) stands on a ground that
+    /// differs from it where the camera reads it, as the camera of a map
+    /// that let go of the ground when its style dropped the terrain does.
     /// While terrain doesn't draw, it tells the map that there is no ground
     /// once it stops, and for each update whose camera stood on a ground,
     /// which another renderer may have drawn.
     ///
-    /// Returns whether the update's camera stands on the ground the tiles
-    /// now draw, the snapshot the renderer last told the map of, compared by
-    /// its address: both `None` while terrain doesn't draw.
+    /// Returns whether the update's camera stands as it would on the ground
+    /// the tiles now draw (`stands_alike`), as it does on none while
+    /// terrain doesn't draw.
     pub(crate) fn bind<'a>(
         &mut self,
         dem: impl FnOnce(&str) -> Option<&'a SourceTiles>,
@@ -249,11 +268,12 @@ impl RenderTerrain {
             Some(drawn) if drawn.draws_as(cover, tiles, unpack, exaggeration) => (drawn, false),
             _ => (&*self.elevation.insert(Arc::new(TerrainElevation::new(cover, tiles, unpack, exaggeration))), true),
         };
-        let same = seen.is_some_and(|seen| std::ptr::addr_eq(Arc::as_ptr(drawn), seen));
-        if new || !same {
+        let center = parameters.view.center(WrapMode::Wrapped);
+        let alike = stands_alike(seen, Some(&**drawn), center);
+        if new || !alike {
             events.push(RendererEvent::TerrainElevation(Some(Arc::<TerrainElevation>::clone(drawn))));
         }
-        same
+        alike
     }
 
     /// How the surface of the last update's cover draws.

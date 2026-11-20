@@ -563,13 +563,15 @@ fn the_ground_the_map_stands_on_is_the_height_rule_on_the_drawn_dem() {
 }
 
 /// An update's camera stands on the terrain's current ground only when the
-/// update carries the snapshot of it that the terrain last told the map of,
-/// which a still image waits for: not one that came before, and not none
-/// while terrain draws. For an update that carries another, the terrain
-/// tells the map of its current ground again, though it didn't change.
-/// Without terrain, an update that carries none stands on it.
+/// ground it carries gives the same height and floor at its center as the
+/// current one, which a still image waits for: not one that came before
+/// the DEM loaded, and not none while terrain draws. For an update that
+/// carries other ground there, the terrain tells the map of its current
+/// ground again, though it didn't change; ground that differs only
+/// elsewhere is as good as the current one. Without terrain, an update
+/// that carries none stands on it.
 #[test]
-fn an_update_stands_on_the_current_ground_when_it_carries_its_snapshot() {
+fn an_update_stands_on_the_current_ground_when_it_carries_its_height_and_floor() {
     let mut load = TerrainLoad::new((0, 14), 1.0);
     load.frame();
     assert!(!load.grounded, "the update carries no ground");
@@ -591,6 +593,16 @@ fn an_update_stands_on_the_current_ground_when_it_carries_its_snapshot() {
     load.frame();
     assert!(load.grounded);
     assert!(load.ground_events().is_empty());
+
+    // Other ground of the same height and floor at the center.
+    load.seen = Some(Arc::new(Uniform { at: Some(100.0), min_at: Some(100.0) }));
+    load.frame();
+    assert!(load.grounded);
+    assert!(load.ground_events().is_empty());
+    load.seen = Some(Arc::new(Uniform { at: Some(100.0), min_at: Some(0.0) }));
+    load.frame();
+    assert!(!load.grounded, "another floor");
+    assert_eq!(1, load.ground_events().len());
 
     load.style.apply(Edit::SetTerrain(None)).unwrap();
     load.update();

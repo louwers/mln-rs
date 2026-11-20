@@ -45,7 +45,8 @@ pub(crate) struct Frame {
     /// symbol placement that isn't due yet.
     pub(crate) repaint_at: Option<Instant>,
     /// Whether the frame is complete: every source, image and tile it needs
-    /// had loaded, and its camera stood on the terrain's current ground.
+    /// had loaded, and its camera stood as it would on the terrain's current
+    /// ground.
     pub(crate) loaded: bool,
     pub(crate) placement_changed: bool,
     /// The layers the frame draws, by their index in the drawing order.

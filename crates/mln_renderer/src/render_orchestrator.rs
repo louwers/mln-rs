@@ -388,9 +388,9 @@ impl RenderOrchestrator {
             }
         }
 
-        // A frame whose camera hasn't stood on the terrain's current ground
+        // A frame whose camera would move on the terrain's current ground
         // isn't complete: the map answers the new ground with an update, and
-        // a still image draws only that update's frame.
+        // a still image draws only the frame of an update that stands on it.
         frame.loaded = update_parameters.style_loaded && !answered && grounded && self.is_loaded();
         if !clock.continuous && !frame.loaded {
             return None;

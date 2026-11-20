@@ -1,6 +1,6 @@
 //! How the camera stands on the terrain its renderer drew, and how the
 //! map's updates carry that ground back to the renderer, which completes a
-//! frame only of an update that carries its newest.
+//! frame only of an update whose camera stands as it would on its newest.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -148,7 +148,7 @@ fn a_camera_at_rest_stands_on_the_ground_and_a_moving_one_holds() {
 
 /// The map answers each ground the renderer tells of with an update that
 /// carries it, though the camera doesn't move: the renderer completes a
-/// frame only of such an update.
+/// frame only of an update that stands the camera as it does.
 #[test]
 fn each_ground_gets_an_update_that_carries_it() {
     let run_loop = Queue::<()>::new();

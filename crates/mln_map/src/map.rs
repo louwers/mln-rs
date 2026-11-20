@@ -84,7 +84,8 @@ pub struct Map {
     terrain_skirt_length: TerrainSkirtLength,
     /// The ground of the terrain as the renderer last drew it, while
     /// terrain draws. Each update carries it, and the renderer completes a
-    /// frame only of an update that carries its newest.
+    /// frame only of an update whose ground gives the height and floor at
+    /// the center that its newest gives.
     elevation: Option<Arc<dyn Elevation>>,
     /// The terrain's moves of the camera while the still image waits.
     ground_moves: u32,
@@ -473,9 +474,10 @@ impl Map {
                 self.repaint_at = repaint_at.filter(|_| continuous && !needs_repaint);
                 self.on_render_frame_finished(mode, needs_repaint, placement_changed, still_image_request_id, stats);
             }
-            // The renderer completes a frame only of an update that carries
-            // its newest ground, so the map answers each with one, whether
-            // or not the camera moves onto it (`follow_terrain`).
+            // The renderer completes a frame only of an update whose ground
+            // stands the camera as its newest does, so the map answers each
+            // with one, whether or not the camera moves onto it
+            // (`follow_terrain`).
             RendererEvent::TerrainElevation(elevation) => {
                 self.elevation = elevation;
                 self.on_update();
@@ -1434,10 +1436,14 @@ impl Map {
     /// the style has none, the planes fit the flat map again, and a clamped
     /// center goes back to sea level.
     ///
-    /// The moves report no camera change. A still image stops following
-    /// the terrain after [`MAX_GROUND_MOVES_PER_STILL`] of them, though it
-    /// still goes back to the flat map, and its updates still carry the
-    /// newest ground, so its frame draws.
+    /// It reads only the height and floor at the center, which are what the
+    /// renderer compares to tell whether a frame's camera stood on its newest
+    /// ground.
+    ///
+    /// The moves report no camera change. A still image stops following the
+    /// terrain after [`MAX_GROUND_MOVES_PER_STILL`] of them, though it still
+    /// goes back to the flat map, and its updates still carry the newest
+    /// ground, so its frame draws.
     fn follow_terrain(&mut self) {
         // The renderer tells of the ground only after it draws an update
         // without it, so the map, which owns the style, lets go first.

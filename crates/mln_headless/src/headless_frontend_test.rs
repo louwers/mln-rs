@@ -319,6 +319,81 @@ fn a_still_image_over_terrain_removed_and_restored_draws() {
     assert!((altitude - 1000.0).abs() < 1e-6, "{altitude}");
 }
 
+/// A still image draws, in one frame, over ground that keeps changing
+/// away from the center under a camera that stays put. Without the tile
+/// cache, the far DEM tiles flip in and out of the ground: once they load,
+/// their height range culls the terrain tiles that read them, which lets
+/// them go; without their range, the next cover reads them again.
+#[test]
+fn a_still_image_over_far_dem_tiles_that_flip_draws_in_one_frame() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use mln_storage::stub_file_source::{ResponseType, StubFileSource};
+    use mln_storage::{Kind, Resource, Response};
+
+    // DEM tiles of 16 pixels a side, each `height` m in Terrarium.
+    let terrarium = |height: u16| {
+        let mut dem = PremultipliedImage::new(Size::new(16, 16));
+        let [hi, lo] = (height + 32768).to_be_bytes();
+        for pixel in dem.data.as_chunks_mut::<4>().0 {
+            pixel.copy_from_slice(&[hi, lo, 0, 255]);
+        }
+        Arc::new(mln_image::encode_png(&dem))
+    };
+    let (low, high) = (terrarium(0), terrarium(20_000));
+    // Seen from zoom 10.5 at a pitch of 60°, the DEM tiles of zoom 8 or more
+    // whose south edge lies north of the center's row of terrain tiles stand
+    // high; terrain tiles read only them there.
+    let center_y = mln_util::projection::Projection::project(
+        &mln_util::geo::LatLng::new(45.0, 10.0).unwrap(),
+        1.0 / mln_util::constants::TILE_SIZE_D,
+    )
+    .y;
+    let far_requests = Arc::new(AtomicUsize::new(0));
+    let file_source = Arc::new(StubFileSource::new(ResponseType::Synchronous));
+    let requests = Arc::clone(&far_requests);
+    file_source.set_response(Kind::Tile, move |resource: &Resource| {
+        let tile = resource.tile_data.as_ref().expect("a tile");
+        let south = f64::from(tile.y + 1) / f64::from(1u32 << tile.z);
+        let far = tile.z > 5 && south < center_y - 0.0003;
+        if far {
+            requests.fetch_add(1, Ordering::Relaxed);
+        }
+        let mut response = Response::new();
+        response.data = Some(Arc::clone(if far { &high } else { &low }));
+        Some(response)
+    });
+    let style = r#"{
+        "version": 8,
+        "center": [10, 45],
+        "zoom": 10.5,
+        "pitch": 60,
+        "terrain": {"source": "dem", "exaggeration": 10},
+        "sources": {"dem": {"type": "raster-dem", "tiles": ["dem/{z}/{x}/{y}.png"], "encoding": "terrarium", "maxzoom": 14}},
+        "layers": [{"id": "background", "type": "background", "paint": {"background-color": "red"}}]
+    }"#;
+
+    let size = Size::new(1024, 1024);
+    let run_loop = Queue::new();
+    let pool = Pool::new(4);
+    let mut frontend = HeadlessFrontend::new(size, 1.0, &run_loop, &pool).expect("a headless frontend");
+    frontend.renderer().set_tile_cache_enabled(false);
+    let options = MapOptions { map_mode: MapMode::Static, size, ..Default::default() };
+    let mut map = Map::with_file_source(file_source, options, &pool).unwrap();
+    frontend.attach(&mut map);
+    map.load_style_json(style);
+    assert_eq!(Some(Ok(())), try_still(&mut map, &mut frontend, &run_loop), "the still never ended");
+    assert_eq!(1, frontend.rendering_stats().num_frames);
+    assert_eq!((0.0, Some(0.0)), ground(&map));
+
+    // The far tiles flip: the next image loads them again.
+    let before = far_requests.load(Ordering::Relaxed);
+    assert!(before > 0, "the far DEM tiles load");
+    assert_eq!(Some(Ok(())), try_still(&mut map, &mut frontend, &run_loop), "the second still never ended");
+    assert_eq!(2, frontend.rendering_stats().num_frames);
+    assert!(far_requests.load(Ordering::Relaxed) > before, "the far DEM tiles load again");
+}
+
 /// A continuous map over terrain goes idle only once a complete frame
 /// showed the camera standing on the newest ground: the frame of an update
 /// from before the camera stood on it isn't complete.
