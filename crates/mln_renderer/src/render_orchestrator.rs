@@ -1444,7 +1444,7 @@ impl RenderOrchestrator {
             source_ids.insert(layer.base().style.base().source.clone());
         }
 
-        let proj_matrix = self.view.projection_matrix_with(1, false);
+        let proj_matrix = self.view.projection_matrix_with(self.view.near_z(), false);
 
         let mut results_by_layer = crate::geometry::feature_index::QueryResults::default();
         for source_id in &source_ids {

@@ -134,6 +134,7 @@ impl MapView {
             y_skew: self.projection_mode.y_skew.unwrap_or(1.0),
             axonometric: self.projection_mode.axonometric.unwrap_or(false),
             center_wrap: WrapMode::Unwrapped,
+            terrain_min_elevation: None,
         };
         // The altitude in pixels at the center as the view places it.
         let placed = View::new(params);

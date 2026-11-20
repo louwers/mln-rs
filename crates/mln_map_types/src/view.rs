@@ -106,6 +106,9 @@ pub(crate) struct ViewParams {
     pub(crate) axonometric: bool,
     /// How [`View::camera`] reports the center.
     pub(crate) center_wrap: WrapMode,
+    /// While terrain draws, the lowest ground near the center, in meters,
+    /// exaggerated; the near and far planes then fit raised ground.
+    pub(crate) terrain_min_elevation: Option<f64>,
 }
 
 impl ViewParams {
@@ -131,6 +134,7 @@ impl ViewParams {
             y_skew: 1.0,
             axonometric: false,
             center_wrap: WrapMode::Unwrapped,
+            terrain_min_elevation: None,
         }
     }
 }
@@ -206,7 +210,7 @@ impl View {
         if self.params.size.is_empty() {
             return Matrices::ZERO;
         }
-        let projection = self.projection_matrix_with(1, false);
+        let projection = self.projection_matrix_with(self.near_z(), false);
         let coord = self.coordinate_point_matrix(&projection);
         let from_center = coord * DMat4::from_translation(self.center_coordinate());
         let (Some(inv_projection), Some(inverted_from_center)) = (projection.try_inverse(), from_center.try_inverse())
@@ -522,11 +526,32 @@ impl View {
         self.projection().projection_data(self, tile_id, mercator_matrix)
     }
 
+    /// The distance from the camera to the near plane of the projection
+    /// matrix, in pixels: 1, or a fiftieth of the view's height while
+    /// terrain draws, as in GL JS, for the depth precision raised ground
+    /// needs.
+    #[must_use]
+    pub fn near_z(&self) -> f64 {
+        match self.params.terrain_min_elevation {
+            Some(_) => f64::from(self.params.size.height) / 50.0,
+            None => 1.0,
+        }
+    }
+
     /// The distance from the camera to the far plane of the projection
     /// matrix, in pixels at the zoom: past the farthest point of the ground
-    /// that the view shows.
+    /// that the view shows, down to the terrain's lowest ground while it
+    /// draws.
     #[must_use]
     pub fn far_z(&self) -> f64 {
+        match self.params.terrain_min_elevation {
+            Some(min_elevation) => self.terrain_far_z(min_elevation),
+            None => self.flat_far_z(),
+        }
+    }
+
+    /// The far plane over a flat map, with the center at its altitude.
+    fn flat_far_z(&self) -> f64 {
         let camera_to_center_distance = self.camera_to_center_distance();
         let offset = self.center_offset();
 
@@ -544,18 +569,7 @@ impl View {
             * (self.params.fov / 2.0).tan()
             * (roll.cos().abs() + roll.sin().abs() * width / height);
         let tan_multiple = mln_math::clamp_f64(tan_fov_above_center * limited_pitch.tan(), 0.0, 0.99);
-
-        // The map ends at the horizon, where the sky starts, as in GL JS's
-        // `_calculateNearFarZ`: at high pitch it is below the top of the view.
-        let horizon = self.mercator_horizon();
-        let horizon_angle = (horizon / camera_to_center_distance).atan();
-        let min_horizon_angle = PI / 2.0 - max_mercator_horizon_angle();
-        let fov_center_to_horizon = if horizon_angle > min_horizon_angle {
-            2.0 * horizon_angle * (0.5 + offset.y / (horizon * 2.0))
-        } else {
-            min_horizon_angle
-        };
-        let horizon_multiple = mln_math::clamp_f64(fov_center_to_horizon.tan() * limited_pitch.tan(), 0.0, 0.99);
+        let horizon_multiple = mln_math::clamp_f64(self.fov_center_to_horizon().tan() * limited_pitch.tan(), 0.0, 0.99);
 
         // The distance to the farthest fragment that is drawn, and a little
         // more, for the precision of a fragment exactly there.
@@ -563,10 +577,66 @@ impl View {
         furthest_distance * 1.01
     }
 
-    /// The projection matrix with its near plane at `near_z`, aligned to the
-    /// pixel grid if `aligned`; zero while the size is empty.
+    /// GL JS's far plane (`calculateNearFarZ`) over ground that reaches down
+    /// to `min_elevation` meters: it fits the lowest of that, the center and
+    /// 100 meters below the camera. The frustum offset shortens it as it
+    /// does the flat map's.
+    fn terrain_far_z(&self, min_elevation: f64) -> f64 {
+        let params = &self.params;
+        let camera_to_center_distance = self.camera_to_center_distance();
+        let offset = self.center_offset();
+        let width = f64::from(params.size.width);
+        let height = f64::from(params.size.height);
+        let pixels_per_meter =
+            1.0 / Projection::meters_per_pixel_at_latitude(self.center(WrapMode::Unwrapped).latitude(), self.zoom());
+
+        // Heights in pixels at the zoom, as the center's altitude is.
+        let limited_pitch = params.pitch.min(max_mercator_horizon_angle());
+        let camera_to_sea_level_distance =
+            f64::max(camera_to_center_distance / 2.0, camera_to_center_distance + params.z / limited_pitch.cos());
+        let camera_altitude = params.pitch.cos() * camera_to_center_distance + params.z;
+        let lowest = params.z.min(min_elevation * pixels_per_meter).min(camera_altitude - 100.0 * pixels_per_meter);
+        let lowest_plane = if lowest < 0.0 {
+            camera_to_sea_level_distance - lowest / limited_pitch.cos()
+        } else {
+            camera_to_sea_level_distance
+        };
+
+        // How far past the center, along the lowest plane, the ray at `angle`
+        // above the center of the view meets it: the law of sines in the
+        // triangle of the camera, the center and that point.
+        let ground_angle = PI / 2.0 + params.pitch;
+        let distance_past_center = |angle: f64| {
+            angle.sin() * lowest_plane / mln_math::clamp_f64(PI - ground_angle - angle, 0.01, PI - 0.01).sin()
+        };
+        // The roll widens the angle to the top edge by the view's other side.
+        let roll = params.roll;
+        let fov = params.fov * (roll.cos().abs() * height + roll.sin().abs() * width) / height;
+        let fov_above_center = fov * (0.5 + (offset.y - params.frustum_offset.top) / height);
+        let top_half_distance =
+            distance_past_center(fov_above_center).min(distance_past_center(self.fov_center_to_horizon()));
+
+        (limited_pitch.sin() * top_half_distance + lowest_plane) * 1.01
+    }
+
+    /// The angle from the center of the view, with the padding, to the
+    /// horizon, where the map ends and the sky starts, as in GL JS's
+    /// `calculateNearFarZ`: at high pitch it is below the top of the view.
+    fn fov_center_to_horizon(&self) -> f64 {
+        let horizon = self.mercator_horizon();
+        let horizon_angle = (horizon / self.camera_to_center_distance()).atan();
+        let min_horizon_angle = PI / 2.0 - max_mercator_horizon_angle();
+        if horizon_angle > min_horizon_angle {
+            2.0 * horizon_angle * (0.5 + self.center_offset().y / (horizon * 2.0))
+        } else {
+            min_horizon_angle
+        }
+    }
+
+    /// The projection matrix with its near plane at `near_z` pixels, aligned
+    /// to the pixel grid if `aligned`; zero while the size is empty.
     #[must_use]
-    pub fn projection_matrix_with(&self, near_z: u16, aligned: bool) -> DMat4 {
+    pub fn projection_matrix_with(&self, near_z: f64, aligned: bool) -> DMat4 {
         let params = &self.params;
         if params.size.is_empty() {
             return DMat4::ZERO;
@@ -578,7 +648,7 @@ impl View {
 
         let camera = self.camera_pose();
         let world_to_camera = camera.world_to_camera(params.scale, params.viewport_mode == ViewportMode::FlippedY);
-        let mut camera_to_clip = perspective(self.perspective_fov(), width / height, f64::from(near_z), self.far_z());
+        let mut camera_to_clip = perspective(self.perspective_fov(), width / height, near_z, self.far_z());
 
         // The vanishing point moves to the center of the padded view, from -1
         // to 1 across it. An axonometric view has none.

@@ -162,6 +162,24 @@ mod tests {
         assert!(!zero_to_one.globe);
     }
 
+    /// While terrain draws, the frame draws with the view's terrain planes,
+    /// and its depth range ends at the far plane that fits the terrain.
+    #[test]
+    fn a_terrain_view_draws_with_its_planes() {
+        let flat = transform();
+        let mut state = flat.view.map_view(1.0).to_state().unwrap();
+        state.set_terrain_min_elevation(Some(-400.0));
+        let terrain = TransformParameters::new(state.view());
+        let view = &terrain.view;
+        assert_eq!(f64::from(SIZE.height) / 50.0, view.near_z());
+        assert_eq!(view.projection_matrix(), terrain.proj_matrix);
+        assert_eq!(view.projection_matrix_with(view.near_z(), true), terrain.aligned_proj_matrix);
+        assert_eq!(flat.near_clipped_near_z, terrain.near_clipped_near_z);
+        let projection = compute(&terrain, 1.0, ClipDepthRange::ZeroToOne);
+        assert_eq!(view.far_z(), projection.far_distance);
+        assert!(projection.far_distance > compute(&flat, 1.0, ClipDepthRange::ZeroToOne).far_distance);
+    }
+
     /// At high pitch the far plane, and the depth range with it, ends at the
     /// horizon, where the map does, below the top of the view.
     #[test]

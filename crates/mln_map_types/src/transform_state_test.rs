@@ -31,7 +31,7 @@ fn pitched(pitch: f64) -> TransformState {
 /// every hundredth of a degree up to 85 degrees north: each point's row
 /// from the top of the view, and its clip z over w.
 fn meridian(state: &TransformState) -> Vec<(f64, f64)> {
-    let proj_matrix = state.view().projection_matrix_with(1, false);
+    let proj_matrix = state.view().projection_matrix_with(1.0, false);
     let height = f64::from(state.view().size().height);
     (0..8500)
         .map(|step| {
@@ -138,6 +138,7 @@ fn numbers_out_of_range_do_not_panic() {
             let _ = s.set_limits(CameraLimits { max_pitch: v, ..*s.limits() });
         }),
         ("center altitude", |s, v| s.set_center_altitude(v)),
+        ("terrain min elevation", |s, v| s.set_terrain_min_elevation(Some(v))),
         ("zoom", |s, v| s.set_lat_lng_zoom(&LatLng::new(10.0, 10.0).unwrap(), v)),
         ("longitude", |s, v| {
             if let Ok(lat_lng) = LatLng::with_mode(0.0, v, WrapMode::Unwrapped) {
@@ -235,4 +236,214 @@ fn equal_zoom_limits_just_below_the_least_zoom_the_view_allows_apply() {
     state.set_size(Size::new(512, 1024));
     let zoom = 0.999_999_999_9;
     state.set_limits(CameraLimits { min_zoom: zoom, max_zoom: zoom, ..*state.limits() }).unwrap();
+}
+
+/// A 301 by 200 view of the Alps, level or with pitch, roll, padding and a
+/// center below sea level.
+fn alpine(pitched: bool) -> TransformState {
+    use mln_util::geo::EdgeInsets;
+
+    let (center_altitude, pitch, roll, top) = if pitched { (-800.0, 72.5, 9.0, 60.0) } else { (0.0, 0.0, 0.0, 0.0) };
+    MapView {
+        camera: Camera {
+            center: LatLng::new(46.5, 7.9).unwrap(),
+            center_altitude,
+            padding: EdgeInsets::new(top, 0.0, 10.0, 25.0),
+            zoom: 12.25,
+            bearing: 20.0,
+            pitch,
+            roll,
+            fov: 37.0,
+        },
+        extent: LogicalExtent::new(Size::new(301, 200), 1.0),
+        projection_mode: ProjectionMode::default(),
+        viewport: Viewport::default(),
+        projection: ProjectionDefinition::default(),
+    }
+    .to_state()
+    .unwrap()
+}
+
+/// Without terrain the planes and matrices are those the view had before it
+/// knew of terrain, to the bit, and a terrain that goes away restores them.
+#[test]
+fn matrices_without_terrain_are_unchanged() {
+    // Each view's far plane, projection matrix, and the z row of its matrix
+    // with the near plane at a tenth of the distance to the center.
+    let expected = [
+        (
+            alpine(false),
+            301.857_181_237_032_25,
+            [
+                1.866_076_615_892_337_9,
+                1.022_190_496_282_749_3,
+                0.0,
+                0.0,
+                0.679_196_343_045_016_2,
+                -2.808_445_306_917_968_7,
+                0.0,
+                0.0,
+                0.007_508_877_260_565_23,
+                -0.004_520_344_110_860_268,
+                -0.091_007_877_558_885_29,
+                -0.090_406_882_217_205_36,
+                -3_028_316.878_903_641,
+                1_147_156.446_909_028_3,
+                298.848_628_475_551_95,
+                298.868_496_274_289_27,
+            ],
+            [0.0, 0.0, -0.109_624_258_666_032_52, 298.233_205_214_500_34],
+        ),
+        (
+            alpine(true),
+            54_478.153_105_644_335,
+            [
+                1.784_059_983_608_735_4,
+                0.661_384_306_806_117_8,
+                0.326_202_383_497_395_66,
+                0.326_190_408_187_028_27,
+                0.833_051_235_020_185_3,
+                -0.450_162_381_905_947_7,
+                -0.896_233_682_831_371_7,
+                -0.896_200_780_936_546_3,
+                -0.024_515_372_283_410_004,
+                0.261_188_125_549_333_3,
+                -0.027_173_570_463_330_236,
+                -0.027_172_572_886_498_946,
+                -3_057_312.553_228_450_5,
+                -463_638.868_611_956_83,
+                366_351.995_260_439_06,
+                366_340.545_969_311_15,
+            ],
+            [0.326_537_870_775_438_83, -0.897_155_426_552_309_5, -0.027_201_517_491_465_696, 366_672.746_155_253_44],
+        ),
+    ];
+    for (mut state, far_z, projection, clipped_z) in expected {
+        let far_z: f64 = far_z;
+        for _ in 0..2 {
+            let view = state.view();
+            assert_eq!(1.0, view.near_z());
+            assert_eq!(far_z.to_bits(), view.far_z().to_bits());
+            assert_eq!(projection.map(f64::to_bits), view.projection_matrix().to_cols_array().map(f64::to_bits));
+            let near_clipped = f64::from((0.1 * view.camera_to_center_distance()) as u16);
+            let clipped = view.projection_matrix_with(near_clipped, false).row(2).to_array();
+            assert_eq!(clipped_z.map(f64::to_bits), clipped.map(f64::to_bits));
+
+            let before = view.clone();
+            state.set_terrain_min_elevation(Some(-120.0));
+            assert_ne!(before.far_z(), state.view().far_z());
+            state.set_terrain_min_elevation(None);
+            assert_eq!(before, *state.view());
+        }
+    }
+}
+
+/// With terrain, the near and far planes are GL JS's (`calculateNearFarZ`
+/// in `mercator_camera_math.ts)`: the numbers come from that function run on
+/// the same cameras, with mln-rs's earth radius for the pixels per meter. A
+/// copy of it with GL JS's radius gives GL JS's own test expectations.
+#[test]
+fn terrain_planes_are_gl_js_planes() {
+    use mln_util::geo::EdgeInsets;
+
+    struct Case {
+        size: Size,
+        center: (f64, f64),
+        center_altitude: f64,
+        zoom: f64,
+        pitch: f64,
+        top_padding: f64,
+        min_elevation: f64,
+        near_z: f64,
+        far_z: f64,
+    }
+    let cases = [
+        // Ground above sea level, the center on it.
+        Case {
+            size: Size::new(500, 400),
+            center: (46.5, 7.9),
+            center_altitude: 1200.0,
+            zoom: 12.25,
+            pitch: 60.0,
+            top_padding: 0.0,
+            min_elevation: 900.0,
+            near_z: 8.0,
+            far_z: 1_952.317_066_220_289_5,
+        },
+        // Ground below sea level: GL JS's own test of a negative floor.
+        Case {
+            size: Size::new(500, 500),
+            center: (0.0, 0.0),
+            center_altitude: 0.0,
+            zoom: 11.46,
+            pitch: 60.0,
+            top_padding: 0.0,
+            min_elevation: -455.5,
+            near_z: 10.0,
+            far_z: 1_870.617_879_146_915_8,
+        },
+        // Past the horizon pitch, with the center moved down the view.
+        Case {
+            size: Size::new(512, 384),
+            center: (27.9, 86.9),
+            center_altitude: 300.0,
+            zoom: 13.0,
+            pitch: 85.0,
+            top_padding: 120.0,
+            min_elevation: 250.0,
+            near_z: 7.68,
+            far_z: 18_532.242_194_604_092,
+        },
+    ];
+    for case in cases {
+        let mut state = MapView {
+            camera: Camera {
+                center: LatLng::new(case.center.0, case.center.1).unwrap(),
+                center_altitude: case.center_altitude,
+                padding: EdgeInsets::new(case.top_padding, 0.0, 0.0, 0.0),
+                zoom: case.zoom,
+                bearing: 20.0,
+                pitch: case.pitch,
+                fov: mln_math::rad2deg(DEFAULT_FOV),
+                ..Camera::default()
+            },
+            extent: LogicalExtent::new(case.size, 1.0),
+            projection_mode: ProjectionMode::default(),
+            viewport: Viewport::default(),
+            projection: ProjectionDefinition::default(),
+        }
+        .to_state()
+        .unwrap();
+        state.set_terrain_min_elevation(Some(case.min_elevation));
+        let view = state.view();
+        assert_eq!(case.near_z, view.near_z());
+        let far_z = view.far_z();
+        assert!((far_z - case.far_z).abs() <= case.far_z * 1e-12, "{far_z} vs {}", case.far_z);
+        assert_eq!(view.projection_matrix_with(view.near_z(), false), view.projection_matrix());
+    }
+}
+
+/// With terrain, the far plane reaches ground 2 km below sea level up to
+/// the top of the view, where the flat map's plane cuts it off.
+#[test]
+fn the_far_plane_reaches_sunken_ground() {
+    let mut state = pitched(60.0);
+    state.set_lat_lng_zoom(&LatLng::new(0.0, -60.0).unwrap(), 13.0);
+    // The depths of the sunken ground north of the center that shows.
+    let depths = |state: &TransformState| -> Vec<f64> {
+        let proj_matrix = state.view().projection_matrix();
+        (0..8500)
+            .filter_map(|step| {
+                let lat_lng = LatLng::new(f64::from(step) / 10_000.0, -60.0).unwrap();
+                let point = Projection::project(&lat_lng, state.view().scale());
+                let clip = proj_matrix * DVec4::new(point.x, point.y, -2000.0, 1.0);
+                (clip.w > 0.0 && clip.y / clip.w <= 1.0).then_some(clip.z / clip.w)
+            })
+            .collect()
+    };
+    let flat = depths(&state);
+    assert!(flat.iter().any(|depth| *depth > 1.0));
+    state.set_terrain_min_elevation(Some(-2000.0));
+    let terrain = depths(&state);
+    assert!(!terrain.is_empty() && terrain.iter().all(|depth| *depth < 1.0));
 }

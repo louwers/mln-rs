@@ -1777,7 +1777,7 @@ fn projection_data_matches_tile_matrix() {
                         let scale = state.view().scale();
 
                         for aligned in [false, true] {
-                            let proj_matrix = state.view().projection_matrix_with(1, aligned);
+                            let proj_matrix = state.view().projection_matrix_with(1.0, aligned);
 
                             for tile_id in &tile_ids {
                                 let tile_matrix = reference_tile_matrix(scale, tile_id);
