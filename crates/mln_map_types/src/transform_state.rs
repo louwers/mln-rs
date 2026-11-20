@@ -613,6 +613,16 @@ impl TransformState {
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
     /// NaN or infinite anchor.
     pub fn move_lat_lng(&mut self, lat_lng: &LatLng, anchor: &ScreenCoordinate) -> Result<(), Error> {
+        self.move_lat_lng_at(lat_lng, anchor, 0.0)
+    }
+
+    /// Recenters the map so that `lat_lng`, `height` meters above sea level,
+    /// is at `anchor`, a point measured from the bottom edge (y up): the
+    /// center moves across the ground, with the zoom, the angles and the
+    /// center's altitude kept. At height 0 it is
+    /// [`move_lat_lng`](Self::move_lat_lng). The globe holds `lat_lng` on its
+    /// surface, whatever the height. Fails as `move_lat_lng` does.
+    pub fn move_lat_lng_at(&mut self, lat_lng: &LatLng, anchor: &ScreenCoordinate, height: f64) -> Result<(), Error> {
         let view = &self.view;
         if view.is_globe() {
             if let Some(center) = VerticalPerspectiveProjection::center_for_location_at_point(view, lat_lng, anchor) {
@@ -626,24 +636,46 @@ impl TransformState {
             }
             return Ok(());
         }
+        let center = self.center_for_lat_lng_at(lat_lng, anchor, height)?;
+        // Wrapped, as easeTo and GL JS's setLocationAtPoint leave it, unless
+        // bounds keep it in their range.
+        let target = if self.limits.bounds == LatLngBounds::default() { center.wrapped() } else { center };
+        let zoom = self.view.zoom();
+        self.set_lat_lng_zoom(&target, zoom);
+        Ok(())
+    }
+
+    /// The center, unwrapped and before the limits constrain it, that puts
+    /// `lat_lng`, `height` meters above sea level, at `anchor` (y up) on a
+    /// Mercator view: the current center moved across the ground by as far
+    /// as `lat_lng` is from the location the line of sight through `anchor`
+    /// meets at that height (GL JS's `getCameraForLocationAtPoint`). On the
+    /// globe it is the center that holds `lat_lng` on the surface, or fails
+    /// where none does. Fails as [`move_lat_lng`](Self::move_lat_lng) does.
+    pub fn center_for_lat_lng_at(
+        &self,
+        lat_lng: &LatLng,
+        anchor: &ScreenCoordinate,
+        height: f64,
+    ) -> Result<LatLng, Error> {
+        let view = &self.view;
+        if view.is_globe() {
+            return VerticalPerspectiveProjection::center_for_location_at_point(view, lat_lng, anchor)
+                .ok_or_else(|| Error::invalid_argument("no center holds the location at the point"));
+        }
         let scale = view.scale();
         let center_coord = Projection::project(&view.center(WrapMode::Unwrapped), scale);
         let lat_lng_coord = Projection::project(lat_lng, scale);
-        let anchor_coord = Projection::project(&view.screen_coordinate_to_lat_lng(anchor, WrapMode::Unwrapped)?, scale);
-        let center = Projection::unproject(
+        let anchor_coord =
+            Projection::project(&view.screen_coordinate_to_lat_lng_at(anchor, height, WrapMode::Unwrapped)?, scale);
+        Projection::unproject(
             &Point::new(
                 center_coord.x + lat_lng_coord.x - anchor_coord.x,
                 center_coord.y + lat_lng_coord.y - anchor_coord.y,
             ),
             scale,
             WrapMode::Unwrapped,
-        )?;
-        // Wrapped, as easeTo and GL JS's setLocationAtPoint leave it, unless
-        // bounds keep it in their range.
-        let target = if self.limits.bounds == LatLngBounds::default() { center.wrapped() } else { center };
-        let zoom = view.zoom();
-        self.set_lat_lng_zoom(&target, zoom);
-        Ok(())
+        )
     }
 
     pub fn set_lat_lng_zoom(&mut self, lat_lng: &LatLng, zoom: f64) {

@@ -415,6 +415,38 @@ fn the_center_altitude_holds_in_meters_through_zoom_and_center_changes() {
     draws_at_center(&state);
 }
 
+/// Moving a location on a plane above sea level to a point puts it there,
+/// at that height, with the zoom, the angles and the center's altitude
+/// kept; at sea level it is `move_lat_lng`, to the bit.
+#[test]
+fn moving_a_location_on_a_plane_puts_it_at_the_point() {
+    use mln_util::geo::{ScreenCoordinate, WrapMode};
+
+    let mut state = pitched(55.0);
+    state.set_lat_lng_zoom(&LatLng::new(30.0, 20.0).unwrap(), 12.0);
+    state.set_center_altitude(400.0);
+    let (from, to) = (ScreenCoordinate::new(140.0, 120.0), ScreenCoordinate::new(380.0, 200.0));
+    for height in [0.0, 400.0, 1500.0] {
+        let mut moved = state.clone();
+        let location = moved.view().screen_coordinate_to_lat_lng_at(&from, height, WrapMode::Unwrapped).unwrap();
+        moved.move_lat_lng_at(&location, &to, height).unwrap();
+        // The center's altitude in meters draws a little higher or lower at
+        // the center's new latitude.
+        let landed = moved.view().lat_lng_to_screen_coordinate_at(&location, height);
+        assert!((landed.x - to.x).hypot(landed.y - to.y) < 1e-2, "{height} m: {landed:?}");
+        let (before, after) = (state.view(), moved.view());
+        assert_eq!(
+            (before.zoom(), before.angle(), before.pitch(), before.center_altitude()),
+            (after.zoom(), after.angle(), after.pitch(), after.center_altitude())
+        );
+        if height == 0.0 {
+            let mut flat = state.clone();
+            flat.move_lat_lng(&location, &to).unwrap();
+            assert_eq!(flat, moved);
+        }
+    }
+}
+
 /// The eye stands back from the center along the line of sight, and the
 /// near plane's middle point is on that line, the near plane's distance
 /// further. Raising the eye keeps the ground under it and the center it
