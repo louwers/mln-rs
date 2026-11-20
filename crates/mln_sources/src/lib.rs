@@ -1,11 +1,8 @@
-//! The built-in source types, outside the engine.
-//!
-//! It holds none yet: the style specification's source types and the custom
-//! source types are in the engine, and register through
+//! The built-in source types outside the engine. The style specification's
+//! source types and the custom source types register through
 //! `mln_renderer::builtins::register_source_types`.
 
-use mln_renderer::RegistryBuilder;
-use mln_style::expression::functions::RegisterError;
+use mln_renderer::{RegisterError, RegistryBuilder};
 
 /// Adds the source types of this crate. Fails for a name that an earlier
 /// call took.

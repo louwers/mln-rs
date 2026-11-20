@@ -134,7 +134,7 @@ impl<'a, T: LayerType> TileView<'a> for LayerBucket<'a, T> {
     }
 
     fn passes(self) -> RenderPass {
-        RenderPass(self.layer.render_passes)
+        self.layer.passes()
     }
 }
 

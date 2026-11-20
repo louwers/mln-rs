@@ -222,6 +222,7 @@ impl Iterator for TileCover {
 /// The parameters of a tile cover. They own a copy of the transform state,
 /// which C++ holds by reference.
 #[derive(Clone, Debug)]
+#[doc(hidden)]
 pub struct TileCoverParameters {
     pub view: View,
     pub tile_lod_min_radius: f64,
@@ -784,6 +785,7 @@ pub(crate) fn globe_level_cover(
     globe::level_cover(state, z, zoom_range, overscaled_z)
 }
 
+#[doc(hidden)]
 #[must_use]
 pub fn tile_cover(
     state: &TileCoverParameters,

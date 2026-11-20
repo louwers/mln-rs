@@ -2898,7 +2898,6 @@ dependencies = [
  "mln-rs-style-types",
  "mln-rs-tile-id",
  "mln-rs-util",
- "mln-rs-vec-map",
  "mln-rs-wire",
  "serde_json",
 ]
@@ -3096,7 +3095,6 @@ name = "mln-rs-sources"
 version = "0.0.13"
 dependencies = [
  "mln-rs-renderer",
- "mln-rs-style",
 ]
 
 [[package]]

@@ -99,7 +99,9 @@ impl std::fmt::Debug for Registry {
 }
 
 impl Registry {
-    /// The built-in registrations, for this crate's tests.
+    /// The built-in expression functions and the engine's own layer and
+    /// source types, without those of `mln_layers` and `mln_sources`, for
+    /// this crate's tests, which can't reach the facade's registry.
     #[cfg(test)]
     pub(crate) fn with_builtins() -> Arc<Registry> {
         static BUILTINS: std::sync::LazyLock<Arc<Registry>> = std::sync::LazyLock::new(|| {

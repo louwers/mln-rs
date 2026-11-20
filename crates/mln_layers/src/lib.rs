@@ -10,8 +10,7 @@
 pub mod background;
 
 pub use background::{Background, BackgroundPaintProperties};
-use mln_renderer::RegistryBuilder;
-use mln_style::expression::functions::RegisterError;
+use mln_renderer::{RegisterError, RegistryBuilder};
 
 /// Adds the layer types of this crate. Fails for a name that an earlier
 /// call took.

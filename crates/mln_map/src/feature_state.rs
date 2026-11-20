@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use mln_renderer::bucket::LayerFeatureStates;
+use mln_renderer::LayerFeatureStates;
 use mln_renderer::source_state::{FeatureStatesBySource, SourceFeatureStates};
 use mln_style::expression::expression::FeatureState;
 

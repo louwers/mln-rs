@@ -17,7 +17,6 @@ doctest = false
 
 [dependencies]
 mln_renderer.workspace = true
-mln_style.workspace = true
 
 [lints]
 workspace = true

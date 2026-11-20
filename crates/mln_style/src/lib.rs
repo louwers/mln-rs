@@ -82,6 +82,8 @@ pub use edit::Edit;
 pub use layer::Layer;
 pub use layer_list::LayerList;
 pub use layer_type::LayerTypeInfo;
+#[doc(hidden)]
+pub use mln_vec_map as __vec_map;
 pub use property_value::{PropertyValue, StyleValue};
 pub use registry::StyleRegistry;
 pub use renderer::property_evaluation_parameters::{CrossfadeParameters, PropertyEvaluationParameters};
