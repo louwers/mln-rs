@@ -9,7 +9,6 @@ impl StyleLayerType for Line {
     const INFO: LayerTypeInfo = LayerTypeInfo {
         name: "line",
         source: SourceKind::Geometry,
-        pass_3d: false,
         fading_tiles: false,
         cross_tile_index: false,
         from_json: true,

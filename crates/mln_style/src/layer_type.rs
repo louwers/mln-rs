@@ -46,8 +46,6 @@ pub struct LayerTypeInfo {
     /// The layer type as style JSON names it.
     pub name: &'static str,
     pub source: SourceKind,
-    /// Whether the type's layers draw in the 3D pass.
-    pub pass_3d: bool,
     /// Whether the type's layers draw on tiles that are fading out.
     pub fading_tiles: bool,
     /// Whether the type's layers take part in cross-tile indexing and

@@ -281,7 +281,7 @@ impl LayerType for Hillshade {
 
     fn passes(_layer: &LayerValues<Hillshade>, evaluated: &EvaluatedLayer<Hillshade>) -> RenderPass {
         if *evaluated.paint.hillshade_exaggeration.uniform() > 0.0 {
-            RenderPass::Translucent | RenderPass::Pass3D
+            RenderPass::Translucent
         } else {
             RenderPass::None
         }

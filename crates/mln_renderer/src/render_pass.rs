@@ -11,7 +11,6 @@ impl RenderPass {
     pub const None: RenderPass = RenderPass(0);
     pub const Opaque: RenderPass = RenderPass(1 << 0);
     pub const Translucent: RenderPass = RenderPass(1 << 1);
-    pub(crate) const Pass3D: RenderPass = RenderPass(1 << 2);
 
     #[must_use]
     pub(crate) fn underlying_type(self) -> u8 {

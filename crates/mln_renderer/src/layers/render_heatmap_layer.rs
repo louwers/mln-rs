@@ -241,7 +241,7 @@ impl LayerType for Heatmap {
 
     fn passes(_layer: &LayerValues<Heatmap>, evaluated: &EvaluatedLayer<Heatmap>) -> RenderPass {
         if *evaluated.paint.heatmap_opacity.uniform() > 0.0 {
-            RenderPass::Translucent | RenderPass::Pass3D
+            RenderPass::Translucent
         } else {
             RenderPass::None
         }

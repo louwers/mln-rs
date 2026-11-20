@@ -29,7 +29,6 @@ impl StyleLayerType for Plain {
     const INFO: LayerTypeInfo = LayerTypeInfo {
         name: "plain",
         source: SourceKind::None,
-        pass_3d: false,
         fading_tiles: false,
         cross_tile_index: false,
         from_json: true,

@@ -9,7 +9,6 @@ impl StyleLayerType for Fill {
     const INFO: LayerTypeInfo = LayerTypeInfo {
         name: "fill",
         source: SourceKind::Geometry,
-        pass_3d: false,
         fading_tiles: false,
         cross_tile_index: false,
         from_json: true,
