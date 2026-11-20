@@ -79,7 +79,7 @@ pub struct Map {
     cross_source_collisions: bool,
     fast_pfor_enabled: bool,
     unused_style_image_policy: UnusedStyleImagePolicy,
-    /// Whether the center of a camera at rest stands on the terrain.
+    /// Whether the center stands on the terrain.
     center_clamped_to_ground: bool,
     terrain_skirt_length: TerrainSkirtLength,
     /// The ground of the terrain as the renderer last drew it, while
@@ -611,6 +611,9 @@ impl Map {
             (time_point, _) => time_point,
         };
 
+        // The frame's commands ease onto the newest ground.
+        let ground = self.terrain_ground();
+        self.transform.set_terrain(ground);
         self.transform.update_transitions(time_point);
         let projection = self.projection_at(self.transform.view().zoom());
         self.transform.set_projection_definition(&projection);
@@ -1412,8 +1415,8 @@ impl Map {
 
     // MARK: - Terrain
 
-    /// Sets whether the center of a camera at rest stands on the terrain, at
-    /// its height under the center ([`MapOptions::center_clamped_to_ground`]).
+    /// Sets whether the center stands on the terrain, at its height under
+    /// the center ([`MapOptions::center_clamped_to_ground`]).
     pub fn set_center_clamped_to_ground(&mut self, clamped: bool) {
         if self.center_clamped_to_ground != clamped {
             self.center_clamped_to_ground = clamped;
@@ -1421,32 +1424,22 @@ impl Map {
         }
     }
 
-    /// Whether the center of a camera at rest stands on the terrain.
+    /// Whether the center stands on the terrain.
     #[must_use]
     pub fn center_clamped_to_ground(&self) -> bool {
         self.center_clamped_to_ground
     }
 
-    /// Hands the transform the terrain the camera stands on, and moves the
-    /// camera onto it ([`Transform::follow_terrain`]): the ground the
-    /// renderer last drew, while the style has terrain on a Mercator view
-    /// outside tile mode, where terrain draws; else none, which turns the
-    /// camera's rules over terrain off.
+    /// Hands the transform the terrain the camera stands on
+    /// ([`Self::terrain_ground`]), and moves the camera onto it
+    /// ([`Transform::follow_terrain`]).
     ///
     /// The moves report no camera change. A still image stops following the
     /// terrain after [`MAX_GROUND_MOVES_PER_STILL`] of them, though it still
     /// goes back to the flat map, and its updates still carry the newest
     /// ground, so its frame draws.
     fn follow_terrain(&mut self) {
-        // The renderer tells of the ground only after it draws an update
-        // without it, so the map, which owns the style, lets go first.
-        if self.style.get_terrain().is_none() {
-            self.elevation = None;
-        }
-        let applies =
-            self.style.get_terrain().is_some() && self.mode != MapMode::Tile && !self.transform.view().is_globe();
-        let ground = applies
-            .then(|| TerrainGround { elevation: self.elevation.clone(), clamped: self.center_clamped_to_ground });
+        let ground = self.terrain_ground();
         let grounded = ground.as_ref().is_some_and(|ground| ground.elevation.is_some());
         self.transform.set_terrain(ground);
         let still = self.mode != MapMode::Continuous && self.still_image == StillImage::Pending;
@@ -1462,6 +1455,21 @@ impl Map {
                 );
             }
         }
+    }
+
+    /// The terrain the camera stands on: the ground the renderer last drew,
+    /// while the style has terrain on a Mercator view outside tile mode,
+    /// where terrain draws; else none, which turns the camera's rules over
+    /// terrain off.
+    fn terrain_ground(&mut self) -> Option<TerrainGround> {
+        // The renderer tells of the ground only after it draws an update
+        // without it, so the map, which owns the style, lets go first.
+        if self.style.get_terrain().is_none() {
+            self.elevation = None;
+        }
+        let applies =
+            self.style.get_terrain().is_some() && self.mode != MapMode::Tile && !self.transform.view().is_globe();
+        applies.then(|| TerrainGround { elevation: self.elevation.clone(), clamped: self.center_clamped_to_ground })
     }
 
     // MARK: - Debug

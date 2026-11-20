@@ -1,13 +1,16 @@
-//! The terrain under the camera: the ground a camera at rest stands on, and
-//! the eye kept above the ground while a command moves the camera.
+//! The terrain under the camera: the ground a camera at rest stands on, the
+//! altitude a command eases onto the ground it ends on, and the eye kept
+//! above the ground while a command moves the camera.
 
 use std::sync::Arc;
 
 use glam::DVec3;
 use mln_map_types::{Elevation, View};
-use mln_util::geo::WrapMode;
+use mln_util::geo::{LatLng, WrapMode};
+use mln_util::interpolate::interpolate;
 
 use super::Transform;
+use super::transition::AlongFn;
 
 /// How many times a command's camera is raised over the ground in a frame,
 /// as in GL JS: each raise turns the near plane, which can bring another
@@ -22,8 +25,55 @@ pub struct TerrainGround {
     /// the eye then stays above sea level, and the ground under the center
     /// counts as loading.
     pub elevation: Option<Arc<dyn Elevation>>,
-    /// Whether the center of a camera at rest stands on the ground.
+    /// Whether the center stands on the ground: at rest, and at the end of
+    /// a command that moves it.
     pub clamped: bool,
+}
+
+/// The center altitude of a command that moves the center over terrain
+/// that clamps it: a straight line from the altitude the command starts at
+/// to the ground at the center it ends on (GL JS's
+/// `_startElevationEasing`). Ground that loads or changes there while the
+/// command runs turns the line about the altitude reached so far, so the
+/// camera heads for the new ground without a jump. While the ground there
+/// is unknown, the line heads for the altitude the command was given, or
+/// else stays level.
+pub(super) struct EasedAltitude {
+    from: f64,
+    target: f64,
+    /// Where the command's center ends, wrapped.
+    end: LatLng,
+    /// The share of the line covered at a frame's eased progress.
+    along: AlongFn,
+}
+
+impl EasedAltitude {
+    /// A line from `from` to the ground at `end`, or to `given` while that
+    /// is unknown.
+    pub(super) fn new(from: f64, given: f64, ground: Option<f64>, end: LatLng, along: AlongFn) -> Self {
+        EasedAltitude { from, target: ground.unwrap_or(given), end, along }
+    }
+
+    /// Where the command's center ends.
+    pub(super) fn end(&self) -> LatLng {
+        self.end
+    }
+
+    /// The altitude at the eased progress `k`, once the line heads for
+    /// `ground`, the ground at the end now, where it is known. The last
+    /// frame (`k` = 1) stands on that ground.
+    pub(super) fn at(&mut self, ground: Option<f64>, k: f64) -> f64 {
+        let k = (self.along)(k);
+        if let Some(ground) = ground.filter(|&ground| ground != self.target) {
+            if k < 1.0 {
+                let reached = interpolate(&self.from, &self.target, k);
+                let slope = (ground - reached) / (1.0 - k);
+                self.from = reached - k * slope;
+            }
+            self.target = ground;
+        }
+        if k < 1.0 { interpolate(&self.from, &self.target, k) } else { self.target }
+    }
 }
 
 impl Transform {
@@ -36,13 +86,20 @@ impl Transform {
         self.terrain = terrain;
     }
 
+    /// The ground at `location`, where the renderer drew it and it has
+    /// loaded.
+    pub(super) fn ground_at(&self, location: LatLng) -> Option<f64> {
+        self.terrain.as_ref()?.elevation.as_ref()?.at(location)
+    }
+
     /// Moves the camera onto the terrain's ground. While there is ground,
     /// the view's near and far planes fit the lowest ground of the tile
     /// under the center, and a camera at rest whose center is clamped
     /// stands on the ground there, unless it is still loading. A camera that
-    /// a gesture or an animation moves keeps its altitude. Once there is no
-    /// ground, the planes fit the flat map again, and a clamped center goes
-    /// back to sea level, once.
+    /// a gesture or a command moves keeps the altitude they give it: a
+    /// command that moves a clamped center eases it onto the ground it ends
+    /// on. Once there is no ground, the planes fit the flat map again, and a
+    /// clamped center goes back to sea level, once.
     ///
     /// It reads only the height and floor at the center
     /// ([`Elevation::at`] and [`Elevation::min_at`]), which are what the

@@ -19,7 +19,7 @@ use crate::{
     MapMode, MapOptions,
 };
 
-const STYLE: &str = r#"{
+pub(super) const STYLE: &str = r#"{
     "version": 8,
     "center": [10, 20],
     "zoom": 3,
@@ -127,11 +127,41 @@ impl Elevation for CenterOnly {
     }
 }
 
-fn flat(height: Option<f64>, min: f64) -> Arc<dyn Elevation> {
+/// Ground that rises `rise` meters for each unit of Web Mercator x at zoom
+/// 0 east of `x`, where it is `height` meters high, with a floor of
+/// `height` under every center.
+#[derive(Debug)]
+pub(super) struct Slope {
+    pub(super) x: f64,
+    pub(super) height: f64,
+    pub(super) rise: f64,
+}
+
+impl Slope {
+    fn height(&self, world: DVec2) -> f64 {
+        self.height + self.rise * (world.x.rem_euclid(1.0) - self.x)
+    }
+}
+
+impl Elevation for Slope {
+    fn at(&self, location: LatLng) -> Option<f64> {
+        Some(self.height(world(&location.wrapped())))
+    }
+
+    fn min_at(&self, _: LatLng) -> Option<f64> {
+        Some(self.height)
+    }
+
+    fn surface_at(&self, world: DVec2) -> Option<f64> {
+        Some(self.height(world))
+    }
+}
+
+pub(super) fn flat(height: Option<f64>, min: f64) -> Arc<dyn Elevation> {
     Arc::new(Flat { height, min })
 }
 
-fn ground_event(elevation: &Arc<dyn Elevation>) -> RendererEvent {
+pub(super) fn ground_event(elevation: &Arc<dyn Elevation>) -> RendererEvent {
     RendererEvent::TerrainElevation(Some(Arc::clone(elevation)))
 }
 
@@ -145,7 +175,7 @@ fn map(mode: MapMode, run_loop: &Queue<()>) -> Map {
 }
 
 /// A 512 by 512 map of `style` that may pitch up to 180 degrees.
-fn pitchable(style: &str, run_loop: &Queue<()>) -> Map {
+pub(super) fn pitchable(style: &str, run_loop: &Queue<()>) -> Map {
     let file_source = StubFileSource::on_queue(run_loop, ResponseType::Asynchronous);
     let options = MapOptions { size: mln_util::size::Size::new(512, 512), ..Default::default() };
     let mut map = Map::with_file_source(file_source, options, &crate::tests::pool()).expect("map");
@@ -156,23 +186,23 @@ fn pitchable(style: &str, run_loop: &Queue<()>) -> Map {
 }
 
 /// Where `location` is in Web Mercator at zoom 0.
-fn world(location: &LatLng) -> DVec2 {
+pub(super) fn world(location: &LatLng) -> DVec2 {
     let point = mln_util::projection::Projection::project(location, 1.0 / mln_util::constants::TILE_SIZE_D);
     DVec2::new(point.x, point.y)
 }
 
-fn assert_near(expected: f64, actual: f64, tolerance: f64, what: &str) {
+pub(super) fn assert_near(expected: f64, actual: f64, tolerance: f64, what: &str) {
     assert!((expected - actual).abs() <= tolerance, "{what}: {actual}, not {expected}");
 }
 
 /// Hands `event` to the map as its renderer would, and has the map handle it.
-fn report(map: &mut Map, event: RendererEvent) {
+pub(super) fn report(map: &mut Map, event: RendererEvent) {
     map.renderer_events().push(event);
     map.process_events();
 }
 
 /// The center's altitude and the floor of the view's planes.
-fn ground(map: &Map) -> (f64, Option<f64>) {
+pub(super) fn ground(map: &Map) -> (f64, Option<f64>) {
     let view = map.transform_state().view();
     (view.center_altitude(), view.terrain_min_elevation())
 }

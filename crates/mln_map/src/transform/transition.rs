@@ -13,6 +13,7 @@ use mln_util::logging::{Event, Log};
 use mln_util::time::Instant;
 
 use super::momentum::MomentumState;
+use super::terrain::EasedAltitude;
 use super::{
     ALTITUDE, BEARING, CENTER, CameraCommandId, CommandEnd, FOV, PADDING, PITCH, ROLL, Transform, TransformEvent, ZOOM,
     camera_fields, max_pitch_for_padding,
@@ -23,6 +24,10 @@ use crate::map_event::{CameraChange, CameraChangeMode, CameraChangeSource};
 /// center or padding the frame could not compute (logged), which keeps the
 /// current one.
 pub(super) type FrameFn = Box<dyn Fn(&TransformState, f64) -> CameraOptions>;
+
+/// A command's share of the way to its end center at an eased progress,
+/// which its altitude over terrain follows ([`EasedAltitude`]).
+pub(super) type AlongFn = Box<dyn Fn(f64) -> f64>;
 
 /// One camera command.
 pub(super) struct Transition {
@@ -56,6 +61,10 @@ pub(super) struct Transition {
     /// For a gesture's momentum, the gesture's serial: its end ends the
     /// gesture, unless another one started since.
     pub(super) gesture: Option<u64>,
+    /// For a command that moves the center over terrain that clamps it, the
+    /// altitude it eases onto the ground it ends on, while it owns
+    /// `ALTITUDE`.
+    eased_altitude: Option<EasedAltitude>,
 }
 
 impl Transition {
@@ -85,6 +94,7 @@ impl Transition {
             source,
             command: None,
             gesture: None,
+            eased_altitude: None,
         }
     }
 
@@ -215,11 +225,18 @@ impl Transform {
     /// couples center with its fields. Replacing any field of a coupled
     /// group stops the whole group, and a command left with no fields
     /// finishes.
+    ///
+    /// Outside a gesture, a command that moves the center, by a center or an
+    /// anchor, over terrain that clamps the center eases the altitude onto
+    /// the ground at the center it ends on, along `along`, in place of the
+    /// altitude it was given ([`EasedAltitude`]). It then owns `ALTITUDE`
+    /// too, until it gives up its center.
     pub(super) fn start_transition(
         &mut self,
         camera: &CameraOptions,
         animation: &AnimationOptions,
         frame: FrameFn,
+        along: AlongFn,
         duration: Duration,
         flight: bool,
     ) {
@@ -256,6 +273,23 @@ impl Transform {
             | (if scaling { ZOOM } else { 0 })
             | (if rotating { BEARING } else { 0 });
 
+        let clamped = !self.gesture_in_progress && self.terrain.as_ref().is_some_and(|terrain| terrain.clamped);
+        let end = if clamped {
+            match anchor {
+                Some(anchor) => Some(self.anchored_end(fields, &target, &anchor, &anchor_lat_lng)),
+                None => camera.center.and(target.center).map(|end| end.wrapped()),
+            }
+        } else {
+            None
+        };
+        let eased_altitude = end.map(|end| {
+            let from = self.state.view().center_altitude();
+            EasedAltitude::new(from, camera.center_altitude.unwrap_or(from), self.ground_at(end), end, along)
+        });
+        if eased_altitude.is_some() {
+            fields |= ALTITUDE;
+        }
+
         let start = self.now();
         let duration = if fields != 0 { duration } else { Duration::ZERO };
         let transition = Transition {
@@ -263,6 +297,7 @@ impl Transform {
             anchor,
             anchor_lat_lng,
             command: self.reporting(),
+            eased_altitude,
             ..Transition::new(fields, moving_fields, start, duration, animation, frame, self.source)
         };
         let mode = transition.mode();
@@ -292,9 +327,12 @@ impl Transform {
         let current = self.state.camera_options(None);
         let mut camera = current;
 
+        // The ground that clamps the center, if any: `Some(None)` before the
+        // renderer drew any.
+        let clamping = self.terrain.as_ref().filter(|terrain| terrain.clamped).map(|terrain| &terrain.elevation);
         let active = match only {
-            Some(index) => &self.transitions[index..=index],
-            None => &self.transitions[..],
+            Some(index) => &mut self.transitions[index..=index],
+            None => &mut self.transitions[..],
         };
         for transition in active {
             if transition.momentum.is_some() {
@@ -303,7 +341,18 @@ impl Transform {
             let t = transition.progress(now);
             let ease = transition.animation.easing.unwrap_or(DEFAULT_TRANSITION_EASE);
             let k = if t == 1.0 { 1.0 } else { ease.solve(t, 0.001) };
-            let value = (transition.frame)(&self.state, k);
+            let mut value = (transition.frame)(&self.state, k);
+            if let Some(eased) = transition.eased_altitude.as_mut() {
+                // Once the terrain stops clamping the center, the altitude
+                // stays where it is.
+                value.center_altitude = match clamping {
+                    Some(elevation) => {
+                        let ground = elevation.as_ref().and_then(|elevation| elevation.at(eased.end()));
+                        Some(eased.at(ground, k))
+                    }
+                    None => current.center_altitude,
+                };
+            }
             compose(&mut camera, &value, transition.fields);
         }
 
@@ -359,6 +408,32 @@ impl Transform {
         }
     }
 
+    /// Where an anchored command's center ends: its camera at the end,
+    /// `target`, for the fields it sets, put on a copy of the state, with
+    /// the anchor's location moved under it. The anchor holds its location
+    /// at the end's altitude, so where the ground at a first end is known,
+    /// the end is found again at that altitude.
+    fn anchored_end(
+        &self,
+        fields: u16,
+        target: &CameraOptions,
+        anchor: &ScreenCoordinate,
+        location: &LatLng,
+    ) -> LatLng {
+        let end_at = |altitude: f64| {
+            let mut state = self.state.clone();
+            let current = state.camera_options(None);
+            let mut camera = CameraOptions { center_altitude: Some(altitude), ..current };
+            compose(&mut camera, target, fields & !ALTITUDE);
+            place(&mut state, &current, &mut camera);
+            // The anchor had a location at the start, so it has one here.
+            let _ = state.move_lat_lng(location, anchor);
+            state.view().center(WrapMode::Wrapped)
+        };
+        let end = end_at(self.state.view().center_altitude());
+        self.ground_at(end).map_or(end, end_at)
+    }
+
     /// Records the fields the running commands move.
     pub(super) fn update_movement_flags(&mut self) {
         self.moving = self.transitions.iter().fold(0, |moving, t| moving | (t.fields & t.moving_fields));
@@ -411,6 +486,11 @@ impl Transform {
             let mut replaced = fields;
             if active.coupled_fields & replaced != 0 {
                 replaced |= active.coupled_fields;
+            }
+            // An altitude eased onto the ground at the end goes with the
+            // center that ends there.
+            if active.eased_altitude.is_some() && replaced & CENTER != 0 {
+                replaced |= ALTITUDE;
             }
             active.fields &= !replaced;
             if let Some(momentum) = &mut active.momentum {
