@@ -42,7 +42,7 @@ use crate::buckets::symbol_bucket::{
     Buffer, PaintProperties, PlacedSymbol, QuadCorner, SortKeyRange, SymbolBucket, SymbolBucketState, SymbolBucketStyle,
     SymbolLayoutFlags, SymbolSizeBinder,
 };
-use crate::geometry::anchor::{Anchor, Anchors};
+use crate::geometry::anchor::Anchor;
 use crate::geometry::feature_index::{FeatureIndex, IndexedSubfeature};
 use crate::gfx::mesh::Indexed;
 use crate::layer_type::EvaluatedLayer;
@@ -55,9 +55,9 @@ use crate::layout::symbol_instance::{
     SymbolQuadSet, TextPart, TextRuns,
 };
 use crate::layout::tile_layout::Resolved;
-use crate::text::collision_feature::{CollisionBox, CollisionFeature};
+use crate::text::collision_feature::{AlongLine, BoxLayout, CollisionBox, CollisionFeature};
 use crate::text::collision_index::OverlapMode;
-use crate::text::get_anchors::{get_anchors, get_center_anchor};
+use crate::text::get_anchors::{LineLabel, get_anchors, get_center_anchor};
 use crate::text::glyph_store::ShapeResults;
 use crate::text::quads::{SymbolQuad, SymbolQuads, glyph_quads, icon_quads};
 use crate::util::pool::PoolRange;
@@ -377,31 +377,15 @@ impl FeatureSymbols<'_> {
         // Vertical text turns its boxes a quarter.
         const VERTICAL_ROTATION: f32 = 90.0;
         let line = &quads.line;
-        let text_feature = |shaping: &Shaping, rotation: f32, boxes: &mut Vec<CollisionBox>| {
-            CollisionFeature::new_text(
-                line,
-                &anchor,
-                shaping,
-                self.text_box_scale,
-                self.text_padding,
-                self.text_placement,
-                &self.indexed_feature,
-                self.overscaling,
-                rotation,
-                boxes,
-            )
+        let along_line =
+            (self.text_placement != SymbolPlacementType::Point).then_some(AlongLine { line, overscaling: self.overscaling });
+        let text_feature = |shaping: &Shaping, rotate: f32, boxes: &mut Vec<CollisionBox>| {
+            let layout = BoxLayout { scale: self.text_box_scale, padding: Padding::uniform(self.text_padding), rotate };
+            CollisionFeature::new_text(&anchor, shaping, along_line, &layout, &self.indexed_feature, boxes)
         };
-        let icon_feature = |icon: &PositionedIcon, rotation: f32, boxes: &mut Vec<CollisionBox>| {
-            CollisionFeature::new_icon(
-                line,
-                &anchor,
-                Some(icon),
-                self.icon_box_scale,
-                &self.icon_padding,
-                &self.indexed_feature,
-                rotation,
-                boxes,
-            )
+        let icon_feature = |icon: &PositionedIcon, rotate: f32, boxes: &mut Vec<CollisionBox>| {
+            let layout = BoxLayout { scale: self.icon_box_scale, padding: self.icon_padding, rotate };
+            CollisionFeature::new_icon(&anchor, Some(icon), &layout, &self.indexed_feature, boxes)
         };
         let text = &self.shaped.text;
         let vertical = self.allow_vertical_placement && text.vertical.is_some();
@@ -998,24 +982,17 @@ impl SymbolLayout {
 
         let text_shaping =
             if shaped.text.vertical.is_some() { Some(&shaped.text.vertical) } else { shaped.text.any_horizontal() };
-        let (text_left, text_right) = text_shaping.map_or((0.0, 0.0), |text| (text.left, text.right));
-        let (icon_left, icon_right) = shaped.icon.as_ref().map_or((0.0, 0.0), |icon| (icon.left(), icon.right()));
+        let line_label = LineLabel {
+            text_width: text_shaping.map_or(0.0, |text| text.right - text.left),
+            icon_width: shaped.icon.as_ref().map_or(0.0, |icon| icon.right() - icon.left()),
+            glyph_size: GLYPH_SIZE,
+            box_scale: text_max_box_scale,
+        };
 
         match placement {
             SymbolPlacementType::Line => {
                 for line in clip_lines(&feature.geometry, 0, 0, EXTENT as i16, EXTENT as i16).iter() {
-                    let anchors: Anchors = get_anchors(
-                        line,
-                        symbol_spacing,
-                        text_max_angle,
-                        text_left,
-                        text_right,
-                        icon_left,
-                        icon_right,
-                        GLYPH_SIZE,
-                        text_max_box_scale,
-                        self.overscaling,
-                    );
+                    let anchors = get_anchors(line, &line_label, symbol_spacing, text_max_angle, self.overscaling);
                     let quads = symbols.quads(line.clone());
                     for anchor in anchors {
                         let too_close = feature.formatted_text.is_some()
@@ -1030,16 +1007,7 @@ impl SymbolLayout {
                 // Each line takes a label at its center, unclipped; a line of
                 // one point takes none.
                 for line in feature.geometry.iter().filter(|line| line.len() > 1) {
-                    let anchor = get_center_anchor(
-                        line,
-                        text_max_angle,
-                        text_left,
-                        text_right,
-                        icon_left,
-                        icon_right,
-                        GLYPH_SIZE,
-                        text_max_box_scale,
-                    );
+                    let anchor = get_center_anchor(line, &line_label, text_max_angle);
                     if let Some(anchor) = anchor {
                         self.add_symbol_instance(&symbols, feature, anchor, &symbols.quads(line.clone()));
                     }
