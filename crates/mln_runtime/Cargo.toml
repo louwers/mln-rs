@@ -104,15 +104,14 @@ mln_d3d12 = { workspace = true, optional = true }
 
 [dev-dependencies]
 glam.workspace = true
-# The built-in registrations of the tests' runtimes, with the layer types'
-# shaders of each backend, which the facade's backend features select.
+# The built-in registrations of the tests' runtimes.
 mln_rs = { package = "mln-rs", path = "../..", default-features = false, features = [
-  "webgpu",
-  "metal",
-  "vulkan",
-  "d3d12",
-  "gl",
+  "runtime",
 ] }
+# The custom layer's host API, and the layer types' shaders in every language,
+# so the tests' renderers draw them on whichever backends this crate's features
+# select.
+mln_layers = { workspace = true, features = ["wgsl", "msl", "glsl-es", "glsl"] }
 # Serves the styles of the resource tests.
 httpmock.workspace = true
 pollster.workspace = true
