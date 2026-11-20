@@ -18,7 +18,7 @@ use mln_gfx::shaders::source::{ShaderSources, glsl_es};
 use mln_util::hash::HashSet;
 
 use crate::shaders::glsl_sources::PRELUDE;
-use crate::shaders::shader_source::{BUILT_INS, LAYER_SOURCES};
+use crate::shaders::shader_source::BUILT_INS;
 use crate::{Api, Device, DeviceOptions, RendererBackend};
 
 /// A backend on a device of `api` that compiles the built-in layer types'
@@ -35,7 +35,7 @@ fn headless_backend(api: Api) -> Option<RendererBackend> {
     match Device::with_options(options).and_then(|device| RendererBackend::new(&device)) {
         Ok(mut backend) => {
             let mut sources = ShaderSources::default();
-            sources.add(LAYER_SOURCES);
+            mln_layers::add_shader_sources(&mut sources);
             backend.gpu().add_shader_sources(&sources);
             Some(backend)
         }
@@ -50,8 +50,10 @@ fn headless_backend(api: Api) -> Option<RendererBackend> {
 }
 
 /// Each program with GLSL: the engine's and the built-in layer types'.
-fn programs() -> impl Iterator<Item = (&'static Program, &'static glsl_es::Source)> {
-    BUILT_INS.iter().chain(LAYER_SOURCES).copied()
+fn programs() -> Vec<(&'static Program, &'static glsl_es::Source)> {
+    let mut layers = ShaderSources::default();
+    mln_layers::add_shader_sources(&mut layers);
+    BUILT_INS.iter().copied().chain(layers.of::<glsl_es::Source>().iter()).collect()
 }
 
 /// The names after `HAS_UNIFORM_u_` in a shader's GLSL.
@@ -217,5 +219,5 @@ fn every_program_links_and_matches_its_tables(backend: &mut RendererBackend) {
             }
         }
     }
-    assert!(compiled >= 2 * programs().count());
+    assert!(compiled >= 2 * programs().len());
 }

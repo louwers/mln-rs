@@ -1,20 +1,20 @@
-use mln_gfx::gpu::conformance::{
+use mln_gfx::gpu::{Gpu, TextureDesc, TextureFormat, TextureRegion, TextureUsage};
+use mln_gfx::shaders::source::ShaderSources;
+use mln_layers::conformance::{
     clip_mask_and_background, custom_layers, depth_only, foreign_ids, imported_textures, instanced_walls,
     invalid_calls, pulled_walls, readbacks, resources_in_use, topologies, transparent_replace, vertex_layouts,
     wall_quads,
 };
-use mln_gfx::gpu::{Gpu, TextureDesc, TextureFormat, TextureRegion, TextureUsage};
-use mln_gfx::shaders::source::ShaderSources;
 use mln_util::size::Size;
 
-use crate::{CustomLayerEncoder, CustomLayerPass, Device, LAYER_SOURCES, WebGpu};
+use crate::{CustomLayerEncoder, CustomLayerPass, Device, WebGpu};
 
 /// A `WebGpu` on `device` that also compiles the built-in layer types'
 /// programs, which the conformance cases draw with.
 fn gpu(device: &Device) -> WebGpu {
     let mut gpu = WebGpu::new(device);
     let mut sources = ShaderSources::default();
-    sources.add(LAYER_SOURCES);
+    mln_layers::add_shader_sources(&mut sources);
     gpu.add_shader_sources(&sources);
     gpu
 }

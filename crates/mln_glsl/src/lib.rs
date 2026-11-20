@@ -30,7 +30,7 @@ mod sources;
 pub mod variants;
 
 pub use front_end::{Module, ResourceUse, Stage};
-pub use program::{BUILT_INS, LAYER_SOURCES, compose};
+pub use program::{BUILT_INS, compose};
 
 #[cfg(test)]
 mod tests;

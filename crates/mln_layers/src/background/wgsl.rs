@@ -1,0 +1,243 @@
+//! The programs of the `background` layer type in WGSL, for `mln_webgpu`.
+
+use mln_gfx::shaders::program::Program;
+use mln_gfx::shaders::shader_defines::{ID_BACKGROUND_IMAGE_TEXTURE, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE};
+use mln_gfx::shaders::source::wgsl::{Attribute, Source, Texture, Wgsl};
+
+use super::programs;
+use crate::shaders::wgsl::tex;
+
+const BACKGROUND_ATTRIBUTES: &[Attribute] = &[Attribute { index: 3, id: ID_BACKGROUND_POS_VERTEX_ATTRIBUTE }];
+const BACKGROUND_PATTERN_TEXTURES: &[Texture] = &[tex(0, ID_BACKGROUND_IMAGE_TEXTURE)];
+
+static BACKGROUND: Source =
+    Source { wgsl: &BACKGROUND_SHADER, attributes: BACKGROUND_ATTRIBUTES, instance_attributes: &[], textures: &[] };
+
+static BACKGROUND_PATTERN: Source = Source {
+    wgsl: &BACKGROUND_PATTERN_SHADER,
+    attributes: BACKGROUND_ATTRIBUTES,
+    instance_attributes: &[],
+    textures: BACKGROUND_PATTERN_TEXTURES,
+};
+
+/// The source of each of the type's programs.
+pub(super) static SOURCES: &[(&Program, &Source)] =
+    &[(&programs::BACKGROUND, &BACKGROUND), (&programs::BACKGROUND_PATTERN, &BACKGROUND_PATTERN)];
+
+const BACKGROUND_PATTERN_SHADER: Wgsl = Wgsl {
+    vertex: Some(
+        r"
+struct VertexInput {
+    @location(3) position: vec2<i32>,
+};
+
+struct VertexOutput {
+    @builtin(position) position: vec4<f32>,
+    @location(0) pos_a: vec2<f32>,
+    @location(1) pos_b: vec2<f32>,
+};
+
+struct BackgroundPatternDrawableUnionUBO {
+    matrix_col0: vec4<f32>,
+    matrix_col1: vec4<f32>,
+    matrix_col2: vec4<f32>,
+    matrix_col3: vec4<f32>,
+    pixel_coord_upper: vec2<f32>,
+    pixel_coord_lower: vec2<f32>,
+    tile_units_to_pixels: f32,
+    pad1: f32,
+    pad2: f32,
+    pad3: f32,
+};
+
+struct BackgroundPatternPropsUBO {
+    pattern_tl_a: vec2<f32>,
+    pattern_br_a: vec2<f32>,
+    pattern_tl_b: vec2<f32>,
+    pattern_br_b: vec2<f32>,
+    pattern_size_a: vec2<f32>,
+    pattern_size_b: vec2<f32>,
+    scale_a: f32,
+    scale_b: f32,
+    mix: f32,
+    opacity: f32,
+};
+
+struct GlobalIndexUBO {
+    value: u32,
+    pad0: vec3<u32>,
+};
+
+@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
+@group(0) @binding(2) var<storage, read> drawableVector: array<BackgroundPatternDrawableUnionUBO>;
+@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
+@group(0) @binding(5) var<uniform> props: BackgroundPatternPropsUBO;
+
+@vertex
+fn main(in: VertexInput) -> VertexOutput {
+    var out: VertexOutput;
+
+    let drawable = drawableVector[globalIndex.value];
+
+    let pos = vec2<f32>(f32(in.position.x), f32(in.position.y));
+
+    // Use get_pattern_pos helper function for pattern positioning
+    out.pos_a = get_pattern_pos(
+        drawable.pixel_coord_upper,
+        drawable.pixel_coord_lower,
+        props.scale_a * props.pattern_size_a,
+        drawable.tile_units_to_pixels,
+        pos
+    );
+
+    out.pos_b = get_pattern_pos(
+        drawable.pixel_coord_upper,
+        drawable.pixel_coord_lower,
+        props.scale_b * props.pattern_size_b,
+        drawable.tile_units_to_pixels,
+        pos
+    );
+
+    let clip = projectTileWithPoles(pos, pos, projectionVector[globalIndex.value]);
+    out.position = clip;
+    return out;
+}
+",
+    ),
+    fragment: Some(
+        r"
+struct FragmentInput {
+    @location(0) pos_a: vec2<f32>,
+    @location(1) pos_b: vec2<f32>,
+};
+
+struct BackgroundPatternPropsUBO {
+    pattern_tl_a: vec2<f32>,
+    pattern_br_a: vec2<f32>,
+    pattern_tl_b: vec2<f32>,
+    pattern_br_b: vec2<f32>,
+    pattern_size_a: vec2<f32>,
+    pattern_size_b: vec2<f32>,
+    scale_a: f32,
+    scale_b: f32,
+    mix: f32,
+    opacity: f32,
+};
+
+struct GlobalPaintParamsUBO {
+    pattern_atlas_texsize: vec2<f32>,
+    // other fields...
+};
+
+@group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
+@group(0) @binding(5) var<uniform> props: BackgroundPatternPropsUBO;
+@group(1) @binding(0) var texture_sampler: sampler;
+@group(1) @binding(1) var pattern_texture: texture_2d<f32>;
+
+@fragment
+fn main(in: FragmentInput) -> @location(0) vec4<f32> {
+#ifdef OVERDRAW_INSPECTOR
+    return vec4<f32>(1.0, 1.0, 1.0, 1.0);
+#endif
+
+    let texsize = paintParams.pattern_atlas_texsize;
+
+    // A crossfade at 0 or 1 shows one pattern, so skip the other.
+    var color_a = vec4<f32>(0.0);
+    if (props.mix < 1.0) {
+        let imagecoord_a = gl_mod(in.pos_a, vec2<f32>(1.0));
+        let pos_a = atlas_pos(props.pattern_tl_a / texsize, (props.pattern_br_a - props.pattern_tl_a) / texsize * imagecoord_a);
+        color_a = textureSample(pattern_texture, texture_sampler, pos_a);
+    }
+    var color_b = vec4<f32>(0.0);
+    if (props.mix > 0.0) {
+        let imagecoord_b = gl_mod(in.pos_b, vec2<f32>(1.0));
+        let pos_b = atlas_pos(props.pattern_tl_b / texsize, (props.pattern_br_b - props.pattern_tl_b) / texsize * imagecoord_b);
+        color_b = textureSample(pattern_texture, texture_sampler, pos_b);
+    }
+
+    // Mix patterns and apply opacity
+    return mix(color_a, color_b, props.mix) * props.opacity;
+}
+",
+    ),
+    prelude: None,
+};
+
+const BACKGROUND_SHADER: Wgsl = Wgsl {
+    vertex: Some(
+        r"
+struct VertexInput {
+    @location(3) position: vec2<i32>,
+};
+
+struct VertexOutput {
+    @builtin(position) position: vec4<f32>,
+};
+
+struct BackgroundDrawableUBO {
+    matrix: mat4x4<f32>,
+};
+
+struct BackgroundDrawableUnionUBO {
+    matrix_col0: vec4<f32>,
+    matrix_col1: vec4<f32>,
+    matrix_col2: vec4<f32>,
+    matrix_col3: vec4<f32>,
+    extra0: vec4<f32>,
+    extra1: vec4<f32>,
+};
+
+struct BackgroundPropsUBO {
+    color: vec4<f32>,
+    opacity: f32,
+    pad1: f32,
+    pad2: f32,
+    pad3: f32,
+};
+
+struct GlobalIndexUBO {
+    value: u32,
+    pad0: vec3<u32>,
+};
+
+@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
+@group(0) @binding(2) var<storage, read> drawableVector: array<BackgroundDrawableUnionUBO>;
+@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
+@group(0) @binding(5) var<uniform> props: BackgroundPropsUBO;
+
+@vertex
+fn main(in: VertexInput) -> VertexOutput {
+    var out: VertexOutput;
+    let drawable = drawableVector[globalIndex.value];
+    let pos = vec2<f32>(f32(in.position.x), f32(in.position.y));
+    let clip = projectTileWithPoles(pos, pos, projectionVector[globalIndex.value]);
+    out.position = clip;
+    return out;
+}
+",
+    ),
+    fragment: Some(
+        r"
+struct BackgroundPropsUBO {
+    color: vec4<f32>,
+    opacity: f32,
+    pad1: f32,
+    pad2: f32,
+    pad3: f32,
+};
+
+@group(0) @binding(5) var<uniform> props: BackgroundPropsUBO;
+
+@fragment
+fn main() -> @location(0) vec4<f32> {
+#ifdef OVERDRAW_INSPECTOR
+    return vec4<f32>(1.0, 1.0, 1.0, 1.0);
+#endif
+
+    return props.color * props.opacity;
+}
+",
+    ),
+    prelude: None,
+};

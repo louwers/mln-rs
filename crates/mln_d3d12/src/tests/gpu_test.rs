@@ -1,16 +1,24 @@
-use mln_gfx::gpu::conformance::{
+use mln_gfx::gpu::{Gpu as _, GpuError};
+use mln_gfx::projection_variant::ProjectionVariant;
+use mln_gfx::shaders::program::Program;
+use mln_gfx::shaders::program_parameters::ProgramParameters;
+use mln_gfx::shaders::source::{ShaderSources, glsl};
+use mln_glsl::BUILT_INS;
+use mln_layers::conformance::{
     clip_mask_and_background, custom_layers, depth_only, foreign_ids, imported_textures, instanced_walls,
     invalid_calls, pulled_walls, readbacks, resources_in_use, topologies, transparent_replace, vertex_layouts,
     wall_quads,
 };
-use mln_gfx::gpu::{Gpu as _, GpuError};
-use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::program_parameters::ProgramParameters;
-use mln_gfx::shaders::source::ShaderSources;
-use mln_glsl::{BUILT_INS, LAYER_SOURCES};
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_UNKNOWN};
 
 use crate::{D3d12Gpu, Device};
+
+/// Each program with GLSL: the engine's and the built-in layer types'.
+fn programs() -> Vec<(&'static Program, &'static glsl::Source)> {
+    let mut layers = ShaderSources::default();
+    mln_layers::add_shader_sources(&mut layers);
+    BUILT_INS.iter().copied().chain(layers.of::<glsl::Source>().iter()).collect()
+}
 
 /// A `D3d12Gpu` that also compiles the built-in layer types' programs,
 /// which the conformance cases draw with.
@@ -21,7 +29,7 @@ fn gpu() -> D3d12Gpu {
 
 fn with_layer_sources(mut gpu: D3d12Gpu) -> D3d12Gpu {
     let mut sources = ShaderSources::default();
-    sources.add(LAYER_SOURCES);
+    mln_layers::add_shader_sources(&mut sources);
     gpu.add_shader_sources(&sources);
     gpu
 }
@@ -120,7 +128,7 @@ fn imported_textures_through_gpu() {
 fn every_program_compiles_for_gpu() {
     let mut gpu = gpu();
     let parameters = ProgramParameters::new(1.0, false);
-    for &(program, _) in BUILT_INS.iter().chain(LAYER_SOURCES) {
+    for (program, _) in programs() {
         for variant in [ProjectionVariant::Mercator, ProjectionVariant::Globe] {
             for uniforms in [&[][..], program.properties] {
                 let key = program.variant_key(&parameters, uniforms, variant);

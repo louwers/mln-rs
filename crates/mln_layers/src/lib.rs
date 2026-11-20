@@ -10,11 +10,18 @@
 //! type's module holds the API of the hosts that draw its layers. Symbol,
 //! the one built-in layer type in the engine, registers through
 //! `mln_renderer::builtins::register_layer_types`.
+//!
+//! A type that draws also has its programs, the uniform blocks its shaders
+//! read, and its programs' sources in each shading language of the crate's
+//! features: `wgsl`, `msl`, `glsl-es` and `glsl`, which the facade's backend
+//! features turn on.
 
 pub mod background;
 pub mod circle;
 mod color_ramp;
 pub mod color_relief;
+#[cfg(feature = "gpu-conformance")]
+pub mod conformance;
 pub mod custom;
 pub mod fill;
 pub mod fill_extrusion;
@@ -23,6 +30,7 @@ pub mod hillshade;
 pub mod line;
 mod pattern_layout;
 pub mod raster;
+mod shaders;
 
 pub use background::{Background, BackgroundPaintProperties};
 pub use circle::{Circle, CircleLayoutProperties, CirclePaintProperties};
@@ -33,13 +41,15 @@ pub use fill_extrusion::{FillExtrusion, FillExtrusionLayoutProperties, FillExtru
 pub use heatmap::{Heatmap, HeatmapPaintProperties};
 pub use hillshade::{Hillshade, HillshadePaintProperties};
 pub use line::{Line, LineLayoutProperties, LinePaintProperties};
+use mln_gfx::shaders::source::ShaderSources;
 use mln_renderer::unstable::{BucketChanges, DrawObjects, VertexAttributeArray};
 use mln_renderer::{RegisterError, RegistryBuilder};
 pub use raster::{Raster, RasterPaintProperties};
 
-/// Adds the layer types of this crate. Fails for a name that an earlier
-/// call took.
+/// Adds the layer types of this crate, with their programs' sources. Fails
+/// for a name that an earlier call took.
 pub fn register_layer_types(builder: &mut RegistryBuilder) -> Result<(), RegisterError> {
+    add_shader_sources(builder.shader_sources_mut());
     builder.add_layer_type::<Background>()?;
     builder.add_layer_type::<Fill>()?;
     builder.add_layer_type::<Line>()?;
@@ -50,6 +60,21 @@ pub fn register_layer_types(builder: &mut RegistryBuilder) -> Result<(), Registe
     builder.add_layer_type::<Hillshade>()?;
     builder.add_layer_type::<ColorRelief>()?;
     builder.add_layer_type::<Custom>()
+}
+
+/// Adds the sources of this crate's programs in the shading languages of
+/// its features, which a `Gpu` that draws them without a registry takes too
+/// ([`Gpu::add_shader_sources`](mln_gfx::gpu::Gpu::add_shader_sources)).
+pub fn add_shader_sources(sources: &mut ShaderSources) {
+    background::add_shader_sources(sources);
+    circle::add_shader_sources(sources);
+    color_relief::add_shader_sources(sources);
+    fill::add_shader_sources(sources);
+    fill_extrusion::add_shader_sources(sources);
+    heatmap::add_shader_sources(sources);
+    hillshade::add_shader_sources(sources);
+    line::add_shader_sources(sources);
+    raster::add_shader_sources(sources);
 }
 
 /// Copies a bucket's data-driven attributes into a draw again where

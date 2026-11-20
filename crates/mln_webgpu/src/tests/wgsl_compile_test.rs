@@ -8,16 +8,18 @@ use std::collections::BTreeSet;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
-use mln_gfx::shaders::source::wgsl;
+use mln_gfx::shaders::source::{ShaderSources, wgsl};
 
 use crate::Device;
 use crate::index_table::IndexTable;
 use crate::shaders::shader_program::compile;
-use crate::shaders::shader_source::{BUILT_INS, LAYER_SOURCES, prelude};
+use crate::shaders::shader_source::{BUILT_INS, prelude};
 
 /// Each program with WGSL: the engine's and the built-in layer types'.
-fn programs() -> impl Iterator<Item = (&'static Program, &'static wgsl::Source)> {
-    BUILT_INS.iter().chain(LAYER_SOURCES).copied()
+fn programs() -> Vec<(&'static Program, &'static wgsl::Source)> {
+    let mut layers = ShaderSources::default();
+    mln_layers::add_shader_sources(&mut layers);
+    BUILT_INS.iter().copied().chain(layers.of::<wgsl::Source>().iter()).collect()
 }
 
 /// The names after the `HAS_UNIFORM_u_` that `source`'s WGSL tests.

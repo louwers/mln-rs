@@ -17,8 +17,6 @@
 //! `ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE`). Each backend maps them to its own
 //! slots, groups, descriptor sets or shader locations.
 
-#[cfg(feature = "gpu-conformance")]
-pub mod conformance;
 mod ids;
 pub mod validation;
 
@@ -705,10 +703,10 @@ mod tests {
 
     #[test]
     fn shader_keys_ignore_define_order_and_repeats() {
-        let key = |defines: &[&str]| ShaderKey::new(&programs::FILL, defines.iter().map(|&d| d.to_owned()));
+        let key = |defines: &[&str]| ShaderKey::new(&programs::SKY, defines.iter().map(|&d| d.to_owned()));
         assert_eq!(key(&["B", "A", "B"]), key(&["A", "B"]));
         assert_eq!(key(&["B", "A"]).defines(), ["A", "B"]);
-        assert_ne!(key(&["A"]), ShaderKey::new(&programs::LINE, ["A".to_owned()]));
+        assert_ne!(key(&["A"]), ShaderKey::new(&programs::ATMOSPHERE, ["A".to_owned()]));
         assert_eq!(key(&["B=2.0", "A"]).define_values().collect::<Vec<_>>(), [("A", ""), ("B", "2.0")]);
     }
 

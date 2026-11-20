@@ -3,13 +3,8 @@ use std::sync::Arc;
 
 use mln_gfx::gpu::{Gpu, ShaderKey};
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::fill_layer_ubo::{
-    FillDrawableUBO, FillDrawableUnionUBO, FillEvaluatedPropsUBO, FillOutlineDrawableUBO, FillPatternDrawableUBO,
-    FillPatternTilePropsUBO, FillTilePropsUnionUBO,
-};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
     ID_FILL_DRAWABLE_UBO, ID_FILL_EVALUATED_PROPS_UBO, ID_FILL_IMAGE_TEXTURE, ID_FILL_OPACITY_VERTEX_ATTRIBUTE,
@@ -36,9 +31,13 @@ use mln_util::error::Error;
 use mln_util::identity::SimpleIdentity;
 use mln_util::size::Size;
 
-use super::Fill;
 use super::bucket::{FillBinders, FillBucket, FillLayoutVertex};
 use super::properties::FillPaintProperties;
+use super::{Fill, programs};
+use crate::fill::ubo::{
+    FillDrawableUBO, FillDrawableUnionUBO, FillEvaluatedPropsUBO, FillOutlineDrawableUBO, FillPatternDrawableUBO,
+    FillPatternTilePropsUBO, FillTilePropsUnionUBO,
+};
 use crate::pattern_layout::{FillLayoutSpec, PatternLayout, uses_pattern};
 use crate::refresh_paint_attributes;
 

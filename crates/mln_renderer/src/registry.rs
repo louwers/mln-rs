@@ -8,8 +8,7 @@
 
 use std::sync::Arc;
 
-use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::source::{ShaderSource, ShaderSources};
+use mln_gfx::shaders::source::ShaderSources;
 use mln_style::StyleRegistry;
 use mln_style::expression::Functions;
 use mln_style::expression::functions::RegisterError;
@@ -70,13 +69,12 @@ impl RegistryBuilder {
         Ok(())
     }
 
-    /// Adds the source of each program of `table` in the shading language
-    /// of `S`, in place of any it had in that language: a layer type adds
-    /// those of the programs it draws with, in each language it has them in.
-    /// A renderer's backend compiles the programs from the sources in its
-    /// language.
-    pub fn add_shader_sources<S: ShaderSource>(&mut self, table: &[(&'static Program, &'static S)]) {
-        self.shader_sources.add(table);
+    /// The sources of the programs that the registry's layer types draw
+    /// with, in each shading language they have them in, which a layer type
+    /// adds to ([`ShaderSources::add`]). A renderer's backend compiles the
+    /// programs from the sources in its language.
+    pub fn shader_sources_mut(&mut self) -> &mut ShaderSources {
+        &mut self.shader_sources
     }
 
     /// Adds the source type `T`. Fails for a name that an earlier type took.

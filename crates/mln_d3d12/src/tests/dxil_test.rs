@@ -1,7 +1,16 @@
+use mln_gfx::shaders::program::Program;
+use mln_gfx::shaders::source::{ShaderSources, glsl};
+use mln_glsl::BUILT_INS;
 use mln_glsl::variants::variants;
-use mln_glsl::{BUILT_INS, LAYER_SOURCES};
 
 use crate::ShaderCompiler;
+
+/// Each program with GLSL: the engine's and the built-in layer types'.
+fn programs() -> Vec<(&'static Program, &'static glsl::Source)> {
+    let mut layers = ShaderSources::default();
+    mln_layers::add_shader_sources(&mut layers);
+    BUILT_INS.iter().copied().chain(layers.of::<glsl::Source>().iter()).collect()
+}
 
 /// The first bytes of a DXIL container.
 const DXIL_MAGIC: &[u8] = b"DXBC";
@@ -18,7 +27,7 @@ fn every_program_compiles_to_dxil() {
     let compiler = compiler();
     let mut failures = Vec::new();
     let mut compiled = 0;
-    for &(program, source) in BUILT_INS.iter().chain(LAYER_SOURCES) {
+    for (program, source) in programs() {
         for variant in variants(program, true) {
             let at = format!("{} ({})", program.name, variant.name);
             match compiler.compile_source(program, source, &variant.defines) {
@@ -40,7 +49,7 @@ fn every_program_compiles_to_dxil() {
 #[test]
 fn only_the_pulled_programs_read_the_vertex_index() {
     let compiler = compiler();
-    for &(program, source) in BUILT_INS.iter().chain(LAYER_SOURCES) {
+    for (program, source) in programs() {
         for variant in variants(program, false) {
             let compiled = compiler.compile_source(program, source, &variant.defines).expect("the program");
             let pulled = program.name.contains("Pulled");

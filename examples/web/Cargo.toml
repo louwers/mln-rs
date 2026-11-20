@@ -33,9 +33,10 @@ webgl = ["mln_rs/gl", "dep:mln_gl"]
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys.workspace = true
 mln_gestures.workspace = true
+mln_gfx.workspace = true
 # gpu-conformance: the host writes case, which check/check.mjs runs on a
 # backend of the map's kind (src/gpu_check.rs).
-mln_gfx = { workspace = true, features = ["gpu-conformance"] }
+mln_layers = { workspace = true, features = ["gpu-conformance"] }
 mln_gl = { workspace = true, optional = true }
 mln_map.workspace = true
 # The built-in registrations, and the backend of the module's kind.

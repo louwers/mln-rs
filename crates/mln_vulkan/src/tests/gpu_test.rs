@@ -2,30 +2,38 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use ash::vk;
-use mln_gfx::gpu::conformance::{
-    clip_mask_and_background, custom_layers, depth_only, foreign_ids, imported_textures, instanced_walls,
-    invalid_calls, pulled_walls, readbacks, resources_in_use, topologies, transparent_replace, vertex_layouts,
-    wall_quads,
-};
 use mln_gfx::gpu::{
     ColorAttachment, Gpu as _, GpuError, LoadOp, PassDesc, TextureDesc, TextureFormat, TextureRegion, TextureUsage,
     read_texels,
 };
 use mln_gfx::projection_variant::ProjectionVariant;
+use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
-use mln_gfx::shaders::source::ShaderSources;
-use mln_glsl::{BUILT_INS, LAYER_SOURCES};
+use mln_gfx::shaders::source::{ShaderSources, glsl};
+use mln_glsl::BUILT_INS;
+use mln_layers::conformance::{
+    clip_mask_and_background, custom_layers, depth_only, foreign_ids, imported_textures, instanced_walls,
+    invalid_calls, pulled_walls, readbacks, resources_in_use, topologies, transparent_replace, vertex_layouts,
+    wall_quads,
+};
 use mln_util::Color;
 use mln_util::size::Size;
 
 use crate::{Device, ImportedImage, VulkanGpu};
+
+/// Each program with GLSL: the engine's and the built-in layer types'.
+fn programs() -> Vec<(&'static Program, &'static glsl::Source)> {
+    let mut layers = ShaderSources::default();
+    mln_layers::add_shader_sources(&mut layers);
+    BUILT_INS.iter().copied().chain(layers.of::<glsl::Source>().iter()).collect()
+}
 
 /// A `VulkanGpu` on `device` that also compiles the built-in layer types'
 /// programs, which the conformance cases draw with.
 fn gpu(device: &Device) -> VulkanGpu {
     let mut gpu = VulkanGpu::new(device).expect("VulkanGpu");
     let mut sources = ShaderSources::default();
-    sources.add(LAYER_SOURCES);
+    mln_layers::add_shader_sources(&mut sources);
     gpu.add_shader_sources(&sources);
     gpu
 }
@@ -135,7 +143,7 @@ fn every_program_compiles_for_gpu() {
     let device = Device::new(None).expect("Vulkan device");
     let mut gpu = gpu(&device);
     let parameters = ProgramParameters::new(1.0, false);
-    for &(program, _) in BUILT_INS.iter().chain(LAYER_SOURCES) {
+    for (program, _) in programs() {
         for variant in [ProjectionVariant::Mercator, ProjectionVariant::Globe] {
             for uniforms in [&[][..], program.properties] {
                 let key = program.variant_key(&parameters, uniforms, variant);

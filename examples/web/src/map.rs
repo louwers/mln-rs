@@ -558,7 +558,7 @@ impl WebMap {
         self.force = true;
     }
 
-    /// Starts `mln_gfx`'s conformance case of writes from JS arrays on a
+    /// Starts `mln_layers`' conformance case of writes from JS arrays on a
     /// `Gpu` of the map's backend made for the check, whose frame
     /// `take_gpu_check` checks. Only check/check.mjs asks for it.
     pub fn start_gpu_check(&self) {

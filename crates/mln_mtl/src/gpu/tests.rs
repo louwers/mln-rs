@@ -1,12 +1,11 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use mln_gfx::gpu::conformance::{
+use mln_gfx::gpu::{BufferUsage, ColorAttachment};
+use mln_layers::conformance::{
     clip_mask_and_background, custom_layers, depth_only, foreign_ids, imported_textures, instanced_walls,
     invalid_calls, pulled_walls, readbacks, resources_in_use, topologies, transparent_replace, vertex_layouts,
 };
-use mln_gfx::gpu::{BufferUsage, ColorAttachment};
-use mln_gfx::shaders::programs;
 use mln_util::Color;
 use objc2::runtime::NSObjectProtocol as _;
 use objc2::{msg_send, sel};
@@ -19,7 +18,7 @@ use super::*;
 fn gpu(device: &Device) -> MetalGpu {
     let mut gpu = MetalGpu::new(device);
     let mut sources = ShaderSources::default();
-    sources.add(crate::LAYER_SOURCES);
+    mln_layers::add_shader_sources(&mut sources);
     gpu.add_shader_sources(&sources);
     gpu
 }
@@ -106,7 +105,7 @@ fragment half4 fragmentMain() { return half4(1.0); }
 ";
     let device = Device::new(None).expect("Metal device");
     let mut gpu = gpu(&device);
-    let program = &programs::FILL_EXTRUSION_INSTANCED;
+    let program = &mln_layers::fill_extrusion::programs::FILL_EXTRUSION_INSTANCED;
     let (vertex, fragment) =
         compile(device.device(), "direct read", MSL, "vertexMain", "fragmentMain", []).expect("the MSL compiles");
     let source = gpu.sources.get(program).expect("the table");

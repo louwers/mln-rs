@@ -4,6 +4,9 @@
 pub(crate) mod render_layer;
 #[rustfmt::skip]
 mod properties;
+pub mod programs;
+pub mod ubo;
+crate::shaders::shader_sources!();
 
 use mln_style::layer_type::{LayerStyle, LayerTypeInfo, NoProperties, SourceKind, StyleLayerType};
 use mln_style::property_table::{PropertyTable, PropertyVisitor};
