@@ -21,7 +21,7 @@ task.disable_spec_from_run_scripts = true
 # Default in mise 2027.7.0.
 cargo.binstall_native = true
 # Default on all platforms in mise 2027.8.0 (otherwise true on NixOS and
-# Alpine, which would build Node.js from source).
+# Alpine, which would build Node.js and target-freebsd's Python from source).
 all_compile = false
 
 [tools]
@@ -52,6 +52,25 @@ all_compile = false
 [deps.pnpm]
 auto = true
 dir = "examples/web"
+
+# Once per user and Unicode version. One curl command, which cmd runs on
+# Windows too; --fail-early and --remove-on-error leave a file that it couldn't
+# download missing, so the next `mise deps` downloads them again.
+[deps.ucd]
+description = "Download the Unicode Character Database files that generate:unicode-tables reads"
+outputs = [
+  "{{ vars.ucd }}/ArabicShaping.txt",
+  "{{ vars.ucd }}/UnicodeData.txt",
+  "{{ vars.ucd }}/BidiMirroring.txt",
+]
+run = 'curl -fsSL --fail-early --remove-on-error --create-dirs --output-dir "{{ vars.ucd }}" --remote-name-all "https://www.unicode.org/Public/{{ vars.unicode_version }}/ucd/{ArabicShaping,UnicodeData,BidiMirroring}.txt"'
+
+[vars]
+# The Unicode version of unicode-bidi's tables, which mln_text's tables must
+# match: bump it with the crate, then run `mise run generate:unicode-tables`
+# (tools/unicode-tables rejects files of another version).
+unicode_version = "16.0.0"
+ucd = "{{ xdg_cache_home }}/mln-rs/ucd-{{ vars.unicode_version }}"
 
 [hooks]
 # The nightly rustfmt that dprint runs.
@@ -122,20 +141,13 @@ run_windows = "cargo doc --no-deps --workspace {{ usage.args | default(value=[])
 description = "Regenerate the C library's bindings (crates/mln_c/src/generated) from its headers"
 run = "cargo run -q -p mln-rs-c-abi-gen"
 
-# From the Unicode version of unicode-bidi's tables, which tools/unicode-tables
-# names: run it again after bumping the crate.
+# From the files of deps.ucd, which it downloads first if `mise deps` hasn't.
 [tasks."generate:unicode-tables"]
 description = "Regenerate mln_text's Arabic presentation forms and Bidi_Mirroring_Glyph table from the Unicode Character Database"
-run = '''
-set -e
-version=$(cargo run -q -p mln-rs-unicode-tables -- --unicode-version)
-ucd=$(mktemp -d)
-trap 'rm -rf "$ucd"' EXIT
-for file in ArabicShaping UnicodeData BidiMirroring; do
-    curl -fsSL -o "$ucd/$file.txt" "https://www.unicode.org/Public/$version/ucd/$file.txt"
-done
-cargo run -q -p mln-rs-unicode-tables -- "$ucd"
-'''
+run = [
+  "mise deps install ucd",
+  'cargo run -q -p mln-rs-unicode-tables -- "{{ vars.ucd }}"',
+]
 
 # style-codegen's generated_code_test checks that the code is up to date.
 [tasks."generate:style"]

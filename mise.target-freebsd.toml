@@ -2,17 +2,19 @@
 # machine, as in `cargo nextest run --target x86_64-unknown-freebsd`. Select it
 # with `mise -E target-freebsd`, or in every command with
 # `env = ["target-freebsd"]` in an untracked .miserc.local.toml. The virtual
-# machine needs from the host QEMU, UEFI firmware (the ovmf or edk2-ovmf
-# package) and a python3 for anyvm.
+# machine needs QEMU and UEFI firmware from the host (the ovmf or edk2-ovmf
+# package).
 
 [tools]
 # The C compiler and linker: Zig's clang (tools/zig-cc-freebsd.sh).
 "core:zig" = "0.17.1"
 # devices-cli gives this checkout its own virtual machine, which anyvm boots
 # with the checkout mounted at its own path, and runs each test there. The go
-# backend builds it with this Go. anyvm, a Python script, installs on every host
-# so that ANYVM resolves, though only x64 Linux with KVM runs the machine.
+# backend builds it with this Go. anyvm, a Python script that this Python runs,
+# installs on every host so that ANYVM resolves, though only x64 Linux with KVM
+# runs the machine.
 "core:go" = "1.27.3"
+"core:python" = "3.15.2"
 "go:github.com/sargunv/devices-cli" = "v0.0.0-20261118051936-f04e04c68e26"
 "http:anyvm" = { version = "0.7.5", url = "https://github.com/anyvm-org/anyvm/releases/download/v{{ version }}/anyvm.py", checksum = "sha256:c192b299b9bf1b9f07b1d5e5b3977b518f8f24a9af9c20da259cdca22271d9f5" }
 

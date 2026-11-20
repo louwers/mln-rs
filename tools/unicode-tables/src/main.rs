@@ -2,13 +2,14 @@
 //! the Unicode Character Database, `crates/mln_text/src/arabic_tables.rs` and
 //! `bidi_mirroring.rs`, from the directory's `ArabicShaping.txt`,
 //! `UnicodeData.txt` and `BidiMirroring.txt`.
-//! `mise run generate:unicode-tables` downloads the files and runs it.
+//! `mise run generate:unicode-tables` runs it on the files that `mise deps`
+//! downloads.
 //!
-//! The files must be of unicode-bidi's Unicode version, which
-//! `unicode-tables --unicode-version` prints, so that the characters
-//! unicode-bidi resolves as right to left and the ones that the tables mirror
-//! and shape come from one version. The tables store UTF-16 code units, so
-//! every character in them must be in the BMP.
+//! The files must be of unicode-bidi's Unicode version, which mise.toml's
+//! `unicode_version` names, so that the characters unicode-bidi resolves as
+//! right to left and the ones that the tables mirror and shape come from one
+//! version. The tables store UTF-16 code units, so every character in them must
+//! be in the BMP.
 
 mod arabic_shaping;
 mod bidi_mirroring;
@@ -17,10 +18,9 @@ use std::path::Path;
 use std::process::ExitCode;
 
 const USAGE: &str = "usage: unicode-tables <directory>
-       unicode-tables --unicode-version
 
 <directory> holds the UCD's ArabicShaping.txt, UnicodeData.txt and
-BidiMirroring.txt, of the Unicode version that --unicode-version prints.";
+BidiMirroring.txt, of unicode-bidi's Unicode version.";
 
 fn main() -> ExitCode {
     match run() {
@@ -34,11 +34,7 @@ fn main() -> ExitCode {
 
 fn run() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let directory = match args.iter().map(String::as_str).collect::<Vec<_>>()[..] {
-        ["--unicode-version"] => {
-            println!("{}", unicode_version());
-            return Ok(());
-        }
+    let directory = match &args[..] {
         [directory] if !directory.starts_with('-') => Path::new(directory),
         _ => return Err(USAGE.into()),
     };
@@ -56,12 +52,6 @@ fn run() -> Result<(), String> {
     Ok(())
 }
 
-/// unicode-bidi's Unicode version, which the UCD files must be of.
-fn unicode_version() -> String {
-    let (major, minor, update) = unicode_bidi::UNICODE_VERSION;
-    format!("{major}.{minor}.{update}")
-}
-
 /// The version that a UCD file's header line names, `# <name>-<version>.txt`,
 /// if it's unicode-bidi's.
 fn ucd_version(text: &str, name: &str) -> Result<String, String> {
@@ -69,9 +59,12 @@ fn ucd_version(text: &str, name: &str) -> Result<String, String> {
         .lines()
         .find_map(|line| line.strip_prefix("# ")?.strip_prefix(name)?.strip_prefix('-')?.strip_suffix(".txt"))
         .ok_or_else(|| format!("not a {name}.txt"))?;
-    let expected = unicode_version();
+    let (major, minor, update) = unicode_bidi::UNICODE_VERSION;
+    let expected = format!("{major}.{minor}.{update}");
     if version != expected {
-        return Err(format!("{name}.txt is of Unicode {version}, not unicode-bidi's {expected}"));
+        return Err(format!(
+            "{name}.txt is of Unicode {version}, not unicode-bidi's {expected}: set unicode_version in mise.toml to it"
+        ));
     }
     Ok(expected)
 }
