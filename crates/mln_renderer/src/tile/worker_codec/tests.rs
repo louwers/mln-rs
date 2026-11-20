@@ -718,7 +718,7 @@ fn raster_decodes_cross() {
 }
 
 /// A raster-dem tile's DEM crosses with its border, as it decodes directly,
-/// and the `DEMData` constructor's error crosses as the tile's.
+/// and the `DemData` constructor's error crosses as the tile's.
 #[test]
 fn dem_decodes_cross() {
     use mln_util::tileset::RasterEncoding;
@@ -742,14 +742,14 @@ fn dem_decodes_cross() {
 }
 
 /// A DEM the map side can't read back fails its job: sizes whose byte
-/// counts overflow 32 bits, or members `DEMData::new` can't make.
+/// counts overflow 32 bits, or members `DemData::new` can't make.
 #[test]
 fn malformed_dems_fail() {
     use mln_util::image::PremultipliedImage;
     use mln_util::size::Size;
     use mln_util::tileset::RasterEncoding;
 
-    /// What a `JobResult::Dem` crosses as, with a `DEMData` of any members.
+    /// What a `JobResult::Dem` crosses as, with a `DemData` of any members.
     #[derive(mln_wire::Wire)]
     enum Malformed {
         _Laid,

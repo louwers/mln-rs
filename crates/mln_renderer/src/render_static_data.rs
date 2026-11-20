@@ -3,10 +3,10 @@ use std::cell::Cell;
 use mln_gfx::shaders::segment::{MAX_SEGMENT_VERTICES, SegmentBase};
 use mln_util::constants;
 
-use crate::buckets::raster_bucket::RasterLayoutVertex;
 use crate::gfx::context::Context;
 use crate::gfx::indexes::{Indexes, SharedIndexes};
 use crate::gfx::store::{IndexesKey, WeakShared};
+use crate::tile::raster::RasterLayoutVertex;
 
 /// The most quads a segment of [`RenderStaticData::quad_segments`] draws:
 /// as many as its 16-bit indices reach.

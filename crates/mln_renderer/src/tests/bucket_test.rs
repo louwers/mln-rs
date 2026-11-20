@@ -12,11 +12,11 @@ use mln_vec_map::VecMap;
 use super::with_context;
 use crate::bucket::Bucket;
 use crate::bucket_geometry::{BucketGeometry, GeometryUpload};
-use crate::buckets::raster_bucket::{RasterBucket, RasterLayoutVertex};
 use crate::buckets::symbol_bucket::{SymbolBucket, SymbolBucketStyle, SymbolLayoutFlags};
 use crate::gfx::context::Context;
 use crate::gfx::indexes::DrawIndexes;
 use crate::layout::symbol_instance::SymbolInstancePools;
+use crate::tile::raster::{RasterContents, RasterLayoutVertex};
 use crate::tile_mask::TileMask;
 
 /// Uploads `bucket`, keeping its geometry in `geometry`, through `context`.
@@ -71,7 +71,7 @@ fn symbol_bucket() {
 #[test]
 fn a_raster_buckets_upload_moves_its_quads_into_the_stores_once_per_mask() {
     let rgba = PremultipliedImage::new(Size::new(1, 1));
-    let mut bucket = RasterBucket::new(rgba);
+    let mut bucket = RasterContents::new(rgba);
     assert!(bucket.has_data());
     bucket.set_mask(mask(&[(1, 0, 0), (1, 1, 1)]));
 
@@ -84,7 +84,7 @@ fn a_raster_buckets_upload_moves_its_quads_into_the_stores_once_per_mask() {
         assert_eq!(quads.vertices.count(), 8);
 
         bucket.set_mask(mask(&[(1, 0, 0)]));
-        assert!(!bucket.base.uploaded);
+        assert!(!bucket.uploaded);
         bucket.upload(context);
         let quads = bucket.geometry().quads().expect("the new mask's quads");
         assert_eq!(context.vertices(&quads.vertices).expect("stored").count(), 4);
@@ -115,7 +115,7 @@ fn raster_vertex(p: (i16, i16), t: (u16, u16)) -> RasterLayoutVertex {
 // gtest: Buckets.RasterBucketMaskEmpty
 #[test]
 fn raster_bucket_mask_empty() {
-    let mut bucket = RasterBucket::with_shared_image(None);
+    let mut bucket = RasterContents::with_shared_image(None);
     bucket.set_mask(mask(&[]));
     let geometry = bucket.geometry();
     assert_eq!(Vec::<RasterLayoutVertex>::new(), geometry.vertices());
@@ -126,7 +126,7 @@ fn raster_bucket_mask_empty() {
 // gtest: Buckets.RasterBucketMaskNoChildren
 #[test]
 fn raster_bucket_mask_no_children() {
-    let mut bucket = RasterBucket::with_shared_image(None);
+    let mut bucket = RasterContents::with_shared_image(None);
     bucket.set_mask(mask(&[(0, 0, 0)]));
 
     // A mask of 0/0/0 doesn't produce buffers since we're instead using the
@@ -140,7 +140,7 @@ fn raster_bucket_mask_no_children() {
 // gtest: Buckets.RasterBucketMaskTwoChildren
 #[test]
 fn raster_bucket_mask_two_children() {
-    let mut bucket = RasterBucket::with_shared_image(None);
+    let mut bucket = RasterContents::with_shared_image(None);
     bucket.set_mask(mask(&[(1, 0, 0), (1, 1, 1)]));
 
     let geometry = bucket.geometry();
@@ -176,7 +176,7 @@ fn raster_bucket_mask_two_children() {
 // gtest: Buckets.RasterBucketMaskComplex
 #[test]
 fn raster_bucket_mask_complex() {
-    let mut bucket = RasterBucket::with_shared_image(None);
+    let mut bucket = RasterContents::with_shared_image(None);
     bucket.set_mask(mask(&[(1, 0, 1), (1, 1, 0), (2, 2, 3), (2, 3, 2), (3, 6, 7), (3, 7, 6)]));
 
     let geometry = bucket.geometry();
