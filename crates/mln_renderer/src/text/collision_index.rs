@@ -405,8 +405,8 @@ impl CollisionIndex {
             run.font_size
         };
         let font_scale = font_size / 24.0;
-        let line_offset_x = symbol.line_offset[0] * font_size;
-        let line_offset_y = symbol.line_offset[1] * font_size;
+        let line_offset_x = symbol.line_offset[0] * font_scale;
+        let line_offset_y = symbol.line_offset[1] * font_scale;
 
         let projected_label_plane_anchor = part.label_plane.project(tile_unit_anchor_point).point;
         let label_plane_anchor_point =
