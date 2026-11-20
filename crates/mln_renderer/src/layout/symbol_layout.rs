@@ -39,7 +39,8 @@ use mln_vec_map::VecMap;
 
 use crate::bucket_parameters::BucketParameters;
 use crate::buckets::symbol_bucket::{
-    Buffer, PaintProperties, PlacedSymbol, SortKeyRange, SymbolBucket, SymbolBucketState, SymbolSizeBinder,
+    Buffer, PaintProperties, PlacedSymbol, QuadCorner, SortKeyRange, SymbolBucket, SymbolBucketState, SymbolBucketStyle,
+    SymbolLayoutFlags, SymbolSizeBinder,
 };
 use crate::geometry::anchor::{Anchor, Anchors};
 use crate::geometry::feature_index::{FeatureIndex, IndexedSubfeature};
@@ -668,8 +669,7 @@ impl SymbolLayout {
                     // Only the sections that draw from glyph PBFs take their
                     // Arabic presentation forms. A font file needs the
                     // letters themselves, to apply its own joining rules.
-                    // The text ends at its first NUL, as in C++.
-                    let chars: Vec<char> = u8string.chars().take_while(|&c| c != '\0').collect();
+                    let chars: Vec<char> = u8string.chars().collect();
                     let section_scale = section.font_scale.unwrap_or(1.0);
                     let section_font_stack = section.font_stack.clone().unwrap_or_else(|| base_font_stack.clone());
                     let glyph_types = glyph_type_tables.get(&section_font_stack);
@@ -932,7 +932,7 @@ impl SymbolLayout {
         );
         let text_max_box_scale = self.tile_pixel_ratio * text_max_size / GLYPH_SIZE;
         let symbol_spacing = self.tile_pixel_ratio * *layout.symbol_spacing.uniform();
-        let text_max_angle = layout.text_max_angle.uniform().to_radians_stepwise();
+        let text_max_angle = layout.text_max_angle.uniform().to_radians();
         let placement = *layout.symbol_placement.uniform();
         let text_placement = if values.text_rotation_alignment == TextRotationAlignmentType::Viewport {
             SymbolPlacementType::Point
@@ -1334,29 +1334,18 @@ fn add_run(
 fn add_quad(buffer: &mut Buffer, run: &RunInfo, quad: &SymbolQuad) -> usize {
     let tex = quad.tex;
     let (tl, br) = (quad.pixel_offset_tl, quad.pixel_offset_br);
+    let corner = |offset, tex, pixel_offset| QuadCorner { offset, tex, pixel_offset };
     let corners = [
-        (quad.tl, tex.x, tex.y, tl),
-        (quad.tr, tex.x + tex.w, tex.y, Vec2::new(br.x, tl.y)),
-        (quad.bl, tex.x, tex.y + tex.h, Vec2::new(tl.x, br.y)),
-        (quad.br, tex.x + tex.w, tex.y + tex.h, br),
+        corner(quad.tl, [tex.x, tex.y], tl),
+        corner(quad.tr, [tex.x + tex.w, tex.y], Vec2::new(br.x, tl.y)),
+        corner(quad.bl, [tex.x, tex.y + tex.h], Vec2::new(tl.x, br.y)),
+        corner(quad.br, [tex.x + tex.w, tex.y + tex.h], br),
     ];
     let anchor = run.anchor.point;
     let first = buffer.attribute_data.len();
-    buffer.attribute_data.get_mut().extend(corners.map(|(corner, tx, ty, pixel_offset)| {
-        SymbolBucket::layout_attributes(
-            anchor,
-            corner,
-            quad.glyph_offset.y,
-            tx,
-            ty,
-            [tex.x, tex.y],
-            run.size,
-            quad.is_sdf,
-            pixel_offset,
-            quad.min_font_scale,
-            run.height_offset,
-        )
-    }));
+    buffer.attribute_data.get_mut().extend(
+        corners.map(|corner| SymbolBucket::layout_vertex(anchor, quad, corner, run.size, run.height_offset)),
+    );
     // Placement writes these before the quad draws; until then they agree
     // in count with the layout vertices.
     buffer.dynamic_attribute_data.extend([SymbolBucket::dynamic_layout_attributes(anchor, 0.0); 4]);
@@ -1407,19 +1396,6 @@ fn add_collision_geometry(state: &mut SymbolBucketState) {
                 }
             }
         }
-    }
-}
-
-/// Degrees in radians as `deg * π / 180`, rounding after each step, which
-/// `f32::to_radians`, rounding `π / 180` first, doesn't match in the last
-/// bit.
-trait ToRadiansStepwise {
-    fn to_radians_stepwise(self) -> f32;
-}
-
-impl ToRadiansStepwise for f32 {
-    fn to_radians_stepwise(self) -> f32 {
-        self * std::f32::consts::PI / 180.0
     }
 }
 
@@ -1805,23 +1781,24 @@ impl SymbolLayout {
         show_collision_boxes: bool,
         canonical: &CanonicalTileID,
     ) -> SymbolBucket {
-        let mut bucket = SymbolBucket::new(
-            Arc::clone(&self.layout),
-            &self.layer_paint_properties,
-            &self.text_size,
-            &self.icon_size,
-            self.zoom,
-            self.icons_need_linear,
-            self.sort_features_by_y,
-            self.bucket_leader_id.to_string(),
-            Vec::new(),
-            std::mem::take(&mut self.symbol_instance_pools),
-            std::mem::take(&mut self.sort_key_ranges),
-            self.tile_pixel_ratio,
-            self.allow_vertical_placement,
-            std::mem::take(&mut self.placement_modes),
-            self.icons_in_text,
-        );
+        let style = SymbolBucketStyle {
+            layout: Arc::clone(&self.layout),
+            paint_properties: &self.layer_paint_properties,
+            text_size: &self.text_size,
+            icon_size: &self.icon_size,
+            zoom: self.zoom,
+            tile_pixel_ratio: self.tile_pixel_ratio,
+            leader_id: self.bucket_leader_id.to_string(),
+        };
+        let flags = SymbolLayoutFlags {
+            icons_need_linear: self.icons_need_linear,
+            sort_features_by_y: self.sort_features_by_y,
+            icons_in_text: self.icons_in_text,
+            allow_vertical_placement: self.allow_vertical_placement,
+            placement_modes: std::mem::take(&mut self.placement_modes),
+        };
+        let pools = std::mem::take(&mut self.symbol_instance_pools);
+        let mut bucket = SymbolBucket::new(style, flags, Vec::new(), pools, std::mem::take(&mut self.sort_key_ranges));
         let mut state = std::mem::take(&mut bucket.state);
         let mut paint_properties = std::mem::take(&mut bucket.paint_properties);
         let mut writer = BucketWriter {

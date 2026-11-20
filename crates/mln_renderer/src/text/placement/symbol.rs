@@ -58,6 +58,18 @@ struct PlacedText {
     shift: Option<Vec2>,
 }
 
+/// A label to place at the first of its variable anchors where it fits.
+#[derive(Clone, Copy)]
+struct VariableLabel<'a> {
+    id: NonZeroU32,
+    text: &'a TextPart,
+    /// The collision feature of the icon fitted to the text, which must fit
+    /// at the anchor too; a vertical text's box stands for its icon's.
+    icon_feature: Option<&'a CollisionFeature>,
+    anchors: &'a [SymbolAnchorType],
+    run: &'a LabelRun<'a>,
+}
+
 /// The orientation a label placed `vertical` has.
 fn orientation(vertical: bool) -> TextWritingModeType {
     if vertical { TextWritingModeType::Vertical } else { TextWritingModeType::Horizontal }
@@ -207,7 +219,8 @@ impl Placement {
                     .as_ref()
                     .filter(|_| ctx.has_icon_text_fit && ctx.icon_overlap_mode == OverlapMode::Never)
                     .map(|icon| if vertical { text.collision(true) } else { &icon.collision });
-                this.place_at_variable_anchors(id, text, icon_feature, vertical, &anchors, &label, ctx)
+                let label = VariableLabel { id, text, icon_feature, anchors: &anchors, run: &label };
+                this.place_at_variable_anchors(&label, vertical, ctx)
             });
             // A label that didn't place fades from where it was.
             if !placed.result.placed
@@ -273,24 +286,16 @@ impl Placement {
         std::iter::once(prev_anchor).chain(rest.filter(|_| !tilted)).collect()
     }
 
-    /// Places a symbol's text at the first of `anchors` where it fits,
-    /// first where it overlaps nothing, then where its overlap mode lets it
-    /// overlap. Where `icon_feature` is given, the icon fitted to the text
-    /// must fit there too.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the symbol's id, text and icon, the writing mode and anchors to try, the run and the context"
-    )]
+    /// Places `label`'s text, `vertical` or not, at the first of its
+    /// anchors where it fits: first where it overlaps nothing, then where its
+    /// overlap mode lets it overlap.
     fn place_at_variable_anchors(
         &mut self,
-        id: NonZeroU32,
-        text: &TextPart,
-        icon_feature: Option<&CollisionFeature>,
+        label: &VariableLabel<'_>,
         vertical: bool,
-        anchors: &[SymbolAnchorType],
-        label: &LabelRun<'_>,
         ctx: &PlacementContext<'_>,
     ) -> PlacedText {
+        let VariableLabel { id, text, icon_feature, anchors, run: label } = *label;
         let pools = &ctx.bucket.state.symbol_instance_pools;
         let feature = text.collision(vertical);
         let unplaced = PlacedText { vertical, ..PlacedText::default() };

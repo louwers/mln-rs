@@ -26,7 +26,7 @@ use mln_util::grid_index::BBox;
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::time::Instant;
 
-use self::context::{CollisionGroups, PlacementContext};
+use self::context::{BucketOptions, CollisionGroups, PlacementContext};
 use self::tile::TilePlacementState;
 use crate::geometry::feature_index::FeatureIndex;
 use crate::layer_drawing::{BucketChanges, ChangedBuckets};
@@ -392,28 +392,37 @@ impl Placement {
     /// The initial placement of a `PlacementController`.
     #[must_use]
     pub(crate) fn new_default() -> Self {
+        Placement::new(PlacementKind::Continuous, None, CollisionIndex::new(&View::default(), MapMode::Static), None)
+    }
+
+    fn new(
+        kind: PlacementKind,
+        inputs: Option<Arc<PlacementInputs>>,
+        collision_index: CollisionIndex,
+        prev_placement: Option<Placement>,
+    ) -> Self {
         Placement {
-            kind: PlacementKind::Continuous,
-            inputs: None,
-            collision_index: CollisionIndex::new(&View::default(), MapMode::Static),
-            transition_options: TransitionOptions::default(),
+            kind,
+            collision_index,
+            transition_options: inputs.as_ref().map(|inputs| inputs.transition_options).unwrap_or_default(),
             fade_start_time: None,
             commit_time: None,
-            placement_zoom: 0.0,
+            placement_zoom: inputs.as_ref().map_or(0.0, |inputs| inputs.view.zoom() as f32),
             prev_zoom_adjustment: 0.0,
             placements: HashMap::default(),
             opacities: HashMap::default(),
             variable_offsets: HashMap::default(),
             placed_orientations: HashMap::default(),
             retained_query_data: HashMap::default(),
-            collision_groups: CollisionGroups::new(true),
-            prev_placement: None,
+            collision_groups: CollisionGroups::new(inputs.as_ref().is_none_or(|inputs| inputs.cross_source_collisions)),
+            prev_placement: prev_placement.map(Box::new),
             spare_collision_index: None,
-            show_collision_boxes: false,
+            show_collision_boxes: inputs.as_ref().is_some_and(|inputs| inputs.show_collision_boxes),
             settled: false,
             text_boxes: Vec::new(),
             icon_boxes: Vec::new(),
             collision_circles: HashMap::default(),
+            inputs,
         }
     }
 
@@ -433,18 +442,8 @@ impl Placement {
             MapMode::Tile => (PlacementKind::Tile(Box::default()), None),
         };
         let spare_index = prev_placement.as_mut().and_then(|prev| prev.spare_collision_index.take());
-        Placement {
-            kind,
-            collision_index: CollisionIndex::reusing(&inputs.view, inputs.mode, spare_index),
-            transition_options: inputs.transition_options,
-            commit_time: time_point,
-            placement_zoom: inputs.view.zoom() as f32,
-            collision_groups: CollisionGroups::new(inputs.cross_source_collisions),
-            prev_placement: prev_placement.map(Box::new),
-            show_collision_boxes: inputs.show_collision_boxes,
-            inputs: Some(inputs),
-            ..Placement::new_default()
-        }
+        let collision_index = CollisionIndex::reusing(&inputs.view, inputs.mode, spare_index);
+        Placement { commit_time: time_point, ..Placement::new(kind, Some(inputs), collision_index, prev_placement) }
     }
 
     fn prev_placement(&self) -> Option<&Placement> {
@@ -501,18 +500,13 @@ impl Placement {
         bucket: &'a crate::buckets::symbol_bucket::SymbolBucket,
         reloaded_placed: &HashSet<BucketKey>,
     ) -> PlacementContext<'a> {
-        let collision_group = self.collision_groups.get(&data.source_id);
-        let avoid_edges = self.avoid_edges(bucket, &data.tile.matrix);
-        PlacementContext::new(
-            data,
-            bucket,
-            bucket.state.just_reloaded && !reloaded_placed.contains(&data.bucket),
-            &inputs.view,
-            self.placement_zoom,
-            collision_group,
-            avoid_edges,
-            self.show_collision_boxes,
-        )
+        let options = BucketOptions {
+            just_reloaded: bucket.state.just_reloaded && !reloaded_placed.contains(&data.bucket),
+            collision_group: self.collision_groups.get(&data.source_id),
+            avoid_edges: self.avoid_edges(bucket, &data.tile.matrix),
+            debug: self.show_collision_boxes,
+        };
+        PlacementContext::new(data, bucket, &inputs.view, self.placement_zoom, options)
     }
 
     /// Places the symbols of `ctx`'s bucket that no bucket of their layer

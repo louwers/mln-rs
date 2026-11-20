@@ -34,7 +34,7 @@ use crate::buckets::fill_bucket::FillBucket;
 use crate::buckets::fill_extrusion_bucket::{FillExtrusionBucket, tile_units_per_meter};
 use crate::buckets::line_bucket::LineBucket;
 use crate::buckets::raster_bucket::{RasterBucket, RasterLayoutVertex};
-use crate::buckets::symbol_bucket::SymbolBucket;
+use crate::buckets::symbol_bucket::{SymbolBucket, SymbolBucketStyle, SymbolLayoutFlags};
 use crate::gfx::context::Context;
 use crate::gfx::indexes::DrawIndexes;
 use crate::gfx::line_mesh::LineLayoutVertex;
@@ -450,28 +450,21 @@ fn line_bucket_drawables_build_from_freed_indexes() {
 #[test]
 fn symbol_bucket() {
     let layout = Arc::new(SymbolLayoutProperties::PossiblyEvaluated::default());
-    let icons_need_linear = false;
-    let sort_features_by_y = false;
-    let bucket_leader_id = "test".to_owned();
-    let symbol_instances = Vec::new();
-    let symbol_ranges = Vec::new();
-
+    let (instances, pools) = (Vec::new(), SymbolInstancePools::default());
     let mut bucket = SymbolBucket::new(
-        layout,
-        &VecMap::new(),
-        &PropertyValue::Constant(16.0),
-        &PropertyValue::Constant(1.0),
-        0.0,
-        icons_need_linear,
-        sort_features_by_y,
-        bucket_leader_id,
-        symbol_instances,
-        SymbolInstancePools::default(),
-        symbol_ranges,
-        1.0,
-        false,
+        SymbolBucketStyle {
+            layout,
+            paint_properties: &VecMap::new(),
+            text_size: &PropertyValue::Constant(16.0),
+            icon_size: &PropertyValue::Constant(1.0),
+            zoom: 0.0,
+            tile_pixel_ratio: 1.0,
+            leader_id: "test".to_owned(),
+        },
+        SymbolLayoutFlags::default(),
+        instances,
+        pools,
         Vec::new(),
-        false, /*iconsInText*/
     );
     assert!(!bucket.has_icon_data());
     assert!(!bucket.has_sdf_icon_data());

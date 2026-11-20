@@ -33,6 +33,7 @@ use crate::bucket_geometry::{GeometryUpload, GeometryVec};
 use crate::layer_type::EvaluatedLayer;
 use crate::layout::symbol_instance::{SymbolInstance, SymbolInstancePools};
 use crate::paint_property_binder::PaintPropertyBinder;
+use crate::text::quads::SymbolQuad;
 use crate::util::pool::PoolRange;
 
 crate::paint_property_binders!(
@@ -100,6 +101,15 @@ pub(crate) struct CollisionBoxLayoutVertex {
 pub(crate) struct CollisionBoxDynamicVertex {
     pub(crate) a1: [u16; 2],
     pub(crate) a2: [f32; 2],
+}
+
+/// A corner of a quad: its offset from the anchor, its texture coordinate
+/// and its pixel offset.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct QuadCorner {
+    pub(crate) offset: Vec2,
+    pub(crate) tex: [u16; 2],
+    pub(crate) pixel_offset: Vec2,
 }
 
 pub(crate) const MAX_GLYPH_ICON_SIZE: u16 = 255;
@@ -441,6 +451,27 @@ impl SymbolBucketState {
     }
 }
 
+/// The style of a bucket's symbol layers at its tile's zoom.
+pub(crate) struct SymbolBucketStyle<'a> {
+    pub(crate) layout: Arc<SymbolLayoutProperties::PossiblyEvaluated>,
+    pub(crate) paint_properties: &'a VecMap<String, Arc<EvaluatedLayer<Symbol>>>,
+    pub(crate) text_size: &'a PropertyValue<f32>,
+    pub(crate) icon_size: &'a PropertyValue<f32>,
+    pub(crate) zoom: f32,
+    pub(crate) tile_pixel_ratio: f32,
+    pub(crate) leader_id: String,
+}
+
+/// What layout found of a bucket's symbols that drawing and placement read.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct SymbolLayoutFlags {
+    pub(crate) icons_need_linear: bool,
+    pub(crate) sort_features_by_y: bool,
+    pub(crate) icons_in_text: bool,
+    pub(crate) allow_vertical_placement: bool,
+    pub(crate) placement_modes: Vec<TextWritingModeType>,
+}
+
 #[derive(Clone, mln_wire::Wire)]
 pub(crate) struct SymbolBucket {
     pub(crate) base: BucketBase,
@@ -481,28 +512,16 @@ impl std::fmt::Debug for SymbolBucket {
 }
 
 impl SymbolBucket {
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the evaluated layout and sizes, the laid-out symbols and the placement flags that the bucket keeps"
-    )]
     #[must_use]
     pub(crate) fn new(
-        layout: Arc<SymbolLayoutProperties::PossiblyEvaluated>,
-        paint_properties: &VecMap<String, Arc<EvaluatedLayer<Symbol>>>,
-        text_size: &PropertyValue<f32>,
-        icon_size: &PropertyValue<f32>,
-        zoom: f32,
-        icons_need_linear: bool,
-        sort_features_by_y: bool,
-        bucket_name: String,
+        style: SymbolBucketStyle<'_>,
+        flags: SymbolLayoutFlags,
         symbol_instances: Vec<SymbolInstance>,
         symbol_instance_pools: SymbolInstancePools,
         sort_key_ranges: Vec<SortKeyRange>,
-        tile_pixel_ratio: f32,
-        allow_vertical_placement: bool,
-        placement_modes: Vec<TextWritingModeType>,
-        icons_in_text: bool,
     ) -> Self {
+        let SymbolBucketStyle { layout, paint_properties, text_size, icon_size, zoom, tile_pixel_ratio, leader_id } =
+            style;
         let icon_size_data_driven_or_zoom =
             icon_size.as_expression().is_some_and(|e| !e.is_feature_constant() || !e.is_zoom_constant());
         let mut binders = VecMap::new();
@@ -517,10 +536,10 @@ impl SymbolBucket {
         SymbolBucket {
             base: BucketBase::default(),
             layout,
-            bucket_leader_id: bucket_name,
-            icons_need_linear: icons_need_linear || icon_size_data_driven_or_zoom,
-            sort_features_by_y,
-            icons_in_text,
+            bucket_leader_id: leader_id,
+            icons_need_linear: flags.icons_need_linear || icon_size_data_driven_or_zoom,
+            sort_features_by_y: flags.sort_features_by_y,
+            icons_in_text: flags.icons_in_text,
             sort_key_ranges,
             paint_properties: binders,
             text_size_binder: SymbolSizeBinder::create(zoom, text_size, SymbolLayoutProperties::Defaults::text_size()),
@@ -528,8 +547,8 @@ impl SymbolBucket {
             tile_pixel_ratio,
             max_height_offset,
             bucket_instance_id: 0,
-            allow_vertical_placement,
-            placement_modes,
+            allow_vertical_placement: flags.allow_vertical_placement,
+            placement_modes: flags.placement_modes,
             state: SymbolBucketState {
                 sorted_angle: f32::MAX,
                 symbol_instances,
@@ -636,43 +655,36 @@ impl SymbolBucket {
         }
     }
 
-    /// The layout vertex of a quad corner, with the quad's atlas origin
-    /// (`tex_origin`, see [`SymbolLayoutVertex::a4`]).
-    #[expect(clippy::too_many_arguments, reason = "each argument is a component of the packed vertex")]
+    /// The layout vertex of `corner` of `quad`, of a symbol at `anchor`
+    /// whose size is `size`, `height_offset` meters up.
     #[must_use]
-    pub(crate) fn layout_attributes(
-        label_anchor: Vec2,
-        o: Vec2,
-        glyph_offset_y: f32,
-        tx: u16,
-        ty: u16,
-        tex_origin: [u16; 2],
-        size_data: Range<f32>,
-        is_sdf: bool,
-        pixel_offset: Vec2,
-        min_font_scale: Vec2,
+    pub(crate) fn layout_vertex(
+        anchor: Vec2,
+        quad: &SymbolQuad,
+        corner: QuadCorner,
+        size: Range<f32>,
         height_offset: f32,
     ) -> SymbolLayoutVertex {
-        let a_size_min = (MAX_PACKED_SIZE.min((size_data.min * f32::from(SIZE_PACK_FACTOR)) as u16) << 1)
-            .wrapping_add(u16::from(is_sdf));
-        let a_size_max = MAX_PACKED_SIZE.min((size_data.max * f32::from(SIZE_PACK_FACTOR)) as u16);
+        let pack = |size: f32| MAX_PACKED_SIZE.min((size * f32::from(SIZE_PACK_FACTOR)) as u16);
+        let QuadCorner { offset, tex, pixel_offset } = corner;
         SymbolLayoutVertex {
-            // combining pos and offset to reduce number of vertex attributes
-            // passed to shader (8 max for some devices)
+            // The position and the offset share an attribute, as some
+            // devices take only eight.
             a1: [
-                label_anchor.x as i16,
-                label_anchor.y as i16,
-                (o.x * 32.0).round() as i16, // use 1/32 pixels for placement
-                ((o.y + glyph_offset_y) * 32.0).round() as i16,
+                anchor.x as i16,
+                anchor.y as i16,
+                // In 1/32 pixels.
+                (offset.x * 32.0).round() as i16,
+                ((offset.y + quad.glyph_offset.y) * 32.0).round() as i16,
             ],
-            a2: [tx, ty, a_size_min, a_size_max],
+            a2: [tex[0], tex[1], (pack(size.min) << 1).wrapping_add(u16::from(quad.is_sdf)), pack(size.max)],
             a3: [
                 (pixel_offset.x * 16.0) as i16,
                 (pixel_offset.y * 16.0) as i16,
-                (min_font_scale.x * 256.0) as i16,
-                (min_font_scale.y * 256.0) as i16,
+                (quad.min_font_scale.x * 256.0) as i16,
+                (quad.min_font_scale.y * 256.0) as i16,
             ],
-            a4: tex_origin,
+            a4: [quad.tex.x, quad.tex.y],
             a5: height_offset,
         }
     }

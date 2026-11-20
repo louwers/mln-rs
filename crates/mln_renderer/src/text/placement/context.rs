@@ -61,6 +61,17 @@ fn without_horizon(mut data: ProjectionData) -> ProjectionData {
     data
 }
 
+/// What a placement decides of a bucket before it places its symbols.
+#[derive(Clone, Copy)]
+pub(crate) struct BucketOptions {
+    /// The bucket's symbols skip their fade in.
+    pub(crate) just_reloaded: bool,
+    pub(crate) collision_group: Option<u16>,
+    pub(crate) avoid_edges: Option<CollisionBoundaries>,
+    /// Debug drawing shows the collision boxes.
+    pub(crate) debug: bool,
+}
+
 /// What placing the symbols of one bucket reads.
 pub(crate) struct PlacementContext<'a> {
     pub(crate) bucket: &'a SymbolBucket,
@@ -104,20 +115,14 @@ pub(crate) struct PlacementContext<'a> {
 }
 
 impl<'a> PlacementContext<'a> {
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the bucket and its data, and what the placement decides of it: reload, view, zoom, group, edges, debug"
-    )]
     pub(crate) fn new(
         data: &'a BucketPlacementData,
         bucket: &'a SymbolBucket,
-        just_reloaded: bool,
         view: &'a View,
         placement_zoom: f32,
-        collision_group: Option<u16>,
-        avoid_edges: Option<CollisionBoundaries>,
-        debug: bool,
+        options: BucketOptions,
     ) -> Self {
+        let BucketOptions { just_reloaded, collision_group, avoid_edges, debug } = options;
         let tile = &data.tile;
         let overscaled_id = tile.overscaled_id;
         let pixels_to_tile_units = tile.id.pixels_to_tile_units(1.0, placement_zoom);

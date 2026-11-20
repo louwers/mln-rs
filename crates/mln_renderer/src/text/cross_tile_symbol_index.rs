@@ -477,7 +477,7 @@ mod tests {
     use mln_util::size::Size;
 
     use super::*;
-    use crate::buckets::symbol_bucket::SortKeyRange;
+    use crate::buckets::symbol_bucket::{SymbolBucketStyle, SymbolLayoutFlags};
     use crate::geometry::anchor::Anchor;
     use crate::util::pool::PoolRange;
 
@@ -498,23 +498,20 @@ mod tests {
         let mut pools = SymbolInstancePools::default();
         let instances = symbols.into_iter().map(|(x, y, key)| make_symbol_instance(x, y, key, &mut pools)).collect();
         let layout = Arc::new(SymbolLayoutProperties::PossiblyEvaluated::default());
-        let ranges: Vec<SortKeyRange> = Vec::new();
         let mut bucket = SymbolBucket::new(
-            layout,
-            &VecMap::new(),
-            &PropertyValue::Constant(16.0f32),
-            &PropertyValue::Constant(1.0f32),
-            0.0,
-            false,
-            false,
-            "test".to_owned(),
+            SymbolBucketStyle {
+                layout,
+                paint_properties: &VecMap::new(),
+                text_size: &PropertyValue::Constant(16.0),
+                icon_size: &PropertyValue::Constant(1.0),
+                zoom: 0.0,
+                tile_pixel_ratio: 1.0,
+                leader_id: "test".to_owned(),
+            },
+            SymbolLayoutFlags::default(),
             instances,
             pools,
-            ranges,
-            1.0,
-            false,
             Vec::new(),
-            false, /*iconsInText*/
         );
         bucket.bucket_instance_id = bucket_instance_id;
         bucket
