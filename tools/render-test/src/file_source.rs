@@ -46,7 +46,35 @@ pub(crate) fn answered(number: u64) {
 /// cache database.
 pub(crate) struct ProxyFileSource {
     pub(crate) default_resource_loader: Arc<dyn FileSource>,
-    pub(crate) assets: Option<PathBuf>,
+    pub(crate) assets: Option<AssetDir>,
+}
+
+/// The directory of files that load in place of the cache's resources.
+pub(crate) struct AssetDir {
+    pub(crate) path: PathBuf,
+    /// The directories `path` holds load only from it: a file missing there
+    /// is not found, and never the cache's.
+    pub(crate) only: bool,
+}
+
+impl AssetDir {
+    /// Whether the test URL path `path` loads from the assets.
+    fn serves(&self, path: &str) -> bool {
+        if self.path.join(path).is_file() {
+            return true;
+        }
+        self.only && path.split_once('/').is_some_and(|(directory, _)| self.path.join(directory).is_dir())
+    }
+}
+
+/// The files that load in place of the cache's resources.
+#[derive(Clone, Copy)]
+pub struct Assets<'a> {
+    /// The directory of the files.
+    pub path: &'a str,
+    /// The test is in the assets' suite: the directories `path` holds load
+    /// only from it, as on the test server of that suite.
+    pub only: bool,
 }
 
 impl ProxyFileSource {
@@ -108,7 +136,7 @@ impl FileSource for ProxyFileSource {
 
         if let Some(assets) = &self.assets
             && let Some(path) = test_url_path(&resource.url)
-            && assets.join(path).is_file()
+            && assets.serves(path)
         {
             transformed.url = format!("{ASSET_PROTOCOL}{path}");
         }
@@ -175,10 +203,13 @@ impl FileSource for ProxyFileSource {
 
 /// A `ProxyFileSource` over a loader for `resource_options`, whose cache
 /// database is read-only while offline (`TestRunner::registerProxyFileSource()`).
-/// `assets` is the directory of files that load in place of the cache's
-/// resources, if any.
+/// `assets` is the files that load in place of the cache's resources, if any.
 #[must_use]
-pub fn proxy_loader(resource_options: &ResourceOptions, assets: Option<&str>, pool: &Pool) -> Arc<dyn FileSource> {
+pub fn proxy_loader(
+    resource_options: &ResourceOptions,
+    assets: Option<Assets<'_>>,
+    pool: &Pool,
+) -> Arc<dyn FileSource> {
     let network: Arc<dyn FileSource> = Arc::new(OnlineFileSource::new(Arc::new(NetworkStatus::new())));
     let cache_path = &resource_options.cache_path;
     let database = if OFFLINE.load(Ordering::SeqCst) {
@@ -187,9 +218,12 @@ pub fn proxy_loader(resource_options: &ResourceOptions, assets: Option<&str>, po
         DatabaseFileSource::new(cache_path, Some(Arc::clone(&network)))
     };
     let loader = Loader::builder(pool)
-        .asset_path(assets.unwrap_or(&resource_options.asset_path))
+        .asset_path(assets.map_or(resource_options.asset_path.as_str(), |assets| assets.path))
         .network(network)
         .database(Arc::new(database))
         .build();
-    Arc::new(ProxyFileSource { default_resource_loader: Arc::new(loader), assets: assets.map(PathBuf::from) })
+    Arc::new(ProxyFileSource {
+        default_resource_loader: Arc::new(loader),
+        assets: assets.map(|assets| AssetDir { path: PathBuf::from(assets.path), only: assets.only }),
+    })
 }

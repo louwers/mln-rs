@@ -76,6 +76,15 @@ pub struct ResourceOptions {
     /// Port-only: the directory of files that load as `local://` resources
     /// the cache lacks (`manifest_parser`'s `asset_path`), or empty.
     pub(crate) asset_path: String,
+    /// Port-only: the test is in the suite whose assets those are, so the
+    /// directories `asset_path` holds load only from it.
+    pub(crate) assets_only: bool,
+}
+
+/// Whether the test whose style is at `style_path` is in the suite that holds
+/// `asset_path`: under its parent directory.
+pub(crate) fn in_assets_suite(style_path: &str, asset_path: &str) -> bool {
+    std::path::Path::new(asset_path).parent().is_some_and(|suite| std::path::Path::new(style_path).starts_with(suite))
 }
 
 /// A frontend, file source and map for one map mode, pixel ratio and
@@ -930,12 +939,15 @@ impl TestRunner {
             }
         }
 
+        let asset_path = self.manifest.get_asset_path();
+        let assets_only = !asset_path.is_empty() && in_assets_suite(&ctx.metadata.paths.style_path, asset_path);
         let key = format!(
-            "{}/{}/{}/{}",
+            "{}/{}/{}/{}/{}",
             ctx.metadata.map_mode as u32,
             ctx.metadata.pixel_ratio,
             u32::from(ctx.metadata.cross_source_collisions),
-            ctx.metadata.terrain_skirt_length as u32
+            ctx.metadata.terrain_skirt_length as u32,
+            u32::from(assets_only)
         );
 
         let mut cut_off_labels_report = String::new();
@@ -955,7 +967,8 @@ impl TestRunner {
                 };
                 let resource_options = ResourceOptions {
                     cache_path: self.manifest.get_cache_path().to_string(),
-                    asset_path: self.manifest.get_asset_path().to_string(),
+                    asset_path: asset_path.to_string(),
+                    assets_only,
                 };
                 let created = catch_unwind(AssertUnwindSafe(|| {
                     factory(ctx.metadata, &resource_options, &self.impl_options, &self.queue, &self.pool)

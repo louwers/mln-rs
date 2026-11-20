@@ -849,11 +849,11 @@ impl mln_storage::FileSource for Recording {
 fn asset_files_stand_in_for_the_caches_local_resources() {
     use mln_storage::{FileSourceExt, Resource};
 
-    use crate::file_source::ProxyFileSource;
+    use crate::file_source::{AssetDir, ProxyFileSource};
 
     let assets = tmp_dir("assets");
     write(&assets.path().join("tiles/a.png"), b"a");
-    let load = |assets: Option<PathBuf>, url: &str| {
+    let load = |assets: Option<AssetDir>, url: &str| {
         let urls = std::sync::Arc::default();
         let loader = std::sync::Arc::new(Recording(std::sync::Arc::clone(&urls)));
         let proxy = ProxyFileSource { default_resource_loader: loader, assets };
@@ -861,11 +861,49 @@ fn asset_files_stand_in_for_the_caches_local_resources() {
         let urls = urls.lock();
         urls.clone()
     };
-    let assets = || Some(assets.path().to_path_buf());
-    assert_eq!(load(assets(), "local://tiles/a.png"), ["asset://tiles/a.png"]);
-    assert_eq!(load(assets(), "http://localhost:2900/tiles/a.png"), ["asset://tiles/a.png"]);
+    let assets = |only| Some(AssetDir { path: assets.path().to_path_buf(), only });
+    assert_eq!(load(assets(false), "local://tiles/a.png"), ["asset://tiles/a.png"]);
+    assert_eq!(load(assets(false), "http://localhost:2900/tiles/a.png"), ["asset://tiles/a.png"]);
     // What isn't there is the cache's.
-    assert_eq!(load(assets(), "local://tiles/b.png"), ["http://tiles/b.png"]);
-    assert_eq!(load(assets(), "http://example.com/tiles/a.png"), ["http://example.com/tiles/a.png"]);
+    assert_eq!(load(assets(false), "local://tiles/b.png"), ["http://tiles/b.png"]);
+    assert_eq!(load(assets(false), "http://example.com/tiles/a.png"), ["http://example.com/tiles/a.png"]);
     assert_eq!(load(None, "local://tiles/a.png"), ["http://tiles/a.png"]);
+}
+
+#[test]
+fn a_suite_whose_assets_hold_a_directory_loads_it_only_from_them() {
+    use mln_storage::{FileSourceExt, Resource};
+
+    use crate::file_source::{AssetDir, ProxyFileSource};
+
+    let assets = tmp_dir("assets-only");
+    write(&assets.path().join("tiles/a.png"), b"a");
+    let load = |only: bool, url: &str| {
+        let urls = std::sync::Arc::default();
+        let loader = std::sync::Arc::new(Recording(std::sync::Arc::clone(&urls)));
+        let assets = Some(AssetDir { path: assets.path().to_path_buf(), only });
+        let proxy = ProxyFileSource { default_resource_loader: loader, assets };
+        let _request = proxy.request(&Resource::style(url), |_| {});
+        let urls = urls.lock();
+        urls.clone()
+    };
+    // A file the assets lack is not found there, not the cache's.
+    assert_eq!(load(true, "local://tiles/a.png"), ["asset://tiles/a.png"]);
+    assert_eq!(load(true, "local://tiles/b.png"), ["asset://tiles/b.png"]);
+    assert_eq!(load(true, "http://localhost:2900/tiles/b.png"), ["asset://tiles/b.png"]);
+    // A directory they lack, and other hosts, are still the cache's.
+    assert_eq!(load(true, "local://glyphs/a.pbf"), ["http://glyphs/a.pbf"]);
+    assert_eq!(load(true, "http://example.com/tiles/b.png"), ["http://example.com/tiles/b.png"]);
+    // A native suite's test falls through to the cache.
+    assert_eq!(load(false, "local://tiles/b.png"), ["http://tiles/b.png"]);
+}
+
+#[test]
+fn a_test_is_in_the_suite_of_the_assets_beside_its_directory() {
+    use crate::runner::in_assets_suite;
+
+    let assets = "../testdata/metrics/integration/gljs/assets";
+    assert!(in_assets_suite("../testdata/metrics/integration/gljs/render-tests/terrain/a/style.json", assets));
+    assert!(!in_assets_suite("../testdata/metrics/integration/render-tests/terrain/a/style.json", assets));
+    assert!(!in_assets_suite("../testdata/metrics/integration/gljs2/render-tests/a/style.json", assets));
 }

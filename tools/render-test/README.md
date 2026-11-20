@@ -21,11 +21,13 @@ ignores of its manifest in `manifests/`.
 The tests in `testdata/metrics/integration/gljs` are MapLibre GL JS's tests of
 terrain, with the tiles and images they load in `gljs/assets`: a manifest's
 `asset_path` names a directory whose files load in place of the cache's
-resources at the same `local://` paths.
-`mise run update:gljs-testdata <checkout>` copies them again, and
-`mise run update:testdata` leaves them alone. `ignores/rust-port-terrain.json`
-lists each with the phase of the terrain work (louwers/mln-rs#532) that will
-make it pass.
+resources at the same `local://` paths. The tests beside that directory (in
+`gljs`) load the directories it holds (`tiles`, `geojson`, `image`) only from
+it, as GL JS's test server does, so a file missing there is not found; the other
+tests fall back to the cache. `mise run update:gljs-testdata <checkout>` copies
+them again, and `mise run update:testdata` leaves them alone.
+`ignores/rust-port-terrain.json` lists each with the phase of the terrain work
+(louwers/mln-rs#532) that will make it pass.
 
 Part of [mln-rs](https://github.com/louwers/mln-rs), a Rust port of the
 [MapLibre Native](https://github.com/maplibre/maplibre-native) map rendering
