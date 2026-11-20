@@ -49,9 +49,10 @@ declare -A allowed=(
     # 790 (lavapipe), 778 (llvmpipe).
     [terrain/skirts-auto]=0.0008
     # The moiré's texels move: 279 of 65536 (0.43%) on RADV, 170 (0.26%) on
-    # Mesa 26.0.8, but 1046 (1.6%) on Mesa 26.2.5, which fails. Without the
-    # drape's mips, 9.8% differ.
-    [terrain/rtt-mipmap-minification/pitch-70]=0.006
+    # Mesa 26.0.8, 1051 (lavapipe) and 1046 (llvmpipe) (1.6%) on Mesa 26.2.5.
+    # Without the drape's mips: 6451 (RADV), 6408 (lavapipe 26.0.8) and 6409
+    # (Mesa 26.0.8's llvmpipe, Mesa 26.2.5's lavapipe and llvmpipe), 9.8%.
+    [terrain/rtt-mipmap-minification/pitch-70]=0.02
 )
 
 checkout="${usage_checkout:-$PWD/../maplibre-gl-js}"
