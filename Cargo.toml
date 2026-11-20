@@ -528,10 +528,12 @@ keywords = ["maplibre", "map", "vector-tiles", "gis", "rendering"]
 categories = ["graphics", "rendering::engine", "science::geo"]
 
 # The runtime's backends (crates/mln_runtime/Cargo.toml), each with its
-# crate; the ambient cache, offline regions and mbtiles:// sources, as in
-# C++; and the style's font faces shaped in-process
-# (crates/mln_renderer/Cargo.toml). A browser build turns on one backend and
-# leaves SQLite and the shaper out; a native runtime always has SQLite.
+# crate and each turning on the runtime; the ambient cache, offline regions
+# and mbtiles:// sources, as in C++; and the style's font faces shaped
+# in-process (crates/mln_renderer/Cargo.toml). A browser build turns on one
+# backend and leaves SQLite and the shaper out; a native runtime always has
+# SQLite. Without a backend, the crate is the built-in registrations alone,
+# which engine crates' tests use.
 [features]
 default = [
   "webgpu",
@@ -542,13 +544,14 @@ default = [
   "sqlite",
   "font-face-shaper",
 ]
-webgpu = ["mln_runtime/webgpu", "dep:mln_webgpu"]
-metal = ["mln_runtime/metal", "dep:mln_mtl"]
-vulkan = ["mln_runtime/vulkan", "dep:mln_vulkan"]
-d3d12 = ["mln_runtime/d3d12", "dep:mln_d3d12"]
-gl = ["mln_runtime/gl", "dep:mln_gl"]
+webgpu = ["runtime", "mln_runtime/webgpu", "dep:mln_webgpu"]
+metal = ["runtime", "mln_runtime/metal", "dep:mln_mtl"]
+vulkan = ["runtime", "mln_runtime/vulkan", "dep:mln_vulkan"]
+d3d12 = ["runtime", "mln_runtime/d3d12", "dep:mln_d3d12"]
+gl = ["runtime", "mln_runtime/gl", "dep:mln_gl"]
 sqlite = ["mln_storage/sqlite", "dep:mln_storage_offline"]
 font-face-shaper = ["mln_renderer/font-face-shaper"]
+runtime = ["dep:mln_runtime"]
 
 [dependencies]
 feature.workspace = true
@@ -571,7 +574,7 @@ mln_map_types.workspace = true
 mln_math.workspace = true
 mln_mtl = { workspace = true, optional = true }
 mln_renderer.workspace = true
-mln_runtime.workspace = true
+mln_runtime = { workspace = true, optional = true }
 mln_sources.workspace = true
 mln_sprite.workspace = true
 mln_storage.workspace = true

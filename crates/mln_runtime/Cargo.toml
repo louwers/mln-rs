@@ -105,7 +105,9 @@ mln_d3d12 = { workspace = true, optional = true }
 [dev-dependencies]
 glam.workspace = true
 # The built-in registrations of the tests' runtimes.
-mln_rs = { package = "mln-rs", path = "../..", default-features = false }
+mln_rs = { package = "mln-rs", path = "../..", default-features = false, features = [
+  "runtime",
+] }
 # Serves the styles of the resource tests.
 httpmock.workspace = true
 pollster.workspace = true

@@ -24,7 +24,9 @@
 
 mod builtins;
 
-pub use builtins::{builtin_registry, register_builtins, start_runtime};
+#[cfg(feature = "runtime")]
+pub use builtins::start_runtime;
+pub use builtins::{builtin_registry, register_builtins};
 pub use feature;
 pub use geo_types;
 pub use geojson;
@@ -52,6 +54,7 @@ pub use mln_mtl;
 pub use mln_renderer;
 // Every runtime type is at the root, so the root can't miss one that a
 // root type's methods take or return.
+#[cfg(feature = "runtime")]
 pub use mln_runtime::{self, *};
 pub use mln_sources;
 pub use mln_sprite;
