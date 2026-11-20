@@ -139,7 +139,7 @@ impl StaticGeometry {
         StaticGeometry {
             vertices: copied_vertices(context, &RenderStaticData::raster_vertices()),
             indexes: context.add_indexes(Indexes::new(RenderStaticData::quad_triangle_indices())),
-            segments: RenderStaticData::raster_segments(),
+            segments: RenderStaticData::quad_triangle_segments(),
         }
     }
 }

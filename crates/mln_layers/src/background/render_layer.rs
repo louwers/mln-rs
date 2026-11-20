@@ -71,7 +71,7 @@ impl BackgroundState {
             let vertices = RenderStaticData::tile_vertices();
             let count = vertices.len();
             let bytes = bytemuck::cast_slice(&vertices).to_vec();
-            (bytes, count, RenderStaticData::quad_triangle_indices(), RenderStaticData::tile_triangle_segments())
+            (bytes, count, RenderStaticData::quad_triangle_indices(), RenderStaticData::quad_triangle_segments())
         };
         let geometry = DrawGeometry {
             vertices: raw_vertices(

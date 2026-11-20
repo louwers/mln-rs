@@ -481,7 +481,7 @@ impl HeatmapState {
                 vertex_count: 4,
                 mode: DrawMode::Triangles(),
                 indexes: DrawIndexes::new(RenderStaticData::quad_triangle_indices()),
-                segments: vec![SegmentBase::with_lengths(0, 0, 4, 6)],
+                segments: RenderStaticData::quad_triangle_segments(),
                 instances: None,
             };
             let mut textures = Textures::default();

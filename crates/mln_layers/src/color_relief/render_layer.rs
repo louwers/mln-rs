@@ -486,7 +486,7 @@ impl LayerType for ColorRelief {
                             static_data_shared_vertices.clone(),
                             4,
                             static_data_indices.clone().into(),
-                            RenderStaticData::raster_segments(),
+                            RenderStaticData::quad_triangle_segments(),
                         )
                     };
                     let geometry = DrawGeometry {
