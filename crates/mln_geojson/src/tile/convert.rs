@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use feature::{Identifier, PropertyMap};
 use geo_types::{Coord, Geometry as GeoGeometry};
+use smallvec::smallvec;
 
 use super::geometry::{Feature, Geometry, Line, Ring, Vertex};
 use super::simplify::simplify;
@@ -38,27 +39,27 @@ struct Converter<'a> {
 impl Converter<'_> {
     fn geometry(&mut self, geometry: &GeoGeometry) {
         match geometry {
-            GeoGeometry::Point(p) => self.push(Geometry::Points(vec![vertex(p.0)])),
+            GeoGeometry::Point(p) => self.push(Geometry::Points(smallvec![vertex(p.0)])),
             GeoGeometry::MultiPoint(points) => {
                 self.push(Geometry::Points(points.iter().map(|p| vertex(p.0)).collect()));
             }
-            GeoGeometry::Line(line) => self.push(Geometry::Lines(vec![self.line(&[line.start, line.end])])),
-            GeoGeometry::LineString(line) => self.push(Geometry::Lines(vec![self.line(&line.0)])),
+            GeoGeometry::Line(line) => self.push(Geometry::Lines(smallvec![self.line(&[line.start, line.end])])),
+            GeoGeometry::LineString(line) => self.push(Geometry::Lines(smallvec![self.line(&line.0)])),
             GeoGeometry::MultiLineString(lines) if self.line_metrics => {
                 for line in lines {
-                    self.push(Geometry::Lines(vec![self.line(&line.0)]));
+                    self.push(Geometry::Lines(smallvec![self.line(&line.0)]));
                 }
             }
             GeoGeometry::MultiLineString(lines) => {
                 self.push(Geometry::Lines(lines.iter().map(|line| self.line(&line.0)).collect()));
             }
-            GeoGeometry::Polygon(polygon) => self.push(Geometry::Polygons(vec![self.polygon(polygon)])),
+            GeoGeometry::Polygon(polygon) => self.push(Geometry::Polygons(smallvec![self.polygon(polygon)])),
             GeoGeometry::MultiPolygon(polygons) => {
                 self.push(Geometry::Polygons(polygons.iter().map(|p| self.polygon(p)).collect()));
             }
-            GeoGeometry::Rect(rect) => self.push(Geometry::Polygons(vec![self.polygon(&rect.to_polygon())])),
+            GeoGeometry::Rect(rect) => self.push(Geometry::Polygons(smallvec![self.polygon(&rect.to_polygon())])),
             GeoGeometry::Triangle(triangle) => {
-                self.push(Geometry::Polygons(vec![self.polygon(&triangle.to_polygon())]));
+                self.push(Geometry::Polygons(smallvec![self.polygon(&triangle.to_polygon())]));
             }
             GeoGeometry::GeometryCollection(geometries) => {
                 for geometry in geometries {

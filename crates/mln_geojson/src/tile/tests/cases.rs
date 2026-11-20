@@ -41,9 +41,9 @@ fn assert_lines_eq(a: &[Line], b: &[Line]) {
 }
 
 fn clip_lines(input: &Line, line_metrics: bool) -> Vec<Line> {
-    let mut pieces = Vec::new();
+    let mut pieces = crate::tile::geometry::Parts::new();
     clip_line::<X>(input, 10.0, 40.0, line_metrics, &mut pieces);
-    pieces
+    pieces.into_vec()
 }
 
 #[test]

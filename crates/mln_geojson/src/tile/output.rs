@@ -6,7 +6,7 @@ use feature::{Feature as TileFeature, PropertyMap, Value};
 use geo_types::{Coord, Geometry, LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 
 use super::TileId;
-use super::geometry::{Feature, Geometry as VtGeometry, Line, Ring, Vertex};
+use super::geometry::{Feature, Geometry as VtGeometry, Line, Parts, Ring, Vertex};
 use crate::TileFeatures;
 
 /// A tile's features.
@@ -54,16 +54,13 @@ impl Writer {
     fn write(&self, feature: &Feature, out: &mut TileFeatures) {
         let mut properties = Arc::clone(&feature.properties);
         let geometry = match &feature.geometry {
-            VtGeometry::Points(points) => {
-                let mut points: Vec<Point<i16>> = points.iter().map(|&p| Point(self.transform(p))).collect();
-                match points.len() {
-                    0 => return,
-                    1 => Geometry::Point(points.swap_remove(0)),
-                    _ => Geometry::MultiPoint(MultiPoint(points)),
-                }
-            }
+            VtGeometry::Points(points) => match points[..] {
+                [] => return,
+                [p] => Geometry::Point(Point(self.transform(p))),
+                _ => Geometry::MultiPoint(MultiPoint(points.iter().map(|&p| Point(self.transform(p))).collect())),
+            },
             VtGeometry::Lines(lines) => {
-                let mut kept: Vec<(&Line, LineString<i16>)> = lines
+                let mut kept: Parts<(&Line, LineString<i16>)> = lines
                     .iter()
                     .filter(|line| line.length > self.tolerance)
                     .map(|line| (line, self.line(line)))
@@ -81,11 +78,12 @@ impl Writer {
                 }
             }
             VtGeometry::Polygons(polygons) => {
-                let mut polygons: Vec<Polygon<i16>> = polygons.iter().filter_map(|rings| self.polygon(rings)).collect();
+                let mut polygons: Parts<Polygon<i16>> =
+                    polygons.iter().filter_map(|rings| self.polygon(rings)).collect();
                 match polygons.len() {
                     0 => return,
                     1 => Geometry::Polygon(polygons.swap_remove(0)),
-                    _ => Geometry::MultiPolygon(MultiPolygon(polygons)),
+                    _ => Geometry::MultiPolygon(MultiPolygon(polygons.into_vec())),
                 }
             }
         };

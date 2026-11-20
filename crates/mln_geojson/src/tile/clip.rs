@@ -4,7 +4,9 @@
 use std::borrow::Cow;
 use std::sync::Arc;
 
-use super::geometry::{Feature, Geometry, Line, Ring, Vertex, X};
+use smallvec::smallvec;
+
+use super::geometry::{Feature, Geometry, Line, Parts, Ring, Vertex, X};
 
 /// The parts of `features` between `k1` and `k2` on `AXIS`. `min` and `max`
 /// bound all of them on that axis: if they lie inside, they come back
@@ -41,14 +43,14 @@ pub(super) fn clip<const AXIS: usize>(
                 Geometry::Points(points.iter().copied().filter(|p| (k1..=k2).contains(&p.get::<AXIS>())).collect())
             }
             Geometry::Lines(lines) => {
-                let mut pieces = Vec::new();
+                let mut pieces = Parts::new();
                 for line in lines {
                     clip_line::<AXIS>(line, k1, k2, line_metrics, &mut pieces);
                 }
                 if line_metrics {
                     for piece in pieces {
                         clipped.extend(Feature::new(
-                            Geometry::Lines(vec![piece]),
+                            Geometry::Lines(smallvec![piece]),
                             Arc::clone(&feature.properties),
                             feature.id.clone(),
                         ));
@@ -77,7 +79,13 @@ pub(super) fn clip<const AXIS: usize>(
 }
 
 /// Appends the pieces of `line` between `k1` and `k2` to `pieces`.
-pub(super) fn clip_line<const AXIS: usize>(line: &Line, k1: f64, k2: f64, line_metrics: bool, pieces: &mut Vec<Line>) {
+pub(super) fn clip_line<const AXIS: usize>(
+    line: &Line,
+    k1: f64,
+    k2: f64,
+    line_metrics: bool,
+    pieces: &mut Parts<Line>,
+) {
     let [_, .., last] = line.points[..] else { return };
     let new_piece = || Line { points: Vec::new(), length: line.length, start: line.start, end: line.end };
     let mut piece = new_piece();

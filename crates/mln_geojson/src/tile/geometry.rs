@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use feature::{Identifier, PropertyMap};
 use geo_types::Coord;
+use smallvec::SmallVec;
 
 /// The x axis, for the functions generic over an axis.
 pub(super) const X: usize = 0;
@@ -62,13 +63,16 @@ pub(super) struct Ring {
     pub(super) area: f64,
 }
 
+/// A geometry's parts, held inline when there's one, as most often.
+pub(super) type Parts<T> = SmallVec<[T; 1]>;
+
 /// A feature's geometry: one or more points, lines or polygons. A polygon is
 /// its rings, the outer one first.
 #[derive(Clone, Debug)]
 pub(super) enum Geometry {
-    Points(Vec<Vertex>),
-    Lines(Vec<Line>),
-    Polygons(Vec<Vec<Ring>>),
+    Points(Parts<Vertex>),
+    Lines(Parts<Line>),
+    Polygons(Parts<Vec<Ring>>),
 }
 
 impl Geometry {

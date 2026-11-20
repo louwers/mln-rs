@@ -2761,6 +2761,7 @@ dependencies = [
  "geojson",
  "mln-rs-feature",
  "serde_json",
+ "smallvec",
  "thiserror 2.0.21",
 ]
 
