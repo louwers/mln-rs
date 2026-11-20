@@ -11,10 +11,11 @@
 //!
 //! A drape draws again only when what its layers would draw it from
 //! differs from what they drew it from ([`DrapeKey`]); while the camera
-//! moves, a drape drawn at another zoom stays, as in GL JS, and at rest a
-//! continuous map draws those stale only by the camera one tile a frame
-//! ([`Drapes::choose`]). A drape whose layers make no draw has no texture,
-//! so a stack that draws nothing in a tile holds no memory there.
+//! of a continuous map moves, a drape drawn at another zoom stays, as in
+//! GL JS, and at rest a continuous map draws those stale only by the
+//! camera one tile a frame ([`Drapes::choose`]). A drape whose layers make
+//! no draw has no texture, so a stack that draws nothing in a tile holds no
+//! memory there.
 //!
 //! A drape's side follows its tile's on screen ([`shown_size`]): GL JS's
 //! where the tile shows large, fewer texels where it shows small, and no
@@ -485,14 +486,15 @@ impl Drapes {
     ///
     /// A drape not drawn yet or stale, or whose key differs from the one it
     /// was drawn from by its content ([`DrapeKey::difference`]), draws again
-    /// at once. With the camera `at_rest`, a drape whose key differs only by
-    /// the camera, or whose texture is smaller than its tile's side, draws
-    /// again too: `paced`, in a continuous map, only the drapes of one tile
-    /// a frame, and those of the tiles whose content changed, as in GL JS.
-    /// That tile is the one drawn longest ago, the nearest of those, so
-    /// that a camera that jumps every frame draws each tile in turn. The
-    /// others [wait](Self::waiting) for a later frame. While the camera
-    /// moves, a drape drawn at another zoom or bearing stays.
+    /// at once. With the camera `at_rest`, and in a still, which isn't
+    /// `paced`, a drape whose key differs only by the camera, or whose
+    /// texture is smaller than its tile's side, draws again too: `paced`, in
+    /// a continuous map, only the drapes of one tile a frame, and those of
+    /// the tiles whose content changed, as in GL JS. That tile is the one
+    /// drawn longest ago, the nearest of those, so that a camera that jumps
+    /// every frame draws each tile in turn. The others
+    /// [wait](Self::waiting) for a later frame. While the camera of a
+    /// continuous map moves, a drape drawn at another zoom or bearing stays.
     ///
     /// The sides are those the byte cap gives the drapes with a texture and
     /// those that draw again for their content, which may make one
@@ -500,6 +502,7 @@ impl Drapes {
     /// again at once, so that the cap holds. Their layers' drawings wait for
     /// the layers to take them.
     pub(crate) fn choose(&mut self, at_rest: bool, paced: bool) {
+        let at_rest = at_rest || !paced;
         (self.at_rest, self.paced) = (at_rest, paced);
         self.frame += 1;
         for drape in self.drapes.iter_mut().flat_map(|drape| &mut drape.stacks) {

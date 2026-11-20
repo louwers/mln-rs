@@ -1063,7 +1063,8 @@ fn a_paint_change_draws_every_drape_in_one_frame_while_the_camera_jumps() {
     assert!(map.frame().1.is_empty(), "the drapes are drawn again once only");
 }
 
-/// A still draws every drape stale by the zoom in its one frame.
+/// A still draws every drape stale by the zoom in its one frame, though a
+/// gesture moves the camera.
 #[test]
 fn a_still_draws_every_drape_stale_by_the_zoom_at_once() {
     let mut map = DrapedMap::new(Tiles::default());
@@ -1071,11 +1072,14 @@ fn a_still_draws_every_drape_stale_by_the_zoom_at_once() {
     map.settle();
     let drapes = map.drapes();
     assert_eq!(4, drapes.len(), "drapes: {drapes:?}");
-    map.transform.jump_to(&CameraOptions { zoom: Some(2.05), ..Default::default() });
-    let (full, drawn) = map.frame();
-    assert!(full);
-    assert_eq!(drapes, drawn);
-    assert_eq!(drapes, map.drapes(), "the same drapes cover the view");
+    for (camera_moving, zoom) in [(false, 2.05), (true, 2.1)] {
+        map.camera_moving = camera_moving;
+        map.transform.jump_to(&CameraOptions { zoom: Some(zoom), ..Default::default() });
+        let (full, drawn) = map.frame();
+        assert!(full);
+        assert_eq!(drapes, drawn, "camera moving: {camera_moving}");
+        assert_eq!(drapes, map.drapes(), "the same drapes cover the view");
+    }
 }
 
 /// A hillshade of the DEM, lit from the viewport, as its lights are by

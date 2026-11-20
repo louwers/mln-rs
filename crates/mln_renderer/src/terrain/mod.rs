@@ -88,7 +88,8 @@
 //!   the layers' evaluated values, the zoom, and the bearing where a layer
 //!   draws by it. A change of the style's images, or of the feature
 //!   state of a bucket a drape shows, draws it again too. While the camera
-//!   moves, a drape drawn at another zoom or bearing stays. At rest, a
+//!   of a continuous map moves, a drape drawn at another zoom or bearing
+//!   stays; a still draws it again. At rest, a
 //!   continuous map draws the drapes stale only by the camera one tile a
 //!   frame, as GL JS does once the zoom settles: the tile drawn longest
 //!   ago, the nearest the center of those, so that a camera that jumps
