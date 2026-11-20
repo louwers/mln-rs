@@ -29,11 +29,10 @@ use crate::tile::source_tiles::SourceTiles;
 use crate::update_parameters::UpdateParameters;
 
 /// How far the skirts of terrain tiles reach down at `zoom`, in meters
-/// (GL JS's `getSkirtLength`, with the earth's radius of mln-rs); `None`
-/// for tiles without skirts.
+/// (GL JS's `getSkirtLength`); `None` for tiles without skirts.
 fn skirt_length(length: TerrainSkirtLength, zoom: f64) -> Option<f64> {
     match length {
-        TerrainSkirtLength::Auto => Some(constants::M2PI * constants::EARTH_RADIUS_M / zoom.max(0.0).exp2() / 5.0),
+        TerrainSkirtLength::Auto => Some(constants::M2PI * constants::EARTH_MEAN_RADIUS_M / zoom.max(0.0).exp2() / 5.0),
         TerrainSkirtLength::None => None,
     }
 }

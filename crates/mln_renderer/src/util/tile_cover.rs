@@ -1039,7 +1039,7 @@ pub(crate) fn mercator_covering_tiles(
     let center_lat_lng = transform.center(WrapMode::Unwrapped);
     let center = Projection::project(&center_lat_lng, 1.0 / constants::TILE_SIZE_D);
     let meters_per_world =
-        Projection::meters_per_pixel_at_latitude(center_lat_lng.latitude(), transform.zoom()) * world_size;
+        Projection::altitude_meters_per_pixel(center_lat_lng.latitude(), transform.zoom()) * world_size;
     let center_coord = DVec3::new(center.x, center.y, transform.center_altitude() / meters_per_world);
     // The camera's position, which is above the elevated center.
     let Some(camera_coord) = transform.free_camera_options().position else {

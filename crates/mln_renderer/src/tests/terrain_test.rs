@@ -147,8 +147,8 @@ fn the_surface_decodes_the_dem_as_its_tileset_says_and_hangs_skirts_as_the_map_s
     assert_eq!(1.0 / 256.0, auto.props.unpack_scale);
     assert_eq!(1.5, auto.props.exaggeration);
     // A fifth of a tile's width at the map's zoom, 10.5, in meters at the
-    // equator.
-    let tile_width = 2.0 * std::f64::consts::PI * 6_378_137.0 / 2f64.powf(10.5);
+    // equator of GL JS's sphere.
+    let tile_width = 2.0 * std::f64::consts::PI * 6_371_008.8 / 2f64.powf(10.5);
     assert_eq!((tile_width / 5.0) as f32, auto.props.skirt_length);
 
     let none = surface(TerrainSkirtLength::None);

@@ -264,9 +264,8 @@ fn alpine(pitched: bool) -> TransformState {
     .unwrap()
 }
 
-/// Without terrain the planes and matrices stay what they were before the
-/// view knew of terrain, to the bit (since then, meters scale as at the
-/// center), and a terrain that goes away restores them.
+/// Without terrain the planes and matrices are those of the flat map, to the
+/// bit, and a terrain that goes away restores them.
 #[test]
 fn matrices_without_terrain_are_unchanged() {
     // Each view's far plane, projection matrix, and the z row of its matrix
@@ -284,39 +283,39 @@ fn matrices_without_terrain_are_unchanged() {
                 -2.808_445_306_917_968_7,
                 0.0,
                 0.0,
-                0.007_508_877_260_565_23,
-                -0.004_520_344_110_860_268,
-                -0.091_007_877_558_885_29,
-                -0.090_406_882_217_205_36,
+                0.007_517_278_564_121_545,
+                -0.004_525_401_695_601_170_5,
+                -0.091_109_701_677_039_9,
+                -0.090_508_033_912_023_4,
                 -3_028_316.878_903_641,
                 1_147_156.446_909_028_3,
                 298.848_628_475_551_95,
                 298.868_496_274_289_27,
             ],
-            [0.0, 0.0, -0.109_624_258_666_032_52, 298.233_205_214_500_34],
+            [0.0, 0.0, -0.109_746_911_712_850_36, 298.233_205_214_500_34],
         ),
         (
             alpine(true),
-            54_478.153_105_644_335,
+            54_505.332_684_338_09,
             [
                 1.784_059_983_608_735_4,
                 0.661_384_306_806_117_8,
-                0.326_202_383_497_395_66,
+                0.326_202_377_525_688_9,
                 0.326_190_408_187_028_27,
                 0.833_051_235_020_185_3,
                 -0.450_162_381_905_947_7,
-                -0.896_233_682_831_371_7,
+                -0.896_233_666_424_242_3,
                 -0.896_200_780_936_546_3,
-                -0.024_527_372_501_201_117,
-                0.261_315_976_530_130_6,
-                -0.027_186_871_862_956_253,
-                -0.027_185_873_797_813_42,
-                -3_057_312.553_228_450_5,
-                -463_638.868_611_956_83,
-                366_351.995_260_439_06,
-                366_340.545_969_311_15,
+                -0.024_554_814_939_620_46,
+                0.261_608_349_779_387_8,
+                -0.027_217_289_382_642_18,
+                -0.027_216_290_699_074_892,
+                -3_057_312.575_182_401,
+                -463_638.634_713_357_43,
+                366_351.964_219_291,
+                366_340.521_635_790_1,
             ],
-            [0.326_537_870_775_438_83, -0.897_155_426_552_309_5, -0.027_214_832_571_097_07, 366_672.746_155_253_44],
+            [0.326_537_697_417_830_06, -0.897_154_950_256_194, -0.027_245_267_408_459_74, 366_672.527_115_380_4],
         ),
     ];
     for (mut state, far_z, projection, clipped_z) in expected {
@@ -371,9 +370,9 @@ fn the_center_at_its_altitude_draws_at_the_center() {
 }
 
 /// With terrain, the near and far planes are GL JS's (`calculateNearFarZ`
-/// in `mercator_camera_math.ts)`: the numbers come from that function run on
-/// the same cameras, with mln-rs's earth radius for the pixels per meter. A
-/// copy of it with GL JS's radius gives GL JS's own test expectations.
+/// in `mercator_camera_math.ts`): the camera below sea level is GL JS's own
+/// test, with its expected far plane, and the others pin the same function
+/// on other cameras.
 #[test]
 fn terrain_planes_are_gl_js_planes() {
     use mln_util::geo::EdgeInsets;
@@ -400,7 +399,7 @@ fn terrain_planes_are_gl_js_planes() {
             top_padding: 0.0,
             min_elevation: 900.0,
             near_z: 8.0,
-            far_z: 1_952.317_066_220_289_5,
+            far_z: 1_952.897_196_030_780_6,
         },
         // Ground below sea level: GL JS's own test of a negative floor.
         Case {
@@ -412,7 +411,7 @@ fn terrain_planes_are_gl_js_planes() {
             top_padding: 0.0,
             min_elevation: -455.5,
             near_z: 10.0,
-            far_z: 1_870.617_879_146_915_8,
+            far_z: 1_870.705_545_073_004,
         },
         // Past the horizon pitch, with the center moved down the view.
         Case {
@@ -424,7 +423,7 @@ fn terrain_planes_are_gl_js_planes() {
             top_padding: 120.0,
             min_elevation: 250.0,
             near_z: 7.68,
-            far_z: 18_532.242_194_604_092,
+            far_z: 18_540.835_075_836_305,
         },
     ];
     for case in cases {

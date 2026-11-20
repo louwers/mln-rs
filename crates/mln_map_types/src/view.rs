@@ -312,8 +312,7 @@ impl View {
     /// The center's altitude, in meters.
     #[must_use]
     pub fn center_altitude(&self) -> f64 {
-        self.params.z
-            * Projection::meters_per_pixel_at_latitude(self.center(WrapMode::Unwrapped).latitude(), self.zoom())
+        self.params.z * Projection::altitude_meters_per_pixel(self.center(WrapMode::Unwrapped).latitude(), self.zoom())
     }
 
     #[must_use]
@@ -588,7 +587,7 @@ impl View {
         let width = f64::from(params.size.width);
         let height = f64::from(params.size.height);
         let pixels_per_meter =
-            1.0 / Projection::meters_per_pixel_at_latitude(self.center(WrapMode::Unwrapped).latitude(), self.zoom());
+            1.0 / Projection::altitude_meters_per_pixel(self.center(WrapMode::Unwrapped).latitude(), self.zoom());
 
         // Heights in pixels at the zoom, as the center's altitude is.
         let limited_pitch = params.pitch.min(max_mercator_horizon_angle());
@@ -651,7 +650,7 @@ impl View {
         // so that a point at the center's altitude draws at the center (GL
         // JS's `pixelsPerMeter`).
         let pixels_per_meter =
-            1.0 / Projection::meters_per_pixel_at_latitude(self.center(WrapMode::Unwrapped).latitude(), self.zoom());
+            1.0 / Projection::altitude_meters_per_pixel(self.center(WrapMode::Unwrapped).latitude(), self.zoom());
         let world_to_camera =
             camera.world_to_camera(params.scale, pixels_per_meter, params.viewport_mode == ViewportMode::FlippedY);
         let mut camera_to_clip = perspective(self.perspective_fov(), width / height, near_z, self.far_z());
