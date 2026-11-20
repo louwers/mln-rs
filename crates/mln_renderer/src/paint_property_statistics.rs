@@ -11,12 +11,14 @@ pub trait StatisticValue {
 }
 
 impl StatisticValue for f32 {
+    #[inline]
     fn statistic(&self) -> Option<f32> {
         Some(*self)
     }
 }
 
 impl StatisticValue for Color {
+    #[inline]
     fn statistic(&self) -> Option<f32> {
         None
     }

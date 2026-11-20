@@ -58,6 +58,7 @@ pub struct InterleavedVertexBuffer {
 impl InterleavedVertexBuffer {
     /// Grows the vertices to `length`, for `populate` to write the values
     /// of the new ones, from the current count up.
+    #[inline]
     pub fn populate(&mut self, length: usize, populate: impl FnOnce(&mut Self)) {
         let added = (length - self.vertex_count) * self.stride;
         let data = self.shared_vertex_vector.get_mut();
@@ -69,29 +70,34 @@ impl InterleavedVertexBuffer {
 
     /// The vertices' size in bytes: their fields' sizes and padding.
     #[must_use]
+    #[inline]
     pub fn stride(&self) -> usize {
         self.stride
     }
 
     /// How many vertices there are.
     #[must_use]
+    #[inline]
     pub fn vertex_count(&self) -> usize {
         self.vertex_count
     }
 
     /// The interleaved vertices, `stride` bytes each.
     #[must_use]
+    #[inline]
     pub fn vertices(&self) -> &GeometryVec<u8> {
         &self.shared_vertex_vector
     }
 
     /// Whether the values moved to the render thread.
     #[must_use]
+    #[inline]
     pub fn is_moved(&self) -> bool {
         self.shared_vertex_vector.is_moved()
     }
 
     /// Writes `value` at `offset` in each of the vertices `indexes`.
+    #[inline]
     pub fn fill(&mut self, indexes: std::ops::Range<usize>, offset: usize, value: &[u8]) {
         // Taking the vertices copies a worker's buffer into wasm memory.
         if indexes.is_empty() {
@@ -108,6 +114,7 @@ impl InterleavedVertexBuffer {
 
     /// Appends a field of `size` bytes, aligned to `alignment`, to the vertex
     /// format and returns its offset.
+    #[inline]
     pub fn extend_vertex_format(&mut self, size: usize, alignment: usize) -> usize {
         let mut offset = self.stride & (alignment - 1);
         if offset != 0 {
@@ -139,6 +146,7 @@ impl BinderValue for f32 {
     const BASE_DATA_TYPE: AttributeDataType = AttributeDataType::Float;
     const INTERPOLATED_DATA_TYPE: AttributeDataType = AttributeDataType::Float2;
 
+    #[inline]
     fn attribute_value(&self) -> [f32; 2] {
         [*self, 0.0]
     }
@@ -146,6 +154,7 @@ impl BinderValue for f32 {
 
 /// Packs two values into a `u16`: `a as u16 * 256 + b as u16`, computed as an
 /// `i32` and truncated.
+#[inline]
 fn pack_uint8_pair(a: f32, b: f32) -> u16 {
     (i32::from(a as u16) * 256 + i32::from(b as u16)) as u16
 }
@@ -161,6 +170,7 @@ impl BinderValue for Color {
     /// another.
     ///
     /// Also note that colors come in as floats 0..1, so we scale by 255.
+    #[inline]
     fn attribute_value(&self) -> [f32; 2] {
         [
             f32::from(pack_uint8_pair(255.0 * self.r, 255.0 * self.g)),
@@ -207,6 +217,7 @@ pub(crate) enum InterleavedVertexData {
 }
 
 impl InterleavedVertexData {
+    #[inline]
     fn offset(&self) -> Option<usize> {
         match self {
             Self::Uninitialized => None,
