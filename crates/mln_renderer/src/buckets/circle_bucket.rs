@@ -84,22 +84,6 @@ impl CircleBucket {
         // The translation's length, in `f32`.
         radius + stroke + (translate[0] * translate[0] + translate[1] * translate[1]).sqrt()
     }
-
-    /// The layout vertex for `p` with extrusion (`ex`, `ey`): `p.x * 2` is
-    /// an integer, added to a float and truncated to `i16`.
-    #[must_use]
-    pub(crate) fn vertex(
-        p: mln_tile_id::geometry_tile_data::GeometryCoordinate,
-        ex: f32,
-        ey: f32,
-    ) -> CircleLayoutVertex {
-        CircleLayoutVertex {
-            a1: [
-                ((i32::from(p.x) * 2) as f32 + f32::midpoint(ex, 1.0)) as i32 as i16,
-                ((i32::from(p.y) * 2) as f32 + f32::midpoint(ey, 1.0)) as i32 as i16,
-            ],
-        }
-    }
 }
 
 /// A data-driven property's largest value over the bucket's features, from

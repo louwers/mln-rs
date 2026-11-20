@@ -4,6 +4,7 @@
 
 use std::sync::Arc;
 
+use geometry::Point;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_map_types::MapMode;
 use mln_style::expression::Value;
@@ -17,6 +18,7 @@ use mln_vec_map::VecMap;
 
 use crate::bucket::{Bucket, BucketBase, UploadNeeds};
 use crate::bucket_geometry::{GeometryUpload, GeometryVec};
+use crate::gfx::mesh::{Indexed, add_point_quads};
 use crate::layer_type::EvaluatedLayer;
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::paint_property_binder::PaintPropertyBinder;
@@ -67,18 +69,6 @@ impl HeatmapBucket {
         }
     }
 
-    /// The layout vertex for `p` with extrusion (`ex`, `ey`): `p.x * 2` is
-    /// an integer, added to a float and truncated to `i16`.
-    #[must_use]
-    pub(crate) fn vertex(p: GeometryCoordinate, ex: f32, ey: f32) -> HeatmapLayoutVertex {
-        HeatmapLayoutVertex {
-            a1: [
-                ((i32::from(p.x) * 2) as f32 + f32::midpoint(ex, 1.0)) as i32 as i16,
-                ((i32::from(p.y) * 2) as f32 + f32::midpoint(ey, 1.0)) as i32 as i16,
-            ],
-        }
-    }
-
     #[must_use]
     pub(crate) fn texture_vertex(p: GeometryCoordinate) -> HeatmapTextureLayoutVertex {
         HeatmapLayoutVertex { a1: [p.x, p.y] }
@@ -100,52 +90,11 @@ impl Bucket for HeatmapBucket {
         canonical: &CanonicalTileID,
         _tessellator: &mut Tessellator,
     ) {
-        const VERTEX_LENGTH: usize = 4;
-
-        for points in geometry.iter() {
-            for &point in points {
-                let x = point.x;
-                let y = point.y;
-
-                // Do not include points that are outside the tile boundaries.
-                if x < 0 || i32::from(x) >= EXTENT || y < 0 || i32::from(y) >= EXTENT {
-                    continue;
-                }
-
-                let (vertex_offset, index_offset) = (self.vertices.len(), self.triangles.len());
-                let segment = match self.segments.last_mut() {
-                    Some(segment) if u16::try_from(segment.vertex_length + VERTEX_LENGTH).is_ok() => segment,
-                    // Move to a new segment because the old one can't hold
-                    // the geometry.
-                    _ => self.segments.push_mut(SegmentBase::new(vertex_offset, index_offset)),
-                };
-
-                // this geometry will be of the Point type, and we'll derive
-                // two triangles from it.
-                //
-                // ┌─────────┐
-                // │ 4     3 │
-                // │         │
-                // │ 1     2 │
-                // └─────────┘
-                //
-                self.vertices.get_mut().push(HeatmapBucket::vertex(point, -1.0, -1.0)); // 1
-                self.vertices.get_mut().push(HeatmapBucket::vertex(point, 1.0, -1.0)); // 2
-                self.vertices.get_mut().push(HeatmapBucket::vertex(point, 1.0, 1.0)); // 3
-                self.vertices.get_mut().push(HeatmapBucket::vertex(point, -1.0, 1.0)); // 4
-
-                debug_assert!(u16::try_from(segment.vertex_length).is_ok());
-                let index = segment.vertex_length as u16;
-
-                // 1, 2, 3
-                // 1, 4, 3
-                self.triangles.get_mut().extend_from_slice(&[index, index + 1, index + 2]);
-                self.triangles.get_mut().extend_from_slice(&[index, index + 3, index + 2]);
-
-                segment.vertex_length += VERTEX_LENGTH;
-                segment.index_length += 6;
-            }
-        }
+        // Points outside the tile are left to the tiles they're in.
+        let in_tile = |p: &&Point<i16>| (0..EXTENT).contains(&i32::from(p.x)) && (0..EXTENT).contains(&i32::from(p.y));
+        let points = geometry.iter().flatten().filter(in_tile).copied();
+        let mut triangles = Indexed { indexes: self.triangles.get_mut(), segments: &mut self.segments };
+        add_point_quads(self.vertices.get_mut(), &mut triangles, points, |a1| HeatmapLayoutVertex { a1 });
 
         let length = self.vertices.len();
         for binders in self.paint_property_binders.values_mut() {

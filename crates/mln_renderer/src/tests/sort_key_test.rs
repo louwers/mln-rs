@@ -219,11 +219,6 @@ fn circle_order() {
             feature_order(bucket.vertices.data().iter().map(|v| v.a1[0]), 2),
             "{type_:?}"
         );
-        let expected_sort_key = match type_ {
-            SortKeyType::Constant | SortKeyType::Camera => 5.0,
-            _ => 0.0,
-        };
-        assert_eq!(expected_sort_key, bucket.segments.first().unwrap().sort_key, "{type_:?}");
     }
 }
 

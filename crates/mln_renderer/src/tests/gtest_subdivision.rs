@@ -584,15 +584,15 @@ fn fill_extrusion_roof_beyond_the_index_limit_keeps_its_granularity() {
 #[test]
 fn quad_and_grid() {
     let quad = create_tile_mesh(TileMeshOptions { granularity: 1, ..TileMeshOptions::default() });
-    assert_eq!(4, quad.vertices.len() / 2);
-    assert_eq!(6, quad.indices.len());
+    assert_eq!(4, quad.vertices.len());
+    assert_eq!(2, quad.triangles.len());
 
     let grid =
         create_tile_mesh(TileMeshOptions { granularity: 4, generate_borders: true, ..TileMeshOptions::default() });
-    assert_eq!(7 * 7, grid.vertices.len() / 2);
-    assert_eq!(6 * 6 * 6, grid.indices.len());
-    assert_eq!(-EXTENT_I16 / 128, grid.vertices[0]);
-    assert_eq!(EXTENT_I16 + EXTENT_I16 / 128, grid.vertices[(7 * 7 - 1) * 2]);
+    assert_eq!(7 * 7, grid.vertices.len());
+    assert_eq!(6 * 6 * 2, grid.triangles.len());
+    assert_eq!(-EXTENT_I16 / 128, grid.vertices[0][0]);
+    assert_eq!(EXTENT_I16 + EXTENT_I16 / 128, grid.vertices[7 * 7 - 1][0]);
 
     let polar = create_tile_mesh(TileMeshOptions {
         granularity: 2,
@@ -600,11 +600,11 @@ fn quad_and_grid() {
         extend_to_south_pole: true,
         ..TileMeshOptions::default()
     });
-    assert_eq!(3 * 5, polar.vertices.len() / 2);
-    assert_eq!(NORTH_POLE_Y, polar.vertices[1]);
-    assert_eq!(SOUTH_POLE_Y, polar.vertices[(3 * 5 - 1) * 2 + 1]);
-    let polar_vertices: Vec<Point<i16>> = polar.vertices.as_chunks::<2>().0.iter().map(|&[x, y]| p(x, y)).collect();
-    for triangle in polar.indices.as_chunks::<3>().0 {
+    assert_eq!(3 * 5, polar.vertices.len());
+    assert_eq!(NORTH_POLE_Y, polar.vertices[0][1]);
+    assert_eq!(SOUTH_POLE_Y, polar.vertices[3 * 5 - 1][1]);
+    let polar_vertices: Vec<Point<i16>> = polar.vertices.iter().map(|&[x, y]| p(x, y)).collect();
+    for triangle in &polar.triangles {
         assert!(signed_area(&polar_vertices, triangle.map(u32::from)) < 0.0);
     }
 }
@@ -613,7 +613,7 @@ fn quad_and_grid() {
 /// largest that fits.
 #[test]
 fn granularity_past_the_index_limit_is_capped() {
-    let vertex_count = |options: TileMeshOptions| create_tile_mesh(options).vertices.len() / 2;
+    let vertex_count = |options: TileMeshOptions| create_tile_mesh(options).vertices.len();
     let plain = |granularity| TileMeshOptions { granularity, ..TileMeshOptions::default() };
     let bordered = |granularity| TileMeshOptions { granularity, generate_borders: true, ..TileMeshOptions::default() };
     assert_eq!(256 * 256, vertex_count(plain(255)));
@@ -676,12 +676,11 @@ fn globe_mask_keeps_the_uncovered_parts() {
         extend_to_north_pole: true,
         ..TileMeshOptions::default()
     });
-    assert_eq!(grid.vertices.len() / 2, full.vertices.len());
-    for (i, vertex) in full.vertices.iter().enumerate() {
-        assert_eq!(grid.vertices[i * 2], vertex.position[0]);
-        assert_eq!(grid.vertices[i * 2 + 1], vertex.position[1]);
+    assert_eq!(grid.vertices.len(), full.vertices.len());
+    for (grid, vertex) in grid.vertices.iter().zip(&full.vertices) {
+        assert_eq!(*grid, vertex.position);
     }
-    assert_eq!(grid.indices, full.indices);
+    assert_eq!(grid.triangles.as_flattened(), full.indices);
 
     assert_eq!(globe_mesh_data(&tile, &TileMask::new(), globe_test_vertex).vertices.len(), 0);
 }

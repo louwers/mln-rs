@@ -4,6 +4,7 @@
 
 use std::sync::Arc;
 
+use geometry::Point;
 use mln_map_types::MapMode;
 use mln_style::expression::{EvaluationContext, Value};
 use mln_style::layers::{Circle, CircleLayoutProperties};
@@ -16,8 +17,9 @@ use mln_util::error::Error;
 use mln_vec_map::VecMap;
 
 use crate::bucket_parameters::BucketParameters;
-use crate::buckets::circle_bucket::CircleBucket;
+use crate::buckets::circle_bucket::{CircleBucket, CircleLayoutVertex};
 use crate::geometry::feature_index::FeatureIndex;
+use crate::gfx::mesh::{Indexed, add_point_quads};
 use crate::layer_type::EvaluatedLayer;
 use crate::layout::filter_groups::FilterGroups;
 use crate::layout::layout::{BuildParams, Layout, SourceLayer, layers_by_id};
@@ -127,69 +129,15 @@ impl CircleLayout {
         feature: &dyn GeometryTileFeature,
         geometry: &GeometryCollection,
         feature_index: usize,
-        sort_key: f32,
         canonical: &CanonicalTileID,
     ) {
-        const VERTEX_LENGTH: usize = 4;
-
-        for circle in geometry.iter() {
-            for point in circle {
-                let x = point.x;
-                let y = point.y;
-
-                // Do not include points that are outside the tile
-                // boundaries. Include all points in Still mode. You need to
-                // include points from neighbouring tiles so that they are
-                // not clipped at tile boundaries.
-                if mode == MapMode::Continuous && (x < 0 || i32::from(x) >= EXTENT || y < 0 || i32::from(y) >= EXTENT) {
-                    continue;
-                }
-
-                let (vertex_offset, index_offset) = (bucket.vertices.len(), bucket.triangles.len());
-                let segment = match bucket.segments.last_mut() {
-                    Some(last) if u16::try_from(last.vertex_length + VERTEX_LENGTH).is_ok() => last,
-                    // Move to a new segment because the old one can't hold
-                    // the geometry.
-                    _ => {
-                        let mut segment = mln_gfx::shaders::segment::SegmentBase::new(vertex_offset, index_offset);
-                        segment.sort_key = sort_key;
-                        bucket.segments.push_mut(segment)
-                    }
-                };
-
-                // this geometry will be of the Point type, and we'll derive
-                // two triangles from it.
-                //
-                // ┌─────────┐
-                // │ 4     3 │
-                // │         │
-                // │ 1     2 │
-                // └─────────┘
-                //
-                bucket.vertices.get_mut().push(CircleBucket::vertex(*point, -1.0, -1.0)); // 1
-                bucket.vertices.get_mut().push(CircleBucket::vertex(*point, 1.0, -1.0)); // 2
-                bucket.vertices.get_mut().push(CircleBucket::vertex(*point, 1.0, 1.0)); // 3
-                bucket.vertices.get_mut().push(CircleBucket::vertex(*point, -1.0, 1.0)); // 4
-
-                debug_assert!(u16::try_from(segment.vertex_length).is_ok());
-                let index = segment.vertex_length as u16;
-
-                // 1, 2, 3
-                // 1, 4, 3
-                // (`index + 1` etc. are `int`s narrowed to uint16_t)
-                bucket.triangles.get_mut().extend_from_slice(&[
-                    index,
-                    (i32::from(index) + 1) as u16,
-                    (i32::from(index) + 2) as u16,
-                    index,
-                    (i32::from(index) + 3) as u16,
-                    (i32::from(index) + 2) as u16,
-                ]);
-
-                segment.vertex_length += VERTEX_LENGTH;
-                segment.index_length += 6;
-            }
-        }
+        // A continuous map leaves the points outside the tile to the tiles
+        // they're in. The others draw them all, so that circles from a
+        // neighbouring tile aren't clipped at the tile's edge.
+        let in_tile = |p: &&Point<i16>| (0..EXTENT).contains(&i32::from(p.x)) && (0..EXTENT).contains(&i32::from(p.y));
+        let points = geometry.iter().flatten().filter(|p| mode != MapMode::Continuous || in_tile(p)).copied();
+        let mut triangles = Indexed { indexes: bucket.triangles.get_mut(), segments: &mut bucket.segments };
+        add_point_quads(bucket.vertices.get_mut(), &mut triangles, points, |a1| CircleLayoutVertex { a1 });
 
         let length = bucket.vertices.len();
         for binders in bucket.paint_property_binders.values_mut() {
@@ -225,15 +173,7 @@ impl Layout<Circle> for CircleLayout {
             let feature = source_layer.feature(i)?;
             let geometries = feature.geometry()?;
 
-            CircleLayout::add_circle(
-                &mut bucket,
-                self.mode,
-                &feature,
-                &geometries,
-                i,
-                circle_feature.sort_key,
-                &build.canonical,
-            );
+            CircleLayout::add_circle(&mut bucket, self.mode, &feature, &geometries, i, &build.canonical);
 
             feature_index.insert(&geometries, i, &self.source_layer_id, &self.bucket_leader_id);
         }

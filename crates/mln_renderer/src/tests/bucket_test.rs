@@ -559,7 +559,7 @@ fn raster_bucket_mask_empty() {
     let geometry = bucket.geometry();
     assert_eq!(Vec::<RasterLayoutVertex>::new(), geometry.vertices());
     assert_eq!(Vec::<u16>::new(), geometry.indices());
-    assert_eq!(vec![(0, 0, 0, 0)], segment_tuples(geometry.segments()));
+    assert_eq!(Vec::<(usize, usize, usize, usize)>::new(), segment_tuples(geometry.segments()));
 }
 
 // gtest: Buckets.RasterBucketMaskNoChildren

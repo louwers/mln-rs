@@ -4,7 +4,6 @@
 //
 
 use std::borrow::Cow;
-use std::cmp::Ordering;
 use std::range::RangeInclusive;
 use std::sync::Arc;
 
@@ -44,6 +43,7 @@ use crate::buckets::symbol_bucket::{
 };
 use crate::geometry::anchor::{Anchor, Anchors};
 use crate::geometry::feature_index::{FeatureIndex, IndexedSubfeature};
+use crate::gfx::mesh::Indexed;
 use crate::layer_type::EvaluatedLayer;
 use crate::layout::clip_lines::clip_lines;
 use crate::layout::layout::{BuildParams, Layout, LayoutParameters, SourceLayer, layers_by_id};
@@ -1244,7 +1244,6 @@ impl SymbolLayout {
         placed_symbol: usize,
         sort_key: f32,
     ) -> usize {
-        const VERTEX_LENGTH: usize = 4;
         let height_offset = buffer.placed_symbols[placed_symbol].height_offset;
 
         let tl = symbol.tl;
@@ -1256,29 +1255,7 @@ impl SymbolLayout {
         let pixel_offset_br = symbol.pixel_offset_br;
         let min_font_scale = symbol.min_font_scale;
 
-        let (vertex_offset, index_offset) = (buffer.attribute_data.len(), buffer.triangles.len());
-        let segment = match buffer.segments.last_mut() {
-            Some(last)
-                if u16::try_from(last.vertex_length + VERTEX_LENGTH).is_ok()
-                    && (last.sort_key - sort_key).abs().partial_cmp(&f32::EPSILON) != Some(Ordering::Greater) =>
-            {
-                last
-            }
-            _ => {
-                // A segment's length counts indices (three per triangle), not
-                // triangles.
-                let mut segment =
-                    mln_gfx::shaders::segment::SegmentBase::with_lengths(vertex_offset, index_offset, 0, 0);
-                segment.sort_key = sort_key;
-                buffer.segments.push_mut(segment)
-            }
-        };
-
-        // We're generating triangle fans, so we always start with the first
-        // coordinate in this polygon.
-        debug_assert!(u16::try_from(segment.vertex_length).is_ok());
-        let index = segment.vertex_length as u16;
-
+        let first = buffer.attribute_data.len();
         let anchor = label_anchor.point;
         let glyph_offset_y = symbol.glyph_offset.y;
         // coordinates (2 triangles)
@@ -1344,17 +1321,12 @@ impl SymbolLayout {
         let opacity_attributes = SymbolBucket::opacity_attributes(true, 1.0);
         buffer.opacity_attribute_data.extend_from_slice(&[opacity_attributes; 4]);
 
-        // add the two triangles, referencing the four coordinates we just
-        // inserted.
-        buffer.triangles.extend_from_slice(&[index, index + 1, index + 2]);
-        buffer.triangles.extend_from_slice(&[index + 1, index + 2, index + 3]);
-
-        segment.vertex_length += VERTEX_LENGTH;
-        segment.index_length += 6;
+        let mut triangles = Indexed { indexes: &mut buffer.triangles, segments: &mut buffer.segments };
+        let index = triangles.add_keyed(buffer.attribute_data.get_mut(), first, sort_key, [[0, 1, 2], [1, 2, 3]]);
 
         buffer.placed_symbols[placed_symbol].glyph_offsets.push(&mut buffer.pools.glyph_offsets, symbol.glyph_offset.x);
 
-        index as usize
+        index
     }
 
     fn add_symbols(
@@ -1400,34 +1372,15 @@ impl SymbolLayout {
                 };
 
                 for b in pools.boxes(feature) {
-                    const VERTEX_LENGTH: usize = 4;
                     let anchor = b.anchor;
-
-                    let tl = Vec2::new(b.x1, b.y1);
-                    let tr = Vec2::new(b.x2, b.y1);
-                    let bl = Vec2::new(b.x1, b.y2);
-                    let br = Vec2::new(b.x2, b.y2);
-
-                    let index_length = if feature.along_line { 6 } else { 8 };
-
-                    // A segment's length counts indices, not primitives.
-                    let (vertex_offset, index_offset) =
-                        (collision_buffer.vertices.len(), collision_buffer.indices.len());
-                    let segment = match collision_buffer.segments.last_mut() {
-                        Some(last) if u16::try_from(last.vertex_length + VERTEX_LENGTH).is_ok() => last,
-                        _ => collision_buffer
-                            .segments
-                            .push_mut(mln_gfx::shaders::segment::SegmentBase::new(vertex_offset, index_offset)),
-                    };
-                    let index = segment.vertex_length as u16;
-
                     let symbol_anchor = symbol_instance.anchor().point;
                     let height = symbol_instance.height_offset();
-                    for corner in [tl, tr, br, bl] {
+                    let first = collision_buffer.vertices.len();
+                    for corner in [(b.x1, b.y1), (b.x2, b.y1), (b.x2, b.y2), (b.x1, b.y2)] {
                         collision_buffer.vertices.push(SymbolBucket::collision_layout_vertex(
                             anchor,
                             symbol_anchor,
-                            corner,
+                            Vec2::from(corner),
                             height,
                         ));
                     }
@@ -1438,18 +1391,15 @@ impl SymbolLayout {
                     let dynamic_vertex = SymbolBucket::collision_dynamic_vertex(false, false, Vec2::ZERO);
                     collision_buffer.dynamic_vertices.extend_from_slice(&[dynamic_vertex; 4]);
 
+                    // A circle along a line is drawn filled, and a box as its
+                    // outline.
+                    let mut primitives =
+                        Indexed { indexes: &mut collision_buffer.indices, segments: &mut collision_buffer.segments };
                     if feature.along_line {
-                        collision_buffer.indices.extend_from_slice(&[index, index + 1, index + 2]);
-                        collision_buffer.indices.extend_from_slice(&[index, index + 2, index + 3]);
+                        primitives.add(&mut collision_buffer.vertices, first, [[0, 1, 2], [0, 2, 3]]);
                     } else {
-                        collision_buffer.indices.extend_from_slice(&[index, index + 1]);
-                        collision_buffer.indices.extend_from_slice(&[index + 1, index + 2]);
-                        collision_buffer.indices.extend_from_slice(&[index + 2, index + 3]);
-                        collision_buffer.indices.extend_from_slice(&[index + 3, index]);
+                        primitives.add(&mut collision_buffer.vertices, first, [[0, 1], [1, 2], [2, 3], [3, 0]]);
                     }
-
-                    segment.vertex_length += VERTEX_LENGTH;
-                    segment.index_length += index_length;
                 }
             };
             populate_collision_box(symbol_instance.text_collision_feature(), true);

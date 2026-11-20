@@ -1,10 +1,32 @@
 //! Index buffers drawn in segments: a segment's 16-bit indices address at
 //! most [`MAX_SEGMENT_VERTICES`] vertices from its first.
 
+use geometry::Point;
 use mln_gfx::shaders::segment::{MAX_SEGMENT_VERTICES, SegmentBase};
+
+/// Adds the quads that circles and heatmap points are drawn as, one for
+/// each of `points`, and indexes their triangles. `vertex` makes each
+/// corner from the point doubled, with the corner's right and top sides in
+/// the low bits.
+pub(crate) fn add_point_quads<V: Copy>(
+    vertices: &mut Vec<V>,
+    triangles: &mut Indexed<'_>,
+    points: impl IntoIterator<Item = Point<i16>>,
+    vertex: impl Fn([i16; 2]) -> V,
+) {
+    for p in points {
+        let (x, y) = (p.x.wrapping_mul(2), p.y.wrapping_mul(2));
+        let first = vertices.len();
+        vertices.extend([[x, y], [x | 1, y], [x | 1, y | 1], [x, y | 1]].map(&vertex));
+        triangles.add(vertices, first, [[0, 1, 2], [0, 3, 2]]);
+    }
+}
 
 /// The indexes of one kind of primitive, such as triangles or lines, over a
 /// vertex buffer, and the segments that draw them.
+///
+/// Where a vertex buffer has per-vertex buffers beside it, a mesh larger
+/// than a segment, whose split copies vertices, must extend them after.
 pub(crate) struct Indexed<'a> {
     pub(crate) indexes: &'a mut Vec<u16>,
     pub(crate) segments: &'a mut Vec<SegmentBase>,
@@ -12,7 +34,10 @@ pub(crate) struct Indexed<'a> {
 
 impl Indexed<'_> {
     /// Indexes `primitives`, each `N` indices into a mesh whose vertices are
-    /// `vertices[first..]`, which follow every vertex the segments draw.
+    /// `vertices[first..]`, which follow every vertex the segments draw, and
+    /// returns where the mesh's first vertex is in its segment: 0 for a mesh
+    /// spread over several, whose first segment starts at it, and for a mesh
+    /// without primitives, which no segment draws.
     ///
     /// A mesh that fits in a segment goes in the last one when that ends at
     /// `first` and has room, or else in a new one. A larger mesh is spread
@@ -25,15 +50,30 @@ impl Indexed<'_> {
         vertices: &mut Vec<V>,
         first: usize,
         primitives: impl IntoIterator<Item = [u32; N]>,
-    ) {
+    ) -> usize {
+        self.add_keyed(vertices, first, 0.0, primitives)
+    }
+
+    /// [`Indexed::add`] into segments of one sort key, which a draw orders
+    /// by: a mesh continues the last segment only if it has `sort_key`.
+    pub(crate) fn add_keyed<V: Copy, const N: usize>(
+        &mut self,
+        vertices: &mut Vec<V>,
+        first: usize,
+        sort_key: f32,
+        primitives: impl IntoIterator<Item = [u32; N]>,
+    ) -> usize {
         let mut primitives = primitives.into_iter().peekable();
         if primitives.peek().is_none() {
-            return;
+            return 0;
         }
         let count = vertices.len() - first;
         if count > MAX_SEGMENT_VERTICES {
-            self.add_split(vertices, first, primitives);
-            return;
+            let primitives: Vec<[u32; N]> = primitives.collect();
+            for source in self.add_split(first, count, sort_key, &primitives) {
+                vertices.push(vertices[source]);
+            }
+            return 0;
         }
 
         let index_offset = self.indexes.len();
@@ -41,48 +81,57 @@ impl Indexed<'_> {
         let segment = match self.segments.last_mut() {
             Some(last)
                 if last.vertex_offset + last.vertex_length == first
-                    && last.vertex_length + count <= MAX_SEGMENT_VERTICES =>
+                    && last.vertex_length + count <= MAX_SEGMENT_VERTICES
+                    && last.sort_key.total_cmp(&sort_key).is_eq() =>
             {
                 last
             }
-            _ => self.segments.push_mut(SegmentBase::new(first, index_offset)),
+            _ => self.segments.push_mut(SegmentBase { sort_key, ..SegmentBase::new(first, index_offset) }),
         };
-        let base = segment.vertex_length as u32;
+        let base = segment.vertex_length;
         for primitive in primitives {
-            self.indexes.extend_from_slice(&primitive.map(|i| (base + i) as u16));
+            self.indexes.extend_from_slice(&primitive.map(|i| (base as u32 + i) as u16));
         }
         segment.vertex_length += count;
         segment.index_length += self.indexes.len() - index_offset;
+        base
     }
 
-    fn add_split<V: Copy, const N: usize>(
+    /// Spreads `primitives` of the `count` vertices from `first`, which end
+    /// the vertex buffer, over segments, and returns the vertices that the
+    /// segments after the first draw copies of, to append in order.
+    fn add_split<const N: usize>(
         &mut self,
-        vertices: &mut Vec<V>,
         first: usize,
-        primitives: impl Iterator<Item = [u32; N]>,
-    ) {
+        count: usize,
+        sort_key: f32,
+        primitives: &[[u32; N]],
+    ) -> Vec<usize> {
+        let end = first + count;
+        let mut copies = Vec::new();
         // Where each mesh vertex was last put in the vertex buffer, and the
         // segment being filled; it draws the vertices in that range.
-        let mut placed: Vec<usize> = (first..vertices.len()).collect();
-        let mut segment = SegmentBase::with_lengths(first, self.indexes.len(), MAX_SEGMENT_VERTICES, 0);
+        let mut placed: Vec<usize> = (first..end).collect();
+        let mut segment =
+            SegmentBase { sort_key, ..SegmentBase::with_lengths(first, self.indexes.len(), MAX_SEGMENT_VERTICES, 0) };
         let drawn = |segment: &SegmentBase, at: usize| {
             (segment.vertex_offset..segment.vertex_offset + segment.vertex_length).contains(&at)
         };
         for primitive in primitives {
             let missing = primitive.iter().filter(|&&i| !drawn(&segment, placed[i as usize])).count();
             if segment.vertex_length + missing > MAX_SEGMENT_VERTICES {
-                let next = SegmentBase::new(vertices.len(), self.indexes.len());
+                let next = SegmentBase { sort_key, ..SegmentBase::new(end + copies.len(), self.indexes.len()) };
                 let full = std::mem::replace(&mut segment, next);
                 // The first may have drawn nothing in place.
                 if full.index_length > 0 {
                     self.segments.push(full);
                 }
             }
-            for i in primitive {
+            for &i in primitive {
                 let i = i as usize;
                 if !drawn(&segment, placed[i]) {
-                    vertices.push(vertices[first + i]);
-                    placed[i] = vertices.len() - 1;
+                    copies.push(first + i);
+                    placed[i] = end + copies.len() - 1;
                     segment.vertex_length += 1;
                 }
                 self.indexes.push((placed[i] - segment.vertex_offset) as u16);
@@ -90,6 +139,7 @@ impl Indexed<'_> {
             segment.index_length += N;
         }
         self.segments.push(segment);
+        copies
     }
 }
 
@@ -160,6 +210,21 @@ mod tests {
         expected.extend(add_mesh(&mut vertices, &mut indexed, 3, &[[0, 1, 2]]));
         assert_eq!(segments.len(), 2);
         assert_eq!(drawn::<3>(&vertices, &indexes, &segments), expected);
+    }
+
+    #[test]
+    fn a_mesh_continues_a_segment_only_of_its_sort_key() {
+        let (mut vertices, mut indexes, mut segments) = (Vec::new(), Vec::new(), Vec::new());
+        let mut indexed = Indexed { indexes: &mut indexes, segments: &mut segments };
+        let mut offsets = Vec::new();
+        for sort_key in [1.0, 1.0, 2.0] {
+            let first = vertices.len();
+            vertices.extend([0u32; 3]);
+            offsets.push(indexed.add_keyed(&mut vertices, first, sort_key, [[0, 1, 2]]));
+        }
+        assert_eq!(offsets, [0, 3, 0]);
+        let keys: Vec<(f32, usize)> = segments.iter().map(|s| (s.sort_key, s.vertex_length)).collect();
+        assert_eq!(keys, [(1.0, 6), (2.0, 3)]);
     }
 
     #[test]
