@@ -519,7 +519,7 @@ impl RenderHeatmapLayer {
             textures[ID_HEATMAP_COLOR_RAMP_TEXTURE] = color_ramp.cloned();
             let objects = DrawObjects::new(
                 heatmap_texture_shader,
-                ColorMode::alpha_blended(),
+                context.color_mode(ColorMode::alpha_blended()),
                 CullFaceMode::disabled(),
                 geometry,
                 textures,
@@ -529,7 +529,7 @@ impl RenderHeatmapLayer {
         let (Some(draw), Some(frame)) = (&drawing.texture, drawing.frame.as_mut()) else {
             return;
         };
-        let frame_draw = FrameDraw { depth: DrawDepth::Off, ..draw.frame_draw(None) };
+        let frame_draw = draw.frame_draw(None);
         frame.push(frame_draw);
         let size = paint_parameters.renderable_size;
         let m = orthographic(0.0, f64::from(size.width), f64::from(size.height), 0.0, -1.0, 1.0);

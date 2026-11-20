@@ -92,12 +92,12 @@ impl RenderBackgroundLayer {
         }
     }
 
-    /// The GPU objects of the draw of the tile `tile_id`, with `shader`, in
-    /// `passes`, in the projection `variant`.
+    /// The GPU objects of the draw of the tile `tile_id`, with `shader` and
+    /// `color_mode`, in the projection `variant`.
     fn build_tile(
         tile_id: &OverscaledTileID,
         shader: ShaderKey,
-        passes: RenderPass,
+        color_mode: ColorMode,
         variant: ProjectionVariant,
     ) -> DrawObjects {
         let (vertices, vertex_count, indexes, segments) = if variant == ProjectionVariant::Globe {
@@ -123,8 +123,6 @@ impl RenderBackgroundLayer {
             segments: segments.iter().map(SegmentBase::copy).collect(),
             instances: None,
         };
-        let color_mode =
-            if passes == RenderPass::Translucent { ColorMode::alpha_blended() } else { ColorMode::unblended() };
         DrawObjects::new(shader, color_mode, CullFaceMode::disabled(), geometry, Textures::default())
     }
 
@@ -223,13 +221,18 @@ impl TypedLayer for RenderBackgroundLayer {
         }
 
         let variant = base.projection_variant;
+        let color_mode = paint_parameters.context.color_mode(if draw_passes == RenderPass::Translucent {
+            ColorMode::alpha_blended()
+        } else {
+            ColorMode::unblended()
+        });
         for tile_id in &*tile_cover {
             let Some(entry) = drawing.tiles_mut().entry(tile_id) else {
                 continue;
             };
             let cached = entry
                 .value
-                .get_or_insert_with(|| KeptDraw::new(Self::build_tile(tile_id, shader.clone(), draw_passes, variant)));
+                .get_or_insert_with(|| KeptDraw::new(Self::build_tile(tile_id, shader.clone(), color_mode, variant)));
             if pattern_texture.is_some() {
                 cached.objects.set_texture(ID_BACKGROUND_IMAGE_TEXTURE, pattern_texture);
             }

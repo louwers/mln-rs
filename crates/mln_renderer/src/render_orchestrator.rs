@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use mln_gfx::gpu::Gpu;
-use mln_map_types::{MapMode, View};
+use mln_map_types::{MapDebugOptions, MapMode, View};
 use mln_style::diff::{ItemChanges, LayerChange, LayerChanges, StyleDiff, sources_by_id};
 use mln_style::expression::{Dependency, GlobalStateMap};
 use mln_style::layer_type::{ErasedLayerStyle, SourceKind};
@@ -917,10 +917,12 @@ impl RenderOrchestrator {
                     && layer.supports_zoom(self.zoom_history.last_zoom)
                 {
                     // On the globe the background is a sphere mesh, not the
-                    // backdrop, so it stays a layer.
+                    // backdrop, so it stays a layer, as it does for the
+                    // overdraw inspector, which counts its draw.
                     if self.background_layer_as_color
                         && frame.sky.is_none()
                         && !update_parameters.view.is_globe()
+                        && !update_parameters.debug_options.contains(MapDebugOptions::OVERDRAW)
                         && layers.first().is_some_and(|first| Arc::ptr_eq(style, first.style()))
                     {
                         let solid_background = layer.solid_background();

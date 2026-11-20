@@ -1357,11 +1357,13 @@ impl TypedLayer for RenderSymbolLayer {
         // Renderables come across tiles, out of order, so the atlases' textures
         // given to a tile's draws are kept by tile.
         let mut tile_atlases: HashMap<UnwrappedTileID, TileAtlases> = HashMap::default();
-        let color_mode = if (passes.underlying_type() & RenderPass::Translucent.underlying_type()) != 0 {
-            ColorMode::alpha_blended()
-        } else {
-            ColorMode::unblended()
-        };
+        let color_mode = paint_parameters.context.color_mode(
+            if (passes.underlying_type() & RenderPass::Translucent.underlying_type()) != 0 {
+                ColorMode::alpha_blended()
+            } else {
+                ColorMode::unblended()
+            },
+        );
 
         for group in &renderable_segments {
             let is_text = group.type_ == SymbolType::Text;

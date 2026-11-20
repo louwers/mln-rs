@@ -64,6 +64,23 @@ fn every_program_declares_the_properties_its_glsl_reads_from_uniforms() {
     }
 }
 
+/// Every program that draws a layer outputs white for the overdraw
+/// inspector, which counts its draws.
+#[test]
+fn every_layer_program_shows_the_overdraw_inspector() {
+    use mln_gfx::shaders::programs::{ATMOSPHERE, CLIPPING_MASK, COLLISION_BOX, COLLISION_CIRCLE, GLOBE_DEPTH, SKY};
+    let not_layers = [&CLIPPING_MASK, &COLLISION_BOX, &COLLISION_CIRCLE, &GLOBE_DEPTH, &SKY, &ATMOSPHERE];
+    for &(program, source) in BUILT_INS {
+        if !not_layers.contains(&program) {
+            assert!(
+                [source.glsl.vertex, source.glsl.fragment].iter().any(|text| text.contains("OVERDRAW_INSPECTOR")),
+                "{}",
+                program.name
+            );
+        }
+    }
+}
+
 /// The names of the uniform blocks `glsl` declares, in declaration order.
 fn declared_blocks_in_order(glsl: &str) -> Vec<String> {
     let mut names = Vec::new();

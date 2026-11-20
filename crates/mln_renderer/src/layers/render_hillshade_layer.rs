@@ -55,9 +55,7 @@ use crate::gfx::store::SharedTexture;
 use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::gfx::vertices::SharedVertices;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
-use crate::layer_drawing::{
-    DrawDepth, DrawList, DrawObjectsMut, FrameDraw, KeptDraw, SingleDraw, TileDraws, TileObjects,
-};
+use crate::layer_drawing::{DrawList, DrawObjectsMut, FrameDraw, KeptDraw, SingleDraw, TileDraws, TileObjects};
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
@@ -332,6 +330,7 @@ impl TypedLayer for RenderHillshadeLayer {
             context.shader_key(&programs::HILLSHADE_PREPARE, Uniforms::default(), ProjectionVariant::Mercator);
         let hillshade_shader =
             context.shader_key(&programs::HILLSHADE, Uniforms::default(), self.base.projection_variant);
+        let color_mode = context.color_mode(ColorMode::alpha_blended());
         let static_data_shared_vertices = &*self
             .static_data_shared_vertices
             .get_or_insert_with(|| copied_vertices(context, &RenderStaticData::raster_vertices()));
@@ -453,14 +452,14 @@ impl TypedLayer for RenderHillshadeLayer {
                 textures[ID_HILLSHADE_IMAGE_TEXTURE] = Some(render_target_texture.clone());
                 let objects = DrawObjects::new(
                     hillshade_shader.clone(),
-                    ColorMode::alpha_blended(),
+                    color_mode,
                     CullFaceMode::disabled(),
                     draw_geometry(),
                     textures,
                 );
                 entry.value.insert(HillshadeTile { draw: KeptDraw::new(objects), geometry_generation })
             };
-            let draw = FrameDraw { depth: DrawDepth::Off, ..cached.draw.frame_draw(Some(tile_id)) };
+            let draw = cached.draw.frame_draw(Some(tile_id));
             let Illumination { num_lights, .. } = *illumination.get_or_insert_with(|| {
                 Self::illumination(&mut self.illumination, &self.values.evaluated, paint_parameters)
             });

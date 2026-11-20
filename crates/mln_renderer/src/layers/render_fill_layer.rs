@@ -131,18 +131,18 @@ struct FillDraw {
 }
 
 impl FillDraw {
-    /// A draw of `geometry` with `shader` and the layer's color and cull
-    /// modes, which binds the textures of `atlases`.
+    /// A draw of `geometry` with `shader` and `color_mode`, without culling,
+    /// which binds the textures of `atlases`.
     fn new(
         shader: ShaderKey,
+        color_mode: ColorMode,
         sub_layer: u8,
         depth: DepthMaskType,
         geometry: DrawGeometry,
         atlases: Option<&AtlasBinding>,
     ) -> FillDraw {
         let textures = atlases.map(|atlases| atlases.textures(&shader)).unwrap_or_default();
-        let objects =
-            DrawObjects::new(shader, ColorMode::alpha_blended(), CullFaceMode::disabled(), geometry, textures);
+        let objects = DrawObjects::new(shader, color_mode, CullFaceMode::disabled(), geometry, textures);
         FillDraw { id: SimpleIdentity::new(), objects, sub_layer, depth, paint_layout: None }
     }
 }
@@ -294,6 +294,7 @@ impl TileBuilder<'_> {
         // The outline draws in the fill color unless it has one of its own,
         // which a pattern doesn't default to.
         let do_outline = *evaluated.fill_antialias.uniform() && (!self.pattern || self.outline_is_fill_color);
+        let color_mode = context.color_mode(ColorMode::alpha_blended());
         let fill_shader = context.shader_key(self.fill_program, uniforms, self.projection_variant);
         let outline_shader =
             do_outline.then(|| context.shader_key(self.outline_program, uniforms, self.projection_variant));
@@ -335,7 +336,7 @@ impl TileBuilder<'_> {
                 indexes.into(),
                 &bucket.triangle_segments,
             );
-            FillDraw::new(fill_shader, 1, fill_depth, fill_geometry, atlases.as_ref())
+            FillDraw::new(fill_shader, color_mode, 1, fill_depth, fill_geometry, atlases.as_ref())
         });
 
         // The bucket's lines, or a quad for each vertex, from it to its
@@ -349,8 +350,14 @@ impl TileBuilder<'_> {
                     DrawIndexes::Shared(indexes.clone()),
                     &RenderStaticData::fill_extrusion_wall_segments(fill_vertex_count),
                 );
-                let mut draw =
-                    FillDraw::new(shader, outline_sub_layer, DepthMaskType::ReadOnly, quad_geometry, atlases.as_ref());
+                let mut draw = FillDraw::new(
+                    shader,
+                    color_mode,
+                    outline_sub_layer,
+                    DepthMaskType::ReadOnly,
+                    quad_geometry,
+                    atlases.as_ref(),
+                );
                 for (id, vertices) in
                     [(ID_FILL_OUTLINE_VERTICES, &bucket.vertices), (ID_FILL_OUTLINE_ENDS, &bucket.outline_ends)]
                 {
@@ -381,7 +388,14 @@ impl TileBuilder<'_> {
                         &[RenderStaticData::fill_outline_segment(fill_vertex_count)],
                     )
                 };
-                Some(FillDraw::new(shader, outline_sub_layer, DepthMaskType::ReadOnly, quad_geometry, atlases.as_ref()))
+                Some(FillDraw::new(
+                    shader,
+                    color_mode,
+                    outline_sub_layer,
+                    DepthMaskType::ReadOnly,
+                    quad_geometry,
+                    atlases.as_ref(),
+                ))
             } else {
                 let line_geometry = fill_geometry(
                     copy_shared_attributes(&vertex_attrs),
@@ -390,7 +404,14 @@ impl TileBuilder<'_> {
                     bucket_indexes(geometry, &bucket.basic_lines)?.into(),
                     &bucket.basic_line_segments,
                 );
-                Some(FillDraw::new(shader, outline_sub_layer, DepthMaskType::ReadOnly, line_geometry, atlases.as_ref()))
+                Some(FillDraw::new(
+                    shader,
+                    color_mode,
+                    outline_sub_layer,
+                    DepthMaskType::ReadOnly,
+                    line_geometry,
+                    atlases.as_ref(),
+                ))
             }
         });
 

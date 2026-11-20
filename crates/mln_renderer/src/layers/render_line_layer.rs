@@ -626,8 +626,11 @@ impl RenderLineLayer {
             segments: bucket.segments.iter().map(SegmentBase::copy).collect(),
             instances: None,
         };
-        let color_mode =
-            if pass == RenderPass::Translucent { ColorMode::alpha_blended() } else { ColorMode::unblended() };
+        let color_mode = context.color_mode(if pass == RenderPass::Translucent {
+            ColorMode::alpha_blended()
+        } else {
+            ColorMode::unblended()
+        });
         let objects = DrawObjects::new(shader, color_mode, CullFaceMode::disabled(), draw_geometry, textures);
         Some(LineTile {
             id: SimpleIdentity::new(),

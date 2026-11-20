@@ -50,7 +50,7 @@ use crate::gfx::store::SharedTexture;
 use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::gfx::vertices::SharedVertices;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
-use crate::layer_drawing::{DrawDepth, DrawList, DrawObjectsMut, FrameDraw, KeptDraw, TileDraws, TileObjects};
+use crate::layer_drawing::{DrawList, DrawObjectsMut, KeptDraw, TileDraws, TileObjects};
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
@@ -533,7 +533,7 @@ impl TypedLayer for RenderColorReliefLayer {
                     }
                     let objects = DrawObjects::new(
                         color_relief_shader.clone(),
-                        ColorMode::alpha_blended(),
+                        context.color_mode(ColorMode::alpha_blended()),
                         CullFaceMode::disabled(),
                         geometry,
                         draw_textures,
@@ -555,7 +555,7 @@ impl TypedLayer for RenderColorReliefLayer {
                 tile_props: cached.tile_props,
                 projection: to_projection_ubo(&projection),
             };
-            let draw = FrameDraw { depth: DrawDepth::Off, ..cached.draw.frame_draw(Some(tile_id)) };
+            let draw = cached.draw.frame_draw(Some(tile_id));
             draw_list.push(draw, uniforms);
         }
 

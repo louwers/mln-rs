@@ -258,12 +258,12 @@ fn read_wall_instances(
     }
 }
 
-/// A draw of `geometry` with `shader`, into depth only or, `in_color`, in
-/// color, which binds the textures of `atlases`.
+/// A draw of `geometry` with `shader`, in color with `color_mode` or, without
+/// one, into depth only, which binds the textures of `atlases`.
 fn extrusion_draw(
     shader: &ShaderKey,
     walls: bool,
-    in_color: bool,
+    color_mode: Option<ColorMode>,
     clip: bool,
     geometry: &SharedGeometry<'_>,
     atlases: Option<&AtlasBinding>,
@@ -276,7 +276,8 @@ fn extrusion_draw(
         segments: geometry.segments.iter().map(SegmentBase::copy).collect(),
         instances: geometry.instances.map(copy_shared_attributes),
     };
-    let color_mode = if in_color { ColorMode::alpha_blended() } else { ColorMode::disabled() };
+    let in_color = color_mode.is_some();
+    let color_mode = color_mode.unwrap_or_else(ColorMode::disabled);
     let textures = atlases.map(|atlases| atlases.textures(shader)).unwrap_or_default();
     let objects = DrawObjects::new(shader.clone(), color_mode, CullFaceMode::back_ccw(), draw_geometry, textures);
     ExtrusionDraw { id: SimpleIdentity::new(), objects, priority: DrawPriority::from(in_color), walls, clip }
@@ -593,6 +594,7 @@ impl TileBuilder<'_> {
 
         let shader = context.shader_key(self.program, uniforms, self.projection_variant);
         let wall_shader = context.shader_key(self.wall_program, wall_uniforms, self.projection_variant);
+        let color = Some(context.color_mode(ColorMode::alpha_blended()));
 
         let stride = size_of::<FillExtrusionLayoutVertex>() as u32;
         vertex_attrs.set_shared(
@@ -639,9 +641,9 @@ impl TileBuilder<'_> {
         };
         if !bucket.triangles.is_empty() && vertex_count > 0 {
             if self.depth_pass {
-                draws.push(extrusion_draw(&shader, false, false, false, &roofs, atlases.as_ref()));
+                draws.push(extrusion_draw(&shader, false, None, false, &roofs, atlases.as_ref()));
             }
-            draws.push(extrusion_draw(&shader, false, true, clip, &roofs, atlases.as_ref()));
+            draws.push(extrusion_draw(&shader, false, color, clip, &roofs, atlases.as_ref()));
         }
         // A tile with one vertex has no wall.
         let walls_geometry = SharedGeometry {
@@ -654,9 +656,9 @@ impl TileBuilder<'_> {
         };
         if walls > 0 && wall_vertex_count > 0 {
             if self.depth_pass {
-                draws.push(extrusion_draw(&wall_shader, true, false, false, &walls_geometry, atlases.as_ref()));
+                draws.push(extrusion_draw(&wall_shader, true, None, false, &walls_geometry, atlases.as_ref()));
             }
-            draws.push(extrusion_draw(&wall_shader, true, true, clip, &walls_geometry, atlases.as_ref()));
+            draws.push(extrusion_draw(&wall_shader, true, color, clip, &walls_geometry, atlases.as_ref()));
         }
         if self.walls == Walls::Pulled {
             for draw in draws.iter_mut().filter(|draw| draw.walls) {

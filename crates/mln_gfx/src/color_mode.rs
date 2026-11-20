@@ -115,6 +115,21 @@ impl ColorMode {
         }
     }
 
+    /// The overdraw inspector's: each fragment adds an eighth of white, so a
+    /// pixel drawn eight times or more is white.
+    #[must_use]
+    pub fn overdraw() -> ColorMode {
+        const STEP: f32 = 1.0 / 8.0;
+        ColorMode {
+            blend_function: BlendFunction::Add(LinearBlend {
+                src_factor: ColorBlendFactorType::ConstantColor,
+                dst_factor: ColorBlendFactorType::One,
+            }),
+            blend_color: Color::new_unchecked(STEP, STEP, STEP, 0.0),
+            mask: Self::ALL,
+        }
+    }
+
     /// A hash of the mode, for a pipeline cache key.
     #[must_use]
     pub fn hash(&self) -> u64 {

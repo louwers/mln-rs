@@ -133,7 +133,8 @@ struct Encoder {
     /// frames.
     layer_composite: LayerComposite,
     /// Whether the context's shaders and pipelines are of an earlier pixel
-    /// ratio, which the next update's render layers no longer draw with.
+    /// ratio or overdraw setting, which the next update's render layers no
+    /// longer draw with.
     shaders_replaced: bool,
     render_state: RenderState,
     /// Where the last frame drew the map.
@@ -226,12 +227,18 @@ impl Renderer {
             return;
         }
         // The shaders build the pixel ratio in on some backends, so a new
-        // ratio takes new shaders, and new draws that use them. The render
-        // layers' draws go with the next update, which makes the layers
-        // again, and the old shaders after it.
+        // ratio takes new shaders, and new draws that use them.
+        self.replace_shaders(pixel_ratio, self.encoder.context.overdraw());
+    }
+
+    /// Compiles the shaders at `pixel_ratio`, with the overdraw inspector if
+    /// `overdraw`, from the next update on. The render layers' draws go with
+    /// that update, which makes the layers again, and the old shaders after
+    /// it.
+    fn replace_shaders(&mut self, pixel_ratio: f32, overdraw: bool) {
         let encoder = &mut self.encoder;
         encoder.pixel_ratio = pixel_ratio;
-        encoder.context.set_pixel_ratio(pixel_ratio);
+        encoder.context.set_program_parameters(pixel_ratio, overdraw);
         encoder.clip_masks = ClipMasks::default();
         encoder.layer_composite = LayerComposite::default();
         encoder.shaders_replaced = true;
@@ -274,6 +281,11 @@ impl Renderer {
     /// loaded yet. Custom layers that the update removed or gave a new host
     /// end on `gpu`.
     pub fn update(&mut self, gpu: &mut dyn Gpu, update_parameters: &Arc<UpdateParameters>) -> Option<UpdatedFrame> {
+        // The overdraw inspector takes shaders and color modes of its own.
+        let overdraw = update_parameters.debug_options.contains(MapDebugOptions::OVERDRAW);
+        if overdraw != self.encoder.context.overdraw() {
+            self.replace_shaders(self.encoder.pixel_ratio, overdraw);
+        }
         let orchestrator = &mut self.orchestrator;
         let frame = orchestrator.update(update_parameters);
         report(orchestrator, self.events.as_ref());

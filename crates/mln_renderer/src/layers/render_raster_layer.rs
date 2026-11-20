@@ -283,7 +283,13 @@ impl RenderRasterLayer {
         while objects.images.len() < tile_ids.len() {
             let draw_geometry =
                 raster_geometry(&quads.vertices, quads.vertices.count(), quads.indexes.clone().into(), &quads.segments);
-            objects.images.push(KeptDraw::new(new_objects(&raster_shader, draw_geometry, texture.as_ref())));
+            let color_mode = paint_parameters.context.color_mode(ColorMode::alpha_blended());
+            objects.images.push(KeptDraw::new(new_objects(
+                &raster_shader,
+                color_mode,
+                draw_geometry,
+                texture.as_ref(),
+            )));
         }
         for (index, (tile_id, draw)) in tile_ids.iter().zip(&objects.images).enumerate() {
             let uniforms = Self::uniforms(tile_id, paint_parameters);
@@ -363,11 +369,16 @@ fn contrast_factor(contrast: f32) -> f32 {
 
 /// The GPU objects of a raster draw of `geometry` with `shader`, which binds
 /// `texture` as both of its images.
-fn new_objects(shader: &ShaderKey, geometry: DrawGeometry, texture: Option<&SharedTexture>) -> DrawObjects {
+fn new_objects(
+    shader: &ShaderKey,
+    color_mode: ColorMode,
+    geometry: DrawGeometry,
+    texture: Option<&SharedTexture>,
+) -> DrawObjects {
     let mut textures = Textures::default();
     textures[ID_RASTER_IMAGE0_TEXTURE] = texture.cloned();
     textures[ID_RASTER_IMAGE1_TEXTURE] = texture.cloned();
-    DrawObjects::new(shader.clone(), ColorMode::alpha_blended(), CullFaceMode::disabled(), geometry, textures)
+    DrawObjects::new(shader.clone(), color_mode, CullFaceMode::disabled(), geometry, textures)
 }
 
 /// The geometry of a raster draw of `vertex_count` vertices in `vertices`,
@@ -518,7 +529,8 @@ impl TypedLayer for RenderRasterLayer {
                         &static_geometry.segments,
                     )
                 };
-                let objects = new_objects(&raster_shader, draw_geometry, texture.as_ref());
+                let color_mode = context.color_mode(ColorMode::alpha_blended());
+                let objects = new_objects(&raster_shader, color_mode, draw_geometry, texture.as_ref());
                 let built = RasterTile { draw: KeptDraw::new(objects), geometry_generation };
                 *entry.value = Some(built);
             }

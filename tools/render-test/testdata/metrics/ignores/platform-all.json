@@ -51,7 +51,6 @@
     "render-tests/custom-layer-js/null-island": "skip - js specific",
     "render-tests/custom-layer-js/tent-3d": "skip - js specific",
     "render-tests/debug/collision": "https://github.com/mapbox/mapbox-gl-native/issues/3841",
-    "render-tests/debug/overdraw": "https://github.com/mapbox/mapbox-gl-native/issues/15638",
     "render-tests/debug/padding/ease-to-btm-distort": "https://github.com/mapbox/mapbox-gl-native/issues/16212",
     "render-tests/debug/padding/ease-to-left-distort": "https://github.com/mapbox/mapbox-gl-native/issues/16212",
     "render-tests/debug/padding/ease-to-no-distort": "https://github.com/mapbox/mapbox-gl-native/issues/16212",
