@@ -1670,3 +1670,25 @@ fn an_image_far_west_draws_in_the_views_world() {
     let wraps = image_copies(&test, None, 10.0 - worlds, 20.0 - worlds);
     assert!(wraps.contains(&0), "{wraps:?}");
 }
+
+/// An image source that draws nowhere holds no frame back, with terrain or
+/// without: the style tracks its image's own load.
+#[test]
+fn an_image_out_of_view_is_loaded() {
+    let test = image_view(256, 3.0, 15.0);
+    let store = test.store();
+    let out_of_view = image_seen_by(&test, None, 100.0, 110.0);
+    assert_eq!(out_of_view.image_render_data().unwrap().tile_ids, []);
+    assert!(out_of_view.is_loaded(&store));
+    let terrain = crate::terrain::TerrainCover {
+        tiles: vec![crate::terrain::TerrainTile {
+            id: OverscaledTileID::new(3, 0, CanonicalTileID::new(3, 4, 3)),
+            dem: None,
+            dem_loading: false,
+        }],
+        ..flat_terrain()
+    };
+    let off_the_terrain = image_seen_by(&test, Some(&terrain), 100.0, 110.0);
+    assert_eq!(off_the_terrain.image_render_data().unwrap().tile_ids, []);
+    assert!(off_the_terrain.is_loaded(&store));
+}

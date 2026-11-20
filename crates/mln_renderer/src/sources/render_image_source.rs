@@ -238,8 +238,10 @@ impl RenderSource for RenderImageSource {
         &self.base
     }
 
+    // A source that draws nowhere holds no frame back: the style tracks
+    // the load of its image.
     fn is_loaded(&self, _store: &TileStore) -> bool {
-        self.loaded()
+        !self.base.enabled || self.loaded()
     }
 
     fn update(
