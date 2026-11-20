@@ -149,8 +149,8 @@ curl -fsSL https://www.unicode.org/Public/16.0.0/ucd/BidiMirroring.txt |
 
 # style-codegen's generated_code_test checks that the code is up to date.
 [tasks."generate:style"]
-description = "Regenerate the style layer code (crates/mln_style) from the style spec"
-run = "cargo run -p mln-rs-style-codegen -- --spec tools/style-codegen/v8.json --out crates/mln_style/src"
+description = "Regenerate the style property code (crates/mln_style, crates/mln_layers) from the style spec"
+run = "cargo run -p mln-rs-style-codegen -- --spec tools/style-codegen/v8.json --out crates"
 
 [tasks.install-nightly]
 description = "Install the nightly rustfmt that MLN_NIGHTLY names, for its unstable import options"

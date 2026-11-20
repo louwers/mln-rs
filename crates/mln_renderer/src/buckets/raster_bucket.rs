@@ -190,7 +190,7 @@ impl MaskedGeometry {
 
 /// A raster tile's image and the geometry that draws it, which the tile
 /// masks (`set_mask`).
-pub(crate) struct RasterBucket {
+pub struct RasterBucket {
     pub(crate) base: BucketBase,
     pub(crate) image: Option<Arc<PremultipliedImage>>,
     geometry: MaskedGeometry,

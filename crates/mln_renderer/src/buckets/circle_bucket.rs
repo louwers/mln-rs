@@ -40,7 +40,7 @@ pub(crate) struct CircleLayoutVertex {
 }
 
 #[derive(Clone, mln_wire::Wire)]
-pub(crate) struct CircleBucket {
+pub struct CircleBucket {
     pub(crate) base: BucketBase,
     pub(crate) vertices: GeometryVec<CircleLayoutVertex>,
     pub(crate) triangles: GeometryVec<u16>,

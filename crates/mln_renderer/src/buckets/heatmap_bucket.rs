@@ -42,7 +42,7 @@ pub(crate) struct HeatmapLayoutVertex {
 pub(crate) type HeatmapTextureLayoutVertex = HeatmapLayoutVertex;
 
 #[derive(Clone, mln_wire::Wire)]
-pub(crate) struct HeatmapBucket {
+pub struct HeatmapBucket {
     pub(crate) base: BucketBase,
     pub(crate) vertices: GeometryVec<HeatmapLayoutVertex>,
     pub(crate) triangles: GeometryVec<u16>,

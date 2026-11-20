@@ -21,7 +21,7 @@ struct Pattern {
     position: ImagePosition,
 }
 
-pub(crate) struct PatternAtlas {
+pub struct PatternAtlas {
     allocator: BucketedAtlasAllocator,
     patterns: HashMap<String, Pattern>,
     atlas_image: PremultipliedImage,
@@ -48,11 +48,11 @@ impl PatternAtlas {
     }
 
     #[must_use]
-    pub(crate) fn pattern(&self, id: &str) -> Option<ImagePosition> {
+    pub fn pattern(&self, id: &str) -> Option<ImagePosition> {
         self.patterns.get(id).map(|pattern| pattern.position.clone())
     }
 
-    pub(crate) fn add_pattern(&mut self, image: &ImageImpl) -> Option<ImagePosition> {
+    pub fn add_pattern(&mut self, image: &ImageImpl) -> Option<ImagePosition> {
         if self.patterns.contains_key(&image.id) {
             return None;
         }
@@ -164,7 +164,7 @@ impl PatternAtlas {
 
     /// The atlas's texture, once `upload` made it.
     #[must_use]
-    pub(crate) fn texture(&self) -> Option<&SharedTexture> {
+    pub fn texture(&self) -> Option<&SharedTexture> {
         self.texture.as_ref()
     }
 

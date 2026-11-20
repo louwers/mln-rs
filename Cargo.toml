@@ -59,6 +59,7 @@ mln_gl = { package = "mln-rs-gl", path = "crates/mln_gl", version = "=0.0.13" }
 mln_glsl = { package = "mln-rs-glsl", path = "crates/mln_glsl", version = "=0.0.13" }
 mln_headless = { package = "mln-rs-headless", path = "crates/mln_headless", version = "=0.0.13" }
 mln_image = { package = "mln-rs-image", path = "crates/mln_image", version = "=0.0.13" }
+mln_layers = { package = "mln-rs-layers", path = "crates/mln_layers", version = "=0.0.13" }
 mln_map = { package = "mln-rs-map", path = "crates/mln_map", version = "=0.0.13" }
 mln_map_types = { package = "mln-rs-map-types", path = "crates/mln_map_types", version = "=0.0.13" }
 mln_math = { package = "mln-rs-math", path = "crates/mln_math", version = "=0.0.13" }
@@ -73,6 +74,7 @@ mln_renderer = { package = "mln-rs-renderer", path = "crates/mln_renderer", vers
 # Without its backends (its default features) unless a package asks for
 # them, so that a browser build of mln_c carries one.
 mln_runtime = { package = "mln-rs-runtime", path = "crates/mln_runtime", version = "=0.0.13", default-features = false }
+mln_sources = { package = "mln-rs-sources", path = "crates/mln_sources", version = "=0.0.13" }
 mln_sprite = { package = "mln-rs-sprite", path = "crates/mln_sprite", version = "=0.0.13" }
 # Without SQLite (its `sqlite` feature) unless a package asks for it, so
 # that examples/web leaves it out.
@@ -563,12 +565,14 @@ mln_gestures.workspace = true
 mln_gfx.workspace = true
 mln_gl = { workspace = true, optional = true }
 mln_image.workspace = true
+mln_layers.workspace = true
 mln_map.workspace = true
 mln_map_types.workspace = true
 mln_math.workspace = true
 mln_mtl = { workspace = true, optional = true }
 mln_renderer.workspace = true
 mln_runtime.workspace = true
+mln_sources.workspace = true
 mln_sprite.workspace = true
 mln_storage.workspace = true
 mln_storage_offline = { workspace = true, optional = true }

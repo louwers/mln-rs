@@ -280,7 +280,7 @@ impl<T> Kept<T> {
 
 /// A bucket's upload: what moves the bucket's geometry into the context's
 /// stores, and keeps its handles in its tile's [`BucketGeometry`].
-pub(crate) struct GeometryUpload<'a> {
+pub struct GeometryUpload<'a> {
     geometry: &'a mut BucketGeometry,
     /// The geometry of the tile's other world copies, whose buckets the
     /// tile's are copies of, or they of the tile's.

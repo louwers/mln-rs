@@ -55,11 +55,13 @@ pub(crate) enum Visit {
     Impl,
 }
 
-/// The `use` paths the table needs.
-pub(crate) fn imports(visit: &Visit) -> Vec<String> {
+/// The `use` paths the table needs, where `style` is the style crate's path.
+pub(crate) fn imports(style: &str, visit: &Visit) -> Vec<String> {
     match visit {
-        Visit::Function => vec!["crate::property_table::{PropertyInfo, PropertyTable, PropertyVisitor}".into()],
-        Visit::Impl => vec!["crate::property_table::{Properties, PropertyInfo, PropertyTable, PropertyVisitor}".into()],
+        Visit::Function => vec![format!("{style}::property_table::{{PropertyInfo, PropertyTable, PropertyVisitor}}")],
+        Visit::Impl => {
+            vec![format!("{style}::property_table::{{Properties, PropertyInfo, PropertyTable, PropertyVisitor}}")]
+        }
     }
 }
 

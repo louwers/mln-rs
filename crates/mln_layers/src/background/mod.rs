@@ -1,6 +1,13 @@
-use crate::layer_type::{LayerStyle, LayerTypeInfo, NoProperties, SourceKind, StyleLayerType};
-use crate::layers::background_layer_properties::{self, BackgroundPaintProperties};
-use crate::property_table::{PropertyTable, PropertyVisitor};
+//! The `background` layer type: a layer without a source that fills the
+//! map with a color or a pattern.
+
+#[rustfmt::skip]
+mod properties;
+mod render_layer;
+
+use mln_style::layer_type::{LayerStyle, LayerTypeInfo, NoProperties, SourceKind, StyleLayerType};
+use mln_style::property_table::{PropertyTable, PropertyVisitor};
+pub use properties::BackgroundPaintProperties;
 
 /// The `background` layer type.
 pub struct Background;
@@ -14,13 +21,13 @@ impl StyleLayerType for Background {
         cross_tile_index: false,
         from_json: true,
     };
-    const PROPERTIES: &'static PropertyTable = &background_layer_properties::PROPERTIES;
+    const PROPERTIES: &'static PropertyTable = &properties::PROPERTIES;
 
     type LayoutProperties = NoProperties;
     type PaintProperties = BackgroundPaintProperties::Transitionable;
     type Extra = ();
 
     fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(slot: usize, visitor: V) -> Option<V::Output> {
-        background_layer_properties::visit(slot, visitor)
+        properties::visit(slot, visitor)
     }
 }

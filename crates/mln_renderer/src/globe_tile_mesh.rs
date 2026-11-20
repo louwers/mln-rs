@@ -166,17 +166,17 @@ impl<V: bytemuck::Pod> GlobeTileMeshCache<V> {
 /// The same grid as raw `Short2` positions, for draws built from raw
 /// vertex bytes.
 #[derive(Debug, Default)]
-pub(crate) struct RawGlobeTileMesh {
-    pub(crate) vertices: Vec<u8>,
-    pub(crate) vertex_count: usize,
-    pub(crate) indices: Vec<u16>,
-    pub(crate) segments: Vec<SegmentBase>,
+pub struct RawGlobeTileMesh {
+    pub vertices: Vec<u8>,
+    pub vertex_count: usize,
+    pub indices: Vec<u16>,
+    pub segments: Vec<SegmentBase>,
 }
 
 /// The globe mesh of the tile `canonical`, with borders if
 /// `generate_borders`, subdivided by `granularity`.
 #[must_use]
-pub(crate) fn raw_globe_tile_mesh(
+pub fn raw_globe_tile_mesh(
     canonical: &CanonicalTileID,
     generate_borders: bool,
     granularity: SubdivisionGranularityExpression,

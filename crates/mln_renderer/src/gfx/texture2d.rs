@@ -181,7 +181,7 @@ impl Texture2D {
 
 /// A texture of the context's store, to set up: changes that replace its
 /// backend's texture let go of that.
-pub(crate) struct TextureMut<'a> {
+pub struct TextureMut<'a> {
     texture: &'a mut Texture2D,
 }
 
@@ -209,7 +209,7 @@ impl<'a> TextureMut<'a> {
     }
 
     /// Sets how shaders sample the texture, with an anisotropy of at least 1.
-    pub(crate) fn set_sampler(&mut self, sampler: SamplerState) {
+    pub fn set_sampler(&mut self, sampler: SamplerState) {
         let texture = &mut *self.texture;
         let sampler = SamplerState { max_anisotropy: sampler.max_anisotropy.max(1), ..sampler };
         if sampler != texture.sampler {

@@ -21,7 +21,7 @@ use crate::layout::tile_layout::Resolved;
 
 /// The layer a layout reads: its tile data and its name.
 #[derive(Clone)]
-pub(crate) struct SourceLayer {
+pub struct SourceLayer {
     pub(crate) data: TileData,
     pub(crate) name: String,
 }
@@ -43,7 +43,7 @@ impl SourceLayer {
 /// How a layer type's layers become a tile's bucket: made from a layer
 /// group and the tile's data, it selects and evaluates the features, and
 /// once the glyphs and images it needs are resolved, makes the bucket.
-pub(crate) trait Layout<T: LayerType>: Send + 'static {
+pub trait Layout<T: LayerType>: Send + 'static {
     /// Whether the bucket needs the glyphs or images the layout recorded.
     fn has_dependencies(&self) -> bool;
 
@@ -65,7 +65,7 @@ pub(crate) trait Layout<T: LayerType>: Send + 'static {
 
 /// What making a bucket reads apart from the layout and its dependencies.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct BuildParams {
+pub struct BuildParams {
     /// Whether the tile has had no layout yet.
     pub(crate) first_load: bool,
     pub(crate) show_collision_boxes: bool,
@@ -73,7 +73,7 @@ pub(crate) struct BuildParams {
 }
 
 /// The layout of a layer type that doesn't lay out: there is no value.
-pub(crate) enum NoLayout {}
+pub enum NoLayout {}
 
 impl<T: LayerType> Layout<T> for NoLayout {
     fn has_dependencies(&self) -> bool {
@@ -103,7 +103,7 @@ pub(crate) fn layers_by_id<T: LayerType>(group: &[Arc<EvaluatedLayer<T>>]) -> Ve
     layers
 }
 
-pub(crate) struct LayoutParameters<'a> {
+pub struct LayoutParameters<'a> {
     pub(crate) bucket_parameters: &'a BucketParameters,
     /// The style's font faces, and its fallback faces after them.
     pub(crate) font_faces: Option<Arc<mln_text::glyph::FontFaces>>,

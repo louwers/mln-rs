@@ -37,37 +37,32 @@ use crate::gfx::vertices::SharedVertices;
 use crate::paint_parameters::{DrawTarget, PaintParameters};
 
 /// The textures a draw binds, by texture id.
-pub(crate) type Textures = [Option<SharedTexture>; MAX_TEXTURE_COUNT_PER_SHADER];
+pub type Textures = [Option<SharedTexture>; MAX_TEXTURE_COUNT_PER_SHADER];
 
 /// The most vertex buffers a draw binds, WebGPU's default limit.
 const MAX_VERTEX_BUFFERS: usize = 8;
 
 /// What a draw draws: its vertices, and the primitives its segments draw of
 /// them.
-pub(crate) struct DrawGeometry {
+pub struct DrawGeometry {
     /// The vertex attributes, by attribute id.
-    pub(crate) vertices: VertexAttributeArray,
+    pub vertices: VertexAttributeArray,
     /// How many vertices the attributes hold, which an attribute the
     /// shader reads and the draw lacks gets default values for.
-    pub(crate) vertex_count: usize,
+    pub vertex_count: usize,
     /// The primitive the segments draw.
-    pub(crate) mode: DrawMode,
-    pub(crate) indexes: DrawIndexes,
+    pub mode: DrawMode,
+    pub indexes: DrawIndexes,
     /// The ranges of the indexes and vertices each draw call draws.
-    pub(crate) segments: Vec<SegmentBase>,
+    pub segments: Vec<SegmentBase>,
     /// The attributes of each instance, for a draw of instances.
-    pub(crate) instances: Option<VertexAttributeArray>,
+    pub instances: Option<VertexAttributeArray>,
 }
 
 /// `count` vertices of `data_type` in `data` as the vertex attribute `id`,
 /// none where there are no vertices.
 #[must_use]
-pub(crate) fn raw_vertices(
-    id: usize,
-    data: Vec<u8>,
-    count: usize,
-    data_type: AttributeDataType,
-) -> VertexAttributeArray {
+pub fn raw_vertices(id: usize, data: Vec<u8>, count: usize, data_type: AttributeDataType) -> VertexAttributeArray {
     let mut attributes = VertexAttributeArray::new();
     if count == 0 || data_type == AttributeDataType::Invalid || data.is_empty() {
         return attributes;
@@ -142,7 +137,7 @@ struct PipelineVariant {
 /// color and cull modes it draws with, and the shader, pipelines, bindings
 /// and geometry it made of them on the context's `Gpu`, which it makes again
 /// when what they are made of changes.
-pub(crate) struct DrawObjects {
+pub struct DrawObjects {
     shader: ShaderKey,
     vertex_attributes: VertexAttributeArray,
     /// The attributes of each instance, for a draw of instances.
@@ -195,7 +190,7 @@ impl DrawObjects {
     /// The objects of a draw of `geometry` with `shader`, in `color_mode`
     /// and `cull_face_mode`, binding `textures`, without buffers of its own.
     #[must_use]
-    pub(crate) fn new(
+    pub fn new(
         shader: ShaderKey,
         color_mode: ColorMode,
         cull_face_mode: CullFaceMode,
@@ -596,7 +591,7 @@ impl DrawObjects {
     }
 
     /// Makes `texture` the one it binds as `id`.
-    pub(crate) fn set_texture(&mut self, id: usize, texture: Option<&SharedTexture>) {
+    pub fn set_texture(&mut self, id: usize, texture: Option<&SharedTexture>) {
         let slot = &mut self.textures[id];
         if slot.as_ref() != texture {
             *slot = texture.cloned();

@@ -1,6 +1,5 @@
 //! The render layers.
 
-pub(crate) mod render_background_layer;
 pub(crate) mod render_circle_layer;
 pub(crate) mod render_color_relief_layer; // dem-heatmap
 pub(crate) mod render_custom_layer;

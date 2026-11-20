@@ -43,7 +43,7 @@ pub struct PropertyInfo {
 
 impl PropertyInfo {
     #[must_use]
-    pub(crate) const fn paint(name: &'static str) -> Self {
+    pub const fn paint(name: &'static str) -> Self {
         PropertyInfo {
             name,
             scope: PropertyScope::Paint,
@@ -55,7 +55,7 @@ impl PropertyInfo {
     }
 
     #[must_use]
-    pub(crate) const fn layout(name: &'static str) -> Self {
+    pub const fn layout(name: &'static str) -> Self {
         PropertyInfo {
             name,
             scope: PropertyScope::Layout,
@@ -67,22 +67,22 @@ impl PropertyInfo {
     }
 
     #[must_use]
-    pub(crate) const fn data_driven(self) -> Self {
+    pub const fn data_driven(self) -> Self {
         PropertyInfo { data_driven: true, ..self }
     }
 
     #[must_use]
-    pub(crate) const fn tokens(self) -> Self {
+    pub const fn tokens(self) -> Self {
         PropertyInfo { tokens: true, ..self }
     }
 
     #[must_use]
-    pub(crate) const fn overridable(self) -> Self {
+    pub const fn overridable(self) -> Self {
         PropertyInfo { overridable: true, ..self }
     }
 
     #[must_use]
-    pub(crate) const fn cross_faded(self) -> Self {
+    pub const fn cross_faded(self) -> Self {
         PropertyInfo { cross_faded: true, ..self }
     }
 }

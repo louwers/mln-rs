@@ -115,7 +115,7 @@ impl Dependencies {
 /// in the atlas pages the render thread packed them into, and the shaping of
 /// the text that font faces draw. No bitmaps or pixels.
 #[derive(Debug, Default, mln_wire::Wire)]
-pub(crate) struct Resolved {
+pub struct Resolved {
     /// `None` for a glyph that no font has, or whose range failed.
     pub(crate) glyphs: GlyphPositions,
     pub(crate) shaping: ShapeResults,

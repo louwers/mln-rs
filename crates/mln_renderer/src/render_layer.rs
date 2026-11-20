@@ -57,7 +57,7 @@ pub(crate) struct ErasedLayerBucket<'a> {
 /// A bucket of a layer of the type `T` in a tile's layout, with the layer's
 /// values it was laid out with and the rest of what the layout's contents
 /// hold for the tile's draws.
-pub(crate) struct LayerBucket<'a, T: LayerType> {
+pub struct LayerBucket<'a, T: LayerType> {
     pub(crate) bucket: &'a T::Bucket,
     /// The index of the bucket among the layout's buckets.
     pub(crate) bucket_index: usize,
@@ -196,7 +196,7 @@ pub(crate) trait SymbolBuckets {
 
 /// A symbol bucket a layer places or draws, with its tile.
 #[derive(Clone)]
-pub(crate) struct BucketPlacementData {
+pub struct BucketPlacementData {
     pub(crate) bucket: BucketKey,
     pub(crate) tile: PlacedTile,
     pub(crate) feature_index: Option<Arc<FeatureIndex>>,
@@ -301,7 +301,7 @@ impl SymbolBuckets for HeldBuckets {
 /// What a layer draws in a frame from its source, as the engine sees it,
 /// without the layer's type.
 #[derive(Clone, Copy)]
-pub(crate) enum LayerSource<'a> {
+pub enum LayerSource<'a> {
     /// The source's render tiles, and the tiles that the frame's updates of
     /// the layers found ([`LayerUpdateParameters::found`]), among which the
     /// layer draws those its update found.
@@ -313,7 +313,7 @@ pub(crate) enum LayerSource<'a> {
 /// A source's render tiles in a frame, with what each of them shows, as
 /// the engine sees them.
 #[derive(Clone, Copy)]
-pub(crate) struct FrameSourceTiles<'a> {
+pub struct FrameSourceTiles<'a> {
     tiles: &'a [RenderTile],
     /// What each of `tiles` shows, at its index.
     contents: &'a [Option<&'a Contents>],
@@ -364,26 +364,26 @@ impl<'a> FrameSourceTiles<'a> {
 /// pattern atlas of `background-pattern`s. A frame's update adds what its
 /// layers draw, and its encode uploads them and binds their textures.
 #[derive(Default)]
-pub(crate) struct Atlases {
+pub struct Atlases {
     pub(crate) line: LineAtlas,
-    pub(crate) pattern: PatternAtlas,
+    pub pattern: PatternAtlas,
 }
 
 /// What a layer reads in the frame's update, besides its tiles.
-pub(crate) struct LayerUpdateParameters<'a> {
+pub struct LayerUpdateParameters<'a> {
     /// The frame's camera.
-    pub(crate) view: &'a View,
+    pub view: &'a View,
     /// The update the frame draws.
-    pub(crate) update_parameters: &'a UpdateParameters,
+    pub update_parameters: &'a UpdateParameters,
     /// The layer's source, `None` for a layer without one or a source type
     /// the renderer has no render source for.
     pub(crate) source: Option<&'a dyn RenderSource>,
     /// What each of the source's render tiles shows, at its index.
     pub(crate) contents: &'a [Option<&'a Contents>],
     /// The images of the style.
-    pub(crate) images: &'a crate::image_store::ImageStore,
+    pub images: &'a crate::image_store::ImageStore,
     /// The atlases, to add what the layer draws to.
-    pub(crate) atlases: &'a mut Atlases,
+    pub atlases: &'a mut Atlases,
     /// The tiles of the frame's layers, as their updates find them, which
     /// the update adds the layer's to: those the encode draws.
     pub(crate) found: &'a mut Vec<FoundTile>,
@@ -400,7 +400,7 @@ impl<'a> LayerUpdateParameters<'a> {
 }
 
 /// What every render layer has, whatever its type.
-pub(crate) struct RenderLayerBase {
+pub struct RenderLayerBase {
     pub(crate) evaluated_properties: Arc<dyn ErasedEvaluatedLayer>,
     pub(crate) style: Arc<dyn ErasedLayerStyle>,
 
@@ -410,7 +410,7 @@ pub(crate) struct RenderLayerBase {
     pub(crate) is_renderable: bool,
 
     /// The projection variant this layer's draws are built with.
-    pub(crate) projection_variant: ProjectionVariant,
+    pub projection_variant: ProjectionVariant,
 
     /// Where the tiles the layer's update found are among the frame's
     /// ([`LayerUpdateParameters::found`]).
@@ -434,16 +434,16 @@ impl RenderLayerBase {
 
 /// A layer's values of its type `T`: its style, its paint values in
 /// transition, and their evaluation for the last frame.
-pub(crate) struct LayerValues<T: LayerType> {
+pub struct LayerValues<T: LayerType> {
     pub(crate) style: Arc<LayerStyle<T>>,
-    pub(crate) unevaluated: <T::PaintProperties as PaintSet>::Unevaluated,
-    pub(crate) evaluated: Arc<EvaluatedLayer<T>>,
+    pub unevaluated: <T::PaintProperties as PaintSet>::Unevaluated,
+    pub evaluated: Arc<EvaluatedLayer<T>>,
 }
 
 impl<T: LayerType> LayerValues<T> {
     /// The values of the layer `style`, before any transition, and the base
     /// of a render layer that holds them.
-    pub(crate) fn new(style: Arc<LayerStyle<T>>) -> (RenderLayerBase, Self) {
+    pub fn new(style: Arc<LayerStyle<T>>) -> (RenderLayerBase, Self) {
         let unevaluated = style.paint.untransitioned();
         let evaluated = Arc::new(EvaluatedLayer::new(Arc::clone(&style)));
         let mut base = RenderLayerBase::new(Arc::<EvaluatedLayer<T>>::clone(&evaluated));
@@ -473,24 +473,24 @@ impl<T: LayerType> LayerValues<T> {
 }
 
 /// The parts of a render layer of a [`TypedLayer`] `L`.
-pub(crate) struct Parts<'a, L: TypedLayer + ?Sized> {
-    pub(crate) base: &'a RenderLayerBase,
-    pub(crate) values: &'a LayerValues<L::Type>,
-    pub(crate) drawing: &'a L::Drawing,
+pub struct Parts<'a, L: TypedLayer + ?Sized> {
+    pub base: &'a RenderLayerBase,
+    pub values: &'a LayerValues<L::Type>,
+    pub drawing: &'a L::Drawing,
 }
 
 /// The parts of a render layer of a [`TypedLayer`] `L`, to change.
-pub(crate) struct PartsMut<'a, L: TypedLayer + ?Sized> {
-    pub(crate) base: &'a mut RenderLayerBase,
-    pub(crate) values: &'a mut LayerValues<L::Type>,
-    pub(crate) drawing: &'a mut L::Drawing,
+pub struct PartsMut<'a, L: TypedLayer + ?Sized> {
+    pub base: &'a mut RenderLayerBase,
+    pub values: &'a mut LayerValues<L::Type>,
+    pub drawing: &'a mut L::Drawing,
 }
 
 /// A render layer whose values are of the layer type `Type`, and that keeps
 /// its drawing, the GPU objects of its draws and its draw groups of the
-/// frame, in a `Drawing` of its own type. Its parts give it [`LayerParts`],
+/// frame, in a `Drawing` of its own type. Its parts give it `LayerParts`,
 /// which runs its hooks here with the tiles and buckets of its type.
-pub(crate) trait TypedLayer {
+pub trait TypedLayer {
     type Type: LayerType;
     type Drawing: LayerDrawing;
 
@@ -588,7 +588,7 @@ pub(crate) trait TypedLayer {
 /// its drawing, which keeps what the layer keeps of its tiles and uploads
 /// and draws its draw groups. It runs the layer's [`TypedLayer`] hooks with
 /// what is common to every layer type around them.
-pub(crate) trait LayerParts {
+pub trait LayerParts {
     fn base(&self) -> &RenderLayerBase;
     fn base_mut(&mut self) -> &mut RenderLayerBase;
 
@@ -888,9 +888,9 @@ fn begin_frame<L: TypedLayer + ?Sized>(layer: &mut L) -> bool {
 
 /// What a layer type does that the engine can't do for it, whatever the
 /// type: the hooks the engine calls on the layers it holds.
-pub(crate) trait RenderLayer: LayerParts {
+pub trait RenderLayer: LayerParts {
     /// Whether the layer draws 3D geometry, whose depth it writes in the
-    /// range of [`PaintParameters::depth_mode_for_3d`].
+    /// range of `PaintParameters::depth_mode_for_3d`.
     fn is_3d(&self) -> bool {
         false
     }

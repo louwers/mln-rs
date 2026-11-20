@@ -24,7 +24,7 @@ pub(crate) fn emit(object_name: &str, properties: &[Property]) -> String {
     w.blank();
 
     let owner = crate::types::camelize(object_name);
-    let mut imports = crate::emit_table::imports(&Visit::Impl);
+    let mut imports = crate::emit_table::imports("crate", &Visit::Impl);
     imports.push(format!("crate::{object_name}::{owner}"));
     w.imports(imports);
     w.blank();

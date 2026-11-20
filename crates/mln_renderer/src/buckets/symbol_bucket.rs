@@ -472,7 +472,7 @@ pub(crate) struct SymbolLayoutFlags {
 }
 
 #[derive(Clone, mln_wire::Wire)]
-pub(crate) struct SymbolBucket {
+pub struct SymbolBucket {
     pub(crate) base: BucketBase,
     pub(crate) layout: Arc<SymbolLayoutProperties::PossiblyEvaluated>,
     pub(crate) bucket_leader_id: Arc<str>,

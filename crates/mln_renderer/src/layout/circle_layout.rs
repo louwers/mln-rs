@@ -32,7 +32,7 @@ pub(crate) struct CircleFeature {
     pub(crate) sort_key: f32,
 }
 
-pub(crate) struct CircleLayout {
+pub struct CircleLayout {
     pub(crate) layer_properties_map: VecMap<String, Arc<EvaluatedLayer<Circle>>>,
     pub(crate) bucket_leader_id: String,
 

@@ -28,7 +28,7 @@ pub type LayerFeatureStates = mln_util::hash::HashMap<String, FeatureStates>;
 /// and the id are the side's that has the bucket. A copy keeps the id: its
 /// draws are the same.
 #[derive(Clone, Debug, mln_wire::Wire)]
-pub(crate) struct BucketBase {
+pub struct BucketBase {
     #[wire(skip)]
     pub(crate) uploaded: bool,
     #[wire(skip, default = "SimpleIdentity::new")]
@@ -44,7 +44,7 @@ impl Default for BucketBase {
 /// What the frame's draws read of the buckets apart from their own
 /// geometry, which depends on the device.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct UploadNeeds {
+pub struct UploadNeeds {
     /// Whether fill outlines draw as instanced quads, which read the fill
     /// buckets' outline ends.
     pub(crate) fill_outline_ends: bool,
@@ -54,7 +54,7 @@ pub(crate) struct UploadNeeds {
     pub(crate) wall_quads: bool,
 }
 
-pub(crate) trait Bucket: Any + Send + CloneBucket {
+pub trait Bucket: Any + Send + CloneBucket {
     fn base(&self) -> &BucketBase;
 
     /// Feature geometries are also used to populate the feature index.
@@ -109,7 +109,7 @@ pub(crate) trait Bucket: Any + Send + CloneBucket {
     fn has_data(&self) -> bool;
 
     /// Writes the bucket for its layer type's
-    /// [`read_bucket`](crate::layer_type::ErasedLayerType::read_bucket).
+    /// `ErasedLayerType::read_bucket`.
     /// A bucket that no layout makes fails `w`.
     fn write_wire(&self, w: &mut Writer);
 
@@ -125,7 +125,7 @@ pub(crate) trait Bucket: Any + Send + CloneBucket {
 /// A bucket's copy, for the tile in another world copy, which draws the
 /// same geometry: what the bucket moved to its tile's geometry, the copy
 /// finds in a copy of that.
-pub(crate) trait CloneBucket {
+pub trait CloneBucket {
     fn clone_bucket(&self) -> Box<dyn Bucket>;
 }
 
@@ -137,7 +137,7 @@ impl<B: Bucket + Clone> CloneBucket for B {
 
 /// The bucket of a layer type that doesn't lay out: there is no value.
 #[derive(Clone)]
-pub(crate) enum NoBucket {}
+pub enum NoBucket {}
 
 impl Bucket for NoBucket {
     fn base(&self) -> &BucketBase {

@@ -7,7 +7,7 @@ use crate::gfx::line_mesh::LineScratch;
 /// Triangulates polygons with earcut and holds the line mesher's scratch,
 /// keeping their buffers from one feature to the next.
 #[derive(Default)]
-pub(crate) struct Tessellator {
+pub struct Tessellator {
     earcut: earcut::Earcut<f64>,
     holes: Vec<u32>,
     indices: Vec<u32>,

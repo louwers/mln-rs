@@ -246,26 +246,24 @@ fn transition_options_change_the_transition() {
 #[test]
 fn a_layer_edit_that_changes_nothing_keeps_the_layers() {
     let mut style = stub_style();
-    style.load_json(r#"{"version":8,"sources":{},"layers":[{"id":"bg","type":"background"}]}"#);
+    style.load_json(r#"{"version":8,"sources":{},"layers":[{"id":"bg","type":"plain"}]}"#);
 
     let before = Arc::clone(style.get_layer_list());
     let same = style.get_layer("bg").unwrap().clone();
     edit(&mut style, Edit::SetLayer(same));
     assert!(Arc::ptr_eq(&before, style.get_layer_list()));
 
-    set_layer_property(&mut style, "bg", "background-color", serde_json::json!("white")).unwrap();
+    set_layer_property(&mut style, "bg", "plain-color", serde_json::json!("white")).unwrap();
     assert!(!Arc::ptr_eq(&before, style.get_layer_list()));
 
-    let error = set_layer_property(&mut style, "absent", "background-color", serde_json::json!("white")).unwrap_err();
+    let error = set_layer_property(&mut style, "absent", "plain-color", serde_json::json!("white")).unwrap_err();
     assert_eq!(mln_util::ErrorKind::NotFound, error.kind);
 }
 
 #[test]
 fn layer_changes_leave_earlier_versions_unchanged() {
     let mut style = stub_style();
-    style.load_json(
-        r#"{"version":8,"sources":{},"layers":[{"id":"a","type":"background"},{"id":"b","type":"background"}]}"#,
-    );
+    style.load_json(r#"{"version":8,"sources":{},"layers":[{"id":"a","type":"plain"},{"id":"b","type":"plain"}]}"#);
     let ids = |layers: &crate::LayerList| layers.iter().map(|layer| layer.get_id().to_owned()).collect::<Vec<_>>();
     let loaded = style.clone();
     assert_eq!(["a", "b"], *ids(loaded.get_layer_list()));
@@ -389,7 +387,7 @@ fn global_state_visibility() {
         "sources": {},
         "layers": [{
             "id": "background",
-            "type": "background",
+            "type": "plain",
             "layout": {
                 "visibility": ["case", ["to-boolean", ["global-state", "showBackground"]], "visible", "none"]
             }
@@ -429,7 +427,7 @@ fn visibility_expression_set_at_runtime() {
         "version": 8,
         "state": {"showBackground": {"default": false}},
         "sources": {},
-        "layers": [{"id": "background", "type": "background"}]
+        "layers": [{"id": "background", "type": "plain"}]
     }"#,
     );
 
@@ -476,7 +474,7 @@ fn visibility_expression_rejects_other_dependencies() {
         r#"{
         "version": 8,
         "sources": {},
-        "layers": [{"id": "background", "type": "background"}]
+        "layers": [{"id": "background", "type": "plain"}]
     }"#,
     );
 
@@ -599,7 +597,7 @@ fn sources_keep_the_order_they_were_added_in() {
 #[test]
 fn an_edit_replaces_only_the_part_it_changes() {
     let mut style = stub_style();
-    style.load_json(r#"{"version":8,"sources":{},"layers":[{"id":"bg","type":"background"}]}"#);
+    style.load_json(r#"{"version":8,"sources":{},"layers":[{"id":"bg","type":"plain"}]}"#);
     let mut case = |edit_to_make: Edit, parts: &[&str]| {
         let before = style.clone();
         edit(&mut style, edit_to_make);

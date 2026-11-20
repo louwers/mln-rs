@@ -101,7 +101,7 @@ pub(crate) fn wall_quad_paint(paint: &[u8], stride: usize, walls: usize) -> Vec<
 }
 
 #[derive(Clone, mln_wire::Wire)]
-pub(crate) struct FillExtrusionBucket {
+pub struct FillExtrusionBucket {
     pub(crate) base: BucketBase,
     pub(crate) layout: FillExtrusionLayoutProperties::PossiblyEvaluated,
 
@@ -434,7 +434,7 @@ impl Bucket for FillExtrusionBucket {
 }
 
 /// The pattern layout of fill-extrusion layers, which have no sort key.
-pub(crate) struct FillExtrusionLayoutSpec;
+pub struct FillExtrusionLayoutSpec;
 
 impl PatternLayoutSpec for FillExtrusionLayoutSpec {
     type Type = FillExtrusion;

@@ -4,13 +4,13 @@ use std::ops::{BitAnd, BitOr, BitOrAssign};
 /// valid value), so a newtype rather than a Rust enum. The associated constants
 /// keep the C++ enumerator names.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) struct RenderPass(pub(crate) u8);
+pub struct RenderPass(pub u8);
 
 #[expect(non_upper_case_globals, reason = "the bit flags keep the C++ enumerator names")]
 impl RenderPass {
-    pub(crate) const None: RenderPass = RenderPass(0);
-    pub(crate) const Opaque: RenderPass = RenderPass(1 << 0);
-    pub(crate) const Translucent: RenderPass = RenderPass(1 << 1);
+    pub const None: RenderPass = RenderPass(0);
+    pub const Opaque: RenderPass = RenderPass(1 << 0);
+    pub const Translucent: RenderPass = RenderPass(1 << 1);
     pub(crate) const Pass3D: RenderPass = RenderPass(1 << 2);
 
     #[must_use]

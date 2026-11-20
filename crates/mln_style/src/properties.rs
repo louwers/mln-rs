@@ -46,7 +46,7 @@ enum Stage {
 }
 
 impl<V: StyleValue> Transitioning<V> {
-    pub(crate) fn new(value: V) -> Self {
+    pub fn new(value: V) -> Self {
         Transitioning { prior: None, start: None, delay: Duration::ZERO, duration: Duration::ZERO, value }
     }
 
@@ -84,7 +84,7 @@ impl<V: StyleValue> Transitioning<V> {
     /// Not inlined: the property sets call these once
     /// per property, so inlining copies them into every call.
     #[inline(never)]
-    pub(crate) fn evaluate(
+    pub fn evaluate(
         &mut self,
         evaluation: Evaluation<V::Type>,
         parameters: &PropertyEvaluationParameters,
@@ -114,7 +114,7 @@ impl<V: StyleValue> Transitioning<V> {
         }
     }
 
-    pub(crate) fn has_transition(&self) -> bool {
+    pub fn has_transition(&self) -> bool {
         self.prior.is_some()
     }
 
@@ -138,7 +138,7 @@ impl<V: StyleValue> Transitioning<V> {
     /// Evaluates the value if it may have changed since `previous`, or
     /// copies `previous`.
     #[inline(never)]
-    pub(crate) fn evaluate_with_previous(
+    pub fn evaluate_with_previous(
         &mut self,
         evaluation: Evaluation<V::Type>,
         parameters: &PropertyEvaluationParameters,
@@ -172,7 +172,7 @@ pub struct Transitionable<V> {
 
 impl<V: StyleValue> Transitionable<V> {
     #[inline(never)]
-    pub(crate) fn transition(&self, params: &TransitionParameters, mut prior: Transitioning<V>) -> Transitioning<V> {
+    pub fn transition(&self, params: &TransitionParameters, mut prior: Transitioning<V>) -> Transitioning<V> {
         if let Some(change) = &params.global_state_change {
             prior.retain_prior_global_state(change);
             if change.state_only && !self.value.transitions_on_global_state_change(Some(&change.changed_keys)) {
@@ -189,6 +189,8 @@ impl<V: StyleValue> Transitionable<V> {
 }
 
 /// The style value type of a property kind.
+#[doc(hidden)]
+#[macro_export]
 macro_rules! __property_value {
     (color_ramp, $t:ty) => {
         $crate::color_ramp_property_value::ColorRampPropertyValue
@@ -197,9 +199,10 @@ macro_rules! __property_value {
         $crate::property_value::PropertyValue<$t>
     };
 }
-pub(crate) use __property_value;
 
 /// How a property kind evaluates.
+#[doc(hidden)]
+#[macro_export]
 macro_rules! __property_evaluation {
     (integer_zoom) => {
         $crate::evaluated::Evaluated::integer_zoom
@@ -217,9 +220,10 @@ macro_rules! __property_evaluation {
         $crate::evaluated::Evaluated::plain
     };
 }
-pub(crate) use __property_evaluation;
 
 /// Whether a property kind may differ by feature.
+#[doc(hidden)]
+#[macro_export]
 macro_rules! __property_data_driven {
     (data_driven) => {
         true
@@ -237,7 +241,6 @@ macro_rules! __property_data_driven {
         false
     };
 }
-pub(crate) use __property_data_driven;
 
 /// Declares a property set as `mod $module`, one named field per property,
 /// followed by the paths its types and defaults need:
@@ -262,6 +265,11 @@ pub(crate) use __property_data_driven;
 /// A paint set's `derived { field: kind T = default => source, }` values
 /// aren't style properties: each takes `source`'s value, and transitions with
 /// the style's default transition.
+///
+/// Unstable: exported for the layer types of other crates, which also
+/// depend on `mln_wire` and `mln_vec_map`, since the expansion names them.
+#[doc(hidden)]
+#[macro_export]
 macro_rules! properties {
     ($(#[$meta:meta])* $vis:vis mod $module:ident: paint {
         $($field:ident: $kind:ident $t:ty = $default:expr),+ $(,)?
@@ -556,9 +564,10 @@ macro_rules! properties {
         }
     };
 }
-pub(crate) use properties;
 
 /// The methods of a set's `PossiblyEvaluated`.
+#[doc(hidden)]
+#[macro_export]
 macro_rules! __possibly_evaluated_methods {
     ($($field:ident: $kind:ident),+) => {
         impl PossiblyEvaluated {
@@ -591,7 +600,6 @@ macro_rules! __possibly_evaluated_methods {
         }
     };
 }
-pub(crate) use __possibly_evaluated_methods;
 
 /// What an overridable property's override reads: whether a formatted
 /// section sets a text color.

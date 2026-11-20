@@ -46,7 +46,7 @@ crate::paint_property_binders!(
 );
 
 #[derive(Clone, mln_wire::Wire)]
-pub(crate) struct LineBucket {
+pub struct LineBucket {
     pub(crate) base: BucketBase,
     pub(crate) layout: LineLayoutProperties::PossiblyEvaluated,
     pub(crate) vertices: GeometryVec<LineLayoutVertex>,

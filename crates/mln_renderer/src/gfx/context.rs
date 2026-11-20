@@ -37,7 +37,7 @@ use crate::gfx::uniform_buffer::UniformBufferArray;
 use crate::gfx::vertex_attribute::Uniforms;
 use crate::gfx::vertices::{SharedVertices, TypedVertices, VertexStore, Vertices};
 
-pub(crate) struct Context {
+pub struct Context {
     device: Device,
     caps: Caps,
     global_uniform_buffers: UniformBufferArray,
@@ -276,7 +276,7 @@ impl Context {
     }
 
     /// The texture of `handle`, to set up.
-    pub(crate) fn texture_mut(&mut self, handle: &SharedTexture) -> Option<TextureMut<'_>> {
+    pub fn texture_mut(&mut self, handle: &SharedTexture) -> Option<TextureMut<'_>> {
         Some(TextureMut::new(self.textures.get_mut(handle)?))
     }
 
@@ -353,7 +353,7 @@ impl Context {
     /// The key of the variant of `program` that reads its properties of
     /// `uniforms` from their uniforms, for `projection`, at the context's
     /// pixel ratio.
-    pub(crate) fn shader_key(
+    pub fn shader_key(
         &mut self,
         program: &'static Program,
         uniforms: Uniforms,
@@ -385,7 +385,7 @@ impl Context {
 
     /// The color mode of a draw into the frame that blends with `mode`: the
     /// overdraw inspector's when it's on.
-    pub(crate) fn color_mode(&self, mode: ColorMode) -> ColorMode {
+    pub fn color_mode(&self, mode: ColorMode) -> ColorMode {
         if self.overdraw { ColorMode::overdraw() } else { mode }
     }
 

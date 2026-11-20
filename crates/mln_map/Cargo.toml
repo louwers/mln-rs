@@ -37,6 +37,8 @@ parking_lot.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
+# The built-in layer types outside the engine, for the tests' registry.
+mln_layers = { package = "mln-rs-layers", path = "../mln_layers" }
 mln_storage = { workspace = true, features = ["stub-file-source"] }
 
 [lints]

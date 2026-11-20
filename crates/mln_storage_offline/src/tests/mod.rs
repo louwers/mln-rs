@@ -13,6 +13,7 @@ use mln_style::StyleRegistry;
 pub(crate) fn registry() -> Arc<StyleRegistry> {
     let mut builder = mln_renderer::RegistryBuilder::new();
     mln_style::expression::functions::register_builtin_functions(builder.functions_mut()).unwrap();
+    mln_layers::register_layer_types(&mut builder).unwrap();
     mln_renderer::builtins::register_layer_types(&mut builder).unwrap();
     mln_renderer::builtins::register_source_types(&mut builder).unwrap();
     Arc::clone(builder.build().style())

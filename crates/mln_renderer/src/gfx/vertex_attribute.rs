@@ -131,7 +131,7 @@ impl VertexAttribute {
 /// The attributes whose paint property a draw reads from its uniform
 /// instead, by id.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub(crate) struct Uniforms(u16);
+pub struct Uniforms(u16);
 
 const _: () = assert!(MAX_ATTRIBUTE_COUNT_PER_SHADER <= u16::BITS as usize);
 
@@ -158,7 +158,7 @@ impl FromIterator<usize> for Uniforms {
 
 /// Vertex attributes by id.
 #[derive(Default)]
-pub(crate) struct VertexAttributeArray {
+pub struct VertexAttributeArray {
     attrs: [Option<Box<VertexAttribute>>; MAX_ATTRIBUTE_COUNT_PER_SHADER],
 }
 

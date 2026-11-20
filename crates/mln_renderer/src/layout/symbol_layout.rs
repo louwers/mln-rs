@@ -422,7 +422,7 @@ impl FeatureSymbols<'_> {
     }
 }
 
-pub(crate) struct SymbolLayout {
+pub struct SymbolLayout {
     pub(crate) layer_paint_properties: VecMap<String, Arc<EvaluatedLayer<Symbol>>>,
     /// Shared by every symbol's `IndexedSubfeature`, which placement clones
     /// for each symbol it places.
