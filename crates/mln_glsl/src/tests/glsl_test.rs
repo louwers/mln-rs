@@ -31,6 +31,7 @@ use mln_gfx::shaders::hillshade_prepare_layer_ubo::{HillshadePrepareDrawableUBO,
 use mln_gfx::shaders::layer_composite_ubo::LayerCompositeUBO;
 use mln_gfx::shaders::layer_ubo::{GlobalPaintParamsUBO, ProjectionUBO};
 use mln_gfx::shaders::line_layer_ubo::{LineDrawableUnionUBO, LineEvaluatedPropsUBO, LineTilePropsUnionUBO};
+use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::raster_layer_ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
 use mln_gfx::shaders::shader_defines::*;
 use mln_gfx::shaders::sky_ubo::{AtmospherePropsUBO, SkyPropsUBO};
@@ -48,18 +49,70 @@ use crate::layout::{
     image_texture_binding, layer_storage_binding, layer_uniform_binding,
 };
 use crate::variants::variants;
-use crate::{AttributeInfo, PROGRAMS, ShaderSource, Stage, sources};
+use crate::{AttributeInfo, BUILT_INS, ShaderSource, Stage, sources};
 
-fn programs() -> impl Iterator<Item = &'static ShaderSource> {
-    PROGRAMS.iter().map(|&(_, source)| source)
+fn programs() -> impl Iterator<Item = (&'static Program, &'static ShaderSource)> {
+    BUILT_INS.iter().copied()
 }
 
 const STAGES: [Stage; 2] = [Stage::Vertex, Stage::Fragment];
 
+/// A variant's defines read a property from its uniform only where the
+/// program declares it.
+#[test]
+fn every_program_declares_the_properties_its_glsl_reads_from_uniforms() {
+    const PREFIX: &str = "HAS_UNIFORM_u_";
+    for (program, source) in programs() {
+        let mut tested = BTreeSet::new();
+        for text in [source.glsl.prelude, source.glsl.vertex, source.glsl.fragment] {
+            for (start, _) in text.match_indices(PREFIX) {
+                let rest = &text[start + PREFIX.len()..];
+                let end = rest.find(|c: char| !c.is_ascii_alphanumeric() && c != '_').unwrap_or(rest.len());
+                tested.insert(&rest[..end]);
+            }
+        }
+        let declared: BTreeSet<&str> = program.properties.iter().map(|property| property.name).collect();
+        assert_eq!(tested, declared, "{}", program.name);
+    }
+}
+
+/// Every program that draws a layer outputs white for the overdraw
+/// inspector, which counts its draws.
+#[test]
+fn every_layer_program_shows_the_overdraw_inspector() {
+    use mln_gfx::shaders::programs::{
+        ATMOSPHERE, CLIPPING_MASK, COLLISION_BOX, COLLISION_CIRCLE, GLOBE_DEPTH, SKY, TERRAIN, TERRAIN_PROBE,
+        VERTEX_TEXEL,
+    };
+    // The terrain shows its drapes, where the draped layers count their draws.
+    let not_layers = [
+        &CLIPPING_MASK,
+        &COLLISION_BOX,
+        &COLLISION_CIRCLE,
+        &GLOBE_DEPTH,
+        &SKY,
+        &ATMOSPHERE,
+        &TERRAIN,
+        &TERRAIN_PROBE,
+        &VERTEX_TEXEL,
+    ];
+    for &(program, source) in BUILT_INS {
+        if !not_layers.contains(&program) {
+            assert!(
+                [source.glsl.prelude, source.glsl.vertex, source.glsl.fragment]
+                    .iter()
+                    .any(|text| text.contains("OVERDRAW_INSPECTOR")),
+                "{}",
+                program.name
+            );
+        }
+    }
+}
+
 /// The module of a stage of `source` with `defines`, unvalidated.
-fn module(source: &ShaderSource, stage: Stage, defines: &str) -> Module {
+fn module(program: &Program, source: &ShaderSource, stage: Stage, defines: &str) -> Module {
     parse(stage, &source.compose(stage, defines))
-        .unwrap_or_else(|error| panic!("{} ({stage:?}):\n{error}", source.name))
+        .unwrap_or_else(|error| panic!("{} ({stage:?}):\n{error}", program.name))
 }
 
 // Every stage parses and validates, with every property per vertex, every
@@ -69,12 +122,12 @@ fn module(source: &ShaderSource, stage: Stage, defines: &str) -> Module {
 fn every_stage_validates() {
     let mut failures = Vec::new();
     let mut validated = 0;
-    for source in programs() {
-        for variant in variants(source, true) {
+    for (program, source) in programs() {
+        for variant in variants(program, true) {
             for stage in STAGES {
                 match crate::Module::parse(stage, &source.compose(stage, &variant.defines)) {
                     Ok(_) => validated += 1,
-                    Err(error) => failures.push(format!("{} ({}, {stage:?}):\n{error}", source.name, variant.name)),
+                    Err(error) => failures.push(format!("{} ({}, {stage:?}):\n{error}", program.name, variant.name)),
                 }
             }
         }
@@ -112,18 +165,15 @@ impl Buffer {
     }
 }
 
-/// The size of the debug layer's UBO, which `mln_gfx` has no struct for.
-const DEBUG_UBO_SIZE: usize = 6 * 16;
-
 /// The buffers of each shader, with the size of what the renderer binds: a
 /// uniform buffer's struct, or an element of a storage buffer's vector (the
 /// union of the layer's drawable structs where it has several, a word of a
 /// vertex buffer).
-fn buffers(source: &ShaderSource) -> Vec<(Buffer, usize)> {
+fn buffers(program: &Program) -> Vec<(Buffer, usize)> {
     use Buffer::{DrawableUniform, DrawableVertex, Global, LayerStorage, LayerUniform};
     let projection = (LayerStorage(ID_PROJECTION_UBO), size_of::<ProjectionUBO>());
     let mut buffers = vec![(Global(ID_GLOBAL_PAINT_PARAMS_UBO), size_of::<GlobalPaintParamsUBO>())];
-    let own: Vec<(Buffer, usize)> = match source.name {
+    let own: Vec<(Buffer, usize)> = match program.name {
         "AtmosphereShader" => vec![(LayerUniform(ID_ATMOSPHERE_PROPS_UBO), size_of::<AtmospherePropsUBO>())],
         "BackgroundShader" => vec![
             (LayerStorage(ID_BACKGROUND_DRAWABLE_UBO), size_of::<BackgroundDrawableUnionUBO>()),
@@ -152,8 +202,7 @@ fn buffers(source: &ShaderSource) -> Vec<(Buffer, usize)> {
             (LayerStorage(ID_COLOR_RELIEF_TILE_PROPS_UBO), size_of::<ColorReliefTilePropsUBO>()),
             (LayerUniform(ID_COLOR_RELIEF_EVALUATED_PROPS_UBO), size_of::<ColorReliefEvaluatedPropsUBO>()),
         ],
-        "DebugShader" => vec![projection, (DrawableUniform(ID_DEBUG_UBO), DEBUG_UBO_SIZE)],
-        "FillShader" | "FillOutlineShader" | "FillOutlineInstancedShader" | "FillOutlineTriangulatedShader" => vec![
+        "FillShader" | "FillOutlineShader" | "FillOutlineInstancedShader" => vec![
             (LayerStorage(ID_FILL_DRAWABLE_UBO), size_of::<FillDrawableUnionUBO>()),
             projection,
             (LayerUniform(ID_FILL_EVALUATED_PROPS_UBO), size_of::<FillEvaluatedPropsUBO>()),
@@ -345,21 +394,22 @@ fn resources_are_in_the_descriptor_set_layouts() {
     assert_eq!(DescriptorSetType::DrawableImage.set_index(), 3);
 
     let mut failures = Vec::new();
-    for source in programs() {
+    for (program, source) in programs() {
         let table: BTreeSet<u32> = source.textures.iter().map(|texture| image_texture_binding(texture.index)).collect();
-        for variant in variants(source, false) {
+        for variant in variants(program, false) {
             let mut declared = BTreeSet::new();
             for stage in STAGES {
                 let mut fail = |message: String| {
-                    failures.push(format!("{} ({}, {stage:?}): {message}", source.name, variant.name));
+                    failures.push(format!("{} ({}, {stage:?}): {message}", program.name, variant.name));
                 };
-                let Resources { bindings, push_constants } = match resources(&module(source, stage, &variant.defines)) {
-                    Ok(resources) => resources,
-                    Err(message) => {
-                        fail(message);
-                        continue;
-                    }
-                };
+                let Resources { bindings, push_constants } =
+                    match resources(&module(program, source, stage, &variant.defines)) {
+                        Ok(resources) => resources,
+                        Err(message) => {
+                            fail(message);
+                            continue;
+                        }
+                    };
                 for (&(set, binding), &resource) in &bindings {
                     if let Err(message) = check_layout(set, binding, resource) {
                         fail(message);
@@ -400,7 +450,7 @@ fn resources_are_in_the_descriptor_set_layouts() {
             if declared != table {
                 failures.push(format!(
                     "{} ({}): textures at {declared:?}, the table has {table:?}",
-                    source.name, variant.name
+                    program.name, variant.name
                 ));
             }
         }
@@ -419,8 +469,8 @@ fn buffers_are_the_renderers() {
     assert_eq!(size_of::<GlobalPaintParamsUBO>(), 48);
 
     let mut failures = Vec::new();
-    for source in programs() {
-        let expected: BTreeMap<(u32, u32), (Buffer, Resource)> = buffers(source)
+    for (program, source) in programs() {
+        let expected: BTreeMap<(u32, u32), (Buffer, Resource)> = buffers(program)
             .into_iter()
             .map(|(buffer, size)| {
                 let (set, binding, storage) = buffer.slot();
@@ -429,13 +479,13 @@ fn buffers_are_the_renderers() {
                 ((set.set_index(), binding), (buffer, resource))
             })
             .collect();
-        assert_eq!(expected.len(), buffers(source).len(), "{}: two buffers at a binding", source.name);
+        assert_eq!(expected.len(), buffers(program).len(), "{}: two buffers at a binding", program.name);
 
         let mut declared = BTreeSet::new();
-        for variant in variants(source, false) {
+        for variant in variants(program, false) {
             for stage in STAGES {
-                let at = format!("{} ({}, {stage:?})", source.name, variant.name);
-                let resources = resources(&module(source, stage, &variant.defines))
+                let at = format!("{} ({}, {stage:?})", program.name, variant.name);
+                let resources = resources(&module(program, source, stage, &variant.defines))
                     .unwrap_or_else(|message| panic!("{at}: {message}"));
                 for (slot, resource) in resources.bindings {
                     if !matches!(resource, Resource::Uniform(_) | Resource::Storage(_)) {
@@ -454,7 +504,7 @@ fn buffers_are_the_renderers() {
         }
         for (slot, (buffer, _)) in &expected {
             if !declared.contains(slot) {
-                failures.push(format!("{}: no stage declares {buffer:?}", source.name));
+                failures.push(format!("{}: no stage declares {buffer:?}", program.name));
             }
         }
     }
@@ -541,16 +591,16 @@ const UNREAD_ATTRIBUTES: &[(&str, usize)] = &[("ColorReliefShader", 1)];
 #[test]
 fn vertex_inputs_are_the_attribute_tables() {
     let mut failures = Vec::new();
-    for source in programs() {
+    for (program, source) in programs() {
         let indices: BTreeSet<usize> = all_attributes(source).map(|attr| attr.index).collect();
-        assert_eq!(indices.len(), all_attributes(source).count(), "{}: attribute indices repeat", source.name);
-        for variant in variants(source, true) {
+        assert_eq!(indices.len(), all_attributes(source).count(), "{}: attribute indices repeat", program.name);
+        for variant in variants(program, true) {
             let table: BTreeMap<u32, (ScalarKind, u32)> = all_attributes(source)
-                .filter(|attr| !UNREAD_ATTRIBUTES.contains(&(source.name, attr.index)))
+                .filter(|attr| !UNREAD_ATTRIBUTES.contains(&(program.name, attr.index)))
                 .map(|attr| (attr.index as u32, input_type(attr.data_type)))
                 .collect();
             let inputs: BTreeMap<u32, (ScalarKind, u32)> =
-                stage_inputs(&module(source, Stage::Vertex, &variant.defines))
+                stage_inputs(&module(program, source, Stage::Vertex, &variant.defines))
                     .into_iter()
                     .map(|(location, (kind, components, _))| (location, (kind, components)))
                     .collect();
@@ -561,7 +611,7 @@ fn vertex_inputs_are_the_attribute_tables() {
             };
             if !matches {
                 failures
-                    .push(format!("{} ({}): inputs {inputs:?}, the table has {table:?}", source.name, variant.name));
+                    .push(format!("{} ({}): inputs {inputs:?}, the table has {table:?}", program.name, variant.name));
             }
         }
     }
@@ -572,14 +622,14 @@ fn vertex_inputs_are_the_attribute_tables() {
 // outline vertex, a vertex further on: the two have the same formats.
 #[test]
 fn a_walls_next_outline_vertex_has_the_formats_of_its_outline_vertex() {
-    let instanced: Vec<&ShaderSource> = programs()
-        .filter(|source| source.name.starts_with("FillExtrusion") && !source.instance_attributes.is_empty())
+    let instanced: Vec<_> = programs()
+        .filter(|(program, source)| program.name.starts_with("FillExtrusion") && !source.instance_attributes.is_empty())
         .collect();
     assert_eq!(instanced.len(), 2);
-    for source in instanced {
+    for (program, source) in instanced {
         let format = |id: usize| {
             let mut found = source.instance_attributes.iter().filter(|attr| attr.id == id);
-            let attr = found.next().unwrap_or_else(|| panic!("{}: no instance attribute {id}", source.name));
+            let attr = found.next().unwrap_or_else(|| panic!("{}: no instance attribute {id}", program.name));
             assert!(found.next().is_none());
             attr.data_type
         };
@@ -587,7 +637,7 @@ fn a_walls_next_outline_vertex_has_the_formats_of_its_outline_vertex() {
             (ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE),
             (ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE),
         ] {
-            assert_eq!(format(id), format(next_id), "{}", source.name);
+            assert_eq!(format(id), format(next_id), "{}", program.name);
         }
     }
 }
@@ -597,11 +647,11 @@ fn a_walls_next_outline_vertex_has_the_formats_of_its_outline_vertex() {
 #[test]
 fn stages_agree_on_what_passes_between_them() {
     let mut failures = Vec::new();
-    for source in programs() {
-        for variant in variants(source, true) {
-            let at = format!("{} ({})", source.name, variant.name);
-            let outputs = stage_outputs(&module(source, Stage::Vertex, &variant.defines));
-            let fragment = module(source, Stage::Fragment, &variant.defines);
+    for (program, source) in programs() {
+        for variant in variants(program, true) {
+            let at = format!("{} ({})", program.name, variant.name);
+            let outputs = stage_outputs(&module(program, source, Stage::Vertex, &variant.defines));
+            let fragment = module(program, source, Stage::Fragment, &variant.defines);
             for (location, input) in stage_inputs(&fragment) {
                 let output = outputs.get(&location);
                 if output != Some(&input) {
@@ -659,7 +709,6 @@ fn bindings_follow_from_the_packed_ids() {
     assert_eq!(drawable_uniform_binding(ID_COLLISION_DRAWABLE_UBO), Some(0));
     assert_eq!(drawable_uniform_binding(ID_COLLISION_PROJECTION_UBO), Some(2));
     assert_eq!(drawable_uniform_binding(ID_COLLISION_TILE_PROPS_UBO), Some(3));
-    assert_eq!(drawable_uniform_binding(ID_DEBUG_UBO), Some(3));
     assert_eq!(drawable_uniform_binding(ID_HILLSHADE_PREPARE_DRAWABLE_UBO), Some(0));
     assert_eq!(drawable_uniform_binding(ID_HILLSHADE_PREPARE_TILE_PROPS_UBO), Some(3));
     // The pulled shaders' vertex buffers, from drawableUBOStartId + 5.
@@ -676,38 +725,29 @@ fn bindings_follow_from_the_packed_ids() {
     assert_eq!(image_sampler_binding(0), 3);
 }
 
-// The tables and `sources::ALL` list the same shaders, under their
-// `BuiltIn` names, and no table has more attributes and textures than a
-// shader can have. Only the fill extrusion walls and the instanced fill
-// outlines have instance attributes.
+// No table has more attributes and textures than a shader can have. Only
+// the fill extrusion walls and the instanced fill outlines have instance
+// attributes.
 #[test]
-fn tables_and_sources_are_the_same_shaders() {
-    let names: Vec<&str> = programs().map(|source| source.name).collect();
-    assert_eq!(names.len(), sources::ALL.len());
-    for glsl in sources::ALL {
-        assert_eq!(glsl.built_in, glsl.name);
-        assert_eq!(names.iter().filter(|&&name| name == glsl.name).count(), 1, "{}", glsl.name);
-    }
-    for &(id, source) in PROGRAMS {
-        assert_eq!(format!("{id:?}"), source.name);
-        assert_eq!(source.name, source.glsl.name);
-        assert!(all_attributes(source).count() <= MAX_ATTRIBUTE_COUNT_PER_SHADER, "{}", source.name);
-        assert!(source.textures.len() <= MAX_TEXTURE_COUNT_PER_SHADER, "{}", source.name);
+fn the_tables_fit_a_shader() {
+    for (program, source) in programs() {
+        assert!(all_attributes(source).count() <= MAX_ATTRIBUTE_COUNT_PER_SHADER, "{}", program.name);
+        assert!(source.textures.len() <= MAX_TEXTURE_COUNT_PER_SHADER, "{}", program.name);
         let instanced = matches!(
-            source.name,
+            program.name,
             "FillExtrusionInstancedShader"
                 | "FillExtrusionPatternInstancedShader"
                 | "FillOutlineInstancedShader"
                 | "FillOutlinePatternInstancedShader"
         );
-        assert_eq!(!source.instance_attributes.is_empty(), instanced, "{}", source.name);
+        assert_eq!(!source.instance_attributes.is_empty(), instanced, "{}", program.name);
         let ids: BTreeSet<usize> = source.attributes.iter().map(|attr| attr.id).collect();
-        assert_eq!(ids.len(), source.attributes.len(), "{}: attribute ids repeat", source.name);
+        assert_eq!(ids.len(), source.attributes.len(), "{}: attribute ids repeat", program.name);
         let ids: BTreeSet<usize> = source.instance_attributes.iter().map(|attr| attr.id).collect();
-        assert_eq!(ids.len(), source.instance_attributes.len(), "{}: instance attribute ids repeat", source.name);
+        assert_eq!(ids.len(), source.instance_attributes.len(), "{}: instance attribute ids repeat", program.name);
         let textures: BTreeSet<usize> = source.textures.iter().map(|texture| texture.index).collect();
-        assert_eq!(textures.len(), source.textures.len(), "{}: texture indices repeat", source.name);
-        assert!(textures.iter().all(|&index| index < IMAGE_TEXTURE_COUNT), "{}", source.name);
+        assert_eq!(textures.len(), source.textures.len(), "{}: texture indices repeat", program.name);
+        assert!(textures.iter().all(|&index| index < IMAGE_TEXTURE_COUNT), "{}", program.name);
     }
 }
 
@@ -715,10 +755,10 @@ fn tables_and_sources_are_the_same_shaders() {
 // y-down clip space does.
 #[test]
 fn no_stage_flips_y() {
-    for glsl in sources::ALL {
-        let text: String = glsl.vertex.chars().filter(|c| !c.is_whitespace()).collect();
-        assert!(!text.contains("gl_Position.y*=-1"), "{}", glsl.name);
-        assert!(!text.contains("applySurfaceTransform"), "{}", glsl.name);
+    for (program, source) in programs() {
+        let text: String = source.glsl.vertex.chars().filter(|c| !c.is_whitespace()).collect();
+        assert!(!text.contains("gl_Position.y*=-1"), "{}", program.name);
+        assert!(!text.contains("applySurfaceTransform"), "{}", program.name);
     }
     assert!(!sources::PRELUDE_VERTEX.contains("applySurfaceTransform"));
 }

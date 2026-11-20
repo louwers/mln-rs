@@ -187,105 +187,78 @@ impl Glyph {
 pub type Glyphs = BTreeMap<GlyphID, Option<Arc<Glyph>>>;
 pub type GlyphMap = VecMap<FontStackHash, Glyphs>;
 
-#[derive(Clone, Debug, PartialEq)]
+/// A glyph or an inline image of a shaped label, placed relative to the
+/// label's anchor, in pixels at a font size of `ONE_EM`.
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct PositionedGlyph {
-    pub(crate) glyph: GlyphID,
+    pub glyph: GlyphID,
     pub x: f32,
     pub y: f32,
+    /// Whether the glyph stands upright in a vertical line rather than
+    /// turning with it.
     pub vertical: bool,
-    pub(crate) font: FontStackHash,
     pub scale: f32,
+    /// Where the glyph or image is in its atlas.
     pub rect: RectU16,
     pub metrics: GlyphMetrics,
+    /// The image an image section draws.
     pub image_id: Option<String>,
-    /// Maps positioned glyph to `TaggedString` section
+    /// The index of the glyph's section in its `TaggedString`.
     pub section_index: usize,
 }
 
-impl PositionedGlyph {
-    #[expect(clippy::too_many_arguments, reason = "each argument is a field of the positioned glyph")]
-    #[must_use]
-    pub fn new(
-        glyph: GlyphID,
-        x: f32,
-        y: f32,
-        vertical: bool,
-        font: FontStackHash,
-        scale: f32,
-        rect: RectU16,
-        metrics: GlyphMetrics,
-        image_id: Option<String>,
-        section_index: usize,
-    ) -> Self {
-        PositionedGlyph { glyph, x, y, vertical, font, scale, rect, metrics, image_id, section_index }
-    }
-}
-
-/// A bitmask of writing modes.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, mln_wire::Wire)]
-pub struct WritingModeType(pub u8);
-
-#[expect(non_upper_case_globals, reason = "the bit flags keep the C++ enumerator names")]
-impl WritingModeType {
-    pub const None: WritingModeType = WritingModeType(0);
-    pub const Horizontal: WritingModeType = WritingModeType(1 << 0);
-    pub const Vertical: WritingModeType = WritingModeType(1 << 1);
-}
-
-impl std::ops::BitOr for WritingModeType {
-    type Output = WritingModeType;
-    fn bitor(self, rhs: Self) -> Self {
-        WritingModeType(self.0 | rhs.0)
-    }
-}
-
-impl std::ops::BitAnd for WritingModeType {
-    type Output = WritingModeType;
-    fn bitand(self, rhs: Self) -> Self {
-        WritingModeType(self.0 & rhs.0)
-    }
-}
-
-impl std::ops::Not for WritingModeType {
-    type Output = WritingModeType;
-    fn not(self) -> Self {
-        WritingModeType(!self.0)
-    }
-}
-
+/// A line of a shaped label.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PositionedLine {
-    pub positioned_glyphs: Vec<PositionedGlyph>,
+    pub glyphs: Vec<PositionedGlyph>,
+    /// How far the line's content reaches below a line of `ONE_EM` glyphs:
+    /// its largest section's growth beyond one em, or an inline image's.
     pub line_offset: f32,
 }
 
-/// `Shaping`.
+/// A box around a label's anchor: its edges' offsets from the anchor, with y
+/// down.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Bounds {
+    pub left: f32,
+    pub top: f32,
+    pub right: f32,
+    pub bottom: f32,
+}
+
+impl Bounds {
+    #[must_use]
+    pub fn width(&self) -> f32 {
+        self.right - self.left
+    }
+
+    #[must_use]
+    pub fn height(&self) -> f32 {
+        self.bottom - self.top
+    }
+}
+
+/// A label's text, broken into lines and placed glyph by glyph.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Shaping {
-    pub positioned_lines: Vec<PositionedLine>,
-    pub top: f32,
-    pub bottom: f32,
-    pub left: f32,
-    pub right: f32,
-    /// `None` by default (C++ leaves it uninitialized).
-    pub writing_mode: WritingModeType,
+    pub lines: Vec<PositionedLine>,
+    /// The box the text takes, moved by the layout's offset.
+    pub bounds: Bounds,
+    /// Whether a glyph stands upright, as in vertical text.
     pub verticalizable: bool,
+    /// Whether the text holds an inline image.
     pub icons_in_text: bool,
 }
 
 impl Shaping {
-    /// The y offset *should* be part of the font metadata.
-    pub const Y_OFFSET: i32 = -17;
+    /// The y of a label's first line before alignment moves it, which suits
+    /// glyph PBFs' metrics. It belongs in the font's metadata.
+    pub const Y_OFFSET: f32 = -17.0;
 
+    /// Whether no line has a glyph.
     #[must_use]
-    pub(crate) fn new(x: f32, y: f32, writing_mode: WritingModeType) -> Self {
-        Shaping { top: y, bottom: y, left: x, right: x, writing_mode, ..Default::default() }
-    }
-
-    /// `explicit operator bool`: whether any line has a glyph.
-    #[must_use]
-    pub fn is_some(&self) -> bool {
-        self.positioned_lines.iter().any(|line| !line.positioned_glyphs.is_empty())
+    pub fn is_empty(&self) -> bool {
+        self.lines.iter().all(|line| line.glyphs.is_empty())
     }
 }
 

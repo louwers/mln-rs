@@ -37,6 +37,7 @@ earcut.workspace = true
 etagere.workspace = true
 feature.workspace = true
 geo-types.workspace = true
+geo-index.workspace = true
 geometry.workspace = true
 mln_expression.workspace = true
 mln_gfx.workspace = true

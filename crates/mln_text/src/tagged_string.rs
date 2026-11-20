@@ -36,17 +36,20 @@ pub fn font_stack_hash(font_stack: &FontStack) -> FontStackHash {
     hasher.finish()
 }
 
+/// The options of a section of a [`TaggedString`]: a run of text in one
+/// font stack and style, or an inline image.
 #[derive(Clone, Debug)]
 pub struct SectionOptions {
-    pub scale: f64,
+    /// The section's font size, relative to the label's `text-size`.
+    pub scale: f32,
     pub font_stack: FontStack,
     pub(crate) font_stack_hash: FontStackHash,
     pub type_: GlyphIDType,
     /// The glyphs of a section that a font face shaped. The section's text
-    /// holds a [`SHAPED_GLYPH`] for each, and the line that holds the section
-    /// holds its first glyph at `start_index`.
+    /// holds a [`SHAPED_GLYPH`] for each.
     pub(crate) shaped: Option<Arc<ShapedText>>,
-    pub(crate) start_index: i32,
+    /// Whether the section is the last of a section of the style's
+    /// `format` expression, rather than one of the runs it splits into.
     pub key_section: bool,
     /// Whether a section of text that a font shaped runs right to left.
     /// Its glyphs are in visual order, so bidi reorders the section as one
@@ -59,22 +62,16 @@ pub struct SectionOptions {
 }
 
 impl SectionOptions {
+    /// The options of a key section of text, aligned to the bottom of its
+    /// line.
     #[must_use]
-    pub fn new(
-        scale: f64,
-        font_stack: FontStack,
-        type_: GlyphIDType,
-        start_index: u32,
-        text_color: Option<Color>,
-    ) -> Self {
-        let font_stack_hash = font_stack_hash(&font_stack);
+    pub fn new(scale: f32, font_stack: FontStack, type_: GlyphIDType, text_color: Option<Color>) -> Self {
         SectionOptions {
             scale,
+            font_stack_hash: font_stack_hash(&font_stack),
             font_stack,
-            font_stack_hash,
             type_,
             shaped: None,
-            start_index: start_index as i32,
             key_section: true,
             rtl: false,
             image_id: None,
@@ -83,277 +80,135 @@ impl SectionOptions {
         }
     }
 
-    /// The options of an image section. The font stack hash and start index
-    /// are 0 (C++ leaves them uninitialized).
+    /// The options of an image section, which has no font stack.
     #[must_use]
-    pub(crate) fn image(image_id: String, vertical_align: VerticalAlign) -> Self {
+    fn image(image_id: String, vertical_align: VerticalAlign) -> Self {
         SectionOptions {
-            scale: 1.0,
-            font_stack: FontStack::new(),
-            font_stack_hash: 0,
-            type_: GlyphIDType::FontPBF,
-            shaped: None,
-            start_index: 0,
-            key_section: true,
-            rtl: false,
             image_id: Some(image_id),
-            text_color: None,
             vertical_align,
+            font_stack_hash: 0,
+            ..SectionOptions::new(1.0, FontStack::new(), GlyphIDType::FontPBF, None)
         }
     }
 }
 
-/// Max number of images within a text is 6400 U+E000–U+F8FF that covers
-/// Basic Multilingual Plane Unicode Private Use Area (PUA).
+/// The characters that stand for inline images: the Private Use Area of the
+/// Basic Multilingual Plane, which leaves room for 6400 images in a label.
 const PUA_BEGIN: char = '\u{E000}';
 const PUA_END: char = '\u{F8FF}';
 
-/// The shaping-code counterpart of `Formatted`, the text at a per-character
-/// level so that character-rearranging operations (e.g. BiDi) preserve
+/// A label's text, a character at a time, with each character's section, so
+/// that operations that rearrange characters, such as bidi, keep their
 /// formatting.
 #[derive(Clone, Debug, Default)]
 pub struct TaggedString {
     styled_text: StyledText,
     sections: Vec<SectionOptions>,
-    supports_vertical_writing_mode: Option<bool>,
     /// The character of the last image section, if any.
     image_section_id: Option<char>,
     /// The text that font faces shaped this text from, once they have.
     unshaped_text: Option<Vec<char>>,
-    /// Whether a section draws from a font file rather than glyph PBFs.
-    has_font_sections: bool,
-}
-
-/// `u" \t\n\v\f\r"`
-fn is_trim_whitespace(c: char) -> bool {
-    matches!(c, ' ' | '\t' | '\n' | '\u{0B}' | '\u{0C}' | '\r')
 }
 
 impl TaggedString {
+    /// `text` in one section.
     #[must_use]
     pub fn new(text: Vec<char>, options: SectionOptions) -> Self {
-        let size = text.len();
-        TaggedString {
-            styled_text: StyledText { text, styles: vec![0; size] },
-            sections: vec![options],
-            ..Default::default()
-        }
+        let styles = vec![0; text.len()];
+        TaggedString { styled_text: StyledText { text, styles }, sections: vec![options], ..Default::default() }
     }
 
     #[must_use]
-    pub(crate) fn from_styled_text(styled_text: StyledText, sections: Vec<SectionOptions>) -> Self {
-        TaggedString { styled_text, sections, ..Default::default() }
-    }
-
-    #[must_use]
-    pub fn length(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.styled_text.text.len()
     }
 
     #[must_use]
-    pub(crate) fn section_count(&self) -> usize {
-        self.sections.len()
-    }
-
-    #[must_use]
-    pub(crate) fn empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.styled_text.text.is_empty()
     }
 
-    /// The section of the character at `index`. Panics when out of range.
     #[must_use]
-    pub(crate) fn get_section(&self, index: usize) -> &SectionOptions {
-        &self.sections[self.styled_text.styles[index] as usize]
-    }
-
-    #[must_use]
-    pub fn char_at(&self, index: usize) -> char {
-        self.styled_text.text[index]
-    }
-
-    #[must_use]
-    pub fn raw_text(&self) -> &[char] {
+    pub fn text(&self) -> &[char] {
         &self.styled_text.text
     }
 
     #[must_use]
-    pub fn get_styled_text(&self) -> &StyledText {
+    pub fn styled_text(&self) -> &StyledText {
         &self.styled_text
     }
 
-    /// Appends a text section. Quirk kept from C++: the section's start index
-    /// is the length *after* appending the text.
-    #[expect(clippy::too_many_arguments, reason = "each argument is a property of the section")]
-    pub fn add_text_section(
-        &mut self,
-        section_text: &[char],
-        scale: f64,
-        font_stack: &FontStack,
-        type_: GlyphIDType,
-        key_section: bool,
-        text_color: Option<Color>,
-        vertical_align: VerticalAlign,
-    ) {
-        self.styled_text.text.extend_from_slice(section_text);
-        let start_index = self.styled_text.text.len() as u32;
-        self.sections.push(SectionOptions {
-            key_section,
-            vertical_align,
-            ..SectionOptions::new(scale, font_stack.clone(), type_, start_index, text_color)
-        });
-        let index = (self.sections.len() - 1) as SectionIndex;
-        self.styled_text.styles.resize(self.styled_text.text.len(), index);
-        self.supports_vertical_writing_mode = None;
-        if type_ != GlyphIDType::FontPBF {
-            self.has_font_sections = true;
-        }
+    #[must_use]
+    pub fn sections(&self) -> &[SectionOptions] {
+        &self.sections
+    }
+
+    /// The index of the section of the character at `index`. Panics when
+    /// out of range.
+    #[must_use]
+    pub fn section_index(&self, index: usize) -> SectionIndex {
+        self.styled_text.styles[index]
+    }
+
+    /// The section of the character at `index`. Panics when out of range.
+    #[must_use]
+    pub fn section_of(&self, index: usize) -> &SectionOptions {
+        &self.sections[usize::from(self.section_index(index))]
+    }
+
+    /// Appends `text` as a section with `options`.
+    pub fn add_text_section(&mut self, text: &[char], options: SectionOptions) {
+        debug_assert!(options.shaped.is_none() && options.image_id.is_none());
+        self.styled_text.text.extend_from_slice(text);
+        self.push_section(options);
     }
 
     /// Appends a section of glyphs that a font face shaped, in visual order,
-    /// from text that runs right to left if `rtl`. The section's start index
-    /// is the length before the glyphs.
-    #[expect(clippy::too_many_arguments, reason = "each argument is a property of the section")]
-    pub fn add_shaped_section(
-        &mut self,
-        shaped: &Arc<ShapedText>,
-        scale: f64,
-        font_stack: &FontStack,
-        type_: GlyphIDType,
-        rtl: bool,
-        key_section: bool,
-        text_color: Option<Color>,
-        vertical_align: VerticalAlign,
-    ) {
-        let start_index = self.styled_text.text.len() as u32;
-        self.sections.push(SectionOptions {
-            vertical_align,
-            shaped: Some(Arc::clone(shaped)),
-            rtl,
-            key_section,
-            ..SectionOptions::new(scale, font_stack.clone(), type_, start_index, text_color)
-        });
+    /// from text that runs right to left if `rtl`.
+    pub fn add_shaped_section(&mut self, shaped: &Arc<ShapedText>, rtl: bool, options: SectionOptions) {
+        debug_assert!(options.image_id.is_none());
         let len = self.styled_text.text.len() + shaped.glyphs.len();
         self.styled_text.text.resize(len, SHAPED_GLYPH);
-        let index = (self.sections.len() - 1) as SectionIndex;
-        self.styled_text.styles.resize(self.styled_text.text.len(), index);
-        if type_ != GlyphIDType::FontPBF {
-            self.has_font_sections = true;
-        }
+        self.push_section(SectionOptions { shaped: Some(Arc::clone(shaped)), rtl, ..options });
     }
 
+    /// Appends an inline image. A label holds at most 6400; it logs a
+    /// warning and drops any more.
     pub fn add_image_section(&mut self, image_id: &str, vertical_align: VerticalAlign) {
-        let Some(next) = self.get_next_image_section_char_code() else {
+        let Some(next) = self.next_image_char() else {
             Log::warning(Event::Style, "Exceeded maximum number of images in a label.");
             return;
         };
         self.styled_text.text.push(next);
-        self.sections.push(SectionOptions::image(image_id.to_string(), vertical_align));
-        let index = (self.sections.len() - 1) as SectionIndex;
+        self.push_section(SectionOptions::image(image_id.to_string(), vertical_align));
+    }
+
+    /// Adds `options` as the section of the characters that have none yet.
+    fn push_section(&mut self, options: SectionOptions) {
+        let index = self.sections.len() as SectionIndex;
+        self.sections.push(options);
         self.styled_text.styles.resize(self.styled_text.text.len(), index);
     }
 
-    #[must_use]
-    pub fn section_at(&self, index: usize) -> &SectionOptions {
-        &self.sections[index]
-    }
-
-    #[must_use]
-    pub fn get_sections(&self) -> &[SectionOptions] {
-        &self.sections
-    }
-
-    #[must_use]
-    pub fn get_section_index(&self, character_index: usize) -> SectionIndex {
-        self.styled_text.styles[character_index]
-    }
-
-    /// The largest section scale, compared with `fmax`.
-    #[must_use]
-    pub(crate) fn get_max_scale(&self) -> f64 {
-        let mut max_scale = 0.0;
-        for i in 0..self.styled_text.text.len() {
-            max_scale = mln_math::fmax(max_scale, self.get_section(i).scale);
-        }
-        max_scale
-    }
-
-    /// `trim`: removes leading and trailing " \t\n\v\f\r", but not from
-    /// sections that need shaping.
-    pub(crate) fn trim(&mut self) {
-        let text = &self.styled_text.text;
-        // find_first_not_of (npos = None)
-        let mut beginning_whitespace = text.iter().position(|&c| !is_trim_whitespace(c));
-        let limit = beginning_whitespace.unwrap_or(usize::MAX);
-        let mut i = 0;
-        while i < limit && i < text.len() {
-            if self.get_section(i).type_ != GlyphIDType::FontPBF {
-                beginning_whitespace = Some(i);
-                break;
-            }
-            i += 1;
-        }
-
-        match beginning_whitespace {
-            None => {
-                for section in &mut self.sections {
-                    section.start_index = 0;
-                }
-                // Entirely whitespace
-                self.styled_text.text.clear();
-                self.styled_text.styles.clear();
-            }
-            Some(beginning_whitespace) => {
-                // find_last_not_of + 1 (npos + 1 == 0)
-                let mut trailing_whitespace =
-                    text.iter().rposition(|&c| !is_trim_whitespace(c)).map_or(0, |p| p + 1) as i32;
-
-                if beginning_whitespace != 0 {
-                    for section in &mut self.sections {
-                        section.start_index = (section.start_index as usize).wrapping_sub(beginning_whitespace) as i32;
-                    }
-                }
-
-                let mut i = self.styled_text.text.len() as i32 - 1;
-                while i >= trailing_whitespace {
-                    if self.get_section(i as usize).type_ != GlyphIDType::FontPBF {
-                        trailing_whitespace = i + 1;
-                        break;
-                    }
-                    i -= 1;
-                }
-
-                let end = trailing_whitespace as usize;
-                self.styled_text.text = self.styled_text.text[beginning_whitespace..end].to_vec();
-                self.styled_text.styles = self.styled_text.styles[beginning_whitespace..end].to_vec();
-            }
-        }
-    }
-
-    /// Replaces punctuation with its vertical forms. Relies on
-    /// verticalization changing characters in place so that style indices
-    /// don't need updating.
+    /// Replaces punctuation drawn from glyph PBFs with its vertical forms,
+    /// where its neighbors allow.
     pub fn verticalize_punctuation(&mut self) {
-        let mut replaced = i18n::verticalize_punctuation_str(&self.styled_text.text);
-        for (i, c) in replaced.iter_mut().enumerate() {
-            if self.get_section(i).type_ != GlyphIDType::FontPBF {
-                *c = self.styled_text.text[i];
+        let vertical = i18n::verticalize_punctuation_str(&self.styled_text.text);
+        let StyledText { text, styles } = &mut self.styled_text;
+        for ((c, vertical), &style) in text.iter_mut().zip(vertical).zip(styles.iter()) {
+            if self.sections[usize::from(style)].type_ == GlyphIDType::FontPBF {
+                *c = vertical;
             }
         }
-        self.styled_text.text = replaced;
     }
 
-    /// Whether the text allows vertical writing mode (cached until the next
-    /// section is added).
-    pub fn allows_vertical_writing_mode(&mut self) -> bool {
-        if let Some(allows) = self.supports_vertical_writing_mode {
-            return allows;
-        }
-        let allows = (0..self.styled_text.text.len()).any(|i| {
-            self.get_section(i).type_ == GlyphIDType::FontPBF
-                && i18n::has_upright_vertical_orientation(self.styled_text.text[i])
-        });
-        self.supports_vertical_writing_mode = Some(allows);
-        allows
+    /// Whether a character drawn from glyph PBFs stays upright in vertical
+    /// writing mode.
+    #[must_use]
+    pub fn allows_vertical_writing_mode(&self) -> bool {
+        self.styled_text.text.iter().zip(&self.styled_text.styles).any(|(&c, &style)| {
+            self.sections[usize::from(style)].type_ == GlyphIDType::FontPBF && i18n::has_upright_vertical_orientation(c)
+        })
     }
 
     /// Whether font faces shaped the text: [`Self::set_unshaped_text`].
@@ -379,10 +234,10 @@ impl TaggedString {
     /// than glyph PBFs.
     #[must_use]
     pub fn has_font_sections(&self) -> bool {
-        self.has_font_sections
+        self.sections.iter().any(|section| section.type_ != GlyphIDType::FontPBF)
     }
 
-    fn get_next_image_section_char_code(&mut self) -> Option<char> {
+    fn next_image_char(&mut self) -> Option<char> {
         let next = match self.image_section_id {
             None => PUA_BEGIN,
             Some(last) => char::from_u32(u32::from(last) + 1).filter(|&next| next <= PUA_END)?,
@@ -396,71 +251,32 @@ impl TaggedString {
 mod tests {
     use super::*;
 
-    fn u(s: &str) -> Vec<char> {
-        s.chars().collect()
-    }
-
-    // gtest: TaggedString.Trim
-    #[test]
-    fn trim() {
-        let mut basic = TaggedString::new(
-            u(" \t\ntrim that and not this  \n\t"),
-            SectionOptions::new(1.0, vec![], GlyphIDType::FontPBF, 0, None),
-        );
-        basic.trim();
-        assert_eq!(basic.raw_text(), u("trim that and not this"));
-
-        let mut two_sections = TaggedString::default();
-        two_sections.add_text_section(
-            &u(" \t\ntrim that"),
-            1.5,
-            &vec![],
-            GlyphIDType::FontPBF,
-            false,
-            None,
-            VerticalAlign::Bottom,
-        );
-        two_sections.add_text_section(
-            &u(" and not this  \n\t"),
-            0.5,
-            &vec![],
-            GlyphIDType::FontPBF,
-            false,
-            None,
-            VerticalAlign::Bottom,
-        );
-
-        two_sections.trim();
-        assert_eq!(two_sections.raw_text(), u("trim that and not this"));
-
-        let mut empty =
-            TaggedString::new(u("\n\t\u{b} \r  \t\n"), SectionOptions::new(1.0, vec![], GlyphIDType::FontPBF, 0, None));
-        empty.trim();
-        assert_eq!(empty.raw_text(), u(""));
-
-        let mut no_trim =
-            TaggedString::new(u("no trim!"), SectionOptions::new(1.0, vec![], GlyphIDType::FontPBF, 0, None));
-        no_trim.trim();
-        assert_eq!(no_trim.raw_text(), u("no trim!"));
-    }
-
     // gtest: TaggedString.ImageSections
     #[test]
     fn image_sections() {
         let mut string = TaggedString::default();
         string.add_image_section("image_name", VerticalAlign::Bottom);
-        assert_eq!(string.raw_text(), u("\u{E000}"));
-        assert!(string.get_section(0).image_id.is_some());
-        assert_eq!(string.get_section(0).image_id.as_deref(), Some("image_name"));
+        assert_eq!(string.text(), ['\u{E000}']);
+        assert_eq!(string.section_of(0).image_id.as_deref(), Some("image_name"));
 
         let mut max_sections = TaggedString::default();
         for i in 0..6401 {
             max_sections.add_image_section(&i.to_string(), VerticalAlign::Bottom);
         }
 
-        assert_eq!(max_sections.get_sections().len(), 6400);
-        assert_eq!(max_sections.char_at(0), '\u{E000}');
-        assert_eq!(max_sections.char_at(6399), '\u{F8FF}');
+        assert_eq!(max_sections.sections().len(), 6400);
+        assert_eq!(max_sections.text()[0], '\u{E000}');
+        assert_eq!(max_sections.text()[6399], '\u{F8FF}');
+    }
+
+    #[test]
+    fn verticalizes_only_glyph_pbf_punctuation() {
+        let face = crate::glyph::face_type("tagged-string-test", "font", &[(0, 0xFFFF)]);
+        let mut string = TaggedString::default();
+        string.add_text_section(&['-'], SectionOptions::new(1.0, vec![], GlyphIDType::FontPBF, None));
+        string.add_text_section(&['-'], SectionOptions::new(1.0, vec![], face, None));
+        string.verticalize_punctuation();
+        assert_eq!(string.text(), ['\u{FE32}', '-']);
     }
 
     #[test]

@@ -1,17 +1,20 @@
-// The label-plane matrices and the CPU line-label projection. Symbols are
-// not instanced: each glyph has four dynamic vertices.
+// The label-plane matrices, and the CPU projection that lays line labels'
+// glyphs along their lines as the camera sees them. Symbols are not
+// instanced: each glyph has four dynamic vertices.
+
+use std::f32::consts::PI;
+use std::iter;
 
 use geometry::Point;
 use glam::{DMat4, DVec2, DVec3, DVec4, Vec2};
 use mln_map_types::{ProjectedTilePoint, TileProjector, View};
-use mln_text::glyph::WritingModeType;
 use mln_tile_id::geometry_tile_data::GeometryCoordinate;
 use mln_util::constants::ONE_EM;
 
 use crate::buckets::symbol_bucket::{
     PlacedSymbol, PlacedSymbolPools, SymbolBucket, SymbolDynamicLayoutVertex, SymbolSizeBinder, ZoomEvaluatedSize,
 };
-use crate::render_layer::PlacedTile;
+use crate::layout::symbol_instance::WritingModes;
 
 /// The directions on screen that a pitched, unrotated label's east and south
 /// axes take, as unit vectors, or zero where an axis is edge-on.
@@ -83,64 +86,48 @@ pub(crate) fn gl_coord_matrix(
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct TileDistance {
-    pub(crate) prev_tile_distance: f32,
-    pub(crate) last_segment_viewport_distance: f32,
-}
-
-impl TileDistance {
-    #[must_use]
-    pub(crate) fn new(prev_tile_distance: f32, last_segment_viewport_distance: f32) -> Self {
-        TileDistance { prev_tile_distance, last_segment_viewport_distance }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct PlacedGlyph {
-    pub(crate) point: Vec2,
-    pub(crate) angle: f32,
-    pub(crate) tile_distance: Option<TileDistance>,
-}
-
-impl PlacedGlyph {
-    #[must_use]
-    pub(crate) fn new(point: Vec2, angle: f32, tile_distance: Option<TileDistance>) -> Self {
-        PlacedGlyph { point, angle, tile_distance }
-    }
-}
-
-pub(crate) type PointAndCameraDistance = (Vec2, f32);
-
-fn to_vec2(p: Point<i16>) -> Vec2 {
-    Vec2::new(f32::from(p.x), f32::from(p.y))
-}
-
-/// `point` through `matrix`, and its w: the distance from the camera for a
-/// projection matrix.
+/// `symbol`'s `text-size` or `icon-size` at the zoom `size` was evaluated
+/// for.
 #[must_use]
-pub(crate) fn project(point: Vec2, matrix: &DMat4) -> PointAndCameraDistance {
-    let pos = *matrix * DVec4::new(f64::from(point.x), f64::from(point.y), 0.0, 1.0);
-    (Vec2::new((pos.x / pos.w) as f32, (pos.y / pos.w) as f32), pos.w as f32)
-}
-
-#[must_use]
-pub(crate) fn evaluate_size_for_feature(zoom_evaluated_size: &ZoomEvaluatedSize, placed_symbol: &PlacedSymbol) -> f32 {
-    if zoom_evaluated_size.is_feature_constant {
-        zoom_evaluated_size.size
-    } else if zoom_evaluated_size.is_zoom_constant {
-        placed_symbol.lower_size
+pub(crate) fn evaluate_size_for_feature(size: &ZoomEvaluatedSize, symbol: &PlacedSymbol) -> f32 {
+    if size.is_feature_constant {
+        size.size
+    } else if size.is_zoom_constant {
+        symbol.lower_size
     } else {
-        placed_symbol.lower_size + zoom_evaluated_size.size_t * (placed_symbol.upper_size - placed_symbol.lower_size)
+        symbol.lower_size + size.size_t * (symbol.upper_size - symbol.lower_size)
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum PlacementResult {
-    Ok,
-    NotEnoughRoom,
-    NeedsFlipping,
-    UseVertical,
+/// Appends the four vertices of a glyph at `anchor`, turned by `angle`.
+pub(crate) fn add_dynamic_attributes(anchor: Vec2, angle: f32, vertices: &mut Vec<SymbolDynamicLayoutVertex>) {
+    vertices.extend([SymbolBucket::dynamic_layout_attributes(anchor, angle); 4]);
+}
+
+/// Appends the vertices of `glyph_count` glyphs placed where nothing draws.
+pub(crate) fn hide_glyphs(glyph_count: usize, vertices: &mut Vec<SymbolDynamicLayoutVertex>) {
+    let hidden = SymbolBucket::dynamic_layout_attributes(Vec2::NEG_INFINITY, 0.0);
+    vertices.resize(vertices.len() + 4 * glyph_count, hidden);
+}
+
+/// A point projected for label placement.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct ProjectedPoint {
+    pub(crate) point: Vec2,
+    /// The projection's w: positive in front of the camera.
+    pub(crate) camera_distance: f32,
+    /// Behind the globe's horizon; never on Mercator.
+    pub(crate) occluded: bool,
+}
+
+impl From<ProjectedTilePoint> for ProjectedPoint {
+    fn from(projected: ProjectedTilePoint) -> Self {
+        ProjectedPoint {
+            point: DVec2::new(projected.point.x, projected.point.y).as_vec2(),
+            camera_distance: projected.signed_distance_from_camera as f32,
+            occluded: projected.occluded,
+        }
+    }
 }
 
 /// Projects tile points to the label plane a symbol is laid out in, through
@@ -150,10 +137,10 @@ pub(crate) struct LabelPlaneProjector<'a> {
     tile: TileProjector<'a>,
     pitch_with_map: bool,
     translation: Vec2,
-    pitched_label_plane_matrix: DMat4,
-    pitched_label_plane_matrix_inverse: DMat4,
-    width: f32,
-    height: f32,
+    /// Tile units to the pitched label plane, and back.
+    pitched: DMat4,
+    pitched_inverse: DMat4,
+    viewport: Vec2,
     /// The symbol's `symbol-height-offset`, in meters.
     elevation: f64,
 }
@@ -170,9 +157,7 @@ impl<'a> LabelPlaneProjector<'a> {
         translation: Vec2,
     ) -> Self {
         let size = tile.view().size();
-        // Only pitched labels lay out in the pitched plane; the others go
-        // through the projection.
-        let (pitched_label_plane_matrix, pitched_label_plane_matrix_inverse) = if pitch_with_map {
+        let (pitched, pitched_inverse) = if pitch_with_map {
             let matrix = label_plane_matrix(true, rotate_with_map, tile.view(), pixels_to_tile_units);
             (matrix, matrix.try_inverse().unwrap_or(DMat4::ZERO))
         } else {
@@ -182,10 +167,9 @@ impl<'a> LabelPlaneProjector<'a> {
             tile: *tile,
             pitch_with_map,
             translation,
-            pitched_label_plane_matrix,
-            pitched_label_plane_matrix_inverse,
-            width: size.width as f32,
-            height: size.height as f32,
+            pitched,
+            pitched_inverse,
+            viewport: Vec2::new(size.width as f32, size.height as f32),
             elevation: 0.0,
         }
     }
@@ -201,580 +185,519 @@ impl<'a> LabelPlaneProjector<'a> {
     /// Tile units to the label plane; distance and occlusion come from the
     /// projection.
     #[must_use]
-    pub(crate) fn project(&self, tile_point: Vec2) -> ProjectedTilePoint {
+    pub(crate) fn project(&self, tile_point: Vec2) -> ProjectedPoint {
         let translated = tile_point + self.translation;
         if self.pitch_with_map {
-            let projected = project(translated, &self.pitched_label_plane_matrix);
-            return ProjectedTilePoint {
-                point: Point::new(f64::from(projected.0.x), f64::from(projected.0.y)),
-                signed_distance_from_camera: f64::from(projected.1),
+            let pos = self.pitched * translated.as_dvec2().extend(0.0).extend(1.0);
+            return ProjectedPoint {
+                point: (pos.truncate().truncate() / pos.w).as_vec2(),
+                camera_distance: pos.w as f32,
                 occluded: false,
             };
         }
-        let mut projected =
-            self.tile.project(&Point::new(f64::from(translated.x), f64::from(translated.y)), self.elevation);
-        projected.point = Point::new(
-            (projected.point.x * 0.5 + 0.5) * f64::from(self.width),
-            (-projected.point.y * 0.5 + 0.5) * f64::from(self.height),
-        );
-        projected
+        let projected = self.tile.project(&tile_point_f64(translated), self.elevation);
+        let clip = DVec2::new(projected.point.x, projected.point.y);
+        ProjectedPoint {
+            point: ((clip * DVec2::new(0.5, -0.5) + 0.5) * self.viewport.as_dvec2()).as_vec2(),
+            ..projected.into()
+        }
     }
 
     /// Label plane to clip space, for orientation checks.
     #[must_use]
     pub(crate) fn to_clip_space(&self, label_plane_point: Vec2) -> Vec2 {
         if self.pitch_with_map {
-            let tile_point = project(label_plane_point, &self.pitched_label_plane_matrix_inverse).0;
-            let projected =
-                self.tile.project(&Point::new(f64::from(tile_point.x), f64::from(tile_point.y)), self.elevation);
-            return Vec2::new(projected.point.x as f32, projected.point.y as f32);
+            let pos = self.pitched_inverse * label_plane_point.as_dvec2().extend(0.0).extend(1.0);
+            let tile_point = (pos.truncate().truncate() / pos.w).as_vec2();
+            return self.to_clip_space_from_tile(tile_point).point;
         }
-        Vec2::new((label_plane_point.x / self.width) * 2.0 - 1.0, 1.0 - (label_plane_point.y / self.height) * 2.0)
+        Vec2::new(1.0, -1.0) * (label_plane_point / self.viewport * 2.0 - 1.0)
     }
 
     /// Tile units straight to clip space.
     #[must_use]
-    pub(crate) fn to_clip_space_from_tile(&self, tile_point: Vec2) -> ProjectedTilePoint {
-        self.tile.project(&Point::new(f64::from(tile_point.x), f64::from(tile_point.y)), self.elevation)
+    pub(crate) fn to_clip_space_from_tile(&self, tile_point: Vec2) -> ProjectedPoint {
+        self.tile.project(&tile_point_f64(tile_point), self.elevation).into()
     }
 }
 
-/// The projections of one symbol's line vertices, so each vertex is
-/// projected once however many glyphs walk it.
-#[derive(Debug, Default)]
-pub(crate) struct LineProjectionCache {
-    points: Vec<Option<ProjectedTilePoint>>,
-    occluded: bool,
+/// How far along its line, from the anchor, a glyph is placed.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct TileDistance {
+    /// Along the line in tile units, to the start of the glyph's segment: 0
+    /// on the anchor's segment.
+    pub(crate) prev_tile_distance: f32,
+    /// Along the glyph's segment in the label plane, from its start.
+    pub(crate) last_segment_viewport_distance: f32,
 }
 
-impl LineProjectionCache {
-    pub(crate) fn reset(&mut self, vertex_count: usize) {
-        self.points.clear();
-        self.points.resize(vertex_count, None);
-        self.occluded = false;
-    }
+/// A glyph placed on its line in the label plane.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct PlacedGlyph {
+    pub(crate) point: Vec2,
+    /// The angle of the segment the glyph is on, turned half around for a
+    /// glyph read against the line's direction.
+    pub(crate) angle: f32,
+    pub(crate) tile_distance: TileDistance,
+}
 
-    pub(crate) fn get(
-        &mut self,
-        index: usize,
-        line: &[GeometryCoordinate],
-        label_plane: &LabelPlaneProjector<'_>,
-    ) -> ProjectedTilePoint {
-        if let Some(cached) = self.points[index] {
-            return cached;
-        }
-        let projected = label_plane.project(to_vec2(line[index]));
-        self.occluded |= projected.occluded;
-        self.points[index] = Some(projected);
-        projected
-    }
+/// A label along a line: a placed symbol's geometry, borrowed from its
+/// buffer's pools.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct LineLabel<'a> {
+    /// In tile units, on the segment from `line[segment]`.
+    anchor: Vec2,
+    segment: usize,
+    line: &'a [GeometryCoordinate],
+    /// Along the line from the anchor to each vertex, in tile units; empty
+    /// for icons.
+    tile_distances: &'a [f32],
+    /// Each glyph's offset along the line from the anchor, in units of a
+    /// `ONE_EM` font.
+    glyph_offsets: &'a [f32],
+    /// `text-offset` or `icon-offset`, in units of a `ONE_EM` font.
+    line_offset: Vec2,
+    writing_modes: WritingModes,
+}
 
-    /// Whether any vertex projected so far is behind the globe's horizon.
+impl<'a> LineLabel<'a> {
     #[must_use]
-    pub(crate) fn any_occluded(&self) -> bool {
-        self.occluded
-    }
-}
-
-/// Whether the anchor, in clip space, is within `clipping_buffer` of the
-/// origin.
-fn is_visible(anchor_pos: &Point<f64>, clipping_buffer: &[f64; 2]) -> bool {
-    let x = anchor_pos.x;
-    let y = anchor_pos.y;
-    x >= -clipping_buffer[0] && x <= clipping_buffer[0] && y >= -clipping_buffer[1] && y <= clipping_buffer[1]
-}
-
-pub(crate) fn add_dynamic_attributes(
-    anchor_point: Vec2,
-    angle: f32,
-    dynamic_attribute_data: &mut Vec<SymbolDynamicLayoutVertex>,
-) {
-    let dynamic_attributes = SymbolBucket::dynamic_layout_attributes(anchor_point, angle);
-    dynamic_attribute_data.push(dynamic_attributes);
-    dynamic_attribute_data.push(dynamic_attributes);
-    dynamic_attribute_data.push(dynamic_attributes);
-    dynamic_attribute_data.push(dynamic_attributes);
-}
-
-pub(crate) fn hide_glyphs(num_glyphs: usize, dynamic_vertex_array: &mut Vec<SymbolDynamicLayoutVertex>) {
-    let count = 4;
-    let offscreen_point = Vec2::new(f32::NEG_INFINITY, f32::NEG_INFINITY);
-    if dynamic_vertex_array.is_empty() {
-        dynamic_vertex_array.reserve(count * num_glyphs);
-    }
-    for _ in 0..num_glyphs {
-        add_dynamic_attributes(offscreen_point, 0.0, dynamic_vertex_array);
-    }
-}
-
-/// Projects a truncated line segment; `project_point` takes a tile point to
-/// the space the line is laid out in.
-fn project_truncated_line_segment(
-    previous_tile_point: Vec2,
-    current_tile_point: Vec2,
-    previous_projected_point: Vec2,
-    minimum_length: f32,
-    project_point: impl Fn(Vec2) -> Vec2,
-) -> Vec2 {
-    // We are assuming the previous tile point won't project to a point within
-    // one unit of the camera plane. If it did, that would mean our label
-    // extended all the way out from within the viewport to a (very distant)
-    // point near the plane of the camera. We wouldn't be able to render the
-    // label anyway once it crossed the plane of the camera.
-    let projected_unit_vertex =
-        project_point(previous_tile_point + (previous_tile_point - current_tile_point).normalize_or_zero());
-    let projected_unit_segment = previous_projected_point - projected_unit_vertex;
-
-    previous_projected_point + projected_unit_segment * (minimum_length / projected_unit_segment.length())
-}
-
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the glyph's offsets, the anchor in both spaces, the line and its distances, and the projection and its cache"
-)]
-fn place_glyph_along_line(
-    offset_x: f32,
-    line_offset_x: f32,
-    line_offset_y: f32,
-    flip: bool,
-    projected_anchor_point: Vec2,
-    tile_anchor_point: Vec2,
-    anchor_segment: u16,
-    line: &[GeometryCoordinate],
-    tile_distances: &[f32],
-    label_plane: &LabelPlaneProjector<'_>,
-    projections: &mut LineProjectionCache,
-    return_tile_distance: bool,
-) -> Option<PlacedGlyph> {
-    let combined_offset_x = if flip { offset_x - line_offset_x } else { offset_x + line_offset_x };
-
-    let mut dir: i16 = if combined_offset_x > 0.0 { 1 } else { -1 };
-
-    let mut angle: f32 = 0.0;
-    if flip {
-        // The label needs to be flipped to keep text upright.
-        // Iterate in the reverse direction.
-        dir *= -1;
-        angle = std::f32::consts::PI;
-    }
-
-    if dir < 0 {
-        angle += std::f32::consts::PI;
-    }
-
-    let mut current_index: i32 = if dir > 0 { i32::from(anchor_segment) } else { i32::from(anchor_segment) + 1 };
-
-    let initial_index = current_index;
-    let mut current = projected_anchor_point;
-    let mut prev = projected_anchor_point;
-    let mut distance_to_prev: f32 = 0.0;
-    let mut current_segment_distance: f32 = 0.0;
-    let abs_offset_x = combined_offset_x.abs();
-
-    while distance_to_prev + current_segment_distance <= abs_offset_x {
-        current_index += i32::from(dir);
-
-        // offset does not fit on the projected line
-        if current_index < 0 || current_index >= line.len() as i32 {
-            return None;
-        }
-
-        prev = current;
-        let projection = projections.get(current_index as usize, line, label_plane);
-        if projection.signed_distance_from_camera > 0.0 {
-            current = Vec2::new(projection.point.x as f32, projection.point.y as f32);
-        } else {
-            // The vertex is behind the plane of the camera, so we can't project it
-            // Instead, we'll create a vertex along the line that's far enough to include the glyph
-            let previous_tile_point = if distance_to_prev == 0.0 {
-                tile_anchor_point
-            } else {
-                to_vec2(line[(current_index - i32::from(dir)) as usize])
-            };
-            let current_tile_point = to_vec2(line[current_index as usize]);
-            current = project_truncated_line_segment(
-                previous_tile_point,
-                current_tile_point,
-                prev,
-                abs_offset_x - distance_to_prev + 1.0,
-                |p| {
-                    let projected = label_plane.project(p);
-                    Vec2::new(projected.point.x as f32, projected.point.y as f32)
-                },
-            );
-        }
-
-        distance_to_prev += current_segment_distance;
-        current_segment_distance = prev.distance(current);
-    }
-
-    // The point is on the current segment. Interpolate to find it.
-    let segment_interpolation_t = (abs_offset_x - distance_to_prev) / current_segment_distance;
-    let prev_to_current = current - prev;
-    let mut p = prev_to_current * segment_interpolation_t + prev;
-
-    // offset the point from the line to text-offset and icon-offset
-    // (`util::mag` defaults to a double result: the float sqrt promoted.)
-    let mag = f64::from(prev_to_current.length());
-    p += prev_to_current.perp() * ((f64::from(line_offset_y * f32::from(dir)) / mag) as f32);
-
-    let segment_angle = angle + (current.y - prev.y).atan2(current.x - prev.x);
-
-    Some(PlacedGlyph::new(
-        p,
-        segment_angle,
-        if return_tile_distance {
-            Some(TileDistance::new(
-                if (current_index - i32::from(dir)) == initial_index {
-                    0.0
-                } else {
-                    tile_distances[(current_index - i32::from(dir)) as usize]
-                },
-                abs_offset_x - distance_to_prev,
-            ))
-        } else {
-            None
-        },
-    ))
-}
-
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the label's offsets, the anchor in both spaces, the symbol, and the projection and its cache"
-)]
-pub(crate) fn place_first_and_last_glyph(
-    font_scale: f32,
-    line_offset_x: f32,
-    line_offset_y: f32,
-    flip: bool,
-    anchor_point: Vec2,
-    tile_anchor_point: Vec2,
-    symbol: &PlacedSymbol,
-    pools: &PlacedSymbolPools,
-    label_plane: &LabelPlaneProjector<'_>,
-    projections: &mut LineProjectionCache,
-    return_tile_distance: bool,
-) -> Option<(PlacedGlyph, PlacedGlyph)> {
-    let glyph_offsets = pools.glyph_offsets(symbol);
-    let (Some(&first_glyph_offset), Some(&last_glyph_offset)) = (glyph_offsets.first(), glyph_offsets.last()) else {
-        debug_assert!(false);
-        return None;
-    };
-
-    let first_placed_glyph = place_glyph_along_line(
-        font_scale * first_glyph_offset,
-        line_offset_x,
-        line_offset_y,
-        flip,
-        anchor_point,
-        tile_anchor_point,
-        symbol.segment as u16,
-        pools.line(symbol),
-        pools.tile_distances(symbol),
-        label_plane,
-        projections,
-        return_tile_distance,
-    )?;
-
-    let last_placed_glyph = place_glyph_along_line(
-        font_scale * last_glyph_offset,
-        line_offset_x,
-        line_offset_y,
-        flip,
-        anchor_point,
-        tile_anchor_point,
-        symbol.segment as u16,
-        pools.line(symbol),
-        pools.tile_distances(symbol),
-        label_plane,
-        projections,
-        return_tile_distance,
-    )?;
-    // A line label with any vertex behind the planet is hidden whole.
-    if projections.any_occluded() {
-        return None;
-    }
-
-    Some((first_placed_glyph, last_placed_glyph))
-}
-
-fn requires_orientation_change(
-    writing_modes: WritingModeType,
-    first_point: Vec2,
-    last_point: Vec2,
-    aspect_ratio: f32,
-) -> Option<PlacementResult> {
-    if writing_modes == (WritingModeType::Horizontal | WritingModeType::Vertical) {
-        // On top of choosing whether to flip, choose whether to render this
-        // version of the glyphs or the alternate vertical glyphs. We can't just
-        // filter out vertical glyphs in the horizontal range because the
-        // horizontal and vertical versions can have slightly different
-        // projections which could lead to angles where both or neither showed.
-        let rise = (last_point.y - first_point.y).abs();
-        let run = (last_point.x - first_point.x).abs() * aspect_ratio;
-        if rise > run {
-            return Some(PlacementResult::UseVertical);
+    pub(crate) fn new(symbol: &PlacedSymbol, pools: &'a PlacedSymbolPools) -> Self {
+        LineLabel {
+            anchor: symbol.anchor_point,
+            segment: symbol.segment,
+            line: pools.line(symbol),
+            tile_distances: pools.tile_distances(symbol),
+            glyph_offsets: pools.glyph_offsets(symbol),
+            line_offset: Vec2::from(symbol.line_offset),
+            writing_modes: symbol.writing_modes,
         }
     }
-
-    if if writing_modes == WritingModeType::Vertical {
-        first_point.y < last_point.y
-    } else {
-        first_point.x > last_point.x
-    } {
-        // Includes the horizontal-only case, of labels without vertical glyphs
-        return Some(PlacementResult::NeedsFlipping);
-    }
-    None
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the symbol, its size and orientation flags, the projection and its cache, and the vertices it writes"
-)]
-fn place_glyphs_along_line(
-    symbol: &PlacedSymbol,
-    pools: &PlacedSymbolPools,
-    font_size: f32,
-    flip: bool,
-    keep_upright: bool,
-    rotate_to_line: bool,
-    label_plane: &LabelPlaneProjector<'_>,
-    projections: &mut LineProjectionCache,
-    dynamic_vertex_array: &mut Vec<SymbolDynamicLayoutVertex>,
-    projected_anchor_point: Vec2,
-    aspect_ratio: f32,
-) -> PlacementResult {
-    let font_scale = font_size / ONE_EM;
-    let line_offset_x = symbol.line_offset[0] * font_scale;
-    let line_offset_y = symbol.line_offset[1] * font_scale;
-    let line = pools.line(symbol);
-    let tile_distances = pools.tile_distances(symbol);
-    let glyph_offsets = pools.glyph_offsets(symbol);
+/// Why a label's glyphs weren't placed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Unplaced {
+    /// The line ends before a glyph.
+    NotEnoughRoom,
+    /// The label reads upside down; flipped, it reads upright.
+    NeedsFlipping,
+    /// The line is steep enough on screen for the label's vertical glyphs
+    /// instead.
+    UseVertical,
+}
 
-    let mut placed_glyphs: Vec<PlacedGlyph> = Vec::new();
-    if glyph_offsets.len() > 1 {
-        let Some(first_and_last_glyph) = place_first_and_last_glyph(
+/// Places line labels' glyphs in one label plane, keeping a buffer for the
+/// projections of each label's line.
+pub(crate) struct LinePlacer<'a> {
+    label_plane: &'a LabelPlaneProjector<'a>,
+    projections: Vec<Option<ProjectedPoint>>,
+}
+
+impl<'a> LinePlacer<'a> {
+    #[must_use]
+    pub(crate) fn new(label_plane: &'a LabelPlaneProjector<'a>) -> Self {
+        LinePlacer { label_plane, projections: Vec::new() }
+    }
+
+    /// Starts placing `label`, its glyphs `font_size` pixels in the label
+    /// plane.
+    pub(crate) fn begin(&mut self, label: LineLabel<'a>, font_size: f32) -> LabelPlacer<'_, 'a> {
+        self.projections.clear();
+        self.projections.resize(label.line.len(), None);
+        let font_scale = font_size / ONE_EM;
+        LabelPlacer {
+            label_plane: self.label_plane,
+            projections: &mut self.projections,
+            occluded: false,
+            anchor: self.label_plane.project(label.anchor).point,
             font_scale,
-            line_offset_x,
-            line_offset_y,
-            flip,
-            projected_anchor_point,
-            symbol.anchor_point,
-            symbol,
-            pools,
-            label_plane,
-            projections,
-            false,
-        ) else {
-            return PlacementResult::NotEnoughRoom;
-        };
-
-        let first_point = label_plane.to_clip_space(first_and_last_glyph.0.point);
-        let last_point = label_plane.to_clip_space(first_and_last_glyph.1.point);
-
-        if keep_upright
-            && !flip
-            && let Some(orientation_change) =
-                requires_orientation_change(symbol.writing_modes, first_point, last_point, aspect_ratio)
-        {
-            return orientation_change;
+            line_offset: label.line_offset * font_scale,
+            label,
         }
-
-        placed_glyphs.reserve(glyph_offsets.len());
-        placed_glyphs.push(first_and_last_glyph.0);
-        for &glyph_offset_x in &glyph_offsets[1..glyph_offsets.len() - 1] {
-            // Since first and last glyph fit on the line, we're sure that the
-            // rest of the glyphs can be placed
-            let placed_glyph = place_glyph_along_line(
-                glyph_offset_x * font_scale,
-                line_offset_x,
-                line_offset_y,
-                flip,
-                projected_anchor_point,
-                symbol.anchor_point,
-                symbol.segment as u16,
-                line,
-                tile_distances,
-                label_plane,
-                projections,
-                false,
-            );
-            match placed_glyph {
-                Some(placed_glyph) => placed_glyphs.push(placed_glyph),
-                None => {
-                    placed_glyphs.push(PlacedGlyph::new(Vec2::new(f32::NEG_INFINITY, f32::NEG_INFINITY), 0.0, None));
-                }
-            }
-        }
-        placed_glyphs.push(first_and_last_glyph.1);
-    } else if glyph_offsets.len() == 1 {
-        // Only a single glyph to place
-        // So, determine whether to flip based on projected angle of the line segment it's on
-        if keep_upright && !flip {
-            let to_clip = |p: Vec2| {
-                let projected = label_plane.to_clip_space_from_tile(p);
-                Vec2::new(projected.point.x as f32, projected.point.y as f32)
-            };
-            let a = to_clip(symbol.anchor_point);
-            let tile_segment_end = to_vec2(line[symbol.segment + 1]);
-            let projected_vertex = label_plane.to_clip_space_from_tile(tile_segment_end);
-            // We know the anchor will be in the viewport, but the end of the
-            // line segment may be behind the plane of the camera, in which case
-            // we can use a point at any arbitrary (closer) point on the
-            // segment.
-            let b = if projected_vertex.signed_distance_from_camera > 0.0 {
-                Vec2::new(projected_vertex.point.x as f32, projected_vertex.point.y as f32)
-            } else {
-                project_truncated_line_segment(symbol.anchor_point, tile_segment_end, a, 1.0, to_clip)
-            };
-
-            if let Some(orientation_change) = requires_orientation_change(symbol.writing_modes, a, b, aspect_ratio) {
-                return orientation_change;
-            }
-        }
-        let glyph_offset_x = glyph_offsets[0];
-        let single_glyph = place_glyph_along_line(
-            font_scale * glyph_offset_x,
-            line_offset_x,
-            line_offset_y,
-            flip,
-            projected_anchor_point,
-            symbol.anchor_point,
-            symbol.segment as u16,
-            line,
-            tile_distances,
-            label_plane,
-            projections,
-            false,
-        );
-        let Some(single_glyph) = single_glyph.filter(|_| !projections.any_occluded()) else {
-            return PlacementResult::NotEnoughRoom;
-        };
-
-        placed_glyphs.push(single_glyph);
     }
-
-    // The number of placed glyphs must equal the number of glyph offsets,
-    // which must correspond to the number of glyph vertices. There may be 0
-    // glyphs here, if a label consists entirely of glyphs of 0x0 dimensions.
-    if dynamic_vertex_array.is_empty() {
-        dynamic_vertex_array.reserve(4 * placed_glyphs.len());
-    }
-    for placed_glyph in &placed_glyphs {
-        let angle = if rotate_to_line { placed_glyph.angle } else { 0.0 };
-        add_dynamic_attributes(placed_glyph.point, angle, dynamic_vertex_array);
-    }
-
-    PlacementResult::Ok
 }
 
-/// Places each glyph of the line labels along its line, for the current
-/// camera. Glyphs that rotate with the map turn to follow the line; others
-/// (`text-rotation-alignment: viewport-glyph`) stay level with the viewport.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the tile's symbols, projector and size binder, the alignment flags and the vertices it writes"
-)]
+/// Places one label's glyphs, projecting each vertex of its line once
+/// however many glyphs walk past it.
+pub(crate) struct LabelPlacer<'s, 'a> {
+    label_plane: &'a LabelPlaneProjector<'a>,
+    projections: &'s mut [Option<ProjectedPoint>],
+    /// Whether any vertex projected so far is behind the globe's horizon.
+    occluded: bool,
+    label: LineLabel<'a>,
+    /// The label's anchor in the label plane.
+    anchor: Vec2,
+    font_scale: f32,
+    /// The label's offset from its line, in the label plane.
+    line_offset: Vec2,
+}
+
+impl LabelPlacer<'_, '_> {
+    fn project_vertex(&mut self, index: usize) -> ProjectedPoint {
+        let (label_plane, line, occluded) = (self.label_plane, self.label.line, &mut self.occluded);
+        *self.projections[index].get_or_insert_with(|| {
+            let projected = label_plane.project(tile_point(line[index]));
+            *occluded |= projected.occluded;
+            projected
+        })
+    }
+
+    /// The glyph `glyph_offset` (in units of a `ONE_EM` font) along the
+    /// line from the anchor, or `None` where the line ends first. A flipped
+    /// label reads against the line's direction.
+    pub(crate) fn glyph_at(&mut self, glyph_offset: f32, flip: bool) -> Option<PlacedGlyph> {
+        let offset = self.font_scale * glyph_offset;
+        let offset = if flip { offset - self.line_offset.x } else { offset + self.line_offset.x };
+        let forward = (offset > 0.0) != flip;
+        let angle_offset = if flip { PI } else { 0.0 } + if forward { 0.0 } else { PI };
+        let distance = offset.abs();
+
+        let segment = self.label.segment;
+        let line_len = self.label.line.len();
+        let first = if forward { segment + 1 } else { segment };
+        let mut vertices = iter::successors(Some(first), |&i| if forward { Some(i + 1) } else { i.checked_sub(1) })
+            .take_while(|&i| i < line_len);
+
+        // The walk goes along the line in the label plane from `prev` to
+        // `current`, until the segment between them reaches the glyph. A
+        // vertex is `None` when it's the anchor.
+        let (mut prev, mut current) = (self.anchor, self.anchor);
+        let mut current_tile = self.label.anchor;
+        let (mut prev_vertex, mut current_vertex) = (None, None);
+        let mut distance_to_prev = 0.0;
+        let mut segment_length = 0.0;
+        while distance_to_prev + segment_length <= distance {
+            let index = vertices.next()?;
+            let prev_tile = current_tile;
+            (prev, prev_vertex) = (current, current_vertex);
+            (current_tile, current_vertex) = (tile_point(self.label.line[index]), Some(index));
+            distance_to_prev += segment_length;
+
+            let projected = self.project_vertex(index);
+            current = if projected.camera_distance > 0.0 {
+                projected.point
+            } else {
+                // Behind the camera, the vertex has no projection. A point
+                // far enough along the segment for the glyph stands in.
+                project_truncated_segment(prev_tile, current_tile, prev, distance - distance_to_prev + 1.0, |p| {
+                    self.label_plane.project(p).point
+                })
+            };
+            segment_length = prev.distance(current);
+        }
+
+        let along_segment = distance - distance_to_prev;
+        let direction = current - prev;
+        let side = if forward { self.line_offset.y } else { -self.line_offset.y };
+        let point = prev + direction * (along_segment / segment_length) + direction.perp() * (side / segment_length);
+        let prev_tile_distance =
+            prev_vertex.map_or(0.0, |i| self.label.tile_distances.get(i).copied().unwrap_or_default());
+        Some(PlacedGlyph {
+            point,
+            angle: angle_offset + direction.y.atan2(direction.x),
+            tile_distance: TileDistance { prev_tile_distance, last_segment_viewport_distance: along_segment },
+        })
+    }
+
+    /// The label's first and last glyphs, or `None` where either doesn't
+    /// fit, or the line is behind the globe's horizon.
+    pub(crate) fn first_and_last_glyph(&mut self, flip: bool) -> Option<(PlacedGlyph, PlacedGlyph)> {
+        let offsets = self.label.glyph_offsets;
+        let first = self.glyph_at(*offsets.first()?, flip)?;
+        let last = self.glyph_at(*offsets.last()?, flip)?;
+        (!self.occluded).then_some((first, last))
+    }
+
+    /// Appends the vertices of the label's glyphs, turned to follow the line
+    /// where `rotate_to_line`. With `keep_upright`, an unflipped label that
+    /// would read upside down, or that its vertical glyphs should replace, is
+    /// left unplaced.
+    fn place_glyphs(
+        &mut self,
+        flip: bool,
+        keep_upright: bool,
+        rotate_to_line: bool,
+        vertices: &mut Vec<SymbolDynamicLayoutVertex>,
+    ) -> Result<(), Unplaced> {
+        let check_upright = keep_upright && !flip;
+        let mut push = |glyph: PlacedGlyph| {
+            add_dynamic_attributes(glyph.point, if rotate_to_line { glyph.angle } else { 0.0 }, vertices);
+        };
+        match self.label.glyph_offsets {
+            // A label of glyphs that are all 0x0 has no vertices.
+            [] => {}
+            &[offset] => {
+                if check_upright {
+                    self.check_segment_upright()?;
+                }
+                let glyph = self.glyph_at(offset, flip).filter(|_| !self.occluded).ok_or(Unplaced::NotEnoughRoom)?;
+                push(glyph);
+            }
+            [_, middle @ .., _] => {
+                let (first, last) = self.first_and_last_glyph(flip).ok_or(Unplaced::NotEnoughRoom)?;
+                if check_upright {
+                    let label_plane = self.label_plane;
+                    let (first_clip, last_clip) =
+                        (label_plane.to_clip_space(first.point), label_plane.to_clip_space(last.point));
+                    self.check_upright(first_clip, last_clip)?;
+                }
+                push(first);
+                for &offset in middle {
+                    // Between two glyphs that fit, every glyph fits; one that
+                    // rounding puts off the line is hidden.
+                    let glyph = self.glyph_at(offset, flip).unwrap_or(PlacedGlyph {
+                        point: Vec2::NEG_INFINITY,
+                        angle: 0.0,
+                        tile_distance: TileDistance::default(),
+                    });
+                    push(glyph);
+                }
+                push(last);
+            }
+        }
+        Ok(())
+    }
+
+    /// Checks a one-glyph label's orientation against its segment's
+    /// direction on screen.
+    fn check_segment_upright(&self) -> Result<(), Unplaced> {
+        let label_plane = self.label_plane;
+        let to_clip = |p: Vec2| label_plane.to_clip_space_from_tile(p).point;
+        let anchor = to_clip(self.label.anchor);
+        let Some(&end) = self.label.line.get(self.label.segment + 1) else {
+            return Err(Unplaced::NotEnoughRoom);
+        };
+        let end_tile = tile_point(end);
+        let end = label_plane.to_clip_space_from_tile(end_tile);
+        // The anchor is in view, but the segment's end may be behind the
+        // camera, where any point closer along the segment gives its
+        // direction.
+        let end = if end.camera_distance > 0.0 {
+            end.point
+        } else {
+            project_truncated_segment(self.label.anchor, end_tile, anchor, 1.0, to_clip)
+        };
+        self.check_upright(anchor, end)
+    }
+
+    /// Checks the orientation of the label running from `first` to `last`
+    /// in clip space. A label that has vertical glyphs too uses them where
+    /// the line is steeper on screen than level. Only the horizontal version
+    /// decides: the two project slightly differently, so deciding each for
+    /// itself could show both or neither.
+    fn check_upright(&self, first: Vec2, last: Vec2) -> Result<(), Unplaced> {
+        let writing_modes = self.label.writing_modes;
+        if writing_modes == WritingModes::BOTH {
+            let aspect_ratio = self.label_plane.viewport.x / self.label_plane.viewport.y;
+            let rise = (last.y - first.y).abs();
+            let run = (last.x - first.x).abs() * aspect_ratio;
+            if rise > run {
+                return Err(Unplaced::UseVertical);
+            }
+        }
+        let upside_down = if writing_modes == WritingModes::VERTICAL { first.y < last.y } else { first.x > last.x };
+        if upside_down { Err(Unplaced::NeedsFlipping) } else { Ok(()) }
+    }
+}
+
+/// The point `min_length` along the segment from `prev_tile` toward
+/// `current_tile`, projected by `project`, when `current_tile` has no
+/// projection: the direction comes from a point one tile unit back from
+/// `prev_tile`, which projects as `prev`.
+fn project_truncated_segment(
+    prev_tile: Vec2,
+    current_tile: Vec2,
+    prev: Vec2,
+    min_length: f32,
+    project: impl Fn(Vec2) -> Vec2,
+) -> Vec2 {
+    let unit_back = project(prev_tile + (prev_tile - current_tile).normalize_or_zero());
+    let unit_segment = prev - unit_back;
+    prev + unit_segment * (min_length / unit_segment.length())
+}
+
+fn tile_point(p: GeometryCoordinate) -> Vec2 {
+    Vec2::new(f32::from(p.x), f32::from(p.y))
+}
+
+fn tile_point_f64(p: Vec2) -> Point<f64> {
+    Point::new(f64::from(p.x), f64::from(p.y))
+}
+
+/// How line labels align with the map.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct LineLabelAlignment {
+    pub(crate) pitch_with_map: bool,
+    /// Whether glyphs turn to follow the line; otherwise
+    /// (`text-rotation-alignment: viewport-glyph`) they stay level with the
+    /// viewport.
+    pub(crate) rotate_with_map: bool,
+    pub(crate) keep_upright: bool,
+}
+
+/// Replaces `vertices` with those of each glyph of the line labels
+/// `symbols`, placed along their lines for `tile_projector`'s view.
 pub(crate) fn reproject_line_labels(
-    dynamic_vertex_array: &mut Vec<SymbolDynamicLayoutVertex>,
-    placed_symbols: &[PlacedSymbol],
+    vertices: &mut Vec<SymbolDynamicLayoutVertex>,
+    symbols: &[PlacedSymbol],
     pools: &PlacedSymbolPools,
     tile_projector: &TileProjector<'_>,
-    pitch_with_map: bool,
-    rotate_with_map: bool,
-    keep_upright: bool,
-    tile: &PlacedTile,
     size_binder: &SymbolSizeBinder,
-    state: &View,
     translation: Vec2,
+    alignment: LineLabelAlignment,
 ) {
-    let partially_evaluated_size = size_binder.evaluate_for_zoom(state.zoom() as f32);
+    let view = tile_projector.view();
+    let zoom = view.zoom() as f32;
+    let sizes = size_binder.evaluate_for_zoom(zoom);
+    let viewport = view.size();
+    let camera_to_center = view.camera_to_center_distance() as f32;
+    // Labels whose anchors are more than 256 pixels off screen don't show.
+    let clip_extent = 256.0 / DVec2::new(f64::from(viewport.width), f64::from(viewport.height)) * 2.0 + 1.0;
 
-    let size = state.size();
-    let clipping_buffer: [f64; 2] =
-        [256.0 / f64::from(size.width) * 2.0 + 1.0, 256.0 / f64::from(size.height) * 2.0 + 1.0];
+    let pixels_to_tile_units = tile_projector.tile_id().pixels_to_tile_units(1.0, zoom);
+    let label_plane = LabelPlaneProjector::new(
+        tile_projector,
+        alignment.pitch_with_map,
+        alignment.rotate_with_map,
+        pixels_to_tile_units,
+        translation,
+    );
+    let mut placer = LinePlacer::new(&label_plane);
 
-    let pixels_to_tile_units = tile.id.pixels_to_tile_units(1.0, state.zoom() as f32);
-
-    let label_plane =
-        LabelPlaneProjector::new(tile_projector, pitch_with_map, rotate_with_map, pixels_to_tile_units, translation);
-
-    dynamic_vertex_array.clear();
-
-    let mut use_vertical = false;
-    let mut projections = LineProjectionCache::default();
-
-    for placed_symbol in placed_symbols {
-        // Don't do calculations for vertical glyphs unless the previous symbol
-        // was horizontal and we determined that vertical glyphs were necessary.
-        // Also don't do calculations for symbols that are collided and fully
-        // faded out
-        if placed_symbol.hidden || (placed_symbol.writing_modes == WritingModeType::Vertical && !use_vertical) {
-            hide_glyphs(placed_symbol.glyph_offsets.len(), dynamic_vertex_array);
-            continue;
-        }
-        // Awkward... but we're counting on the paired "vertical" symbol coming
-        // immediately after its horizontal counterpart
-        use_vertical = false;
-
-        let tile_anchor = Point::new(f64::from(placed_symbol.anchor_point.x), f64::from(placed_symbol.anchor_point.y));
-        let anchor_pos = tile_projector.project(&tile_anchor, 0.0);
-
-        // Don't bother calculating the correct point for invisible labels.
-        if anchor_pos.occluded || !is_visible(&anchor_pos.point, &clipping_buffer) {
-            hide_glyphs(placed_symbol.glyph_offsets.len(), dynamic_vertex_array);
+    vertices.clear();
+    // A label's vertical glyphs come right after its horizontal ones, and
+    // show only when those find the line steep.
+    let mut show_vertical = false;
+    for symbol in symbols {
+        let glyph_count = symbol.glyph_offsets.len();
+        let vertical_shows = std::mem::take(&mut show_vertical);
+        if symbol.hidden || (symbol.writing_modes == WritingModes::VERTICAL && !vertical_shows) {
+            hide_glyphs(glyph_count, vertices);
             continue;
         }
 
-        let camera_to_anchor_distance = anchor_pos.signed_distance_from_camera as f32;
-        let perspective_ratio = 0.5 + 0.5 * (camera_to_anchor_distance / state.camera_to_center_distance() as f32);
+        let tile_anchor = tile_point_f64(symbol.anchor_point);
+        let anchor = tile_projector.project(&tile_anchor, 0.0);
+        if anchor.occluded || !DVec2::new(anchor.point.x, anchor.point.y).abs().cmple(clip_extent).all() {
+            hide_glyphs(glyph_count, vertices);
+            continue;
+        }
 
-        let font_size = evaluate_size_for_feature(&partially_evaluated_size, placed_symbol);
-        let pitch_scaled_font_size = if pitch_with_map {
+        let perspective_ratio = 0.5 + 0.5 * (anchor.signed_distance_from_camera as f32 / camera_to_center);
+        let font_size = evaluate_size_for_feature(&sizes, symbol);
+        let font_size = if alignment.pitch_with_map {
             font_size * perspective_ratio * tile_projector.pitched_text_correction(&tile_anchor) as f32
         } else {
             font_size / perspective_ratio
         };
 
-        let projected_anchor = label_plane.project(placed_symbol.anchor_point).point;
-        let anchor_point = Vec2::new(projected_anchor.x as f32, projected_anchor.y as f32);
+        let mut label = placer.begin(LineLabel::new(symbol, pools), font_size);
+        let mut place = |flip| label.place_glyphs(flip, alignment.keep_upright, alignment.rotate_with_map, vertices);
+        let placed = match place(false) {
+            Err(Unplaced::NeedsFlipping) => place(true),
+            placed => placed,
+        };
+        if let Err(unplaced) = placed {
+            show_vertical = unplaced == Unplaced::UseVertical;
+            hide_glyphs(glyph_count, vertices);
+        }
+    }
+}
 
-        projections.reset(placed_symbol.line.len());
-        let place_unflipped = place_glyphs_along_line(
-            placed_symbol,
-            pools,
-            pitch_scaled_font_size,
-            false, /*unflipped*/
-            keep_upright,
-            rotate_with_map,
-            &label_plane,
-            &mut projections,
-            dynamic_vertex_array,
-            anchor_point,
-            size.aspect_ratio(),
+#[cfg(test)]
+mod tests {
+    use std::f32::consts::{FRAC_PI_2, TAU};
+
+    use geometry::Point;
+    use glam::Vec2;
+    use mln_map::transform::Transform;
+    use mln_map_types::{ConstrainMode, TileProjector, ViewportMode};
+    use mln_tile_id::UnwrappedTileID;
+    use mln_util::size::Size;
+
+    use super::{LabelPlaneProjector, LineLabel, LinePlacer, PlacedGlyph, TileDistance, Unplaced, WritingModes};
+
+    /// A 512 px square map at zoom 0, where tile 0/0/0 fills the viewport
+    /// and a pixel is 16 tile units.
+    fn transform() -> Transform {
+        let mut transform = Transform::new(ConstrainMode::HeightOnly, ViewportMode::Default);
+        transform.resize(Size::new(512, 512)).unwrap();
+        transform
+    }
+
+    fn label<'a>(
+        anchor: Vec2,
+        line: &'a [Point<i16>],
+        tile_distances: &'a [f32],
+        glyph_offsets: &'a [f32],
+    ) -> LineLabel<'a> {
+        LineLabel {
+            anchor,
+            segment: 0,
+            line,
+            tile_distances,
+            glyph_offsets,
+            line_offset: Vec2::ZERO,
+            writing_modes: WritingModes { horizontal: true, vertical: false },
+        }
+    }
+
+    fn assert_glyph(glyph: Option<PlacedGlyph>, point: Vec2, angle: f32, tile_distance: TileDistance) {
+        let glyph = glyph.expect("the glyph fits");
+        assert!(glyph.point.abs_diff_eq(point, 1e-3), "{} != {point}", glyph.point);
+        let turn = (glyph.angle - angle).rem_euclid(TAU);
+        assert!(turn.min(TAU - turn) < 1e-5, "{} != {angle}", glyph.angle);
+        assert!((glyph.tile_distance.prev_tile_distance - tile_distance.prev_tile_distance).abs() < 1e-3);
+        assert!(
+            (glyph.tile_distance.last_segment_viewport_distance - tile_distance.last_segment_viewport_distance).abs()
+                < 1e-3
         );
+    }
 
-        use_vertical = place_unflipped == PlacementResult::UseVertical;
+    #[test]
+    fn glyphs_follow_the_line_around_corners_and_stop_at_its_ends() {
+        let transform = transform();
+        let tile = TileProjector::new(transform.view(), &UnwrappedTileID::new(0, 0, 0));
+        let label_plane = LabelPlaneProjector::new(&tile, false, true, 16.0, Vec2::ZERO);
+        let mut placer = LinePlacer::new(&label_plane);
+        // East from (128, 256) px to (256, 256), then south to (256, 384).
+        let line = [Point::new(2048, 4096), Point::new(4096, 4096), Point::new(4096, 6144)];
+        let tile_distances = [1024.0, 1024.0, 3072.0];
+        let mut label = placer.begin(label(Vec2::new(3072.0, 4096.0), &line, &tile_distances, &[]), 24.0);
 
-        if place_unflipped == PlacementResult::NotEnoughRoom
-            || use_vertical
-            || (place_unflipped == PlacementResult::NeedsFlipping
-                && place_glyphs_along_line(
-                    placed_symbol,
-                    pools,
-                    pitch_scaled_font_size,
-                    true, /*flipped*/
-                    keep_upright,
-                    rotate_with_map,
-                    &label_plane,
-                    &mut projections,
-                    dynamic_vertex_array,
-                    anchor_point,
-                    size.aspect_ratio(),
-                ) == PlacementResult::NotEnoughRoom)
-        {
-            hide_glyphs(placed_symbol.glyph_offsets.len(), dynamic_vertex_array);
+        let on_anchor_segment = |last| TileDistance { prev_tile_distance: 0.0, last_segment_viewport_distance: last };
+        assert_glyph(label.glyph_at(32.0, false), Vec2::new(224.0, 256.0), 0.0, on_anchor_segment(32.0));
+        assert_glyph(label.glyph_at(-32.0, false), Vec2::new(160.0, 256.0), 0.0, on_anchor_segment(32.0));
+        assert_glyph(
+            label.glyph_at(96.0, false),
+            Vec2::new(256.0, 288.0),
+            FRAC_PI_2,
+            TileDistance { prev_tile_distance: 1024.0, last_segment_viewport_distance: 32.0 },
+        );
+        assert_eq!(label.glyph_at(193.0, false), None);
+        assert_eq!(label.glyph_at(-65.0, false), None);
+    }
+
+    #[test]
+    fn an_upright_label_on_a_line_drawn_westward_flips() {
+        let transform = transform();
+        let tile = TileProjector::new(transform.view(), &UnwrappedTileID::new(0, 0, 0));
+        let label_plane = LabelPlaneProjector::new(&tile, false, true, 16.0, Vec2::ZERO);
+        let mut placer = LinePlacer::new(&label_plane);
+        // West from (384, 256) px to (128, 256).
+        let line = [Point::new(6144, 4096), Point::new(2048, 4096)];
+        let mut label =
+            placer.begin(label(Vec2::new(4096.0, 4096.0), &line, &[0.0, 2048.0], &[-10.0, 0.0, 10.0]), 24.0);
+
+        let mut vertices = Vec::new();
+        assert_eq!(label.place_glyphs(false, true, true, &mut vertices), Err(Unplaced::NeedsFlipping));
+        assert_eq!(vertices.len(), 0);
+        assert_eq!(label.place_glyphs(true, true, true, &mut vertices), Ok(()));
+        let xs: Vec<f32> = vertices.iter().step_by(4).map(|vertex| vertex.a1[0]).collect();
+        assert_eq!(vertices.len(), 12);
+        for (x, expected) in xs.iter().zip([246.0, 256.0, 266.0]) {
+            assert!((x - expected).abs() < 1e-3, "{xs:?}");
         }
     }
 }

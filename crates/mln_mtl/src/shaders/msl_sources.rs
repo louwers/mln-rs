@@ -1361,68 +1361,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-pub(crate) const DEBUG_SHADER: MslShaderSource = MslShaderSource {
-    vertex_main_function: r"vertexMain",
-    fragment_main_function: r"fragmentMain",
-    prelude: r#"
-
-enum {
-    idDebugUBO = drawableReservedUBOCount,
-    debugUBOCount
-};
-
-struct alignas(16) DebugUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float4 color;
-    /* 80 */ float overlay_scale;
-    /* 84 */ float pad1;
-    /* 88 */ float pad2;
-    /* 92 */ float pad3;
-    /* 96 */
-};
-static_assert(sizeof(DebugUBO) == 6 * 16, "wrong size");
-
-"#,
-    source: r"
-
-struct VertexStage {
-    short2 pos [[attribute(0)]];
-};
-
-struct FragmentStage {
-    float4 position [[position, invariant]];
-    float2 uv;
-};
-
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const DebugUBO& debug [[buffer(idDebugUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]]) {
-
-    const float4 position = projectTile(float2(vertx.pos) * debug.overlay_scale, projectionVector[uboIndex]);
-
-    // This vertex shader expects a EXTENT x EXTENT quad,
-    // The UV coordinates for the overlay texture can be calculated using that knowledge
-    float2 uv = float2(vertx.pos) / 8192.0;
-
-    return {
-        .position    = position,
-        .uv          = uv
-    };
-}
-
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const DebugUBO& debug [[buffer(idDebugUBO)]],
-                            texture2d<float, access::sample> overlay [[texture(0)]],
-                            sampler overlay_sampler [[sampler(0)]]) {
-
-    float4 overlay_color = overlay.sample(overlay_sampler, in.uv);
-    float4 color = mix(debug.color, overlay_color, overlay_color.a);
-    return half4(color);
-}
-",
-};
-
 // The walls' fragment stage, and `wall`, the vertex of a wall, which reads
 // the instanced walls' attributes as the fields of `vertx`.
 macro_rules! extrusion_wall {
@@ -2560,19 +2498,6 @@ struct alignas(16) FillOutlinePatternTilePropsUBO {
 };
 static_assert(sizeof(FillOutlinePatternTilePropsUBO) == 3 * 16, "wrong size");
 
-//
-// Fill outline triangulated
-
-struct alignas(16) FillOutlineTriangulatedDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float ratio;
-    /* 68 */ float pad1;
-    /* 72 */ float pad2;
-    /* 76 */ float pad3;
-    /* 80 */
-};
-static_assert(sizeof(FillOutlineTriangulatedDrawableUBO) == 5 * 16, "wrong size");
-
 /// Evaluated properties that do not depend on the tile
 struct alignas(16) FillEvaluatedPropsUBO {
     /*  0 */ float4 color;
@@ -2590,7 +2515,6 @@ union FillDrawableUnionUBO {
     FillOutlineDrawableUBO fillOutlineDrawableUBO;
     FillPatternDrawableUBO fillPatternDrawableUBO;
     FillOutlinePatternDrawableUBO fillOutlinePatternDrawableUBO;
-    FillOutlineTriangulatedDrawableUBO fillOutlineTriangulatedDrawableUBO;
 };
 
 union FillTilePropsUnionUBO {
@@ -2942,19 +2866,6 @@ struct alignas(16) FillOutlinePatternTilePropsUBO {
 };
 static_assert(sizeof(FillOutlinePatternTilePropsUBO) == 3 * 16, "wrong size");
 
-//
-// Fill outline triangulated
-
-struct alignas(16) FillOutlineTriangulatedDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float ratio;
-    /* 68 */ float pad1;
-    /* 72 */ float pad2;
-    /* 76 */ float pad3;
-    /* 80 */
-};
-static_assert(sizeof(FillOutlineTriangulatedDrawableUBO) == 5 * 16, "wrong size");
-
 /// Evaluated properties that do not depend on the tile
 struct alignas(16) FillEvaluatedPropsUBO {
     /*  0 */ float4 color;
@@ -2972,7 +2883,6 @@ union FillDrawableUnionUBO {
     FillOutlineDrawableUBO fillOutlineDrawableUBO;
     FillPatternDrawableUBO fillPatternDrawableUBO;
     FillOutlinePatternDrawableUBO fillOutlinePatternDrawableUBO;
-    FillOutlineTriangulatedDrawableUBO fillOutlineTriangulatedDrawableUBO;
 };
 
 union FillTilePropsUnionUBO {
@@ -3085,222 +2995,6 @@ FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]],
     ),
 };
 
-pub(crate) const FILL_OUTLINE_TRIANGULATED_SHADER: MslShaderSource = MslShaderSource {
-    vertex_main_function: r"vertexMain",
-    fragment_main_function: r"fragmentMain",
-    prelude: r#"
-
-enum {
-    idFillDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idFillTilePropsUBO = drawableReservedUBOCount,
-    idFillEvaluatedPropsUBO,
-    fillUBOCount
-};
-
-//
-// Fill
-
-struct alignas(16) FillDrawableUBO {
-    /*  0 */ float4x4 matrix;
-
-    // Interpolations
-    /* 64 */ float color_t;
-    /* 68 */ float opacity_t;
-    /* 72 */ float pad1;
-    /* 76 */ float pad2;
-    /* 80 */
-};
-static_assert(sizeof(FillDrawableUBO) == 5 * 16, "wrong size");
-
-//
-// Fill outline
-
-struct alignas(16) FillOutlineDrawableUBO {
-    /*  0 */ float4x4 matrix;
-
-    // Interpolations
-    /* 64 */ float outline_color_t;
-    /* 68 */ float opacity_t;
-    /* 72 */ uint32_t paint_layout;
-    /* 76 */ float pad2;
-    /* 80 */
-};
-static_assert(sizeof(FillOutlineDrawableUBO) == 5 * 16, "wrong size");
-
-//
-// Fill pattern
-
-struct alignas(16) FillPatternDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float2 pixel_coord_upper;
-    /* 72 */ float2 pixel_coord_lower;
-    /* 80 */ float tile_ratio;
-
-    // Interpolations
-    /* 84 */ float pattern_from_t;
-    /* 88 */ float pattern_to_t;
-    /* 92 */ float opacity_t;
-    /* 96 */ float color_t;
-    /*100 */ float pad1;
-    /*104 */ float pad2;
-    /*108 */ float pad3;
-    /*112 */
-};
-static_assert(sizeof(FillPatternDrawableUBO) == 7 * 16, "wrong size");
-
-struct alignas(16) FillPatternTilePropsUBO {
-    /*  0 */ float4 pattern_from;
-    /* 16 */ float4 pattern_to;
-    /* 32 */ float2 texsize;
-    /* 40 */ float sdf;
-    /* 44 */ float pad2;
-    /* 48 */
-};
-static_assert(sizeof(FillPatternTilePropsUBO) == 3 * 16, "wrong size");
-
-//
-// Fill pattern outline
-
-struct alignas(16) FillOutlinePatternDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float2 pixel_coord_upper;
-    /* 72 */ float2 pixel_coord_lower;
-    /* 80 */ float tile_ratio;
-
-    // Interpolations
-    /* 84 */ float pattern_from_t;
-    /* 88 */ float pattern_to_t;
-    /* 92 */ float opacity_t;
-    /* 96 */ float color_t;
-    /*100 */ float pad1;
-    /*104 */ float pad2;
-    /*108 */ float pad3;
-    /*112 */
-};
-static_assert(sizeof(FillOutlinePatternDrawableUBO) == 7 * 16, "wrong size");
-
-struct alignas(16) FillOutlinePatternTilePropsUBO {
-    /*  0 */ float4 pattern_from;
-    /* 16 */ float4 pattern_to;
-    /* 32 */ float2 texsize;
-    /* 40 */ float sdf;
-    /* 44 */ float pad2;
-    /* 48 */
-};
-static_assert(sizeof(FillOutlinePatternTilePropsUBO) == 3 * 16, "wrong size");
-
-//
-// Fill outline triangulated
-
-struct alignas(16) FillOutlineTriangulatedDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float ratio;
-    /* 68 */ float pad1;
-    /* 72 */ float pad2;
-    /* 76 */ float pad3;
-    /* 80 */
-};
-static_assert(sizeof(FillOutlineTriangulatedDrawableUBO) == 5 * 16, "wrong size");
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) FillEvaluatedPropsUBO {
-    /*  0 */ float4 color;
-    /* 16 */ float4 outline_color;
-    /* 32 */ float opacity;
-    /* 36 */ float fade;
-    /* 40 */ float from_scale;
-    /* 44 */ float to_scale;
-    /* 48 */
-};
-static_assert(sizeof(FillEvaluatedPropsUBO) == 3 * 16, "wrong size");
-
-union FillDrawableUnionUBO {
-    FillDrawableUBO fillDrawableUBO;
-    FillOutlineDrawableUBO fillOutlineDrawableUBO;
-    FillPatternDrawableUBO fillPatternDrawableUBO;
-    FillOutlinePatternDrawableUBO fillOutlinePatternDrawableUBO;
-    FillOutlineTriangulatedDrawableUBO fillOutlineTriangulatedDrawableUBO;
-};
-
-union FillTilePropsUnionUBO {
-    FillPatternTilePropsUBO fillPatternTilePropsUBO;
-    FillOutlinePatternTilePropsUBO fillOutlinePatternTilePropsUBO;
-};
-
-"#,
-    source: r"
-
-struct VertexStage {
-    short2 pos_normal [[attribute(0)]];
-    uchar4 data [[attribute(1)]];
-};
-
-struct FragmentStage {
-    float4 position [[position, invariant]];
-    float width2;
-    float2 normal;
-    half gamma_scale;
-};
-
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const FillDrawableUnionUBO* drawableVector [[buffer(idFillDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]]) {
-
-    device const FillOutlineTriangulatedDrawableUBO& drawable = drawableVector[uboIndex].fillOutlineTriangulatedDrawableUBO;
-
-    // the distance over which the line edge fades out.
-    // Retina devices need a smaller distance to avoid aliasing.
-    const float ANTIALIASING = 1.0 / DEVICE_PIXEL_RATIO / 2.0;
-
-    const float2 a_extrude = float2(vertx.data.xy) - 128.0;
-    const float2 pos = floor(float2(vertx.pos_normal) * 0.5);
-
-    // x is 1 if it's a round cap, 0 otherwise
-    // y is 1 if the normal points up, and -1 if it points down
-    // We store these in the least significant bit of a_pos_normal
-    const float2 normal = float2(vertx.pos_normal) - 2.0 * pos;
-    const float2 v_normal = float2(normal.x, normal.y * 2.0 - 1.0);
-
-    const float width = 1.0; //Should come from props ubo
-    const float halfwidth = width / 2.0;
-    const float outset = halfwidth + (halfwidth == 0.0 ? 0.0 : ANTIALIASING);
-
-    // Scale the extrusion vector down to a normal and then up by the line width of this vertex.
-    const float2 dist = outset * a_extrude * LINE_NORMAL_SCALE;
-
-    const float4 projected_extrude = projectionVector[uboIndex].fallback_matrix * float4(dist / drawable.ratio, 0.0, 0.0);
-    const float4 position = projectTile(pos, pos, projectionVector[uboIndex]) + projected_extrude;
-
-    // calculate how much the perspective view squishes or stretches the extrude
-    const float extrude_length_without_perspective = length(dist);
-    const float extrude_length_with_perspective = length(projected_extrude.xy / position.w * paintParams.units_to_pixels);
-
-    return {
-        .position    = position,
-        .width2      = outset,
-        .normal      = v_normal,
-        .gamma_scale = half(extrude_length_without_perspective / extrude_length_with_perspective),
-    };
-}
-
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const FillEvaluatedPropsUBO& props [[buffer(idFillEvaluatedPropsUBO)]]) {
-
-    // Calculate the distance of the pixel from the line in pixels.
-    const float dist = length(in.normal) * in.width2;
-
-    // Calculate the antialiasing fade factor. This is either when fading in the
-    // line in case of an offset line (`v_width2.y`) or when fading out (`v_width2.x`)
-    const float blur2 = (1.0 / DEVICE_PIXEL_RATIO) * in.gamma_scale;
-    const float alpha = clamp(min(dist + blur2, in.width2 - dist) / blur2, 0.0, 1.0);
-
-    return half4(props.outline_color * (alpha * props.opacity));
-}
-",
-};
-
 pub(crate) const FILL_PATTERN_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
@@ -3405,19 +3099,6 @@ struct alignas(16) FillOutlinePatternTilePropsUBO {
 };
 static_assert(sizeof(FillOutlinePatternTilePropsUBO) == 3 * 16, "wrong size");
 
-//
-// Fill outline triangulated
-
-struct alignas(16) FillOutlineTriangulatedDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float ratio;
-    /* 68 */ float pad1;
-    /* 72 */ float pad2;
-    /* 76 */ float pad3;
-    /* 80 */
-};
-static_assert(sizeof(FillOutlineTriangulatedDrawableUBO) == 5 * 16, "wrong size");
-
 /// Evaluated properties that do not depend on the tile
 struct alignas(16) FillEvaluatedPropsUBO {
     /*  0 */ float4 color;
@@ -3435,7 +3116,6 @@ union FillDrawableUnionUBO {
     FillOutlineDrawableUBO fillOutlineDrawableUBO;
     FillPatternDrawableUBO fillPatternDrawableUBO;
     FillOutlinePatternDrawableUBO fillOutlinePatternDrawableUBO;
-    FillOutlineTriangulatedDrawableUBO fillOutlineTriangulatedDrawableUBO;
 };
 
 union FillTilePropsUnionUBO {
@@ -3710,19 +3390,6 @@ struct alignas(16) FillOutlinePatternTilePropsUBO {
 };
 static_assert(sizeof(FillOutlinePatternTilePropsUBO) == 3 * 16, "wrong size");
 
-//
-// Fill outline triangulated
-
-struct alignas(16) FillOutlineTriangulatedDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float ratio;
-    /* 68 */ float pad1;
-    /* 72 */ float pad2;
-    /* 76 */ float pad3;
-    /* 80 */
-};
-static_assert(sizeof(FillOutlineTriangulatedDrawableUBO) == 5 * 16, "wrong size");
-
 /// Evaluated properties that do not depend on the tile
 struct alignas(16) FillEvaluatedPropsUBO {
     /*  0 */ float4 color;
@@ -3740,7 +3407,6 @@ union FillDrawableUnionUBO {
     FillOutlineDrawableUBO fillOutlineDrawableUBO;
     FillPatternDrawableUBO fillPatternDrawableUBO;
     FillOutlinePatternDrawableUBO fillOutlinePatternDrawableUBO;
-    FillOutlineTriangulatedDrawableUBO fillOutlineTriangulatedDrawableUBO;
 };
 
 union FillTilePropsUnionUBO {

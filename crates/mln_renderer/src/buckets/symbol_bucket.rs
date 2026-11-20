@@ -4,11 +4,14 @@
 
 use std::cmp::Reverse;
 use std::collections::BTreeMap;
-use std::num::NonZeroU32;
 use std::sync::Arc;
 
 use glam::Vec2;
 use mln_gfx::shaders::segment::SegmentBase;
+use mln_gfx::shaders::shader_defines::{
+    ID_SYMBOL_COLOR_ATTRIBUTE, ID_SYMBOL_HALO_BLUR_ATTRIBUTE, ID_SYMBOL_HALO_COLOR_ATTRIBUTE,
+    ID_SYMBOL_HALO_WIDTH_ATTRIBUTE, ID_SYMBOL_OPACITY_ATTRIBUTE,
+};
 use mln_style::expression::EvaluationContext;
 use mln_style::layers::Symbol;
 use mln_style::layers::symbol_layer::SymbolLayerPaintPropertyOverrides;
@@ -17,7 +20,6 @@ use mln_style::property_expression::PropertyExpression;
 use mln_style::property_value::PropertyValue;
 use mln_style_types::TextWritingModeType;
 use mln_style_types::image::ImagePositions;
-use mln_text::glyph::WritingModeType;
 use mln_tile::TileLayer;
 use mln_tile_id::geometry_tile_data::{GeometryCoordinate, GeometryCoordinates, GeometryTileFeature};
 use mln_util::Color;
@@ -28,27 +30,28 @@ use mln_vec_map::VecMap;
 use crate::bucket::{Bucket, BucketBase, FeatureStates, UploadNeeds};
 use crate::bucket_geometry::{GeometryUpload, GeometryVec};
 use crate::layer_type::EvaluatedLayer;
-use crate::layout::symbol_instance::{SymbolInstance, SymbolInstancePools};
+use crate::layout::symbol_instance::{SymbolInstance, SymbolInstancePools, WritingModes};
 use crate::paint_property_binder::PaintPropertyBinder;
+use crate::text::quads::SymbolQuad;
 use crate::util::pool::PoolRange;
 
 crate::paint_property_binders!(
     pub struct SymbolIconBinders for SymbolPaintProperties::PossiblyEvaluated {
-        icon_opacity => PaintPropertyBinder<f32>,
-        icon_color => PaintPropertyBinder<Color>,
-        icon_halo_color => PaintPropertyBinder<Color>,
-        icon_halo_width => PaintPropertyBinder<f32>,
-        icon_halo_blur => PaintPropertyBinder<f32>,
+        icon_opacity: PaintPropertyBinder<f32> => [ID_SYMBOL_OPACITY_ATTRIBUTE],
+        icon_color: PaintPropertyBinder<Color> => [ID_SYMBOL_COLOR_ATTRIBUTE],
+        icon_halo_color: PaintPropertyBinder<Color> => [ID_SYMBOL_HALO_COLOR_ATTRIBUTE],
+        icon_halo_width: PaintPropertyBinder<f32> => [ID_SYMBOL_HALO_WIDTH_ATTRIBUTE],
+        icon_halo_blur: PaintPropertyBinder<f32> => [ID_SYMBOL_HALO_BLUR_ATTRIBUTE],
     }
 );
 
 crate::paint_property_binders!(
     pub struct SymbolTextBinders for SymbolPaintProperties::PossiblyEvaluated {
-        text_opacity => PaintPropertyBinder<f32>,
-        text_color => PaintPropertyBinder<Color>,
-        text_halo_color => PaintPropertyBinder<Color>,
-        text_halo_width => PaintPropertyBinder<f32>,
-        text_halo_blur => PaintPropertyBinder<f32>,
+        text_opacity: PaintPropertyBinder<f32> => [ID_SYMBOL_OPACITY_ATTRIBUTE],
+        text_color: PaintPropertyBinder<Color> => [ID_SYMBOL_COLOR_ATTRIBUTE],
+        text_halo_color: PaintPropertyBinder<Color> => [ID_SYMBOL_HALO_COLOR_ATTRIBUTE],
+        text_halo_width: PaintPropertyBinder<f32> => [ID_SYMBOL_HALO_WIDTH_ATTRIBUTE],
+        text_halo_blur: PaintPropertyBinder<f32> => [ID_SYMBOL_HALO_BLUR_ATTRIBUTE],
     }
 );
 
@@ -97,6 +100,15 @@ pub(crate) struct CollisionBoxLayoutVertex {
 pub(crate) struct CollisionBoxDynamicVertex {
     pub(crate) a1: [u16; 2],
     pub(crate) a2: [f32; 2],
+}
+
+/// A corner of a quad: its offset from the anchor, its texture coordinate
+/// and its pixel offset.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct QuadCorner {
+    pub(crate) offset: Vec2,
+    pub(crate) tex: [u16; 2],
+    pub(crate) pixel_offset: Vec2,
 }
 
 pub(crate) const MAX_GLYPH_ICON_SIZE: u16 = 255;
@@ -259,6 +271,8 @@ impl SymbolSizeBinder {
     }
 }
 
+/// A run of a buffer's quads that shows together: the glyphs of a symbol's
+/// text at one justification or orientation, or its icon.
 #[derive(Clone, Debug, mln_wire::Wire)]
 pub(crate) struct PlacedSymbol {
     pub(crate) anchor_point: Vec2,
@@ -266,7 +280,7 @@ pub(crate) struct PlacedSymbol {
     pub(crate) lower_size: f32,
     pub(crate) upper_size: f32,
     pub(crate) line_offset: [f32; 2],
-    pub(crate) writing_modes: WritingModeType,
+    pub(crate) writing_modes: WritingModes,
     /// The line the symbol is placed along, in its buffer's `pools.lines`.
     pub(crate) line: PoolRange,
     /// The distance along `line` from the anchor to each vertex, in its
@@ -275,54 +289,13 @@ pub(crate) struct PlacedSymbol {
     /// The x offset of each glyph, or of the icon, in its buffer's
     /// `pools.glyph_offsets`. There are four vertices for each.
     pub(crate) glyph_offsets: PoolRange,
-    pub(crate) hidden: bool,
+    /// The index of the run's first vertex.
     pub(crate) start_index: usize,
-    /// The symbol's id across tiles, which only variable text anchors read.
-    pub(crate) cross_tile_id: Option<NonZeroU32>,
-    /// The orientation the symbol was placed in, where the layer places
-    /// orientation variants.
-    pub(crate) placed_orientation: Option<TextWritingModeType>,
     pub(crate) angle: f32,
-    /// Reference to placed icon, only applicable for text symbols.
-    pub(crate) placed_icon_index: Option<usize>,
     /// The symbol's `symbol-height-offset`, in meters above the ground.
     pub(crate) height_offset: f32,
-}
-
-impl PlacedSymbol {
-    #[expect(clippy::too_many_arguments, reason = "each argument is a field of the placed symbol")]
-    #[must_use]
-    pub(crate) fn new(
-        anchor_point: Vec2,
-        segment: usize,
-        lower_size: f32,
-        upper_size: f32,
-        line_offset: [f32; 2],
-        writing_modes: WritingModeType,
-        line: PoolRange,
-        tile_distances: PoolRange,
-        glyph_offsets: PoolRange,
-        placed_icon_index: Option<usize>,
-    ) -> Self {
-        PlacedSymbol {
-            anchor_point,
-            segment,
-            lower_size,
-            upper_size,
-            line_offset,
-            writing_modes,
-            line,
-            tile_distances,
-            glyph_offsets,
-            hidden: false,
-            start_index: 0,
-            cross_tile_id: None,
-            placed_orientation: None,
-            angle: 0.0,
-            placed_icon_index,
-            height_offset: 0.0,
-        }
-    }
+    /// Faded out or a duplicate, as the last opacity update found it.
+    pub(crate) hidden: bool,
 }
 
 #[derive(Clone, Debug, Default, mln_wire::Wire)]
@@ -430,7 +403,7 @@ pub(crate) struct CollisionBuffer {
     pub(crate) indices: Vec<u16>,
 }
 
-/// The paint property binders of one layer (`SymbolBucket::PaintProperties`).
+/// The paint property binders of one layer.
 #[derive(Clone, Debug, mln_wire::Wire)]
 pub(crate) struct PaintProperties {
     pub(crate) icon_binders: SymbolIconBinders,
@@ -477,11 +450,32 @@ impl SymbolBucketState {
     }
 }
 
+/// The style of a bucket's symbol layers at its tile's zoom.
+pub(crate) struct SymbolBucketStyle<'a> {
+    pub(crate) layout: Arc<SymbolLayoutProperties::PossiblyEvaluated>,
+    pub(crate) paint_properties: &'a VecMap<String, Arc<EvaluatedLayer<Symbol>>>,
+    pub(crate) text_size: &'a PropertyValue<f32>,
+    pub(crate) icon_size: &'a PropertyValue<f32>,
+    pub(crate) zoom: f32,
+    pub(crate) tile_pixel_ratio: f32,
+    pub(crate) leader_id: Arc<str>,
+}
+
+/// What layout found of a bucket's symbols that drawing and placement read.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct SymbolLayoutFlags {
+    pub(crate) icons_need_linear: bool,
+    pub(crate) sort_features_by_y: bool,
+    pub(crate) icons_in_text: bool,
+    pub(crate) allow_vertical_placement: bool,
+    pub(crate) placement_modes: Vec<TextWritingModeType>,
+}
+
 #[derive(Clone, mln_wire::Wire)]
 pub(crate) struct SymbolBucket {
     pub(crate) base: BucketBase,
     pub(crate) layout: Arc<SymbolLayoutProperties::PossiblyEvaluated>,
-    pub(crate) bucket_leader_id: String,
+    pub(crate) bucket_leader_id: Arc<str>,
 
     // Flags
     pub(crate) icons_need_linear: bool,
@@ -517,28 +511,16 @@ impl std::fmt::Debug for SymbolBucket {
 }
 
 impl SymbolBucket {
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the evaluated layout and sizes, the laid-out symbols and the placement flags that the bucket keeps"
-    )]
     #[must_use]
     pub(crate) fn new(
-        layout: Arc<SymbolLayoutProperties::PossiblyEvaluated>,
-        paint_properties: &VecMap<String, Arc<EvaluatedLayer<Symbol>>>,
-        text_size: &PropertyValue<f32>,
-        icon_size: &PropertyValue<f32>,
-        zoom: f32,
-        icons_need_linear: bool,
-        sort_features_by_y: bool,
-        bucket_name: String,
+        style: SymbolBucketStyle<'_>,
+        flags: SymbolLayoutFlags,
         symbol_instances: Vec<SymbolInstance>,
         symbol_instance_pools: SymbolInstancePools,
         sort_key_ranges: Vec<SortKeyRange>,
-        tile_pixel_ratio: f32,
-        allow_vertical_placement: bool,
-        placement_modes: Vec<TextWritingModeType>,
-        icons_in_text: bool,
     ) -> Self {
+        let SymbolBucketStyle { layout, paint_properties, text_size, icon_size, zoom, tile_pixel_ratio, leader_id } =
+            style;
         let icon_size_data_driven_or_zoom =
             icon_size.as_expression().is_some_and(|e| !e.is_feature_constant() || !e.is_zoom_constant());
         let mut binders = VecMap::new();
@@ -549,14 +531,14 @@ impl SymbolBucket {
                 text_binders: SymbolTextBinders::new(evaluated, zoom),
             });
         }
-        let max_height_offset = symbol_instances.iter().map(SymbolInstance::height_offset).fold(0.0, f32::max);
+        let max_height_offset = symbol_instances.iter().map(|symbol| symbol.height_offset).fold(0.0, f32::max);
         SymbolBucket {
             base: BucketBase::default(),
             layout,
-            bucket_leader_id: bucket_name,
-            icons_need_linear: icons_need_linear || icon_size_data_driven_or_zoom,
-            sort_features_by_y,
-            icons_in_text,
+            bucket_leader_id: leader_id,
+            icons_need_linear: flags.icons_need_linear || icon_size_data_driven_or_zoom,
+            sort_features_by_y: flags.sort_features_by_y,
+            icons_in_text: flags.icons_in_text,
             sort_key_ranges,
             paint_properties: binders,
             text_size_binder: SymbolSizeBinder::create(zoom, text_size, SymbolLayoutProperties::Defaults::text_size()),
@@ -564,8 +546,8 @@ impl SymbolBucket {
             tile_pixel_ratio,
             max_height_offset,
             bucket_instance_id: 0,
-            allow_vertical_placement,
-            placement_modes,
+            allow_vertical_placement: flags.allow_vertical_placement,
+            placement_modes: flags.placement_modes,
             state: SymbolBucketState {
                 sorted_angle: f32::MAX,
                 symbol_instances,
@@ -643,32 +625,18 @@ impl SymbolBucket {
         // screen position. The index array buffer is rewritten to reference
         // the (unchanged) vertices in the sorted order.
         for index in symbols_by_viewport_y(&state.symbol_instances, angle) {
-            let symbol_instance = &state.symbol_instances[index];
-            symbols_sort_order.push(symbol_instance.data_feature_index());
-
-            if let Some(i) = symbol_instance.placed_right_text_index {
-                add_placed_symbol(&mut state.text.triangles, &state.text.placed_symbols[i]);
+            let symbol = &state.symbol_instances[index];
+            symbols_sort_order.push(symbol.data_feature_index);
+            if let Some(text) = &symbol.text {
+                for (run, _) in text.runs.all() {
+                    add_placed_symbol(&mut state.text.triangles, &state.text.placed_symbols[run]);
+                }
             }
-            if let Some(i) = symbol_instance.placed_center_text_index
-                && !symbol_instance.single_line()
-            {
-                add_placed_symbol(&mut state.text.triangles, &state.text.placed_symbols[i]);
-            }
-            if let Some(i) = symbol_instance.placed_left_text_index
-                && !symbol_instance.single_line()
-            {
-                add_placed_symbol(&mut state.text.triangles, &state.text.placed_symbols[i]);
-            }
-            if let Some(i) = symbol_instance.placed_vertical_text_index {
-                add_placed_symbol(&mut state.text.triangles, &state.text.placed_symbols[i]);
-            }
-
-            let icon_buffer = if symbol_instance.has_sdf_icon() { &mut state.sdf_icon } else { &mut state.icon };
-            if let Some(i) = symbol_instance.placed_icon_index {
-                add_placed_symbol(&mut icon_buffer.triangles, &icon_buffer.placed_symbols[i]);
-            }
-            if let Some(i) = symbol_instance.placed_vertical_icon_index {
-                add_placed_symbol(&mut icon_buffer.triangles, &icon_buffer.placed_symbols[i]);
+            if let Some(icon) = &symbol.icon {
+                let buffer = if icon.sdf { &mut state.sdf_icon } else { &mut state.icon };
+                for (run, _) in icon.runs() {
+                    add_placed_symbol(&mut buffer.triangles, &buffer.placed_symbols[run]);
+                }
             }
         }
 
@@ -686,51 +654,36 @@ impl SymbolBucket {
         }
     }
 
-    /// Marks the bucket for upload when placement changed its opacities or
-    /// its dynamic vertices.
-    pub(crate) fn mark_vertices_updated(&mut self, update_opacities: bool, dynamic_updated: bool) {
-        if update_opacities || dynamic_updated {
-            self.base.uploaded = false;
-        }
-    }
-
-    /// The layout vertex of a quad corner, with the quad's atlas origin
-    /// (`tex_origin`, see [`SymbolLayoutVertex::a4`]).
-    #[expect(clippy::too_many_arguments, reason = "each argument is a component of the packed vertex")]
+    /// The layout vertex of `corner` of `quad`, of a symbol at `anchor`
+    /// whose size is `size`, `height_offset` meters up.
     #[must_use]
-    pub(crate) fn layout_attributes(
-        label_anchor: Vec2,
-        o: Vec2,
-        glyph_offset_y: f32,
-        tx: u16,
-        ty: u16,
-        tex_origin: [u16; 2],
-        size_data: Range<f32>,
-        is_sdf: bool,
-        pixel_offset: Vec2,
-        min_font_scale: Vec2,
+    pub(crate) fn layout_vertex(
+        anchor: Vec2,
+        quad: &SymbolQuad,
+        corner: QuadCorner,
+        size: Range<f32>,
         height_offset: f32,
     ) -> SymbolLayoutVertex {
-        let a_size_min = (MAX_PACKED_SIZE.min((size_data.min * f32::from(SIZE_PACK_FACTOR)) as u16) << 1)
-            .wrapping_add(u16::from(is_sdf));
-        let a_size_max = MAX_PACKED_SIZE.min((size_data.max * f32::from(SIZE_PACK_FACTOR)) as u16);
+        let pack = |size: f32| MAX_PACKED_SIZE.min((size * f32::from(SIZE_PACK_FACTOR)) as u16);
+        let QuadCorner { offset, tex, pixel_offset } = corner;
         SymbolLayoutVertex {
-            // combining pos and offset to reduce number of vertex attributes
-            // passed to shader (8 max for some devices)
+            // The position and the offset share an attribute, as some
+            // devices take only eight.
             a1: [
-                label_anchor.x as i16,
-                label_anchor.y as i16,
-                (o.x * 32.0).round() as i16, // use 1/32 pixels for placement
-                ((o.y + glyph_offset_y) * 32.0).round() as i16,
+                anchor.x as i16,
+                anchor.y as i16,
+                // In 1/32 pixels.
+                (offset.x * 32.0).round() as i16,
+                ((offset.y + quad.glyph_offset.y) * 32.0).round() as i16,
             ],
-            a2: [tx, ty, a_size_min, a_size_max],
+            a2: [tex[0], tex[1], (pack(size.min) << 1).wrapping_add(u16::from(quad.is_sdf)), pack(size.max)],
             a3: [
                 (pixel_offset.x * 16.0) as i16,
                 (pixel_offset.y * 16.0) as i16,
-                (min_font_scale.x * 256.0) as i16,
-                (min_font_scale.y * 256.0) as i16,
+                (quad.min_font_scale.x * 256.0) as i16,
+                (quad.min_font_scale.y * 256.0) as i16,
             ],
-            a4: tex_origin,
+            a4: [quad.tex.x, quad.tex.y],
             a5: height_offset,
         }
     }
@@ -766,13 +719,12 @@ impl SymbolBucket {
     }
 }
 
+/// Adds the two triangles of each quad of `placed_symbol`.
 fn add_placed_symbol(triangles: &mut Vec<u16>, placed_symbol: &PlacedSymbol) {
-    let end_index = placed_symbol.start_index + placed_symbol.glyph_offsets.len() * 4;
-    let mut vertex_index = placed_symbol.start_index;
-    while vertex_index < end_index {
-        triangles.extend_from_slice(&[vertex_index as u16, (vertex_index + 1) as u16, (vertex_index + 2) as u16]);
-        triangles.extend_from_slice(&[(vertex_index + 1) as u16, (vertex_index + 2) as u16, (vertex_index + 3) as u16]);
-        vertex_index += 4;
+    let start = placed_symbol.start_index;
+    for quad in (start..start + placed_symbol.glyph_offsets.len() * 4).step_by(4) {
+        let [a, b, c, d] = [quad, quad + 1, quad + 2, quad + 3].map(|i| i as u16);
+        triangles.extend_from_slice(&[a, b, c, b, c, d]);
     }
 }
 
@@ -786,8 +738,8 @@ pub(crate) fn symbols_by_viewport_y(symbol_instances: &[SymbolInstance], angle: 
     let cos = angle.cos();
     result.sort_by_key(|&i| {
         let s = &symbol_instances[i];
-        let p = s.anchor().point;
-        ((sin * p.x + cos * p.y).round() as i64, Reverse(s.data_feature_index()))
+        let p = s.anchor.point;
+        ((sin * p.x + cos * p.y).round() as i64, Reverse(s.data_feature_index))
     });
     result
 }

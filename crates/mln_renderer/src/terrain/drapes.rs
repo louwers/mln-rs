@@ -336,7 +336,6 @@ impl Drapes {
                 }
             }
         }
-        let shaders = &parameters.static_data.shaders;
         let stencil_clear_tile = parameters.stencil_clear_tile();
         for drape in self.drapes.iter_mut().filter(|drape| drape.redraws) {
             let context = &mut *parameters.context;
@@ -356,7 +355,7 @@ impl Drapes {
                 stencil_clear_tile.map(|_| drape.tile.to_unwrapped()),
             );
             let transform = &drape.transform;
-            drape.clip_masks.update(gpu, context, shaders, false, &drape.groups.clip_tiles, |tile| {
+            drape.clip_masks.update(gpu, context, false, &drape.groups.clip_tiles, |tile| {
                 to_projection_ubo(&transform.projection_data_for_tile(tile, false))
             });
         }

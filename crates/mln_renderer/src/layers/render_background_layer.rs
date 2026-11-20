@@ -1,13 +1,13 @@
-use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_gfx::gpu::Gpu;
+use mln_gfx::gpu::{Gpu, ShaderKey};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::background_layer_ubo::{
     BackgroundDrawableUBO, BackgroundDrawableUnionUBO, BackgroundPatternDrawableUBO, BackgroundPatternPropsUBO,
     BackgroundPropsUBO,
 };
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
+use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
     ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_IMAGE_TEXTURE, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE,
@@ -29,11 +29,9 @@ use super::cast_matrix;
 use crate::bucket::NoBucket;
 use crate::draw::{DrawGeometry, DrawObjects, Textures, raw_vertices};
 use crate::gfx::indexes::DrawIndexes;
-use crate::gfx::shader_program::ShaderProgramPtr;
+use crate::gfx::vertex_attribute::Uniforms;
 use crate::globe_tile_mesh::raw_globe_tile_mesh;
-use crate::layer_drawing::{
-    DrawDepth, DrawList, DrawObjectsMut, FrameDraw, KeptDraw, LayerDrawing, TileDraws, TileObjects,
-};
+use crate::layer_drawing::{DrawDepth, DrawList, DrawObjectsMut, FrameDraw, KeptDraw, TileDraws, TileObjects};
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
@@ -45,9 +43,6 @@ use crate::render_static_data::RenderStaticData;
 use crate::render_tile::NoTileBucket;
 use crate::tile_matrix::{projection_data, to_projection_ubo};
 use crate::util::tile_cover::{TileCoverParameters, tile_cover};
-
-const BACKGROUND_PLAIN_SHADER_NAME: &str = "BackgroundShader";
-const BACKGROUND_PATTERN_SHADER_NAME: &str = "BackgroundPatternShader";
 
 /// Adds the image `id` to the pattern atlas if it isn't there yet.
 fn add_pattern_if_needed(id: &str, params: &mut LayerUpdateParameters<'_>) {
@@ -95,29 +90,20 @@ pub(crate) struct RenderBackgroundLayer {
     /// The frame's draws as the update makes them, with their uniform blocks
     /// and projections.
     draw_list: DrawList<(BackgroundDrawableUnionUBO, ProjectionUBO)>,
-    plain_shader: Option<ShaderProgramPtr>,
-    pattern_shader: Option<ShaderProgramPtr>,
 }
 
 impl RenderBackgroundLayer {
     pub(crate) fn new(impl_: Arc<LayerStyle<Background>>) -> Self {
         let (base, values) = LayerValues::new(impl_);
-        RenderBackgroundLayer {
-            base,
-            values,
-            drawing: TileDraws::default(),
-            draw_list: DrawList::default(),
-            plain_shader: None,
-            pattern_shader: None,
-        }
+        RenderBackgroundLayer { base, values, drawing: TileDraws::default(), draw_list: DrawList::default() }
     }
 
-    /// The GPU objects of the draw of the tile `tile_id`, with `shader`, in
-    /// `passes`, in the projection `variant`.
+    /// The GPU objects of the draw of the tile `tile_id`, with `shader` and
+    /// `color_mode`, in the projection `variant`.
     fn build_tile(
         tile_id: &OverscaledTileID,
-        shader: ShaderProgramPtr,
-        passes: RenderPass,
+        shader: ShaderKey,
+        color_mode: ColorMode,
         variant: ProjectionVariant,
     ) -> DrawObjects {
         let (vertices, vertex_count, indexes, segments) = if variant == ProjectionVariant::Globe {
@@ -143,8 +129,6 @@ impl RenderBackgroundLayer {
             segments: segments.iter().map(SegmentBase::copy).collect(),
             instances: None,
         };
-        let color_mode =
-            if passes == RenderPass::Translucent { ColorMode::alpha_blended() } else { ColorMode::unblended() };
         DrawObjects::new(shader, color_mode, CullFaceMode::disabled(), geometry, Textures::default())
     }
 
@@ -208,24 +192,15 @@ impl TypedLayer for RenderBackgroundLayer {
         paint_parameters: &mut PaintParameters<'_>,
         atlases: &Atlases,
     ) {
-        let RenderBackgroundLayer { base, values, drawing, draw_list, plain_shader, pattern_shader } = self;
-        let shaders = &paint_parameters.static_data.shaders;
+        let RenderBackgroundLayer { base, values, drawing, draw_list } = self;
         let layer = &*values.evaluated;
         let evaluated = &layer.paint;
         let has_pattern = !evaluated.background_pattern.faded().to.empty();
         let draw_passes = RenderPass(layer.render_passes);
         let built_for = (draw_passes, has_pattern);
 
-        if !has_pattern && plain_shader.is_none() {
-            *plain_shader = shaders.shader(BACKGROUND_PLAIN_SHADER_NAME, base.projection_variant);
-        }
-        if has_pattern && pattern_shader.is_none() {
-            *pattern_shader = shaders.shader(BACKGROUND_PATTERN_SHADER_NAME, base.projection_variant);
-        }
-        let Some(shader) = (if has_pattern { pattern_shader.as_ref() } else { plain_shader.as_ref() }) else {
-            drawing.clear();
-            return;
-        };
+        let program = if has_pattern { &programs::BACKGROUND_PATTERN } else { &programs::BACKGROUND };
+        let shader = paint_parameters.context.shader_key(program, Uniforms::default(), base.projection_variant);
 
         let pattern_atlas = &atlases.pattern;
         let faded = evaluated.background_pattern.faded();
@@ -250,12 +225,17 @@ impl TypedLayer for RenderBackgroundLayer {
         }
 
         let variant = base.projection_variant;
+        let color_mode = paint_parameters.context.color_mode(if draw_passes == RenderPass::Translucent {
+            ColorMode::alpha_blended()
+        } else {
+            ColorMode::unblended()
+        });
         for (tile_id, entry) in drawing.tiles_mut().entries() {
             if entry.value.as_ref().is_some_and(|cached| cached.built_for != built_for) {
                 *entry.value = None;
             }
             let cached = entry.value.get_or_insert_with(|| BackgroundTile {
-                draw: KeptDraw::new(Self::build_tile(&tile_id, Rc::clone(shader), draw_passes, variant)),
+                draw: KeptDraw::new(Self::build_tile(&tile_id, shader.clone(), color_mode, variant)),
                 built_for,
             });
             if pattern_texture.is_some() {
@@ -299,11 +279,6 @@ impl TypedLayer for RenderBackgroundLayer {
             writer.storage(ID_BACKGROUND_DRAWABLE_UBO, |(draw_ubo, _)| *draw_ubo);
             writer.storage(ID_PROJECTION_UBO, |(_, projection)| *projection);
         });
-    }
-
-    fn projection_changed(&mut self) {
-        self.plain_shader = None;
-        self.pattern_shader = None;
     }
 
     /// None where the layer is transparent, and the opaque pass too where

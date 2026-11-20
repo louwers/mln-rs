@@ -3,13 +3,13 @@
 // The draws' projections are entries of one storage buffer of the pass's.
 
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use mln_gfx::color_mode::ColorMode;
 use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
+use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE, ID_PROJECTION_UBO};
 use mln_gfx::{AttributeDataType, DepthMaskType, DrawMode};
@@ -20,16 +20,13 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use crate::draw::{DrawGeometry, DrawObjects, Textures, raw_vertices};
 use crate::gfx::context::Context;
 use crate::gfx::indexes::DrawIndexes;
-use crate::gfx::shader_program::ShaderProgramPtr;
-use crate::gfx::shader_registry::ShaderRegistry;
+use crate::gfx::vertex_attribute::Uniforms;
 use crate::globe_tile_mesh::{RawGlobeTileMesh, raw_globe_tile_mesh};
 use crate::layer_drawing::{DrawDepth, DrawList, FrameDraw, KeptDraw, LayerDraws, TileMap, finish_tiles, tile_objects};
 use crate::paint_parameters::PaintParameters;
 use crate::tile_matrix::to_projection_ubo;
 use crate::update_parameters::UpdateParameters;
 use crate::util::tile_cover::{TileCoverParameters, tile_cover};
-
-const GLOBE_DEPTH_SHADER_NAME: &str = "GlobeDepthShader";
 
 /// Writes the planet into the depth buffer ahead of the translucent pass, so
 /// that 3D geometry behind the horizon is hidden by the globe the way the 2D
@@ -43,7 +40,6 @@ pub(crate) struct GlobeDepthPass {
     frame: LayerDraws,
     /// The frame's draws as the update makes them, with their projections.
     draw_list: DrawList<ProjectionUBO>,
-    shader: Option<ShaderProgramPtr>,
     meshes: BTreeMap<(u8, bool, bool), RawGlobeTileMesh>,
 }
 
@@ -53,7 +49,6 @@ impl GlobeDepthPass {
     pub(crate) fn update(
         &mut self,
         gpu: &mut dyn Gpu,
-        shaders: &ShaderRegistry,
         context: &mut Context,
         state: &View,
         update_parameters: &UpdateParameters,
@@ -68,12 +63,7 @@ impl GlobeDepthPass {
             return;
         }
 
-        if self.shader.is_none() {
-            self.shader = shaders.shader(GLOBE_DEPTH_SHADER_NAME, ProjectionVariant::Globe);
-        }
-        let Some(shader) = self.shader.clone() else {
-            return;
-        };
+        let shader = context.shader_key(&programs::GLOBE_DEPTH, Uniforms::default(), ProjectionVariant::Globe);
         let caches = &mut self.tiles;
 
         let zoom = state.integer_zoom();
@@ -123,7 +113,7 @@ impl GlobeDepthPass {
                 // The far hemisphere is clockwise on screen on every backend,
                 // Vulkan included, since its shaders flip Y.
                 let objects = DrawObjects::new(
-                    Rc::clone(&shader),
+                    shader.clone(),
                     ColorMode::disabled(),
                     CullFaceMode::back_ccw(),
                     geometry,

@@ -3,13 +3,13 @@
 //! buffer, raised by the DEM's texture and sampling the tile's drape.
 
 use std::mem::size_of;
-use std::rc::Rc;
 
 use mln_gfx::color_mode::ColorMode;
 use mln_gfx::cull_face_mode::CullFaceMode;
-use mln_gfx::gpu::Gpu;
+use mln_gfx::gpu::{Gpu, ShaderKey};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
+use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
     ID_PROJECTION_UBO, ID_TERRAIN_DEM_TEXTURE, ID_TERRAIN_DRAPE_TEXTURE, ID_TERRAIN_DRAWABLE_UBO,
@@ -30,16 +30,13 @@ use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::frame_projection::zero_to_one_clip_z;
 use crate::gfx::context::Context;
 use crate::gfx::indexes::Indexes;
-use crate::gfx::shader_program::ShaderProgramPtr;
 use crate::gfx::store::SharedIndexes;
-use crate::gfx::vertex_attribute::{SharedAttribute, VertexAttributeArray};
+use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::gfx::vertices::SharedVertices;
 use crate::layer_drawing::{DrawDepth, DrawList, FrameDraw, KeptDraw, LayerDraws, TileMap, finish_tiles, tile_objects};
 use crate::layers::cast_matrix;
 use crate::paint_parameters::PaintParameters;
 use crate::tile::source_tiles::SourceTiles;
-
-const TERRAIN_SHADER_NAME: &str = "TerrainShader";
 
 /// The grid, in the context's stores.
 struct SharedMesh {
@@ -65,7 +62,7 @@ pub(crate) struct TerrainDraws {
     frame: LayerDraws,
     /// The frame's draws as the update makes them, with their uniforms.
     draw_list: DrawList<TerrainDrawableUBO>,
-    shader: Option<ShaderProgramPtr>,
+    shader: Option<ShaderKey>,
     mesh: Option<SharedMesh>,
     /// The textures of the DEM tiles the tiles read.
     dem_textures: DemTextures,
@@ -171,20 +168,21 @@ impl TerrainDraws {
 
     /// The terrain's shader, made on `gpu` the first time; `None`, logged
     /// once, where the backend has none.
-    fn shader(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) -> Option<ShaderProgramPtr> {
+    fn shader(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) -> Option<ShaderKey> {
         if let Some(shader) = &self.shader {
-            return Some(Rc::clone(shader));
+            return Some(shader.clone());
         }
         if self.unsupported {
             return None;
         }
-        let shader = parameters.static_data.shaders.shader(TERRAIN_SHADER_NAME, ProjectionVariant::Mercator)?;
-        if let Err(error) = parameters.context.shader(gpu, shader.key()) {
+        let context = &mut *parameters.context;
+        let shader = context.shader_key(&programs::TERRAIN, Uniforms::default(), ProjectionVariant::Mercator);
+        if let Err(error) = context.shader(gpu, &shader) {
             self.unsupported = true;
             Log::warning(Event::Render, format!("Terrain draws nothing on this backend: {error}"));
             return None;
         }
-        Some(Rc::clone(self.shader.insert(shader)))
+        Some(self.shader.insert(shader).clone())
     }
 
     /// Uploads the GPU objects of the frame's draws.
@@ -200,7 +198,7 @@ impl TerrainDraws {
 
 /// The GPU objects of a tile's draw of `mesh` with `shader`: alpha-blended,
 /// without the triangles that face away.
-fn mesh_objects(shader: &ShaderProgramPtr, mesh: &SharedMesh) -> DrawObjects {
+fn mesh_objects(shader: &ShaderKey, mesh: &SharedMesh) -> DrawObjects {
     let mut vertices = VertexAttributeArray::new();
     vertices.set_shared(
         ID_TERRAIN_POS_VERTEX_ATTRIBUTE,
@@ -214,5 +212,5 @@ fn mesh_objects(shader: &ShaderProgramPtr, mesh: &SharedMesh) -> DrawObjects {
         segments: vec![SegmentBase::with_lengths(0, 0, mesh.vertex_count, mesh.index_count)],
         instances: None,
     };
-    DrawObjects::new(Rc::clone(shader), ColorMode::alpha_blended(), mesh.cull_face_mode, geometry, Textures::default())
+    DrawObjects::new(shader.clone(), ColorMode::alpha_blended(), mesh.cull_face_mode, geometry, Textures::default())
 }

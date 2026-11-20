@@ -12,13 +12,12 @@ use mln_style_types::image::ImagePositions;
 use mln_tile::TileLayer;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature};
-use mln_util::error::Error;
 use mln_util::identity::SimpleIdentity;
 use mln_wire::{Reader, Wire, Writer};
 
 use crate::bucket_geometry::GeometryUpload;
 use crate::layout::pattern_layout::PatternLayerMap;
-use crate::util::triangulate::Triangulator;
+use crate::util::tessellator::Tessellator;
 
 pub(crate) type FeatureStates = mln_util::hash::HashMap<String, mln_style::expression::expression::FeatureState>;
 pub type LayerFeatureStates = mln_util::hash::HashMap<String, FeatureStates>;
@@ -42,13 +41,6 @@ impl Default for BucketBase {
     }
 }
 
-/// The error of a polygon with more vertices than a 16-bit index can
-/// address. The tile that holds it fails to lay out.
-#[must_use]
-pub(crate) fn geometry_too_long() -> Error {
-    Error::native("a polygon has more vertices than a 16-bit index can address")
-}
-
 /// What the frame's draws read of the buckets apart from their own
 /// geometry, which depends on the device.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -69,10 +61,8 @@ pub(crate) trait Bucket: Any + Send + CloneBucket {
     /// Obtaining these is a costly operation, so we do it only once, and
     /// pass-by-const-ref the geometries as a second parameter.
     ///
-    /// A bucket that fills polygons triangulates them with `triangulator`.
-    ///
-    /// Fails with [`geometry_too_long`] for a polygon that a bucket can't
-    /// index; the worker reports it as the tile's error.
+    /// A bucket that meshes lines or polygons keeps its scratch in
+    /// `tessellator`.
     #[expect(clippy::too_many_arguments, reason = "the feature and what the layout lays it out with")]
     fn add_feature(
         &mut self,
@@ -82,9 +72,8 @@ pub(crate) trait Bucket: Any + Send + CloneBucket {
         _patterns: &PatternLayerMap,
         _index: usize,
         _canonical: &CanonicalTileID,
-        _triangulator: &mut Triangulator,
-    ) -> Result<(), Error> {
-        Ok(())
+        _tessellator: &mut Tessellator,
+    ) {
     }
 
     /// Re-evaluates the feature-state dependent attribute values of the

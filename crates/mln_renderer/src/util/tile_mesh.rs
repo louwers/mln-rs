@@ -31,14 +31,14 @@ impl Default for TileMeshOptions {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct TileMesh {
-    /// Flattened `x, y` pairs in tile units.
-    pub(crate) vertices: Vec<i16>,
-    pub(crate) indices: Vec<u16>,
+    /// The vertices' `x, y` in tile units.
+    pub(crate) vertices: Vec<[i16; 2]>,
+    pub(crate) triangles: Vec<[u16; 3]>,
 }
 
-/// A grid mesh covering one tile, optionally with borders and pole caps; port
-/// of GL JS `util/create_tile_mesh.ts`. Triangles are counter-clockwise in
-/// tile space.
+/// A grid mesh covering one tile, optionally with borders and pole caps, as
+/// GL JS's `util/create_tile_mesh.ts` makes it. Triangles are
+/// counter-clockwise in tile space.
 #[must_use]
 pub(crate) fn create_tile_mesh(options: TileMeshOptions) -> TileMesh {
     let extra_quads_x: i32 = if options.generate_borders { 2 } else { 0 };
@@ -57,7 +57,7 @@ pub(crate) fn create_tile_mesh(options: TileMeshOptions) -> TileMesh {
     let end_y = granularity + i32::from(options.generate_borders || options.extend_to_south_pole);
 
     let mut mesh = TileMesh::default();
-    mesh.vertices.reserve(vertices_per_axis_x as usize * vertices_per_axis_y as usize * 2);
+    mesh.vertices.reserve(vertices_per_axis_x as usize * vertices_per_axis_y as usize);
     for y in offset_y..=end_y {
         for x in offset_x..=end_x {
             let mut vx = x * EXTENT / granularity;
@@ -75,19 +75,18 @@ pub(crate) fn create_tile_mesh(options: TileMeshOptions) -> TileMesh {
                 vy =
                     if options.extend_to_south_pole { i32::from(SOUTH_POLE_Y) } else { EXTENT + EXTENT_STENCIL_BORDER };
             }
-            mesh.vertices.push(vx as i16);
-            mesh.vertices.push(vy as i16);
+            mesh.vertices.push([vx as i16, vy as i16]);
         }
     }
 
-    mesh.indices.reserve(quads_per_axis_x as usize * quads_per_axis_y as usize * 6);
+    mesh.triangles.reserve(quads_per_axis_x as usize * quads_per_axis_y as usize * 2);
     for y in 0..quads_per_axis_y {
         for x in 0..quads_per_axis_x {
             let v0 = (x + y * vertices_per_axis_x) as u16;
             let v1 = ((x + 1) + y * vertices_per_axis_x) as u16;
             let v2 = (x + (y + 1) * vertices_per_axis_x) as u16;
             let v3 = ((x + 1) + (y + 1) * vertices_per_axis_x) as u16;
-            mesh.indices.extend_from_slice(&[v0, v2, v1, v1, v2, v3]);
+            mesh.triangles.extend([[v0, v2, v1], [v1, v2, v3]]);
         }
     }
     mesh

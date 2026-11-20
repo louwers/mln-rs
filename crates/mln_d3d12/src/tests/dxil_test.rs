@@ -1,4 +1,4 @@
-use mln_glsl::PROGRAMS;
+use mln_glsl::BUILT_INS;
 use mln_glsl::variants::variants;
 
 use crate::ShaderCompiler;
@@ -18,10 +18,10 @@ fn every_program_compiles_to_dxil() {
     let compiler = compiler();
     let mut failures = Vec::new();
     let mut compiled = 0;
-    for &(_, source) in PROGRAMS {
-        for variant in variants(source, true) {
-            let at = format!("{} ({})", source.name, variant.name);
-            match compiler.compile_source(source, &variant.defines) {
+    for &(program, source) in BUILT_INS {
+        for variant in variants(program, true) {
+            let at = format!("{} ({})", program.name, variant.name);
+            match compiler.compile_source(program, source, &variant.defines) {
                 Ok(program) if program.vertex.starts_with(DXIL_MAGIC) && program.fragment.starts_with(DXIL_MAGIC) => {
                     compiled += 1;
                 }
@@ -40,11 +40,11 @@ fn every_program_compiles_to_dxil() {
 #[test]
 fn only_the_pulled_programs_read_the_vertex_index() {
     let compiler = compiler();
-    for &(_, source) in PROGRAMS {
-        for variant in variants(source, false) {
-            let program = compiler.compile_source(source, &variant.defines).expect("the program");
-            let pulled = source.name.contains("Pulled");
-            assert_eq!(program.reads_vertex_index, pulled, "{} ({})", source.name, variant.name);
+    for &(program, source) in BUILT_INS {
+        for variant in variants(program, false) {
+            let compiled = compiler.compile_source(program, source, &variant.defines).expect("the program");
+            let pulled = program.name.contains("Pulled");
+            assert_eq!(compiled.reads_vertex_index, pulled, "{} ({})", program.name, variant.name);
         }
     }
 }

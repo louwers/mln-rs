@@ -14,7 +14,7 @@ use mln_util::error::Error;
 use mln_vec_map::{VecMap, VecSet};
 
 use crate::bucket_parameters::BucketParameters;
-use crate::geometry::feature_index::FeatureIndex;
+use crate::geometry::feature_index::FeatureIndexBuilder;
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::filter_groups::FilterGroups;
 use crate::layout::tile_layout::Resolved;
@@ -50,13 +50,12 @@ pub(crate) trait Layout<T: LayerType>: Send + 'static {
     /// Makes the bucket and adds its features to `feature_index`.
     /// `resolved` is what the dependencies resolved to, or `None` for a
     /// layout without dependencies. `None` when the layout has nothing to
-    /// draw. A feature that fails to lay out, such as one that
-    /// [`geometry_too_long`](crate::bucket::geometry_too_long) reports,
-    /// fails the bucket; the worker reports it as the tile's error.
+    /// draw. A feature that fails to decode fails the bucket; the worker
+    /// reports it as the tile's error.
     fn create_bucket(
         &mut self,
         resolved: Option<&Resolved>,
-        feature_index: &mut FeatureIndex,
+        feature_index: &mut FeatureIndexBuilder,
         build: &BuildParams,
     ) -> Result<Option<T::Bucket>, Error>;
 
@@ -84,7 +83,7 @@ impl<T: LayerType> Layout<T> for NoLayout {
     fn create_bucket(
         &mut self,
         _resolved: Option<&Resolved>,
-        _feature_index: &mut FeatureIndex,
+        _feature_index: &mut FeatureIndexBuilder,
         _build: &BuildParams,
     ) -> Result<Option<T::Bucket>, Error> {
         match *self {}

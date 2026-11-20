@@ -17,9 +17,8 @@ mod text;
 mod gtest_image_store;
 // gtests-core: test/renderer/dynamic_texture_atlas.test.cpp.
 mod gtest_dynamic_texture_atlas;
-mod gtest_fill_generator;
+mod gtest_fill_mesh;
 // gtests-core: test/renderer/pattern_atlas.test.cpp.
-mod gtest_fill_large_mesh_arrays;
 mod gtest_pattern_atlas;
 mod gtest_tile_lod;
 // gtests-core: test/algorithm/update_renderables.test.cpp.
@@ -381,7 +380,7 @@ fn with_context(f: impl FnOnce(&mut dyn mln_gfx::gpu::Gpu, &mut crate::gfx::cont
     let device = mln_webgpu::Device::new(None).expect("device");
     let mut backend = mln_webgpu::RendererBackend::new(&device);
     let gpu = backend.gpu();
-    let mut context = crate::gfx::context::Context::new(*gpu.caps());
+    let mut context = crate::gfx::context::Context::new(*gpu.caps(), 1.0);
     f(gpu, &mut context);
     context.tear_down(gpu);
 }

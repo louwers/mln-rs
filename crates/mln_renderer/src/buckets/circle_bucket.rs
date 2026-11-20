@@ -4,6 +4,11 @@
 use std::sync::Arc;
 
 use mln_gfx::shaders::segment::SegmentBase;
+use mln_gfx::shaders::shader_defines::{
+    ID_CIRCLE_BLUR_VERTEX_ATTRIBUTE, ID_CIRCLE_COLOR_VERTEX_ATTRIBUTE, ID_CIRCLE_OPACITY_VERTEX_ATTRIBUTE,
+    ID_CIRCLE_RADIUS_VERTEX_ATTRIBUTE, ID_CIRCLE_STROKE_COLOR_VERTEX_ATTRIBUTE,
+    ID_CIRCLE_STROKE_OPACITY_VERTEX_ATTRIBUTE, ID_CIRCLE_STROKE_WIDTH_VERTEX_ATTRIBUTE,
+};
 use mln_map_types::MapMode;
 use mln_style::layers::Circle;
 use mln_style::layers::circle_layer_properties::CirclePaintProperties;
@@ -18,13 +23,13 @@ use crate::paint_property_binder::PaintPropertyBinder;
 
 crate::paint_property_binders!(
     pub struct CircleBinders for CirclePaintProperties::PossiblyEvaluated {
-        circle_blur => PaintPropertyBinder<f32>,
-        circle_color => PaintPropertyBinder<Color>,
-        circle_opacity => PaintPropertyBinder<f32>,
-        circle_radius => PaintPropertyBinder<f32>,
-        circle_stroke_color => PaintPropertyBinder<Color>,
-        circle_stroke_opacity => PaintPropertyBinder<f32>,
-        circle_stroke_width => PaintPropertyBinder<f32>,
+        circle_blur: PaintPropertyBinder<f32> => [ID_CIRCLE_BLUR_VERTEX_ATTRIBUTE],
+        circle_color: PaintPropertyBinder<Color> => [ID_CIRCLE_COLOR_VERTEX_ATTRIBUTE],
+        circle_opacity: PaintPropertyBinder<f32> => [ID_CIRCLE_OPACITY_VERTEX_ATTRIBUTE],
+        circle_radius: PaintPropertyBinder<f32> => [ID_CIRCLE_RADIUS_VERTEX_ATTRIBUTE],
+        circle_stroke_color: PaintPropertyBinder<Color> => [ID_CIRCLE_STROKE_COLOR_VERTEX_ATTRIBUTE],
+        circle_stroke_opacity: PaintPropertyBinder<f32> => [ID_CIRCLE_STROKE_OPACITY_VERTEX_ATTRIBUTE],
+        circle_stroke_width: PaintPropertyBinder<f32> => [ID_CIRCLE_STROKE_WIDTH_VERTEX_ATTRIBUTE],
     }
 );
 
@@ -83,22 +88,6 @@ impl CircleBucket {
         let translate = evaluated.circle_translate.uniform();
         // The translation's length, in `f32`.
         radius + stroke + (translate[0] * translate[0] + translate[1] * translate[1]).sqrt()
-    }
-
-    /// The layout vertex for `p` with extrusion (`ex`, `ey`): `p.x * 2` is
-    /// an integer, added to a float and truncated to `i16`.
-    #[must_use]
-    pub(crate) fn vertex(
-        p: mln_tile_id::geometry_tile_data::GeometryCoordinate,
-        ex: f32,
-        ey: f32,
-    ) -> CircleLayoutVertex {
-        CircleLayoutVertex {
-            a1: [
-                ((i32::from(p.x) * 2) as f32 + f32::midpoint(ex, 1.0)) as i32 as i16,
-                ((i32::from(p.y) * 2) as f32 + f32::midpoint(ey, 1.0)) as i32 as i16,
-            ],
-        }
     }
 }
 

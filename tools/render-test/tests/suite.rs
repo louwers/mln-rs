@@ -6,8 +6,8 @@
 // rasterizer and D3D12 draw them 1 px wide (ignores/rust-port-1px-outlines.json):
 // D3D12 has no wide lines, and takes WebGPU's manifest.
 // macOS adds the C++ WebGPU ignore list, since wgpu renders through Metal
-// there, and ignores the tests whose expected images are C++ Metal's, which
-// triangulates them (ignores/rust-port-metal-outlines.json).
+// there, and ignores the tests whose only expected image is C++ Metal's, which
+// triangulates them 1 px wide (ignores/rust-port-metal-outlines.json).
 //
 // The tests run in worker processes of the package's render-test binary
 // (`--jobs`, src/jobs.rs): one per CPU, or $RENDER_TEST_JOBS (1: in the

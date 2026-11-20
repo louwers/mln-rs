@@ -26,11 +26,11 @@ use mln_vec_map::VecMap;
 use crate::bucket::Bucket;
 use crate::buckets::fill_bucket::FillBucket;
 use crate::buckets::line_bucket::LineBucket;
-use crate::geometry::feature_index::FeatureIndex;
+use crate::geometry::feature_index::FeatureIndexBuilder;
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::{BuildParams, Layout, LayoutParameters, SourceLayer, layers_by_id};
 use crate::layout::tile_layout::Resolved;
-use crate::util::triangulate::Triangulator;
+use crate::util::tessellator::Tessellator;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct PatternDependency {
@@ -257,7 +257,7 @@ impl<S: PatternLayoutSpec> Layout<S::Type> for PatternLayout<S> {
     fn create_bucket(
         &mut self,
         resolved: Option<&Resolved>,
-        feature_index: &mut FeatureIndex,
+        feature_index: &mut FeatureIndexBuilder,
         build: &BuildParams,
     ) -> Result<Option<S::Bucket>, Error> {
         let no_patterns = ImagePositions::default();
@@ -281,7 +281,7 @@ impl<S: PatternLayoutSpec> Layout<S::Type> for PatternLayout<S> {
             }
         }
 
-        let mut triangulator = Triangulator::default();
+        let mut tessellator = Tessellator::default();
         for pattern_feature in &self.features {
             let i = pattern_feature.i;
             let feature = source_layer.feature(i)?;
@@ -302,8 +302,8 @@ impl<S: PatternLayoutSpec> Layout<S::Type> for PatternLayout<S> {
                 patterns,
                 i,
                 &build.canonical,
-                &mut triangulator,
-            )?;
+                &mut tessellator,
+            );
         }
         Ok(Some(bucket))
     }

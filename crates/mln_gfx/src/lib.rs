@@ -8,8 +8,8 @@
 //! owns the renderer's buffers, textures and the groups of buffers its
 //! draws bind, which the renderer keeps in `mln_renderer`. The targets that
 //! draw into rings of the host's textures, or of images they export, are
-//! generic over each backend's part, in [`ring`]. Each program's
-//! attributes and the keys of its variants are in `shaders::program_info`.
+//! generic over each backend's part, in [`ring`]. What each program reads is
+//! in `shaders::program`, and the built-in programs in `shaders::programs`.
 
 pub mod backend;
 pub mod color_mode;
@@ -21,7 +21,6 @@ pub mod frame;
 pub mod gfx_types;
 pub mod gpu;
 pub mod offscreen_target;
-pub mod polyline_generator;
 pub mod projection_variant;
 pub mod renderer_backend;
 pub mod rendering_stats;

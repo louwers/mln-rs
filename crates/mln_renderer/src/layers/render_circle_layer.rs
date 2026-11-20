@@ -5,17 +5,16 @@ use geometry::Point;
 use mln_gfx::gpu::Gpu;
 use mln_gfx::shaders::circle_layer_ubo::{CircleDrawableUBO, CircleEvaluatedPropsUBO};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
+use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
-    ID_CIRCLE_COLOR_VERTEX_ATTRIBUTE, ID_CIRCLE_DRAWABLE_UBO, ID_CIRCLE_EVALUATED_PROPS_UBO,
-    ID_CIRCLE_POS_VERTEX_ATTRIBUTE, ID_PROJECTION_UBO,
+    ID_CIRCLE_DRAWABLE_UBO, ID_CIRCLE_EVALUATED_PROPS_UBO, ID_CIRCLE_POS_VERTEX_ATTRIBUTE, ID_PROJECTION_UBO,
 };
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_map_types::{TileProjector, View};
 use mln_style::expression::EvaluationContext;
 use mln_style::layer_type::LayerStyle;
 use mln_style::layers::Circle;
-use mln_style::layers::circle_layer_properties::CirclePaintProperties;
 use mln_style_types::{AlignmentType, CirclePitchScaleType};
 use mln_tile_id::OverscaledTileID;
 use mln_util::Color;
@@ -26,107 +25,21 @@ use crate::bucket::Bucket;
 use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
 use crate::buckets::circle_bucket::{CircleBinders, CircleBucket, CircleLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
-use crate::gfx::shader_group::{ShaderGroupPtr, StringIDSetsPair};
-use crate::gfx::vertex_attribute::{SharedAttribute, VertexAttributeArray};
-use crate::gfx::vertices::SharedVertices;
+use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::layer_drawing::{DrawList, KeptDraw, TileDraws, UniformWriter};
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::circle_layout::CircleLayout;
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::paint_parameters::PaintParameters;
-use crate::paint_property_binder::read_data_driven_paint_property;
 use crate::render_layer::{
-    Atlases, LayerBucket, LayerParts, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
+    Atlases, LayerBucket, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
 };
 use crate::render_pass::RenderPass;
 use crate::render_tile::{FrameTile, RenderTile};
 use crate::tile_matrix::{globe_extrude_scale, projection_data, to_projection_ubo};
 
-const CIRCLE_SHADER_GROUP_NAME: &str = "CircleShader";
-
 /// The pass the layer's draws draw in.
 const RENDER_PASS: RenderPass = RenderPass::Translucent;
-
-fn read_circle_attributes(
-    attrs: &mut VertexAttributeArray,
-    b: &CircleBinders,
-    shared: Option<&SharedVertices>,
-    evaluated: &CirclePaintProperties::PossiblyEvaluated,
-    pau: &mut StringIDSetsPair,
-) {
-    let buffer = &b.interleaved_vertex_buffer;
-    let mut id = ID_CIRCLE_COLOR_VERTEX_ATTRIBUTE;
-    read_data_driven_paint_property(
-        attrs,
-        &b.circle_color,
-        buffer,
-        shared,
-        &["a_color"],
-        evaluated.circle_color.is_constant(),
-        pau,
-        &mut id,
-    );
-    read_data_driven_paint_property(
-        attrs,
-        &b.circle_radius,
-        buffer,
-        shared,
-        &["a_radius"],
-        evaluated.circle_radius.is_constant(),
-        pau,
-        &mut id,
-    );
-    read_data_driven_paint_property(
-        attrs,
-        &b.circle_blur,
-        buffer,
-        shared,
-        &["a_blur"],
-        evaluated.circle_blur.is_constant(),
-        pau,
-        &mut id,
-    );
-    read_data_driven_paint_property(
-        attrs,
-        &b.circle_opacity,
-        buffer,
-        shared,
-        &["a_opacity"],
-        evaluated.circle_opacity.is_constant(),
-        pau,
-        &mut id,
-    );
-    read_data_driven_paint_property(
-        attrs,
-        &b.circle_stroke_color,
-        buffer,
-        shared,
-        &["a_stroke_color"],
-        evaluated.circle_stroke_color.is_constant(),
-        pau,
-        &mut id,
-    );
-    read_data_driven_paint_property(
-        attrs,
-        &b.circle_stroke_width,
-        buffer,
-        shared,
-        &["a_stroke_width"],
-        evaluated.circle_stroke_width.is_constant(),
-        pau,
-        &mut id,
-    );
-    read_data_driven_paint_property(
-        attrs,
-        &b.circle_stroke_opacity,
-        buffer,
-        shared,
-        &["a_stroke_opacity"],
-        evaluated.circle_stroke_opacity.is_constant(),
-        pau,
-        &mut id,
-    );
-}
 
 // query
 fn project_point(
@@ -178,19 +91,12 @@ pub(crate) struct RenderCircleLayer {
     drawing: TileDraws<KeptDraw>,
     /// The frame's draws as the update makes them.
     draw_list: DrawList<CircleUniforms>,
-    circle_shader_group: Option<ShaderGroupPtr>,
 }
 
 impl RenderCircleLayer {
     pub(crate) fn new(impl_: Arc<LayerStyle<Circle>>) -> Self {
         let (base, values) = LayerValues::new(impl_);
-        RenderCircleLayer {
-            base,
-            values,
-            drawing: TileDraws::default(),
-            draw_list: DrawList::default(),
-            circle_shader_group: None,
-        }
+        RenderCircleLayer { base, values, drawing: TileDraws::default(), draw_list: DrawList::default() }
     }
 
     /// The entries in the layer's storage buffers of the draw of `tile_id`,
@@ -308,16 +214,6 @@ impl TypedLayer for RenderCircleLayer {
         _atlases: &Atlases,
         render_tiles: &[FrameTile<'_, Circle>],
     ) {
-        let shaders = &paint_parameters.static_data.shaders;
-
-        if self.circle_shader_group.is_none() {
-            self.circle_shader_group = shaders.shader_group(CIRCLE_SHADER_GROUP_NAME);
-        }
-        let Some(circle_shader_group) = &self.circle_shader_group else {
-            self.remove_all_draws();
-            return;
-        };
-
         let layer_id = self.base.style.base().id.as_str();
         let layer = &*self.values.evaluated;
         let evaluated = &layer.paint;
@@ -355,16 +251,15 @@ impl TypedLayer for RenderCircleLayer {
             let context = &mut *paint_parameters.context;
             if let Some(cached) = entry.value.as_mut() {
                 refresh_paint_attributes(&mut cached.objects, changes, |attrs| {
-                    read_circle_attributes(attrs, binders, paint(context).as_ref(), evaluated, &mut Default::default());
+                    binders.bind(evaluated, paint(context).as_ref(), attrs, &mut Uniforms::default());
                 });
             } else if !bucket.vertices.is_empty()
                 && let (Some(vertices), Some(indexes)) =
                     (bucket_vertices(geometry, &bucket.vertices), bucket_indexes(geometry, &bucket.triangles))
             {
-                let mut properties_as_uniforms = StringIDSetsPair::default();
+                let mut uniforms = Uniforms::default();
                 let mut attrs = VertexAttributeArray::new();
-                let paint = paint(context);
-                read_circle_attributes(&mut attrs, binders, paint.as_ref(), evaluated, &mut properties_as_uniforms);
+                binders.bind(evaluated, paint(context).as_ref(), &mut attrs, &mut uniforms);
                 attrs.set_shared(
                     ID_CIRCLE_POS_VERTEX_ATTRIBUTE,
                     SharedAttribute::new(
@@ -376,8 +271,8 @@ impl TypedLayer for RenderCircleLayer {
                 );
                 let vertex_count = if bucket.segments.is_empty() { 0 } else { bucket.vertices.len() };
                 let objects = DrawObjects::new(
-                    circle_shader_group.shader(&properties_as_uniforms, self.base.projection_variant),
-                    ColorMode::alpha_blended(),
+                    context.shader_key(&programs::CIRCLE, uniforms, self.base.projection_variant),
+                    context.color_mode(ColorMode::alpha_blended()),
                     CullFaceMode::disabled(),
                     DrawGeometry {
                         vertices: attrs,

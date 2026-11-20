@@ -23,7 +23,7 @@ use crate::buckets::circle_bucket::CircleBucket;
 use crate::buckets::fill_bucket::FillBucket;
 use crate::buckets::line_bucket::LineBucket;
 use crate::buckets::symbol_bucket::SymbolBucket;
-use crate::geometry::feature_index::FeatureIndex;
+use crate::geometry::feature_index::FeatureIndexBuilder;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::layout::filter_groups::FilterGroups;
 use crate::layout::layout::{BuildParams, LayoutParameters, SourceLayer};
@@ -159,7 +159,7 @@ fn create_bucket(properties: &Arc<dyn ErasedEvaluatedLayer>, shape: Shape) -> Bo
         ImagePosition::new(RectU16 { x: 0, y: 0, w: 18, h: 18 }, &marker),
     )]);
     let resolved = Resolved { icons: image_positions.clone(), patterns: image_positions, ..Resolved::default() };
-    let mut built = Built { buckets: LayoutBuckets::default(), feature_index: FeatureIndex::new(Some(data)) };
+    let mut built = Built { buckets: LayoutBuckets::default(), feature_index: FeatureIndexBuilder::new(Some(data)) };
     let build =
         BuildParams { first_load: true, show_collision_boxes: false, canonical: bucket_parameters.tile_id.canonical };
     layout.create_bucket(Some(&resolved), &mut built, &build).unwrap();
@@ -219,11 +219,6 @@ fn circle_order() {
             feature_order(bucket.vertices.data().iter().map(|v| v.a1[0]), 2),
             "{type_:?}"
         );
-        let expected_sort_key = match type_ {
-            SortKeyType::Constant | SortKeyType::Camera => 5.0,
-            _ => 0.0,
-        };
-        assert_eq!(expected_sort_key, bucket.segments.first().unwrap().sort_key, "{type_:?}");
     }
 }
 
@@ -243,12 +238,7 @@ fn symbol_order() {
     for type_ in SORT_KEY_TYPES {
         let bucket = create_bucket(&symbol_layer(type_, None), Shape::Point);
         let bucket = bucket.downcast_ref::<SymbolBucket>().unwrap();
-        let order: Vec<usize> = bucket
-            .state
-            .symbol_instances
-            .iter()
-            .map(crate::layout::symbol_instance::SymbolInstance::data_feature_index)
-            .collect();
+        let order: Vec<usize> = bucket.state.symbol_instances.iter().map(|symbol| symbol.data_feature_index).collect();
         assert_eq!(expected_order(type_), order, "{type_:?}");
         // An explicit constant key still disables viewport-Y sorting for symbol-z-order:auto.
         assert_eq!(type_ == SortKeyType::Undefined, bucket.sort_features_by_y, "{type_:?}");
@@ -273,12 +263,7 @@ fn symbol_viewport_y() {
         let bucket = bucket.downcast_ref::<SymbolBucket>().unwrap();
         assert!(bucket.sort_features_by_y, "{type_:?}");
         assert!(bucket.sort_key_ranges.is_empty(), "{type_:?}");
-        let order: Vec<usize> = bucket
-            .state
-            .symbol_instances
-            .iter()
-            .map(crate::layout::symbol_instance::SymbolInstance::data_feature_index)
-            .collect();
+        let order: Vec<usize> = bucket.state.symbol_instances.iter().map(|symbol| symbol.data_feature_index).collect();
         assert_eq!(vec![0, 1, 2], order, "{type_:?}");
     }
 }

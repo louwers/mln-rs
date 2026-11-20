@@ -11,7 +11,6 @@ use std::time::Duration;
 use feature::Value;
 use geo_types::{LineString, Point};
 use geojson::{GeoJson, Geometry};
-use mln_gfx::shaders::shader_source::BuiltIn;
 use mln_headless::HeadlessFrontend;
 use mln_map::{
     AnimationOptions, BoundOptions, CameraOptions, ConstrainMode, Map, MapMode, MapOptions, MapProjection,
@@ -2570,7 +2569,7 @@ fn keep_render_data() {
 #[test]
 #[ignore = "DISABLED_ in C++ (no symbol placement occurs in the MapTiler streets style fixture)"]
 fn disabled_placed_symbol_data() {
-    fn is_inside_tile(box_: &mln_util::grid_index::BBox, padding: f32, viewport_size: Size) -> bool {
+    fn is_inside_tile(box_: &mln_renderer::text::Aabb, padding: f32, viewport_size: Size) -> bool {
         if box_.min.x - padding < 0.0 {
             return false;
         }
@@ -2701,12 +2700,6 @@ fn volatile_source() {
     test.observer.did_finish_loading_map_callback.set(move |()| run_loop.stop());
     run_with_timeout(&test.run_loop, 60);
     assert_eq!(8, requested_tiles.load(Ordering::SeqCst));
-}
-
-// gtest: Map.GlobeDepthShaderIdFollowsTheExistingShaders
-#[test]
-fn globe_depth_shader_id_follows_the_existing_shaders() {
-    assert_eq!(BuiltIn::WideVectorShader as i32 + 1, BuiltIn::GlobeDepthShader as i32);
 }
 
 // gtest: Map.ResourceError

@@ -2,11 +2,12 @@ use std::collections::BTreeMap;
 
 use mln_gfx::gpu::{
     BindGroupEntry, BindingsDesc, BindingsId, BufferUsage, DepthState, Draw, DynamicState, FixedState, GeometryDesc,
-    GeometryId, Gpu, GpuError, PipelineId, PipelineKey, Scissor, ShaderId, StencilState, TargetFormats,
+    GeometryId, Gpu, GpuError, PipelineId, PipelineKey, Scissor, ShaderId, ShaderKey, StencilState, TargetFormats,
     VertexAttribute, VertexBufferLayout, VertexStep,
 };
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
+use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
     ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE, ID_PROJECTION_UBO, MAX_UBO_COUNT_PER_SHADER,
@@ -22,8 +23,7 @@ use crate::draw::Entries;
 use crate::gfx::buffer::Buffer;
 use crate::gfx::context::Context;
 use crate::gfx::owned::Owned;
-use crate::gfx::shader_program::ShaderProgramPtr;
-use crate::gfx::shader_registry::ShaderRegistry;
+use crate::gfx::vertex_attribute::Uniforms;
 use crate::globe_tile_mesh::raw_globe_tile_mesh;
 use crate::paint_parameters::DrawTarget;
 use crate::render_static_data::RenderStaticData;
@@ -100,7 +100,7 @@ impl Mesh {
 pub(crate) struct ClipMasks {
     /// Whether the masks are the globe's.
     globe: bool,
-    shader: Option<ShaderProgramPtr>,
+    shader: Option<ShaderKey>,
     shader_id: Option<ShaderId>,
     /// The meshes of the masks.
     meshes: BTreeMap<MeshKey, Mesh>,
@@ -128,7 +128,6 @@ impl ClipMasks {
         &mut self,
         gpu: &mut dyn Gpu,
         context: &mut Context,
-        shaders: &ShaderRegistry,
         globe: bool,
         tiles: &[UnwrappedTileID],
         projection: impl Fn(&UnwrappedTileID) -> ProjectionUBO,
@@ -136,11 +135,11 @@ impl ClipMasks {
         if globe != self.globe {
             *self = ClipMasks { globe, ..ClipMasks::default() };
         }
-        if self.shader.is_none() {
+        self.shader.get_or_insert_with(|| {
             let variant = if globe { ProjectionVariant::Globe } else { ProjectionVariant::Mercator };
-            self.shader = shaders.shader("ClippingMaskProgram", variant);
-        }
-        if self.shader.is_none() || tiles.is_empty() {
+            context.shader_key(&programs::CLIPPING_MASK, Uniforms::default(), variant)
+        });
+        if tiles.is_empty() {
             self.masks.clear();
             self.meshes.clear();
             self.projections = None;
@@ -228,7 +227,7 @@ impl ClipMasks {
         let DrawTarget { size, targets, scissor } = target;
         let shader_id = match self.shader_id {
             Some(id) => id,
-            None => *self.shader_id.insert(context.shader(gpu, shader.key())?),
+            None => *self.shader_id.insert(context.shader(gpu, shader)?),
         };
 
         let made = context.global_uniform_buffers().epoch();

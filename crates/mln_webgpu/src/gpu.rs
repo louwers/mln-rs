@@ -14,6 +14,7 @@ use mln_gfx::gpu::{
     ResourceId, SamplerId, Scissor, ShaderId, ShaderKey, SlotMap, TextureDesc, TextureFormat, TextureId, TextureRegion,
     TextureUsage,
 };
+use mln_gfx::shaders::program::Sources;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_util::Color;
@@ -22,6 +23,7 @@ use mln_util::size::Size;
 use crate::index_table::IndexTable;
 use crate::mipmaps::Mipmapper;
 use crate::shaders::shader_program::{self, BindingType, ShaderProgram, validated};
+use crate::shaders::shader_source::{BUILT_INS, ShaderSource};
 use crate::writes::Writes;
 use crate::{CustomLayerEncoder, CustomLayerPass, Device};
 
@@ -186,6 +188,8 @@ pub struct WebGpu {
     writes: Writes,
     textures: SlotMap<TextureId, Texture>,
     samplers: SlotMap<SamplerId, wgpu::Sampler>,
+    /// The source each program compiles from.
+    sources: Sources<ShaderSource>,
     shaders: SlotMap<ShaderId, Shader>,
     layout_tags: LayoutTags,
     pipelines: SlotMap<PipelineId, Pipeline>,
@@ -241,6 +245,7 @@ impl WebGpu {
             writes: Writes::default(),
             textures: SlotMap::with_key(),
             samplers: SlotMap::with_key(),
+            sources: Sources::new(BUILT_INS),
             shaders: SlotMap::with_key(),
             layout_tags: LayoutTags::default(),
             pipelines: SlotMap::with_key(),
@@ -779,7 +784,8 @@ impl Gpu for WebGpu {
     }
 
     fn create_shader(&mut self, key: &ShaderKey) -> Result<ShaderId, GpuError> {
-        let program = shader_program::compile(self.device.device(), self.index_table.layout(), key)?;
+        let source = self.sources.get(key.program())?;
+        let program = shader_program::compile(self.device.device(), self.index_table.layout(), key, source)?;
         let reads = shader_bindings(&program)?;
         Ok(self.shaders.insert(Shader { program, reads }))
     }

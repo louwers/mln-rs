@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use mln_style_types::image::{ImageContent, ImagePosition, ImagePositions, Impl, RectU16, TextFit};
-use mln_style_types::types::{IconTextFitType, SymbolAnchorType, TextJustifyType, VerticalAlign};
+use mln_style_types::types::{IconTextFitType, SymbolAnchorType, TextJustifyType, TextWritingModeType, VerticalAlign};
 use mln_util::constants::ONE_EM;
 use mln_util::font_stack::FontStack;
 use mln_util::i18n;
@@ -9,11 +9,11 @@ use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 
 use crate::glyph::{
-    GlyphID, GlyphIDType, GlyphMetrics, GlyphPosition, GlyphPositions, PositionedGlyph, PositionedLine, Shaping,
-    WritingModeType, face_type,
+    Bounds, GlyphID, GlyphIDType, GlyphMetrics, GlyphPosition, GlyphPositions, PositionedGlyph, PositionedLine,
+    Shaping, face_type,
 };
 use crate::shaper::{GlyphAdjust, ShapedText};
-use crate::shaping::{PositionedIcon, get_shaping};
+use crate::shaping::{PositionedIcon, ShapingOptions, shape_text};
 use crate::tagged_string::{FontStackHash, SectionOptions, TaggedString, font_stack_hash};
 
 fn u(s: &str) -> Vec<char> {
@@ -27,16 +27,16 @@ fn add_stub_glyph(glyph_positions: &mut GlyphPositions, font_stack_hash: FontSta
 }
 
 fn add_stub_glyphs(string: &TaggedString, glyph_positions: &mut GlyphPositions) {
-    for i in 0..string.length() {
-        let section = string.get_section(i);
+    for i in 0..string.len() {
+        let section = string.section_of(i);
         if section.image_id.is_some() {
             continue;
         }
         let glyphs = match &section.shaped {
             Some(shaped) => shaped.glyphs.clone(),
-            None => std::iter::once(string.char_at(i))
+            None => std::iter::once(string.text()[i])
                 .chain(
-                    i18n::verticalize_punctuation(string.char_at(i)).filter(|_| section.type_ == GlyphIDType::FontPBF),
+                    i18n::verticalize_punctuation(string.text()[i]).filter(|_| section.type_ == GlyphIDType::FontPBF),
                 )
                 .map(|c| GlyphID::from_char(c).unwrap())
                 .collect(),
@@ -49,34 +49,36 @@ fn add_stub_glyphs(string: &TaggedString, glyph_positions: &mut GlyphPositions) 
 
 fn shape_tagged_text(
     string: &TaggedString,
-    writing_mode: WritingModeType,
+    writing_mode: TextWritingModeType,
     allow_vertical_placement: bool,
     image_positions: &ImagePositions,
 ) -> Shaping {
     let mut glyph_positions = GlyphPositions::new();
     add_stub_glyphs(string, &mut glyph_positions);
 
-    get_shaping(
+    shape_text(
         string,
-        4096.0,
-        ONE_EM,
-        SymbolAnchorType::TopLeft,
-        TextJustifyType::Left,
-        0.0,
-        &[0.0, 0.0],
-        writing_mode,
+        &ShapingOptions {
+            max_width: 4096.0,
+            line_height: ONE_EM,
+            anchor: SymbolAnchorType::TopLeft,
+            justify: TextJustifyType::Left,
+            spacing: 0.0,
+            offset: [0.0, 0.0],
+            writing_mode,
+            allow_vertical_placement,
+            text_size: ONE_EM,
+            text_size_at_bucket_zoom: ONE_EM,
+        },
         &glyph_positions,
         image_positions,
-        ONE_EM,
-        ONE_EM,
-        allow_vertical_placement,
     )
 }
 
-fn shape_line_label_with(text: &str, writing_mode: WritingModeType, allow_vertical_placement: bool) -> Shaping {
+fn shape_line_label_with(text: &str, writing_mode: TextWritingModeType, allow_vertical_placement: bool) -> Shaping {
     let font_stack: FontStack = vec!["font-stack".to_string()];
     shape_tagged_text(
-        &TaggedString::new(u(text), SectionOptions::new(1.0, font_stack, GlyphIDType::FontPBF, 0, None)),
+        &TaggedString::new(u(text), SectionOptions::new(1.0, font_stack, GlyphIDType::FontPBF, None)),
         writing_mode,
         allow_vertical_placement,
         &ImagePositions::default(),
@@ -84,15 +86,15 @@ fn shape_line_label_with(text: &str, writing_mode: WritingModeType, allow_vertic
 }
 
 fn shape_line_label(text: &str) -> Shaping {
-    shape_line_label_with(text, WritingModeType::Vertical, false)
+    shape_line_label_with(text, TextWritingModeType::Vertical, false)
 }
 
 type GlyphOrientation = (u16, &'static str);
 
 fn get_glyph_orientations(shaping: &Shaping) -> Vec<GlyphOrientation> {
     let mut result = Vec::new();
-    for line in &shaping.positioned_lines {
-        for glyph in &line.positioned_glyphs {
+    for line in &shaping.lines {
+        for glyph in &line.glyphs {
             result.push((glyph.glyph.code, if glyph.vertical { "upright" } else { "along-line" }));
         }
     }
@@ -111,7 +113,7 @@ fn zwsp() {
     let glyph_position = GlyphPosition { metrics, ..Default::default() };
 
     let font_stack: FontStack = vec!["font-stack".to_string()];
-    let section_options = SectionOptions::new(1.0, font_stack.clone(), GlyphIDType::FontPBF, 0, None);
+    let section_options = SectionOptions::new(1.0, font_stack.clone(), GlyphIDType::FontPBF, None);
     let layout_text_size = 16.0f32;
     let layout_text_size_at_bucket_zoom_level = 16.0f32;
     let mut glyph_positions = GlyphPositions::new();
@@ -122,20 +124,22 @@ fn zwsp() {
     let image_positions = ImagePositions::default();
 
     let test_get_shaping = |string: &TaggedString, max_width_in_chars: u32| {
-        get_shaping(
+        shape_text(
             string,
-            max_width_in_chars as f32 * ONE_EM,
-            ONE_EM, // lineHeight
-            SymbolAnchorType::Center,
-            TextJustifyType::Center,
-            0.0,         // spacing
-            &[0.0, 0.0], // translate
-            WritingModeType::Horizontal,
+            &ShapingOptions {
+                max_width: max_width_in_chars as f32 * ONE_EM,
+                line_height: ONE_EM,
+                anchor: SymbolAnchorType::Center,
+                justify: TextJustifyType::Center,
+                spacing: 0.0,
+                offset: [0.0, 0.0],
+                writing_mode: TextWritingModeType::Horizontal,
+                allow_vertical_placement: false,
+                text_size: layout_text_size,
+                text_size_at_bucket_zoom: layout_text_size_at_bucket_zoom_level,
+            },
             &glyph_positions,
             &image_positions,
-            layout_text_size,
-            layout_text_size_at_bucket_zoom_level,
-            /*allowVerticalPlacement*/ false,
         )
     };
 
@@ -149,12 +153,11 @@ fn zwsp() {
             section_options.clone(),
         );
         let shaping = test_get_shaping(&string, 5);
-        assert_eq!(shaping.positioned_lines.len(), 3);
-        assert_eq!(shaping.top, -36.0);
-        assert_eq!(shaping.bottom, 36.0);
-        assert_eq!(shaping.left, -63.0);
-        assert_eq!(shaping.right, 63.0);
-        assert_eq!(shaping.writing_mode, WritingModeType::Horizontal);
+        assert_eq!(shaping.lines.len(), 3);
+        assert_eq!(shaping.bounds.top, -36.0);
+        assert_eq!(shaping.bounds.bottom, 36.0);
+        assert_eq!(shaping.bounds.left, -63.0);
+        assert_eq!(shaping.bounds.right, 63.0);
     }
 
     // 2 lines
@@ -163,12 +166,11 @@ fn zwsp() {
     {
         let string = TaggedString::new(u("中中\u{200b}中"), section_options.clone());
         let shaping = test_get_shaping(&string, 1);
-        assert_eq!(shaping.positioned_lines.len(), 2);
-        assert_eq!(shaping.top, -24.0);
-        assert_eq!(shaping.bottom, 24.0);
-        assert_eq!(shaping.left, -21.0);
-        assert_eq!(shaping.right, 21.0);
-        assert_eq!(shaping.writing_mode, WritingModeType::Horizontal);
+        assert_eq!(shaping.lines.len(), 2);
+        assert_eq!(shaping.bounds.top, -24.0);
+        assert_eq!(shaping.bounds.bottom, 24.0);
+        assert_eq!(shaping.bounds.left, -21.0);
+        assert_eq!(shaping.bounds.right, 21.0);
     }
 
     // 1 line
@@ -176,24 +178,22 @@ fn zwsp() {
     {
         let string = TaggedString::new(u("中中\u{200b}"), section_options.clone());
         let shaping = test_get_shaping(&string, 2);
-        assert_eq!(shaping.positioned_lines.len(), 1);
-        assert_eq!(shaping.top, -12.0);
-        assert_eq!(shaping.bottom, 12.0);
-        assert_eq!(shaping.left, -21.0);
-        assert_eq!(shaping.right, 21.0);
-        assert_eq!(shaping.writing_mode, WritingModeType::Horizontal);
+        assert_eq!(shaping.lines.len(), 1);
+        assert_eq!(shaping.bounds.top, -12.0);
+        assert_eq!(shaping.bounds.bottom, 12.0);
+        assert_eq!(shaping.bounds.left, -21.0);
+        assert_eq!(shaping.bounds.right, 21.0);
     }
 
-    // 5 'new' lines.
+    // 1 empty line: a line never starts at a zero width space.
     {
         let string = TaggedString::new(u("\u{200b}\u{200b}\u{200b}\u{200b}\u{200b}"), section_options);
         let shaping = test_get_shaping(&string, 1);
-        assert_eq!(shaping.positioned_lines.len(), 5);
-        assert_eq!(shaping.top, -60.0);
-        assert_eq!(shaping.bottom, 60.0);
-        assert_eq!(shaping.left, 0.0);
-        assert_eq!(shaping.right, 0.0);
-        assert_eq!(shaping.writing_mode, WritingModeType::Horizontal);
+        assert_eq!(shaping.lines.len(), 1);
+        assert_eq!(shaping.bounds.top, -12.0);
+        assert_eq!(shaping.bounds.bottom, 12.0);
+        assert_eq!(shaping.bounds.left, 0.0);
+        assert_eq!(shaping.bounds.right, 0.0);
     }
 }
 
@@ -428,26 +428,28 @@ fn vertical_punctuation_in_rotated_run() {
 fn vertical_missing_glyph_preserves_indices() {
     let font_stack: FontStack = vec!["font-stack".to_string()];
     let hash = font_stack_hash(&font_stack);
-    let text = TaggedString::new(u("what 国21号"), SectionOptions::new(1.0, font_stack, GlyphIDType::FontPBF, 0, None));
+    let text = TaggedString::new(u("what 国21号"), SectionOptions::new(1.0, font_stack, GlyphIDType::FontPBF, None));
     let mut glyph_positions = GlyphPositions::new();
     add_stub_glyphs(&text, &mut glyph_positions);
     // Missing "w" must not shift the character index used for the remaining glyphs.
     glyph_positions.get_mut(&hash).unwrap().remove(&GlyphID::from_char('w').unwrap());
 
-    let shaped_line_label = get_shaping(
+    let shaped_line_label = shape_text(
         &text,
-        4096.0,
-        ONE_EM,
-        SymbolAnchorType::TopLeft,
-        TextJustifyType::Left,
-        0.0,
-        &[0.0, 0.0],
-        WritingModeType::Vertical,
+        &ShapingOptions {
+            max_width: 4096.0,
+            line_height: ONE_EM,
+            anchor: SymbolAnchorType::TopLeft,
+            justify: TextJustifyType::Left,
+            spacing: 0.0,
+            offset: [0.0, 0.0],
+            writing_mode: TextWritingModeType::Vertical,
+            allow_vertical_placement: false,
+            text_size: ONE_EM,
+            text_size_at_bucket_zoom: ONE_EM,
+        },
         &glyph_positions,
         &ImagePositions::default(),
-        ONE_EM,
-        ONE_EM,
-        false,
     );
     let orientations = get_glyph_orientations(&shaped_line_label);
 
@@ -467,7 +469,8 @@ fn vertical_missing_glyph_preserves_indices() {
 // gtest: Shaping.HorizontalGlyphOrientation
 #[test]
 fn horizontal_glyph_orientation() {
-    let orientations = get_glyph_orientations(&shape_line_label_with("身什戰33", WritingModeType::Horizontal, false));
+    let orientations =
+        get_glyph_orientations(&shape_line_label_with("身什戰33", TextWritingModeType::Horizontal, false));
     let expected = expect(&[
         ('身', "along-line"),
         ('什', "along-line"),
@@ -481,7 +484,8 @@ fn horizontal_glyph_orientation() {
 // gtest: Shaping.AllowedVerticalGlyphOrientation
 #[test]
 fn allowed_vertical_glyph_orientation() {
-    let orientations = get_glyph_orientations(&shape_line_label_with("two 身什戰", WritingModeType::Vertical, true));
+    let orientations =
+        get_glyph_orientations(&shape_line_label_with("two 身什戰", TextWritingModeType::Vertical, true));
     let expected = expect(&[
         ('t', "upright"),
         ('w', "upright"),
@@ -562,11 +566,15 @@ fn vertical_digit_with_combining_mark() {
 fn vertical_glyph_orientation_respects_formatted_sections() {
     let font_stack: FontStack = vec!["font-stack".to_string()];
     let mut text = TaggedString::default();
-    text.add_text_section(&u("AB"), 1.0, &font_stack, GlyphIDType::FontPBF, true, None, VerticalAlign::Bottom);
-    text.add_text_section(&u("CD"), 0.5, &font_stack, GlyphIDType::FontPBF, true, None, VerticalAlign::Bottom);
+    text.add_text_section(&u("AB"), SectionOptions::new(1.0, font_stack.clone(), GlyphIDType::FontPBF, None));
+    text.add_text_section(&u("CD"), SectionOptions::new(0.5, font_stack.clone(), GlyphIDType::FontPBF, None));
 
-    let orientations =
-        get_glyph_orientations(&shape_tagged_text(&text, WritingModeType::Vertical, false, &ImagePositions::default()));
+    let orientations = get_glyph_orientations(&shape_tagged_text(
+        &text,
+        TextWritingModeType::Vertical,
+        false,
+        &ImagePositions::default(),
+    ));
     let expected = expect(&[('A', "along-line"), ('B', "along-line"), ('C', "along-line"), ('D', "along-line")]);
     assert_eq!(orientations, expected);
 }
@@ -576,9 +584,9 @@ fn vertical_glyph_orientation_respects_formatted_sections() {
 fn vertical_glyph_orientation_delimits_inline_images() {
     let font_stack: FontStack = vec!["font-stack".to_string()];
     let mut text = TaggedString::default();
-    text.add_text_section(&u("AB"), 1.0, &font_stack, GlyphIDType::FontPBF, true, None, VerticalAlign::Bottom);
+    text.add_text_section(&u("AB"), SectionOptions::new(1.0, font_stack.clone(), GlyphIDType::FontPBF, None));
     text.add_image_section("image", VerticalAlign::Bottom);
-    text.add_text_section(&u("CD"), 1.0, &font_stack, GlyphIDType::FontPBF, true, None, VerticalAlign::Bottom);
+    text.add_text_section(&u("CD"), SectionOptions::new(1.0, font_stack.clone(), GlyphIDType::FontPBF, None));
 
     let image = Impl::new(
         "image".to_string(),
@@ -595,9 +603,9 @@ fn vertical_glyph_orientation_delimits_inline_images() {
     let mut image_positions = ImagePositions::default();
     image_positions.insert("image".to_string(), ImagePosition::new(RectU16 { x: 0, y: 0, w: 14, h: 26 }, &image));
 
-    let shaped_line_label = shape_tagged_text(&text, WritingModeType::Vertical, false, &image_positions);
-    assert_eq!(shaped_line_label.positioned_lines.len(), 1);
-    assert_eq!(shaped_line_label.positioned_lines[0].positioned_glyphs.len(), 5);
+    let shaped_line_label = shape_tagged_text(&text, TextWritingModeType::Vertical, false, &image_positions);
+    assert_eq!(shaped_line_label.lines.len(), 1);
+    assert_eq!(shaped_line_label.lines[0].glyphs.len(), 5);
     let orientations = get_glyph_orientations(&shaped_line_label);
     let expected = expect(&[
         ('A', "upright"),
@@ -607,7 +615,7 @@ fn vertical_glyph_orientation_delimits_inline_images() {
         ('D', "upright"),
     ]);
     assert_eq!(orientations, expected);
-    assert_eq!(shaped_line_label.positioned_lines[0].positioned_glyphs[2].image_id.as_deref(), Some("image"));
+    assert_eq!(shaped_line_label.lines[0].glyphs[2].image_id.as_deref(), Some("image"));
     assert!(shaped_line_label.icons_in_text);
 }
 
@@ -617,12 +625,16 @@ fn vertical_glyph_orientation_delimits_native_glyph_sections() {
     let font_stack: FontStack = vec!["font-stack".to_string()];
     let native_type = face_type("shaping-test-native", "font-stack", &[(0, 0xffff)]);
     let mut text = TaggedString::default();
-    text.add_text_section(&u("AB"), 1.0, &font_stack, GlyphIDType::FontPBF, true, None, VerticalAlign::Bottom);
-    text.add_text_section(&u("C"), 1.0, &font_stack, native_type, true, None, VerticalAlign::Bottom);
-    text.add_text_section(&u("D"), 1.0, &font_stack, GlyphIDType::FontPBF, true, None, VerticalAlign::Bottom);
+    text.add_text_section(&u("AB"), SectionOptions::new(1.0, font_stack.clone(), GlyphIDType::FontPBF, None));
+    text.add_text_section(&u("C"), SectionOptions::new(1.0, font_stack.clone(), native_type, None));
+    text.add_text_section(&u("D"), SectionOptions::new(1.0, font_stack.clone(), GlyphIDType::FontPBF, None));
 
-    let orientations =
-        get_glyph_orientations(&shape_tagged_text(&text, WritingModeType::Vertical, false, &ImagePositions::default()));
+    let orientations = get_glyph_orientations(&shape_tagged_text(
+        &text,
+        TextWritingModeType::Vertical,
+        false,
+        &ImagePositions::default(),
+    ));
     let expected = expect(&[('A', "upright"), ('B', "upright"), ('C', "along-line"), ('D', "upright")]);
     assert_eq!(orientations, expected);
 }
@@ -634,28 +646,28 @@ fn label_with_shaped_section(before: &str, rtl: bool, after: &str, adjusts: Vec<
     let shaped_type = face_type("shaping-test-shaped", "font-stack", &[(0, 0xffff)]);
     let mut text = TaggedString::default();
     if !before.is_empty() {
-        text.add_text_section(&u(before), 1.0, &font_stack, GlyphIDType::FontPBF, true, None, VerticalAlign::Bottom);
+        text.add_text_section(&u(before), SectionOptions::new(1.0, font_stack.clone(), GlyphIDType::FontPBF, None));
     }
     let glyphs =
         vec![GlyphID::with_type(u16::from(b'X'), shaped_type), GlyphID::with_type(u16::from(b'Y'), shaped_type)];
     let shaped = Arc::new(ShapedText { glyphs, adjusts });
-    text.add_shaped_section(&shaped, 1.0, &font_stack, shaped_type, rtl, true, None, VerticalAlign::Bottom);
+    text.add_shaped_section(&shaped, rtl, SectionOptions::new(1.0, font_stack.clone(), shaped_type, None));
     if !after.is_empty() {
-        text.add_text_section(&u(after), 1.0, &font_stack, GlyphIDType::FontPBF, true, None, VerticalAlign::Bottom);
+        text.add_text_section(&u(after), SectionOptions::new(1.0, font_stack.clone(), GlyphIDType::FontPBF, None));
     }
     text
 }
 
 fn shaped_codes(shaping: &Shaping) -> String {
     shaping
-        .positioned_lines
+        .lines
         .iter()
-        .flat_map(|line| line.positioned_glyphs.iter().map(|glyph| char::from_u32(glyph.glyph.code.into()).unwrap()))
+        .flat_map(|line| line.glyphs.iter().map(|glyph| char::from_u32(glyph.glyph.code.into()).unwrap()))
         .collect()
 }
 
 fn shape_horizontal(text: &TaggedString) -> Shaping {
-    shape_tagged_text(text, WritingModeType::Horizontal, false, &ImagePositions::default())
+    shape_tagged_text(text, TextWritingModeType::Horizontal, false, &ImagePositions::default())
 }
 
 // gtest: Shaping.RightToLeftShapedSectionBeforeLatin
@@ -692,8 +704,8 @@ fn left_to_right_shaped_section_keeps_its_place() {
 fn shaped_section_keeps_its_adjustments_when_it_moves() {
     let adjusts = vec![GlyphAdjust::new(0.0, 0.0, 5.0), GlyphAdjust::new(0.0, 0.0, 7.0)];
     let shaping = shape_horizontal(&label_with_shaped_section("", true, " 12", adjusts));
-    assert_eq!(shaping.positioned_lines.len(), 1);
-    let glyphs = &shaping.positioned_lines[0].positioned_glyphs;
+    assert_eq!(shaping.lines.len(), 1);
+    let glyphs = &shaping.lines[0].glyphs;
     assert_eq!(glyphs.len(), 5);
     // "1", "2", and the space advance 12 each, and X its own 5.
     assert_eq!(glyphs[3].glyph.code, 'X' as u16);
@@ -707,10 +719,10 @@ fn a_label_holds_more_than_256_sections() {
     let mut text = TaggedString::default();
     for i in 0..300 {
         let type_ = if i % 2 == 0 { GlyphIDType::FontPBF } else { face };
-        text.add_text_section(&['a'], 1.0, &font_stack, type_, true, None, VerticalAlign::Bottom);
+        text.add_text_section(&['a'], SectionOptions::new(1.0, font_stack.clone(), type_, None));
     }
-    assert_eq!(text.get_section_index(299), 299);
-    assert_eq!(text.get_section(299).type_, face);
+    assert_eq!(text.section_index(299), 299);
+    assert_eq!(text.section_of(299).type_, face);
 }
 
 // Line breaking measures a shaped section by its shaping.
@@ -720,54 +732,45 @@ fn shaped_glyphs_take_up_their_width_on_a_line() {
     let text = label_with_shaped_section("", false, " ab", adjusts);
     let mut glyph_positions = GlyphPositions::new();
     add_stub_glyphs(&text, &mut glyph_positions);
-    let shaping = get_shaping(
+    let shaping = shape_text(
         &text,
-        150.0,
-        ONE_EM,
-        SymbolAnchorType::TopLeft,
-        TextJustifyType::Left,
-        0.0,
-        &[0.0, 0.0],
-        WritingModeType::Horizontal,
+        &ShapingOptions {
+            max_width: 150.0,
+            line_height: ONE_EM,
+            anchor: SymbolAnchorType::TopLeft,
+            justify: TextJustifyType::Left,
+            spacing: 0.0,
+            offset: [0.0, 0.0],
+            writing_mode: TextWritingModeType::Horizontal,
+            allow_vertical_placement: false,
+            text_size: ONE_EM,
+            text_size_at_bucket_zoom: ONE_EM,
+        },
         &glyph_positions,
         &ImagePositions::default(),
-        ONE_EM,
-        ONE_EM,
-        false,
     );
-    assert_eq!(shaping.positioned_lines.len(), 2);
+    assert_eq!(shaping.lines.len(), 2);
 }
 
-fn setup_shaped_text(shaped_text: &mut Shaping, text_size: f32) {
-    let glyph = PositionedGlyph::new(
-        GlyphID::new(32),
-        0.0,
-        0.0,
-        false,
-        0,
-        1.0,
-        /*texRect*/ RectU16::default(),
-        /*metrics*/ GlyphMetrics::default(),
-        /*imageID*/ None,
-        0,
-    );
-    shaped_text.right = text_size;
-    shaped_text.bottom = text_size;
-    shaped_text.positioned_lines.push(PositionedLine::default());
-    shaped_text.positioned_lines.last_mut().unwrap().positioned_glyphs.push(glyph);
+fn setup_shaped_text(text_size: f32) -> Shaping {
+    let glyph = PositionedGlyph { glyph: GlyphID::new(32), scale: 1.0, ..Default::default() };
+    Shaping {
+        lines: vec![PositionedLine { glyphs: vec![glyph], line_offset: 0.0 }],
+        bounds: Bounds { right: text_size, bottom: text_size, ..Default::default() },
+        ..Default::default()
+    }
 }
 
-#[expect(clippy::too_many_arguments, reason = "a case's image, text fit, shaping and scale, and the expected edges")]
-fn test_apply_text_fit(
+/// The text fit bounds of an icon of `rectangle` with `content`, fitted to
+/// `shaped_text` at `font_scale` with `fit`: its `textFitWidth` and
+/// `textFitHeight`.
+fn text_fit_bounds(
     rectangle: RectU16,
     content: ImageContent,
-    text_fit_width: Option<TextFit>,
-    text_fit_height: Option<TextFit>,
+    fit: [Option<TextFit>; 2],
     shaped_text: &Shaping,
     font_scale: f32,
-    expected_right: f32,
-    expected_bottom: f32,
-) {
+) -> Bounds {
     let image = ImagePosition::new(
         rectangle,
         &Impl::new(
@@ -778,18 +781,14 @@ fn test_apply_text_fit(
             vec![],
             vec![],
             Some(content),
-            text_fit_width,
-            text_fit_height,
+            fit[0],
+            fit[1],
         )
         .unwrap(),
     );
-    let mut shaped_icon = PositionedIcon::shape_icon(&image, &[0.0, 0.0], SymbolAnchorType::TopLeft);
-    shaped_icon.fit_icon_to_text(shaped_text, IconTextFitType::Both, &[0.0, 0.0, 0.0, 0.0], &[0.0, 0.0], font_scale);
-    let icon = shaped_icon.apply_text_fit();
-    assert_eq!(icon.top(), 0.0);
-    assert_eq!(icon.left(), 0.0);
-    assert_eq!(icon.right(), expected_right);
-    assert_eq!(icon.bottom(), expected_bottom);
+    let mut shaped_icon = PositionedIcon::new(&image, [0.0, 0.0], SymbolAnchorType::TopLeft);
+    shaped_icon.fit_to_text(shaped_text, IconTextFitType::Both, [0.0; 4], [0.0, 0.0], font_scale);
+    shaped_icon.text_fit_bounds()
 }
 
 // gtest: Shaping.BreakBeforeLeftParenthesis
@@ -799,7 +798,7 @@ fn break_before_left_parenthesis() {
     let glyph_position = GlyphPosition { metrics, ..Default::default() };
 
     let font_stack: FontStack = vec!["font-stack".to_string()];
-    let section_options = SectionOptions::new(1.0, font_stack.clone(), GlyphIDType::FontPBF, 0, None);
+    let section_options = SectionOptions::new(1.0, font_stack.clone(), GlyphIDType::FontPBF, None);
     let mut glyph_positions = GlyphPositions::new();
     for id in ['o', 'a', '(', ')', ' '] {
         let id = GlyphID::from_char(id).unwrap();
@@ -808,22 +807,24 @@ fn break_before_left_parenthesis() {
     let image_positions = ImagePositions::default();
 
     let glyphs_per_line = |text: &str| {
-        let shaping = get_shaping(
+        let shaping = shape_text(
             &TaggedString::new(u(text), section_options.clone()),
-            5.0 * ONE_EM,
-            ONE_EM, // lineHeight
-            SymbolAnchorType::Center,
-            TextJustifyType::Center,
-            0.0,         // spacing
-            &[0.0, 0.0], // translate
-            WritingModeType::Horizontal,
+            &ShapingOptions {
+                max_width: 5.0 * ONE_EM,
+                line_height: ONE_EM,
+                anchor: SymbolAnchorType::Center,
+                justify: TextJustifyType::Center,
+                spacing: 0.0,
+                offset: [0.0, 0.0],
+                writing_mode: TextWritingModeType::Horizontal,
+                allow_vertical_placement: false,
+                text_size: 16.0,
+                text_size_at_bucket_zoom: 16.0,
+            },
             &glyph_positions,
             &image_positions,
-            16.0, // layoutTextSize
-            16.0, // layoutTextSizeAtBucketZoomLevel
-            /*allowVerticalPlacement*/ false,
         );
-        shaping.positioned_lines.iter().map(|line| line.positioned_glyphs.len()).collect::<Vec<usize>>()
+        shaping.lines.iter().map(|line| line.glyphs.len()).collect::<Vec<usize>>()
     };
 
     // The break goes before the parenthesis, so it opens the second line
@@ -840,8 +841,7 @@ fn apply_text_fit() {
     let text_size = 4.0f32;
     let font_scale = 4.0f32;
     let expected_image_size = text_size * font_scale;
-    let mut shaped_text = Shaping::default();
-    setup_shaped_text(&mut shaped_text, text_size);
+    let shaped_text = setup_shaped_text(text_size);
 
     {
         // applyTextFitHorizontal
@@ -853,42 +853,36 @@ fn apply_text_fit() {
 
         // applyTextFit: not specified
         // No change should happen
-        test_apply_text_fit(
-            horizontal_rectangle,
-            horizontal_content,
-            None,
-            None,
-            &shaped_text,
-            font_scale,
-            expected_image_size,
-            expected_image_size,
+        assert_eq!(
+            text_fit_bounds(horizontal_rectangle, horizontal_content, [None, None], &shaped_text, font_scale),
+            Bounds { left: 0.0, top: 0.0, right: expected_image_size, bottom: expected_image_size }
         );
 
         // applyTextFit: both stretchOrShrink
         // No change should happen
-        test_apply_text_fit(
-            horizontal_rectangle,
-            horizontal_content,
-            Some(TextFit::StretchOrShrink),
-            Some(TextFit::StretchOrShrink),
-            &shaped_text,
-            font_scale,
-            expected_image_size,
-            expected_image_size,
+        assert_eq!(
+            text_fit_bounds(
+                horizontal_rectangle,
+                horizontal_content,
+                [Some(TextFit::StretchOrShrink), Some(TextFit::StretchOrShrink)],
+                &shaped_text,
+                font_scale
+            ),
+            Bounds { left: 0.0, top: 0.0, right: expected_image_size, bottom: expected_image_size }
         );
 
         // applyTextFit: stretchOnly, proportional
         // Since textFitWidth is stretchOnly, it should be returned to the
         // aspect ratio of the content rectangle (9:1) aspect ratio so 144x16.
-        test_apply_text_fit(
-            horizontal_rectangle,
-            horizontal_content,
-            Some(TextFit::StretchOnly),
-            Some(TextFit::Proportional),
-            &shaped_text,
-            font_scale,
-            expected_image_size * 9.0,
-            expected_image_size,
+        assert_eq!(
+            text_fit_bounds(
+                horizontal_rectangle,
+                horizontal_content,
+                [Some(TextFit::StretchOnly), Some(TextFit::Proportional)],
+                &shaped_text,
+                font_scale
+            ),
+            Bounds { left: 0.0, top: 0.0, right: expected_image_size * 9.0, bottom: expected_image_size }
         );
     }
 
@@ -903,15 +897,15 @@ fn apply_text_fit() {
         // applyTextFit: stretchOnly, proportional
         // Since textFitWidth is stretchOnly, it should be returned to the
         // aspect ratio of the content rectangle (9:1) aspect ratio so 144x16.
-        test_apply_text_fit(
-            vertical_rectangle,
-            vertical_content,
-            Some(TextFit::Proportional),
-            Some(TextFit::StretchOnly),
-            &shaped_text,
-            font_scale,
-            expected_image_size,
-            expected_image_size * 9.0,
+        assert_eq!(
+            text_fit_bounds(
+                vertical_rectangle,
+                vertical_content,
+                [Some(TextFit::Proportional), Some(TextFit::StretchOnly)],
+                &shaped_text,
+                font_scale
+            ),
+            Bounds { left: 0.0, top: 0.0, right: expected_image_size, bottom: expected_image_size * 9.0 }
         );
     }
 }

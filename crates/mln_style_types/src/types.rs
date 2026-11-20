@@ -29,9 +29,6 @@ pub enum LineJoinType {
     Miter,
     Bevel,
     Round,
-    // the following two types are for internal use only
-    FakeRound,
-    FlipBevel,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, mln_wire::Wire)]
@@ -322,8 +319,6 @@ style_spec_names!(LineJoinType {
     Miter => "miter",
     Bevel => "bevel",
     Round => "round",
-    FakeRound => "fakeround",
-    FlipBevel => "flipbevel",
 });
 
 style_spec_names!(SymbolPlacementType {

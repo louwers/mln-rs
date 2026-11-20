@@ -1,125 +1,13 @@
-// The two C++ constructors are `CollisionFeature::new_text` (shaped text)
-// and `CollisionFeature::new_icon` (shaped icon). C++ copies the
-// `RefIndexedSubfeature` into an owning `IndexedSubfeature`; here both are
-// `IndexedSubfeature`, so it is cloned.
-
-use geometry::Point;
 use glam::Vec2;
 use mln_math::deg2radf;
-use mln_style_types::SymbolPlacementType;
 use mln_text::PositionedIcon;
 use mln_text::glyph::Shaping;
-use mln_tile_id::geometry_tile_data::{GeometryCoordinate, GeometryCoordinates};
+use mln_tile_id::geometry_tile_data::GeometryCoordinate;
 use mln_util::Padding;
-use mln_util::grid_index::{BBox, BCircle};
 
-use crate::geometry::anchor::Anchor;
+use crate::geometry::anchor::{Anchor, segments, vertex_behind};
 use crate::geometry::feature_index::IndexedSubfeature;
 use crate::util::pool::PoolRange;
-
-/// The distance from `a` to `b` as C++ computes it: an `f64` square root of
-/// the integer sum, narrowed to `f32`.
-fn dist(a: GeometryCoordinate, b: GeometryCoordinate) -> f32 {
-    let dx = f64::from(i32::from(b.x) - i32::from(a.x));
-    let dy = f64::from(i32::from(b.y) - i32::from(a.y));
-    (dx * dx + dy * dy).sqrt() as f32
-}
-
-/// The first smallest of `values` by `<`, as `std::min` picks it.
-fn min4(values: [f32; 4]) -> f32 {
-    let mut smallest = values[0];
-    for value in &values[1..] {
-        if *value < smallest {
-            smallest = *value;
-        }
-    }
-    smallest
-}
-
-/// The first largest of `values` by `<`, as `std::max` picks it.
-fn max4(values: [f32; 4]) -> f32 {
-    let mut largest = values[0];
-    for value in &values[1..] {
-        if largest < *value {
-            largest = *value;
-        }
-    }
-    largest
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) enum ProjectedCollisionBoxType {
-    #[default]
-    Unknown,
-    Box,
-    Circle,
-}
-
-/// A projected collision box or circle.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub(crate) struct ProjectedCollisionBox {
-    geometry: ProjectedCollisionBoxGeometry,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-enum ProjectedCollisionBoxGeometry {
-    #[default]
-    Unknown,
-    Box(BBox),
-    Circle(BCircle),
-}
-
-impl ProjectedCollisionBox {
-    #[must_use]
-    pub(crate) fn new_box(x1: f32, y1: f32, x2: f32, y2: f32) -> Self {
-        ProjectedCollisionBox {
-            geometry: ProjectedCollisionBoxGeometry::Box(BBox::new(Point::new(x1, y1), Point::new(x2, y2))),
-        }
-    }
-
-    #[must_use]
-    pub(crate) fn new_circle(x: f32, y: f32, r: f32) -> Self {
-        ProjectedCollisionBox { geometry: ProjectedCollisionBoxGeometry::Circle(BCircle::new(Point::new(x, y), r)) }
-    }
-
-    /// The box; panics if this is a circle.
-    #[must_use]
-    pub(crate) fn box_(&self) -> &BBox {
-        match &self.geometry {
-            ProjectedCollisionBoxGeometry::Box(b) => b,
-            _ => panic!("ProjectedCollisionBox::box: not a box"),
-        }
-    }
-
-    /// The circle; panics if this is a box.
-    #[must_use]
-    pub(crate) fn circle(&self) -> &BCircle {
-        match &self.geometry {
-            ProjectedCollisionBoxGeometry::Circle(c) => c,
-            _ => panic!("ProjectedCollisionBox::circle: not a circle"),
-        }
-    }
-
-    /// The `type` member.
-    #[must_use]
-    pub(crate) fn type_(&self) -> ProjectedCollisionBoxType {
-        match self.geometry {
-            ProjectedCollisionBoxGeometry::Unknown => ProjectedCollisionBoxType::Unknown,
-            ProjectedCollisionBoxGeometry::Box(_) => ProjectedCollisionBoxType::Box,
-            ProjectedCollisionBoxGeometry::Circle(_) => ProjectedCollisionBoxType::Circle,
-        }
-    }
-
-    #[must_use]
-    pub(crate) fn is_circle(&self) -> bool {
-        self.type_() == ProjectedCollisionBoxType::Circle
-    }
-
-    #[must_use]
-    pub(crate) fn is_box(&self) -> bool {
-        self.type_() == ProjectedCollisionBoxType::Box
-    }
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, mln_wire::Wire)]
 pub(crate) struct CollisionBox {
@@ -154,314 +42,247 @@ pub(crate) struct CollisionFeature {
     pub(crate) along_line: bool,
 }
 
+/// How a label's shaped box is sized and placed as its collision box.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct BoxLayout {
+    /// Tile units per shaping unit.
+    pub(crate) scale: f32,
+    /// The padding around the scaled box, in tile units.
+    pub(crate) padding: Padding,
+    /// The label's rotation in degrees. A rotated label at a point collides
+    /// as its rotated box's envelope.
+    pub(crate) rotate: f32,
+}
+
+/// The line a label follows.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct AlongLine<'a> {
+    pub(crate) line: &'a [GeometryCoordinate],
+    /// The tile's overscaling, which adds collision circles beyond the
+    /// label's ends for the labels that grow as a pitched map shows them
+    /// farther away.
+    pub(crate) overscaling: f32,
+}
+
 impl CollisionFeature {
-    /// The constructor for text.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the line, anchor and shaped text, and the box scale, padding, placement, feature, overscaling and rotation of its boxes"
-    )]
+    /// The collision feature of shaped text: a box around `anchor`, or
+    /// circles along the line for text that follows one.
     #[must_use]
     pub(crate) fn new_text(
-        line: &GeometryCoordinates,
         anchor: &Anchor,
         shaped_text: &Shaping,
-        box_scale: f32,
-        padding: f32,
-        placement: SymbolPlacementType,
+        along_line: Option<AlongLine<'_>>,
+        layout: &BoxLayout,
         indexed_feature: &IndexedSubfeature,
-        overscaling: f32,
-        rotate: f32,
-        boxes: &mut Vec<CollisionBox>,
+        pool: &mut Vec<CollisionBox>,
     ) -> Self {
-        let mut feature = CollisionFeature {
-            boxes: PoolRange::at_end(boxes),
-            indexed_feature: indexed_feature.clone(),
-            along_line: placement != SymbolPlacementType::Point,
-        };
-        feature.initialize(
-            boxes,
-            line,
-            anchor,
-            shaped_text.top,
-            shaped_text.bottom,
-            shaped_text.left,
-            shaped_text.right,
-            None,
-            box_scale,
-            &Padding::uniform(padding),
-            overscaling,
-            rotate,
-        );
-        feature
+        let bounds = shaped_text.bounds;
+        let label = LabelBox::new(bounds.left, bounds.top, bounds.right, bounds.bottom)
+            .map(|label| label.scaled(layout.scale).padded(&layout.padding));
+        Self::new(anchor, label, along_line, layout, indexed_feature, pool)
     }
 
-    /// The constructor for icons.
-    ///
-    /// Icons collision features are always `SymbolPlacementType::Point`, which
-    /// means the collision feature will be viewport-rotation-aligned even if the
-    /// icon is map-rotation-aligned (e.g. `icon-rotation-alignment: map` _or_
-    /// `symbol-placement: line`). We're relying on most icons being "close
-    /// enough" to square that having incorrect rotation alignment doesn't throw
-    /// off collision detection too much. See:
-    /// <https://github.com/mapbox/mapbox-gl-js/issues/4861>
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the line, anchor and shaped icon, the box scale, padding, feature and rotation, and the pool"
-    )]
+    /// The collision feature of a shaped icon: a box around `anchor`, also
+    /// for icons that follow a line or the map's rotation, on the grounds
+    /// that most icons are close enough to square
+    /// (<https://github.com/mapbox/mapbox-gl-js/issues/4861>). An icon fitted
+    /// to its text collides with its fitted size.
     #[must_use]
     pub(crate) fn new_icon(
-        line: &GeometryCoordinates,
         anchor: &Anchor,
         shaped_icon: Option<&PositionedIcon>,
-        box_scale: f32,
-        padding: &Padding,
+        layout: &BoxLayout,
         indexed_feature: &IndexedSubfeature,
-        rotate: f32,
-        boxes: &mut Vec<CollisionBox>,
+        pool: &mut Vec<CollisionBox>,
     ) -> Self {
-        let mut feature = CollisionFeature {
-            boxes: PoolRange::at_end(boxes),
-            indexed_feature: indexed_feature.clone(),
-            along_line: false,
-        };
-        if let Some(shaped_icon) = shaped_icon {
-            let image = shaped_icon.image();
-            let mut icon = shaped_icon.clone();
-            if image.content.is_some() && (image.text_fit_width.is_some() || image.text_fit_height.is_some()) {
-                icon = shaped_icon.apply_text_fit();
-            }
-            feature.initialize(
-                boxes,
-                line,
-                anchor,
-                icon.top(),
-                icon.bottom(),
-                icon.left(),
-                icon.right(),
-                Some(shaped_icon.collision_padding()),
-                box_scale,
-                padding,
-                1.0,
-                rotate,
-            );
-        } else {
-            feature.initialize(boxes, line, anchor, 0.0, 0.0, 0.0, 0.0, None, box_scale, padding, 1.0, rotate);
-        }
-        feature
+        let label = shaped_icon.and_then(|shaped_icon| {
+            let bounds = shaped_icon.text_fit_bounds();
+            let collision_padding = shaped_icon.collision_padding;
+            let scale = layout.scale;
+            LabelBox::new(bounds.left, bounds.top, bounds.right, bounds.bottom).map(|label| {
+                label.scaled(scale).padded(&layout.padding).padded(&Padding::new(
+                    collision_padding.top * scale,
+                    collision_padding.right * scale,
+                    collision_padding.bottom * scale,
+                    collision_padding.left * scale,
+                ))
+            })
+        });
+        Self::new(anchor, label, None, layout, indexed_feature, pool)
     }
 
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the pool, line, anchor and box edges, and the paddings, scales and rotation of the boxes"
-    )]
-    /// Appends the feature's boxes to `boxes`, the pool its range is at the
-    /// end of.
-    fn initialize(
-        &mut self,
-        boxes: &mut Vec<CollisionBox>,
-        line: &GeometryCoordinates,
+    fn new(
         anchor: &Anchor,
-        top: f32,
-        bottom: f32,
-        left: f32,
-        right: f32,
-        collision_padding: Option<&Padding>,
-        box_scale: f32,
-        padding: &Padding,
-        overscaling: f32,
-        rotate: f32,
-    ) {
-        if top == 0.0 && bottom == 0.0 && left == 0.0 && right == 0.0 {
-            return;
-        }
-
-        let mut y1 = top * box_scale - padding.top;
-        let mut y2 = bottom * box_scale + padding.bottom;
-        let mut x1 = left * box_scale - padding.left;
-        let mut x2 = right * box_scale + padding.right;
-
-        if let Some(collision_padding) = collision_padding {
-            x1 -= collision_padding.left * box_scale;
-            y1 -= collision_padding.top * box_scale;
-            x2 += collision_padding.right * box_scale;
-            y2 += collision_padding.bottom * box_scale;
-        }
-
-        if self.along_line {
-            let mut height = y2 - y1;
-            let length = x2 - x1;
-
-            if height <= 0.0 {
-                return;
+        label: Option<LabelBox>,
+        along_line: Option<AlongLine<'_>>,
+        layout: &BoxLayout,
+        indexed_feature: &IndexedSubfeature,
+        pool: &mut Vec<CollisionBox>,
+    ) -> Self {
+        let boxes = match (label, along_line) {
+            (None, _) => PoolRange::at_end(pool),
+            (Some(label), Some(along_line)) => {
+                let size = label.max - label.min;
+                if size.y > 0.0 {
+                    let diameter = size.y.max(10.0 * layout.scale);
+                    PoolRange::extend(pool, line_circles(along_line, anchor, size.x, diameter))
+                } else {
+                    PoolRange::at_end(pool)
+                }
             }
+            (Some(label), None) => {
+                let label = if layout.rotate == 0.0 { label } else { label.rotated_envelope(deg2radf(layout.rotate)) };
+                PoolRange::extend(
+                    pool,
+                    [CollisionBox::new(anchor.point, label.min.x, label.min.y, label.max.x, label.max.y, 0.0)],
+                )
+            }
+        };
+        CollisionFeature { boxes, indexed_feature: indexed_feature.clone(), along_line: along_line.is_some() }
+    }
+}
 
-            // `std::max(10.0f * boxScale, height)`.
-            let min_height = 10.0f32 * box_scale;
-            height = if min_height < height { height } else { min_height };
+/// A label's box, relative to its anchor.
+#[derive(Clone, Copy, Debug)]
+struct LabelBox {
+    min: Vec2,
+    max: Vec2,
+}
 
-            // `convertPoint<int16_t>(anchor.point)`.
-            let mut anchor_point = GeometryCoordinate::new(anchor.point.x as i16, anchor.point.y as i16);
-            self.bboxify_label(
-                boxes,
-                line,
-                &mut anchor_point,
-                anchor.segment.unwrap_or(0),
-                length,
-                height,
-                overscaling,
-            );
-        } else if rotate != 0.0 {
-            // Account for *-rotate in point collision boxes
-            // Doesn't account for icon-text-fit
-            let rotate_radians = deg2radf(rotate);
+impl LabelBox {
+    /// The box with these edges, or `None` for a label without one, whose
+    /// edges are all 0.
+    fn new(left: f32, top: f32, right: f32, bottom: f32) -> Option<Self> {
+        let label = LabelBox { min: Vec2::new(left, top), max: Vec2::new(right, bottom) };
+        (label.min != Vec2::ZERO || label.max != Vec2::ZERO).then_some(label)
+    }
 
-            let rotation = Vec2::from_angle(rotate_radians);
-            let tl = rotation.rotate(Vec2::new(x1, y1));
-            let tr = rotation.rotate(Vec2::new(x2, y1));
-            let bl = rotation.rotate(Vec2::new(x1, y2));
-            let br = rotation.rotate(Vec2::new(x2, y2));
+    fn scaled(self, scale: f32) -> Self {
+        LabelBox { min: self.min * scale, max: self.max * scale }
+    }
 
-            // Collision features require an "on-axis" geometry,
-            // so take the envelope of the rotated geometry
-            // (may be quite large for wide labels rotated 45 degrees)
-            let x_min = min4([tl.x, tr.x, bl.x, br.x]);
-            let x_max = max4([tl.x, tr.x, bl.x, br.x]);
-            let y_min = min4([tl.y, tr.y, bl.y, br.y]);
-            let y_max = max4([tl.y, tr.y, bl.y, br.y]);
-
-            self.boxes.push(boxes, CollisionBox::new(anchor.point, x_min, y_min, x_max, y_max, 0.0));
-        } else {
-            self.boxes.push(boxes, CollisionBox::new(anchor.point, x1, y1, x2, y2, 0.0));
+    fn padded(self, padding: &Padding) -> Self {
+        LabelBox {
+            min: self.min - Vec2::new(padding.left, padding.top),
+            max: self.max + Vec2::new(padding.right, padding.bottom),
         }
     }
 
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the pool, the line and the anchor on it, and the label's length, box size and overscaling"
-    )]
-    fn bboxify_label(
-        &mut self,
-        boxes: &mut Vec<CollisionBox>,
-        line: &GeometryCoordinates,
-        anchor_point: &mut GeometryCoordinate,
-        segment: usize,
-        label_length: f32,
-        box_size: f32,
-        overscaling: f32,
-    ) {
-        let step = box_size / 2.0;
-        // `std::max(static_cast<int>(std::floor(labelLength / step)), 1)`.
-        let n_boxes = ((label_length / step).floor() as i32).max(1);
-
-        // We calculate line collision circles out to 300% of what would normally be
-        // our max size, to allow collision detection to work on labels that expand
-        // as they move into the distance Vertically oriented labels in the distant
-        // field can extend past this padding This is a noticeable problem in
-        // overscaled tiles where the pitch 0-based symbol spacing will put labels
-        // very close together in a pitched map. To reduce the cost of adding extra
-        // collision circles, we slowly increase them for overscaled tiles.
-        let overscaling_padding_factor: f64 = 1.0 + 0.4 * f64::from(overscaling).log2();
-        let n_pitch_padding_boxes = (f64::from(n_boxes) * overscaling_padding_factor / 2.0).floor() as i32;
-
-        // offset the center of the first box by half a box so that the edge of the
-        // box is at the edge of the label.
-        let first_box_offset = -box_size / 2.0;
-
-        let p = anchor_point;
-        let mut index: usize = segment + 1;
-        let mut anchor_distance = first_box_offset;
-        let label_start_distance = -label_length / 2.0;
-        let padding_start_distance = label_start_distance - label_length / 8.0;
-
-        // move backwards along the line to the first segment the label appears on
-        loop {
-            if index == 0 {
-                if anchor_distance > label_start_distance {
-                    // there isn't enough room for the label after the beginning of
-                    // the line checkMaxAngle should have already caught this
-                    return;
-                }
-                // The line doesn't extend far enough back for all of our padding,
-                // but we got far enough to show the label under most conditions.
-                index = 0;
-                break;
-            }
-
-            index -= 1;
-            anchor_distance -= dist(line[index], *p);
-            *p = line[index];
-
-            if anchor_distance <= padding_start_distance {
-                break;
-            }
+    /// The axis-aligned envelope of the box turned by `angle` radians.
+    fn rotated_envelope(self, angle: f32) -> Self {
+        let rotation = Vec2::from_angle(angle);
+        let corners = [self.min, Vec2::new(self.max.x, self.min.y), Vec2::new(self.min.x, self.max.y), self.max]
+            .map(|corner| rotation.rotate(corner));
+        LabelBox {
+            min: corners.into_iter().reduce(Vec2::min).unwrap_or_default(),
+            max: corners.into_iter().reduce(Vec2::max).unwrap_or_default(),
         }
+    }
+}
 
-        let mut segment_length = dist(line[index], line[index + 1]);
+/// The collision circles, as square boxes of `diameter`, of a label of
+/// `length` along the line at `anchor`. The circles cover the label and,
+/// spaced out more and more, some of the line beyond each end, to collide
+/// labels that grow as a pitched map shows them farther away. None if the
+/// line doesn't reach back to the label's start.
+fn line_circles<'a>(
+    along_line: AlongLine<'a>,
+    anchor: &Anchor,
+    length: f32,
+    diameter: f32,
+) -> impl Iterator<Item = CollisionBox> + 'a {
+    let AlongLine { line, overscaling } = along_line;
+    let radius = diameter / 2.0;
+    let label_circles = ((length / radius).floor() as i32).max(1);
+    // Overscaled tiles get more padding circles, slowly, to keep their cost
+    // down.
+    let padding_circles = (label_circles as f32 * (1.0 + 0.4 * overscaling.log2()) / 2.0).floor() as i32;
 
-        for i in -n_pitch_padding_boxes..n_boxes + n_pitch_padding_boxes {
-            // the distance the box will be from the anchor
-            let box_offset = i as f32 * step;
-            let mut box_distance_to_anchor = label_start_distance + box_offset;
-
-            // make the distance between pitch padding boxes bigger
-            if box_offset < 0.0 {
-                box_distance_to_anchor += box_offset;
-            }
-            if box_offset > label_length {
-                box_distance_to_anchor += box_offset - label_length;
-            }
-
-            if box_distance_to_anchor < anchor_distance {
-                // The line doesn't extend far enough back for this box, skip it
-                // (This could allow for line collisions on distant tiles)
-                continue;
-            }
-
-            // the box is not on the current segment. Move to the next segment.
-            while anchor_distance + segment_length < box_distance_to_anchor {
-                anchor_distance += segment_length;
-                index += 1;
-
-                // There isn't enough room before the end of the line.
-                if index + 1 >= line.len() {
-                    return;
-                }
-
-                segment_length = dist(line[index], line[index + 1]);
-            }
-
-            // the distance the box will be from the beginning of the segment
-            let segment_box_distance = box_distance_to_anchor - anchor_distance;
-
-            let p0 = &line[index];
-            let p1 = &line[index + 1];
-
-            let box_anchor = Vec2::new(
-                f32::from(p0.x) + segment_box_distance / segment_length * (i32::from(p1.x) - i32::from(p0.x)) as f32,
-                f32::from(p0.y) + segment_box_distance / segment_length * (i32::from(p1.y) - i32::from(p0.y)) as f32,
-            );
-
-            // If the box is within boxSize of the anchor, force the box to be used
-            // (so even 0-width labels use at least one box)
-            // Otherwise, the .8 multiplication gives us a little bit of conservative
-            // padding in choosing which boxes to use (see CollisionIndex#placedCollisionCircles)
-            let padded_anchor_distance = if (box_distance_to_anchor - first_box_offset).abs() < step {
-                0.0f32
-            } else {
-                (box_distance_to_anchor - first_box_offset) * 0.8f32
-            };
-
-            self.boxes.push(
-                boxes,
-                CollisionBox::new(
-                    box_anchor,
-                    -box_size / 2.0,
-                    -box_size / 2.0,
-                    box_size / 2.0,
-                    box_size / 2.0,
-                    padded_anchor_distance,
-                ),
-            );
+    // The circles' centers, as distances along the line from the anchor. The
+    // label's circles are `radius` apart, from one whose edge is on the
+    // label's start; the padding circles are twice as far apart.
+    let first_center = -length / 2.0 + radius;
+    let center = move |i: i32| {
+        let offset = i as f32 * radius;
+        let mut center = first_center + offset;
+        if offset < 0.0 {
+            center += offset;
         }
+        if offset > length {
+            center += offset - length;
+        }
+        center
+    };
+
+    // Walk back far enough for the padding circles over an eighth of the
+    // label's length before its start.
+    let segment = anchor.segment.unwrap_or(0);
+    let (start, behind) = vertex_behind(line, anchor.point, segment, length / 2.0 + length / 8.0 - radius);
+    let line_start = -behind;
+
+    let mut segments = segments(&line[start..]);
+    let first_segment = segments.next().filter(|_| line_start <= first_center);
+    let circles = first_segment.map(move |(mut a, mut b)| {
+        let mut segment_start = line_start;
+        let mut segment_length = a.distance(b);
+        (-padding_circles..label_circles + padding_circles)
+            .map(center)
+            .filter(move |&center| center >= line_start)
+            .map_while(move |center| {
+                while segment_start + segment_length < center {
+                    segment_start += segment_length;
+                    (a, b) = segments.next()?;
+                    segment_length = a.distance(b);
+                }
+                let point = a + (b - a) * ((center - segment_start) / segment_length);
+                // Use a circle within a radius of the anchor even for a label
+                // without length. Scale the others' distances a bit for some
+                // conservative padding in choosing which circles to use.
+                let signed_distance = if center.abs() < radius { 0.0 } else { center * 0.8 };
+                Some(CollisionBox::new(point, -radius, -radius, radius, radius, signed_distance))
+            })
+    });
+    circles.into_iter().flatten()
+}
+
+#[cfg(test)]
+mod tests {
+    use geometry::Point;
+
+    use super::*;
+
+    #[test]
+    fn line_circles_cover_the_label_and_space_out_beyond_it() {
+        let line = [Point::new(0, 0), Point::new(100, 0)];
+        let anchor = Anchor::new(50.0, 0.0, 0.0, Some(0));
+        let circles: Vec<_> = line_circles(AlongLine { line: &line, overscaling: 1.0 }, &anchor, 20.0, 10.0).collect();
+
+        let centers: Vec<_> = circles.iter().map(|circle| circle.anchor.x.round()).collect();
+        assert_eq!(centers, [25.0, 35.0, 45.0, 50.0, 55.0, 60.0, 65.0, 75.0]);
+        let distances: Vec<_> = circles.iter().map(|circle| circle.signed_distance_from_anchor).collect();
+        assert_eq!(distances, [-20.0, -12.0, -4.0, 0.0, 4.0, 8.0, 12.0, 20.0]);
+        assert!(circles.iter().all(|circle| (circle.x1, circle.y1, circle.x2, circle.y2) == (-5.0, -5.0, 5.0, 5.0)));
+    }
+
+    #[test]
+    fn line_circles_stop_at_the_line_ends() {
+        let line = [Point::new(0, 0), Point::new(58, 0)];
+        let anchor = Anchor::new(50.0, 0.0, 0.0, Some(0));
+        let circles = line_circles(AlongLine { line: &line, overscaling: 1.0 }, &anchor, 20.0, 10.0);
+        assert_eq!(circles.map(|circle| circle.anchor.x.round()).collect::<Vec<_>>(), [25.0, 35.0, 45.0, 50.0, 55.0]);
+
+        // The circles reach back only to the first vertex an eighth of the
+        // label's length before its start.
+        let line = [Point::new(0, 0), Point::new(40, 0), Point::new(100, 0)];
+        let anchor = Anchor::new(50.0, 0.0, 0.0, Some(1));
+        let circles = line_circles(AlongLine { line: &line, overscaling: 1.0 }, &anchor, 20.0, 10.0);
+        assert_eq!(
+            circles.map(|circle| circle.anchor.x.round()).collect::<Vec<_>>(),
+            [45.0, 50.0, 55.0, 60.0, 65.0, 75.0]
+        );
+
+        // Not even the label reaches back to the line's start.
+        let anchor = Anchor::new(4.0, 0.0, 0.0, Some(0));
+        assert_eq!(line_circles(AlongLine { line: &line, overscaling: 1.0 }, &anchor, 20.0, 10.0).count(), 0);
     }
 }

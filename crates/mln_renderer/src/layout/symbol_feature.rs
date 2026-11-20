@@ -1,8 +1,7 @@
-// C++ keeps the tile's `GeometryTileFeature` (which may borrow the source
-// layer the SymbolLayout holds). A Rust feature borrows its layer, and the
-// layout lives across worker messages, so a SymbolFeature keeps an owned
-// copy of what the layout reads: type, id, properties and the geometry
-// (C++ also clones the geometry, for mergeLines).
+// A tile's features borrow their layer, and a symbol layout lives across
+// worker messages while it waits for glyphs and images, so a SymbolFeature
+// keeps an owned copy of what the layout reads: type, id, properties and
+// geometry, which line merging changes.
 
 use std::borrow::Cow;
 

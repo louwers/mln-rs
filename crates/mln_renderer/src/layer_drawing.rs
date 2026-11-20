@@ -756,7 +756,19 @@ impl FrameDraws {
             .flatten();
         let drawing = composited.as_ref().is_none_or(Composited::draws);
         let draws = if drawing { &self.draws[..] } else { &[] };
-        let mut pass = DrawPass { frame: self, draws, pass: parameters.pass, volume_stencil: None, composited };
+        // A draw for both the opaque and the translucent pass draws in one:
+        // the opaque where its layer draws there, and the translucent
+        // otherwise. Drawn in both, it would cover itself, which the overdraw
+        // inspector shows.
+        let both = RenderPass::Opaque | RenderPass::Translucent;
+        let drawn_in =
+            if parameters.opaque_pass_enabled_for_layer() { RenderPass::Opaque } else { RenderPass::Translucent };
+        let skip = if parameters.pass & both != RenderPass::None && parameters.pass != drawn_in {
+            both
+        } else {
+            RenderPass::None
+        };
+        let mut pass = DrawPass { frame: self, draws, pass: parameters.pass, skip, volume_stencil: None, composited };
         let (volume, volume_clips) =
             pass.draws().fold((false, false), |(volume, clips), PassDraw { draw, .. }| match draw.depth {
                 DrawDepth::Volume { .. } => (true, clips || draw.clip),
@@ -804,6 +816,9 @@ pub(crate) struct DrawPass<'a> {
     /// begin.
     draws: &'a [FrameDraw],
     pass: RenderPass,
+    /// The passes of the draws that draw in another pass: both the opaque
+    /// and the translucent, or none.
+    skip: RenderPass,
     /// The stencil of the 3D draws that clip.
     volume_stencil: Option<StencilMode>,
     composited: Option<Composited>,
@@ -827,10 +842,11 @@ impl<'a> PassDraw<'a> {
 impl<'a> DrawPass<'a> {
     /// The draws of the pass, in drawing order.
     pub(crate) fn draws(&self) -> impl Iterator<Item = PassDraw<'a>> + use<'a> {
-        let pass = self.pass;
+        let (pass, skip) = (self.pass, self.skip);
         let draws = self.draws.iter().enumerate();
         draws
             .filter(move |(_, draw)| draw.pass & pass != RenderPass::None)
+            .filter(move |(_, draw)| skip == RenderPass::None || draw.pass & skip != skip)
             .map(|(index, draw)| PassDraw { index, draw })
     }
 

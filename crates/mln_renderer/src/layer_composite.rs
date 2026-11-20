@@ -20,8 +20,8 @@ use mln_gfx::color_mode::{BlendFunction, LinearBlend};
 use mln_gfx::gpu::{
     BindGroupEntry, BindingsDesc, BindingsId, BufferUsage, ColorAttachment, DepthState, DepthStencilAttachment, Draw,
     DynamicState, FixedState, GeometryDesc, GeometryId, Gpu, GpuError, LoadOp, PipelineKey, SamplerId, Scissor,
-    ShaderId, StencilState, TargetFormats, TextureDesc, TextureFormat, TextureId, TextureUsage, VertexAttribute,
-    VertexBufferLayout, VertexStep,
+    ShaderId, ShaderKey, StencilState, TargetFormats, TextureDesc, TextureFormat, TextureId, TextureUsage,
+    VertexAttribute, VertexBufferLayout, VertexStep,
 };
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::layer_composite_ubo::{
@@ -29,6 +29,7 @@ use mln_gfx::shaders::layer_composite_ubo::{
     LAYER_COMPOSITE_BLEND_NONE, LAYER_COMPOSITE_BLEND_OVERLAY, LayerCompositeUBO,
 };
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
+use mln_gfx::shaders::programs;
 use mln_gfx::shaders::shader_defines::{
     ID_LAYER_COMPOSITE_BACKDROP_TEXTURE, ID_LAYER_COMPOSITE_IMAGE_TEXTURE, ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE,
     ID_LAYER_COMPOSITE_UBO, ID_PROJECTION_UBO, MAX_UBO_COUNT_PER_SHADER,
@@ -47,8 +48,7 @@ use crate::gfx::buffer::Buffer;
 use crate::gfx::context::Context;
 use crate::gfx::owned::Owned;
 use crate::gfx::resources::GpuTexture;
-use crate::gfx::shader_program::ShaderProgramPtr;
-use crate::gfx::shader_registry::ShaderRegistry;
+use crate::gfx::vertex_attribute::Uniforms;
 use crate::paint_parameters::{DrawTarget, OpenPass};
 use crate::render_static_data::RenderStaticData;
 
@@ -178,7 +178,7 @@ struct Quad {
 /// another, and the draw that composites one onto the frame.
 #[derive(Default)]
 pub(crate) struct LayerComposite {
-    shader: Option<ShaderProgramPtr>,
+    shader: Option<ShaderKey>,
     shader_id: Option<ShaderId>,
     target: Option<Target>,
     frame: Option<FrameCopy>,
@@ -208,15 +208,10 @@ impl LayerComposite {
     /// and drops it where there are none. With `overdraw`, the overdraw
     /// inspector's, every group blends as `normal`, and without `format` so
     /// does every group that blends in the shader.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the frame's GPU and context, the shaders, and the frame's size, format and composited groups"
-    )]
     pub(crate) fn update(
         &mut self,
         gpu: &mut dyn Gpu,
         context: &mut Context,
-        shaders: &ShaderRegistry,
         size: Size,
         format: Option<TextureFormat>,
         overdraw: bool,
@@ -228,12 +223,9 @@ impl LayerComposite {
             self.quad = None;
             return;
         }
-        if self.shader.is_none() {
-            self.shader = shaders.shader("LayerCompositeShader", ProjectionVariant::Mercator);
-        }
-        if self.shader.is_none() {
-            return;
-        }
+        self.shader.get_or_insert_with(|| {
+            context.shader_key(&programs::LAYER_COMPOSITE, Uniforms::default(), ProjectionVariant::Mercator)
+        });
         for &(group, mut composite) in groups {
             if overdraw || (format.is_none() && composite.reads_backdrop()) {
                 composite.blend = LayerBlendType::Normal;
@@ -450,7 +442,7 @@ impl LayerComposite {
         let DrawTarget { size, targets, scissor } = draw_target;
         let shader_id = match self.shader_id {
             Some(id) => id,
-            None => *self.shader_id.insert(context.shader(gpu, shader.key())?),
+            None => *self.shader_id.insert(context.shader(gpu, shader)?),
         };
 
         let layer = &target.color;

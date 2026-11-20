@@ -484,11 +484,18 @@ impl<'a> PaintParameters<'a> {
         self.transform_params.projection_data_for_tile(tile_id, aligned)
     }
 
+    /// Whether the current layer draws in the opaque pass: front to back,
+    /// with depth. On the globe, 2D layers are ordered by draw order alone;
+    /// their Z is the back-hemisphere clip. Over terrain they draw flat, on
+    /// top of it.
+    #[must_use]
+    pub(crate) fn opaque_pass_enabled_for_layer(&self) -> bool {
+        self.current_layer >= self.opaque_pass_cutoff && !self.view.is_globe() && !self.terrain
+    }
+
     #[must_use]
     pub(crate) fn depth_mode_for_sublayer(&self, n: u8, mask: DepthMaskType) -> DepthMode {
-        // On the globe, 2D layers are ordered by draw order alone; their Z is
-        // the back-hemisphere clip. Over terrain they draw flat, on top of it.
-        if self.current_layer < self.opaque_pass_cutoff || self.view.is_globe() || self.terrain {
+        if !self.opaque_pass_enabled_for_layer() {
             return DepthMode::disabled();
         }
 

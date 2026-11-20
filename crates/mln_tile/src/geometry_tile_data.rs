@@ -15,25 +15,20 @@ use mln_util::geometry::FeatureType;
 
 use crate::TileError;
 
-/// Twice the signed area of `ring`. The products are C++ `int` arithmetic,
-/// which can overflow for coordinates near the int16 limits; x86-64 wraps,
-/// and so does this.
+/// Twice the signed area of `ring`, positive for a ring that is clockwise
+/// with y down.
 #[must_use]
-pub fn signed_area(ring: &GeometryCoordinates) -> f64 {
-    let mut sum = 0.0;
-
-    let len = ring.len();
-    let mut j = len.wrapping_sub(1);
-    for i in 0..len {
-        let p1 = ring[i];
-        let p2 = ring[j];
-        let dx = i32::from(p2.x) - i32::from(p1.x);
-        let sy = i32::from(p1.y) + i32::from(p2.y);
-        sum += f64::from(dx.wrapping_mul(sy));
-        j = i;
+pub fn signed_area(ring: &[Point<i16>]) -> f64 {
+    let Some(&last) = ring.last() else {
+        return 0.0;
+    };
+    let mut prev = last;
+    let mut sum = 0i64;
+    for &p in ring {
+        sum += (i64::from(prev.x) - i64::from(p.x)) * (i64::from(p.y) + i64::from(prev.y));
+        prev = p;
     }
-
-    sum
+    sum as f64
 }
 
 /// Repairs the rings of a polygon from a version 1 vector tile, whose spec

@@ -13,11 +13,11 @@ use std::num::NonZeroU16;
 
 use feature::Value;
 use mln_style_types::image::ImagePositions;
-use mln_style_types::{SymbolAnchorType, TextJustifyType};
+use mln_style_types::{SymbolAnchorType, TextJustifyType, TextWritingModeType};
 use mln_text::glyph::{GlyphID, GlyphIDType, GlyphPosition, GlyphPositions, GlyphRange, get_glyph_range};
 use mln_text::glyph_pbf::parse_glyph_pbf;
 use mln_text::tagged_string::font_stack_hash;
-use mln_text::{SectionOptions, ShapedText, Shaper, TaggedString, WritingModeType, get_shaping};
+use mln_text::{SectionOptions, ShapedText, Shaper, ShapingOptions, TaggedString, shape_text};
 use mln_tile_id::GeometryTileFeature;
 use mln_util::constants::ONE_EM;
 use mln_util::tiny_sdf::transform_raster_to_sdf;
@@ -236,34 +236,26 @@ fn shape(bench: &mut Bench, tile: LabelTile, repeats: u64) {
             font_positions.insert(glyph.id, Some(GlyphPosition { metrics: glyph.metrics, ..GlyphPosition::default() }));
         }
     }
-    let section = SectionOptions::new(1.0, font_stack, GlyphIDType::FontPBF, 0, None);
+    let section = SectionOptions::new(1.0, font_stack, GlyphIDType::FontPBF, None);
     let texts: Vec<TaggedString> =
         labels.iter().map(|label| TaggedString::new(label.text.clone(), section.clone())).collect();
     let images = ImagePositions::default();
+    let options = ShapingOptions {
+        max_width: 9.0 * ONE_EM,
+        line_height: 1.2 * ONE_EM,
+        anchor: SymbolAnchorType::Top,
+        justify: TextJustifyType::Center,
+        spacing: 0.0,
+        offset: [0.0, 0.6 * ONE_EM],
+        writing_mode: TextWritingModeType::Horizontal,
+        allow_vertical_placement: false,
+        text_size: TEXT_SIZE,
+        text_size_at_bucket_zoom: TEXT_SIZE,
+    };
 
     for _ in 0..repeats {
         let lines = bench.measure(|| {
-            texts
-                .iter()
-                .map(|text| {
-                    let shaping = get_shaping(
-                        text,
-                        9.0 * ONE_EM,
-                        1.2 * ONE_EM,
-                        SymbolAnchorType::Top,
-                        TextJustifyType::Center,
-                        0.0,
-                        &[0.0, 0.6 * ONE_EM],
-                        WritingModeType::Horizontal,
-                        &positions,
-                        &images,
-                        TEXT_SIZE,
-                        TEXT_SIZE,
-                        false,
-                    );
-                    shaping.positioned_lines.len()
-                })
-                .sum::<usize>()
+            texts.iter().map(|text| shape_text(text, &options, &positions, &images).lines.len()).sum::<usize>()
         });
         assert!(lines >= texts.len(), "each label has a line");
     }

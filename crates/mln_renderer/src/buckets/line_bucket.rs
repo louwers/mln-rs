@@ -1,17 +1,20 @@
 use std::sync::{Arc, Once};
 
 use geometry::Point;
-use mln_gfx::polyline_generator::{PolylineGenerator, PolylineGeneratorDistances, PolylineGeneratorOptions, dist};
 use mln_gfx::shaders::segment::SegmentBase;
+use mln_gfx::shaders::shader_defines::{
+    ID_LINE_BLUR_VERTEX_ATTRIBUTE, ID_LINE_COLOR_VERTEX_ATTRIBUTE, ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE,
+    ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE, ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE, ID_LINE_OFFSET_VERTEX_ATTRIBUTE,
+    ID_LINE_OPACITY_VERTEX_ATTRIBUTE, ID_LINE_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_LINE_PATTERN_TO_VERTEX_ATTRIBUTE,
+    ID_LINE_WIDTH_VERTEX_ATTRIBUTE,
+};
 use mln_style::expression::{EvaluationContext, Image, Value};
 use mln_style::layers::Line;
 use mln_style::layers::line_layer_properties::{LineLayoutProperties, LinePaintProperties};
 use mln_style_types::image::ImagePositions;
-use mln_style_types::{LineCapType, LineJoinType};
 use mln_tile_id::CanonicalTileID;
-use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinates, GeometryTileFeature};
+use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature};
 use mln_util::Color;
-use mln_util::error::Error;
 use mln_util::feature::numeric_value_f64;
 use mln_util::geometry::FeatureType;
 use mln_util::logging::{Event, Log};
@@ -20,34 +23,27 @@ use mln_vec_map::VecMap;
 
 use crate::bucket::{Bucket, BucketBase, UploadNeeds};
 use crate::bucket_geometry::{GeometryUpload, GeometryVec};
+use crate::gfx::line_mesh::{LineLayoutVertex, LineOptions, add_line};
+use crate::gfx::mesh::Indexed;
 use crate::layer_type::EvaluatedLayer;
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::paint_property_binder::{CrossFadedPaintPropertyBinder, DashArrayBinder, PaintPropertyBinder};
 use crate::util::subdivision::subdivide_vertex_line;
-use crate::util::triangulate::Triangulator;
+use crate::util::tessellator::Tessellator;
 
 crate::paint_property_binders!(
     pub struct LineBinders for LinePaintProperties::PossiblyEvaluated {
-        line_blur => PaintPropertyBinder<f32>,
-        line_color => PaintPropertyBinder<Color>,
-        line_floor_width => PaintPropertyBinder<f32>,
-        line_gap_width => PaintPropertyBinder<f32>,
-        line_offset => PaintPropertyBinder<f32>,
-        line_opacity => PaintPropertyBinder<f32>,
-        line_pattern => CrossFadedPaintPropertyBinder<Image>,
-        line_width => PaintPropertyBinder<f32>,
-        line_dasharray => DashArrayBinder,
+        line_blur: PaintPropertyBinder<f32> => [ID_LINE_BLUR_VERTEX_ATTRIBUTE],
+        line_color: PaintPropertyBinder<Color> => [ID_LINE_COLOR_VERTEX_ATTRIBUTE],
+        line_floor_width: PaintPropertyBinder<f32> => [ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE],
+        line_gap_width: PaintPropertyBinder<f32> => [ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE],
+        line_offset: PaintPropertyBinder<f32> => [ID_LINE_OFFSET_VERTEX_ATTRIBUTE],
+        line_opacity: PaintPropertyBinder<f32> => [ID_LINE_OPACITY_VERTEX_ATTRIBUTE],
+        line_pattern: CrossFadedPaintPropertyBinder<Image> => [ID_LINE_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_LINE_PATTERN_TO_VERTEX_ATTRIBUTE],
+        line_width: PaintPropertyBinder<f32> => [ID_LINE_WIDTH_VERTEX_ATTRIBUTE],
+        line_dasharray: DashArrayBinder => [ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE],
     }
 );
-
-/// A line layout vertex: position and normal, then four bytes of extrusion
-/// data (8 bytes in all).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
-#[repr(C)]
-pub(crate) struct LineLayoutVertex {
-    pub(crate) a1: [i16; 2],
-    pub(crate) a2: [u8; 4],
-}
 
 #[derive(Clone, mln_wire::Wire)]
 pub(crate) struct LineBucket {
@@ -61,13 +57,6 @@ pub(crate) struct LineBucket {
     overscaling: u32,
     subdivision_granularity: SubdivisionGranularitySetting,
 }
-
-/// Scale the extrusion vector so that the normal length is this value.
-/// Contains the "texture" normals (-1..1). This is distinct from the
-/// extrude normals for line joins, because the x-value remains 0 for the
-/// texture normal array, while the extrude normal actually moves the vertex
-/// to create the acute/bevelled line join.
-pub(crate) const EXTRUDE_SCALE: i8 = 63;
 
 impl LineBucket {
     #[must_use]
@@ -130,145 +119,47 @@ impl LineBucket {
         self.subdivision_granularity = *value;
     }
 
-    /// The layout vertex of a line point.
-    ///
-    /// @param p vertex position
-    /// @param e extrude normal
-    /// @param round whether the vertex uses a round line cap
-    /// @param up whether the line normal points up or down
-    /// @param dir direction of the line cap (-1/0/1)
-    #[must_use]
-    pub(crate) fn layout_vertex(
-        p: Point<i16>,
-        e: Point<f64>,
-        round: bool,
-        up: bool,
-        dir: i8,
-        linesofar: i32,
-    ) -> LineLayoutVertex {
-        let extrude = |v: f64| -> u8 {
-            // add 128 to store a byte in an unsigned byte
-            mln_math::clamp_f64((f64::from(EXTRUDE_SCALE) * v).round() + 128.0, 0.0, 255.0) as u8
-        };
-        let dir_value = i32::from(dir.signum());
-        LineLayoutVertex {
-            a1: [((i32::from(p.x) * 2) | i32::from(round)) as i16, ((i32::from(p.y) * 2) | i32::from(up)) as i16],
-            a2: [
-                extrude(e.x),
-                extrude(e.y),
-                // Encode the -1/0/1 direction value into the first two bits
-                // of .z of a_data. Combine it with the lower 6 bits of
-                // `linesofar` (shifted by 2 bites to make room for the
-                // direction value). The upper 8 bits of `linesofar` are
-                // placed in the `w` component. `linesofar` is scaled down by
-                // `LINE_DISTANCE_SCALE` so that we can store longer distances
-                // while sacrificing precision.
-                ((dir_value + 1) | ((linesofar & 0x3F) << 2)) as u8,
-                (linesofar >> 6) as u8,
-            ],
-        }
-    }
-
     fn add_geometry(
         &mut self,
-        input_coordinates: &GeometryCoordinates,
+        line: &[Point<i16>],
         feature: &dyn GeometryTileFeature,
         canonical: &CanonicalTileID,
+        tessellator: &mut Tessellator,
     ) {
-        // Ignore empty coordinates.
-        if input_coordinates.is_empty() {
+        let closed = feature.get_type() == FeatureType::Polygon;
+        if line.len() < if closed { 3 } else { 2 } {
+            // A line layer can't draw a source's points, such as a GeoJSON
+            // `MultiPoint`. The layer and source aren't known here.
+            static WARNED_INVALID_GEOMETRY: Once = Once::new();
+            WARNED_INVALID_GEOMETRY.call_once(|| Log::warning(Event::General, "Invalid geometry in line layer"));
             return;
         }
         let granularity = self.subdivision_granularity.line.granularity_for_zoom_level(canonical.z);
         let subdivided;
-        let coordinates = if granularity >= 2 {
-            subdivided = subdivide_vertex_line(input_coordinates, granularity, false);
+        let line = if granularity >= 2 {
+            subdivided = subdivide_vertex_line(line, granularity, false);
             &subdivided
         } else {
-            input_coordinates
+            line
         };
 
-        let mut options = PolylineGeneratorOptions { type_: feature.get_type(), ..Default::default() };
-        let len = {
-            let mut l = coordinates.len();
-            // If the line has duplicate vertices at the end, adjust length to remove them.
-            while l >= 2 && coordinates[l - 1] == coordinates[l - 2] {
-                l -= 1;
-            }
-            l
+        let clip = match (feature.get_value("mapbox_clip_start"), feature.get_value("mapbox_clip_end")) {
+            (Some(start), Some(end)) => numeric_value_f64(&start).zip(numeric_value_f64(&end)),
+            _ => None,
         };
-
-        let first = {
-            let mut i = 0;
-            // If the line has duplicate vertices at the start, adjust index to remove them.
-            while i + 1 < len && coordinates[i] == coordinates[i + 1] {
-                i += 1;
-            }
-            i
+        let context =
+            EvaluationContext::with_zoom_feature(self.zoom, Some(feature)).with_canonical_tile_id(Some(canonical));
+        let options = LineOptions {
+            closed,
+            join: self.layout.line_join.evaluate(&context),
+            cap: self.layout.line_cap.evaluate(&context),
+            miter_limit: self.layout.line_miter_limit.evaluate(&context),
+            round_limit: self.layout.line_round_limit.evaluate(&context),
+            overscaling: self.overscaling,
+            clip: clip.filter(|(start, end)| start < end),
         };
-
-        // Ignore invalid geometry.
-        let min_len = if options.type_ == FeatureType::Polygon { 3 } else { 2 };
-        if len < min_len {
-            // Warn once, but only if the source geometry is invalid, not if
-            // de-duplication made it invalid. This happens, e.g., when
-            // attempting to use a GeoJSON `MultiPoint` or
-            // `MLNPointCollectionFeature` as the source for a line layer.
-            // Unfortunately, we cannot show the layer or source name from
-            // here.
-            if coordinates.len() < min_len {
-                static WARNED_INVALID_GEOMETRY: Once = Once::new();
-                WARNED_INVALID_GEOMETRY.call_once(|| Log::warning(Event::General, "Invalid geometry in line layer"));
-            }
-            return;
-        }
-
-        if let Some(clip_start) = feature.get_value("mapbox_clip_start")
-            && let Some(clip_end) = feature.get_value("mapbox_clip_end")
-        {
-            let start_value = numeric_value_f64(&clip_start);
-            let end_value = numeric_value_f64(&clip_end);
-            if let (Some(start_value), Some(end_value)) = (start_value, end_value)
-                && start_value < end_value
-            {
-                let mut total_length = 0.0;
-                for i in first..len - 1 {
-                    total_length += dist(coordinates[i], coordinates[i + 1]);
-                }
-
-                options.clip_distances = Some(PolylineGeneratorDistances::new(start_value, end_value, total_length));
-            }
-        }
-
-        options.join_type = self.layout.line_join.evaluate(
-            &EvaluationContext::with_zoom_feature(self.zoom, Some(feature)).with_canonical_tile_id(Some(canonical)),
-        );
-        options.miter_limit = if options.join_type == LineJoinType::Bevel {
-            1.05
-        } else {
-            self.layout.line_miter_limit.evaluate(
-                &EvaluationContext::with_zoom_feature(self.zoom, Some(feature)).with_canonical_tile_id(Some(canonical)),
-            )
-        };
-        let cap = self.layout.line_cap.evaluate(
-            &EvaluationContext::with_zoom_feature(self.zoom, Some(feature)).with_canonical_tile_id(Some(canonical)),
-        );
-        options.begin_cap = cap;
-        options.end_cap = if options.type_ == FeatureType::Polygon { LineCapType::Butt } else { cap };
-        options.round_limit = self.layout.line_round_limit.evaluate(
-            &EvaluationContext::with_zoom_feature(self.zoom, Some(feature)).with_canonical_tile_id(Some(canonical)),
-        );
-        options.overscaling = self.overscaling;
-
-        let mut generator = PolylineGenerator::new(
-            self.vertices.get_mut(),
-            LineBucket::layout_vertex,
-            &mut self.segments,
-            &SegmentBase::new,
-            |segment: &mut SegmentBase| segment,
-            self.triangles.get_mut(),
-        );
-        generator.generate(coordinates, &options);
+        let mut triangles = Indexed { indexes: self.triangles.get_mut(), segments: &mut self.segments };
+        add_line(self.vertices.get_mut(), &mut triangles, &mut tessellator.line, line, &options);
     }
 }
 
@@ -296,10 +187,10 @@ impl Bucket for LineBucket {
         pattern_dependencies: &PatternLayerMap,
         index: usize,
         canonical: &CanonicalTileID,
-        _triangulator: &mut Triangulator,
-    ) -> Result<(), Error> {
+        tessellator: &mut Tessellator,
+    ) {
         for line in geometry_collection.iter() {
-            self.add_geometry(line, feature, canonical);
+            self.add_geometry(line, feature, canonical, tessellator);
         }
 
         let length = self.vertices.len();
@@ -314,7 +205,6 @@ impl Bucket for LineBucket {
                 &EMPTY_FORMATTED_SECTION,
             );
         }
-        Ok(())
     }
 
     fn upload(&mut self, geometry: &mut GeometryUpload<'_>, _needs: UploadNeeds) {

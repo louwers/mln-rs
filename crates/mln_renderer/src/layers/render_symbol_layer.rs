@@ -11,6 +11,8 @@ use glam::{DMat4, DVec3};
 use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
+use mln_gfx::shaders::program::Program;
+use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
     ID_COLLISION_ANCHOR_POS_VERTEX_ATTRIBUTE, ID_COLLISION_DRAWABLE_UBO, ID_COLLISION_EXTRUDE_VERTEX_ATTRIBUTE,
@@ -18,9 +20,9 @@ use mln_gfx::shaders::shader_defines::{
     ID_COLLISION_POS_VERTEX_ATTRIBUTE, ID_COLLISION_PROJECTION_UBO, ID_COLLISION_SHIFT_VERTEX_ATTRIBUTE,
     ID_COLLISION_TILE_PROPS_UBO, ID_PROJECTION_UBO, ID_SYMBOL_DATA_ATTRIBUTE, ID_SYMBOL_DRAWABLE_UBO,
     ID_SYMBOL_EVALUATED_PROPS_UBO, ID_SYMBOL_FADE_OPACITY_ATTRIBUTE, ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE,
-    ID_SYMBOL_IMAGE_ICON_TEXTURE, ID_SYMBOL_IMAGE_TEXTURE, ID_SYMBOL_OPACITY_ATTRIBUTE,
-    ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE, ID_SYMBOL_POS_OFFSET_ATTRIBUTE, ID_SYMBOL_PROJECTED_POS_ATTRIBUTE,
-    ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE, ID_SYMBOL_TILE_PROPS_UBO,
+    ID_SYMBOL_IMAGE_ICON_TEXTURE, ID_SYMBOL_IMAGE_TEXTURE, ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE,
+    ID_SYMBOL_POS_OFFSET_ATTRIBUTE, ID_SYMBOL_PROJECTED_POS_ATTRIBUTE, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE,
+    ID_SYMBOL_TILE_PROPS_UBO,
 };
 use mln_gfx::shaders::symbol_layer_ubo::{
     CollisionDrawableUBO, CollisionTilePropsUBO, SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO,
@@ -53,8 +55,7 @@ use crate::draw::{DrawGeometry, DrawObjects, Textures, copy_shared_attributes};
 use crate::geometry::feature_index::FeatureIndex;
 use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
-use crate::gfx::shader_group::{ShaderGroupPtr, StringIDSetsPair};
-use crate::gfx::vertex_attribute::{SharedAttribute, VertexAttributeArray};
+use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::gfx::vertices::TypedVertices;
 use crate::layer_drawing::{
     BucketChanges, DrawDepth, DrawGroup, DrawList, DrawObjectsMut, DrawOrder, FrameDraw, KeptDraw, LayerDrawing,
@@ -65,7 +66,6 @@ use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::layout::symbol_layout::SymbolLayout;
 use crate::layout::symbol_projection::{gl_coord_matrix, label_plane_matrix};
 use crate::paint_parameters::PaintParameters;
-use crate::paint_property_binder::read_data_driven_paint_property;
 use crate::render_layer::{
     Atlases, BucketKey, BucketPlacementData, LayerBucket, LayerUpdateParameters, LayerValues, Parts, PartsMut,
     PlacedTile, RenderLayer, RenderLayerBase, SymbolTranslate, TypedLayer,
@@ -74,10 +74,6 @@ use crate::render_pass::RenderPass;
 use crate::render_source::{RenderSource, TileOrder};
 use crate::render_tile::{FrameTile, RenderTile};
 use crate::tile_matrix::{projection_data, to_projection_ubo};
-
-const SYMBOL_ICON_SHADER_NAME: &str = "SymbolIconShader";
-const SYMBOL_SDF_SHADER_NAME: &str = "SymbolSDFShader";
-const SYMBOL_TEXT_AND_ICON_SHADER_NAME: &str = "SymbolTextAndIconShader";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SymbolType {
@@ -169,9 +165,9 @@ fn update_tile_attributes(
     paint_props: &PaintProperties,
     evaluated: &SymbolPaintProperties::PossiblyEvaluated,
     attribs: &mut VertexAttributeArray,
-    properties_as_uniforms: &mut StringIDSetsPair,
+    uniforms: &mut Uniforms,
 ) -> PlacedVertices {
-    set_binder_attributes(context, geometry, is_text, paint_props, evaluated, attribs, properties_as_uniforms);
+    set_binder_attributes(context, geometry, is_text, paint_props, evaluated, attribs, uniforms);
     let mut placed = PlacedVertices::default();
     set_layout_attributes(geometry, buffer, attribs);
     set_projected_pos_attribute(context, buffer, layer_id, attribs, &mut placed.projected);
@@ -187,120 +183,18 @@ fn set_binder_attributes(
     paint_props: &PaintProperties,
     evaluated: &SymbolPaintProperties::PossiblyEvaluated,
     attribs: &mut VertexAttributeArray,
-    properties_as_uniforms: &mut StringIDSetsPair,
+    uniforms: &mut Uniforms,
 ) {
-    let mut id = ID_SYMBOL_OPACITY_ATTRIBUTE;
-    let pau = properties_as_uniforms;
     if is_text {
-        let b = &paint_props.text_binders;
-        let ib = &b.interleaved_vertex_buffer;
-        let shared = paint_vertices(context, geometry, ib, b.depends_on_feature_state());
-        let shared = shared.as_ref();
-        read_data_driven_paint_property(
-            attribs,
-            &b.text_opacity,
-            ib,
-            shared,
-            &["a_opacity"],
-            evaluated.text_opacity.is_constant(),
-            pau,
-            &mut id,
-        );
-        read_data_driven_paint_property(
-            attribs,
-            &b.text_color,
-            ib,
-            shared,
-            &["a_fill_color"],
-            evaluated.text_color.is_constant(),
-            pau,
-            &mut id,
-        );
-        read_data_driven_paint_property(
-            attribs,
-            &b.text_halo_color,
-            ib,
-            shared,
-            &["a_halo_color"],
-            evaluated.text_halo_color.is_constant(),
-            pau,
-            &mut id,
-        );
-        read_data_driven_paint_property(
-            attribs,
-            &b.text_halo_width,
-            ib,
-            shared,
-            &["a_halo_width"],
-            evaluated.text_halo_width.is_constant(),
-            pau,
-            &mut id,
-        );
-        read_data_driven_paint_property(
-            attribs,
-            &b.text_halo_blur,
-            ib,
-            shared,
-            &["a_halo_blur"],
-            evaluated.text_halo_blur.is_constant(),
-            pau,
-            &mut id,
-        );
+        let binders = &paint_props.text_binders;
+        let buffer = &binders.interleaved_vertex_buffer;
+        let shared = paint_vertices(context, geometry, buffer, binders.depends_on_feature_state());
+        binders.bind(evaluated, shared.as_ref(), attribs, uniforms);
     } else {
-        let b = &paint_props.icon_binders;
-        let ib = &b.interleaved_vertex_buffer;
-        let shared = paint_vertices(context, geometry, ib, b.depends_on_feature_state());
-        let shared = shared.as_ref();
-        read_data_driven_paint_property(
-            attribs,
-            &b.icon_opacity,
-            ib,
-            shared,
-            &["a_opacity"],
-            evaluated.icon_opacity.is_constant(),
-            pau,
-            &mut id,
-        );
-        read_data_driven_paint_property(
-            attribs,
-            &b.icon_color,
-            ib,
-            shared,
-            &["a_fill_color"],
-            evaluated.icon_color.is_constant(),
-            pau,
-            &mut id,
-        );
-        read_data_driven_paint_property(
-            attribs,
-            &b.icon_halo_color,
-            ib,
-            shared,
-            &["a_halo_color"],
-            evaluated.icon_halo_color.is_constant(),
-            pau,
-            &mut id,
-        );
-        read_data_driven_paint_property(
-            attribs,
-            &b.icon_halo_width,
-            ib,
-            shared,
-            &["a_halo_width"],
-            evaluated.icon_halo_width.is_constant(),
-            pau,
-            &mut id,
-        );
-        read_data_driven_paint_property(
-            attribs,
-            &b.icon_halo_blur,
-            ib,
-            shared,
-            &["a_halo_blur"],
-            evaluated.icon_halo_blur.is_constant(),
-            pau,
-            &mut id,
-        );
+        let binders = &paint_props.icon_binders;
+        let buffer = &binders.interleaved_vertex_buffer;
+        let shared = paint_vertices(context, geometry, buffer, binders.depends_on_feature_state());
+        binders.bind(evaluated, shared.as_ref(), attribs, uniforms);
     }
 }
 
@@ -637,8 +531,7 @@ fn refresh_draw(
         if refresh.paint
             && let Some(paint_props) = bucket.paint_properties.get(layer_id)
         {
-            let mut uniforms = StringIDSetsPair::default();
-            set_binder_attributes(context, geometry, is_text, paint_props, evaluated, attrs, &mut uniforms);
+            set_binder_attributes(context, geometry, is_text, paint_props, evaluated, attrs, &mut Uniforms::default());
         }
     }
 
@@ -735,12 +628,6 @@ pub(crate) struct RenderSymbolLayer {
     icon_size: f32,
     text_size: f32,
 
-    symbol_icon_group: Option<ShaderGroupPtr>,
-    symbol_sdf_group: Option<ShaderGroupPtr>,
-    symbol_text_and_icon_group: Option<ShaderGroupPtr>,
-
-    collision_box_group: Option<ShaderGroupPtr>,
-    collision_circle_group: Option<ShaderGroupPtr>,
     /// The passes the layer's draws were built for.
     draws_passes: RenderPass,
     /// The indexes of the buckets `HeldBuckets` holds for the layer.
@@ -798,7 +685,7 @@ impl RenderSymbolLayer {
             text_translate,
             icon_translate,
         };
-        if bucket.bucket_leader_id != self.base.style.base().id {
+        if *bucket.bucket_leader_id != *self.base.style.base().id {
             let data = data(None, None);
             self.follower_data.push(data);
             return;
@@ -883,11 +770,6 @@ impl RenderSymbolLayer {
             source_id: Arc::from(""),
             icon_size: 1.0,
             text_size: 16.0,
-            symbol_icon_group: None,
-            symbol_sdf_group: None,
-            symbol_text_and_icon_group: None,
-            collision_box_group: None,
-            collision_circle_group: None,
             draws_passes: RenderPass::None,
             #[cfg(feature = "bench")]
             held: Vec::new(),
@@ -943,10 +825,7 @@ impl RenderSymbolLayer {
             icon_property_values(evaluated, &bucket.layout)
         };
         let state = &bucket.state;
-        let mut add = |buffer: &CollisionBuffer, group: &Option<ShaderGroupPtr>, mode: DrawMode| {
-            let Some(group) = group else {
-                return;
-            };
+        let mut add = |buffer: &CollisionBuffer, program: &'static Program, mode: DrawMode| {
             if buffer.vertices.is_empty() || buffer.indices.is_empty() {
                 return;
             }
@@ -959,7 +838,7 @@ impl RenderSymbolLayer {
                 instances: None,
             };
             let objects = DrawObjects::new(
-                group.shader(&Default::default(), self.base.projection_variant),
+                context.shader_key(program, Uniforms::default(), self.base.projection_variant),
                 ColorMode::alpha_blended(),
                 CullFaceMode::disabled(),
                 geometry,
@@ -975,13 +854,13 @@ impl RenderSymbolLayer {
         if has_collision_box {
             let collision_box = if is_text { &state.text_collision_box } else { &state.icon_collision_box };
             if let Some(collision_box) = collision_box {
-                add(collision_box, &self.collision_box_group, DrawMode::Lines(1.0));
+                add(collision_box, &programs::COLLISION_BOX, DrawMode::Lines(1.0));
             }
         }
         if has_collision_circle {
             let collision_circle = if is_text { &state.text_collision_circle } else { &state.icon_collision_circle };
             if let Some(collision_circle) = collision_circle {
-                add(collision_circle, &self.collision_circle_group, DrawMode::Triangles());
+                add(collision_circle, &programs::COLLISION_CIRCLE, DrawMode::Triangles());
             }
         }
         true
@@ -1345,28 +1224,11 @@ impl TypedLayer for RenderSymbolLayer {
             icon: Option<AtlasBinding>,
         }
 
-        let (static_data, transform) = (paint_parameters.static_data, paint_parameters.view);
-        let shaders = &static_data.shaders;
+        let transform = paint_parameters.view;
         let passes = self.base.passes;
         if passes != self.draws_passes {
             self.drawing.clear();
             self.draws_passes = passes;
-        }
-
-        if self.symbol_icon_group.is_none() {
-            self.symbol_icon_group = shaders.shader_group(SYMBOL_ICON_SHADER_NAME);
-        }
-        if self.symbol_sdf_group.is_none() {
-            self.symbol_sdf_group = shaders.shader_group(SYMBOL_SDF_SHADER_NAME);
-        }
-        if self.symbol_text_and_icon_group.is_none() {
-            self.symbol_text_and_icon_group = shaders.shader_group(SYMBOL_TEXT_AND_ICON_SHADER_NAME);
-        }
-        if self.collision_box_group.is_none() {
-            self.collision_box_group = shaders.shader_group("CollisionBoxShader");
-        }
-        if self.collision_circle_group.is_none() {
-            self.collision_circle_group = shaders.shader_group("CollisionCircleShader");
         }
 
         let layout = &self.values.style.layout;
@@ -1495,12 +1357,13 @@ impl TypedLayer for RenderSymbolLayer {
         // Renderables come across tiles, out of order, so the atlases' textures
         // given to a tile's draws are kept by tile.
         let mut tile_atlases: HashMap<UnwrappedTileID, TileAtlases> = HashMap::default();
-        let mut properties_as_uniforms: StringIDSetsPair = Default::default();
-        let color_mode = if (passes.underlying_type() & RenderPass::Translucent.underlying_type()) != 0 {
-            ColorMode::alpha_blended()
-        } else {
-            ColorMode::unblended()
-        };
+        let color_mode = paint_parameters.context.color_mode(
+            if (passes.underlying_type() & RenderPass::Translucent.underlying_type()) != 0 {
+                ColorMode::alpha_blended()
+            } else {
+                ColorMode::unblended()
+            },
+        );
 
         for group in &renderable_segments {
             let is_text = group.type_ == SymbolType::Text;
@@ -1543,9 +1406,7 @@ impl TypedLayer for RenderSymbolLayer {
 
             let atlases = render_data.atlas_textures();
 
-            properties_as_uniforms.0.clear();
-            properties_as_uniforms.1.clear();
-
+            let mut uniforms = Uniforms::default();
             let mut vertex_attribs = VertexAttributeArray::new();
             let placed = update_tile_attributes(
                 paint_parameters.context,
@@ -1556,7 +1417,7 @@ impl TypedLayer for RenderSymbolLayer {
                 bucket_paint_properties,
                 evaluated,
                 &mut vertex_attribs,
-                &mut properties_as_uniforms,
+                &mut uniforms,
             );
 
             let text_halo = evaluated.text_halo_color.constant_or(&Color::black()).a > 0.0
@@ -1567,27 +1428,23 @@ impl TypedLayer for RenderSymbolLayer {
                 && evaluated.icon_halo_width.constant_or(&1.0) != 0.0;
             let icon_fill = evaluated.icon_color.constant_or(&Color::black()).a > 0.0;
 
-            // The shaders, halo first, with whether each is a halo's and
+            // The programs, halo first, with whether each is a halo's and
             // draws.
-            let shader_groups = if is_text {
-                let shader_group =
-                    if bucket.icons_in_text { &self.symbol_text_and_icon_group } else { &self.symbol_sdf_group };
-                vec![(shader_group, true, text_halo), (shader_group, false, text_fill)]
+            let halo_and_fill = if is_text {
+                let program =
+                    if bucket.icons_in_text { &programs::SYMBOL_TEXT_AND_ICON } else { &programs::SYMBOL_SDF };
+                vec![(program, true, text_halo), (program, false, text_fill)]
             } else if sdf_icons {
-                vec![(&self.symbol_sdf_group, true, icon_halo), (&self.symbol_sdf_group, false, icon_fill)]
+                vec![(&programs::SYMBOL_SDF, true, icon_halo), (&programs::SYMBOL_SDF, false, icon_fill)]
             } else {
-                vec![(&self.symbol_icon_group, false, true)]
+                vec![(&programs::SYMBOL_ICON, false, true)]
             };
 
             let segments = match group.segment {
                 Some(i) => std::slice::from_ref(&buffer.segments[i]),
                 None => &buffer.segments,
             };
-            for (shader_group, is_halo, _) in shader_groups.into_iter().filter(|(_, _, drawn)| *drawn) {
-                let Some(shader_group) = shader_group else {
-                    continue;
-                };
-
+            for (program, is_halo, _) in halo_and_fill.into_iter().filter(|(_, _, drawn)| *drawn) {
                 // The draws of a tile share the atlases' textures.
                 let tile_atlases = tile_atlases.entry(tile.tile.id).or_default();
                 let draw_atlases = if is_text {
@@ -1630,7 +1487,7 @@ impl TypedLayer for RenderSymbolLayer {
                     segments: segments.iter().map(SegmentBase::copy).collect(),
                     instances: None,
                 };
-                let shader = shader_group.shader(&properties_as_uniforms, symbol_projection_variant);
+                let shader = paint_parameters.context.shader_key(program, uniforms, symbol_projection_variant);
                 let textures = draw_atlases.textures(&shader);
                 let objects = DrawObjects::new(shader, color_mode, CullFaceMode::disabled(), geometry, textures);
 

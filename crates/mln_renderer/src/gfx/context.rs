@@ -1,6 +1,7 @@
 //! What the renderer keeps over its backend's `Gpu`: its caps, the caches
-//! its draws share, the stores of the textures, indexes and vertices they
-//! share, the buffers every draw binds, and the device that makes its
+//! its draws share, among them the keys of the programs' variants, the
+//! stores of the textures, indexes and vertices they share, the buffers
+//! every draw binds, and the device that makes its
 //! buffers and textures, with the rendering stats and the queue of what it
 //! dropped. The renderer owns it, and lends it
 //! to a frame's encode, which changes it through `&mut`. The context holds
@@ -9,12 +10,16 @@
 
 use std::rc::Rc;
 
+use mln_gfx::ColorMode;
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::gpu::{
     BufferId, BufferUsage, Caps, Gpu, GpuError, PipelineId, PipelineKey, ResourceId, SamplerId, ShaderId, ShaderKey,
     TextureFormat, TextureId,
 };
+use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::rendering_stats::RenderingStats;
+use mln_gfx::shaders::program::Program;
+use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::TextureChannelDataType;
 use mln_util::hash::HashMap;
@@ -29,6 +34,7 @@ use crate::gfx::resources::{Device, SharedGpuTexture};
 use crate::gfx::store::{IndexesKey, SharedTexture, Store, StoreKey, TextureKey};
 use crate::gfx::texture2d::{Texture2D, TextureMut};
 use crate::gfx::uniform_buffer::UniformBufferArray;
+use crate::gfx::vertex_attribute::Uniforms;
 use crate::gfx::vertices::{SharedVertices, TypedVertices, VertexStore, Vertices};
 
 pub(crate) struct Context {
@@ -37,6 +43,13 @@ pub(crate) struct Context {
     global_uniform_buffers: UniformBufferArray,
     /// The sampler of each state a texture is sampled with.
     samplers: HashMap<SamplerState, SamplerId>,
+    /// What the programs are compiled with: the pixel ratio's defines, and
+    /// the overdraw inspector's when it's on.
+    program_parameters: ProgramParameters,
+    /// Whether the draws show the overdraw inspector.
+    overdraw: bool,
+    /// The key of each variant a draw used.
+    shader_keys: HashMap<(&'static Program, Uniforms, ProjectionVariant), ShaderKey>,
     /// The shader of each key a draw used.
     shaders: HashMap<ShaderKey, ShaderId>,
     /// The pipeline of each key a draw used.
@@ -61,13 +74,17 @@ pub(crate) struct Context {
 }
 
 impl Context {
-    /// The renderer's state over a `Gpu` of `caps`.
-    pub(crate) fn new(caps: Caps) -> Context {
+    /// The renderer's state over a `Gpu` of `caps`, for draws at
+    /// `pixel_ratio` device pixels per logical pixel.
+    pub(crate) fn new(caps: Caps, pixel_ratio: f32) -> Context {
         Context {
             device: Device::default(),
             caps,
             global_uniform_buffers: UniformBufferArray::default(),
             samplers: HashMap::default(),
+            program_parameters: ProgramParameters::new(pixel_ratio, false),
+            overdraw: false,
+            shader_keys: HashMap::default(),
             shaders: HashMap::default(),
             pipelines: HashMap::default(),
             default_vertex_buffers: HashMap::default(),
@@ -339,6 +356,45 @@ impl Context {
     /// bindings made of it hold.
     pub(crate) fn gpu_texture(&self, handle: &SharedTexture) -> Option<&SharedGpuTexture> {
         self.textures.get(handle)?.gpu_texture()
+    }
+
+    /// The key of the variant of `program` that reads its properties of
+    /// `uniforms` from their uniforms, for `projection`, at the context's
+    /// pixel ratio.
+    pub(crate) fn shader_key(
+        &mut self,
+        program: &'static Program,
+        uniforms: Uniforms,
+        projection: ProjectionVariant,
+    ) -> ShaderKey {
+        // Only the program's own properties tell its variants apart.
+        let read = program.properties.iter().filter(move |property| uniforms.contains(property.attribute));
+        let uniforms = read.clone().map(|property| property.attribute).collect();
+        let parameters = &self.program_parameters;
+        self.shader_keys
+            .entry((program, uniforms, projection))
+            .or_insert_with(|| program.variant_key(parameters, read, projection))
+            .clone()
+    }
+
+    /// Makes the keys of later variants at `pixel_ratio`, and with the
+    /// overdraw inspector's define if `overdraw`. The shaders of the earlier
+    /// keys stay until [`release_shaders`](Self::release_shaders).
+    pub(crate) fn set_program_parameters(&mut self, pixel_ratio: f32, overdraw: bool) {
+        self.program_parameters = ProgramParameters::new(pixel_ratio, overdraw);
+        self.overdraw = overdraw;
+        self.shader_keys.clear();
+    }
+
+    /// Whether the draws show the overdraw inspector.
+    pub(crate) fn overdraw(&self) -> bool {
+        self.overdraw
+    }
+
+    /// The color mode of a draw into the frame that blends with `mode`: the
+    /// overdraw inspector's when it's on.
+    pub(crate) fn color_mode(&self, mode: ColorMode) -> ColorMode {
+        if self.overdraw { ColorMode::overdraw() } else { mode }
     }
 
     /// The shader of `key`, made through `gpu` on first use.

@@ -20,7 +20,7 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
 
 use crate::bucket_parameters::BucketParameters;
-use crate::geometry::feature_index::FeatureIndex;
+use crate::geometry::feature_index::FeatureIndexBuilder;
 use crate::group_by_layout::group_layers;
 use crate::layer_type::{ErasedEvaluatedLayer, ErasedLayout};
 use crate::layout::filter_groups::FilterGroups;
@@ -149,7 +149,7 @@ struct DiscoveredGroup {
 pub(crate) struct Built {
     /// The buckets, and each layer's.
     pub(crate) buckets: LayoutBuckets,
-    pub(crate) feature_index: FeatureIndex,
+    pub(crate) feature_index: FeatureIndexBuilder,
 }
 
 /// Groups the layers, builds the layouts of the groups that can need glyphs
@@ -206,13 +206,9 @@ pub(crate) fn discover(input: &LayoutInput<'_>) -> Result<Discovered, Error> {
 /// gets the groups that use no glyphs or images first, then the others,
 /// each in group order.
 pub(crate) fn build(discovered: Discovered, input: &LayoutInput<'_>, resolved: &Resolved) -> Result<Built, Error> {
-    // Avoid small reallocations for populated cells. If we had a total
-    // feature count, this could be based on that and the cell count.
-    const ESTIMATED_ELEMENTS_PER_CELL: usize = 8;
-
     let Discovered { groups, mut filter_groups, dependencies: _ } = discovered;
-    let mut built = Built { buckets: LayoutBuckets::default(), feature_index: FeatureIndex::new(input.data.cloned()) };
-    built.feature_index.reserve(ESTIMATED_ELEMENTS_PER_CELL);
+    let mut built =
+        Built { buckets: LayoutBuckets::default(), feature_index: FeatureIndexBuilder::new(input.data.cloned()) };
     let Some(data) = input.data else {
         return Ok(built);
     };

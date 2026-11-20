@@ -7,9 +7,10 @@ use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate, Ge
 use mln_util::constants::EXTENT;
 
 use crate::buckets::fill_bucket::FillLayoutVertex;
-use crate::gfx::fill_generator::generate_fill_and_outline_buffers;
-use crate::util::subdivision::{SubdivisionResult, TILE_BORDER_STRIP_WIDTH, add_tile_border_strips, subdivide_polygon};
-use crate::util::triangulate::Triangulator;
+use crate::gfx::fill_mesh::FillBuffers;
+use crate::gfx::mesh::Indexed;
+use crate::util::subdivision::{SubdividedPolygon, TILE_BORDER_STRIP_WIDTH, add_tile_border_strips, subdivide_polygon};
+use crate::util::tessellator::Tessellator;
 
 /// `EXTENT` as a tile coordinate.
 const EXTENT_I16: i16 = EXTENT as i16;
@@ -25,7 +26,7 @@ fn square(x0: i16, y0: i16, x1: i16, y1: i16) -> GeometryCollection {
 type Triangle = [i16; 6];
 type Line = [i16; 4];
 
-/// The buffers `generateFillAndOutineBuffers` fills.
+/// The buffers of a fill bucket.
 #[derive(Default)]
 struct Buffers {
     fill_vertices: Vec<FillLayoutVertex>,
@@ -36,23 +37,17 @@ struct Buffers {
     outline_ends: Vec<FillLayoutVertex>,
 }
 
-/// Runs `generate_fill_and_outline_buffers` into fresh buffers, and checks
-/// that the outline's instances draw the segments its lines do.
+/// Adds the polygons of `geometry` to fresh buffers, and checks that the
+/// outline's instances draw the segments its lines do.
 fn generate(geometry: &GeometryCollection, canonical: &CanonicalTileID, granularity: u32) -> Buffers {
     let mut buffers = Buffers::default();
-    generate_fill_and_outline_buffers(
-        geometry,
-        &mut buffers.fill_vertices,
-        &mut buffers.fill_indexes,
-        &mut buffers.fill_segments,
-        &mut buffers.basic_line_indexes,
-        &mut buffers.basic_line_segments,
-        &mut buffers.outline_ends,
-        canonical,
-        granularity,
-        &mut Triangulator::default(),
-    )
-    .expect("generateFillAndOutineBuffers");
+    FillBuffers {
+        vertices: &mut buffers.fill_vertices,
+        outline_ends: &mut buffers.outline_ends,
+        triangles: Indexed { indexes: &mut buffers.fill_indexes, segments: &mut buffers.fill_segments },
+        lines: Indexed { indexes: &mut buffers.basic_line_indexes, segments: &mut buffers.basic_line_segments },
+    }
+    .add_polygons(geometry, canonical, granularity, &mut Tessellator::default());
     let mut lines = drawn_lines(&buffers.fill_vertices, &buffers.basic_line_indexes, &buffers.basic_line_segments);
     lines.retain(|line| line[..2] != line[2..]);
     lines.sort_unstable();
@@ -110,32 +105,26 @@ fn drawn_lines(vertices: &[FillLayoutVertex], indexes: &[u16], segments: &[Segme
     lines
 }
 
-fn mesh_triangles(mesh: &SubdivisionResult) -> Vec<Triangle> {
-    let mut triangles = Vec::new();
-    for indices in mesh.triangle_indices.as_chunks::<3>().0 {
-        let mut triangle: Triangle = [0; 6];
-        for k in 0..3 {
-            triangle[k * 2] = mesh.vertices[indices[k] as usize * 2];
-            triangle[k * 2 + 1] = mesh.vertices[indices[k] as usize * 2 + 1];
-        }
-        triangles.push(triangle);
-    }
-    triangles
+fn mesh_triangles(mesh: &SubdividedPolygon) -> Vec<Triangle> {
+    let position = |i: u32| mesh.vertices[i as usize];
+    mesh.triangles
+        .iter()
+        .map(|&[a, b, c]| {
+            let [a, b, c] = [position(a), position(b), position(c)];
+            [a.x, a.y, b.x, b.y, c.x, c.y]
+        })
+        .collect()
 }
 
-fn mesh_lines(mesh: &SubdivisionResult) -> Vec<Line> {
-    let mut lines = Vec::new();
-    for list in &mesh.line_index_lists {
-        for pair in list.as_chunks::<2>().0 {
-            lines.push([
-                mesh.vertices[pair[0] as usize * 2],
-                mesh.vertices[pair[0] as usize * 2 + 1],
-                mesh.vertices[pair[1] as usize * 2],
-                mesh.vertices[pair[1] as usize * 2 + 1],
-            ]);
-        }
-    }
-    lines
+fn mesh_lines(mesh: &SubdividedPolygon) -> Vec<Line> {
+    let position = |i: u32| mesh.vertices[i as usize];
+    mesh.lines
+        .iter()
+        .map(|&[a, b]| {
+            let [a, b] = [position(a), position(b)];
+            [a.x, a.y, b.x, b.y]
+        })
+        .collect()
 }
 
 fn any_line_outside_tile_x(lines: &[Line]) -> bool {
@@ -206,9 +195,9 @@ fn globe_subdivided_polygon_beyond_the_index_limit_keeps_its_granularity() {
 
     let buffers = generate(&polygon, &tile, 128);
 
-    let mut full = subdivide_polygon(&polygon, &tile, 128, true, &mut Triangulator::default());
+    let mut full = subdivide_polygon(&polygon, &tile, 128, true, &mut Tessellator::default());
     add_tile_border_strips(&mut full, &tile, TILE_BORDER_STRIP_WIDTH);
-    assert!(full.vertices.len() / 2 > MAX_SEGMENT_VERTICES);
+    assert!(full.vertices.len() > MAX_SEGMENT_VERTICES);
     assert!(buffers.fill_segments.len() > 1);
     let expected_triangles = mesh_triangles(&full);
     let triangles = drawn_triangles(&buffers.fill_vertices, &buffers.fill_indexes, &buffers.fill_segments);
@@ -371,22 +360,16 @@ fn malformed_triangles_fall_back_to_earcut() {
     }
 }
 
-// A geometry with more vertices than a segment holds is triangulated per
-// polygon, as without triangles, rather than drawn from one segment.
+// A geometry with more vertices than a segment holds is filled with its
+// triangles all the same, from several segments.
 #[test]
-fn pretessellated_geometries_beyond_a_segment_fall_back_to_earcut() {
-    // Rings of 20,001 vertices on a line, which the earcut path drops for
-    // having no area.
+fn pretessellated_geometries_beyond_a_segment_keep_their_triangles() {
+    // Rings of 20,001 vertices on a line, which have no area to outline.
     let ring = |y: i16| (0..=20_000).map(|x| p(x, y)).collect::<GeometryCoordinates>();
-    let geometry = GeometryCollection::from(vec![ring(0), ring(1), ring(2), ring(3)]);
-    let mut pretessellated = geometry.clone();
-    pretessellated.set_triangles(Arc::from(&[0u32, 1, 20_001][..]), 0..3);
-    let canonical = CanonicalTileID::new(14, 0, 0);
-    let earcut = generate(&geometry, &canonical, 1);
-    let buffers = generate(&pretessellated, &canonical, 1);
-    assert_eq!(earcut.fill_vertices, buffers.fill_vertices);
-    assert_eq!(earcut.fill_indexes, buffers.fill_indexes);
-    assert_eq!(drawn(&earcut), drawn(&buffers));
+    let mut geometry = GeometryCollection::from(vec![ring(0), ring(1), ring(2), ring(3)]);
+    geometry.set_triangles(Arc::from(&[0u32, 1, 20_001, 0, 20_001, 80_003][..]), 0..6);
+    let buffers = generate(&geometry, &CanonicalTileID::new(14, 0, 0), 1);
+    assert_eq!(drawn(&buffers), (vec![[0, 0, 1, 0, 0, 1], [0, 0, 0, 1, 20_000, 3]], vec![]));
 }
 
 // A ring without an area between two with one keeps its vertices for the

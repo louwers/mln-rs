@@ -6,17 +6,16 @@ use mln_style_types::IconOverlapType;
 use mln_tile_id::geometry_tile_data::GeometryCoordinates;
 use mln_util::constants::EXTENT;
 use mln_util::geo::ScreenLineString;
-use mln_util::grid_index::{BBox, GridIndex};
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::intersection_tests::polygon_intersects_polygon;
 
 use crate::buckets::symbol_bucket::{PlacedSymbol, PlacedSymbolPools};
 use crate::geometry::feature_index::IndexedSubfeature;
-use crate::layout::symbol_instance::SymbolInstancePools;
 use crate::layout::symbol_projection::{
-    LabelPlaneProjector, LineProjectionCache, TileDistance, place_first_and_last_glyph, tile_skew_vectors,
+    LabelPlaneProjector, LineLabel, LinePlacer, PlacedGlyph, TileDistance, tile_skew_vectors,
 };
-use crate::text::collision_feature::{CollisionBox, CollisionFeature, ProjectedCollisionBox};
+use crate::text::collision_feature::{CollisionBox, CollisionFeature};
+use crate::text::collision_grid::{Aabb, Grid, Shape};
 
 /// A box's edges: [x1, y1, x2, y2].
 pub(crate) type CollisionBoundaries = [f32; 4];
@@ -34,7 +33,7 @@ impl IntersectStatus {
     pub(crate) const VERTICAL_BORDERS: u8 = 1 << 1;
 }
 
-pub(crate) type CollisionGrid = GridIndex<IndexedSubfeature>;
+pub(crate) type CollisionGrid = Grid<IndexedSubfeature>;
 
 /// How a symbol's text or icon may overlap the symbols placed before it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -125,6 +124,39 @@ struct ProjectedBox {
     all_points_occluded: bool,
 }
 
+/// How the text or the icons of a bucket's symbols collide.
+#[derive(Clone, Copy)]
+pub(crate) struct PartCollision<'a> {
+    pub(crate) tile_projector: &'a TileProjector<'a>,
+    pub(crate) label_plane: &'a LabelPlaneProjector<'a>,
+    /// `*-translate`, in tile units.
+    pub(crate) translation: Vec2,
+    /// Tile units to pixels at the tile's own zoom.
+    pub(crate) pixel_ratio: f32,
+    /// The scale of the placement's zoom over the tile's.
+    pub(crate) scale: f32,
+    pub(crate) overlap_mode: OverlapMode,
+    pub(crate) pitch_with_map: bool,
+    pub(crate) rotate_with_map: bool,
+    /// The tile borders the symbols stay inside, in tile mode.
+    pub(crate) avoid_edges: Option<&'a CollisionBoundaries>,
+    /// The group whose symbols alone these collide with; `None` for every
+    /// group.
+    pub(crate) collision_group: Option<u16>,
+    /// Debug drawing shows the collision circles, so a line label finds all
+    /// it uses.
+    pub(crate) debug: bool,
+}
+
+/// The run a feature is placed for: the glyphs a line label lays out along
+/// its line, at `font_size`.
+#[derive(Clone, Copy)]
+pub(crate) struct LabelRun<'a> {
+    pub(crate) symbol: &'a PlacedSymbol,
+    pub(crate) pools: &'a PlacedSymbolPools,
+    pub(crate) font_size: f32,
+}
+
 pub(crate) struct CollisionIndex {
     view: View,
 
@@ -157,13 +189,14 @@ impl CollisionIndex {
         let height = size.height as f32;
         let grid_width = width + 2.0 * viewport_padding;
         let grid_height = height + 2.0 * viewport_padding;
+        let grid_size = Vec2::new(grid_width, grid_height);
         let reset = |mut grid: CollisionGrid| {
-            grid.reset(grid_width, grid_height, 25);
+            grid.reset(grid_size, 25.0);
             grid
         };
         let (collision_grid, ignored_grid) = match previous {
             Some(previous) => (reset(previous.collision_grid), reset(previous.ignored_grid)),
-            None => (CollisionGrid::new(grid_width, grid_height, 25), CollisionGrid::new(grid_width, grid_height, 25)),
+            None => (CollisionGrid::new(grid_size, 25.0), CollisionGrid::new(grid_size, 25.0)),
         };
         CollisionIndex {
             view: view.clone(),
@@ -176,10 +209,6 @@ impl CollisionIndex {
             grid_bottom_boundary: grid_height,
             pitch_factor: (view.pitch().cos() * view.camera_to_center_distance()) as f32,
         }
-    }
-
-    pub(crate) fn view(&self) -> &View {
-        &self.view
     }
 
     pub(crate) fn viewport_padding(&self) -> f32 {
@@ -294,343 +323,196 @@ impl CollisionIndex {
         result
     }
 
-    /// Places a collision feature. `shift` is a variable anchor's offset,
-    /// unset when there is none.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the feature, its shift and translation, the projectors, the symbol's size and alignment, the collision options and the boxes it writes"
-    )]
+    /// Places `feature`, whose boxes are `boxes`, as `part` collides, and
+    /// writes its projected boxes to `projected_boxes`. `shift` is a
+    /// variable anchor's offset; a line label lays out along `run`.
     pub(crate) fn place_feature(
         &self,
+        part: &PartCollision<'_>,
         feature: &CollisionFeature,
-        instance_pools: &SymbolInstancePools,
+        boxes: &[CollisionBox],
+        run: &LabelRun<'_>,
         shift: Option<Vec2>,
-        translation: Vec2,
-        tile_projector: &TileProjector<'_>,
-        label_plane: &LabelPlaneProjector<'_>,
-        text_pixel_ratio: f32,
-        symbol: &PlacedSymbol,
-        symbol_pools: &PlacedSymbolPools,
-        scale: f32,
-        font_size: f32,
-        overlap_mode: OverlapMode,
-        pitch_with_map: bool,
-        rotate_with_map: bool,
-        collision_debug: bool,
-        avoid_edges: Option<&CollisionBoundaries>,
-        collision_group_predicate: Option<&dyn Fn(&IndexedSubfeature) -> bool>,
-        projected_boxes: &mut Vec<ProjectedCollisionBox>,
+        projected_boxes: &mut Vec<Option<Shape>>,
     ) -> PlacedFeatureResult {
         debug_assert_eq!(projected_boxes.as_slice(), []);
         if feature.along_line {
-            self.place_line_feature(
-                feature,
-                instance_pools,
-                translation,
-                tile_projector,
-                label_plane,
-                text_pixel_ratio,
-                symbol,
-                symbol_pools,
-                scale,
-                font_size,
-                overlap_mode,
-                pitch_with_map,
-                collision_debug,
-                avoid_edges,
-                collision_group_predicate,
-                projected_boxes,
-            )
-        } else {
-            let box_ = &instance_pools.boxes(feature)[0];
-            let elevation = symbol.height_offset;
-            let projected_point =
-                self.project_and_get_perspective_ratio(tile_projector, box_.anchor + translation, elevation);
-            let tile_to_viewport = text_pixel_ratio * projected_point.perspective_ratio;
-            let collision_boundaries: CollisionBoundaries;
-            let mut occluded = projected_point.occluded;
-            if pitch_with_map || rotate_with_map {
-                let projected_box = self.project_collision_box(
-                    box_,
-                    tile_to_viewport,
-                    scale,
-                    tile_projector,
-                    pitch_with_map,
-                    rotate_with_map,
-                    &projected_point,
-                    shift,
-                    translation,
-                    elevation,
-                );
-                collision_boundaries = projected_box.boundaries;
-                occluded = if pitch_with_map { projected_box.all_points_occluded } else { projected_point.occluded };
-            } else {
-                collision_boundaries = Self::projected_collision_boundaries_for_anchor(
-                    &projected_point,
-                    shift.unwrap_or(Vec2::ZERO),
-                    text_pixel_ratio,
-                    box_,
-                );
-            }
-            let projected_collision_box = ProjectedCollisionBox::new_box(
-                collision_boundaries[0],
-                collision_boundaries[1],
-                collision_boundaries[2],
-                collision_boundaries[3],
-            );
-            projected_boxes.push(projected_collision_box);
-            if occluded
-                || projected_point.perspective_ratio < PERSPECTIVE_RATIO_CUTOFF
-                || avoid_edges.as_ref().is_some_and(|edges| !Self::is_inside_tile(&collision_boundaries, edges))
-                || !self.is_inside_grid(&collision_boundaries)
-                || self.collides(overlap_mode, collision_group_predicate, |grid, predicate| {
-                    grid.hit_test(projected_collision_box.box_(), predicate)
-                })
-            {
-                return PlacedFeatureResult { placed: false, offscreen: false, occluded };
-            }
-
-            PlacedFeatureResult { placed: true, offscreen: self.is_offscreen(&collision_boundaries), occluded: false }
+            return self.place_line_feature(part, boxes, run, projected_boxes);
         }
+        let Some(box_) = boxes.first() else {
+            return PlacedFeatureResult::default();
+        };
+        let elevation = run.symbol.height_offset;
+        let projected_point =
+            self.project_and_get_perspective_ratio(part.tile_projector, box_.anchor + part.translation, elevation);
+        let mut occluded = projected_point.occluded;
+        let collision_boundaries = if part.pitch_with_map || part.rotate_with_map {
+            let tile_to_viewport = part.pixel_ratio * projected_point.perspective_ratio;
+            let projected_box =
+                self.project_collision_box(box_, tile_to_viewport, part, &projected_point, shift, elevation);
+            if part.pitch_with_map {
+                occluded = projected_box.all_points_occluded;
+            }
+            projected_box.boundaries
+        } else {
+            Self::projected_collision_boundaries_for_anchor(
+                &projected_point,
+                shift.unwrap_or(Vec2::ZERO),
+                part.pixel_ratio,
+                box_,
+            )
+        };
+        let [x1, y1, x2, y2] = collision_boundaries;
+        let projected_collision_box = Shape::Box(Aabb::new(Vec2::new(x1, y1), Vec2::new(x2, y2)));
+        projected_boxes.push(Some(projected_collision_box));
+        if occluded
+            || projected_point.perspective_ratio < PERSPECTIVE_RATIO_CUTOFF
+            || part.avoid_edges.is_some_and(|edges| !Self::is_inside_tile(&collision_boundaries, edges))
+            || !self.is_inside_grid(&collision_boundaries)
+            || self.collides(part.overlap_mode, part.collision_group, &projected_collision_box)
+        {
+            return PlacedFeatureResult { placed: false, offscreen: false, occluded };
+        }
+        PlacedFeatureResult { placed: true, offscreen: self.is_offscreen(&collision_boundaries), occluded: false }
     }
 
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the feature and its translation, the projectors, the symbol's size and alignment, the collision options and the boxes it writes"
-    )]
+    /// Places a line label's collision circles along its line.
     fn place_line_feature(
         &self,
-        feature: &CollisionFeature,
-        instance_pools: &SymbolInstancePools,
-        translation: Vec2,
-        tile_projector: &TileProjector<'_>,
-        label_plane: &LabelPlaneProjector<'_>,
-        text_pixel_ratio: f32,
-        symbol: &PlacedSymbol,
-        symbol_pools: &PlacedSymbolPools,
-        scale: f32,
-        font_size: f32,
-        overlap_mode: OverlapMode,
-        pitch_with_map: bool,
-        collision_debug: bool,
-        avoid_edges: Option<&CollisionBoundaries>,
-        collision_group_predicate: Option<&dyn Fn(&IndexedSubfeature) -> bool>,
-        projected_boxes: &mut Vec<ProjectedCollisionBox>,
+        part: &PartCollision<'_>,
+        boxes: &[CollisionBox],
+        run: &LabelRun<'_>,
+        projected_boxes: &mut Vec<Option<Shape>>,
     ) -> PlacedFeatureResult {
-        debug_assert!(feature.along_line);
-        debug_assert_eq!(projected_boxes.as_slice(), []);
+        let symbol = run.symbol;
         let tile_unit_anchor_point = symbol.anchor_point;
         // Line labels are never raised.
-        let anchor = self.project_and_get_perspective_ratio(tile_projector, tile_unit_anchor_point, 0.0);
+        let anchor = self.project_and_get_perspective_ratio(part.tile_projector, tile_unit_anchor_point, 0.0);
         if anchor.occluded {
             return PlacedFeatureResult { placed: false, offscreen: false, occluded: true };
         }
         if anchor.perspective_ratio < PERSPECTIVE_RATIO_CUTOFF {
-            return PlacedFeatureResult { placed: false, offscreen: false, occluded: false };
+            return PlacedFeatureResult::default();
         }
-        let projected_anchor = (anchor.perspective_ratio, anchor.signed_distance_from_camera);
 
-        let corrected_font_size = if pitch_with_map {
-            font_size
-                * tile_projector.pitched_text_correction(&Point::new(
+        let font_size = if part.pitch_with_map {
+            run.font_size
+                * part.tile_projector.pitched_text_correction(&Point::new(
                     f64::from(tile_unit_anchor_point.x),
                     f64::from(tile_unit_anchor_point.y),
                 )) as f32
         } else {
-            font_size
+            run.font_size
         };
-        let font_scale = corrected_font_size / 24.0;
-        let line_offset_x = symbol.line_offset[0] * corrected_font_size;
-        let line_offset_y = symbol.line_offset[1] * corrected_font_size;
+        let first_and_last_glyph = LinePlacer::new(part.label_plane)
+            .begin(LineLabel::new(symbol, run.pools), font_size)
+            .first_and_last_glyph(false);
 
-        let projected_label_plane_anchor = label_plane.project(tile_unit_anchor_point).point;
-        let label_plane_anchor_point =
-            Vec2::new(projected_label_plane_anchor.x as f32, projected_label_plane_anchor.y as f32);
-
-        let mut projections = LineProjectionCache::default();
-        projections.reset(symbol.line.len());
-        let first_and_last_glyph = place_first_and_last_glyph(
-            font_scale,
-            line_offset_x,
-            line_offset_y,
-            /*flip*/ false,
-            label_plane_anchor_point,
-            tile_unit_anchor_point,
-            symbol,
-            symbol_pools,
-            label_plane,
-            &mut projections,
-            /*return tile distance*/ true,
-        );
+        let tile_to_viewport = anchor.perspective_ratio * part.pixel_ratio;
+        // Translates line geometry to tile units, so it takes the scale but
+        // not the perspective ratio.
+        let pixels_to_tile_units = 1.0 / (part.pixel_ratio * part.scale);
+        // How far the label reaches along its line from its anchor, back and
+        // forth, in tile units.
+        let Some((first, last)) = first_and_last_glyph.map(|(first, last)| {
+            let reach = |glyph: &PlacedGlyph| {
+                self.approximate_tile_distance(
+                    glyph.tile_distance,
+                    glyph.angle,
+                    pixels_to_tile_units,
+                    anchor.signed_distance_from_camera,
+                    part.pitch_with_map,
+                )
+            };
+            (reach(&first), reach(&last))
+        }) else {
+            // The label doesn't fit on its line.
+            projected_boxes.resize(boxes.len(), None);
+            return PlacedFeatureResult { placed: false, offscreen: true, occluded: false };
+        };
+        let used = |circle: &CollisionBox| {
+            -first <= circle.signed_distance_from_anchor && circle.signed_distance_from_anchor <= last
+        };
 
         let mut collision_detected = false;
         let mut in_grid = false;
         let mut entirely_offscreen = true;
-
-        let tile_to_viewport = projected_anchor.0 * text_pixel_ratio;
-        // Translates line geometry to tile units, so it takes the scale but
-        // not the perspective ratio.
-        let pixels_to_tile_units = 1.0 / (text_pixel_ratio * scale);
-
-        let mut first_tile_distance: f32 = 0.0;
-        let mut last_tile_distance: f32 = 0.0;
-        if let Some((first, last)) = &first_and_last_glyph {
-            first_tile_distance = self.approximate_tile_distance(
-                first.tile_distance.expect("returnTileDistance"),
-                first.angle,
-                pixels_to_tile_units,
-                projected_anchor.1,
-                pitch_with_map,
-            );
-            last_tile_distance = self.approximate_tile_distance(
-                last.tile_distance.expect("returnTileDistance"),
-                last.angle,
-                pixels_to_tile_units,
-                projected_anchor.1,
-                pitch_with_map,
-            );
-        }
-
-        let mut previous_circle_placed = false;
-        let boxes = instance_pools.boxes(feature);
-        projected_boxes.resize(boxes.len(), ProjectedCollisionBox::default());
+        let mut previous_center: Option<Vec2> = None;
+        projected_boxes.resize(boxes.len(), None);
         for (i, circle) in boxes.iter().enumerate() {
-            let box_signed_distance_from_anchor = circle.signed_distance_from_anchor;
-            if first_and_last_glyph.is_none()
-                || (box_signed_distance_from_anchor < -first_tile_distance)
-                || (box_signed_distance_from_anchor > last_tile_distance)
-            {
-                // The label either doesn't fit on its line or we
-                // don't need to use this circle because the label
-                // doesn't extend this far. Either way, mark the circle unused.
-                previous_circle_placed = false;
+            if !used(circle) {
+                // The label doesn't reach this far.
+                previous_center = None;
                 continue;
             }
-
-            let projected_point = self.project_point_with_projector(tile_projector, circle.anchor + translation);
-            let tile_unit_radius = (circle.x2 - circle.x1) / 2.0;
-            let radius = tile_unit_radius * tile_to_viewport;
-
-            if previous_circle_placed {
-                let previous_circle = &projected_boxes[i - 1];
-                debug_assert!(previous_circle.is_circle());
-                let previous_center = previous_circle.circle().center;
-                let dx = projected_point.x - previous_center.x;
-                let dy = projected_point.y - previous_center.y;
-                // The circle edges touch when the distance between their centers is
-                // 2x the radius When the distance is 1x the radius, they're doubled
-                // up, and we could remove every other circle while keeping them all
-                // in touch. We actually start removing circles when the distance is
-                // √2x the radius:
-                //  thinning the number of circles as much as possible is a major
-                //  performance win, and the small gaps introduced don't make a very
-                //  noticeable difference.
-                let placed_too_densely = radius * radius * 2.0 > dx * dx + dy * dy;
-                if placed_too_densely && let Some(next_circle) = boxes.get(i + 1) {
-                    let next_box_distance_from_anchor = next_circle.signed_distance_from_anchor;
-                    if (next_box_distance_from_anchor > -first_tile_distance)
-                        && (next_box_distance_from_anchor < last_tile_distance)
-                    {
-                        // Hide significantly overlapping circles, unless this
-                        // is the last one we can use, in which case we want to
-                        // keep it in place even if it's tightly packed with the
-                        // one before it.
-                        previous_circle_placed = false;
-                        continue;
-                    }
-                }
+            let center = self.project_point_with_projector(part.tile_projector, circle.anchor + part.translation);
+            let radius = (circle.x2 - circle.x1) / 2.0 * tile_to_viewport;
+            // Circles closer than √2 radii to the last one placed are skipped,
+            // which thins them as much as can be with small gaps, unless it is
+            // the last circle the label uses.
+            if let Some(previous) = previous_center
+                && radius * radius * 2.0 > previous.distance_squared(center)
+                && boxes.get(i + 1).is_some_and(|next| {
+                    -first < next.signed_distance_from_anchor && next.signed_distance_from_anchor < last
+                })
+            {
+                previous_center = None;
+                continue;
             }
+            previous_center = Some(center);
 
-            previous_circle_placed = true;
-
-            let collision_boundaries: CollisionBoundaries = [
-                projected_point.x - radius,
-                projected_point.y - radius,
-                projected_point.x + radius,
-                projected_point.y + radius,
-            ];
-
-            projected_boxes[i] = ProjectedCollisionBox::new_circle(projected_point.x, projected_point.y, radius);
-
+            let collision_boundaries = [center.x - radius, center.y - radius, center.x + radius, center.y + radius];
+            let circle = Shape::Circle { center, radius };
+            projected_boxes[i] = Some(circle);
             entirely_offscreen &= self.is_offscreen(&collision_boundaries);
             in_grid |= self.is_inside_grid(&collision_boundaries);
 
-            if avoid_edges.is_some_and(|edges| !Self::is_inside_tile(&collision_boundaries, edges))
-                || self.collides(overlap_mode, collision_group_predicate, |grid, predicate| {
-                    grid.hit_test_circle(projected_boxes[i].circle(), predicate)
-                })
+            if part.avoid_edges.is_some_and(|edges| !Self::is_inside_tile(&collision_boundaries, edges))
+                || self.collides(part.overlap_mode, part.collision_group, &circle)
             {
-                if !collision_debug {
-                    return PlacedFeatureResult { placed: false, offscreen: false, occluded: false };
+                // Debug drawing shows which circles are used, so it keeps
+                // going.
+                if !part.debug {
+                    return PlacedFeatureResult::default();
                 }
-                // Don't early exit if we're showing the debug circles because
-                // we still want to calculate which circles are in use
                 collision_detected = true;
             }
         }
 
-        PlacedFeatureResult {
-            placed: !collision_detected && first_and_last_glyph.is_some() && in_grid,
-            offscreen: entirely_offscreen,
-            occluded: false,
-        }
+        PlacedFeatureResult { placed: !collision_detected && in_grid, offscreen: entirely_offscreen, occluded: false }
     }
 
     /// Whether a box placed with `overlap_mode` collides with a symbol in the
     /// grid, where `hit_test` tests the grid with a predicate.
-    fn collides(
-        &self,
-        overlap_mode: OverlapMode,
-        collision_group_predicate: Option<&dyn Fn(&IndexedSubfeature) -> bool>,
-        hit_test: impl FnOnce(&CollisionGrid, Option<&dyn Fn(&IndexedSubfeature) -> bool>) -> bool,
-    ) -> bool {
+    /// Whether `shape`, placed with `overlap_mode`, collides with a symbol in
+    /// the grid of `collision_group`, or of any group without one.
+    fn collides(&self, overlap_mode: OverlapMode, collision_group: Option<u16>, shape: &Shape) -> bool {
+        let in_group =
+            |feature: &IndexedSubfeature| collision_group.is_none_or(|group| feature.collision_group_id == group);
         match overlap_mode {
-            OverlapMode::Never => hit_test(&self.collision_grid, collision_group_predicate),
+            OverlapMode::Never => self.collision_grid.any(shape, in_group),
             OverlapMode::Always => false,
-            OverlapMode::Cooperative => hit_test(
-                &self.collision_grid,
-                Some(&|feature: &IndexedSubfeature| {
-                    feature.overlap_mode == OverlapMode::Never
-                        && collision_group_predicate.is_none_or(|predicate| predicate(feature))
-                }),
-            ),
+            OverlapMode::Cooperative => self
+                .collision_grid
+                .any(shape, |feature| feature.overlap_mode == OverlapMode::Never && in_group(feature)),
         }
     }
 
     pub(crate) fn insert_feature(
         &mut self,
         feature: &CollisionFeature,
-        projected_boxes: &[ProjectedCollisionBox],
+        projected_boxes: &[Option<Shape>],
         overlap_mode: OverlapMode,
         ignore_placement: bool,
         bucket_instance_id: u32,
         collision_group_id: u16,
     ) {
-        if feature.along_line {
-            for circle in projected_boxes {
-                if !circle.is_circle() {
-                    continue;
-                }
-
-                let subfeature =
-                    indexed_subfeature(&feature.indexed_feature, overlap_mode, bucket_instance_id, collision_group_id);
-                if ignore_placement {
-                    self.ignored_grid.insert_circle(subfeature, circle.circle());
-                } else {
-                    self.collision_grid.insert_circle(subfeature, circle.circle());
-                }
-            }
-        } else if !projected_boxes.is_empty() {
-            debug_assert_eq!(projected_boxes.len(), 1);
-            let box_ = &projected_boxes[0];
-            debug_assert!(box_.is_box());
+        debug_assert!(feature.along_line || projected_boxes.len() <= 1);
+        let grid = if ignore_placement { &mut self.ignored_grid } else { &mut self.collision_grid };
+        for shape in projected_boxes.iter().flatten() {
             let subfeature =
                 indexed_subfeature(&feature.indexed_feature, overlap_mode, bucket_instance_id, collision_group_id);
-            if ignore_placement {
-                self.ignored_grid.insert(subfeature, box_.box_());
-            } else {
-                self.collision_grid.insert(subfeature, box_.box_());
-            }
+            grid.insert(subfeature, *shape);
         }
     }
 
@@ -639,7 +521,7 @@ impl CollisionIndex {
         query_geometry: &ScreenLineString,
     ) -> HashMap<u32, Vec<IndexedSubfeature>> {
         let mut result: HashMap<u32, Vec<IndexedSubfeature>> = HashMap::default();
-        if query_geometry.is_empty() || (self.collision_grid.empty() && self.ignored_grid.empty()) {
+        if query_geometry.is_empty() || (self.collision_grid.is_empty() && self.ignored_grid.is_empty()) {
             return result;
         }
 
@@ -649,32 +531,29 @@ impl CollisionIndex {
         }
 
         // The bounding box of the query in the grid.
-        let mut envelope = BBox::new(grid_query[0], grid_query[0]);
+        let mut envelope = Aabb::new(Vec2::INFINITY, Vec2::NEG_INFINITY);
         for point in &grid_query {
-            envelope.min.x = envelope.min.x.min(point.x);
-            envelope.min.y = envelope.min.y.min(point.y);
-            envelope.max.x = envelope.max.x.max(point.x);
-            envelope.max.y = envelope.max.y.max(point.y);
+            let point = Vec2::new(point.x, point.y);
+            envelope.min = envelope.min.min(point);
+            envelope.max = envelope.max.max(point);
         }
+        let envelope = Shape::Box(envelope);
 
-        let mut features = self.collision_grid.query_with_boxes(&envelope);
-        let ignored_features = self.ignored_grid.query_with_boxes(&envelope);
-        features.extend(ignored_features);
-
+        let features = self.collision_grid.query(&envelope).chain(self.ignored_grid.query(&envelope));
         let mut seen_buckets: HashMap<u32, HashSet<usize>> = HashMap::default();
-        for (feature, bbox) in features {
+        for (feature, shape) in features {
             // Skip already seen features.
             let seen_features = seen_buckets.entry(feature.bucket_instance_id).or_default();
             if seen_features.contains(&feature.index) {
                 continue;
             }
 
-            if !polygon_intersects_box(&grid_query, &bbox) {
+            if !polygon_intersects_box(&grid_query, &shape.bounds()) {
                 continue;
             }
 
             seen_features.insert(feature.index);
-            result.entry(feature.bucket_instance_id).or_default().push(feature);
+            result.entry(feature.bucket_instance_id).or_default().push(feature.clone());
         }
 
         result
@@ -765,23 +644,16 @@ impl CollisionIndex {
     /// Projects a pitched or map-rotated box. The box outline is sampled at
     /// eight points and projected, so it turns and foreshortens the way the
     /// label does.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the box, its scales, the projector and alignment flags, and the anchor, shift, translation and height that place it"
-    )]
     fn project_collision_box(
         &self,
         box_: &CollisionBox,
         tile_to_viewport: f32,
-        scale: f32,
-        tile_projector: &TileProjector<'_>,
-        pitch_with_map: bool,
-        rotate_with_map: bool,
+        part: &PartCollision<'_>,
         projected_point: &ProjectedAnchor,
         shift: Option<Vec2>,
-        translation: Vec2,
         elevation: f32,
     ) -> ProjectedBox {
+        let PartCollision { tile_projector, pitch_with_map, rotate_with_map, translation, scale, .. } = *part;
         let anchor = box_.anchor + translation;
         // These vectors hold for screen-space texts aligned with the viewport
         // and for pitched texts aligned with the map.
@@ -873,7 +745,7 @@ fn transform(pos_matrix: &DMat4, point: Vec2) -> DVec4 {
     *pos_matrix * DVec4::new(f64::from(point.x), f64::from(point.y), 0.0, 1.0)
 }
 
-fn polygon_intersects_box(polygon: &[Point<f32>], bbox: &BBox) -> bool {
+fn polygon_intersects_box(polygon: &[Point<f32>], bbox: &Aabb) -> bool {
     // The integer polygon test, whose conversion limits the query's accuracy
     // to a pixel.
     let mut integer_polygon = GeometryCoordinates::new();
@@ -927,17 +799,13 @@ mod tests {
     }
 
     fn insert(index: &mut CollisionIndex, overlap_mode: OverlapMode, collision_group_id: u16) {
-        let projected = [ProjectedCollisionBox::new_box(100.0, 100.0, 200.0, 200.0)];
+        let projected = [Some(Shape::Box(Aabb::new(Vec2::splat(100.0), Vec2::splat(200.0))))];
         index.insert_feature(&feature(0), &projected, overlap_mode, false, 1, collision_group_id);
     }
 
-    fn collides(
-        index: &CollisionIndex,
-        overlap_mode: OverlapMode,
-        predicate: Option<&dyn Fn(&IndexedSubfeature) -> bool>,
-    ) -> bool {
-        let projected = ProjectedCollisionBox::new_box(150.0, 150.0, 250.0, 250.0);
-        index.collides(overlap_mode, predicate, |grid, predicate| grid.hit_test(projected.box_(), predicate))
+    fn collides(index: &CollisionIndex, overlap_mode: OverlapMode, group: Option<u16>) -> bool {
+        let projected = Shape::Box(Aabb::new(Vec2::splat(150.0), Vec2::splat(250.0)));
+        index.collides(overlap_mode, group, &projected)
     }
 
     #[test]
@@ -970,12 +838,12 @@ mod tests {
     }
 
     #[test]
-    fn cooperative_keeps_the_collision_group_predicate() {
+    fn cooperative_keeps_the_collision_group() {
         let mut index = collision_index();
         insert(&mut index, OverlapMode::Never, 2);
-        let same_group = |feature: &IndexedSubfeature| feature.collision_group_id == 2;
-        let other_group = |feature: &IndexedSubfeature| feature.collision_group_id == 3;
-        assert!(collides(&index, OverlapMode::Cooperative, Some(&same_group)));
-        assert!(!collides(&index, OverlapMode::Cooperative, Some(&other_group)));
+        assert!(collides(&index, OverlapMode::Cooperative, Some(2)));
+        assert!(!collides(&index, OverlapMode::Cooperative, Some(3)));
+        assert!(collides(&index, OverlapMode::Never, Some(2)));
+        assert!(!collides(&index, OverlapMode::Never, Some(3)));
     }
 }

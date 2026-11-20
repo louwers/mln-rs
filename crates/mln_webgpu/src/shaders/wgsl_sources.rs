@@ -3,8 +3,6 @@
 use super::shader_source::WgslShaderSource;
 
 pub(crate) const ATMOSPHERE_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "AtmosphereShader",
-    name: r"AtmosphereShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -148,8 +146,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const BACKGROUND_PATTERN_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "BackgroundPatternShader",
-    name: r"BackgroundPatternShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -261,6 +257,10 @@ struct GlobalPaintParamsUBO {
 
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
+#ifdef OVERDRAW_INSPECTOR
+    return vec4<f32>(1.0, 1.0, 1.0, 1.0);
+#endif
+
     let texsize = paintParams.pattern_atlas_texsize;
 
     // A crossfade at 0 or 1 shows one pattern, so skip the other.
@@ -286,8 +286,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const BACKGROUND_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "BackgroundShader",
-    name: r"BackgroundShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -354,6 +352,10 @@ struct BackgroundPropsUBO {
 
 @fragment
 fn main() -> @location(0) vec4<f32> {
+#ifdef OVERDRAW_INSPECTOR
+    return vec4<f32>(1.0, 1.0, 1.0, 1.0);
+#endif
+
     return props.color * props.opacity;
 }
 ",
@@ -362,8 +364,6 @@ fn main() -> @location(0) vec4<f32> {
 };
 
 pub(crate) const CIRCLE_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "CircleShader",
-    name: r"CircleShader",
     vertex: Some(
         r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
@@ -553,6 +553,10 @@ struct FragmentInput {
 
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
+#ifdef OVERDRAW_INSPECTOR
+    return vec4<f32>(1.0, 1.0, 1.0, 1.0);
+#endif
+
     let extrude_length = length(in.extrude);
     let antialiasblur = in.antialiasblur;
 #ifdef HAS_UNIFORM_u_color
@@ -663,8 +667,6 @@ struct GlobalIndexUBO {
 };
 
 pub(crate) const CLIPPING_MASK_PROGRAM: WgslShaderSource = WgslShaderSource {
-    built_in: "ClippingMaskProgram",
-    name: r"ClippingMaskProgram",
     vertex: Some(
         r"
 struct VertexInput {
@@ -698,8 +700,6 @@ fn main() -> @location(0) vec4<f32> {
 };
 
 pub(crate) const COLLISION_BOX_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "CollisionBoxShader",
-    name: r"CollisionBoxShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -812,8 +812,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const COLLISION_CIRCLE_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "CollisionCircleShader",
-    name: r"CollisionCircleShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -954,8 +952,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const COLOR_RELIEF_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "ColorReliefShader",
-    name: r"ColorReliefShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -1122,85 +1118,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-pub(crate) const DEBUG_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "DebugShader",
-    name: r"DebugShader",
-    vertex: Some(
-        r"
-struct VertexInput {
-    @location(5) position: vec2<i32>,
-};
-
-struct VertexOutput {
-    @builtin(position) position: vec4<f32>,
-    @location(0) uv: vec2<f32>,
-};
-
-struct DebugUBO {
-    matrix: mat4x4<f32>,
-    color: vec4<f32>,
-    overlay_scale: f32,
-    pad1: f32,
-    pad2: f32,
-    pad3: f32,
-};
-
-struct GlobalIndexUBO {
-    value: u32,
-    pad0: vec3<u32>,
-};
-
-@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
-@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
-@group(0) @binding(5) var<uniform> debug: DebugUBO;
-
-@vertex
-fn main(in: VertexInput) -> VertexOutput {
-    var out: VertexOutput;
-
-    let scaled_pos = vec2<f32>(f32(in.position.x), f32(in.position.y)) * debug.overlay_scale;
-    out.position = projectTile(scaled_pos, projectionVector[globalIndex.value]);
-
-    // This vertex shader expects a EXTENT x EXTENT quad,
-    // The UV coordinates for the overlay texture can be calculated using that knowledge
-    out.uv = vec2<f32>(f32(in.position.x), f32(in.position.y)) / 8192.0;
-
-    return out;
-}
-",
-    ),
-    fragment: Some(
-        r"
-struct FragmentInput {
-    @location(0) uv: vec2<f32>,
-};
-
-struct DebugUBO {
-    matrix: mat4x4<f32>,
-    color: vec4<f32>,
-    overlay_scale: f32,
-    pad1: f32,
-    pad2: f32,
-    pad3: f32,
-};
-
-@group(0) @binding(5) var<uniform> debug: DebugUBO;
-@group(1) @binding(0) var texture_sampler: sampler;
-@group(1) @binding(1) var overlay_texture: texture_2d<f32>;
-
-@fragment
-fn main(in: FragmentInput) -> @location(0) vec4<f32> {
-    let overlay_color = textureSample(overlay_texture, texture_sampler, in.uv);
-    return mix(debug.color, overlay_color, overlay_color.a);
-}
-",
-    ),
-    prelude: None,
-};
-
 pub(crate) const FILL_EXTRUSION_PATTERN_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "FillExtrusionPatternShader",
-    name: r"FillExtrusionPatternShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -1439,6 +1357,10 @@ struct GlobalIndexUBO {
 
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
+#ifdef OVERDRAW_INSPECTOR
+    return vec4<f32>(1.0, 1.0, 1.0, 1.0);
+#endif
+
     let tileProps = tilePropsVector[globalIndex.value];
 
 #ifdef HAS_UNIFORM_u_pattern_from
@@ -1481,8 +1403,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const FILL_EXTRUSION_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "FillExtrusionShader",
-    name: r"FillExtrusionShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -1620,8 +1540,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const FILL_OUTLINE_PATTERN_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "FillOutlinePatternShader",
-    name: r"FillOutlinePatternShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -1844,6 +1762,10 @@ struct GlobalIndexUBO {
 
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
+#ifdef OVERDRAW_INSPECTOR
+    return vec4<f32>(1.0, 1.0, 1.0, 1.0);
+#endif
+
     let tileProps = tilePropsVector[globalIndex.value];
 
     let pattern_from =
@@ -1915,8 +1837,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const FILL_OUTLINE_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "FillOutlineShader",
-    name: r"FillOutlineShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -2036,6 +1956,10 @@ struct FragmentInput {
 
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
+#ifdef OVERDRAW_INSPECTOR
+    return vec4<f32>(1.0, 1.0, 1.0, 1.0);
+#endif
+
     var color: vec4<f32>;
 #ifdef HAS_UNIFORM_u_outline_color
     color = props.outline_color;
@@ -2061,148 +1985,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-pub(crate) const FILL_OUTLINE_TRIANGULATED_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "FillOutlineTriangulatedShader",
-    name: r"FillOutlineTriangulatedShader",
-    vertex: Some(
-        r"
-const SCALE: f32 = 0.015873016;
-
-struct VertexInput {
-    @location(0) pos_normal: vec2<i32>,
-    @location(1) data: vec4<u32>,
-};
-
-struct VertexOutput {
-    @builtin(position) position: vec4<f32>,
-    @location(0) normal: vec2<f32>,
-    @location(1) width: f32,
-    @location(2) gamma_scale: f32,
-};
-
-struct FillOutlineTriangulatedDrawableUnionUBO {
-    matrix_col0: vec4<f32>,
-    matrix_col1: vec4<f32>,
-    matrix_col2: vec4<f32>,
-    matrix_col3: vec4<f32>,
-    params: vec4<f32>,
-    padding1: vec4<f32>,
-    padding2: vec4<f32>,
-};
-
-struct GlobalPaintParamsUBO {
-    pattern_atlas_texsize: vec2<f32>,
-    units_to_pixels: vec2<f32>,
-    world_size: vec2<f32>,
-    camera_to_center_distance: f32,
-    symbol_fade_change: f32,
-    aspect_ratio: f32,
-    pixel_ratio: f32,
-    map_zoom: f32,
-    pad1: f32,
-};
-
-struct GlobalIndexUBO {
-    value: u32,
-    pad0: vec3<u32>,
-};
-
-@group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
-@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
-@group(0) @binding(2) var<storage, read> drawableVector: array<FillOutlineTriangulatedDrawableUnionUBO>;
-@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
-
-@vertex
-fn main(in: VertexInput) -> VertexOutput {
-    var out: VertexOutput;
-
-    let drawable = drawableVector[globalIndex.value];
-    let matrix = mat4x4<f32>(drawable.matrix_col0,
-                             drawable.matrix_col1,
-                             drawable.matrix_col2,
-                             drawable.matrix_col3);
-    let ratio = max(drawable.params.x, 1e-6);
-
-    let pos_normal = vec2<f32>(f32(in.pos_normal.x), f32(in.pos_normal.y));
-    let pos = floor(pos_normal * 0.5);
-    var normal = pos_normal - pos * 2.0;
-    normal.y = normal.y * 2.0 - 1.0;
-
-    let data = vec4<f32>(in.data);
-    let extrude = data.xy - vec2<f32>(128.0, 128.0);
-
-    let half_width = 0.5;
-    let antialiasing = 0.5 / paintParams.pixel_ratio;
-    let outset = half_width + antialiasing;
-
-    let dist = extrude * outset * SCALE;
-    let extrude_vec = dist / ratio;
-
-    let projected_extrude = projectionVector[globalIndex.value].fallback_matrix * vec4<f32>(extrude_vec, 0.0, 0.0);
-    let base = projectTileWithPoles(pos, pos, projectionVector[globalIndex.value]);
-    let clip = base + projected_extrude;
-    out.position = clip;
-
-    let extrude_length_without_perspective = length(dist);
-    let extrude_length_with_perspective = length((projected_extrude.xy / clip.w) * paintParams.units_to_pixels);
-    let gamma_denom = max(extrude_length_with_perspective, 1e-6);
-
-    out.normal = normal;
-    out.width = outset;
-    out.gamma_scale = extrude_length_without_perspective / gamma_denom;
-
-    return out;
-}
-",
-    ),
-    fragment: Some(
-        r"
-struct FragmentInput {
-    @location(0) normal: vec2<f32>,
-    @location(1) width: f32,
-    @location(2) gamma_scale: f32,
-};
-
-struct FillEvaluatedPropsUBO {
-    color: vec4<f32>,
-    outline_color: vec4<f32>,
-    opacity: f32,
-    fade: f32,
-    from_scale: f32,
-    to_scale: f32,
-};
-
-struct GlobalPaintParamsUBO {
-    pattern_atlas_texsize: vec2<f32>,
-    units_to_pixels: vec2<f32>,
-    world_size: vec2<f32>,
-    camera_to_center_distance: f32,
-    symbol_fade_change: f32,
-    aspect_ratio: f32,
-    pixel_ratio: f32,
-    map_zoom: f32,
-    pad1: f32,
-};
-
-@group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
-@group(0) @binding(6) var<uniform> props: FillEvaluatedPropsUBO;
-
-@fragment
-fn main(in: FragmentInput) -> @location(0) vec4<f32> {
-    let dist = length(in.normal) * in.width;
-    let blur2 = (1.0 / paintParams.pixel_ratio) * in.gamma_scale;
-    let denom = max(blur2, 1e-6);
-    let alpha = clamp(min(dist + blur2, in.width - dist) / denom, 0.0, 1.0);
-    return props.outline_color * (alpha * props.opacity);
-}
-",
-    ),
-    prelude: None,
-};
-
 pub(crate) const FILL_PATTERN_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "FillPatternShader",
-    name: r"FillPatternShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -2417,6 +2200,10 @@ struct GlobalIndexUBO {
 
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
+#ifdef OVERDRAW_INSPECTOR
+    return vec4<f32>(1.0, 1.0, 1.0, 1.0);
+#endif
+
     let tileProps = tilePropsVector[globalIndex.value];
 
     let pattern_from =
@@ -2483,8 +2270,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const FILL_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "FillShader",
-    name: r"FillShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -2586,6 +2371,10 @@ struct FragmentInput {
 
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
+#ifdef OVERDRAW_INSPECTOR
+    return vec4<f32>(1.0, 1.0, 1.0, 1.0);
+#endif
+
     var color: vec4<f32>;
 #ifdef HAS_UNIFORM_u_color
     color = props.color;
@@ -2608,8 +2397,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const GLOBE_DEPTH_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "GlobeDepthShader",
-    name: r"GlobeDepthShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -2648,8 +2435,6 @@ fn main() -> @location(0) vec4<f32> {
 };
 
 pub(crate) const HEATMAP_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "HeatmapShader",
-    name: r"HeatmapShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -2782,8 +2567,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const HEATMAP_TEXTURE_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "HeatmapTextureShader",
-    name: r"HeatmapTextureShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -2848,6 +2631,10 @@ struct HeatmapTextureUBO {
 
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
+#ifdef OVERDRAW_INSPECTOR
+    return vec4<f32>(1.0, 1.0, 1.0, 1.0);
+#endif
+
     let t = textureSample(heatmap_texture, texture_sampler, in.tex_coord).r;
     let color = textureSample(color_ramp_texture, texture_sampler, vec2<f32>(t, 0.5));
     return color * ubo.opacity;
@@ -2861,8 +2648,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 /// `drawableVector`, raised to the heights of the tile's DEM with its skirts
 /// lowered, in the colors of the tile's drape.
 pub(crate) const TERRAIN_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "TerrainShader",
-    name: r"TerrainShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -2926,8 +2711,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 /// the height at a place of a tile, and whose fragments write that height's
 /// bits, least significant byte first, as the texel's channels.
 pub(crate) const TERRAIN_PROBE_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "TerrainProbeShader",
-    name: r"TerrainProbeShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -3014,8 +2797,6 @@ fn terrain_elevation(pos: vec2<f32>, dem_coords: vec4<f32>) -> f32 {
 /// each vertex colored by the texel of `image_texture` it names, which the
 /// vertex stage loads.
 pub(crate) const VERTEX_TEXEL_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "VertexTexelShader",
-    name: r"VertexTexelShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -3053,8 +2834,6 @@ fn main(@location(0) color: vec4<f32>) -> @location(0) vec4<f32> {
 /// texel for texel, with its opacity and, for the blend modes that no blend
 /// function expresses, against a copy of the frame (`backdrop_texture`).
 pub(crate) const LAYER_COMPOSITE_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "LayerCompositeShader",
-    name: r"LayerCompositeShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -3158,8 +2937,6 @@ fn main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const HILLSHADE_PREPARE_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "HillshadePrepareShader",
-    name: r"HillshadePrepareShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -3269,8 +3046,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const HILLSHADE_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "HillshadeShader",
-    name: r"HillshadeShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -3486,8 +3261,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const LINE_GRADIENT_SDF_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "LineGradientSDFShader",
-    name: r"LineGradientSDFShader",
     vertex: Some(
         r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
@@ -3806,6 +3579,9 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
         discard;
     }
 #endif
+#ifdef OVERDRAW_INSPECTOR
+    return vec4<f32>(1.0, 1.0, 1.0, 1.0);
+#endif
     let tileProps = tilePropsVector[globalIndex.value].data;
 #ifdef HAS_UNIFORM_u_blur
     let blur = props.blur;
@@ -3854,8 +3630,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const LINE_GRADIENT_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "LineGradientShader",
-    name: r"LineGradientShader",
     vertex: Some(
         r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
@@ -4091,6 +3865,9 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
         discard;
     }
 #endif
+#ifdef OVERDRAW_INSPECTOR
+    return vec4<f32>(1.0, 1.0, 1.0, 1.0);
+#endif
 #ifdef HAS_UNIFORM_u_blur
     let blur = props.blur;
 #else
@@ -4121,8 +3898,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const LINE_PATTERN_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "LinePatternShader",
-    name: r"LinePatternShader",
     vertex: Some(
         r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
@@ -4423,6 +4198,9 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
         discard;
     }
 #endif
+#ifdef OVERDRAW_INSPECTOR
+    return vec4<f32>(1.0, 1.0, 1.0, 1.0);
+#endif
     let tileProps = tilePropsVector[globalIndex.value].data;
 
 #ifdef HAS_UNIFORM_u_pattern_from
@@ -4510,8 +4288,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const LINE_SDF_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "LineSDFShader",
-    name: r"LineSDFShader",
     vertex: Some(
         r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
@@ -4851,6 +4627,9 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
         discard;
     }
 #endif
+#ifdef OVERDRAW_INSPECTOR
+    return vec4<f32>(1.0, 1.0, 1.0, 1.0);
+#endif
     let tileProps = tilePropsVector[globalIndex.value].data;
 #ifdef HAS_UNIFORM_u_color
     let color = props.color;
@@ -4901,8 +4680,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const LINE_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "LineShader",
-    name: r"LineShader",
     vertex: Some(
         r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
@@ -5143,6 +4920,9 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
         discard;
     }
 #endif
+#ifdef OVERDRAW_INSPECTOR
+    return vec4<f32>(1.0, 1.0, 1.0, 1.0);
+#endif
 #ifdef HAS_UNIFORM_u_color
     let color = props.color;
 #else
@@ -5176,8 +4956,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const PRELUDE: WgslShaderSource = WgslShaderSource {
-    built_in: "Prelude",
-    name: r"Prelude",
     vertex: None,
     fragment: None,
     prelude: Some(
@@ -5423,8 +5201,6 @@ fn atlas_pos(origin: vec2<f32>, offset: vec2<f32>) -> vec2<f32> {
 };
 
 pub(crate) const RASTER_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "RasterShader",
-    name: r"RasterShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -5513,6 +5289,10 @@ struct RasterEvaluatedPropsUBO {
 
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
+#ifdef OVERDRAW_INSPECTOR
+    return vec4<f32>(1.0, 1.0, 1.0, 1.0);
+#endif
+
     var color0 = textureSample(image0, texture_sampler, in.pos0);
     var color1 = textureSample(image1, texture_sampler, in.pos1);
 
@@ -5548,8 +5328,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const SKY_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "SkyShader",
-    name: r"SkyShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -5610,8 +5388,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const SYMBOL_ICON_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "SymbolIconShader",
-    name: r"SymbolIconShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -5790,6 +5566,10 @@ struct FragmentInput {
 
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
+#ifdef OVERDRAW_INSPECTOR
+    return vec4<f32>(1.0, 1.0, 1.0, 1.0);
+#endif
+
     let tileProps = tilePropsVector[globalIndex.value];
 #ifdef HAS_UNIFORM_u_opacity
     let base_opacity = select(props.icon_opacity, props.text_opacity, tileProps.is_text != 0u);
@@ -5890,8 +5670,6 @@ const c_offscreen_degenerate_triangle_location: f32 = -2.0;
 };
 
 pub(crate) const SYMBOL_SDF_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "SymbolSDFShader",
-    name: r"SymbolSDFShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -6119,6 +5897,10 @@ struct FragmentInput {
 
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
+#ifdef OVERDRAW_INSPECTOR
+    return vec4<f32>(1.0, 1.0, 1.0, 1.0);
+#endif
+
     let tileProps = tilePropsVector[globalIndex.value];
 #ifndef HAS_UNIFORM_u_fill_color
     let fill_color = in.fill_color;
@@ -6249,8 +6031,6 @@ const c_offscreen_degenerate_triangle_location: f32 = -2.0;
 };
 
 pub(crate) const SYMBOL_TEXT_AND_ICON_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "SymbolTextAndIconShader",
-    name: r"SymbolTextAndIconShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -6488,6 +6268,10 @@ struct FragmentInput {
 
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
+#ifdef OVERDRAW_INSPECTOR
+    return vec4<f32>(1.0, 1.0, 1.0, 1.0);
+#endif
+
     let tileProps = tilePropsVector[globalIndex.value];
 #ifndef HAS_UNIFORM_u_fill_color
     let fill_color = in.fill_color;
@@ -6623,116 +6407,3 @@ const c_offscreen_degenerate_triangle_location: f32 = -2.0;
 ",
     ),
 };
-
-#[cfg(test)]
-pub(crate) const WIDE_VECTOR_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "WideVectorShader",
-    name: r"WideVectorShader",
-    vertex: Some(
-        r"
-struct VertexInput {
-    @location(5) position: vec3<f32>,
-    @location(6) normal: vec2<f32>,
-    @location(7) texCoord: vec2<f32>,
-};
-
-struct InstanceInput {
-    @location(8) instanceCenter: vec3<f32>,
-    @location(9) instanceColor: vec4<f32>,
-    @location(10) instancePrev: i32,
-    @location(11) instanceNext: i32,
-};
-
-struct VertexOutput {
-    @builtin(position) position: vec4<f32>,
-    @location(0) color: vec4<f32>,
-    @location(1) texCoord: vec2<f32>,
-};
-
-struct WideVectorUBO {
-    mvpMatrix: mat4x4<f32>,
-    mvpMatrixDiff: mat4x4<f32>,
-    mvMatrix: mat4x4<f32>,
-    mvMatrixDiff: mat4x4<f32>,
-    pMatrix: mat4x4<f32>,
-    pMatrixDiff: mat4x4<f32>,
-    frameSize: vec2<f32>,
-    color: vec4<f32>,
-    width: f32,
-    offset: f32,
-    edge: f32,
-    texRepeat: f32,
-    texOffset: vec2<f32>,
-};
-
-@group(0) @binding(0) var<uniform> ubo: WideVectorUBO;
-
-@vertex
-fn main(in: VertexInput, instance: InstanceInput) -> VertexOutput {
-    var out: VertexOutput;
-
-    // Calculate position with offset based on normal
-    let worldPos = instance.instanceCenter + vec3<f32>(in.normal * ubo.width, 0.0);
-    out.position = ubo.mvpMatrix * vec4<f32>(worldPos, 1.0);
-
-    // Pass through color and texture coordinates
-    out.color = instance.instanceColor * ubo.color;
-    out.texCoord = in.texCoord * ubo.texRepeat + ubo.texOffset;
-
-    return out;
-}
-",
-    ),
-    fragment: Some(
-        r"
-@fragment
-fn main(@location(0) color: vec4<f32>, @location(1) texCoord: vec2<f32>) -> @location(0) vec4<f32> {
-    // Simple color output with alpha blending support
-    return color;
-}
-",
-    ),
-    prelude: None,
-};
-
-/// Every extracted specialisation, sorted by `BuiltIn` name.
-#[cfg(test)]
-pub(crate) const ALL: &[&WgslShaderSource] = &[
-    &ATMOSPHERE_SHADER,
-    &BACKGROUND_PATTERN_SHADER,
-    &BACKGROUND_SHADER,
-    &CIRCLE_SHADER,
-    &CLIPPING_MASK_PROGRAM,
-    &COLLISION_BOX_SHADER,
-    &COLLISION_CIRCLE_SHADER,
-    &COLOR_RELIEF_SHADER,
-    &DEBUG_SHADER,
-    &FILL_EXTRUSION_PATTERN_SHADER,
-    &FILL_EXTRUSION_SHADER,
-    &FILL_OUTLINE_PATTERN_SHADER,
-    &FILL_OUTLINE_SHADER,
-    &FILL_OUTLINE_TRIANGULATED_SHADER,
-    &FILL_PATTERN_SHADER,
-    &FILL_SHADER,
-    &GLOBE_DEPTH_SHADER,
-    &HEATMAP_SHADER,
-    &HEATMAP_TEXTURE_SHADER,
-    &HILLSHADE_PREPARE_SHADER,
-    &HILLSHADE_SHADER,
-    &LAYER_COMPOSITE_SHADER,
-    &LINE_GRADIENT_SDF_SHADER,
-    &LINE_GRADIENT_SHADER,
-    &LINE_PATTERN_SHADER,
-    &LINE_SDF_SHADER,
-    &LINE_SHADER,
-    &PRELUDE,
-    &RASTER_SHADER,
-    &SKY_SHADER,
-    &SYMBOL_ICON_SHADER,
-    &SYMBOL_SDF_SHADER,
-    &SYMBOL_TEXT_AND_ICON_SHADER,
-    &TERRAIN_PROBE_SHADER,
-    &TERRAIN_SHADER,
-    &VERTEX_TEXEL_SHADER,
-    &WIDE_VECTOR_SHADER,
-];

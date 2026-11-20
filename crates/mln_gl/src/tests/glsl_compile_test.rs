@@ -1,8 +1,9 @@
 #![cfg(not(target_arch = "wasm32"))]
-//! Compiles and links every GLSL program `shader_source()` returns on an
-//! OpenGL ES 3.0 context and on a desktop OpenGL one, through `GlGpu`, with
-//! the keys of the renderer's variants: in both projection variants, with every data-driven property as a vertex attribute and with
-//! every one as a uniform. Also checks each program against its tables:
+//! Compiles and links every built-in program's GLSL on an OpenGL ES 3.0
+//! context and on a desktop OpenGL one, through `GlGpu`, with the keys of
+//! the renderer's variants: in both projection variants, with every property
+//! the program declares read per vertex and with every one read from its
+//! uniform. Also checks each program against its tables:
 //! every uniform block is as large as the UBO the renderer writes for it,
 //! and every attribute and sampler the program has is in them.
 
@@ -10,12 +11,11 @@ use std::collections::BTreeSet;
 
 use mln_gfx::RendererBackend as _;
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::program_info::program_info;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_util::hash::HashSet;
 
 use crate::shaders::glsl_sources::PRELUDE;
-use crate::shaders::shader_source::{REGISTERED_SHADERS, ShaderSource, shader_source};
+use crate::shaders::shader_source::{BUILT_INS, ShaderSource};
 use crate::{Api, Device, DeviceOptions, RendererBackend};
 
 /// A backend on a device of `api`, or none where there is no EGL to make a
@@ -40,9 +40,8 @@ fn headless_backend(api: Api) -> Option<RendererBackend> {
     }
 }
 
-/// The data-driven properties of a shader: the names after `HAS_UNIFORM_u_`
-/// in its GLSL.
-fn properties(source: &ShaderSource) -> BTreeSet<String> {
+/// The names after `HAS_UNIFORM_u_` in a shader's GLSL.
+fn uniforms(source: &ShaderSource) -> BTreeSet<String> {
     const PREFIX: &str = "HAS_UNIFORM_u_";
     let mut names = BTreeSet::new();
     for glsl in [source.glsl.vertex, source.glsl.fragment] {
@@ -53,6 +52,47 @@ fn properties(source: &ShaderSource) -> BTreeSet<String> {
         }
     }
     names
+}
+
+/// A variant's defines read a property from its uniform only where the
+/// program declares it.
+#[test]
+fn every_program_declares_the_properties_its_glsl_reads_from_uniforms() {
+    for &(program, source) in BUILT_INS {
+        let declared: BTreeSet<String> = program.properties.iter().map(|property| property.name.to_owned()).collect();
+        assert_eq!(uniforms(source), declared, "{}", program.name);
+    }
+}
+
+/// Every program that draws a layer outputs white for the overdraw
+/// inspector, which counts its draws.
+#[test]
+fn every_layer_program_shows_the_overdraw_inspector() {
+    use mln_gfx::shaders::programs::{
+        ATMOSPHERE, CLIPPING_MASK, COLLISION_BOX, COLLISION_CIRCLE, GLOBE_DEPTH, SKY, TERRAIN, TERRAIN_PROBE,
+        VERTEX_TEXEL,
+    };
+    // The terrain shows its drapes, where the draped layers count their draws.
+    let not_layers = [
+        &CLIPPING_MASK,
+        &COLLISION_BOX,
+        &COLLISION_CIRCLE,
+        &GLOBE_DEPTH,
+        &SKY,
+        &ATMOSPHERE,
+        &TERRAIN,
+        &TERRAIN_PROBE,
+        &VERTEX_TEXEL,
+    ];
+    for &(program, source) in BUILT_INS {
+        if !not_layers.contains(&program) {
+            assert!(
+                [source.glsl.vertex, source.glsl.fragment].iter().any(|text| text.contains("OVERDRAW_INSPECTOR")),
+                "{}",
+                program.name
+            );
+        }
+    }
 }
 
 /// The names of the uniform blocks `glsl` declares, in declaration order.
@@ -78,14 +118,13 @@ fn declared_blocks(glsl: &str) -> BTreeSet<String> {
 /// compilers. So every block a shader declares needs an id to bind at.
 #[test]
 fn every_declared_uniform_block_has_a_table_entry() {
-    for &shader_id in REGISTERED_SHADERS {
-        let source = shader_source(shader_id).expect("a registered shader has a source");
+    for &(program, source) in BUILT_INS {
         for glsl in [PRELUDE.vertex, PRELUDE.fragment, source.glsl.vertex, source.glsl.fragment] {
             for block in declared_blocks(glsl) {
                 assert!(
                     source.uniform_blocks.iter().any(|info| info.name == block),
                     "{}: uniform block {block} has no table entry",
-                    source.name
+                    program.name
                 );
             }
         }
@@ -97,13 +136,12 @@ fn every_declared_uniform_block_has_a_table_entry() {
 /// first, in the vertex shader's order (maplibre/maplibre-native#4625).
 #[test]
 fn fragment_shaders_declare_shared_uniform_blocks_first() {
-    for &shader_id in REGISTERED_SHADERS {
-        let source = shader_source(shader_id).expect("a registered shader has a source");
+    for &(program, source) in BUILT_INS {
         let vertex = declared_blocks_in_order(source.glsl.vertex);
         let fragment = declared_blocks_in_order(source.glsl.fragment);
         let shared: Vec<&String> = vertex.iter().filter(|block| fragment.contains(block)).collect();
         let leading: Vec<&String> = fragment.iter().take(shared.len()).collect();
-        assert_eq!(leading, shared, "{}: fragment shader's leading uniform blocks", source.name);
+        assert_eq!(leading, shared, "{}: fragment shader's leading uniform blocks", program.name);
     }
 }
 
@@ -130,18 +168,15 @@ fn every_program_links_and_matches_its_tables(backend: &mut RendererBackend) {
     let parameters = ProgramParameters::new(1.0, false);
 
     let mut programs = 0;
-    for &shader_id in REGISTERED_SHADERS {
-        let source = shader_source(shader_id).expect("a registered shader has a source");
-        let info = program_info(shader_id).expect("a registered shader has a program");
-        let properties = properties(source);
-        let mut property_sets = vec![Vec::new()];
-        if !properties.is_empty() {
-            property_sets.push(properties.iter().map(String::as_str).collect());
+    for &(program, source) in BUILT_INS {
+        let mut property_sets = vec![&[][..]];
+        if !program.properties.is_empty() {
+            property_sets.push(program.properties);
         }
         for variant in [ProjectionVariant::Mercator, ProjectionVariant::Globe] {
-            for (i, property_set) in property_sets.iter().enumerate() {
-                let what = format!("{} ({variant:?}, {})", source.name, ["attributes", "uniforms"][i]);
-                let key = info.variant_key(&parameters, property_set.iter().copied(), variant);
+            for (i, &property_set) in property_sets.iter().enumerate() {
+                let what = format!("{} ({variant:?}, {})", program.name, ["attributes", "uniforms"][i]);
+                let key = program.variant_key(&parameters, property_set, variant);
                 // Fragment shaders default to mediump on a GPU and to highp
                 // on a CPU rasterizer, so both must link wherever this runs.
                 let mut compile = |highp_fragment| {
@@ -182,5 +217,5 @@ fn every_program_links_and_matches_its_tables(backend: &mut RendererBackend) {
             }
         }
     }
-    assert!(programs >= 2 * REGISTERED_SHADERS.len());
+    assert!(programs >= 2 * BUILT_INS.len());
 }

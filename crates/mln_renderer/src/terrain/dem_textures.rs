@@ -74,17 +74,20 @@ mod tests {
     use crate::geometry::dem_data::DEMData;
 
     fn context() -> Context {
-        Context::new(Caps {
-            buffer_offset_alignment: 256,
-            max_texture_size: 4096,
-            half_float_render_targets: false,
-            clip_depth: ClipDepthRange::ZeroToOne,
-            render_target_depth: None,
-            clear_stencil_with_pass: false,
-            cpu_rasterizer: false,
-            max_line_width: 1.0,
-            binds_vertex_buffers: false,
-        })
+        Context::new(
+            Caps {
+                buffer_offset_alignment: 256,
+                max_texture_size: 4096,
+                half_float_render_targets: false,
+                clip_depth: ClipDepthRange::ZeroToOne,
+                render_target_depth: None,
+                clear_stencil_with_pass: false,
+                cpu_rasterizer: false,
+                max_line_width: 1.0,
+                binds_vertex_buffers: false,
+            },
+            1.0,
+        )
     }
 
     fn bucket() -> HillshadeBucket {

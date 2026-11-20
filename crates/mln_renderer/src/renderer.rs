@@ -3,7 +3,6 @@ use std::time::Duration;
 
 use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, Gpu, LoadOp, TargetFormats};
 use mln_gfx::rendering_stats::RenderingStats;
-use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::shaders::shader_defines::ID_GLOBAL_PAINT_PARAMS_UBO;
 use mln_gfx::{FrameImage, Handoff, ScissorRect};
 use mln_map_types::MapDebugOptions;
@@ -21,7 +20,6 @@ use crate::clip_masks::ClipMasks;
 use crate::frame::Frame;
 use crate::frame_projection::{self, FrameProjection};
 use crate::gfx::context::Context;
-use crate::gfx::shader_registry::ShaderRegistry;
 use crate::layer_composite::LayerComposite;
 use crate::layer_drawing::{DrawGroups, DrawOrder};
 use crate::layers::render_custom_layer::end_hosts;
@@ -126,15 +124,16 @@ struct Encoder {
     /// tear-down destroys after what the other fields hold.
     context: Context,
     pixel_ratio: f32,
-    /// Dropped in the tear-down, after the orchestrator.
-    static_data: Option<RenderStaticData>,
+    /// Reset in the tear-down, after the orchestrator.
+    static_data: RenderStaticData,
     /// Kept across frames; dropped in the tear-down.
     clip_masks: ClipMasks,
     /// What layers drawn as a whole draw into and composite with, between
     /// frames.
     layer_composite: LayerComposite,
     /// Whether the context's shaders and pipelines are of an earlier pixel
-    /// ratio, which the next update's render layers no longer draw with.
+    /// ratio or overdraw setting, which the next update's render layers no
+    /// longer draw with.
     shaders_replaced: bool,
     render_state: RenderState,
     /// Where the last frame drew the map.
@@ -203,9 +202,9 @@ impl Renderer {
                 pool,
             ),
             encoder: Encoder {
-                context: Context::new(*gpu.caps()),
+                context: Context::new(*gpu.caps(), pixel_ratio),
                 pixel_ratio,
-                static_data: None,
+                static_data: RenderStaticData::default(),
                 clip_masks: ClipMasks::default(),
                 layer_composite: LayerComposite::default(),
                 shaders_replaced: false,
@@ -227,12 +226,18 @@ impl Renderer {
             return;
         }
         // The shaders build the pixel ratio in on some backends, so a new
-        // ratio takes new shaders, and new draws that use them. The render
-        // layers' draws go with the next update, which makes the layers
-        // again, and the old shaders after it.
+        // ratio takes new shaders, and new draws that use them.
+        self.replace_shaders(pixel_ratio, self.encoder.context.overdraw());
+    }
+
+    /// Compiles the shaders at `pixel_ratio`, with the overdraw inspector if
+    /// `overdraw`, from the next update on. The render layers' draws go with
+    /// that update, which makes the layers again, and the old shaders after
+    /// it.
+    fn replace_shaders(&mut self, pixel_ratio: f32, overdraw: bool) {
         let encoder = &mut self.encoder;
         encoder.pixel_ratio = pixel_ratio;
-        encoder.static_data = None;
+        encoder.context.set_program_parameters(pixel_ratio, overdraw);
         encoder.clip_masks = ClipMasks::default();
         encoder.layer_composite = LayerComposite::default();
         encoder.shaders_replaced = true;
@@ -288,6 +293,11 @@ impl Renderer {
     /// loaded yet. Custom layers that the update removed or gave a new host
     /// end on `gpu`.
     pub fn update(&mut self, gpu: &mut dyn Gpu, update_parameters: &Arc<UpdateParameters>) -> Option<UpdatedFrame> {
+        // The overdraw inspector takes shaders and color modes of its own.
+        let overdraw = update_parameters.debug_options.contains(MapDebugOptions::OVERDRAW);
+        if overdraw != self.encoder.context.overdraw() {
+            self.replace_shaders(self.encoder.pixel_ratio, overdraw);
+        }
         let orchestrator = &mut self.orchestrator;
         let frame = orchestrator.update(update_parameters);
         report(orchestrator, self.events.as_ref());
@@ -514,7 +524,7 @@ impl Renderer {
         drop(orchestrator);
         encoder.clip_masks = ClipMasks::default();
         encoder.layer_composite = LayerComposite::default();
-        encoder.static_data = None;
+        encoder.static_data = RenderStaticData::default();
         encoder.context.tear_down(gpu);
         end_hosts(gpu, ended);
         encoder.context.stats()
@@ -548,10 +558,7 @@ impl Encoder {
             stats.num_draw_calls = 0;
             stats.num_frames += 1;
         }
-        let static_data = &*self.static_data.get_or_insert_with(|| {
-            let program_parameters = ProgramParameters::new(self.pixel_ratio, false);
-            RenderStaticData::new(Box::new(ShaderRegistry::new(&program_parameters)))
-        });
+        let static_data = &self.static_data;
 
         if self.render_state == RenderState::Never {
             emit(events, RendererEvent::RenderMapStarted);
@@ -609,19 +616,13 @@ impl Encoder {
         let draw_groups =
             DrawGroups::of(|visit| orchestrator.visit_draw_groups(visit), parameters.stencil_clear_tile());
         let (proj_state, transform) = (parameters.view, parameters.transform_params);
-        parameters.clip_masks.update(
-            gpu,
-            parameters.context,
-            &static_data.shaders,
-            proj_state.is_globe(),
-            &draw_groups.clip_tiles,
-            |tile| to_projection_ubo(&transform.projection_data_for_tile(tile, false)),
-        );
+        parameters.clip_masks.update(gpu, parameters.context, proj_state.is_globe(), &draw_groups.clip_tiles, |tile| {
+            to_projection_ubo(&transform.projection_data_for_tile(tile, false))
+        });
         orchestrator.terrain().upload_drapes(gpu, &mut parameters);
         parameters.layer_composite.update(
             gpu,
             parameters.context,
-            &static_data.shaders,
             image.size,
             image.targets.color,
             parameters.debug_options.contains(MapDebugOptions::OVERDRAW),

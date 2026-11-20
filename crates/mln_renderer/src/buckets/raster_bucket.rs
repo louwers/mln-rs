@@ -13,6 +13,7 @@ use mln_util::image::PremultipliedImage;
 use crate::bucket::BucketBase;
 use crate::gfx::context::Context;
 use crate::gfx::indexes::{Indexes, SharedIndexes};
+use crate::gfx::mesh::Indexed;
 use crate::gfx::vertices::SharedVertices;
 use crate::tile_mask::TileMask;
 
@@ -134,8 +135,6 @@ impl MaskedGeometry {
     /// Makes `mask` the geometry's, with the quads of its tiles. Returns
     /// whether it changed.
     pub(crate) fn set_mask(&mut self, mask: TileMask) -> bool {
-        const VERTEX_LENGTH: usize = 4;
-
         if self.mask == mask {
             return false;
         }
@@ -146,46 +145,18 @@ impl MaskedGeometry {
             return true;
         }
 
-        // One segment even for a mask of no tiles, which then draws nothing.
-        let mut segments = vec![SegmentBase::new(0, 0)];
         let mut vertices = Vec::new();
-        let mut indices = Vec::new();
+        let (mut indices, mut segments) = (Vec::new(), Vec::new());
         for id in &self.mask {
             // A quad for each tile of the mask.
-            let vertex_extent: i32 = constants::EXTENT >> id.z;
-
-            // `id.x * vertex_extent` in `i32`, wrapped to `i16`.
-            let tl_vertex = Point::new(
-                (id.x as i32).wrapping_mul(vertex_extent) as i16,
-                (id.y as i32).wrapping_mul(vertex_extent) as i16,
-            );
-            let br_vertex = Point::new(
-                (i32::from(tl_vertex.x) + vertex_extent) as i16,
-                (i32::from(tl_vertex.y) + vertex_extent) as i16,
-            );
-
-            let (v, i) = (vertices.len(), indices.len());
-            let segment = match segments.last_mut() {
-                Some(segment) if u16::try_from(segment.vertex_length + VERTEX_LENGTH).is_ok() => segment,
-                // A new segment where the last can't index another quad.
-                _ => segments.push_mut(SegmentBase::new(v, i)),
-            };
-
-            for (x, y) in [
-                (tl_vertex.x, tl_vertex.y),
-                (br_vertex.x, tl_vertex.y),
-                (tl_vertex.x, br_vertex.y),
-                (br_vertex.x, br_vertex.y),
-            ] {
-                vertices.push(RasterLayoutVertex::new(Point::new(x, y), Point::new(x as u16, y as u16)));
+            let extent = constants::EXTENT >> id.z;
+            let (left, top) = ((id.x as i32).wrapping_mul(extent), (id.y as i32).wrapping_mul(extent));
+            let first = vertices.len();
+            for (x, y) in [(left, top), (left + extent, top), (left, top + extent), (left + extent, top + extent)] {
+                vertices.push(RasterLayoutVertex::new(Point::new(x as i16, y as i16), Point::new(x as u16, y as u16)));
             }
-
-            debug_assert!(u16::try_from(segment.vertex_length).is_ok());
-            let offset = segment.vertex_length as u16;
-            indices.extend_from_slice(&[offset, offset + 1, offset + 2, offset + 1, offset + 2, offset + 3]);
-
-            segment.vertex_length += VERTEX_LENGTH;
-            segment.index_length += 6;
+            let mut triangles = Indexed { indexes: &mut indices, segments: &mut segments };
+            triangles.add(&mut vertices, first, [[0, 1, 2], [1, 2, 3]]);
         }
         self.set(vertices, indices, segments);
         true

@@ -1,62 +1,31 @@
 use glam::Vec2;
-use mln_math::{deg2radf, fmaxf, fminf};
+use mln_math::deg2radf;
 use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
-use mln_style_types::image::{ImagePosition, ImagePositions, ImageStretches, RectU16};
+use mln_style_types::image::{ImagePosition, ImagePositions, ImageStretch, RectU16};
 use mln_style_types::{SymbolPlacementType, TextRotationAlignmentType};
 use mln_text::PositionedIcon;
-use mln_text::glyph::{Shaping, WritingModeType};
+use mln_text::glyph::Shaping;
 use mln_util::constants::ONE_EM;
 
-use crate::layout::symbol_instance::SymbolContent;
-
+/// A glyph's or an icon's quad, relative to its symbol's anchor.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct SymbolQuad {
     pub(crate) tl: Vec2,
     pub(crate) tr: Vec2,
     pub(crate) bl: Vec2,
     pub(crate) br: Vec2,
+    /// The quad's image in the atlas.
     pub(crate) tex: RectU16,
+    /// The offsets, in pixels, of a stretched icon's corners that don't
+    /// scale with its size.
     pub(crate) pixel_offset_tl: Vec2,
     pub(crate) pixel_offset_br: Vec2,
+    /// The glyph's offset along a line it follows.
     pub(crate) glyph_offset: Vec2,
-    pub(crate) writing_mode: WritingModeType,
     pub(crate) is_sdf: bool,
     pub(crate) section_index: usize,
+    /// The smallest scale of a stretched icon, where its fixed parts fill it.
     pub(crate) min_font_scale: Vec2,
-}
-
-impl SymbolQuad {
-    #[expect(clippy::too_many_arguments, reason = "each argument is a field of the quad")]
-    #[must_use]
-    pub(crate) fn new(
-        tl: Vec2,
-        tr: Vec2,
-        bl: Vec2,
-        br: Vec2,
-        tex: RectU16,
-        writing_mode: WritingModeType,
-        glyph_offset: Vec2,
-        is_sdf: bool,
-        pixel_offset_tl: Vec2,
-        pixel_offset_br: Vec2,
-        min_font_scale: Vec2,
-        section_index: usize,
-    ) -> Self {
-        SymbolQuad {
-            tl,
-            tr,
-            bl,
-            br,
-            tex,
-            pixel_offset_tl,
-            pixel_offset_br,
-            glyph_offset,
-            writing_mode,
-            is_sdf,
-            section_index,
-            min_font_scale,
-        }
-    }
 }
 
 pub(crate) type SymbolQuads = Vec<SymbolQuad>;
@@ -64,219 +33,174 @@ pub(crate) type SymbolQuads = Vec<SymbolQuad>;
 /// The border around an image in the atlas: its padding.
 const BORDER: u16 = ImagePosition::PADDING;
 
-fn matrix_multiply(m: &[f32; 4], p: Vec2) -> Vec2 {
-    Vec2::new(m[0] * p.x + m[1] * p.y, m[2] * p.x + m[3] * p.y)
+/// The buffer around a glyph in its rect that its metrics don't include: the
+/// glyph SDF's border of 3 and the atlas padding of 1.
+const GLYPH_RECT_BUFFER: f32 = 4.0;
+
+/// The total length of `stretches` within `min..max`.
+fn stretch_within(stretches: &[ImageStretch], min: f32, max: f32) -> f32 {
+    stretches.iter().map(|&(start, end)| end.clamp(min, max) - start.clamp(min, max)).sum()
 }
 
-#[must_use]
-pub(crate) fn compute_stretch_sum(stretches: &ImageStretches) -> f32 {
-    let mut sum: f32 = 0.0;
-    for stretch in stretches {
-        sum += stretch.1 - stretch.0;
-    }
-    sum
-}
-
-#[must_use]
-pub(crate) fn sum_within_range(stretches: &ImageStretches, min: f32, max: f32) -> f32 {
-    let mut sum: f32 = 0.0;
-    for stretch in stretches {
-        sum += fmaxf(min, fminf(max, stretch.1)) - fmaxf(min, fminf(max, stretch.0));
-    }
-    sum
-}
-
-#[inline]
-#[must_use]
-fn em_offset(stretch_offset: f32, stretch_size: f32, icon_size: f32, icon_offset: f32) -> f32 {
-    icon_offset + icon_size * stretch_offset / stretch_size
-}
-
-#[inline]
-#[must_use]
-fn px_offset(fixed_offset: f32, fixed_size: f32, stretch_offset: f32, stretch_size: f32) -> f32 {
-    fixed_offset - fixed_size * stretch_offset / stretch_size
-}
-
-/// `Cut`.
+/// A position along one axis of an icon's image: `stretch` pixels of its
+/// stretchable parts and `fixed` pixels of the rest.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct Cut {
-    pub(crate) fixed: f32,
-    pub(crate) stretch: f32,
+struct Cut {
+    fixed: f32,
+    stretch: f32,
 }
 
-/// `Cuts`.
-pub(crate) type Cuts = Vec<Cut>;
-
-#[must_use]
-pub(crate) fn stretch_zones_to_cuts(stretch_zones: &ImageStretches, fixed_size: f32, stretch_size: f32) -> Cuts {
-    // `-border` is the `int` -1.
-    let mut cuts: Cuts = vec![Cut { fixed: -i32::from(BORDER) as f32, stretch: 0.0 }];
-
-    let mut last_stretch = 0.0;
-    for zone in stretch_zones {
-        let c1 = zone.0;
-        let c2 = zone.1;
-        cuts.push(Cut { fixed: c1 - last_stretch, stretch: last_stretch });
-        cuts.push(Cut { fixed: c1 - last_stretch, stretch: last_stretch + (c2 - c1) });
-        last_stretch += c2 - c1;
+impl Cut {
+    /// The position in the image, in pixels.
+    fn texel(self) -> f32 {
+        self.stretch + self.fixed
     }
-    cuts.push(Cut { fixed: fixed_size + f32::from(BORDER), stretch: stretch_size });
-    cuts
 }
 
-#[must_use]
-pub(crate) fn icon_quads(
-    shaped_icon: &PositionedIcon,
-    icon_rotate: f32,
-    icon_type: SymbolContent,
-    has_icon_text_fit: bool,
-) -> SymbolQuads {
-    let mut quads = SymbolQuads::new();
+/// How one axis of an icon's image maps to its quad: the stretchable parts
+/// stretch with the icon's size, the rest keeps its size in pixels.
+struct StretchAxis<'a> {
+    stretches: &'a [ImageStretch],
+    /// The image's stretchable and fixed pixels.
+    stretch_size: f32,
+    fixed_size: f32,
+    /// The stretchable and fixed pixels before the icon's content, and
+    /// within it. Without content, the content is the whole image.
+    stretch_offset: f32,
+    stretch_content: f32,
+    fixed_offset: f32,
+    fixed_content: f32,
+    /// Where the icon starts on this axis, and its size, in ems.
+    icon_start: f32,
+    icon_size: f32,
+}
 
-    let image: &ImagePosition = shaped_icon.image();
-    let pixel_ratio = image.pixel_ratio;
-    // `int` arithmetic narrowed to `uint16_t`.
-    let image_width = (i32::from(image.padded_rect.w) - 2 * i32::from(BORDER)) as u16;
-    let image_height = (i32::from(image.padded_rect.h) - 2 * i32::from(BORDER)) as u16;
-
-    let stretch_x_full: ImageStretches = vec![(0.0, f32::from(image_width))];
-    let stretch_y_full: ImageStretches = vec![(0.0, f32::from(image_height))];
-    let stretch_x: &ImageStretches = if image.stretch_x.is_empty() { &stretch_x_full } else { &image.stretch_x };
-    let stretch_y: &ImageStretches = if image.stretch_y.is_empty() { &stretch_y_full } else { &image.stretch_y };
-
-    let stretch_width = compute_stretch_sum(stretch_x);
-    let stretch_height = compute_stretch_sum(stretch_y);
-    let fixed_width = f32::from(image_width) - stretch_width;
-    let fixed_height = f32::from(image_height) - stretch_height;
-
-    let mut stretch_offset_x: f32 = 0.0;
-    let mut stretch_content_width = stretch_width;
-    let mut stretch_offset_y: f32 = 0.0;
-    let mut stretch_content_height = stretch_height;
-    let mut fixed_offset_x: f32 = 0.0;
-    let mut fixed_content_width = fixed_width;
-    let mut fixed_offset_y: f32 = 0.0;
-    let mut fixed_content_height = fixed_height;
-
-    let mut icon = shaped_icon.clone();
-
-    if has_icon_text_fit && let Some(content) = &image.content {
-        let content_width = content.right - content.left;
-        let content_height = content.bottom - content.top;
-        if image.text_fit_width.is_some() || image.text_fit_height.is_some() {
-            icon = icon.apply_text_fit();
-        }
-        stretch_offset_x = sum_within_range(stretch_x, 0.0, content.left);
-        stretch_offset_y = sum_within_range(stretch_y, 0.0, content.top);
-        stretch_content_width = sum_within_range(stretch_x, content.left, content.right);
-        stretch_content_height = sum_within_range(stretch_y, content.top, content.bottom);
-        fixed_offset_x = content.left - stretch_offset_x;
-        fixed_offset_y = content.top - stretch_offset_y;
-        fixed_content_width = content_width - stretch_content_width;
-        fixed_content_height = content_height - stretch_content_height;
-    }
-
-    let mut matrix: Option<[f32; 4]> = None;
-    if icon_rotate != 0.0 {
-        let angle = deg2radf(icon_rotate);
-        let angle_sin = angle.sin();
-        let angle_cos = angle.cos();
-        matrix = Some([angle_cos, -angle_sin, angle_sin, angle_cos]);
-    }
-
-    let icon_left = icon.left();
-    let icon_top = icon.top();
-    let icon_width = icon.right() - icon_left;
-    let icon_height = icon.bottom() - icon_top;
-
-    let mut make_box = |left: Cut, top: Cut, right: Cut, bottom: Cut| {
-        let left_em = em_offset(left.stretch - stretch_offset_x, stretch_content_width, icon_width, icon_left);
-        let left_px = px_offset(left.fixed - fixed_offset_x, fixed_content_width, left.stretch, stretch_width);
-
-        let top_em = em_offset(top.stretch - stretch_offset_y, stretch_content_height, icon_height, icon_top);
-        let top_px = px_offset(top.fixed - fixed_offset_y, fixed_content_height, top.stretch, stretch_height);
-
-        let right_em = em_offset(right.stretch - stretch_offset_x, stretch_content_width, icon_width, icon_left);
-        let right_px = px_offset(right.fixed - fixed_offset_x, fixed_content_width, right.stretch, stretch_width);
-
-        let bottom_em = em_offset(bottom.stretch - stretch_offset_y, stretch_content_height, icon_height, icon_top);
-        let bottom_px = px_offset(bottom.fixed - fixed_offset_y, fixed_content_height, bottom.stretch, stretch_height);
-
-        let mut tl = Vec2::new(left_em, top_em);
-        let mut tr = Vec2::new(right_em, top_em);
-        let mut br = Vec2::new(right_em, bottom_em);
-        let mut bl = Vec2::new(left_em, bottom_em);
-        let pixel_offset_tl = Vec2::new(left_px / pixel_ratio, top_px / pixel_ratio);
-        let pixel_offset_br = Vec2::new(right_px / pixel_ratio, bottom_px / pixel_ratio);
-
-        if let Some(matrix) = &matrix {
-            tl = matrix_multiply(matrix, tl);
-            tr = matrix_multiply(matrix, tr);
-            bl = matrix_multiply(matrix, bl);
-            br = matrix_multiply(matrix, br);
-        }
-
-        let x1 = left.stretch + left.fixed;
-        let x2 = right.stretch + right.fixed;
-        let y1 = top.stretch + top.fixed;
-        let y2 = bottom.stretch + bottom.fixed;
-
-        // TODO: consider making texture coordinates float instead of u16
-        // (the padded rect's x plus the border is an integer, which the
-        // stretch offset makes a float, which truncates to u16.)
-        let sub_rect = RectU16 {
-            x: ((i32::from(image.padded_rect.x) + i32::from(BORDER)) as f32 + x1) as u16,
-            y: ((i32::from(image.padded_rect.y) + i32::from(BORDER)) as f32 + y1) as u16,
-            w: (x2 - x1) as u16,
-            h: (y2 - y1) as u16,
+impl<'a> StretchAxis<'a> {
+    fn new(
+        stretches: &'a [ImageStretch],
+        image_size: f32,
+        content: Option<(f32, f32)>,
+        icon_start: f32,
+        icon_size: f32,
+    ) -> Self {
+        let stretch_size: f32 = stretches.iter().map(|&(start, end)| end - start).sum();
+        let fixed_size = image_size - stretch_size;
+        let (stretch_offset, stretch_content, fixed_offset, fixed_content) = match content {
+            None => (0.0, stretch_size, 0.0, fixed_size),
+            Some((start, end)) => {
+                let stretch_offset = stretch_within(stretches, 0.0, start);
+                let stretch_content = stretch_within(stretches, start, end);
+                (stretch_offset, stretch_content, start - stretch_offset, end - start - stretch_content)
+            }
         };
+        StretchAxis {
+            stretches,
+            stretch_size,
+            fixed_size,
+            stretch_offset,
+            stretch_content,
+            fixed_offset,
+            fixed_content,
+            icon_start,
+            icon_size,
+        }
+    }
 
-        let min_font_scale_x = fixed_content_width / pixel_ratio / icon_width;
-        let min_font_scale_y = fixed_content_height / pixel_ratio / icon_height;
+    /// Where `cut` is in the quad, in ems.
+    fn em(&self, cut: Cut) -> f32 {
+        self.icon_start + self.icon_size * (cut.stretch - self.stretch_offset) / self.stretch_content
+    }
 
-        // Icon quad is padded, so texture coordinates also need to be padded.
-        quads.push(SymbolQuad::new(
-            tl,
-            tr,
-            bl,
-            br,
-            sub_rect,
-            WritingModeType::None,
-            Vec2::ZERO,
-            icon_type == SymbolContent::IconSDF,
-            pixel_offset_tl,
-            pixel_offset_br,
-            Vec2::new(min_font_scale_x, min_font_scale_y),
-            0,
-        ));
+    /// How far `cut` is from where [`em`](Self::em) puts it, in image pixels.
+    fn px(&self, cut: Cut) -> f32 {
+        cut.fixed - self.fixed_offset - self.fixed_content * cut.stretch / self.stretch_size
+    }
+
+    /// The cuts at the image's edges, including its border, and at the
+    /// edges of its stretchable parts.
+    fn cuts(&self) -> Vec<Cut> {
+        let mut cuts = vec![Cut { fixed: -f32::from(BORDER), stretch: 0.0 }];
+        let mut stretched = 0.0;
+        for &(start, end) in self.stretches {
+            cuts.push(Cut { fixed: start - stretched, stretch: stretched });
+            cuts.push(Cut { fixed: start - stretched, stretch: stretched + (end - start) });
+            stretched += end - start;
+        }
+        cuts.push(Cut { fixed: self.fixed_size + f32::from(BORDER), stretch: self.stretch_size });
+        cuts
+    }
+}
+
+/// The quads of `shaped_icon`, rotated by `icon_rotate` degrees. An icon
+/// fitted to its text with stretchable parts is cut into a quad for each
+/// part, so that only the stretchable ones stretch.
+#[must_use]
+pub(crate) fn icon_quads(shaped_icon: &PositionedIcon, icon_rotate: f32, has_icon_text_fit: bool) -> SymbolQuads {
+    let image = &shaped_icon.image;
+    let pixel_ratio = image.pixel_ratio;
+    let image_width = f32::from(image.padded_rect.w - 2 * BORDER);
+    let image_height = f32::from(image.padded_rect.h - 2 * BORDER);
+    let full_x = [(0.0, image_width)];
+    let full_y = [(0.0, image_height)];
+    let stretch_x = if image.stretch_x.is_empty() { &full_x[..] } else { &image.stretch_x };
+    let stretch_y = if image.stretch_y.is_empty() { &full_y[..] } else { &image.stretch_y };
+
+    let content = image.content.filter(|_| has_icon_text_fit);
+    let bounds = if has_icon_text_fit { shaped_icon.text_fit_bounds() } else { shaped_icon.bounds };
+
+    let x = StretchAxis::new(stretch_x, image_width, content.map(|c| (c.left, c.right)), bounds.left, bounds.width());
+    let y = StretchAxis::new(stretch_y, image_height, content.map(|c| (c.top, c.bottom)), bounds.top, bounds.height());
+
+    let rotation = (icon_rotate != 0.0).then(|| Vec2::from_angle(deg2radf(icon_rotate)));
+    let rotate = |p: Vec2| rotation.map_or(p, |rotation| rotation.rotate(p));
+    let min_font_scale =
+        Vec2::new(x.fixed_content, y.fixed_content) / pixel_ratio / Vec2::new(x.icon_size, y.icon_size);
+    let image_origin = Vec2::new(f32::from(image.padded_rect.x + BORDER), f32::from(image.padded_rect.y + BORDER));
+
+    let quad = |left: Cut, top: Cut, right: Cut, bottom: Cut| {
+        let (x1, y1) = (left.texel(), top.texel());
+        let (x2, y2) = (right.texel(), bottom.texel());
+        SymbolQuad {
+            tl: rotate(Vec2::new(x.em(left), y.em(top))),
+            tr: rotate(Vec2::new(x.em(right), y.em(top))),
+            bl: rotate(Vec2::new(x.em(left), y.em(bottom))),
+            br: rotate(Vec2::new(x.em(right), y.em(bottom))),
+            tex: RectU16 {
+                x: (image_origin.x + x1) as u16,
+                y: (image_origin.y + y1) as u16,
+                w: (x2 - x1) as u16,
+                h: (y2 - y1) as u16,
+            },
+            pixel_offset_tl: Vec2::new(x.px(left), y.px(top)) / pixel_ratio,
+            pixel_offset_br: Vec2::new(x.px(right), y.px(bottom)) / pixel_ratio,
+            glyph_offset: Vec2::ZERO,
+            is_sdf: image.sdf,
+            section_index: 0,
+            min_font_scale,
+        }
     };
 
     if !has_icon_text_fit || (image.stretch_x.is_empty() && image.stretch_y.is_empty()) {
-        make_box(
-            Cut { fixed: 0.0, stretch: -1.0 },
-            Cut { fixed: 0.0, stretch: -1.0 },
-            Cut { fixed: 0.0, stretch: (i32::from(image_width) + 1) as f32 },
-            Cut { fixed: 0.0, stretch: (i32::from(image_height) + 1) as f32 },
-        );
+        // The whole image, and the border around it.
+        let start = Cut { fixed: 0.0, stretch: -1.0 };
+        vec![quad(
+            start,
+            start,
+            Cut { fixed: 0.0, stretch: image_width + 1.0 },
+            Cut { fixed: 0.0, stretch: image_height + 1.0 },
+        )]
     } else {
-        let x_cuts = stretch_zones_to_cuts(stretch_x, fixed_width, stretch_width);
-        let y_cuts = stretch_zones_to_cuts(stretch_y, fixed_height, stretch_height);
-
-        for xi in 0..x_cuts.len() - 1 {
-            let x1 = x_cuts[xi];
-            let x2 = x_cuts[xi + 1];
-            for yi in 0..y_cuts.len() - 1 {
-                let y1 = y_cuts[yi];
-                let y2 = y_cuts[yi + 1];
-                make_box(x1, y1, x2, y2);
-            }
-        }
+        let (x_cuts, y_cuts) = (x.cuts(), y.cuts());
+        x_cuts
+            .windows(2)
+            .flat_map(|x| y_cuts.windows(2).map(move |y| (x, y)))
+            .map(|(x, y)| quad(x[0], y[0], x[1], y[1]))
+            .collect()
     }
-
-    quads
 }
 
+/// The quads of the glyphs and images in `shaped_text`. A glyph without
+/// area has none.
 #[must_use]
 pub(crate) fn glyph_quads(
     shaped_text: &Shaping,
@@ -286,82 +210,61 @@ pub(crate) fn glyph_quads(
     icons: &ImagePositions,
     allow_vertical_placement: bool,
 ) -> SymbolQuads {
-    let text_rotate = deg2radf(layout.text_rotate);
+    let text_rotation = (layout.text_rotate != 0.0).then(|| Vec2::from_angle(deg2radf(layout.text_rotate)));
     let along_line = layout.text_rotation_alignment != TextRotationAlignmentType::Viewport
         && placement != SymbolPlacementType::Point;
 
     let mut quads = SymbolQuads::new();
 
-    for line in &shaped_text.positioned_lines {
-        for positioned_glyph in &line.positioned_glyphs {
-            // A glyph without area has no quad.
-            if !(positioned_glyph.rect.w != 0 && positioned_glyph.rect.h != 0) {
+    for line in &shaped_text.lines {
+        for glyph in &line.glyphs {
+            let rect = glyph.rect;
+            if rect.w == 0 || rect.h == 0 {
                 continue;
             }
 
-            // The rects have an additional buffer that is not included in their size;
-            let glyph_padding: f32 = 1.0;
-            let mut rect_buffer: f32 = 3.0 + glyph_padding;
-            let mut pixel_ratio: f32 = 1.0;
-            let mut line_offset: f32 = 0.0;
-            let rotate_vertical_glyph = (along_line || allow_vertical_placement) && positioned_glyph.vertical;
-            let half_advance = positioned_glyph.metrics.advance as f32 * positioned_glyph.scale / 2.0;
-            let rect = &positioned_glyph.rect;
-            let mut is_sdf = true;
-
-            // Align images and scaled glyphs in the middle of a vertical line.
-            if allow_vertical_placement && shaped_text.verticalizable {
-                let scaled_glyph_offset = (positioned_glyph.scale - 1.0) * ONE_EM;
-                let image_offset = (ONE_EM - positioned_glyph.metrics.width as f32 * positioned_glyph.scale) / 2.0;
-                line_offset = line.line_offset / 2.0
-                    - (if positioned_glyph.image_id.is_some() { -image_offset } else { scaled_glyph_offset });
-            }
-
-            if let Some(image_id) = &positioned_glyph.image_id {
-                let Some(image) = icons.get(image_id) else {
-                    continue;
-                };
-                pixel_ratio = image.pixel_ratio;
-                rect_buffer = f32::from(ImagePosition::PADDING) / pixel_ratio;
-                is_sdf = image.sdf;
-            }
-
-            let glyph_offset =
-                if along_line { Vec2::new(positioned_glyph.x + half_advance, positioned_glyph.y) } else { Vec2::ZERO };
-
-            let mut built_in_offset = if along_line {
-                Vec2::ZERO
-            } else {
-                Vec2::new(
-                    positioned_glyph.x + half_advance + text_offset[0],
-                    positioned_glyph.y + text_offset[1] - line_offset,
-                )
+            let (rect_buffer, pixel_ratio, is_sdf) = match &glyph.image_id {
+                Some(image_id) => {
+                    let Some(image) = icons.get(image_id) else {
+                        continue;
+                    };
+                    (f32::from(ImagePosition::PADDING) / image.pixel_ratio, image.pixel_ratio, image.sdf)
+                }
+                None => (GLYPH_RECT_BUFFER, 1.0, true),
             };
 
-            let mut verticalized_label_offset = Vec2::ZERO;
-            if rotate_vertical_glyph {
-                // Vertical POI labels, that are rotated 90deg CW and whose
-                // glyphs must preserve upright orientation need to be rotated
-                // 90deg CCW. After quad is rotated, it is translated to the
-                // original built-in offset.
-                verticalized_label_offset = built_in_offset;
-                built_in_offset = Vec2::ZERO;
-            }
+            let rotate_vertical_glyph = (along_line || allow_vertical_placement) && glyph.vertical;
+            let half_advance = glyph.metrics.advance as f32 * glyph.scale / 2.0;
+
+            // Align images and scaled glyphs in the middle of a vertical line.
+            let line_offset = if allow_vertical_placement && shaped_text.verticalizable {
+                let scaled_glyph_offset = (glyph.scale - 1.0) * ONE_EM;
+                let image_offset = (ONE_EM - glyph.metrics.width as f32 * glyph.scale) / 2.0;
+                line.line_offset / 2.0 - if glyph.image_id.is_some() { -image_offset } else { scaled_glyph_offset }
+            } else {
+                0.0
+            };
+
+            let glyph_offset = if along_line { Vec2::new(glyph.x + half_advance, glyph.y) } else { Vec2::ZERO };
+
+            let label_offset = if along_line {
+                Vec2::ZERO
+            } else {
+                Vec2::new(glyph.x + half_advance + text_offset[0], glyph.y + text_offset[1] - line_offset)
+            };
+            // A vertical glyph is rotated first and moved to its offset after.
+            let (built_in_offset, verticalized_label_offset) =
+                if rotate_vertical_glyph { (Vec2::ZERO, label_offset) } else { (label_offset, Vec2::ZERO) };
 
             // The rect buffer is in 1x logical units; only rect.w/h carry the
             // texture scale. Fractional left/top metrics keep 2x glyphs
             // centered.
-            let texture_scale: f32 = if positioned_glyph.metrics.is_double_resolution { 2.0 } else { 1.0 };
-            let x1 = (positioned_glyph.metrics.left - rect_buffer) * positioned_glyph.scale - half_advance
-                + built_in_offset.x;
-            let y1 = (-positioned_glyph.metrics.top - rect_buffer) * positioned_glyph.scale + built_in_offset.y;
-            let x2 = x1 + f32::from(rect.w) / texture_scale * positioned_glyph.scale / pixel_ratio;
-            let y2 = y1 + f32::from(rect.h) / texture_scale * positioned_glyph.scale / pixel_ratio;
-
-            let mut tl = Vec2::new(x1, y1);
-            let mut tr = Vec2::new(x2, y1);
-            let mut bl = Vec2::new(x1, y2);
-            let mut br = Vec2::new(x2, y2);
+            let texture_scale: f32 = if glyph.metrics.is_double_resolution { 2.0 } else { 1.0 };
+            let x1 = (glyph.metrics.left - rect_buffer) * glyph.scale - half_advance + built_in_offset.x;
+            let y1 = (-glyph.metrics.top - rect_buffer) * glyph.scale + built_in_offset.y;
+            let x2 = x1 + f32::from(rect.w) / texture_scale * glyph.scale / pixel_ratio;
+            let y2 = y1 + f32::from(rect.h) / texture_scale * glyph.scale / pixel_ratio;
+            let mut corners = [Vec2::new(x1, y1), Vec2::new(x2, y1), Vec2::new(x1, y2), Vec2::new(x2, y2)];
 
             if rotate_vertical_glyph {
                 // Vertical-supporting glyphs are laid out in 24x24 point boxes
@@ -375,63 +278,42 @@ pub(crate) fn glyph_quads(
                 // along the x axis. The y coordinate includes the baseline's
                 // y offset, which needs to be accounted for when the glyph is
                 // rotated and translated.
-
-                let center = Vec2::new(-half_advance, half_advance - Shaping::Y_OFFSET as f32);
-                let vertical_rotation = -std::f32::consts::PI / 2.0;
+                let center = Vec2::new(-half_advance, half_advance - Shaping::Y_OFFSET);
 
                 // The x half-width offset correction is the difference
                 // between full-width and half-width advance: 0 for full-width
                 // glyphs, and it pulls up half-width glyphs.
                 let x_half_width_offset_correction = ONE_EM / 2.0 - half_advance;
                 let y_image_offset_correction =
-                    if positioned_glyph.image_id.is_some() { x_half_width_offset_correction } else { 0.0 };
-                let x_offset_correction = Vec2::new(
-                    5.0 - Shaping::Y_OFFSET as f32 - x_half_width_offset_correction,
-                    -y_image_offset_correction,
-                );
+                    if glyph.image_id.is_some() { x_half_width_offset_correction } else { 0.0 };
+                let offset_correction =
+                    Vec2::new(5.0 - Shaping::Y_OFFSET - x_half_width_offset_correction, -y_image_offset_correction);
 
-                let transform = |p: Vec2| {
-                    Vec2::from_angle(vertical_rotation).rotate(p - center)
-                        + center
-                        + x_offset_correction
-                        + verticalized_label_offset
-                };
-                tl = transform(tl);
-                tr = transform(tr);
-                bl = transform(bl);
-                br = transform(br);
+                corners = corners.map(|p| {
+                    // A quarter turn counter-clockwise, with y down.
+                    let d = p - center;
+                    Vec2::new(d.y, -d.x) + center + offset_correction + verticalized_label_offset
+                });
             }
 
-            if text_rotate != 0.0 {
-                // Compute the transformation matrix.
-                let angle_sin = text_rotate.sin();
-                let angle_cos = text_rotate.cos();
-                let matrix: [f32; 4] = [angle_cos, -angle_sin, angle_sin, angle_cos];
-
-                tl = matrix_multiply(&matrix, tl);
-                tr = matrix_multiply(&matrix, tr);
-                bl = matrix_multiply(&matrix, bl);
-                br = matrix_multiply(&matrix, br);
+            if let Some(rotation) = text_rotation {
+                corners = corners.map(|p| rotation.rotate(p));
             }
 
-            let pixel_offset_tl = Vec2::ZERO;
-            let pixel_offset_br = Vec2::ZERO;
-            let min_font_scale = Vec2::ZERO;
-
-            quads.push(SymbolQuad::new(
+            let [tl, tr, bl, br] = corners;
+            quads.push(SymbolQuad {
                 tl,
                 tr,
                 bl,
                 br,
-                *rect,
-                shaped_text.writing_mode,
+                tex: rect,
+                pixel_offset_tl: Vec2::ZERO,
+                pixel_offset_br: Vec2::ZERO,
                 glyph_offset,
                 is_sdf,
-                pixel_offset_tl,
-                pixel_offset_br,
-                min_font_scale,
-                positioned_glyph.section_index,
-            ));
+                section_index: glyph.section_index,
+                min_font_scale: Vec2::ZERO,
+            });
         }
     }
 
@@ -442,13 +324,11 @@ pub(crate) fn glyph_quads(
 mod tests {
     use mln_style_types::image::Impl as ImageImpl;
     use mln_style_types::{IconTextFitType, SymbolAnchorType};
-    use mln_text::glyph::{GlyphID, GlyphMetrics, PositionedGlyph, PositionedLine};
-    use mln_tile_id::geometry_tile_data::GeometryCoordinates;
+    use mln_text::glyph::{Bounds, GlyphID, GlyphMetrics, PositionedGlyph, PositionedLine};
     use mln_util::image::PremultipliedImage;
     use mln_util::size::Size;
 
     use super::*;
-    use crate::geometry::anchor::Anchor;
 
     /// gtest `EXPECT_FLOAT_EQ`: within 4 ULPs.
     fn assert_float_eq(actual: f32, expected: f32) {
@@ -481,7 +361,7 @@ mod tests {
     }
 
     fn positioned_glyph(code: u32, rect: RectU16, metrics: GlyphMetrics) -> PositionedGlyph {
-        PositionedGlyph::new(GlyphID::new(code), 0.0, 0.0, false, 0, 1.0, rect, metrics, None, 0)
+        PositionedGlyph { glyph: GlyphID::new(code), scale: 1.0, rect, metrics, ..Default::default() }
     }
 
     // Atlas padding is not scaled with the texture scale, so a 2x glyph quad
@@ -500,21 +380,21 @@ mod tests {
 
         // Rects reflect the real DynamicTextureAtlas output: bitmap.size + 2 *
         // ImagePosition::padding (= 2). 1x bitmap 30 -> rect 32; 2x bitmap 60 -> rect 62.
-        let mut shaped_text1x = Shaping::default();
-        shaped_text1x.positioned_lines.push(PositionedLine::default());
-        shaped_text1x.positioned_lines.last_mut().unwrap().positioned_glyphs.push(positioned_glyph(
-            'A' as u32,
-            rect(0, 0, 32, 32),
-            metrics1x,
-        ));
+        let shaped_text1x = Shaping {
+            lines: vec![PositionedLine {
+                glyphs: vec![positioned_glyph('A' as u32, rect(0, 0, 32, 32), metrics1x)],
+                line_offset: 0.0,
+            }],
+            ..Default::default()
+        };
 
-        let mut shaped_text2x = Shaping::default();
-        shaped_text2x.positioned_lines.push(PositionedLine::default());
-        shaped_text2x.positioned_lines.last_mut().unwrap().positioned_glyphs.push(positioned_glyph(
-            'A' as u32,
-            rect(0, 0, 62, 62),
-            metrics2x,
-        ));
+        let shaped_text2x = Shaping {
+            lines: vec![PositionedLine {
+                glyphs: vec![positioned_glyph('A' as u32, rect(0, 0, 62, 62), metrics2x)],
+                line_offset: 0.0,
+            }],
+            ..Default::default()
+        };
 
         let layout = SymbolLayoutProperties::Values::default();
         let image_map = ImagePositions::default();
@@ -540,15 +420,11 @@ mod tests {
     // gtest: getIconQuads.normal
     #[test]
     fn icon_quads_normal() {
-        let _layout = SymbolLayoutProperties::Values::default();
-        let _anchor = Anchor::new(2.0, 3.0, 0.0, Some(0));
         let image = ImagePosition::new(rect(0, 0, 15, 11), &test_image_impl());
 
-        let shaped_icon = PositionedIcon::shape_icon(&image, &[-6.5, -4.5], SymbolAnchorType::Center);
+        let shaped_icon = PositionedIcon::new(&image, [-6.5, -4.5], SymbolAnchorType::Center);
 
-        let _line = GeometryCoordinates::new();
-
-        let quads = icon_quads(&shaped_icon, 0.0, SymbolContent::IconRGBA, false);
+        let quads = icon_quads(&shaped_icon, 0.0, false);
 
         assert_eq!(quads.len(), 1);
         let quad = &quads[0];
@@ -576,36 +452,35 @@ mod tests {
     // gtest: getIconQuads.style
     #[test]
     fn icon_quads_style() {
-        let _anchor = Anchor::new(0.0, 0.0, 0.0, Some(0));
         let image = ImagePosition::new(rect(0, 0, 20, 20), &test_image_impl());
 
-        let _line = GeometryCoordinates::new();
-        let mut shaped_text = Shaping { top: -10.0, bottom: 30.0, left: -60.0, right: 20.0, ..Default::default() };
-        shaped_text.positioned_lines.push(PositionedLine::default());
-        shaped_text.positioned_lines.last_mut().unwrap().positioned_glyphs.push(positioned_glyph(
-            32,
-            RectU16::default(),
-            GlyphMetrics::default(),
-        ));
+        let shaped_text = Shaping {
+            lines: vec![PositionedLine {
+                glyphs: vec![positioned_glyph(32, RectU16::default(), GlyphMetrics::default())],
+                line_offset: 0.0,
+            }],
+            bounds: Bounds { left: -60.0, top: -10.0, right: 20.0, bottom: 30.0 },
+            ..Default::default()
+        };
 
         let fit = |text_fit: IconTextFitType, padding: [f32; 4], font_scale: f32| {
-            let mut shaped_icon = PositionedIcon::shape_icon(&image, &[-9.5, -9.5], SymbolAnchorType::Center);
-            shaped_icon.fit_icon_to_text(&shaped_text, text_fit, &padding, &[0.0, 0.0], font_scale);
-            let quads = icon_quads(&shaped_icon, 0.0, SymbolContent::IconRGBA, false);
+            let mut shaped_icon = PositionedIcon::new(&image, [-9.5, -9.5], SymbolAnchorType::Center);
+            shaped_icon.fit_to_text(&shaped_text, text_fit, padding, [0.0, 0.0], font_scale);
+            let quads = icon_quads(&shaped_icon, 0.0, false);
             assert_eq!(quads.len(), 1);
             quads[0].clone()
         };
 
         // none
         {
-            let shaped_icon = PositionedIcon::shape_icon(&image, &[-9.5, -9.5], SymbolAnchorType::Center);
+            let shaped_icon = PositionedIcon::new(&image, [-9.5, -9.5], SymbolAnchorType::Center);
 
-            assert_float_eq(-18.5, shaped_icon.top());
-            assert_float_eq(-0.5, shaped_icon.right());
-            assert_float_eq(-0.5, shaped_icon.bottom());
-            assert_float_eq(-18.5, shaped_icon.left());
+            assert_float_eq(-18.5, shaped_icon.bounds.top);
+            assert_float_eq(-0.5, shaped_icon.bounds.right);
+            assert_float_eq(-0.5, shaped_icon.bounds.bottom);
+            assert_float_eq(-18.5, shaped_icon.bounds.left);
 
-            let quads = icon_quads(&shaped_icon, 0.0, SymbolContent::IconRGBA, false);
+            let quads = icon_quads(&shaped_icon, 0.0, false);
 
             assert_eq!(quads.len(), 1);
             assert_quad(&quads[0], -19.5, -19.5, 0.5, 0.5);
@@ -694,5 +569,38 @@ mod tests {
             18.333_332,
             26.666_666,
         );
+    }
+
+    #[test]
+    fn icon_quads_cut_a_stretchable_icon_at_its_stretches() {
+        let image = ImageImpl::new(
+            "stretchable".to_owned(),
+            PremultipliedImage::new(Size { width: 10, height: 10 }),
+            1.0,
+            false,
+            vec![(2.0, 8.0)],
+            vec![(2.0, 8.0)],
+            Some(mln_style_types::image::ImageContent { left: 2.0, top: 2.0, right: 8.0, bottom: 8.0 }),
+            None,
+            None,
+        )
+        .expect("valid image");
+        let position = ImagePosition::new(rect(20, 30, 12, 12), &image);
+        let shaped_icon = PositionedIcon::new(&position, [0.0, 0.0], SymbolAnchorType::Center);
+
+        let quads = icon_quads(&shaped_icon, 0.0, true);
+
+        // Three columns and rows: fixed, stretched and fixed, which together
+        // cover the padded image.
+        let texs: Vec<_> = quads.iter().map(|quad| quad.tex).collect();
+        assert_eq!(texs.len(), 9);
+        assert_eq!(texs[0], rect(20, 30, 3, 3));
+        assert_eq!(texs[4], rect(23, 33, 6, 6));
+        assert_eq!(texs[8], rect(29, 39, 3, 3));
+        // A fixed corner has no size in ems, only in pixels: from the border
+        // to the content's start.
+        assert_eq!(quads[0].tl, quads[0].br);
+        assert_eq!(quads[0].pixel_offset_tl, Vec2::new(-3.0, -3.0));
+        assert_eq!(quads[0].pixel_offset_br, Vec2::ZERO);
     }
 }

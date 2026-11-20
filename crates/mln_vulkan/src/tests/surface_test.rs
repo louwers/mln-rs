@@ -37,10 +37,9 @@ use mln_gfx::gpu::{
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::background_layer_ubo::{BackgroundDrawableUBO, BackgroundDrawableUnionUBO, BackgroundPropsUBO};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::program_info::program_info;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
+use mln_gfx::shaders::programs;
 use mln_gfx::shaders::shader_defines::{ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_PROPS_UBO, ID_PROJECTION_UBO};
-use mln_gfx::shaders::shader_source::BuiltIn;
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::types::DepthFunctionType;
 use mln_util::Color;
@@ -198,9 +197,9 @@ fn buffer(gpu: &mut VulkanGpu, usage: BufferUsage, data: &[u8]) -> BufferId {
 impl Scene {
     fn new(backend: &mut Window) -> Scene {
         let gpu = backend.backend.gpu();
-        let program = program_info(BuiltIn::BackgroundShader).expect("BackgroundShader");
+        let program = &programs::BACKGROUND;
         let parameters = ProgramParameters::new(1.0, false);
-        let key = program.variant_key(&parameters, std::iter::empty(), ProjectionVariant::Mercator);
+        let key = program.variant_key(&parameters, [], ProjectionVariant::Mercator);
         let shader = gpu.create_shader(&key).expect("the shader");
         let (attribute, _) = program.attributes[0];
         let layouts = [VertexBufferLayout {

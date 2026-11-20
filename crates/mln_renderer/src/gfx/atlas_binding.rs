@@ -1,10 +1,10 @@
+use mln_gfx::gpu::ShaderKey;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_style_types::AlignmentType;
 
 use crate::draw::{DrawObjects, Textures};
 use crate::gfx::context::Context;
-use crate::gfx::shader_program::ShaderProgram;
 use crate::gfx::store::SharedTexture;
 use crate::paint_parameters::PaintParameters;
 use crate::tile_render_data::TileAtlasTextures;
@@ -55,7 +55,7 @@ impl AtlasBinding {
     /// The textures of a draw with `shader`: the atlases', in the slots the
     /// shader samples them from. [`bind`](Self::bind) sets how they filter.
     #[must_use]
-    pub(crate) fn textures(&self, shader: &ShaderProgram) -> Textures {
+    pub(crate) fn textures(&self, shader: &ShaderKey) -> Textures {
         let mut textures = Textures::default();
         self.set_textures(self.samples_icon(shader), |id, texture| textures[id] = texture.cloned());
         textures
@@ -99,8 +99,8 @@ impl AtlasBinding {
     }
 
     /// Whether `shader` samples the icon texture.
-    fn samples_icon(&self, shader: &ShaderProgram) -> bool {
-        self.icon_texture_id.is_some_and(|id| shader.samples(usize::from(id)))
+    fn samples_icon(&self, shader: &ShaderKey) -> bool {
+        self.icon_texture_id.is_some_and(|id| shader.program().textures.contains(&usize::from(id)))
     }
 }
 

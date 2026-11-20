@@ -15,13 +15,13 @@ use mln_vec_map::VecMap;
 use crate::bucket::Bucket;
 use crate::bucket_parameters::BucketParameters;
 use crate::buckets::heatmap_bucket::HeatmapBucket;
-use crate::geometry::feature_index::FeatureIndex;
+use crate::geometry::feature_index::FeatureIndexBuilder;
 use crate::layer_type::EvaluatedLayer;
 use crate::layout::filter_groups::FilterGroups;
 use crate::layout::layout::{BuildParams, Layout, SourceLayer, layers_by_id};
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::layout::tile_layout::Resolved;
-use crate::util::triangulate::Triangulator;
+use crate::util::tessellator::Tessellator;
 
 pub(crate) struct HeatmapLayout {
     layers: VecMap<String, Arc<EvaluatedLayer<Heatmap>>>,
@@ -87,7 +87,7 @@ impl Layout<Heatmap> for HeatmapLayout {
     fn create_bucket(
         &mut self,
         _resolved: Option<&Resolved>,
-        feature_index: &mut FeatureIndex,
+        feature_index: &mut FeatureIndexBuilder,
         build: &BuildParams,
     ) -> Result<Option<HeatmapBucket>, Error> {
         let source_layer = self.source_layer.layer()?;
@@ -103,8 +103,8 @@ impl Layout<Heatmap> for HeatmapLayout {
                 &PatternLayerMap::default(),
                 i,
                 &build.canonical,
-                &mut Triangulator::default(),
-            )?;
+                &mut Tessellator::default(),
+            );
             feature_index.insert(&geometries, i, &self.source_layer_id, &self.bucket_leader_id);
         }
         Ok(Some(bucket))

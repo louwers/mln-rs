@@ -21,6 +21,7 @@ use mln_gfx::gpu::{
     ResourceId, SamplerId, ShaderId, ShaderKey, SlotMap, TargetFormats, TextureDesc, TextureFormat, TextureId,
     TextureRegion, TextureUsage, VertexStep,
 };
+use mln_gfx::shaders::program::Sources;
 use mln_gfx::shaders::shader_defines::{DRAWABLE_RESERVED_UBO_COUNT, LAYER_SSBO_START_ID};
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{DepthFunctionType, TextureFilterType, TextureWrapType};
@@ -28,7 +29,7 @@ use mln_glsl::layout::{
     DescriptorSetType, IMAGE_SAMPLER_START, IMAGE_TEXTURE_COUNT, LAYER_STORAGE_COUNT, UBO_INDEX_PUSH_CONSTANT_SIZE,
     image_sampler_binding, image_texture_binding,
 };
-use mln_glsl::{AttributeInfo, ResourceUse, Stage, TextureInfo, shader_source};
+use mln_glsl::{AttributeInfo, BUILT_INS, ResourceUse, ShaderSource, Stage, TextureInfo};
 use mln_util::hash::HashMap;
 use mln_util::size::Size;
 
@@ -381,6 +382,8 @@ pub struct VulkanGpu {
     buffers: SlotMap<BufferId, Buffer>,
     textures: SlotMap<TextureId, Texture>,
     samplers: SlotMap<SamplerId, vk::Sampler>,
+    /// The source each program compiles from.
+    sources: Sources<ShaderSource>,
     shaders: SlotMap<ShaderId, Shader>,
     layout_tags: LayoutTags,
     pipelines: SlotMap<PipelineId, Pipeline>,
@@ -655,6 +658,7 @@ impl VulkanGpu {
             buffers: SlotMap::with_key(),
             textures: SlotMap::with_key(),
             samplers: SlotMap::with_key(),
+            sources: Sources::new(BUILT_INS),
             shaders: SlotMap::with_key(),
             layout_tags: LayoutTags::default(),
             pipelines: SlotMap::with_key(),
@@ -1077,8 +1081,8 @@ impl VulkanGpu {
 
     /// Compiles the program of `key`.
     fn compile(&self, key: &ShaderKey) -> Result<Shader, GpuError> {
-        let program = key.program();
-        let source = shader_source(program).ok_or_else(|| GpuError::Unsupported(format!("no GLSL for {program:?}")))?;
+        let name = key.program().name;
+        let source = self.sources.get(key.program())?;
         let mut defines = String::new();
         for (name, value) in key.define_values() {
             let _ = writeln!(defines, "#define {name} {value}");
@@ -1098,10 +1102,10 @@ impl VulkanGpu {
         for stage in [Stage::Vertex, Stage::Fragment] {
             let composed = source.compose(stage, &defines);
             let result = shaders::compile_program(stage, &composed)
-                .map_err(|error| GpuError::Invalid(format!("{}: {error}", source.name)))
+                .map_err(|error| GpuError::Invalid(format!("{name}: {error}")))
                 .and_then(|compiled| {
                     for &ResourceUse { set, binding, size } in &compiled.resources {
-                        let (type_, resource) = binding_of(source.name, source.textures, set, binding)?;
+                        let (type_, resource) = binding_of(name, source.textures, set, binding)?;
                         let set_bindings = &mut bindings[type_ as usize];
                         if !set_bindings.contains(&(binding, resource)) {
                             set_bindings.push((binding, resource));
@@ -1110,7 +1114,7 @@ impl VulkanGpu {
                     }
                     let create_info = vk::ShaderModuleCreateInfo::default().code(&compiled.spirv);
                     // SAFETY: the code is the SPIR-V module naga wrote.
-                    unsafe { self.vk().create_shader_module(&create_info, None) }.map_err(vk_error(source.name))
+                    unsafe { self.vk().create_shader_module(&create_info, None) }.map_err(vk_error(name))
                 });
             match result {
                 Ok(module) => modules.push(module),
@@ -1123,10 +1127,10 @@ impl VulkanGpu {
         for set_bindings in &mut bindings {
             set_bindings.sort_unstable_by_key(|&(binding, _)| binding);
         }
-        self.device.set_debug_name(modules[0], &format!("{}.vert", source.name));
-        self.device.set_debug_name(modules[1], &format!("{}.frag", source.name));
+        self.device.set_debug_name(modules[0], &format!("{name}.vert"));
+        self.device.set_debug_name(modules[1], &format!("{name}.frag"));
         Ok(Shader {
-            name: source.name,
+            name,
             vertex: modules[0],
             fragment: modules[1],
             bindings,

@@ -16,11 +16,11 @@ use crate::gpu::{
     TextureFormat, TextureRegion, TextureUsage, VertexAttribute, VertexBufferLayout, VertexStep, read_texels,
 };
 use crate::shaders::layer_ubo::ProjectionUBO;
+use crate::shaders::programs;
 use crate::shaders::shader_defines::{
     ID_PROJECTION_UBO, ID_TERRAIN_DEM_TEXTURE, ID_TERRAIN_PROBE_DEM_COORDS_VERTEX_ATTRIBUTE,
     ID_TERRAIN_PROBE_POS_VERTEX_ATTRIBUTE, ID_TERRAIN_PROPS_UBO,
 };
-use crate::shaders::shader_source::BuiltIn;
 use crate::shaders::terrain_ubo::TerrainPropsUBO;
 use crate::stencil_mode::StencilMode;
 use crate::texture2d::SamplerState;
@@ -159,7 +159,7 @@ pub fn terrain_heights(gpu: &mut impl Gpu) -> Result<(), GpuError> {
         Dem::new(custom, 1.5, 16, terrarium),
         Dem::flat(),
     ];
-    let shader = gpu.create_shader(&ShaderKey::new(BuiltIn::TerrainProbeShader, []))?;
+    let shader = gpu.create_shader(&ShaderKey::new(&programs::TERRAIN_PROBE, []))?;
     // A tile's own DEM, a quadrant of it, and a sub-rect of an ancestor's.
     let coords =
         [DemCoords::OWN, DemCoords { scale: 0.5, offset: [0.5, 0.0] }, DemCoords { scale: 0.25, offset: [0.25, 0.75] }];

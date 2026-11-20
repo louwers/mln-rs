@@ -128,6 +128,34 @@ impl VertexAttribute {
     }
 }
 
+/// The attributes whose paint property a draw reads from its uniform
+/// instead, by id.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub(crate) struct Uniforms(u16);
+
+const _: () = assert!(MAX_ATTRIBUTE_COUNT_PER_SHADER <= u16::BITS as usize);
+
+impl Uniforms {
+    pub(crate) fn insert(&mut self, id: usize) {
+        self.0 |= 1 << id;
+    }
+
+    #[must_use]
+    pub(crate) fn contains(self, id: usize) -> bool {
+        self.0 & (1 << id) != 0
+    }
+}
+
+impl FromIterator<usize> for Uniforms {
+    fn from_iter<I: IntoIterator<Item = usize>>(ids: I) -> Uniforms {
+        let mut uniforms = Uniforms::default();
+        for id in ids {
+            uniforms.insert(id);
+        }
+        uniforms
+    }
+}
+
 /// Vertex attributes by id.
 #[derive(Default)]
 pub(crate) struct VertexAttributeArray {

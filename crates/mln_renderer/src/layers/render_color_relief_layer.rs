@@ -14,6 +14,7 @@ use mln_gfx::shaders::color_relief_layer_ubo::{
     ColorReliefDrawableUBO, ColorReliefEvaluatedPropsUBO, ColorReliefTilePropsUBO,
 };
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
+use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
     ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE, ID_COLOR_RELIEF_DRAWABLE_UBO, ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE,
@@ -45,14 +46,11 @@ use crate::buckets::hillshade_bucket::HillshadeBucket;
 use crate::buckets::raster_bucket::RasterLayoutVertex;
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::gfx::indexes::{DrawIndexes, Indexes, SharedIndexes};
-use crate::gfx::shader_program::ShaderProgramPtr;
 use crate::gfx::store::SharedTexture;
-use crate::gfx::vertex_attribute::{SharedAttribute, VertexAttributeArray};
+use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::gfx::vertices::SharedVertices;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
-use crate::layer_drawing::{
-    DrawDepth, DrawList, DrawObjectsMut, FrameDraw, KeptDraw, LayerDrawing, TileDraws, TileObjects,
-};
+use crate::layer_drawing::{DrawList, DrawObjectsMut, KeptDraw, TileDraws, TileObjects};
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
@@ -63,8 +61,6 @@ use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::render_tile::FrameTile;
 use crate::tile_matrix::to_projection_ubo;
-
-const COLOR_RELIEF_SHADER_GROUP_NAME: &str = "ColorReliefShader";
 
 /// What the layer keeps of a tile: the draw that colors its bucket's DEM,
 /// with the generation of the bucket's geometry and the DEM's properties it
@@ -127,8 +123,6 @@ pub(crate) struct RenderColorReliefLayer {
     elevation_stops_texture: Option<SharedTexture>,
     color_stops_texture: Option<SharedTexture>,
 
-    color_relief_shader: Option<ShaderProgramPtr>,
-
     static_data_shared_vertices: Option<SharedVertices>,
     /// The triangles of the static data's quad.
     static_data_indices: Option<SharedIndexes>,
@@ -160,7 +154,6 @@ impl RenderColorReliefLayer {
             color_stops: PremultipliedImage::new(Size::new(color_ramp_size, 1)),
             elevation_stops_texture: None,
             color_stops_texture: None,
-            color_relief_shader: None,
             static_data_shared_vertices: None,
             static_data_indices: None,
             globe_meshes: GlobeTileMeshCache::new(),
@@ -309,10 +302,8 @@ impl TypedLayer for RenderColorReliefLayer {
         PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
     }
 
-    /// Drops the shader of the last projection, and the globe's meshes
-    /// when the frame isn't on the globe.
+    /// Drops the globe's meshes when the frame isn't on the globe.
     fn projection_changed(&mut self) {
-        self.color_relief_shader = None;
         if self.base.projection_variant == ProjectionVariant::Mercator {
             self.globe_meshes.clear();
         }
@@ -359,7 +350,6 @@ impl TypedLayer for RenderColorReliefLayer {
         _atlases: &Atlases,
         render_tiles: &[FrameTile<'_, ColorRelief>],
     ) {
-        let shaders = &paint_parameters.static_data.shaders;
         let RenderColorReliefLayer {
             base,
             values,
@@ -371,7 +361,6 @@ impl TypedLayer for RenderColorReliefLayer {
             color_stops,
             elevation_stops_texture,
             color_stops_texture,
-            color_relief_shader,
             static_data_shared_vertices,
             static_data_indices,
             globe_meshes,
@@ -379,14 +368,8 @@ impl TypedLayer for RenderColorReliefLayer {
             ..
         } = self;
 
-        if color_relief_shader.is_none() {
-            *color_relief_shader = shaders.shader(COLOR_RELIEF_SHADER_GROUP_NAME, base.projection_variant);
-        }
-        let Some(color_relief_shader) = color_relief_shader.as_ref() else {
-            Log::error(Event::Render, "ColorRelief shader failed to load");
-            drawing.clear();
-            return;
-        };
+        let color_relief_shader =
+            paint_parameters.context.shader_key(&programs::COLOR_RELIEF, Uniforms::default(), base.projection_variant);
 
         let context = &mut *paint_parameters.context;
         let static_data_shared_vertices = &*static_data_shared_vertices
@@ -546,8 +529,8 @@ impl TypedLayer for RenderColorReliefLayer {
                         draw_textures[id] = Some(texture.clone());
                     }
                     let objects = DrawObjects::new(
-                        Rc::clone(color_relief_shader),
-                        ColorMode::alpha_blended(),
+                        color_relief_shader.clone(),
+                        context.color_mode(ColorMode::alpha_blended()),
                         CullFaceMode::disabled(),
                         geometry,
                         draw_textures,
@@ -569,7 +552,7 @@ impl TypedLayer for RenderColorReliefLayer {
                 tile_props: cached.tile_props,
                 projection: to_projection_ubo(&projection),
             };
-            let draw = FrameDraw { depth: DrawDepth::Off, ..cached.draw.frame_draw(Some(tile_id)) };
+            let draw = cached.draw.frame_draw(Some(tile_id));
             draw_list.push(draw, uniforms);
         }
 

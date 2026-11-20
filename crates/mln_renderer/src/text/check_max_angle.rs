@@ -1,109 +1,88 @@
 use std::collections::VecDeque;
-use std::f64::consts::PI;
 
-use mln_tile_id::geometry_tile_data::{GeometryCoordinate, GeometryCoordinates};
+use glam::Vec2;
+use mln_tile_id::geometry_tile_data::GeometryCoordinate;
 
-use crate::geometry::anchor::Anchor;
+use crate::geometry::anchor::{Anchor, segments, vertex_behind};
 
-/// The distance from `a` to `b` as C++ computes it: the differences are
-/// integers, and the square root of their sum is taken in `f64`, then
-/// narrowed to `f32`. The sum is formed in `f64`, which is exact where the
-/// C++ `int` sum does not overflow.
-fn dist(a: GeometryCoordinate, b: GeometryCoordinate) -> f32 {
-    let dx = f64::from(i32::from(b.x) - i32::from(a.x));
-    let dy = f64::from(i32::from(b.y) - i32::from(a.y));
-    (dx * dx + dy * dy).sqrt() as f32
-}
-
-/// The angle from `b` to `a`: `atan2` of the integer differences, in `f64`.
-fn angle_to(a: GeometryCoordinate, b: GeometryCoordinate) -> f64 {
-    f64::from(i32::from(a.y) - i32::from(b.y)).atan2(f64::from(i32::from(a.x) - i32::from(b.x)))
-}
-
-/// `Corner`.
-struct Corner {
-    distance: f32,
-    angle_delta: f32,
-}
-
-/// Whether the label fits on the line without the sum of the angles within
-/// `window_size` exceeding `max_angle`.
+/// Whether a label of `label_length` centered on `anchor` fits on `line`
+/// with the line turning by at most `max_angle` radians within any stretch
+/// of `window_size`. An anchor without a segment, a horizontal label, always
+/// passes.
 #[must_use]
 pub(crate) fn check_max_angle(
-    line: &GeometryCoordinates,
+    line: &[GeometryCoordinate],
     anchor: &Anchor,
     label_length: f32,
     window_size: f32,
     max_angle: f32,
 ) -> bool {
-    // horizontal labels always pass
     let Some(segment) = anchor.segment else {
         return true;
     };
+    let half_length = label_length / 2.0;
 
-    // `convertPoint<int16_t>(anchor.point)`.
-    let mut p: GeometryCoordinate = GeometryCoordinate::new(anchor.point.x as i16, anchor.point.y as i16);
-    let mut index: usize = segment + 1;
-    let mut anchor_distance: f32 = 0.0;
-
-    // move backwards along the line to the first segment the label appears on
-    while anchor_distance > -label_length / 2.0 {
-        // there isn't enough room for the label after the beginning of the line
-        if index == 0 {
-            return false;
-        }
-
-        index -= 1;
-        anchor_distance -= dist(line[index], p);
-        p = line[index];
+    let (start, behind) = vertex_behind(line, anchor.point, segment, half_length);
+    if behind < half_length {
+        return false;
     }
 
-    anchor_distance += dist(line[index], line[index + 1]);
-    index += 1;
+    // The corners within the window behind the current one, as their
+    // distances from the anchor and turns, and the sum of those turns.
+    let mut corners: VecDeque<(f32, f32)> = VecDeque::new();
+    let mut window_turn = 0.0;
 
-    // store recent corners and their total angle difference
-    let mut recent_corners: VecDeque<Corner> = VecDeque::new();
-    let mut recent_angle_delta: f32 = 0.0;
-
-    // move forwards by the length of the label and check angles along the way
-    while anchor_distance < label_length / 2.0 {
-        // there isn't enough room for the label before the end of the line
-        if index + 1 >= line.len() {
-            return false;
+    let mut distance = -behind;
+    let mut previous_direction: Option<Vec2> = None;
+    for (a, b) in segments(&line[start..]) {
+        let direction = b - a;
+        if direction == Vec2::ZERO {
+            continue;
         }
-
-        let prev = &line[index - 1];
-        let current = &line[index];
-        let next = &line[index + 1];
-
-        let mut angle_delta: f64 = angle_to(*prev, *current) - angle_to(*current, *next);
-        // restrict angle to -pi..pi range (`%` on f64 is C fmod)
-        angle_delta = ((angle_delta + 3.0 * PI) % (PI * 2.0) - PI).abs();
-
-        recent_corners.push_back(Corner { distance: anchor_distance, angle_delta: angle_delta as f32 });
-        recent_angle_delta += angle_delta as f32;
-
-        // remove corners that are far enough away from the list of recent anchors
-        // (C++ reads `front()` unchecked; the queue is never empty here
-        // unless `window_size` is negative.)
-        while let Some(front) = recent_corners.front() {
-            if anchor_distance - front.distance > window_size {
-                recent_angle_delta -= front.angle_delta;
-                recent_corners.pop_front();
-            } else {
-                break;
+        if let Some(previous) = previous_direction {
+            if distance >= half_length {
+                return true;
+            }
+            let turn = previous.perp_dot(direction).atan2(previous.dot(direction)).abs();
+            corners.push_back((distance, turn));
+            window_turn += turn;
+            while let Some(&(corner_distance, corner_turn)) = corners.front()
+                && distance - corner_distance > window_size
+            {
+                window_turn -= corner_turn;
+                corners.pop_front();
+            }
+            if window_turn > max_angle {
+                return false;
             }
         }
+        distance += direction.length();
+        previous_direction = Some(direction);
+    }
+    distance >= half_length
+}
 
-        // the sum of angles within the window area exceeds the maximum allowed value. check fails.
-        if recent_angle_delta > max_angle {
-            return false;
-        }
+#[cfg(test)]
+mod tests {
+    use std::f32::consts::{FRAC_PI_2, FRAC_PI_4};
 
-        index += 1;
-        anchor_distance += dist(*current, *next);
+    use geometry::Point;
+
+    use super::*;
+
+    #[test]
+    fn measures_turns_across_repeated_vertices() {
+        let line = [(0, 0), (4, 0), (4, 0), (4, 4)].map(|(x, y)| Point::new(x, y));
+        let anchor = Anchor::new(4.0, 0.0, 0.0, Some(0));
+        assert!(!check_max_angle(&line, &anchor, 4.0, 2.0, FRAC_PI_4));
+        assert!(check_max_angle(&line, &anchor, 4.0, 2.0, FRAC_PI_2 + 0.01));
     }
 
-    // no part of the line had an angle greater than the maximum allowed. check passes.
-    true
+    #[test]
+    fn fails_without_room_before_the_line_start() {
+        let line = [(0, 0), (10, 0)].map(|(x, y)| Point::new(x, y));
+        let anchor = Anchor::new(1.0, 0.0, 0.0, Some(0));
+        assert!(!check_max_angle(&line, &anchor, 4.0, 2.0, FRAC_PI_4));
+        assert!(check_max_angle(&line, &anchor, 2.0, 2.0, FRAC_PI_4));
+    }
 }

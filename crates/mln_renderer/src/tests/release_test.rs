@@ -5,8 +5,8 @@ use mln_gfx::gpu::{
     VertexBufferLayout, VertexStep,
 };
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
+use mln_gfx::shaders::programs;
 use mln_gfx::shaders::shader_defines::{ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE, ID_PROJECTION_UBO};
-use mln_gfx::shaders::shader_source::BuiltIn;
 use mln_util::Color;
 use mln_util::size::Size;
 
@@ -35,7 +35,7 @@ fn bindings_and_geometry_go_before_what_they_were_made_of() {
         context.upload_indexes(gpu, &indexes).expect("indexes");
         let indices_id = DrawIndexes::Shared(indexes.clone()).buffer(context).expect("a buffer");
 
-        let shader = context.shader(gpu, &ShaderKey::new(BuiltIn::ClippingMaskProgram, [])).expect("the shader");
+        let shader = context.shader(gpu, &ShaderKey::new(&programs::CLIPPING_MASK, [])).expect("the shader");
         let entries = [
             BindGroupEntry::Buffer { id: ID_PROJECTION_UBO as u32, buffer: ubo_id, offset: 0, size: projection as u64 },
             BindGroupEntry::Texture { id: 0, texture: texture_id, sampler },
@@ -85,7 +85,7 @@ fn bindings_and_geometry_go_before_what_they_were_made_of() {
 #[test]
 fn released_shaders_and_pipelines_go() {
     with_context(|gpu, context| {
-        let key = ShaderKey::new(BuiltIn::ClippingMaskProgram, []);
+        let key = ShaderKey::new(&programs::CLIPPING_MASK, []);
         let shader = context.shader(gpu, &key).expect("the shader");
         let pipeline_key = clip_mask_pipeline(shader);
         let pipeline = context.pipeline(gpu, &pipeline_key).expect("the pipeline");

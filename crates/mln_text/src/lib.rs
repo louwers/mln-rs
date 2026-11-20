@@ -18,6 +18,7 @@ pub mod font_name;
 pub mod glyph;
 pub mod glyph_cache;
 pub mod glyph_pbf;
+mod line_breaks;
 pub mod local_glyph_rasterizer;
 mod rasterize;
 mod shaper;
@@ -32,12 +33,12 @@ pub use arabic::shape_arabic;
 pub use bidi::{BiDiRun, starts_right_to_left, visual_runs};
 pub use face::FontFile;
 pub use glyph::{
-    Glyph, GlyphID, GlyphIDType, GlyphMap, GlyphMetrics, GlyphPosition, GlyphPositions, GlyphRange, PositionedGlyph,
-    PositionedLine, Shaping, WritingModeType,
+    Bounds, Glyph, GlyphID, GlyphIDType, GlyphMap, GlyphMetrics, GlyphPosition, GlyphPositions, GlyphRange,
+    PositionedGlyph, PositionedLine, Shaping,
 };
 pub use glyph_cache::GlyphCache;
 pub use shaper::{GlyphAdjust, ShapedText, Shaper};
-pub use shaping::{AnchorAlignment, PositionedIcon, get_anchor_justification, get_shaping};
+pub use shaping::{PositionedIcon, ShapingOptions, anchor_alignment, anchor_justification, shape_text};
 pub use tagged_string::{SectionOptions, TaggedString};
 
 #[cfg(test)]

@@ -4,7 +4,6 @@
 
 use glam::{DVec4, Vec2, Vec4};
 use mln_gfx::ScissorRect;
-use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_map::transform::Transform;
 use mln_map_types::{CameraOptions, ConstrainMode, MapDebugOptions, View, ViewportMode};
 use mln_style::layers::Fill;
@@ -16,7 +15,6 @@ use mln_util::size::Size;
 use super::with_context;
 use crate::clip_masks::ClipMasks;
 use crate::frame::Frame;
-use crate::gfx::shader_registry::ShaderRegistry;
 use crate::layer_composite::LayerComposite;
 use crate::layers::cast_matrix;
 use crate::paint_parameters::{PaintParameters, TransformParameters};
@@ -93,7 +91,7 @@ fn lines_in_a_drape_antialias_at_a_gamma_scale_of_1() {
     with_context(|_, context| {
         let view = view(60.0, 30.0);
         let frame = Frame::new(&view, false, MapDebugOptions::NO_DEBUG);
-        let static_data = RenderStaticData::new(Box::new(ShaderRegistry::new(&ProgramParameters::new(1.0, false))));
+        let static_data = RenderStaticData::default();
         let (mut clip_masks, mut layer_composite) = (ClipMasks::default(), LayerComposite::default());
         let size = Size::new(512, 512);
         let scissor = ScissorRect { x: 0, y: 0, width: size.width, height: size.height };
@@ -143,7 +141,7 @@ fn a_drape_clears_its_stencil_over_its_whole_target() {
     with_context(|_, context| {
         let view = view(0.0, 0.0);
         let frame = Frame::new(&view, false, MapDebugOptions::NO_DEBUG);
-        let static_data = RenderStaticData::new(Box::new(ShaderRegistry::new(&ProgramParameters::new(1.0, false))));
+        let static_data = RenderStaticData::default();
         let (mut clip_masks, mut layer_composite) = (ClipMasks::default(), LayerComposite::default());
         let size = Size::new(512, 512);
         let scissor = ScissorRect { x: 0, y: 0, width: size.width, height: size.height };

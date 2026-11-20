@@ -16,10 +16,11 @@ use mln_gfx::gpu::{
     ResourceId, SamplerId, Scissor, ShaderId, ShaderKey, SlotMap, TextureDesc, TextureFormat, TextureId, TextureRegion,
     TextureUsage, VertexStep, destroy_unused,
 };
+use mln_gfx::shaders::program::Sources;
 use mln_gfx::shaders::shader_defines::{DRAWABLE_RESERVED_UBO_COUNT, LAYER_SSBO_START_ID};
 use mln_gfx::texture2d::SamplerState;
-use mln_glsl::TextureInfo as ShaderTexture;
 use mln_glsl::layout::{DescriptorSetType, IMAGE_SAMPLER_START, LAYER_STORAGE_COUNT};
+use mln_glsl::{BUILT_INS, ShaderSource, TextureInfo as ShaderTexture};
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::size::Size;
 use windows::Win32::Foundation::{HANDLE, RECT};
@@ -289,6 +290,8 @@ pub struct D3d12Gpu {
     /// The upload memory that holds each set of sampler indices bindings
     /// point at, kept as long as the `D3d12Gpu`, as there are few sets.
     sampler_indices: HashMap<[u32; TABLE_SIZE as usize], BufferMemory>,
+    /// The source each program compiles from.
+    sources: Sources<ShaderSource>,
     shaders: SlotMap<ShaderId, Shader>,
     layout_tags: LayoutTags,
     pipelines: SlotMap<PipelineId, Pipeline>,
@@ -481,6 +484,7 @@ impl D3d12Gpu {
             sampler_heap: SamplerHeap::new(d3d)?,
             samplers: SlotMap::with_key(),
             sampler_indices: HashMap::default(),
+            sources: Sources::new(BUILT_INS),
             shaders: SlotMap::with_key(),
             layout_tags: LayoutTags::default(),
             pipelines: SlotMap::with_key(),
@@ -1233,8 +1237,9 @@ impl Gpu for D3d12Gpu {
     }
 
     fn create_shader(&mut self, key: &ShaderKey) -> Result<ShaderId, GpuError> {
-        let program = self.compiler.compile(key)?;
-        let source_textures = mln_glsl::shader_source(key.program()).map_or(&[][..], |source| source.textures);
+        let source = self.sources.get(key.program())?;
+        let program = self.compiler.compile(key, source)?;
+        let source_textures = source.textures;
         let mut reads: Vec<ShaderBinding> = Vec::new();
         let mut buffers = Vec::new();
         let mut textures = Vec::new();

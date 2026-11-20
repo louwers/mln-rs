@@ -9,6 +9,7 @@ use mln_util::subdivision_granularity::{SubdivisionGranularityExpression, Subdiv
 
 use crate::gfx::context::Context;
 use crate::gfx::indexes::{DrawIndexes, Indexes, SharedIndexes};
+use crate::gfx::mesh::Indexed;
 use crate::gfx::vertices::SharedVertices;
 use crate::tile_mask::TileMask;
 use crate::util::subdivision::{NORTH_POLE_Y, SOUTH_POLE_Y};
@@ -58,14 +59,13 @@ impl GlobeTileMesh {
 
 /// The data of the [`GlobeTileMesh`] of the parts of the tile `canonical`
 /// that `mask` keeps, of `layout_vertex`'s vertices.
-pub(crate) fn globe_mesh_data<V>(
+pub(crate) fn globe_mesh_data<V: Copy>(
     canonical: &CanonicalTileID,
     mask: &TileMask,
     layout_vertex: fn(Point<i16>, Point<u16>) -> V,
 ) -> GlobeMeshData<V> {
     let mut vertices: Vec<V> = Vec::new();
-    let mut indices: Vec<u16> = Vec::new();
-    let mut segments: Vec<SegmentBase> = Vec::new();
+    let (mut indices, mut segments) = (Vec::new(), Vec::new());
     for part in mask {
         let mesh = create_tile_mesh(TileMeshOptions {
             granularity: SubdivisionGranularitySetting::globe()
@@ -75,21 +75,15 @@ pub(crate) fn globe_mesh_data<V>(
             extend_to_north_pole: canonical.y == 0 && part.y == 0,
             extend_to_south_pole: canonical.y == (1u32 << canonical.z) - 1 && part.y == (1u32 << part.z) - 1,
         });
-        let vertex_count = mesh.vertices.len() / 2;
-        let segment = match segments.last_mut() {
-            Some(last) if u16::try_from(last.vertex_length + vertex_count).is_ok() => last,
-            _ => segments.push_mut(SegmentBase::new(vertices.len(), indices.len())),
-        };
-        let offset = segment.vertex_length;
+        let first = vertices.len();
         let extent = EXTENT >> part.z;
-        for point in mesh.vertices.as_chunks::<2>().0 {
-            let vy = point[1];
+        for &[x, y] in &mesh.vertices {
             let position = Point::new(
-                (part.x as i32 * extent + (i32::from(point[0]) >> part.z)) as i16,
-                if vy == NORTH_POLE_Y || vy == SOUTH_POLE_Y {
-                    vy
+                (part.x as i32 * extent + (i32::from(x) >> part.z)) as i16,
+                if y == NORTH_POLE_Y || y == SOUTH_POLE_Y {
+                    y
                 } else {
-                    (part.y as i32 * extent + (i32::from(vy) >> part.z)) as i16
+                    (part.y as i32 * extent + (i32::from(y) >> part.z)) as i16
                 },
             );
             // Texture positions stay inside the tile.
@@ -97,13 +91,8 @@ pub(crate) fn globe_mesh_data<V>(
             let texture = Point::new(clamp(position.x), clamp(position.y));
             vertices.push(layout_vertex(position, texture));
         }
-        for triangle in mesh.indices.as_chunks::<3>().0 {
-            indices.push((offset + usize::from(triangle[0])) as u16);
-            indices.push((offset + usize::from(triangle[1])) as u16);
-            indices.push((offset + usize::from(triangle[2])) as u16);
-        }
-        segment.vertex_length += vertex_count;
-        segment.index_length += mesh.indices.len();
+        let mut triangles = Indexed { indexes: &mut indices, segments: &mut segments };
+        triangles.add(&mut vertices, first, mesh.triangles.iter().map(|t| t.map(u32::from)));
     }
     GlobeMeshData { vertices, indices, segments }
 }
@@ -198,13 +187,13 @@ pub(crate) fn raw_globe_tile_mesh(
         extend_to_north_pole: canonical.y == 0,
         extend_to_south_pole: canonical.y == (1u32 << canonical.z) - 1,
     });
-    let vertex_count = mesh.vertices.len() / 2;
+    let vertex_count = mesh.vertices.len();
     debug_assert!(u16::try_from(vertex_count).is_ok());
-    let index_count = mesh.indices.len();
+    let index_count = 3 * mesh.triangles.len();
     RawGlobeTileMesh {
         vertices: bytemuck::cast_slice(&mesh.vertices).to_vec(),
         vertex_count,
-        indices: mesh.indices,
+        indices: mesh.triangles.into_flattened(),
         segments: vec![SegmentBase::with_lengths(0, 0, vertex_count, index_count)],
     }
 }
