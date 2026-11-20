@@ -32,6 +32,7 @@ use mln_gfx::shaders::shader_defines::{
     ID_SYMBOL_IMAGE_ICON_TEXTURE, ID_SYMBOL_IMAGE_TEXTURE, ID_SYMBOL_OPACITY_ATTRIBUTE,
     ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE, ID_SYMBOL_POS_OFFSET_ATTRIBUTE, ID_SYMBOL_PROJECTED_POS_ATTRIBUTE,
     ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE, ID_TERRAIN_DEM_TEXTURE, ID_TERRAIN_DRAPE_TEXTURE, ID_TERRAIN_POS_VERTEX_ATTRIBUTE,
+    ID_TERRAIN_PROBE_DEM_COORDS_VERTEX_ATTRIBUTE, ID_TERRAIN_PROBE_POS_VERTEX_ATTRIBUTE,
     ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE, ID_VERTEX_TEXEL_TEXTURE,
 };
 use mln_gfx::shaders::shader_source::BuiltIn;
@@ -584,6 +585,15 @@ const TERRAIN_ATTRIBUTES: &[AttributeInfo] = &[attr(0, ID_TERRAIN_POS_VERTEX_ATT
 const TERRAIN_TEXTURES: &[TextureInfo] =
     &[unfilterable_tex(0, ID_TERRAIN_DEM_TEXTURE), tex(2, ID_TERRAIN_DRAPE_TEXTURE)];
 shader_source!(TERRAIN_SHADER, TERRAIN_SHADER, "TerrainShader", TERRAIN_ATTRIBUTES, TERRAIN_TEXTURES);
+const TERRAIN_PROBE_ATTRIBUTES: &[AttributeInfo] =
+    &[attr(0, ID_TERRAIN_PROBE_POS_VERTEX_ATTRIBUTE), attr(1, ID_TERRAIN_PROBE_DEM_COORDS_VERTEX_ATTRIBUTE)];
+shader_source!(
+    TERRAIN_PROBE_SHADER,
+    TERRAIN_PROBE_SHADER,
+    "TerrainProbeShader",
+    TERRAIN_PROBE_ATTRIBUTES,
+    &[unfilterable_tex(0, ID_TERRAIN_DEM_TEXTURE)]
+);
 
 /// The WebGPU source of `shader_id`, or `None` for a shader without WGSL.
 #[must_use]
@@ -631,6 +641,7 @@ pub(crate) fn shader_source(shader_id: BuiltIn) -> Option<&'static ShaderSource>
         BuiltIn::LayerCompositeShader => Some(&LAYER_COMPOSITE_SHADER),
         BuiltIn::VertexTexelShader => Some(&VERTEX_TEXEL_SHADER),
         BuiltIn::TerrainShader => Some(&TERRAIN_SHADER),
+        BuiltIn::TerrainProbeShader => Some(&TERRAIN_PROBE_SHADER),
         _ => None,
     }
 }

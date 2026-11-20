@@ -42,6 +42,7 @@ use crate::shaders::shader_defines::{
     ID_SYMBOL_IMAGE_ICON_TEXTURE, ID_SYMBOL_IMAGE_TEXTURE, ID_SYMBOL_OPACITY_ATTRIBUTE,
     ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE, ID_SYMBOL_POS_OFFSET_ATTRIBUTE, ID_SYMBOL_PROJECTED_POS_ATTRIBUTE,
     ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE, ID_TERRAIN_DEM_TEXTURE, ID_TERRAIN_DRAPE_TEXTURE, ID_TERRAIN_POS_VERTEX_ATTRIBUTE,
+    ID_TERRAIN_PROBE_DEM_COORDS_VERTEX_ATTRIBUTE, ID_TERRAIN_PROBE_POS_VERTEX_ATTRIBUTE,
     ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE, ID_VERTEX_TEXEL_TEXTURE,
 };
 use crate::shaders::shader_source::BuiltIn;
@@ -602,6 +603,16 @@ pub fn program_info(program: BuiltIn) -> Option<&'static ProgramInfo> {
             attributes: &[(ID_TERRAIN_POS_VERTEX_ATTRIBUTE, Short4)],
             instance_attributes: &[],
             textures: &[ID_TERRAIN_DEM_TEXTURE, ID_TERRAIN_DRAPE_TEXTURE],
+        }),
+        BuiltIn::TerrainProbeShader => Some(&ProgramInfo {
+            name: "TerrainProbeShader",
+            program: BuiltIn::TerrainProbeShader,
+            attributes: &[
+                (ID_TERRAIN_PROBE_POS_VERTEX_ATTRIBUTE, Float4),
+                (ID_TERRAIN_PROBE_DEM_COORDS_VERTEX_ATTRIBUTE, Float4),
+            ],
+            instance_attributes: &[],
+            textures: &[ID_TERRAIN_DEM_TEXTURE],
         }),
         _ => None,
     }

@@ -26,6 +26,7 @@ const REQUIRED: &[&str] = &[
     "LayerCompositeShader",
     "VertexTexelShader",
     "TerrainShader",
+    "TerrainProbeShader",
 ];
 
 /// `wgsl` without inputs or textures.

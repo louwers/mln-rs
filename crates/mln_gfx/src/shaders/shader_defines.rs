@@ -170,6 +170,14 @@ pub const ID_TERRAIN_PROPS_UBO: usize = DRAWABLE_RESERVED_UBO_COUNT; // packed
 pub const ID_TERRAIN_DEM_TEXTURE: usize = 0;
 pub const ID_TERRAIN_DRAPE_TEXTURE: usize = 1;
 
+// --- terrain probe (port-only): the conformance case's probes of the height
+// rule, which read the terrain's props and DEM texture.
+/// Where a probe draws, in clip x and y, then where it reads the height, in
+/// tile units.
+pub const ID_TERRAIN_PROBE_POS_VERTEX_ATTRIBUTE: usize = 0;
+/// Where the probe reads its DEM, as the terrain's `dem_coords`.
+pub const ID_TERRAIN_PROBE_DEM_COORDS_VERTEX_ATTRIBUTE: usize = 1;
+
 // --- sky (`idSkyPropsUBO` / `idAtmospherePropsUBO = getEnumValue(drawableReservedUBOCount, layerUBOStartId)`)
 pub const ID_SKY_PROPS_UBO: usize = DRAWABLE_RESERVED_UBO_COUNT; // packed
 pub const SKY_LAYER_UBO_COUNT: usize = ID_SKY_PROPS_UBO + 1;

@@ -2921,6 +2921,49 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: Some(TERRAIN_ELEVATION_PRELUDE),
 };
 
+/// Port-only, for the backend conformance cases: probes of the terrain's
+/// height rule. Each probe is a quad at clip positions whose vertices read
+/// the height at a place of a tile, and whose fragments write that height's
+/// bits, least significant byte first, as the texel's channels.
+pub(crate) const TERRAIN_PROBE_SHADER: WgslShaderSource = WgslShaderSource {
+    built_in: "TerrainProbeShader",
+    name: r"TerrainProbeShader",
+    vertex: Some(
+        r"
+struct VertexInput {
+    // Clip x and y, then where the height is read, in tile units.
+    @location(0) pos: vec4<f32>,
+    // The DEM uv's scale and offset, then the DEM's width in pixels.
+    @location(1) dem_coords: vec4<f32>,
+};
+
+struct VertexOutput {
+    @builtin(position) position: vec4<f32>,
+    @location(0) @interpolate(flat) height: f32,
+};
+
+@vertex
+fn main(in: VertexInput) -> VertexOutput {
+    var out: VertexOutput;
+    out.position = vec4<f32>(in.pos.xy, 0.0, 1.0);
+    out.height = terrain_elevation(in.pos.zw, in.dem_coords);
+    return out;
+}
+",
+    ),
+    fragment: Some(
+        r"
+@fragment
+fn main(@location(0) @interpolate(flat) height: f32) -> @location(0) vec4<f32> {
+    let bits = bitcast<u32>(height);
+    let bytes = vec4<u32>(bits, bits >> 8u, bits >> 16u, bits >> 24u) & vec4<u32>(255u);
+    return vec4<f32>(bytes) / 255.0;
+}
+",
+    ),
+    prelude: Some(TERRAIN_ELEVATION_PRELUDE),
+};
+
 /// The height rule of `mln_util::dem`, over the DEM tile a terrain tile
 /// reads: its RGBA8 texels behind a one-texel border, decoded by
 /// `terrainProps`.
@@ -6688,6 +6731,7 @@ pub(crate) const ALL: &[&WgslShaderSource] = &[
     &SYMBOL_ICON_SHADER,
     &SYMBOL_SDF_SHADER,
     &SYMBOL_TEXT_AND_ICON_SHADER,
+    &TERRAIN_PROBE_SHADER,
     &TERRAIN_SHADER,
     &VERTEX_TEXEL_SHADER,
     &WIDE_VECTOR_SHADER,

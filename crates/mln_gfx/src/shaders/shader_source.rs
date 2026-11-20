@@ -64,4 +64,8 @@ pub enum BuiltIn {
     VertexTexelShader,
     /// The terrain's surface: a grid over a tile, raised by its DEM.
     TerrainShader,
+    /// Port-only, for the backend conformance cases: probes whose vertex
+    /// stage reads a height by the terrain's height rule, and whose fragment
+    /// stage writes its bits. The renderer doesn't draw with it.
+    TerrainProbeShader,
 }
