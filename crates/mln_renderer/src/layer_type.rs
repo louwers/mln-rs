@@ -26,17 +26,21 @@ use crate::bucket::Bucket;
 use crate::layout::layout::{BuildParams, Layout, LayoutParameters, SourceLayer};
 use crate::layout::tile_layout::{Built, Resolved};
 use crate::render_layer::RenderLayer;
+use crate::render_pass::RenderPass;
 use crate::render_tile::TileView;
 
-/// A layer type that the renderer draws.
+/// A layer type that the renderer draws: the render half of a type whose
+/// style half is its [`StyleLayerType`]. A
+/// [`RegistryBuilder`](crate::RegistryBuilder) registers it by name with
+/// [`add_layer_type`](crate::RegistryBuilder::add_layer_type).
 pub trait LayerType: StyleLayerType {
     /// How a tile lays out a group of the type's layers.
     /// [`NoLayout`](crate::layout::layout::NoLayout) for a type that
     /// doesn't lay out.
     type Layout: Layout<Self>;
 
-    /// The bucket the layout makes. [`NoBucket`](crate::bucket::NoBucket)
-    /// for a type that doesn't lay out.
+    /// The bucket the layout makes. `NoBucket` for a type that doesn't lay
+    /// out.
     type Bucket: Bucket + Wire;
 
     /// What a frame's tile shows a layer of the type, which its draws draw:
@@ -74,6 +78,7 @@ pub trait LayerType: StyleLayerType {
     /// the frame's cross-fade.
     const CROSSFADES: bool = false;
 
+    /// The render half of the layer `style`, which a frame updates and draws.
     fn render_layer(style: Arc<LayerStyle<Self>>) -> Box<dyn RenderLayer>;
 }
 
@@ -84,10 +89,16 @@ pub struct EvaluatedLayer<T: LayerType> {
     /// The default for a type without cross-faded properties.
     pub crossfade: CrossfadeParameters,
     /// The `RenderPass` bits the layer draws in.
-    pub render_passes: u8,
+    pub(crate) render_passes: u8,
 }
 
 impl<T: LayerType> EvaluatedLayer<T> {
+    /// The render passes the layer draws in.
+    #[must_use]
+    pub fn passes(&self) -> RenderPass {
+        RenderPass(self.render_passes)
+    }
+
     /// `layer` as a `T` layer's values, the same allocation, or `None` for
     /// another type's.
     pub(crate) fn recover(layer: &Arc<dyn ErasedEvaluatedLayer>) -> Option<Arc<Self>> {

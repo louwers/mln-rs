@@ -74,9 +74,9 @@ pub(crate) fn emit(layer: &LayerSpec, home: &Home) -> String {
     imports.extend(crate::emit_table::imports(style, &Visit::Function));
     let heatmap_color = layer.paint_properties.iter().find(|p| p.name == "heatmap-color");
     if heatmap_color.is_some() {
-        imports.push("crate::color_ramp_property_value::ColorRampPropertyValue".into());
-        imports.push("crate::conversion::convert_color_ramp_property_value".into());
-        imports.push("crate::expression::Functions".into());
+        imports.push(format!("{style}::color_ramp_property_value::ColorRampPropertyValue"));
+        imports.push(format!("{style}::conversion::convert_color_ramp_property_value"));
+        imports.push(format!("{style}::expression::Functions"));
         imports.push("mln_conversion::{Convertible, Error}".into());
     }
     w.imports(imports);

@@ -4,7 +4,7 @@ use std::ops::{BitAnd, BitOr, BitOrAssign};
 /// valid value), so a newtype rather than a Rust enum. The associated constants
 /// keep the C++ enumerator names.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct RenderPass(pub u8);
+pub struct RenderPass(pub(crate) u8);
 
 #[expect(non_upper_case_globals, reason = "the bit flags keep the C++ enumerator names")]
 impl RenderPass {

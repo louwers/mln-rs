@@ -349,12 +349,8 @@ pub struct WorkerReply(Reply);
 impl Codec {
     /// The two sides of a new worker instance, with `registry`.
     #[must_use]
-    pub fn new(registry: &Arc<Registry>) -> Codec {
-        Codec {
-            map: MapCodec::new(Arc::clone(registry)),
-            worker: WorkerCodec::new(Arc::clone(registry)),
-            generation: 0,
-        }
+    pub fn new(registry: Arc<Registry>) -> Codec {
+        Codec { map: MapCodec::new(Arc::clone(&registry)), worker: WorkerCodec::new(registry), generation: 0 }
     }
 
     /// Sends `layout`'s job for `data` to the worker: the map side encodes
@@ -595,7 +591,7 @@ mod tests {
         )
         .unwrap();
         let direct = layout.run(data.clone()).unwrap();
-        let mut codec = Codec::new(&Registry::with_builtins());
+        let mut codec = Codec::new(Registry::with_builtins());
         for _ in 0..2 {
             let reply = codec.send(&layout, data.clone()).unwrap().run();
             let crossed = codec.reply(&reply).unwrap();

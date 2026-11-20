@@ -16,13 +16,13 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
+use mln_renderer::LayerType;
 use mln_renderer::unstable::{
     Atlases, DrawDepth, DrawGeometry, DrawIndexes, DrawList, DrawObjects, EvaluatedLayer, FrameDraw, KeptDraw,
     LayerDrawing, LayerUpdateParameters, LayerValues, NoBucket, NoLayout, NoTileBucket, PaintParameters, Parts,
-    PartsMut, RenderLayerBase, RenderPass, RenderStaticData, Textures, TileCoverParameters, TileDraws, Uniforms,
-    projection_data, raw_globe_tile_mesh, raw_vertices, tile_cover, to_projection_ubo,
+    PartsMut, RenderLayer, RenderLayerBase, RenderPass, RenderStaticData, Textures, TileCoverParameters, TileDraws,
+    TypedLayer, Uniforms, projection_data, raw_globe_tile_mesh, raw_vertices, tile_cover, to_projection_ubo,
 };
-use mln_renderer::{LayerType, RenderLayer, TypedLayer};
 use mln_style::layer_type::LayerStyle;
 use mln_style_types::TranslateAnchorType;
 use mln_tile_id::OverscaledTileID;
@@ -177,7 +177,7 @@ impl TypedLayer for RenderBackgroundLayer {
         let layer = &*values.evaluated;
         let evaluated = &layer.paint;
         let has_pattern = !evaluated.background_pattern.faded().to.empty();
-        let draw_passes = RenderPass(layer.render_passes);
+        let draw_passes = layer.passes();
 
         if *draws_built_for != Some((draw_passes, has_pattern)) {
             drawing.clear();

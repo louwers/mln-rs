@@ -2,17 +2,9 @@
 //! which aren't yet a contract for layer types. Anything here can change or
 //! go in any release.
 //!
-//! What it holds: a layer's values and its update (`EvaluatedLayer`,
-//! `LayerValues`, `RenderLayerBase`, `Parts`, `PartsMut`,
-//! `LayerUpdateParameters`, `Atlases`); the contents a type without a source
-//! or a layout names (`NoBucket`, `NoLayout`, `NoTileBucket`); the tiles
-//! that cover the view (`tile_cover`); and drawing: the frame's
-//! `PaintParameters`, its draws and their GPU objects.
-//!
 //! The engine types that the hooks of [`LayerType`](crate::LayerType),
-//! [`TypedLayer`](crate::TypedLayer) and [`RenderLayer`](crate::RenderLayer)
-//! name are public too, for those traits to be, but nothing names them
-//! outside the engine.
+//! [`TypedLayer`] and [`RenderLayer`] name are public too, for those traits
+//! to be, but outside the engine they're unnameable or `#[doc(hidden)]`.
 
 pub use crate::bucket::NoBucket;
 pub use crate::draw::{DrawGeometry, DrawObjects, Textures, raw_vertices};
@@ -23,7 +15,9 @@ pub use crate::layer_drawing::{DrawDepth, DrawList, FrameDraw, KeptDraw, LayerDr
 pub use crate::layer_type::EvaluatedLayer;
 pub use crate::layout::layout::NoLayout;
 pub use crate::paint_parameters::PaintParameters;
-pub use crate::render_layer::{Atlases, LayerUpdateParameters, LayerValues, Parts, PartsMut, RenderLayerBase};
+pub use crate::render_layer::{
+    Atlases, LayerUpdateParameters, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
+};
 pub use crate::render_pass::RenderPass;
 pub use crate::render_static_data::RenderStaticData;
 pub use crate::render_tile::NoTileBucket;
