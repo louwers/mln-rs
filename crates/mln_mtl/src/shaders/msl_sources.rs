@@ -4195,6 +4195,164 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 ",
 };
 
+/// The UBO ids and structs of the terrain's shaders.
+const TERRAIN_PRELUDE: &str = r#"
+
+enum {
+    idTerrainDrawableUBO = idDrawableReservedVertexOnlyUBO,
+    idTerrainPropsUBO = drawableReservedUBOCount,
+    terrainUBOCount
+};
+
+struct alignas(16) TerrainDrawableUBO {
+    /*  0 */ float4x4 matrix;
+    /* 64 */ float4 dem_coords;
+    /* 80 */
+};
+static_assert(sizeof(TerrainDrawableUBO) == 5 * 16, "wrong size");
+
+struct alignas(16) TerrainPropsUBO {
+    /*  0 */ float4 unpack;
+    /* 16 */ float unpack_scale;
+    /* 20 */ float exaggeration;
+    /* 24 */ float skirt_length;
+    /* 28 */ float pad;
+    /* 32 */
+};
+static_assert(sizeof(TerrainPropsUBO) == 2 * 16, "wrong size");
+
+"#;
+
+// The height rule of `mln_util::dem`, over the DEM tile a terrain tile reads:
+// its RGBA8 texels behind a one-texel border, decoded by `TerrainPropsUBO`.
+macro_rules! terrain_elevation {
+    () => {
+        r"
+
+// The height in meters of the DEM's bordered texel at `texel`, clamped to the
+// texture.
+static float terrain_texel_height(texture2d<float, access::read> dem, int2 texel,
+                                  device const TerrainPropsUBO& props) {
+    const int2 last = int2(int(dem.get_width()), int(dem.get_height())) - 1;
+    const float3 rgb = round(dem.read(uint2(clamp(texel, int2(0), last))).rgb * 255.0);
+    return (rgb.r * props.unpack.x + rgb.g * props.unpack.y + rgb.b * props.unpack.z + props.unpack.w) *
+        props.unpack_scale;
+}
+
+// The height in meters, exaggerated, at `pos` in tile units of a tile that
+// reads its DEM at `dem_coords`: the DEM uv's scale and offset, then the DEM's
+// width in pixels, 0 for flat ground.
+static float terrain_elevation(float2 pos, float4 dem_coords, texture2d<float, access::read> dem,
+                               device const TerrainPropsUBO& props) {
+    const float dim = dem_coords.w;
+    if (dim == 0.0) {
+        return 0.0;
+    }
+    const float2 coord = (pos / 8192.0 * dem_coords.x + dem_coords.yz) * dim + 0.5;
+    const float2 first = floor(coord);
+    const float2 f = coord - first;
+    const int2 texel = int2(first);
+    const float tl = terrain_texel_height(dem, texel, props);
+    const float tr = terrain_texel_height(dem, texel + int2(1, 0), props);
+    const float bl = terrain_texel_height(dem, texel + int2(0, 1), props);
+    const float br = terrain_texel_height(dem, texel + int2(1, 1), props);
+    const float top = tl * (1.0 - f.x) + tr * f.x;
+    const float bottom = bl * (1.0 - f.x) + br * f.x;
+    return (top * (1.0 - f.y) + bottom * f.y) * props.exaggeration;
+}
+
+"
+    };
+}
+
+/// The terrain's surface: a tile's grid, drawn with the tile's matrix, raised
+/// to the heights of the tile's DEM with its skirts lowered, in the colors of
+/// the tile's drape. Rows of a pass's texture are stored north first, as the
+/// drape is read.
+pub(crate) const TERRAIN_SHADER: MslShaderSource = MslShaderSource {
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
+    prelude: TERRAIN_PRELUDE,
+    source: concat!(
+        terrain_elevation!(),
+        r"
+
+struct VertexStage {
+    // x and y in tile units, whether the vertex is a skirt's lower edge, 0.
+    short4 pos [[attribute(0)]];
+};
+
+struct FragmentStage {
+    float4 position [[position, invariant]];
+    float2 drape_pos;
+};
+
+FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
+                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
+                                device const TerrainDrawableUBO* drawableVector [[buffer(idTerrainDrawableUBO)]],
+                                device const TerrainPropsUBO& props [[buffer(idTerrainPropsUBO)]],
+                                texture2d<float, access::read> dem [[texture(0)]]) {
+    device const TerrainDrawableUBO& drawable = drawableVector[uboIndex];
+    const float2 pos = float2(vertx.pos.xy);
+    const float skirt = float(vertx.pos.z);
+    const float elevation = terrain_elevation(pos, drawable.dem_coords, dem, props) - skirt * props.skirt_length;
+    return {
+        .position = drawable.matrix * float4(pos, elevation, 1.0),
+        .drape_pos = pos / 8192.0,
+    };
+}
+
+half4 fragment fragmentMain(FragmentStage in [[stage_in]],
+                            texture2d<float, access::sample> drape [[texture(1)]],
+                            sampler drape_sampler [[sampler(1)]]) {
+    return half4(drape.sample(drape_sampler, in.drape_pos));
+}
+"
+    ),
+};
+
+/// Port-only, for the backend conformance cases: probes of the terrain's
+/// height rule. Each probe is a quad at clip positions whose vertices read the
+/// height at a place of a tile, and whose fragments write that height's bits,
+/// least significant byte first, as the texel's channels.
+pub(crate) const TERRAIN_PROBE_SHADER: MslShaderSource = MslShaderSource {
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
+    prelude: TERRAIN_PRELUDE,
+    source: concat!(
+        terrain_elevation!(),
+        r"
+
+struct VertexStage {
+    // Clip x and y, then where the height is read, in tile units.
+    float4 pos [[attribute(0)]];
+    // The DEM uv's scale and offset, then the DEM's width in pixels.
+    float4 dem_coords [[attribute(1)]];
+};
+
+struct FragmentStage {
+    float4 position [[position, invariant]];
+    float height [[flat]];
+};
+
+FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
+                                device const TerrainPropsUBO& props [[buffer(idTerrainPropsUBO)]],
+                                texture2d<float, access::read> dem [[texture(0)]]) {
+    return {
+        .position = float4(vertx.pos.xy, 0.0, 1.0),
+        .height = terrain_elevation(vertx.pos.zw, vertx.dem_coords, dem, props),
+    };
+}
+
+float4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
+    const uint bits = as_type<uint>(in.height);
+    const uint4 bytes = uint4(bits, bits >> 8, bits >> 16, bits >> 24) & uint4(255);
+    return float4(bytes) / 255.0;
+}
+"
+    ),
+};
+
 pub(crate) const HILLSHADE_PREPARE_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
