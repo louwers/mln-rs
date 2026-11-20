@@ -154,7 +154,7 @@ impl Placement {
             icon_placed: placement.icon,
             intersects_tile_border: !placement.skip_fade && tile.populate_intersections,
             viewport_padding,
-            layer: ctx.bucket.bucket_leader_id.clone(),
+            layer: ctx.bucket.bucket_leader_id.to_string(),
         });
     }
 

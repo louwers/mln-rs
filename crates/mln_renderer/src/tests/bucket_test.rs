@@ -459,7 +459,7 @@ fn symbol_bucket() {
             icon_size: &PropertyValue::Constant(1.0),
             zoom: 0.0,
             tile_pixel_ratio: 1.0,
-            leader_id: "test".to_owned(),
+            leader_id: Arc::from("test"),
         },
         SymbolLayoutFlags::default(),
         instances,

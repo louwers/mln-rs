@@ -685,7 +685,7 @@ impl RenderSymbolLayer {
             text_translate,
             icon_translate,
         };
-        if bucket.bucket_leader_id != self.base.style.base().id {
+        if *bucket.bucket_leader_id != *self.base.style.base().id {
             let data = data(None, None);
             self.follower_data.push(data);
             return;

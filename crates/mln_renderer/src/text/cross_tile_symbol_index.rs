@@ -23,6 +23,7 @@
 //! ([`SymbolBuckets`]).
 
 use std::num::NonZeroU32;
+use std::sync::Arc;
 
 use geometry::Point;
 use glam::{I64Vec2, Vec2};
@@ -309,7 +310,7 @@ fn grid_cell(anchor: Vec2, tile: CanonicalTileID, grid_z: u8) -> I64Vec2 {
 struct TileIndex {
     tile: OverscaledTileID,
     bucket_instance_id: u32,
-    bucket_leader_id: String,
+    bucket_leader_id: Arc<str>,
     /// The keys of `symbols`, end to end, in one allocation rather than one
     /// each.
     keys: Vec<u8>,
@@ -349,7 +350,7 @@ impl TileIndex {
         TileIndex {
             tile,
             bucket_instance_id: bucket.bucket_instance_id,
-            bucket_leader_id: bucket.bucket_leader_id.clone(),
+            bucket_leader_id: Arc::clone(&bucket.bucket_leader_id),
             keys,
             symbols,
         }
@@ -430,7 +431,7 @@ mod tests {
                 icon_size: &PropertyValue::Constant(1.0),
                 zoom: 0.0,
                 tile_pixel_ratio: 1.0,
-                leader_id: "test".to_owned(),
+                leader_id: Arc::from("test"),
             },
             SymbolLayoutFlags::default(),
             instances,

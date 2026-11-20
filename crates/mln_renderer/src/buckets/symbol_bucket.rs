@@ -459,7 +459,7 @@ pub(crate) struct SymbolBucketStyle<'a> {
     pub(crate) icon_size: &'a PropertyValue<f32>,
     pub(crate) zoom: f32,
     pub(crate) tile_pixel_ratio: f32,
-    pub(crate) leader_id: String,
+    pub(crate) leader_id: Arc<str>,
 }
 
 /// What layout found of a bucket's symbols that drawing and placement read.
@@ -476,7 +476,7 @@ pub(crate) struct SymbolLayoutFlags {
 pub(crate) struct SymbolBucket {
     pub(crate) base: BucketBase,
     pub(crate) layout: Arc<SymbolLayoutProperties::PossiblyEvaluated>,
-    pub(crate) bucket_leader_id: String,
+    pub(crate) bucket_leader_id: Arc<str>,
 
     // Flags
     pub(crate) icons_need_linear: bool,

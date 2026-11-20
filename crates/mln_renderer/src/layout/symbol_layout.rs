@@ -1696,7 +1696,7 @@ impl SymbolLayout {
             icon_size: &self.icon_size,
             zoom: self.zoom,
             tile_pixel_ratio: self.tile_pixel_ratio,
-            leader_id: self.bucket_leader_id.to_string(),
+            leader_id: Arc::clone(&self.bucket_leader_id),
         };
         let flags = SymbolLayoutFlags {
             icons_need_linear: self.icons_need_linear,
