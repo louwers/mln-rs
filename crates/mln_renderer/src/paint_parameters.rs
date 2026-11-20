@@ -205,9 +205,9 @@ pub(crate) struct PaintParameters<'a> {
     /// The stencil value of each tile whose mask the stencil buffer holds.
     tile_clipping_mask_ids: VecMap<UnwrappedTileID, i32>,
     next_stencil_id: i32,
-    /// The tile whose mask covers the whole target: the world's, or a
-    /// drape's own.
-    target_tile: UnwrappedTileID,
+    /// The tile of the drape that the draws go into, whose mask covers the
+    /// whole target; `None` for the frame, which the world's covers.
+    drape_tile: Option<UnwrappedTileID>,
 
     pub(crate) current_layer: u32,
     pub(crate) depth_range_size: f32,
@@ -270,7 +270,7 @@ impl<'a> PaintParameters<'a> {
             composites_with_frame_depth,
             tile_clipping_mask_ids: VecMap::new(),
             next_stencil_id: 1,
-            target_tile: UnwrappedTileID::new(0, 0, 0),
+            drape_tile: None,
             // The renderer sets these before use.
             current_layer: 0,
             depth_range_size: 1.0,
@@ -317,7 +317,7 @@ impl<'a> PaintParameters<'a> {
             composites_with_frame_depth: false,
             tile_clipping_mask_ids: VecMap::new(),
             next_stencil_id: 1,
-            target_tile: tile,
+            drape_tile: Some(tile),
             current_layer: 0,
             depth_range_size: 1.0,
             terrain: false,
@@ -528,7 +528,14 @@ impl<'a> PaintParameters<'a> {
     /// the whole target.
     #[must_use]
     pub(crate) fn stencil_clear_tile(&self) -> Option<UnwrappedTileID> {
-        (!self.context.caps().clear_stencil_with_pass).then_some(self.target_tile)
+        let tile = self.drape_tile.unwrap_or(UnwrappedTileID::new(0, 0, 0));
+        (!self.context.caps().clear_stencil_with_pass).then_some(tile)
+    }
+
+    /// Whether the draws go into a terrain tile's drape.
+    #[must_use]
+    pub(crate) fn in_drape(&self) -> bool {
+        self.drape_tile.is_some()
     }
 
     fn draw_clip_masks(&mut self, gpu: &mut dyn Gpu, masks: &[(UnwrappedTileID, i32)]) {

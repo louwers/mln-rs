@@ -1,4 +1,3 @@
 {
-  "gljs/render-tests/terrain/rtt-mipmap-minification/pitch-70": "OpenGL on llvmpipe: 1046 of 65536 pixels differ from GL JS's image (1.6%) where the fixture allows 0.6%; llvmpipe filters the drape's mips anisotropically differently from RADV (0.43%) and lavapipe (0.26%), which moves the moire's texels",
-  "gljs/render-tests/terrain/skirts-auto": "OpenGL on llvmpipe: 67 pixels differ from GL JS's image where the fixture allows 65 (0.025%, measured 0.026%); the drape's translucent edges are softer by a fraction of a pixel, and radeonsi has 61"
+  "gljs/render-tests/terrain/rtt-mipmap-minification/pitch-70": "OpenGL on llvmpipe: 1046 of 65536 pixels differ from GL JS's image (1.6%) where the fixture allows 0.6%; llvmpipe filters the drape's mips anisotropically differently from RADV (0.43%) and lavapipe (0.26%), which moves the moire's texels"
 }

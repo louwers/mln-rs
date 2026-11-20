@@ -80,6 +80,11 @@ const FILL_OUTLINE_PULLED_SHADER_NAME: &str = "FillOutlinePulledShader";
 /// pattern draws instances there too.
 const LINE_WIDTH: f32 = 2.0;
 
+/// The outlines' line width in a terrain tile's drape, in its texels: GL JS
+/// draws them 1 px wide there, which its terrain fixtures' expected images
+/// show at fill edges.
+const DRAPE_LINE_WIDTH: f32 = 1.0;
+
 /// Whether the layer draws the outlines as quads, which read the buckets'
 /// outline ends, rather than as lines (`LINE_WIDTH`).
 pub(crate) fn draws_outline_quads(context: &Context) -> bool {
@@ -100,9 +105,10 @@ enum Outlines {
 }
 
 impl Outlines {
-    /// How the outlines of a layer draw on `context`'s device.
-    fn of(context: &Context, pattern: bool) -> Outlines {
-        if !draws_outline_quads(context) {
+    /// How the outlines of a layer draw on `context`'s device, into a drape
+    /// if `drape`: as lines of 1 px there, which every device draws.
+    fn of(context: &Context, pattern: bool, drape: bool) -> Outlines {
+        if drape || !draws_outline_quads(context) {
             Outlines::Lines
         } else if context.caps().binds_vertex_buffers && !pattern {
             Outlines::Pulled
@@ -266,6 +272,8 @@ struct TileBuilder<'a> {
     /// The triangles of the pulled outlines' quads
     /// (`RenderStaticData::wall_indexes`), where the layer draws them.
     pulled_indexes: Option<&'a SharedIndexes>,
+    /// The width of the outlines where the layer draws them as lines.
+    line_width: f32,
     /// The depth mask of the fills without a pattern, which the first tile
     /// they are built for sets.
     fill_depth: Option<DepthMaskType>,
@@ -396,7 +404,7 @@ impl TileBuilder<'_> {
                 let line_geometry = fill_geometry(
                     copy_shared_attributes(&vertex_attrs),
                     fill_vertex_count,
-                    DrawMode::Lines(LINE_WIDTH),
+                    DrawMode::Lines(self.line_width),
                     bucket_indexes(geometry, &bucket.basic_lines)?.into(),
                     &bucket.basic_line_segments,
                 );
@@ -496,11 +504,7 @@ pub(crate) struct RenderFillLayer {
     draw_list: DrawList<FillUniforms, FillPart>,
 
     fill_shader_group: Option<ShaderGroupPtr>,
-    /// The outline shaders: the line ones, or the instanced ones on a
-    /// device that draws no `LINE_WIDTH` lines and rasterizes on the GPU.
-    outline_shader_group: Option<ShaderGroupPtr>,
     pattern_shader_group: Option<ShaderGroupPtr>,
-    outline_pattern_shader_group: Option<ShaderGroupPtr>,
 
     /// The instanced outlines' quad (`RenderStaticData::fill_outline_vertices`),
     /// from the first update that draws them.
@@ -520,9 +524,7 @@ impl RenderFillLayer {
             drawing: TileDraws::default(),
             draw_list: DrawList::default(),
             fill_shader_group: None,
-            outline_shader_group: None,
             pattern_shader_group: None,
-            outline_pattern_shader_group: None,
             outline_quad: None,
             pulled_indexes: None,
         }
@@ -718,29 +720,28 @@ impl TypedLayer for RenderFillLayer {
         let shaders = &paint_parameters.static_data.shaders;
 
         let pattern = !self.values.unevaluated.fill_pattern.is_undefined();
-        let outlines = Outlines::of(paint_parameters.context, pattern);
-        let outline_name = match Outlines::of(paint_parameters.context, false) {
-            Outlines::Lines => FILL_OUTLINE_SHADER_NAME,
-            Outlines::Instanced => FILL_OUTLINE_INSTANCED_SHADER_NAME,
-            Outlines::Pulled => FILL_OUTLINE_PULLED_SHADER_NAME,
+        let drape = paint_parameters.in_drape();
+        let outlines = Outlines::of(paint_parameters.context, pattern, drape);
+        // The outline shaders: the line ones, or the instanced ones on a
+        // device that draws no `LINE_WIDTH` lines and rasterizes on the GPU,
+        // outside drapes.
+        let outline_name = match (pattern, outlines) {
+            (false, Outlines::Lines) => FILL_OUTLINE_SHADER_NAME,
+            (false, Outlines::Instanced) => FILL_OUTLINE_INSTANCED_SHADER_NAME,
+            (false, Outlines::Pulled) => FILL_OUTLINE_PULLED_SHADER_NAME,
+            (true, Outlines::Lines) => FILL_OUTLINE_PATTERN_SHADER_NAME,
+            (true, Outlines::Instanced | Outlines::Pulled) => FILL_OUTLINE_PATTERN_INSTANCED_SHADER_NAME,
         };
-        let outline_pattern_name = match Outlines::of(paint_parameters.context, true) {
-            Outlines::Lines => FILL_OUTLINE_PATTERN_SHADER_NAME,
-            Outlines::Instanced | Outlines::Pulled => FILL_OUTLINE_PATTERN_INSTANCED_SHADER_NAME,
-        };
-        let (fill_group, fill_name, outline_group, outline_name) = if pattern {
-            let outline = &mut self.outline_pattern_shader_group;
-            (&mut self.pattern_shader_group, FILL_PATTERN_SHADER_NAME, outline, outline_pattern_name)
+        let (fill_group, fill_name) = if pattern {
+            (&mut self.pattern_shader_group, FILL_PATTERN_SHADER_NAME)
         } else {
-            (&mut self.fill_shader_group, FILL_SHADER_NAME, &mut self.outline_shader_group, outline_name)
+            (&mut self.fill_shader_group, FILL_SHADER_NAME)
         };
         if fill_group.is_none() {
             *fill_group = shaders.shader_group(fill_name);
         }
-        if outline_group.is_none() {
-            *outline_group = shaders.shader_group(outline_name);
-        }
-        let (Some(fill_shaders), Some(outline_shaders)) = (&*fill_group, &*outline_group) else {
+        let outline_group = shaders.shader_group(outline_name);
+        let (Some(fill_shaders), Some(outline_shaders)) = (&*fill_group, &outline_group) else {
             self.remove_all_draws();
             return;
         };
@@ -760,6 +761,7 @@ impl TypedLayer for RenderFillLayer {
             projection_variant: self.base.projection_variant,
             outline_quad: self.outline_quad.as_ref().filter(|_| outlines == Outlines::Instanced),
             pulled_indexes: self.pulled_indexes.as_ref().filter(|_| outlines == Outlines::Pulled),
+            line_width: if drape { DRAPE_LINE_WIDTH } else { LINE_WIDTH },
             fill_depth: None,
         };
 

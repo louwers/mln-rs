@@ -23,10 +23,6 @@ set -euo pipefail
 # numbers are the share of pixels that differ.
 declare -A allowed=(
     # How each GPU filters the drape's mips anisotropically, which no
-    # specification pins down, moves the edges of the translucent fill by a
-    # few pixels: 0.029% on RADV, 0.072% on lavapipe.
-    [terrain/skirts-none]=0.001
-    # How each GPU filters the drape's mips anisotropically, which no
     # specification pins down, moves the moiré's texels: 0.43% on RADV, 0.26%
     # on lavapipe. Without the drape's mips, 9.8% differ.
     [terrain/rtt-mipmap-minification/pitch-70]=0.006
