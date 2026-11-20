@@ -3,14 +3,14 @@
 
 use std::sync::Arc;
 
-use mln_map::{CameraOptions, MapMode};
+use mln_map::{BoundOptions, CameraOptions, MapMode};
 use mln_util::geo::LatLng;
 
 use super::VIEW;
 use crate::scenario::{Bench, Kind, Scenario};
 use crate::support::fixtures::{Fixtures, Tiles};
 use crate::support::latency::Latency;
-use crate::support::map::{Frontend, HeadlessMap};
+use crate::support::map::{DrawMeter, Frontend, HeadlessMap, gesture_phase};
 
 pub(crate) const SCENARIOS: &[Scenario] = &[
     Scenario {
@@ -31,7 +31,16 @@ pub(crate) const SCENARIOS: &[Scenario] = &[
         question: "What does zooming from a city's streets out to the world and back in cost, with tiles arriving while it zooms?",
         run: zoom,
     },
+    Scenario {
+        name: "macro/navigate/terrain-3d",
+        kind: Kind::Macro,
+        question: "What does a flight over 3D terrain into ground it hasn't loaded cost: pan, zoom and rotate at pitch 60 to 75?",
+        run: terrain_3d,
+    },
 ];
+
+/// The steepest pitch a map takes by default, in degrees.
+const DEFAULT_MAX_PITCH: f64 = 60.0;
 
 /// The frames between a request and its answer: 100 ms at 60 Hz, about
 /// what a tile takes to come from a nearby CDN.
@@ -69,7 +78,7 @@ fn street(bench: &mut Bench) {
         Key { frame: 160, center: (lat + 0.018, lon + 0.035), zoom: 15.5, bearing: 40.0, pitch: 30.0 },
         Key::at(240, (lat, lon), 12.0),
     ];
-    flight(bench, &fixtures, Tiles::Street, &keys);
+    flight(bench, &fixtures, &fixtures.style(Tiles::Street), &keys, None);
 }
 
 /// The question: what does flying from San Francisco's streets to Tokyo's
@@ -86,7 +95,7 @@ fn fly(bench: &mut Bench) {
     let to = fixtures.area_center(Tiles::Cjk);
     let (from, to) = ((from.latitude(), from.longitude()), (to.latitude(), to.longitude() - 360.0));
     let keys = [Key::at(0, from, 14.0), Key::at(80, from, 3.0), Key::at(160, to, 3.0), Key::at(240, to, 14.0)];
-    flight(bench, &fixtures, Tiles::Flight, &keys);
+    flight(bench, &fixtures, &fixtures.style(Tiles::Flight), &keys, None);
 }
 
 /// The question: what does zooming out from San Francisco's streets at
@@ -98,10 +107,35 @@ fn zoom(bench: &mut Bench) {
     let center = fixtures.area_center(Tiles::Street);
     let center = (center.latitude(), center.longitude());
     let keys = [Key::at(0, center, 15.0), Key::at(60, center, 2.0), Key::at(120, center, 15.0)];
-    flight(bench, &fixtures, Tiles::Street, &keys);
+    flight(bench, &fixtures, &fixtures.style(Tiles::Street), &keys, None);
 }
 
-/// Flies through `keys` over Liberty on `tiles`, as each tile, glyph range
+/// The question: what does a flight over San Francisco's hills in 3D cost,
+/// into ground whose tiles haven't loaded, as a user who tilts the map to
+/// look across the hills does? Four seconds at 60 Hz over
+/// [`Snapshot::terrain_3d_style`](mln_bench_workload::Snapshot::terrain_3d_style),
+/// tilted from 60 to 75 degrees all the way: from Ocean Beach at zoom 12 in
+/// to Twin Peaks at 14.5 as the camera turns, across to downtown, and back
+/// out to zoom 13 over the city, turning half a turn in all. Each leg needs
+/// terrain, DEM and street tiles that the one before didn't, and the drapes
+/// of the tiles that arrive draw as they do. The camera moves as one
+/// gesture moves it, which keeps the drapes it drew at another zoom or
+/// bearing, and the last frame ends the gesture, which draws them again at
+/// the zoom and bearing it ends at. It also reports the frames'
+/// render passes and draw calls, the drapes they drew, and the most the
+/// terrain held ([`DrawMeter`]).
+fn terrain_3d(bench: &mut Bench) {
+    let fixtures = Fixtures::open(bench);
+    let keys = [
+        Key { frame: 0, center: (37.755, -122.495), zoom: 12.0, bearing: 0.0, pitch: 60.0 },
+        Key { frame: 80, center: (37.752, -122.447), zoom: 14.5, bearing: 60.0, pitch: 70.0 },
+        Key { frame: 160, center: (37.788, -122.405), zoom: 14.5, bearing: 120.0, pitch: 75.0 },
+        Key { frame: 240, center: (37.77, -122.43), zoom: 13.0, bearing: 180.0, pitch: 65.0 },
+    ];
+    flight(bench, &fixtures, &fixtures.terrain_3d_style(), &keys, Some(DrawMeter::default()));
+}
+
+/// Flies through `keys` over `style`, such as Liberty, as each tile, glyph range
 /// and image the map asks for arrives [`LATENCY`] frames after it asked,
 /// and measures each frame: sending on the answers due at it, laying out
 /// what they brought, its update, symbol placement, draw calls and the GPU
@@ -110,8 +144,10 @@ fn zoom(bench: &mut Bench) {
 /// The map starts settled at the first key. Its frames then show what has
 /// arrived, and parent or child tiles where a tile is missing, as a map does
 /// over a network; tiles arrive on a schedule that only frames advance, so
-/// every run draws the same frames with the same tiles.
-fn flight(bench: &mut Bench, fixtures: &Fixtures, tiles: Tiles, keys: &[Key]) {
+/// every run draws the same frames with the same tiles. The map's pitch
+/// may reach the steepest of the keys'. With a `meter`, the camera moves as
+/// one gesture's, and it also reports what the frames drew.
+fn flight(bench: &mut Bench, fixtures: &Fixtures, style: &str, keys: &[Key], mut meter: Option<DrawMeter>) {
     let camera = |frame: usize| {
         let leg = keys.windows(2).find(|leg| frame <= leg[1].frame).expect("a frame of the flight");
         let (from, to) = (&leg[0], &leg[1]);
@@ -133,20 +169,34 @@ fn flight(bench: &mut Bench, fixtures: &Fixtures, tiles: Tiles, keys: &[Key]) {
     bench.gpu = Some(frontend.gpu());
     let latency = Latency::new(fixtures.file_source(frontend.pool()));
     let mut map = HeadlessMap::new(frontend, MapMode::Continuous, Arc::<Latency>::clone(&latency));
+    let max_pitch = keys.iter().map(|key| key.pitch).fold(DEFAULT_MAX_PITCH, f64::max);
+    if max_pitch > DEFAULT_MAX_PITCH {
+        let bounds = BoundOptions { max_pitch: Some(max_pitch), ..Default::default() };
+        map.map().set_bounds(&bounds).expect("a pitch the map can take");
+    }
     map.jump(&camera(0));
-    map.map().load_style_json(&fixtures.style(tiles));
+    map.map().load_style_json(style);
     map.settle();
 
     latency.set_delay(LATENCY);
     let incomplete = map.frames_incomplete();
     let requests = latency.tile_requests();
     for frame in 1..=frames {
-        map.jump(&camera(frame));
+        match meter {
+            Some(_) => map.gesture(&camera(frame), gesture_phase(frame - 1, frames)),
+            None => map.jump(&camera(frame)),
+        }
         bench.measure(|| {
             latency.tick();
             map.wait_for_workers();
             map.draw_frame()
         });
+        if let Some(meter) = &mut meter {
+            meter.frame(&map);
+        }
+    }
+    if let Some(meter) = &meter {
+        meter.report(bench);
     }
     bench.per_part("frame");
     bench.count("frames_incomplete", map.frames_incomplete() - incomplete);
