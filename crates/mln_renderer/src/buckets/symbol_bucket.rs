@@ -4,7 +4,6 @@
 
 use std::cmp::Reverse;
 use std::collections::BTreeMap;
-use std::num::NonZeroU32;
 use std::sync::Arc;
 
 use glam::Vec2;
@@ -263,6 +262,8 @@ impl SymbolSizeBinder {
     }
 }
 
+/// A run of a buffer's quads that shows together: the glyphs of a symbol's
+/// text at one justification or orientation, or its icon.
 #[derive(Clone, Debug, mln_wire::Wire)]
 pub(crate) struct PlacedSymbol {
     pub(crate) anchor_point: Vec2,
@@ -279,54 +280,13 @@ pub(crate) struct PlacedSymbol {
     /// The x offset of each glyph, or of the icon, in its buffer's
     /// `pools.glyph_offsets`. There are four vertices for each.
     pub(crate) glyph_offsets: PoolRange,
-    pub(crate) hidden: bool,
+    /// The index of the run's first vertex.
     pub(crate) start_index: usize,
-    /// The symbol's id across tiles, which only variable text anchors read.
-    pub(crate) cross_tile_id: Option<NonZeroU32>,
-    /// The orientation the symbol was placed in, where the layer places
-    /// orientation variants.
-    pub(crate) placed_orientation: Option<TextWritingModeType>,
     pub(crate) angle: f32,
-    /// Reference to placed icon, only applicable for text symbols.
-    pub(crate) placed_icon_index: Option<usize>,
     /// The symbol's `symbol-height-offset`, in meters above the ground.
     pub(crate) height_offset: f32,
-}
-
-impl PlacedSymbol {
-    #[expect(clippy::too_many_arguments, reason = "each argument is a field of the placed symbol")]
-    #[must_use]
-    pub(crate) fn new(
-        anchor_point: Vec2,
-        segment: usize,
-        lower_size: f32,
-        upper_size: f32,
-        line_offset: [f32; 2],
-        writing_modes: WritingModeType,
-        line: PoolRange,
-        tile_distances: PoolRange,
-        glyph_offsets: PoolRange,
-        placed_icon_index: Option<usize>,
-    ) -> Self {
-        PlacedSymbol {
-            anchor_point,
-            segment,
-            lower_size,
-            upper_size,
-            line_offset,
-            writing_modes,
-            line,
-            tile_distances,
-            glyph_offsets,
-            hidden: false,
-            start_index: 0,
-            cross_tile_id: None,
-            placed_orientation: None,
-            angle: 0.0,
-            placed_icon_index,
-            height_offset: 0.0,
-        }
-    }
+    /// Faded out or a duplicate, as the last opacity update found it.
+    pub(crate) hidden: bool,
 }
 
 #[derive(Clone, Debug, Default, mln_wire::Wire)]
@@ -553,7 +513,7 @@ impl SymbolBucket {
                 text_binders: SymbolTextBinders::new(evaluated, zoom),
             });
         }
-        let max_height_offset = symbol_instances.iter().map(SymbolInstance::height_offset).fold(0.0, f32::max);
+        let max_height_offset = symbol_instances.iter().map(|symbol| symbol.height_offset).fold(0.0, f32::max);
         SymbolBucket {
             base: BucketBase::default(),
             layout,
@@ -647,32 +607,18 @@ impl SymbolBucket {
         // screen position. The index array buffer is rewritten to reference
         // the (unchanged) vertices in the sorted order.
         for index in symbols_by_viewport_y(&state.symbol_instances, angle) {
-            let symbol_instance = &state.symbol_instances[index];
-            symbols_sort_order.push(symbol_instance.data_feature_index());
-
-            if let Some(i) = symbol_instance.placed_right_text_index {
-                add_placed_symbol(&mut state.text.triangles, &state.text.placed_symbols[i]);
+            let symbol = &state.symbol_instances[index];
+            symbols_sort_order.push(symbol.data_feature_index);
+            if let Some(text) = &symbol.text {
+                for (run, _) in text.runs.all() {
+                    add_placed_symbol(&mut state.text.triangles, &state.text.placed_symbols[run]);
+                }
             }
-            if let Some(i) = symbol_instance.placed_center_text_index
-                && !symbol_instance.single_line()
-            {
-                add_placed_symbol(&mut state.text.triangles, &state.text.placed_symbols[i]);
-            }
-            if let Some(i) = symbol_instance.placed_left_text_index
-                && !symbol_instance.single_line()
-            {
-                add_placed_symbol(&mut state.text.triangles, &state.text.placed_symbols[i]);
-            }
-            if let Some(i) = symbol_instance.placed_vertical_text_index {
-                add_placed_symbol(&mut state.text.triangles, &state.text.placed_symbols[i]);
-            }
-
-            let icon_buffer = if symbol_instance.has_sdf_icon() { &mut state.sdf_icon } else { &mut state.icon };
-            if let Some(i) = symbol_instance.placed_icon_index {
-                add_placed_symbol(&mut icon_buffer.triangles, &icon_buffer.placed_symbols[i]);
-            }
-            if let Some(i) = symbol_instance.placed_vertical_icon_index {
-                add_placed_symbol(&mut icon_buffer.triangles, &icon_buffer.placed_symbols[i]);
+            if let Some(icon) = &symbol.icon {
+                let buffer = if icon.sdf { &mut state.sdf_icon } else { &mut state.icon };
+                for (run, _) in icon.runs() {
+                    add_placed_symbol(&mut buffer.triangles, &buffer.placed_symbols[run]);
+                }
             }
         }
 
@@ -687,14 +633,6 @@ impl SymbolBucket {
         match range {
             Some(range) if range.start < range.end && range.end <= count => range.start..range.end,
             _ => 0..count,
-        }
-    }
-
-    /// Marks the bucket for upload when placement changed its opacities or
-    /// its dynamic vertices.
-    pub(crate) fn mark_vertices_updated(&mut self, update_opacities: bool, dynamic_updated: bool) {
-        if update_opacities || dynamic_updated {
-            self.base.uploaded = false;
         }
     }
 
@@ -770,13 +708,12 @@ impl SymbolBucket {
     }
 }
 
+/// Adds the two triangles of each quad of `placed_symbol`.
 fn add_placed_symbol(triangles: &mut Vec<u16>, placed_symbol: &PlacedSymbol) {
-    let end_index = placed_symbol.start_index + placed_symbol.glyph_offsets.len() * 4;
-    let mut vertex_index = placed_symbol.start_index;
-    while vertex_index < end_index {
-        triangles.extend_from_slice(&[vertex_index as u16, (vertex_index + 1) as u16, (vertex_index + 2) as u16]);
-        triangles.extend_from_slice(&[(vertex_index + 1) as u16, (vertex_index + 2) as u16, (vertex_index + 3) as u16]);
-        vertex_index += 4;
+    let start = placed_symbol.start_index;
+    for quad in (start..start + placed_symbol.glyph_offsets.len() * 4).step_by(4) {
+        let [a, b, c, d] = [quad, quad + 1, quad + 2, quad + 3].map(|i| i as u16);
+        triangles.extend_from_slice(&[a, b, c, b, c, d]);
     }
 }
 
@@ -790,8 +727,8 @@ pub(crate) fn symbols_by_viewport_y(symbol_instances: &[SymbolInstance], angle: 
     let cos = angle.cos();
     result.sort_by_key(|&i| {
         let s = &symbol_instances[i];
-        let p = s.anchor().point;
-        ((sin * p.x + cos * p.y).round() as i64, Reverse(s.data_feature_index()))
+        let p = s.anchor.point;
+        ((sin * p.x + cos * p.y).round() as i64, Reverse(s.data_feature_index))
     });
     result
 }

@@ -33,13 +33,13 @@ use mln_tile_id::geometry_tile_data::{GeometryCoordinate, GeometryCoordinates, G
 use mln_util::constants::{EXTENT, ONE_EM, TILE_SIZE_D};
 use mln_util::error::Error;
 use mln_util::geometry::FeatureType;
-use mln_util::i18n;
 use mln_util::range::Range;
+use mln_util::{Padding, i18n};
 use mln_vec_map::VecMap;
 
 use crate::bucket_parameters::BucketParameters;
 use crate::buckets::symbol_bucket::{
-    Buffer, CollisionBuffer, PaintProperties, PlacedSymbol, SortKeyRange, SymbolBucket, SymbolBucketState,
+    Buffer, PaintProperties, PlacedSymbol, SortKeyRange, SymbolBucket, SymbolBucketState, SymbolSizeBinder,
 };
 use crate::geometry::anchor::{Anchor, Anchors};
 use crate::geometry::feature_index::{FeatureIndex, IndexedSubfeature};
@@ -50,13 +50,15 @@ use crate::layout::layout::{BuildParams, Layout, LayoutParameters, SourceLayer, 
 use crate::layout::merge_lines::merge_lines;
 use crate::layout::symbol_feature::SymbolFeature;
 use crate::layout::symbol_instance::{
-    ShapedTextOrientations, SymbolContent, SymbolInstance, SymbolInstancePools, SymbolInstanceSharedData,
+    IconPart, Justification, LaidOutSymbol, ShapedTextOrientations, SymbolContent, SymbolInstance, SymbolInstancePools,
+    SymbolQuadSet, TextPart, TextRuns,
 };
 use crate::layout::tile_layout::Resolved;
+use crate::text::collision_feature::{CollisionBox, CollisionFeature};
 use crate::text::collision_index::OverlapMode;
 use crate::text::get_anchors::{get_anchors, get_center_anchor};
 use crate::text::glyph_store::ShapeResults;
-use crate::text::quads::{SymbolQuad, SymbolQuads};
+use crate::text::quads::{SymbolQuad, SymbolQuads, glyph_quads, icon_quads};
 use crate::util::pool::PoolRange;
 
 /// Whether `text-field` is set: a constant that is not empty, or an
@@ -267,36 +269,6 @@ fn dist(ax: f32, ay: f32, bx: f32, by: f32) -> f32 {
 // the shaping does.
 const BASELINE_OFFSET: f32 = 7.0;
 
-/// Any horizontal shaping: this is used for collision purposes, and all the
-/// justifications have the same collision box.
-fn default_horizontal_shaping(shaped_text_orientations: &ShapedTextOrientations) -> &Shaping {
-    if shaped_text_orientations.right().is_some() {
-        return shaped_text_orientations.right();
-    }
-    if shaped_text_orientations.center.is_some() {
-        return &shaped_text_orientations.center;
-    }
-    if shaped_text_orientations.left.is_some() {
-        return &shaped_text_orientations.left;
-    }
-    &shaped_text_orientations.horizontal
-}
-
-fn shaping_for_text_justify_type(
-    shaped_text_orientations: &mut ShapedTextOrientations,
-    type_: TextJustifyType,
-) -> &mut Shaping {
-    match type_ {
-        TextJustifyType::Right => shaped_text_orientations.right_mut(),
-        TextJustifyType::Left => &mut shaped_text_orientations.left,
-        TextJustifyType::Center => &mut shaped_text_orientations.center,
-        TextJustifyType::Auto => {
-            debug_assert!(false);
-            &mut shaped_text_orientations.horizontal
-        }
-    }
-}
-
 fn evaluate_radial_offset(anchor: SymbolAnchorType, radial_offset: f32) -> [f32; 2] {
     let mut result = [0.0_f32, 0.0_f32];
     let radial_offset = mln_math::fmaxf(radial_offset, 0.0); // Ignore negative offset.
@@ -322,12 +294,159 @@ fn evaluate_radial_offset(anchor: SymbolAnchorType, radial_offset: f32) -> [f32;
     result
 }
 
+/// What `prepare_symbols` made of a feature: its text shaped and its icon
+/// placed in the image atlas.
+struct ShapedFeature {
+    text: ShapedTextOrientations,
+    icon: Option<PositionedIcon>,
+    icon_type: SymbolContent,
+    text_offset: [f32; 2],
+    /// `text-size` and `icon-size` a zoom level up, which size the symbols'
+    /// collision boxes.
+    text_size: f32,
+    icon_size: f32,
+}
+
+/// What the symbols of one feature share: its shapes, and how its quads and
+/// collision boxes are laid out.
+struct FeatureSymbols<'a> {
+    shaped: &'a ShapedFeature,
+    /// The icon fitted to the vertical text.
+    vertical_icon: Option<&'a PositionedIcon>,
+    values: &'a SymbolLayoutProperties::Values,
+    icons: &'a ImagePositions,
+    text_placement: SymbolPlacementType,
+    has_icon_text_fit: bool,
+    allow_vertical_placement: bool,
+    overscaling: f32,
+    text_box_scale: f32,
+    text_padding: f32,
+    icon_box_scale: f32,
+    icon_padding: Padding,
+    variable_anchors: Option<VariableAnchorOffsetCollection>,
+    height_offset: f32,
+    indexed_feature: IndexedSubfeature,
+    key: &'a str,
+    feature_index: usize,
+    data_feature_index: usize,
+}
+
+impl FeatureSymbols<'_> {
+    /// The quads of the feature's symbols along `line`.
+    fn quads(&self, line: GeometryCoordinates) -> Arc<SymbolQuadSet> {
+        let text = &self.shaped.text;
+        let glyphs = |shaping: &Shaping| {
+            glyph_quads(
+                shaping,
+                self.shaped.text_offset,
+                self.values,
+                self.text_placement,
+                self.icons,
+                self.allow_vertical_placement,
+            )
+        };
+        let icon = |icon: &PositionedIcon| {
+            icon_quads(icon, self.values.icon_rotate, self.shaped.icon_type, self.has_icon_text_fit)
+        };
+        let mut horizontal: [SymbolQuads; 3] = Default::default();
+        if text.single_line {
+            if let Some(shaping) = text.any_horizontal() {
+                horizontal[Justification::Right as usize] = glyphs(shaping);
+            }
+        } else {
+            for justification in Justification::ALL {
+                let shaping = text.get(justification);
+                if shaping.is_some() {
+                    horizontal[justification as usize] = glyphs(shaping);
+                }
+            }
+        }
+        Arc::new(SymbolQuadSet {
+            line,
+            single_line: text.single_line,
+            horizontal,
+            vertical: if text.vertical.is_some() { glyphs(&text.vertical) } else { SymbolQuads::new() },
+            icon: self.shaped.icon.as_ref().map(icon),
+            vertical_icon: self.shaped.icon.as_ref().and(self.vertical_icon).map(icon),
+        })
+    }
+
+    /// The feature's symbol at `anchor`, whose collision boxes and key go to
+    /// `pools`.
+    fn symbol(&self, anchor: Anchor, quads: Arc<SymbolQuadSet>, pools: &mut SymbolInstancePools) -> LaidOutSymbol {
+        // Vertical text turns its boxes a quarter.
+        const VERTICAL_ROTATION: f32 = 90.0;
+        let line = &quads.line;
+        let text_feature = |shaping: &Shaping, rotation: f32, boxes: &mut Vec<CollisionBox>| {
+            CollisionFeature::new_text(
+                line,
+                &anchor,
+                shaping,
+                self.text_box_scale,
+                self.text_padding,
+                self.text_placement,
+                &self.indexed_feature,
+                self.overscaling,
+                rotation,
+                boxes,
+            )
+        };
+        let icon_feature = |icon: &PositionedIcon, rotation: f32, boxes: &mut Vec<CollisionBox>| {
+            CollisionFeature::new_icon(
+                line,
+                &anchor,
+                Some(icon),
+                self.icon_box_scale,
+                &self.icon_padding,
+                &self.indexed_feature,
+                rotation,
+                boxes,
+            )
+        };
+        let text = &self.shaped.text;
+        let vertical = self.allow_vertical_placement && text.vertical.is_some();
+        let text_part = quads.has_text().then(|| TextPart {
+            runs: TextRuns::default(),
+            collision: text_feature(text.any(), self.values.text_rotate, &mut pools.collision_boxes),
+            vertical_collision: vertical.then(|| {
+                text_feature(&text.vertical, self.values.text_rotate + VERTICAL_ROTATION, &mut pools.collision_boxes)
+            }),
+            box_scale: self.text_box_scale,
+            variable_anchors: self.variable_anchors.clone(),
+        });
+        let icon_part = self.shaped.icon.as_ref().map(|icon| IconPart {
+            run: 0,
+            vertical_run: None,
+            collision: icon_feature(icon, self.values.icon_rotate, &mut pools.collision_boxes),
+            vertical_collision: self.vertical_icon.filter(|_| vertical).map(|icon| {
+                icon_feature(icon, self.values.icon_rotate + VERTICAL_ROTATION, &mut pools.collision_boxes)
+            }),
+            sdf: self.shaped.icon_type == SymbolContent::IconSDF,
+        });
+        LaidOutSymbol {
+            symbol: SymbolInstance {
+                anchor,
+                key: PoolRange::extend(&mut pools.keys, self.key.bytes()),
+                data_feature_index: self.data_feature_index,
+                height_offset: self.height_offset,
+                cross_tile_id: None,
+                text: text_part,
+                icon: icon_part,
+            },
+            quads,
+            feature: self.feature_index,
+            text_offset: self.shaped.text_offset,
+            icon_offset: self.values.icon_offset,
+        }
+    }
+}
+
 pub(crate) struct SymbolLayout {
     pub(crate) layer_paint_properties: VecMap<String, Arc<EvaluatedLayer<Symbol>>>,
     /// Shared by every symbol's `IndexedSubfeature`, which placement clones
     /// for each symbol it places.
     pub(crate) bucket_leader_id: Arc<str>,
-    pub(crate) symbol_instances: Vec<SymbolInstance>,
+    symbols: Vec<LaidOutSymbol>,
     symbol_instance_pools: SymbolInstancePools,
     pub(crate) sort_key_ranges: Vec<SortKeyRange>,
 
@@ -389,7 +508,7 @@ impl SymbolLayout {
         let mut this = SymbolLayout {
             layer_paint_properties: VecMap::new(),
             bucket_leader_id: Arc::from(leader.id.as_str()),
-            symbol_instances: Vec::new(),
+            symbols: Vec::new(),
             symbol_instance_pools: SymbolInstancePools::default(),
             sort_key_ranges: Vec::new(),
             compare_text: VecMap::new(),
@@ -791,236 +910,128 @@ impl SymbolLayout {
         Some(VariableAnchorOffsetCollection::new(anchor_offset_pairs))
     }
 
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "one feature's shaped text and icon, its images and its evaluated text and icon layout"
-    )]
+    /// Adds the symbols of `feature`, the layout's feature `feature_index`,
+    /// at each of its anchors.
     fn add_feature(
         &mut self,
-        layout_feature_index: usize,
+        feature_index: usize,
         feature: &SymbolFeature,
-        shaped_text_orientations: &ShapedTextOrientations,
-        mut shaped_icon: Option<PositionedIcon>,
+        shaped: ShapedFeature,
         icons: &ImagePositions,
-        text_offset: [f32; 2],
-        layout_text_size: f32,
-        layout_icon_size: f32,
-        icon_type: SymbolContent,
     ) {
-        let min_scale = 0.5_f32;
-        let glyph_size = 24.0_f32;
-        let zoom = self.zoom;
-        let canonical = self.canonical_id;
+        const GLYPH_SIZE: f32 = 24.0;
         let layout = Arc::clone(&self.layout);
+        let context = EvaluationContext::with_zoom_feature(self.zoom, Some(feature))
+            .with_canonical_tile_id(Some(&self.canonical_id));
+        let values = layout.evaluate_all(&context);
 
-        let icon_offset = layout.icon_offset.evaluate(
-            &EvaluationContext::with_zoom_feature(zoom, Some(feature)).with_canonical_tile_id(Some(&canonical)),
-        );
-
-        // To reduce the number of labels that jump around when zooming we
-        // need to use a text-size value that is the same for all zoom
-        // levels. This calculates text-size at a high zoom level so that all
-        // tiles can use the same value when calculating anchor positions.
+        // A text size from a high zoom level, the same for every zoom, so
+        // that labels keep their anchors as the map zooms.
         let text_max_size = layout.text_size.evaluate(
-            &EvaluationContext::with_zoom_feature(18.0, Some(feature)).with_canonical_tile_id(Some(&canonical)),
+            &EvaluationContext::with_zoom_feature(18.0, Some(feature)).with_canonical_tile_id(Some(&self.canonical_id)),
         );
-
-        let font_scale = layout_text_size / glyph_size;
-        let text_box_scale = self.tile_pixel_ratio * font_scale;
-        let text_max_box_scale = self.tile_pixel_ratio * text_max_size / glyph_size;
-        let icon_box_scale = self.tile_pixel_ratio * layout_icon_size;
+        let text_max_box_scale = self.tile_pixel_ratio * text_max_size / GLYPH_SIZE;
         let symbol_spacing = self.tile_pixel_ratio * *layout.symbol_spacing.uniform();
-        let text_padding = *layout.text_padding.uniform() * self.tile_pixel_ratio;
-        let icon_padding = layout.icon_padding.evaluate(
-            &EvaluationContext::with_zoom_feature(zoom, Some(feature)).with_canonical_tile_id(Some(&canonical)),
-        ) * self.tile_pixel_ratio;
-        let text_max_angle = (layout.text_max_angle).uniform().to_radians_stepwise();
-        let icon_rotation = layout.icon_rotate.evaluate(
-            &EvaluationContext::with_zoom_feature(zoom, Some(feature)).with_canonical_tile_id(Some(&canonical)),
-        );
-        let text_rotation = layout.text_rotate.evaluate(
-            &EvaluationContext::with_zoom_feature(zoom, Some(feature)).with_canonical_tile_id(Some(&canonical)),
-        );
-        let variable_anchor_offsets = self.text_variable_anchor_offset(feature);
-        // The spec raises only point-placed symbols.
-        let height_offset = if *layout.symbol_placement.uniform() == SymbolPlacementType::Point {
-            layout.symbol_height_offset.evaluate(
-                &EvaluationContext::with_zoom_feature(zoom, Some(feature)).with_canonical_tile_id(Some(&canonical)),
-            )
-        } else {
-            0.0
-        };
-
-        let text_placement = if *layout.text_rotation_alignment.uniform() == TextRotationAlignmentType::Viewport {
+        let text_max_angle = layout.text_max_angle.uniform().to_radians_stepwise();
+        let placement = *layout.symbol_placement.uniform();
+        let text_placement = if values.text_rotation_alignment == TextRotationAlignmentType::Viewport {
             SymbolPlacementType::Point
         } else {
-            *layout.symbol_placement.uniform()
+            placement
         };
 
-        let text_repeat_distance = symbol_spacing / 2.0;
-        let evaluated_layout_properties = layout.evaluate_all(
-            &EvaluationContext::with_zoom_feature(zoom, Some(feature)).with_canonical_tile_id(Some(&canonical)),
-        );
-        let indexed_feature = IndexedSubfeature {
-            index: feature.index,
-            source_layer_name: Arc::clone(&self.source_layer_name),
-            bucket_leader_id: Arc::clone(&self.bucket_leader_id),
-            sort_index: self.symbol_instances.len(),
-            bucket_instance_id: 0,
-            collision_group_id: 0,
-            overlap_mode: OverlapMode::Never,
-        };
-
-        let icon_text_fit = evaluated_layout_properties.icon_text_fit;
-        let has_icon_text_fit = icon_text_fit != IconTextFitType::None;
-        // Adjust shaped icon size when icon-text-fit is used.
-        let mut vertically_shaped_icon: Option<PositionedIcon> = None;
-        if let Some(icon) = shaped_icon.as_mut()
+        let mut shaped = shaped;
+        let has_icon_text_fit = values.icon_text_fit != IconTextFitType::None;
+        let font_scale = shaped.text_size / GLYPH_SIZE;
+        let mut vertical_icon = None;
+        if let Some(icon) = shaped.icon.as_mut()
             && has_icon_text_fit
         {
-            // Create vertically shaped icon for vertical writing mode if needed.
-            if self.allow_vertical_placement && shaped_text_orientations.vertical.is_some() {
-                let mut vertical = icon.clone();
-                vertical.fit_icon_to_text(
-                    &shaped_text_orientations.vertical,
-                    icon_text_fit,
-                    layout.icon_text_fit_padding.uniform(),
-                    &icon_offset,
-                    font_scale,
-                );
-                vertically_shaped_icon = Some(vertical);
-            }
-            let shaped_text = default_horizontal_shaping(shaped_text_orientations);
-            if shaped_text.is_some() {
+            let fit = |icon: &mut PositionedIcon, text: &Shaping| {
                 icon.fit_icon_to_text(
-                    shaped_text,
-                    icon_text_fit,
-                    layout.icon_text_fit_padding.uniform(),
-                    &icon_offset,
+                    text,
+                    values.icon_text_fit,
+                    &values.icon_text_fit_padding,
+                    &values.icon_offset,
                     font_scale,
                 );
+            };
+            if self.allow_vertical_placement && shaped.text.vertical.is_some() {
+                let mut vertical = icon.clone();
+                fit(&mut vertical, &shaped.text.vertical);
+                vertical_icon = Some(vertical);
+            }
+            if let Some(text) = shaped.text.any_horizontal() {
+                fit(icon, text);
             }
         }
 
         let key: String =
             feature.formatted_text.as_ref().map_or_else(String::new, |text| text.logical_text().iter().collect());
-
-        let allow_vertical_placement = self.allow_vertical_placement;
-        let create_symbol_instance_shared_data = |line: GeometryCoordinates| {
-            Arc::new(SymbolInstanceSharedData::new(
-                line,
-                shaped_text_orientations,
-                shaped_icon.as_ref(),
-                vertically_shaped_icon.as_ref(),
-                &evaluated_layout_properties,
-                text_placement,
-                text_offset,
-                icons,
-                icon_rotation,
-                icon_type,
-                has_icon_text_fit,
-                allow_vertical_placement,
-            ))
+        let symbols = FeatureSymbols {
+            shaped: &shaped,
+            vertical_icon: vertical_icon.as_ref(),
+            values: &values,
+            icons,
+            text_placement,
+            has_icon_text_fit,
+            allow_vertical_placement: self.allow_vertical_placement,
+            overscaling: self.overscaling,
+            text_box_scale: self.tile_pixel_ratio * font_scale,
+            text_padding: values.text_padding * self.tile_pixel_ratio,
+            icon_box_scale: self.tile_pixel_ratio * shaped.icon_size,
+            icon_padding: values.icon_padding * self.tile_pixel_ratio,
+            variable_anchors: self.text_variable_anchor_offset(feature),
+            // The spec raises only point-placed symbols.
+            height_offset: if placement == SymbolPlacementType::Point { values.symbol_height_offset } else { 0.0 },
+            indexed_feature: IndexedSubfeature {
+                index: feature.index,
+                source_layer_name: Arc::clone(&self.source_layer_name),
+                bucket_leader_id: Arc::clone(&self.bucket_leader_id),
+                sort_index: self.symbols.len(),
+                bucket_instance_id: 0,
+                collision_group_id: 0,
+                overlap_mode: OverlapMode::Never,
+            },
+            key: &key,
+            feature_index,
+            data_feature_index: feature.index,
         };
 
-        let mode = self.mode;
-        let overscaling = self.overscaling;
-        let sort_features_by_key = self.sort_features_by_key;
-        let add_symbol_instance =
-            |this: &mut SymbolLayout, anchor: Anchor, shared_data: Arc<SymbolInstanceSharedData>| {
-                let anchor_inside_tile = anchor.point.x >= 0.0
-                    && anchor.point.x < EXTENT as f32
-                    && anchor.point.y >= 0.0
-                    && anchor.point.y < EXTENT as f32;
+        let text_shaping =
+            if shaped.text.vertical.is_some() { Some(&shaped.text.vertical) } else { shaped.text.any_horizontal() };
+        let (text_left, text_right) = text_shaping.map_or((0.0, 0.0), |text| (text.left, text.right));
+        let (icon_left, icon_right) = shaped.icon.as_ref().map_or((0.0, 0.0), |icon| (icon.left(), icon.right()));
 
-                if mode == MapMode::Tile || anchor_inside_tile {
-                    // For static/continuous rendering, only add symbols anchored
-                    // within this tile: neighboring symbols will be added as part
-                    // of the neighboring tiles. In tiled rendering mode, add all
-                    // symbols in the buffers so that we can: (1) render symbols
-                    // that overlap into this tile (2) approximate collision
-                    // detection effects from neighboring symbols
-                    this.symbol_instances.push(SymbolInstance::new(
-                        anchor,
-                        shared_data,
-                        shaped_text_orientations,
-                        shaped_icon.as_ref(),
-                        vertically_shaped_icon.as_ref(),
-                        text_box_scale,
-                        text_padding,
-                        text_placement,
-                        text_offset,
-                        icon_box_scale,
-                        icon_padding,
-                        icon_offset,
-                        &indexed_feature,
-                        layout_feature_index,
-                        feature.index,
-                        key.as_bytes(),
-                        overscaling,
-                        icon_rotation,
-                        text_rotation,
-                        variable_anchor_offsets.as_ref(),
-                        allow_vertical_placement,
-                        icon_type,
-                        height_offset,
-                        &mut this.symbol_instance_pools,
-                    ));
-
-                    if sort_features_by_key {
-                        let len = this.symbol_instances.len();
-                        match this.sort_key_ranges.last_mut() {
-                            Some(last) if last.sort_key == feature.sort_key => last.end = len,
-                            _ => this.sort_key_ranges.push(SortKeyRange {
-                                sort_key: feature.sort_key,
-                                start: len - 1,
-                                end: len,
-                            }),
+        match placement {
+            SymbolPlacementType::Line => {
+                for line in clip_lines(&feature.geometry, 0, 0, EXTENT as i16, EXTENT as i16).iter() {
+                    let anchors: Anchors = get_anchors(
+                        line,
+                        symbol_spacing,
+                        text_max_angle,
+                        text_left,
+                        text_right,
+                        icon_left,
+                        icon_right,
+                        GLYPH_SIZE,
+                        text_max_box_scale,
+                        self.overscaling,
+                    );
+                    let quads = symbols.quads(line.clone());
+                    for anchor in anchors {
+                        let too_close = feature.formatted_text.is_some()
+                            && self.anchor_is_too_close(&key, symbol_spacing / 2.0, &anchor);
+                        if !too_close {
+                            self.add_symbol_instance(&symbols, feature, anchor, &quads);
                         }
                     }
                 }
-            };
-
-        let feature_type = feature.get_type();
-        let text_shaping = if shaped_text_orientations.vertical.is_some() {
-            &shaped_text_orientations.vertical
-        } else {
-            default_horizontal_shaping(shaped_text_orientations)
-        };
-        let (text_left, text_right) = (text_shaping.left, text_shaping.right);
-        let (icon_left, icon_right) = shaped_icon.as_ref().map_or((0.0, 0.0), |icon| (icon.left(), icon.right()));
-
-        let placement = &layout.symbol_placement;
-        if *placement.uniform() == SymbolPlacementType::Line {
-            let clipped_lines = clip_lines(&feature.geometry, 0, 0, EXTENT as i16, EXTENT as i16);
-            for line in clipped_lines.iter() {
-                let anchors: Anchors = get_anchors(
-                    line,
-                    symbol_spacing,
-                    text_max_angle,
-                    text_left,
-                    text_right,
-                    icon_left,
-                    icon_right,
-                    glyph_size,
-                    text_max_box_scale,
-                    self.overscaling,
-                );
-                let shared_data = create_symbol_instance_shared_data(line.clone());
-                for anchor in anchors {
-                    let too_close = feature.formatted_text.is_some()
-                        && self.anchor_is_too_close(&key, text_repeat_distance, &anchor);
-                    if !too_close {
-                        add_symbol_instance(self, anchor, Arc::clone(&shared_data));
-                    }
-                }
             }
-        } else if *placement.uniform() == SymbolPlacementType::LineCenter {
-            // No clipping, multiple lines per feature are allowed
-            // "lines" with only one point are ignored, as clipping ignores
-            // them
-            for line in feature.geometry.iter() {
-                if line.len() > 1 {
+            SymbolPlacementType::LineCenter => {
+                // Each line takes a label at its center, unclipped; a line of
+                // one point takes none.
+                for line in feature.geometry.iter().filter(|line| line.len() > 1) {
                     let anchor = get_center_anchor(
                         line,
                         text_max_angle,
@@ -1028,46 +1039,69 @@ impl SymbolLayout {
                         text_right,
                         icon_left,
                         icon_right,
-                        glyph_size,
+                        GLYPH_SIZE,
                         text_max_box_scale,
                     );
                     if let Some(anchor) = anchor {
-                        add_symbol_instance(self, anchor, create_symbol_instance_shared_data(line.clone()));
+                        self.add_symbol_instance(&symbols, feature, anchor, &symbols.quads(line.clone()));
                     }
                 }
             }
-        } else if feature_type == FeatureType::Polygon {
-            for polygon in mln_tile::geometry_tile_data::classify_rings(&feature.geometry) {
-                let mut poly: polylabel::Polygon<f64> = Vec::new();
-                for ring in polygon.iter() {
-                    let r: polylabel::LinearRing<f64> =
-                        ring.iter().map(|p| Point::new(f64::from(p.x), f64::from(p.y))).collect();
-                    poly.push(r);
+            SymbolPlacementType::Point => match feature.get_type() {
+                FeatureType::Polygon => {
+                    for polygon in mln_tile::geometry_tile_data::classify_rings(&feature.geometry) {
+                        let rings: polylabel::Polygon<f64> = polygon
+                            .iter()
+                            .map(|ring| ring.iter().map(|p| Point::new(f64::from(p.x), f64::from(p.y))).collect())
+                            .collect();
+                        // To a pixel, in tile units.
+                        let Ok(poi) = polylabel::polylabel(&rings, f64::from(EXTENT) / TILE_SIZE_D) else {
+                            continue;
+                        };
+                        let anchor = Anchor::new(poi.x as f32, poi.y as f32, 0.0, None);
+                        self.add_symbol_instance(&symbols, feature, anchor, &symbols.quads(polygon[0].clone()));
+                    }
                 }
+                FeatureType::LineString => {
+                    for line in feature.geometry.iter() {
+                        if let Some(start) = line.first() {
+                            let anchor = Anchor::new(f32::from(start.x), f32::from(start.y), 0.0, None);
+                            self.add_symbol_instance(&symbols, feature, anchor, &symbols.quads(line.clone()));
+                        }
+                    }
+                }
+                FeatureType::Point => {
+                    for &point in feature.geometry.iter().flat_map(|points| points.iter()) {
+                        let anchor = Anchor::new(f32::from(point.x), f32::from(point.y), 0.0, None);
+                        self.add_symbol_instance(&symbols, feature, anchor, &symbols.quads(vec![point]));
+                    }
+                }
+                FeatureType::Unknown => {}
+            },
+        }
+    }
 
-                // 1 pixel worth of precision, in tile coordinates
-                let Ok(poi) = polylabel::polylabel(&poly, f64::from(EXTENT) / TILE_SIZE_D) else {
-                    continue;
-                };
-                let anchor = Anchor::new(poi.x as f32, poi.y as f32, 0.0, Some(min_scale as usize));
-                add_symbol_instance(self, anchor, create_symbol_instance_shared_data(polygon[0].clone()));
-            }
-        } else if feature_type == FeatureType::LineString {
-            for line in feature.geometry.iter() {
-                // Skip invalid LineStrings.
-                if line.is_empty() {
-                    continue;
-                }
-
-                let anchor = Anchor::new(f32::from(line[0].x), f32::from(line[0].y), 0.0, Some(min_scale as usize));
-                add_symbol_instance(self, anchor, create_symbol_instance_shared_data(line.clone()));
-            }
-        } else if feature_type == FeatureType::Point {
-            for points in feature.geometry.iter() {
-                for point in points {
-                    let anchor = Anchor::new(f32::from(point.x), f32::from(point.y), 0.0, Some(min_scale as usize));
-                    add_symbol_instance(self, anchor, create_symbol_instance_shared_data(vec![*point]));
-                }
+    /// Adds `symbols`' symbol at `anchor`. Outside tile mode, only a symbol
+    /// anchored inside the tile is added: its neighbors add the others. Tile
+    /// mode adds them all, so that the tile draws the symbols that reach
+    /// into it and collides with its neighbors' symbols.
+    fn add_symbol_instance(
+        &mut self,
+        symbols: &FeatureSymbols<'_>,
+        feature: &SymbolFeature,
+        anchor: Anchor,
+        quads: &Arc<SymbolQuadSet>,
+    ) {
+        let tile = 0.0..EXTENT as f32;
+        if self.mode != MapMode::Tile && !(tile.contains(&anchor.point.x) && tile.contains(&anchor.point.y)) {
+            return;
+        }
+        self.symbols.push(symbols.symbol(anchor, Arc::clone(quads), &mut self.symbol_instance_pools));
+        if self.sort_features_by_key {
+            let len = self.symbols.len();
+            match self.sort_key_ranges.last_mut() {
+                Some(last) if last.sort_key == feature.sort_key => last.end = len,
+                _ => self.sort_key_ranges.push(SortKeyRange { sort_key: feature.sort_key, start: len - 1, end: len }),
             }
         }
     }
@@ -1123,300 +1157,256 @@ impl SymbolLayout {
             }
         }
     }
+}
 
-    fn update_paint_properties_for_section(
-        paint_properties: &mut VecMap<String, PaintProperties>,
-        state: &SymbolBucketState,
-        feature: &SymbolFeature,
-        section_index: usize,
-        canonical: &CanonicalTileID,
-    ) {
-        let formatted_section =
-            section_options_to_value(feature.formatted_text.as_ref().expect("text").section_at(section_index));
-        let length = state.text.attribute_data.len();
-        for binders in paint_properties.values_mut() {
-            binders.text_binders.populate_vertex_vectors(
-                feature,
-                length,
-                feature.index,
-                &ImagePositions::default(),
-                None,
-                canonical,
-                &formatted_section,
-            );
-        }
-    }
+/// Adds laid-out symbols' quads to a bucket's buffers, as runs.
+struct BucketWriter<'a> {
+    state: &'a mut SymbolBucketState,
+    paint_properties: &'a mut VecMap<String, PaintProperties>,
+    text_size: &'a SymbolSizeBinder,
+    icon_size: &'a SymbolSizeBinder,
+    /// The text's paint varies by section, so binders take each section's.
+    section_overrides: bool,
+    allow_vertical_placement: bool,
+    canonical: &'a CanonicalTileID,
+}
 
-    /// Adds symbol quads to the bucket and returns the formatted section index
-    /// of the last added quad.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the bucket, its state and binders, the symbol and feature, and the quads of one writing mode"
-    )]
-    fn add_symbol_glyph_quads(
-        &self,
-        bucket: &SymbolBucket,
-        state: &mut SymbolBucketState,
-        paint_properties: &mut VecMap<String, PaintProperties>,
-        symbol_instance: &SymbolInstance,
-        feature: &SymbolFeature,
-        writing_mode: WritingModeType,
-        glyph_quads: &SymbolQuads,
-        canonical: &CanonicalTileID,
-        mut last_added_section: Option<usize>,
-        line: &mut Option<(PoolRange, PoolRange)>,
-    ) -> (usize, usize) {
-        let size_data = bucket.text_size_binder.vertex_size_data(feature);
-        let has_format_section_overrides = bucket.has_format_section_overrides();
-        let placed_icon_index = if writing_mode == WritingModeType::Vertical {
-            symbol_instance.placed_vertical_icon_index
-        } else {
-            symbol_instance.placed_icon_index
-        };
+/// What the quads of a run share.
+#[derive(Clone, Copy)]
+struct RunInfo {
+    anchor: Anchor,
+    height_offset: f32,
+    size: Range<f32>,
+    offset: [f32; 2],
+    writing_modes: WritingModeType,
+    angle: f32,
+    line: PoolRange,
+    tile_distances: PoolRange,
+    sort_key: f32,
+}
 
-        // The symbol's text variants share its line and its distances.
-        let pools = &mut state.text.pools;
-        let (line, tile_distances) = *line.get_or_insert_with(|| {
-            let line = symbol_instance.line();
-            let tile_distances = PoolRange::extend(&mut pools.tile_distances, std::iter::repeat_n(0.0, line.len()));
-            Self::calculate_tile_distances(
-                line,
-                symbol_instance.anchor(),
-                tile_distances.of_mut(&mut pools.tile_distances),
-            );
-            (PoolRange::extend(&mut pools.lines, line.iter().copied()), tile_distances)
-        });
-        let glyph_offsets = PoolRange::at_end(&pools.glyph_offsets);
-        state.text.placed_symbols.push(PlacedSymbol::new(
-            symbol_instance.anchor().point,
-            symbol_instance.anchor().segment.unwrap_or(0),
-            size_data.min,
-            size_data.max,
-            symbol_instance.text_offset(),
-            writing_mode,
-            line,
-            tile_distances,
-            glyph_offsets,
-            placed_icon_index,
-        ));
-        let placed_index = state.text.placed_symbols.len() - 1;
-        state.text.placed_symbols[placed_index].height_offset = symbol_instance.height_offset();
-        state.text.placed_symbols[placed_index].angle =
-            if self.allow_vertical_placement && writing_mode == WritingModeType::Vertical {
+impl BucketWriter<'_> {
+    /// Adds `laid_out`'s runs, and returns its symbol with them set.
+    fn add(&mut self, laid_out: LaidOutSymbol, feature: &SymbolFeature) -> SymbolInstance {
+        let LaidOutSymbol { mut symbol, quads, text_offset, icon_offset, .. } = laid_out;
+        let (anchor, height_offset) = (symbol.anchor, symbol.height_offset);
+        let allow_vertical_placement = self.allow_vertical_placement;
+        let run = |size, offset, writing_modes, line, tile_distances| RunInfo {
+            anchor,
+            height_offset,
+            size,
+            offset,
+            writing_modes,
+            angle: if allow_vertical_placement && writing_modes == WritingModeType::Vertical {
                 std::f32::consts::FRAC_PI_2
             } else {
                 0.0
+            },
+            line,
+            tile_distances,
+            sort_key: feature.sort_key,
+        };
+
+        // Icons go first, so that a text's runs follow its icon's.
+        if let Some(icon) = &mut symbol.icon {
+            let size = self.icon_size.vertex_size_data(feature);
+            let buffer = if icon.sdf { &mut self.state.sdf_icon } else { &mut self.state.icon };
+            let mut add = |run_quads: &[SymbolQuad], writing_modes| {
+                let line = PoolRange::extend(&mut buffer.pools.lines, quads.line.iter().copied());
+                let info = run(size, icon_offset, writing_modes, line, PoolRange::default());
+                add_run(buffer, &info, run_quads, |_, _| {})
             };
+            icon.run = add(quads.icon.as_deref().unwrap_or_default(), WritingModeType::None);
+            icon.vertical_run =
+                quads.vertical_icon.as_deref().map(|run_quads| add(run_quads, WritingModeType::Vertical));
+            let length = buffer.attribute_data.len();
+            for binders in self.paint_properties.values_mut() {
+                binders.icon_binders.populate_vertex_vectors(
+                    feature,
+                    length,
+                    symbol.data_feature_index,
+                    &ImagePositions::default(),
+                    None,
+                    self.canonical,
+                    &Value::Null,
+                );
+            }
+        }
 
-        let mut first_symbol = true;
-        for symbol_quad in glyph_quads {
-            if has_format_section_overrides {
-                if let Some(last) = last_added_section
-                    && last != symbol_quad.section_index
-                {
-                    Self::update_paint_properties_for_section(paint_properties, state, feature, last, canonical);
+        if let Some(text) = &mut symbol.text
+            && let Some(formatted_text) = &feature.formatted_text
+        {
+            let size = self.text_size.vertex_size_data(feature);
+            let BucketWriter { state, paint_properties, canonical, section_overrides, .. } = self;
+            let buffer = &mut state.text;
+            // The text's runs share its line and the distances along it.
+            let mut distances = vec![0.0; quads.line.len()];
+            SymbolLayout::calculate_tile_distances(&quads.line, &anchor, &mut distances);
+            let tile_distances = PoolRange::extend(&mut buffer.pools.tile_distances, distances);
+            let line = PoolRange::extend(&mut buffer.pools.lines, quads.line.iter().copied());
+
+            let mut section = None;
+            let mut populate_section = |section: usize, length: usize| {
+                let section = section_options_to_value(formatted_text.section_at(section));
+                for binders in paint_properties.values_mut() {
+                    binders.text_binders.populate_vertex_vectors(
+                        feature,
+                        length,
+                        feature.index,
+                        &ImagePositions::default(),
+                        None,
+                        canonical,
+                        &section,
+                    );
                 }
-                last_added_section = Some(symbol_quad.section_index);
-            }
-            let index = Self::add_symbol(
-                &mut state.text,
-                size_data,
-                symbol_quad,
-                symbol_instance.anchor(),
-                placed_index,
-                feature.sort_key,
-            );
-            if first_symbol {
-                state.text.placed_symbols[placed_index].start_index = index;
-                first_symbol = false;
-            }
-        }
-
-        (last_added_section.unwrap_or(0), placed_index)
-    }
-
-    /// Adds a placed symbol quad to `buffer`.
-    fn add_symbol(
-        buffer: &mut Buffer,
-        size_data: Range<f32>,
-        symbol: &SymbolQuad,
-        label_anchor: &Anchor,
-        placed_symbol: usize,
-        sort_key: f32,
-    ) -> usize {
-        let height_offset = buffer.placed_symbols[placed_symbol].height_offset;
-
-        let tl = symbol.tl;
-        let tr = symbol.tr;
-        let bl = symbol.bl;
-        let br = symbol.br;
-        let tex = symbol.tex;
-        let pixel_offset_tl = symbol.pixel_offset_tl;
-        let pixel_offset_br = symbol.pixel_offset_br;
-        let min_font_scale = symbol.min_font_scale;
-
-        let first = buffer.attribute_data.len();
-        let anchor = label_anchor.point;
-        let glyph_offset_y = symbol.glyph_offset.y;
-        // coordinates (2 triangles)
-        buffer.attribute_data.get_mut().push(SymbolBucket::layout_attributes(
-            anchor,
-            tl,
-            glyph_offset_y,
-            tex.x,
-            tex.y,
-            [tex.x, tex.y],
-            size_data,
-            symbol.is_sdf,
-            pixel_offset_tl,
-            min_font_scale,
-            height_offset,
-        ));
-        buffer.attribute_data.get_mut().push(SymbolBucket::layout_attributes(
-            anchor,
-            tr,
-            glyph_offset_y,
-            tex.x + tex.w,
-            tex.y,
-            [tex.x, tex.y],
-            size_data,
-            symbol.is_sdf,
-            Vec2::new(pixel_offset_br.x, pixel_offset_tl.y),
-            min_font_scale,
-            height_offset,
-        ));
-        buffer.attribute_data.get_mut().push(SymbolBucket::layout_attributes(
-            anchor,
-            bl,
-            glyph_offset_y,
-            tex.x,
-            tex.y + tex.h,
-            [tex.x, tex.y],
-            size_data,
-            symbol.is_sdf,
-            Vec2::new(pixel_offset_tl.x, pixel_offset_br.y),
-            min_font_scale,
-            height_offset,
-        ));
-        buffer.attribute_data.get_mut().push(SymbolBucket::layout_attributes(
-            anchor,
-            br,
-            glyph_offset_y,
-            tex.x + tex.w,
-            tex.y + tex.h,
-            [tex.x, tex.y],
-            size_data,
-            symbol.is_sdf,
-            pixel_offset_br,
-            min_font_scale,
-            height_offset,
-        ));
-
-        // Dynamic/Opacity vertices are initialized so that the vertex count
-        // always agrees with the layout vertex buffer, but they will always
-        // be updated before rendering happens
-        let dynamic_attributes = SymbolBucket::dynamic_layout_attributes(anchor, 0.0);
-        buffer.dynamic_attribute_data.extend_from_slice(&[dynamic_attributes; 4]);
-
-        let opacity_attributes = SymbolBucket::opacity_attributes(true, 1.0);
-        buffer.opacity_attribute_data.extend_from_slice(&[opacity_attributes; 4]);
-
-        let mut triangles = Indexed { indexes: &mut buffer.triangles, segments: &mut buffer.segments };
-        let index = triangles.add_keyed(buffer.attribute_data.get_mut(), first, sort_key, [[0, 1, 2], [1, 2, 3]]);
-
-        buffer.placed_symbols[placed_symbol].glyph_offsets.push(&mut buffer.pools.glyph_offsets, symbol.glyph_offset.x);
-
-        index
-    }
-
-    fn add_symbols(
-        buffer: &mut Buffer,
-        size_data: Range<f32>,
-        symbols: &SymbolQuads,
-        label_anchor: &Anchor,
-        placed_symbol: usize,
-        sort_key: f32,
-    ) -> usize {
-        let mut first_symbol = true;
-        let mut first_index = 0;
-        for symbol in symbols {
-            let index = Self::add_symbol(buffer, size_data, symbol, label_anchor, placed_symbol, sort_key);
-            if first_symbol {
-                first_index = index;
-                first_symbol = false;
-            }
-        }
-        first_index
-    }
-
-    fn add_to_debug_buffers(state: &mut SymbolBucketState) {
-        if !Self::has_symbol_instances_in(state) {
-            return;
-        }
-
-        let instances = std::mem::take(&mut state.symbol_instances);
-        let pools = std::mem::take(&mut state.symbol_instance_pools);
-        for symbol_instance in &instances {
-            let mut populate_collision_box = |feature: &crate::text::collision_feature::CollisionFeature,
-                                              is_text: bool| {
-                let collision_buffer: &mut CollisionBuffer = if feature.along_line {
-                    if is_text {
-                        state.text_collision_circle.get_or_insert_with(Default::default)
-                    } else {
-                        state.icon_collision_circle.get_or_insert_with(Default::default)
+            };
+            let mut add = |run_quads: &[SymbolQuad], writing_modes| {
+                let info = run(size, text_offset, writing_modes, line, tile_distances);
+                add_run(buffer, &info, run_quads, |quad, length| {
+                    if *section_overrides {
+                        if let Some(previous) = section
+                            && previous != quad.section_index
+                        {
+                            populate_section(previous, length);
+                        }
+                        section = Some(quad.section_index);
                     }
-                } else if is_text {
-                    state.text_collision_box.get_or_insert_with(Default::default)
+                })
+            };
+            let writing_modes = quads.text_writing_modes();
+            if quads.single_line {
+                text.runs.horizontal = [Some(add(&quads.horizontal[Justification::Right as usize], writing_modes)); 3];
+            } else {
+                for justification in Justification::ALL {
+                    let run_quads = &quads.horizontal[justification as usize];
+                    if !run_quads.is_empty() {
+                        text.runs.horizontal[justification as usize] = Some(add(run_quads, writing_modes));
+                    }
+                }
+            }
+            if !quads.vertical.is_empty() {
+                text.runs.vertical = Some(add(&quads.vertical, WritingModeType::Vertical));
+            }
+            let length = buffer.attribute_data.len();
+            populate_section(section.unwrap_or(0), length);
+        }
+        symbol
+    }
+}
+
+/// Adds `quads` to `buffer` as one run, and returns the run's index.
+/// `before_quad` takes each quad, and the buffer's vertex count before its
+/// vertices.
+fn add_run(
+    buffer: &mut Buffer,
+    run: &RunInfo,
+    quads: &[SymbolQuad],
+    mut before_quad: impl FnMut(&SymbolQuad, usize),
+) -> u32 {
+    let mut glyph_offsets = PoolRange::at_end(&buffer.pools.glyph_offsets);
+    let mut start_index = None;
+    for quad in quads {
+        before_quad(quad, buffer.attribute_data.len());
+        let index = add_quad(buffer, run, quad);
+        start_index.get_or_insert(index);
+        glyph_offsets.push(&mut buffer.pools.glyph_offsets, quad.glyph_offset.x);
+    }
+    buffer.placed_symbols.push(PlacedSymbol {
+        anchor_point: run.anchor.point,
+        segment: run.anchor.segment.unwrap_or(0),
+        lower_size: run.size.min,
+        upper_size: run.size.max,
+        line_offset: run.offset,
+        writing_modes: run.writing_modes,
+        line: run.line,
+        tile_distances: run.tile_distances,
+        glyph_offsets,
+        start_index: start_index.unwrap_or(0),
+        angle: run.angle,
+        height_offset: run.height_offset,
+        hidden: false,
+    });
+    (buffer.placed_symbols.len() - 1) as u32
+}
+
+/// Adds the vertices and triangles of `quad`, and returns the index of its
+/// first vertex in its segment.
+fn add_quad(buffer: &mut Buffer, run: &RunInfo, quad: &SymbolQuad) -> usize {
+    let tex = quad.tex;
+    let (tl, br) = (quad.pixel_offset_tl, quad.pixel_offset_br);
+    let corners = [
+        (quad.tl, tex.x, tex.y, tl),
+        (quad.tr, tex.x + tex.w, tex.y, Vec2::new(br.x, tl.y)),
+        (quad.bl, tex.x, tex.y + tex.h, Vec2::new(tl.x, br.y)),
+        (quad.br, tex.x + tex.w, tex.y + tex.h, br),
+    ];
+    let anchor = run.anchor.point;
+    let first = buffer.attribute_data.len();
+    buffer.attribute_data.get_mut().extend(corners.map(|(corner, tx, ty, pixel_offset)| {
+        SymbolBucket::layout_attributes(
+            anchor,
+            corner,
+            quad.glyph_offset.y,
+            tx,
+            ty,
+            [tex.x, tex.y],
+            run.size,
+            quad.is_sdf,
+            pixel_offset,
+            quad.min_font_scale,
+            run.height_offset,
+        )
+    }));
+    // Placement writes these before the quad draws; until then they agree
+    // in count with the layout vertices.
+    buffer.dynamic_attribute_data.extend([SymbolBucket::dynamic_layout_attributes(anchor, 0.0); 4]);
+    buffer.opacity_attribute_data.extend([SymbolBucket::opacity_attributes(true, 1.0); 4]);
+    let mut triangles = Indexed { indexes: &mut buffer.triangles, segments: &mut buffer.segments };
+    triangles.add_keyed(buffer.attribute_data.get_mut(), first, run.sort_key, [[0, 1, 2], [1, 2, 3]])
+}
+
+/// Adds the debug geometry of the collision boxes and circles of `state`'s
+/// symbols.
+fn add_collision_geometry(state: &mut SymbolBucketState) {
+    let SymbolBucketState {
+        symbol_instances,
+        symbol_instance_pools,
+        text_collision_box,
+        icon_collision_box,
+        text_collision_circle,
+        icon_collision_circle,
+        ..
+    } = state;
+    for symbol in symbol_instances.iter() {
+        for (feature, is_text) in symbol.collision_features() {
+            let buffer = match (feature.along_line, is_text) {
+                (true, true) => &mut *text_collision_circle,
+                (true, false) => &mut *icon_collision_circle,
+                (false, true) => &mut *text_collision_box,
+                (false, false) => &mut *icon_collision_box,
+            }
+            .get_or_insert_with(Default::default);
+            for b in symbol_instance_pools.boxes(feature) {
+                let first = buffer.vertices.len();
+                buffer.vertices.extend([(b.x1, b.y1), (b.x2, b.y1), (b.x2, b.y2), (b.x1, b.y2)].map(|corner| {
+                    SymbolBucket::collision_layout_vertex(
+                        b.anchor,
+                        symbol.anchor.point,
+                        Vec2::from(corner),
+                        symbol.height_offset,
+                    )
+                }));
+                // Placement writes these before the box draws.
+                buffer.dynamic_vertices.extend([SymbolBucket::collision_dynamic_vertex(false, false, Vec2::ZERO); 4]);
+                // A circle along a line draws filled, and a box as its outline.
+                let mut primitives = Indexed { indexes: &mut buffer.indices, segments: &mut buffer.segments };
+                if feature.along_line {
+                    primitives.add(&mut buffer.vertices, first, [[0, 1, 2], [0, 2, 3]]);
                 } else {
-                    state.icon_collision_box.get_or_insert_with(Default::default)
-                };
-
-                for b in pools.boxes(feature) {
-                    let anchor = b.anchor;
-                    let symbol_anchor = symbol_instance.anchor().point;
-                    let height = symbol_instance.height_offset();
-                    let first = collision_buffer.vertices.len();
-                    for corner in [(b.x1, b.y1), (b.x2, b.y1), (b.x2, b.y2), (b.x1, b.y2)] {
-                        collision_buffer.vertices.push(SymbolBucket::collision_layout_vertex(
-                            anchor,
-                            symbol_anchor,
-                            Vec2::from(corner),
-                            height,
-                        ));
-                    }
-
-                    // Dynamic vertices are initialized so that the vertex
-                    // count always agrees with the layout vertex buffer, but
-                    // they will always be updated before rendering happens
-                    let dynamic_vertex = SymbolBucket::collision_dynamic_vertex(false, false, Vec2::ZERO);
-                    collision_buffer.dynamic_vertices.extend_from_slice(&[dynamic_vertex; 4]);
-
-                    // A circle along a line is drawn filled, and a box as its
-                    // outline.
-                    let mut primitives =
-                        Indexed { indexes: &mut collision_buffer.indices, segments: &mut collision_buffer.segments };
-                    if feature.along_line {
-                        primitives.add(&mut collision_buffer.vertices, first, [[0, 1, 2], [0, 2, 3]]);
-                    } else {
-                        primitives.add(&mut collision_buffer.vertices, first, [[0, 1], [1, 2], [2, 3], [3, 0]]);
-                    }
+                    primitives.add(&mut buffer.vertices, first, [[0, 1], [1, 2], [2, 3], [3, 0]]);
                 }
-            };
-            populate_collision_box(symbol_instance.text_collision_feature(), true);
-            if let Some(feature) = symbol_instance.vertical_text_collision_feature() {
-                populate_collision_box(feature, true);
             }
-            if let Some(feature) = symbol_instance.vertical_icon_collision_feature() {
-                populate_collision_box(feature, false);
-            }
-            populate_collision_box(symbol_instance.icon_collision_feature(), false);
         }
-        state.symbol_instances = instances;
-        state.symbol_instance_pools = pools;
-    }
-
-    fn has_symbol_instances_in(state: &SymbolBucketState) -> bool {
-        !state.symbol_instances.is_empty()
     }
 }
 
@@ -1451,7 +1441,7 @@ impl Layout<Symbol> for SymbolLayout {
                 self.finalize_symbols(&resolved.shaping);
             }
             self.prepare_symbols(&resolved.glyphs, &resolved.icons);
-            if self.symbol_instances.is_empty() {
+            if self.symbols.is_empty() {
                 return Ok(None);
             }
         }
@@ -1676,8 +1666,8 @@ impl SymbolLayout {
                     } else {
                         justifications.push(text_justify);
                     }
-                    for justification in justifications {
-                        if shaping_for_text_justify_type(&mut shaped_text_orientations, justification).is_some() {
+                    for justification in justifications.into_iter().filter_map(Justification::of) {
+                        if shaped_text_orientations.get(justification).is_some() {
                             continue;
                         }
                         // If using text-variable-anchor for the layer, we use
@@ -1687,12 +1677,12 @@ impl SymbolLayout {
                             formatted_text,
                             WritingModeType::Horizontal,
                             SymbolAnchorType::Center,
-                            justification,
+                            justification.into(),
                             &text_offset,
                         );
                         if shaping.is_some() {
                             let single = shaping.positioned_lines.len() == 1;
-                            *shaping_for_text_justify_type(&mut shaped_text_orientations, justification) = shaping;
+                            *shaped_text_orientations.get_mut(justification) = shaping;
                             if single {
                                 shaped_text_orientations.single_line = true;
                                 break;
@@ -1732,7 +1722,7 @@ impl SymbolLayout {
                         &text_offset,
                     );
                     if shaping.is_some() {
-                        shaped_text_orientations.horizontal = shaping;
+                        *shaped_text_orientations.get_mut(Justification::Right) = shaping;
                     }
 
                     // Vertical point label shaping where the layer allows
@@ -1788,20 +1778,18 @@ impl SymbolLayout {
             }
 
             // Add the feature if it has either shaped text or an icon.
-            let default_shaping = default_horizontal_shaping(&shaped_text_orientations);
-            self.icons_in_text |= default_shaping.is_some() && default_shaping.icons_in_text;
-            if default_shaping.is_some() || shaped_icon.is_some() {
-                self.add_feature(
-                    feature_index,
-                    feature,
-                    &shaped_text_orientations,
-                    shaped_icon,
-                    icons,
-                    text_offset,
-                    layout_text_size,
-                    layout_icon_size,
+            let text = shaped_text_orientations.any_horizontal();
+            self.icons_in_text |= text.is_some_and(|text| text.icons_in_text);
+            if text.is_some() || shaped_icon.is_some() {
+                let shaped = ShapedFeature {
+                    text: shaped_text_orientations,
+                    icon: shaped_icon,
                     icon_type,
-                );
+                    text_offset,
+                    text_size: layout_text_size,
+                    icon_size: layout_icon_size,
+                };
+                self.add_feature(feature_index, feature, shaped, icons);
             }
 
             feature.geometry.clear();
@@ -1826,7 +1814,7 @@ impl SymbolLayout {
             self.icons_need_linear,
             self.sort_features_by_y,
             self.bucket_leader_id.to_string(),
-            std::mem::take(&mut self.symbol_instances),
+            Vec::new(),
             std::mem::take(&mut self.symbol_instance_pools),
             std::mem::take(&mut self.sort_key_ranges),
             self.tile_pixel_ratio,
@@ -1834,212 +1822,31 @@ impl SymbolLayout {
             std::mem::take(&mut self.placement_modes),
             self.icons_in_text,
         );
-
-        // Out of the bucket while the symbols fill them.
         let mut state = std::mem::take(&mut bucket.state);
         let mut paint_properties = std::mem::take(&mut bucket.paint_properties);
-        let mut instances = std::mem::take(&mut state.symbol_instances);
-        {
-            let bucket_ref = &bucket;
-            let state = &mut state;
-            for symbol_instance in &mut instances {
-                let has_text = symbol_instance.has_text();
-                let has_icon = symbol_instance.has_icon();
-                let single_line = symbol_instance.single_line();
-
-                let feature = &self.features[symbol_instance.layout_feature_index()];
-
-                // Insert final placement into collision tree and add
-                // glyphs/icons to buffers
-
-                // Process icon first, so that text symbols would have
-                // the index of the icon, which updates the dynamic vertices of
-                // an `icon-text-fit` image.
-                if has_icon {
-                    let size_data = bucket_ref.icon_size_binder.vertex_size_data(feature);
-                    let sdf = symbol_instance.has_sdf_icon();
-                    let mut place_icon = |icon_quads: &SymbolQuads, writing_mode: WritingModeType| -> usize {
-                        let icon_buffer = if sdf { &mut state.sdf_icon } else { &mut state.icon };
-                        let pools = &mut icon_buffer.pools;
-                        let line = PoolRange::extend(&mut pools.lines, symbol_instance.line().iter().copied());
-                        let glyph_offsets = PoolRange::at_end(&pools.glyph_offsets);
-                        icon_buffer.placed_symbols.push(PlacedSymbol::new(
-                            symbol_instance.anchor().point,
-                            symbol_instance.anchor().segment.unwrap_or(0),
-                            size_data.min,
-                            size_data.max,
-                            symbol_instance.icon_offset(),
-                            writing_mode,
-                            line,
-                            PoolRange::default(),
-                            glyph_offsets,
-                            None,
-                        ));
-                        let index = icon_buffer.placed_symbols.len() - 1;
-                        icon_buffer.placed_symbols[index].height_offset = symbol_instance.height_offset();
-                        icon_buffer.placed_symbols[index].angle =
-                            if self.allow_vertical_placement && writing_mode == WritingModeType::Vertical {
-                                std::f32::consts::FRAC_PI_2
-                            } else {
-                                0.0
-                            };
-                        let start_index = Self::add_symbols(
-                            icon_buffer,
-                            size_data,
-                            icon_quads,
-                            symbol_instance.anchor(),
-                            index,
-                            feature.sort_key,
-                        );
-                        icon_buffer.placed_symbols[index].start_index = start_index;
-                        index
-                    };
-
-                    let icon_quads = symbol_instance.icon_quads().cloned().unwrap_or_default();
-                    let index = place_icon(&icon_quads, WritingModeType::None);
-                    let vertical_index = symbol_instance
-                        .vertical_icon_quads()
-                        .cloned()
-                        .map(|vertical_icon_quads| place_icon(&vertical_icon_quads, WritingModeType::Vertical));
-                    symbol_instance.placed_icon_index = Some(index);
-                    if vertical_index.is_some() {
-                        symbol_instance.placed_vertical_icon_index = vertical_index;
-                    }
-
-                    let length =
-                        if sdf { state.sdf_icon.attribute_data.len() } else { state.icon.attribute_data.len() };
-                    for binders in paint_properties.values_mut() {
-                        binders.icon_binders.populate_vertex_vectors(
-                            feature,
-                            length,
-                            symbol_instance.data_feature_index(),
-                            &ImagePositions::default(),
-                            None,
-                            canonical,
-                            &Value::Null,
-                        );
-                    }
-                }
-
-                if has_text && feature.formatted_text.is_some() {
-                    let mut last_added_section: Option<usize> = None;
-                    let mut text_line = None;
-                    let writing_modes = symbol_instance.writing_modes();
-                    if single_line {
-                        let quads = symbol_instance.right_justified_glyph_quads().clone();
-                        let (section, placed) = self.add_symbol_glyph_quads(
-                            bucket_ref,
-                            state,
-                            &mut paint_properties,
-                            symbol_instance,
-                            feature,
-                            writing_modes,
-                            &quads,
-                            canonical,
-                            last_added_section,
-                            &mut text_line,
-                        );
-                        last_added_section = Some(section);
-                        symbol_instance.placed_right_text_index = Some(placed);
-                        symbol_instance.placed_center_text_index = Some(placed);
-                        symbol_instance.placed_left_text_index = Some(placed);
-                    } else {
-                        if symbol_instance.right_justified_glyph_quads_size() != 0 {
-                            let quads = symbol_instance.right_justified_glyph_quads().clone();
-                            let (section, placed) = self.add_symbol_glyph_quads(
-                                bucket_ref,
-                                state,
-                                &mut paint_properties,
-                                symbol_instance,
-                                feature,
-                                writing_modes,
-                                &quads,
-                                canonical,
-                                last_added_section,
-                                &mut text_line,
-                            );
-                            last_added_section = Some(section);
-                            symbol_instance.placed_right_text_index = Some(placed);
-                        }
-                        if symbol_instance.center_justified_glyph_quads_size() != 0 {
-                            let quads = symbol_instance.center_justified_glyph_quads().clone();
-                            let (section, placed) = self.add_symbol_glyph_quads(
-                                bucket_ref,
-                                state,
-                                &mut paint_properties,
-                                symbol_instance,
-                                feature,
-                                writing_modes,
-                                &quads,
-                                canonical,
-                                last_added_section,
-                                &mut text_line,
-                            );
-                            last_added_section = Some(section);
-                            symbol_instance.placed_center_text_index = Some(placed);
-                        }
-                        if symbol_instance.left_justified_glyph_quads_size() != 0 {
-                            let quads = symbol_instance.left_justified_glyph_quads().clone();
-                            let (section, placed) = self.add_symbol_glyph_quads(
-                                bucket_ref,
-                                state,
-                                &mut paint_properties,
-                                symbol_instance,
-                                feature,
-                                writing_modes,
-                                &quads,
-                                canonical,
-                                last_added_section,
-                                &mut text_line,
-                            );
-                            last_added_section = Some(section);
-                            symbol_instance.placed_left_text_index = Some(placed);
-                        }
-                    }
-                    if (writing_modes & WritingModeType::Vertical) != WritingModeType::None
-                        && symbol_instance.vertical_glyph_quads_size() != 0
-                    {
-                        let quads = symbol_instance.vertical_glyph_quads().clone();
-                        let (section, placed) = self.add_symbol_glyph_quads(
-                            bucket_ref,
-                            state,
-                            &mut paint_properties,
-                            symbol_instance,
-                            feature,
-                            WritingModeType::Vertical,
-                            &quads,
-                            canonical,
-                            last_added_section,
-                            &mut text_line,
-                        );
-                        last_added_section = Some(section);
-                        symbol_instance.placed_vertical_text_index = Some(placed);
-                    }
-                    // The instance has text, so a section was added.
-                    debug_assert!(last_added_section.is_some());
-                    Self::update_paint_properties_for_section(
-                        &mut paint_properties,
-                        state,
-                        feature,
-                        last_added_section.unwrap_or(0),
-                        canonical,
-                    );
-                }
-
-                symbol_instance.release_shared_data();
-            }
-            state.symbol_instances = instances;
-
-            if show_collision_boxes {
-                Self::add_to_debug_buffers(state);
-            }
-            if !first_load {
-                state.just_reloaded = true;
-            }
+        let mut writer = BucketWriter {
+            state: &mut state,
+            paint_properties: &mut paint_properties,
+            text_size: &bucket.text_size_binder,
+            icon_size: &bucket.icon_size_binder,
+            section_overrides: bucket.has_format_section_overrides(),
+            allow_vertical_placement: self.allow_vertical_placement,
+            canonical,
+        };
+        let symbols: Vec<SymbolInstance> = std::mem::take(&mut self.symbols)
+            .into_iter()
+            .map(|laid_out| {
+                let feature = &self.features[laid_out.feature];
+                writer.add(laid_out, feature)
+            })
+            .collect();
+        state.symbol_instances = symbols;
+        if show_collision_boxes {
+            add_collision_geometry(&mut state);
         }
+        state.just_reloaded = !first_load;
         bucket.state = state;
         bucket.paint_properties = paint_properties;
-
         bucket
     }
 }

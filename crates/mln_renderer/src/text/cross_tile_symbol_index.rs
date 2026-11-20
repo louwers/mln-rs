@@ -472,84 +472,25 @@ mod tests {
 
     use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
     use mln_style::property_value::PropertyValue;
-    use mln_style_types::image::ImagePositions;
-    use mln_style_types::{
-        AnchorOffsetPair, ProjectionDefinition, SymbolAnchorType, SymbolPlacementType, VariableAnchorOffsetCollection,
-    };
-    use mln_tile_id::geometry_tile_data::GeometryCoordinates;
-    use mln_util::Padding;
+    use mln_style_types::ProjectionDefinition;
     use mln_util::geo::LatLng;
     use mln_util::size::Size;
 
     use super::*;
     use crate::buckets::symbol_bucket::SortKeyRange;
     use crate::geometry::anchor::Anchor;
-    use crate::geometry::feature_index::IndexedSubfeature;
-    use crate::layout::symbol_instance::{ShapedTextOrientations, SymbolContent, SymbolInstanceSharedData};
-    use crate::text::collision_index::OverlapMode;
+    use crate::util::pool::PoolRange;
 
     fn make_symbol_instance(x: f32, y: f32, key: &str, pools: &mut SymbolInstancePools) -> SymbolInstance {
-        let line = GeometryCoordinates::new();
-        let image_map = ImagePositions::default();
-        let shaping = ShapedTextOrientations::default();
-        let layout = SymbolLayoutProperties::Values::default();
-        let subfeature = IndexedSubfeature {
-            index: 0,
-            source_layer_name: Arc::from(""),
-            bucket_leader_id: Arc::from(""),
-            sort_index: 0,
-            bucket_instance_id: 0,
-            collision_group_id: 0,
-            overlap_mode: OverlapMode::Never,
-        };
-        let anchor = Anchor::new(x, y, 0.0, Some(0));
-        let text_offset = [0.0f32, 0.0];
-        let icon_offset = [0.0f32, 0.0];
-        let variable_text_offset = [0.0f32, 0.0];
-        let anchor_offsets = vec![AnchorOffsetPair::new(SymbolAnchorType::Left, variable_text_offset)];
-        let variable_anchor_offset_collection = VariableAnchorOffsetCollection::new(anchor_offsets);
-        let placement_type = SymbolPlacementType::Point;
-
-        let shared_data = Arc::new(SymbolInstanceSharedData::new(
-            line,
-            &shaping,
-            None.as_ref(),
-            None.as_ref(),
-            &layout,
-            placement_type,
-            text_offset,
-            &image_map,
-            0.0,
-            SymbolContent::IconSDF,
-            false,
-            false,
-        ));
-        SymbolInstance::new(
-            anchor,
-            shared_data,
-            &shaping,
-            None.as_ref(),
-            None.as_ref(),
-            0.0,
-            0.0,
-            placement_type,
-            text_offset,
-            0.0,
-            Padding::uniform(0.0),
-            icon_offset,
-            &subfeature,
-            0,
-            0,
-            key.as_bytes(),
-            0.0,
-            0.0,
-            0.0,
-            Some(variable_anchor_offset_collection).as_ref(),
-            false,
-            SymbolContent::IconSDF,
-            0.0,
-            pools,
-        )
+        SymbolInstance {
+            anchor: Anchor::new(x, y, 0.0, Some(0)),
+            key: PoolRange::extend(&mut pools.keys, key.bytes()),
+            data_feature_index: 0,
+            height_offset: 0.0,
+            cross_tile_id: None,
+            text: None,
+            icon: None,
+        }
     }
 
     /// A bucket of symbols at `(x, y)` with the text `key`.

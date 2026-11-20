@@ -238,12 +238,7 @@ fn symbol_order() {
     for type_ in SORT_KEY_TYPES {
         let bucket = create_bucket(&symbol_layer(type_, None), Shape::Point);
         let bucket = bucket.downcast_ref::<SymbolBucket>().unwrap();
-        let order: Vec<usize> = bucket
-            .state
-            .symbol_instances
-            .iter()
-            .map(crate::layout::symbol_instance::SymbolInstance::data_feature_index)
-            .collect();
+        let order: Vec<usize> = bucket.state.symbol_instances.iter().map(|symbol| symbol.data_feature_index).collect();
         assert_eq!(expected_order(type_), order, "{type_:?}");
         // An explicit constant key still disables viewport-Y sorting for symbol-z-order:auto.
         assert_eq!(type_ == SortKeyType::Undefined, bucket.sort_features_by_y, "{type_:?}");
@@ -268,12 +263,7 @@ fn symbol_viewport_y() {
         let bucket = bucket.downcast_ref::<SymbolBucket>().unwrap();
         assert!(bucket.sort_features_by_y, "{type_:?}");
         assert!(bucket.sort_key_ranges.is_empty(), "{type_:?}");
-        let order: Vec<usize> = bucket
-            .state
-            .symbol_instances
-            .iter()
-            .map(crate::layout::symbol_instance::SymbolInstance::data_feature_index)
-            .collect();
+        let order: Vec<usize> = bucket.state.symbol_instances.iter().map(|symbol| symbol.data_feature_index).collect();
         assert_eq!(vec![0, 1, 2], order, "{type_:?}");
     }
 }
