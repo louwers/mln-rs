@@ -94,12 +94,14 @@ impl TerrainDraws {
             return;
         };
 
-        let cull_face_mode = match parameters.view.viewport_mode() {
-            ViewportMode::Default => CullFaceMode::back_ccw(),
-            ViewportMode::FlippedY => CullFaceMode { winding: CullFaceWindingType::Clockwise, ..CullFaceMode::back_ccw() },
+        let winding = match parameters.view.viewport_mode() {
+            ViewportMode::Default => CullFaceWindingType::CounterClockwise,
+            ViewportMode::FlippedY => CullFaceWindingType::Clockwise,
         };
+        let cull_face_mode = CullFaceMode { winding, ..CullFaceMode::back_ccw() };
         let context = &mut *parameters.context;
-        if self.mesh.as_ref().is_some_and(|mesh| mesh.skirts != surface.skirts || mesh.cull_face_mode != cull_face_mode) {
+        let built_for = (surface.skirts, cull_face_mode);
+        if self.mesh.as_ref().is_some_and(|mesh| (mesh.skirts, mesh.cull_face_mode) != built_for) {
             // The draws hold the other grid, or cull the other way.
             self.tiles.clear_tiles();
             self.mesh = None;
@@ -208,11 +210,5 @@ fn mesh_objects(shader: &ShaderProgramPtr, mesh: &SharedMesh) -> DrawObjects {
         segments: vec![SegmentBase::with_lengths(0, 0, mesh.vertex_count, mesh.index_count)],
         instances: None,
     };
-    DrawObjects::new(
-        Rc::clone(shader),
-        ColorMode::alpha_blended(),
-        mesh.cull_face_mode,
-        geometry,
-        Textures::default(),
-    )
+    DrawObjects::new(Rc::clone(shader), ColorMode::alpha_blended(), mesh.cull_face_mode, geometry, Textures::default())
 }

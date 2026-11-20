@@ -833,8 +833,7 @@ fn malformed_dems_fail() {
     ];
     let decode = |dim, stride, image| {
         let mut bytes = Vec::new();
-        envelope::append(&mut bytes, &Malformed::Dem(dim, stride, RasterEncoding::Mapbox, image), ())
-            .unwrap();
+        envelope::append(&mut bytes, &Malformed::Dem(dim, stride, RasterEncoding::Mapbox, image), ()).unwrap();
         MapCodec::new(Registry::with_builtins()).decode_result(Encoded::from(bytes))
     };
     for (dim, stride, image) in dems {

@@ -124,7 +124,8 @@ fn pixel(image: &PremultipliedImage, x: u32, y: u32) -> [u8; 4] {
 
 #[test]
 fn a_fill_and_a_line_drape_over_flat_terrain() {
-    let (Some((draped, draped_textures)), Some((flat, flat_textures))) = (render(&style(true), ViewportMode::Default), render(&style(false), ViewportMode::Default))
+    let (Some((draped, draped_textures)), Some((flat, flat_textures))) =
+        (render(&style(true), ViewportMode::Default), render(&style(false), ViewportMode::Default))
     else {
         return;
     };
@@ -151,6 +152,7 @@ fn a_flipped_viewport_shows_the_terrain() {
     };
     let center = SIDE / 2;
     assert_eq!([0, 0, 255, 255], pixel(&flipped, center, center + 57), "the line, south of the center");
-    let differing = pixelmatch::pixelmatch(&flipped.data, &flat.data, SIDE as usize, SIDE as usize, None, 0.1285, false);
+    let differing =
+        pixelmatch::pixelmatch(&flipped.data, &flat.data, SIDE as usize, SIDE as usize, None, 0.1285, false);
     assert_eq!(0, differing, "pixels that differ from the map without terrain");
 }

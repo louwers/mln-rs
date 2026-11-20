@@ -53,9 +53,7 @@ impl mln_wire::Wire for DEMData {
         let stride = i32::read(r)?;
         let encoding = RasterEncoding::read(r)?;
         let image = PremultipliedImage::read(r)?;
-        DEMData::from_parts(dim, stride, encoding, image)
-            .ok()
-            .or_else(|| r.fail("DEM data that `new` can't make"))
+        DEMData::from_parts(dim, stride, encoding, image).ok().or_else(|| r.fail("DEM data that `new` can't make"))
     }
 }
 
@@ -120,12 +118,7 @@ impl DEMData {
     /// `stride == dim + 2` and `dim >= 0`, as `new` makes them. The sizes are
     /// checked without overflow: on wasm32 `Image::bytes` would wrap for a
     /// large stride.
-    fn from_parts(
-        dim: i32,
-        stride: i32,
-        encoding: RasterEncoding,
-        image: PremultipliedImage,
-    ) -> Result<Self, String> {
+    fn from_parts(dim: i32, stride: i32, encoding: RasterEncoding, image: PremultipliedImage) -> Result<Self, String> {
         let side = u32::try_from(stride).map_err(|_| format!("a DEM stride of {stride}"))?;
         let bytes = u64::from(side).checked_mul(u64::from(side)).and_then(|n| n.checked_mul(4));
         if dim < 0
