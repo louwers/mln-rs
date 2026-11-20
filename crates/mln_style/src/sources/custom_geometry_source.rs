@@ -77,13 +77,13 @@ fn tile_features(geojson: GeoJson, tile_id: &CanonicalTileID, options: &TileOpti
     };
     // `create` checked that the tile size divides the extent.
     let scale = f64::from(constants::EXTENT / i32::from(options.tile_size.max(1)));
-    let vt_options = geojson_vt::TileOptions {
+    let tile_options = mln_geojson::tile::TileOptions {
         extent: constants::EXTENT as u16,
         buffer: (scale * f64::from(options.buffer)).round() as u16,
         tolerance: scale * options.tolerance,
         ..Default::default()
     };
-    geojson_vt::geojson_to_tile(&features, tile_id.z, tile_id.x, tile_id.y, &vt_options, options.wrap, options.clip)
+    mln_geojson::tile::cut_tile(&features, tile_id.z, tile_id.x, tile_id.y, &tile_options, options.wrap, options.clip)
         .features
 }
 

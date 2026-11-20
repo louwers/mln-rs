@@ -6,7 +6,7 @@ use std::sync::{Arc, OnceLock};
 use feature::{Feature, PropertyMap, Value};
 use geojson::GeoJson;
 use mln_expression::expression::evaluate_accumulated;
-use mln_geojson::cluster;
+use mln_geojson::{cluster, tile};
 use mln_storage::{Data, Resource};
 use mln_tile_id::CanonicalTileID;
 use mln_util::constants;
@@ -26,47 +26,45 @@ use crate::source_type::{
     Described, Load, OfflineResources, Source, SourceData, SourceSummary, SourceTypeInfo, StyleSourceType,
 };
 
-/// The features of tile `id`. For a zoom above the maximum zoom or a missing
-/// parent tile, `get_tile` fails (C++ throws); this logs the error and hands
-/// out an empty tile.
-fn geojsonvt_tile_features(vt: &Mutex<geojson_vt::GeoJSONVT>, id: &CanonicalTileID) -> TileFeatures {
-    match vt.lock().get_tile(id.z, id.x, id.y) {
+/// The features of tile `id`. A tile past the maximum zoom or the last row
+/// is logged, and empty.
+fn tile_features(index: &Mutex<tile::TileIndex>, id: &CanonicalTileID) -> TileFeatures {
+    match index.lock().tile(id.z, id.x, id.y) {
         Ok(tile) => tile.features.clone(),
         Err(e) => {
-            // C++ lets the exception propagate; here it is logged.
-            Log::error(Event::General, e);
+            Log::error(Event::General, e.to_string());
             TileFeatures::new()
         }
     }
 }
 
-/// A `GeoJSONVT`'s tiles, which it cuts on the calling thread, or, given a
+/// A `TileIndex`'s tiles, which it cuts on the calling thread, or, given a
 /// pool, one at a time and in the order asked, so that one source never
 /// holds more than one of the pool's threads.
-struct GeoJSONVTData {
-    vt: Arc<Mutex<geojson_vt::GeoJSONVT>>,
+struct TileData {
+    index: Arc<Mutex<tile::TileIndex>>,
     /// Where the tiles asked for with a pool are cut: a serial group on the
     /// first pool given, kept while the data lives. The data is made when
     /// the style is parsed, before any renderer gives it a pool.
     slices: OnceLock<TaskGroup>,
 }
 
-impl std::fmt::Debug for GeoJSONVTData {
+impl std::fmt::Debug for TileData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("GeoJSONVTData")
+        f.write_str("TileData")
     }
 }
 
-impl GeoJSONData for GeoJSONVTData {
+impl GeoJSONData for TileData {
     fn get_tile(&self, id: &CanonicalTileID, callback: Box<dyn FnOnce(TileFeatures) + Send>, pool: Option<&Pool>) {
         match pool {
             Some(pool) => {
-                let (vt, id) = (Arc::clone(&self.vt), *id);
+                let (index, id) = (Arc::clone(&self.index), *id);
                 self.slices.get_or_init(|| TaskGroup::serial(pool)).spawn(move || {
-                    callback(geojsonvt_tile_features(&vt, &id));
+                    callback(tile_features(&index, &id));
                 });
             }
-            None => callback(geojsonvt_tile_features(&self.vt, id)),
+            None => callback(tile_features(&self.index, id)),
         }
     }
 
@@ -166,9 +164,9 @@ fn create(features: Features, collection: bool, options: &Arc<GeoJSONOptions>) -
         return Ok(Arc::new(ClusterData { clusters }));
     }
 
-    let vt_options = geojson_vt::Options {
+    let tile_options = tile::Options {
         max_zoom: options.maxzoom,
-        tile: geojson_vt::TileOptions {
+        tile: tile::TileOptions {
             extent: constants::EXTENT as u16,
             buffer: (scale * f64::from(options.buffer)).round() as u16,
             tolerance: scale * options.tolerance,
@@ -176,8 +174,8 @@ fn create(features: Features, collection: bool, options: &Arc<GeoJSONOptions>) -
         },
         ..Default::default()
     };
-    let vt = Arc::new(Mutex::new(geojson_vt::GeoJSONVT::new(&features, vt_options)));
-    Ok(Arc::new(GeoJSONVTData { vt, slices: OnceLock::new() }))
+    let index = Arc::new(Mutex::new(tile::TileIndex::new(&features, tile_options)));
+    Ok(Arc::new(TileData { index, slices: OnceLock::new() }))
 }
 
 pub(crate) type ClusterExpression = (Arc<Expr>, Arc<Expr>);
@@ -256,7 +254,7 @@ impl GeoJSONOptions {
     }
 }
 
-pub type TileFeatures = geojson_vt::TileFeatures;
+pub type TileFeatures = mln_geojson::TileFeatures;
 pub type Features = Vec<Feature<f64>>;
 
 pub trait GeoJSONData: Send + Sync {

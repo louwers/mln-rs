@@ -2459,7 +2459,6 @@ dependencies = [
 name = "mln-rs"
 version = "0.0.13"
 dependencies = [
- "geo-traits",
  "geo-types",
  "geojson",
  "glam",
@@ -2469,7 +2468,6 @@ dependencies = [
  "mln-rs-feature",
  "mln-rs-frame-pacer",
  "mln-rs-geojson",
- "mln-rs-geojson-vt",
  "mln-rs-geometry",
  "mln-rs-gestures",
  "mln-rs-gfx",
@@ -2757,24 +2755,13 @@ dependencies = [
 name = "mln-rs-geojson"
 version = "0.0.13"
 dependencies = [
- "geo-index",
- "geo-types",
- "mln-rs-feature",
- "serde_json",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "mln-rs-geojson-vt"
-version = "0.0.13"
-dependencies = [
  "foldhash 0.2.0",
- "geo-traits",
+ "geo-index",
  "geo-types",
  "geojson",
  "mln-rs-feature",
- "mln-rs-geometry",
  "serde_json",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -3154,7 +3141,6 @@ dependencies = [
  "mln-rs-expression",
  "mln-rs-feature",
  "mln-rs-geojson",
- "mln-rs-geojson-vt",
  "mln-rs-image",
  "mln-rs-map-types",
  "mln-rs-math",

@@ -1,64 +1,55 @@
-// Ports the fixture-free tests of
-// vendor/maplibre-native-base/deps/geojson-vt-cpp/test/test.cpp:
-// Simplify.Points, Clip.* and GeoJSONVT.ClipVertexOnTileBorder.
-// tests/fixtures.rs has the rest.
+//! Simplification, clipping and cutting, without fixtures.
 
 use feature::Value;
 use geo_types::{Coord, Geometry, LineString};
 
-use crate::clip::Clipper;
-use crate::detail::{VtGeometry, VtLineString, VtLinearRing, VtPoint};
-use crate::simplify::simplify;
-use crate::{GeoJSONVT, Options};
+use crate::tile::clip::{clip_line, clip_ring};
+use crate::tile::geometry::{Line, Ring, Vertex, X};
+use crate::tile::simplify::simplify;
+use crate::tile::{Error, Options, TileIndex};
 
-fn p(x: f64, y: f64) -> VtPoint {
-    VtPoint::xy(x, y)
+fn p(x: f64, y: f64) -> Vertex {
+    Vertex::new(x, y, 0.0)
 }
 
-fn line(points: &[(f64, f64)]) -> VtLineString {
-    VtLineString::new(points.iter().map(|&(x, y)| p(x, y)).collect())
+fn line(points: &[(f64, f64)]) -> Line {
+    Line { points: points.iter().map(|&(x, y)| p(x, y)).collect(), ..Line::default() }
 }
 
-fn ring(points: &[(f64, f64)]) -> VtLinearRing {
-    VtLinearRing::new(points.iter().map(|&(x, y)| p(x, y)).collect())
+fn ring(points: &[(f64, f64)]) -> Ring {
+    Ring { points: points.iter().map(|&(x, y)| p(x, y)).collect(), area: 0.0 }
 }
 
-/// `EXPECT_DOUBLE_EQ`: within 4 ULPs.
+/// Within 4 ULPs.
 fn assert_double_eq(a: f64, b: f64) {
     let (ia, ib) = (a.to_bits() as i64, b.to_bits() as i64);
     let to_biased = |i: i64| if i < 0 { i64::MIN - i } else { i };
     assert!(a == b || (to_biased(ia) - to_biased(ib)).abs() <= 4, "{a} != {b}");
 }
 
-/// The test's `operator==(vt_point, vt_point)` (`EXPECT_DOUBLE_EQ` on x and
-/// y) applied through the geometry variants.
-fn assert_geometry_eq(a: &VtGeometry, b: &VtGeometry) {
-    fn points(a: &[VtPoint], b: &[VtPoint]) {
-        assert_eq!(a.len(), b.len(), "{a:?} != {b:?}");
-        for (p, q) in a.iter().zip(b) {
-            assert_double_eq(p.x, q.x);
-            assert_double_eq(p.y, q.y);
-        }
+fn assert_points_eq(a: &[Vertex], b: &[Vertex]) {
+    assert_eq!(a.len(), b.len(), "{a:?} != {b:?}");
+    for (p, q) in a.iter().zip(b) {
+        assert_double_eq(p.x, q.x);
+        assert_double_eq(p.y, q.y);
     }
-    match (a, b) {
-        (VtGeometry::MultiPoint(a), VtGeometry::MultiPoint(b)) => points(a, b),
-        (VtGeometry::LineString(a), VtGeometry::LineString(b)) => points(a, b),
-        (VtGeometry::MultiLineString(a), VtGeometry::MultiLineString(b)) => {
-            assert_eq!(a.len(), b.len());
-            a.iter().zip(b).for_each(|(a, b)| points(a, b));
-        }
-        (VtGeometry::Polygon(a), VtGeometry::Polygon(b)) => {
-            assert_eq!(a.len(), b.len());
-            a.iter().zip(b).for_each(|(a, b)| points(a, b));
-        }
-        _ => panic!("{a:?} != {b:?}"),
-    }
+}
+
+fn assert_lines_eq(a: &[Line], b: &[Line]) {
+    assert_eq!(a.len(), b.len(), "{a:?} != {b:?}");
+    a.iter().zip(b).for_each(|(a, b)| assert_points_eq(&a.points, &b.points));
+}
+
+fn clip_lines(input: &Line, line_metrics: bool) -> Vec<Line> {
+    let mut pieces = Vec::new();
+    clip_line::<X>(input, 10.0, 40.0, line_metrics, &mut pieces);
+    pieces
 }
 
 #[test]
 fn simplify_points() {
     #[rustfmt::skip]
-    let mut points: Vec<VtPoint> = [
+    let mut points: Vec<Vertex> = [
         (0.22455, 0.25015), (0.22691, 0.24419), (0.23331, 0.24145), (0.23498, 0.23606),
         (0.24421, 0.23276), (0.26259, 0.21531), (0.26776, 0.21381), (0.27357, 0.20184),
         (0.27312, 0.19216), (0.27762, 0.18903), (0.28036, 0.18141), (0.28651, 0.17774),
@@ -104,7 +95,7 @@ fn simplify_points() {
 
     simplify(&mut points, 0.001);
 
-    let result: Vec<&VtPoint> = points.iter().filter(|p| p.z > 0.005 * 0.005).collect();
+    let result: Vec<&Vertex> = points.iter().filter(|p| p.importance > 0.005 * 0.005).collect();
 
     assert_eq!(result.len(), simplified.len());
     for (a, b) in result.iter().zip(&simplified) {
@@ -134,23 +125,20 @@ fn clip_polylines() {
     ]);
     let points2 = line(&[(0.0, 0.0), (50.0, 0.0), (50.0, 10.0), (0.0, 10.0)]);
 
-    let clip = Clipper::<0>::new(10.0, 40.0, false);
+    let clipped1 = clip_lines(&points1, false);
+    let clipped2 = clip_lines(&points2, false);
 
-    let clipped1 = clip.line_string(&points1);
-    let clipped2 = clip.line_string(&points2);
-
-    let expected1 = VtGeometry::MultiLineString(vec![
+    let expected1 = [
         line(&[(10.0, 0.0), (40.0, 0.0)]),
         line(&[(40.0, 10.0), (20.0, 10.0), (20.0, 20.0), (30.0, 20.0), (30.0, 30.0), (40.0, 30.0)]),
         line(&[(40.0, 40.0), (25.0, 40.0), (25.0, 50.0), (10.0, 50.0)]),
         line(&[(10.0, 60.0), (25.0, 60.0), (30.0, 60.0)]),
-    ]);
+    ];
 
-    let expected2 =
-        VtGeometry::MultiLineString(vec![line(&[(10.0, 0.0), (40.0, 0.0)]), line(&[(40.0, 10.0), (10.0, 10.0)])]);
+    let expected2 = [line(&[(10.0, 0.0), (40.0, 0.0)]), line(&[(40.0, 10.0), (10.0, 10.0)])];
 
-    assert_geometry_eq(&expected1, &clipped1);
-    assert_geometry_eq(&expected2, &clipped2);
+    assert_lines_eq(&expected1, &clipped1);
+    assert_lines_eq(&expected2, &clipped2);
 }
 
 #[test]
@@ -172,26 +160,24 @@ fn clip_polylines_line_metrics() {
         (25.0, 60.0),
     ]);
 
-    let clip = Clipper::<0>::new(10.0, 40.0, true /*lineMetrics*/);
+    let clipped = clip_lines(&points1, true);
 
-    let VtGeometry::MultiLineString(clipped) = clip.line_string(&points1) else { panic!("not a multi line string") };
+    assert_eq!(clipped[0].start, 10.0);
+    assert_eq!(clipped[0].end, 40.0);
 
-    assert_eq!(clipped[0].seg_start, 10.0);
-    assert_eq!(clipped[0].seg_end, 40.0);
+    assert_eq!(clipped[1].start, 70.0);
+    assert_eq!(clipped[1].end, 130.0);
 
-    assert_eq!(clipped[1].seg_start, 70.0);
-    assert_eq!(clipped[1].seg_end, 130.0);
+    assert_eq!(clipped[2].start, 160.0);
+    assert_eq!(clipped[2].end, 200.0);
 
-    assert_eq!(clipped[2].seg_start, 160.0);
-    assert_eq!(clipped[2].seg_end, 200.0);
-
-    assert_eq!(clipped[3].seg_start, 230.0);
-    assert_eq!(clipped[3].seg_end, 245.0);
+    assert_eq!(clipped[3].start, 230.0);
+    assert_eq!(clipped[3].end, 245.0);
 }
 
 #[test]
 fn clip_polygons() {
-    let points1 = vec![ring(&[
+    let points1 = ring(&[
         (0.0, 0.0),
         (50.0, 0.0),
         (50.0, 10.0),
@@ -207,15 +193,13 @@ fn clip_polygons() {
         (0.0, 60.0),
         (25.0, 60.0),
         (0.0, 0.0),
-    ])];
-    let points2 = vec![ring(&[(0.0, 0.0), (50.0, 0.0), (50.0, 10.0), (0.0, 10.0), (0.0, 0.0)])];
+    ]);
+    let points2 = ring(&[(0.0, 0.0), (50.0, 0.0), (50.0, 10.0), (0.0, 10.0), (0.0, 0.0)]);
 
-    let clip = Clipper::<0>::new(10.0, 40.0, false);
+    let clipped1 = clip_ring::<X>(&points1, 10.0, 40.0);
+    let clipped2 = clip_ring::<X>(&points2, 10.0, 40.0);
 
-    let clipped1 = clip.polygon(&points1);
-    let clipped2 = clip.polygon(&points2);
-
-    let expected1 = VtGeometry::Polygon(vec![ring(&[
+    let expected1 = ring(&[
         (10.0, 0.0),
         (40.0, 0.0),
         (40.0, 10.0),
@@ -232,58 +216,16 @@ fn clip_polygons() {
         (25.0, 60.0),
         (10.0, 24.0),
         (10.0, 0.0),
-    ])]);
-
-    let expected2 =
-        VtGeometry::Polygon(vec![ring(&[(10.0, 0.0), (40.0, 0.0), (40.0, 10.0), (10.0, 10.0), (10.0, 0.0)])]);
-
-    assert_geometry_eq(&expected1, &clipped1);
-    assert_geometry_eq(&expected2, &clipped2);
-}
-
-#[test]
-fn clip_points() {
-    let pts = |v: &[(f64, f64)]| -> Vec<VtPoint> { v.iter().map(|&(x, y)| p(x, y)).collect() };
-    let points1 = pts(&[
-        (0.0, 0.0),
-        (50.0, 0.0),
-        (50.0, 10.0),
-        (20.0, 10.0),
-        (20.0, 20.0),
-        (30.0, 20.0),
-        (30.0, 30.0),
-        (50.0, 30.0),
-        (50.0, 40.0),
-        (25.0, 40.0),
-        (25.0, 50.0),
-        (0.0, 50.0),
-        (0.0, 60.0),
-        (25.0, 60.0),
     ]);
-    let points2 = pts(&[(0.0, 0.0), (50.0, 0.0), (50.0, 10.0), (0.0, 10.0)]);
 
-    let clip = Clipper::<0>::new(10.0, 40.0, false);
+    let expected2 = ring(&[(10.0, 0.0), (40.0, 0.0), (40.0, 10.0), (10.0, 10.0), (10.0, 0.0)]);
 
-    let clipped1 = clip.multi_point(&points1);
-    let clipped2 = clip.multi_point(&points2);
-
-    let expected1 = VtGeometry::MultiPoint(pts(&[
-        (20.0, 10.0),
-        (20.0, 20.0),
-        (30.0, 20.0),
-        (30.0, 30.0),
-        (25.0, 40.0),
-        (25.0, 50.0),
-        (25.0, 60.0),
-    ]));
-    let expected2 = VtGeometry::MultiPoint(vec![]);
-
-    assert_geometry_eq(&expected1, &clipped1);
-    assert_geometry_eq(&expected2, &clipped2);
+    assert_points_eq(&expected1.points, &clipped1.points);
+    assert_points_eq(&expected2.points, &clipped2.points);
 }
 
 #[test]
-fn geojsonvt_clip_vertex_on_tile_border() {
+fn clip_vertex_on_tile_border() {
     let data = r#"{
         "type": "Feature",
         "geometry": {
@@ -303,9 +245,9 @@ fn geojsonvt_clip_vertex_on_tile_border() {
 
     let k_epsilon = 1e-5;
 
-    let mut index = GeoJSONVT::new(&geojson, options);
+    let mut index = TileIndex::new(&geojson, options);
 
-    let tile = index.get_tile(13, 2344, 3134).unwrap();
+    let tile = index.tile(13, 2344, 3134).unwrap();
     assert_ne!(tile.features, crate::TileFeatures::new());
     let expected = LineString::from(vec![(-2048i16, 2747), (408, 5037)]);
     assert_eq!(tile.features[0].geometry, Some(Geometry::LineString(expected)));
@@ -338,8 +280,8 @@ fn polygon_rings_are_closed_and_rewound() {
             [[[-40, 0], [-40, 40], [-80, 40], [-80, 0]], [[-50, 10], [-70, 10], [-70, 30], [-50, 30], [-50, 10]]]
         ]
     }"#;
-    let mut index = GeoJSONVT::new(&feature::geojson::features(data.parse().unwrap()).unwrap(), Options::default());
-    let tile = index.get_tile(0, 0, 0).unwrap();
+    let mut index = TileIndex::new(&feature::geojson::features(data.parse().unwrap()).unwrap(), Options::default());
+    let tile = index.tile(0, 0, 0).unwrap();
     let Some(Geometry::MultiPolygon(polygons)) = &tile.features[0].geometry else { panic!("{:?}", tile.features) };
     assert_eq!(polygons.0.len(), 2);
     for polygon in polygons {
@@ -348,4 +290,15 @@ fn polygon_rings_are_closed_and_rewound() {
         assert!(shoelace(&polygon.exterior().0) > 0, "outer ring {:?}", polygon.exterior());
         assert!(shoelace(&hole.0) < 0, "hole {hole:?}");
     }
+}
+
+#[test]
+fn a_tile_past_the_max_zoom_or_the_last_row_is_an_error() {
+    let geojson = feature::geojson::features(r#"{"type": "Point", "coordinates": [0, 0]}"#.parse().unwrap()).unwrap();
+    let mut index = TileIndex::new(&geojson, Options { max_zoom: 4, ..Options::default() });
+    assert_eq!(index.tile(5, 0, 0), Err(Error::ZoomPastMax(5)));
+    assert_eq!(index.tile(2, 0, 4), Err(Error::RowPastEnd { z: 2, y: 4 }));
+    // Columns wrap around the world.
+    let tile = index.tile(1, 1, 1).unwrap().clone();
+    assert_eq!(index.tile(1, 3, 1).unwrap(), &tile);
 }

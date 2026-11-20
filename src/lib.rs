@@ -15,10 +15,8 @@
 //! re-exported.
 
 pub use feature;
-pub use geo_traits;
 pub use geo_types;
 pub use geojson;
-pub use geojson_vt;
 pub use geometry;
 pub use glam;
 pub use mln_conversion;

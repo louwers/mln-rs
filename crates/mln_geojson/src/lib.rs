@@ -1,8 +1,10 @@
-//! A GeoJSON source's features, prepared for drawing: [`cluster`] groups a
-//! clustered source's points into clusters for each zoom.
+//! A GeoJSON source's features, prepared for drawing: [`tile`] cuts them
+//! into vector tiles, and [`cluster`] groups a clustered source's points
+//! into clusters for each zoom.
 
 pub mod cluster;
 mod mercator;
+pub mod tile;
 
 use std::sync::Arc;
 

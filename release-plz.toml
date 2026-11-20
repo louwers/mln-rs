@@ -54,7 +54,6 @@ changelog_include = [
   "mln-rs-feature",
   "mln-rs-frame-pacer",
   "mln-rs-geojson",
-  "mln-rs-geojson-vt",
   "mln-rs-geometry",
   "mln-rs-gestures",
   "mln-rs-gfx",

@@ -6,8 +6,8 @@
 > Depend on [`mln-rs`](https://crates.io/crates/mln-rs) instead: it re-exports
 > this crate as `mln_rs::mln_geojson`.
 
-Prepares a GeoJSON source's features for drawing: clusters its points, as
-supercluster does.
+Prepares a GeoJSON source's features for drawing: cuts them into vector tiles,
+as geojson-vt does, or clusters its points, as supercluster does.
 
 Its code is under the root license ([LICENSE.md](LICENSE.md)); the algorithms it
 follows are Mapbox's, under the ISC License ([LICENSE-ISC](LICENSE-ISC)).

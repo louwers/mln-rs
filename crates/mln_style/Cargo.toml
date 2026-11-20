@@ -19,7 +19,6 @@ doctest = false
 feature.workspace = true
 geojson.workspace = true
 geo-types.workspace = true
-geojson_vt.workspace = true
 mln_conversion.workspace = true
 mln_geojson.workspace = true
 mln_expression.workspace = true
