@@ -3,28 +3,14 @@ use std::sync::Arc;
 use mln_conversion::{Convertible, Error};
 use mln_style_types::VisibilityType;
 
-use super::util::{new_layer, parse_json, style_of};
+use super::util::{new_layer, parse_json};
 use crate::conversion::convert_filter;
 use crate::edit::Edit;
 use crate::expression::Functions;
 use crate::filter::Filter;
 use crate::layer::Layer;
-use crate::layers::Raster;
-use crate::property_value::PropertyValue;
 use crate::registry::StyleRegistry;
 use crate::style::Style;
-
-const OPACITY: f32 = 1.0;
-const HUE_ROTATE: f32 = 1.0;
-const BRIGHTNESS: f32 = 1.0;
-const SATURATION: f32 = 1.0;
-const CONTRAST: f32 = 1.0;
-const DURATION: f32 = 1.0;
-
-/// The implicit `PropertyValue<T>(T)` conversion of the C++ setters.
-fn c<T>(t: T) -> PropertyValue<T> {
-    PropertyValue::Constant(t)
-}
 
 fn parse_filter(expression: &str) -> Filter {
     let mut error = Error::default();
@@ -39,32 +25,7 @@ fn set(layer: &mut Layer, name: &str, json: &str) {
     assert!(error.is_none(), "{name}: {error:?}");
 }
 
-/// Sets a paint property from JSON and checks the value it holds.
-macro_rules! paint {
-    ($type:ident, $layer:ident, $field:ident, $name:literal, $json:expr, $expected:expr) => {
-        set(&mut $layer, $name, $json);
-        assert_eq!(style_of::<$type>(&$layer).paint.$field.value, $expected, $name);
-    };
-}
-
 const RED: &str = r##""#ff0000""##;
-
-// gtest: Layer.RasterProperties
-#[test]
-fn raster_properties() {
-    let mut layer = new_layer("raster", "raster", "source");
-    assert_eq!("raster", layer.info().name);
-
-    // Paint properties
-
-    paint!(Raster, layer, raster_opacity, "raster-opacity", "1", c(OPACITY));
-    paint!(Raster, layer, raster_hue_rotate, "raster-hue-rotate", "1", c(HUE_ROTATE));
-    paint!(Raster, layer, raster_brightness_min, "raster-brightness-min", "1", c(BRIGHTNESS));
-    paint!(Raster, layer, raster_brightness_max, "raster-brightness-max", "1", c(BRIGHTNESS));
-    paint!(Raster, layer, raster_saturation, "raster-saturation", "1", c(SATURATION));
-    paint!(Raster, layer, raster_contrast, "raster-contrast", "1", c(CONTRAST));
-    paint!(Raster, layer, raster_fade_duration, "raster-fade-duration", "1", c(DURATION));
-}
 
 // gtest: Layer.Observer
 #[test]
@@ -153,11 +114,11 @@ fn incompatible_layer() {
     style.load_json(&fixture("test/fixtures/resources/style-unused-sources.json"));
 
     // Try to add duplicate
-    match style.apply(Edit::AddLayer { layer: new_layer("raster", "raster", "unusedsource"), before: None }) {
+    match style.apply(Edit::AddLayer { layer: new_layer("shade", "shade", "unusedsource"), before: None }) {
         Ok(()) => panic!("Should not have been allowed to add an incompatible layer to the source"),
         // Expected
         Err(e) => assert_eq!(
-            mln_util::Error::invalid_argument("Layer 'raster' is not compatible with source 'unusedsource'"),
+            mln_util::Error::invalid_argument("Layer 'shade' is not compatible with source 'unusedsource'"),
             e
         ),
     }

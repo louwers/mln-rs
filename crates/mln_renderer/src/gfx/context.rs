@@ -261,7 +261,7 @@ impl Context {
     /// A texture without a size, made by its first upload or
     /// [`create_texture`](Self::create_texture), which the context keeps
     /// while a clone of the returned handle lasts.
-    pub(crate) fn add_texture(&mut self) -> SharedTexture {
+    pub fn add_texture(&mut self) -> SharedTexture {
         self.add_texture_with(|_| {})
     }
 

@@ -5,32 +5,17 @@
 //! the style spec (tools/style-codegen/v8.json); its `generated_code_test`
 //! checks them, and the formatter skips them (dprint.jsonc). The
 //! `<type>_layer.rs` files are written by hand: each declares the type's
-//! marker (such as [`Raster`]), which implements
+//! marker (such as [`Symbol`]), which implements
 //! [`StyleLayerType`](crate::layer_type::StyleLayerType); a layer's style
 //! data is a [`LayerStyle`](crate::layer_type::LayerStyle) of it.
 
-pub mod color_relief_layer;
-#[rustfmt::skip]
-pub mod color_relief_layer_properties;
 pub mod custom_layer;
-pub mod hillshade_layer;
-#[rustfmt::skip]
-pub mod hillshade_layer_properties;
-pub mod raster_layer;
-#[rustfmt::skip]
-pub mod raster_layer_properties;
 pub mod symbol_layer;
 #[rustfmt::skip]
 pub mod symbol_layer_properties;
 
-pub use color_relief_layer::ColorRelief;
-pub use color_relief_layer_properties::ColorReliefPaintProperties;
 pub use custom_layer::{
     Custom, CustomLayerFrame, CustomLayerHost, CustomLayerPrerenderParameters, CustomLayerRenderParameters,
 };
-pub use hillshade_layer::Hillshade;
-pub use hillshade_layer_properties::HillshadePaintProperties;
-pub use raster_layer::Raster;
-pub use raster_layer_properties::RasterPaintProperties;
 pub use symbol_layer::Symbol;
 pub use symbol_layer_properties::{SymbolLayoutProperties, SymbolPaintProperties};

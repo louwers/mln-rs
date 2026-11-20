@@ -1,6 +1,6 @@
-// The layer keeps one texture per bucket id (`textures`), in the context's
-// store: buckets are Send and cross from the workers without one. A tile's
-// draw stays until the bucket's masked geometry changes, and is then built
+// The layer keeps one texture per contents id (`textures`), in the context's
+// store: the image crosses from the workers without one. A tile's
+// draw stays until the contents' masked geometry changes, and is then built
 // again.
 
 use std::mem::offset_of;
@@ -19,37 +19,25 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
-use mln_style::layers::Raster;
+use mln_renderer::layer::{
+    DrawContext, EvaluatedLayer, LayerType, LayerValues, NoBucket, NoLayout, RasterContents, RasterLayoutVertex,
+    RasterView, RenderPass, UpdateContext,
+};
+use mln_renderer::unstable::{
+    Composite, Context, DrawGeometry, DrawGroup, DrawIndexes, DrawList, DrawObjects, DrawObjectsMut, DrawOrder,
+    FrameDraw, GlobeTileMeshCache, Indexes, KeptDraw, LayerDrawing, LayerDraws, PaintParameters, RenderStaticData,
+    SharedAttribute, SharedIndexes, SharedTexture, SharedVertices, Textures, TileMap, Uniforms, VertexAttributeArray,
+    cast_matrix, copied_vertices, projection_data, to_projection_ubo,
+};
 use mln_style_types::{RasterResamplingType, ResamplingType, TranslateAnchorType};
 use mln_tile_id::UnwrappedTileID;
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::identity::SimpleIdentity;
 
-use super::cast_matrix;
-use crate::bucket::NoBucket;
-use crate::bucket_geometry::copied_vertices;
-use crate::draw::{DrawGeometry, DrawObjects, Textures};
-use crate::gfx::context::Context;
-use crate::gfx::indexes::{DrawIndexes, Indexes, SharedIndexes};
-use crate::gfx::store::SharedTexture;
-use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
-use crate::gfx::vertices::SharedVertices;
-use crate::globe_tile_mesh::GlobeTileMeshCache;
-use crate::layer::{DrawContext, EvaluatedLayer, LayerType, LayerValues, UpdateContext};
-use crate::layer_composite::Composite;
-use crate::layer_drawing::{
-    DrawGroup, DrawList, DrawObjectsMut, DrawOrder, FrameDraw, KeptDraw, LayerDrawing, LayerDraws, TileMap,
-};
-use crate::layout::layout::NoLayout;
-use crate::paint_parameters::PaintParameters;
-use crate::render_pass::RenderPass;
-use crate::render_static_data::RenderStaticData;
-use crate::render_tile::RasterView;
-use crate::tile::raster::{RasterContents, RasterLayoutVertex};
-use crate::tile_matrix::{projection_data, to_projection_ubo};
+use super::Raster;
 
 /// What the layer keeps of a tile: its draw, and the generation of the
-/// bucket's geometry it was built of.
+/// contents' geometry it was built of.
 pub struct RasterTile {
     draw: KeptDraw,
     geometry_generation: u64,
@@ -66,7 +54,7 @@ enum RasterPart {
 
 /// What the layer keeps of its draws: those of the tiles, and of an image
 /// source's image, one for each tile it is drawn in, with the image's
-/// bucket and the generation of its geometry they were built of.
+/// contents and the generation of its geometry they were built of.
 #[derive(Default)]
 struct RasterObjects {
     tiles: TileMap<RasterTile>,
@@ -137,7 +125,7 @@ impl LayerDrawing for RasterDrawing {
     }
 }
 
-/// The tile extent's geometry, which a tile draws that its bucket doesn't
+/// The tile extent's geometry, which a tile draws whose contents don't
 /// mask.
 struct StaticGeometry {
     vertices: SharedVertices,
@@ -165,24 +153,24 @@ pub struct RasterState {
     static_geometry: Option<StaticGeometry>,
     globe_meshes: GlobeTileMeshCache<RasterLayoutVertex>,
 
-    /// The texture of each bucket's image, by bucket id.
+    /// The texture of each contents' image, by contents id.
     textures: HashMap<SimpleIdentity, SharedTexture>,
-    /// The buckets of the frame's tiles, whose textures stay.
-    live_buckets: HashSet<SimpleIdentity>,
+    /// The contents of the frame's tiles, whose textures stay.
+    live_contents: HashSet<SimpleIdentity>,
 }
 
 impl RasterState {
-    /// The bucket's texture in `textures`, which this creates if needed,
-    /// with `sampler`; `None` for a bucket without an image.
-    fn bucket_texture(
+    /// The contents' texture in `textures`, which this creates if needed,
+    /// with `sampler`; `None` for contents without an image.
+    fn contents_texture(
         textures: &mut HashMap<SimpleIdentity, SharedTexture>,
         sampler: SamplerState,
         context: &mut Context,
-        bucket: &RasterContents,
+        contents: &RasterContents,
     ) -> Option<SharedTexture> {
-        let image = bucket.image()?;
+        let image = contents.image()?;
         let texture = textures
-            .entry(bucket.id())
+            .entry(contents.id())
             .or_insert_with(|| context.add_texture_with(|texture| texture.set_image(Some(Rc::new((**image).clone())))))
             .clone();
         if let Some(mut texture) = context.texture_mut(&texture) {
@@ -198,7 +186,7 @@ impl RasterState {
         &mut self,
         drawing: &mut RasterDrawing,
         gpu: &mut dyn Gpu,
-        bucket: &RasterContents,
+        contents: &RasterContents,
         cx: &mut DrawContext<'_, '_, '_, Raster>,
     ) {
         let (paint_parameters, layer) = (&mut *cx.paint, cx.layer);
@@ -207,22 +195,22 @@ impl RasterState {
         let raster_shader =
             paint_parameters.context.shader_key(&programs::RASTER, Uniforms::default(), cx.projection_variant);
         let objects = &mut drawing.objects;
-        // An image source's bucket always has geometry of its own once it
-        // has an image.
-        let Some(quads) = bucket.geometry().quads() else {
+        // An image source's contents always have geometry of their own once
+        // they have an image.
+        let Some(quads) = contents.geometry().quads() else {
             objects.images.clear();
             objects.image = None;
             return;
         };
-        let built_of = (bucket.id(), bucket.geometry().generation());
+        let built_of = (contents.id(), contents.geometry().generation());
         if objects.image != Some(built_of) {
             objects.images.clear();
             objects.image = Some(built_of);
-            // Only the image's bucket draws: the textures of the images
+            // Only the image's contents draw: the textures of the images
             // before it go.
-            textures.retain(|id, _| *id == bucket.id());
+            textures.retain(|id, _| *id == contents.id());
         }
-        let texture = Self::bucket_texture(textures, sampler, paint_parameters.context, bucket);
+        let texture = Self::contents_texture(textures, sampler, paint_parameters.context, contents);
         let tiles = cx.tiles;
         objects.images.truncate(tiles.len());
         while objects.images.len() < tiles.len() {
@@ -238,7 +226,7 @@ impl RasterState {
         }
         for (index, (tile, draw)) in tiles.iter().zip(&objects.images).enumerate() {
             let uniforms = Self::uniforms(&tile.id().to_unwrapped(), paint_parameters);
-            draw_list.push_part(FrameDraw::new(None, draw.id), RasterPart::Image(index), uniforms);
+            draw_list.push_part(draw.frame_draw(None), RasterPart::Image(index), uniforms);
         }
 
         self.finish_frame_draws(drawing, layer, gpu, paint_parameters.context);
@@ -404,7 +392,7 @@ impl LayerType for Raster {
             static_geometry: None,
             globe_meshes: GlobeTileMeshCache::new(),
             textures: HashMap::default(),
-            live_buckets: HashSet::default(),
+            live_contents: HashSet::default(),
         };
         (state, RasterDrawing::default())
     }
@@ -422,7 +410,7 @@ impl LayerType for Raster {
 
     /// Makes the frame's draws of the layer: those of an image source's
     /// image, or one of each of its tiles, which it builds for a tile it
-    /// keeps none of or whose bucket's geometry changed since, and writes the
+    /// keeps none of or whose contents' geometry changed since, and writes the
     /// layer's buffers they read.
     fn make_draws(
         state: &mut RasterState,
@@ -431,7 +419,7 @@ impl LayerType for Raster {
         cx: &mut DrawContext<'_, '_, '_, Raster>,
     ) {
         let image = cx.tiles.iter().find_map(|tile| match tile.bucket()? {
-            RasterView::Image(bucket) => Some(bucket),
+            RasterView::Image(contents) => Some(contents),
             RasterView::Tile(_) => None,
         });
         if let Some(image) = image {
@@ -440,15 +428,15 @@ impl LayerType for Raster {
         }
         let (paint_parameters, render_tiles, layer) = (&mut *cx.paint, cx.tiles, cx.layer);
         let sampler = sampler_state(layer);
-        let RasterState { draw_list, static_geometry, globe_meshes, textures, live_buckets } = state;
+        let RasterState { draw_list, static_geometry, globe_meshes, textures, live_contents } = state;
         let raster_shader =
             paint_parameters.context.shader_key(&programs::RASTER, Uniforms::default(), cx.projection_variant);
         let static_geometry = static_geometry.get_or_insert_with(|| StaticGeometry::new(paint_parameters.context));
 
-        // Drop the textures of buckets that are no longer rendered.
-        live_buckets.clear();
-        live_buckets.extend(render_tiles.iter().filter_map(|tile| Some(tile.bucket()?.contents().id())));
-        textures.retain(|id, _| live_buckets.contains(id));
+        // Drop the textures of contents that are no longer rendered.
+        live_contents.clear();
+        live_contents.extend(render_tiles.iter().filter_map(|tile| Some(tile.bucket()?.contents().id())));
+        textures.retain(|id, _| live_contents.contains(id));
         // Kept draws keep their textures, so a changed filter is applied to
         // the textures themselves.
         for texture in textures.values() {
@@ -463,27 +451,27 @@ impl LayerType for Raster {
                 continue;
             };
 
-            let Some(RasterView::Tile(bucket)) = tile.bucket().filter(|view| view.contents().has_data()) else {
+            let Some(RasterView::Tile(contents)) = tile.bucket().filter(|view| view.contents().has_data()) else {
                 *entry.value = None;
                 continue;
             };
 
-            // A draw of another bucket, or of the bucket's geometry before
+            // A draw of other contents, or of the contents' geometry before
             // its mask changed, is built again.
-            entry.set_bucket(bucket.id());
-            let geometry_generation = bucket.geometry().generation();
+            entry.set_bucket(contents.id());
+            let geometry_generation = contents.geometry().generation();
             if entry.value.as_ref().is_some_and(|cached| cached.geometry_generation != geometry_generation) {
                 *entry.value = None;
             }
 
             if entry.value.is_none() {
-                let texture = RasterState::bucket_texture(textures, sampler, paint_parameters.context, bucket);
+                let texture = RasterState::contents_texture(textures, sampler, paint_parameters.context, contents);
 
-                // The bucket only has geometry for a masked tile; any other
+                // The contents only have geometry for a masked tile; any other
                 // tile is drawn with the static quad over the tile's extent.
                 // On the globe, the draw is the pole-capped grid of what the
                 // mask keeps.
-                let geometry = bucket.geometry();
+                let geometry = contents.geometry();
                 let context = &mut *paint_parameters.context;
                 let draw_geometry = if cx.projection_variant == ProjectionVariant::Globe {
                     let globe_mesh =

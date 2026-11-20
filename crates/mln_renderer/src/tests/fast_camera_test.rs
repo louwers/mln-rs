@@ -18,7 +18,6 @@ use mln_storage::{FileSource, Resource, Responder, Response};
 use mln_style::Source;
 use mln_style::layer::Layer;
 use mln_style::layer_type::LayerStyle;
-use mln_style::layers::Raster;
 use mln_style::sources::{raster_source, vector_source};
 use mln_util::chrono::{Timestamp, now};
 use mln_util::constants::DEFAULT_MAXIMUM_CONCURRENT_REQUESTS;
@@ -33,7 +32,7 @@ use parking_lot::Mutex;
 use crate::Registry;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::render_source::RenderSource;
-use crate::tests::fixture_layer::Dot;
+use crate::tests::fixture_layer::{Dot, Tint};
 use crate::tile::source_tiles::SourceTiles;
 use crate::tile::store::TileStore;
 use crate::tile_parameters::TileParameters;
@@ -187,9 +186,9 @@ impl Scene {
         fill.set_source_layer("water");
         let fill_layers: Vec<Arc<dyn ErasedEvaluatedLayer>> =
             vec![Arc::new(EvaluatedLayer::<Dot>::new(LayerStyle::recover(fill.style()).unwrap()))];
-        let raster_layer = Layer::new(Registry::with_builtins().style(), "raster", "raster", "raster").unwrap();
+        let raster_layer = Layer::new(Registry::with_builtins().style(), "tint", "raster", "raster").unwrap();
         let raster_layers: Vec<Arc<dyn ErasedEvaluatedLayer>> =
-            vec![Arc::new(EvaluatedLayer::<Raster>::new(LayerStyle::recover(raster_layer.style()).unwrap()))];
+            vec![Arc::new(EvaluatedLayer::<Tint>::new(LayerStyle::recover(raster_layer.style()).unwrap()))];
 
         let mut transform = Transform::new(ConstrainMode::HeightOnly, ViewportMode::Default);
         transform.resize(size).unwrap();

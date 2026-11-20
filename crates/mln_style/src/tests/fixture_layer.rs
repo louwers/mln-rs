@@ -1,6 +1,7 @@
-//! `plain`, a layer type without a source for the tests of this crate, which
-//! can't reach the built-in layer types outside it. Its paint properties are
-//! a constant color and opacity and a cross-faded pattern.
+//! Layer types for the tests of this crate, which can't reach the built-in
+//! layer types outside it: `plain`, a layer type without a source, whose
+//! paint properties are a constant color and opacity and a cross-faded
+//! pattern, and `shade`, a layer type of a raster-dem source.
 
 use crate::layer_type::{LayerStyle, LayerTypeInfo, NoProperties, SourceKind, StyleLayerType};
 use crate::property_table::{PropertyInfo, PropertyTable, PropertyVisitor};
@@ -40,5 +41,23 @@ impl StyleLayerType for Plain {
             2 => visitor.paint(|s| &s.paint.plain_pattern, |s| &mut s.paint.plain_pattern),
             _ => return None,
         })
+    }
+}
+
+/// `shade`, a layer type of a raster-dem source without properties.
+pub(crate) struct Shade;
+
+static NO_PROPERTIES: PropertyTable = PropertyTable::new(&[], &[]);
+
+impl StyleLayerType for Shade {
+    const INFO: LayerTypeInfo = LayerTypeInfo { name: "shade", source: SourceKind::RasterDem, from_json: true };
+    const PROPERTIES: &'static PropertyTable = &NO_PROPERTIES;
+
+    type LayoutProperties = NoProperties;
+    type PaintProperties = NoProperties;
+    type Extra = ();
+
+    fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(_slot: usize, _visitor: V) -> Option<V::Output> {
+        None
     }
 }

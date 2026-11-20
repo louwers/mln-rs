@@ -60,9 +60,9 @@ fn missing_style_ids_report_not_found() {
         r#"before_layer_id "absent-layer" does not exist"#,
     );
     assert_fails(
-        style.add_layer_json(r#"{"id":"hillshade","type":"hillshade","source":"absent-source"}"#, None),
+        style.add_layer_json(r#"{"id":"shade","type":"shade","source":"absent-source"}"#, None),
         ErrorKind::NotFound,
-        r#"layer "hillshade" uses source "absent-source", which does not exist"#,
+        r#"layer "shade" uses source "absent-source", which does not exist"#,
     );
     assert_eq!(style.get_layers().len(), 0);
     assert_eq!(style.layer_json("absent-layer"), None);
@@ -89,7 +89,7 @@ fn malformed_layers_are_invalid_arguments() {
     assert_eq!(style.get_layers().len(), 1);
 }
 
-// A hillshade layer requires a raster DEM source, and a symbol layer can't
+// A shade layer requires a raster DEM source, and a symbol layer can't
 // draw one. A layer ID is taken once.
 #[test]
 fn a_layer_requires_a_source_that_supports_its_type() {
@@ -97,21 +97,17 @@ fn a_layer_requires_a_source_that_supports_its_type() {
     style.add_source_json("dem", DEM_SOURCE);
     style.add_source_json("points", EMPTY_GEOJSON_SOURCE);
 
-    let hillshade = r#"{"id":"hillshade","type":"hillshade","source":"dem"}"#;
-    style.add_layer_json(hillshade, None).unwrap();
-    let layer = style.get_layer("hillshade").unwrap();
-    assert_eq!(layer.info().name, "hillshade");
+    let shade = r#"{"id":"shade","type":"shade","source":"dem"}"#;
+    style.add_layer_json(shade, None).unwrap();
+    let layer = style.get_layer("shade").unwrap();
+    assert_eq!(layer.info().name, "shade");
     assert_eq!(layer.get_source_id(), "dem");
-    assert_fails(
-        style.add_layer_json(hillshade, None),
-        ErrorKind::AlreadyExists,
-        r#"layer "hillshade" already exists"#,
-    );
+    assert_fails(style.add_layer_json(shade, None), ErrorKind::AlreadyExists, r#"layer "shade" already exists"#);
 
     assert_fails(
-        style.add_layer_json(r#"{"id":"on-points","type":"hillshade","source":"points"}"#, None),
+        style.add_layer_json(r#"{"id":"on-points","type":"shade","source":"points"}"#, None),
         ErrorKind::InvalidArgument,
-        r#"source "points" does not support hillshade layer "on-points""#,
+        r#"source "points" does not support shade layer "on-points""#,
     );
     assert_fails(
         style.add_layer_json(r#"{"id":"dots","type":"symbol","source":"dem"}"#, None),

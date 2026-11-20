@@ -1,10 +1,17 @@
-//! `dot`, a layer type of a geometry source for the tests of this crate,
-//! which can't reach the built-in layer types outside it. Its layout makes
-//! a bucket of each feature's points that its filter selects, with each
-//! point's `dot-color`, which can read feature state, and adds the features
-//! to the tile's feature index. A layer with a `dot-pattern` needs the
-//! pattern's image, as the layer types that draw patterns do. It draws
-//! nothing.
+//! Layer types for the tests of this crate, which can't reach the built-in
+//! layer types outside it.
+//!
+//! `dot` is a layer type of a geometry source. Its layout makes a bucket of
+//! each feature's points that its filter selects, with each point's
+//! `dot-color`, which can read feature state, and adds the features to the
+//! tile's feature index. A layer with a `dot-pattern` needs the pattern's
+//! image, as the layer types that draw patterns do.
+//!
+//! `tint` is a layer type of a raster or image source, with a constant
+//! `tint-opacity`, and `shade` one of a raster-dem source without
+//! properties.
+//!
+//! None of them draws anything.
 
 use std::sync::Arc;
 
@@ -16,9 +23,9 @@ use mln_util::error::Error;
 use mln_vec_map::VecMap;
 
 use crate::layer::{
-    Bucket, BucketBase, BuildParams, DrawContext, EvaluatedLayer, FeatureIndexBuilder, FeatureStates, GeometryUpload,
-    GeometryVec, LayerBucket, LayerType, LayerValues, Layout, LayoutParameters, RenderPass, Resolved, SourceLayer,
-    layers_by_id,
+    Bucket, BucketBase, BuildParams, DemContents, DrawContext, EvaluatedLayer, FeatureIndexBuilder, FeatureStates,
+    GeometryUpload, GeometryVec, LayerBucket, LayerType, LayerValues, Layout, LayoutParameters, NoBucket, NoLayout,
+    RasterView, RenderPass, Resolved, SourceLayer, layers_by_id,
 };
 use crate::layer_drawing::{KeptDraw, TileDraws};
 
@@ -224,6 +231,101 @@ impl LayerType for Dot {
         _drawing: &mut TileDraws<KeptDraw>,
         _gpu: &mut dyn mln_gfx::gpu::Gpu,
         _cx: &mut DrawContext<'_, '_, '_, Dot>,
+    ) {
+    }
+}
+
+mln_style::properties!(
+    /// The paint properties of a `tint` layer.
+    #[expect(non_snake_case, reason = "named as the layer types' property sets are")]
+    pub(crate) mod TintPaintProperties: paint {
+        tint_opacity: constant f32 = 1.0_f32,
+    }
+);
+
+static TINT_PROPERTIES: PropertyTable = PropertyTable::new(&[PropertyInfo::paint("tint-opacity")], &[0]);
+
+/// The `tint` layer type.
+pub(crate) struct Tint;
+
+impl StyleLayerType for Tint {
+    const INFO: LayerTypeInfo = LayerTypeInfo { name: "tint", source: SourceKind::Raster, from_json: true };
+    const PROPERTIES: &'static PropertyTable = &TINT_PROPERTIES;
+
+    type LayoutProperties = NoProperties;
+    type PaintProperties = TintPaintProperties::Transitionable;
+    type Extra = ();
+
+    fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(slot: usize, visitor: V) -> Option<V::Output> {
+        Some(match slot {
+            0 => visitor.paint(|s| &s.paint.tint_opacity, |s| &mut s.paint.tint_opacity),
+            _ => return None,
+        })
+    }
+}
+
+impl LayerType for Tint {
+    type Layout = NoLayout;
+    type Bucket = NoBucket;
+    type TileBucket<'a> = RasterView<'a>;
+    type Drawing = TileDraws<KeptDraw>;
+    type State = ();
+
+    fn new_layer(_layer: &LayerValues<Tint>) -> ((), TileDraws<KeptDraw>) {
+        Default::default()
+    }
+
+    fn passes(_layer: &LayerValues<Tint>, _evaluated: &EvaluatedLayer<Tint>) -> RenderPass {
+        RenderPass::Translucent
+    }
+
+    fn make_draws(
+        _state: &mut (),
+        _drawing: &mut TileDraws<KeptDraw>,
+        _gpu: &mut dyn mln_gfx::gpu::Gpu,
+        _cx: &mut DrawContext<'_, '_, '_, Tint>,
+    ) {
+    }
+}
+
+static NO_PROPERTIES: PropertyTable = PropertyTable::new(&[], &[]);
+
+/// The `shade` layer type.
+pub(crate) struct Shade;
+
+impl StyleLayerType for Shade {
+    const INFO: LayerTypeInfo = LayerTypeInfo { name: "shade", source: SourceKind::RasterDem, from_json: true };
+    const PROPERTIES: &'static PropertyTable = &NO_PROPERTIES;
+
+    type LayoutProperties = NoProperties;
+    type PaintProperties = NoProperties;
+    type Extra = ();
+
+    fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(_slot: usize, _visitor: V) -> Option<V::Output> {
+        None
+    }
+}
+
+impl LayerType for Shade {
+    type Layout = NoLayout;
+    type Bucket = NoBucket;
+    type TileBucket<'a> = &'a DemContents;
+    type Drawing = TileDraws<KeptDraw>;
+    type State = ();
+
+    fn new_layer(_layer: &LayerValues<Shade>) -> ((), TileDraws<KeptDraw>) {
+        Default::default()
+    }
+
+    fn passes(_layer: &LayerValues<Shade>, _evaluated: &EvaluatedLayer<Shade>) -> RenderPass {
+        RenderPass::Translucent
+    }
+
+    fn make_draws(
+        _state: &mut (),
+        _drawing: &mut TileDraws<KeptDraw>,
+        _gpu: &mut dyn mln_gfx::gpu::Gpu,
+        _cx: &mut DrawContext<'_, '_, '_, Shade>,
     ) {
     }
 }

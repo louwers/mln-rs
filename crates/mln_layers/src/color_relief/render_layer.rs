@@ -1,5 +1,5 @@
-// A tile's draw is built again only when the bucket's masked geometry
-// changed, and the layer keeps each bucket's DEM texture by its id. The
+// A tile's draw is built again only when the contents' masked geometry
+// changed, and the layer keeps each DEM's texture by its contents' id. The
 // elevation stops texture is made anew when the ramp changes, since its size
 // changes with the ramp.
 
@@ -24,11 +24,19 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
+use mln_renderer::layer::{
+    DemContents, DrawContext, EvaluatedLayer, LayerType, LayerValues, NoBucket, NoLayout, RasterLayoutVertex,
+    RenderPass,
+};
+use mln_renderer::unstable::{
+    DrawGeometry, DrawIndexes, DrawList, DrawObjects, DrawObjectsMut, GlobeTileMeshCache, Indexes, KeptDraw,
+    RenderStaticData, SharedAttribute, SharedIndexes, SharedTexture, SharedVertices, Textures, TileDraws, TileObjects,
+    Uniforms, VertexAttributeArray, cast_matrix, copied_vertices, to_projection_ubo,
+};
 use mln_style::color_ramp_property_value::ColorRampPropertyValue;
 use mln_style::expression::{
     Dependency, EvaluationContext, GlobalStateMap, from_expression_value, global_state_refs_intersect,
 };
-use mln_style::layers::ColorRelief;
 use mln_style::{PropertyEvaluationParameters, StyleValue as _};
 use mln_style_types::ResamplingType;
 use mln_util::Color;
@@ -38,26 +46,10 @@ use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
-use super::cast_matrix;
-use crate::bucket::NoBucket;
-use crate::bucket_geometry::copied_vertices;
-use crate::draw::{DrawGeometry, DrawObjects, Textures};
-use crate::gfx::indexes::{DrawIndexes, Indexes, SharedIndexes};
-use crate::gfx::store::SharedTexture;
-use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
-use crate::gfx::vertices::SharedVertices;
-use crate::globe_tile_mesh::GlobeTileMeshCache;
-use crate::layer::{DrawContext, EvaluatedLayer, LayerType, LayerValues};
-use crate::layer_drawing::{DrawList, DrawObjectsMut, KeptDraw, TileDraws, TileObjects};
-use crate::layout::layout::NoLayout;
-use crate::render_pass::RenderPass;
-use crate::render_static_data::RenderStaticData;
-use crate::tile::dem::DemContents;
-use crate::tile::raster::RasterLayoutVertex;
-use crate::tile_matrix::to_projection_ubo;
+use super::ColorRelief;
 
-/// What the layer keeps of a tile: the draw that colors its bucket's DEM,
-/// with the generation of the bucket's geometry and the DEM's properties it
+/// What the layer keeps of a tile: the draw that colors its contents' DEM,
+/// with the generation of the contents' geometry and the DEM's properties it
 /// was built with.
 pub struct ReliefTile {
     draw: KeptDraw,
@@ -110,12 +102,11 @@ pub struct ReliefState {
     static_data_indices: Option<SharedIndexes>,
     globe_meshes: GlobeTileMeshCache<RasterLayoutVertex>,
 
-    /// The DEM texture of each bucket, made from its current, possibly
-    /// backfilled, DEM image, with the bucket's prepare generation it was
-    /// made at.
+    /// The texture of each DEM, by its contents' id, made from its current,
+    /// possibly backfilled, image, with the DEM's generation it was made at.
     dem_textures: HashMap<SimpleIdentity, (SharedTexture, u64)>,
-    /// The buckets of the frame's tiles, whose DEM textures stay.
-    live_buckets: HashSet<SimpleIdentity>,
+    /// The contents of the frame's tiles, whose DEM textures stay.
+    live_contents: HashSet<SimpleIdentity>,
 }
 
 impl ReliefState {
@@ -136,7 +127,7 @@ impl ReliefState {
             static_data_indices: None,
             globe_meshes: GlobeTileMeshCache::new(),
             dem_textures: HashMap::default(),
-            live_buckets: HashSet::default(),
+            live_contents: HashSet::default(),
         };
 
         // Initialize with default color ramp immediately to avoid
@@ -341,7 +332,7 @@ impl LayerType for ColorRelief {
             static_data_indices,
             globe_meshes,
             dem_textures,
-            live_buckets,
+            live_contents,
             ..
         } = state;
 
@@ -395,10 +386,10 @@ impl LayerType for ColorRelief {
             return;
         };
 
-        // Drop the DEM textures of buckets that are no longer rendered.
-        live_buckets.clear();
-        live_buckets.extend(render_tiles.iter().filter_map(|tile| Some(tile.bucket()?.id())));
-        dem_textures.retain(|id, _| live_buckets.contains(id));
+        // Drop the DEM textures of contents that are no longer rendered.
+        live_contents.clear();
+        live_contents.extend(render_tiles.iter().filter_map(|tile| Some(tile.bucket()?.id())));
+        dem_textures.retain(|id, _| live_contents.contains(id));
 
         let dem_sampler = SamplerState {
             filter: match *values.evaluated.paint.resampling.uniform() {
@@ -416,17 +407,17 @@ impl LayerType for ColorRelief {
                 continue;
             };
 
-            let Some(bucket) = tile.bucket().filter(|bucket| bucket.has_data()) else {
+            let Some(contents) = tile.bucket().filter(|contents| contents.has_data()) else {
                 *entry.value = None;
                 continue;
             };
-            let bucket_id = bucket.id();
-            // A draw built from another bucket goes.
-            entry.set_bucket(bucket_id);
+            let contents_id = contents.id();
+            // A draw built from other contents goes.
+            entry.set_bucket(contents_id);
 
-            let geometry = bucket.geometry();
+            let geometry = contents.geometry();
             let geometry_generation = geometry.generation();
-            let dem_data = bucket.dem();
+            let dem_data = contents.dem();
             if dem_data.image().valid() {
                 let tile_props = ColorReliefTilePropsUBO {
                     unpack: dem_data.unpack_vector(),
@@ -436,9 +427,9 @@ impl LayerType for ColorRelief {
                     color_ramp_size: *color_ramp_size as i32,
                     pad_tile0: 0.0,
                 };
-                let generation = bucket.dem_generation();
+                let generation = contents.dem_generation();
                 let context = &mut *paint_parameters.context;
-                let (dem_texture, _) = match dem_textures.entry(bucket_id) {
+                let (dem_texture, _) = match dem_textures.entry(contents_id) {
                     Entry::Occupied(entry) if entry.get().1 == generation => entry.into_mut(),
                     entry => {
                         let texture = context.add_texture_with(|texture| {
@@ -462,7 +453,7 @@ impl LayerType for ColorRelief {
                 }
                 if let Some(cached) = entry.value.as_mut() {
                     // The DEM and the ramps' textures change with the
-                    // bucket's generation and the ramps.
+                    // DEM's generation and the ramps.
                     for (id, texture) in textures {
                         cached.draw.objects.set_texture(id, Some(texture));
                     }

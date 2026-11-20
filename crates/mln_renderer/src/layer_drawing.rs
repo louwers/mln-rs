@@ -311,7 +311,7 @@ impl<T> TileMap<T> {
     }
 
     /// What the layer keeps of the tiles.
-    pub(crate) fn values_mut(&mut self) -> impl Iterator<Item = &mut T> {
+    pub fn values_mut(&mut self) -> impl Iterator<Item = &mut T> {
         self.values.iter_mut().flatten()
     }
 
@@ -332,7 +332,7 @@ impl<T> TileMap<T> {
 
     /// What the layer keeps of `tile_id`, if the tile is one of the frame's
     /// and the layer keeps anything of it.
-    pub(crate) fn get_mut(&mut self, tile_id: &OverscaledTileID) -> Option<&mut T> {
+    pub fn get_mut(&mut self, tile_id: &OverscaledTileID) -> Option<&mut T> {
         self.values.get_mut(self.set.index_of(tile_id)?)?.as_mut()
     }
 
@@ -590,7 +590,7 @@ impl<U, P: Copy> DrawList<U, P> {
     /// whose owner then drops the bindings of the draws that bind them
     /// ([`DrawObjects::drop_bindings`]).
     #[must_use]
-    pub(crate) fn finish(
+    pub fn finish(
         &mut self,
         layer: &mut LayerDraws<P>,
         gpu: &mut dyn Gpu,
@@ -908,7 +908,7 @@ impl<P> Default for LayerDraws<P> {
 impl<P: Copy> LayerDraws<P> {
     /// The draws, with what they share.
     #[must_use]
-    pub(crate) fn frame(&self) -> &FrameDraws {
+    pub fn frame(&self) -> &FrameDraws {
         &self.frame
     }
 
@@ -968,7 +968,7 @@ impl<P: Copy> LayerDraws<P> {
 
 /// One draw's GPU objects and a frame's draws of them, with the buffers they
 /// bind.
-pub(crate) struct SingleDraw {
+pub struct SingleDraw {
     pub(crate) objects: DrawObjects,
     pub(crate) frame: FrameDraws,
 }
@@ -976,25 +976,25 @@ pub(crate) struct SingleDraw {
 impl SingleDraw {
     /// One draw of `objects`, as `draw` draws, without buffers.
     #[must_use]
-    pub(crate) fn new(objects: DrawObjects, draw: FrameDraw) -> SingleDraw {
+    pub fn new(objects: DrawObjects, draw: FrameDraw) -> SingleDraw {
         let mut frame = FrameDraws::default();
         frame.push(draw);
         SingleDraw { objects, frame }
     }
 
-    pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
+    pub fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
         self.frame.upload_one(gpu, &mut self.objects, context);
+    }
+
+    /// Binds a projection block that projects nothing, as
+    /// [`FrameDraws::bind_no_projection`] does.
+    pub fn bind_no_projection(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
+        self.frame.bind_no_projection(gpu, context);
     }
 
     /// Writes `value` to the frame's uniform buffer `id`, as
     /// [`UniformBufferArray::write_pod`] does.
-    pub(crate) fn write_pod<T: bytemuck::Pod>(
-        &mut self,
-        gpu: &mut dyn Gpu,
-        id: usize,
-        value: &T,
-        context: &mut Context,
-    ) {
+    pub fn write_pod<T: bytemuck::Pod>(&mut self, gpu: &mut dyn Gpu, id: usize, value: &T, context: &mut Context) {
         if self.frame.uniform_buffers.write_pod(gpu, id, value, context.device()) {
             self.objects.drop_bindings();
         }
@@ -1002,7 +1002,7 @@ impl SingleDraw {
 
     /// Draws the draw, if it draws in the pass, into the open pass of `gpu`,
     /// the context's.
-    pub(crate) fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+    pub fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
         self.frame.render_one(&mut self.objects, gpu, parameters);
     }
 }
