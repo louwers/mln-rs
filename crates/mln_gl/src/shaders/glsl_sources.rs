@@ -495,14 +495,13 @@ layout (std140) uniform GlobalPaintParamsUBO {
 layout (std140) uniform TileDebugDrawableUBO {
     highp mat4 u_matrix;
     mediump float u_ratio;
-    // Interpolations
-    lowp float u_color_t;
-    lowp float u_blur_t;
-    lowp float u_opacity_t;
-    lowp float u_gapwidth_t;
-    lowp float u_offset_t;
-    lowp float u_width_t;
+    lowp float drawable_pad0;
     lowp float drawable_pad1;
+    lowp float drawable_pad2;
+    lowp float drawable_pad3;
+    lowp float drawable_pad4;
+    lowp float drawable_pad5;
+    lowp float drawable_pad6;
 };
 
 layout (std140) uniform TileDebugPropsUBO {
@@ -512,7 +511,7 @@ layout (std140) uniform TileDebugPropsUBO {
     mediump float u_gapwidth;
     lowp float u_offset;
     mediump float u_width;
-    lowp float u_floorwidth;
+    lowp float props_pad0;
     lowp float props_pad1;
     lowp float props_pad2;
 };
@@ -600,7 +599,7 @@ void main() {
     mediump float u_gapwidth;
     lowp float u_offset;
     mediump float u_width;
-    lowp float u_floorwidth;
+    lowp float props_pad0;
     lowp float props_pad1;
     lowp float props_pad2;
 };

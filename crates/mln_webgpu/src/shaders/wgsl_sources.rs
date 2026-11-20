@@ -599,13 +599,13 @@ struct VertexOutput {
 struct TileDebugDrawableUBO {
     matrix: mat4x4<f32>,
     ratio: f32,
-    color_t: f32,
-    blur_t: f32,
-    opacity_t: f32,
-    gapwidth_t: f32,
-    offset_t: f32,
-    width_t: f32,
+    pad0: f32,
     pad1: f32,
+    pad2: f32,
+    pad3: f32,
+    pad4: f32,
+    pad5: f32,
+    pad6: f32,
 };
 
 struct TileDebugPropsUBO {
@@ -615,9 +615,9 @@ struct TileDebugPropsUBO {
     gapwidth: f32,
     offset: f32,
     width: f32,
-    floorwidth: f32,
     pad0: f32,
     pad1: f32,
+    pad2: f32,
 };
 
 struct GlobalPaintParamsUBO {
@@ -731,9 +731,9 @@ struct TileDebugPropsUBO {
     gapwidth: f32,
     offset: f32,
     width: f32,
-    floorwidth: f32,
     pad0: f32,
     pad1: f32,
+    pad2: f32,
 };
 
 struct GlobalPaintParamsUBO {

@@ -1,7 +1,5 @@
 //! The uniform blocks of the tile debug overlays' shader
-//! ([`TILE_DEBUG`](crate::shaders::programs::TILE_DEBUG)), which has the
-//! layout of the line shader's: `LineDrawableUBO` and
-//! `LineEvaluatedPropsUBO`.
+//! ([`TILE_DEBUG`](crate::shaders::programs::TILE_DEBUG)).
 
 use bytemuck::{Pod, Zeroable};
 

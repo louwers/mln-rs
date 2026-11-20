@@ -714,16 +714,15 @@ layout(push_constant) uniform Constants {
 struct TileDebugDrawableUBO {
     mat4 matrix;
     float ratio;
-    // Interpolations
-    float color_t;
-    float blur_t;
-    float opacity_t;
-    float gapwidth_t;
-    float offset_t;
-    float width_t;
+    float pad0;
     float pad1;
-    vec4 pad2;
-    vec4 pad3;
+    float pad2;
+    float pad3;
+    float pad4;
+    float pad5;
+    float pad6;
+    vec4 pad7;
+    vec4 pad8;
 };
 
 layout(std140, set = LAYER_SET_INDEX, binding = idTileDebugDrawableUBO) readonly buffer TileDebugDrawableUBOVector {
@@ -741,9 +740,9 @@ layout(set = LAYER_SET_INDEX, binding = idTileDebugPropsUBO) uniform TileDebugPr
     float gapwidth;
     float offset;
     float width;
-    float floorwidth;
     float pad0;
     float pad1;
+    float pad2;
 } props;
 
 layout(location = 0) out vec2 frag_normal;
@@ -831,9 +830,9 @@ layout(set = LAYER_SET_INDEX, binding = idTileDebugPropsUBO) uniform TileDebugPr
     float gapwidth;
     float offset;
     float width;
-    float floorwidth;
     float pad0;
     float pad1;
+    float pad2;
 } props;
 
 #ifdef PROJECTION_GLOBE
