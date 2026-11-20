@@ -3,11 +3,6 @@ use mln_gfx::color_mode::ColorMode;
 use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
-use mln_gfx::gpu::conformance::{
-    clip_mask_and_background, custom_layers, depth_only, foreign_ids, imported_textures, instanced_walls,
-    invalid_calls, pulled_walls, readbacks, resources_in_use, topologies, transparent_replace, vertex_layouts,
-    wall_quads,
-};
 use mln_gfx::gpu::{
     BindGroupEntry, BindingsDesc, BindingsId, BufferDesc, BufferId, BufferUsage, ColorAttachment, DepthState,
     DepthStencilAttachment, Draw, DynamicState, FixedState, GeometryDesc, GeometryId, Gpu, GpuError, LoadOp, PassDesc,
@@ -15,15 +10,20 @@ use mln_gfx::gpu::{
     TextureFormat, TextureId, TextureRegion, TextureUsage, VertexAttribute, VertexBufferLayout, VertexStep,
     read_texels,
 };
-use mln_gfx::shaders::background_layer_ubo::{BackgroundDrawableUnionUBO, BackgroundPropsUBO};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::programs;
 use mln_gfx::shaders::shader_defines::{
     ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE, ID_BACKGROUND_PROPS_UBO, ID_PROJECTION_UBO,
 };
 use mln_gfx::shaders::source::ShaderSources;
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::types::DepthFunctionType;
+use mln_layers::background::programs::BACKGROUND;
+use mln_layers::background::ubo::{BackgroundDrawableUnionUBO, BackgroundPropsUBO};
+use mln_layers::conformance::{
+    clip_mask_and_background, custom_layers, depth_only, foreign_ids, imported_textures, instanced_walls,
+    invalid_calls, pulled_walls, readbacks, resources_in_use, topologies, transparent_replace, vertex_layouts,
+    wall_quads,
+};
 use mln_util::Color;
 use mln_util::size::Size;
 
@@ -47,7 +47,7 @@ fn knob() -> Option<String> {
 fn gpu() -> Option<GlGpu> {
     let mut gpu = with_device(GlGpu::new)?;
     let mut sources = ShaderSources::default();
-    sources.add(crate::LAYER_SOURCES);
+    mln_layers::add_shader_sources(&mut sources);
     gpu.add_shader_sources(&sources);
     Some(gpu)
 }
@@ -238,7 +238,7 @@ impl Background {
 }
 
 fn background(gpu: &mut GlGpu, props: &BackgroundPropsUBO) -> Background {
-    let shader = gpu.create_shader(&ShaderKey::new(&programs::BACKGROUND, [])).unwrap();
+    let shader = gpu.create_shader(&ShaderKey::new(&BACKGROUND, [])).unwrap();
     let quad = buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&[[-1i16, -1], [1, -1], [-1, 1], [1, 1]]));
     let indices = buffer(gpu, BufferUsage::Index, bytemuck::cast_slice(&[0u16, 1, 2, 1, 2, 3]));
     let projection = [ProjectionUBO {

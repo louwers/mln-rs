@@ -9,10 +9,7 @@ use std::sync::Arc;
 use glam::dcamera::rh::proj::opengl::orthographic;
 use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::heatmap_layer_ubo::{HeatmapDrawableUBO, HeatmapEvaluatedPropsUBO};
-use mln_gfx::shaders::heatmap_texture_layer_ubo::HeatmapTexturePropsUBO;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
     ID_HEATMAP_COLOR_RAMP_TEXTURE, ID_HEATMAP_DRAWABLE_UBO, ID_HEATMAP_EVALUATED_PROPS_UBO, ID_HEATMAP_IMAGE_TEXTURE,
@@ -40,11 +37,12 @@ use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 
-use super::Heatmap;
 use super::bucket::{HeatmapBinders, HeatmapBucket, HeatmapLayoutVertex};
 use super::layout::HeatmapLayout;
 use super::properties::{HeatmapPaintProperties, default_heatmap_color};
+use super::{Heatmap, programs};
 use crate::color_ramp::apply_color_ramp;
+use crate::heatmap::ubo::{HeatmapDrawableUBO, HeatmapEvaluatedPropsUBO, HeatmapTexturePropsUBO};
 use crate::refresh_paint_attributes;
 
 /// The pass the layer's draws draw in, onto the frame and into its render

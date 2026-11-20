@@ -3,9 +3,7 @@ use std::sync::Arc;
 
 use geometry::Point;
 use mln_gfx::gpu::Gpu;
-use mln_gfx::shaders::circle_layer_ubo::{CircleDrawableUBO, CircleEvaluatedPropsUBO};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
     ID_CIRCLE_DRAWABLE_UBO, ID_CIRCLE_EVALUATED_PROPS_UBO, ID_CIRCLE_POS_VERTEX_ATTRIBUTE, ID_PROJECTION_UBO,
@@ -27,9 +25,10 @@ use mln_tile_id::OverscaledTileID;
 use mln_util::Color;
 use mln_util::error::Error;
 
-use super::Circle;
 use super::bucket::{CircleBinders, CircleBucket, CircleLayoutVertex};
 use super::layout::CircleLayout;
+use super::{Circle, programs};
+use crate::circle::ubo::{CircleDrawableUBO, CircleEvaluatedPropsUBO};
 use crate::refresh_paint_attributes;
 
 /// The pass the layer's draws draw in.

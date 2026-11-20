@@ -1,11 +1,6 @@
 use mln_gfx::gpu::{Gpu, ShaderKey};
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::background_layer_ubo::{
-    BackgroundDrawableUBO, BackgroundDrawableUnionUBO, BackgroundPatternDrawableUBO, BackgroundPatternPropsUBO,
-    BackgroundPropsUBO,
-};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
     ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_IMAGE_TEXTURE, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE,
@@ -29,7 +24,11 @@ use mln_util::constants::TILE_SIZE_D;
 use mln_util::range::Range;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
-use super::Background;
+use super::{Background, programs};
+use crate::background::ubo::{
+    BackgroundDrawableUBO, BackgroundDrawableUnionUBO, BackgroundPatternDrawableUBO, BackgroundPatternPropsUBO,
+    BackgroundPropsUBO,
+};
 
 /// Adds the image `id` to the pattern atlas if it isn't there yet.
 fn add_pattern_if_needed(id: &str, cx: &mut UpdateContext<'_, '_, Background>) {

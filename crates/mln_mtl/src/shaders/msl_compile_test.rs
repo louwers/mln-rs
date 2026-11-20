@@ -14,7 +14,7 @@ use std::mem::size_of;
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::shaders::program::{GLOBE_DEFINE, Program};
 use mln_gfx::shaders::shader_defines::*;
-use mln_gfx::shaders::source::msl;
+use mln_gfx::shaders::source::{ShaderSources, msl};
 use mln_gfx::shaders::*;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
@@ -25,11 +25,14 @@ use objc2_metal::{
 };
 
 use super::msl_sources::PRELUDE;
-use super::shader_source::{BUILT_INS, LAYER_SOURCES};
+use super::shader_source::BUILT_INS;
 use crate::Id;
 
-fn sources() -> impl Iterator<Item = (&'static Program, &'static msl::Source)> {
-    BUILT_INS.iter().chain(LAYER_SOURCES).copied()
+/// Each program with MSL: the engine's and the built-in layer types'.
+fn sources() -> Vec<(&'static Program, &'static msl::Source)> {
+    let mut layers = ShaderSources::default();
+    mln_layers::add_shader_sources(&mut layers);
+    BUILT_INS.iter().copied().chain(layers.of::<msl::Source>().iter()).collect()
 }
 
 /// The projection variants of a program: its name, and whether it defines
@@ -310,53 +313,53 @@ const UBO_SIZES: &[(&str, usize)] = &[
     ("ProjectionUBO", size_of::<layer_ubo::ProjectionUBO>()),
     ("SkyPropsUBO", size_of::<sky_ubo::SkyPropsUBO>()),
     ("AtmospherePropsUBO", size_of::<sky_ubo::AtmospherePropsUBO>()),
-    ("BackgroundDrawableUBO", size_of::<background_layer_ubo::BackgroundDrawableUBO>()),
-    ("BackgroundPropsUBO", size_of::<background_layer_ubo::BackgroundPropsUBO>()),
-    ("BackgroundPatternDrawableUBO", size_of::<background_layer_ubo::BackgroundPatternDrawableUBO>()),
-    ("BackgroundPatternPropsUBO", size_of::<background_layer_ubo::BackgroundPatternPropsUBO>()),
-    ("BackgroundDrawableUnionUBO", size_of::<background_layer_ubo::BackgroundDrawableUnionUBO>()),
-    ("CircleDrawableUBO", size_of::<circle_layer_ubo::CircleDrawableUBO>()),
-    ("CircleEvaluatedPropsUBO", size_of::<circle_layer_ubo::CircleEvaluatedPropsUBO>()),
+    ("BackgroundDrawableUBO", size_of::<mln_layers::background::ubo::BackgroundDrawableUBO>()),
+    ("BackgroundPropsUBO", size_of::<mln_layers::background::ubo::BackgroundPropsUBO>()),
+    ("BackgroundPatternDrawableUBO", size_of::<mln_layers::background::ubo::BackgroundPatternDrawableUBO>()),
+    ("BackgroundPatternPropsUBO", size_of::<mln_layers::background::ubo::BackgroundPatternPropsUBO>()),
+    ("BackgroundDrawableUnionUBO", size_of::<mln_layers::background::ubo::BackgroundDrawableUnionUBO>()),
+    ("CircleDrawableUBO", size_of::<mln_layers::circle::ubo::CircleDrawableUBO>()),
+    ("CircleEvaluatedPropsUBO", size_of::<mln_layers::circle::ubo::CircleEvaluatedPropsUBO>()),
     ("CollisionDrawableUBO", size_of::<symbol_layer_ubo::CollisionDrawableUBO>()),
     ("CollisionTilePropsUBO", size_of::<symbol_layer_ubo::CollisionTilePropsUBO>()),
-    ("ColorReliefDrawableUBO", size_of::<color_relief_layer_ubo::ColorReliefDrawableUBO>()),
-    ("ColorReliefTilePropsUBO", size_of::<color_relief_layer_ubo::ColorReliefTilePropsUBO>()),
-    ("ColorReliefEvaluatedPropsUBO", size_of::<color_relief_layer_ubo::ColorReliefEvaluatedPropsUBO>()),
-    ("FillDrawableUBO", size_of::<fill_layer_ubo::FillDrawableUBO>()),
-    ("FillOutlineDrawableUBO", size_of::<fill_layer_ubo::FillOutlineDrawableUBO>()),
-    ("FillPatternDrawableUBO", size_of::<fill_layer_ubo::FillPatternDrawableUBO>()),
-    ("FillPatternTilePropsUBO", size_of::<fill_layer_ubo::FillPatternTilePropsUBO>()),
-    ("FillOutlinePatternDrawableUBO", size_of::<fill_layer_ubo::FillOutlinePatternDrawableUBO>()),
-    ("FillOutlinePatternTilePropsUBO", size_of::<fill_layer_ubo::FillOutlinePatternTilePropsUBO>()),
-    ("FillEvaluatedPropsUBO", size_of::<fill_layer_ubo::FillEvaluatedPropsUBO>()),
-    ("FillDrawableUnionUBO", size_of::<fill_layer_ubo::FillDrawableUnionUBO>()),
-    ("FillTilePropsUnionUBO", size_of::<fill_layer_ubo::FillTilePropsUnionUBO>()),
-    ("FillExtrusionDrawableUBO", size_of::<fill_extrusion_layer_ubo::FillExtrusionDrawableUBO>()),
-    ("FillExtrusionTilePropsUBO", size_of::<fill_extrusion_layer_ubo::FillExtrusionTilePropsUBO>()),
-    ("FillExtrusionPropsUBO", size_of::<fill_extrusion_layer_ubo::FillExtrusionPropsUBO>()),
-    ("HeatmapDrawableUBO", size_of::<heatmap_layer_ubo::HeatmapDrawableUBO>()),
-    ("HeatmapEvaluatedPropsUBO", size_of::<heatmap_layer_ubo::HeatmapEvaluatedPropsUBO>()),
-    ("HeatmapTexturePropsUBO", size_of::<heatmap_texture_layer_ubo::HeatmapTexturePropsUBO>()),
+    ("ColorReliefDrawableUBO", size_of::<mln_layers::color_relief::ubo::ColorReliefDrawableUBO>()),
+    ("ColorReliefTilePropsUBO", size_of::<mln_layers::color_relief::ubo::ColorReliefTilePropsUBO>()),
+    ("ColorReliefEvaluatedPropsUBO", size_of::<mln_layers::color_relief::ubo::ColorReliefEvaluatedPropsUBO>()),
+    ("FillDrawableUBO", size_of::<mln_layers::fill::ubo::FillDrawableUBO>()),
+    ("FillOutlineDrawableUBO", size_of::<mln_layers::fill::ubo::FillOutlineDrawableUBO>()),
+    ("FillPatternDrawableUBO", size_of::<mln_layers::fill::ubo::FillPatternDrawableUBO>()),
+    ("FillPatternTilePropsUBO", size_of::<mln_layers::fill::ubo::FillPatternTilePropsUBO>()),
+    ("FillOutlinePatternDrawableUBO", size_of::<mln_layers::fill::ubo::FillOutlinePatternDrawableUBO>()),
+    ("FillOutlinePatternTilePropsUBO", size_of::<mln_layers::fill::ubo::FillOutlinePatternTilePropsUBO>()),
+    ("FillEvaluatedPropsUBO", size_of::<mln_layers::fill::ubo::FillEvaluatedPropsUBO>()),
+    ("FillDrawableUnionUBO", size_of::<mln_layers::fill::ubo::FillDrawableUnionUBO>()),
+    ("FillTilePropsUnionUBO", size_of::<mln_layers::fill::ubo::FillTilePropsUnionUBO>()),
+    ("FillExtrusionDrawableUBO", size_of::<mln_layers::fill_extrusion::ubo::FillExtrusionDrawableUBO>()),
+    ("FillExtrusionTilePropsUBO", size_of::<mln_layers::fill_extrusion::ubo::FillExtrusionTilePropsUBO>()),
+    ("FillExtrusionPropsUBO", size_of::<mln_layers::fill_extrusion::ubo::FillExtrusionPropsUBO>()),
+    ("HeatmapDrawableUBO", size_of::<mln_layers::heatmap::ubo::HeatmapDrawableUBO>()),
+    ("HeatmapEvaluatedPropsUBO", size_of::<mln_layers::heatmap::ubo::HeatmapEvaluatedPropsUBO>()),
+    ("HeatmapTexturePropsUBO", size_of::<mln_layers::heatmap::ubo::HeatmapTexturePropsUBO>()),
     ("LayerCompositeUBO", size_of::<layer_composite_ubo::LayerCompositeUBO>()),
-    ("HillshadeDrawableUBO", size_of::<hillshade_layer_ubo::HillshadeDrawableUBO>()),
-    ("HillshadeTilePropsUBO", size_of::<hillshade_layer_ubo::HillshadeTilePropsUBO>()),
-    ("HillshadeEvaluatedPropsUBO", size_of::<hillshade_layer_ubo::HillshadeEvaluatedPropsUBO>()),
-    ("HillshadePrepareDrawableUBO", size_of::<hillshade_prepare_layer_ubo::HillshadePrepareDrawableUBO>()),
-    ("HillshadePrepareTilePropsUBO", size_of::<hillshade_prepare_layer_ubo::HillshadePrepareTilePropsUBO>()),
-    ("LineDrawableUBO", size_of::<line_layer_ubo::LineDrawableUBO>()),
-    ("LineGradientDrawableUBO", size_of::<line_layer_ubo::LineGradientDrawableUBO>()),
-    ("LinePatternDrawableUBO", size_of::<line_layer_ubo::LinePatternDrawableUBO>()),
-    ("LinePatternTilePropsUBO", size_of::<line_layer_ubo::LinePatternTilePropsUBO>()),
-    ("LineSDFDrawableUBO", size_of::<line_layer_ubo::LineSDFDrawableUBO>()),
-    ("LineSDFTilePropsUBO", size_of::<line_layer_ubo::LineSDFTilePropsUBO>()),
-    ("LineEvaluatedPropsUBO", size_of::<line_layer_ubo::LineEvaluatedPropsUBO>()),
-    ("LineDrawableUnionUBO", size_of::<line_layer_ubo::LineDrawableUnionUBO>()),
+    ("HillshadeDrawableUBO", size_of::<mln_layers::hillshade::ubo::HillshadeDrawableUBO>()),
+    ("HillshadeTilePropsUBO", size_of::<mln_layers::hillshade::ubo::HillshadeTilePropsUBO>()),
+    ("HillshadeEvaluatedPropsUBO", size_of::<mln_layers::hillshade::ubo::HillshadeEvaluatedPropsUBO>()),
+    ("HillshadePrepareDrawableUBO", size_of::<mln_layers::hillshade::ubo::HillshadePrepareDrawableUBO>()),
+    ("HillshadePrepareTilePropsUBO", size_of::<mln_layers::hillshade::ubo::HillshadePrepareTilePropsUBO>()),
+    ("LineDrawableUBO", size_of::<mln_layers::line::ubo::LineDrawableUBO>()),
+    ("LineGradientDrawableUBO", size_of::<mln_layers::line::ubo::LineGradientDrawableUBO>()),
+    ("LinePatternDrawableUBO", size_of::<mln_layers::line::ubo::LinePatternDrawableUBO>()),
+    ("LinePatternTilePropsUBO", size_of::<mln_layers::line::ubo::LinePatternTilePropsUBO>()),
+    ("LineSDFDrawableUBO", size_of::<mln_layers::line::ubo::LineSDFDrawableUBO>()),
+    ("LineSDFTilePropsUBO", size_of::<mln_layers::line::ubo::LineSDFTilePropsUBO>()),
+    ("LineEvaluatedPropsUBO", size_of::<mln_layers::line::ubo::LineEvaluatedPropsUBO>()),
+    ("LineDrawableUnionUBO", size_of::<mln_layers::line::ubo::LineDrawableUnionUBO>()),
     ("TileDebugDrawableUBO", size_of::<tile_debug_ubo::TileDebugDrawableUBO>()),
     ("TileDebugDrawableElement", size_of::<tile_debug_ubo::TileDebugDrawableElement>()),
     ("TileDebugPropsUBO", size_of::<tile_debug_ubo::TileDebugPropsUBO>()),
-    ("LineTilePropsUnionUBO", size_of::<line_layer_ubo::LineTilePropsUnionUBO>()),
-    ("RasterDrawableUBO", size_of::<raster_layer_ubo::RasterDrawableUBO>()),
-    ("RasterEvaluatedPropsUBO", size_of::<raster_layer_ubo::RasterEvaluatedPropsUBO>()),
+    ("LineTilePropsUnionUBO", size_of::<mln_layers::line::ubo::LineTilePropsUnionUBO>()),
+    ("RasterDrawableUBO", size_of::<mln_layers::raster::ubo::RasterDrawableUBO>()),
+    ("RasterEvaluatedPropsUBO", size_of::<mln_layers::raster::ubo::RasterEvaluatedPropsUBO>()),
     ("SymbolDrawableUBO", size_of::<symbol_layer_ubo::SymbolDrawableUBO>()),
     ("SymbolTilePropsUBO", size_of::<symbol_layer_ubo::SymbolTilePropsUBO>()),
     ("SymbolEvaluatedPropsUBO", size_of::<symbol_layer_ubo::SymbolEvaluatedPropsUBO>()),

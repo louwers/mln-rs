@@ -18,29 +18,30 @@
 
 mod cases;
 
-use mln_util::Color;
-use mln_util::size::Size;
-
-pub use self::cases::*;
-use super::{
+use mln_gfx::color_mode::ColorMode;
+use mln_gfx::cull_face_mode::CullFaceMode;
+use mln_gfx::depth_mode::DepthMode;
+use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
+use mln_gfx::gpu::{
     BindGroupEntry, BindingsDesc, BindingsId, BufferDesc, BufferId, BufferUsage, ColorAttachment, DepthState,
     DepthStencilAttachment, Draw, DynamicState, FixedState, GeometryDesc, GeometryId, Gpu, GpuError, LoadOp, PassDesc,
     PipelineDesc, PipelineId, ResourceId, Scissor, ShaderId, ShaderKey, StencilState, TargetFormats, TextureDesc,
     TextureFormat, TextureId, TextureUsage, VertexAttribute, VertexBufferLayout, VertexStep,
 };
-use crate::color_mode::ColorMode;
-use crate::cull_face_mode::CullFaceMode;
-use crate::depth_mode::DepthMode;
-use crate::gfx_types::{AttributeDataType, DrawModeType};
-use crate::shaders::background_layer_ubo::{BackgroundDrawableUnionUBO, BackgroundPropsUBO};
-use crate::shaders::layer_ubo::ProjectionUBO;
-use crate::shaders::programs;
-use crate::shaders::shader_defines::{
+use mln_gfx::shaders::layer_ubo::ProjectionUBO;
+use mln_gfx::shaders::programs::CLIPPING_MASK;
+use mln_gfx::shaders::shader_defines::{
     ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE, ID_BACKGROUND_PROPS_UBO,
     ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE, ID_PROJECTION_UBO,
 };
-use crate::stencil_mode::{StencilMode, Test};
-use crate::types::StencilOpType;
+use mln_gfx::stencil_mode::{StencilMode, Test};
+use mln_gfx::types::StencilOpType;
+use mln_util::Color;
+use mln_util::size::Size;
+
+pub use self::cases::*;
+use crate::background;
+use crate::background::ubo::{BackgroundDrawableUnionUBO, BackgroundPropsUBO};
 
 /// The size of the frame's color texture.
 pub const SIZE: Size = Size { width: 64, height: 32 };
@@ -208,7 +209,7 @@ fn clipped_frame(gpu: &mut impl Gpu) -> Result<ClippedFrame, GpuError> {
     };
     let (quad, indices) = quad(gpu)?;
 
-    let mask_shader = gpu.create_shader(&ShaderKey::new(&programs::CLIPPING_MASK, []))?;
+    let mask_shader = gpu.create_shader(&ShaderKey::new(&CLIPPING_MASK, []))?;
     let mask_layouts = [position_layout(ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE)];
     let mask_pipeline = gpu.create_pipeline(&PipelineDesc {
         shader: mask_shader,
@@ -237,7 +238,7 @@ fn clipped_frame(gpu: &mut impl Gpu) -> Result<ClippedFrame, GpuError> {
         index_buffer: indices,
     })?;
 
-    let background_shader = gpu.create_shader(&ShaderKey::new(&programs::BACKGROUND, []))?;
+    let background_shader = gpu.create_shader(&ShaderKey::new(&background::programs::BACKGROUND, []))?;
     let background_layouts = [position_layout(ID_BACKGROUND_POS_VERTEX_ATTRIBUTE)];
     let background_pipeline = gpu.create_pipeline(&PipelineDesc {
         shader: background_shader,

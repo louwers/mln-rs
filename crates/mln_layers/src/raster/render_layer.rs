@@ -9,8 +9,6 @@ use std::rc::Rc;
 use mln_gfx::gpu::{Gpu, ShaderKey};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::programs;
-use mln_gfx::shaders::raster_layer_ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
     ID_PROJECTION_UBO, ID_RASTER_DRAWABLE_UBO, ID_RASTER_EVALUATED_PROPS_UBO, ID_RASTER_IMAGE0_TEXTURE,
@@ -34,7 +32,8 @@ use mln_tile_id::UnwrappedTileID;
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::identity::SimpleIdentity;
 
-use super::Raster;
+use super::{Raster, programs};
+use crate::raster::ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
 
 /// What the layer keeps of a tile: its draw, and the generation of the
 /// contents' geometry it was built of.

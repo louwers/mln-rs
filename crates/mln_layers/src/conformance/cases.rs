@@ -3,28 +3,18 @@
 
 use std::any::Any;
 
-use mln_util::Color;
-use mln_util::size::Size;
-
-use super::{EXTENT, SIZE, buffer, draw, fixed, position_layout, quad, tile_matrix, whole};
-use crate::color_mode::ColorMode;
-use crate::gfx_types::{AttributeDataType, DrawModeType};
-use crate::gpu::{
+use mln_gfx::color_mode::ColorMode;
+use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
+use mln_gfx::gpu::{
     BindGroupEntry, BindingsDesc, BindingsId, BufferId, BufferUsage, ColorAttachment, DepthState,
     DepthStencilAttachment, Draw, GeometryDesc, GeometryId, Gpu, GpuError, LoadOp, PassDesc, PipelineDesc, PipelineId,
     ResourceId, ShaderId, ShaderKey, StencilState, TargetFormats, TextureDesc, TextureFormat, TextureId, TextureRegion,
     TextureUsage, VertexAttribute, VertexBufferLayout, VertexStep, read_texels,
 };
-use crate::shaders::background_layer_ubo::{BackgroundDrawableUnionUBO, BackgroundPropsUBO};
-use crate::shaders::fill_extrusion_layer_ubo::{
-    FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO,
-};
-use crate::shaders::fill_layer_ubo::{FillDrawableUBO, FillDrawableUnionUBO, FillEvaluatedPropsUBO};
-use crate::shaders::heatmap_texture_layer_ubo::HeatmapTexturePropsUBO;
-use crate::shaders::layer_ubo::{GlobalPaintParamsUBO, ProjectionUBO};
-use crate::shaders::program::Program;
-use crate::shaders::programs;
-use crate::shaders::shader_defines::{
+use mln_gfx::shaders::layer_ubo::{GlobalPaintParamsUBO, ProjectionUBO};
+use mln_gfx::shaders::program::Program;
+use mln_gfx::shaders::programs::CLIPPING_MASK;
+use mln_gfx::shaders::shader_defines::{
     ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE, ID_BACKGROUND_PROPS_UBO,
     ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE, ID_FILL_COLOR_VERTEX_ATTRIBUTE, ID_FILL_DRAWABLE_UBO,
     ID_FILL_EVALUATED_PROPS_UBO, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_DRAWABLE_UBO,
@@ -34,9 +24,18 @@ use crate::shaders::shader_defines::{
     ID_FILL_POS_VERTEX_ATTRIBUTE, ID_GLOBAL_PAINT_PARAMS_UBO, ID_HEATMAP_COLOR_RAMP_TEXTURE, ID_HEATMAP_IMAGE_TEXTURE,
     ID_HEATMAP_POS_VERTEX_ATTRIBUTE, ID_HEATMAP_TEXTURE_PROPS_UBO, ID_PROJECTION_UBO,
 };
-use crate::stencil_mode::StencilMode;
-use crate::texture2d::SamplerState;
-use crate::types::DepthFunctionType;
+use mln_gfx::stencil_mode::StencilMode;
+use mln_gfx::texture2d::SamplerState;
+use mln_gfx::types::DepthFunctionType;
+use mln_util::Color;
+use mln_util::size::Size;
+
+use super::{EXTENT, SIZE, buffer, draw, fixed, position_layout, quad, tile_matrix, whole};
+use crate::background::ubo::{BackgroundDrawableUnionUBO, BackgroundPropsUBO};
+use crate::fill::ubo::{FillDrawableUBO, FillDrawableUnionUBO, FillEvaluatedPropsUBO};
+use crate::fill_extrusion::ubo::{FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO};
+use crate::heatmap::ubo::HeatmapTexturePropsUBO;
+use crate::{background, fill, fill_extrusion, heatmap};
 
 const BLACK: Color = Color::black();
 const RGBA8: TargetFormats = TargetFormats { color: Some(TextureFormat::Rgba8Unorm), depth_stencil: None };
@@ -67,7 +66,7 @@ fn solid(gpu: &mut impl Gpu, format: TextureFormat, color: [f32; 4]) -> Result<S
 fn solid_at(gpu: &mut impl Gpu, format: TextureFormat, color: [f32; 4], matrix: [f32; 16]) -> Result<Solid, GpuError> {
     let target = target(gpu, format)?;
     let (quad, indices) = quad(gpu)?;
-    let shader = gpu.create_shader(&ShaderKey::new(&programs::BACKGROUND, []))?;
+    let shader = gpu.create_shader(&ShaderKey::new(&background::programs::BACKGROUND, []))?;
     let projection = [ProjectionUBO { matrix, ..ProjectionUBO::default() }];
     let drawable = [BackgroundDrawableUnionUBO::default()];
     let props = BackgroundPropsUBO { color, opacity: 1.0, ..BackgroundPropsUBO::default() };
@@ -166,7 +165,7 @@ fn invalid<T>(result: &Result<T, GpuError>) -> bool {
 }
 
 /// Checks that `gpu` rejects calls that break the rules of
-/// [`validation`](crate::gpu::validation) and the calls' own, as
+/// [`validation`](mln_gfx::gpu::validation) and the calls' own, as
 /// [`GpuError::Invalid`], and takes the same calls without the fault.
 /// Returns the error of a call that should succeed.
 ///
@@ -183,7 +182,7 @@ pub fn invalid_calls(gpu: &mut impl Gpu) -> Result<(), GpuError> {
     let alignment = u64::from(gpu.caps().buffer_offset_alignment.max(4));
     let unit = (size_of::<BackgroundPropsUBO>() as u64).next_multiple_of(alignment);
     let uniform =
-        gpu.create_buffer(&crate::gpu::BufferDesc { label: "uniform", usage: BufferUsage::Uniform, size: 2 * unit })?;
+        gpu.create_buffer(&mln_gfx::gpu::BufferDesc { label: "uniform", usage: BufferUsage::Uniform, size: 2 * unit })?;
     let props =
         |buffer, offset, size| BindGroupEntry::Buffer { id: ID_BACKGROUND_PROPS_UBO as u32, buffer, offset, size };
     let with = |entry: Option<BindGroupEntry>| -> Vec<BindGroupEntry> {
@@ -227,7 +226,7 @@ pub fn invalid_calls(gpu: &mut impl Gpu) -> Result<(), GpuError> {
         TargetFormats { depth_stencil: Some(TextureFormat::Depth24PlusStencil8), ..RGBA8 },
     ))?;
     assert!(invalid(&with_draw(gpu, frame.draw(depth_pipeline))), "a pipeline for a depth attachment");
-    let mask = gpu.create_shader(&ShaderKey::new(&programs::CLIPPING_MASK, []))?;
+    let mask = gpu.create_shader(&ShaderKey::new(&CLIPPING_MASK, []))?;
     let mask_layouts = [position_layout(ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE)];
     let mask_geometry = gpu.create_geometry(&GeometryDesc {
         shader: mask,
@@ -493,7 +492,7 @@ pub fn depth_only(gpu: &mut impl Gpu) -> Result<(), GpuError> {
 /// Where a check doesn't hold.
 pub fn vertex_layouts(gpu: &mut impl Gpu) -> Result<(), GpuError> {
     let frame = solid(gpu, TextureFormat::Rgba8Unorm, [0.0, 0.0, 0.0, 0.0])?;
-    let shader = gpu.create_shader(&ShaderKey::new(&programs::FILL, []))?;
+    let shader = gpu.create_shader(&ShaderKey::new(&fill::programs::FILL, []))?;
     let projection = [ProjectionUBO { matrix: tile_matrix(1.0), ..ProjectionUBO::default() }];
     let mut drawable = [FillDrawableUnionUBO::default()];
     drawable[0].set_fill(&FillDrawableUBO { matrix: tile_matrix(1.0), ..FillDrawableUBO::default() });
@@ -655,7 +654,7 @@ pub fn instanced_walls(gpu: &mut impl Gpu) -> Result<(), GpuError> {
 
 /// The texels of the frame of `instanced_walls`.
 fn instanced_wall_texels(gpu: &mut impl Gpu) -> Result<Vec<u8>, GpuError> {
-    let (frame, shader, bindings) = wall_frame(gpu, &programs::FILL_EXTRUSION_INSTANCED, &[])?;
+    let (frame, shader, bindings) = wall_frame(gpu, &fill_extrusion::programs::FILL_EXTRUSION_INSTANCED, &[])?;
     let corners = buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&WALL_CORNERS))?;
     let outline = buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&wall_outline()))?;
 
@@ -704,7 +703,7 @@ fn instanced_wall_texels(gpu: &mut impl Gpu) -> Result<Vec<u8>, GpuError> {
 ///
 /// Where a check doesn't hold.
 pub fn wall_quads(gpu: &mut impl Gpu) -> Result<(), GpuError> {
-    let (frame, shader, bindings) = wall_frame(gpu, &programs::FILL_EXTRUSION_WALL, &[])?;
+    let (frame, shader, bindings) = wall_frame(gpu, &fill_extrusion::programs::FILL_EXTRUSION_WALL, &[])?;
     let mut quads: Vec<i16> = Vec::new();
     for vertex in wall_outline() {
         for corner in WALL_CORNERS {
@@ -757,7 +756,7 @@ pub fn wall_quads(gpu: &mut impl Gpu) -> Result<(), GpuError> {
 ///
 /// Where a check doesn't hold.
 ///
-/// [`Caps::binds_vertex_buffers`]: crate::gpu::Caps::binds_vertex_buffers
+/// [`Caps::binds_vertex_buffers`]: mln_gfx::gpu::Caps::binds_vertex_buffers
 pub fn pulled_walls(gpu: &mut impl Gpu) -> Result<(), GpuError> {
     let outline = wall_outline();
     let outline: &[u8] = bytemuck::cast_slice(&outline);
@@ -771,7 +770,7 @@ pub fn pulled_walls(gpu: &mut impl Gpu) -> Result<(), GpuError> {
         return Ok(());
     }
 
-    let (frame, shader, bindings) = wall_frame(gpu, &programs::FILL_EXTRUSION_PULLED, &[outline])?;
+    let (frame, shader, bindings) = wall_frame(gpu, &fill_extrusion::programs::FILL_EXTRUSION_PULLED, &[outline])?;
     // The corners of a wall's quad are in the static quad's order.
     let indices: [u16; 12] = [0, 2, 1, 1, 2, 3, 4, 6, 5, 5, 6, 7];
     let indices = buffer(gpu, BufferUsage::Index, bytemuck::cast_slice(&indices))?;
@@ -915,7 +914,7 @@ pub fn resources_in_use<G: Gpu>(gpu: &mut G) -> Result<(), GpuError> {
     let projection = bytemuck::cast_slice(&projection);
     let projection_buffer = buffer(gpu, BufferUsage::Storage, projection)?;
     let (vertices, indices) = quad(gpu)?;
-    let shader = gpu.create_shader(&ShaderKey::new(&programs::HEATMAP_TEXTURE, []))?;
+    let shader = gpu.create_shader(&ShaderKey::new(&heatmap::programs::HEATMAP_TEXTURE, []))?;
     let layouts = [position_layout(ID_HEATMAP_POS_VERTEX_ATTRIBUTE)];
     let pipeline = gpu.create_pipeline(&PipelineDesc {
         shader,
@@ -1070,17 +1069,17 @@ pub fn custom_layers(
 pub fn host_writes<G: Gpu + ?Sized>(
     gpu: &mut G,
     host: impl Fn(&[u8]) -> mln_util::host_bytes::HostBytes,
-) -> Result<crate::gpu::ReadbackId, GpuError> {
+) -> Result<mln_gfx::gpu::ReadbackId, GpuError> {
     let target = target(gpu, TextureFormat::Rgba8Unorm)?;
     let (quad, indices) = quad(gpu)?;
-    let shader = gpu.create_shader(&ShaderKey::new(&programs::BACKGROUND, []))?;
+    let shader = gpu.create_shader(&ShaderKey::new(&background::programs::BACKGROUND, []))?;
     let drawable = [BackgroundDrawableUnionUBO::default()];
     let drawable = bytemuck::cast_slice(&drawable);
     let drawable_buffer = buffer(gpu, BufferUsage::Storage, drawable)?;
     let props = |color| BackgroundPropsUBO { color, opacity: 1.0, ..BackgroundPropsUBO::default() };
     let props_size = size_of::<BackgroundPropsUBO>() as u64;
     let props_buffer = |gpu: &mut G| {
-        gpu.create_buffer(&crate::gpu::BufferDesc { label: "props", usage: BufferUsage::Uniform, size: props_size })
+        gpu.create_buffer(&mln_gfx::gpu::BufferDesc { label: "props", usage: BufferUsage::Uniform, size: props_size })
     };
 
     // Opaque green, then red from the host up to the middle of the alpha:

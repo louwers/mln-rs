@@ -27,10 +27,5 @@ mln_wire.workspace = true
 slotmap.workspace = true
 thiserror.workspace = true
 
-[features]
-# `gpu::conformance`, the frames that the backends' tests draw through their
-# `Gpu`.
-gpu-conformance = []
-
 [lints]
 workspace = true

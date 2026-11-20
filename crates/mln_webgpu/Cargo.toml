@@ -33,7 +33,12 @@ wgpu.workspace = true
 wgpu = { workspace = true, features = ["naga-ir"] }
 
 [dev-dependencies]
-mln_gfx = { workspace = true, features = ["gpu-conformance"] }
+# The layer types' programs and the conformance cases, which the tests compile
+# and draw.
+mln_layers = { package = "mln-rs-layers", path = "../mln_layers", features = [
+  "wgsl",
+  "gpu-conformance",
+] }
 
 [lints]
 workspace = true

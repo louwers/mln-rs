@@ -544,11 +544,11 @@ default = [
   "sqlite",
   "font-face-shaper",
 ]
-webgpu = ["runtime", "mln_runtime/webgpu", "dep:mln_webgpu"]
-metal = ["runtime", "mln_runtime/metal", "dep:mln_mtl"]
-vulkan = ["runtime", "mln_runtime/vulkan", "dep:mln_vulkan", "dep:mln_glsl"]
-d3d12 = ["runtime", "mln_runtime/d3d12", "dep:mln_d3d12", "dep:mln_glsl"]
-gl = ["runtime", "mln_runtime/gl", "dep:mln_gl"]
+webgpu = ["runtime", "mln_runtime/webgpu", "dep:mln_webgpu", "mln_layers/wgsl"]
+metal = ["runtime", "mln_runtime/metal", "dep:mln_mtl", "mln_layers/msl"]
+vulkan = ["runtime", "mln_runtime/vulkan", "dep:mln_vulkan", "mln_layers/glsl"]
+d3d12 = ["runtime", "mln_runtime/d3d12", "dep:mln_d3d12", "mln_layers/glsl"]
+gl = ["runtime", "mln_runtime/gl", "dep:mln_gl", "mln_layers/glsl-es"]
 sqlite = ["mln_storage/sqlite", "dep:mln_storage_offline"]
 font-face-shaper = ["mln_renderer/font-face-shaper"]
 runtime = ["dep:mln_runtime"]
@@ -567,7 +567,6 @@ mln_geojson.workspace = true
 mln_gestures.workspace = true
 mln_gfx.workspace = true
 mln_gl = { workspace = true, optional = true }
-mln_glsl = { workspace = true, optional = true }
 mln_image.workspace = true
 mln_layers.workspace = true
 mln_map.workspace = true

@@ -2472,7 +2472,6 @@ dependencies = [
  "mln-rs-gestures",
  "mln-rs-gfx",
  "mln-rs-gl",
- "mln-rs-glsl",
  "mln-rs-image",
  "mln-rs-layers",
  "mln-rs-map",
@@ -2633,6 +2632,7 @@ dependencies = [
  "gpu-allocator",
  "mln-rs-gfx",
  "mln-rs-glsl",
+ "mln-rs-layers",
  "mln-rs-util",
  "naga",
  "parking_lot",
@@ -2813,6 +2813,7 @@ dependencies = [
  "libc",
  "libloading",
  "mln-rs-gfx",
+ "mln-rs-layers",
  "mln-rs-tile-id",
  "mln-rs-util",
  "parking_lot",
@@ -2827,6 +2828,7 @@ name = "mln-rs-glsl"
 version = "0.0.13"
 dependencies = [
  "mln-rs-gfx",
+ "mln-rs-layers",
  "naga",
 ]
 
@@ -2899,6 +2901,7 @@ dependencies = [
  "mln-rs-feature",
  "mln-rs-geometry",
  "mln-rs-gfx",
+ "mln-rs-layers",
  "mln-rs-map-types",
  "mln-rs-math",
  "mln-rs-renderer",
@@ -2966,6 +2969,7 @@ dependencies = [
  "block2 0.6.2",
  "bytemuck",
  "mln-rs-gfx",
+ "mln-rs-layers",
  "mln-rs-tile-id",
  "mln-rs-util",
  "objc2 0.6.5",
@@ -3354,6 +3358,7 @@ dependencies = [
  "libc",
  "mln-rs-gfx",
  "mln-rs-glsl",
+ "mln-rs-layers",
  "mln-rs-tile-id",
  "mln-rs-util",
  "naga",
@@ -3378,6 +3383,7 @@ dependencies = [
  "mln-rs-gestures",
  "mln-rs-gfx",
  "mln-rs-gl",
+ "mln-rs-layers",
  "mln-rs-map",
  "mln-rs-runtime",
  "mln-rs-storage",
@@ -3418,6 +3424,7 @@ name = "mln-rs-webgpu"
 version = "0.0.13"
 dependencies = [
  "mln-rs-gfx",
+ "mln-rs-layers",
  "mln-rs-util",
  "mln-rs-vec-map",
  "parking_lot",

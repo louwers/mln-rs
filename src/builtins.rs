@@ -19,16 +19,6 @@ pub fn register_builtins(builder: &mut RegistryBuilder) -> Result<(), RegisterEr
     register_builtin_functions(builder.functions_mut())?;
     mln_layers::register_layer_types(builder)?;
     mln_renderer::builtins::register_layer_types(builder)?;
-    // The layer types' programs, in the shading languages of the build's
-    // backends.
-    #[cfg(feature = "webgpu")]
-    builder.add_shader_sources(mln_webgpu::LAYER_SOURCES);
-    #[cfg(all(feature = "metal", target_vendor = "apple"))]
-    builder.add_shader_sources(mln_mtl::LAYER_SOURCES);
-    #[cfg(feature = "gl")]
-    builder.add_shader_sources(mln_gl::LAYER_SOURCES);
-    #[cfg(all(any(feature = "vulkan", feature = "d3d12"), not(any(target_vendor = "apple", target_family = "wasm"))))]
-    builder.add_shader_sources(mln_glsl::LAYER_SOURCES);
     mln_sources::register_source_types(builder)?;
     mln_renderer::builtins::register_source_types(builder)
 }

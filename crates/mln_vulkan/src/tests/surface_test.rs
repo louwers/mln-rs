@@ -35,14 +35,14 @@ use mln_gfx::gpu::{
     TextureRegion, TextureUsage, VertexAttribute, VertexBufferLayout, VertexStep,
 };
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::background_layer_ubo::{BackgroundDrawableUBO, BackgroundDrawableUnionUBO, BackgroundPropsUBO};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
-use mln_gfx::shaders::programs;
 use mln_gfx::shaders::shader_defines::{ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_PROPS_UBO, ID_PROJECTION_UBO};
 use mln_gfx::shaders::source::ShaderSources;
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::types::DepthFunctionType;
+use mln_layers::background::programs::BACKGROUND;
+use mln_layers::background::ubo::{BackgroundDrawableUBO, BackgroundDrawableUnionUBO, BackgroundPropsUBO};
 use mln_util::Color;
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
@@ -199,9 +199,9 @@ impl Scene {
     fn new(backend: &mut Window) -> Scene {
         let gpu = backend.backend.gpu();
         let mut sources = ShaderSources::default();
-        sources.add(mln_glsl::LAYER_SOURCES);
+        mln_layers::add_shader_sources(&mut sources);
         gpu.add_shader_sources(&sources);
-        let program = &programs::BACKGROUND;
+        let program = &BACKGROUND;
         let parameters = ProgramParameters::new(1.0, false);
         let key = program.variant_key(&parameters, [], ProjectionVariant::Mercator);
         let shader = gpu.create_shader(&key).expect("the shader");

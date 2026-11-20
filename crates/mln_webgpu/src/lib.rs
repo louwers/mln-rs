@@ -24,7 +24,6 @@ pub use custom_layer::{CustomLayerEncoder, CustomLayerPass};
 pub use device::Device;
 pub use gpu::WebGpu;
 pub use renderer_backend::RendererBackend;
-pub use shaders::shader_source::LAYER_SOURCES;
 pub use surface_target::{Overlay, OverlayTarget, SurfaceOptions, SurfaceTarget};
 
 /// Frames drawn into textures of the library's and read back.

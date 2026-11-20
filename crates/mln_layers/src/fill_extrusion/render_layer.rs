@@ -29,12 +29,8 @@ use std::mem::offset_of;
 use std::sync::Arc;
 
 use mln_gfx::gpu::{Gpu, ShaderKey};
-use mln_gfx::shaders::fill_extrusion_layer_ubo::{
-    FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO,
-};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
     ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE,
@@ -65,12 +61,13 @@ use mln_util::error::Error;
 use mln_util::identity::SimpleIdentity;
 use mln_util::size::Size;
 
-use super::FillExtrusion;
 use super::bucket::{
     FillExtrusionBinders, FillExtrusionBucket, FillExtrusionLayoutSpec, FillExtrusionLayoutVertex,
     FillExtrusionStaticVertex, FillExtrusionWallVertex, WALL_CORNERS, WALL_STRIP_INDICES, wall_quad_paint,
 };
 use super::properties::FillExtrusionPaintProperties;
+use super::{FillExtrusion, programs};
+use crate::fill_extrusion::ubo::{FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO};
 use crate::pattern_layout::{PatternLayout, uses_pattern};
 
 /// The pass the layer's draws draw in.

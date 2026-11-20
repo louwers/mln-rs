@@ -5,11 +5,6 @@ use std::sync::Arc;
 use mln_gfx::gpu::{Gpu, TextureFormat};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::line_layer_ubo::{
-    LineDrawableUBO, LineDrawableUnionUBO, LineEvaluatedPropsUBO, LineGradientDrawableUBO, LinePatternDrawableUBO,
-    LinePatternTilePropsUBO, LineSDFDrawableUBO, LineSDFTilePropsUBO, LineTilePropsUnionUBO,
-};
-use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
     ID_LINE_DASH_TEXTURE, ID_LINE_DATA_VERTEX_ATTRIBUTE, ID_LINE_DRAWABLE_UBO, ID_LINE_EVALUATED_PROPS_UBO,
@@ -39,10 +34,14 @@ use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
-use super::Line;
 use super::bucket::{LineBinders, LineBucket};
 use super::properties::LinePaintProperties;
+use super::{Line, programs};
 use crate::color_ramp::apply_color_ramp;
+use crate::line::ubo::{
+    LineDrawableUBO, LineDrawableUnionUBO, LineEvaluatedPropsUBO, LineGradientDrawableUBO, LinePatternDrawableUBO,
+    LinePatternTilePropsUBO, LineSDFDrawableUBO, LineSDFTilePropsUBO, LineTilePropsUnionUBO,
+};
 use crate::pattern_layout::{LineLayoutSpec, PatternLayout, uses_pattern};
 use crate::refresh_paint_attributes;
 

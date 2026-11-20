@@ -367,17 +367,13 @@ pub(crate) fn ready(source: mln_style::Source) -> mln_style::Source {
 }
 
 /// Runs `f` with the `Gpu` of a headless WebGPU backend, which compiles the
-/// built-in layer types' programs, and a context over it, which it then
-/// tears down.
+/// engine's programs, and a context over it, which it then tears down.
 fn with_context(f: impl FnOnce(&mut dyn mln_gfx::gpu::Gpu, &mut crate::gfx::context::Context)) {
     use mln_gfx::RendererBackend as _;
     use mln_gfx::gpu::Gpu as _;
     let device = mln_webgpu::Device::new(None).expect("device");
     let mut backend = mln_webgpu::RendererBackend::new(&device);
     let gpu = backend.gpu();
-    let mut sources = mln_gfx::shaders::source::ShaderSources::default();
-    sources.add(mln_webgpu::LAYER_SOURCES);
-    gpu.add_shader_sources(&sources);
     let mut context = crate::gfx::context::Context::new(*gpu.caps(), 1.0);
     f(gpu, &mut context);
     context.tear_down(gpu);
