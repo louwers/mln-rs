@@ -9,6 +9,7 @@
     "../testdata/metrics/ignores/platform-linux-vulkan.json",
     "../ignores/rust-port.json",
     "../ignores/rust-port-terrain.json",
+    "../ignores/rust-port-terrain-glsl.json",
     "../ignores/rust-port-1px-outlines.json"
   ],
   "metric_path": "../testdata/metrics/linux-gcc8-release"

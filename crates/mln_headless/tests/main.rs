@@ -40,3 +40,5 @@ mod pixel_ratio_test;
 mod resize_test;
 // Text that the device's fonts shape, with a font file standing in for them.
 mod system_fonts_test;
+// The layers that drape over terrain, drawn through the terrain's drapes.
+mod terrain_drape_test;

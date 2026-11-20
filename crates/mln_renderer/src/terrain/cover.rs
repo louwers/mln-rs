@@ -167,6 +167,8 @@ impl TerrainTile {
 pub(crate) struct TerrainCover {
     /// The id of the terrain's raster-dem source.
     pub(crate) source_id: String,
+    /// The size of the tiles in pixels ([`terrain_tile_size`]).
+    pub(crate) tile_size: u16,
     /// The tiles, nearest the center first.
     pub(crate) tiles: Vec<TerrainTile>,
     /// The DEM tiles the source keeps loaded for the tiles, whether or not
@@ -192,7 +194,8 @@ impl TerrainCover {
             cover_tiles(view, dem_tile_size, &ranges).into_iter().map(TerrainTile::new).collect();
         let mut seen = HashSet::default();
         let dem_tiles = tiles.iter().flat_map(|tile| tile.dem_reads(dem_zooms)).filter(|id| seen.insert(*id)).collect();
-        TerrainCover { source_id: source_id.to_owned(), tiles, dem_tiles, ranges }
+        let tile_size = terrain_tile_size(dem_tile_size);
+        TerrainCover { source_id: source_id.to_owned(), tile_size, tiles, dem_tiles, ranges }
     }
 
     /// Binds each tile's DEM from the tiles of `dem`, the terrain's source.

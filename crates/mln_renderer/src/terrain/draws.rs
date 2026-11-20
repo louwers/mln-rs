@@ -1,5 +1,6 @@
 //! The terrain's draws: one per terrain tile, of the shared grid, each with
-//! the tile's matrix in an entry of one storage buffer.
+//! the tile's matrix in an entry of one storage buffer, sampling the tile's
+//! drape.
 
 use std::mem::size_of;
 use std::rc::Rc;
@@ -9,14 +10,16 @@ use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::shader_defines::{ID_TERRAIN_DRAWABLE_UBO, ID_TERRAIN_POS_VERTEX_ATTRIBUTE};
+use mln_gfx::shaders::shader_defines::{
+    ID_TERRAIN_DRAPE_TEXTURE, ID_TERRAIN_DRAWABLE_UBO, ID_TERRAIN_POS_VERTEX_ATTRIBUTE,
+};
 use mln_gfx::shaders::terrain_ubo::TerrainDrawableUBO;
 use mln_gfx::{AttributeDataType, DepthMaskType, DrawMode};
 use mln_util::clip_depth::ClipDepthRange;
 use mln_util::logging::{Event, Log};
 
-use super::TerrainCover;
 use super::mesh::{TerrainMesh, TerrainVertex};
+use super::{Drapes, TerrainCover};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::frame_projection::zero_to_one_clip_z;
 use crate::gfx::context::Context;
@@ -64,6 +67,7 @@ impl TerrainDraws {
         gpu: &mut dyn Gpu,
         parameters: &mut PaintParameters<'_>,
         cover: Option<&TerrainCover>,
+        drapes: &Drapes,
     ) {
         let shader = cover.and_then(|_| self.shader(gpu, parameters));
         let (Some(cover), Some(shader)) = (cover, shader) else {
@@ -94,6 +98,7 @@ impl TerrainDraws {
                 continue;
             };
             let draw = entry.value.get_or_insert_with(|| KeptDraw::new(mesh_objects(&shader, mesh)));
+            draw.objects.set_texture(ID_TERRAIN_DRAPE_TEXTURE, drapes.texture(index, &tile.id));
             let mut matrix = *proj_matrix * view.tile_matrix(&tile.id.to_unwrapped());
             if remap_clip_z {
                 zero_to_one_clip_z(&mut matrix);
@@ -108,6 +113,12 @@ impl TerrainDraws {
         finish_tiles(&mut self.draw_list, &mut self.frame, &mut self.tiles, gpu, context, |writer| {
             writer.storage(ID_TERRAIN_DRAWABLE_UBO, |drawable| *drawable);
         });
+    }
+
+    /// Whether the backend has the terrain's shader, which this makes on
+    /// `gpu` the first time.
+    pub(crate) fn supported(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) -> bool {
+        self.shader(gpu, parameters).is_some()
     }
 
     /// The terrain's shader, made on `gpu` the first time; `None`, logged

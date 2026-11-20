@@ -300,6 +300,7 @@ fn hillshade_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeArra
 impl TypedLayer for RenderHillshadeLayer {
     type Type = Hillshade;
     type Drawing = TileDraws<HillshadeTile>;
+    const DRAPES: bool = true;
 
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
@@ -514,10 +515,6 @@ impl TypedLayer for RenderHillshadeLayer {
 }
 
 impl RenderLayer for RenderHillshadeLayer {
-    fn drapes(&self) -> bool {
-        true
-    }
-
     fn upload_render_targets(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
         if self.base.is_renderable {
             for target in self.bucket_render_targets.values_mut() {

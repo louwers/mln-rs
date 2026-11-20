@@ -27,7 +27,7 @@ use crate::bucket_geometry::BucketGeometry;
 use crate::buckets::symbol_bucket::SymbolBucket;
 use crate::geometry::feature_index::FeatureIndex;
 use crate::gfx::context::Context;
-use crate::layer_drawing::{ChangedBuckets, DrawGroup, DrawOrder, LayerDrawing};
+use crate::layer_drawing::{ChangedBuckets, DrapeDrawing, DrawGroup, DrawOrder, LayerDrawing};
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType};
 use crate::layers::render_custom_layer::EndedHosts;
 use crate::line_atlas::LineAtlas;
@@ -346,9 +346,9 @@ impl<'a> FrameSourceTiles<'a> {
 
     /// The tiles of `found`, as [`find`](Self::find) found them for the
     /// layer `layer_id` of the type `T` in the same frame.
-    fn at<T: LayerType>(self, found: &[FoundTile], layer_id: &str) -> FrameTiles<'a, T> {
+    fn at<'f, T: LayerType>(self, found: impl IntoIterator<Item = &'f FoundTile>, layer_id: &str) -> FrameTiles<'a, T> {
         found
-            .iter()
+            .into_iter()
             .filter_map(|&FoundTile { tile, view }| {
                 let render_tile = self.tiles.get(tile);
                 debug_assert!(render_tile.is_some(), "a tile found past the frame's render tiles");
@@ -356,6 +356,23 @@ impl<'a> FrameSourceTiles<'a> {
                 Some(FrameTile::at(render_tile?, contents, layer_id, view))
             })
             .collect()
+    }
+
+    /// The tiles of `found`, as [`at`](Self::at) gives them, that overlap
+    /// `tile`: it, its ancestors and its descendants, in its world copy.
+    pub(crate) fn overlapping<T: LayerType>(
+        self,
+        found: &[FoundTile],
+        layer_id: &str,
+        tile: UnwrappedTileID,
+    ) -> FrameTiles<'a, T> {
+        let overlaps = |found: &&FoundTile| {
+            self.tiles.get(found.tile).is_some_and(|render_tile| {
+                let id = render_tile.id;
+                id == tile || id.is_child_of(&tile) || tile.is_child_of(&id)
+            })
+        };
+        self.at(found.iter().filter(overlaps), layer_id)
     }
 }
 
@@ -492,10 +509,15 @@ pub(crate) struct PartsMut<'a, L: TypedLayer + ?Sized> {
 /// which runs its hooks here with the tiles and buckets of its type.
 pub(crate) trait TypedLayer {
     type Type: LayerType;
-    type Drawing: LayerDrawing;
+    type Drawing: LayerDrawing + Default + 'static;
 
     /// The order the layer draws its source's tiles in.
     const TILE_ORDER: TileOrder = TileOrder::ById;
+
+    /// Whether the layer drapes over terrain: it draws flat into the
+    /// terrain tiles' textures ([`LayerParts::update_drape_draws`]) rather
+    /// than onto the frame.
+    const DRAPES: bool = false;
 
     fn parts(&self) -> Parts<'_, Self>;
     fn parts_mut(&mut self) -> PartsMut<'_, Self>;
@@ -649,6 +671,31 @@ pub(crate) trait LayerParts {
         source: Option<LayerSource<'_>>,
     );
 
+    /// Whether the layer drapes over terrain ([`TypedLayer::DRAPES`]).
+    fn drapes(&self) -> bool;
+
+    /// An empty drawing of the layer's type, which a drape keeps of the
+    /// layer.
+    fn new_drape_drawing(&self) -> DrapeDrawing;
+
+    /// The encode's update of the layer's draws into the drape of the
+    /// terrain tile `drape_tile`, which keeps them in `drawing`, one of the
+    /// layer's ([`new_drape_drawing`](Self::new_drape_drawing)): as
+    /// [`update_draws`](Self::update_draws) makes the frame's, with the
+    /// drape's `parameters`, from the tiles of `source` the layer's update
+    /// found that overlap `drape_tile`, or from `drape_tile` itself for a
+    /// layer without a source, in the Mercator projection, a drape's. A
+    /// layer with an image source makes none: an image doesn't drape.
+    fn update_drape_draws(
+        &mut self,
+        gpu: &mut dyn Gpu,
+        parameters: &mut PaintParameters<'_>,
+        atlases: &Atlases,
+        source: Option<LayerSource<'_>>,
+        drape_tile: OverscaledTileID,
+        drawing: &mut DrapeDrawing,
+    );
+
     /// Records that the buckets in `changed` changed, for the tiles whose
     /// draws were built from them.
     fn mark_changed(&mut self, changed: &ChangedBuckets);
@@ -788,12 +835,10 @@ impl<L: TypedLayer> LayerParts for L {
         source: Option<LayerSource<'_>>,
     ) {
         let state = parameters.view;
-        let variant = if state.is_globe() { ProjectionVariant::Globe } else { ProjectionVariant::Mercator };
-        if variant != self.base().projection_variant {
-            self.base_mut().projection_variant = variant;
-            self.remove_all_draws();
-            self.projection_changed();
-        }
+        use_projection_variant(
+            self,
+            if state.is_globe() { ProjectionVariant::Globe } else { ProjectionVariant::Mercator },
+        );
         if <L::Type as StyleLayerType>::INFO.source == SourceKind::None {
             // A layer that keeps tiles draws those its update picked.
             if self.parts_mut().drawing.tiles().is_some_and(|tiles| tiles.is_empty()) {
@@ -822,6 +867,34 @@ impl<L: TypedLayer> LayerParts for L {
                 TypedLayer::nothing_to_draw(self);
             }
         }
+    }
+
+    fn drapes(&self) -> bool {
+        L::DRAPES
+    }
+
+    fn new_drape_drawing(&self) -> DrapeDrawing {
+        DrapeDrawing::new(L::Drawing::default())
+    }
+
+    fn update_drape_draws(
+        &mut self,
+        gpu: &mut dyn Gpu,
+        parameters: &mut PaintParameters<'_>,
+        atlases: &Atlases,
+        source: Option<LayerSource<'_>>,
+        drape_tile: OverscaledTileID,
+        drawing: &mut DrapeDrawing,
+    ) {
+        let Some(drawing) = drawing.downcast_mut::<L::Drawing>() else {
+            debug_assert!(false, "a drape's drawing of another layer's type");
+            return;
+        };
+        // The drape's drawing is the layer's while the layer's hooks make its
+        // draws.
+        std::mem::swap(self.parts_mut().drawing, drawing);
+        update_drape(self, gpu, parameters, atlases, source, drape_tile);
+        std::mem::swap(self.parts_mut().drawing, drawing);
     }
 
     fn mark_changed(&mut self, changed: &ChangedBuckets) {
@@ -873,6 +946,54 @@ impl<L: TypedLayer> LayerParts for L {
     }
 }
 
+/// [`LayerParts::update_drape_draws`] of `layer`, whose drawing is the
+/// drape's.
+fn update_drape<L: TypedLayer>(
+    layer: &mut L,
+    gpu: &mut dyn Gpu,
+    parameters: &mut PaintParameters<'_>,
+    atlases: &Atlases,
+    source: Option<LayerSource<'_>>,
+    drape_tile: OverscaledTileID,
+) {
+    // A drape is flat: the layer's draws are Mercator's.
+    use_projection_variant(layer, ProjectionVariant::Mercator);
+    if <L::Type as StyleLayerType>::INFO.source == SourceKind::None {
+        if let Some(kept) = layer.parts_mut().drawing.tiles() {
+            kept.set_tiles([drape_tile]);
+        }
+        if begin_frame(layer) {
+            TypedLayer::update_draws_without_source(layer, gpu, parameters, atlases);
+        }
+        return;
+    }
+    let tiles = match source {
+        Some(LayerSource::Tiles(source, found)) => {
+            let found = found.get(layer.base().found.clone()).unwrap_or_default();
+            source.overlapping::<L::Type>(found, layer.id(), drape_tile.to_unwrapped())
+        }
+        _ => FrameTiles::new(),
+    };
+    if let Some(kept) = layer.parts_mut().drawing.tiles() {
+        kept.set_tiles(tiles.iter().map(|tile| tile.id()));
+    }
+    if tiles.is_empty() {
+        layer.remove_all_draws();
+    } else if begin_frame(layer) {
+        TypedLayer::update_draws(layer, gpu, parameters, atlases, &tiles);
+    }
+}
+
+/// Makes `layer` draw in the projection `variant`: where its draws were of
+/// another, drops them and what the layer made for that one.
+fn use_projection_variant<L: TypedLayer>(layer: &mut L, variant: ProjectionVariant) {
+    if variant != layer.base().projection_variant {
+        layer.base_mut().projection_variant = variant;
+        layer.remove_all_draws();
+        layer.projection_changed();
+    }
+}
+
 /// Starts the frame's draws of `layer`, which has something to draw, and
 /// returns whether it draws in a pass with its values of the frame. One that
 /// doesn't drops the frame's draws, and keeps what it keeps of its tiles.
@@ -899,12 +1020,6 @@ pub(crate) trait RenderLayer: LayerParts {
     /// planet's depth hides behind the horizon.
     fn needs_globe_depth(&self) -> bool {
         self.is_3d()
-    }
-
-    /// Whether the layer drapes over terrain: it draws flat onto the
-    /// terrain's surface rather than onto the frame.
-    fn drapes(&self) -> bool {
-        false
     }
 
     /// A background layer's color, where it is a solid color the frame can

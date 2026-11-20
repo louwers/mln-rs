@@ -3,7 +3,6 @@ use std::time::Duration;
 
 use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, Gpu, LoadOp, TargetFormats};
 use mln_gfx::rendering_stats::RenderingStats;
-use mln_gfx::shaders::layer_ubo::GlobalPaintParamsUBO;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::shaders::shader_defines::ID_GLOBAL_PAINT_PARAMS_UBO;
 use mln_gfx::{FrameImage, Handoff, ScissorRect};
@@ -11,10 +10,8 @@ use mln_map_types::MapDebugOptions;
 use mln_style::layers::CustomLayerFrame;
 use mln_text::GlyphCache;
 use mln_text::local_glyph_rasterizer::LocalGlyphs;
-use mln_tile_id::UnwrappedTileID;
 use mln_util::Color;
 use mln_util::event_queue::Waker;
-use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, Log};
 use mln_util::pool::Pool;
 use mln_util::time::Instant;
@@ -25,8 +22,8 @@ use crate::frame::Frame;
 use crate::frame_projection::{self, FrameProjection};
 use crate::gfx::context::Context;
 use crate::gfx::shader_registry::ShaderRegistry;
-use crate::layer_composite::{Composite, LayerComposite};
-use crate::layer_drawing::DrawOrder;
+use crate::layer_composite::LayerComposite;
+use crate::layer_drawing::{DrawGroups, DrawOrder};
 use crate::layers::render_custom_layer::end_hosts;
 use crate::paint_parameters::{OpenPass, PaintParameters};
 use crate::render_orchestrator::RenderOrchestrator;
@@ -593,7 +590,8 @@ impl Encoder {
 
         // - DRAW UPLOAD ---------------------------------------------------
         orchestrator.upload_draws(gpu, parameters.context);
-        let draw_groups = DrawGroups::of(orchestrator, &parameters);
+        let draw_groups =
+            DrawGroups::of(|visit| orchestrator.visit_draw_groups(visit), parameters.stencil_clear_tile());
         let (proj_state, transform) = (parameters.view, parameters.transform_params);
         parameters.clip_masks.update(
             gpu,
@@ -603,6 +601,7 @@ impl Encoder {
             &draw_groups.clip_tiles,
             |tile| to_projection_ubo(&transform.projection_data_for_tile(tile, false)),
         );
+        orchestrator.terrain().upload_drapes(gpu, &mut parameters);
         parameters.layer_composite.update(
             gpu,
             parameters.context,
@@ -612,18 +611,7 @@ impl Encoder {
             parameters.debug_options.contains(MapDebugOptions::OVERDRAW),
             &draw_groups.composited,
         );
-        let atlas_size = orchestrator.atlases().pattern.pixel_size();
-        let global_paint_params_ubo = GlobalPaintParamsUBO {
-            pattern_atlas_texsize: [atlas_size.width as f32, atlas_size.height as f32],
-            units_to_pixels: [1.0 / parameters.pixels_to_gl_units[0], 1.0 / parameters.pixels_to_gl_units[1]],
-            world_size: [renderable_size.width as f32, renderable_size.height as f32],
-            camera_to_center_distance: state.camera_to_center_distance() as f32,
-            symbol_fade_change: parameters.symbol_fade_change,
-            aspect_ratio: state.size().aspect_ratio(),
-            pixel_ratio: parameters.pixel_ratio,
-            map_zoom: state.zoom() as f32,
-            pad1: 0.0,
-        };
+        let global_paint_params_ubo = parameters.global_paint_params(orchestrator.atlases().pattern.pixel_size());
         parameters.context.write_global_uniform_buffer(gpu, ID_GLOBAL_PAINT_PARAMS_UBO, &global_paint_params_ubo);
         // What the uploads replaced goes before the passes make what
         // replaces it, such as a draw's geometry.
@@ -634,9 +622,7 @@ impl Encoder {
         // The 3D layers draw into depth from 0 to the passes' depth range
         // size, which the draw groups' count sets, and custom layers record
         // their work with the projection that the frame's result reports.
-        let depth_range_size = 1.0
-            - ((draw_groups.count + 2) * PaintParameters::NUM_SUBLAYERS as usize) as f32
-                * PaintParameters::DEPTH_EPSILON;
+        let depth_range_size = draw_groups.depth_range_size();
         let frame_projection =
             frame_projection::compute(&frame.transform, depth_range_size, parameters.context.caps().clip_depth);
         parameters.custom_layer_frame = Some(CustomLayerFrame {
@@ -731,44 +717,6 @@ impl Encoder {
     }
 }
 
-/// What the frame's draw groups need of the passes: their number, which sets
-/// the passes' depth range; the masks of the tiles they clip to and, when
-/// any of them uses the stencil buffer, of the tile that clears it; and the
-/// groups drawn as a whole, each into the layer composite's texture and then
-/// onto the frame.
-struct DrawGroups {
-    count: usize,
-    clip_tiles: Vec<UnwrappedTileID>,
-    composited: Vec<(SimpleIdentity, Composite)>,
-}
-
-impl DrawGroups {
-    /// The draw groups of `orchestrator`'s layers. Draw groups of one source
-    /// clip to the same tiles, which are added once.
-    fn of(orchestrator: &RenderOrchestrator, parameters: &PaintParameters<'_>) -> DrawGroups {
-        let mut groups = DrawGroups { count: 0, clip_tiles: Vec::new(), composited: Vec::new() };
-        let mut last: Option<&[UnwrappedTileID]> = None;
-        orchestrator.visit_draw_groups(|group| {
-            groups.count += 1;
-            if let Some(tiles) = group.stencil_tiles()
-                && last.is_none_or(|last| last != tiles)
-            {
-                groups.clip_tiles.extend(tiles.iter().copied());
-                last = Some(tiles);
-            }
-            groups.composited.extend(group.composite());
-        });
-        if last.is_some() {
-            groups.clip_tiles.extend(parameters.stencil_clear_tile());
-        }
-        if !groups.clip_tiles.is_sorted() {
-            groups.clip_tiles.sort_unstable();
-        }
-        groups.clip_tiles.dedup();
-        groups
-    }
-}
-
 /// The draw section of a frame's encode: encodes the passes of `frame` into
 /// `image` through `gpu`, which holds the frame's work until it is
 /// submitted, each pass drawing the `num_draw_groups` draw groups at depths
@@ -796,8 +744,10 @@ fn draw(
         orchestrator.render_draw_groups(gpu, parameters, DrawOrder::BottomUp);
     }
 
-    // The layers' render targets, which the passes sample.
+    // The layers' render targets, which the passes sample, and the terrain's
+    // drapes, whose draws sample some of them.
     orchestrator.visit_render_layers(|layer| layer.render_targets(gpu, parameters));
+    orchestrator.terrain().render_drapes(gpu, parameters);
 
     // The frame's pass, cleared to the backdrop, which shows where there are
     // no tiles.

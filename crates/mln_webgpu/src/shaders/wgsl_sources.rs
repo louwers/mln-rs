@@ -2861,7 +2861,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 /// each vertex colored by the texel of `image_texture` it names, which the
 /// vertex stage loads.
 /// The terrain's surface: a tile's grid, drawn with the tile's matrix from
-/// `drawableVector`, flat at sea level and in one opaque grey.
+/// `drawableVector`, flat at sea level, in the colors of the tile's drape.
 pub(crate) const TERRAIN_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "TerrainShader",
     name: r"TerrainShader",
@@ -2870,6 +2870,13 @@ pub(crate) const TERRAIN_SHADER: WgslShaderSource = WgslShaderSource {
 struct VertexInput {
     // x and y in tile units, whether the vertex is a skirt's lower edge, 0.
     @location(0) pos: vec4<i32>,
+};
+
+struct VertexOutput {
+    @builtin(position) position: vec4<f32>,
+    // Where in the drape, its north-west corner at 0 and its rows from the
+    // north, as they are drawn.
+    @location(0) drape_pos: vec2<f32>,
 };
 
 struct TerrainDrawableUBO {
@@ -2886,17 +2893,28 @@ struct GlobalIndexUBO {
 @group(0) @binding(2) var<storage, read> drawableVector: array<TerrainDrawableUBO>;
 
 @vertex
-fn main(in: VertexInput) -> @builtin(position) vec4<f32> {
+fn main(in: VertexInput) -> VertexOutput {
     let drawable = drawableVector[globalIndex.value];
-    return drawable.matrix * vec4<f32>(vec2<f32>(in.pos.xy), 0.0, 1.0);
+    let pos = vec2<f32>(in.pos.xy);
+    var out: VertexOutput;
+    out.position = drawable.matrix * vec4<f32>(pos, 0.0, 1.0);
+    out.drape_pos = pos / 8192.0;
+    return out;
 }
 ",
     ),
     fragment: Some(
         r"
+struct FragmentInput {
+    @location(0) drape_pos: vec2<f32>,
+};
+
+@group(1) @binding(2) var drape_sampler: sampler;
+@group(1) @binding(3) var drape_texture: texture_2d<f32>;
+
 @fragment
-fn main() -> @location(0) vec4<f32> {
-    return vec4<f32>(0.5, 0.5, 0.5, 1.0);
+fn main(in: FragmentInput) -> @location(0) vec4<f32> {
+    return textureSample(drape_texture, drape_sampler, in.drape_pos);
 }
 ",
     ),

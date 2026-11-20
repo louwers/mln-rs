@@ -429,6 +429,7 @@ fn offset_line(
 impl TypedLayer for RenderLineLayer {
     type Type = Line;
     type Drawing = TileDraws<LineTile>;
+    const DRAPES: bool = true;
 
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
@@ -603,10 +604,6 @@ impl TypedLayer for RenderLineLayer {
 }
 
 impl RenderLayer for RenderLineLayer {
-    fn drapes(&self) -> bool {
-        true
-    }
-
     // query
     fn query_intersects_feature(
         &self,

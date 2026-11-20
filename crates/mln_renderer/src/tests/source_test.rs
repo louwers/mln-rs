@@ -1538,6 +1538,7 @@ fn a_source_covers_the_view_as_the_terrain_does_while_terrain_draws() {
     assert_eq!(std::collections::BTreeSet::from([12]), pitched_cover_zooms(None));
     let flat = crate::terrain::TerrainCover {
         source_id: "dem".to_owned(),
+        tile_size: 512,
         tiles: Vec::new(),
         dem_tiles: Vec::new(),
         ranges: crate::terrain::ElevationRanges::default(),

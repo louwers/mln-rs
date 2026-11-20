@@ -662,6 +662,7 @@ impl RenderFillLayer {
 impl TypedLayer for RenderFillLayer {
     type Type = Fill;
     type Drawing = TileDraws<FillTile>;
+    const DRAPES: bool = true;
 
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
@@ -864,10 +865,6 @@ impl TypedLayer for RenderFillLayer {
 }
 
 impl RenderLayer for RenderFillLayer {
-    fn drapes(&self) -> bool {
-        true
-    }
-
     // query
     fn query_intersects_feature(
         &self,

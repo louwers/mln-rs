@@ -2,12 +2,14 @@
 //! from a raster-dem source.
 
 mod cover;
+mod drapes;
 mod draws;
 mod mesh;
 
 #[cfg(test)]
 pub(crate) use cover::terrain_tile_size;
 pub(crate) use cover::{ElevationRanges, TerrainCover};
+pub(crate) use drapes::Drapes;
 use mln_gfx::gpu::Gpu;
 use mln_map_types::MapMode;
 use mln_style::source_type::SourceData;
@@ -15,16 +17,18 @@ use mln_style::sources::RasterDemSourceType;
 use mln_util::logging::{Event, Log};
 
 use crate::gfx::context::Context;
+use crate::layer_drawing::ChangedBuckets;
 use crate::paint_parameters::PaintParameters;
 use crate::terrain::draws::TerrainDraws;
 use crate::tile::source_tiles::SourceTiles;
 use crate::update_parameters::UpdateParameters;
 
 /// The terrain of the frames the renderer draws: whether it draws, the
-/// tiles that cover the view, and their draws.
+/// tiles that cover the view, their drapes and their draws.
 #[derive(Default)]
 pub(crate) struct RenderTerrain {
     cover: Option<TerrainCover>,
+    drapes: Drapes,
     draws: TerrainDraws,
     /// Whether it has logged that terrain doesn't draw on the globe.
     logged_globe: bool,
@@ -87,11 +91,44 @@ impl RenderTerrain {
         self.cover.as_ref()
     }
 
-    /// Makes the draws of the frame of the last update, or drops them for a
-    /// frame that doesn't draw terrain (`draws` false).
+    /// Starts the encode's update of the drapes of the frame of the last
+    /// update, whose draped layers then make their draws in them
+    /// ([`Drapes::update_layer`]); `None`, dropping the drapes, for a frame
+    /// that doesn't draw terrain (`draws` false) or a backend without the
+    /// terrain's shader.
+    pub(crate) fn begin_drapes(
+        &mut self,
+        gpu: &mut dyn Gpu,
+        parameters: &mut PaintParameters<'_>,
+        draws: bool,
+    ) -> Option<&mut Drapes> {
+        let cover = self.cover.as_ref().filter(|_| draws);
+        let Some(cover) = cover.filter(|_| self.draws.supported(gpu, parameters)) else {
+            self.drapes = Drapes::default();
+            return None;
+        };
+        self.drapes.begin(parameters.context, parameters.view, cover);
+        Some(&mut self.drapes)
+    }
+
+    /// Makes the draws of the frame of the last update, which sample the
+    /// drapes, or drops them for a frame that doesn't draw terrain (`draws`
+    /// false).
     pub(crate) fn update_draws(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, draws: bool) {
         let cover = self.cover.as_ref().filter(|_| draws);
-        self.draws.update(gpu, parameters, cover);
+        self.draws.update(gpu, parameters, cover, &self.drapes);
+    }
+
+    /// Records that the buckets in `changed` changed, for the drapes' draws
+    /// built from them.
+    pub(crate) fn mark_changed(&mut self, changed: &ChangedBuckets) {
+        self.drapes.mark_changed(changed);
+    }
+
+    /// Drops the drapes once the map's center crossed the antimeridian: the
+    /// tiles are the same ones under new ids.
+    pub(crate) fn handle_wrap_jump(&mut self) {
+        self.drapes = Drapes::default();
     }
 
     /// Uploads the GPU objects of the frame's draws.
@@ -99,14 +136,27 @@ impl RenderTerrain {
         self.draws.upload(gpu, context);
     }
 
+    /// Makes what the drapes draw with, and uploads their draws, through
+    /// `gpu`, the context of `parameters`, the frame's.
+    pub(crate) fn upload_drapes(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+        self.drapes.upload(gpu, parameters);
+    }
+
+    /// Draws the drapes into their textures, outside any pass, before the
+    /// frame's passes, whose surface samples them.
+    pub(crate) fn render_drapes(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+        self.drapes.render(gpu, parameters);
+    }
+
     /// Draws the surface into the open pass of `gpu`, the context's.
     pub(crate) fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
         self.draws.render(gpu, parameters);
     }
 
-    /// Drops the draws, which hold the renderer's shaders; the next frame
-    /// makes them again.
+    /// Drops the draws and the drapes, which hold the renderer's shaders;
+    /// the next frame makes them again.
     pub(crate) fn release_shaders(&mut self) {
+        self.drapes = Drapes::default();
         self.draws = TerrainDraws::default();
     }
 }

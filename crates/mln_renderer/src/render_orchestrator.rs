@@ -371,6 +371,9 @@ impl RenderOrchestrator {
         let longitude = update_parameters.view.center(mln_util::geo::WrapMode::Unwrapped).longitude() as f32;
         let wrap_delta = ((longitude - self.longitude) / 360.0).round() as i16;
         self.longitude = longitude;
+        if wrap_delta != 0 {
+            self.terrain.handle_wrap_jump();
+        }
         for (layer, will_render) in self.layers.iter_mut().zip(will_render) {
             if wrap_delta != 0 {
                 layer.handle_wrap_jump(wrap_delta);
@@ -428,6 +431,7 @@ impl RenderOrchestrator {
             for layer in &mut self.layers {
                 layer.mark_changed(&changed_buckets);
             }
+            self.terrain.mark_changed(&changed_buckets);
         }
 
         Some(frame)
@@ -1289,7 +1293,7 @@ impl RenderOrchestrator {
 
     /// Makes the draws of the layers the frame draws, of the terrain, and of
     /// the sky and globe depth passes. Over terrain, the layers that drape
-    /// over it make none.
+    /// over it make theirs in the terrain's drapes rather than in the frame.
     pub(crate) fn update_layer_draws(
         &mut self,
         gpu: &mut dyn Gpu,
@@ -1299,25 +1303,33 @@ impl RenderOrchestrator {
     ) {
         let mut needs_globe_depth = false;
         let mut contents = SourceContents::default();
+        let mut draped: SmallVec<[u32; 16]> = SmallVec::new();
         for (&index, frame_layer) in &frame.layers {
             let render_layer = &mut self.layers[index as usize];
-            let source = frame_layer.source.as_ref().and_then(|id| self.render_sources.get_key_value(id));
-            let source = source.map(|(id, source)| (id.as_str(), &**source));
-            let source_contents = contents.of(source, &self.tile_store);
-            let layer_source = source.map(|(_, source)| match source.image_render_data() {
-                Some(image) => LayerSource::Image(image),
-                None => {
-                    LayerSource::Tiles(FrameSourceTiles::new(source.render_tiles(), source_contents), &self.found_tiles)
-                }
-            });
+            let layer_source =
+                layer_source(frame_layer, &self.render_sources, &self.tile_store, &self.found_tiles, &mut contents);
             // Over terrain, a layer that drapes draws nothing onto the frame.
             // An image source's raster doesn't drape.
             if frame.terrain && render_layer.drapes() && !matches!(layer_source, Some(LayerSource::Image(_))) {
                 render_layer.remove_all_draws();
+                draped.push(index);
                 continue;
             }
             render_layer.update_draws(gpu, paint_parameters, &self.atlases, layer_source);
             needs_globe_depth = needs_globe_depth || render_layer.needs_globe_depth();
+        }
+        if let Some(drapes) = self.terrain.begin_drapes(gpu, paint_parameters, frame.terrain) {
+            let mut contents = SourceContents::default();
+            for index in draped {
+                let Some(frame_layer) = frame.layers.get(&index) else {
+                    continue;
+                };
+                let layer_source =
+                    layer_source(frame_layer, &self.render_sources, &self.tile_store, &self.found_tiles, &mut contents);
+                let render_layer = &mut *self.layers[index as usize];
+                drapes.update_layer(gpu, paint_parameters, &self.atlases, render_layer, layer_source);
+            }
+            drapes.finish_update();
         }
         let (static_data, state) = (paint_parameters.static_data, paint_parameters.view);
         let shaders = &static_data.shaders;
@@ -1645,6 +1657,28 @@ impl<'a> SourceContents<'a> {
         }
         &self.contents
     }
+}
+
+/// What `frame_layer`, a layer of the frame, draws from its source among
+/// `render_sources`: an image source's image, or the source's render tiles
+/// with what `contents` finds they show in `tile_store`, among which it draws
+/// those of `found` its update found.
+fn layer_source<'a, 'c>(
+    frame_layer: &'a FrameLayer,
+    render_sources: &'a HashMap<String, Box<dyn RenderSource>>,
+    tile_store: &'a TileStore,
+    found: &'a [FoundTile],
+    contents: &'c mut SourceContents<'a>,
+) -> Option<LayerSource<'c>> {
+    let source = frame_layer.source.as_ref().and_then(|id| render_sources.get_key_value(id));
+    let (id, source) = source.map(|(id, source)| (id.as_str(), &**source))?;
+    Some(match source.image_render_data() {
+        Some(image) => LayerSource::Image(image),
+        None => LayerSource::Tiles(
+            FrameSourceTiles::new(source.render_tiles(), contents.of(Some((id, source)), tile_store)),
+            found,
+        ),
+    })
 }
 
 /// Drops `value` on `thread_pool`, the orchestrator's workers, instead of

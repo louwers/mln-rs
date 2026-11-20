@@ -35,6 +35,7 @@ use crate::gfx::context::Context;
 use crate::gfx::indexes::{DrawIndexes, Indexes, SharedIndexes};
 use crate::gfx::shader_program::ShaderProgramPtr;
 use crate::gfx::store::SharedTexture;
+use crate::gfx::uniform_buffer::UniformBufferArray;
 use crate::gfx::vertex_attribute::{SharedAttribute, VertexAttributeArray};
 use crate::gfx::vertices::SharedVertices;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
@@ -140,6 +141,10 @@ impl LayerDrawing for RasterDrawing {
             frame.render(&mut self.objects, Self::objects, gpu, parameters);
             order.step(parameters);
         }
+    }
+
+    fn frame_buffers(&mut self) -> Option<&mut UniformBufferArray> {
+        Some(self.frame.as_mut()?.uniform_buffers_mut())
     }
 }
 
@@ -422,6 +427,7 @@ fn raster_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeArray {
 impl TypedLayer for RenderRasterLayer {
     type Type = Raster;
     type Drawing = RasterDrawing;
+    const DRAPES: bool = true;
 
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
@@ -583,8 +589,4 @@ fn shader<'a>(
     slot.as_ref()
 }
 
-impl RenderLayer for RenderRasterLayer {
-    fn drapes(&self) -> bool {
-        true
-    }
-}
+impl RenderLayer for RenderRasterLayer {}

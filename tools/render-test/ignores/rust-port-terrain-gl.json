@@ -1,0 +1,11 @@
+{
+  "gljs/render-tests/terrain/fog-no-sky-blend": "P1a (GL GLSL ES port): the terrain's shaders have no GLSL ES yet, so terrain and the layers that drape over it draw nothing",
+  "gljs/render-tests/terrain/fog-no-sky-blend-roll": "P1a (GL GLSL ES port): the terrain's shaders have no GLSL ES yet, so terrain and the layers that drape over it draw nothing",
+  "gljs/render-tests/terrain/image-wrap-eq-zl": "P1a (GL GLSL ES port): the terrain's shaders have no GLSL ES yet, so terrain and the layers that drape over it draw nothing",
+  "gljs/render-tests/terrain/image-wrap-higher-zl": "P1a (GL GLSL ES port): the terrain's shaders have no GLSL ES yet, so terrain and the layers that drape over it draw nothing",
+  "gljs/render-tests/terrain/image-wrap-lower-zl": "P1a (GL GLSL ES port): the terrain's shaders have no GLSL ES yet, so terrain and the layers that drape over it draw nothing",
+  "gljs/render-tests/terrain/pitched-world": "P1a (GL GLSL ES port): the terrain's shaders have no GLSL ES yet, so terrain and the layers that drape over it draw nothing",
+  "gljs/render-tests/terrain/tile-transparency-overlap-fill": "P1a (GL GLSL ES port): the terrain's shaders have no GLSL ES yet, so terrain and the layers that drape over it draw nothing",
+  "gljs/render-tests/terrain/tile-transparency-overlap-line": "P1a (GL GLSL ES port): the terrain's shaders have no GLSL ES yet, so terrain and the layers that drape over it draw nothing",
+  "render-tests/symbol-height-offset/elevated-symbol-above-horizon": "P1a (GL GLSL ES port): the terrain's shaders have no GLSL ES yet, so terrain and the layers that drape over it draw nothing"
+}

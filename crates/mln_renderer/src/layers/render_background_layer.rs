@@ -188,6 +188,7 @@ impl RenderBackgroundLayer {
 impl TypedLayer for RenderBackgroundLayer {
     type Type = Background;
     type Drawing = TileDraws<BackgroundTile>;
+    const DRAPES: bool = true;
 
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
@@ -353,10 +354,6 @@ impl TypedLayer for RenderBackgroundLayer {
 }
 
 impl RenderLayer for RenderBackgroundLayer {
-    fn drapes(&self) -> bool {
-        true
-    }
-
     fn solid_background(&self) -> Option<Color> {
         let evaluated = &self.values.evaluated.paint;
         if !evaluated.background_pattern.faded().from.empty() || *evaluated.background_opacity.uniform() <= 0.0 {
