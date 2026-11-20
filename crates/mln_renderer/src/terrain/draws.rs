@@ -15,7 +15,9 @@ use mln_gfx::shaders::shader_defines::{
     ID_TERRAIN_PROPS_UBO,
 };
 use mln_gfx::shaders::terrain_ubo::TerrainDrawableUBO;
+use mln_gfx::types::CullFaceWindingType;
 use mln_gfx::{AttributeDataType, DepthMaskType, DrawMode};
+use mln_map_types::ViewportMode;
 use mln_util::clip_depth::ClipDepthRange;
 use mln_util::logging::{Event, Log};
 
@@ -42,6 +44,9 @@ const TERRAIN_SHADER_NAME: &str = "TerrainShader";
 struct SharedMesh {
     /// Whether it has skirts.
     skirts: bool,
+    /// The triangles its draws cull: those facing away, whose winding a
+    /// flipped viewport turns round.
+    cull_face_mode: CullFaceMode,
     vertices: SharedVertices,
     vertex_count: usize,
     indexes: SharedIndexes,
@@ -89,9 +94,13 @@ impl TerrainDraws {
             return;
         };
 
+        let cull_face_mode = match parameters.view.viewport_mode() {
+            ViewportMode::Default => CullFaceMode::back_ccw(),
+            ViewportMode::FlippedY => CullFaceMode { winding: CullFaceWindingType::Clockwise, ..CullFaceMode::back_ccw() },
+        };
         let context = &mut *parameters.context;
-        if self.mesh.as_ref().is_some_and(|mesh| mesh.skirts != surface.skirts) {
-            // The draws hold the other grid.
+        if self.mesh.as_ref().is_some_and(|mesh| mesh.skirts != surface.skirts || mesh.cull_face_mode != cull_face_mode) {
+            // The draws hold the other grid, or cull the other way.
             self.tiles.clear_tiles();
             self.mesh = None;
         }
@@ -99,6 +108,7 @@ impl TerrainDraws {
             let TerrainMesh { vertices, indices } = TerrainMesh::new(surface.skirts);
             SharedMesh {
                 skirts: surface.skirts,
+                cull_face_mode,
                 vertex_count: vertices.len(),
                 vertices: context.add_vertices(vertices),
                 index_count: indices.len(),
@@ -201,7 +211,7 @@ fn mesh_objects(shader: &ShaderProgramPtr, mesh: &SharedMesh) -> DrawObjects {
     DrawObjects::new(
         Rc::clone(shader),
         ColorMode::alpha_blended(),
-        CullFaceMode::back_ccw(),
+        mesh.cull_face_mode,
         geometry,
         Textures::default(),
     )

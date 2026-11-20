@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use mln_headless::HeadlessFrontend;
-use mln_map::{Map, MapMode, MapOptions};
+use mln_map::{Map, MapMode, MapOptions, ViewportMode};
 use mln_runtime::{BackendType, Device, DeviceOptions};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{Kind, Resource, Response};
@@ -86,7 +86,7 @@ fn style(terrain: bool) -> String {
 /// The still image of `style` on WebGPU, the one backend with terrain's
 /// shaders yet, and the bytes of the textures that drew it; `None` without a
 /// WebGPU device.
-fn render(style: &str) -> Option<(PremultipliedImage, i32)> {
+fn render(style: &str, viewport_mode: ViewportMode) -> Option<(PremultipliedImage, i32)> {
     let size = Size::new(SIDE, SIDE);
     let run_loop = Queue::new();
     let pool = Pool::new(4);
@@ -107,7 +107,7 @@ fn render(style: &str) -> Option<(PremultipliedImage, i32)> {
         response.data = Some(Arc::clone(&dem));
         Some(response)
     });
-    let options = MapOptions { map_mode: MapMode::Static, size, pixel_ratio: 1.0, ..Default::default() };
+    let options = MapOptions { map_mode: MapMode::Static, size, pixel_ratio: 1.0, viewport_mode, ..Default::default() };
     let mut map = Map::with_file_source(file_source, options, &pool).unwrap();
     frontend.attach(&mut map);
     map.load_style_json(style);
@@ -124,7 +124,7 @@ fn pixel(image: &PremultipliedImage, x: u32, y: u32) -> [u8; 4] {
 
 #[test]
 fn a_fill_and_a_line_drape_over_flat_terrain() {
-    let (Some((draped, draped_textures)), Some((flat, flat_textures))) = (render(&style(true)), render(&style(false)))
+    let (Some((draped, draped_textures)), Some((flat, flat_textures))) = (render(&style(true), ViewportMode::Default), render(&style(false), ViewportMode::Default))
     else {
         return;
     };
@@ -137,5 +137,20 @@ fn a_fill_and_a_line_drape_over_flat_terrain() {
     assert_eq!([0, 0, 255, 255], pixel(&draped, center, center - 57), "the line");
     assert_eq!([255, 255, 255, 255], pixel(&draped, 4, 4), "the background");
     let differing = pixelmatch::pixelmatch(&draped.data, &flat.data, SIDE as usize, SIDE as usize, None, 0.1285, false);
+    assert_eq!(0, differing, "pixels that differ from the map without terrain");
+}
+
+/// A viewport flipped upside down, which turns the surface's triangles
+/// round, still shows the surface, drawn upside down.
+#[test]
+fn a_flipped_viewport_shows_the_terrain() {
+    let (Some((flipped, _)), Some((flat, _))) =
+        (render(&style(true), ViewportMode::FlippedY), render(&style(false), ViewportMode::FlippedY))
+    else {
+        return;
+    };
+    let center = SIDE / 2;
+    assert_eq!([0, 0, 255, 255], pixel(&flipped, center, center + 57), "the line, south of the center");
+    let differing = pixelmatch::pixelmatch(&flipped.data, &flat.data, SIDE as usize, SIDE as usize, None, 0.1285, false);
     assert_eq!(0, differing, "pixels that differ from the map without terrain");
 }
