@@ -1,0 +1,3 @@
+{
+  "gljs/render-tests/terrain/skirts-auto": "D3D12 under Wine (vkd3d-proton on RADV): 66 pixels differ from GL JS's image where the fixture allows 65 (0.025%); the drape's translucent edges are softer by a fraction of a pixel, and Vulkan on the same GPU has 63"
+}
