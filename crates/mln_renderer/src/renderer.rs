@@ -250,6 +250,14 @@ impl Renderer {
     }
 
     /// The tiles of the terrain's drapes, those of the last update's cover.
+    /// Whether the terrain's surface made its shader, and whether it holds
+    /// draws, the grid or DEM textures.
+    #[cfg(test)]
+    pub(crate) fn terrain_surface_holds(&mut self) -> (bool, bool) {
+        let draws = self.orchestrator.terrain().draws();
+        (draws.has_shader(), draws.holds_draws())
+    }
+
     #[cfg(test)]
     pub(crate) fn drape_tiles(&mut self) -> Vec<mln_tile_id::OverscaledTileID> {
         let cover = self.orchestrator.terrain().cover();

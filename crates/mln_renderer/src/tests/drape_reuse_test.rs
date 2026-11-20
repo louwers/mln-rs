@@ -454,15 +454,22 @@ fn a_paint_change_in_a_stack_draws_only_its_drapes_again() {
     assert!(map.frame_passes().1.is_empty(), "the drapes are drawn again once only");
 }
 
-/// Without a draped layer, a map over terrain has no drape and draws no
-/// surface: only its circle.
-#[test]
-fn a_map_without_a_draped_layer_draws_no_surface() {
-    let (mut map, _) = settled(Tiles::default());
+/// [`STYLE`]'s draped layers, removed, and a circle in their place.
+fn only_a_circle(map: &mut DrapedMap) {
     for layer in ["background", "raster", "fill", "line"] {
         map.edit(Edit::RemoveLayer(layer.to_owned()));
     }
-    add_layer(&mut map, CIRCLE, None);
+    add_layer(map, CIRCLE, None);
+}
+
+/// Without a draped layer, a map over terrain has no drape and draws no
+/// surface: only its circle. The surface lets go of its grid and DEM
+/// textures.
+#[test]
+fn a_map_without_a_draped_layer_draws_no_surface() {
+    let (mut map, _) = settled(Tiles::default());
+    assert_eq!((true, true), map.renderer.terrain_surface_holds());
+    only_a_circle(&mut map);
     let drawn = map.settle();
     assert!(drawn.is_empty(), "drapes drawn: {drawn:?}");
     let (full, passes) = map.frame_passes();
@@ -470,6 +477,19 @@ fn a_map_without_a_draped_layer_draws_no_surface() {
     assert!(passes.is_empty(), "drapes drawn: {passes:?}");
     assert_eq!(4, map.drapes().len(), "terrain still covers the view");
     assert_eq!(1, map.draw_calls());
+    assert!(!map.renderer.terrain_surface_holds().1, "the surface holds draws, its grid or DEM textures");
+}
+
+/// A map over terrain that never had a draped layer makes nothing for the
+/// surface it doesn't draw: no shader, grid or DEM texture.
+#[test]
+fn a_map_that_never_drapes_makes_no_surface() {
+    let mut map = DrapedMap::new(Tiles::default());
+    only_a_circle(&mut map);
+    map.settle();
+    assert!(map.frame().0);
+    assert_eq!(4, map.drapes().len(), "terrain covers the view");
+    assert_eq!((false, false), map.renderer.terrain_surface_holds());
 }
 
 #[test]

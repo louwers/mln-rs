@@ -354,19 +354,27 @@ impl RenderTerrain {
     }
 
     /// Makes the draws of the frame of the last update, a set for each stack
-    /// of the drapes, which read the DEM tiles of the terrain's source that
-    /// `dem` finds by its id and sample their stack's drapes, or drops them
-    /// for a frame that doesn't draw terrain (`draws` false).
+    /// of the drapes the encode began ([`begin_drapes`]), which read the DEM
+    /// tiles of the terrain's source that `dem` finds by its id and sample
+    /// their stack's drapes. Without a stack, which a frame without terrain
+    /// has too, it makes none, and drops what the draws hold.
+    ///
+    /// [`begin_drapes`]: Self::begin_drapes
     pub(crate) fn update_draws<'a>(
         &mut self,
         gpu: &mut dyn Gpu,
         parameters: &mut PaintParameters<'_>,
-        draws: bool,
         dem: impl FnOnce(&str) -> Option<&'a SourceTiles>,
     ) {
-        let cover = self.cover.as_ref().filter(|_| draws);
+        let cover = self.cover.as_ref().filter(|_| self.drapes.stacks() > 0);
         let dem = cover.and_then(|cover| dem(&cover.source_id));
         self.draws.update(gpu, parameters, cover, dem, self.surface, &self.drapes);
+    }
+
+    /// The surface's draws.
+    #[cfg(test)]
+    pub(crate) fn draws(&self) -> &TerrainDraws {
+        &self.draws
     }
 
     /// Records that the buckets in `changed` changed, for the drapes' draws

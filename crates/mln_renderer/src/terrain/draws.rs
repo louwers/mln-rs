@@ -83,8 +83,8 @@ impl TerrainDraws {
     /// Makes the frame's draws of `cover`'s tiles, one for each of the
     /// stacks of `drapes`, which read their DEM from the tiles of `dem`,
     /// sample the tile's drape of their stack and draw as `surface` says, or
-    /// drops the draws and what they share for `None`, a frame without
-    /// terrain.
+    /// drops the draws and what they share for `None`, a frame that draws no
+    /// surface.
     pub(crate) fn update(
         &mut self,
         gpu: &mut dyn Gpu,
@@ -201,6 +201,18 @@ impl TerrainDraws {
             return None;
         }
         Some(self.shader.insert(shader).clone())
+    }
+
+    /// Whether it made the terrain's shader.
+    #[cfg(test)]
+    pub(crate) fn has_shader(&self) -> bool {
+        self.shader.is_some()
+    }
+
+    /// Whether it holds draws, the grid or DEM textures.
+    #[cfg(test)]
+    pub(crate) fn holds_draws(&self) -> bool {
+        !self.stacks.is_empty() || self.mesh.is_some() || !self.dem_textures.is_empty()
     }
 
     /// Uploads the GPU objects of the frame's draws.
