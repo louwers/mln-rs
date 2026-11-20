@@ -350,7 +350,9 @@ impl MetalGpu {
             clear_stencil_with_pass: false,
             cpu_rasterizer: false,
             max_line_width: 1.0,
-            binds_vertex_buffers: false,
+            // The pulled quads draw in segments of their index buffer, past
+            // the first at a base vertex, which older GPUs don't take.
+            binds_vertex_buffers: modern,
         };
         MetalGpu {
             device: device.clone(),

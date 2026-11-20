@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use mln_gfx::gpu::conformance::{
     clip_mask_and_background, custom_layers, depth_only, foreign_ids, imported_textures, instanced_walls,
-    invalid_calls, readbacks, resources_in_use, topologies, transparent_replace, vertex_layouts,
+    invalid_calls, pulled_walls, readbacks, resources_in_use, topologies, transparent_replace, vertex_layouts,
 };
 use mln_gfx::gpu::{BufferUsage, ColorAttachment};
 use mln_gfx::shaders::shader_source::BuiltIn;
@@ -72,6 +72,12 @@ fn vertex_layouts_through_gpu() {
 fn instanced_walls_through_gpu() {
     let device = Device::new(None).expect("Metal device");
     instanced_walls(&mut MetalGpu::new(&device)).expect("the frame");
+}
+
+#[test]
+fn pulled_walls_through_gpu() {
+    let device = Device::new(None).expect("Metal device");
+    pulled_walls(&mut MetalGpu::new(&device)).expect("the frame");
 }
 
 #[test]

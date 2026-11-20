@@ -256,6 +256,10 @@ shader_source!(
     FILL_OUTLINE_INSTANCED_INSTANCE_ATTRIBUTES,
     &[]
 );
+// The pulled outlines read the same vertices, ends and paint values by
+// vertex index, four vertices a segment, as storage buffers
+// (`ID_FILL_OUTLINE_VERTICES` and on).
+shader_source!(FILL_OUTLINE_PULLED_SHADER, "FillOutlinePulledShader", &[], &[]);
 shader_source!(
     FILL_OUTLINE_PATTERN_INSTANCED_SHADER,
     "FillOutlinePatternInstancedShader",
@@ -317,6 +321,10 @@ shader_source!(
     FILL_EXTRUSION_INSTANCED_INSTANCE_ATTRIBUTES,
     &[]
 );
+// The pulled walls read the bucket's vertices and paint values by vertex
+// index, four vertices a wall, as storage buffers
+// (`ID_FILL_EXTRUSION_WALL_VERTICES` and on).
+shader_source!(FILL_EXTRUSION_PULLED_SHADER, "FillExtrusionPulledShader", &[], &[]);
 shader_source!(
     FILL_EXTRUSION_PATTERN_SHADER,
     "FillExtrusionPatternShader",
@@ -540,10 +548,12 @@ pub(crate) fn shader_source(shader_id: BuiltIn) -> Option<&'static ShaderSource>
         BuiltIn::FillShader => Some(&FILL_SHADER),
         BuiltIn::FillPatternShader => Some(&FILL_PATTERN_SHADER),
         BuiltIn::FillOutlineInstancedShader => Some(&FILL_OUTLINE_INSTANCED_SHADER),
+        BuiltIn::FillOutlinePulledShader => Some(&FILL_OUTLINE_PULLED_SHADER),
         BuiltIn::FillOutlinePatternInstancedShader => Some(&FILL_OUTLINE_PATTERN_INSTANCED_SHADER),
         BuiltIn::FillOutlineTriangulatedShader => Some(&FILL_OUTLINE_TRIANGULATED_SHADER),
         BuiltIn::FillExtrusionShader => Some(&FILL_EXTRUSION_SHADER),
         BuiltIn::FillExtrusionInstancedShader => Some(&FILL_EXTRUSION_INSTANCED_SHADER),
+        BuiltIn::FillExtrusionPulledShader => Some(&FILL_EXTRUSION_PULLED_SHADER),
         BuiltIn::FillExtrusionPatternShader => Some(&FILL_EXTRUSION_PATTERN_SHADER),
         BuiltIn::FillExtrusionPatternInstancedShader => Some(&FILL_EXTRUSION_PATTERN_INSTANCED_SHADER),
         BuiltIn::HeatmapShader => Some(&HEATMAP_SHADER),
