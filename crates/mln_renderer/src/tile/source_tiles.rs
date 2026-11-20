@@ -626,7 +626,7 @@ impl SourceTiles {
         let tile_size = update.tile_size;
         let info = style_source.info();
         let overscaled_zoom: i32 = covering_zoom_level(zoom, info.round_zoom, tile_size);
-        let mut tile_zoom: i32 = overscaled_zoom;
+        let mut tile_zoom: i32 = overscaled_zoom.max(0);
         let mut pan_zoom: i32 = i32::from(zoom_range.max);
 
         let source_prefetch_zoom_delta = style_source.common().prefetch_zoom_delta;
@@ -660,8 +660,12 @@ impl SourceTiles {
         };
 
         // A source that only the terrain reads covers nothing of the view.
-        if update.needs_rendering && overscaled_zoom >= i32::from(zoom_range.min) {
-            let ideal_zoom: i32 = std::cmp::min(i32::from(zoom_range.max), overscaled_zoom);
+        // Under terrain, tiles near the camera can be finer than the nominal
+        // zoom, and the cover skips those below the source's lowest zoom one
+        // by one.
+        let covers_zoom = overscaled_zoom >= i32::from(zoom_range.min) || parameters.terrain.is_some();
+        if update.needs_rendering && covers_zoom {
+            let ideal_zoom: i32 = std::cmp::min(i32::from(zoom_range.max), tile_zoom);
 
             // Past the highest zoom level, draw that level's tiles larger.
             if !info.overscale {
