@@ -404,7 +404,7 @@ pub(crate) struct CollisionBuffer {
     pub(crate) indices: Vec<u16>,
 }
 
-/// The paint property binders of one layer (`SymbolBucket::PaintProperties`).
+/// The paint property binders of one layer.
 #[derive(Clone, Debug, mln_wire::Wire)]
 pub(crate) struct PaintProperties {
     pub(crate) icon_binders: SymbolIconBinders,
