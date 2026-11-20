@@ -297,7 +297,8 @@ pub(crate) struct TilesetLoad {
 /// A request answers as load `load`; dropping `request` cancels it.
 pub(crate) enum Fetch {
     Idle,
-    /// The last response was an error: `retry_failed_load` asks again.
+    /// The cache's answer was an error, and nothing asks again until the
+    /// tile is required or `retry_failed_load` runs.
     Failed,
     Cache {
         load: u64,
@@ -306,7 +307,13 @@ pub(crate) enum Fetch {
     },
     Network {
         load: u64,
-        #[expect(dead_code, reason = "dropping the request cancels it")]
+        request: Request,
+    },
+    /// The network answered with an error, and the request stays open: the
+    /// file source asks again after its backoff, or once the network is
+    /// reachable again, and answers as the same load.
+    Retrying {
+        load: u64,
         request: Request,
     },
 }
@@ -385,7 +392,9 @@ impl Load {
     pub(crate) fn awaits_response(&self, load: u64) -> bool {
         match &self.origin {
             OriginLoad::Tileset(tileset) => match tileset.fetch {
-                Fetch::Cache { load: current, .. } | Fetch::Network { load: current, .. } => current == load,
+                Fetch::Cache { load: current, .. }
+                | Fetch::Network { load: current, .. }
+                | Fetch::Retrying { load: current, .. } => current == load,
                 Fetch::Idle | Fetch::Failed => false,
             },
             OriginLoad::GeoJson { .. } | OriginLoad::Custom(_) => false,
@@ -406,6 +415,11 @@ impl Load {
             OriginLoad::Tileset(tileset) => Some(tileset.resource.order.get()),
             OriginLoad::GeoJson { .. } | OriginLoad::Custom(_) => None,
         }
+    }
+
+    /// Whether the tile's last tileset answer was an error.
+    pub(crate) fn has_failed(&self) -> bool {
+        matches!(&self.origin, OriginLoad::Tileset(tileset) if tileset.has_failed())
     }
 
     pub(crate) fn has_tried_cache(&self) -> bool {
@@ -448,6 +462,12 @@ impl TilesetLoad {
 
     pub(crate) fn is_idle(&self) -> bool {
         matches!(self.fetch, Fetch::Idle | Fetch::Failed)
+    }
+
+    /// Whether the last answer was an error, whether or not the file source
+    /// asks again.
+    pub(crate) fn has_failed(&self) -> bool {
+        matches!(self.fetch, Fetch::Failed | Fetch::Retrying { .. })
     }
 
     /// Whether the tile has data from the network that hasn't expired. Data

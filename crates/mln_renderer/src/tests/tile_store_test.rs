@@ -734,6 +734,65 @@ fn a_relayout_keeps_only_the_bins_it_uses() {
     assert_eq!(icons(&tile), (vec!["a".to_owned()], 1));
 }
 
+/// A network error leaves the tile's request open for the file source's
+/// retry: the tile fails once however many errors come, takes the retry's
+/// data, which ends the request, and ignores what comes after it.
+#[test]
+fn a_failed_network_load_takes_the_file_source_retry() {
+    use TileOperation::{EndParse, Error, LoadFromNetwork, RequestedFromNetwork, StartParse};
+
+    let test = Test::new();
+    let file_source = Arc::new(Held::default());
+    let mut tile = test.tileset_tile(&file_source, Box::new(InlineWorkers));
+    let id = tile.id;
+    tile.set_style(&style(&[water_layer("water", "red")]));
+    tile.set_necessity(&id, TileNecessity::Required);
+    let failed = || {
+        let mut failed = Response::new();
+        failed.error = Some(Box::new(ResourceError::new(Reason::Connection, "offline")));
+        failed
+    };
+    let responder = file_source.0.lock().remove(0);
+    responder.send(failed());
+    responder.send(failed());
+    tile.update();
+    assert_eq!(tile.actions(), [StartParse, RequestedFromNetwork, Error], "one error for the streak");
+    assert!(!responder.is_cancelled(), "the request stays open");
+    assert!(tile.tile().is_complete(), "a failed tile has done what it can for now");
+
+    // The retry's answer, and one more behind it.
+    responder.send(water());
+    responder.send(failed());
+    tile.update();
+    tile.update();
+    assert_eq!(tile.actions(), [LoadFromNetwork, StartParse, EndParse]);
+    assert!(responder.is_cancelled(), "the answer ended the request");
+    assert!(tile.shows_layout() && tile.tile().is_complete());
+    assert_eq!(file_source.pending(), 0, "no new request");
+}
+
+/// A tile that becomes optional while its failed request waits for the file
+/// source's retry cancels it, and requests anew when required again.
+#[test]
+fn an_optional_tile_stops_retrying() {
+    let test = Test::new();
+    let file_source = Arc::new(Held::default());
+    let mut tile = test.tileset_tile(&file_source, Box::new(InlineWorkers));
+    let id = tile.id;
+    tile.set_style(&style(&[water_layer("water", "red")]));
+    tile.set_necessity(&id, TileNecessity::Required);
+    let responder = file_source.0.lock().remove(0);
+    let mut failed = Response::new();
+    failed.error = Some(Box::new(ResourceError::new(Reason::Connection, "offline")));
+    responder.send(failed);
+    tile.update();
+
+    tile.set_necessity(&id, TileNecessity::Optional);
+    assert!(responder.is_cancelled());
+    tile.set_necessity(&id, TileNecessity::Required);
+    assert_eq!(file_source.pending(), 1, "a new request");
+}
+
 /// A required tile whose load failed starts parsing again when it is
 /// retried: its parse events say `StartParse` once its new request is made,
 /// and `EndParse` once its layout shows.

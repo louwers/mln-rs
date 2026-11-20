@@ -132,8 +132,9 @@ impl<'a> TileMut<'a> {
                     if tileset.is_idle() && !tileset.is_fresh(mln_util::chrono::now()) {
                         self.request(Method::Network);
                     }
-                } else if matches!(tileset.fetch, Fetch::Network { .. }) {
-                    // Only a network-only request is aborted.
+                } else if matches!(tileset.fetch, Fetch::Network { .. } | Fetch::Retrying { .. }) {
+                    // Only a network-only request is aborted, with the
+                    // file source's retries.
                     tileset.fetch = Fetch::Idle;
                 }
             }
@@ -167,18 +168,19 @@ impl<'a> TileMut<'a> {
             return;
         };
         if std::mem::replace(&mut tileset.update_parameters, parameters) != parameters
-            && matches!(tileset.fetch, Fetch::Network { .. })
+            && matches!(tileset.fetch, Fetch::Network { .. } | Fetch::Retrying { .. })
         {
             tileset.fetch = Fetch::Idle;
             self.request(Method::Network);
         }
     }
 
-    /// Requests a required tile whose last response was an error again.
+    /// Requests a required tile whose last response was an error again,
+    /// now rather than after the file source's backoff.
     pub(crate) fn retry_failed_load(&mut self) {
         if let OriginLoad::Tileset(tileset) = &mut self.tile.load.origin
             && self.tile.load.necessity == TileNecessity::Required
-            && matches!(tileset.fetch, Fetch::Failed)
+            && tileset.has_failed()
         {
             tileset.fetch = Fetch::Idle;
             self.tile.settled = false;
@@ -193,11 +195,30 @@ impl<'a> TileMut<'a> {
         };
         let method = match tileset.fetch {
             Fetch::Cache { load: current, .. } if current == load => Method::Cache,
-            Fetch::Network { load: current, .. } if current == load => Method::Network,
-            Fetch::Idle | Fetch::Failed | Fetch::Cache { .. } | Fetch::Network { .. } => return,
+            Fetch::Network { load: current, .. } | Fetch::Retrying { load: current, .. } if current == load => {
+                Method::Network
+            }
+            Fetch::Idle | Fetch::Failed | Fetch::Cache { .. } | Fetch::Network { .. } | Fetch::Retrying { .. } => {
+                return;
+            }
         };
-        tileset.fetch = Fetch::Idle;
+        let fetch = std::mem::replace(&mut tileset.fetch, Fetch::Idle);
         if method == Method::Network {
+            if let Some(error) = res.error.as_ref().filter(|error| error.reason != Reason::NotFound) {
+                // The request stays open for the file source's retry. A
+                // streak of errors fails the tile once.
+                let first = matches!(fetch, Fetch::Network { .. });
+                let (Fetch::Network { request, .. } | Fetch::Retrying { request, .. }) = fetch else {
+                    return;
+                };
+                tileset.fetch = Fetch::Retrying { load, request };
+                if first {
+                    self.fail(Error::native(error.message.clone()));
+                }
+                return;
+            }
+            // The first answer with data ends the request.
+            drop(fetch);
             self.take_response(method, res);
             return;
         }
@@ -679,9 +700,17 @@ impl<'a> TileMut<'a> {
             return;
         };
         let inbox = self.store.inbox.clone();
-        // One response per request: a reload is a new request.
-        let (request, responder) =
-            Request::once(move |response| inbox.send(TileEvent::Response { tile: key, load, response }));
+        // A cache-only request answers once. A network request stays open
+        // after an error for the file source's retries, and ends with the
+        // first answer the tile takes: a reload is a new request.
+        let (request, responder) = match method {
+            Method::Cache => {
+                Request::once(move |response| inbox.send(TileEvent::Response { tile: key, load, response }))
+            }
+            Method::Network => {
+                Request::new(move |response| inbox.send(TileEvent::Response { tile: key, load, response }))
+            }
+        };
         file_source.load(tileset.resource_for(method), responder);
         debug_assert!(tileset.is_idle(), "one request at a time");
         tileset.fetch = match method {
@@ -716,6 +745,8 @@ impl<'a> TileMut<'a> {
         let OriginLoad::Tileset(tileset) = &mut self.tile.load.origin else {
             return;
         };
+        // A network error leaves the request retrying (`apply_response`):
+        // only the cache's errors reach here.
         if let Some(error) = &res.error
             && error.reason != Reason::NotFound
         {
