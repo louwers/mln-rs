@@ -602,6 +602,23 @@ fn a_terrain_needs_a_raster_dem_source_if_the_style_has_the_source() {
 }
 
 #[test]
+fn a_terrains_exaggeration_is_finite_and_at_least_zero() {
+    let mut style = stub_style();
+    style.load_json(TERRAIN_STYLE);
+
+    for exaggeration in [-1.0, f32::NAN, f32::INFINITY] {
+        let terrain = Terrain { source: "dem".to_owned(), exaggeration };
+        let error = style.apply(Edit::SetTerrain(Some(terrain))).unwrap_err();
+        assert_eq!(mln_util::ErrorKind::InvalidArgument, error.kind, "{exaggeration}");
+    }
+    assert!(style.get_terrain().is_none());
+
+    // A number too large for an f32.
+    style.load_json(&terrain_style(r#"{"source":"dem","exaggeration":1e40}"#));
+    assert!(style.get_terrain().is_none());
+}
+
+#[test]
 fn a_parsed_terrain_that_doesnt_fit_is_dropped() {
     let mut style = stub_style();
 

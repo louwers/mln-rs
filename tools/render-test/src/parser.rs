@@ -381,10 +381,6 @@ pub(crate) fn parse_test_metadata(paths: &TestPaths) -> TestMetadata {
         metadata.threshold = get_f64(member(test_value, "threshold"));
     }
 
-    if has("timeout") {
-        metadata.timeout = Some(Duration::from_millis(get_u64(member(test_value, "timeout"))));
-    }
-
     if has("description") {
         metadata.description = get_str(member(test_value, "description")).to_string();
     }

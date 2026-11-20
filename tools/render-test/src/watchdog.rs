@@ -44,21 +44,14 @@ impl Watchdog {
         Watchdog { limit, current: Arc::new(AtomicU64::new(0)) }
     }
 
-    /// The limit of a test that asks for `timeout`: the watchdog's, or the
-    /// test's if that is longer.
-    fn limit_for(&self, timeout: Option<Duration>) -> Duration {
-        self.limit.max(timeout.unwrap_or_default())
-    }
-
     /// Starts the limit for the test about to run on `queue`, this
     /// thread's; the returned guard stops it.
     #[must_use]
-    pub(crate) fn arm(&self, queue: &Queue<()>, timeout: Option<Duration>) -> WatchdogGuard<'_> {
+    pub(crate) fn arm(&self, queue: &Queue<()>) -> WatchdogGuard<'_> {
         let generation = self.current.fetch_add(1, Ordering::SeqCst) + 1;
         let current = Arc::clone(&self.current);
-        let limit = self.limit_for(timeout);
-        let payload = TestTimedOut { limit };
-        queue.post_after(limit, move |()| {
+        let payload = TestTimedOut { limit: self.limit };
+        queue.post_after(self.limit, move |()| {
             if current.load(Ordering::SeqCst) == generation {
                 // resume_unwind: no panic-hook message; the runner reports it.
                 std::panic::resume_unwind(Box::new(payload));
@@ -81,18 +74,5 @@ pub(crate) struct WatchdogGuard<'a> {
 impl Drop for WatchdogGuard<'_> {
     fn drop(&mut self) {
         self.watchdog.disarm();
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_test_can_lengthen_its_limit_but_not_shorten_it() {
-        let watchdog = Watchdog::new(Duration::from_secs(60));
-        assert_eq!(watchdog.limit_for(None), Duration::from_secs(60));
-        assert_eq!(watchdog.limit_for(Some(Duration::from_secs(90))), Duration::from_secs(90));
-        assert_eq!(watchdog.limit_for(Some(Duration::from_secs(10))), Duration::from_secs(60));
     }
 }

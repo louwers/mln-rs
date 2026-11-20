@@ -1332,6 +1332,10 @@ impl Gpu for MetalGpu {
             return Err(GpuError::Invalid("generating the mips of a texture without them".to_owned()));
         }
         let texture = entry.texture.clone();
+        // Metal rejects a texture of one level, which a 1x1 texture's chain is.
+        if texture.mipmapLevelCount() == 1 {
+            return Ok(());
+        }
         autoreleasepool(|_| {
             let blit = self
                 .frame()?

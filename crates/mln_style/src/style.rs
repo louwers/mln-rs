@@ -186,7 +186,7 @@ impl Style {
         style.terrain = parser
             .terrain
             .take()
-            .filter(|terrain| match check_terrain_source(&style.sources, terrain) {
+            .filter(|terrain| match check_terrain(&style.sources, terrain) {
                 Ok(()) => true,
                 Err(error) => {
                     Log::error(Event::ParseStyle, error.to_string());
@@ -403,7 +403,7 @@ impl Style {
             Edit::SetSky(sky) => self.sky = sky.map(Arc::new),
             Edit::SetTerrain(terrain) => {
                 if let Some(terrain) = &terrain {
-                    check_terrain_source(&self.sources, terrain)?;
+                    check_terrain(&self.sources, terrain)?;
                 }
                 if self.terrain.as_deref() != terrain.as_ref() {
                     self.terrain = terrain.map(Arc::new);
@@ -621,10 +621,13 @@ fn check_layer_source(sources: &SourceList, layer: &Layer) -> Result<(), Error> 
     Ok(())
 }
 
-/// Fails when `terrain`'s source is in `sources` and isn't a `raster-dem`
-/// source. A source the style lacks passes: the terrain then draws as off until
-/// the source is added.
-fn check_terrain_source(sources: &SourceList, terrain: &Terrain) -> Result<(), Error> {
+/// Fails when `terrain`'s exaggeration isn't a finite number of at least 0, or
+/// its source is in `sources` and isn't a `raster-dem` source. A source the
+/// style lacks passes: the terrain then draws as off until the source is added.
+fn check_terrain(sources: &SourceList, terrain: &Terrain) -> Result<(), Error> {
+    if !(terrain.exaggeration >= 0.0 && terrain.exaggeration.is_finite()) {
+        return Err(Error::invalid_argument("Terrain exaggeration must be a finite number of at least 0"));
+    }
     if let Some(source) = sources.get(&terrain.source)
         && source.info().layer_kind != SourceKind::RasterDem
     {

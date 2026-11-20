@@ -916,7 +916,7 @@ impl TestRunner {
 
         let mut ctx = TestContext::new(metadata);
         // The per-test time limit, stopped when `run` returns.
-        let _watchdog_guard = self.watchdog.as_ref().map(|watchdog| watchdog.arm(&self.queue, ctx.metadata.timeout));
+        let _watchdog_guard = self.watchdog.as_ref().map(|watchdog| watchdog.arm(&self.queue));
 
         if !ctx.metadata.ignored_test {
             for operation in get_before_operations(&self.manifest) {
