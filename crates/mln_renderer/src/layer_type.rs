@@ -171,7 +171,7 @@ pub(crate) trait ErasedLayerType: ErasedStyleLayerType {
     /// layer of the type.
     fn read_evaluated(&self, r: &mut Reader<'_>) -> Option<Arc<dyn ErasedEvaluatedLayer>>;
 
-    /// Reads a bucket of the type, which [`Bucket::write_wire`] wrote.
+    /// Reads a bucket of the type, which [`BucketValue::write_wire`](crate::bucket::BucketValue::write_wire) wrote.
     fn read_bucket(&self, r: &mut Reader<'_>) -> Option<Box<dyn Bucket>>;
 }
 
