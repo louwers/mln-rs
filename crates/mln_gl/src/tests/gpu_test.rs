@@ -14,7 +14,6 @@ use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::shader_defines::{
     ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE, ID_BACKGROUND_PROPS_UBO, ID_PROJECTION_UBO,
 };
-use mln_gfx::shaders::source::ShaderSources;
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::types::DepthFunctionType;
 use mln_layers::background::programs::BACKGROUND;
@@ -40,16 +39,11 @@ fn knob() -> Option<String> {
     std::env::var("MLN_RENDER_BACKEND").ok()
 }
 
-/// A backend on a device of its own that compiles the built-in layer types'
-/// programs too, which the conformance cases draw with, or none where there
-/// is no EGL to make a context of [`api`] with: the test is skipped there,
-/// unless `MLN_RENDER_BACKEND` asks for this backend (`gl` or `gl-desktop`).
+/// A backend on a device of its own, or none where there is no EGL to make
+/// a context of [`api`] with: the test is skipped there, unless
+/// `MLN_RENDER_BACKEND` asks for this backend (`gl` or `gl-desktop`).
 fn gpu() -> Option<GlGpu> {
-    let mut gpu = with_device(GlGpu::new)?;
-    let mut sources = ShaderSources::default();
-    mln_layers::add_shader_sources(&mut sources);
-    gpu.add_shader_sources(&sources);
-    Some(gpu)
+    with_device(GlGpu::new)
 }
 
 /// What `make` makes on a device of its own, or none where there is no EGL
@@ -238,6 +232,7 @@ impl Background {
 }
 
 fn background(gpu: &mut GlGpu, props: &BackgroundPropsUBO) -> Background {
+    gpu.add_shader_sources(&mln_layers::shader_sources());
     let shader = gpu.create_shader(&ShaderKey::new(&BACKGROUND, [])).unwrap();
     let quad = buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&[[-1i16, -1], [1, -1], [-1, 1], [1, 1]]));
     let indices = buffer(gpu, BufferUsage::Index, bytemuck::cast_slice(&[0u16, 1, 2, 1, 2, 3]));

@@ -20,9 +20,7 @@ fn with_context(f: impl FnOnce(&mut dyn mln_gfx::gpu::Gpu, &mut mln_renderer::dr
     let device = mln_webgpu::Device::new(None).expect("device");
     let mut backend = mln_webgpu::RendererBackend::new(&device);
     let gpu = backend.gpu();
-    let mut sources = mln_gfx::shaders::source::ShaderSources::default();
-    crate::add_shader_sources(&mut sources);
-    gpu.add_shader_sources(&sources);
+    gpu.add_shader_sources(&crate::shader_sources());
     let mut context = mln_renderer::draw::Context::new(*gpu.caps(), 1.0);
     f(gpu, &mut context);
     context.tear_down(gpu);

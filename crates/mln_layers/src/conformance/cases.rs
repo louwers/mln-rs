@@ -30,7 +30,7 @@ use mln_gfx::types::DepthFunctionType;
 use mln_util::Color;
 use mln_util::size::Size;
 
-use super::{EXTENT, SIZE, buffer, draw, fixed, position_layout, quad, tile_matrix, whole};
+use super::{EXTENT, SIZE, buffer, create_shader, draw, fixed, position_layout, quad, tile_matrix, whole};
 use crate::background::ubo::{BackgroundDrawableUnionUBO, BackgroundPropsUBO};
 use crate::fill::ubo::{FillDrawableUBO, FillDrawableUnionUBO, FillEvaluatedPropsUBO};
 use crate::fill_extrusion::ubo::{FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO};
@@ -66,7 +66,7 @@ fn solid(gpu: &mut impl Gpu, format: TextureFormat, color: [f32; 4]) -> Result<S
 fn solid_at(gpu: &mut impl Gpu, format: TextureFormat, color: [f32; 4], matrix: [f32; 16]) -> Result<Solid, GpuError> {
     let target = target(gpu, format)?;
     let (quad, indices) = quad(gpu)?;
-    let shader = gpu.create_shader(&ShaderKey::new(&background::programs::BACKGROUND, []))?;
+    let shader = create_shader(gpu, &ShaderKey::new(&background::programs::BACKGROUND, []))?;
     let projection = [ProjectionUBO { matrix, ..ProjectionUBO::default() }];
     let drawable = [BackgroundDrawableUnionUBO::default()];
     let props = BackgroundPropsUBO { color, opacity: 1.0, ..BackgroundPropsUBO::default() };
@@ -492,7 +492,7 @@ pub fn depth_only(gpu: &mut impl Gpu) -> Result<(), GpuError> {
 /// Where a check doesn't hold.
 pub fn vertex_layouts(gpu: &mut impl Gpu) -> Result<(), GpuError> {
     let frame = solid(gpu, TextureFormat::Rgba8Unorm, [0.0, 0.0, 0.0, 0.0])?;
-    let shader = gpu.create_shader(&ShaderKey::new(&fill::programs::FILL, []))?;
+    let shader = create_shader(gpu, &ShaderKey::new(&fill::programs::FILL, []))?;
     let projection = [ProjectionUBO { matrix: tile_matrix(1.0), ..ProjectionUBO::default() }];
     let mut drawable = [FillDrawableUnionUBO::default()];
     drawable[0].set_fill(&FillDrawableUBO { matrix: tile_matrix(1.0), ..FillDrawableUBO::default() });
@@ -583,10 +583,13 @@ fn wall_frame(
     more: &[BindGroupEntry],
 ) -> Result<(Solid, ShaderId, BindingsId), GpuError> {
     let frame = solid(gpu, TextureFormat::Rgba8Unorm, [0.0, 0.0, 0.0, 0.0])?;
-    let shader = gpu.create_shader(&ShaderKey::new(
-        program,
-        ["HAS_UNIFORM_u_color", "HAS_UNIFORM_u_base", "HAS_UNIFORM_u_height"].map(String::from),
-    ))?;
+    let shader = create_shader(
+        gpu,
+        &ShaderKey::new(
+            program,
+            ["HAS_UNIFORM_u_color", "HAS_UNIFORM_u_base", "HAS_UNIFORM_u_height"].map(String::from),
+        ),
+    )?;
     // At clip depth 0.5.
     let s = 2.0 / EXTENT;
     let matrix = [s, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, -1.0, -1.0, 0.5, 1.0];
@@ -914,7 +917,7 @@ pub fn resources_in_use<G: Gpu>(gpu: &mut G) -> Result<(), GpuError> {
     let projection = bytemuck::cast_slice(&projection);
     let projection_buffer = buffer(gpu, BufferUsage::Storage, projection)?;
     let (vertices, indices) = quad(gpu)?;
-    let shader = gpu.create_shader(&ShaderKey::new(&heatmap::programs::HEATMAP_TEXTURE, []))?;
+    let shader = create_shader(gpu, &ShaderKey::new(&heatmap::programs::HEATMAP_TEXTURE, []))?;
     let layouts = [position_layout(ID_HEATMAP_POS_VERTEX_ATTRIBUTE)];
     let pipeline = gpu.create_pipeline(&PipelineDesc {
         shader,
@@ -1072,7 +1075,7 @@ pub fn host_writes<G: Gpu + ?Sized>(
 ) -> Result<mln_gfx::gpu::ReadbackId, GpuError> {
     let target = target(gpu, TextureFormat::Rgba8Unorm)?;
     let (quad, indices) = quad(gpu)?;
-    let shader = gpu.create_shader(&ShaderKey::new(&background::programs::BACKGROUND, []))?;
+    let shader = create_shader(gpu, &ShaderKey::new(&background::programs::BACKGROUND, []))?;
     let drawable = [BackgroundDrawableUnionUBO::default()];
     let drawable = bytemuck::cast_slice(&drawable);
     let drawable_buffer = buffer(gpu, BufferUsage::Storage, drawable)?;

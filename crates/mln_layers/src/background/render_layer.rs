@@ -6,6 +6,7 @@ use mln_gfx::shaders::shader_defines::{
     ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_IMAGE_TEXTURE, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE,
     ID_BACKGROUND_PROPS_UBO, ID_PROJECTION_UBO,
 };
+use mln_gfx::shaders::source::ShaderSources;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
@@ -133,6 +134,10 @@ impl LayerType for Background {
     type Drawing = TileDraws<KeptDraw>;
     type State = BackgroundState;
     const CROSSFADES: bool = true;
+
+    fn add_shader_sources(sources: &mut ShaderSources) {
+        super::add_shader_sources(sources);
+    }
 
     fn new_layer(_layer: &LayerValues<Background>) -> (BackgroundState, TileDraws<KeptDraw>) {
         Default::default()

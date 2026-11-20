@@ -14,7 +14,7 @@ use std::mem::size_of;
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::shaders::program::{GLOBE_DEFINE, Program};
 use mln_gfx::shaders::shader_defines::*;
-use mln_gfx::shaders::source::{ShaderSources, msl};
+use mln_gfx::shaders::source::msl;
 use mln_gfx::shaders::*;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
@@ -30,8 +30,7 @@ use crate::Id;
 
 /// Each program with MSL: the engine's and the built-in layer types'.
 fn sources() -> Vec<(&'static Program, &'static msl::Source)> {
-    let mut layers = ShaderSources::default();
-    mln_layers::add_shader_sources(&mut layers);
+    let layers = mln_layers::shader_sources();
     BUILT_INS.iter().copied().chain(layers.of::<msl::Source>().iter()).collect()
 }
 

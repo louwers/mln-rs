@@ -12,6 +12,7 @@ use mln_gfx::shaders::shader_defines::{
     ID_FILL_OUTLINE_POS_ATTRIBUTE, ID_FILL_OUTLINE_VERTICES, ID_FILL_POS_VERTEX_ATTRIBUTE, ID_FILL_TILE_PROPS_UBO,
     ID_PROJECTION_UBO,
 };
+use mln_gfx::shaders::source::ShaderSources;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
 use mln_renderer::draw::{
     AtlasBinding, Composite, Context, DrawDepth, DrawGeometry, DrawIndexes, DrawList, DrawObjects, DrawObjectsMut,
@@ -558,6 +559,10 @@ impl LayerType for Fill {
     type Drawing = TileDraws<FillTile>;
     type State = FillState;
     const CROSSFADES: bool = true;
+
+    fn add_shader_sources(sources: &mut ShaderSources) {
+        super::add_shader_sources(sources);
+    }
 
     /// Whether a layer of the group has a pattern.
     fn layout_can_need_dependencies(group: &[Arc<EvaluatedLayer<Fill>>]) -> bool {

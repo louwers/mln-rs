@@ -10,8 +10,8 @@
 //! ([`BucketGeometry`]), is read with [`bucket_vertices`],
 //! [`bucket_indexes`] and [`paint_vertices`]. A draw names its program's
 //! shader by the key the context gives ([`Context::shader_key`]); the layer
-//! type registers its programs' sources with the registry
-//! ([`shader_sources_mut`](crate::RegistryBuilder::shader_sources_mut)).
+//! type adds its programs' sources to the registry
+//! ([`LayerType::add_shader_sources`](crate::layer::LayerType::add_shader_sources)).
 //!
 //! Each frame, [`LayerType::make_draws`](crate::layer::LayerType::make_draws)
 //! makes the layer's draws of the frame from its

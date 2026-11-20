@@ -14,6 +14,7 @@ use mln_gfx::shaders::shader_defines::{
     ID_PROJECTION_UBO, ID_RASTER_DRAWABLE_UBO, ID_RASTER_EVALUATED_PROPS_UBO, ID_RASTER_IMAGE0_TEXTURE,
     ID_RASTER_IMAGE1_TEXTURE, ID_RASTER_POS_VERTEX_ATTRIBUTE, ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE,
 };
+use mln_gfx::shaders::source::ShaderSources;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
@@ -384,6 +385,10 @@ impl LayerType for Raster {
     type View<'a> = RasterView<'a>;
     type Drawing = RasterDrawing;
     type State = RasterState;
+
+    fn add_shader_sources(sources: &mut ShaderSources) {
+        super::add_shader_sources(sources);
+    }
 
     fn new_layer(_layer: &LayerValues<Raster>) -> (RasterState, RasterDrawing) {
         let state = RasterState {

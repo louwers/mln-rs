@@ -21,6 +21,7 @@ use mln_gfx::shaders::shader_defines::{
     ID_HILLSHADE_POS_VERTEX_ATTRIBUTE, ID_HILLSHADE_PREPARE_DRAWABLE_UBO, ID_HILLSHADE_PREPARE_TILE_PROPS_UBO,
     ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE, ID_HILLSHADE_TILE_PROPS_UBO, ID_PROJECTION_UBO,
 };
+use mln_gfx::shaders::source::ShaderSources;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
@@ -245,6 +246,10 @@ impl LayerType for Hillshade {
 
     type Drawing = TileDraws<HillshadeTile>;
     type State = HillshadeState;
+
+    fn add_shader_sources(sources: &mut ShaderSources) {
+        super::add_shader_sources(sources);
+    }
 
     fn new_layer(_layer: &LayerValues<Hillshade>) -> (HillshadeState, TileDraws<HillshadeTile>) {
         let state = HillshadeState {

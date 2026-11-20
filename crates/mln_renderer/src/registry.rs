@@ -51,9 +51,10 @@ impl RegistryBuilder {
         &mut self.functions
     }
 
-    /// Adds the layer type `T`. Fails for a name that an earlier type took.
-    /// A type whose [`View`](LayerType::View) is of another kind of source
-    /// than its style half's doesn't compile.
+    /// Adds the layer type `T`, with the sources of its programs
+    /// ([`LayerType::add_shader_sources`]). Fails for a name that an earlier
+    /// type took. A type whose [`View`](LayerType::View) is of another kind
+    /// of source than its style half's doesn't compile.
     pub fn add_layer_type<T: LayerType>(&mut self) -> Result<(), RegisterError> {
         const {
             assert!(
@@ -66,15 +67,8 @@ impl RegistryBuilder {
             return Err(RegisterError::Duplicate(name.to_owned()));
         }
         self.layer_types.insert(name, entry::<T>());
+        T::add_shader_sources(&mut self.shader_sources);
         Ok(())
-    }
-
-    /// The sources of the programs that the registry's layer types draw
-    /// with, in each shading language they have them in, which a layer type
-    /// adds to ([`ShaderSources::add`]). A renderer's backend compiles the
-    /// programs from the sources in its language.
-    pub fn shader_sources_mut(&mut self) -> &mut ShaderSources {
-        &mut self.shader_sources
     }
 
     /// Adds the source type `T`. Fails for a name that an earlier type took.

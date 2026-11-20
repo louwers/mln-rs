@@ -40,6 +40,7 @@ use mln_gfx::shaders::shader_defines::{
     ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_PROPS_UBO, ID_FILL_EXTRUSION_TILE_PROPS_UBO,
     ID_FILL_EXTRUSION_WALL_PAINT, ID_FILL_EXTRUSION_WALL_VERTICES, ID_PROJECTION_UBO,
 };
+use mln_gfx::shaders::source::ShaderSources;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
 use mln_map_types::View;
 use mln_renderer::draw::{
@@ -291,6 +292,10 @@ impl LayerType for FillExtrusion {
     type State = ExtrusionState;
     const CROSSFADES: bool = true;
     const IS_3D: bool = true;
+
+    fn add_shader_sources(sources: &mut ShaderSources) {
+        super::add_shader_sources(sources);
+    }
 
     /// Whether a layer of the group has a pattern.
     fn layout_can_need_dependencies(group: &[Arc<EvaluatedLayer<FillExtrusion>>]) -> bool {

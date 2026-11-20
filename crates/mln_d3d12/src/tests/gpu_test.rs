@@ -2,7 +2,7 @@ use mln_gfx::gpu::{Gpu as _, GpuError};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
-use mln_gfx::shaders::source::{ShaderSources, glsl};
+use mln_gfx::shaders::source::glsl;
 use mln_glsl::BUILT_INS;
 use mln_layers::conformance::{
     clip_mask_and_background, custom_layers, depth_only, foreign_ids, imported_textures, instanced_walls,
@@ -15,23 +15,13 @@ use crate::{D3d12Gpu, Device};
 
 /// Each program with GLSL: the engine's and the built-in layer types'.
 fn programs() -> Vec<(&'static Program, &'static glsl::Source)> {
-    let mut layers = ShaderSources::default();
-    mln_layers::add_shader_sources(&mut layers);
+    let layers = mln_layers::shader_sources();
     BUILT_INS.iter().copied().chain(layers.of::<glsl::Source>().iter()).collect()
 }
 
-/// A `D3d12Gpu` that also compiles the built-in layer types' programs,
-/// which the conformance cases draw with.
 fn gpu() -> D3d12Gpu {
     let device = Device::new(None).expect("a D3D12 device");
-    with_layer_sources(D3d12Gpu::new(&device).expect("D3d12Gpu"))
-}
-
-fn with_layer_sources(mut gpu: D3d12Gpu) -> D3d12Gpu {
-    let mut sources = ShaderSources::default();
-    mln_layers::add_shader_sources(&mut sources);
-    gpu.add_shader_sources(&sources);
-    gpu
+    D3d12Gpu::new(&device).expect("D3d12Gpu")
 }
 
 #[test]
@@ -47,8 +37,8 @@ fn invalid_calls_through_gpu() {
 #[test]
 fn foreign_ids_through_gpu() {
     let device = Device::new(None).expect("a D3D12 device");
-    let mut first = with_layer_sources(D3d12Gpu::new(&device).expect("D3d12Gpu"));
-    let mut second = with_layer_sources(D3d12Gpu::new(&device).expect("D3d12Gpu"));
+    let mut first = D3d12Gpu::new(&device).expect("D3d12Gpu");
+    let mut second = D3d12Gpu::new(&device).expect("D3d12Gpu");
     foreign_ids(&mut first, &mut second).expect("the valid calls");
 }
 
@@ -127,6 +117,7 @@ fn imported_textures_through_gpu() {
 #[test]
 fn every_program_compiles_for_gpu() {
     let mut gpu = gpu();
+    gpu.add_shader_sources(&mln_layers::shader_sources());
     let parameters = ProgramParameters::new(1.0, false);
     for (program, _) in programs() {
         for variant in [ProjectionVariant::Mercator, ProjectionVariant::Globe] {

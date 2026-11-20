@@ -1,5 +1,5 @@
 use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::source::{ShaderSources, glsl};
+use mln_gfx::shaders::source::glsl;
 use mln_glsl::variants::variants;
 use mln_glsl::{BUILT_INS, Stage, compose};
 
@@ -7,8 +7,7 @@ use crate::shaders::compile_program;
 
 /// Each program with GLSL: the engine's and the built-in layer types'.
 fn programs() -> Vec<(&'static Program, &'static glsl::Source)> {
-    let mut layers = ShaderSources::default();
-    mln_layers::add_shader_sources(&mut layers);
+    let layers = mln_layers::shader_sources();
     BUILT_INS.iter().copied().chain(layers.of::<glsl::Source>().iter()).collect()
 }
 
