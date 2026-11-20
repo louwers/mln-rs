@@ -203,6 +203,8 @@ pub(crate) struct RenderImageSource {
     bucket: Option<RasterBucket>,
     tile_ids: Vec<UnwrappedTileID>,
     mesh_corners: GeometryCoordinates,
+    /// The box of `mesh_corners`, as [`ImageSourceRenderData::bounds`].
+    bounds: [i32; 4],
     mesh_cells: u32,
 }
 
@@ -214,6 +216,7 @@ impl RenderImageSource {
             bucket: None,
             tile_ids: Vec::new(),
             mesh_corners: GeometryCoordinates::new(),
+            bounds: [0; 4],
             mesh_cells: 0,
         }
     }
@@ -396,6 +399,12 @@ impl RenderSource for RenderImageSource {
         };
         if !bucket.geometry().has_quads() || geom_coords != self.mesh_corners || cells != self.mesh_cells {
             build_image_mesh(bucket, &geom_coords, cells);
+            let mut bounds = [i32::MAX, i32::MAX, i32::MIN, i32::MIN];
+            for corner in &geom_coords {
+                let (x, y) = (i32::from(corner.x), i32::from(corner.y));
+                bounds = [bounds[0].min(x), bounds[1].min(y), bounds[2].max(x), bounds[3].max(y)];
+            }
+            self.bounds = bounds;
             self.mesh_corners = geom_coords;
             self.mesh_cells = cells;
         }
@@ -414,12 +423,7 @@ impl RenderSource for RenderImageSource {
         // coordinates, and an image shrunk out of sight or out of view draws
         // nowhere: the drapes that showed it draw again.
         let tile_ids: &[UnwrappedTileID] = if self.base.enabled && self.loaded() { &self.tile_ids } else { &[] };
-        let mut bounds = [i32::MAX, i32::MAX, i32::MIN, i32::MIN];
-        for corner in &self.mesh_corners {
-            let (x, y) = (i32::from(corner.x), i32::from(corner.y));
-            bounds = [bounds[0].min(x), bounds[1].min(y), bounds[2].max(x), bounds[3].max(y)];
-        }
-        Some(ImageSourceRenderData { bucket: self.bucket.as_ref(), tile_ids, bounds })
+        Some(ImageSourceRenderData { bucket: self.bucket.as_ref(), tile_ids, bounds: self.bounds })
     }
 
     fn dump_debug_logs(&self) {
