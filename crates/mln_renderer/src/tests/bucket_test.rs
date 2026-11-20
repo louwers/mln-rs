@@ -84,7 +84,6 @@ fn a_raster_buckets_upload_moves_its_quads_into_the_stores_once_per_mask() {
         assert_eq!(quads.vertices.count(), 8);
 
         bucket.set_mask(mask(&[(1, 0, 0)]));
-        assert!(!bucket.uploaded);
         bucket.upload(context);
         let quads = bucket.geometry().quads().expect("the new mask's quads");
         assert_eq!(context.vertices(&quads.vertices).expect("stored").count(), 4);
