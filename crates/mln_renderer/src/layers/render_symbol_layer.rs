@@ -746,7 +746,7 @@ impl SymbolState {
             let Some(cached) = drawing.tiles.get_mut(&tile_id) else {
                 continue;
             };
-            let bucket = tile.bucket().map(|bucket| bucket.bucket);
+            let bucket = tile.view().map(|bucket| bucket.bucket);
             debug_assert!(bucket.is_some() || cached.draws.is_empty());
             for (index, draw) in cached.draws.iter().enumerate().filter(|(_, draw)| draw.visible) {
                 let Some(uniforms) =
@@ -1118,7 +1118,7 @@ fn collision_vertex_attributes(context: &mut Context, buffer: &CollisionBuffer) 
 impl LayerType for Symbol {
     type Layout = SymbolLayout;
     type Bucket = SymbolBucket;
-    type TileBucket<'a> = LayerBucket<'a, Symbol>;
+    type View<'a> = LayerBucket<'a, Symbol>;
     type Drawing = SymbolDrawing;
     type State = SymbolState;
 
@@ -1149,7 +1149,7 @@ impl LayerType for Symbol {
             placement_data: Vec::new(),
             follower_data: Vec::new(),
             source_id: Arc::from(""),
-            draws_passes: RenderPass::None,
+            draws_passes: RenderPass::NONE,
             #[cfg(feature = "bench")]
             held: Vec::new(),
         };
@@ -1184,9 +1184,9 @@ impl LayerType for Symbol {
         if (evaluated.icon_opacity.constant_or(&1.0) > 0.0 && has_icon_opacity)
             || (evaluated.text_opacity.constant_or(&1.0) > 0.0 && has_text_opacity)
         {
-            RenderPass::Translucent
+            RenderPass::TRANSLUCENT
         } else {
-            RenderPass::None
+            RenderPass::NONE
         }
     }
 
@@ -1240,7 +1240,7 @@ impl LayerType for Symbol {
             let Some(mut entry) = drawing.tiles.entry(&tile_id) else {
                 continue;
             };
-            let render_data = tile.bucket_for_pass(passes);
+            let render_data = tile.view_for_pass(passes);
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
                 *entry.value = None;
                 continue;
@@ -1348,13 +1348,11 @@ impl LayerType for Symbol {
         // Renderables come across tiles, out of order, so the atlases' textures
         // given to a tile's draws are kept by tile.
         let mut tile_atlases: HashMap<UnwrappedTileID, TileAtlases> = HashMap::default();
-        let color_mode = paint_parameters.context.color_mode(
-            if (passes.underlying_type() & RenderPass::Translucent.underlying_type()) != 0 {
-                ColorMode::alpha_blended()
-            } else {
-                ColorMode::unblended()
-            },
-        );
+        let color_mode = paint_parameters.context.color_mode(if passes & RenderPass::TRANSLUCENT == RenderPass::NONE {
+            ColorMode::unblended()
+        } else {
+            ColorMode::alpha_blended()
+        });
 
         for group in &renderable_segments {
             let is_text = group.type_ == SymbolType::Text;
@@ -1364,7 +1362,7 @@ impl LayerType for Symbol {
                 continue;
             };
             let tile_id = tile.tile.id.overscale_to(group.overscaled_z);
-            let Some(render_data) = tile.bucket_for_pass(passes) else {
+            let Some(render_data) = tile.view_for_pass(passes) else {
                 continue;
             };
             let bucket = render_data.bucket;
@@ -1520,7 +1518,7 @@ impl LayerType for Symbol {
         };
         let translates = symbol_translates(&cx.layer.evaluated);
         for tile in cx.tiles {
-            let Some(bucket) = tile.bucket() else {
+            let Some(bucket) = tile.view() else {
                 continue;
             };
             let key = BucketKey { source, tile: tile.id(), slot: tile.tile.slot(), bucket: bucket.bucket_index };

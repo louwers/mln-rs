@@ -103,7 +103,7 @@ pub(crate) fn outline_paint_layout(attrs: &VertexAttributeArray) -> u32 {
 }
 
 /// The pass the layer's draws draw in.
-const RENDER_PASS: RenderPass = RenderPass::Translucent;
+const RENDER_PASS: RenderPass = RenderPass::TRANSLUCENT;
 
 /// A draw the layer keeps of a tile.
 struct FillDraw {
@@ -561,7 +561,7 @@ impl FillState {
 impl LayerType for Fill {
     type Layout = PatternLayout<FillLayoutSpec>;
     type Bucket = FillBucket;
-    type TileBucket<'a> = LayerBucket<'a, Fill>;
+    type View<'a> = LayerBucket<'a, Fill>;
     type Drawing = TileDraws<FillTile>;
     type State = FillState;
     const CROSSFADES: bool = true;
@@ -608,11 +608,11 @@ impl LayerType for Fill {
             && evaluated.fill_opacity.constant_or(&0.0) >= 1.0;
         let shows = *evaluated.fill_layer_opacity.uniform() > 0.0;
         if shows && opaque {
-            RenderPass::Translucent | RenderPass::Opaque
+            RenderPass::TRANSLUCENT | RenderPass::OPAQUE
         } else if shows {
-            RenderPass::Translucent
+            RenderPass::TRANSLUCENT
         } else {
-            RenderPass::None
+            RenderPass::NONE
         }
     }
 
@@ -667,7 +667,7 @@ impl LayerType for Fill {
                 continue;
             };
 
-            let render_data = tile.bucket_for_pass(RENDER_PASS);
+            let render_data = tile.view_for_pass(RENDER_PASS);
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
                 *entry.value = None;
                 continue;

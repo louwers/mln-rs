@@ -65,7 +65,7 @@ impl RenderTarget {
         }
         let prev_scissor_rect = parameters.scissor_rect;
         parameters.scissor_rect = ScissorRect { x: 0, y: 0, width: pass.size.width, height: pass.size.height };
-        Some(TargetPasses { passes: [RenderPass::Opaque, RenderPass::Translucent].into_iter(), prev_scissor_rect })
+        Some(TargetPasses { passes: [RenderPass::OPAQUE, RenderPass::TRANSLUCENT].into_iter(), prev_scissor_rect })
     }
 
     /// The pass that clears the texture to opaque black and its depth to 1,

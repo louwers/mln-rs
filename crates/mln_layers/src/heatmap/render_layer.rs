@@ -49,7 +49,7 @@ use crate::refresh_paint_attributes;
 
 /// The pass the layer's draws draw in, onto the frame and into its render
 /// target.
-const RENDER_PASS: RenderPass = RenderPass::Translucent;
+const RENDER_PASS: RenderPass = RenderPass::TRANSLUCENT;
 
 /// A tile's draw's entries in the render target's storage buffers.
 struct HeatmapUniforms {
@@ -191,7 +191,7 @@ impl HeatmapState {
 impl LayerType for Heatmap {
     type Layout = HeatmapLayout;
     type Bucket = HeatmapBucket;
-    type TileBucket<'a> = LayerBucket<'a, Heatmap>;
+    type View<'a> = LayerBucket<'a, Heatmap>;
     type Drawing = HeatmapDrawing;
     type State = HeatmapState;
 
@@ -242,7 +242,7 @@ impl LayerType for Heatmap {
     }
 
     fn passes(_layer: &LayerValues<Heatmap>, evaluated: &EvaluatedLayer<Heatmap>) -> RenderPass {
-        if *evaluated.paint.heatmap_opacity.uniform() > 0.0 { RenderPass::Translucent } else { RenderPass::None }
+        if *evaluated.paint.heatmap_opacity.uniform() > 0.0 { RenderPass::TRANSLUCENT } else { RenderPass::NONE }
     }
 
     /// Makes the tiles' draws into the render target, which it builds for a
@@ -293,7 +293,7 @@ impl HeatmapState {
         for tile in render_tiles {
             let tile_id = tile.id();
 
-            let Some(render_data) = tile.bucket_for_pass(RENDER_PASS) else {
+            let Some(render_data) = tile.view_for_pass(RENDER_PASS) else {
                 drawing.tiles.drop_value(&tile_id);
                 continue;
             };

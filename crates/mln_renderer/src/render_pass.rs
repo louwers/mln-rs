@@ -1,21 +1,17 @@
 use std::ops::{BitAnd, BitOr, BitOrAssign};
 
-/// The render passes a layer draws in. A bitmask (`Opaque | Translucent` is a
-/// valid value), so a newtype rather than a Rust enum. The associated constants
-/// keep the C++ enumerator names.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct RenderPass(pub(crate) u8);
+/// The render passes a layer draws in. A bitmask (`OPAQUE | TRANSLUCENT` is a
+/// valid value), so a newtype rather than a Rust enum.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, mln_wire::Wire)]
+pub struct RenderPass(u8);
 
-#[expect(non_upper_case_globals, reason = "the bit flags keep the C++ enumerator names")]
 impl RenderPass {
-    pub const None: RenderPass = RenderPass(0);
-    pub const Opaque: RenderPass = RenderPass(1 << 0);
-    pub const Translucent: RenderPass = RenderPass(1 << 1);
-
-    #[must_use]
-    pub(crate) fn underlying_type(self) -> u8 {
-        self.0
-    }
+    /// No pass.
+    pub const NONE: RenderPass = RenderPass(0);
+    /// The pass that draws opaque geometry, which the depth buffer orders.
+    pub const OPAQUE: RenderPass = RenderPass(1 << 0);
+    /// The pass that blends the layers, bottom to top.
+    pub const TRANSLUCENT: RenderPass = RenderPass(1 << 1);
 }
 
 impl BitOr for RenderPass {

@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use mln_gfx::gpu::Gpu;
 use mln_renderer::layer::{
-    DrawContext, EndedHost, EvaluatedLayer, LayerHost, LayerType, LayerValues, NoBucket, NoLayout, NoTileBucket,
+    DrawContext, EndedHost, EvaluatedLayer, LayerHost, LayerType, LayerValues, NoBucket, NoLayout, NoTileView,
     OffscreenPass, RenderPass,
 };
 use mln_renderer::unstable::{Context, DrawGroup, DrawOrder, LayerDrawing, PaintParameters, TileMap};
@@ -61,7 +61,7 @@ impl CustomDrawing {
 
     /// In the translucent pass, lends the live pass to the host.
     fn lend_pass(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        if parameters.pass() != RenderPass::Translucent {
+        if parameters.pass() != RenderPass::TRANSLUCENT {
             return;
         }
         let (Some(host), Some(frame)) = (&self.host, self.frame) else {
@@ -123,7 +123,7 @@ impl LayerDrawing for CustomDrawing {
 impl LayerType for Custom {
     type Layout = NoLayout;
     type Bucket = NoBucket;
-    type TileBucket<'a> = NoTileBucket;
+    type View<'a> = NoTileView;
 
     type Drawing = CustomDrawing;
     type State = ();
@@ -136,7 +136,7 @@ impl LayerType for Custom {
     /// The layer has no properties: it only keeps drawing in the
     /// translucent pass.
     fn passes(_layer: &LayerValues<Custom>, _evaluated: &EvaluatedLayer<Custom>) -> RenderPass {
-        RenderPass::Translucent
+        RenderPass::TRANSLUCENT
     }
 
     /// The layer's draws are what its host draws, in its draw group.

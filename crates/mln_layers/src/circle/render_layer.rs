@@ -33,7 +33,7 @@ use super::layout::CircleLayout;
 use crate::refresh_paint_attributes;
 
 /// The pass the layer's draws draw in.
-const RENDER_PASS: RenderPass = RenderPass::Translucent;
+const RENDER_PASS: RenderPass = RenderPass::TRANSLUCENT;
 
 // query
 fn project_point(
@@ -145,7 +145,7 @@ struct CircleUniforms {
 impl LayerType for Circle {
     type Layout = CircleLayout;
     type Bucket = CircleBucket;
-    type TileBucket<'a> = LayerBucket<'a, Circle>;
+    type View<'a> = LayerBucket<'a, Circle>;
     type Drawing = TileDraws<KeptDraw>;
     type State = CircleState;
 
@@ -173,9 +173,9 @@ impl LayerType for Circle {
             && (evaluated.circle_opacity.constant_or(&1.0) > 0.0
                 || evaluated.circle_stroke_opacity.constant_or(&1.0) > 0.0)
         {
-            RenderPass::Translucent
+            RenderPass::TRANSLUCENT
         } else {
-            RenderPass::None
+            RenderPass::NONE
         }
     }
 
@@ -198,7 +198,7 @@ impl LayerType for Circle {
                 continue;
             };
 
-            let render_data = tile.bucket_for_pass(RENDER_PASS);
+            let render_data = tile.view_for_pass(RENDER_PASS);
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
                 *entry.value = None;
                 continue;

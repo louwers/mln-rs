@@ -74,7 +74,7 @@ use super::properties::FillExtrusionPaintProperties;
 use crate::pattern_layout::{PatternLayout, uses_pattern};
 
 /// The pass the layer's draws draw in.
-const RENDER_PASS: RenderPass = RenderPass::Translucent;
+const RENDER_PASS: RenderPass = RenderPass::TRANSLUCENT;
 
 /// A draw the layer keeps of a tile: of its roofs or its walls, into depth
 /// only or in color.
@@ -289,7 +289,7 @@ fn opacity(evaluated: &EvaluatedLayer<FillExtrusion>) -> f32 {
 impl LayerType for FillExtrusion {
     type Layout = PatternLayout<FillExtrusionLayoutSpec>;
     type Bucket = FillExtrusionBucket;
-    type TileBucket<'a> = LayerBucket<'a, FillExtrusion>;
+    type View<'a> = LayerBucket<'a, FillExtrusion>;
     type Drawing = TileDraws<ExtrusionTile>;
     type State = ExtrusionState;
     const CROSSFADES: bool = true;
@@ -323,7 +323,7 @@ impl LayerType for FillExtrusion {
     }
 
     fn passes(_layer: &LayerValues<FillExtrusion>, evaluated: &EvaluatedLayer<FillExtrusion>) -> RenderPass {
-        if opacity(evaluated) > 0.0 { RenderPass::Translucent } else { RenderPass::None }
+        if opacity(evaluated) > 0.0 { RenderPass::TRANSLUCENT } else { RenderPass::NONE }
     }
 
     /// Makes the frame's draws of the layer, those of each of its tiles,
@@ -382,7 +382,7 @@ impl LayerType for FillExtrusion {
                 continue;
             };
 
-            let render_data = tile.bucket_for_pass(RENDER_PASS);
+            let render_data = tile.view_for_pass(RENDER_PASS);
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
                 *entry.value = None;
                 continue;

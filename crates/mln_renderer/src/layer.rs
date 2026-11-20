@@ -84,7 +84,7 @@ use crate::render_layer::{Atlases, BucketPlacementData};
 pub use crate::render_pass::RenderPass;
 use crate::render_source::RenderSource;
 pub use crate::render_source::TileOrder;
-pub use crate::render_tile::{FrameTile, NoTileBucket, RasterView, TileView};
+pub use crate::render_tile::{FrameTile, NoTileView, RasterView, TileView};
 pub use crate::tile::dem::DemContents;
 pub use crate::tile::raster::{MaskedGeometry, RasterContents, RasterLayoutVertex, StoredQuads};
 pub use crate::tile_mask::TileMask;
@@ -109,8 +109,8 @@ pub trait LayerType: StyleLayerType {
     /// What a frame's tile shows a layer of the type, which its draws draw:
     /// its bucket in the tile's layout, a raster or raster-dem tile's own
     /// data or an image source's image, or nothing for a type without a
-    /// source ([`NoTileBucket`]).
-    type TileBucket<'a>: TileView<'a>;
+    /// source ([`NoTileView`]).
+    type View<'a>: TileView<'a>;
 
     /// What a layer of the type keeps of its draws: their GPU objects and
     /// its draw groups of the frame, which the engine uploads and draws.
