@@ -5,10 +5,10 @@ version:
 
 - **mln-rs**, the package in the repository root. It re-exports the libraries
   under their crate names: `mln_rs::mln_map`, `mln_rs::mln_util`,
-  `mln_rs::geojson_vt`, and so on. Users depend on this one.
+  `mln_rs::polylabel`, and so on. Users depend on this one.
 - **`mln-rs-<name>`**, one package per library under `crates/` and `vendor/`
-  (for example `mln-rs-util` for `mln_util`, `mln-rs-geojson-vt` for
-  `geojson_vt`). Their library names are unchanged, so the code still says
+  (for example `mln-rs-util` for `mln_util`, `mln-rs-polylabel` for
+  `polylabel`). Their library names are unchanged, so the code still says
   `mln_util::`. They exist for mln-rs only.
 
 The `publish = false` packages (the desktop app, the browser build in
