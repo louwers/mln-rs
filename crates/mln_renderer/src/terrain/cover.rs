@@ -35,10 +35,11 @@ pub(crate) fn terrain_tile_size(dem_tile_size: u16) -> u16 {
 /// The zoom of the DEM tile that a tile at zoom `z` reads: z − 1, within
 /// the DEM's zoom levels `dem_zooms`. `None` where the DEM's lowest zoom is
 /// deeper than the tile, which then reads no DEM (GL JS's
-/// `_getSourceZoom`).
+/// `_getSourceZoom`), and for a DEM whose lowest zoom is above its highest,
+/// which has no zoom to read.
 pub(crate) fn dem_zoom(z: u8, dem_zooms: Range<u8>) -> Option<u8> {
     let zoom = z.saturating_sub(1).min(dem_zooms.max).max(dem_zooms.min);
-    (zoom <= z).then_some(zoom)
+    (zoom <= z && zoom <= dem_zooms.max).then_some(zoom)
 }
 
 /// Where `tile` has the point `world` of the world, in units of the world's

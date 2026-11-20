@@ -584,14 +584,18 @@ fn the_coarse_dem_tile_loads_while_the_fine_one_is_loading() {
 
 /// A DEM whose lowest zoom is above its highest, as a TileJSON can say,
 /// has no zoom a terrain tile can read: the terrain draws flat and loads
-/// nothing.
+/// nothing, below its lowest zoom and at or above it.
 #[test]
 fn a_dem_whose_zoom_levels_are_empty_draws_flat() {
-    let mut load = TerrainLoad::new((12, 10), 1.0);
-    load.frame();
-    load.frame();
-    assert!(load.bindings().iter().all(|&binding| binding == (None, false)));
-    assert_eq!(BTreeSet::new(), load.tiles.requested());
+    for zoom in [10.5, 13.5] {
+        let mut load = TerrainLoad::new((12, 10), 1.0);
+        load.transform.jump_to(&CameraOptions { zoom: Some(zoom), ..Default::default() });
+        let cover = load.frame();
+        assert!(cover.tiles.iter().any(|tile| tile.id.canonical.z >= 12) == (zoom > 12.0), "{zoom}");
+        load.frame();
+        assert!(load.bindings().iter().all(|&binding| binding == (None, false)), "{zoom}");
+        assert_eq!(BTreeSet::new(), load.tiles.requested(), "{zoom}");
+    }
 }
 
 /// Nothing of the terrain outlives the data it was made from: once the
