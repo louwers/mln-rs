@@ -3954,6 +3954,158 @@ void main() {
 ",
 };
 
+/// The height rule of `mln_util::dem`, over the DEM tile a terrain tile
+/// reads: its RGBA8 texels behind a one-texel border, decoded by `props`
+/// (`terrain_props`). A macro, so that `concat!` puts it in the vertex stages
+/// that read the DEM: a fragment stage would need a sampler for the texture.
+macro_rules! terrain_elevation {
+    () => {
+        r"
+
+layout(std140, set = LAYER_SET_INDEX, binding = idTerrainPropsUBO) uniform TerrainPropsUBO {
+    vec4 unpack;
+    float unpack_scale;
+    float exaggeration;
+    float skirt_length;
+    float pad0;
+} terrain_props;
+
+layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D dem_texture;
+
+// The height in meters of the DEM's bordered texel at `texel`, clamped to the
+// texture.
+float terrain_texel_height(const ivec2 texel) {
+    const ivec2 last = textureSize(dem_texture, 0) - 1;
+    const vec3 rgb = round(texelFetch(dem_texture, clamp(texel, ivec2(0), last), 0).rgb * 255.0);
+    const vec4 unpack = terrain_props.unpack;
+    return (rgb.r * unpack.x + rgb.g * unpack.y + rgb.b * unpack.z + unpack.w) * terrain_props.unpack_scale;
+}
+
+// The height in meters, exaggerated, at `pos` in tile units of a tile that
+// reads its DEM at `dem_coords`: the DEM uv's scale and offset, then the
+// DEM's width in pixels, 0 for flat ground.
+float terrain_elevation(const vec2 pos, const vec4 dem_coords) {
+    const float dim = dem_coords.w;
+    if (dim == 0.0) {
+        return 0.0;
+    }
+    const vec2 coord = (pos / 8192.0 * dem_coords.x + dem_coords.yz) * dim + 0.5;
+    const vec2 first = floor(coord);
+    const vec2 f = coord - first;
+    const ivec2 texel = ivec2(first);
+    const float tl = terrain_texel_height(texel);
+    const float tr = terrain_texel_height(texel + ivec2(1, 0));
+    const float bl = terrain_texel_height(texel + ivec2(0, 1));
+    const float br = terrain_texel_height(texel + ivec2(1, 1));
+    const float top = tl * (1.0 - f.x) + tr * f.x;
+    const float bottom = bl * (1.0 - f.x) + br * f.x;
+    return (top * (1.0 - f.y) + bottom * f.y) * terrain_props.exaggeration;
+}
+"
+    };
+}
+
+pub(crate) const TERRAIN_SHADER_PRELUDE: &str = r"
+
+#define idTerrainDrawableUBO    idDrawableReservedVertexOnlyUBO
+#define idTerrainPropsUBO       layerUBOStartId
+
+";
+
+/// The terrain's surface: a tile's grid, drawn with the tile's matrix from
+/// `drawableVector`, raised to the heights of the tile's DEM with its skirts
+/// lowered, in the colors of the tile's drape. The drape is sampled where the
+/// vertex is in the tile: the back end's flip of Y puts its rows north first.
+pub(crate) const TERRAIN_SHADER: GlslShaderSource = GlslShaderSource {
+    built_in: "TerrainShader",
+    name: "TerrainShader",
+    prelude: TERRAIN_SHADER_PRELUDE,
+    vertex: concat!(
+        terrain_elevation!(),
+        r"
+
+// x and y in tile units, whether the vertex is a skirt's lower edge, 0.
+layout(location = 0) in ivec4 in_pos;
+
+layout(location = 0) out vec2 frag_drape_pos;
+
+layout(push_constant) uniform Constants {
+    int ubo_index;
+} constant;
+
+struct TerrainDrawableUBO {
+    mat4 matrix;
+    vec4 dem_coords;
+};
+
+layout(std140, set = LAYER_SET_INDEX, binding = idTerrainDrawableUBO) readonly buffer TerrainDrawableUBOVector {
+    TerrainDrawableUBO drawable_ubo[];
+} drawableVector;
+
+void main() {
+    const TerrainDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
+    const vec2 pos = vec2(in_pos.xy);
+    const float skirt = float(in_pos.z);
+    const float elevation = terrain_elevation(pos, drawable.dem_coords) - skirt * terrain_props.skirt_length;
+    gl_Position = drawable.matrix * vec4(pos, elevation, 1.0);
+    frag_drape_pos = pos / 8192.0;
+}
+"
+    ),
+    fragment: r"
+
+layout(location = 0) in vec2 frag_drape_pos;
+
+layout(location = 0) out vec4 out_color;
+
+layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 1) uniform texture2D drape_texture;
+layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId + 1) uniform sampler drape_sampler;
+
+void main() {
+    out_color = texture(sampler2D(drape_texture, drape_sampler), frag_drape_pos);
+}
+",
+};
+
+/// Port-only, for the backend conformance cases: probes of the terrain's
+/// height rule. Each probe is a quad at clip positions whose vertices read
+/// the height at a place of a tile, and whose fragments write that height's
+/// bits, least significant byte first, as the texel's channels.
+pub(crate) const TERRAIN_PROBE_SHADER: GlslShaderSource = GlslShaderSource {
+    built_in: "TerrainProbeShader",
+    name: "TerrainProbeShader",
+    prelude: TERRAIN_SHADER_PRELUDE,
+    vertex: concat!(
+        terrain_elevation!(),
+        r"
+
+// Clip x and y, then where the height is read, in tile units.
+layout(location = 0) in vec4 in_pos;
+// The DEM uv's scale and offset, then the DEM's width in pixels.
+layout(location = 1) in vec4 in_dem_coords;
+
+layout(location = 0) flat out float frag_height;
+
+void main() {
+    frag_height = terrain_elevation(in_pos.zw, in_dem_coords);
+    gl_Position = vec4(in_pos.xy, 0.0, 1.0);
+}
+"
+    ),
+    fragment: r"
+
+layout(location = 0) flat in float frag_height;
+
+layout(location = 0) out vec4 out_color;
+
+void main() {
+    const uint bits = floatBitsToUint(frag_height);
+    const uvec4 bytes = uvec4(bits, bits >> 8u, bits >> 16u, bits >> 24u) & uvec4(255u);
+    out_color = vec4(bytes) / 255.0;
+}
+",
+};
+
 pub(crate) const HILLSHADE_SHADER_PRELUDE: &str = r"
 
 #define idHillshadeDrawableUBO          idDrawableReservedVertexOnlyUBO
@@ -7236,4 +7388,6 @@ pub(crate) const ALL: &[&GlslShaderSource] = &[
     &SYMBOL_TEXT_AND_ICON_SHADER,
     &LAYER_COMPOSITE_SHADER,
     &VERTEX_TEXEL_SHADER,
+    &TERRAIN_SHADER,
+    &TERRAIN_PROBE_SHADER,
 ];
