@@ -323,3 +323,38 @@ fn the_synchronous_update_override_publishes_an_update() {
     set_override_synchronous_update(&mut map, false);
     assert_eq!(map.update_generation(), before + 1);
 }
+
+const TERRAIN_STYLE: &str = r#"{"version":8,"sources":{
+    "dem":{"type":"raster-dem","tiles":["https://example.com/{z}/{x}/{y}.png"]}},"layers":[]}"#;
+
+fn published_terrain(reader: &UpdateReader) -> Option<(String, f32)> {
+    let update = reader.latest().expect("an update");
+    update.parameters.style.get_terrain().map(|terrain| (terrain.source.clone(), terrain.exaggeration))
+}
+
+#[test]
+fn a_terrain_only_edit_publishes_a_style_with_the_terrain() {
+    let run_loop = Queue::<()>::new();
+    let mut map = map(&run_loop);
+    map.load_style_json(TERRAIN_STYLE);
+    map.process_events();
+    map.drain_events();
+    let reader = map.update_reader();
+    let before = map.update_generation();
+
+    map.edit_style(|style| style.set_root_property_json("terrain", r#"{"source":"dem"}"#)).unwrap();
+    assert_eq!(map.update_generation(), before + 1);
+    assert_eq!(published_terrain(&reader), Some(("dem".to_owned(), 1.0)));
+
+    map.edit_style(|style| style.set_root_property_json("terrain", r#"{"source":"dem","exaggeration":2}"#)).unwrap();
+    assert_eq!(map.update_generation(), before + 2);
+    assert_eq!(published_terrain(&reader), Some(("dem".to_owned(), 2.0)));
+
+    // What sets the terrain the style has publishes nothing.
+    map.edit_style(|style| style.set_root_property_json("terrain", r#"{"source":"dem","exaggeration":2}"#)).unwrap();
+    assert_eq!(map.update_generation(), before + 2);
+
+    map.edit_style(|style| style.set_root_property_json("terrain", "null")).unwrap();
+    assert_eq!(map.update_generation(), before + 3);
+    assert_eq!(published_terrain(&reader), None);
+}
