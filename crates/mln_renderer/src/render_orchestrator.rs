@@ -343,7 +343,9 @@ impl RenderOrchestrator {
         }
         self.view = update_parameters.view.clone();
 
-        frame.terrain = self.terrain.update(update_parameters).is_some();
+        let (store, render_sources) = (&self.tile_store, &self.render_sources);
+        let dem = |id: &str| store.source(render_sources.get(id)?.tiles()?);
+        frame.terrain = self.terrain.update(update_parameters, dem).is_some();
         let will_render = self.update_sources(
             update_parameters,
             &layers,
@@ -352,6 +354,8 @@ impl RenderOrchestrator {
             &clock,
             &mut frame,
         );
+        let (store, render_sources) = (&self.tile_store, &self.render_sources);
+        self.terrain.bind(|id| store.source(render_sources.get(id)?.tiles()?));
 
         // A synchronous source's tile laid out by its answer isn't in this
         // update's render tiles yet: the next update has it.

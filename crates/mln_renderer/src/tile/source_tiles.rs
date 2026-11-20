@@ -60,6 +60,9 @@ pub(crate) struct CoverUpdate<'a, 'p> {
     pub(crate) layers: &'a [Arc<dyn ErasedEvaluatedLayer>],
     pub(crate) needs_rendering: bool,
     pub(crate) needs_relayout: bool,
+    /// The DEM tiles that the terrain reads, of the terrain's source: they
+    /// are kept loaded, with or without a layer, and render nothing.
+    pub(crate) terrain_reads: &'a [OverscaledTileID],
     pub(crate) parameters: &'a TileParameters<'p>,
     pub(crate) style_source: &'a Source,
     pub(crate) tile_size: u16,
@@ -577,8 +580,9 @@ impl SourceTiles {
             self.max_content_elevation = 0.0;
         }
 
-        // Nothing renders: the cover's tiles go to the cache, or go.
-        if !update.needs_rendering {
+        // Nothing renders or reads them: the cover's tiles go to the cache,
+        // or go.
+        if !update.needs_rendering && update.terrain_reads.is_empty() {
             let cover: Vec<OverscaledTileID> = self.cover().map(|tile| tile.id).collect();
             for id in cover {
                 if relayout {
@@ -651,7 +655,8 @@ impl SourceTiles {
             None => tile_cover(parameters, z, zoom_range, overscaled_z),
         };
 
-        if overscaled_zoom >= i32::from(zoom_range.min) {
+        // A source that only the terrain reads covers nothing of the view.
+        if update.needs_rendering && overscaled_zoom >= i32::from(zoom_range.min) {
             let ideal_zoom: i32 = std::cmp::min(i32::from(zoom_range.max), overscaled_zoom);
 
             // Past the highest zoom level, draw that level's tiles larger.
@@ -756,6 +761,13 @@ impl SourceTiles {
                 update_renderables(&mut cover, &pan_tiles, zoom_range, max_parent_tile_overscale_factor);
             }
 
+            // The terrain's DEM tiles load with the coarse ones, and stand in
+            // for each other as the view's do, but render nothing.
+            if !update.terrain_reads.is_empty() {
+                cover.render = false;
+                update_renderables(&mut cover, update.terrain_reads, zoom_range, max_parent_tile_overscale_factor);
+            }
+
             cover.render = true;
             cover.pass_rank = 0;
             update_renderables(&mut cover, &ideal_tiles, zoom_range, max_parent_tile_overscale_factor);
@@ -789,7 +801,7 @@ impl SourceTiles {
                 * 0.5) as usize;
             // A tilted view holds more tiles than its size suggests, and as it
             // turns it passes over more again.
-            let view_cache_size = ideal_tiles.len() * VIEWS_CACHED;
+            let view_cache_size = (ideal_tiles.len() + update.terrain_reads.len()) * VIEWS_CACHED;
             self.cache_set_size(conservative_cache_size.max(view_cache_size), ctx);
         } else {
             self.cache_set_size(0, ctx);
@@ -801,7 +813,7 @@ impl SourceTiles {
         // load them each time. A tile the view has left further behind, such
         // as one of a zoom level that a fast zoom passed, stops loading, since
         // it would hold up the requests and workers the view's tiles need.
-        let wanted = WantedTiles::new(ideal_tiles.iter().chain(&pan_tiles));
+        let wanted = WantedTiles::new(ideal_tiles.iter().chain(&pan_tiles).chain(update.terrain_reads));
         self.cache_release_loading(ctx, |id| wanted.is_near(id));
 
         // The cover's tiles that weren't retained go to the cache, or go.

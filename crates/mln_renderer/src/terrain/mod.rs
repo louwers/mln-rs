@@ -17,6 +17,7 @@ use mln_util::logging::{Event, Log};
 use crate::gfx::context::Context;
 use crate::paint_parameters::PaintParameters;
 use crate::terrain::draws::TerrainDraws;
+use crate::tile::source_tiles::SourceTiles;
 use crate::update_parameters::UpdateParameters;
 
 /// The terrain of the frames the renderer draws: whether it draws, the
@@ -31,9 +32,17 @@ pub(crate) struct RenderTerrain {
 
 impl RenderTerrain {
     /// Brings the terrain to `parameters`, before the sources update: checks
-    /// whether it draws and covers the view with its tiles. Returns the
-    /// cover while terrain draws.
-    pub(crate) fn update(&mut self, parameters: &UpdateParameters) -> Option<&TerrainCover> {
+    /// whether it draws, takes the elevation ranges from the DEM tiles that
+    /// have loaded, covers the view with its tiles and lists the DEM tiles
+    /// they read. `dem` finds the tiles of a source by its id. Returns the
+    /// cover while terrain draws; its tiles bind their DEM in [`bind`].
+    ///
+    /// [`bind`]: Self::bind
+    pub(crate) fn update<'a>(
+        &mut self,
+        parameters: &UpdateParameters,
+        dem: impl FnOnce(&str) -> Option<&'a SourceTiles>,
+    ) -> Option<&TerrainCover> {
         self.cover = None;
         let style = &parameters.style;
         let terrain = style.get_terrain()?;
@@ -44,7 +53,7 @@ impl RenderTerrain {
         // all from a source that isn't raster-dem.
         let source = style.get_source(&terrain.source)?;
         let data = SourceData::<RasterDemSourceType>::recover(source)?;
-        data.description.as_ref().filter(|tileset| !tileset.tiles.is_empty())?;
+        let tileset = data.description.as_ref().filter(|tileset| !tileset.tiles.is_empty())?;
         if parameters.view.is_globe() {
             if !self.logged_globe {
                 self.logged_globe = true;
@@ -53,10 +62,22 @@ impl RenderTerrain {
             return None;
         }
 
-        let ranges = ElevationRanges::default();
-        let tiles = cover::cover_tiles(&parameters.view, data.options.tile_size, &ranges);
-        self.cover = Some(TerrainCover { tiles, ranges });
+        let dem_zooms = tileset.zoom_range;
+        let ranges = ElevationRanges::new(dem_zooms, dem(&terrain.source), f64::from(terrain.exaggeration));
+        let tile_size = data.options.tile_size;
+        self.cover = Some(TerrainCover::new(&parameters.view, &terrain.source, tile_size, dem_zooms, ranges));
         self.cover.as_ref()
+    }
+
+    /// Binds each terrain tile's DEM, once the sources have updated, from
+    /// the tiles of the terrain's source that `dem` finds by its id. A
+    /// frame's bindings are of the DEM tiles it has, so that a frame that
+    /// has loaded draws each tile with its own.
+    pub(crate) fn bind<'a>(&mut self, dem: impl FnOnce(&str) -> Option<&'a SourceTiles>) {
+        if let Some(cover) = &mut self.cover {
+            let tiles = dem(&cover.source_id);
+            cover.bind(tiles);
+        }
     }
 
     /// The cover of the last update, while terrain draws: [`update`]'s.
