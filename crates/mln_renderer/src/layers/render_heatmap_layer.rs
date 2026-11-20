@@ -41,7 +41,7 @@ use crate::gfx::indexes::DrawIndexes;
 use crate::gfx::store::SharedTexture;
 use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::gfx::vertices::SharedVertices;
-use crate::layer::{DrawContext, EvaluatedLayer, LayerType, LayerValues};
+use crate::layer::{DrawContext, EvaluatedLayer, LayerType, LayerValues, OffscreenPass};
 use crate::layer_drawing::{
     DrawDepth, DrawGroup, DrawList, DrawOrder, FrameDraw, FrameDraws, KeptDraw, LayerDrawing, LayerDraws, TileMap,
     UniformWriter, finish_tiles, tile_objects,
@@ -71,6 +71,9 @@ struct HeatmapUniforms {
 #[derive(Default)]
 pub struct HeatmapDrawing {
     tiles: TileMap<KeptDraw>,
+    /// The texture the tiles draw their heat into, which the layer's draw
+    /// colors onto the frame.
+    render_target: Option<RenderTarget>,
     /// The tiles' draws into the render target.
     target: Option<LayerDraws>,
     /// The layer's draw, built on its first frame.
@@ -83,20 +86,25 @@ pub struct HeatmapDrawing {
     frame: Option<FrameDraws>,
 }
 
-impl HeatmapDrawing {
-    /// Uploads the GPU objects of the tiles' draws into the render target.
-    fn upload_target(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
-        if let Some(target) = &self.target {
+/// The tiles' draws into the render target.
+impl OffscreenPass for HeatmapDrawing {
+    fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
+        if self.render_target.is_some()
+            && let Some(target) = &self.target
+        {
             target.upload(gpu, &mut self.tiles, tile_objects, context);
         }
     }
 
-    /// Draws the tiles' draws into the render target into the open pass of
-    /// `gpu`, the context's, which draws into it.
-    fn render_target(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        if let Some(target) = &self.target {
-            target.render(&mut self.tiles, tile_objects, gpu, parameters);
+    fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+        let Some(render_target) = &mut self.render_target else { return };
+        let Some(mut passes) = render_target.begin(gpu, parameters) else { return };
+        while passes.next(parameters) {
+            if let Some(target) = &self.target {
+                target.render(&mut self.tiles, tile_objects, gpu, parameters);
+            }
         }
+        passes.end(gpu, parameters);
     }
 }
 
@@ -163,10 +171,6 @@ pub struct HeatmapState {
     /// detect when it needs to be rebuilt.
     color_ramp_global_state: Option<Arc<GlobalStateMap>>,
 
-    /// The texture the tiles draw their heat into, which the layer's draw
-    /// colors onto the frame.
-    render_target: Option<RenderTarget>,
-
     shared_texture_vertices: Option<SharedVertices>,
 }
 
@@ -205,7 +209,6 @@ impl LayerType for Heatmap {
             tile_draws: DrawList::default(),
             color_ramp: Rc::new(PremultipliedImage::new(Size::new(256, 1))),
             color_ramp_global_state: None,
-            render_target: None,
             shared_texture_vertices: None,
         };
         (state, HeatmapDrawing::default())
@@ -240,11 +243,7 @@ impl LayerType for Heatmap {
     }
 
     fn passes(_layer: &LayerValues<Heatmap>, evaluated: &EvaluatedLayer<Heatmap>) -> RenderPass {
-        if *evaluated.paint.heatmap_opacity.uniform() > 0.0 {
-            RenderPass::Translucent
-        } else {
-            RenderPass::None
-        }
+        if *evaluated.paint.heatmap_opacity.uniform() > 0.0 { RenderPass::Translucent } else { RenderPass::None }
     }
 
     /// Makes the tiles' draws into the render target, which it builds for a
@@ -259,7 +258,7 @@ impl LayerType for Heatmap {
         let paint_parameters = &mut *cx.paint;
         let viewport_size = paint_parameters.view.size();
         let size = Size::new(viewport_size.width / 2, viewport_size.height / 2);
-        let render_target = state.render_target.get_or_insert_with(|| {
+        let render_target = drawing.render_target.get_or_insert_with(|| {
             RenderTarget::new(paint_parameters.context, size, TextureChannelDataType::HalfFloat)
         });
         render_target.set_size(paint_parameters.context, size);
@@ -268,31 +267,11 @@ impl LayerType for Heatmap {
         }
     }
 
-    fn upload_render_targets(
-        state: &mut HeatmapState,
-        drawing: &mut HeatmapDrawing,
-        gpu: &mut dyn Gpu,
-        context: &mut Context,
-    ) {
-        if state.render_target.is_some() {
-            drawing.upload_target(gpu, context);
-        }
-    }
-
-    fn render_targets(
-        state: &mut HeatmapState,
-        drawing: &mut HeatmapDrawing,
-        gpu: &mut dyn Gpu,
-        parameters: &mut PaintParameters<'_>,
-    ) {
-        if let Some(render_target) = &mut state.render_target
-            && let Some(mut passes) = render_target.begin(gpu, parameters)
-        {
-            while passes.next(parameters) {
-                drawing.render_target(gpu, parameters);
-            }
-            passes.end(gpu, parameters);
-        }
+    fn offscreen_pass<'a>(
+        _state: &'a mut HeatmapState,
+        drawing: &'a mut HeatmapDrawing,
+    ) -> Option<&'a mut dyn OffscreenPass> {
+        Some(drawing)
     }
 }
 
@@ -457,8 +436,8 @@ impl HeatmapState {
         gpu: &mut dyn Gpu,
         paint_parameters: &mut PaintParameters<'_>,
     ) {
-        let HeatmapState { color_ramp, render_target, shared_texture_vertices, .. } = self;
-        let Some(render_target) = render_target.as_ref() else {
+        let HeatmapState { color_ramp, shared_texture_vertices, .. } = self;
+        let Some(render_target) = drawing.render_target.as_ref() else {
             return;
         };
         if drawing.frame.is_none() {

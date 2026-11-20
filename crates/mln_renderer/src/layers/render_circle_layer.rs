@@ -11,7 +11,7 @@ use mln_gfx::shaders::shader_defines::{
     ID_CIRCLE_DRAWABLE_UBO, ID_CIRCLE_EVALUATED_PROPS_UBO, ID_CIRCLE_POS_VERTEX_ATTRIBUTE, ID_PROJECTION_UBO,
 };
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
-use mln_map_types::{TileProjector, View};
+use mln_map_types::TileProjector;
 use mln_style::expression::EvaluationContext;
 use mln_style::layers::Circle;
 use mln_style_types::{AlignmentType, CirclePitchScaleType};
@@ -25,7 +25,7 @@ use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
 use crate::buckets::circle_bucket::{CircleBinders, CircleBucket, CircleLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
-use crate::layer::{DrawContext, EvaluatedLayer, LayerType, LayerValues};
+use crate::layer::{DrawContext, EvaluatedLayer, FeatureQuery, HitTest, LayerType, LayerValues};
 use crate::layer_drawing::{DrawList, KeptDraw, TileDraws, UniformWriter};
 use crate::layout::circle_layout::CircleLayout;
 use crate::layout::layout::{LayoutParameters, SourceLayer};
@@ -160,8 +160,8 @@ impl LayerType for Circle {
         CircleLayout::new(parameters.bucket_parameters, group, source_layer, parameters.filter_groups).map(Some)
     }
 
-    fn query_radius(bucket: &CircleBucket, layer: &EvaluatedLayer<Circle>) -> f32 {
-        bucket.query_radius(layer)
+    fn feature_query() -> Option<&'static dyn FeatureQuery<Circle>> {
+        Some(&Circle)
     }
 
     fn new_layer(_layer: &LayerValues<Circle>) -> (CircleState, TileDraws<KeptDraw>) {
@@ -275,29 +275,21 @@ impl LayerType for Circle {
             write_uniforms(layer, writer);
         });
     }
+}
 
-    // query
-    fn query_intersects_feature(
-        layer: &EvaluatedLayer<Circle>,
-        query_geometry: &mln_tile_id::geometry_tile_data::GeometryCoordinates,
-        feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
-        geometry: &mln_tile_id::geometry_tile_data::GeometryCollection,
-        zoom: f32,
-        view: &View,
-        pixels_to_tile_units: f32,
-        projector: &TileProjector<'_>,
-        feature_state: &mln_style::expression::expression::FeatureState,
-    ) -> bool {
-        use crate::geometry::feature_index::FeatureIndex;
+impl FeatureQuery<Circle> for Circle {
+    fn query_radius(&self, bucket: &CircleBucket, layer: &EvaluatedLayer<Circle>) -> f32 {
+        bucket.query_radius(layer)
+    }
 
+    fn intersects(&self, layer: &EvaluatedLayer<Circle>, test: &HitTest<'_>) -> bool {
+        let HitTest { query_geometry, feature, geometry, zoom, view, pixels_to_tile_units, projector, feature_state } =
+            *test;
         let evaluated = &layer.paint;
         // Translate query geometry
-        let translated = FeatureIndex::translate_query_geometry(
-            query_geometry,
+        let translated = test.translated_query_geometry(
             *evaluated.circle_translate.uniform(),
             *evaluated.circle_translate_anchor.uniform(),
-            view.angle() as f32,
-            pixels_to_tile_units,
         );
         let translated_query_geometry = translated.as_ref().unwrap_or(query_geometry);
 

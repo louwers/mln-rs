@@ -156,8 +156,16 @@ pub(crate) trait ErasedLayerType: ErasedStyleLayerType {
         source_layer: SourceLayer,
     ) -> Result<Option<Box<dyn ErasedLayout>>, Error>;
 
-    /// [`LayerType::query_radius`]; 0 for a bucket or layer of another type.
+    /// [`FeatureQuery::query_radius`](crate::layer::FeatureQuery::query_radius);
+    /// 0 for a type whose features no query hits, or a bucket or layer of
+    /// another type.
     fn query_radius(&self, bucket: &dyn Bucket, layer: &Arc<dyn ErasedEvaluatedLayer>) -> f32;
+
+    /// [`LayerType::max_content_elevation`]; 0 for a bucket of another type.
+    fn max_content_elevation(&self, bucket: &dyn Bucket) -> f32;
+
+    /// [`LayerType::PLACES_SYMBOLS`].
+    fn places_symbols(&self) -> bool;
 
     /// Reads the values that [`ErasedEvaluatedLayer::write`] wrote for a
     /// layer of the type.
@@ -187,10 +195,18 @@ impl<T: LayerType> ErasedLayerType for LayerTypeEntry<T> {
     }
 
     fn query_radius(&self, bucket: &dyn Bucket, layer: &Arc<dyn ErasedEvaluatedLayer>) -> f32 {
-        match (recover_bucket::<T>(bucket), EvaluatedLayer::<T>::recover(layer)) {
-            (Some(bucket), Some(layer)) => T::query_radius(bucket, &layer),
+        match (T::feature_query(), recover_bucket::<T>(bucket), EvaluatedLayer::<T>::recover(layer)) {
+            (Some(query), Some(bucket), Some(layer)) => query.query_radius(bucket, &layer),
             _ => 0.0,
         }
+    }
+
+    fn max_content_elevation(&self, bucket: &dyn Bucket) -> f32 {
+        recover_bucket::<T>(bucket).map_or(0.0, T::max_content_elevation)
+    }
+
+    fn places_symbols(&self) -> bool {
+        T::PLACES_SYMBOLS
     }
 
     fn read_evaluated(&self, r: &mut Reader<'_>) -> Option<Arc<dyn ErasedEvaluatedLayer>> {

@@ -24,6 +24,7 @@ use mln_util::feature::{Feature, feature_id_to_string};
 use mln_util::hash::{HashMap, HashSet};
 use mln_vec_map::VecMap;
 
+use crate::layer::HitTest;
 use crate::query::RenderedQueryOptions;
 use crate::render_layer::RenderLayer;
 use crate::source_state::SourceFeatureState;
@@ -386,22 +387,21 @@ impl FeatureIndex {
                 continue;
             };
 
-            let needs_cross_tile_index = render_layer.style().info().cross_tile_index;
             // we use the float camera zoom here, not the integer tile ID zoom,
             // because for the query we take into account the actual rendered
             // size of the geometry (#2781)
-            let intersects = needs_cross_tile_index
+            let intersects = render_layer.places_symbols()
                 || region.is_some_and(|region| {
-                    render_layer.query_intersects_feature(
-                        region.geometry,
-                        &feature,
-                        &geometry,
-                        region.view.zoom() as f32,
-                        region.view,
-                        region.pixels_to_tile_units,
-                        region.projector,
-                        &state,
-                    )
+                    render_layer.query_intersects_feature(&HitTest {
+                        query_geometry: region.geometry,
+                        feature: &feature,
+                        geometry: &geometry,
+                        feature_state: &state,
+                        zoom: region.view.zoom() as f32,
+                        view: region.view,
+                        pixels_to_tile_units: region.pixels_to_tile_units,
+                        projector: region.projector,
+                    })
                 });
             if !intersects {
                 continue;

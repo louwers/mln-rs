@@ -13,13 +13,7 @@ pub use properties::BackgroundPaintProperties;
 pub struct Background;
 
 impl StyleLayerType for Background {
-    const INFO: LayerTypeInfo = LayerTypeInfo {
-        name: "background",
-        source: SourceKind::None,
-        fading_tiles: false,
-        cross_tile_index: false,
-        from_json: true,
-    };
+    const INFO: LayerTypeInfo = LayerTypeInfo { name: "background", source: SourceKind::None, from_json: true };
     const PROPERTIES: &'static PropertyTable = &properties::PROPERTIES;
 
     type LayoutProperties = NoProperties;

@@ -33,11 +33,10 @@ use crate::globe_depth_pass::GlobeDepthPass;
 use crate::image_store::ImageStore;
 use crate::layer_drawing::{ChangedBuckets, DrawGroup, DrawOrder, SingleDraw};
 use crate::layer_type::ErasedEvaluatedLayer;
-use crate::layers::render_custom_layer::EndedHosts;
 use crate::line_atlas::LineAtlas;
 use crate::paint_parameters::PaintParameters;
 use crate::pattern_atlas::PatternAtlas;
-use crate::render_layer::{Atlases, FrameSourceTiles, LayerUpdate, RenderLayer};
+use crate::render_layer::{Atlases, EndedHosts, FrameSourceTiles, LayerUpdate, RenderLayer};
 use crate::render_source::{self, RenderSource, RenderTileParameters, TileOrder};
 use crate::render_tile::{FoundTile, RenderTile, TileContent};
 use crate::renderer_event::RendererEvent;
@@ -1196,7 +1195,7 @@ impl RenderOrchestrator {
             atmosphere.upload(gpu, context);
         }
         for layer in &mut self.layers {
-            layer.upload_render_targets(gpu, context);
+            layer.upload_offscreen(gpu, context);
         }
         for debug in self.debug_layers.values_mut() {
             debug.upload(gpu, context);
@@ -1360,11 +1359,8 @@ impl RenderOrchestrator {
         layers: &crate::geometry::feature_index::QueryLayers<'_>,
         options: &crate::query::RenderedQueryOptions,
     ) -> Result<(), Error> {
-        let cross_tile_symbol_index_layers: crate::geometry::feature_index::QueryLayers<'_> = layers
-            .iter()
-            .filter(|(_, layer)| layer.style().info().cross_tile_index)
-            .map(|(id, layer)| (id.clone(), *layer))
-            .collect();
+        let cross_tile_symbol_index_layers: crate::geometry::feature_index::QueryLayers<'_> =
+            layers.iter().filter(|(_, layer)| layer.places_symbols()).map(|(id, layer)| (id.clone(), *layer)).collect();
 
         if cross_tile_symbol_index_layers.is_empty() {
             return Ok(());
@@ -1655,7 +1651,7 @@ impl Drop for RenderOrchestrator {
         // Hosts that left and that the renderer didn't take, as when it
         // goes without its tear-down, lose their graphics objects.
         for host in std::mem::take(&mut self.ended_hosts) {
-            host.context_lost();
+            host.lose();
         }
         self.tile_store.log_stats();
         // The render sources and their tiles go before the wait, since

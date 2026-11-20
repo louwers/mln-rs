@@ -81,13 +81,7 @@ pub struct Custom;
 static PROPERTIES: PropertyTable = PropertyTable::new(&[], &[]);
 
 impl StyleLayerType for Custom {
-    const INFO: LayerTypeInfo = LayerTypeInfo {
-        name: "custom",
-        source: SourceKind::None,
-        fading_tiles: false,
-        cross_tile_index: false,
-        from_json: false,
-    };
+    const INFO: LayerTypeInfo = LayerTypeInfo { name: "custom", source: SourceKind::None, from_json: false };
     const PROPERTIES: &'static PropertyTable = &PROPERTIES;
 
     type LayoutProperties = NoProperties;

@@ -782,7 +782,7 @@ impl WorldCopy {
         let contents = match &shown.contents {
             Contents::Geometry(contents) => {
                 let layer_render_data =
-                    contents.result.layer_render_data.copy_where(|layer| !layer.style().info().cross_tile_index);
+                    contents.result.layer_render_data.copy_where(|layer| !layer.entry().places_symbols());
                 Contents::Geometry(GeometryContents {
                     result: LayoutResult::new(layer_render_data, Arc::clone(&contents.result.feature_index)),
                     missing: contents.missing,

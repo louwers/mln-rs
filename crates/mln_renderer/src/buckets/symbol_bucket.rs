@@ -749,10 +749,6 @@ impl Bucket for SymbolBucket {
         &self.base
     }
 
-    fn max_content_elevation(&self) -> f32 {
-        self.max_height_offset
-    }
-
     fn upload(&mut self, geometry: &mut GeometryUpload<'_>, _needs: UploadNeeds) {
         let state = &mut self.state;
         for buffer in [&mut state.text, &mut state.icon, &mut state.sdf_icon] {

@@ -1127,6 +1127,8 @@ impl LayerType for Symbol {
     /// higher's.
     const TILE_ORDER: TileOrder = TileOrder::ByY;
 
+    const PLACES_SYMBOLS: bool = true;
+
     /// A symbol layout always waits for its glyphs and images.
     fn layout_can_need_dependencies(_group: &[Arc<EvaluatedLayer<Symbol>>]) -> bool {
         true
@@ -1537,6 +1539,10 @@ impl LayerType for Symbol {
 
     fn release(state: &mut SymbolState) {
         state.placement_data.clear();
+    }
+
+    fn max_content_elevation(bucket: &SymbolBucket) -> f32 {
+        bucket.max_height_offset
     }
 
     fn placement_data(state: &SymbolState) -> &[BucketPlacementData] {

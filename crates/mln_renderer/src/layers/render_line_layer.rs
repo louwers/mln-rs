@@ -18,7 +18,6 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
-use mln_map_types::View;
 use mln_style::expression::{Dependency, EvaluationContext, GlobalStateMap, global_state_refs_intersect};
 use mln_style::layers::Line;
 use mln_style::layers::line_layer_properties::LinePaintProperties;
@@ -42,7 +41,7 @@ use crate::gfx::line_mesh::LineLayoutVertex;
 use crate::gfx::store::SharedTexture;
 use crate::gfx::texture2d::Texture2D;
 use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
-use crate::layer::{DrawContext, EvaluatedLayer, LayerType, LayerValues, UpdateContext};
+use crate::layer::{DrawContext, EvaluatedLayer, FeatureQuery, HitTest, LayerType, LayerValues, UpdateContext};
 use crate::layer_composite::Composite;
 use crate::layer_drawing::{DrawList, DrawObjectsMut, FrameDraw, LayerDrawing, TileDraws, TileObjects, UniformWriter};
 use crate::layout::layout::{LayoutParameters, SourceLayer};
@@ -291,8 +290,8 @@ impl LayerType for Line {
         PatternLayout::new(parameters, group, source_layer).map(Some)
     }
 
-    fn query_radius(bucket: &LineBucket, layer: &EvaluatedLayer<Line>) -> f32 {
-        bucket.query_radius(layer)
+    fn feature_query() -> Option<&'static dyn FeatureQuery<Line>> {
+        Some(&Line)
     }
 
     fn new_layer(_layer: &LayerValues<Line>) -> (LineState, TileDraws<LineTile>) {
@@ -478,27 +477,19 @@ impl LayerType for Line {
             }
         }
     }
+}
 
-    fn query_intersects_feature(
-        layer: &EvaluatedLayer<Line>,
-        query_geometry: &mln_tile_id::geometry_tile_data::GeometryCoordinates,
-        feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
-        geometry: &mln_tile_id::geometry_tile_data::GeometryCollection,
-        zoom: f32,
-        view: &View,
-        pixels_to_tile_units: f32,
-        _projector: &mln_map_types::TileProjector<'_>,
-        feature_state: &mln_style::expression::expression::FeatureState,
-    ) -> bool {
+impl FeatureQuery<Line> for Line {
+    fn query_radius(&self, bucket: &LineBucket, layer: &EvaluatedLayer<Line>) -> f32 {
+        bucket.query_radius(layer)
+    }
+
+    fn intersects(&self, layer: &EvaluatedLayer<Line>, test: &HitTest<'_>) -> bool {
+        let HitTest { query_geometry, feature, geometry, zoom, pixels_to_tile_units, feature_state, .. } = *test;
         let evaluated = &layer.paint;
         // Translate query geometry
-        let translated_query_geometry = crate::geometry::feature_index::FeatureIndex::translate_query_geometry(
-            query_geometry,
-            *evaluated.line_translate.uniform(),
-            *evaluated.line_translate_anchor.uniform(),
-            view.angle() as f32,
-            pixels_to_tile_units,
-        );
+        let translated_query_geometry = test
+            .translated_query_geometry(*evaluated.line_translate.uniform(), *evaluated.line_translate_anchor.uniform());
         let query = translated_query_geometry.as_ref().unwrap_or(query_geometry);
 
         // Evaluate function
