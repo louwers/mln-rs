@@ -103,6 +103,12 @@ pub(crate) trait RenderSource {
         None
     }
 
+    /// Whether the source is an image source, even before its image
+    /// arrives.
+    fn is_image(&self) -> bool {
+        false
+    }
+
     /// Queries a feature extension; sources without extensions return a null
     /// value.
     fn query_feature_extensions(

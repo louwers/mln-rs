@@ -1288,7 +1288,7 @@ impl RenderOrchestrator {
             let source = frame_layer.source.as_ref().and_then(|id| self.render_sources.get_key_value(id));
             let source = source.map(|(id, source)| (id.as_str(), &**source));
             let source_contents = contents.of(source, &self.tile_store);
-            let tiles = source.map(|(_, source)| FrameSourceTiles::new(source.render_tiles(), source_contents));
+            let tiles = source.map(|(_, source)| FrameSourceTiles::new(source, source_contents));
             render_layer.update_draws(gpu, paint_parameters, &self.atlases, tiles, &self.found_tiles);
             needs_globe_depth = needs_globe_depth || render_layer.is_3d();
         }
