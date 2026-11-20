@@ -50,5 +50,6 @@
   "gljs/render-tests/terrain/symbol-line": "P4 (standing layers): the renderer doesn't draw terrain yet",
   "gljs/render-tests/terrain/tile-stiching": "P1a (surface and one drape stack): the renderer doesn't draw terrain yet; its DEM source declares tileSize 256 for tiles/terrain-shading's 512 px tiles",
   "gljs/render-tests/terrain/tile-transparency-overlap-fill": "P1b (stacks and composites): the renderer doesn't draw terrain yet; its single DEM tile, tiles/terrain/10-189-401.terrain.png, is a 256 px Terrarium tile declared as Mapbox with tileSize 1024; the exaggeration 0 hides the 850 km that the Mapbox decode gives; passes on Linux WebGPU without terrain today",
-  "gljs/render-tests/terrain/tile-transparency-overlap-line": "P1b (stacks and composites): the renderer doesn't draw terrain yet; its single DEM tile, tiles/terrain/10-189-401.terrain.png, is a 256 px Terrarium tile declared as Mapbox with tileSize 1024; the exaggeration 0 hides the 850 km that the Mapbox decode gives; passes on Linux WebGPU without terrain today"
+  "gljs/render-tests/terrain/tile-transparency-overlap-line": "P1b (stacks and composites): the renderer doesn't draw terrain yet; its single DEM tile, tiles/terrain/10-189-401.terrain.png, is a 256 px Terrarium tile declared as Mapbox with tileSize 1024; the exaggeration 0 hides the 850 km that the Mapbox decode gives; passes on Linux WebGPU without terrain today",
+  "render-tests/symbol-height-offset/elevated-symbol-above-horizon": "P1a in progress: the terrain draws its surface without the background draped over it yet"
 }

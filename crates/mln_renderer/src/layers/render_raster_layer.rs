@@ -580,4 +580,8 @@ fn shader<'a>(
     slot.as_ref()
 }
 
-impl RenderLayer for RenderRasterLayer {}
+impl RenderLayer for RenderRasterLayer {
+    fn drapes(&self) -> bool {
+        true
+    }
+}

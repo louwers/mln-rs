@@ -65,7 +65,6 @@ pub(crate) struct TerrainTile {
 #[derive(Debug)]
 pub(crate) struct TerrainCover {
     /// The tiles, nearest the center first.
-    #[cfg_attr(not(test), expect(dead_code, reason = "nothing draws the surface yet"))]
     pub(crate) tiles: Vec<TerrainTile>,
     pub(crate) ranges: ElevationRanges,
 }

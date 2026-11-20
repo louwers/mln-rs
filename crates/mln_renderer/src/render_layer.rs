@@ -901,6 +901,12 @@ pub(crate) trait RenderLayer: LayerParts {
         self.is_3d()
     }
 
+    /// Whether the layer drapes over terrain: it draws flat onto the
+    /// terrain's surface rather than onto the frame.
+    fn drapes(&self) -> bool {
+        false
+    }
+
     /// A background layer's color, where it is a solid color the frame can
     /// clear to instead of drawing the layer.
     fn solid_background(&self) -> Option<Color> {

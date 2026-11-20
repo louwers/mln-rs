@@ -343,7 +343,7 @@ impl RenderOrchestrator {
         }
         self.view = update_parameters.view.clone();
 
-        self.terrain.update(update_parameters);
+        frame.terrain = self.terrain.update(update_parameters).is_some();
         let will_render = self.update_sources(
             update_parameters,
             &layers,
@@ -922,10 +922,12 @@ impl RenderOrchestrator {
                     && layer.supports_zoom(self.zoom_history.last_zoom)
                 {
                     // On the globe the background is a sphere mesh, not the
-                    // backdrop, so it stays a layer.
+                    // backdrop, and over terrain it drapes, so it stays a
+                    // layer.
                     if self.background_layer_as_color
                         && frame.sky.is_none()
                         && !update_parameters.view.is_globe()
+                        && !frame.terrain
                         && layers.first().is_some_and(|first| Arc::ptr_eq(style, first.style()))
                     {
                         let solid_background = layer.solid_background();
@@ -1116,7 +1118,7 @@ impl RenderOrchestrator {
     }
 
     /// Drops what holds the renderer's shaders: the sky and globe depth
-    /// passes and the debug overlays now, and the render layers in the next
+    /// passes, the terrain's draws and the debug overlays now, and the render layers in the next
     /// update, which makes them again. The draws made after that use the
     /// shaders the renderer has then. The sources keep their tiles, and the
     /// tiles their layout.
@@ -1125,6 +1127,7 @@ impl RenderOrchestrator {
         self.debug_layers.clear();
         self.sky_pass = crate::sky_pass::SkyPass::default();
         self.globe_depth_pass = GlobeDepthPass::default();
+        self.terrain.release_shaders();
     }
 
     /// Makes the GPU textures of the tiles' atlas and of the layers'
@@ -1186,14 +1189,15 @@ impl RenderOrchestrator {
     }
 
     /// Uploads the GPU objects of the frame's draws: the layers' draw
-    /// groups in drawing order, the globe's depth, the sky and the
-    /// atmosphere, what draws into the layers' render targets, and the debug
-    /// overlays.
+    /// groups in drawing order, the globe's depth, the terrain, the sky and
+    /// the atmosphere, what draws into the layers' render targets, and the
+    /// debug overlays.
     pub(crate) fn upload_draws(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
         for layer in &mut self.layers {
             layer.upload(gpu, context);
         }
         self.globe_depth_pass.upload(gpu, context);
+        self.terrain.upload(gpu, context);
         if let Some(sky) = self.sky_pass.sky() {
             sky.upload(gpu, context);
         }
@@ -1279,8 +1283,9 @@ impl RenderOrchestrator {
         }
     }
 
-    /// Makes the draws of the layers the frame draws, and of the sky and
-    /// globe depth passes.
+    /// Makes the draws of the layers the frame draws, of the terrain, and of
+    /// the sky and globe depth passes. Over terrain, the layers that drape
+    /// over it make none.
     pub(crate) fn update_layer_draws(
         &mut self,
         gpu: &mut dyn Gpu,
@@ -1301,6 +1306,12 @@ impl RenderOrchestrator {
                     LayerSource::Tiles(FrameSourceTiles::new(source.render_tiles(), source_contents), &self.found_tiles)
                 }
             });
+            // Over terrain, a layer that drapes draws nothing onto the frame.
+            // An image source's raster doesn't drape.
+            if frame.terrain && render_layer.drapes() && !matches!(layer_source, Some(LayerSource::Image(_))) {
+                render_layer.remove_all_draws();
+                continue;
+            }
             render_layer.update_draws(gpu, paint_parameters, &self.atlases, layer_source);
             needs_globe_depth = needs_globe_depth || render_layer.needs_globe_depth();
         }
@@ -1326,6 +1337,7 @@ impl RenderOrchestrator {
             update_parameters,
             needs_globe_depth || self.sky_pass.has_atmosphere(),
         );
+        self.terrain.update_draws(gpu, paint_parameters, frame.terrain);
     }
 
     /// The render layer at `index` in the drawing order.
@@ -1347,6 +1359,12 @@ impl RenderOrchestrator {
     /// The pass that draws the planet's depth.
     pub(crate) fn globe_depth(&mut self) -> &mut GlobeDepthPass {
         &mut self.globe_depth_pass
+    }
+
+    /// The terrain, whose surface draws before the layers' translucent
+    /// draws.
+    pub(crate) fn terrain(&mut self) -> &mut RenderTerrain {
+        &mut self.terrain
     }
 
     /// Queries the rendered features in `geometry`. `Err` if the query fails

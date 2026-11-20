@@ -514,6 +514,10 @@ impl TypedLayer for RenderHillshadeLayer {
 }
 
 impl RenderLayer for RenderHillshadeLayer {
+    fn drapes(&self) -> bool {
+        true
+    }
+
     fn upload_render_targets(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
         if self.base.is_renderable {
             for target in self.bucket_render_targets.values_mut() {

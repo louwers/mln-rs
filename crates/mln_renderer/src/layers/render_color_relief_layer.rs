@@ -591,4 +591,8 @@ impl TypedLayer for RenderColorReliefLayer {
     }
 }
 
-impl RenderLayer for RenderColorReliefLayer {}
+impl RenderLayer for RenderColorReliefLayer {
+    fn drapes(&self) -> bool {
+        true
+    }
+}

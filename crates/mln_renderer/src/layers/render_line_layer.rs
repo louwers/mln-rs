@@ -609,6 +609,10 @@ impl TypedLayer for RenderLineLayer {
 }
 
 impl RenderLayer for RenderLineLayer {
+    fn drapes(&self) -> bool {
+        true
+    }
+
     // query
     fn query_intersects_feature(
         &self,

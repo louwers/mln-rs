@@ -351,6 +351,10 @@ impl TypedLayer for RenderBackgroundLayer {
 }
 
 impl RenderLayer for RenderBackgroundLayer {
+    fn drapes(&self) -> bool {
+        true
+    }
+
     fn solid_background(&self) -> Option<Color> {
         let evaluated = &self.values.evaluated.paint;
         if !evaluated.background_pattern.faded().from.empty() || *evaluated.background_opacity.uniform() <= 0.0 {

@@ -845,10 +845,12 @@ fn draw(
     }
 
     // The translucent pass. The planet goes into the depth buffer first, so
-    // 3D geometry behind the horizon stays hidden.
+    // 3D geometry behind the horizon stays hidden. The terrain's surface
+    // draws next, under the layers that don't drape over it.
     parameters.pass = RenderPass::Translucent;
     parameters.depth_range_size = depth_range_size;
     orchestrator.globe_depth().render(gpu, parameters);
+    orchestrator.terrain().render(gpu, parameters);
     parameters.current_layer = (num_draw_groups as u32).wrapping_sub(1);
     orchestrator.render_draw_groups(gpu, parameters, DrawOrder::BottomUp);
 

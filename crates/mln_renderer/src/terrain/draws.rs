@@ -1,0 +1,165 @@
+//! The terrain's draws: one per terrain tile, of the shared grid, each with
+//! the tile's matrix in an entry of one storage buffer.
+
+use std::mem::size_of;
+use std::rc::Rc;
+
+use mln_gfx::color_mode::ColorMode;
+use mln_gfx::cull_face_mode::CullFaceMode;
+use mln_gfx::gpu::Gpu;
+use mln_gfx::projection_variant::ProjectionVariant;
+use mln_gfx::shaders::segment::SegmentBase;
+use mln_gfx::shaders::shader_defines::{ID_TERRAIN_DRAWABLE_UBO, ID_TERRAIN_POS_VERTEX_ATTRIBUTE};
+use mln_gfx::shaders::terrain_ubo::TerrainDrawableUBO;
+use mln_gfx::{AttributeDataType, DepthMaskType, DrawMode};
+use mln_util::clip_depth::ClipDepthRange;
+use mln_util::logging::{Event, Log};
+
+use super::TerrainCover;
+use super::mesh::{TerrainMesh, TerrainVertex};
+use crate::draw::{DrawGeometry, DrawObjects, Textures};
+use crate::frame_projection::zero_to_one_clip_z;
+use crate::gfx::context::Context;
+use crate::gfx::indexes::Indexes;
+use crate::gfx::shader_program::ShaderProgramPtr;
+use crate::gfx::store::SharedIndexes;
+use crate::gfx::vertex_attribute::{SharedAttribute, VertexAttributeArray};
+use crate::gfx::vertices::SharedVertices;
+use crate::layer_drawing::{DrawDepth, DrawList, FrameDraw, KeptDraw, LayerDraws, TileMap, finish_tiles, tile_objects};
+use crate::layers::cast_matrix;
+use crate::paint_parameters::PaintParameters;
+
+const TERRAIN_SHADER_NAME: &str = "TerrainShader";
+
+/// The grid, in the context's stores.
+struct SharedMesh {
+    vertices: SharedVertices,
+    vertex_count: usize,
+    indexes: SharedIndexes,
+    index_count: usize,
+}
+
+/// The draws of the terrain's tiles, which draw in the translucent pass
+/// before the layers, nearest the center first, testing and writing the 3D
+/// depth range.
+#[derive(Default)]
+pub(crate) struct TerrainDraws {
+    /// The GPU objects of each tile's draw.
+    tiles: TileMap<KeptDraw>,
+    /// The frame's draws of them.
+    frame: LayerDraws,
+    /// The frame's draws as the update makes them, with their uniforms.
+    draw_list: DrawList<TerrainDrawableUBO>,
+    shader: Option<ShaderProgramPtr>,
+    mesh: Option<SharedMesh>,
+    /// Whether the backend has no terrain shader, which draws nothing then.
+    unsupported: bool,
+}
+
+impl TerrainDraws {
+    /// Makes the frame's draws of `cover`'s tiles, or drops the draws and
+    /// what they share for `None`, a frame without terrain.
+    pub(crate) fn update(
+        &mut self,
+        gpu: &mut dyn Gpu,
+        parameters: &mut PaintParameters<'_>,
+        cover: Option<&TerrainCover>,
+    ) {
+        let shader = cover.and_then(|_| self.shader(gpu, parameters));
+        let (Some(cover), Some(shader)) = (cover, shader) else {
+            self.tiles.clear_tiles();
+            self.frame.clear();
+            self.mesh = None;
+            return;
+        };
+
+        let context = &mut *parameters.context;
+        let mesh = self.mesh.get_or_insert_with(|| {
+            let TerrainMesh { vertices, indices } = TerrainMesh::new(true);
+            SharedMesh {
+                vertex_count: vertices.len(),
+                vertices: context.add_vertices(vertices),
+                index_count: indices.len(),
+                indexes: context.add_indexes(Indexes::new(indices)),
+            }
+        });
+
+        // A backend whose clip depth runs from -1 writes the depth of one
+        // whose runs from 0, as fill extrusions do.
+        let remap_clip_z = context.caps().clip_depth == ClipDepthRange::NegativeOneToOne;
+        let (view, proj_matrix) = (parameters.view, &parameters.transform_params.proj_matrix);
+        self.tiles.set_tiles(cover.tiles.iter().map(|tile| tile.id));
+        for (index, tile) in cover.tiles.iter().enumerate() {
+            let Some(entry) = self.tiles.entry(&tile.id) else {
+                continue;
+            };
+            let draw = entry.value.get_or_insert_with(|| KeptDraw::new(mesh_objects(&shader, mesh)));
+            let mut matrix = *proj_matrix * view.tile_matrix(&tile.id.to_unwrapped());
+            if remap_clip_z {
+                zero_to_one_clip_z(&mut matrix);
+            }
+            let frame_draw = FrameDraw {
+                priority: index as i64,
+                depth: DrawDepth::Volume { mask: DepthMaskType::ReadWrite },
+                ..draw.frame_draw(Some(tile.id))
+            };
+            self.draw_list.push(frame_draw, TerrainDrawableUBO { matrix: cast_matrix(&matrix), dem_coords: [0.0; 4] });
+        }
+        finish_tiles(&mut self.draw_list, &mut self.frame, &mut self.tiles, gpu, context, |writer| {
+            writer.storage(ID_TERRAIN_DRAWABLE_UBO, |drawable| *drawable);
+        });
+    }
+
+    /// The terrain's shader, made on `gpu` the first time; `None`, logged
+    /// once, where the backend has none.
+    fn shader(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) -> Option<ShaderProgramPtr> {
+        if let Some(shader) = &self.shader {
+            return Some(Rc::clone(shader));
+        }
+        if self.unsupported {
+            return None;
+        }
+        let shader = parameters.static_data.shaders.shader(TERRAIN_SHADER_NAME, ProjectionVariant::Mercator)?;
+        if let Err(error) = parameters.context.shader(gpu, shader.key()) {
+            self.unsupported = true;
+            Log::warning(Event::Render, format!("Terrain draws nothing on this backend: {error}"));
+            return None;
+        }
+        Some(Rc::clone(self.shader.insert(shader)))
+    }
+
+    /// Uploads the GPU objects of the frame's draws.
+    pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
+        self.frame.upload(gpu, &mut self.tiles, tile_objects, context);
+    }
+
+    /// Draws the frame's draws into the open pass of `gpu`, the context's.
+    pub(crate) fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+        self.frame.render(&mut self.tiles, tile_objects, gpu, parameters);
+    }
+}
+
+/// The GPU objects of a tile's draw of `mesh` with `shader`: alpha-blended,
+/// without the triangles that face away.
+fn mesh_objects(shader: &ShaderProgramPtr, mesh: &SharedMesh) -> DrawObjects {
+    let mut vertices = VertexAttributeArray::new();
+    vertices.set_shared(
+        ID_TERRAIN_POS_VERTEX_ATTRIBUTE,
+        SharedAttribute::new(mesh.vertices.clone(), AttributeDataType::Short4, 0, size_of::<TerrainVertex>() as u32),
+    );
+    let geometry = DrawGeometry {
+        vertices,
+        vertex_count: mesh.vertex_count,
+        mode: DrawMode::Triangles(),
+        indexes: mesh.indexes.clone().into(),
+        segments: vec![SegmentBase::with_lengths(0, 0, mesh.vertex_count, mesh.index_count)],
+        instances: None,
+    };
+    DrawObjects::new(
+        Rc::clone(shader),
+        ColorMode::alpha_blended(),
+        CullFaceMode::back_ccw(),
+        geometry,
+        Textures::default(),
+    )
+}

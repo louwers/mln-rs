@@ -180,6 +180,9 @@ pub(crate) struct PaintParameters<'a> {
 
     pub(crate) current_layer: u32,
     pub(crate) depth_range_size: f32,
+    /// Whether the frame draws terrain, under which 2D layers draw without
+    /// depth.
+    pub(crate) terrain: bool,
     pub(crate) opaque_pass_cutoff: u32,
     pub(crate) symbol_fade_change: f32,
 
@@ -239,6 +242,7 @@ impl<'a> PaintParameters<'a> {
             // The renderer sets these before use.
             current_layer: 0,
             depth_range_size: 1.0,
+            terrain: frame.terrain,
             opaque_pass_cutoff: frame.opaque_pass_cutoff,
             symbol_fade_change: frame.symbol_fade_change,
             scissor_rect,
@@ -387,8 +391,8 @@ impl<'a> PaintParameters<'a> {
     #[must_use]
     pub(crate) fn depth_mode_for_sublayer(&self, n: u8, mask: DepthMaskType) -> DepthMode {
         // On the globe, 2D layers are ordered by draw order alone; their Z is
-        // the back-hemisphere clip.
-        if self.current_layer < self.opaque_pass_cutoff || self.view.is_globe() {
+        // the back-hemisphere clip. Over terrain they draw flat, on top of it.
+        if self.current_layer < self.opaque_pass_cutoff || self.view.is_globe() || self.terrain {
             return DepthMode::disabled();
         }
 
