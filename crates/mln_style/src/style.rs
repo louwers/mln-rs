@@ -21,6 +21,7 @@ use crate::sky::Sky;
 use crate::source_list::SourceList;
 use crate::source_type::Source;
 use crate::sprite::Sprite;
+use crate::style_json::check_layer_type;
 use crate::transition_options::TransitionOptions;
 
 /// Why a style failed to load.
@@ -316,6 +317,7 @@ impl Style {
     pub fn apply(&mut self, edit: Edit) -> Result<(), Error> {
         match edit {
             Edit::AddLayer { mut layer, before } => {
+                check_layer_type(&self.registry, &layer)?;
                 check_layer_source(&self.sources, &layer)?;
                 if self.layers.get(layer.get_id()).is_some() {
                     return Err(Error::already_exists(format!("Layer {} already exists", layer.get_id())));
@@ -341,6 +343,7 @@ impl Style {
                 Arc::make_mut(&mut self.layers).move_before(&id, before.as_deref());
             }
             Edit::SetLayer(layer) => {
+                check_layer_type(&self.registry, &layer)?;
                 let id = layer.get_id().to_owned();
                 self.update_layer(&id, |old| {
                     *old = layer;
