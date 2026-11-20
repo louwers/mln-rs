@@ -228,7 +228,7 @@ impl<'a> PaintParameters<'a> {
             camera_moving: frame.camera_moving,
             static_data,
             light: &frame.light,
-            pass: RenderPass::Opaque,
+            pass: RenderPass::OPAQUE,
             debug_options: frame.debug_options,
             pixel_ratio,
             renderable_size,

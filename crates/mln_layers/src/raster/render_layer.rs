@@ -382,7 +382,7 @@ fn raster_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeArray {
 impl LayerType for Raster {
     type Layout = NoLayout;
     type Bucket = NoBucket;
-    type TileBucket<'a> = RasterView<'a>;
+    type View<'a> = RasterView<'a>;
     type Drawing = RasterDrawing;
     type State = RasterState;
 
@@ -405,7 +405,7 @@ impl LayerType for Raster {
     }
 
     fn passes(_layer: &LayerValues<Raster>, evaluated: &EvaluatedLayer<Raster>) -> RenderPass {
-        if *evaluated.paint.raster_opacity.uniform() > 0.0 { RenderPass::Translucent } else { RenderPass::None }
+        if *evaluated.paint.raster_opacity.uniform() > 0.0 { RenderPass::TRANSLUCENT } else { RenderPass::NONE }
     }
 
     /// Makes the frame's draws of the layer: those of an image source's
@@ -418,7 +418,7 @@ impl LayerType for Raster {
         gpu: &mut dyn Gpu,
         cx: &mut DrawContext<'_, '_, '_, Raster>,
     ) {
-        let image = cx.tiles.iter().find_map(|tile| match tile.bucket()? {
+        let image = cx.tiles.iter().find_map(|tile| match tile.view()? {
             RasterView::Image(contents) => Some(contents),
             RasterView::Tile(_) => None,
         });
@@ -435,7 +435,7 @@ impl LayerType for Raster {
 
         // Drop the textures of contents that are no longer rendered.
         live_contents.clear();
-        live_contents.extend(render_tiles.iter().filter_map(|tile| Some(tile.bucket()?.contents().id())));
+        live_contents.extend(render_tiles.iter().filter_map(|tile| Some(tile.view()?.contents().id())));
         textures.retain(|id, _| live_contents.contains(id));
         // Kept draws keep their textures, so a changed filter is applied to
         // the textures themselves.
@@ -451,7 +451,7 @@ impl LayerType for Raster {
                 continue;
             };
 
-            let Some(RasterView::Tile(contents)) = tile.bucket().filter(|view| view.contents().has_data()) else {
+            let Some(RasterView::Tile(contents)) = tile.view().filter(|view| view.contents().has_data()) else {
                 *entry.value = None;
                 continue;
             };

@@ -242,7 +242,7 @@ fn offset_line(
 impl LayerType for Line {
     type Layout = PatternLayout<LineLayoutSpec>;
     type Bucket = LineBucket;
-    type TileBucket<'a> = LayerBucket<'a, Line>;
+    type View<'a> = LayerBucket<'a, Line>;
     type Drawing = TileDraws<LineTile>;
     type State = LineState;
     const CROSSFADES: bool = true;
@@ -310,9 +310,9 @@ impl LayerType for Line {
             && evaluated.line_color.constant_or(&Color::black()).a > 0.0
             && evaluated.line_width.constant_or(&1.0) > 0.0
         {
-            RenderPass::Translucent
+            RenderPass::TRANSLUCENT
         } else {
-            RenderPass::None
+            RenderPass::NONE
         }
     }
 
@@ -337,11 +337,11 @@ impl LayerType for Line {
         frame.set_stencil_tiles(render_tiles.iter().map(|tile| tile.unwrapped_id()));
 
         // Lines draw only in the translucent pass.
-        let render_pass = cx.layer.evaluated.passes() & RenderPass::Translucent;
+        let render_pass = cx.layer.evaluated.passes() & RenderPass::TRANSLUCENT;
         for tile in render_tiles {
             let tile_id = tile.id();
 
-            let Some(render_data) = tile.bucket_for_pass(render_pass) else {
+            let Some(render_data) = tile.view_for_pass(render_pass) else {
                 drawing.tiles_mut().drop_value(&tile_id);
                 continue;
             };
@@ -419,7 +419,7 @@ impl LayerType for Line {
     fn update(_state: &mut LineState, _drawing: &mut TileDraws<LineTile>, cx: &mut UpdateContext<'_, '_, Line>) {
         let (atlases, tiles) = (&mut *cx.atlases, cx.tiles);
         for tile in tiles {
-            let Some(bucket) = tile.bucket() else {
+            let Some(bucket) = tile.view() else {
                 continue;
             };
             let dasharray = bucket.layer.paint.line_dasharray.faded();
@@ -432,7 +432,7 @@ impl LayerType for Line {
         // A dashed draw asks for the layer's pattern even where it is empty.
         let layer_dasharray = cx.layer.evaluated.paint.line_dasharray.faded();
         for tile in tiles {
-            let Some(bucket) = tile.bucket() else {
+            let Some(bucket) = tile.view() else {
                 continue;
             };
             let laid_out = &bucket.layer.paint.line_dasharray;
@@ -578,7 +578,7 @@ impl LineState {
             segments: bucket.segments.iter().map(SegmentBase::copy).collect(),
             instances: None,
         };
-        let color_mode = context.color_mode(if pass == RenderPass::Translucent {
+        let color_mode = context.color_mode(if pass == RenderPass::TRANSLUCENT {
             ColorMode::alpha_blended()
         } else {
             ColorMode::unblended()

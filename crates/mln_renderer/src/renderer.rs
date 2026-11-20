@@ -820,7 +820,7 @@ fn draw(
 
     // The sky.
     if let Some(sky) = orchestrator.sky() {
-        parameters.pass = RenderPass::Translucent;
+        parameters.pass = RenderPass::TRANSLUCENT;
         parameters.depth_range_size = depth_range_size;
         parameters.current_layer = num_draw_groups as u32 + 1;
         sky.render(gpu, parameters);
@@ -828,7 +828,7 @@ fn draw(
 
     // The opaque pass: front to back with the depth buffer, except on the
     // globe, where 2D layers carry no depth and are painted bottom to top.
-    parameters.pass = RenderPass::Opaque;
+    parameters.pass = RenderPass::OPAQUE;
     parameters.depth_range_size = depth_range_size;
     if frame.transform.view.is_globe() {
         parameters.current_layer = (num_draw_groups as u32).wrapping_sub(1);
@@ -840,7 +840,7 @@ fn draw(
 
     // The translucent pass. The planet goes into the depth buffer first, so
     // 3D geometry behind the horizon stays hidden.
-    parameters.pass = RenderPass::Translucent;
+    parameters.pass = RenderPass::TRANSLUCENT;
     parameters.depth_range_size = depth_range_size;
     orchestrator.globe_depth().render(gpu, parameters);
     parameters.current_layer = (num_draw_groups as u32).wrapping_sub(1);
@@ -848,7 +848,7 @@ fn draw(
 
     // The atmosphere.
     if let Some(atmosphere) = orchestrator.atmosphere() {
-        parameters.pass = RenderPass::Translucent;
+        parameters.pass = RenderPass::TRANSLUCENT;
         parameters.depth_range_size = depth_range_size;
         parameters.current_layer = num_draw_groups as u32 + 1;
         atmosphere.render(gpu, parameters);

@@ -262,7 +262,7 @@ fn color_relief_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeA
 impl LayerType for ColorRelief {
     type Layout = NoLayout;
     type Bucket = NoBucket;
-    type TileBucket<'a> = &'a DemContents;
+    type View<'a> = &'a DemContents;
 
     type Drawing = TileDraws<ReliefTile>;
     type State = ReliefState;
@@ -307,7 +307,7 @@ impl LayerType for ColorRelief {
     }
 
     fn passes(_layer: &LayerValues<ColorRelief>, evaluated: &EvaluatedLayer<ColorRelief>) -> RenderPass {
-        if *evaluated.paint.color_relief_opacity.uniform() > 0.0 { RenderPass::Translucent } else { RenderPass::None }
+        if *evaluated.paint.color_relief_opacity.uniform() > 0.0 { RenderPass::TRANSLUCENT } else { RenderPass::NONE }
     }
 
     /// Makes the frame's draws of the layer, those of each of its tiles,
@@ -388,7 +388,7 @@ impl LayerType for ColorRelief {
 
         // Drop the DEM textures of contents that are no longer rendered.
         live_contents.clear();
-        live_contents.extend(render_tiles.iter().filter_map(|tile| Some(tile.bucket()?.id())));
+        live_contents.extend(render_tiles.iter().filter_map(|tile| Some(tile.view()?.id())));
         dem_textures.retain(|id, _| live_contents.contains(id));
 
         let dem_sampler = SamplerState {
@@ -407,7 +407,7 @@ impl LayerType for ColorRelief {
                 continue;
             };
 
-            let Some(contents) = tile.bucket().filter(|contents| contents.has_data()) else {
+            let Some(contents) = tile.view().filter(|contents| contents.has_data()) else {
                 *entry.value = None;
                 continue;
             };

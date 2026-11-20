@@ -241,7 +241,7 @@ fn hillshade_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeArra
 impl LayerType for Hillshade {
     type Layout = NoLayout;
     type Bucket = NoBucket;
-    type TileBucket<'a> = &'a DemContents;
+    type View<'a> = &'a DemContents;
 
     type Drawing = TileDraws<HillshadeTile>;
     type State = HillshadeState;
@@ -268,7 +268,7 @@ impl LayerType for Hillshade {
     }
 
     fn passes(_layer: &LayerValues<Hillshade>, evaluated: &EvaluatedLayer<Hillshade>) -> RenderPass {
-        if *evaluated.paint.hillshade_exaggeration.uniform() > 0.0 { RenderPass::Translucent } else { RenderPass::None }
+        if *evaluated.paint.hillshade_exaggeration.uniform() > 0.0 { RenderPass::TRANSLUCENT } else { RenderPass::NONE }
     }
 
     /// Makes the render target of each DEM it has none of, which prepares
@@ -304,7 +304,7 @@ impl LayerType for Hillshade {
         // Drop the render targets of contents that are no longer rendered.
         let live_contents = &mut state.live_contents;
         live_contents.clear();
-        live_contents.extend(render_tiles.iter().filter_map(|tile| Some(tile.bucket()?.id())));
+        live_contents.extend(render_tiles.iter().filter_map(|tile| Some(tile.view()?.id())));
         state.render_targets.retain(|id, _| live_contents.contains(id));
 
         // The illumination, which the first draw computes.
@@ -315,7 +315,7 @@ impl LayerType for Hillshade {
                 continue;
             };
 
-            let Some(contents) = tile.bucket().filter(|contents| contents.has_data()) else {
+            let Some(contents) = tile.view().filter(|contents| contents.has_data()) else {
                 *entry.value = None;
                 continue;
             };

@@ -15,7 +15,7 @@ use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
 use mln_renderer::layer::{
-    DrawContext, EvaluatedLayer, LayerType, LayerValues, NoBucket, NoLayout, NoTileBucket, RenderPass, UpdateContext,
+    DrawContext, EvaluatedLayer, LayerType, LayerValues, NoBucket, NoLayout, NoTileView, RenderPass, UpdateContext,
 };
 use mln_renderer::unstable::{
     DrawDepth, DrawGeometry, DrawIndexes, DrawList, DrawObjects, FrameDraw, KeptDraw, LayerDrawing, PaintParameters,
@@ -129,7 +129,7 @@ impl BackgroundState {
 impl LayerType for Background {
     type Layout = NoLayout;
     type Bucket = NoBucket;
-    type TileBucket<'a> = NoTileBucket;
+    type View<'a> = NoTileView;
     type Drawing = TileDraws<KeptDraw>;
     type State = BackgroundState;
     const CROSSFADES: bool = true;
@@ -184,7 +184,7 @@ impl LayerType for Background {
             });
         }
 
-        let color_mode = paint_parameters.context.color_mode(if draw_passes == RenderPass::Translucent {
+        let color_mode = paint_parameters.context.color_mode(if draw_passes == RenderPass::TRANSLUCENT {
             ColorMode::alpha_blended()
         } else {
             ColorMode::unblended()
@@ -244,14 +244,14 @@ impl LayerType for Background {
     fn passes(layer: &LayerValues<Background>, evaluated: &EvaluatedLayer<Background>) -> RenderPass {
         let evaluated = &evaluated.paint;
         if *evaluated.background_opacity.uniform() == 0.0 {
-            RenderPass::None
+            RenderPass::NONE
         } else if !layer.unevaluated.background_pattern.is_undefined()
             || *evaluated.background_opacity.uniform() < 1.0
             || evaluated.background_color.uniform().a < 1.0
         {
-            RenderPass::Translucent
+            RenderPass::TRANSLUCENT
         } else {
-            RenderPass::Opaque | RenderPass::Translucent
+            RenderPass::OPAQUE | RenderPass::TRANSLUCENT
         }
     }
 

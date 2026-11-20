@@ -175,7 +175,7 @@ impl Layout<Dot> for DotLayout {
 impl LayerType for Dot {
     type Layout = DotLayout;
     type Bucket = DotBucket;
-    type TileBucket<'a> = LayerBucket<'a, Dot>;
+    type View<'a> = LayerBucket<'a, Dot>;
     type Drawing = TileDraws<KeptDraw>;
     type State = ();
 
@@ -223,7 +223,7 @@ impl LayerType for Dot {
     }
 
     fn passes(_layer: &LayerValues<Dot>, _evaluated: &EvaluatedLayer<Dot>) -> RenderPass {
-        RenderPass::Translucent
+        RenderPass::TRANSLUCENT
     }
 
     fn make_draws(
@@ -267,7 +267,7 @@ impl StyleLayerType for Tint {
 impl LayerType for Tint {
     type Layout = NoLayout;
     type Bucket = NoBucket;
-    type TileBucket<'a> = RasterView<'a>;
+    type View<'a> = RasterView<'a>;
     type Drawing = TileDraws<KeptDraw>;
     type State = ();
 
@@ -276,7 +276,7 @@ impl LayerType for Tint {
     }
 
     fn passes(_layer: &LayerValues<Tint>, _evaluated: &EvaluatedLayer<Tint>) -> RenderPass {
-        RenderPass::Translucent
+        RenderPass::TRANSLUCENT
     }
 
     fn make_draws(
@@ -309,7 +309,7 @@ impl StyleLayerType for Shade {
 impl LayerType for Shade {
     type Layout = NoLayout;
     type Bucket = NoBucket;
-    type TileBucket<'a> = &'a DemContents;
+    type View<'a> = &'a DemContents;
     type Drawing = TileDraws<KeptDraw>;
     type State = ();
 
@@ -318,7 +318,7 @@ impl LayerType for Shade {
     }
 
     fn passes(_layer: &LayerValues<Shade>, _evaluated: &EvaluatedLayer<Shade>) -> RenderPass {
-        RenderPass::Translucent
+        RenderPass::TRANSLUCENT
     }
 
     fn make_draws(

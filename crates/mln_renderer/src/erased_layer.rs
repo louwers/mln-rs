@@ -31,15 +31,15 @@ pub struct EvaluatedLayer<T: LayerType> {
     pub paint: <T::PaintProperties as PaintSet>::Evaluated,
     /// The default for a type without cross-faded properties.
     pub crossfade: CrossfadeParameters,
-    /// The `RenderPass` bits the layer draws in.
-    pub(crate) render_passes: u8,
+    /// The passes the layer draws in.
+    pub(crate) render_passes: RenderPass,
 }
 
 impl<T: LayerType> EvaluatedLayer<T> {
     /// The render passes the layer draws in.
     #[must_use]
     pub fn passes(&self) -> RenderPass {
-        RenderPass(self.render_passes)
+        self.render_passes
     }
 
     /// `layer` as a `T` layer's values, the same allocation, or `None` for
@@ -59,7 +59,7 @@ impl<T: LayerType> EvaluatedLayer<T> {
     /// The values of the layer `style` with its paint properties evaluated
     /// to `paint`, without a cross-fade or render passes.
     pub fn with_paint(style: Arc<LayerStyle<T>>, paint: <T::PaintProperties as PaintSet>::Evaluated) -> Self {
-        EvaluatedLayer { style, paint, crossfade: CrossfadeParameters::default(), render_passes: 0 }
+        EvaluatedLayer { style, paint, crossfade: CrossfadeParameters::default(), render_passes: RenderPass::NONE }
     }
 }
 
@@ -317,7 +317,7 @@ mod tests {
         let paint = TintPaintProperties::PossiblyEvaluated { tint_opacity: Evaluated::Constant(0.5) };
         let style = Arc::new(LayerStyle::<Tint>::new("raster".to_owned(), "source".to_owned()));
         let crossfade = CrossfadeParameters { from_scale: 2.0, to_scale: 1.0, t: 0.25 };
-        Arc::new(EvaluatedLayer { style, paint, crossfade, render_passes: 0 })
+        Arc::new(EvaluatedLayer { style, paint, crossfade, render_passes: RenderPass::NONE })
     }
 
     #[test]

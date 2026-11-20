@@ -435,7 +435,7 @@ impl<T: LayerType> Layer<T> {
             values,
             state,
             drawing,
-            passes: RenderPass::None,
+            passes: RenderPass::NONE,
             renderable: false,
             projection_variant: ProjectionVariant::Mercator,
             found: 0..0,
@@ -466,7 +466,7 @@ impl<T: LayerType> Layer<T> {
     /// its tiles.
     fn begin_frame(&mut self) -> bool {
         self.drawing.begin_frame();
-        let draws = self.values.evaluated.render_passes != RenderPass::None.underlying_type();
+        let draws = self.values.evaluated.render_passes != RenderPass::NONE;
         if !draws {
             self.drawing.clear_frame();
         }
@@ -699,7 +699,7 @@ impl<T: LayerType> RenderLayer for Layer<T> {
         let mut evaluated = self.values.evaluate(parameters);
         T::complete_evaluation(&mut self.state, &self.values, parameters, &mut evaluated);
         self.passes = T::passes(&self.values, &evaluated);
-        evaluated.render_passes = self.passes.underlying_type();
+        evaluated.render_passes = self.passes;
         self.values.evaluated = Arc::new(evaluated);
     }
 
@@ -718,7 +718,7 @@ impl<T: LayerType> RenderLayer for Layer<T> {
             None => FrameTiles::new(),
         };
         self.found = start..update.found.len();
-        for bucket in tiles.iter().filter_map(|tile| tile.bucket()) {
+        for bucket in tiles.iter().filter_map(|tile| tile.view()) {
             self.passes |= bucket.passes();
         }
         if T::INFO.source != SourceKind::None
@@ -802,7 +802,7 @@ impl<T: LayerType> RenderLayer for Layer<T> {
     }
 
     fn needs_rendering(&self) -> bool {
-        self.passes != RenderPass::None && self.values.style.visibility != VisibilityType::None
+        self.passes != RenderPass::NONE && self.values.style.visibility != VisibilityType::None
     }
 
     fn remove_all_draws(&mut self) {
