@@ -2610,6 +2610,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "mln-rs-c-abi-test"
+version = "0.0.13"
+dependencies = [
+ "regex",
+]
+
+[[package]]
 name = "mln-rs-conversion"
 version = "0.0.13"
 dependencies = [
@@ -2953,6 +2960,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "mln-rs-ratchet"
+version = "0.0.13"
+dependencies = [
+ "regex",
+ "toml_edit",
+]
+
+[[package]]
 name = "mln-rs-render-test"
 version = "0.0.13"
 dependencies = [
@@ -3259,6 +3274,10 @@ dependencies = [
  "mln-rs-util",
  "mln-rs-wire",
 ]
+
+[[package]]
+name = "mln-rs-unicode-tables"
+version = "0.0.13"
 
 [[package]]
 name = "mln-rs-util"

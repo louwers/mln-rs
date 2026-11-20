@@ -12,10 +12,13 @@ members = [
   "tools/bench/workload",
   "tools/bench-snapshot",
   "tools/c-abi-gen",
+  "tools/c-abi-test",
   "tools/expression-test",
+  "tools/ratchet",
   "tools/render-test",
   "tools/style-codegen",
   "tools/test-server",
+  "tools/unicode-tables",
   "tools/wasm-size",
   "vendor/*",
 ]

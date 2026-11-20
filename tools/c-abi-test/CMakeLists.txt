@@ -3,7 +3,7 @@
 # cmake/mln_ffi_tests.cmake builds it against its own: the same support files,
 # Unity and graphics fixtures, for one render backend: vulkan, or opengl on EGL,
 # maplibre-native-ffi's Linux OpenGL preset. `mise run test:c-abi` configures it
-# with the library that Cargo built and runs it through run.py.
+# with the library that Cargo built and runs it through src/main.rs.
 cmake_minimum_required(VERSION 3.25)
 project(mln_c_abi_test C CXX)
 
@@ -207,9 +207,9 @@ target_link_options(mln_native_abi_tests PRIVATE "LINKER:--allow-shlib-undefined
 # The exit programs (testdata/tests/native/exit), one executable each in exit/,
 # as maplibre-native-ffi's mln_native_add_exit_tests builds them. Each makes
 # its calls and returns from main while the library's threads are at work, so
-# the process exit that follows is the check: run.py expects each to exit with
-# status 0. A program whose name ends in a tag builds only where the tag is
-# active, as a suite file does.
+# the process exit that follows is the check: src/main.rs expects each to exit
+# with status 0. A program whose name ends in a tag builds only where the tag
+# is active, as a suite file does.
 file(GLOB exit_programs RELATIVE "${TESTS_DIR}/exit" CONFIGURE_DEPENDS
      "${TESTS_DIR}/exit/*.c")
 foreach(program IN LISTS exit_programs)

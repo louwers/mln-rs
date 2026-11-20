@@ -21,7 +21,7 @@ task.disable_spec_from_run_scripts = true
 # Default in mise 2027.7.0.
 cargo.binstall_native = true
 # Default on all platforms in mise 2027.8.0 (otherwise true on NixOS and
-# Alpine, which would build Node.js and Python from source).
+# Alpine, which would build Node.js from source).
 all_compile = false
 
 [tools]
@@ -40,9 +40,7 @@ all_compile = false
 # The browser build's page (examples/web) and its check.
 "core:node" = "24.22.2"
 "aqua:pnpm/pnpm" = "12.18.0"
-# The tasks' scripts that generate tables and fixtures, and the jq that
-# reads Cargo's JSON output.
-"core:python" = "3.15.2"
+# The jq that reads Cargo's JSON output.
 "aqua:jqlang/jq" = "1.8.2"
 # The formatters and linters (hk.pkl): hk runs them, dprint formats
 # (dprint.jsonc), jactionlint lints the workflows and shellcheck the tasks.
@@ -134,7 +132,7 @@ ucd=$(mktemp -d)
 trap 'rm -rf "$ucd"' EXIT
 curl -fsSL -o "$ucd/ArabicShaping.txt" https://www.unicode.org/Public/16.0.0/ucd/ArabicShaping.txt
 curl -fsSL -o "$ucd/UnicodeData.txt" https://www.unicode.org/Public/16.0.0/ucd/UnicodeData.txt
-python3 -I crates/mln_text/tools/gen_arabic_shaping.py "$ucd/ArabicShaping.txt" "$ucd/UnicodeData.txt" > crates/mln_text/src/arabic_tables.rs
+cargo run -q -p mln-rs-unicode-tables -- arabic-shaping "$ucd/ArabicShaping.txt" "$ucd/UnicodeData.txt"
 '''
 
 # The Unicode version is unicode-bidi's (its char_data's UNICODE_VERSION):
@@ -142,9 +140,11 @@ python3 -I crates/mln_text/tools/gen_arabic_shaping.py "$ucd/ArabicShaping.txt" 
 [tasks."generate:bidi-mirroring"]
 description = "Regenerate mln_text's Bidi_Mirroring_Glyph table from the Unicode Character Database"
 run = '''
-set -o pipefail
-curl -fsSL https://www.unicode.org/Public/16.0.0/ucd/BidiMirroring.txt |
-    python3 -I crates/mln_text/tools/gen_bidi_mirroring.py > crates/mln_text/src/bidi_mirroring.rs
+set -e
+ucd=$(mktemp -d)
+trap 'rm -rf "$ucd"' EXIT
+curl -fsSL -o "$ucd/BidiMirroring.txt" https://www.unicode.org/Public/16.0.0/ucd/BidiMirroring.txt
+cargo run -q -p mln-rs-unicode-tables -- bidi-mirroring "$ucd/BidiMirroring.txt"
 '''
 
 # style-codegen's generated_code_test checks that the code is up to date.
@@ -163,10 +163,10 @@ run = "cargo deny --locked check licenses"
 
 [tasks.ratchet]
 description = "Check that no file gains panics or RefCell borrows (tools/ratchet); `--update` lowers the counts"
-usage = 'arg "[args]..." var=#true help="Arguments to tools/ratchet/ratchet.py, such as `--update`"'
-run = 'eval "set -- ${usage_args:-}"; python3 -I tools/ratchet/ratchet.py "$@"'
+usage = 'arg "[args]..." var=#true help="Arguments to tools/ratchet, such as `--update`"'
+run = 'eval "set -- ${usage_args:-}"; cargo run -q -p mln-rs-ratchet -- "$@"'
 # As for docs: cmd has no eval.
-run_windows = "python3 -I tools/ratchet/ratchet.py {{ usage.args | default(value=[]) | join(sep=' ') }}"
+run_windows = "cargo run -q -p mln-rs-ratchet -- {{ usage.args | default(value=[]) | join(sep=' ') }}"
 
 [tasks.release]
 description = "Run the release workflow on main again, to finish a release that failed part way (RELEASING.md)"

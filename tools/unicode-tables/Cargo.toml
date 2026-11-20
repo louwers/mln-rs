@@ -1,0 +1,19 @@
+[package]
+name = "mln-rs-unicode-tables"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+# Writes mln_text's tables from the Unicode Character Database
+# (`mise run generate:arabic-shaping`, `generate:bidi-mirroring`); never
+# released.
+publish = false
+
+[[bin]]
+name = "unicode-tables"
+path = "src/main.rs"
+
+[lints]
+workspace = true
