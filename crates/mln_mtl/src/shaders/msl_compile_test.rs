@@ -254,18 +254,17 @@ fn ubo_ids(program: &Program, source: &msl::Source) -> Vec<(&'static str, usize)
             ],
             "hillshadePrepareUBOCount",
         ),
-        "LineShader"
-        | "LineGradientShader"
-        | "LinePatternShader"
-        | "LineSDFShader"
-        | "LineGradientSDFShader"
-        | "TileDebugShader" => (
+        "LineShader" | "LineGradientShader" | "LinePatternShader" | "LineSDFShader" | "LineGradientSDFShader" => (
             &[
                 ("idLineDrawableUBO", ID_LINE_DRAWABLE_UBO),
                 ("idLineTilePropsUBO", ID_LINE_TILE_PROPS_UBO),
                 ("idLineEvaluatedPropsUBO", ID_LINE_EVALUATED_PROPS_UBO),
             ],
             "lineUBOCount",
+        ),
+        "TileDebugShader" => (
+            &[("idTileDebugDrawableUBO", ID_LINE_DRAWABLE_UBO), ("idTileDebugPropsUBO", ID_LINE_EVALUATED_PROPS_UBO)],
+            "tileDebugUBOCount",
         ),
         "RasterShader" => (
             &[
@@ -352,6 +351,9 @@ const UBO_SIZES: &[(&str, usize)] = &[
     ("LineSDFTilePropsUBO", size_of::<line_layer_ubo::LineSDFTilePropsUBO>()),
     ("LineEvaluatedPropsUBO", size_of::<line_layer_ubo::LineEvaluatedPropsUBO>()),
     ("LineDrawableUnionUBO", size_of::<line_layer_ubo::LineDrawableUnionUBO>()),
+    ("TileDebugDrawableUBO", size_of::<tile_debug_ubo::TileDebugDrawableUBO>()),
+    ("TileDebugDrawableElement", size_of::<tile_debug_ubo::TileDebugDrawableElement>()),
+    ("TileDebugPropsUBO", size_of::<tile_debug_ubo::TileDebugPropsUBO>()),
     ("LineTilePropsUnionUBO", size_of::<line_layer_ubo::LineTilePropsUnionUBO>()),
     ("RasterDrawableUBO", size_of::<raster_layer_ubo::RasterDrawableUBO>()),
     ("RasterEvaluatedPropsUBO", size_of::<raster_layer_ubo::RasterEvaluatedPropsUBO>()),

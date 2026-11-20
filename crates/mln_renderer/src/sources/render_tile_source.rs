@@ -1,6 +1,6 @@
 // The render source of a source with tiles, and the debug overlays of its
 // tiles: the tile borders and the parse status and timestamp text, drawn as
-// polylines by the line shader.
+// polylines by the tile debug shader.
 
 use std::collections::BTreeMap;
 use std::mem::offset_of;
@@ -12,15 +12,13 @@ use glam::Vec2;
 use mln_gfx::gpu::{Gpu, ShaderKey};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::line_layer_ubo::{LineDrawableUBO, LineDrawableUnionUBO, LineEvaluatedPropsUBO};
 use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
-    ID_LINE_BLUR_VERTEX_ATTRIBUTE, ID_LINE_COLOR_VERTEX_ATTRIBUTE, ID_LINE_DATA_VERTEX_ATTRIBUTE, ID_LINE_DRAWABLE_UBO,
-    ID_LINE_EVALUATED_PROPS_UBO, ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE, ID_LINE_OFFSET_VERTEX_ATTRIBUTE,
-    ID_LINE_OPACITY_VERTEX_ATTRIBUTE, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, ID_LINE_WIDTH_VERTEX_ATTRIBUTE,
-    ID_PROJECTION_UBO,
+    ID_LINE_DATA_VERTEX_ATTRIBUTE, ID_LINE_DRAWABLE_UBO, ID_LINE_EVALUATED_PROPS_UBO,
+    ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, ID_PROJECTION_UBO,
 };
+use mln_gfx::shaders::tile_debug_ubo::{TileDebugDrawableElement, TileDebugDrawableUBO, TileDebugPropsUBO};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_map_types::MapDebugOptions;
 use mln_style::Source;
@@ -40,7 +38,7 @@ use crate::gfx::context::Context;
 use crate::gfx::indexes::DrawIndexes;
 use crate::gfx::line_mesh::{LineLayoutVertex, LineOptions, LineScratch, add_line};
 use crate::gfx::mesh::Indexed;
-use crate::gfx::vertex_attribute::{SharedAttribute, VertexAttributeArray};
+use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::layer_drawing::{DrawDepth, DrawList, DrawObjectsMut, FrameDraw, KeptDraw, LayerDraws};
 use crate::paint_parameters::PaintParameters;
 use crate::query::FeatureExtensionValue;
@@ -58,22 +56,20 @@ use crate::util::subdivision::subdivide_vertex_line;
 /// The line properties of a debug overlay's polylines: red tile borders, and
 /// black text over a white outline.
 #[must_use]
-fn debug_line_properties(type_: DebugType) -> LineEvaluatedPropsUBO {
+fn debug_line_properties(type_: DebugType) -> TileDebugPropsUBO {
     let (color, width) = match type_ {
         DebugType::TextOutline => (Color::white(), 4.0),
         DebugType::Text => (Color::black(), 2.0),
         DebugType::Border => (Color::red(), 4.0),
     };
-    LineEvaluatedPropsUBO {
+    TileDebugPropsUBO {
         color: color.to_float_array(),
         blur: 0.0,
         opacity: 1.0,
         gapwidth: 0.0,
         offset: 0.0,
         width,
-        floorwidth: 0.0,
-        pad0: 0.0,
-        pad1: 0.0,
+        pad: [0.0; 3],
     }
 }
 
@@ -140,7 +136,7 @@ struct DebugDraw {
 
 /// A draw's entries in a debug overlay's storage buffers.
 struct DebugUniforms {
-    draw_ubo: LineDrawableUnionUBO,
+    draw_ubo: TileDebugDrawableElement,
     projection: ProjectionUBO,
 }
 
@@ -163,7 +159,7 @@ fn debug_layer(debug_layers: &mut DebugLayers, type_: DebugType) -> &mut DebugLa
 /// A debug overlay: polylines over the tiles of the sources, in the color
 /// and width of its type.
 pub(crate) struct DebugLayer {
-    properties: LineEvaluatedPropsUBO,
+    properties: TileDebugPropsUBO,
     /// The overlay's draws, in the order they were made, which is the order
     /// they draw in.
     draws: Vec<DebugDraw>,
@@ -234,18 +230,14 @@ impl DebugLayer {
                 None,
                 false,
             );
-            let mut draw_ubo = LineDrawableUnionUBO::default();
-            draw_ubo.set(&LineDrawableUBO {
-                matrix: cast_matrix(&projection.fallback_matrix),
-                ratio: 1.0 / tile_id.pixels_to_tile_units(1.0, zoom as f32),
-                color_t: 0.0,
-                blur_t: 0.0,
-                opacity_t: 0.0,
-                gapwidth_t: 0.0,
-                offset_t: 0.0,
-                width_t: 0.0,
-                pad1: 0.0,
-            });
+            let draw_ubo = TileDebugDrawableElement {
+                drawable: TileDebugDrawableUBO {
+                    matrix: cast_matrix(&projection.fallback_matrix),
+                    ratio: 1.0 / tile_id.pixels_to_tile_units(1.0, zoom as f32),
+                    pad: [0.0; 7],
+                },
+                pad: [0.0; 8],
+            };
             let frame_draw = FrameDraw { depth: DrawDepth::Off, ..draw.draw.frame_draw(None) };
             let uniforms = DebugUniforms { draw_ubo, projection: to_projection_ubo(&projection) };
             self.draw_list.push_part(frame_draw, index, uniforms);
@@ -411,16 +403,8 @@ impl RenderSource for RenderTileSource {
         let globe = parameters.view.is_globe();
         let projection_variant = if globe { ProjectionVariant::Globe } else { ProjectionVariant::Mercator };
 
-        let uniforms = [
-            ID_LINE_COLOR_VERTEX_ATTRIBUTE,
-            ID_LINE_BLUR_VERTEX_ATTRIBUTE,
-            ID_LINE_OPACITY_VERTEX_ATTRIBUTE,
-            ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE,
-            ID_LINE_OFFSET_VERTEX_ATTRIBUTE,
-            ID_LINE_WIDTH_VERTEX_ATTRIBUTE,
-        ];
         let polyline_shader =
-            parameters.context.shader_key(&programs::TILE_DEBUG, uniforms.into_iter().collect(), projection_variant);
+            parameters.context.shader_key(&programs::TILE_DEBUG, Uniforms::default(), projection_variant);
 
         // The tiles to cover, whose draws stay where they were built with
         // the same shader and spell the tile's text: one of the other

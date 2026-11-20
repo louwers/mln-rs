@@ -91,6 +91,7 @@ use mln_gfx::shaders::source::glsl_es::{Attribute, Source, Texture, UniformBlock
 use mln_gfx::shaders::symbol_layer_ubo::{
     CollisionDrawableUBO, CollisionTilePropsUBO, SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO,
 };
+use mln_gfx::shaders::tile_debug_ubo::{TileDebugDrawableElement, TileDebugDrawableUBO, TileDebugPropsUBO};
 
 use super::glsl_sources;
 
@@ -603,6 +604,19 @@ shader_source!(
     ]
 );
 
+// Tile debug
+shader_source!(
+    TILE_DEBUG_SHADER,
+    &[
+        element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
+        block::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
+        element::<TileDebugDrawableUBO, TileDebugDrawableElement>("TileDebugDrawableUBO", ID_LINE_DRAWABLE_UBO),
+        block::<TileDebugPropsUBO>("TileDebugPropsUBO", ID_LINE_EVALUATED_PROPS_UBO),
+    ],
+    &[attr("a_pos_normal", ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE), attr("a_data", ID_LINE_DATA_VERTEX_ATTRIBUTE)],
+    &[]
+);
+
 // Line
 shader_source!(
     LINE_SHADER,
@@ -814,7 +828,7 @@ pub(crate) static BUILT_INS: &[(&Program, &Source)] = &[
     (&programs::CLIPPING_MASK, &CLIPPING_MASK_PROGRAM),
     (&programs::GLOBE_DEPTH, &GLOBE_DEPTH_SHADER),
     (&programs::LAYER_COMPOSITE, &LAYER_COMPOSITE_SHADER),
-    (&programs::TILE_DEBUG, &LINE_SHADER),
+    (&programs::TILE_DEBUG, &TILE_DEBUG_SHADER),
 ];
 
 /// The source of each program of the built-in layer types, which the

@@ -4311,6 +4311,185 @@ void main() {
 ",
 };
 
+pub(crate) const TILE_DEBUG_SHADER_PRELUDE: &str = r"
+
+#define idTileDebugDrawableUBO           idDrawableReservedVertexOnlyUBO
+#define idTileDebugPropsUBO     layerUBOStartId
+
+";
+
+pub(crate) const TILE_DEBUG_SHADER: Glsl = Glsl {
+    prelude: TILE_DEBUG_SHADER_PRELUDE,
+    vertex: r"
+
+layout(location = 0) in ivec2 in_pos_normal;
+layout(location = 1) in uvec4 in_data;
+
+layout(push_constant) uniform Constants {
+    int ubo_index;
+} constant;
+
+struct TileDebugDrawableUBO {
+    mat4 matrix;
+    float ratio;
+    // Interpolations
+    float color_t;
+    float blur_t;
+    float opacity_t;
+    float gapwidth_t;
+    float offset_t;
+    float width_t;
+    float pad1;
+    vec4 pad2;
+    vec4 pad3;
+};
+
+layout(std140, set = LAYER_SET_INDEX, binding = idTileDebugDrawableUBO) readonly buffer TileDebugDrawableUBOVector {
+    TileDebugDrawableUBO drawable_ubo[];
+} drawableVector;
+
+layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
+    ProjectionUBO projection_ubo[];
+} projectionVector;
+
+layout(set = LAYER_SET_INDEX, binding = idTileDebugPropsUBO) uniform TileDebugPropsUBO {
+    vec4 color;
+    float blur;
+    float opacity;
+    float gapwidth;
+    float offset;
+    float width;
+    float floorwidth;
+    float pad0;
+    float pad1;
+} props;
+
+layout(location = 0) out vec2 frag_normal;
+layout(location = 1) out vec2 frag_width2;
+layout(location = 2) out float frag_gamma_scale;
+
+#ifdef PROJECTION_GLOBE
+layout(location = 6) out float frag_tile_x;
+#endif
+
+void main() {
+    const TileDebugDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
+
+    const float gapwidth = props.gapwidth / 2.0;
+
+    const float offset = props.offset * -1.0;
+
+    float width = props.width;
+
+    // the distance over which the line edge fades out.
+    // Retina devices need a smaller distance to avoid aliasing.
+    const float ANTIALIASING = 1.0 / DEVICE_PIXEL_RATIO / 2.0;
+
+    vec2 a_extrude = in_data.xy - 128.0;
+    float a_direction = mod(in_data.z, 4.0) - 1.0;
+    vec2 pos = floor(in_pos_normal * 0.5);
+
+    // x is 1 if it's a round cap, 0 otherwise
+    // y is 1 if the normal points up, and -1 if it points down
+    // We store these in the least significant bit of in_pos_normal
+    vec2 normal = in_pos_normal - 2.0 * pos;
+    frag_normal = vec2(normal.x, normal.y * 2.0 - 1.0);
+
+    // these transformations used to be applied in the JS and native code bases.
+    // moved them into the shader for clarity and simplicity.
+    float halfwidth = width / 2.0;
+
+    float inset = gapwidth + (gapwidth > 0.0 ? ANTIALIASING : 0.0);
+    float outset = gapwidth + halfwidth * (gapwidth > 0.0 ? 2.0 : 1.0) + (halfwidth == 0.0 ? 0.0 : ANTIALIASING);
+
+    // Scale the extrusion vector down to a normal and then up by the line width
+    // of this vertex.
+    vec2 dist = outset * a_extrude * LINE_NORMAL_SCALE;
+
+    // Calculate the offset when drawing a line that is to the side of the actual line.
+    // We do this by creating a vector that points towards the extrude, but rotate
+    // it when we're drawing round end points (a_direction = -1 or 1) since their
+    // extrude vector points in another direction.
+    float u = 0.5 * a_direction;
+    float t = 1.0 - abs(u);
+    vec2 offset2 = offset * a_extrude * LINE_NORMAL_SCALE * frag_normal.y * mat2(t, -u, u, t);
+
+#ifdef PROJECTION_GLOBE
+    const float adjustedThickness = projectLineThickness(pos.y, projectionVector.projection_ubo[constant.ubo_index]);
+    const vec4 projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector.projection_ubo[constant.ubo_index]);
+    const vec2 extrudedPos = pos + (offset2 + dist) / drawable.ratio * adjustedThickness;
+    gl_Position = projectTile(extrudedPos, projectionVector.projection_ubo[constant.ubo_index]);
+    frag_tile_x = antimeridianClipX(extrudedPos, projectionVector.projection_ubo[constant.ubo_index]);
+    vec4 projected_extrude = gl_Position - projected_no_extrude;
+#else
+    vec4 projected_extrude = drawable.matrix * vec4(dist / drawable.ratio, 0.0, 0.0);
+    gl_Position = drawable.matrix * vec4(pos + offset2 / drawable.ratio, 0.0, 1.0) + projected_extrude;
+#endif
+
+    // calculate how much the perspective view squishes or stretches the extrude
+    float extrude_length_without_perspective = length(dist);
+    float extrude_length_with_perspective = length(projected_extrude.xy / gl_Position.w * paintParams.units_to_pixels);
+    frag_gamma_scale = extrude_length_without_perspective / extrude_length_with_perspective;
+
+    frag_width2 = vec2(outset, inset);
+}
+",
+    fragment: r"
+
+layout(location = 0) in vec2 frag_normal;
+layout(location = 1) in vec2 frag_width2;
+layout(location = 2) in float frag_gamma_scale;
+
+layout(location = 0) out vec4 out_color;
+
+layout(set = LAYER_SET_INDEX, binding = idTileDebugPropsUBO) uniform TileDebugPropsUBO {
+    vec4 color;
+    float blur;
+    float opacity;
+    float gapwidth;
+    float offset;
+    float width;
+    float floorwidth;
+    float pad0;
+    float pad1;
+} props;
+
+#ifdef PROJECTION_GLOBE
+layout(location = 6) in float frag_tile_x;
+#endif
+
+void main() {
+#ifdef PROJECTION_GLOBE
+    if (clippedAtAntimeridian(frag_tile_x)) {
+        discard;
+    }
+#endif
+
+#ifdef OVERDRAW_INSPECTOR
+    out_color = vec4(1.0);
+    return;
+#endif
+
+    vec4 color = props.color;
+
+    float blur = props.blur;
+
+    float opacity = props.opacity;
+
+    // Calculate the distance of the pixel from the line in pixels.
+    float dist = length(frag_normal) * frag_width2.s;
+
+    // Calculate the antialiasing fade factor. This is either when fading in
+    // the line in case of an offset line (frag_width2.t) or when fading out
+    // (frag_width2.s)
+    float blur2 = (blur + 1.0 / DEVICE_PIXEL_RATIO) * frag_gamma_scale;
+    float alpha = clamp(min(dist - (frag_width2.t - blur2), frag_width2.s - dist) / blur2, 0.0, 1.0);
+
+    out_color = color * (alpha * opacity);
+}
+",
+};
+
 pub(crate) const LINE_GRADIENT_SHADER: Glsl = Glsl {
     prelude: LINE_SHADE_PRELUDE,
     vertex: r"

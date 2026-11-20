@@ -23,3 +23,4 @@ pub mod shader_defines;
 pub mod sky_ubo;
 pub mod source;
 pub mod symbol_layer_ubo;
+pub mod tile_debug_ubo;

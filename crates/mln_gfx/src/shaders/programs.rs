@@ -677,12 +677,12 @@ pub static LAYER_COMPOSITE: Program = Program {
 };
 
 /// The engine's debug overlays of tiles: their borders and their text, drawn
-/// as lines whose properties are all uniforms. Each backend compiles it from
-/// its line shader.
+/// as lines whose color, width and other properties are uniforms
+/// ([`tile_debug_ubo`](crate::shaders::tile_debug_ubo)).
 pub static TILE_DEBUG: Program = Program {
     name: "TileDebugShader",
-    attributes: LINE_ATTRIBUTES,
+    attributes: &[(ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, Short2), (ID_LINE_DATA_VERTEX_ATTRIBUTE, UByte4)],
     instance_attributes: &[],
     textures: &[],
-    properties: LINE_PROPERTIES,
+    properties: &[],
 };
