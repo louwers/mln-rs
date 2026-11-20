@@ -2,7 +2,7 @@
 //! gesture or an animation over tiles already there.
 
 use mln_bench_workload::paths::{FRAMES, Path};
-use mln_map::{CameraOptions, MapMode};
+use mln_map::{BoundOptions, CameraOptions, MapMode};
 
 use super::VIEW;
 use crate::scenario::{Bench, Kind, Scenario};
@@ -126,7 +126,11 @@ fn terrain_3d(bench: &mut Bench) {
     let path = Path::Terrain3d;
     let camera = path.camera(&fixtures);
     let style = path.style(&fixtures);
-    let map = HeadlessMap::open(bench, &fixtures, VIEW, MapMode::Continuous, &style, &camera(0));
+    let mut map = HeadlessMap::open(bench, &fixtures, VIEW, MapMode::Continuous, &style, &camera(0));
+    // The path tilts past the map's default bound.
+    let max_pitch = (0..FRAMES).filter_map(|frame| camera(frame).pitch).fold(0.0, f64::max);
+    let bounds = BoundOptions { max_pitch: Some(max_pitch), ..Default::default() };
+    map.map().set_bounds(&bounds).expect("a pitch the map can take");
     frames(bench, map, camera, Some(DrawMeter::default()));
 }
 
