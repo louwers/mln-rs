@@ -264,8 +264,9 @@ fn alpine(pitched: bool) -> TransformState {
     .unwrap()
 }
 
-/// Without terrain the planes and matrices are those the view had before it
-/// knew of terrain, to the bit, and a terrain that goes away restores them.
+/// Without terrain the planes and matrices stay what they were before the
+/// view knew of terrain, to the bit (since then, meters scale as at the
+/// center), and a terrain that goes away restores them.
 #[test]
 fn matrices_without_terrain_are_unchanged() {
     // Each view's far plane, projection matrix, and the z row of its matrix
@@ -306,16 +307,16 @@ fn matrices_without_terrain_are_unchanged() {
                 -0.450_162_381_905_947_7,
                 -0.896_233_682_831_371_7,
                 -0.896_200_780_936_546_3,
-                -0.024_515_372_283_410_004,
-                0.261_188_125_549_333_3,
-                -0.027_173_570_463_330_236,
-                -0.027_172_572_886_498_946,
+                -0.024_527_372_501_201_117,
+                0.261_315_976_530_130_6,
+                -0.027_186_871_862_956_253,
+                -0.027_185_873_797_813_42,
                 -3_057_312.553_228_450_5,
                 -463_638.868_611_956_83,
                 366_351.995_260_439_06,
                 366_340.545_969_311_15,
             ],
-            [0.326_537_870_775_438_83, -0.897_155_426_552_309_5, -0.027_201_517_491_465_696, 366_672.746_155_253_44],
+            [0.326_537_870_775_438_83, -0.897_155_426_552_309_5, -0.027_214_832_571_097_07, 366_672.746_155_253_44],
         ),
     ];
     for (mut state, far_z, projection, clipped_z) in expected {
@@ -335,6 +336,37 @@ fn matrices_without_terrain_are_unchanged() {
             state.set_terrain_min_elevation(None);
             assert_eq!(before, *state.view());
         }
+    }
+}
+
+/// Meters scale as at the center, as the center's altitude does, so a point
+/// at the center's altitude draws at the center of the view, even where the
+/// camera is far from the center, over another latitude (GL JS's
+/// `pixelsPerMeter`).
+#[test]
+fn the_center_at_its_altitude_draws_at_the_center() {
+    for (zoom, center_altitude) in [(0.0, 9000.0), (3.0, -4000.0), (14.0, 1200.0)] {
+        let state = MapView {
+            camera: Camera {
+                center: LatLng::new(20.0, 10.0).unwrap(),
+                center_altitude,
+                zoom,
+                pitch: 60.0,
+                bearing: 45.0,
+                fov: mln_math::rad2deg(DEFAULT_FOV),
+                ..Camera::default()
+            },
+            extent: LogicalExtent::new(Size::new(512, 512), 1.0),
+            projection_mode: ProjectionMode::default(),
+            viewport: Viewport::default(),
+            projection: ProjectionDefinition::default(),
+        }
+        .to_state()
+        .unwrap();
+        let view = state.view();
+        let center = Projection::project(&view.center(mln_util::geo::WrapMode::Unwrapped), view.scale());
+        let clip = view.projection_matrix() * DVec4::new(center.x, center.y, center_altitude, 1.0);
+        assert!((clip.x / clip.w).abs() < 1e-9 && (clip.y / clip.w).abs() < 1e-9, "zoom {zoom}: {clip}");
     }
 }
 

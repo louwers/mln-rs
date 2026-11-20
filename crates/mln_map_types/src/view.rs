@@ -647,7 +647,13 @@ impl View {
         let height = f64::from(params.size.height);
 
         let camera = self.camera_pose();
-        let world_to_camera = camera.world_to_camera(params.scale, params.viewport_mode == ViewportMode::FlippedY);
+        // Meters scale as at the center, which the center's altitude is in,
+        // so that a point at the center's altitude draws at the center (GL
+        // JS's `pixelsPerMeter`).
+        let pixels_per_meter =
+            1.0 / Projection::meters_per_pixel_at_latitude(self.center(WrapMode::Unwrapped).latitude(), self.zoom());
+        let world_to_camera =
+            camera.world_to_camera(params.scale, pixels_per_meter, params.viewport_mode == ViewportMode::FlippedY);
         let mut camera_to_clip = perspective(self.perspective_fov(), width / height, near_z, self.far_z());
 
         // The vanishing point moves to the center of the padded view, from -1
@@ -666,8 +672,6 @@ impl View {
         if params.axonometric {
             // Without perspective, z skews x and y instead.
             proj_matrix.z_axis.w = 0.0;
-            let pixels_per_meter = 1.0
-                / Projection::meters_per_pixel_at_latitude(self.center(WrapMode::Unwrapped).latitude(), self.zoom());
             proj_matrix.z_axis.x = params.x_skew * pixels_per_meter;
             proj_matrix.z_axis.y = params.y_skew * pixels_per_meter;
         }
