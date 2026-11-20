@@ -18,9 +18,8 @@ use mln_storage::{FileSource, Resource, Responder, Response};
 use mln_style::Source;
 use mln_style::layer::Layer;
 use mln_style::layer_type::LayerStyle;
-use mln_style::sources::{raster_source, vector_source};
 use mln_util::chrono::{Timestamp, now};
-use mln_util::constants::DEFAULT_MAXIMUM_CONCURRENT_REQUESTS;
+use mln_util::constants::{DEFAULT_MAXIMUM_CONCURRENT_REQUESTS, TILE_SIZE_I};
 use mln_util::geo::LatLng;
 use mln_util::pool::TaskGroup;
 use mln_util::queue::Queue;
@@ -33,6 +32,7 @@ use crate::Registry;
 use crate::erased_layer::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::render_source::RenderSource;
 use crate::tests::fixture_layer::{Dot, Tint};
+use crate::tests::fixture_source::{self, Geometry, Raster};
 use crate::tile::source_tiles::SourceTiles;
 use crate::tile::store::TileStore;
 use crate::tile_parameters::TileParameters;
@@ -174,13 +174,11 @@ impl Scene {
         let thread_pool = TaskGroup::new(&crate::tests::pool());
         let network = Arc::new(Network::new());
 
-        let tileset = |url: &str, max_zoom| PartialTileset {
-            tiles: Some(vec![url.to_owned()]),
-            max_zoom: Some(max_zoom),
-            ..Default::default()
+        let tileset = |url: &str, max_zoom| {
+            PartialTileset { tiles: Some(vec![url.to_owned()]), max_zoom: Some(max_zoom), ..Default::default() }.into()
         };
-        let vector = crate::tests::ready(vector_source("vector", None, tileset("vector/{z}/{x}/{y}", 14)));
-        let raster = crate::tests::ready(raster_source("raster", None, tileset("raster/{z}/{x}/{y}", 6), 256));
+        let vector = fixture_source::source::<Geometry>("vector", tileset("vector/{z}/{x}/{y}", 14), TILE_SIZE_I);
+        let raster = fixture_source::source::<Raster>("raster", tileset("raster/{z}/{x}/{y}", 6), 256);
 
         let mut fill = Layer::new(Registry::with_builtins().style(), "dot", "water", "vector").unwrap();
         fill.set_source_layer("water");

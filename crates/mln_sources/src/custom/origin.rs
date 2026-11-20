@@ -1,27 +1,29 @@
-//! Custom geometry and custom vector sources: tiles whose data the host
-//! gives through the source's provider. Fetching it is assumed to be
-//! expensive, so only a required tile subscribes; a tile that becomes
-//! optional before it has anything to show cancels.
+//! The render half of custom sources: tiles whose data the host gives
+//! through the source's provider. Fetching it is assumed to be expensive, so
+//! only a required tile subscribes; a tile that becomes optional before it
+//! has anything to show cancels.
 
 use std::marker::PhantomData;
 use std::sync::Arc;
 
+use mln_renderer::source::{
+    Cover, DataOrigin, LoadContext, NewTile, OriginUpdate, Replier, SourceType, Supply, TileInput, TileKind, TileLoad,
+    TileNecessity,
+};
 use mln_style::Source;
-use mln_style::custom_tile_loader::{CustomProvider, CustomTileSubscriber, SubscriberKey};
 use mln_style::source_type::{SourceData, StyleSourceType};
-use mln_style::sources::custom::{CustomGeometryProvider, CustomVectorProvider, CustomVectorTileData, TileDataFormat};
-use mln_style::sources::geojson::TileFeatures;
-use mln_style::sources::{CustomGeometrySourceType, CustomVectorSourceType};
 use mln_tile::TileData;
 use mln_tile_id::OverscaledTileID;
 use mln_util::constants;
 use mln_util::error::Error;
 use mln_util::range::Range;
 
-use crate::source::{
-    Cover, DataOrigin, LoadContext, NewTile, OriginUpdate, Replier, SourceType, Supply, TileInput, TileKind, TileLoad,
-    TileNecessity,
+use super::provider::{CustomProvider, CustomTileSubscriber, SubscriberKey};
+use super::{
+    CustomGeometryProvider, CustomGeometrySourceType, CustomVectorProvider, CustomVectorSourceType,
+    CustomVectorTileData, TileDataFormat,
 };
+use crate::geojson::TileFeatures;
 
 impl SourceType for CustomGeometrySourceType {
     fn supply(_source: &Source) -> Supply {
@@ -46,7 +48,10 @@ pub(crate) trait CustomSource: StyleSourceType {
 
 impl CustomSource for CustomGeometrySourceType {
     fn differs(a: &SourceData<Self>, b: &SourceData<Self>) -> bool {
-        a.differs(b)
+        let (a, b) = (&a.options, &b.options);
+        !Arc::ptr_eq(&a.tile_options, &b.tile_options)
+            || a.zoom_range != b.zoom_range
+            || !Arc::ptr_eq(&a.provider, &b.provider)
     }
 
     fn parts(data: &SourceData<Self>) -> (Arc<dyn CustomLoader>, u16, Range<u8>) {
@@ -58,7 +63,8 @@ impl CustomSource for CustomGeometrySourceType {
 
 impl CustomSource for CustomVectorSourceType {
     fn differs(a: &SourceData<Self>, b: &SourceData<Self>) -> bool {
-        a.differs(b)
+        let (a, b) = (&a.options, &b.options);
+        a.zoom_range != b.zoom_range || !Arc::ptr_eq(&a.provider, &b.provider)
     }
 
     fn parts(data: &SourceData<Self>) -> (Arc<dyn CustomLoader>, u16, Range<u8>) {

@@ -5,10 +5,8 @@ use std::time::Duration;
 use feature::Value;
 use geojson::{Feature, GeoJson, Geometry};
 use mln_renderer::RenderingStats;
+use mln_sources::custom::geometry::{self, CustomGeometrySourceHandle, Options as CustomGeometrySourceOptions};
 use mln_style::conversion::Convertible;
-use mln_style::sources::custom_geometry_source::{
-    self, CustomGeometrySourceHandle, Options as CustomGeometrySourceOptions,
-};
 use mln_style::{Edit, Layer};
 use mln_tile_id::CanonicalTileID;
 use mln_util::Color;
@@ -76,7 +74,7 @@ impl RenderingStatsView {
                 ..Default::default()
             };
             // The default tile options are valid, so this always succeeds.
-            if let Ok(source) = custom_geometry_source::create(RENDERING_STATS_SOURCE_ID, options, map.pool())
+            if let Ok(source) = geometry::create(RENDERING_STATS_SOURCE_ID, options, map.pool())
                 && let Some(source_handle) = CustomGeometrySourceHandle::of(&source)
             {
                 let _ = handle.set(source_handle);

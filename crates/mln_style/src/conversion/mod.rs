@@ -11,11 +11,8 @@
 pub(crate) mod color_ramp_property_value;
 pub(crate) mod constant;
 pub(crate) mod coordinate;
-pub(crate) mod custom_geometry_source_options;
 pub(crate) mod filter;
 pub mod function;
-pub(crate) mod geojson;
-pub(crate) mod geojson_options;
 pub(crate) mod image;
 pub mod layer;
 pub(crate) mod light;
@@ -26,7 +23,6 @@ pub(crate) mod rotation;
 pub(crate) mod sky;
 pub mod source;
 pub(crate) mod sprite;
-pub mod tileset;
 pub(crate) mod transition_options;
 
 pub use mln_conversion::{Convertible, Error};
@@ -43,7 +39,6 @@ pub fn convert<T: Converter>(value: &Convertible<'_>, error: &mut Error) -> Opti
 
 pub use color_ramp_property_value::convert_color_ramp_property_value;
 pub use filter::convert_filter;
-pub use geojson_options::convert_geojson_options;
 pub use layer::convert_layer;
 pub use light::convert_light;
 pub use projection::convert_projection;

@@ -17,6 +17,11 @@ use mln_map::{
     NorthOrientation, ProjectionMode, RenderFrameStatus, RenderMode, TileLodMode, TileSettings, Viewport, ViewportMode,
 };
 use mln_renderer::{OverscaledTileID, TileOperation, UpdateParameters, UpdateReader};
+use mln_sources::custom::geometry::{self, CustomGeometrySourceHandle, Options as CustomGeometrySourceOptions};
+use mln_sources::custom::provider::TileFunction;
+use mln_sources::geojson::GeoJSONOptions;
+use mln_sources::image::ImageSourceOptions;
+use mln_sources::{ImageSourceType, image_source};
 use mln_storage::network_status::{NetworkStatus, Status as NetworkStatusType};
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
@@ -26,19 +31,12 @@ use mln_storage::{
 };
 use mln_style::conversion::layer::convert_layer;
 use mln_style::conversion::{Convertible, Error as ConversionError};
-use mln_style::custom_tile_loader::TileFunction;
 use mln_style::expression::{Formatted, FormattedSection, Functions, Image};
 use mln_style::layer::Layer;
 use mln_style::layer_type::LayerStyle;
 use mln_style::layers::symbol_layer::Symbol;
 use mln_style::projection::Projection;
 use mln_style::source_type::SourceData;
-use mln_style::sources::custom_geometry_source::{
-    self, CustomGeometrySourceHandle, Options as CustomGeometrySourceOptions,
-};
-use mln_style::sources::geojson::GeoJSONOptions;
-use mln_style::sources::image::ImageSourceOptions;
-use mln_style::sources::{ImageSourceType, image_source};
 use mln_style::sprite::Sprite;
 use mln_style::style_property::Kind as StylePropertyKind;
 use mln_style::{Edit, PropertyValue, Source, TransitionOptions};
@@ -96,7 +94,7 @@ pub(crate) fn layer_property(layer: &str, name: &str, value: serde_json::Value) 
 
 fn vector_source(id: &str, tiles: &str) -> Source {
     let tileset = PartialTileset { tiles: Some(vec![tiles.to_owned()]), ..PartialTileset::default() };
-    mln_style::sources::vector_source(id, None, tileset)
+    mln_sources::vector_source(id, None, tileset)
 }
 
 /// `source` with `change` made to its common members.
@@ -2211,7 +2209,7 @@ fn counted_custom_source(requested_tiles: &Arc<AtomicI32>, prefetch_zoom_delta: 
         cancel_tile_function: Some(Arc::new(|_: &CanonicalTileID| {})),
         ..Default::default()
     };
-    let custom = custom_geometry_source::create("custom", options, pool).unwrap();
+    let custom = geometry::create("custom", options, pool).unwrap();
     handle.set(CustomGeometrySourceHandle::of(&custom).unwrap()).unwrap();
     if prefetch_zoom_delta.is_some() {
         return with_common(&custom, |common| common.prefetch_zoom_delta = prefetch_zoom_delta);
@@ -2989,7 +2987,7 @@ fn stencil_overflow() {
     };
     let mut options = CustomGeometrySourceOptions { fetch_tile_function: Some(fetch), ..Default::default() };
     options.tile_options.tile_size = mln_util::constants::TILE_SIZE_I / 32;
-    let custom = custom_geometry_source::create("custom", options, &test.pool).unwrap();
+    let custom = geometry::create("custom", options, &test.pool).unwrap();
     handle.set(CustomGeometrySourceHandle::of(&custom).unwrap()).unwrap();
 
     test.map().add_source(custom).unwrap();

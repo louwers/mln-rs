@@ -5,13 +5,13 @@ use geojson::{GeoJson, Geometry};
 use mln_expression::dsl::{eq, get_str, gt, id, literal, literal_str, ne, number};
 use mln_map::{CameraOptions, MapMode};
 use mln_renderer::query::{FeatureExtensionValue, RenderedQueryOptions, SourceQueryOptions};
+use mln_sources::geojson::{GeoJSONOptions, GeoJsonSourceType};
 use mln_storage::Kind;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style::conversion::{Convertible, Error, convert_filter};
 use mln_style::expression::expression::FeatureState;
 use mln_style::expression::{Functions, Value as ExpressionValue};
 use mln_style::filter::Filter;
-use mln_style::sources::geojson::{GeoJSONOptions, GeoJsonSourceType};
 use mln_style::{Edit, Layer};
 use mln_util::ErrorKind;
 use mln_util::feature::Feature;
@@ -563,7 +563,7 @@ fn get_top_cluster_feature(test: &QueryTest) -> Vec<Feature> {
 
     let coordinate = ll(0.0, 0.0);
     let options = GeoJSONOptions { cluster: true, ..GeoJSONOptions::default() };
-    let source = mln_style::sources::geojson_source("cluster_source", Arc::new(options));
+    let source = mln_sources::geojson_source("cluster_source", Arc::new(options));
 
     let mut cluster_layer =
         Layer::new(mln_rs::builtin_registry().style(), "symbol", "cluster_layer", "cluster_source").unwrap();

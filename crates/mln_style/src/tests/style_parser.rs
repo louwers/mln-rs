@@ -275,7 +275,7 @@ fn deepest_admitted_style_parses_on_a_1_mib_stack() {
         let radius =
             nest(r#"["interpolate", ["linear"], ["get", "a"], 0, X, 1, 0]"#, r#"["number", ["get", "a"]]"#, depth);
         format!(
-            r#"{{"version": 8, "sources": {{"s": {{"type": "vector", "tiles": ["http://example.com/{{z}}/{{x}}/{{y}}"]}}}},
+            r#"{{"version": 8, "sources": {{"s": {{"type": "shapes"}}}},
                 "layers": [{{"id": "c", "type": "symbol", "source": "s", "source-layer": "l",
                              "filter": {filter}, "paint": {{"text-halo-width": {radius}}}}}]}}"#
         )
@@ -308,7 +308,7 @@ fn invalid_properties_are_skipped() {
         .parse(
             r#"{
         "version": 8,
-        "sources": {"s": {"type": "geojson", "data": {"type": "FeatureCollection", "features": []}}},
+        "sources": {"s": {"type": "points"}},
         "layers": [
             {"id": "a", "type": "symbol", "source": "s",
              "layout": {"visibility": "maybe", "symbol-sort-key": 1},

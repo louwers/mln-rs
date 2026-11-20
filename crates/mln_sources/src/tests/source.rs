@@ -5,18 +5,18 @@
 use std::sync::Arc;
 
 use mln_conversion::Convertible;
+use mln_style::conversion::Error;
+use mln_style::conversion::source::convert_source;
+use mln_style::source_type::{Described, ErasedDescription, Load, Source, SourceData};
+use mln_style::{Edit, Style};
 use mln_util::tileset::{PartialTileset, RasterEncoding, Tileset, VectorEncoding};
 
-use super::util::parse_json;
-use crate::conversion::Error;
-use crate::conversion::source::convert_source;
-use crate::source_type::{Described, ErasedDescription, Load, Source, SourceData};
-use crate::sources::geojson::{GeoJSONOptions, GeoJsonSourceType, geojson_source};
-use crate::sources::tileset::{
+use super::{parse_json, style_registry};
+use crate::geojson::{GeoJSONOptions, GeoJsonSourceType, geojson_source};
+use crate::tileset::{
     RasterDemKind, RasterKind, TilesetKind, TilesetSourceType, VectorKind, raster_dem_source, raster_source,
     vector_source,
 };
-use crate::{Edit, Style, StyleRegistry};
 
 /// What `source`'s type describes `data`, its fetched resource, as.
 fn describe(source: &Source, data: &[u8]) -> Described<ErasedDescription> {
@@ -52,7 +52,7 @@ fn tileset_loaded_from_tilejson<K: TilesetKind>(source: &Source) -> Tileset {
 }
 
 fn style_with(source: Source) -> Style {
-    let mut style = Style::new(StyleRegistry::with_builtins());
+    let mut style = Style::new(style_registry());
     style.apply(Edit::AddSource(source)).unwrap();
     style
 }
@@ -107,14 +107,14 @@ fn geojson_source_keeps_the_style_attribution() {
     assert_eq!(Some("Fixture data".to_owned()), source.data().attribution());
 
     let mut style = style_with(source);
-    let options = crate::sources::geojson::GeoJsonSourceOptions::new(GeoJSONOptions::default_options());
+    let options = crate::geojson::GeoJsonSourceOptions::new(GeoJSONOptions::default_options());
     let data = options.data_builder().build(r#"{"type": "Point", "coordinates": [1.1, 1.1]}"#.parse().unwrap());
     style.apply(GeoJsonSourceType::set_data("source", Some(data.unwrap()))).unwrap();
     assert_eq!(Some("Fixture data".to_owned()), style.get_source("source").unwrap().data().attribution());
 
     style.apply(GeoJsonSourceType::set_url("source", "url")).unwrap();
     let source = described(style.get_source("source").unwrap(), br#"{"type": "Point", "coordinates": [2.2, 2.2]}"#);
-    assert!(crate::sources::geojson::geojson_data(&source).is_some());
+    assert!(crate::geojson::geojson_data(&source).is_some());
     assert_eq!(Some("Fixture data".to_owned()), source.data().attribution());
 }
 
@@ -199,8 +199,7 @@ fn raster_dem_tile_json_zoom_kept_without_inline_override() {
 /// The source the style JSON `json` converts to.
 fn converted_source(json: &str) -> Result<Source, String> {
     let mut error = Error::default();
-    convert_source(&Convertible::from(&parse_json(json)), &mut error, "source", &StyleRegistry::with_builtins())
-        .ok_or(error.message)
+    convert_source(&Convertible::from(&parse_json(json)), &mut error, "source", &style_registry()).ok_or(error.message)
 }
 
 // A vector source's tileset takes the style's sparse, over a TileJSON or inline.

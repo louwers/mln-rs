@@ -6,11 +6,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use mln_runtime::{CustomSourceCallbacks, ErrorKind, GeoJsonSourceOptions, Map, ResourceRequest, SourceKind};
+use mln_sources::TileDataFormat;
+use mln_sources::custom::geometry::TileOptions;
 use mln_storage::response::Reason;
 use mln_storage::{ResourceError, Response};
 use mln_style::expression::Functions;
-use mln_style::sources::TileDataFormat;
-use mln_style::sources::custom_geometry_source::TileOptions;
 use mln_style_types::{ProjectionDefinition, ProjectionType};
 use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;

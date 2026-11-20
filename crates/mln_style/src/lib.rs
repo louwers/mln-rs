@@ -41,7 +41,6 @@
 pub mod color_ramp_property_value;
 pub mod conversion;
 mod conversion_impl;
-pub mod custom_tile_loader;
 pub mod diff;
 pub mod edit;
 pub mod evaluated;
@@ -71,7 +70,6 @@ pub mod sky;
 mod sky_properties;
 pub mod source_list;
 pub mod source_type;
-pub mod sources;
 pub mod sprite;
 mod style;
 mod style_json;

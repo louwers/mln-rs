@@ -5,17 +5,18 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 
 use geojson::{GeoJson, GeometryValue};
+use mln_sources::custom::geometry::{self, TileOptions};
+use mln_sources::custom::vector;
+use mln_sources::geojson::{GeoJSONData, GeoJSONDataBuilder};
+use mln_sources::image::ImageSourceOptions;
+use mln_sources::{
+    CustomGeometrySourceHandle, CustomGeometrySourceType, CustomVectorSourceHandle, CustomVectorSourceType,
+    GeoJSONOptions, GeoJsonSourceType, ImageSourceType, RasterDemSourceType, RasterSourceType, TileDataFormat,
+    VectorSourceType, geojson_source,
+};
 use mln_style::expression::Functions;
 use mln_style::image::Impl as StyleImage;
 use mln_style::source_type::{SourceData, StyleSourceType};
-use mln_style::sources::custom_geometry_source::{self, TileOptions};
-use mln_style::sources::geojson::{GeoJSONData, GeoJSONDataBuilder};
-use mln_style::sources::image::ImageSourceOptions;
-use mln_style::sources::{
-    CustomGeometrySourceHandle, CustomGeometrySourceType, CustomVectorSourceHandle, CustomVectorSourceType,
-    GeoJSONOptions, GeoJsonSourceType, ImageSourceType, RasterDemSourceType, RasterSourceType, TileDataFormat,
-    VectorSourceType, custom_vector_source, geojson_source,
-};
 use mln_style::{Edit, Source, SourceInstance, TransitionOptions};
 use mln_tile_id::CanonicalTileID;
 use mln_util::error::Error;
@@ -145,7 +146,7 @@ impl GeoJsonSourceOptions {
     fn into_core(self, functions: &Arc<Functions>) -> Result<GeoJSONOptions, Error> {
         let cluster_properties = match &self.cluster_properties {
             Some(json) => parse_cluster_properties(json, functions)?,
-            None => mln_style::sources::geojson::ClusterProperties::default(),
+            None => mln_sources::geojson::ClusterProperties::default(),
         };
         Ok(GeoJSONOptions {
             minzoom: self.min_zoom,
@@ -171,7 +172,7 @@ impl GeoJsonSourceOptions {
 fn parse_cluster_properties(
     json: &str,
     functions: &Arc<Functions>,
-) -> Result<mln_style::sources::geojson::ClusterProperties, Error> {
+) -> Result<mln_sources::geojson::ClusterProperties, Error> {
     let value: serde_json::Value = serde_json::from_str(json)
         .map_err(|error| Error::invalid_argument(format!("cluster_properties is not valid JSON: {error}")))?;
     if !value.is_object() {
@@ -179,7 +180,7 @@ fn parse_cluster_properties(
     }
     let wrapper = serde_json::json!({ "clusterProperties": value });
     let mut error = mln_conversion::Error::default();
-    let options = mln_style::conversion::convert_geojson_options(
+    let options = mln_sources::geojson::convert_geojson_options(
         &mln_conversion::Convertible::from(&wrapper),
         functions,
         &mut error,
@@ -249,7 +250,7 @@ impl std::fmt::Debug for CustomSourceCallbacks {
 /// the source's provider does.
 fn tile_functions(
     callbacks: &Arc<CustomSourceCallbacks>,
-) -> (Option<mln_style::custom_tile_loader::TileFunction>, Option<mln_style::custom_tile_loader::TileFunction>) {
+) -> (Option<mln_sources::custom::provider::TileFunction>, Option<mln_sources::custom::provider::TileFunction>) {
     let fetch: Weak<CustomSourceCallbacks> = Arc::downgrade(callbacks);
     let fetch = Arc::new(move |tile: &CanonicalTileID| {
         if let Some(callbacks) = fetch.upgrade() {
@@ -258,7 +259,7 @@ fn tile_functions(
     });
     let cancel = callbacks.cancel_tile.as_ref().map(|_| {
         let cancel = Arc::downgrade(callbacks);
-        let cancel: mln_style::custom_tile_loader::TileFunction = Arc::new(move |tile: &CanonicalTileID| {
+        let cancel: mln_sources::custom::provider::TileFunction = Arc::new(move |tile: &CanonicalTileID| {
             if let Some(callback) = cancel.upgrade().as_ref().and_then(|callbacks| callbacks.cancel_tile.as_ref()) {
                 callback(*tile);
             }
@@ -442,7 +443,8 @@ fn source_info(source: &Source) -> Option<SourceInfo> {
         }),
         tile_size: summary.tile_size,
         vector_encoding: summary.vector_encoding,
-        geojson: summary.geojson.map(|options| GeoJsonSourceOptions::from_core(&options)),
+        geojson: SourceData::<GeoJsonSourceType>::recover(source)
+            .map(|data| GeoJsonSourceOptions::from_core(&data.options.options)),
     })
 }
 
@@ -676,14 +678,9 @@ impl Map {
             move |entry, outbox| {
                 add_callback_source(entry, outbox, source_id, callbacks, |id, callbacks, pool| {
                     let (fetch_tile_function, cancel_tile_function) = tile_functions(callbacks);
-                    let options = custom_geometry_source::Options {
-                        fetch_tile_function,
-                        cancel_tile_function,
-                        zoom_range,
-                        tile_options,
-                    };
-                    custom_geometry_source::create(&id, options, pool)
-                        .map_err(|error| Error::invalid_argument(error.to_string()))
+                    let options =
+                        geometry::Options { fetch_tile_function, cancel_tile_function, zoom_range, tile_options };
+                    geometry::create(&id, options, pool).map_err(|error| Error::invalid_argument(error.to_string()))
                 })
             },
             |(), entry| entry.applied(),
@@ -704,9 +701,8 @@ impl Map {
             move |entry, outbox| {
                 add_callback_source(entry, outbox, source_id, callbacks, |id, callbacks, pool| {
                     let (fetch_tile_function, cancel_tile_function) = tile_functions(callbacks);
-                    let options =
-                        custom_vector_source::Options { fetch_tile_function, cancel_tile_function, zoom_range };
-                    Ok(custom_vector_source::create(&id, options, pool))
+                    let options = vector::Options { fetch_tile_function, cancel_tile_function, zoom_range };
+                    Ok(vector::create(&id, options, pool))
                 })
             },
             |(), entry| entry.applied(),

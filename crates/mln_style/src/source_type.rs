@@ -28,7 +28,6 @@ use mln_util::tileset::{Tileset, VectorEncoding};
 
 use crate::expression::Functions;
 use crate::layer_type::SourceKind;
-use crate::sources::geojson::GeoJSONOptions;
 
 /// What the engine needs to know about a source type besides its data. The
 /// name identifies the type: two registries that agree on a name agree on
@@ -70,8 +69,6 @@ pub struct SourceSummary {
     /// How a vector source's tiles are encoded: as its loaded tileset says,
     /// else as the style does.
     pub vector_encoding: Option<VectorEncoding>,
-    /// A GeoJSON source's options.
-    pub geojson: Option<Arc<GeoJSONOptions>>,
 }
 
 /// What an offline download of a source fetches.

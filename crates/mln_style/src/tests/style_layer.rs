@@ -81,17 +81,19 @@ fn observer() {
     assert!(!notified(&mut layer, &mut |l| l.set_source_id("other-source")));
 }
 
-fn fixture(path: &str) -> String {
-    let path = std::path::Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("testdata").join(path);
-    std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+/// A loaded style with the geometry source `unusedsource`, as C++'s
+/// `style-unused-sources.json` has, of a fixture source type.
+fn style_with_unused_source() -> Style {
+    let mut style = Style::new(StyleRegistry::with_builtins());
+    style.load_json(r#"{"version": 8, "sources": {"unusedsource": {"type": "shapes"}}, "layers": []}"#);
+    style
 }
 
 // gtest: Layer.DuplicateLayer
 #[test]
 fn duplicate_layer() {
     // Setup style
-    let mut style = Style::new(StyleRegistry::with_builtins());
-    style.load_json(&fixture("test/fixtures/resources/style-unused-sources.json"));
+    let mut style = style_with_unused_source();
 
     // Add initial layer
     style
@@ -110,8 +112,7 @@ fn duplicate_layer() {
 #[test]
 fn incompatible_layer() {
     // Setup style
-    let mut style = Style::new(StyleRegistry::with_builtins());
-    style.load_json(&fixture("test/fixtures/resources/style-unused-sources.json"));
+    let mut style = style_with_unused_source();
 
     // Try to add duplicate
     match style.apply(Edit::AddLayer { layer: new_layer("shade", "shade", "unusedsource"), before: None }) {

@@ -117,12 +117,13 @@ impl std::fmt::Debug for Registry {
 }
 
 impl Registry {
-    /// The built-in expression functions, the engine's own layer and source
-    /// types, without those of `mln_layers` and `mln_sources`, and the tests'
-    /// `dot` layer type, for this crate's tests, which can't reach the
-    /// facade's registry.
+    /// The built-in expression functions, the engine's own layer type,
+    /// without the types of `mln_layers` and `mln_sources`, and the tests'
+    /// fixture layer and source types, for this crate's tests, which can't
+    /// reach the facade's registry.
     #[cfg(test)]
     pub(crate) fn with_builtins() -> Arc<Registry> {
+        use crate::tests::fixture_source::{Dem, Geometry, Raster, Tiles};
         static BUILTINS: std::sync::LazyLock<Arc<Registry>> = std::sync::LazyLock::new(|| {
             let mut builder = RegistryBuilder::new();
             mln_style::expression::functions::register_builtin_functions(builder.functions_mut()).unwrap();
@@ -130,7 +131,9 @@ impl Registry {
             builder.add_layer_type::<crate::tests::fixture_layer::Dot>().unwrap();
             builder.add_layer_type::<crate::tests::fixture_layer::Tint>().unwrap();
             builder.add_layer_type::<crate::tests::fixture_layer::Shade>().unwrap();
-            crate::builtins::register_source_types(&mut builder).unwrap();
+            builder.add_source_type::<Tiles<Geometry>>().unwrap();
+            builder.add_source_type::<Tiles<Raster>>().unwrap();
+            builder.add_source_type::<Tiles<Dem>>().unwrap();
             builder.build()
         });
         Arc::clone(&BUILTINS)
@@ -187,16 +190,15 @@ impl mln_wire::Context for &Registry {
 
 #[cfg(test)]
 mod tests {
-    use mln_style::sources::GeoJsonSourceType;
-
     use super::*;
     use crate::tests::fixture_layer::Tint;
+    use crate::tests::fixture_source::{Geometry, Tiles};
 
     #[test]
     fn a_source_type_registers_once() {
         let mut builder = RegistryBuilder::new();
-        builder.add_source_type::<GeoJsonSourceType>().unwrap();
-        assert_eq!(builder.add_source_type::<GeoJsonSourceType>(), Err(RegisterError::Duplicate("geojson".to_owned())));
+        builder.add_source_type::<Tiles<Geometry>>().unwrap();
+        assert_eq!(builder.add_source_type::<Tiles<Geometry>>(), Err(RegisterError::Duplicate("tiles".to_owned())));
     }
 
     #[test]

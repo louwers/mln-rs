@@ -27,10 +27,10 @@ use std::sync::{Arc, OnceLock};
 use mln_headless::{HeadlessFrontend, RenderResult};
 use mln_map::{Map, MapEvent, MapMode, MapOptions, RenderFrameStatus};
 use mln_renderer::{FontStack, GlyphRange, OverscaledTileID, TileOperation, UpdateReader};
+use mln_sources::custom::geometry::CustomGeometrySourceHandle;
+use mln_sources::custom::provider::TileFunction;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{FileSource, Kind, Resource, Responder, Response};
-use mln_style::custom_tile_loader::TileFunction;
-use mln_style::sources::custom_geometry_source::CustomGeometrySourceHandle;
 use mln_style::sprite::Sprite;
 use mln_tile_id::CanonicalTileID;
 use mln_util::Error;
@@ -60,11 +60,11 @@ pub(crate) fn read_file(path: &str) -> String {
 /// A GeoJSON source `id` with `options` and the data of `geojson`.
 pub(crate) fn geojson_source_with_data(
     id: &str,
-    options: Arc<mln_style::sources::GeoJSONOptions>,
+    options: Arc<mln_sources::GeoJSONOptions>,
     geojson: geojson::GeoJson,
 ) -> mln_style::Source {
+    use mln_sources::geojson::{GeoJsonSourceOptions, GeoJsonSourceType};
     use mln_style::source_type::SourceData;
-    use mln_style::sources::geojson::{GeoJsonSourceOptions, GeoJsonSourceType};
     let options = GeoJsonSourceOptions::new(options);
     let data = options.data_builder().build(geojson).expect("GeoJSON data");
     mln_style::Source::new(id, SourceData::<GeoJsonSourceType>::with_description(options, data))
@@ -72,8 +72,8 @@ pub(crate) fn geojson_source_with_data(
 
 /// Replaces the data of `map`'s GeoJSON source `id` with `geojson`.
 pub(crate) fn set_geojson(map: &mut Map, id: &str, geojson: geojson::GeoJson) {
+    use mln_sources::geojson::GeoJsonSourceType;
     use mln_style::source_type::SourceData;
-    use mln_style::sources::geojson::GeoJsonSourceType;
     let source = map.source(id).expect("the source");
     let builder = SourceData::<GeoJsonSourceType>::recover(source).expect("a GeoJSON source").options.data_builder();
     let data = builder.build(geojson).expect("GeoJSON data");

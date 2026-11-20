@@ -55,6 +55,8 @@ mln_rs = { package = "mln-rs", path = "../..", default-features = false, feature
 mln_runtime = { package = "mln-rs-runtime", path = "../../crates/mln_runtime", default-features = false, features = [
   "bench",
 ] }
+# The GeoJSON sources whose data the GeoJSON scenarios build.
+mln_sources = { package = "mln-rs-sources", path = "../../crates/mln_sources" }
 # The file source that reads the fixtures (support/fixtures.rs).
 mln_storage = { package = "mln-rs-storage", path = "../../crates/mln_storage" }
 # The sprite whose images the layouts of symbols use.

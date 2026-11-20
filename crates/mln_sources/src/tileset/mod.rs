@@ -5,18 +5,21 @@
 use std::marker::PhantomData;
 use std::sync::Arc;
 
+use mln_conversion::{Convertible, Error};
 use mln_storage::{Data, Resource};
+use mln_style::expression::Functions;
+use mln_style::layer_type::SourceKind;
+use mln_style::source_type::{
+    Described, Load, OfflineResources, Source, SourceData, SourceSummary, SourceTypeInfo, StyleSourceType,
+};
 use mln_util::constants;
 use mln_util::pool::Respond;
 use mln_util::tileset::{PartialTileset, Tileset, VectorEncoding};
 
-use crate::conversion::tileset::{convert_tileset, optional_member};
-use crate::conversion::{Convertible, Error};
-use crate::expression::Functions;
-use crate::layer_type::SourceKind;
-use crate::source_type::{
-    Described, Load, OfflineResources, Source, SourceData, SourceSummary, SourceTypeInfo, StyleSourceType,
-};
+use self::conversion::{convert_tileset, optional_member};
+
+pub(crate) mod conversion;
+pub(crate) mod origin;
 
 /// Which of the tileset source types a [`TilesetSourceType`] is.
 pub trait TilesetKind: Send + Sync + 'static {
@@ -177,7 +180,6 @@ impl<K: TilesetKind> StyleSourceType for TilesetSourceType<K> {
             tile_size: Some(options.tile_size),
             inline_tileset: options.inline_tileset(),
             vector_encoding,
-            geojson: None,
         }
     }
 

@@ -1,9 +1,14 @@
+//! GeoJSON sources from style JSON: their options and their data.
+
 use std::sync::Arc;
 
-use super::{Convertible, Error};
-use crate::expression::Functions;
-use crate::expression::parsing_context::create_expression;
-use crate::sources::geojson::{ClusterProperties, GeoJSONOptions};
+use geojson::GeoJson;
+use mln_conversion::{Convertible, Error};
+use mln_style::expression::Functions;
+use mln_style::expression::parsing_context::create_expression;
+use mln_style::source_type::SourceData;
+
+use super::{ClusterProperties, GeoJSONOptions, GeoJsonSourceOptions, GeoJsonSourceType};
 
 // The C++ `static_cast<uint8_t/uint16_t/size_t>(float)` of out-of-range
 // values is UB; the port saturates (`as`).
@@ -163,4 +168,54 @@ pub fn convert_geojson_options(
     }
 
     Some(options)
+}
+
+/// A GeoJSON source's data from its style JSON: its options, and its data,
+/// built at once, or the URL it loads it from.
+pub(crate) fn convert_geojson_source(
+    value: &Convertible<'_>,
+    functions: &Arc<Functions>,
+    error: &mut Error,
+) -> Option<SourceData<GeoJsonSourceType>> {
+    let Some(data_value) = value.object_member("data") else {
+        error.message = "GeoJSON source must have a data value".to_owned();
+        return None;
+    };
+
+    let mut options = GeoJSONOptions::default_options();
+    if let Some(converted) = convert_geojson_options(value, functions, error) {
+        options = Arc::new(converted);
+    }
+
+    let mut options = GeoJsonSourceOptions::new(options);
+
+    if data_value.is_object() {
+        let geojson = data_value.to_geojson(error)?;
+        match options.data_builder().build(geojson) {
+            Ok(data) => Some(SourceData::with_description(options, data)),
+            Err(e) => {
+                // A clustered non-point feature fails the style's parse.
+                error.message = e.message;
+                None
+            }
+        }
+    } else if let Some(url) = data_value.to_string() {
+        options.url = Some(url);
+        Some(SourceData::new(options))
+    } else {
+        error.message = "GeoJSON data must be a URL or an object".to_owned();
+        None
+    }
+}
+
+/// Reads GeoJSON from JSON bytes, reporting the `geojson` crate's error
+/// (C++: rapidjson's `GetParseError_En(code) + " at offset N"`).
+pub(crate) fn convert_json_geojson(json: &[u8], error: &mut Error) -> Option<GeoJson> {
+    match serde_json::from_slice(json) {
+        Ok(geojson) => Some(geojson),
+        Err(e) => {
+            error.message = e.to_string();
+            None
+        }
+    }
 }

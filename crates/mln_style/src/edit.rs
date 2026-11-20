@@ -104,9 +104,9 @@ pub enum Edit {
         common: SourceCommon,
     },
     /// Changes the data of the source `id` as `update` says. A source type
-    /// makes the updates its sources take, such as
-    /// [`GeoJsonSourceType::set_url`](crate::sources::GeoJsonSourceType::set_url);
-    /// [`Edit::update_source`] makes one from a change to a source's data.
+    /// makes the updates its sources take, such as a GeoJSON source's new
+    /// data; [`Edit::update_source`] makes one from a change to a source's
+    /// data.
     UpdateSource {
         id: String,
         update: SourceUpdate,
