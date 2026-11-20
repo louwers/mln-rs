@@ -747,7 +747,8 @@ pub fn wall_quads(gpu: &mut impl Gpu) -> Result<(), GpuError> {
 /// Checks that the pulled fill extrusion shader draws the walls of
 /// [`instanced_walls`] into the texels that the instanced shader draws, from
 /// geometry without vertex buffers: a vertex reads the outline, a vertex
-/// buffer its bindings bind, by its index. A backend that binds no vertex
+/// buffer its bindings bind, by its index, which includes the draw's base
+/// vertex. A backend that binds no vertex
 /// buffers ([`Caps::binds_vertex_buffers`]) fails to make bindings of one
 /// instead. Returns the error of a call that should succeed.
 ///
@@ -776,11 +777,19 @@ pub fn pulled_walls(gpu: &mut impl Gpu) -> Result<(), GpuError> {
     let pipeline = gpu.create_pipeline(&PipelineDesc { shader, vertex_buffers: &[], ..background(shader, RGBA8) })?;
     let geometry =
         gpu.create_geometry(&GeometryDesc { shader, layouts: &[], vertex_buffers: &[], index_buffer: indices })?;
-    frame.frame(gpu, &[draw(pipeline, bindings, geometry, 12)])?;
+    let walls = draw(pipeline, bindings, geometry, 12);
+    frame.frame(gpu, &[walls])?;
 
     let pixels = read(gpu, frame.target)?;
     check_walls(&pixels);
     assert!(pixels == instanced_wall_texels(gpu)?, "the pulled walls draw other texels than the instanced walls");
+
+    // Four vertices on, the first wall's indices are the second wall's,
+    // which ends a ring and draws nothing.
+    frame.frame(gpu, &[])?;
+    let empty = read(gpu, frame.target)?;
+    frame.frame(gpu, &[Draw { index_count: 6, base_vertex: 4, ..walls }])?;
+    assert!(read(gpu, frame.target)? == empty, "the vertex indices leave out the draw's base vertex");
     Ok(())
 }
 

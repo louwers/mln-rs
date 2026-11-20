@@ -511,7 +511,8 @@ pub struct DynamicState {
 
 /// A draw of `index_count` of the geometry's indices from `first_index`,
 /// offset by `base_vertex`, for each of `instance_count` instances from
-/// `first_instance`.
+/// `first_instance`. A vertex's index, as a shader reads it, includes
+/// `base_vertex`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Draw {
     pub pipeline: PipelineId,

@@ -34,3 +34,17 @@ fn every_program_compiles_to_dxil() {
         failures.join("\n\n")
     });
 }
+
+// Only the pulled programs read the vertex index, and so the base vertex in
+// naga's special constants.
+#[test]
+fn only_the_pulled_programs_read_the_vertex_index() {
+    let compiler = compiler();
+    for &(_, source) in PROGRAMS {
+        for variant in variants(source, false) {
+            let program = compiler.compile_source(source, &variant.defines).expect("the program");
+            let pulled = source.name.contains("Pulled");
+            assert_eq!(program.reads_vertex_index, pulled, "{} ({})", source.name, variant.name);
+        }
+    }
+}

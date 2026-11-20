@@ -30,6 +30,9 @@ pub struct CompiledProgram {
     pub resources: Vec<ResourceUse>,
     pub attributes: &'static [AttributeInfo],
     pub instance_attributes: &'static [AttributeInfo],
+    /// Whether the vertex stage reads the vertex index, which includes the
+    /// base vertex in naga's special constants.
+    pub reads_vertex_index: bool,
 }
 
 impl ShaderCompiler {
@@ -77,8 +80,14 @@ impl ShaderCompiler {
         defines: &str,
     ) -> Result<CompiledProgram, String> {
         let mut resources: Vec<ResourceUse> = Vec::new();
+        let mut reads_vertex_index = false;
         let mut compile = |stage| -> Result<Vec<u8>, String> {
             let module = Module::parse(stage, &source.compose(stage, defines))?;
+            reads_vertex_index |= module.module.entry_points.iter().any(|entry_point| {
+                entry_point.function.arguments.iter().any(|argument| {
+                    matches!(argument.binding, Some(naga::Binding::BuiltIn(naga::BuiltIn::VertexIndex)))
+                })
+            });
             for resource in module.resources()? {
                 if !resources.contains(&resource) {
                     resources.push(resource);
@@ -96,6 +105,7 @@ impl ShaderCompiler {
             resources,
             attributes: source.attributes,
             instance_attributes: source.instance_attributes,
+            reads_vertex_index,
         })
     }
 }

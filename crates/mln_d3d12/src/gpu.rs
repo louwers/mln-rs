@@ -57,7 +57,9 @@ use windows::core::{Interface, s};
 
 use crate::heaps::{CpuDescriptors, CpuSlot, SamplerHeap, TABLE_SIZE, TableHeap};
 use crate::memory::{BufferMemory, Memory, NO_RANGE, TextureMemory};
-use crate::root_signature::{self, ROOT_CONSTANTS, SAMPLER_INDICES, SAMPLER_TABLE, TEXTURE_TABLE, View};
+use crate::root_signature::{
+    self, ROOT_CONSTANTS, SAMPLER_INDICES, SAMPLER_TABLE, SPECIAL_CONSTANTS, TEXTURE_TABLE, View,
+};
 use crate::shaders::{CompiledProgram, ShaderCompiler};
 use crate::upload::UploadRing;
 use crate::{CustomLayerEncoder, CustomLayerPass, Device, conv};
@@ -127,6 +129,9 @@ struct Shader {
 struct Pipeline {
     state: ID3D12PipelineState,
     topology: D3D_PRIMITIVE_TOPOLOGY,
+    /// Whether its vertex stage reads the base vertex in the special
+    /// constants.
+    reads_base_vertex: bool,
     tags: PipelineTags,
 }
 
@@ -192,6 +197,8 @@ struct OpenPass {
     pipeline: Option<PipelineId>,
     bindings: Option<BindingsId>,
     global_index: Option<u32>,
+    /// The base vertex in the special constants.
+    base_vertex: Option<i32>,
     geometry: Option<GeometryId>,
     /// The views of the vertex buffers bound, by slot, and of the index
     /// buffer: geometries of other indices or attributes often share them.
@@ -206,6 +213,7 @@ impl OpenPass {
         self.pipeline = None;
         self.bindings = None;
         self.global_index = None;
+        self.base_vertex = None;
         self.geometry = None;
         self.vertex_buffers.clear();
         self.index_buffer = None;
@@ -1132,7 +1140,8 @@ impl Gpu for D3d12Gpu {
         let state = self.device.pipeline(key, || create_pipeline_state(&self.device, program, desc, topology_type))?;
         let layout = self.layout_tags.tag(desc.shader, desc.vertex_buffers);
         let tags = PipelineTags { shader: desc.shader, layout, targets: desc.targets };
-        let id = self.pipelines.insert(Pipeline { state, topology, tags });
+        let reads_base_vertex = program.reads_vertex_index;
+        let id = self.pipelines.insert(Pipeline { state, topology, reads_base_vertex, tags });
         self.dependents.pipeline(id, desc.shader);
         Ok(id)
     }
@@ -1400,6 +1409,7 @@ impl Gpu for D3d12Gpu {
             pipeline: None,
             bindings: None,
             global_index: None,
+            base_vertex: None,
             geometry: None,
             vertex_buffers: Vec::new(),
             index_buffer: None,
@@ -1442,6 +1452,10 @@ impl Gpu for D3d12Gpu {
             if open.global_index != Some(draw.global_index) {
                 list.SetGraphicsRoot32BitConstant(ROOT_CONSTANTS, draw.global_index, 0);
                 open.global_index = Some(draw.global_index);
+            }
+            if pipeline.reads_base_vertex && open.base_vertex != Some(draw.base_vertex) {
+                list.SetGraphicsRoot32BitConstant(SPECIAL_CONSTANTS, draw.base_vertex as u32, 0);
+                open.base_vertex = Some(draw.base_vertex);
             }
             if open.geometry != Some(draw.geometry) {
                 for (slot, view) in geometry.vertex_views.iter().enumerate() {

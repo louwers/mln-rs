@@ -1,8 +1,10 @@
 //! The root signature of every pipeline, for the registers that
 //! `shaders::hlsl` puts the shaders' resources in: `ubo_index` as a root
-//! constant, each buffer as a root CBV or SRV, the textures as one table,
+//! constant, each buffer as a root CBV or SRV (a vertex buffer that a
+//! shader reads as a storage buffer too), the textures as one table,
 //! and the sampler heap as another, with the buffer of the indices in it of
-//! a draw's samplers as a root SRV. Binding a draw sets GPU addresses only.
+//! a draw's samplers as a root SRV, and naga's special constants as root
+//! constants. Binding a draw sets GPU addresses and constants only.
 
 use mln_gfx::gpu::GpuError;
 use mln_glsl::layout::DescriptorSetType;
@@ -13,12 +15,15 @@ use windows::Win32::Graphics::Direct3D12::{
     D3D12_ROOT_PARAMETER, D3D12_ROOT_PARAMETER_0, D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
     D3D12_ROOT_PARAMETER_TYPE_CBV, D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE, D3D12_ROOT_PARAMETER_TYPE_SRV,
     D3D12_ROOT_SIGNATURE_DESC, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT,
-    D3D12_SHADER_VISIBILITY_ALL, D3D12_SHADER_VISIBILITY_PIXEL, D3D12SerializeRootSignature, ID3D12Device,
-    ID3D12RootSignature,
+    D3D12_SHADER_VISIBILITY_ALL, D3D12_SHADER_VISIBILITY_PIXEL, D3D12_SHADER_VISIBILITY_VERTEX,
+    D3D12SerializeRootSignature, ID3D12Device, ID3D12RootSignature,
 };
 
 use crate::heaps::{SAMPLER_HEAP_SIZE, TABLE_SIZE};
-use crate::shaders::hlsl::{ROOT_CONSTANT_SPACE, SAMPLER_HEAP_SPACE, SAMPLER_INDEX_REGISTER};
+use crate::shaders::hlsl::{
+    ROOT_CONSTANT_SPACE, SAMPLER_HEAP_SPACE, SAMPLER_INDEX_REGISTER, SPECIAL_CONSTANTS_REGISTER,
+    SPECIAL_CONSTANTS_VALUES,
+};
 
 /// The parameter of the root constants.
 pub(crate) const ROOT_CONSTANTS: u32 = 0;
@@ -45,13 +50,17 @@ pub(crate) const TEXTURE_TABLE: u32 = ROOT_CONSTANTS + 1 + buffer_count();
 pub(crate) const SAMPLER_INDICES: u32 = TEXTURE_TABLE + 1;
 /// The parameter of the sampler heap's table.
 pub(crate) const SAMPLER_TABLE: u32 = SAMPLER_INDICES + 1;
+/// The parameter of naga's special constants, whose first value, a draw's
+/// base vertex, a vertex stage's vertex index includes.
+pub(crate) const SPECIAL_CONSTANTS: u32 = SAMPLER_TABLE + 1;
 
 /// How a buffer binds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum View {
     /// A uniform buffer: a root CBV.
     Constant,
-    /// A storage buffer: a root SRV.
+    /// A storage buffer, or a vertex buffer that a shader reads as one: a
+    /// root SRV.
     Shader,
 }
 
@@ -134,6 +143,18 @@ pub(crate) fn create(device: &ID3D12Device) -> Result<ID3D12RootSignature, GpuEr
     parameters.push(table(&textures));
     parameters.push(descriptor(D3D12_ROOT_PARAMETER_TYPE_SRV, SAMPLER_INDEX_REGISTER, image_space, pixel));
     parameters.push(table(&samplers));
+    debug_assert_eq!(parameters.len() as u32, SPECIAL_CONSTANTS);
+    parameters.push(D3D12_ROOT_PARAMETER {
+        ParameterType: D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
+        Anonymous: D3D12_ROOT_PARAMETER_0 {
+            Constants: D3D12_ROOT_CONSTANTS {
+                ShaderRegister: SPECIAL_CONSTANTS_REGISTER,
+                RegisterSpace: u32::from(ROOT_CONSTANT_SPACE),
+                Num32BitValues: SPECIAL_CONSTANTS_VALUES,
+            },
+        },
+        ShaderVisibility: D3D12_SHADER_VISIBILITY_VERTEX,
+    });
     let desc = D3D12_ROOT_SIGNATURE_DESC {
         NumParameters: parameters.len() as u32,
         pParameters: parameters.as_ptr(),

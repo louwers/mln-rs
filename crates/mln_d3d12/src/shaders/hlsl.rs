@@ -3,7 +3,7 @@
 //
 // - Descriptor set N is register space N, and a buffer's binding is its
 //   register: `b` for a uniform buffer, a root CBV, and `t` for a storage
-//   buffer, a root SRV.
+//   buffer or a vertex buffer read as one, a root SRV.
 // - The image set's textures are `t0` to `t2` of its space, one descriptor
 //   table.
 // - naga reads samplers out of a heap of them (`nagaSamplerHeap`, a table
@@ -13,6 +13,10 @@
 //   comparison sampler heap naga also declares is unused.
 // - The push constants (`ubo_index`) are root constants at `b0` of
 //   `ROOT_CONSTANT_SPACE`.
+// - naga's special constants are root constants at
+//   `SPECIAL_CONSTANTS_REGISTER` of that space. naga adds the first, a draw's
+//   base vertex, to `SV_VertexID`, which D3D doesn't include it in, so that
+//   `gl_VertexIndex` includes it as Vulkan's does.
 
 use std::sync::LazyLock;
 
@@ -28,6 +32,11 @@ pub(crate) const SAMPLER_HEAP_SPACE: u8 = ROOT_CONSTANT_SPACE + 1;
 /// The space naga declares its comparison sampler heap in, which no shader
 /// reads.
 const COMPARISON_SAMPLER_HEAP_SPACE: u8 = SAMPLER_HEAP_SPACE + 1;
+/// The register in `ROOT_CONSTANT_SPACE` of naga's special constants.
+pub(crate) const SPECIAL_CONSTANTS_REGISTER: u32 = 1;
+/// The values of naga's special constants: the first vertex, the first
+/// instance and one more.
+pub(crate) const SPECIAL_CONSTANTS_VALUES: u32 = 3;
 /// The register in the image set's space of the sampler index buffer: the one
 /// after its textures.
 pub(crate) const SAMPLER_INDEX_REGISTER: u32 = IMAGE_TEXTURE_COUNT as u32;
@@ -57,6 +66,7 @@ fn options() -> hlsl::Options {
         binding_map,
         fake_missing_bindings: false,
         immediates_target: Some(target(ROOT_CONSTANT_SPACE, 0)),
+        special_constants_binding: Some(target(ROOT_CONSTANT_SPACE, SPECIAL_CONSTANTS_REGISTER)),
         sampler_heap_target: hlsl::SamplerHeapBindTargets {
             standard_samplers: target(SAMPLER_HEAP_SPACE, 0),
             comparison_samplers: target(COMPARISON_SAMPLER_HEAP_SPACE, 0),
