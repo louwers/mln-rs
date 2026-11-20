@@ -170,10 +170,6 @@ pub trait LayerType: StyleLayerType {
     /// stops rendering.
     fn release(_state: &mut Self::State) {}
 
-    /// Called when the engine drops a layer's draws because its source shows
-    /// it nothing.
-    fn nothing_to_draw(_state: &mut Self::State) {}
-
     /// How far above the ground `bucket`'s highest content is raised, for
     /// a layer whose content elevation
     /// ([`StyleLayerType::content_elevation`]) is an expression.
