@@ -11,10 +11,5 @@ fn pool() -> mln_util::pool::Pool {
 
 /// The built-in registrations that a test's map parses its style against.
 fn registry() -> std::sync::Arc<mln_style::StyleRegistry> {
-    let mut builder = mln_renderer::RegistryBuilder::new();
-    mln_style::expression::functions::register_builtin_functions(builder.functions_mut()).unwrap();
-    mln_layers::register_layer_types(&mut builder).unwrap();
-    mln_renderer::builtins::register_layer_types(&mut builder).unwrap();
-    mln_renderer::builtins::register_source_types(&mut builder).unwrap();
-    std::sync::Arc::clone(builder.build().style())
+    std::sync::Arc::clone(mln_rs::builtin_registry().style())
 }

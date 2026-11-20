@@ -17,8 +17,7 @@ use std::time::Duration;
 
 use mln_conversion::Convertible;
 use mln_layers::{Background, BackgroundPaintProperties};
-use mln_renderer::{Registry, RegistryBuilder};
-use mln_style::expression::functions::register_builtin_functions;
+use mln_rs::builtin_registry;
 use mln_style::expression::{EvaluationContext, Functions, Image};
 use mln_style::layer::Layer;
 use mln_style::layer_type::LayerStyle;
@@ -28,17 +27,6 @@ use mln_style::{Edit, PropertyEvaluationParameters, PropertyValue, Style, Transi
 use mln_style_types::VisibilityType;
 use mln_util::time::Instant;
 use mln_util::{Color, UnitBezier};
-
-/// The built-in registrations: the expression functions and the layer and
-/// source types of the engine and of `mln_layers`.
-fn builtin_registry() -> Arc<Registry> {
-    let mut builder = RegistryBuilder::new();
-    register_builtin_functions(builder.functions_mut()).unwrap();
-    mln_layers::register_layer_types(&mut builder).unwrap();
-    mln_renderer::builtins::register_layer_types(&mut builder).unwrap();
-    mln_renderer::builtins::register_source_types(&mut builder).unwrap();
-    builder.build()
-}
 
 // gtest: Layer.BackgroundProperties
 #[test]

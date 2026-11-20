@@ -32,6 +32,8 @@ mln_wire.workspace = true
 
 [dev-dependencies]
 mln_conversion.workspace = true
+# The built-in registrations that the tests' styles parse against.
+mln_rs = { package = "mln-rs", path = "../..", default-features = false }
 serde_json.workspace = true
 
 [[test]]
