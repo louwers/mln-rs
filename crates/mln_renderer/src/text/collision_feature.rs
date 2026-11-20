@@ -327,3 +327,43 @@ fn line_circles<'a>(
     });
     circles.into_iter().flatten()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn line_circles_cover_the_label_and_space_out_beyond_it() {
+        let line = [Point::new(0, 0), Point::new(100, 0)];
+        let anchor = Anchor::new(50.0, 0.0, 0.0, Some(0));
+        let circles: Vec<_> = line_circles(AlongLine { line: &line, overscaling: 1.0 }, &anchor, 20.0, 10.0).collect();
+
+        let centers: Vec<_> = circles.iter().map(|circle| circle.anchor.x.round()).collect();
+        assert_eq!(centers, [25.0, 35.0, 45.0, 50.0, 55.0, 60.0, 65.0, 75.0]);
+        let distances: Vec<_> = circles.iter().map(|circle| circle.signed_distance_from_anchor).collect();
+        assert_eq!(distances, [-20.0, -12.0, -4.0, 0.0, 4.0, 8.0, 12.0, 20.0]);
+        assert!(circles.iter().all(|circle| (circle.x1, circle.y1, circle.x2, circle.y2) == (-5.0, -5.0, 5.0, 5.0)));
+    }
+
+    #[test]
+    fn line_circles_stop_at_the_line_ends() {
+        let line = [Point::new(0, 0), Point::new(58, 0)];
+        let anchor = Anchor::new(50.0, 0.0, 0.0, Some(0));
+        let circles = line_circles(AlongLine { line: &line, overscaling: 1.0 }, &anchor, 20.0, 10.0);
+        assert_eq!(circles.map(|circle| circle.anchor.x.round()).collect::<Vec<_>>(), [25.0, 35.0, 45.0, 50.0, 55.0]);
+
+        // The circles reach back only to the first vertex an eighth of the
+        // label's length before its start.
+        let line = [Point::new(0, 0), Point::new(40, 0), Point::new(100, 0)];
+        let anchor = Anchor::new(50.0, 0.0, 0.0, Some(1));
+        let circles = line_circles(AlongLine { line: &line, overscaling: 1.0 }, &anchor, 20.0, 10.0);
+        assert_eq!(
+            circles.map(|circle| circle.anchor.x.round()).collect::<Vec<_>>(),
+            [45.0, 50.0, 55.0, 60.0, 65.0, 75.0]
+        );
+
+        // Not even the label reaches back to the line's start.
+        let anchor = Anchor::new(4.0, 0.0, 0.0, Some(0));
+        assert_eq!(line_circles(AlongLine { line: &line, overscaling: 1.0 }, &anchor, 20.0, 10.0).count(), 0);
+    }
+}
