@@ -121,8 +121,9 @@ pub(crate) enum UserEvent {
     Ui(Box<egui::PlatformOutput>),
     /// A gesture reached a notch: the trackpad ticks, where it can.
     Notch,
-    /// The render thread has dropped the map and ended.
-    Ended,
+    /// The render thread has dropped the map and ended, with the error that
+    /// stopped it opening the map, if one did.
+    Ended(Option<String>),
 }
 
 /// The messages the render thread hasn't taken yet, and the wakes of the
@@ -209,11 +210,13 @@ impl Inbox {
     }
 }
 
-/// Opens the window and runs the app in it until it closes.
-pub(crate) fn run(args: Args, settings: Settings) -> Result<(), winit::error::EventLoopError> {
-    let event_loop = EventLoop::<UserEvent>::with_user_event().build()?;
-    let mut host = Host { start: Some((args, settings)), proxy: event_loop.create_proxy(), open: None };
-    event_loop.run_app(&mut host)
+/// Opens the window and runs the app in it until it closes. Fails if the
+/// app couldn't open the map.
+pub(crate) fn run(args: Args, settings: Settings) -> Result<(), String> {
+    let event_loop = EventLoop::<UserEvent>::with_user_event().build().map_err(|e| e.to_string())?;
+    let mut host = Host { start: Some((args, settings)), proxy: event_loop.create_proxy(), open: None, failure: None };
+    event_loop.run_app(&mut host).map_err(|e| e.to_string())?;
+    host.failure.map_or(Ok(()), Err)
 }
 
 struct Host {
@@ -221,6 +224,8 @@ struct Host {
     start: Option<(Args, Settings)>,
     proxy: EventLoopProxy<UserEvent>,
     open: Option<Open>,
+    /// Why the app couldn't open the map, once the render thread says.
+    failure: Option<String>,
 }
 
 /// The open window, on the main thread.
@@ -403,17 +408,17 @@ impl ApplicationHandler<UserEvent> for Host {
         let proxy = self.proxy.clone();
         let spawned = mln_util::thread::builder("render").spawn(move || {
             // Sent even if the render thread panics, so the window closes.
-            struct Ended(EventLoopProxy<UserEvent>);
+            struct Ended(EventLoopProxy<UserEvent>, Option<String>);
             impl Drop for Ended {
                 fn drop(&mut self) {
-                    let _ = self.0.send_event(UserEvent::Ended);
+                    let _ = self.0.send_event(UserEvent::Ended(self.1.take()));
                 }
             }
-            let _ended = Ended(proxy);
-            view::run(launch);
+            let mut ended = Ended(proxy, None);
+            ended.1 = view::run(launch).err();
         });
         if let Err(e) = spawned {
-            eprintln!("failed to start the render thread: {e}");
+            self.failure = Some(format!("failed to start the render thread: {e}"));
             event_loop.exit();
         }
     }
@@ -567,7 +572,10 @@ impl ApplicationHandler<UserEvent> for Host {
                     open.inbox.send(Message::Resized(size));
                 }
             }
-            UserEvent::Ended => event_loop.exit(),
+            UserEvent::Ended(failure) => {
+                self.failure = failure;
+                event_loop.exit();
+            }
         }
     }
 }

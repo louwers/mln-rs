@@ -128,36 +128,25 @@ impl StyleInfo {
     }
 }
 
-/// Opens the map in the window and runs it until the window closes.
-pub(crate) fn run(launch: Launch) {
+/// Opens the map in the window and runs it until the window closes. Fails
+/// if the runtime, the map or the window's session can't be made.
+pub(crate) fn run(launch: Launch) -> Result<(), String> {
     let Launch { frame_pacer, args, settings, ui, pixel_ratio, size, frame_interval, start, inbox, proxy, .. } = launch;
     #[cfg(not(target_os = "macos"))]
     let surfaces = WindowSurfaces { window: launch.window, cap_frame_rate: args.benchmark.is_none() };
     #[cfg(target_os = "macos")]
     let surfaces = WindowSurfaces { proxy: proxy.clone(), cap_frame_rate: args.benchmark.is_none() };
 
-    let benchmark = match args.benchmark.map(|path| Benchmark::new(path, args.laps.unwrap_or(10))).transpose() {
-        Ok(benchmark) => benchmark,
-        Err(e) => {
-            Log::error(Event::Setup, e);
-            return;
-        }
-    };
+    let benchmark = args.benchmark.map(|path| Benchmark::new(path, args.laps.unwrap_or(10))).transpose()?;
     // A benchmark reads its fixtures through `asset://` URLs, and nothing
     // else: no cache database, and no network.
     let runtime_options = if let Some(benchmark) = &benchmark {
         RuntimeOptions { asset_path: Some(benchmark.asset_path()), ..RuntimeOptions::default() }
     } else {
-        let cache_db = args.cache.clone().unwrap_or_else(|| "/tmp/mbgl-cache.db".to_owned());
-        RuntimeOptions { cache_path: Some(cache_db.into()), ..RuntimeOptions::default() }
+        let cache_db = args.cache.clone().map_or_else(|| std::env::temp_dir().join("mbgl-cache.db"), PathBuf::from);
+        RuntimeOptions { cache_path: Some(cache_db), ..RuntimeOptions::default() }
     };
-    let runtime = match Runtime::new(&runtime_options) {
-        Ok(runtime) => runtime,
-        Err(e) => {
-            Log::error(Event::Setup, e.message);
-            return;
-        }
-    };
+    let runtime = Runtime::new(&runtime_options).map_err(|e| e.message)?;
     if !settings.online || benchmark.is_some() {
         // The cache still serves what it has.
         log_failure(runtime.set_resource_provider(|request: ResourceRequest| {
@@ -183,13 +172,8 @@ pub(crate) fn run(launch: Launch) {
         system_fonts: !args.no_system_fonts && benchmark.is_none(),
         ..MapOptions::default()
     };
-    let map = match runtime.create_map(options).and_then(|(map, created)| created.wait().map(|_| map)) {
-        Ok(map) => map,
-        Err(e) => {
-            Log::error(Event::Setup, e.message);
-            return;
-        }
-    };
+    let map =
+        runtime.create_map(options).and_then(|(map, created)| created.wait().map(|_| map)).map_err(|e| e.message)?;
     log_failure(map.set_bounds(BoundOptions { max_pitch: Some(settings.max_pitch), ..Default::default() }));
     let camera = if let Some(benchmark) = &benchmark {
         benchmark.start()
@@ -210,13 +194,8 @@ pub(crate) fn run(launch: Launch) {
     log_failure(map.set_globe_free_bearing_enabled(settings.free_bearing));
 
     let paint = Rc::new(RefCell::new(Paint::default()));
-    let window = match WindowSession::attach(args.backend, None, &map, &surfaces, map_size, Rc::clone(&paint), &inbox) {
-        Ok(window) => window,
-        Err(e) => {
-            Log::error(Event::GraphicsBackend, e.message);
-            return;
-        }
-    };
+    let window = WindowSession::attach(args.backend, None, &map, &surfaces, map_size, Rc::clone(&paint), &inbox)
+        .map_err(|e| e.message)?;
     Log::info(Event::Render, format!("Rendering with {}", window.adapter(&paint.borrow())));
 
     let style_url = match &args.style {
@@ -326,6 +305,7 @@ pub(crate) fn run(launch: Launch) {
     // The session lets go of the window's surface while the window is still
     // open; the map and the runtime go after it.
     view.close_window();
+    Ok(())
 }
 
 /// A physical size in the map's logical pixels.
