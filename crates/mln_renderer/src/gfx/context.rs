@@ -512,7 +512,7 @@ impl Context {
     }
 
     /// Destroys what the context made and what the renderer released, and
-    /// tells the custom layers' hosts that it stopped. What drops later
+    /// tells the layers' hosts that it stopped. What drops later
     /// still goes to the queue, and goes with the `Gpu`.
     pub fn tear_down(&mut self, gpu: &mut dyn Gpu) {
         self.global_uniform_buffers = UniformBufferArray::new();

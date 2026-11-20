@@ -50,14 +50,18 @@ impl<T: LayerType> EvaluatedLayer<T> {
     }
 
     /// The values of the layer `style` before its first evaluation: its
-    /// paint properties' defaults, in no pass.
+    /// paint properties' defaults, in no pass. The engine evaluates a
+    /// layer's values; this is public for tests.
+    #[doc(hidden)]
     #[must_use]
     pub fn new(style: Arc<LayerStyle<T>>) -> Self {
         EvaluatedLayer::with_paint(style, Default::default())
     }
 
     /// The values of the layer `style` with its paint properties evaluated
-    /// to `paint`, without a cross-fade or render passes.
+    /// to `paint`, without a cross-fade or render passes. Public for tests,
+    /// as [`new`](Self::new) is.
+    #[doc(hidden)]
     pub fn with_paint(style: Arc<LayerStyle<T>>, paint: <T::PaintProperties as PaintSet>::Evaluated) -> Self {
         EvaluatedLayer { style, paint, crossfade: CrossfadeParameters::default(), render_passes: RenderPass::NONE }
     }
@@ -313,16 +317,16 @@ mod tests {
     use super::*;
     use crate::tests::fixture_layer::{Dot, DotBucket, Tint, TintPaintProperties};
 
-    fn raster() -> Arc<dyn ErasedEvaluatedLayer> {
+    fn tint() -> Arc<dyn ErasedEvaluatedLayer> {
         let paint = TintPaintProperties::PossiblyEvaluated { tint_opacity: Evaluated::Constant(0.5) };
-        let style = Arc::new(LayerStyle::<Tint>::new("raster".to_owned(), "source".to_owned()));
+        let style = Arc::new(LayerStyle::<Tint>::new("tint".to_owned(), "source".to_owned()));
         let crossfade = CrossfadeParameters { from_scale: 2.0, to_scale: 1.0, t: 0.25 };
         Arc::new(EvaluatedLayer { style, paint, crossfade, render_passes: RenderPass::NONE })
     }
 
     #[test]
     fn recover_keeps_the_allocation() {
-        let layer = raster();
+        let layer = tint();
         let recovered = EvaluatedLayer::<Tint>::recover(&layer).unwrap();
         assert!(std::ptr::addr_eq(Arc::as_ptr(&recovered), Arc::as_ptr(&layer)));
         assert_eq!(*recovered.paint.tint_opacity.uniform(), 0.5);
@@ -332,7 +336,7 @@ mod tests {
 
     #[test]
     fn a_type_reads_no_other_types_values() {
-        let layer = raster();
+        let layer = tint();
         let dots = entry::<Dot>();
         assert!(!dots.layout_can_need_dependencies(std::slice::from_ref(&layer)));
         assert_eq!(dots.query_radius(&DotBucket::default(), &layer), 0.0);

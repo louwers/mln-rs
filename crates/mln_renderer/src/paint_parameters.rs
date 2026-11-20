@@ -378,7 +378,7 @@ impl<'a> PaintParameters<'a> {
     }
 
     /// Runs `f` with `gpu`'s, the context's, commands inside the pass
-    /// begun, after what drew there so far, as a custom layer draws: `f`
+    /// begun, after what drew there so far, as a layer's host draws: `f`
     /// gets the backend's `CustomLayerPass`. Returns whether `f` ran.
     pub fn lend_pass(&self, gpu: &mut dyn Gpu, f: &mut dyn FnMut(&mut dyn Any)) -> Result<bool, GpuError> {
         if self.open_pass.is_none() {

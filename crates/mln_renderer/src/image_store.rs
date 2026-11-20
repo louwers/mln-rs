@@ -28,6 +28,7 @@ pub(crate) struct ResolvedImages {
     pub(crate) patterns: ImageMap,
 }
 
+/// The style's images, as a frame's layers read them.
 pub struct ImageStore {
     /// Whether the sprite loaded: before, a missing image may still come
     /// with it.
@@ -104,6 +105,8 @@ impl ImageStore {
         Log::info(Event::General, format!("ImageManager::loaded: {}", if self.is_loaded() { "1" } else { "0" }));
     }
 
+    /// The style's image `id`, if it has one.
+    #[must_use]
     pub fn image(&self, id: &str) -> Option<&Arc<ImageImpl>> {
         self.images.get(id)
     }

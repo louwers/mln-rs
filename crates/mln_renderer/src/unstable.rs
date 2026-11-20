@@ -33,6 +33,7 @@ pub use crate::paint_property_binder::{
     BinderValue, InterleavedVertexBuffer, PaintPropertyBinderBase, PatternDependency, bind_paint_property,
 };
 pub use crate::paint_property_statistics::StatisticValue;
+pub use crate::pattern_atlas::PatternAtlas;
 pub use crate::render_layer::Atlases;
 pub use crate::render_light::EvaluatedLight;
 pub use crate::render_static_data::RenderStaticData;

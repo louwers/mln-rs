@@ -175,7 +175,7 @@ pub(crate) struct RenderOrchestrator {
     /// Whether the next update makes the render layers again, for new
     /// shaders.
     remake_render_layers: bool,
-    /// The hosts of the custom layers that left since the renderer last
+    /// The hosts of the layers that left since the renderer last
     /// [took them](Self::take_ended_hosts).
     ended_hosts: EndedHosts,
     filtered_layers_for_source: Vec<Arc<dyn ErasedEvaluatedLayer>>,
@@ -1259,7 +1259,7 @@ impl RenderOrchestrator {
         }
     }
 
-    /// The hosts of the custom layers that left since the last call, which
+    /// The hosts of the layers that left since the last call, which
     /// drew and hear that the renderer stopped.
     pub(crate) fn take_ended_hosts(&mut self) -> EndedHosts {
         std::mem::take(&mut self.ended_hosts)

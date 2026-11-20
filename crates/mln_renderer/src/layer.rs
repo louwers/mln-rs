@@ -49,7 +49,9 @@
 //! for a type that has none.
 //!
 //! The drawing types that the hooks name are in the engine's unstable
-//! module until they become part of the contract.
+//! module until they become part of the contract. So are the frame's
+//! [`Atlases`], which the engine declares for line and background: a layer
+//! type can't yet declare state that the frame's layers share.
 
 use std::sync::Arc;
 
@@ -72,7 +74,7 @@ pub use crate::erased_layer::EvaluatedLayer;
 pub use crate::geometry::dem_data::DemData;
 pub use crate::geometry::feature_index::FeatureIndexBuilder;
 use crate::gfx::context::Context;
-use crate::image_store::ImageStore;
+pub use crate::image_store::ImageStore;
 use crate::layer_drawing::LayerDrawing;
 pub use crate::layout::filter_groups::FilterGroups;
 pub use crate::layout::layout::{BuildParams, Layout, LayoutParameters, NoLayout, SourceLayer, layers_by_id};
@@ -202,9 +204,11 @@ pub trait LayerType: StyleLayerType {
 
     // The capabilities.
 
-    /// Whether a layer of the type draws 3D geometry, whose depth it writes
-    /// in the range of `PaintParameters::depth_mode_for_3d`, and which the
-    /// planet's depth hides behind the horizon.
+    /// Whether a layer of the type draws 3D geometry, with draws of
+    /// [`DrawDepth::Volume`](crate::unstable::DrawDepth::Volume). The layers
+    /// above the lowest 3D layer draw their opaque draws in the translucent
+    /// pass, and on the globe, the planet's depth hides 3D geometry behind
+    /// the horizon.
     const IS_3D: bool = false;
 
     /// The color a layer with `evaluated` is, where it is one solid color,
@@ -279,13 +283,16 @@ pub trait FeatureQuery<T: LayerType> {
 pub struct HitTest<'a> {
     /// The query's geometry.
     pub query_geometry: &'a GeometryCoordinates,
+    /// The feature, whose properties the layer's values evaluate with.
     pub feature: &'a dyn GeometryTileFeature,
     /// The feature's geometry.
     pub geometry: &'a GeometryCollection,
+    /// The feature's state, which the layer's values evaluate with.
     pub feature_state: &'a FeatureState,
     /// The camera's zoom, not the tile's: a feature is as large as it is
     /// drawn.
     pub zoom: f32,
+    /// The camera.
     pub view: &'a View,
     /// The tile units a pixel spans.
     pub pixels_to_tile_units: f32,
@@ -366,8 +373,11 @@ pub trait LayerHost<T: LayerType> {
 /// transition, and their evaluation for the last frame. The engine keeps
 /// them and changes them; the hooks read them.
 pub struct LayerValues<T: LayerType> {
+    /// The layer's style.
     pub style: Arc<LayerStyle<T>>,
+    /// The paint values, in transition.
     pub unevaluated: <T::PaintProperties as PaintSet>::Unevaluated,
+    /// The paint values evaluated for the last frame.
     pub evaluated: Arc<EvaluatedLayer<T>>,
 }
 

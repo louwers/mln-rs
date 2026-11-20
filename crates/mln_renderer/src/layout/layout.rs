@@ -69,6 +69,8 @@ pub trait Layout<T: LayerType>: Send + 'static {
 pub struct BuildParams {
     /// Whether the tile has had no layout yet.
     pub first_load: bool,
+    /// Whether the map shows collision boxes, which only the types that
+    /// place read.
     pub show_collision_boxes: bool,
     /// The tile the bucket is of.
     pub canonical: CanonicalTileID,

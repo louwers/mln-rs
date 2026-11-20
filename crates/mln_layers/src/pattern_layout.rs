@@ -48,7 +48,6 @@ impl PatternFeature {
     }
 }
 
-/// The template arguments of a `PatternLayout` instantiation.
 /// A bucket that a [`PatternLayout`] makes: of features that can draw with
 /// patterns.
 pub trait PatternBucket: Bucket {
@@ -73,6 +72,8 @@ pub trait PatternBucket: Bucket {
     fn record_sdf_pattern(&mut self, _layer_id: &str, _sdf: bool) {}
 }
 
+/// How a [`PatternLayout`] lays out one layer type: its bucket, its layout
+/// properties, and how it reads the type's pattern and sort key.
 pub trait PatternLayoutSpec: Send + 'static {
     /// The layer type the layout lays out.
     type Type: LayerType<Bucket = Self::Bucket>;
