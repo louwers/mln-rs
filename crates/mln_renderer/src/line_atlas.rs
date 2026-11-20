@@ -167,15 +167,26 @@ fn add_dash_pattern(
     pattern_cap: LinePatternCap,
 ) -> LinePatternPos {
     let n: u8 = if pattern_cap == LinePatternCap::Round { 7 } else { 0 };
-
-    if dasharray.len() < 2 {
-        Log::warning(Event::ParseStyle, "line dasharray requires at least two elements");
-        return LinePatternPos::default();
-    }
+    let image_height = image.size.height as f32;
+    let pos = |width| LinePatternPos {
+        y: (0.5 + y_offset as f32 + f32::from(n)) / image_height,
+        height: (2.0 * f32::from(n) + 1.0) / image_height,
+        width,
+    };
 
     let mut length = 0.0f32;
     for part in dasharray {
         length += part;
+    }
+
+    // As in a `DashAtlas`, a dash array with fewer than two parts or no
+    // length is solid. The width is the image's, as the draw's uniforms
+    // divide by it and take the smaller of a cross-fade's two.
+    if dasharray.len() < 2 || length.is_nan() || length <= 0.0 {
+        let width = image.size.width;
+        let rows = (y_offset * width) as usize..((y_offset + 2 * u32::from(n) + 1) * width) as usize;
+        image.data[rows].fill(255);
+        return pos(width as f32);
     }
 
     let stretch = image.size.width as f32 / length;
@@ -187,11 +198,7 @@ fn add_dash_pattern(
         add_regular_dash(&mut ranges, y_offset, image);
     }
 
-    LinePatternPos {
-        y: (0.5 + y_offset as f32 + f32::from(n)) / image.size.height as f32,
-        height: (2.0 * f32::from(n) + 1.0) / image.size.height as f32,
-        width: length,
-    }
+    pos(length)
 }
 
 /// A texture of two dash patterns, a `line-dasharray`'s at the zooms a
@@ -402,5 +409,25 @@ impl LineAtlas {
     #[must_use]
     pub(crate) fn is_empty(&self) -> bool {
         self.textures.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_dash_array_of_fewer_than_two_parts_or_no_length_is_solid() {
+        for dasharray in [&[][..], &[3.0], &[0.0, 0.0]] {
+            for (cap, rows) in [(LinePatternCap::Square, 1), (LinePatternCap::Round, 15)] {
+                let texture = DashPatternTexture::new(&[2.0, 1.0], dasharray, cap);
+                assert_eq!(texture.from().width, 3.0);
+                assert_eq!(texture.to().width, 256.0, "{dasharray:?}");
+                let image = texture.image.as_ref().unwrap();
+                let start = (rows * image.size.width) as usize;
+                let end = (2 * rows * image.size.width) as usize;
+                assert!(image.data[start..end].iter().all(|&alpha| alpha == 255), "{dasharray:?}");
+            }
+        }
     }
 }
