@@ -343,19 +343,24 @@ impl RenderSource for RenderImageSource {
                     || covering_tile.canonical.is_child_of(&tile.canonical)
                     || tile.canonical.is_child_of(&covering_tile.canonical)
                 {
-                    has_visible_tile = true;
                     // The copy that puts this covering tile on the view's
                     // tile: where the quad crosses the antimeridian, the
                     // covering tile may lie in the world next to the
-                    // first's.
-                    let wrap = tile.wrap - covering_tile.wrap + tile_cover_ids[0].wrap;
+                    // first's, and one view tile may see two copies. A
+                    // copy too many worlds from the first has no tile id.
+                    let wrap = i32::from(tile.wrap) - i32::from(covering_tile.wrap) + i32::from(tile_cover_ids[0].wrap);
+                    let Ok(wrap) = i16::try_from(wrap) else {
+                        continue;
+                    };
+                    has_visible_tile = true;
                     let wrapped_tile_id = UnwrappedTileID::with_wrap(wrap, tile_cover_ids[0].canonical);
                     if globe {
                         self.tile_ids = vec![wrapped_tile_id];
-                    } else if !self.tile_ids.contains(&wrapped_tile_id) {
+                        break;
+                    }
+                    if !self.tile_ids.contains(&wrapped_tile_id) {
                         self.tile_ids.push(wrapped_tile_id);
                     }
-                    break;
                 }
             }
             if globe && has_visible_tile {

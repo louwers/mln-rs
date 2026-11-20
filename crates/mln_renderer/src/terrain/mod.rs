@@ -127,7 +127,7 @@ use std::sync::Arc;
 
 pub(crate) use cover::{ElevationRanges, TerrainCover};
 #[cfg(test)]
-pub(crate) use cover::{REMEMBERED_RANGES, terrain_tile_size};
+pub(crate) use cover::{REMEMBERED_RANGES, TerrainTile, terrain_tile_size};
 pub(crate) use drapes::Drapes;
 pub(crate) use elevation::TerrainElevation;
 use mln_gfx::gpu::Gpu;
