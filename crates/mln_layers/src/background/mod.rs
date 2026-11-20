@@ -3,7 +3,7 @@
 
 #[rustfmt::skip]
 mod properties;
-mod render_layer;
+pub(crate) mod render_layer;
 
 use mln_style::layer_type::{LayerStyle, LayerTypeInfo, NoProperties, SourceKind, StyleLayerType};
 use mln_style::property_table::{PropertyTable, PropertyVisitor};

@@ -86,7 +86,7 @@ pub trait Bucket: Any + Send + BucketValue {
 
 impl dyn Bucket {
     /// Whether the bucket has data its tile's draws don't have yet.
-    pub(crate) fn needs_upload(&self) -> bool {
+    pub fn needs_upload(&self) -> bool {
         !self.base().uploaded && self.has_data()
     }
 

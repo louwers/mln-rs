@@ -25,7 +25,12 @@
 //! A layer type that lays out makes a [`Bucket`] of each layer's features
 //! in a tile, which the engine moves between threads, uploads, rewrites for
 //! feature state and copies for the tile's other world copies; a type that
-//! doesn't lay out has [`NoBucket`].
+//! doesn't lay out has [`NoBucket`] and [`NoLayout`]. Its [`Layout`], which
+//! [`LayerType::create_layout`] makes of a group of layers with the tile's
+//! [`LayoutParameters`] and [`SourceLayer`], selects the features and
+//! records the images they need, and once those are [`Resolved`], makes the
+//! bucket, keeping its geometry in [`GeometryVec`]s, and adds the features
+//! to the tile's [`FeatureIndexBuilder`].
 //!
 //! A layer's tiles are those of its source, each as a [`FrameTile`] with
 //! what it shows the layer, the type's [`TileView`]: its bucket in the
@@ -58,12 +63,16 @@ use mln_util::error::Error;
 use mln_wire::Wire;
 
 pub use crate::bucket::{Bucket, BucketBase, BucketValue, FeatureStates, NoBucket};
-pub use crate::bucket_geometry::GeometryUpload;
+pub use crate::bucket_geometry::{GeometryUpload, GeometryVec};
+pub use crate::bucket_parameters::BucketParameters;
+pub use crate::geometry::feature_index::FeatureIndexBuilder;
 use crate::gfx::context::Context;
 use crate::image_store::ImageStore;
 use crate::layer_drawing::LayerDrawing;
 pub use crate::layer_type::EvaluatedLayer;
-use crate::layout::layout::{Layout, LayoutParameters, SourceLayer};
+pub use crate::layout::filter_groups::FilterGroups;
+pub use crate::layout::layout::{BuildParams, Layout, LayoutParameters, NoLayout, SourceLayer, layers_by_id};
+pub use crate::layout::tile_layout::Resolved;
 use crate::paint_parameters::PaintParameters;
 pub use crate::paint_property_binder::{CrossFadedPaintPropertyBinder, PaintPropertyBinder};
 pub use crate::render_layer::LayerBucket;
@@ -83,8 +92,7 @@ use crate::update_parameters::UpdateParameters;
 /// everything around them that is the same for every type.
 pub trait LayerType: StyleLayerType {
     /// How a tile lays out a group of the type's layers.
-    /// [`NoLayout`](crate::unstable::NoLayout) for a type that doesn't lay
-    /// out.
+    /// [`NoLayout`] for a type that doesn't lay out.
     type Layout: Layout<Self>;
 
     /// The bucket the layout makes. [`NoBucket`] for a type that doesn't

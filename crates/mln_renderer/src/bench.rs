@@ -197,6 +197,15 @@ impl LaidOut {
     pub fn buckets(&self) -> usize {
         self.result.layer_render_data.len()
     }
+
+    /// The tile's id, and the wire forms of its buckets and its feature
+    /// index's grid, which are equal for equal layouts. Fails for a bucket
+    /// without a wire form.
+    pub fn encoded(&self) -> Result<(OverscaledTileID, [Vec<u8>; 2]), Error> {
+        let buckets = crate::tile::worker_codec::fields::encode_buckets(&self.result).map_err(Error::native)?;
+        let grid = self.result.feature_index.encode_grid().map_err(Error::native)?;
+        Ok((self.id, [buckets, grid]))
+    }
 }
 
 /// The symbols of laid-out tiles in a view, as a renderer finds which to
@@ -466,7 +475,7 @@ mod tests {
         Feature { geometry: Some(geometry), properties: Arc::new(properties), id: Identifier::Uint(id) }
     }
 
-    /// A style of a line layer whose color depends on feature state, and a
+    /// A style of a `dot` layer whose color depends on feature state, and a
     /// symbol layer, over source `s`.
     fn style() -> Style {
         Style::from_json(
@@ -476,8 +485,8 @@ mod tests {
                 "glyphs": "local://glyphs/{fontstack}/{range}.pbf",
                 "sources": {"s": {"type": "vector", "tiles": ["local://tiles/{z}-{x}-{y}.mvt"]}},
                 "layers": [
-                    {"id": "roads", "type": "line", "source": "s", "source-layer": "l",
-                     "paint": {"line-color": ["case", ["boolean", ["feature-state", "on"], false], "red", "blue"]}},
+                    {"id": "roads", "type": "dot", "source": "s", "source-layer": "l",
+                     "paint": {"dot-color": ["case", ["boolean", ["feature-state", "on"], false], "red", "blue"]}},
                     {"id": "names", "type": "symbol", "source": "s", "source-layer": "l",
                      "layout": {"text-field": ["get", "name"], "text-font": ["Test"]}}
                 ]
@@ -515,17 +524,17 @@ mod tests {
         assert_eq!(*requested.borrow(), ["local://glyphs/Test/0-255.pbf"]);
         assert_eq!(layout.run(data.clone()).unwrap().buckets(), 2);
 
-        let lines = TileLayout::new(
+        let dots = TileLayout::new(
             &Registry::with_builtins(),
             &style,
             "s",
-            |type_| type_ == "line",
+            |type_| type_ == "dot",
             (0, 0, 0),
             &data,
             |_| None,
         )
         .unwrap();
-        assert_eq!(lines.run(data).unwrap().buckets(), 1);
+        assert_eq!(dots.run(data).unwrap().buckets(), 1);
     }
 
     #[test]
@@ -567,7 +576,7 @@ mod tests {
             &Registry::with_builtins(),
             &style,
             "s",
-            |type_| type_ == "line",
+            |type_| type_ == "dot",
             (0, 0, 0),
             &data,
             |_| None,
@@ -581,7 +590,7 @@ mod tests {
         let mut on = mln_style::expression::expression::FeatureState::new();
         on.insert("on".to_owned(), Value::Bool(true));
         states.entry("l".to_owned()).or_default().insert("1".to_owned(), on);
-        let roads = laid_out.result.layer_render_data.get("roads").unwrap().bucket.base().bucket_id;
+        let roads = laid_out.result.layer_render_data.get("roads").unwrap().bucket.base().id();
         assert_eq!(laid_out.result.set_feature_state(&states, patterns), [roads]);
     }
 
@@ -603,14 +612,7 @@ mod tests {
         for _ in 0..2 {
             let reply = codec.send(&layout, data.clone()).unwrap().run();
             let crossed = codec.reply(&reply).unwrap();
-            assert_eq!(crossed.id, direct.id);
-            let comparable = |laid_out: &LaidOut| {
-                [
-                    crate::tile::worker_codec::fields::encode_buckets(&laid_out.result),
-                    laid_out.result.feature_index.encode_grid(),
-                ]
-            };
-            assert_eq!(comparable(&crossed), comparable(&direct));
+            assert_eq!(crossed.encoded().unwrap(), direct.encoded().unwrap());
         }
     }
 }

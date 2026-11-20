@@ -7,7 +7,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use mln_style::custom_tile_loader::{CustomProvider, CustomTileSubscriber, TileFunction};
 use mln_style::layer::Layer;
 use mln_style::layer_type::LayerStyle;
-use mln_style::layers::Fill;
 use mln_style::sources::custom_vector_source::{CustomVectorProvider, CustomVectorTileData, TileDataFormat};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;
@@ -19,6 +18,7 @@ use crate::Registry;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::query::SourceQueryOptions;
 use crate::tests::OneTile;
+use crate::tests::fixture_layer::Dot;
 use crate::tile::contents::Contents;
 use crate::tile::loading::DataOrigin;
 use crate::tile::tile::{TileKind, TileNecessity};
@@ -216,10 +216,10 @@ fn set_mlt_tile_data() {
     let root = OverscaledTileID::from_zxy(0, 0, 0);
     let mut tiles = tiles(&test, &[root], Arc::clone(&loader));
 
-    let mut layer = Layer::new(Registry::with_builtins().style(), "fill", "water", "source").unwrap();
+    let mut layer = Layer::new(Registry::with_builtins().style(), "dot", "water", "source").unwrap();
     layer.set_source_layer("water");
     let layer_properties: Arc<dyn ErasedEvaluatedLayer> =
-        Arc::new(EvaluatedLayer::<Fill>::new(LayerStyle::recover(layer.style()).unwrap()));
+        Arc::new(EvaluatedLayer::<Dot>::new(LayerStyle::recover(layer.style()).unwrap()));
     tiles.set_style(&crate::tests::style(&[layer_properties]));
     tiles.set_necessity(&root, TileNecessity::Required);
     test.local_pool.run_all();

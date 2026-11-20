@@ -1,5 +1,7 @@
-// Ports test/gl/bucket.test.cpp (circle, fill, line; on the WebGPU headless
-// backend) and test/renderer/fill_bucket.test.cpp.
+// `dot`, the tests' layer type of a geometry source.
+pub(crate) mod fixture_layer;
+// Ports test/gl/bucket.test.cpp (symbol, raster; on the WebGPU headless
+// backend). mln_layers' tests port the circle, fill and line parts.
 mod bucket_test;
 // Cameras that move faster than the network answers.
 mod fast_camera_test;
@@ -17,7 +19,6 @@ mod text;
 mod gtest_image_store;
 // gtests-core: test/renderer/dynamic_texture_atlas.test.cpp.
 mod gtest_dynamic_texture_atlas;
-mod gtest_fill_mesh;
 // gtests-core: test/renderer/pattern_atlas.test.cpp.
 mod gtest_pattern_atlas;
 mod gtest_tile_lod;

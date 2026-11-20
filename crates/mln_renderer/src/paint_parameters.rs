@@ -156,15 +156,15 @@ pub struct PaintParameters<'a> {
     /// over crispness then.
     pub(crate) camera_moving: bool,
     /// The light of the frame.
-    pub(crate) light: &'a crate::render_light::EvaluatedLight,
-    pub(crate) static_data: &'a RenderStaticData,
+    pub light: &'a crate::render_light::EvaluatedLight,
+    pub static_data: &'a RenderStaticData,
 
     pub(crate) pass: RenderPass,
     pub(crate) debug_options: MapDebugOptions,
 
-    pub(crate) pixel_ratio: f32,
-    pub(crate) renderable_size: Size,
-    pub(crate) pixels_to_gl_units: [f32; 2],
+    pub pixel_ratio: f32,
+    pub renderable_size: Size,
+    pub pixels_to_gl_units: [f32; 2],
 
     /// The masks of the tiles that the frame's draw groups can clip to.
     pub(crate) clip_masks: &'a mut ClipMasks,
@@ -173,7 +173,7 @@ pub struct PaintParameters<'a> {
     /// Whether a layer drawn as a whole can draw with the frame's depth and
     /// stencil: the frame has them, and a pass can draw into them together
     /// with the layer composite's texture.
-    pub(crate) composites_with_frame_depth: bool,
+    pub composites_with_frame_depth: bool,
     /// The stencil value of each tile whose mask the stencil buffer holds.
     tile_clipping_mask_ids: VecMap<UnwrappedTileID, i32>,
     next_stencil_id: i32,

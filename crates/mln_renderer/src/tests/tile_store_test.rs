@@ -84,7 +84,7 @@ fn not_modified() -> Response {
 }
 
 fn water_layer(id: &str, color: &str) -> Arc<dyn ErasedEvaluatedLayer> {
-    layer(json!({"id": id, "type": "fill", "source-layer": "water", "paint": {"fill-color": color}}))
+    layer(json!({"id": id, "type": "dot", "source-layer": "water", "paint": {"dot-color": color}}))
 }
 
 /// Features with ids `ids`, at the middle of the tile.
@@ -354,7 +354,7 @@ fn eviction_and_revival_while_a_job_is_in_flight() {
     let manual = Manual::default();
     let mut tile = test.tile(Box::new(manual.clone()));
     let id = tile.id;
-    tile.set_style(&style(&[layer(json!({"id": "dots", "type": "circle"}))]));
+    tile.set_style(&style(&[layer(json!({"id": "dots", "type": "dot"}))]));
     tile.set_data(Some(features(&[1])));
     tile.update();
     let old = manual.take();
@@ -362,7 +362,7 @@ fn eviction_and_revival_while_a_job_is_in_flight() {
     tile.drop_tile();
     assert!(old.superseded.load(std::sync::atomic::Ordering::Relaxed), "a worker may skip it");
     tile.add(id);
-    tile.set_style(&style(&[layer(json!({"id": "dots", "type": "circle"}))]));
+    tile.set_style(&style(&[layer(json!({"id": "dots", "type": "dot"}))]));
     tile.set_data(Some(features(&[2])));
     tile.update();
     let new = manual.take();
@@ -427,7 +427,7 @@ fn queries_and_feature_state_read_the_shown_contents() {
     let test = Test::new();
     let manual = Manual::default();
     let mut tile = test.tile(Box::new(manual.clone()));
-    tile.set_style(&style(&[layer(json!({"id": "dots", "type": "circle"}))]));
+    tile.set_style(&style(&[layer(json!({"id": "dots", "type": "dot"}))]));
     tile.set_data(Some(features(&[1])));
     tile.update();
     manual.run();
@@ -476,12 +476,12 @@ fn source_data_racing_eviction() {
     let mut tile = test.tile(Box::new(InlineWorkers));
     let id = tile.id;
     let key = tile.key;
-    tile.set_style(&style(&[layer(json!({"id": "dots", "type": "circle"}))]));
+    tile.set_style(&style(&[layer(json!({"id": "dots", "type": "dot"}))]));
     // A load under way, as a GeoJSON source's `setData` starts.
     let old_load = start_geojson_load(&mut tile);
     tile.drop_tile();
     tile.add(id);
-    tile.set_style(&style(&[layer(json!({"id": "dots", "type": "circle"}))]));
+    tile.set_style(&style(&[layer(json!({"id": "dots", "type": "dot"}))]));
     let new_load = start_geojson_load(&mut tile);
 
     let inbox = tile.store.inbox().clone();
@@ -675,7 +675,7 @@ fn data_from_the_inbox_starts_a_job_at_once() {
     let manual = Manual::default();
     let mut tile = test.tile(Box::new(manual.clone()));
     let (id, key) = (tile.id, tile.key);
-    tile.set_style(&style(&[layer(json!({"id": "dots", "type": "circle"}))]));
+    tile.set_style(&style(&[layer(json!({"id": "dots", "type": "dot"}))]));
     let load = start_geojson_load(&mut tile);
     let inbox = tile.store.inbox().clone();
     // From another thread, as a GeoJSON source's tiles cut on a pool answer.

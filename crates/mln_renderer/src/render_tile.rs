@@ -21,7 +21,7 @@ use crate::render_source::RenderTileParameters;
 use crate::tile::contents::Contents;
 use crate::tile::tile::Tile;
 
-pub(crate) struct RenderTile {
+pub struct RenderTile {
     pub(crate) id: UnwrappedTileID,
     /// The projection contract for this tile; `matrix` is its main matrix.
     pub(crate) projection: ProjectionData,
@@ -62,7 +62,8 @@ impl RenderTile {
     }
 
     /// The layer's translation in tile units, rotated for its anchor.
-    pub(crate) fn tile_unit_translation(
+    #[must_use]
+    pub fn tile_unit_translation(
         id: &UnwrappedTileID,
         translation: [f32; 2],
         anchor: TranslateAnchorType,
@@ -294,5 +295,11 @@ impl<'a, T: LayerType> FrameTile<'a, T> {
     #[must_use]
     pub fn id(self) -> OverscaledTileID {
         *self.tile.overscaled_tile_id()
+    }
+
+    /// The id the frame draws the tile at: its tile in its world copy.
+    #[must_use]
+    pub fn unwrapped_id(self) -> UnwrappedTileID {
+        self.tile.id
     }
 }

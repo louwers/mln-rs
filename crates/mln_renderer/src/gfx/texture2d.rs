@@ -16,8 +16,8 @@ use crate::gfx::resources::{Device, SharedGpuTexture};
 /// it waits to upload, and once made, a texture of the backend's
 /// [`Gpu`](mln_gfx::gpu::Gpu), which the texture lets go of when it
 /// replaces it or drops, and which bindings made of it hold until they go. The context changes it, and lends it to set up as a
-/// [`TextureMut`].
-pub(crate) struct Texture2D {
+/// `TextureMut`.
+pub struct Texture2D {
     texture: Option<SharedGpuTexture>,
     size: Size,
     format: TextureFormat,
@@ -44,7 +44,7 @@ impl Texture2D {
     }
 
     #[must_use]
-    pub(crate) fn size(&self) -> Size {
+    pub fn size(&self) -> Size {
         self.size
     }
 
@@ -198,7 +198,7 @@ impl<'a> TextureMut<'a> {
 
     /// Sets the format the texture is made with. A texture made with
     /// another format goes.
-    pub(crate) fn set_format(&mut self, format: TextureFormat) {
+    pub fn set_format(&mut self, format: TextureFormat) {
         self.texture.set_format(format);
     }
 
@@ -220,7 +220,7 @@ impl<'a> TextureMut<'a> {
 
     /// Sets the RGBA image the next upload writes, and the texture's size to
     /// the image's.
-    pub(crate) fn set_image(&mut self, image: Option<Rc<PremultipliedImage>>) {
+    pub fn set_image(&mut self, image: Option<Rc<PremultipliedImage>>) {
         if let Some(image) = &image {
             self.set_size(image.size);
             self.set_format(TextureFormat::Rgba8Unorm);

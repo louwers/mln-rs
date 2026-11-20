@@ -28,9 +28,9 @@
 //!   of its type `T`; `layer_type::LayerBase` holds the members every layer
 //!   type has.
 //! - Each layer type is a marker type that implements
-//!   `layer_type::StyleLayerType`, such as `layers::Circle`, with
+//!   `layer_type::StyleLayerType`, such as `layers::Raster`, with
 //!   property sets that [`properties!`] declares, such as
-//!   `layers::CirclePaintProperties::{Transitionable, Unevaluated, PossiblyEvaluated}`.
+//!   `layers::RasterPaintProperties::{Transitionable, Unevaluated, PossiblyEvaluated}`.
 //!   A crate outside this one declares a layer type the same way.
 //! - Each layer type, the light and the sky have a property table, which
 //!   `property_table` reads to get, set and serialize properties by name.

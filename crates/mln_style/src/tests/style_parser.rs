@@ -276,8 +276,8 @@ fn deepest_admitted_style_parses_on_a_1_mib_stack() {
             nest(r#"["interpolate", ["linear"], ["get", "a"], 0, X, 1, 0]"#, r#"["number", ["get", "a"]]"#, depth);
         format!(
             r#"{{"version": 8, "sources": {{"s": {{"type": "vector", "tiles": ["http://example.com/{{z}}/{{x}}/{{y}}"]}}}},
-                "layers": [{{"id": "c", "type": "circle", "source": "s", "source-layer": "l",
-                             "filter": {filter}, "paint": {{"circle-radius": {radius}}}}}]}}"#
+                "layers": [{{"id": "c", "type": "symbol", "source": "s", "source-layer": "l",
+                             "filter": {filter}, "paint": {{"text-halo-width": {radius}}}}}]}}"#
         )
     };
     let fits = |depth: usize| serde_json::from_str::<serde_json::Value>(&style(depth)).is_ok();
@@ -310,10 +310,10 @@ fn invalid_properties_are_skipped() {
         "version": 8,
         "sources": {"s": {"type": "geojson", "data": {"type": "FeatureCollection", "features": []}}},
         "layers": [
-            {"id": "a", "type": "circle", "source": "s",
-             "layout": {"visibility": "maybe", "circle-sort-key": 1},
-             "paint": {"circle-color": "not a color", "circle-foo": 1, "circle-radius": 5}},
-            {"id": "b", "ref": "a", "paint": {"circle-opacity": "opaque", "circle-radius": 7}}
+            {"id": "a", "type": "symbol", "source": "s",
+             "layout": {"visibility": "maybe", "symbol-sort-key": 1},
+             "paint": {"text-color": "not a color", "text-foo": 1, "text-halo-width": 5}},
+            {"id": "b", "ref": "a", "paint": {"text-opacity": "opaque", "text-halo-width": 7}}
         ]
     }"#,
         )
@@ -325,19 +325,19 @@ fn invalid_properties_are_skipped() {
         let property = parser.layers[layer].get_property(name);
         (property.get_kind(), property.get_value().clone())
     };
-    assert_eq!(property(0, "circle-radius"), (Kind::Constant, Value::Double(5.0)));
-    assert_eq!(property(0, "circle-sort-key"), (Kind::Constant, Value::Double(1.0)));
-    assert_eq!(property(0, "circle-color").0, Kind::Undefined);
+    assert_eq!(property(0, "text-halo-width"), (Kind::Constant, Value::Double(5.0)));
+    assert_eq!(property(0, "symbol-sort-key"), (Kind::Constant, Value::Double(1.0)));
+    assert_eq!(property(0, "text-color").0, Kind::Undefined);
     assert_eq!(property(0, "visibility").0, Kind::Undefined);
-    assert_eq!(property(1, "circle-radius"), (Kind::Constant, Value::Double(7.0)));
-    assert_eq!(property(1, "circle-opacity").0, Kind::Undefined);
+    assert_eq!(property(1, "text-halo-width"), (Kind::Constant, Value::Double(7.0)));
+    assert_eq!(property(1, "text-opacity").0, Kind::Undefined);
 
     let mut warnings: Vec<_> = log.messages().into_iter().map(|message| message.msg).collect();
     warnings.sort();
     assert_eq!(
         warnings,
         [
-            "layer 'a' doesn't support property 'circle-foo'",
+            "layer 'a' doesn't support property 'text-foo'",
             "value must be a number",
             "value must be a valid color",
             "value must be a valid enumeration value",

@@ -27,7 +27,7 @@ use crate::render_pass::RenderPass;
 
 /// The values of a layer of the type `T` for a frame.
 pub struct EvaluatedLayer<T: LayerType> {
-    pub(crate) style: Arc<LayerStyle<T>>,
+    pub style: Arc<LayerStyle<T>>,
     pub paint: <T::PaintProperties as PaintSet>::Evaluated,
     /// The default for a type without cross-faded properties.
     pub crossfade: CrossfadeParameters,
@@ -49,13 +49,16 @@ impl<T: LayerType> EvaluatedLayer<T> {
         any.downcast().ok()
     }
 
-    pub(crate) fn new(style: Arc<LayerStyle<T>>) -> Self {
+    /// The values of the layer `style` before its first evaluation: its
+    /// paint properties' defaults, in no pass.
+    #[must_use]
+    pub fn new(style: Arc<LayerStyle<T>>) -> Self {
         EvaluatedLayer::with_paint(style, Default::default())
     }
 
     /// The values of the layer `style` with its paint properties evaluated
     /// to `paint`, without a cross-fade or render passes.
-    pub(crate) fn with_paint(style: Arc<LayerStyle<T>>, paint: <T::PaintProperties as PaintSet>::Evaluated) -> Self {
+    pub fn with_paint(style: Arc<LayerStyle<T>>, paint: <T::PaintProperties as PaintSet>::Evaluated) -> Self {
         EvaluatedLayer { style, paint, crossfade: CrossfadeParameters::default(), render_passes: 0 }
     }
 }
@@ -304,13 +307,11 @@ pub(crate) const fn entry<T: LayerType>() -> &'static dyn ErasedLayerType {
 
 #[cfg(test)]
 mod tests {
-    use mln_map_types::MapMode;
     use mln_style::evaluated::Evaluated;
-    use mln_style::layers::{Circle, Raster, RasterPaintProperties, Symbol};
-    use mln_vec_map::VecMap;
+    use mln_style::layers::{Raster, RasterPaintProperties, Symbol};
 
     use super::*;
-    use crate::buckets::circle_bucket::CircleBucket;
+    use crate::tests::fixture_layer::{Dot, DotBucket};
 
     fn raster() -> Arc<dyn ErasedEvaluatedLayer> {
         let paint = RasterPaintProperties::PossiblyEvaluated {
@@ -331,16 +332,15 @@ mod tests {
         assert_eq!(*recovered.paint.raster_hue_rotate.uniform(), 90.0);
         assert_eq!(*recovered.paint.raster_opacity.uniform(), 0.5);
         assert_eq!(recovered.crossfade.t, 0.25);
-        assert!(EvaluatedLayer::<Circle>::recover(&layer).is_none());
+        assert!(EvaluatedLayer::<Dot>::recover(&layer).is_none());
     }
 
     #[test]
     fn a_type_reads_no_other_types_values() {
         let layer = raster();
-        let circles = entry::<Circle>();
-        assert!(!circles.layout_can_need_dependencies(std::slice::from_ref(&layer)));
-        let bucket = CircleBucket::new(&VecMap::new(), MapMode::Static, 0.0);
-        assert_eq!(circles.query_radius(&bucket, &layer), 0.0);
+        let dots = entry::<Dot>();
+        assert!(!dots.layout_can_need_dependencies(std::slice::from_ref(&layer)));
+        assert_eq!(dots.query_radius(&DotBucket::default(), &layer), 0.0);
         let symbols = entry::<Symbol>();
         assert!(!symbols.layout_can_need_dependencies(&[layer]));
     }

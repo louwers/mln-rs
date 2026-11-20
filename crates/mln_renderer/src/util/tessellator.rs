@@ -11,7 +11,7 @@ pub struct Tessellator {
     earcut: earcut::Earcut<f64>,
     holes: Vec<u32>,
     indices: Vec<u32>,
-    pub(crate) line: LineScratch,
+    pub line: LineScratch,
 }
 
 impl Tessellator {
@@ -20,7 +20,7 @@ impl Tessellator {
     /// The indices point into the polygon's rings concatenated in order. A
     /// ring may repeat its first point at the end. A polygon whose outer
     /// ring is empty has no triangles.
-    pub(crate) fn triangulate<T: Copy + Into<f64>, R: AsRef<[Point<T>]>>(&mut self, polygon: &[R]) -> &[[u32; 3]] {
+    pub fn triangulate<T: Copy + Into<f64>, R: AsRef<[Point<T>]>>(&mut self, polygon: &[R]) -> &[[u32; 3]] {
         // earcut indexes out of bounds on an empty outer ring with holes.
         if polygon.first().is_none_or(|ring| ring.as_ref().is_empty()) {
             return &[];

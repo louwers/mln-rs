@@ -7,8 +7,8 @@
 > this crate as `mln_rs::mln_layers`.
 
 The built-in layer types, outside the engine: each type's properties, its
-style-side and render-side type and its drawing. They register through
-`register_layer_types`.
+style-side and render-side type, its layout and bucket, and its drawing. They
+register through `register_layer_types`.
 
 Part of [mln-rs](https://github.com/louwers/mln-rs), a Rust port of the
 [MapLibre Native](https://github.com/maplibre/maplibre-native) map rendering

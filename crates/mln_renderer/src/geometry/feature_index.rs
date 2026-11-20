@@ -109,7 +109,7 @@ pub struct FeatureIndexBuilder {
 impl FeatureIndexBuilder {
     /// An empty index of `tile_data`'s features, sharing the tile data.
     #[must_use]
-    pub(crate) fn new(tile_data: Option<TileData>) -> Self {
+    pub fn new(tile_data: Option<TileData>) -> Self {
         FeatureIndexBuilder {
             entries: Vec::new(),
             boxes: Vec::new(),
@@ -147,7 +147,7 @@ impl FeatureIndexBuilder {
 
     /// Adds the feature at `index` of `source_layer_name`, with the box of
     /// each of its rings that reaches into the tile.
-    pub(crate) fn insert(
+    pub fn insert(
         &mut self,
         geometries: &GeometryCollection,
         index: usize,
@@ -513,9 +513,9 @@ impl FeatureIndex {
     }
 
     /// The index as it crosses, without its tile data.
-    #[cfg(test)]
-    pub(crate) fn encode_grid(&self) -> Vec<u8> {
-        mln_wire::to_vec(&self.to_wire()).unwrap()
+    #[cfg(any(test, feature = "bench"))]
+    pub(crate) fn encode_grid(&self) -> Result<Vec<u8>, String> {
+        mln_wire::to_vec(&self.to_wire())
     }
 }
 
@@ -607,11 +607,11 @@ mod tests {
             builder.insert(&GeometryCollection::from(vec![ring.clone(), ring]), i, "layer", "leader");
         }
         let index = builder.finish();
-        let encoded = index.encode_grid();
+        let encoded = index.encode_grid().unwrap();
         let decoded: FeatureIndex = mln_wire::from_slice(&mln_wire::to_vec(&index).unwrap()).unwrap();
         assert_eq!(decoded.entries, index.entries);
         assert_eq!(decoded.boxes, index.boxes);
-        assert_eq!(decoded.encode_grid(), encoded);
+        assert_eq!(decoded.encode_grid().unwrap(), encoded);
         assert_eq!(index.boxes[14], [560, 10, 565, 4000]);
     }
 

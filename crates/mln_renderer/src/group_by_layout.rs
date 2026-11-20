@@ -154,11 +154,12 @@ mod tests {
     use mln_style::filter::Filter;
     use mln_style::layer::Layer;
     use mln_style::layer_type::LayerStyle;
-    use mln_style::layers::{Circle, Fill, Raster};
+    use mln_style::layers::{Raster, Symbol};
 
     use super::*;
     use crate::Registry;
     use crate::layer::{EvaluatedLayer, LayerType};
+    use crate::tests::fixture_layer::Dot;
 
     /// A filter of its own, which shares no expression with another.
     fn filter(json: &str) -> Filter {
@@ -176,8 +177,8 @@ mod tests {
         Arc::new(EvaluatedLayer::<T>::new(LayerStyle::recover(layer.style()).unwrap()))
     }
 
-    fn circle(id: &str, source_layer: &str, filter: Option<&Filter>) -> Arc<dyn ErasedEvaluatedLayer> {
-        layer::<Circle>(id, source_layer, filter)
+    fn dot(id: &str, source_layer: &str, filter: Option<&Filter>) -> Arc<dyn ErasedEvaluatedLayer> {
+        layer::<Dot>(id, source_layer, filter)
     }
 
     fn ids(groups: &GroupMap) -> Vec<Vec<String>> {
@@ -204,17 +205,17 @@ mod tests {
         let motorway = filter(r#"["==", ["get", "class"], "motorway"]"#);
         let primary = filter(r#"["==", ["get", "class"], "primary"]"#);
         let layers = [
-            circle("a", "roads", Some(&motorway)),
-            circle("b", "roads", Some(&primary)),
-            circle("c", "roads", Some(&motorway)),
-            circle("d", "roads", None),
-            circle("e", "water", Some(&motorway)),
-            layer::<Fill>("f", "roads", Some(&motorway)),
-            circle("g", "roads", Some(&primary)),
-            circle("h", "roads", None),
+            dot("a", "roads", Some(&motorway)),
+            dot("b", "roads", Some(&primary)),
+            dot("c", "roads", Some(&motorway)),
+            dot("d", "roads", None),
+            dot("e", "water", Some(&motorway)),
+            layer::<Symbol>("f", "roads", Some(&motorway)),
+            dot("g", "roads", Some(&primary)),
+            dot("h", "roads", None),
             // An equal filter that isn't shared: a filterable layer's
             // layout differs from another's unless they share the filter.
-            circle("i", "roads", Some(&filter(r#"["==", ["get", "class"], "motorway"]"#))),
+            dot("i", "roads", Some(&filter(r#"["==", ["get", "class"], "motorway"]"#))),
         ];
         let groups = ids(&group_layers(&layers));
         assert_eq!(groups, [vec!["a", "c"], vec!["b", "g"], vec!["d", "h"], vec!["e"], vec!["f"], vec!["i"]]);
@@ -248,8 +249,7 @@ mod tests {
     fn groups_many_filters_as_comparison_does() {
         let filters: Vec<_> =
             (0..50).map(|i| filter(&format!(r#"["==", ["%", ["number", ["id"]], 50], {i}]"#))).collect();
-        let layers: Vec<_> =
-            (0..200).map(|i| circle(&format!("layer-{i}"), "points", Some(&filters[i % 50]))).collect();
+        let layers: Vec<_> = (0..200).map(|i| dot(&format!("layer-{i}"), "points", Some(&filters[i % 50]))).collect();
         let groups = ids(&group_layers(&layers));
         assert_eq!(groups.len(), 50);
         assert_eq!(groups, grouped_by_comparison(&layers));

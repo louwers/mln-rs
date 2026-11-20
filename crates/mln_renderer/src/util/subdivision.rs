@@ -18,11 +18,11 @@ pub(crate) const SOUTH_POLE_Y: i16 = 32767;
 
 /// A polygon's mesh, with vertices of its own.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub(crate) struct SubdividedPolygon {
-    pub(crate) vertices: Vec<Point<i16>>,
-    pub(crate) triangles: Vec<[u32; 3]>,
+pub struct SubdividedPolygon {
+    pub vertices: Vec<Point<i16>>,
+    pub triangles: Vec<[u32; 3]>,
     /// The outlines of the polygon's rings.
-    pub(crate) lines: Vec<[u32; 2]>,
+    pub lines: Vec<[u32; 2]>,
 }
 
 /// Triangulates `polygon`, an outer ring and its holes, and splits the
@@ -32,7 +32,7 @@ pub(crate) struct SubdividedPolygon {
 /// outside the tile are dropped. The triangles are counter-clockwise in tile
 /// space. `outline` adds the lines of the rings, subdivided as well.
 #[must_use]
-pub(crate) fn subdivide_polygon(
+pub fn subdivide_polygon(
     polygon: &GeometryCollection,
     canonical: &CanonicalTileID,
     granularity: u32,
@@ -290,7 +290,7 @@ struct Row {
 /// times the widest sliver between the meshes of neighboring zoom levels
 /// (about 2π units with the globe's granularities), and inside the stencil
 /// masks' border.
-pub(crate) const TILE_BORDER_STRIP_WIDTH: i16 = (EXTENT / 256) as i16;
+pub const TILE_BORDER_STRIP_WIDTH: i16 = (EXTENT / 256) as i16;
 
 /// Extends every triangle edge that lies on the tile border with nothing
 /// beyond it by a strip `width` units outside the tile.
@@ -302,7 +302,7 @@ pub(crate) const TILE_BORDER_STRIP_WIDTH: i16 = (EXTENT / 256) as i16;
 /// triangles on both sides of the border belongs to a tile with a buffer and
 /// gets none, and neither do pole borders or the zoom 0 tile's antimeridian
 /// edges.
-pub(crate) fn add_tile_border_strips(mesh: &mut SubdividedPolygon, canonical: &CanonicalTileID, width: i16) {
+pub fn add_tile_border_strips(mesh: &mut SubdividedPolygon, canonical: &CanonicalTileID, width: i16) {
     struct BorderEdge {
         a: u32,
         b: u32,
@@ -366,7 +366,7 @@ pub(crate) fn add_tile_border_strips(mesh: &mut SubdividedPolygon, canonical: &C
 /// Inserts a vertex wherever the line crosses a cell boundary; `is_ring`
 /// closes the line first.
 #[must_use]
-pub(crate) fn subdivide_vertex_line(line: &[Point<i16>], granularity: u32, is_ring: bool) -> GeometryCoordinates {
+pub fn subdivide_vertex_line(line: &[Point<i16>], granularity: u32, is_ring: bool) -> GeometryCoordinates {
     if line.len() < 2 {
         return GeometryCoordinates::new();
     }

@@ -14,7 +14,7 @@ use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{FileSource, FileSourceExt, Kind, RequestOrder, Resource, Responder, Response};
 use mln_style::layer::Layer;
 use mln_style::layer_type::LayerStyle;
-use mln_style::layers::{Circle, Hillshade, Line, Raster};
+use mln_style::layers::{Hillshade, Raster};
 use mln_style::source_type::SourceData;
 use mln_style::sources::custom_geometry_source::{self, Options as CustomGeometrySourceOptions};
 use mln_style::sources::custom_vector_source::{self, Options as CustomVectorSourceOptions, TileDataFormat};
@@ -39,6 +39,7 @@ use parking_lot::Mutex;
 use crate::Registry;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::render_source::RenderSource;
+use crate::tests::fixture_layer::Dot;
 use crate::tile::source_tiles::SourceTiles;
 use crate::tile::store::{StoreEvent, TileStore};
 use crate::tile_parameters::TileParameters;
@@ -212,9 +213,9 @@ impl Tiled {
                 Arc::new(EvaluatedLayer::<Hillshade>::new(LayerStyle::recover(layer.style()).unwrap()))
             }
             Tiled::Vector => {
-                let mut layer = Layer::new(Registry::with_builtins().style(), "line", "id", "source").unwrap();
+                let mut layer = Layer::new(Registry::with_builtins().style(), "dot", "id", "source").unwrap();
                 layer.set_source_layer("water");
-                Arc::new(EvaluatedLayer::<Line>::new(LayerStyle::recover(layer.style()).unwrap()))
+                Arc::new(EvaluatedLayer::<Dot>::new(LayerStyle::recover(layer.style()).unwrap()))
             }
         };
         vec![properties]
@@ -654,10 +655,10 @@ fn custom_geometry_case(test: &SourceTest, store: &mut TileStore) -> (Source, Bo
         custom_geometry_source::create("source", CustomGeometrySourceOptions::default(), test.thread_pool.pool())
             .unwrap();
 
-    let mut layer = Layer::new(Registry::with_builtins().style(), "line", "id", "source").unwrap();
+    let mut layer = Layer::new(Registry::with_builtins().style(), "dot", "id", "source").unwrap();
     layer.set_source_layer("water");
     let layer_properties: Arc<dyn ErasedEvaluatedLayer> =
-        Arc::new(EvaluatedLayer::<Line>::new(LayerStyle::recover(layer.style()).unwrap()));
+        Arc::new(EvaluatedLayer::<Dot>::new(LayerStyle::recover(layer.style()).unwrap()));
     let layers = vec![layer_properties];
 
     let mut render_source = crate::tests::create_render_source(&source, store);
@@ -728,10 +729,10 @@ fn custom_vector_source_set_tile_data() {
 
     let source = custom_vector_source::create("source", CustomVectorSourceOptions::default(), test.thread_pool.pool());
 
-    let mut layer = Layer::new(Registry::with_builtins().style(), "line", "id", "source").unwrap();
+    let mut layer = Layer::new(Registry::with_builtins().style(), "dot", "id", "source").unwrap();
     layer.set_source_layer("water");
     let layer_properties: Arc<dyn ErasedEvaluatedLayer> =
-        Arc::new(EvaluatedLayer::<Line>::new(LayerStyle::recover(layer.style()).unwrap()));
+        Arc::new(EvaluatedLayer::<Dot>::new(LayerStyle::recover(layer.style()).unwrap()));
 
     let mut store = test.store();
     let mut render_source = crate::tests::create_render_source(&source, &mut store);
@@ -818,9 +819,9 @@ fn geojson_source_tiles_after_data_reset() {
     let mut store = test.store();
     let mut render_source = crate::tests::create_render_source(&source, &mut store);
 
-    let layer = Layer::new(Registry::with_builtins().style(), "circle", "id", "source").unwrap();
+    let layer = Layer::new(Registry::with_builtins().style(), "dot", "id", "source").unwrap();
     let layer_properties: Arc<dyn ErasedEvaluatedLayer> =
-        Arc::new(EvaluatedLayer::<Circle>::new(LayerStyle::recover(layer.style()).unwrap()));
+        Arc::new(EvaluatedLayer::<Dot>::new(LayerStyle::recover(layer.style()).unwrap()));
     let layers = vec![layer_properties];
 
     let continuous = test.tile_parameters(MapMode::Continuous);
@@ -841,13 +842,13 @@ fn geojson_source_tiles_after_data_reset() {
     assert!(render_source.is_loaded(&store)); // Tiles are reset in static mode.
 }
 
-/// A circle layer "id" on "source", as evaluated values.
-fn circle_layers() -> Vec<Arc<dyn ErasedEvaluatedLayer>> {
-    let layer = Layer::new(Registry::with_builtins().style(), "circle", "id", "source").unwrap();
-    vec![Arc::new(EvaluatedLayer::<Circle>::new(LayerStyle::recover(layer.style()).unwrap()))]
+/// A dot layer "id" on "source", as evaluated values.
+fn dot_layers() -> Vec<Arc<dyn ErasedEvaluatedLayer>> {
+    let layer = Layer::new(Registry::with_builtins().style(), "dot", "id", "source").unwrap();
+    vec![Arc::new(EvaluatedLayer::<Dot>::new(LayerStyle::recover(layer.style()).unwrap()))]
 }
 
-/// A GeoJSON source rendered with a circle layer. Its data is clustered,
+/// A GeoJSON source rendered with a dot layer. Its data is clustered,
 /// which slices a tile within the call in either mode, so whether the tiles
 /// complete within an update shows only how they lay out.
 struct SynchronousUpdateSource {
@@ -865,7 +866,7 @@ impl SynchronousUpdateSource {
         let source = geojson_source("source", Arc::clone(&options));
         let mut store = test.store();
         let render_source = crate::tests::create_render_source(&source, &mut store);
-        SynchronousUpdateSource { options, source, store, render_source, layers: circle_layers() }
+        SynchronousUpdateSource { options, source, store, render_source, layers: dot_layers() }
     }
 
     fn is_loaded(&self) -> bool {
@@ -939,7 +940,7 @@ fn geojson_source_slices_inline_while_a_background_slice_runs() {
     source = edited(&source, GeoJsonSourceType::set_data("source", Some(data)));
     let mut store = crate::tests::pool_store(&TaskGroup::new(&pool));
     let mut render_source = crate::tests::create_render_source(&source, &mut store);
-    let layers = circle_layers();
+    let layers = dot_layers();
     let update = |render_source: &mut Box<dyn RenderSource>, store: &mut TileStore, source: &Source| {
         let mut parameters = test.tile_parameters(MapMode::Continuous);
         parameters.is_update_synchronous = source.data().is_update_synchronous();
