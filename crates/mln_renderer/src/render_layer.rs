@@ -766,10 +766,7 @@ impl<T: LayerType> RenderLayer for Layer<T> {
                 let tiles = source.at::<T>(found, &self.values.style.id);
                 self.make_draws(gpu, paint, atlases, &tiles);
             }
-            _ => {
-                self.remove_all_draws();
-                T::nothing_to_draw(&mut self.state);
-            }
+            _ => self.remove_all_draws(),
         }
     }
 

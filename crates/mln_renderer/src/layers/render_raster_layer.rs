@@ -36,7 +36,7 @@ use crate::gfx::store::SharedTexture;
 use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::gfx::vertices::SharedVertices;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
-use crate::layer::{DrawContext, EvaluatedLayer, LayerType, LayerValues};
+use crate::layer::{DrawContext, EvaluatedLayer, LayerType, LayerValues, UpdateContext};
 use crate::layer_composite::Composite;
 use crate::layer_drawing::{
     DrawGroup, DrawList, DrawObjectsMut, DrawOrder, FrameDraw, KeptDraw, LayerDrawing, LayerDraws, TileMap,
@@ -565,11 +565,14 @@ impl LayerType for Raster {
         state.finish_frame_draws(drawing, layer, gpu, paint_parameters.context);
     }
 
-    fn release(state: &mut RasterState) {
-        state.textures.clear();
+    /// A layer whose source shows it nothing keeps no textures.
+    fn update(state: &mut RasterState, _drawing: &mut RasterDrawing, cx: &mut UpdateContext<'_, '_, Raster>) {
+        if cx.tiles.is_empty() {
+            state.textures.clear();
+        }
     }
 
-    fn nothing_to_draw(state: &mut RasterState) {
+    fn release(state: &mut RasterState) {
         state.textures.clear();
     }
 }
