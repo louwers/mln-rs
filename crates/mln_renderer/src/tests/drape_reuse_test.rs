@@ -415,11 +415,12 @@ const CIRCLE: &str = r#"{
     "layers": [{"id": "circle", "type": "circle", "source": "point"}]
 }"#;
 
-/// [`STYLE`] with a circle under its line, which splits its layers into two
-/// stacks, settled, and its four drapes.
+/// [`STYLE`] with a circle over its background, which splits its layers
+/// into two stacks that both draw in every tile, settled, and its four
+/// drapes.
 fn two_stacks() -> (DrapedMap, BTreeSet<OverscaledTileID>) {
     let (mut map, drapes) = settled(Tiles::default());
-    add_layer(&mut map, CIRCLE, Some("line"));
+    add_layer(&mut map, CIRCLE, Some("raster"));
     let both: BTreeSet<(OverscaledTileID, usize)> = drapes.iter().flat_map(|&tile| [(tile, 0), (tile, 1)]).collect();
     let mut drawn = BTreeSet::new();
     for _ in 0..1000 {
@@ -459,6 +460,112 @@ fn a_paint_change_in_a_stack_draws_only_its_drapes_again() {
     assert!(map.frame_passes().1.is_empty(), "the drapes are drawn again once only");
 }
 
+/// [`STYLE`] with a circle under its line, which shows in the north-west
+/// drape's tile only: the line's stack draws nothing in the other three.
+#[test]
+fn a_stack_has_no_drape_where_it_draws_nothing() {
+    let (mut map, drapes) = settled(Tiles::default());
+    add_layer(&mut map, CIRCLE, Some("line"));
+    map.settle();
+    let _north_west = OverscaledTileID::new(2, 0, CanonicalTileID::new(2, 1, 1));
+    let (full, passes) = map.frame_passes();
+    assert!(full);
+    assert!(passes.is_empty(), "drapes drawn again: {passes:?}");
+    let terrain = map.renderer.rendering_stats().terrain;
+    assert_eq!(drapes.len() + 1, terrain.drapes, "the line's stack has the north-west drape only");
+    // The first stack's surface, the line's in the north-west tile, and the
+    // circle.
+    assert_eq!(drapes.len() + 1, terrain.surface_draw_calls);
+    assert_eq!(drapes.len() + 2, map.draw_calls());
+
+    // The shapes move out of the north-west tile into the south-west one:
+    // the line's drape there is made, and the north-west one goes.
+    let geojson: geojson::GeoJson = r#"{
+        "type": "Feature",
+        "id": 1,
+        "properties": {},
+        "geometry": {"type": "Polygon", "coordinates": [[[-80, -50], [-70, -50], [-70, -40], [-80, -40], [-80, -50]]]}
+    }"#
+    .parse()
+    .unwrap();
+    let data = mln_style::sources::geojson::create_geojson_data(geojson, &GeoJSONOptions::default_options()).unwrap();
+    map.edit(GeoJsonSourceType::set_data("shapes", Some(data)));
+    let mut drawn = BTreeSet::new();
+    for _ in 0..1000 {
+        drawn.extend(map.frame_passes().1);
+        if drawn.iter().any(|&(_, stack)| stack == 1) && map.work.idle(0) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    drawn.extend(map.frame_passes().1);
+    let south_west = OverscaledTileID::new(2, 0, CanonicalTileID::new(2, 1, 2));
+    let line: BTreeSet<_> = drawn.iter().filter(|&&(_, stack)| stack == 1).collect();
+    assert_eq!(BTreeSet::from([&(south_west, 1)]), line);
+    map.frame_passes();
+    let terrain = map.renderer.rendering_stats().terrain;
+    assert_eq!(drapes.len() + 1, terrain.drapes, "the line's stack has the south-west drape only");
+    assert_eq!(drapes.len() + 1, terrain.surface_draw_calls);
+}
+
+/// A raster layer of its own stack, whose tile of the north-west drape is
+/// held: the stack has no drape there until the tile arrives, and then
+/// draws it once.
+#[test]
+fn a_stack_gets_a_drape_where_its_tile_arrives() {
+    let north_west = CanonicalTileID::new(2, 1, 1);
+    let tiles = Tiles { held: Mutex::new(Some(("late/", north_west))), ..Tiles::default() };
+    let (mut map, drapes) = settled(tiles);
+    add_layer(&mut map, CIRCLE, None);
+    add_layer(
+        &mut map,
+        r#"{
+            "version": 8,
+            "sources": {"late": {"type": "raster", "tiles": ["late/{z}/{x}/{y}.png"], "tileSize": 512}},
+            "layers": [{"id": "late", "type": "raster", "source": "late", "paint": {"raster-fade-duration": 0}}]
+        }"#,
+        None,
+    );
+    map.settle();
+    assert_eq!(1, map.tiles.waiting.lock().len(), "the held tile was requested");
+    let (full, passes) = map.frame_passes();
+    assert!(!full, "the held tile hasn't loaded");
+    assert!(passes.is_empty(), "drapes drawn again: {passes:?}");
+    let terrain = map.renderer.rendering_stats().terrain;
+    assert_eq!(2 * drapes.len() - 1, terrain.drapes, "no drape of the raster's stack in the north-west");
+    assert_eq!(2 * drapes.len() - 1, terrain.surface_draw_calls);
+
+    map.tiles.release();
+    let mut drawn = BTreeSet::new();
+    for _ in 0..1000 {
+        drawn.extend(map.frame_passes().1);
+        if map.work.idle(0) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    drawn.extend(map.frame_passes().1);
+    let north_west = OverscaledTileID::new(2, 0, north_west);
+    assert_eq!(BTreeSet::from([(north_west, 1)]), drawn);
+    let terrain = map.renderer.rendering_stats().terrain;
+    assert_eq!(2 * drapes.len(), terrain.drapes);
+    assert_eq!(2 * drapes.len(), terrain.surface_draw_calls);
+}
+
+/// The first stack draws the surface of every tile, for the depth the
+/// stacks above test, though it has a drape only where it draws something.
+#[test]
+fn the_first_stack_draws_every_tile_without_a_drape_where_it_draws_nothing() {
+    let (mut map, drapes) = settled(Tiles::default());
+    for layer in ["background", "raster"] {
+        map.edit(Edit::RemoveLayer(layer.to_owned()));
+    }
+    map.settle();
+    let terrain = map.renderer.rendering_stats().terrain;
+    assert_eq!(1, terrain.drapes, "the shapes show in the north-west drape only");
+    assert_eq!(drapes.len(), terrain.surface_draw_calls);
+}
+
 /// The rendering stats count what a map of two stacks holds of the terrain,
 /// and what each frame drew of it: here, the drapes of one stack, and then,
 /// at rest, none.
@@ -484,8 +591,7 @@ fn the_rendering_stats_count_the_terrain() {
     assert_eq!(0, terrain.mem_drape_composite, "no layer composites");
     assert_eq!(tiles, terrain.drapes_drawn);
     assert_eq!(tiles, terrain.drape_passes);
-    // The line shows in one drape only.
-    assert!(terrain.drape_draw_calls > 0, "{terrain:?}");
+    assert!(terrain.drape_draw_calls >= tiles, "{terrain:?}");
     assert_eq!(2 * tiles, terrain.surface_draw_calls);
     assert!(stats.num_mipmap_generations >= tiles as i32, "{stats:?}");
     assert!(stats.num_render_passes > tiles as i32, "{stats:?}");

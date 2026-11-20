@@ -23,7 +23,8 @@ pub(crate) struct DemTextures {
     textures: HashMap<SimpleIdentity, (SharedTexture, u64)>,
     /// The buckets the frame's tiles read so far.
     read: HashSet<SimpleIdentity>,
-    /// A 1×1 texture, for the tiles that read no DEM.
+    /// A transparent 1×1 texture, for the tiles that read no DEM, and for
+    /// the drape of a tile that the first stack draws nothing in.
     flat: Option<SharedTexture>,
 }
 
@@ -46,8 +47,9 @@ impl DemTextures {
         texture.clone()
     }
 
-    /// The texture of the tiles that read no DEM, whose shader reads no
-    /// texel of it.
+    /// A transparent 1×1 texture: that of the tiles that read no DEM, whose
+    /// shader reads no texel of it, and of the drape of a tile that the
+    /// first stack draws nothing in.
     pub(crate) fn flat(&mut self, context: &mut Context) -> SharedTexture {
         let flat = self.flat.get_or_insert_with(|| {
             let image = PremultipliedImage::new(Size::new(1, 1));

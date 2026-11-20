@@ -1384,7 +1384,7 @@ impl RenderOrchestrator {
                     drapes.update_layer(stack, gpu, paint_parameters, &self.atlases, render_layer, layer_source);
                 }
             }
-            drapes.finish_update();
+            drapes.finish_update(paint_parameters.context);
         } else {
             // A backend without the terrain's shader draws no surface.
             self.stacks = DrapeStacks::default();

@@ -155,9 +155,20 @@ impl TerrainDraws {
                 let Some(entry) = draws.tiles.entry(&tile.id) else {
                     continue;
                 };
+                // Where a stack draws nothing in the tile, it has no drape
+                // and no draw, but the first stack's draw writes the depth
+                // the stacks above test, so it draws transparent there.
+                let drape = match drapes.texture(stack, index, &tile.id) {
+                    Some(drape) => drape.clone(),
+                    None if stack == 0 => self.dem_textures.flat(context),
+                    None => {
+                        *entry.value = None;
+                        continue;
+                    }
+                };
                 let draw = entry.value.get_or_insert_with(|| KeptDraw::new(mesh_objects(&shader, mesh)));
                 draw.objects.set_texture(ID_TERRAIN_DEM_TEXTURE, Some(&dem_texture));
-                draw.objects.set_texture(ID_TERRAIN_DRAPE_TEXTURE, drapes.texture(stack, index, &tile.id));
+                draw.objects.set_texture(ID_TERRAIN_DRAPE_TEXTURE, Some(&drape));
                 let frame_draw = FrameDraw {
                     priority: index as i64,
                     depth: DrawDepth::Volume { mask: DepthMaskType::ReadWrite },

@@ -11,7 +11,9 @@
 //!
 //! A drape draws again only when what its layers would draw it from
 //! differs from what they drew it from ([`DrapeKey`]); while the camera
-//! moves, a drape drawn at another zoom stays, as in GL JS.
+//! moves, a drape drawn at another zoom stays, as in GL JS. A drape whose
+//! layers make no draw has no texture, so a stack that draws nothing in a
+//! tile holds no memory there.
 
 use std::sync::Arc;
 
@@ -114,7 +116,8 @@ impl DrapeKey {
 
 /// The drape of a terrain tile for one stack of draped layers.
 struct StackDrape {
-    texture: SharedTexture,
+    /// The texture, while the stack's layers draw something in the tile.
+    texture: Option<SharedTexture>,
     clip_masks: ClipMasks,
     /// The stack's layers' drawings, in drawing order.
     layers: Vec<DrapeLayer>,
@@ -133,24 +136,28 @@ struct StackDrape {
     redraws: bool,
 }
 
-impl StackDrape {
-    /// A drape not drawn yet, with a texture of `size` texels a side.
-    fn new(context: &mut Context, size: u32) -> StackDrape {
-        let texture = context.add_texture_with(|texture| {
-            texture.set_size(Size::new(size, size));
-            texture.set_format(COLOR);
-            texture.set_render_target();
-            texture.set_mipmapped(true);
-            texture.set_sampler(SamplerState {
-                filter: TextureFilterType::Linear,
-                wrap_u: TextureWrapType::Clamp,
-                wrap_v: TextureWrapType::Clamp,
-                max_anisotropy: MAX_ANISOTROPY,
-                mipmapped: true,
-            });
+/// A drape's texture, of `size` texels a side, with its mips.
+fn drape_texture(context: &mut Context, size: u32) -> SharedTexture {
+    context.add_texture_with(|texture| {
+        texture.set_size(Size::new(size, size));
+        texture.set_format(COLOR);
+        texture.set_render_target();
+        texture.set_mipmapped(true);
+        texture.set_sampler(SamplerState {
+            filter: TextureFilterType::Linear,
+            wrap_u: TextureWrapType::Clamp,
+            wrap_v: TextureWrapType::Clamp,
+            max_anisotropy: MAX_ANISOTROPY,
+            mipmapped: true,
         });
+    })
+}
+
+impl StackDrape {
+    /// A drape not drawn yet, without a texture.
+    fn new() -> StackDrape {
         StackDrape {
-            texture,
+            texture: None,
             clip_masks: ClipMasks::default(),
             layers: Vec::new(),
             previous: Vec::new(),
@@ -170,7 +177,8 @@ struct Drape {
 }
 
 /// The drapes of the terrain tiles of a frame, in the cover's order, each
-/// with a drape for each of the frame's stacks of draped layers.
+/// with a drape for each of the frame's stacks of draped layers, which has
+/// a texture where the stack draws something.
 #[derive(Default)]
 pub(crate) struct Drapes {
     drapes: Vec<Drape>,
@@ -197,7 +205,7 @@ impl Drapes {
     /// give their keys ([`key_layer`](Self::key_layer)), which choose the
     /// drapes that draw again ([`choose`](Self::choose)), whose drawings
     /// they then update ([`update_layer`](Self::update_layer)).
-    pub(crate) fn begin(&mut self, context: &mut Context, view: &View, cover: &TerrainCover, stacks: usize) {
+    pub(crate) fn begin(&mut self, view: &View, cover: &TerrainCover, stacks: usize) {
         let size = drape_size(cover.tile_size);
         if size != self.size {
             *self = Drapes { size, ..Drapes::default() };
@@ -211,7 +219,7 @@ impl Drapes {
                 Some(index) => Drape { transform, ..kept.swap_remove(index) },
                 None => Drape { tile: tile.id, transform, stacks: Vec::new() },
             };
-            drape.stacks.resize_with(stacks, || StackDrape::new(context, size));
+            drape.stacks.resize_with(stacks, StackDrape::new);
             for drape in &mut drape.stacks {
                 drape.key.layers.clear();
                 drape.key.tiles.clear();
@@ -303,18 +311,34 @@ impl Drapes {
     }
 
     /// Ends the frame's update of the drapes: the drawings of layers that no
-    /// longer drape in their stack go.
-    pub(crate) fn finish_update(&mut self) {
+    /// longer drape in their stack go. A drape that draws again and whose
+    /// layers draw something has a texture, made in `context`; one whose
+    /// layers draw nothing has none and draws no pass, drawn from its key.
+    pub(crate) fn finish_update(&mut self, context: &mut Context) {
         for drape in self.drapes.iter_mut().flat_map(|drape| &mut drape.stacks) {
             drape.previous.clear();
+            if !drape.redraws {
+                continue;
+            }
+            let mut draws = false;
+            for layer in &drape.layers {
+                layer.drawing.visit_groups(&mut |group| draws = draws || group.draws());
+            }
+            if draws {
+                drape.texture.get_or_insert_with(|| drape_texture(context, self.size));
+            } else {
+                drape.texture = None;
+                drape.drawn = Some(std::mem::take(&mut drape.key));
+                drape.redraws = false;
+            }
         }
     }
 
     /// The texture of the drape of `stack` of the tile at `index` in the
-    /// cover, `tile`.
+    /// cover, `tile`; `None` where the stack draws nothing in the tile.
     pub(crate) fn texture(&self, stack: usize, index: usize, tile: &OverscaledTileID) -> Option<&SharedTexture> {
         let drape = self.drapes.get(index).filter(|drape| drape.tile == *tile)?;
-        drape.stacks.get(stack).map(|drape| &drape.texture)
+        drape.stacks.get(stack)?.texture.as_ref()
     }
 
     /// Records that the buckets in `changed` changed, for the drapes' draws
@@ -344,8 +368,8 @@ impl Drapes {
     pub(crate) fn count(&self, context: &mut Context) {
         let mut drapes = 0;
         let mut bytes = 0;
-        for drape in self.drapes.iter().flat_map(|drape| &drape.stacks) {
-            if let Some(texture) = context.texture(&drape.texture).filter(|texture| texture.gpu_texture().is_some()) {
+        for texture in self.drapes.iter().flat_map(|drape| &drape.stacks).filter_map(|drape| drape.texture.as_ref()) {
+            if let Some(texture) = context.texture(texture).filter(|texture| texture.gpu_texture().is_some()) {
                 drapes += 1;
                 bytes += texture.bytes();
             }
@@ -379,7 +403,8 @@ impl Drapes {
             return;
         }
         let size = Size::new(self.size, self.size);
-        if self.depth_stencil.is_none() {
+        let redraws = self.drapes.iter().flat_map(|drape| &drape.stacks).any(|drape| drape.redraws);
+        if redraws && self.depth_stencil.is_none() {
             match parameters.context.device().attachment(gpu, "drape depth and stencil", size, DEPTH_STENCIL) {
                 Ok(depth_stencil) => self.depth_stencil = Some(depth_stencil),
                 Err(error) => {
@@ -391,9 +416,6 @@ impl Drapes {
         for Drape { tile, transform, stacks } in &mut self.drapes {
             for drape in stacks.iter_mut().filter(|drape| drape.redraws) {
                 let context = &mut *parameters.context;
-                if let Err(error) = context.create_texture(gpu, &drape.texture) {
-                    Log::error(Event::Render, format!("Making a drape's texture failed: {error}"));
-                }
                 for layer in &mut drape.layers {
                     layer.drawing.upload(gpu, context);
                 }
@@ -406,6 +428,11 @@ impl Drapes {
                     },
                     stencil_clear_tile.map(|_| tile.to_unwrapped()),
                 );
+                if let Some(texture) = &drape.texture
+                    && let Err(error) = context.create_texture(gpu, texture)
+                {
+                    Log::error(Event::Render, format!("Making a drape's texture failed: {error}"));
+                }
                 drape.clip_masks.update(gpu, context, false, &drape.groups.clip_tiles, |tile| {
                     to_projection_ubo(&transform.projection_data_for_tile(tile, false))
                 });
@@ -436,6 +463,9 @@ impl Drapes {
                 let StackDrape { texture, clip_masks, layers, groups, drawn, key, .. } = drape;
                 // A drape that fails to draw draws again in the next frame.
                 *drawn = None;
+                let Some(texture) = texture.as_ref() else {
+                    continue;
+                };
                 let color = match parameters.context.create_texture(gpu, texture) {
                     Ok(color) => color,
                     Err(error) => {

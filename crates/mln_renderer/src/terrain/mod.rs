@@ -28,7 +28,7 @@
 //!    relief, and raster, an image source's too) make no draws in the
 //!    frame: they draw in each drape of their stack whose key changed
 //!    ([`RenderTerrain::begin_drapes`]). The surface makes a draw per tile
-//!    and stack ([`RenderTerrain::update_draws`]).
+//!    and stack that has a drape there ([`RenderTerrain::update_draws`]).
 //! 4. The drapes draw into their textures before the frame's pass. The
 //!    frame clears to transparent, and its translucent pass draws each
 //!    stack's surface where the stack's first layer draws, and the layers
@@ -66,13 +66,19 @@
 //! - **The surface** draws once for each stack, its tiles nearest the
 //!   center first, testing and writing the 3D depth range with less or
 //!   equal and blending its drapes over what is under it. A stack above the
-//!   first draws where the first left the nearest ground. Where the first
+//!   first draws where the first left the nearest ground, and only the
+//!   tiles where it has a drape; the first draws every tile, transparent
+//!   where it has none, for that depth. Where the first
 //!   stack's drape is translucent, a farther slope drawn before a nearer
 //!   one in the same draw shows through it, and skirts blend over the
 //!   neighbouring tiles, as in GL JS.
-//! - **The drapes** ([`Drapes`]): a texture for each drawn tile and stack,
-//!   which the stack's draped layers draw into with the map's camera,
-//!   through their own draw updates. Each stack's drape of a tile keeps its
+//! - **The drapes** ([`Drapes`]): a texture for each drawn tile and stack
+//!   whose layers draw something in the tile, which the stack's draped
+//!   layers draw into with the map's camera, through their own draw
+//!   updates. Where their draw updates make no draw, as a stack of lines
+//!   does in a tile they don't cross, or one whose tiles haven't loaded,
+//!   the drape has no texture and draws no pass until its key changes.
+//!   Each stack's drape of a tile keeps its
 //!   own key, so a change in one stack leaves the others' drapes as they
 //!   were. A drape draws again only when its key
 //!   differs from the one it was drawn from: its stack's layers' styles,
@@ -349,7 +355,7 @@ impl RenderTerrain {
             self.drapes = Drapes::default();
             return None;
         };
-        self.drapes.begin(parameters.context, parameters.view, cover, stacks);
+        self.drapes.begin(parameters.view, cover, stacks);
         Some(&mut self.drapes)
     }
 

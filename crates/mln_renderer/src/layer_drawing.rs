@@ -1031,6 +1031,15 @@ impl<'a> DrawGroup<'a> {
         }
     }
 
+    /// Whether the group draws anything: a custom layer's host may.
+    #[must_use]
+    pub(crate) fn draws(self) -> bool {
+        match self {
+            DrawGroup::Draws(frame) => !frame.draws.is_empty(),
+            DrawGroup::Custom => true,
+        }
+    }
+
     /// How the group composites onto the frame, with the id that tells it
     /// apart in the layer composite, if it draws anything and composites.
     #[must_use]
