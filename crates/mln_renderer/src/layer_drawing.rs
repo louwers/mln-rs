@@ -352,6 +352,12 @@ impl<T> TileMap<T> {
         }
     }
 
+    /// The tiles, in order, each with its entry.
+    pub(crate) fn entries(&mut self) -> impl Iterator<Item = (OverscaledTileID, TileEntry<'_, T>)> {
+        let TileSet { ids, states, .. } = &mut self.set;
+        ids.iter().zip(states).zip(&mut self.values).map(|((&id, state), value)| (id, TileEntry { state, value }))
+    }
+
     /// The entry of `tile_id`, if the tile is one of the frame's.
     pub(crate) fn entry(&mut self, tile_id: &OverscaledTileID) -> Option<TileEntry<'_, T>> {
         let index = self.set.index_of(tile_id)?;

@@ -31,7 +31,9 @@ use crate::draw::{DrawGeometry, DrawObjects, Textures, raw_vertices};
 use crate::gfx::indexes::DrawIndexes;
 use crate::gfx::shader_program::ShaderProgramPtr;
 use crate::globe_tile_mesh::raw_globe_tile_mesh;
-use crate::layer_drawing::{DrawDepth, DrawList, FrameDraw, KeptDraw, LayerDrawing, TileDraws};
+use crate::layer_drawing::{
+    DrawDepth, DrawList, DrawObjectsMut, FrameDraw, KeptDraw, LayerDrawing, TileDraws, TileObjects,
+};
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
@@ -67,21 +69,34 @@ impl LayerType for Background {
     }
 }
 
+/// What the layer keeps of a tile: its draw, and the passes it was built
+/// for and whether with a pattern.
+pub(crate) struct BackgroundTile {
+    draw: KeptDraw,
+    built_for: (RenderPass, bool),
+}
+
+impl TileObjects for BackgroundTile {
+    type Part = ();
+
+    fn objects(&mut self, (): ()) -> Option<DrawObjectsMut<'_>> {
+        self.draw.objects(())
+    }
+
+    fn drop_bindings(&mut self) {
+        self.draw.drop_bindings();
+    }
+}
+
 pub(crate) struct RenderBackgroundLayer {
     base: RenderLayerBase,
     values: LayerValues<Background>,
-    drawing: TileDraws<KeptDraw>,
+    drawing: TileDraws<BackgroundTile>,
     /// The frame's draws as the update makes them, with their uniform blocks
     /// and projections.
     draw_list: DrawList<(BackgroundDrawableUnionUBO, ProjectionUBO)>,
     plain_shader: Option<ShaderProgramPtr>,
     pattern_shader: Option<ShaderProgramPtr>,
-    /// The passes the tiles' draws were built for, and whether with a
-    /// pattern.
-    draws_built_for: Option<(RenderPass, bool)>,
-    /// The tiles that cover the view, which the frame's update picks for
-    /// its encode.
-    tile_cover: Vec<OverscaledTileID>,
 }
 
 impl RenderBackgroundLayer {
@@ -94,8 +109,6 @@ impl RenderBackgroundLayer {
             draw_list: DrawList::default(),
             plain_shader: None,
             pattern_shader: None,
-            draws_built_for: None,
-            tile_cover: Vec::new(),
         }
     }
 
@@ -174,7 +187,7 @@ impl RenderBackgroundLayer {
 
 impl TypedLayer for RenderBackgroundLayer {
     type Type = Background;
-    type Drawing = TileDraws<KeptDraw>;
+    type Drawing = TileDraws<BackgroundTile>;
 
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
@@ -184,35 +197,23 @@ impl TypedLayer for RenderBackgroundLayer {
         PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
     }
 
-    /// Makes the frame's draws of the layer, one of each tile that covers
-    /// the view, which it builds for a tile it keeps none of, and writes the
-    /// layer's buffers they read.
+    /// Makes the frame's draws of the layer, one of each tile it keeps: the
+    /// tiles that cover the view, or a drape's tile. It builds the draw of a
+    /// tile it keeps none of or whose draw was built for other passes or
+    /// patterns, and writes the layer's buffers the draws read.
     fn update_draws_without_source(
         &mut self,
         gpu: &mut dyn Gpu,
         paint_parameters: &mut PaintParameters<'_>,
         atlases: &Atlases,
     ) {
-        let RenderBackgroundLayer {
-            base,
-            values,
-            drawing,
-            draw_list,
-            plain_shader,
-            pattern_shader,
-            draws_built_for,
-            tile_cover,
-        } = self;
+        let RenderBackgroundLayer { base, values, drawing, draw_list, plain_shader, pattern_shader } = self;
         let shaders = &paint_parameters.static_data.shaders;
         let layer = &*values.evaluated;
         let evaluated = &layer.paint;
         let has_pattern = !evaluated.background_pattern.faded().to.empty();
         let draw_passes = RenderPass(layer.render_passes);
-
-        if *draws_built_for != Some((draw_passes, has_pattern)) {
-            drawing.clear();
-            *draws_built_for = Some((draw_passes, has_pattern));
-        }
+        let built_for = (draw_passes, has_pattern);
 
         if !has_pattern && plain_shader.is_none() {
             *plain_shader = shaders.shader(BACKGROUND_PLAIN_SHADER_NAME, base.projection_variant);
@@ -248,22 +249,23 @@ impl TypedLayer for RenderBackgroundLayer {
         }
 
         let variant = base.projection_variant;
-        for tile_id in &*tile_cover {
-            let Some(entry) = drawing.tiles_mut().entry(tile_id) else {
-                continue;
-            };
-            let cached = entry.value.get_or_insert_with(|| {
-                KeptDraw::new(Self::build_tile(tile_id, Rc::clone(shader), draw_passes, variant))
+        for (tile_id, entry) in drawing.tiles_mut().entries() {
+            if entry.value.as_ref().is_some_and(|cached| cached.built_for != built_for) {
+                *entry.value = None;
+            }
+            let cached = entry.value.get_or_insert_with(|| BackgroundTile {
+                draw: KeptDraw::new(Self::build_tile(&tile_id, Rc::clone(shader), draw_passes, variant)),
+                built_for,
             });
             if pattern_texture.is_some() {
-                cached.objects.set_texture(ID_BACKGROUND_IMAGE_TEXTURE, pattern_texture);
+                cached.draw.objects.set_texture(ID_BACKGROUND_IMAGE_TEXTURE, pattern_texture);
             }
             let draw = FrameDraw {
                 pass: draw_passes,
                 depth: DrawDepth::Layer { sub_layer: 0, mask: DepthMaskType::ReadWrite },
-                ..cached.frame_draw(Some(*tile_id))
+                ..cached.draw.frame_draw(Some(tile_id))
             };
-            draw_list.push(draw, Self::uniforms(tile_id, has_pattern, paint_parameters));
+            draw_list.push(draw, Self::uniforms(&tile_id, has_pattern, paint_parameters));
         }
 
         drawing.finish(draw_list, gpu, paint_parameters.context, |writer| {
@@ -324,7 +326,7 @@ impl TypedLayer for RenderBackgroundLayer {
     fn update_without_source(&mut self, parameters: &mut LayerUpdateParameters<'_>) {
         let (state, update_parameters) = (parameters.view, parameters.update_parameters);
         let zoom = state.integer_zoom();
-        self.tile_cover = tile_cover(
+        let tiles = tile_cover(
             &TileCoverParameters {
                 view: state.clone(),
                 tile_lod_min_radius: update_parameters.tile_lod_min_radius,
@@ -339,7 +341,7 @@ impl TypedLayer for RenderBackgroundLayer {
             Range::new(0u8, zoom),
             None,
         );
-        self.drawing.tiles_mut().set_tiles(self.tile_cover.iter().copied());
+        self.drawing.tiles_mut().set_tiles(tiles);
 
         let evaluated = &self.values.evaluated.paint;
         if !evaluated.background_pattern.faded().to.empty() {
