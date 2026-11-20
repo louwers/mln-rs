@@ -47,6 +47,8 @@ mod tile_jobs_test;
 mod tile_layout_test;
 // Port-only: the tile store keeps a tile's data, work and contents apart.
 mod tile_store_test;
+// Port-only: whether terrain draws, and its cover.
+mod terrain_test;
 // The VectorTile tests of test/tile/vector_tile.test.cpp.
 mod vector_tile_test;
 

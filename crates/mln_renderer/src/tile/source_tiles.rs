@@ -37,7 +37,9 @@ use crate::tile::store::{SourceInfo, StoreContext};
 use crate::tile::tile::{Tile, TileKind, TileLoadOrder, TileNecessity, TileUpdateParameters};
 use crate::tile::tile_mut::{TileMut, WorldCopy, retire};
 use crate::tile_parameters::TileParameters;
-use crate::util::tile_cover::{TileCoverParameters, covering_zoom_level, globe_level_cover, tile_cover};
+use crate::util::tile_cover::{
+    TileCoverParameters, covering_zoom_level, globe_level_cover, terrain_tile_cover, tile_cover,
+};
 
 /// How many times the tiles in view the cache keeps, at least.
 const VIEWS_CACHED: usize = 3;
@@ -638,6 +640,17 @@ impl SourceTiles {
             max_content_elevation: f64::from(self.update_max_content_elevation(update.layers)),
         };
 
+        // While terrain draws, every source covers the view as the terrain
+        // does, with the tiles under raised ground, and only a source that
+        // cuts overscaled tiles loads them at a deeper zoom.
+        let cover = |parameters: &TileCoverParameters, z: u8, overscaled_z: Option<u8>| match update.parameters.terrain
+        {
+            Some(terrain) => {
+                terrain_tile_cover(parameters, z, zoom_range, overscaled_z.filter(|_| info.overscale), &terrain.ranges)
+            }
+            None => tile_cover(parameters, z, zoom_range, overscaled_z),
+        };
+
         if overscaled_zoom >= i32::from(zoom_range.min) {
             let ideal_zoom: i32 = std::cmp::min(i32::from(zoom_range.max), overscaled_zoom);
 
@@ -659,11 +672,11 @@ impl SourceTiles {
                     let mut pan_parameters = tile_cover_parameters.clone();
                     pan_parameters.requested_zoom = None;
                     pan_parameters.round_zoom = false;
-                    pan_tiles = tile_cover(&pan_parameters, pan_zoom as u8, zoom_range, None);
+                    pan_tiles = cover(&pan_parameters, pan_zoom as u8, None);
                 }
             }
 
-            ideal_tiles = tile_cover(&tile_cover_parameters, ideal_zoom as u8, zoom_range, Some(tile_zoom as u8));
+            ideal_tiles = cover(&tile_cover_parameters, ideal_zoom as u8, Some(tile_zoom as u8));
 
             // The globe cover leaves out the far side of the planet, so a
             // view turned there would find no parent to draw until its tiles
@@ -703,7 +716,9 @@ impl SourceTiles {
         // tiles finer than the nominal zoom, up to the source's maximum.
         let mut tile_range: Option<TileRange> = None;
         if let Some(bounds) = &update.bounds {
-            let variable_zoom = parameters.tile_lod_mode == TileLodMode::Distance || parameters.view.is_globe();
+            let variable_zoom = parameters.tile_lod_mode == TileLodMode::Distance
+                || parameters.view.is_globe()
+                || parameters.terrain.is_some();
             let max_zoom: i32 = if variable_zoom {
                 i32::from(zoom_range.max)
             } else {

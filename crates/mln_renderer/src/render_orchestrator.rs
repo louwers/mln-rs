@@ -42,6 +42,7 @@ use crate::render_source::{self, RenderSource, RenderTileParameters, TileOrder};
 use crate::render_tile::{FoundTile, RenderTile};
 use crate::renderer_event::RendererEvent;
 use crate::sources::render_tile_source::{DebugLayer, DebugLayers};
+use crate::terrain::RenderTerrain;
 use crate::text::glyph_store::GlyphStore;
 use crate::text::placement::{Placement, PlacementInputs};
 use crate::tile::contents::Contents;
@@ -191,6 +192,7 @@ pub(crate) struct RenderOrchestrator {
 
     globe_depth_pass: GlobeDepthPass,
     sky_pass: crate::sky_pass::SkyPass,
+    terrain: RenderTerrain,
 
     /// Last, so that it drops after the fields above: the render sources'
     /// tiles free their data on the thread pool (`drop_on_workers`).
@@ -250,6 +252,7 @@ impl RenderOrchestrator {
             global_state: None,
             globe_depth_pass: GlobeDepthPass::default(),
             sky_pass: crate::sky_pass::SkyPass::default(),
+            terrain: RenderTerrain::default(),
             debug_layers: VecMap::new(),
         }
     }
@@ -340,6 +343,7 @@ impl RenderOrchestrator {
         }
         self.view = update_parameters.view.clone();
 
+        self.terrain.update(update_parameters);
         let will_render = self.update_sources(
             update_parameters,
             &layers,
@@ -829,6 +833,7 @@ impl RenderOrchestrator {
             font_faces: update_parameters.style.get_font_faces().cloned(),
             glyph_pbfs: !update_parameters.style.get_glyph_url().is_empty(),
             placement_commits: self.placement_controller.commits(),
+            terrain: self.terrain.cover(),
         };
 
         if !self.sources_by_id.is_empty() {

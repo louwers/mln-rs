@@ -78,6 +78,7 @@ fn tile_parameters(
         font_faces: None,
         glyph_pbfs: true,
         placement_commits: 0,
+        terrain: None,
     }
 }
 
@@ -1505,4 +1506,37 @@ fn raster_dem_borders_across_a_world_wrap() {
         assert_eq!(east.get(16, y), west.get(0, y), "row {y} of the east tile's border");
         assert_eq!(west.get(-1, y), east.get(15, y), "row {y} of the west tile's border");
     }
+}
+
+/// The zoom levels of the tiles a raster source wants for a camera pitched
+/// to 60 degrees, with the terrain's cover `terrain` or without terrain.
+fn pitched_cover_zooms(terrain: Option<&crate::terrain::TerrainCover>) -> std::collections::BTreeSet<u8> {
+    let mut test = SourceTest::new();
+    test.transform.jump_to(&CameraOptions {
+        center: Some(LatLng::new(45.0, 10.0).unwrap()),
+        zoom: Some(12.0),
+        pitch: Some(60.0),
+        ..Default::default()
+    });
+    let file_source: Arc<dyn FileSource> = Arc::new(StubFileSource::new(ResponseType::Manual));
+    let source = crate::tests::ready(Tiled::Raster.source(None, tiles_tileset()));
+    let mut store = test.store();
+    let mut render_source = crate::tests::create_render_source(&source, &mut store);
+    let mut parameters = test.tile_parameters_with(MapMode::Continuous, Some(file_source));
+    parameters.terrain = terrain;
+    render_source.update(&mut store, source, &Tiled::Raster.layers(), true, false, &parameters);
+    let key = render_source.tiles().expect("the source's tiles");
+    let pyramid = store.source(key).expect("the source's tiles");
+    pyramid.cover().map(|tile| tile.id.canonical.z).collect()
+}
+
+/// While terrain draws, a source's tiles get finer toward the camera at any
+/// pitch, as the terrain's do; without terrain, a view pitched to 60 degrees
+/// loads one zoom level.
+#[test]
+fn a_source_covers_the_view_as_the_terrain_does_while_terrain_draws() {
+    assert_eq!(std::collections::BTreeSet::from([12]), pitched_cover_zooms(None));
+    let flat = crate::terrain::TerrainCover { tiles: Vec::new(), ranges: crate::terrain::ElevationRanges::default() };
+    let zooms = pitched_cover_zooms(Some(&flat));
+    assert!(zooms.len() > 1 && zooms.iter().any(|&z| z > 12), "{zooms:?}");
 }
