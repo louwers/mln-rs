@@ -1357,9 +1357,10 @@ fn a_still_image_that_fails_ends_its_demand() {
     assert_eq!((None, FrameDisposition::NoUpdate), (ended.token, ended.disposition));
 }
 
-/// A still image of a terrain publishes a frame that shows the camera's
-/// center at sea level, then one of the update that stands it on the ground
-/// that the first loaded, and completes with the second.
+/// A still image of a terrain draws a frame that shows the camera's center
+/// at sea level, then one of the update that stands it on the ground that
+/// the first loaded, over it, and completes with the second: the host gets
+/// that one only.
 #[test]
 fn a_still_image_over_terrain_completes_once_the_camera_stands_on_it() {
     let runtime = runtime();
@@ -1382,7 +1383,7 @@ fn a_still_image_over_terrain_completes_once_the_camera_stands_on_it() {
     let session = attach(&map);
     wait(map.request_still_image());
     let results = tokens_and_dispositions(&session.drain_frame_results().unwrap());
-    assert_eq!(vec![(None, FrameDisposition::Rendered), (None, FrameDisposition::Rendered)], results);
+    assert_eq!(vec![(None, FrameDisposition::Rendered)], results);
     let altitude = wait(map.camera()).camera.center_altitude;
     assert!((altitude - 1000.0).abs() < 1e-6, "{altitude}");
 }

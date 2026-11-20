@@ -837,12 +837,12 @@ impl Map {
     /// Sends the command that binds the session `id`, whose thread runs
     /// `queue`, to the map: it sizes the map to `size`, and hands the
     /// session the map's updates. The map tells the session of the commands
-    /// it runs from `awaited` on.
+    /// it runs from the session's `awaited_command` on.
     pub(crate) fn bind_session(
         &self,
         id: SessionId,
         queue: SessionQueue,
-        awaited: Arc<AtomicU64>,
+        session: Arc<SessionShared>,
         size: Size,
     ) -> Result<(), Error> {
         let reply = SessionReply::new(queue.clone(), |worker, bound, outbox| match bound {
@@ -854,7 +854,7 @@ impl Map {
             if !core.maps.contains_key(&map_id) {
                 return reply.send(Err(missing_map()));
             }
-            let link = SessionLink { id, queue, awaited };
+            let link = SessionLink { id, queue, session };
             apply_command(
                 core,
                 map_id,
@@ -1517,8 +1517,9 @@ fn unbind(core: &mut RuntimeCore, map_id: MapId, id: SessionId) {
 pub(crate) struct SessionLink {
     id: SessionId,
     queue: SessionQueue,
-    /// The session's `awaited_command`.
-    awaited: Arc<AtomicU64>,
+    /// What the session shares with its handle: the command its work waits
+    /// for, and the still image's frame that waits for the map.
+    session: Arc<SessionShared>,
 }
 
 /// A still image on its way, whose outcome the next flush that finds it
@@ -1716,7 +1717,7 @@ pub(crate) fn apply_command<T>(
 fn report_applied(entry: &MapEntry, sequence: u64) {
     entry.published.applied.store(sequence, Ordering::SeqCst);
     if let Some(link) = &entry.session
-        && sequence >= link.awaited.load(Ordering::SeqCst)
+        && sequence >= link.session.awaited_command.load(Ordering::SeqCst)
     {
         worker_post(&link.queue, move |worker, outbox| worker.map_applied(sequence, outbox));
     }
@@ -1874,6 +1875,14 @@ pub(crate) fn flush(core: &mut RuntimeCore, id: MapId, outbox: &mut Outbox) {
         None => None,
     };
     let still = still_outcome.and_then(|outcome| Some((outcome, entry.pending_still.take()?.resolver)));
+    // The frame that the map ended the image on waits in the session, out of
+    // the host's reach: it is published before the image completes, and
+    // before the session hears that the image no longer waits.
+    if let (Some((Ok(()), _)), Some(link)) = (&still, &entry.session)
+        && let Some(wake) = link.session.publish_still_frame()
+    {
+        outbox.push(move || wake());
+    }
     // The session demands a frame for the image while it waits, and lets
     // the demand go once it doesn't.
     let still_image = entry.pending_still.as_ref().and(entry.core.pending_still_image()).unwrap_or(0);

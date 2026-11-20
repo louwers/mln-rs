@@ -10,8 +10,10 @@ use mln_map::MapMode;
 use mln_runtime::{
     AcquiredFrame, AttachOptions, BackendType, ConsumerSync, DemandMode, Device, DeviceOptions, DmaBufFormat,
     ErrorKind, ExportKind, ExportKinds, ExportedImage, ExportedRing, FrameDemand, FrameDisposition, FrameTextureKind,
-    GpuSync, LogicalExtent, Map, MapOptions, RenderSession, RenderTarget, Runtime, SyncKind, SyncKinds,
+    GpuSync, LogicalExtent, Map, MapOptions, RenderSession, RenderTarget, ResourceRequest, Runtime, SyncKind,
+    SyncKinds,
 };
+use mln_storage::Response;
 use mln_util::size::Size;
 
 use crate::support::{eventually, runtime, wait};
@@ -262,6 +264,62 @@ fn dropped_and_released_frames_free_their_slots() {
                     frame.release(ConsumerSync::of(GpuSync::of(SyncKind::CpuComplete))).unwrap();
                 }
             }
+        }
+    }
+}
+
+/// A still image whose camera stands on the terrain that its first frame
+/// loaded draws its second frame over the first, which the host never
+/// gets: a host that holds each frame it gets of a ring of one image until
+/// the image completes doesn't hold up the image.
+#[test]
+fn a_still_image_over_terrain_gives_the_host_one_frame_of_a_ring_of_one() {
+    let runtime = runtime();
+    // DEM tiles of 1000 m everywhere, in the Mapbox encoding:
+    // (1 · 65536 + 173 · 256 + 176) · 0.1 − 10000.
+    let mut dem = mln_util::image::PremultipliedImage::new(Size::new(4, 4));
+    for pixel in dem.data.as_chunks_mut::<4>().0 {
+        pixel.copy_from_slice(&[1, 173, 176, 255]);
+    }
+    let dem = std::sync::Arc::new(mln_image::encode_png(&dem));
+    wait(runtime.set_resource_provider(move |request: ResourceRequest| {
+        let _ = request.respond(Response { data: Some(std::sync::Arc::clone(&dem)), ..Response::default() });
+    }));
+    for kind in EVERY_KIND {
+        for device in BACKENDS.into_iter().filter_map(device_of).filter(|device| device.export_kinds().contains(kind)) {
+            let backend = device.backend();
+            let options = MapOptions {
+                map: mln_map::MapOptions { size: SIZE, map_mode: MapMode::Static, ..Default::default() },
+                ..Default::default()
+            };
+            let (map, created) = runtime.create_map(options).unwrap();
+            created.wait().unwrap();
+            // Seen from zoom 1, one terrain tile covers the world, and reads
+            // the one DEM tile, at zoom 0.
+            wait(map.set_style_json(
+                r#"{"version":8,"zoom":1,"terrain":{"source":"dem"},"sources":{"dem":{"type":"raster-dem","tiles":["custom://dem/{z}/{x}/{y}.png"],"maxzoom":0}},"layers":[{"id":"bg","type":"background","paint":{"background-color":"red"}}]}"#,
+            ));
+            let session = attach(&map, ExportedRing { depth: 1, ..ring(&[kind]) }, Some(device), SyncKinds::NONE)
+                .unwrap();
+            let (sender, receiver) = std::sync::mpsc::channel();
+            map.request_still_image().unwrap().on_complete(move |result| {
+                let _ = sender.send(result);
+            });
+            let mut held = Vec::new();
+            let completed = eventually(|| {
+                held.extend(session.acquire_frame().unwrap());
+                receiver.try_recv().is_ok()
+            });
+            assert!(completed, "{backend:?} {kind:?}: the still image never completed");
+            held.extend(session.acquire_frame().unwrap());
+            let results: Vec<FrameDisposition> =
+                session.drain_frame_results().unwrap().iter().map(|result| result.disposition).collect();
+            assert_eq!(vec![FrameDisposition::Rendered], results, "{backend:?} {kind:?}");
+            assert_eq!(1, held.len(), "{backend:?} {kind:?}");
+            let altitude = wait(map.camera()).camera.center_altitude;
+            assert!((altitude - 1000.0).abs() < 1e-6, "{backend:?} {kind:?}: {altitude}");
+            drop(held);
+            detach(session);
         }
     }
 }

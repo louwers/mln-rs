@@ -30,7 +30,7 @@ use mln_util::size::Size;
 
 use super::frame::{DemandMode, FrameDemand, FrameDisposition, FrameResult};
 use super::local::LocalTarget;
-use super::session::{Published, RenderSessionState, SessionShared, WorkId, physical_size};
+use super::session::{Published, RenderSessionState, SessionShared, StillFrame, WorkId, physical_size};
 use super::target::{
     BorrowedRing, Device, DeviceLease, Driver, ExportKind, ExportedRing, SentSurface, Surface, SurfaceOverlay,
 };
@@ -346,10 +346,10 @@ struct StillDemand {
     /// a newer one.
     tried: Option<u64>,
     /// The `ground_generation` of the frame of the image that the demand
-    /// published. Its result ended the demand for the host, and the map
-    /// ends the image with it, unless the map's camera moves onto the
-    /// terrain that the frame loaded: only an update of a newer ground then
-    /// draws the image again.
+    /// drew. The frame ends the demand for the host once it is published,
+    /// which the map does when it ends the image on it, unless the map's
+    /// camera moves onto the terrain that the frame loaded: only an update
+    /// of a newer ground then draws the image again.
     rendered: Option<u64>,
 }
 
@@ -870,8 +870,10 @@ impl Worker {
     }
 
     /// The map's still image changed: one waits for a frame, or none does.
+    /// The frame that the map ended the image on may have freed the ring
+    /// texture that a demand waits for.
     pub(crate) fn still_image_changed(&mut self, outbox: &mut Outbox) {
-        self.serve_still(outbox);
+        self.pump(outbox);
     }
 
     /// The still image that waits for a frame, as the
@@ -882,26 +884,34 @@ impl Worker {
 
     /// Serves the map's still image: demands a frame for it while it waits
     /// for one, and renders the demand once the target can take a frame and
-    /// the map has an update that it hasn't tried. The demand finishes once
-    /// the map ends the image, which a frame of it usually does. The map
-    /// may move its camera onto the terrain that the frame loaded instead:
-    /// the demand then renders the move's update too. One that draws
-    /// nothing, because a resource that the image needs is still loading,
-    /// waits for the map's next update, and one that finds the ring full
-    /// parks until the host releases a frame. A host's demands neither replace nor wait for it. Ending the
-    /// demands on their way ends it too, until the session can render again:
-    /// a barrier demands the image again once it ran, a new target once it
-    /// lands, and the next session once it attaches.
+    /// the map has an update that it hasn't tried. The frame waits, out of
+    /// the host's reach, until the map ends the image on it, and the map
+    /// then publishes it, so the image completes with its result queued.
+    /// The map may move its camera onto the terrain that the frame loaded
+    /// instead: the demand then draws the move's update over it. A host
+    /// gets one frame of each image. A demand that draws nothing, because a
+    /// resource that the image needs is still loading, waits for the map's
+    /// next update, and one that finds the ring full parks until the host
+    /// releases a frame. A host's demands neither replace nor wait for it.
+    /// Ending the demands on their way ends it too, with its frame if it
+    /// has one, until the session can render again: a barrier demands the
+    /// image again once it ran, a new target once it lands, and the next
+    /// session once it attaches.
     fn serve_still(&mut self, outbox: &mut Outbox) {
         let pending = self.pending_still_image();
         // The image completed or failed meanwhile, and the next one, if one
-        // waits, gets a demand of its own. A demand that published a frame
-        // ended for the host with it.
-        if let Some(still) = self.still.take_if(|still| still.request != pending)
-            && still.rendered.is_none()
-        {
-            let result = FrameResult::unrendered(None, FrameDisposition::NoUpdate, self.latest_generation());
-            self.publish(&result, outbox);
+        // waits, gets a demand of its own. A demand whose frame was
+        // published ended for the host with it; one whose frame the map
+        // didn't end the image on lets the frame go.
+        if let Some(still) = self.still.take_if(|still| still.request != pending) {
+            let unaccepted = self.shared.state.lock().still_frame.take();
+            if let Some((slot, _)) = unaccepted.as_ref().and_then(|frame| frame.slot.as_ref()) {
+                self.end_slot(*slot, None);
+            }
+            if still.rendered.is_none() || unaccepted.is_some() {
+                let result = FrameResult::unrendered(None, FrameDisposition::NoUpdate, self.latest_generation());
+                self.publish(&result, outbox);
+            }
         }
         if pending == 0 {
             return;
@@ -936,12 +946,22 @@ impl Worker {
         if self.fail_if_device_lost(outbox) {
             return;
         }
-        let slot = match self.pick_slot() {
+        // The frame that waits for the map, which no longer ends the image
+        // on it, gives its ring texture to the next.
+        let drawn_over = self.shared.state.lock().still_frame.take();
+        let pick = match drawn_over.and_then(|frame| frame.slot) {
+            Some((slot, _)) => RingPick::Slot(slot),
+            None => self.pick_slot(),
+        };
+        let slot = match pick {
             RingPick::Full => return,
             RingPick::Quarantined => {
-                self.still = None;
-                let result = FrameResult::unrendered(None, FrameDisposition::TargetNotReady, update.generation);
-                return self.publish(&result, outbox);
+                // A demand whose frame was published ended with it.
+                if self.still.take().is_some_and(|still| still.rendered.is_none()) {
+                    let result = FrameResult::unrendered(None, FrameDisposition::TargetNotReady, update.generation);
+                    self.publish(&result, outbox);
+                }
+                return;
             }
             RingPick::None => None,
             RingPick::Slot(slot) => Some(slot),
@@ -962,7 +982,8 @@ impl Worker {
                 let ground = update.parameters.ground_generation;
                 self.still = Some(StillDemand { request: pending, tried: None, rendered: Some(ground) });
                 self.still_rendered = (pending, ground);
-                self.publish_rendered(frame, outbox);
+                self.shared.state.lock().still_frame = Some(StillFrame { slot: frame.slot, result: frame.result });
+                self.forward(frame.events);
             }
             disposition => {
                 // A frame that a surface dropped is tried again.
@@ -1117,21 +1138,18 @@ impl Worker {
     /// one lock, so a snapshot shows a frame only once its result can be
     /// drained and, in a ring, its slot acquired.
     fn publish_frame(&self, slot: Option<(usize, Option<Published>)>, result: &FrameResult, outbox: &mut Outbox) {
-        let wake = {
-            let mut state = self.shared.state.lock();
-            if let Some((slot, published)) = slot
-                && let Some(entry) = state.ring.get_mut(slot)
-            {
-                entry.rendering = false;
-                entry.frame = published;
-            }
-            state.results.push(*result);
-            state.frame_generation = state.frame_generation.max(result.frame_generation);
-            let wake = !state.frame_woken;
-            state.frame_woken = true;
-            wake.then(|| self.shared.frame_wake.clone()).flatten()
-        };
-        if let Some(wake) = wake {
+        let wake = self.shared.state.lock().publish_frame(slot, result);
+        if let Some(wake) = wake.then(|| self.shared.frame_wake.clone()).flatten() {
+            outbox.push(move || wake());
+        }
+    }
+
+    /// Publishes the still image's frame that waits for the map, if one
+    /// does, as the frame that ends the image's demand: the demand ends
+    /// before the map ends the image, or the target that holds the frame
+    /// changes.
+    fn publish_still_frame(&self, outbox: &mut Outbox) {
+        if let Some(wake) = self.shared.publish_still_frame() {
             outbox.push(move || wake());
         }
     }
@@ -1149,6 +1167,7 @@ impl Worker {
         for pending in pending {
             self.publish(&FrameResult::unrendered(Some(pending.demand.token), disposition, latest), outbox);
         }
+        self.publish_still_frame(outbox);
         if self.still.take().is_some_and(|still| still.rendered.is_none()) {
             self.publish(&FrameResult::unrendered(None, disposition, latest), outbox);
         }
@@ -1278,6 +1297,7 @@ impl Worker {
         }
         let sync = gfx.target.set_ring(ring.clone())?;
         let old = self.ring.replace(ring.clone());
+        self.publish_still_frame(outbox);
         {
             let mut state = self.shared.state.lock();
             // The host's GPU may still read a texture it gave up, wherever it
@@ -1349,7 +1369,11 @@ impl Worker {
                 // The frames that the host holds keep their images, and every
                 // slot gets a new one. The frames it didn't acquire go first,
                 // in the same step as the snapshot, so that none is acquired
-                // with an image that the resize lets go of.
+                // with an image that the resize lets go of. The still image's
+                // frame that waits for the map goes the same way.
+                if let Some(wake) = self.shared.publish_still_frame() {
+                    outbox.push(move || wake());
+                }
                 let held: Vec<usize> = {
                     let mut state = self.shared.state.lock();
                     for slot in state.ring.iter_mut().filter(|slot| !slot.acquired) {
@@ -1477,6 +1501,7 @@ impl Worker {
         let sync = gfx.target.release_surface()?;
         self.has_frame = false;
         self.ring = None;
+        self.publish_still_frame(outbox);
         {
             let mut state = self.shared.state.lock();
             state.has_target = false;
@@ -1535,7 +1560,7 @@ impl Worker {
         gfx.target.with_renderer(|renderer, gpu| renderer.clear_data(gpu)).ok_or_else(target_lost)?;
         self.rendered_update = 0;
         // The renderer loads what the image needs again, once it tries.
-        if let Some(still) = self.still.as_mut().filter(|still| still.rendered.is_none()) {
+        if let Some(still) = self.still.as_mut() {
             still.tried = None;
             post(&self.shared.queue, Worker::still_image_changed);
         }
