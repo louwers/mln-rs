@@ -581,3 +581,15 @@ fn the_coarse_dem_tile_loads_while_the_fine_one_is_loading() {
     let ancestors: Vec<_> = tiles.iter().map(|id| (Some((5, sub_rect(id, 5))), true)).collect();
     assert_eq!(ancestors, load.bindings());
 }
+
+/// A DEM whose lowest zoom is above its highest, as a TileJSON can say,
+/// has no zoom a terrain tile can read: the terrain draws flat and loads
+/// nothing.
+#[test]
+fn a_dem_whose_zoom_levels_are_empty_draws_flat() {
+    let mut load = TerrainLoad::new((12, 10), 1.0);
+    load.frame();
+    load.frame();
+    assert!(load.bindings().iter().all(|&binding| binding == (None, false)));
+    assert_eq!(BTreeSet::new(), load.tiles.requested());
+}

@@ -145,7 +145,9 @@ impl TerrainTile {
     fn dem_reads(&self, dem_zooms: Range<u8>) -> impl Iterator<Item = OverscaledTileID> {
         let z = self.id.canonical.z;
         let read = dem_zoom(z, dem_zooms);
-        let culling = z.min(CULLING_DEM_MAX_ZOOM).clamp(dem_zooms.min, dem_zooms.max);
+        // Not `clamp`, which panics on a DEM whose lowest zoom is above its
+        // highest; that one has no `read`.
+        let culling = z.min(CULLING_DEM_MAX_ZOOM).min(dem_zooms.max).max(dem_zooms.min);
         let culling = read.filter(|&read| culling < read).map(|_| culling);
         [read, culling].into_iter().flatten().map(move |zoom| self.id.scaled_to(zoom))
     }
