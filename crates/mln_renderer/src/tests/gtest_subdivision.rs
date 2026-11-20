@@ -16,10 +16,9 @@ use mln_util::subdivision_granularity::{SubdivisionGranularityExpression, Subdiv
 use mln_vec_map::VecMap;
 
 use super::with_context;
-use crate::bucket::Bucket;
 use crate::buckets::fill_extrusion_bucket::FillExtrusionBucket;
 use crate::globe_tile_mesh::{GlobeTileMeshCache, globe_mesh_data};
-use crate::layout::pattern_layout::PatternLayerMap;
+use crate::layout::pattern_layout::{PatternBucket, PatternLayerMap};
 use crate::tile_mask::TileMask;
 use crate::util::subdivision::{
     NORTH_POLE_Y, SOUTH_POLE_Y, SubdividedPolygon, TILE_BORDER_STRIP_WIDTH, add_tile_border_strips, subdivide_polygon,

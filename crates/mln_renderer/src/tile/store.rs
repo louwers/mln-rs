@@ -18,7 +18,6 @@ use mln_util::error::Error;
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::pool::TaskGroup;
 
-use crate::bucket::UploadNeeds;
 use crate::buckets::symbol_bucket::SymbolBucket;
 use crate::gfx::context::Context;
 use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas;
@@ -315,18 +314,12 @@ impl TileStore {
     /// Readies the buckets of the tiles of `render_tiles`, render tiles of
     /// the source `key`, for the frame's draws, which read what `needs`
     /// says (`SourceTiles::upload_at`).
-    pub(crate) fn upload(
-        &mut self,
-        key: SourceKey,
-        render_tiles: &[RenderTile],
-        context: &mut Context,
-        needs: UploadNeeds,
-    ) {
+    pub(crate) fn upload(&mut self, key: SourceKey, render_tiles: &[RenderTile], context: &mut Context) {
         let Some(tiles) = self.sources.get_mut(&key) else {
             return;
         };
         for render_tile in render_tiles {
-            tiles.upload_at(render_tile.overscaled_tile_id(), render_tile.slot(), &self.ctx.atlas, context, needs);
+            tiles.upload_at(render_tile.overscaled_tile_id(), render_tile.slot(), &self.ctx.atlas, context);
         }
     }
 

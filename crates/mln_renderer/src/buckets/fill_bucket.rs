@@ -18,12 +18,12 @@ use mln_util::serialization::sorted;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecMap;
 
-use crate::bucket::{Bucket, BucketBase, UploadNeeds};
+use crate::bucket::{Bucket, BucketBase};
 use crate::bucket_geometry::{GeometryUpload, GeometryVec};
 use crate::gfx::fill_mesh::FillBuffers;
 use crate::gfx::mesh::Indexed;
 use crate::layer_type::EvaluatedLayer;
-use crate::layout::pattern_layout::PatternLayerMap;
+use crate::layout::pattern_layout::{PatternBucket, PatternLayerMap};
 use crate::paint_property_binder::{CrossFadedPaintPropertyBinder, PaintPropertyBinder};
 use crate::util::tessellator::Tessellator;
 
@@ -144,11 +144,15 @@ impl FillBucket {
     }
 }
 
-impl Bucket for FillBucket {
-    fn base(&self) -> &BucketBase {
-        &self.base
+impl FillBucket {
+    /// Whether the patterns of the layer `layer_id` are SDF images, which
+    /// draw in the layer's fill color.
+    pub(crate) fn is_sdf_pattern(&self, layer_id: &str) -> bool {
+        self.sdf_patterns.get(layer_id).copied().unwrap_or(false)
     }
+}
 
+impl PatternBucket for FillBucket {
     fn add_feature(
         &mut self,
         feature: &dyn GeometryTileFeature,
@@ -180,16 +184,18 @@ impl Bucket for FillBucket {
             }
         }
     }
+}
 
-    fn is_sdf_pattern(&self, layer_id: &str) -> bool {
-        self.sdf_patterns.get(layer_id).copied().unwrap_or(false)
+impl Bucket for FillBucket {
+    fn base(&self) -> &BucketBase {
+        &self.base
     }
 
-    fn upload(&mut self, geometry: &mut GeometryUpload<'_>, needs: UploadNeeds) {
+    fn upload(&mut self, geometry: &mut GeometryUpload<'_>) {
         geometry.move_vertices(&mut self.vertices);
         geometry.move_indexes(&mut self.triangles);
         geometry.move_indexes(&mut self.basic_lines);
-        if needs.fill_outline_ends {
+        if crate::layers::render_fill_layer::draws_outline_quads(geometry.context()) {
             geometry.move_vertices(&mut self.outline_ends);
         } else {
             // Only the instanced outlines read the outline ends.
@@ -204,10 +210,6 @@ impl Bucket for FillBucket {
 
     fn has_data(&self) -> bool {
         !self.triangle_segments.is_empty() || !self.basic_line_segments.is_empty()
-    }
-
-    fn write_wire(&self, w: &mut mln_wire::Writer) {
-        mln_wire::Wire::write(self, w);
     }
 
     fn update(

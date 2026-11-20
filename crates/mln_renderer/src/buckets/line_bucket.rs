@@ -21,12 +21,12 @@ use mln_util::logging::{Event, Log};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecMap;
 
-use crate::bucket::{Bucket, BucketBase, UploadNeeds};
+use crate::bucket::{Bucket, BucketBase};
 use crate::bucket_geometry::{GeometryUpload, GeometryVec};
 use crate::gfx::line_mesh::{LineLayoutVertex, LineOptions, add_line};
 use crate::gfx::mesh::Indexed;
 use crate::layer_type::EvaluatedLayer;
-use crate::layout::pattern_layout::PatternLayerMap;
+use crate::layout::pattern_layout::{PatternBucket, PatternLayerMap};
 use crate::paint_property_binder::{CrossFadedPaintPropertyBinder, DashArrayBinder, PaintPropertyBinder};
 use crate::util::subdivision::subdivide_vertex_line;
 use crate::util::tessellator::Tessellator;
@@ -174,11 +174,7 @@ fn evaluated_or_max(evaluated_constant: Option<f32>, default_value: f32, statist
 
 static EMPTY_FORMATTED_SECTION: Value = Value::Null;
 
-impl Bucket for LineBucket {
-    fn base(&self) -> &BucketBase {
-        &self.base
-    }
-
+impl PatternBucket for LineBucket {
     fn add_feature(
         &mut self,
         feature: &dyn GeometryTileFeature,
@@ -206,8 +202,14 @@ impl Bucket for LineBucket {
             );
         }
     }
+}
 
-    fn upload(&mut self, geometry: &mut GeometryUpload<'_>, _needs: UploadNeeds) {
+impl Bucket for LineBucket {
+    fn base(&self) -> &BucketBase {
+        &self.base
+    }
+
+    fn upload(&mut self, geometry: &mut GeometryUpload<'_>) {
         geometry.move_vertices(&mut self.vertices);
         geometry.move_indexes(&mut self.triangles);
         for binders in self.paint_property_binders.values_mut() {
@@ -219,10 +221,6 @@ impl Bucket for LineBucket {
 
     fn has_data(&self) -> bool {
         !self.segments.is_empty()
-    }
-
-    fn write_wire(&self, w: &mut mln_wire::Writer) {
-        mln_wire::Wire::write(self, w);
     }
 
     fn update(

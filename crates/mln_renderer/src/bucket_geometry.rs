@@ -278,8 +278,10 @@ impl<T> Kept<T> {
     }
 }
 
-/// A bucket's upload: what moves the bucket's geometry into the context's
-/// stores, and keeps its handles in its tile's [`BucketGeometry`].
+/// A bucket's upload ([`Bucket::upload`](crate::layer::Bucket::upload)):
+/// what moves the bucket's geometry into the context's stores, which the
+/// draws of the bucket's tile and of its world copies share, and keeps its
+/// handles with the tile.
 pub struct GeometryUpload<'a> {
     geometry: &'a mut BucketGeometry,
     /// The geometry of the tile's other world copies, whose buckets the
@@ -298,6 +300,12 @@ impl<'a> GeometryUpload<'a> {
         context: &'a mut Context,
     ) -> Self {
         GeometryUpload { geometry, copies, context }
+    }
+
+    /// The context whose stores the geometry moves into, whose device's
+    /// capabilities say how the draws read it.
+    pub(crate) fn context(&self) -> &Context {
+        self.context
     }
 
     /// Moves the data of `vec`, a bucket's, into the store, unless it moved

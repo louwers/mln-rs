@@ -17,13 +17,11 @@ use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate, Ge
 use mln_util::constants::EXTENT;
 use mln_vec_map::VecMap;
 
-use crate::bucket::{Bucket, BucketBase, UploadNeeds};
+use crate::bucket::{Bucket, BucketBase};
 use crate::bucket_geometry::{GeometryUpload, GeometryVec};
 use crate::gfx::mesh::{Indexed, add_point_quads};
 use crate::layer_type::EvaluatedLayer;
-use crate::layout::pattern_layout::PatternLayerMap;
 use crate::paint_property_binder::PaintPropertyBinder;
-use crate::util::tessellator::Tessellator;
 
 crate::paint_property_binders!(
     pub struct HeatmapBinders for HeatmapPaintProperties::PossiblyEvaluated {
@@ -74,22 +72,15 @@ impl HeatmapBucket {
     pub(crate) fn texture_vertex(p: GeometryCoordinate) -> HeatmapTextureLayoutVertex {
         HeatmapLayoutVertex { a1: [p.x, p.y] }
     }
-}
 
-impl Bucket for HeatmapBucket {
-    fn base(&self) -> &BucketBase {
-        &self.base
-    }
-
-    fn add_feature(
+    /// Adds the points of `feature`, the feature at `feature_index` of its
+    /// source layer, with `geometry`, in the tile `canonical`.
+    pub(crate) fn add_feature(
         &mut self,
         feature: &dyn GeometryTileFeature,
         geometry: &GeometryCollection,
-        _image_positions: &ImagePositions,
-        _patterns: &PatternLayerMap,
         feature_index: usize,
         canonical: &CanonicalTileID,
-        _tessellator: &mut Tessellator,
     ) {
         // Points outside the tile are left to the tiles they're in.
         let in_tile = |p: &&Point<i16>| (0..EXTENT).contains(&i32::from(p.x)) && (0..EXTENT).contains(&i32::from(p.y));
@@ -110,6 +101,12 @@ impl Bucket for HeatmapBucket {
             );
         }
     }
+}
+
+impl Bucket for HeatmapBucket {
+    fn base(&self) -> &BucketBase {
+        &self.base
+    }
 
     fn update(
         &mut self,
@@ -126,7 +123,7 @@ impl Bucket for HeatmapBucket {
         true
     }
 
-    fn upload(&mut self, geometry: &mut GeometryUpload<'_>, _needs: UploadNeeds) {
+    fn upload(&mut self, geometry: &mut GeometryUpload<'_>) {
         geometry.move_vertices(&mut self.vertices);
         geometry.move_indexes(&mut self.triangles);
         for binders in self.paint_property_binders.values_mut() {
@@ -138,9 +135,5 @@ impl Bucket for HeatmapBucket {
 
     fn has_data(&self) -> bool {
         !self.segments.is_empty()
-    }
-
-    fn write_wire(&self, w: &mut mln_wire::Writer) {
-        mln_wire::Wire::write(self, w);
     }
 }

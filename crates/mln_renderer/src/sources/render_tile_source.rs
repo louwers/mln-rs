@@ -34,7 +34,6 @@ use mln_util::hash::{HashMap, HashSet};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecMap;
 
-use crate::bucket::UploadNeeds;
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::gfx::context::Context;
 use crate::gfx::indexes::DrawIndexes;
@@ -392,8 +391,8 @@ impl RenderSource for RenderTileSource {
         self.order_by_y = Vec::new();
     }
 
-    fn upload(&mut self, store: &mut TileStore, context: &mut Context, needs: UploadNeeds) {
-        store.upload(self.key, &self.render_tiles, context, needs);
+    fn upload(&mut self, store: &mut TileStore, context: &mut Context) {
+        store.upload(self.key, &self.render_tiles, context);
     }
 
     /// Updates the source's draws of the debug overlays.

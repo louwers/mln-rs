@@ -39,7 +39,7 @@ use crate::gfx::context::Context;
 use crate::gfx::indexes::DrawIndexes;
 use crate::gfx::line_mesh::LineLayoutVertex;
 use crate::layer_type::EvaluatedLayer;
-use crate::layout::pattern_layout::PatternLayerMap;
+use crate::layout::pattern_layout::{PatternBucket, PatternLayerMap};
 use crate::layout::symbol_instance::SymbolInstancePools;
 use crate::tile_mask::TileMask;
 use crate::util::tessellator::Tessellator;
@@ -78,8 +78,11 @@ fn collection(rings: &[&[(i16, i16)]]) -> GeometryCollection {
 
 /// Uploads `bucket`, keeping its geometry in `geometry`, through `context`.
 fn upload(bucket: &mut dyn Bucket, geometry: &mut BucketGeometry, context: &mut Context) {
-    let needs = crate::layers::upload_needs(context);
-    bucket.upload(&mut GeometryUpload::new(geometry, &[], context), needs);
+    bucket.upload(&mut GeometryUpload::new(geometry, &[], context));
+}
+
+fn needs_upload(bucket: &dyn Bucket) -> bool {
+    bucket.needs_upload()
 }
 
 // gtest: Buckets.CircleBucket
@@ -87,29 +90,15 @@ fn upload(bucket: &mut dyn Bucket, geometry: &mut BucketGeometry, context: &mut 
 fn circle_bucket() {
     let mut bucket = CircleBucket::new(&VecMap::new(), MapMode::Static, 1.0);
     assert!(!bucket.has_data());
-    assert!(!bucket.needs_upload());
-
-    // CircleBucket::addFeature() is a no-op.
-    let point = collection(&[&[(0, 0)]]);
-    bucket.add_feature(
-        &feature(FeatureType::Point, &point),
-        &point,
-        &ImagePositions::default(),
-        &PatternLayerMap::default(),
-        0,
-        &CanonicalTileID::new(0, 0, 0),
-        &mut Tessellator::default(),
-    );
-    assert!(!bucket.has_data());
-    assert!(!bucket.needs_upload());
+    assert!(!needs_upload(&bucket));
 
     bucket.segments.push(SegmentBase::new(0, 0));
     assert!(bucket.has_data());
-    assert!(bucket.needs_upload());
+    assert!(needs_upload(&bucket));
 
     with_context(|_, context| upload(&mut bucket, &mut BucketGeometry::default(), context));
     assert!(bucket.has_data());
-    assert!(!bucket.needs_upload());
+    assert!(!needs_upload(&bucket));
 }
 
 // gtest: Buckets.FillBucket
@@ -118,7 +107,7 @@ fn fill_bucket() {
     let layout = FillLayoutProperties::PossiblyEvaluated::default();
     let mut bucket = FillBucket::new(&layout, &VecMap::new(), 5.0, 1);
     assert!(!bucket.has_data());
-    assert!(!bucket.needs_upload());
+    assert!(!needs_upload(&bucket));
 
     let polygon = collection(&[&[(0, 0), (0, 1), (1, 1)]]);
     bucket.add_feature(
@@ -131,10 +120,10 @@ fn fill_bucket() {
         &mut Tessellator::default(),
     );
     assert!(bucket.has_data());
-    assert!(bucket.needs_upload());
+    assert!(needs_upload(&bucket));
 
     with_context(|_, context| upload(&mut bucket, &mut BucketGeometry::default(), context));
-    assert!(!bucket.needs_upload());
+    assert!(!needs_upload(&bucket));
 }
 
 /// The vertices of a fill-extrusion bucket of `tile` holding `polygon`
@@ -334,8 +323,7 @@ fn world_copies_share_their_buckets_stored_geometry() {
         let mut copy_geometry = BucketGeometry::default();
         upload(&mut copy, &mut copy_geometry, context);
         let mut geometry = BucketGeometry::default();
-        let needs = crate::layers::upload_needs(context);
-        bucket.upload(&mut GeometryUpload::new(&mut geometry, &[&copy_geometry], context), needs);
+        bucket.upload(&mut GeometryUpload::new(&mut geometry, &[&copy_geometry], context));
 
         assert!(bucket.vertices.is_moved() && bucket.vertices.data().is_empty());
         assert!(bucket.triangles.is_moved() && bucket.triangles.data().is_empty());
@@ -379,7 +367,7 @@ fn line_bucket() {
     let layout = LineLayoutProperties::PossiblyEvaluated::default();
     let mut bucket = LineBucket::new(layout, &VecMap::new(), 10.0, 1);
     assert!(!bucket.has_data());
-    assert!(!bucket.needs_upload());
+    assert!(!needs_upload(&bucket));
 
     // Ignore invalid feature type.
     let point = collection(&[&[(0, 0)]]);
@@ -405,10 +393,10 @@ fn line_bucket() {
         &mut Tessellator::default(),
     );
     assert!(bucket.has_data());
-    assert!(bucket.needs_upload());
+    assert!(needs_upload(&bucket));
 
     with_context(|_, context| upload(&mut bucket, &mut BucketGeometry::default(), context));
-    assert!(!bucket.needs_upload());
+    assert!(!needs_upload(&bucket));
 }
 
 // gtest: Buckets.LineBucketDrawablesBuildFromFreedIndexes
@@ -474,29 +462,15 @@ fn symbol_bucket() {
     assert!(!bucket.has_icon_collision_circle_data());
     assert!(!bucket.has_text_collision_circle_data());
     assert!(!bucket.has_data());
-    assert!(!bucket.needs_upload());
-
-    // SymbolBucket::addFeature() is a no-op.
-    let point = collection(&[&[(0, 0)]]);
-    bucket.add_feature(
-        &feature(FeatureType::Point, &point),
-        &point,
-        &ImagePositions::default(),
-        &PatternLayerMap::default(),
-        0,
-        &CanonicalTileID::new(0, 0, 0),
-        &mut Tessellator::default(),
-    );
-    assert!(!bucket.has_data());
-    assert!(!bucket.needs_upload());
+    assert!(!needs_upload(&bucket));
 
     bucket.state.text.segments.push(SegmentBase::new(0, 0));
     assert!(bucket.has_text_data());
     assert!(bucket.has_data());
-    assert!(bucket.needs_upload());
+    assert!(needs_upload(&bucket));
 
     with_context(|_, context| upload(&mut bucket, &mut BucketGeometry::default(), context));
-    assert!(!bucket.needs_upload());
+    assert!(!needs_upload(&bucket));
 }
 
 // gtest: Buckets.RasterBucket

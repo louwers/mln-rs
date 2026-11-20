@@ -7,21 +7,17 @@ use std::sync::Arc;
 use mln_map_types::MapMode;
 use mln_style::expression::EvaluationContext;
 use mln_style::layers::Heatmap;
-use mln_style_types::image::ImagePositions;
 use mln_tile_id::geometry_tile_data::GeometryTileFeature;
 use mln_util::error::Error;
 use mln_vec_map::VecMap;
 
-use crate::bucket::Bucket;
 use crate::bucket_parameters::BucketParameters;
 use crate::buckets::heatmap_bucket::HeatmapBucket;
 use crate::geometry::feature_index::FeatureIndexBuilder;
 use crate::layer_type::EvaluatedLayer;
 use crate::layout::filter_groups::FilterGroups;
 use crate::layout::layout::{BuildParams, Layout, SourceLayer, layers_by_id};
-use crate::layout::pattern_layout::PatternLayerMap;
 use crate::layout::tile_layout::Resolved;
-use crate::util::tessellator::Tessellator;
 
 pub struct HeatmapLayout {
     layers: VecMap<String, Arc<EvaluatedLayer<Heatmap>>>,
@@ -96,15 +92,7 @@ impl Layout<Heatmap> for HeatmapLayout {
         for &i in &self.features {
             let feature = source_layer.feature(i)?;
             let geometries = feature.geometry()?;
-            bucket.add_feature(
-                &feature,
-                &geometries,
-                &ImagePositions::default(),
-                &PatternLayerMap::default(),
-                i,
-                &build.canonical,
-                &mut Tessellator::default(),
-            );
+            bucket.add_feature(&feature, &geometries, i, &build.canonical);
             feature_index.insert(&geometries, i, &self.source_layer_id, &self.bucket_leader_id);
         }
         Ok(Some(bucket))

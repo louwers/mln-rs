@@ -11,18 +11,9 @@ pub(crate) mod render_line_layer;
 pub(crate) mod render_raster_layer;
 pub(crate) mod render_symbol_layer;
 
-use crate::bucket::UploadNeeds;
 use crate::draw::DrawObjects;
 use crate::gfx::vertex_attribute::VertexAttributeArray;
 use crate::layer_drawing::BucketChanges;
-
-/// What the layers' draws read of the buckets on the device of `context`.
-pub(crate) fn upload_needs(context: &crate::gfx::context::Context) -> UploadNeeds {
-    UploadNeeds {
-        fill_outline_ends: render_fill_layer::draws_outline_quads(context),
-        wall_quads: !render_fill_extrusion_layer::instanced_walls(context),
-    }
-}
 
 /// Copies the bucket's data-driven attributes into a draw again where
 /// `changes` says their values changed: `refresh(attrs)` reads them into its

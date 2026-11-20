@@ -29,11 +29,11 @@ use mln_util::constants::{EARTH_RADIUS_M, EXTENT, M2PI};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecMap;
 
-use crate::bucket::{Bucket, BucketBase, UploadNeeds};
+use crate::bucket::{Bucket, BucketBase};
 use crate::bucket_geometry::{GeometryUpload, GeometryVec};
 use crate::gfx::mesh::Indexed;
 use crate::layer_type::EvaluatedLayer;
-use crate::layout::pattern_layout::{PatternLayerMap, PatternLayoutSpec};
+use crate::layout::pattern_layout::{PatternBucket, PatternLayerMap, PatternLayoutSpec};
 use crate::paint_property_binder::{CrossFadedPaintPropertyBinder, PaintPropertyBinder};
 use crate::render_static_data::RenderStaticData;
 use crate::util::subdivision::{SubdividedPolygon, subdivide_polygon, subdivide_vertex_line};
@@ -330,11 +330,7 @@ impl FillExtrusionBucket {
     }
 }
 
-impl Bucket for FillExtrusionBucket {
-    fn base(&self) -> &BucketBase {
-        &self.base
-    }
-
+impl PatternBucket for FillExtrusionBucket {
     fn add_feature(
         &mut self,
         feature: &dyn GeometryTileFeature,
@@ -387,12 +383,19 @@ impl Bucket for FillExtrusionBucket {
             );
         }
     }
+}
 
-    fn upload(&mut self, geometry: &mut GeometryUpload<'_>, needs: UploadNeeds) {
+impl Bucket for FillExtrusionBucket {
+    fn base(&self) -> &BucketBase {
+        &self.base
+    }
+
+    fn upload(&mut self, geometry: &mut GeometryUpload<'_>) {
         // Walls that aren't instances of the static quad are quads of their
         // own, made of the vertices and paint values before those move.
         let walls = self.vertices.len().saturating_sub(1);
-        if needs.wall_quads {
+        let wall_quads = !crate::layers::render_fill_extrusion_layer::instanced_walls(geometry.context());
+        if wall_quads {
             geometry.derive_vertices(&self.vertices, wall_quad_vertices);
         }
         geometry.move_vertices(&mut self.vertices);
@@ -400,7 +403,7 @@ impl Bucket for FillExtrusionBucket {
         for binders in self.paint_property_binders.values_mut() {
             let depends_on_feature_state = binders.depends_on_feature_state();
             let buffer = &mut binders.interleaved_vertex_buffer;
-            if needs.wall_quads && !depends_on_feature_state {
+            if wall_quads && !depends_on_feature_state {
                 let stride = buffer.stride;
                 geometry.derive_vertices(&buffer.shared_vertex_vector, |paint| wall_quad_paint(paint, stride, walls));
             }
@@ -411,10 +414,6 @@ impl Bucket for FillExtrusionBucket {
 
     fn has_data(&self) -> bool {
         !self.triangle_segments.is_empty()
-    }
-
-    fn write_wire(&self, w: &mut mln_wire::Writer) {
-        mln_wire::Wire::write(self, w);
     }
 
     fn update(

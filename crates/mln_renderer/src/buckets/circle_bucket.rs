@@ -16,7 +16,7 @@ use mln_style_types::image::ImagePositions;
 use mln_util::Color;
 use mln_vec_map::VecMap;
 
-use crate::bucket::{Bucket, BucketBase, UploadNeeds};
+use crate::bucket::{Bucket, BucketBase};
 use crate::bucket_geometry::{GeometryUpload, GeometryVec};
 use crate::layer_type::EvaluatedLayer;
 use crate::paint_property_binder::PaintPropertyBinder;
@@ -105,7 +105,7 @@ impl Bucket for CircleBucket {
         &self.base
     }
 
-    fn upload(&mut self, geometry: &mut GeometryUpload<'_>, _needs: UploadNeeds) {
+    fn upload(&mut self, geometry: &mut GeometryUpload<'_>) {
         geometry.move_vertices(&mut self.vertices);
         geometry.move_indexes(&mut self.triangles);
         for binders in self.paint_property_binders.values_mut() {
@@ -117,10 +117,6 @@ impl Bucket for CircleBucket {
 
     fn has_data(&self) -> bool {
         !self.segments.is_empty()
-    }
-
-    fn write_wire(&self, w: &mut mln_wire::Writer) {
-        mln_wire::Wire::write(self, w);
     }
 
     fn update(
