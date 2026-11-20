@@ -566,3 +566,18 @@ fn a_camera_below_the_ground_stands_on_the_dem_under_its_center() {
     let ground = load.ground_events().pop().flatten().expect("the ground");
     assert_eq!(Some(3_000_000.0), ground.at(LatLng::new(45.0, 10.0).unwrap()));
 }
+
+/// The coarse DEM tile a terrain tile reads for culling loads while its
+/// own, finer DEM tile is still loading: the finer tile's search for a
+/// loaded ancestor doesn't make the coarse tile a fallback that waits.
+#[test]
+fn the_coarse_dem_tile_loads_while_the_fine_one_is_loading() {
+    let mut load = TerrainLoad::new((0, 14), 1.0);
+    for _ in 0..3 {
+        load.frame();
+    }
+    load.answer(|tile| (tile.z == 5).then(|| terrarium_png(100)));
+    let tiles: Vec<OverscaledTileID> = load.terrain.cover().unwrap().tiles.iter().map(|tile| tile.id).collect();
+    let ancestors: Vec<_> = tiles.iter().map(|id| (Some((5, sub_rect(id, 5))), true)).collect();
+    assert_eq!(ancestors, load.bindings());
+}

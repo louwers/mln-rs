@@ -312,6 +312,10 @@ impl RenderablesContext for CoverContext<'_, '_, '_> {
             return;
         }
         let first = self.retain.insert(*key);
+        // A tile the terrain reads is required, also where another read
+        // reaches it first as a fallback: its necessity is set only once a
+        // pass, and an optional one would stop it loading.
+        let necessity = if self.update.terrain_reads.contains(key) { TileNecessity::Required } else { necessity };
         if first {
             // The pan pass comes first, so a tile of both covers loads with
             // the coarse ones.
