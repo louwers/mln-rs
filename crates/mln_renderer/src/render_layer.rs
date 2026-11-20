@@ -114,6 +114,8 @@ impl<'a, T: LayerType> LayerBucket<'a, T> {
 }
 
 impl<'a, T: LayerType> FindView<'a> for LayerBucket<'a, T> {
+    const SOURCE: SourceKind = SourceKind::Geometry;
+
     fn find(content: TileContent<'a>, layer_id: &str) -> Option<(Self, ViewPlace)> {
         let TileContent::Tile(contents) = content else { return None };
         let contents = contents.geometry()?;
