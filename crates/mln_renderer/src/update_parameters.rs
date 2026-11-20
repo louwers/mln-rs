@@ -43,6 +43,11 @@ pub struct UpdateParameters {
     pub fast_pfor_enabled: bool,
     /// How far the skirts of terrain tiles reach down.
     pub terrain_skirt_length: TerrainSkirtLength,
+    /// Counts the map's moves of its camera onto the terrain: the frame of
+    /// the update reports it back ([`RendererEvent::RenderFrameFinished`]).
+    ///
+    /// [`RendererEvent::RenderFrameFinished`]: crate::RendererEvent::RenderFrameFinished
+    pub ground_generation: u64,
 
     pub tile_lod_min_radius: f64,
     pub tile_lod_scale: f64,

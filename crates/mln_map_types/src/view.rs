@@ -525,6 +525,16 @@ impl View {
         self.projection().projection_data(self, tile_id, mercator_matrix)
     }
 
+    /// The lowest ground near the center while terrain draws, in meters,
+    /// exaggerated; `None` without terrain
+    /// ([`TransformState::set_terrain_min_elevation`]).
+    ///
+    /// [`TransformState::set_terrain_min_elevation`]: crate::TransformState::set_terrain_min_elevation
+    #[must_use]
+    pub fn terrain_min_elevation(&self) -> Option<f64> {
+        self.params.terrain_min_elevation
+    }
+
     /// The distance from the camera to the near plane of the projection
     /// matrix, in pixels: 1, or a fiftieth of the view's height while
     /// terrain draws, as in GL JS, for the depth precision raised ground

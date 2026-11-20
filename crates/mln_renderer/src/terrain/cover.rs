@@ -2,10 +2,11 @@
 //! elevation ranges that cull them and every source's tiles while terrain
 //! draws.
 
-use mln_map_types::View;
+use mln_map_types::{TileCoordinate, View};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::constants;
 use mln_util::dem::DemCoords;
+use mln_util::geo::WrapMode;
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::range::Range;
 
@@ -38,6 +39,17 @@ pub(crate) fn terrain_tile_size(dem_tile_size: u16) -> u16 {
 pub(crate) fn dem_zoom(z: u8, dem_zooms: Range<u8>) -> Option<u8> {
     let zoom = z.saturating_sub(1).min(dem_zooms.max).max(dem_zooms.min);
     (zoom <= z).then_some(zoom)
+}
+
+/// Where `tile` has the point `world` of the world, in units of the world's
+/// width, y down, from 0 to 1 across the tile; `None` outside it. Every
+/// world copy of the tile has it.
+pub(crate) fn place_in(tile: CanonicalTileID, world: [f64; 2]) -> Option<[f64; 2]> {
+    let [x, y] = world;
+    let tiles = f64::from(1u32 << tile.z);
+    let u = (x - x.floor()) * tiles - f64::from(tile.x);
+    let v = y.clamp(0.0, 1.0) * tiles - f64::from(tile.y);
+    ((0.0..1.0).contains(&u) && (0.0..=1.0).contains(&v)).then_some([u, v])
 }
 
 /// The bucket of `tile`, a raster-dem source's tile, if it has one with DEM
@@ -178,8 +190,13 @@ pub(crate) struct TerrainCover {
     pub(crate) tile_size: u16,
     /// The tiles, nearest the center first.
     pub(crate) tiles: Vec<TerrainTile>,
-    /// The DEM tiles the source keeps loaded for the tiles, whether or not
-    /// a layer draws them, nearest the center first.
+    /// The tile under the view's center at the cover's zoom, while none of
+    /// `tiles` is: the camera stands on its DEM. A camera below raised
+    /// ground looks over it, culling every tile, until it stands on it, as
+    /// in GL JS, whose camera falls back to the DEM tiles at its zoom.
+    pub(crate) center: Option<TerrainTile>,
+    /// The DEM tiles the source keeps loaded for the tiles and the center,
+    /// whether or not a layer draws them, nearest the center first.
     pub(crate) dem_tiles: Vec<OverscaledTileID>,
     pub(crate) ranges: ElevationRanges,
 }
@@ -199,19 +216,40 @@ impl TerrainCover {
     ) -> Self {
         let tiles: Vec<TerrainTile> =
             cover_tiles(view, dem_tile_size, &ranges).into_iter().map(TerrainTile::new).collect();
+        let center = TileCoordinate::from_lat_lng(0.0, &view.center(WrapMode::Wrapped)).p;
+        let center = [center.x, center.y];
+        let center = tiles.iter().all(|tile| place_in(tile.id.canonical, center).is_none()).then(|| {
+            let z = cover_zoom(view, dem_tile_size);
+            let tiles = f64::from(1u32 << z);
+            let max = (1u32 << z) - 1;
+            let (x, y) = ((center[0] * tiles) as u32, (center[1] * tiles) as u32);
+            TerrainTile::new(OverscaledTileID::with_zxy(z, 0, z, x.min(max), y.min(max)))
+        });
         let mut seen = HashSet::default();
-        let dem_tiles = tiles.iter().flat_map(|tile| tile.dem_reads(dem_zooms)).filter(|id| seen.insert(*id)).collect();
+        let dem_tiles = tiles
+            .iter()
+            .chain(&center)
+            .flat_map(|tile| tile.dem_reads(dem_zooms))
+            .filter(|id| seen.insert(*id))
+            .collect();
         let tile_size = terrain_tile_size(dem_tile_size);
-        TerrainCover { source_id: source_id.to_owned(), tile_size, tiles, dem_tiles, ranges }
+        TerrainCover { source_id: source_id.to_owned(), tile_size, tiles, center, dem_tiles, ranges }
     }
 
     /// Binds each tile's DEM from the tiles of `dem`, the terrain's source.
     pub(crate) fn bind(&mut self, dem: Option<&SourceTiles>) {
         let dem_zooms = self.ranges.dem_zooms;
-        for tile in &mut self.tiles {
+        for tile in self.tiles.iter_mut().chain(&mut self.center) {
             tile.bind(dem, dem_zooms);
         }
     }
+}
+
+/// The zoom the terrain covers `view` at, over a DEM of `dem_tile_size`,
+/// before its tiles get coarser away from the camera.
+fn cover_zoom(view: &View, dem_tile_size: u16) -> u8 {
+    let tile_size = terrain_tile_size(dem_tile_size);
+    covering_zoom_level(view.zoom(), false, tile_size).clamp(0, i32::from(TERRAIN_ZOOM_RANGE.max)) as u8
 }
 
 /// The terrain tiles of `view` over a DEM of `dem_tile_size`, culled by
@@ -219,7 +257,7 @@ impl TerrainCover {
 pub(crate) fn cover_tiles(view: &View, dem_tile_size: u16, ranges: &ElevationRanges) -> Vec<OverscaledTileID> {
     let tile_size = terrain_tile_size(dem_tile_size);
     let zoom = view.zoom();
-    let z = covering_zoom_level(zoom, false, tile_size).clamp(0, i32::from(TERRAIN_ZOOM_RANGE.max)) as u8;
+    let z = cover_zoom(view, dem_tile_size);
     let mut parameters = TileCoverParameters::new(view.clone());
     parameters.requested_zoom = Some(zoom + (constants::TILE_SIZE_D / f64::from(tile_size)).log2());
     terrain_tile_cover(&parameters, z, TERRAIN_ZOOM_RANGE, None, ranges)

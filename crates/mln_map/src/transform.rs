@@ -711,6 +711,24 @@ impl Transform {
         self.state.view().screen_coordinate_to_lat_lng(&flipped_point, wrap_mode)
     }
 
+    /// Stands the camera on the terrain: puts the center at `altitude`
+    /// meters, unless `None`, and sets the lowest ground near it,
+    /// `min_elevation` meters, or `None` without terrain
+    /// ([`TransformState::set_terrain_min_elevation`]). The terrain moves
+    /// the camera, not a command, so this reports no camera change. Returns
+    /// whether the view changed.
+    pub fn set_ground(&mut self, altitude: Option<f64>, min_elevation: Option<f64>) -> bool {
+        let ground = |view: &View| (view.terrain_min_elevation(), view.center_altitude());
+        let before = ground(self.state.view());
+        if min_elevation != before.0 {
+            self.state.set_terrain_min_elevation(min_elevation);
+        }
+        if let Some(altitude) = altitude.filter(|&altitude| altitude != before.1) {
+            self.state.set_center_altitude(altitude);
+        }
+        ground(self.state.view()) != before
+    }
+
     pub(crate) fn set_free_camera_options(&mut self, options: &FreeCameraOptions) {
         self.cancel_transitions();
         self.state.set_free_camera_options(options);

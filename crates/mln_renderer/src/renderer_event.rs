@@ -6,6 +6,7 @@
 use std::sync::Arc;
 
 pub use mln_gfx::rendering_stats::RenderingStats;
+use mln_map_types::Elevation;
 pub use mln_text::glyph::GlyphRange;
 pub use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
@@ -49,9 +50,18 @@ pub enum RendererEvent {
         /// updates completes it, not one of an earlier update that a renderer
         /// on another thread drew late.
         still_image_request_id: u64,
+        /// The `ground_generation` of the update that the frame drew. Only
+        /// a frame of the map's latest ground completes a still image or
+        /// leaves the map idle: one drawn before the camera moved onto the
+        /// terrain doesn't.
+        ground_generation: u64,
         /// The context's counters after the frame.
         stats: Arc<RenderingStats>,
     },
+    /// The ground of the terrain changed: the tiles that draw it, or the DEM
+    /// data they read. The map's camera stands on it. `None` once terrain
+    /// stops drawing. It comes before the frame of its update finishes.
+    TerrainElevation(Option<Arc<dyn Elevation>>),
     /// The renderer drew its first frame with everything loaded.
     RenderMapFinished,
     /// A layer uses an image that the style lacks. The renderer lays out

@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use mln_map::transform::Transform;
 use mln_map_types::{
-    CameraOptions, ConstrainMode, MapDebugOptions, MapMode, TerrainSkirtLength, TileLodMode, ViewportMode,
+    CameraOptions, ConstrainMode, Elevation, MapDebugOptions, MapMode, TerrainSkirtLength, TileLodMode, ViewportMode,
 };
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::{FileSource, Resource, Responder, Response};
@@ -15,7 +15,7 @@ use mln_style::terrain::Terrain;
 use mln_style::{Edit, Source, Style};
 use mln_style_types::ProjectionDefinition;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
-use mln_util::dem::DemCoords;
+use mln_util::dem::{DemCoords, DemUnpack};
 use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
 use mln_util::pool::TaskGroup;
@@ -26,8 +26,11 @@ use parking_lot::Mutex;
 
 use crate::Registry;
 use crate::render_source::RenderSource;
+use crate::renderer_event::RendererEvent;
 use crate::terrain::{RenderTerrain, TerrainCover};
+use crate::tile::contents::Contents;
 use crate::tile::store::{StoreEvent, TileStore};
+use crate::tile::tile::Tile;
 use crate::tile::tile_workers::InlineWorkers;
 use crate::tile_parameters::TileParameters;
 use crate::update_parameters::UpdateParameters;
@@ -77,6 +80,7 @@ fn update_parameters(style: Style, transform: &Transform, mode: MapMode) -> Upda
         cross_source_collisions: true,
         fast_pfor_enabled: false,
         terrain_skirt_length: TerrainSkirtLength::Auto,
+        ground_generation: 0,
         tile_lod_min_radius: 3.0,
         tile_lod_scale: 1.0,
         tile_lod_pitch_threshold: mln_math::deg2rad(60.0),
@@ -208,6 +212,20 @@ fn terrarium_png(height: u16) -> Response {
     response
 }
 
+/// A DEM tile: 16 pixels a side, rising 7 m a pixel eastward and 3 m
+/// southward from 100 m, in Terrarium.
+fn terrarium_slope() -> Response {
+    let mut image = PremultipliedImage::new(Size::new(16, 16));
+    for (i, pixel) in image.data.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+        let (x, y) = ((i % 16) as u16, (i / 16) as u16);
+        let [hi, lo] = (100 + 7 * x + 3 * y + 32768).to_be_bytes();
+        *pixel = [hi, lo, 0, 255];
+    }
+    let mut response = Response::new();
+    response.data = Some(Arc::new(mln_image::encode_png(&image)));
+    response
+}
+
 fn not_found() -> Response {
     let mut response = Response::new();
     response.error = Some(Box::new(ResourceError::new(Reason::NotFound, "no such tile")));
@@ -227,6 +245,8 @@ struct TerrainLoad {
     terrain: RenderTerrain,
     relayout: bool,
     errors: usize,
+    /// What the terrain told the map.
+    events: Vec<RendererEvent>,
 }
 
 impl TerrainLoad {
@@ -258,16 +278,23 @@ impl TerrainLoad {
             terrain: RenderTerrain::default(),
             relayout: true,
             errors: 0,
+            events: Vec::new(),
         }
     }
 
-    /// One update, as a frame's: the terrain's cover, the source's tiles
-    /// and the terrain's bindings.
+    /// One update, as a frame's, which draws terrain: the terrain's cover,
+    /// the source's tiles and the terrain's bindings.
     fn frame(&mut self) -> &TerrainCover {
+        self.update();
+        self.terrain.cover().expect("terrain draws")
+    }
+
+    /// One update, as a frame's.
+    fn update(&mut self) {
         crate::tests::update(&mut self.store);
         let parameters = update_parameters(self.style.clone(), &self.transform, MapMode::Static);
         let (store, render_source) = (&self.store, &self.render_source);
-        self.terrain.update(&parameters, |_| store.source(render_source.tiles()?)).expect("terrain draws");
+        self.terrain.update(&parameters, |_| store.source(render_source.tiles()?));
         let file_source: Arc<dyn FileSource> = Arc::<DemTiles>::clone(&self.tiles);
         let tile_parameters = TileParameters {
             pixel_ratio: 1.0,
@@ -294,11 +321,21 @@ impl TerrainLoad {
         let relayout = std::mem::take(&mut self.relayout);
         self.render_source.update(&mut self.store, self.source.clone(), &[], false, relayout, &tile_parameters);
         let (store, render_source) = (&self.store, &self.render_source);
-        self.terrain.bind(|_| store.source(render_source.tiles()?));
+        self.terrain.bind(|_| store.source(render_source.tiles()?), &mut self.events);
         self.store.drive();
         self.errors +=
             self.store.take_events().iter().filter(|event| matches!(event, StoreEvent::Error { .. })).count();
-        self.terrain.cover().expect("terrain draws")
+    }
+
+    /// What the terrain told the map of its ground since the last call.
+    fn ground_events(&mut self) -> Vec<Option<Arc<dyn Elevation>>> {
+        self.events
+            .drain(..)
+            .filter_map(|event| match event {
+                RendererEvent::TerrainElevation(elevation) => Some(elevation),
+                _ => None,
+            })
+            .collect()
     }
 
     /// Answers the DEM requests `answer` has a response for, then runs
@@ -460,4 +497,72 @@ fn ranges_come_from_the_loaded_dem_tiles() {
         let top = f64::from(tile.canonical.y) / f64::from(1u32 << tile.canonical.z);
         assert!(top > center_y, "{tile} is south of the center");
     }
+}
+
+/// The ground the terrain tells the map is the height rule on the DEM that
+/// each tile drew: at the center, the rule's height on the DEM of the tile
+/// drawn there, exaggerated. The terrain tells the map once per change of
+/// its ground, and once when terrain stops.
+#[test]
+fn the_ground_the_map_stands_on_is_the_height_rule_on_the_drawn_dem() {
+    let mut load = TerrainLoad::new((0, 14), 1.5);
+    load.frame();
+    load.answer(|_| Some(terrarium_slope()));
+    assert!(load.is_loaded());
+    let ground = load.ground_events().pop().flatten().expect("the ground");
+
+    let center = LatLng::new(45.0, 10.0).unwrap();
+    let world = mln_util::projection::Projection::project(&center, 1.0 / mln_util::constants::TILE_SIZE_D);
+    let cover = load.terrain.cover().unwrap();
+    let (tile, uv) = cover
+        .tiles
+        .iter()
+        .find_map(|tile| {
+            let tiles = f64::from(1u32 << tile.id.canonical.z);
+            let u = world.x * tiles - f64::from(tile.id.canonical.x);
+            let v = world.y * tiles - f64::from(tile.id.canonical.y);
+            ((0.0..1.0).contains(&u) && (0.0..1.0).contains(&v)).then_some((tile, [u as f32, v as f32]))
+        })
+        .expect("a tile at the center");
+    let (dem, coords) = tile.dem.expect("its DEM");
+    let source = load.store.source(load.render_source.tiles().unwrap()).unwrap();
+    let Some(Contents::Dem(bucket)) = source.tile(&dem).and_then(Tile::contents) else { panic!("the DEM tile {dem}") };
+    let data = bucket.dem_data();
+    let (dim, stride) = (data.dim as u32, data.stride as usize);
+    let unpack = DemUnpack::of(RasterEncoding::Terrarium);
+    let texel = |x: u32, y: u32| {
+        let start = (y as usize * stride + x as usize) * 4;
+        unpack.decode(data.image().data[start..start + 4].try_into().unwrap())
+    };
+    let height = mln_util::dem::sample(dim, coords, uv, texel) * 1.5;
+    assert_eq!(Some(f64::from(height)), ground.at(center));
+    assert!(height.fract() != 0.0, "{height} reads between pixels");
+    assert_eq!(Some(f64::from(data.min * 1.5)), ground.min_at(center));
+    // Ground far from the view, where no tile drew.
+    assert_eq!(None, ground.at(LatLng::new(-45.0, -170.0).unwrap()));
+
+    load.frame();
+    assert!(load.ground_events().is_empty(), "no change, nothing to tell");
+
+    load.style.apply(Edit::SetTerrain(None)).unwrap();
+    load.update();
+    load.update();
+    assert!(matches!(load.ground_events()[..], [None]));
+}
+
+/// A camera far below raised ground looks over it, which culls every tile;
+/// the tile under the center still loads its DEM, which the camera stands
+/// on.
+#[test]
+fn a_camera_below_the_ground_stands_on_the_dem_under_its_center() {
+    let mut load = TerrainLoad::new((0, 14), 100.0);
+    load.transform.jump_to(&CameraOptions { pitch: Some(60.0), ..Default::default() });
+    load.frame();
+    load.answer(|_| Some(terrarium_png(30_000)));
+    let cover = load.terrain.cover().unwrap();
+    assert!(cover.tiles.is_empty(), "{:?}", cover.tiles);
+    let center = cover.center.expect("the tile under the center");
+    assert!(cover.dem_tiles.contains(&center.id.scaled_to(center.id.canonical.z - 1)));
+    let ground = load.ground_events().pop().flatten().expect("the ground");
+    assert_eq!(Some(3_000_000.0), ground.at(LatLng::new(45.0, 10.0).unwrap()));
 }

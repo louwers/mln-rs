@@ -7,6 +7,7 @@ mod bound_options;
 mod camera;
 mod camera_limits;
 mod camera_momentum;
+mod elevation;
 mod frame_projection;
 mod map_view;
 mod mode;
@@ -23,6 +24,7 @@ pub use camera_momentum::{
     AnchoredMomentum, CameraMomentum, InvalidMomentum, MomentumDecay, MomentumDecayModel, MomentumEasing,
     MomentumGlide, MomentumSnap,
 };
+pub use elevation::Elevation;
 pub use frame_projection::{ClipDepthRange, FrameProjection};
 pub use map_view::{Camera, LogicalExtent, MapView, Viewport};
 pub use mode::{ConstrainMode, MapDebugOptions, MapMode, TerrainSkirtLength, TileLodMode, ViewportMode};

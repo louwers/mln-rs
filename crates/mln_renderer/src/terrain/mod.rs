@@ -5,12 +5,16 @@ mod cover;
 mod dem_textures;
 mod drapes;
 mod draws;
+mod elevation;
 mod mesh;
+
+use std::sync::Arc;
 
 #[cfg(test)]
 pub(crate) use cover::terrain_tile_size;
 pub(crate) use cover::{ElevationRanges, TerrainCover};
 pub(crate) use drapes::Drapes;
+pub(crate) use elevation::TerrainElevation;
 use mln_gfx::gpu::Gpu;
 use mln_gfx::shaders::terrain_ubo::TerrainPropsUBO;
 use mln_map_types::{MapMode, TerrainSkirtLength};
@@ -24,6 +28,7 @@ use mln_util::tileset::RasterEncoding;
 use crate::gfx::context::Context;
 use crate::layer_drawing::ChangedBuckets;
 use crate::paint_parameters::PaintParameters;
+use crate::renderer_event::RendererEvent;
 use crate::terrain::draws::TerrainDraws;
 use crate::tile::source_tiles::SourceTiles;
 use crate::update_parameters::UpdateParameters;
@@ -61,6 +66,12 @@ impl Surface {
         };
         Surface { props, skirts: skirt_length.is_some() }
     }
+
+    /// How the DEM decodes.
+    fn unpack(&self) -> DemUnpack {
+        let [r, g, b, base] = self.props.unpack;
+        DemUnpack { weights: [r, g, b], base, scale: self.props.unpack_scale }
+    }
 }
 
 /// The terrain of the frames the renderer draws: whether it draws, the
@@ -72,6 +83,9 @@ pub(crate) struct RenderTerrain {
     surface: Surface,
     drapes: Drapes,
     draws: TerrainDraws,
+    /// The ground the last update's cover drew, as the renderer last told
+    /// the map; `None` while terrain doesn't draw.
+    elevation: Option<Arc<TerrainElevation>>,
     /// Whether it has logged that terrain doesn't draw on the globe.
     logged_globe: bool,
 }
@@ -123,11 +137,31 @@ impl RenderTerrain {
     /// the tiles of the terrain's source that `dem` finds by its id. A
     /// frame's bindings are of the DEM tiles it has, so that a frame that
     /// has loaded draws each tile with its own.
-    pub(crate) fn bind<'a>(&mut self, dem: impl FnOnce(&str) -> Option<&'a SourceTiles>) {
-        if let Some(cover) = &mut self.cover {
-            let tiles = dem(&cover.source_id);
-            cover.bind(tiles);
+    ///
+    /// When the ground the tiles draw changed, it tells the map in `events`
+    /// ([`RendererEvent::TerrainElevation`]), before the frame finishes:
+    /// the tiles, the DEM data they read, or how it decodes. Once terrain
+    /// stops drawing, it tells the map once.
+    pub(crate) fn bind<'a>(
+        &mut self,
+        dem: impl FnOnce(&str) -> Option<&'a SourceTiles>,
+        events: &mut Vec<RendererEvent>,
+    ) {
+        let Some(cover) = &mut self.cover else {
+            if self.elevation.take().is_some() {
+                events.push(RendererEvent::TerrainElevation(None));
+            }
+            return;
+        };
+        let tiles = dem(&cover.source_id);
+        cover.bind(tiles);
+        let (unpack, exaggeration) = (self.surface.unpack(), self.surface.props.exaggeration);
+        if self.elevation.as_ref().is_some_and(|drawn| drawn.draws_as(cover, tiles, unpack, exaggeration)) {
+            return;
         }
+        let elevation = Arc::new(TerrainElevation::new(cover, tiles, unpack, exaggeration));
+        self.elevation = Some(Arc::clone(&elevation));
+        events.push(RendererEvent::TerrainElevation(Some(elevation)));
     }
 
     /// How the surface of the last update's cover draws.

@@ -110,6 +110,8 @@ pub struct DrawnFrame {
     placement_changed: bool,
     /// The `still_image_request_id` of a still image's frame, or 0.
     still_image_request_id: u64,
+    /// The `ground_generation` of the frame's update.
+    ground_generation: u64,
     started: Instant,
     symbols_started: Instant,
     updated: Instant,
@@ -651,6 +653,7 @@ impl Encoder {
             } else {
                 0
             },
+            ground_generation: update_parameters.ground_generation,
             started: frame.started,
             symbols_started: frame.symbols_started,
             updated,
@@ -669,6 +672,7 @@ impl Encoder {
             repaint_at,
             placement_changed,
             still_image_request_id,
+            ground_generation,
             started,
             symbols_started,
             updated,
@@ -704,6 +708,7 @@ impl Encoder {
                 repaint_at,
                 placement_changed,
                 still_image_request_id,
+                ground_generation,
                 stats,
             },
         );

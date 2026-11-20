@@ -8,7 +8,7 @@ use std::sync::Arc;
 use geo_types::Geometry;
 use glam::{DMat4, DVec3};
 use mln_map_types::{
-    AnimationOptions, BoundOptions, CameraDelta, CameraError, CameraLimits, CameraOptions, CameraUpdate,
+    AnimationOptions, BoundOptions, CameraDelta, CameraError, CameraLimits, CameraOptions, CameraUpdate, Elevation,
     MapDebugOptions, MapMode, ProjectionMode, TerrainSkirtLength, TileLodMode, TransformState,
     VerticalPerspectiveProjection, Viewport,
 };
@@ -38,6 +38,11 @@ use crate::map_snapshot::{CameraBounds, FreeCamera, MapSnapshot, TileSettings};
 use crate::rendering_stats_view::{RenderingStatsView, RenderingStatsViewOptions};
 use crate::style_loader::{LoadEvent, StyleLoader};
 use crate::transform::{CameraCommandId, CommandEnd, FrameClock, Transform, TransformEvent};
+
+/// How many times the terrain may move the camera while a still image
+/// waits, before the map stops following it for that image: a camera whose
+/// ground changes with each move would otherwise never settle.
+const MAX_GROUND_MOVES_PER_STILL: u32 = 8;
 
 /// Where a still image that [`Map::render_still`] asked for stands.
 #[derive(Debug, PartialEq)]
@@ -77,6 +82,14 @@ pub struct Map {
     /// Whether the center of a camera at rest stands on the terrain.
     center_clamped_to_ground: bool,
     terrain_skirt_length: TerrainSkirtLength,
+    /// The ground of the terrain as the renderer last drew it, while
+    /// terrain draws.
+    elevation: Option<Arc<dyn Elevation>>,
+    /// Counts the terrain's moves of the camera. Only a frame of the latest
+    /// completes a still image or leaves the map idle.
+    ground_generation: u64,
+    /// The terrain's moves of the camera while the still image waits.
+    ground_moves: u32,
 
     debug_options: MapDebugOptions,
     rendering_stats_view: Option<RenderingStatsView>,
@@ -179,6 +192,9 @@ impl Map {
             unused_style_image_policy: map_options.unused_style_image_policy,
             center_clamped_to_ground: map_options.center_clamped_to_ground,
             terrain_skirt_length: map_options.terrain_skirt_length,
+            elevation: None,
+            ground_generation: 0,
+            ground_moves: 0,
             debug_options: MapDebugOptions::NO_DEBUG,
             rendering_stats_view: None,
             style,
@@ -455,10 +471,25 @@ impl Map {
                 repaint_at,
                 placement_changed,
                 still_image_request_id,
+                ground_generation,
                 stats,
             } => {
                 self.repaint_at = repaint_at.filter(|_| continuous && !needs_repaint);
-                self.on_render_frame_finished(mode, needs_repaint, placement_changed, still_image_request_id, stats);
+                let grounded = ground_generation == self.ground_generation;
+                self.on_render_frame_finished(
+                    mode,
+                    needs_repaint,
+                    placement_changed,
+                    still_image_request_id,
+                    grounded,
+                    stats,
+                );
+            }
+            RendererEvent::TerrainElevation(elevation) => {
+                self.elevation = elevation;
+                if self.follow_terrain() {
+                    self.on_update();
+                }
             }
             RendererEvent::RenderMapStarted => {
                 if continuous {
@@ -508,12 +539,17 @@ impl Map {
         }
     }
 
+    /// Handles the end of a frame: `grounded` when it drew the camera on
+    /// the terrain's latest ground. A frame drawn before the terrain moved
+    /// the camera neither completes a still image nor leaves the map idle:
+    /// the move's update draws another.
     fn on_render_frame_finished(
         &mut self,
         mode: mln_renderer::RenderMode,
         needs_repaint: bool,
         placement_changed: bool,
         still_image_request_id: u64,
+        grounded: bool,
         stats: Arc<RenderingStats>,
     ) {
         let fully_loaded = mode == mln_renderer::RenderMode::Full;
@@ -540,10 +576,11 @@ impl Map {
             let animating = self.transform.in_transition();
             if needs_repaint || (animating && self.transform.frame_time().is_none()) {
                 self.on_update();
-            } else if !animating && self.renderer_fully_loaded && self.repaint_at.is_none() {
+            } else if !animating && self.renderer_fully_loaded && grounded && self.repaint_at.is_none() {
                 self.emit(MapEvent::Idle);
             }
         } else if self.renderer_fully_loaded
+            && grounded
             && still_image_request_id == self.still_image_request_id
             && self.still_image == StillImage::Pending
         {
@@ -587,6 +624,7 @@ impl Map {
         self.transform.update_transitions(time_point);
         let projection = self.projection_at(self.transform.view().zoom());
         self.transform.set_projection_definition(&projection);
+        self.follow_terrain();
 
         let params = UpdateParameters {
             style_loaded: self.style_loaded(),
@@ -608,6 +646,7 @@ impl Map {
             cross_source_collisions: self.cross_source_collisions,
             fast_pfor_enabled: self.fast_pfor_enabled,
             terrain_skirt_length: self.terrain_skirt_length,
+            ground_generation: self.ground_generation,
             tile_lod_min_radius: self.tile.lod_min_radius,
             tile_lod_scale: self.tile.lod_scale,
             tile_lod_pitch_threshold: mln_math::deg2rad(self.tile.lod_pitch_threshold),
@@ -675,6 +714,7 @@ impl Map {
         }
         self.still_image = StillImage::Pending;
         self.still_image_request_id += 1;
+        self.ground_moves = 0;
         self.on_update();
         Ok(())
     }
@@ -1395,6 +1435,54 @@ impl Map {
     #[must_use]
     pub fn center_clamped_to_ground(&self) -> bool {
         self.center_clamped_to_ground
+    }
+
+    /// Moves the camera onto the terrain's ground as the renderer last drew
+    /// it. While terrain draws, the view's near and far planes fit the
+    /// lowest ground of the tile under the center, and a camera at rest
+    /// whose center is clamped to the ground stands on it, unless the
+    /// ground there is still loading. A camera that a gesture or an
+    /// animation moves keeps its altitude. Once terrain stops drawing, the
+    /// planes fit the flat map again, and a clamped center goes back to sea
+    /// level.
+    ///
+    /// The moves report no camera change, and each counts in
+    /// `ground_generation`; a still image stops following the terrain after
+    /// [`MAX_GROUND_MOVES_PER_STILL`] of them. Returns whether the view
+    /// changed.
+    fn follow_terrain(&mut self) -> bool {
+        let still = self.mode != MapMode::Continuous && self.still_image == StillImage::Pending;
+        if still && self.ground_moves >= MAX_GROUND_MOVES_PER_STILL {
+            return false;
+        }
+        let clamped = self.center_clamped_to_ground;
+        let moved = match &self.elevation {
+            Some(elevation) => {
+                let center = self.transform.view().center(WrapMode::Wrapped);
+                let min = elevation.min_at(center).unwrap_or(0.0);
+                let at_rest = !self.transform.is_camera_moving();
+                let altitude = if clamped && at_rest { elevation.at(center) } else { None };
+                self.transform.set_ground(altitude, Some(min))
+            }
+            // Terrain drew until now: the floor goes, once.
+            None if self.transform.view().terrain_min_elevation().is_some() => {
+                self.transform.set_ground(clamped.then_some(0.0), None)
+            }
+            None => false,
+        };
+        if moved {
+            self.ground_generation += 1;
+            if still {
+                self.ground_moves += 1;
+                if self.ground_moves == MAX_GROUND_MOVES_PER_STILL {
+                    Log::warning(
+                        Event::Render,
+                        "The camera didn't settle on the terrain: the still image shows it where it last moved",
+                    );
+                }
+            }
+        }
+        moved
     }
 
     // MARK: - Debug

@@ -1540,6 +1540,7 @@ fn a_source_covers_the_view_as_the_terrain_does_while_terrain_draws() {
         source_id: "dem".to_owned(),
         tile_size: 512,
         tiles: Vec::new(),
+        center: None,
         dem_tiles: Vec::new(),
         ranges: crate::terrain::ElevationRanges::default(),
     };

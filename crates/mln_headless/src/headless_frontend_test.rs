@@ -155,3 +155,49 @@ fn second_background_layer_uses_the_drawable_path() {
     assert!((i32::from(p[2]) - 128).abs() <= 1, "{p:?}");
     assert_eq!(p[3], 255, "{p:?}");
 }
+
+/// A still image of a terrain renders twice when the ground of its first
+/// frame moves the camera: the first frame shows the center at sea level,
+/// and the second, which completes the image, shows it standing on the
+/// ground.
+#[test]
+fn a_still_image_renders_again_once_the_camera_stands_on_the_terrain() {
+    use mln_storage::stub_file_source::{ResponseType, StubFileSource};
+    use mln_storage::{Kind, Resource, Response};
+
+    // One DEM tile of 1000 m everywhere, in the Mapbox encoding:
+    // (1 · 65536 + 173 · 256 + 176) · 0.1 − 10000.
+    let mut dem = PremultipliedImage::new(Size::new(4, 4));
+    for pixel in dem.data.as_chunks_mut::<4>().0 {
+        pixel.copy_from_slice(&[1, 173, 176, 255]);
+    }
+    let dem = Arc::new(mln_image::encode_png(&dem));
+    let file_source = Arc::new(StubFileSource::new(ResponseType::Synchronous));
+    file_source.set_response(Kind::Tile, move |_: &Resource| {
+        let mut response = Response::new();
+        response.data = Some(Arc::clone(&dem));
+        Some(response)
+    });
+    // Seen from zoom 1, one terrain tile covers the world, and reads the one
+    // DEM tile, at zoom 0.
+    let style = r#"{
+        "version": 8,
+        "zoom": 1,
+        "terrain": {"source": "dem"},
+        "sources": {"dem": {"type": "raster-dem", "tiles": ["dem/{z}/{x}/{y}.png"], "maxzoom": 0}},
+        "layers": [{"id": "background", "type": "background", "paint": {"background-color": "red"}}]
+    }"#;
+
+    let size = Size::new(64, 64);
+    let run_loop = Queue::new();
+    let pool = Pool::new(4);
+    let mut frontend = HeadlessFrontend::new(size, 1.0, &run_loop, &pool).expect("a headless frontend");
+    let options = MapOptions { map_mode: MapMode::Static, size, ..Default::default() };
+    let mut map = Map::with_file_source(file_source, options, &pool).unwrap();
+    frontend.attach(&mut map);
+    map.load_style_json(style);
+    let result = frontend.render(&mut map).expect("the still image");
+    assert_eq!(2, result.stats.num_frames);
+    let altitude = map.transform_state().view().center_altitude();
+    assert!((altitude - 1000.0).abs() < 1e-6, "{altitude}");
+}
