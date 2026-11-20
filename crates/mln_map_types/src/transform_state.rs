@@ -707,6 +707,36 @@ impl TransformState {
         self.update(|p| p.center_altitude = alt_m);
     }
 
+    /// Raises the eye by `lift` meters straight up, still looking at the
+    /// center at its altitude: keeps the center, its altitude, the bearing
+    /// and the roll, and solves the pitch and the zoom that put the eye there
+    /// (GL JS's `calculateCameraOptionsFromTo`, from the raised eye to the
+    /// center), within the limits. Heights convert to pixels at the center's
+    /// latitude. Returns whether the view changed; on the globe, or while the
+    /// view shows nothing, it doesn't.
+    pub fn raise_eye(&mut self, lift: f64) -> bool {
+        let view = &self.view;
+        if !lift.is_finite() || view.is_globe() || !view.is_valid() {
+            return false;
+        }
+        // The eye's offset from the center, in pixels at the zoom: across
+        // the ground, and up.
+        let distance = view.camera_to_center_distance();
+        let across = view.pitch().sin() * distance;
+        let up = view.pitch().cos() * distance + lift / view.meters_per_pixel();
+        let raised = across.hypot(up);
+        if raised == 0.0 {
+            return false;
+        }
+        let pitch = mln_math::clamp_f64(across.atan2(up), self.limits.min_pitch, self.limits.max_pitch);
+        let zoom = view.zoom() + (distance / raised).log2();
+        let center = view.center(WrapMode::Unwrapped);
+        let before = *view.params();
+        self.set_pitch(pitch);
+        self.set_lat_lng_zoom(&center, zoom);
+        *self.view.params() != before
+    }
+
     /// Sets the lowest ground near the center while terrain draws, in
     /// meters, exaggerated, or `None` without terrain. With it, the view's
     /// near and far planes fit raised and sunken ground; without it, they

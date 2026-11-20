@@ -319,7 +319,7 @@ impl View {
     /// Meters per pixel at the zoom, as at the center (GL JS's
     /// `pixelsPerMeter`, inverted): the scale of every height the matrices
     /// place, so that a point at the center's altitude draws at the center.
-    fn meters_per_pixel(&self) -> f64 {
+    pub(crate) fn meters_per_pixel(&self) -> f64 {
         Projection::altitude_meters_per_pixel(self.center(WrapMode::Unwrapped).latitude(), self.zoom())
     }
 
@@ -481,6 +481,35 @@ impl View {
         let mut camera = CameraPose::from_angles(DVec3::ZERO, self.params.roll, self.params.pitch, self.params.angle);
         camera.position = (center - camera.forward() * self.camera_to_center_distance()) / world_size;
         camera
+    }
+
+    /// Where the camera's eye is: its Web Mercator point at zoom 0 (from 0
+    /// to 1 across, y south) and its altitude in meters, of the meters the
+    /// view places heights in ([`center_altitude`](Self::center_altitude)).
+    #[must_use]
+    pub fn eye_position(&self) -> DVec3 {
+        let position = self.camera_pose().position;
+        let world_size = Projection::world_size(self.params.scale);
+        DVec3::new(position.x, position.y, position.z * world_size * self.meters_per_pixel())
+    }
+
+    /// A 3 by 3 grid over the projection matrix's near plane, its corners,
+    /// the middles of its edges and its center, in the units of
+    /// [`eye_position`](Self::eye_position): the renderer drops what is
+    /// nearer, so ground above a point shows as a hole into it. All are the
+    /// eye while the view shows nothing.
+    #[must_use]
+    pub fn near_plane_points(&self) -> [DVec3; 9] {
+        let eye = self.eye_position();
+        if self.matrices.projection == DMat4::ZERO {
+            return [eye; 9];
+        }
+        let world_size = Projection::world_size(self.params.scale);
+        std::array::from_fn(|index| {
+            let clip = DVec3::new((index % 3) as f64 - 1.0, (index / 3) as f64 - 1.0, -1.0);
+            let point = self.matrices.inv_projection.project_point3(clip);
+            DVec3::new(point.x / world_size, point.y / world_size, point.z)
+        })
     }
 
     /// The camera's position and orientation.

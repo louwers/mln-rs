@@ -415,6 +415,63 @@ fn the_center_altitude_holds_in_meters_through_zoom_and_center_changes() {
     draws_at_center(&state);
 }
 
+/// The eye stands back from the center along the line of sight, and the
+/// near plane's middle point is on that line, the near plane's distance
+/// further. Raising the eye keeps the ground under it and the center it
+/// looks at, with its altitude, the bearing and the roll.
+#[test]
+fn raising_the_eye_keeps_its_place_and_the_center() {
+    use mln_util::geo::WrapMode;
+
+    let mut state = pitched(70.0);
+    state.set_limits(CameraLimits { max_pitch: mln_util::constants::PITCH_MAX, ..*state.limits() }).unwrap();
+    state.set_angle(0.5);
+    state.set_roll(0.1);
+    state.set_center_altitude(1000.0);
+    state.set_terrain_min_elevation(Some(800.0));
+    let view = state.view().clone();
+    let meters_per_pixel = view.meters_per_pixel();
+    let world_size = Projection::world_size(view.scale());
+    let eye = view.eye_position();
+    let rise = mln_math::deg2rad(70.0).cos() * view.camera_to_center_distance() * meters_per_pixel;
+    assert!((eye.z - (1000.0 + rise)).abs() < 1e-6, "{eye}");
+    let middle = view.near_plane_points()[4];
+    let to_middle = DVec3::new(
+        (middle.x - eye.x) * world_size,
+        (middle.y - eye.y) * world_size,
+        (middle.z - eye.z) / meters_per_pixel,
+    );
+    assert!((to_middle.length() - view.near_z()).abs() < 1e-6, "{to_middle}");
+    assert!((to_middle.z / to_middle.length() + mln_math::deg2rad(70.0).cos()).abs() < 1e-9, "{to_middle}");
+
+    assert!(state.raise_eye(500.0));
+    let raised = state.view();
+    let center = |view: &crate::View| view.center(WrapMode::Unwrapped);
+    assert!((center(raised).latitude() - center(&view).latitude()).abs() < 1e-9);
+    assert!((center(raised).longitude() - center(&view).longitude()).abs() < 1e-9);
+    assert_eq!((1000.0, 0.5, 0.1), (raised.center_altitude(), raised.angle(), raised.roll()));
+    assert!(raised.pitch() < view.pitch() && raised.zoom() < view.zoom());
+    let raised_eye = raised.eye_position();
+    assert!((raised_eye.truncate() - eye.truncate()).length() * world_size < 1e-6, "{raised_eye} {eye}");
+    assert!((raised_eye.z - (eye.z + 500.0)).abs() < 1e-6, "{raised_eye} {eye}");
+}
+
+/// An eye below sea level raised to it looks level at a center at sea
+/// level, from as far as it stood across the ground: GL JS's pitch 90 and
+/// zoom for the camera of `high-pitch/terrain-pitch95`.
+#[test]
+fn an_eye_raised_level_with_the_center_looks_level() {
+    let mut state = pitched(95.0);
+    state.set_limits(CameraLimits { max_pitch: mln_util::constants::PITCH_MAX, ..*state.limits() }).unwrap();
+    state.set_pitch(mln_math::deg2rad(95.0));
+    let eye = state.view().eye_position();
+    assert!(eye.z < 0.0, "{eye}");
+    assert!(state.raise_eye(-eye.z));
+    assert!((state.view().pitch() - mln_math::deg2rad(90.0)).abs() < 1e-12);
+    let zoom = 5.0 + (1.0 / mln_math::deg2rad(95.0).sin()).log2();
+    assert!((state.view().zoom() - zoom).abs() < 1e-12, "{}", state.view().zoom());
+}
+
 /// With terrain, the near and far planes are GL JS's (`calculateNearFarZ`
 /// in `mercator_camera_math.ts`): the camera below sea level is GL JS's own
 /// test, with its expected far plane, and the others pin the same function
