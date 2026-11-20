@@ -12,7 +12,7 @@ use mln_util::intersection_tests::polygon_intersects_polygon;
 use crate::buckets::symbol_bucket::{PlacedSymbol, PlacedSymbolPools};
 use crate::geometry::feature_index::IndexedSubfeature;
 use crate::layout::symbol_projection::{
-    LabelPlaneProjector, LineProjectionCache, PlacedGlyph, TileDistance, place_first_and_last_glyph, tile_skew_vectors,
+    LabelPlaneProjector, LineLabel, LinePlacer, PlacedGlyph, TileDistance, tile_skew_vectors,
 };
 use crate::text::collision_feature::{CollisionBox, CollisionFeature};
 use crate::text::collision_grid::{Aabb, Grid, Shape};
@@ -404,29 +404,9 @@ impl CollisionIndex {
         } else {
             run.font_size
         };
-        let font_scale = font_size / 24.0;
-        let line_offset_x = symbol.line_offset[0] * font_scale;
-        let line_offset_y = symbol.line_offset[1] * font_scale;
-
-        let projected_label_plane_anchor = part.label_plane.project(tile_unit_anchor_point).point;
-        let label_plane_anchor_point =
-            Vec2::new(projected_label_plane_anchor.x as f32, projected_label_plane_anchor.y as f32);
-
-        let mut projections = LineProjectionCache::default();
-        projections.reset(symbol.line.len());
-        let first_and_last_glyph = place_first_and_last_glyph(
-            font_scale,
-            line_offset_x,
-            line_offset_y,
-            /*flip*/ false,
-            label_plane_anchor_point,
-            tile_unit_anchor_point,
-            symbol,
-            run.pools,
-            part.label_plane,
-            &mut projections,
-            /*return tile distance*/ true,
-        );
+        let first_and_last_glyph = LinePlacer::new(part.label_plane)
+            .begin(LineLabel::new(symbol, run.pools), font_size)
+            .first_and_last_glyph(false);
 
         let tile_to_viewport = anchor.perspective_ratio * part.pixel_ratio;
         // Translates line geometry to tile units, so it takes the scale but
@@ -437,7 +417,7 @@ impl CollisionIndex {
         let Some((first, last)) = first_and_last_glyph.map(|(first, last)| {
             let reach = |glyph: &PlacedGlyph| {
                 self.approximate_tile_distance(
-                    glyph.tile_distance.unwrap_or(TileDistance::new(0.0, 0.0)),
+                    glyph.tile_distance,
                     glyph.angle,
                     pixels_to_tile_units,
                     anchor.signed_distance_from_camera,

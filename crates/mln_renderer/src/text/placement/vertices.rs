@@ -16,7 +16,7 @@ use super::{JointOpacityState, Placement, VariableOffset};
 use crate::buckets::symbol_bucket::{Buffer, CollisionBuffer, SymbolBucket, SymbolBucketState};
 use crate::layout::symbol_instance::{Justification, SymbolInstance, TextPart};
 use crate::layout::symbol_projection::{
-    LabelPlaneProjector, add_dynamic_attributes, evaluate_size_for_feature, hide_glyphs, reproject_line_labels,
+    LabelPlaneProjector, LineLabelAlignment, add_dynamic_attributes, evaluate_size_for_feature, hide_glyphs, reproject_line_labels,
     tile_skew_vectors,
 };
 use crate::render_layer::BucketPlacementData;
@@ -225,8 +225,11 @@ impl Placement {
         if along_line {
             let mut laid_out = false;
             if *layout.icon_rotation_alignment.uniform() == AlignmentType::Map {
-                let pitch_with_map = *layout.icon_pitch_alignment.uniform() == AlignmentType::Map;
-                let keep_upright = *layout.icon_keep_upright.uniform();
+                let alignment = LineLabelAlignment {
+                    pitch_with_map: *layout.icon_pitch_alignment.uniform() == AlignmentType::Map,
+                    rotate_with_map: true,
+                    keep_upright: *layout.icon_keep_upright.uniform(),
+                };
                 for buffer in [&mut bucket.state.sdf_icon, &mut bucket.state.icon] {
                     if buffer.segments.is_empty() {
                         continue;
@@ -237,13 +240,9 @@ impl Placement {
                         runs,
                         pools,
                         &tile_projector,
-                        pitch_with_map,
-                        true,
-                        keep_upright,
-                        tile,
                         &bucket.icon_size_binder,
-                        view,
                         icon_translation,
+                        alignment,
                     );
                     laid_out = true;
                 }
@@ -256,13 +255,13 @@ impl Placement {
                     runs,
                     pools,
                     &tile_projector,
-                    *layout.text_pitch_alignment.uniform() == AlignmentType::Map,
-                    rotation_alignment == TextRotationAlignmentType::Map,
-                    *layout.text_keep_upright.uniform(),
-                    tile,
                     &bucket.text_size_binder,
-                    view,
                     text_translation,
+                    LineLabelAlignment {
+                        pitch_with_map: *layout.text_pitch_alignment.uniform() == AlignmentType::Map,
+                        rotate_with_map: rotation_alignment == TextRotationAlignmentType::Map,
+                        keep_upright: *layout.text_keep_upright.uniform(),
+                    },
                 );
                 laid_out = true;
             }
@@ -323,9 +322,8 @@ impl Placement {
             } else {
                 label_plane.project(tile_anchor)
             };
-            let projected_anchor = Vec2::new(projected.point.x as f32, projected.point.y as f32);
-            let perspective_ratio =
-                0.5 + 0.5 * (view.camera_to_center_distance() as f32 / projected.signed_distance_from_camera as f32);
+            let projected_anchor = projected.point;
+            let perspective_ratio = 0.5 + 0.5 * (view.camera_to_center_distance() as f32 / projected.camera_distance);
             let mut size = evaluate_size_for_feature(&text_size, run) * perspective_ratio / ONE_EM;
             if pitch_with_map {
                 // From pixels to tile units.
@@ -338,13 +336,12 @@ impl Placement {
                     f64::from(tile_anchor.x + translation.x),
                     f64::from(tile_anchor.y + translation.y),
                 )) as f32;
-                let shifted = label_plane.project(tile_anchor + (east * shift.x + south * shift.y) * correction).point;
-                Vec2::new(shifted.x as f32, shifted.y as f32)
+                label_plane.project(tile_anchor + (east * shift.x + south * shift.y) * correction).point
             } else if rotate_with_map {
                 // Viewport labels stay east-west aligned, so the shift
                 // follows the projected east.
                 let east = label_plane.project(tile_anchor + Vec2::X).point;
-                let to_east = Vec2::new(east.x as f32, east.y as f32) - projected_anchor;
+                let to_east = east - projected_anchor;
                 let angle = (to_east.y / to_east.x).atan() + if to_east.x < 0.0 { std::f32::consts::PI } else { 0.0 };
                 projected_anchor + Vec2::from_angle(angle).rotate(shift)
             } else {
