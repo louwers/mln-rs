@@ -292,11 +292,13 @@ impl WebGpu {
         then(&mut encoder);
         #[cfg(feature = "bench")]
         let measured = self.queries.as_mut().and_then(|queries| queries.resolve(self.device.device(), &mut encoder));
-        // wgpu reports what it rejects in the passes when they finish. The
+        // wgpu reports what it rejects in the passes when they finish, and
+        // what it rejects of their resources when they are submitted. The
         // writes stay for the next flush.
         let command_buffer = self.validated("flush", |_| encoder.finish())?;
         let writes = self.writes.encode(self.device.device(), self.device.queue());
-        let submission = self.device.queue().submit(writes.into_iter().chain([command_buffer]));
+        let queue = self.device.queue();
+        let submission = self.validated("submit", |_| queue.submit(writes.into_iter().chain([command_buffer])))?;
         #[cfg(feature = "bench")]
         if let Some(measured) = measured {
             crate::bench::Queries::read_back(measured);

@@ -157,3 +157,29 @@ fn imported_textures_through_gpu() {
     })
     .expect("the frames");
 }
+
+/// A submission that WebGPU rejects, here of a pass into a texture
+/// destroyed after the pass recorded, fails the flush that submits it.
+#[test]
+fn a_rejected_submission_fails_the_flush() {
+    use mln_gfx::gpu::{ColorAttachment, LoadOp, PassDesc};
+
+    let device = Device::new(None).expect("WebGPU device");
+    let mut gpu = WebGpu::new(&device);
+    let usage = TextureUsage { render_target: true, ..TextureUsage::default() };
+    let desc = TextureDesc {
+        label: "target",
+        size: Size::new(4, 4),
+        format: TextureFormat::Rgba8Unorm,
+        usage,
+        mipmapped: false,
+    };
+    let texture = gpu.create_texture(&desc).expect("a texture");
+    let color = Some(ColorAttachment { texture, load: LoadOp::Clear(mln_util::Color::new(0.0, 0.0, 0.0, 0.0)) });
+    gpu.begin_pass(&PassDesc { label: "pass", color, depth_stencil: None }).expect("the pass");
+    gpu.end_pass().expect("the pass's end");
+    gpu.native_texture(texture).expect("a texture of the backend's").destroy();
+    // As a frame's, which doesn't wait for the GPU.
+    assert!(gpu.flush(false).is_err(), "a submission of a destroyed texture's pass");
+    gpu.flush(true).expect("the next flush");
+}
