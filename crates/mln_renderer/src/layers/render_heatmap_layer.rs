@@ -59,7 +59,7 @@ use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::render_target::RenderTarget;
 use crate::render_tile::FrameTile;
-use crate::terrain::write_projection;
+use crate::terrain::{TileFeatures, write_projection};
 use crate::tile_matrix::{bind_no_projection, globe_extrude_scale, projection_data, to_projection_ubo};
 
 /// The pass the layer's draws draw in, onto the frame and into its render
@@ -377,7 +377,7 @@ impl RenderHeatmapLayer {
                     binders.bind(evaluated, paint(context).as_ref(), attrs, &mut Uniforms::default());
                 });
             }
-            let reads = ground.map(|ground| ground.reads(&tile_id));
+            let reads = ground.map(|ground| ground.reads(&tile_id, TileFeatures::Anchored));
             draws.resize(reads.as_ref().map_or(1, SmallVec::len), || {
                 if bucket.vertices.is_empty() {
                     return None;

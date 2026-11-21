@@ -28,7 +28,7 @@ use parking_lot::Mutex;
 use crate::Registry;
 use crate::render_source::RenderSource;
 use crate::renderer_event::RendererEvent;
-use crate::terrain::{RenderTerrain, TerrainCover, TerrainElevation};
+use crate::terrain::{RenderTerrain, TerrainCover, TerrainElevation, TileFeatures};
 use crate::tile::contents::Contents;
 use crate::tile::store::{StoreEvent, TileStore};
 use crate::tile::tile::Tile;
@@ -1282,7 +1282,7 @@ fn world_at(tile: &OverscaledTileID, uv: DVec2) -> DVec2 {
 /// `n` by `n` grid where it drew, within a millimeter; returns at how many
 /// it drew.
 fn assert_stands_on(ground: &TerrainElevation, tile: &OverscaledTileID, surface: &TerrainElevation, n: u32) -> usize {
-    let under = ground.ground(tile);
+    let under = ground.ground(tile, TileFeatures::All);
     let mut drawn_at = 0;
     for uv in grid(n) {
         let point = (uv * f64::from(mln_util::constants::EXTENT)).as_vec2();
@@ -1316,7 +1316,7 @@ fn the_ground_of_a_terrain_tile_is_the_surface_it_draws() {
     let cover = load.terrain.cover().unwrap();
     for tile in &cover.tiles {
         let (dem, coords) = tile.dem.expect("its DEM");
-        let under = ground.ground(&tile.id);
+        let under = ground.ground(&tile.id, TileFeatures::All);
         assert_eq!((Some(dem), [coords.scale, coords.offset[0], coords.offset[1], 16.0]), one_read(&under));
         assert_eq!(64, assert_stands_on(&ground, &tile.id, &surface, 8));
     }
@@ -1342,7 +1342,7 @@ fn a_source_tile_inside_a_terrain_tile_reads_its_dem() {
                 OverscaledTileID::new(z + 1, tile.id.wrap, CanonicalTileID::new(z + 1, 2 * x + dx, 2 * y + dy));
             let coords = sub_rect(&source, source.canonical.z - dem.canonical.z);
             let expected = (Some(dem), [coords.scale, coords.offset[0], coords.offset[1], 16.0]);
-            assert_eq!(expected, one_read(&ground.ground(&source)), "{source}");
+            assert_eq!(expected, one_read(&ground.ground(&source, TileFeatures::All)), "{source}");
             assert_eq!(64, assert_stands_on(&ground, &source, &surface, 8));
         }
     }
@@ -1381,13 +1381,13 @@ fn a_source_tile_coarser_than_the_terrain_tiles_reads_the_dem_tiles_under_it() {
     let ground = Arc::clone(load.terrain.ground().expect("the ground"));
     let mut drawn_at = 0;
     for source in &sources {
-        let under = ground.ground(source);
+        let under = ground.ground(source, TileFeatures::All);
         let dems: BTreeSet<u8> = under.reads().iter().filter_map(|read| Some(read.dem()?.canonical.z)).collect();
         assert!(dems.iter().all(|&z| z == 15 || z == 5), "{source}: DEM tiles of {dems:?}");
         drawn_at += assert_stands_on(&ground, source, &surface, 256);
     }
     assert!(drawn_at > 100, "{drawn_at} points drawn");
-    let under = ground.ground(&cover_source(&sources, waiting));
+    let under = ground.ground(&cover_source(&sources, waiting), TileFeatures::All);
     assert!(under.reads().iter().any(|read| read.dem().is_some_and(|dem| dem.canonical.z == 5)));
 
     load.answer(|tile| Some(terrarium_of(tile)));
@@ -1400,7 +1400,7 @@ fn a_source_tile_coarser_than_the_terrain_tiles_reads_the_dem_tiles_under_it() {
     let sources: BTreeSet<OverscaledTileID> = cover.tiles.iter().map(|tile| tile.id.scaled_to(14)).collect();
     let (mut parts, mut drawn_at) = (0, 0);
     for source in &sources {
-        let under = ground.ground(source);
+        let under = ground.ground(source, TileFeatures::All);
         // Parts off the cover read the culling DEM tile of zoom 5.
         let dems: BTreeSet<u8> = under.reads().iter().filter_map(|read| Some(read.dem()?.canonical.z)).collect();
         assert!(dems.contains(&15) && dems.iter().all(|&z| z == 15 || z == 5), "{source}: {dems:?}");
@@ -1423,7 +1423,7 @@ fn the_ground_without_a_dem_is_sea_level() {
     load.frame();
     let ground = Arc::clone(load.terrain.ground().expect("the ground"));
     for tile in &load.terrain.cover().unwrap().tiles {
-        let under = ground.ground(&tile.id);
+        let under = ground.ground(&tile.id, TileFeatures::All);
         assert_eq!((None, [0.0; 4]), one_read(&under));
         let point = glam::Vec2::new(4096.0, 4096.0);
         assert_eq!(0.0, under.height(point, point));

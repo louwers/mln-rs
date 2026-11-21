@@ -286,7 +286,10 @@ fn ridge(tile: &TileData) -> Vec<u8> {
 /// neighbours.
 #[test]
 fn a_circle_of_a_source_tiled_coarser_than_the_dem_stands_on_the_surface() {
-    let center = LatLng::new(0.0, 0.0).unwrap();
+    // Just inside the north-east of the four source tiles that meet at 0, 0:
+    // the south ones, under the camera, are culled by the range of the DEM
+    // tile of zoom 14, 50 m, below the surface at 300 m.
+    let center = LatLng::new(0.0001, 0.0001).unwrap();
     for zooms in [&[17.0][..], &[14.0, 17.0]] {
         let Some((image, map, _)) = render(&Scene::new(center, 14, 15), zooms, ridge) else {
             return;
@@ -313,6 +316,25 @@ fn a_circle_by_an_edge_between_dem_tiles_draws_once() {
         _ => dem_png(SEA_LEVEL),
     };
     let Some((image, map, _)) = render(&scene, &[17.0], dem) else {
+        return;
+    };
+    assert_circle_at(&image, &map, &center, 50.0);
+    let [r, g, b, _] = pixel_at(&image, &map, &center, 50.0);
+    // Half of red over white is (255, 128, 128); twice over, (255, 64, 64).
+    assert!(r > 240 && (100..160).contains(&g) && (100..160).contains(&b), "drawn once: {:?}", [r, g, b]);
+}
+
+/// A circle half opaque, 3 DEM pixels east of the edge between two source
+/// tiles of zoom 14, both drawn, over level DEM tiles of zoom 15, in a
+/// still: the west tile's bucket holds it too, in its buffer, but it draws
+/// once, as half opaque as it is.
+#[test]
+fn a_circle_by_an_edge_between_source_tiles_draws_once() {
+    // The source tiles of zoom 14 meet at x 8192, where the DEM tiles of
+    // zoom 15 meet at x 16384.
+    let center = location_at(15, 16384.0 + 3.0 / 256.0, 16384.5);
+    let scene = Scene { translucent: true, ..Scene::new(center, 14, 15) };
+    let Some((image, map, _)) = render(&scene, &[17.0], |_| dem_png(METERS_50)) else {
         return;
     };
     assert_circle_at(&image, &map, &center, 50.0);

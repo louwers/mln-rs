@@ -101,7 +101,7 @@ use crate::render_light::EvaluatedLight;
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::render_tile::FrameTile;
-use crate::terrain::write_projection;
+use crate::terrain::{TileFeatures, write_projection};
 use crate::tile_matrix::{projection_data, to_projection_ubo};
 
 /// The pass the layer's draws draw in.
@@ -475,7 +475,7 @@ impl TypedLayer for RenderFillExtrusionLayer {
 
             let changes = entry.take_changes();
             let context = &mut *paint_parameters.context;
-            let reads = ground.map(|ground| ground.reads(&tile_id));
+            let reads = ground.map(|ground| ground.reads(&tile_id, TileFeatures::All));
             let parts = reads.as_ref().map_or(1, SmallVec::len);
             // Draws of as many parts as the tile reads its ground in, made
             // again where that changed.

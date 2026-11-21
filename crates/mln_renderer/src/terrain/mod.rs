@@ -95,8 +95,15 @@
 //!   untranslated anchor (an extrusion's centroid) is off its part, so each
 //!   feature draws once, on the DEM tile the surface reads under its anchor:
 //!   the terrain tile's own wherever that has loaded, which a still waits for,
-//!   and while it loads, the ancestor the surface reads in its place. Off the
-//!   cover, a part reads the deepest DEM tile that the cover reads, or loads to
+//!   and while it loads, the ancestor the surface reads in its place. A
+//!   point layer's T (circles and heatmap kernels) draws only the features
+//!   whose anchor is in T, from 0 to under the extent on both axes: a copy in
+//!   T's buffer, which a still's circles keep, is left to the tile that holds
+//!   it, and is absent where that tile doesn't draw, as on a continuous flat
+//!   map ([`TileFeatures::Anchored`]). A fill extrusion's T draws every piece
+//!   of a polygon that its bucket cut at T's edges, its parts on those edges
+//!   reaching past them, so that a piece whose centroid lies outside T draws
+//!   once too ([`TileFeatures::All`]). Off the cover, a part reads the deepest DEM tile that the cover reads, or loads to
 //!   cull its tiles, that holds it, or stands at sea level while none has
 //!   loaded. The CPU reads a feature's height ([`TileGround::height`]) from the
 //!   DEM tile and coordinates its draw reads, by the same height rule. A draw's
@@ -272,7 +279,7 @@ pub(crate) use drapes::Drapes;
 pub(crate) use elevation::TerrainElevation;
 #[cfg(any(doc, test))]
 pub(crate) use ground::TileGround;
-pub(crate) use ground::{GroundBindings, write_projection};
+pub(crate) use ground::{GroundBindings, TileFeatures, write_projection};
 use mln_gfx::gpu::Gpu;
 #[cfg(doc)]
 use mln_gfx::projection_variant::ProjectionVariant;

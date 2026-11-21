@@ -22,12 +22,43 @@ use crate::layer_drawing::UniformWriter;
 /// least x0 and y0 and under x1 and y1.
 type Rect = [f32; 4];
 
-/// How far past a tile's edges a part of it on an edge reaches, in tile
-/// units: so far that the part holds every point past that edge.
+/// How far past a tile's edges a part of it on an edge reaches where it
+/// draws every feature of the tile ([`TileFeatures::All`]), in tile units:
+/// so far that the part holds every point past that edge.
 const BEYOND: f32 = 1.0e9;
 
-/// The whole of a tile, and every point past its edges.
-const WHOLE: Rect = [-BEYOND, -BEYOND, BEYOND, BEYOND];
+/// Which of the features of a tile of a standing layer its draws over
+/// terrain draw, by where the features' anchors are.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TileFeatures {
+    /// Those whose anchor is in the tile, from 0 to under [`EXTENT`] on both
+    /// axes: points, such as circles and heatmap kernels, whose copy in a
+    /// neighbour's buffer that neighbour's draws leave to the tile that holds
+    /// it.
+    Anchored,
+    /// All of them: the pieces that the tile's bucket cut features into at
+    /// its edges, such as extrusions', whose anchor, a piece's centroid, may
+    /// lie outside the tile.
+    All,
+}
+
+impl TileFeatures {
+    /// Where a tile's parts on its low and high edges end, in its tile
+    /// units, on either axis.
+    fn edges(self) -> (f32, f32) {
+        match self {
+            TileFeatures::Anchored => (0.0, EXTENT as f32),
+            TileFeatures::All => (-BEYOND, BEYOND),
+        }
+    }
+
+    /// The whole of a tile, with what its parts on its edges reach past
+    /// them.
+    fn whole(self) -> Rect {
+        let (low, high) = self.edges();
+        [low, low, high, high]
+    }
+}
 
 /// Whether `outer` holds `inner`, or is it.
 fn holds(outer: CanonicalTileID, inner: CanonicalTileID) -> bool {
@@ -67,15 +98,17 @@ fn partition<D: Copy>(
     }
 }
 
-/// The part `part` of `tile`: `tile` or a tile inside it, reaching out past
-/// the edges it shares with `tile`.
-fn rect(tile: CanonicalTileID, part: CanonicalTileID) -> Rect {
+/// The part `part` of `tile`, `tile` or a tile inside it, that draws
+/// `features`: reaching out past the edges it shares with `tile` where it
+/// draws all the features.
+fn rect(tile: CanonicalTileID, part: CanonicalTileID, features: TileFeatures) -> Rect {
     let dz = part.z - tile.z;
     let size = EXTENT as f32 / f32::from(dz).exp2();
     let x = (part.x - (tile.x << dz)) as f32 * size;
     let y = (part.y - (tile.y << dz)) as f32 * size;
-    let low = |at: f32| if at == 0.0 { -BEYOND } else { at };
-    let high = |at: f32| if at == EXTENT as f32 { BEYOND } else { at };
+    let (low_edge, high_edge) = features.edges();
+    let low = |at: f32| if at == 0.0 { low_edge } else { at };
+    let high = |at: f32| if at == EXTENT as f32 { high_edge } else { at };
     [low(x), low(y), high(x + size), high(y + size)]
 }
 
@@ -135,7 +168,8 @@ impl<'a> GroundRead<'a> {
 /// ([`TerrainElevation::ground`]). A draw of the tile reads one of them, and
 /// draws the features whose untranslated anchor is on its part.
 pub(crate) struct TileGround<'a> {
-    /// One or more, whose parts hold each point once.
+    /// One or more, whose parts hold each point of the tile once, and each
+    /// point past its edges once or, for [`TileFeatures::Anchored`], never.
     reads: SmallVec<[GroundRead<'a>; 1]>,
     /// How the DEM decodes, and the exaggeration.
     #[cfg_attr(not(test), expect(dead_code, reason = "only the tests read the ground's heights on the CPU"))]
@@ -165,23 +199,24 @@ impl<'a> TileGround<'a> {
 }
 
 impl TerrainElevation {
-    /// The ground under `tile`, a tile of a standing layer's source: the DEM
-    /// tiles the drawn tiles over it read, as these tiles drew. A tile in a
-    /// drawn tile reads that one's DEM tile. A tile that drawn tiles are
-    /// inside reads, on each of its parts, the DEM tile the drawn tiles there
-    /// read, whether their own or, while that loads, an ancestor
-    /// ([`partition`]). A part with no drawn tile, off the cover, reads the
-    /// deepest DEM tile that holds it of those the cover reads or loads to
-    /// cull its tiles, or is flat.
-    pub(crate) fn ground(&self, tile: &OverscaledTileID) -> TileGround<'_> {
+    /// The ground under `tile`, a tile of a standing layer's source whose
+    /// draws draw `features`: the DEM tiles the drawn tiles over it read, as
+    /// these tiles drew. A tile in a drawn tile reads that one's DEM tile. A
+    /// tile that drawn tiles are inside reads, on each of its parts, the DEM
+    /// tile the drawn tiles there read, whether their own or, while that
+    /// loads, an ancestor ([`partition`]). A part with no drawn tile, off the
+    /// cover, reads the deepest DEM tile that holds it of those the cover
+    /// reads or loads to cull its tiles, or is flat.
+    pub(crate) fn ground(&self, tile: &OverscaledTileID, features: TileFeatures) -> TileGround<'_> {
         let canonical = tile.canonical;
         let reads = match self.drawn_over(tile) {
-            DrawnOver::Holding(dem) => SmallVec::from_buf([GroundRead::new(canonical, dem, WHOLE)]),
+            DrawnOver::Holding(dem) => SmallVec::from_buf([GroundRead::new(canonical, dem, features.whole())]),
             DrawnOver::Inside(under) => {
                 let mut parts = SmallVec::new();
                 let dem_of = |dem: &DrawnDem| dem.id.canonical;
                 partition(canonical, &under, &dem_of, &|part| self.dem_holding(part), &mut parts);
-                parts.into_iter().map(|(part, dem)| GroundRead::new(canonical, dem, rect(canonical, part))).collect()
+                let read = |(part, dem)| GroundRead::new(canonical, dem, rect(canonical, part, features));
+                parts.into_iter().map(read).collect()
             }
         };
         TileGround { reads, decode: (self.unpack(), self.exaggeration()) }
@@ -222,11 +257,11 @@ impl GroundBindings {
         GroundBindings { elevation, props, textures, flat }
     }
 
-    /// What the draws of `tile` bind of its ground, a draw each: one for
-    /// each DEM tile the surface reads under it
+    /// What the draws of `tile`, which draw `features`, bind of its ground,
+    /// a draw each: one for each DEM tile the surface reads under it
     /// ([`TerrainElevation::ground`]), most often one.
-    pub(crate) fn reads(&self, tile: &OverscaledTileID) -> SmallVec<[GroundBinding; 1]> {
-        let ground = self.elevation.ground(tile);
+    pub(crate) fn reads(&self, tile: &OverscaledTileID, features: TileFeatures) -> SmallVec<[GroundBinding; 1]> {
+        let ground = self.elevation.ground(tile, features);
         let bind = |read: &GroundRead<'_>| {
             let texture = read.dem().and_then(|dem| self.textures.get(&dem.canonical));
             let (texture, dem_coords) = match texture {
@@ -350,14 +385,26 @@ mod tests {
         assert_eq!(vec![(q0, None), (q1, Some(q1)), (q2, Some(q2)), (q3, Some(held))], got);
     }
 
-    /// The parts of a tile reach out past its own edges, and meet each
-    /// other without a gap.
+    /// The parts of a tile that draw all its features reach out past its
+    /// own edges, and meet each other without a gap.
     #[test]
-    fn parts_reach_past_the_tiles_edges() {
+    fn parts_of_all_features_reach_past_the_tiles_edges() {
         let [q0, _, _, q3] = tile(3, 1, 2).children();
-        assert_eq!([-BEYOND, -BEYOND, 4096.0, 4096.0], rect(tile(3, 1, 2), q0));
-        assert_eq!([4096.0, 4096.0, BEYOND, BEYOND], rect(tile(3, 1, 2), q3));
-        assert_eq!(WHOLE, rect(tile(3, 1, 2), tile(3, 1, 2)));
+        let all = TileFeatures::All;
+        assert_eq!([-BEYOND, -BEYOND, 4096.0, 4096.0], rect(tile(3, 1, 2), q0, all));
+        assert_eq!([4096.0, 4096.0, BEYOND, BEYOND], rect(tile(3, 1, 2), q3, all));
+        assert_eq!([-BEYOND, -BEYOND, BEYOND, BEYOND], rect(tile(3, 1, 2), tile(3, 1, 2), all));
+    }
+
+    /// The parts of a tile that draw the features anchored in it stop at its
+    /// edges, so that they hold no point of a neighbour's.
+    #[test]
+    fn parts_of_anchored_features_stop_at_the_tiles_edges() {
+        let [q0, _, _, q3] = tile(3, 1, 2).children();
+        let anchored = TileFeatures::Anchored;
+        assert_eq!([0.0, 0.0, 4096.0, 4096.0], rect(tile(3, 1, 2), q0, anchored));
+        assert_eq!([4096.0, 4096.0, 8192.0, 8192.0], rect(tile(3, 1, 2), q3, anchored));
+        assert_eq!([0.0, 0.0, 8192.0, 8192.0], rect(tile(3, 1, 2), tile(3, 1, 2), anchored));
     }
 
     /// A tile's place in a DEM tile that holds it, and in one inside it.
