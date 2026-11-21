@@ -805,8 +805,9 @@ impl RenderTerrain {
 
     /// Drops all it made from the map's data, for the renderer's
     /// `clear_data`: the cover and the elevation ranges it remembers, the
-    /// drapes and the layers' drawings in them, the draws and the DEM
-    /// textures. If it had told the map of the ground, it tells it in
+    /// drapes and the layers' drawings in them, the draws, the DEM textures
+    /// and the ground's depth, which the renderer's context then binds no
+    /// more. If it had told the map of the ground, it tells it in
     /// `events` that the ground is gone.
     pub(crate) fn clear_data(&mut self, events: &mut Vec<RendererEvent>) {
         if self.elevation.is_some() {

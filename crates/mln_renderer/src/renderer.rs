@@ -307,6 +307,19 @@ impl Renderer {
         self.orchestrator.projection_variants()
     }
 
+    /// The key of the ground's depth that the context binds for the frame's
+    /// draws, if any.
+    #[cfg(test)]
+    pub(crate) fn ground_depth_key(&self) -> Option<crate::gfx::store::TextureKey> {
+        self.encoder.context.ground_depth().map(crate::gfx::store::Shared::key)
+    }
+
+    /// Whether the context holds the texture `key`, made or not.
+    #[cfg(test)]
+    pub(crate) fn holds_texture(&self, key: crate::gfx::store::TextureKey) -> bool {
+        self.encoder.context.has_texture(key)
+    }
+
     /// How many DEM textures the terrain holds, made or waiting to upload,
     /// and how many DEM tiles its drawn tiles read.
     #[cfg(test)]
@@ -611,6 +624,7 @@ impl Renderer {
     /// `gpu` that the renderer stopped.
     pub fn clear_data(&mut self, gpu: &mut dyn Gpu) {
         self.orchestrator.clear_data();
+        self.encoder.context.set_ground_depth(None);
         end_hosts(gpu, self.orchestrator.take_ended_hosts());
         report(&mut self.orchestrator, self.events.as_ref());
     }

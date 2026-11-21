@@ -1842,6 +1842,24 @@ fn a_map_whose_terrain_turned_off_keeps_no_ground() {
     assert_eq!(0, map.renderer.rendering_stats().terrain.mem_dem_textures);
 }
 
+/// Once the renderer lets go of the map's data, it binds no ground's depth,
+/// and once it reduces its memory use, the depth's texture is gone.
+#[test]
+fn clearing_the_data_lets_go_of_the_ground_depth() {
+    let mut map = raised(10.0, 0.0);
+    add_layer(&mut map, &red_circle(LatLng::new(-10.0, 10.0086).unwrap()), None);
+    map.settle();
+    map.frame();
+    assert_ne!(0, map.renderer.rendering_stats().terrain.mem_ground_depth);
+    let depth = map.renderer.ground_depth_key().expect("the ground's depth");
+    assert!(map.renderer.holds_texture(depth));
+
+    map.renderer.clear_data(map.backend.gpu());
+    assert_eq!(None, map.renderer.ground_depth_key(), "the ground's depth the context binds");
+    map.renderer.reduce_memory_use(map.backend.gpu());
+    assert!(!map.renderer.holds_texture(depth), "the ground's depth's texture");
+}
+
 /// A red fill extrusion `height` meters tall, a square `half` degrees from
 /// `location` to each side.
 fn red_extrusion(location: LatLng, half: f64, height: f64) -> String {

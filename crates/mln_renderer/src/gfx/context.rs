@@ -248,6 +248,12 @@ impl Context {
         self.vertices.contains(key)
     }
 
+    /// Whether the store has the texture `key`.
+    #[cfg(test)]
+    pub(crate) fn has_texture(&self, key: TextureKey) -> bool {
+        self.textures.contains(key)
+    }
+
     /// Replaces the vertices of `typed` with a copy of `data`, as many, which
     /// the next upload writes over their buffer's. Returns false, leaving
     /// them be, for another number of vertices.
