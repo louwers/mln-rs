@@ -2,11 +2,11 @@ use std::sync::{Arc, Once};
 
 use geometry::Point;
 use mln_gfx::shaders::segment::SegmentBase;
+use mln_render::globe::subdivide_line;
 use mln_render::layer::{
     Bucket, BucketBase, CrossFadedPaintPropertyBinder, EvaluatedLayer, GeometryUpload, GeometryVec, Indexed,
     PaintPropertyBinder,
 };
-use mln_render::unstable::subdivide_vertex_line;
 use mln_style::expression::{EvaluationContext, Image, Value};
 use mln_style_types::image::ImagePositions;
 use mln_tile_id::CanonicalTileID;
@@ -137,7 +137,7 @@ impl LineBucket {
         let granularity = self.subdivision_granularity.line.granularity_for_zoom_level(canonical.z);
         let subdivided;
         let line = if granularity >= 2 {
-            subdivided = subdivide_vertex_line(line, granularity, false);
+            subdivided = subdivide_line(line, granularity, false);
             &subdivided
         } else {
             line

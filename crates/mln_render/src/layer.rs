@@ -52,8 +52,8 @@
 //! renderer ([`LayerHost`]). The engine asks for each, and does without it
 //! for a type that has none. A type can also place its layers' contents
 //! across tiles, where they collide with nothing placed before them
-//! (`LayerType::PLACEMENT`), which is unstable and hidden from these docs
-//! (`mln_render::placement`).
+//! (`LayerType::PLACEMENT`, with the hidden `mln_render::placement`
+//! module); a registry has at most one such type.
 //!
 //! [`LayerType::add_shader_sources`] runs once, when the type registers,
 //! on the thread that registers it. The engine runs the other hooks one at
@@ -63,17 +63,18 @@
 //! tile's other work on the thread that runs the tile's job: another
 //! thread, or the renderer's thread for a source whose updates are
 //! synchronous, when no worker could start, or when the host drains the
-//! renderer's pool there. So the layout and the bucket are `Send`. A worker that shares the renderer's memory hands the bucket
-//! back as it is. One that doesn't, such as a browser's Web Worker with its
-//! own wasm instance, gets the layer's values and sends the bucket back
-//! through the worker codec (`mln_wire::Wire`), so the bucket and the style
-//! half's property sets implement `Wire`, which is unstable
-//! (`mln_render::unstable`). A layer's
+//! renderer's pool there. So the layout and the bucket are `Send`. A worker
+//! that shares the renderer's memory hands the bucket back as it is. One
+//! that doesn't, such as a browser's Web Worker with its own wasm instance,
+//! gets the layer's values and sends the bucket back through the worker
+//! codec, so the bucket and the style half's property sets implement
+//! `mln_wire::Wire`. A layer's
 //! [`State`](LayerType::State) and [`Drawing`](LayerType::Drawing) stay on
 //! the renderer's thread.
 //!
 //! The types a layer type draws with, which the hooks name, are the
-//! [draw services](crate::draw).
+//! [draw services](crate::draw), and the geometry that drawing on the globe
+//! needs is in [`globe`](crate::globe).
 
 use std::sync::Arc;
 
@@ -277,7 +278,7 @@ pub trait LayerType: StyleLayerType {
         None
     }
 
-    /// Unstable: what makes the placement pass of the type's layers, for a
+    /// What makes the placement pass of the type's layers, for a
     /// type whose layers place what they show where it collides with
     /// nothing shown already ([`PlacementPass`](crate::placement::PlacementPass));
     /// `None` for a type whose layers don't. A renderer makes one pass, of
@@ -457,7 +458,7 @@ pub struct UpdateContext<'a, 'f, T: LayerType> {
 }
 
 impl<T: LayerType> UpdateContext<'_, '_, T> {
-    /// Unstable: the key that the layer's placement finds `tile`'s bucket
+    /// The key that the layer's placement finds `tile`'s bucket
     /// by among the frame's tiles
     /// ([`PlacementBuckets`](crate::placement::PlacementBuckets)), for a tile
     /// that shows the layer a bucket of its layout.

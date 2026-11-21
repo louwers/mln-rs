@@ -2,14 +2,15 @@ use std::sync::Arc;
 
 use geometry::Point;
 use mln_gfx::shaders::segment::{MAX_SEGMENT_VERTICES, SegmentBase};
+use mln_render::globe::{SubdividedPolygon, add_tile_border_strips};
 use mln_render::layer::Indexed;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate, GeometryCoordinates};
 use mln_util::constants::EXTENT;
 
+use super::subdivide;
 use crate::fill::bucket::FillLayoutVertex;
 use crate::fill::mesh::FillBuffers;
-use crate::subdivision::{SubdividedPolygon, TILE_BORDER_STRIP_WIDTH, add_tile_border_strips, subdivide_polygon};
 use crate::tessellator::Tessellator;
 
 /// `EXTENT` as a tile coordinate.
@@ -195,8 +196,8 @@ fn globe_subdivided_polygon_beyond_the_index_limit_keeps_its_granularity() {
 
     let buffers = generate(&polygon, &tile, 128);
 
-    let mut full = subdivide_polygon(&polygon, &tile, 128, true, &mut Tessellator::default());
-    add_tile_border_strips(&mut full, &tile, TILE_BORDER_STRIP_WIDTH);
+    let mut full = subdivide(&polygon, &tile, 128, true);
+    add_tile_border_strips(&mut full, &tile);
     assert!(full.vertices.len() > MAX_SEGMENT_VERTICES);
     assert!(buffers.fill_segments.len() > 1);
     let expected_triangles = mesh_triangles(&full);

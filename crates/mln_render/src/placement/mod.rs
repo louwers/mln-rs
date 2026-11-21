@@ -1,6 +1,6 @@
-//! Unstable: placement, which decides what of the frame's layers shows
-//! where it would collide with what shows already, and fades what it shows
-//! between placements. Anything here can change or go in any release.
+//! Placement, which decides what of the frame's layers shows where it
+//! would collide with what shows already, and fades what it shows between
+//! placements.
 //!
 //! A layer type whose layers place declares a [`PlacementPass`]
 //! ([`LayerType::PLACEMENT`]): the pass over every layer of the type that

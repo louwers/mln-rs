@@ -1,24 +1,14 @@
-//! Subdivision for the globe: lines split where they cross a grid of cells
-//! over the tile, so that they bend with the sphere, and the rows of a
-//! tile's vertices at the poles. The algorithm is GL JS's
-//! `render/subdivision.ts`.
-
 use geometry::Point;
 use glam::DVec2;
 use mln_tile_id::geometry_tile_data::GeometryCoordinates;
 use mln_util::constants::EXTENT;
 
-/// The Y coordinate of a tile vertex that the globe's vertex shaders draw
-/// at the north pole.
-pub const NORTH_POLE_Y: i16 = -32768;
-/// The Y coordinate of a tile vertex that the globe's vertex shaders draw
-/// at the south pole.
-pub const SOUTH_POLE_Y: i16 = 32767;
-
-/// Inserts a vertex wherever the line crosses a cell boundary; `is_ring`
-/// closes the line first.
+/// `line` with a vertex inserted wherever it crosses the boundary of a
+/// cell of a grid of `granularity` cells per axis over the tile. `is_ring`
+/// closes the line first, so the result ends where it starts. A line of
+/// fewer than two points has none.
 #[must_use]
-pub fn subdivide_vertex_line(line: &[Point<i16>], granularity: u32, is_ring: bool) -> GeometryCoordinates {
+pub fn subdivide_line(line: &[Point<i16>], granularity: u32, is_ring: bool) -> GeometryCoordinates {
     if line.len() < 2 {
         return GeometryCoordinates::new();
     }

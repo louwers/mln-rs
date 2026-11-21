@@ -10,10 +10,10 @@ use mln_render::draw::{
     DrawDepth, DrawFrame, DrawGeometry, DrawIndexes, DrawList, DrawObjects, FrameDraw, KeptDraw, LayerDrawing,
     RenderStaticData, Texture2D, Textures, TileDraws, Uniforms, projection_data, raw_vertices, to_projection_ubo,
 };
+use mln_render::globe::tile_grid;
 use mln_render::layer::{
     DrawContext, EvaluatedLayer, LayerType, LayerValues, NoBucket, NoLayout, NoTileView, RenderPass, UpdateContext,
 };
-use mln_render::unstable::raw_globe_tile_mesh;
 use mln_style_types::TranslateAnchorType;
 use mln_tile_id::OverscaledTileID;
 use mln_util::Color;
@@ -60,8 +60,13 @@ impl BackgroundState {
     ) -> DrawObjects {
         let (vertices, vertex_count, indexes, segments) = if variant == ProjectionVariant::Globe {
             // The background is not depth tested, so it needs no tile border.
-            let mesh = raw_globe_tile_mesh(&tile_id.canonical, false, SubdivisionGranularitySetting::globe().tile);
-            (mesh.vertices, mesh.vertex_count, mesh.indices, mesh.segments)
+            let canonical = &tile_id.canonical;
+            let granularity = SubdivisionGranularitySetting::globe().tile.granularity_for_zoom_level(canonical.z);
+            let grid = tile_grid(canonical, granularity, false);
+            let count = grid.vertices.len();
+            let indices = grid.triangles.into_flattened();
+            let segments = vec![SegmentBase::with_lengths(0, 0, count, indices.len())];
+            (bytemuck::cast_slice(&grid.vertices).to_vec(), count, indices, segments)
         } else {
             let vertices = RenderStaticData::tile_vertices();
             let count = vertices.len();

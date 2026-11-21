@@ -1,13 +1,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use geometry::Point;
-use mln_render::draw::{NORTH_POLE_Y, SOUTH_POLE_Y};
+use mln_render::globe::{
+    NORTH_POLE_Y, SOUTH_POLE_Y, SubdividedPolygon, TILE_BORDER_STRIP_WIDTH, add_tile_border_strips,
+};
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate};
 use mln_util::constants::EXTENT;
 
-use crate::subdivision::{SubdividedPolygon, TILE_BORDER_STRIP_WIDTH, add_tile_border_strips, subdivide_polygon};
-use crate::tessellator::Tessellator;
+use super::subdivide;
 
 /// `EXTENT` as a tile coordinate.
 const EXTENT_I16: i16 = EXTENT as i16;
@@ -163,13 +164,7 @@ fn y_coordinates(r: &SubdividedPolygon) -> BTreeSet<i16> {
 #[test]
 fn no_subdivision_keeps_triangles() {
     // GL JS "Polygon is unchanged when granularity=1".
-    let result = subdivide_polygon(
-        &square(0, 0, 20000, 20000),
-        &CanonicalTileID::new(3, 1, 1),
-        1,
-        true,
-        &mut Tessellator::default(),
-    );
+    let result = subdivide(&square(0, 0, 20000, 20000), &CanonicalTileID::new(3, 1, 1), 1, true);
     assert_eq!(vec![p(0, 0), p(20000, 0), p(20000, 20000), p(0, 20000)], result.vertices);
     // Two triangles on one diagonal (earcut's pick), wound the same way as GL
     // JS's [2, 0, 3, 2, 1, 0].
@@ -186,7 +181,7 @@ fn no_subdivision_keeps_triangles() {
 #[test]
 fn splits_on_cell_boundaries_and_keeps_area() {
     let full = square(0, 0, EXTENT_I16, EXTENT_I16);
-    let result = subdivide_polygon(&full, &CanonicalTileID::new(3, 1, 1), 4, true, &mut Tessellator::default());
+    let result = subdivide(&full, &CanonicalTileID::new(3, 1, 1), 4, true);
     // A 4x4 grid: 25 unique vertices, 32 triangles.
     assert_eq!(25, result.vertices.len());
     assert_eq!(32, result.triangles.len());
@@ -202,9 +197,8 @@ fn splits_on_cell_boundaries_and_keeps_area() {
 #[test]
 fn strips_extend_each_edge_of_a_fill_that_ends_at_the_tile_border() {
     let tile = CanonicalTileID::new(9, 255, 149);
-    let mut result =
-        subdivide_polygon(&square(0, 0, EXTENT_I16, EXTENT_I16), &tile, 4, true, &mut Tessellator::default());
-    add_tile_border_strips(&mut result, &tile, TILE_BORDER_STRIP_WIDTH);
+    let mut result = subdivide(&square(0, 0, EXTENT_I16, EXTENT_I16), &tile, 4, true);
+    add_tile_border_strips(&mut result, &tile);
 
     // The 4x4 grid's 32 triangles, two more for each of its 16 cell edges on
     // the border, five outer vertices per side.
@@ -223,15 +217,9 @@ fn strips_extend_each_edge_of_a_fill_that_ends_at_the_tile_border() {
 #[test]
 fn no_strips_where_the_fill_continues_past_the_tile_border() {
     let tile = CanonicalTileID::new(9, 255, 149);
-    let mut result = subdivide_polygon(
-        &square(-128, -128, EXTENT_I16 + 128, EXTENT_I16 + 128),
-        &tile,
-        4,
-        true,
-        &mut Tessellator::default(),
-    );
+    let mut result = subdivide(&square(-128, -128, EXTENT_I16 + 128, EXTENT_I16 + 128), &tile, 4, true);
     let triangle_count = result.triangles.len();
-    add_tile_border_strips(&mut result, &tile, TILE_BORDER_STRIP_WIDTH);
+    add_tile_border_strips(&mut result, &tile);
 
     assert_eq!(triangle_count, result.triangles.len());
 }
@@ -240,9 +228,9 @@ fn no_strips_where_the_fill_continues_past_the_tile_border() {
 #[test]
 fn no_strips_for_a_fill_that_stays_inside_the_tile() {
     let tile = CanonicalTileID::new(9, 255, 149);
-    let mut result = subdivide_polygon(&square(1000, 1000, 3000, 3000), &tile, 4, true, &mut Tessellator::default());
+    let mut result = subdivide(&square(1000, 1000, 3000, 3000), &tile, 4, true);
     let triangle_count = result.triangles.len();
-    add_tile_border_strips(&mut result, &tile, TILE_BORDER_STRIP_WIDTH);
+    add_tile_border_strips(&mut result, &tile);
 
     assert_eq!(triangle_count, result.triangles.len());
 }
@@ -252,11 +240,11 @@ fn no_strips_for_a_fill_that_stays_inside_the_tile() {
 fn no_strips_on_the_pole_border_of_a_pole_tile() {
     let full = square(0, 0, EXTENT_I16, EXTENT_I16);
     let north_pole_tile = CanonicalTileID::new(1, 0, 0);
-    let mut north = subdivide_polygon(&full, &north_pole_tile, 4, true, &mut Tessellator::default());
-    add_tile_border_strips(&mut north, &north_pole_tile, TILE_BORDER_STRIP_WIDTH);
+    let mut north = subdivide(&full, &north_pole_tile, 4, true);
+    add_tile_border_strips(&mut north, &north_pole_tile);
     let south_pole_tile = CanonicalTileID::new(1, 1, 1);
-    let mut south = subdivide_polygon(&full, &south_pole_tile, 4, true, &mut Tessellator::default());
-    add_tile_border_strips(&mut south, &south_pole_tile, TILE_BORDER_STRIP_WIDTH);
+    let mut south = subdivide(&full, &south_pole_tile, 4, true);
+    add_tile_border_strips(&mut south, &south_pole_tile);
 
     assert!(!y_coordinates(&north).contains(&-TILE_BORDER_STRIP_WIDTH));
     assert!(y_coordinates(&north).contains(&(EXTENT_I16 + TILE_BORDER_STRIP_WIDTH)));
@@ -268,9 +256,8 @@ fn no_strips_on_the_pole_border_of_a_pole_tile() {
 #[test]
 fn no_strips_on_the_zoom_zero_tile_whose_edges_are_the_antimeridian_and_the_poles() {
     let world_tile = CanonicalTileID::new(0, 0, 0);
-    let mut result =
-        subdivide_polygon(&square(0, 0, EXTENT_I16, EXTENT_I16), &world_tile, 4, true, &mut Tessellator::default());
-    add_tile_border_strips(&mut result, &world_tile, TILE_BORDER_STRIP_WIDTH);
+    let mut result = subdivide(&square(0, 0, EXTENT_I16, EXTENT_I16), &world_tile, 4, true);
+    add_tile_border_strips(&mut result, &world_tile);
 
     assert_eq!(0, vertices_outside_border(&result, TILE_BORDER_STRIP_WIDTH));
 }
@@ -279,19 +266,19 @@ fn no_strips_on_the_zoom_zero_tile_whose_edges_are_the_antimeridian_and_the_pole
 #[test]
 fn pole_tiles_get_pole_quads() {
     let full = square(0, 0, EXTENT_I16, EXTENT_I16);
-    let north = subdivide_polygon(&full, &CanonicalTileID::new(1, 0, 0), 2, true, &mut Tessellator::default());
+    let north = subdivide(&full, &CanonicalTileID::new(1, 0, 0), 2, true);
     let ys = y_coordinates(&north);
     assert!(ys.contains(&NORTH_POLE_Y));
     assert!(!ys.contains(&SOUTH_POLE_Y));
     expect_sound_mesh(&north, false);
 
-    let south = subdivide_polygon(&full, &CanonicalTileID::new(1, 0, 1), 2, true, &mut Tessellator::default());
+    let south = subdivide(&full, &CanonicalTileID::new(1, 0, 1), 2, true);
     let ys = y_coordinates(&south);
     assert!(ys.contains(&SOUTH_POLE_Y));
     assert!(!ys.contains(&NORTH_POLE_Y));
     expect_sound_mesh(&south, false);
 
-    let middle = subdivide_polygon(&full, &CanonicalTileID::new(2, 1, 1), 2, true, &mut Tessellator::default());
+    let middle = subdivide(&full, &CanonicalTileID::new(2, 1, 1), 2, true);
     for y in y_coordinates(&middle) {
         assert_ne!(NORTH_POLE_Y, y);
         assert_ne!(SOUTH_POLE_Y, y);
@@ -312,7 +299,7 @@ fn pole_caps_reach_the_pole_where_the_input_touched_it() {
         p(0, EXTENT_I16),
         p(0, NORTH_POLE_Y),
     ]]);
-    let result = subdivide_polygon(&polygon, &CanonicalTileID::new(1, 0, 0), 64, true, &mut Tessellator::default());
+    let result = subdivide(&polygon, &CanonicalTileID::new(1, 0, 0), 64, true);
     let mut cap_reaches_the_pole = false;
     for triangle in &result.triangles {
         let has = |vertex: Point<i16>| triangle.iter().any(|&i| result.vertices[i as usize] == vertex);
@@ -325,7 +312,7 @@ fn pole_caps_reach_the_pole_where_the_input_touched_it() {
 #[test]
 fn zoom_zero_drops_geometry_outside_the_tile() {
     let wide = square(-2000, 1000, EXTENT_I16 + 2000, 2000);
-    let result = subdivide_polygon(&wide, &CanonicalTileID::new(0, 0, 0), 8, true, &mut Tessellator::default());
+    let result = subdivide(&wide, &CanonicalTileID::new(0, 0, 0), 8, true);
     // A triangle with any vertex in the buffer is a wrapped copy of geometry
     // the tile itself draws.
     let indices = result.triangles.iter().flatten().chain(result.lines.iter().flatten());
@@ -341,8 +328,7 @@ fn world_polygon_with_buffer_is_sound() {
     const BUFFER: i16 = 512;
     let world = square(-BUFFER, -BUFFER, EXTENT_I16 + BUFFER, EXTENT_I16 + BUFFER);
     for z in [0u8, 1] {
-        let result =
-            subdivide_polygon(&world, &CanonicalTileID::new(z, 0, 0), 128 >> z, true, &mut Tessellator::default());
+        let result = subdivide(&world, &CanonicalTileID::new(z, 0, 0), 128 >> z, true);
         expect_sound_mesh(&result, z == 0);
     }
 }

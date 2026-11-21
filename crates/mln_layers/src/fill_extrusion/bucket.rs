@@ -7,11 +7,11 @@ use std::sync::Arc;
 use geometry::Point;
 use mln_gfx::shaders::segment::{MAX_SEGMENT_VERTICES, SegmentBase};
 use mln_map_types::View;
+use mln_render::globe::{SubdividedPolygon, subdivide_line, subdivide_polygon};
 use mln_render::layer::{
     Bucket, BucketBase, CrossFadedPaintPropertyBinder, EvaluatedLayer, GeometryUpload, GeometryVec, Indexed,
     PaintPropertyBinder,
 };
-use mln_render::unstable::subdivide_vertex_line;
 use mln_style::PropertyEvaluationParameters;
 use mln_style::evaluated::Evaluated;
 use mln_style::expression::{Image, Value};
@@ -33,7 +33,6 @@ use super::programs::{
 };
 use super::properties::{FillExtrusionLayoutProperties, FillExtrusionPaintProperties};
 use crate::pattern_layout::{PatternBucket, PatternLayerMap, PatternLayoutSpec};
-use crate::subdivision::{SubdividedPolygon, subdivide_polygon};
 use crate::tessellator::Tessellator;
 
 mln_render::paint_property_binders!(
@@ -368,8 +367,9 @@ impl PatternBucket for FillExtrusionBucket {
             let granularity = self.subdivision_granularity.fill.granularity_for_zoom_level(canonical.z);
             if granularity >= 2 {
                 let subdivided_rings: Vec<GeometryCoordinates> =
-                    polygon.iter().map(|ring| subdivide_vertex_line(ring, granularity, true)).collect();
-                let roof = subdivide_polygon(&polygon, canonical, granularity, false, tessellator);
+                    polygon.iter().map(|ring| subdivide_line(ring, granularity, true)).collect();
+                let roof =
+                    subdivide_polygon(&polygon, tessellator.triangulate(&polygon), canonical, granularity, false);
                 self.add_polygon(&subdivided_rings, Some(&roof), tessellator);
             } else {
                 self.add_polygon(&polygon[..], None, tessellator);

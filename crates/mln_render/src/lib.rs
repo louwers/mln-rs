@@ -6,7 +6,7 @@
 //! point states its contract:
 //!
 //! - [`layer`]: a layer type's render half, with the [`draw`] services it
-//!   draws with.
+//!   draws with and the geometry that drawing on the [`globe`] needs.
 //! - [`source`]: a source type's render half and the data origin of its
 //!   tiles.
 //! - [`RegistryBuilder`]: where both register, with the expression
@@ -14,8 +14,7 @@
 //!   shader sources (`mln_gfx::shaders::source`).
 //!
 //! The GPU backend that a renderer draws through is `mln_gfx::gpu`'s
-//! `Gpu`. What the engine exposes to the built-in types besides, not yet
-//! meant as a contract, is in the hidden `unstable` module.
+//! `Gpu`.
 
 mod algorithm;
 #[cfg(feature = "bench")]
@@ -34,8 +33,8 @@ mod frame;
 mod frame_projection;
 mod geometry;
 mod gfx;
+pub mod globe;
 mod globe_depth_pass;
-mod globe_tile_mesh;
 mod group_by_layout;
 mod image_store;
 pub mod layer;
@@ -73,11 +72,8 @@ mod tile_mask;
 mod tile_matrix;
 mod tile_parameters;
 mod tile_render_data;
-#[doc(hidden)]
-pub mod unstable;
 mod update_parameters;
 pub mod update_slot;
-mod util;
 
 pub use bucket::LayerFeatureStates;
 pub use mln_style::expression::functions::RegisterError;
