@@ -22,10 +22,6 @@ pub(super) struct GestureState {
     /// The altitude that a gesture in progress over a center the terrain
     /// clamps holds, under its lift ([`Transform::follow_terrain`]).
     pub(super) hold: Option<f64>,
-    /// Whether a command took the center from the gesture's momentum and
-    /// eases the altitude onto the ground it ends on: the gesture then
-    /// neither holds the altitude nor ends on the ground.
-    pub(super) ceded: bool,
     /// The plane over terrain that the gesture's anchored steps solve on
     /// ([`Transform::anchor_plane`]).
     pub(super) anchor_plane: Option<AnchorPlane>,
@@ -160,11 +156,16 @@ impl Transform {
         self.gesture_phase_after(update.phase, false);
     }
 
-    /// `Begin` cancels the running commands, and `Begin` and `Update` mark
-    /// the gesture, before its change applies, so that the change follows
-    /// the gesture rules (an ease doesn't fly, and wraps the longitude as a
-    /// drag). The first phase after a gesture ended starts a new one, which
-    /// an earlier gesture's momentum no longer ends.
+    /// `Begin` and `Update` mark the gesture, before its change applies, so
+    /// that the change follows the gesture rules (an ease doesn't fly, and
+    /// wraps the longitude as a drag), and `Begin` then cancels the running
+    /// commands, which end within the gesture. The first phase after a
+    /// gesture ended starts a new one, which an earlier gesture's momentum
+    /// no longer ends.
+    ///
+    /// When the fingers go down, the gesture owns the altitude: the running
+    /// commands stop easing theirs, and the gesture holds the altitude the
+    /// camera has.
     fn gesture_phase_before(&mut self, phase: GesturePhase) {
         if phase != GesturePhase::None && (phase == GesturePhase::Begin || !self.gesture.active) {
             // A gesture that begins during the last one's momentum keeps its
@@ -175,12 +176,15 @@ impl Transform {
                 ..GestureState::default()
             };
         }
-        if phase == GesturePhase::Begin {
-            self.cancel_transitions();
-        }
-        if matches!(phase, GesturePhase::Begin | GesturePhase::Update) {
+        if matches!(phase, GesturePhase::Begin | GesturePhase::Update) && !self.gesture.active {
             self.gesture.active = true;
             self.set_gesture_in_progress(true);
+            for transition in &mut self.transitions {
+                transition.stop_easing_altitude();
+            }
+        }
+        if phase == GesturePhase::Begin {
+            self.cancel_transitions();
         }
     }
 
@@ -208,11 +212,9 @@ impl Transform {
         gesture == Some(self.gesture.serial) && !self.gesture.active && self.set_gesture_in_progress(false)
     }
 
-    /// Marks whether a gesture is in progress. The end of one that held the
-    /// altitude over a center the terrain clamps moves the center onto the
-    /// ground along the view ([`Self::recenter_on_ground`]), unless a
-    /// command took the center from its momentum. Returns whether that end
-    /// moved the camera.
+    /// Marks whether a gesture is in progress. The end of one over a clamped
+    /// center ends on the ground, unless a command still moves the camera
+    /// ([`Self::come_to_rest`]). Returns whether that end moved the camera.
     pub(crate) fn set_gesture_in_progress(&mut self, in_progress: bool) -> bool {
         let ends = self.gesture_in_progress && !in_progress;
         self.gesture_in_progress = in_progress;
@@ -220,7 +222,7 @@ impl Transform {
             return false;
         }
         self.gesture.hold = None;
-        !std::mem::take(&mut self.gesture.ceded) && self.recenter_on_ground()
+        self.come_to_rest()
     }
 
     #[must_use]

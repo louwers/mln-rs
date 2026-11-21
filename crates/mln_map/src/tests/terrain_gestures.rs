@@ -585,3 +585,42 @@ fn a_lift_before_the_first_ground_reports_the_change() {
     assert!(transform.follow_terrain(), "the lift changed the view");
     assert!(transform.view().eye_position().z >= -1e-6, "the eye at {} m", transform.view().eye_position().z);
 }
+
+/// A gesture held still over a clamped center, with no command running,
+/// clears the near plane the first ground draws with in the update that
+/// brings it, which is farther from the eye than the flat map's: the lift
+/// needs no second update.
+#[test]
+fn a_held_gesture_clears_the_near_plane_of_the_first_ground_at_once() {
+    let height = 1000.0;
+    let mut transform = Transform::new(ConstrainMode::HeightOnly, ViewportMode::Default);
+    transform.resize(Size::new(512, 512)).unwrap();
+    let mut limits = *transform.state().limits();
+    limits.max_pitch = 85f64.to_radians();
+    transform.set_limits(limits).unwrap();
+    transform.set_terrain(Some(TerrainGround { elevation: None, clamped: true }));
+    transform.jump_to(&CameraOptions {
+        center: Some(start()),
+        zoom: Some(16.0),
+        pitch: Some(85.0),
+        ..Default::default()
+    });
+    // The eye 3 px above the ground the renderer draws next.
+    let view = transform.view();
+    let meters_per_pixel = Projection::altitude_meters_per_pixel(start().latitude(), 16.0);
+    let altitude = height - (view.eye_position().z - view.center_altitude()) + 3.0 * meters_per_pixel;
+    transform.jump_to(&CameraOptions { center_altitude: Some(altitude), ..Default::default() });
+    transform.follow_terrain();
+    transform.apply_camera_delta(&delta(GesturePhase::Begin, None, None)).unwrap();
+    assert!(transform.is_gesture_in_progress() && !transform.in_transition());
+    assert!(transform.view().terrain_min_elevation().is_none());
+
+    transform.set_terrain(Some(TerrainGround { elevation: Some(flat(Some(height), height)), clamped: true }));
+    transform.follow_terrain();
+    let view = transform.view();
+    assert!(view.terrain_min_elevation().is_some());
+    assert!(view.eye_position().z >= height, "the eye under the ground");
+    for point in view.near_plane_points() {
+        assert!(point.z >= height - 1e-6, "{point} under the ground at {height} m");
+    }
+}

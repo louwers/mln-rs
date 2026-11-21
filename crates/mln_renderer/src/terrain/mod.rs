@@ -167,7 +167,9 @@
 //!   ([`UpdateParameters::camera_moving`]), even a gesture held still,
 //!   reads more (the surface under its eye and near plane, rays through the
 //!   screen, the ground at a command's end), so its update must carry the
-//!   current snapshot itself. A still image draws only such an update's
+//!   current snapshot itself. The move onto the ground that ends a motion
+//!   reads them once more, in the update the camera comes to rest in,
+//!   which no later snapshot redoes. A still image draws only such an update's
 //!   frame, and a continuous frame of any other reports itself partial, so
 //!   it doesn't make the map idle.
 

@@ -196,9 +196,6 @@ pub struct Transform {
     globe_drag_hold: Option<GlobeDragHold>,
     /// The terrain the camera stands on ([`Self::set_terrain`]).
     terrain: Option<TerrainGround>,
-    /// Whether the last terrain clamped the center to its ground, which the
-    /// center leaves for sea level once the terrain goes.
-    clamped_to_ground: bool,
 }
 
 /// The location a drag on the globe holds under the cursor, from the step
@@ -237,7 +234,6 @@ impl Transform {
             globe_free_bearing: false,
             globe_drag_hold: None,
             terrain: None,
-            clamped_to_ground: false,
         }
     }
 
