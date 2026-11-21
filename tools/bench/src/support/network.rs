@@ -94,7 +94,8 @@ pub(crate) struct Counts {
     pub(crate) bytes: u64,
     /// Bytes received of transfers that were cancelled or failed.
     pub(crate) wasted: u64,
-    /// Transfers of a resource whose last transfer failed.
+    /// Transfers of a resource (a URL, and a byte range of it) whose last
+    /// transfer failed.
     pub(crate) retries: u64,
     /// Transfers of a resource that an earlier transfer brought.
     pub(crate) refetches: u64,
@@ -276,6 +277,15 @@ impl Origin for Server {
     }
 }
 
+/// What names a resource among transfers: its URL, and the byte range of it,
+/// as a PMTiles archive's header, directories and tiles are ranges of one URL.
+fn key(resource: &Resource) -> String {
+    match resource.data_range {
+        Some((first, last)) => format!("{} {first}-{last}", resource.url),
+        None => resource.url.clone(),
+    }
+}
+
 /// FNV-1a over `parts`.
 fn fnv(parts: &[&[u8]]) -> u64 {
     let mut hash = 0xcbf2_9ce4_8422_2325u64;
@@ -336,8 +346,8 @@ struct State {
     /// Transfers that ended, for [`Network::pump`], with when and in which
     /// order.
     ended: Vec<(u64, u64, Transfer, Ended)>,
-    /// Transfers per URL, and the URLs whose last transfer failed or
-    /// brought data.
+    /// Transfers per resource ([`key`]), and the resources whose last
+    /// transfer failed or brought data.
     attempts: HashMap<String, u64>,
     failed: HashSet<String>,
     brought: HashSet<String>,
@@ -386,7 +396,8 @@ impl State {
         self.outage().is_some_and(|(from, until)| (from..until).contains(&at))
     }
 
-    /// Whether the `attempt`th transfer of `url` draws a fault of `rate`
+    /// Whether the `attempt`th transfer of resource `url` ([`key`]) draws a
+    /// fault of `rate`
     /// thousandths, of the kind `salt` names. The draw depends on the
     /// transfer alone, so that a change in what else the map requests, or
     /// in what order, doesn't move the faults.
@@ -397,7 +408,7 @@ impl State {
 
     /// Ends `flight` at `at`.
     fn end(&mut self, at: u64, flight: InFlight, ended: Ended) {
-        let url = flight.transfer.resource().url.clone();
+        let url = key(flight.transfer.resource());
         match &ended {
             Ended::Answered(answer) => {
                 self.counts.bytes += answer.wire;
@@ -405,7 +416,7 @@ impl State {
                     self.failed.insert(url);
                 } else {
                     self.failed.remove(&url);
-                    if answer.status == 200 {
+                    if matches!(answer.status, 200 | 206) {
                         self.brought.insert(url);
                     }
                 }
@@ -430,7 +441,7 @@ impl State {
                 self.counts.cancelled += 1;
                 continue;
             }
-            let url = transfer.resource().url.clone();
+            let url = key(transfer.resource());
             let attempt = self.attempts.entry(url.clone()).or_default();
             *attempt += 1;
             let attempt = *attempt;
@@ -610,9 +621,12 @@ impl Network {
         self.driver.run() || delivered
     }
 
-    /// What has gone over the network so far.
+    /// What has gone over the network so far, the bytes of the transfers
+    /// still receiving included.
     pub(crate) fn counts(&self) -> Counts {
-        self.simulator.state.lock().counts
+        let state = self.simulator.state.lock();
+        let receiving: u64 = state.flight.iter().map(InFlight::received).sum();
+        Counts { bytes: state.counts.bytes + receiving, ..state.counts }
     }
 
     /// Whether no transfer is in flight.
@@ -731,6 +745,7 @@ mod tests {
             network.pump();
             network.advance();
         }
+        assert_eq!(network.counts().bytes, 650, "what has come so far");
         drop(request);
         network.pump();
         network.advance();

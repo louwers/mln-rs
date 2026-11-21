@@ -213,14 +213,14 @@ pub struct OnlineCore {
     connection_backoff: Option<Duration>,
     /// The clock that the deadlines go by, in place of the system's
     /// (`crate::bench`).
-    #[cfg(feature = "bench")]
+    #[cfg(all(feature = "bench", not(target_family = "wasm")))]
     clock: Option<crate::bench::Clock>,
 }
 
 impl OnlineCore {
     /// The time that deadlines go by.
     fn now(&self) -> Instant {
-        #[cfg(feature = "bench")]
+        #[cfg(all(feature = "bench", not(target_family = "wasm")))]
         if let Some(clock) = &self.clock {
             return clock();
         }
@@ -629,7 +629,7 @@ impl OnlineFileSource {
             network,
             reachable,
             connection_backoff: None,
-            #[cfg(feature = "bench")]
+            #[cfg(all(feature = "bench", not(target_family = "wasm")))]
             clock: None,
         };
         let source = OnlineFileSource {
@@ -709,7 +709,7 @@ impl OnlineFileSource {
     /// Whether a thread, or the caller, runs the source's core.
     #[cfg(not(target_family = "wasm"))]
     fn is_running(&self) -> bool {
-        #[cfg(feature = "bench")]
+        #[cfg(all(feature = "bench", not(target_family = "wasm")))]
         if self.driven {
             return true;
         }

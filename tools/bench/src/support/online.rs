@@ -38,11 +38,14 @@ impl Sight {
     fn observe(&mut self, full: bool, coverage: Option<Coverage>) {
         self.frames += 1;
         let thousandths = |share: f64| (share * 1000.0).round() as u64;
-        let (shown, blank, stand_in) = match coverage {
-            Some(coverage) => {
-                (coverage.ideal + coverage.stand_in > 0.0, thousandths(coverage.blank), thousandths(coverage.stand_in))
-            }
-            None => (false, 1000, 0),
+        let (shown, whole, blank, stand_in) = match coverage {
+            Some(coverage) => (
+                coverage.ideal + coverage.stand_in > 0.0,
+                coverage.blank == 0.0 && coverage.stand_in == 0.0,
+                thousandths(coverage.blank),
+                thousandths(coverage.stand_in),
+            ),
+            None => (false, false, 1000, 0),
         };
         self.blank += blank;
         self.stand_in += stand_in;
@@ -50,8 +53,8 @@ impl Sight {
             self.first_paint = Some(self.frames);
         }
         // A tile whose load failed counts as loaded, so a frame can be
-        // `Full` with a parent standing in for it.
-        let complete = full && shown && blank == 0 && stand_in == 0;
+        // `Full` with a parent standing in for it, however small.
+        let complete = full && shown && whole;
         if complete && self.frames > self.rest && self.complete.is_none() {
             self.complete = Some(self.frames - self.rest);
         }
@@ -192,10 +195,12 @@ mod tests {
         sight.observe(false, Some(coverage(0.25, 0.5, 0.25)));
         // Loaded, but a failed tile's parent stands in for it.
         sight.observe(true, Some(coverage(0.9, 0.1, 0.0)));
+        // A stand-in too small to count in the sums still isn't complete.
         sight.observe(true, Some(coverage(0.9996, 0.0004, 0.0)));
+        sight.observe(true, Some(coverage(1.0, 0.0, 0.0)));
         assert_eq!((sight.blank, sight.stand_in), (1000 + 900 + 250, 500 + 100));
         assert_eq!(sight.first_paint, Some(3));
-        assert_eq!(sight.complete, Some(5), "a sliver under half a thousandth counts as none");
+        assert_eq!(sight.complete, Some(6));
 
         sight.rest();
         assert!(!sight.is_complete());
