@@ -5,7 +5,7 @@
 use std::hint::black_box;
 use std::sync::Arc;
 
-use mln_expression::EvaluationContext;
+use mln_style::expression::EvaluationContext;
 use mln_style::filter::Filter;
 use mln_style_types::VisibilityType;
 use mln_tile::TileData;

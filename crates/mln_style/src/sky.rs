@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
-use mln_conversion::{Convertible, Error};
-
+use crate::conversion::{Convertible, Error};
 use crate::expression::Functions;
 use crate::property_table::{self, InPlace, SetPropertyError};
 use crate::style_property::StyleProperty;

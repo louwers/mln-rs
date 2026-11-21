@@ -1,9 +1,8 @@
 use feature::{Identifier, Value};
-use mln_conversion::Convertible;
 use mln_util::geometry::FeatureType;
 
 use super::util::{StubGeometryTileFeature, parse_json, property_map};
-use crate::conversion::{Error, convert_filter};
+use crate::conversion::{Convertible, Error, convert_filter};
 use crate::expression::{EvaluationContext, Functions};
 use crate::filter::Filter;
 
@@ -50,7 +49,7 @@ fn stringify_filter(json: &str) -> String {
     assert_eq!(error.message, "");
 
     let value = filter.unwrap().serialize();
-    mln_expression::value::stringify(&mln_expression::value::from_mbgl_value(&value))
+    crate::expression::value::stringify(&crate::expression::value::from_mbgl_value(&value))
 }
 
 fn s(v: &str) -> Value {

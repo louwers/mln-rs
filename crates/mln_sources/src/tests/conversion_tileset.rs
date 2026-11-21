@@ -1,4 +1,4 @@
-use mln_conversion::Convertible;
+use mln_style::conversion::Convertible;
 use mln_style::layer_type::SourceKind;
 use mln_util::geo::{LatLng, LatLngBounds};
 use mln_util::tileset::{PartialTileset, Scheme};

@@ -2462,9 +2462,7 @@ dependencies = [
  "geo-types",
  "geojson",
  "glam",
- "mln-rs-conversion",
  "mln-rs-d3d12",
- "mln-rs-expression",
  "mln-rs-feature",
  "mln-rs-frame-pacer",
  "mln-rs-geojson",
@@ -2505,9 +2503,7 @@ dependencies = [
  "libc",
  "mln-rs",
  "mln-rs-bench-workload",
- "mln-rs-conversion",
  "mln-rs-d3d12",
- "mln-rs-expression",
  "mln-rs-feature",
  "mln-rs-gfx",
  "mln-rs-gl",
@@ -2571,9 +2567,7 @@ dependencies = [
  "js-sys",
  "libc",
  "mln-rs",
- "mln-rs-conversion",
  "mln-rs-d3d12",
- "mln-rs-expression",
  "mln-rs-feature",
  "mln-rs-frame-pacer",
  "mln-rs-gestures",
@@ -2613,19 +2607,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
-]
-
-[[package]]
-name = "mln-rs-conversion"
-version = "0.0.13"
-dependencies = [
- "foldhash 0.2.0",
- "geojson",
- "mln-rs-feature",
- "serde",
- "serde_json",
- "serde_json_borrow",
- "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -2681,50 +2662,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "mln-rs-expression"
-version = "0.0.13"
-dependencies = [
- "cheap-ruler",
- "fixed_decimal",
- "geo-types",
- "geojson",
- "icu_collator",
- "icu_decimal",
- "icu_experimental",
- "icu_locale",
- "icu_plurals",
- "icu_provider",
- "jni",
- "js-sys",
- "mln-rs-conversion",
- "mln-rs-feature",
- "mln-rs-geometry",
- "mln-rs-math",
- "mln-rs-style-types",
- "mln-rs-text",
- "mln-rs-tile-id",
- "mln-rs-util",
- "mln-rs-vec-map",
- "mln-rs-wire",
- "objc2 0.6.5",
- "objc2-foundation 0.3.2",
- "parking_lot",
- "serde",
- "serde_json",
- "smallvec",
- "thiserror 2.0.21",
- "wasm-bindgen",
- "writeable",
-]
-
-[[package]]
 name = "mln-rs-expression-test"
 version = "0.0.13"
 dependencies = [
  "geo-types",
  "geojson",
- "mln-rs-conversion",
- "mln-rs-expression",
  "mln-rs-feature",
  "mln-rs-style",
  "mln-rs-tile-id",
@@ -2846,7 +2788,6 @@ dependencies = [
  "khronos-egl",
  "mln-rs",
  "mln-rs-d3d12",
- "mln-rs-expression",
  "mln-rs-feature",
  "mln-rs-gfx",
  "mln-rs-gl",
@@ -2901,8 +2842,6 @@ dependencies = [
  "geo-types",
  "glam",
  "mln-rs",
- "mln-rs-conversion",
- "mln-rs-expression",
  "mln-rs-feature",
  "mln-rs-geometry",
  "mln-rs-gfx",
@@ -3009,8 +2948,6 @@ dependencies = [
  "fastrand",
  "geojson",
  "mln-rs",
- "mln-rs-conversion",
- "mln-rs-expression",
  "mln-rs-feature",
  "mln-rs-geometry",
  "mln-rs-gfx",
@@ -3042,8 +2979,6 @@ dependencies = [
  "geo-types",
  "geojson",
  "glam",
- "mln-rs-conversion",
- "mln-rs-expression",
  "mln-rs-feature",
  "mln-rs-geometry",
  "mln-rs-gfx",
@@ -3120,8 +3055,6 @@ name = "mln-rs-sources"
 version = "0.0.13"
 dependencies = [
  "geojson",
- "mln-rs-conversion",
- "mln-rs-expression",
  "mln-rs-feature",
  "mln-rs-geojson",
  "mln-rs-image",
@@ -3212,13 +3145,24 @@ dependencies = [
 name = "mln-rs-style"
 version = "0.0.13"
 dependencies = [
+ "cheap-ruler",
+ "fixed_decimal",
  "geo-types",
+ "geojson",
+ "icu_collator",
+ "icu_decimal",
+ "icu_experimental",
+ "icu_locale",
+ "icu_plurals",
+ "icu_provider",
+ "jni",
+ "js-sys",
  "mln-rs",
- "mln-rs-conversion",
- "mln-rs-expression",
  "mln-rs-feature",
+ "mln-rs-geometry",
  "mln-rs-layers",
  "mln-rs-map-types",
+ "mln-rs-math",
  "mln-rs-storage",
  "mln-rs-style-types",
  "mln-rs-text",
@@ -3226,9 +3170,16 @@ dependencies = [
  "mln-rs-util",
  "mln-rs-vec-map",
  "mln-rs-wire",
+ "objc2 0.6.5",
+ "objc2-foundation 0.3.2",
  "parking_lot",
+ "serde",
  "serde_json",
+ "serde_json_borrow",
+ "smallvec",
  "thiserror 2.0.21",
+ "wasm-bindgen",
+ "writeable",
 ]
 
 [[package]]
@@ -3347,8 +3298,6 @@ dependencies = [
  "glam",
  "httpdate",
  "js-sys",
- "mln-rs-conversion",
- "mln-rs-expression",
  "mln-rs-feature",
  "mln-rs-geometry",
  "mln-rs-math",

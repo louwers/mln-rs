@@ -1,10 +1,9 @@
 use feature::Value;
-use mln_conversion::Convertible;
 use mln_style_types::ProjectionDefinition;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use super::util::parse_json;
-use crate::conversion::{Error, convert_projection};
+use crate::conversion::{Convertible, Error, convert_projection};
 use crate::expression::Functions;
 use crate::property_value::StyleValue as _;
 use crate::style_property::Kind;

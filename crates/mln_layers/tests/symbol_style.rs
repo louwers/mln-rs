@@ -4,10 +4,9 @@
 use std::path::PathBuf;
 
 use feature::Value;
-use mln_conversion::{Convertible, Error, value_to_json};
 use mln_rs::builtin_registry;
 use mln_style::Style;
-use mln_style::conversion::convert_layer;
+use mln_style::conversion::{Convertible, Error, convert_layer, value_to_json};
 use mln_style::layer::{FontStack, Layer};
 use mln_style::parser::Parser;
 use mln_vec_map::VecSet;
@@ -150,7 +149,7 @@ fn is_supported_script_of_a_literal_in_a_layout_property() {
     // Not a C++ test: ffi patch 0093 kept "is-supported-script" from folding,
     // so this text-field wasn't a literal and property conversion rejected it
     // (an assertion in debug builds). The port lets it fold (see
-    // REQUIRED_PROPS in mln_expression's parsing_context.rs).
+    // REQUIRED_PROPS in mln_style's expression/parsing_context.rs).
     let json = r#"{"version":8,"sources":{"s":{"type":"geojson","data":{"type":"FeatureCollection","features":[]}}},
         "layers":[{"id":"symbol","type":"symbol","source":"s",
         "layout":{"text-field":["case",["is-supported-script","မြန်မာ"],"local","fallback"]}}]}"#;

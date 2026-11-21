@@ -183,7 +183,7 @@ fn line_width(
     layer: &EvaluatedLayer<Line>,
     feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
     zoom: f32,
-    feature_state: &mln_style::expression::expression::FeatureState,
+    feature_state: &mln_style::expression::expr::FeatureState,
 ) -> f32 {
     let evaluated = &layer.paint;
     let line_width = evaluated.line_width.evaluate(&EvaluationContext::with_zoom_feature_state(

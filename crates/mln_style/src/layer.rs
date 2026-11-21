@@ -8,12 +8,11 @@ use std::any::Any;
 use std::sync::Arc;
 
 use feature::{Value, ValueObject};
-use mln_conversion::{Convertible, Error};
 use mln_style_types::VisibilityType;
 use mln_util::logging::{Event, Log};
 use mln_vec_map::VecSet;
 
-use crate::conversion::{Converter, convert, convert_filter};
+use crate::conversion::{Converter, Convertible, Error, convert, convert_filter};
 use crate::expression::{
     Dependency, EvaluationContext, Expr, Functions, GlobalStateMap, ParsingContext, Type, from_expression_value,
 };

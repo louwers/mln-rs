@@ -5,10 +5,10 @@
 
 use std::sync::Arc;
 
-use mln_expression::format_expression::FormatExpressionSection;
-use mln_expression::format_section_override::{FormatSectionOverride, OverrideDefault};
-use mln_expression::value::from_expression_value;
 use mln_style::evaluated::Evaluated;
+use mln_style::expression::format_expression::FormatExpressionSection;
+use mln_style::expression::format_section_override::{FormatSectionOverride, OverrideDefault};
+use mln_style::expression::value::from_expression_value;
 use mln_style::expression::{Dependency, Expr, Formatted, FormattedSection, GlobalStateMap, Type};
 use mln_style::properties::OverridableSection as _;
 use mln_style::property_expression::PropertyExpression;

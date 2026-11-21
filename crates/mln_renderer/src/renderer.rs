@@ -436,7 +436,7 @@ impl Renderer {
         source_id: &str,
         source_layer_id: Option<&str>,
         feature_id: &str,
-        state: &mln_style::expression::expression::FeatureState,
+        state: &mln_style::expression::expr::FeatureState,
     ) {
         self.orchestrator.set_feature_state(source_id, source_layer_id, feature_id, state);
     }
@@ -448,7 +448,7 @@ impl Renderer {
         source_id: &str,
         source_layer_id: Option<&str>,
         feature_id: &str,
-    ) -> mln_style::expression::expression::FeatureState {
+    ) -> mln_style::expression::expr::FeatureState {
         self.orchestrator.feature_state(source_id, source_layer_id, feature_id)
     }
 

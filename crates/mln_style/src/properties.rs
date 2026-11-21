@@ -636,13 +636,13 @@ pub trait OverridableSection {
     fn has_text_color(&self) -> bool;
 }
 
-impl OverridableSection for mln_expression::formatted::FormattedSection {
+impl OverridableSection for crate::expression::formatted::FormattedSection {
     fn has_text_color(&self) -> bool {
         self.text_color.is_some()
     }
 }
 
-impl OverridableSection for mln_expression::format_expression::FormatExpressionSection {
+impl OverridableSection for crate::expression::format_expression::FormatExpressionSection {
     fn has_text_color(&self) -> bool {
         self.text_color.is_some()
     }

@@ -14,10 +14,10 @@
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use mln_conversion::{Convertible, Error as ConversionError};
 use mln_storage::response::Reason;
 use mln_storage::{FileSource, LoadingMethod, Request, Resource, Response, StoragePolicy};
 use mln_style::Source;
+use mln_style::conversion::{Convertible, Error as ConversionError};
 use mln_style::expression::Functions;
 use mln_style::layer_type::SourceKind;
 use mln_style::source_type::{SourceData, SourceTypeInfo, StyleSourceType};

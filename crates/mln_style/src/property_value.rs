@@ -1,10 +1,9 @@
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use mln_conversion::{Convertible, Error};
 use mln_vec_map::VecSet;
 
-use crate::conversion::{Converter, convert_property_value};
+use crate::conversion::{Converter, Convertible, Error, convert_property_value};
 use crate::conversion_impl::{ValueFactory, make_style_property};
 use crate::evaluated::{Evaluated, Evaluation};
 use crate::expression::{Dependency, Functions, Type, ValueConverter, global_state_refs_intersect};

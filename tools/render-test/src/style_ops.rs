@@ -1,6 +1,6 @@
-use mln_conversion::Convertible;
 use mln_map::Map;
 use mln_map_types::CameraOptions;
+use mln_style::conversion::Convertible;
 use mln_style::{Edit, Style};
 
 use crate::runner::MapError;
@@ -44,7 +44,7 @@ pub(crate) fn add_layer(style: &mut Style, json: &str) -> Result<(), MapError> {
         Ok(value) => value,
         Err(e) => return Err(MapError::Conversion(e.to_string())),
     };
-    let mut error = mln_conversion::Error::default();
+    let mut error = mln_style::conversion::Error::default();
     let Some(layer) = mln_style::conversion::convert_layer(style.registry(), &Convertible::from(&value), &mut error)
     else {
         return Err(MapError::Conversion(error.message));
@@ -60,7 +60,7 @@ pub(crate) fn set_layer_filter(
     layer_name: &str,
     filter: &serde_json::Value,
 ) -> Result<(), MapError> {
-    let mut error = mln_conversion::Error::default();
+    let mut error = mln_style::conversion::Error::default();
     let Some(filter) =
         mln_style::conversion::convert_filter(&Convertible::from(filter), style.registry().functions(), &mut error)
     else {
@@ -90,7 +90,7 @@ pub(crate) fn add_source(map: &mut Map, source_name: &str, json: &str) -> Result
         Ok(value) => value,
         Err(e) => return Err(MapError::Conversion(e.to_string())),
     };
-    let mut error = mln_conversion::Error::default();
+    let mut error = mln_style::conversion::Error::default();
     let registry = map.style().registry();
     let Some(source) =
         mln_style::conversion::convert_source(&Convertible::from(&value), &mut error, source_name, registry)
@@ -107,7 +107,7 @@ pub(crate) fn set_light(style: &mut Style, json: &str) -> Result<(), MapError> {
         Ok(value) => value,
         Err(e) => return Err(MapError::Conversion(e.to_string())),
     };
-    let mut error = mln_conversion::Error::default();
+    let mut error = mln_style::conversion::Error::default();
     let Some(light) =
         mln_style::conversion::convert_light(&Convertible::from(&value), style.registry().functions(), &mut error)
     else {

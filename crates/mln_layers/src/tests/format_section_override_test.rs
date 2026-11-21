@@ -7,17 +7,17 @@ use std::borrow::Cow;
 use std::sync::Arc;
 
 use feature::{PropertyMap, Value as MbglValue};
-use mln_conversion::Convertible;
-use mln_expression::dsl::{format_str, get_str, literal_str, string, to_color};
-use mln_expression::expression::{Dependency, EvaluationContext, Expr, GlobalStateMap};
-use mln_expression::format_expression::{FormatExpression, FormatExpressionSection};
-use mln_expression::formatted::{Formatted, FormattedSection};
-use mln_expression::match_::Match;
-use mln_expression::parsing_context::ParsingContext;
-use mln_expression::type_::Type;
-use mln_expression::value::{ObjectType, Value};
+use mln_style::conversion::Convertible;
 use mln_style::evaluated::Evaluated;
 use mln_style::expression::Functions;
+use mln_style::expression::dsl::{format_str, get_str, literal_str, string, to_color};
+use mln_style::expression::expr::{Dependency, EvaluationContext, Expr, GlobalStateMap};
+use mln_style::expression::format_expression::{FormatExpression, FormatExpressionSection};
+use mln_style::expression::formatted::{Formatted, FormattedSection};
+use mln_style::expression::match_::Match;
+use mln_style::expression::parsing_context::ParsingContext;
+use mln_style::expression::type_::Type;
+use mln_style::expression::value::{ObjectType, Value};
 use mln_style::layer_type::{ErasedLayerStyle as _, LayerStyle};
 use mln_style::properties::{Transitionable, Transitioning};
 use mln_style::property_expression::PropertyExpression;
@@ -318,7 +318,7 @@ fn symbol_layer_overrides() {
         };
 
         let mut ctx = ParsingContext::new(&Functions::with_builtins());
-        let state_expression = mln_expression::compound_expression::create_compound_expression(
+        let state_expression = mln_style::expression::compound_expression::create_compound_expression(
             "global-state",
             vec![literal_str("labelColor")],
             &mut ctx,

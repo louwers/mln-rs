@@ -15,9 +15,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use mln_conversion::Convertible;
 use mln_layers::{Background, BackgroundPaintProperties};
 use mln_rs::builtin_registry;
+use mln_style::conversion::Convertible;
 use mln_style::expression::{EvaluationContext, Functions, Image};
 use mln_style::layer::Layer;
 use mln_style::layer_type::LayerStyle;

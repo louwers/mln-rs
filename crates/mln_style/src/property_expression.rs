@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
-use mln_expression::range::Range;
-use mln_expression::value::from_expression_values;
 use mln_util::serialization::shared;
 use mln_vec_map::VecSet;
 
+use crate::expression::range::Range;
+use crate::expression::value::from_expression_values;
 use crate::expression::{
     Dependency, EvaluationContext, Expr, GlobalStateMap, Value, ValueConverter, ZoomCurvePtr,
     collect_global_state_refs, find_zoom_curve_checked,

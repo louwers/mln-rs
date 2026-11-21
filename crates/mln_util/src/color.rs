@@ -444,7 +444,7 @@ impl Color {
     }
 
     /// Whether the "rgba" expression of these values makes this color: the
-    /// premultiplication of `mln_expression`'s `rgba`.
+    /// premultiplication of `mln_style`'s `rgba` expression.
     fn is_made_by(&self, [r, g, b, a]: [f64; 4]) -> bool {
         let premultiplied = |c: f64| (c / 255.0 * a) as f32;
         premultiplied(r) == self.r && premultiplied(g) == self.g && premultiplied(b) == self.b && a as f32 == self.a

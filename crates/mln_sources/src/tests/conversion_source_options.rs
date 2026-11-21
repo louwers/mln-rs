@@ -1,6 +1,5 @@
-use mln_conversion::Convertible;
-use mln_style::conversion::Error;
 use mln_style::conversion::source::convert_source;
+use mln_style::conversion::{Convertible, Error};
 use mln_style::layer_type::SourceKind;
 use mln_style::source_type::Source;
 use mln_util::tileset::{PartialTileset, RasterEncoding, VectorEncoding};

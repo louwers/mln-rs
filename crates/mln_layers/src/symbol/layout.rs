@@ -18,15 +18,14 @@ use std::sync::Arc;
 
 use geometry::Point;
 use glam::Vec2;
-use mln_expression::Value;
-use mln_expression::formatted::K_FORMATTED_SECTION_TEXT_COLOR;
 use mln_map_types::MapMode;
 use mln_renderer::layer::{
     BucketParameters, BuildParams, EvaluatedLayer, FeatureIndexBuilder, Indexed, Layout, LayoutParameters, Resolved,
     ShapeResults, SourceLayer, layers_by_id,
 };
 use mln_style::evaluated::Evaluated;
-use mln_style::expression::{EvaluationContext, GlobalStateMap};
+use mln_style::expression::formatted::K_FORMATTED_SECTION_TEXT_COLOR;
+use mln_style::expression::{EvaluationContext, GlobalStateMap, Value};
 use mln_style::property_value::PropertyValue;
 use mln_style::{PropertyEvaluationParameters, StyleValue as _};
 use mln_style_types::image::{ImagePositions, ImageType};
@@ -210,7 +209,7 @@ impl GlyphTypeTables {
 
 #[must_use]
 pub(crate) fn section_options_to_value(options: &SectionOptions) -> Value {
-    let mut result = mln_expression::value::ObjectType::new();
+    let mut result = mln_style::expression::value::ObjectType::new();
     // TODO: Data driven properties that can be overridden on per section
     // basis. TextOpacity TextHaloColor TextHaloWidth TextHaloBlur
     if let Some(text_color) = options.text_color {

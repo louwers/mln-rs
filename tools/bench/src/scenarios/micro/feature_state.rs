@@ -100,7 +100,7 @@ fn states(data: &TileData, first: usize) -> LayerFeatureStates {
         for index in 0..layer.len() {
             let feature = layer.feature(index).expect("a feature that decodes");
             let Some(id) = feature_id_to_string(&feature.get_id()) else { continue };
-            let mut state = mln_style::expression::expression::FeatureState::new();
+            let mut state = mln_style::expression::expr::FeatureState::new();
             state.insert("selected".to_owned(), feature::Value::Bool((index + first).is_multiple_of(2)));
             layer_states.insert(id, state);
         }

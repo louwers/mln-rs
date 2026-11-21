@@ -23,8 +23,6 @@ runtime = ["dep:mln_runtime"]
 [dependencies]
 feature.workspace = true
 geojson.workspace = true
-mln_conversion.workspace = true
-mln_expression.workspace = true
 mln_geojson.workspace = true
 mln_image.workspace = true
 mln_map_types.workspace = true

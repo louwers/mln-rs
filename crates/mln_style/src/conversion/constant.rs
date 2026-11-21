@@ -345,9 +345,9 @@ impl Converter for Vec<String> {
     }
 }
 
-/// Converts with `mln_expression::formatted::convert_formatted`.
-impl Converter for mln_expression::formatted::Formatted {
+/// Converts with `crate::expression::formatted::convert_formatted`.
+impl Converter for crate::expression::formatted::Formatted {
     fn convert(value: &Convertible<'_>, error: &mut Error) -> Option<Self> {
-        mln_expression::formatted::convert_formatted(value, error)
+        crate::expression::formatted::convert_formatted(value, error)
     }
 }
