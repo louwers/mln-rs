@@ -428,8 +428,9 @@ impl<'a, 't, R: Send + 'static> LoadContext<'a, 't, R> {
         self.tile.unsettle();
     }
 
-    /// Drops the tile's data and style, so that it lays out anew once it
-    /// has both again.
+    /// Drops a geometry tile's data and style, so that it lays out anew once
+    /// it has both again. A raster or DEM tile's decodes keep running, so an
+    /// origin of image tiles doesn't call it.
     pub fn reset(&mut self) {
         self.tile.reset();
     }
