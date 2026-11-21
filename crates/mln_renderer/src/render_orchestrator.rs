@@ -1461,6 +1461,22 @@ impl RenderOrchestrator {
         self.layers.iter_mut().any(|layer| layer.base().style.base().id == id && layer.keeps_vertices_of(vertices))
     }
 
+    /// How many polygon centroids the fill-extrusion buckets of the cover
+    /// tiles of source `id` hold.
+    #[cfg(test)]
+    pub(crate) fn extrusion_centroids(&self, id: &str) -> usize {
+        use crate::buckets::fill_extrusion_bucket::FillExtrusionBucket;
+        let Some(source) = self.source_tiles(id) else {
+            return 0;
+        };
+        let geometry = source.cover().filter_map(|tile| tile.contents()?.geometry());
+        let buckets = geometry.flat_map(|contents| contents.result.layer_render_data.buckets());
+        buckets
+            .filter_map(|bucket| bucket.downcast_ref::<FillExtrusionBucket>())
+            .map(|bucket| bucket.centroids.len())
+            .sum()
+    }
+
     /// How many placements the controller has committed.
     #[cfg(test)]
     pub(crate) fn placement_commits(&self) -> u64 {

@@ -1977,6 +1977,43 @@ fn a_map_without_terrain_keeps_no_extrusion_centroids() {
     assert!(keeps(&mut map, ID_FILL_EXTRUSION_CENTROID_ATTRIBUTE), "the roofs' centroids");
 }
 
+/// A fill extrusion's tile laid out over terrain keeps its layout when the
+/// terrain goes, but new data for its GeoJSON source lays out for the map as
+/// it is then, flat, without centroids.
+#[test]
+fn new_data_after_terrain_goes_lays_out_no_extrusion_centroids() {
+    let mut map = DrapedMap::new(Tiles::default());
+    add_layer(&mut map, &red_extrusion(LatLng::new(-10.0, 10.0).unwrap(), 2.0, 500.0), None);
+    map.settle();
+    assert_ne!(0, map.renderer.extrusion_centroids("block"), "centroids over terrain");
+
+    map.edit(Edit::SetTerrain(None));
+    map.settle();
+    assert_ne!(0, map.renderer.extrusion_centroids("block"), "the layout laid out over terrain");
+
+    let moved = LatLng::new(-10.0, 20.0).unwrap();
+    let (west, east, south, north) = (19.0, 21.0, -11.0, -9.0);
+    let geojson: geojson::GeoJson = format!(
+        r#"{{"type": "Polygon", "coordinates": [[
+            [{west}, {south}], [{east}, {south}], [{east}, {north}], [{west}, {north}], [{west}, {south}]
+        ]]}}"#
+    )
+    .parse()
+    .unwrap();
+    let data = mln_style::sources::geojson::create_geojson_data(geojson, &GeoJSONOptions::default_options()).unwrap();
+    map.edit(GeoJsonSourceType::set_data("block", Some(data)));
+    // The new data's tiles cut on the pool, unseen by the tile events.
+    for _ in 0..1000 {
+        map.frame();
+        if red(map.pixel_at(&moved, 500.0)) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(red(map.pixel_at(&moved, 500.0)), "the new data's extrusion");
+    assert_eq!(0, map.renderer.extrusion_centroids("block"), "centroids on a flat map");
+}
+
 /// A red square icon 16 px a side, `marker`, at `location`, which the style
 /// of `map` gets as an image.
 fn red_icon(map: &mut DrapedMap, location: LatLng) {

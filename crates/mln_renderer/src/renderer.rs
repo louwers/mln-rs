@@ -288,6 +288,13 @@ impl Renderer {
         self.orchestrator.keeps_vertices_of(id, vertices)
     }
 
+    /// How many polygon centroids the fill-extrusion buckets of the cover
+    /// tiles of source `id` hold.
+    #[cfg(test)]
+    pub(crate) fn extrusion_centroids(&self, id: &str) -> usize {
+        self.orchestrator.extrusion_centroids(id)
+    }
+
     /// How many placements the renderer has committed.
     #[cfg(test)]
     pub(crate) fn placement_commits(&self) -> u64 {

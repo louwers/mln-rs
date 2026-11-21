@@ -145,6 +145,12 @@ pub(crate) struct SourceInfo {
     counter: u64,
     /// The tiles' jobs run on the render thread as soon as they're ready.
     pub(crate) synchronous: bool,
+    /// Whether the tiles' layouts are for terrain, as this frame's
+    /// [`TileParameters::layout_terrain`] says. Every layout job takes it,
+    /// whatever the tile's last layout was for.
+    ///
+    /// [`TileParameters::layout_terrain`]: crate::tile_parameters::TileParameters::layout_terrain
+    pub(crate) layout_terrain: bool,
     /// The data has one layer, which a source query gets whatever source
     /// layer it names.
     pub(crate) single_layer: bool,
@@ -160,6 +166,7 @@ impl SourceInfo {
             origin: None,
             counter: 0,
             synchronous: false,
+            layout_terrain: false,
             single_layer,
             feature_state: SourceFeatureState::new(),
         }

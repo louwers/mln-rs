@@ -550,6 +550,9 @@ impl<'a> TileMut<'a> {
                         (None, answer, Arc::clone(self.store.images.available_images()))
                     }
                 };
+                // For the frame's terrain, not that of the last layout: new
+                // data after terrain went lays out flat.
+                layout.params.terrain = self.source.layout_terrain;
                 let input = if cached {
                     DataInput::Cached(data.key)
                 } else {

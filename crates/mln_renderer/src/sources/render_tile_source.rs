@@ -349,6 +349,8 @@ impl RenderSource for RenderTileSource {
         let Some((source, ctx)) = store.source_mut(self.key) else {
             return;
         };
+        // Before the origin's update, whose new data may lay out at once.
+        source.info.layout_terrain = parameters.layout_terrain;
         let origin_update = OriginUpdate { parameters, needs_relayout, fast_pfor_enabled: self.fast_pfor_enabled };
         let Some(cover) = self.origin.update(&previous, &self.base.style_source, source, ctx, &origin_update) else {
             return;
