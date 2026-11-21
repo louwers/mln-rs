@@ -1,13 +1,27 @@
 use mln_gfx::gpu::ShaderKey;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
-use mln_style_types::AlignmentType;
 
 use crate::draw_objects::{DrawObjects, Textures};
 use crate::gfx::context::Context;
 use crate::gfx::store::SharedTexture;
 use crate::paint_parameters::PaintParameters;
 use crate::tile_render_data::TileAtlasTextures;
+
+/// How a draw samples its tile's icon atlas.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IconFilter {
+    /// Linearly, always.
+    Linear,
+    /// Linearly while the camera moves or the images don't lie flat on
+    /// the screen: the view is pitched, or they turn with the map
+    /// (`map_aligned`). Otherwise nearest, so that an image drawn at its
+    /// own size stays sharp.
+    NearestWhenStill {
+        /// Whether the images turn with the map.
+        map_aligned: bool,
+    },
+}
 
 /// Gives a draw the textures of its tile's glyph and icon atlases, which
 /// change after the draw is made.
@@ -19,29 +33,21 @@ pub struct AtlasBinding {
     icon_texture_id: Option<u8>,
     glyph_texture_id: Option<u8>,
     is_text: bool,
-    sdf_icons: bool,
-    rotation_alignment: AlignmentType,
-    icon_scaled: bool,
-    text_size_is_zoom_constant: bool,
+    icon_filter: IconFilter,
 }
 
 impl AtlasBinding {
     /// The binding of the tile's `atlases` to a draw's textures
     /// `icon_texture_id` and `glyph_texture_id`, those it samples, for a
-    /// draw of text or icons (`is_text`) that samples them as the layer's
-    /// values say: SDF icons, aligned to the map or the viewport, scaled,
-    /// and of text whose size is the same at every zoom.
-    #[expect(clippy::too_many_arguments, reason = "each argument is a field of the binding")]
+    /// draw of text or of icons (`is_text`), whose icon atlas filters as
+    /// `icon_filter` says.
     #[must_use]
     pub fn new(
         atlases: Option<TileAtlasTextures>,
         icon_texture_id: Option<usize>,
         glyph_texture_id: Option<usize>,
         is_text: bool,
-        sdf_icons: bool,
-        rotation_alignment: AlignmentType,
-        icon_scaled: bool,
-        text_size_is_zoom_constant: bool,
+        icon_filter: IconFilter,
     ) -> Self {
         debug_assert_ne!(icon_texture_id, glyph_texture_id);
         let texture_id = |id: Option<usize>| id.and_then(|id| u8::try_from(id).ok());
@@ -50,16 +56,13 @@ impl AtlasBinding {
             icon_texture_id: texture_id(icon_texture_id),
             glyph_texture_id: texture_id(glyph_texture_id),
             is_text,
-            sdf_icons,
-            rotation_alignment,
-            icon_scaled,
-            text_size_is_zoom_constant,
+            icon_filter,
         }
     }
 
     /// The textures of a draw with `shader`: the atlases', in the slots the
-    /// shader samples them from. The engine sets how they filter as the
-    /// frame's view asks before each draw.
+    /// shader samples them from. The engine sets how they filter before
+    /// each draw.
     #[must_use]
     pub fn textures(&self, shader: &ShaderKey) -> Textures {
         let mut textures = Textures::default();
@@ -69,14 +72,13 @@ impl AtlasBinding {
 
     /// Gives the draw the atlases' textures before it draws, and sets the
     /// samplers of the atlases, which the tile's draws share, to filter as
-    /// the frame's view asks.
+    /// the binding's [`IconFilter`] asks in the frame.
     pub(crate) fn bind(&self, objects: &mut DrawObjects, parameters: &mut PaintParameters<'_>) {
-        let state = parameters.frame.view;
-        let transformed = self.rotation_alignment == AlignmentType::Map || state.pitch() != 0.0;
-        let linear_filter_for_icons = if self.is_text {
-            parameters.frame.camera_moving || transformed || !self.text_size_is_zoom_constant
-        } else {
-            self.sdf_icons || parameters.frame.camera_moving || self.icon_scaled || transformed
+        let linear_filter_for_icons = match self.icon_filter {
+            IconFilter::Linear => true,
+            IconFilter::NearestWhenStill { map_aligned } => {
+                parameters.frame.camera_moving || map_aligned || parameters.frame.view.pitch() != 0.0
+            }
         };
         if self.glyph_texture_id.is_some()
             && let Some((glyph, icon)) = &self.atlases

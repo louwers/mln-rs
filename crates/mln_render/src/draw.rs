@@ -44,7 +44,7 @@ pub use crate::bucket_geometry::{
 };
 pub use crate::draw_objects::{DrawGeometry, DrawObjects, Textures, copy_shared_attributes, raw_vertices};
 pub use crate::frame_projection::zero_to_one_clip_z;
-pub use crate::gfx::atlas_binding::AtlasBinding;
+pub use crate::gfx::atlas_binding::{AtlasBinding, IconFilter};
 pub use crate::gfx::context::Context;
 pub use crate::gfx::indexes::{DrawIndexes, Indexes};
 pub use crate::gfx::store::{SharedIndexes, SharedTexture};
