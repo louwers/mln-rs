@@ -303,8 +303,9 @@ impl OfflineRegionStatus {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct OfflineRegionExpiry {
     /// When the first of the region's resources goes stale, which may have
-    /// passed; `None` if none ever does. Maps revalidate a stale resource
-    /// before they use it, and a download refreshes it.
+    /// passed; `None` if none ever does. Maps show a stale resource while
+    /// they revalidate it, unless it must revalidate first, and a download
+    /// refreshes it.
     pub stale_after: Option<Timestamp>,
     /// When the first of its resources stops standing in for the server
     /// while maps can't reach it, which may have passed; `None` if none ever

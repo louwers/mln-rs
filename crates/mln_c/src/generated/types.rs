@@ -167,9 +167,9 @@ pub type mln_network_status = u32;
 /** Deletes the ambient cache's resources and frees the space they used.
  Offline regions keep their resources.*/
 pub const MLN_CACHE_DATABASE_OPERATION_CLEAR: mln_cache_database_operation = 1;
-/** Keeps the ambient cache's resources, but makes maps check each one with the
- server before they use it again. Offline regions keep their resources as
- they are.*/
+/** Keeps the ambient cache's resources, but makes them stale: maps check each
+ one with the server when they next use it, and show it meanwhile. Offline
+ regions keep their resources as they are.*/
 pub const MLN_CACHE_DATABASE_OPERATION_INVALIDATE: mln_cache_database_operation = 2;
 /** Compacts the whole database file to free the disk space that it no longer
  uses.*/
@@ -1518,9 +1518,9 @@ pub type mln_offline_region_expiry_fields = u32;
 pub struct mln_offline_region_expiry {
     pub fields: mln_offline_region_expiry_fields,
     /** When the first of the region's resources goes stale, which may have
- passed. Maps check a stale resource with the server before they use it,
- and the region's download refreshes it. Without it, no resource ever goes
- stale.*/
+ passed. Maps show a stale resource while they check it with the server,
+ unless it must be checked first, and the region's download refreshes it.
+ Without it, no resource ever goes stale.*/
     pub stale_after_unix_ms: i64,
     /** When the first of the region's resources stops standing in while maps
  can't reach the server, which may have passed. Refresh the region before

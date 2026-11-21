@@ -46,8 +46,9 @@ pub enum CacheDatabaseOperation {
     /// Deletes the ambient cache's resources and frees their space. Offline
     /// regions keep theirs.
     Clear,
-    /// Keeps the ambient cache's resources, but makes maps check each with
-    /// its server before they use it again. Offline regions are unaffected.
+    /// Keeps the ambient cache's resources, but makes them stale: maps check
+    /// each with its server when they next use it, and show it meanwhile.
+    /// Offline regions are unaffected.
     Invalidate,
     /// Compacts the database file to free the space it no longer uses.
     Pack,

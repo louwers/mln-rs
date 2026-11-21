@@ -798,8 +798,8 @@ impl OfflineDatabase {
         Ok(true)
     }
 
-    /// Makes maps revalidate the ambient cache's copies before they use
-    /// them. See `invalidate`.
+    /// Makes the ambient cache's copies stale, so maps revalidate them when
+    /// they next use them. See `invalidate`.
     pub(crate) fn invalidate_ambient_cache(&mut self) -> DbResult<()> {
         let result = self.invalidate(
             "id NOT IN (SELECT tile_id FROM region_tiles)",
@@ -809,8 +809,8 @@ impl OfflineDatabase {
         self.report(result, "invalidate ambient cache")
     }
 
-    /// Makes maps revalidate the region's copies before they use them, and
-    /// its next download refresh them. See `invalidate`.
+    /// Makes the region's copies stale, so maps revalidate them when they
+    /// next use them and its next download refreshes them. See `invalidate`.
     pub fn invalidate_region(&mut self, region_id: i64) -> DbResult<()> {
         let result = self.invalidate(
             "id IN (SELECT tile_id FROM region_tiles WHERE region_id = ?1)",
@@ -821,10 +821,10 @@ impl OfflineDatabase {
     }
 
     /// Makes the tiles and resources whose ids match the conditions stale
-    /// now, without letting maps show them while they revalidate. A copy
-    /// keeps standing in for the server as long as it could before: a fresh
-    /// one that must revalidate once stale may stand in until it would have
-    /// gone stale.
+    /// now. A copy keeps standing in for the server as long as it could
+    /// before, and so keeps showing while it revalidates: a fresh one that
+    /// must revalidate once stale may stand in until it would have gone
+    /// stale.
     fn invalidate(&mut self, tiles: &str, resources: &str, params: impl rusqlite::Params + Copy) -> DbResult<()> {
         self.check_flags()?;
         let now = now().secs_since_epoch();

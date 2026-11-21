@@ -789,9 +789,9 @@ typedef struct mln_offline_region_expiry {
   mln_offline_region_expiry_fields fields;
   /**
    * When the first of the region's resources goes stale, which may have
-   * passed. Maps check a stale resource with the server before they use it,
-   * and the region's download refreshes it. Without it, no resource ever goes
-   * stale.
+   * passed. Maps show a stale resource while they check it with the server,
+   * unless it must be checked first, and the region's download refreshes it.
+   * Without it, no resource ever goes stale.
    */
   int64_t stale_after_unix_ms
     MLN_BINDING("mask=fields;bit=MLN_OFFLINE_REGION_EXPIRY_STALE_AFTER");
@@ -960,8 +960,8 @@ MLN_API mln_status mln_runtime_set_offline_region_download_state(
 ) MLN_NOEXCEPT;
 
 /**
- * Makes maps check each resource of the offline region `region_id` with the
- * server before they use it.
+ * Makes each resource of the offline region `region_id` stale, so maps check
+ * it with the server when they next use it.
  *
  * The region keeps its resources, and each one stands in while maps can't
  * reach the server for as long as it could before. Starting the region's
