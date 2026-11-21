@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use feature::Value;
 use geo_types::{LineString, Point};
@@ -1070,17 +1070,26 @@ fn style_loaded_signal() {
 /// A map over an `OnlineFileSource` that has made one transfer from
 /// `server`. The process's first transfer sets up the platform's HTTP
 /// stack, and on Apple platforms that reads the test binary's directory,
-/// which holds every crate's object files and takes seconds to read on a
-/// busy machine. Doing it here keeps that out of the tests' timed waits.
+/// which holds every crate's object files. In a large build directory on a
+/// busy machine that takes longer than the stack's own 60 s request
+/// timeout, so a transfer that times out is asked again, for up to five
+/// minutes. Doing it here keeps the setup out of the tests' timed waits.
 fn online_file_source_test(server: &HttpServer) -> MapTest<OnlineFileSource> {
     let run_loop = TestLoop::new();
     let file_source = Arc::new(OnlineFileSource::new(Arc::new(NetworkStatus::new())));
-    let (sent, received) = std::sync::mpsc::channel();
-    let _request = file_source.request(&Resource::source(&server.url("/test")), move |response| {
-        let _ = sent.send(response.error);
-    });
-    let error = received.recv_timeout(Duration::from_secs(60)).expect("the first transfer finishes within 60 s");
-    assert_eq!(None, error);
+    let deadline = Instant::now() + Duration::from_secs(300);
+    loop {
+        let (sent, received) = std::sync::mpsc::channel();
+        let _request = file_source.request(&Resource::source(&server.url("/test")), move |response| {
+            let _ = sent.send(response.error);
+        });
+        let error = received.recv_timeout(Duration::from_secs(120)).expect("a transfer answers within 120 s");
+        match error {
+            None => break,
+            Some(error) if error.reason == Reason::Connection && Instant::now() < deadline => {}
+            Some(error) => panic!("the first transfer failed: {error:?}"),
+        }
+    }
     MapTest::create(run_loop, file_source, 1.0, MapMode::Static)
 }
 
@@ -2949,13 +2958,13 @@ fn still_image_after_tile_error() {
         .unwrap();
     test.map().process_events();
     test.map().render_still().unwrap();
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(5);
     let result = loop {
         test.map().process_events();
         if let Some(result) = test.map().take_still_image() {
             break result;
         }
-        assert!(std::time::Instant::now() < deadline, "the still image did not finish");
+        assert!(Instant::now() < deadline, "the still image did not finish");
         if !test.run_loop.run_once() {
             std::thread::sleep(Duration::from_millis(1));
         }
