@@ -30,7 +30,7 @@ use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
 use crate::gfx::uniform_buffer::UniformBufferArray;
 use crate::layer_composite::Composite;
-use crate::paint_parameters::{Composited, PaintParameters};
+use crate::paint_parameters::{Composited, PaintParameters, StencilClear};
 use crate::render_pass::RenderPass;
 
 /// The order of a layer's draws that its draws' ids don't give: lower
@@ -1099,7 +1099,7 @@ pub(crate) struct DrawGroups {
     pub(crate) clip_tiles: Vec<UnwrappedTileID>,
     /// The tiles whose masks clear the stencil buffer, also in
     /// `clip_tiles` ([`PaintParameters::stencil_clear`]).
-    pub(crate) stencil_clear: Vec<UnwrappedTileID>,
+    pub(crate) stencil_clear: StencilClear,
     pub(crate) composited: Vec<(SimpleIdentity, Composite)>,
 }
 
@@ -1111,7 +1111,7 @@ impl DrawGroups {
     /// clip to the same tiles, which are added once.
     pub(crate) fn of<'a>(
         visit_groups: impl FnOnce(&mut dyn FnMut(DrawGroup<'a>)),
-        stencil_clear_tiles: impl FnOnce(&[UnwrappedTileID]) -> Vec<UnwrappedTileID>,
+        stencil_clear_tiles: impl FnOnce(&[UnwrappedTileID]) -> StencilClear,
     ) -> DrawGroups {
         let mut groups = DrawGroups::default();
         let mut last: Option<&[UnwrappedTileID]> = None;

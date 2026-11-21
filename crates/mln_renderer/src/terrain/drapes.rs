@@ -57,7 +57,7 @@ use crate::gfx::store::SharedTexture;
 use crate::layer_composite::{CompositeTextures, LayerComposite};
 use crate::layer_drawing::{ChangedBuckets, DrapeDrawing, DrawGroups, DrawOrder};
 use crate::layer_type::ErasedEvaluatedLayer;
-use crate::paint_parameters::{OpenPass, PaintParameters, TransformParameters};
+use crate::paint_parameters::{OpenPass, PaintParameters, StencilClear, TransformParameters};
 use crate::render_layer::{Atlases, LayerSource, RenderLayer};
 use crate::render_pass::RenderPass;
 use crate::render_tile::TileStamp;
@@ -853,7 +853,7 @@ impl Drapes {
                             layer.drawing.visit_groups(visit);
                         }
                     },
-                    |tiles| if tiles.is_empty() { Vec::new() } else { stencil_clear },
+                    |tiles| if tiles.is_empty() { StencilClear::new() } else { stencil_clear },
                 );
                 drape.clip_masks.update(gpu, context, false, &drape.groups.clip_tiles, |tile| {
                     to_projection_ubo(&transform.projection_data_for_tile(tile, false))

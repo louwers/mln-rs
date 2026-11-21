@@ -15,6 +15,7 @@ use mln_util::identity::SimpleIdentity;
 use mln_util::range::Range;
 use mln_util::size::Size;
 use mln_vec_map::VecMap;
+use smallvec::SmallVec;
 
 use crate::clip_masks::ClipMasks;
 use crate::frame::Frame;
@@ -172,6 +173,10 @@ impl OpenPass {
     }
 }
 
+/// The tiles whose masks clear the stencil buffer: one per world copy in
+/// view, so usually one, and held inline, since every frame makes them.
+pub(crate) type StencilClear = SmallVec<[UnwrappedTileID; 2]>;
+
 /// The state of a frame's encode: the renderer's GPU state, which the
 /// encode changes, the frame's camera and values, and where its passes are.
 pub(crate) struct PaintParameters<'a> {
@@ -213,7 +218,7 @@ pub(crate) struct PaintParameters<'a> {
     /// The tiles whose masks `clear_stencil` draws zero with in the frame,
     /// from [`stencil_clear_tiles`](Self::stencil_clear_tiles); a drape
     /// draws its own tile's.
-    pub(crate) stencil_clear: Vec<UnwrappedTileID>,
+    pub(crate) stencil_clear: StencilClear,
 
     pub(crate) current_layer: u32,
     pub(crate) depth_range_size: f32,
@@ -280,7 +285,7 @@ impl<'a> PaintParameters<'a> {
             tile_clipping_mask_ids: VecMap::new(),
             next_stencil_id: 1,
             drape_tile: None,
-            stencil_clear: Vec::new(),
+            stencil_clear: StencilClear::new(),
             // The renderer sets these before use.
             current_layer: 0,
             depth_range_size: 1.0,
@@ -339,7 +344,7 @@ impl<'a> PaintParameters<'a> {
             tile_clipping_mask_ids: VecMap::new(),
             next_stencil_id: 1,
             drape_tile: Some(tile),
-            stencil_clear: Vec::new(),
+            stencil_clear: StencilClear::new(),
             current_layer: 0,
             depth_range_size: 1.0,
             terrain: false,
@@ -551,8 +556,8 @@ impl<'a> PaintParameters<'a> {
         if self.context.caps().clear_stencil_with_pass {
             self.restart_pass(gpu, LoadOp::Clear(0));
         } else {
-            let masks: Vec<_> = match self.drape_tile {
-                Some(tile) => vec![(tile, 0)],
+            let masks: SmallVec<[_; 2]> = match self.drape_tile {
+                Some(tile) => SmallVec::from_elem((tile, 0), 1),
                 None => self.stencil_clear.iter().map(|tile| (*tile, 0)).collect(),
             };
             self.draw_clip_masks(gpu, &masks);
@@ -566,17 +571,22 @@ impl<'a> PaintParameters<'a> {
     /// the drape's own tile in a drape and the world in each world copy of
     /// `clip_tiles` in the frame.
     #[must_use]
-    pub(crate) fn stencil_clear_tiles(&self, clip_tiles: &[UnwrappedTileID]) -> Vec<UnwrappedTileID> {
+    pub(crate) fn stencil_clear_tiles(&self, clip_tiles: &[UnwrappedTileID]) -> StencilClear {
+        let mut tiles = StencilClear::new();
         if self.context.caps().clear_stencil_with_pass || clip_tiles.is_empty() {
-            return Vec::new();
+            return tiles;
         }
         if let Some(tile) = self.drape_tile {
-            return vec![tile];
+            tiles.push(tile);
+            return tiles;
         }
-        let mut wraps: Vec<i16> = clip_tiles.iter().map(|tile| tile.wrap).collect();
-        wraps.sort_unstable();
-        wraps.dedup();
-        wraps.into_iter().map(|wrap| UnwrappedTileID::with_wrap(wrap, CanonicalTileID::new(0, 0, 0))).collect()
+        for tile in clip_tiles {
+            if !tiles.iter().any(|world| world.wrap == tile.wrap) {
+                tiles.push(UnwrappedTileID::with_wrap(tile.wrap, CanonicalTileID::new(0, 0, 0)));
+            }
+        }
+        tiles.sort_unstable();
+        tiles
     }
 
     /// Whether the draws go into a terrain tile's drape.
