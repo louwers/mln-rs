@@ -1820,6 +1820,34 @@ fn a_map_without_a_standing_layer_makes_no_texture_of_a_dem_tile_its_surface_doe
     assert_eq!(read + 1, textures, "the DEM tiles the surface reads, and the circle's tile's");
 }
 
+/// Once the data of the GeoJSON source of a circle that stands on the ground
+/// is cleared, the terrain loads no DEM tile for the source's tiles: after a
+/// pan, a frame is complete though the DEM tile the circle read hasn't come.
+#[test]
+fn a_source_whose_data_is_cleared_asks_for_no_dem_tile() {
+    let mut map = raised(10.0, 0.0);
+    // The DEM tile of the circle's tile of zoom 6, which the surface doesn't
+    // read.
+    *map.tiles.held.lock() = Some(("dem/", CanonicalTileID::new(6, 33, 33)));
+    let coarse = red_circle(LatLng::new(-10.0, 10.0086).unwrap())
+        .replace(r#""type": "geojson","#, r#""type": "geojson", "maxzoom": 6,"#);
+    add_layer(&mut map, &coarse, None);
+    map.settle();
+    assert_eq!(1, map.tiles.waiting.lock().len(), "the circle's DEM tile was requested");
+    assert!(!map.frame().0, "a frame waits for the circle's DEM tile");
+
+    map.edit(GeoJsonSourceType::set_data("point", None));
+    map.transform.jump_to(&CameraOptions { center: Some(LatLng::new(-10.0, 10.2).unwrap()), ..Default::default() });
+    let full = (0..1000).any(|_| {
+        let full = map.frame().0;
+        if !full {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        full
+    });
+    assert!(full, "a frame waits for a DEM tile nothing reads");
+}
+
 /// Once terrain turns off, a circle that stood on it draws with the flat
 /// variant, whose draws are made again without the ground, and the DEM
 /// textures go.

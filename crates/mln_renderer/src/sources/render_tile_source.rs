@@ -353,6 +353,8 @@ impl RenderSource for RenderTileSource {
         source.info.layout_terrain = parameters.layout_terrain;
         let origin_update = OriginUpdate { parameters, needs_relayout, fast_pfor_enabled: self.fast_pfor_enabled };
         let Some(cover) = self.origin.update(&previous, &self.base.style_source, source, ctx, &origin_update) else {
+            // No cover, so no ideal tiles for the terrain to load DEM tiles for.
+            source.ideal.clear();
             return;
         };
         let source_id = self.base.style_source.id();

@@ -169,7 +169,7 @@ pub(crate) struct SourceTiles {
     /// requests for a standing layer
     /// ([`TerrainCover::request_standing`](crate::terrain::TerrainCover::request_standing)).
     /// The benchmarks keep it always, for their measure of what a frame
-    /// shows (`crate::bench`).
+    /// shows (`crate::bench`). Empty after an update that made no cover.
     pub(crate) ideal: Vec<OverscaledTileID>,
 }
 
