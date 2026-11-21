@@ -165,8 +165,8 @@ impl Transform {
     ///
     /// When the fingers go down over a center the terrain clamps, the
     /// gesture holds the altitude the camera has: commands no longer ease
-    /// it while the fingers are down, and it takes `ALTITUDE` from every
-    /// running command that was given an altitude.
+    /// it while the fingers are down, and it takes `ALTITUDE`, alone, from
+    /// every running command that was given an altitude.
     fn gesture_phase_before(&mut self, phase: GesturePhase) {
         if phase != GesturePhase::None && (phase == GesturePhase::Begin || !self.gesture.active) {
             // A gesture that begins during the last one's momentum keeps its

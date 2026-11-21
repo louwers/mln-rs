@@ -585,12 +585,15 @@ impl Transform {
     /// Takes `fields` from the running commands, and returns the ones left
     /// with no fields, which the caller finishes.
     pub(super) fn release_fields(&mut self, fields: u16) -> Vec<Transition> {
+        let altitude_alone = if self.clamped() { ALTITUDE } else { 0 };
         for active in &mut self.transitions {
             let mut replaced = fields;
             // Only the fields it still owns are coupled: one that gave up its
-            // anchor and its center keeps the rest.
+            // anchor and its center keeps the rest. Over a clamped center the
+            // clamp decides the altitude, so the altitude alone takes no
+            // other field with it.
             let coupled = active.coupled_fields & active.fields;
-            if coupled & replaced != 0 {
+            if coupled & replaced & !altitude_alone != 0 {
                 replaced |= coupled;
             }
             active.fields &= !replaced;

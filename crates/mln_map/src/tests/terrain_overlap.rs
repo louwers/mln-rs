@@ -10,17 +10,17 @@ use std::time::Duration;
 use glam::DVec2;
 use mln_map_types::{ConstrainMode, Elevation, TransitionOutcome, View, ViewportMode};
 use mln_util::constants::DEFAULT_TRANSITION_EASE;
-use mln_util::geo::{LatLng, WrapMode};
+use mln_util::geo::{LatLng, ScreenCoordinate, WrapMode};
 use mln_util::hash::HashMap;
 use mln_util::queue::Queue;
 use mln_util::size::Size;
 use mln_util::time::Instant;
 
 use super::ground::{STYLE, flat, ground_event, pitchable, report};
-use super::terrain_camera::{FRAME, frames};
+use super::terrain_camera::{FRAME, frames, pixel};
 use super::terrain_rest::picture_moved;
 use crate::transform::{CameraCommandId, TerrainGround, Transform, TransformEvent};
-use crate::{AnimationOptions, CameraOptions, CameraUpdate, CameraUpdateMode};
+use crate::{AnimationOptions, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase};
 
 /// No more than a couple of pixels: the most the picture may move on the
 /// frame that brings the camera to rest.
@@ -199,6 +199,39 @@ fn a_center_ease_during_a_longer_zoom_leaves_the_zoom_its_end() {
     let center = run.rest.center(WrapMode::Wrapped);
     assert!((center.longitude() - 0.06).abs() < 1e-9, "{center:?}");
     run.assert_rests_without_a_jump(&*ground, "the zoom");
+}
+
+/// Fingers that go down 400 ms into an anchored zoom, with a gesture's
+/// update that sets only the roll, take neither the zoom nor the center
+/// from it, though the host passed the zoom an altitude: the zoom reaches
+/// the zoom it asked for and completes, with its anchor's ground under the
+/// anchor.
+#[test]
+fn fingers_down_leave_an_anchored_zoom_given_an_altitude_its_zoom() {
+    let anchor = ScreenCoordinate::new(120.0, 400.0);
+    for altitude in [None, Some(500.0)] {
+        let (mut transform, ground, clock) = transform_over_step();
+        let view = transform.view();
+        let grabbed = view.ground_under(&ScreenCoordinate::new(anchor.x, 512.0 - anchor.y), &*ground).unwrap();
+        let zoom = transform.ease_to(
+            &CameraOptions { zoom: Some(14.0), anchor: Some(anchor), center_altitude: altitude, ..Default::default() },
+            &over(1000),
+        );
+        let run = run_until_rest(&mut transform, clock, |transform, elapsed| {
+            if elapsed == Duration::from_millis(400) {
+                transform.update_camera(&CameraUpdate {
+                    camera: CameraOptions { roll: Some(5.0), ..Default::default() },
+                    phase: GesturePhase::Update,
+                    ..Default::default()
+                });
+            }
+        });
+        assert_eq!(TransitionOutcome::Completed, run.outcome(zoom), "{altitude:?}");
+        assert_eq!(14.0, run.rest.zoom(), "{altitude:?}");
+        let drawn = pixel(&run.rest, grabbed.world, grabbed.height);
+        let off = drawn.distance(DVec2::new(anchor.x, 512.0 - anchor.y));
+        assert!(off < 1.0, "{altitude:?}: the ground under the anchor moved {off} px");
+    }
 }
 
 /// An ease from zoom 11.5 to 13 on the globe at a pitch, into Mercator,

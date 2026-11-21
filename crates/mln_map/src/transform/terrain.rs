@@ -20,7 +20,7 @@
 //!   and ground that lands, leave the next frame to head on from where the
 //!   altitude is. Commands of the angles or the altitude alone hold it.
 //! - **A gesture** holds the altitude from when its fingers go down: it
-//!   takes the altitude from every running command, and holds the
+//!   takes the altitude, alone, from every running command, and holds the
 //!   altitude the camera has then, lifted over ground that reaches above
 //!   the eye or the near plane, through its momentum. A command of the
 //!   center or the zoom that runs once the fingers lift eases the altitude
@@ -44,7 +44,8 @@
 //!
 //! An altitude that a command passes places the center while the ground
 //! under the end is unknown, and moves the eye while no command of the
-//! center or the zoom runs; the clamp decides it everywhere else.
+//! center or the zoom runs; the clamp decides it everywhere else, so it
+//! takes no other field with it when a gesture or command takes it.
 //!
 //! The terrain moves a camera at rest, as ground loads or changes under it,
 //! the clamp turns on or the terrain goes, without camera events, as in GL
