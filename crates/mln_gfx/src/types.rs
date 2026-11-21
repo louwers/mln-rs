@@ -49,7 +49,7 @@ pub enum DepthFunctionType {
     Always,
 }
 
-/// Depth buffer masking type (`enum class DepthMaskType : bool`)
+/// Whether a draw writes the depth buffer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum DepthMaskType {
     /// The depth buffer is not written to
