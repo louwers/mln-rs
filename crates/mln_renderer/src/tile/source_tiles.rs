@@ -7,7 +7,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use mln_map_types::{MapDebugOptions, MapMode, TileLodMode, VerticalPerspectiveProjection};
-use mln_storage::response::Reuse;
 use mln_style::Source;
 use mln_style::property_value::PropertyValue;
 use mln_tile_id::tile_range::TileRange;
@@ -978,14 +977,13 @@ impl SourceTiles {
     }
 
     /// Moves cached tile `id` back into the cover, unless caching rules
-    /// forbid showing its data now, stale past its `stale-while-revalidate`:
-    /// then the tile goes, and one made anew holds its data back until it
-    /// revalidates.
+    /// forbid showing its data while it revalidates: then the tile goes, and
+    /// one made anew holds its data back until it revalidates.
     fn cache_pop(&mut self, id: &OverscaledTileID, ctx: &mut StoreContext) -> bool {
         let Some(slot) = self.tiles.get_mut(id).filter(|slot| slot.place.is_cached()) else {
             return false;
         };
-        if matches!(slot.tile.load.reuse(mln_util::chrono::now()), Reuse::OnError | Reuse::Never) {
+        if !slot.tile.load.shows(mln_util::chrono::now()) {
             self.evict(id, ctx);
             return false;
         }

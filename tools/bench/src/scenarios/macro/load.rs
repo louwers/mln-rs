@@ -149,9 +149,8 @@ enum Cached {
     /// What an earlier visit stored, still fresh: nothing goes to the
     /// network.
     Fresh,
-    /// What an earlier visit stored, expired since, with no
-    /// `stale-while-revalidate`: the map shows each copy once the server
-    /// answers its revalidation with a 304.
+    /// What an earlier visit stored, expired since: the map shows it at
+    /// once and revalidates it, which the server answers with 304s.
     Expired,
 }
 
@@ -189,7 +188,7 @@ fn street_warm(bench: &mut Bench) {
 
 /// The question: what does revalidating a cache that has expired cost?
 /// `macro/load/street-warm` with the cache's entries expired: the map
-/// revalidates each over the 4G link before it shows it.
+/// shows them while it revalidates each over the 4G link.
 fn street_expired(bench: &mut Bench) {
     load_online(bench, MOBILE_4G, Cached::Expired);
 }

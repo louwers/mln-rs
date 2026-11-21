@@ -948,13 +948,15 @@ fn connection_error() -> Response {
     Response { error: Some(Box::new(ResourceError::new(Reason::Connection, "offline"))), ..Response::default() }
 }
 
-/// A stale copy from the cache, past its stale-while-revalidate, waits for
-/// the network, which a 304 shows it after.
+/// A stale copy from the cache that must revalidate waits for the network,
+/// which a 304 shows it after.
 #[test]
-fn a_stale_copy_waits_for_the_network() {
+fn a_stale_copy_that_must_revalidate_waits_for_the_network() {
     let test = Test::new();
     let file_source = Arc::new(WithCache::default());
-    let mut tile = tile_with_cached(&test, &file_source, expired(water()));
+    let mut cached = expired(water());
+    cached.caching.must_revalidate = true;
+    let mut tile = tile_with_cached(&test, &file_source, cached);
     assert!(!tile.shows_layout(), "held back");
     let network = file_source.oldest();
     assert_eq!((LoadingMethod::NetworkOnly, Priority::Regular), (network.loading_method, network.priority));
@@ -982,21 +984,25 @@ fn a_copy_within_stale_while_revalidate_shows_at_once() {
     assert_eq!(Priority::Low, file_source.oldest().priority);
 }
 
-/// A stale copy stands in for a failure to connect, without an error; one
-/// that must revalidate doesn't.
+/// A stale copy shows while it revalidates, and stays when the server
+/// can't be reached, which the tile reports; one that must revalidate never
+/// shows.
 #[test]
-fn a_stale_copy_stands_in_for_a_failure_to_connect() {
+fn a_stale_copy_shows_until_it_revalidates() {
     use TileOperation::Error;
 
     let test = Test::new();
     let file_source = Arc::new(WithCache::default());
     let mut tile = tile_with_cached(&test, &file_source, expired(water()));
+    tile.update();
+    assert!(tile.shows_layout(), "shown at once");
+    let network = file_source.oldest();
+    assert_eq!((LoadingMethod::NetworkOnly, Priority::Low), (network.loading_method, network.priority));
     tile.actions();
     file_source.answer(connection_error());
     tile.update();
-    tile.update();
     assert!(tile.shows_layout());
-    assert!(!tile.actions().contains(&Error));
+    assert_eq!(tile.actions(), [Error]);
 
     let mut tile = tile_with_cached(&test, &file_source, {
         let mut cached = expired(water());

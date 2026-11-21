@@ -513,9 +513,9 @@ impl OfflineDatabase {
         })
     }
 
-    /// Version 7 keeps until when a stale copy may be used while it
-    /// revalidates and in place of an error, which copies stored before
-    /// don't have, and each region's `max_stale`.
+    /// Version 7 keeps a copy's `stale-while-revalidate` and
+    /// `stale-if-error`, which copies stored before don't have, and each
+    /// region's `max_stale`.
     fn migrate_to_version7(&mut self) -> DbResult<()> {
         self.check_flags()?;
         self.with_transaction(Begin::Deferred, |this| {
@@ -716,8 +716,8 @@ impl OfflineDatabase {
             return Ok((false, 0));
         }
 
-        // A copy the database has, for a 304 or in place of an error, only
-        // renews its caching rules.
+        // A copy the database has, as for a 304, only renews its caching
+        // rules.
         let renews = renews(response);
         let compressed = match &response.data {
             Some(data) if !renews => {
@@ -1604,7 +1604,7 @@ impl<'a> Stored<'a> {
 }
 
 /// Whether `response` brings a copy the database has: a 304, or the copy
-/// the request carried, delivered for a 304 or in place of an error.
+/// the request carried, which a 304 delivered.
 fn renews(response: &Response) -> bool {
     response.not_modified || response.prior
 }

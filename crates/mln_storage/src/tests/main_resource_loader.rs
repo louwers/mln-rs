@@ -1091,38 +1091,40 @@ fn a_copy_within_stale_while_revalidate_answers_at_once() {
     assert_eq!(b"Hello World!", data(&answers[1]));
 }
 
-/// A stale copy past its stale-while-revalidate waits for the network.
+/// A stale copy past its stale-while-revalidate still shows while it
+/// revalidates, as it may stand in for a failure; one that must revalidate,
+/// or past its stale-if-error, waits for the network.
 #[test]
-fn a_copy_past_stale_while_revalidate_waits_for_the_network() {
+fn a_stale_copy_shows_while_it_revalidates_unless_it_may_not_be_used() {
     let server = HttpServer::new();
-    let cached = with_caching(stale_copy(), |caching| caching.stale_while_revalidate = Some(one_hour_ago()));
-    let answers = answers_with_cached(&server.url("/test"), &cached, 1);
-    assert_eq!(b"Hello World!", data(&answers[0]));
+    let url = server.url("/test");
+    for cached in [
+        with_caching(stale_copy(), |caching| caching.stale_while_revalidate = Some(one_hour_ago())),
+        with_caching(stale_copy(), |caching| caching.stale_if_error = Some(in_one_hour())),
+    ] {
+        let answers = answers_with_cached(&url, &cached, 2);
+        assert_eq!(b"Cached value", data(&answers[0]));
+        assert_eq!(b"Hello World!", data(&answers[1]));
+    }
+    for cached in [
+        with_caching(stale_copy(), |caching| caching.must_revalidate = true),
+        with_caching(stale_copy(), |caching| caching.stale_if_error = Some(one_hour_ago())),
+    ] {
+        let answers = answers_with_cached(&url, &cached, 1);
+        assert_eq!(b"Hello World!", data(&answers[0]));
+    }
 }
 
-/// A stale copy stands in for a server error within its stale-if-error,
-/// and not without one.
+/// When the server can't be reached, the requester keeps the stale copy it
+/// was shown, and hears of the failure; a copy that may not be used isn't
+/// delivered.
 #[test]
-fn a_stale_copy_stands_in_for_a_server_error_within_stale_if_error() {
-    let server = HttpServer::new();
-    let url = server.url("/permanent-error");
-    let cached = with_caching(stale_copy(), |caching| caching.stale_if_error = Some(in_one_hour()));
-    let answers = answers_with_cached(&url, &cached, 1);
-    assert_eq!(None, answers[0].error);
-    assert_eq!(b"Cached value", data(&answers[0]));
-
-    let answers = answers_with_cached(&url, &stale_copy(), 1);
-    assert_eq!(Reason::Server, answers[0].error.as_ref().expect("an error").reason);
-}
-
-/// A stale copy stands in for a failure to connect, unless it must
-/// revalidate or its stale-if-error has passed.
-#[test]
-fn a_stale_copy_stands_in_for_a_failure_to_connect() {
+fn a_stale_copy_shows_when_the_server_cant_be_reached() {
     // Nothing listens on port 1.
     let url = "http://127.0.0.1:1/test";
-    let answers = answers_with_cached(url, &stale_copy(), 1);
+    let answers = answers_with_cached(url, &stale_copy(), 2);
     assert_eq!(b"Cached value", data(&answers[0]));
+    assert_eq!(Reason::Connection, answers[1].error.as_ref().expect("an error").reason);
 
     for cached in [
         with_caching(stale_copy(), |caching| caching.must_revalidate = true),

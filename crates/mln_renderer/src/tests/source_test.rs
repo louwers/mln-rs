@@ -1277,17 +1277,18 @@ fn cached_tiles_wait_behind_the_view() {
     assert_eq!(cover, hidden.cached_unwanted(), "the hidden source's tiles");
 }
 
-/// A tile that comes back from the cache shows its data if caching rules
-/// allow it now; a tile whose data is stale past its
-/// `stale-while-revalidate` goes, and loads anew.
+/// A tile that comes back from the cache shows its data while it
+/// revalidates if caching rules allow it; a tile whose stale data must
+/// revalidate goes, and loads anew.
 #[test]
 fn a_cached_tile_shows_its_data_only_while_caching_rules_allow() {
-    for (expires, reused) in [(i64::MAX, true), (0, false)] {
+    for (expires, must_revalidate, reused) in [(i64::MAX, false, true), (0, false, true), (0, true, false)] {
         let mut turned = TurningSource::new("mercator", Size::new(512, 512), 0);
         turned.file_source.set_response(Kind::Tile, move |_| {
             let mut response = Response::new();
             response.no_content = true;
             response.caching.expires = Some(mln_util::chrono::Timestamp::from_secs(expires));
+            response.caching.must_revalidate = must_revalidate;
             Some(response)
         });
         turned.load(0.0, 3.0);
@@ -1300,7 +1301,7 @@ fn a_cached_tile_shows_its_data_only_while_caching_rules_allow() {
         turned.update(0.0, 3.0);
         let pyramid = turned.pyramid();
         let renderable = shown.iter().all(|id| pyramid.tile(id).is_some_and(crate::tile::tile::Tile::is_renderable));
-        assert_eq!(reused, renderable, "data that expires at {expires}");
+        assert_eq!(reused, renderable, "data that expires at {expires}, must revalidate: {must_revalidate}");
     }
 }
 

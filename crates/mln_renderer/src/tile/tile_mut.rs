@@ -8,7 +8,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use mln_storage::response::{Reason, Reuse};
+use mln_storage::response::Reason;
 use mln_storage::{Request, Response};
 use mln_style::custom_tile_loader::SubscriberKey;
 use mln_style::sources::geojson::GeoJSONData;
@@ -205,13 +205,8 @@ impl<'a> TileMut<'a> {
             // The request stays open: the file source answers it again after
             // an error, and when the data expires.
             if let Some(error) = res.error.as_ref().filter(|error| error.reason != Reason::NotFound) {
-                // A streak of errors reports once. The copy the tile holds
-                // back stands in for an error that its caching rules allow
-                // (stale-if-error), and the streak goes on behind it.
-                let first = !std::mem::replace(&mut tileset.failed, true);
-                if let Some(withheld) = tileset.withheld.take_if(|copy| copy.caching.stands_in_for(error, now)) {
-                    self.take_response(Method::Cache, &withheld);
-                } else if first {
+                // A streak of errors reports once.
+                if !std::mem::replace(&mut tileset.failed, true) {
                     self.fail(Error::native(error.message.clone()));
                 }
                 return;
@@ -236,19 +231,17 @@ impl<'a> TileMut<'a> {
         tileset.cache_answered = true;
         self.store.changed();
         // A cache-only request that found nothing isn't an error. A copy
-        // shows if its caching rules allow it now; else the tile holds it
-        // back for the network request to revalidate.
+        // shows while it revalidates unless its caching rules forbid that;
+        // then the tile holds it back for the network request to revalidate.
         if res.error.is_none() {
             tileset.resource.set_prior(res);
-            match res.caching.reuse(now) {
-                Reuse::Fresh | Reuse::WhileRevalidating => self.take_response(method, res),
-                Reuse::OnError | Reuse::Never => {
-                    // The network request carries it too, so that the file
-                    // source can deliver it for a 304 or in place of an
-                    // error.
-                    tileset.resource.prior_data.clone_from(&res.data);
-                    tileset.withheld = Some(res.clone());
-                }
+            if res.caching.shows_while_revalidating(now) {
+                self.take_response(method, res);
+            } else {
+                // The network request carries it too, so that the file
+                // source can deliver it for a 304.
+                tileset.resource.prior_data.clone_from(&res.data);
+                tileset.withheld = Some(res.clone());
             }
         }
         if self.tile.load.necessity == TileNecessity::Required

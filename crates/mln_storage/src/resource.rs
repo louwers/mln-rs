@@ -212,34 +212,21 @@ impl Resource {
     }
 
     /// What a revalidation's answer `response` delivers to a requester that
-    /// waits for the prior copy in `prior_data`: that copy, for a 304, or in
-    /// place of an error at `now` that it may stand in for (RFC 5861 §4),
-    /// which it satisfies the request in place of. Delivering the copy takes
-    /// it; the requester has it then.
-    pub fn deliver(&mut self, mut response: Response, now: Timestamp) -> Response {
-        if response.not_modified && self.prior_data.is_some() {
-            response.data = self.prior_data.take();
+    /// waits for the prior copy in `prior_data`: that copy, for a 304, which
+    /// takes it. Any other answer as it is.
+    pub fn deliver(&mut self, mut response: Response) -> Response {
+        if response.not_modified
+            && let Some(data) = self.prior_data.take()
+        {
+            response.data = Some(data);
             response.not_modified = false;
             response.prior = true;
             response.modified = response.modified.or(self.prior_modified);
             if response.etag.is_none() {
                 response.etag.clone_from(&self.prior_etag);
             }
-            response
-        } else if let Some(error) = &response.error
-            && self.prior_data.is_some()
-            && self.prior_caching.stands_in_for(error, now)
-        {
-            let mut stale = Response::new();
-            stale.data = self.prior_data.take();
-            stale.prior = true;
-            stale.modified = self.prior_modified;
-            stale.etag.clone_from(&self.prior_etag);
-            stale.caching = self.prior_caching;
-            stale
-        } else {
-            response
         }
+        response
     }
 
     pub fn set_priority(&mut self, p: Priority) {
@@ -354,7 +341,6 @@ mod tests {
 
     mod deliver {
         use super::super::*;
-        use crate::response::{Reason, ResourceError};
 
         fn at(secs: i64) -> Timestamp {
             Timestamp::from_secs(1000 + secs)
@@ -368,10 +354,6 @@ mod tests {
             resource
         }
 
-        fn failed(reason: Reason) -> Response {
-            Response { error: Some(Box::new(ResourceError::new(reason, "failed"))), ..Response::default() }
-        }
-
         #[test]
         fn a_304_delivers_the_copy_with_its_caching_rules() {
             let mut resource = waiting(Caching { expires: Some(at(-10)), ..Caching::default() });
@@ -380,25 +362,11 @@ mod tests {
                 caching: Caching { expires: Some(at(100)), ..Caching::default() },
                 ..Response::default()
             };
-            let delivered = resource.deliver(renewed, at(0));
+            let delivered = resource.deliver(renewed);
             assert!(!delivered.not_modified);
             assert_eq!(Some(b"cached".as_slice()), delivered.data.as_deref().map(Vec::as_slice));
             assert_eq!((Some(at(100)), Some("a")), (delivered.caching.expires, delivered.etag.as_deref()));
             assert!(resource.prior_data.is_none(), "the requester has it");
-        }
-
-        #[test]
-        fn a_stale_copy_stands_in_for_an_error_it_may() {
-            let stale = Caching { expires: Some(at(-10)), stale_if_error: Some(at(10)), ..Caching::default() };
-            let mut resource = waiting(stale);
-            let delivered = resource.deliver(failed(Reason::Server), at(0));
-            assert_eq!(None, delivered.error);
-            assert_eq!(stale, delivered.caching);
-            assert!(delivered.data.is_some() && resource.prior_data.is_none());
-
-            let mut resource = waiting(Caching { must_revalidate: true, ..stale });
-            assert!(resource.deliver(failed(Reason::Connection), at(0)).error.is_some());
-            assert!(resource.prior_data.is_some(), "the copy still waits");
         }
     }
 

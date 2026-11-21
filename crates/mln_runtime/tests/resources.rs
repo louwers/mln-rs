@@ -311,10 +311,14 @@ fn cache_operations_change_what_the_ambient_cache_serves() {
     // The cache serves a fresh style without the network.
     load();
     assert_eq!((1, 0), calls());
-    // An invalidated style revalidates.
+    // An invalidated style shows at once, and revalidates.
     wait(runtime.run_cache_database_operation(CacheDatabaseOperation::Invalidate));
     load();
-    assert_eq!((1, 1), calls());
+    let deadline = std::time::Instant::now() + Duration::from_secs(60);
+    while calls() != (1, 1) {
+        assert!(std::time::Instant::now() < deadline, "never revalidated: {:?}", calls());
+        std::thread::sleep(Duration::from_millis(5));
+    }
     // A cleared cache loads it again, and keeps the offline regions.
     wait(runtime.run_cache_database_operation(CacheDatabaseOperation::Clear));
     load();

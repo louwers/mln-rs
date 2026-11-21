@@ -316,9 +316,9 @@ pub(crate) enum OriginLoad {
 /// open while the tile is required: the file source answers it again when
 /// it retries an error or revalidates expired data.
 ///
-/// The cache's copy shows at once if it is fresh or within its
-/// `stale-while-revalidate`; otherwise the tile holds it back until the
-/// network revalidates it, or fails in a way it may stand in for.
+/// The cache's copy shows at once unless caching rules forbid using it
+/// stale (`Caching::shows_while_revalidating`); then the tile holds it back
+/// until a 304 renews it.
 pub(crate) struct TilesetLoad {
     /// Its order follows the tile's place in its source.
     pub(crate) resource: Resource,
@@ -483,12 +483,12 @@ impl Load {
         }
     }
 
-    /// How the tile's data may be used at `now`, if the tile comes back
-    /// from the cache. Only a tileset's data expires.
-    pub(crate) fn reuse(&self, now: Timestamp) -> Reuse {
+    /// Whether the tile's data may show at `now` while it revalidates, if
+    /// the tile comes back from the cache. Only a tileset's data expires.
+    pub(crate) fn shows(&self, now: Timestamp) -> bool {
         match &self.origin {
-            OriginLoad::Tileset(tileset) if tileset.has_data => tileset.caching.reuse(now),
-            OriginLoad::Tileset(_) | OriginLoad::GeoJson { .. } | OriginLoad::Custom(_) => Reuse::Fresh,
+            OriginLoad::Tileset(tileset) if tileset.has_data => tileset.caching.shows_while_revalidating(now),
+            OriginLoad::Tileset(_) | OriginLoad::GeoJson { .. } | OriginLoad::Custom(_) => true,
         }
     }
 

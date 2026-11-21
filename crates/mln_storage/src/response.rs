@@ -43,8 +43,7 @@ impl ResourceError {
 /// A response to a resource request. `Clone` shares the data.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Response {
-    /// Why the request failed; `None` when it succeeded, which includes a
-    /// stale copy standing in for a failure ([`Caching::stands_in_for`]).
+    /// Why the request failed; `None` when it succeeded.
     pub error: Option<Box<ResourceError>>,
 
     /// The response has no body: a 204 No Content, or a 404 Not Found for a
@@ -55,8 +54,8 @@ pub struct Response {
     pub not_modified: bool,
 
     /// The data is the copy the request carried (`Resource::prior_data`),
-    /// delivered for a 304 or in place of an error: a cache that stored that
-    /// copy has its data already.
+    /// which a 304 delivered: a cache that stored that copy has its data
+    /// already.
     pub prior: bool,
 
     /// Set, with `no_content`, for a 404 Not Found for a tile, which the
@@ -95,8 +94,9 @@ pub struct Caching {
     pub must_revalidate: bool,
     /// Until when it may be used stale while it revalidates.
     pub stale_while_revalidate: Option<Timestamp>,
-    /// Until when it may stand in for an error, once stale. Without it, a
-    /// stale copy stands in only for a failure to connect (RFC 9111 §4.2.4).
+    /// Until when it may be used stale when revalidating it fails, and so
+    /// while it revalidates. Without it, a stale copy may be used for as
+    /// long as it needn't revalidate first.
     pub stale_if_error: Option<Timestamp>,
 }
 
@@ -105,10 +105,12 @@ pub struct Caching {
 pub enum Reuse {
     /// It is fresh: use it.
     Fresh,
-    /// It is stale, but may be used while it revalidates.
+    /// It is stale, within its `stale-while-revalidate`: the server lets it
+    /// be used while it revalidates.
     WhileRevalidating,
-    /// It is stale: revalidate it first, and use it only if that fails as
-    /// [`Caching::stands_in_for`] allows.
+    /// It is stale, within its `stale-if-error` or without one: the server
+    /// lets it stand in when revalidating it fails. The map shows it while
+    /// it revalidates, too ([`Caching::shows_while_revalidating`]).
     OnError,
     /// It is stale and may not be used at all until it revalidates.
     Never,
@@ -131,18 +133,14 @@ impl Caching {
         }
     }
 
-    /// Whether the copy may be used at `now` in place of a revalidation that
-    /// failed with `error`: a stale one for a failure to connect, or, within
-    /// its `stale-if-error`, for a server error (RFC 5861 §4).
+    /// Whether the copy may show at `now` while it revalidates: unless it
+    /// may not be used at all. A stale copy that the server lets stand in for
+    /// a failure shows at once, as RFC 9111 §5.2.1.2 lets a client accept
+    /// (`max-stale`): an old map that updates beats a blank one while the
+    /// network answers, and it would show if the network failed anyway.
     #[must_use]
-    pub fn stands_in_for(&self, error: &ResourceError, now: Timestamp) -> bool {
-        match self.reuse(now) {
-            Reuse::Fresh | Reuse::WhileRevalidating => true,
-            Reuse::OnError => {
-                error.reason == Reason::Connection || (error.reason == Reason::Server && self.stale_if_error.is_some())
-            }
-            Reuse::Never => false,
-        }
+    pub fn shows_while_revalidating(&self, now: Timestamp) -> bool {
+        self.reuse(now) != Reuse::Never
     }
 
     /// Until when the copy may stand in when the server can't be reached;
@@ -160,12 +158,16 @@ impl Caching {
     #[must_use]
     pub fn with_max_stale(mut self, max_stale: Duration) -> Self {
         if let (Some(expires), Some(until), false) = (self.expires, self.stale_if_error, self.must_revalidate) {
-            let secs = i64::try_from(max_stale.as_secs()).unwrap_or(i64::MAX);
-            let allowed = Timestamp::from_secs(expires.secs_since_epoch().saturating_add(secs));
-            self.stale_if_error = Some(until.max(allowed));
+            self.stale_if_error = Some(until.max(after(expires, max_stale)));
         }
         self
     }
+}
+
+/// `duration` after `time`, at most the last timestamp.
+fn after(time: Timestamp, duration: Duration) -> Timestamp {
+    let secs = i64::try_from(duration.as_secs()).unwrap_or(i64::MAX);
+    Timestamp::from_secs(time.secs_since_epoch().saturating_add(secs))
 }
 
 #[cfg(test)]
@@ -193,21 +195,15 @@ mod tests {
     }
 
     #[test]
-    fn stands_in_for() {
+    fn shows_while_revalidating() {
         let now = at(0);
-        let connection = ResourceError::new(Reason::Connection, "");
-        let server = ResourceError::new(Reason::Server, "");
-        let not_found = ResourceError::new(Reason::NotFound, "");
         let stale = Caching { expires: Some(at(-10)), ..Caching::default() };
-        assert!(stale.stands_in_for(&connection, now));
-        assert!(!stale.stands_in_for(&server, now));
-        assert!(!stale.stands_in_for(&not_found, now));
-        let if_error = Caching { stale_if_error: Some(at(5)), ..stale };
-        assert!(if_error.stands_in_for(&server, now) && if_error.stands_in_for(&connection, now));
-        assert!(!if_error.stands_in_for(&not_found, now));
-        let past = Caching { stale_if_error: Some(at(-1)), ..stale };
-        assert!(!past.stands_in_for(&connection, now));
-        assert!(!Caching { must_revalidate: true, ..if_error }.stands_in_for(&connection, now));
+        assert!(Caching::default().shows_while_revalidating(now));
+        assert!(stale.shows_while_revalidating(now));
+        assert!(Caching { stale_if_error: Some(at(5)), ..stale }.shows_while_revalidating(now));
+        assert!(!Caching { stale_if_error: Some(at(-5)), ..stale }.shows_while_revalidating(now));
+        assert!(!Caching { must_revalidate: true, ..stale }.shows_while_revalidating(now));
+        assert!(Caching { expires: Some(at(10)), must_revalidate: true, ..stale }.shows_while_revalidating(now));
     }
 
     #[test]

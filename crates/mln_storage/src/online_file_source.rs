@@ -443,9 +443,9 @@ impl OnlineCore {
 
     fn activate(&mut self, id: u64) {
         // With the network forced offline, a request starts again once the
-        // network is back. A requester that has no copy of the resource hears
-        // at once that it failed to connect, which a stale copy it waits for
-        // may stand in for; one that has a copy keeps it meanwhile.
+        // network is back. A requester that shows no copy of the resource
+        // hears at once that it failed to connect; one that does keeps it
+        // meanwhile.
         if self.network.get() == Status::Offline {
             let Some(req) = self.requests.get_mut(&id) else { return };
             req.failed_request_reason = Reason::Connection;
@@ -459,8 +459,7 @@ impl OnlineCore {
                 let mut error = Response::new();
                 error.error =
                     Some(Box::new(ResourceError::new(Reason::Connection, "Online connectivity is disabled.")));
-                let response = req.resource.deliver(error, now());
-                req.responder.send(response);
+                req.responder.send(error);
             }
             return;
         }
@@ -531,7 +530,7 @@ impl OnlineCore {
         let interval = req.update_interval(&response, connection_backoff);
 
         let resource = &mut req.resource;
-        let mut response = resource.deliver(response, now());
+        let mut response = resource.deliver(response);
         // A response without validators keeps the copy's.
         if response.modified.is_none() {
             response.modified = resource.prior_modified;

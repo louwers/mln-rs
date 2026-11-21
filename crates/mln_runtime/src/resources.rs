@@ -279,10 +279,10 @@ impl RequestShared {
     }
 
     fn respond(&self, response: Response) {
-        // A revalidation withholds the cached copy from the requester until
-        // the answer: a "not modified" answer, or an error the copy may stand
-        // in for, delivers it, as the online file source's do.
-        let response = self.resource.clone().deliver(response, mln_util::chrono::now());
+        // A revalidation may withhold the cached copy from the requester
+        // until a "not modified" answer delivers it, as the online file
+        // source's do.
+        let response = self.resource.clone().deliver(response);
         self.responder.send(response);
     }
 

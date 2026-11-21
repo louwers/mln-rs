@@ -852,10 +852,8 @@ fn invalidate() {
     assert!(db.invalidate_ambient_cache().is_ok());
     let mut get = |r: &Resource| db.get(r).expect("response");
     for resource in [&ambient_tile, &ambient_style, &region1_tile, &region1_style] {
-        // Stale, but still standing in while the server can't be reached.
-        let caching = get(resource).caching;
-        assert_eq!(caching.reuse(now()), Reuse::OnError);
-        assert!(caching.stands_in_for(&ResourceError::new(Reason::Connection, ""), now()));
+        // Stale, but still shown while it revalidates, and offline.
+        assert_eq!(get(resource).caching.reuse(now()), Reuse::OnError);
     }
     assert!(get(&region2_tile).caching.expires > Some(now()));
     assert!(get(&region2_style).caching.expires > Some(now()));

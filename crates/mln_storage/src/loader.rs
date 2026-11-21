@@ -25,8 +25,6 @@ use crate::resource::Priority;
 use crate::resource::{LoadingMethod, Resource};
 #[cfg(not(target_family = "wasm"))]
 use crate::resource_options::ResourceOptions;
-#[cfg(feature = "sqlite")]
-use crate::response::Reuse;
 use crate::response::{Reason, ResourceError, Response};
 
 /// The file sources a [`Loader`] picks from.
@@ -129,10 +127,9 @@ impl Sources {
     }
 
     /// Loads `resource` from the cache, then from the network. A cached copy
-    /// that is fresh, or stale within its `stale-while-revalidate`, goes to
-    /// the requester at once, and the network revalidates it at low priority
-    /// once it expires. Any other copy waits for the network: the requester
-    /// gets it on a 304, or in place of an error that it may stand in for
+    /// that may show while it revalidates goes to the requester at once, and
+    /// the network revalidates it at low priority once it expires. Any other
+    /// copy waits for the network, and the requester gets it on a 304
     /// (`Resource::deliver`).
     #[cfg(feature = "sqlite")]
     fn request_cached(self: &Arc<Self>, database: &dyn Cache, resource: &Resource, responder: Responder) {
@@ -147,12 +144,11 @@ impl Sources {
 
             // A cached copy.
             if response.error.is_none() && !response.no_content {
-                match response.caching.reuse(now()) {
-                    Reuse::Fresh | Reuse::WhileRevalidating => {
-                        responder.send(response.clone());
-                        res.set_priority(Priority::Low);
-                    }
-                    Reuse::OnError | Reuse::Never => res.prior_data = response.data.clone(),
+                if response.caching.shows_while_revalidating(now()) {
+                    responder.send(response.clone());
+                    res.set_priority(Priority::Low);
+                } else {
+                    res.prior_data = response.data.clone();
                 }
                 res.set_prior(&response);
             }
