@@ -2522,6 +2522,27 @@ macro_rules! fill_extrusion_ground {
     };
 }
 
+/// `z`, the height of a fill extrusion wall's corner at `t` (0 at the base,
+/// 1 at the top) of its `end`. Over terrain, the foot of a wall of a polygon
+/// whose base is at or below 0 reaches down to the ground under its own end
+/// where that is lower than under the centroid, so that no gap shows under a
+/// wall on a steep slope: `sink` is how much lower, 0 elsewhere.
+macro_rules! fill_extrusion_wall_foot {
+    () => {
+        r"
+#if defined(TERRAIN)
+    float sink = 0.0;
+    if (t == 0.0 && base <= 0.0) {
+        sink = max(groundHeight - standing_height(end + standing.translate, standing.ground), 0.0);
+    }
+    const float z = t > 0.0 ? height + groundHeight : base + baseGround - sink;
+#else
+    const float z = t > 0.0 ? height + groundHeight : base + baseGround;
+#endif
+"
+    };
+}
+
 pub(crate) const FILL_EXTRUSION_SHADER_PRELUDE: &str = r"
 
 #define idFillExtrusionDrawableUBO              idDrawableReservedVertexOnlyUBO
@@ -2733,6 +2754,46 @@ layout(set = LAYER_SET_INDEX, binding = idFillExtrusionPropsUBO) uniform FillExt
 
 layout(location = 0) out vec4 frag_color;
 
+// The color of a wall facing `normal` at `t`, 0 at its base and 1 at its top.
+vec4 wall_color(vec4 color, const vec3 normal, const float t, const float base, const float height) {
+    // Relative luminance (how dark/bright is the surface color?)
+    const float luminance = color.r * 0.2126 + color.g * 0.7152 + color.b * 0.0722;
+
+    vec4 vcolor = vec4(0.0, 0.0, 0.0, 1.0);
+
+    // Add slight ambient lighting so no extrusions are totally black
+    color += vec4(0.03, 0.03, 0.03, 1.0);
+
+    // Calculate cos(theta), where theta is the angle between surface normal and diffuse light ray
+    const float directionalFraction = clamp(dot(normal, props.light_position_base.xyz), 0.0, 1.0);
+
+    // Adjust directional so that the range of values for highlight/shading is
+    // narrower with lower light intensity and with lighter/brighter surface colors
+    const float minDirectional = 1.0 - props.light_intensity;
+    const float maxDirectional = max(1.0 - luminance + props.light_intensity, 1.0);
+    float directional = mix(minDirectional, maxDirectional, directionalFraction);
+
+    // Add gradient along z axis of side surfaces
+    if (normal.z == 0.0) {
+        // This avoids another branching statement, but multiplies by a constant of 0.84 if no
+        // vertical gradient, and otherwise calculates the gradient based on base + height
+        // TODO: If we're optimizing to the level of avoiding branches, we should pre-compute
+        //       the square root when height is a uniform.
+        const float fMin = mix(0.7, 0.98, 1.0 - props.light_intensity);
+        const float factor = clamp((t + base) * pow(height / 150.0, 0.5), fMin, 1.0);
+        directional *= (1.0 - props.vertical_gradient) + (props.vertical_gradient * factor);
+    }
+
+    // Assign final color based on surface + ambient light color, diffuse light directional,
+    // and light color with lower bounds adjusted to hue of light so that shading is tinted
+    // with the complementary (opposite) color to the light color
+    const vec3 light_color = props.light_color_pad.rgb;
+    const vec3 minLight = mix(vec3(0.0), vec3(0.3), 1.0 - light_color.rgb);
+    vcolor += vec4(clamp(color.rgb * directional * light_color.rgb, minLight, vec3(1.0)), 0.0);
+
+    return vcolor * props.opacity;
+}
+
 "
     };
 }
@@ -2786,52 +2847,26 @@ macro_rules! fill_extrusion_wall_main {
     const vec2 own = vec2(-edgevector.y, edgevector.x);
 
     const vec3 normal = vec3(in_position.x == 0.0 ? wall_normal(in_decimals_ed.x, own) : wall_normal(in_next_decimals_ed.x, own), 0.0);
+    const vec2 end = in_position.x == 0.0 ? p1 : p2;
     const float t = float(in_position.y);
-    const float z = t > 0.0 ? height + groundHeight : base + baseGround;
-
-    gl_Position = projectTileFor3D(in_position.x == 0.0 ? p1 : p2, z, projectionVector.projection_ubo[constant.ubo_index]);
+",
+            fill_extrusion_wall_foot!(),
+            r"
+    gl_Position = projectTileFor3D(end, z, projectionVector.projection_ubo[constant.ubo_index]);
 
 #if defined(OVERDRAW_INSPECTOR)
     frag_color = vec4(1.0);
-    return;
-#endif
-
-    // Relative luminance (how dark/bright is the surface color?)
-    const float luminance = color.r * 0.2126 + color.g * 0.7152 + color.b * 0.0722;
-
-    vec4 vcolor = vec4(0.0, 0.0, 0.0, 1.0);
-
-    // Add slight ambient lighting so no extrusions are totally black
-    color += vec4(0.03, 0.03, 0.03, 1.0);
-
-    // Calculate cos(theta), where theta is the angle between surface normal and diffuse light ray
-    const float directionalFraction = clamp(dot(normal, props.light_position_base.xyz), 0.0, 1.0);
-
-    // Adjust directional so that the range of values for highlight/shading is
-    // narrower with lower light intensity and with lighter/brighter surface colors
-    const float minDirectional = 1.0 - props.light_intensity;
-    const float maxDirectional = max(1.0 - luminance + props.light_intensity, 1.0);
-    float directional = mix(minDirectional, maxDirectional, directionalFraction);
-
-    // Add gradient along z axis of side surfaces
-    if (normal.z == 0.0) {
-        // This avoids another branching statement, but multiplies by a constant of 0.84 if no
-        // vertical gradient, and otherwise calculates the gradient based on base + height
-        // TODO: If we're optimizing to the level of avoiding branches, we should pre-compute
-        //       the square root when height is a uniform.
-        const float fMin = mix(0.7, 0.98, 1.0 - props.light_intensity);
-        const float factor = clamp((t + base) * pow(height / 150.0, 0.5), fMin, 1.0);
-        directional *= (1.0 - props.vertical_gradient) + (props.vertical_gradient * factor);
+#else
+    frag_color = wall_color(color, normal, t, base, height);
+#if defined(TERRAIN)
+    // The gradient carries on below the base to a foot that sinks, so that
+    // the wall shades where it showed as it did.
+    if (sink > 0.0) {
+        frag_color = mix(frag_color, wall_color(color, normal, 1.0, base, height),
+                         -sink / (height + groundHeight - base - baseGround));
     }
-
-    // Assign final color based on surface + ambient light color, diffuse light directional,
-    // and light color with lower bounds adjusted to hue of light so that shading is tinted
-    // with the complementary (opposite) color to the light color
-    const vec3 light_color = props.light_color_pad.rgb;
-    const vec3 minLight = mix(vec3(0.0), vec3(0.3), 1.0 - light_color.rgb);
-    vcolor += vec4(clamp(color.rgb * directional * light_color.rgb, minLight, vec3(1.0)), 0.0);
-
-    frag_color = vcolor * props.opacity;
+#endif
+#endif
 "
         )
     };
@@ -3353,6 +3388,27 @@ layout(location = 3) flat out vec4 frag_pattern_from;
 layout(location = 4) flat out vec4 frag_pattern_to;
 #endif
 
+// The lighting of a wall facing `normal` at `t`, 0 at its base and 1 at its
+// top.
+vec4 wall_lighting(const vec3 normal, const float t, const float base, const float height) {
+    vec4 lighting = vec4(0.0, 0.0, 0.0, 1.0);
+    float directional = clamp(dot(normal, props.light_position_base.xyz), 0.0, 1.0);
+    directional = mix((1.0 - props.light_intensity), max((0.5 + props.light_intensity), 1.0), directional);
+
+    if (normal.z == 0.0) {
+        // This avoids another branching statement, but multiplies by a constant of 0.84 if no
+        // vertical gradient, and otherwise calculates the gradient based on base + height
+        // TODO: If we're optimizing to the level of avoiding branches, we should pre-compute
+        //       the square root when height is a uniform.
+        const float fMin = mix(0.7, 0.98, 1.0 - props.light_intensity);
+        const float factor = clamp((t + base) * pow(height / 150.0, 0.5), fMin, 1.0);
+        directional *= (1.0 - props.vertical_gradient) + (props.vertical_gradient * factor);
+    }
+
+    lighting.rgb += clamp(directional * props.light_color_pad.rgb, mix(vec3(0.0), vec3(0.3), 1.0 - props.light_color_pad.rgb), vec3(1.0));
+    return lighting * props.opacity;
+}
+
 void main() {
     const vec2 instancePos = vec2(in_outline_pos);
     const vec2 instanceDecimalsEd = vec2(in_decimals_ed);
@@ -3389,10 +3445,12 @@ void main() {
 
     const vec3 normal = vec3(in_position.x == 0.0 ? wall_normal(in_decimals_ed.x, own) : wall_normal(in_next_decimals_ed.x, own), 0.0);
     const float edgedistance = in_position.x == 0.0 ? nextInstanceDecimalsEd.y : instanceDecimalsEd.y;
+    const vec2 end = in_position.x == 0.0 ? p1 : p2;
     const float t = float(in_position.y);
-    const float z = t > 0.0 ? height + groundHeight : base + baseGround;
-
-    gl_Position = projectTileFor3D(in_position.x == 0.0 ? p1 : p2, z, projectionVector.projection_ubo[constant.ubo_index]);
+",
+        fill_extrusion_wall_foot!(),
+        r"
+    gl_Position = projectTileFor3D(end, z, projectionVector.projection_ubo[constant.ubo_index]);
 
 #if defined(OVERDRAW_INSPECTOR)
     frag_lighting = vec4(1.0);
@@ -3436,24 +3494,16 @@ void main() {
 
     const vec2 pos = vec2(edgedistance, z * drawable.height_factor); // extrusion side
 
-    vec4 lighting = vec4(0.0, 0.0, 0.0, 1.0);
-    float directional = clamp(dot(normal, props.light_position_base.xyz), 0.0, 1.0);
-    directional = mix((1.0 - props.light_intensity), max((0.5 + props.light_intensity), 1.0), directional);
-
-    if (normal.z == 0.0) {
-        // This avoids another branching statement, but multiplies by a constant of 0.84 if no
-        // vertical gradient, and otherwise calculates the gradient based on base + height
-        // TODO: If we're optimizing to the level of avoiding branches, we should pre-compute
-        //       the square root when height is a uniform.
-        const float fMin = mix(0.7, 0.98, 1.0 - props.light_intensity);
-        const float factor = clamp((t + base) * pow(height / 150.0, 0.5), fMin, 1.0);
-        directional *= (1.0 - props.vertical_gradient) + (props.vertical_gradient * factor);
+    frag_lighting = wall_lighting(normal, t, base, height);
+#if defined(TERRAIN)
+    // The gradient carries on below the base to a foot that sinks, so that
+    // the wall shades where it showed as it did. The pattern, placed by `z`,
+    // stays where it was.
+    if (sink > 0.0) {
+        frag_lighting = mix(frag_lighting, wall_lighting(normal, 1.0, base, height),
+                            -sink / (height + groundHeight - base - baseGround));
     }
-
-    lighting.rgb += clamp(directional * props.light_color_pad.rgb, mix(vec3(0.0), vec3(0.3), 1.0 - props.light_color_pad.rgb), vec3(1.0));
-    lighting *= props.opacity;
-
-    frag_lighting = lighting;
+#endif
     frag_pos_a = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, fromScale * display_size_a, tileZoomRatio, pos);
     frag_pos_b = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, toScale * display_size_b, tileZoomRatio, pos);
 

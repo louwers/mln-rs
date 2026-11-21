@@ -81,16 +81,20 @@
 //!   draws (translated), a kernel's, and the centroid of a fill extrusion's
 //!   polygon as it draws (GL JS's: the floored mean of its rings' vertices), by
 //!   the height rule the surface reads its DEM by. A polygon's roof and base
-//!   rise by the ground at its centroid, and a base at or below 0 sinks 10 m
-//!   more, so that no gap shows under a wall downhill; its vertical gradient
-//!   shades by its own height. Over terrain the extrusions project as the
-//!   surface does, and test and write the depth it writes, so the ground hides
-//!   them, and they hide it, pixel by pixel; on a flat map they keep a near
-//!   plane further out, for the depth buffer's precision. Their buckets keep a
-//!   centroid for each polygon, which only a terrain variant's draws expand to
-//!   their vertices. A tile T of theirs reads the DEM tiles the surface reads
-//!   under it, and no others ([`TerrainElevation::ground`]): the DEM tile of
-//!   the terrain tile it is in, or, where terrain tiles are inside T, as over a
+//!   rise by the ground at its centroid. Where its base is at or below 0, each
+//!   end of a wall's foot sinks to 10 m below the lower of the ground at the
+//!   centroid and the ground under that end, so that no gap shows under a
+//!   wall on any slope. Its vertical gradient shades by its own base and
+//!   height, carried on below the base to a foot that sinks, so a wall shades
+//!   where it shows as it would on level ground. Over terrain the extrusions
+//!   project as the surface does, and test and write the depth it writes, so
+//!   the ground hides them, and they hide it, pixel by pixel; on a flat map
+//!   they keep a near plane further out, for the depth buffer's precision.
+//!   Their buckets keep a centroid for each polygon, which only a terrain
+//!   variant's draws expand to their vertices. A tile T of theirs reads the
+//!   DEM tiles the surface reads under it, and no others
+//!   ([`TerrainElevation::ground`]): the DEM tile of the terrain tile it is
+//!   in, or, where terrain tiles are inside T, as over a
 //!   source tiled coarser than the DEM, the one each of them reads, on its part
 //!   of T. T draws once for each part, and each draw drops the features whose
 //!   untranslated anchor (an extrusion's centroid) is off its part, so each

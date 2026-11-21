@@ -184,6 +184,27 @@ macro_rules! fill_extrusion_ground {
     };
 }
 
+/// `z`, the height of a fill extrusion wall's corner at `t` (0 at the base,
+/// 1 at the top) of its `end`. Over terrain, the foot of a wall of a polygon
+/// whose base is at or below 0 reaches down to the ground under its own end
+/// where that is lower than under the centroid, so that no gap shows under a
+/// wall on a steep slope: `sink` is how much lower, 0 elsewhere.
+macro_rules! fill_extrusion_wall_foot {
+    () => {
+        r"
+#ifdef TERRAIN
+    highp float sink = 0.0;
+    if (t == 0.0 && base <= 0.0) {
+        sink = max(groundHeight - standing_height(end + u_projection_translate), 0.0);
+    }
+    float z = t > 0.0 ? height + groundHeight : base + baseGround - sink;
+#else
+    float z = t > 0.0 ? height + groundHeight : base + baseGround;
+#endif
+"
+    };
+}
+
 pub(crate) const ATMOSPHERE_SHADER: GlslShaderSource = GlslShaderSource {
     vertex: r"layout(location = 0) in vec2 a_pos;
 
@@ -1105,6 +1126,44 @@ layout (location = 5) in highp vec4 a_color;
 layout (location = 10) in vec2 a_centroid;
 #endif
 
+// The color of a wall facing `normal` at `t`, 0 at its base and 1 at its top.
+highp vec4 wall_color(highp vec4 color, vec3 normal, float t, highp float wall_base, highp float wall_height) {
+    // Relative luminance (how dark/bright is the surface color?)
+    float colorvalue = color.r * 0.2126 + color.g * 0.7152 + color.b * 0.0722;
+
+    highp vec4 lit = vec4(0.0, 0.0, 0.0, 1.0);
+
+    // Add slight ambient lighting so no extrusions are totally black
+    vec4 ambientlight = vec4(0.03, 0.03, 0.03, 1.0);
+    color += ambientlight;
+
+    // Calculate cos(theta), where theta is the angle between surface normal and diffuse light ray
+    float directional = clamp(dot(normal, u_lightpos), 0.0, 1.0);
+
+    // Adjust directional so that
+    // the range of values for highlight/shading is narrower
+    // with lower light intensity
+    // and with lighter/brighter surface colors
+    directional = mix((1.0 - u_lightintensity), max((1.0 - colorvalue + u_lightintensity), 1.0), directional);
+
+    // Add gradient along z axis of side surfaces
+    if (normal.z == 0.0) {
+        // This avoids another branching statement, but multiplies by a constant of 0.84 if no vertical gradient,
+        // and otherwise calculates the gradient based on base + height
+        float fMin = mix(0.7, 0.98, 1.0 - u_lightintensity);
+        float factor = clamp((t + wall_base) * pow(wall_height / 150.0, 0.5), fMin, 1.0);
+        directional *= (1.0 - u_vertical_gradient) + (u_vertical_gradient * factor);
+    }
+
+    // Assign final color based on surface + ambient light color, diffuse light directional, and light color
+    // with lower bounds adjusted to hue of light
+    // so that shading is tinted with the complementary (opposite) color to the light color
+    lit.r += clamp(color.r * directional * u_lightcolor.r, mix(0.0, 0.3, 1.0 - u_lightcolor.r), 1.0);
+    lit.g += clamp(color.g * directional * u_lightcolor.g, mix(0.0, 0.3, 1.0 - u_lightcolor.g), 1.0);
+    lit.b += clamp(color.b * directional * u_lightcolor.b, mix(0.0, 0.3, 1.0 - u_lightcolor.b), 1.0);
+    return lit * u_opacity;
+}
+
 void main() {
     // The vertex that ends a ring has no wall.
     if (mod(a_decimals_ed.x, 2.0) > 0.0) {
@@ -1139,45 +1198,22 @@ highp vec4 color = u_color;
 ",
         fill_extrusion_ground!(),
         r"
+    vec2 end = a_pos.x == 0.0 ? p1 : p2;
     float t = a_pos.y;
-    float z = t > 0.0 ? height + groundHeight : base + baseGround;
+",
+        fill_extrusion_wall_foot!(),
+        r"
+    gl_Position = projectTileFor3D(end, z);
 
-    gl_Position = projectTileFor3D(a_pos.x == 0.0 ? p1 : p2, z);
-
-    // Relative luminance (how dark/bright is the surface color?)
-    float colorvalue = color.r * 0.2126 + color.g * 0.7152 + color.b * 0.0722;
-
-    v_color = vec4(0.0, 0.0, 0.0, 1.0);
-
-    // Add slight ambient lighting so no extrusions are totally black
-    vec4 ambientlight = vec4(0.03, 0.03, 0.03, 1.0);
-    color += ambientlight;
-
-    // Calculate cos(theta), where theta is the angle between surface normal and diffuse light ray
-    float directional = clamp(dot(normal, u_lightpos), 0.0, 1.0);
-
-    // Adjust directional so that
-    // the range of values for highlight/shading is narrower
-    // with lower light intensity
-    // and with lighter/brighter surface colors
-    directional = mix((1.0 - u_lightintensity), max((1.0 - colorvalue + u_lightintensity), 1.0), directional);
-
-    // Add gradient along z axis of side surfaces
-    if (normal.z == 0.0) {
-        // This avoids another branching statement, but multiplies by a constant of 0.84 if no vertical gradient,
-        // and otherwise calculates the gradient based on base + height
-        float fMin = mix(0.7, 0.98, 1.0 - u_lightintensity);
-        float factor = clamp((t + base) * pow(height / 150.0, 0.5), fMin, 1.0);
-        directional *= (1.0 - u_vertical_gradient) + (u_vertical_gradient * factor);
+    v_color = wall_color(color, normal, t, base, height);
+#ifdef TERRAIN
+    // The gradient carries on below the base to a foot that sinks, so that
+    // the wall shades where it showed as it did.
+    if (sink > 0.0) {
+        v_color = mix(v_color, wall_color(color, normal, 1.0, base, height),
+                      -sink / (height + groundHeight - base - baseGround));
     }
-
-    // Assign final color based on surface + ambient light color, diffuse light directional, and light color
-    // with lower bounds adjusted to hue of light
-    // so that shading is tinted with the complementary (opposite) color to the light color
-    v_color.r += clamp(color.r * directional * u_lightcolor.r, mix(0.0, 0.3, 1.0 - u_lightcolor.r), 1.0);
-    v_color.g += clamp(color.g * directional * u_lightcolor.g, mix(0.0, 0.3, 1.0 - u_lightcolor.g), 1.0);
-    v_color.b += clamp(color.b * directional * u_lightcolor.b, mix(0.0, 0.3, 1.0 - u_lightcolor.b), 1.0);
-    v_color *= u_opacity;
+#endif
 }
 "
     ),
@@ -1282,6 +1318,25 @@ flat out highp vec4 pattern_to;
 layout (location = 10) in vec2 a_centroid;
 #endif
 
+// The lighting of a wall facing `normal` at `t`, 0 at its base and 1 at its
+// top.
+vec4 wall_lighting(vec3 normal, float t, highp float wall_base, highp float wall_height) {
+    vec4 lighting = vec4(0.0, 0.0, 0.0, 1.0);
+    float directional = clamp(dot(normal, u_lightpos), 0.0, 1.0);
+    directional = mix((1.0 - u_lightintensity), max((0.5 + u_lightintensity), 1.0), directional);
+
+    if (normal.z == 0.0) {
+        // This avoids another branching statement, but multiplies by a constant of 0.84 if no vertical gradient,
+        // and otherwise calculates the gradient based on base + height
+        float fMin = mix(0.7, 0.98, 1.0 - u_lightintensity);
+        float factor = clamp((t + wall_base) * pow(wall_height / 150.0, 0.5), fMin, 1.0);
+        directional *= (1.0 - u_vertical_gradient) + (u_vertical_gradient * factor);
+    }
+
+    lighting.rgb += clamp(directional * u_lightcolor, mix(vec3(0.0), vec3(0.3), 1.0 - u_lightcolor), vec3(1.0));
+    return lighting * u_opacity;
+}
+
 void main() {
     // The vertex that ends a ring has no wall.
     if (mod(a_decimals_ed.x, 2.0) > 0.0) {
@@ -1335,10 +1390,12 @@ highp vec4 pattern_to = u_pattern_to;
 ",
         fill_extrusion_ground!(),
         r"
+    vec2 end = a_pos.x == 0.0 ? p1 : p2;
     float t = a_pos.y;
-    float z = t > 0.0 ? height + groundHeight : base + baseGround;
-
-    gl_Position = projectTileFor3D(a_pos.x == 0.0 ? p1 : p2, z);
+",
+        fill_extrusion_wall_foot!(),
+        r"
+    gl_Position = projectTileFor3D(end, z);
 
     // extrusion top or side
     vec2 pos = normal.z == 1.0 ? a_pos : vec2(edgedistance, z * u_height_factor);
@@ -1346,20 +1403,16 @@ highp vec4 pattern_to = u_pattern_to;
     v_pos_a = get_pattern_pos(u_pixel_coord_upper, u_pixel_coord_lower, fromScale * display_size_a, tileRatio, pos);
     v_pos_b = get_pattern_pos(u_pixel_coord_upper, u_pixel_coord_lower, toScale * display_size_b, tileRatio, pos);
 
-    v_lighting = vec4(0.0, 0.0, 0.0, 1.0);
-    float directional = clamp(dot(normal, u_lightpos), 0.0, 1.0);
-    directional = mix((1.0 - u_lightintensity), max((0.5 + u_lightintensity), 1.0), directional);
-
-    if (normal.z == 0.0) {
-        // This avoids another branching statement, but multiplies by a constant of 0.84 if no vertical gradient,
-        // and otherwise calculates the gradient based on base + height
-        float fMin = mix(0.7, 0.98, 1.0 - u_lightintensity);
-        float factor = clamp((t + base) * pow(height / 150.0, 0.5), fMin, 1.0);
-        directional *= (1.0 - u_vertical_gradient) + (u_vertical_gradient * factor);
+    v_lighting = wall_lighting(normal, t, base, height);
+#ifdef TERRAIN
+    // The gradient carries on below the base to a foot that sinks, so that
+    // the wall shades where it showed as it did. The pattern, placed by `z`,
+    // stays where it was.
+    if (sink > 0.0) {
+        v_lighting = mix(v_lighting, wall_lighting(normal, 1.0, base, height),
+                         -sink / (height + groundHeight - base - baseGround));
     }
-
-    v_lighting.rgb += clamp(directional * u_lightcolor, mix(vec3(0.0), vec3(0.3), 1.0 - u_lightcolor), vec3(1.0));
-    v_lighting *= u_opacity;
+#endif
 }
 "
     ),

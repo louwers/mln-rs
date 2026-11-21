@@ -18,7 +18,9 @@
 //!
 //! The terrain variants stand each polygon on the ground under its
 //! centroid, which the roofs and the instanced and quad walls read as an
-//! attribute, and the pulled walls from a storage buffer of their own.
+//! attribute, and the pulled walls from a storage buffer of their own. A
+//! wall of a polygon on the ground reaches down to the ground under its own
+//! ends too.
 
 use super::shader_source::WgslShaderSource;
 use super::wgsl_sources::{self, standing_ground};
@@ -315,6 +317,11 @@ fn wall_normal(bits: u32, own: vec2<f32>) -> vec2<f32> {
 /// A wall instance's two outline vertices, `p1` and `p2`, the corner's
 /// `normal`, `t` and `z`, with the ground under it (`ground`). Returns `out`
 /// for an instance that ends a ring.
+///
+/// Over terrain, the foot of a wall of a polygon whose base is at or below 0
+/// reaches down to the ground under its own end where that is lower
+/// than under the centroid, so that no gap shows under a wall on a steep
+/// slope: `sink` is how much lower, 0 elsewhere.
 macro_rules! wall {
     () => {
         r#"
@@ -330,11 +337,20 @@ macro_rules! wall {
         select(wall_normal(in.next_decimals_ed.x, own), wall_normal(in.decimals_ed.x, own), in.position.x == 0),
         0.0,
     );
+    let end = select(p2, p1, in.position.x == 0);
 
     let t = f32(in.position.y);
+#ifdef TERRAIN
+    var sink = 0.0;
+    if (t == 0.0 && baseValue <= 0.0) {
+        sink = max(groundHeight - standing_height(end + standing.translate, standing.ground), 0.0);
+    }
+    let z = select(baseValue + baseGround - sink, heightValue + groundHeight, t > 0.0);
+#else
     let z = select(baseValue + baseGround, heightValue + groundHeight, t > 0.0);
+#endif
 
-    out.position = projectTileFor3D(select(p2, p1, in.position.x == 0), z, projectionVector[globalIndex.value]);
+    out.position = projectTileFor3D(end, z, projectionVector[globalIndex.value]);
 "#
     };
 }
@@ -440,6 +456,14 @@ fn main(in: VertexInput) -> VertexOutput {
     let color = props.color;
 #endif
     out.color = lit_color(color, normal, t, baseValue, heightValue);
+#ifdef TERRAIN
+    // The gradient carries on below the base to a foot that sinks, so that
+    // the wall shades where it showed as it did.
+    if (sink > 0.0) {
+        out.color = mix(out.color, lit_color(color, normal, 1.0, baseValue, heightValue),
+                        -sink / (heightValue + groundHeight - baseValue - baseGround));
+    }
+#endif
     return out;
 }
 "#
@@ -566,6 +590,14 @@ fn main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     let color = props.color;
 #endif
     out.color = lit_color(color, normal, t, baseValue, heightValue);
+#ifdef TERRAIN
+    // The gradient carries on below the base to a foot that sinks, so that
+    // the wall shades where it showed as it did.
+    if (sink > 0.0) {
+        out.color = mix(out.color, lit_color(color, normal, 1.0, baseValue, heightValue),
+                        -sink / (heightValue + groundHeight - baseValue - baseGround));
+    }
+#endif
     return out;
 }
 "#
@@ -668,6 +700,15 @@ fn main(in: VertexInput) -> VertexOutput {
     let edgedistance = f32(select(in.decimals_ed.y, in.next_decimals_ed.y, in.position.x == 0));
 
     out.lighting = lighting_of(normal, t, baseValue, heightValue);
+#ifdef TERRAIN
+    // The gradient carries on below the base to a foot that sinks, so that
+    // the wall shades where it showed as it did. The pattern, placed by `z`,
+    // stays where it was.
+    if (sink > 0.0) {
+        out.lighting = mix(out.lighting, lighting_of(normal, 1.0, baseValue, heightValue),
+                           -sink / (heightValue + groundHeight - baseValue - baseGround));
+    }
+#endif
     set_pattern(&out, drawable, patternFrom, patternTo, vec2<f32>(edgedistance, z * drawable.height_factor));
     return out;
 }

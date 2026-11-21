@@ -30,6 +30,8 @@ fn dem_png(rgb: [u8; 3]) -> Vec<u8> {
 
 /// (1 · 65536 + 146 · 256 + 88) · 0.1 − 10000 = 300 m.
 const METERS_300: [u8; 3] = [1, 146, 88];
+/// (1 · 65536 + 154 · 256 + 40) · 0.1 − 10000 = 500 m.
+const METERS_500: [u8; 3] = [1, 154, 40];
 /// (1 · 65536 + 137 · 256 + 192) · 0.1 − 10000 = 80 m.
 const METERS_80: [u8; 3] = [1, 137, 192];
 /// (1 · 65536 + 136 · 256 + 148) · 0.1 − 10000 = 50 m.
@@ -468,4 +470,72 @@ fn an_extrusion_of_a_source_tiled_coarser_than_the_dem_stands_on_the_surface() {
     assert!(red(pixel_at(&image, &map, &center, 320.0)), "the roof on the ground");
     let (ground, coarse) = (seen_at(&map, &center, 320.0), seen_at(&map, &center, 70.0));
     assert!((ground.0 - coarse.0).hypot(ground.1 - coarse.1) > 20.0, "the zooms' DEMs differ on screen");
+}
+
+/// A DEM tile of 256 pixels a side over a slope down to the east, which
+/// falls `drop` meters a pixel of zoom 15 from 500 m at `x`, in pixels of
+/// zoom 15 from the world's west, and lies between 0 and 1000 m.
+fn slope_png(tile: &TileData, x: f64, drop: f64) -> Vec<u8> {
+    let scale = 2f64.powi(15 - i32::from(tile.z));
+    let mut image = PremultipliedImage::new(Size::new(256, 256));
+    for (index, pixel) in image.data.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+        let column = f64::from(tile.x * 256) + (index % 256) as f64 + 0.5;
+        let height = (500.0 - drop * (column * scale - x)).clamp(0.0, 1000.0);
+        let value = ((height + 10000.0) * 10.0).round() as u32;
+        *pixel = [(value >> 16) as u8, (value >> 8) as u8, value as u8, 255];
+    }
+    mln_image::encode_png(&image)
+}
+
+/// Whether `pixel` is of the extrusion: a lit or shaded red, not the white
+/// ground.
+fn extrusion(pixel: [u8; 4]) -> bool {
+    let [r, g, b, _] = pixel;
+    r > 40 && g < r / 2 && b < r / 2
+}
+
+/// A building 150 m tall on the ground, on a slope down to the east that
+/// falls 5 m a DEM pixel: the ground under its east wall is 23 m below the
+/// ground under its centroid, 500 m. Seen from the east, the wall reaches
+/// down to the ground, with no gap above it that the 10 m that a wall's base
+/// sinks would leave, and the wall shades as the same building's does on
+/// level ground at 500 m, where the two show.
+#[test]
+fn a_wall_downhill_reaches_the_ground() {
+    let center = location_at(15, 16384.5, 16384.5);
+    let x = 16384.5 * 256.0;
+    let scene = Scene { extrusion: Some(150.0), ..Scene::new(center, 18, 15) };
+    let camera = CameraOptions {
+        center: Some(center),
+        zoom: Some(16.0),
+        pitch: Some(60.0),
+        bearing: Some(270.0),
+        ..Default::default()
+    };
+    let Some((image, map, _)) = render_views(&scene.style(), &[camera], move |tile| slope_png(tile, x, 5.0)) else {
+        return;
+    };
+    let east = LatLng::new(center.latitude(), center.longitude() + 0.0002).unwrap();
+    // The wall's end is 0.0002° east of the centroid, 4.66 pixels of zoom 15.
+    let ground = 500.0 - 5.0 * 0.0002 / 360.0 * 2f64.powi(15) * 256.0;
+    let base = 500.0 - 10.0;
+    assert!(base - ground > 10.0, "a gap of {} m under the base", base - ground);
+    for height in (ground.ceil() as i32 + 1..base as i32).map(f64::from) {
+        let pixel = pixel_at(&image, &map, &east, height);
+        assert!(extrusion(pixel), "the wall {height} m up, {:.1} m above the ground: {pixel:?}", height - ground);
+    }
+
+    let Some((level, level_map, _)) = render_views(&scene.style(), &[camera], |_| dem_png(METERS_500)) else {
+        return;
+    };
+    // Above the level ground, the wall's gradient runs from its base to its
+    // top, as it does on the slope.
+    for height in [505.0, 520.0, 560.0, 600.0, 640.0] {
+        let (pixel, level) = (pixel_at(&image, &map, &east, height), pixel_at(&level, &level_map, &east, height));
+        assert!(extrusion(pixel), "the wall {height} m up: {pixel:?}");
+        assert!(
+            pixel.iter().zip(level).all(|(&a, b)| a.abs_diff(b) <= 1),
+            "the wall {height} m up on the slope, {pixel:?}, and on level ground, {level:?}"
+        );
+    }
 }

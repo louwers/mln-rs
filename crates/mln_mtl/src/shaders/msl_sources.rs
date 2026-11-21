@@ -1522,6 +1522,27 @@ macro_rules! fill_extrusion_base_ground {
     };
 }
 
+/// `z`, the height of a fill extrusion wall's corner at `t` (0 at the base,
+/// 1 at the top) of its `end`, from `projection`. Over terrain, the foot of a
+/// wall of a polygon whose base is at or below 0 reaches down to the ground
+/// under its own end, read from `ground_dem`, where that is lower than under
+/// the centroid, so that no gap shows under a wall on a steep slope: `sink`
+/// is how much lower, 0 elsewhere.
+macro_rules! fill_extrusion_wall_foot {
+    () => {
+        r"
+#if defined(TERRAIN)
+    const float sink = (t == 0.0 && base <= 0.0)
+        ? max(ground - standing_height(end + projection.translate, projection.ground, ground_dem), 0.0)
+        : 0.0;
+    const float z = (t != 0.0) ? height + ground : base + base_ground - sink;
+#else
+    const float z = (t != 0.0) ? height + ground : base + base_ground;
+#endif
+"
+    };
+}
+
 // The walls' fragment stage, and `wall`, the vertex of a wall, which reads
 // the instanced walls' attributes as the fields of `vertx`, raised by
 // `ground`, and dropped unless `ground_kept`.
@@ -1539,60 +1560,9 @@ struct FragmentOutput {
     //float depth [[depth(less)]]; // Write depth value if it's less than what's already there
 };
 
-template <typename Vertex>
-FragmentStage wall(thread const Vertex& vertx,
-                   device const FillExtrusionDrawableUBO& drawable,
-                   device const ProjectionUBO& projection,
-                   device const FillExtrusionPropsUBO& props,
-                   float ground,
-                   bool ground_kept) {
-
-    bool isDiscarded = glMod(float(vertx.decimals_ed.x), 2.0) > 0.0;
-    if (isDiscarded) {
-        return {
-            .position = float4(0.0),
-            .color    = half4(0.0),
-        };
-    }
-
-#if defined(HAS_UNIFORM_u_base)
-    const auto base   = max(props.light_position_base.w, 0.0);
-#else
-    const auto base   = max(unpack_mix_float(vertx.base, drawable.base_t), 0.0);
-#endif
-#if defined(HAS_UNIFORM_u_height)
-    const auto height = max(props.height, 0.0);
-#else
-    const auto height = max(unpack_mix_float(vertx.height, drawable.height_t), 0.0);
-#endif
-
-    const float2 p1 = float2(vertx.outline_pos);
-    const float2 p2 = float2(vertx.next_outline_pos);
-    const float2 edgevector = normalize(p2 - p1);
-    const float2 own = float2(-edgevector.y, edgevector.x);
-
-    const float3 normal = float3(vertx.pos.x == 0 ? wall_normal(vertx.decimals_ed.x, own) : wall_normal(vertx.next_decimals_ed.x, own), 0.0);
-    const float t = float(vertx.pos.y);
-",
-            fill_extrusion_base_ground!(),
-            r"
-    const float z = (t != 0.0) ? height + ground : base + base_ground;
-
-    const float4 position = ground_kept ? projectTileFor3D(vertx.pos.x == 0.0 ? p1 : p2, z, projection) : ground_dropped();
-
-#if defined(OVERDRAW_INSPECTOR)
-    return {
-        .position = position,
-        .color    = half4(1.0),
-    };
-#endif
-
-#if defined(HAS_UNIFORM_u_color)
-    auto color = props.color;
-#else
-    auto color = unpack_mix_color(vertx.color, drawable.color_t);
-#endif
-
+// The color of a wall facing `normal` at `t`, 0 at its base and 1 at its top.
+static float4 wall_color(float4 color, float3 normal, float t, float base, float height,
+                         device const FillExtrusionPropsUBO& props) {
     // Relative luminance (how dark/bright is the surface color?)
     const float luminance = color.r * 0.2126 + color.g * 0.7152 + color.b * 0.0722;
 
@@ -1628,9 +1598,79 @@ FragmentStage wall(thread const Vertex& vertx,
     const float3 minLight = mix(0.0, 0.3, 1.0 - light_color.rgb);
     vcolor += float4(clamp(color.rgb * directional * light_color.rgb, minLight, 1.0), 0.0);
 
+    return vcolor * props.opacity;
+}
+
+template <typename Vertex>
+FragmentStage wall(thread const Vertex& vertx,
+                   device const FillExtrusionDrawableUBO& drawable,
+                   device const ProjectionUBO& projection,
+                   device const FillExtrusionPropsUBO& props,
+#if defined(TERRAIN)
+                   texture2d<float, access::read> ground_dem,
+#endif
+                   float ground,
+                   bool ground_kept) {
+
+    bool isDiscarded = glMod(float(vertx.decimals_ed.x), 2.0) > 0.0;
+    if (isDiscarded) {
+        return {
+            .position = float4(0.0),
+            .color    = half4(0.0),
+        };
+    }
+
+#if defined(HAS_UNIFORM_u_base)
+    const auto base   = max(props.light_position_base.w, 0.0);
+#else
+    const auto base   = max(unpack_mix_float(vertx.base, drawable.base_t), 0.0);
+#endif
+#if defined(HAS_UNIFORM_u_height)
+    const auto height = max(props.height, 0.0);
+#else
+    const auto height = max(unpack_mix_float(vertx.height, drawable.height_t), 0.0);
+#endif
+
+    const float2 p1 = float2(vertx.outline_pos);
+    const float2 p2 = float2(vertx.next_outline_pos);
+    const float2 edgevector = normalize(p2 - p1);
+    const float2 own = float2(-edgevector.y, edgevector.x);
+
+    const float3 normal = float3(vertx.pos.x == 0 ? wall_normal(vertx.decimals_ed.x, own) : wall_normal(vertx.next_decimals_ed.x, own), 0.0);
+    const float2 end = vertx.pos.x == 0 ? p1 : p2;
+    const float t = float(vertx.pos.y);
+",
+            fill_extrusion_base_ground!(),
+            fill_extrusion_wall_foot!(),
+            r"
+    const float4 position = ground_kept ? projectTileFor3D(end, z, projection) : ground_dropped();
+
+#if defined(OVERDRAW_INSPECTOR)
     return {
         .position = position,
-        .color    = half4(vcolor * props.opacity),
+        .color    = half4(1.0),
+    };
+#endif
+
+#if defined(HAS_UNIFORM_u_color)
+    auto color = props.color;
+#else
+    auto color = unpack_mix_color(vertx.color, drawable.color_t);
+#endif
+
+    float4 vcolor = wall_color(color, normal, t, base, height, props);
+#if defined(TERRAIN)
+    // The gradient carries on below the base to a foot that sinks, so that
+    // the wall shades where it showed as it did.
+    if (sink > 0.0) {
+        vcolor = mix(vcolor, wall_color(color, normal, 1.0, base, height, props),
+                     -sink / (height + ground - base - base_ground));
+    }
+#endif
+
+    return {
+        .position = position,
+        .color    = half4(vcolor),
     };
 }
 
@@ -1739,7 +1779,11 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 ",
         fill_extrusion_ground!(),
         r"
-    return wall(vertx, drawableVector[uboIndex], projectionVector[uboIndex], props, ground, ground_kept);
+    return wall(vertx, drawableVector[uboIndex], projectionVector[uboIndex], props,
+#if defined(TERRAIN)
+                ground_dem,
+#endif
+                ground, ground_kept);
 }
 
 "
@@ -1837,7 +1881,11 @@ FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]],
 ",
         fill_extrusion_ground!(),
         r"
-    return wall(vertx, drawable, projectionVector[uboIndex], props, ground, ground_kept);
+    return wall(vertx, drawable, projectionVector[uboIndex], props,
+#if defined(TERRAIN)
+                ground_dem,
+#endif
+                ground, ground_kept);
 }
 "
     ),
@@ -1948,6 +1996,28 @@ struct FragmentOutput {
     //float depth [[depth(less)]]; // Write depth value if it's less than what's already there
 };
 
+// The lighting of a wall facing `normal` at `t`, 0 at its base and 1 at its
+// top.
+static float4 wall_lighting(float3 normal, float t, float base, float height,
+                            device const FillExtrusionPropsUBO& props) {
+    float4 lighting = float4(0.0, 0.0, 0.0, 1.0);
+    float directional = clamp(dot(normal, props.light_position_base.xyz), 0.0, 1.0);
+    directional = mix((1.0 - props.light_intensity), max((0.5 + props.light_intensity), 1.0), directional);
+
+    if (normal.z == 0.0) {
+        // This avoids another branching statement, but multiplies by a constant of 0.84 if no vertical gradient,
+        // and otherwise calculates the gradient based on base + height
+        // TODO: If we're optimizing to the level of avoiding branches, we should pre-compute
+        //       the square root when height is a uniform.
+        const float fMin = mix(0.7, 0.98, 1.0 - props.light_intensity);
+        const float factor = clamp((t + base) * pow(height / 150.0, 0.5), fMin, 1.0);
+        directional *= (1.0 - props.vertical_gradient) + (props.vertical_gradient * factor);
+    }
+
+    lighting.rgb += clamp(directional * props.light_color_pad.rgb, mix(float3(0.0), float3(0.3), 1.0 - props.light_color_pad.rgb), float3(1.0));
+    return lighting * props.opacity;
+}
+
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
@@ -2000,10 +2070,13 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 
     const float3 normal = float3(vertx.pos.x == 0 ? wall_normal(vertx.decimals_ed.x, own) : wall_normal(vertx.next_decimals_ed.x, own), 0.0);
     const float edgedistance = vertx.pos.x == 0 ? vertx.next_decimals_ed.y : vertx.decimals_ed.y;
+    const float2 end = vertx.pos.x == 0 ? p1 : p2;
     const float t = float(vertx.pos.y);
-    const float z = (t != 0.0) ? height + ground : base + base_ground;
-
-    const float4 position = ground_kept ? projectTileFor3D(vertx.pos.x == 0.0 ? p1 : p2, z, projectionVector[uboIndex]) : ground_dropped();
+    device const ProjectionUBO& projection = projectionVector[uboIndex];
+",
+        fill_extrusion_wall_foot!(),
+        r"
+    const float4 position = ground_kept ? projectTileFor3D(end, z, projection) : ground_dropped();
 
 #if defined(OVERDRAW_INSPECTOR)
     return {
@@ -2047,22 +2120,16 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 
     const float2 pos = float2(edgedistance, z * drawable.height_factor); // extrusion side
 
-    float4 lighting = float4(0.0, 0.0, 0.0, 1.0);
-    float directional = clamp(dot(normal, props.light_position_base.xyz), 0.0, 1.0);
-    directional = mix((1.0 - props.light_intensity), max((0.5 + props.light_intensity), 1.0), directional);
-
-    if (normal.z == 0.0) {
-        // This avoids another branching statement, but multiplies by a constant of 0.84 if no vertical gradient,
-        // and otherwise calculates the gradient based on base + height
-        // TODO: If we're optimizing to the level of avoiding branches, we should pre-compute
-        //       the square root when height is a uniform.
-        const float fMin = mix(0.7, 0.98, 1.0 - props.light_intensity);
-        const float factor = clamp((t + base) * pow(height / 150.0, 0.5), fMin, 1.0);
-        directional *= (1.0 - props.vertical_gradient) + (props.vertical_gradient * factor);
+    float4 lighting = wall_lighting(normal, t, base, height, props);
+#if defined(TERRAIN)
+    // The gradient carries on below the base to a foot that sinks, so that
+    // the wall shades where it showed as it did. The pattern, placed by `z`,
+    // stays where it was.
+    if (sink > 0.0) {
+        lighting = mix(lighting, wall_lighting(normal, 1.0, base, height, props),
+                       -sink / (height + ground - base - base_ground));
     }
-
-    lighting.rgb += clamp(directional * props.light_color_pad.rgb, mix(float3(0.0), float3(0.3), 1.0 - props.light_color_pad.rgb), float3(1.0));
-    lighting *= props.opacity;
+#endif
 
     return {
         .position       = position,
