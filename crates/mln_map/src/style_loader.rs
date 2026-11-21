@@ -18,7 +18,7 @@
 use std::sync::Arc;
 
 use mln_sprite::load_sprite;
-use mln_storage::{Data, FileSource, FileSourceExt, Request, Resource, Response};
+use mln_storage::{Data, FileSource, FileSourceExt, Request, Resource, ResourceError, Response};
 use mln_style::source_type::{Described, ErasedDescription, Load};
 use mln_style::sprite::Sprite;
 use mln_style::{Edit, SourceInstance, Style, StyleLoadError, StyleRegistry, image};
@@ -100,6 +100,8 @@ struct SourceLoad {
     describing: u64,
     /// Whether the description loaded, or the source has nothing to load.
     loaded: bool,
+    /// The last response was an error (`error_streak`).
+    failing: bool,
 }
 
 /// A sprite of the parsed style, and where its load stands.
@@ -115,6 +117,9 @@ struct SpriteLoad {
     /// Whether the sprite loaded or failed for good. A style without a
     /// sprite that has no file source never loads.
     loaded: bool,
+    /// The last response to the JSON request, and to the image request, was
+    /// an error (`error_streak`).
+    failing: [bool; 2],
 }
 
 /// Loads a map's style document, its sprites and its sources' descriptions
@@ -143,6 +148,8 @@ pub(crate) struct StyleLoader {
     /// Whether a response to the document request brought a style, which a
     /// later response without content or not modified confirms.
     delivered: bool,
+    /// The document request's last response was an error (`error_streak`).
+    failing: bool,
     /// The parsed document's sprites.
     sprite_list: Vec<Sprite>,
     sprites: Vec<SpriteLoad>,
@@ -173,6 +180,7 @@ impl StyleLoader {
             loads: 0,
             style_load: 0,
             delivered: false,
+            failing: false,
             sprite_list: Vec::new(),
             sprites: Vec::new(),
             pixel_ratio,
@@ -229,6 +237,7 @@ impl StyleLoader {
         self.url = Some(url.to_owned());
 
         self.delivered = false;
+        self.failing = false;
         let load = self.next_load();
         self.style_load = load;
         let replies = self.replies.clone();
@@ -294,7 +303,8 @@ impl StyleLoader {
             if self.sources.get(&load.id).is_some_and(|entry| entry.load == load) {
                 continue;
             }
-            let mut entry = SourceLoad { load: load.clone(), request: None, fetch: 0, describing: 0, loaded: true };
+            let mut entry =
+                SourceLoad { load: load.clone(), request: None, fetch: 0, describing: 0, loaded: true, failing: false };
             match source.data().plan_load() {
                 Load::Done => {}
                 Load::Ready(description) => edits.push(Edit::SetSourceDescription {
@@ -339,12 +349,15 @@ impl StyleLoader {
         let Some(source) = style.get_source(&load.id).filter(|source| source.instance() == load.instance) else {
             return;
         };
-        if let Some(error) = &res.error {
-            let error = Error::native(error.message.clone());
-            self.last_error = Some(error.clone());
-            events.push(LoadEvent::SourceDescribed { load, result: Err(error) });
+        if let Err(error) = error_streak(&mut entry.failing, &res) {
+            if let Some(error) = error {
+                let error = Error::native(error.message.clone());
+                self.last_error = Some(error.clone());
+                events.push(LoadEvent::SourceDescribed { load, result: Err(error) });
+            }
             return;
-        } else if res.not_modified {
+        }
+        if res.not_modified {
             return;
         }
         let data = if res.no_content { None } else { Some(res.data.unwrap_or_default()) };
@@ -368,36 +381,39 @@ impl StyleLoader {
         res: &Response,
         events: &mut Vec<LoadEvent>,
     ) {
-        if load != self.style_load {
+        // A later answer doesn't replace a loaded style that an edit changed.
+        if load != self.style_load || (self.edited && self.document_loaded) {
             return;
         }
-        // Don't allow a loaded, edited style to be overwritten with a new version.
-        if self.edited && self.document_loaded {
+        // An error fails the load only if no earlier response brought a
+        // style.
+        if let Err(error) = error_streak(&mut self.failing, res) {
+            if let Some(error) = error {
+                let message = format!("loading style failed: {}", error.message);
+                Log::error(Event::Setup, &message);
+                if !self.delivered {
+                    events.push(LoadEvent::Failed(StyleLoadError::Load(message)));
+                }
+                events.push(LoadEvent::ResourceError(Error::native(error.message.clone())));
+            }
             return;
         }
-
         // A response without content or not modified confirms the style an
         // earlier response brought. Without one, the load has no style, so
         // it fails.
         let empty = res.no_content || res.not_modified;
-        let error = match &res.error {
-            Some(error) => Some(error.message.clone()),
-            None if empty && !self.delivered => Some(
-                if res.no_content {
-                    "the style request returned no content"
-                } else {
-                    "the style request returned not modified, but no earlier response delivered the style"
-                }
-                .to_owned(),
-            ),
-            None => None,
-        };
-        if let Some(error) = error {
+        if empty && !self.delivered {
+            let error = if res.no_content {
+                "the style request returned no content"
+            } else {
+                "the style request returned not modified, but no earlier response delivered the style"
+            };
             let message = format!("loading style failed: {error}");
             Log::error(Event::Setup, &message);
             events.push(LoadEvent::Failed(StyleLoadError::Load(message)));
             events.push(LoadEvent::ResourceError(Error::native(error)));
-        } else if !empty && let Some(data) = &res.data {
+        }
+        if !empty && let Some(data) = &res.data {
             self.delivered = true;
             let json = String::from_utf8_lossy(data);
             self.parse(registry, &json, events);
@@ -485,12 +501,14 @@ impl StyleLoader {
         events: &mut Vec<LoadEvent>,
     ) {
         let Some(entry) = self.sprite_load(id, load) else { return };
-        if let Some(error) = &res.error {
-            let sprite = entry.sprite.clone();
-            let error = Error::native(error.message.clone());
-            self.sprite_failed(sprite, error, events);
+        if let Err(error) = error_streak(&mut entry.failing[part as usize], &res) {
+            if let Some(error) = error {
+                let sprite = entry.sprite.clone();
+                self.sprite_failed(sprite, Error::native(error.message.clone()), events);
+            }
             return;
-        } else if res.not_modified {
+        }
+        if res.not_modified {
             return;
         }
         // Only parse again for new data.
@@ -596,12 +614,23 @@ impl StyleLoader {
     }
 }
 
+/// Follows a request's streak of errors in `failing`, so that each streak
+/// reports once: returns `res`'s error as `Err`, which is `Some` only for
+/// the first of a streak.
+fn error_streak<'r>(failing: &mut bool, res: &'r Response) -> Result<(), Option<&'r ResourceError>> {
+    let Some(error) = res.error.as_deref() else {
+        *failing = false;
+        return Ok(());
+    };
+    Err((!std::mem::replace(failing, true)).then_some(error))
+}
+
 /// The id a style without a sprite loads under.
 const DEFAULT_SPRITE: &str = "default";
 
 impl SpriteLoad {
     fn new(sprite: Option<Sprite>, load: u64) -> Self {
-        SpriteLoad { sprite, load, json: None, image: None, requests: Vec::new(), loaded: false }
+        SpriteLoad { sprite, load, json: None, image: None, requests: Vec::new(), loaded: false, failing: [false; 2] }
     }
 
     fn id(&self) -> &str {

@@ -6,6 +6,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
 use geo_types::{Geometry, Point};
 use mln_util::chrono::{Timestamp, now};
@@ -20,12 +21,12 @@ use super::{
     warning,
 };
 use crate::offline::{
-    OfflineGeometryRegionDefinition, OfflineRegionDefinition, OfflineRegionMetadata, OfflineRegionStatus,
-    OfflineTilePyramidRegionDefinition,
+    OfflineGeometryRegionDefinition, OfflineRegionDefinition, OfflineRegionExpiry, OfflineRegionMetadata,
+    OfflineRegionStatus, OfflineTilePyramidRegionDefinition,
 };
 use crate::offline_database::OfflineDatabase;
 use crate::resource::{Kind, LoadingMethod, Resource, TileData};
-use crate::response::{Reason, ResourceError, Response};
+use crate::response::{Caching, Reason, ResourceError, Response};
 
 fn fixture(name: &str) -> PathBuf {
     cpp_path(&format!("test/fixtures/offline_database/{name}"))
@@ -174,7 +175,7 @@ fn schema_version() {
 
     {
         let db = Connection::open(&*filename).unwrap();
-        db.busy_timeout(std::time::Duration::from_secs(1)).unwrap();
+        db.busy_timeout(Duration::from_secs(1)).unwrap();
         db.execute_batch("PRAGMA user_version = 1").unwrap();
     }
 
@@ -570,7 +571,7 @@ fn disabled_maximum_ambient_cache_size() {
 
     {
         let mut db = OfflineDatabase::new(&filename);
-        db.set_maximum_ambient_cache_size(maximum_size as u64); // 50 MB
+        let _ = db.set_maximum_ambient_cache_size(maximum_size as u64); // 50 MB
 
         let definition =
             tile_pyramid("https://example.com/masp/style", hull((1.0, 2.0), (3.0, 4.0)), 5.0, 6.0, 2.0, true);
@@ -604,7 +605,7 @@ fn disabled_maximum_ambient_cache_size() {
 
     {
         let mut db = OfflineDatabase::new(&filename);
-        db.set_maximum_ambient_cache_size(maximum_size as u64); // 30 MB
+        let _ = db.set_maximum_ambient_cache_size(maximum_size as u64); // 30 MB
     }
 
     // Setting a new size to the ambient cache should have no effect because
@@ -614,9 +615,9 @@ fn disabled_maximum_ambient_cache_size() {
 
     {
         let mut db = OfflineDatabase::new(&filename);
-        db.set_maximum_ambient_cache_size(maximum_size as u64); // 30 MB
+        let _ = db.set_maximum_ambient_cache_size(maximum_size as u64); // 30 MB
         let region = db.list_regions().unwrap().remove(0);
-        db.delete_region(&region);
+        let _ = db.delete_region(&region);
     }
 
     // After deleting the offline region, the data will migrate to the
@@ -626,7 +627,7 @@ fn disabled_maximum_ambient_cache_size() {
 
     {
         let mut db = OfflineDatabase::new(&filename);
-        db.set_maximum_ambient_cache_size(maximum_size as u64 * 2); // 60 MB
+        let _ = db.set_maximum_ambient_cache_size(maximum_size as u64 * 2); // 60 MB
     }
 
     // Doubling the size should have no effect if we don't and new tiles and
@@ -636,7 +637,7 @@ fn disabled_maximum_ambient_cache_size() {
 
     {
         let mut db = OfflineDatabase::new(&filename);
-        db.set_maximum_ambient_cache_size(maximum_size as u64); // 30 MB
+        let _ = db.set_maximum_ambient_cache_size(maximum_size as u64); // 30 MB
 
         // Add ~50 MB in ambient cache data.
         for i in 0..250 {
@@ -656,7 +657,7 @@ fn disabled_maximum_ambient_cache_size() {
 
     {
         let mut db = OfflineDatabase::new(&filename);
-        db.set_maximum_ambient_cache_size(maximum_size as u64); // 20 MB
+        let _ = db.set_maximum_ambient_cache_size(maximum_size as u64); // 20 MB
     }
 
     // Should shrink again.
@@ -665,7 +666,7 @@ fn disabled_maximum_ambient_cache_size() {
 
     {
         let mut db = OfflineDatabase::new(&filename);
-        db.set_maximum_ambient_cache_size(0);
+        let _ = db.set_maximum_ambient_cache_size(0);
 
         for i in 0..5 {
             let ambient_tile = tile(&format!("https://example.com/tiles/tiles/ambient_tile_{i}"), 1.0, 0, 0, 0);
@@ -735,22 +736,22 @@ fn delete_region() {
         let size_with_two_regions = file_size(&filename);
 
         db.run_pack_database_automatically(false);
-        db.delete_region(&region1);
+        let _ = db.delete_region(&region1);
 
         assert_eq!(1, db.list_regions().unwrap().len());
         // Region is removed but the size of the database is the same.
         assert_eq!(size_with_two_regions, file_size(&filename));
 
-        db.pack();
+        let _ = db.pack();
         // The size of the database has shrunk after pack().
         let size_with_one_region = file_size(&filename);
         assert!(size_with_one_region < size_with_two_regions);
         db.run_pack_database_automatically(true);
-        db.delete_region(&region2);
+        let _ = db.delete_region(&region2);
 
         // After clearing the cache, the size of the database should get back
         // to the original size.
-        db.clear_ambient_cache();
+        let _ = db.clear_ambient_cache();
 
         // The size of the database has shrunk right away after deleted region
         // is evicted from an ambient cache.
@@ -792,11 +793,11 @@ fn pack() {
     let populated_size = file_size(&filename);
     assert!(populated_size > initial_size);
 
-    db.clear_ambient_cache();
+    let _ = db.clear_ambient_cache();
     assert_eq!(populated_size, file_size(&filename));
     check_log_empty(&log);
 
-    db.pack();
+    let _ = db.pack();
     assert_eq!(initial_size, file_size(&filename));
     check_log_empty(&log);
 }
@@ -809,8 +810,8 @@ fn invalidate() {
 
     let mut response = Response::new();
     response.no_content = true;
-    response.must_revalidate = false;
-    response.expires = Some(Timestamp::from_secs(now().secs_since_epoch() + 3600));
+    response.caching.must_revalidate = false;
+    response.caching.expires = Some(Timestamp::from_secs(now().secs_since_epoch() + 3600));
 
     let ambient_tile = tile("https://example.com/tiles/tiles/tile_ambient", 1.0, 0, 0, 0);
     db.put(&ambient_tile, &response);
@@ -835,59 +836,33 @@ fn invalidate() {
     let region2_style = style("https://example.com/maps/style_offline_region2");
     db.put_region_resource(region2.id, &region2_style, &response);
 
+    let mut fresh = |r: &Resource| db.get(r).expect("response").caching.is_fresh(now());
+    for resource in [&ambient_tile, &ambient_style, &region1_tile, &region1_style, &region2_tile, &region2_style] {
+        assert!(fresh(resource));
+    }
+
+    // Invalidating a region leaves the ambient cache and other regions be.
+    assert!(db.invalidate_region(region1.id).is_ok());
+    let mut fresh = |r: &Resource| db.get(r).expect("response").caching.is_fresh(now());
+    assert!(fresh(&ambient_tile) && fresh(&ambient_style));
+    assert!(!fresh(&region1_tile) && !fresh(&region1_style));
+    assert!(fresh(&region2_tile) && fresh(&region2_style));
+
+    // Invalidating the ambient cache leaves the regions be.
+    assert!(db.invalidate_ambient_cache().is_ok());
     let mut get = |r: &Resource| db.get(r).expect("response");
+    for resource in [&ambient_tile, &ambient_style, &region1_tile, &region1_style] {
+        // Stale, but still usable.
+        let caching = get(resource).caching;
+        assert!(!caching.is_fresh(now()) && caching.is_usable(now()));
+    }
+    assert!(get(&region2_tile).caching.expires > Some(now()));
+    assert!(get(&region2_style).caching.expires > Some(now()));
 
-    // Prior to invalidation, all tiles are usable.
-    assert!(get(&ambient_tile).is_usable());
-    assert!(get(&ambient_style).is_usable());
-    assert!(get(&region1_tile).is_usable());
-    assert!(get(&region1_style).is_usable());
-    assert!(get(&region2_tile).is_usable());
-    assert!(get(&region2_style).is_usable());
-
-    // Invalidate a region will not invalidate ambient tiles or other
-    // regions.
-    assert!(db.invalidate_region(region1.id).is_none());
-
-    let mut get = |r: &Resource| db.get(r).expect("response");
-    assert!(get(&ambient_tile).is_usable());
-    assert!(get(&ambient_style).is_usable());
-    assert!(!get(&region1_tile).is_usable());
-    assert!(!get(&region1_style).is_usable());
-    assert!(get(&region2_tile).is_usable());
-    assert!(get(&region2_style).is_usable());
-
-    // Invalidate the ambient cache will not invalidate the regions that are
-    // still valid.
-    assert!(db.invalidate_ambient_cache().is_none());
-
-    let mut get = |r: &Resource| db.get(r).expect("response");
-    assert!(!get(&ambient_tile).is_usable());
-    assert!(!get(&ambient_style).is_usable());
-    assert!(!get(&region1_tile).is_usable());
-    assert!(!get(&region1_style).is_usable());
-    assert!(get(&region2_tile).is_usable());
-    assert!(get(&region2_style).is_usable());
-
-    // Sanity check.
-    assert!(get(&ambient_tile).expires < Some(now()));
-    assert!(get(&ambient_style).expires < Some(now()));
-    assert!(get(&region1_tile).expires < Some(now()));
-    assert!(get(&region1_style).expires < Some(now()));
-    assert!(get(&region2_tile).expires > Some(now()));
-    assert!(get(&region2_style).expires > Some(now()));
-
-    assert!(get(&ambient_tile).must_revalidate);
-    assert!(get(&ambient_style).must_revalidate);
-    assert!(get(&region1_tile).must_revalidate);
-    assert!(get(&region1_style).must_revalidate);
-    assert!(!get(&region2_tile).must_revalidate);
-    assert!(!get(&region2_style).must_revalidate);
-
-    // Should not throw.
-    assert!(db.invalidate_region(region2.id).is_none());
-    assert!(db.invalidate_region(region2.id).is_none());
-    assert!(db.invalidate_region(123).is_none());
+    // Invalidating twice, or a region that doesn't exist, succeeds.
+    assert!(db.invalidate_region(region2.id).is_ok());
+    assert!(db.invalidate_region(region2.id).is_ok());
+    assert!(db.invalidate_region(123).is_ok());
 
     // Invalidate != delete.
     let regions = db.list_regions().unwrap();
@@ -923,7 +898,7 @@ fn clear_ambient_cache() {
             db.put(&s, &response);
         }
 
-        db.clear_ambient_cache();
+        let _ = db.clear_ambient_cache();
     }
 
     assert_eq!(initial_size, file_size(&filename));
@@ -976,7 +951,7 @@ fn concurrent_use() {
                 assert!(db2.get(&fixture::resource()).is_some());
 
                 if i == 50 {
-                    db2.clear_ambient_cache();
+                    let _ = db2.clear_ambient_cache();
                 }
             }
             check_log_empty(&log);
@@ -1020,7 +995,7 @@ fn put_returns_size() {
 fn put_evicts_least_recently_used_resources() {
     let log = FixtureLog::new();
     let mut db = OfflineDatabase::new(":memory:");
-    db.set_maximum_ambient_cache_size(1024 * 100);
+    let _ = db.set_maximum_ambient_cache_size(1024 * 100);
 
     let mut response = Response::new();
     response.data = Some(random_string(1024));
@@ -1048,7 +1023,7 @@ fn offline_region_does_not_affect_ambient_cache_size() {
     let page_overhead = number_of_cached_resources * database_page;
 
     // 200KB ambient cache limit + database page overhead.
-    db.set_maximum_ambient_cache_size(u64::from(data_size * number_of_cached_resources + page_overhead));
+    let _ = db.set_maximum_ambient_cache_size(u64::from(data_size * number_of_cached_resources + page_overhead));
 
     let mut response = Response::new();
     response.data = Some(random_string(data_size as usize));
@@ -1082,7 +1057,7 @@ fn offline_region_does_not_affect_ambient_cache_size() {
 fn put_region_resource_does_not_evict() {
     let log = FixtureLog::new();
     let mut db = OfflineDatabase::new(":memory:");
-    db.set_maximum_ambient_cache_size(1024 * 100);
+    let _ = db.set_maximum_ambient_cache_size(1024 * 100);
 
     let definition = tile_pyramid("", LatLngBounds::world(), 0.0, f64::INFINITY, 1.0, true);
     let region = db.create_region(&definition.into(), &OfflineRegionMetadata::new()).expect("region");
@@ -1105,7 +1080,7 @@ fn put_region_resource_does_not_evict() {
 fn put_fails_when_eviction_insuffices() {
     let log = FixtureLog::new();
     let mut db = OfflineDatabase::new(":memory:");
-    db.set_maximum_ambient_cache_size(1024 * 100);
+    let _ = db.set_maximum_ambient_cache_size(1024 * 100);
 
     let mut big = Response::new();
     // One page over the cache size.
@@ -1126,7 +1101,7 @@ fn put_fails_when_eviction_insuffices() {
 fn put_skips_zero_size_ambient_cache() {
     let log = FixtureLog::new();
     let mut db = OfflineDatabase::new(":memory:");
-    db.set_maximum_ambient_cache_size(0);
+    let _ = db.set_maximum_ambient_cache_size(0);
 
     // A region keeps the database enabled, so put() reaches the ambient cache.
     let definition = tile_pyramid("", LatLngBounds::world(), 0.0, f64::INFINITY, 1.0, true);
@@ -1183,13 +1158,13 @@ fn get_region_completed_status() {
 fn has_region_resource() {
     let log = FixtureLog::new();
     let mut db = OfflineDatabase::new(":memory:");
-    db.set_maximum_ambient_cache_size(1024 * 100);
+    let _ = db.set_maximum_ambient_cache_size(1024 * 100);
 
     let definition = tile_pyramid("", LatLngBounds::world(), 0.0, f64::INFINITY, 1.0, true);
     let region = db.create_region(&definition.into(), &OfflineRegionMetadata::new()).expect("region");
 
-    assert!(db.has_region_resource(&style("http://example.com/1")).is_none());
-    assert!(db.has_region_resource(&style("http://example.com/20")).is_none());
+    assert!(db.check_region_resource(&style("http://example.com/1")).is_none());
+    assert!(db.check_region_resource(&style("http://example.com/20")).is_none());
 
     let mut response = Response::new();
     response.data = Some(random_string(1024));
@@ -1198,9 +1173,9 @@ fn has_region_resource() {
         db.put_region_resource(region.id, &style(&format!("http://example.com/{i}")), &response);
     }
 
-    assert!(db.has_region_resource(&style("http://example.com/1")).is_some());
-    assert!(db.has_region_resource(&style("http://example.com/20")).is_some());
-    assert_eq!(Some(1024), db.has_region_resource(&style("http://example.com/20")));
+    assert!(db.check_region_resource(&style("http://example.com/1")).is_some());
+    assert!(db.check_region_resource(&style("http://example.com/20")).is_some());
+    assert_eq!(Some(1024), db.check_region_resource(&style("http://example.com/20")).map(|(size, _)| size));
 
     check_log_empty(&log);
 }
@@ -1210,7 +1185,7 @@ fn has_region_resource() {
 fn has_region_resource_tile() {
     let log = FixtureLog::new();
     let mut db = OfflineDatabase::new(":memory:");
-    db.set_maximum_ambient_cache_size(1024 * 100);
+    let _ = db.set_maximum_ambient_cache_size(1024 * 100);
 
     let definition = tile_pyramid("", LatLngBounds::world(), 0.0, f64::INFINITY, 1.0, false);
     let region = db.create_region(&definition.clone().into(), &OfflineRegionMetadata::new()).expect("region");
@@ -1220,22 +1195,21 @@ fn has_region_resource_tile() {
 
     response.data = Some(data("first"));
 
-    assert!(db.has_region_resource(&resource).is_none());
+    assert!(db.check_region_resource(&resource).is_none());
     db.put_region_resource(region.id, &resource, &response);
-    assert!(db.has_region_resource(&resource).is_some());
-    assert_eq!(Some(5), db.has_region_resource(&resource));
+    assert!(db.check_region_resource(&resource).is_some());
+    assert_eq!(Some(5), db.check_region_resource(&resource).map(|(size, _)| size));
 
     let another_region = db.create_region(&definition.into(), &OfflineRegionMetadata::new()).expect("region");
     assert!(region.id < another_region.id);
-    assert!(db.has_region_resource(&resource).is_some());
-    assert_eq!(Some(5), db.has_region_resource(&resource));
+    assert!(db.check_region_resource(&resource).is_some());
+    assert_eq!(Some(5), db.check_region_resource(&resource).map(|(size, _)| size));
 
     check_log_empty(&log);
 }
 
-// Not a C++ test: ffi patch 0077 tests these through OfflineDownload.
-// checkRegionResource reports whether the stored copy is usable, and
-// putRegionResource reports the stored size for a 304.
+// check_region_resource reports the stored copy's size and caching rules,
+// and put_region_resource reports the stored size for a 304.
 #[test]
 fn check_region_resource_and_not_modified_size() {
     let log = FixtureLog::new();
@@ -1248,17 +1222,19 @@ fn check_region_resource_and_not_modified_size() {
         response.data = Some(data("first"));
         assert_eq!(None, db.check_region_resource(&resource));
         assert_eq!(5, db.put_region_resource(region.id, &resource, &response));
-        assert_eq!(Some((5, true)), db.check_region_resource(&resource));
+        let fresh = |db: &mut OfflineDatabase| {
+            db.check_region_resource(&resource).map(|(size, caching)| (size, caching.is_fresh(now())))
+        };
+        assert_eq!(Some((5, true)), fresh(&mut db));
 
-        assert!(db.invalidate_region(region.id).is_none());
-        assert_eq!(Some((5, false)), db.check_region_resource(&resource));
-        assert_eq!(Some(5), db.has_region_resource(&resource));
+        assert!(db.invalidate_region(region.id).is_ok());
+        assert_eq!(Some((5, false)), fresh(&mut db));
 
         let mut not_modified = Response::new();
         not_modified.not_modified = true;
-        not_modified.expires = Some(Timestamp::from_secs(now().secs_since_epoch() + 3600));
+        not_modified.caching.expires = Some(Timestamp::from_secs(now().secs_since_epoch() + 3600));
         assert_eq!(5, db.put_region_resource(region.id, &resource, &not_modified));
-        assert_eq!(Some((5, true)), db.check_region_resource(&resource));
+        assert_eq!(Some((5, true)), fresh(&mut db));
     }
 
     check_log_empty(&log);
@@ -1269,7 +1245,7 @@ fn check_region_resource_and_not_modified_size() {
 fn batch_insertion() {
     let log = FixtureLog::new();
     let mut db = OfflineDatabase::new(":memory:");
-    db.set_maximum_ambient_cache_size(1024 * 100);
+    let _ = db.set_maximum_ambient_cache_size(1024 * 100);
 
     let definition = tile_pyramid("", LatLngBounds::world(), 0.0, f64::INFINITY, 1.0, true);
     let region = db.create_region(&definition.into(), &OfflineRegionMetadata::new()).expect("region");
@@ -1296,11 +1272,11 @@ fn batch_insertion() {
 /// delete every region.
 fn open_and_delete_regions(filename: &str) {
     let mut db = OfflineDatabase::new(filename);
-    db.set_maximum_ambient_cache_size(0);
+    let _ = db.set_maximum_ambient_cache_size(0);
 
     let regions = db.list_regions().expect("regions");
     for region in regions {
-        db.delete_region(&region);
+        let _ = db.delete_region(&region);
     }
 }
 
@@ -1376,8 +1352,126 @@ const TILES_COLUMNS: [&str; 13] = [
     "accessed",
     "must_revalidate",
 ];
+
 const RESOURCES_COLUMNS: [&str; 10] =
     ["id", "url", "kind", "expires", "modified", "etag", "data", "compressed", "accessed", "must_revalidate"];
+
+/// A 304, or the copy it delivered, renews a copy's caching rules. What the
+/// server forbids storing isn't stored.
+#[test]
+fn caching_rules_are_stored() {
+    let log = FixtureLog::new();
+    let mut db = OfflineDatabase::new(":memory:");
+    let at = |secs: i64| Some(Timestamp::from_secs(secs));
+
+    for resource in [style("https://example.com/style"), tile("https://example.com/{z}/{x}/{y}.pbf", 1.0, 0, 0, 0)] {
+        let mut response = Response::new();
+        response.data = Some(data("first"));
+        response.caching.expires = at(100);
+        response.caching.must_revalidate = true;
+        db.put(&resource, &response);
+        let stored = db.get(&resource).unwrap();
+        assert_eq!(response.caching, stored.caching);
+
+        let mut renewed = Response::new();
+        renewed.not_modified = true;
+        renewed.caching.expires = at(1000);
+        db.put(&resource, &renewed);
+        let stored = db.get(&resource).unwrap();
+        assert_eq!(renewed.caching, stored.caching);
+        assert_eq!(b"first", stored.data.unwrap().as_slice());
+
+        // The copy a 304 delivered back is the stored one: only its caching
+        // rules change.
+        let mut delivered = Response::new();
+        delivered.prior = true;
+        delivered.data = Some(data("delivered"));
+        delivered.caching.expires = at(2000);
+        assert_eq!((false, 0), db.put(&resource, &delivered));
+        let stored = db.get(&resource).unwrap();
+        assert_eq!(delivered.caching, stored.caching);
+        assert_eq!(b"first", stored.data.unwrap().as_slice());
+
+        let mut no_store = Response::new();
+        no_store.data = Some(data("second"));
+        no_store.no_store = true;
+        assert_eq!((false, 0), db.put(&resource, &no_store));
+        assert_eq!(b"first", db.get(&resource).unwrap().data.unwrap().as_slice());
+    }
+
+    check_log_empty(&log);
+}
+
+/// A region's expiry reports when its resources go stale and stop being
+/// usable, and how many are stale or unusable now.
+#[test]
+fn region_expiry() {
+    let log = FixtureLog::new();
+    let mut db = OfflineDatabase::new(":memory:");
+    let definition: OfflineRegionDefinition = tile_pyramid("", LatLngBounds::world(), 0.0, 1.0, 1.0, false).into();
+    let region = db.create_region(&definition, &OfflineRegionMetadata::new()).unwrap();
+    assert_eq!(OfflineRegionExpiry::default(), db.get_region_expiry(region.id).unwrap());
+
+    let now = now().secs_since_epoch();
+    let at = |secs: i64| Some(Timestamp::from_secs(now + secs));
+    let put = |db: &mut OfflineDatabase, resource: &Resource, caching: Caching| {
+        let mut response = Response::new();
+        response.data = Some(data("data"));
+        response.caching = caching;
+        db.put_region_resource(region.id, resource, &response);
+    };
+    let tile = |y: i32| tile("https://example.com/{z}/{x}/{y}.pbf", 1.0, 0, y, 1);
+    // Fresh for an hour, then usable stale.
+    put(&mut db, &tile(0), Caching { expires: at(3600), must_revalidate: false });
+    // Stale, and usable.
+    put(&mut db, &tile(1), Caching { expires: at(-60), must_revalidate: false });
+    // Stale, and unusable without the server.
+    put(&mut db, &style("https://example.com/style.json"), Caching { expires: at(-30), must_revalidate: true });
+    // Never stale.
+    put(&mut db, &style("https://example.com/sprite.json"), Caching::default());
+
+    let expiry = db.get_region_expiry(region.id).unwrap();
+    assert_eq!(at(-60), expiry.stale_after);
+    assert_eq!(at(-30), expiry.usable_offline_until);
+    assert_eq!((2, 1), (expiry.stale_resource_count, expiry.unusable_resource_count));
+
+    check_log_empty(&log);
+}
+
+/// Invalidating makes copies stale. They stay usable, except those that
+/// must revalidate.
+#[test]
+fn invalidating_makes_copies_stale() {
+    let log = FixtureLog::new();
+    let mut db = OfflineDatabase::new(":memory:");
+    let definition: OfflineRegionDefinition = tile_pyramid("", LatLngBounds::world(), 0.0, 1.0, 1.0, false).into();
+    let region = db.create_region(&definition, &OfflineRegionMetadata::new()).unwrap();
+    let now = now();
+    let at = |secs: i64| Some(Timestamp::from_secs(now.secs_since_epoch() + secs));
+    let cases = [
+        Caching { expires: at(3600), must_revalidate: true },
+        Caching { expires: at(3600), must_revalidate: false },
+        Caching::default(),
+        Caching { expires: at(-60), must_revalidate: true },
+    ];
+    let tile = |y: usize| tile("https://example.com/{z}/{x}/{y}.pbf", 1.0, 0, y as i32, 1);
+    for (y, caching) in cases.iter().enumerate() {
+        let mut response = Response::new();
+        response.data = Some(data("data"));
+        response.caching = *caching;
+        db.put_region_resource(region.id, &tile(y), &response);
+    }
+
+    db.invalidate_region(region.id).unwrap();
+
+    for (y, before) in cases.iter().enumerate() {
+        let caching = db.get(&tile(y)).unwrap().caching;
+        assert!(!caching.is_fresh(now), "{before:?}");
+        assert_eq!(!before.must_revalidate, caching.is_usable(now), "{before:?}");
+    }
+
+    check_log_empty(&log);
+}
 
 // gtest: OfflineDatabase.MigrateFromV5Schema
 #[test]
@@ -1441,7 +1535,7 @@ fn downgrade_schema() {
 
     {
         let mut db = OfflineDatabase::new(&filename);
-        db.set_maximum_ambient_cache_size(0);
+        let _ = db.set_maximum_ambient_cache_size(0);
     }
 
     assert_eq!(6, database_user_version(&filename));
@@ -1618,12 +1712,12 @@ fn merge_database_with_single_region_ambient_tiles() {
     let mut db = OfflineDatabase::new(":memory:");
     let _result = db.merge_database(&filename_sideload);
 
-    assert!(db.has_region_resource(&tile(SATELLITE_TILE_URL, 1.0, 0, 0, 1)).is_some());
+    assert!(db.check_region_resource(&tile(SATELLITE_TILE_URL, 1.0, 0, 0, 1)).is_some());
 
     // Ambient resources should not be copied
-    assert!(db.has_region_resource(&style("maptiler://maps/streets")).is_none());
-    assert!(db.has_region_resource(&tile(SATELLITE_TILE_URL, 1.0, 0, 1, 2)).is_none());
-    assert!(db.has_region_resource(&tile(SATELLITE_TILE_URL, 1.0, 1, 1, 2)).is_none());
+    assert!(db.check_region_resource(&style("maptiler://maps/streets")).is_none());
+    assert!(db.check_region_resource(&tile(SATELLITE_TILE_URL, 1.0, 0, 1, 2)).is_none());
+    assert!(db.check_region_resource(&tile(SATELLITE_TILE_URL, 1.0, 1, 1, 2)).is_none());
 }
 
 // gtest: OfflineDatabase.MergeDatabaseWithMultipleRegions_New
@@ -1748,7 +1842,7 @@ fn reset_database() {
 
     let mut db = OfflineDatabase::new(&filename);
     let result = db.reset_database();
-    assert!(result.is_none());
+    assert!(result.is_ok());
 
     let regions = db.list_regions().unwrap();
     assert_eq!(0, regions.len());
@@ -1766,7 +1860,7 @@ fn reset_in_memory_database() {
         let decoy = std::fs::write(path, "unrelated file").is_ok();
 
         let mut db = OfflineDatabase::new(path);
-        assert!(db.reset_database().is_none(), "{path}");
+        assert!(db.reset_database().is_ok(), "{path}");
         if decoy {
             assert_eq!("unrelated file", std::fs::read_to_string(path).unwrap(), "{path}");
             delete_file(path);
@@ -1814,7 +1908,7 @@ fn update_database_read_only_mode() {
 
     let mut db = OfflineDatabase::new(&filename);
     db.reopen_database_read_only(true);
-    db.clear_ambient_cache();
+    let _ = db.clear_ambient_cache();
     assert_eq!(
         1,
         log.count(
@@ -1949,7 +2043,7 @@ fn batched_read_touches_discard_after_clear() {
     db.put(&fixture::resource(), &fixture::response());
     assert!(db.get(&fixture::resource()).is_some());
     assert_eq!(1, db.pending_accessed_count());
-    assert!(db.clear_ambient_cache().is_none());
+    assert!(db.clear_ambient_cache().is_ok());
     assert_eq!(0, db.pending_accessed_count());
     assert!(db.get(&fixture::resource()).is_none());
     assert!(db.flush_accessed());
@@ -2018,7 +2112,7 @@ fn batched_read_touches_participate_in_eviction_transaction() {
         "WITH RECURSIVE sequence(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM sequence WHERE n<60) \
          INSERT INTO resources(url,kind,accessed,data) SELECT 'evict-'||n,2,n,randomblob(1024) FROM sequence",
     );
-    assert!(db.set_maximum_ambient_cache_size(100_000).is_none());
+    assert!(db.set_maximum_ambient_cache_size(100_000).is_ok());
     let recent = Resource::new(Kind::Source, "evict-1");
     assert!(db.get(&recent).is_some());
     assert_eq!(1, db.pending_accessed_count());
@@ -2058,7 +2152,7 @@ fn batched_read_touch_failure_does_not_prevent_cache_resize() {
         "CREATE TRIGGER fail_touch BEFORE UPDATE OF accessed ON resources \
          BEGIN SELECT RAISE(ABORT,'injected resize touch failure'); END",
     );
-    assert!(db.set_maximum_ambient_cache_size(0).is_none());
+    assert!(db.set_maximum_ambient_cache_size(0).is_ok());
     assert_eq!(
         1,
         log.count(&constraint_warning("Can't flush accessed timestamps: injected resize touch failure"), false)
@@ -2078,7 +2172,7 @@ fn batched_read_touch_failure_does_not_prevent_region_deletion() {
     let filename = filename();
     delete_database_files(&filename);
     let mut db = OfflineDatabase::new(&filename);
-    assert!(db.set_maximum_ambient_cache_size(0).is_none());
+    assert!(db.set_maximum_ambient_cache_size(0).is_ok());
     let definition = tile_pyramid("https://example.com/maps/style", hull((1.0, 2.0), (3.0, 4.0)), 5.0, 6.0, 2.0, true);
     let region = db.create_region(&definition.into(), &OfflineRegionMetadata::new()).unwrap();
     db.put_region_resource(region.id, &fixture::tile(), &fixture::response());
@@ -2088,7 +2182,7 @@ fn batched_read_touch_failure_does_not_prevent_region_deletion() {
         "CREATE TRIGGER fail_touch BEFORE UPDATE OF accessed ON tiles \
          BEGIN SELECT RAISE(ABORT,'injected delete touch failure'); END",
     );
-    assert!(db.delete_region(&region).is_none());
+    assert!(db.delete_region(&region).is_ok());
     assert_eq!(
         1,
         log.count(&constraint_warning("Can't flush accessed timestamps: injected delete touch failure"), false)

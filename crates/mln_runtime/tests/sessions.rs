@@ -1,7 +1,7 @@
 // Offscreen render sessions: frame demands and their results, the session's
 // work, still images, queries and the session's lifecycle. They follow
-// maplibre-native-ffi's ABI tests (tests/native/abi/render/{demands,driver,
-// offscreen,queries}.c and map/still_image.c at eae96a42c) where those test
+// the C ABI suite (tools/c-abi-test/testdata/tests/native/abi/render/
+// {demands,driver,offscreen,queries}.c and map/still_image.c) where it tests
 // the same rules.
 
 use std::sync::Arc;
@@ -16,7 +16,7 @@ use mln_runtime::{
     SourceQueryOptions,
 };
 use mln_storage::resource::Kind;
-use mln_storage::response::Reason;
+use mln_storage::response::{Caching, Reason};
 use mln_storage::{ResourceError, Response};
 use mln_util::UnitBezier;
 use mln_util::chrono::Timestamp;
@@ -1404,12 +1404,12 @@ struct TileServer {
 
 impl TileServer {
     fn answer(request: ResourceRequest, revalidation: bool) {
-        let expires = Some(Timestamp::from_secs(4_102_444_800));
-        let _ = request.respond(Response { expires, not_modified: revalidation, ..empty_tile() });
+        let caching = Caching { expires: Some(Timestamp::from_secs(4_102_444_800)), ..Caching::default() };
+        let _ = request.respond(Response { caching, not_modified: revalidation, ..empty_tile() });
     }
 
     fn serve(&self, request: ResourceRequest) {
-        let revalidation = request.resource().prior_expires.is_some();
+        let revalidation = request.resource().prior_caching.expires.is_some();
         if request.resource().kind == Kind::Tile && !revalidation {
             self.loads.fetch_add(1, Ordering::SeqCst);
             if let Some(held) = self.held.lock().as_mut() {

@@ -3,17 +3,16 @@
 The MapLibre Native C API: the headers in `include/` define it, and this crate
 implements it as the C library `libmaplibre_native_c`.
 
-[maplibre-native-ffi](https://github.com/maplibre/maplibre-native-ffi) builds
-this crate from a pinned mln-rs commit, packages the library for each platform,
-and generates bindings for other languages from the headers. Its copy of the
-headers must match the ones here, so it takes theirs from the commit it pins.
+[maplibre-native-ffi](https://github.com/maplibre/maplibre-native-ffi) includes
+mln-rs as a submodule: it builds this crate, packages the library for each
+platform, and generates bindings for other languages from the headers here.
 
 ## Changing the API
 
 - After editing a header, run `mise run generate:c-abi`. `src/lib.rs` explains
   what it generates and how to implement a function.
-- Test what the API adds in this crate's tests. `mise run test:c-abi` also runs
-  maplibre-native-ffi's ABI suite, which `mise run update:ffi-abi` copies here,
+- Test what the API adds in this crate's tests, and its behavior as a C caller
+  sees it in the ABI suite (tools/c-abi-test), which `mise run test:c-abi` runs
   against the library.
 - Follow the guidelines below when you design or review a change to the headers.
 

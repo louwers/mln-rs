@@ -31,3 +31,11 @@ pub type HashMap<K, V> = std::collections::HashMap<K, V, RandomState>;
 /// `default()`, or `with_capacity_and_hasher(n, RandomState::default())`.
 #[expect(clippy::disallowed_types, reason = "the one place that names it")]
 pub type HashSet<T> = std::collections::HashSet<T, RandomState>;
+
+/// A hash of `bytes` that is the same for the same bytes throughout the
+/// process, to tell whether data changed without keeping a copy of it.
+#[must_use]
+pub fn hash_bytes(bytes: &[u8]) -> u64 {
+    use std::hash::BuildHasher;
+    foldhash::quality::FixedState::default().hash_one(bytes)
+}

@@ -9,7 +9,7 @@ use mln_util::string::to_string_double;
 use mln_util::tileset::Scheme;
 use mln_util::token::replace_tokens;
 
-use crate::response::Data;
+use crate::response::{Caching, Data, Response};
 
 /// The kind of a resource. The values are stored in the offline database.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -80,7 +80,7 @@ pub struct TileData {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct LoadingMethod(pub u8);
 
-#[expect(non_upper_case_globals, reason = "the bit flags keep the C++ enumerator names")]
+#[expect(non_upper_case_globals, reason = "the bit flags keep MapLibre Native's names")]
 impl LoadingMethod {
     #[cfg(test)]
     pub(crate) const None: LoadingMethod = LoadingMethod(0b00);
@@ -108,9 +108,12 @@ pub struct Resource {
     pub tile_data: Option<TileData>,
 
     pub data_range: Option<(u64, u64)>,
+    /// The copy of the resource the requester has or the cache holds, which
+    /// a request revalidates: its validators and caching rules, and its data
+    /// if the requester waits for it (see [`Resource::deliver`]).
     pub prior_modified: Option<Timestamp>,
-    pub prior_expires: Option<Timestamp>,
     pub prior_etag: Option<String>,
+    pub prior_caching: Caching,
     pub prior_data: Option<Data>,
     pub minimum_update_interval: Duration,
     pub storage_policy: StoragePolicy,
@@ -192,12 +195,42 @@ impl Resource {
             tile_data,
             data_range: None,
             prior_modified: None,
-            prior_expires: None,
             prior_etag: None,
+            prior_caching: Caching::default(),
             prior_data: None,
             minimum_update_interval: Duration::ZERO,
             storage_policy: StoragePolicy::Permanent,
         }
+    }
+
+    /// Takes the validators and caching rules of `response`, a copy of the
+    /// resource, as the prior copy's. The requester has that copy, so no data
+    /// waits for it.
+    pub fn set_prior(&mut self, response: &Response) {
+        self.prior_data = None;
+        self.prior_modified = response.modified;
+        self.prior_etag.clone_from(&response.etag);
+        self.prior_caching = response.caching;
+    }
+
+    /// What a revalidation's answer `response` delivers: a 304 keeps the
+    /// prior copy's validators it lacks, and to a requester that waits for
+    /// that copy in `prior_data`, delivers it. Any other answer as it is.
+    #[must_use]
+    pub fn deliver(&self, mut response: Response) -> Response {
+        if !response.not_modified {
+            return response;
+        }
+        response.modified = response.modified.or(self.prior_modified);
+        if response.etag.is_none() {
+            response.etag.clone_from(&self.prior_etag);
+        }
+        if let Some(data) = &self.prior_data {
+            response.data = Some(Arc::clone(data));
+            response.not_modified = false;
+            response.prior = true;
+        }
+        response
     }
 
     pub fn set_priority(&mut self, p: Priority) {
@@ -284,7 +317,6 @@ impl Resource {
                 // The spec defines `{bbox}` as `{bbox-epsg-3857}` under every
                 // projection mln-rs has: mercator, globe and vertical-perspective.
                 "bbox" | "bbox-epsg-3857" => Some(get_tile_bbox(x, y, z)),
-                // C++ indexes with `x % 16` (UB for negative x).
                 "prefix" => Some(
                     [hex[x.rem_euclid(16) as usize] as char, hex[y.rem_euclid(16) as usize] as char].iter().collect(),
                 ),
@@ -310,6 +342,36 @@ impl Resource {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    mod deliver {
+        use super::super::*;
+
+        fn at(secs: i64) -> Timestamp {
+            Timestamp::from_secs(1000 + secs)
+        }
+
+        fn waiting(caching: Caching) -> Resource {
+            let mut resource = Resource::style("https://example.com/style.json");
+            resource.prior_data = Some(Arc::new(b"cached".to_vec()));
+            resource.prior_etag = Some("a".to_owned());
+            resource.prior_caching = caching;
+            resource
+        }
+
+        #[test]
+        fn a_304_delivers_the_copy_with_its_caching_rules() {
+            let resource = waiting(Caching { expires: Some(at(-10)), ..Caching::default() });
+            let renewed = Response {
+                not_modified: true,
+                caching: Caching { expires: Some(at(100)), ..Caching::default() },
+                ..Response::default()
+            };
+            let delivered = resource.deliver(renewed);
+            assert!(!delivered.not_modified);
+            assert_eq!(Some(b"cached".as_slice()), delivered.data.as_deref().map(Vec::as_slice));
+            assert_eq!((Some(at(100)), Some("a")), (delivered.caching.expires, delivered.etag.as_deref()));
+        }
+    }
 
     fn tile(url: &str, ratio: f32, x: i32, y: i32, z: i8, scheme: Scheme) -> Resource {
         Resource::tile(url, ratio, x, y, z, scheme, LoadingMethod::All)

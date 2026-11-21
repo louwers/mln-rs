@@ -54,8 +54,9 @@ fn http200() {
         Box::new(move |res: Response| {
             assert_eq!(None, res.error);
             assert_eq!(b"Hello World!", data(&res));
-            assert!(res.expires.is_none());
-            assert!(!res.must_revalidate);
+            // Without caching headers, the response is stale at once.
+            assert!(res.caching.expires.is_some_and(|expires| expires <= now()));
+            assert!(!res.caching.must_revalidate);
             assert!(res.modified.is_none());
             assert!(res.etag.is_none());
             stop.stop();
@@ -83,8 +84,9 @@ fn http206() {
         Box::new(move |res: Response| {
             assert_eq!(None, res.error);
             assert_eq!(b"lo Wor", data(&res));
-            assert!(res.expires.is_none());
-            assert!(!res.must_revalidate);
+            // Without caching headers, the response is stale at once.
+            assert!(res.caching.expires.is_some_and(|expires| expires <= now()));
+            assert!(!res.caching.must_revalidate);
             assert!(res.modified.is_none());
             assert!(res.etag.is_none());
             stop.stop();
@@ -111,8 +113,8 @@ fn http404() {
             assert_eq!(Reason::NotFound, error.reason);
             assert_eq!("HTTP status code 404", error.message);
             assert!(res.data.is_none());
-            assert!(res.expires.is_none());
-            assert!(!res.must_revalidate);
+            assert!(res.caching.expires.is_none());
+            assert!(!res.caching.must_revalidate);
             assert!(res.modified.is_none());
             assert!(res.etag.is_none());
             stop.stop();
@@ -139,8 +141,9 @@ fn http_tile404() {
             assert!(res.tile_not_found);
             assert!(res.error.is_none());
             assert!(res.data.is_none());
-            assert!(res.expires.is_none());
-            assert!(!res.must_revalidate);
+            // Without caching headers, the response is stale at once.
+            assert!(res.caching.expires.is_some_and(|expires| expires <= now()));
+            assert!(!res.caching.must_revalidate);
             assert!(res.modified.is_none());
             assert!(res.etag.is_none());
             stop.stop();
@@ -166,8 +169,9 @@ fn http200_empty_data() {
             assert!(!res.no_content);
             assert!(res.error.is_none());
             assert_eq!(b"", data(&res));
-            assert!(res.expires.is_none());
-            assert!(!res.must_revalidate);
+            // Without caching headers, the response is stale at once.
+            assert!(res.caching.expires.is_some_and(|expires| expires <= now()));
+            assert!(!res.caching.must_revalidate);
             assert!(res.modified.is_none());
             assert!(res.etag.is_none());
             stop.stop();
@@ -194,8 +198,9 @@ fn http204() {
             assert!(!res.tile_not_found);
             assert!(res.error.is_none());
             assert!(res.data.is_none());
-            assert!(res.expires.is_none());
-            assert!(!res.must_revalidate);
+            // Without caching headers, the response is stale at once.
+            assert!(res.caching.expires.is_some_and(|expires| expires <= now()));
+            assert!(!res.caching.must_revalidate);
             assert!(res.modified.is_none());
             assert!(res.etag.is_none());
             stop.stop();
@@ -222,8 +227,8 @@ fn http500() {
             assert_eq!(Reason::Server, error.reason);
             assert_eq!("HTTP status code 500", error.message);
             assert!(res.data.is_none());
-            assert!(res.expires.is_none());
-            assert!(!res.must_revalidate);
+            assert!(res.caching.expires.is_none());
+            assert!(!res.caching.must_revalidate);
             assert!(res.modified.is_none());
             assert!(res.etag.is_none());
             stop.stop();
@@ -244,12 +249,13 @@ fn expires_parsing() {
     let stop = run_loop.clone();
     let _req = fs.request_local(
         &local,
-        &Resource::new(Kind::Unknown, server.url("/test?modified=1420794326&expires=1420797926&etag=foo")),
+        &Resource::new(Kind::Unknown, server.url("/test?modified=1420794326&expires=2000000000&etag=foo")),
         Box::new(move |res: Response| {
             assert_eq!(None, res.error);
             assert_eq!(b"Hello World!", data(&res));
-            assert_eq!(Some(Timestamp::from_secs(1_420_797_926)), res.expires);
-            assert!(!res.must_revalidate);
+            let expires = res.caching.expires.expect("expires").secs_since_epoch();
+            assert!((expires - 2_000_000_000).abs() < 2, "expires at the Expires date");
+            assert!(!res.caching.must_revalidate);
             assert_eq!(Some(Timestamp::from_secs(1_420_794_326)), res.modified);
             assert_eq!(Some("foo"), res.etag.as_deref());
             stop.stop();
@@ -274,9 +280,9 @@ fn cache_control_parsing() {
         Box::new(move |res: Response| {
             assert_eq!(None, res.error);
             assert_eq!(b"Hello World!", data(&res));
-            let delta = res.expires.expect("expires").secs_since_epoch() - now().secs_since_epoch() - 120;
+            let delta = res.caching.expires.expect("expires").secs_since_epoch() - now().secs_since_epoch() - 120;
             assert!(delta.abs() < 2, "Expiration date isn't about 120 seconds in the future");
-            assert!(!res.must_revalidate);
+            assert!(!res.caching.must_revalidate);
             assert!(res.modified.is_none());
             assert!(res.etag.is_none());
             stop.stop();
@@ -314,8 +320,9 @@ pub(crate) fn load_request(
             state2.reqs[i].borrow_mut().take();
             assert_eq!(None, res.error);
             assert_eq!(format!("Request {current}").as_bytes(), data(&res));
-            assert!(res.expires.is_none());
-            assert!(!res.must_revalidate);
+            // Without caching headers, the response is stale at once.
+            assert!(res.caching.expires.is_some_and(|expires| expires <= now()));
+            assert!(!res.caching.must_revalidate);
             assert!(res.modified.is_none());
             assert!(res.etag.is_none());
 

@@ -17,10 +17,17 @@
 //! ureq follows redirects with every header it was given, so a request with
 //! the host's headers follows them here instead, and drops those headers
 //! once a redirect leaves their origin.
+//!
+//! A cancelled request's reads and writes stop at once: they block, so
+//! the cancel shuts down the socket the transfer uses (`Interrupt`), which
+//! costs that connection. A transfer left to finish would hold its worker,
+//! and spend bandwidth, on a resource nobody wants. A name lookup or a TCP
+//! connect under way still runs to its end.
 
+use std::cell::RefCell;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, OnceLock, mpsc};
+use std::sync::{Arc, OnceLock, Weak, mpsc};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -33,7 +40,8 @@ use ureq::unversioned::transport::NativeTlsConnector;
 #[cfg(not(target_os = "windows"))]
 use ureq::unversioned::transport::RustlsConnector;
 use ureq::unversioned::transport::{
-    ConnectProxyConnector, ConnectionDetails, Connector, Either, TcpConnector, Transport as UreqTransport,
+    Buffers, ConnectProxyConnector, ConnectionDetails, Connector, Either, NextTimeout, ShutdownHandle, TcpConnector,
+    Transport as UreqTransport,
 };
 
 use crate::http_file_source::{HttpTransport, Transfer, TransferRequest, range_header, same_origin};
@@ -43,6 +51,10 @@ use crate::response::{Reason, ResourceError};
 
 /// curl's default `CURLOPT_HAPPY_EYEBALLS_TIMEOUT_MS`.
 const HAPPY_EYEBALLS_DELAY: Duration = Duration::from_millis(200);
+
+/// The transport's worker threads: as many as the online file source's
+/// default maximum of concurrent requests.
+const WORKERS: usize = mln_util::constants::DEFAULT_MAXIMUM_CONCURRENT_REQUESTS as usize;
 
 /// The TCP step of ureq's default connector chain with Happy Eyeballs
 /// (RFC 8305): the addresses alternate between the families, starting
@@ -66,8 +78,7 @@ impl<In: UreqTransport, A: Connector> Connector<In> for HappyEyeballsConnector<A
         }
         if details.addrs.len() < 2 {
             // Nothing to race.
-            let transport = self.per_address.connect(details, None)?;
-            return Ok(transport.map(|transport| -> Box<dyn UreqTransport> { Box::new(transport) }).map(Either::B));
+            return Ok(connect_interruptible(&*self.per_address, details)?.map(Either::B));
         }
 
         let (first, second): (Vec<SocketAddr>, Vec<SocketAddr>) =
@@ -141,15 +152,151 @@ fn start_attempt<A: Connector>(
             run_connector,
             register_shutdown,
         };
-        let result = per_address
-            .connect(&details, None)
-            .and_then(|transport| transport.ok_or(ureq::Error::ConnectionFailed))
-            .map(|transport| -> Box<dyn UreqTransport> { Box::new(transport) });
+        let result = connect_interruptible(&*per_address, &details)
+            .and_then(|transport| transport.ok_or(ureq::Error::ConnectionFailed));
         // After another attempt won, nobody listens: the
         // connection closes here.
         let _ = sender.send(result);
     })?;
     Ok(())
+}
+
+/// `per_address`'s connection on `details`, made [`Interruptible`] by the
+/// socket it registers for the agent's shutdown.
+fn connect_interruptible<A: Connector>(
+    per_address: &A,
+    details: &ConnectionDetails,
+) -> Result<Option<Box<dyn UreqTransport>>, ureq::Error> {
+    let registered: Arc<Mutex<Option<Weak<dyn ShutdownHandle>>>> = Arc::default();
+    let register_shutdown = {
+        let (registered, register) = (Arc::clone(&registered), Arc::clone(&details.register_shutdown));
+        Arc::new(move |socket: Weak<dyn ShutdownHandle>| {
+            *registered.lock() = Some(Weak::clone(&socket));
+            register(socket)
+        })
+    };
+    let mut addrs = details.resolver.empty();
+    for addr in &details.addrs {
+        addrs.push(*addr);
+    }
+    let details = ConnectionDetails {
+        uri: details.uri,
+        addrs,
+        config: details.config,
+        request_level: details.request_level,
+        resolver: details.resolver,
+        now: details.now,
+        timeout: details.timeout,
+        current_time: Arc::clone(&details.current_time),
+        run_connector: Arc::clone(&details.run_connector),
+        register_shutdown,
+    };
+    let transport = per_address.connect(&details, None)?;
+    Ok(transport.map(|transport| -> Box<dyn UreqTransport> {
+        match registered.lock().take() {
+            Some(socket) => Box::new(Interruptible { inner: Box::new(transport), socket }),
+            None => Box::new(transport),
+        }
+    }))
+}
+
+thread_local! {
+    /// The interrupt of the transfer this worker thread runs.
+    static TRANSFER: RefCell<Option<Arc<Interrupt>>> = const { RefCell::new(None) };
+}
+
+/// Stops a worker's transfer when its request is cancelled, by shutting
+/// down the socket the transfer uses: reads and writes blocked on it end
+/// at once, and the pool drops the connection.
+#[derive(Default)]
+struct Interrupt(Mutex<InterruptState>);
+
+#[derive(Default)]
+struct InterruptState {
+    cancelled: bool,
+    /// The socket the transfer reads or writes now. Only while it does:
+    /// between them, a connection may be back in the pool, for another
+    /// transfer.
+    socket: Option<Weak<dyn ShutdownHandle>>,
+}
+
+fn shut_down(socket: &Weak<dyn ShutdownHandle>) {
+    if let Some(socket) = socket.upgrade() {
+        socket.shutdown();
+    }
+}
+
+impl Interrupt {
+    /// The request was cancelled: shuts down the socket the transfer reads
+    /// or writes, now or when it next does.
+    fn cancel(&self) {
+        let mut state = self.0.lock();
+        state.cancelled = true;
+        if let Some(socket) = state.socket.take() {
+            shut_down(&socket);
+        }
+    }
+
+    /// The transfer is about to read or write `socket`.
+    fn enter(&self, socket: &Weak<dyn ShutdownHandle>) {
+        let mut state = self.0.lock();
+        if state.cancelled {
+            shut_down(socket);
+        } else {
+            state.socket = Some(Weak::clone(socket));
+        }
+    }
+
+    /// The transfer's read or write returned.
+    fn leave(&self) {
+        self.0.lock().socket = None;
+    }
+}
+
+/// A connection whose reads and writes tell the [`Interrupt`] of the
+/// worker's transfer which socket to shut down.
+#[derive(Debug)]
+struct Interruptible {
+    inner: Box<dyn UreqTransport>,
+    socket: Weak<dyn ShutdownHandle>,
+}
+
+impl Interruptible {
+    /// Runs `io` on the connection, which the worker's transfer's
+    /// interrupt shuts down meanwhile.
+    fn io<T>(&mut self, io: impl FnOnce(&mut dyn UreqTransport) -> T) -> T {
+        let interrupt = TRANSFER.with_borrow(Clone::clone);
+        if let Some(interrupt) = &interrupt {
+            interrupt.enter(&self.socket);
+        }
+        let result = io(&mut *self.inner);
+        if let Some(interrupt) = &interrupt {
+            interrupt.leave();
+        }
+        result
+    }
+}
+
+impl UreqTransport for Interruptible {
+    fn buffers(&mut self) -> &mut dyn Buffers {
+        self.inner.buffers()
+    }
+
+    fn transmit_output(&mut self, amount: usize, timeout: NextTimeout) -> Result<(), ureq::Error> {
+        self.io(|inner| inner.transmit_output(amount, timeout))
+    }
+
+    fn await_input(&mut self, timeout: NextTimeout) -> Result<bool, ureq::Error> {
+        self.io(|inner| inner.await_input(timeout))
+    }
+
+    fn is_open(&mut self) -> bool {
+        self.inner.is_open()
+    }
+
+    fn is_tls(&self) -> bool {
+        self.inner.is_tls()
+    }
 }
 
 /// The ureq transport: requests wait in a queue for the next free one
@@ -191,7 +338,7 @@ impl Transport {
         let (requests, receiver) = mpsc::channel::<TransferRequest>();
         let (running, ended) = mpsc::channel::<()>();
         let receiver = Arc::new(Mutex::new(receiver));
-        let workers = (0..mln_util::constants::DEFAULT_MAXIMUM_CONCURRENT_REQUESTS)
+        let workers = (0..WORKERS)
             .filter_map(|i| {
                 let worker = Worker {
                     client: Arc::clone(&client),
@@ -256,7 +403,12 @@ impl Worker {
             if self.stopping.load(Ordering::SeqCst) {
                 return;
             }
+            let interrupt = Arc::new(Interrupt::default());
+            let cancel = Arc::clone(&interrupt);
+            request.set_cancel_handler(move || cancel.cancel());
+            TRANSFER.set(Some(Arc::clone(&interrupt)));
             let transfer = client.transfer(request.resource(), request.headers());
+            TRANSFER.set(None);
             request.finish(transfer);
         }
     }
@@ -306,8 +458,12 @@ impl Client {
 
     /// `new` with another per-address connector and resolver (tests).
     fn with_parts(per_address: impl Connector, resolver: impl Resolver) -> Self {
+        // As many idle connections as workers, so that a burst of requests
+        // finds the connections the last one opened.
         let config = ureq::Agent::config_builder()
             .http_status_as_error(false)
+            .max_idle_connections(WORKERS)
+            .max_idle_connections_per_host(WORKERS)
             .user_agent("MapLibreNative/1.0")
             .tls_config(tls_config())
             .build();
@@ -405,14 +561,15 @@ impl Client {
 #[cfg(test)]
 mod tests {
     use std::io::{Read, Write};
-    use std::net::TcpListener;
+    use std::net::{TcpListener, TcpStream};
+    use std::sync::Barrier;
+    use std::sync::atomic::AtomicUsize;
     use std::time::Instant;
 
     use parking_lot::Mutex;
     use ureq::config::Config;
     use ureq::http::Uri;
     use ureq::unversioned::resolver::ResolvedSocketAddrs;
-    use ureq::unversioned::transport::NextTimeout;
 
     use super::*;
 
@@ -566,6 +723,91 @@ mod tests {
             String::from_utf8(request).unwrap().to_ascii_lowercase()
         });
         (addr, server)
+    }
+
+    /// Reads a request's head off `stream`. False once the client closed it.
+    fn read_head(stream: &mut TcpStream) -> bool {
+        let mut head = Vec::new();
+        let mut byte = [0];
+        while !head.ends_with(b"\r\n\r\n") {
+            match stream.read(&mut byte) {
+                Ok(1) => head.push(byte[0]),
+                _ => return false,
+            }
+        }
+        true
+    }
+
+    #[test]
+    fn cancelling_a_request_ends_its_transfer() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (sent, was_sent) = mpsc::channel();
+        let (closed, was_closed) = mpsc::channel();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            assert!(read_head(&mut stream));
+            // A body that stalls after its first bytes.
+            stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1000000\r\n\r\npartial").unwrap();
+            sent.send(()).unwrap();
+            let mut buffer = [0; 1024];
+            while stream.read(&mut buffer).is_ok_and(|read| read != 0) {}
+            closed.send(()).unwrap();
+        });
+
+        let transport = Transport::new();
+        let (transfer, request) = TransferRequest::unanswered(Resource::style(&format!("http://{addr}/style.json")));
+        transport.start(transfer);
+        was_sent.recv_timeout(Duration::from_secs(10)).unwrap();
+        drop(request);
+        was_closed.recv_timeout(Duration::from_secs(5)).expect("the cancelled transfer goes on");
+    }
+
+    #[test]
+    fn a_burst_of_requests_reuses_the_connections_of_the_one_before() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let accepted = Arc::new(AtomicUsize::new(0));
+        // A burst's requests all arrive before any is answered, so that
+        // each burst holds a connection per worker.
+        let burst = Arc::new(Barrier::new(WORKERS));
+        let counted = Arc::clone(&accepted);
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { return };
+                counted.fetch_add(1, Ordering::SeqCst);
+                let burst = Arc::clone(&burst);
+                std::thread::spawn(move || {
+                    while read_head(&mut stream) {
+                        burst.wait();
+                        if stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok").is_err() {
+                            return;
+                        }
+                    }
+                });
+            }
+        });
+
+        let transport = Transport::new();
+        for _ in 0..2 {
+            let (answered, answers) = mpsc::channel();
+            let requests: Vec<_> = (0..WORKERS)
+                .map(|i| {
+                    let answered = answered.clone();
+                    let resource = Resource::style(&format!("http://{addr}/{i}.json"));
+                    let (transfer, request) = TransferRequest::answered(resource, move |_| {
+                        let _ = answered.send(());
+                    });
+                    transport.start(transfer);
+                    request
+                })
+                .collect();
+            for _ in 0..WORKERS {
+                answers.recv_timeout(Duration::from_secs(10)).unwrap();
+            }
+            drop(requests);
+        }
+        assert_eq!(WORKERS, accepted.load(Ordering::SeqCst));
     }
 
     #[test]

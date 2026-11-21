@@ -2,6 +2,11 @@
 //! with. The browser's HTTP cache does the caching. A host can hand it
 //! responses it fetched ahead (`OnlineCore::set_fetch_preloads`).
 //!
+//! A request for a resource the requester already has a copy of (one with
+//! prior validators or an expiry) revalidates it: it asks the server, in
+//! fetch's `no-cache` mode, rather than take the browser's copy, which may
+//! be the same stale one under `stale-while-revalidate`.
+//!
 //! The host's headers (`TransferRequest::headers`) go with the request, which
 //! makes a cross-origin request one that the server must allow in its CORS
 //! preflight. fetch follows a redirect with every header it was given, and
@@ -111,15 +116,18 @@ async fn fetch(
         let message = error.as_string().unwrap_or_else(|| format!("{error:?}"));
         Box::new(ResourceError::new(Reason::Connection, message))
     };
-    let url = &request.resource().url;
-    let range = http_file_source::range_header(request.resource());
+    let resource = request.resource();
+    let url = &resource.url;
+    let range = http_file_source::range_header(resource);
+    let revalidate =
+        resource.prior_caching.expires.is_some() || resource.prior_etag.is_some() || resource.prior_modified.is_some();
     let early = match range {
-        None => preloaded(take, url).await,
-        Some(_) => None,
+        None if !revalidate => preloaded(take, url).await,
+        _ => None,
     };
     let response = match early {
         Some(response) => response,
-        None => send(url, range.as_deref(), request.headers(), signal).await.map_err(connection_error)?,
+        None => send(url, range.as_deref(), request.headers(), revalidate, signal).await.map_err(connection_error)?,
     };
     if response.type_() == web_sys::ResponseType::Opaqueredirect {
         return Err(Box::new(ResourceError::new(
@@ -153,10 +161,14 @@ async fn send(
     url: &str,
     range: Option<&str>,
     extra: &[(String, String)],
+    revalidate: bool,
     signal: Option<&web_sys::AbortSignal>,
 ) -> Result<web_sys::Response, JsValue> {
     let init = web_sys::RequestInit::new();
     init.set_signal(signal);
+    if revalidate {
+        init.set_cache(web_sys::RequestCache::NoCache);
+    }
     if range.is_some() || !extra.is_empty() {
         let headers = web_sys::Headers::new()?;
         if let Some(range) = range {

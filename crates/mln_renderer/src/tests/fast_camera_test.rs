@@ -132,7 +132,7 @@ impl Network {
         let mut response = Response::new();
         let data = if pending.tile.starts_with("vector") { &self.vector_tile } else { &self.raster_tile };
         response.data = Some(Arc::clone(data));
-        response.expires = Some(Timestamp::from_secs(now().secs_since_epoch() + 3600));
+        response.caching.expires = Some(Timestamp::from_secs(now().secs_since_epoch() + 3600));
         pending.responder.send(response);
     }
 
@@ -183,7 +183,7 @@ impl FileSource for Network {
         let tile = format!("{source}/{}/{}/{}", data.z, data.x, data.y);
         // A tile that is still fresh, which the online file source holds
         // until it expires: never answered.
-        if resource.prior_expires.is_some_and(|expires| expires > now()) {
+        if resource.prior_caching.expires.is_some_and(|expires| expires > now()) {
             return;
         }
         let mut requests = self.requests.lock();

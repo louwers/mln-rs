@@ -3,6 +3,7 @@
 // too large for 64 bits).
 
 use geo_types::Geometry;
+use mln_util::chrono::Timestamp;
 use mln_util::error::Error;
 #[cfg(any(test, feature = "sqlite"))]
 use mln_util::geo::LatLng;
@@ -338,6 +339,26 @@ impl OfflineRegionStatus {
     pub fn complete(&self) -> bool {
         self.completed_resource_count >= self.required_resource_count
     }
+}
+
+/// How long a region's stored resources stay usable, from their caching
+/// rules.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct OfflineRegionExpiry {
+    /// When the first of the region's resources goes stale, which may have
+    /// passed; `None` if none ever does. Maps show a stale resource while
+    /// they revalidate it, unless it must revalidate first, and a download
+    /// refreshes it.
+    pub stale_after: Option<Timestamp>,
+    /// When the first of its resources that must revalidate once stale
+    /// stops being usable until maps reach the server, which may have
+    /// passed; `None` if none ever does.
+    pub usable_offline_until: Option<Timestamp>,
+    /// The resources that are stale now, tiles included.
+    pub stale_resource_count: u64,
+    /// The stale resources that maps can't use now until they reach the
+    /// server.
+    pub unusable_resource_count: u64,
 }
 
 /// A region can have a single observer, which gets notified whenever a

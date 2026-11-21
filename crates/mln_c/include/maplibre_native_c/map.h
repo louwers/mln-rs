@@ -786,6 +786,43 @@ typedef struct mln_offline_region_info {
   size_t metadata_size;
 } mln_offline_region_info;
 
+/** The fields that mln_offline_region_expiry sets. */
+typedef enum MLN_BINDING(
+  "kind=bitmask"
+) mln_offline_region_expiry_field : uint32_t {
+  MLN_OFFLINE_REGION_EXPIRY_STALE_AFTER = 1U << 0U,
+  MLN_OFFLINE_REGION_EXPIRY_USABLE_OFFLINE_UNTIL = 1U << 1U,
+} mln_offline_region_expiry_field;
+
+/** A set of mln_offline_region_expiry_field bits. */
+typedef uint32_t mln_offline_region_expiry_fields;
+
+/** How long the resources that an offline region holds stay usable. */
+typedef struct mln_offline_region_expiry {
+  mln_offline_region_expiry_fields fields;
+  /**
+   * When the first of the region's resources goes stale, which may have
+   * passed. Maps show a stale resource while they check it with the server,
+   * unless it must be checked first, and the region's download refreshes it.
+   * Without it, no resource ever goes stale.
+   */
+  int64_t stale_after_unix_ms
+    MLN_BINDING("mask=fields;bit=MLN_OFFLINE_REGION_EXPIRY_STALE_AFTER");
+  /**
+   * When the first of the region's resources that the server requires
+   * checking once stale stops being usable without the server, which may have
+   * passed. Refresh the region before then to keep all of it usable offline.
+   * Without it, every resource stays usable offline.
+   */
+  int64_t usable_offline_until_unix_ms MLN_BINDING(
+    "mask=fields;bit=MLN_OFFLINE_REGION_EXPIRY_USABLE_OFFLINE_UNTIL"
+  );
+  /** The resources that are stale now, tiles included. */
+  uint64_t stale_resource_count;
+  /** The stale resources that maps can't use now without the server. */
+  uint64_t unusable_resource_count;
+} mln_offline_region_expiry;
+
 /**
  * Creates an offline region in the runtime's cache file.
  *
@@ -869,6 +906,18 @@ MLN_API mln_status mln_runtime_get_offline_region_status(
 ) MLN_NOEXCEPT;
 
 /**
+ * Reads how long the resources of the offline region `region_id` stay usable.
+ *
+ * Completes with:
+ * - MLN_STATUS_NOT_FOUND when the cache file has no region `region_id`.
+ */
+MLN_BINDING("execution=query;result=mln_offline_region_expiry")
+MLN_API mln_status mln_runtime_get_offline_region_expiry(
+  mln_runtime runtime, mln_offline_region_id region_id,
+  const mln_completion* completion, mln_diagnostic* out_diagnostic
+) MLN_NOEXCEPT;
+
+/**
  * Selects the events that the runtime reports about the download of the
  * offline region `region_id`.
  *
@@ -889,8 +938,10 @@ MLN_API mln_status mln_runtime_set_offline_region_observed(
 /**
  * Starts or pauses the download of the offline region `region_id`.
  *
- * Setting the state that the download already has does nothing. A download
- * stops when the runtime closes.
+ * A download fetches the resources that the region lacks, and checks those
+ * that are stale with the server, keeping each stored copy until its refresh
+ * arrives. Setting the state that the download already has does nothing. A
+ * download stops when the runtime closes.
  *
  * Completes with:
  * - MLN_STATUS_NOT_FOUND when the cache file has no region `region_id`.
@@ -903,14 +954,16 @@ MLN_API mln_status mln_runtime_set_offline_region_download_state(
 ) MLN_NOEXCEPT;
 
 /**
- * Makes maps check each resource of the offline region `region_id` with the
- * server before they use it.
+ * Makes each resource of the offline region `region_id` stale, so maps check
+ * it with the server when they next use it.
  *
- * The region keeps its resources. Starting its download again fetches the
- * invalidated resources for offline use. If the style or a TileJSON document
- * is then missing or invalid, the download reports an offline region response
- * error and goes on from the stored copy. Resources that the current style no
- * longer lists stay in the region until it's deleted.
+ * The region keeps its resources, and maps show them while they check them,
+ * except those that the server requires checking first. Starting the region's
+ * download again checks every resource with the server. If the style or a
+ * TileJSON document is then missing or invalid, the download reports an
+ * offline region response error and goes on from the stored copy. Resources
+ * that the current style no longer lists stay in the region until it's
+ * deleted.
  *
  * Completes with:
  * - MLN_STATUS_NOT_FOUND when the cache file has no region `region_id`.

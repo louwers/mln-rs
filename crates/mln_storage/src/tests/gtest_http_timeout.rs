@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use mln_util::chrono::{Timestamp, now};
 
-use crate::http_timeout::{error_retry_timeout, expiration_timeout};
+use crate::http_timeout::error_retry_timeout;
 use crate::response::Reason;
 
 fn now_plus(s: i64) -> Timestamp {
@@ -54,26 +54,4 @@ fn rate_limit() {
 
     // A retry time that has already passed waits a second
     assert_eq!(Some(Duration::from_secs(1)), error_retry_timeout(Reason::RateLimit, 1, Some(now_plus(-1))));
-}
-
-// gtest: HttpRetry.ExpiredInitial
-#[test]
-fn expired_initial() {
-    // 1 sec timeout
-    assert_eq!(Some(Duration::from_secs(1)), expiration_timeout(Some(now_plus(1)), 0));
-}
-
-// gtest: HttpRetry.ExpiredSubsequent
-#[test]
-fn expired_subsequent() {
-    // exponential backoff
-    assert_eq!(Some(Duration::from_secs(1)), expiration_timeout(None, 1));
-    assert_eq!(Some(Duration::from_secs(1 << 31)), expiration_timeout(None, 50));
-}
-
-// gtest: HttpRetry.ExpiredNotSet
-#[test]
-fn expired_not_set() {
-    // No expires header set
-    assert_eq!(None, expiration_timeout(None, 0));
 }
