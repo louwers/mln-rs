@@ -156,9 +156,14 @@ pub(crate) struct FillExtrusionBucket {
     pub(crate) triangles: GeometryVec<u16>,
     pub(crate) triangle_segments: Vec<SegmentBase>,
     /// Each polygon's centroid, by the vertices it is the centroid of
-    /// ([`vertex_centroids`]), which an extrusion over terrain stands on.
+    /// ([`vertex_centroids`]), which an extrusion over terrain stands on:
+    /// none unless the bucket is laid out for terrain (`terrain`).
     pub(crate) centroids: Vec<PolygonCentroid>,
     pub(crate) subdivision_granularity: SubdivisionGranularitySetting,
+    /// Whether the layout lays out the polygons' centroids, for a style
+    /// with terrain.
+    #[wire(skip)]
+    pub(crate) terrain: bool,
 
     pub(crate) paint_property_binders: VecMap<String, FillExtrusionBinders>,
 }
@@ -257,6 +262,7 @@ impl FillExtrusionBucket {
             triangle_segments: Vec::new(),
             centroids: Vec::new(),
             subdivision_granularity: SubdivisionGranularitySetting::none(),
+            terrain: false,
             paint_property_binders,
         }
     }
@@ -412,8 +418,10 @@ impl Bucket for FillExtrusionBucket {
                 continue;
             }
 
-            let first_vertex = self.vertices.len() as u32;
-            self.centroids.push(PolygonCentroid { first_vertex, centroid: polygon_centroid(&polygon) });
+            if self.terrain {
+                let first_vertex = self.vertices.len() as u32;
+                self.centroids.push(PolygonCentroid { first_vertex, centroid: polygon_centroid(&polygon) });
+            }
 
             // On the globe the walls follow subdivided rings and the roof is a
             // subdivided mesh of its own.
@@ -535,6 +543,9 @@ impl PatternLayoutSpec for FillExtrusionLayoutSpec {
     }
     fn set_subdivision_granularity(bucket: &mut FillExtrusionBucket, value: &SubdivisionGranularitySetting) {
         bucket.set_subdivision_granularity(value);
+    }
+    fn set_terrain(bucket: &mut FillExtrusionBucket, terrain: bool) {
+        bucket.terrain = terrain;
     }
 }
 

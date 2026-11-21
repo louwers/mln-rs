@@ -292,6 +292,7 @@ impl RenderablesContext for CoverContext<'_, '_, '_> {
             pixel_ratio: parameters.pixel_ratio,
             show_collision_boxes: parameters.debug_options.contains(MapDebugOptions::COLLISION),
             subdivision_granularity: parameters.subdivision_granularity,
+            terrain: parameters.layout_terrain,
             first_load: true,
         };
         let tile = self.source.info.new_tile(*id, params)?;
@@ -306,7 +307,7 @@ impl RenderablesContext for CoverContext<'_, '_, '_> {
                 Some(copy) => tile.start_as_copy(copy),
                 None => tile.start_load(),
             }
-            tile.set_style(style, params.pixel_ratio, params.subdivision_granularity);
+            tile.set_style(style, params.pixel_ratio, params.subdivision_granularity, params.terrain);
         });
         Some(*id)
     }
@@ -346,7 +347,12 @@ impl RenderablesContext for CoverContext<'_, '_, '_> {
             let pixel_ratio_changed =
                 tile.tile().pipeline.layout().is_some_and(|layout| layout.params.pixel_ratio != parameters.pixel_ratio);
             if needs_relayout || pixel_ratio_changed {
-                tile.set_style(style, parameters.pixel_ratio, parameters.subdivision_granularity);
+                tile.set_style(
+                    style,
+                    parameters.pixel_ratio,
+                    parameters.subdivision_granularity,
+                    parameters.layout_terrain,
+                );
             }
         });
     }

@@ -35,6 +35,9 @@ pub(crate) struct LayoutParams {
     pub(crate) pixel_ratio: f32,
     pub(crate) show_collision_boxes: bool,
     pub(crate) subdivision_granularity: SubdivisionGranularitySetting,
+    /// Whether the style has terrain, over which fill extrusions stand on
+    /// their polygons' centroids, which only then are laid out.
+    pub(crate) terrain: bool,
     /// Whether the tile has had no layout yet.
     pub(crate) first_load: bool,
 }
@@ -63,6 +66,7 @@ impl LayoutInput<'_> {
             pixel_ratio: self.params.pixel_ratio,
             global_state: self.global_state.cloned(),
             subdivision_granularity: self.params.subdivision_granularity,
+            terrain: self.params.terrain,
         }
     }
 }

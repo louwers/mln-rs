@@ -1071,12 +1071,14 @@ fn store_entries_last_as_long_as_their_handles() {
 
 /// A fill-extrusion bucket of `tile` holding `polygons`, one feature's
 /// rings, extruded with `fill-extrusion-rounded-corner-distance` set to
-/// `meters`, on the globe's subdivided rings where `globe`.
+/// `meters`, on the globe's subdivided rings where `globe`, laid out for a
+/// style with terrain where `terrain`.
 fn extrusion_bucket(
     polygons: &GeometryCollection,
     meters: f32,
     tile: CanonicalTileID,
     globe: bool,
+    terrain: bool,
 ) -> FillExtrusionBucket {
     let layout = FillExtrusionLayoutProperties::PossiblyEvaluated {
         fill_extrusion_rounded_corner_distance: Evaluated::Constant(meters),
@@ -1085,6 +1087,7 @@ fn extrusion_bucket(
     if globe {
         bucket.set_subdivision_granularity(&SubdivisionGranularitySetting::globe());
     }
+    bucket.terrain = terrain;
     bucket.add_feature(
         &feature(FeatureType::Polygon, polygons),
         polygons,
@@ -1100,7 +1103,7 @@ fn extrusion_bucket(
 
 /// The centroid of each polygon of a bucket of `polygons`.
 fn centroids(polygons: &GeometryCollection, meters: f32) -> Vec<[i16; 2]> {
-    let bucket = extrusion_bucket(polygons, meters, CanonicalTileID::new(16, 32768, 32768), false);
+    let bucket = extrusion_bucket(polygons, meters, CanonicalTileID::new(16, 32768, 32768), false, true);
     bucket.centroids.iter().map(|polygon| polygon.centroid).collect()
 }
 
@@ -1160,7 +1163,7 @@ fn fill_extrusion_centroids_expand_to_every_vertex() {
         &[(1000, 1000), (4000, 1000), (4000, 2000), (2000, 2000), (2000, 4000), (1000, 4000), (1000, 1000)],
         &[(5000, 5000), (7000, 5000), (7000, 6000), (5000, 6000), (5000, 5000)],
     ]);
-    let bucket = extrusion_bucket(&polygons, 0.0, CanonicalTileID::new(2, 1, 1), true);
+    let bucket = extrusion_bucket(&polygons, 0.0, CanonicalTileID::new(2, 1, 1), true, true);
     let firsts: Vec<u32> = bucket.centroids.iter().map(|polygon| polygon.first_vertex).collect();
     // The L's six corners: 14000 / 6 = 2333.3.
     let expected = [[2333, 2333], [6000, 5500]];
@@ -1201,9 +1204,17 @@ fn fill_extrusion_centroids_cross_the_wire() {
         &[(0, 0), (300, 0), (300, 100), (100, 100), (100, 300), (0, 300), (0, 0)],
         &[(500, 500), (900, 500), (900, 900), (500, 900), (500, 500)],
     ]);
-    let bucket = extrusion_bucket(&polygons, 0.0, CanonicalTileID::new(16, 32768, 32768), false);
+    let bucket = extrusion_bucket(&polygons, 0.0, CanonicalTileID::new(16, 32768, 32768), false, true);
     assert_eq!(bucket.centroids.len(), 2);
     let bytes = mln_wire::to_vec(&bucket).expect("the bucket's bytes");
     let crossed: FillExtrusionBucket = mln_wire::from_slice(&bytes).expect("the bucket");
     assert_eq!(crossed.centroids, bucket.centroids);
+}
+
+// A bucket laid out for a style without terrain keeps no centroids.
+#[test]
+fn fill_extrusion_centroids_wait_for_terrain() {
+    let square = collection(&[&[(0, 0), (1000, 0), (1000, 1000), (0, 1000), (0, 0)]]);
+    let bucket = extrusion_bucket(&square, 0.0, CanonicalTileID::new(16, 32768, 32768), false, false);
+    assert_eq!(bucket.centroids, []);
 }

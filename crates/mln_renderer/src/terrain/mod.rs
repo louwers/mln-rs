@@ -91,7 +91,10 @@
 //!   the ground hides them, and they hide it, pixel by pixel; on a flat map
 //!   they keep a near plane further out, for the depth buffer's precision.
 //!   Their buckets keep a centroid for each polygon, which only a terrain
-//!   variant's draws expand to their vertices. A tile T of theirs reads the
+//!   variant's draws expand to their vertices, and are laid out with them
+//!   only for a style with terrain: their sources lay out again when terrain
+//!   comes, and a tile laid out before draws nothing over terrain until then.
+//!   A tile T of theirs reads the
 //!   DEM tiles the surface reads under it, and no others
 //!   ([`TerrainElevation::ground`]): the DEM tile of the terrain tile it is
 //!   in, or, where terrain tiles are inside T, as over a

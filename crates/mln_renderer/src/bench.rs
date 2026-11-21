@@ -131,6 +131,7 @@ impl TileLayout {
                 pixel_ratio: 1.0,
                 show_collision_boxes: false,
                 subdivision_granularity: style.get_projection().get_subdivision_granularity(),
+                terrain: style.get_terrain().is_some(),
                 first_load: true,
             },
             resolved: Arc::default(),

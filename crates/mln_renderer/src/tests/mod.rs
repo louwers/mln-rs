@@ -127,6 +127,7 @@ impl OneTile {
             pixel_ratio: 1.0,
             show_collision_boxes: false,
             subdivision_granularity: mln_util::subdivision_granularity::SubdivisionGranularitySetting::none(),
+            terrain: false,
             first_load: true,
         }
     }
@@ -237,7 +238,7 @@ impl OneTile {
 
     pub(crate) fn set_style(&mut self, style: &std::sync::Arc<crate::tile::job::SourceStyle>) {
         let params = self.params();
-        self.with(|tile| tile.set_style(style, params.pixel_ratio, params.subdivision_granularity));
+        self.with(|tile| tile.set_style(style, params.pixel_ratio, params.subdivision_granularity, params.terrain));
     }
 
     /// Gives a geometry tile `data`, as a load of its own.

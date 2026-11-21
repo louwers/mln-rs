@@ -25,6 +25,11 @@ pub(crate) struct TileParameters<'a> {
     pub(crate) tile_lod_zoom_shift: f64,
     pub(crate) tile_lod_mode: TileLodMode,
     pub(crate) subdivision_granularity: SubdivisionGranularitySetting,
+    /// Whether the style has terrain, which the tiles lay out for
+    /// ([`LayoutParams::terrain`]).
+    ///
+    /// [`LayoutParams::terrain`]: crate::layout::tile_layout::LayoutParams::terrain
+    pub(crate) layout_terrain: bool,
     pub(crate) global_state: Option<Arc<GlobalStateMap>>,
     pub(crate) is_update_synchronous: bool,
     /// The style's font faces, which the tiles' layouts shape text with.

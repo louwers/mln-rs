@@ -328,11 +328,13 @@ impl<'a> TileMut<'a> {
         style: &Arc<SourceStyle>,
         pixel_ratio: f32,
         granularity: SubdivisionGranularitySetting,
+        terrain: bool,
     ) {
         self.change_layout(|layout| {
             layout.style = Some(Arc::clone(style));
             layout.params.pixel_ratio = pixel_ratio;
             layout.params.subdivision_granularity = granularity;
+            layout.params.terrain = terrain;
         });
     }
 

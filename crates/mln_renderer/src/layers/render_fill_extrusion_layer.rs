@@ -600,6 +600,11 @@ impl TileBuilder<'_> {
             return ExtrusionTile { draws: Vec::new(), parts, paint_layout: 0, atlases: None };
         };
         let vertex_count = bucket.vertices.len();
+        // A bucket laid out before the style had terrain has no centroids to
+        // stand on: the tile draws once the one laid out for terrain comes.
+        if self.projection_variant == ProjectionVariant::Terrain && bucket.centroids.is_empty() {
+            return ExtrusionTile { draws: Vec::new(), parts, paint_layout: 0, atlases: None };
+        }
         // A wall from each vertex to the next, but from the last, which
         // ends a ring.
         let walls = vertex_count.saturating_sub(1);

@@ -176,7 +176,9 @@ fn update_through_the_codec() {
     let mut tiles = test.tiles(point_data(), &ids, workers, false);
     let (style, params) = (style(std::slice::from_ref(&layer_properties)), tiles.params());
     for id in &ids {
-        tiles.with_at(id, |tile| tile.set_style(&style, params.pixel_ratio, params.subdivision_granularity));
+        tiles.with_at(id, |tile| {
+            tile.set_style(&style, params.pixel_ratio, params.subdivision_granularity, params.terrain);
+        });
     }
     tiles.settle(&ids);
     for id in &ids {

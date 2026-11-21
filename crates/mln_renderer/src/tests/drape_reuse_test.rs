@@ -1854,10 +1854,11 @@ fn red_extrusion(location: LatLng, half: f64, height: f64) -> String {
 
 /// A fill extrusion stands on the ground: over ground 25 km high, the camera
 /// sees its roof 25 km and its height up, not its height above sea level.
-/// Once the terrain turns off, the next frame draws it on the sea, and once
-/// it turns back on, the next one on the ground again.
+/// Once the terrain turns off, the next frame draws it on the sea. Once it
+/// turns back on, it draws on the ground again when its tile has laid out
+/// again for terrain, and never on the sea in between.
 #[test]
-fn toggling_terrain_moves_an_extrusion_in_the_next_frame() {
+fn toggling_terrain_moves_an_extrusion() {
     let mut map = raised(10.0, 0.0);
     // About 50 px east of the view's center on the ground, and some 11 px
     // at sea level, which is farther from the camera.
@@ -1875,6 +1876,9 @@ fn toggling_terrain_moves_an_extrusion_in_the_next_frame() {
     assert!(!red(map.pixel_at(&location, 25_500.0)), "no roof on the ground that went");
 
     map.edit(Edit::SetTerrain(terrain));
+    map.frame();
+    assert!(!red(map.pixel_at(&location, 500.0)), "no roof above sea level while the tile lays out again");
+    map.settle();
     map.frame();
     assert!(red(map.pixel_at(&location, 25_500.0)), "the roof on the ground again");
     assert!(!red(map.pixel_at(&location, 500.0)), "no roof above sea level");
