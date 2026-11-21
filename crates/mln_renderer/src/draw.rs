@@ -625,6 +625,15 @@ impl DrawObjects {
         self.segments = segments;
     }
 
+    /// Culls faces as `cull_face_mode` says from the next draw on.
+    pub(crate) fn set_cull_face_mode(&mut self, cull_face_mode: CullFaceMode) {
+        if self.cull_face_mode != cull_face_mode {
+            self.cull_face_mode = cull_face_mode;
+            // The pipelines bake the culling in.
+            self.pipelines.clear();
+        }
+    }
+
     /// Drops the bindings, for an owner that replaces a buffer they bind.
     // Not inlined: every layer type's loop over its draws calls it.
     #[inline(never)]

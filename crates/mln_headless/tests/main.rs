@@ -8,6 +8,8 @@ mod custom_layer_test;
 mod debug_options_test;
 // Empty and absent tiles of vector and raster sources through Map -> HeadlessFrontend.
 mod empty_tile_test;
+// A viewport flipped upside down draws the map upside down.
+mod flipped_viewport_test;
 // Frames that fail on the GPU: stills that end with the error, and
 // continuous maps that report it once and draw again later.
 mod gpu_failure_test;

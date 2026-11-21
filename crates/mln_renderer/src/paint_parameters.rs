@@ -1,10 +1,11 @@
 use std::any::Any;
 
 use glam::{DMat4, DVec4};
+use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, Gpu, GpuError, LoadOp, PassDesc, Scissor, TargetFormats};
 use mln_gfx::shaders::layer_ubo::GlobalPaintParamsUBO;
 use mln_gfx::stencil_mode::Test;
-use mln_gfx::types::{DepthFunctionType, StencilOpType};
+use mln_gfx::types::{CullFaceWindingType, DepthFunctionType, StencilOpType};
 use mln_gfx::{DepthMaskType, DepthMode, ScissorRect, StencilMode};
 use mln_map_types::{MapDebugOptions, ProjectionData, View, ViewportMode};
 use mln_tile_id::UnwrappedTileID;
@@ -279,6 +280,16 @@ impl<'a> PaintParameters<'a> {
             scissor_rect,
             custom_layer_frame: None,
         }
+    }
+
+    /// Culling of the faces turned away from the camera, whose triangles
+    /// wind clockwise on screen, or counterclockwise where a viewport
+    /// flipped upside down turns every triangle round. The globe's
+    /// projection draws the right way up in either mode.
+    pub(crate) fn cull_back_faces(&self) -> CullFaceMode {
+        let turned = self.view.viewport_mode() == ViewportMode::FlippedY && !self.view.is_globe();
+        let winding = if turned { CullFaceWindingType::Clockwise } else { CullFaceWindingType::CounterClockwise };
+        CullFaceMode { winding, ..CullFaceMode::back_ccw() }
     }
 
     /// The parameters of the encode of a drape, which draws the frame's

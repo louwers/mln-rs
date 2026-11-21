@@ -418,6 +418,7 @@ impl TypedLayer for RenderFillExtrusionLayer {
         };
 
         let layer = &*self.values.evaluated;
+        let cull_face_mode = paint_parameters.cull_back_faces();
         for tile in render_tiles {
             let tile_id = tile.id();
             let Some(mut entry) = self.drawing.tiles_mut().entry(&tile_id) else {
@@ -448,7 +449,8 @@ impl TypedLayer for RenderFillExtrusionLayer {
                 }
                 None => entry.value.insert(builder.build(context, render_data, binders, &layer.paint)),
             };
-            for (index, draw) in cached.draws.iter().enumerate() {
+            for (index, draw) in cached.draws.iter_mut().enumerate() {
+                draw.objects.set_cull_face_mode(cull_face_mode);
                 let frame_draw = FrameDraw {
                     priority: draw.priority,
                     pass: RENDER_PASS,

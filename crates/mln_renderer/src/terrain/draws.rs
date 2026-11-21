@@ -17,9 +17,7 @@ use mln_gfx::shaders::shader_defines::{
     ID_TERRAIN_POS_VERTEX_ATTRIBUTE, ID_TERRAIN_PROPS_UBO,
 };
 use mln_gfx::shaders::terrain_ubo::{TerrainDrawableUBO, TerrainFogUBO};
-use mln_gfx::types::CullFaceWindingType;
 use mln_gfx::{AttributeDataType, DepthMaskType, DrawMode};
-use mln_map_types::ViewportMode;
 use mln_util::clip_depth::ClipDepthRange;
 use mln_util::logging::{Event, Log};
 
@@ -110,11 +108,7 @@ impl TerrainDraws {
             return;
         };
 
-        let winding = match parameters.view.viewport_mode() {
-            ViewportMode::Default => CullFaceWindingType::CounterClockwise,
-            ViewportMode::FlippedY => CullFaceWindingType::Clockwise,
-        };
-        let cull_face_mode = CullFaceMode { winding, ..CullFaceMode::back_ccw() };
+        let cull_face_mode = parameters.cull_back_faces();
         let context = &mut *parameters.context;
         let built_for = (surface.skirts, cull_face_mode);
         if self.mesh.as_ref().is_some_and(|mesh| (mesh.skirts, mesh.cull_face_mode) != built_for) {
