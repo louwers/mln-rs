@@ -172,8 +172,9 @@ pub struct TileCover {
 
 impl TileCover {
     /// The cover at zoom `z` of `bounds_`, with its latitudes clamped to the
-    /// Mercator range. Empty bounds, or bounds outside that range, cover the
-    /// world.
+    /// Mercator range, so that bounds wholly north or south of it cover the
+    /// row of tiles at that edge across the bounds' longitudes. Empty bounds
+    /// cover the world.
     #[must_use]
     pub fn new_from_bounds(bounds_: &LatLngBounds, z: u8) -> TileCover {
         let mut bounds = LatLngBounds::hull(
@@ -1035,7 +1036,7 @@ pub fn tile_count_bounds(bounds: &LatLngBounds, zoom: u8) -> u64 {
 /// How many tiles [`TileCover::new_from_geometry`] covers `geometry` with
 /// at zoom `z`, and fails as it does.
 pub fn tile_count_geometry(geometry: &Geometry<f64>, z: u8) -> Result<u64, Error> {
-    Ok(TileCover::new_from_geometry(geometry, z)?.count() as u64)
+    Ok(TileCover::new_from_geometry(geometry, z)?.fold(0, |count: u64, _| count + 1))
 }
 
 #[cfg(test)]
