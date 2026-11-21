@@ -179,17 +179,17 @@ impl TerrainElevation {
             return None;
         }
         let (copy, x) = world_copy(world.x);
+        // No tile is in a copy past the range of the wraps.
+        let wrap = if in_copy { Some(i16::try_from(copy as i64).ok()?) } else { None };
         self.zooms.iter().find_map(|&z| {
             let tiles = f64::from(1u32 << z);
             let (u, v) = (x * tiles, world.y * tiles);
             // The world's bottom edge is in the last row's tiles.
             let (column, row) = (u.floor(), v.floor().min(tiles - 1.0));
             let canonical = CanonicalTileID::new(z, column as u32, row as u32);
-            let at = if in_copy {
-                // `as` saturates a copy past the range of wraps, where no tile is.
-                self.copies.get(&UnwrappedTileID::with_wrap(copy as i16, canonical))
-            } else {
-                self.index.get(&canonical)
+            let at = match wrap {
+                Some(wrap) => self.copies.get(&UnwrappedTileID::with_wrap(wrap, canonical)),
+                None => self.index.get(&canonical),
             };
             Some((&self.tiles[*at?], [(u - column) as f32, (v - row) as f32]))
         })
@@ -282,5 +282,40 @@ impl Elevation for TerrainElevation {
 
     fn range(&self) -> Option<(f64, f64)> {
         self.range
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use mln_util::tileset::RasterEncoding;
+
+    use super::*;
+    use crate::terrain::cover::{ElevationRanges, TerrainTile};
+
+    /// A point in a world copy past the range of the tiles' wraps has no
+    /// surface, though a tile of the last copy in range drew: no copy of
+    /// the point's stands in for it.
+    #[test]
+    fn a_point_in_a_copy_past_the_wraps_has_no_surface() {
+        let tile = |wrap: i16| TerrainTile {
+            id: OverscaledTileID::new(0, wrap, CanonicalTileID::new(0, 0, 0)),
+            dem: None,
+            dem_loading: false,
+        };
+        let cover = TerrainCover {
+            source_id: "dem".to_owned(),
+            tile_size: 512,
+            tiles: vec![tile(i16::MAX), tile(i16::MIN)],
+            center: None,
+            dem_tiles: Vec::new(),
+            ranges: ElevationRanges::default(),
+        };
+        let ground = TerrainElevation::new(&cover, None, DemUnpack::of(RasterEncoding::Terrarium), 1.0);
+        for copy in [i16::MAX, i16::MIN] {
+            assert_eq!(Some(0.0), ground.surface_at(DVec2::new(f64::from(copy) + 0.5, 0.5)), "copy {copy}");
+        }
+        for x in [f64::from(i16::MAX) + 1.5, 1e12, f64::from(i16::MIN) - 0.5, -1e12] {
+            assert_eq!(None, ground.surface_at(DVec2::new(x, 0.5)), "x {x}");
+        }
     }
 }
