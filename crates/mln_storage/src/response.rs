@@ -54,6 +54,11 @@ pub struct Response {
     /// A 304 Not Modified: the requester's copy is still current.
     pub not_modified: bool,
 
+    /// The data is the copy the request carried (`Resource::prior_data`),
+    /// delivered for a 304 or in place of an error: a cache that stored that
+    /// copy has its data already.
+    pub prior: bool,
+
     /// Set, with `no_content`, for a 404 Not Found for a tile, which the
     /// tileset doesn't have, so a tile loader can tell it apart from a tile
     /// with nothing in it.

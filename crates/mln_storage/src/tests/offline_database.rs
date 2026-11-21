@@ -1440,7 +1440,7 @@ fn a_read_only_v6_database_can_be_read() {
 }
 
 /// A copy keeps its stale-while-revalidate and stale-if-error times, and a
-/// 304 renews them. What the server forbids storing isn't stored.
+/// 304, or the copy it delivered, renews them. What the server forbids storing isn't stored.
 #[test]
 fn caching_rules_are_stored() {
     let log = FixtureLog::new();
@@ -1464,6 +1464,17 @@ fn caching_rules_are_stored() {
         db.put(&resource, &renewed);
         let stored = db.get(&resource).unwrap();
         assert_eq!(renewed.caching, stored.caching);
+        assert_eq!(b"first", stored.data.unwrap().as_slice());
+
+        // The copy a 304 delivered back is the stored one: only its caching
+        // rules change.
+        let mut delivered = Response::new();
+        delivered.prior = true;
+        delivered.data = Some(data("delivered"));
+        delivered.caching.expires = at(2000);
+        assert_eq!((false, 0), db.put(&resource, &delivered));
+        let stored = db.get(&resource).unwrap();
+        assert_eq!(delivered.caching, stored.caching);
         assert_eq!(b"first", stored.data.unwrap().as_slice());
 
         let mut no_store = Response::new();

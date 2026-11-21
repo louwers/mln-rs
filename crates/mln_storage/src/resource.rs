@@ -220,6 +220,7 @@ impl Resource {
         if response.not_modified && self.prior_data.is_some() {
             response.data = self.prior_data.take();
             response.not_modified = false;
+            response.prior = true;
             response.modified = response.modified.or(self.prior_modified);
             if response.etag.is_none() {
                 response.etag.clone_from(&self.prior_etag);
@@ -231,6 +232,7 @@ impl Resource {
         {
             let mut stale = Response::new();
             stale.data = self.prior_data.take();
+            stale.prior = true;
             stale.modified = self.prior_modified;
             stale.etag.clone_from(&self.prior_etag);
             stale.caching = self.prior_caching;

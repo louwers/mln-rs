@@ -548,8 +548,9 @@ same step on every run:
 - cold: none, as in `macro/load/street-4g` and `-slow`;
 - warm: what a visit to the view over `local` stored before measuring, still
   fresh, so that nothing goes to the network (`macro/load/street-warm`);
-- expired: the same, expired, so that the map shows it at once and revalidates
-  each resource (`macro/load/street-expired`).
+- expired: the same, expired, with no `stale-while-revalidate`, so that the map
+  shows each copy once the server answers its revalidation with a 304
+  (`macro/load/street-expired`).
 
 A view still in the map's own tile cache, as when it comes back to the street
 tiles after a zoom out (`macro/navigate/zoom-slow`), needs none of these. Expiry

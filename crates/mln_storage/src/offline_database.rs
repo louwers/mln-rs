@@ -716,11 +716,20 @@ impl OfflineDatabase {
             return Ok((false, 0));
         }
 
+        // A copy the database has, for a 304 or in place of an error, only
+        // renews its caching rules.
+        let renews = renews(response);
         let compressed = match &response.data {
-            Some(data) => Some(compress(data).map_err(DatabaseError::Runtime)?).filter(|c| c.len() < data.len()),
-            None => None,
+            Some(data) if !renews => {
+                Some(compress(data).map_err(DatabaseError::Runtime)?).filter(|c| c.len() < data.len())
+            }
+            _ => None,
         };
-        let data = compressed.as_deref().or(response.data.as_deref().map(Vec::as_slice)).unwrap_or_default();
+        let data = if renews {
+            &[]
+        } else {
+            compressed.as_deref().or(response.data.as_deref().map(Vec::as_slice)).unwrap_or_default()
+        };
         let size = data.len() as u64;
 
         let stats = if evict {
@@ -744,8 +753,8 @@ impl OfflineDatabase {
     }
 
     /// Writes `response`, with `data` as its stored bytes, to the row of
-    /// `stored`, and gives whether it added the row. A 304 updates only the
-    /// stored copy's caching rules.
+    /// `stored`, and gives whether it added the row. A copy the database has
+    /// (`renews`) updates only its caching rules.
     fn write(&mut self, stored: &Stored<'_>, response: &Response, data: &[u8], compressed: bool) -> DbResult<bool> {
         let secs = |time: Option<Timestamp>| time.map(Timestamp::secs_since_epoch);
         let (expires, modified) = (secs(response.caching.expires), secs(response.modified));
@@ -762,7 +771,8 @@ impl OfflineDatabase {
             ("stale_while_revalidate", &swr),
             ("stale_if_error", &sie),
         ];
-        if !response.not_modified {
+        let renews = renews(response);
+        if !renews {
             columns.extend::<[(&str, &dyn ToSql); 4]>([
                 ("etag", &response.etag),
                 ("modified", &modified),
@@ -778,7 +788,7 @@ impl OfflineDatabase {
         let assignments: Vec<String> = columns.iter().map(|(column, _)| format!("{column} = ?")).collect();
         let table = stored.table().name();
         let sql = format!("UPDATE {table} SET {} WHERE {}", assignments.join(", "), stored.condition());
-        if self.execute(&sql, &*params)? != 0 || response.not_modified {
+        if self.execute(&sql, &*params)? != 0 || renews {
             return Ok(false);
         }
 
@@ -1591,6 +1601,12 @@ impl<'a> Stored<'a> {
             Stored::Resource { kind, .. } => vec![("kind", kind)],
         }
     }
+}
+
+/// Whether `response` brings a copy the database has: a 304, or the copy
+/// the request carried, delivered for a 304 or in place of an error.
+fn renews(response: &Response) -> bool {
+    response.not_modified || response.prior
 }
 
 /// Reads `etag, modified, data, compressed, id`, then the caching columns:
