@@ -8,9 +8,9 @@ pub(super) const BACKGROUND_PATTERN_SHADER: Glsl = Glsl {
     highp vec2 u_pixel_coord_upper;
     highp vec2 u_pixel_coord_lower;
     highp float u_tile_units_to_pixels;
-    lowp float drawable_pad1;
-    lowp float drawable_pad2;
-    lowp float drawable_pad3;
+    highp float BackgroundPatternDrawableUBO_pad1;
+    highp float BackgroundPatternDrawableUBO_pad2;
+    highp float BackgroundPatternDrawableUBO_pad3;
 };
 
 layout (std140) uniform BackgroundPatternPropsUBO {
@@ -25,8 +25,8 @@ layout (std140) uniform BackgroundPatternPropsUBO {
     highp float u_mix;
     highp float u_opacity;
     highp vec2 u_texsize;
-    lowp float props_pad1;
-    lowp float props_pad2;
+    highp float BackgroundPatternPropsUBO_pad1;
+    highp float BackgroundPatternPropsUBO_pad2;
 };
 
 layout (location = 0) in vec2 a_pos;
@@ -52,8 +52,8 @@ void main() {
     highp float u_mix;
     highp float u_opacity;
     highp vec2 u_texsize;
-    lowp float props_pad1;
-    lowp float props_pad2;
+    highp float BackgroundPatternPropsUBO_pad1;
+    highp float BackgroundPatternPropsUBO_pad2;
 };
 
 uniform sampler2D u_image;
@@ -98,9 +98,9 @@ void main() {
     fragment: r"layout (std140) uniform BackgroundPropsUBO {
     highp vec4 u_color;
     highp float u_opacity;
-    lowp float props_pad1;
-    lowp float props_pad2;
-    lowp float props_pad3;
+    highp float BackgroundPropsUBO_pad1;
+    highp float BackgroundPropsUBO_pad2;
+    highp float BackgroundPropsUBO_pad3;
 };
 
 void main() {

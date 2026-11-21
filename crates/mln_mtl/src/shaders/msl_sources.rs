@@ -60,27 +60,25 @@ inline float2 atlas_pos(const float2 origin, const float2 offset) {
 }
 
 struct alignas(16) ViewUBO {
-    /*  0 */ float2 units_to_pixels;
-    /*  8 */ float2 target_size;
-    /* 16 */ float camera_to_center_distance;
-    /* 20 */ float aspect_ratio;
-    /* 24 */ float pixel_ratio;
-    /* 28 */ float pad1;
-    /* 32 */
+    float2 units_to_pixels;
+    float2 target_size;
+    float camera_to_center_distance;
+    float aspect_ratio;
+    float pixel_ratio;
+    float pad1;
 };
-static_assert(sizeof(ViewUBO) == 2 * 16, "wrong size");
+static_assert(sizeof(ViewUBO) == 32, "wrong size");
 
 struct alignas(16) ProjectionUBO {
-    /*   0 */ float4x4 matrix;
-    /*  64 */ float4x4 fallback_matrix;
-    /* 128 */ float4 tile_mercator_coords;
-    /* 144 */ float4 clipping_plane;
-    /* 160 */ float projection_transition;
-    /* 164 */ float depth_offset;
-    /* 168 */ float2 translate;
-    /* 176 */
+    float4x4 matrix;
+    float4x4 fallback_matrix;
+    float4 tile_mercator_coords;
+    float4 clipping_plane;
+    float transition;
+    float depth_offset;
+    float2 translate;
 };
-static_assert(sizeof(ProjectionUBO) == 11 * 16, "wrong size");
+static_assert(sizeof(ProjectionUBO) == 176, "wrong size");
 
 // Pole vertices carry these sentinel Y values in their raw position.
 #define GLOBE_POLE_NORTH_Y -32767.5
@@ -138,19 +136,19 @@ inline float4 interpolateProjection(float2 posInTile, float3 spherePos, float el
     // sphere, where the hemisphere's Z gradient is steepest; a constant NDC offset z-fights fill against outline.
     globePosition.z = globeComputeClippingZ(elevatedPos, projection) * globePosition.w - projection.depth_offset;
 
-    if (projection.projection_transition > 0.999) {
+    if (projection.transition > 0.999) {
         return globePosition;
     }
 
     const float4 flatPosition = projection.fallback_matrix * float4(posInTile, elevation, 1.0);
     const float z_globeness_threshold = 0.2;
     float4 result = globePosition;
-    result.z = mix(0.0, globePosition.z, clamp((projection.projection_transition - z_globeness_threshold) / (1.0 - z_globeness_threshold), 0.0, 1.0));
-    result.xyw = mix(flatPosition.xyw, globePosition.xyw, projection.projection_transition);
+    result.z = mix(0.0, globePosition.z, clamp((projection.transition - z_globeness_threshold) / (1.0 - z_globeness_threshold), 0.0, 1.0));
+    result.xyw = mix(flatPosition.xyw, globePosition.xyw, projection.transition);
     if ((posInTile.y < GLOBE_POLE_NORTH_Y) || (posInTile.y > GLOBE_POLE_SOUTH_Y)) {
         result = globePosition;
         const float poles_hidden_anim_percentage = 0.02;
-        result.z = mix(globePosition.z, 100.0, pow(max((1.0 - projection.projection_transition) / poles_hidden_anim_percentage, 0.0), 8.0));
+        result.z = mix(globePosition.z, 100.0, pow(max((1.0 - projection.transition) / poles_hidden_anim_percentage, 0.0), 8.0));
     }
     return result;
 }
@@ -159,11 +157,11 @@ inline float4 interpolateProjection(float2 posInTile, float3 spherePos, float el
 inline float4 interpolateProjectionFor3D(float2 posInTile, float3 spherePos, float elevation, device const ProjectionUBO& projection) {
     const float3 elevatedPos = spherePos * (1.0 + elevation / GLOBE_RADIUS);
     const float4 globePosition = projection.matrix * float4(elevatedPos, 1.0);
-    if (projection.projection_transition > 0.999) {
+    if (projection.transition > 0.999) {
         return globePosition;
     }
     const float4 fallbackPosition = projection.fallback_matrix * float4(posInTile, elevation, 1.0);
-    return mix(fallbackPosition, globePosition, projection.projection_transition);
+    return mix(fallbackPosition, globePosition, projection.transition);
 }
 
 inline float4 projectTile(float2 pos, device const ProjectionUBO& projection) {

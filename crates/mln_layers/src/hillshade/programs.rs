@@ -28,9 +28,9 @@ pub(crate) const ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE: usize = 1;
 pub static HILLSHADE: Program = Program {
     name: "HillshadeShader",
     buffers: &[
-        Buffer::storage::<HillshadeDrawableUBO>(ID_HILLSHADE_DRAWABLE_UBO, "HillshadeDrawableUBO"),
-        Buffer::storage::<HillshadeTilePropsUBO>(ID_HILLSHADE_TILE_PROPS_UBO, "HillshadeTilePropsUBO"),
-        Buffer::uniform::<HillshadeEvaluatedPropsUBO>(ID_HILLSHADE_EVALUATED_PROPS_UBO, "HillshadeEvaluatedPropsUBO"),
+        Buffer::storage::<HillshadeDrawableUBO>(ID_HILLSHADE_DRAWABLE_UBO),
+        Buffer::storage::<HillshadeTilePropsUBO>(ID_HILLSHADE_TILE_PROPS_UBO),
+        Buffer::uniform::<HillshadeEvaluatedPropsUBO>(ID_HILLSHADE_EVALUATED_PROPS_UBO),
     ],
     attributes: &[
         Attribute::new(ID_HILLSHADE_POS_VERTEX_ATTRIBUTE, "a_pos", Short2),
@@ -50,14 +50,8 @@ pub static HILLSHADE: Program = Program {
 pub static HILLSHADE_PREPARE: Program = Program {
     name: "HillshadePrepareShader",
     buffers: &[
-        Buffer::uniform::<HillshadePrepareDrawableUBO>(
-            ID_HILLSHADE_PREPARE_DRAWABLE_UBO,
-            "HillshadePrepareDrawableUBO",
-        ),
-        Buffer::uniform::<HillshadePrepareTilePropsUBO>(
-            ID_HILLSHADE_PREPARE_TILE_PROPS_UBO,
-            "HillshadePrepareTilePropsUBO",
-        ),
+        Buffer::uniform::<HillshadePrepareDrawableUBO>(ID_HILLSHADE_PREPARE_DRAWABLE_UBO),
+        Buffer::uniform::<HillshadePrepareTilePropsUBO>(ID_HILLSHADE_PREPARE_TILE_PROPS_UBO),
     ],
     attributes: &[
         Attribute::new(ID_HILLSHADE_POS_VERTEX_ATTRIBUTE, "a_pos", Short2),

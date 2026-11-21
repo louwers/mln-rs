@@ -790,8 +790,8 @@ impl GlGpu {
                         id: info.id,
                         size: size.max(0) as usize,
                         element_size: match info.kind {
-                            BufferKind::Uniform => 0,
-                            BufferKind::Storage { stride } => stride,
+                            BufferKind::Storage { stride, .. } => stride,
+                            BufferKind::Uniform(_) | BufferKind::Vertices { .. } => 0,
                         },
                     });
                     Ok(())

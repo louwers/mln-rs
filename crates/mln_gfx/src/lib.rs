@@ -48,3 +48,9 @@ pub use scissor_rect::ScissorRect;
 pub use stencil_mode::StencilMode;
 pub use types::DepthMaskType;
 pub use window::Window;
+
+/// What the expansions of this crate's macros name.
+#[doc(hidden)]
+pub mod __private {
+    pub use bytemuck;
+}

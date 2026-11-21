@@ -54,7 +54,7 @@ struct VertexOutput {
 #endif
 };
 
-struct FillOutlinePatternDrawableUBO {
+struct FillPatternDrawableUBO {
     matrix: mat4x4<f32>,
     pixel_coord_upper: vec2<f32>,
     pixel_coord_lower: vec2<f32>,
@@ -68,7 +68,7 @@ struct FillOutlinePatternDrawableUBO {
     pad3: f32,
 };
 
-struct FillOutlinePatternTilePropsUBO {
+struct FillPatternTilePropsUBO {
     pattern_from: vec4<f32>,
     pattern_to: vec4<f32>,
     texsize: vec2<f32>,
@@ -85,8 +85,8 @@ struct FillEvaluatedPropsUBO {
     to_scale: f32,
 };
 
-@group(0) @binding(2) var<storage, read> drawableVector: array<FillOutlinePatternDrawableUBO>;
-@group(0) @binding(5) var<storage, read> tilePropsVector: array<FillOutlinePatternTilePropsUBO>;
+@group(0) @binding(2) var<storage, read> drawableVector: array<FillPatternDrawableUBO>;
+@group(0) @binding(5) var<storage, read> tilePropsVector: array<FillPatternTilePropsUBO>;
 @group(0) @binding(6) var<uniform> props: FillEvaluatedPropsUBO;
 
 @vertex
@@ -189,7 +189,7 @@ struct FragmentInput {
 #endif
 };
 
-struct FillOutlinePatternTilePropsUBO {
+struct FillPatternTilePropsUBO {
     pattern_from: vec4<f32>,
     pattern_to: vec4<f32>,
     texsize: vec2<f32>,
@@ -206,7 +206,7 @@ struct FillEvaluatedPropsUBO {
     to_scale: f32,
 };
 
-@group(0) @binding(5) var<storage, read> tilePropsVector: array<FillOutlinePatternTilePropsUBO>;
+@group(0) @binding(5) var<storage, read> tilePropsVector: array<FillPatternTilePropsUBO>;
 @group(0) @binding(6) var<uniform> props: FillEvaluatedPropsUBO;
 @group(1) @binding(0) var texture_sampler: sampler;
 @group(1) @binding(1) var pattern_texture: texture_2d<f32>;
@@ -317,15 +317,10 @@ struct FillOutlineDrawableUBO {
     opacity_t: f32,
     paint_layout: u32,
     pad2: f32,
+    stride_pad: array<vec4<f32>, 2>,
 };
 
-struct FillOutlineDrawableUnionUBO {
-    fill: FillOutlineDrawableUBO,
-    padding1: vec4<f32>,
-    padding2: vec4<f32>,
-};
-
-struct FillOutlineEvaluatedPropsUBO {
+struct FillEvaluatedPropsUBO {
     color: vec4<f32>,
     outline_color: vec4<f32>,
     opacity: f32,
@@ -334,15 +329,15 @@ struct FillOutlineEvaluatedPropsUBO {
     to_scale: f32,
 };
 
-@group(0) @binding(2) var<storage, read> drawableVector: array<FillOutlineDrawableUnionUBO>;
-@group(0) @binding(6) var<uniform> props: FillOutlineEvaluatedPropsUBO;
+@group(0) @binding(2) var<storage, read> drawableVector: array<FillOutlineDrawableUBO>;
+@group(0) @binding(6) var<uniform> props: FillEvaluatedPropsUBO;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
 
     // Transform position using the matrix
-    let drawable = drawableVector[globalIndex.value].fill;
+    let drawable = drawableVector[globalIndex.value];
     let pos = vec2<f32>(f32(in.position.x), f32(in.position.y));
     let clip = projectTileWithPoles(pos, pos, projectionVector[globalIndex.value]);
     let invW = 1.0 / clip.w;
@@ -363,7 +358,7 @@ fn main(in: VertexInput) -> VertexOutput {
     ),
     fragment: Some(
         r"
-struct FillOutlineEvaluatedPropsUBO {
+struct FillEvaluatedPropsUBO {
     color: vec4<f32>,
     outline_color: vec4<f32>,
     opacity: f32,
@@ -372,7 +367,7 @@ struct FillOutlineEvaluatedPropsUBO {
     to_scale: f32,
 };
 
-@group(0) @binding(6) var<uniform> props: FillOutlineEvaluatedPropsUBO;
+@group(0) @binding(6) var<uniform> props: FillEvaluatedPropsUBO;
 
 struct FragmentInput {
     @builtin(position) position: vec4<f32>,
@@ -703,12 +698,7 @@ struct FillDrawableUBO {
     opacity_t: f32,
     pad1: f32,
     pad2: f32,
-};
-
-struct FillDrawableUnionUBO {
-    fill: FillDrawableUBO,
-    padding1: vec4<f32>,
-    padding2: vec4<f32>,
+    stride_pad: array<vec4<f32>, 2>,
 };
 
 struct FillEvaluatedPropsUBO {
@@ -720,7 +710,7 @@ struct FillEvaluatedPropsUBO {
     to_scale: f32,
 };
 
-@group(0) @binding(2) var<storage, read> drawableVector: array<FillDrawableUnionUBO>;
+@group(0) @binding(2) var<storage, read> drawableVector: array<FillDrawableUBO>;
 @group(0) @binding(6) var<uniform> props: FillEvaluatedPropsUBO;
 
 @vertex
@@ -728,7 +718,7 @@ fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
 
     // Transform position using the matrix
-    let drawable = drawableVector[globalIndex.value].fill;
+    let drawable = drawableVector[globalIndex.value];
     let pos = vec2<f32>(f32(in.position.x), f32(in.position.y));
     let clip = projectTileWithPoles(pos, pos, projectionVector[globalIndex.value]);
     out.position = clip;
@@ -877,15 +867,10 @@ struct FillOutlineDrawableUBO {
     opacity_t: f32,
     paint_layout: u32,
     pad2: f32,
+    stride_pad: array<vec4<f32>, 2>,
 };
 
-struct FillOutlineDrawableUnionUBO {
-    fill: FillOutlineDrawableUBO,
-    padding1: vec4<f32>,
-    padding2: vec4<f32>,
-};
-
-struct FillOutlineEvaluatedPropsUBO {
+struct FillEvaluatedPropsUBO {
     color: vec4<f32>,
     outline_color: vec4<f32>,
     opacity: f32,
@@ -894,8 +879,8 @@ struct FillOutlineEvaluatedPropsUBO {
     to_scale: f32,
 };
 
-@group(0) @binding(2) var<storage, read> drawableVector: array<FillOutlineDrawableUnionUBO>;
-@group(0) @binding(6) var<uniform> props: FillOutlineEvaluatedPropsUBO;
+@group(0) @binding(2) var<storage, read> drawableVector: array<FillOutlineDrawableUBO>;
+@group(0) @binding(6) var<uniform> props: FillEvaluatedPropsUBO;
 "#
     };
 }
@@ -923,7 +908,7 @@ struct VertexInput {
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
 
-    let drawable = drawableVector[globalIndex.value].fill;
+    let drawable = drawableVector[globalIndex.value];
     let projection = projectionVector[globalIndex.value];
     let start = vec2<f32>(in.outline_pos);
     let end = vec2<f32>(in.outline_end);
@@ -974,7 +959,7 @@ fn tile_position(word: u32) -> vec2<f32> {
 fn main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     var out: VertexOutput;
 
-    let drawable = drawableVector[globalIndex.value].fill;
+    let drawable = drawableVector[globalIndex.value];
     let projection = projectionVector[globalIndex.value];
     // Four vertices a segment, in the order of the instanced quad's corners.
     let segment = vertex_index / 4u;
@@ -1051,7 +1036,7 @@ struct VertexOutput {
 #endif
 };
 
-struct FillOutlinePatternDrawableUBO {
+struct FillPatternDrawableUBO {
     matrix: mat4x4<f32>,
     pixel_coord_upper: vec2<f32>,
     pixel_coord_lower: vec2<f32>,
@@ -1065,7 +1050,7 @@ struct FillOutlinePatternDrawableUBO {
     pad3: f32,
 };
 
-struct FillOutlinePatternTilePropsUBO {
+struct FillPatternTilePropsUBO {
     pattern_from: vec4<f32>,
     pattern_to: vec4<f32>,
     texsize: vec2<f32>,
@@ -1082,8 +1067,8 @@ struct FillEvaluatedPropsUBO {
     to_scale: f32,
 };
 
-@group(0) @binding(2) var<storage, read> drawableVector: array<FillOutlinePatternDrawableUBO>;
-@group(0) @binding(5) var<storage, read> tilePropsVector: array<FillOutlinePatternTilePropsUBO>;
+@group(0) @binding(2) var<storage, read> drawableVector: array<FillPatternDrawableUBO>;
+@group(0) @binding(5) var<storage, read> tilePropsVector: array<FillPatternTilePropsUBO>;
 @group(0) @binding(6) var<uniform> props: FillEvaluatedPropsUBO;
 "#,
         outline_corner!(),

@@ -79,116 +79,83 @@ enum {
 // Fill
 
 struct alignas(16) FillDrawableUBO {
-    /*  0 */ float4x4 matrix;
-
-    // Interpolations
-    /* 64 */ float color_t;
-    /* 68 */ float opacity_t;
-    /* 72 */ float pad1;
-    /* 76 */ float pad2;
-    /* 80 */
+    float4x4 matrix;
+    float color_t;
+    float opacity_t;
+    float pad1;
+    float pad2;
+    float4 stride_pad[2];
 };
-static_assert(sizeof(FillDrawableUBO) == 5 * 16, "wrong size");
+static_assert(sizeof(FillDrawableUBO) == 112, "wrong size");
 
 //
 // Fill outline
 
 struct alignas(16) FillOutlineDrawableUBO {
-    /*  0 */ float4x4 matrix;
-
-    // Interpolations
-    /* 64 */ float outline_color_t;
-    /* 68 */ float opacity_t;
-    /* 72 */ uint32_t paint_layout;
-    /* 76 */ float pad2;
-    /* 80 */
+    float4x4 matrix;
+    float outline_color_t;
+    float opacity_t;
+    uint paint_layout;
+    float pad2;
+    float4 stride_pad[2];
 };
-static_assert(sizeof(FillOutlineDrawableUBO) == 5 * 16, "wrong size");
+static_assert(sizeof(FillOutlineDrawableUBO) == 112, "wrong size");
 
 //
 // Fill pattern
 
 struct alignas(16) FillPatternDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float2 pixel_coord_upper;
-    /* 72 */ float2 pixel_coord_lower;
-    /* 80 */ float tile_ratio;
-
-    // Interpolations
-    /* 84 */ float pattern_from_t;
-    /* 88 */ float pattern_to_t;
-    /* 92 */ float opacity_t;
-    /* 96 */ float color_t;
-    /*100 */ float pad1;
-    /*104 */ float pad2;
-    /*108 */ float pad3;
-    /*112 */
+    float4x4 matrix;
+    float2 pixel_coord_upper;
+    float2 pixel_coord_lower;
+    float tile_ratio;
+    float pattern_from_t;
+    float pattern_to_t;
+    float opacity_t;
+    float color_t;
+    float pad1;
+    float pad2;
+    float pad3;
 };
-static_assert(sizeof(FillPatternDrawableUBO) == 7 * 16, "wrong size");
+static_assert(sizeof(FillPatternDrawableUBO) == 112, "wrong size");
 
 struct alignas(16) FillPatternTilePropsUBO {
-    /*  0 */ float4 pattern_from;
-    /* 16 */ float4 pattern_to;
-    /* 32 */ float2 texsize;
-    /* 40 */ float sdf;
-    /* 44 */ float pad2;
-    /* 48 */
+    float4 pattern_from;
+    float4 pattern_to;
+    float2 texsize;
+    float sdf;
+    float pad2;
 };
-static_assert(sizeof(FillPatternTilePropsUBO) == 3 * 16, "wrong size");
+static_assert(sizeof(FillPatternTilePropsUBO) == 48, "wrong size");
 
 //
 // Fill pattern outline
 
-struct alignas(16) FillOutlinePatternDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float2 pixel_coord_upper;
-    /* 72 */ float2 pixel_coord_lower;
-    /* 80 */ float tile_ratio;
 
-    // Interpolations
-    /* 84 */ float pattern_from_t;
-    /* 88 */ float pattern_to_t;
-    /* 92 */ float opacity_t;
-    /* 96 */ float color_t;
-    /*100 */ float pad1;
-    /*104 */ float pad2;
-    /*108 */ float pad3;
-    /*112 */
-};
-static_assert(sizeof(FillOutlinePatternDrawableUBO) == 7 * 16, "wrong size");
 
-struct alignas(16) FillOutlinePatternTilePropsUBO {
-    /*  0 */ float4 pattern_from;
-    /* 16 */ float4 pattern_to;
-    /* 32 */ float2 texsize;
-    /* 40 */ float sdf;
-    /* 44 */ float pad2;
-    /* 48 */
-};
-static_assert(sizeof(FillOutlinePatternTilePropsUBO) == 3 * 16, "wrong size");
+
 
 /// Evaluated properties that do not depend on the tile
 struct alignas(16) FillEvaluatedPropsUBO {
-    /*  0 */ float4 color;
-    /* 16 */ float4 outline_color;
-    /* 32 */ float opacity;
-    /* 36 */ float fade;
-    /* 40 */ float from_scale;
-    /* 44 */ float to_scale;
-    /* 48 */
+    float4 color;
+    float4 outline_color;
+    float opacity;
+    float fade;
+    float from_scale;
+    float to_scale;
 };
-static_assert(sizeof(FillEvaluatedPropsUBO) == 3 * 16, "wrong size");
+static_assert(sizeof(FillEvaluatedPropsUBO) == 48, "wrong size");
 
 union FillDrawableUnionUBO {
     FillDrawableUBO fillDrawableUBO;
     FillOutlineDrawableUBO fillOutlineDrawableUBO;
     FillPatternDrawableUBO fillPatternDrawableUBO;
-    FillOutlinePatternDrawableUBO fillOutlinePatternDrawableUBO;
+    FillPatternDrawableUBO fillOutlinePatternDrawableUBO;
 };
 
 union FillTilePropsUnionUBO {
     FillPatternTilePropsUBO fillPatternTilePropsUBO;
-    FillOutlinePatternTilePropsUBO fillOutlinePatternTilePropsUBO;
+    FillPatternTilePropsUBO fillOutlinePatternTilePropsUBO;
 };
 
 "#,
@@ -247,8 +214,8 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const FillTilePropsUnionUBO* tilePropsVector [[buffer(idFillTilePropsUBO)]],
                                 device const FillEvaluatedPropsUBO& props [[buffer(idFillEvaluatedPropsUBO)]]) {
 
-    device const FillOutlinePatternDrawableUBO& drawable = drawableVector[uboIndex].fillOutlinePatternDrawableUBO;
-    device const FillOutlinePatternTilePropsUBO& tileProps = tilePropsVector[uboIndex].fillOutlinePatternTilePropsUBO;
+    device const FillPatternDrawableUBO& drawable = drawableVector[uboIndex].fillOutlinePatternDrawableUBO;
+    device const FillPatternTilePropsUBO& tileProps = tilePropsVector[uboIndex].fillOutlinePatternTilePropsUBO;
 
 #if defined(HAS_UNIFORM_u_pattern_from)
     const auto pattern_from = tileProps.pattern_from;
@@ -316,7 +283,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     return half4(1.0);
 #endif
 
-    device const FillOutlinePatternTilePropsUBO& tileProps = tilePropsVector[uboIndex].fillOutlinePatternTilePropsUBO;
+    device const FillPatternTilePropsUBO& tileProps = tilePropsVector[uboIndex].fillOutlinePatternTilePropsUBO;
 
 #if defined(HAS_UNIFORM_u_pattern_from)
     const auto pattern_from   = float4(tileProps.pattern_from);
@@ -447,116 +414,83 @@ enum {
 // Fill
 
 struct alignas(16) FillDrawableUBO {
-    /*  0 */ float4x4 matrix;
-
-    // Interpolations
-    /* 64 */ float color_t;
-    /* 68 */ float opacity_t;
-    /* 72 */ float pad1;
-    /* 76 */ float pad2;
-    /* 80 */
+    float4x4 matrix;
+    float color_t;
+    float opacity_t;
+    float pad1;
+    float pad2;
+    float4 stride_pad[2];
 };
-static_assert(sizeof(FillDrawableUBO) == 5 * 16, "wrong size");
+static_assert(sizeof(FillDrawableUBO) == 112, "wrong size");
 
 //
 // Fill outline
 
 struct alignas(16) FillOutlineDrawableUBO {
-    /*  0 */ float4x4 matrix;
-
-    // Interpolations
-    /* 64 */ float outline_color_t;
-    /* 68 */ float opacity_t;
-    /* 72 */ uint32_t paint_layout;
-    /* 76 */ float pad2;
-    /* 80 */
+    float4x4 matrix;
+    float outline_color_t;
+    float opacity_t;
+    uint paint_layout;
+    float pad2;
+    float4 stride_pad[2];
 };
-static_assert(sizeof(FillOutlineDrawableUBO) == 5 * 16, "wrong size");
+static_assert(sizeof(FillOutlineDrawableUBO) == 112, "wrong size");
 
 //
 // Fill pattern
 
 struct alignas(16) FillPatternDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float2 pixel_coord_upper;
-    /* 72 */ float2 pixel_coord_lower;
-    /* 80 */ float tile_ratio;
-
-    // Interpolations
-    /* 84 */ float pattern_from_t;
-    /* 88 */ float pattern_to_t;
-    /* 92 */ float opacity_t;
-    /* 96 */ float color_t;
-    /*100 */ float pad1;
-    /*104 */ float pad2;
-    /*108 */ float pad3;
-    /*112 */
+    float4x4 matrix;
+    float2 pixel_coord_upper;
+    float2 pixel_coord_lower;
+    float tile_ratio;
+    float pattern_from_t;
+    float pattern_to_t;
+    float opacity_t;
+    float color_t;
+    float pad1;
+    float pad2;
+    float pad3;
 };
-static_assert(sizeof(FillPatternDrawableUBO) == 7 * 16, "wrong size");
+static_assert(sizeof(FillPatternDrawableUBO) == 112, "wrong size");
 
 struct alignas(16) FillPatternTilePropsUBO {
-    /*  0 */ float4 pattern_from;
-    /* 16 */ float4 pattern_to;
-    /* 32 */ float2 texsize;
-    /* 40 */ float sdf;
-    /* 44 */ float pad2;
-    /* 48 */
+    float4 pattern_from;
+    float4 pattern_to;
+    float2 texsize;
+    float sdf;
+    float pad2;
 };
-static_assert(sizeof(FillPatternTilePropsUBO) == 3 * 16, "wrong size");
+static_assert(sizeof(FillPatternTilePropsUBO) == 48, "wrong size");
 
 //
 // Fill pattern outline
 
-struct alignas(16) FillOutlinePatternDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float2 pixel_coord_upper;
-    /* 72 */ float2 pixel_coord_lower;
-    /* 80 */ float tile_ratio;
 
-    // Interpolations
-    /* 84 */ float pattern_from_t;
-    /* 88 */ float pattern_to_t;
-    /* 92 */ float opacity_t;
-    /* 96 */ float color_t;
-    /*100 */ float pad1;
-    /*104 */ float pad2;
-    /*108 */ float pad3;
-    /*112 */
-};
-static_assert(sizeof(FillOutlinePatternDrawableUBO) == 7 * 16, "wrong size");
 
-struct alignas(16) FillOutlinePatternTilePropsUBO {
-    /*  0 */ float4 pattern_from;
-    /* 16 */ float4 pattern_to;
-    /* 32 */ float2 texsize;
-    /* 40 */ float sdf;
-    /* 44 */ float pad2;
-    /* 48 */
-};
-static_assert(sizeof(FillOutlinePatternTilePropsUBO) == 3 * 16, "wrong size");
+
 
 /// Evaluated properties that do not depend on the tile
 struct alignas(16) FillEvaluatedPropsUBO {
-    /*  0 */ float4 color;
-    /* 16 */ float4 outline_color;
-    /* 32 */ float opacity;
-    /* 36 */ float fade;
-    /* 40 */ float from_scale;
-    /* 44 */ float to_scale;
-    /* 48 */
+    float4 color;
+    float4 outline_color;
+    float opacity;
+    float fade;
+    float from_scale;
+    float to_scale;
 };
-static_assert(sizeof(FillEvaluatedPropsUBO) == 3 * 16, "wrong size");
+static_assert(sizeof(FillEvaluatedPropsUBO) == 48, "wrong size");
 
 union FillDrawableUnionUBO {
     FillDrawableUBO fillDrawableUBO;
     FillOutlineDrawableUBO fillOutlineDrawableUBO;
     FillPatternDrawableUBO fillPatternDrawableUBO;
-    FillOutlinePatternDrawableUBO fillOutlinePatternDrawableUBO;
+    FillPatternDrawableUBO fillOutlinePatternDrawableUBO;
 };
 
 union FillTilePropsUnionUBO {
     FillPatternTilePropsUBO fillPatternTilePropsUBO;
-    FillOutlinePatternTilePropsUBO fillOutlinePatternTilePropsUBO;
+    FillPatternTilePropsUBO fillOutlinePatternTilePropsUBO;
 };
 
 "#,
@@ -680,116 +614,83 @@ enum {
 // Fill
 
 struct alignas(16) FillDrawableUBO {
-    /*  0 */ float4x4 matrix;
-
-    // Interpolations
-    /* 64 */ float color_t;
-    /* 68 */ float opacity_t;
-    /* 72 */ float pad1;
-    /* 76 */ float pad2;
-    /* 80 */
+    float4x4 matrix;
+    float color_t;
+    float opacity_t;
+    float pad1;
+    float pad2;
+    float4 stride_pad[2];
 };
-static_assert(sizeof(FillDrawableUBO) == 5 * 16, "wrong size");
+static_assert(sizeof(FillDrawableUBO) == 112, "wrong size");
 
 //
 // Fill outline
 
 struct alignas(16) FillOutlineDrawableUBO {
-    /*  0 */ float4x4 matrix;
-
-    // Interpolations
-    /* 64 */ float outline_color_t;
-    /* 68 */ float opacity_t;
-    /* 72 */ uint32_t paint_layout;
-    /* 76 */ float pad2;
-    /* 80 */
+    float4x4 matrix;
+    float outline_color_t;
+    float opacity_t;
+    uint paint_layout;
+    float pad2;
+    float4 stride_pad[2];
 };
-static_assert(sizeof(FillOutlineDrawableUBO) == 5 * 16, "wrong size");
+static_assert(sizeof(FillOutlineDrawableUBO) == 112, "wrong size");
 
 //
 // Fill pattern
 
 struct alignas(16) FillPatternDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float2 pixel_coord_upper;
-    /* 72 */ float2 pixel_coord_lower;
-    /* 80 */ float tile_ratio;
-
-    // Interpolations
-    /* 84 */ float pattern_from_t;
-    /* 88 */ float pattern_to_t;
-    /* 92 */ float opacity_t;
-    /* 96 */ float color_t;
-    /*100 */ float pad1;
-    /*104 */ float pad2;
-    /*108 */ float pad3;
-    /*112 */
+    float4x4 matrix;
+    float2 pixel_coord_upper;
+    float2 pixel_coord_lower;
+    float tile_ratio;
+    float pattern_from_t;
+    float pattern_to_t;
+    float opacity_t;
+    float color_t;
+    float pad1;
+    float pad2;
+    float pad3;
 };
-static_assert(sizeof(FillPatternDrawableUBO) == 7 * 16, "wrong size");
+static_assert(sizeof(FillPatternDrawableUBO) == 112, "wrong size");
 
 struct alignas(16) FillPatternTilePropsUBO {
-    /*  0 */ float4 pattern_from;
-    /* 16 */ float4 pattern_to;
-    /* 32 */ float2 texsize;
-    /* 40 */ float sdf;
-    /* 44 */ float pad2;
-    /* 48 */
+    float4 pattern_from;
+    float4 pattern_to;
+    float2 texsize;
+    float sdf;
+    float pad2;
 };
-static_assert(sizeof(FillPatternTilePropsUBO) == 3 * 16, "wrong size");
+static_assert(sizeof(FillPatternTilePropsUBO) == 48, "wrong size");
 
 //
 // Fill pattern outline
 
-struct alignas(16) FillOutlinePatternDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float2 pixel_coord_upper;
-    /* 72 */ float2 pixel_coord_lower;
-    /* 80 */ float tile_ratio;
 
-    // Interpolations
-    /* 84 */ float pattern_from_t;
-    /* 88 */ float pattern_to_t;
-    /* 92 */ float opacity_t;
-    /* 96 */ float color_t;
-    /*100 */ float pad1;
-    /*104 */ float pad2;
-    /*108 */ float pad3;
-    /*112 */
-};
-static_assert(sizeof(FillOutlinePatternDrawableUBO) == 7 * 16, "wrong size");
 
-struct alignas(16) FillOutlinePatternTilePropsUBO {
-    /*  0 */ float4 pattern_from;
-    /* 16 */ float4 pattern_to;
-    /* 32 */ float2 texsize;
-    /* 40 */ float sdf;
-    /* 44 */ float pad2;
-    /* 48 */
-};
-static_assert(sizeof(FillOutlinePatternTilePropsUBO) == 3 * 16, "wrong size");
+
 
 /// Evaluated properties that do not depend on the tile
 struct alignas(16) FillEvaluatedPropsUBO {
-    /*  0 */ float4 color;
-    /* 16 */ float4 outline_color;
-    /* 32 */ float opacity;
-    /* 36 */ float fade;
-    /* 40 */ float from_scale;
-    /* 44 */ float to_scale;
-    /* 48 */
+    float4 color;
+    float4 outline_color;
+    float opacity;
+    float fade;
+    float from_scale;
+    float to_scale;
 };
-static_assert(sizeof(FillEvaluatedPropsUBO) == 3 * 16, "wrong size");
+static_assert(sizeof(FillEvaluatedPropsUBO) == 48, "wrong size");
 
 union FillDrawableUnionUBO {
     FillDrawableUBO fillDrawableUBO;
     FillOutlineDrawableUBO fillOutlineDrawableUBO;
     FillPatternDrawableUBO fillPatternDrawableUBO;
-    FillOutlinePatternDrawableUBO fillOutlinePatternDrawableUBO;
+    FillPatternDrawableUBO fillOutlinePatternDrawableUBO;
 };
 
 union FillTilePropsUnionUBO {
     FillPatternTilePropsUBO fillPatternTilePropsUBO;
-    FillOutlinePatternTilePropsUBO fillOutlinePatternTilePropsUBO;
+    FillPatternTilePropsUBO fillOutlinePatternTilePropsUBO;
 };
 
 "#,
@@ -971,116 +872,83 @@ enum {
 // Fill
 
 struct alignas(16) FillDrawableUBO {
-    /*  0 */ float4x4 matrix;
-
-    // Interpolations
-    /* 64 */ float color_t;
-    /* 68 */ float opacity_t;
-    /* 72 */ float pad1;
-    /* 76 */ float pad2;
-    /* 80 */
+    float4x4 matrix;
+    float color_t;
+    float opacity_t;
+    float pad1;
+    float pad2;
+    float4 stride_pad[2];
 };
-static_assert(sizeof(FillDrawableUBO) == 5 * 16, "wrong size");
+static_assert(sizeof(FillDrawableUBO) == 112, "wrong size");
 
 //
 // Fill outline
 
 struct alignas(16) FillOutlineDrawableUBO {
-    /*  0 */ float4x4 matrix;
-
-    // Interpolations
-    /* 64 */ float outline_color_t;
-    /* 68 */ float opacity_t;
-    /* 72 */ uint32_t paint_layout;
-    /* 76 */ float pad2;
-    /* 80 */
+    float4x4 matrix;
+    float outline_color_t;
+    float opacity_t;
+    uint paint_layout;
+    float pad2;
+    float4 stride_pad[2];
 };
-static_assert(sizeof(FillOutlineDrawableUBO) == 5 * 16, "wrong size");
+static_assert(sizeof(FillOutlineDrawableUBO) == 112, "wrong size");
 
 //
 // Fill pattern
 
 struct alignas(16) FillPatternDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float2 pixel_coord_upper;
-    /* 72 */ float2 pixel_coord_lower;
-    /* 80 */ float tile_ratio;
-
-    // Interpolations
-    /* 84 */ float pattern_from_t;
-    /* 88 */ float pattern_to_t;
-    /* 92 */ float opacity_t;
-    /* 96 */ float color_t;
-    /*100 */ float pad1;
-    /*104 */ float pad2;
-    /*108 */ float pad3;
-    /*112 */
+    float4x4 matrix;
+    float2 pixel_coord_upper;
+    float2 pixel_coord_lower;
+    float tile_ratio;
+    float pattern_from_t;
+    float pattern_to_t;
+    float opacity_t;
+    float color_t;
+    float pad1;
+    float pad2;
+    float pad3;
 };
-static_assert(sizeof(FillPatternDrawableUBO) == 7 * 16, "wrong size");
+static_assert(sizeof(FillPatternDrawableUBO) == 112, "wrong size");
 
 struct alignas(16) FillPatternTilePropsUBO {
-    /*  0 */ float4 pattern_from;
-    /* 16 */ float4 pattern_to;
-    /* 32 */ float2 texsize;
-    /* 40 */ float sdf;
-    /* 44 */ float pad2;
-    /* 48 */
+    float4 pattern_from;
+    float4 pattern_to;
+    float2 texsize;
+    float sdf;
+    float pad2;
 };
-static_assert(sizeof(FillPatternTilePropsUBO) == 3 * 16, "wrong size");
+static_assert(sizeof(FillPatternTilePropsUBO) == 48, "wrong size");
 
 //
 // Fill pattern outline
 
-struct alignas(16) FillOutlinePatternDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float2 pixel_coord_upper;
-    /* 72 */ float2 pixel_coord_lower;
-    /* 80 */ float tile_ratio;
 
-    // Interpolations
-    /* 84 */ float pattern_from_t;
-    /* 88 */ float pattern_to_t;
-    /* 92 */ float opacity_t;
-    /* 96 */ float color_t;
-    /*100 */ float pad1;
-    /*104 */ float pad2;
-    /*108 */ float pad3;
-    /*112 */
-};
-static_assert(sizeof(FillOutlinePatternDrawableUBO) == 7 * 16, "wrong size");
 
-struct alignas(16) FillOutlinePatternTilePropsUBO {
-    /*  0 */ float4 pattern_from;
-    /* 16 */ float4 pattern_to;
-    /* 32 */ float2 texsize;
-    /* 40 */ float sdf;
-    /* 44 */ float pad2;
-    /* 48 */
-};
-static_assert(sizeof(FillOutlinePatternTilePropsUBO) == 3 * 16, "wrong size");
+
 
 /// Evaluated properties that do not depend on the tile
 struct alignas(16) FillEvaluatedPropsUBO {
-    /*  0 */ float4 color;
-    /* 16 */ float4 outline_color;
-    /* 32 */ float opacity;
-    /* 36 */ float fade;
-    /* 40 */ float from_scale;
-    /* 44 */ float to_scale;
-    /* 48 */
+    float4 color;
+    float4 outline_color;
+    float opacity;
+    float fade;
+    float from_scale;
+    float to_scale;
 };
-static_assert(sizeof(FillEvaluatedPropsUBO) == 3 * 16, "wrong size");
+static_assert(sizeof(FillEvaluatedPropsUBO) == 48, "wrong size");
 
 union FillDrawableUnionUBO {
     FillDrawableUBO fillDrawableUBO;
     FillOutlineDrawableUBO fillOutlineDrawableUBO;
     FillPatternDrawableUBO fillPatternDrawableUBO;
-    FillOutlinePatternDrawableUBO fillOutlinePatternDrawableUBO;
+    FillPatternDrawableUBO fillOutlinePatternDrawableUBO;
 };
 
 union FillTilePropsUnionUBO {
     FillPatternTilePropsUBO fillPatternTilePropsUBO;
-    FillOutlinePatternTilePropsUBO fillOutlinePatternTilePropsUBO;
+    FillPatternTilePropsUBO fillOutlinePatternTilePropsUBO;
 };
 
 "#,

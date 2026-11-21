@@ -48,8 +48,8 @@ const LINE_PROPERTIES: &[Property] = &[
 pub static LINE: Program = Program {
     name: "LineShader",
     buffers: &[
-        Buffer::storage_of::<LineDrawableUBO, LineDrawableUnionUBO>(ID_LINE_DRAWABLE_UBO, "LineDrawableUBO"),
-        Buffer::uniform::<LineEvaluatedPropsUBO>(ID_LINE_EVALUATED_PROPS_UBO, "LineEvaluatedPropsUBO"),
+        Buffer::storage_of::<LineDrawableUBO, LineDrawableUnionUBO>(ID_LINE_DRAWABLE_UBO),
+        Buffer::uniform::<LineEvaluatedPropsUBO>(ID_LINE_EVALUATED_PROPS_UBO),
     ],
     attributes: &[
         Attribute::new(ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, "a_pos_normal", Short2),
@@ -70,11 +70,8 @@ pub static LINE: Program = Program {
 pub static LINE_GRADIENT: Program = Program {
     name: "LineGradientShader",
     buffers: &[
-        Buffer::storage_of::<LineGradientDrawableUBO, LineDrawableUnionUBO>(
-            ID_LINE_DRAWABLE_UBO,
-            "LineGradientDrawableUBO",
-        ),
-        Buffer::uniform::<LineEvaluatedPropsUBO>(ID_LINE_EVALUATED_PROPS_UBO, "LineEvaluatedPropsUBO"),
+        Buffer::storage_of::<LineGradientDrawableUBO, LineDrawableUnionUBO>(ID_LINE_DRAWABLE_UBO),
+        Buffer::uniform::<LineEvaluatedPropsUBO>(ID_LINE_EVALUATED_PROPS_UBO),
     ],
     attributes: &[
         Attribute::new(ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, "a_pos_normal", Short2),
@@ -105,15 +102,9 @@ pub static LINE_GRADIENT: Program = Program {
 pub static LINE_PATTERN: Program = Program {
     name: "LinePatternShader",
     buffers: &[
-        Buffer::storage_of::<LinePatternDrawableUBO, LineDrawableUnionUBO>(
-            ID_LINE_DRAWABLE_UBO,
-            "LinePatternDrawableUBO",
-        ),
-        Buffer::storage_of::<LinePatternTilePropsUBO, LineTilePropsUnionUBO>(
-            ID_LINE_TILE_PROPS_UBO,
-            "LinePatternTilePropsUBO",
-        ),
-        Buffer::uniform::<LineEvaluatedPropsUBO>(ID_LINE_EVALUATED_PROPS_UBO, "LineEvaluatedPropsUBO"),
+        Buffer::storage_of::<LinePatternDrawableUBO, LineDrawableUnionUBO>(ID_LINE_DRAWABLE_UBO),
+        Buffer::storage_of::<LinePatternTilePropsUBO, LineTilePropsUnionUBO>(ID_LINE_TILE_PROPS_UBO),
+        Buffer::uniform::<LineEvaluatedPropsUBO>(ID_LINE_EVALUATED_PROPS_UBO),
     ],
     attributes: &[
         Attribute::new(ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, "a_pos_normal", Short2),
@@ -148,9 +139,9 @@ pub static LINE_PATTERN: Program = Program {
 pub static LINE_SDF: Program = Program {
     name: "LineSDFShader",
     buffers: &[
-        Buffer::storage_of::<LineSDFDrawableUBO, LineDrawableUnionUBO>(ID_LINE_DRAWABLE_UBO, "LineSDFDrawableUBO"),
-        Buffer::storage_of::<LineSDFTilePropsUBO, LineTilePropsUnionUBO>(ID_LINE_TILE_PROPS_UBO, "LineSDFTilePropsUBO"),
-        Buffer::uniform::<LineEvaluatedPropsUBO>(ID_LINE_EVALUATED_PROPS_UBO, "LineEvaluatedPropsUBO"),
+        Buffer::storage_of::<LineSDFDrawableUBO, LineDrawableUnionUBO>(ID_LINE_DRAWABLE_UBO),
+        Buffer::storage_of::<LineSDFTilePropsUBO, LineTilePropsUnionUBO>(ID_LINE_TILE_PROPS_UBO),
+        Buffer::uniform::<LineEvaluatedPropsUBO>(ID_LINE_EVALUATED_PROPS_UBO),
     ],
     attributes: &[
         Attribute::new(ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, "a_pos_normal", Short2),
@@ -187,9 +178,9 @@ pub static LINE_SDF: Program = Program {
 pub static LINE_GRADIENT_SDF: Program = Program {
     name: "LineGradientSDFShader",
     buffers: &[
-        Buffer::storage_of::<LineSDFDrawableUBO, LineDrawableUnionUBO>(ID_LINE_DRAWABLE_UBO, "LineSDFDrawableUBO"),
-        Buffer::storage_of::<LineSDFTilePropsUBO, LineTilePropsUnionUBO>(ID_LINE_TILE_PROPS_UBO, "LineSDFTilePropsUBO"),
-        Buffer::uniform::<LineEvaluatedPropsUBO>(ID_LINE_EVALUATED_PROPS_UBO, "LineEvaluatedPropsUBO"),
+        Buffer::storage_of::<LineSDFDrawableUBO, LineDrawableUnionUBO>(ID_LINE_DRAWABLE_UBO),
+        Buffer::storage_of::<LineSDFTilePropsUBO, LineTilePropsUnionUBO>(ID_LINE_TILE_PROPS_UBO),
+        Buffer::uniform::<LineEvaluatedPropsUBO>(ID_LINE_EVALUATED_PROPS_UBO),
     ],
     attributes: &[
         Attribute::new(ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, "a_pos_normal", Short2),

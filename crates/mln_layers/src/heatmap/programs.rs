@@ -25,8 +25,8 @@ pub(crate) const ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE: usize = 2;
 pub static HEATMAP: Program = Program {
     name: "HeatmapShader",
     buffers: &[
-        Buffer::storage::<HeatmapDrawableUBO>(ID_HEATMAP_DRAWABLE_UBO, "HeatmapDrawableUBO"),
-        Buffer::uniform::<HeatmapEvaluatedPropsUBO>(ID_HEATMAP_EVALUATED_PROPS_UBO, "HeatmapEvaluatedPropsUBO"),
+        Buffer::storage::<HeatmapDrawableUBO>(ID_HEATMAP_DRAWABLE_UBO),
+        Buffer::uniform::<HeatmapEvaluatedPropsUBO>(ID_HEATMAP_EVALUATED_PROPS_UBO),
     ],
     attributes: &[
         Attribute::new(ID_HEATMAP_POS_VERTEX_ATTRIBUTE, "a_pos", Short2),
@@ -44,7 +44,7 @@ pub static HEATMAP: Program = Program {
 
 pub static HEATMAP_TEXTURE: Program = Program {
     name: "HeatmapTextureShader",
-    buffers: &[Buffer::uniform::<HeatmapTexturePropsUBO>(ID_HEATMAP_TEXTURE_PROPS_UBO, "HeatmapTexturePropsUBO")],
+    buffers: &[Buffer::uniform::<HeatmapTexturePropsUBO>(ID_HEATMAP_TEXTURE_PROPS_UBO)],
     attributes: &[Attribute::new(ID_HEATMAP_POS_VERTEX_ATTRIBUTE, "a_pos", Short2)],
     instance_attributes: &[],
     textures: &[Texture::new("u_image"), Texture::new("u_color_ramp")],

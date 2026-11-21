@@ -17,8 +17,8 @@ macro_rules! line_prelude {
 
 inline float projectLineThickness(float tileY, device const ProjectionUBO& projection) {
     const float thickness = 1.0 / circumferenceRatioAtTileY(tileY, projection);
-    if (projection.projection_transition < 0.999) {
-        return mix(1.0, thickness, projection.projection_transition);
+    if (projection.transition < 0.999) {
+        return mix(1.0, thickness, projection.transition);
     }
     return thickness;
 }
@@ -65,122 +65,111 @@ enum {
 // Line
 
 struct alignas(16) LineDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float ratio;
-
-    // Interpolations
-    /* 68 */ float color_t;
-    /* 72 */ float blur_t;
-    /* 76 */ float opacity_t;
-    /* 80 */ float gapwidth_t;
-    /* 84 */ float offset_t;
-    /* 88 */ float width_t;
-    /* 92 */ float pad1;
-    /* 96 */
+    float4x4 matrix;
+    float ratio;
+    float color_t;
+    float blur_t;
+    float opacity_t;
+    float gapwidth_t;
+    float offset_t;
+    float width_t;
+    float pad1;
+    float4 stride_pad[2];
 };
-static_assert(sizeof(LineDrawableUBO) == 6 * 16, "wrong size");
+static_assert(sizeof(LineDrawableUBO) == 128, "wrong size");
 
 //
 // Line gradient
 
 struct alignas(16) LineGradientDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float ratio;
-
-    // Interpolations
-    /* 68 */ float blur_t;
-    /* 72 */ float opacity_t;
-    /* 76 */ float gapwidth_t;
-    /* 80 */ float offset_t;
-    /* 84 */ float width_t;
-    /* 88 */ float pad1;
-    /* 92 */ float pad2;
-    /* 96 */
+    float4x4 matrix;
+    float ratio;
+    float blur_t;
+    float opacity_t;
+    float gapwidth_t;
+    float offset_t;
+    float width_t;
+    float pad1;
+    float pad2;
+    float4 stride_pad[2];
 };
-static_assert(sizeof(LineGradientDrawableUBO) == 6 * 16, "wrong size");
+static_assert(sizeof(LineGradientDrawableUBO) == 128, "wrong size");
 
 //
 // Line pattern
 
 struct alignas(16) LinePatternDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float ratio;
-
-    // Interpolations
-    /* 68 */ float blur_t;
-    /* 72 */ float opacity_t;
-    /* 76 */ float gapwidth_t;
-    /* 80 */ float offset_t;
-    /* 84 */ float width_t;
-    /* 88 */ float pattern_from_t;
-    /* 92 */ float pattern_to_t;
-    /* 96 */ float floorwidth_t;
-    /* 100 */ float pad1;
-    /* 104 */ float pad2;
-    /* 108 */ float pad3;
-    /* 112 */
+    float4x4 matrix;
+    float ratio;
+    float blur_t;
+    float opacity_t;
+    float gapwidth_t;
+    float offset_t;
+    float width_t;
+    float pattern_from_t;
+    float pattern_to_t;
+    float floorwidth_t;
+    float pad1;
+    float pad2;
+    float pad3;
+    float4 stride_pad[1];
 };
-static_assert(sizeof(LinePatternDrawableUBO) == 7 * 16, "wrong size");
+static_assert(sizeof(LinePatternDrawableUBO) == 128, "wrong size");
 
 struct alignas(16) LinePatternTilePropsUBO {
-    /*  0 */ float4 pattern_from;
-    /* 16 */ float4 pattern_to;
-    /* 32 */ float4 scale;
-    /* 48 */ float2 texsize;
-    /* 56 */ float fade;
-    /* 60 */ float pad2;
-    /* 64 */
+    float4 pattern_from;
+    float4 pattern_to;
+    float4 scale;
+    float2 texsize;
+    float fade;
+    float pad1;
 };
-static_assert(sizeof(LinePatternTilePropsUBO) == 4 * 16, "wrong size");
+static_assert(sizeof(LinePatternTilePropsUBO) == 64, "wrong size");
 
 //
 // Line SDF
 
 struct alignas(16) LineSDFDrawableUBO {
-    /*   0 */ float4x4 matrix;
-    /*  64 */ float2 patternscale_a;
-    /*  72 */ float2 patternscale_b;
-    /*  80 */ float tex_y_a;
-    /*  84 */ float tex_y_b;
-    /*  88 */ float ratio;
-
-    // Interpolations
-    /*  92 */ float color_t;
-    /*  96 */ float blur_t;
-    /* 100 */ float opacity_t;
-    /* 104 */ float gapwidth_t;
-    /* 108 */ float offset_t;
-    /* 112 */ float width_t;
-    /* 116 */ float floorwidth_t;
-    /* 120 */ float atlas_height;
-    /* 124 */ float pad2;
-    /* 128 */
+    float4x4 matrix;
+    float2 patternscale_a;
+    float2 patternscale_b;
+    float tex_y_a;
+    float tex_y_b;
+    float ratio;
+    float color_t;
+    float blur_t;
+    float opacity_t;
+    float gapwidth_t;
+    float offset_t;
+    float width_t;
+    float floorwidth_t;
+    float atlas_height;
+    float pad2;
 };
-static_assert(sizeof(LineSDFDrawableUBO) == 8 * 16, "wrong size");
+static_assert(sizeof(LineSDFDrawableUBO) == 128, "wrong size");
 
 struct alignas(16) LineSDFTilePropsUBO {
-    /* 0 */ float sdfgamma;
-    /* 4 */ float mix;
-    /* 8 */ float pad1;
-    /* 12 */ float pad2;
-    /* 16 */
+    float sdfgamma;
+    float mix;
+    float pad1;
+    float pad2;
+    float4 stride_pad[3];
 };
-static_assert(sizeof(LineSDFTilePropsUBO) == 16, "wrong size");
+static_assert(sizeof(LineSDFTilePropsUBO) == 64, "wrong size");
 
 /// Evaluated properties that do not depend on the tile
 struct alignas(16) LineEvaluatedPropsUBO {
-    /*  0 */ float4 color;
-    /* 16 */ float blur;
-    /* 20 */ float opacity;
-    /* 24 */ float gapwidth;
-    /* 28 */ float offset;
-    /* 32 */ float width;
-    /* 36 */ float floorwidth;
-    /* 40 */ float pad0;
-    /* 44 */ float pad1;
-    /* 48 */
+    float4 color;
+    float blur;
+    float opacity;
+    float gapwidth;
+    float offset;
+    float width;
+    float floorwidth;
+    float pad0;
+    float pad1;
 };
-static_assert(sizeof(LineEvaluatedPropsUBO) == 3 * 16, "wrong size");
+static_assert(sizeof(LineEvaluatedPropsUBO) == 48, "wrong size");
 
 union LineDrawableUnionUBO {
     LineDrawableUBO lineDrawableUBO;
@@ -457,122 +446,111 @@ enum {
 // Line
 
 struct alignas(16) LineDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float ratio;
-
-    // Interpolations
-    /* 68 */ float color_t;
-    /* 72 */ float blur_t;
-    /* 76 */ float opacity_t;
-    /* 80 */ float gapwidth_t;
-    /* 84 */ float offset_t;
-    /* 88 */ float width_t;
-    /* 92 */ float pad1;
-    /* 96 */
+    float4x4 matrix;
+    float ratio;
+    float color_t;
+    float blur_t;
+    float opacity_t;
+    float gapwidth_t;
+    float offset_t;
+    float width_t;
+    float pad1;
+    float4 stride_pad[2];
 };
-static_assert(sizeof(LineDrawableUBO) == 6 * 16, "wrong size");
+static_assert(sizeof(LineDrawableUBO) == 128, "wrong size");
 
 //
 // Line gradient
 
 struct alignas(16) LineGradientDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float ratio;
-
-    // Interpolations
-    /* 68 */ float blur_t;
-    /* 72 */ float opacity_t;
-    /* 76 */ float gapwidth_t;
-    /* 80 */ float offset_t;
-    /* 84 */ float width_t;
-    /* 88 */ float pad1;
-    /* 92 */ float pad2;
-    /* 96 */
+    float4x4 matrix;
+    float ratio;
+    float blur_t;
+    float opacity_t;
+    float gapwidth_t;
+    float offset_t;
+    float width_t;
+    float pad1;
+    float pad2;
+    float4 stride_pad[2];
 };
-static_assert(sizeof(LineGradientDrawableUBO) == 6 * 16, "wrong size");
+static_assert(sizeof(LineGradientDrawableUBO) == 128, "wrong size");
 
 //
 // Line pattern
 
 struct alignas(16) LinePatternDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float ratio;
-
-    // Interpolations
-    /* 68 */ float blur_t;
-    /* 72 */ float opacity_t;
-    /* 76 */ float gapwidth_t;
-    /* 80 */ float offset_t;
-    /* 84 */ float width_t;
-    /* 88 */ float pattern_from_t;
-    /* 92 */ float pattern_to_t;
-    /* 96 */ float floorwidth_t;
-    /* 100 */ float pad1;
-    /* 104 */ float pad2;
-    /* 108 */ float pad3;
-    /* 112 */
+    float4x4 matrix;
+    float ratio;
+    float blur_t;
+    float opacity_t;
+    float gapwidth_t;
+    float offset_t;
+    float width_t;
+    float pattern_from_t;
+    float pattern_to_t;
+    float floorwidth_t;
+    float pad1;
+    float pad2;
+    float pad3;
+    float4 stride_pad[1];
 };
-static_assert(sizeof(LinePatternDrawableUBO) == 7 * 16, "wrong size");
+static_assert(sizeof(LinePatternDrawableUBO) == 128, "wrong size");
 
 struct alignas(16) LinePatternTilePropsUBO {
-    /*  0 */ float4 pattern_from;
-    /* 16 */ float4 pattern_to;
-    /* 32 */ float4 scale;
-    /* 48 */ float2 texsize;
-    /* 56 */ float fade;
-    /* 60 */ float pad2;
-    /* 64 */
+    float4 pattern_from;
+    float4 pattern_to;
+    float4 scale;
+    float2 texsize;
+    float fade;
+    float pad1;
 };
-static_assert(sizeof(LinePatternTilePropsUBO) == 4 * 16, "wrong size");
+static_assert(sizeof(LinePatternTilePropsUBO) == 64, "wrong size");
 
 //
 // Line SDF
 
 struct alignas(16) LineSDFDrawableUBO {
-    /*   0 */ float4x4 matrix;
-    /*  64 */ float2 patternscale_a;
-    /*  72 */ float2 patternscale_b;
-    /*  80 */ float tex_y_a;
-    /*  84 */ float tex_y_b;
-    /*  88 */ float ratio;
-
-    // Interpolations
-    /*  92 */ float color_t;
-    /*  96 */ float blur_t;
-    /* 100 */ float opacity_t;
-    /* 104 */ float gapwidth_t;
-    /* 108 */ float offset_t;
-    /* 112 */ float width_t;
-    /* 116 */ float floorwidth_t;
-    /* 120 */ float pad1;
-    /* 124 */ float pad2;
-    /* 128 */
+    float4x4 matrix;
+    float2 patternscale_a;
+    float2 patternscale_b;
+    float tex_y_a;
+    float tex_y_b;
+    float ratio;
+    float color_t;
+    float blur_t;
+    float opacity_t;
+    float gapwidth_t;
+    float offset_t;
+    float width_t;
+    float floorwidth_t;
+    float atlas_height;
+    float pad2;
 };
-static_assert(sizeof(LineSDFDrawableUBO) == 8 * 16, "wrong size");
+static_assert(sizeof(LineSDFDrawableUBO) == 128, "wrong size");
 
 struct alignas(16) LineSDFTilePropsUBO {
-    /* 0 */ float sdfgamma;
-    /* 4 */ float mix;
-    /* 8 */ float pad1;
-    /* 12 */ float pad2;
-    /* 16 */
+    float sdfgamma;
+    float mix;
+    float pad1;
+    float pad2;
+    float4 stride_pad[3];
 };
-static_assert(sizeof(LineSDFTilePropsUBO) == 16, "wrong size");
+static_assert(sizeof(LineSDFTilePropsUBO) == 64, "wrong size");
 
 /// Evaluated properties that do not depend on the tile
 struct alignas(16) LineEvaluatedPropsUBO {
-    /*  0 */ float4 color;
-    /* 16 */ float blur;
-    /* 20 */ float opacity;
-    /* 24 */ float gapwidth;
-    /* 28 */ float offset;
-    /* 32 */ float width;
-    /* 36 */ float floorwidth;
-    /* 40 */ float pad0;
-    /* 44 */ float pad1;
-    /* 48 */
+    float4 color;
+    float blur;
+    float opacity;
+    float gapwidth;
+    float offset;
+    float width;
+    float floorwidth;
+    float pad0;
+    float pad1;
 };
-static_assert(sizeof(LineEvaluatedPropsUBO) == 3 * 16, "wrong size");
+static_assert(sizeof(LineEvaluatedPropsUBO) == 48, "wrong size");
 
 union LineDrawableUnionUBO {
     LineDrawableUBO lineDrawableUBO;
@@ -783,122 +761,111 @@ enum {
 // Line
 
 struct alignas(16) LineDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float ratio;
-
-    // Interpolations
-    /* 68 */ float color_t;
-    /* 72 */ float blur_t;
-    /* 76 */ float opacity_t;
-    /* 80 */ float gapwidth_t;
-    /* 84 */ float offset_t;
-    /* 88 */ float width_t;
-    /* 92 */ float pad1;
-    /* 96 */
+    float4x4 matrix;
+    float ratio;
+    float color_t;
+    float blur_t;
+    float opacity_t;
+    float gapwidth_t;
+    float offset_t;
+    float width_t;
+    float pad1;
+    float4 stride_pad[2];
 };
-static_assert(sizeof(LineDrawableUBO) == 6 * 16, "wrong size");
+static_assert(sizeof(LineDrawableUBO) == 128, "wrong size");
 
 //
 // Line gradient
 
 struct alignas(16) LineGradientDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float ratio;
-
-    // Interpolations
-    /* 68 */ float blur_t;
-    /* 72 */ float opacity_t;
-    /* 76 */ float gapwidth_t;
-    /* 80 */ float offset_t;
-    /* 84 */ float width_t;
-    /* 88 */ float pad1;
-    /* 92 */ float pad2;
-    /* 96 */
+    float4x4 matrix;
+    float ratio;
+    float blur_t;
+    float opacity_t;
+    float gapwidth_t;
+    float offset_t;
+    float width_t;
+    float pad1;
+    float pad2;
+    float4 stride_pad[2];
 };
-static_assert(sizeof(LineGradientDrawableUBO) == 6 * 16, "wrong size");
+static_assert(sizeof(LineGradientDrawableUBO) == 128, "wrong size");
 
 //
 // Line pattern
 
 struct alignas(16) LinePatternDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float ratio;
-
-    // Interpolations
-    /* 68 */ float blur_t;
-    /* 72 */ float opacity_t;
-    /* 76 */ float gapwidth_t;
-    /* 80 */ float offset_t;
-    /* 84 */ float width_t;
-    /* 88 */ float pattern_from_t;
-    /* 92 */ float pattern_to_t;
-    /* 96 */ float floorwidth_t;
-    /* 100 */ float pad1;
-    /* 104 */ float pad2;
-    /* 108 */ float pad3;
-    /* 112 */
+    float4x4 matrix;
+    float ratio;
+    float blur_t;
+    float opacity_t;
+    float gapwidth_t;
+    float offset_t;
+    float width_t;
+    float pattern_from_t;
+    float pattern_to_t;
+    float floorwidth_t;
+    float pad1;
+    float pad2;
+    float pad3;
+    float4 stride_pad[1];
 };
-static_assert(sizeof(LinePatternDrawableUBO) == 7 * 16, "wrong size");
+static_assert(sizeof(LinePatternDrawableUBO) == 128, "wrong size");
 
 struct alignas(16) LinePatternTilePropsUBO {
-    /*  0 */ float4 pattern_from;
-    /* 16 */ float4 pattern_to;
-    /* 32 */ float4 scale;
-    /* 48 */ float2 texsize;
-    /* 56 */ float fade;
-    /* 60 */ float pad2;
-    /* 64 */
+    float4 pattern_from;
+    float4 pattern_to;
+    float4 scale;
+    float2 texsize;
+    float fade;
+    float pad1;
 };
-static_assert(sizeof(LinePatternTilePropsUBO) == 4 * 16, "wrong size");
+static_assert(sizeof(LinePatternTilePropsUBO) == 64, "wrong size");
 
 //
 // Line SDF
 
 struct alignas(16) LineSDFDrawableUBO {
-    /*   0 */ float4x4 matrix;
-    /*  64 */ float2 patternscale_a;
-    /*  72 */ float2 patternscale_b;
-    /*  80 */ float tex_y_a;
-    /*  84 */ float tex_y_b;
-    /*  88 */ float ratio;
-
-    // Interpolations
-    /*  92 */ float color_t;
-    /*  96 */ float blur_t;
-    /* 100 */ float opacity_t;
-    /* 104 */ float gapwidth_t;
-    /* 108 */ float offset_t;
-    /* 112 */ float width_t;
-    /* 116 */ float floorwidth_t;
-    /* 120 */ float pad1;
-    /* 124 */ float pad2;
-    /* 128 */
+    float4x4 matrix;
+    float2 patternscale_a;
+    float2 patternscale_b;
+    float tex_y_a;
+    float tex_y_b;
+    float ratio;
+    float color_t;
+    float blur_t;
+    float opacity_t;
+    float gapwidth_t;
+    float offset_t;
+    float width_t;
+    float floorwidth_t;
+    float atlas_height;
+    float pad2;
 };
-static_assert(sizeof(LineSDFDrawableUBO) == 8 * 16, "wrong size");
+static_assert(sizeof(LineSDFDrawableUBO) == 128, "wrong size");
 
 struct alignas(16) LineSDFTilePropsUBO {
-    /* 0 */ float sdfgamma;
-    /* 4 */ float mix;
-    /* 8 */ float pad1;
-    /* 12 */ float pad2;
-    /* 16 */
+    float sdfgamma;
+    float mix;
+    float pad1;
+    float pad2;
+    float4 stride_pad[3];
 };
-static_assert(sizeof(LineSDFTilePropsUBO) == 16, "wrong size");
+static_assert(sizeof(LineSDFTilePropsUBO) == 64, "wrong size");
 
 /// Evaluated properties that do not depend on the tile
 struct alignas(16) LineEvaluatedPropsUBO {
-    /*  0 */ float4 color;
-    /* 16 */ float blur;
-    /* 20 */ float opacity;
-    /* 24 */ float gapwidth;
-    /* 28 */ float offset;
-    /* 32 */ float width;
-    /* 36 */ float floorwidth;
-    /* 40 */ float pad0;
-    /* 44 */ float pad1;
-    /* 48 */
+    float4 color;
+    float blur;
+    float opacity;
+    float gapwidth;
+    float offset;
+    float width;
+    float floorwidth;
+    float pad0;
+    float pad1;
 };
-static_assert(sizeof(LineEvaluatedPropsUBO) == 3 * 16, "wrong size");
+static_assert(sizeof(LineEvaluatedPropsUBO) == 48, "wrong size");
 
 union LineDrawableUnionUBO {
     LineDrawableUBO lineDrawableUBO;
@@ -1197,122 +1164,111 @@ enum {
 // Line
 
 struct alignas(16) LineDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float ratio;
-
-    // Interpolations
-    /* 68 */ float color_t;
-    /* 72 */ float blur_t;
-    /* 76 */ float opacity_t;
-    /* 80 */ float gapwidth_t;
-    /* 84 */ float offset_t;
-    /* 88 */ float width_t;
-    /* 92 */ float pad1;
-    /* 96 */
+    float4x4 matrix;
+    float ratio;
+    float color_t;
+    float blur_t;
+    float opacity_t;
+    float gapwidth_t;
+    float offset_t;
+    float width_t;
+    float pad1;
+    float4 stride_pad[2];
 };
-static_assert(sizeof(LineDrawableUBO) == 6 * 16, "wrong size");
+static_assert(sizeof(LineDrawableUBO) == 128, "wrong size");
 
 //
 // Line gradient
 
 struct alignas(16) LineGradientDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float ratio;
-
-    // Interpolations
-    /* 68 */ float blur_t;
-    /* 72 */ float opacity_t;
-    /* 76 */ float gapwidth_t;
-    /* 80 */ float offset_t;
-    /* 84 */ float width_t;
-    /* 88 */ float pad1;
-    /* 92 */ float pad2;
-    /* 96 */
+    float4x4 matrix;
+    float ratio;
+    float blur_t;
+    float opacity_t;
+    float gapwidth_t;
+    float offset_t;
+    float width_t;
+    float pad1;
+    float pad2;
+    float4 stride_pad[2];
 };
-static_assert(sizeof(LineGradientDrawableUBO) == 6 * 16, "wrong size");
+static_assert(sizeof(LineGradientDrawableUBO) == 128, "wrong size");
 
 //
 // Line pattern
 
 struct alignas(16) LinePatternDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float ratio;
-
-    // Interpolations
-    /* 68 */ float blur_t;
-    /* 72 */ float opacity_t;
-    /* 76 */ float gapwidth_t;
-    /* 80 */ float offset_t;
-    /* 84 */ float width_t;
-    /* 88 */ float pattern_from_t;
-    /* 92 */ float pattern_to_t;
-    /* 96 */ float floorwidth_t;
-    /* 100 */ float pad1;
-    /* 104 */ float pad2;
-    /* 108 */ float pad3;
-    /* 112 */
+    float4x4 matrix;
+    float ratio;
+    float blur_t;
+    float opacity_t;
+    float gapwidth_t;
+    float offset_t;
+    float width_t;
+    float pattern_from_t;
+    float pattern_to_t;
+    float floorwidth_t;
+    float pad1;
+    float pad2;
+    float pad3;
+    float4 stride_pad[1];
 };
-static_assert(sizeof(LinePatternDrawableUBO) == 7 * 16, "wrong size");
+static_assert(sizeof(LinePatternDrawableUBO) == 128, "wrong size");
 
 struct alignas(16) LinePatternTilePropsUBO {
-    /*  0 */ float4 pattern_from;
-    /* 16 */ float4 pattern_to;
-    /* 32 */ float4 scale;
-    /* 48 */ float2 texsize;
-    /* 56 */ float fade;
-    /* 60 */ float pad2;
-    /* 64 */
+    float4 pattern_from;
+    float4 pattern_to;
+    float4 scale;
+    float2 texsize;
+    float fade;
+    float pad1;
 };
-static_assert(sizeof(LinePatternTilePropsUBO) == 4 * 16, "wrong size");
+static_assert(sizeof(LinePatternTilePropsUBO) == 64, "wrong size");
 
 //
 // Line SDF
 
 struct alignas(16) LineSDFDrawableUBO {
-    /*   0 */ float4x4 matrix;
-    /*  64 */ float2 patternscale_a;
-    /*  72 */ float2 patternscale_b;
-    /*  80 */ float tex_y_a;
-    /*  84 */ float tex_y_b;
-    /*  88 */ float ratio;
-
-    // Interpolations
-    /*  92 */ float color_t;
-    /*  96 */ float blur_t;
-    /* 100 */ float opacity_t;
-    /* 104 */ float gapwidth_t;
-    /* 108 */ float offset_t;
-    /* 112 */ float width_t;
-    /* 116 */ float floorwidth_t;
-    /* 120 */ float atlas_height;
-    /* 124 */ float pad2;
-    /* 128 */
+    float4x4 matrix;
+    float2 patternscale_a;
+    float2 patternscale_b;
+    float tex_y_a;
+    float tex_y_b;
+    float ratio;
+    float color_t;
+    float blur_t;
+    float opacity_t;
+    float gapwidth_t;
+    float offset_t;
+    float width_t;
+    float floorwidth_t;
+    float atlas_height;
+    float pad2;
 };
-static_assert(sizeof(LineSDFDrawableUBO) == 8 * 16, "wrong size");
+static_assert(sizeof(LineSDFDrawableUBO) == 128, "wrong size");
 
 struct alignas(16) LineSDFTilePropsUBO {
-    /* 0 */ float sdfgamma;
-    /* 4 */ float mix;
-    /* 8 */ float pad1;
-    /* 12 */ float pad2;
-    /* 16 */
+    float sdfgamma;
+    float mix;
+    float pad1;
+    float pad2;
+    float4 stride_pad[3];
 };
-static_assert(sizeof(LineSDFTilePropsUBO) == 16, "wrong size");
+static_assert(sizeof(LineSDFTilePropsUBO) == 64, "wrong size");
 
 /// Evaluated properties that do not depend on the tile
 struct alignas(16) LineEvaluatedPropsUBO {
-    /*  0 */ float4 color;
-    /* 16 */ float blur;
-    /* 20 */ float opacity;
-    /* 24 */ float gapwidth;
-    /* 28 */ float offset;
-    /* 32 */ float width;
-    /* 36 */ float floorwidth;
-    /* 40 */ float pad0;
-    /* 44 */ float pad1;
-    /* 48 */
+    float4 color;
+    float blur;
+    float opacity;
+    float gapwidth;
+    float offset;
+    float width;
+    float floorwidth;
+    float pad0;
+    float pad1;
 };
-static_assert(sizeof(LineEvaluatedPropsUBO) == 3 * 16, "wrong size");
+static_assert(sizeof(LineEvaluatedPropsUBO) == 48, "wrong size");
 
 union LineDrawableUnionUBO {
     LineDrawableUBO lineDrawableUBO;
@@ -1594,122 +1550,111 @@ enum {
 // Line
 
 struct alignas(16) LineDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float ratio;
-
-    // Interpolations
-    /* 68 */ float color_t;
-    /* 72 */ float blur_t;
-    /* 76 */ float opacity_t;
-    /* 80 */ float gapwidth_t;
-    /* 84 */ float offset_t;
-    /* 88 */ float width_t;
-    /* 92 */ float pad1;
-    /* 96 */
+    float4x4 matrix;
+    float ratio;
+    float color_t;
+    float blur_t;
+    float opacity_t;
+    float gapwidth_t;
+    float offset_t;
+    float width_t;
+    float pad1;
+    float4 stride_pad[2];
 };
-static_assert(sizeof(LineDrawableUBO) == 6 * 16, "wrong size");
+static_assert(sizeof(LineDrawableUBO) == 128, "wrong size");
 
 //
 // Line gradient
 
 struct alignas(16) LineGradientDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float ratio;
-
-    // Interpolations
-    /* 68 */ float blur_t;
-    /* 72 */ float opacity_t;
-    /* 76 */ float gapwidth_t;
-    /* 80 */ float offset_t;
-    /* 84 */ float width_t;
-    /* 88 */ float pad1;
-    /* 92 */ float pad2;
-    /* 96 */
+    float4x4 matrix;
+    float ratio;
+    float blur_t;
+    float opacity_t;
+    float gapwidth_t;
+    float offset_t;
+    float width_t;
+    float pad1;
+    float pad2;
+    float4 stride_pad[2];
 };
-static_assert(sizeof(LineGradientDrawableUBO) == 6 * 16, "wrong size");
+static_assert(sizeof(LineGradientDrawableUBO) == 128, "wrong size");
 
 //
 // Line pattern
 
 struct alignas(16) LinePatternDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float ratio;
-
-    // Interpolations
-    /* 68 */ float blur_t;
-    /* 72 */ float opacity_t;
-    /* 76 */ float gapwidth_t;
-    /* 80 */ float offset_t;
-    /* 84 */ float width_t;
-    /* 88 */ float pattern_from_t;
-    /* 92 */ float pattern_to_t;
-    /* 96 */ float floorwidth_t;
-    /* 100 */ float pad1;
-    /* 104 */ float pad2;
-    /* 108 */ float pad3;
-    /* 112 */
+    float4x4 matrix;
+    float ratio;
+    float blur_t;
+    float opacity_t;
+    float gapwidth_t;
+    float offset_t;
+    float width_t;
+    float pattern_from_t;
+    float pattern_to_t;
+    float floorwidth_t;
+    float pad1;
+    float pad2;
+    float pad3;
+    float4 stride_pad[1];
 };
-static_assert(sizeof(LinePatternDrawableUBO) == 7 * 16, "wrong size");
+static_assert(sizeof(LinePatternDrawableUBO) == 128, "wrong size");
 
 struct alignas(16) LinePatternTilePropsUBO {
-    /*  0 */ float4 pattern_from;
-    /* 16 */ float4 pattern_to;
-    /* 32 */ float4 scale;
-    /* 48 */ float2 texsize;
-    /* 56 */ float fade;
-    /* 60 */ float pad2;
-    /* 64 */
+    float4 pattern_from;
+    float4 pattern_to;
+    float4 scale;
+    float2 texsize;
+    float fade;
+    float pad1;
 };
-static_assert(sizeof(LinePatternTilePropsUBO) == 4 * 16, "wrong size");
+static_assert(sizeof(LinePatternTilePropsUBO) == 64, "wrong size");
 
 //
 // Line SDF
 
 struct alignas(16) LineSDFDrawableUBO {
-    /*   0 */ float4x4 matrix;
-    /*  64 */ float2 patternscale_a;
-    /*  72 */ float2 patternscale_b;
-    /*  80 */ float tex_y_a;
-    /*  84 */ float tex_y_b;
-    /*  88 */ float ratio;
-
-    // Interpolations
-    /*  92 */ float color_t;
-    /*  96 */ float blur_t;
-    /* 100 */ float opacity_t;
-    /* 104 */ float gapwidth_t;
-    /* 108 */ float offset_t;
-    /* 112 */ float width_t;
-    /* 116 */ float floorwidth_t;
-    /* 120 */ float pad1;
-    /* 124 */ float pad2;
-    /* 128 */
+    float4x4 matrix;
+    float2 patternscale_a;
+    float2 patternscale_b;
+    float tex_y_a;
+    float tex_y_b;
+    float ratio;
+    float color_t;
+    float blur_t;
+    float opacity_t;
+    float gapwidth_t;
+    float offset_t;
+    float width_t;
+    float floorwidth_t;
+    float atlas_height;
+    float pad2;
 };
-static_assert(sizeof(LineSDFDrawableUBO) == 8 * 16, "wrong size");
+static_assert(sizeof(LineSDFDrawableUBO) == 128, "wrong size");
 
 struct alignas(16) LineSDFTilePropsUBO {
-    /* 0 */ float sdfgamma;
-    /* 4 */ float mix;
-    /* 8 */ float pad1;
-    /* 12 */ float pad2;
-    /* 16 */
+    float sdfgamma;
+    float mix;
+    float pad1;
+    float pad2;
+    float4 stride_pad[3];
 };
-static_assert(sizeof(LineSDFTilePropsUBO) == 16, "wrong size");
+static_assert(sizeof(LineSDFTilePropsUBO) == 64, "wrong size");
 
 /// Evaluated properties that do not depend on the tile
 struct alignas(16) LineEvaluatedPropsUBO {
-    /*  0 */ float4 color;
-    /* 16 */ float blur;
-    /* 20 */ float opacity;
-    /* 24 */ float gapwidth;
-    /* 28 */ float offset;
-    /* 32 */ float width;
-    /* 36 */ float floorwidth;
-    /* 40 */ float pad0;
-    /* 44 */ float pad1;
-    /* 48 */
+    float4 color;
+    float blur;
+    float opacity;
+    float gapwidth;
+    float offset;
+    float width;
+    float floorwidth;
+    float pad0;
+    float pad1;
 };
-static_assert(sizeof(LineEvaluatedPropsUBO) == 3 * 16, "wrong size");
+static_assert(sizeof(LineEvaluatedPropsUBO) == 48, "wrong size");
 
 union LineDrawableUnionUBO {
     LineDrawableUBO lineDrawableUBO;

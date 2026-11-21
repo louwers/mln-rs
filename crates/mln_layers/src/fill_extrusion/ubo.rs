@@ -1,62 +1,55 @@
-use bytemuck::{Pod, Zeroable};
-
-/// The fill extrusion shader's per-drawable uniform block (112 bytes).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
-#[repr(C, align(16))]
-pub struct FillExtrusionDrawableUBO {
-    /*   0 */ pub matrix: [f32; 4 * 4],
-    /*  64 */ pub pixel_coord_upper: [f32; 2],
-    /*  72 */ pub pixel_coord_lower: [f32; 2],
-    /*  80 */ pub height_factor: f32,
-    /*  84 */ pub tile_ratio: f32,
-
-    // Interpolations
-    /*  88 */ pub base_t: f32,
-    /*  92 */ pub height_t: f32,
-    /*  96 */ pub color_t: f32,
-    /* 100 */ pub pattern_from_t: f32,
-    /* 104 */ pub pattern_to_t: f32,
-    /// Where `FillExtrusionPulledShader` finds a vertex's paint values in
-    /// the buffer it reads them from, in words, a byte each from the
-    /// lowest: how many a vertex takes, then the offset in them of its
-    /// base, its height and its color.
-    /* 108 */
-    pub paint_layout: u32,
-    /* 112 */
+mln_gfx::uniform_block! {
+    /// The fill extrusion shader's per-drawable uniform block (112 bytes).
+    pub struct FillExtrusionDrawableUBO {
+        pub matrix: [f32; 4 * 4],
+        pub pixel_coord_upper: [f32; 2],
+        pub pixel_coord_lower: [f32; 2],
+        pub height_factor: f32,
+        pub tile_ratio: f32,
+        // Interpolations
+        pub base_t: f32,
+        pub height_t: f32,
+        pub color_t: f32,
+        pub pattern_from_t: f32,
+        pub pattern_to_t: f32,
+        /// Where `FillExtrusionPulledShader` finds a vertex's paint values in
+        /// the buffer it reads them from, in words, a byte each from the
+        /// lowest: how many a vertex takes, then the offset in them of its
+        /// base, its height and its color.
+        pub paint_layout: u32,
+    }
 }
 const _: () = assert!(size_of::<FillExtrusionDrawableUBO>() == 7 * 16);
 
-/// The fill extrusion shader's per-tile uniform block (48 bytes).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
-#[repr(C, align(16))]
-pub struct FillExtrusionTilePropsUBO {
-    /*  0 */ pub pattern_from: [f32; 4],
-    /* 16 */ pub pattern_to: [f32; 4],
-    /* 32 */ pub texsize: [f32; 2],
-    /* 40 */ pub pad1: f32,
-    /* 44 */ pub pad2: f32,
-    /* 48 */
+mln_gfx::uniform_block! {
+    /// The fill extrusion shader's per-tile uniform block (48 bytes).
+    pub struct FillExtrusionTilePropsUBO {
+        pub pattern_from: [f32; 4],
+        pub pattern_to: [f32; 4],
+        pub texsize: [f32; 2],
+        pub pad1: f32,
+        pub pad2: f32,
+    }
 }
 const _: () = assert!(size_of::<FillExtrusionTilePropsUBO>() == 3 * 16);
 
-/// Evaluated properties that do not depend on the tile (80 bytes). `color`
-/// is the premultiplied `mln::Color` as r, g, b, a floats.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
-#[repr(C, align(16))]
-pub struct FillExtrusionPropsUBO {
-    /*  0 */ pub color: [f32; 4],
-    /* 16 */ pub light_color: [f32; 3],
-    /* 28 */ pub pad1: f32,
-    /* 32 */ pub light_position: [f32; 3],
-    /* 44 */ pub base: f32,
-    /* 48 */ pub height: f32,
-    /* 52 */ pub light_intensity: f32,
-    /* 56 */ pub vertical_gradient: f32,
-    /* 60 */ pub opacity: f32,
-    /* 64 */ pub fade: f32,
-    /* 68 */ pub from_scale: f32,
-    /* 72 */ pub to_scale: f32,
-    /* 76 */ pub pad2: f32,
-    /* 80 */
+mln_gfx::uniform_block! {
+    /// Evaluated properties that do not depend on the tile (80 bytes). `color`
+    /// is the premultiplied `mln::Color` as r, g, b, a floats.
+    pub struct FillExtrusionPropsUBO {
+        pub color: [f32; 4],
+        pub light_color: [f32; 3],
+        pub pad1: f32,
+        pub light_position: [f32; 3],
+        pub base: f32,
+        pub height: f32,
+        pub light_intensity: f32,
+        pub vertical_gradient: f32,
+        pub opacity: f32,
+        pub fade: f32,
+        pub from_scale: f32,
+        pub to_scale: f32,
+        pub pad2: f32,
+    }
 }
 const _: () = assert!(size_of::<FillExtrusionPropsUBO>() == 5 * 16);

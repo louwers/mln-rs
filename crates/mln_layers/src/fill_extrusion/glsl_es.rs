@@ -40,37 +40,36 @@ layout (std140) uniform FillExtrusionDrawableUBO {
     highp vec2 u_pixel_coord_lower;
     highp float u_height_factor;
     highp float u_tile_ratio;
-    // Interpolations
     highp float u_base_t;
     highp float u_height_t;
     highp float u_color_t;
     highp float u_pattern_from_t;
     highp float u_pattern_to_t;
-    lowp float drawable_pad1;
+    highp uint u_paint_layout;
 };
 
 layout (std140) uniform FillExtrusionTilePropsUBO {
     highp vec4 u_pattern_from;
     highp vec4 u_pattern_to;
     highp vec2 u_texsize;
-    lowp float tileprops_pad1;
-    lowp float tileprops_pad2;
+    highp float FillExtrusionTilePropsUBO_pad1;
+    highp float FillExtrusionTilePropsUBO_pad2;
 };
 
 layout (std140) uniform FillExtrusionPropsUBO {
     highp vec4 u_color;
-    highp vec3 u_lightcolor;
-    lowp float props_pad1;
-    highp vec3 u_lightpos;
+    highp vec3 u_light_color;
+    highp float FillExtrusionPropsUBO_pad1;
+    highp vec3 u_light_position;
     highp float u_base;
     highp float u_height;
-    highp float u_lightintensity;
+    highp float u_light_intensity;
     highp float u_vertical_gradient;
     highp float u_opacity;
     highp float u_fade;
     highp float u_from_scale;
     highp float u_to_scale;
-    lowp float props_pad2;
+    highp float FillExtrusionPropsUBO_pad2;
 };
 
 #ifndef HAS_UNIFORM_u_base
@@ -130,19 +129,19 @@ highp vec4 color = u_color;
     color += ambientlight;
 
     // Calculate cos(theta), where theta is the angle between surface normal and diffuse light ray
-    float directional = clamp(dot(normal, u_lightpos), 0.0, 1.0);
+    float directional = clamp(dot(normal, u_light_position), 0.0, 1.0);
 
     // Adjust directional so that
     // the range of values for highlight/shading is narrower
     // with lower light intensity
     // and with lighter/brighter surface colors
-    directional = mix((1.0 - u_lightintensity), max((1.0 - colorvalue + u_lightintensity), 1.0), directional);
+    directional = mix((1.0 - u_light_intensity), max((1.0 - colorvalue + u_light_intensity), 1.0), directional);
 
     // Add gradient along z axis of side surfaces
     if (normal.z == 0.0) {
         // This avoids another branching statement, but multiplies by a constant of 0.84 if no vertical gradient,
         // and otherwise calculates the gradient based on base + height
-        float fMin = mix(0.7, 0.98, 1.0 - u_lightintensity);
+        float fMin = mix(0.7, 0.98, 1.0 - u_light_intensity);
         float factor = clamp((t + base) * pow(height / 150.0, 0.5), fMin, 1.0);
         directional *= (1.0 - u_vertical_gradient) + (u_vertical_gradient * factor);
     }
@@ -150,9 +149,9 @@ highp vec4 color = u_color;
     // Assign final color based on surface + ambient light color, diffuse light directional, and light color
     // with lower bounds adjusted to hue of light
     // so that shading is tinted with the complementary (opposite) color to the light color
-    v_color.r += clamp(color.r * directional * u_lightcolor.r, mix(0.0, 0.3, 1.0 - u_lightcolor.r), 1.0);
-    v_color.g += clamp(color.g * directional * u_lightcolor.g, mix(0.0, 0.3, 1.0 - u_lightcolor.g), 1.0);
-    v_color.b += clamp(color.b * directional * u_lightcolor.b, mix(0.0, 0.3, 1.0 - u_lightcolor.b), 1.0);
+    v_color.r += clamp(color.r * directional * u_light_color.r, mix(0.0, 0.3, 1.0 - u_light_color.r), 1.0);
+    v_color.g += clamp(color.g * directional * u_light_color.g, mix(0.0, 0.3, 1.0 - u_light_color.g), 1.0);
+    v_color.b += clamp(color.b * directional * u_light_color.b, mix(0.0, 0.3, 1.0 - u_light_color.b), 1.0);
     v_color *= u_opacity;
 }
 "
@@ -193,37 +192,36 @@ layout (std140) uniform FillExtrusionDrawableUBO {
     highp vec2 u_pixel_coord_lower;
     highp float u_height_factor;
     highp float u_tile_ratio;
-    // Interpolations
     highp float u_base_t;
     highp float u_height_t;
     highp float u_color_t;
     highp float u_pattern_from_t;
     highp float u_pattern_to_t;
-    lowp float drawable_pad1;
+    highp uint u_paint_layout;
 };
 
 layout (std140) uniform FillExtrusionTilePropsUBO {
     highp vec4 u_pattern_from;
     highp vec4 u_pattern_to;
     highp vec2 u_texsize;
-    lowp float tileprops_pad1;
-    lowp float tileprops_pad2;
+    highp float FillExtrusionTilePropsUBO_pad1;
+    highp float FillExtrusionTilePropsUBO_pad2;
 };
 
 layout (std140) uniform FillExtrusionPropsUBO {
     highp vec4 u_color;
-    highp vec3 u_lightcolor;
-    lowp float props_pad1;
-    highp vec3 u_lightpos;
+    highp vec3 u_light_color;
+    highp float FillExtrusionPropsUBO_pad1;
+    highp vec3 u_light_position;
     highp float u_base;
     highp float u_height;
-    highp float u_lightintensity;
+    highp float u_light_intensity;
     highp float u_vertical_gradient;
     highp float u_opacity;
     highp float u_fade;
     highp float u_from_scale;
     highp float u_to_scale;
-    lowp float props_pad2;
+    highp float FillExtrusionPropsUBO_pad2;
 };
 
 #ifndef HAS_UNIFORM_u_base
@@ -306,18 +304,18 @@ highp vec4 pattern_to = u_pattern_to;
     v_pos_b = get_pattern_pos(u_pixel_coord_upper, u_pixel_coord_lower, toScale * display_size_b, tileRatio, pos);
 
     v_lighting = vec4(0.0, 0.0, 0.0, 1.0);
-    float directional = clamp(dot(normal, u_lightpos), 0.0, 1.0);
-    directional = mix((1.0 - u_lightintensity), max((0.5 + u_lightintensity), 1.0), directional);
+    float directional = clamp(dot(normal, u_light_position), 0.0, 1.0);
+    directional = mix((1.0 - u_light_intensity), max((0.5 + u_light_intensity), 1.0), directional);
 
     if (normal.z == 0.0) {
         // This avoids another branching statement, but multiplies by a constant of 0.84 if no vertical gradient,
         // and otherwise calculates the gradient based on base + height
-        float fMin = mix(0.7, 0.98, 1.0 - u_lightintensity);
+        float fMin = mix(0.7, 0.98, 1.0 - u_light_intensity);
         float factor = clamp((t + base) * pow(height / 150.0, 0.5), fMin, 1.0);
         directional *= (1.0 - u_vertical_gradient) + (u_vertical_gradient * factor);
     }
 
-    v_lighting.rgb += clamp(directional * u_lightcolor, mix(vec3(0.0), vec3(0.3), 1.0 - u_lightcolor), vec3(1.0));
+    v_lighting.rgb += clamp(directional * u_light_color, mix(vec3(0.0), vec3(0.3), 1.0 - u_light_color), vec3(1.0));
     v_lighting *= u_opacity;
 }
 "
@@ -334,24 +332,24 @@ layout (std140) uniform FillExtrusionTilePropsUBO {
     highp vec4 u_pattern_from;
     highp vec4 u_pattern_to;
     highp vec2 u_texsize;
-    lowp float tileprops_pad1;
-    lowp float tileprops_pad2;
+    highp float FillExtrusionTilePropsUBO_pad1;
+    highp float FillExtrusionTilePropsUBO_pad2;
 };
 
 layout (std140) uniform FillExtrusionPropsUBO {
     highp vec4 u_color;
-    highp vec3 u_lightcolor;
-    lowp float props_pad1;
-    highp vec3 u_lightpos;
+    highp vec3 u_light_color;
+    highp float FillExtrusionPropsUBO_pad1;
+    highp vec3 u_light_position;
     highp float u_base;
     highp float u_height;
-    highp float u_lightintensity;
+    highp float u_light_intensity;
     highp float u_vertical_gradient;
     highp float u_opacity;
     highp float u_fade;
     highp float u_from_scale;
     highp float u_to_scale;
-    lowp float props_pad2;
+    highp float FillExtrusionPropsUBO_pad2;
 };
 
 uniform sampler2D u_image;
@@ -429,37 +427,36 @@ layout (std140) uniform FillExtrusionDrawableUBO {
     highp vec2 u_pixel_coord_lower;
     highp float u_height_factor;
     highp float u_tile_ratio;
-    // Interpolations
     highp float u_base_t;
     highp float u_height_t;
     highp float u_color_t;
     highp float u_pattern_from_t;
     highp float u_pattern_to_t;
-    lowp float drawable_pad1;
+    highp uint u_paint_layout;
 };
 
 layout (std140) uniform FillExtrusionTilePropsUBO {
     highp vec4 u_pattern_from;
     highp vec4 u_pattern_to;
     highp vec2 u_texsize;
-    lowp float tileprops_pad1;
-    lowp float tileprops_pad2;
+    highp float FillExtrusionTilePropsUBO_pad1;
+    highp float FillExtrusionTilePropsUBO_pad2;
 };
 
 layout (std140) uniform FillExtrusionPropsUBO {
     highp vec4 u_color;
-    highp vec3 u_lightcolor;
-    lowp float props_pad1;
-    highp vec3 u_lightpos;
+    highp vec3 u_light_color;
+    highp float FillExtrusionPropsUBO_pad1;
+    highp vec3 u_light_position;
     highp float u_base;
     highp float u_height;
-    highp float u_lightintensity;
+    highp float u_light_intensity;
     highp float u_vertical_gradient;
     highp float u_opacity;
     highp float u_fade;
     highp float u_from_scale;
     highp float u_to_scale;
-    lowp float props_pad2;
+    highp float FillExtrusionPropsUBO_pad2;
 };
 
 #ifndef HAS_UNIFORM_u_base
@@ -532,18 +529,18 @@ highp vec4 pattern_to = u_pattern_to;
     v_pos_b = get_pattern_pos(u_pixel_coord_upper, u_pixel_coord_lower, toScale * display_size_b, tileRatio, pos);
 
     v_lighting = vec4(0.0, 0.0, 0.0, 1.0);
-    float directional = clamp(dot(normal, u_lightpos), 0.0, 1.0);
-    directional = mix((1.0 - u_lightintensity), max((0.5 + u_lightintensity), 1.0), directional);
+    float directional = clamp(dot(normal, u_light_position), 0.0, 1.0);
+    directional = mix((1.0 - u_light_intensity), max((0.5 + u_light_intensity), 1.0), directional);
 
     if (normal.z == 0.0) {
         // This avoids another branching statement, but multiplies by a constant of 0.84 if no vertical gradient,
         // and otherwise calculates the gradient based on base + height
-        float fMin = mix(0.7, 0.98, 1.0 - u_lightintensity);
+        float fMin = mix(0.7, 0.98, 1.0 - u_light_intensity);
         float factor = clamp((t + base) * pow(height / 150.0, 0.5), fMin, 1.0);
         directional *= (1.0 - u_vertical_gradient) + (u_vertical_gradient * factor);
     }
 
-    v_lighting.rgb += clamp(directional * u_lightcolor, mix(vec3(0.0), vec3(0.3), 1.0 - u_lightcolor), vec3(1.0));
+    v_lighting.rgb += clamp(directional * u_light_color, mix(vec3(0.0), vec3(0.3), 1.0 - u_light_color), vec3(1.0));
     v_lighting *= u_opacity;
 }
 ",
@@ -559,24 +556,24 @@ layout (std140) uniform FillExtrusionTilePropsUBO {
     highp vec4 u_pattern_from;
     highp vec4 u_pattern_to;
     highp vec2 u_texsize;
-    lowp float tileprops_pad1;
-    lowp float tileprops_pad2;
+    highp float FillExtrusionTilePropsUBO_pad1;
+    highp float FillExtrusionTilePropsUBO_pad2;
 };
 
 layout (std140) uniform FillExtrusionPropsUBO {
     highp vec4 u_color;
-    highp vec3 u_lightcolor;
-    lowp float props_pad1;
-    highp vec3 u_lightpos;
+    highp vec3 u_light_color;
+    highp float FillExtrusionPropsUBO_pad1;
+    highp vec3 u_light_position;
     highp float u_base;
     highp float u_height;
-    highp float u_lightintensity;
+    highp float u_light_intensity;
     highp float u_vertical_gradient;
     highp float u_opacity;
     highp float u_fade;
     highp float u_from_scale;
     highp float u_to_scale;
-    lowp float props_pad2;
+    highp float FillExtrusionPropsUBO_pad2;
 };
 
 uniform sampler2D u_image;
@@ -651,37 +648,36 @@ layout (std140) uniform FillExtrusionDrawableUBO {
     highp vec2 u_pixel_coord_lower;
     highp float u_height_factor;
     highp float u_tile_ratio;
-    // Interpolations
     highp float u_base_t;
     highp float u_height_t;
     highp float u_color_t;
     highp float u_pattern_from_t;
     highp float u_pattern_to_t;
-    lowp float drawable_pad1;
+    highp uint u_paint_layout;
 };
 
 layout (std140) uniform FillExtrusionTilePropsUBO {
     highp vec4 u_pattern_from;
     highp vec4 u_pattern_to;
     highp vec2 u_texsize;
-    lowp float tileprops_pad1;
-    lowp float tileprops_pad2;
+    highp float FillExtrusionTilePropsUBO_pad1;
+    highp float FillExtrusionTilePropsUBO_pad2;
 };
 
 layout (std140) uniform FillExtrusionPropsUBO {
     highp vec4 u_color;
-    highp vec3 u_lightcolor;
-    lowp float props_pad1;
-    highp vec3 u_lightpos;
+    highp vec3 u_light_color;
+    highp float FillExtrusionPropsUBO_pad1;
+    highp vec3 u_light_position;
     highp float u_base;
     highp float u_height;
-    highp float u_lightintensity;
+    highp float u_light_intensity;
     highp float u_vertical_gradient;
     highp float u_opacity;
     highp float u_fade;
     highp float u_from_scale;
     highp float u_to_scale;
-    lowp float props_pad2;
+    highp float FillExtrusionPropsUBO_pad2;
 };
 
 #ifndef HAS_UNIFORM_u_base
@@ -731,19 +727,19 @@ highp vec4 color = u_color;
     color += ambientlight;
 
     // Calculate cos(theta), where theta is the angle between surface normal and diffuse light ray
-    float directional = clamp(dot(normal, u_lightpos), 0.0, 1.0);
+    float directional = clamp(dot(normal, u_light_position), 0.0, 1.0);
 
     // Adjust directional so that
     // the range of values for highlight/shading is narrower
     // with lower light intensity
     // and with lighter/brighter surface colors
-    directional = mix((1.0 - u_lightintensity), max((1.0 - colorvalue + u_lightintensity), 1.0), directional);
+    directional = mix((1.0 - u_light_intensity), max((1.0 - colorvalue + u_light_intensity), 1.0), directional);
 
     // Add gradient along z axis of side surfaces
     if (normal.z == 0.0) {
         // This avoids another branching statement, but multiplies by a constant of 0.84 if no vertical gradient,
         // and otherwise calculates the gradient based on base + height
-        float fMin = mix(0.7, 0.98, 1.0 - u_lightintensity);
+        float fMin = mix(0.7, 0.98, 1.0 - u_light_intensity);
         float factor = clamp((t + base) * pow(height / 150.0, 0.5), fMin, 1.0);
         directional *= (1.0 - u_vertical_gradient) + (u_vertical_gradient * factor);
     }
@@ -751,9 +747,9 @@ highp vec4 color = u_color;
     // Assign final color based on surface + ambient light color, diffuse light directional, and light color
     // with lower bounds adjusted to hue of light
     // so that shading is tinted with the complementary (opposite) color to the light color
-    v_color.r += clamp(color.r * directional * u_lightcolor.r, mix(0.0, 0.3, 1.0 - u_lightcolor.r), 1.0);
-    v_color.g += clamp(color.g * directional * u_lightcolor.g, mix(0.0, 0.3, 1.0 - u_lightcolor.g), 1.0);
-    v_color.b += clamp(color.b * directional * u_lightcolor.b, mix(0.0, 0.3, 1.0 - u_lightcolor.b), 1.0);
+    v_color.r += clamp(color.r * directional * u_light_color.r, mix(0.0, 0.3, 1.0 - u_light_color.r), 1.0);
+    v_color.g += clamp(color.g * directional * u_light_color.g, mix(0.0, 0.3, 1.0 - u_light_color.g), 1.0);
+    v_color.b += clamp(color.b * directional * u_light_color.b, mix(0.0, 0.3, 1.0 - u_light_color.b), 1.0);
     v_color *= u_opacity;
 }
 ",

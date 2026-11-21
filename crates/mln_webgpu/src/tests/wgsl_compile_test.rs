@@ -11,9 +11,9 @@ use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::gfx_types::DrawModeType;
 use mln_gfx::gpu::{DepthState, FixedState, StencilState, VertexAttribute, VertexBufferLayout, VertexStep};
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::program::Program;
+use mln_gfx::shaders::program::{PROJECTION_BUFFER, Program, VIEW_BUFFER};
 use mln_gfx::shaders::program_parameters::ProgramParameters;
-use mln_gfx::shaders::source::wgsl::Wgsl;
+use mln_gfx::shaders::source::wgsl::{self, Wgsl};
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::types::DepthFunctionType;
 
@@ -150,4 +150,45 @@ fn layouts(program: &Program) -> Vec<VertexBufferLayout> {
             VertexBufferLayout { stride, step, attributes }
         })
         .collect()
+}
+
+/// `text` without its comments, its whitespace runs one space.
+fn normalized(text: &str) -> String {
+    let mut code = String::with_capacity(text.len());
+    let mut rest = text;
+    while !rest.is_empty() {
+        if let Some(after) = rest.strip_prefix("//") {
+            rest = after.find('\n').map_or("", |end| &after[end..]);
+        } else if let Some(after) = rest.strip_prefix("/*") {
+            rest = after.find("*/").map_or("", |end| &after[end + 2..]);
+            code.push(' ');
+        } else {
+            let c = rest.chars().next().unwrap_or(' ');
+            code.push(c);
+            rest = &rest[c.len_utf8()..];
+        }
+    }
+    code.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// The sources declare every buffer's block as `uniform_block!` lays it
+/// out: the prelude the engine's, and a program's WGSL its own.
+#[test]
+fn every_block_is_declared_as_its_layout_says() {
+    let prelude = normalized(PRELUDE);
+    for buffer in [VIEW_BUFFER, PROJECTION_BUFFER] {
+        let block = buffer.block().expect("a block");
+        assert!(prelude.contains(&normalized(&wgsl::declaration(block, block.size))), "{}", block.name);
+    }
+    for (program, source) in programs() {
+        let text =
+            normalized(&[source.prelude, source.vertex, source.fragment].map(Option::unwrap_or_default).concat());
+        for buffer in program.buffers {
+            // Only another language reads a block its source doesn't name.
+            if let Some(block) = buffer.block().filter(|block| text.contains(block.name)) {
+                let declaration = normalized(&wgsl::declaration(block, buffer.size()));
+                assert!(text.contains(&declaration), "{}: {declaration}", program.name);
+            }
+        }
+    }
 }

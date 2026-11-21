@@ -49,7 +49,7 @@ FragmentStage wall(thread const Vertex& vertx,
     }
 
 #if defined(HAS_UNIFORM_u_base)
-    const auto base   = max(props.light_position_base.w, 0.0);
+    const auto base   = max(props.base, 0.0);
 #else
     const auto base   = max(unpack_mix_float(vertx.base, drawable.base_t), 0.0);
 #endif
@@ -92,7 +92,7 @@ FragmentStage wall(thread const Vertex& vertx,
     color += min(float4(0.03, 0.03, 0.03, 1.0), float4(1.0));
 
     // Calculate cos(theta), where theta is the angle between surface normal and diffuse light ray
-    const float directionalFraction = clamp(dot(normal, props.light_position_base.xyz), 0.0, 1.0);
+    const float directionalFraction = clamp(dot(normal, float3(props.light_position)), 0.0, 1.0);
 
     // Adjust directional so that the range of values for highlight/shading is
     // narrower with lower light intensity and with lighter/brighter surface colors
@@ -114,7 +114,7 @@ FragmentStage wall(thread const Vertex& vertx,
     // Assign final color based on surface + ambient light color, diffuse light directional,
     // and light color with lower bounds adjusted to hue of light so that shading is tinted
     // with the complementary (opposite) color to the light color
-    const float3 light_color = props.light_color_pad.rgb;
+    const float3 light_color = float3(props.light_color);
     const float3 minLight = mix(0.0, 0.3, 1.0 - light_color.rgb);
     vcolor += float4(clamp(color.rgb * directional * light_color.rgb, minLight, 1.0), 0.0);
 
@@ -146,49 +146,46 @@ enum {
 };
 
 struct alignas(16) FillExtrusionDrawableUBO {
-    /*   0 */ float4x4 matrix;
-    /*  64 */ float2 pixel_coord_upper;
-    /*  72 */ float2 pixel_coord_lower;
-    /*  80 */ float height_factor;
-    /*  84 */ float tile_ratio;
-
-    // Interpolations
-    /*  88 */ float base_t;
-    /*  92 */ float height_t;
-    /*  96 */ float color_t;
-    /* 100 */ float pattern_from_t;
-    /* 104 */ float pattern_to_t;
-    /* 108 */ uint32_t paint_layout;
-    /* 112 */
+    float4x4 matrix;
+    float2 pixel_coord_upper;
+    float2 pixel_coord_lower;
+    float height_factor;
+    float tile_ratio;
+    float base_t;
+    float height_t;
+    float color_t;
+    float pattern_from_t;
+    float pattern_to_t;
+    uint paint_layout;
 };
-static_assert(sizeof(FillExtrusionDrawableUBO) == 7 * 16, "wrong size");
+static_assert(sizeof(FillExtrusionDrawableUBO) == 112, "wrong size");
 
 struct alignas(16) FillExtrusionTilePropsUBO {
-    /*  0 */ float4 pattern_from;
-    /* 16 */ float4 pattern_to;
-    /* 32 */ float2 texsize;
-    /* 40 */ float pad1;
-    /* 44 */ float pad2;
-    /* 48 */
+    float4 pattern_from;
+    float4 pattern_to;
+    float2 texsize;
+    float pad1;
+    float pad2;
 };
-static_assert(sizeof(FillExtrusionTilePropsUBO) == 3 * 16, "wrong size");
+static_assert(sizeof(FillExtrusionTilePropsUBO) == 48, "wrong size");
 
 /// Evaluated properties that do not depend on the tile
 struct alignas(16) FillExtrusionPropsUBO {
-    /*  0 */ float4 color;
-    /* 16 */ float4 light_color_pad;
-    /* 32 */ float4 light_position_base;
-    /* 48 */ float height;
-    /* 52 */ float light_intensity;
-    /* 56 */ float vertical_gradient;
-    /* 60 */ float opacity;
-    /* 64 */ float fade;
-    /* 68 */ float from_scale;
-    /* 72 */ float to_scale;
-    /* 76 */ float pad2;
-    /* 80 */
+    float4 color;
+    packed_float3 light_color;
+    float pad1;
+    packed_float3 light_position;
+    float base;
+    float height;
+    float light_intensity;
+    float vertical_gradient;
+    float opacity;
+    float fade;
+    float from_scale;
+    float to_scale;
+    float pad2;
 };
-static_assert(sizeof(FillExtrusionPropsUBO) == 5 * 16, "wrong size");
+static_assert(sizeof(FillExtrusionPropsUBO) == 80, "wrong size");
 
 "#
     ),
@@ -324,49 +321,46 @@ enum {
 };
 
 struct alignas(16) FillExtrusionDrawableUBO {
-    /*   0 */ float4x4 matrix;
-    /*  64 */ float2 pixel_coord_upper;
-    /*  72 */ float2 pixel_coord_lower;
-    /*  80 */ float height_factor;
-    /*  84 */ float tile_ratio;
-
-    // Interpolations
-    /*  88 */ float base_t;
-    /*  92 */ float height_t;
-    /*  96 */ float color_t;
-    /* 100 */ float pattern_from_t;
-    /* 104 */ float pattern_to_t;
-    /* 108 */ uint32_t paint_layout;
-    /* 112 */
+    float4x4 matrix;
+    float2 pixel_coord_upper;
+    float2 pixel_coord_lower;
+    float height_factor;
+    float tile_ratio;
+    float base_t;
+    float height_t;
+    float color_t;
+    float pattern_from_t;
+    float pattern_to_t;
+    uint paint_layout;
 };
-static_assert(sizeof(FillExtrusionDrawableUBO) == 7 * 16, "wrong size");
+static_assert(sizeof(FillExtrusionDrawableUBO) == 112, "wrong size");
 
 struct alignas(16) FillExtrusionTilePropsUBO {
-    /*  0 */ float4 pattern_from;
-    /* 16 */ float4 pattern_to;
-    /* 32 */ float2 texsize;
-    /* 40 */ float pad1;
-    /* 44 */ float pad2;
-    /* 48 */
+    float4 pattern_from;
+    float4 pattern_to;
+    float2 texsize;
+    float pad1;
+    float pad2;
 };
-static_assert(sizeof(FillExtrusionTilePropsUBO) == 3 * 16, "wrong size");
+static_assert(sizeof(FillExtrusionTilePropsUBO) == 48, "wrong size");
 
 /// Evaluated properties that do not depend on the tile
 struct alignas(16) FillExtrusionPropsUBO {
-    /*  0 */ float4 color;
-    /* 16 */ float4 light_color_pad;
-    /* 32 */ float4 light_position_base;
-    /* 48 */ float height;
-    /* 52 */ float light_intensity;
-    /* 56 */ float vertical_gradient;
-    /* 60 */ float opacity;
-    /* 64 */ float fade;
-    /* 68 */ float from_scale;
-    /* 72 */ float to_scale;
-    /* 76 */ float pad2;
-    /* 80 */
+    float4 color;
+    packed_float3 light_color;
+    float pad1;
+    packed_float3 light_position;
+    float base;
+    float height;
+    float light_intensity;
+    float vertical_gradient;
+    float opacity;
+    float fade;
+    float from_scale;
+    float to_scale;
+    float pad2;
 };
-static_assert(sizeof(FillExtrusionPropsUBO) == 5 * 16, "wrong size");
+static_assert(sizeof(FillExtrusionPropsUBO) == 80, "wrong size");
 
 "#
     ),
@@ -441,7 +435,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     device const FillExtrusionTilePropsUBO& tileProps = tilePropsVector[uboIndex];
 
 #if defined(HAS_UNIFORM_u_base)
-    const auto base   = max(props.light_position_base.w, 0.0);
+    const auto base   = max(props.base, 0.0);
 #else
     const auto base   = max(unpack_mix_float(vertx.base, drawable.base_t), 0.0);
 #endif
@@ -506,7 +500,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float2 pos = float2(edgedistance, z * drawable.height_factor); // extrusion side
 
     float4 lighting = float4(0.0, 0.0, 0.0, 1.0);
-    float directional = clamp(dot(normal, props.light_position_base.xyz), 0.0, 1.0);
+    float directional = clamp(dot(normal, float3(props.light_position)), 0.0, 1.0);
     directional = mix((1.0 - props.light_intensity), max((0.5 + props.light_intensity), 1.0), directional);
 
     if (normal.z == 0.0) {
@@ -519,7 +513,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         directional *= (1.0 - props.vertical_gradient) + (props.vertical_gradient * factor);
     }
 
-    lighting.rgb += clamp(directional * props.light_color_pad.rgb, mix(float3(0.0), float3(0.3), 1.0 - props.light_color_pad.rgb), float3(1.0));
+    lighting.rgb += clamp(directional * float3(props.light_color), mix(float3(0.0), float3(0.3), 1.0 - float3(props.light_color)), float3(1.0));
     lighting *= props.opacity;
 
     return {
@@ -597,49 +591,46 @@ enum {
 };
 
 struct alignas(16) FillExtrusionDrawableUBO {
-    /*   0 */ float4x4 matrix;
-    /*  64 */ float2 pixel_coord_upper;
-    /*  72 */ float2 pixel_coord_lower;
-    /*  80 */ float height_factor;
-    /*  84 */ float tile_ratio;
-
-    // Interpolations
-    /*  88 */ float base_t;
-    /*  92 */ float height_t;
-    /*  96 */ float color_t;
-    /* 100 */ float pattern_from_t;
-    /* 104 */ float pattern_to_t;
-    /* 108 */ uint32_t paint_layout;
-    /* 112 */
+    float4x4 matrix;
+    float2 pixel_coord_upper;
+    float2 pixel_coord_lower;
+    float height_factor;
+    float tile_ratio;
+    float base_t;
+    float height_t;
+    float color_t;
+    float pattern_from_t;
+    float pattern_to_t;
+    uint paint_layout;
 };
-static_assert(sizeof(FillExtrusionDrawableUBO) == 7 * 16, "wrong size");
+static_assert(sizeof(FillExtrusionDrawableUBO) == 112, "wrong size");
 
 struct alignas(16) FillExtrusionTilePropsUBO {
-    /*  0 */ float4 pattern_from;
-    /* 16 */ float4 pattern_to;
-    /* 32 */ float2 texsize;
-    /* 40 */ float pad1;
-    /* 44 */ float pad2;
-    /* 48 */
+    float4 pattern_from;
+    float4 pattern_to;
+    float2 texsize;
+    float pad1;
+    float pad2;
 };
-static_assert(sizeof(FillExtrusionTilePropsUBO) == 3 * 16, "wrong size");
+static_assert(sizeof(FillExtrusionTilePropsUBO) == 48, "wrong size");
 
 /// Evaluated properties that do not depend on the tile
 struct alignas(16) FillExtrusionPropsUBO {
-    /*  0 */ float4 color;
-    /* 16 */ float4 light_color_pad;
-    /* 32 */ float4 light_position_base;
-    /* 48 */ float height;
-    /* 52 */ float light_intensity;
-    /* 56 */ float vertical_gradient;
-    /* 60 */ float opacity;
-    /* 64 */ float fade;
-    /* 68 */ float from_scale;
-    /* 72 */ float to_scale;
-    /* 76 */ float pad2;
-    /* 80 */
+    float4 color;
+    packed_float3 light_color;
+    float pad1;
+    packed_float3 light_position;
+    float base;
+    float height;
+    float light_intensity;
+    float vertical_gradient;
+    float opacity;
+    float fade;
+    float from_scale;
+    float to_scale;
+    float pad2;
 };
-static_assert(sizeof(FillExtrusionPropsUBO) == 5 * 16, "wrong size");
+static_assert(sizeof(FillExtrusionPropsUBO) == 80, "wrong size");
 
 "#,
     source: r"
@@ -693,7 +684,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     device const FillExtrusionTilePropsUBO& tileProps = tilePropsVector[uboIndex];
 
 #if defined(HAS_UNIFORM_u_base)
-    const auto base   = max(props.light_position_base.w, 0.0);
+    const auto base   = max(props.base, 0.0);
 #else
     const auto base   = max(unpack_mix_float(vertx.base, drawable.base_t), 0.0);
 #endif
@@ -750,7 +741,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float2 pos = float2(vertx.pos); // extrusion top
 
     float4 lighting = float4(0.0, 0.0, 0.0, 1.0);
-    float directional = clamp(dot(normal, props.light_position_base.xyz), 0.0, 1.0);
+    float directional = clamp(dot(normal, float3(props.light_position)), 0.0, 1.0);
     directional = mix((1.0 - props.light_intensity), max((0.5 + props.light_intensity), 1.0), directional);
 
     if (normal.z == 0.0) {
@@ -763,7 +754,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         directional *= (1.0 - props.vertical_gradient) + (props.vertical_gradient * factor);
     }
 
-    lighting.rgb += clamp(directional * props.light_color_pad.rgb, mix(float3(0.0), float3(0.3), 1.0 - props.light_color_pad.rgb), float3(1.0));
+    lighting.rgb += clamp(directional * float3(props.light_color), mix(float3(0.0), float3(0.3), 1.0 - float3(props.light_color)), float3(1.0));
     lighting *= props.opacity;
 
     return {
@@ -840,49 +831,46 @@ enum {
 };
 
 struct alignas(16) FillExtrusionDrawableUBO {
-    /*   0 */ float4x4 matrix;
-    /*  64 */ float2 pixel_coord_upper;
-    /*  72 */ float2 pixel_coord_lower;
-    /*  80 */ float height_factor;
-    /*  84 */ float tile_ratio;
-
-    // Interpolations
-    /*  88 */ float base_t;
-    /*  92 */ float height_t;
-    /*  96 */ float color_t;
-    /* 100 */ float pattern_from_t;
-    /* 104 */ float pattern_to_t;
-    /* 108 */ uint32_t paint_layout;
-    /* 112 */
+    float4x4 matrix;
+    float2 pixel_coord_upper;
+    float2 pixel_coord_lower;
+    float height_factor;
+    float tile_ratio;
+    float base_t;
+    float height_t;
+    float color_t;
+    float pattern_from_t;
+    float pattern_to_t;
+    uint paint_layout;
 };
-static_assert(sizeof(FillExtrusionDrawableUBO) == 7 * 16, "wrong size");
+static_assert(sizeof(FillExtrusionDrawableUBO) == 112, "wrong size");
 
 struct alignas(16) FillExtrusionTilePropsUBO {
-    /*  0 */ float4 pattern_from;
-    /* 16 */ float4 pattern_to;
-    /* 32 */ float2 texsize;
-    /* 40 */ float pad1;
-    /* 44 */ float pad2;
-    /* 48 */
+    float4 pattern_from;
+    float4 pattern_to;
+    float2 texsize;
+    float pad1;
+    float pad2;
 };
-static_assert(sizeof(FillExtrusionTilePropsUBO) == 3 * 16, "wrong size");
+static_assert(sizeof(FillExtrusionTilePropsUBO) == 48, "wrong size");
 
 /// Evaluated properties that do not depend on the tile
 struct alignas(16) FillExtrusionPropsUBO {
-    /*  0 */ float4 color;
-    /* 16 */ float4 light_color_pad;
-    /* 32 */ float4 light_position_base;
-    /* 48 */ float height;
-    /* 52 */ float light_intensity;
-    /* 56 */ float vertical_gradient;
-    /* 60 */ float opacity;
-    /* 64 */ float fade;
-    /* 68 */ float from_scale;
-    /* 72 */ float to_scale;
-    /* 76 */ float pad2;
-    /* 80 */
+    float4 color;
+    packed_float3 light_color;
+    float pad1;
+    packed_float3 light_position;
+    float base;
+    float height;
+    float light_intensity;
+    float vertical_gradient;
+    float opacity;
+    float fade;
+    float from_scale;
+    float to_scale;
+    float pad2;
 };
-static_assert(sizeof(FillExtrusionPropsUBO) == 5 * 16, "wrong size");
+static_assert(sizeof(FillExtrusionPropsUBO) == 80, "wrong size");
 
 "#,
     source: r"
@@ -921,7 +909,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     device const FillExtrusionDrawableUBO& drawable = drawableVector[uboIndex];
 
 #if defined(HAS_UNIFORM_u_base)
-    const auto base   = max(props.light_position_base.w, 0.0);
+    const auto base   = max(props.base, 0.0);
 #else
     const auto base   = max(unpack_mix_float(vertx.base, drawable.base_t), 0.0);
 #endif
@@ -958,7 +946,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     color += min(float4(0.03, 0.03, 0.03, 1.0), float4(1.0));
 
     // Calculate cos(theta), where theta is the angle between surface normal and diffuse light ray
-    const float directionalFraction = clamp(dot(normal, props.light_position_base.xyz), 0.0, 1.0);
+    const float directionalFraction = clamp(dot(normal, float3(props.light_position)), 0.0, 1.0);
 
     // Adjust directional so that the range of values for highlight/shading is
     // narrower with lower light intensity and with lighter/brighter surface colors
@@ -980,7 +968,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     // Assign final color based on surface + ambient light color, diffuse light directional,
     // and light color with lower bounds adjusted to hue of light so that shading is tinted
     // with the complementary (opposite) color to the light color
-    const float3 light_color = props.light_color_pad.rgb;
+    const float3 light_color = float3(props.light_color);
     const float3 minLight = mix(0.0, 0.3, 1.0 - light_color.rgb);
     vcolor += float4(clamp(color.rgb * directional * light_color.rgb, minLight, 1.0), 0.0);
 

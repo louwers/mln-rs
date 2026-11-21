@@ -21,8 +21,7 @@ layout(push_constant) uniform Constants {
 
 struct BackgroundDrawableUBO {
     mat4 matrix;
-    vec4 pad1;
-    vec4 pad2;
+    vec4 stride_pad[2];
 };
 
 layout(std140, set = LAYER_SET_INDEX, binding = idBackgroundDrawableUBO) readonly buffer BackgroundDrawableUBOVector {

@@ -805,11 +805,13 @@ pub(crate) fn compile(
 /// program's prelude, read: of each one whose variable they name outside
 /// their comments.
 fn reserved_bindings(texts: &[&str]) -> String {
-    RESERVED_BINDINGS
-        .iter()
-        .filter(|(name, _)| texts.iter().any(|text| identifiers(text).any(|identifier| identifier == *name)))
-        .map(|(_, declaration)| format!("{declaration}\n"))
-        .collect()
+    let named = |name: &str| texts.iter().any(|text| identifiers(text).any(|identifier| identifier == name));
+    let mut declarations = String::new();
+    for (_, declaration) in RESERVED_BINDINGS.iter().filter(|(name, _)| named(name)) {
+        declarations.push_str(declaration);
+        declarations.push('\n');
+    }
+    declarations
 }
 
 /// The identifiers of `text`, outside its `//` comments.

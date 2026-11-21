@@ -264,33 +264,27 @@ struct SymbolDrawableUBO {
     mat4 matrix;
     mat4 label_plane_matrix;
     mat4 coord_matrix;
-
     vec2 texsize;
     vec2 texsize_icon;
-
     int is_text_prop;
-	int rotate_symbol;
+    int rotate_symbol;
     int pitch_with_map;
     int is_size_zoom_constant;
     int is_size_feature_constant;
     int is_offset;
-
     float size_t;
     float size;
-
-    // Interpolations
     float fill_color_t;
     float halo_color_t;
     float opacity_t;
     float halo_width_t;
     float halo_blur_t;
-
     int is_along_line;
     int is_variable_anchor;
     float pitched_scale;
     vec2 translation;
     float gamma_scale;
-    int is_halo;
+    int is_halo_pass;
 };
 
 layout(std140, set = LAYER_SET_INDEX, binding = idSymbolDrawableUBO) readonly buffer SymbolDrawableUBOVector {
@@ -422,7 +416,7 @@ void main() {
 #ifdef PROJECTION_GLOBE
     if (drawable.pitch_with_map != 0) {
         const float anchor_pos_tile_y = (drawable.coord_matrix * vec4(projected_pos.xy / projected_pos.w, z, 1.0)).y;
-        projectionScaling = mix(projectionScaling, 1.0 / circumferenceRatioAtTileY(anchor_pos_tile_y, projection) * drawable.pitched_scale, projection.projection_transition);
+        projectionScaling = mix(projectionScaling, 1.0 / circumferenceRatioAtTileY(anchor_pos_tile_y, projection) * drawable.pitched_scale, projection.transition);
     }
 #endif
     const vec2 posOffset = a_offset * max(a_minFontScale, fontScale) / 32.0 + a_pxoffset / 16.0;
@@ -545,33 +539,27 @@ struct SymbolDrawableUBO {
     mat4 matrix;
     mat4 label_plane_matrix;
     mat4 coord_matrix;
-
     vec2 texsize;
     vec2 texsize_icon;
-
     int is_text_prop;
-	int rotate_symbol;
+    int rotate_symbol;
     int pitch_with_map;
     int is_size_zoom_constant;
     int is_size_feature_constant;
     int is_offset;
-
     float size_t;
     float size;
-
-    // Interpolations
     float fill_color_t;
     float halo_color_t;
     float opacity_t;
     float halo_width_t;
     float halo_blur_t;
-
     int is_along_line;
     int is_variable_anchor;
     float pitched_scale;
     vec2 translation;
     float gamma_scale;
-    int is_halo;
+    int is_halo_pass;
 };
 
 layout(std140, set = LAYER_SET_INDEX, binding = idSymbolDrawableUBO) readonly buffer SymbolDrawableUBOVector {
@@ -722,7 +710,7 @@ void main() {
 #ifdef PROJECTION_GLOBE
     if (drawable.pitch_with_map != 0) {
         const float anchor_pos_tile_y = (drawable.coord_matrix * vec4(projected_pos.xy / projected_pos.w, z, 1.0)).y;
-        projectionScaling = mix(projectionScaling, 1.0 / circumferenceRatioAtTileY(anchor_pos_tile_y, projection) * drawable.pitched_scale, projection.projection_transition);
+        projectionScaling = mix(projectionScaling, 1.0 / circumferenceRatioAtTileY(anchor_pos_tile_y, projection) * drawable.pitched_scale, projection.transition);
     }
 #endif
     const vec2 pos_rot = a_offset / 32.0 * fontScale + a_pxoffset;
@@ -751,7 +739,7 @@ void main() {
     const float halo_blur = unpack_mix_float(in_halo_blur, drawable.halo_blur_t);
 #endif
     const float EDGE_GAMMA = 0.105 / DEVICE_PIXEL_RATIO;
-    const float haloBlurGamma = drawable.is_halo != 0 ? halo_blur * 1.19 / SDF_PX : 0.0;
+    const float haloBlurGamma = drawable.is_halo_pass != 0 ? halo_blur * 1.19 / SDF_PX : 0.0;
     frag_gamma_scaled = (haloBlurGamma + EDGE_GAMMA) / (fontScale * drawable.gamma_scale) * gl_Position.w;
     frag_halo_edge = (6.0 - halo_width / fontScale) / SDF_PX;
 
@@ -906,33 +894,27 @@ struct SymbolDrawableUBO {
     mat4 matrix;
     mat4 label_plane_matrix;
     mat4 coord_matrix;
-
     vec2 texsize;
     vec2 texsize_icon;
-
     int is_text_prop;
-	int rotate_symbol;
+    int rotate_symbol;
     int pitch_with_map;
     int is_size_zoom_constant;
     int is_size_feature_constant;
     int is_offset;
-
     float size_t;
     float size;
-
-    // Interpolations
     float fill_color_t;
     float halo_color_t;
     float opacity_t;
     float halo_width_t;
     float halo_blur_t;
-
     int is_along_line;
     int is_variable_anchor;
     float pitched_scale;
     vec2 translation;
     float gamma_scale;
-    int is_halo;
+    int is_halo_pass;
 };
 
 layout(std140, set = LAYER_SET_INDEX, binding = idSymbolDrawableUBO) readonly buffer SymbolDrawableUBOVector {
@@ -1085,7 +1067,7 @@ void main() {
 #ifdef PROJECTION_GLOBE
     if (drawable.pitch_with_map != 0 && drawable.is_along_line == 0) {
         const float anchor_pos_tile_y = (drawable.coord_matrix * vec4(projected_pos.xy / projected_pos.w, z, 1.0)).y;
-        projectionScaling = mix(projectionScaling, 1.0 / circumferenceRatioAtTileY(anchor_pos_tile_y, projection) * drawable.pitched_scale, projection.projection_transition);
+        projectionScaling = mix(projectionScaling, 1.0 / circumferenceRatioAtTileY(anchor_pos_tile_y, projection) * drawable.pitched_scale, projection.transition);
     }
 #endif
     const vec2 pos_rot = a_offset / 32.0 * fontScale;
@@ -1118,7 +1100,7 @@ void main() {
     const float halo_blur = unpack_mix_float(in_halo_blur, drawable.halo_blur_t);
 #endif
     const float EDGE_GAMMA = 0.105 / DEVICE_PIXEL_RATIO;
-    const float haloBlurGamma = drawable.is_halo != 0 ? halo_blur * 1.19 / SDF_PX : 0.0;
+    const float haloBlurGamma = drawable.is_halo_pass != 0 ? halo_blur * 1.19 / SDF_PX : 0.0;
     frag_gamma_scaled = (haloBlurGamma + EDGE_GAMMA) / (fontScale * drawable.gamma_scale) * gl_Position.w;
     frag_halo_edge = (6.0 - halo_width / fontScale) / SDF_PX;
 

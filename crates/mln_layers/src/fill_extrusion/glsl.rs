@@ -53,13 +53,12 @@ struct FillExtrusionDrawableUBO {
     vec2 pixel_coord_lower;
     float height_factor;
     float tile_ratio;
-    // Interpolations
     float base_t;
     float height_t;
     float color_t;
     float pattern_from_t;
     float pattern_to_t;
-    float pad1;
+    uint paint_layout;
 };
 
 layout(std140, set = LAYER_SET_INDEX, binding = idFillExtrusionDrawableUBO) readonly buffer FillExtrusionDrawableUBOVector {
@@ -72,8 +71,10 @@ layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer
 
 layout(set = LAYER_SET_INDEX, binding = idFillExtrusionPropsUBO) uniform FillExtrusionPropsUBO {
     vec4 color;
-    vec4 light_color_pad;
-    vec4 light_position_base;
+    vec3 light_color;
+    float pad1;
+    vec3 light_position;
+    float base;
     float height;
     float light_intensity;
     float vertical_gradient;
@@ -90,7 +91,7 @@ void main() {
     const FillExtrusionDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
 
 #if defined(HAS_UNIFORM_u_base)
-    const float base = max(props.light_position_base.w, 0.0);
+    const float base = max(props.base, 0.0);
 #else
     const float base = max(unpack_mix_float(in_base, drawable.base_t), 0.0);
 #endif
@@ -126,7 +127,7 @@ void main() {
     color += vec4(0.03, 0.03, 0.03, 1.0);
 
     // Calculate cos(theta), where theta is the angle between surface normal and diffuse light ray
-    const float directionalFraction = clamp(dot(normal, props.light_position_base.xyz), 0.0, 1.0);
+    const float directionalFraction = clamp(dot(normal, props.light_position), 0.0, 1.0);
 
     // Adjust directional so that the range of values for highlight/shading is
     // narrower with lower light intensity and with lighter/brighter surface colors
@@ -148,7 +149,7 @@ void main() {
     // Assign final color based on surface + ambient light color, diffuse light directional,
     // and light color with lower bounds adjusted to hue of light so that shading is tinted
     // with the complementary (opposite) color to the light color
-    const vec3 light_color = props.light_color_pad.rgb;
+    const vec3 light_color = props.light_color;
     const vec3 minLight = mix(vec3(0.0), vec3(0.3), 1.0 - light_color.rgb);
     vcolor += vec4(clamp(color.rgb * directional * light_color.rgb, minLight, vec3(1.0)), 0.0);
 
@@ -180,13 +181,11 @@ struct FillExtrusionDrawableUBO {
     vec2 pixel_coord_lower;
     float height_factor;
     float tile_ratio;
-    // Interpolations
     float base_t;
     float height_t;
     float color_t;
     float pattern_from_t;
     float pattern_to_t;
-    // Where the pulled walls find a vertex's paint values.
     uint paint_layout;
 };
 
@@ -200,8 +199,10 @@ layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer
 
 layout(set = LAYER_SET_INDEX, binding = idFillExtrusionPropsUBO) uniform FillExtrusionPropsUBO {
     vec4 color;
-    vec4 light_color_pad;
-    vec4 light_position_base;
+    vec3 light_color;
+    float pad1;
+    vec3 light_position;
+    float base;
     float height;
     float light_intensity;
     float vertical_gradient;
@@ -232,7 +233,7 @@ macro_rules! fill_extrusion_wall_main {
     const FillExtrusionDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
 
 #if defined(HAS_UNIFORM_u_base)
-    const float base = max(props.light_position_base.w, 0.0);
+    const float base = max(props.base, 0.0);
 #else
     const float base = max(unpack_mix_float(in_base, drawable.base_t), 0.0);
 #endif
@@ -283,7 +284,7 @@ macro_rules! fill_extrusion_wall_main {
     color += vec4(0.03, 0.03, 0.03, 1.0);
 
     // Calculate cos(theta), where theta is the angle between surface normal and diffuse light ray
-    const float directionalFraction = clamp(dot(normal, props.light_position_base.xyz), 0.0, 1.0);
+    const float directionalFraction = clamp(dot(normal, props.light_position), 0.0, 1.0);
 
     // Adjust directional so that the range of values for highlight/shading is
     // narrower with lower light intensity and with lighter/brighter surface colors
@@ -305,7 +306,7 @@ macro_rules! fill_extrusion_wall_main {
     // Assign final color based on surface + ambient light color, diffuse light directional,
     // and light color with lower bounds adjusted to hue of light so that shading is tinted
     // with the complementary (opposite) color to the light color
-    const vec3 light_color = props.light_color_pad.rgb;
+    const vec3 light_color = props.light_color;
     const vec3 minLight = mix(vec3(0.0), vec3(0.3), 1.0 - light_color.rgb);
     vcolor += vec4(clamp(color.rgb * directional * light_color.rgb, minLight, vec3(1.0)), 0.0);
 
@@ -460,13 +461,12 @@ struct FillExtrusionDrawableUBO {
     vec2 pixel_coord_lower;
     float height_factor;
     float tile_ratio;
-    // Interpolations
     float base_t;
     float height_t;
     float color_t;
     float pattern_from_t;
     float pattern_to_t;
-    float pad1;
+    uint paint_layout;
 };
 
 layout(std140, set = LAYER_SET_INDEX, binding = idFillExtrusionDrawableUBO) readonly buffer FillExtrusionDrawableUBOVector {
@@ -491,8 +491,10 @@ layout(std140, set = LAYER_SET_INDEX, binding = idFillExtrusionTilePropsUBO) rea
 
 layout(set = LAYER_SET_INDEX, binding = idFillExtrusionPropsUBO) uniform FillExtrusionPropsUBO {
     vec4 color;
-    vec4 light_color_pad;
-    vec4 light_position_base;
+    vec3 light_color;
+    float pad1;
+    vec3 light_position;
+    float base;
     float height;
     float light_intensity;
     float vertical_gradient;
@@ -520,7 +522,7 @@ void main() {
     const FillExtrusionTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
 
 #if defined(HAS_UNIFORM_u_base)
-    const float base = max(props.light_position_base.w, 0.0);
+    const float base = max(props.base, 0.0);
 #else
     const float base = max(unpack_mix_float(in_base, drawable.base_t), 0.0);
 #endif
@@ -579,7 +581,7 @@ void main() {
     const vec2 pos = vec2(in_position); // extrusion top
 
     vec4 lighting = vec4(0.0, 0.0, 0.0, 1.0);
-    float directional = clamp(dot(normal, props.light_position_base.xyz), 0.0, 1.0);
+    float directional = clamp(dot(normal, props.light_position), 0.0, 1.0);
     directional = mix((1.0 - props.light_intensity), max((0.5 + props.light_intensity), 1.0), directional);
 
     if (normal.z == 0.0) {
@@ -591,7 +593,7 @@ void main() {
         const float factor = clamp((t + base) * pow(height / 150.0, 0.5), fMin, 1.0);
         directional *= (1.0 - props.vertical_gradient) + (props.vertical_gradient * factor);    }
 
-    lighting.rgb += clamp(directional * props.light_color_pad.rgb, mix(vec3(0.0), vec3(0.3), 1.0 - props.light_color_pad.rgb), vec3(1.0));
+    lighting.rgb += clamp(directional * props.light_color, mix(vec3(0.0), vec3(0.3), 1.0 - props.light_color), vec3(1.0));
     lighting *= props.opacity;
 
     frag_lighting = lighting;
@@ -642,8 +644,10 @@ layout(std140, set = LAYER_SET_INDEX, binding = idFillExtrusionTilePropsUBO) rea
 
 layout(set = LAYER_SET_INDEX, binding = idFillExtrusionPropsUBO) uniform FillExtrusionPropsUBO {
     vec4 color;
-    vec4 light_color_pad;
-    vec4 light_position_base;
+    vec3 light_color;
+    float pad1;
+    vec3 light_position;
+    float base;
     float height;
     float light_intensity;
     float vertical_gradient;
@@ -742,13 +746,12 @@ struct FillExtrusionDrawableUBO {
     vec2 pixel_coord_lower;
     float height_factor;
     float tile_ratio;
-    // Interpolations
     float base_t;
     float height_t;
     float color_t;
     float pattern_from_t;
     float pattern_to_t;
-    float pad1;
+    uint paint_layout;
 };
 
 layout(std140, set = LAYER_SET_INDEX, binding = idFillExtrusionDrawableUBO) readonly buffer FillExtrusionDrawableUBOVector {
@@ -773,8 +776,10 @@ layout(std140, set = LAYER_SET_INDEX, binding = idFillExtrusionTilePropsUBO) rea
 
 layout(set = LAYER_SET_INDEX, binding = idFillExtrusionPropsUBO) uniform FillExtrusionPropsUBO {
     vec4 color;
-    vec4 light_color_pad;
-    vec4 light_position_base;
+    vec3 light_color;
+    float pad1;
+    vec3 light_position;
+    float base;
     float height;
     float light_intensity;
     float vertical_gradient;
@@ -805,7 +810,7 @@ void main() {
     const FillExtrusionTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
 
 #if defined(HAS_UNIFORM_u_base)
-    const float base = max(props.light_position_base.w, 0.0);
+    const float base = max(props.base, 0.0);
 #else
     const float base = max(unpack_mix_float(in_base, drawable.base_t), 0.0);
 #endif
@@ -879,7 +884,7 @@ void main() {
     const vec2 pos = vec2(edgedistance, z * drawable.height_factor); // extrusion side
 
     vec4 lighting = vec4(0.0, 0.0, 0.0, 1.0);
-    float directional = clamp(dot(normal, props.light_position_base.xyz), 0.0, 1.0);
+    float directional = clamp(dot(normal, props.light_position), 0.0, 1.0);
     directional = mix((1.0 - props.light_intensity), max((0.5 + props.light_intensity), 1.0), directional);
 
     if (normal.z == 0.0) {
@@ -892,7 +897,7 @@ void main() {
         directional *= (1.0 - props.vertical_gradient) + (props.vertical_gradient * factor);
     }
 
-    lighting.rgb += clamp(directional * props.light_color_pad.rgb, mix(vec3(0.0), vec3(0.3), 1.0 - props.light_color_pad.rgb), vec3(1.0));
+    lighting.rgb += clamp(directional * props.light_color, mix(vec3(0.0), vec3(0.3), 1.0 - props.light_color), vec3(1.0));
     lighting *= props.opacity;
 
     frag_lighting = lighting;
@@ -943,8 +948,10 @@ layout(std140, set = LAYER_SET_INDEX, binding = idFillExtrusionTilePropsUBO) rea
 
 layout(set = LAYER_SET_INDEX, binding = idFillExtrusionPropsUBO) uniform FillExtrusionPropsUBO {
     vec4 color;
-    vec4 light_color_pad;
-    vec4 light_position_base;
+    vec3 light_color;
+    float pad1;
+    vec3 light_position;
+    float base;
     float height;
     float light_intensity;
     float vertical_gradient;

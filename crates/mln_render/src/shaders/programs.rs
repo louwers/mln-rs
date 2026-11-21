@@ -63,7 +63,7 @@ pub(crate) static GLOBE_DEPTH: Program = Program {
 /// The style's sky, on a quad over the whole view.
 pub(crate) static SKY: Program = Program {
     name: "SkyShader",
-    buffers: &[Buffer::uniform::<SkyPropsUBO>(ID_SKY_PROPS_UBO, "SkyPropsUBO")],
+    buffers: &[Buffer::uniform::<SkyPropsUBO>(ID_SKY_PROPS_UBO)],
     attributes: &[Attribute::new(ID_SKY_POS_VERTEX_ATTRIBUTE, "a_pos", Short2)],
     instance_attributes: &[],
     textures: &[],
@@ -74,7 +74,7 @@ pub(crate) static SKY: Program = Program {
 /// The globe's atmosphere, on a quad over the whole view.
 pub(crate) static ATMOSPHERE: Program = Program {
     name: "AtmosphereShader",
-    buffers: &[Buffer::uniform::<AtmospherePropsUBO>(ID_ATMOSPHERE_PROPS_UBO, "AtmospherePropsUBO")],
+    buffers: &[Buffer::uniform::<AtmospherePropsUBO>(ID_ATMOSPHERE_PROPS_UBO)],
     attributes: &[Attribute::new(ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE, "a_pos", Short2)],
     instance_attributes: &[],
     textures: &[],
@@ -90,7 +90,7 @@ pub(crate) static ATMOSPHERE: Program = Program {
 /// A layer drawn into a texture, composited onto the frame.
 pub(crate) static LAYER_COMPOSITE: Program = Program {
     name: "LayerCompositeShader",
-    buffers: &[Buffer::uniform::<LayerCompositeUBO>(ID_LAYER_COMPOSITE_UBO, "LayerCompositeUBO")],
+    buffers: &[Buffer::uniform::<LayerCompositeUBO>(ID_LAYER_COMPOSITE_UBO)],
     attributes: &[Attribute::new(ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE, "a_pos", Short2)],
     instance_attributes: &[],
     textures: &[Texture::new("u_image"), Texture::new("u_backdrop")],
@@ -110,7 +110,7 @@ pub(crate) static LAYER_COMPOSITE: Program = Program {
 /// segment's latitude), with an antialiased edge one device pixel wide.
 pub(crate) static TILE_DEBUG: Program = Program {
     name: "TileDebugShader",
-    buffers: &[Buffer::uniform::<TileDebugPropsUBO>(ID_TILE_DEBUG_PROPS_UBO, "TileDebugPropsUBO")],
+    buffers: &[Buffer::uniform::<TileDebugPropsUBO>(ID_TILE_DEBUG_PROPS_UBO)],
     attributes: &[Attribute::new(ID_TILE_DEBUG_CORNER_VERTEX_ATTRIBUTE, "a_corner", Short2)],
     instance_attributes: &[
         Attribute::new(ID_TILE_DEBUG_START_ATTRIBUTE, "a_start", Short2),

@@ -23,12 +23,9 @@ pub(crate) const ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE: usize = 1;
 pub static COLOR_RELIEF: Program = Program {
     name: "ColorReliefShader",
     buffers: &[
-        Buffer::storage::<ColorReliefDrawableUBO>(ID_COLOR_RELIEF_DRAWABLE_UBO, "ColorReliefDrawableUBO"),
-        Buffer::storage::<ColorReliefTilePropsUBO>(ID_COLOR_RELIEF_TILE_PROPS_UBO, "ColorReliefTilePropsUBO"),
-        Buffer::uniform::<ColorReliefEvaluatedPropsUBO>(
-            ID_COLOR_RELIEF_EVALUATED_PROPS_UBO,
-            "ColorReliefEvaluatedPropsUBO",
-        ),
+        Buffer::storage::<ColorReliefDrawableUBO>(ID_COLOR_RELIEF_DRAWABLE_UBO),
+        Buffer::storage::<ColorReliefTilePropsUBO>(ID_COLOR_RELIEF_TILE_PROPS_UBO),
+        Buffer::uniform::<ColorReliefEvaluatedPropsUBO>(ID_COLOR_RELIEF_EVALUATED_PROPS_UBO),
     ],
     attributes: &[
         Attribute::new(ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE, "a_pos", Short2),

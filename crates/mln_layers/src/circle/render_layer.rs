@@ -125,8 +125,8 @@ fn write_uniforms(layer: &EvaluatedLayer<Circle>, writer: &mut UniformWriter<'_,
         opacity: *evaluated.circle_opacity.uniform(),
         stroke_width: *evaluated.circle_stroke_width.uniform(),
         stroke_opacity: *evaluated.circle_stroke_opacity.uniform(),
-        scale_with_map: i32::from(*evaluated.circle_pitch_scale.uniform() == CirclePitchScaleType::Map),
-        pitch_with_map: i32::from(*evaluated.circle_pitch_alignment.uniform() == AlignmentType::Map),
+        scale_with_map: (*evaluated.circle_pitch_scale.uniform() == CirclePitchScaleType::Map).into(),
+        pitch_with_map: (*evaluated.circle_pitch_alignment.uniform() == AlignmentType::Map).into(),
         pad1: 0.0,
     };
     writer.uniform(ID_CIRCLE_EVALUATED_PROPS_UBO, &props);

@@ -127,7 +127,7 @@ pub fn to_projection_ubo(data: &ProjectionData) -> ProjectionUBO {
         fallback_matrix: cast_matrix(&data.fallback_matrix),
         tile_mercator_coords: data.tile_mercator_coords.as_vec4().to_array(),
         clipping_plane: data.clipping_plane.as_vec4().to_array(),
-        projection_transition: data.projection_transition as f32,
+        transition: data.projection_transition as f32,
         depth_offset: data.depth_offset as f32,
         translate: data.translate.as_vec2().to_array(),
     }

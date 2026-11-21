@@ -19,7 +19,7 @@ use mln_gfx::shaders::shader_defines::{
     ID_PROJECTION_UBO, ID_VIEW_UBO, LAYER_SSBO_START_ID, MAX_ATTRIBUTE_COUNT_PER_SHADER, MAX_TEXTURE_COUNT_PER_SHADER,
     MAX_UBO_COUNT_PER_SHADER,
 };
-use mln_gfx::shaders::source::glsl::Glsl;
+use mln_gfx::shaders::source::glsl::{self, Glsl};
 use naga::{AddressSpace, ArraySize, Binding, Interpolation, Module, ScalarKind, StorageAccess, TypeInner};
 
 use crate::front_end::parse;
@@ -306,21 +306,19 @@ fn buffers_are_the_programs() {
                         continue;
                     };
                     let expected = match (buffer.kind, resource) {
-                        (BufferKind::Uniform, Resource::Uniform(_)) => Some(buffer.size),
-                        (BufferKind::Storage { .. }, Resource::Storage(_)) if buffer.id >= MAX_UBO_COUNT_PER_SHADER => {
-                            None
-                        }
-                        (BufferKind::Storage { stride }, Resource::Storage(_)) => Some(stride),
-                        (BufferKind::Storage { .. }, Resource::Uniform(_)) if buffer.id == ID_PROJECTION_UBO => {
-                            Some(buffer.size)
+                        (BufferKind::Uniform(block), Resource::Uniform(_)) => Some(block.size),
+                        (BufferKind::Vertices { .. }, Resource::Storage(_)) => None,
+                        (BufferKind::Storage { stride, .. }, Resource::Storage(_)) => Some(stride),
+                        (BufferKind::Storage { block, .. }, Resource::Uniform(_)) if buffer.id == ID_PROJECTION_UBO => {
+                            Some(block.size)
                         }
                         _ => {
-                            failures.push(format!("{at}: {} is {resource:?}, not {:?}", buffer.name, buffer.kind));
+                            failures.push(format!("{at}: buffer {} is {resource:?}, not {:?}", buffer.id, buffer.kind));
                             continue;
                         }
                     };
                     if expected.is_some_and(|expected| expected != size) {
-                        failures.push(format!("{at}: {} is {size} bytes, not {expected:?}", buffer.name));
+                        failures.push(format!("{at}: buffer {} is {size} bytes, not {expected:?}", buffer.id));
                     }
                 }
             }
@@ -555,4 +553,50 @@ fn no_stage_flips_y() {
         assert!(!text.contains("applySurfaceTransform"), "{}", program.name);
     }
     assert!(!sources::PRELUDE_VERTEX.contains("applySurfaceTransform"));
+}
+
+/// `text` without its comments, its whitespace runs one space.
+fn normalized(text: &str) -> String {
+    let mut code = String::with_capacity(text.len());
+    let mut rest = text;
+    while !rest.is_empty() {
+        if let Some(after) = rest.strip_prefix("//") {
+            rest = after.find('\n').map_or("", |end| &after[end..]);
+        } else if let Some(after) = rest.strip_prefix("/*") {
+            rest = after.find("*/").map_or("", |end| &after[end + 2..]);
+            code.push(' ');
+        } else {
+            let c = rest.chars().next().unwrap_or(' ');
+            code.push(c);
+            rest = &rest[c.len_utf8()..];
+        }
+    }
+    code.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// The sources declare every buffer's block as `uniform_block!` lays it
+/// out: as a struct, or as the members of a uniform block of its name.
+#[test]
+fn every_block_is_declared_as_its_layout_says() {
+    let preludes = normalized(&[sources::PRELUDE_VERTEX, sources::PRELUDE_FRAGMENT].concat());
+    let mut checked = 0;
+    for (program, source) in programs() {
+        let text = format!("{preludes} {}", normalized(&[source.prelude, source.vertex, source.fragment].concat()));
+        let buffers = program.buffers.iter().chain([&VIEW_BUFFER, &PROJECTION_BUFFER]);
+        for buffer in buffers {
+            let Some(block) = buffer.block() else { continue };
+            let declaration = normalized(&glsl::declaration(block, buffer.size()));
+            if text.contains(&format!("struct {} {{", block.name)) {
+                assert!(text.contains(&declaration), "{}: {declaration}", program.name);
+                checked += 1;
+            }
+            if text.contains(&format!("uniform {} {{", block.name)) {
+                let members = &declaration
+                    [declaration.find('{').expect("a struct")..declaration.rfind('}').expect("a struct") + 1];
+                assert!(text.contains(&format!("uniform {} {members}", block.name)), "{}: {members}", program.name);
+                checked += 1;
+            }
+        }
+    }
+    assert!(checked > 0);
 }

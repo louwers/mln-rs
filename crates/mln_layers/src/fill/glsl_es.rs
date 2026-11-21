@@ -3,27 +3,26 @@
 use mln_gfx::shaders::source::glsl_es::Glsl;
 
 pub(super) const FILL_OUTLINE_PATTERN_SHADER: Glsl = Glsl {
-    vertex: r"layout (std140) uniform FillOutlinePatternDrawableUBO {
+    vertex: r"layout (std140) uniform FillPatternDrawableUBO {
     highp mat4 u_matrix;
     highp vec2 u_pixel_coord_upper;
     highp vec2 u_pixel_coord_lower;
     highp float u_tile_ratio;
-    // Interpolations
     highp float u_pattern_from_t;
     highp float u_pattern_to_t;
     highp float u_opacity_t;
     highp float u_color_t;
-    lowp float drawable_pad1;
-    lowp float drawable_pad2;
-    lowp float drawable_pad3;
+    highp float FillPatternDrawableUBO_pad1;
+    highp float FillPatternDrawableUBO_pad2;
+    highp float FillPatternDrawableUBO_pad3;
 };
 
-layout (std140) uniform FillOutlinePatternTilePropsUBO {
+layout (std140) uniform FillPatternTilePropsUBO {
     highp vec4 u_pattern_from;
     highp vec4 u_pattern_to;
     highp vec2 u_texsize;
     lowp float u_sdf;
-    lowp float tileprops_pad2;
+    highp float FillPatternTilePropsUBO_pad2;
 };
 
 layout (std140) uniform FillEvaluatedPropsUBO {
@@ -105,12 +104,12 @@ highp vec4 pattern_to = u_pattern_to;
 precision highp float;
 #endif
 
-layout (std140) uniform FillOutlinePatternTilePropsUBO {
+layout (std140) uniform FillPatternTilePropsUBO {
     highp vec4 u_pattern_from;
     highp vec4 u_pattern_to;
     highp vec2 u_texsize;
     lowp float u_sdf;
-    lowp float tileprops_pad2;
+    highp float FillPatternTilePropsUBO_pad2;
 };
 
 layout (std140) uniform FillEvaluatedPropsUBO {
@@ -200,11 +199,10 @@ highp vec4 pattern_to = u_pattern_to;
 pub(super) const FILL_OUTLINE_SHADER: Glsl = Glsl {
     vertex: r"layout (std140) uniform FillOutlineDrawableUBO {
     highp mat4 u_matrix;
-    // Interpolations
     highp float u_outline_color_t;
     highp float u_opacity_t;
-    lowp float drawable_pad1;
-    lowp float drawable_pad2;
+    highp uint u_paint_layout;
+    highp float FillOutlineDrawableUBO_pad2;
 };
 
 layout (std140) uniform FillEvaluatedPropsUBO {
@@ -341,11 +339,10 @@ pub(super) const FILL_OUTLINE_INSTANCED_SHADER: Glsl = Glsl {
     vertex: concat!(
         r"layout (std140) uniform FillOutlineDrawableUBO {
     highp mat4 u_matrix;
-    // Interpolations
     highp float u_outline_color_t;
     highp float u_opacity_t;
-    lowp float drawable_pad1;
-    lowp float drawable_pad2;
+    highp uint u_paint_layout;
+    highp float FillOutlineDrawableUBO_pad2;
 };
 
 layout (std140) uniform FillEvaluatedPropsUBO {
@@ -399,27 +396,26 @@ lowp float opacity = u_opacity;
 
 pub(super) const FILL_OUTLINE_PATTERN_INSTANCED_SHADER: Glsl = Glsl {
     vertex: concat!(
-        r"layout (std140) uniform FillOutlinePatternDrawableUBO {
+        r"layout (std140) uniform FillPatternDrawableUBO {
     highp mat4 u_matrix;
     highp vec2 u_pixel_coord_upper;
     highp vec2 u_pixel_coord_lower;
     highp float u_tile_ratio;
-    // Interpolations
     highp float u_pattern_from_t;
     highp float u_pattern_to_t;
     highp float u_opacity_t;
     highp float u_color_t;
-    lowp float drawable_pad1;
-    lowp float drawable_pad2;
-    lowp float drawable_pad3;
+    highp float FillPatternDrawableUBO_pad1;
+    highp float FillPatternDrawableUBO_pad2;
+    highp float FillPatternDrawableUBO_pad3;
 };
 
-layout (std140) uniform FillOutlinePatternTilePropsUBO {
+layout (std140) uniform FillPatternTilePropsUBO {
     highp vec4 u_pattern_from;
     highp vec4 u_pattern_to;
     highp vec2 u_texsize;
     lowp float u_sdf;
-    lowp float tileprops_pad2;
+    highp float FillPatternTilePropsUBO_pad2;
 };
 
 layout (std140) uniform FillEvaluatedPropsUBO {
@@ -504,14 +500,13 @@ pub(super) const FILL_PATTERN_SHADER: Glsl = Glsl {
     highp vec2 u_pixel_coord_upper;
     highp vec2 u_pixel_coord_lower;
     highp float u_tile_ratio;
-    // Interpolations
     highp float u_pattern_from_t;
     highp float u_pattern_to_t;
     highp float u_opacity_t;
     highp float u_color_t;
-    lowp float drawable_pad1;
-    lowp float drawable_pad2;
-    lowp float drawable_pad3;
+    highp float FillPatternDrawableUBO_pad1;
+    highp float FillPatternDrawableUBO_pad2;
+    highp float FillPatternDrawableUBO_pad3;
 };
 
 layout (std140) uniform FillPatternTilePropsUBO {
@@ -519,7 +514,7 @@ layout (std140) uniform FillPatternTilePropsUBO {
     highp vec4 u_pattern_to;
     highp vec2 u_texsize;
     lowp float u_sdf;
-    lowp float tileprops_pad2;
+    highp float FillPatternTilePropsUBO_pad2;
 };
 
 layout (std140) uniform FillEvaluatedPropsUBO {
@@ -602,7 +597,7 @@ layout (std140) uniform FillPatternTilePropsUBO {
     highp vec4 u_pattern_to;
     highp vec2 u_texsize;
     lowp float u_sdf;
-    lowp float tileprops_pad2;
+    highp float FillPatternTilePropsUBO_pad2;
 };
 
 layout (std140) uniform FillEvaluatedPropsUBO {
@@ -686,11 +681,10 @@ highp vec4 pattern_to = u_pattern_to;
 pub(super) const FILL_SHADER: Glsl = Glsl {
     vertex: r"layout (std140) uniform FillDrawableUBO {
     highp mat4 u_matrix;
-    // Interpolations
     highp float u_color_t;
     highp float u_opacity_t;
-    lowp float drawable_pad1;
-    lowp float drawable_pad2;
+    highp float FillDrawableUBO_pad1;
+    highp float FillDrawableUBO_pad2;
 };
 
 layout (std140) uniform FillEvaluatedPropsUBO {

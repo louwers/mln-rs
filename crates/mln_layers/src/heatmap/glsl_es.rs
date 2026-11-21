@@ -9,7 +9,6 @@ out vec2 v_extrude;
 layout (std140) uniform HeatmapDrawableUBO {
     highp mat4 u_matrix;
     highp float u_extrude_scale;
-    // Interpolations
     lowp float u_weight_t;
     lowp float u_radius_t;
     highp float u_globe_extrude_scale;
@@ -19,7 +18,7 @@ layout (std140) uniform HeatmapEvaluatedPropsUBO {
     highp float u_weight;
     highp float u_radius;
     highp float u_intensity;
-    lowp float props_pad1;
+    highp float HeatmapEvaluatedPropsUBO_padding;
 };
 
 #ifndef HAS_UNIFORM_u_weight
@@ -93,7 +92,7 @@ layout (std140) uniform HeatmapEvaluatedPropsUBO {
     highp float u_weight;
     highp float u_radius;
     highp float u_intensity;
-    lowp float props_pad1;
+    highp float HeatmapEvaluatedPropsUBO_padding;
 };
 
 #ifndef HAS_UNIFORM_u_weight
@@ -128,9 +127,9 @@ out vec2 v_pos;
 layout (std140) uniform HeatmapTexturePropsUBO {
     highp mat4 u_matrix;
     highp float u_opacity;
-    lowp float props_pad1;
-    lowp float props_pad2;
-    lowp float props_pad3;
+    highp float HeatmapTexturePropsUBO_pad1;
+    highp float HeatmapTexturePropsUBO_pad2;
+    highp float HeatmapTexturePropsUBO_pad3;
 };
 
 void main() {
@@ -147,9 +146,9 @@ uniform sampler2D u_color_ramp;
 layout (std140) uniform HeatmapTexturePropsUBO {
     highp mat4 u_matrix;
     highp float u_opacity;
-    lowp float props_pad1;
-    lowp float props_pad2;
-    lowp float props_pad3;
+    highp float HeatmapTexturePropsUBO_pad1;
+    highp float HeatmapTexturePropsUBO_pad2;
+    highp float HeatmapTexturePropsUBO_pad3;
 };
 
 void main() {

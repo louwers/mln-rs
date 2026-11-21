@@ -38,7 +38,6 @@ layout(push_constant) uniform Constants {
 struct HeatmapDrawableUBO {
     mat4 matrix;
     float extrude_scale;
-    // Interpolations
     float weight_t;
     float radius_t;
     float globe_extrude_scale;
@@ -56,7 +55,7 @@ layout(set = LAYER_SET_INDEX, binding = idHeatmapEvaluatedPropsUBO) uniform Heat
     float weight;
     float radius;
     float intensity;
-    float pad1;
+    float padding;
 } props;
 
 #if !defined(HAS_UNIFORM_u_weight)
@@ -135,7 +134,7 @@ layout(set = LAYER_SET_INDEX, binding = idHeatmapEvaluatedPropsUBO) uniform Heat
     float weight;
     float radius;
     float intensity;
-    float pad1;
+    float padding;
 } props;
 
 void main() {

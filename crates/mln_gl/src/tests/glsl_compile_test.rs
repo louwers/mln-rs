@@ -11,9 +11,9 @@ use std::collections::BTreeSet;
 
 use mln_gfx::RendererBackend as _;
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::program::{PROJECTION_BUFFER, Program, VIEW_BUFFER};
+use mln_gfx::shaders::program::{Buffer, PROJECTION_BUFFER, Program, VIEW_BUFFER};
 use mln_gfx::shaders::program_parameters::ProgramParameters;
-use mln_gfx::shaders::source::glsl_es::Glsl;
+use mln_gfx::shaders::source::glsl_es::{self, Glsl};
 use mln_util::hash::HashSet;
 
 use crate::shaders::glsl_sources::stage_sources;
@@ -211,11 +211,12 @@ fn every_program_links_and_matches_its_declaration(backend: &mut RendererBackend
                         declared.buffers.iter().chain(&reserved).find(|info| info.id == block.id).unwrap_or_else(
                             || panic!("{what}: block at {} that isn't a buffer of the program's", block.id),
                         );
+                    let declared = info.block().expect("a block");
                     assert_eq!(
                         block.size.next_multiple_of(16),
-                        info.size,
+                        declared.size,
                         "{what}: the size of {} differs from its UBO's",
-                        info.name
+                        declared.name
                     );
                 }
 
@@ -235,4 +236,41 @@ fn every_program_links_and_matches_its_declaration(backend: &mut RendererBackend
         }
     }
     assert!(compiled >= 2 * programs().len());
+}
+
+/// `text` without its comments, its whitespace runs one space.
+fn normalized(text: &str) -> String {
+    let mut code = String::with_capacity(text.len());
+    let mut rest = text;
+    while !rest.is_empty() {
+        if let Some(after) = rest.strip_prefix("//") {
+            rest = after.find('\n').map_or("", |end| &after[end..]);
+        } else if let Some(after) = rest.strip_prefix("/*") {
+            rest = after.find("*/").map_or("", |end| &after[end + 2..]);
+            code.push(' ');
+        } else {
+            let c = rest.chars().next().unwrap_or(' ');
+            code.push(c);
+            rest = &rest[c.len_utf8()..];
+        }
+    }
+    code.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// The stages declare every block they declare as `uniform_block!` lays it
+/// out.
+#[test]
+fn every_block_is_declared_as_its_layout_says() {
+    for (program, stages) in compiled_stages() {
+        let buffers = program.buffers.iter().chain([&VIEW_BUFFER, &PROJECTION_BUFFER]);
+        for block in buffers.filter_map(Buffer::block) {
+            for stage in &stages {
+                let stage = normalized(stage);
+                if stage.contains(&format!("uniform {} {{", block.name)) {
+                    let declaration = normalized(&glsl_es::declaration(block));
+                    assert!(stage.contains(&declaration), "{}: {declaration}", program.name);
+                }
+            }
+        }
+    }
 }

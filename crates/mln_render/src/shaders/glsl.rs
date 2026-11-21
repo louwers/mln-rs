@@ -149,8 +149,7 @@ layout(set = LAYER_SET_INDEX, binding = idTileDebugPropsUBO) uniform TileDebugPr
     vec4 color;
     float width;
     float world_width;
-    float pad0;
-    float pad1;
+    vec2 pad;
 } props;
 
 ";
@@ -194,7 +193,7 @@ void main() {
     float units = 1.0 / (projection.tile_mercator_coords.z * props.world_width);
 #ifdef PROJECTION_GLOBE
     const float ratio = circumferenceRatioAtTileY((start.y + end.y) * 0.5, projection);
-    units *= mix(1.0, 1.0 / ratio, projection.projection_transition);
+    units *= mix(1.0, 1.0 / ratio, projection.transition);
 #endif
 
     // The quad around the segment on the map, reaching half the width and

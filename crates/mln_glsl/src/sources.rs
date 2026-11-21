@@ -92,7 +92,7 @@ struct ProjectionUBO {
     mat4 fallback_matrix;
     vec4 tile_mercator_coords;
     vec4 clipping_plane;
-    float projection_transition;
+    float transition;
     float depth_offset;
     vec2 translate;
 };
@@ -151,19 +151,19 @@ vec4 interpolateProjection(vec2 posInTile, vec3 spherePos, float elevation, Proj
     // Clip the far side of the globe through Z; the layer's depth shift keeps layer order.
     globePosition.z = globeComputeClippingZ(elevatedPos, projection) * globePosition.w - projection.depth_offset;
 
-    if (projection.projection_transition > 0.999) {
+    if (projection.transition > 0.999) {
         return globePosition;
     }
 
     const vec4 flatPosition = projection.fallback_matrix * vec4(posInTile, elevation, 1.0);
     const float z_globeness_threshold = 0.2;
     vec4 result = globePosition;
-    result.z = mix(0.0, globePosition.z, clamp((projection.projection_transition - z_globeness_threshold) / (1.0 - z_globeness_threshold), 0.0, 1.0));
-    result.xyw = mix(flatPosition.xyw, globePosition.xyw, projection.projection_transition);
+    result.z = mix(0.0, globePosition.z, clamp((projection.transition - z_globeness_threshold) / (1.0 - z_globeness_threshold), 0.0, 1.0));
+    result.xyw = mix(flatPosition.xyw, globePosition.xyw, projection.transition);
     if ((posInTile.y < GLOBE_POLE_NORTH_Y) || (posInTile.y > GLOBE_POLE_SOUTH_Y)) {
         result = globePosition;
         const float poles_hidden_anim_percentage = 0.02;
-        result.z = mix(globePosition.z, 100.0, pow(max((1.0 - projection.projection_transition) / poles_hidden_anim_percentage, 0.0), 8.0));
+        result.z = mix(globePosition.z, 100.0, pow(max((1.0 - projection.transition) / poles_hidden_anim_percentage, 0.0), 8.0));
     }
     return result;
 }
@@ -172,11 +172,11 @@ vec4 interpolateProjection(vec2 posInTile, vec3 spherePos, float elevation, Proj
 vec4 interpolateProjectionFor3D(vec2 posInTile, vec3 spherePos, float elevation, ProjectionUBO projection) {
     const vec3 elevatedPos = spherePos * (1.0 + elevation / GLOBE_RADIUS);
     const vec4 globePosition = projection.matrix * vec4(elevatedPos, 1.0);
-    if (projection.projection_transition > 0.999) {
+    if (projection.transition > 0.999) {
         return globePosition;
     }
     const vec4 fallbackPosition = projection.fallback_matrix * vec4(posInTile, elevation, 1.0);
-    return mix(fallbackPosition, globePosition, projection.projection_transition);
+    return mix(fallbackPosition, globePosition, projection.transition);
 }
 
 vec4 projectTile(vec2 pos, ProjectionUBO projection) {

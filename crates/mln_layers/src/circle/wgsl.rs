@@ -274,8 +274,8 @@ struct CircleEvaluatedPropsUBO {
     opacity: f32,
     stroke_width: f32,
     stroke_opacity: f32,
-    scale_with_map: i32,
-    pitch_with_map: i32,
+    scale_with_map: u32,
+    pitch_with_map: u32,
     pad1: f32,
 };
 

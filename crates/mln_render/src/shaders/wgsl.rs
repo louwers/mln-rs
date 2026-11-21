@@ -347,8 +347,7 @@ struct TileDebugPropsUBO {
     color: vec4<f32>,
     width: f32,
     world_width: f32,
-    pad0: f32,
-    pad1: f32,
+    pad: vec2<f32>,
 };
 
 @group(0) @binding(5) var<uniform> props: TileDebugPropsUBO;
@@ -365,7 +364,7 @@ fn main(in: VertexInput) -> VertexOutput {
     var units = 1.0 / (projection.tile_mercator_coords.z * props.world_width);
 #ifdef PROJECTION_GLOBE
     let ratio = circumferenceRatioAtTileY((start.y + end.y) * 0.5, projection);
-    units = units * mix(1.0, 1.0 / ratio, projection.projection_transition);
+    units = units * mix(1.0, 1.0 / ratio, projection.transition);
 #endif
 
     // The quad around the segment on the map, reaching half the width and
@@ -417,8 +416,7 @@ struct TileDebugPropsUBO {
     color: vec4<f32>,
     width: f32,
     world_width: f32,
-    pad0: f32,
-    pad1: f32,
+    pad: vec2<f32>,
 };
 
 @group(0) @binding(5) var<uniform> props: TileDebugPropsUBO;

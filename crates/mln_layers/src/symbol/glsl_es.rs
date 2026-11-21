@@ -38,7 +38,7 @@ layout (std140) uniform CollisionDrawableUBO {
 layout (std140) uniform CollisionTilePropsUBO {
     highp vec2 u_extrude_scale;
     highp float u_overscale_factor;
-    lowp float drawable_pad1;
+    highp float CollisionTilePropsUBO_pad1;
 };
 
 out float v_placed;
@@ -107,7 +107,7 @@ layout (std140) uniform CollisionDrawableUBO {
 layout (std140) uniform CollisionTilePropsUBO {
     highp vec2 u_extrude_scale;
     highp float u_overscale_factor;
-    lowp float drawable_pad1;
+    highp float CollisionTilePropsUBO_pad1;
 };
 
 out float v_placed;
@@ -152,7 +152,7 @@ void main() {
     fragment: r"layout (std140) uniform CollisionTilePropsUBO {
     highp vec2 u_extrude_scale;
     highp float u_overscale_factor;
-    lowp float drawable_pad1;
+    highp float CollisionTilePropsUBO_pad1;
 };
 
 in float v_placed;
@@ -205,27 +205,21 @@ layout (std140) uniform SymbolDrawableUBO {
     highp mat4 u_matrix;
     highp mat4 u_label_plane_matrix;
     highp mat4 u_coord_matrix;
-
     highp vec2 u_texsize;
     highp vec2 u_texsize_icon;
-
     bool u_is_text_prop;
     bool u_rotate_symbol;
     bool u_pitch_with_map;
     bool u_is_size_zoom_constant;
     bool u_is_size_feature_constant;
     bool u_is_offset;
-
-    highp float u_size_t; // used to interpolate between zoom stops when size is a composite function
-    highp float u_size; // used when size is both zoom and feature constant
-
-    // Interpolations
+    highp float u_size_t;
+    highp float u_size;
     highp float u_fill_color_t;
     highp float u_halo_color_t;
     highp float u_opacity_t;
     highp float u_halo_width_t;
     highp float u_halo_blur_t;
-
     bool u_is_along_line;
     bool u_is_variable_anchor;
     highp float u_pitched_scale;
@@ -240,7 +234,7 @@ layout (std140) uniform SymbolEvaluatedPropsUBO {
     highp float u_text_opacity;
     highp float u_text_halo_width;
     highp float u_text_halo_blur;
-    lowp float props_pad1;
+    highp float SymbolEvaluatedPropsUBO_pad1;
     highp vec4 u_icon_fill_color;
     highp vec4 u_icon_halo_color;
     highp float u_icon_opacity;
@@ -380,7 +374,7 @@ layout (std140) uniform SymbolEvaluatedPropsUBO {
     highp float u_text_opacity;
     highp float u_text_halo_width;
     highp float u_text_halo_blur;
-    lowp float props_pad1;
+    highp float SymbolEvaluatedPropsUBO_pad1;
     highp vec4 u_icon_fill_color;
     highp vec4 u_icon_halo_color;
     highp float u_icon_opacity;
@@ -392,8 +386,8 @@ layout (std140) uniform SymbolEvaluatedPropsUBO {
 layout (std140) uniform SymbolTilePropsUBO {
     bool u_is_text;
     bool u_is_halo;
-    lowp float tileprops_pad1;
-    lowp float tileprops_pad2;
+    highp float SymbolTilePropsUBO_pad1;
+    highp float SymbolTilePropsUBO_pad2;
 };
 
 in highp vec2 v_tex;
@@ -440,27 +434,21 @@ layout (std140) uniform SymbolDrawableUBO {
     highp mat4 u_matrix;
     highp mat4 u_label_plane_matrix;
     highp mat4 u_coord_matrix;
-
     highp vec2 u_texsize;
     highp vec2 u_texsize_icon;
-
     bool u_is_text_prop;
     bool u_rotate_symbol;
     bool u_pitch_with_map;
     bool u_is_size_zoom_constant;
     bool u_is_size_feature_constant;
     bool u_is_offset;
-
-    highp float u_size_t; // used to interpolate between zoom stops when size is a composite function
-    highp float u_size; // used when size is both zoom and feature constant
-
-    // Interpolations
+    highp float u_size_t;
+    highp float u_size;
     highp float u_fill_color_t;
     highp float u_halo_color_t;
     highp float u_opacity_t;
     highp float u_halo_width_t;
     highp float u_halo_blur_t;
-
     bool u_is_along_line;
     bool u_is_variable_anchor;
     highp float u_pitched_scale;
@@ -475,7 +463,7 @@ layout (std140) uniform SymbolEvaluatedPropsUBO {
     highp float u_text_opacity;
     highp float u_text_halo_width;
     highp float u_text_halo_blur;
-    lowp float props_pad1;
+    highp float SymbolEvaluatedPropsUBO_pad1;
     highp vec4 u_icon_fill_color;
     highp vec4 u_icon_halo_color;
     highp float u_icon_opacity;
@@ -669,7 +657,7 @@ layout (std140) uniform SymbolEvaluatedPropsUBO {
     highp float u_text_opacity;
     highp float u_text_halo_width;
     highp float u_text_halo_blur;
-    lowp float props_pad1;
+    highp float SymbolEvaluatedPropsUBO_pad1;
     highp vec4 u_icon_fill_color;
     highp vec4 u_icon_halo_color;
     highp float u_icon_opacity;
@@ -681,8 +669,8 @@ layout (std140) uniform SymbolEvaluatedPropsUBO {
 layout (std140) uniform SymbolTilePropsUBO {
     bool u_is_text;
     bool u_is_halo;
-    lowp float tileprops_pad1;
-    lowp float tileprops_pad2;
+    highp float SymbolTilePropsUBO_pad1;
+    highp float SymbolTilePropsUBO_pad2;
 };
 
 uniform sampler2D u_texture;
@@ -769,27 +757,21 @@ layout (std140) uniform SymbolDrawableUBO {
     highp mat4 u_matrix;
     highp mat4 u_label_plane_matrix;
     highp mat4 u_coord_matrix;
-
     highp vec2 u_texsize;
     highp vec2 u_texsize_icon;
-
     bool u_is_text_prop;
     bool u_rotate_symbol;
     bool u_pitch_with_map;
     bool u_is_size_zoom_constant;
     bool u_is_size_feature_constant;
     bool u_is_offset;
-
-    highp float u_size_t; // used to interpolate between zoom stops when size is a composite function
-    highp float u_size; // used when size is both zoom and feature constant
-
-    // Interpolations
+    highp float u_size_t;
+    highp float u_size;
     highp float u_fill_color_t;
     highp float u_halo_color_t;
     highp float u_opacity_t;
     highp float u_halo_width_t;
     highp float u_halo_blur_t;
-
     bool u_is_along_line;
     bool u_is_variable_anchor;
     highp float u_pitched_scale;
@@ -804,7 +786,7 @@ layout (std140) uniform SymbolEvaluatedPropsUBO {
     highp float u_text_opacity;
     highp float u_text_halo_width;
     highp float u_text_halo_blur;
-    lowp float props_pad1;
+    highp float SymbolEvaluatedPropsUBO_pad1;
     highp vec4 u_icon_fill_color;
     highp vec4 u_icon_halo_color;
     highp float u_icon_opacity;
@@ -1002,7 +984,7 @@ layout (std140) uniform SymbolEvaluatedPropsUBO {
     highp float u_text_opacity;
     highp float u_text_halo_width;
     highp float u_text_halo_blur;
-    lowp float props_pad1;
+    highp float SymbolEvaluatedPropsUBO_pad1;
     highp vec4 u_icon_fill_color;
     highp vec4 u_icon_halo_color;
     highp float u_icon_opacity;
@@ -1014,8 +996,8 @@ layout (std140) uniform SymbolEvaluatedPropsUBO {
 layout (std140) uniform SymbolTilePropsUBO {
     bool u_is_text;
     bool u_is_halo;
-    lowp float tileprops_pad1;
-    lowp float tileprops_pad2;
+    highp float SymbolTilePropsUBO_pad1;
+    highp float SymbolTilePropsUBO_pad2;
 };
 
 uniform sampler2D u_texture;

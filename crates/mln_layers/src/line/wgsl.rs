@@ -12,8 +12,8 @@ const LINE_NORMAL_SCALE: f32 = 1.0 / 63.0;  // 1.0 / (127 / 2)
 
 fn projectLineThickness(tileY: f32, projection: ProjectionUBO) -> f32 {
     let thickness = 1.0 / circumferenceRatioAtTileY(tileY, projection);
-    if (projection.projection_transition < 0.999) {
-        return mix(1.0, thickness, projection.projection_transition);
+    if (projection.transition < 0.999) {
+        return mix(1.0, thickness, projection.transition);
     }
     return thickness;
 }
@@ -124,18 +124,14 @@ struct LineEvaluatedPropsUBO {
     pad1: f32,
 };
 
-struct LineSDFDrawableEntry {
-    data: LineSDFDrawableUBO,
-};
-
-@group(0) @binding(2) var<storage, read> drawableVector: array<LineSDFDrawableEntry>;
+@group(0) @binding(2) var<storage, read> drawableVector: array<LineSDFDrawableUBO>;
 @group(0) @binding(5) var<uniform> props: LineEvaluatedPropsUBO;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
     let index = globalIndex.value;
-    let drawable = drawableVector[index].data;
+    let drawable = drawableVector[index];
 
     // Constants
     let LINE_DISTANCE_SCALE = 2.0;
@@ -294,16 +290,10 @@ struct LineSDFTilePropsUBO {
     mix: f32,
     pad1: f32,
     pad2: f32,
+    stride_pad: array<vec4<f32>, 3>,
 };
 
-struct LineSDFTilePropsEntry {
-    data: LineSDFTilePropsUBO,
-    pad0: vec4<f32>,
-    pad1: vec4<f32>,
-    pad2: vec4<f32>,
-};
-
-@group(0) @binding(3) var<storage, read> tilePropsVector: array<LineSDFTilePropsEntry>;
+@group(0) @binding(3) var<storage, read> tilePropsVector: array<LineSDFTilePropsUBO>;
 @group(0) @binding(5) var<uniform> props: LineEvaluatedPropsUBO;
 @group(1) @binding(0) var gradient_sampler: sampler;
 @group(1) @binding(1) var gradient_texture: texture_2d<f32>;
@@ -320,7 +310,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 #ifdef OVERDRAW_INSPECTOR
     return vec4<f32>(1.0, 1.0, 1.0, 1.0);
 #endif
-    let tileProps = tilePropsVector[globalIndex.value].data;
+    let tileProps = tilePropsVector[globalIndex.value];
 #ifdef HAS_UNIFORM_u_blur
     let blur = props.blur;
 #else
@@ -420,6 +410,7 @@ struct LineGradientDrawableUBO {
     width_t: f32,
     pad1: f32,
     pad2: f32,
+    stride_pad: array<vec4<f32>, 2>,
 };
 
 struct LineEvaluatedPropsUBO {
@@ -434,19 +425,13 @@ struct LineEvaluatedPropsUBO {
     pad1: f32,
 };
 
-struct LineGradientDrawableEntry {
-    data: LineGradientDrawableUBO,
-    pad0: vec4<f32>,
-    pad1: vec4<f32>,
-};
-
-@group(0) @binding(2) var<storage, read> drawableVector: array<LineGradientDrawableEntry>;
+@group(0) @binding(2) var<storage, read> drawableVector: array<LineGradientDrawableUBO>;
 @group(0) @binding(5) var<uniform> props: LineEvaluatedPropsUBO;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
-    let drawable = drawableVector[globalIndex.value].data;
+    let drawable = drawableVector[globalIndex.value];
 
     // Constants
     let pixel_ratio = max(DEVICE_PIXEL_RATIO, 1e-6);
@@ -674,6 +659,7 @@ struct LinePatternDrawableUBO {
     pad1: f32,
     pad2: f32,
     pad3: f32,
+    stride_pad: array<vec4<f32>, 1>,
 };
 
 struct LinePatternTilePropsUBO {
@@ -682,7 +668,7 @@ struct LinePatternTilePropsUBO {
     scale: vec4<f32>,
     texsize: vec2<f32>,
     fade: f32,
-    pad2: f32,
+    pad1: f32,
 };
 
 struct LineEvaluatedPropsUBO {
@@ -697,25 +683,16 @@ struct LineEvaluatedPropsUBO {
     pad1: f32,
 };
 
-struct LinePatternDrawableEntry {
-    data: LinePatternDrawableUBO,
-    pad0: vec4<f32>,
-};
-
-struct LinePatternTilePropsEntry {
-    data: LinePatternTilePropsUBO,
-};
-
-@group(0) @binding(2) var<storage, read> drawableVector: array<LinePatternDrawableEntry>;
-@group(0) @binding(3) var<storage, read> tilePropsVector: array<LinePatternTilePropsEntry>;
+@group(0) @binding(2) var<storage, read> drawableVector: array<LinePatternDrawableUBO>;
+@group(0) @binding(3) var<storage, read> tilePropsVector: array<LinePatternTilePropsUBO>;
 @group(0) @binding(5) var<uniform> props: LineEvaluatedPropsUBO;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
     let index = globalIndex.value;
-    let drawable = drawableVector[index].data;
-    let tileProps = tilePropsVector[index].data;
+    let drawable = drawableVector[index];
+    let tileProps = tilePropsVector[index];
 
     let ratio = max(drawable.ratio, 1e-6);
     let antialiasing = 0.5 / DEVICE_PIXEL_RATIO;
@@ -845,14 +822,10 @@ struct LinePatternTilePropsUBO {
     scale: vec4<f32>,
     texsize: vec2<f32>,
     fade: f32,
-    pad2: f32,
+    pad1: f32,
 };
 
-struct LinePatternTilePropsEntry {
-    data: LinePatternTilePropsUBO,
-};
-
-@group(0) @binding(3) var<storage, read> tilePropsVector: array<LinePatternTilePropsEntry>;
+@group(0) @binding(3) var<storage, read> tilePropsVector: array<LinePatternTilePropsUBO>;
 @group(0) @binding(5) var<uniform> props: LineEvaluatedPropsUBO;
 @group(1) @binding(0) var pattern_sampler: sampler;
 @group(1) @binding(1) var pattern_texture: texture_2d<f32>;
@@ -867,7 +840,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 #ifdef OVERDRAW_INSPECTOR
     return vec4<f32>(1.0, 1.0, 1.0, 1.0);
 #endif
-    let tileProps = tilePropsVector[globalIndex.value].data;
+    let tileProps = tilePropsVector[globalIndex.value];
 
 #ifdef HAS_UNIFORM_u_pattern_from
     let pattern_from = tileProps.pattern_from;
@@ -1038,6 +1011,7 @@ struct LineSDFTilePropsUBO {
     mix: f32,
     pad1: f32,
     pad2: f32,
+    stride_pad: array<vec4<f32>, 3>,
 };
 
 struct LineEvaluatedPropsUBO {
@@ -1052,27 +1026,16 @@ struct LineEvaluatedPropsUBO {
     pad1: f32,
 };
 
-struct LineSDFDrawableEntry {
-    data: LineSDFDrawableUBO,
-};
-
-struct LineSDFTilePropsEntry {
-    data: LineSDFTilePropsUBO,
-    pad0: vec4<f32>,
-    pad1: vec4<f32>,
-    pad2: vec4<f32>,
-};
-
-@group(0) @binding(2) var<storage, read> drawableVector: array<LineSDFDrawableEntry>;
-@group(0) @binding(3) var<storage, read> tilePropsVector: array<LineSDFTilePropsEntry>;
+@group(0) @binding(2) var<storage, read> drawableVector: array<LineSDFDrawableUBO>;
+@group(0) @binding(3) var<storage, read> tilePropsVector: array<LineSDFTilePropsUBO>;
 @group(0) @binding(5) var<uniform> props: LineEvaluatedPropsUBO;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
     let index = globalIndex.value;
-    let drawable = drawableVector[index].data;
-    let tileProps = tilePropsVector[index].data;
+    let drawable = drawableVector[index];
+    let tileProps = tilePropsVector[index];
 
     // Constants
     let LINE_DISTANCE_SCALE = 2.0;
@@ -1233,16 +1196,10 @@ struct LineSDFTilePropsUBO {
     mix: f32,
     pad1: f32,
     pad2: f32,
+    stride_pad: array<vec4<f32>, 3>,
 };
 
-struct LineSDFTilePropsEntry {
-    data: LineSDFTilePropsUBO,
-    pad0: vec4<f32>,
-    pad1: vec4<f32>,
-    pad2: vec4<f32>,
-};
-
-@group(0) @binding(3) var<storage, read> tilePropsVector: array<LineSDFTilePropsEntry>;
+@group(0) @binding(3) var<storage, read> tilePropsVector: array<LineSDFTilePropsUBO>;
 @group(0) @binding(5) var<uniform> props: LineEvaluatedPropsUBO;
 @group(1) @binding(0) var sdf_sampler: sampler;
 @group(1) @binding(1) var sdf_texture: texture_2d<f32>;
@@ -1257,7 +1214,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 #ifdef OVERDRAW_INSPECTOR
     return vec4<f32>(1.0, 1.0, 1.0, 1.0);
 #endif
-    let tileProps = tilePropsVector[globalIndex.value].data;
+    let tileProps = tilePropsVector[globalIndex.value];
 #ifdef HAS_UNIFORM_u_color
     let color = props.color;
 #else
@@ -1364,6 +1321,7 @@ struct LineDrawableUBO {
     offset_t: f32,
     width_t: f32,
     pad1: f32,
+    stride_pad: array<vec4<f32>, 2>,
 };
 
 struct LineEvaluatedPropsUBO {
@@ -1378,19 +1336,13 @@ struct LineEvaluatedPropsUBO {
     pad1: f32,
 };
 
-struct LineDrawableEntry {
-    data: LineDrawableUBO,
-    pad0: vec4<f32>,
-    pad1: vec4<f32>,
-};
-
-@group(0) @binding(2) var<storage, read> drawableVector: array<LineDrawableEntry>;
+@group(0) @binding(2) var<storage, read> drawableVector: array<LineDrawableUBO>;
 @group(0) @binding(5) var<uniform> props: LineEvaluatedPropsUBO;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
-    let drawable = drawableVector[globalIndex.value].data;
+    let drawable = drawableVector[globalIndex.value];
     let ratio = max(drawable.ratio, 1e-6);
     let pixel_ratio = DEVICE_PIXEL_RATIO;
     let antialiasing = (1.0 / pixel_ratio) * 0.5;

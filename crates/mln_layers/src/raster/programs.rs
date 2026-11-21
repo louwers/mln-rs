@@ -21,8 +21,8 @@ pub(crate) const ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE: usize = 1;
 pub static RASTER: Program = Program {
     name: "RasterShader",
     buffers: &[
-        Buffer::storage::<RasterDrawableUBO>(ID_RASTER_DRAWABLE_UBO, "RasterDrawableUBO"),
-        Buffer::uniform::<RasterEvaluatedPropsUBO>(ID_RASTER_EVALUATED_PROPS_UBO, "RasterEvaluatedPropsUBO"),
+        Buffer::storage::<RasterDrawableUBO>(ID_RASTER_DRAWABLE_UBO),
+        Buffer::uniform::<RasterEvaluatedPropsUBO>(ID_RASTER_EVALUATED_PROPS_UBO),
     ],
     attributes: &[
         Attribute::new(ID_RASTER_POS_VERTEX_ATTRIBUTE, "a_pos", Short2),

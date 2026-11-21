@@ -43,16 +43,14 @@ enum {
 };
 
 struct alignas(16) CollisionDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */
+    float4x4 matrix;
 };
-static_assert(sizeof(CollisionDrawableUBO) == 4 * 16, "wrong size");
+static_assert(sizeof(CollisionDrawableUBO) == 64, "wrong size");
 
 struct alignas(16) CollisionTilePropsUBO {
-    /*  0 */ float2 extrude_scale;
-    /*  8 */ float overscale_factor;
-    /* 12 */ float pad1;
-    /* 16 */
+    float2 extrude_scale;
+    float overscale_factor;
+    float pad1;
 };
 static_assert(sizeof(CollisionTilePropsUBO) == 16, "wrong size");
 
@@ -148,16 +146,14 @@ enum {
 };
 
 struct alignas(16) CollisionDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */
+    float4x4 matrix;
 };
-static_assert(sizeof(CollisionDrawableUBO) == 4 * 16, "wrong size");
+static_assert(sizeof(CollisionDrawableUBO) == 64, "wrong size");
 
 struct alignas(16) CollisionTilePropsUBO {
-    /*  0 */ float2 extrude_scale;
-    /*  8 */ float overscale_factor;
-    /* 12 */ float pad1;
-    /* 16 */
+    float2 extrude_scale;
+    float overscale_factor;
+    float pad1;
 };
 static_assert(sizeof(CollisionTilePropsUBO) == 16, "wrong size");
 
@@ -273,65 +269,57 @@ enum {
 };
 
 struct alignas(16) SymbolDrawableUBO {
-    /*   0 */ float4x4 matrix;
-    /*  64 */ float4x4 label_plane_matrix;
-    /* 128 */ float4x4 coord_matrix;
-
-    /* 192 */ float2 texsize;
-    /* 200 */ float2 texsize_icon;
-
-    /* 208 */ /*bool*/ int is_text_prop;
-    /* 212 */ /*bool*/ int rotate_symbol;
-    /* 216 */ /*bool*/ int pitch_with_map;
-    /* 220 */ /*bool*/ int is_size_zoom_constant;
-    /* 224 */ /*bool*/ int is_size_feature_constant;
-    /* 228 */ /*bool*/ int is_offset;
-
-    /* 232 */ float size_t;
-    /* 236 */ float size;
-
-    // Interpolations
-    /* 240 */ float fill_color_t;
-    /* 244 */ float halo_color_t;
-    /* 248 */ float opacity_t;
-    /* 252 */ float halo_width_t;
-    /* 256 */ float halo_blur_t;
-    /* 260 */ /*bool*/ int is_along_line;
-    /* 264 */ /*bool*/ int is_variable_anchor;
-    /* 268 */ float pitched_scale;
-    /* 272 */ float2 translation;
-    /* 280 */ float gamma_scale;
-    /* 284 */ /*bool*/ int is_halo;
-    /* 288 */
+    float4x4 matrix;
+    float4x4 label_plane_matrix;
+    float4x4 coord_matrix;
+    float2 texsize;
+    float2 texsize_icon;
+    int is_text_prop;
+    int rotate_symbol;
+    int pitch_with_map;
+    int is_size_zoom_constant;
+    int is_size_feature_constant;
+    int is_offset;
+    float size_t;
+    float size;
+    float fill_color_t;
+    float halo_color_t;
+    float opacity_t;
+    float halo_width_t;
+    float halo_blur_t;
+    int is_along_line;
+    int is_variable_anchor;
+    float pitched_scale;
+    float2 translation;
+    float gamma_scale;
+    int is_halo_pass;
 };
-static_assert(sizeof(SymbolDrawableUBO) == 18 * 16, "wrong size");
+static_assert(sizeof(SymbolDrawableUBO) == 288, "wrong size");
 
 struct alignas(16) SymbolTilePropsUBO {
-    /*  0 */ /*bool*/ int is_text;
-    /*  4 */ /*bool*/ int is_halo;
-    /*  8 */ float pad1;
-    /* 12 */ float pad2;
-    /* 16 */
+    int is_text;
+    int is_halo;
+    float pad1;
+    float pad2;
 };
 static_assert(sizeof(SymbolTilePropsUBO) == 16, "wrong size");
 
 /// Evaluated properties that do not depend on the tile
 struct alignas(16) SymbolEvaluatedPropsUBO {
-    /*  0 */ float4 text_fill_color;
-    /* 16 */ float4 text_halo_color;
-    /* 32 */ float text_opacity;
-    /* 36 */ float text_halo_width;
-    /* 40 */ float text_halo_blur;
-    /* 44 */ float pad1;
-    /* 48 */ float4 icon_fill_color;
-    /* 64 */ float4 icon_halo_color;
-    /* 80 */ float icon_opacity;
-    /* 84 */ float icon_halo_width;
-    /* 88 */ float icon_halo_blur;
-    /* 92 */ float fade_change;
-    /* 96 */
+    float4 text_fill_color;
+    float4 text_halo_color;
+    float text_opacity;
+    float text_halo_width;
+    float text_halo_blur;
+    float pad1;
+    float4 icon_fill_color;
+    float4 icon_halo_color;
+    float icon_opacity;
+    float icon_halo_width;
+    float icon_halo_blur;
+    float fade_change;
 };
-static_assert(sizeof(SymbolEvaluatedPropsUBO) == 6 * 16, "wrong size");
+static_assert(sizeof(SymbolEvaluatedPropsUBO) == 96, "wrong size");
 
 #define c_offscreen_degenerate_triangle_location -2.0
 
@@ -480,7 +468,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 #if defined(PROJECTION_GLOBE)
     if (drawable.pitch_with_map) {
         const float anchor_pos_tile_y = (drawable.coord_matrix * float4(projected_pos.xy / projected_pos.w, z, 1.0)).y;
-        projectionScaling = mix(projectionScaling, 1.0 / circumferenceRatioAtTileY(anchor_pos_tile_y, projection) * drawable.pitched_scale, projection.projection_transition);
+        projectionScaling = mix(projectionScaling, 1.0 / circumferenceRatioAtTileY(anchor_pos_tile_y, projection) * drawable.pitched_scale, projection.transition);
     }
 #endif
 
@@ -541,65 +529,57 @@ enum {
 };
 
 struct alignas(16) SymbolDrawableUBO {
-    /*   0 */ float4x4 matrix;
-    /*  64 */ float4x4 label_plane_matrix;
-    /* 128 */ float4x4 coord_matrix;
-
-    /* 192 */ float2 texsize;
-    /* 200 */ float2 texsize_icon;
-
-    /* 208 */ /*bool*/ int is_text_prop;
-    /* 212 */ /*bool*/ int rotate_symbol;
-    /* 216 */ /*bool*/ int pitch_with_map;
-    /* 220 */ /*bool*/ int is_size_zoom_constant;
-    /* 224 */ /*bool*/ int is_size_feature_constant;
-    /* 228 */ /*bool*/ int is_offset;
-
-    /* 232 */ float size_t;
-    /* 236 */ float size;
-
-    // Interpolations
-    /* 240 */ float fill_color_t;
-    /* 244 */ float halo_color_t;
-    /* 248 */ float opacity_t;
-    /* 252 */ float halo_width_t;
-    /* 256 */ float halo_blur_t;
-    /* 260 */ /*bool*/ int is_along_line;
-    /* 264 */ /*bool*/ int is_variable_anchor;
-    /* 268 */ float pitched_scale;
-    /* 272 */ float2 translation;
-    /* 280 */ float gamma_scale;
-    /* 284 */ /*bool*/ int is_halo;
-    /* 288 */
+    float4x4 matrix;
+    float4x4 label_plane_matrix;
+    float4x4 coord_matrix;
+    float2 texsize;
+    float2 texsize_icon;
+    int is_text_prop;
+    int rotate_symbol;
+    int pitch_with_map;
+    int is_size_zoom_constant;
+    int is_size_feature_constant;
+    int is_offset;
+    float size_t;
+    float size;
+    float fill_color_t;
+    float halo_color_t;
+    float opacity_t;
+    float halo_width_t;
+    float halo_blur_t;
+    int is_along_line;
+    int is_variable_anchor;
+    float pitched_scale;
+    float2 translation;
+    float gamma_scale;
+    int is_halo_pass;
 };
-static_assert(sizeof(SymbolDrawableUBO) == 18 * 16, "wrong size");
+static_assert(sizeof(SymbolDrawableUBO) == 288, "wrong size");
 
 struct alignas(16) SymbolTilePropsUBO {
-    /*  0 */ /*bool*/ int is_text;
-    /*  4 */ /*bool*/ int is_halo;
-    /*  8 */ float pad1;
-    /* 12 */ float pad2;
-    /* 16 */
+    int is_text;
+    int is_halo;
+    float pad1;
+    float pad2;
 };
 static_assert(sizeof(SymbolTilePropsUBO) == 16, "wrong size");
 
 /// Evaluated properties that do not depend on the tile
 struct alignas(16) SymbolEvaluatedPropsUBO {
-    /*  0 */ float4 text_fill_color;
-    /* 16 */ float4 text_halo_color;
-    /* 32 */ float text_opacity;
-    /* 36 */ float text_halo_width;
-    /* 40 */ float text_halo_blur;
-    /* 44 */ float pad1;
-    /* 48 */ float4 icon_fill_color;
-    /* 64 */ float4 icon_halo_color;
-    /* 80 */ float icon_opacity;
-    /* 84 */ float icon_halo_width;
-    /* 88 */ float icon_halo_blur;
-    /* 92 */ float fade_change;
-    /* 96 */
+    float4 text_fill_color;
+    float4 text_halo_color;
+    float text_opacity;
+    float text_halo_width;
+    float text_halo_blur;
+    float pad1;
+    float4 icon_fill_color;
+    float4 icon_halo_color;
+    float icon_opacity;
+    float icon_halo_width;
+    float icon_halo_blur;
+    float fade_change;
 };
-static_assert(sizeof(SymbolEvaluatedPropsUBO) == 6 * 16, "wrong size");
+static_assert(sizeof(SymbolEvaluatedPropsUBO) == 96, "wrong size");
 
 #define c_offscreen_degenerate_triangle_location -2.0
 
@@ -773,7 +753,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 #if defined(PROJECTION_GLOBE)
     if (drawable.pitch_with_map) {
         const float anchor_pos_tile_y = (drawable.coord_matrix * float4(projected_pos.xy / projected_pos.w, z, 1.0)).y;
-        projectionScaling = mix(projectionScaling, 1.0 / circumferenceRatioAtTileY(anchor_pos_tile_y, projection) * drawable.pitched_scale, projection.projection_transition);
+        projectionScaling = mix(projectionScaling, 1.0 / circumferenceRatioAtTileY(anchor_pos_tile_y, projection) * drawable.pitched_scale, projection.transition);
     }
 #endif
 
@@ -798,7 +778,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float halo_blur = unpack_mix_float(vertx.halo_blur, drawable.halo_blur_t);
 #endif
     const float EDGE_GAMMA = 0.105 / DEVICE_PIXEL_RATIO;
-    const float haloBlurGamma = drawable.is_halo ? halo_blur * 1.19 / SDF_PX : 0.0;
+    const float haloBlurGamma = drawable.is_halo_pass ? halo_blur * 1.19 / SDF_PX : 0.0;
     const float gamma_scaled = (haloBlurGamma + EDGE_GAMMA) / (fontScale * drawable.gamma_scale) * position.w;
     const float halo_edge = (6.0 - halo_width / fontScale) / SDF_PX;
 #if defined(HAS_UNIFORM_u_opacity)
@@ -886,65 +866,57 @@ enum {
 };
 
 struct alignas(16) SymbolDrawableUBO {
-    /*   0 */ float4x4 matrix;
-    /*  64 */ float4x4 label_plane_matrix;
-    /* 128 */ float4x4 coord_matrix;
-
-    /* 192 */ float2 texsize;
-    /* 200 */ float2 texsize_icon;
-
-    /* 208 */ /*bool*/ int is_text_prop;
-    /* 212 */ /*bool*/ int rotate_symbol;
-    /* 216 */ /*bool*/ int pitch_with_map;
-    /* 220 */ /*bool*/ int is_size_zoom_constant;
-    /* 224 */ /*bool*/ int is_size_feature_constant;
-    /* 228 */ /*bool*/ int is_offset;
-
-    /* 232 */ float size_t;
-    /* 236 */ float size;
-
-    // Interpolations
-    /* 240 */ float fill_color_t;
-    /* 244 */ float halo_color_t;
-    /* 248 */ float opacity_t;
-    /* 252 */ float halo_width_t;
-    /* 256 */ float halo_blur_t;
-    /* 260 */ /*bool*/ int is_along_line;
-    /* 264 */ /*bool*/ int is_variable_anchor;
-    /* 268 */ float pitched_scale;
-    /* 272 */ float2 translation;
-    /* 280 */ float gamma_scale;
-    /* 284 */ /*bool*/ int is_halo;
-    /* 288 */
+    float4x4 matrix;
+    float4x4 label_plane_matrix;
+    float4x4 coord_matrix;
+    float2 texsize;
+    float2 texsize_icon;
+    int is_text_prop;
+    int rotate_symbol;
+    int pitch_with_map;
+    int is_size_zoom_constant;
+    int is_size_feature_constant;
+    int is_offset;
+    float size_t;
+    float size;
+    float fill_color_t;
+    float halo_color_t;
+    float opacity_t;
+    float halo_width_t;
+    float halo_blur_t;
+    int is_along_line;
+    int is_variable_anchor;
+    float pitched_scale;
+    float2 translation;
+    float gamma_scale;
+    int is_halo_pass;
 };
-static_assert(sizeof(SymbolDrawableUBO) == 18 * 16, "wrong size");
+static_assert(sizeof(SymbolDrawableUBO) == 288, "wrong size");
 
 struct alignas(16) SymbolTilePropsUBO {
-    /*  0 */ /*bool*/ int is_text;
-    /*  4 */ /*bool*/ int is_halo;
-    /*  8 */ float pad1;
-    /* 12 */ float pad2;
-    /* 16 */
+    int is_text;
+    int is_halo;
+    float pad1;
+    float pad2;
 };
 static_assert(sizeof(SymbolTilePropsUBO) == 16, "wrong size");
 
 /// Evaluated properties that do not depend on the tile
 struct alignas(16) SymbolEvaluatedPropsUBO {
-    /*  0 */ float4 text_fill_color;
-    /* 16 */ float4 text_halo_color;
-    /* 32 */ float text_opacity;
-    /* 36 */ float text_halo_width;
-    /* 40 */ float text_halo_blur;
-    /* 44 */ float pad1;
-    /* 48 */ float4 icon_fill_color;
-    /* 64 */ float4 icon_halo_color;
-    /* 80 */ float icon_opacity;
-    /* 84 */ float icon_halo_width;
-    /* 88 */ float icon_halo_blur;
-    /* 92 */ float fade_change;
-    /* 96 */
+    float4 text_fill_color;
+    float4 text_halo_color;
+    float text_opacity;
+    float text_halo_width;
+    float text_halo_blur;
+    float pad1;
+    float4 icon_fill_color;
+    float4 icon_halo_color;
+    float icon_opacity;
+    float icon_halo_width;
+    float icon_halo_blur;
+    float fade_change;
 };
-static_assert(sizeof(SymbolEvaluatedPropsUBO) == 6 * 16, "wrong size");
+static_assert(sizeof(SymbolEvaluatedPropsUBO) == 96, "wrong size");
 
 #define c_offscreen_degenerate_triangle_location -2.0
 
@@ -1122,7 +1094,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 #if defined(PROJECTION_GLOBE)
     if (drawable.pitch_with_map && !drawable.is_along_line) {
         const float anchor_pos_tile_y = (drawable.coord_matrix * float4(projected_pos.xy / projected_pos.w, z, 1.0)).y;
-        projectionScaling = mix(projectionScaling, 1.0 / circumferenceRatioAtTileY(anchor_pos_tile_y, projection) * drawable.pitched_scale, projection.projection_transition);
+        projectionScaling = mix(projectionScaling, 1.0 / circumferenceRatioAtTileY(anchor_pos_tile_y, projection) * drawable.pitched_scale, projection.transition);
     }
 #endif
 
@@ -1149,7 +1121,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float halo_blur = unpack_mix_float(vertx.halo_blur, drawable.halo_blur_t);
 #endif
     const float EDGE_GAMMA = 0.105 / DEVICE_PIXEL_RATIO;
-    const float haloBlurGamma = drawable.is_halo ? halo_blur * 1.19 / SDF_PX : 0.0;
+    const float haloBlurGamma = drawable.is_halo_pass ? halo_blur * 1.19 / SDF_PX : 0.0;
     const float gamma_scaled = (haloBlurGamma + EDGE_GAMMA) / (fontScale * drawable.gamma_scale) * position.w;
     const float halo_edge = (6.0 - halo_width / fontScale) / SDF_PX;
 #if defined(HAS_UNIFORM_u_opacity)

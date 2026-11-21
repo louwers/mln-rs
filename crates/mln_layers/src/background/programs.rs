@@ -22,11 +22,8 @@ pub(crate) const ID_BACKGROUND_POS_VERTEX_ATTRIBUTE: usize = 0;
 pub static BACKGROUND: Program = Program {
     name: "BackgroundShader",
     buffers: &[
-        Buffer::storage_of::<BackgroundDrawableUBO, BackgroundDrawableUnionUBO>(
-            ID_BACKGROUND_DRAWABLE_UBO,
-            "BackgroundDrawableUBO",
-        ),
-        Buffer::uniform::<BackgroundPropsUBO>(ID_BACKGROUND_PROPS_UBO, "BackgroundPropsUBO"),
+        Buffer::storage_of::<BackgroundDrawableUBO, BackgroundDrawableUnionUBO>(ID_BACKGROUND_DRAWABLE_UBO),
+        Buffer::uniform::<BackgroundPropsUBO>(ID_BACKGROUND_PROPS_UBO),
     ],
     attributes: &[Attribute::new(ID_BACKGROUND_POS_VERTEX_ATTRIBUTE, "a_pos", Short2)],
     instance_attributes: &[],
@@ -43,11 +40,8 @@ pub static BACKGROUND: Program = Program {
 pub static BACKGROUND_PATTERN: Program = Program {
     name: "BackgroundPatternShader",
     buffers: &[
-        Buffer::storage_of::<BackgroundPatternDrawableUBO, BackgroundDrawableUnionUBO>(
-            ID_BACKGROUND_DRAWABLE_UBO,
-            "BackgroundPatternDrawableUBO",
-        ),
-        Buffer::uniform::<BackgroundPatternPropsUBO>(ID_BACKGROUND_PROPS_UBO, "BackgroundPatternPropsUBO"),
+        Buffer::storage_of::<BackgroundPatternDrawableUBO, BackgroundDrawableUnionUBO>(ID_BACKGROUND_DRAWABLE_UBO),
+        Buffer::uniform::<BackgroundPatternPropsUBO>(ID_BACKGROUND_PROPS_UBO),
     ],
     attributes: &[Attribute::new(ID_BACKGROUND_POS_VERTEX_ATTRIBUTE, "a_pos", Short2)],
     instance_attributes: &[],

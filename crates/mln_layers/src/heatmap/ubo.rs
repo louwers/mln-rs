@@ -1,41 +1,37 @@
-use bytemuck::{Pod, Zeroable};
-
-/// The heatmap shader's per-drawable uniform block (80 bytes).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
-#[repr(C, align(16))]
-pub struct HeatmapDrawableUBO {
-    /*  0 */ pub matrix: [f32; 4 * 4],
-    /* 64 */ pub extrude_scale: f32,
-
-    // Interpolations
-    /* 68 */ pub weight_t: f32,
-    /* 72 */ pub radius_t: f32,
-    /* 76 */ pub globe_extrude_scale: f32,
-    /* 80 */
+mln_gfx::uniform_block! {
+    /// The heatmap shader's per-drawable uniform block (80 bytes).
+    pub struct HeatmapDrawableUBO {
+        pub matrix: [f32; 4 * 4],
+        pub extrude_scale: f32,
+        // Interpolations
+        #[glsl_es(lowp)]
+        pub weight_t: f32,
+        #[glsl_es(lowp)]
+        pub radius_t: f32,
+        pub globe_extrude_scale: f32,
+    }
 }
 const _: () = assert!(size_of::<HeatmapDrawableUBO>() == 5 * 16);
 
-/// Evaluated properties that do not depend on the tile (16 bytes).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
-#[repr(C, align(16))]
-pub struct HeatmapEvaluatedPropsUBO {
-    /*  0 */ pub weight: f32,
-    /*  4 */ pub radius: f32,
-    /*  8 */ pub intensity: f32,
-    /* 12 */ pub padding: f32,
-    /* 16 */
+mln_gfx::uniform_block! {
+    /// Evaluated properties that do not depend on the tile (16 bytes).
+    pub struct HeatmapEvaluatedPropsUBO {
+        pub weight: f32,
+        pub radius: f32,
+        pub intensity: f32,
+        pub padding: f32,
+    }
 }
 const _: () = assert!(size_of::<HeatmapEvaluatedPropsUBO>() == 16);
 
-/// The heatmap texture shader's properties uniform block (80 bytes).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
-#[repr(C, align(16))]
-pub struct HeatmapTexturePropsUBO {
-    /*  0 */ pub matrix: [f32; 4 * 4],
-    /* 64 */ pub opacity: f32,
-    /* 68 */ pub pad1: f32,
-    /* 72 */ pub pad2: f32,
-    /* 76 */ pub pad3: f32,
-    /* 80 */
+mln_gfx::uniform_block! {
+    /// The heatmap texture shader's properties uniform block (80 bytes).
+    pub struct HeatmapTexturePropsUBO {
+        pub matrix: [f32; 4 * 4],
+        pub opacity: f32,
+        pub pad1: f32,
+        pub pad2: f32,
+        pub pad3: f32,
+    }
 }
 const _: () = assert!(size_of::<HeatmapTexturePropsUBO>() == 5 * 16);

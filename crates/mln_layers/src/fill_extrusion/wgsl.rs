@@ -32,7 +32,7 @@ struct FragmentInput {
 #endif
 };
 
-struct FillExtrusionPatternTilePropsUBO {
+struct FillExtrusionTilePropsUBO {
     pattern_from: vec4<f32>,
     pattern_to: vec4<f32>,
     texsize: vec2<f32>,
@@ -42,8 +42,10 @@ struct FillExtrusionPatternTilePropsUBO {
 
 struct FillExtrusionPropsUBO {
     color: vec4<f32>,
-    light_color_pad: vec4<f32>,
-    light_position_base: vec4<f32>,
+    light_color: vec3<f32>,
+    pad1: f32,
+    light_position: vec3<f32>,
+    base: f32,
     height: f32,
     light_intensity: f32,
     vertical_gradient: f32,
@@ -54,7 +56,7 @@ struct FillExtrusionPropsUBO {
     pad2: f32,
 };
 
-@group(0) @binding(5) var<storage, read> tilePropsVector: array<FillExtrusionPatternTilePropsUBO>;
+@group(0) @binding(5) var<storage, read> tilePropsVector: array<FillExtrusionTilePropsUBO>;
 @group(0) @binding(6) var<uniform> props: FillExtrusionPropsUBO;
 @group(1) @binding(0) var texture_sampler: sampler;
 @group(1) @binding(1) var pattern_texture: texture_2d<f32>;
@@ -140,8 +142,10 @@ struct FillExtrusionDrawableUBO {
 
 struct FillExtrusionPropsUBO {
     color: vec4<f32>,
-    light_color_pad: vec4<f32>,
-    light_position_base: vec4<f32>,
+    light_color: vec3<f32>,
+    pad1: f32,
+    light_position: vec3<f32>,
+    base: f32,
     height: f32,
     light_intensity: f32,
     vertical_gradient: f32,
@@ -163,7 +167,7 @@ fn lit_color(in_color: vec4<f32>, normal: vec3<f32>, t: f32, baseValue: f32, hei
     let luminance = dot(in_color.rgb, vec3<f32>(0.2126, 0.7152, 0.0722));
     let color = in_color + vec4<f32>(0.03, 0.03, 0.03, 1.0);
 
-    let directionalFraction = clamp(dot(normal, props.light_position_base.xyz), 0.0, 1.0);
+    let directionalFraction = clamp(dot(normal, props.light_position), 0.0, 1.0);
     let minDirectional = 1.0 - props.light_intensity;
     let maxDirectional = max(1.0 - luminance + props.light_intensity, 1.0);
     var directional = mix(minDirectional, maxDirectional, directionalFraction);
@@ -174,7 +178,7 @@ fn lit_color(in_color: vec4<f32>, normal: vec3<f32>, t: f32, baseValue: f32, hei
         directional *= (1.0 - props.vertical_gradient) + props.vertical_gradient * factor;
     }
 
-    let lightColor = props.light_color_pad.xyz;
+    let lightColor = props.light_color;
     let minLight = mix(vec3<f32>(0.0), vec3<f32>(0.3), 1.0 - lightColor);
     let lit = clamp(color.rgb * directional * lightColor, minLight, vec3<f32>(1.0));
 
@@ -203,7 +207,7 @@ struct VertexOutput {
 #endif
 };
 
-struct FillExtrusionPatternDrawableUBO {
+struct FillExtrusionDrawableUBO {
     matrix: mat4x4<f32>,
     pixel_coord_upper: vec2<f32>,
     pixel_coord_lower: vec2<f32>,
@@ -214,10 +218,10 @@ struct FillExtrusionPatternDrawableUBO {
     color_t: f32,
     pattern_from_t: f32,
     pattern_to_t: f32,
-    pad1: f32,
+    paint_layout: u32,
 };
 
-struct FillExtrusionPatternTilePropsUBO {
+struct FillExtrusionTilePropsUBO {
     pattern_from: vec4<f32>,
     pattern_to: vec4<f32>,
     texsize: vec2<f32>,
@@ -227,8 +231,10 @@ struct FillExtrusionPatternTilePropsUBO {
 
 struct FillExtrusionPropsUBO {
     color: vec4<f32>,
-    light_color_pad: vec4<f32>,
-    light_position_base: vec4<f32>,
+    light_color: vec3<f32>,
+    pad1: f32,
+    light_position: vec3<f32>,
+    base: f32,
     height: f32,
     light_intensity: f32,
     vertical_gradient: f32,
@@ -239,15 +245,15 @@ struct FillExtrusionPropsUBO {
     pad2: f32,
 };
 
-@group(0) @binding(2) var<storage, read> drawableVector: array<FillExtrusionPatternDrawableUBO>;
-@group(0) @binding(5) var<storage, read> tilePropsVector: array<FillExtrusionPatternTilePropsUBO>;
+@group(0) @binding(2) var<storage, read> drawableVector: array<FillExtrusionDrawableUBO>;
+@group(0) @binding(5) var<storage, read> tilePropsVector: array<FillExtrusionTilePropsUBO>;
 @group(0) @binding(6) var<uniform> props: FillExtrusionPropsUBO;
 
 // The lighting of a surface facing `normal`, at `t` (0 at the base, 1 at the
 // top) of a wall.
 fn lighting_of(normal: vec3<f32>, t: f32, baseValue: f32, heightValue: f32) -> vec4<f32> {
     var lighting = vec4<f32>(0.0, 0.0, 0.0, 1.0);
-    var directional = clamp(dot(normal, props.light_position_base.xyz), 0.0, 1.0);
+    var directional = clamp(dot(normal, props.light_position), 0.0, 1.0);
     directional = mix(1.0 - props.light_intensity, max(0.5 + props.light_intensity, 1.0), directional);
 
     if (normal.z == 0.0) {
@@ -256,7 +262,7 @@ fn lighting_of(normal: vec3<f32>, t: f32, baseValue: f32, heightValue: f32) -> v
         directional *= (1.0 - props.vertical_gradient) + props.vertical_gradient * factor;
     }
 
-    let lightColor = props.light_color_pad.xyz;
+    let lightColor = props.light_color;
     let lit = clamp(directional * lightColor,
                     mix(vec3<f32>(0.0), vec3<f32>(0.3), 1.0 - lightColor),
                     vec3<f32>(1.0));
@@ -266,7 +272,7 @@ fn lighting_of(normal: vec3<f32>, t: f32, baseValue: f32, heightValue: f32) -> v
 
 // Sets the output's pattern positions and data-driven patterns for the point
 // `patternPos` of the pattern's plane.
-fn set_pattern(out: ptr<function, VertexOutput>, drawable: FillExtrusionPatternDrawableUBO,
+fn set_pattern(out: ptr<function, VertexOutput>, drawable: FillExtrusionDrawableUBO,
                patternFrom: vec4<f32>, patternTo: vec4<f32>, patternPos: vec2<f32>) {
 #ifndef HAS_UNIFORM_u_pattern_from
     (*out).pattern_from = patternFrom;
@@ -304,7 +310,7 @@ macro_rules! base_and_height {
 #ifndef HAS_UNIFORM_u_base
     let baseValue = max(unpack_mix_float(in.base, drawable.base_t), 0.0);
 #else
-    let baseValue = max(props.light_position_base.w, 0.0);
+    let baseValue = max(props.base, 0.0);
 #endif
 
 #ifndef HAS_UNIFORM_u_height

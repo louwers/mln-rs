@@ -7,17 +7,17 @@ use mln_gfx::shaders::source::glsl_es::Glsl;
 pub(crate) const ATMOSPHERE_SHADER: Glsl = Glsl {
     vertex: r"layout(location = 0) in vec2 a_pos;
 
-layout(std140) uniform AtmospherePropsUBO {
-    mat4 inv_view_projection;
-    vec4 camera_position;
-    vec4 sun_position;
-} atmosphere;
+layout (std140) uniform AtmospherePropsUBO {
+    highp mat4 u_inv_view_projection;
+    highp vec4 u_camera_position;
+    highp vec4 u_sun_position;
+};
 
 out vec3 v_view_direction;
 
 void main() {
-    vec4 view_position = atmosphere.inv_view_projection * vec4(a_pos, 0.0, 1.0);
-    v_view_direction = view_position.xyz / view_position.w - atmosphere.camera_position.xyz;
+    vec4 view_position = u_inv_view_projection * vec4(a_pos, 0.0, 1.0);
+    v_view_direction = view_position.xyz / view_position.w - u_camera_position.xyz;
     // WebGL maps NDC z=0 to depth 0.5. This keeps atmospheric scattering in
     // front of the planet while still participating in the read-only depth test.
     gl_Position = vec4(a_pos, 0.0, 1.0);
@@ -29,11 +29,11 @@ precision highp float;
 
 in vec3 v_view_direction;
 
-layout(std140) uniform AtmospherePropsUBO {
-    mat4 inv_view_projection;
-    vec4 camera_position;
-    vec4 sun_position;
-} atmosphere;
+layout (std140) uniform AtmospherePropsUBO {
+    highp mat4 u_inv_view_projection;
+    highp vec4 u_camera_position;
+    highp vec4 u_sun_position;
+};
 
 const float PI = 3.141592653589793;
 const int PRIMARY_STEPS = 5;
@@ -125,11 +125,11 @@ vec4 scatter(vec3 direction, vec3 origin, vec3 sun) {
 }
 
 void main() {
-    vec3 camera = atmosphere.camera_position.xyz * EARTH_RADIUS;
-    vec4 color = scatter(v_view_direction, camera, atmosphere.sun_position.xyz);
+    vec3 camera = u_camera_position.xyz * EARTH_RADIUS;
+    vec4 color = scatter(v_view_direction, camera, u_sun_position.xyz);
     color.rgb = 1.0 - exp(-color.rgb);
     color = pow(color, vec4(1.0 / 2.2));
-    fragColor = vec4(color.rgb, 1.0 - color.a) * atmosphere.sun_position.w;
+    fragColor = vec4(color.rgb, 1.0 - color.a) * u_sun_position.w;
 }
 ",
 };
@@ -176,8 +176,8 @@ uniform sampler2D u_backdrop;
 layout (std140) uniform LayerCompositeUBO {
     highp float u_opacity;
     highp int u_blend;
-    lowp float props_pad2;
-    lowp float props_pad3;
+    highp float LayerCompositeUBO_pad2;
+    highp float LayerCompositeUBO_pad3;
 };
 
 // The blend modes that no blend function expresses, of the W3C compositing
@@ -240,8 +240,7 @@ pub(crate) const TILE_DEBUG_SHADER: Glsl = Glsl {
     highp vec4 u_color;
     highp float u_width;
     highp float u_world_width;
-    lowp float props_pad0;
-    lowp float props_pad1;
+    highp vec2 TileDebugPropsUBO_pad;
 };
 
 // The quad's corner: x picks the segment's start (0) or end (1), y its side.
@@ -299,8 +298,7 @@ void main() {
     highp vec4 u_color;
     highp float u_width;
     highp float u_world_width;
-    lowp float props_pad0;
-    lowp float props_pad1;
+    highp vec2 TileDebugPropsUBO_pad;
 };
 
 in highp vec2 v_offset;
@@ -347,31 +345,31 @@ precision highp float;
 
 in vec2 v_pos;
 
-layout(std140) uniform SkyPropsUBO {
-    vec4 sky_color;
-    vec4 horizon_color;
-    vec2 horizon;
-    vec2 horizon_normal;
-    vec2 viewport_size;
-    float sky_horizon_blend;
-    float sky_blend;
-} sky;
+layout (std140) uniform SkyPropsUBO {
+    highp vec4 u_sky_color;
+    highp vec4 u_horizon_color;
+    highp vec2 u_horizon;
+    highp vec2 u_horizon_normal;
+    highp vec2 u_viewport_size;
+    highp float u_sky_horizon_blend;
+    highp float u_sky_blend;
+};
 
 void main() {
-    vec2 pixel = (v_pos * 0.5 + 0.5) * sky.viewport_size;
-    float distance_to_horizon = dot(pixel - sky.horizon, sky.horizon_normal);
+    vec2 pixel = (v_pos * 0.5 + 0.5) * u_viewport_size;
+    float distance_to_horizon = dot(pixel - u_horizon, u_horizon_normal);
     vec4 color = vec4(0.0);
 
     if (distance_to_horizon > 0.0) {
-        if (sky.sky_horizon_blend > 0.0 && distance_to_horizon < sky.sky_horizon_blend) {
-            float blend = 1.0 - distance_to_horizon / sky.sky_horizon_blend;
-            color = mix(sky.sky_color, sky.horizon_color, blend * blend);
+        if (u_sky_horizon_blend > 0.0 && distance_to_horizon < u_sky_horizon_blend) {
+            float blend = 1.0 - distance_to_horizon / u_sky_horizon_blend;
+            color = mix(u_sky_color, u_horizon_color, blend * blend);
         } else {
-            color = sky.sky_color;
+            color = u_sky_color;
         }
     }
 
-    fragColor = color * (1.0 - sky.sky_blend);
+    fragColor = color * (1.0 - u_sky_blend);
 }
 ",
 };

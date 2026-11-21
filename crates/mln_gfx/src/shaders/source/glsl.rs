@@ -2,6 +2,8 @@
 //! Vulkan and D3D12 backends write as SPIR-V and HLSL, whose buffers and
 //! textures bind at `mln_glsl`'s descriptor set layout.
 
+use crate::shaders::block::{Block, MemberType, c_like_members};
+
 /// The GLSL of a program.
 ///
 /// A stage compiles from `mln_glsl`'s prelude of the stage, `prelude` and
@@ -14,4 +16,27 @@ pub struct Glsl {
     pub vertex: &'static str,
     /// The fragment shader.
     pub fragment: &'static str,
+}
+
+/// The declaration of `block` in the GLSL: a struct of its members, padded
+/// to `size` bytes, the stride of the storage buffer whose elements it is,
+/// or its own size. A buffer of it is a `std140` block of one member of the
+/// struct, or of an array of them.
+#[must_use]
+pub fn declaration(block: &Block, size: usize) -> String {
+    let members = c_like_members(
+        block,
+        size,
+        |ty| match ty {
+            MemberType::Float => "float",
+            MemberType::Int | MemberType::Bool => "int",
+            MemberType::Uint => "uint",
+            MemberType::Vec2 => "vec2",
+            MemberType::Vec3 => "vec3",
+            MemberType::Vec4 | MemberType::Vec4Array(_) => "vec4",
+            MemberType::Mat4 => "mat4",
+        },
+        "vec4",
+    );
+    format!("struct {} {{\n{members}}};\n", block.name)
 }

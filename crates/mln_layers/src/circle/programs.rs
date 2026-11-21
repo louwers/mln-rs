@@ -27,8 +27,8 @@ pub(crate) const ID_CIRCLE_STROKE_OPACITY_VERTEX_ATTRIBUTE: usize = 7;
 pub static CIRCLE: Program = Program {
     name: "CircleShader",
     buffers: &[
-        Buffer::storage::<CircleDrawableUBO>(ID_CIRCLE_DRAWABLE_UBO, "CircleDrawableUBO"),
-        Buffer::uniform::<CircleEvaluatedPropsUBO>(ID_CIRCLE_EVALUATED_PROPS_UBO, "CircleEvaluatedPropsUBO"),
+        Buffer::storage::<CircleDrawableUBO>(ID_CIRCLE_DRAWABLE_UBO),
+        Buffer::uniform::<CircleEvaluatedPropsUBO>(ID_CIRCLE_EVALUATED_PROPS_UBO),
     ],
     attributes: &[
         Attribute::new(ID_CIRCLE_POS_VERTEX_ATTRIBUTE, "a_pos", Short2),

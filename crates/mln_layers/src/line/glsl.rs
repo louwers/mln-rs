@@ -17,8 +17,8 @@ macro_rules! line_vertex_prelude {
 
 float projectLineThickness(float tileY, ProjectionUBO projection) {
     const float thickness = 1.0 / circumferenceRatioAtTileY(tileY, projection);
-    if (projection.projection_transition < 0.999) {
-        return mix(1.0, thickness, projection.projection_transition);
+    if (projection.transition < 0.999) {
+        return mix(1.0, thickness, projection.transition);
     }
     return thickness;
 }
@@ -105,7 +105,6 @@ layout(push_constant) uniform Constants {
 struct LineDrawableUBO {
     mat4 matrix;
     float ratio;
-    // Interpolations
     float color_t;
     float blur_t;
     float opacity_t;
@@ -113,8 +112,7 @@ struct LineDrawableUBO {
     float offset_t;
     float width_t;
     float pad1;
-    vec4 pad2;
-    vec4 pad3;
+    vec4 stride_pad[2];
 };
 
 layout(std140, set = LAYER_SET_INDEX, binding = idLineDrawableUBO) readonly buffer LineDrawableUBOVector {
@@ -361,7 +359,6 @@ layout(push_constant) uniform Constants {
 struct LineGradientDrawableUBO {
     mat4 matrix;
     float ratio;
-    // Interpolations
     float blur_t;
     float opacity_t;
     float gapwidth_t;
@@ -369,8 +366,7 @@ struct LineGradientDrawableUBO {
     float width_t;
     float pad1;
     float pad2;
-    vec4 pad3;
-    vec4 pad4;
+    vec4 stride_pad[2];
 };
 
 layout(std140, set = LAYER_SET_INDEX, binding = idLineDrawableUBO) readonly buffer LineGradientDrawableUBOVector {
@@ -617,7 +613,6 @@ layout(push_constant) uniform Constants {
 struct LinePatternDrawableUBO {
     mat4 matrix;
     float ratio;
-    // Interpolations
     float blur_t;
     float opacity_t;
     float gapwidth_t;
@@ -629,7 +624,7 @@ struct LinePatternDrawableUBO {
     float pad1;
     float pad2;
     float pad3;
-    vec4 pad4;
+    vec4 stride_pad[1];
 };
 
 layout(std140, set = LAYER_SET_INDEX, binding = idLineDrawableUBO) readonly buffer LinePatternDrawableUBOVector {
@@ -808,7 +803,7 @@ layout(push_constant) uniform Constants {
     int ubo_index;
 } constant;
 
-struct LinePatternTilePropertiesUBO {
+struct LinePatternTilePropsUBO {
     vec4 pattern_from;
     vec4 pattern_to;
     vec4 scale;
@@ -818,7 +813,7 @@ struct LinePatternTilePropertiesUBO {
 };
 
 layout(std140, set = LAYER_SET_INDEX, binding = idLineTilePropsUBO) readonly buffer LinePatternTilePropertiesUBOVector {
-    LinePatternTilePropertiesUBO tile_props_ubo[];
+    LinePatternTilePropsUBO tile_props_ubo[];
 } tilePropsVector;
 
 layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEvaluatedPropsUBO {
@@ -852,7 +847,7 @@ void main() {
     return;
 #else
 
-    const LinePatternTilePropertiesUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
+    const LinePatternTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
 
 #ifdef HAS_UNIFORM_u_blur
     const float blur = props.blur;
@@ -992,7 +987,6 @@ struct LineSDFDrawableUBO {
     float tex_y_a;
     float tex_y_b;
     float ratio;
-    // Interpolations
     float color_t;
     float blur_t;
     float opacity_t;
@@ -1201,9 +1195,7 @@ struct LineSDFTilePropsUBO {
     float mix;
     float pad1;
     float pad2;
-    vec4 pad3;
-    vec4 pad4;
-    vec4 pad5;
+    vec4 stride_pad[3];
 };
 
 layout(std140, set = LAYER_SET_INDEX, binding = idLineTilePropsUBO) readonly buffer LineSDFTilePropsUBOVector {
@@ -1343,7 +1335,6 @@ struct LineSDFDrawableUBO {
     float tex_y_a;
     float tex_y_b;
     float ratio;
-    // Interpolations
     float color_t;
     float blur_t;
     float opacity_t;
@@ -1551,9 +1542,7 @@ struct LineSDFTilePropsUBO {
     float mix;
     float pad1;
     float pad2;
-    vec4 pad3;
-    vec4 pad4;
-    vec4 pad5;
+    vec4 stride_pad[3];
 };
 
 layout(std140, set = LAYER_SET_INDEX, binding = idLineTilePropsUBO) readonly buffer LineSDFTilePropsUBOVector {

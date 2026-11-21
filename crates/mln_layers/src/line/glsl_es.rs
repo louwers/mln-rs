@@ -77,7 +77,6 @@ layout (std140) uniform LineSDFDrawableUBO {
     highp float u_tex_y_a;
     highp float u_tex_y_b;
     mediump float u_ratio;
-    // Interpolations
     lowp float u_color_t;
     lowp float u_blur_t;
     lowp float u_opacity_t;
@@ -86,7 +85,7 @@ layout (std140) uniform LineSDFDrawableUBO {
     lowp float u_width_t;
     lowp float u_floorwidth_t;
     highp float u_atlas_height;
-    lowp float drawable_pad2;
+    highp float LineSDFDrawableUBO_pad2;
 };
 
 layout (std140) uniform LineEvaluatedPropsUBO {
@@ -97,8 +96,8 @@ layout (std140) uniform LineEvaluatedPropsUBO {
     lowp float u_offset;
     mediump float u_width;
     lowp float u_floorwidth;
-    lowp float props_pad1;
-    lowp float props_pad2;
+    highp float LineEvaluatedPropsUBO_pad0;
+    highp float LineEvaluatedPropsUBO_pad1;
 };
 
 out vec2 v_normal;
@@ -255,15 +254,15 @@ lowp float floorwidth = u_floorwidth;
     lowp float u_offset;
     mediump float u_width;
     lowp float u_floorwidth;
-    lowp float props_pad1;
-    lowp float props_pad2;
+    highp float LineEvaluatedPropsUBO_pad0;
+    highp float LineEvaluatedPropsUBO_pad1;
 };
 
 layout (std140) uniform LineSDFTilePropsUBO {
     highp float u_sdfgamma;
     highp float u_mix;
-    lowp float tileprops_pad1;
-    lowp float tileprops_pad2;
+    highp float LineSDFTilePropsUBO_pad1;
+    highp float LineSDFTilePropsUBO_pad2;
 };
 
 uniform sampler2D u_image;
@@ -369,14 +368,13 @@ layout (location = 1) in vec4 a_data;
 layout (std140) uniform LineGradientDrawableUBO {
     highp mat4 u_matrix;
     mediump float u_ratio;
-    // Interpolations
     lowp float u_blur_t;
     lowp float u_opacity_t;
     lowp float u_gapwidth_t;
     lowp float u_offset_t;
     lowp float u_width_t;
-    lowp float drawable_pad1;
-    lowp float drawable_pad2;
+    highp float LineGradientDrawableUBO_pad1;
+    highp float LineGradientDrawableUBO_pad2;
 };
 
 layout (std140) uniform LineEvaluatedPropsUBO {
@@ -387,8 +385,8 @@ layout (std140) uniform LineEvaluatedPropsUBO {
     lowp float u_offset;
     mediump float u_width;
     lowp float u_floorwidth;
-    lowp float props_pad1;
-    lowp float props_pad2;
+    highp float LineEvaluatedPropsUBO_pad0;
+    highp float LineEvaluatedPropsUBO_pad1;
 };
 
 out vec2 v_normal;
@@ -513,8 +511,8 @@ mediump float width = u_width;
     lowp float u_offset;
     mediump float u_width;
     lowp float u_floorwidth;
-    lowp float props_pad1;
-    lowp float props_pad2;
+    highp float LineEvaluatedPropsUBO_pad0;
+    highp float LineEvaluatedPropsUBO_pad1;
 };
 
 uniform sampler2D u_image;
@@ -592,7 +590,6 @@ layout (location = 1) in vec4 a_data;
 layout (std140) uniform LinePatternDrawableUBO {
     highp mat4 u_matrix;
     mediump float u_ratio;
-    // Interpolations
     lowp float u_blur_t;
     lowp float u_opacity_t;
     lowp float u_gapwidth_t;
@@ -601,9 +598,9 @@ layout (std140) uniform LinePatternDrawableUBO {
     lowp float u_pattern_from_t;
     lowp float u_pattern_to_t;
     lowp float u_floorwidth_t;
-    lowp float drawable_pad1;
-    lowp float drawable_pad2;
-    lowp float drawable_pad3;
+    highp float LinePatternDrawableUBO_pad1;
+    highp float LinePatternDrawableUBO_pad2;
+    highp float LinePatternDrawableUBO_pad3;
 };
 
 layout (std140) uniform LinePatternTilePropsUBO {
@@ -612,7 +609,7 @@ layout (std140) uniform LinePatternTilePropsUBO {
     mediump vec4 u_scale;
     highp vec2 u_texsize;
     highp float u_fade;
-    lowp float tileprops_pad1;
+    highp float LinePatternTilePropsUBO_pad1;
 };
 
 layout (std140) uniform LineEvaluatedPropsUBO {
@@ -623,8 +620,8 @@ layout (std140) uniform LineEvaluatedPropsUBO {
     lowp float u_offset;
     mediump float u_width;
     lowp float u_floorwidth;
-    lowp float props_pad1;
-    lowp float props_pad2;
+    highp float LineEvaluatedPropsUBO_pad0;
+    highp float LineEvaluatedPropsUBO_pad1;
 };
 
 out vec2 v_normal;
@@ -776,7 +773,7 @@ layout (std140) uniform LinePatternTilePropsUBO {
     mediump vec4 u_scale;
     highp vec2 u_texsize;
     highp float u_fade;
-    lowp float tileprops_pad1;
+    highp float LinePatternTilePropsUBO_pad1;
 };
 
 layout (std140) uniform LineEvaluatedPropsUBO {
@@ -787,8 +784,8 @@ layout (std140) uniform LineEvaluatedPropsUBO {
     lowp float u_offset;
     mediump float u_width;
     lowp float u_floorwidth;
-    lowp float props_pad1;
-    lowp float props_pad2;
+    highp float LineEvaluatedPropsUBO_pad0;
+    highp float LineEvaluatedPropsUBO_pad1;
 };
 
 uniform sampler2D u_image;
@@ -921,7 +918,6 @@ layout (std140) uniform LineSDFDrawableUBO {
     highp float u_tex_y_a;
     highp float u_tex_y_b;
     mediump float u_ratio;
-    // Interpolations
     lowp float u_color_t;
     lowp float u_blur_t;
     lowp float u_opacity_t;
@@ -930,7 +926,7 @@ layout (std140) uniform LineSDFDrawableUBO {
     lowp float u_width_t;
     lowp float u_floorwidth_t;
     highp float u_atlas_height;
-    lowp float drawable_pad2;
+    highp float LineSDFDrawableUBO_pad2;
 };
 
 layout (std140) uniform LineEvaluatedPropsUBO {
@@ -941,8 +937,8 @@ layout (std140) uniform LineEvaluatedPropsUBO {
     lowp float u_offset;
     mediump float u_width;
     lowp float u_floorwidth;
-    lowp float props_pad1;
-    lowp float props_pad2;
+    highp float LineEvaluatedPropsUBO_pad0;
+    highp float LineEvaluatedPropsUBO_pad1;
 };
 
 out vec2 v_normal;
@@ -1106,15 +1102,15 @@ lowp float floorwidth = u_floorwidth;
     lowp float u_offset;
     mediump float u_width;
     lowp float u_floorwidth;
-    lowp float props_pad1;
-    lowp float props_pad2;
+    highp float LineEvaluatedPropsUBO_pad0;
+    highp float LineEvaluatedPropsUBO_pad1;
 };
 
 layout (std140) uniform LineSDFTilePropsUBO {
     highp float u_sdfgamma;
     highp float u_mix;
-    lowp float tileprops_pad1;
-    lowp float tileprops_pad2;
+    highp float LineSDFTilePropsUBO_pad1;
+    highp float LineSDFTilePropsUBO_pad2;
 };
 
 uniform sampler2D u_image;
@@ -1216,14 +1212,13 @@ layout (location = 1) in vec4 a_data;
 layout (std140) uniform LineDrawableUBO {
     highp mat4 u_matrix;
     mediump float u_ratio;
-    // Interpolations
     lowp float u_color_t;
     lowp float u_blur_t;
     lowp float u_opacity_t;
     lowp float u_gapwidth_t;
     lowp float u_offset_t;
     lowp float u_width_t;
-    lowp float drawable_pad1;
+    highp float LineDrawableUBO_pad1;
 };
 
 layout (std140) uniform LineEvaluatedPropsUBO {
@@ -1234,8 +1229,8 @@ layout (std140) uniform LineEvaluatedPropsUBO {
     lowp float u_offset;
     mediump float u_width;
     lowp float u_floorwidth;
-    lowp float props_pad1;
-    lowp float props_pad2;
+    highp float LineEvaluatedPropsUBO_pad0;
+    highp float LineEvaluatedPropsUBO_pad1;
 };
 
 out vec2 v_normal;
@@ -1369,8 +1364,8 @@ mediump float width = u_width;
     lowp float u_offset;
     mediump float u_width;
     lowp float u_floorwidth;
-    lowp float props_pad1;
-    lowp float props_pad2;
+    highp float LineEvaluatedPropsUBO_pad0;
+    highp float LineEvaluatedPropsUBO_pad1;
 };
 
 in vec2 v_width2;

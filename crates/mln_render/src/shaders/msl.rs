@@ -5,7 +5,7 @@ use mln_gfx::shaders::source::msl::Msl;
 pub(crate) const ATMOSPHERE_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r"
+    prelude: r#"
 
 enum {
     idSkyPropsUBO = drawableReservedUBOCount,
@@ -26,14 +26,16 @@ struct alignas(16) SkyPropsUBO {
     float sky_horizon_blend;
     float sky_blend;
 };
+static_assert(sizeof(SkyPropsUBO) == 64, "wrong size");
 
 struct alignas(16) AtmospherePropsUBO {
     float4x4 inv_view_projection;
     float4 camera_position;
     float4 sun_position;
 };
+static_assert(sizeof(AtmospherePropsUBO) == 96, "wrong size");
 
-",
+"#,
     source: r"
 
 struct AtmosphereVertexStage {
@@ -242,11 +244,10 @@ enum {
 };
 
 struct alignas(16) LayerCompositeUBO {
-    /*  0 */ float opacity;
-    /*  4 */ int blend;
-    /*  8 */ float pad2;
-    /* 12 */ float pad3;
-    /* 16 */
+    float opacity;
+    int blend;
+    float pad2;
+    float pad3;
 };
 static_assert(sizeof(LayerCompositeUBO) == 16, "wrong size");
 
@@ -339,13 +340,12 @@ enum {
 };
 
 struct alignas(16) TileDebugPropsUBO {
-    /*  0 */ float4 color;
-    /* 16 */ float width;
-    /* 20 */ float world_width;
-    /* 24 */ float pad[2];
-    /* 32 */
+    float4 color;
+    float width;
+    float world_width;
+    float2 pad;
 };
-static_assert(sizeof(TileDebugPropsUBO) == 2 * 16, "wrong size");
+static_assert(sizeof(TileDebugPropsUBO) == 32, "wrong size");
 
 "#,
     source: r"
@@ -387,7 +387,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     float units = 1.0 / (projection.tile_mercator_coords.z * props.world_width);
 #if defined(PROJECTION_GLOBE)
     const float ratio = circumferenceRatioAtTileY((start.y + end.y) * 0.5, projection);
-    units *= mix(1.0, 1.0 / ratio, projection.projection_transition);
+    units *= mix(1.0, 1.0 / ratio, projection.transition);
 #endif
 
     // The quad around the segment on the map, reaching half the width and
@@ -443,7 +443,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 pub(crate) const SKY_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r"
+    prelude: r#"
 
 enum {
     idSkyPropsUBO = drawableReservedUBOCount,
@@ -464,14 +464,16 @@ struct alignas(16) SkyPropsUBO {
     float sky_horizon_blend;
     float sky_blend;
 };
+static_assert(sizeof(SkyPropsUBO) == 64, "wrong size");
 
 struct alignas(16) AtmospherePropsUBO {
     float4x4 inv_view_projection;
     float4 camera_position;
     float4 sun_position;
 };
+static_assert(sizeof(AtmospherePropsUBO) == 96, "wrong size");
 
-",
+"#,
     source: r"
 
 struct SkyVertexStage {

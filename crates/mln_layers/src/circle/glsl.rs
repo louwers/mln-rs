@@ -50,7 +50,6 @@ layout(push_constant) uniform Constants {
 struct CircleDrawableUBO {
     mat4 matrix;
     vec2 extrude_scale;
-    // Interpolations
     float color_t;
     float radius_t;
     float blur_t;

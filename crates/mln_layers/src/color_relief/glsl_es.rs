@@ -3,15 +3,15 @@
 use mln_gfx::shaders::source::glsl_es::Glsl;
 
 pub(super) const COLOR_RELIEF_SHADER: Glsl = Glsl {
-    vertex: r"layout(std140) uniform ColorReliefDrawableUBO {
+    vertex: r"layout (std140) uniform ColorReliefDrawableUBO {
     highp mat4 u_matrix;
 };
 
-layout(std140) uniform ColorReliefTilePropsUBO {
+layout (std140) uniform ColorReliefTilePropsUBO {
     highp vec4 u_unpack;
     highp vec2 u_dimension;
     highp int u_color_ramp_size;
-    highp float pad_tile0;
+    highp float ColorReliefTilePropsUBO_pad_tile0;
 };
 
 layout (location = 0) in vec2 a_pos;
@@ -34,22 +34,22 @@ void main() {
 precision highp float;
 #endif
 
-layout(std140) uniform ColorReliefDrawableUBO {
+layout (std140) uniform ColorReliefDrawableUBO {
     highp mat4 u_matrix;
 };
 
-layout(std140) uniform ColorReliefTilePropsUBO {
+layout (std140) uniform ColorReliefTilePropsUBO {
     highp vec4 u_unpack;
     highp vec2 u_dimension;
     highp int u_color_ramp_size;
-    highp float pad_tile0;
+    highp float ColorReliefTilePropsUBO_pad_tile0;
 };
 
-layout(std140) uniform ColorReliefEvaluatedPropsUBO {
+layout (std140) uniform ColorReliefEvaluatedPropsUBO {
     highp float u_opacity;
-    highp float pad_eval0;
-    highp float pad_eval1;
-    highp float pad_eval2;
+    highp float ColorReliefEvaluatedPropsUBO_pad_eval0;
+    highp float ColorReliefEvaluatedPropsUBO_pad_eval1;
+    highp float ColorReliefEvaluatedPropsUBO_pad_eval2;
 };
 
 uniform sampler2D u_image;

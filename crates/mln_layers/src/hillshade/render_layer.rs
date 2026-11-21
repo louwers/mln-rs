@@ -181,20 +181,14 @@ fn pack_evaluated_props(illumination: &IlluminationProperties, accent_color: &Co
         ubo.azimuths[i] = azimuth;
     }
 
-    // Pack shadow colors (4 colors * 4 components = 16 floats)
+    // Pack shadow colors (up to 4)
     for (i, color) in illumination.shadow_colors.iter().take(4).enumerate() {
-        ubo.shadows[i * 4] = color.r;
-        ubo.shadows[i * 4 + 1] = color.g;
-        ubo.shadows[i * 4 + 2] = color.b;
-        ubo.shadows[i * 4 + 3] = color.a;
+        ubo.shadows[i] = [color.r, color.g, color.b, color.a];
     }
 
-    // Pack highlight colors (4 colors * 4 components = 16 floats)
+    // Pack highlight colors (up to 4)
     for (i, color) in illumination.highlight_colors.iter().take(4).enumerate() {
-        ubo.highlights[i * 4] = color.r;
-        ubo.highlights[i * 4 + 1] = color.g;
-        ubo.highlights[i * 4 + 2] = color.b;
-        ubo.highlights[i * 4 + 3] = color.a;
+        ubo.highlights[i] = [color.r, color.g, color.b, color.a];
     }
 
     ubo

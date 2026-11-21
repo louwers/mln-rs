@@ -7,7 +7,7 @@ pub(super) const RASTER_SHADER: Glsl = Glsl {
     highp mat4 u_matrix;
 };
 layout (std140) uniform RasterEvaluatedPropsUBO {
-    highp vec3 u_spin_weights;
+    highp vec4 u_spin_weights;
     highp vec2 u_tl_parent;
     highp float u_scale_parent;
     highp float u_buffer_scale;
@@ -17,8 +17,8 @@ layout (std140) uniform RasterEvaluatedPropsUBO {
     highp float u_brightness_high;
     highp float u_saturation_factor;
     highp float u_contrast_factor;
-    lowp float props_pad1;
-    lowp float props_pad2;
+    highp float RasterEvaluatedPropsUBO_pad1;
+    highp float RasterEvaluatedPropsUBO_pad2;
 };
 
 layout (location = 0) in vec2 a_pos;
@@ -39,7 +39,7 @@ void main() {
 }
 ",
     fragment: r"layout (std140) uniform RasterEvaluatedPropsUBO {
-    highp vec3 u_spin_weights;
+    highp vec4 u_spin_weights;
     highp vec2 u_tl_parent;
     highp float u_scale_parent;
     highp float u_buffer_scale;
@@ -49,8 +49,8 @@ void main() {
     highp float u_brightness_high;
     highp float u_saturation_factor;
     highp float u_contrast_factor;
-    lowp float props_pad1;
-    lowp float props_pad2;
+    highp float RasterEvaluatedPropsUBO_pad1;
+    highp float RasterEvaluatedPropsUBO_pad2;
 };
 uniform sampler2D u_image0;
 uniform sampler2D u_image1;

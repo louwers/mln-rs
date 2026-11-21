@@ -9,7 +9,6 @@ out vec3 v_data;
 layout (std140) uniform CircleDrawableUBO {
     highp mat4 u_matrix;
     highp vec2 u_extrude_scale;
-    // Interpolations
     lowp float u_color_t;
     lowp float u_radius_t;
     lowp float u_blur_t;
@@ -18,8 +17,8 @@ layout (std140) uniform CircleDrawableUBO {
     lowp float u_stroke_width_t;
     lowp float u_stroke_opacity_t;
     highp float u_globe_extrude_scale;
-    lowp float drawable_pad2;
-    lowp float drawable_pad3;
+    highp float CircleDrawableUBO_pad2;
+    highp float CircleDrawableUBO_pad3;
 };
 
 layout (std140) uniform CircleEvaluatedPropsUBO {
@@ -32,7 +31,7 @@ layout (std140) uniform CircleEvaluatedPropsUBO {
     lowp float u_stroke_opacity;
     bool u_scale_with_map;
     bool u_pitch_with_map;
-    lowp float props_pad1;
+    highp float CircleEvaluatedPropsUBO_pad1;
 };
 
 #ifndef HAS_UNIFORM_u_color
@@ -174,7 +173,7 @@ layout (std140) uniform CircleEvaluatedPropsUBO {
     lowp float u_stroke_opacity;
     bool u_scale_with_map;
     bool u_pitch_with_map;
-    lowp float props_pad1;
+    highp float CircleEvaluatedPropsUBO_pad1;
 };
 
 #ifndef HAS_UNIFORM_u_color

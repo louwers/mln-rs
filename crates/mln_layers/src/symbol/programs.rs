@@ -51,9 +51,9 @@ pub(crate) const ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE: usize = 11;
 pub static SYMBOL_ICON: Program = Program {
     name: "SymbolIconShader",
     buffers: &[
-        Buffer::storage::<SymbolDrawableUBO>(ID_SYMBOL_DRAWABLE_UBO, "SymbolDrawableUBO"),
-        Buffer::storage::<SymbolTilePropsUBO>(ID_SYMBOL_TILE_PROPS_UBO, "SymbolTilePropsUBO"),
-        Buffer::uniform::<SymbolEvaluatedPropsUBO>(ID_SYMBOL_EVALUATED_PROPS_UBO, "SymbolEvaluatedPropsUBO"),
+        Buffer::storage::<SymbolDrawableUBO>(ID_SYMBOL_DRAWABLE_UBO),
+        Buffer::storage::<SymbolTilePropsUBO>(ID_SYMBOL_TILE_PROPS_UBO),
+        Buffer::uniform::<SymbolEvaluatedPropsUBO>(ID_SYMBOL_EVALUATED_PROPS_UBO),
     ],
     attributes: &[
         Attribute::new(ID_SYMBOL_POS_OFFSET_ATTRIBUTE, "a_pos_offset", Short4),
@@ -79,9 +79,9 @@ pub static SYMBOL_ICON: Program = Program {
 pub static SYMBOL_SDF: Program = Program {
     name: "SymbolSDFShader",
     buffers: &[
-        Buffer::storage::<SymbolDrawableUBO>(ID_SYMBOL_DRAWABLE_UBO, "SymbolDrawableUBO"),
-        Buffer::storage::<SymbolTilePropsUBO>(ID_SYMBOL_TILE_PROPS_UBO, "SymbolTilePropsUBO"),
-        Buffer::uniform::<SymbolEvaluatedPropsUBO>(ID_SYMBOL_EVALUATED_PROPS_UBO, "SymbolEvaluatedPropsUBO"),
+        Buffer::storage::<SymbolDrawableUBO>(ID_SYMBOL_DRAWABLE_UBO),
+        Buffer::storage::<SymbolTilePropsUBO>(ID_SYMBOL_TILE_PROPS_UBO),
+        Buffer::uniform::<SymbolEvaluatedPropsUBO>(ID_SYMBOL_EVALUATED_PROPS_UBO),
     ],
     attributes: &[
         Attribute::new(ID_SYMBOL_POS_OFFSET_ATTRIBUTE, "a_pos_offset", Short4),
@@ -117,9 +117,9 @@ pub static SYMBOL_SDF: Program = Program {
 pub static SYMBOL_TEXT_AND_ICON: Program = Program {
     name: "SymbolTextAndIconShader",
     buffers: &[
-        Buffer::storage::<SymbolDrawableUBO>(ID_SYMBOL_DRAWABLE_UBO, "SymbolDrawableUBO"),
-        Buffer::storage::<SymbolTilePropsUBO>(ID_SYMBOL_TILE_PROPS_UBO, "SymbolTilePropsUBO"),
-        Buffer::uniform::<SymbolEvaluatedPropsUBO>(ID_SYMBOL_EVALUATED_PROPS_UBO, "SymbolEvaluatedPropsUBO"),
+        Buffer::storage::<SymbolDrawableUBO>(ID_SYMBOL_DRAWABLE_UBO),
+        Buffer::storage::<SymbolTilePropsUBO>(ID_SYMBOL_TILE_PROPS_UBO),
+        Buffer::uniform::<SymbolEvaluatedPropsUBO>(ID_SYMBOL_EVALUATED_PROPS_UBO),
     ],
     attributes: &[
         Attribute::new(ID_SYMBOL_POS_OFFSET_ATTRIBUTE, "a_pos_offset", Short4),
@@ -154,8 +154,8 @@ pub static SYMBOL_TEXT_AND_ICON: Program = Program {
 pub static COLLISION_BOX: Program = Program {
     name: "CollisionBoxShader",
     buffers: &[
-        Buffer::uniform::<CollisionDrawableUBO>(ID_COLLISION_DRAWABLE_UBO, "CollisionDrawableUBO"),
-        Buffer::uniform::<CollisionTilePropsUBO>(ID_COLLISION_TILE_PROPS_UBO, "CollisionTilePropsUBO"),
+        Buffer::uniform::<CollisionDrawableUBO>(ID_COLLISION_DRAWABLE_UBO),
+        Buffer::uniform::<CollisionTilePropsUBO>(ID_COLLISION_TILE_PROPS_UBO),
     ],
     attributes: &[
         Attribute::new(ID_COLLISION_POS_VERTEX_ATTRIBUTE, "a_pos", Short2),
@@ -179,8 +179,8 @@ pub static COLLISION_BOX: Program = Program {
 pub static COLLISION_CIRCLE: Program = Program {
     name: "CollisionCircleShader",
     buffers: &[
-        Buffer::uniform::<CollisionDrawableUBO>(ID_COLLISION_DRAWABLE_UBO, "CollisionDrawableUBO"),
-        Buffer::uniform::<CollisionTilePropsUBO>(ID_COLLISION_TILE_PROPS_UBO, "CollisionTilePropsUBO"),
+        Buffer::uniform::<CollisionDrawableUBO>(ID_COLLISION_DRAWABLE_UBO),
+        Buffer::uniform::<CollisionTilePropsUBO>(ID_COLLISION_TILE_PROPS_UBO),
     ],
     attributes: &[
         Attribute::new(ID_COLLISION_POS_VERTEX_ATTRIBUTE, "a_pos", Short2),

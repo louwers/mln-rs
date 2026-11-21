@@ -7,6 +7,7 @@ use std::{fmt, ptr};
 use crate::gfx_types::AttributeDataType;
 use crate::gpu::{ShaderKey, VertexStep};
 use crate::projection_variant::ProjectionVariant;
+use crate::shaders::block::{Block, UniformBlock};
 use crate::shaders::layer_ubo::{ProjectionUBO, ViewUBO};
 use crate::shaders::program_parameters::ProgramParameters;
 use crate::shaders::shader_defines::{ID_PROJECTION_UBO, ID_VIEW_UBO};
@@ -71,58 +72,83 @@ pub struct Program {
 }
 
 /// A uniform or storage buffer a program reads.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug)]
 pub struct Buffer {
     /// The id a draw binds it by, which is also its binding.
     pub id: usize,
-    /// The name of its block in the GLSL ES and GLSL.
-    pub name: &'static str,
-    /// The bytes the shader reads: its block, a storage buffer's element as
-    /// the block declares it, or the vertex of a vertex buffer it reads as a
-    /// storage buffer.
-    pub size: usize,
     pub kind: BufferKind,
 }
 
 /// How a program reads a [`Buffer`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug)]
 pub enum BufferKind {
     /// One block.
-    Uniform,
+    Uniform(&'static Block),
     /// An array of elements `stride` bytes apart, one for each draw of a
-    /// layer, which a draw reads at its index. GLSL ES reads its element as
-    /// a uniform block bound at the element's offset.
-    Storage { stride: usize },
+    /// layer, which a draw reads at its index, each read as `block` padded
+    /// to the stride. GLSL ES reads its element as a uniform block bound at
+    /// the element's offset.
+    Storage { block: &'static Block, stride: usize },
+    /// A vertex buffer that the vertex stage reads as a storage buffer, of
+    /// vertices `stride` bytes apart, where the backend binds them
+    /// ([`Caps::binds_vertex_buffers`](crate::gpu::Caps::binds_vertex_buffers)).
+    Vertices { stride: usize },
 }
 
 impl Buffer {
-    /// The uniform buffer `id`, the block `name` of a `T`.
+    /// The uniform buffer `id` of a `T`.
     #[must_use]
-    pub const fn uniform<T>(id: usize, name: &'static str) -> Buffer {
-        Buffer { id, name, size: size_of::<T>(), kind: BufferKind::Uniform }
+    pub const fn uniform<T: UniformBlock>(id: usize) -> Buffer {
+        Buffer { id, kind: BufferKind::Uniform(T::BLOCK) }
     }
 
-    /// The storage buffer `id` of `T`s, the block `name` of one.
+    /// The storage buffer `id` of `T`s.
     #[must_use]
-    pub const fn storage<T>(id: usize, name: &'static str) -> Buffer {
-        Buffer::storage_of::<T, T>(id, name)
+    pub const fn storage<T: UniformBlock>(id: usize) -> Buffer {
+        Buffer::storage_of::<T, T>(id)
     }
 
-    /// The storage buffer `id` of `Element`s, of each of which the shader
-    /// reads the block `name` of a `T`, as of a union of the blocks of a
-    /// layer's programs.
+    /// The storage buffer `id` of `Element`s, each of which the shader reads
+    /// as a `T`, as of a union of the blocks of a layer's programs.
     #[must_use]
-    pub const fn storage_of<T, Element>(id: usize, name: &'static str) -> Buffer {
+    pub const fn storage_of<T: UniformBlock, Element>(id: usize) -> Buffer {
         assert!(size_of::<T>() <= size_of::<Element>());
-        Buffer { id, name, size: size_of::<T>(), kind: BufferKind::Storage { stride: size_of::<Element>() } }
+        Buffer { id, kind: BufferKind::Storage { block: T::BLOCK, stride: size_of::<Element>() } }
+    }
+
+    /// The vertex buffer `id` of `V`s, which the vertex stage reads as a
+    /// storage buffer.
+    #[must_use]
+    pub const fn vertices<V>(id: usize) -> Buffer {
+        Buffer { id, kind: BufferKind::Vertices { stride: size_of::<V>() } }
+    }
+
+    /// The block the shader reads of it, or of each of its elements; `None`
+    /// for a vertex buffer.
+    #[must_use]
+    pub const fn block(&self) -> Option<&'static Block> {
+        match self.kind {
+            BufferKind::Uniform(block) | BufferKind::Storage { block, .. } => Some(block),
+            BufferKind::Vertices { .. } => None,
+        }
+    }
+
+    /// The bytes the shader reads of it: its block, a storage buffer's
+    /// element padded to the stride, or a vertex.
+    #[must_use]
+    pub const fn size(&self) -> usize {
+        match self.kind {
+            BufferKind::Uniform(block) => block.size,
+            BufferKind::Storage { stride, .. } | BufferKind::Vertices { stride } => stride,
+        }
     }
 }
 
 /// The view's block, which the engine binds for every draw.
-pub const VIEW_BUFFER: Buffer = Buffer::uniform::<ViewUBO>(ID_VIEW_UBO, "ViewUBO");
+pub const VIEW_BUFFER: Buffer = Buffer::uniform::<ViewUBO>(ID_VIEW_UBO);
 
 /// The projection block, which a layer binds for its draws.
-pub const PROJECTION_BUFFER: Buffer = Buffer::storage::<ProjectionUBO>(ID_PROJECTION_UBO, "ProjectionUBO");
+pub const PROJECTION_BUFFER: Buffer = Buffer::storage::<ProjectionUBO>(ID_PROJECTION_UBO);
 
 /// A vertex or instance attribute of a program.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -243,11 +269,11 @@ impl Program {
     }
 
     /// The buffer whose block is `name`: one of the program's, or the
-    /// frame's or the projection block.
+    /// view's or the projection block.
     #[must_use]
     pub fn buffer_named(&self, name: &str) -> Option<&'static Buffer> {
         static RESERVED: [Buffer; 2] = [VIEW_BUFFER, PROJECTION_BUFFER];
-        self.buffers.iter().chain(&RESERVED).find(|buffer| buffer.name == name)
+        self.buffers.iter().chain(&RESERVED).find(|buffer| buffer.block().is_some_and(|block| block.name == name))
     }
 }
 

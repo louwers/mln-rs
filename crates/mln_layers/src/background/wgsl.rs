@@ -15,11 +15,8 @@ struct VertexOutput {
     @location(1) pos_b: vec2<f32>,
 };
 
-struct BackgroundPatternDrawableUnionUBO {
-    matrix_col0: vec4<f32>,
-    matrix_col1: vec4<f32>,
-    matrix_col2: vec4<f32>,
-    matrix_col3: vec4<f32>,
+struct BackgroundPatternDrawableUBO {
+    matrix: mat4x4<f32>,
     pixel_coord_upper: vec2<f32>,
     pixel_coord_lower: vec2<f32>,
     tile_units_to_pixels: f32,
@@ -44,7 +41,7 @@ struct BackgroundPatternPropsUBO {
     pad2: f32,
 };
 
-@group(0) @binding(2) var<storage, read> drawableVector: array<BackgroundPatternDrawableUnionUBO>;
+@group(0) @binding(2) var<storage, read> drawableVector: array<BackgroundPatternDrawableUBO>;
 @group(0) @binding(5) var<uniform> props: BackgroundPatternPropsUBO;
 
 @vertex
@@ -148,15 +145,7 @@ struct VertexOutput {
 
 struct BackgroundDrawableUBO {
     matrix: mat4x4<f32>,
-};
-
-struct BackgroundDrawableUnionUBO {
-    matrix_col0: vec4<f32>,
-    matrix_col1: vec4<f32>,
-    matrix_col2: vec4<f32>,
-    matrix_col3: vec4<f32>,
-    extra0: vec4<f32>,
-    extra1: vec4<f32>,
+    stride_pad: array<vec4<f32>, 2>,
 };
 
 struct BackgroundPropsUBO {
@@ -167,7 +156,7 @@ struct BackgroundPropsUBO {
     pad3: f32,
 };
 
-@group(0) @binding(2) var<storage, read> drawableVector: array<BackgroundDrawableUnionUBO>;
+@group(0) @binding(2) var<storage, read> drawableVector: array<BackgroundDrawableUBO>;
 @group(0) @binding(5) var<uniform> props: BackgroundPropsUBO;
 
 @vertex

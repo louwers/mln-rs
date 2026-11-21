@@ -386,7 +386,7 @@ fn main(in: VertexInput) -> VertexOutput {
 #ifdef PROJECTION_GLOBE
     if (drawable.pitch_with_map != 0u) {
         let anchor_pos_tile_y = (drawable.coord_matrix * vec4<f32>(projected_pos.xy / projected_pos.w, z, 1.0)).y;
-        projectionScaling = mix(projectionScaling, 1.0 / circumferenceRatioAtTileY(anchor_pos_tile_y, projection) * drawable.pitched_scale, projection.projection_transition);
+        projectionScaling = mix(projectionScaling, 1.0 / circumferenceRatioAtTileY(anchor_pos_tile_y, projection) * drawable.pitched_scale, projection.transition);
     }
 #endif
     let posOffset = a_offset * max(a_minFontScale, vec2<f32>(fontScale)) / 32.0 + a_pxoffset / 16.0;
@@ -450,33 +450,27 @@ struct SymbolDrawableUBO {
     matrix: mat4x4<f32>,
     label_plane_matrix: mat4x4<f32>,
     coord_matrix: mat4x4<f32>,
-
     texsize: vec2<f32>,
     texsize_icon: vec2<f32>,
-
     is_text_prop: u32,
     rotate_symbol: u32,
     pitch_with_map: u32,
     is_size_zoom_constant: u32,
     is_size_feature_constant: u32,
     is_offset: u32,
-
     size_t: f32,
     size: f32,
-
-    // Interpolations
     fill_color_t: f32,
     halo_color_t: f32,
     opacity_t: f32,
     halo_width_t: f32,
     halo_blur_t: f32,
-
     is_along_line: u32,
     is_variable_anchor: u32,
     pitched_scale: f32,
     translation: vec2<f32>,
     gamma_scale: f32,
-    is_halo: u32,
+    is_halo_pass: u32,
 };
 
 struct SymbolTilePropsUBO {
@@ -658,7 +652,7 @@ fn main(in: VertexInput) -> VertexOutput {
 #ifdef PROJECTION_GLOBE
     if (drawable.pitch_with_map != 0u) {
         let anchor_pos_tile_y = (drawable.coord_matrix * vec4<f32>(projected_pos.xy / projected_pos.w, z, 1.0)).y;
-        projectionScaling = mix(projectionScaling, 1.0 / circumferenceRatioAtTileY(anchor_pos_tile_y, projection) * drawable.pitched_scale, projection.projection_transition);
+        projectionScaling = mix(projectionScaling, 1.0 / circumferenceRatioAtTileY(anchor_pos_tile_y, projection) * drawable.pitched_scale, projection.transition);
     }
 #endif
     let pos_rot = a_offset / 32.0 * fontScale + a_pxoffset;
@@ -692,7 +686,7 @@ fn main(in: VertexInput) -> VertexOutput {
     let halo_blur = select(props.icon_halo_blur, props.text_halo_blur, drawable.is_text_prop != 0u);
 #endif
     let EDGE_GAMMA = 0.105 / view.pixel_ratio;
-    let halo_blur_gamma = select(0.0, halo_blur * 1.19 / SDF_PX, drawable.is_halo != 0u);
+    let halo_blur_gamma = select(0.0, halo_blur * 1.19 / SDF_PX, drawable.is_halo_pass != 0u);
     out.gamma_scaled = (halo_blur_gamma + EDGE_GAMMA) / (fontScale * drawable.gamma_scale) * gamma_scale;
     out.halo_edge = (6.0 - halo_width / fontScale) / SDF_PX;
 #ifndef HAS_UNIFORM_u_fill_color
@@ -784,33 +778,27 @@ struct SymbolDrawableUBO {
     matrix: mat4x4<f32>,
     label_plane_matrix: mat4x4<f32>,
     coord_matrix: mat4x4<f32>,
-
     texsize: vec2<f32>,
     texsize_icon: vec2<f32>,
-
     is_text_prop: u32,
     rotate_symbol: u32,
     pitch_with_map: u32,
     is_size_zoom_constant: u32,
     is_size_feature_constant: u32,
     is_offset: u32,
-
     size_t: f32,
     size: f32,
-
-    // Interpolations
     fill_color_t: f32,
     halo_color_t: f32,
     opacity_t: f32,
     halo_width_t: f32,
     halo_blur_t: f32,
-
     is_along_line: u32,
     is_variable_anchor: u32,
     pitched_scale: f32,
     translation: vec2<f32>,
     gamma_scale: f32,
-    is_halo: u32,
+    is_halo_pass: u32,
 };
 
 struct SymbolTilePropsUBO {
@@ -994,7 +982,7 @@ fn main(in: VertexInput) -> VertexOutput {
 #ifdef PROJECTION_GLOBE
     if (drawable.pitch_with_map != 0u && drawable.is_along_line == 0u) {
         let anchor_pos_tile_y = (drawable.coord_matrix * vec4<f32>(projected_pos.xy / projected_pos.w, z, 1.0)).y;
-        projectionScaling = mix(projectionScaling, 1.0 / circumferenceRatioAtTileY(anchor_pos_tile_y, projection) * drawable.pitched_scale, projection.projection_transition);
+        projectionScaling = mix(projectionScaling, 1.0 / circumferenceRatioAtTileY(anchor_pos_tile_y, projection) * drawable.pitched_scale, projection.transition);
     }
 #endif
     let pos_rot = a_offset / 32.0 * fontScale;
@@ -1031,7 +1019,7 @@ fn main(in: VertexInput) -> VertexOutput {
     let halo_blur = select(props.icon_halo_blur, props.text_halo_blur, drawable.is_text_prop != 0u);
 #endif
     let EDGE_GAMMA = 0.105 / view.pixel_ratio;
-    let halo_blur_gamma = select(0.0, halo_blur * 1.19 / SDF_PX, drawable.is_halo != 0u);
+    let halo_blur_gamma = select(0.0, halo_blur * 1.19 / SDF_PX, drawable.is_halo_pass != 0u);
     out.gamma_scaled = (halo_blur_gamma + EDGE_GAMMA) / (fontScale * drawable.gamma_scale) * gamma_scale;
     out.halo_edge = (6.0 - halo_width / fontScale) / SDF_PX;
     out.is_icon = is_icon;
@@ -1135,33 +1123,27 @@ struct SymbolDrawableUBO {
     matrix: mat4x4<f32>,
     label_plane_matrix: mat4x4<f32>,
     coord_matrix: mat4x4<f32>,
-
     texsize: vec2<f32>,
     texsize_icon: vec2<f32>,
-
     is_text_prop: u32,
     rotate_symbol: u32,
     pitch_with_map: u32,
     is_size_zoom_constant: u32,
     is_size_feature_constant: u32,
     is_offset: u32,
-
     size_t: f32,
     size: f32,
-
-    // Interpolations
     fill_color_t: f32,
     halo_color_t: f32,
     opacity_t: f32,
     halo_width_t: f32,
     halo_blur_t: f32,
-
     is_along_line: u32,
     is_variable_anchor: u32,
     pitched_scale: f32,
     translation: vec2<f32>,
     gamma_scale: f32,
-    is_halo: u32,
+    is_halo_pass: u32,
 };
 
 struct SymbolTilePropsUBO {

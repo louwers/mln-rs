@@ -253,7 +253,7 @@ const VIEW_BLOCK: &str = r"layout (std140) uniform ViewUBO {
     highp float u_camera_to_center_distance;
     highp float u_aspect_ratio;
     highp float u_pixel_ratio;
-    lowp float global_pad1;
+    highp float ViewUBO_pad1;
 };
 ";
 

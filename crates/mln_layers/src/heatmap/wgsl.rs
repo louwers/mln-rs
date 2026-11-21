@@ -139,7 +139,7 @@ struct VertexOutput {
     @location(0) tex_coord: vec2<f32>,
 };
 
-struct HeatmapTextureUBO {
+struct HeatmapTexturePropsUBO {
     matrix: mat4x4<f32>,
     opacity: f32,
     pad1: f32,
@@ -147,7 +147,7 @@ struct HeatmapTextureUBO {
     pad3: f32,
 };
 
-@group(0) @binding(5) var<uniform> ubo: HeatmapTextureUBO;
+@group(0) @binding(5) var<uniform> ubo: HeatmapTexturePropsUBO;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
@@ -169,7 +169,7 @@ struct FragmentInput {
     @location(0) tex_coord: vec2<f32>,
 };
 
-struct HeatmapTextureUBO {
+struct HeatmapTexturePropsUBO {
     matrix: mat4x4<f32>,
     opacity: f32,
     pad1: f32,
@@ -177,7 +177,7 @@ struct HeatmapTextureUBO {
     pad3: f32,
 };
 
-@group(0) @binding(5) var<uniform> ubo: HeatmapTextureUBO;
+@group(0) @binding(5) var<uniform> ubo: HeatmapTexturePropsUBO;
 @group(1) @binding(0) var texture_sampler: sampler;
 @group(1) @binding(1) var heatmap_texture: texture_2d<f32>;
 @group(1) @binding(2) var color_ramp_texture: texture_2d<f32>;

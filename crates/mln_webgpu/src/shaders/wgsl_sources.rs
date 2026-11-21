@@ -76,7 +76,7 @@ struct ProjectionUBO {
     fallback_matrix: mat4x4<f32>,
     tile_mercator_coords: vec4<f32>,
     clipping_plane: vec4<f32>,
-    projection_transition: f32,
+    transition: f32,
     depth_offset: f32,
     translate: vec2<f32>,
 };
@@ -135,22 +135,22 @@ fn interpolateProjection(posInTile: vec2<f32>, spherePos: vec3<f32>, elevation: 
     // Clip the far side of the globe through Z; the layer's depth shift keeps layer order.
     globePosition.z = globeComputeClippingZ(elevatedPos, projection) * globePosition.w - projection.depth_offset;
 
-    if (projection.projection_transition > 0.999) {
+    if (projection.transition > 0.999) {
         return globePosition;
     }
 
     let flatPosition = projection.fallback_matrix * vec4<f32>(posInTile, elevation, 1.0);
     let z_globeness_threshold = 0.2;
     var result = globePosition;
-    result.z = mix(0.0, globePosition.z, clamp((projection.projection_transition - z_globeness_threshold) / (1.0 - z_globeness_threshold), 0.0, 1.0));
-    let xyw = mix(flatPosition.xyw, globePosition.xyw, projection.projection_transition);
+    result.z = mix(0.0, globePosition.z, clamp((projection.transition - z_globeness_threshold) / (1.0 - z_globeness_threshold), 0.0, 1.0));
+    let xyw = mix(flatPosition.xyw, globePosition.xyw, projection.transition);
     result.x = xyw.x;
     result.y = xyw.y;
     result.w = xyw.z;
     if ((posInTile.y < GLOBE_POLE_NORTH_Y) || (posInTile.y > GLOBE_POLE_SOUTH_Y)) {
         result = globePosition;
         let poles_hidden_anim_percentage = 0.02;
-        result.z = mix(globePosition.z, 100.0, pow(max((1.0 - projection.projection_transition) / poles_hidden_anim_percentage, 0.0), 8.0));
+        result.z = mix(globePosition.z, 100.0, pow(max((1.0 - projection.transition) / poles_hidden_anim_percentage, 0.0), 8.0));
     }
     return result;
 }
@@ -159,11 +159,11 @@ fn interpolateProjection(posInTile: vec2<f32>, spherePos: vec3<f32>, elevation: 
 fn interpolateProjectionFor3D(posInTile: vec2<f32>, spherePos: vec3<f32>, elevation: f32, projection: ProjectionUBO) -> vec4<f32> {
     let elevatedPos = spherePos * (1.0 + elevation / GLOBE_RADIUS);
     let globePosition = projection.matrix * vec4<f32>(elevatedPos, 1.0);
-    if (projection.projection_transition > 0.999) {
+    if (projection.transition > 0.999) {
         return globePosition;
     }
     let fallbackPosition = projection.fallback_matrix * vec4<f32>(posInTile, elevation, 1.0);
-    return mix(fallbackPosition, globePosition, projection.projection_transition);
+    return mix(fallbackPosition, globePosition, projection.transition);
 }
 
 fn projectTile(pos: vec2<f32>, projection: ProjectionUBO) -> vec4<f32> {

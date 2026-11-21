@@ -1,42 +1,51 @@
-use bytemuck::{Pod, Zeroable};
+use mln_gfx::shaders::block::Bool32;
 
-/// The circle shader's per-drawable uniform block (112 bytes).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
-#[repr(C, align(16))]
-pub struct CircleDrawableUBO {
-    /*   0 */ pub matrix: [f32; 4 * 4],
-    /*  64 */ pub extrude_scale: [f32; 2],
-
-    // Interpolations
-    /*  72 */ pub color_t: f32,
-    /*  76 */ pub radius_t: f32,
-    /*  80 */ pub blur_t: f32,
-    /*  84 */ pub opacity_t: f32,
-    /*  88 */ pub stroke_color_t: f32,
-    /*  92 */ pub stroke_width_t: f32,
-    /*  96 */ pub stroke_opacity_t: f32,
-    /* 100 */ pub globe_extrude_scale: f32,
-    /* 104 */ pub pad2: f32,
-    /* 108 */ pub pad3: f32,
-    /* 112 */
+mln_gfx::uniform_block! {
+    /// The circle shader's per-drawable uniform block (112 bytes).
+    pub struct CircleDrawableUBO {
+        pub matrix: [f32; 4 * 4],
+        pub extrude_scale: [f32; 2],
+        // Interpolations
+        #[glsl_es(lowp)]
+        pub color_t: f32,
+        #[glsl_es(lowp)]
+        pub radius_t: f32,
+        #[glsl_es(lowp)]
+        pub blur_t: f32,
+        #[glsl_es(lowp)]
+        pub opacity_t: f32,
+        #[glsl_es(lowp)]
+        pub stroke_color_t: f32,
+        #[glsl_es(lowp)]
+        pub stroke_width_t: f32,
+        #[glsl_es(lowp)]
+        pub stroke_opacity_t: f32,
+        pub globe_extrude_scale: f32,
+        pub pad2: f32,
+        pub pad3: f32,
+    }
 }
 const _: () = assert!(size_of::<CircleDrawableUBO>() == 7 * 16);
 
-/// Evaluated properties that do not depend on the tile (64 bytes). The
-/// colors are the premultiplied `mln::Color` as r, g, b, a floats.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
-#[repr(C, align(16))]
-pub struct CircleEvaluatedPropsUBO {
-    /*  0 */ pub color: [f32; 4],
-    /* 16 */ pub stroke_color: [f32; 4],
-    /* 32 */ pub radius: f32,
-    /* 36 */ pub blur: f32,
-    /* 40 */ pub opacity: f32,
-    /* 44 */ pub stroke_width: f32,
-    /* 48 */ pub stroke_opacity: f32,
-    /* 52 */ pub scale_with_map: i32,
-    /* 56 */ pub pitch_with_map: i32,
-    /* 60 */ pub pad1: f32,
-    /* 64 */
+mln_gfx::uniform_block! {
+    /// Evaluated properties that do not depend on the tile (64 bytes). The
+    /// colors are the premultiplied `mln::Color` as r, g, b, a floats.
+    pub struct CircleEvaluatedPropsUBO {
+        pub color: [f32; 4],
+        pub stroke_color: [f32; 4],
+        #[glsl_es(mediump)]
+        pub radius: f32,
+        #[glsl_es(lowp)]
+        pub blur: f32,
+        #[glsl_es(lowp)]
+        pub opacity: f32,
+        #[glsl_es(mediump)]
+        pub stroke_width: f32,
+        #[glsl_es(lowp)]
+        pub stroke_opacity: f32,
+        pub scale_with_map: Bool32,
+        pub pitch_with_map: Bool32,
+        pub pad1: f32,
+    }
 }
 const _: () = assert!(size_of::<CircleEvaluatedPropsUBO>() == 4 * 16);

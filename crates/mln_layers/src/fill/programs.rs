@@ -42,8 +42,8 @@ pub(crate) const ID_FILL_OUTLINE_PAINT: usize = MAX_UBO_COUNT_PER_SHADER + 2;
 pub static FILL: Program = Program {
     name: "FillShader",
     buffers: &[
-        Buffer::storage_of::<FillDrawableUBO, FillDrawableUnionUBO>(ID_FILL_DRAWABLE_UBO, "FillDrawableUBO"),
-        Buffer::uniform::<FillEvaluatedPropsUBO>(ID_FILL_EVALUATED_PROPS_UBO, "FillEvaluatedPropsUBO"),
+        Buffer::storage_of::<FillDrawableUBO, FillDrawableUnionUBO>(ID_FILL_DRAWABLE_UBO),
+        Buffer::uniform::<FillEvaluatedPropsUBO>(ID_FILL_EVALUATED_PROPS_UBO),
     ],
     attributes: &[
         Attribute::new(ID_FILL_POS_VERTEX_ATTRIBUTE, "a_pos", Short2),
@@ -62,11 +62,8 @@ pub static FILL: Program = Program {
 pub static FILL_OUTLINE: Program = Program {
     name: "FillOutlineShader",
     buffers: &[
-        Buffer::storage_of::<FillOutlineDrawableUBO, FillDrawableUnionUBO>(
-            ID_FILL_DRAWABLE_UBO,
-            "FillOutlineDrawableUBO",
-        ),
-        Buffer::uniform::<FillEvaluatedPropsUBO>(ID_FILL_EVALUATED_PROPS_UBO, "FillEvaluatedPropsUBO"),
+        Buffer::storage_of::<FillOutlineDrawableUBO, FillDrawableUnionUBO>(ID_FILL_DRAWABLE_UBO),
+        Buffer::uniform::<FillEvaluatedPropsUBO>(ID_FILL_EVALUATED_PROPS_UBO),
     ],
     attributes: &[
         Attribute::new(ID_FILL_POS_VERTEX_ATTRIBUTE, "a_pos", Short2),
@@ -85,15 +82,9 @@ pub static FILL_OUTLINE: Program = Program {
 pub static FILL_PATTERN: Program = Program {
     name: "FillPatternShader",
     buffers: &[
-        Buffer::storage_of::<FillPatternDrawableUBO, FillDrawableUnionUBO>(
-            ID_FILL_DRAWABLE_UBO,
-            "FillPatternDrawableUBO",
-        ),
-        Buffer::storage_of::<FillPatternTilePropsUBO, FillTilePropsUnionUBO>(
-            ID_FILL_TILE_PROPS_UBO,
-            "FillPatternTilePropsUBO",
-        ),
-        Buffer::uniform::<FillEvaluatedPropsUBO>(ID_FILL_EVALUATED_PROPS_UBO, "FillEvaluatedPropsUBO"),
+        Buffer::storage_of::<FillPatternDrawableUBO, FillDrawableUnionUBO>(ID_FILL_DRAWABLE_UBO),
+        Buffer::storage_of::<FillPatternTilePropsUBO, FillTilePropsUnionUBO>(ID_FILL_TILE_PROPS_UBO),
+        Buffer::uniform::<FillEvaluatedPropsUBO>(ID_FILL_EVALUATED_PROPS_UBO),
     ],
     attributes: &[
         Attribute::new(ID_FILL_POS_VERTEX_ATTRIBUTE, "a_pos", Short2),
@@ -121,15 +112,9 @@ pub static FILL_PATTERN: Program = Program {
 pub static FILL_OUTLINE_PATTERN: Program = Program {
     name: "FillOutlinePatternShader",
     buffers: &[
-        Buffer::storage_of::<FillPatternDrawableUBO, FillDrawableUnionUBO>(
-            ID_FILL_DRAWABLE_UBO,
-            "FillOutlinePatternDrawableUBO",
-        ),
-        Buffer::storage_of::<FillPatternTilePropsUBO, FillTilePropsUnionUBO>(
-            ID_FILL_TILE_PROPS_UBO,
-            "FillOutlinePatternTilePropsUBO",
-        ),
-        Buffer::uniform::<FillEvaluatedPropsUBO>(ID_FILL_EVALUATED_PROPS_UBO, "FillEvaluatedPropsUBO"),
+        Buffer::storage_of::<FillPatternDrawableUBO, FillDrawableUnionUBO>(ID_FILL_DRAWABLE_UBO),
+        Buffer::storage_of::<FillPatternTilePropsUBO, FillTilePropsUnionUBO>(ID_FILL_TILE_PROPS_UBO),
+        Buffer::uniform::<FillEvaluatedPropsUBO>(ID_FILL_EVALUATED_PROPS_UBO),
     ],
     attributes: &[
         Attribute::new(ID_FILL_POS_VERTEX_ATTRIBUTE, "a_pos", Short2),
@@ -156,11 +141,8 @@ pub static FILL_OUTLINE_PATTERN: Program = Program {
 pub static FILL_OUTLINE_INSTANCED: Program = Program {
     name: "FillOutlineInstancedShader",
     buffers: &[
-        Buffer::storage_of::<FillOutlineDrawableUBO, FillDrawableUnionUBO>(
-            ID_FILL_DRAWABLE_UBO,
-            "FillOutlineDrawableUBO",
-        ),
-        Buffer::uniform::<FillEvaluatedPropsUBO>(ID_FILL_EVALUATED_PROPS_UBO, "FillEvaluatedPropsUBO"),
+        Buffer::storage_of::<FillOutlineDrawableUBO, FillDrawableUnionUBO>(ID_FILL_DRAWABLE_UBO),
+        Buffer::uniform::<FillEvaluatedPropsUBO>(ID_FILL_EVALUATED_PROPS_UBO),
     ],
     attributes: &[Attribute::new(ID_FILL_POS_VERTEX_ATTRIBUTE, "a_pos", Short2)],
     instance_attributes: &[
@@ -188,14 +170,11 @@ pub static FILL_OUTLINE_INSTANCED: Program = Program {
 pub static FILL_OUTLINE_PULLED: Program = Program {
     name: "FillOutlinePulledShader",
     buffers: &[
-        Buffer::storage_of::<FillOutlineDrawableUBO, FillDrawableUnionUBO>(
-            ID_FILL_DRAWABLE_UBO,
-            "FillOutlineDrawableUBO",
-        ),
-        Buffer::uniform::<FillEvaluatedPropsUBO>(ID_FILL_EVALUATED_PROPS_UBO, "FillEvaluatedPropsUBO"),
-        Buffer::storage::<[i16; 2]>(ID_FILL_OUTLINE_VERTICES, "FillOutlineVertices"),
-        Buffer::storage::<[i16; 2]>(ID_FILL_OUTLINE_ENDS, "FillOutlineEnds"),
-        Buffer::storage::<f32>(ID_FILL_OUTLINE_PAINT, "FillOutlinePaint"),
+        Buffer::storage_of::<FillOutlineDrawableUBO, FillDrawableUnionUBO>(ID_FILL_DRAWABLE_UBO),
+        Buffer::uniform::<FillEvaluatedPropsUBO>(ID_FILL_EVALUATED_PROPS_UBO),
+        Buffer::vertices::<[i16; 2]>(ID_FILL_OUTLINE_VERTICES),
+        Buffer::vertices::<[i16; 2]>(ID_FILL_OUTLINE_ENDS),
+        Buffer::vertices::<f32>(ID_FILL_OUTLINE_PAINT),
     ],
     attributes: &[],
     instance_attributes: &[],
@@ -214,15 +193,9 @@ pub static FILL_OUTLINE_PULLED: Program = Program {
 pub static FILL_OUTLINE_PATTERN_INSTANCED: Program = Program {
     name: "FillOutlinePatternInstancedShader",
     buffers: &[
-        Buffer::storage_of::<FillPatternDrawableUBO, FillDrawableUnionUBO>(
-            ID_FILL_DRAWABLE_UBO,
-            "FillOutlinePatternDrawableUBO",
-        ),
-        Buffer::storage_of::<FillPatternTilePropsUBO, FillTilePropsUnionUBO>(
-            ID_FILL_TILE_PROPS_UBO,
-            "FillOutlinePatternTilePropsUBO",
-        ),
-        Buffer::uniform::<FillEvaluatedPropsUBO>(ID_FILL_EVALUATED_PROPS_UBO, "FillEvaluatedPropsUBO"),
+        Buffer::storage_of::<FillPatternDrawableUBO, FillDrawableUnionUBO>(ID_FILL_DRAWABLE_UBO),
+        Buffer::storage_of::<FillPatternTilePropsUBO, FillTilePropsUnionUBO>(ID_FILL_TILE_PROPS_UBO),
+        Buffer::uniform::<FillEvaluatedPropsUBO>(ID_FILL_EVALUATED_PROPS_UBO),
     ],
     attributes: &[Attribute::new(ID_FILL_POS_VERTEX_ATTRIBUTE, "a_pos", Short2)],
     instance_attributes: &[

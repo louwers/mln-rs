@@ -10,9 +10,9 @@
 use std::collections::BTreeSet;
 
 use mln_gfx::gfx_types::AttributeDataType;
-use mln_gfx::shaders::program::{BufferKind, GLOBE_DEFINE, PROJECTION_BUFFER, Program, VIEW_BUFFER};
+use mln_gfx::shaders::program::{GLOBE_DEFINE, PROJECTION_BUFFER, Program, VIEW_BUFFER};
 use mln_gfx::shaders::shader_defines::ID_GLOBAL_UBO_INDEX;
-use mln_gfx::shaders::source::msl::Msl;
+use mln_gfx::shaders::source::msl::{self, Msl};
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_foundation::{NSDictionary, NSObject, NSString};
@@ -238,12 +238,9 @@ fn check_bindings(program: &Program, bindings: &[Retained<ProtocolObject<dyn MTL
                 // MTLBufferBinding, which ProtocolObject wraps alike.
                 let reflected =
                     unsafe { &*std::ptr::from_ref(&**binding).cast::<ProtocolObject<dyn MTLBufferBinding>>() };
-                let size = match buffer.kind {
-                    BufferKind::Uniform => buffer.size,
-                    BufferKind::Storage { stride } => stride,
-                };
+                let size = buffer.size();
                 if reflected.bufferDataSize() != size {
-                    failures.push(format!("{} is {} bytes, not {size}", buffer.name, reflected.bufferDataSize()));
+                    failures.push(format!("buffer {index} is {} bytes, not {size}", reflected.bufferDataSize()));
                 }
             }
             MTLBindingType::Texture | MTLBindingType::Sampler if index >= program.textures.len() => {
@@ -332,4 +329,44 @@ fn pipelines_build_with_the_programs_vertex_layout() {
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// `text` without its comments, its whitespace runs one space.
+fn normalized(text: &str) -> String {
+    let mut code = String::with_capacity(text.len());
+    let mut rest = text;
+    while !rest.is_empty() {
+        if let Some(after) = rest.strip_prefix("//") {
+            rest = after.find('\n').map_or("", |end| &after[end..]);
+        } else if let Some(after) = rest.strip_prefix("/*") {
+            rest = after.find("*/").map_or("", |end| &after[end + 2..]);
+            code.push(' ');
+        } else {
+            let c = rest.chars().next().unwrap_or(' ');
+            code.push(c);
+            rest = &rest[c.len_utf8()..];
+        }
+    }
+    code.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// The sources declare every buffer's block as `uniform_block!` lays it
+/// out: the prelude the engine's, and a program's MSL its own.
+#[test]
+fn every_block_is_declared_as_its_layout_says() {
+    let prelude = normalized(PRELUDE);
+    for buffer in [VIEW_BUFFER, PROJECTION_BUFFER] {
+        let block = buffer.block().expect("a block");
+        assert!(prelude.contains(&normalized(&msl::declaration(block, block.size))), "{}", block.name);
+    }
+    for (program, source) in sources() {
+        let text = normalized(&[source.prelude, source.source].concat());
+        for buffer in program.buffers {
+            // Only another language reads a block its source doesn't name.
+            if let Some(block) = buffer.block().filter(|block| text.contains(block.name)) {
+                let declaration = normalized(&msl::declaration(block, buffer.size()));
+                assert!(text.contains(&declaration), "{}: {declaration}", program.name);
+            }
+        }
+    }
 }

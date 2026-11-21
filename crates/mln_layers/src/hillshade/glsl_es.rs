@@ -123,21 +123,21 @@ void main() {
     fragment: r#"in vec2 v_pos;
 uniform sampler2D u_image;
 
-layout(std140) uniform HillshadeTilePropsUBO {
+layout (std140) uniform HillshadeTilePropsUBO {
     highp vec2 u_latrange;
     highp float u_exaggeration;
-    highp int u_method;           // Hillshade method (0: STANDARD, 1: COMBINED, 2: IGOR, 3: MULTIDIRECTIONAL, 4: BASIC)
-    highp int u_num_lights;       // Number of light sources (1-4)
-    highp float u_pad0;
-    highp float u_pad1;
-    highp float u_pad2;
+    highp int u_method;
+    highp int u_num_lights;
+    highp float HillshadeTilePropsUBO_pad0;
+    highp float HillshadeTilePropsUBO_pad1;
+    highp float HillshadeTilePropsUBO_pad2;
 };
-layout(std140) uniform HillshadeEvaluatedPropsUBO {
+layout (std140) uniform HillshadeEvaluatedPropsUBO {
     highp vec4 u_accent;
-    highp vec4 u_altitudes;       // Up to 4 altitude values (in radians)
-    highp vec4 u_azimuths;        // Up to 4 azimuth values (in radians)
-    highp vec4 u_shadows[4];      // Shadow colors (up to 4 lights)
-    highp vec4 u_highlights[4];   // Highlight colors (up to 4 lights)
+    highp vec4 u_altitudes;
+    highp vec4 u_azimuths;
+    highp vec4 u_shadows[4];
+    highp vec4 u_highlights[4];
 };
 
 #define PI 3.141592653589793
