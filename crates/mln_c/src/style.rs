@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use ::mln_runtime::{Applied, LayerInfo, SourceInfo};
 use mln_expression::Functions;
-use mln_sources::custom::geometry::TileOptions;
+use mln_sources::custom::TileOptions;
 use mln_sources::{
     CustomGeometrySourceType, CustomSourceCallbacks, CustomSourceCommands, CustomVectorSourceType,
     GeoJsonSourceCommands, GeoJsonSourceSettings, GeoJsonSourceType, ImageSourceCommands, ImageSourceType,

@@ -13,8 +13,7 @@ use mln_util::pool::Pool;
 use mln_util::range::Range;
 
 use super::provider::{CustomProvider, TileFunction};
-pub use super::{CustomVectorProvider, CustomVectorTileData, TileDataFormat};
-use super::{CustomVectorSourceOptions, CustomVectorSourceType};
+use super::{CustomVectorProvider, CustomVectorSourceOptions, CustomVectorSourceType, TileDataFormat};
 
 #[derive(Clone)]
 pub struct Options {
