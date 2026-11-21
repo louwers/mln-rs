@@ -626,9 +626,6 @@ impl Encoder {
         // The layers' draws of the frame, and those of the debug overlays.
         let uploaded = Instant::now();
         orchestrator.update_layer_draws(gpu, &update_parameters, &mut parameters, &frame);
-        // Drapes stale by the camera that wait for a later frame leave this
-        // one incomplete, and ask for the next.
-        let drapes_waiting = orchestrator.terrain().drapes_waiting();
         let layers_updated = Instant::now();
         orchestrator.update_debug_layers(gpu, &mut parameters);
 
@@ -676,6 +673,9 @@ impl Encoder {
         });
         draw(orchestrator, gpu, &mut parameters, &frame, image, draw_groups.count, depth_range_size);
         orchestrator.terrain().count(parameters.context);
+        // Drapes left for a later frame, stale by the camera or failed to
+        // draw, leave this one incomplete, and ask for the next.
+        let drapes_waiting = orchestrator.terrain().drapes_waiting();
         let start_rendering = Instant::now();
         if let Err(error) = parameters.end_pass(gpu).and_then(|()| gpu.flush(false)) {
             Log::error(Event::Render, format!("Submitting the frame failed: {error}"));

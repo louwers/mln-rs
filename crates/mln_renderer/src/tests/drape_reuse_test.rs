@@ -11,6 +11,11 @@ use std::time::Duration;
 
 use mln_gfx::RendererBackend as _;
 use mln_gfx::frame::FrameTarget;
+use mln_gfx::gpu::{
+    BindingsDesc, BindingsId, BufferDesc, BufferId, Caps, Draw, GeometryDesc, GeometryId, Gpu, GpuError, PassDesc,
+    PipelineDesc, PipelineId, ReadbackId, ResourceId, SamplerId, ShaderId, ShaderKey, TextureDesc, TextureId,
+    TextureRegion,
+};
 use mln_gfx::offscreen_target::OffscreenTarget;
 use mln_map::transform::{TerrainGround, Transform};
 use mln_map_types::{
@@ -148,6 +153,91 @@ impl Tiles {
     }
 }
 
+/// What a [`Failing`] GPU fails.
+#[derive(Clone, Copy)]
+enum Fail {
+    /// Beginning a drape's pass.
+    DrapePasses,
+}
+
+/// A GPU that fails what `fail` says, as a device out of memory would, and
+/// does the rest on `gpu`.
+struct Failing<'a> {
+    gpu: &'a mut dyn Gpu,
+    fail: Fail,
+}
+
+/// The error of what a [`Failing`] GPU fails.
+fn failed<T>() -> Result<T, GpuError> {
+    Err(GpuError::Invalid("failed on purpose".to_owned()))
+}
+
+impl Gpu for Failing<'_> {
+    fn caps(&self) -> &Caps {
+        self.gpu.caps()
+    }
+    fn create_buffer(&mut self, desc: &BufferDesc<'_>) -> Result<BufferId, GpuError> {
+        self.gpu.create_buffer(desc)
+    }
+    fn write_buffer(&mut self, buffer: BufferId, offset: u64, data: &[u8]) -> Result<(), GpuError> {
+        self.gpu.write_buffer(buffer, offset, data)
+    }
+    fn create_texture(&mut self, desc: &TextureDesc<'_>) -> Result<TextureId, GpuError> {
+        self.gpu.create_texture(desc)
+    }
+    fn write_texture(&mut self, texture: TextureId, region: TextureRegion, data: &[u8]) -> Result<(), GpuError> {
+        self.gpu.write_texture(texture, region, data)
+    }
+    fn generate_mipmaps(&mut self, texture: TextureId) -> Result<(), GpuError> {
+        self.gpu.generate_mipmaps(texture)
+    }
+    fn create_sampler(&mut self, state: &mln_gfx::texture2d::SamplerState) -> Result<SamplerId, GpuError> {
+        self.gpu.create_sampler(state)
+    }
+    fn create_shader(&mut self, key: &ShaderKey) -> Result<ShaderId, GpuError> {
+        self.gpu.create_shader(key)
+    }
+    fn create_pipeline(&mut self, desc: &PipelineDesc<'_>) -> Result<PipelineId, GpuError> {
+        self.gpu.create_pipeline(desc)
+    }
+    fn create_bindings(&mut self, desc: &BindingsDesc<'_>) -> Result<BindingsId, GpuError> {
+        self.gpu.create_bindings(desc)
+    }
+    fn create_geometry(&mut self, desc: &GeometryDesc<'_>) -> Result<GeometryId, GpuError> {
+        self.gpu.create_geometry(desc)
+    }
+    fn destroy(&mut self, resource: ResourceId) -> Result<(), GpuError> {
+        self.gpu.destroy(resource)
+    }
+    fn begin_pass(&mut self, desc: &PassDesc<'_>) -> Result<(), GpuError> {
+        if matches!(self.fail, Fail::DrapePasses) && desc.label == "drape" {
+            return failed();
+        }
+        self.gpu.begin_pass(desc)
+    }
+    fn attaches_with_any_color(&self, depth_stencil: TextureId) -> bool {
+        self.gpu.attaches_with_any_color(depth_stencil)
+    }
+    fn draw(&mut self, draw: &Draw) -> Result<(), GpuError> {
+        self.gpu.draw(draw)
+    }
+    fn lend(&mut self, f: &mut dyn FnMut(&mut dyn std::any::Any)) -> Result<(), GpuError> {
+        self.gpu.lend(f)
+    }
+    fn end_pass(&mut self) -> Result<(), GpuError> {
+        self.gpu.end_pass()
+    }
+    fn flush(&mut self, wait: bool) -> Result<(), GpuError> {
+        self.gpu.flush(wait)
+    }
+    fn read_texture(&mut self, texture: TextureId, region: TextureRegion) -> Result<ReadbackId, GpuError> {
+        self.gpu.read_texture(texture, region)
+    }
+    fn take_readback(&mut self, readback: ReadbackId, wait: bool) -> Result<Option<Vec<u8>>, GpuError> {
+        self.gpu.take_readback(readback, wait)
+    }
+}
+
 /// [`STYLE`], with what its sources' types know without a fetch.
 fn style() -> Style {
     style_of(STYLE)
@@ -190,6 +280,8 @@ struct DrapedMap {
     /// The drapes' byte cap that each frame's drapes, and what they draw
     /// with, hold to.
     drape_byte_cap: Option<usize>,
+    /// What the GPU fails in each frame's encode, if anything.
+    fail: Option<Fail>,
     work: TileWork,
     _pool: mln_util::pool::Pool,
 }
@@ -266,6 +358,7 @@ impl DrapedMap {
             needs_repaint: false,
             elevation: None,
             drape_byte_cap: None,
+            fail: None,
             work: TileWork::default(),
             _pool: pool,
         }
@@ -320,7 +413,10 @@ impl DrapedMap {
         assert!(frame.is_some() || self.mode == MapMode::Static, "a continuous map's frame");
         if let Some(frame) = frame {
             let image = self.target.begin_frame(gpu).expect("the frame's image");
-            let drawn = self.renderer.render(gpu, &image, frame);
+            let drawn = match self.fail {
+                Some(fail) => self.renderer.render(&mut Failing { gpu, fail }, &image, frame),
+                None => self.renderer.render(gpu, &image, frame),
+            };
             let handoff = self.target.end_frame(gpu);
             self.renderer.finish_frame(gpu, drawn, handoff);
         }
@@ -1017,6 +1113,30 @@ fn a_byte_cap_holds_while_drapes_wait_to_grow_alone_at_their_side() {
     map.settle();
     frames_until_full(&mut map);
     assert_eq!(whole, sides(&mut map));
+}
+
+/// A frame in which drapes fail to draw, drawn from their key or again at a
+/// new side only, is incomplete and asks for the next, which draws them.
+#[test]
+fn a_frame_whose_drapes_fail_to_draw_asks_for_the_next_which_draws_them() {
+    let (mut map, drapes) = settled(Tiles::default());
+    let fails_then_draws = |map: &mut DrapedMap| {
+        map.fail = Some(Fail::DrapePasses);
+        let (full, drawn) = map.frame();
+        assert!(drawn.is_empty(), "drapes drawn: {drawn:?}");
+        assert!(!full && map.needs_repaint, "a frame whose drapes failed to draw is done");
+        map.fail = None;
+        let (full, drawn) = map.frame();
+        assert!(full && !map.needs_repaint);
+        drawn
+    };
+    line_color(&mut map, "green");
+    assert_eq!(drapes, fails_then_draws(&mut map));
+    map.set_drape_byte_cap(3 * drape_bytes(1024));
+    let lowered: BTreeSet<_> =
+        fails_then_draws(&mut map).into_iter().filter(|&tile| sides(&mut map).contains(&(tile, 512))).collect();
+    assert!(!lowered.is_empty(), "{:?}", sides(&mut map));
+    assert!(map.frame().1.is_empty(), "the drapes are drawn again once only");
 }
 
 /// [`STYLE`]'s draped layers, removed, and a circle in their place.

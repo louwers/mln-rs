@@ -429,8 +429,8 @@ pub(crate) struct Drapes {
     paced: bool,
     /// Whether [`choose`](Self::choose) gave a tile its turn in the frame.
     turn_taken: bool,
-    /// Whether drapes stale by the camera only, or smaller than their
-    /// tile's side, wait for a later frame.
+    /// Whether drapes stale by the camera only, smaller than their tile's
+    /// side, or that failed to draw, wait for a later frame.
     waiting: bool,
     /// The tiles and stacks of the drapes drawn since the last
     /// [`take_passes`](Self::take_passes).
@@ -577,8 +577,9 @@ impl Drapes {
 
     /// Whether the last frame left drapes stale by the camera only, or
     /// smaller than their tile's side, for a later frame to draw
-    /// ([`choose`](Self::choose), [`finish_update`](Self::finish_update)):
-    /// the map then isn't done drawing.
+    /// ([`choose`](Self::choose), [`finish_update`](Self::finish_update)),
+    /// or drapes that failed to draw ([`render`](Self::render)): the map
+    /// then isn't done drawing.
     pub(crate) fn waiting(&self) -> bool {
         self.waiting
     }
@@ -876,7 +877,9 @@ impl Drapes {
     /// its texture's mips: its layers' opaque draws front to back, then
     /// their translucent ones back to front, over transparent texels. A
     /// drape with a layer that blends in the shader draws into the layer
-    /// composite's frame texture, which is then copied into its own.
+    /// composite's frame texture, which is then copied into its own. A
+    /// drape that fails to draw draws again in the next frame, which it
+    /// [waits](Self::waiting) for.
     pub(crate) fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
         let formats = TargetFormats { color: Some(COLOR), depth_stencil: Some(DEPTH_STENCIL) };
         for Drape { tile, transform, stacks, .. } in &mut self.drapes {
@@ -958,6 +961,10 @@ impl Drapes {
                 }
             }
         }
+        // A drape that failed to draw has no key left, and draws again in the
+        // next frame, which this one then asks for.
+        let mut stacks = self.drapes.iter().flat_map(|drape| &drape.stacks);
+        self.waiting |= stacks.any(|drape| drape.redraws && drape.drawn.is_none());
     }
 }
 
