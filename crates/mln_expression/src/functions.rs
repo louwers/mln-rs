@@ -137,7 +137,8 @@ impl FunctionDef {
     }
 }
 
-/// Why [`Functions::add`] refused a function.
+/// Why a registration was refused: [`Functions::add`]'s of a function, or
+/// a renderer's registry's of a layer or source type.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum RegisterError {
     #[error("\"{0}\" is already registered")]
