@@ -619,7 +619,7 @@ impl SymbolState {
         tile: &PlacedTile,
         key: BucketKey,
         bucket: &SymbolBucket,
-        feature_index: impl FnOnce() -> Option<Arc<FeatureIndex>>,
+        feature_index: &Arc<FeatureIndex>,
         (text_translate, icon_translate): (SymbolTranslate, SymbolTranslate),
     ) {
         let source = &style.source;
@@ -642,7 +642,7 @@ impl SymbolState {
             return;
         }
         // Only place this layer if it's the "group leader" for the bucket
-        let feature_index = feature_index();
+        let feature_index = Some(Arc::clone(feature_index));
 
         if bucket.sort_key_ranges.is_empty() {
             let data = data(feature_index, None);
@@ -1451,7 +1451,7 @@ impl LayerType for Symbol {
             let (Some(bucket), Some(key)) = (tile.view(), cx.bucket_key(tile)) else {
                 continue;
             };
-            let feature_index = || Some(Arc::clone(bucket.feature_index()));
+            let feature_index = bucket.feature_index();
             state.add_bucket(&cx.layer.style, &PlacedTile::of(tile), key, bucket.bucket, feature_index, translates);
         }
     }

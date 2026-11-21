@@ -12,7 +12,7 @@ use mln_tile_id::UnwrappedTileID;
 use mln_util::constants::EXTENT;
 use mln_util::hash::HashSet;
 
-use super::context::PlacementContext;
+use super::context::BucketContext;
 use super::{JointPlacement, PlacedSymbolData, Placement, PlacementInputs, PlacementKind, VariableOffset};
 use crate::symbol::Symbol;
 use crate::symbol::bucket::SymbolBucket;
@@ -87,7 +87,7 @@ impl Placement {
         anchor: SymbolAnchorType,
         shift: Vec2,
         anchors: &[SymbolAnchorType],
-        ctx: &PlacementContext<'_>,
+        ctx: &BucketContext<'_>,
     ) -> bool {
         let PlacementKind::Tile(tile) = &self.kind else {
             return true;
@@ -116,7 +116,7 @@ impl Placement {
 
     /// Whether a symbol crossing the borders that didn't place places again
     /// with the rest, to try its other variable anchors.
-    fn should_retry_placement(&self, placement: JointPlacement, ctx: &PlacementContext<'_>) -> bool {
+    fn should_retry_placement(&self, placement: JointPlacement, ctx: &BucketContext<'_>) -> bool {
         matches!(&self.kind, PlacementKind::Tile(tile) if tile.populate_intersections)
             && !placement.placed()
             && ctx.bucket.has_variable_text_anchors()
@@ -128,7 +128,7 @@ impl Placement {
     pub(super) fn symbol_placed(
         &mut self,
         symbol: &SymbolInstance,
-        ctx: &PlacementContext<'_>,
+        ctx: &BucketContext<'_>,
         placement: JointPlacement,
     ) {
         let viewport_padding = self.collision_index.viewport_padding();
@@ -181,7 +181,7 @@ impl Placement {
         let mut intersections = Vec::new();
         for data in inputs.buckets() {
             if let Some(bucket) = buckets.get(&data.bucket) {
-                let ctx = self.context(inputs, data, bucket, reloaded_placed);
+                let ctx = self.bucket_context(inputs, data, bucket, reloaded_placed);
                 let found = self.intersections(&ctx, contexts.len());
                 if !found.is_empty() {
                     contexts.push(ctx);
@@ -225,7 +225,7 @@ impl Placement {
         }
         for data in inputs.buckets() {
             if let Some(bucket) = buckets.get(&data.bucket) {
-                let ctx = self.context(inputs, data, bucket, reloaded_placed);
+                let ctx = self.bucket_context(inputs, data, bucket, reloaded_placed);
                 self.place_bucket(&ctx, &mut seen_cross_tile_ids, reloaded_placed);
             }
         }
@@ -234,7 +234,7 @@ impl Placement {
     /// The point symbols of `ctx`'s bucket, which is the placement's
     /// context `ctx_index`, that cross its tile's borders or a neighbor's.
     /// Each bucket of point symbols that may cross takes the next priority.
-    fn intersections(&mut self, ctx: &PlacementContext<'_>, ctx_index: usize) -> Vec<Intersection> {
+    fn intersections(&mut self, ctx: &BucketContext<'_>, ctx_index: usize) -> Vec<Intersection> {
         let layout = ctx.layout();
         if ctx.along_line() || *layout.symbol_avoid_edges.uniform() {
             return Vec::new();

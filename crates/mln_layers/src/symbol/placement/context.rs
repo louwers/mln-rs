@@ -51,7 +51,7 @@ pub(crate) struct BucketOptions {
 }
 
 /// What placing the symbols of one bucket reads.
-pub(crate) struct PlacementContext<'a> {
+pub(crate) struct BucketContext<'a> {
     pub(crate) bucket: &'a SymbolBucket,
     pub(crate) data: &'a BucketPlacementData,
     pub(crate) view: &'a View,
@@ -94,7 +94,7 @@ pub(crate) struct PlacementContext<'a> {
     debug: bool,
 }
 
-impl<'a> PlacementContext<'a> {
+impl<'a> BucketContext<'a> {
     pub(crate) fn new(
         data: &'a BucketPlacementData,
         bucket: &'a SymbolBucket,
@@ -129,7 +129,7 @@ impl<'a> PlacementContext<'a> {
         let text_always = text_overlap_mode == OverlapMode::Always;
         let icon_always = icon_overlap_mode == OverlapMode::Always;
         let has_icons = bucket.has_icon_data() || bucket.has_sdf_icon_data();
-        PlacementContext {
+        BucketContext {
             bucket,
             data,
             view,

@@ -24,7 +24,7 @@ use mln_map_types::{MapDebugOptions, MapMode, ProjectionData, View};
 use mln_renderer::draw::{BucketChanges, ChangedBuckets};
 use mln_renderer::layer::{FeatureIndex, FrameTile};
 use mln_renderer::placement::{
-    self as engine, Aabb, BucketKey, CollisionGroups, IndexedFeature, Placed, PlacementBuckets, PlacementPass,
+    Aabb, BucketKey, CollisionGroups, IndexedFeature, Placed, PlacementBuckets, PlacementContext, PlacementPass,
     PlacementQuery, PlacingLayer, Prepared, Shape,
 };
 use mln_renderer::{Renderer, UpdateParameters};
@@ -35,7 +35,7 @@ use mln_util::error::Error;
 use mln_util::hash::{HashMap, HashSet};
 use mln_vec_map::VecSet;
 
-use self::context::{BucketOptions, PlacementContext};
+use self::context::{BucketContext, BucketOptions};
 use self::tile::TilePlacementState;
 use crate::symbol::Symbol;
 use crate::symbol::bucket::SortKeyRange;
@@ -123,7 +123,7 @@ impl PartialEq for BucketPlacementData {
 
 /// The layers of `layers` that place symbol buckets, which lead them, in
 /// their order.
-fn leaders<'a>(
+pub(crate) fn leaders<'a>(
     layers: &'a [PlacingLayer<'a, Symbol>],
 ) -> impl DoubleEndedIterator<Item = &'a PlacingLayer<'a, Symbol>> {
     layers.iter().filter(|layer| !layer.state.placement_data.is_empty())
@@ -365,8 +365,8 @@ impl PlacementPass<Symbol> for SymbolPlacement {
     /// Gives the symbols of the buckets the layers place, topmost layer
     /// first, their cross-tile ids, and takes the inputs of the frame's
     /// placement.
-    fn prepare(&mut self, cx: &mut engine::PlacementContext<'_, Symbol>) -> Prepared {
-        let engine::PlacementContext { layers, update_parameters, buckets } = cx;
+    fn prepare(&mut self, cx: &mut PlacementContext<'_, Symbol>) -> Prepared {
+        let PlacementContext { layers, update_parameters, buckets } = cx;
         let view = &update_parameters.view;
         let longitude = view.center(mln_util::geo::WrapMode::Unwrapped).longitude() as f32;
         let mut prepared = Prepared::default();
@@ -388,7 +388,7 @@ impl PlacementPass<Symbol> for SymbolPlacement {
         prepared
     }
 
-    fn place(&mut self, cx: &mut engine::PlacementContext<'_, Symbol>, groups: CollisionGroups, fade: f32) -> Placed {
+    fn place(&mut self, cx: &mut PlacementContext<'_, Symbol>, groups: CollisionGroups, fade: f32) -> Placed {
         let Some(inputs) = self.inputs.take() else {
             debug_assert!(false, "a placement that wasn't prepared");
             return Placed::default();
@@ -407,8 +407,8 @@ impl PlacementPass<Symbol> for SymbolPlacement {
     /// Brings the vertices of the buckets the layers place to the
     /// placement, topmost layer first, and then the positions of those that
     /// draw buckets other layers place.
-    fn update_buckets(&mut self, cx: &mut engine::PlacementContext<'_, Symbol>, changed: &mut ChangedBuckets) {
-        let engine::PlacementContext { layers, update_parameters, buckets } = cx;
+    fn update_buckets(&mut self, cx: &mut PlacementContext<'_, Symbol>, changed: &mut ChangedBuckets) {
+        let PlacementContext { layers, update_parameters, buckets } = cx;
         let view = &update_parameters.view;
         let update_opacities = std::mem::take(&mut self.update_opacities);
         for layer in leaders(layers).rev() {
@@ -667,7 +667,7 @@ impl Placement {
                 let mut seen_cross_tile_ids = BTreeSet::new();
                 for data in layer {
                     if let Some(bucket) = buckets.get(&data.bucket) {
-                        let ctx = self.context(&inputs, data, bucket, &reloaded_placed);
+                        let ctx = self.bucket_context(&inputs, data, bucket, &reloaded_placed);
                         self.place_bucket(&ctx, &mut seen_cross_tile_ids, &mut reloaded_placed);
                     }
                 }
@@ -683,13 +683,13 @@ impl Placement {
     }
 
     /// The context for placing `bucket`, `data`'s bucket.
-    fn context<'a>(
+    fn bucket_context<'a>(
         &mut self,
         inputs: &'a PlacementInputs,
         data: &'a BucketPlacementData,
         bucket: &'a crate::symbol::bucket::SymbolBucket,
         reloaded_placed: &HashSet<BucketKey>,
-    ) -> PlacementContext<'a> {
+    ) -> BucketContext<'a> {
         let (tile_borders, avoid_edges) = self.tile_borders(bucket, &data.tile.matrix);
         let options = BucketOptions {
             just_reloaded: bucket.state.just_reloaded && !reloaded_placed.contains(&data.bucket),
@@ -698,14 +698,14 @@ impl Placement {
             avoid_edges,
             debug: self.show_collision_boxes,
         };
-        PlacementContext::new(data, bucket, &inputs.view, self.placement_zoom, options)
+        BucketContext::new(data, bucket, &inputs.view, self.placement_zoom, options)
     }
 
     /// Places the symbols of `ctx`'s bucket that no bucket of their layer
     /// placed before, by `seen_cross_tile_ids`.
     fn place_bucket(
         &mut self,
-        ctx: &PlacementContext<'_>,
+        ctx: &BucketContext<'_>,
         seen_cross_tile_ids: &mut BTreeSet<NonZeroU32>,
         reloaded_placed: &mut HashSet<BucketKey>,
     ) {
@@ -743,7 +743,7 @@ impl Placement {
     /// The indices of the symbols of `ctx`'s bucket, in the order to place
     /// them. In a tilted view, those shown before go first, then the new
     /// ones, then those hidden before.
-    fn placement_order(&self, ctx: &PlacementContext<'_>) -> Vec<usize> {
+    fn placement_order(&self, ctx: &BucketContext<'_>) -> Vec<usize> {
         let mut order = ctx.bucket_symbols();
         if let Some(prev) = self.prev_placement()
             && ctx.view.pitch() != 0.0
@@ -910,10 +910,6 @@ impl Placement {
 
 #[cfg(test)]
 mod tests {
-    use mln_renderer::bench::PlacementFrame;
-    use mln_style::Style;
-    use mln_util::geo::LatLng;
-
     use super::*;
 
     #[test]
@@ -944,17 +940,13 @@ mod tests {
     /// The placement after `current`, whose fade had come `fade` far, where
     /// the symbols of `placed` show; returns whether it is settled.
     fn place(current: &mut Placement, fade: f32, placed: &[u32]) -> bool {
-        let style =
-            Style::from_json(crate::tests::registry().style(), r#"{"version": 8, "sources": {}, "layers": []}"#, None);
-        let center = LatLng::new(0.0, 0.0).unwrap();
-        let mut frame = PlacementFrame::<Symbol>::new(&style.unwrap(), "s", &[], center, 0.0, (512, 512)).unwrap();
         let prev = std::mem::replace(current, Placement::new_default());
         let mut placement = Placement::create(Arc::new(inputs()), CollisionGroups::new(true), Some(prev));
         for &id in placed {
             let placed = JointPlacement { text: true, icon: true, skip_fade: false };
             placement.placements.insert(NonZeroU32::new(id).unwrap(), placed);
         }
-        let placed = frame.with_context(|cx| placement.place(&mut cx.buckets, fade));
+        let placed = placement.commit(fade);
         *current = placement;
         placed.settled
     }

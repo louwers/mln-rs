@@ -7,7 +7,7 @@ use glam::Vec2;
 use mln_style_types::{SymbolAnchorType, TextWritingModeType};
 use mln_text::anchor_alignment;
 
-use super::context::PlacementContext;
+use super::context::BucketContext;
 use super::{CircleKey, JointPlacement, Placement, VariableOffset};
 use crate::symbol::collision_feature::CollisionFeature;
 use crate::symbol::instance::{IconPart, SymbolInstance, TextPart};
@@ -72,7 +72,7 @@ impl Placement {
         &mut self,
         index: usize,
         symbol: &SymbolInstance,
-        ctx: &PlacementContext<'_>,
+        ctx: &BucketContext<'_>,
     ) -> JointPlacement {
         let Some(id) = symbol.cross_tile_id else {
             return JointPlacement::UNPLACED;
@@ -167,7 +167,7 @@ impl Placement {
         id: NonZeroU32,
         symbol: &SymbolInstance,
         text: &TextPart,
-        ctx: &PlacementContext<'_>,
+        ctx: &BucketContext<'_>,
     ) -> Option<PlacedText> {
         let state = &ctx.bucket.state;
         let run = &state.text.placed_symbols[text.runs.default_horizontal()?];
@@ -237,7 +237,7 @@ impl Placement {
     fn place_in_writing_modes(
         &mut self,
         text: &TextPart,
-        ctx: &PlacementContext<'_>,
+        ctx: &BucketContext<'_>,
         mut place: impl FnMut(&mut Self, bool) -> PlacedText,
     ) -> PlacedText {
         let bucket = ctx.bucket;
@@ -261,7 +261,7 @@ impl Placement {
         &self,
         id: NonZeroU32,
         anchors: Vec<SymbolAnchorType>,
-        ctx: &PlacementContext<'_>,
+        ctx: &BucketContext<'_>,
     ) -> Vec<SymbolAnchorType> {
         let Some(prev_anchor) = self.prev_placement().and_then(|prev| prev.variable_offsets.get(&id)).map(|o| o.anchor)
         else {
@@ -282,7 +282,7 @@ impl Placement {
         &mut self,
         label: &VariableLabel<'_>,
         vertical: bool,
-        ctx: &PlacementContext<'_>,
+        ctx: &BucketContext<'_>,
     ) -> PlacedText {
         let VariableLabel { id, text, icon_feature, anchors, run: label } = *label;
         let pools = &ctx.bucket.state.symbol_instance_pools;
@@ -361,7 +361,7 @@ impl Placement {
         &mut self,
         icon: &IconPart,
         text: Option<PlacedText>,
-        ctx: &PlacementContext<'_>,
+        ctx: &BucketContext<'_>,
     ) -> (PlacedFeatureResult, bool) {
         let state = &ctx.bucket.state;
         let shift = text.filter(|text| ctx.has_icon_text_fit && text.result.placed).and_then(|text| text.shift);
