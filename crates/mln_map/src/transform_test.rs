@@ -5353,8 +5353,8 @@ fn a_drag_delta_holds_its_anchor() {
 /// own steps do, also with the center 800 m up: a drag pans by its offset at
 /// the view's center on the plane at sea level, whatever its anchor, and a
 /// pinch's zoom, a turn, and their momentum hold the anchor's location at sea
-/// level. Each step is compared with the same step put together from the
-/// state's flat conversions.
+/// level, the zoom with the altitude held in pixels. Each step is compared
+/// with the same step put together from the state's flat conversions.
 #[test]
 fn without_terrain_gestures_are_bit_identical() {
     let flipped = |point: ScreenCoordinate| sc(point.x, 600.0 - point.y);
@@ -5406,8 +5406,13 @@ fn without_terrain_gestures_are_bit_identical() {
             })
             .unwrap();
         expected.set_angle(deg2rad(-(before.bearing.unwrap() - 12.0)));
+        // The zoom keeps the altitude in pixels while the anchor holds its
+        // location, and the altitude in meters after.
+        let pixels = altitude_pixels(expected.view());
         expected.set_lat_lng_zoom(&before.center.unwrap(), before.zoom.unwrap() + 1.3f64.log2());
+        set_altitude_pixels(&mut expected, pixels);
         expected.move_lat_lng(&location, &flipped(anchor)).unwrap();
+        expected.set_center_altitude(altitude);
         assert_eq!(expected.camera_options(None), transform.camera_options(None), "{altitude} m: the pinch");
 
         let mut momentum = CameraMomentum::default();
@@ -5439,6 +5444,143 @@ fn without_terrain_gestures_are_bit_identical() {
             assert_eq!(expected.camera_options(None), after.camera_options(None), "{altitude} m: {ms} ms of momentum");
         }
     }
+}
+
+/// Without terrain, anchored commands and gestures at a center altitude
+/// hold the anchor with the altitude as many pixels high as before each
+/// step, as before the camera's altitude was kept in meters. The expected
+/// cameras were recorded from commit f464c84b3, which kept it in pixels:
+/// (latitude, longitude, zoom, bearing, pitch, altitude).
+#[test]
+fn without_terrain_anchored_moves_hold_the_altitude_in_pixels() {
+    let anchor = sc(600.0, 450.0);
+    let map = |altitude: f64, pitch: f64, bounds: bool| {
+        let mut transform = Transform::new(ConstrainMode::Screen, ViewportMode::Default);
+        transform.resize(Size::new(800, 600)).unwrap();
+        if bounds {
+            transform.set_lat_lng_bounds(LatLngBounds::hull(ll(25.0, 15.0), ll(35.0, 25.0))).unwrap();
+        }
+        transform.jump_to(&CameraOptions {
+            center: Some(ll(30.0, 20.0)),
+            zoom: Some(10.0),
+            pitch: Some(pitch),
+            bearing: Some(20.0),
+            center_altitude: Some(altitude),
+            ..Default::default()
+        });
+        let start = start_clock(&mut transform);
+        (transform, start)
+    };
+    let check = |transform: &Transform, expected: [f64; 6], what: &str| {
+        let camera = transform.camera_options(None);
+        let center = camera.center.unwrap();
+        let actual = [
+            center.latitude(),
+            center.longitude(),
+            camera.zoom.unwrap(),
+            camera.bearing.unwrap(),
+            camera.pitch.unwrap(),
+            camera.center_altitude.unwrap(),
+        ];
+        for (actual, expected) in actual.into_iter().zip(expected) {
+            assert!((actual - expected).abs() < 1e-9, "{what}: {actual} against {expected}");
+        }
+    };
+
+    // A jump of the altitude alone leaves the center where it is.
+    let (mut transform, _) = map(0.0, 0.0, false);
+    transform.jump_to(&CameraOptions { center_altitude: Some(1000.0), anchor: Some(anchor), ..Default::default() });
+    check(&transform, [30.0, 20.0, 10.0, 20.0, 0.0, 1000.0], "a jump of the altitude");
+
+    let (mut transform, _) = map(3000.0, 30.0, false);
+    transform.jump_to(&CameraOptions {
+        zoom: Some(9.2),
+        bearing: Some(50.0),
+        center_altitude: Some(3500.0),
+        anchor: Some(anchor),
+        ..Default::default()
+    });
+    let expected = [30.128822122977297, 20.072228971547304, 9.2, 50.0, 30.0, 3500.0];
+    check(&transform, expected, "a jump of the zoom and the altitude");
+
+    let (mut transform, start) = map(800.0, 50.0, true);
+    transform.ease_to(
+        &CameraOptions {
+            zoom: Some(11.5),
+            bearing: Some(-30.0),
+            pitch: Some(40.0),
+            center_altitude: Some(1000.0),
+            anchor: Some(anchor),
+            ..Default::default()
+        },
+        &AnimationOptions { duration: Some(Duration::from_millis(500)), ..Default::default() },
+    );
+    // Each frame holds the anchor at the altitude of the frame before.
+    for ms in [16, 100, 250] {
+        transform.update_transitions(Some(start + Duration::from_millis(ms)));
+    }
+    let expected = [
+        29.88385825236196,
+        20.000727401811673,
+        11.234648613495041,
+        -21.154953783168036,
+        41.7690092433664,
+        964.6198151326721,
+    ];
+    check(&transform, expected, "an ease, halfway");
+    for ms in [499, 500] {
+        transform.update_transitions(Some(start + Duration::from_millis(ms)));
+    }
+    let expected = [29.869362034611274, 20.009654279734576, 11.5, -30.0, 40.0, 1000.0];
+    check(&transform, expected, "an ease's end");
+
+    let (mut transform, start) = map(800.0, 50.0, false);
+    for delta in [
+        CameraDelta {
+            offset: Some(sc(12.0, -30.0)),
+            anchor: Some(anchor),
+            phase: GesturePhase::Begin,
+            ..CameraDelta::default()
+        },
+        CameraDelta {
+            scale: Some(1.3),
+            bearing: Some(-12.0),
+            pitch: Some(5.0),
+            anchor: Some(anchor),
+            phase: GesturePhase::Update,
+            ..CameraDelta::default()
+        },
+    ] {
+        transform.apply_camera_delta(&delta).unwrap();
+    }
+    let expected = [29.947803959026174, 19.97978717213664, 10.37851162325373, 8.0, 55.0, 800.0];
+    check(&transform, expected, "a pinch");
+    let mut momentum = CameraMomentum { pan: Some(plain(sc(900.0, -1400.0))), ..CameraMomentum::default() };
+    momentum.zoom.glide = Some(glide(1.5, MomentumDecay::DEFAULT));
+    momentum.zoom.anchor = Some(sc(300.0, 200.0));
+    momentum.bearing.glide = Some(glide(40.0, MomentumDecay::DEFAULT));
+    momentum.bearing.anchor = Some(sc(450.0, 200.0));
+    momentum.pitch.glide = Some(glide(-10.0, MomentumDecay::DEFAULT));
+    momentum.pitch.anchor = Some(sc(420.0, 520.0));
+    transform
+        .apply_camera_delta(&CameraDelta {
+            momentum: Some(momentum),
+            phase: GesturePhase::End,
+            ..CameraDelta::default()
+        })
+        .unwrap();
+    for ms in [16, 33, 100] {
+        transform.update_transitions(Some(start + Duration::from_millis(ms)));
+    }
+    let expected =
+        [29.9756657317206, 19.936230697029686, 10.479500276115955, 11.154830358741185, 54.21129241021984, 800.0];
+    check(&transform, expected, "a glide");
+    for ms in [400, 3000] {
+        transform.update_transitions(Some(start + Duration::from_millis(ms)));
+    }
+    let expected =
+        [29.990340872301, 19.873852945169972, 10.479500276115955, 15.877114923253739, 53.182204248479906, 800.0];
+    check(&transform, expected, "a glide's end");
 }
 
 #[test]

@@ -16,7 +16,7 @@ use super::momentum::MomentumState;
 use super::terrain::EasedAltitude;
 use super::{
     ALTITUDE, BEARING, CENTER, CameraCommandId, CommandEnd, FOV, PADDING, PITCH, ROLL, Transform, TransformEvent, ZOOM,
-    camera_fields, max_pitch_for_padding,
+    altitude_pixels, camera_fields, max_pitch_for_padding, set_altitude_pixels,
 };
 use crate::map_event::{CameraChange, CameraChangeMode, CameraChangeSource};
 
@@ -387,9 +387,16 @@ impl Transform {
             _ => None,
         };
 
-        // The altitude is set before the anchor holds its location, so that
-        // it holds at the frame's altitude (see `place`).
+        // Over terrain the altitude is set before the anchor holds its
+        // location, so that it holds at the frame's altitude (see `place`).
+        // Without terrain the anchor holds it with the center as many pixels
+        // high as before the frame, and the frame's altitude applies after
+        // (see `altitude_pixels`).
+        let held_pixels = anchored.filter(|_| self.terrain.is_none()).map(|_| altitude_pixels(self.view()));
         place(&mut self.state, &current, &mut camera);
+        if let Some(pixels) = held_pixels {
+            set_altitude_pixels(&mut self.state, pixels);
+        }
         if let Some((anchor, anchor_lat_lng, height)) = anchored {
             match globe_zoom_around {
                 Some((location, zoom_before)) if self.state.view().zoom() != zoom_before => {
@@ -403,6 +410,9 @@ impl Transform {
                     );
                 }
                 _ => self.hold_anchor(&anchor_lat_lng, &anchor, height),
+            }
+            if held_pixels.is_some() {
+                self.state.set_center_altitude(camera.center_altitude.unwrap_or_default());
             }
         }
         // Last, so that the eye stays clear: a gesture's lift that changes

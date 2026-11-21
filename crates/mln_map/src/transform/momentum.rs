@@ -15,7 +15,10 @@ use mln_util::logging::{Event, Log};
 use mln_util::time::Instant;
 
 use super::transition::Transition;
-use super::{BEARING, CENTER, PITCH, Transform, TransformEvent, ZOOM, max_pitch_for_padding, nanos_from_secs};
+use super::{
+    BEARING, CENTER, PITCH, Transform, TransformEvent, ZOOM, altitude_pixels, max_pitch_for_padding, nanos_from_secs,
+    set_altitude_pixels,
+};
 use crate::map_event::{CameraChange, CameraChangeMode, CameraChangeSource};
 
 /// How far one part of a momentum moves, over how long, and along which
@@ -521,10 +524,16 @@ impl Transform {
             return true;
         }
         let before = self.view().center(WrapMode::Unwrapped);
+        // Without terrain the steps hold the altitude in pixels (see
+        // `altitude_pixels`).
+        let held = self.terrain.is_none().then(|| (self.view().center_altitude(), altitude_pixels(self.view())));
         let steps = f64::min((distance / MAX_STEP).ceil(), MAX_STEPS);
         let step = ScreenCoordinate::new(offset.x / steps, offset.y / steps);
         let bounded = self.state.limits().bounds != LatLngBounds::default();
         for _ in 0..steps as u32 {
+            if let Some((_, pixels)) = held {
+                set_altitude_pixels(&mut self.state, pixels);
+            }
             if self.globe_on_screen() {
                 self.step_globe_pan(&step);
                 continue;
@@ -552,6 +561,9 @@ impl Transform {
             let mut zoom = self.state.view().zoom();
             self.state.constrain_camera_and_zoom_to_bounds(&mut camera, &mut zoom);
             self.state.set_lat_lng_zoom(&camera.center.unwrap_or(unwrapped), zoom);
+        }
+        if let Some((altitude, _)) = held {
+            self.state.set_center_altitude(altitude);
         }
         self.view().center(WrapMode::Unwrapped) != before
     }

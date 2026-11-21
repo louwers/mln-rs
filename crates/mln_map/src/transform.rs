@@ -781,6 +781,28 @@ pub(crate) fn flip_y(view: &View, point: &ScreenCoordinate) -> ScreenCoordinate 
     ScreenCoordinate::new(point.x, f64::from(view.size().height) - point.y)
 }
 
+/// The center's altitude of `view` in pixels at its zoom and latitude.
+/// Without terrain, a move holds it while it finds the center it ends at,
+/// and puts the altitude in meters back after: the flat map's anchored
+/// moves at a center altitude end where they would with the altitude kept
+/// in pixels.
+fn altitude_pixels(view: &View) -> f64 {
+    let altitude = view.center_altitude();
+    // A center at sea level, as on most maps, spares the conversion.
+    if altitude == 0.0 { altitude } else { altitude / altitude_meters_per_pixel(view) }
+}
+
+/// Puts the center of `state` `pixels` high at its zoom and latitude
+/// ([`altitude_pixels`]).
+fn set_altitude_pixels(state: &mut TransformState, pixels: f64) {
+    let altitude = if pixels == 0.0 { pixels } else { pixels * altitude_meters_per_pixel(state.view()) };
+    state.set_center_altitude(altitude);
+}
+
+fn altitude_meters_per_pixel(view: &View) -> f64 {
+    Projection::altitude_meters_per_pixel(view.center(WrapMode::Unwrapped).latitude(), view.zoom())
+}
+
 /// `seconds` truncated to whole nanoseconds; `None`
 /// when negative, NaN, or too long for a `Duration` made of nanoseconds. The
 /// bound is exclusive because `u64::MAX` rounds up as a double.
