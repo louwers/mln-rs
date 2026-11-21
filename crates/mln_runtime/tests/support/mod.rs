@@ -5,7 +5,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use mln_runtime::{Completion, Error, Map, MapOptions, Runtime, RuntimeEvent, RuntimeOptions};
+use mln_map::MapMode;
+use mln_runtime::{
+    AttachOptions, Completion, Error, Map, MapOptions, RenderSession, RenderTarget, ResourceRequest, Runtime,
+    RuntimeEvent, RuntimeOptions,
+};
+use mln_storage::Response;
 use mln_util::size::Size;
 use parking_lot::{Condvar, Mutex};
 
@@ -65,6 +70,47 @@ pub(crate) fn map(runtime: &Runtime) -> Map {
     let (map, created) = runtime.create_map(map_options()).unwrap();
     created.wait().unwrap();
     map
+}
+
+/// A style centered on 10° N, 20° E at zoom 12 and pitch 60, over the
+/// terrain of [`serve_level_dem`]'s tiles.
+pub(crate) const LEVEL_TERRAIN_STYLE: &str = r##"{"version":8,"center":[20,10],"zoom":12,"pitch":60,"terrain":{"source":"dem"},"sources":{"dem":{"type":"raster-dem","tiles":["custom://dem/{z}/{x}/{y}.png"],"maxzoom":0}},"layers":[{"id":"bg","type":"background","paint":{"background-color":"#ff0000"}}]}"##;
+
+/// Answers every resource request of `runtime` with a DEM tile of ground
+/// 1000 m high everywhere, in the Mapbox encoding:
+/// (1 · 65536 + 173 · 256 + 176) · 0.1 − 10000.
+pub(crate) fn serve_level_dem(runtime: &Runtime) {
+    let mut dem = mln_util::image::PremultipliedImage::new(Size::new(4, 4));
+    for pixel in dem.data.as_chunks_mut::<4>().0 {
+        pixel.copy_from_slice(&[1, 173, 176, 255]);
+    }
+    let dem = Arc::new(mln_image::encode_png(&dem));
+    wait(runtime.set_resource_provider(move |request: ResourceRequest| {
+        let _ = request.respond(Response { data: Some(Arc::clone(&dem)), ..Response::default() });
+    }));
+}
+
+/// A 256 by 256 still map of [`LEVEL_TERRAIN_STYLE`] on `runtime`, which
+/// [`serve_level_dem`] serves, whose center the terrain doesn't clamp, so
+/// it stays at sea level, and the offscreen session that draws its stills.
+/// It has drawn none yet.
+pub(crate) fn level_terrain_map(runtime: &Runtime) -> (Map, RenderSession) {
+    let options = MapOptions {
+        map: mln_map::MapOptions {
+            size: Size::new(256, 256),
+            map_mode: MapMode::Static,
+            center_clamped_to_ground: false,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let (map, created) = runtime.create_map(options).unwrap();
+    result_of(created).unwrap();
+    wait(map.set_style_json(LEVEL_TERRAIN_STYLE));
+    let target = RenderTarget::Offscreen { size: Size::new(256, 256), device: None };
+    let (session, attached) = map.attach(target, AttachOptions::default()).unwrap();
+    result_of(attached).unwrap();
+    (map, session)
 }
 
 /// How long a test waits for a completion before it fails, which is far

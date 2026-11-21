@@ -6,8 +6,8 @@ use std::sync::{Arc, OnceLock, Weak};
 use mln_map::transform::TerrainGround;
 use mln_map::{
     BoundOptions, Camera, CameraCommandId, CameraDelta, CameraOptions, CameraUpdate, FrameClock, FreeCameraOptions,
-    LogicalExtent, MapDebugOptions, MapEvent, MapMode, MapSnapshot, ProjectionMode, StyleLoadError, TransitionEnd,
-    TransitionOutcome,
+    LogicalExtent, MapDebugOptions, MapEvent, MapMode, MapProjection, MapSnapshot, ProjectionMode, StyleLoadError,
+    TransitionEnd, TransitionOutcome,
 };
 use mln_renderer::text::font_face_engine::FontFaceEngine;
 use mln_renderer::{Registry, UpdateReader};
@@ -472,6 +472,20 @@ impl Map {
             return None;
         }
         self.shared.published.terrain.lock().clone()
+    }
+
+    /// A projection of the map's view as of [`snapshot`](Self::snapshot),
+    /// on the terrain its camera stands on as the map last published it, so
+    /// its conversions and its
+    /// [`terrain_elevation`](MapProjection::terrain_elevation) meet the
+    /// ground that the renderer last drew, as the map's own conversions do.
+    /// Without terrain it converts on the flat map. The terrain can be from a
+    /// state a little later or earlier than the view's. The projection is the
+    /// caller's and doesn't follow the map.
+    ///
+    /// Fails as [`snapshot`](Self::snapshot) does.
+    pub fn projection(&self) -> Result<MapProjection, Error> {
+        Ok(MapProjection::from_view(&self.snapshot()?.view)?.with_terrain(self.terrain()))
     }
 
     /// The events that the map reports, as of the last command that ran.
@@ -1462,6 +1476,15 @@ impl Map {
     pub fn set_globe_free_bearing_enabled(&self, enabled: bool) -> Result<Completion<Applied>, Error> {
         self.command(move |map| {
             map.set_globe_free_bearing(enabled);
+            Ok(())
+        })
+    }
+
+    /// Sets whether the center stands on the terrain, as
+    /// `mln_map::Map::set_center_clamped_to_ground` describes.
+    pub fn set_center_clamped_to_ground(&self, clamped: bool) -> Result<Completion<Applied>, Error> {
+        self.command(move |map| {
+            map.set_center_clamped_to_ground(clamped);
             Ok(())
         })
     }

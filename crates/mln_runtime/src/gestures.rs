@@ -3,7 +3,7 @@
 //! waiting for them.
 
 use mln_gestures::{GestureCamera, PendingEnd};
-use mln_map::{CameraDelta, CameraOptions, CameraUpdate, MapProjection, MapSnapshot};
+use mln_map::{CameraDelta, CameraOptions, CameraUpdate, MapSnapshot};
 use mln_util::LatLng;
 use mln_util::geo::{LatLngBounds, ScreenCoordinate, WrapMode};
 use mln_util::logging::{Event, Log};
@@ -57,8 +57,7 @@ impl GestureCamera for Map {
     /// state a little newer or older than the snapshot, which only moves
     /// the point by how far its ground changed.
     fn lat_lng_for_pixel(&self, pixel: ScreenCoordinate) -> Option<LatLng> {
-        let projection = MapProjection::from_view(&self.gesture_snapshot()?.view).ok()?.with_terrain(self.terrain());
-        projection.lat_lng_for_pixel(&pixel, WrapMode::Unwrapped).ok()
+        self.projection().ok()?.lat_lng_for_pixel(&pixel, WrapMode::Unwrapped).ok()
     }
 
     fn apply_camera_delta(&mut self, delta: &CameraDelta) {

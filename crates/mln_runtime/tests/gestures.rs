@@ -1,16 +1,11 @@
 // A runtime map as the camera that mln_gestures' recognizer moves: its reads
 // come from the published snapshot, and its commands go out without waiting.
 
-use std::sync::Arc;
-
 use mln_gestures::{GestureCamera, GestureRecognizer, Input, Modes, PointerKind};
-use mln_map::{CameraOptions, CameraUpdate, MapMode};
-use mln_runtime::{AttachOptions, MapOptions, RenderTarget, ResourceRequest};
-use mln_storage::Response;
+use mln_map::{CameraOptions, CameraUpdate};
 use mln_util::geo::{LatLng, ScreenCoordinate, WrapMode};
-use mln_util::size::Size;
 
-use crate::support::{map, result_of, runtime, wait};
+use crate::support::{level_terrain_map, map, runtime, serve_level_dem, wait};
 
 fn at(x: f64, y: f64) -> ScreenCoordinate {
     ScreenCoordinate::new(x, y)
@@ -61,33 +56,8 @@ fn the_recognizer_reads_and_moves_a_runtime_map() {
 #[test]
 fn a_box_zoom_over_terrain_centres_on_the_boxed_ground() {
     let runtime = runtime();
-    // DEM tiles of 1000 m everywhere, in the Mapbox encoding:
-    // (1 · 65536 + 173 · 256 + 176) · 0.1 − 10000.
-    let mut dem = mln_util::image::PremultipliedImage::new(Size::new(4, 4));
-    for pixel in dem.data.as_chunks_mut::<4>().0 {
-        pixel.copy_from_slice(&[1, 173, 176, 255]);
-    }
-    let dem = Arc::new(mln_image::encode_png(&dem));
-    wait(runtime.set_resource_provider(move |request: ResourceRequest| {
-        let _ = request.respond(Response { data: Some(Arc::clone(&dem)), ..Response::default() });
-    }));
-    let options = MapOptions {
-        map: mln_map::MapOptions {
-            size: Size::new(256, 256),
-            map_mode: MapMode::Static,
-            center_clamped_to_ground: false,
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    let (map, created) = runtime.create_map(options).unwrap();
-    result_of(created).unwrap();
-    wait(map.set_style_json(
-        r##"{"version":8,"center":[20,10],"zoom":12,"pitch":60,"terrain":{"source":"dem"},"sources":{"dem":{"type":"raster-dem","tiles":["custom://dem/{z}/{x}/{y}.png"],"maxzoom":0}},"layers":[{"id":"bg","type":"background","paint":{"background-color":"#ff0000"}}]}"##,
-    ));
-    let target = RenderTarget::Offscreen { size: Size::new(256, 256), device: None };
-    let (session, attached) = map.attach(target, AttachOptions::default()).unwrap();
-    result_of(attached).unwrap();
+    serve_level_dem(&runtime);
+    let (map, session) = level_terrain_map(&runtime);
     // The still draws the terrain, and the map publishes its ground.
     wait(map.request_still_image());
     let snapshot = map.snapshot().unwrap();

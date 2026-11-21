@@ -21,3 +21,4 @@ mod surfaces;
 mod surfaces_win32;
 mod surfaces_window;
 mod teardown;
+mod terrain;
