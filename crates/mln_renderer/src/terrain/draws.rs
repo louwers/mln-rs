@@ -74,7 +74,8 @@ pub(crate) struct TerrainDraws {
     shader: Option<ShaderKey>,
     depth_shader: Option<ShaderKey>,
     mesh: Option<SharedMesh>,
-    /// Whether the backend has no terrain shader, which draws nothing then.
+    /// Whether the backend has no shader of the surface, which draws
+    /// nothing then.
     unsupported: bool,
 }
 
@@ -83,8 +84,9 @@ impl TerrainDraws {
     /// stacks of `drapes`, which read the DEM textures of `ground`, sample
     /// the tile's drape of their stack, draw as `surface` says and fog as
     /// `sky` says, and, with `depth`, one of the ground's depth
-    /// ([`render_depth`](Self::render_depth)); or drops the draws and what
-    /// they share for `None`, a frame without terrain.
+    /// ([`render_depth`](Self::render_depth)), unless its shader fails,
+    /// which fails the frame; or drops the draws and what they share for
+    /// `None`, a frame without terrain.
     #[expect(clippy::too_many_arguments, reason = "the frame's terrain")]
     pub(crate) fn update(
         &mut self,
@@ -219,20 +221,16 @@ impl TerrainDraws {
         self.depth.is_some()
     }
 
-    /// The program of the ground's depth, made on `gpu` the first time;
-    /// `None`, logged once, where the backend has none.
+    /// The program of the ground's depth, made on `gpu` the first time it
+    /// makes; `None`, the frame's failure, in a frame where it fails.
     fn depth_shader(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) -> Option<ShaderKey> {
         if let Some(shader) = &self.depth_shader {
             return Some(shader.clone());
         }
-        if self.unsupported {
-            return None;
-        }
         let context = &mut *parameters.context;
         let shader = context.shader_key(&programs::TERRAIN_DEPTH, Uniforms::default(), ProjectionVariant::Mercator);
         if let Err(error) = context.shader(gpu, &shader) {
-            self.unsupported = true;
-            Log::warning(Event::Render, format!("Terrain hides nothing on this backend: {error}"));
+            context.fail(format!("Making the ground's depth shader failed: {error}"));
             return None;
         }
         Some(self.depth_shader.insert(shader).clone())
@@ -244,7 +242,7 @@ impl TerrainDraws {
         self.shader(gpu, parameters).is_some()
     }
 
-    /// The terrain's shader, made on `gpu` the first time; `None`, logged
+    /// The surface's shader, made on `gpu` the first time; `None`, logged
     /// once, where the backend has none.
     fn shader(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) -> Option<ShaderKey> {
         if let Some(shader) = &self.shader {

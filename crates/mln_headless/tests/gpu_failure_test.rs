@@ -246,6 +246,8 @@ impl FailingMap {
             response.data = Some(Arc::clone(&dem));
             Some(response)
         });
+        file_source
+            .set_response(Kind::Glyphs, |_| Some(crate::support::file_response("test/fixtures/resources/glyphs.pbf")));
         let options = MapOptions { map_mode: mode, size, ..Default::default() };
         let mut map = Map::with_file_source(file_source, options, &pool).unwrap();
         let events = map.renderer_events();
@@ -502,4 +504,59 @@ fn a_continuous_map_whose_frames_fail_for_a_while_reports_once_and_recovers() {
         assert_eq!(0, errors(&events), "{fail:?}: an error once the device works");
         assert!(map.shown.as_ref() == Some(&expected), "{fail:?}: the map shows other pixels");
     }
+}
+
+/// A map over flat terrain, seen pitched, of a red label at the center, the
+/// only layer, with a square around the center, which drapes, for a layer
+/// added later.
+const LABEL_STYLE: &str = r#"{
+    "version": 8,
+    "center": [0, 0],
+    "zoom": 4,
+    "pitch": 40,
+    "glyphs": "glyphs/{fontstack}/{range}.pbf",
+    "terrain": {"source": "dem"},
+    "sources": {
+        "dem": {"type": "raster-dem", "tiles": ["dem/{z}/{x}/{y}.png"], "tileSize": 256, "maxzoom": 10},
+        "square": {"type": "geojson", "data": {"type": "Polygon", "coordinates": [[[-5, -5], [5, -5], [5, 5], [-5, 5], [-5, -5]]]}},
+        "label": {"type": "geojson", "data": {"type": "Point", "coordinates": [0, 0]}}
+    },
+    "layers": [
+        {"id": "label", "type": "symbol", "source": "label",
+         "layout": {"text-field": "HH", "text-font": ["Open Sans Regular"], "text-size": 24},
+         "paint": {"text-color": "red"}}
+    ]
+}"#;
+
+/// How many of the RGBA `pixels` are `kind`.
+fn count(pixels: &[u8], kind: fn([u8; 4]) -> bool) -> usize {
+    pixels.as_chunks::<4>().0.iter().filter(|&&pixel| kind(pixel)).count()
+}
+
+/// A continuous map over terrain whose shader of the ground's depth always
+/// fails, as on a backend that rejects it, reports the failure once, and
+/// shows its label, in front of the ground, which then hides nothing. A
+/// layer that drapes, added once its frames have failed without one, draws
+/// on the surface.
+#[test]
+fn a_continuous_map_whose_ground_depth_shader_fails_hides_nothing_and_draws_the_surface() {
+    let mut map = FailingMap::with_style(MapMode::Continuous, LABEL_STYLE, Fail::Shaders("TerrainDepth"));
+    map.failing = usize::MAX;
+    let (mut events, went_idle) = map.run(Duration::from_secs(10), idle);
+    assert!(went_idle, "the map never went idle");
+    let red = |[r, g, b, _]: [u8; 4]| r > 200 && g < 60 && b < 60;
+    let shown = map.shown.take().expect("the map showed nothing");
+    assert!(count(&shown, red) >= 40, "{} opaque red pixels of the label", count(&shown, red));
+
+    let square = r#"{"id": "square", "type": "fill", "source": "square", "paint": {"fill-color": "lime"}}"#;
+    map.map.edit_style(|style| style.add_layer_json(square, Some("label"))).unwrap();
+    let (later, went_idle) = map.run(Duration::from_secs(10), idle);
+    events.extend(later);
+    assert!(went_idle, "the map never went idle with the square");
+    let shown = map.shown.take().expect("the map showed nothing");
+    let lime = |[r, g, b, _]: [u8; 4]| r < 60 && g > 200 && b < 60;
+    assert!(count(&shown, lime) >= 1000, "{} lime pixels of the square", count(&shown, lime));
+    assert!(count(&shown, red) >= 40, "{} opaque red pixels of the label over the square", count(&shown, red));
+    let reported: Vec<_> = events.iter().filter(|event| matches!(event, MapEvent::RenderError(_))).collect();
+    assert_eq!(1, reported.len(), "{reported:?}");
 }

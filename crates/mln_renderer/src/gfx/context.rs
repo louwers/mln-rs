@@ -434,9 +434,10 @@ impl Context {
         &self.global_uniform_buffers
     }
 
-    /// The depth of the frame's drawn ground, which the draws of programs
-    /// that read [`ID_GROUND_DEPTH_TEXTURE`] bind, as they bind the global
-    /// buffers; `None` in a frame without it.
+    /// The depth of the frame's drawn ground, or a texture of no ground in a
+    /// frame that drew none, which the draws of programs that read
+    /// [`ID_GROUND_DEPTH_TEXTURE`] bind, as they bind the global buffers;
+    /// `None` in a frame without terrain.
     ///
     /// [`ID_GROUND_DEPTH_TEXTURE`]: mln_gfx::shaders::shader_defines::ID_GROUND_DEPTH_TEXTURE
     pub(crate) fn ground_depth(&self) -> Option<&SharedTexture> {
