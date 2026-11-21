@@ -78,7 +78,7 @@ pub mod update_slot;
 pub use bucket::LayerFeatureStates;
 pub use mln_style::expression::functions::RegisterError;
 pub use registry::{Registry, RegistryBuilder};
-pub use renderer::{DrawnFrame, RenderTimings, Renderer, UpdatedFrame};
+pub use renderer::{DrawnFrame, Renderer, UpdatedFrame};
 pub use renderer_event::{
     FontStack, GlyphRange, OverscaledTileID, RenderMode, RendererEvent, RendererEvents, RenderingStats, TileOperation,
 };

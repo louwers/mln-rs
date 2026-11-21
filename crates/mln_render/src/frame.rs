@@ -46,14 +46,11 @@ pub(crate) struct Frame {
     pub(crate) layers: VecMap<u32, FrameLayer>,
     /// When the frame's update started.
     pub(crate) started: Instant,
-    /// When the frame's update started placing.
-    pub(crate) placement_started: Instant,
 }
 
 impl Frame {
     /// A frame of `state` that draws no layers, started now.
     pub(crate) fn new(state: &View, camera_moving: bool, debug_options: MapDebugOptions) -> Self {
-        let started = Instant::now();
         Frame {
             transform: TransformParameters::new(state),
             camera_moving,
@@ -68,8 +65,7 @@ impl Frame {
             loaded: false,
             placement_changed: false,
             layers: VecMap::new(),
-            started,
-            placement_started: started,
+            started: Instant::now(),
         }
     }
 }

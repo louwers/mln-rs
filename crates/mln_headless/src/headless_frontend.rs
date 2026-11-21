@@ -215,11 +215,12 @@ impl HeadlessFrontend {
         target.renderer_or(|gpu| {
             let reports_to = Arc::clone(reports_to);
             let events = reports_to.lock().clone();
-            let mut renderer = Renderer::with_glyph_cache(
+            let mut renderer = Renderer::new(
                 gpu,
                 *pixel_ratio,
                 local_glyphs.clone(),
                 Arc::clone(glyph_cache),
+                mln_render::text::font_face_engine::default_engine(),
                 mln_rs::builtin_registry(),
                 Arc::new(move || {
                     let events = reports_to.lock().clone();

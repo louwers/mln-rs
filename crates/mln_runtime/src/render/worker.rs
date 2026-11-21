@@ -286,7 +286,7 @@ impl Gfx {
     fn make_renderer(&mut self, events: &RendererEvents, pixel_ratio: f32, tile_cache_enabled: bool) {
         let Gfx { target, glyph_cache, font_face_engine, registry, local_glyphs, pool } = self;
         target.renderer_or(|gpu| {
-            let mut renderer = Renderer::with_fonts(
+            let mut renderer = Renderer::new(
                 gpu,
                 pixel_ratio,
                 local_glyphs.clone(),
