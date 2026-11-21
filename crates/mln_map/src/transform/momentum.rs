@@ -351,13 +351,14 @@ impl Transform {
                     let delta = snap_delta(momentum_value(&self.state, i), &snap, i == MOMENTUM_BEARING);
                     self.step_scalar(i, delta, momentum.anchor(i));
                 }
+                self.keep_clear_of_ground();
             }
             // The gesture's end can move the center onto the terrain.
             let recentered = self.end_gesture_momentum(gesture);
-            self.end_unstarted(animation, TransitionOutcome::Completed);
             if settling == 0 && recentered {
                 self.emit(TransformEvent::CameraWillChange(momentum_change(CameraChangeMode::Immediate)));
             }
+            self.end_unstarted(animation, TransitionOutcome::Completed);
             if settling != 0 || recentered {
                 self.emit(TransformEvent::CameraDidChange(momentum_change(CameraChangeMode::Immediate)));
             }

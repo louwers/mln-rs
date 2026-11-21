@@ -7,18 +7,20 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use glam::{DVec2, DVec3};
-use mln_map_types::{Elevation, View};
+use mln_map_types::{ConstrainMode, Elevation, View, ViewportMode};
 use mln_util::constants::DEFAULT_TRANSITION_EASE;
 use mln_util::geo::{LatLng, ScreenCoordinate, WrapMode};
 use mln_util::projection::Projection;
 use mln_util::queue::Queue;
+use mln_util::size::Size;
 
 use super::ground::{Slope, assert_near, flat, ground, ground_event, report, world};
 use super::terrain_camera::{frames, map_over, pixel, start};
+use crate::transform::{TerrainGround, Transform, TransformEvent};
 use crate::{
     AnchoredMomentum, AnimationOptions, BoundOptions, CameraChangeSource, CameraDelta, CameraMomentum, CameraOptions,
     CameraUpdate, CameraUpdateMode, GesturePhase, Map, MapEvent, MomentumDecay, MomentumDecayModel, MomentumEasing,
-    MomentumGlide,
+    MomentumGlide, MomentumSnap,
 };
 
 /// Ground at sea level under the start that rises about half a meter for
@@ -468,4 +470,69 @@ fn a_command_that_takes_the_center_from_a_glide_ends_on_the_ground() {
             "turns {turns}: at rest"
         );
     }
+}
+
+/// A momentum whose only part is a pitch snap that settles at once keeps
+/// the eye and the near plane above the ground, as every other step does:
+/// over a center the terrain doesn't clamp, the ground raises the snapped
+/// eye by pitch and zoom.
+#[test]
+fn an_instant_snap_keeps_the_eye_above_the_ground() {
+    let run_loop = Queue::<()>::new();
+    let (mut map, _) = map_over(None, &run_loop);
+    map.set_center_clamped_to_ground(false);
+    map.jump_to(&CameraOptions { zoom: Some(14.0), pitch: Some(50.0), ..Default::default() });
+    let height = 1000.0;
+    report(&mut map, ground_event(&flat(Some(height), height)));
+    map.apply_camera_delta(&CameraDelta { pitch: Some(5.0), phase: GesturePhase::Begin, ..Default::default() })
+        .unwrap();
+    assert!(map.transform_state().view().eye_position().z > height + 500.0);
+    // A snap from 55 to 80 degrees, which would put the eye under the ground.
+    let snap = MomentumSnap { spacing: 80.0, offset: 0.0, tolerance: 30.0, duration: Duration::ZERO };
+    let momentum =
+        CameraMomentum { pitch: AnchoredMomentum { snap: Some(snap), ..Default::default() }, ..Default::default() };
+    map.apply_camera_delta(&CameraDelta { momentum: Some(momentum), ..delta(GesturePhase::End, None, None) }).unwrap();
+    let snapshot = map.snapshot();
+    assert!(!snapshot.gesture_in_progress && !snapshot.transition_in_progress);
+    let view = map.transform_state().view();
+    assert!(view.pitch().to_degrees() > 55.0, "the snap pitched the camera, to {}", view.pitch().to_degrees());
+    assert!(view.eye_position().z >= height, "the eye at {} m", view.eye_position().z);
+    for point in view.near_plane_points() {
+        assert!(point.z >= height - 0.01, "{point} under the ground at {height} m");
+    }
+}
+
+/// A momentum with nothing to move ends its gesture at once, and the end's
+/// move onto the ground reports its change as every camera change does:
+/// will change, the command's end, did change.
+#[test]
+fn an_empty_momentum_reports_its_recentre_in_order() {
+    let mut transform = Transform::new(ConstrainMode::HeightOnly, ViewportMode::Default);
+    transform.resize(Size::new(512, 512)).unwrap();
+    transform.set_terrain(Some(TerrainGround { elevation: Some(slope()), clamped: true }));
+    transform.jump_to(&CameraOptions {
+        center: Some(start()),
+        zoom: Some(12.0),
+        pitch: Some(40.0),
+        ..Default::default()
+    });
+    transform.follow_terrain();
+    transform.apply_camera_delta(&delta(GesturePhase::Begin, Some((-60.0, 40.0)), None)).unwrap();
+    let held = transform.view().center_altitude();
+    transform.drain_events().for_each(drop);
+    let momentum = CameraMomentum::default();
+    transform
+        .apply_camera_delta(&CameraDelta { momentum: Some(momentum), ..delta(GesturePhase::End, None, None) })
+        .unwrap();
+    assert!(!transform.is_gesture_in_progress() && transform.view().center_altitude() != held, "the end recentred");
+    let events: Vec<_> = transform
+        .drain_events()
+        .map(|event| match event {
+            TransformEvent::CameraWillChange(change) => format!("will {:?}", change.source),
+            TransformEvent::CameraIsChanging => "changing".to_owned(),
+            TransformEvent::CameraDidChange(change) => format!("did {:?}", change.source),
+            TransformEvent::CommandEnded(_) => "ended".to_owned(),
+        })
+        .collect();
+    assert_eq!(vec!["will Momentum", "ended", "did Momentum"], events);
 }
