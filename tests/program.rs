@@ -22,7 +22,7 @@ use mln_rs::mln_gfx::gpu::{
 use mln_rs::mln_gfx::texture2d::SamplerState;
 use mln_rs::mln_util::Color;
 use mln_rs::mln_util::size::Size;
-use quad::{ID_CORNER, ID_OFFSET, ID_QUAD_UBO, QUAD, QuadUBO};
+use quad::{ID_CORNER, ID_OFFSET, PROPS, QUAD, QuadUBO};
 
 const SIZE: Size = Size { width: 32, height: 32 };
 const BLACK: [u8; 4] = [0, 0, 0, 255];
@@ -114,7 +114,7 @@ fn quads(gpu: &mut impl Gpu) -> Result<(), GpuError> {
     })?;
     let whole = |id, buffer, data: &[u8]| BindGroupEntry::Buffer { id, buffer, offset: 0, size: data.len() as u64 };
     let entries =
-        [whole(ID_QUAD_UBO as u32, block_buffer, block), BindGroupEntry::Texture { id: 0, texture: image, sampler }];
+        [whole(PROPS.id as u32, block_buffer, block), BindGroupEntry::Texture { id: 0, texture: image, sampler }];
     let bindings = gpu.create_bindings(&BindingsDesc { label: "quads", shader, entries: &entries })?;
     let geometry = gpu.create_geometry(&GeometryDesc {
         shader,

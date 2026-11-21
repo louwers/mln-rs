@@ -19,8 +19,7 @@ mln_rs::mln_gfx::uniform_block! {
 }
 
 /// The quads' block, which the draws share.
-const PROPS: Buffer = Buffer::uniform::<QuadUBO>("props", 0);
-pub(crate) const ID_QUAD_UBO: usize = PROPS.id;
+pub(crate) const PROPS: Buffer = Buffer::uniform::<QuadUBO>("props", 0);
 /// The ids of the quads' corner, which steps per vertex, and offset, which
 /// steps per instance.
 pub(crate) const ID_CORNER: usize = 0;
