@@ -91,9 +91,8 @@ pub struct Caps {
     /// ([`DynamicState::line_width`]): 1 on a device without wide lines.
     pub max_line_width: f32,
     /// Whether bindings bind [`Vertex`](BufferUsage::Vertex) buffers too,
-    /// which shaders read as storage buffers. The renderer draws the walls
-    /// of fill extrusions there as quads whose vertex shader reads the
-    /// bucket's vertices by vertex index, rather than as instances.
+    /// which shaders read as storage buffers, so that a vertex shader can
+    /// read any vertex of a buffer, such as its neighbors, by index.
     pub binds_vertex_buffers: bool,
 }
 
