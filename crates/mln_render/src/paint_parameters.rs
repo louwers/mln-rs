@@ -1,12 +1,12 @@
 use std::any::Any;
 
 use glam::DMat4;
+use mln_gfx::DepthMaskType;
 use mln_gfx::gpu::{
     ColorAttachment, DepthState, DepthStencilAttachment, Gpu, GpuError, LoadOp, PassDesc, Scissor, StencilState,
     StencilTest, TargetFormats,
 };
 use mln_gfx::types::{DepthFunctionType, StencilOpType};
-use mln_gfx::{DepthMaskType, ScissorRect};
 use mln_map_types::{FrameProjection, MapDebugOptions, ProjectionData, View, ViewportMode};
 use mln_tile_id::UnwrappedTileID;
 use mln_util::identity::SimpleIdentity;
@@ -214,7 +214,8 @@ pub struct PaintParameters<'a> {
     pub(crate) depth_range_size: f32,
     pub(crate) opaque_pass_cutoff: u32,
 
-    pub(crate) scissor_rect: ScissorRect,
+    /// The area of the frame's target that its draws draw in.
+    pub(crate) scissor: Scissor,
     /// Where the frame draws the map, and the depth it writes there, once
     /// the frame's draw groups are known, before the offscreen passes.
     pub(crate) frame_projection: Option<FrameProjection>,
@@ -227,7 +228,7 @@ impl<'a> PaintParameters<'a> {
 
     /// The parameters of the encode of `frame`, into a target of
     /// `renderable_size` device pixels at `pixel_ratio`, drawn within
-    /// `scissor_rect`, which clips with `clip_masks` and composites with
+    /// `scissor`, which clips with `clip_masks` and composites with
     /// `layer_composite`, with the frame's depth where
     /// `composites_with_frame_depth` says it can.
     #[expect(clippy::too_many_arguments, reason = "the renderer's GPU state, the frame and where it draws")]
@@ -240,7 +241,7 @@ impl<'a> PaintParameters<'a> {
         static_data: &'a RenderStaticData,
         pixel_ratio: f32,
         renderable_size: Size,
-        scissor_rect: ScissorRect,
+        scissor: Scissor,
     ) -> Self {
         let transform_params = &frame.transform;
         let state = &transform_params.view;
@@ -275,7 +276,7 @@ impl<'a> PaintParameters<'a> {
             current_layer: 0,
             depth_range_size: 1.0,
             opaque_pass_cutoff: frame.opaque_pass_cutoff,
-            scissor_rect,
+            scissor,
             frame_projection: None,
         }
     }
@@ -295,7 +296,7 @@ impl<'a> PaintParameters<'a> {
     /// Where draws draw now, `None` outside a pass.
     pub(crate) fn draw_target(&self) -> Option<DrawTarget> {
         let (size, targets) = self.pass_target()?;
-        Some(DrawTarget { size, targets, scissor: clamped_scissor(self.scissor_rect, size) })
+        Some(DrawTarget { size, targets, scissor: clamped_scissor(self.scissor, size) })
     }
 
     /// Begins `pass` on `gpu`, the context's, which draws then draw
@@ -599,8 +600,8 @@ impl Stencil {
 }
 
 /// `rect` within a target of `size`, `None` where nothing of it is.
-fn clamped_scissor(rect: ScissorRect, size: Size) -> Option<Scissor> {
-    let (x, y) = (rect.x as u32, rect.y as u32);
+fn clamped_scissor(rect: Scissor, size: Size) -> Option<Scissor> {
+    let Scissor { x, y, .. } = rect;
     let width = if x < size.width { rect.width.min(size.width - x) } else { 0 };
     let height = if y < size.height { rect.height.min(size.height - y) } else { 0 };
     (width > 0 && height > 0).then_some(Scissor { x, y, width, height })

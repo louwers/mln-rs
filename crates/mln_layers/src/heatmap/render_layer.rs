@@ -10,7 +10,6 @@ use glam::dcamera::rh::proj::opengl::orthographic;
 use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TextureWrapType};
@@ -342,7 +341,7 @@ impl HeatmapState {
                     vertex_count: if bucket.segments.is_empty() { 0 } else { bucket.vertices.len() },
                     mode: DrawMode::Triangles,
                     indexes: indexes.into(),
-                    segments: bucket.segments.iter().map(SegmentBase::copy).collect(),
+                    segments: bucket.segments.clone(),
                     instances: None,
                 };
                 let objects = DrawObjects::new(

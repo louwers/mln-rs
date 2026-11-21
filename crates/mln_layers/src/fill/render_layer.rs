@@ -148,7 +148,7 @@ fn fill_geometry(
         vertex_count: if segments.is_empty() { 0 } else { vertex_count },
         mode,
         indexes,
-        segments: segments.iter().map(SegmentBase::copy).collect(),
+        segments: segments.to_vec(),
         instances: None,
     }
 }

@@ -349,7 +349,7 @@ fn raster_geometry(
         vertex_count,
         mode: DrawMode::Triangles,
         indexes,
-        segments: segments.iter().map(SegmentBase::copy).collect(),
+        segments: segments.to_vec(),
         instances: None,
     }
 }

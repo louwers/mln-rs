@@ -220,7 +220,7 @@ impl State {
 
     /// Sets the depth test and write of `depth`, and the depths `range`
     /// that clip z maps to.
-    pub(crate) fn set_depth(&mut self, gl: &Gl, depth: &DepthState, range: (f32, f32)) {
+    pub(crate) fn set_depth(&mut self, gl: &Gl, depth: DepthState, range: (f32, f32)) {
         if depth.compare == DepthFunctionType::Always && !depth.write {
             Self::capability(gl, &mut self.depth_test, glow::DEPTH_TEST, false);
             // Depth-related state should not matter when the depth test is

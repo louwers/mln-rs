@@ -24,11 +24,9 @@ pub mod projection_variant;
 pub mod renderer_backend;
 pub mod rendering_stats;
 pub mod ring;
-pub mod scissor_rect;
 pub mod shaders;
 pub mod texture2d;
 pub mod types;
-pub mod util_hash;
 pub mod window;
 
 pub use color_mode::ColorMode;
@@ -41,7 +39,6 @@ pub use export::{
 pub use frame::{ConsumerSync, FrameImage, FrameTarget, GpuSync, Handoff, SyncKind, SyncKinds};
 pub use gfx_types::{AttributeDataType, DrawModeType};
 pub use renderer_backend::RendererBackend;
-pub use scissor_rect::ScissorRect;
 pub use types::DepthMaskType;
 pub use window::Window;
 

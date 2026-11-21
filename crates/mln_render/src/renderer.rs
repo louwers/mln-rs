@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
-use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, Gpu, LoadOp, TargetFormats};
+use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, Gpu, LoadOp, Scissor, TargetFormats};
 use mln_gfx::rendering_stats::RenderingStats;
 use mln_gfx::shaders::layer_ubo::ViewUBO;
 use mln_gfx::shaders::shader_defines::ID_VIEW_UBO;
-use mln_gfx::{FrameImage, Handoff, ScissorRect};
+use mln_gfx::{FrameImage, Handoff};
 use mln_map_types::{FrameProjection, MapDebugOptions};
 use mln_text::GlyphCache;
 use mln_text::local_glyph_rasterizer::LocalGlyphs;
@@ -485,9 +485,9 @@ impl Encoder {
         let renderable_size = image.size;
         let frustum_offset = state.frustum_offset();
         let pixel_ratio = f64::from(self.pixel_ratio);
-        let scissor_rect = ScissorRect {
-            x: (frustum_offset.left * pixel_ratio) as i32,
-            y: (frustum_offset.top * pixel_ratio) as i32,
+        let scissor = Scissor {
+            x: (frustum_offset.left * pixel_ratio) as u32,
+            y: (frustum_offset.top * pixel_ratio) as u32,
             width: renderable_size
                 .width
                 .wrapping_sub(((frustum_offset.left + frustum_offset.right) * pixel_ratio) as u32),
@@ -507,7 +507,7 @@ impl Encoder {
             static_data,
             self.pixel_ratio,
             renderable_size,
-            scissor_rect,
+            scissor,
         );
 
         // - UPLOAD --------------------------------------------------------

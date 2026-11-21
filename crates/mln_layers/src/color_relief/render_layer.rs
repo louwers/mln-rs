@@ -471,14 +471,14 @@ impl LayerType for ColorRelief {
                             globe_mesh.vertices.clone(),
                             globe_mesh.vertices.count(),
                             globe_mesh.indexes(),
-                            globe_mesh.segments.iter().map(SegmentBase::copy).collect(),
+                            globe_mesh.segments.clone(),
                         )
                     } else if let Some(quads) = geometry.quads() {
                         (
                             quads.vertices.clone(),
                             quads.vertices.count(),
                             quads.indexes.clone().into(),
-                            quads.segments.iter().map(SegmentBase::copy).collect(),
+                            quads.segments.clone(),
                         )
                     } else {
                         (

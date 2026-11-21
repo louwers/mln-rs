@@ -970,7 +970,7 @@ fn set_state(
     // out bound, which the draw leaves alone.
     if differs(|a, b| a.depth_range == b.depth_range) {
         let depth = if depth_stencil { fixed.depth } else { DepthState::DISABLED };
-        state.set_depth(gl, &depth, dynamic.depth_range);
+        state.set_depth(gl, depth, dynamic.depth_range);
     }
     if differs(|a, b| a.stencil_reference == b.stencil_reference) {
         let stencil = if depth_stencil { fixed.stencil } else { StencilState::DISABLED };

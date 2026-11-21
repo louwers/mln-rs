@@ -253,7 +253,7 @@ fn extrusion_draw(
         vertex_count: if geometry.segments.is_empty() { 0 } else { geometry.vertex_count },
         mode: geometry.mode,
         indexes: geometry.indexes.clone().into(),
-        segments: geometry.segments.iter().map(SegmentBase::copy).collect(),
+        segments: geometry.segments.to_vec(),
         instances: geometry.instances.map(copy_shared_attributes),
     };
     let in_color = color_mode.is_some();

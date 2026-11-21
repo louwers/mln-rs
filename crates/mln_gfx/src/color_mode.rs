@@ -20,16 +20,6 @@ pub enum BlendFunction {
 }
 
 impl BlendFunction {
-    #[must_use]
-    pub(crate) fn which(self) -> usize {
-        match self {
-            BlendFunction::Replace => 0,
-            BlendFunction::Add(_) => 1,
-            BlendFunction::Subtract(_) => 2,
-            BlendFunction::ReverseSubtract(_) => 3,
-        }
-    }
-
     /// The static `equation` member of the active alternative.
     #[must_use]
     pub fn equation(&self) -> ColorBlendEquationType {
@@ -128,21 +118,5 @@ impl ColorMode {
             blend_color: Color::new_unchecked(STEP, STEP, STEP, 0.0),
             mask: Self::ALL,
         }
-    }
-
-    /// A hash of the mode, for a pipeline cache key.
-    #[must_use]
-    pub fn hash(&self) -> u64 {
-        crate::util_hash::hash(&[
-            self.blend_function.which() as u64,
-            u64::from(self.blend_color.r.to_bits()),
-            u64::from(self.blend_color.g.to_bits()),
-            u64::from(self.blend_color.b.to_bits()),
-            u64::from(self.blend_color.a.to_bits()),
-            u64::from(self.mask.r),
-            u64::from(self.mask.g),
-            u64::from(self.mask.b),
-            u64::from(self.mask.a),
-        ])
     }
 }

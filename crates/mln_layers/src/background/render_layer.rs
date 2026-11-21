@@ -79,7 +79,7 @@ impl BackgroundState {
             vertex_count,
             mode: DrawMode::Triangles,
             indexes: DrawIndexes::new(indexes),
-            segments: segments.iter().map(SegmentBase::copy).collect(),
+            segments: segments.clone(),
             instances: None,
         };
         DrawObjects::new(shader, color_mode, CullFaceMode::disabled(), geometry, Textures::default())

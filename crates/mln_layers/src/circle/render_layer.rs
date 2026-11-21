@@ -4,7 +4,6 @@ use std::sync::Arc;
 use geometry::Point;
 use mln_gfx::gpu::Gpu;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_map_types::TileProjector;
@@ -252,7 +251,7 @@ impl LayerType for Circle {
                         vertex_count,
                         mode: DrawMode::Triangles,
                         indexes: indexes.into(),
-                        segments: bucket.segments.iter().map(SegmentBase::copy).collect(),
+                        segments: bucket.segments.clone(),
                         instances: None,
                     },
                     Textures::default(),

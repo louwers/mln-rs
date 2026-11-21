@@ -1,5 +1,4 @@
-use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, Gpu, GpuError, LoadOp, TargetFormats};
-use mln_gfx::scissor_rect::ScissorRect;
+use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, Gpu, GpuError, LoadOp, Scissor, TargetFormats};
 use mln_gfx::texture2d::{SamplerState, texture_format};
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TexturePixelType, TextureWrapType};
 use mln_util::Color;
@@ -63,9 +62,9 @@ impl RenderTarget {
             Log::error(Event::Render, format!("Beginning a render target's pass failed: {error}"));
             return None;
         }
-        let prev_scissor_rect = parameters.scissor_rect;
-        parameters.scissor_rect = ScissorRect { x: 0, y: 0, width: pass.size.width, height: pass.size.height };
-        Some(TargetPasses { passes: [RenderPass::OPAQUE, RenderPass::TRANSLUCENT].into_iter(), prev_scissor_rect })
+        let frame_scissor = parameters.scissor;
+        parameters.scissor = Scissor { x: 0, y: 0, width: pass.size.width, height: pass.size.height };
+        Some(TargetPasses { passes: [RenderPass::OPAQUE, RenderPass::TRANSLUCENT].into_iter(), frame_scissor })
     }
 
     /// The pass that clears the texture to opaque black and its depth to 1,
@@ -120,8 +119,8 @@ fn texture(context: &mut Context, size: Size, type_: TextureChannelDataType) -> 
 pub struct TargetPasses {
     /// The passes not yet drawn.
     passes: std::array::IntoIter<RenderPass, 2>,
-    /// The frame's scissor rect, which `end` restores.
-    prev_scissor_rect: ScissorRect,
+    /// The frame's scissor, which `end` restores.
+    frame_scissor: Scissor,
 }
 
 impl TargetPasses {
@@ -144,6 +143,6 @@ impl TargetPasses {
         if let Err(error) = parameters.end_pass(gpu) {
             Log::error(Event::Render, format!("Ending a render target's pass failed: {error}"));
         }
-        parameters.scissor_rect = self.prev_scissor_rect;
+        parameters.scissor = self.frame_scissor;
     }
 }

@@ -12,7 +12,6 @@ use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_map_types::{Projection, ProjectionData};
@@ -528,7 +527,7 @@ fn refresh_draw(
             Some(i) => buffer.segments.get(i..=i).unwrap_or_default(),
             None => &buffer.segments,
         };
-        let segments = segments.iter().map(SegmentBase::copy).collect();
+        let segments = segments.to_vec();
         draw.objects.replace_indexes(copied_indexes(&buffer.triangles), segments);
     }
     copy_attributes
@@ -790,7 +789,7 @@ impl SymbolState {
                 vertex_count: buffer.vertices.len(),
                 mode,
                 indexes: copied_indexes(&buffer.indices),
-                segments: buffer.segments.iter().map(SegmentBase::copy).collect(),
+                segments: buffer.segments.clone(),
                 instances: None,
             };
             let objects = DrawObjects::new(
@@ -1408,7 +1407,7 @@ impl LayerType for Symbol {
                     vertex_count: buffer.attribute_data.len(),
                     mode: DrawMode::Triangles,
                     indexes: copied_indexes(&buffer.triangles),
-                    segments: segments.iter().map(SegmentBase::copy).collect(),
+                    segments: segments.to_vec(),
                     instances: None,
                 };
                 let shader = cx.context.shader_key(program, uniforms, symbol_projection_variant);

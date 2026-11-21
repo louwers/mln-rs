@@ -7,7 +7,9 @@ pub enum DrawMode {
     TriangleStrip,
     /// Lines `width` pixels wide, up to the device's widest
     /// ([`Caps::max_line_width`](crate::gpu::Caps::max_line_width)).
-    Lines { width: f32 },
+    Lines {
+        width: f32,
+    },
 }
 
 impl DrawMode {
