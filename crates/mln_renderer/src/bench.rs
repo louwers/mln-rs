@@ -558,39 +558,63 @@ fn cover_coverage(
 /// near side of the camera.
 fn screen_share(matrix: &DMat4) -> f64 {
     let extent = f64::from(EXTENT);
-    let mut polygon: Vec<DVec4> = [(0.0, 0.0), (extent, 0.0), (extent, extent), (0.0, extent)]
-        .into_iter()
-        .map(|(x, y)| *matrix * DVec4::new(x, y, 0.0, 1.0))
-        .collect();
+    let mut polygon = Polygon::default();
+    for (x, y) in [(0.0, 0.0), (extent, 0.0), (extent, extent), (0.0, extent)] {
+        polygon.push(*matrix * DVec4::new(x, y, 0.0, 1.0));
+    }
     // In front of the camera, then inside each edge of the view: w > 0 and
     // -w <= x, y <= w.
     let planes: [fn(DVec4) -> f64; 5] = [|p| p.w - 1e-9, |p| p.w - p.x, |p| p.w + p.x, |p| p.w - p.y, |p| p.w + p.y];
     for plane in planes {
-        polygon = clip(&polygon, plane);
-        if polygon.is_empty() {
+        polygon = polygon.clip(plane);
+        if polygon.points().is_empty() {
             return 0.0;
         }
     }
-    let points: Vec<(f64, f64)> = polygon.iter().map(|p| (p.x / p.w, p.y / p.w)).collect();
-    let twice: f64 = points.iter().zip(points.iter().cycle().skip(1)).map(|(a, b)| a.0 * b.1 - b.0 * a.1).sum();
+    let points = polygon.points();
+    let twice: f64 = points
+        .iter()
+        .zip(points.iter().cycle().skip(1))
+        .map(|(a, b)| (a.x / a.w) * (b.y / b.w) - (b.x / b.w) * (a.y / a.w))
+        .sum();
     // The view is 2 by 2 in normalized device coordinates.
     (twice.abs() / 2.0 / 4.0).min(1.0)
 }
 
-/// The part of `polygon` where `inside` isn't negative (Sutherland-Hodgman).
-fn clip(polygon: &[DVec4], inside: fn(DVec4) -> f64) -> Vec<DVec4> {
-    let mut clipped = Vec::with_capacity(polygon.len() + 1);
-    for (i, &point) in polygon.iter().enumerate() {
-        let previous = polygon[(i + polygon.len() - 1) % polygon.len()];
-        let (d0, d1) = (inside(previous), inside(point));
-        if (d0 >= 0.0) != (d1 >= 0.0) {
-            clipped.push(previous + (point - previous) * (d0 / (d0 - d1)));
-        }
-        if d1 >= 0.0 {
-            clipped.push(point);
-        }
+/// A convex polygon of a tile's square clipped by the view's five planes:
+/// each clip adds at most one point to the square's four.
+#[derive(Clone, Copy, Default)]
+struct Polygon {
+    points: [DVec4; 9],
+    len: usize,
+}
+
+impl Polygon {
+    fn points(&self) -> &[DVec4] {
+        &self.points[..self.len]
     }
-    clipped
+
+    fn push(&mut self, point: DVec4) {
+        self.points[self.len] = point;
+        self.len += 1;
+    }
+
+    /// The part where `inside` isn't negative (Sutherland-Hodgman).
+    fn clip(&self, inside: fn(DVec4) -> f64) -> Polygon {
+        let points = self.points();
+        let mut clipped = Polygon::default();
+        for (i, &point) in points.iter().enumerate() {
+            let previous = points[(i + points.len() - 1) % points.len()];
+            let (d0, d1) = (inside(previous), inside(point));
+            if (d0 >= 0.0) != (d1 >= 0.0) {
+                clipped.push(previous + (point - previous) * (d0 / (d0 - d1)));
+            }
+            if d1 >= 0.0 {
+                clipped.push(point);
+            }
+        }
+        clipped
+    }
 }
 
 #[cfg(test)]

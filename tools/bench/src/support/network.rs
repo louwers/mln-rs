@@ -92,7 +92,8 @@ pub(crate) struct Counts {
     pub(crate) cancelled: u64,
     /// Bytes received, headers included.
     pub(crate) bytes: u64,
-    /// Bytes received of transfers that were cancelled or failed.
+    /// Bytes received of transfers that were cancelled or failed, a 5xx
+    /// or 429 answer's included.
     pub(crate) wasted: u64,
     /// Transfers of a resource (a URL, and a byte range of it) whose last
     /// transfer failed.
@@ -413,6 +414,7 @@ impl State {
             Ended::Answered(answer) => {
                 self.counts.bytes += answer.wire;
                 if answer.status >= 500 || answer.status == 429 {
+                    self.counts.wasted += answer.wire;
                     self.failed.insert(url);
                 } else {
                     self.failed.remove(&url);
@@ -732,7 +734,10 @@ mod tests {
         assert_eq!(frames_until(&mut network, &answers, 3), 123);
         assert!(answers.lock().iter().all(|answer| answer.error.is_some()));
         let counts = network.counts();
-        assert_eq!((counts.requests, counts.retries, counts.bytes), (3, 2, 3 * HEADER_BYTES));
+        assert_eq!(
+            (counts.requests, counts.retries, counts.bytes, counts.wasted),
+            (3, 2, 3 * HEADER_BYTES, 3 * HEADER_BYTES)
+        );
     }
 
     #[test]
