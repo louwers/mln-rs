@@ -316,6 +316,24 @@
 //!   which no later snapshot redoes. A still image draws only such an update's
 //!   frame, and a continuous frame of any other reports itself partial, so
 //!   it doesn't make the map idle.
+//! - **Queries.** A rendered query of the last update's frame meets the
+//!   ground that frame drew ([`RenderTerrain::ground`]): each point of its
+//!   screen geometry, a box's corners included, is where its line of sight
+//!   first meets the surface as drawn, the ray the map's conversions use,
+//!   or the flat map's point at sea level where it meets none. Each source
+//!   then tests its tiles' features there as on a flat map: the layers that
+//!   drape, the footprints of fill extrusions and circles aligned with the
+//!   map. Circles aligned with the viewport, or scaled with it, are tested
+//!   on the screen: each query point projects at the height its ray met,
+//!   and each center at the height its draw stands on, the ground of its
+//!   tile ([`TerrainElevation::ground`]). So a feature that drapes or
+//!   stands behind the first ground a line of sight meets isn't found
+//!   there, as in GL JS and MapLibre Native. Symbols are found where
+//!   placement put them, on the screen, through the collision index, so a
+//!   label the ground hides is found, as in GL JS, MapLibre Native and
+//!   orbis, and a query of symbol layers alone casts no ray. Heatmaps
+//!   answer no query, as on a flat map. A frame without terrain queries as
+//!   a flat map does.
 
 mod cover;
 mod dem_textures;

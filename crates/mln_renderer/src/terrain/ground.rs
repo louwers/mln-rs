@@ -26,6 +26,7 @@ fn dem_coords(tile: CanonicalTileID, dem: CanonicalTileID) -> DemCoords {
 
 /// The ground under a tile of a standing layer: the one DEM tile its draws
 /// read, and where the tile is in it ([`TerrainElevation::ground`]).
+#[derive(Clone, Copy)]
 pub(crate) struct TileGround<'a> {
     /// `None` where the ground is flat.
     dem: Option<&'a DrawnDem>,

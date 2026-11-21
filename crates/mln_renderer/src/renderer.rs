@@ -464,7 +464,8 @@ impl Renderer {
     }
 
     /// The features drawn in `geometry`, a point or a polygon in screen
-    /// coordinates. `Err` for a malformed tile.
+    /// coordinates. Over terrain, each point is where it meets the ground
+    /// the last frame drew. `Err` for a malformed tile.
     pub fn query_rendered_features(
         &mut self,
         geometry: &[mln_util::geo::ScreenCoordinate],

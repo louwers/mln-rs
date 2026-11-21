@@ -715,3 +715,112 @@ fn collision_boxes_draw_over_terrain() {
     let debug = frontend.render(&mut map).expect("a frame with the collision boxes").image;
     assert_ne!(plain.data, debug.data, "no collision box drew");
 }
+
+/// How many features of the layer `layer` the frontend's renderer finds at
+/// `x`, `y`, in pixels from the top left.
+fn query_at(frontend: &mut HeadlessFrontend, layer: &str, x: f64, y: f64) -> usize {
+    use mln_renderer::query::RenderedQueryOptions;
+    use mln_util::geo::ScreenCoordinate;
+
+    let options = RenderedQueryOptions::new(Some(vec![layer.to_owned()]), None);
+    frontend.renderer().query_rendered_features_at_point(&ScreenCoordinate::new(x, y), &options).unwrap().len()
+}
+
+/// How many features of the layer `layer` the frontend's renderer finds in
+/// the box `reach` pixels to each side of `x`, `y`.
+fn query_around(frontend: &mut HeadlessFrontend, layer: &str, x: f64, y: f64, reach: f64) -> usize {
+    use mln_renderer::query::RenderedQueryOptions;
+    use mln_util::geo::ScreenCoordinate;
+
+    let options = RenderedQueryOptions::new(Some(vec![layer.to_owned()]), None);
+    let (min, max) = (ScreenCoordinate::new(x - reach, y - reach), ScreenCoordinate::new(x + reach, y + reach));
+    frontend.renderer().query_rendered_features_in_box(&min, &max, &options).unwrap().len()
+}
+
+/// A red fill square 0.001° to each side of a point 500 m up a slope down to
+/// the east, pitched 60°, drapes over the ground: a query, at a point or in a
+/// box, finds it where the camera sees its middle on the ground, and not
+/// where it would see it at sea level, some 50 px lower.
+#[test]
+fn a_fill_on_a_raised_slope_is_found_where_it_drapes() {
+    let center = location_at(15, 16384.5, 16384.5);
+    let x = 16384.5 * 256.0;
+    let (lng, lat) = (center.longitude(), center.latitude());
+    let (west, east, south, north) = (lng - 0.001, lng + 0.001, lat - 0.001, lat + 0.001);
+    let style = format!(
+        r#"{{
+            "version": 8,
+            "terrain": {{"source": "dem"}},
+            "sources": {{
+                "dem": {{"type": "raster-dem", "tiles": ["dem/{{z}}/{{x}}/{{y}}.png"], "tileSize": 256, "maxzoom": 15}},
+                "square": {{"type": "geojson", "data": {{"type": "Polygon", "coordinates": [[
+                    [{west}, {south}], [{east}, {south}], [{east}, {north}], [{west}, {north}], [{west}, {south}]
+                ]]}}}}
+            }},
+            "layers": [
+                {{"id": "background", "type": "background", "paint": {{"background-color": "white"}}}},
+                {{"id": "fill", "type": "fill", "source": "square", "paint": {{"fill-color": "red"}}}}
+            ]
+        }}"#
+    );
+    let camera = CameraOptions { center: Some(center), zoom: Some(14.0), pitch: Some(60.0), ..Default::default() };
+    let Some((image, map, _, mut frontend)) =
+        render_with_frontend(&style, &[camera], move |tile| slope_png(tile, x, 2.0))
+    else {
+        return;
+    };
+    assert!(red(pixel_at(&image, &map, &center, 500.0)), "the fill on the ground");
+    let (ground_x, ground_y) = seen_at(&map, &center, 500.0);
+    let (sea_x, sea_y) = seen_at(&map, &center, 0.0);
+    assert!(sea_y - ground_y > 50.0, "sea level {} px lower", sea_y - ground_y);
+    assert!(!red(pixel_at(&image, &map, &center, 0.0)), "no fill where sea level is seen");
+
+    assert_eq!(1, query_at(&mut frontend, "fill", ground_x, ground_y), "the fill where it drapes");
+    assert_eq!(0, query_at(&mut frontend, "fill", sea_x, sea_y), "nothing where it would be at sea level");
+    assert_eq!(1, query_around(&mut frontend, "fill", ground_x, ground_y, 3.0), "a box where it drapes");
+    assert_eq!(0, query_around(&mut frontend, "fill", sea_x, sea_y, 3.0), "a box where it would be at sea level");
+}
+
+/// Over ground 300 m high, pitched 60°, a red circle, aligned with the map
+/// or with the viewport, is found where it draws, and not where the camera
+/// sees its center at sea level, some 50 px lower.
+#[test]
+fn a_circle_on_raised_ground_is_found_where_it_draws() {
+    let center = LatLng::new(0.0, 0.0).unwrap();
+    for alignment in ["map", "viewport"] {
+        let style = Scene::new(center, 18, 14).style().replace(
+            r#""circle-radius": 6"#,
+            &format!(r#""circle-radius": 6, "circle-pitch-alignment": "{alignment}""#),
+        );
+        let camera = CameraOptions { center: Some(center), zoom: Some(14.0), pitch: Some(60.0), ..Default::default() };
+        let Some((image, map, _, mut frontend)) = render_with_frontend(&style, &[camera], |_| dem_png(METERS_300))
+        else {
+            return;
+        };
+        let ((x, y), _) = red_center(&image);
+        let (sea_x, sea_y) = seen_at(&map, &center, 0.0);
+        assert!(sea_y - y > 30.0, "{alignment}: sea level {} px lower", sea_y - y);
+        assert_eq!(1, query_at(&mut frontend, "circle", x, y), "{alignment}: the circle where it draws");
+        assert_eq!(0, query_at(&mut frontend, "circle", sea_x, sea_y), "{alignment}: nothing at sea level");
+    }
+}
+
+/// Over ground 300 m high, pitched 45°, a red fill extrusion 20 m tall is
+/// found by its footprint where the camera sees it on the ground, and not
+/// where it would see it at sea level.
+#[test]
+fn an_extrusion_on_raised_ground_is_found_by_its_footprint_on_the_ground() {
+    let center = LatLng::new(0.0, 0.0).unwrap();
+    let scene = Scene { pitch: 45.0, extrusion: Some(20.0), ..Scene::new(center, 18, 14) };
+    let camera = CameraOptions { center: Some(center), zoom: Some(16.0), pitch: Some(45.0), ..Default::default() };
+    let Some((image, map, _, mut frontend)) = render_with_frontend(&scene.style(), &[camera], |_| dem_png(METERS_300))
+    else {
+        return;
+    };
+    assert!(extrusion(pixel_at(&image, &map, &center, 300.0)), "the extrusion on the ground");
+    let (x, y) = seen_at(&map, &center, 300.0);
+    let (sea_x, sea_y) = seen_at(&map, &center, 0.0);
+    assert!(sea_y - y > 50.0, "sea level {} px lower", sea_y - y);
+    assert_eq!(1, query_at(&mut frontend, "extrusion", x, y), "the footprint on the ground");
+    assert_eq!(0, query_at(&mut frontend, "extrusion", sea_x, sea_y), "nothing at sea level");
+}

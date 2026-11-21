@@ -1135,9 +1135,18 @@ impl SourceTiles {
         );
     }
 
+    /// The features the source's rendered tiles draw in `geometry`, screen
+    /// points from the top left. Over terrain, `ground` gives where each
+    /// point meets the ground, which the tiles are queried at in place of
+    /// sea level.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the query geometry and its ground, camera, layers, options, global state and projection of a feature query"
+    )]
     pub(crate) fn query_rendered_features(
         &self,
         geometry: &[mln_util::geo::ScreenCoordinate],
+        ground: Option<&crate::geometry::feature_index::QueryGround<'_>>,
         view: &mln_map_types::View,
         layers: &crate::geometry::feature_index::QueryLayers<'_>,
         options: &crate::query::RenderedQueryOptions,
@@ -1184,7 +1193,12 @@ impl SourceTiles {
             traced.extend(geometry.last().copied());
         }
         let screen_geometry: &[mln_util::geo::ScreenCoordinate] = if traced.is_empty() { geometry } else { &traced };
-        let mut query_geometry: Vec<geometry::Point<f64>> = screen_geometry.iter().map(to_world).collect();
+        // Terrain draws flat on the globe, so a query there has no ground.
+        debug_assert!(!globe || ground.is_none(), "a query of the globe over terrain");
+        let mut query_geometry: Vec<geometry::Point<f64>> = match ground {
+            Some(ground) => ground.world.clone(),
+            None => screen_geometry.iter().map(to_world).collect(),
+        };
 
         // The bounding box of points, of which the geometry has at least one.
         let envelope = |points: &mut dyn Iterator<Item = (f64, f64)>| {
@@ -1342,6 +1356,7 @@ impl SourceTiles {
                         &tile.id,
                         &mut result,
                         &tile_space_query_geometry,
+                        ground,
                         view,
                         layers,
                         options,
@@ -1357,6 +1372,7 @@ impl SourceTiles {
                     &tile.id,
                     &mut found,
                     &tile_space_query_geometry,
+                    ground,
                     view,
                     layers,
                     options,

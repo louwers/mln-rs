@@ -1609,11 +1609,23 @@ impl RenderOrchestrator {
 
         let proj_matrix = self.view.projection_matrix_with(self.view.near_z(), false);
 
+        // Over terrain, each point is queried where its line of sight meets
+        // the ground the frame drew, once for every source. Symbols are found
+        // where they were placed, on the screen, so a query of symbols alone
+        // needs no ground.
+        let symbols_only = filtered_layers.values().all(|layer| layer.base().style.info().cross_tile_index);
+        let ground = self
+            .terrain
+            .ground()
+            .filter(|_| !symbols_only)
+            .map(|elevation| crate::geometry::feature_index::QueryGround::new(&self.view, elevation, geometry));
+
         let mut results_by_layer = crate::geometry::feature_index::QueryResults::default();
         for source_id in &source_ids {
             if let Some(source) = self.source_tiles(source_id) {
                 let source_results = source.query_rendered_features(
                     geometry,
+                    ground.as_ref(),
                     &self.view,
                     &filtered_layers,
                     options,

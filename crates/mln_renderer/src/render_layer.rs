@@ -12,7 +12,7 @@ use std::sync::Arc;
 use glam::DMat4;
 use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_map_types::{ProjectionData, TileProjector, View};
+use mln_map_types::{ProjectionData, View};
 use mln_style::expression::Dependency;
 use mln_style::layer_type::{ErasedLayerStyle, LayerStyle, PaintSet, SourceKind, StyleLayerType};
 use mln_style::{PropertyEvaluationParameters, TransitionParameters};
@@ -1205,22 +1205,14 @@ pub(crate) trait RenderLayer: LayerParts {
         &[]
     }
 
-    /// Whether the feature `feature` with `geometry`, in a tile whose
-    /// `projector` projects it, intersects `query_geometry` as the layer
-    /// draws it at `zoom`; false unless a layer type overrides it.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the query geometry, the feature and its state, and the zoom, camera and projector that test them"
-    )]
+    /// Whether the feature `feature` with `geometry`, with `feature_state`,
+    /// intersects `region` of its tile as the layer draws it at the view's
+    /// zoom; false unless a layer type overrides it.
     fn query_intersects_feature(
         &self,
-        _query_geometry: &mln_tile_id::geometry_tile_data::GeometryCoordinates,
+        _region: &crate::geometry::feature_index::QueryRegion<'_>,
         _feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
         _geometry: &mln_tile_id::geometry_tile_data::GeometryCollection,
-        _zoom: f32,
-        _transform_state: &View,
-        _pixels_to_tile_units: f32,
-        _projector: &TileProjector<'_>,
         _feature_state: &mln_style::expression::expression::FeatureState,
     ) -> bool {
         false

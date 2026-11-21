@@ -2,6 +2,7 @@ use std::mem::offset_of;
 use std::sync::Arc;
 
 use geometry::Point;
+use glam::Vec2;
 use mln_gfx::gpu::Gpu;
 use mln_gfx::shaders::circle_layer_ubo::{CircleDrawableUBO, CircleEvaluatedPropsUBO};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
@@ -12,7 +13,7 @@ use mln_gfx::shaders::shader_defines::{
 };
 use mln_gfx::shaders::terrain_ubo::GroundDrawableUBO;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
-use mln_map_types::{TileProjector, View};
+use mln_map_types::TileProjector;
 use mln_style::expression::EvaluationContext;
 use mln_style::layer_type::LayerStyle;
 use mln_style::layers::Circle;
@@ -26,6 +27,7 @@ use crate::bucket::Bucket;
 use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
 use crate::buckets::circle_bucket::{CircleBinders, CircleBucket, CircleLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
+use crate::geometry::feature_index::QueryRegion;
 use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::layer_drawing::{DrawList, FrameDraw, TileDraws, UniformWriter};
 use crate::layer_type::{EvaluatedLayer, LayerType};
@@ -44,12 +46,15 @@ use crate::tile_matrix::{globe_extrude_scale, projection_data, to_projection_ubo
 const RENDER_PASS: RenderPass = RenderPass::Translucent;
 
 // query
+/// Where on the screen the tile point `p`, `height` meters up, shows, in
+/// pixels.
 fn project_point(
     p: mln_tile_id::geometry_tile_data::GeometryCoordinate,
+    height: f64,
     projector: &TileProjector<'_>,
     size: mln_util::size::Size,
 ) -> mln_tile_id::geometry_tile_data::GeometryCoordinate {
-    let pos = projector.project(&Point::new(f64::from(p.x), f64::from(p.y)), 0.0).point;
+    let pos = projector.project(&Point::new(f64::from(p.x), f64::from(p.y)), height).point;
     // `(float(pos.x) + 1) * size.width * 0.5`: float, then double.
     mln_tile_id::geometry_tile_data::GeometryCoordinate::new(
         (f64::from((pos.x as f32 + 1.0) * size.width as f32) * 0.5) as i16,
@@ -57,12 +62,16 @@ fn project_point(
     )
 }
 
+/// Where on the screen the points of `query_geometry` show, each at its
+/// height of `heights`, or at sea level without them.
 fn project_query_geometry(
     query_geometry: &mln_tile_id::geometry_tile_data::GeometryCoordinates,
+    heights: Option<&[f64]>,
     projector: &TileProjector<'_>,
     size: mln_util::size::Size,
 ) -> mln_tile_id::geometry_tile_data::GeometryCoordinates {
-    query_geometry.iter().map(|p| project_point(*p, projector, size)).collect()
+    let height = |i: usize| heights.map_or(0.0, |heights| heights[i]);
+    query_geometry.iter().enumerate().map(|(i, p)| project_point(*p, height(i), projector, size)).collect()
 }
 
 impl LayerType for Circle {
@@ -339,17 +348,16 @@ impl RenderLayer for RenderCircleLayer {
     // query
     fn query_intersects_feature(
         &self,
-        query_geometry: &mln_tile_id::geometry_tile_data::GeometryCoordinates,
+        region: &QueryRegion<'_>,
         feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
         geometry: &mln_tile_id::geometry_tile_data::GeometryCollection,
-        zoom: f32,
-        view: &View,
-        pixels_to_tile_units: f32,
-        projector: &TileProjector<'_>,
         feature_state: &mln_style::expression::expression::FeatureState,
     ) -> bool {
         use crate::geometry::feature_index::FeatureIndex;
 
+        let QueryRegion { geometry: query_geometry, view, projector, pixels_to_tile_units, ground, heights, .. } =
+            *region;
+        let zoom = view.zoom() as f32;
         let evaluated = &self.values.evaluated.paint;
         // Translate query geometry
         let translated = FeatureIndex::translate_query_geometry(
@@ -385,7 +393,9 @@ impl RenderLayer for RenderCircleLayer {
         let transformed_query_geometry = if align_with_map {
             translated_query_geometry
         } else {
-            projected = project_query_geometry(translated_query_geometry, projector, view.size());
+            // Over terrain, each point at the height its line of sight met
+            // the ground at.
+            projected = project_query_geometry(translated_query_geometry, heights, projector, view.size());
             &projected
         };
         let transformed_size = if align_with_map { size * pixels_to_tile_units } else { size };
@@ -414,10 +424,18 @@ impl RenderLayer for RenderCircleLayer {
                 {
                     continue;
                 }
+                // Over terrain, the center stands where its draw does: on the
+                // ground under it as translated.
+                let height = ground.map_or(0.0, |ground| {
+                    ground.height(Vec2::new(
+                        f32::from(point.x) + drawn_translation[0],
+                        f32::from(point.y) + drawn_translation[1],
+                    ))
+                });
                 let transformed_point =
-                    if align_with_map { *point } else { project_point(*point, projector, view.size()) };
+                    if align_with_map { *point } else { project_point(*point, height, projector, view.size()) };
 
-                let projected = projector.project(&Point::new(f64::from(point.x), f64::from(point.y)), 0.0);
+                let projected = projector.project(&Point::new(f64::from(point.x), f64::from(point.y)), height);
                 let mut adjusted_size = transformed_size;
                 let w = projected.signed_distance_from_camera;
                 let pitch_scale = &evaluated.circle_pitch_scale;

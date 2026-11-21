@@ -27,7 +27,9 @@ use crate::bucket::{Bucket, LayerFeatureStates, UploadNeeds};
 use crate::bucket_geometry::{BucketGeometry, GeometryUpload};
 use crate::buckets::hillshade_bucket::HillshadeBucket;
 use crate::buckets::raster_bucket::RasterBucket;
-use crate::geometry::feature_index::{FeatureIndex, FeatureSelection, QueryLayers, QueryRegion, QueryResults};
+use crate::geometry::feature_index::{
+    FeatureIndex, FeatureSelection, QueryGround, QueryLayers, QueryRegion, QueryResults,
+};
 use crate::gfx::context::Context;
 use crate::gfx::dynamic_texture_atlas::{AtlasLease, BinUse, DynamicTextureAtlas};
 use crate::layer_drawing::{BucketChanges, ChangedBuckets};
@@ -460,15 +462,18 @@ impl GeometryContents {
 
     /// Adds the rendered features of tile `id` in `query_geometry` to
     /// `result`.
+    /// Over terrain, `ground` is where the query met the ground, in the
+    /// order of `query_geometry`'s points.
     #[expect(
         clippy::too_many_arguments,
-        reason = "the results, tile, query geometry, camera, layers, options, global and feature state and projection of a feature query"
+        reason = "the results, tile, query geometry and its ground, camera, layers, options, global and feature state and projection of a feature query"
     )]
     pub(crate) fn query_rendered_features(
         &self,
         id: &OverscaledTileID,
         result: &mut QueryResults,
         query_geometry: &mln_tile_id::geometry_tile_data::GeometryCoordinates,
+        ground: Option<&QueryGround<'_>>,
         view: &mln_map_types::View,
         layers: &QueryLayers<'_>,
         options: &RenderedQueryOptions,
@@ -495,6 +500,8 @@ impl GeometryContents {
             projector: &projector,
             pixels_to_tile_units: (f64::from(mln_util::constants::EXTENT) / tile_size / scale) as f32,
             padding: query_padding * view.max_pitch_scale_factor() as f32,
+            ground: ground.map(|ground| ground.elevation.ground(id)),
+            heights: ground.map(|ground| ground.heights.as_slice()),
         };
         self.result.feature_index.query(result, &selection, &region)
     }

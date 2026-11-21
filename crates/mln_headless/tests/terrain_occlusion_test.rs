@@ -253,6 +253,64 @@ fn a_ridge_hides_a_circle_behind_it_and_not_one_before_it() {
     assert!(blue(pixel(&kernel, x, y)), "the heatmap's kernel behind the ridge");
 }
 
+/// [`circles_style`] over terrain, with a fill square under its circles, 20 m
+/// to each side of `at`.
+fn circles_and_fill_style(red: &[LatLng], blue: &[LatLng], at: &LatLng) -> String {
+    // 20 m in degrees at the equator.
+    let half = 20.0 / METERS_PER_PIXEL / 256.0 / 32768.0 * 360.0;
+    let (w, e, s, n) = (at.longitude() - half, at.longitude() + half, at.latitude() - half, at.latitude() + half);
+    let fill = format!(
+        r#""fill": {{"type": "geojson", "data": {{"type": "Polygon", "coordinates": [[
+            [{w}, {s}], [{e}, {s}], [{e}, {n}], [{w}, {n}], [{w}, {s}]
+        ]]}}}},
+        "red":"#
+    );
+    circles_style(red, blue, true).replacen(r#""red":"#, &fill, 1).replacen(
+        r#"{"id": "red""#,
+        r#"{"id": "fill", "type": "fill", "source": "fill", "paint": {"fill-color": "lime"}},
+                {"id": "red""#,
+        1,
+    )
+}
+
+/// How many features of the layer `layer` the frontend's renderer finds at
+/// `x`, `y`, in pixels from the top left.
+fn query_at(frontend: &mut HeadlessFrontend, layer: &str, (x, y): (u32, u32)) -> usize {
+    use mln_renderer::query::RenderedQueryOptions;
+
+    let options = RenderedQueryOptions::new(Some(vec![layer.to_owned()]), None);
+    let point = ScreenCoordinate::new(f64::from(x), f64::from(y));
+    frontend.renderer().query_rendered_features_at_point(&point, &options).unwrap().len()
+}
+
+/// The ridge of [`a_ridge_hides_a_circle_behind_it_and_not_one_before_it`]
+/// hides a blue circle and a fill square behind it from queries where the
+/// camera sees them at sea level: there, the line of sight meets the ridge
+/// first. The red circle before it is found. Over the same ground at sea
+/// level, the blue circle and the square are found there.
+#[test]
+fn a_ridge_hides_a_circle_and_a_fill_behind_it_from_queries() {
+    let (front, behind) = (north(0.0), north(BEHIND));
+    let style = circles_and_fill_style(&[front], &[behind], &behind);
+    let view = camera(front, 0.0);
+    let size = Size::new(SIDE, SIDE);
+    let Some((_, map, mut frontend)) = still(&style, size, &view, |tile| dem_of(tile, ridge_height)) else {
+        return;
+    };
+    let red_at = seen_at(&map, &front, 0.0).expect("the red circle in view");
+    let hidden = seen_at(&map, &behind, 0.0).expect("the blue circle in view, behind the ridge");
+    assert_eq!(1, query_at(&mut frontend, "red", red_at), "the red circle before the ridge");
+    assert_eq!(0, query_at(&mut frontend, "blue", hidden), "the blue circle behind the ridge");
+    assert_eq!(0, query_at(&mut frontend, "fill", hidden), "the fill behind the ridge");
+
+    let Some((_, level_map, mut level)) = still(&style, size, &view, |tile| dem_of(tile, |_, _| 0.0)) else {
+        return;
+    };
+    let shown = seen_at(&level_map, &behind, 0.0).expect("the blue circle in view");
+    assert_eq!(1, query_at(&mut level, "blue", shown), "the blue circle over level ground");
+    assert_eq!(1, query_at(&mut level, "fill", shown), "the fill over level ground");
+}
+
 /// A red label on the ground, on a slope that falls 30° to the east, seen
 /// from a camera pitched 45° at each of eight bearings, so that the camera
 /// sees the slope at 15° or more from grazing, shows at full opacity: the

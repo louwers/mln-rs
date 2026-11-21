@@ -17,7 +17,6 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
-use mln_map_types::View;
 use mln_style::expression::{Dependency, EvaluationContext, GlobalStateMap, global_state_refs_intersect};
 use mln_style::layer_type::LayerStyle;
 use mln_style::layers::Line;
@@ -495,15 +494,15 @@ impl RenderLayer for RenderLineLayer {
     // query
     fn query_intersects_feature(
         &self,
-        query_geometry: &mln_tile_id::geometry_tile_data::GeometryCoordinates,
+        region: &crate::geometry::feature_index::QueryRegion<'_>,
         feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
         geometry: &mln_tile_id::geometry_tile_data::GeometryCollection,
-        zoom: f32,
-        view: &View,
-        pixels_to_tile_units: f32,
-        _projector: &mln_map_types::TileProjector<'_>,
         feature_state: &mln_style::expression::expression::FeatureState,
     ) -> bool {
+        let crate::geometry::feature_index::QueryRegion {
+            geometry: query_geometry, view, pixels_to_tile_units, ..
+        } = *region;
+        let zoom = view.zoom() as f32;
         let evaluated = &self.values.evaluated.paint;
         // Translate query geometry
         let translated_query_geometry = crate::geometry::feature_index::FeatureIndex::translate_query_geometry(
