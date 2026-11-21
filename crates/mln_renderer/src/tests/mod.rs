@@ -1,4 +1,4 @@
-// `dot`, `tint` and `shade`, the tests' layer types.
+// `dot`, `tint`, `shade` and `mark`, the tests' layer types.
 pub(crate) mod fixture_layer;
 // `tiles`, `raster-tiles` and `dem-tiles`, the tests' source types.
 pub(crate) mod fixture_source;
@@ -38,6 +38,8 @@ mod geojson_tile_test;
 mod source_test;
 // Port-only: the renderer frees what it lets go of on its workers.
 mod drop_on_workers_test;
+// The engine drives a layer type's placement pass on its schedule.
+mod placement_test;
 // Port-only: malformed vector tiles become tile errors, not panics.
 mod malformed_tile_test;
 // The context destroys what it released after what was made of it.

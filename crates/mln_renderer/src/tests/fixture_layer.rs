@@ -14,6 +14,10 @@
 //! `tint-opacity`, and `shade` one of a raster-dem source without
 //! properties.
 //!
+//! `mark` is a layer type without a source or properties whose layers
+//! place, with a [`MarkPass`] that places nothing and records the engine's
+//! calls; `other-mark` is another. A registry has at most one of them.
+//!
 //! None of them draws anything.
 
 use std::sync::Arc;
@@ -31,9 +35,10 @@ use mln_vec_map::VecMap;
 use crate::layer::{
     Bucket, BucketBase, BuildParams, DemContents, DrawContext, EvaluatedLayer, FeatureIndexBuilder, FeatureStates,
     GeometryUpload, GeometryVec, LayerBucket, LayerType, LayerValues, Layout, LayoutParameters, NoBucket, NoLayout,
-    RasterView, RenderPass, Resolved, SourceLayer, layers_by_id,
+    NoTileView, RasterView, RenderPass, Resolved, SourceLayer, layers_by_id,
 };
-use crate::layer_drawing::{KeptDraw, TileDraws};
+use crate::layer_drawing::{ChangedBuckets, KeptDraw, TileDraws};
+use crate::placement::{CollisionGroups, Placed, PlacementContext, PlacementPass, PlacementQuery, Prepared};
 
 mln_style::properties!(
     /// The layout properties of a `dot` layer.
@@ -387,5 +392,87 @@ impl LayerType for Shade {
         _gpu: &mut dyn mln_gfx::gpu::Gpu,
         _cx: &mut DrawContext<'_, '_, Shade>,
     ) {
+    }
+}
+
+/// The `mark` layer type, and with `OTHER` the `other-mark` one.
+pub(crate) struct Mark<const OTHER: bool = false>;
+
+impl<const OTHER: bool> StyleLayerType for Mark<OTHER> {
+    const INFO: LayerTypeInfo =
+        LayerTypeInfo { name: if OTHER { "other-mark" } else { "mark" }, source: SourceKind::None, from_json: true };
+    const PROPERTIES: &'static PropertyTable = &NO_PROPERTIES;
+
+    type LayoutProperties = NoProperties;
+    type PaintProperties = NoProperties;
+    type Extra = ();
+
+    fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(_slot: usize, _visitor: V) -> Option<V::Output> {
+        None
+    }
+}
+
+impl<const OTHER: bool> LayerType for Mark<OTHER> {
+    type Layout = NoLayout;
+    type Bucket = NoBucket;
+    type View<'a> = NoTileView;
+    type Drawing = TileDraws<KeptDraw>;
+    type State = ();
+
+    const PLACEMENT: Option<crate::placement::NewPlacement<Self>> = Some(|| Box::new(MarkPass::default()));
+
+    fn new_layer(_layer: &LayerValues<Self>) -> ((), TileDraws<KeptDraw>) {
+        Default::default()
+    }
+
+    fn passes(_layer: &LayerValues<Self>, _evaluated: &EvaluatedLayer<Self>) -> RenderPass {
+        RenderPass::TRANSLUCENT
+    }
+
+    fn make_draws(
+        _state: &mut (),
+        _drawing: &mut TileDraws<KeptDraw>,
+        _gpu: &mut dyn mln_gfx::gpu::Gpu,
+        _cx: &mut DrawContext<'_, '_, Self>,
+    ) {
+    }
+}
+
+/// The placement pass of `mark` layers: it places nothing, and records the
+/// hooks the engine calls, by name, with the number of layers of those that
+/// see them.
+#[derive(Default)]
+pub(crate) struct MarkPass {
+    /// Whether [`prepare`](PlacementPass::prepare) says a layer has
+    /// something to place.
+    pub(crate) places: bool,
+    pub(crate) calls: Vec<String>,
+}
+
+impl<const OTHER: bool> PlacementPass<Mark<OTHER>> for MarkPass {
+    fn prepare(&mut self, cx: &mut PlacementContext<'_, Mark<OTHER>>) -> Prepared {
+        self.calls.push(format!("prepare {}", cx.layers.len()));
+        Prepared { places: self.places, added: false, changed: true }
+    }
+
+    fn place(&mut self, cx: &mut PlacementContext<'_, Mark<OTHER>>, _groups: CollisionGroups, _fade: f32) -> Placed {
+        self.calls.push(format!("place {}", cx.layers.len()));
+        Placed { changed: false, settled: true }
+    }
+
+    fn update_buckets(&mut self, cx: &mut PlacementContext<'_, Mark<OTHER>>, _changed: &mut ChangedBuckets) {
+        self.calls.push(format!("update_buckets {}", cx.layers.len()));
+    }
+
+    fn forget_buckets(&mut self) {
+        self.calls.push("forget_buckets".to_owned());
+    }
+
+    fn reset(&mut self) {
+        self.calls.push("reset".to_owned());
+    }
+
+    fn query_rendered_features(&self, _query: &mut PlacementQuery<'_>) -> Result<(), Error> {
+        Ok(())
     }
 }
