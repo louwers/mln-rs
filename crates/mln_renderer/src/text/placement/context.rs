@@ -9,36 +9,12 @@ use mln_style_types::{
 };
 use mln_tile_id::UnwrappedTileID;
 use mln_util::constants::{EXTENT, TILE_SIZE_D};
-use mln_vec_map::VecMap;
 
+use super::{BucketPlacementData, PlacedTile, SymbolTranslate};
 use crate::buckets::symbol_bucket::{SymbolBucket, ZoomEvaluatedSize, symbols_by_viewport_y};
 use crate::layout::symbol_projection::LabelPlaneProjector;
-use crate::render_layer::{BucketPlacementData, PlacedTile, SymbolTranslate};
 use crate::text::collision_index::{CollisionBoundaries, OverlapMode, PartCollision};
 use crate::tile_matrix::tile_unit_translation;
-
-/// The collision groups of the sources: with cross-source collisions, every
-/// symbol collides with every other; without, only with its own source's.
-pub(crate) struct CollisionGroups {
-    ids: VecMap<String, u16>,
-    cross_source_collisions: bool,
-}
-
-impl CollisionGroups {
-    pub(crate) fn new(cross_source_collisions: bool) -> Self {
-        CollisionGroups { ids: VecMap::new(), cross_source_collisions }
-    }
-
-    /// The group of `source_id`'s symbols, which they collide with alone;
-    /// `None` where they collide with all, as group 0.
-    pub(crate) fn get(&mut self, source_id: &str) -> Option<u16> {
-        if self.cross_source_collisions {
-            return None;
-        }
-        let next = self.ids.len() as u16 + 1;
-        Some(*self.ids.get_or_insert_with(source_id, || next))
-    }
-}
 
 /// A symbol layer's `*-translate` in the tile's units.
 pub(crate) fn translation(

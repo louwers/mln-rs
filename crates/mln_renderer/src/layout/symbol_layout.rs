@@ -44,7 +44,7 @@ use crate::buckets::symbol_bucket::{
 };
 use crate::erased_layer::EvaluatedLayer;
 use crate::geometry::anchor::Anchor;
-use crate::geometry::feature_index::{FeatureIndexBuilder, IndexedSubfeature};
+use crate::geometry::feature_index::FeatureIndexBuilder;
 use crate::gfx::mesh::Indexed;
 use crate::layout::clip_lines::clip_lines;
 use crate::layout::layout::{BuildParams, Layout, LayoutParameters, SourceLayer, layers_by_id};
@@ -55,7 +55,7 @@ use crate::layout::symbol_instance::{
     TextPart, TextRuns, WritingModes,
 };
 use crate::layout::tile_layout::Resolved;
-use crate::text::collision_feature::{AlongLine, BoxLayout, CollisionBox, CollisionFeature};
+use crate::text::collision_feature::{AlongLine, BoxLayout, CollisionBox, CollisionFeature, IndexedSubfeature};
 use crate::text::collision_index::OverlapMode;
 use crate::text::get_anchors::{LineLabel, get_anchors, get_center_anchor};
 use crate::text::glyph_store::ShapeResults;

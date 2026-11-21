@@ -65,11 +65,13 @@ use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::layout::symbol_layout::SymbolLayout;
 use crate::layout::symbol_projection::{gl_coord_matrix, label_plane_matrix};
 use crate::paint_parameters::{DrawFrame, PaintParameters};
-use crate::render_layer::{BucketKey, BucketPlacementData, LayerBucket, PlacedTile, SymbolTranslate};
+use crate::placement::{BucketKey, NewPlacement};
+use crate::render_layer::LayerBucket;
 use crate::render_pass::RenderPass;
-use crate::render_source::{RenderSource, TileOrder};
+use crate::render_source::TileOrder;
 #[cfg(feature = "bench")]
 use crate::render_tile::RenderTile;
+use crate::text::placement::{BucketPlacementData, PlacedTile, SymbolPlacement, SymbolTranslate};
 use crate::tile_matrix::{cast_matrix, projection_data, tile_unit_translation, to_projection_ubo};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -591,9 +593,9 @@ pub struct SymbolState {
     /// them, kept from frame to frame for their memory.
     renderable_segments: Vec<SegmentGroup>,
     /// The buckets the layer places, in placement order.
-    placement_data: Vec<BucketPlacementData>,
+    pub(crate) placement_data: Vec<BucketPlacementData>,
     /// The buckets another layer places and this layer draws.
-    follower_data: Vec<BucketPlacementData>,
+    pub(crate) follower_data: Vec<BucketPlacementData>,
     /// The layer's source, which its buckets' placement data shares.
     source_id: Arc<str>,
 
@@ -704,7 +706,8 @@ impl SymbolState {
         feature_index: impl FnOnce() -> Option<Arc<FeatureIndex>>,
         translates: (SymbolTranslate, SymbolTranslate),
     ) {
-        use crate::render_layer::{HeldBuckets, SymbolBuckets as _};
+        use crate::placement::PlacementBuckets;
+        use crate::render_layer::HeldBuckets;
         self.held.push(bucket);
         let Some(tile) = tiles.get(tile_index) else {
             return;
@@ -715,9 +718,9 @@ impl SymbolState {
             tile: *tile.overscaled_tile_id(),
             source: crate::tile::job::SourceKey(0),
         };
-        let held = HeldBuckets::take();
-        if let Some(bucket) = held.get(&key) {
-            self.add_bucket(style, &PlacedTile::new(tile), key, bucket, feature_index, translates);
+        let mut held = HeldBuckets::take();
+        if let Some(bucket) = PlacementBuckets::<Symbol>::new(&mut held).get(&key) {
+            self.add_bucket(style, &PlacedTile::of_render_tile(tile), key, bucket, feature_index, translates);
         }
         held.restore();
     }
@@ -1122,7 +1125,7 @@ impl LayerType for Symbol {
     /// higher's.
     const TILE_ORDER: TileOrder = TileOrder::ByY;
 
-    const PLACES_SYMBOLS: bool = true;
+    const PLACEMENT: Option<NewPlacement<Symbol>> = Some(|| Box::<SymbolPlacement>::default());
 
     /// A symbol layout always waits for its glyphs and images.
     fn layout_can_need_dependencies(_group: &[Arc<EvaluatedLayer<Symbol>>]) -> bool {
@@ -1502,24 +1505,13 @@ impl LayerType for Symbol {
     fn update(state: &mut SymbolState, _drawing: &mut SymbolDrawing, cx: &mut UpdateContext<'_, '_, Symbol>) {
         state.placement_data.clear();
         state.follower_data.clear();
-        let Some(source) = cx.source.and_then(RenderSource::tiles) else {
-            return;
-        };
         let translates = symbol_translates(&cx.layer.evaluated);
-        for tile in cx.tiles {
-            let Some(bucket) = tile.view() else {
+        for &tile in cx.tiles {
+            let (Some(bucket), Some(key)) = (tile.view(), cx.bucket_key(tile)) else {
                 continue;
             };
-            let key = BucketKey { source, tile: tile.id(), slot: tile.tile.slot(), bucket: bucket.bucket_index };
             let feature_index = || Some(Arc::clone(bucket.feature_index()));
-            state.add_bucket(
-                &cx.layer.style,
-                &PlacedTile::new(tile.tile),
-                key,
-                bucket.bucket,
-                feature_index,
-                translates,
-            );
+            state.add_bucket(&cx.layer.style, &PlacedTile::of(tile), key, bucket.bucket, feature_index, translates);
         }
     }
 
@@ -1529,13 +1521,5 @@ impl LayerType for Symbol {
 
     fn max_content_elevation(bucket: &SymbolBucket) -> f32 {
         bucket.max_height_offset
-    }
-
-    fn placement_data(state: &SymbolState) -> &[BucketPlacementData] {
-        &state.placement_data
-    }
-
-    fn follower_data(state: &SymbolState) -> &[BucketPlacementData] {
-        &state.follower_data
     }
 }

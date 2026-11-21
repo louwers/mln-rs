@@ -20,6 +20,9 @@
 //! contract to be, but outside the engine they're unnameable or
 //! `#[doc(hidden)]`.
 //!
+//! The [placement](crate::placement) capability, which only the engine's
+//! symbol layer type has, is unstable too.
+//!
 //! Two more hidden modules serve tools, each behind a feature of its own:
 //! `testing` (`testing`), drivers for the tests of a crate
 //! that adds source types, and `bench` (`bench`), the benchmarks' entry

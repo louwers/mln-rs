@@ -6,6 +6,7 @@ use std::collections::BTreeSet;
 use std::num::NonZeroU32;
 
 use glam::{DMat4, Vec2};
+use mln_style::layers::Symbol;
 use mln_style_types::{SymbolAnchorType, SymbolPlacementType};
 use mln_tile_id::UnwrappedTileID;
 use mln_util::constants::EXTENT;
@@ -15,9 +16,8 @@ use super::context::PlacementContext;
 use super::{JointPlacement, PlacedSymbolData, Placement, PlacementInputs, PlacementKind, VariableOffset};
 use crate::buckets::symbol_bucket::SymbolBucket;
 use crate::layout::symbol_instance::SymbolInstance;
-use crate::render_layer::{BucketKey, SymbolBuckets};
+use crate::placement::{BucketKey, PlacementBuckets, Shape};
 use crate::text::collision_feature::CollisionBox;
-use crate::text::collision_grid::Shape;
 use crate::text::collision_index::{CollisionBoundaries, IntersectStatus, OverlapMode};
 
 /// What a tile placement keeps besides the placement's own state.
@@ -164,10 +164,10 @@ impl Placement {
     /// Places `inputs`' buckets of `buckets` for a tile: the symbols that
     /// cross the borders first, by bucket and then by how they cross, and
     /// then the rest.
-    pub(super) fn tile_place_buckets<B: SymbolBuckets + ?Sized>(
+    pub(super) fn tile_place_buckets(
         &mut self,
         inputs: &PlacementInputs,
-        buckets: &B,
+        buckets: &PlacementBuckets<'_, Symbol>,
         reloaded_placed: &mut HashSet<BucketKey>,
     ) {
         let Some(tile) = self.tile_state() else {

@@ -22,6 +22,7 @@ use crate::bucket::Bucket;
 use crate::layer::LayerType;
 use crate::layout::layout::{BuildParams, Layout, LayoutParameters, SourceLayer};
 use crate::layout::tile_layout::{Built, Resolved};
+use crate::placement::{self, ErasedPlacement};
 use crate::render_layer::{Layer, RenderLayer};
 use crate::render_pass::RenderPass;
 
@@ -171,8 +172,12 @@ pub(crate) trait ErasedLayerType: ErasedStyleLayerType {
     /// [`LayerType::max_content_elevation`]; 0 for a bucket of another type.
     fn max_content_elevation(&self, bucket: &dyn Bucket) -> f32;
 
-    /// [`LayerType::PLACES_SYMBOLS`].
-    fn places_symbols(&self) -> bool;
+    /// Whether the type's layers place ([`LayerType::PLACEMENT`]).
+    fn places(&self) -> bool;
+
+    /// A new placement pass of the type's layers, for a type whose layers
+    /// place ([`LayerType::PLACEMENT`]).
+    fn new_placement(&self) -> Option<Box<dyn ErasedPlacement>>;
 
     /// Reads the values that [`ErasedEvaluatedLayer::write`] wrote for a
     /// layer of the type.
@@ -212,8 +217,12 @@ impl<T: LayerType> ErasedLayerType for LayerTypeEntry<T> {
         recover_bucket::<T>(bucket).map_or(0.0, T::max_content_elevation)
     }
 
-    fn places_symbols(&self) -> bool {
-        T::PLACES_SYMBOLS
+    fn places(&self) -> bool {
+        T::PLACEMENT.is_some()
+    }
+
+    fn new_placement(&self) -> Option<Box<dyn ErasedPlacement>> {
+        T::PLACEMENT.map(|new| placement::typed(new()))
     }
 
     fn read_evaluated(&self, r: &mut Reader<'_>) -> Option<Arc<dyn ErasedEvaluatedLayer>> {

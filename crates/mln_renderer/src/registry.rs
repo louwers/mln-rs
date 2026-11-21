@@ -19,6 +19,7 @@ use mln_vec_map::VecMap;
 use crate::erased_layer::{ErasedLayerType, entry};
 use crate::erased_source::{self, ErasedSourceType};
 use crate::layer::LayerType;
+use crate::placement::ErasedPlacement;
 use crate::render_tile::FindView;
 use crate::source::SourceType;
 
@@ -54,8 +55,9 @@ impl RegistryBuilder {
 
     /// Adds the layer type `T`, with the sources of its programs
     /// ([`LayerType::add_shader_sources`]). Fails for a name that an earlier
-    /// type took. A type whose [`View`](LayerType::View) is of another kind
-    /// of source than its style half's doesn't compile.
+    /// type took, and for a second type whose layers place
+    /// ([`LayerType::PLACEMENT`]). A type whose [`View`](LayerType::View) is
+    /// of another kind of source than its style half's doesn't compile.
     pub fn add_layer_type<T: LayerType>(&mut self) -> Result<(), RegisterError> {
         const {
             assert!(
@@ -66,6 +68,9 @@ impl RegistryBuilder {
         let name = T::INFO.name;
         if self.layer_types.contains_key(name) {
             return Err(RegisterError::Duplicate(name.to_owned()));
+        }
+        if T::PLACEMENT.is_some() && self.layer_types.values().any(|layer_type| layer_type.places()) {
+            return Err(RegisterError::RoleTaken(name.to_owned()));
         }
         self.layer_types.insert(name, entry::<T>());
         T::add_shader_sources(&mut self.shader_sources);
@@ -170,6 +175,12 @@ impl Registry {
 
     pub(crate) fn layer_type(&self, name: &str) -> Option<&'static dyn ErasedLayerType> {
         self.layer_types.get(name).copied()
+    }
+
+    /// A new placement pass of the layer type whose layers place, if the
+    /// registry has one.
+    pub(crate) fn new_placement(&self) -> Option<Box<dyn ErasedPlacement>> {
+        self.layer_types.values().find_map(|layer_type| layer_type.new_placement())
     }
 
     pub(crate) fn source_type(&self, name: &str) -> Option<&'static dyn ErasedSourceType> {

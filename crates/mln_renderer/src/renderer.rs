@@ -403,12 +403,18 @@ impl Renderer {
         self.orchestrator.query_feature_extensions(source_id, feature, extension, extension_field, args)
     }
 
-    /// The data of the symbols the last placement placed, when
-    /// [`collect_placed_symbol_data`](Self::collect_placed_symbol_data)
-    /// turned their collection on.
+    /// Unstable: the renderer's placement pass, if it is a `P`: the pass
+    /// of its registry's layer type that places
+    /// ([`LayerType::PLACEMENT`](crate::layer::LayerType::PLACEMENT)), for
+    /// the type's own API to reach.
     #[must_use]
-    pub fn placed_symbols_data(&self) -> Vec<crate::text::placement::PlacedSymbolData> {
-        self.orchestrator.placed_symbols_data()
+    pub fn placement<P: 'static>(&self) -> Option<&P> {
+        self.orchestrator.placement()?.pass().downcast_ref()
+    }
+
+    /// Unstable: [`placement`](Self::placement), to change.
+    pub fn placement_mut<P: 'static>(&mut self) -> Option<&mut P> {
+        self.orchestrator.placement_mut()?.pass_mut().downcast_mut()
     }
 
     /// Logs every render source's tiles and the image manager's state.
@@ -457,10 +463,6 @@ impl Renderer {
         self.orchestrator.remove_feature_state(source_id, source_layer_id, feature_id, state_key);
     }
 
-    pub fn collect_placed_symbol_data(&mut self, enable: bool) {
-        self.orchestrator.collect_placed_symbol_data(enable);
-    }
-
     pub fn set_tile_cache_enabled(&mut self, enable: bool) {
         self.orchestrator.set_tile_cache_enabled(enable);
     }
@@ -477,7 +479,7 @@ impl Renderer {
     /// objects are lost, so that they forget theirs, and lets go of them.
     /// Call it before the renderer goes when its device or target went first.
     pub fn lose_layer_hosts(&mut self) {
-        self.orchestrator.visit_render_layers(|layer| layer.lose_context());
+        self.orchestrator.visit_render_layers(crate::render_layer::RenderLayer::lose_context);
     }
 
     /// Lets go of what the orchestrator caches, destroys what it and the

@@ -12,20 +12,18 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_storage::{FileSource, RequestOrder};
-use mln_style::layers::Symbol;
 use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::pool::TaskGroup;
 
-use crate::buckets::symbol_bucket::SymbolBucket;
-use crate::erased_layer::{recover_bucket, recover_bucket_mut};
+use crate::bucket::Bucket;
 use crate::erased_source::ErasedOrigin;
 use crate::gfx::context::Context;
 use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas;
 use crate::image_store::ImageStore;
 use crate::layout::tile_layout::{LayoutParams, Resolved};
-use crate::render_layer::{BucketKey, SymbolBuckets};
+use crate::placement::{BucketKey, LaidBuckets};
 use crate::render_orchestrator::drop_on_workers;
 use crate::render_tile::RenderTile;
 use crate::renderer_event::RendererEvent;
@@ -505,15 +503,15 @@ impl TileStore {
     }
 }
 
-/// The symbol buckets of the tiles' layouts.
-impl SymbolBuckets for TileStore {
-    fn get(&self, key: &BucketKey) -> Option<&SymbolBucket> {
+/// The buckets of the tiles' layouts.
+impl LaidBuckets for TileStore {
+    fn bucket(&self, key: &BucketKey) -> Option<&dyn Bucket> {
         let contents = self.sources.get(&key.source)?.contents_at(&key.tile, key.slot)?.geometry()?;
-        recover_bucket::<Symbol>(contents.result.layer_render_data.bucket(key.bucket)?)
+        contents.result.layer_render_data.bucket(key.bucket)
     }
 
-    fn get_mut(&mut self, key: &BucketKey) -> Option<&mut SymbolBucket> {
+    fn bucket_mut(&mut self, key: &BucketKey) -> Option<&mut dyn Bucket> {
         let contents = self.sources.get_mut(&key.source)?.contents_at_mut(&key.tile, key.slot)?.geometry_mut()?;
-        recover_bucket_mut::<Symbol>(contents.result.layer_render_data.bucket_mut(key.bucket)?)
+        contents.result.layer_render_data.bucket_mut(key.bucket)
     }
 }

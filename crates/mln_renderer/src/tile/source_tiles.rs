@@ -833,7 +833,7 @@ impl SourceTiles {
             };
             debug_assert!(tile.is_renderable());
             for layer_properties in update.layers {
-                if entry.is_held() && !layer_properties.entry().places_symbols() {
+                if entry.is_held() && !layer_properties.entry().places() {
                     continue;
                 }
                 let updated = tile.layer_properties_updated(layer_properties);

@@ -25,10 +25,10 @@ use mln_util::hash::{HashMap, HashSet};
 use mln_vec_map::VecMap;
 
 use crate::layer::HitTest;
+use crate::placement::IndexedFeature;
 use crate::query::RenderedQueryOptions;
 use crate::render_layer::RenderLayer;
 use crate::source_state::SourceFeatureState;
-use crate::text::collision_index::OverlapMode;
 
 /// The render layers a query looks at, by id.
 pub(crate) type QueryLayers<'a> = HashMap<String, &'a dyn RenderLayer>;
@@ -59,26 +59,6 @@ pub(crate) struct QueryRegion<'a> {
 
 /// The features a query found, by layer id.
 pub(crate) type QueryResults = HashMap<String, Vec<Feature>>;
-
-/// A feature of a feature index or a collision index, which a query looks
-/// up in its tile's data.
-#[derive(Clone, Debug, PartialEq, mln_wire::Wire)]
-pub(crate) struct IndexedSubfeature {
-    pub(crate) index: usize,
-    pub(crate) source_layer_name: Arc<str>,
-    pub(crate) bucket_leader_id: Arc<str>,
-    pub(crate) sort_index: usize,
-    // Only used for symbol features
-    pub(crate) bucket_instance_id: u32,
-    pub(crate) collision_group_id: u16,
-    /// The overlap mode the symbol was placed with. It's set only in a
-    /// collision index, so the worker codec doesn't carry it.
-    #[wire(skip)]
-    pub(crate) overlap_mode: OverlapMode,
-}
-
-/// A shared order of feature indices that queries sort symbol features by.
-pub(crate) type FeatureSortOrder = Option<Arc<Vec<usize>>>;
 
 /// A box of a feature index: one ring of a feature.
 #[derive(Clone, Debug, PartialEq)]
@@ -203,7 +183,7 @@ fn build_tree(boxes: &[Bounds]) -> Option<RTree<i32>> {
 }
 
 /// A tile's features by their bounding boxes, and the tile data they are in.
-pub(crate) struct FeatureIndex {
+pub struct FeatureIndex {
     /// Indexes `boxes`, once a query has built it; `None` when there are
     /// none.
     tree: OnceLock<Option<RTree<i32>>>,
@@ -297,54 +277,27 @@ impl FeatureIndex {
         Ok(())
     }
 
-    /// The features of `symbol_features`, which the collision index found,
-    /// that `selection` selects, in the order their bucket last drew them.
-    pub(crate) fn lookup_symbol_features(
+    /// The features of `features`, which a placement shows, that
+    /// `selection` selects, in their order.
+    pub(crate) fn lookup_features<'f>(
         &self,
-        symbol_features: &[IndexedSubfeature],
+        features: impl IntoIterator<Item = IndexedFeature<'f>>,
         selection: &FeatureSelection<'_>,
-        feature_sort_order: &FeatureSortOrder,
     ) -> Result<QueryResults, Error> {
         let mut result = QueryResults::default();
         if self.tile_data.is_none() {
             return Ok(result);
         }
-        let mut sorted_features: Vec<&IndexedSubfeature> = symbol_features.iter().collect();
-
-        sorted_features.sort_by(|a, b| {
-            // Same idea as the non-symbol sort order, but symbol features may
-            // have changed their sort order since their indexed subfeature
-            // was added to the collision index. The feature sort order is
-            // relatively inefficient for querying but cheap to build on every
-            // bucket sort.
-            if let Some(order) = feature_sort_order {
-                // A query of rendered symbols returns features in
-                // top-to-bottom rendering order, last to first.
-                // Actually there can be multiple symbol instances per feature, so
-                // we sort each feature based on the first matching symbol instance.
-                let sorted_a = order.iter().position(|&i| i == a.index).unwrap_or(order.len());
-                let sorted_b = order.iter().position(|&i| i == b.index).unwrap_or(order.len());
-                debug_assert_ne!(sorted_a, order.len());
-                debug_assert_ne!(sorted_b, order.len());
-                sorted_b.cmp(&sorted_a)
-            } else {
-                // Bucket hasn't been re-sorted based on angle, so use same
-                // "reverse of appearance in source data" logic as non-symboles
-                b.sort_index.cmp(&a.sort_index)
-            }
-        });
-
-        for feature in sorted_features {
-            let entry = (feature.index, &*feature.source_layer_name, &*feature.bucket_leader_id);
-            self.add_feature(&mut result, entry, selection, None)?;
+        for IndexedFeature { index, source_layer, bucket_leader } in features {
+            self.add_feature(&mut result, (index, source_layer, bucket_leader), selection, None)?;
         }
         Ok(result)
     }
 
     /// Adds the feature `index` of the source layer `source_layer_name`,
     /// of the bucket of `bucket_leader_id`, to `result` under each layer of
-    /// `selection` it is in, where it touches `region`. A symbol layer's
-    /// features need no region: the collision index found them.
+    /// `selection` it is in, where it touches `region`. The features that a
+    /// placement shows need no region: the placement found them.
     fn add_feature(
         &self,
         result: &mut QueryResults,
@@ -390,19 +343,18 @@ impl FeatureIndex {
             // we use the float camera zoom here, not the integer tile ID zoom,
             // because for the query we take into account the actual rendered
             // size of the geometry (#2781)
-            let intersects = render_layer.places_symbols()
-                || region.is_some_and(|region| {
-                    render_layer.query_intersects_feature(&HitTest {
-                        query_geometry: region.geometry,
-                        feature: &feature,
-                        geometry: &geometry,
-                        feature_state: &state,
-                        zoom: region.view.zoom() as f32,
-                        view: region.view,
-                        pixels_to_tile_units: region.pixels_to_tile_units,
-                        projector: region.projector,
-                    })
-                });
+            let intersects = region.is_none_or(|region| {
+                render_layer.query_intersects_feature(&HitTest {
+                    query_geometry: region.geometry,
+                    feature: &feature,
+                    geometry: &geometry,
+                    feature_state: &state,
+                    zoom: region.view.zoom() as f32,
+                    view: region.view,
+                    pixels_to_tile_units: region.pixels_to_tile_units,
+                    projector: region.projector,
+                })
+            });
             if !intersects {
                 continue;
             }

@@ -20,7 +20,7 @@
 //! take no id until the bucket is added again with them in view.
 //!
 //! The index runs in the frame's update, which has the buckets mutably
-//! ([`SymbolBuckets`]).
+//! ([`PlacementBuckets`]).
 
 use std::num::NonZeroU32;
 use std::sync::Arc;
@@ -28,6 +28,7 @@ use std::sync::Arc;
 use geometry::Point;
 use glam::{I64Vec2, Vec2};
 use mln_map_types::{TileProjector, View};
+use mln_style::layers::Symbol;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::constants::EXTENT;
 use mln_util::hash::HashSet;
@@ -35,7 +36,8 @@ use mln_vec_map::{VecMap, VecSet};
 
 use crate::buckets::symbol_bucket::SymbolBucket;
 use crate::layout::symbol_instance::{SymbolInstance, SymbolInstancePools};
-use crate::render_layer::{RenderLayer, SymbolBuckets};
+use crate::placement::PlacementBuckets;
+use crate::text::placement::BucketPlacementData;
 
 /// What adding a layer to the index changed.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -59,22 +61,24 @@ pub(crate) struct CrossTileSymbolIndex {
 }
 
 impl CrossTileSymbolIndex {
-    /// Gives the symbols of the buckets `layer` places, in `buckets`, their
-    /// cross-tile ids, and forgets the buckets of the layer it no longer
-    /// places. `lng` is the view's unwrapped longitude.
+    /// Gives the symbols of `placed`, the buckets in `buckets` that the
+    /// layer `layer_id` places, their cross-tile ids, and forgets the
+    /// buckets of the layer it no longer places. `lng` is the view's
+    /// unwrapped longitude.
     pub(crate) fn index_layer(
         &mut self,
-        layer: &dyn RenderLayer,
+        layer_id: &str,
+        placed: &[BucketPlacementData],
         lng: f32,
         view: &View,
-        buckets: &mut (impl SymbolBuckets + ?Sized),
+        buckets: &mut PlacementBuckets<'_, Symbol>,
     ) -> AddLayerResult {
-        let index = self.layers.get_or_insert_with(layer.id(), LayerIndex::default);
+        let index = self.layers.get_or_insert_with(layer_id, LayerIndex::default);
         index.follow_wrap_jump(lng);
 
         self.current_bucket_ids.clear();
         let mut buckets_added = false;
-        for item in layer.placement_data() {
+        for item in placed {
             let Some(bucket) = buckets.get_mut(&item.bucket) else {
                 continue;
             };
@@ -94,10 +98,16 @@ impl CrossTileSymbolIndex {
     /// [`index_layer`](Self::index_layer) of the buckets that
     /// `HeldBuckets` holds, for the benchmarks.
     #[cfg(feature = "bench")]
-    pub(crate) fn add_layer(&mut self, layer: &dyn RenderLayer, lng: f32, view: &View) -> AddLayerResult {
-        let mut buckets = crate::render_layer::HeldBuckets::take();
-        let result = self.index_layer(layer, lng, view, &mut buckets);
-        buckets.restore();
+    pub(crate) fn add_layer(
+        &mut self,
+        layer_id: &str,
+        placed: &[BucketPlacementData],
+        lng: f32,
+        view: &View,
+    ) -> AddLayerResult {
+        let mut held = crate::render_layer::HeldBuckets::take();
+        let result = self.index_layer(layer_id, placed, lng, view, &mut PlacementBuckets::new(&mut held));
+        held.restore();
         result
     }
 

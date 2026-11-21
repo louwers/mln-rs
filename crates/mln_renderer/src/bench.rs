@@ -33,7 +33,8 @@ use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas;
 use crate::layers::render_symbol_layer::symbol_translates;
 use crate::layout::tile_layout::{Dependencies, LayoutParams, Resolved};
 use crate::paint_parameters::TransformParameters;
-use crate::render_layer::{Layer, RenderLayer};
+use crate::placement::{CollisionGroups, PlacementBuckets, Schedule};
+use crate::render_layer::{HeldBuckets, Layer, RenderLayer as _};
 use crate::render_tile::RenderTile;
 use crate::text::cross_tile_symbol_index::CrossTileSymbolIndex;
 use crate::text::glyph_store::ShapeResults;
@@ -262,7 +263,7 @@ impl SymbolView {
             let style = Arc::clone(&render_layer.values().style);
             for (tile_index, laid_out) in tiles.iter().enumerate() {
                 let Some(render_data) = laid_out.result.layer_render_data.get(layer.get_id()) else { continue };
-                let Some(bucket) = crate::bucket::recover(&render_data.bucket) else { continue };
+                let bucket = crate::bucket::recover(&render_data.bucket);
                 let feature_index = || Some(Arc::clone(&laid_out.result.feature_index));
                 render_layer.state_mut().add_placement_data(
                     &style,
@@ -316,7 +317,9 @@ impl SymbolView {
         let longitude = self.update.view.center(mln_util::geo::WrapMode::Unwrapped).longitude() as f32;
         let mut added = 0;
         for layer in self.layers.iter().rev() {
-            let result = index.0.add_layer(layer, longitude, &self.update.view);
+            let placing = layer.placing();
+            let placed = &placing.state.placement_data;
+            let result = index.0.add_layer(placing.layer.id(), placed, longitude, &self.update.view);
             if result.buckets_added {
                 added += 1;
             }
@@ -332,12 +335,15 @@ impl SymbolView {
     #[must_use]
     pub fn place(&self) -> usize {
         let previous = Placement::new_default();
-        let layers: Vec<&dyn RenderLayer> = self.layers.iter().map(|layer| -> &dyn RenderLayer { layer }).collect();
-        let mut buckets = crate::render_layer::HeldBuckets::take();
-        let inputs = PlacementInputs::new(&self.update, &layers, &buckets);
-        let mut placement = Placement::create(Arc::new(inputs), self.update.time_point, Some(previous));
-        placement.place(&mut buckets);
-        buckets.restore();
+        let layers: Vec<_> = self.layers.iter().map(Layer::placing).collect();
+        let mut held = HeldBuckets::take();
+        let mut buckets = PlacementBuckets::new(&mut held);
+        let inputs = PlacementInputs::new(&self.update, layers.iter(), &buckets);
+        let groups = CollisionGroups::new(self.update.cross_source_collisions);
+        let mut placement = Placement::create(Arc::new(inputs), groups, Some(previous));
+        let fade = Schedule::default().fade_change(self.update.time_point);
+        placement.place(&mut buckets, fade);
+        held.restore();
         placement.shown()
     }
 }

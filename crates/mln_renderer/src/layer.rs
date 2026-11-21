@@ -47,7 +47,10 @@
 //! ([`FeatureQuery`]), draws into textures of its own before the frame's
 //! passes ([`OffscreenPass`]), or draws through a host outside the
 //! renderer ([`LayerHost`]). The engine asks for each, and does without it
-//! for a type that has none.
+//! for a type that has none. A type can also place its layers' contents
+//! across tiles, where they collide with nothing placed before them
+//! ([`LayerType::PLACEMENT`]), which is
+//! [unstable](crate::placement).
 //!
 //! The types a layer type draws with, which the hooks name, are the
 //! [draw services](crate::draw). The frame's [`Atlases`], which the engine
@@ -74,7 +77,7 @@ pub use crate::bucket_geometry::{GeometryUpload, GeometryVec};
 pub use crate::bucket_parameters::BucketParameters;
 pub use crate::erased_layer::EvaluatedLayer;
 pub use crate::geometry::dem_data::DemData;
-pub use crate::geometry::feature_index::FeatureIndexBuilder;
+pub use crate::geometry::feature_index::{FeatureIndex, FeatureIndexBuilder};
 use crate::gfx::context::Context;
 pub use crate::image_store::ImageStore;
 use crate::layer_drawing::LayerDrawing;
@@ -87,11 +90,13 @@ pub use crate::paint_property_binder::{
     PatternDependency, bind_paint_property,
 };
 pub use crate::paint_property_statistics::StatisticValue;
+use crate::placement::{BucketKey, NewPlacement};
+use crate::render_layer::Atlases;
 pub use crate::render_layer::LayerBucket;
-use crate::render_layer::{Atlases, BucketPlacementData};
 pub use crate::render_pass::RenderPass;
 use crate::render_source::RenderSource;
 pub use crate::render_source::TileOrder;
+use crate::render_tile::FindView as _;
 pub use crate::render_tile::{FrameTile, NoTileView, RasterView, TileView};
 pub use crate::tile::dem::DemContents;
 pub use crate::tile::raster::{MaskedGeometry, RasterContents, RasterLayoutVertex, StoredQuads};
@@ -253,26 +258,15 @@ pub trait LayerType: StyleLayerType {
         None
     }
 
-    /// Unstable: whether the type's layers take part in the engine's symbol
-    /// placement, which places them across tiles, keeps drawing them on
-    /// tiles that fade out, and answers their feature queries from the
-    /// collision index. Only the engine's symbol type does.
-    #[doc(hidden)]
-    const PLACES_SYMBOLS: bool = false;
-
-    /// Unstable: the buckets a layer places, with
-    /// [`PLACES_SYMBOLS`](Self::PLACES_SYMBOLS).
-    #[doc(hidden)]
-    fn placement_data(_state: &Self::State) -> &[BucketPlacementData] {
-        &[]
-    }
-
-    /// Unstable: the buckets that another layer places and a layer draws,
-    /// at its own translation, with [`PLACES_SYMBOLS`](Self::PLACES_SYMBOLS).
-    #[doc(hidden)]
-    fn follower_data(_state: &Self::State) -> &[BucketPlacementData] {
-        &[]
-    }
+    /// Unstable: what makes the placement pass of the type's layers, for a
+    /// type whose layers place what they show where it collides with
+    /// nothing shown already ([`PlacementPass`](crate::placement::PlacementPass));
+    /// `None` for a type whose layers don't. A renderer makes one pass, of
+    /// its registry's one type that places, and runs it over the frame's
+    /// layers of the type. Placement changes such a layer's buckets where
+    /// they are: a tile that fades out keeps drawing the layer, and a
+    /// tile's copy for another world copy leaves its buckets out.
+    const PLACEMENT: Option<NewPlacement<Self>> = None;
 }
 
 /// How the features of the layer type `T` answer rendered-feature queries:
@@ -322,7 +316,7 @@ impl HitTest<'_> {
         translate: [f32; 2],
         anchor: TranslateAnchorType,
     ) -> Option<GeometryCoordinates> {
-        crate::geometry::feature_index::FeatureIndex::translate_query_geometry(
+        FeatureIndex::translate_query_geometry(
             self.query_geometry,
             translate,
             anchor,
@@ -442,6 +436,19 @@ pub struct UpdateContext<'a, 'f, T: LayerType> {
 }
 
 impl<T: LayerType> UpdateContext<'_, '_, T> {
+    /// The key that the layer's placement finds `tile`'s bucket by among
+    /// the frame's tiles ([`PlacementBuckets`](crate::placement::PlacementBuckets)),
+    /// for a tile that shows the layer a bucket of its layout.
+    #[must_use]
+    pub fn bucket_key(&self, tile: FrameTile<'_, T>) -> Option<BucketKey> {
+        Some(BucketKey {
+            bucket: tile.view()?.bucket_index()?,
+            slot: tile.tile.slot(),
+            tile: tile.id(),
+            source: self.source?.tiles()?,
+        })
+    }
+
     /// The deepest zoom that has tiles of its own in the layer's source's
     /// [`Cover`](crate::source::Cover), once it has one.
     #[must_use]
