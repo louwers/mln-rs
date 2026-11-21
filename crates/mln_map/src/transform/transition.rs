@@ -328,8 +328,9 @@ impl Transform {
     ///
     /// Outside a gesture's own moves, a command that moves the center, by a
     /// center or an anchor, over terrain that clamps the center eases the
-    /// altitude onto the ground at the center it ends on, along `along`, in
-    /// place of the altitude it was given ([`EasedAltitude`]). It then owns
+    /// altitude onto the ground at the center it ends on, along the share of
+    /// the way that `along` makes, which is made only then, in place of the
+    /// altitude it was given ([`EasedAltitude`]). It then owns
     /// `ALTITUDE` too, until it gives up its center. One that takes the
     /// center from a gesture's momentum ends the gesture's hold of the
     /// altitude, and its move onto the ground at its end.
@@ -338,7 +339,7 @@ impl Transform {
         camera: &CameraOptions,
         animation: &AnimationOptions,
         frame: FrameFn,
-        along: AlongFn,
+        along: impl FnOnce() -> AlongFn,
         duration: Duration,
         flight: bool,
     ) {
@@ -397,7 +398,7 @@ impl Transform {
         };
         let eased_altitude = end.map(|end| {
             let from = self.state.view().center_altitude();
-            EasedAltitude::new(from, camera.center_altitude.unwrap_or(from), self.ground_at(end), end, along)
+            EasedAltitude::new(from, camera.center_altitude.unwrap_or(from), self.ground_at(end), end, along())
         });
         if eased_altitude.is_some() {
             fields |= ALTITUDE;

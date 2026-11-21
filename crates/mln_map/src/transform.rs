@@ -430,7 +430,7 @@ impl Transform {
                 bearing: Some(end.bearing),
                 ..Default::default()
             };
-            self.start_transition(&fields, animation, frame, Box::new(|t| t), duration, false);
+            self.start_transition(&fields, animation, frame, || Box::new(|t| t), duration, false);
             return Ok(());
         }
 
