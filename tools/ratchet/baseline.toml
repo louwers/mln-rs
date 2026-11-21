@@ -1,4 +1,4 @@
-# Library panic sites and RefCell borrows per file (tools/ratchet/ratchet.py).
+# Library panic sites and RefCell borrows per file (tools/ratchet).
 # Counts only fall: `mise run ratchet --update` lowers them. Raise one by hand
 # in the change that needs it.
 

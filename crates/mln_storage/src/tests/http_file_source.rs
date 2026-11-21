@@ -456,3 +456,28 @@ fn origins_compare_scheme_host_and_effective_port() {
     assert!(!same_origin("file:///a", "file:///a"));
     assert!(!same_origin("http:///a", "http:///a"));
 }
+
+/// A 503 is a server error that waits for its `Retry-After`, and a 408 a
+/// connection error, which the online file source retries.
+#[test]
+fn unavailable_and_request_timeout_are_retried() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method("GET").path("/unavailable");
+        then.status(503).header("Retry-After", "120");
+    });
+    server.mock(|when, then| {
+        when.method("GET").path("/timeout");
+        then.status(408);
+    });
+    let fs = http_file_source();
+
+    let res = load_once(&fs, Kind::Tile, server.url("/unavailable"));
+    let error = res.error.expect("error");
+    assert_eq!(Reason::Server, error.reason);
+    let retry_after = error.retry_after.expect("retry after").secs_since_epoch() - now().secs_since_epoch();
+    assert!((118..=120).contains(&retry_after), "{retry_after}");
+
+    let res = load_once(&fs, Kind::Tile, server.url("/timeout"));
+    assert_eq!(Reason::Connection, res.error.expect("error").reason);
+}

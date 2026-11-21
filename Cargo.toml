@@ -12,10 +12,13 @@ members = [
   "tools/bench/workload",
   "tools/bench-snapshot",
   "tools/c-abi-gen",
+  "tools/c-abi-test",
   "tools/expression-test",
+  "tools/ratchet",
   "tools/render-test",
   "tools/style-codegen",
   "tools/test-server",
+  "tools/unicode-tables",
   "tools/wasm-size",
   "vendor/*",
 ]
@@ -235,8 +238,9 @@ thiserror = "2.0.21"
 wasmparser = { version = "0.263.0", default-features = false, features = [
   "std",
 ] }
-# The Unicode bidi algorithm (mln_text's bidi.rs). mln_text's mirroring table
-# comes from the same Unicode version (`mise run generate:bidi-mirroring`).
+# The Unicode bidi algorithm (mln_text's bidi.rs). mln_text's mirroring and
+# Arabic tables come from the same Unicode version: mise.toml's
+# unicode_version, which a bump changes with them.
 unicode-bidi = { version = "0.3.18" }
 # Where label text may break into lines (mln_text's line_breaks): UAX #14.
 unicode-linebreak = { version = "0.1.5" }
@@ -354,6 +358,8 @@ js-sys = { version = "0.3.107" }
 wasm-bindgen = { version = "=0.2.130" }
 wasm-bindgen-futures = { version = "0.4.80" }
 web-sys = { version = "0.3.107", features = [
+  "AbortController",
+  "AbortSignal",
   "Blob",
   "Headers",
   "ImageBitmap",

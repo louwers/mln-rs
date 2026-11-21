@@ -1,0 +1,25 @@
+[package]
+name = "mln-rs-c-abi-test"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+# Runs maplibre-native-ffi's ABI suite, which CMakeLists.txt builds, against
+# crates/mln_c (`mise run test:c-abi`); never released.
+publish = false
+
+[[bin]]
+name = "c-abi-test"
+path = "src/main.rs"
+
+[dependencies]
+regex.workspace = true
+wait-timeout = "0.2.1"
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

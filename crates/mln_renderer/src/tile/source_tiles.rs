@@ -740,6 +740,10 @@ impl SourceTiles {
             tile_range = Some(TileRange::from_lat_lng_bounds_range(bounds, zoom_range.min, max_zoom as u8));
         }
 
+        // A tile that failed in the cache goes before the cover could take it
+        // back: there it would wait for a retry that may never come.
+        self.cache_release_loading(ctx, |_| true);
+
         if parameters.view.is_globe() {
             self.move_tiles_to_wanted_wraps(&ideal_tiles, &pan_tiles, ctx);
         }
@@ -820,7 +824,9 @@ impl SourceTiles {
         // and forth needs the tiles at its corners for moments too short to
         // load them each time. A tile the view has left further behind, such
         // as one of a zoom level that a fast zoom passed, stops loading, since
-        // it would hold up the requests and workers the view's tiles need.
+        // it would hold up the requests and workers the view's tiles need. A
+        // tile whose load failed isn't loading: it goes, and is requested
+        // anew if the view comes back, rather than wait out a backoff.
         let wanted = WantedTiles::new(ideal_tiles.iter().chain(&pan_tiles).chain(update.terrain_reads));
         self.cache_release_loading(ctx, |id| wanted.is_near(id));
 
@@ -831,7 +837,8 @@ impl SourceTiles {
                 continue;
             };
             let renderable = tile.is_renderable();
-            let loading_near = tile.load.necessity == TileNecessity::Required && wanted.is_near(&id);
+            let loading_near =
+                tile.load.necessity == TileNecessity::Required && !tile.load.has_failed() && wanted.is_near(&id);
             if relayout {
                 self.release(&id, ctx);
             } else if renderable {
@@ -845,7 +852,7 @@ impl SourceTiles {
                 // A fallback that looked only in the cache, and found nothing
                 // there, loads nothing: kept, it would only push the tiles
                 // that the view needed out of the cache. A tile still loading
-                // far from the view stops loading.
+                // far from the view stops loading, and so does one that failed.
                 self.set_necessity(&id, ctx, TileNecessity::Optional);
                 self.release(&id, ctx);
             }
@@ -1055,12 +1062,17 @@ impl SourceTiles {
         }
     }
 
-    /// Lets go of the cached tiles still loading that `keep` turns down.
+    /// Lets go of the cached tiles still loading that `keep` turns down, and
+    /// of those whose load failed.
     fn cache_release_loading(&mut self, ctx: &mut StoreContext, keep: impl Fn(&OverscaledTileID) -> bool) {
         let released: Vec<OverscaledTileID> = self
             .tiles
             .values()
-            .filter(|slot| slot.place.is_cached() && !slot.tile.is_renderable() && !keep(&slot.tile.id))
+            .filter(|slot| {
+                slot.place.is_cached()
+                    && !slot.tile.is_renderable()
+                    && (slot.tile.load.has_failed() || !keep(&slot.tile.id))
+            })
             .map(|slot| slot.tile.id)
             .collect();
         for id in released {

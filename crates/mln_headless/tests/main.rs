@@ -42,3 +42,5 @@ mod resize_test;
 mod system_fonts_test;
 // The layers that drape over terrain, drawn through the terrain's drapes.
 mod terrain_drape_test;
+// Tiles reloading as their data expires, over an online file source.
+mod tile_expiry_test;

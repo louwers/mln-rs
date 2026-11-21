@@ -280,12 +280,18 @@ pub(crate) enum OriginLoad {
 }
 
 /// A tileset tile's requests: one that only looks in the cache, then, while
-/// the tile is required, one to the network.
+/// the tile is required, one to the network. The network request stays
+/// open while the tile is required: the file source answers it again when
+/// it retries an error or revalidates expired data.
 pub(crate) struct TilesetLoad {
     /// Its order follows the tile's place in its source.
     pub(crate) resource: Resource,
     pub(crate) update_parameters: TileUpdateParameters,
     pub(crate) fetch: Fetch,
+    /// The current request's last answer was an error. Nothing asks again
+    /// until the tile is required or `retry_failed_load` runs, unless a
+    /// network request is open, which the file source answers again.
+    pub(crate) failed: bool,
     /// A cache-only request has answered.
     pub(crate) cache_answered: bool,
     pub(crate) modified: Option<Timestamp>,
@@ -297,8 +303,6 @@ pub(crate) struct TilesetLoad {
 /// A request answers as load `load`; dropping `request` cancels it.
 pub(crate) enum Fetch {
     Idle,
-    /// The last response was an error: `retry_failed_load` asks again.
-    Failed,
     Cache {
         load: u64,
         #[expect(dead_code, reason = "dropping the request cancels it")]
@@ -361,6 +365,7 @@ impl Load {
                         is_volatile: false,
                     },
                     fetch: Fetch::Idle,
+                    failed: false,
                     cache_answered: false,
                     modified: None,
                     expires: None,
@@ -386,7 +391,7 @@ impl Load {
         match &self.origin {
             OriginLoad::Tileset(tileset) => match tileset.fetch {
                 Fetch::Cache { load: current, .. } | Fetch::Network { load: current, .. } => current == load,
-                Fetch::Idle | Fetch::Failed => false,
+                Fetch::Idle => false,
             },
             OriginLoad::GeoJson { .. } | OriginLoad::Custom(_) => false,
         }
@@ -406,6 +411,11 @@ impl Load {
             OriginLoad::Tileset(tileset) => Some(tileset.resource.order.get()),
             OriginLoad::GeoJson { .. } | OriginLoad::Custom(_) => None,
         }
+    }
+
+    /// Whether the tile's last tileset answer was an error.
+    pub(crate) fn has_failed(&self) -> bool {
+        matches!(&self.origin, OriginLoad::Tileset(tileset) if tileset.failed)
     }
 
     pub(crate) fn has_tried_cache(&self) -> bool {
@@ -447,13 +457,20 @@ impl TilesetLoad {
     }
 
     pub(crate) fn is_idle(&self) -> bool {
-        matches!(self.fetch, Fetch::Idle | Fetch::Failed)
+        matches!(self.fetch, Fetch::Idle)
     }
 
     /// Whether the tile has data from the network that hasn't expired. Data
     /// without an expiry stays fresh.
     pub(crate) fn is_fresh(&self, now: Timestamp) -> bool {
         self.from_network && self.expires.is_none_or(|expires| expires > now)
+    }
+
+    /// Whether a required tile needn't ask the network: its data came from
+    /// there and never expires. Data that expires is asked for again, which
+    /// the file source holds until it does.
+    pub(crate) fn has_lasting_data(&self) -> bool {
+        self.from_network && self.expires.is_none()
     }
 
     /// What the requests know of the data they brought.

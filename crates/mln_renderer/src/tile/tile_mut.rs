@@ -119,9 +119,9 @@ impl<'a> TileMut<'a> {
         }
     }
 
-    /// A required tile loads from the network, unless it has fresh data from
-    /// there, or from its custom loader; an optional one stops, unless it is
-    /// a custom tile that is renderable.
+    /// A required tile asks the network, unless it has data from there that
+    /// never expires, or loads from its custom loader; an optional one stops,
+    /// unless it is a custom tile that is renderable.
     pub(crate) fn set_necessity(&mut self, necessity: TileNecessity) {
         let unchanged = std::mem::replace(&mut self.tile.load.necessity, necessity) == necessity;
         let required = necessity == TileNecessity::Required;
@@ -129,11 +129,12 @@ impl<'a> TileMut<'a> {
         match &mut self.tile.load.origin {
             OriginLoad::Tileset(tileset) if !unchanged => {
                 if required {
-                    if tileset.is_idle() && !tileset.is_fresh(mln_util::chrono::now()) {
+                    if tileset.is_idle() && !tileset.has_lasting_data() {
                         self.request(Method::Network);
                     }
                 } else if matches!(tileset.fetch, Fetch::Network { .. }) {
-                    // Only a network-only request is aborted.
+                    // Only a network-only request is aborted, with the
+                    // file source's retries and revalidations.
                     tileset.fetch = Fetch::Idle;
                 }
             }
@@ -174,11 +175,12 @@ impl<'a> TileMut<'a> {
         }
     }
 
-    /// Requests a required tile whose last response was an error again.
+    /// Requests a required tile whose last response was an error again,
+    /// now rather than after the file source's backoff.
     pub(crate) fn retry_failed_load(&mut self) {
         if let OriginLoad::Tileset(tileset) = &mut self.tile.load.origin
             && self.tile.load.necessity == TileNecessity::Required
-            && matches!(tileset.fetch, Fetch::Failed)
+            && tileset.failed
         {
             tileset.fetch = Fetch::Idle;
             self.tile.settled = false;
@@ -194,13 +196,24 @@ impl<'a> TileMut<'a> {
         let method = match tileset.fetch {
             Fetch::Cache { load: current, .. } if current == load => Method::Cache,
             Fetch::Network { load: current, .. } if current == load => Method::Network,
-            Fetch::Idle | Fetch::Failed | Fetch::Cache { .. } | Fetch::Network { .. } => return,
+            Fetch::Idle | Fetch::Cache { .. } | Fetch::Network { .. } => return,
         };
-        tileset.fetch = Fetch::Idle;
         if method == Method::Network {
+            // The request stays open: the file source answers it again after
+            // an error, and when the data expires.
+            if let Some(error) = res.error.as_ref().filter(|error| error.reason != Reason::NotFound) {
+                // A streak of errors fails the tile once.
+                if !std::mem::replace(&mut tileset.failed, true) {
+                    self.fail(Error::native(error.message.clone()));
+                }
+                return;
+            }
+            tileset.failed = false;
             self.take_response(method, res);
             return;
         }
+        // A cache-only request answers once.
+        tileset.fetch = Fetch::Idle;
         tileset.cache_answered = true;
         // A cache-only request that found nothing isn't an error. It can
         // still bring expired data that Cache-Control forbids using, which
@@ -661,9 +674,17 @@ impl<'a> TileMut<'a> {
         }
     }
 
-    fn request(&mut self, method: Method) {
-        if self.take_cut_in_memory() {
-            return;
+    fn request(&mut self, mut method: Method) {
+        let fresh =
+            matches!(&self.tile.load.origin, OriginLoad::Tileset(tileset) if tileset.is_fresh(mln_util::chrono::now()));
+        if !fresh && self.take_cut_in_memory() {
+            // A required tile whose data expires still asks the network,
+            // which the file source holds until the data expires.
+            let lasting = matches!(&self.tile.load.origin, OriginLoad::Tileset(tileset) if tileset.has_lasting_data());
+            if self.tile.load.necessity != TileNecessity::Required || lasting {
+                return;
+            }
+            method = Method::Network;
         }
         let Some(file_source) = self.source.file_source() else {
             self.fail(Error::native("Can't load tile."));
@@ -679,11 +700,20 @@ impl<'a> TileMut<'a> {
             return;
         };
         let inbox = self.store.inbox.clone();
-        // One response per request: a reload is a new request.
-        let (request, responder) =
-            Request::once(move |response| inbox.send(TileEvent::Response { tile: key, load, response }));
+        // A cache-only request answers once; a network request stays open
+        // while the tile is required.
+        let (request, responder) = match method {
+            Method::Cache => {
+                Request::once(move |response| inbox.send(TileEvent::Response { tile: key, load, response }))
+            }
+            Method::Network => {
+                Request::new(move |response| inbox.send(TileEvent::Response { tile: key, load, response }))
+            }
+        };
         file_source.load(tileset.resource_for(method), responder);
         debug_assert!(tileset.is_idle(), "one request at a time");
+        // A new request's errors are a new streak, which fails the tile.
+        tileset.failed = false;
         tileset.fetch = match method {
             Method::Cache => Fetch::Cache { load, request },
             Method::Network => Fetch::Network { load, request },
@@ -716,13 +746,16 @@ impl<'a> TileMut<'a> {
         let OriginLoad::Tileset(tileset) = &mut self.tile.load.origin else {
             return;
         };
+        // A network error leaves the request open (`apply_response`): only
+        // the cache's errors reach here.
         if let Some(error) = &res.error
             && error.reason != Reason::NotFound
         {
-            tileset.fetch = Fetch::Failed;
+            tileset.failed = true;
             self.fail(Error::native(error.message.clone()));
             return;
         }
+        tileset.failed = false;
         let resource = &mut tileset.resource;
         if !res.not_modified {
             resource.prior_modified = res.modified;

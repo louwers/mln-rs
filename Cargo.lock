@@ -2610,6 +2610,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "mln-rs-c-abi-test"
+version = "0.0.13"
+dependencies = [
+ "regex",
+ "tempfile",
+ "wait-timeout",
+]
+
+[[package]]
 name = "mln-rs-conversion"
 version = "0.0.13"
 dependencies = [
@@ -2834,6 +2843,7 @@ dependencies = [
  "geojson",
  "glam",
  "glow",
+ "httpmock",
  "khronos-egl",
  "mln-rs-d3d12",
  "mln-rs-expression",
@@ -2950,6 +2960,14 @@ version = "0.0.13"
 dependencies = [
  "mln-rs-geometry",
  "serde_json",
+]
+
+[[package]]
+name = "mln-rs-ratchet"
+version = "0.0.13"
+dependencies = [
+ "regex",
+ "toml_edit",
 ]
 
 [[package]]
@@ -3259,6 +3277,13 @@ dependencies = [
  "mln-rs-math",
  "mln-rs-util",
  "mln-rs-wire",
+]
+
+[[package]]
+name = "mln-rs-unicode-tables"
+version = "0.0.13"
+dependencies = [
+ "unicode-bidi",
 ]
 
 [[package]]

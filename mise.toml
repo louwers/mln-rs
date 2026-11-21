@@ -21,7 +21,7 @@ task.disable_spec_from_run_scripts = true
 # Default in mise 2027.7.0.
 cargo.binstall_native = true
 # Default on all platforms in mise 2027.8.0 (otherwise true on NixOS and
-# Alpine, which would build Node.js and Python from source).
+# Alpine, which would build Node.js and target-freebsd's Python from source).
 all_compile = false
 
 [tools]
@@ -40,9 +40,8 @@ all_compile = false
 # The browser build's page (examples/web) and its check.
 "core:node" = "24.22.2"
 "aqua:pnpm/pnpm" = "12.18.0"
-# The tasks' scripts that generate tables and fixtures, and the jq that
-# reads Cargo's JSON output.
-"core:python" = "3.15.2"
+# The jq that reads Cargo's JSON output and rewrites the styles that
+# update:gljs-testdata copies.
 "aqua:jqlang/jq" = "1.8.2"
 # The formatters and linters (hk.pkl): hk runs them, dprint formats
 # (dprint.jsonc), jactionlint lints the workflows and shellcheck the tasks.
@@ -54,6 +53,25 @@ all_compile = false
 [deps.pnpm]
 auto = true
 dir = "examples/web"
+
+# Once per user and Unicode version. One curl command, which cmd runs on
+# Windows too; --fail-early and --remove-on-error leave a file that it couldn't
+# download missing, so the next `mise deps` downloads them again.
+[deps.ucd]
+description = "Download the Unicode Character Database files that generate:unicode-tables reads"
+outputs = [
+  "{{ vars.ucd }}/ArabicShaping.txt",
+  "{{ vars.ucd }}/UnicodeData.txt",
+  "{{ vars.ucd }}/BidiMirroring.txt",
+]
+run = 'curl -fsSL --fail-early --remove-on-error --create-dirs --output-dir "{{ vars.ucd }}" --remote-name-all "https://www.unicode.org/Public/{{ vars.unicode_version }}/ucd/{ArabicShaping,UnicodeData,BidiMirroring}.txt"'
+
+[vars]
+# The Unicode version of unicode-bidi's tables, which mln_text's tables must
+# match: bump it with the crate, then run `mise run generate:unicode-tables`
+# (tools/unicode-tables rejects files of another version).
+unicode_version = "16.0.0"
+ucd = "{{ xdg_cache_home }}/mln-rs/ucd-{{ vars.unicode_version }}"
 
 [hooks]
 # The nightly rustfmt that dprint runs.
@@ -124,28 +142,13 @@ run_windows = "cargo doc --no-deps --workspace {{ usage.args | default(value=[])
 description = "Regenerate the C library's bindings (crates/mln_c/src/generated) from its headers"
 run = "cargo run -q -p mln-rs-c-abi-gen"
 
-# The Unicode version is unicode-bidi's (its char_data's UNICODE_VERSION):
-# bump it with the crate, here and in generate:bidi-mirroring.
-[tasks."generate:arabic-shaping"]
-description = "Regenerate mln_text's Arabic presentation forms from the Unicode Character Database"
-run = '''
-set -e
-ucd=$(mktemp -d)
-trap 'rm -rf "$ucd"' EXIT
-curl -fsSL -o "$ucd/ArabicShaping.txt" https://www.unicode.org/Public/16.0.0/ucd/ArabicShaping.txt
-curl -fsSL -o "$ucd/UnicodeData.txt" https://www.unicode.org/Public/16.0.0/ucd/UnicodeData.txt
-python3 -I crates/mln_text/tools/gen_arabic_shaping.py "$ucd/ArabicShaping.txt" "$ucd/UnicodeData.txt" > crates/mln_text/src/arabic_tables.rs
-'''
-
-# The Unicode version is unicode-bidi's (its char_data's UNICODE_VERSION):
-# bump it with the crate, here and in generate:arabic-shaping.
-[tasks."generate:bidi-mirroring"]
-description = "Regenerate mln_text's Bidi_Mirroring_Glyph table from the Unicode Character Database"
-run = '''
-set -o pipefail
-curl -fsSL https://www.unicode.org/Public/16.0.0/ucd/BidiMirroring.txt |
-    python3 -I crates/mln_text/tools/gen_bidi_mirroring.py > crates/mln_text/src/bidi_mirroring.rs
-'''
+# From the files of deps.ucd, which it downloads first if `mise deps` hasn't.
+[tasks."generate:unicode-tables"]
+description = "Regenerate mln_text's Arabic presentation forms and Bidi_Mirroring_Glyph table from the Unicode Character Database"
+run = [
+  "mise deps install ucd",
+  'cargo run -q -p mln-rs-unicode-tables -- "{{ vars.ucd }}"',
+]
 
 # style-codegen's generated_code_test checks that the code is up to date.
 [tasks."generate:style"]
@@ -163,10 +166,10 @@ run = "cargo deny --locked check licenses"
 
 [tasks.ratchet]
 description = "Check that no file gains panics or RefCell borrows (tools/ratchet); `--update` lowers the counts"
-usage = 'arg "[args]..." var=#true help="Arguments to tools/ratchet/ratchet.py, such as `--update`"'
-run = 'eval "set -- ${usage_args:-}"; python3 -I tools/ratchet/ratchet.py "$@"'
+usage = 'arg "[args]..." var=#true help="Arguments to tools/ratchet, such as `--update`"'
+run = 'eval "set -- ${usage_args:-}"; cargo run -q -p mln-rs-ratchet -- "$@"'
 # As for docs: cmd has no eval.
-run_windows = "python3 -I tools/ratchet/ratchet.py {{ usage.args | default(value=[]) | join(sep=' ') }}"
+run_windows = "cargo run -q -p mln-rs-ratchet -- {{ usage.args | default(value=[]) | join(sep=' ') }}"
 
 [tasks.release]
 description = "Run the release workflow on main again, to finish a release that failed part way (RELEASING.md)"
