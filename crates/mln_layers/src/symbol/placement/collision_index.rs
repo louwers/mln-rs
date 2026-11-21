@@ -1,7 +1,7 @@
 use geometry::Point;
 use glam::{DMat4, DVec4, Vec2};
 use mln_map_types::{MapMode, ProjectedTilePoint, TileProjector, View};
-use mln_renderer::placement::{Aabb, Grid, Shape};
+use mln_render::placement::{Aabb, Grid, Shape};
 use mln_style_types::IconOverlapType;
 use mln_tile_id::geometry_tile_data::GeometryCoordinates;
 use mln_util::constants::EXTENT;

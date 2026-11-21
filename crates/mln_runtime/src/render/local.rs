@@ -28,7 +28,7 @@ use mln_gfx::{
     ConsumerSync, ExportKind, ExportedFrame, ExportedRing, FrameImage, FrameTarget, GpuSync, Handoff, RendererBackend,
     SyncKind, Window,
 };
-use mln_renderer::{Renderer, UpdateParameters};
+use mln_render::{Renderer, UpdateParameters};
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;

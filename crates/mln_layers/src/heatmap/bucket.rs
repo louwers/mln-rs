@@ -8,7 +8,7 @@ use geometry::Point;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE, ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE};
 use mln_map_types::MapMode;
-use mln_renderer::layer::{
+use mln_render::layer::{
     Bucket, BucketBase, EvaluatedLayer, GeometryUpload, GeometryVec, Indexed, PaintPropertyBinder,
 };
 use mln_style::expression::Value;
@@ -22,7 +22,7 @@ use super::Heatmap;
 use super::properties::HeatmapPaintProperties;
 use crate::mesh::add_point_quads;
 
-mln_renderer::paint_property_binders!(
+mln_render::paint_property_binders!(
     pub(crate) struct HeatmapBinders for HeatmapPaintProperties::PossiblyEvaluated {
         heatmap_radius: PaintPropertyBinder<f32> => [ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE],
         heatmap_weight: PaintPropertyBinder<f32> => [ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE],
@@ -102,7 +102,7 @@ impl Bucket for HeatmapBucket {
 
     fn update(
         &mut self,
-        states: &mln_renderer::layer::FeatureStates,
+        states: &mln_render::layer::FeatureStates,
         layer: &mln_tile::TileLayer<'_>,
         layer_id: &str,
         image_positions: &ImagePositions,

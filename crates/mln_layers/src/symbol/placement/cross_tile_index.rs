@@ -28,7 +28,7 @@ use std::sync::Arc;
 use geometry::Point;
 use glam::{I64Vec2, Vec2};
 use mln_map_types::{TileProjector, View};
-use mln_renderer::placement::PlacementBuckets;
+use mln_render::placement::PlacementBuckets;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::constants::EXTENT;
 use mln_util::hash::HashSet;

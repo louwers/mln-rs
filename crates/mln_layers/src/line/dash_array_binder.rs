@@ -1,9 +1,9 @@
 //! The binder of `line-dasharray`.
 
 use mln_gfx::gfx_types::AttributeDataType;
-use mln_renderer::draw::{SharedAttribute, SharedVertices};
-use mln_renderer::layer::{InterleavedVertexBuffer, PaintPropertyBinderBase, PatternDependency};
-use mln_renderer::unstable::{DashAtlas, LinePatternCap};
+use mln_render::draw::{SharedAttribute, SharedVertices};
+use mln_render::layer::{InterleavedVertexBuffer, PaintPropertyBinderBase, PatternDependency};
+use mln_render::unstable::{DashAtlas, LinePatternCap};
 use mln_style::evaluated::Evaluated;
 use mln_style::expression::{EvaluationContext, Value};
 use mln_style::property_expression::PropertyExpression;

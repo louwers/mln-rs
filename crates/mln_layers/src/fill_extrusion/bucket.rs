@@ -12,11 +12,11 @@ use mln_gfx::shaders::shader_defines::{
     ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE,
 };
 use mln_map_types::View;
-use mln_renderer::layer::{
+use mln_render::layer::{
     Bucket, BucketBase, CrossFadedPaintPropertyBinder, EvaluatedLayer, GeometryUpload, GeometryVec, Indexed,
     PaintPropertyBinder,
 };
-use mln_renderer::unstable::subdivide_vertex_line;
+use mln_render::unstable::subdivide_vertex_line;
 use mln_style::PropertyEvaluationParameters;
 use mln_style::evaluated::Evaluated;
 use mln_style::expression::{Image, Value};
@@ -36,7 +36,7 @@ use crate::pattern_layout::{PatternBucket, PatternLayerMap, PatternLayoutSpec};
 use crate::subdivision::{SubdividedPolygon, subdivide_polygon};
 use crate::tessellator::Tessellator;
 
-mln_renderer::paint_property_binders!(
+mln_render::paint_property_binders!(
     pub(crate) struct FillExtrusionBinders for FillExtrusionPaintProperties::PossiblyEvaluated {
         fill_extrusion_base: PaintPropertyBinder<f32> => [ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE],
         fill_extrusion_color: PaintPropertyBinder<Color> => [ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE],
@@ -77,7 +77,7 @@ pub(crate) struct FillExtrusionWallVertex {
     pub(crate) vertex: FillExtrusionLayoutVertex,
 }
 
-pub(crate) use mln_renderer::draw::EvaluatedLight;
+pub(crate) use mln_render::draw::EvaluatedLight;
 
 /// The quads of the walls of `vertices`: each vertex with each corner of the
 /// static quad, in its order. The quad of the wall from a vertex is its four
@@ -424,7 +424,7 @@ impl Bucket for FillExtrusionBucket {
 
     fn update(
         &mut self,
-        states: &mln_renderer::layer::FeatureStates,
+        states: &mln_render::layer::FeatureStates,
         layer: &mln_tile::TileLayer<'_>,
         layer_id: &str,
         image_positions: &ImagePositions,

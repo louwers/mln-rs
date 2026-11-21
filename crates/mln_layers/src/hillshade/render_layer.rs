@@ -26,13 +26,13 @@ use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_math::deg2radf;
-use mln_renderer::draw::{
+use mln_render::draw::{
     Context, DrawFrame, DrawGeometry, DrawIndexes, DrawList, DrawObjects, DrawObjectsMut, FrameDraw, Indexes, KeptDraw,
     PaintParameters, RenderStaticData, RenderTarget, SharedAttribute, SharedIndexes, SharedTexture, SharedVertices,
     SingleDraw, Textures, TileDraws, TileObjects, Uniforms, VertexAttributeArray, cast_matrix, copied_vertices,
     projection_data, to_projection_ubo,
 };
-use mln_renderer::layer::{
+use mln_render::layer::{
     DemContents, DrawContext, EvaluatedLayer, LayerType, LayerValues, NoBucket, NoLayout, OffscreenPass,
     RasterLayoutVertex, RenderPass, UpdateContext,
 };

@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 use std::num::NonZeroU32;
 
 use glam::{DMat4, Vec2};
-use mln_renderer::placement::{BucketKey, PlacementBuckets, Shape};
+use mln_render::placement::{BucketKey, PlacementBuckets, Shape};
 use mln_style_types::{SymbolAnchorType, SymbolPlacementType};
 use mln_tile_id::UnwrappedTileID;
 use mln_util::constants::EXTENT;

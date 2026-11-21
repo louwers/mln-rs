@@ -9,7 +9,7 @@
 
 use std::sync::Arc;
 
-use mln_renderer::layer::{
+use mln_render::layer::{
     Bucket, BuildParams, EvaluatedLayer, FeatureIndexBuilder, LayerType, Layout, LayoutParameters, PatternDependency,
     Resolved, SourceLayer, layers_by_id,
 };

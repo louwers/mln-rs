@@ -11,7 +11,7 @@ use mln_map_types::{
     AnimationOptions, BoundOptions, CameraDelta, CameraError, CameraLimits, CameraOptions, CameraUpdate,
     MapDebugOptions, MapMode, ProjectionMode, TileLodMode, TransformState, VerticalPerspectiveProjection, Viewport,
 };
-use mln_renderer::{RendererEvent, RendererEvents, RenderingStats, UpdateParameters, UpdateReader, UpdateSlot};
+use mln_render::{RendererEvent, RendererEvents, RenderingStats, UpdateParameters, UpdateReader, UpdateSlot};
 use mln_storage::FileSource;
 #[cfg(not(target_family = "wasm"))]
 use mln_storage::{Loader, ResourceOptions};
@@ -117,7 +117,7 @@ impl Map {
     /// against `registry`, on `pool`.
     ///
     /// The renderer that draws the map must be given a registry filled by
-    /// the same calls as `registry` ([`mln_renderer::Registry::style`]): it
+    /// the same calls as `registry` ([`mln_render::Registry::style`]): it
     /// finds a layer's type by name, and draws no layer whose type it lacks.
     ///
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an empty `map_options.size`.
@@ -443,7 +443,7 @@ impl Map {
             }
             RendererEvent::RenderMapFinished => {
                 if continuous && self.loading {
-                    self.emit(MapEvent::RenderMapFinished(mln_renderer::RenderMode::Full));
+                    self.emit(MapEvent::RenderMapFinished(mln_render::RenderMode::Full));
                     self.loading = false;
                     self.emit(MapEvent::LoadingFinished);
                 }
@@ -486,13 +486,13 @@ impl Map {
 
     fn on_render_frame_finished(
         &mut self,
-        mode: mln_renderer::RenderMode,
+        mode: mln_render::RenderMode,
         needs_repaint: bool,
         placement_changed: bool,
         still_image_request_id: u64,
         stats: Arc<RenderingStats>,
     ) {
-        let fully_loaded = mode == mln_renderer::RenderMode::Full;
+        let fully_loaded = mode == mln_render::RenderMode::Full;
         if std::mem::replace(&mut self.renderer_fully_loaded, fully_loaded) != fully_loaded {
             self.changed();
         }

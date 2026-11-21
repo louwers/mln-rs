@@ -1,7 +1,7 @@
 //! The scratch of tessellating a bucket's features.
 
 use geometry::Point;
-use mln_renderer::unstable::LineScratch;
+use mln_render::unstable::LineScratch;
 
 /// Triangulates polygons with earcut and holds the line mesher's scratch,
 /// keeping their buffers from one feature to the next.

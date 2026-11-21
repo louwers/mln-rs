@@ -2,7 +2,7 @@
 //! outline them, over the same vertices.
 
 use geometry::Point;
-use mln_renderer::layer::Indexed;
+use mln_render::layer::Indexed;
 use mln_tile::geometry_tile_data::limit_holes;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, classify_rings, signed_area};

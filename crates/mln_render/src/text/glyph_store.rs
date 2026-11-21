@@ -1,4 +1,4 @@
-// In mln_renderer rather than mln_text: it requests through mln_storage
+// In mln_render rather than mln_text: it requests through mln_storage
 // (mln_text stays free of it).
 //
 // The store lives on the render thread, owned by the tile store. Tiles

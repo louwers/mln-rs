@@ -14,17 +14,17 @@ use mln_gfx::shaders::source::ShaderSources;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
-use mln_renderer::draw::{
+use mln_render::draw::{
     AtlasBinding, Composite, Context, DrawGeometry, DrawList, DrawObjects, DrawObjectsMut, FrameDraw, LayerDrawing,
     SharedAttribute, SharedTexture, Texture2D, Textures, TileDraws, TileObjects, UniformWriter, Uniforms,
     VertexAttributeArray, bucket_indexes, bucket_vertices, cast_matrix, paint_vertices, projection_data,
     to_projection_ubo,
 };
-use mln_renderer::layer::{
+use mln_render::layer::{
     DrawContext, EvaluatedLayer, FeatureQuery, HitTest, LayerBucket, LayerType, LayerValues, LayoutParameters,
     RenderPass, SourceLayer, UpdateContext,
 };
-use mln_renderer::unstable::{LineLayoutVertex, LinePatternCap};
+use mln_render::unstable::{LineLayoutVertex, LinePatternCap};
 use mln_style::expression::{Dependency, EvaluationContext, GlobalStateMap, global_state_refs_intersect};
 use mln_style::{PropertyEvaluationParameters, StyleValue as _};
 use mln_style_types::{AlignmentType, LineCapType};

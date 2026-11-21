@@ -2477,7 +2477,7 @@ dependencies = [
  "mln-rs-math",
  "mln-rs-mtl",
  "mln-rs-polylabel",
- "mln-rs-renderer",
+ "mln-rs-render",
  "mln-rs-runtime",
  "mln-rs-sources",
  "mln-rs-sprite",
@@ -2512,7 +2512,7 @@ dependencies = [
  "mln-rs-layers",
  "mln-rs-map",
  "mln-rs-mtl",
- "mln-rs-renderer",
+ "mln-rs-render",
  "mln-rs-runtime",
  "mln-rs-sources",
  "mln-rs-sprite",
@@ -2797,7 +2797,7 @@ dependencies = [
  "mln-rs-math",
  "mln-rs-mtl",
  "mln-rs-pixelmatch",
- "mln-rs-renderer",
+ "mln-rs-render",
  "mln-rs-runtime",
  "mln-rs-sources",
  "mln-rs-storage",
@@ -2850,7 +2850,7 @@ dependencies = [
  "mln-rs-map-types",
  "mln-rs-math",
  "mln-rs-polylabel",
- "mln-rs-renderer",
+ "mln-rs-render",
  "mln-rs-style",
  "mln-rs-style-types",
  "mln-rs-text",
@@ -2878,7 +2878,7 @@ dependencies = [
  "mln-rs-geometry",
  "mln-rs-map-types",
  "mln-rs-math",
- "mln-rs-renderer",
+ "mln-rs-render",
  "mln-rs-sprite",
  "mln-rs-storage",
  "mln-rs-style",
@@ -2942,35 +2942,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "mln-rs-render-test"
-version = "0.0.13"
-dependencies = [
- "fastrand",
- "geojson",
- "mln-rs",
- "mln-rs-feature",
- "mln-rs-geometry",
- "mln-rs-gfx",
- "mln-rs-headless",
- "mln-rs-image",
- "mln-rs-map",
- "mln-rs-map-types",
- "mln-rs-math",
- "mln-rs-pixelmatch",
- "mln-rs-renderer",
- "mln-rs-storage",
- "mln-rs-style",
- "mln-rs-util",
- "mln-rs-wire",
- "parking_lot",
- "regex",
- "serde",
- "serde_json",
- "tempfile",
-]
-
-[[package]]
-name = "mln-rs-renderer"
+name = "mln-rs-render"
 version = "0.0.13"
 dependencies = [
  "bytemuck",
@@ -3006,6 +2978,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "mln-rs-render-test"
+version = "0.0.13"
+dependencies = [
+ "fastrand",
+ "geojson",
+ "mln-rs",
+ "mln-rs-feature",
+ "mln-rs-geometry",
+ "mln-rs-gfx",
+ "mln-rs-headless",
+ "mln-rs-image",
+ "mln-rs-map",
+ "mln-rs-map-types",
+ "mln-rs-math",
+ "mln-rs-pixelmatch",
+ "mln-rs-render",
+ "mln-rs-storage",
+ "mln-rs-style",
+ "mln-rs-util",
+ "mln-rs-wire",
+ "parking_lot",
+ "regex",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "mln-rs-runtime"
 version = "0.0.13"
 dependencies = [
@@ -3027,7 +3027,7 @@ dependencies = [
  "mln-rs-map",
  "mln-rs-math",
  "mln-rs-mtl",
- "mln-rs-renderer",
+ "mln-rs-render",
  "mln-rs-storage",
  "mln-rs-storage-offline",
  "mln-rs-style",
@@ -3061,7 +3061,7 @@ dependencies = [
  "mln-rs-layers",
  "mln-rs-map-types",
  "mln-rs-math",
- "mln-rs-renderer",
+ "mln-rs-render",
  "mln-rs-runtime",
  "mln-rs-storage",
  "mln-rs-style",
@@ -3372,7 +3372,7 @@ name = "mln-rs-web-host"
 version = "0.0.13"
 dependencies = [
  "js-sys",
- "mln-rs-renderer",
+ "mln-rs-render",
  "mln-rs-text",
  "mln-rs-util",
  "parking_lot",

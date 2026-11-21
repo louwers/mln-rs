@@ -1,5 +1,5 @@
 //! Port-only: `mln_wire` helpers for the types that cross between wasm instances
-//! (`mln_renderer`'s `tile/worker_codec`), which have no C++ counterpart.
+//! (`mln_render`'s `tile/worker_codec`), which have no C++ counterpart.
 //!
 //! - `payload`: large byte arrays (pixels, vertices, indices) travel beside
 //!   a message rather than in it, so that a host can transfer them.

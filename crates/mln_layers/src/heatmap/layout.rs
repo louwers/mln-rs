@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use mln_map_types::MapMode;
-use mln_renderer::layer::{
+use mln_render::layer::{
     BucketParameters, BuildParams, EvaluatedLayer, FeatureIndexBuilder, FilterGroups, Layout, Resolved, SourceLayer,
     layers_by_id,
 };

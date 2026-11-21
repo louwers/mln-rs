@@ -11,12 +11,12 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::shaders::source::ShaderSources;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_map_types::TileProjector;
-use mln_renderer::draw::{
+use mln_render::draw::{
     DrawFrame, DrawGeometry, DrawList, DrawObjects, KeptDraw, SharedAttribute, Textures, TileDraws, UniformWriter,
     Uniforms, VertexAttributeArray, bucket_indexes, bucket_vertices, cast_matrix, globe_extrude_scale, paint_vertices,
     projection_data, tile_unit_translation, to_projection_ubo,
 };
-use mln_renderer::layer::{
+use mln_render::layer::{
     Bucket, DrawContext, EvaluatedLayer, FeatureQuery, HitTest, LayerBucket, LayerType, LayerValues, LayoutParameters,
     RenderPass, SourceLayer,
 };

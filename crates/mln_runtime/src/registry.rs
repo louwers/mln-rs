@@ -5,6 +5,6 @@
 //! [`Runtime::new`](crate::Runtime::new). In the browser, each tile
 //! worker's Web Worker makes the same calls for its own instance.
 
-pub use mln_renderer::{Registry, RegistryBuilder};
+pub use mln_render::{Registry, RegistryBuilder};
 pub use mln_style::expression::Functions;
 pub use mln_style::expression::functions::RegisterError;

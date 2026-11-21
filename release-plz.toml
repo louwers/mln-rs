@@ -64,7 +64,7 @@ changelog_include = [
   "mln-rs-math",
   "mln-rs-mtl",
   "mln-rs-polylabel",
-  "mln-rs-renderer",
+  "mln-rs-render",
   "mln-rs-runtime",
   "mln-rs-shelf-pack",
   "mln-rs-sources",

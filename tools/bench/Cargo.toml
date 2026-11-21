@@ -39,7 +39,7 @@ mln_layers = { package = "mln-rs-layers", path = "../../crates/mln_layers", feat
 ] }
 mln_map = { package = "mln-rs-map", path = "../../crates/mln_map" }
 # The renderer's internal stages, through its `bench` entry points.
-mln_renderer = { package = "mln-rs-renderer", path = "../../crates/mln_renderer", default-features = false, features = [
+mln_render = { package = "mln-rs-render", path = "../../crates/mln_render", default-features = false, features = [
   "bench",
 ] }
 # The built-in registrations, the devices of every backend, which

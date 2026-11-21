@@ -26,7 +26,7 @@ pub use mln_map_types::{
     MomentumEasing, MomentumGlide, MomentumSnap, NorthOrientation, ProjectionMode, TileLodMode, TransformState,
     TransitionEnd, TransitionOutcome, View, Viewport, ViewportMode,
 };
-pub use mln_renderer::{
+pub use mln_render::{
     OverscaledTileID, RenderMode, RendererEvents, RenderingStats, TileOperation, Update, UpdateReader,
 };
 pub use mln_style::StyleLoadError;

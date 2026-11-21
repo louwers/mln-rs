@@ -784,7 +784,7 @@ pub fn bind_paint_property(
 /// read, and the vertex buffer that interleaves them.
 ///
 /// ```ignore
-/// mln_renderer::paint_property_binders!(
+/// mln_render::paint_property_binders!(
 ///     pub struct DotBinders for DotPaintProperties::PossiblyEvaluated {
 ///         dot_color: PaintPropertyBinder<Color> => [ID_DOT_COLOR_VERTEX_ATTRIBUTE],
 ///         dot_pattern: CrossFadedPaintPropertyBinder<Image> => [ID_DOT_PATTERN_FROM_ATTRIBUTE, ID_DOT_PATTERN_TO_ATTRIBUTE],
@@ -810,7 +810,7 @@ pub fn bind_paint_property(
 ///   attributes as uniforms where the property is the same for every
 ///   feature.
 ///
-/// The expansion reaches everything else through `mln_renderer`, so it
+/// The expansion reaches everything else through `mln_render`, so it
 /// needs nothing in scope but the prelude and the paths the invocation
 /// names.
 #[macro_export]

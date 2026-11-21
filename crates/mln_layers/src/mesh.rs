@@ -6,9 +6,9 @@ use std::marker::PhantomData;
 
 use geometry::Point;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_renderer::draw::{Context, DrawIndexes, Indexes, SharedIndexes, SharedVertices};
-use mln_renderer::layer::{Indexed, TileMask};
-use mln_renderer::unstable::globe_mesh_data;
+use mln_render::draw::{Context, DrawIndexes, Indexes, SharedIndexes, SharedVertices};
+use mln_render::layer::{Indexed, TileMask};
+use mln_render::unstable::globe_mesh_data;
 use mln_tile_id::CanonicalTileID;
 
 /// Adds the quads that points are drawn as, one for each of `points`, and

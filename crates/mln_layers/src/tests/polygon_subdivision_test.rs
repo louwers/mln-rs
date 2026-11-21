@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use geometry::Point;
-use mln_renderer::draw::{NORTH_POLE_Y, SOUTH_POLE_Y};
+use mln_render::draw::{NORTH_POLE_Y, SOUTH_POLE_Y};
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate};
 use mln_util::constants::EXTENT;

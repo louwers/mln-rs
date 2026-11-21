@@ -2,7 +2,7 @@ use std::fmt::Write;
 use std::time::Duration;
 
 use feature::Value;
-use mln_renderer::RenderingStats;
+use mln_render::RenderingStats;
 use mln_style::conversion::{Convertible, convert_source};
 use mln_style::{Edit, Layer};
 use mln_util::Color;

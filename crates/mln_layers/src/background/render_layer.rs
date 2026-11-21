@@ -11,14 +11,14 @@ use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
 use mln_map_types::tile_cover::{TileCoverParameters, tile_cover};
-use mln_renderer::draw::{
+use mln_render::draw::{
     DrawDepth, DrawFrame, DrawGeometry, DrawIndexes, DrawList, DrawObjects, FrameDraw, KeptDraw, LayerDrawing,
     RenderStaticData, Textures, TileDraws, Uniforms, projection_data, raw_vertices, to_projection_ubo,
 };
-use mln_renderer::layer::{
+use mln_render::layer::{
     DrawContext, EvaluatedLayer, LayerType, LayerValues, NoBucket, NoLayout, NoTileView, RenderPass, UpdateContext,
 };
-use mln_renderer::unstable::raw_globe_tile_mesh;
+use mln_render::unstable::raw_globe_tile_mesh;
 use mln_style_types::TranslateAnchorType;
 use mln_tile_id::OverscaledTileID;
 use mln_util::Color;

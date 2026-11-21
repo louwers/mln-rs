@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use mln_map_types::MapMode;
-use mln_renderer::source::{
+use mln_render::source::{
     Cover, DataOrigin, FeatureExtensionValue, LoadContext, NewTile, OriginUpdate, Replier, SourceType, Supply,
     TileInput, TileKind, TileLoad,
 };

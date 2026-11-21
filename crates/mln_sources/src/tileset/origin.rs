@@ -6,7 +6,7 @@ use std::marker::PhantomData;
 use std::sync::{Arc, Weak};
 
 use mln_map_types::MapMode;
-use mln_renderer::source::{
+use mln_render::source::{
     Cover, DataOrigin, Freshness, LoadContext, NewTile, OriginUpdate, SourceType, Supply, TileInput, TileKind,
     TileLoad, TileNecessity, TileOperation, TileUpdateParameters,
 };
