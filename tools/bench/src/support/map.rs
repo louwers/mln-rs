@@ -431,6 +431,9 @@ pub(crate) struct DrawMeter {
     /// once.
     #[cfg(mln_bench_terrain_stats)]
     held: [u64; 7],
+    /// The frames' draws of the ground's depth, and the most bytes it held.
+    #[cfg(mln_bench_ground_depth)]
+    ground_depth: (u64, u64),
 }
 
 impl DrawMeter {
@@ -467,15 +470,22 @@ impl DrawMeter {
                 *peak = (*peak).max(value);
             }
         }
+        #[cfg(mln_bench_ground_depth)]
+        {
+            let terrain = stats.terrain;
+            self.ground_depth.0 += terrain.ground_depth_draw_calls as u64;
+            self.ground_depth.1 = self.ground_depth.1.max(terrain.mem_ground_depth as u64);
+        }
     }
 
     /// Declares in `bench` what the frames drew: `draw_calls`,
     /// `render_passes`, `mipmap_generations`, `drapes_drawn` (and the most
-    /// in a frame, `drapes_drawn_max`), `drape_passes`, `drape_draw_calls`
-    /// and `surface_draw_calls`; and the most bytes the terrain held:
-    /// `terrain_drapes`, `terrain_drape_depth_stencil`,
+    /// in a frame, `drapes_drawn_max`), `drape_passes`, `drape_draw_calls`,
+    /// `surface_draw_calls` and `ground_depth_draw_calls`; and the most bytes
+    /// the terrain held: `terrain_drapes`, `terrain_drape_depth_stencil`,
     /// `terrain_drape_composite`, `terrain_dem_textures`, `terrain_dem_data`,
-    /// `terrain_height_ranges`, and `terrain_memory`, all of them at once.
+    /// `terrain_height_ranges`, and `terrain_memory`, all of them at once,
+    /// and `terrain_ground_depth`, the ground's depth and its depth test.
     pub(crate) fn report(&self, bench: &mut Bench) {
         bench.count("draw_calls", self.draw_calls);
         #[cfg(mln_bench_terrain_stats)]
@@ -504,6 +514,11 @@ impl DrawMeter {
             for (name, value) in held.into_iter().zip(self.held) {
                 bench.bytes(name, value);
             }
+        }
+        #[cfg(mln_bench_ground_depth)]
+        {
+            bench.count("ground_depth_draw_calls", self.ground_depth.0);
+            bench.bytes("terrain_ground_depth", self.ground_depth.1);
         }
     }
 }

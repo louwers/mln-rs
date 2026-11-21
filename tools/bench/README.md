@@ -292,13 +292,15 @@ counts it: WebGPU on Vulkan or D3D12, a CPU rasterizer such as lavapipe
 included), `background_work` (the times a frame started work off the frame, such
 as laying out a tile), or, over 3D terrain, what the frames drew (`draw_calls`,
 `render_passes`, `mipmap_generations`, `drapes_drawn` and the most in a frame,
-`drape_passes`, `drape_draw_calls`, `surface_draw_calls`) and the most bytes the
-terrain held (`terrain_drapes`, the drapes' textures with their mips;
+`drape_passes`, `drape_draw_calls`, `surface_draw_calls`,
+`ground_depth_draw_calls`) and the most bytes the terrain held
+(`terrain_drapes`, the drapes' textures with their mips;
 `terrain_drape_depth_stencil` and `terrain_drape_composite`, what they draw
 with; `terrain_dem_textures`; `terrain_dem_data`, the DEM images the camera's
-ground holds; `terrain_height_ranges`; and `terrain_memory`, all of them at
-once). A scenario that repeats a unit of work, such as a frame or a tile, also
-reports `instructions`, `allocations` and `allocated` per unit, such as
+ground holds; `terrain_height_ranges`; `terrain_memory`, all of them at once;
+and `terrain_ground_depth`, the depth of the ground that hides what stands
+behind it). A scenario that repeats a unit of work, such as a frame or a tile,
+also reports `instructions`, `allocations` and `allocated` per unit, such as
 `instructions_per_frame`.
 
 A scenario over the simulated network also counts what a user sees, from what

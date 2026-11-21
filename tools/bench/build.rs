@@ -81,7 +81,8 @@ fn terrain_update(workspace: &Path) {
 
 /// Sets `mln_bench_terrain_stats` where the rendering stats count what the
 /// terrain draws and holds, and the passes and mips of a frame, which the
-/// terrain scenarios report. A base of `mln-bench compare` from before them
+/// terrain scenarios report, and `mln_bench_ground_depth` where they count
+/// the ground's depth too. A base of `mln-bench compare` from before them
 /// reports none of it.
 fn terrain_stats(workspace: &Path) {
     let source = workspace.join("crates/mln_gfx/src/rendering_stats.rs");
@@ -90,6 +91,11 @@ fn terrain_stats(workspace: &Path) {
     let source = std::fs::read_to_string(&source).expect("the rendering stats");
     if source.contains("pub struct TerrainStats") {
         println!("cargo::rustc-cfg=mln_bench_terrain_stats");
+    }
+    // The ground's depth, which hides what stands behind the ground.
+    println!("cargo::rustc-check-cfg=cfg(mln_bench_ground_depth)");
+    if source.contains("pub ground_depth_draw_calls:") {
+        println!("cargo::rustc-cfg=mln_bench_ground_depth");
     }
 }
 
