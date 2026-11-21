@@ -192,8 +192,10 @@ impl Drop for UpdateSlot {
     }
 }
 
-/// The reading side of an [`UpdateSlot`], for the renderer that draws the
-/// map. Clones read the same slot, each with a waker of its own.
+/// The reading side of a map's update slot
+/// ([`MapCore::update_reader`](super::MapCore::update_reader)), for the
+/// renderer that draws the map. Clones read the same slot, each with a waker
+/// of its own.
 pub struct UpdateReader {
     shared: Arc<Shared>,
     id: u64,
