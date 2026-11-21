@@ -25,15 +25,17 @@ use mln_tile_id::OverscaledTileID;
 use mln_util::Color;
 use mln_util::constants::{EXTENT, TILE_SIZE};
 use mln_util::hash::{HashMap, HashSet};
-use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecMap;
 
 use crate::draw_objects::{DrawGeometry, DrawObjects, Textures};
 use crate::erased_layer::ErasedEvaluatedLayer;
 use crate::erased_source::ErasedOrigin;
 use crate::gfx::context::Context;
-use crate::gfx::indexes::DrawIndexes;
+use crate::gfx::indexes::{DrawIndexes, Indexes};
+use crate::gfx::store::SharedIndexes;
 use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
+use crate::gfx::vertices::SharedVertices;
+use crate::globe::{subdivide_ring, surface_granularity};
 use crate::layer_drawing::{DrawDepth, DrawList, DrawObjectsMut, FrameDraw, KeptDraw, LayerDraws};
 use crate::paint_parameters::PaintParameters;
 use crate::render_source::{RenderSource, RenderSourceBase, RenderTileParameters, TileOrder};
@@ -46,15 +48,14 @@ use crate::tile_matrix::to_projection_ubo;
 use crate::tile_parameters::TileParameters;
 
 /// The color and width of a debug overlay's segments: red tile borders, and
-/// black text over a white outline. `update_draws` sets the world's width.
+/// black text over a white outline.
 #[must_use]
-fn debug_properties(type_: DebugType) -> TileDebugPropsUBO {
-    let (color, width) = match type_ {
+fn debug_style(type_: DebugType) -> (Color, f32) {
+    match type_ {
         DebugType::TextOutline => (Color::white(), 4.0),
         DebugType::Text => (Color::black(), 2.0),
         DebugType::Border => (Color::red(), 4.0),
-    };
-    TileDebugPropsUBO { color: color.to_float_array(), width, world_width: 0.0, pad: [0.0; 2] }
+    }
 }
 
 /// A segment of a debug overlay, from its first point to its second, in
@@ -65,11 +66,13 @@ type Segment = [Point<i16>; 2];
 /// 0 at the segment's start and 1 at its end, y picks its side.
 const SEGMENT_QUAD: [[i16; 2]; 4] = [[0, 0], [0, 1], [1, 0], [1, 1]];
 
-/// The GPU objects that draw `segments` with `shader`; `None` where there
+/// The GPU objects that draw `segments` with `shader`, as instances of
+/// `quad`, the vertices and indexes of [`SEGMENT_QUAD`]; `None` where there
 /// are none.
 fn segment_objects(
     context: &mut Context,
     shader: &ShaderKey,
+    quad: &(SharedVertices, SharedIndexes),
     segments: impl IntoIterator<Item = Segment>,
 ) -> Option<DrawObjects> {
     let ends: Vec<[i16; 4]> = segments.into_iter().map(|[a, b]| [a.x, a.y, b.x, b.y]).collect();
@@ -77,7 +80,7 @@ fn segment_objects(
         return None;
     }
     let instance_count = ends.len();
-    let corners = context.add_vertices(SEGMENT_QUAD.to_vec());
+    let (corners, indexes) = quad.clone();
     let ends = context.add_vertices(ends);
     let point = size_of::<[i16; 2]>() as u32;
     let mut vertices = VertexAttributeArray::new();
@@ -94,7 +97,7 @@ fn segment_objects(
         vertices,
         vertex_count: SEGMENT_QUAD.len(),
         mode: DrawMode::TriangleStrip(),
-        indexes: DrawIndexes::new(vec![0, 1, 2, 3]),
+        indexes: DrawIndexes::Shared(indexes),
         segments: vec![SegmentBase { instance_count, ..SegmentBase::with_lengths(0, 0, 4, 4) }],
         instances: Some(instances),
     };
@@ -110,23 +113,6 @@ fn segment_objects(
 /// The segments of `lines`, each a polyline.
 fn polyline_segments(lines: &[Vec<Point<i16>>]) -> impl Iterator<Item = Segment> {
     lines.iter().flat_map(|line| line.windows(2).map(|pair| [pair[0], pair[1]]))
-}
-
-/// The segments of a tile's border, each edge split into `steps` segments
-/// so that it bends with the globe.
-fn border_segments(steps: u32) -> impl Iterator<Item = Segment> {
-    let extent = EXTENT;
-    let edges = [
-        ((0, 0), (extent, 0)),
-        ((extent, 0), (extent, extent)),
-        ((extent, extent), (0, extent)),
-        ((0, extent), (0, 0)),
-    ];
-    let steps = steps.max(1) as i32;
-    edges.into_iter().flat_map(move |((x0, y0), (x1, y1))| {
-        let at = move |i: i32| Point::new((x0 + (x1 - x0) * i / steps) as i16, (y0 + (y1 - y0) * i / steps) as i16);
-        (0..steps).map(move |i| [at(i), at(i + 1)])
-    })
 }
 
 // Debug overlays -------------------------------------------------------------
@@ -160,7 +146,11 @@ fn debug_layer(debug_layers: &mut DebugLayers, type_: DebugType) -> &mut DebugLa
 /// A debug overlay: segments over the tiles of the sources, in the color and
 /// width of its type.
 pub(crate) struct DebugLayer {
-    properties: TileDebugPropsUBO,
+    /// The color and width of the overlay's segments.
+    style: (Color, f32),
+    /// The vertices and indexes of [`SEGMENT_QUAD`] that the overlay's
+    /// draws share, once a draw needs them.
+    quad: Option<(SharedVertices, SharedIndexes)>,
     /// The overlay's draws, in the order they were made, which is the order
     /// they draw in.
     draws: Vec<DebugDraw>,
@@ -175,7 +165,8 @@ impl DebugLayer {
     #[must_use]
     pub(crate) fn new(type_: DebugType) -> Self {
         DebugLayer {
-            properties: debug_properties(type_),
+            style: debug_style(type_),
+            quad: None,
             draws: Vec::new(),
             draw_list: DrawList::default(),
             frame: LayerDraws::default(),
@@ -208,11 +199,26 @@ impl DebugLayer {
         self.draws.iter().filter(|draw| *draw.source == *source).map(|draw| draw.tile).collect()
     }
 
-    /// Adds a draw of `objects` over `tile_id` of the source `source`,
-    /// spelling `text`.
-    fn add(&mut self, source: &Rc<str>, tile_id: OverscaledTileID, text: Option<Vec<String>>, objects: DrawObjects) {
+    /// Adds a draw of `segments` with `shader` over `tile_id` of the source
+    /// `source`, spelling `text`; `false` where there are no segments.
+    fn add(
+        &mut self,
+        context: &mut Context,
+        shader: &ShaderKey,
+        source: &Rc<str>,
+        tile_id: OverscaledTileID,
+        text: Option<Vec<String>>,
+        segments: impl IntoIterator<Item = Segment>,
+    ) -> bool {
+        let quad = self.quad.get_or_insert_with(|| {
+            (context.add_vertices(SEGMENT_QUAD.to_vec()), context.add_indexes(Indexes::new(vec![0, 1, 2, 3])))
+        });
+        let Some(objects) = segment_objects(context, shader, quad, segments) else {
+            return false;
+        };
         let draw = KeptDraw::new(objects);
         self.draws.push(DebugDraw { source: Rc::clone(source), tile: tile_id, text, draw });
+        true
     }
 
     /// Makes the frame's draws of the overlay, and writes the buffers they
@@ -224,10 +230,11 @@ impl DebugLayer {
             self.draw_list.push_part(frame_draw, index, to_projection_ubo(&projection));
         }
 
-        self.properties.world_width = (TILE_SIZE * parameters.frame.view.zoom().exp2()) as f32;
-        let properties = &self.properties;
+        let (color, width) = self.style;
+        let world_width = (TILE_SIZE * parameters.frame.view.zoom().exp2()) as f32;
+        let properties = TileDebugPropsUBO { color: color.to_float_array(), width, world_width, pad: [0.0; 2] };
         let replaced = self.draw_list.finish(&mut self.frame, gpu, parameters.context, |writer| {
-            writer.uniform(ID_TILE_DEBUG_PROPS_UBO, properties);
+            writer.uniform(ID_TILE_DEBUG_PROPS_UBO, &properties);
             writer.storage(ID_PROJECTION_UBO, |projection| *projection);
         });
         if replaced {
@@ -428,11 +435,16 @@ impl RenderSource for RenderTileSource {
                     };
                     if tile.needs_rendering()
                         && !of_tiles.contains(&tile_id)
-                        && let Some(objects) =
-                            segment_objects(parameters.context, &shader, polyline_segments(&debug_bucket.strokes))
+                        && layer.add(
+                            parameters.context,
+                            &shader,
+                            source,
+                            tile_id,
+                            Some(debug_bucket.text.clone()),
+                            polyline_segments(&debug_bucket.strokes),
+                        )
                     {
                         of_tiles.insert(tile_id);
-                        layer.add(source, tile_id, Some(debug_bucket.text.clone()), objects);
                     }
                 }
             }
@@ -449,20 +461,19 @@ impl RenderSource for RenderTileSource {
             let mut of_tiles = layer.tiles_of(source);
 
             // add new draws; on the globe the edges bend with the sphere,
-            // split as finely as the tile meshes of the zoom
+            // split as finely as the tile's surface
+            let extent = EXTENT as i16;
+            let corners = [Point::new(0, 0), Point::new(extent, 0), Point::new(extent, extent), Point::new(0, extent)];
             for tile in &self.render_tiles {
                 let tile_id = *tile.overscaled_tile_id();
                 if tile.debug_bucket.is_none() || !tile.needs_rendering() || of_tiles.contains(&tile_id) {
                     continue;
                 }
-                let steps = if globe {
-                    SubdivisionGranularitySetting::globe().tile.granularity_for_zoom_level(tile_id.canonical.z)
-                } else {
-                    1
-                };
-                if let Some(objects) = segment_objects(parameters.context, &shader, border_segments(steps)) {
+                let granularity = if globe { surface_granularity(tile_id.canonical.z) } else { 1 };
+                let border = subdivide_ring(&corners, granularity);
+                let segments = polyline_segments(std::slice::from_ref(&border));
+                if layer.add(parameters.context, &shader, source, tile_id, None, segments) {
                     of_tiles.insert(tile_id);
-                    layer.add(source, tile_id, None, objects);
                 }
             }
         } else {
