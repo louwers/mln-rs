@@ -941,7 +941,7 @@ impl<'a> GeoJSONFeature<'a> {
 
     fn with_canonical(feature: &'a Feature<f64>, canonical: &CanonicalTileID) -> Self {
         let geometry = feature.geometry.as_ref().map_or_else(GeometryCollection::default, |g| {
-            mln_tile::geometry_tile_data::convert_geometry_to_tile(g, canonical)
+            mln_tile_id::geometry_tile_data::convert_geometry_to_tile(g, canonical)
         });
         GeoJSONFeature { feature, geometry }
     }

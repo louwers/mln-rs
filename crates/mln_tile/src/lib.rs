@@ -5,14 +5,14 @@
 //!   fast-mvt, an MLT tile decoded with mlt-core, or features already in
 //!   tile coordinates (GeoJSON and custom geometry sources). Its layers
 //!   ([`TileLayer`]) and features ([`Feature`]) are views that borrow it.
-//! - [`geometry_tile_data`]: ring classification, hole limits, polygon fixup
-//!   on `i_overlay`, coordinate conversion and corner rounding. The feature
-//!   interface that expressions read is in `mln_tile_id`.
+//! - [`geometry_tile_data`]: hole limits, polygon fixup on `i_overlay`,
+//!   feature conversion and corner rounding. Ring classification, coordinate
+//!   conversion and the feature interface that expressions read are in
+//!   `mln_tile_id`.
 //!
-//! This crate is deliberately low in the crate graph (no style, renderer or
-//! expression dependencies), so `mln_expression` and the buckets can use
-//! the geometry functions. The tiles themselves, and their workers, depend
-//! on the renderer and live in a higher crate.
+//! This crate is low in the crate graph (no style or renderer dependencies),
+//! so the buckets can use the geometry functions. The tiles themselves, and
+//! their workers, depend on the renderer and live in a higher crate.
 
 pub mod cut;
 mod error;
@@ -23,8 +23,7 @@ mod tile_data;
 
 pub use error::TileError;
 pub use geometry_tile_data::{
-    classify_rings, convert_feature, convert_geometry, convert_geometry_to_tile, is_boundary_edge, is_entirely_outside,
-    limit_holes, round_polygon_corners, to_geometry_collection,
+    convert_feature, is_boundary_edge, is_entirely_outside, limit_holes, round_polygon_corners,
 };
 pub use mlt::{MltFeature, MltLayer, MltTile};
 pub use mvt::{MvtFeature, MvtLayer, MvtTile};

@@ -10,8 +10,8 @@ pub enum TileError {
     #[error("{0}")]
     Geometry(String),
     /// An index past the end, with libstdc++'s message for it.
-    #[error("{0}")]
-    OutOfRange(String),
+    #[error(transparent)]
+    OutOfRange(#[from] mln_tile_id::geometry_tile_data::OutOfRange),
 }
 
 impl TileError {
@@ -19,7 +19,7 @@ impl TileError {
     /// message libstdc++'s `std::vector::at` throws.
     #[must_use]
     pub(crate) fn vector_range_check(n: usize, size: usize) -> TileError {
-        TileError::OutOfRange(format!("vector::_M_range_check: __n (which is {n}) >= this->size() (which is {size})"))
+        TileError::OutOfRange(mln_tile_id::geometry_tile_data::OutOfRange { index: n, len: size })
     }
 }
 

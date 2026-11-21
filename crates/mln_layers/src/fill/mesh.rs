@@ -3,9 +3,9 @@
 
 use geometry::Point;
 use mln_renderer::layer::Indexed;
-use mln_tile::geometry_tile_data::{classify_rings, limit_holes, signed_area};
+use mln_tile::geometry_tile_data::limit_holes;
 use mln_tile_id::CanonicalTileID;
-use mln_tile_id::geometry_tile_data::GeometryCollection;
+use mln_tile_id::geometry_tile_data::{GeometryCollection, classify_rings, signed_area};
 
 use super::bucket::FillLayoutVertex;
 use crate::subdivision::{TILE_BORDER_STRIP_WIDTH, add_tile_border_strips, subdivide_polygon};

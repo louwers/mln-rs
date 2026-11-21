@@ -22,11 +22,9 @@ use mln_style::evaluated::Evaluated;
 use mln_style::expression::{Image, Value};
 use mln_style_types::LightAnchorType;
 use mln_style_types::image::ImagePositions;
-use mln_tile::geometry_tile_data::{
-    classify_rings, is_boundary_edge, is_entirely_outside, limit_holes, round_polygon_corners,
-};
+use mln_tile::geometry_tile_data::{is_boundary_edge, is_entirely_outside, limit_holes, round_polygon_corners};
 use mln_tile_id::CanonicalTileID;
-use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinates, GeometryTileFeature};
+use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinates, GeometryTileFeature, classify_rings};
 use mln_util::Color;
 use mln_util::constants::{EARTH_RADIUS_M, EXTENT, M2PI};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
