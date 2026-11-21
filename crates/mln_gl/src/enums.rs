@@ -25,6 +25,8 @@ pub(crate) fn color_blend_equation(value: ColorBlendEquationType) -> u32 {
         ColorBlendEquationType::Add => glow::FUNC_ADD,
         ColorBlendEquationType::Subtract => glow::FUNC_SUBTRACT,
         ColorBlendEquationType::ReverseSubtract => glow::FUNC_REVERSE_SUBTRACT,
+        ColorBlendEquationType::Min => glow::MIN,
+        ColorBlendEquationType::Max => glow::MAX,
     }
 }
 
@@ -96,7 +98,6 @@ pub(crate) fn cull_face_side(value: CullFaceSideType) -> u32 {
     match value {
         CullFaceSideType::Front => glow::FRONT,
         CullFaceSideType::Back => glow::BACK,
-        CullFaceSideType::FrontAndBack => glow::FRONT_AND_BACK,
     }
 }
 

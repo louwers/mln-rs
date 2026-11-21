@@ -10,9 +10,9 @@ use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::program::{Program, ProgramParameters};
 use mln_gfx::shaders::source::glsl::Glsl;
 use mln_layers::conformance::{
-    clip_mask_and_background, custom_layers, depth_only, foreign_ids, imported_textures, instanced_walls,
-    invalid_calls, pulled_walls, readbacks, resources_in_use, topologies, transparent_replace, vertex_layouts,
-    wall_quads,
+    blend_equations, clip_mask_and_background, custom_layers, depth_only, foreign_ids, imported_textures,
+    instanced_walls, invalid_calls, pulled_walls, readbacks, resources_in_use, topologies, transparent_replace,
+    vertex_layouts, wall_quads,
 };
 use mln_util::Color;
 use mln_util::size::Size;
@@ -49,6 +49,12 @@ fn foreign_ids_through_gpu() {
     let mut first = VulkanGpu::new(&device).expect("VulkanGpu");
     let mut second = VulkanGpu::new(&device).expect("VulkanGpu");
     foreign_ids(&mut first, &mut second).expect("the valid calls");
+}
+
+#[test]
+fn blend_equations_through_gpu() {
+    let device = Device::new(None).expect("Vulkan device");
+    blend_equations(&mut VulkanGpu::new(&device).expect("VulkanGpu")).expect("the frames");
 }
 
 #[test]

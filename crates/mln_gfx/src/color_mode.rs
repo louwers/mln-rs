@@ -10,40 +10,54 @@ pub struct LinearBlend {
     pub dst_factor: ColorBlendFactorType,
 }
 
-/// A blend equation and its factors.
+/// How a fragment's color, S, combines with the target's, D, on every
+/// channel.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum BlendFunction {
+    /// S, with no blend.
     Replace,
+    /// sS + dD, of the blend's factors s and d.
     Add(LinearBlend),
+    /// sS - dD.
     Subtract(LinearBlend),
+    /// dD - sS.
     ReverseSubtract(LinearBlend),
+    /// min(S, D), with no factors.
+    Min,
+    /// max(S, D), with no factors.
+    Max,
 }
 
 impl BlendFunction {
-    /// The static `equation` member of the active alternative.
+    /// The equation.
     #[must_use]
     pub fn equation(&self) -> ColorBlendEquationType {
         match self {
             BlendFunction::Replace | BlendFunction::Add(_) => ColorBlendEquationType::Add,
             BlendFunction::Subtract(_) => ColorBlendEquationType::Subtract,
             BlendFunction::ReverseSubtract(_) => ColorBlendEquationType::ReverseSubtract,
+            BlendFunction::Min => ColorBlendEquationType::Min,
+            BlendFunction::Max => ColorBlendEquationType::Max,
         }
     }
 
-    /// The source blend factor (`One` for `Replace`).
+    /// The source blend factor: `One` for `Replace`, `Min` and `Max`, whose
+    /// equations read none, as WebGPU requires of them.
     #[must_use]
     pub fn src_factor(&self) -> ColorBlendFactorType {
         match self {
-            BlendFunction::Replace => ColorBlendFactorType::One,
+            BlendFunction::Replace | BlendFunction::Min | BlendFunction::Max => ColorBlendFactorType::One,
             BlendFunction::Add(b) | BlendFunction::Subtract(b) | BlendFunction::ReverseSubtract(b) => b.src_factor,
         }
     }
 
-    /// The destination blend factor (`Zero` for `Replace`).
+    /// The destination blend factor: `Zero` for `Replace`, and `One` for
+    /// `Min` and `Max`.
     #[must_use]
     pub fn dst_factor(&self) -> ColorBlendFactorType {
         match self {
             BlendFunction::Replace => ColorBlendFactorType::Zero,
+            BlendFunction::Min | BlendFunction::Max => ColorBlendFactorType::One,
             BlendFunction::Add(b) | BlendFunction::Subtract(b) | BlendFunction::ReverseSubtract(b) => b.dst_factor,
         }
     }

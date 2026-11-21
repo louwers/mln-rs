@@ -136,6 +136,8 @@ fn webgpu_blend_operation(equation: ColorBlendEquationType) -> wgpu::BlendOperat
         ColorBlendEquationType::Add => wgpu::BlendOperation::Add,
         ColorBlendEquationType::Subtract => wgpu::BlendOperation::Subtract,
         ColorBlendEquationType::ReverseSubtract => wgpu::BlendOperation::ReverseSubtract,
+        ColorBlendEquationType::Min => wgpu::BlendOperation::Min,
+        ColorBlendEquationType::Max => wgpu::BlendOperation::Max,
     }
 }
 
@@ -494,13 +496,10 @@ impl ShaderProgram {
             } else {
                 wgpu::FrontFace::Cw
             },
-            cull_mode: if !state.cull.enabled {
-                None
-            } else if state.cull.side == CullFaceSideType::Front {
-                Some(wgpu::Face::Front)
-            } else {
-                Some(wgpu::Face::Back)
-            },
+            cull_mode: state.cull.enabled.then_some(match state.cull.side {
+                CullFaceSideType::Front => wgpu::Face::Front,
+                CullFaceSideType::Back => wgpu::Face::Back,
+            }),
             ..Default::default()
         };
 

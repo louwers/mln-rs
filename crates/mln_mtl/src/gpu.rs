@@ -1063,6 +1063,8 @@ fn blend_operation(equation: ColorBlendEquationType) -> MTLBlendOperation {
         ColorBlendEquationType::Add => MTLBlendOperation::Add,
         ColorBlendEquationType::Subtract => MTLBlendOperation::Subtract,
         ColorBlendEquationType::ReverseSubtract => MTLBlendOperation::ReverseSubtract,
+        ColorBlendEquationType::Min => MTLBlendOperation::Min,
+        ColorBlendEquationType::Max => MTLBlendOperation::Max,
     }
 }
 
@@ -1129,7 +1131,6 @@ pub(crate) fn map_cull_mode(side: CullFaceSideType) -> MTLCullMode {
     match side {
         CullFaceSideType::Front => MTLCullMode::Front,
         CullFaceSideType::Back => MTLCullMode::Back,
-        CullFaceSideType::FrontAndBack => MTLCullMode::None,
     }
 }
 

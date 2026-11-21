@@ -61,7 +61,6 @@ pub(crate) fn cull_mode(value: CullFaceSideType) -> vk::CullModeFlags {
     match value {
         CullFaceSideType::Back => vk::CullModeFlags::BACK,
         CullFaceSideType::Front => vk::CullModeFlags::FRONT,
-        CullFaceSideType::FrontAndBack => vk::CullModeFlags::FRONT_AND_BACK,
     }
 }
 
@@ -79,6 +78,8 @@ pub(crate) fn blend_op(value: ColorBlendEquationType) -> vk::BlendOp {
         ColorBlendEquationType::Add => vk::BlendOp::ADD,
         ColorBlendEquationType::Subtract => vk::BlendOp::SUBTRACT,
         ColorBlendEquationType::ReverseSubtract => vk::BlendOp::REVERSE_SUBTRACT,
+        ColorBlendEquationType::Min => vk::BlendOp::MIN,
+        ColorBlendEquationType::Max => vk::BlendOp::MAX,
     }
 }
 

@@ -8,6 +8,10 @@ pub enum ColorBlendEquationType {
     Subtract,
     /// O = dD - sS
     ReverseSubtract,
+    /// O = min(S, D)
+    Min,
+    /// O = max(S, D)
+    Max,
 }
 
 /// Color blending factor type
@@ -82,13 +86,12 @@ pub enum StencilOpType {
     DecrementWrap,
 }
 
-/// Cull face side
+/// The face that culling drops.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum CullFaceSideType {
     Front,
     Back,
-    FrontAndBack,
 }
 
 /// Define the orientation of front facing polygons

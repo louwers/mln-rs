@@ -3,9 +3,9 @@ use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::program::{Program, ProgramParameters};
 use mln_gfx::shaders::source::glsl::Glsl;
 use mln_layers::conformance::{
-    clip_mask_and_background, custom_layers, depth_only, foreign_ids, imported_textures, instanced_walls,
-    invalid_calls, pulled_walls, readbacks, resources_in_use, topologies, transparent_replace, vertex_layouts,
-    wall_quads,
+    blend_equations, clip_mask_and_background, custom_layers, depth_only, foreign_ids, imported_textures,
+    instanced_walls, invalid_calls, pulled_walls, readbacks, resources_in_use, topologies, transparent_replace,
+    vertex_layouts, wall_quads,
 };
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_UNKNOWN};
 
@@ -38,6 +38,11 @@ fn foreign_ids_through_gpu() {
     let mut first = D3d12Gpu::new(&device).expect("D3d12Gpu");
     let mut second = D3d12Gpu::new(&device).expect("D3d12Gpu");
     foreign_ids(&mut first, &mut second).expect("the valid calls");
+}
+
+#[test]
+fn blend_equations_through_gpu() {
+    blend_equations(&mut gpu()).expect("the frames");
 }
 
 #[test]

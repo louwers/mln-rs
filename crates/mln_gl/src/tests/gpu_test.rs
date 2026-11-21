@@ -15,9 +15,9 @@ use mln_gfx::types::DepthFunctionType;
 use mln_layers::background::programs::BACKGROUND;
 use mln_layers::background::ubo::{BackgroundDrawableUnionUBO, BackgroundPropsUBO};
 use mln_layers::conformance::{
-    clip_mask_and_background, custom_layers, depth_only, foreign_ids, imported_textures, instanced_walls,
-    invalid_calls, pulled_walls, readbacks, resources_in_use, topologies, transparent_replace, vertex_layouts,
-    wall_quads,
+    blend_equations, clip_mask_and_background, custom_layers, depth_only, foreign_ids, imported_textures,
+    instanced_walls, invalid_calls, pulled_walls, readbacks, resources_in_use, topologies, transparent_replace,
+    vertex_layouts, wall_quads,
 };
 use mln_util::Color;
 use mln_util::size::Size;
@@ -93,6 +93,14 @@ fn invalid_calls_through_gpu() {
         return;
     };
     invalid_calls(&mut gpu).expect("the valid calls");
+}
+
+#[test]
+fn blend_equations_through_gpu() {
+    let Some(mut gpu) = gpu() else {
+        return;
+    };
+    blend_equations(&mut gpu).expect("the frames");
 }
 
 #[test]

@@ -3,7 +3,7 @@
 
 use std::any::Any;
 
-use mln_gfx::color_mode::ColorMode;
+use mln_gfx::color_mode::{BlendFunction, ColorMode, LinearBlend};
 use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
 use mln_gfx::gpu::{
     BindGroupEntry, BindingsDesc, BindingsId, BufferId, BufferUsage, ColorAttachment, DepthState,
@@ -15,7 +15,7 @@ use mln_gfx::shaders::layer_ubo::{ProjectionUBO, ViewUBO};
 use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::shader_defines::{ID_PROJECTION_UBO, ID_VIEW_UBO};
 use mln_gfx::texture2d::SamplerState;
-use mln_gfx::types::DepthFunctionType;
+use mln_gfx::types::{ColorBlendFactorType, DepthFunctionType};
 use mln_util::Color;
 use mln_util::size::Size;
 
@@ -376,6 +376,34 @@ pub fn transparent_replace(gpu: &mut impl Gpu) -> Result<(), GpuError> {
     frame.frame(gpu, &[frame.draw(frame.pipeline)])?;
     let pixels = read(gpu, frame.target)?;
     assert_eq!(texel(&pixels, SIZE.width / 2, SIZE.height / 2), [255, 0, 0, 153], "not blended with the black");
+    Ok(())
+}
+
+/// Checks the blend equations: a translucent color drawn twice over opaque
+/// black adds up with `Add(One, One)`, and stays itself with `Max` and black
+/// with `Min`, both of which keep the larger and the smaller alpha. Returns
+/// the error of a call that should succeed.
+///
+/// # Panics
+///
+/// Where a check doesn't hold.
+pub fn blend_equations(gpu: &mut impl Gpu) -> Result<(), GpuError> {
+    let one = LinearBlend { src_factor: ColorBlendFactorType::One, dst_factor: ColorBlendFactorType::One };
+    let cases = [
+        (BlendFunction::Add(one), [204, 255, 102, 255]),
+        (BlendFunction::Max, [102, 204, 51, 255]),
+        (BlendFunction::Min, [0, 0, 0, 153]),
+    ];
+    let frame = solid(gpu, TextureFormat::Rgba8Unorm, [0.4, 0.8, 0.2, 0.6])?;
+    for (blend, expected) in cases {
+        let mut desc = background(frame.shader, RGBA8);
+        desc.state.blend = blend;
+        let pipeline = gpu.create_pipeline(&desc)?;
+        frame.frame(gpu, &[frame.draw(pipeline), frame.draw(pipeline)])?;
+        let texel = texel(&read(gpu, frame.target)?, SIZE.width / 2, SIZE.height / 2);
+        let near = texel.iter().zip(expected).all(|(&a, b)| a.abs_diff(b) <= 1);
+        assert!(near, "{blend:?} drew {texel:?}, not {expected:?}");
+    }
     Ok(())
 }
 

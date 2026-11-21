@@ -3,8 +3,9 @@ use std::time::Duration;
 
 use mln_gfx::gpu::{BufferUsage, ColorAttachment};
 use mln_layers::conformance::{
-    clip_mask_and_background, custom_layers, depth_only, foreign_ids, imported_textures, instanced_walls,
-    invalid_calls, pulled_walls, readbacks, resources_in_use, topologies, transparent_replace, vertex_layouts,
+    blend_equations, clip_mask_and_background, custom_layers, depth_only, foreign_ids, imported_textures,
+    instanced_walls, invalid_calls, pulled_walls, readbacks, resources_in_use, topologies, transparent_replace,
+    vertex_layouts,
 };
 use mln_util::Color;
 use objc2::runtime::NSObjectProtocol as _;
@@ -29,6 +30,12 @@ fn invalid_calls_through_gpu() {
 fn foreign_ids_through_gpu() {
     let device = Device::new(None).expect("Metal device");
     foreign_ids(&mut MetalGpu::new(&device), &mut MetalGpu::new(&device)).expect("the valid calls");
+}
+
+#[test]
+fn blend_equations_through_gpu() {
+    let device = Device::new(None).expect("Metal device");
+    blend_equations(&mut MetalGpu::new(&device)).expect("the frames");
 }
 
 #[test]
