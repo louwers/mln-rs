@@ -4,7 +4,6 @@
 // language.
 
 use mln_rs::mln_gfx::gfx_types::AttributeDataType::Float2;
-use mln_rs::mln_gfx::shaders::bindings::FIRST_UNIFORM_ID;
 use mln_rs::mln_gfx::shaders::program::{Attribute, Buffer, Program, Sources, Texture};
 use mln_rs::mln_gfx::shaders::source::{glsl, glsl_es, msl, wgsl};
 
@@ -19,8 +18,9 @@ mln_rs::mln_gfx::uniform_block! {
     }
 }
 
-/// The id of the quads' block.
-pub(crate) const ID_QUAD_UBO: usize = FIRST_UNIFORM_ID;
+/// The quads' block, which the draws share.
+const PROPS: Buffer = Buffer::uniform::<QuadUBO>("props", 0);
+pub(crate) const ID_QUAD_UBO: usize = PROPS.id;
 /// The ids of the quads' corner, which steps per vertex, and offset, which
 /// steps per instance.
 pub(crate) const ID_CORNER: usize = 0;
@@ -28,7 +28,7 @@ pub(crate) const ID_OFFSET: usize = 1;
 
 pub(crate) static QUAD: Program = Program {
     name: "quad",
-    buffers: &[Buffer::uniform::<QuadUBO>(ID_QUAD_UBO)],
+    buffers: &[PROPS],
     attributes: &[Attribute { id: ID_CORNER, format: Float2 }],
     instance_attributes: &[Attribute { id: ID_OFFSET, format: Float2 }],
     textures: &[Texture::new("u_image")],

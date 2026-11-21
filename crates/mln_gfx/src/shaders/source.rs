@@ -240,7 +240,7 @@ pub fn identifiers(source: &str) -> impl Iterator<Item = &str> {
 #[expect(unsafe_code, reason = "`uniform_block!` implements bytemuck's `Pod` for the block it declares")]
 mod tests {
     use crate::gfx_types::AttributeDataType::{Float4, Short2};
-    use crate::shaders::program::{Attribute, Buffer, Program, Property, Sources};
+    use crate::shaders::program::{Attribute, Buffer, Program, Property, Sources, Stages};
     use crate::shaders::source::wgsl::{self, Wgsl};
 
     crate::uniform_block! {
@@ -261,7 +261,7 @@ mod tests {
 
     static DOT: Program = Program {
         name: "dot",
-        buffers: &[Buffer::storage::<DotDrawableUBO>(2)],
+        buffers: &[Buffer::storage::<DotDrawableUBO>("drawableVector", Stages::Vertex)],
         attributes: &[Attribute { id: 0, format: Short2 }, Attribute { id: 3, format: Float4 }],
         instance_attributes: &[],
         textures: &[],

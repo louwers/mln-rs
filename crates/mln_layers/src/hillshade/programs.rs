@@ -3,8 +3,7 @@
 //! sources.
 
 use mln_gfx::gfx_types::AttributeDataType::Short2;
-use mln_gfx::shaders::bindings::{FIRST_UNIFORM_ID, FRAGMENT_STORAGE_ID, VERTEX_STORAGE_ID};
-use mln_gfx::shaders::program::{Attribute, Buffer, Program, Sources, Texture};
+use mln_gfx::shaders::program::{Attribute, Buffer, Program, Sources, Stages, Texture};
 
 use super::ubo::{
     HillshadeDrawableUBO, HillshadeEvaluatedPropsUBO, HillshadePrepareDrawableUBO, HillshadePrepareTilePropsUBO,
@@ -14,21 +13,28 @@ use super::{glsl, glsl_es, msl, wgsl};
 
 // The binding ids of the programs: their buffers, textures and vertex
 // attributes.
-pub(crate) const ID_HILLSHADE_DRAWABLE_UBO: usize = VERTEX_STORAGE_ID;
-pub(crate) const ID_HILLSHADE_TILE_PROPS_UBO: usize = FRAGMENT_STORAGE_ID;
-pub(crate) const ID_HILLSHADE_EVALUATED_PROPS_UBO: usize = FIRST_UNIFORM_ID;
-pub(crate) const ID_HILLSHADE_PREPARE_DRAWABLE_UBO: usize = VERTEX_STORAGE_ID;
-pub(crate) const ID_HILLSHADE_PREPARE_TILE_PROPS_UBO: usize = FIRST_UNIFORM_ID;
+pub(crate) const ID_HILLSHADE_DRAWABLE_UBO: usize = DRAWABLE.id;
+pub(crate) const ID_HILLSHADE_TILE_PROPS_UBO: usize = TILE_PROPS.id;
+pub(crate) const ID_HILLSHADE_EVALUATED_PROPS_UBO: usize = PROPS.id;
+pub(crate) const ID_HILLSHADE_PREPARE_DRAWABLE_UBO: usize = PREPARE_DRAWABLE.id;
+pub(crate) const ID_HILLSHADE_PREPARE_TILE_PROPS_UBO: usize = PREPARE_TILE_PROPS.id;
 pub(crate) const ID_HILLSHADE_IMAGE_TEXTURE: usize = 0;
 pub(crate) const ID_HILLSHADE_POS_VERTEX_ATTRIBUTE: usize = 0;
 pub(crate) const ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE: usize = 1;
 
+const DRAWABLE: Buffer = Buffer::storage::<HillshadeDrawableUBO>("drawableVector", Stages::Vertex);
+const TILE_PROPS: Buffer = Buffer::storage::<HillshadeTilePropsUBO>("tilePropsVector", Stages::Fragment);
+const PROPS: Buffer = Buffer::uniform::<HillshadeEvaluatedPropsUBO>("props", 0);
+/// A DEM tile's values, which its prepare draw binds alone.
+const PREPARE_DRAWABLE: Buffer = Buffer::draw_uniform::<HillshadePrepareDrawableUBO>("drawable", Stages::Vertex);
+const PREPARE_TILE_PROPS: Buffer = Buffer::draw_uniform::<HillshadePrepareTilePropsUBO>("tileProps", Stages::Both);
+
 pub static HILLSHADE: Program = Program {
     name: "hillshade",
     buffers: &[
-        Buffer::storage::<HillshadeDrawableUBO>(ID_HILLSHADE_DRAWABLE_UBO),
-        Buffer::storage::<HillshadeTilePropsUBO>(ID_HILLSHADE_TILE_PROPS_UBO),
-        Buffer::uniform::<HillshadeEvaluatedPropsUBO>(ID_HILLSHADE_EVALUATED_PROPS_UBO),
+        DRAWABLE,
+        TILE_PROPS,
+        PROPS,
     ],
     attributes: &[
         Attribute { id: ID_HILLSHADE_POS_VERTEX_ATTRIBUTE, format: Short2 },
@@ -47,8 +53,8 @@ pub static HILLSHADE: Program = Program {
 pub static HILLSHADE_PREPARE: Program = Program {
     name: "hillshade-prepare",
     buffers: &[
-        Buffer::uniform::<HillshadePrepareDrawableUBO>(ID_HILLSHADE_PREPARE_DRAWABLE_UBO),
-        Buffer::uniform::<HillshadePrepareTilePropsUBO>(ID_HILLSHADE_PREPARE_TILE_PROPS_UBO),
+        PREPARE_DRAWABLE,
+        PREPARE_TILE_PROPS,
     ],
     attributes: &[
         Attribute { id: ID_HILLSHADE_POS_VERTEX_ATTRIBUTE, format: Short2 },

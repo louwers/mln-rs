@@ -3,8 +3,8 @@
 //! collision boxes and circles, and their sources.
 
 use mln_gfx::gfx_types::AttributeDataType::{Float, Float2, Float3, Float4, Short2, Short4, UShort2, UShort4};
-use mln_gfx::shaders::bindings::{FIRST_UNIFORM_ID, FRAGMENT_STORAGE_ID, PROJECTION_BUFFER_ID, VERTEX_STORAGE_ID};
-use mln_gfx::shaders::program::{Attribute, Buffer, Program, Property, Sources, Texture};
+use mln_gfx::shaders::bindings::PROJECTION_BUFFER_ID;
+use mln_gfx::shaders::program::{Attribute, Buffer, Program, Property, Sources, Stages, Texture};
 
 use super::ubo::{
     CollisionDrawableUBO, CollisionTilePropsUBO, SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO,
@@ -13,11 +13,13 @@ use super::{glsl, glsl_es, msl, wgsl};
 
 // The binding ids of the programs: their buffers, textures and vertex
 // attributes.
-pub(crate) const ID_SYMBOL_DRAWABLE_UBO: usize = VERTEX_STORAGE_ID;
-pub(crate) const ID_SYMBOL_TILE_PROPS_UBO: usize = FRAGMENT_STORAGE_ID;
-pub(crate) const ID_SYMBOL_EVALUATED_PROPS_UBO: usize = FIRST_UNIFORM_ID;
-pub(crate) const ID_COLLISION_DRAWABLE_UBO: usize = VERTEX_STORAGE_ID;
-pub(crate) const ID_COLLISION_TILE_PROPS_UBO: usize = FIRST_UNIFORM_ID;
+pub(crate) const ID_SYMBOL_DRAWABLE_UBO: usize = DRAWABLE.id;
+pub(crate) const ID_SYMBOL_TILE_PROPS_UBO: usize = TILE_PROPS.id;
+pub(crate) const ID_SYMBOL_EVALUATED_PROPS_UBO: usize = PROPS.id;
+pub(crate) const ID_COLLISION_DRAWABLE_UBO: usize = COLLISION_DRAWABLE.id;
+pub(crate) const ID_COLLISION_TILE_PROPS_UBO: usize = COLLISION_TILE_PROPS.id;
+/// The projection block of a collision draw's own, which its shaders read
+/// as `drawProjection`.
 pub(crate) const ID_COLLISION_PROJECTION_UBO: usize = PROJECTION_BUFFER_ID;
 pub(crate) const ID_SYMBOL_IMAGE_TEXTURE: usize = 0;
 pub(crate) const ID_SYMBOL_IMAGE_ICON_TEXTURE: usize = 1;
@@ -45,12 +47,19 @@ pub(crate) const ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE: usize = 10;
 /// The symbol's `symbol-height-offset`.
 pub(crate) const ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE: usize = 11;
 
+const DRAWABLE: Buffer = Buffer::storage::<SymbolDrawableUBO>("drawableVector", Stages::Vertex);
+const TILE_PROPS: Buffer = Buffer::storage::<SymbolTilePropsUBO>("tilePropsVector", Stages::Fragment);
+const PROPS: Buffer = Buffer::uniform::<SymbolEvaluatedPropsUBO>("props", 0);
+/// A collision draw's values, which it binds alone.
+const COLLISION_DRAWABLE: Buffer = Buffer::draw_uniform::<CollisionDrawableUBO>("drawable", Stages::Vertex);
+const COLLISION_TILE_PROPS: Buffer = Buffer::draw_uniform::<CollisionTilePropsUBO>("tileProps", Stages::Both);
+
 pub static SYMBOL_ICON: Program = Program {
     name: "symbol-icon",
     buffers: &[
-        Buffer::storage::<SymbolDrawableUBO>(ID_SYMBOL_DRAWABLE_UBO),
-        Buffer::storage::<SymbolTilePropsUBO>(ID_SYMBOL_TILE_PROPS_UBO),
-        Buffer::uniform::<SymbolEvaluatedPropsUBO>(ID_SYMBOL_EVALUATED_PROPS_UBO),
+        DRAWABLE,
+        TILE_PROPS,
+        PROPS,
     ],
     attributes: &[
         Attribute { id: ID_SYMBOL_POS_OFFSET_ATTRIBUTE, format: Short4 },
@@ -75,9 +84,9 @@ pub static SYMBOL_ICON: Program = Program {
 pub static SYMBOL_SDF: Program = Program {
     name: "symbol-sdf",
     buffers: &[
-        Buffer::storage::<SymbolDrawableUBO>(ID_SYMBOL_DRAWABLE_UBO),
-        Buffer::storage::<SymbolTilePropsUBO>(ID_SYMBOL_TILE_PROPS_UBO),
-        Buffer::uniform::<SymbolEvaluatedPropsUBO>(ID_SYMBOL_EVALUATED_PROPS_UBO),
+        DRAWABLE,
+        TILE_PROPS,
+        PROPS,
     ],
     attributes: &[
         Attribute { id: ID_SYMBOL_POS_OFFSET_ATTRIBUTE, format: Short4 },
@@ -112,9 +121,9 @@ pub static SYMBOL_SDF: Program = Program {
 pub static SYMBOL_TEXT_AND_ICON: Program = Program {
     name: "symbol-text-and-icon",
     buffers: &[
-        Buffer::storage::<SymbolDrawableUBO>(ID_SYMBOL_DRAWABLE_UBO),
-        Buffer::storage::<SymbolTilePropsUBO>(ID_SYMBOL_TILE_PROPS_UBO),
-        Buffer::uniform::<SymbolEvaluatedPropsUBO>(ID_SYMBOL_EVALUATED_PROPS_UBO),
+        DRAWABLE,
+        TILE_PROPS,
+        PROPS,
     ],
     attributes: &[
         Attribute { id: ID_SYMBOL_POS_OFFSET_ATTRIBUTE, format: Short4 },
@@ -148,8 +157,8 @@ pub static SYMBOL_TEXT_AND_ICON: Program = Program {
 pub static COLLISION_BOX: Program = Program {
     name: "collision-box",
     buffers: &[
-        Buffer::uniform::<CollisionDrawableUBO>(ID_COLLISION_DRAWABLE_UBO),
-        Buffer::uniform::<CollisionTilePropsUBO>(ID_COLLISION_TILE_PROPS_UBO),
+        COLLISION_DRAWABLE,
+        COLLISION_TILE_PROPS,
     ],
     attributes: &[
         Attribute { id: ID_COLLISION_POS_VERTEX_ATTRIBUTE, format: Short2 },
@@ -172,8 +181,8 @@ pub static COLLISION_BOX: Program = Program {
 pub static COLLISION_CIRCLE: Program = Program {
     name: "collision-circle",
     buffers: &[
-        Buffer::uniform::<CollisionDrawableUBO>(ID_COLLISION_DRAWABLE_UBO),
-        Buffer::uniform::<CollisionTilePropsUBO>(ID_COLLISION_TILE_PROPS_UBO),
+        COLLISION_DRAWABLE,
+        COLLISION_TILE_PROPS,
     ],
     attributes: &[
         Attribute { id: ID_COLLISION_POS_VERTEX_ATTRIBUTE, format: Short2 },

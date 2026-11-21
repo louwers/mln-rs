@@ -3,16 +3,15 @@
 //! sources.
 
 use mln_gfx::gfx_types::AttributeDataType::{Float2, Float4, Short2};
-use mln_gfx::shaders::bindings::{FIRST_UNIFORM_ID, VERTEX_STORAGE_ID};
-use mln_gfx::shaders::program::{Attribute, Buffer, Program, Property, Sources};
+use mln_gfx::shaders::program::{Attribute, Buffer, Program, Property, Sources, Stages};
 
 use super::ubo::{CircleDrawableUBO, CircleEvaluatedPropsUBO};
 use super::{glsl, glsl_es, msl, wgsl};
 
 // The binding ids of the programs: their buffers, textures and vertex
 // attributes.
-pub(crate) const ID_CIRCLE_DRAWABLE_UBO: usize = VERTEX_STORAGE_ID;
-pub(crate) const ID_CIRCLE_EVALUATED_PROPS_UBO: usize = FIRST_UNIFORM_ID;
+pub(crate) const ID_CIRCLE_DRAWABLE_UBO: usize = DRAWABLE.id;
+pub(crate) const ID_CIRCLE_EVALUATED_PROPS_UBO: usize = PROPS.id;
 pub(crate) const ID_CIRCLE_POS_VERTEX_ATTRIBUTE: usize = 0;
 
 // Data-driven properties.
@@ -24,11 +23,14 @@ pub(crate) const ID_CIRCLE_STROKE_COLOR_VERTEX_ATTRIBUTE: usize = 5;
 pub(crate) const ID_CIRCLE_STROKE_WIDTH_VERTEX_ATTRIBUTE: usize = 6;
 pub(crate) const ID_CIRCLE_STROKE_OPACITY_VERTEX_ATTRIBUTE: usize = 7;
 
+const DRAWABLE: Buffer = Buffer::storage::<CircleDrawableUBO>("drawableVector", Stages::Vertex);
+const PROPS: Buffer = Buffer::uniform::<CircleEvaluatedPropsUBO>("props", 0);
+
 pub static CIRCLE: Program = Program {
     name: "circle",
     buffers: &[
-        Buffer::storage::<CircleDrawableUBO>(ID_CIRCLE_DRAWABLE_UBO),
-        Buffer::uniform::<CircleEvaluatedPropsUBO>(ID_CIRCLE_EVALUATED_PROPS_UBO),
+        DRAWABLE,
+        PROPS,
     ],
     attributes: &[
         Attribute { id: ID_CIRCLE_POS_VERTEX_ATTRIBUTE, format: Short2 },

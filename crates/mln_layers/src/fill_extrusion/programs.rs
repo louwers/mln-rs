@@ -2,23 +2,21 @@
 //! attributes, textures and paint properties of its shaders, and their
 //! sources.
 
-use mln_gfx::gfx_types::AttributeDataType::{Float2, Float4, Short2, UShort2, UShort4};
-use mln_gfx::shaders::bindings::{FIRST_UNIFORM_ID, FIRST_VERTEX_BUFFER_ID, VERTEX_STORAGE_ID};
-use mln_gfx::shaders::program::{Attribute, Buffer, Program, Property, Sources, Texture};
+use mln_gfx::gfx_types::AttributeDataType::{Float, Float2, Float4, Short2, Short4, UShort2, UShort4};
+use mln_gfx::shaders::program::{Attribute, Buffer, Program, Property, Sources, Stages, Texture};
 
 use super::ubo::{FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO};
 use super::{glsl, glsl_es, msl, wgsl};
 
 // The binding ids of the programs: their buffers, textures and vertex
 // attributes.
-pub(crate) const ID_FILL_EXTRUSION_DRAWABLE_UBO: usize = VERTEX_STORAGE_ID;
-pub(crate) const ID_FILL_EXTRUSION_TILE_PROPS_UBO: usize = FIRST_UNIFORM_ID;
-pub(crate) const ID_FILL_EXTRUSION_PROPS_UBO: usize = ID_FILL_EXTRUSION_TILE_PROPS_UBO + 1;
+pub(crate) const ID_FILL_EXTRUSION_DRAWABLE_UBO: usize = DRAWABLE.id;
+pub(crate) const ID_FILL_EXTRUSION_TILE_PROPS_UBO: usize = TILE_PROPS.id;
+pub(crate) const ID_FILL_EXTRUSION_PROPS_UBO: usize = PROPS.id;
 
-// The vertex buffers that `FillExtrusionPulledShader` reads as storage
-// buffers, whose ids follow the uniform buffers'.
-pub(crate) const ID_FILL_EXTRUSION_WALL_VERTICES: usize = FIRST_VERTEX_BUFFER_ID;
-pub(crate) const ID_FILL_EXTRUSION_WALL_PAINT: usize = FIRST_VERTEX_BUFFER_ID + 1;
+// The vertex buffers that the pulled walls read as storage buffers.
+pub(crate) const ID_FILL_EXTRUSION_WALL_VERTICES: usize = WALL_VERTICES.id;
+pub(crate) const ID_FILL_EXTRUSION_WALL_PAINT: usize = WALL_PAINT.id;
 pub(crate) const ID_FILL_EXTRUSION_IMAGE_TEXTURE: usize = 0;
 pub(crate) const ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE: usize = 0;
 pub(crate) const ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE: usize = 1;
@@ -36,12 +34,20 @@ pub(crate) const ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE: usize = 7;
 pub(crate) const ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE: usize = 8;
 pub(crate) const ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE: usize = 9;
 
+const DRAWABLE: Buffer = Buffer::storage::<FillExtrusionDrawableUBO>("drawableVector", Stages::Vertex);
+const TILE_PROPS: Buffer = Buffer::storage::<FillExtrusionTilePropsUBO>("tilePropsVector", Stages::Both);
+// Slot 0's id is the tile properties'.
+const PROPS: Buffer = Buffer::uniform::<FillExtrusionPropsUBO>("props", 1);
+/// The bucket's vertices: the position and `decimals_ed` of each.
+const WALL_VERTICES: Buffer = Buffer::vertices("wallVertices", 0, Short4);
+const WALL_PAINT: Buffer = Buffer::vertices("wallPaint", 1, Float);
+
 pub static FILL_EXTRUSION: Program = Program {
     name: "fill-extrusion",
     buffers: &[
-        Buffer::storage::<FillExtrusionDrawableUBO>(ID_FILL_EXTRUSION_DRAWABLE_UBO),
-        Buffer::storage::<FillExtrusionTilePropsUBO>(ID_FILL_EXTRUSION_TILE_PROPS_UBO),
-        Buffer::uniform::<FillExtrusionPropsUBO>(ID_FILL_EXTRUSION_PROPS_UBO),
+        DRAWABLE,
+        TILE_PROPS,
+        PROPS,
     ],
     attributes: &[
         Attribute { id: ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, format: Short2 },
@@ -67,9 +73,9 @@ pub static FILL_EXTRUSION: Program = Program {
 pub static FILL_EXTRUSION_INSTANCED: Program = Program {
     name: "fill-extrusion-instanced",
     buffers: &[
-        Buffer::storage::<FillExtrusionDrawableUBO>(ID_FILL_EXTRUSION_DRAWABLE_UBO),
-        Buffer::storage::<FillExtrusionTilePropsUBO>(ID_FILL_EXTRUSION_TILE_PROPS_UBO),
-        Buffer::uniform::<FillExtrusionPropsUBO>(ID_FILL_EXTRUSION_PROPS_UBO),
+        DRAWABLE,
+        TILE_PROPS,
+        PROPS,
     ],
     attributes: &[Attribute { id: ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, format: Short2 }],
     instance_attributes: &[
@@ -99,9 +105,9 @@ pub static FILL_EXTRUSION_INSTANCED: Program = Program {
 pub static FILL_EXTRUSION_WALL: Program = Program {
     name: "fill-extrusion-wall",
     buffers: &[
-        Buffer::storage::<FillExtrusionDrawableUBO>(ID_FILL_EXTRUSION_DRAWABLE_UBO),
-        Buffer::storage::<FillExtrusionTilePropsUBO>(ID_FILL_EXTRUSION_TILE_PROPS_UBO),
-        Buffer::uniform::<FillExtrusionPropsUBO>(ID_FILL_EXTRUSION_PROPS_UBO),
+        DRAWABLE,
+        TILE_PROPS,
+        PROPS,
     ],
     attributes: &[
         Attribute { id: ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, format: Short2 },
@@ -132,11 +138,11 @@ pub static FILL_EXTRUSION_WALL: Program = Program {
 pub static FILL_EXTRUSION_PULLED: Program = Program {
     name: "fill-extrusion-pulled",
     buffers: &[
-        Buffer::storage::<FillExtrusionDrawableUBO>(ID_FILL_EXTRUSION_DRAWABLE_UBO),
-        Buffer::storage::<FillExtrusionTilePropsUBO>(ID_FILL_EXTRUSION_TILE_PROPS_UBO),
-        Buffer::uniform::<FillExtrusionPropsUBO>(ID_FILL_EXTRUSION_PROPS_UBO),
-        Buffer::vertices::<[i16; 4]>(ID_FILL_EXTRUSION_WALL_VERTICES),
-        Buffer::vertices::<f32>(ID_FILL_EXTRUSION_WALL_PAINT),
+        DRAWABLE,
+        TILE_PROPS,
+        PROPS,
+        WALL_VERTICES,
+        WALL_PAINT,
     ],
     attributes: &[],
     instance_attributes: &[],
@@ -155,9 +161,9 @@ pub static FILL_EXTRUSION_PULLED: Program = Program {
 pub static FILL_EXTRUSION_PATTERN: Program = Program {
     name: "fill-extrusion-pattern",
     buffers: &[
-        Buffer::storage::<FillExtrusionDrawableUBO>(ID_FILL_EXTRUSION_DRAWABLE_UBO),
-        Buffer::storage::<FillExtrusionTilePropsUBO>(ID_FILL_EXTRUSION_TILE_PROPS_UBO),
-        Buffer::uniform::<FillExtrusionPropsUBO>(ID_FILL_EXTRUSION_PROPS_UBO),
+        DRAWABLE,
+        TILE_PROPS,
+        PROPS,
     ],
     attributes: &[
         Attribute { id: ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, format: Short2 },
@@ -185,9 +191,9 @@ pub static FILL_EXTRUSION_PATTERN: Program = Program {
 pub static FILL_EXTRUSION_PATTERN_INSTANCED: Program = Program {
     name: "fill-extrusion-pattern-instanced",
     buffers: &[
-        Buffer::storage::<FillExtrusionDrawableUBO>(ID_FILL_EXTRUSION_DRAWABLE_UBO),
-        Buffer::storage::<FillExtrusionTilePropsUBO>(ID_FILL_EXTRUSION_TILE_PROPS_UBO),
-        Buffer::uniform::<FillExtrusionPropsUBO>(ID_FILL_EXTRUSION_PROPS_UBO),
+        DRAWABLE,
+        TILE_PROPS,
+        PROPS,
     ],
     attributes: &[Attribute { id: ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, format: Short2 }],
     instance_attributes: &[
@@ -218,9 +224,9 @@ pub static FILL_EXTRUSION_PATTERN_INSTANCED: Program = Program {
 pub static FILL_EXTRUSION_PATTERN_WALL: Program = Program {
     name: "fill-extrusion-pattern-wall",
     buffers: &[
-        Buffer::storage::<FillExtrusionDrawableUBO>(ID_FILL_EXTRUSION_DRAWABLE_UBO),
-        Buffer::storage::<FillExtrusionTilePropsUBO>(ID_FILL_EXTRUSION_TILE_PROPS_UBO),
-        Buffer::uniform::<FillExtrusionPropsUBO>(ID_FILL_EXTRUSION_PROPS_UBO),
+        DRAWABLE,
+        TILE_PROPS,
+        PROPS,
     ],
     attributes: &[
         Attribute { id: ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, format: Short2 },

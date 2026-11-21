@@ -8,8 +8,8 @@ use crate::gfx_types::AttributeDataType;
 use crate::gpu::{GpuError, ShaderKey, VertexStep};
 use crate::projection_variant::ProjectionVariant;
 use crate::shaders::bindings::{
-    FIRST_PROGRAM_BUFFER_ID, FIRST_UNIFORM_ID, FIRST_VERTEX_BUFFER_ID, MAX_ATTRIBUTES, MAX_TEXTURES,
-    MAX_VERTEX_BUFFERS, PROJECTION_BUFFER_ID, VIEW_BUFFER_ID,
+    FIRST_UNIFORM_ID, FIRST_VERTEX_BUFFER_ID, FRAGMENT_STORAGE_ID, MAX_ATTRIBUTES, MAX_TEXTURES, MAX_VERTEX_BUFFERS,
+    PROJECTION_BUFFER_ID, VERTEX_STORAGE_ID, VIEW_BUFFER_ID,
 };
 use crate::shaders::block::{Block, UniformBlock};
 use crate::shaders::layer_ubo::{ProjectionUBO, ViewUBO};
@@ -23,21 +23,15 @@ use crate::shaders::source::{glsl, glsl_es, msl, wgsl};
 /// source in the backend's shading language and binds what a draw gives it
 /// where this declaration says:
 ///
-/// - A buffer at the binding of its id. The engine reserves the view's
-///   block at 0 ([`VIEW_BUFFER`]), the draw's index into the storage
-///   buffers it reads at 1, which the backend binds itself, and the
-///   projection block at 4 ([`PROJECTION_BUFFER`]); any program may read
-///   them, and lists none of them in [`buffers`](Program::buffers): the
-///   backends declare them for the stages that read them. A program's own
-///   buffers take the other ids: at 2 a storage buffer that
-///   only its vertex stage reads, at 3 one that only its fragment stage
-///   reads, either a uniform block instead where a draw binds one of its
-///   own; at 5 and 6 its uniform blocks, or at 5 a storage buffer that both
-///   stages read; and at 7, 8 and 9 the vertex buffers its vertex stage reads
-///   as storage buffers, where the backend binds them
-///   ([`Caps::binds_vertex_buffers`](crate::gpu::Caps::binds_vertex_buffers)).
-///   The Vulkan and D3D12 backends share one pipeline layout that these
-///   ranges lay out.
+/// - A buffer at the binding of its id, which a stage that names it
+///   declares, as the backend writes it from the [`Buffer`]: a source
+///   declares no buffer itself. The engine reserves the view's block at 0
+///   ([`VIEW_BUFFER`]), the draw's index into the storage buffers it reads
+///   at 1, which the backend binds itself, and the projection block at 4
+///   ([`PROJECTION_BUFFER`]); any program may read them, and lists none of
+///   them in [`buffers`](Program::buffers). A program's own buffers take
+///   the ids that [`Buffer`] says, which the Vulkan and D3D12 backends' one
+///   pipeline layout gives places to.
 /// - A vertex attribute at the shader location of its index in
 ///   [`attributes`](Program::attributes), and an instance attribute at the
 ///   location after the vertex attributes' of its index in
@@ -76,19 +70,41 @@ pub struct Program {
     pub sources: Sources,
 }
 
-/// A uniform or storage buffer a program reads.
+/// A buffer a program reads, by its name in the program's shaders.
+///
+/// A program's buffers take the ids that the constructors give them:
+///
+/// - a layer's uniform blocks, which all its draws share, the ids of their
+///   slots ([`uniform`](Buffer::uniform));
+/// - the values of each draw, in a storage buffer of an element per draw
+///   ([`storage`](Buffer::storage)) or in a uniform block that each draw binds
+///   one of its own for ([`draw_uniform`](Buffer::draw_uniform)), the id of
+///   the [`Stages`] that read them;
+/// - the vertex buffers that the vertex stage reads as storage buffers, the
+///   ids of their slots ([`vertices`](Buffer::vertices)).
+///
+/// [`Program::check`] fails for a program with two buffers at one id, as a
+/// uniform block at slot 0 and the values of each draw that both stages
+/// read.
 #[derive(Clone, Copy, Debug)]
 pub struct Buffer {
-    /// The id a draw binds it by, which is also its binding.
+    /// The id a draw binds it by.
     pub id: usize,
+    /// The name its shaders read it by: the variable of a block, or of an
+    /// array of its elements or of the vertices. GLSL ES has no variable: a
+    /// stage reads a block's members by their own names.
+    pub name: &'static str,
     pub kind: BufferKind,
 }
 
 /// How a program reads a [`Buffer`].
 #[derive(Clone, Copy, Debug)]
 pub enum BufferKind {
-    /// One block.
+    /// One block, which all the draws of a layer share.
     Uniform(&'static Block),
+    /// One block of a draw's own values, which each draw binds a buffer of
+    /// its own for.
+    DrawUniform(&'static Block),
     /// An array of elements `stride` bytes apart, each read as `block`
     /// padded to the stride, which a shader indexes: by its draw's
     /// [`global_index`](crate::gpu::Draw::global_index), as for an element
@@ -98,39 +114,79 @@ pub enum BufferKind {
     /// [`Caps::indexes_storage_buffers`](crate::gpu::Caps::indexes_storage_buffers)
     /// is false.
     Storage { block: &'static Block, stride: usize },
-    /// A vertex buffer that the vertex stage reads as a storage buffer, of
-    /// vertices `stride` bytes apart, where the backend binds them
-    /// ([`Caps::binds_vertex_buffers`](crate::gpu::Caps::binds_vertex_buffers)).
-    Vertices { stride: usize },
+    /// A vertex buffer of vertices of `format` that the vertex stage reads
+    /// as a storage buffer, where the backend binds them
+    /// ([`Caps::binds_vertex_buffers`](crate::gpu::Caps::binds_vertex_buffers)):
+    /// in MSL as an array of the vertices, in WGSL and GLSL as one of 32-bit
+    /// words, floats for a format of floats, and otherwise integers that
+    /// hold two 16-bit or four 8-bit values each.
+    Vertices { format: AttributeDataType },
+}
+
+/// The stages of a program that read a buffer of each draw's values, which
+/// give the buffer its id.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Stages {
+    /// Only the vertex stage.
+    Vertex,
+    /// Only the fragment stage.
+    Fragment,
+    /// Both stages.
+    Both,
+}
+
+impl Stages {
+    /// The id of a buffer of each draw's values that these stages read.
+    #[must_use]
+    pub const fn id(self) -> usize {
+        match self {
+            Stages::Vertex => VERTEX_STORAGE_ID,
+            Stages::Fragment => FRAGMENT_STORAGE_ID,
+            Stages::Both => FIRST_UNIFORM_ID,
+        }
+    }
 }
 
 impl Buffer {
-    /// The uniform buffer `id` of a `T`.
+    /// The uniform block `name` of a `T`, which all the draws of a layer
+    /// share, at uniform block slot `slot`, 0 or 1.
     #[must_use]
-    pub const fn uniform<T: UniformBlock>(id: usize) -> Buffer {
-        Buffer { id, kind: BufferKind::Uniform(T::BLOCK) }
+    pub const fn uniform<T: UniformBlock>(name: &'static str, slot: usize) -> Buffer {
+        assert!(slot < UNIFORM_SLOTS, "a program has two uniform block slots");
+        Buffer { id: FIRST_UNIFORM_ID + slot, name, kind: BufferKind::Uniform(T::BLOCK) }
     }
 
-    /// The storage buffer `id` of `T`s.
+    /// The uniform block `name` of a `T` of a draw's own values, which each
+    /// draw binds a buffer of its own for, and which `stages` read.
     #[must_use]
-    pub const fn storage<T: UniformBlock>(id: usize) -> Buffer {
-        Buffer::storage_of::<T, T>(id)
+    pub const fn draw_uniform<T: UniformBlock>(name: &'static str, stages: Stages) -> Buffer {
+        Buffer { id: stages.id(), name, kind: BufferKind::DrawUniform(T::BLOCK) }
     }
 
-    /// The storage buffer `id` of `Element`s, each of which the shader reads
-    /// as a `T`, as of a union of the blocks of a layer's programs.
+    /// The storage buffer `name` of a `T` per draw, which `stages` read.
     #[must_use]
-    pub const fn storage_of<T: UniformBlock, Element>(id: usize) -> Buffer {
+    pub const fn storage<T: UniformBlock>(name: &'static str, stages: Stages) -> Buffer {
+        Buffer::storage_of::<T, T>(name, stages)
+    }
+
+    /// The storage buffer `name` of an `Element` per draw, each of which
+    /// the shader reads as a `T`, as of a union of the blocks of a layer's
+    /// programs, and which `stages` read.
+    #[must_use]
+    pub const fn storage_of<T: UniformBlock, Element>(name: &'static str, stages: Stages) -> Buffer {
         assert!(size_of::<T>() <= size_of::<Element>(), "an element holds the block");
         assert!(size_of::<Element>().is_multiple_of(16), "an element's size is a multiple of 16");
-        Buffer { id, kind: BufferKind::Storage { block: T::BLOCK, stride: size_of::<Element>() } }
+        let kind = BufferKind::Storage { block: T::BLOCK, stride: size_of::<Element>() };
+        Buffer { id: stages.id(), name, kind }
     }
 
-    /// The vertex buffer `id` of `V`s, which the vertex stage reads as a
-    /// storage buffer.
+    /// The vertex buffer `name` of vertices of `format`, which the vertex
+    /// stage reads as a storage buffer, at vertex buffer slot `slot`, 0, 1
+    /// or 2.
     #[must_use]
-    pub const fn vertices<V>(id: usize) -> Buffer {
-        Buffer { id, kind: BufferKind::Vertices { stride: size_of::<V>() } }
+    pub const fn vertices(name: &'static str, slot: usize, format: AttributeDataType) -> Buffer {
+        assert!(slot < MAX_VERTEX_BUFFERS, "a program has three vertex buffer slots");
+        Buffer { id: FIRST_VERTEX_BUFFER_ID + slot, name, kind: BufferKind::Vertices { format } }
     }
 
     /// The block the shader reads of it, or of each of its elements; `None`
@@ -138,7 +194,9 @@ impl Buffer {
     #[must_use]
     pub const fn block(&self) -> Option<&'static Block> {
         match self.kind {
-            BufferKind::Uniform(block) | BufferKind::Storage { block, .. } => Some(block),
+            BufferKind::Uniform(block) | BufferKind::DrawUniform(block) | BufferKind::Storage { block, .. } => {
+                Some(block)
+            }
             BufferKind::Vertices { .. } => None,
         }
     }
@@ -148,21 +206,37 @@ impl Buffer {
     #[must_use]
     pub const fn size(&self) -> usize {
         match self.kind {
-            BufferKind::Uniform(block) => block.size,
-            BufferKind::Storage { stride, .. } | BufferKind::Vertices { stride } => stride,
+            BufferKind::Uniform(block) | BufferKind::DrawUniform(block) => block.size,
+            BufferKind::Storage { stride, .. } => stride,
+            BufferKind::Vertices { format } => format.stride(),
         }
     }
 }
 
+/// How many uniform blocks that all of a layer's draws share a program can
+/// read.
+const UNIFORM_SLOTS: usize = FIRST_VERTEX_BUFFER_ID - FIRST_UNIFORM_ID;
+
 /// The view's block, which the engine binds for every draw.
-pub const VIEW_BUFFER: Buffer = Buffer::uniform::<ViewUBO>(VIEW_BUFFER_ID);
+pub const VIEW_BUFFER: Buffer =
+    Buffer { id: VIEW_BUFFER_ID, name: "view", kind: BufferKind::Uniform(ViewUBO::BLOCK) };
 
-/// The projection block, which a layer binds for the draws of a program
-/// whose vertex stage projects with it.
-pub const PROJECTION_BUFFER: Buffer = Buffer::storage::<ProjectionUBO>(PROJECTION_BUFFER_ID);
+/// The projection block of each draw, a storage buffer that a layer binds
+/// for the draws of a program whose vertex stage projects with it.
+pub const PROJECTION_BUFFER: Buffer = Buffer {
+    id: PROJECTION_BUFFER_ID,
+    name: "projectionVector",
+    kind: BufferKind::Storage { block: ProjectionUBO::BLOCK, stride: size_of::<ProjectionUBO>() },
+};
 
-/// The engine's buffers that a program may read without listing them: the
-/// view's block and the projection block.
+/// The projection block of a draw's own, at the projection block's id, for
+/// a program whose draws each bind a buffer of their own for it.
+pub const DRAW_PROJECTION_BUFFER: Buffer =
+    Buffer { id: PROJECTION_BUFFER_ID, name: "drawProjection", kind: BufferKind::DrawUniform(ProjectionUBO::BLOCK) };
+
+/// The engine's blocks, which a program may read without listing them: the
+/// view's block and the projection block, of which a stage reads
+/// [`PROJECTION_BUFFER`] or [`DRAW_PROJECTION_BUFFER`].
 pub static ENGINE_BUFFERS: [Buffer; 2] = [VIEW_BUFFER, PROJECTION_BUFFER];
 
 /// A vertex or instance attribute of a program.
@@ -366,9 +440,9 @@ impl Program {
 
     /// Checks the rules this declaration's doc states, which a backend checks
     /// before it compiles the program: distinct attribute ids within each
-    /// step, distinct buffer ids in the ranges of their kinds and none of the
-    /// engine's, and no more attributes and textures than a program can
-    /// have. Also that the GLSL ES names of the members of the view's block,
+    /// step, buffers at ids of their kinds, as [`Buffer`]'s constructors
+    /// give them, each id and each name once, and no more attributes and
+    /// textures than a program can have. Also that the GLSL ES names of the members of the view's block,
     /// the projection block and the program's blocks are distinct, since
     /// GLSL ES has them in one scope.
     ///
@@ -391,20 +465,28 @@ impl Program {
         if self.textures.len() > MAX_TEXTURES {
             return invalid(format!("{} textures, more than {MAX_TEXTURES}", self.textures.len()));
         }
+        let per_draw = [Stages::Vertex.id(), Stages::Fragment.id(), Stages::Both.id()];
         for (index, buffer) in self.buffers.iter().enumerate() {
-            let ids = match buffer.kind {
-                BufferKind::Uniform(_) => FIRST_PROGRAM_BUFFER_ID..FIRST_VERTEX_BUFFER_ID,
-                BufferKind::Storage { .. } => FIRST_PROGRAM_BUFFER_ID..FIRST_UNIFORM_ID + 1,
-                BufferKind::Vertices { .. } => FIRST_VERTEX_BUFFER_ID..FIRST_VERTEX_BUFFER_ID + MAX_VERTEX_BUFFERS,
+            let fits = match buffer.kind {
+                BufferKind::Uniform(_) => (FIRST_UNIFORM_ID..FIRST_VERTEX_BUFFER_ID).contains(&buffer.id),
+                BufferKind::DrawUniform(_) | BufferKind::Storage { .. } => per_draw.contains(&buffer.id),
+                BufferKind::Vertices { .. } => {
+                    (FIRST_VERTEX_BUFFER_ID..FIRST_VERTEX_BUFFER_ID + MAX_VERTEX_BUFFERS).contains(&buffer.id)
+                }
             };
-            if !ids.contains(&buffer.id) || buffer.id == PROJECTION_BUFFER_ID {
-                return invalid(format!(
-                    "buffer id {}, outside the ids of its kind ({ids:?}, but {PROJECTION_BUFFER_ID})",
-                    buffer.id
-                ));
+            if !fits {
+                return invalid(format!("buffer {} has the id {}, which its kind can't have", buffer.name, buffer.id));
             }
-            if self.buffers[..index].iter().any(|earlier| earlier.id == buffer.id) {
-                return invalid(format!("two buffers have the id {}", buffer.id));
+            if let BufferKind::Vertices { format: format @ (AttributeDataType::UShort8 | AttributeDataType::Invalid) } =
+                buffer.kind
+            {
+                return invalid(format!("buffer {} has vertices of {format:?}, which no language reads", buffer.name));
+            }
+            if let Some(earlier) = self.buffers[..index].iter().find(|earlier| earlier.id == buffer.id) {
+                return invalid(format!("buffers {} and {} have the id {}", earlier.name, buffer.name, buffer.id));
+            }
+            if self.buffers[..index].iter().any(|earlier| earlier.name == buffer.name) {
+                return invalid(format!("two buffers are named {}", buffer.name));
             }
         }
         let blocks = || ENGINE_BUFFERS.iter().chain(self.buffers).filter_map(Buffer::block);
@@ -470,12 +552,15 @@ mod tests {
         assert!(EMPTY.check().is_ok());
         let fails = |program: Program| assert!(program.check().is_err(), "{:?}", program.buffers);
         fails(Program { attributes: &[POSITION, POSITION], ..EMPTY });
-        fails(Program { buffers: const { &[Buffer::uniform::<ViewUBO>(5), Buffer::uniform::<ViewUBO>(5)] }, ..EMPTY });
-        fails(Program { buffers: const { &[Buffer::storage::<ViewUBO>(PROJECTION_BUFFER_ID)] }, ..EMPTY });
-        fails(Program { buffers: const { &[Buffer::storage::<ViewUBO>(6)] }, ..EMPTY });
-        fails(Program { buffers: const { &[Buffer::vertices::<[f32; 4]>(2)] }, ..EMPTY });
+        let props = Buffer::uniform::<ViewUBO>("props", 0);
+        fails(Program { buffers: const { &[Buffer::uniform::<ViewUBO>("props", 0), Buffer::uniform::<ViewUBO>("other", 0)] }, ..EMPTY });
+        fails(Program { buffers: const { &[Buffer::uniform::<ViewUBO>("props", 0), Buffer::storage::<ViewUBO>("drawable", Stages::Both)] }, ..EMPTY });
+        fails(Program { buffers: const { &[Buffer { id: PROJECTION_BUFFER_ID, ..Buffer::storage::<ViewUBO>("drawable", Stages::Vertex) }] }, ..EMPTY });
+        fails(Program { buffers: const { &[Buffer { id: 2, ..Buffer::vertices("vertices", 0, Short2) }] }, ..EMPTY });
+        fails(Program { buffers: const { &[Buffer::vertices("vertices", 0, Short2), Buffer::vertices("vertices", 1, Short2)] }, ..EMPTY });
         // The view's members again, in one GLSL ES scope with the view's.
-        fails(Program { buffers: const { &[Buffer::uniform::<ViewUBO>(5)] }, ..EMPTY });
+        assert_eq!(props.id, 5);
+        fails(Program { buffers: const { &[Buffer::uniform::<ViewUBO>("props", 0)] }, ..EMPTY });
     }
 
     #[test]

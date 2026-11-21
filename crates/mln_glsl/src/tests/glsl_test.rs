@@ -300,7 +300,9 @@ fn buffers_are_the_programs() {
                         continue;
                     };
                     let expected = match (buffer.kind, resource) {
-                        (BufferKind::Uniform(block), Resource::Uniform(_)) => Some(block.size),
+                        (BufferKind::Uniform(block) | BufferKind::DrawUniform(block), Resource::Uniform(_)) => {
+                            Some(block.size)
+                        }
                         (BufferKind::Vertices { .. }, Resource::Storage(_)) => None,
                         (BufferKind::Storage { stride, .. }, Resource::Storage(_)) => Some(stride),
                         (BufferKind::Storage { block, .. }, Resource::Uniform(_))

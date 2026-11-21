@@ -1,7 +1,6 @@
 //! The engine's programs and the binding ids they read.
 
 use mln_gfx::gfx_types::AttributeDataType::Short2;
-use mln_gfx::shaders::bindings::FIRST_UNIFORM_ID;
 use mln_gfx::shaders::program::{Attribute, Buffer, Program, Sources, Texture};
 
 use super::ubo::{AtmospherePropsUBO, LayerCompositeUBO, SkyPropsUBO, TileDebugPropsUBO};
@@ -11,7 +10,7 @@ pub(crate) const ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE: usize = 0;
 
 pub(crate) const ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE: usize = 0;
 
-pub(crate) const ID_TILE_DEBUG_PROPS_UBO: usize = FIRST_UNIFORM_ID;
+pub(crate) const ID_TILE_DEBUG_PROPS_UBO: usize = TILE_DEBUG_PROPS.id;
 /// The corner of the quad that draws a segment: x is 0 at the segment's
 /// start and 1 at its end, y picks its side.
 pub(crate) const ID_TILE_DEBUG_CORNER_VERTEX_ATTRIBUTE: usize = 0;
@@ -19,15 +18,20 @@ pub(crate) const ID_TILE_DEBUG_CORNER_VERTEX_ATTRIBUTE: usize = 0;
 pub(crate) const ID_TILE_DEBUG_START_ATTRIBUTE: usize = 1;
 pub(crate) const ID_TILE_DEBUG_END_ATTRIBUTE: usize = 2;
 
-pub(crate) const ID_LAYER_COMPOSITE_UBO: usize = FIRST_UNIFORM_ID;
+pub(crate) const ID_LAYER_COMPOSITE_UBO: usize = LAYER_COMPOSITE_PROPS.id;
 pub(crate) const ID_LAYER_COMPOSITE_IMAGE_TEXTURE: usize = 0;
 pub(crate) const ID_LAYER_COMPOSITE_BACKDROP_TEXTURE: usize = 1;
 pub(crate) const ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE: usize = 0;
 
-pub(crate) const ID_SKY_PROPS_UBO: usize = FIRST_UNIFORM_ID;
-pub(crate) const ID_ATMOSPHERE_PROPS_UBO: usize = FIRST_UNIFORM_ID;
+pub(crate) const ID_SKY_PROPS_UBO: usize = SKY_PROPS.id;
+pub(crate) const ID_ATMOSPHERE_PROPS_UBO: usize = ATMOSPHERE_PROPS.id;
 pub(crate) const ID_SKY_POS_VERTEX_ATTRIBUTE: usize = 0;
 pub(crate) const ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE: usize = 0;
+
+const TILE_DEBUG_PROPS: Buffer = Buffer::uniform::<TileDebugPropsUBO>("props", 0);
+const LAYER_COMPOSITE_PROPS: Buffer = Buffer::uniform::<LayerCompositeUBO>("props", 0);
+const SKY_PROPS: Buffer = Buffer::uniform::<SkyPropsUBO>("sky", 0);
+const ATMOSPHERE_PROPS: Buffer = Buffer::uniform::<AtmospherePropsUBO>("atmosphere", 0);
 
 /// The tile's clipping mask, drawn into the stencil buffer.
 pub(crate) static CLIPPING_MASK: Program = Program {
@@ -62,7 +66,7 @@ pub(crate) static GLOBE_DEPTH: Program = Program {
 /// The style's sky, on a quad over the whole view.
 pub(crate) static SKY: Program = Program {
     name: "sky",
-    buffers: &[Buffer::uniform::<SkyPropsUBO>(ID_SKY_PROPS_UBO)],
+    buffers: &[SKY_PROPS],
     attributes: &[Attribute { id: ID_SKY_POS_VERTEX_ATTRIBUTE, format: Short2 }],
     instance_attributes: &[],
     textures: &[],
@@ -77,7 +81,7 @@ pub(crate) static SKY: Program = Program {
 /// The globe's atmosphere, on a quad over the whole view.
 pub(crate) static ATMOSPHERE: Program = Program {
     name: "atmosphere",
-    buffers: &[Buffer::uniform::<AtmospherePropsUBO>(ID_ATMOSPHERE_PROPS_UBO)],
+    buffers: &[ATMOSPHERE_PROPS],
     attributes: &[Attribute { id: ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE, format: Short2 }],
     instance_attributes: &[],
     textures: &[],
@@ -92,7 +96,7 @@ pub(crate) static ATMOSPHERE: Program = Program {
 /// A layer drawn into a texture, composited onto the frame.
 pub(crate) static LAYER_COMPOSITE: Program = Program {
     name: "layer-composite",
-    buffers: &[Buffer::uniform::<LayerCompositeUBO>(ID_LAYER_COMPOSITE_UBO)],
+    buffers: &[LAYER_COMPOSITE_PROPS],
     attributes: &[Attribute { id: ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE, format: Short2 }],
     instance_attributes: &[],
     textures: &[Texture::new("u_image"), Texture::new("u_backdrop")],
@@ -111,7 +115,7 @@ pub(crate) static LAYER_COMPOSITE: Program = Program {
 /// segment's latitude), with an antialiased edge one device pixel wide.
 pub(crate) static TILE_DEBUG: Program = Program {
     name: "tile-debug",
-    buffers: &[Buffer::uniform::<TileDebugPropsUBO>(ID_TILE_DEBUG_PROPS_UBO)],
+    buffers: &[TILE_DEBUG_PROPS],
     attributes: &[Attribute { id: ID_TILE_DEBUG_CORNER_VERTEX_ATTRIBUTE, format: Short2 }],
     instance_attributes: &[
         Attribute { id: ID_TILE_DEBUG_START_ATTRIBUTE, format: Short2 },

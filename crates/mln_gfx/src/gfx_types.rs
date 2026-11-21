@@ -51,7 +51,7 @@ pub enum AttributeDataType {
 impl AttributeDataType {
     /// The bytes a value of the type takes in a vertex buffer.
     #[must_use]
-    pub fn stride(self) -> usize {
+    pub const fn stride(self) -> usize {
         use AttributeDataType::{
             Byte, Byte2, Byte3, Byte4, Float, Float2, Float3, Float4, Int, Int2, Int3, Int4, Invalid, Short, Short2,
             Short3, Short4, UByte, UByte2, UByte3, UByte4, UByte4Normalized, UInt, UInt2, UInt3, UInt4, UShort,

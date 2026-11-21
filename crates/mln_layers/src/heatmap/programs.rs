@@ -3,17 +3,16 @@
 //! sources.
 
 use mln_gfx::gfx_types::AttributeDataType::{Float2, Short2};
-use mln_gfx::shaders::bindings::{FIRST_UNIFORM_ID, VERTEX_STORAGE_ID};
-use mln_gfx::shaders::program::{Attribute, Buffer, Program, Property, Sources, Texture};
+use mln_gfx::shaders::program::{Attribute, Buffer, Program, Property, Sources, Stages, Texture};
 
 use super::ubo::{HeatmapDrawableUBO, HeatmapEvaluatedPropsUBO, HeatmapTexturePropsUBO};
 use super::{glsl, glsl_es, msl, wgsl};
 
 // The binding ids of the programs: their buffers, textures and vertex
 // attributes.
-pub(crate) const ID_HEATMAP_DRAWABLE_UBO: usize = VERTEX_STORAGE_ID;
-pub(crate) const ID_HEATMAP_EVALUATED_PROPS_UBO: usize = FIRST_UNIFORM_ID;
-pub(crate) const ID_HEATMAP_TEXTURE_PROPS_UBO: usize = FIRST_UNIFORM_ID;
+pub(crate) const ID_HEATMAP_DRAWABLE_UBO: usize = DRAWABLE.id;
+pub(crate) const ID_HEATMAP_EVALUATED_PROPS_UBO: usize = PROPS.id;
+pub(crate) const ID_HEATMAP_TEXTURE_PROPS_UBO: usize = TEXTURE_PROPS.id;
 pub(crate) const ID_HEATMAP_IMAGE_TEXTURE: usize = 0;
 pub(crate) const ID_HEATMAP_COLOR_RAMP_TEXTURE: usize = 1;
 pub(crate) const ID_HEATMAP_POS_VERTEX_ATTRIBUTE: usize = 0;
@@ -22,11 +21,15 @@ pub(crate) const ID_HEATMAP_POS_VERTEX_ATTRIBUTE: usize = 0;
 pub(crate) const ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE: usize = 1;
 pub(crate) const ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE: usize = 2;
 
+const DRAWABLE: Buffer = Buffer::storage::<HeatmapDrawableUBO>("drawableVector", Stages::Vertex);
+const PROPS: Buffer = Buffer::uniform::<HeatmapEvaluatedPropsUBO>("props", 0);
+const TEXTURE_PROPS: Buffer = Buffer::uniform::<HeatmapTexturePropsUBO>("props", 0);
+
 pub static HEATMAP: Program = Program {
     name: "heatmap",
     buffers: &[
-        Buffer::storage::<HeatmapDrawableUBO>(ID_HEATMAP_DRAWABLE_UBO),
-        Buffer::uniform::<HeatmapEvaluatedPropsUBO>(ID_HEATMAP_EVALUATED_PROPS_UBO),
+        DRAWABLE,
+        PROPS,
     ],
     attributes: &[
         Attribute { id: ID_HEATMAP_POS_VERTEX_ATTRIBUTE, format: Short2 },
@@ -48,7 +51,7 @@ pub static HEATMAP: Program = Program {
 
 pub static HEATMAP_TEXTURE: Program = Program {
     name: "heatmap-texture",
-    buffers: &[Buffer::uniform::<HeatmapTexturePropsUBO>(ID_HEATMAP_TEXTURE_PROPS_UBO)],
+    buffers: &[TEXTURE_PROPS],
     attributes: &[Attribute { id: ID_HEATMAP_POS_VERTEX_ATTRIBUTE, format: Short2 }],
     instance_attributes: &[],
     textures: &[Texture::new("u_image"), Texture::new("u_color_ramp")],
