@@ -5,14 +5,16 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use glam::{DVec2, DVec3, DVec4};
-use mln_map_types::{Elevation, View};
+use mln_map_types::{ConstrainMode, Elevation, View, ViewportMode};
 use mln_util::constants::DEFAULT_TRANSITION_EASE;
 use mln_util::geo::{LatLng, ScreenCoordinate, WrapMode};
 use mln_util::projection::Projection;
 use mln_util::queue::Queue;
+use mln_util::size::Size;
 use mln_util::time::Instant;
 
 use super::ground::{STYLE, Slope, assert_near, flat, ground, ground_event, pitchable, report, world};
+use crate::transform::{TerrainGround, Transform};
 use crate::{AnimationOptions, CameraOptions, CameraUpdate, CameraUpdateMode, Map};
 
 /// How long each command in these tests runs, and a frame's length.
@@ -257,4 +259,73 @@ fn an_unclamped_ease_keeps_its_altitude() {
     );
     frames(&mut map, clock, DURATION, |_, _| {});
     assert_eq!(2000.0, self::ground(&map).0);
+}
+
+/// An anchored ease of the zoom, the pitch and the bearing over a steep
+/// slope at a high pitch ends with its center on the ground under it, also
+/// when that ground changes on the way: the ground at rest moves its last
+/// frame's camera by no more than a micrometer.
+#[test]
+fn an_anchored_ease_on_a_steep_slope_ends_at_rest() {
+    // About half a meter up for each meter east.
+    let ground: Arc<dyn Elevation> = Arc::new(Slope { x: world(&start()).x, height: 1000.0, rise: 2e7 });
+    let mut transform = Transform::new(ConstrainMode::HeightOnly, ViewportMode::Default);
+    transform.resize(Size::new(512, 512)).unwrap();
+    let mut limits = *transform.state().limits();
+    limits.max_pitch = 85f64.to_radians();
+    transform.set_limits(limits).unwrap();
+    transform.set_terrain(Some(TerrainGround { elevation: Some(Arc::clone(&ground)), clamped: true }));
+    let clock = Instant::now() + Duration::from_secs(3600);
+    transform.set_frame_time(Some(clock));
+    transform.jump_to(&CameraOptions {
+        center: Some(start()),
+        zoom: Some(12.0),
+        pitch: Some(60.0),
+        bearing: Some(-30.0),
+        ..Default::default()
+    });
+    transform.follow_terrain();
+    let mut now = clock;
+    // The last ease's ground rises 300 m halfway through it.
+    let risen: Arc<dyn Elevation> = Arc::new(Slope { x: world(&start()).x, height: 1300.0, rise: 2e7 });
+    let mut ground = ground;
+    for (anchor, pitch, rises) in [
+        ((120.0, 400.0), 70.0, false),
+        ((400.0, 300.0), 80.0, false),
+        ((60.0, 480.0), 75.0, false),
+        ((200.0, 450.0), 70.0, true),
+    ] {
+        transform.ease_to(
+            &CameraOptions {
+                zoom: Some(transform.view().zoom() + 1.0),
+                pitch: Some(pitch),
+                bearing: Some(-mln_math::rad2deg(transform.view().angle()) - 20.0),
+                anchor: Some(ScreenCoordinate::new(anchor.0, anchor.1)),
+                ..Default::default()
+            },
+            &AnimationOptions { duration: Some(DURATION), easing: Some(DEFAULT_TRANSITION_EASE), ..Default::default() },
+        );
+        // As the map updates: the frame, then the ground.
+        let end = now + DURATION;
+        while now < end {
+            now = (now + FRAME).min(end);
+            transform.set_frame_time(Some(now));
+            if rises && now + DURATION / 2 >= end && !Arc::ptr_eq(&ground, &risen) {
+                ground = Arc::clone(&risen);
+                transform.set_terrain(Some(TerrainGround { elevation: Some(Arc::clone(&ground)), clamped: true }));
+            }
+            transform.update_transitions(Some(now));
+            if transform.in_transition() {
+                transform.follow_terrain();
+            }
+        }
+        let view = transform.view().clone();
+        let center = view.center(WrapMode::Wrapped);
+        let off = view.center_altitude() - ground.at(center).unwrap();
+        assert!(off.abs() < 1e-6, "{anchor:?}: the last frame stands {off} m off the ground");
+        transform.follow_terrain();
+        let rest = transform.view();
+        assert_eq!(center, rest.center(WrapMode::Wrapped), "{anchor:?}");
+        assert_eq!((view.zoom(), view.pitch(), view.angle()), (rest.zoom(), rest.pitch(), rest.angle()), "{anchor:?}");
+    }
 }

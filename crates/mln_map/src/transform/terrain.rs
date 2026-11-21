@@ -90,6 +90,16 @@ impl EasedAltitude {
         self.end
     }
 
+    /// Whether the line heads for `ground`.
+    pub(super) fn heads_for(&self, ground: f64) -> bool {
+        ground == self.target
+    }
+
+    /// Moves where the command's center ends, as the ground there changes.
+    pub(super) fn move_end(&mut self, end: LatLng) {
+        self.end = end;
+    }
+
     /// The altitude at the eased progress `k`, once the line heads for
     /// `ground`, the ground at the end now, where it is known. The last
     /// frame (`k` = 1) stands on that ground.

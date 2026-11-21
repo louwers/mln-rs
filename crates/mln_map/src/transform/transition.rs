@@ -4,7 +4,7 @@
 use std::time::Duration;
 
 use mln_map_types::{
-    AnimationOptions, CameraOptions, CameraVelocity, TransformState, TransitionEnd, TransitionOutcome,
+    AnimationOptions, CameraOptions, CameraVelocity, Elevation, TransformState, TransitionEnd, TransitionOutcome,
     VerticalPerspectiveProjection,
 };
 use mln_util::constants::DEFAULT_TRANSITION_EASE;
@@ -213,6 +213,76 @@ fn place(state: &mut TransformState, current: &CameraOptions, camera: &mut Camer
     state.set_lat_lng_zoom(&camera.center.unwrap_or_default(), zoom);
 }
 
+/// How many times an anchored command's end is solved, at most, and how far
+/// off the ground there, in meters, its center may end (see
+/// [`anchored_end`]).
+const ANCHORED_END_SOLVES: usize = 8;
+const ANCHORED_END_TOLERANCE: f64 = 1e-6;
+
+/// Where an anchored command's center ends over `ground`: its camera at the
+/// end, `target`, for the `fields` it sets, put on a copy of `state`, with
+/// the anchor's location, `height` meters up, moved under `anchor` (y up).
+///
+/// The anchor holds its location at the end's altitude, which is the ground
+/// at the end, which depends on where the anchor puts the end: the altitude
+/// is solved with the end, by the secant method from the altitude now, until
+/// the end stands within [`ANCHORED_END_TOLERANCE`] of the ground under it,
+/// or else the end found nearest the ground. A step back to the ground found
+/// can move away from it, on a slope as steep as the end moves for each
+/// meter. While the ground there is unknown, the end is the one at the
+/// altitude now.
+fn anchored_end(
+    state: &TransformState,
+    ground: Option<&dyn Elevation>,
+    fields: u16,
+    target: &CameraOptions,
+    anchor: &ScreenCoordinate,
+    location: &LatLng,
+    height: f64,
+) -> LatLng {
+    let end_at = |altitude: f64| {
+        let mut state = state.clone();
+        let current = state.camera_options(None);
+        let mut camera = CameraOptions { center_altitude: Some(altitude), ..current };
+        compose(&mut camera, target, fields & !ALTITUDE);
+        place(&mut state, &current, &mut camera);
+        // The anchor had a location at the start, so it has one here.
+        let _ = state.move_lat_lng_at(location, anchor, height);
+        let end = state.view().center(WrapMode::Wrapped);
+        (end, ground.and_then(|ground| ground.at(end)).map(|ground| ground - altitude))
+    };
+    let mut altitude = state.view().center_altitude();
+    let (end, off) = end_at(altitude);
+    let Some(mut off) = off else { return end };
+    let mut nearest = (end, off);
+    let mut last: Option<(f64, f64)> = None;
+    for _ in 1..ANCHORED_END_SOLVES {
+        if nearest.1.abs() <= ANCHORED_END_TOLERANCE {
+            break;
+        }
+        // The first step goes to the ground found; the next ones follow the
+        // line through the last two.
+        let next = match last {
+            Some((before, off_before)) if off != off_before => {
+                altitude - off * (altitude - before) / (off - off_before)
+            }
+            _ => altitude + off,
+        };
+        if !next.is_finite() {
+            break;
+        }
+        last = Some((altitude, off));
+        altitude = next;
+        let (end, next_off) = end_at(altitude);
+        let Some(next_off) = next_off else { break };
+        off = next_off;
+        if off.abs() < nearest.1.abs() {
+            nearest = (end, off);
+        }
+    }
+    nearest.0
+}
+
 /// A command made of several transitions, which ends once with the
 /// outcome that covers them all: cancelled if any was, otherwise closed if
 /// any was, otherwise replaced if any was.
@@ -285,7 +355,15 @@ impl Transform {
         // one that takes the center from a gesture's momentum.
         let end = if !self.gesture.active && self.clamped() {
             match anchor {
-                Some(anchor) => Some(self.anchored_end(fields, &target, &anchor, &anchor_lat_lng, anchor_height)),
+                Some(anchor) => Some(anchored_end(
+                    &self.state,
+                    self.ground().map(|ground| &**ground),
+                    fields,
+                    &target,
+                    &anchor,
+                    &anchor_lat_lng,
+                    anchor_height,
+                )),
                 None => camera.center.and(target.center).map(|end| end.wrapped()),
             }
         } else {
@@ -361,7 +439,26 @@ impl Transform {
                 // stays where it is.
                 value.center_altitude = match clamping {
                     Some(elevation) => {
-                        let ground = elevation.as_ref().and_then(|elevation| elevation.at(eased.end()));
+                        let elevation = elevation.as_deref();
+                        let mut ground = elevation.and_then(|elevation| elevation.at(eased.end()));
+                        // An anchored command's end moves with the ground
+                        // there (see `anchored_end`).
+                        if let Some(anchor) =
+                            transition.anchor.filter(|_| ground.is_some_and(|ground| !eased.heads_for(ground)))
+                        {
+                            let target = (transition.frame)(&self.state, 1.0);
+                            let end = anchored_end(
+                                &self.state,
+                                elevation,
+                                transition.fields,
+                                &target,
+                                &anchor,
+                                &transition.anchor_lat_lng,
+                                transition.anchor_height,
+                            );
+                            eased.move_end(end);
+                            ground = elevation.and_then(|elevation| elevation.at(end));
+                        }
                         Some(eased.at(ground, k))
                     }
                     None => current.center_altitude,
@@ -435,33 +532,6 @@ impl Transform {
         if let Err(e) = self.state.move_lat_lng_at(location, anchor, height) {
             Log::error(Event::General, &e.message);
         }
-    }
-
-    /// Where an anchored command's center ends: its camera at the end,
-    /// `target`, for the fields it sets, put on a copy of the state, with
-    /// the anchor's location, `height` meters up, moved under it. The anchor
-    /// holds its location at the end's altitude, so where the ground at a
-    /// first end is known, the end is found again at that altitude.
-    fn anchored_end(
-        &self,
-        fields: u16,
-        target: &CameraOptions,
-        anchor: &ScreenCoordinate,
-        location: &LatLng,
-        height: f64,
-    ) -> LatLng {
-        let end_at = |altitude: f64| {
-            let mut state = self.state.clone();
-            let current = state.camera_options(None);
-            let mut camera = CameraOptions { center_altitude: Some(altitude), ..current };
-            compose(&mut camera, target, fields & !ALTITUDE);
-            place(&mut state, &current, &mut camera);
-            // The anchor had a location at the start, so it has one here.
-            let _ = state.move_lat_lng_at(location, anchor, height);
-            state.view().center(WrapMode::Wrapped)
-        };
-        let end = end_at(self.state.view().center_altitude());
-        self.ground_at(end).map_or(end, end_at)
     }
 
     /// Records the fields the running commands move.
