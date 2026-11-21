@@ -22,6 +22,7 @@ use mln_util::geometry::FeatureType;
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, EventSeverity, Log, Observer};
 use mln_util::size::Size;
+use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecMap;
 use parking_lot::Mutex;
 
@@ -31,7 +32,9 @@ use crate::bucket::Bucket;
 use crate::bucket_geometry::{BucketGeometry, GeometryUpload, bucket_indexes, bucket_vertices, paint_vertices};
 use crate::buckets::circle_bucket::CircleBucket;
 use crate::buckets::fill_bucket::FillBucket;
-use crate::buckets::fill_extrusion_bucket::{FillExtrusionBucket, tile_units_per_meter};
+use crate::buckets::fill_extrusion_bucket::{
+    FillExtrusionBucket, tile_units_per_meter, vertex_centroids, wall_quad_centroids,
+};
 use crate::buckets::line_bucket::LineBucket;
 use crate::buckets::raster_bucket::{RasterBucket, RasterLayoutVertex};
 use crate::buckets::symbol_bucket::{SymbolBucket, SymbolBucketStyle, SymbolLayoutFlags};
@@ -1064,4 +1067,143 @@ fn store_entries_last_as_long_as_their_handles() {
         context.destroy_released(gpu);
         assert!(!context.has_vertices(key));
     });
+}
+
+/// A fill-extrusion bucket of `tile` holding `polygons`, one feature's
+/// rings, extruded with `fill-extrusion-rounded-corner-distance` set to
+/// `meters`, on the globe's subdivided rings where `globe`.
+fn extrusion_bucket(
+    polygons: &GeometryCollection,
+    meters: f32,
+    tile: CanonicalTileID,
+    globe: bool,
+) -> FillExtrusionBucket {
+    let layout = FillExtrusionLayoutProperties::PossiblyEvaluated {
+        fill_extrusion_rounded_corner_distance: Evaluated::Constant(meters),
+    };
+    let mut bucket = FillExtrusionBucket::new(layout, &VecMap::new(), f32::from(tile.z), 1);
+    if globe {
+        bucket.set_subdivision_granularity(&SubdivisionGranularitySetting::globe());
+    }
+    bucket.add_feature(
+        &feature(FeatureType::Polygon, polygons),
+        polygons,
+        &ImagePositions::default(),
+        &PatternLayerMap::default(),
+        0,
+        &tile,
+        &mut Tessellator::default(),
+    );
+    assert!(bucket.has_data());
+    bucket
+}
+
+/// The centroid of each polygon of a bucket of `polygons`.
+fn centroids(polygons: &GeometryCollection, meters: f32) -> Vec<[i16; 2]> {
+    let bucket = extrusion_bucket(polygons, meters, CanonicalTileID::new(16, 32768, 32768), false);
+    bucket.centroids.iter().map(|polygon| polygon.centroid).collect()
+}
+
+/// GL JS's centroid of `rings`: the floored mean of their vertices, each
+/// ring's closing vertex left out.
+fn gl_js_centroid(rings: &GeometryCollection) -> [i16; 2] {
+    let points: Vec<Point<i16>> =
+        rings.iter().flat_map(|ring| ring[..ring.len() - usize::from(ring.first() == ring.last())].to_vec()).collect();
+    let mean = |coordinate: fn(&Point<i16>) -> i16| {
+        let sum: f64 = points.iter().map(|p| f64::from(coordinate(p))).sum();
+        (sum / points.len() as f64).floor() as i16
+    };
+    [mean(|p| p.x), mean(|p| p.y)]
+}
+
+// An extrusion stands on the ground at its polygon's centroid, GL JS's: the
+// floored mean of its rings' vertices, holes too, without each ring's
+// closing vertex.
+#[test]
+fn fill_extrusion_centroids_are_gl_js_s() {
+    let square = collection(&[&[(0, 0), (1000, 0), (1000, 1000), (0, 1000), (0, 0)]]);
+    assert_eq!(centroids(&square, 0.0), [[500, 500]]);
+
+    // (0 + 300 + 300 + 100 + 100 + 0) / 6 = 133.3
+    let l_shape = collection(&[&[(0, 0), (300, 0), (300, 100), (100, 100), (100, 300), (0, 300), (0, 0)]]);
+    assert_eq!(centroids(&l_shape, 0.0), [[133, 133]]);
+
+    // The hole's four vertices count with the outer ring's.
+    let holed = collection(&[
+        &[(0, 0), (1000, 0), (1000, 1000), (0, 1000), (0, 0)],
+        &[(600, 600), (600, 800), (800, 800), (800, 600), (600, 600)],
+    ]);
+    assert_eq!(centroids(&holed, 0.0), [[600, 600]]);
+
+    // The mean floors: -1/3 to -1.
+    let west = collection(&[&[(-1, 0), (0, 0), (0, 1), (-1, 0)]]);
+    assert_eq!(centroids(&west, 0.0), [[-1, 0]]);
+
+    // Rounded corners are the ring's vertices, as GL JS rounds them before
+    // the bucket sees the polygon: 4 points a corner.
+    let rounded = mln_tile::geometry_tile_data::round_polygon_corners(
+        &l_shape,
+        2.0 * tile_units_per_meter(&CanonicalTileID::new(16, 32768, 32768)),
+    );
+    assert!(rounded[0].len() > l_shape[0].len());
+    let expected = gl_js_centroid(&rounded);
+    assert_ne!(expected, [133, 133]);
+    assert_eq!(centroids(&l_shape, 2.0), [expected]);
+}
+
+// Every vertex of a bucket has its polygon's centroid, the roof's own
+// vertices and the globe's subdivided rings too, which leave the centroid
+// as it was; each wall quad's four corners have their wall's.
+#[test]
+fn fill_extrusion_centroids_expand_to_every_vertex() {
+    let polygons = collection(&[
+        &[(1000, 1000), (4000, 1000), (4000, 2000), (2000, 2000), (2000, 4000), (1000, 4000), (1000, 1000)],
+        &[(5000, 5000), (7000, 5000), (7000, 6000), (5000, 6000), (5000, 5000)],
+    ]);
+    let bucket = extrusion_bucket(&polygons, 0.0, CanonicalTileID::new(2, 1, 1), true);
+    let firsts: Vec<u32> = bucket.centroids.iter().map(|polygon| polygon.first_vertex).collect();
+    // The L's six corners: 14000 / 6 = 2333.3.
+    let expected = [[2333, 2333], [6000, 5500]];
+    assert_eq!(bucket.centroids.iter().map(|polygon| polygon.centroid).collect::<Vec<_>>(), expected);
+    assert_eq!(firsts[0], 0);
+    // The first polygon's vertices are its subdivided ring's and its roof's
+    // own.
+    let ring = outline_len(&bucket, firsts[1] as usize);
+    assert!(ring > 5, "the ring is subdivided: {ring}");
+    assert!((firsts[1] as usize) > ring, "the roof has vertices of its own");
+
+    let vertex_count = bucket.vertices.len();
+    let per_vertex = vertex_centroids(&bucket.centroids, vertex_count);
+    assert_eq!(per_vertex.len(), vertex_count);
+    for (i, centroid) in per_vertex.iter().enumerate() {
+        assert_eq!(*centroid, expected[usize::from(i >= firsts[1] as usize)], "vertex {i}");
+    }
+
+    let walls = vertex_count - 1;
+    let quads = wall_quad_centroids(&per_vertex, walls);
+    assert_eq!(quads.len(), 4 * walls);
+    for (wall, corners) in quads.chunks(4).enumerate() {
+        assert!(corners.iter().all(|corner| *corner == per_vertex[wall]), "wall {wall}");
+    }
+}
+
+/// The vertices of the outline that starts a bucket, before its roof's own:
+/// those up to the first that draws no wall and ends the ring.
+fn outline_len(bucket: &FillExtrusionBucket, end: usize) -> usize {
+    let vertices = bucket.vertices.data();
+    vertices[..end].iter().position(|vertex| vertex.a2[0] & 1 == 1).map_or(end, |last| last + 1)
+}
+
+// A bucket's centroids cross to the map side with it.
+#[test]
+fn fill_extrusion_centroids_cross_the_wire() {
+    let polygons = collection(&[
+        &[(0, 0), (300, 0), (300, 100), (100, 100), (100, 300), (0, 300), (0, 0)],
+        &[(500, 500), (900, 500), (900, 900), (500, 900), (500, 500)],
+    ]);
+    let bucket = extrusion_bucket(&polygons, 0.0, CanonicalTileID::new(16, 32768, 32768), false);
+    assert_eq!(bucket.centroids.len(), 2);
+    let bytes = mln_wire::to_vec(&bucket).expect("the bucket's bytes");
+    let crossed: FillExtrusionBucket = mln_wire::from_slice(&bytes).expect("the bucket");
+    assert_eq!(crossed.centroids, bucket.centroids);
 }

@@ -100,6 +100,53 @@ pub(crate) fn wall_quad_paint(paint: &[u8], stride: usize, walls: usize) -> Vec<
     values
 }
 
+/// The centroid of a polygon's vertices, from its first vertex in the
+/// bucket's on to the next polygon's first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, mln_wire::Wire)]
+pub(crate) struct PolygonCentroid {
+    pub(crate) first_vertex: u32,
+    pub(crate) centroid: [i16; 2],
+}
+
+/// The point an extrusion of `polygon` stands on over terrain, as GL JS
+/// takes it: the floored mean of the vertices of its rings, holes too, as
+/// they are before the globe subdivides them, each ring's closing vertex
+/// left out.
+pub(crate) fn polygon_centroid<R: AsRef<[Point<i16>]>>(polygon: &[R]) -> [i16; 2] {
+    let (mut x, mut y, mut count) = (0i64, 0i64, 0i64);
+    for ring in polygon {
+        let ring = ring.as_ref();
+        let closed = !ring.is_empty() && ring.first() == ring.last();
+        for p in &ring[..ring.len() - usize::from(closed)] {
+            x += i64::from(p.x);
+            y += i64::from(p.y);
+            count += 1;
+        }
+    }
+    let count = count.max(1);
+    [x.div_euclid(count) as i16, y.div_euclid(count) as i16]
+}
+
+/// The centroid of the polygon of each of the `vertex_count` vertices of a
+/// bucket whose polygons' centroids are `centroids`, in the order of the
+/// vertices.
+pub(crate) fn vertex_centroids(centroids: &[PolygonCentroid], vertex_count: usize) -> Vec<[i16; 2]> {
+    let mut vertices = Vec::with_capacity(vertex_count);
+    for (index, polygon) in centroids.iter().enumerate() {
+        let end = centroids.get(index + 1).map_or(vertex_count, |next| next.first_vertex as usize);
+        vertices.resize(end.min(vertex_count), polygon.centroid);
+    }
+    vertices.resize(vertex_count, [0, 0]);
+    vertices
+}
+
+/// The centroids of the quads of `wall_quad_vertices`: each of the first
+/// `walls` vertices' of `centroids` (`vertex_centroids`), for each corner of
+/// its wall.
+pub(crate) fn wall_quad_centroids(centroids: &[[i16; 2]], walls: usize) -> Vec<[i16; 2]> {
+    centroids.iter().take(walls).flat_map(|&centroid| [centroid; 4]).collect()
+}
+
 #[derive(Clone, mln_wire::Wire)]
 pub(crate) struct FillExtrusionBucket {
     pub(crate) base: BucketBase,
@@ -108,6 +155,9 @@ pub(crate) struct FillExtrusionBucket {
     pub(crate) vertices: GeometryVec<FillExtrusionLayoutVertex>,
     pub(crate) triangles: GeometryVec<u16>,
     pub(crate) triangle_segments: Vec<SegmentBase>,
+    /// Each polygon's centroid, by the vertices it is the centroid of
+    /// ([`vertex_centroids`]), which an extrusion over terrain stands on.
+    pub(crate) centroids: Vec<PolygonCentroid>,
     pub(crate) subdivision_granularity: SubdivisionGranularitySetting,
 
     pub(crate) paint_property_binders: VecMap<String, FillExtrusionBinders>,
@@ -205,6 +255,7 @@ impl FillExtrusionBucket {
             vertices: GeometryVec::default(),
             triangles: GeometryVec::default(),
             triangle_segments: Vec::new(),
+            centroids: Vec::new(),
             subdivision_granularity: SubdivisionGranularitySetting::none(),
             paint_property_binders,
         }
@@ -360,6 +411,9 @@ impl Bucket for FillExtrusionBucket {
             if polygon.first().is_none_or(|outer| is_entirely_outside(outer)) {
                 continue;
             }
+
+            let first_vertex = self.vertices.len() as u32;
+            self.centroids.push(PolygonCentroid { first_vertex, centroid: polygon_centroid(&polygon) });
 
             // On the globe the walls follow subdivided rings and the roof is a
             // subdivided mesh of its own.

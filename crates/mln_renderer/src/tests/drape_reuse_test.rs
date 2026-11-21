@@ -1805,3 +1805,83 @@ fn a_map_whose_terrain_turned_off_keeps_no_ground() {
     assert_eq!(Some(ProjectionVariant::Mercator), circle(&map));
     assert_eq!(0, map.renderer.rendering_stats().terrain.mem_dem_textures);
 }
+
+/// A red fill extrusion `height` meters tall, a square `half` degrees from
+/// `location` to each side.
+fn red_extrusion(location: LatLng, half: f64, height: f64) -> String {
+    let (lat, lng) = (location.latitude(), location.longitude());
+    format!(
+        r#"{{
+            "version": 8,
+            "sources": {{
+                "block": {{"type": "geojson", "data": {{"type": "Polygon", "coordinates": [[
+                    [{west}, {south}], [{east}, {south}], [{east}, {north}], [{west}, {north}], [{west}, {south}]
+                ]]}}}}
+            }},
+            "layers": [{{
+                "id": "extrusion",
+                "type": "fill-extrusion",
+                "source": "block",
+                "paint": {{"fill-extrusion-color": "red", "fill-extrusion-height": {height}}}
+            }}]
+        }}"#,
+        west = lng - half,
+        east = lng + half,
+        south = lat - half,
+        north = lat + half,
+    )
+}
+
+/// A fill extrusion stands on the ground: over ground 25 km high, the camera
+/// sees its roof 25 km and its height up, not its height above sea level.
+/// Once the terrain turns off, the next frame draws it on the sea, and once
+/// it turns back on, the next one on the ground again.
+#[test]
+fn toggling_terrain_moves_an_extrusion_in_the_next_frame() {
+    let mut map = raised(10.0, 0.0);
+    // About 50 px east of the view's center on the ground, and some 11 px
+    // at sea level, which is farther from the camera.
+    let location = LatLng::new(-10.0, 10.0086).unwrap();
+    add_layer(&mut map, &red_extrusion(location, 0.002, 500.0), None);
+    map.settle();
+    map.frame();
+    assert!(red(map.pixel_at(&location, 25_500.0)), "the roof on the ground");
+    assert!(!red(map.pixel_at(&location, 500.0)), "no roof above sea level");
+
+    let terrain = map.style.get_terrain().map(|terrain| (**terrain).clone());
+    map.edit(Edit::SetTerrain(None));
+    map.frame();
+    assert!(red(map.pixel_at(&location, 500.0)), "the roof above sea level");
+    assert!(!red(map.pixel_at(&location, 25_500.0)), "no roof on the ground that went");
+
+    map.edit(Edit::SetTerrain(terrain));
+    map.frame();
+    assert!(red(map.pixel_at(&location, 25_500.0)), "the roof on the ground again");
+    assert!(!red(map.pixel_at(&location, 500.0)), "no roof above sea level");
+}
+
+/// A map without terrain draws its fill extrusions flat, with draws that
+/// keep no centroid, per vertex or in a storage buffer. Over terrain they
+/// keep them.
+#[test]
+fn a_map_without_terrain_keeps_no_extrusion_centroids() {
+    use mln_gfx::shaders::shader_defines::{ID_FILL_EXTRUSION_CENTROID_ATTRIBUTE, ID_FILL_EXTRUSION_WALL_CENTROIDS};
+
+    let mut map = DrapedMap::new(Tiles::default());
+    let terrain = map.style.get_terrain().map(|terrain| (**terrain).clone());
+    map.edit(Edit::SetTerrain(None));
+    add_layer(&mut map, &red_extrusion(LatLng::new(-10.0, 10.0).unwrap(), 2.0, 500.0), None);
+    map.settle();
+    assert!(map.frame().0);
+    let center = SIDE / 2;
+    assert!(red(map.pixel(center, center)), "the extrusion");
+    let keeps = |map: &mut DrapedMap, id| map.renderer.keeps_vertices_of("extrusion", id);
+    assert!(!keeps(&mut map, ID_FILL_EXTRUSION_CENTROID_ATTRIBUTE));
+    assert!(!keeps(&mut map, ID_FILL_EXTRUSION_WALL_CENTROIDS));
+    assert!(!map.renderer.made_terrain_variant());
+
+    map.edit(Edit::SetTerrain(terrain));
+    map.settle();
+    map.frame();
+    assert!(keeps(&mut map, ID_FILL_EXTRUSION_CENTROID_ATTRIBUTE), "the roofs' centroids");
+}

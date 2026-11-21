@@ -1438,6 +1438,13 @@ impl RenderOrchestrator {
     }
 
     /// The projection variant each layer draws with, by its id.
+    /// Whether a draw that the layer `id` keeps reads vertices as the
+    /// attribute, instance attribute or storage buffer `vertices`.
+    #[cfg(test)]
+    pub(crate) fn keeps_vertices_of(&mut self, id: &str, vertices: usize) -> bool {
+        self.layers.iter_mut().any(|layer| layer.base().style.base().id == id && layer.keeps_vertices_of(vertices))
+    }
+
     #[cfg(test)]
     pub(crate) fn projection_variants(&self) -> Vec<(String, mln_gfx::projection_variant::ProjectionVariant)> {
         let variant = |layer: &dyn RenderLayer| (layer.base().style.base().id.clone(), layer.base().projection_variant);

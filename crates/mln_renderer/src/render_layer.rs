@@ -1101,6 +1101,13 @@ fn begin_frame<L: TypedLayer + ?Sized>(layer: &mut L) -> bool {
 /// What a layer type does that the engine can't do for it, whatever the
 /// type: the hooks the engine calls on the layers it holds.
 pub(crate) trait RenderLayer: LayerParts {
+    /// Whether a draw the layer keeps reads vertices as the attribute,
+    /// instance attribute or storage buffer `id`.
+    #[cfg(test)]
+    fn keeps_vertices_of(&mut self, _id: usize) -> bool {
+        false
+    }
+
     /// Whether the layer draws 3D geometry, whose depth it writes in the
     /// range of [`PaintParameters::depth_mode_for_3d`].
     fn is_3d(&self) -> bool {

@@ -35,10 +35,11 @@
 //! 4. The drapes draw into their textures before the frame's pass. The
 //!    frame clears to transparent, and its translucent pass draws each
 //!    stack's surface where the stack's first layer draws, and the layers
-//!    that don't drape between the stacks, with their layer depth off: those
-//!    that stand on the ground as it draws (see **Standing layers**), such
-//!    as circles and heatmap kernels, and the others flat, such as fill
-//!    extrusions and symbols for now.
+//!    that don't drape between the stacks: those that stand on the ground
+//!    as it draws (see **Standing layers**), such as circles, heatmap
+//!    kernels and fill extrusions, and the others flat, such as symbols for
+//!    now. They draw with their layer depth off, but fill extrusions, which
+//!    test and write the 3D depth that the surface writes.
 //!
 //! # Contracts
 //!
@@ -72,42 +73,51 @@
 //!   layer. A layer the frame doesn't draw, hidden or out of its zooms,
 //!   splits no stack. A style whose layers don't drape has no stack, and
 //!   then no drapes and no surface.
-//! - **Standing layers** (circle and heatmap) stand on the surface as it
-//!   draws, whether or not a stack draws it: over terrain, their draws are
-//!   of the [`ProjectionVariant::Terrain`] variant, which reads the height
-//!   of the ground in the vertex stage, under a circle's center as it draws
-//!   (translated) and a kernel's, by the height rule the surface reads its
-//!   DEM by. A tile T of theirs reads the DEM tiles the surface reads under
-//!   it, and no others ([`TerrainElevation::ground`]): the DEM tile of the
-//!   terrain tile it is in, or, where terrain tiles are inside T, as over
-//!   a source tiled coarser than the DEM, the one each of them reads, on its
-//!   part of T. T draws once for each part, and each draw drops the
-//!   features whose untranslated anchor is off its part, so each feature
-//!   draws once, on the DEM tile the surface reads under its anchor: the
-//!   terrain tile's own wherever that has loaded, which a still waits for,
-//!   and while it loads, the ancestor the surface reads in its place. Off
-//!   the cover, a part reads the deepest DEM tile that the cover reads, or
-//!   loads to cull its tiles, that holds it, or stands at sea level while
-//!   none has loaded. The CPU reads a feature's height
-//!   ([`TileGround::height`]) from the DEM tile and coordinates its draw
-//!   reads, by the same height rule. A draw's ground (DEM coordinates,
-//!   part, decode and exaggeration) rides in its projection entry, which
-//!   every standing program's vertex stage reads ([`TerrainProjectionUBO`]);
-//!   its DEM texture binds at [`ID_GROUND_DEM_TEXTURE`], a slot of the
-//!   draw's own textures that no standing program's other textures take, so
-//!   a label's glyphs and icons keep 0 and 1. Nothing hides what stands
-//!   behind the ground yet. The depth of the drawn ground that will hide it
-//!   is one texture for the whole frame: it is to bind as the frame's global
-//!   uniform buffers do, from what the context holds for the frame rather
-//!   than among a draw's own textures, at a slot that only the terrain
-//!   variants declare, so that no flat program's layout or draw changes for
-//!   it. A frame without terrain makes no terrain variant, writes no ground
-//!   and binds no ground texture. A known limit: a tile that draws in
-//!   several parts, which happens only where the view is zoomed past a
-//!   source's deepest zoom over a deeper DEM, draws its features part by
-//!   part rather than in its bucket's order, so where features of two parts
-//!   overlap, which is on top can differ from a flat map, and symbols would
-//!   sort within each part only.
+//! - **Standing layers** (circle, heatmap and fill extrusion) stand on the
+//!   surface as it draws, whether or not a stack draws it: over terrain, their
+//!   draws are of the [`ProjectionVariant::Terrain`] variant, which reads the
+//!   height of the ground in the vertex stage, under a circle's center as it
+//!   draws (translated), a kernel's, and the centroid of a fill extrusion's
+//!   polygon as it draws (GL JS's: the floored mean of its rings' vertices), by
+//!   the height rule the surface reads its DEM by. A polygon's roof and base
+//!   rise by the ground at its centroid, and a base at or below 0 sinks 10 m
+//!   more, so that no gap shows under a wall downhill; its vertical gradient
+//!   shades by its own height. Over terrain the extrusions project as the
+//!   surface does, and test and write the depth it writes, so the ground hides
+//!   them, and they hide it, pixel by pixel; on a flat map they keep a near
+//!   plane further out, for the depth buffer's precision. Their buckets keep a
+//!   centroid for each polygon, which only a terrain variant's draws expand to
+//!   their vertices. A tile T of theirs reads the DEM tiles the surface reads
+//!   under it, and no others ([`TerrainElevation::ground`]): the DEM tile of
+//!   the terrain tile it is in, or, where terrain tiles are inside T, as over a
+//!   source tiled coarser than the DEM, the one each of them reads, on its part
+//!   of T. T draws once for each part, and each draw drops the features whose
+//!   untranslated anchor (an extrusion's centroid) is off its part, so each
+//!   feature draws once, on the DEM tile the surface reads under its anchor:
+//!   the terrain tile's own wherever that has loaded, which a still waits for,
+//!   and while it loads, the ancestor the surface reads in its place. Off the
+//!   cover, a part reads the deepest DEM tile that the cover reads, or loads to
+//!   cull its tiles, that holds it, or stands at sea level while none has
+//!   loaded. The CPU reads a feature's height ([`TileGround::height`]) from the
+//!   DEM tile and coordinates its draw reads, by the same height rule. A draw's
+//!   ground (DEM coordinates, part, decode and exaggeration) rides in its
+//!   projection entry, which every standing program's vertex stage reads
+//!   ([`TerrainProjectionUBO`]); its DEM texture binds at
+//!   [`ID_GROUND_DEM_TEXTURE`], a slot of the draw's own textures that no
+//!   standing program's other textures take, so a label's glyphs and icons keep
+//!   0 and 1. Nothing hides the circles and kernels behind the ground yet. The
+//!   depth of the drawn ground that will hide them is one texture for the whole
+//!   frame: it is to bind as the frame's global uniform buffers do, from what
+//!   the context holds for the frame rather than among a draw's own textures,
+//!   at a slot that only the terrain variants declare, so that no flat
+//!   program's layout or draw changes for it. A frame without terrain makes no
+//!   terrain variant, writes no ground, binds no ground texture and expands no
+//!   centroid. A known
+//!   limit: a tile that draws in several parts, which happens only where the
+//!   view is zoomed past a source's deepest zoom over a deeper DEM, draws its
+//!   features part by part rather than in its bucket's order, so where features
+//!   of two parts overlap, which is on top can differ from a flat map, and
+//!   symbols would sort within each part only.
 //! - **The surface** draws once for each stack, its tiles nearest the
 //!   center first, testing and writing the 3D depth range with less or
 //!   equal and blending its drapes over what is under it. A stack above the

@@ -572,6 +572,15 @@ impl DrawObjects {
         self.storage_vertices.iter().find(|(at, ..)| *at == id).and_then(|&(_, _, buffer)| buffer)
     }
 
+    /// Whether the draw reads vertices as the attribute or the instance
+    /// attribute `id`, or as the storage buffer `id`.
+    #[cfg(test)]
+    pub(crate) fn reads_vertices(&self, id: usize) -> bool {
+        self.vertex_attributes.get(id).is_some()
+            || self.instance_attributes.as_ref().is_some_and(|attrs| attrs.get(id).is_some())
+            || self.storage_vertices.iter().any(|(at, ..)| *at == id)
+    }
+
     /// Whether the draw draws instances.
     #[must_use]
     pub(crate) fn has_instances(&self) -> bool {

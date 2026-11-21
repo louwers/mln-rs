@@ -41,7 +41,9 @@ const SEA_LEVEL: [u8; 3] = [1, 134, 160];
 /// a point, half opaque if `translucent`, from a GeoJSON source of the zoom
 /// levels up to `geojson_max_zoom`, of the circle layer's zoom levels
 /// `circle_zooms`, over a terrain of DEM tiles of 256 px of the zoom levels
-/// `dem_zooms`, seen at a pitch of `pitch` degrees.
+/// `dem_zooms`, seen at a pitch of `pitch` degrees. With an `extrusion`
+/// height, the source is a square 0.0002° from the point to each side, and
+/// the layer a red fill extrusion of that height in meters.
 struct Scene {
     center: LatLng,
     pitch: f64,
@@ -49,6 +51,7 @@ struct Scene {
     circle_zooms: (u8, u8),
     dem_zooms: (u8, u8),
     translucent: bool,
+    extrusion: Option<f64>,
 }
 
 impl Scene {
@@ -63,6 +66,7 @@ impl Scene {
             circle_zooms: (0, 24),
             dem_zooms: (0, dem_max_zoom),
             translucent: false,
+            extrusion: None,
         }
     }
 
@@ -71,6 +75,39 @@ impl Scene {
         let Scene { geojson_max_zoom, circle_zooms: (circle_min, circle_max), dem_zooms: (dem_min, dem_max), .. } =
             *self;
         let opacity = if self.translucent { 0.5 } else { 1.0 };
+        let (data, layer) = match self.extrusion {
+            None => (
+                format!(r#"{{"type": "Point", "coordinates": [{lng}, {lat}]}}"#),
+                format!(
+                    r#"{{
+                        "id": "circle",
+                        "type": "circle",
+                        "source": "point",
+                        "minzoom": {circle_min},
+                        "maxzoom": {circle_max},
+                        "paint": {{"circle-color": "red", "circle-radius": 6, "circle-opacity": {opacity}}}
+                    }}"#
+                ),
+            ),
+            Some(height) => {
+                let (west, east, south, north) = (lng - 0.0002, lng + 0.0002, lat - 0.0002, lat + 0.0002);
+                (
+                    format!(
+                        r#"{{"type": "Polygon", "coordinates": [[
+                            [{west}, {south}], [{east}, {south}], [{east}, {north}], [{west}, {north}], [{west}, {south}]
+                        ]]}}"#
+                    ),
+                    format!(
+                        r#"{{
+                            "id": "extrusion",
+                            "type": "fill-extrusion",
+                            "source": "point",
+                            "paint": {{"fill-extrusion-color": "red", "fill-extrusion-height": {height}}}
+                        }}"#
+                    ),
+                )
+            }
+        };
         format!(
             r#"{{
                 "version": 8,
@@ -86,19 +123,12 @@ impl Scene {
                     "point": {{
                         "type": "geojson",
                         "maxzoom": {geojson_max_zoom},
-                        "data": {{"type": "Point", "coordinates": [{lng}, {lat}]}}
+                        "data": {data}
                     }}
                 }},
                 "layers": [
                     {{"id": "background", "type": "background", "paint": {{"background-color": "white"}}}},
-                    {{
-                        "id": "circle",
-                        "type": "circle",
-                        "source": "point",
-                        "minzoom": {circle_min},
-                        "maxzoom": {circle_max},
-                        "paint": {{"circle-color": "red", "circle-radius": 6, "circle-opacity": {opacity}}}
-                    }}
+                    {layer}
                 ]
             }}"#
         )
@@ -318,4 +348,23 @@ fn a_circle_layer_out_of_its_zooms_asks_for_no_dem_tile() {
     let zooms: BTreeSet<i8> = requests.lock().iter().map(|&(z, ..)| z).collect();
     assert!(!zooms.contains(&14), "DEM tiles of zoom 14 asked for: {zooms:?}");
     assert!((0..SIDE).all(|y| (0..SIDE).all(|x| !red(pixel(&image, x, y)))), "no circle");
+}
+
+/// An extrusion of a source whose deepest zoom, 14, is coarser than the DEM
+/// tiles of zoom 15 that the surface under it reads at zoom 17 stands on the
+/// surface, 300 m up, though its tile of zoom 14 draws in a part for each of
+/// the DEM tiles of zoom 15 under it: its roof is where the camera sees it
+/// 300 m and its height up, and not where the DEM tile of zoom 14 would put
+/// it, at 50 m, off the screen.
+#[test]
+fn an_extrusion_of_a_source_tiled_coarser_than_the_dem_stands_on_the_surface() {
+    // In the south-east DEM tile of zoom 15 of its tile of zoom 14.
+    let center = location_at(15, 16385.5, 16385.5);
+    let scene = Scene { extrusion: Some(20.0), ..Scene::new(center, 14, 15) };
+    let Some((image, map, _)) = render(&scene, &[17.0], ridge) else {
+        return;
+    };
+    assert!(red(pixel_at(&image, &map, &center, 320.0)), "the roof on the ground");
+    let (ground, coarse) = (seen_at(&map, &center, 320.0), seen_at(&map, &center, 70.0));
+    assert!((ground.0 - coarse.0).hypot(ground.1 - coarse.1) > 20.0, "the zooms' DEMs differ on screen");
 }

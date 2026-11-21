@@ -281,6 +281,13 @@ impl Renderer {
         self.encoder.context.made_key_for(mln_gfx::projection_variant::ProjectionVariant::Terrain)
     }
 
+    /// Whether a draw that the layer `id` keeps reads vertices as the
+    /// attribute, instance attribute or storage buffer `vertices`.
+    #[cfg(test)]
+    pub(crate) fn keeps_vertices_of(&mut self, id: &str, vertices: usize) -> bool {
+        self.orchestrator.keeps_vertices_of(id, vertices)
+    }
+
     /// The projection variant each layer draws with, by its id.
     #[cfg(test)]
     pub(crate) fn projection_variants(&self) -> Vec<(String, mln_gfx::projection_variant::ProjectionVariant)> {
