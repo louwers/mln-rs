@@ -121,6 +121,29 @@ fn a_ray_meets_a_ridge_where_it_draws() {
     assert!(on_the_ridge > 16, "{on_the_ridge} pixels show the ridge");
 }
 
+/// A line that isn't a line of sight, one through the view's center along
+/// the line of sight of a point near the top of the view, meets the ground
+/// as a line of sight does: on the surface, where the line first enters it
+/// from above.
+#[test]
+fn a_line_through_the_center_meets_the_ground_where_it_enters_it() {
+    let ground = ridge();
+    let view = view(60.0, 1000.0, 1000.0);
+    let (near, far) = view.line_of_sight(&ScreenCoordinate::new(256.0, 500.0)).unwrap();
+    let along = far - near;
+    let center = world(&view.center(WrapMode::Unwrapped)).extend(1000.0);
+    let start = center - along;
+    let hit = view.ground_along(start, center + along, &ground).expect("ground along the line");
+    assert_eq!(Some(hit.height), ground.surface_at(hit.world));
+    let to_hit = (hit.world - start.truncate()).length() / (2.0 * along).truncate().length();
+    for step in 0..1000 {
+        let point = start + 2.0 * along * (to_hit * f64::from(step) / 1000.0);
+        assert!(point.z > ground.surface_at(point.truncate()).unwrap() - 1e-3, "the line passes under the ground");
+    }
+    let end = start + 2.0 * along * to_hit;
+    assert!((end.z - hit.height).abs() < 1e-3, "the hit lies on the line: {end} against {hit:?}");
+}
+
 /// A ray above the horizon meets nothing, and nor does one over ground no
 /// tile drew.
 #[test]

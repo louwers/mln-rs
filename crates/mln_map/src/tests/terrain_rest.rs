@@ -1,9 +1,10 @@
 //! How a motion over a clamped center comes to rest, on the ground under
 //! the center, before the motion's last camera event, so the camera at rest
-//! moves no more: a command that completes ends at the camera it asked for,
-//! its altitude on the ground there, and anything else that brings the
-//! camera to rest moves the center onto the ground along the view, with the
-//! eye where it is, where the limits allow it.
+//! moves no more: a command of the center or the zoom ends at the center and
+//! zoom it asked for, its altitude on the ground there, without a visible
+//! jump on the frame that brings it to rest, and anything else that brings
+//! the camera to rest moves the center onto the ground along the view, with
+//! the eye where it is, where the limits allow it.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -459,12 +460,16 @@ fn ground_under(view: &View, ground: &dyn Elevation, point: ScreenCoordinate) ->
     (hit.world, hit.height)
 }
 
-/// Checks that the ground `held` draws within 0.01 px of `point` (y down)
-/// on `view`.
+/// Within about a pixel: the eye can't tell a grabbed point from the
+/// pointer, or a picture from one a pixel off, at that distance.
+const ABOUT_A_PIXEL: f64 = 1.0;
+
+/// Checks that the ground `held` draws within about a pixel of `point` (y
+/// down) on `view`.
 fn assert_holds(view: &View, held: (DVec2, f64), point: ScreenCoordinate, what: &str) {
     let drawn = pixel(view, held.0, held.1);
     let off = drawn.distance(DVec2::new(point.x, f64::from(view.size().height) - point.y));
-    assert!(off < 0.01, "{what}: the ground under the anchor moved {off} px");
+    assert!(off < ABOUT_A_PIXEL, "{what}: the ground under the anchor moved {off} px");
 }
 
 /// Checks that `view`'s center stands exactly on `ground`.
@@ -478,13 +483,13 @@ fn run(map: &mut Map, mode: CameraUpdateMode, camera: CameraOptions, animation: 
     map.update_camera(&CameraUpdate { mode, camera, animation, ..Default::default() });
 }
 
-/// Every kind of command that completes over terrain, alone or beside
-/// another command that changes the pitch or the bearing, ends at exactly
+/// Every kind of command of the center or the zoom over terrain, alone or
+/// beside another command that changes the pitch or the bearing, ends at
 /// the center and zoom it asked for, its altitude on the ground there, and
-/// the next update moves nothing. An anchored command ends with the ground
-/// it grabbed under its anchor.
+/// the next update moves nothing: a host that asked for zoom 13 reads 13.
+/// An anchored command ends with the ground it grabbed under its anchor.
 #[test]
-fn a_command_that_completes_ends_at_the_camera_it_asked_for() {
+fn a_command_ends_at_the_center_and_zoom_it_asked_for() {
     let destination = LatLng::new(20.02, 10.05).unwrap();
     let anchor = ScreenCoordinate::new(120.0, 400.0);
     let to = CameraOptions { center: Some(destination), zoom: Some(13.0), ..Default::default() };
@@ -543,9 +548,8 @@ fn a_command_that_completes_ends_at_the_camera_it_asked_for() {
 }
 
 /// An anchored zoom over a slope that a DEM's rounding leaves rough by a
-/// fraction of a millimeter, over which its end can't be solved to a
-/// micrometer, ends at the zoom it asked for, with the ground it grabbed
-/// under its anchor and its center on the ground.
+/// fraction of a millimeter ends at the zoom it asked for, with the ground
+/// it grabbed under its anchor and its center on the ground.
 #[test]
 fn an_anchored_zoom_on_rough_ground_ends_where_it_asked() {
     let ground: Arc<dyn Elevation> = Arc::new(Incline { height: 1000.0, east: 0.25, north: 0.1, rough: 5e-5 });
@@ -566,26 +570,19 @@ fn an_anchored_zoom_on_rough_ground_ends_where_it_asked() {
     }
 }
 
-/// An anchored zoom with a pitch change that ends with it solves its end in
-/// the camera of each frame, the pitch that frame reaches included: sampled
-/// halfway and then at the shared end, it ends at the zoom it asked for,
-/// with the ground it grabbed under its anchor and its center on the ground.
+/// An anchored zoom with a pitch change that ends with it estimates its end
+/// in the camera of each frame, the pitch that frame reaches included: it
+/// ends at the zoom it asked for, with the ground it grabbed under its
+/// anchor and its center on the ground.
 #[test]
-fn an_anchored_zoom_ending_with_a_pitch_change_solves_its_end_in_the_frame() {
+fn an_anchored_zoom_ending_with_a_pitch_change_ends_where_it_asked() {
     let ground = steep();
     let (mut transform, clock) = transform_over(&ground, 60.0);
     let anchor = ScreenCoordinate::new(120.0, 400.0);
     let grabbed = ground_under(transform.view(), &*ground, anchor);
     transform.ease_to(&CameraOptions { pitch: Some(70.0), ..Default::default() }, &eased());
     transform.ease_to(&CameraOptions { zoom: Some(13.0), anchor: Some(anchor), ..Default::default() }, &eased());
-    for elapsed in [500, 1000] {
-        let now = clock + Duration::from_millis(elapsed);
-        transform.set_frame_time(Some(now));
-        transform.update_transitions(Some(now));
-        if transform.in_transition() {
-            transform.follow_terrain();
-        }
-    }
+    transform_frames(&mut transform, clock, clock + Duration::from_secs(1), |_, _| {});
     assert!(!transform.in_transition());
     let view = transform.view().clone();
     assert_eq!(13.0, view.zoom(), "the zoom it asked for");
@@ -593,6 +590,128 @@ fn an_anchored_zoom_ending_with_a_pitch_change_solves_its_end_in_the_frame() {
     assert_holds(&view, grabbed, anchor, "at the end");
     assert_on_ground(&view, &*ground, "at the end");
     assert!(!transform.follow_terrain(), "at rest");
+}
+
+/// Ground that falls 4,000 m to the north across 5 km of the start, from
+/// 3,000 m to -1,000 m, at 39 degrees at the start: 1000 - 2000 tanh(meters
+/// north / 2500).
+#[derive(Debug)]
+struct Escarpment;
+
+impl Escarpment {
+    fn height(at: DVec2) -> f64 {
+        let north = (world(&start()).y - at.y) * meters();
+        1000.0 - 2000.0 * (north / 2500.0).tanh()
+    }
+}
+
+impl Elevation for Escarpment {
+    fn at(&self, location: LatLng) -> Option<f64> {
+        Some(Self::height(world(&location)))
+    }
+
+    fn min_at(&self, _: LatLng) -> Option<f64> {
+        Some(-1000.0)
+    }
+
+    fn surface_at(&self, world: DVec2) -> Option<f64> {
+        Some(Self::height(world))
+    }
+
+    fn range(&self) -> Option<(f64, f64)> {
+        Some((-1000.0, 3000.0))
+    }
+}
+
+/// The largest move, in pixels, from `before` to `after` of the ground
+/// drawn under a grid of points across `before`.
+fn picture_moved(before: &View, after: &View, ground: &dyn Elevation) -> f64 {
+    let size = before.size();
+    let mut moved = 0.0f64;
+    for x in (0..=size.width).step_by(32) {
+        for y in (0..=size.height).step_by(32) {
+            let point = ScreenCoordinate::new(f64::from(x), f64::from(y));
+            if let Some(hit) = before.ground_under(&point, ground) {
+                moved = moved.max(pixel(before, hit.world, hit.height).distance(pixel(after, hit.world, hit.height)));
+            }
+        }
+    }
+    moved
+}
+
+/// A second's ease from zoom 12 to 13 around a point up an escarpment,
+/// pitched 50 degrees, holds the ground it grabbed under its anchor within
+/// about a pixel on every frame and ends at zoom 13, on the ground: the
+/// frame that brings it to rest moves no ground on screen by more than
+/// about a pixel, and the eye by less than a meter. Where the ground is
+/// steep along the anchor's line of sight, a meter of altitude moves the
+/// end of such a zoom far across the slope, and an end taken up in altitude
+/// alone on its last frame moved the ground on screen 108 px.
+#[test]
+fn an_anchored_zoom_up_an_escarpment_comes_to_rest_without_a_jump() {
+    let ground: Arc<dyn Elevation> = Arc::new(Escarpment);
+    let mut transform = Transform::new(ConstrainMode::HeightOnly, ViewportMode::Default);
+    transform.resize(Size::new(512, 512)).unwrap();
+    transform.set_terrain(Some(TerrainGround { elevation: Some(Arc::clone(&ground)), clamped: true }));
+    let clock = Instant::now() + Duration::from_secs(3600);
+    transform.set_frame_time(Some(clock));
+    transform.jump_to(&CameraOptions {
+        center: Some(start()),
+        zoom: Some(12.0),
+        pitch: Some(50.0),
+        ..Default::default()
+    });
+    transform.follow_terrain();
+    let anchor = ScreenCoordinate::new(450.0, 200.0);
+    let grabbed = ground_under(transform.view(), &*ground, anchor);
+    transform.ease_to(&CameraOptions { zoom: Some(13.0), anchor: Some(anchor), ..Default::default() }, &eased());
+    let mut last = transform.view().clone();
+    let mut before_rest = last.clone();
+    transform_frames(&mut transform, clock, clock + Duration::from_secs(1), |transform, _| {
+        before_rest = last.clone();
+        last = transform.view().clone();
+        assert_holds(&last, grabbed, anchor, "a frame");
+    });
+    assert!(!transform.in_transition());
+    let rest = transform.view().clone();
+    assert_eq!(13.0, rest.zoom(), "the zoom it asked for");
+    assert_holds(&rest, grabbed, anchor, "at rest");
+    assert_on_ground(&rest, &*ground, "at rest");
+    let moved = picture_moved(&last, &rest, &*ground);
+    assert!(moved < ABOUT_A_PIXEL, "the frame that brings the camera to rest moves the ground {moved} px");
+    let eye = rest.eye_position() - last.eye_position();
+    let eye = DVec3::new(eye.x * meters(), eye.y * meters(), eye.z).length();
+    // A meter is a fraction of a pixel of the ground at zoom 13, 9 m a pixel.
+    assert!(eye < 1.0, "the eye moved {eye} m");
+    assert!(picture_moved(&before_rest, &last, &*ground) > moved, "the motion slows to its rest");
+}
+
+/// A pitch-only ease during which the ground under the center lands
+/// thousands of meters above the altitude the camera holds comes to rest
+/// with the center moved onto the ground along the view: neither the eye
+/// nor the picture moves on the frame that brings it to rest, and the pitch
+/// ends where it was asked, though the zoom follows from the ground there.
+#[test]
+fn a_pitch_ease_under_which_the_ground_lands_comes_to_rest_with_the_eye_kept() {
+    let run_loop = Queue::<()>::new();
+    let (mut map, clock) = map_over(None, &run_loop);
+    let ground = flat(Some(2000.0), 2000.0);
+    run(&mut map, CameraUpdateMode::Ease, CameraOptions { pitch: Some(60.0), ..Default::default() }, eased());
+    let mut before = None;
+    frames(&mut map, clock, Duration::from_secs(1), |map, elapsed| {
+        if elapsed == Duration::from_millis(992) {
+            report(map, ground_event(&ground));
+            before = Some(Picture::of(map.transform_state().view(), &*ground));
+        }
+    });
+    assert!(!map.snapshot().transition_in_progress);
+    let view = map.transform_state().view();
+    assert_eq!(60.0, view.pitch().to_degrees().round());
+    // The last frame's own motion moves the picture a hundredth of a pixel
+    // and the eye a few centimeters; landing the eye on the ground would
+    // drop it 2,000 m.
+    before.unwrap().assert_kept_by(view, &*ground, 1.0, ABOUT_A_PIXEL, "at rest");
+    assert_at_rest(&mut map, "at rest");
 }
 
 /// A transform under [`ConstrainMode::Screen`], 512 by 512, over ground

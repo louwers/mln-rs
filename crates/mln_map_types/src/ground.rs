@@ -1,7 +1,7 @@
 //! Where a line of sight meets the ground a frame drew.
 
 use geometry::Point;
-use glam::DVec2;
+use glam::{DVec2, DVec3};
 use mln_util::constants::TILE_SIZE_D;
 use mln_util::geo::{LatLng, ScreenCoordinate, WrapMode};
 use mln_util::projection::Projection;
@@ -60,6 +60,17 @@ impl View {
     #[must_use]
     pub fn ground_under(&self, point: &ScreenCoordinate, ground: &dyn Elevation) -> Option<GroundHit> {
         let (near, far) = self.line_of_sight(point)?;
+        self.ground_along(near, far, ground)
+    }
+
+    /// Where the line from `near` to `far`, each a Web Mercator point at
+    /// zoom 0 (x in the world copy the view shows it in) and a height in
+    /// meters, first enters `ground` from above, as
+    /// [`ground_under`](Self::ground_under) finds it on a line of sight,
+    /// sampling every 4 pixels across the ground at the view's zoom. `None`
+    /// where the line meets no drawn ground.
+    #[must_use]
+    pub fn ground_along(&self, near: DVec3, far: DVec3, ground: &dyn Elevation) -> Option<GroundHit> {
         let (low, high) = ground.range()?;
         let (low, high) = (low - BAND_PADDING, high + BAND_PADDING);
         let along = far - near;

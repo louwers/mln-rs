@@ -1,5 +1,5 @@
 //! The terrain under the camera: the ground a camera at rest stands on, the
-//! altitude a command eases onto the ground it ends on, the altitude a
+//! altitude a command eases toward the ground it ends on, the altitude a
 //! gesture holds, the ground every motion ends on, the eye kept above the
 //! ground while a command or a gesture moves the camera, the planes that
 //! moves around an anchor solve on, and the conversions between screen
@@ -12,8 +12,12 @@
 //!
 //! - **At rest**, the center stands on the ground under it, unless that is
 //!   still loading.
-//! - **A command** that moves the center eases its altitude onto the ground
-//!   at the center it ends on ([`EasedAltitude`]).
+//! - **A command** of the center or the zoom eases its altitude along a
+//!   line toward the ground under the center it is expected to end on
+//!   ([`EasedAltitude`]), which each frame estimates again in the camera it
+//!   composes: the center it was given, for an anchored command the center
+//!   its anchor puts on the ground, and otherwise the center it has. Any
+//!   other command holds the altitude.
 //! - **A gesture** owns the altitude from when its fingers go down: it
 //!   takes the altitude from every running command, and holds the
 //!   altitude the camera has then, lifted over ground that reaches above
@@ -23,19 +27,19 @@
 //! - **Every motion ends on the ground**, before its last camera event, so
 //!   that the rule at rest finds nothing left to do
 //!   ([`Transform::come_to_rest`]). How depends on how the motion ends:
-//!   - A command that completes, reaching its last frame still owning
-//!     every field it took, ends at the center, zoom, bearing and pitch it
-//!     asked for, and its last frame stands on the ground at that center:
-//!     what is left between where its eased altitude headed and that
-//!     ground is taken up in altitude alone. It is never recentred.
+//!   - A command that runs to its end owning a center or a zoom, and the
+//!     altitude it eased, keeps the center and the zoom, and the ground
+//!     under its center takes up what is left in altitude alone: what its
+//!     eased altitude still lacked on its last frame.
 //!   - Anything else that brings the camera to rest leaves the center
 //!     wherever the motion stopped, maybe off the ground: a gesture's end,
 //!     a momentum's end, a command cancelled or replaced with nothing left
-//!     moving, or one that gave up its center or its altitude on the way.
-//!     A center off the ground then moves onto it along the view, with the
-//!     eye where it is, where the bounds and the zoom limits take that
-//!     camera as it is; where they don't, or the view meets no drawn
-//!     ground, the rule at rest takes the center up or down instead.
+//!     moving, one whose altitude fingers or the clamp turned off took, or
+//!     one of the angles alone, under which ground may have loaded. A center
+//!     off the ground then moves onto it along the view, with the eye where
+//!     it is, where the bounds and the zoom limits take that camera as it
+//!     is; where they don't, or the view meets no drawn ground, the rule at
+//!     rest takes the center up or down instead.
 //!
 //! The terrain moves a camera at rest, as ground loads or changes under it,
 //! the clamp turns on or the terrain goes, without camera events, as in GL
@@ -68,8 +72,8 @@ const MAX_EYE_RAISES: usize = 3;
 const RECENTER_PASSES: usize = 3;
 
 /// How far off the ground, in meters, a center may stand and count as on it
-/// as a motion ends.
-pub(super) const ON_GROUND_TOLERANCE: f64 = 1e-4;
+/// as a motion ends: a tenth of a millimeter, far below a pixel at any zoom.
+const ON_GROUND_TOLERANCE: f64 = 1e-4;
 
 /// How near the view's center, in squared pixels, an anchor stands at it:
 /// a move around it leaves the center where it is (GL JS's).
@@ -93,54 +97,46 @@ pub struct TerrainGround {
     pub clamped: bool,
 }
 
-/// The center altitude of a command that moves the center over terrain
-/// that clamps it: a straight line from the altitude the command starts at
-/// to the ground at the center it ends on (GL JS's
-/// `_startElevationEasing`). Ground that loads or changes there while the
-/// command runs turns the line about the altitude reached so far, so the
-/// camera heads for the new ground without a jump. While the ground there
-/// is unknown, the line heads for the altitude the command was given, or
-/// else stays level.
+/// The center altitude of a command of the center or the zoom over terrain
+/// that clamps the center: a
+/// straight line from the altitude the command starts at to the ground
+/// under the center it is expected to end on (GL JS's
+/// `_startElevationEasing`). Each frame turns the line about the altitude
+/// reached so far toward its new estimate of that ground, so the camera
+/// heads for it without a jump; the estimate changes as ground loads or
+/// changes, and, for an anchored command, as the camera nears its end.
+/// While the ground there is unknown, the line heads for the altitude the
+/// command was given, or else stays level.
 pub(super) struct EasedAltitude {
     from: f64,
     target: f64,
-    /// Where the command's center ends, wrapped.
-    end: LatLng,
     /// The share of the line covered at a frame's eased progress.
     along: AlongFn,
 }
 
 impl EasedAltitude {
-    /// A line from `from` to the ground at `end`, or to `given` while that
-    /// is unknown.
-    pub(super) fn new(from: f64, given: f64, ground: Option<f64>, end: LatLng, along: AlongFn) -> Self {
-        EasedAltitude { from, target: ground.unwrap_or(given), end, along }
+    /// A line from `from` to `ground`, or to `given` while that is unknown.
+    pub(super) fn new(from: f64, given: f64, ground: Option<f64>, along: AlongFn) -> Self {
+        EasedAltitude { from, target: ground.unwrap_or(given), along }
     }
 
-    /// Where the command's center ends.
-    pub(super) fn end(&self) -> LatLng {
-        self.end
-    }
-
-    /// Moves where the command's center ends, as the ground there changes.
-    pub(super) fn move_end(&mut self, end: LatLng) {
-        self.end = end;
-    }
-
-    /// The altitude at the eased progress `k`, once the line heads for
-    /// `ground`, the ground at the end now, where it is known. The last
-    /// frame (`k` = 1) stands on that ground.
-    pub(super) fn at(&mut self, ground: Option<f64>, k: f64) -> f64 {
+    /// The altitude at the eased progress `k`.
+    pub(super) fn at(&self, k: f64) -> f64 {
         let k = (self.along)(k);
-        if let Some(ground) = ground.filter(|&ground| ground != self.target) {
-            if k < 1.0 {
-                let reached = interpolate(&self.from, &self.target, k);
-                let slope = (ground - reached) / (1.0 - k);
-                self.from = reached - k * slope;
-            }
+        if k < 1.0 { interpolate(&self.from, &self.target, k) } else { self.target }
+    }
+
+    /// Turns the line about its altitude at the eased progress `k` toward
+    /// `ground`, which the rest of the line then heads for. From the line's
+    /// end on, it no longer turns: what is left is the end's to take up.
+    pub(super) fn head_for(&mut self, ground: f64, k: f64) {
+        let k = (self.along)(k);
+        if k < 1.0 && ground != self.target {
+            let reached = interpolate(&self.from, &self.target, k);
+            let slope = (ground - reached) / (1.0 - k);
+            self.from = reached - k * slope;
             self.target = ground;
         }
-        if k < 1.0 { interpolate(&self.from, &self.target, k) } else { self.target }
     }
 }
 
@@ -309,11 +305,12 @@ impl Transform {
     /// Ends a motion over a clamped center on the ground, once nothing moves
     /// the camera any more: no gesture is in progress and no command runs.
     ///
-    /// After a command that `completed`, the camera stays where it asked to
-    /// be, and the ground under its center takes it up or down, as at rest.
-    /// After anything else, a center that stands farther off the loaded
-    /// ground under it than [`ON_GROUND_TOLERANCE`] moves along the view
-    /// onto the ground its line of sight meets, with the eye where it is
+    /// After a command that `keeps` the center and the zoom, having run to
+    /// its end owning either, they stay, and the ground under the center
+    /// takes it up or down, as at rest. After anything else, a center that
+    /// stands farther off the loaded ground under it than
+    /// [`ON_GROUND_TOLERANCE`] moves along the view onto the ground its
+    /// line of sight meets, with the eye where it is
     /// ([`TransformState::recenter_on`], GL JS's `recenterOnTerrain`), and
     /// then stands on the ground as at rest; where the line meets no drawn
     /// ground, or the bounds or the zoom limits would move that camera
@@ -322,16 +319,17 @@ impl Transform {
     ///
     /// The caller reports the camera's change. Returns whether the view
     /// changed.
-    pub(super) fn come_to_rest(&mut self, completed: bool) -> bool {
+    pub(super) fn come_to_rest(&mut self, keeps: bool) -> bool {
         let Some(TerrainGround { elevation: Some(elevation), clamped: true }) = &self.terrain else {
             return false;
         };
         if self.gesture_in_progress || !self.transitions.is_empty() {
             return false;
         }
-        if completed {
+        if keeps {
             return self.follow_terrain();
         }
+
         let view = self.view();
         let ground = elevation.at(view.center(WrapMode::Wrapped));
         if !ground.is_some_and(|ground| (view.center_altitude() - ground).abs() > ON_GROUND_TOLERANCE) {
