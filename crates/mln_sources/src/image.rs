@@ -18,6 +18,12 @@ use mln_util::LatLng;
 use mln_util::image::PremultipliedImage;
 use mln_util::pool::Respond;
 
+#[cfg(feature = "runtime")]
+pub use self::commands::ImageSourceCommands;
+
+#[cfg(feature = "runtime")]
+mod commands;
+
 /// The image source type.
 pub struct ImageSourceType;
 

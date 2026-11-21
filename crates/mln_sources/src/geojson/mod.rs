@@ -23,9 +23,13 @@ use mln_util::pool::{Pool, Respond, TaskGroup};
 use mln_util::range::Range;
 use mln_vec_map::VecMap;
 
+#[cfg(feature = "runtime")]
+pub use self::commands::{ClusterQueries, GeoJsonSourceCommands, GeoJsonSourceSettings};
 pub use self::conversion::convert_geojson_options;
 use self::conversion::{convert_geojson_source, convert_json_geojson};
 
+#[cfg(feature = "runtime")]
+mod commands;
 pub(crate) mod conversion;
 mod origin;
 
@@ -448,6 +452,17 @@ impl GeoJsonSourceType {
             changed
         })
     }
+}
+
+/// Parses GeoJSON text, as a GeoJSON source's or a custom geometry
+/// source's command takes it. Fails with
+/// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for text that isn't
+/// JSON, or JSON that isn't GeoJSON.
+pub fn parse_geojson(json: &str) -> Result<GeoJson, Error> {
+    serde_json::from_str(json).map_err(|error| {
+        let what = if error.is_data() { "invalid" } else { "not valid JSON" };
+        Error::invalid_argument(format!("GeoJSON data is {what}: {error}"))
+    })
 }
 
 /// The data of `source`, if it's a GeoJSON source with data.

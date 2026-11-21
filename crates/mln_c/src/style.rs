@@ -5,12 +5,17 @@ use core::ffi::c_void;
 use std::sync::Arc;
 use std::time::Duration;
 
-use ::mln_runtime::{Applied, CustomSourceCallbacks, GeoJsonSourceOptions, LayerInfo, SourceInfo, SourceKind};
+use ::mln_runtime::{Applied, LayerInfo, SourceInfo};
 use mln_expression::Functions;
-use mln_sources::TileDataFormat;
 use mln_sources::custom::geometry::TileOptions;
-use mln_style::TransitionOptions;
+use mln_sources::{
+    CustomGeometrySourceType, CustomSourceCallbacks, CustomSourceCommands, CustomVectorSourceType,
+    GeoJsonSourceCommands, GeoJsonSourceSettings, GeoJsonSourceType, ImageSourceCommands, ImageSourceType,
+    RasterDemSourceType, RasterSourceType, TileDataFormat, VectorSourceType,
+};
 use mln_style::image::{ImageContent, Impl as StyleImage, TextFit};
+use mln_style::source_type::StyleSourceType;
+use mln_style::{Source, TransitionOptions};
 use mln_tile_id::CanonicalTileID;
 use mln_util::constants;
 use mln_util::geo::{LatLng, LatLngBounds};
@@ -384,8 +389,8 @@ fn whole_zoom_level(zoom: f64, name: &str) -> Result<u8, Error> {
 unsafe fn geojson_options(
     options: *const mln_geo_json_source_options,
     functions: &Arc<Functions>,
-) -> Result<GeoJsonSourceOptions, Error> {
-    let mut result = GeoJsonSourceOptions::default();
+) -> Result<GeoJsonSourceSettings, Error> {
+    let mut result = GeoJsonSourceSettings::default();
     if options.is_null() {
         return Ok(result);
     }
@@ -451,16 +456,20 @@ impl<T: Send + 'static> CompletionValue for Plain<T> {
     }
 }
 
-const fn source_type(kind: SourceKind) -> mln_style_source_type {
-    match kind {
-        SourceKind::Vector => MLN_STYLE_SOURCE_TYPE_VECTOR,
-        SourceKind::Raster => MLN_STYLE_SOURCE_TYPE_RASTER,
-        SourceKind::RasterDem => MLN_STYLE_SOURCE_TYPE_RASTER_DEM,
-        SourceKind::GeoJson => MLN_STYLE_SOURCE_TYPE_GEO_JSON,
-        SourceKind::Image => MLN_STYLE_SOURCE_TYPE_IMAGE,
-        SourceKind::CustomGeometry => MLN_STYLE_SOURCE_TYPE_CUSTOM_GEOMETRY,
-        SourceKind::CustomVector => MLN_STYLE_SOURCE_TYPE_CUSTOM_VECTOR,
-    }
+/// The C type of a source of the type named `name`, or `None` for a type
+/// that the C API doesn't name.
+fn source_type(name: &str) -> Option<mln_style_source_type> {
+    [
+        (VectorSourceType::INFO.name, MLN_STYLE_SOURCE_TYPE_VECTOR),
+        (RasterSourceType::INFO.name, MLN_STYLE_SOURCE_TYPE_RASTER),
+        (RasterDemSourceType::INFO.name, MLN_STYLE_SOURCE_TYPE_RASTER_DEM),
+        (GeoJsonSourceType::INFO.name, MLN_STYLE_SOURCE_TYPE_GEO_JSON),
+        (ImageSourceType::INFO.name, MLN_STYLE_SOURCE_TYPE_IMAGE),
+        (CustomGeometrySourceType::INFO.name, MLN_STYLE_SOURCE_TYPE_CUSTOM_GEOMETRY),
+        (CustomVectorSourceType::INFO.name, MLN_STYLE_SOURCE_TYPE_CUSTOM_VECTOR),
+    ]
+    .into_iter()
+    .find_map(|(type_name, source_type)| (type_name == name).then_some(source_type))
 }
 
 const fn vector_encoding(encoding: VectorEncoding) -> mln_style_vector_tile_encoding {
@@ -472,7 +481,7 @@ const fn vector_encoding(encoding: VectorEncoding) -> mln_style_vector_tile_enco
 
 /// A GeoJSON source's options with every field set.
 fn from_geojson_options(
-    options: &GeoJsonSourceOptions,
+    options: &GeoJsonSourceSettings,
     cluster_properties: mln_buffer_view,
 ) -> mln_geo_json_source_options {
     mln_geo_json_source_options {
@@ -499,9 +508,26 @@ fn from_geojson_options(
     }
 }
 
+/// What the C API reports about a source: its C type, what the runtime
+/// reports about it, and a GeoJSON source's options.
+struct ReportedSource {
+    source_type: mln_style_source_type,
+    info: SourceInfo,
+    geojson: Option<GeoJsonSourceSettings>,
+}
+
+impl ReportedSource {
+    /// What the C API reports about `source`, or `None` for a source of a
+    /// type that the C API doesn't name.
+    fn of(source: &Source) -> Option<Self> {
+        let source_type = source_type(source.info().name)?;
+        Some(ReportedSource { source_type, info: SourceInfo::of(source), geojson: GeoJsonSourceSettings::of(source) })
+    }
+}
+
 /// A source and the text its `mln_style_source_info` lends.
 struct LentSource {
-    info: SourceInfo,
+    source: ReportedSource,
     id: LentText,
     attribution: LentText,
     url: LentText,
@@ -510,23 +536,24 @@ struct LentSource {
 }
 
 impl LentSource {
-    fn new(info: SourceInfo) -> Self {
+    fn new(source: ReportedSource) -> Self {
+        let info = &source.info;
         Self {
             id: LentText::new(&info.id),
             attribution: LentText::new(info.attribution.as_deref().unwrap_or_default()),
             url: LentText::new(info.url.as_deref().unwrap_or_default()),
             tile_urls: info.tiles.iter().flat_map(|tiles| &tiles.urls).map(|url| LentText::new(url)).collect(),
             cluster_properties: LentText::new(
-                info.geojson.as_ref().and_then(|geojson| geojson.cluster_properties.as_deref()).unwrap_or_default(),
+                source.geojson.as_ref().and_then(|geojson| geojson.cluster_properties.as_deref()).unwrap_or_default(),
             ),
-            info,
+            source,
         }
     }
 
     /// The C view, valid while `self` and `tile_urls`, the views of its
     /// tile URLs, are.
     fn item(&self, tile_urls: &[mln_buffer_view]) -> mln_style_source_info {
-        let info = &self.info;
+        let info = &self.source.info;
         let mut fields = 0;
         let mut tile_json = mln_style_source_tile_info {
             tile_urls: core::ptr::null(),
@@ -576,7 +603,7 @@ impl LentSource {
         if info.vector_encoding.is_some() {
             fields |= MLN_STYLE_SOURCE_INFO_VECTOR_ENCODING;
         }
-        let geo_json = match &info.geojson {
+        let geo_json = match &self.source.geojson {
             Some(geojson) => {
                 fields |= MLN_STYLE_SOURCE_INFO_GEO_JSON;
                 from_geojson_options(geojson, self.cluster_properties.view())
@@ -586,7 +613,7 @@ impl LentSource {
         };
         mln_style_source_info {
             id: self.id.view(),
-            type_: source_type(info.kind),
+            type_: self.source.source_type,
             fields,
             is_volatile: info.is_volatile,
             attribution: self.attribution.view(),
@@ -846,8 +873,8 @@ pub(crate) unsafe extern "C" fn mln_map_get_style_source(
             query(
                 map,
                 completion,
-                |map| map.style_source(id),
-                |info| LentSources(info.into_iter().map(LentSource::new).collect()),
+                |map| map.with_core(move |map| map.source(&id).and_then(ReportedSource::of)),
+                |source| LentSources(source.into_iter().map(LentSource::new).collect()),
             )
         }
     })
@@ -888,9 +915,12 @@ pub(crate) unsafe extern "C" fn mln_map_list_style_sources(
     export!(out_diagnostic, {
         // SAFETY: the caller's contract.
         unsafe {
-            query(map, completion, ::mln_runtime::Map::style_sources, |sources| {
-                LentSources(sources.into_iter().map(LentSource::new).collect())
-            })
+            query(
+                map,
+                completion,
+                |map| map.with_core(|map| map.sources().filter_map(ReportedSource::of).collect::<Vec<_>>()),
+                |sources| LentSources(sources.into_iter().map(LentSource::new).collect()),
+            )
         }
     })
 }
@@ -2064,6 +2094,6 @@ mod tests {
         assert!(check("[]").unwrap_err().message().contains("must contain a JSON object"));
         assert!(check(r#"{"total":5}"#).unwrap_err().message().contains("GeoJSON source options"));
         assert!(check(r#"{"total":NaN}"#).unwrap_err().message().contains("cluster_properties"));
-        assert_eq!(check("").unwrap(), GeoJsonSourceOptions::default());
+        assert_eq!(check("").unwrap(), GeoJsonSourceSettings::default());
     }
 }

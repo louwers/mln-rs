@@ -12,6 +12,7 @@ use std::time::Duration;
 use mln_frame_pacer::{FramePacer, RefreshWaiter};
 use mln_map::LogicalExtent;
 use mln_renderer::query::{RenderedQueryOptions, SourceQueryOptions};
+use mln_style::Source;
 use mln_util::error::Error;
 use mln_util::feature::Feature;
 use mln_util::image::PremultipliedImage;
@@ -1579,55 +1580,21 @@ impl RenderSession {
         self.operation(move |worker, _| worker.renderer()?.query_source_features(&source_id, &options))
     }
 
-    /// The clusters and points that a cluster of a clustered GeoJSON source
-    /// splits into at the next zoom level. `cluster_id` is a cluster
-    /// feature's `cluster_id` property.
+    /// Runs `read` on the source `source_id` as the session's most recent
+    /// render attempt had it, on the session's thread, for a query that
+    /// reads a source's data, such as a GeoJSON source's clusters.
     ///
-    /// The query reads the source as the session's most recent render
-    /// attempt had it. A cluster ID belongs to one version of the source's
-    /// data, so query the features again after the data changes.
-    ///
-    /// Completes with [`ErrorKind::NotFound`](mln_util::ErrorKind) when that
-    /// render had no source `source_id`, or the source has no cluster
-    /// `cluster_id`, and with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind)
-    /// when the source isn't a clustered GeoJSON source.
-    pub fn cluster_children(
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an
+    /// empty `source_id`, and completes with
+    /// [`ErrorKind::NotFound`](mln_util::ErrorKind) when that render had no
+    /// source `source_id`, or with what `read` fails with.
+    pub fn query_rendered_source<T: Send + 'static>(
         &self,
         source_id: impl Into<String>,
-        cluster_id: u32,
-    ) -> Result<Completion<Vec<feature::Feature<f64>>>, Error> {
+        read: impl FnOnce(&Source) -> Result<T, Error> + Send + 'static,
+    ) -> Result<Completion<T>, Error> {
         let source_id = source_id_of(source_id)?;
-        self.operation(move |worker, _| worker.cluster(&source_id, cluster_id, |_, children| Ok(children)))
-    }
-
-    /// The points in a cluster of a clustered GeoJSON source: it skips the
-    /// first `offset`, then holds up to `limit`. It fails as
-    /// [`cluster_children`](Self::cluster_children) does.
-    pub fn cluster_leaves(
-        &self,
-        source_id: impl Into<String>,
-        cluster_id: u32,
-        limit: u32,
-        offset: u32,
-    ) -> Result<Completion<Vec<feature::Feature<f64>>>, Error> {
-        let source_id = source_id_of(source_id)?;
-        self.operation(move |worker, _| {
-            worker.cluster(&source_id, cluster_id, |index, _| index.get_leaves(cluster_id, limit, offset))
-        })
-    }
-
-    /// The zoom level at which a cluster of a clustered GeoJSON source splits
-    /// into two or more clusters or points. It fails as
-    /// [`cluster_children`](Self::cluster_children) does.
-    pub fn cluster_expansion_zoom(
-        &self,
-        source_id: impl Into<String>,
-        cluster_id: u32,
-    ) -> Result<Completion<u8>, Error> {
-        let source_id = source_id_of(source_id)?;
-        self.operation(move |worker, _| {
-            worker.cluster(&source_id, cluster_id, |index, _| index.get_cluster_expansion_zoom(cluster_id))
-        })
+        self.operation(move |worker, _| worker.rendered_source(&source_id, read))
     }
 
     /// Detaches the session from its map and frees its graphics objects. The

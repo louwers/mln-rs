@@ -12,9 +12,13 @@ use mln_style::source_type::{SourceTypeInfo, StyleSourceType};
 use mln_util::constants;
 use mln_util::range::Range;
 
+#[cfg(feature = "runtime")]
+pub use self::commands::{CustomSourceCallbacks, CustomSourceCommands};
 use self::provider::CustomProvider;
 use crate::geojson::TileFeatures;
 
+#[cfg(feature = "runtime")]
+mod commands;
 pub mod geometry;
 pub(crate) mod origin;
 pub mod provider;

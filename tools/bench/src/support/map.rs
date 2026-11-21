@@ -14,7 +14,7 @@ pub(crate) use mln_bench_workload::paths::{tile_at, tile_center};
 use mln_headless::HeadlessFrontend;
 use mln_map::{CameraOptions, Map, MapEvent, MapMode, MapOptions, RenderFrameStatus, RenderMode};
 use mln_runtime::{BackendRef, Device};
-use mln_sources::geojson::{GeoJSONOptions, GeoJsonSourceType, create_geojson_data, geojson_source};
+use mln_sources::geojson::{GeoJSONOptions, GeoJsonSourceType, create_geojson_data, geojson_source, parse_geojson};
 use mln_storage::FileSource;
 use mln_util::pool::Pool;
 use mln_util::queue::Queue;
@@ -351,7 +351,7 @@ impl HeadlessMap {
     /// it, indexes it for tiling and gives it to the source. The source's
     /// tiles are cut on the renderer's pool, the map's.
     pub(crate) fn set_geojson(&mut self, id: &str, json: &str) {
-        let geojson = mln_runtime::bench::parse_geojson(json).expect("GeoJSON");
+        let geojson = parse_geojson(json).expect("GeoJSON");
         let data = create_geojson_data(geojson, &GeoJSONOptions::default_options()).expect("GeoJSON that tiles");
         self.map
             .edit_style(|style| style.apply(GeoJsonSourceType::set_data(id, Some(data))))

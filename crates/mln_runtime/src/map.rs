@@ -32,7 +32,7 @@ use crate::render::{
     Abandoner, AttachOptions, RenderSession, RenderTarget, SessionId, SessionQueue, SessionShared, Worker, worker_post,
 };
 use crate::runtime::{CoreQueue, Outbox, Runtime, RuntimeCore, RuntimeShared, post, post_at};
-use crate::style::{CallbackSources, GeoJsonUpdates};
+use crate::style::{KeptForSources, SourceDataUpdates};
 
 /// The ID of a map, unique within its runtime.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -1095,8 +1095,9 @@ impl Map {
     /// [`ErrorKind::NotFound`](mln_util::ErrorKind) when the style has no
     /// such source, and [`ErrorKind::InvalidState`](mln_util::ErrorKind)
     /// when a layer uses it or the style isn't loaded. The source's features
-    /// lose their state, and a custom source's callbacks drop before the
-    /// completion.
+    /// lose their state, and what the map kept for the source
+    /// ([`add_style_source_keeping`](Self::add_style_source_keeping)) drops
+    /// before the completion.
     pub fn remove_style_source(&self, source_id: impl Into<String>) -> Result<Completion<Applied>, Error> {
         let source_id = source_id.into();
         self.send(
@@ -1552,10 +1553,10 @@ pub(crate) struct MapEntry {
     flush_pending: FlushFlag,
     /// The camera commands whose change hasn't ended.
     camera_commands: HashMap<CameraCommandId, Resolver<TransitionEnd>>,
-    /// The callbacks of the custom sources that commands added.
-    pub(crate) callback_sources: CallbackSources,
-    /// The GeoJSON data that commands set and that is still being built.
-    pub(crate) geojson_updates: GeoJsonUpdates,
+    /// What the map keeps for the sources that commands added.
+    pub(crate) kept_for_sources: KeptForSources,
+    /// The data that commands gave sources and that is still being prepared.
+    pub(crate) source_data_updates: SourceDataUpdates,
     /// The repaint posted for when the map changes next on its own
     /// ([`mln_map::Map::repaint_at`]).
     repaint: Option<(Instant, TimedTask)>,
@@ -1658,8 +1659,8 @@ pub(crate) fn create(
             session: None,
             flush_pending,
             camera_commands: HashMap::default(),
-            callback_sources: CallbackSources::default(),
-            geojson_updates: GeoJsonUpdates::default(),
+            kept_for_sources: KeptForSources::default(),
+            source_data_updates: SourceDataUpdates::default(),
             repaint: None,
         },
     );

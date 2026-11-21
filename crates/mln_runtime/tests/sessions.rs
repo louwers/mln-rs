@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::channel;
 
 use mln_map::{AnimationOptions, CameraOptions, CameraUpdate, CameraUpdateMode, MapEvent, MapMode, TileOperation};
+use mln_rs::ClusterQueries;
 use mln_rs::mln_layers::Custom;
 use mln_runtime::{
     AttachOptions, DemandMode, Device, DeviceOptions, Driver, ErrorKind, EventMask, FrameDemand, FrameDisposition,

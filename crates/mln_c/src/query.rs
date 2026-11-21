@@ -4,6 +4,7 @@
 use std::sync::Arc;
 
 use ::mln_runtime::{RenderSession, RenderedQueryGeometry, RenderedQueryOptions, SourceQueryOptions};
+use mln_sources::ClusterQueries;
 use mln_style::expression::Functions;
 use mln_style::filter::Filter;
 use mln_util::geo::ScreenCoordinate;
