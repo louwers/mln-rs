@@ -17,7 +17,7 @@
 use mln_gfx::shaders::source::glsl::Glsl;
 
 /// The start of every vertex stage.
-pub(crate) const PRELUDE_VERTEX: &str = r#"
+pub(crate) const PRELUDE_VERTEX: &str = r"
 
 #define M_PI 3.1415926535897932384626433832795
 
@@ -226,7 +226,7 @@ vec4 projectTileFor3D(vec2 pos, float elevation, ProjectionUBO projection) {
 
 #endif
 
-"#;
+";
 
 /// The start of every fragment stage.
 pub(crate) const PRELUDE_FRAGMENT: &str = r"
