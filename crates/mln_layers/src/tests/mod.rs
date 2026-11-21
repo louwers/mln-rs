@@ -27,9 +27,7 @@ fn with_context(f: impl FnOnce(&mut dyn mln_gfx::gpu::Gpu, &mut mln_render::draw
     let mut backend = mln_webgpu::RendererBackend::new(&device);
     let gpu = backend.gpu();
     gpu.add_shader_sources(&crate::shader_sources());
-    let mut context = mln_render::draw::Context::new(*gpu.caps(), 1.0);
-    f(gpu, &mut context);
-    context.tear_down(gpu);
+    mln_render::testing::with_context(gpu, 1.0, f);
 }
 
 /// The built-in expression functions and the layer types of this crate, as

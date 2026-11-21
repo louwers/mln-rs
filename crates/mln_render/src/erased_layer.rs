@@ -51,19 +51,15 @@ impl<T: LayerType> EvaluatedLayer<T> {
     }
 
     /// The values of the layer `style` before its first evaluation: its
-    /// paint properties' defaults, in no pass. The engine evaluates a
-    /// layer's values; this is public for tests.
-    #[doc(hidden)]
+    /// paint properties' defaults, in no pass.
     #[must_use]
-    pub fn new(style: Arc<LayerStyle<T>>) -> Self {
+    pub(crate) fn new(style: Arc<LayerStyle<T>>) -> Self {
         EvaluatedLayer::with_paint(style, Default::default())
     }
 
     /// The values of the layer `style` with its paint properties evaluated
-    /// to `paint`, without a cross-fade or render passes. Public for tests,
-    /// as [`new`](Self::new) is.
-    #[doc(hidden)]
-    pub fn with_paint(style: Arc<LayerStyle<T>>, paint: <T::PaintProperties as PaintSet>::Evaluated) -> Self {
+    /// to `paint`, without a cross-fade or render passes.
+    pub(crate) fn with_paint(style: Arc<LayerStyle<T>>, paint: <T::PaintProperties as PaintSet>::Evaluated) -> Self {
         EvaluatedLayer { style, paint, crossfade: CrossfadeParameters::default(), render_passes: RenderPass::NONE }
     }
 }

@@ -31,9 +31,9 @@ font-face-shaper = []
 # `bench`, the entry points to internal stages that the benchmarks
 # (tools/bench) measure. Not API: hidden from the documentation.
 bench = []
-# `testing`, the drivers of a source type's tiles that the tests of the
-# crates that add source types (mln_sources) run them through. Not API:
-# hidden from the documentation.
+# `testing`, what the tests of the crates that add layer and source types
+# (mln_layers, mln_sources) drive the engine's parts with. Not API: hidden
+# from the documentation.
 testing = []
 
 [dependencies]
