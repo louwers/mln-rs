@@ -38,7 +38,7 @@ mod transition;
 use gesture::GestureState;
 pub use terrain::TerrainGround;
 pub(crate) use terrain::{project_on_ground, unproject_on_ground};
-use transition::{FrameFn, JointEnd, Transition};
+use transition::{Along, FrameFn, JointEnd, Transition};
 
 use crate::map_event::{CameraChange, CameraChangeSource};
 
@@ -432,7 +432,7 @@ impl Transform {
                 bearing: Some(end.bearing),
                 ..Default::default()
             };
-            self.start_transition(&fields, animation, frame, Box::new(|t| t), duration, false);
+            self.start_transition(&fields, animation, frame, Along::Linear, duration, false);
             return Ok(());
         }
 

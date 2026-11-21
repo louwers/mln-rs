@@ -10,7 +10,7 @@ use mln_util::geo::{EdgeInsets, LatLngBounds, WrapMode};
 use mln_util::interpolate::interpolate;
 use mln_util::projection::Projection;
 
-use super::transition::{AlongFn, FrameFn};
+use super::transition::{Along, FrameFn};
 use super::{
     CameraCommandId, Transform, frame_edge_insets, frame_unproject, lat_lng, nanos_from_secs, normalize_angle,
 };
@@ -248,7 +248,7 @@ impl Transform {
         } else {
             *input_camera
         };
-        self.start_transition(&fields, animation, frame, Box::new(|t| t), duration, false);
+        self.start_transition(&fields, animation, frame, Along::Linear, duration, false);
     }
 
     /// This method implements an “optimal path” animation, as detailed in:
@@ -471,14 +471,12 @@ impl Transform {
                 r0.cosh() / (r0 + rho * s).cosh()
             }
         };
-        // u(s): Returns the distance along the flight path as projected onto
-        // the ground plane, measured in pixels from the world image origin at
-        // the initial scale.
-        let u = move |s: f64| -> f64 {
-            if is_close { 0.0 } else { w0 * (r0.cosh() * (r0 + rho * s).tanh() - r0.sinh()) / rho2 / u1 }
-        };
         // S: Total length of the flight path, measured in ρ-screenfuls.
         let total_s = if is_close { (w1 / w0).ln().abs() / rho } else { (r1 - r0) / rho };
+        // u(s): The distance along the flight path as projected onto the
+        // ground plane, over its length, at s = k S. The altitude over
+        // terrain follows it, or the time where the center stays.
+        let along = if is_close { Along::Linear } else { Along::Flight { w0, r0, rho, u1, total_s } };
 
         let duration = if let Some(duration) = animation.duration {
             duration
@@ -516,23 +514,12 @@ impl Transform {
             0.0
         };
 
-        // The altitude follows the center along the path, or the time where
-        // the center stays.
-        let along: AlongFn = Box::new(move |k: f64| {
-            if k == 1.0 {
-                1.0
-            } else if is_close {
-                k
-            } else {
-                u(k * total_s)
-            }
-        });
-
         let frame: FrameFn = Box::new(move |_: &TransformState, k: f64| {
             // s: The distance traveled along the flight path, measured in
             // ρ-screenfuls.
             let s = k * total_s;
-            let us = if k == 1.0 { 1.0 } else { u(s) };
+            // u(s), or nothing where the center stays.
+            let us = if is_close && k < 1.0 { 0.0 } else { along.share(k) };
 
             let (frame_lat_lng, frame_zoom) = if globe {
                 let mut frame_lat_lng = lat_lng_end;

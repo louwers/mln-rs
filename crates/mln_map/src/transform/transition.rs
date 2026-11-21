@@ -29,8 +29,29 @@ pub(super) type FrameFn = Box<dyn Fn(&TransformState, f64) -> CameraOptions>;
 
 /// A command's share of the way to its end center at an eased progress,
 /// which the altitude over terrain follows while the command times it
-/// ([`Transform::ease_altitude`]): 1 at its end.
-pub(super) type AlongFn = Box<dyn Fn(f64) -> f64>;
+/// ([`Transform::ease_altitude`]).
+#[derive(Clone, Copy, Debug)]
+pub(super) enum Along {
+    /// The eased progress itself.
+    Linear,
+    /// The distance along a flight's path over its length, van Wijk's u(s)
+    /// with the flight's parameters (see `Transform::fly`).
+    Flight { w0: f64, r0: f64, rho: f64, u1: f64, total_s: f64 },
+}
+
+impl Along {
+    /// The share at the eased progress `k`: 1 at its end.
+    pub(super) fn share(self, k: f64) -> f64 {
+        match self {
+            _ if k == 1.0 => 1.0,
+            Along::Linear => k,
+            Along::Flight { w0, r0, rho, u1, total_s } => {
+                let s = k * total_s;
+                w0 * (r0.cosh() * (r0 + rho * s).tanh() - r0.sinh()) / (rho * rho) / u1
+            }
+        }
+    }
+}
 
 /// One camera command.
 pub(super) struct Transition {
@@ -48,7 +69,7 @@ pub(super) struct Transition {
     pub(super) duration: Duration,
     animation: AnimationOptions,
     frame: FrameFn,
-    along: AlongFn,
+    along: Along,
     anchor: Option<ScreenCoordinate>,
     anchor_lat_lng: LatLng,
     /// The height in meters of the plane the anchor holds its location on
@@ -90,7 +111,7 @@ impl Transition {
             duration,
             animation: *animation,
             frame,
-            along: Box::new(|k| k),
+            along: Along::Linear,
             anchor: None,
             anchor_lat_lng: LatLng::default(),
             anchor_height: 0.0,
@@ -200,10 +221,10 @@ impl Transition {
         if t == 1.0 { 1.0 } else { ease.solve(t, 0.001) }
     }
 
-    /// The command's share of the way to its end at `now` ([`AlongFn`]): 0
+    /// The command's share of the way to its end at `now` ([`Along`]): 0
     /// before it starts, 1 from its end on.
     pub(super) fn share(&self, now: Option<Instant>) -> f64 {
-        (self.along)(self.eased_progress(now))
+        self.along.share(self.eased_progress(now))
     }
 
     /// The time left of the command at `now`: none without a clock.
@@ -355,7 +376,7 @@ impl Transform {
         camera: &CameraOptions,
         animation: &AnimationOptions,
         frame: FrameFn,
-        along: AlongFn,
+        along: Along,
         duration: Duration,
         flight: bool,
     ) {
