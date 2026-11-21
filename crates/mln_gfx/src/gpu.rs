@@ -763,6 +763,53 @@ mod tests {
         assert_eq!(key(&["B=2.0", "A"]).define_values().collect::<Vec<_>>(), [("A", ""), ("B", "2.0")]);
     }
 
+    // A fill extrusion program's terrain variant reads its own attributes,
+    // in their order, and then the centroid, per vertex or per instance as
+    // its walls step, but the pulled walls, which read it from a storage
+    // buffer; its other variants, and every other program's, read the
+    // program's.
+    #[test]
+    fn only_a_fill_extrusions_terrain_variant_reads_the_centroid() {
+        use crate::projection_variant::ProjectionVariant;
+        use crate::shaders::program_parameters::ProgramParameters;
+        use crate::shaders::shader_defines::ID_FILL_EXTRUSION_CENTROID_ATTRIBUTE as CENTROID;
+
+        let parameters = ProgramParameters::new(1.0, false);
+        let extrusions = [
+            &programs::FILL_EXTRUSION,
+            &programs::FILL_EXTRUSION_INSTANCED,
+            &programs::FILL_EXTRUSION_WALL,
+            &programs::FILL_EXTRUSION_PULLED,
+            &programs::FILL_EXTRUSION_PATTERN,
+            &programs::FILL_EXTRUSION_PATTERN_INSTANCED,
+            &programs::FILL_EXTRUSION_PATTERN_WALL,
+        ];
+        for program in extrusions.into_iter().chain([&programs::FILL, &programs::CIRCLE]) {
+            for &variant in programs::projection_variants(program) {
+                let key = program.variant_key(&parameters, program.properties, variant);
+                let (attributes, instances) = (key.attributes(), key.instance_attributes());
+                let reads = variant == ProjectionVariant::Terrain
+                    && extrusions.contains(&program)
+                    && program != &programs::FILL_EXTRUSION_PULLED;
+                let ids = |attributes: &[(usize, AttributeDataType)]| -> Vec<usize> {
+                    attributes.iter().map(|&(id, _)| id).collect()
+                };
+                let (own, own_instances) = (ids(program.attributes), ids(program.instance_attributes));
+                let (attributes, instances) = (ids(attributes), ids(instances));
+                let added: Vec<usize> = if instances.len() > own_instances.len() {
+                    assert_eq!(attributes, own, "{program:?} {variant:?}");
+                    assert_eq!(instances[..own_instances.len()], own_instances, "{program:?} {variant:?}");
+                    instances[own_instances.len()..].to_vec()
+                } else {
+                    assert_eq!(instances, own_instances, "{program:?} {variant:?}");
+                    assert_eq!(attributes[..own.len()], own, "{program:?} {variant:?}");
+                    attributes[own.len()..].to_vec()
+                };
+                assert_eq!(added, if reads { vec![CENTROID] } else { vec![] }, "{program:?} {variant:?}");
+            }
+        }
+    }
+
     #[test]
     fn texture_writes_fit_their_region_and_texture() {
         let size = Size { width: 4, height: 2 };
