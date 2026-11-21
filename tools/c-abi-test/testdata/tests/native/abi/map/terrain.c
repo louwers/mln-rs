@@ -67,6 +67,7 @@ static void a_maps_projection_meets_and_reads_the_drawn_ground(void) {
   options.initial_extent =
     (mln_logical_extent){.width = 64, .height = 64, .scale_factor = 1.0};
   options.map_mode = MLN_MAP_MODE_STATIC;
+  options.fields |= MLN_MAP_OPTION_TERRAIN_SKIRT_LENGTH;
   options.terrain_skirt_length = MLN_TERRAIN_SKIRT_LENGTH_NONE;
   mln_map map = mln_test_create_map_with_options(runtime, &options);
   MLN_TEST_AWAIT_OK(mln_map_set_center_clamped_to_ground_enabled(

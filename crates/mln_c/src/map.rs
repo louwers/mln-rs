@@ -16,17 +16,21 @@ use crate::generated::types::{
     MLN_FEATURE_ID_TYPE_DOUBLE, MLN_FEATURE_ID_TYPE_INT, MLN_FEATURE_ID_TYPE_STRING, MLN_FEATURE_ID_TYPE_UINT,
     MLN_FEATURE_STATE_SELECTOR_FEATURE_ID, MLN_MAP_MODE_CONTINUOUS, MLN_MAP_MODE_STATIC, MLN_MAP_MODE_TILE,
     MLN_MAP_OPTION_EVENT_MASK, MLN_MAP_OPTION_LOCAL_IDEOGRAPHS_ENABLED, MLN_MAP_OPTION_SYSTEM_FONTS_ENABLED,
-    MLN_MAP_OPTION_TILE_CACHE_ENABLED, MLN_TERRAIN_SKIRT_LENGTH_AUTO, MLN_TERRAIN_SKIRT_LENGTH_NONE,
-    MLN_TILE_LOD_MODE_DEFAULT, MLN_TILE_LOD_MODE_DISTANCE, mln_buffer_view, mln_camera_bounds, mln_completion,
-    mln_diagnostic, mln_feature_state_selector, mln_free_camera, mln_lat_lng_bounds, mln_logical_extent, mln_map,
-    mln_map_options, mln_map_snapshot, mln_map_tile_settings, mln_quaternion, mln_runtime, mln_runtime_event_flags,
-    mln_status, mln_vec3,
+    MLN_MAP_OPTION_TERRAIN_SKIRT_LENGTH, MLN_MAP_OPTION_TILE_CACHE_ENABLED, MLN_TERRAIN_SKIRT_LENGTH_AUTO,
+    MLN_TERRAIN_SKIRT_LENGTH_NONE, MLN_TILE_LOD_MODE_DEFAULT, MLN_TILE_LOD_MODE_DISTANCE, mln_buffer_view,
+    mln_camera_bounds, mln_completion, mln_diagnostic, mln_feature_state_selector, mln_free_camera, mln_lat_lng_bounds,
+    mln_logical_extent, mln_map, mln_map_options, mln_map_snapshot, mln_map_tile_settings, mln_quaternion, mln_runtime,
+    mln_runtime_event_flags, mln_status, mln_vec3,
 };
 use crate::handles::{self, HandleKind, HandleTable};
 use crate::runtime::{self, MapHandles};
 use crate::{abi, buffer, geo, parse_thread, projection};
 
-abi::versioned!(mln_map_options, mln_map_snapshot, mln_feature_state_selector);
+abi::versioned!(
+    mln_map_options since terrain_skirt_length,
+    mln_map_snapshot since center_clamped_to_ground_enabled,
+    mln_feature_state_selector,
+);
 
 pub(crate) struct MapObject {
     pub(crate) map: ::mln_runtime::Map,
@@ -134,7 +138,8 @@ unsafe fn map_options(options: *const mln_map_options) -> Result<(MapOptions, f6
         MLN_MAP_OPTION_EVENT_MASK
             | MLN_MAP_OPTION_TILE_CACHE_ENABLED
             | MLN_MAP_OPTION_SYSTEM_FONTS_ENABLED
-            | MLN_MAP_OPTION_LOCAL_IDEOGRAPHS_ENABLED,
+            | MLN_MAP_OPTION_LOCAL_IDEOGRAPHS_ENABLED
+            | MLN_MAP_OPTION_TERRAIN_SKIRT_LENGTH,
         "mln_map_options.fields",
     )?;
     let event_mask = match fields.get(MLN_MAP_OPTION_EVENT_MASK, options.event_mask) {
@@ -151,12 +156,18 @@ unsafe fn map_options(options: *const mln_map_options) -> Result<(MapOptions, f6
         MLN_MAP_MODE_TILE => MapMode::Tile,
         _ => MapMode::Continuous,
     };
-    let terrain_skirt_length = match abi::enum_value(
-        options.terrain_skirt_length,
-        MLN_TERRAIN_SKIRT_LENGTH_AUTO..=MLN_TERRAIN_SKIRT_LENGTH_NONE,
-        "terrain_skirt_length",
-    )? {
-        MLN_TERRAIN_SKIRT_LENGTH_NONE => TerrainSkirtLength::None,
+    let terrain_skirt_length = match fields
+        .get(MLN_MAP_OPTION_TERRAIN_SKIRT_LENGTH, options.terrain_skirt_length)
+        .map(|length| {
+            abi::enum_value(
+                length,
+                MLN_TERRAIN_SKIRT_LENGTH_AUTO..=MLN_TERRAIN_SKIRT_LENGTH_NONE,
+                "terrain_skirt_length",
+            )
+        })
+        .transpose()?
+    {
+        Some(MLN_TERRAIN_SKIRT_LENGTH_NONE) => TerrainSkirtLength::None,
         _ => TerrainSkirtLength::Auto,
     };
     // SAFETY: the caller's contract.
@@ -832,7 +843,18 @@ pub(crate) mod tests {
             (mln_map_options { fields: 1 << 9, ..options(1.0) }, "mln_map_options.fields"),
             (mln_map_options { fields: MLN_MAP_OPTION_EVENT_MASK, event_mask: 1, ..options(1.0) }, "event_mask"),
             (mln_map_options { fallback_font_faces: view("{}"), ..options(1.0) }, "fallback_font_faces is invalid"),
-            (mln_map_options { terrain_skirt_length: 9, ..options(1.0) }, "terrain_skirt_length"),
+            (
+                mln_map_options {
+                    fields: MLN_MAP_OPTION_TERRAIN_SKIRT_LENGTH,
+                    terrain_skirt_length: 9,
+                    ..options(1.0)
+                },
+                "terrain_skirt_length 9 is out of range",
+            ),
+            (
+                mln_map_options { size: <mln_map_options as abi::Versioned>::FIRST_SIZE as u32 - 1, ..options(1.0) },
+                "mln_map_options.size is too small",
+            ),
         ] {
             // SAFETY: local arguments.
             let status = unsafe {
@@ -879,16 +901,30 @@ pub(crate) mod tests {
         assert!(read(mln_map_options { local_ideographs_enabled: true, ..off }));
     }
 
+    /// The skirt length is read only with its bit, and a caller built
+    /// against the headers before it, whose options end before it or leave
+    /// its bytes as padding, gets the default.
     #[test]
     fn terrain_skirts_are_auto_unless_the_options_say_none() {
         let read = |options: mln_map_options| {
-            // SAFETY: local options without views.
+            // SAFETY: local options without views, of at least the size they
+            // declare.
             let (options, _) = unsafe { map_options(&raw const options) }.unwrap();
             options.map.terrain_skirt_length
         };
         assert_eq!(read(options(1.0)), TerrainSkirtLength::Auto);
-        let none = mln_map_options { terrain_skirt_length: MLN_TERRAIN_SKIRT_LENGTH_NONE, ..options(1.0) };
+        let none = mln_map_options {
+            fields: MLN_MAP_OPTION_TERRAIN_SKIRT_LENGTH,
+            terrain_skirt_length: MLN_TERRAIN_SKIRT_LENGTH_NONE,
+            ..options(1.0)
+        };
         assert_eq!(read(none), TerrainSkirtLength::None);
+        for garbage in [MLN_TERRAIN_SKIRT_LENGTH_NONE, 9, u32::MAX] {
+            let unset = mln_map_options { terrain_skirt_length: garbage, ..options(1.0) };
+            assert_eq!(read(unset), TerrainSkirtLength::Auto, "{garbage}");
+            let older = mln_map_options { size: <mln_map_options as abi::Versioned>::FIRST_SIZE as u32, ..unset };
+            assert_eq!(read(older), TerrainSkirtLength::Auto, "{garbage}");
+        }
     }
 
     #[test]
@@ -896,6 +932,14 @@ pub(crate) mod tests {
         let runtime = create();
         let map = create_map(runtime, &options(1.0));
         assert!(snapshot(map).center_clamped_to_ground_enabled);
+        // A caller built against the headers before the setting declares
+        // the snapshot's size then.
+        // SAFETY: zeros are a valid snapshot to overwrite.
+        let mut older: mln_map_snapshot = unsafe { core::mem::zeroed() };
+        older.size = <mln_map_snapshot as abi::Versioned>::FIRST_SIZE as u32;
+        // SAFETY: a local snapshot of at least the size it declares.
+        assert_eq!(unsafe { mln_map_get_snapshot(map, &raw mut older, NO_DIAGNOSTIC) }, MLN_STATUS_OK);
+        assert_eq!(older.view.extent.width, 64);
         for enabled in [false, true] {
             let waiter = Waiter::new();
             // SAFETY: a local completion.

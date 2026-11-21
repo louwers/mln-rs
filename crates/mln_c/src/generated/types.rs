@@ -1081,6 +1081,7 @@ pub const MLN_MAP_OPTION_EVENT_MASK: mln_map_option_field = 1;
 pub const MLN_MAP_OPTION_TILE_CACHE_ENABLED: mln_map_option_field = 2;
 pub const MLN_MAP_OPTION_SYSTEM_FONTS_ENABLED: mln_map_option_field = 4;
 pub const MLN_MAP_OPTION_LOCAL_IDEOGRAPHS_ENABLED: mln_map_option_field = 8;
+pub const MLN_MAP_OPTION_TERRAIN_SKIRT_LENGTH: mln_map_option_field = 16;
 /// The fields that mln_map_options sets.
 pub type mln_map_option_field = u32;
 /// A set of mln_map_option_field bits.
@@ -1126,7 +1127,8 @@ pub struct mln_map_options {
  from a glyph PBF downloaded for every few characters. Without it, they
  do.*/
     pub local_ideographs_enabled: bool,
-    /// The skirts of the style's terrain, for the map's lifetime.
+    /** The skirts of the style's terrain, for the map's lifetime. Without it,
+ MLN_TERRAIN_SKIRT_LENGTH_AUTO.*/
     pub terrain_skirt_length: mln_terrain_skirt_length,
 }
 /// A point on the screen, in logical pixels from the map's top-left corner.

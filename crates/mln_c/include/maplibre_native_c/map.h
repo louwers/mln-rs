@@ -217,6 +217,7 @@ typedef enum MLN_BINDING("kind=bitmask") mln_map_option_field : uint32_t {
   MLN_MAP_OPTION_TILE_CACHE_ENABLED = 1U << 1U,
   MLN_MAP_OPTION_SYSTEM_FONTS_ENABLED = 1U << 2U,
   MLN_MAP_OPTION_LOCAL_IDEOGRAPHS_ENABLED = 1U << 3U,
+  MLN_MAP_OPTION_TERRAIN_SKIRT_LENGTH = 1U << 4U,
 } mln_map_option_field;
 
 /** A set of mln_map_option_field bits. */
@@ -277,8 +278,12 @@ typedef struct mln_map_options {
    */
   bool local_ideographs_enabled
     MLN_BINDING("mask=fields;bit=MLN_MAP_OPTION_LOCAL_IDEOGRAPHS_ENABLED");
-  /** The skirts of the style's terrain, for the map's lifetime. */
-  mln_terrain_skirt_length terrain_skirt_length;
+  /**
+   * The skirts of the style's terrain, for the map's lifetime. Without it,
+   * MLN_TERRAIN_SKIRT_LENGTH_AUTO.
+   */
+  mln_terrain_skirt_length terrain_skirt_length
+    MLN_BINDING("mask=fields;bit=MLN_MAP_OPTION_TERRAIN_SKIRT_LENGTH");
 } mln_map_options;
 
 /** A point on the screen, in logical pixels from the map's top-left corner. */

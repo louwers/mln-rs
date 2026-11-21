@@ -22,19 +22,33 @@ pub(crate) unsafe trait Versioned: Copy {
     const FIRST_SIZE: usize = size_of::<Self>();
 }
 
+/// Implements [`Versioned`] for header structs. A struct that has grown
+/// since the headers first published it names its first added member, as in
+/// `mln_map_options since terrain_skirt_length`: its first size is its size
+/// without that member and the ones after it, on every target.
 macro_rules! versioned {
-    ($($ty:ident),+ $(,)?) => {$(
+    ($($ty:ident $(since $added:ident)?),+ $(,)?) => {$(
         const _: () = assert!(core::mem::offset_of!($ty, size) == 0);
         // SAFETY: a bindgen struct of the headers, whose first field is
         // `size` (asserted above) and whose fields are integers, pointers and
         // nullable function pointers.
         unsafe impl $crate::abi::Versioned for $ty {
             const NAME: &'static str = stringify!($ty);
+            $(
+                const FIRST_SIZE: usize =
+                    $crate::abi::size_before(core::mem::offset_of!($ty, $added), align_of::<$ty>());
+            )?
         }
     )+};
 }
 
 pub(crate) use versioned;
+
+/// The size of a struct of alignment `align` whose members end before
+/// `offset`: `offset` up to the next multiple of `align`.
+pub(crate) const fn size_before(offset: usize, align: usize) -> usize {
+    offset.next_multiple_of(align)
+}
 
 versioned!(mln_completion, mln_delivery_queue_options);
 
@@ -202,6 +216,15 @@ mod tests {
         let mut small = Options { size: 0, first: 0, second: 0 };
         // SAFETY: as above.
         assert!(unsafe { write_sized(&raw mut small, &value) }.is_err());
+    }
+
+    #[test]
+    fn a_first_size_ends_at_the_padding_before_the_first_added_member() {
+        // `mln_map_options` before it grew, on x86-64, i686 and wasm32: its
+        // first added member sat in x86-64's trailing padding.
+        assert_eq!(size_before(68, 8), 72);
+        assert_eq!(size_before(56, 4), 56);
+        assert_eq!(size_before(56, 8), 56);
     }
 
     #[test]
