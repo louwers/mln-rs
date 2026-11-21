@@ -347,8 +347,9 @@ impl DrawObjects {
             "a draw of {} draws indexes it didn't upload",
             self.shader.program().name
         );
+        // A draw whose indexes failed to upload draws nothing, and fails.
         let Some(index_buffer) = index_buffer else {
-            return Ok(());
+            return Err(GpuError::Invalid("its indexes aren't uploaded".to_owned()));
         };
 
         let shader_id = match self.shader_id {
