@@ -2,7 +2,6 @@
 // validation, stale and foreign handles, and release.
 
 #include <math.h>
-#include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -124,15 +123,8 @@ static void runtime_calls_reject_a_value_that_names_no_runtime(void) {
   mln_test_destroy_runtime(live);
 }
 
-// The size of mln_map_options in the headers before it gained
-// `terrain_skirt_length`, which a caller built against them declares.
-#define MAP_OPTIONS_FIRST_SIZE                                    \
-  ((offsetof(mln_map_options, terrain_skirt_length) +             \
-    _Alignof(mln_map_options) - 1) /                              \
-   _Alignof(mln_map_options) * _Alignof(mln_map_options))
-
 static void map_options_with_small_size(void* descriptor) {
-  ((mln_map_options*)descriptor)->size = MAP_OPTIONS_FIRST_SIZE - 1;
+  ((mln_map_options*)descriptor)->size = sizeof(mln_map_options) - 1;
 }
 
 static void map_options_with_unknown_mode(void* descriptor) {
@@ -208,16 +200,9 @@ static void map_creation_validates_its_options(void) {
   mln_test_destroy_runtime(runtime);
 }
 
-// A caller built against the headers before `terrain_skirt_length` declares
-// the options' size then, and leaves the bytes after its last member unset,
-// so the library reads the skirt length only with its bit.
-static void map_creation_accepts_options_without_the_skirt_length(void) {
+// The library reads the skirt length only with its bit.
+static void map_creation_ignores_the_skirt_length_without_its_bit(void) {
   mln_runtime runtime = mln_test_create_runtime();
-  mln_map_options older = mln_test_map_options();
-  older.size = (uint32_t)MAP_OPTIONS_FIRST_SIZE;
-  older.terrain_skirt_length = 9;
-  mln_test_destroy_map(mln_test_create_map_with_options(runtime, &older));
-
   mln_map_options unset = mln_test_map_options();
   unset.terrain_skirt_length = 9;
   mln_test_destroy_map(mln_test_create_map_with_options(runtime, &unset));
@@ -543,7 +528,7 @@ MLN_TEST_GROUP {
   RUN_TEST(null_options_create_a_runtime_with_the_defaults);
   RUN_TEST(runtime_calls_reject_a_value_that_names_no_runtime);
   RUN_TEST(map_creation_validates_its_options);
-  RUN_TEST(map_creation_accepts_options_without_the_skirt_length);
+  RUN_TEST(map_creation_ignores_the_skirt_length_without_its_bit);
   RUN_TEST(map_creation_checks_its_output);
   RUN_TEST(style_functions_reject_null_inputs);
   RUN_TEST(disposal_waits_for_children_and_retires_callback_state);
