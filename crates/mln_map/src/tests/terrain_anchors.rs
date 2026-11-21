@@ -427,3 +427,49 @@ fn a_tilt_that_carries_its_anchor_into_the_sky_turns_around_the_center() {
     });
     assert!(held > 5 && skyward > 5, "{held} frames held the anchor, and {skyward} didn't");
 }
+
+/// Under a roll, where the horizon isn't a row of the screen, a turn around
+/// a point whose line of sight doesn't descend to the ground turns around
+/// the view's center, as a turn without an anchor does, and a turn around a
+/// point on the ground holds that ground under it.
+#[test]
+fn a_turn_under_a_roll_holds_only_a_point_on_the_ground() {
+    let run_loop = Queue::<()>::new();
+    let rolled = CameraOptions { pitch: Some(80.0), roll: Some(90.0), ..Default::default() };
+    let turn = |anchor: Option<DVec2>| {
+        let (mut map, _) = map_over(Some(&slope()), &run_loop);
+        map.jump_to(&rolled);
+        let delta = CameraDelta {
+            bearing: Some(15.0),
+            anchor: anchor.map(|anchor| ScreenCoordinate::new(anchor.x, anchor.y)),
+            phase: GesturePhase::Begin,
+            ..Default::default()
+        };
+        map.apply_camera_delta(&delta).unwrap();
+        map
+    };
+    let (map, _) = map_over(Some(&slope()), &run_loop);
+    let mut map = map;
+    map.jump_to(&rolled);
+    let view = map.transform_state().view();
+    let descends = |point: DVec2| {
+        let (near, far) = view.line_of_sight(&view_point(view, point)).unwrap();
+        far.z < near.z
+    };
+    // The roll puts the sky on one side of the screen and the ground on the
+    // other.
+    let (left, right) = (DVec2::new(20.0, 480.0), DVec2::new(492.0, 480.0));
+    let (sky, ground) = if descends(left) { (right, left) } else { (left, right) };
+    assert!(!descends(sky) && descends(ground), "the roll turns the horizon upright");
+    assert!(view.ground_under(&view_point(view, sky), &*map.ground().unwrap()).is_none());
+    let horizon_row = view.padding().center_in(view.size()).y - view.mercator_horizon();
+    assert!(sky.y > horizon_row, "below the row of the unrolled horizon");
+
+    let camera = |map: &Map| map.transform_state().camera_options(None);
+    assert_eq!(camera(&turn(None)), camera(&turn(Some(sky))), "a turn around the sky");
+
+    let grabbed = ground_under(&map, ground);
+    let map = turn(Some(ground));
+    let error = on_screen(&map, grabbed.world, grabbed.height).distance(ground);
+    assert!(error < 0.01, "the ground moved {error} px from the anchor");
+}

@@ -396,14 +396,16 @@ impl Transform {
 
 /// Whether a move can hold a location on the plane `height` meters above
 /// sea level under `point` of `view`, measured from the bottom edge (y up):
-/// whether the point's line of sight descends, below the horizon, and the
-/// plane stands less than nine tenths of the way up from the center to the
-/// eye, where the line meets it at a depth deep enough to solve on.
+/// whether the point's line of sight descends and meets the plane in front
+/// of the eye, before the far plane, where the view draws the ground, and
+/// the plane stands less than nine tenths of the way up from the center to
+/// the eye, where the line meets it at a depth deep enough to solve on. It
+/// asks the line itself, which a roll turns away from the screen's rows.
 pub(super) fn sees_plane(view: &View, point: &ScreenCoordinate, height: f64) -> bool {
-    let center = view.padding().center_in(view.size());
-    let below_horizon = f64::from(view.size().height) - point.y > center.y - view.mercator_horizon();
+    let Some((near, far)) = view.line_of_sight(point) else { return false };
     let altitude = view.center_altitude();
-    below_horizon && height - altitude < MAX_ANCHOR_RISE * (view.eye_position().z - altitude)
+    let eye = view.eye_position().z;
+    far.z < near.z && far.z <= height && height < eye && height - altitude < MAX_ANCHOR_RISE * (eye - altitude)
 }
 
 /// The location under `point` of `view`, measured from the bottom edge (y

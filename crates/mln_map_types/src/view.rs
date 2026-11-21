@@ -963,7 +963,8 @@ impl View {
     /// point at zoom 0 (x in the world copy the view shows it in) and its
     /// height in meters. `None` on the globe, while the view shows nothing,
     /// and for a point that isn't finite.
-    pub(crate) fn line_of_sight(&self, point: &ScreenCoordinate) -> Option<(DVec3, DVec3)> {
+    #[must_use]
+    pub fn line_of_sight(&self, point: &ScreenCoordinate) -> Option<(DVec3, DVec3)> {
         if self.is_globe() || self.matrices.projection == DMat4::ZERO {
             return None;
         }
