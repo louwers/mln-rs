@@ -1,6 +1,6 @@
 // The descriptor sets of every pipeline, and the binding of each buffer and
-// texture in them, for the packed ids of mln_gfx::shaders::shader_defines
-// (see the crate's doc comment).
+// texture in them, for the ids in the ranges of
+// mln_gfx::shaders::shader_defines (see the crate's doc comment).
 //
 // - A layer's uniform buffer binds at its id less one: the first one of a
 //   layer has the id 5, or 6 for the layers with a tile properties storage

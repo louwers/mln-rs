@@ -2,17 +2,18 @@
 
 use mln_gfx::shaders::layer_ubo::{GlobalPaintParamsUBO, ProjectionUBO};
 use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::shader_defines::{
-    ID_GLOBAL_PAINT_PARAMS_UBO, ID_LINE_BLUR_VERTEX_ATTRIBUTE, ID_LINE_COLOR_VERTEX_ATTRIBUTE, ID_LINE_DASH_TEXTURE,
+use mln_gfx::shaders::shader_defines::{ID_GLOBAL_PAINT_PARAMS_UBO, ID_PROJECTION_UBO};
+use mln_gfx::shaders::source::glsl_es::{Attribute, Glsl, Source, Texture, UniformBlock};
+
+use super::programs;
+use super::programs::{
+    ID_LINE_BLUR_VERTEX_ATTRIBUTE, ID_LINE_COLOR_VERTEX_ATTRIBUTE, ID_LINE_DASH_TEXTURE,
     ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE, ID_LINE_DATA_VERTEX_ATTRIBUTE, ID_LINE_DRAWABLE_UBO,
     ID_LINE_EVALUATED_PROPS_UBO, ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE, ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE,
     ID_LINE_IMAGE_TEXTURE, ID_LINE_OFFSET_VERTEX_ATTRIBUTE, ID_LINE_OPACITY_VERTEX_ATTRIBUTE,
     ID_LINE_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_LINE_PATTERN_TO_VERTEX_ATTRIBUTE, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE,
-    ID_LINE_TILE_PROPS_UBO, ID_LINE_WIDTH_VERTEX_ATTRIBUTE, ID_PROJECTION_UBO,
+    ID_LINE_TILE_PROPS_UBO, ID_LINE_WIDTH_VERTEX_ATTRIBUTE,
 };
-use mln_gfx::shaders::source::glsl_es::{Attribute, Glsl, Source, Texture, UniformBlock};
-
-use super::programs;
 use super::ubo::{
     LineDrawableUBO, LineDrawableUnionUBO, LineEvaluatedPropsUBO, LineGradientDrawableUBO, LinePatternDrawableUBO,
     LinePatternTilePropsUBO, LineSDFDrawableUBO, LineSDFTilePropsUBO, LineTilePropsUnionUBO,

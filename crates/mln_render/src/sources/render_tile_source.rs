@@ -13,11 +13,12 @@ use mln_gfx::gpu::{Gpu, ShaderKey};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::programs;
-use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::shader_defines::{
-    ID_LINE_DATA_VERTEX_ATTRIBUTE, ID_LINE_DRAWABLE_UBO, ID_LINE_EVALUATED_PROPS_UBO,
-    ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, ID_PROJECTION_UBO,
+use mln_gfx::shaders::programs::{
+    ID_TILE_DEBUG_DATA_VERTEX_ATTRIBUTE, ID_TILE_DEBUG_DRAWABLE_UBO, ID_TILE_DEBUG_POS_NORMAL_VERTEX_ATTRIBUTE,
+    ID_TILE_DEBUG_PROPS_UBO,
 };
+use mln_gfx::shaders::segment::SegmentBase;
+use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
 use mln_gfx::shaders::tile_debug_ubo::{TileDebugDrawableElement, TileDebugDrawableUBO, TileDebugPropsUBO};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_map_types::MapDebugOptions;
@@ -99,8 +100,8 @@ fn polyline_objects(
     let mut attrs = VertexAttributeArray::new();
     // The position and normal, then the extrusion data.
     for (id, offset, data_type) in [
-        (ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, offset_of!(LineLayoutVertex, a1) as u32, AttributeDataType::Short2),
-        (ID_LINE_DATA_VERTEX_ATTRIBUTE, offset_of!(LineLayoutVertex, a2) as u32, AttributeDataType::UByte4),
+        (ID_TILE_DEBUG_POS_NORMAL_VERTEX_ATTRIBUTE, offset_of!(LineLayoutVertex, a1) as u32, AttributeDataType::Short2),
+        (ID_TILE_DEBUG_DATA_VERTEX_ATTRIBUTE, offset_of!(LineLayoutVertex, a2) as u32, AttributeDataType::UByte4),
     ] {
         attrs.set_shared(id, SharedAttribute::new(shared.clone(), data_type, offset, stride));
     }
@@ -245,8 +246,8 @@ impl DebugLayer {
 
         let properties = &self.properties;
         let replaced = self.draw_list.finish(&mut self.frame, gpu, parameters.context, |writer| {
-            writer.uniform(ID_LINE_EVALUATED_PROPS_UBO, properties);
-            writer.storage(ID_LINE_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);
+            writer.uniform(ID_TILE_DEBUG_PROPS_UBO, properties);
+            writer.storage(ID_TILE_DEBUG_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);
             writer.storage(ID_PROJECTION_UBO, |uniforms| uniforms.projection);
         });
         if replaced {

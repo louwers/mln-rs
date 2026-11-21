@@ -6,7 +6,6 @@ use std::sync::Arc;
 
 use geometry::Point;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::shader_defines::{ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE, ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE};
 use mln_map_types::MapMode;
 use mln_render::layer::{
     Bucket, BucketBase, EvaluatedLayer, GeometryUpload, GeometryVec, Indexed, PaintPropertyBinder,
@@ -19,6 +18,7 @@ use mln_util::constants::EXTENT;
 use mln_vec_map::VecMap;
 
 use super::Heatmap;
+use super::programs::{ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE, ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE};
 use super::properties::HeatmapPaintProperties;
 use crate::mesh::add_point_quads;
 

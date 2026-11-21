@@ -2,10 +2,10 @@
 
 use mln_gfx::gfx_types::AttributeDataType::Short2;
 use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::shader_defines::{ID_BACKGROUND_IMAGE_TEXTURE, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE};
 use mln_gfx::shaders::source::glsl::{Attribute, Glsl, Source, Texture};
 
 use super::programs;
+use super::programs::{ID_BACKGROUND_IMAGE_TEXTURE, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE};
 
 const BACKGROUND_ATTRIBUTES: &[Attribute] = &[Attribute::new(0, Short2, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE)];
 static BACKGROUND: Source =

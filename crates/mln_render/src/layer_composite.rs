@@ -30,10 +30,11 @@ use mln_gfx::shaders::layer_composite_ubo::{
 };
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::programs;
-use mln_gfx::shaders::shader_defines::{
+use mln_gfx::shaders::programs::{
     ID_LAYER_COMPOSITE_BACKDROP_TEXTURE, ID_LAYER_COMPOSITE_IMAGE_TEXTURE, ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE,
-    ID_LAYER_COMPOSITE_UBO, ID_PROJECTION_UBO, MAX_UBO_COUNT_PER_SHADER,
+    ID_LAYER_COMPOSITE_UBO,
 };
+use mln_gfx::shaders::shader_defines::{ID_PROJECTION_UBO, MAX_UBO_COUNT_PER_SHADER};
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::ColorBlendFactorType;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMode, DrawModeType, StencilMode};

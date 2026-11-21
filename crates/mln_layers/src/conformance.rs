@@ -32,11 +32,8 @@ use mln_gfx::gpu::{
     TextureFormat, TextureId, TextureUsage, VertexAttribute, VertexBufferLayout, VertexStep,
 };
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::programs::CLIPPING_MASK;
-use mln_gfx::shaders::shader_defines::{
-    ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE, ID_BACKGROUND_PROPS_UBO,
-    ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE, ID_PROJECTION_UBO,
-};
+use mln_gfx::shaders::programs::{CLIPPING_MASK, ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE};
+use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
 use mln_gfx::stencil_mode::{StencilMode, Test};
 use mln_gfx::types::StencilOpType;
 use mln_util::Color;
@@ -44,6 +41,9 @@ use mln_util::size::Size;
 
 pub use self::cases::*;
 use crate::background;
+use crate::background::programs::{
+    ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE, ID_BACKGROUND_PROPS_UBO,
+};
 use crate::background::ubo::{BackgroundDrawableUnionUBO, BackgroundPropsUBO};
 
 /// The size of the frame's color texture.

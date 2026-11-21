@@ -11,12 +11,12 @@ use mln_gfx::gpu::{
     read_texels,
 };
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::shader_defines::{
-    ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE, ID_BACKGROUND_PROPS_UBO, ID_PROJECTION_UBO,
-};
+use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::types::DepthFunctionType;
-use mln_layers::background::programs::BACKGROUND;
+use mln_layers::background::programs::{
+    BACKGROUND, ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE, ID_BACKGROUND_PROPS_UBO,
+};
 use mln_layers::background::ubo::{BackgroundDrawableUnionUBO, BackgroundPropsUBO};
 use mln_layers::conformance::{
     clip_mask_and_background, custom_layers, depth_only, foreign_ids, imported_textures, instanced_walls,

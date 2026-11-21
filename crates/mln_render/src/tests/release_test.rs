@@ -6,7 +6,8 @@ use mln_gfx::gpu::{
 };
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::programs;
-use mln_gfx::shaders::shader_defines::{ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE, ID_PROJECTION_UBO};
+use mln_gfx::shaders::programs::ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE;
+use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
 use mln_util::Color;
 use mln_util::size::Size;
 

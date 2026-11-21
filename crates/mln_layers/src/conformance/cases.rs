@@ -13,17 +13,8 @@ use mln_gfx::gpu::{
 };
 use mln_gfx::shaders::layer_ubo::{GlobalPaintParamsUBO, ProjectionUBO};
 use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::programs::CLIPPING_MASK;
-use mln_gfx::shaders::shader_defines::{
-    ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE, ID_BACKGROUND_PROPS_UBO,
-    ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE, ID_FILL_COLOR_VERTEX_ATTRIBUTE, ID_FILL_DRAWABLE_UBO,
-    ID_FILL_EVALUATED_PROPS_UBO, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_DRAWABLE_UBO,
-    ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE,
-    ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_PROPS_UBO,
-    ID_FILL_EXTRUSION_TILE_PROPS_UBO, ID_FILL_EXTRUSION_WALL_VERTICES, ID_FILL_OPACITY_VERTEX_ATTRIBUTE,
-    ID_FILL_POS_VERTEX_ATTRIBUTE, ID_GLOBAL_PAINT_PARAMS_UBO, ID_HEATMAP_COLOR_RAMP_TEXTURE, ID_HEATMAP_IMAGE_TEXTURE,
-    ID_HEATMAP_POS_VERTEX_ATTRIBUTE, ID_HEATMAP_TEXTURE_PROPS_UBO, ID_PROJECTION_UBO,
-};
+use mln_gfx::shaders::programs::{CLIPPING_MASK, ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE};
+use mln_gfx::shaders::shader_defines::{ID_GLOBAL_PAINT_PARAMS_UBO, ID_PROJECTION_UBO};
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::DepthFunctionType;
@@ -31,9 +22,26 @@ use mln_util::Color;
 use mln_util::size::Size;
 
 use super::{EXTENT, SIZE, buffer, create_shader, draw, fixed, position_layout, quad, tile_matrix, whole};
+use crate::background::programs::{
+    ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE, ID_BACKGROUND_PROPS_UBO,
+};
 use crate::background::ubo::{BackgroundDrawableUnionUBO, BackgroundPropsUBO};
+use crate::fill::programs::{
+    ID_FILL_COLOR_VERTEX_ATTRIBUTE, ID_FILL_DRAWABLE_UBO, ID_FILL_EVALUATED_PROPS_UBO,
+    ID_FILL_OPACITY_VERTEX_ATTRIBUTE, ID_FILL_POS_VERTEX_ATTRIBUTE,
+};
 use crate::fill::ubo::{FillDrawableUBO, FillDrawableUnionUBO, FillEvaluatedPropsUBO};
+use crate::fill_extrusion::programs::{
+    ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_DRAWABLE_UBO,
+    ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE,
+    ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_PROPS_UBO,
+    ID_FILL_EXTRUSION_TILE_PROPS_UBO, ID_FILL_EXTRUSION_WALL_VERTICES,
+};
 use crate::fill_extrusion::ubo::{FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO};
+use crate::heatmap::programs::{
+    ID_HEATMAP_COLOR_RAMP_TEXTURE, ID_HEATMAP_IMAGE_TEXTURE, ID_HEATMAP_POS_VERTEX_ATTRIBUTE,
+    ID_HEATMAP_TEXTURE_PROPS_UBO,
+};
 use crate::heatmap::ubo::HeatmapTexturePropsUBO;
 use crate::{background, fill, fill_extrusion, heatmap};
 

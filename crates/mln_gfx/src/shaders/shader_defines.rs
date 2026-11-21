@@ -1,228 +1,40 @@
-// The values were checked against the C++ headers compiled with
-// -DMLN_RENDER_BACKEND_WEBGPU=1 (idGlobalUBOIndex = 1, idBackgroundDrawableUBO
-// = 2, idProjectionUBO = 4, idBackgroundPropsUBO = 5, layerUBOStartId = 6,
-// maxUBOCountPerShader = 7, maxTextureCountPerShader = 3,
-// maxAttributeCountPerShader = 11).
+//! The buffer ids the engine reserves, and how many buffers, textures and
+//! vertex attributes a program can have. Every other id is its program's:
+//! a program's buffers take the ids from [`DRAWABLE_RESERVED_UBO_COUNT`] to
+//! [`MAX_UBO_COUNT_PER_SHADER`], and the vertex buffers it reads as storage
+//! buffers the ids after those.
 
-// --- layer_ubo.hpp: global UBOs (WebGPU branch) ---
+/// The frame's uniform block
+/// ([`GlobalPaintParamsUBO`](crate::shaders::layer_ubo::GlobalPaintParamsUBO)).
 pub const ID_GLOBAL_PAINT_PARAMS_UBO: usize = 0;
+/// The draw's index into the storage buffers it reads, which the backend
+/// binds.
 pub const ID_GLOBAL_UBO_INDEX: usize = 1;
+/// How many ids the frame's buffers take.
 pub const GLOBAL_UBO_COUNT: usize = 2;
 
-// --- layer SSBOs ---
+/// The first id of the storage buffers a layer's draws share, an element of
+/// each per draw.
 pub const LAYER_SSBO_START_ID: usize = GLOBAL_UBO_COUNT;
+/// A storage buffer that only a program's vertex stage reads.
 pub const ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO: usize = LAYER_SSBO_START_ID;
+/// A storage buffer that only a program's fragment stage reads.
 pub const ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO: usize = LAYER_SSBO_START_ID + 1;
-/// The per-drawable projection block (`ProjectionUBO`), one SSBO per layer.
+/// The per-draw projection block
+/// ([`ProjectionUBO`](crate::shaders::layer_ubo::ProjectionUBO)), a storage
+/// buffer.
 pub const ID_PROJECTION_UBO: usize = LAYER_SSBO_START_ID + 2;
+/// The first id after the reserved ones.
 pub const DRAWABLE_RESERVED_UBO_COUNT: usize = LAYER_SSBO_START_ID + 3;
+/// The end of the ids a layer's storage buffers can have, from
+/// [`LAYER_SSBO_START_ID`]. A layer's uniform buffers have the ids from
+/// [`DRAWABLE_RESERVED_UBO_COUNT`], so that id can be either.
+pub const LAYER_UBO_START_ID: usize = DRAWABLE_RESERVED_UBO_COUNT + 1;
 
-pub const ID_BACKGROUND_DRAWABLE_UBO: usize = ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO; // SSBO
-pub(crate) const BACKGROUND_LAYER_SSBO_COUNT: usize = DRAWABLE_RESERVED_UBO_COUNT;
-
-pub const ID_CIRCLE_DRAWABLE_UBO: usize = ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO; // SSBO
-pub(crate) const CIRCLE_LAYER_SSBO_COUNT: usize = DRAWABLE_RESERVED_UBO_COUNT;
-
-pub const ID_FILL_DRAWABLE_UBO: usize = ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO; // SSBO
-pub const ID_FILL_TILE_PROPS_UBO: usize = DRAWABLE_RESERVED_UBO_COUNT; // SSBO
-pub(crate) const FILL_LAYER_SSBO_COUNT: usize = ID_FILL_TILE_PROPS_UBO + 1;
-
-pub const ID_LINE_DRAWABLE_UBO: usize = ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO; // SSBO
-pub const ID_LINE_TILE_PROPS_UBO: usize = ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO; // SSBO
-pub(crate) const LINE_LAYER_SSBO_COUNT: usize = DRAWABLE_RESERVED_UBO_COUNT;
-
-// fill/color-relief/fill-extrusion reserve one more SSBO, so the max of the
-// layer SSBO counts is FILL_LAYER_SSBO_COUNT.
-
-// --- layer UBOs ---
-pub const LAYER_UBO_START_ID: usize = FILL_LAYER_SSBO_COUNT;
-pub const ID_BACKGROUND_PROPS_UBO: usize = BACKGROUND_LAYER_SSBO_COUNT; // packed
-pub(crate) const BACKGROUND_LAYER_UBO_COUNT: usize = ID_BACKGROUND_PROPS_UBO + 1;
-pub const ID_CIRCLE_EVALUATED_PROPS_UBO: usize = CIRCLE_LAYER_SSBO_COUNT; // packed
-pub const CIRCLE_LAYER_UBO_COUNT: usize = ID_CIRCLE_EVALUATED_PROPS_UBO + 1;
-pub const ID_FILL_EVALUATED_PROPS_UBO: usize = FILL_LAYER_SSBO_COUNT; // packed
-pub const FILL_LAYER_UBO_COUNT: usize = ID_FILL_EVALUATED_PROPS_UBO + 1;
-pub const ID_LINE_EVALUATED_PROPS_UBO: usize = LINE_LAYER_SSBO_COUNT; // packed
-pub const LINE_LAYER_UBO_COUNT: usize = ID_LINE_EVALUATED_PROPS_UBO + 1;
-
-// --- drawable SSBOs / UBOs ---
-pub const BACKGROUND_UBO_COUNT: usize = BACKGROUND_LAYER_UBO_COUNT; // packed
-
+/// The end of the buffer ids of a program, but for the vertex buffers it
+/// reads as storage buffers.
 pub const MAX_UBO_COUNT_PER_SHADER: usize = 7;
-
-// --- textures ---
-pub const ID_BACKGROUND_IMAGE_TEXTURE: usize = 0;
-pub const ID_FILL_IMAGE_TEXTURE: usize = 0;
-pub const ID_LINE_IMAGE_TEXTURE: usize = 0;
-pub const ID_LINE_DASH_TEXTURE: usize = 1;
+/// How many textures a program can sample.
 pub const MAX_TEXTURE_COUNT_PER_SHADER: usize = 3;
-
-// --- vertex attributes ---
-pub const ID_BACKGROUND_POS_VERTEX_ATTRIBUTE: usize = 0;
-pub const ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE: usize = 0;
-
-pub const ID_CIRCLE_POS_VERTEX_ATTRIBUTE: usize = 0;
-// Data driven
-pub const ID_CIRCLE_COLOR_VERTEX_ATTRIBUTE: usize = 1;
-pub const ID_CIRCLE_RADIUS_VERTEX_ATTRIBUTE: usize = 2;
-pub const ID_CIRCLE_BLUR_VERTEX_ATTRIBUTE: usize = 3;
-pub const ID_CIRCLE_OPACITY_VERTEX_ATTRIBUTE: usize = 4;
-pub const ID_CIRCLE_STROKE_COLOR_VERTEX_ATTRIBUTE: usize = 5;
-pub const ID_CIRCLE_STROKE_WIDTH_VERTEX_ATTRIBUTE: usize = 6;
-pub const ID_CIRCLE_STROKE_OPACITY_VERTEX_ATTRIBUTE: usize = 7;
-
-pub const ID_FILL_POS_VERTEX_ATTRIBUTE: usize = 0;
-// Data driven
-pub const ID_FILL_COLOR_VERTEX_ATTRIBUTE: usize = 1;
-pub const ID_FILL_OPACITY_VERTEX_ATTRIBUTE: usize = 2;
-pub const ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE: usize = 3;
-pub const ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE: usize = 4;
-pub const ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE: usize = 5;
-/// Port-only: an outline instance's vertex, and where its segment of the
-/// outline ends, which the instanced outline shaders read per instance.
-pub const ID_FILL_OUTLINE_POS_ATTRIBUTE: usize = 6;
-pub const ID_FILL_OUTLINE_END_ATTRIBUTE: usize = 7;
-// The vertex buffers that `FillOutlinePulledShader` reads as storage
-// buffers, whose ids follow the uniform buffers'.
-pub const ID_FILL_OUTLINE_VERTICES: usize = MAX_UBO_COUNT_PER_SHADER;
-pub const ID_FILL_OUTLINE_ENDS: usize = MAX_UBO_COUNT_PER_SHADER + 1;
-pub const ID_FILL_OUTLINE_PAINT: usize = MAX_UBO_COUNT_PER_SHADER + 2;
-
-pub const ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE: usize = 0;
-pub const ID_LINE_DATA_VERTEX_ATTRIBUTE: usize = 1;
-// Data driven
-pub const ID_LINE_COLOR_VERTEX_ATTRIBUTE: usize = 2;
-pub const ID_LINE_BLUR_VERTEX_ATTRIBUTE: usize = 3;
-pub const ID_LINE_OPACITY_VERTEX_ATTRIBUTE: usize = 4;
-pub const ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE: usize = 5;
-pub const ID_LINE_OFFSET_VERTEX_ATTRIBUTE: usize = 6;
-pub const ID_LINE_WIDTH_VERTEX_ATTRIBUTE: usize = 7;
-pub const ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE: usize = 8;
-pub const ID_LINE_PATTERN_FROM_VERTEX_ATTRIBUTE: usize = 9;
-pub const ID_LINE_PATTERN_TO_VERTEX_ATTRIBUTE: usize = 10;
-pub const ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE: usize = 11;
+/// How many vertex attributes a program can read.
 pub const MAX_ATTRIBUTE_COUNT_PER_SHADER: usize = 12;
-
-// --- conformance: raster, fill-extrusion, hillshade, heatmap, color-relief
-// (WebGPU values; the packed SSBO/UBO counts above already include them) ---
-pub const ID_RASTER_DRAWABLE_UBO: usize = ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO; // SSBO
-pub(crate) const RASTER_LAYER_SSBO_COUNT: usize = DRAWABLE_RESERVED_UBO_COUNT;
-pub const ID_RASTER_EVALUATED_PROPS_UBO: usize = RASTER_LAYER_SSBO_COUNT; // packed
-pub const RASTER_LAYER_UBO_COUNT: usize = ID_RASTER_EVALUATED_PROPS_UBO + 1;
-pub const ID_RASTER_IMAGE0_TEXTURE: usize = 0;
-pub const ID_RASTER_IMAGE1_TEXTURE: usize = 1;
-pub const ID_RASTER_POS_VERTEX_ATTRIBUTE: usize = 0;
-pub const ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE: usize = 1;
-
-pub const ID_FILL_EXTRUSION_DRAWABLE_UBO: usize = ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO; // SSBO
-pub const ID_FILL_EXTRUSION_TILE_PROPS_UBO: usize = DRAWABLE_RESERVED_UBO_COUNT; // SSBO
-pub(crate) const FILL_EXTRUSION_LAYER_SSBO_COUNT: usize = ID_FILL_EXTRUSION_TILE_PROPS_UBO + 1;
-pub const ID_FILL_EXTRUSION_PROPS_UBO: usize = FILL_EXTRUSION_LAYER_SSBO_COUNT; // packed
-pub const FILL_EXTRUSION_LAYER_UBO_COUNT: usize = ID_FILL_EXTRUSION_PROPS_UBO + 1;
-// The vertex buffers that `FillExtrusionPulledShader` reads as storage
-// buffers, whose ids follow the uniform buffers'.
-pub const ID_FILL_EXTRUSION_WALL_VERTICES: usize = MAX_UBO_COUNT_PER_SHADER;
-pub const ID_FILL_EXTRUSION_WALL_PAINT: usize = MAX_UBO_COUNT_PER_SHADER + 1;
-pub const ID_FILL_EXTRUSION_IMAGE_TEXTURE: usize = 0;
-pub const ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE: usize = 0;
-pub const ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE: usize = 1;
-/// `MLN_USE_FILL_EXTRUSION_INSTANCING`
-pub const ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE: usize = 2;
-/// Port-only: the next outline vertex of a wall instance, which every
-/// backend's shaders read as attributes.
-pub const ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE: usize = 3;
-pub const ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE: usize = 4;
-// Data driven
-pub const ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE: usize = 5;
-pub const ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE: usize = 6;
-pub const ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE: usize = 7;
-pub const ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE: usize = 8;
-pub const ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE: usize = 9;
-
-pub const ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE: usize = 0;
-
-// --- layer composite (port-only): a layer drawn into a texture, composited
-// onto the frame with its `*-layer-opacity` and `*-layer-blend`.
-pub const ID_LAYER_COMPOSITE_UBO: usize = DRAWABLE_RESERVED_UBO_COUNT; // packed
-pub const LAYER_COMPOSITE_UBO_COUNT: usize = ID_LAYER_COMPOSITE_UBO + 1;
-pub const ID_LAYER_COMPOSITE_IMAGE_TEXTURE: usize = 0;
-pub const ID_LAYER_COMPOSITE_BACKDROP_TEXTURE: usize = 1;
-pub const ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE: usize = 0;
-
-// --- sky (`idSkyPropsUBO` / `idAtmospherePropsUBO = getEnumValue(drawableReservedUBOCount, layerUBOStartId)`)
-pub const ID_SKY_PROPS_UBO: usize = DRAWABLE_RESERVED_UBO_COUNT; // packed
-pub const SKY_LAYER_UBO_COUNT: usize = ID_SKY_PROPS_UBO + 1;
-pub const ID_ATMOSPHERE_PROPS_UBO: usize = DRAWABLE_RESERVED_UBO_COUNT; // packed
-pub const ATMOSPHERE_LAYER_UBO_COUNT: usize = ID_ATMOSPHERE_PROPS_UBO + 1;
-pub const ID_SKY_POS_VERTEX_ATTRIBUTE: usize = 0;
-pub const ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE: usize = 0;
-
-pub const ID_HEATMAP_DRAWABLE_UBO: usize = ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO; // SSBO
-pub(crate) const HEATMAP_LAYER_SSBO_COUNT: usize = DRAWABLE_RESERVED_UBO_COUNT;
-pub const ID_HEATMAP_EVALUATED_PROPS_UBO: usize = HEATMAP_LAYER_SSBO_COUNT; // packed
-pub const HEATMAP_LAYER_UBO_COUNT: usize = ID_HEATMAP_EVALUATED_PROPS_UBO + 1;
-pub const ID_HEATMAP_TEXTURE_PROPS_UBO: usize = DRAWABLE_RESERVED_UBO_COUNT; // packed
-pub const ID_HEATMAP_IMAGE_TEXTURE: usize = 0;
-pub const ID_HEATMAP_COLOR_RAMP_TEXTURE: usize = 1;
-pub const ID_HEATMAP_POS_VERTEX_ATTRIBUTE: usize = 0;
-// Data driven
-pub const ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE: usize = 1;
-pub const ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE: usize = 2;
-
-pub const ID_HILLSHADE_DRAWABLE_UBO: usize = ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO; // SSBO
-pub const ID_HILLSHADE_TILE_PROPS_UBO: usize = ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO; // SSBO
-pub(crate) const HILLSHADE_LAYER_SSBO_COUNT: usize = DRAWABLE_RESERVED_UBO_COUNT;
-pub const ID_HILLSHADE_EVALUATED_PROPS_UBO: usize = HILLSHADE_LAYER_SSBO_COUNT; // packed
-pub const HILLSHADE_LAYER_UBO_COUNT: usize = ID_HILLSHADE_EVALUATED_PROPS_UBO + 1;
-pub const ID_HILLSHADE_PREPARE_DRAWABLE_UBO: usize = ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO; // packed
-pub const ID_HILLSHADE_PREPARE_TILE_PROPS_UBO: usize = DRAWABLE_RESERVED_UBO_COUNT; // packed
-pub const ID_HILLSHADE_IMAGE_TEXTURE: usize = 0;
-pub const ID_HILLSHADE_POS_VERTEX_ATTRIBUTE: usize = 0;
-pub const ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE: usize = 1;
-
-pub const ID_COLOR_RELIEF_DRAWABLE_UBO: usize = ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO; // SSBO
-pub const ID_COLOR_RELIEF_TILE_PROPS_UBO: usize = DRAWABLE_RESERVED_UBO_COUNT; // SSBO
-pub(crate) const COLOR_RELIEF_LAYER_SSBO_COUNT: usize = ID_COLOR_RELIEF_TILE_PROPS_UBO + 1;
-pub const ID_COLOR_RELIEF_EVALUATED_PROPS_UBO: usize = COLOR_RELIEF_LAYER_SSBO_COUNT; // packed
-pub const COLOR_RELIEF_LAYER_UBO_COUNT: usize = ID_COLOR_RELIEF_EVALUATED_PROPS_UBO + 1;
-pub const ID_COLOR_RELIEF_IMAGE_TEXTURE: usize = 0;
-pub const ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE: usize = 1;
-pub const ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE: usize = 2;
-pub const ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE: usize = 0;
-pub const ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE: usize = 1;
-
-// symbols: symbol and collision ids (shader_defines.hpp, packed WebGPU
-// enums, MLN_USE_SYMBOL_INSTANCING off).
-pub const ID_SYMBOL_DRAWABLE_UBO: usize = ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO; // SSBO
-pub const ID_SYMBOL_TILE_PROPS_UBO: usize = ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO; // SSBO
-pub(crate) const SYMBOL_LAYER_SSBO_COUNT: usize = DRAWABLE_RESERVED_UBO_COUNT;
-pub const ID_SYMBOL_EVALUATED_PROPS_UBO: usize = SYMBOL_LAYER_SSBO_COUNT; // packed
-pub const SYMBOL_LAYER_UBO_COUNT: usize = ID_SYMBOL_EVALUATED_PROPS_UBO + 1;
-pub const ID_COLLISION_DRAWABLE_UBO: usize = ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO; // packed
-pub const ID_COLLISION_TILE_PROPS_UBO: usize = DRAWABLE_RESERVED_UBO_COUNT; // packed
-pub const ID_COLLISION_PROJECTION_UBO: usize = ID_PROJECTION_UBO; // packed
-pub const COLLISION_UBO_COUNT: usize = ID_COLLISION_TILE_PROPS_UBO + 1; // packed
-pub const ID_SYMBOL_IMAGE_TEXTURE: usize = 0;
-pub const ID_SYMBOL_IMAGE_ICON_TEXTURE: usize = 1;
-pub const ID_COLLISION_POS_VERTEX_ATTRIBUTE: usize = 0;
-pub const ID_COLLISION_ANCHOR_POS_VERTEX_ATTRIBUTE: usize = 1;
-pub const ID_COLLISION_EXTRUDE_VERTEX_ATTRIBUTE: usize = 2;
-pub const ID_COLLISION_PLACED_VERTEX_ATTRIBUTE: usize = 3;
-pub const ID_COLLISION_SHIFT_VERTEX_ATTRIBUTE: usize = 4;
-// Port-only: the symbol's `symbol-height-offset` (`CollisionBoxLayoutVertex::a4`).
-pub const ID_COLLISION_HEIGHT_OFFSET_VERTEX_ATTRIBUTE: usize = 5;
-pub const ID_SYMBOL_POS_OFFSET_ATTRIBUTE: usize = 0;
-pub const ID_SYMBOL_DATA_ATTRIBUTE: usize = 1;
-pub const ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE: usize = 2;
-pub const ID_SYMBOL_PROJECTED_POS_ATTRIBUTE: usize = 3;
-pub const ID_SYMBOL_FADE_OPACITY_ATTRIBUTE: usize = 4;
-// Data driven
-pub const ID_SYMBOL_OPACITY_ATTRIBUTE: usize = 5;
-pub const ID_SYMBOL_COLOR_ATTRIBUTE: usize = 6;
-pub const ID_SYMBOL_HALO_COLOR_ATTRIBUTE: usize = 7;
-pub const ID_SYMBOL_HALO_WIDTH_ATTRIBUTE: usize = 8;
-pub const ID_SYMBOL_HALO_BLUR_ATTRIBUTE: usize = 9;
-// Port-only: the quad's atlas origin (`SymbolLayoutVertex::a4`).
-pub const ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE: usize = 10;
-// Port-only: the symbol's `symbol-height-offset` (`SymbolLayoutVertex::a5`).
-pub const ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE: usize = 11;

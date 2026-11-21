@@ -10,8 +10,9 @@
 //! program's code and the tables of where the program's attributes,
 //! textures and buffers bind, which follow the rules of
 //! `mln_gfx::shaders::source`'s module of the language. The ids in the
-//! tables are `shader_defines`', so a shader's buffers bind where the
-//! renderer puts them.
+//! tables are the program's, in its `programs` module, and the engine's
+//! reserved ones (`mln_gfx::shaders::shader_defines`), so a shader's
+//! buffers bind where the renderer puts them.
 //!
 //! The MSL tables describe the vertex layout the renderer produces:
 //! instanced fill extrusions. The vertex buffers follow the shader's UBOs:

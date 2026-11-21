@@ -613,12 +613,12 @@ fn line_bucket_evaluates_cap_and_limits_per_feature() {
 #[test]
 fn the_paint_layout_of_pulled_walls_is_the_paint_attributes() {
     use mln_gfx::AttributeDataType::{Float, Float4};
-    use mln_gfx::shaders::shader_defines::{
+    use mln_render::draw::{SharedAttribute, VertexAttributeArray};
+
+    use crate::fill_extrusion::programs::{
         ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE,
         ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE,
     };
-    use mln_render::draw::{SharedAttribute, VertexAttributeArray};
-
     use crate::fill_extrusion::render_layer::paint_layout;
 
     with_context(|_, context| {
@@ -644,11 +644,11 @@ fn the_paint_layout_of_pulled_walls_is_the_paint_attributes() {
 #[test]
 fn the_paint_layout_of_pulled_outlines_is_the_paint_attributes() {
     use mln_gfx::AttributeDataType::{Float, Float2, Float4};
-    use mln_gfx::shaders::shader_defines::{
-        ID_FILL_COLOR_VERTEX_ATTRIBUTE, ID_FILL_OPACITY_VERTEX_ATTRIBUTE, ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE,
-    };
     use mln_render::draw::{SharedAttribute, VertexAttributeArray};
 
+    use crate::fill::programs::{
+        ID_FILL_COLOR_VERTEX_ATTRIBUTE, ID_FILL_OPACITY_VERTEX_ATTRIBUTE, ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE,
+    };
     use crate::fill::render_layer::outline_paint_layout;
 
     with_context(|_, context| {

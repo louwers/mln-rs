@@ -2,7 +2,10 @@
 
 use mln_gfx::gfx_types::AttributeDataType::{Float2, Float4, Short2, UShort2, UShort4};
 use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::shader_defines::{
+use mln_gfx::shaders::source::glsl::{Attribute, Glsl, Source, Texture};
+
+use super::programs;
+use super::programs::{
     ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE,
     ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE,
     ID_FILL_EXTRUSION_IMAGE_TEXTURE, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE,
@@ -10,9 +13,6 @@ use mln_gfx::shaders::shader_defines::{
     ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE,
     ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE,
 };
-use mln_gfx::shaders::source::glsl::{Attribute, Glsl, Source, Texture};
-
-use super::programs;
 
 // An instance of the instanced fill extrusion shaders is an outline vertex
 // and the vertex after it.

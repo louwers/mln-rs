@@ -17,7 +17,10 @@
 //! that hold them for the roofs, bound as storage buffers.
 
 use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::shader_defines::{
+use mln_gfx::shaders::source::wgsl::{Attribute, Source, Texture, Wgsl};
+
+use super::programs;
+use super::programs::{
     ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE,
     ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE,
     ID_FILL_EXTRUSION_IMAGE_TEXTURE, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE,
@@ -25,9 +28,6 @@ use mln_gfx::shaders::shader_defines::{
     ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE,
     ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE,
 };
-use mln_gfx::shaders::source::wgsl::{Attribute, Source, Texture, Wgsl};
-
-use super::programs;
 
 const FILL_EXTRUSION_ATTRIBUTES: &[Attribute] = &[
     Attribute::new(0, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE),

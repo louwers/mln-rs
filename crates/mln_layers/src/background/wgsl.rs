@@ -1,10 +1,10 @@
 //! The programs of the `background` layer type in WGSL, for `mln_webgpu`.
 
 use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::shader_defines::{ID_BACKGROUND_IMAGE_TEXTURE, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE};
 use mln_gfx::shaders::source::wgsl::{Attribute, Source, Texture, Wgsl};
 
 use super::programs;
+use super::programs::{ID_BACKGROUND_IMAGE_TEXTURE, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE};
 
 const BACKGROUND_ATTRIBUTES: &[Attribute] = &[Attribute { index: 3, id: ID_BACKGROUND_POS_VERTEX_ATTRIBUTE }];
 const BACKGROUND_PATTERN_TEXTURES: &[Texture] = &[Texture::new(0, ID_BACKGROUND_IMAGE_TEXTURE)];

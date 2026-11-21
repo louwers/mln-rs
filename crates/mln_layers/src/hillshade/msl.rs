@@ -2,13 +2,13 @@
 
 use mln_gfx::gfx_types::AttributeDataType::Short2;
 use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::shader_defines::{
-    HILLSHADE_LAYER_UBO_COUNT, ID_HILLSHADE_IMAGE_TEXTURE, ID_HILLSHADE_POS_VERTEX_ATTRIBUTE,
-    ID_HILLSHADE_PREPARE_TILE_PROPS_UBO, ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE,
-};
 use mln_gfx::shaders::source::msl::{Attribute, Msl, Source, Texture};
 
 use super::programs;
+use super::programs::{
+    HILLSHADE_LAYER_UBO_COUNT, ID_HILLSHADE_IMAGE_TEXTURE, ID_HILLSHADE_POS_VERTEX_ATTRIBUTE,
+    ID_HILLSHADE_PREPARE_TILE_PROPS_UBO, ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE,
+};
 
 const HILLSHADE_PREPARE_UBO_COUNT: usize = ID_HILLSHADE_PREPARE_TILE_PROPS_UBO + 1;
 const HILLSHADE_UBO_COUNT: usize = HILLSHADE_LAYER_UBO_COUNT;

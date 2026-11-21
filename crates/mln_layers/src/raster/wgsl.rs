@@ -1,13 +1,13 @@
 //! The programs of the `raster` layer type in WGSL, for `mln_webgpu`.
 
 use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::shader_defines::{
-    ID_RASTER_IMAGE0_TEXTURE, ID_RASTER_IMAGE1_TEXTURE, ID_RASTER_POS_VERTEX_ATTRIBUTE,
-    ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE,
-};
 use mln_gfx::shaders::source::wgsl::{Attribute, Source, Texture, Wgsl};
 
 use super::programs;
+use super::programs::{
+    ID_RASTER_IMAGE0_TEXTURE, ID_RASTER_IMAGE1_TEXTURE, ID_RASTER_POS_VERTEX_ATTRIBUTE,
+    ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE,
+};
 
 const RASTER_ATTRIBUTES: &[Attribute] =
     &[Attribute::new(0, ID_RASTER_POS_VERTEX_ATTRIBUTE), Attribute::new(1, ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE)];

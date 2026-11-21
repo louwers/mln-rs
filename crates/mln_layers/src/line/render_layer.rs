@@ -6,10 +6,7 @@ use mln_gfx::gpu::{Gpu, TextureFormat};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::shader_defines::{
-    ID_LINE_DASH_TEXTURE, ID_LINE_DATA_VERTEX_ATTRIBUTE, ID_LINE_DRAWABLE_UBO, ID_LINE_EVALUATED_PROPS_UBO,
-    ID_LINE_IMAGE_TEXTURE, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, ID_LINE_TILE_PROPS_UBO, ID_PROJECTION_UBO,
-};
+use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
 use mln_gfx::shaders::source::ShaderSources;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
@@ -37,6 +34,10 @@ use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 use super::bucket::{LineBinders, LineBucket};
+use super::programs::{
+    ID_LINE_DASH_TEXTURE, ID_LINE_DATA_VERTEX_ATTRIBUTE, ID_LINE_DRAWABLE_UBO, ID_LINE_EVALUATED_PROPS_UBO,
+    ID_LINE_IMAGE_TEXTURE, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, ID_LINE_TILE_PROPS_UBO,
+};
 use super::properties::LinePaintProperties;
 use super::ubo::{
     LineDrawableUBO, LineDrawableUnionUBO, LineEvaluatedPropsUBO, LineGradientDrawableUBO, LinePatternDrawableUBO,

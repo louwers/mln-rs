@@ -1,12 +1,12 @@
 //! The programs of the `hillshade` layer type in WGSL, for `mln_webgpu`.
 
 use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::shader_defines::{
-    ID_HILLSHADE_IMAGE_TEXTURE, ID_HILLSHADE_POS_VERTEX_ATTRIBUTE, ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE,
-};
 use mln_gfx::shaders::source::wgsl::{Attribute, Source, Texture, Wgsl};
 
 use super::programs;
+use super::programs::{
+    ID_HILLSHADE_IMAGE_TEXTURE, ID_HILLSHADE_POS_VERTEX_ATTRIBUTE, ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE,
+};
 
 const HILLSHADE_ATTRIBUTES: &[Attribute] = &[
     Attribute::new(5, ID_HILLSHADE_POS_VERTEX_ATTRIBUTE),

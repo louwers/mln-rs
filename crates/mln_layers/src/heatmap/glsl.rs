@@ -2,13 +2,13 @@
 
 use mln_gfx::gfx_types::AttributeDataType::{Float2, Short2};
 use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::shader_defines::{
-    ID_HEATMAP_COLOR_RAMP_TEXTURE, ID_HEATMAP_IMAGE_TEXTURE, ID_HEATMAP_POS_VERTEX_ATTRIBUTE,
-    ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE, ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE,
-};
 use mln_gfx::shaders::source::glsl::{Attribute, Glsl, Source, Texture};
 
 use super::programs;
+use super::programs::{
+    ID_HEATMAP_COLOR_RAMP_TEXTURE, ID_HEATMAP_IMAGE_TEXTURE, ID_HEATMAP_POS_VERTEX_ATTRIBUTE,
+    ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE, ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE,
+};
 
 const HEATMAP_ATTRIBUTES: &[Attribute] = &[
     Attribute::new(0, Short2, ID_HEATMAP_POS_VERTEX_ATTRIBUTE),

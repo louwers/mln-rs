@@ -2,12 +2,6 @@ use std::sync::{Arc, Once};
 
 use geometry::Point;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::shader_defines::{
-    ID_LINE_BLUR_VERTEX_ATTRIBUTE, ID_LINE_COLOR_VERTEX_ATTRIBUTE, ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE,
-    ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE, ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE, ID_LINE_OFFSET_VERTEX_ATTRIBUTE,
-    ID_LINE_OPACITY_VERTEX_ATTRIBUTE, ID_LINE_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_LINE_PATTERN_TO_VERTEX_ATTRIBUTE,
-    ID_LINE_WIDTH_VERTEX_ATTRIBUTE,
-};
 use mln_render::layer::{
     Bucket, BucketBase, CrossFadedPaintPropertyBinder, EvaluatedLayer, GeometryUpload, GeometryVec, Indexed,
     PaintPropertyBinder,
@@ -26,6 +20,12 @@ use mln_vec_map::VecMap;
 
 use super::Line;
 use super::dash_array_binder::DashArrayBinder;
+use super::programs::{
+    ID_LINE_BLUR_VERTEX_ATTRIBUTE, ID_LINE_COLOR_VERTEX_ATTRIBUTE, ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE,
+    ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE, ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE, ID_LINE_OFFSET_VERTEX_ATTRIBUTE,
+    ID_LINE_OPACITY_VERTEX_ATTRIBUTE, ID_LINE_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_LINE_PATTERN_TO_VERTEX_ATTRIBUTE,
+    ID_LINE_WIDTH_VERTEX_ATTRIBUTE,
+};
 use super::properties::{LineLayoutProperties, LinePaintProperties};
 use crate::pattern_layout::{PatternBucket, PatternLayerMap};
 use crate::tessellator::Tessellator;
