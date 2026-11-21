@@ -7,12 +7,18 @@
 // resource's `RequestOrder`), and performed by the HTTPFileSource.
 // `requests` is keyed by id, so it iterates in id order.
 //
+// Requests whose transfers would be the same, of one URL, byte range and
+// validators, share one: a request due while that transfer is in flight, or
+// waiting for room when it starts, joins it, and each request takes its
+// response as its own. A shared transfer takes one place in the active set,
+// and is cancelled when the last of its requests is.
+//
 // The resource transform's answers and the transfers' responses come back
 // to the core as tasks, from whichever thread posts them, numbered with a
-// generation of their request: an answer whose generation is no longer the
-// one the request waits for is dropped, so a stale one can't end a transfer
-// twice; they need the number because they may already be on their way
-// when the core moves on. A deadline is a timed task of the core's own
+// generation: an answer whose generation is no longer the one its request
+// waits for, or a response to a transfer no longer in flight, is dropped,
+// so a stale one can't end a transfer twice; they need the number because
+// they may already be on their way when the core moves on. A deadline is a timed task of the core's own
 // queue, which runs on the core's thread, so restarting or stopping a
 // request's deadline, or cancelling the request, cancels that task instead.
 //
@@ -31,7 +37,7 @@ use mln_util::constants::{
 use mln_util::logging::{Event, Log};
 use mln_util::queue::{Queue, TimedTask};
 use mln_util::time::Instant;
-use mln_vec_map::{VecMap, VecSet};
+use mln_vec_map::VecMap;
 
 use crate::file_source::FileSource;
 use crate::http_file_source::HTTPFileSource;
@@ -51,8 +57,8 @@ pub type OnlineQueue = Queue<OnlineCore>;
 struct OnlineRequest {
     resource: Resource,
     responder: Responder,
-    /// The transfer in flight, and its generation.
-    transfer: Option<(u64, Request)>,
+    /// The generation of the transfer in flight that it waits for.
+    transfer: Option<u64>,
     /// The generation of the resource transform's answer it waits for.
     transforming: Option<u64>,
     /// The task of the deadline that starts it again, while one runs.
@@ -73,6 +79,38 @@ struct OnlineRequest {
     /// Whether the resource transform failed the request. A retry calls the
     /// transform again instead of loading the original URL.
     transform_failed: bool,
+}
+
+/// A transfer in flight, for the requests that wait for it.
+struct Transfer {
+    key: TransferKey,
+    /// Cancels the transfer when it drops.
+    _request: Request,
+    /// The requests that wait for it, in the order they joined.
+    waiters: Vec<u64>,
+}
+
+/// What a transfer of a resource sends, which requests that share a
+/// transfer have in common.
+#[derive(PartialEq)]
+struct TransferKey {
+    kind: crate::resource::Kind,
+    url: String,
+    data_range: Option<(u64, u64)>,
+    prior_etag: Option<String>,
+    prior_modified: Option<Timestamp>,
+}
+
+impl TransferKey {
+    fn of(resource: &Resource) -> TransferKey {
+        TransferKey {
+            kind: resource.kind,
+            url: resource.url.clone(),
+            data_range: resource.data_range,
+            prior_etag: resource.prior_etag.clone(),
+            prior_modified: resource.prior_modified,
+        }
+    }
 }
 
 /// What waiting requests start by, lowest first: regular priority before
@@ -97,6 +135,20 @@ struct PendingRequest {
 impl PendingRequests {
     fn remove(&mut self, id: u64) {
         self.requests.retain(|request| request.id != id);
+    }
+
+    /// Removes the requests that `joins` picks, in the order they started
+    /// to wait.
+    fn take(&mut self, mut joins: impl FnMut(u64) -> bool) -> Vec<u64> {
+        let mut taken = Vec::new();
+        self.requests.retain(|request| {
+            let join = joins(request.id);
+            if join {
+                taken.push(request.id);
+            }
+            !join
+        });
+        taken
     }
 
     fn insert(&mut self, id: u64, resource: &Resource) {
@@ -188,15 +240,15 @@ pub struct OnlineCore {
     ///
     /// 1. Waiting for its deadline (revalidation or retry)
     /// 2. Pending (waiting for room in the active set)
-    /// 3. Active (open network connection)
+    /// 3. Active (waiting for a transfer in flight, maybe shared)
     /// 4. Back to #1
     ///
     /// Requests in any state are in `requests`. Requests in the pending
-    /// state are in `pending_requests`. Requests in the active state are in
-    /// `active_requests`.
+    /// state are in `pending_requests`. The transfers of requests in the
+    /// active state are in `transfers`, by their generation: the active set.
     requests: VecMap<u64, OnlineRequest>,
     pending_requests: PendingRequests,
-    active_requests: VecSet<u64>,
+    transfers: VecMap<u64, Transfer>,
     /// The last generation handed out.
     generation: u64,
 
@@ -231,13 +283,18 @@ impl OnlineCore {
         }
     }
 
-    /// A transfer's response for request `id`, which ends its transfer
-    /// unless transfer `generation` is no longer the one in flight.
-    fn transferred(&mut self, id: u64, generation: u64, response: Response) {
-        let in_flight = self.requests.get(&id).and_then(|req| req.transfer.as_ref()).map(|(g, _)| *g);
-        if in_flight == Some(generation) {
-            self.transfer_done(id, response);
+    /// Transfer `generation`'s response, which goes to each request that
+    /// waits for it, unless the transfer is no longer in flight. Starts the
+    /// pending requests that the room it leaves allows.
+    fn transferred(&mut self, generation: u64, response: &Response) {
+        let Some(transfer) = self.transfers.remove(&generation) else { return };
+        for id in transfer.waiters {
+            if let Some(req) = self.requests.get_mut(&id) {
+                req.transfer = None;
+                self.completed(id, response.clone());
+            }
         }
+        self.activate_pending_requests();
     }
 
     /// Starts request `id` again: what its deadline's task does. Cancelling
@@ -326,68 +383,84 @@ impl OnlineCore {
     }
 
     fn cancel(&mut self, id: u64) {
-        if self.active_requests.remove(&id) {
-            self.activate_pending_request();
-        } else {
-            self.pending_requests.remove(id);
+        self.pending_requests.remove(id);
+        let Some(req) = self.requests.remove(&id) else { return };
+        if let Some(timer) = req.timer {
+            self.queue.cancel(timer);
         }
-        if let Some(req) = self.requests.remove(&id) {
-            if let Some(timer) = req.timer {
-                self.queue.cancel(timer);
+        // The transfer goes on while another request waits for it.
+        if let Some(generation) = req.transfer
+            && let Some(transfer) = self.transfers.get_mut(&generation)
+        {
+            transfer.waiters.retain(|&waiter| waiter != id);
+            if transfer.waiters.is_empty() {
+                self.transfers.remove(&generation);
+                self.activate_pending_requests();
             }
-            drop(req);
         }
     }
 
+    /// Starts request `id`: it joins the transfer in flight that it shares,
+    /// or starts its own if the active set has room, or waits for room.
     fn activate_or_queue_request(&mut self, id: u64) {
         let Some(req) = self.requests.get(&id) else { return };
-        debug_assert!(!self.active_requests.contains(&id));
         debug_assert!(req.transfer.is_none());
-
-        if self.active_requests.len() >= self.maximum_concurrent_requests as usize {
+        let key = TransferKey::of(&req.resource);
+        let shared = self.transfers.iter().find(|(_, transfer)| transfer.key == key).map(|(&generation, _)| generation);
+        if let Some(generation) = shared {
+            if let Some(transfer) = self.transfers.get_mut(&generation) {
+                transfer.waiters.push(id);
+            }
+            if let Some(req) = self.requests.get_mut(&id) {
+                req.transfer = Some(generation);
+            }
+        } else if self.transfers.len() >= self.maximum_concurrent_requests as usize {
             self.pending_requests.insert(id, &req.resource);
         } else {
             self.activate_request(id);
         }
     }
 
+    /// Starts request `id`'s transfer, which the pending requests that
+    /// share it join.
     fn activate_request(&mut self, id: u64) {
-        self.active_requests.insert(id);
-
-        if self.online {
-            let generation = self.next_generation();
-            let queue = self.queue.clone();
-            let Some(req) = self.requests.get_mut(&id) else { return };
-            let (request, responder) = Request::new(move |response: Response| {
-                queue.post(move |core| core.transferred(id, generation, response));
-            });
-            req.transfer = Some((generation, request));
-            self.http_file_source.start(&req.resource, responder);
-        } else {
+        if !self.online {
             let mut response = Response::new();
             response.error = Some(Box::new(ResourceError::new(Reason::Connection, "Online connectivity is disabled.")));
-            self.transfer_done(id, response);
-        }
-    }
-
-    /// Ends request `id`'s transfer with `response`, and starts a pending
-    /// request in its place.
-    fn transfer_done(&mut self, id: u64, response: Response) {
-        self.active_requests.remove(&id);
-        if let Some(req) = self.requests.get_mut(&id) {
-            // The transfer is done; dropping its request is a no-op.
-            let finished = req.transfer.take();
-            drop(finished);
             self.completed(id, response);
+            return;
         }
-        self.activate_pending_request();
+        let generation = self.next_generation();
+        let queue = self.queue.clone();
+        let Some(req) = self.requests.get_mut(&id) else { return };
+        let (request, responder) = Request::new(move |response: Response| {
+            queue.post(move |core| core.transferred(generation, &response));
+        });
+        req.transfer = Some(generation);
+        let key = TransferKey::of(&req.resource);
+        self.http_file_source.start(&req.resource, responder);
+        let requests = &self.requests;
+        let joined = self
+            .pending_requests
+            .take(|pending| requests.get(&pending).is_some_and(|pending| TransferKey::of(&pending.resource) == key));
+        for &pending in &joined {
+            if let Some(req) = self.requests.get_mut(&pending) {
+                req.transfer = Some(generation);
+            }
+        }
+        let mut waiters = vec![id];
+        waiters.extend(joined);
+        self.transfers.insert(generation, Transfer { key, _request: request, waiters });
     }
 
-    fn activate_pending_request(&mut self) {
-        if let Some(id) = self.pending_requests.pop()
-            && self.requests.contains_key(&id)
+    /// Starts pending requests while the active set has room.
+    fn activate_pending_requests(&mut self) {
+        while self.transfers.len() < self.maximum_concurrent_requests as usize
+            && let Some(id) = self.pending_requests.pop()
         {
-            self.activate_request(id);
+            if self.requests.contains_key(&id) {
+                self.activate_request(id);
+            }
         }
     }
 
@@ -425,10 +498,10 @@ impl OnlineCore {
         let now = self.clock.as_ref().map_or_else(Instant::now, |clock| clock());
         #[cfg(not(all(feature = "bench", not(target_family = "wasm"))))]
         let now = Instant::now();
-        let in_progress = self.pending_requests.contains(id) || self.active_requests.contains(&id);
+        let pending = self.pending_requests.contains(id);
         let offline = self.network.get() == Status::Offline;
         let Some(req) = self.requests.get_mut(&id) else { return };
-        if req.transforming.is_some() || in_progress {
+        if req.transforming.is_some() || pending || req.transfer.is_some() {
             // There's already a request in progress; don't start another one.
             return;
         }
@@ -522,8 +595,9 @@ impl OnlineCore {
 
 /// The `Network` file source: HTTP(S) requests, revalidated when they
 /// expire and retried with a backoff after errors, with at most
-/// [`maximum_concurrent_requests`](Self::maximum_concurrent_requests) in
-/// flight. Its requests follow the [`NetworkStatus`] it was made with.
+/// [`maximum_concurrent_requests`](Self::maximum_concurrent_requests)
+/// transfers in flight. Requests that would send the same transfer at once
+/// share it. Its requests follow the [`NetworkStatus`] it was made with.
 ///
 /// Outside the browser its requests run on a thread of its own, which its
 /// drop waits for, unless it drops on that thread. When that thread can't
@@ -615,7 +689,7 @@ impl OnlineFileSource {
             queue: core_queue,
             requests: VecMap::new(),
             pending_requests: PendingRequests::default(),
-            active_requests: VecSet::new(),
+            transfers: VecMap::new(),
             generation: 0,
             online: true,
             maximum_concurrent_requests: DEFAULT_MAXIMUM_CONCURRENT_REQUESTS,
@@ -793,7 +867,7 @@ mod tests {
 
     /// The generation of request `id`'s transfer in flight.
     fn transfer(core: &OnlineCore, id: u64) -> Option<u64> {
-        core.requests[&id].transfer.as_ref().map(|(generation, _)| *generation)
+        core.requests[&id].transfer
     }
 
     /// A response to a transfer that ended, or that never was, ends
@@ -802,27 +876,128 @@ mod tests {
     #[test]
     fn a_stale_transfer_response_is_dropped() {
         let (_source, mut core) = core(1);
-        let url = closed_port_url("/stale");
-        let _first = request(&mut core, 1, &url);
-        let _second = request(&mut core, 2, &url);
+        let _first = request(&mut core, 1, &closed_port_url("/stale-1"));
+        let _second = request(&mut core, 2, &closed_port_url("/stale-2"));
         pass_deadline(&mut core, 1);
         pass_deadline(&mut core, 2);
         let first = transfer(&core, 1).expect("the first request's transfer");
         assert!(core.pending_requests.contains(2));
 
-        core.transferred(1, first + 1000, Response::new());
+        core.transferred(first + 1000, &Response::new());
         assert_eq!(Some(first), transfer(&core, 1));
         assert!(core.pending_requests.contains(2));
 
-        core.transferred(1, first, Response::new());
+        core.transferred(first, &Response::new());
         assert_eq!(None, transfer(&core, 1));
         let second = transfer(&core, 2).expect("the second request's transfer");
-        assert_eq!(1, core.active_requests.len());
+        assert_eq!(1, core.transfers.len());
 
-        core.transferred(1, first, Response::new());
+        core.transferred(first, &Response::new());
         assert_eq!(Some(second), transfer(&core, 2));
-        assert_eq!(1, core.active_requests.len());
+        assert_eq!(1, core.transfers.len());
         assert!(!core.pending_requests.contains(2));
+    }
+
+    /// A request whose answers the test counts.
+    fn counted(core: &mut OnlineCore, id: u64, resource: Resource) -> (Request, Arc<AtomicU32>) {
+        let answers = Arc::new(AtomicU32::new(0));
+        let counted = Arc::clone(&answers);
+        let (request, responder) = Request::new(move |_| {
+            counted.fetch_add(1, Ordering::SeqCst);
+        });
+        core.request(id, resource, responder);
+        (request, answers)
+    }
+
+    fn tile(url: &str) -> Resource {
+        Resource::new(Kind::Tile, url)
+    }
+
+    fn data() -> Response {
+        let mut response = Response::new();
+        response.data = Some(Arc::new(b"tile".to_vec()));
+        response
+    }
+
+    /// Requests for the same resource at once make one transfer, which
+    /// takes one place in the active set, and each takes its response.
+    #[test]
+    fn requests_for_one_resource_share_its_transfer() {
+        let (_source, mut core) = core(1);
+        let url = closed_port_url("/shared");
+        let (_first, first) = counted(&mut core, 1, tile(&url));
+        let (_second, second) = counted(&mut core, 2, tile(&url));
+        pass_deadline(&mut core, 1);
+        pass_deadline(&mut core, 2);
+        let generation = transfer(&core, 1).expect("the transfer");
+        assert_eq!(Some(generation), transfer(&core, 2));
+        assert_eq!(1, core.transfers.len());
+        assert!(!core.pending_requests.contains(2));
+
+        core.transferred(generation, &data());
+        assert_eq!((1, 1), (first.load(Ordering::SeqCst), second.load(Ordering::SeqCst)));
+        assert!(core.transfers.is_empty());
+    }
+
+    /// A shared transfer goes on while a request waits for it, and stops
+    /// with the last.
+    #[test]
+    fn a_shared_transfer_stops_with_its_last_request() {
+        let (_source, mut core) = core(2);
+        let url = closed_port_url("/shared");
+        let (_first, _) = counted(&mut core, 1, tile(&url));
+        let (_second, second) = counted(&mut core, 2, tile(&url));
+        pass_deadline(&mut core, 1);
+        pass_deadline(&mut core, 2);
+        let generation = transfer(&core, 1).expect("the transfer");
+
+        core.cancel(1);
+        assert!(core.transfers.contains_key(&generation));
+        core.cancel(2);
+        assert!(core.transfers.is_empty());
+        core.transferred(generation, &data());
+        assert_eq!(0, second.load(Ordering::SeqCst));
+    }
+
+    /// Requests that wait for room join the transfer they share when it
+    /// starts, rather than starting another after it.
+    #[test]
+    fn waiting_requests_join_the_transfer_they_share_when_it_starts() {
+        let (_source, mut core) = core(1);
+        let url = closed_port_url("/shared");
+        let (_other, _) = counted(&mut core, 1, tile(&closed_port_url("/other")));
+        let (_first, first) = counted(&mut core, 2, tile(&url));
+        let (_second, second) = counted(&mut core, 3, tile(&url));
+        for id in 1..=3 {
+            pass_deadline(&mut core, id);
+        }
+        let other = transfer(&core, 1).expect("the first transfer");
+        assert!(core.pending_requests.contains(2) && core.pending_requests.contains(3));
+
+        core.transferred(other, &data());
+        let generation = transfer(&core, 2).expect("the shared transfer");
+        assert_eq!(Some(generation), transfer(&core, 3));
+        assert!(!core.pending_requests.contains(3));
+        core.transferred(generation, &data());
+        assert_eq!((1, 1), (first.load(Ordering::SeqCst), second.load(Ordering::SeqCst)));
+    }
+
+    /// Requests that would send different validators, or ask for different
+    /// bytes, don't share a transfer.
+    #[test]
+    fn requests_of_other_validators_or_bytes_transfer_apart() {
+        let (_source, mut core) = core(4);
+        let url = closed_port_url("/apart");
+        let mut validated = tile(&url);
+        validated.prior_etag = Some("\"v1\"".to_owned());
+        let mut ranged = tile(&url);
+        ranged.data_range = Some((0, 99));
+        let _requests =
+            [counted(&mut core, 1, tile(&url)), counted(&mut core, 2, validated), counted(&mut core, 3, ranged)];
+        for id in 1..=3 {
+            pass_deadline(&mut core, id);
+        }
+        assert_eq!(3, core.transfers.len());
     }
 
     /// An answer of the resource transform that the request no longer waits
@@ -865,7 +1040,7 @@ mod tests {
         let mut response = Response::new();
         response.data = Some(Arc::new(b"tile".to_vec()));
         response.expires = Some(Timestamp::from_secs(now().secs_since_epoch() + 60));
-        core.transferred(1, generation, response);
+        core.transferred(generation, &response);
         assert_eq!(None, core.requests[&1].timer);
         assert_eq!(None, core.queue.next_deadline());
     }
@@ -881,7 +1056,7 @@ mod tests {
         let generation = transfer(&core, 1).expect("the request's transfer");
         let mut response = Response::new();
         response.error = Some(Box::new(ResourceError::new(Reason::Connection, "refused")));
-        core.transferred(1, generation, response);
+        core.transferred(generation, &response);
         let retry = core.queue.next_deadline().expect("the retry");
         assert!(retry > Instant::now() + Duration::from_secs(60));
 
