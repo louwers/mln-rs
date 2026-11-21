@@ -17,7 +17,7 @@
 
 use crate::gpu::GpuError;
 use crate::shaders::block::{Block, MemberType, c_like_members};
-use crate::shaders::program::{Program, PropertyType};
+use crate::shaders::program::{Buffer, Program, PropertyType};
 use crate::shaders::source::{Named, Stage, expand as expand_properties, per_vertex};
 
 /// The GLSL of a program.
@@ -35,12 +35,18 @@ pub struct Glsl {
     pub fragment: &'static str,
 }
 
+/// The structs of the blocks of `buffers`, the engine's or a program's, each
+/// of a storage buffer's element padded to its stride. A buffer of one is a
+/// `std140` block of one member of the struct, or of an array of them.
+#[must_use]
+pub fn blocks<'a>(buffers: impl IntoIterator<Item = &'a Buffer>) -> String {
+    super::blocks(buffers, declaration)
+}
+
 /// The declaration of `block` in the GLSL: a struct of its members, padded
 /// to `size` bytes, the stride of the storage buffer whose elements it is,
-/// or its own size. A buffer of it is a `std140` block of one member of the
-/// struct, or of an array of them.
-#[must_use]
-pub fn declaration(block: &Block, size: usize) -> String {
+/// or its own size.
+fn declaration(block: &Block, size: usize) -> String {
     let members = c_like_members(
         block,
         size,
@@ -58,21 +64,15 @@ pub fn declaration(block: &Block, size: usize) -> String {
     format!("struct {} {{\n{members}}};\n", block.name)
 }
 
-/// The vertex and fragment stages of `program`'s GLSL, `glsl`, with its
-/// properties' directives written out, as the [module docs](self) say.
-/// Fails for a directive that names no property of the program, or that is
-/// malformed.
-pub fn expand(program: &Program, glsl: &Glsl) -> Result<[String; 2], GpuError> {
-    let stage = |text, stage| {
-        expand_properties(
-            program,
-            text,
-            "",
-            |role, named| directive(named, role, stage),
-            |named| Ok(value(named, stage)),
-        )
+/// The `stage` of `program`'s GLSL, `glsl`, with its properties'
+/// directives written out, as the [module docs](self) say. Fails for a
+/// directive that names no property of the program, or that is malformed.
+pub fn expand(program: &Program, glsl: &Glsl, stage: Stage) -> Result<String, GpuError> {
+    let text = match stage {
+        Stage::Vertex => glsl.vertex,
+        Stage::Fragment => glsl.fragment,
     };
-    Ok([stage(glsl.vertex, Stage::Vertex)?, stage(glsl.fragment, Stage::Fragment)?])
+    expand_properties(program, text, "", |role, named| directive(named, role, stage), |named| Ok(value(named, stage)))
 }
 
 fn directive(named: &Named<'_>, role: &str, stage: Stage) -> Result<String, GpuError> {

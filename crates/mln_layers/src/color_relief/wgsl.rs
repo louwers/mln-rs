@@ -3,8 +3,7 @@
 use mln_gfx::shaders::source::wgsl::Wgsl;
 
 pub(super) const COLOR_RELIEF_SHADER: Wgsl = Wgsl {
-    vertex: Some(
-        r"
+    vertex: r"
 struct VertexInput {
     @location(0) position: vec2<i32>,
     @location(1) texture_pos: vec2<i32>,
@@ -39,9 +38,7 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 ",
-    ),
-    fragment: Some(
-        r"
+    fragment: r"
 struct FragmentInput {
     @location(0) frag_position: vec2<f32>,
 };
@@ -127,6 +124,5 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     return vec4<f32>(final_color);
 }
 ",
-    ),
-    prelude: None,
+    prelude: "",
 };

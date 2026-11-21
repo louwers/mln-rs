@@ -5,7 +5,7 @@ use std::ptr;
 
 use mln_gfx::gpu::{GpuError, ShaderKey};
 use mln_gfx::shaders::block::Block;
-use mln_gfx::shaders::program::{Buffer, PROJECTION_BUFFER, VIEW_BUFFER};
+use mln_gfx::shaders::program::PROJECTION_BUFFER;
 use mln_gfx::shaders::source::glsl_es::{self, Glsl};
 use mln_gfx::shaders::source::identifiers;
 use mln_util::hash::HashSet;
@@ -295,25 +295,15 @@ pub(crate) fn stage_sources(key: &ShaderKey, desktop: bool, highp_fragment: bool
     let defines: String = key.define_values().flat_map(|(name, value)| ["#define ", name, " ", value, "\n"]).collect();
     let fragment_defines = if highp_fragment { "#define HIGHP_FRAGMENT\n" } else { "" };
 
-    let blocks: Vec<&Block> = [&VIEW_BUFFER].into_iter().chain(program.buffers).filter_map(Buffer::block).collect();
-    let named = |glsl: &str| -> Vec<&Block> {
-        let identifiers: HashSet<&str> = identifiers(glsl).collect();
-        let reads = |block: &&Block| {
-            let members = block.members.iter().filter(|member| !member.padding);
-            members.map(|member| glsl_es::member_name(block, member)).any(|name| identifiers.contains(name.as_str()))
-        };
-        blocks.iter().copied().filter(reads).collect()
-    };
     let [vertex, fragment] = glsl_es::expand(program, source)?;
     let projects = projects(&identifiers(&vertex).collect());
     let projection = PROJECTION_BUFFER.block().filter(|_| projects);
-    let vertex_blocks: Vec<&Block> = projection.into_iter().chain(named(&vertex)).collect();
-    let mut fragment_blocks = named(&fragment);
+    let vertex_blocks: Vec<&Block> = projection.into_iter().chain(glsl_es::stage_blocks(program, &vertex)).collect();
+    let mut fragment_blocks = glsl_es::stage_blocks(program, &fragment);
     fragment_blocks
         .sort_by_key(|block| vertex_blocks.iter().position(|shared| ptr::eq(*shared, *block)).unwrap_or(usize::MAX));
     let stage = |stage_defines, precision, blocks: &[&Block], prelude, glsl| {
-        let blocks: String = blocks.iter().map(|block| glsl_es::declaration(block)).collect();
-        [version, &defines, stage_defines, precision, &blocks, prelude, glsl].concat()
+        [version, &defines, stage_defines, precision, &glsl_es::blocks(blocks), prelude, glsl].concat()
     };
     let vertex_prelude =
         if projects { [PRELUDE.vertex, PROJECTION_PRELUDE].concat() } else { PRELUDE.vertex.to_owned() };

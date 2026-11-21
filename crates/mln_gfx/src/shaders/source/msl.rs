@@ -19,7 +19,7 @@
 
 use crate::gpu::GpuError;
 use crate::shaders::block::{Block, MemberType, c_like_members};
-use crate::shaders::program::{Program, PropertyType};
+use crate::shaders::program::{Buffer, Program, PropertyType};
 use crate::shaders::source::{Named, Stage, expand as expand_properties, per_vertex};
 
 /// The MSL of a program. Its library compiles from the backend's prelude,
@@ -37,11 +37,17 @@ pub struct Msl {
     pub source: &'static str,
 }
 
+/// The structs of the blocks of `buffers`, the engine's or a program's, each
+/// of a storage buffer's element padded to its stride.
+#[must_use]
+pub fn blocks<'a>(buffers: impl IntoIterator<Item = &'a Buffer>) -> String {
+    super::blocks(buffers, declaration)
+}
+
 /// The declaration of `block` in MSL: a struct of its members, aligned to
 /// 16 bytes and padded to `size` bytes, the stride of the storage buffer
 /// whose elements it is, or its own size, which a `static_assert` checks.
-#[must_use]
-pub fn declaration(block: &Block, size: usize) -> String {
+fn declaration(block: &Block, size: usize) -> String {
     let members = c_like_members(
         block,
         size,

@@ -8,7 +8,7 @@ use std::borrow::Cow;
 use mln_gfx::color_mode::BlendFunction;
 use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
 use mln_gfx::gpu::{FixedState, GpuError, ShaderKey, VertexBufferLayout, VertexStep};
-use mln_gfx::shaders::program::{PROJECTION_BUFFER, Program, VIEW_BUFFER};
+use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::source::identifiers;
 use mln_gfx::shaders::source::wgsl::{self, Wgsl};
 use mln_gfx::types::{
@@ -798,27 +798,14 @@ pub(crate) fn stage_sources(key: &ShaderKey) -> Result<[String; 2], GpuError> {
         program.sources.wgsl.ok_or_else(|| GpuError::Unsupported(format!("no WGSL for {}", program.name)))?;
     // The common prelude goes through the preprocessor with the program, so
     // its `#ifdef`s see the defines.
-    let shader_prelude = source.prelude.unwrap_or("");
-    let blocks = block_declarations(program);
+    let shader_prelude = source.prelude;
+    let blocks = wgsl::blocks(program);
     let assemble = |stage: &str| {
         format!("{PRELUDE}\n{blocks}{}{shader_prelude}{stage}", reserved_bindings(&[shader_prelude, stage]))
     };
     // WGSL reads no define's value; the pixel ratio's is an override's.
     let defines: HashMap<String, bool> = key.define_values().map(|(name, _)| (name.to_owned(), true)).collect();
     Ok(wgsl::expand(program, source)?.map(|stage| preprocess_wgsl(&assemble(&stage), &defines)))
-}
-
-/// The structs of the blocks of the engine's buffers and `program`'s, each a
-/// storage buffer's element padded to its stride.
-fn block_declarations(program: &Program) -> String {
-    let buffers = [&VIEW_BUFFER, &PROJECTION_BUFFER].into_iter().chain(program.buffers);
-    let mut declarations = String::new();
-    for buffer in buffers {
-        if let Some(block) = buffer.block() {
-            declarations.push_str(&wgsl::declaration(block, buffer.size()));
-        }
-    }
-    declarations
 }
 
 /// The declarations of the engine's buffers that `texts`, a stage and the

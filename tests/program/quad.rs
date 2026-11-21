@@ -37,8 +37,7 @@ pub(crate) static QUAD: Program = Program {
 };
 
 const WGSL: wgsl::Wgsl = wgsl::Wgsl {
-    vertex: Some(
-        r"
+    vertex: r"
 struct VertexInput {
     @location(0) corner: vec2<f32>,
     @location(1) offset: vec2<f32>,
@@ -59,9 +58,7 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 ",
-    ),
-    fragment: Some(
-        r"
+    fragment: r"
 struct FragmentInput {
     @location(0) uv: vec2<f32>,
 };
@@ -75,8 +72,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     return textureSample(image, image_sampler, in.uv) * props.tint;
 }
 ",
-    ),
-    prelude: None,
+    prelude: "",
 };
 
 const MSL: msl::Msl = msl::Msl {

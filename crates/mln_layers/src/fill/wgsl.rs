@@ -17,8 +17,7 @@
 use mln_gfx::shaders::source::wgsl::Wgsl;
 
 pub(super) const FILL_OUTLINE_PATTERN_SHADER: Wgsl = Wgsl {
-    vertex: Some(
-        r"
+    vertex: r"
 struct VertexInput {
     @location(0) position: vec2<i32>,
     #property attribute color
@@ -108,9 +107,7 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 ",
-    ),
-    fragment: Some(
-        r"
+    fragment: r"
 struct FragmentInput {
     @builtin(position) position: vec4<f32>,
     @location(0) v_pos_a: vec2<f32>,
@@ -183,13 +180,11 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     return mix(color_a, color_b, props.fade) * alpha * opacity;
 }
 ",
-    ),
-    prelude: None,
+    prelude: "",
 };
 
 pub(super) const FILL_OUTLINE_SHADER: Wgsl = Wgsl {
-    vertex: Some(
-        r"
+    vertex: r"
 struct VertexInput {
     @location(0) position: vec2<i32>,
     #property attribute outline_color
@@ -229,9 +224,7 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 ",
-    ),
-    fragment: Some(
-        r"
+    fragment: r"
 @group(0) @binding(6) var<uniform> props: FillEvaluatedPropsUBO;
 
 struct FragmentInput {
@@ -266,13 +259,11 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     return color * alpha * opacity;
 }
 ",
-    ),
-    prelude: None,
+    prelude: "",
 };
 
 pub(super) const FILL_PATTERN_SHADER: Wgsl = Wgsl {
-    vertex: Some(
-        r"
+    vertex: r"
 struct VertexInput {
     @location(0) position: vec2<i32>,
     #property attribute color
@@ -356,9 +347,7 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 ",
-    ),
-    fragment: Some(
-        r"
+    fragment: r"
 struct FragmentInput {
     @location(0) v_pos_a: vec2<f32>,
     @location(1) v_pos_b: vec2<f32>,
@@ -424,13 +413,11 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     return mix(color_a, color_b, props.fade) * opacity;
 }
 ",
-    ),
-    prelude: None,
+    prelude: "",
 };
 
 pub(super) const FILL_SHADER: Wgsl = Wgsl {
-    vertex: Some(
-        r"
+    vertex: r"
 struct VertexInput {
     @location(0) position: vec2<i32>,
     #property attribute color
@@ -462,9 +449,7 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 ",
-    ),
-    fragment: Some(
-        r"
+    fragment: r"
 @group(0) @binding(6) var<uniform> props: FillEvaluatedPropsUBO;
 
 struct FragmentInput {
@@ -488,8 +473,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     return color * opacity;
 }
 ",
-    ),
-    prelude: None,
+    prelude: "",
 };
 
 /// `outline_corner`, the quad's corner of the attributes' segment.
@@ -575,7 +559,7 @@ struct VertexOutput {
 
 /// The instanced fill outlines.
 pub(super) const FILL_OUTLINE_INSTANCED_SHADER: Wgsl = Wgsl {
-    vertex: Some(concat!(
+    vertex: concat!(
         r"
 struct VertexInput {
     @location(0) corner: vec2<i32>,
@@ -609,14 +593,14 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 "
-    )),
+    ),
     fragment: FILL_OUTLINE_SHADER.fragment,
-    prelude: None,
+    prelude: "",
 };
 
 /// The pulled fill outlines.
 pub(super) const FILL_OUTLINE_PULLED_SHADER: Wgsl = Wgsl {
-    vertex: Some(concat!(
+    vertex: concat!(
         plain_declarations!(),
         r"
 // The fill's vertices and the ends of the outline segments that start at
@@ -672,14 +656,14 @@ fn main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     return out;
 }
 "
-    )),
+    ),
     fragment: FILL_OUTLINE_SHADER.fragment,
-    prelude: None,
+    prelude: "",
 };
 
 /// The instanced fill outlines of a pattern.
 pub(super) const FILL_OUTLINE_PATTERN_INSTANCED_SHADER: Wgsl = Wgsl {
-    vertex: Some(concat!(
+    vertex: concat!(
         r"
 struct VertexInput {
     @location(0) corner: vec2<i32>,
@@ -750,7 +734,7 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 "
-    )),
+    ),
     fragment: FILL_OUTLINE_PATTERN_SHADER.fragment,
-    prelude: None,
+    prelude: "",
 };

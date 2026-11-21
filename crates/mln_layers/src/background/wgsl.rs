@@ -3,8 +3,7 @@
 use mln_gfx::shaders::source::wgsl::Wgsl;
 
 pub(super) const BACKGROUND_PATTERN_SHADER: Wgsl = Wgsl {
-    vertex: Some(
-        r"
+    vertex: r"
 struct VertexInput {
     @location(0) position: vec2<i32>,
 };
@@ -48,9 +47,7 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 ",
-    ),
-    fragment: Some(
-        r"
+    fragment: r"
 struct FragmentInput {
     @location(0) pos_a: vec2<f32>,
     @location(1) pos_b: vec2<f32>,
@@ -86,13 +83,11 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     return mix(color_a, color_b, props.mix) * props.opacity;
 }
 ",
-    ),
-    prelude: None,
+    prelude: "",
 };
 
 pub(super) const BACKGROUND_SHADER: Wgsl = Wgsl {
-    vertex: Some(
-        r"
+    vertex: r"
 struct VertexInput {
     @location(0) position: vec2<i32>,
 };
@@ -114,9 +109,7 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 ",
-    ),
-    fragment: Some(
-        r"
+    fragment: r"
 @group(0) @binding(5) var<uniform> props: BackgroundPropsUBO;
 
 @fragment
@@ -128,6 +121,5 @@ fn main() -> @location(0) vec4<f32> {
     return props.color * props.opacity;
 }
 ",
-    ),
-    prelude: None,
+    prelude: "",
 };

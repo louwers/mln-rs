@@ -47,7 +47,7 @@ fn every_program_declares_the_properties_its_glsl_reads_from_uniforms() {
     const PREFIX: &str = "HAS_UNIFORM_u_";
     for (program, source) in programs() {
         let mut tested = BTreeSet::new();
-        let [vertex, fragment] = glsl::expand(program, source).expect("expands");
+        let [vertex, fragment] = STAGES.map(|stage| glsl::expand(program, source, stage.into()).expect("expands"));
         for text in [source.prelude, &vertex, &fragment] {
             for (start, _) in text.match_indices(PREFIX) {
                 let rest = &text[start + PREFIX.len()..];

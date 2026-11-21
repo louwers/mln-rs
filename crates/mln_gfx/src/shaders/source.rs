@@ -38,16 +38,17 @@ use std::fmt::Write as _;
 
 use crate::gfx_types::AttributeDataType;
 use crate::gpu::{GpuError, VertexStep};
-use crate::shaders::program::{Program, Property, PropertyType};
+use crate::shaders::block::Block;
+use crate::shaders::program::{Buffer, Program, Property, PropertyType};
 
 pub mod glsl;
 pub mod glsl_es;
 pub mod msl;
 pub mod wgsl;
 
-/// A shader stage, which a property's directive writes for.
+/// A shader stage.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Stage {
+pub enum Stage {
     Vertex,
     Fragment,
 }
@@ -100,6 +101,15 @@ impl Named<'_> {
             .copied()
             .ok_or_else(|| GpuError::Invalid(format!("missing argument for property {}", self.name())))
     }
+}
+
+/// The declarations that `declaration` writes of the blocks of `buffers`,
+/// each of a storage buffer's element padded to its stride.
+pub(crate) fn blocks<'a>(
+    buffers: impl IntoIterator<Item = &'a Buffer>,
+    declaration: impl Fn(&Block, usize) -> String,
+) -> String {
+    buffers.into_iter().filter_map(|buffer| Some(declaration(buffer.block()?, buffer.size()))).collect()
 }
 
 /// `text` between `#ifndef HAS_UNIFORM_u_<name>` and `#endif`, for the
@@ -228,9 +238,9 @@ mod tests {
     #[test]
     fn directives_write_both_kinds_of_variant() {
         let source = Wgsl {
-            vertex: Some("#property attribute color\n  #property varying color 2 flat\n#property pass color\n"),
-            fragment: Some("let color = $props.color * 2.0;"),
-            prelude: None,
+            vertex: "#property attribute color\n  #property varying color 2 flat\n#property pass color\n",
+            fragment: "let color = $props.color * 2.0;",
+            prelude: "",
         };
         let [vertex, fragment] = wgsl::expand(&DOT, &source).expect("expands");
         let per_vertex = |text: &str| format!("#ifndef HAS_UNIFORM_u_color\n{text}\n#endif\n");
@@ -252,7 +262,7 @@ mod tests {
     #[test]
     fn a_directive_names_a_property_of_the_program() {
         for vertex in ["#property attribute radius", "let radius = $props.radius;", "#property spin color"] {
-            let source = Wgsl { vertex: Some(vertex), fragment: None, prelude: None };
+            let source = Wgsl { vertex, fragment: "", prelude: "" };
             assert!(wgsl::expand(&DOT, &source).is_err(), "{vertex}");
         }
     }

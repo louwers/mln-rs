@@ -34,6 +34,15 @@ impl Stage {
     }
 }
 
+impl From<Stage> for mln_gfx::shaders::source::Stage {
+    fn from(stage: Stage) -> Self {
+        match stage {
+            Stage::Vertex => mln_gfx::shaders::source::Stage::Vertex,
+            Stage::Fragment => mln_gfx::shaders::source::Stage::Fragment,
+        }
+    }
+}
+
 /// The source of a stage: the version, the program's defines (`#define`
 /// lines), the declarations of the engine's blocks, the stage's prelude, and
 /// the shader's own prelude and source.

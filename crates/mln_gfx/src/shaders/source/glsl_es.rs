@@ -28,10 +28,12 @@
 
 use std::fmt::Write as _;
 
+use mln_util::hash::HashSet;
+
 use crate::gpu::GpuError;
 use crate::shaders::block::{Block, Member, MemberType};
-use crate::shaders::program::{Program, PropertyType};
-use crate::shaders::source::{Named, Stage, expand as expand_properties, from_uniform, per_vertex};
+use crate::shaders::program::{Buffer, Program, PropertyType, VIEW_BUFFER};
+use crate::shaders::source::{Named, Stage, expand as expand_properties, from_uniform, identifiers, per_vertex};
 
 /// The GLSL of a program.
 ///
@@ -49,10 +51,27 @@ pub struct Glsl {
     pub fragment: &'static str,
 }
 
-/// The declaration of `block` in GLSL ES: a `std140` uniform block whose
+/// The blocks of the view's buffer and `program`'s that `text`, a stage,
+/// names a member of: a stage declares only these, since WebGL2 rejects a
+/// draw whose program has a block without a buffer.
+#[must_use]
+pub fn stage_blocks(program: &Program, text: &str) -> Vec<&'static Block> {
+    let identifiers: HashSet<&str> = identifiers(text).collect();
+    let names = |block: &&Block| {
+        let mut members = block.members.iter().filter(|member| !member.padding);
+        members.any(|member| identifiers.contains(member_name(block, member).as_str()))
+    };
+    [&VIEW_BUFFER].into_iter().chain(program.buffers).filter_map(Buffer::block).filter(names).collect()
+}
+
+/// The declarations of `blocks`: each a `std140` uniform block whose
 /// members are in the program's scope, named as [`Block`] says.
 #[must_use]
-pub fn declaration(block: &Block) -> String {
+pub fn blocks(blocks: &[&Block]) -> String {
+    blocks.iter().map(|block| declaration(block)).collect()
+}
+
+fn declaration(block: &Block) -> String {
     let mut text = format!("layout (std140) uniform {} {{\n", block.name);
     for member in block.members {
         let (ty, array) = match member.ty {
@@ -77,8 +96,7 @@ pub fn declaration(block: &Block) -> String {
 }
 
 /// The name of `member` of `block` in GLSL ES, in the program's scope.
-#[must_use]
-pub fn member_name(block: &Block, member: &Member) -> String {
+fn member_name(block: &Block, member: &Member) -> String {
     if member.padding {
         format!("{}_{}", block.name, member.name)
     } else {
@@ -145,7 +163,7 @@ fn uniform(program: &Program, named: &Named<'_>) -> Result<&'static Member, GpuE
     program
         .buffers
         .iter()
-        .filter_map(super::super::program::Buffer::block)
+        .filter_map(Buffer::block)
         .find_map(|block| block.members.iter().find(|member| member_name(block, member) == name))
         .ok_or_else(|| GpuError::Invalid(format!("{} has no uniform {name}", program.name)))
 }

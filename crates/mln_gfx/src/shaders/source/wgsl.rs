@@ -18,7 +18,7 @@ use std::fmt::Write as _;
 
 use crate::gpu::GpuError;
 use crate::shaders::block::{Block, MemberType};
-use crate::shaders::program::{Program, PropertyType};
+use crate::shaders::program::{ENGINE_BUFFERS, Program, PropertyType};
 use crate::shaders::source::{Named, Stage, expand as expand_properties, per_vertex};
 
 /// The WGSL of a program: its stages, and the constants and structs of its
@@ -30,19 +30,25 @@ use crate::shaders::source::{Named, Stage, expand as expand_properties, per_vert
 /// `projectionVector`), `prelude` and the stage's source.
 #[derive(Debug)]
 pub struct Wgsl {
-    /// The vertex stage, or `None` for an empty one.
-    pub vertex: Option<&'static str>,
-    /// The fragment stage, or `None` for an empty one.
-    pub fragment: Option<&'static str>,
-    /// What both stages read, or `None` for nothing.
-    pub prelude: Option<&'static str>,
+    /// The vertex stage.
+    pub vertex: &'static str,
+    /// The fragment stage.
+    pub fragment: &'static str,
+    /// What both stages read, "" if nothing.
+    pub prelude: &'static str,
+}
+
+/// The structs of the blocks of the engine's buffers and `program`'s,
+/// each of a storage buffer's element padded to its stride.
+#[must_use]
+pub fn blocks(program: &Program) -> String {
+    super::blocks(ENGINE_BUFFERS.iter().chain(program.buffers), declaration)
 }
 
 /// The declaration of `block` in WGSL: a struct of its members, padded to
 /// `size` bytes, the stride of the storage buffer whose elements it is, or
 /// its own size.
-#[must_use]
-pub fn declaration(block: &Block, size: usize) -> String {
+fn declaration(block: &Block, size: usize) -> String {
     let mut text = format!("struct {} {{\n", block.name);
     for member in block.members {
         let ty = match member.ty {
@@ -64,14 +70,14 @@ pub fn declaration(block: &Block, size: usize) -> String {
 }
 
 /// The vertex and fragment stages of `program`'s WGSL, `source`, with its
-/// properties' directives written out, as the [module docs](self) say. A
-/// stage that `source` has none of is empty. Fails for a directive that
-/// names no property of the program, or that is malformed.
+/// properties' directives written out, as the [module docs](self) say.
+/// Fails for a directive that names no property of the program, or that is
+/// malformed.
 pub fn expand(program: &Program, source: &Wgsl) -> Result<[String; 2], GpuError> {
-    let stage = |text: Option<&str>, stage| {
+    let stage = |text: &str, stage| {
         expand_properties(
             program,
-            text.unwrap_or(""),
+            text,
             "",
             |role, named| directive(named, role, stage),
             |named| Ok(value(named, stage)),

@@ -3,8 +3,7 @@
 use mln_gfx::shaders::source::wgsl::Wgsl;
 
 pub(super) const HILLSHADE_PREPARE_SHADER: Wgsl = Wgsl {
-    vertex: Some(
-        r"
+    vertex: r"
 struct VertexInput {
     @location(0) position: vec2<i32>,
     @location(1) texcoord: vec2<i32>,
@@ -29,9 +28,7 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 ",
-    ),
-    fragment: Some(
-        r"
+    fragment: r"
 struct FragmentInput {
     @location(0) tex_coord: vec2<f32>,
 };
@@ -89,13 +86,11 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     return color;
 }
 ",
-    ),
-    prelude: None,
+    prelude: "",
 };
 
 pub(super) const HILLSHADE_SHADER: Wgsl = Wgsl {
-    vertex: Some(
-        r"
+    vertex: r"
 struct VertexInput {
     @location(0) position: vec2<i32>,
     @location(1) texcoord: vec2<i32>,
@@ -121,9 +116,7 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 ",
-    ),
-    fragment: Some(
-        r"
+    fragment: r"
 const STANDARD: i32 = 0;
 const COMBINED: i32 = 1;
 const IGOR: i32 = 2;
@@ -269,12 +262,9 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     }
 }
 ",
-    ),
-    prelude: Some(
-        r"
+    prelude: r"
 fn radians(degrees: f32) -> f32 {
     return PI * degrees / 180.0;
 }
 ",
-    ),
 };

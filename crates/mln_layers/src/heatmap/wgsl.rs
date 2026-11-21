@@ -3,8 +3,7 @@
 use mln_gfx::shaders::source::wgsl::Wgsl;
 
 pub(super) const HEATMAP_SHADER: Wgsl = Wgsl {
-    vertex: Some(
-        r"
+    vertex: r"
 struct VertexInput {
     @location(0) position: vec2<i32>,
     #property attribute weight
@@ -57,9 +56,7 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 ",
-    ),
-    fragment: Some(
-        r"
+    fragment: r"
 struct FragmentInput {
     #property varying weight 0
     @location(1) extrude: vec2<f32>,
@@ -81,13 +78,11 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 #endif
 }
 ",
-    ),
-    prelude: None,
+    prelude: "",
 };
 
 pub(super) const HEATMAP_TEXTURE_SHADER: Wgsl = Wgsl {
-    vertex: Some(
-        r"
+    vertex: r"
 struct VertexInput {
     @location(0) position: vec2<i32>,
 };
@@ -112,9 +107,7 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 ",
-    ),
-    fragment: Some(
-        r"
+    fragment: r"
 struct FragmentInput {
     @location(0) tex_coord: vec2<f32>,
 };
@@ -135,6 +128,5 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     return color * ubo.opacity;
 }
 ",
-    ),
-    prelude: None,
+    prelude: "",
 };

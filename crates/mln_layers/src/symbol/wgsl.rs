@@ -27,8 +27,7 @@ const SDF_PX: f32 = 8.0;
 }
 
 pub(super) const COLLISION_BOX_SHADER: Wgsl = Wgsl {
-    vertex: Some(
-        r"
+    vertex: r"
 struct VertexInput {
     @location(0) position: vec2<i32>,
     @location(1) anchor_position: vec2<i32>,
@@ -83,9 +82,7 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 ",
-    ),
-    fragment: Some(
-        r"
+    fragment: r"
 struct FragmentInput {
     @location(0) placed: f32,
     @location(1) not_used: f32,
@@ -111,13 +108,11 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     return color;
 }
 ",
-    ),
-    prelude: None,
+    prelude: "",
 };
 
 pub(super) const COLLISION_CIRCLE_SHADER: Wgsl = Wgsl {
-    vertex: Some(
-        r"
+    vertex: r"
 struct VertexInput {
     @location(0) position: vec2<i32>,
     @location(1) anchor_position: vec2<i32>,
@@ -179,9 +174,7 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 ",
-    ),
-    fragment: Some(
-        r"
+    fragment: r"
 struct FragmentInput {
     @location(0) placed: f32,
     @location(1) not_used: f32,
@@ -220,13 +213,11 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     return opacity_t * color;
 }
 ",
-    ),
-    prelude: None,
+    prelude: "",
 };
 
 pub(super) const SYMBOL_ICON_SHADER: Wgsl = Wgsl {
-    vertex: Some(
-        r"
+    vertex: r"
 struct VertexInput {
     @location(0) pos_offset: vec4<i32>,
     @location(1) data: vec4<u32>,
@@ -377,9 +368,7 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 ",
-    ),
-    fragment: Some(
-        r"
+    fragment: r"
 struct FragmentInput {
     @location(0) tex: vec2<f32>,
     @location(1) fade_opacity: f32,
@@ -409,19 +398,17 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     return textureSample(image, texture_sampler, atlas_pos(in.tex_origin, in.tex)) * opacity;
 }
 ",
-    ),
-    prelude: Some(concat!(
+    prelude: concat!(
         unpack_opacity!(),
         r"
 
 const c_offscreen_degenerate_triangle_location: f32 = -2.0;
 "
-    )),
+    ),
 };
 
 pub(super) const SYMBOL_SDF_SHADER: Wgsl = Wgsl {
-    vertex: Some(
-        r"
+    vertex: r"
 struct VertexInput {
     @location(0) pos_offset: vec4<i32>,
     @location(1) data: vec4<u32>,
@@ -600,9 +587,7 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 ",
-    ),
-    fragment: Some(
-        r"
+    fragment: r"
 struct FragmentInput {
     @location(0) tex: vec2<f32>,
     @location(1) fade_opacity: f32,
@@ -665,20 +650,18 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     return vec4<f32>(color.rgb * coverage, outAlpha);
 }
 ",
-    ),
-    prelude: Some(concat!(
+    prelude: concat!(
         sdf_px!(),
         unpack_opacity!(),
         r"
 
 const c_offscreen_degenerate_triangle_location: f32 = -2.0;
 "
-    )),
+    ),
 };
 
 pub(super) const SYMBOL_TEXT_AND_ICON_SHADER: Wgsl = Wgsl {
-    vertex: Some(
-        r"
+    vertex: r"
 struct VertexInput {
     @location(0) pos_offset: vec4<i32>,
     @location(1) data: vec4<u32>,
@@ -864,9 +847,7 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 ",
-    ),
-    fragment: Some(
-        r"
+    fragment: r"
 struct FragmentInput {
     @location(0) tex: vec2<f32>,
     @location(1) fade_opacity: f32,
@@ -939,13 +920,12 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 
 }
 ",
-    ),
-    prelude: Some(concat!(
+    prelude: concat!(
         sdf_px!(),
         unpack_opacity!(),
         r"
 
 const c_offscreen_degenerate_triangle_location: f32 = -2.0;
 "
-    )),
+    ),
 };

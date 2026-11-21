@@ -32,7 +32,7 @@ fn uniforms(program: &Program, wgsl: &Wgsl) -> BTreeSet<String> {
     const PREFIX: &str = "HAS_UNIFORM_u_";
     let mut names = BTreeSet::new();
     let [vertex, fragment] = wgsl::expand(program, wgsl).expect("expands");
-    for text in [wgsl.prelude.unwrap_or(""), &vertex, &fragment] {
+    for text in [wgsl.prelude, &vertex, &fragment] {
         for (start, _) in text.match_indices(PREFIX) {
             let rest = &text[start + PREFIX.len()..];
             let end = rest.find(|c: char| !c.is_ascii_alphanumeric() && c != '_').unwrap_or(rest.len());
@@ -60,10 +60,7 @@ fn every_layer_program_shows_the_overdraw_inspector() {
     for (program, wgsl) in programs() {
         if !not_layers.contains(&program.name) {
             assert!(
-                [wgsl.prelude, wgsl.vertex, wgsl.fragment]
-                    .into_iter()
-                    .flatten()
-                    .any(|text| text.contains("OVERDRAW_INSPECTOR")),
+                [wgsl.prelude, wgsl.vertex, wgsl.fragment].into_iter().any(|text| text.contains("OVERDRAW_INSPECTOR")),
                 "{}",
                 program.name
             );
@@ -93,10 +90,10 @@ fn every_program_compiles() {
                             ) {
                                 failed.push(format!("{} ({variant:?}, {:?}): {error}", program.name, key.defines()));
                             }
-                            let text = [Some(PRELUDE), wgsl.prelude, wgsl.vertex, wgsl.fragment];
+                            let text = [PRELUDE, wgsl.prelude, wgsl.vertex, wgsl.fragment];
                             assert_eq!(
                                 compiled.index_group().is_some(),
-                                text.into_iter().flatten().any(|text| text.contains("globalIndex")),
+                                text.into_iter().any(|text| text.contains("globalIndex")),
                                 "{} binds globalIndex in a group of its own",
                                 program.name
                             );
@@ -151,8 +148,7 @@ fn layouts(program: &Program) -> Vec<VertexBufferLayout> {
 fn no_source_declares_a_block() {
     let engine = [VIEW_BUFFER, PROJECTION_BUFFER];
     for (program, source) in programs() {
-        let text =
-            [Some(PRELUDE), source.prelude, source.vertex, source.fragment].map(Option::unwrap_or_default).concat();
+        let text = [PRELUDE, source.prelude, source.vertex, source.fragment].concat();
         for block in program.buffers.iter().chain(&engine).filter_map(Buffer::block) {
             assert!(!text.contains(&format!("struct {} {{", block.name)), "{} declares {}", program.name, block.name);
         }

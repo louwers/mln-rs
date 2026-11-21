@@ -153,6 +153,10 @@ pub const VIEW_BUFFER: Buffer = Buffer::uniform::<ViewUBO>(ID_VIEW_UBO);
 /// whose vertex stage projects with it.
 pub const PROJECTION_BUFFER: Buffer = Buffer::storage::<ProjectionUBO>(ID_PROJECTION_UBO);
 
+/// The engine's buffers that a program may read without listing them: the
+/// view's block and the projection block.
+pub static ENGINE_BUFFERS: [Buffer; 2] = [VIEW_BUFFER, PROJECTION_BUFFER];
+
 /// A vertex or instance attribute of a program.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Attribute {
@@ -348,8 +352,7 @@ impl Program {
     /// view's or the projection block.
     #[must_use]
     pub fn buffer_named(&self, name: &str) -> Option<&'static Buffer> {
-        static RESERVED: [Buffer; 2] = [VIEW_BUFFER, PROJECTION_BUFFER];
-        self.buffers.iter().chain(&RESERVED).find(|buffer| buffer.block().is_some_and(|block| block.name == name))
+        self.buffers.iter().chain(&ENGINE_BUFFERS).find(|buffer| buffer.block().is_some_and(|block| block.name == name))
     }
 }
 

@@ -269,7 +269,7 @@ macro_rules! wall {
 }
 
 pub(super) const FILL_EXTRUSION_SHADER: Wgsl = Wgsl {
-    vertex: Some(concat!(
+    vertex: concat!(
         r"
 struct VertexInput {
     @location(0) position: vec2<i32>,
@@ -300,14 +300,14 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 "
-    )),
-    fragment: Some(PLAIN_FRAGMENT),
-    prelude: None,
+    ),
+    fragment: PLAIN_FRAGMENT,
+    prelude: "",
 };
 
 /// The instanced fill extrusion walls.
 pub(super) const FILL_EXTRUSION_INSTANCED_SHADER: Wgsl = Wgsl {
-    vertex: Some(concat!(
+    vertex: concat!(
         r"
 struct VertexInput {
     @location(0) position: vec2<i32>,
@@ -341,9 +341,9 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 "
-    )),
-    fragment: Some(PLAIN_FRAGMENT),
-    prelude: None,
+    ),
+    fragment: PLAIN_FRAGMENT,
+    prelude: "",
 };
 
 /// The paint values' buffer of the pulled walls, where a paint property is
@@ -368,7 +368,7 @@ macro_rules! wall_paint {
 
 /// The pulled fill extrusion walls.
 pub(super) const FILL_EXTRUSION_PULLED_SHADER: Wgsl = Wgsl {
-    vertex: Some(concat!(
+    vertex: concat!(
         r"
 // What the instanced walls read as attributes.
 struct VertexInput {
@@ -448,14 +448,14 @@ fn main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     return out;
 }
 "
-    )),
-    fragment: Some(PLAIN_FRAGMENT),
-    prelude: None,
+    ),
+    fragment: PLAIN_FRAGMENT,
+    prelude: "",
 };
 
 /// The fill extrusion pattern roofs.
 pub(super) const FILL_EXTRUSION_PATTERN_SHADER: Wgsl = Wgsl {
-    vertex: Some(concat!(
+    vertex: concat!(
         r"
 struct VertexInput {
     @location(0) position: vec2<i32>,
@@ -483,14 +483,14 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 "
-    )),
-    fragment: Some(PATTERN_FRAGMENT),
-    prelude: None,
+    ),
+    fragment: PATTERN_FRAGMENT,
+    prelude: "",
 };
 
 /// The instanced fill extrusion pattern walls.
 pub(super) const FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: Wgsl = Wgsl {
-    vertex: Some(concat!(
+    vertex: concat!(
         r"
 struct VertexInput {
     @location(0) position: vec2<i32>,
@@ -525,7 +525,7 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 "
-    )),
-    fragment: Some(PATTERN_FRAGMENT),
-    prelude: None,
+    ),
+    fragment: PATTERN_FRAGMENT,
+    prelude: "",
 };

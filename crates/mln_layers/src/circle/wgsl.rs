@@ -3,8 +3,7 @@
 use mln_gfx::shaders::source::wgsl::Wgsl;
 
 pub(super) const CIRCLE_SHADER: Wgsl = Wgsl {
-    vertex: Some(
-        r"
+    vertex: r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
 override DEVICE_PIXEL_RATIO: f32 = 1.0;
 
@@ -123,9 +122,7 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 ",
-    ),
-    fragment: Some(
-        r"
+    fragment: r"
 struct FragmentInput {
     @location(0) extrude: vec2<f32>,
     @location(1) antialiasblur: f32,
@@ -168,11 +165,8 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     return opacity_t * final_color;
 }
 ",
-    ),
-    prelude: Some(
-        r"
+    prelude: r"
 @group(0) @binding(2) var<storage, read> drawableVector: array<CircleDrawableUBO>;
 @group(0) @binding(5) var<uniform> props: CircleEvaluatedPropsUBO;
 ",
-    ),
 };

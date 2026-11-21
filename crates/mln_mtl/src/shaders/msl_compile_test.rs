@@ -356,7 +356,7 @@ fn every_block_has_its_layout() {
             // One namespace a block and its stride, as a library declares
             // each once.
             _ = writeln!(library, "namespace {}_{} {{", block.name, buffer.size());
-            library += &msl::declaration(block, buffer.size());
+            library += &msl::blocks([buffer]);
             for member in block.members {
                 let (name, offset) = (member.name, member.offset);
                 _ = writeln!(

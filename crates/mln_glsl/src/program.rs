@@ -1,5 +1,5 @@
 use mln_gfx::gpu::GpuError;
-use mln_gfx::shaders::program::{Buffer, PROJECTION_BUFFER, Program, VIEW_BUFFER};
+use mln_gfx::shaders::program::{ENGINE_BUFFERS, Program};
 use mln_gfx::shaders::source::glsl::{self, Glsl};
 
 use crate::front_end::Stage;
@@ -11,15 +11,7 @@ use crate::front_end::Stage;
 /// and the program's own prelude and stage with its properties written out
 /// ([`glsl::expand`]). Fails as [`glsl::expand`] does.
 pub fn compose(program: &Program, glsl: &Glsl, stage: Stage, defines: &str) -> Result<String, GpuError> {
-    let [vertex, fragment] = glsl::expand(program, glsl)?;
-    let source = match stage {
-        Stage::Vertex => vertex,
-        Stage::Fragment => fragment,
-    };
-    let declarations = |buffers: &mut dyn Iterator<Item = &Buffer>| -> String {
-        buffers.filter_map(|buffer| Some(glsl::declaration(buffer.block()?, buffer.size()))).collect()
-    };
-    let engine = declarations(&mut [&VIEW_BUFFER, &PROJECTION_BUFFER].into_iter());
-    let own = declarations(&mut program.buffers.iter());
+    let source = glsl::expand(program, glsl, stage.into())?;
+    let (engine, own) = (glsl::blocks(&ENGINE_BUFFERS), glsl::blocks(program.buffers));
     Ok(crate::front_end::compose(stage, defines, &engine, &[&own, glsl.prelude].concat(), &source))
 }

@@ -2,7 +2,7 @@
 //! composes it with the blocks the program reads and its MSL.
 
 use mln_gfx::gpu::GpuError;
-use mln_gfx::shaders::program::{Buffer, PROJECTION_BUFFER, Program, VIEW_BUFFER};
+use mln_gfx::shaders::program::{ENGINE_BUFFERS, Program};
 use mln_gfx::shaders::source::msl::{self, Msl};
 
 /// The start of every library.
@@ -215,10 +215,6 @@ enum {
 /// and the program's own prelude and source with its properties written
 /// out ([`msl::expand`]). Fails as [`msl::expand`] does.
 pub(crate) fn library_source(program: &Program, source: &Msl) -> Result<String, GpuError> {
-    let declarations = |buffers: &mut dyn Iterator<Item = &Buffer>| -> String {
-        buffers.filter_map(|buffer| Some(msl::declaration(buffer.block()?, buffer.size()))).collect()
-    };
-    let engine = declarations(&mut [&VIEW_BUFFER, &PROJECTION_BUFFER].into_iter());
-    let own = declarations(&mut program.buffers.iter());
+    let (engine, own) = (msl::blocks(&ENGINE_BUFFERS), msl::blocks(program.buffers));
     Ok([HEADER, &engine, PRELUDE, &own, source.prelude, &msl::expand(program, source)?].concat())
 }

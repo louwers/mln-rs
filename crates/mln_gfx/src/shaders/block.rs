@@ -75,8 +75,7 @@ pub enum Precision {
 
 impl Precision {
     /// Its qualifier in GLSL ES.
-    #[must_use]
-    pub const fn glsl_es(self) -> &'static str {
+    pub(crate) const fn glsl_es(self) -> &'static str {
         match self {
             Precision::High => "highp",
             Precision::Medium => "mediump",

@@ -3,8 +3,7 @@
 use mln_gfx::shaders::source::wgsl::Wgsl;
 
 pub(crate) const ATMOSPHERE_SHADER: Wgsl = Wgsl {
-    vertex: Some(
-        r"
+    vertex: r"
 struct VertexInput {
     @location(0) position: vec2<i32>,
 };
@@ -28,9 +27,7 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 ",
-    ),
-    fragment: Some(
-        r"
+    fragment: r"
 struct FragmentInput {
     @location(0) view_direction: vec3<f32>,
 };
@@ -129,13 +126,11 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     return vec4<f32>(color.rgb, 1.0 - color.a) * atmosphere.sun_position.w;
 }
 ",
-    ),
-    prelude: None,
+    prelude: "",
 };
 
 pub(crate) const CLIPPING_MASK_PROGRAM: Wgsl = Wgsl {
-    vertex: Some(
-        r"
+    vertex: r"
 struct VertexInput {
     @location(0) position: vec2<i32>,
 };
@@ -154,21 +149,17 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 ",
-    ),
-    fragment: Some(
-        r"
+    fragment: r"
 @fragment
 fn main() -> @location(0) vec4<f32> {
     return vec4<f32>(0.0, 0.0, 0.0, 0.0);
 }
 ",
-    ),
-    prelude: None,
+    prelude: "",
 };
 
 pub(crate) const GLOBE_DEPTH_SHADER: Wgsl = Wgsl {
-    vertex: Some(
-        r"
+    vertex: r"
 struct VertexInput {
     @location(0) position: vec2<i32>,
 };
@@ -184,24 +175,20 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 ",
-    ),
-    fragment: Some(
-        r"
+    fragment: r"
 @fragment
 fn main() -> @location(0) vec4<f32> {
     return vec4<f32>(0.0);
 }
 ",
-    ),
-    prelude: None,
+    prelude: "",
 };
 
 /// A layer's texture, the size of the frame, composited onto it
 /// texel for texel, with its opacity and, for the blend modes that no blend
 /// function expresses, against a copy of the frame (`backdrop_texture`).
 pub(crate) const LAYER_COMPOSITE_SHADER: Wgsl = Wgsl {
-    vertex: Some(
-        r"
+    vertex: r"
 struct VertexInput {
     @location(0) position: vec2<i32>,
 };
@@ -212,9 +199,7 @@ fn main(in: VertexInput) -> @builtin(position) vec4<f32> {
     return vec4<f32>(pos * 2.0 - 1.0, 0.0, 1.0);
 }
 ",
-    ),
-    fragment: Some(
-        r"
+    fragment: r"
 @group(0) @binding(5) var<uniform> props: LayerCompositeUBO;
 @group(1) @binding(1) var image_texture: texture_2d<f32>;
 @group(1) @binding(2) var backdrop_texture: texture_2d<f32>;
@@ -291,13 +276,11 @@ fn main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
 #endif
 }
 ",
-    ),
-    prelude: None,
+    prelude: "",
 };
 
 pub(crate) const TILE_DEBUG_SHADER: Wgsl = Wgsl {
-    vertex: Some(
-        r"
+    vertex: r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
 override DEVICE_PIXEL_RATIO: f32 = 1.0;
 
@@ -371,9 +354,7 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 ",
-    ),
-    fragment: Some(
-        r"
+    fragment: r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
 override DEVICE_PIXEL_RATIO: f32 = 1.0;
 
@@ -408,13 +389,11 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 #endif
 }
 ",
-    ),
-    prelude: None,
+    prelude: "",
 };
 
 pub(crate) const SKY_SHADER: Wgsl = Wgsl {
-    vertex: Some(
-        r"
+    vertex: r"
 struct VertexInput {
     @location(0) position: vec2<i32>,
 };
@@ -433,9 +412,7 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 ",
-    ),
-    fragment: Some(
-        r"
+    fragment: r"
 struct FragmentInput {
     @location(0) pos: vec2<f32>,
 };
@@ -458,6 +435,5 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     return color * (1.0 - sky.sky_blend);
 }
 ",
-    ),
-    prelude: None,
+    prelude: "",
 };

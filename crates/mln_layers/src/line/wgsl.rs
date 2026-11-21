@@ -38,8 +38,7 @@ fn projectLineThickness(tileY: f32, projection: ProjectionUBO) -> f32 {
 ";
 
 pub(super) const LINE_GRADIENT_SDF_SHADER: Wgsl = Wgsl {
-    vertex: Some(
-        r"
+    vertex: r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
 override DEVICE_PIXEL_RATIO: f32 = 1.0;
 
@@ -179,9 +178,7 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 ",
-    ),
-    fragment: Some(
-        r"
+    fragment: r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
 override DEVICE_PIXEL_RATIO: f32 = 1.0;
 
@@ -257,13 +254,11 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     return color * (alpha * opacity * sdf_alpha);
 }
 ",
-    ),
-    prelude: Some(LINE_PRELUDE),
+    prelude: LINE_PRELUDE,
 };
 
 pub(super) const LINE_GRADIENT_SHADER: Wgsl = Wgsl {
-    vertex: Some(
-        r"
+    vertex: r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
 override DEVICE_PIXEL_RATIO: f32 = 1.0;
 
@@ -359,9 +354,7 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 ",
-    ),
-    fragment: Some(
-        r"
+    fragment: r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
 override DEVICE_PIXEL_RATIO: f32 = 1.0;
 
@@ -408,13 +401,11 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     return color * (alpha * opacity);
 }
 ",
-    ),
-    prelude: Some(LINE_PRELUDE),
+    prelude: LINE_PRELUDE,
 };
 
 pub(super) const LINE_PATTERN_SHADER: Wgsl = Wgsl {
-    vertex: Some(
-        r"
+    vertex: r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
 override DEVICE_PIXEL_RATIO: f32 = 1.0;
 
@@ -522,9 +513,7 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 ",
-    ),
-    fragment: Some(
-        r"
+    fragment: r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
 override DEVICE_PIXEL_RATIO: f32 = 1.0;
 
@@ -626,13 +615,11 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     return pattern_color * (alpha * opacity);
 }
 ",
-    ),
-    prelude: Some(LINE_PRELUDE),
+    prelude: LINE_PRELUDE,
 };
 
 pub(super) const LINE_SDF_SHADER: Wgsl = Wgsl {
-    vertex: Some(
-        r"
+    vertex: r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
 override DEVICE_PIXEL_RATIO: f32 = 1.0;
 
@@ -773,9 +760,7 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 ",
-    ),
-    fragment: Some(
-        r"
+    fragment: r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
 override DEVICE_PIXEL_RATIO: f32 = 1.0;
 
@@ -847,13 +832,11 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     return color * (alpha * opacity * sdf_alpha);
 }
 ",
-    ),
-    prelude: Some(LINE_PRELUDE),
+    prelude: LINE_PRELUDE,
 };
 
 pub(super) const LINE_SHADER: Wgsl = Wgsl {
-    vertex: Some(
-        r"
+    vertex: r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
 override DEVICE_PIXEL_RATIO: f32 = 1.0;
 
@@ -948,9 +931,7 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 ",
-    ),
-    fragment: Some(
-        r"
+    fragment: r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
 override DEVICE_PIXEL_RATIO: f32 = 1.0;
 
@@ -994,6 +975,5 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     return color * (alpha * opacity);
 }
 ",
-    ),
-    prelude: Some(LINE_PRELUDE),
+    prelude: LINE_PRELUDE,
 };

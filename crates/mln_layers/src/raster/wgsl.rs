@@ -3,8 +3,7 @@
 use mln_gfx::shaders::source::wgsl::Wgsl;
 
 pub(super) const RASTER_SHADER: Wgsl = Wgsl {
-    vertex: Some(
-        r"
+    vertex: r"
 struct VertexInput {
     @location(0) position: vec2<i32>,
     @location(1) texcoord: vec2<i32>,
@@ -35,9 +34,7 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 ",
-    ),
-    fragment: Some(
-        r"
+    fragment: r"
 struct FragmentInput {
     @location(0) pos0: vec2<f32>,
     @location(1) pos1: vec2<f32>,
@@ -84,6 +81,5 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     return vec4<f32>(final_rgb, color.a);
 }
 ",
-    ),
-    prelude: None,
+    prelude: "",
 };
