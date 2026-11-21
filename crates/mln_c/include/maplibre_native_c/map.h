@@ -186,6 +186,18 @@ typedef enum mln_map_mode : uint32_t {
   MLN_MAP_MODE_TILE = 2,
 } mln_map_mode;
 
+/**
+ * How far the skirts that hang from the edges of terrain tiles reach down.
+ *
+ * Skirts hide the cracks between neighboring terrain tiles of different zooms.
+ */
+typedef enum mln_terrain_skirt_length : uint32_t {
+  /** Skirts as long as a fifth of a tile's width at the map's zoom. */
+  MLN_TERRAIN_SKIRT_LENGTH_AUTO = 0,
+  /** No skirts. */
+  MLN_TERRAIN_SKIRT_LENGTH_NONE = 1,
+} mln_terrain_skirt_length;
+
 /** A size in logical pixels, and the physical pixels in each logical pixel. */
 typedef struct mln_logical_extent {
   uint32_t width;
@@ -265,6 +277,8 @@ typedef struct mln_map_options {
    */
   bool local_ideographs_enabled
     MLN_BINDING("mask=fields;bit=MLN_MAP_OPTION_LOCAL_IDEOGRAPHS_ENABLED");
+  /** The skirts of the style's terrain, for the map's lifetime. */
+  mln_terrain_skirt_length terrain_skirt_length;
 } mln_map_options;
 
 /** A point on the screen, in logical pixels from the map's top-left corner. */
@@ -1174,6 +1188,8 @@ typedef struct mln_map_snapshot {
   bool globe_rendering;
   /** The setting from mln_map_set_globe_free_bearing_enabled(). */
   bool globe_free_bearing_enabled;
+  /** The setting from mln_map_set_center_clamped_to_ground_enabled(). */
+  bool center_clamped_to_ground_enabled;
 } mln_map_snapshot;
 
 /** A map's camera, with the snapshot generation that it matches. */

@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use ::mln_map::{MapMode, MapSnapshot};
+use ::mln_map::{MapMode, MapSnapshot, TerrainSkirtLength};
 use ::mln_runtime::{Applied, EventMask, FeatureState, FeatureStateSelector, MapOptions};
 use feature::{Identifier, Value};
 use mln_util::geo::LatLngBounds;
@@ -16,10 +16,11 @@ use crate::generated::types::{
     MLN_FEATURE_ID_TYPE_DOUBLE, MLN_FEATURE_ID_TYPE_INT, MLN_FEATURE_ID_TYPE_STRING, MLN_FEATURE_ID_TYPE_UINT,
     MLN_FEATURE_STATE_SELECTOR_FEATURE_ID, MLN_MAP_MODE_CONTINUOUS, MLN_MAP_MODE_STATIC, MLN_MAP_MODE_TILE,
     MLN_MAP_OPTION_EVENT_MASK, MLN_MAP_OPTION_LOCAL_IDEOGRAPHS_ENABLED, MLN_MAP_OPTION_SYSTEM_FONTS_ENABLED,
-    MLN_MAP_OPTION_TILE_CACHE_ENABLED, MLN_TILE_LOD_MODE_DEFAULT, MLN_TILE_LOD_MODE_DISTANCE, mln_buffer_view,
-    mln_camera_bounds, mln_completion, mln_diagnostic, mln_feature_state_selector, mln_free_camera, mln_lat_lng_bounds,
-    mln_logical_extent, mln_map, mln_map_options, mln_map_snapshot, mln_map_tile_settings, mln_quaternion, mln_runtime,
-    mln_runtime_event_flags, mln_status, mln_vec3,
+    MLN_MAP_OPTION_TILE_CACHE_ENABLED, MLN_TERRAIN_SKIRT_LENGTH_AUTO, MLN_TERRAIN_SKIRT_LENGTH_NONE,
+    MLN_TILE_LOD_MODE_DEFAULT, MLN_TILE_LOD_MODE_DISTANCE, mln_buffer_view, mln_camera_bounds, mln_completion,
+    mln_diagnostic, mln_feature_state_selector, mln_free_camera, mln_lat_lng_bounds, mln_logical_extent, mln_map,
+    mln_map_options, mln_map_snapshot, mln_map_tile_settings, mln_quaternion, mln_runtime, mln_runtime_event_flags,
+    mln_status, mln_vec3,
 };
 use crate::handles::{self, HandleKind, HandleTable};
 use crate::runtime::{self, MapHandles};
@@ -150,6 +151,14 @@ unsafe fn map_options(options: *const mln_map_options) -> Result<(MapOptions, f6
         MLN_MAP_MODE_TILE => MapMode::Tile,
         _ => MapMode::Continuous,
     };
+    let terrain_skirt_length = match abi::enum_value(
+        options.terrain_skirt_length,
+        MLN_TERRAIN_SKIRT_LENGTH_AUTO..=MLN_TERRAIN_SKIRT_LENGTH_NONE,
+        "terrain_skirt_length",
+    )? {
+        MLN_TERRAIN_SKIRT_LENGTH_NONE => TerrainSkirtLength::None,
+        _ => TerrainSkirtLength::Auto,
+    };
     // SAFETY: the caller's contract.
     let faces = unsafe { buffer::text(options.fallback_font_faces, "mln_map_options.fallback_font_faces") }?;
     let fallback_font_faces = if faces.is_empty() {
@@ -170,6 +179,7 @@ unsafe fn map_options(options: *const mln_map_options) -> Result<(MapOptions, f6
             size: Size::new(extent.width, extent.height),
             pixel_ratio: extent.scale_factor as f32,
             fast_pfor_enabled: options.fast_pfor_enabled,
+            terrain_skirt_length,
             ..Default::default()
         },
         event_mask,
@@ -338,6 +348,7 @@ fn from_snapshot(snapshot: &MapSnapshot, event_mask: mln_runtime_event_flags) ->
         view: projection::from_map_view(&snapshot.view),
         globe_rendering: snapshot.globe_rendering,
         globe_free_bearing_enabled: snapshot.globe_free_bearing,
+        center_clamped_to_ground_enabled: snapshot.center_clamped_to_ground,
     }
 }
 
@@ -821,6 +832,7 @@ pub(crate) mod tests {
             (mln_map_options { fields: 1 << 9, ..options(1.0) }, "mln_map_options.fields"),
             (mln_map_options { fields: MLN_MAP_OPTION_EVENT_MASK, event_mask: 1, ..options(1.0) }, "event_mask"),
             (mln_map_options { fallback_font_faces: view("{}"), ..options(1.0) }, "fallback_font_faces is invalid"),
+            (mln_map_options { terrain_skirt_length: 9, ..options(1.0) }, "terrain_skirt_length"),
         ] {
             // SAFETY: local arguments.
             let status = unsafe {
@@ -865,6 +877,54 @@ pub(crate) mod tests {
         let off = mln_map_options { fields: MLN_MAP_OPTION_LOCAL_IDEOGRAPHS_ENABLED, ..options(1.0) };
         assert!(!read(off));
         assert!(read(mln_map_options { local_ideographs_enabled: true, ..off }));
+    }
+
+    #[test]
+    fn terrain_skirts_are_auto_unless_the_options_say_none() {
+        let read = |options: mln_map_options| {
+            // SAFETY: local options without views.
+            let (options, _) = unsafe { map_options(&raw const options) }.unwrap();
+            options.map.terrain_skirt_length
+        };
+        assert_eq!(read(options(1.0)), TerrainSkirtLength::Auto);
+        let none = mln_map_options { terrain_skirt_length: MLN_TERRAIN_SKIRT_LENGTH_NONE, ..options(1.0) };
+        assert_eq!(read(none), TerrainSkirtLength::None);
+    }
+
+    #[test]
+    fn the_center_clamp_is_on_until_its_setter_turns_it_off() {
+        let runtime = create();
+        let map = create_map(runtime, &options(1.0));
+        assert!(snapshot(map).center_clamped_to_ground_enabled);
+        for enabled in [false, true] {
+            let waiter = Waiter::new();
+            // SAFETY: a local completion.
+            let status = unsafe {
+                crate::camera::mln_map_set_center_clamped_to_ground_enabled(
+                    map,
+                    enabled,
+                    &raw const waiter.descriptor,
+                    NO_DIAGNOSTIC,
+                )
+            };
+            assert_eq!(status, MLN_STATUS_OK);
+            assert_eq!(waiter.status(), MLN_STATUS_OK);
+            assert_eq!(snapshot(map).center_clamped_to_ground_enabled, enabled);
+        }
+        release_map(map);
+        let waiter = Waiter::new();
+        // SAFETY: a local completion.
+        let status = unsafe {
+            crate::camera::mln_map_set_center_clamped_to_ground_enabled(
+                map,
+                false,
+                &raw const waiter.descriptor,
+                NO_DIAGNOSTIC,
+            )
+        };
+        assert_eq!(status, MLN_STATUS_INVALID_STATE);
+        waiter.unused();
+        release(runtime);
     }
 
     #[test]

@@ -131,6 +131,10 @@ static void map_options_with_unknown_mode(void* descriptor) {
   ((mln_map_options*)descriptor)->map_mode = 999;
 }
 
+static void map_options_with_unknown_skirt_length(void* descriptor) {
+  ((mln_map_options*)descriptor)->terrain_skirt_length = 9;
+}
+
 static void map_options_with_unknown_field(void* descriptor) {
   ((mln_map_options*)descriptor)->fields = 1U << 31U;
 }
@@ -154,6 +158,8 @@ static const mln_test_validation_case map_creation_cases[] = {
    "mln_map_options.size"},
   {"unknown map mode", map_options_with_unknown_mode,
    MLN_STATUS_INVALID_ARGUMENT, "map_mode"},
+  {"unknown terrain skirt length", map_options_with_unknown_skirt_length,
+   MLN_STATUS_INVALID_ARGUMENT, "terrain_skirt_length"},
   {"unknown field", map_options_with_unknown_field, MLN_STATUS_INVALID_ARGUMENT,
    "mln_map_options.fields"},
   {"zero initial extent", map_options_without_extent,

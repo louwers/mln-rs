@@ -75,6 +75,15 @@ static void every_option_command_round_trips_through_the_snapshot(void) {
     );
     TEST_ASSERT_EQUAL(free_bearing, snapshot.globe_free_bearing_enabled);
     TEST_ASSERT_FALSE(snapshot.globe_rendering);
+    // On by default, so the first pass turns it off.
+    const bool clamped = pass != 0;
+    COMMIT(
+      "center clamped to ground",
+      mln_map_set_center_clamped_to_ground_enabled(
+        map, clamped, &completion.descriptor, NULL
+      )
+    );
+    TEST_ASSERT_EQUAL(clamped, snapshot.center_clamped_to_ground_enabled);
   }
 
   static const struct {
@@ -434,6 +443,9 @@ static void option_descriptors_reject_what_they_cannot_express(void) {
     MLN_HANDLE_NULL, true, &discard, NULL
   ));
   MLN_TEST_INVALID(mln_map_set_globe_free_bearing_enabled(
+    MLN_HANDLE_NULL, true, &discard, NULL
+  ));
+  MLN_TEST_INVALID(mln_map_set_center_clamped_to_ground_enabled(
     MLN_HANDLE_NULL, true, &discard, NULL
   ));
   MLN_TEST_INVALID(mln_map_dump_debug_logs(MLN_HANDLE_NULL, &discard, NULL));

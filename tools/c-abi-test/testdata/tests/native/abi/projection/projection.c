@@ -64,6 +64,90 @@ static mln_screen_point projected_pixel(
   return point;
 }
 
+// Without terrain, a projection of the map converts as one of its snapshot's
+// view does, has no ground to read, and outlives the map.
+static void a_map_projection_without_terrain_converts_as_its_view_does(void) {
+  mln_runtime runtime = mln_test_create_runtime();
+  mln_map map = mln_test_create_map(runtime);
+  mln_camera_update pitched = {
+    .size = sizeof(mln_camera_update),
+    .camera = {.size = sizeof(mln_camera_options)}
+  };
+  pitched.mode = MLN_CAMERA_UPDATE_MODE_JUMP;
+  pitched.camera.fields = MLN_CAMERA_OPTION_ZOOM | MLN_CAMERA_OPTION_PITCH;
+  pitched.camera.zoom = 4.0;
+  pitched.camera.pitch = 50.0;
+  MLN_TEST_AWAIT_OK(
+    mln_map_update_camera(map, &pitched, &completion.descriptor, NULL)
+  );
+
+  mln_map_projection projection = MLN_HANDLE_NULL;
+  MLN_TEST_OK(mln_map_create_projection(map, &projection, NULL));
+  const mln_map_projection from_view = mln_test_map_create_projection(map);
+  mln_map_projection occupied = from_view;
+  MLN_TEST_INVALID(mln_map_create_projection(map, &occupied, NULL));
+  TEST_ASSERT_EQUAL_UINT64(from_view, occupied);
+  MLN_TEST_INVALID(mln_map_create_projection(map, NULL, NULL));
+  mln_map_projection rejected = MLN_HANDLE_NULL;
+  MLN_TEST_INVALID(mln_map_create_projection(MLN_HANDLE_NULL, &rejected, NULL));
+  mln_test_destroy_map(map);
+  MLN_TEST_INVALID_STATE(mln_map_create_projection(map, &rejected, NULL));
+  TEST_ASSERT_EQUAL_UINT64(MLN_HANDLE_NULL, rejected);
+  mln_test_destroy_runtime(runtime);
+
+  const mln_lat_lng coordinates[] = {
+    {.latitude = 0.0, .longitude = 0.0},
+    {.latitude = 10.0, .longitude = 20.0},
+    {.latitude = -5.0, .longitude = -8.0},
+  };
+  for (size_t index = 0; index < 3; index += 1) {
+    const mln_screen_point expected =
+      projected_pixel(from_view, coordinates[index]);
+    const mln_screen_point actual =
+      projected_pixel(projection, coordinates[index]);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-9, expected.x, actual.x);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-9, expected.y, actual.y);
+  }
+  const mln_screen_point below = {.x = 32.0, .y = 60.0};
+  mln_lat_lng expected = {0};
+  mln_lat_lng actual = {0};
+  MLN_TEST_OK(
+    mln_map_projection_lat_lng_for_pixel(from_view, below, &expected, NULL)
+  );
+  MLN_TEST_OK(
+    mln_map_projection_lat_lng_for_pixel(projection, below, &actual, NULL)
+  );
+  TEST_ASSERT_DOUBLE_WITHIN(1e-9, expected.latitude, actual.latitude);
+  TEST_ASSERT_DOUBLE_WITHIN(1e-9, expected.longitude, actual.longitude);
+
+  const mln_lat_lng origin = {.latitude = 0.0, .longitude = 0.0};
+  mln_map_projection_terrain_elevation_result elevation = {
+    .size = sizeof(mln_map_projection_terrain_elevation_result),
+    .has_elevation = true,
+  };
+  MLN_TEST_OK(mln_map_projection_get_terrain_elevation(
+    projection, origin, &elevation, NULL
+  ));
+  TEST_ASSERT_FALSE(elevation.has_elevation);
+  mln_map_projection_terrain_elevation_result undersized = {
+    .size = sizeof(mln_map_projection_terrain_elevation_result) - 1,
+    .has_elevation = true,
+  };
+  MLN_TEST_INVALID(mln_map_projection_get_terrain_elevation(
+    projection, origin, &undersized, NULL
+  ));
+  TEST_ASSERT_TRUE(undersized.has_elevation);
+  MLN_TEST_INVALID(
+    mln_map_projection_get_terrain_elevation(projection, origin, NULL, NULL)
+  );
+
+  mln_map_projection_release(projection);
+  mln_map_projection_release(from_view);
+  MLN_TEST_INVALID_STATE(mln_map_projection_get_terrain_elevation(
+    projection, origin, &elevation, NULL
+  ));
+}
+
 static void projection_follows_committed_extent_viewport_and_mode(void) {
   mln_runtime runtime = mln_test_create_runtime();
   mln_map map = mln_test_create_map(runtime);
@@ -864,6 +948,7 @@ MLN_TEST_GROUP {
   RUN_TEST(conversions_reject_invalid_inputs_without_writing_outputs);
   RUN_TEST(projection_outlives_its_source_map_and_runtime);
   RUN_TEST(projection_follows_committed_extent_viewport_and_mode);
+  RUN_TEST(a_map_projection_without_terrain_converts_as_its_view_does);
   RUN_TEST(creation_rejects_invalid_views);
   RUN_TEST(a_globe_view_projects_where_the_library_has_a_globe);
   RUN_TEST(a_mercator_view_hides_no_location);

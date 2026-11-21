@@ -137,6 +137,9 @@ typedef struct mln_source_feature {
  * The query reads the last frame that the session rendered. A feature that
  * several layers draw appears once for each layer. The topmost layer's
  * features come first, and the bottom layer's last.
+ *
+ * Over terrain, a point finds what the frame drew where its line of sight
+ * meets the ground.
  */
 MLN_BINDING("execution=query;result=mln_rendered_feature;shape=array")
 MLN_API mln_status mln_render_session_query_rendered_features(
