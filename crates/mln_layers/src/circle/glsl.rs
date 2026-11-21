@@ -2,15 +2,8 @@
 
 use mln_gfx::shaders::source::glsl::Glsl;
 
-const CIRCLE_SHADER_PRELUDE: &str = r"
-
-#define idCircleDrawableUBO         idDrawableReservedVertexOnlyUBO
-#define idCircleEvaluatedPropsUBO   layerUBOStartId
-
-";
-
 pub(super) const CIRCLE_SHADER: Glsl = Glsl {
-    prelude: CIRCLE_SHADER_PRELUDE,
+    prelude: "",
     vertex: r"
 
 layout(location = 0) in ivec2 in_position;
@@ -28,14 +21,6 @@ layout(location = 0) in ivec2 in_position;
 #property attribute stroke_width
 
 #property attribute stroke_opacity
-
-layout(std140, set = LAYER_SET_INDEX, binding = idCircleDrawableUBO) readonly buffer CircleDrawableUBOVector {
-    CircleDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(set = LAYER_SET_INDEX, binding = idCircleEvaluatedPropsUBO) uniform CircleEvaluatedPropsUBOBlock {
-    CircleEvaluatedPropsUBO props;
-};
 
 layout(location = 0) out vec2 frag_extrude;
 layout(location = 1) out float frag_antialiasblur;
@@ -55,7 +40,7 @@ layout(location = 1) out float frag_antialiasblur;
 #property varying stroke_opacity 8
 
 void main() {
-    const CircleDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
+    const CircleDrawableUBO drawable = drawableVector[constant.ubo_index];
 
     const float radius = $props.radius;
 
@@ -69,7 +54,7 @@ void main() {
     const vec2 circle_center = floor(in_position * 0.5);
 
 #ifdef PROJECTION_GLOBE
-    const ProjectionUBO projection = projectionVector.projection_ubo[constant.ubo_index];
+    const ProjectionUBO projection = projectionVector[constant.ubo_index];
 #endif
     if (props.pitch_with_map != 0) {
 #ifdef PROJECTION_GLOBE
@@ -162,10 +147,6 @@ layout(location = 1) in float frag_antialiasblur;
 #property varying stroke_opacity 8
 
 layout(location = 0) out vec4 out_color;
-
-layout(set = LAYER_SET_INDEX, binding = idCircleEvaluatedPropsUBO) uniform CircleEvaluatedPropsUBOBlock {
-    CircleEvaluatedPropsUBO props;
-};
 
 void main() {
 

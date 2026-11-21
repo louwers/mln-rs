@@ -4,20 +4,7 @@ use mln_gfx::shaders::source::glsl::Glsl;
 
 use crate::shaders::{atlas_pos, pattern_pos};
 
-const FILL_SHADER_PRELUDE: &str = concat!(
-    pattern_pos!(glsl),
-    atlas_pos!(glsl),
-    r"
-
-#define idFillDrawableUBO           idDrawableReservedVertexOnlyUBO
-#define idFillTilePropsUBO          drawableReservedUBOCount
-#define idFillEvaluatedPropsUBO     layerUBOStartId + 1
-#define idFillOutlineVertices       drawableUBOStartId + 5
-#define idFillOutlineEnds           drawableUBOStartId + 6
-#define idFillOutlinePaint          drawableUBOStartId + 7
-
-"
-);
+const FILL_SHADER_PRELUDE: &str = concat!(pattern_pos!(glsl), atlas_pos!(glsl),);
 
 pub(super) const FILL_SHADER: Glsl = Glsl {
     prelude: FILL_SHADER_PRELUDE,
@@ -29,16 +16,12 @@ layout(location = 0) in ivec2 in_position;
 
 #property attribute opacity
 
-layout(std140, set = LAYER_SET_INDEX, binding = idFillDrawableUBO) readonly buffer FillDrawableUBOVector {
-    FillDrawableUBO drawable_ubo[];
-} drawableVector;
-
 #property varying color 0
 
 #property varying opacity 1
 
 void main() {
-    const FillDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
+    const FillDrawableUBO drawable = drawableVector[constant.ubo_index];
 
 #if !defined(HAS_UNIFORM_u_color)
     frag_color = vec4(unpack_mix_color(in_color, drawable.color_t));
@@ -46,7 +29,7 @@ void main() {
 
     #property pass opacity
 
-    gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector.projection_ubo[constant.ubo_index]);
+    gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector[constant.ubo_index]);
 }
 ",
     fragment: r"
@@ -56,10 +39,6 @@ void main() {
 #property varying opacity 1
 
 layout(location = 0) out vec4 out_color;
-
-layout(set = LAYER_SET_INDEX, binding = idFillEvaluatedPropsUBO) uniform FillEvaluatedPropsUBOBlock {
-    FillEvaluatedPropsUBO props;
-};
 
 void main() {
 
@@ -89,10 +68,6 @@ layout(location = 1) in vec4 in_color;
 
 #property attribute opacity
 
-layout(std140, set = LAYER_SET_INDEX, binding = idFillDrawableUBO) readonly buffer FillOutlineDrawableUBOVector {
-    FillOutlineDrawableUBO drawable_ubo[];
-} drawableVector;
-
 #if !defined(HAS_UNIFORM_u_outline_color)
 layout(location = 0) out vec4 frag_color;
 #endif
@@ -102,7 +77,7 @@ layout(location = 0) out vec4 frag_color;
 layout(location = 2) out vec2 frag_position;
 
 void main() {
-    const FillOutlineDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
+    const FillOutlineDrawableUBO drawable = drawableVector[constant.ubo_index];
 
 #if !defined(HAS_UNIFORM_u_outline_color)
     frag_color = vec4(unpack_mix_color(in_color, drawable.outline_color_t));
@@ -110,7 +85,7 @@ void main() {
 
     #property pass opacity
 
-    gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector.projection_ubo[constant.ubo_index]);
+    gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector[constant.ubo_index]);
 
     // From the top left, as gl_FragCoord is.
     frag_position = (vec2(1.0, -1.0) * gl_Position.xy / gl_Position.w + 1.0) / 2.0 * view.target_size;
@@ -127,10 +102,6 @@ layout(location = 0) in vec4 frag_color;
 layout(location = 2) in vec2 frag_position;
 
 layout(location = 0) out vec4 out_color;
-
-layout(set = LAYER_SET_INDEX, binding = idFillEvaluatedPropsUBO) uniform FillEvaluatedPropsUBOBlock {
-    FillEvaluatedPropsUBO props;
-};
 
 void main() {
 
@@ -168,18 +139,6 @@ layout(location = 0) in ivec2 in_position;
 
 #property attribute opacity
 
-layout(std140, set = LAYER_SET_INDEX, binding = idFillDrawableUBO) readonly buffer FillPatternDrawableUBOVector {
-    FillPatternDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idFillTilePropsUBO) readonly buffer FillPatternTilePropsUBOVector {
-    FillPatternTilePropsUBO tile_props_ubo[];
-} tilePropsVector;
-
-layout(set = LAYER_SET_INDEX, binding = idFillEvaluatedPropsUBO) uniform FillEvaluatedPropsUBOBlock {
-    FillEvaluatedPropsUBO props;
-};
-
 layout(location = 0) out vec2 frag_pos_a;
 layout(location = 1) out vec2 frag_pos_b;
 
@@ -192,8 +151,8 @@ layout(location = 1) out vec2 frag_pos_b;
 #property varying opacity 5
 
 void main() {
-    const FillPatternDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
-    const FillPatternTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
+    const FillPatternDrawableUBO drawable = drawableVector[constant.ubo_index];
+    const FillPatternTilePropsUBO tileProps = tilePropsVector[constant.ubo_index];
 
     #property pass color
 
@@ -227,7 +186,7 @@ void main() {
     frag_pos_a = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, fromScale * display_size_a, tileZoomRatio, in_position),
     frag_pos_b = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, toScale * display_size_b, tileZoomRatio, in_position),
 
-    gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector.projection_ubo[constant.ubo_index]);
+    gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector[constant.ubo_index]);
 }
 ",
     fragment: r"
@@ -245,14 +204,6 @@ layout(location = 1) in vec2 frag_pos_b;
 
 layout(location = 0) out vec4 out_color;
 
-layout(std140, set = LAYER_SET_INDEX, binding = idFillTilePropsUBO) readonly buffer FillPatternTilePropsUBOVector {
-    FillPatternTilePropsUBO tile_props_ubo[];
-} tilePropsVector;
-
-layout(set = LAYER_SET_INDEX, binding = idFillEvaluatedPropsUBO) uniform FillEvaluatedPropsUBOBlock {
-    FillEvaluatedPropsUBO props;
-};
-
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image0_texture;
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image0_sampler;
 
@@ -263,7 +214,7 @@ void main() {
     return;
 #else
 
-    const FillPatternTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
+    const FillPatternTilePropsUBO tileProps = tilePropsVector[constant.ubo_index];
 
     const vec4 pattern_from = $tileProps.pattern_from;
 
@@ -321,18 +272,6 @@ layout(location = 0) in ivec2 in_position;
 
 #property attribute opacity
 
-layout(std140, set = LAYER_SET_INDEX, binding = idFillDrawableUBO) readonly buffer FillOutlinePatternDrawableUBOVector {
-    FillPatternDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idFillTilePropsUBO) readonly buffer FillOutlinePatternTilePropsUBOVector {
-    FillPatternTilePropsUBO tile_props_ubo[];
-} tilePropsVector;
-
-layout(set = LAYER_SET_INDEX, binding = idFillEvaluatedPropsUBO) uniform FillEvaluatedPropsUBOBlock {
-    FillEvaluatedPropsUBO props;
-};
-
 layout(location = 0) out vec2 frag_pos_a;
 layout(location = 1) out vec2 frag_pos_b;
 layout(location = 2) out vec2 frag_pos;
@@ -346,8 +285,8 @@ layout(location = 2) out vec2 frag_pos;
 #property varying opacity 6
 
 void main() {
-    const FillPatternDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
-    const FillPatternTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
+    const FillPatternDrawableUBO drawable = drawableVector[constant.ubo_index];
+    const FillPatternTilePropsUBO tileProps = tilePropsVector[constant.ubo_index];
 
     #property pass color
 
@@ -379,7 +318,7 @@ void main() {
     const vec2 display_size_b = vec2((pattern_br_b.x - pattern_tl_b.x) / pixelRatio, (pattern_br_b.y - pattern_tl_b.y) / pixelRatio);
 
     const vec2 position2 = in_position.xy;
-    gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector.projection_ubo[constant.ubo_index]);
+    gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector[constant.ubo_index]);
 
     frag_pos_a = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, fromScale * display_size_a, tileZoomRatio, position2),
     frag_pos_b = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, toScale * display_size_b, tileZoomRatio, position2),
@@ -403,14 +342,6 @@ layout(location = 2) in vec2 frag_pos;
 
 layout(location = 0) out vec4 out_color;
 
-layout(std140, set = LAYER_SET_INDEX, binding = idFillTilePropsUBO) readonly buffer FillOutlinePatternTilePropsUBOVector {
-    FillPatternTilePropsUBO tile_props_ubo[];
-} tilePropsVector;
-
-layout(set = LAYER_SET_INDEX, binding = idFillEvaluatedPropsUBO) uniform FillEvaluatedPropsUBOBlock {
-    FillEvaluatedPropsUBO props;
-};
-
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image0_texture;
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image0_sampler;
 
@@ -421,7 +352,7 @@ void main() {
     return;
 #else
 
-    const FillPatternTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
+    const FillPatternTilePropsUBO tileProps = tilePropsVector[constant.ubo_index];
 
     const vec4 pattern_from = $tileProps.pattern_from;
 
@@ -542,10 +473,6 @@ layout(location = 1) in vec4 in_color;
 
 #property attribute opacity
 
-layout(std140, set = LAYER_SET_INDEX, binding = idFillDrawableUBO) readonly buffer FillOutlineDrawableUBOVector {
-    FillOutlineDrawableUBO drawable_ubo[];
-} drawableVector;
-
 #if !defined(HAS_UNIFORM_u_outline_color)
 layout(location = 0) out vec4 frag_color;
 #endif
@@ -557,7 +484,7 @@ layout(location = 2) out vec2 frag_position;
         outline_corner!(),
         r"
 void main() {
-    const FillOutlineDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
+    const FillOutlineDrawableUBO drawable = drawableVector[constant.ubo_index];
 
 #if !defined(HAS_UNIFORM_u_outline_color)
     frag_color = vec4(unpack_mix_color(in_color, drawable.outline_color_t));
@@ -565,7 +492,7 @@ void main() {
 
     #property pass opacity
 
-    const ProjectionUBO projection = projectionVector.projection_ubo[constant.ubo_index];
+    const ProjectionUBO projection = projectionVector[constant.ubo_index];
     const vec2 start = vec2(in_outline_pos);
     const vec2 end = vec2(in_outline_end);
     vec2 pos;
@@ -600,18 +527,6 @@ layout(location = 6) in ivec2 in_outline_end;
 
 #property attribute opacity
 
-layout(std140, set = LAYER_SET_INDEX, binding = idFillDrawableUBO) readonly buffer FillOutlinePatternDrawableUBOVector {
-    FillPatternDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idFillTilePropsUBO) readonly buffer FillOutlinePatternTilePropsUBOVector {
-    FillPatternTilePropsUBO tile_props_ubo[];
-} tilePropsVector;
-
-layout(set = LAYER_SET_INDEX, binding = idFillEvaluatedPropsUBO) uniform FillEvaluatedPropsUBOBlock {
-    FillEvaluatedPropsUBO props;
-};
-
 layout(location = 0) out vec2 frag_pos_a;
 layout(location = 1) out vec2 frag_pos_b;
 layout(location = 2) out vec2 frag_pos;
@@ -627,8 +542,8 @@ layout(location = 2) out vec2 frag_pos;
         outline_corner!(),
         r"
 void main() {
-    const FillPatternDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
-    const FillPatternTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
+    const FillPatternDrawableUBO drawable = drawableVector[constant.ubo_index];
+    const FillPatternTilePropsUBO tileProps = tilePropsVector[constant.ubo_index];
 
     #property pass color
 
@@ -649,7 +564,7 @@ void main() {
     const vec2 display_size_a = (frag_pattern_from.zw - frag_pattern_from.xy) / view.pixel_ratio;
     const vec2 display_size_b = (frag_pattern_to.zw - frag_pattern_to.xy) / view.pixel_ratio;
 
-    const ProjectionUBO projection = projectionVector.projection_ubo[constant.ubo_index];
+    const ProjectionUBO projection = projectionVector[constant.ubo_index];
     const vec2 start = vec2(in_outline_pos);
     const vec2 end = vec2(in_outline_end);
     vec2 pos;
@@ -675,25 +590,11 @@ pub(super) const FILL_OUTLINE_PULLED_SHADER: Glsl = Glsl {
     vertex: concat!(
         r"
 
-layout(std140, set = LAYER_SET_INDEX, binding = idFillDrawableUBO) readonly buffer FillOutlineDrawableUBOVector {
-    FillOutlineDrawableUBO drawable_ubo[];
-} drawableVector;
-
 // The fill's vertices and the ends of the outline segments that start at
 // them, a word each: x and y in its halves.
-layout(std430, set = DRAWABLE_UBO_SET_INDEX, binding = idFillOutlineVertices) readonly buffer FillOutlineVertices {
-    uint vertices[];
-} outlineVertices;
-
-layout(std430, set = DRAWABLE_UBO_SET_INDEX, binding = idFillOutlineEnds) readonly buffer FillOutlineEnds {
-    uint ends[];
-} outlineEnds;
 
 #if !defined(HAS_UNIFORM_u_outline_color) || !defined(HAS_UNIFORM_u_opacity)
 // The fill's paint values, interleaved as the fill reads them.
-layout(std430, set = DRAWABLE_UBO_SET_INDEX, binding = idFillOutlinePaint) readonly buffer FillOutlinePaint {
-    float paint[];
-} outlinePaint;
 #endif
 
 #if !defined(HAS_UNIFORM_u_outline_color)
@@ -711,7 +612,7 @@ vec2 tile_position(const uint word) {
         outline_corner!(),
         r"
 void main() {
-    const FillOutlineDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
+    const FillOutlineDrawableUBO drawable = drawableVector[constant.ubo_index];
 
     // Four vertices a segment, in the order of the instanced quad's corners.
     const uint segment = uint(gl_VertexIndex) / 4u;
@@ -722,20 +623,20 @@ void main() {
     const uint paint = segment * (paint_layout & 0xffu);
 #if !defined(HAS_UNIFORM_u_outline_color)
     const uint color_at = paint + ((paint_layout >> 8u) & 0xffu);
-    const vec4 outline_color = vec4(outlinePaint.paint[color_at], outlinePaint.paint[color_at + 1u],
-                                    outlinePaint.paint[color_at + 2u], outlinePaint.paint[color_at + 3u]);
+    const vec4 outline_color = vec4(outlinePaint[color_at], outlinePaint[color_at + 1u],
+                                    outlinePaint[color_at + 2u], outlinePaint[color_at + 3u]);
     frag_color = vec4(unpack_mix_color(outline_color, drawable.outline_color_t));
 #endif
 
 #if !defined(HAS_UNIFORM_u_opacity)
     const uint opacity_at = paint + ((paint_layout >> 16u) & 0xffu);
-    const vec2 opacity = vec2(outlinePaint.paint[opacity_at], outlinePaint.paint[opacity_at + 1u]);
+    const vec2 opacity = vec2(outlinePaint[opacity_at], outlinePaint[opacity_at + 1u]);
     frag_opacity = unpack_mix_float(opacity, drawable.opacity_t);
 #endif
 
-    const ProjectionUBO projection = projectionVector.projection_ubo[constant.ubo_index];
-    const vec2 start = tile_position(outlineVertices.vertices[segment]);
-    const vec2 end = tile_position(outlineEnds.ends[segment]);
+    const ProjectionUBO projection = projectionVector[constant.ubo_index];
+    const vec2 start = tile_position(outlineVertices[segment]);
+    const vec2 end = tile_position(outlineEnds[segment]);
     const vec2 corner = vec2(float(quad_corner >> 1u), float(quad_corner & 1u));
     vec2 pos;
     float t;

@@ -2,15 +2,8 @@
 
 use mln_gfx::shaders::source::glsl::Glsl;
 
-const HEATMAP_SHADER_PRELUDE: &str = r"
-
-#define idHeatmapDrawableUBO        idDrawableReservedVertexOnlyUBO
-#define idHeatmapEvaluatedPropsUBO  layerUBOStartId
-
-";
-
 pub(super) const HEATMAP_SHADER: Glsl = Glsl {
-    prelude: HEATMAP_SHADER_PRELUDE,
+    prelude: "",
     vertex: r#"
 
 // Effective "0" in the kernel density texture to adjust the kernel size to;
@@ -27,19 +20,11 @@ layout(location = 0) in ivec2 in_position;
 
 #property attribute radius
 
-layout(std140, set = LAYER_SET_INDEX, binding = idHeatmapDrawableUBO) readonly buffer HeatmapDrawableUBOVector {
-    HeatmapDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(set = LAYER_SET_INDEX, binding = idHeatmapEvaluatedPropsUBO) uniform HeatmapEvaluatedPropsUBOBlock {
-    HeatmapEvaluatedPropsUBO props;
-};
-
 #property varying weight 0
 layout(location = 1) out vec2 frag_extrude;
 
 void main() {
-    const HeatmapDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
+    const HeatmapDrawableUBO drawable = drawableVector[constant.ubo_index];
 
     const float weight = $props.weight;
 
@@ -72,9 +57,9 @@ void main() {
     // in extrusion data
 #ifdef PROJECTION_GLOBE
     const vec2 circle_center = floor(in_position * 0.5);
-    const vec3 center_vector = projectToSphere(circle_center, vec2(0.0, 0.0), projectionVector.projection_ubo[constant.ubo_index]);
+    const vec3 center_vector = projectToSphere(circle_center, vec2(0.0, 0.0), projectionVector[constant.ubo_index]);
     const vec3 corner_vector = globeRotateVector(center_vector, extrude * radius * drawable.globe_extrude_scale);
-    gl_Position = interpolateProjection(circle_center + scaled_extrude, corner_vector, 0.0, projectionVector.projection_ubo[constant.ubo_index]);
+    gl_Position = interpolateProjection(circle_center + scaled_extrude, corner_vector, 0.0, projectionVector[constant.ubo_index]);
 #else
     gl_Position = drawable.matrix * vec4(floor(in_position * 0.5) + scaled_extrude, 0, 1);
 #endif
@@ -95,10 +80,6 @@ layout(location = 1) in vec2 frag_extrude;
 
 layout(location = 0) out vec4 out_color;
 
-layout(set = LAYER_SET_INDEX, binding = idHeatmapEvaluatedPropsUBO) uniform HeatmapEvaluatedPropsUBOBlock {
-    HeatmapEvaluatedPropsUBO props;
-};
-
 void main() {
 
 #if defined(OVERDRAW_INSPECTOR)
@@ -116,17 +97,11 @@ void main() {
 ",
 };
 
-const HEATMAP_TEXTURE_SHADER_PRELUDE: &str = r"#define idHeatmapTexturePropsUBO    layerUBOStartId";
-
 pub(super) const HEATMAP_TEXTURE_SHADER: Glsl = Glsl {
-    prelude: HEATMAP_TEXTURE_SHADER_PRELUDE,
+    prelude: "",
     vertex: r"
 
 layout(location = 0) in ivec2 in_position;
-
-layout(set = LAYER_SET_INDEX, binding = idHeatmapTexturePropsUBO) uniform HeatmapTexturePropsUBOBlock {
-    HeatmapTexturePropsUBO props;
-};
 
 layout(location = 0) out vec2 frag_position;
 
@@ -141,10 +116,6 @@ void main() {
 
 layout(location = 0) in vec2 frag_position;
 layout(location = 0) out vec4 out_color;
-
-layout(set = LAYER_SET_INDEX, binding = idHeatmapTexturePropsUBO) uniform HeatmapTexturePropsUBOBlock {
-    HeatmapTexturePropsUBO props;
-};
 
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image_texture;
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image_sampler;

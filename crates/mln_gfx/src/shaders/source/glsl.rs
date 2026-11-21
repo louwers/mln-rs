@@ -23,13 +23,20 @@ use crate::shaders::source::{Named, Stage, expand as expand_properties, per_vert
 /// The GLSL of a program.
 ///
 /// A stage compiles from the structs of the engine's blocks, `mln_glsl`'s
-/// prelude of the stage, the declarations of the engine's buffers that
-/// `prelude` or the stage names (`constant`, whose `ubo_index` is the
-/// draw's index into its layer's storage buffers, and `projectionVector`),
-/// the structs of the program's blocks, `prelude` and the stage's source.
+/// prelude of the stage, which declares the view's block, the declarations
+/// of the engine's buffers that `prelude` or the stage names (`constant`,
+/// whose `ubo_index` is the draw's index into its layer's storage buffers,
+/// and the projection blocks), the structs of the program's blocks, the
+/// declarations of the program's buffers that `prelude` or the stage names,
+/// `prelude` and the stage's source. A buffer's declaration is a block
+/// without an instance name, at the set and binding of its id and kind in
+/// `mln_glsl`'s layout, whose one member has the buffer's
+/// [`name`](crate::shaders::program::Buffer::name): the buffer's block, or
+/// an array of the elements, or of the vertices' 32-bit words, of a storage
+/// buffer.
 #[derive(Debug)]
 pub struct Glsl {
-    /// The shader's own constants (its buffer bindings), "" if none.
+    /// What both stages read before their sources, "" if nothing.
     pub prelude: &'static str,
     /// The vertex shader.
     pub vertex: &'static str,

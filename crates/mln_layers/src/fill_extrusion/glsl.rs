@@ -8,13 +8,6 @@ const FILL_EXTRUSION_SHADER_PRELUDE: &str = concat!(
     pattern_pos!(glsl),
     atlas_pos!(glsl),
     r"
-
-#define idFillExtrusionDrawableUBO              idDrawableReservedVertexOnlyUBO
-#define idFillExtrusionTilePropsUBO             drawableReservedUBOCount
-#define idFillExtrusionPropsUBO                 layerUBOStartId + 1
-#define idFillExtrusionWallVertices             drawableUBOStartId + 5
-#define idFillExtrusionWallPaint                drawableUBOStartId + 6
-
 // The normal at the end of a fill extrusion wall from its outline vertex's
 // packed decimals_ed.x: the one the walls there share, whose angle from -pi
 // its bits 2 to 15 hold where bit 1 is set, or else `own`, the wall's.
@@ -43,18 +36,10 @@ layout(location = 1) in uvec2 in_decimals_ed;
 
 #property attribute height
 
-layout(std140, set = LAYER_SET_INDEX, binding = idFillExtrusionDrawableUBO) readonly buffer FillExtrusionDrawableUBOVector {
-    FillExtrusionDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(set = LAYER_SET_INDEX, binding = idFillExtrusionPropsUBO) uniform FillExtrusionPropsUBOBlock {
-    FillExtrusionPropsUBO props;
-};
-
 layout(location = 0) out vec4 frag_color;
 
 void main() {
-    const FillExtrusionDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
+    const FillExtrusionDrawableUBO drawable = drawableVector[constant.ubo_index];
 
     const float base = max($props.base, 0.0);
 
@@ -65,7 +50,7 @@ void main() {
     const vec3 normal = vec3(0.0, 0.0, 1.0);
     const float t = 1.0;
     const float z = t > 0.0 ? height : base;
-    gl_Position = projectTileFor3D(vec2(in_position), z, projectionVector.projection_ubo[constant.ubo_index]);
+    gl_Position = projectTileFor3D(vec2(in_position), z, projectionVector[constant.ubo_index]);
 
 #if defined(OVERDRAW_INSPECTOR)
     frag_color = vec4(1.0);
@@ -125,13 +110,6 @@ void main() {
 macro_rules! fill_extrusion_wall_declarations {
     () => {
         r"
-layout(std140, set = LAYER_SET_INDEX, binding = idFillExtrusionDrawableUBO) readonly buffer FillExtrusionDrawableUBOVector {
-    FillExtrusionDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(set = LAYER_SET_INDEX, binding = idFillExtrusionPropsUBO) uniform FillExtrusionPropsUBOBlock {
-    FillExtrusionPropsUBO props;
-};
 
 layout(location = 0) out vec4 frag_color;
 
@@ -150,7 +128,7 @@ macro_rules! fill_extrusion_wall_main {
     const vec2 instancePos = vec2(in_outline_pos);
     const vec2 instanceDecimalsEd = vec2(in_decimals_ed);
 
-    const FillExtrusionDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
+    const FillExtrusionDrawableUBO drawable = drawableVector[constant.ubo_index];
 
     const float base = max($props.base, 0.0);
 
@@ -176,7 +154,7 @@ macro_rules! fill_extrusion_wall_main {
     const float t = float(in_position.y);
     const float z = t > 0.0 ? height : base;
 
-    gl_Position = projectTileFor3D(in_position.x == 0.0 ? p1 : p2, z, projectionVector.projection_ubo[constant.ubo_index]);
+    gl_Position = projectTileFor3D(in_position.x == 0.0 ? p1 : p2, z, projectionVector[constant.ubo_index]);
 
 #if defined(OVERDRAW_INSPECTOR)
     frag_color = vec4(1.0);
@@ -278,25 +256,19 @@ invariant gl_Position;
         r"
 // The bucket's vertices, two words each: the position's x and y in the
 // halves of the first, decimals_ed's in those of the second.
-layout(std430, set = DRAWABLE_UBO_SET_INDEX, binding = idFillExtrusionWallVertices) readonly buffer FillExtrusionWallVertices {
-    uint vertices[];
-} wallVertices;
 
 #if !defined(HAS_UNIFORM_u_color) || !defined(HAS_UNIFORM_u_base) || !defined(HAS_UNIFORM_u_height)
 // The bucket's paint values, interleaved as the roofs read them.
-layout(std430, set = DRAWABLE_UBO_SET_INDEX, binding = idFillExtrusionWallPaint) readonly buffer FillExtrusionWallPaint {
-    float paint[];
-} wallPaint;
 #endif
 
 void main() {
     // Four vertices a wall, in the order of the static quad's corners.
     const uint wall = uint(gl_VertexIndex) / 4u;
     const uint corner = uint(gl_VertexIndex) % 4u;
-    const uint pos = wallVertices.vertices[2u * wall];
-    const uint decimals_ed = wallVertices.vertices[2u * wall + 1u];
-    const uint next_pos = wallVertices.vertices[2u * wall + 2u];
-    const uint next_decimals_ed = wallVertices.vertices[2u * wall + 3u];
+    const uint pos = wallVertices[2u * wall];
+    const uint decimals_ed = wallVertices[2u * wall + 1u];
+    const uint next_pos = wallVertices[2u * wall + 2u];
+    const uint next_decimals_ed = wallVertices[2u * wall + 3u];
 
     // What the instanced walls read as vertex inputs.
     const ivec2 in_position = ivec2(corner < 2u ? 1 : 0, int(corner & 1u));
@@ -306,20 +278,20 @@ void main() {
     const uvec2 in_next_decimals_ed = uvec2(next_decimals_ed & 0xffffu, next_decimals_ed >> 16u);
 
     // The wall's paint values are its outline vertex's.
-    const uint paint_layout = drawableVector.drawable_ubo[constant.ubo_index].paint_layout;
+    const uint paint_layout = drawableVector[constant.ubo_index].paint_layout;
     const uint paint = wall * (paint_layout & 0xffu);
 #if !defined(HAS_UNIFORM_u_base)
     const uint base_at = paint + ((paint_layout >> 8u) & 0xffu);
-    const vec2 in_base = vec2(wallPaint.paint[base_at], wallPaint.paint[base_at + 1u]);
+    const vec2 in_base = vec2(wallPaint[base_at], wallPaint[base_at + 1u]);
 #endif
 #if !defined(HAS_UNIFORM_u_height)
     const uint height_at = paint + ((paint_layout >> 16u) & 0xffu);
-    const vec2 in_height = vec2(wallPaint.paint[height_at], wallPaint.paint[height_at + 1u]);
+    const vec2 in_height = vec2(wallPaint[height_at], wallPaint[height_at + 1u]);
 #endif
 #if !defined(HAS_UNIFORM_u_color)
     const uint color_at = paint + (paint_layout >> 24u);
-    const vec4 in_color = vec4(wallPaint.paint[color_at], wallPaint.paint[color_at + 1u],
-                               wallPaint.paint[color_at + 2u], wallPaint.paint[color_at + 3u]);
+    const vec4 in_color = vec4(wallPaint[color_at], wallPaint[color_at + 1u],
+                               wallPaint[color_at + 2u], wallPaint[color_at + 3u]);
 #endif
 ",
         fill_extrusion_wall_main!(),
@@ -345,18 +317,6 @@ layout(location = 1) in uvec2 in_decimals_ed;
 
 #property attribute pattern_to
 
-layout(std140, set = LAYER_SET_INDEX, binding = idFillExtrusionDrawableUBO) readonly buffer FillExtrusionDrawableUBOVector {
-    FillExtrusionDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idFillExtrusionTilePropsUBO) readonly buffer FillExtrusionTilePropsUBOVector {
-    FillExtrusionTilePropsUBO tile_props_ubo[];
-} tilePropsVector;
-
-layout(set = LAYER_SET_INDEX, binding = idFillExtrusionPropsUBO) uniform FillExtrusionPropsUBOBlock {
-    FillExtrusionPropsUBO props;
-};
-
 layout(location = 0) out vec4 frag_lighting;
 layout(location = 1) out vec2 frag_pos_a;
 layout(location = 2) out vec2 frag_pos_b;
@@ -366,8 +326,8 @@ layout(location = 2) out vec2 frag_pos_b;
 #property varying pattern_to 4 flat
 
 void main() {
-    const FillExtrusionDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
-    const FillExtrusionTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
+    const FillExtrusionDrawableUBO drawable = drawableVector[constant.ubo_index];
+    const FillExtrusionTilePropsUBO tileProps = tilePropsVector[constant.ubo_index];
 
     const float base = max($props.base, 0.0);
 
@@ -376,7 +336,7 @@ void main() {
     const vec3 normal = vec3(0.0, 0.0, 1.0);
     const float t = 1.0;
     const float z = t > 0.0 ? height : base;
-    gl_Position = projectTileFor3D(vec2(in_position), z, projectionVector.projection_ubo[constant.ubo_index]);
+    gl_Position = projectTileFor3D(vec2(in_position), z, projectionVector[constant.ubo_index]);
 
 #if defined(OVERDRAW_INSPECTOR)
     frag_lighting = vec4(1.0);
@@ -458,14 +418,6 @@ layout(location = 2) in vec2 frag_pos_b;
 
 layout(location = 0) out vec4 out_color;
 
-layout(std140, set = LAYER_SET_INDEX, binding = idFillExtrusionTilePropsUBO) readonly buffer FillExtrusionTilePropsUBOVector {
-    FillExtrusionTilePropsUBO tile_props_ubo[];
-} tilePropsVector;
-
-layout(set = LAYER_SET_INDEX, binding = idFillExtrusionPropsUBO) uniform FillExtrusionPropsUBOBlock {
-    FillExtrusionPropsUBO props;
-};
-
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image0_texture;
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image0_sampler;
 
@@ -476,7 +428,7 @@ void main() {
     return;
 #else
 
-    const FillExtrusionTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
+    const FillExtrusionTilePropsUBO tileProps = tilePropsVector[constant.ubo_index];
 
     const vec4 pattern_from = $tileProps.pattern_from;
     const vec4 pattern_to = $tileProps.pattern_to;
@@ -528,18 +480,6 @@ layout(location = 8) in uvec2 in_next_decimals_ed;
 
 #property attribute pattern_to
 
-layout(std140, set = LAYER_SET_INDEX, binding = idFillExtrusionDrawableUBO) readonly buffer FillExtrusionDrawableUBOVector {
-    FillExtrusionDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idFillExtrusionTilePropsUBO) readonly buffer FillExtrusionTilePropsUBOVector {
-    FillExtrusionTilePropsUBO tile_props_ubo[];
-} tilePropsVector;
-
-layout(set = LAYER_SET_INDEX, binding = idFillExtrusionPropsUBO) uniform FillExtrusionPropsUBOBlock {
-    FillExtrusionPropsUBO props;
-};
-
 layout(location = 0) out vec4 frag_lighting;
 layout(location = 1) out vec2 frag_pos_a;
 layout(location = 2) out vec2 frag_pos_b;
@@ -552,8 +492,8 @@ void main() {
     const vec2 instancePos = vec2(in_outline_pos);
     const vec2 instanceDecimalsEd = vec2(in_decimals_ed);
 
-    const FillExtrusionDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
-    const FillExtrusionTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
+    const FillExtrusionDrawableUBO drawable = drawableVector[constant.ubo_index];
+    const FillExtrusionTilePropsUBO tileProps = tilePropsVector[constant.ubo_index];
 
     const float base = max($props.base, 0.0);
 
@@ -577,7 +517,7 @@ void main() {
     const float t = float(in_position.y);
     const float z = t > 0.0 ? height : base;
 
-    gl_Position = projectTileFor3D(in_position.x == 0.0 ? p1 : p2, z, projectionVector.projection_ubo[constant.ubo_index]);
+    gl_Position = projectTileFor3D(in_position.x == 0.0 ? p1 : p2, z, projectionVector[constant.ubo_index]);
 
 #if defined(OVERDRAW_INSPECTOR)
     frag_lighting = vec4(1.0);
@@ -660,14 +600,6 @@ layout(location = 2) in vec2 frag_pos_b;
 
 layout(location = 0) out vec4 out_color;
 
-layout(std140, set = LAYER_SET_INDEX, binding = idFillExtrusionTilePropsUBO) readonly buffer FillExtrusionTilePropsUBOVector {
-    FillExtrusionTilePropsUBO tile_props_ubo[];
-} tilePropsVector;
-
-layout(set = LAYER_SET_INDEX, binding = idFillExtrusionPropsUBO) uniform FillExtrusionPropsUBOBlock {
-    FillExtrusionPropsUBO props;
-};
-
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image0_texture;
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image0_sampler;
 
@@ -678,7 +610,7 @@ void main() {
     return;
 #else
 
-    const FillExtrusionTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
+    const FillExtrusionTilePropsUBO tileProps = tilePropsVector[constant.ubo_index];
 
     const vec4 pattern_from = $tileProps.pattern_from;
     const vec4 pattern_to = $tileProps.pattern_to;

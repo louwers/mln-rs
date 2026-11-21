@@ -7,10 +7,9 @@
 //! for the programs that read them, and a module of sources for
 //! each shading language: `wgsl` for `mln_webgpu`, `msl` for `mln_mtl`,
 //! `glsl_es` for `mln_gl`, and `glsl` for `mln_vulkan` and `mln_d3d12`,
-//! which parse it with `mln_glsl`. A source binds what its program declares where
-//! `mln_gfx::shaders::program::Program` says, and reads the program's
-//! data-driven properties through the directives that
-//! `mln_gfx::shaders::source` describes.
+//! which parse it with `mln_glsl`. A source reads its program's buffers by
+//! their names, which the backends declare, and its data-driven properties
+//! through the directives that `mln_gfx::shaders::source` describes.
 //!
 //! The vertex buffers that the MSL reads follow the shader's buffers, from
 //! the index after its last one: the layout vertices, then the fill
@@ -37,8 +36,6 @@
 //!   instanced ones, which the renderer draws the walls with, the instances'.
 //!
 //! The GLSL that `mln_glsl` parses:
-//! - The evaluated properties of the fill, fill extrusion and color relief
-//!   layers bind one binding after the other layers'.
 //! - A fill extrusion wall reads its outline vertex and the next one as
 //!   instance attributes. The pulled walls and outlines have no vertex
 //!   inputs: they read the bucket's vertices from storage buffers in the

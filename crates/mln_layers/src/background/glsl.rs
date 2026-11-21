@@ -4,16 +4,7 @@ use mln_gfx::shaders::source::glsl::Glsl;
 
 use crate::shaders::{atlas_pos, pattern_pos};
 
-const BACKGROUND_SHADER_PRELUDE: &str = concat!(
-    pattern_pos!(glsl),
-    atlas_pos!(glsl),
-    r"
-
-#define idBackgroundDrawableUBO     idDrawableReservedVertexOnlyUBO
-#define idBackgroundPropsUBO        layerUBOStartId
-
-"
-);
+const BACKGROUND_SHADER_PRELUDE: &str = concat!(pattern_pos!(glsl), atlas_pos!(glsl),);
 
 pub(super) const BACKGROUND_SHADER: Glsl = Glsl {
     prelude: BACKGROUND_SHADER_PRELUDE,
@@ -21,22 +12,14 @@ pub(super) const BACKGROUND_SHADER: Glsl = Glsl {
 
 layout(location = 0) in ivec2 in_position;
 
-layout(std140, set = LAYER_SET_INDEX, binding = idBackgroundDrawableUBO) readonly buffer BackgroundDrawableUBOVector {
-    BackgroundDrawableUBO drawable_ubo[];
-} drawableVector;
-
 void main() {
-    const BackgroundDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
+    const BackgroundDrawableUBO drawable = drawableVector[constant.ubo_index];
 
-    gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector.projection_ubo[constant.ubo_index]);
+    gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector[constant.ubo_index]);
 }
 ",
     fragment: r"
 layout(location = 0) out vec4 out_color;
-
-layout(set = LAYER_SET_INDEX, binding = idBackgroundPropsUBO) uniform BackgroundPropsUBOBlock {
-    BackgroundPropsUBO props;
-};
 
 void main() {
 
@@ -55,19 +38,11 @@ pub(super) const BACKGROUND_PATTERN_SHADER: Glsl = Glsl {
     vertex: r"
 layout(location = 0) in ivec2 in_position;
 
-layout(std140, set = LAYER_SET_INDEX, binding = idBackgroundDrawableUBO) readonly buffer BackgroundPatternDrawableUBOVector {
-    BackgroundPatternDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(set = LAYER_SET_INDEX, binding = idBackgroundPropsUBO) uniform BackgroundPatternPropsUBOBlock {
-    BackgroundPatternPropsUBO props;
-};
-
 layout(location = 0) out vec2 frag_pos_a;
 layout(location = 1) out vec2 frag_pos_b;
 
 void main() {
-    const BackgroundPatternDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
+    const BackgroundPatternDrawableUBO drawable = drawableVector[constant.ubo_index];
 
     frag_pos_a = get_pattern_pos(drawable.pixel_coord_upper,
                                  drawable.pixel_coord_lower,
@@ -80,7 +55,7 @@ void main() {
                                  drawable.tile_units_to_pixels,
                                  in_position);
 
-    gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector.projection_ubo[constant.ubo_index]);
+    gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector[constant.ubo_index]);
 }
 ",
     fragment: r"
@@ -88,10 +63,6 @@ layout(location = 0) in vec2 frag_pos_a;
 layout(location = 1) in vec2 frag_pos_b;
 
 layout(location = 0) out vec4 out_color;
-
-layout(set = LAYER_SET_INDEX, binding = idBackgroundPropsUBO) uniform BackgroundPatternPropsUBOBlock {
-    BackgroundPatternPropsUBO props;
-};
 
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image_texture;
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image_sampler;

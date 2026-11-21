@@ -8,10 +8,11 @@
 //!
 //! The descriptor sets ([`layout`]) are the global uniform buffers, a layer's
 //! buffers, a drawable's uniform buffers with the vertex buffers its shader
-//! reads as storage buffers, and a drawable's textures. The renderer's buffer
-//! ids are packed: a layer's uniform buffer can have the id of another layer's
-//! storage buffer, so a buffer's binding follows from its id and from whether
-//! it is a storage buffer.
+//! reads as storage buffers, and a drawable's textures. A buffer's set and
+//! binding follow from its id and its
+//! [`kind`](mln_gfx::shaders::program::BufferKind): a layer's uniform block
+//! can have the id of another program's storage buffer, and a draw's own
+//! uniform block binds in the drawable set.
 //!
 //! The crate is empty on Apple platforms and in the browser build.
 

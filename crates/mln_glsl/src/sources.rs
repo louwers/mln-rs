@@ -1,7 +1,7 @@
 // The preludes every stage of the GLSL compiles after, which `mln_glsl`
 // parses with naga's GLSL front end:
-// - The buffers bind where `layout` puts the renderer's packed ids, from
-//   binding 0 for a drawable's uniform buffers.
+// - The view's block binds where `layout` puts it; `compose` declares the
+//   other buffers.
 // - A texture and its sampler are two bindings, `<name>_texture` and
 //   `<name>_sampler`, combined where they are sampled.
 // - What naga doesn't take is written another way: no precision qualifiers,
@@ -57,21 +57,7 @@ vec4 unpack_mix_color(const vec4 packedColors, const float t) {
     return mix(minColor, maxColor, t);
 }
 
-#define GLOBAL_SET_INDEX                    0
-#define LAYER_SET_INDEX                     1
-#define DRAWABLE_UBO_SET_INDEX              2
-#define DRAWABLE_IMAGE_SET_INDEX            3
-
-#define layerSSBOStartId                    0
-#define layerUBOStartId                     4
-#define drawableUBOStartId                  0
-
-#define idDrawableReservedVertexOnlyUBO     layerSSBOStartId
-#define idDrawableReservedFragmentOnlyUBO   idDrawableReservedVertexOnlyUBO + 1
-#define idProjectionUBO                     idDrawableReservedFragmentOnlyUBO + 1
-#define drawableReservedUBOCount            idProjectionUBO + 1
-
-layout(set = GLOBAL_SET_INDEX, binding = 0) uniform ViewUBOBlock {
+layout(std140, set = 0, binding = 0) uniform ViewUBOBlock {
     ViewUBO view;
 };
 
@@ -206,34 +192,16 @@ pub(crate) const PRELUDE_FRAGMENT: &str = r"
 
 #define M_PI 3.1415926535897932384626433832795
 
-#define GLOBAL_SET_INDEX                    0
-#define LAYER_SET_INDEX                     1
-#define DRAWABLE_UBO_SET_INDEX              2
 #define DRAWABLE_IMAGE_SET_INDEX            3
-
-#define layerSSBOStartId                    0
-#define layerUBOStartId                     4
-#define drawableUBOStartId                  0
 #define samplerBindingStartId               3
 
-#define idDrawableReservedVertexOnlyUBO     layerSSBOStartId
-#define idDrawableReservedFragmentOnlyUBO   idDrawableReservedVertexOnlyUBO + 1
-#define idProjectionUBO                     idDrawableReservedFragmentOnlyUBO + 1
-#define drawableReservedUBOCount            idProjectionUBO + 1
-
-layout(set = GLOBAL_SET_INDEX, binding = 0) uniform ViewUBOBlock {
+layout(std140, set = 0, binding = 0) uniform ViewUBOBlock {
     ViewUBO view;
 };
 
 ";
 
-/// The declarations of the engine's buffers that a stage may read without
-/// declaring them, each with the name it reads it by: the draw's index into
-/// its layer's storage buffers, a push constant, and the projection blocks.
-pub(crate) const RESERVED_BINDINGS: [(&str, &str); 2] = [
-    ("constant", "layout(push_constant) uniform Constants {\n    int ubo_index;\n} constant;"),
-    (
-        "projectionVector",
-        "layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {\n    ProjectionUBO projection_ubo[];\n} projectionVector;",
-    ),
-];
+/// The declaration of the draw's index into its layer's storage buffers, a
+/// push constant, which a stage reads as `constant.ubo_index`.
+pub(crate) const UBO_INDEX_DECLARATION: &str =
+    "layout(push_constant) uniform Constants {\n    int ubo_index;\n} constant;";

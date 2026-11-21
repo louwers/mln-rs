@@ -476,28 +476,27 @@ fn stages_agree_on_what_passes_between_them() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
-// The bindings the GLSL spells out as numbers are the ones the packed ids
-// have: `layerSSBOStartId`, `layerUBOStartId` and `drawableUBOStartId` with
-// the offsets the shader preludes add, and `samplerBindingStartId`.
+// The bindings of the ids in the shared pipeline layout, which the
+// preludes and `compose` declare the buffers at, and the textures' and
+// samplers', which the sources spell out from `samplerBindingStartId`.
 #[test]
 fn bindings_follow_from_the_packed_ids() {
     assert_eq!(global_uniform_binding(VIEW_BUFFER_ID), Some(0));
 
-    // idDrawableReservedVertexOnlyUBO, idDrawableReservedFragmentOnlyUBO,
-    // idProjectionUBO and drawableReservedUBOCount, from layerSSBOStartId.
+    // A layer's storage buffers, from binding 0.
     assert_eq!(layer_storage_binding(VERTEX_STORAGE_ID), Some(0));
     assert_eq!(layer_storage_binding(FRAGMENT_STORAGE_ID), Some(1));
     assert_eq!(layer_storage_binding(PROJECTION_BUFFER_ID), Some(2));
     assert_eq!(layer_storage_binding(FIRST_UNIFORM_ID), Some(3));
     assert_eq!(LAYER_STORAGE_COUNT, 4);
 
-    // layerUBOStartId, and the bindings after it.
+    // A layer's uniform blocks, after its storage buffers.
     assert_eq!(layer_uniform_binding(FIRST_UNIFORM_ID), Some(4));
     assert_eq!(layer_uniform_binding(FIRST_UNIFORM_ID + 1), Some(5));
     assert_eq!(LAYER_UNIFORM_COUNT, 2);
 
-    // drawableUBOStartId and its offsets, then the vertex buffers of the
-    // pulled shaders, from drawableUBOStartId + 5.
+    // A draw's own uniform blocks, from binding 0, then the vertex buffers
+    // of the pulled shaders.
     assert_eq!(drawable_uniform_binding(VERTEX_STORAGE_ID), Some(0));
     assert_eq!(drawable_uniform_binding(PROJECTION_BUFFER_ID), Some(2));
     assert_eq!(drawable_uniform_binding(FIRST_UNIFORM_ID), Some(3));
@@ -546,6 +545,21 @@ fn no_stage_flips_y() {
     assert!(!sources::PRELUDE_VERTEX.contains("applySurfaceTransform"));
 }
 
+/// No source declares a buffer: `compose` declares the engine's and its
+/// program's, by their names. A source declares only its textures and
+/// samplers, in the image set.
+#[test]
+fn no_source_declares_a_buffer() {
+    for (program, source) in programs() {
+        for text in [source.prelude, source.vertex, source.fragment] {
+            for line in text.lines().filter(|line| line.contains("layout(") && line.contains("set =")) {
+                assert!(line.contains("set = DRAWABLE_IMAGE_SET_INDEX"), "{}: {line}", program.name);
+            }
+            assert!(!text.contains("readonly buffer"), "{} declares a buffer", program.name);
+        }
+    }
+}
+
 /// No source declares a block of the engine's or its program's: the
 /// backend declares them, from their layouts.
 #[test]
@@ -589,4 +603,37 @@ fn every_block_has_its_layout() {
             }
         }
     }
+}
+
+/// A buffer's declaration is at the set and binding of its id and kind: a
+/// layer's uniform block and a storage buffer in the layer set, a draw's
+/// own uniform block and a vertex buffer in the drawable set.
+#[test]
+fn a_buffers_declaration_is_at_its_ids_binding() {
+    use mln_gfx::gfx_types::AttributeDataType::{Float, Short4};
+    use mln_gfx::shaders::layer_ubo::ViewUBO;
+    use mln_gfx::shaders::program::{DRAW_PROJECTION_BUFFER, Stages};
+
+    use crate::program::declaration;
+
+    let at = |buffer: &ProgramBuffer| {
+        let text = declaration(buffer).expect("a declaration");
+        text.split_once(')').expect("a layout").0.to_owned()
+    };
+    assert_eq!(at(&ProgramBuffer::uniform::<ViewUBO>("props", 0)), "layout(std140, set = 1, binding = 4");
+    assert_eq!(
+        at(&ProgramBuffer::storage::<ViewUBO>("drawableVector", Stages::Vertex)),
+        "layout(std140, set = 1, binding = 0"
+    );
+    assert_eq!(
+        at(&ProgramBuffer::draw_uniform::<ViewUBO>("tileProps", Stages::Both)),
+        "layout(std140, set = 2, binding = 3"
+    );
+    assert_eq!(at(&ProgramBuffer::vertices("wallVertices", 0, Short4)), "layout(std430, set = 2, binding = 5");
+    assert_eq!(at(&PROJECTION_BUFFER), "layout(std140, set = 1, binding = 2");
+    assert_eq!(at(&DRAW_PROJECTION_BUFFER), "layout(std140, set = 2, binding = 2");
+    assert_eq!(
+        declaration(&ProgramBuffer::vertices("wallPaint", 1, Float)).expect("one"),
+        "layout(std430, set = 2, binding = 6) readonly buffer wallPaintWords {\n    float wallPaint[];\n};"
+    );
 }

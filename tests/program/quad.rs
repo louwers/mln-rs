@@ -124,11 +124,7 @@ void main() {
 };
 
 const GLSL: glsl::Glsl = glsl::Glsl {
-    prelude: r"
-layout(set = LAYER_SET_INDEX, binding = layerUBOStartId) uniform QuadUBOBlock {
-    QuadUBO props;
-};
-",
+    prelude: "",
     vertex: r"
 layout(location = 0) in vec2 in_corner;
 layout(location = 1) in vec2 in_offset;

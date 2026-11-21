@@ -26,16 +26,8 @@ vec2 unpack_opacity(const float packedOpacity) {
     };
 }
 
-const COLLISION_SHADER_PRELUDE: &str = r"
-
-#define idCollisionDrawableUBO      drawableUBOStartId
-#define idCollisionTilePropsUBO     drawableUBOStartId + 3
-#define idCollisionProjectionUBO    drawableUBOStartId + 2
-
-";
-
 pub(super) const COLLISION_BOX_SHADER: Glsl = Glsl {
-    prelude: COLLISION_SHADER_PRELUDE,
+    prelude: "",
     vertex: r"
 
 layout(location = 0) in ivec2 in_position;
@@ -45,25 +37,13 @@ layout(location = 3) in uvec2 in_placed;
 layout(location = 4) in vec2 in_shift;
 layout(location = 5) in float in_height_offset;
 
-layout(set = DRAWABLE_UBO_SET_INDEX, binding = idCollisionDrawableUBO) uniform CollisionDrawableUBOBlock {
-    CollisionDrawableUBO drawable;
-};
-
-layout(set = DRAWABLE_UBO_SET_INDEX, binding = idCollisionTilePropsUBO) uniform CollisionTilePropsUBOBlock {
-    CollisionTilePropsUBO tileProps;
-};
-
-layout(std140, set = DRAWABLE_UBO_SET_INDEX, binding = idCollisionProjectionUBO) uniform CollisionProjectionUBO {
-    ProjectionUBO projection;
-} collisionProjection;
-
 layout(location = 0) out float frag_placed;
 layout(location = 1) out float frag_notUsed;
 
 void main() {
 
 #ifdef PROJECTION_GLOBE
-    vec4 projectedPoint = projectTileWithElevation(vec2(in_anchor_position), in_height_offset, collisionProjection.projection);
+    vec4 projectedPoint = projectTileWithElevation(vec2(in_anchor_position), in_height_offset, drawProjection);
 #else
     vec4 projectedPoint = drawable.matrix * vec4(in_anchor_position, in_height_offset, 1.0);
 #endif
@@ -74,7 +54,7 @@ void main() {
         4.0);
 
 #ifdef PROJECTION_GLOBE
-    gl_Position = projectTileWithElevation(vec2(in_position), in_height_offset, collisionProjection.projection);
+    gl_Position = projectTileWithElevation(vec2(in_position), in_height_offset, drawProjection);
     // Boxes just past the horizon stay visible, as in GL JS; ones far behind it are clipped.
     if (gl_Position.z / gl_Position.w < 1.1) {
         gl_Position.z = 0.0;
@@ -118,25 +98,13 @@ void main() {
 };
 
 pub(super) const COLLISION_CIRCLE_SHADER: Glsl = Glsl {
-    prelude: COLLISION_SHADER_PRELUDE,
+    prelude: "",
     vertex: r"
 
 layout(location = 0) in ivec2 in_position;
 layout(location = 1) in ivec2 in_anchor_position;
 layout(location = 2) in ivec2 in_extrude;
 layout(location = 3) in uvec2 in_placed;
-
-layout(set = DRAWABLE_UBO_SET_INDEX, binding = idCollisionDrawableUBO) uniform CollisionDrawableUBOBlock {
-    CollisionDrawableUBO drawable;
-};
-
-layout(set = DRAWABLE_UBO_SET_INDEX, binding = idCollisionTilePropsUBO) uniform CollisionTilePropsUBOBlock {
-    CollisionTilePropsUBO tileProps;
-};
-
-layout(std140, set = DRAWABLE_UBO_SET_INDEX, binding = idCollisionProjectionUBO) uniform CollisionProjectionUBO {
-    ProjectionUBO projection;
-} collisionProjection;
 
 layout(location = 0) out float frag_placed;
 layout(location = 1) out float frag_notUsed;
@@ -147,7 +115,7 @@ layout(location = 4) out vec2 frag_extrude_scale;
 void main() {
 
 #ifdef PROJECTION_GLOBE
-    vec4 projectedPoint = projectTile(vec2(in_anchor_position), collisionProjection.projection);
+    vec4 projectedPoint = projectTile(vec2(in_anchor_position), drawProjection);
 #else
     vec4 projectedPoint = drawable.matrix * vec4(in_anchor_position, 0, 1);
 #endif
@@ -159,7 +127,7 @@ void main() {
 
     float padding_factor = 1.2; // Pad the vertices slightly to make room for anti-alias blur
 #ifdef PROJECTION_GLOBE
-    gl_Position = projectTile(vec2(in_position), collisionProjection.projection);
+    gl_Position = projectTile(vec2(in_position), drawProjection);
     // Circles just past the horizon stay visible, as in GL JS; ones far behind it are clipped.
     if (gl_Position.z / gl_Position.w < 1.1) {
         gl_Position.z = 0.0;
@@ -185,10 +153,6 @@ layout(location = 3) in vec2 frag_extrude;
 layout(location = 4) in vec2 frag_extrude_scale;
 
 layout(location = 0) out vec4 out_color;
-
-layout(set = DRAWABLE_UBO_SET_INDEX, binding = idCollisionTilePropsUBO) uniform CollisionTilePropsUBOBlock {
-    CollisionTilePropsUBO tileProps;
-};
 
 void main() {
 
@@ -223,11 +187,6 @@ void main() {
 const SYMBOL_SHADER_PRELUDE: &str = concat!(
     atlas_pos!(glsl),
     r"
-
-#define idSymbolDrawableUBO         idDrawableReservedVertexOnlyUBO
-#define idSymbolTilePropsUBO        idDrawableReservedFragmentOnlyUBO
-#define idSymbolEvaluatedPropsUBO   layerUBOStartId
-
 #define SDF_PX 8.0
 
 ",
@@ -251,14 +210,6 @@ layout(location = 6) in uvec2 in_tex_origin;
 // The symbol's symbol-height-offset, in meters.
 layout(location = 7) in float in_height_offset;
 
-layout(std140, set = LAYER_SET_INDEX, binding = idSymbolDrawableUBO) readonly buffer SymbolDrawableUBOVector {
-    SymbolDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(set = LAYER_SET_INDEX, binding = idSymbolEvaluatedPropsUBO) uniform SymbolEvaluatedPropsUBOBlock {
-    SymbolEvaluatedPropsUBO props;
-};
-
 layout(location = 0) out vec2 frag_tex;
 layout(location = 1) out float frag_opacity;
 
@@ -267,8 +218,8 @@ layout(location = 1) out float frag_opacity;
 layout(location = 2) flat out vec2 frag_tex_origin;
 
 void main() {
-    const SymbolDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
-    const ProjectionUBO projection = projectionVector.projection_ubo[constant.ubo_index];
+    const SymbolDrawableUBO drawable = drawableVector[constant.ubo_index];
+    const ProjectionUBO projection = projectionVector[constant.ubo_index];
 
     const vec2 raw_fade_opacity = unpack_opacity(in_fade_opacity);
     const float fade_change = raw_fade_opacity[1] > 0.5 ? props.fade_change : -props.fade_change;
@@ -392,14 +343,6 @@ layout(location = 2) flat in vec2 frag_tex_origin;
 
 layout(location = 0) out vec4 out_color;
 
-layout(std140, set = LAYER_SET_INDEX, binding = idSymbolTilePropsUBO) readonly buffer SymbolTilePropsUBOVector {
-    SymbolTilePropsUBO tile_props_ubo[];
-} tilePropsVector;
-
-layout(set = LAYER_SET_INDEX, binding = idSymbolEvaluatedPropsUBO) uniform SymbolEvaluatedPropsUBOBlock {
-    SymbolEvaluatedPropsUBO props;
-};
-
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image0_texture;
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image0_sampler;
 
@@ -409,7 +352,7 @@ void main() {
     return;
 #else
 
-    const SymbolTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
+    const SymbolTilePropsUBO tileProps = tilePropsVector[constant.ubo_index];
 
 #if defined(HAS_UNIFORM_u_opacity)
     const float opacity = (tileProps.is_text != 0 ? props.text_opacity : props.icon_opacity) * frag_opacity;
@@ -448,14 +391,6 @@ layout(location = 10) in uvec2 in_tex_origin;
 // The symbol's symbol-height-offset, in meters.
 layout(location = 11) in float in_height_offset;
 
-layout(std140, set = LAYER_SET_INDEX, binding = idSymbolDrawableUBO) readonly buffer SymbolDrawableUBOVector {
-    SymbolDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(set = LAYER_SET_INDEX, binding = idSymbolEvaluatedPropsUBO) uniform SymbolEvaluatedPropsUBOBlock {
-    SymbolEvaluatedPropsUBO props;
-};
-
 layout(location = 0) out vec2 frag_tex;
 // The fade opacity, times the opacity when it's per vertex.
 layout(location = 1) out float frag_fade_opacity;
@@ -473,8 +408,8 @@ layout(location = 3) out float frag_halo_edge;
 layout(location = 9) flat out vec2 frag_tex_origin;
 
 void main() {
-    const SymbolDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
-    const ProjectionUBO projection = projectionVector.projection_ubo[constant.ubo_index];
+    const SymbolDrawableUBO drawable = drawableVector[constant.ubo_index];
+    const ProjectionUBO projection = projectionVector[constant.ubo_index];
 
     const vec2 raw_fade_opacity = unpack_opacity(in_fade_opacity);
     const float fade_change = raw_fade_opacity[1] > 0.5 ? props.fade_change : -props.fade_change;
@@ -631,14 +566,6 @@ layout(location = 9) flat in vec2 frag_tex_origin;
 
 layout(location = 0) out vec4 out_color;
 
-layout(std140, set = LAYER_SET_INDEX, binding = idSymbolTilePropsUBO) readonly buffer SymbolTilePropsUBOVector {
-    SymbolTilePropsUBO tile_props_ubo[];
-} tilePropsVector;
-
-layout(set = LAYER_SET_INDEX, binding = idSymbolEvaluatedPropsUBO) uniform SymbolEvaluatedPropsUBOBlock {
-    SymbolEvaluatedPropsUBO props;
-};
-
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image0_texture;
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image0_sampler;
 
@@ -649,7 +576,7 @@ void main() {
     return;
 #else
 
-    const SymbolTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
+    const SymbolTilePropsUBO tileProps = tilePropsVector[constant.ubo_index];
 
 #if defined(HAS_UNIFORM_u_fill_color)
     const vec4 fill_color = tileProps.is_text != 0 ? props.text_fill_color : props.icon_fill_color;
@@ -713,14 +640,6 @@ layout(location = 9) in uvec2 in_tex_origin;
 // The symbol's symbol-height-offset, in meters.
 layout(location = 10) in float in_height_offset;
 
-layout(std140, set = LAYER_SET_INDEX, binding = idSymbolDrawableUBO) readonly buffer SymbolDrawableUBOVector {
-    SymbolDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(set = LAYER_SET_INDEX, binding = idSymbolEvaluatedPropsUBO) uniform SymbolEvaluatedPropsUBOBlock {
-    SymbolEvaluatedPropsUBO props;
-};
-
 layout(location = 0) out vec2 frag_tex;
 // The fade opacity, times the opacity when it's per vertex.
 layout(location = 1) out float frag_fade_opacity;
@@ -740,8 +659,8 @@ layout(location = 9) flat out int frag_is_icon;
 layout(location = 10) flat out vec2 frag_tex_origin;
 
 void main() {
-    const SymbolDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
-    const ProjectionUBO projection = projectionVector.projection_ubo[constant.ubo_index];
+    const SymbolDrawableUBO drawable = drawableVector[constant.ubo_index];
+    const ProjectionUBO projection = projectionVector[constant.ubo_index];
 
     const vec2 raw_fade_opacity = unpack_opacity(in_fade_opacity);
     const float fade_change = raw_fade_opacity[1] > 0.5 ? props.fade_change : -props.fade_change;
@@ -904,14 +823,6 @@ layout(location = 10) flat in vec2 frag_tex_origin;
 
 layout(location = 0) out vec4 out_color;
 
-layout(std140, set = LAYER_SET_INDEX, binding = idSymbolTilePropsUBO) readonly buffer SymbolTilePropsUBOVector {
-    SymbolTilePropsUBO tile_props_ubo[];
-} tilePropsVector;
-
-layout(set = LAYER_SET_INDEX, binding = idSymbolEvaluatedPropsUBO) uniform SymbolEvaluatedPropsUBOBlock {
-    SymbolEvaluatedPropsUBO props;
-};
-
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D glyph_image_texture;
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler glyph_image_sampler;
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 1) uniform texture2D icon_image_texture;
@@ -923,7 +834,7 @@ void main() {
     return;
 #else
 
-    const SymbolTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
+    const SymbolTilePropsUBO tileProps = tilePropsVector[constant.ubo_index];
 
 #if defined(HAS_UNIFORM_u_fill_color)
     const vec4 fill_color = tileProps.is_text != 0 ? props.text_fill_color : props.icon_fill_color;

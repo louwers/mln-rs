@@ -2,35 +2,19 @@
 
 use mln_gfx::shaders::source::glsl::Glsl;
 
-const COLOR_RELIEF_SHADER_PRELUDE: &str = r"
-
-#define idColorReliefDrawableUBO        idDrawableReservedVertexOnlyUBO
-#define idColorReliefTilePropsUBO       drawableReservedUBOCount
-#define idColorReliefEvaluatedPropsUBO  layerUBOStartId + 1
-
-";
-
 pub(super) const COLOR_RELIEF_SHADER: Glsl = Glsl {
-    prelude: COLOR_RELIEF_SHADER_PRELUDE,
+    prelude: "",
     vertex: r"
 
 layout(location = 0) in ivec2 in_position;
 
-layout(std140, set = LAYER_SET_INDEX, binding = idColorReliefDrawableUBO) readonly buffer ColorReliefDrawableUBOVector {
-    ColorReliefDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idColorReliefTilePropsUBO) readonly buffer ColorReliefTilePropsUBOVector {
-    ColorReliefTilePropsUBO tile_props_ubo[];
-} tilePropsVector;
-
 layout(location = 0) out vec2 frag_position;
 
 void main() {
-    const ColorReliefDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
-    const ColorReliefTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
+    const ColorReliefDrawableUBO drawable = drawableVector[constant.ubo_index];
+    const ColorReliefTilePropsUBO tileProps = tilePropsVector[constant.ubo_index];
 
-    gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector.projection_ubo[constant.ubo_index]);
+    gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector[constant.ubo_index]);
 
     vec2 epsilon = 1.0 / tileProps.dimension;
     float scale = (tileProps.dimension.x - 2.0) / tileProps.dimension.x;
@@ -45,14 +29,6 @@ void main() {
 
 layout(location = 0) in vec2 frag_position;
 layout(location = 0) out vec4 out_color;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idColorReliefTilePropsUBO) readonly buffer ColorReliefTilePropsUBOVector {
-    ColorReliefTilePropsUBO tile_props_ubo[];
-} tilePropsVector;
-
-layout(set = LAYER_SET_INDEX, binding = idColorReliefEvaluatedPropsUBO) uniform ColorReliefEvaluatedPropsUBOBlock {
-    ColorReliefEvaluatedPropsUBO props;
-};
 
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image_texture;
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image_sampler;
@@ -86,7 +62,7 @@ void main() {
     return;
 #else
 
-    const ColorReliefTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
+    const ColorReliefTilePropsUBO tileProps = tilePropsVector[constant.ubo_index];
 
     float el = getElevation(frag_position, tileProps.unpack);
 

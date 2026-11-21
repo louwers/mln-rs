@@ -59,11 +59,6 @@ bool clippedAtAntimeridian(float tileX) {
 const LINE_SHADE_PRELUDE: &str = concat!(
     atlas_pos!(glsl),
     r"
-
-#define idLineDrawableUBO           idDrawableReservedVertexOnlyUBO
-#define idLineTilePropsUBO          idDrawableReservedFragmentOnlyUBO
-#define idLineEvaluatedPropsUBO     layerUBOStartId
-
 // The attribute conveying progress along a line is scaled to [0, 2^15).
 #define MAX_LINE_DISTANCE 32767.0
 
@@ -91,14 +86,6 @@ layout(location = 1) in uvec4 in_data;
 
 #property attribute width
 
-layout(std140, set = LAYER_SET_INDEX, binding = idLineDrawableUBO) readonly buffer LineDrawableUBOVector {
-    LineDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEvaluatedPropsUBOBlock {
-    LineEvaluatedPropsUBO props;
-};
-
 layout(location = 0) out vec2 frag_normal;
 layout(location = 1) out vec2 frag_width2;
 layout(location = 2) out float frag_gamma_scale;
@@ -114,7 +101,7 @@ layout(location = 6) out float frag_tile_x;
 #endif
 
 void main() {
-    const LineDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
+    const LineDrawableUBO drawable = drawableVector[constant.ubo_index];
 
     #property pass color
 
@@ -160,11 +147,11 @@ void main() {
     vec2 offset2 = offset * a_extrude * LINE_NORMAL_SCALE * frag_normal.y * mat2(t, -u, u, t);
 
 #ifdef PROJECTION_GLOBE
-    const float adjustedThickness = projectLineThickness(pos.y, projectionVector.projection_ubo[constant.ubo_index]);
-    const vec4 projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector.projection_ubo[constant.ubo_index]);
+    const float adjustedThickness = projectLineThickness(pos.y, projectionVector[constant.ubo_index]);
+    const vec4 projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector[constant.ubo_index]);
     const vec2 extrudedPos = pos + (offset2 + dist) / drawable.ratio * adjustedThickness;
-    gl_Position = projectTile(extrudedPos, projectionVector.projection_ubo[constant.ubo_index]);
-    frag_tile_x = antimeridianClipX(extrudedPos, projectionVector.projection_ubo[constant.ubo_index]);
+    gl_Position = projectTile(extrudedPos, projectionVector[constant.ubo_index]);
+    frag_tile_x = antimeridianClipX(extrudedPos, projectionVector[constant.ubo_index]);
     vec4 projected_extrude = gl_Position - projected_no_extrude;
 #else
     vec4 projected_extrude = drawable.matrix * vec4(dist / drawable.ratio, 0.0, 0.0);
@@ -195,10 +182,6 @@ layout(location = 2) in float frag_gamma_scale;
 #property varying opacity 5
 
 layout(location = 0) out vec4 out_color;
-
-layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEvaluatedPropsUBOBlock {
-    LineEvaluatedPropsUBO props;
-};
 
 #ifdef PROJECTION_GLOBE
 layout(location = 6) in float frag_tile_x;
@@ -256,14 +239,6 @@ layout(location = 1) in uvec4 in_data;
 
 #property attribute width
 
-layout(std140, set = LAYER_SET_INDEX, binding = idLineDrawableUBO) readonly buffer LineGradientDrawableUBOVector {
-    LineGradientDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEvaluatedPropsUBOBlock {
-    LineEvaluatedPropsUBO props;
-};
-
 layout(location = 0) out vec2 frag_normal;
 layout(location = 1) out vec2 frag_width2;
 layout(location = 2) out float frag_gamma_scale;
@@ -278,7 +253,7 @@ layout(location = 6) out float frag_tile_x;
 #endif
 
 void main() {
-    const LineGradientDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
+    const LineGradientDrawableUBO drawable = drawableVector[constant.ubo_index];
 
     #property pass blur
 
@@ -323,11 +298,11 @@ void main() {
     vec2 offset2 = offset * a_extrude * LINE_NORMAL_SCALE * frag_normal.y * mat2(t, -u, u, t);
 
 #ifdef PROJECTION_GLOBE
-    const float adjustedThickness = projectLineThickness(pos.y, projectionVector.projection_ubo[constant.ubo_index]);
-    const vec4 projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector.projection_ubo[constant.ubo_index]);
+    const float adjustedThickness = projectLineThickness(pos.y, projectionVector[constant.ubo_index]);
+    const vec4 projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector[constant.ubo_index]);
     const vec2 extrudedPos = pos + (offset2 + dist) / drawable.ratio * adjustedThickness;
-    gl_Position = projectTile(extrudedPos, projectionVector.projection_ubo[constant.ubo_index]);
-    frag_tile_x = antimeridianClipX(extrudedPos, projectionVector.projection_ubo[constant.ubo_index]);
+    gl_Position = projectTile(extrudedPos, projectionVector[constant.ubo_index]);
+    frag_tile_x = antimeridianClipX(extrudedPos, projectionVector[constant.ubo_index]);
     vec4 projected_extrude = gl_Position - projected_no_extrude;
 #else
     vec4 projected_extrude = drawable.matrix * vec4(dist / drawable.ratio, 0.0, 0.0);
@@ -360,10 +335,6 @@ layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image0_tex
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image0_sampler;
 
 layout(location = 0) out vec4 out_color;
-
-layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEvaluatedPropsUBOBlock {
-    LineEvaluatedPropsUBO props;
-};
 
 #ifdef PROJECTION_GLOBE
 layout(location = 6) in float frag_tile_x;
@@ -427,14 +398,6 @@ layout(location = 1) in uvec4 in_data;
 
 #property attribute pattern_to
 
-layout(std140, set = LAYER_SET_INDEX, binding = idLineDrawableUBO) readonly buffer LinePatternDrawableUBOVector {
-    LinePatternDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEvaluatedPropsUBOBlock {
-    LineEvaluatedPropsUBO props;
-};
-
 layout(location = 0) out vec2 frag_normal;
 layout(location = 1) out vec2 frag_width2;
 layout(location = 2) out float frag_gamma_scale;
@@ -456,7 +419,7 @@ layout(location = 9) out float frag_tile_x;
 #endif
 
 void main() {
-    const LinePatternDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
+    const LinePatternDrawableUBO drawable = drawableVector[constant.ubo_index];
 
     #property pass blur
 
@@ -508,11 +471,11 @@ void main() {
     vec2 offset2 = offset * a_extrude * LINE_NORMAL_SCALE * frag_normal.y * mat2(t, -u, u, t);
 
 #ifdef PROJECTION_GLOBE
-    const float adjustedThickness = projectLineThickness(pos.y, projectionVector.projection_ubo[constant.ubo_index]);
-    const vec4 projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector.projection_ubo[constant.ubo_index]);
+    const float adjustedThickness = projectLineThickness(pos.y, projectionVector[constant.ubo_index]);
+    const vec4 projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector[constant.ubo_index]);
     const vec2 extrudedPos = pos + (offset2 + dist) / drawable.ratio * adjustedThickness;
-    gl_Position = projectTile(extrudedPos, projectionVector.projection_ubo[constant.ubo_index]);
-    frag_tile_x = antimeridianClipX(extrudedPos, projectionVector.projection_ubo[constant.ubo_index]);
+    gl_Position = projectTile(extrudedPos, projectionVector[constant.ubo_index]);
+    frag_tile_x = antimeridianClipX(extrudedPos, projectionVector[constant.ubo_index]);
     vec4 projected_extrude = gl_Position - projected_no_extrude;
 #else
     vec4 projected_extrude = drawable.matrix * vec4(dist / drawable.ratio, 0.0, 0.0);
@@ -551,14 +514,6 @@ layout(location = 8) in float frag_floorwidth;
 
 layout(location = 0) out vec4 out_color;
 
-layout(std140, set = LAYER_SET_INDEX, binding = idLineTilePropsUBO) readonly buffer LinePatternTilePropertiesUBOVector {
-    LinePatternTilePropsUBO tile_props_ubo[];
-} tilePropsVector;
-
-layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEvaluatedPropsUBOBlock {
-    LineEvaluatedPropsUBO props;
-};
-
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image0_texture;
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image0_sampler;
 
@@ -578,7 +533,7 @@ void main() {
     return;
 #else
 
-    const LinePatternTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
+    const LinePatternTilePropsUBO tileProps = tilePropsVector[constant.ubo_index];
 
     const float blur = $props.blur;
 
@@ -675,14 +630,6 @@ layout(location = 1) in uvec4 in_data;
 
 #property attribute dasharray
 
-layout(std140, set = LAYER_SET_INDEX, binding = idLineDrawableUBO) readonly buffer LineSDFDrawableUBOVector {
-    LineSDFDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEvaluatedPropsUBOBlock {
-    LineEvaluatedPropsUBO props;
-};
-
 layout(location = 0) out vec2 frag_normal;
 layout(location = 1) out vec2 frag_width2;
 layout(location = 2) out float frag_gamma_scale;
@@ -706,7 +653,7 @@ layout(location = 10) flat out float frag_dash_width;
 #endif
 
 void main() {
-    const LineSDFDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
+    const LineSDFDrawableUBO drawable = drawableVector[constant.ubo_index];
 
     #property pass color
 
@@ -761,11 +708,11 @@ void main() {
     vec2 offset2 = offset * a_extrude * LINE_NORMAL_SCALE * frag_normal.y * mat2(t, -u, u, t);
 
 #ifdef PROJECTION_GLOBE
-    const float adjustedThickness = projectLineThickness(pos.y, projectionVector.projection_ubo[constant.ubo_index]);
-    const vec4 projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector.projection_ubo[constant.ubo_index]);
+    const float adjustedThickness = projectLineThickness(pos.y, projectionVector[constant.ubo_index]);
+    const vec4 projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector[constant.ubo_index]);
     const vec2 extrudedPos = pos + (offset2 + dist) / drawable.ratio * adjustedThickness;
-    gl_Position = projectTile(extrudedPos, projectionVector.projection_ubo[constant.ubo_index]);
-    frag_tile_x = antimeridianClipX(extrudedPos, projectionVector.projection_ubo[constant.ubo_index]);
+    gl_Position = projectTile(extrudedPos, projectionVector[constant.ubo_index]);
+    frag_tile_x = antimeridianClipX(extrudedPos, projectionVector[constant.ubo_index]);
     vec4 projected_extrude = gl_Position - projected_no_extrude;
 #else
     vec4 projected_extrude = drawable.matrix * vec4(dist / drawable.ratio, 0.0, 0.0);
@@ -817,14 +764,6 @@ layout(location = 4) in vec2 frag_tex_b;
 
 layout(location = 0) out vec4 out_color;
 
-layout(std140, set = LAYER_SET_INDEX, binding = idLineTilePropsUBO) readonly buffer LineSDFTilePropsUBOVector {
-    LineSDFTilePropsUBO tile_props_ubo[];
-} tilePropsVector;
-
-layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEvaluatedPropsUBOBlock {
-    LineEvaluatedPropsUBO props;
-};
-
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image0_texture;
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image0_sampler;
 
@@ -848,7 +787,7 @@ void main() {
     return;
 #endif
 
-    const LineSDFTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
+    const LineSDFTilePropsUBO tileProps = tilePropsVector[constant.ubo_index];
 
     const vec4 color = $props.color;
 
@@ -905,14 +844,6 @@ layout(location = 1) in uvec4 in_data;
 
 #property attribute dasharray
 
-layout(std140, set = LAYER_SET_INDEX, binding = idLineDrawableUBO) readonly buffer LineSDFDrawableUBOVector {
-    LineSDFDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEvaluatedPropsUBOBlock {
-    LineEvaluatedPropsUBO props;
-};
-
 layout(location = 0) out vec2 frag_normal;
 layout(location = 1) out vec2 frag_width2;
 layout(location = 2) out float frag_gamma_scale;
@@ -935,7 +866,7 @@ layout(location = 10) flat out float frag_dash_width;
 #endif
 
 void main() {
-    const LineSDFDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
+    const LineSDFDrawableUBO drawable = drawableVector[constant.ubo_index];
 
     #property pass blur
 
@@ -989,11 +920,11 @@ void main() {
     vec2 offset2 = offset * a_extrude * LINE_NORMAL_SCALE * frag_normal.y * mat2(t, -u, u, t);
 
 #ifdef PROJECTION_GLOBE
-    const float adjustedThickness = projectLineThickness(pos.y, projectionVector.projection_ubo[constant.ubo_index]);
-    const vec4 projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector.projection_ubo[constant.ubo_index]);
+    const float adjustedThickness = projectLineThickness(pos.y, projectionVector[constant.ubo_index]);
+    const vec4 projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector[constant.ubo_index]);
     const vec2 extrudedPos = pos + (offset2 + dist) / drawable.ratio * adjustedThickness;
-    gl_Position = projectTile(extrudedPos, projectionVector.projection_ubo[constant.ubo_index]);
-    frag_tile_x = antimeridianClipX(extrudedPos, projectionVector.projection_ubo[constant.ubo_index]);
+    gl_Position = projectTile(extrudedPos, projectionVector[constant.ubo_index]);
+    frag_tile_x = antimeridianClipX(extrudedPos, projectionVector[constant.ubo_index]);
     vec4 projected_extrude = gl_Position - projected_no_extrude;
 #else
     vec4 projected_extrude = drawable.matrix * vec4(dist / drawable.ratio, 0.0, 0.0);
@@ -1052,14 +983,6 @@ layout(location = 10) flat in float frag_dash_width;
 
 layout(location = 0) out vec4 out_color;
 
-layout(std140, set = LAYER_SET_INDEX, binding = idLineTilePropsUBO) readonly buffer LineSDFTilePropsUBOVector {
-    LineSDFTilePropsUBO tile_props_ubo[];
-} tilePropsVector;
-
-layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEvaluatedPropsUBOBlock {
-    LineEvaluatedPropsUBO props;
-};
-
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image0_texture;
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image0_sampler;
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 1) uniform texture2D image1_texture;
@@ -1077,7 +1000,7 @@ void main() {
     return;
 #endif
 
-    const LineSDFTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
+    const LineSDFTilePropsUBO tileProps = tilePropsVector[constant.ubo_index];
 
     const float blur = $props.blur;
 

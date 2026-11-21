@@ -7,12 +7,8 @@ pub(crate) const CLIPPING_MASK_PROGRAM: Glsl = Glsl {
     vertex: r"
         layout(location = 0) in ivec2 position;
 
-        layout(std140, set = DRAWABLE_UBO_SET_INDEX, binding = drawableUBOStartId + 2) uniform ClipMaskProjectionUBO {
-            ProjectionUBO projection;
-        } clip;
-
         void main() {
-            gl_Position = projectTile(vec2(position), vec2(position), clip.projection);
+            gl_Position = projectTile(vec2(position), vec2(position), drawProjection);
         }
     ",
     fragment: r"
@@ -31,7 +27,7 @@ pub(crate) const GLOBE_DEPTH_SHADER: Glsl = Glsl {
 layout(location = 0) in ivec2 in_position;
 
 void main() {
-    gl_Position = projectTileFor3D(vec2(in_position), 0.0, projectionVector.projection_ubo[constant.ubo_index]);
+    gl_Position = projectTileFor3D(vec2(in_position), 0.0, projectionVector[constant.ubo_index]);
 }
 ",
     fragment: r"
@@ -43,13 +39,11 @@ void main() {
 ",
 };
 
-pub(crate) const LAYER_COMPOSITE_SHADER_PRELUDE: &str = r"#define idLayerCompositeUBO    layerUBOStartId";
-
 /// A layer's texture, the size of the frame, composited onto it
 /// texel for texel, with its opacity and, for the blend modes that no blend
 /// function expresses, against a copy of the frame (`backdrop_texture`).
 pub(crate) const LAYER_COMPOSITE_SHADER: Glsl = Glsl {
-    prelude: LAYER_COMPOSITE_SHADER_PRELUDE,
+    prelude: "",
     vertex: r"
 
 layout(location = 0) in ivec2 in_position;
@@ -61,10 +55,6 @@ void main() {
     fragment: r"
 
 layout(location = 0) out vec4 out_color;
-
-layout(set = LAYER_SET_INDEX, binding = idLayerCompositeUBO) uniform LayerCompositeUBOBlock {
-    LayerCompositeUBO props;
-};
 
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image_texture;
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image_sampler;
@@ -130,18 +120,8 @@ void main() {
 ",
 };
 
-pub(crate) const TILE_DEBUG_SHADER_PRELUDE: &str = r"
-
-#define idTileDebugPropsUBO     layerUBOStartId
-
-layout(set = LAYER_SET_INDEX, binding = idTileDebugPropsUBO) uniform TileDebugPropsUBOBlock {
-    TileDebugPropsUBO props;
-};
-
-";
-
 pub(crate) const TILE_DEBUG_SHADER: Glsl = Glsl {
-    prelude: TILE_DEBUG_SHADER_PRELUDE,
+    prelude: "",
     vertex: r"
 
 // The quad's corner: x picks the segment's start (0) or end (1), y its side.
@@ -162,7 +142,7 @@ layout(location = 3) out float frag_tile_x;
 #endif
 
 void main() {
-    const ProjectionUBO projection = projectionVector.projection_ubo[constant.ubo_index];
+    const ProjectionUBO projection = projectionVector[constant.ubo_index];
     const vec2 start = vec2(in_start);
     const vec2 end = vec2(in_end);
 
@@ -231,15 +211,8 @@ void main() {
 ",
 };
 
-pub(crate) const SKY_SHADER_PRELUDE: &str = r"
-
-#define idSkyPropsUBO layerUBOStartId
-#define idAtmospherePropsUBO layerUBOStartId
-
-";
-
 pub(crate) const SKY_SHADER: Glsl = Glsl {
-    prelude: SKY_SHADER_PRELUDE,
+    prelude: "",
     vertex: r"
 layout(location = 0) in ivec2 in_position;
 layout(location = 0) out vec2 frag_pos;
@@ -252,10 +225,6 @@ void main() {
     fragment: r"
 layout(location = 0) in vec2 frag_pos;
 layout(location = 0) out vec4 out_color;
-
-layout(set = LAYER_SET_INDEX, binding = idSkyPropsUBO) uniform SkyPropsUBOBlock {
-    SkyPropsUBO sky;
-};
 
 void main() {
     vec2 pixel = (frag_pos * 0.5 + 0.5) * sky.viewport_size;
@@ -275,14 +244,10 @@ void main() {
 };
 
 pub(crate) const ATMOSPHERE_SHADER: Glsl = Glsl {
-    prelude: SKY_SHADER_PRELUDE,
+    prelude: "",
     vertex: r"
 layout(location = 0) in ivec2 in_position;
 layout(location = 0) out vec3 frag_view_direction;
-
-layout(set = LAYER_SET_INDEX, binding = idAtmospherePropsUBO) uniform AtmospherePropsUBOBlock {
-    AtmospherePropsUBO atmosphere;
-};
 
 void main() {
     vec2 pos = vec2(in_position);
@@ -296,10 +261,6 @@ void main() {
     fragment: r"
 layout(location = 0) in vec3 frag_view_direction;
 layout(location = 0) out vec4 out_color;
-
-layout(set = LAYER_SET_INDEX, binding = idAtmospherePropsUBO) uniform AtmospherePropsUBOBlock {
-    AtmospherePropsUBO atmosphere;
-};
 
 const float PI = 3.141592653589793;
 const int PRIMARY_STEPS = 5;

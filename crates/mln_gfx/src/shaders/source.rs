@@ -4,10 +4,12 @@
 //! `mln_webgpu`, [`msl`] for `mln_mtl`, [`glsl_es`] for `mln_gl`, and
 //! [`glsl`] for the backends that compile through `mln_glsl`, `mln_vulkan`
 //! and `mln_d3d12`. Each backend composes a program's code with a prelude
-//! of its own, of the helpers the shaders share, and with the declarations
-//! of the blocks of the engine's buffers and the program's, which it writes
-//! from their [`Block`]s: a source declares
-//! no block itself.
+//! of its own, of the helpers the shaders share, with the declarations of
+//! the blocks of the engine's buffers and the program's, which it writes
+//! from their [`Block`]s, and with the declarations of the buffers that a
+//! stage names, which it writes from their [`Buffer`]s: a source declares
+//! no block and no buffer itself, and reads a buffer by its
+//! [`name`](Buffer::name).
 //!
 //! # Properties
 //!

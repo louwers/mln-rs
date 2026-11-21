@@ -2,35 +2,20 @@
 
 use mln_gfx::shaders::source::glsl::Glsl;
 
-const RASTER_SHADER_PRELUDE: &str = r"
-
-#define idRasterDrawableUBO         idDrawableReservedVertexOnlyUBO
-#define idRasterEvaluatedPropsUBO   layerUBOStartId
-
-";
-
 pub(super) const RASTER_SHADER: Glsl = Glsl {
-    prelude: RASTER_SHADER_PRELUDE,
+    prelude: "",
     vertex: r"
 
 layout(location = 0) in ivec2 in_position;
 layout(location = 1) in ivec2 in_texture_position;
 
-layout(std140, set = LAYER_SET_INDEX, binding = idRasterDrawableUBO) readonly buffer RasterDrawableUBOVector {
-    RasterDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(set = LAYER_SET_INDEX, binding = idRasterEvaluatedPropsUBO) uniform RasterEvaluatedPropsUBOBlock {
-    RasterEvaluatedPropsUBO props;
-};
-
 layout(location = 0) out vec2 frag_position0;
 layout(location = 1) out vec2 frag_position1;
 
 void main() {
-    const RasterDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
+    const RasterDrawableUBO drawable = drawableVector[constant.ubo_index];
 
-    gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector.projection_ubo[constant.ubo_index]);
+    gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector[constant.ubo_index]);
 
     // We are using Int16 for texture position coordinates to give us enough precision for
     // fractional coordinates. We use 8192 to scale the texture coordinates in the buffer
@@ -47,10 +32,6 @@ layout(location = 0) in vec2 frag_position0;
 layout(location = 1) in vec2 frag_position1;
 
 layout(location = 0) out vec4 out_color;
-
-layout(set = LAYER_SET_INDEX, binding = idRasterEvaluatedPropsUBO) uniform RasterEvaluatedPropsUBOBlock {
-    RasterEvaluatedPropsUBO props;
-};
 
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image0_texture;
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image0_sampler;
