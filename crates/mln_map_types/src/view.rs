@@ -638,6 +638,20 @@ impl View {
         furthest_distance * 1.01
     }
 
+    /// GL JS's `cameraToSeaLevelDistance`, in pixels at the zoom: how far
+    /// the camera is from sea level along the view, past the center by its
+    /// altitude, at the pitch up to the horizon's limit, and at least half
+    /// the distance to the center.
+    #[must_use]
+    pub fn camera_to_sea_level_distance(&self) -> f64 {
+        let camera_to_center_distance = self.camera_to_center_distance();
+        let limited_pitch = self.params.pitch.min(max_mercator_horizon_angle());
+        f64::max(
+            camera_to_center_distance / 2.0,
+            camera_to_center_distance + self.center_altitude_pixels() / limited_pitch.cos(),
+        )
+    }
+
     /// GL JS's far plane (`calculateNearFarZ`) over ground that reaches down
     /// to `min_elevation` meters: it fits the lowest of that, the center and
     /// 100 meters below the camera. The frustum offset shortens it as it
@@ -653,10 +667,7 @@ impl View {
         // Heights in pixels at the zoom.
         let center_altitude = self.center_altitude_pixels();
         let limited_pitch = params.pitch.min(max_mercator_horizon_angle());
-        let camera_to_sea_level_distance = f64::max(
-            camera_to_center_distance / 2.0,
-            camera_to_center_distance + center_altitude / limited_pitch.cos(),
-        );
+        let camera_to_sea_level_distance = self.camera_to_sea_level_distance();
         let camera_altitude = params.pitch.cos() * camera_to_center_distance + center_altitude;
         let lowest =
             center_altitude.min(min_elevation * pixels_per_meter).min(camera_altitude - 100.0 * pixels_per_meter);

@@ -652,6 +652,36 @@ fn terrain_planes_are_gl_js_planes() {
     }
 }
 
+/// The camera's distance to sea level is GL JS's (`cameraToSeaLevelDistance`
+/// in `mercator_camera_math.ts`), at least half the distance to the center:
+/// for a center above, at and below sea level, and past the horizon's pitch.
+#[test]
+fn the_camera_to_sea_level_distance_is_gl_js_s() {
+    let (latitude, zoom) = (46.5, 12.0);
+    // GL JS's `pixelsPerMeter`: the world's pixels over the circumference at
+    // the latitude.
+    let pixels_per_meter =
+        512.0 * 2f64.powf(zoom) / (2.0 * std::f64::consts::PI * 6_371_008.8 * mln_math::deg2rad(latitude).cos());
+    for (pitch, altitude) in [(60.0, 1200.0), (60.0, 0.0), (60.0, -400.0), (60.0, -30_000.0), (89.9, 1200.0)] {
+        let mut state = pitched(pitch);
+        state.set_lat_lng_zoom(&LatLng::new(latitude, 7.9).unwrap(), zoom);
+        state.set_center_altitude(altitude);
+        let view = state.view();
+        let camera_to_center = view.camera_to_center_distance();
+        let limited_pitch = mln_math::deg2rad(f64::min(pitch, 89.25));
+        let expected =
+            f64::max(camera_to_center / 2.0, camera_to_center + altitude * pixels_per_meter / limited_pitch.cos());
+        let distance = view.camera_to_sea_level_distance();
+        assert!((distance - expected).abs() <= expected * 1e-12, "{distance} vs {expected} at {pitch}°, {altitude} m");
+        if altitude == 0.0 {
+            assert_eq!(camera_to_center, distance);
+        }
+        if altitude == -30_000.0 {
+            assert_eq!(camera_to_center / 2.0, distance, "at least half the distance to the center");
+        }
+    }
+}
+
 /// With terrain, the far plane reaches ground 2 km below sea level up to
 /// the top of the view, where the flat map's plane cuts it off.
 #[test]
