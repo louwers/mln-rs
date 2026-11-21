@@ -276,7 +276,8 @@ impl GeoJsonSourceCommands for Map {
         source_id: impl Into<String>,
         url: impl Into<String>,
     ) -> Result<Completion<Applied>, Error> {
-        self.apply_style_edit(GeoJsonSourceType::set_url(source_id, url))
+        let source_id = source_id.into();
+        self.replace_style_source_data(source_id.clone(), GeoJsonSourceType::set_url(source_id, url))
     }
 
     fn set_geojson_source_data(

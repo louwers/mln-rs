@@ -223,34 +223,31 @@ fn only_the_newest_waiting_geojson_data_follows_the_data_being_built() {
 }
 
 #[test]
-fn replacing_the_data_cancels_the_waiting_geojson_data() {
-    for by_url in [true, false] {
-        let (_runtime, map) = styled_map();
-        wait(map.add_geojson_source("points", GeoJsonSourceSettings::default()));
-        // The data being built holds its background thread until released.
-        let (release, held) = std::sync::mpsc::channel::<()>();
-        let building = map
-            .set_style_source_data("points", move |_| {
-                let work: PrepareSourceData = Box::new(move || {
-                    let _ = held.recv();
-                    Ok(GeoJsonSourceType::set_data("points", None))
-                });
-                Ok(work)
-            })
-            .unwrap();
-        let waiting = map.set_geojson_source_data("points", point_collection("waiting")).unwrap();
-        if by_url {
-            wait(map.set_geojson_source_url("points", "fixture://points.geojson"));
-        } else {
-            wait(map.set_geojson_source_synchronous_tiling("points", true));
-            wait(map.set_geojson_source_data("points", point_collection("now")));
-        }
-        // The command that replaced the data cancelled what waited as it ran.
-        assert!(waiting.is_complete(), "by_url: {by_url}");
-        assert_eq!(waiting.wait().unwrap_err().kind, ErrorKind::Cancelled);
-        release.send(()).unwrap();
-        assert_eq!(building.wait().unwrap_err().kind, ErrorKind::Cancelled);
-    }
+fn a_url_cancels_only_the_geojson_data_waiting_before_it() {
+    let (_runtime, map) = styled_map();
+    wait(map.add_geojson_source("points", GeoJsonSourceSettings::default()));
+    // The data being built holds its background thread until released.
+    let (release, held) = std::sync::mpsc::channel::<()>();
+    let building = map
+        .set_style_source_data("points", move |_| {
+            let work: PrepareSourceData = Box::new(move || {
+                let _ = held.recv();
+                Ok(GeoJsonSourceType::set_data("points", None))
+            });
+            Ok(work)
+        })
+        .unwrap();
+    let before = map.set_geojson_source_data("points", point_collection("before")).unwrap();
+    wait(map.set_geojson_source_url("points", "fixture://points.geojson"));
+    // The URL cancelled what waited as it ran.
+    assert!(before.is_complete());
+    assert_eq!(before.wait().unwrap_err().kind, ErrorKind::Cancelled);
+    // Data sent after the URL follows the data being built, which the URL
+    // replaced.
+    let after = map.set_geojson_source_data("points", point_collection("after")).unwrap();
+    release.send(()).unwrap();
+    assert_eq!(building.wait().unwrap_err().kind, ErrorKind::Cancelled);
+    after.wait().unwrap();
 }
 
 #[test]
