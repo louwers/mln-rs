@@ -373,8 +373,6 @@ fn is_dash_key(key: &DashKey, from: &[f32], to: &[f32], cap: DashCap) -> bool {
 pub(crate) struct DashTextures {
     /// The textures, in the order they were made, with their keys.
     textures: Vec<(DashKey, DashTexture)>,
-    /// The indexes of the textures that need uploading.
-    needs_upload: Vec<usize>,
 }
 
 impl DashTextures {
@@ -383,7 +381,6 @@ impl DashTextures {
     pub(crate) fn add(&mut self, from: &[f32], to: &[f32], cap: DashCap) -> &DashTexture {
         let index = self.textures.iter().position(|(key, _)| is_dash_key(key, from, to, cap)).unwrap_or_else(|| {
             self.textures.push((dash_key(from, to, cap), DashTexture::new(from, to, cap)));
-            self.needs_upload.push(self.textures.len() - 1);
             self.textures.len() - 1
         });
         &self.textures[index].1
@@ -398,8 +395,8 @@ impl DashTextures {
 
     /// Makes the GPU textures of the textures made since the last upload.
     pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
-        for index in self.needs_upload.drain(..) {
-            self.textures[index].1.upload(gpu, context);
+        for (_, texture) in &mut self.textures {
+            texture.upload(gpu, context);
         }
     }
 }

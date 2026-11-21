@@ -8,7 +8,7 @@ use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMod
 use mln_map_types::tile_cover::{TileCoverParameters, tile_cover};
 use mln_render::draw::{
     DrawDepth, DrawFrame, DrawGeometry, DrawIndexes, DrawList, DrawObjects, FrameDraw, KeptDraw, LayerDrawing,
-    RenderStaticData, Texture2D, Textures, TileDraws, Uniforms, projection_data, raw_vertices, to_projection_ubo,
+    RenderStaticData, Textures, TileDraws, Uniforms, projection_data, raw_vertices, to_projection_ubo,
 };
 use mln_render::globe::tile_grid;
 use mln_render::layer::{
@@ -19,7 +19,6 @@ use mln_tile_id::OverscaledTileID;
 use mln_util::Color;
 use mln_util::constants::TILE_SIZE_D;
 use mln_util::range::Range;
-use mln_util::size::Size;
 
 use super::pattern_atlas::PatternAtlas;
 use super::programs::{
@@ -176,8 +175,7 @@ impl LayerType for Background {
             None
         };
         let pattern_texture = patterns.texture().filter(|_| has_pattern);
-        let atlas_size =
-            pattern_texture.and_then(|texture| context.texture(texture)).map_or(Size::new(0, 0), Texture2D::size);
+        let atlas_size = patterns.size();
 
         let color_mode = context.color_mode(if draw_passes == RenderPass::TRANSLUCENT {
             ColorMode::alpha_blended()
