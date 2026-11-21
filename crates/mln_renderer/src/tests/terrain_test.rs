@@ -892,11 +892,26 @@ fn points_over(load: &TerrainLoad) -> Vec<DVec2> {
         .collect()
 }
 
+/// The corners and the middles of the edges of the tiles of `load`'s cover
+/// and of the tile under its center, in the world copy each tile is in:
+/// points exactly on the edges between tiles.
+fn edges_over(load: &TerrainLoad) -> Vec<DVec2> {
+    let cover = load.terrain.cover().unwrap();
+    let edges = |tile: &crate::terrain::TerrainTile| {
+        let tiles = f64::from(1u32 << tile.id.canonical.z);
+        let (x, y) = (f64::from(tile.id.canonical.x), f64::from(tile.id.canonical.y));
+        let wrap = f64::from(tile.id.wrap);
+        [(0.0, 0.0), (0.5, 0.0), (1.0, 0.0), (0.0, 0.5), (1.0, 0.5), (0.0, 1.0), (0.5, 1.0), (1.0, 1.0)]
+            .map(|(u, v)| DVec2::new((x + u) / tiles + wrap, (y + v) / tiles))
+    };
+    cover.tiles.iter().chain(&cover.center).flat_map(edges).collect()
+}
+
 /// The per-zoom index finds, at every point, the tile the scan of the tiles
 /// in order found, so the height and floor under the camera are as they
 /// were: while the DEM loads, with ancestors in place, once it has loaded,
-/// over tiles of several zooms, across world copies, and on the tile the
-/// cover keeps under the center.
+/// over tiles of several zooms, across world copies, on the tile the cover
+/// keeps under the center, and on the edges between tiles.
 #[test]
 fn the_index_finds_the_tiles_the_scan_found() {
     let check = |load: &TerrainLoad, exaggeration: f32, what: &str| {
@@ -909,6 +924,11 @@ fn the_index_finds_the_tiles_the_scan_found() {
             found += usize::from(ground.min_at(location).is_some());
         }
         assert!(found > points.len() / 2, "{what}: {found} of {} points on tiles", points.len());
+        for world in edges_over(load) {
+            let location = location_of(world);
+            let edge = format!("{what}: on an edge at {world}");
+            assert_eq!(ground.scanned(location), (ground.at(location), ground.min_at(location)), "{edge}");
+        }
     };
 
     let mut load = TerrainLoad::new((0, 14), 1.5);

@@ -56,13 +56,16 @@ pub(crate) fn world_copy(x: f64) -> (f64, f64) {
 
 /// Where `tile` has the point `world` of the world, in units of the world's
 /// width, y down, from 0 to 1 across the tile; `None` outside it. Every
-/// world copy of the tile has it.
+/// world copy of the tile has it. A point on an edge between two tiles is
+/// in the one east or south of it, but on the world's bottom edge, which is
+/// in the last row.
 pub(crate) fn place_in(tile: CanonicalTileID, world: [f64; 2]) -> Option<[f64; 2]> {
     let [x, y] = world;
     let tiles = f64::from(1u32 << tile.z);
     let u = world_copy(x).1 * tiles - f64::from(tile.x);
     let v = y.clamp(0.0, 1.0) * tiles - f64::from(tile.y);
-    ((0.0..1.0).contains(&u) && (0.0..=1.0).contains(&v)).then_some([u, v])
+    let last_row = f64::from(tile.y) == tiles - 1.0;
+    ((0.0..1.0).contains(&u) && ((0.0..1.0).contains(&v) || (last_row && v == 1.0))).then_some([u, v])
 }
 
 /// The bucket of `tile`, a raster-dem source's tile, if it has one with DEM
@@ -353,5 +356,20 @@ mod tests {
                 assert_eq!(None, place_in(CanonicalTileID::new(z, last, 0), [x, 0.5 / f64::from(1u32 << z)]));
             }
         }
+    }
+
+    /// A point on an edge between two tiles is in one of them: the tile
+    /// east of a column edge, and south of a row edge, but on the world's
+    /// bottom edge, which is in the last row.
+    #[test]
+    fn a_point_on_an_edge_between_tiles_is_in_one_of_them() {
+        let (north, south) = (CanonicalTileID::new(1, 0, 0), CanonicalTileID::new(1, 0, 1));
+        assert_eq!(None, place_in(north, [0.25, 0.5]), "the equator");
+        assert_eq!(Some([0.5, 0.0]), place_in(south, [0.25, 0.5]), "the equator");
+        assert_eq!(Some([0.5, 1.0]), place_in(south, [0.25, 1.0]), "the world's bottom edge");
+        assert_eq!(Some([0.5, 0.0]), place_in(north, [0.25, 0.0]), "the world's top edge");
+        let (west, east) = (CanonicalTileID::new(1, 0, 0), CanonicalTileID::new(1, 1, 0));
+        assert_eq!(None, place_in(west, [0.5, 0.25]));
+        assert_eq!(Some([0.0, 0.5]), place_in(east, [0.5, 0.25]));
     }
 }

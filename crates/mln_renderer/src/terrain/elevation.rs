@@ -167,8 +167,9 @@ impl TerrainElevation {
 
     /// The drawn tile at `world`, a Web Mercator point at zoom 0 whose y is
     /// within the world, and where in it, from 0 to 1 across, y down: the
-    /// finest that has it, of which there is one but along an edge between
-    /// tiles. Every world copy of a tile reads the same DEM, so any does.
+    /// finest that has it ([`place_in`]'s, which puts a point on an edge
+    /// between tiles in one of them). Every world copy of a tile reads the
+    /// same DEM, so any does.
     fn drawn_tile_at(&self, world: DVec2) -> Option<(&DrawnTile, [f32; 2])> {
         if !world.x.is_finite() {
             return None;
