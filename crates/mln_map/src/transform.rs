@@ -345,10 +345,11 @@ impl Transform {
     }
 
     /// Moves the map by `offset`. A drag on the globe turns the planet so
-    /// that the location under `anchor` follows the cursor. Over terrain
-    /// ([`Self::set_terrain`]) the ground under the cursor before the move
-    /// follows it, on the plane at that ground's height; without an anchor,
-    /// or with one that grabs no ground, the map moves on the plane at the
+    /// that the location under `anchor` follows the cursor. On a Mercator
+    /// view the ground under the cursor before the move follows it, on the
+    /// plane at that ground's height: sea level on the flat map, the drawn
+    /// ground over terrain ([`Self::set_terrain`]); without an anchor, or
+    /// with one that grabs no ground, the map moves on the plane at the
     /// center's altitude. With the bearing
     /// held, steps that follow one another, each starting at the `anchor` of
     /// the one before with the camera as it left it, hold the location the
@@ -551,21 +552,16 @@ impl Transform {
         let size = self.state.view().size();
         let center = self.state.view().padding().center_in(size);
         let point_on_screen = ScreenCoordinate::new(center.x - center_offset.x, center.y - center_offset.y);
-        // Use unwrapped LatLng to carry information about moveBy direction.
-        let center = if self.terrain.is_none() {
-            self.screen_coordinate_to_lat_lng_at(&point_on_screen, 0.0, WrapMode::Unwrapped)?
-        } else {
-            // Over terrain the ground the pointer grabbed follows it, on its
-            // plane; without an anchor, the map moves on the plane at the
-            // center's altitude.
-            let gesture = self.source != CameraChangeSource::Command;
-            let anchored = anchor.and_then(|anchor| {
-                let grabbed = ScreenCoordinate::new(anchor.x - offset.x, anchor.y - offset.y);
-                Some((grabbed, anchor, self.anchor_plane(&grabbed, &anchor, gesture)?))
-            });
-            let (from, to, height) = anchored.unwrap_or((point_on_screen, center, self.view().center_altitude()));
-            self.center_moving_on_plane(&from, &to, height)?
-        };
+        // The ground the pointer grabbed follows it, on its plane; without an
+        // anchor, the map moves on the plane at the center's altitude. Use
+        // unwrapped LatLng to carry information about moveBy direction.
+        let gesture = self.source != CameraChangeSource::Command;
+        let anchored = anchor.and_then(|anchor| {
+            let grabbed = ScreenCoordinate::new(anchor.x - offset.x, anchor.y - offset.y);
+            Some((grabbed, anchor, self.anchor_plane(&grabbed, &anchor, gesture)?))
+        });
+        let (from, to, height) = anchored.unwrap_or((point_on_screen, center, self.view().center_altitude()));
+        let center = self.center_moving_on_plane(&from, &to, height)?;
         self.ease_to(&CameraOptions { center: Some(center), ..Default::default() }, animation);
         Ok(())
     }
@@ -775,28 +771,6 @@ impl Transform {
 /// (y down) as a view point (y up), or back.
 pub(crate) fn flip_y(view: &View, point: &ScreenCoordinate) -> ScreenCoordinate {
     ScreenCoordinate::new(point.x, f64::from(view.size().height) - point.y)
-}
-
-/// The center's altitude of `view` in pixels at its zoom and latitude.
-/// Without terrain, a move holds it while it finds the center it ends at,
-/// and puts the altitude in meters back after: the flat map's anchored
-/// moves at a center altitude end where they would with the altitude kept
-/// in pixels.
-fn altitude_pixels(view: &View) -> f64 {
-    let altitude = view.center_altitude();
-    // A center at sea level, as on most maps, spares the conversion.
-    if altitude == 0.0 { altitude } else { altitude / altitude_meters_per_pixel(view) }
-}
-
-/// Puts the center of `state` `pixels` high at its zoom and latitude
-/// ([`altitude_pixels`]).
-fn set_altitude_pixels(state: &mut TransformState, pixels: f64) {
-    let altitude = if pixels == 0.0 { pixels } else { pixels * altitude_meters_per_pixel(state.view()) };
-    state.set_center_altitude(altitude);
-}
-
-fn altitude_meters_per_pixel(view: &View) -> f64 {
-    Projection::altitude_meters_per_pixel(view.center(WrapMode::Unwrapped).latitude(), view.zoom())
 }
 
 /// `seconds` truncated to whole nanoseconds; `None`

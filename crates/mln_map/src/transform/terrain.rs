@@ -6,8 +6,9 @@
 //! points and the ground drawn under them.
 //!
 //! Every rule applies only while the map hands the transform a ground
-//! ([`TerrainGround`]); without one, each path is the flat map's. The
-//! rules for a center the terrain clamps:
+//! ([`TerrainGround`]); without one, the flat map's ground is the plane at
+//! sea level, and the anchors hold the locations they grab on it. The rules
+//! for a center the terrain clamps:
 //!
 //! - **At rest**, the center stands on the ground under it, unless that is
 //!   still loading.
@@ -369,29 +370,29 @@ impl Transform {
 
     /// The height of the plane on which a move around `anchor` (y down)
     /// holds the ground it grabbed under `grabbed`, the pointer before the
-    /// move, over terrain (GL JS's `_terrainGestureElevation`): for a
-    /// gesture and its momentum (`gesture`), the height of the ground the
-    /// gesture grabbed at its first anchored step, which holds while the
-    /// gesture holds the same altitude, so that the map moves as far for
-    /// each pixel throughout; for a command, the height of the ground its own
-    /// line of sight meets.
+    /// move (GL JS's `_terrainGestureElevation`): the flat map's ground is
+    /// the plane at sea level; over terrain, for a gesture and its momentum
+    /// (`gesture`), the height of the ground the gesture grabbed at its first
+    /// anchored step, which holds while the gesture holds the same altitude,
+    /// so that the map moves as far for each pixel throughout; for a
+    /// command, the height of the ground its own line of sight meets.
     ///
-    /// `None`, for the plane at the center's altitude, without terrain,
-    /// where the pointer grabbed no drawn ground, for a pivot (`grabbed` is
-    /// `anchor`) at the view's center, and where the plane can't hold the
-    /// anchor or the grabbed point ([`sees_plane`]).
+    /// `None`, for the plane at the center's altitude, where the pointer
+    /// grabbed no drawn ground, before the renderer drew any, for a pivot
+    /// (`grabbed` is `anchor`) at the view's center, on the globe, and where
+    /// the plane can't hold the anchor or the grabbed point ([`sees_plane`]).
     pub(super) fn anchor_plane(
         &mut self,
         grabbed: &ScreenCoordinate,
         anchor: &ScreenCoordinate,
         gesture: bool,
     ) -> Option<f64> {
-        let elevation = self.terrain.as_ref()?.elevation.clone();
-        let grab = |view: &View| {
-            let ground = elevation.as_deref()?;
-            Some(view.ground_under(&flip_y(view, grabbed), ground)?.height)
+        let terrain = self.terrain.as_ref().map(|terrain| terrain.elevation.clone());
+        let grab = |view: &View| match &terrain {
+            None => Some(0.0),
+            Some(ground) => Some(view.ground_under(&flip_y(view, grabbed), ground.as_deref()?)?.height),
         };
-        let height = if gesture {
+        let height = if gesture && terrain.is_some() {
             let altitude = self.gesture.hold.unwrap_or(self.view().center_altitude());
             match self.gesture.anchor_plane {
                 Some(plane) if plane.at_altitude == altitude => plane.height,
@@ -413,18 +414,14 @@ impl Transform {
     }
 
     /// The height of the plane on which a move around `anchor` holds the
-    /// location under it ([`Self::anchor_plane`] for `grabbed`): the plane at
-    /// the center's altitude where that is `None` over terrain, and sea
-    /// level, the flat map, without terrain.
+    /// location under it ([`Self::anchor_plane`] for `grabbed`), or else
+    /// the plane at the center's altitude.
     pub(super) fn anchor_height(
         &mut self,
         grabbed: &ScreenCoordinate,
         anchor: &ScreenCoordinate,
         gesture: bool,
     ) -> f64 {
-        if self.terrain.is_none() {
-            return 0.0;
-        }
         self.anchor_plane(grabbed, anchor, gesture).unwrap_or(self.view().center_altitude())
     }
 

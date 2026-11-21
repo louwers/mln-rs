@@ -16,7 +16,7 @@ use super::momentum::MomentumState;
 use super::terrain::{EasedAltitude, ON_GROUND_TOLERANCE, sees_plane};
 use super::{
     ALTITUDE, BEARING, CENTER, CameraCommandId, CommandEnd, FOV, PADDING, PITCH, ROLL, Transform, TransformEvent, ZOOM,
-    altitude_pixels, camera_fields, max_pitch_for_padding, set_altitude_pixels,
+    camera_fields, max_pitch_for_padding,
 };
 use crate::map_event::{CameraChange, CameraChangeMode, CameraChangeSource};
 
@@ -579,16 +579,9 @@ impl Transform {
             _ => None,
         };
 
-        // Over terrain the altitude is set before the anchor holds its
-        // location, so that it holds at the frame's altitude (see `place`).
-        // Without terrain the anchor holds it with the center as many pixels
-        // high as before the frame, and the frame's altitude applies after
-        // (see `altitude_pixels`).
-        let held_pixels = anchored.filter(|_| self.terrain.is_none()).map(|_| altitude_pixels(self.view()));
+        // The altitude is set before the anchor holds its location, so that it
+        // holds at the frame's altitude (see `place`).
         place(&mut self.state, &current, &mut camera);
-        if let Some(pixels) = held_pixels {
-            set_altitude_pixels(&mut self.state, pixels);
-        }
         if let Some((anchor, anchor_lat_lng, height, index)) = anchored {
             match globe_zoom_around {
                 Some((location, zoom_before)) if self.state.view().zoom() != zoom_before => {
@@ -602,9 +595,6 @@ impl Transform {
                     );
                 }
                 _ => self.hold_anchor(&anchor_lat_lng, &anchor, height, &current, index),
-            }
-            if held_pixels.is_some() {
-                self.state.set_center_altitude(camera.center_altitude.unwrap_or_default());
             }
         }
         // The last frame of a command that completes stands on the ground at
@@ -626,7 +616,7 @@ impl Transform {
     /// `LatLng` at the start; a frame that has none logs it, as
     /// `frame_edge_insets` does.
     ///
-    /// Over terrain, a frame whose camera can't hold it there
+    /// On a Mercator view, a frame whose camera can't hold it there
     /// ([`sees_plane`]), such as one whose pitch carries the anchor above the
     /// horizon, moves around the view's center instead: the center stays
     /// where it was, in `before`, and the command gives up its anchor and
@@ -639,7 +629,7 @@ impl Transform {
         before: &CameraOptions,
         index: usize,
     ) {
-        if self.terrain.is_some() && !sees_plane(self.view(), anchor, height) {
+        if !self.view().is_globe() && !sees_plane(self.view(), anchor, height) {
             let zoom = self.view().zoom();
             self.state.set_lat_lng_zoom(&before.center.unwrap_or_default(), zoom);
             let center = self.view().center(WrapMode::Wrapped);

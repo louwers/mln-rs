@@ -16,10 +16,7 @@ use mln_util::time::Instant;
 
 use super::terrain::sees_plane;
 use super::transition::Transition;
-use super::{
-    BEARING, CENTER, PITCH, Transform, TransformEvent, ZOOM, altitude_pixels, max_pitch_for_padding, nanos_from_secs,
-    set_altitude_pixels,
-};
+use super::{BEARING, CENTER, PITCH, Transform, TransformEvent, ZOOM, max_pitch_for_padding, nanos_from_secs};
 use crate::map_event::{CameraChange, CameraChangeMode, CameraChangeSource};
 
 /// How far one part of a momentum moves, over how long, and along which
@@ -503,11 +500,11 @@ impl Transform {
         }
     }
 
-    /// Moves the center so that `lat_lng` is at `point` again; over terrain,
-    /// where the camera can hold it there (see `Transform::hold_anchor`).
+    /// Moves the center so that `lat_lng` is at `point` again; on a Mercator
+    /// view, where the camera can hold it there (see `Transform::hold_anchor`).
     fn hold_momentum_anchor(&mut self, anchor: Option<(ScreenCoordinate, LatLng, f64)>) {
         let Some((point, lat_lng, height)) = anchor else { return };
-        if self.terrain.is_some() && !sees_plane(self.view(), &point, height) {
+        if !self.view().is_globe() && !sees_plane(self.view(), &point, height) {
             return;
         }
         if let Err(e) = self.state.move_lat_lng_at(&lat_lng, &point, height) {
@@ -530,16 +527,10 @@ impl Transform {
             return true;
         }
         let before = self.view().center(WrapMode::Unwrapped);
-        // Without terrain the steps hold the altitude in pixels (see
-        // `altitude_pixels`).
-        let held = self.terrain.is_none().then(|| (self.view().center_altitude(), altitude_pixels(self.view())));
         let steps = f64::min((distance / MAX_STEP).ceil(), MAX_STEPS);
         let step = ScreenCoordinate::new(offset.x / steps, offset.y / steps);
         let bounded = self.state.limits().bounds != LatLngBounds::default();
         for _ in 0..steps as u32 {
-            if let Some((_, pixels)) = held {
-                set_altitude_pixels(&mut self.state, pixels);
-            }
             if self.globe_on_screen() {
                 self.step_globe_pan(&step);
                 continue;
@@ -547,13 +538,9 @@ impl Transform {
             let size = self.state.view().size();
             let center = self.state.view().padding().center_in(size);
             let point = ScreenCoordinate::new(center.x - step.x, center.y - step.y);
-            // A step that has no LatLng is logged and stops. Over terrain the
-            // map moves on the plane at the center's altitude.
-            let unwrapped = match self.terrain {
-                None => self.screen_coordinate_to_lat_lng_at(&point, 0.0, WrapMode::Unwrapped),
-                Some(_) => self.center_moving_on_plane(&point, &center, self.view().center_altitude()),
-            };
-            let unwrapped = match unwrapped {
+            // A step that has no LatLng is logged and stops. The map moves on
+            // the plane at the center's altitude.
+            let unwrapped = match self.center_moving_on_plane(&point, &center, self.view().center_altitude()) {
                 Ok(lat_lng) => lat_lng,
                 Err(e) => {
                     Log::error(Event::General, &e.message);
@@ -567,9 +554,6 @@ impl Transform {
             let mut zoom = self.state.view().zoom();
             self.state.constrain_camera_and_zoom_to_bounds(&mut camera, &mut zoom);
             self.state.set_lat_lng_zoom(&camera.center.unwrap_or(unwrapped), zoom);
-        }
-        if let Some((altitude, _)) = held {
-            self.state.set_center_altitude(altitude);
         }
         self.view().center(WrapMode::Unwrapped) != before
     }

@@ -651,7 +651,9 @@ impl TransformState {
     /// as `lat_lng` is from the location the line of sight through `anchor`
     /// meets at that height (GL JS's `getCameraForLocationAtPoint`). On the
     /// globe it is the center that holds `lat_lng` on the surface, or fails
-    /// where none does. Fails as [`move_lat_lng`](Self::move_lat_lng) does.
+    /// where none does; before the globe has a size, its points are
+    /// Mercator's, as [`crate::View::screen_coordinate_to_lat_lng_at`] reads them.
+    /// Fails as [`move_lat_lng`](Self::move_lat_lng) does.
     pub fn center_for_lat_lng_at(
         &self,
         lat_lng: &LatLng,
@@ -659,7 +661,7 @@ impl TransformState {
         height: f64,
     ) -> Result<LatLng, Error> {
         let view = &self.view;
-        if view.is_globe() {
+        if view.is_globe() && !view.size().is_empty() {
             return VerticalPerspectiveProjection::center_for_location_at_point(view, lat_lng, anchor)
                 .ok_or_else(|| Error::invalid_argument("no center holds the location at the point"));
         }
