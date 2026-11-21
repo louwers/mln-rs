@@ -406,8 +406,12 @@ impl Program {
         let mut names: Vec<String> =
             blocks().flat_map(|block| block.members.iter().map(|member| glsl_es::member_name(block, member))).collect();
         names.sort_unstable();
-        if let Some(pair) = names.windows(2).find(|pair| pair[0] == pair[1]) {
-            return invalid(format!("two block members are {} in GLSL ES", pair[0]));
+        let repeated = names.windows(2).find_map(|pair| match pair {
+            [name, next] if name == next => Some(name),
+            _ => None,
+        });
+        if let Some(name) = repeated {
+            return invalid(format!("two block members are {name} in GLSL ES"));
         }
         Ok(())
     }
@@ -457,8 +461,8 @@ mod tests {
 
     #[test]
     fn a_program_breaking_a_rule_of_its_declaration_fails_its_check() {
-        assert!(EMPTY.check().is_ok());
         const POSITION: Attribute = Attribute { id: 0, format: Short2 };
+        assert!(EMPTY.check().is_ok());
         let fails = |program: Program| assert!(program.check().is_err(), "{:?}", program.buffers);
         fails(Program { attributes: &[POSITION, POSITION], ..EMPTY });
         fails(Program { buffers: const { &[Buffer::uniform::<ViewUBO>(5), Buffer::uniform::<ViewUBO>(5)] }, ..EMPTY });
