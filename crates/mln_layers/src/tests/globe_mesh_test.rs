@@ -1,9 +1,17 @@
+use std::collections::BTreeSet;
+
 use geometry::Point;
+use mln_render::globe::{NORTH_POLE_Y, tile_grid};
 use mln_render::layer::TileMask;
 use mln_tile_id::CanonicalTileID;
+use mln_util::constants::EXTENT;
+use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use super::with_context;
-use crate::mesh::GlobeTileMeshCache;
+use crate::mesh::{GlobeTileMeshCache, masked_grid};
+
+/// `EXTENT` as a tile coordinate.
+const EXTENT_I16: i16 = EXTENT as i16;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
@@ -52,4 +60,62 @@ fn globe_mesh_cache_keeps_the_meshes_in_use() {
             assert!(vertices == cache.get(context, &tile, &whole, globe_test_vertex).vertices, "{i}");
         }
     });
+}
+
+// gtest: TileMesh.GlobeMaskKeepsTheUncoveredParts
+#[test]
+fn globe_mask_keeps_the_uncovered_parts() {
+    let tile = CanonicalTileID::new(1, 0, 0);
+    let masked = masked_grid(&tile, &mask(&[(1, 1, 0), (1, 0, 1), (1, 1, 1)]), globe_test_vertex);
+    let child = masked_grid(&CanonicalTileID::new(2, 0, 0), &mask(&[(0, 0, 0)]), globe_test_vertex);
+    let vertices = &masked.vertices;
+    let indices = &masked.indices;
+    assert_eq!(1, masked.segments.len());
+
+    for triangle in indices.as_chunks::<3>().0 {
+        let mut x = 0.0;
+        let mut y = 0.0;
+        for &index in triangle {
+            x += f64::from(vertices[usize::from(index)].position[0]) / 3.0;
+            y += f64::from(vertices[usize::from(index)].position[1]) / 3.0;
+        }
+        assert!(
+            !(x < f64::from(EXTENT / 2) && y >= 0.0 && y < f64::from(EXTENT / 2)),
+            "triangle in the covered quadrant at {x}, {y}"
+        );
+    }
+
+    let mut masked_edge = BTreeSet::new();
+    for vertex in vertices {
+        if vertex.position[0] == EXTENT_I16 / 2 && vertex.position[1] >= 0 && vertex.position[1] <= EXTENT_I16 / 2 {
+            masked_edge.insert(vertex.position[1]);
+        }
+    }
+    let mut child_edge = BTreeSet::new();
+    for vertex in &child.vertices {
+        if vertex.position[0] == EXTENT_I16 && vertex.position[1] >= 0 {
+            child_edge.insert(vertex.position[1] / 2);
+        }
+    }
+    assert_eq!(child_edge, masked_edge);
+    assert_eq!(33, masked_edge.len());
+
+    let mut north_pole = 0;
+    for vertex in vertices {
+        if vertex.position[1] == NORTH_POLE_Y {
+            assert!(vertex.position[0] >= EXTENT_I16 / 2);
+            north_pole += 1;
+        }
+    }
+    assert_eq!(33, north_pole);
+
+    let full = masked_grid(&tile, &mask(&[(0, 0, 0)]), globe_test_vertex);
+    let grid = tile_grid(&tile, SubdivisionGranularitySetting::globe().tile.granularity_for_zoom_level(1), false);
+    assert_eq!(grid.vertices.len(), full.vertices.len());
+    for (grid, vertex) in grid.vertices.iter().zip(&full.vertices) {
+        assert_eq!(*grid, vertex.position);
+    }
+    assert_eq!(grid.triangles.as_flattened(), full.indices);
+
+    assert_eq!(masked_grid(&tile, &TileMask::new(), globe_test_vertex).vertices.len(), 0);
 }

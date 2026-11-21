@@ -1,57 +1,58 @@
-//! Subdivision of polygons for the globe: their triangles split where they
-//! cross a grid of cells over the tile, so that they bend with the sphere.
-//! The algorithm is GL JS's `render/subdivision.ts`.
-
 use geometry::Point;
 use glam::DVec2;
-use mln_render::draw::{NORTH_POLE_Y, SOUTH_POLE_Y};
-use mln_render::unstable::subdivide_vertex_line;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::GeometryCollection;
 use mln_util::constants::EXTENT;
 use mln_util::hash::HashMap;
 
-use crate::tessellator::Tessellator;
+use super::line::subdivide_line;
+use super::{NORTH_POLE_Y, SOUTH_POLE_Y};
 
 /// A polygon's mesh, with vertices of its own.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub(crate) struct SubdividedPolygon {
-    pub(crate) vertices: Vec<Point<i16>>,
-    pub(crate) triangles: Vec<[u32; 3]>,
-    /// The outlines of the polygon's rings.
-    pub(crate) lines: Vec<[u32; 2]>,
+pub struct SubdividedPolygon {
+    /// The vertices' positions in tile units.
+    pub vertices: Vec<Point<i16>>,
+    /// The triangles that fill the polygon, as indices of
+    /// [`vertices`](Self::vertices), counter-clockwise in tile space.
+    pub triangles: Vec<[u32; 3]>,
+    /// The outlines of the polygon's rings, as segments between two
+    /// [`vertices`](Self::vertices).
+    pub lines: Vec<[u32; 2]>,
 }
 
-/// Triangulates `polygon`, an outer ring and its holes, and splits the
-/// triangles on a grid of `granularity` cells per axis. On a tile at a pole,
-/// the triangles along the pole's edge extend to the pole, and on the zoom 0
-/// tile, which spans the antimeridian, triangles and lines that reach
-/// outside the tile are dropped. The triangles are counter-clockwise in tile
-/// space. `outline` adds the lines of the rings, subdivided as well.
+/// Splits the triangles of `polygon`, an outer ring and its holes, on a
+/// grid of `granularity` cells per axis over the tile `tile`.
+///
+/// `triangles` fill the polygon, as indices into its rings concatenated in
+/// order, as an earcut triangulation gives them. On a tile of the top or
+/// bottom row, the triangles along the pole's edge of the tile extend to
+/// the pole. On the zoom 0 tile, which spans the antimeridian, triangles
+/// and lines that reach outside the tile are dropped. `outline` adds the
+/// lines of the rings, subdivided as well.
 #[must_use]
-pub(crate) fn subdivide_polygon(
+pub fn subdivide_polygon(
     polygon: &GeometryCollection,
-    canonical: &CanonicalTileID,
+    triangles: &[[u32; 3]],
+    tile: &CanonicalTileID,
     granularity: u32,
     outline: bool,
-    tessellator: &mut Tessellator,
 ) -> SubdividedPolygon {
     let mut subdivider = Subdivider {
         vertices: Vec::new(),
         indices: HashMap::default(),
-        canonical: *canonical,
+        tile: *tile,
         granularity,
         cell_size: f64::from(EXTENT) / f64::from(granularity),
     };
     let rings: Vec<u32> = polygon.iter().flatten().map(|&p| subdivider.index(vec(p))).collect();
-    let triangles: Vec<[u32; 3]> =
-        tessellator.triangulate(polygon).iter().map(|triangle| triangle.map(|i| rings[i as usize])).collect();
+    let triangles: Vec<[u32; 3]> = triangles.iter().map(|triangle| triangle.map(|i| rings[i as usize])).collect();
     let mut triangles = subdivider.split_triangles(&triangles);
     let mut lines = if outline { subdivider.outline(polygon) } else { Vec::new() };
 
     subdivider.move_off_pole_rows();
     subdivider.add_pole_caps(&mut triangles);
-    if granularity >= 2 && canonical.z == 0 {
+    if granularity >= 2 && tile.z == 0 {
         let inside = |i: &u32| (0..=EXTENT).contains(&i32::from(subdivider.vertices[*i as usize].x));
         triangles.retain(|triangle| triangle.iter().all(inside));
         lines.retain(|line| line.iter().all(inside));
@@ -63,7 +64,7 @@ struct Subdivider {
     vertices: Vec<Point<i16>>,
     /// The index of the vertex at each position.
     indices: HashMap<u32, u32>,
-    canonical: CanonicalTileID,
+    tile: CanonicalTileID,
     granularity: u32,
     cell_size: f64,
 }
@@ -224,7 +225,7 @@ impl Subdivider {
     fn outline(&mut self, polygon: &GeometryCollection) -> Vec<[u32; 2]> {
         let mut lines = Vec::new();
         for ring in polygon.iter() {
-            let path = subdivide_vertex_line(ring, self.granularity, true);
+            let path = subdivide_line(ring, self.granularity, true);
             lines.extend(path.windows(2).map(|segment| [self.index(vec(segment[0])), self.index(vec(segment[1]))]));
         }
         lines
@@ -249,9 +250,8 @@ impl Subdivider {
     /// On a tile at a pole, extends every triangle edge on the pole's edge
     /// of the tile to the pole, with a quad.
     fn add_pole_caps(&mut self, triangles: &mut Vec<[u32; 3]>) {
-        let last_row = (1u32 << self.canonical.z) - 1;
-        let poles =
-            [(self.canonical.y == 0, 0, NORTH_POLE_Y), (self.canonical.y == last_row, EXTENT as i16, SOUTH_POLE_Y)];
+        let last_row = (1u32 << self.tile.z) - 1;
+        let poles = [(self.tile.y == 0, 0, NORTH_POLE_Y), (self.tile.y == last_row, EXTENT as i16, SOUTH_POLE_Y)];
         for i in 0..triangles.len() {
             let triangle = triangles[i];
             for (at_pole, edge_y, pole_y) in poles {
@@ -283,23 +283,24 @@ struct Row {
     bottom: f64,
 }
 
-/// How far past the tile border [`add_tile_border_strips`] reaches: several
+/// How far outside the tile [`add_tile_border_strips`] reaches: several
 /// times the widest sliver between the meshes of neighboring zoom levels
-/// (about 2π units with the globe's granularities), and inside the stencil
+/// (about 2π units with the globe's granularities), and inside the clipping
 /// masks' border.
-pub(crate) const TILE_BORDER_STRIP_WIDTH: i16 = (EXTENT / 256) as i16;
+pub const TILE_BORDER_STRIP_WIDTH: i16 = (EXTENT / 256) as i16;
 
-/// Extends every triangle edge that lies on the tile border with nothing
-/// beyond it by a strip `width` units outside the tile.
+/// Extends every triangle edge of `mesh` that lies on the border of the
+/// tile `tile` with nothing beyond it by a strip
+/// [`TILE_BORDER_STRIP_WIDTH`] units outside the tile.
 ///
 /// Tiles of neighboring zoom levels split their shared edge at different
-/// points, and only the stencil masks' borders cover the slivers between the
-/// two meshes. The strip lets a fill that ends exactly at the tile border
+/// points, and only the clipping masks' borders cover the slivers between
+/// the two meshes. The strip lets a fill that ends exactly at the tile border
 /// reach them, as the geometry of a tile with a buffer does. An edge with
 /// triangles on both sides of the border belongs to a tile with a buffer and
 /// gets none, and neither do pole borders or the zoom 0 tile's antimeridian
 /// edges.
-pub(crate) fn add_tile_border_strips(mesh: &mut SubdividedPolygon, canonical: &CanonicalTileID, width: i16) {
+pub fn add_tile_border_strips(mesh: &mut SubdividedPolygon, tile: &CanonicalTileID) {
     struct BorderEdge {
         a: u32,
         b: u32,
@@ -308,10 +309,11 @@ pub(crate) fn add_tile_border_strips(mesh: &mut SubdividedPolygon, canonical: &C
         uses: u32,
     }
 
+    let width = TILE_BORDER_STRIP_WIDTH;
     let extent = EXTENT as i16;
-    let north_pole_tile = canonical.y == 0;
-    let south_pole_tile = canonical.y == (1u32 << canonical.z) - 1;
-    let wraps_x = canonical.z == 0;
+    let north_pole_tile = tile.y == 0;
+    let south_pole_tile = tile.y == (1u32 << tile.z) - 1;
+    let wraps_x = tile.z == 0;
     let vertices = &mut mesh.vertices;
 
     let mut edges: Vec<BorderEdge> = Vec::new();
@@ -361,7 +363,7 @@ pub(crate) fn add_tile_border_strips(mesh: &mut SubdividedPolygon, canonical: &C
 }
 
 /// Reorders every triangle to counter-clockwise winding in tile space.
-pub(crate) fn wind_counter_clockwise(vertices: &[Point<i16>], triangles: &mut [[u32; 3]]) {
+fn wind_counter_clockwise(vertices: &[Point<i16>], triangles: &mut [[u32; 3]]) {
     for triangle in triangles {
         let [a, b, c] = triangle.map(|i| vec(vertices[i as usize]));
         if (b - a).perp_dot(c - a) > 0.0 {
@@ -372,7 +374,7 @@ pub(crate) fn wind_counter_clockwise(vertices: &[Point<i16>], triangles: &mut [[
 
 /// Triangulates an ordered convex ring of vertex indices by walking outward
 /// from its leftmost vertex. An empty ring adds no triangles.
-pub(crate) fn scanline_triangulate_vertex_ring(vertices: &[Point<i16>], ring: &[u32], triangles: &mut Vec<[u32; 3]>) {
+fn scanline_triangulate_vertex_ring(vertices: &[Point<i16>], ring: &[u32], triangles: &mut Vec<[u32; 3]>) {
     let Some(leftmost) = ring.iter().enumerate().min_by_key(|&(_, &i)| vertices[i as usize].x).map(|(at, _)| at) else {
         return;
     };

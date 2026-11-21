@@ -17,6 +17,18 @@ mod sort_key_test;
 // The fill-extrusion parts of the subdivision tests.
 mod subdivision_test;
 
+/// Subdivides `polygon` for the globe, filled with earcut's triangles.
+fn subdivide(
+    polygon: &mln_tile_id::geometry_tile_data::GeometryCollection,
+    tile: &mln_tile_id::CanonicalTileID,
+    granularity: u32,
+    outline: bool,
+) -> mln_render::globe::SubdividedPolygon {
+    let mut tessellator = crate::tessellator::Tessellator::default();
+    let triangles = tessellator.triangulate(polygon);
+    mln_render::globe::subdivide_polygon(polygon, triangles, tile, granularity, outline)
+}
+
 /// Runs `f` with the `Gpu` of a headless WebGPU backend, which compiles the
 /// built-in layer types' programs, and a context over it, which it then
 /// tears down.

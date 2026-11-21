@@ -2,13 +2,13 @@
 //! outline them, over the same vertices.
 
 use geometry::Point;
+use mln_render::globe::{add_tile_border_strips, subdivide_polygon};
 use mln_render::layer::Indexed;
 use mln_tile::geometry_tile_data::limit_holes;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, classify_rings, signed_area};
 
 use super::bucket::FillLayoutVertex;
-use crate::subdivision::{TILE_BORDER_STRIP_WIDTH, add_tile_border_strips, subdivide_polygon};
 use crate::tessellator::Tessellator;
 
 /// The buffers of a fill bucket that its polygons' meshes go in.
@@ -42,8 +42,9 @@ impl FillBuffers<'_> {
             limit_holes(&mut polygon, 500);
             let first = self.vertices.len();
             if granularity >= 2 {
-                let mut mesh = subdivide_polygon(&polygon, canonical, granularity, true, tessellator);
-                add_tile_border_strips(&mut mesh, canonical, TILE_BORDER_STRIP_WIDTH);
+                let triangles = tessellator.triangulate(&polygon);
+                let mut mesh = subdivide_polygon(&polygon, triangles, canonical, granularity, true);
+                add_tile_border_strips(&mut mesh, canonical);
                 if mesh.triangles.is_empty() && mesh.lines.is_empty() {
                     continue;
                 }

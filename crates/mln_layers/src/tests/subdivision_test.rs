@@ -13,10 +13,10 @@ use mln_util::geometry::FeatureType;
 use mln_util::subdivision_granularity::{SubdivisionGranularityExpression, SubdivisionGranularitySetting};
 use mln_vec_map::VecMap;
 
+use super::subdivide;
 use crate::fill_extrusion::FillExtrusionLayoutProperties;
 use crate::fill_extrusion::bucket::FillExtrusionBucket;
 use crate::pattern_layout::{PatternBucket, PatternLayerMap};
-use crate::subdivision::subdivide_polygon;
 use crate::tessellator::Tessellator;
 
 /// `EXTENT` as a tile coordinate.
@@ -126,7 +126,7 @@ fn roof_granularity(bucket: &FillExtrusionBucket, polygon: &GeometryCollection, 
     }
     let mut granularity = SubdivisionGranularitySetting::globe().fill.granularity_for_zoom_level(tile.z);
     while granularity >= 1 {
-        let roof = subdivide_polygon(polygon, tile, granularity, false, &mut Tessellator::default());
+        let roof = subdivide(polygon, tile, granularity, false);
         let count = roof.triangles.len();
         if count <= drawn.len() {
             let matches = roof.triangles.iter().zip(&drawn[drawn.len() - count..]).all(|(triangle, drawn)| {
@@ -174,7 +174,7 @@ fn fill_extrusion_roof_beside_long_walls_takes_its_own_segment() {
     let polygon = fine_zigzag();
     let tile = CanonicalTileID::new(2, 1, 1);
     let bucket = extrude_on_the_globe(&polygon, &tile);
-    let roof = subdivide_polygon(&polygon, &tile, 32, false, &mut Tessellator::default());
+    let roof = subdivide(&polygon, &tile, 32, false);
     let last = bucket.triangle_segments.last().expect("segment");
     assert_eq!(roof.vertices.len(), last.vertex_length);
     assert_eq!(roof.triangles.len() * 3, last.index_length);
@@ -189,10 +189,7 @@ fn fill_extrusion_roof_beyond_the_index_limit_keeps_its_granularity() {
     // rather than coarsened.
     let polygon = fine_zigzag();
     let tile = CanonicalTileID::new(1, 0, 0);
-    assert!(
-        subdivide_polygon(&polygon, &tile, 64, false, &mut Tessellator::default()).vertices.len()
-            > MAX_SEGMENT_VERTICES
-    );
+    assert!(subdivide(&polygon, &tile, 64, false).vertices.len() > MAX_SEGMENT_VERTICES);
     let bucket = extrude_on_the_globe(&polygon, &tile);
     assert!(bucket.triangle_segments.len() >= 2);
     assert_eq!(64, roof_granularity(&bucket, &polygon, &tile));

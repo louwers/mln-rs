@@ -35,7 +35,6 @@ mod mesh;
 mod pattern_layout;
 pub mod raster;
 mod shaders;
-mod subdivision;
 pub mod symbol;
 mod tessellator;
 

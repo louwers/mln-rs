@@ -23,7 +23,7 @@ use crate::gfx::buffer::Buffer;
 use crate::gfx::context::Context;
 use crate::gfx::owned::Owned;
 use crate::gfx::vertex_attribute::Uniforms;
-use crate::globe_tile_mesh::raw_globe_tile_mesh;
+use crate::globe::tile_grid;
 use crate::paint_parameters::DrawTarget;
 use crate::render_static_data::RenderStaticData;
 
@@ -172,9 +172,13 @@ impl ClipMasks {
                 }
                 let mesh = if globe {
                     let (_, _, _, borders) = key;
-                    let raw =
-                        raw_globe_tile_mesh(&tile.canonical, borders, SubdivisionGranularitySetting::globe().stencil);
-                    Mesh::new(gpu, context, &raw.vertices, &raw.indices, raw.segments)
+                    let canonical = &tile.canonical;
+                    let granularity =
+                        SubdivisionGranularitySetting::globe().stencil.granularity_for_zoom_level(canonical.z);
+                    let grid = tile_grid(canonical, granularity, borders);
+                    let indices = grid.triangles.as_flattened();
+                    let segment = SegmentBase::with_lengths(0, 0, grid.vertices.len(), indices.len());
+                    Mesh::new(gpu, context, bytemuck::cast_slice(&grid.vertices), indices, vec![segment])
                 } else {
                     let vertices = RenderStaticData::tile_vertices();
                     let indices = RenderStaticData::quad_triangle_indices();

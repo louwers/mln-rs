@@ -23,7 +23,7 @@ use crate::draw_objects::{DrawGeometry, DrawObjects, Textures, raw_vertices};
 use crate::gfx::context::Context;
 use crate::gfx::indexes::DrawIndexes;
 use crate::gfx::vertex_attribute::Uniforms;
-use crate::globe_tile_mesh::{RawGlobeTileMesh, raw_globe_tile_mesh};
+use crate::globe::{TileGrid, tile_grid};
 use crate::layer_drawing::{DrawDepth, DrawList, FrameDraw, KeptDraw, LayerDraws, TileMap, finish_tiles, tile_objects};
 use crate::paint_parameters::PaintParameters;
 use crate::tile_matrix::to_projection_ubo;
@@ -41,7 +41,7 @@ pub(crate) struct GlobeDepthPass {
     frame: LayerDraws,
     /// The frame's draws as the update makes them, with their projections.
     draw_list: DrawList<ProjectionUBO>,
-    meshes: BTreeMap<(u8, bool, bool), RawGlobeTileMesh>,
+    meshes: BTreeMap<(u8, bool, bool), TileGrid>,
 }
 
 impl GlobeDepthPass {
@@ -95,20 +95,24 @@ impl GlobeDepthPass {
                 let canonical = &tile_id.canonical;
                 let key = (canonical.z, canonical.y == 0, canonical.y == (1u32 << canonical.z) - 1);
                 let mesh = self.meshes.entry(key).or_insert_with(|| {
-                    raw_globe_tile_mesh(canonical, true, SubdivisionGranularitySetting::globe().tile)
+                    let granularity =
+                        SubdivisionGranularitySetting::globe().tile.granularity_for_zoom_level(canonical.z);
+                    tile_grid(canonical, granularity, true)
                 });
+                let vertex_count = mesh.vertices.len();
+                let indices = mesh.triangles.as_flattened().to_vec();
                 let vertices = raw_vertices(
                     ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE,
-                    mesh.vertices.clone(),
-                    mesh.vertex_count,
+                    bytemuck::cast_slice(&mesh.vertices).to_vec(),
+                    vertex_count,
                     AttributeDataType::Short2,
                 );
                 let geometry = DrawGeometry {
                     vertices,
-                    vertex_count: mesh.vertex_count,
+                    vertex_count,
                     mode: DrawMode::Triangles(),
-                    indexes: DrawIndexes::new(mesh.indices.clone()),
-                    segments: mesh.segments.iter().map(SegmentBase::copy).collect(),
+                    segments: vec![SegmentBase::with_lengths(0, 0, vertex_count, indices.len())],
+                    indexes: DrawIndexes::new(indices),
                     instances: None,
                 };
                 // The far hemisphere is clockwise on screen on every backend,
