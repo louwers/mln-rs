@@ -37,8 +37,9 @@ use crate::layer::{
     FeatureIndexBuilder, FeatureStates, GeometryUpload, GeometryVec, LayerBucket, LayerType, LayerValues, Layout,
     LayoutParameters, NoBucket, NoLayout, NoTileView, RasterView, Resolved, SourceLayer, layers_by_id,
 };
-use crate::layer_drawing::{ChangedBuckets, KeptDraw, TileDraws};
+use crate::layer_drawing::{KeptDraw, TileDraws};
 use crate::placement::{CollisionGroups, Placed, PlacementContext, PlacementPass, PlacementQuery, Prepared};
+use crate::tile_values::{ChangedBuckets, TileMap};
 
 mln_style::properties!(
     /// The layout properties of a `dot` layer.
@@ -219,6 +220,7 @@ impl LayerType for Dot {
     type Layout = DotLayout;
     type Bucket = DotBucket;
     type View<'a> = LayerBucket<'a, Dot>;
+    type Tile = KeptDraw;
     type Drawing = TileDraws<KeptDraw>;
     type State = ();
 
@@ -294,6 +296,7 @@ impl LayerType for Dot {
     fn make_draws(
         _state: &mut (),
         _drawing: &mut TileDraws<KeptDraw>,
+        _tile_values: &mut TileMap<KeptDraw>,
         _gpu: &mut dyn mln_gfx::gpu::Gpu,
         _cx: &mut DrawContext<'_, '_, Dot>,
     ) {
@@ -333,6 +336,7 @@ impl LayerType for Tint {
     type Layout = NoLayout;
     type Bucket = NoBucket;
     type View<'a> = RasterView<'a>;
+    type Tile = KeptDraw;
     type Drawing = TileDraws<KeptDraw>;
     type State = ();
 
@@ -347,6 +351,7 @@ impl LayerType for Tint {
     fn make_draws(
         _state: &mut (),
         _drawing: &mut TileDraws<KeptDraw>,
+        _tile_values: &mut TileMap<KeptDraw>,
         _gpu: &mut dyn mln_gfx::gpu::Gpu,
         _cx: &mut DrawContext<'_, '_, Tint>,
     ) {
@@ -375,6 +380,7 @@ impl LayerType for Shade {
     type Layout = NoLayout;
     type Bucket = NoBucket;
     type View<'a> = &'a DemContents;
+    type Tile = KeptDraw;
     type Drawing = TileDraws<KeptDraw>;
     type State = ();
 
@@ -389,6 +395,7 @@ impl LayerType for Shade {
     fn make_draws(
         _state: &mut (),
         _drawing: &mut TileDraws<KeptDraw>,
+        _tile_values: &mut TileMap<KeptDraw>,
         _gpu: &mut dyn mln_gfx::gpu::Gpu,
         _cx: &mut DrawContext<'_, '_, Shade>,
     ) {
@@ -416,6 +423,7 @@ impl<const OTHER: bool> LayerType for Mark<OTHER> {
     type Layout = NoLayout;
     type Bucket = NoBucket;
     type View<'a> = NoTileView;
+    type Tile = KeptDraw;
     type Drawing = TileDraws<KeptDraw>;
     type State = ();
 
@@ -432,6 +440,7 @@ impl<const OTHER: bool> LayerType for Mark<OTHER> {
     fn make_draws(
         _state: &mut (),
         _drawing: &mut TileDraws<KeptDraw>,
+        _tile_values: &mut TileMap<KeptDraw>,
         _gpu: &mut dyn mln_gfx::gpu::Gpu,
         _cx: &mut DrawContext<'_, '_, Self>,
     ) {

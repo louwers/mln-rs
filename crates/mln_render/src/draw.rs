@@ -21,11 +21,13 @@
 //! [`LayerDraws`]. The [`DrawFrame`] holds what the draws' uniforms read of
 //! the frame, and [`projection_data`] projects a tile's geometry in it.
 //!
-//! The layer's [`LayerDrawing`] keeps its draws, those of its tiles in a
-//! [`TileMap`], and gives the engine its draw groups ([`DrawGroup`]). The
-//! engine places each group in the layers' order and depth, and uploads and
-//! draws it through [`LayerDrawing::upload`] and [`LayerDrawing::render`],
-//! which hand the draws [`PaintParameters`], the frame's encode.
+//! The engine keeps the layer's values of its tiles, which hold the GPU
+//! objects of the tiles' draws, in a [`TileMap`]. The layer's
+//! [`LayerDrawing`] keeps its other draws, and gives the engine its draw
+//! groups ([`DrawGroup`]). The engine places each group in the layers' order
+//! and depth, and uploads and draws it through [`LayerDrawing::upload`] and
+//! [`LayerDrawing::render`], which hand the draws [`PaintParameters`], the
+//! frame's encode.
 //! [`TileDraws`] is the drawing of a layer that draws one group of its
 //! tiles' draws, and [`SingleDraw`] is one draw with its buffers. Draws that
 //! draw onto the frame as one surface say how with a [`Composite`]; a layer
@@ -53,9 +55,8 @@ pub use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttribut
 pub use crate::gfx::vertices::{SharedVertices, TypedVertices, Vertices};
 pub use crate::layer_composite::Composite;
 pub use crate::layer_drawing::{
-    BucketChanges, ChangedBuckets, DrawDepth, DrawGroup, DrawList, DrawObjectsMut, DrawOrder, DrawPriority, FrameDraw,
-    FrameDraws, KeptDraw, LayerDrawing, LayerDraws, SingleDraw, TileDraws, TileEntry, TileMap, TileObjects,
-    UniformWriter, finish_tiles, tile_objects,
+    DrawDepth, DrawGroup, DrawList, DrawObjectsMut, DrawOrder, DrawPriority, FrameDraw, FrameDraws, KeptDraw,
+    LayerDrawing, LayerDraws, SingleDraw, TileDraws, TileObjects, UniformWriter, finish_tiles, tile_objects,
 };
 pub use crate::paint_parameters::{DrawFrame, PaintParameters};
 pub use crate::render_light::EvaluatedLight;
@@ -66,3 +67,4 @@ pub use crate::tile_matrix::{
     cast_matrix, globe_extrude_scale, projection_data, tile_unit_translation, to_projection_ubo,
 };
 pub use crate::tile_render_data::TileAtlasTextures;
+pub use crate::tile_values::{BucketChanges, ChangedBuckets, TileMap};

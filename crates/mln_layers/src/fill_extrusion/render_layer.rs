@@ -37,9 +37,9 @@ use mln_map_types::View;
 use mln_render::draw::{
     AtlasBinding, BucketGeometry, Composite, Context, DrawDepth, DrawGeometry, DrawList, DrawObjects, DrawObjectsMut,
     DrawPriority, EvaluatedLight, FrameDraw, IconFilter, Indexes, RenderStaticData, SharedAttribute, SharedIndexes,
-    SharedVertices, Texture2D, TileDraws, TileObjects, UniformWriter, Uniforms, VertexAttributeArray, bucket_indexes,
-    bucket_vertices, cast_matrix, copied_vertices, copy_shared_attributes, derived_vertices, paint_vertices,
-    projection_data, to_projection_ubo, zero_to_one_clip_z,
+    SharedVertices, Texture2D, TileDraws, TileMap, TileObjects, UniformWriter, Uniforms, VertexAttributeArray,
+    bucket_indexes, bucket_vertices, cast_matrix, copied_vertices, copy_shared_attributes, derived_vertices,
+    paint_vertices, projection_data, to_projection_ubo, zero_to_one_clip_z,
 };
 use mln_render::layer::{
     Bucket, DrawContext, EvaluateCx, EvaluatedLayer, Evaluation, FeatureQuery, HitTest, LayerBucket, LayerType,
@@ -283,6 +283,7 @@ impl LayerType for FillExtrusion {
     type Layout = PatternLayout<FillExtrusionLayoutSpec>;
     type Bucket = FillExtrusionBucket;
     type View<'a> = LayerBucket<'a, FillExtrusion>;
+    type Tile = ExtrusionTile;
     type Drawing = TileDraws<ExtrusionTile>;
     type State = ExtrusionState;
     const VOLUME: bool = true;
@@ -324,6 +325,7 @@ impl LayerType for FillExtrusion {
     fn make_draws(
         state: &mut ExtrusionState,
         drawing: &mut TileDraws<ExtrusionTile>,
+        tile_values: &mut TileMap<ExtrusionTile>,
         gpu: &mut dyn Gpu,
         cx: &mut DrawContext<'_, '_, FillExtrusion>,
     ) {
@@ -368,35 +370,28 @@ impl LayerType for FillExtrusion {
         };
 
         let layer = &*cx.layer.evaluated;
-        for tile in render_tiles {
+        for (index, tile) in render_tiles.iter().enumerate() {
             let tile_id = tile.id();
-            let Some(mut entry) = drawing.tiles_mut().entry(&tile_id) else {
-                continue;
-            };
-
             let render_data = tile.view_to_draw();
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
-                *entry.value = None;
                 continue;
             };
             let bucket = render_data.bucket;
-            // Draws built from another bucket go.
-            entry.set_bucket(bucket.base.id());
-
             let Some(binders) = bucket.paint_property_binders.get(cx.layer.id()) else {
                 continue;
             };
 
-            let changes = entry.take_changes();
+            let changes = tile_values.take_changes(index);
+            let value = tile_values.get_mut(index);
             let context = &mut *cx.context;
-            let cached = match entry.value {
+            let cached = match value {
                 Some(cached) => {
                     if changes.paint {
                         builder.refresh_paint(context, cached, render_data, binders, &layer.paint);
                     }
                     cached
                 }
-                None => entry.value.insert(builder.build(context, render_data, binders, &layer.paint)),
+                None => value.insert(builder.build(context, render_data, binders, &layer.paint)),
             };
             for (index, draw) in cached.draws.iter().enumerate() {
                 let frame_draw = FrameDraw {
@@ -418,7 +413,7 @@ impl LayerType for FillExtrusion {
         // The draws that composite draw opaque: the composite has the
         // layer's opacity.
         let opacity = if composite.is_some() { 1.0 } else { opacity };
-        drawing.finish(&mut state.draw_list, gpu, cx.context, |writer| {
+        drawing.finish(&mut state.draw_list, tile_values, gpu, cx.context, |writer| {
             ExtrusionState::write_uniforms(layer, writer, light, view, opacity);
         });
     }

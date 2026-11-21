@@ -18,7 +18,7 @@ use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_render::draw::{
     DrawGeometry, DrawIndexes, DrawList, DrawObjects, DrawObjectsMut, Indexes, KeptDraw, RenderStaticData,
-    SharedAttribute, SharedIndexes, SharedTexture, SharedVertices, Textures, TileDraws, TileObjects, Uniforms,
+    SharedAttribute, SharedIndexes, SharedTexture, SharedVertices, Textures, TileDraws, TileMap, TileObjects, Uniforms,
     VertexAttributeArray, cast_matrix, copied_vertices, to_projection_ubo,
 };
 use mln_render::layer::{
@@ -261,7 +261,7 @@ impl LayerType for ColorRelief {
     type Layout = NoLayout;
     type Bucket = NoBucket;
     type View<'a> = &'a DemContents;
-
+    type Tile = ReliefTile;
     type Drawing = TileDraws<ReliefTile>;
     type State = ReliefState;
 
@@ -312,6 +312,7 @@ impl LayerType for ColorRelief {
     fn make_draws(
         state: &mut ReliefState,
         drawing: &mut TileDraws<ReliefTile>,
+        tile_values: &mut TileMap<ReliefTile>,
         gpu: &mut dyn Gpu,
         cx: &mut DrawContext<'_, '_, ColorRelief>,
     ) {
@@ -397,19 +398,13 @@ impl LayerType for ColorRelief {
             ..Default::default()
         };
 
-        for tile in render_tiles {
+        for (index, tile) in render_tiles.iter().enumerate() {
             let tile_id = tile.id();
-            let Some(mut entry) = drawing.tiles_mut().entry(&tile_id) else {
-                continue;
-            };
-
             let Some(contents) = tile.view().filter(|contents| contents.has_data()) else {
-                *entry.value = None;
                 continue;
             };
             let contents_id = contents.id();
-            // A draw built from other contents goes.
-            entry.set_bucket(contents_id);
+            let value = tile_values.get_mut(index);
 
             let geometry = contents.geometry();
             let geometry_generation = geometry.generation();
@@ -443,11 +438,11 @@ impl LayerType for ColorRelief {
                     (ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE, color_stops_texture),
                 ];
 
-                if entry.value.as_ref().is_some_and(|cached| cached.geometry_generation != geometry_generation) {
+                if value.as_ref().is_some_and(|cached| cached.geometry_generation != geometry_generation) {
                     // The masked geometry changed (see the file comment).
-                    *entry.value = None;
+                    *value = None;
                 }
-                if let Some(cached) = entry.value.as_mut() {
+                if let Some(cached) = value.as_mut() {
                     // The DEM and the ramps' textures change with the
                     // DEM's generation and the ramps.
                     for (id, texture) in textures {
@@ -505,14 +500,14 @@ impl LayerType for ColorRelief {
                         draw_textures,
                     );
                     let cached = ReliefTile { draw: KeptDraw::new(objects), geometry_generation, tile_props };
-                    *entry.value = Some(cached);
+                    *value = Some(cached);
                 }
             } else {
                 // The tile's draw, if it has one, draws as it was.
                 Log::warning(Event::Render, "ColorRelief: DEM image not valid for tile");
             }
 
-            let Some(cached) = entry.value.as_ref() else {
+            let Some(cached) = value.as_ref() else {
                 continue;
             };
             let projection = frame.projection_data_for_tile(&tile_id.to_unwrapped(), false);
@@ -526,7 +521,7 @@ impl LayerType for ColorRelief {
         }
 
         let opacity = *values.evaluated.paint.color_relief_opacity.uniform();
-        drawing.finish(draw_list, gpu, cx.context, |writer| {
+        drawing.finish(draw_list, tile_values, gpu, cx.context, |writer| {
             let props = ColorReliefEvaluatedPropsUBO { opacity, pad_eval0: 0.0, pad_eval1: 0.0, pad_eval2: 0.0 };
             writer.uniform(PROPS.id, &props);
             writer.storage(DRAWABLE.id, |uniforms| uniforms.draw_ubo);

@@ -16,7 +16,6 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
 
 use crate::erased_source::ErasedOrigin;
-use crate::layer_drawing::ChangedBuckets;
 use crate::layout::tile_layout::{Dependencies, LayoutParams};
 use crate::render_orchestrator::drop_on_workers;
 use crate::source::TileLoad;
@@ -32,6 +31,7 @@ use crate::tile::raster::RasterContents;
 use crate::tile::store::{SourceInfo, StoreContext};
 use crate::tile::tile::{Shown, Tile, TileInput, TileNecessity, TileOperation, TileUpdateParameters};
 use crate::tile::tile_workers::{InlineWorkers, Lane, ReplyBody};
+use crate::tile_values::ChangedBuckets;
 
 /// A tile, its source and the store, borrowed for a transition.
 pub(crate) struct TileMut<'a> {

@@ -29,7 +29,6 @@ use crate::erased_layer::ErasedEvaluatedLayer;
 use crate::geometry::feature_index::{FeatureIndex, FeatureSelection, QueryLayers, QueryRegion, QueryResults};
 use crate::gfx::context::Context;
 use crate::gfx::dynamic_texture_atlas::{AtlasLease, BinUse, DynamicTextureAtlas};
-use crate::layer_drawing::{BucketChanges, ChangedBuckets};
 use crate::layout::tile_layout::{Dependencies, Resolved};
 use crate::query::{RenderedQueryOptions, SourceQueryOptions};
 use crate::render_layer::ErasedLayerBucket;
@@ -40,6 +39,7 @@ use crate::tile::dem::DemContents;
 use crate::tile::raster::RasterContents;
 use crate::tile_mask::TileMask;
 use crate::tile_render_data::TileAtlasTextures;
+use crate::tile_values::{BucketChanges, ChangedBuckets};
 
 /// A layout's buckets, each once, and the bucket of each layer it laid out,
 /// with the values it laid the layer out with. The layers of a layout group

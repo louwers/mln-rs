@@ -22,7 +22,6 @@ use serde_json::json;
 
 use super::tile_jobs_test::{Manual, icons, layer, points};
 use crate::erased_layer::ErasedEvaluatedLayer;
-use crate::layer_drawing::ChangedBuckets;
 use crate::query::SourceQueryOptions;
 use crate::tests::fixture_source::{self, Fetch, Fetched, FetchedLoad};
 use crate::tests::tile::{dem_png, png};
@@ -34,6 +33,7 @@ use crate::tile::job::{DataInput, Job, Run, TileKey};
 use crate::tile::pipeline::LayoutWork;
 use crate::tile::tile::{TileKind, TileNecessity, TileOperation};
 use crate::tile::tile_workers::{InlineWorkers, TileWorkers};
+use crate::tile_values::ChangedBuckets;
 
 /// A file source whose requests wait until the test answers them.
 #[derive(Default)]

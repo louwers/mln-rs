@@ -10,7 +10,7 @@ use mln_util::hash::HashMap;
 use mln_vec_map::VecMap;
 
 use crate::bucket::{FeatureStates, LayerFeatureStates};
-use crate::layer_drawing::ChangedBuckets;
+use crate::tile_values::ChangedBuckets;
 
 /// What holds a source's feature state: a tile's buckets.
 pub(crate) trait FeatureStateTarget {

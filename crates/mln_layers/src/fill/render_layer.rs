@@ -9,7 +9,7 @@ use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
 use mln_render::draw::{
     AtlasBinding, Composite, Context, DrawDepth, DrawGeometry, DrawIndexes, DrawList, DrawObjects, DrawObjectsMut,
-    FrameDraw, IconFilter, Indexes, RenderStaticData, SharedAttribute, SharedIndexes, Texture2D, TileDraws,
+    FrameDraw, IconFilter, Indexes, RenderStaticData, SharedAttribute, SharedIndexes, Texture2D, TileDraws, TileMap,
     TileObjects, UniformWriter, Uniforms, VertexAttributeArray, bucket_indexes, bucket_vertices, cast_matrix,
     copied_vertices, copy_shared_attributes, paint_vertices, projection_data, to_projection_ubo,
 };
@@ -545,6 +545,7 @@ impl LayerType for Fill {
     type Layout = PatternLayout<FillLayoutSpec>;
     type Bucket = FillBucket;
     type View<'a> = LayerBucket<'a, Fill>;
+    type Tile = FillTile;
     type Drawing = TileDraws<FillTile>;
     type State = FillState;
 
@@ -595,6 +596,7 @@ impl LayerType for Fill {
     fn make_draws(
         state: &mut FillState,
         drawing: &mut TileDraws<FillTile>,
+        tile_values: &mut TileMap<FillTile>,
         gpu: &mut dyn Gpu,
         cx: &mut DrawContext<'_, '_, Fill>,
     ) {
@@ -634,15 +636,10 @@ impl LayerType for Fill {
 
         let layer_id = cx.layer.id();
         let layer = &*cx.layer.evaluated;
-        for &tile in render_tiles {
+        for (index, &tile) in render_tiles.iter().enumerate() {
             let tile_id = tile.id();
-            let Some(mut entry) = drawing.tiles_mut().entry(&tile_id) else {
-                continue;
-            };
-
             let render_data = tile.view_to_draw();
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
-                *entry.value = None;
                 continue;
             };
             let bucket = render_data.bucket;
@@ -650,16 +647,14 @@ impl LayerType for Fill {
                 continue;
             };
 
-            // Draws built from another bucket go.
-            entry.set_bucket(bucket.base.id());
-
             let evaluated = &render_data.layer.paint;
 
             // The draws' attributes read the bucket's vertices in the
             // context's store, which upload again when they change.
-            let changes = entry.take_changes();
+            let changes = tile_values.take_changes(index);
+            let value = tile_values.get_mut(index);
             let context = &mut *cx.context;
-            if let Some(cached) = entry.value.as_mut() {
+            if let Some(cached) = value.as_mut() {
                 let geometry = render_data.geometry();
                 // Reads the paint attributes, and returns the vertices they
                 // read.
@@ -693,10 +688,10 @@ impl LayerType for Fill {
                     }
                 }
             } else if let Some(built) = builder.build(context, render_data, binders, evaluated) {
-                *entry.value = Some(built);
+                *value = Some(built);
             }
 
-            let Some(cached) = entry.value.as_ref() else {
+            let Some(cached) = value.as_ref() else {
                 continue;
             };
             let tile_draws = [(&cached.fill, FillPart::Fill), (&cached.outline, FillPart::Outline)];
@@ -724,7 +719,7 @@ impl LayerType for Fill {
             *layer.paint.fill_layer_blend.uniform(),
         ));
         frame.set_stencil_tiles(render_tiles.iter().map(|tile| tile.unwrapped_id()));
-        drawing.finish(&mut state.draw_list, gpu, cx.context, |writer| {
+        drawing.finish(&mut state.draw_list, tile_values, gpu, cx.context, |writer| {
             FillState::write_uniforms(layer, writer);
         });
     }

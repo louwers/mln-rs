@@ -11,8 +11,8 @@ use super::{
 };
 use crate::bucket::Bucket;
 use crate::layer::LayerType;
-use crate::layer_drawing::ChangedBuckets;
 use crate::render_layer::{Layer, RenderLayer};
+use crate::tile_values::ChangedBuckets;
 use crate::update_parameters::UpdateParameters;
 
 /// The buckets of laid-out tiles, by their keys: the tile store's, or the

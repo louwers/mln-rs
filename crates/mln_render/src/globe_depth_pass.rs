@@ -21,11 +21,12 @@ use crate::gfx::context::Context;
 use crate::gfx::indexes::DrawIndexes;
 use crate::gfx::vertex_attribute::Uniforms;
 use crate::globe::{TileGrid, grid, surface_granularity};
-use crate::layer_drawing::{DrawDepth, DrawList, FrameDraw, KeptDraw, LayerDraws, TileMap, finish_tiles, tile_objects};
+use crate::layer_drawing::{DrawDepth, DrawList, FrameDraw, KeptDraw, LayerDraws, finish_tiles, tile_objects};
 use crate::paint_parameters::PaintParameters;
 use crate::shaders::programs;
 use crate::shaders::programs::ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE;
 use crate::tile_matrix::to_projection_ubo;
+use crate::tile_values::TileMap;
 use crate::update_parameters::UpdateParameters;
 
 /// Writes the planet into the depth buffer ahead of the translucent pass, so
@@ -84,11 +85,9 @@ impl GlobeDepthPass {
         );
 
         caches.set_tiles(tile_cover.iter().copied());
-        for tile_id in &tile_cover {
-            let Some(entry) = caches.entry(tile_id) else {
-                continue;
-            };
-            if entry.value.is_none() {
+        for (index, tile_id) in tile_cover.iter().enumerate() {
+            let value = caches.get_mut(index);
+            if value.is_none() {
                 // The grid depends only on the zoom and whether the tile
                 // touches a pole.
                 let canonical = &tile_id.canonical;
@@ -120,9 +119,9 @@ impl GlobeDepthPass {
                     geometry,
                     Textures::default(),
                 );
-                *entry.value = Some(KeptDraw::new(objects));
+                *value = Some(KeptDraw::new(objects));
             }
-            let Some(draw) = entry.value.as_ref() else {
+            let Some(draw) = value.as_ref() else {
                 continue;
             };
             let depth = DrawDepth::Volume { mask: DepthMaskType::ReadWrite };

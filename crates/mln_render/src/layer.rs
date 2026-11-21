@@ -10,13 +10,16 @@
 //!
 //! The engine holds each layer of the type: its values ([`LayerValues`]),
 //! which it transitions and evaluates, what their last evaluation says of
-//! its drawing ([`Evaluation`]), whether the frame draws it, and the
-//! layer's [`Drawing`](LayerType::Drawing) and [`State`](LayerType::State),
-//! which the layer type keeps. The engine runs [`LayerType::evaluate`]
-//! whenever the layer's values may have changed. Each frame, it finds the
-//! layer's tiles and runs [`LayerType::update`] with an [`UpdateContext`],
-//! and in the encode runs [`LayerType::make_draws`] with a [`DrawContext`].
-//! The engine then uploads and draws the drawing's draws.
+//! its drawing ([`Evaluation`]), whether the frame draws it, the layer's
+//! value of each of the frame's tiles ([`Tile`](LayerType::Tile)), which
+//! it keeps in step with the frame in a [`TileMap`], and the layer's
+//! [`Drawing`](LayerType::Drawing) and [`State`](LayerType::State), which
+//! the layer type keeps. The engine runs [`LayerType::evaluate`] whenever
+//! the layer's values may have changed. Each frame, it finds the layer's
+//! tiles and runs [`LayerType::update`] with an [`UpdateContext`], and in
+//! the encode runs [`LayerType::make_draws`] with a [`DrawContext`] and the
+//! layer's tile values. The engine then uploads and draws the drawing's
+//! draws.
 //!
 //! The style half declares the type's properties with
 //! [`mln_style::properties!`]. A bucket binds the data-driven paint
@@ -67,8 +70,8 @@
 //! the `mln_rs` facade names it with `#[wire(crate = mln_rs::mln_wire)]`.
 //! The codec only runs between instances of one build, so its encoding
 //! needn't stay the same from one release to the next. A layer's
-//! [`State`](LayerType::State) and [`Drawing`](LayerType::Drawing) stay on
-//! the renderer's thread.
+//! [`State`](LayerType::State), [`Drawing`](LayerType::Drawing) and tile
+//! values stay on the renderer's thread.
 //!
 //! The types a layer type draws with, which the hooks name, are the
 //! [draw services](crate::draw), and the geometry that drawing on the globe
@@ -81,8 +84,9 @@ use mln_gfx::projection_variant::ProjectionVariant;
 use mln_map_types::{TileProjector, View};
 use mln_style::PropertyEvaluationParameters;
 use mln_style::expression::expr::FeatureState;
-use mln_style::layer_type::{LayerStyle, PaintSet, StyleLayerType};
+use mln_style::layer_type::{LayerStyle, PaintSet, SourceKind, StyleLayerType};
 use mln_style_types::TranslateAnchorType;
+use mln_tile_id::OverscaledTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinates, GeometryTileFeature};
 use mln_util::Color;
 use mln_util::error::Error;
@@ -117,6 +121,7 @@ pub use crate::tile::dem::DemContents;
 use crate::tile::job::SourceKey;
 pub use crate::tile::raster::{MaskedGeometry, RasterContents, RasterLayoutVertex, StoredQuads};
 pub use crate::tile_mask::TileMask;
+use crate::tile_values::TileMap;
 use crate::update_parameters::UpdateParameters;
 
 /// The render half of a layer type, whose style half is its
@@ -141,9 +146,22 @@ pub trait LayerType: StyleLayerType {
     /// source ([`NoTileView`]).
     type View<'a>: TileView<'a>;
 
-    /// What a layer of the type keeps of its draws: their GPU objects and
-    /// its draw groups of the frame, which the engine uploads and draws.
-    type Drawing: LayerDrawing;
+    /// What a layer of the type keeps of a tile it draws, such as the GPU
+    /// objects of the tile's draws. The engine keeps one for each of the
+    /// frame's tiles of the layer, from when the layer makes it
+    /// ([`make_draws`](Self::make_draws)): it moves the value with its tile
+    /// when the frame's tiles change or the map wraps, drops it when its
+    /// tile leaves the frame, and, before a layer of a source makes its
+    /// draws, when its tile shows the layer nothing to draw or another
+    /// bucket or contents than it was made from. It drops them all when the
+    /// layer's style changes, the frame switches between Mercator and the
+    /// globe, or the layer stops rendering.
+    type Tile: 'static;
+
+    /// What a layer of the type keeps of its draws besides its tiles'
+    /// values: GPU objects and its draw groups of the frame, which the
+    /// engine uploads and draws.
+    type Drawing: LayerDrawing<Self::Tile>;
 
     /// What else a layer of the type keeps from frame to frame, such as a
     /// color ramp or the textures of its tiles.
@@ -189,20 +207,25 @@ pub trait LayerType: StyleLayerType {
     fn evaluate(state: &mut Self::State, cx: EvaluateCx<'_, Self>) -> Evaluation;
 
     /// The frame's update of a layer the frame draws, once the engine found
-    /// its tiles and kept their entries in the drawing's tile map. The
-    /// layer prepares in its state what its draws need, such as the images
-    /// it packs; a layer without a source picks the tiles it keeps.
+    /// its tiles and moved their values to them. The layer prepares in its
+    /// state what its draws need, such as the images it packs; a layer
+    /// without a source picks the tiles it keeps values of
+    /// ([`UpdateContext::pick_tiles`]).
     fn update(_state: &mut Self::State, _drawing: &mut Self::Drawing, _cx: &mut UpdateContext<'_, '_, Self>) {}
 
     /// Makes a layer's draws of the frame, in the frame's encode, once the
     /// engine started them ([`LayerDrawing::begin_frame`]): from the
     /// context's tiles, for a layer whose evaluation draws and whose source
-    /// shows it tiles, or a layer without a source that keeps tiles in its
-    /// drawing and picked some. The layer keeps in its drawing what it makes
-    /// of them, with the values of their uniforms.
+    /// shows it tiles, or a layer without a source that didn't pick tiles
+    /// or picked some. The layer keeps what it makes of a tile in its value
+    /// in `tile_values`, at the tile's index in the context's tiles, or for
+    /// a layer without a source among those it picked; the value of a tile
+    /// of a source that shows the layer nothing to draw is `None`. It keeps
+    /// the rest in its drawing, with the values of their uniforms.
     fn make_draws(
         state: &mut Self::State,
         drawing: &mut Self::Drawing,
+        tile_values: &mut TileMap<Self::Tile>,
         gpu: &mut dyn Gpu,
         cx: &mut DrawContext<'_, '_, Self>,
     );
@@ -231,7 +254,7 @@ pub trait LayerType: StyleLayerType {
     fn offscreen_pass<'a>(
         _state: &'a mut Self::State,
         _drawing: &'a mut Self::Drawing,
-    ) -> Option<&'a mut dyn OffscreenPass> {
+    ) -> Option<&'a mut dyn OffscreenPass<Self::Tile>> {
         None
     }
 
@@ -315,16 +338,16 @@ impl HitTest<'_> {
 /// such as a render target that its draws in the passes sample: the
 /// capability of a type that does, whose layers return it from
 /// [`LayerType::offscreen_pass`]. The engine runs it for a layer the frame
-/// draws.
-pub trait OffscreenPass {
+/// draws, with the layer's values of its tiles, each a `Tile`.
+pub trait OffscreenPass<Tile> {
     /// Uploads the GPU objects of what the pass draws, after the layers'
     /// draws upload.
-    fn upload(&mut self, _gpu: &mut dyn Gpu, _context: &mut Context) {}
+    fn upload(&mut self, _tiles: &mut TileMap<Tile>, _gpu: &mut dyn Gpu, _context: &mut Context) {}
 
     /// Draws through `gpu`, the context's, after the frame's uploads and
     /// before its first pass, with no pass open: what it draws into, it
     /// begins and ends a pass of its own for.
-    fn render(&mut self, gpu: &mut dyn Gpu, paint: &mut PaintParameters<'_>);
+    fn render(&mut self, tiles: &mut TileMap<Tile>, gpu: &mut dyn Gpu, paint: &mut PaintParameters<'_>);
 }
 
 /// A host that drew through a layer and that the layer let go of, which
@@ -454,6 +477,11 @@ pub struct UpdateContext<'a, 'f, T: LayerType> {
     pub(crate) source_tiles: Option<SourceKey>,
     /// See [`source_max_zoom`](Self::source_max_zoom).
     pub(crate) source_max_zoom: Option<u8>,
+    /// The layer's values of its tiles.
+    pub(crate) tile_values: &'a mut TileMap<T::Tile>,
+    /// Whether the layer, which has no source, picked the tiles it keeps
+    /// values of ([`pick_tiles`](Self::pick_tiles)).
+    pub(crate) picked_tiles: &'a mut bool,
 }
 
 impl<T: LayerType> UpdateContext<'_, '_, T> {
@@ -477,6 +505,19 @@ impl<T: LayerType> UpdateContext<'_, '_, T> {
     #[must_use]
     pub fn source_max_zoom(&self) -> Option<u8> {
         self.source_max_zoom
+    }
+
+    /// Makes `tiles`, in the order the layer draws them, the tiles a layer
+    /// without a source keeps values of: the engine keeps the values of
+    /// those it had, and drops the others. The encode then makes the
+    /// layer's draws unless it picked none. Does nothing for a layer of a
+    /// source, whose tiles are its source's.
+    pub fn pick_tiles(&mut self, tiles: impl IntoIterator<Item = OverscaledTileID>) {
+        debug_assert_eq!(T::INFO.source, SourceKind::None, "a layer of a source picks no tiles");
+        if T::INFO.source == SourceKind::None {
+            self.tile_values.set_tiles(tiles);
+            *self.picked_tiles = true;
+        }
     }
 }
 

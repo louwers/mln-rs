@@ -32,7 +32,7 @@ use crate::frame::{Frame, FrameLayer};
 use crate::gfx::context::Context;
 use crate::globe_depth_pass::GlobeDepthPass;
 use crate::image_store::ImageStore;
-use crate::layer_drawing::{ChangedBuckets, DrawGroup, DrawOrder, SingleDraw};
+use crate::layer_drawing::{DrawGroup, DrawOrder, SingleDraw};
 use crate::paint_parameters::PaintParameters;
 use crate::placement::{CollisionGroups, ErasedFrame, ErasedPlacement, PlacementQuery, Prepared, Schedule};
 use crate::render_layer::{EndedHosts, FrameSourceTiles, LayerUpdate, RenderLayer};
@@ -47,6 +47,7 @@ use crate::tile::store::{StoreEvent, TileStore};
 use crate::tile::tile_workers::PoolWorkers;
 use crate::tile::worker_codec::RemoteWorkers;
 use crate::tile_parameters::TileParameters;
+use crate::tile_values::ChangedBuckets;
 use crate::update_parameters::UpdateParameters;
 
 /// The keys whose values differ between two global state snapshots. Values

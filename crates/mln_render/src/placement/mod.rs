@@ -42,9 +42,9 @@ pub(crate) use self::schedule::Schedule;
 use crate::erased_layer::{recover_bucket, recover_bucket_mut};
 use crate::geometry::feature_index::{FeatureIndex, FeatureSelection, QueryLayers, QueryResults};
 use crate::layer::{LayerType, LayerValues};
-use crate::layer_drawing::ChangedBuckets;
 use crate::query::RenderedQueryOptions;
 use crate::tile::job::SourceKey;
+use crate::tile_values::ChangedBuckets;
 use crate::update_parameters::UpdateParameters;
 
 /// What makes a [`PlacementPass`] of the layer type `T`, which a type whose

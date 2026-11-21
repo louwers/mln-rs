@@ -10,6 +10,7 @@ use glam::DMat4;
 use mln_map_types::{MapDebugOptions, ProjectionData};
 use mln_style::layer_type::SourceKind;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
+use mln_util::identity::SimpleIdentity;
 
 use crate::buckets::debug_bucket::DebugBucket;
 use crate::layer::LayerType;
@@ -189,6 +190,11 @@ pub(crate) trait FindView<'a>: Sized {
     fn bucket_index(self) -> Option<usize> {
         None
     }
+
+    /// The identity of the bucket or contents the view shows the layer to
+    /// draw; `None` where it shows nothing to draw: a bucket laid out with
+    /// values that draw nothing, or a bucket or contents without data.
+    fn data(self) -> Option<SimpleIdentity>;
 }
 
 /// What a frame's tile shows a layer of a raster source or an image source:
@@ -227,6 +233,11 @@ impl<'a> FindView<'a> for RasterView<'a> {
             TileContent::Tile(_) => None,
         }
     }
+
+    fn data(self) -> Option<SimpleIdentity> {
+        let contents = self.contents();
+        contents.has_data().then(|| contents.id())
+    }
 }
 
 impl<'a> FindView<'a> for &'a DemContents {
@@ -243,6 +254,10 @@ impl<'a> FindView<'a> for &'a DemContents {
             _ => None,
         }
     }
+
+    fn data(self) -> Option<SimpleIdentity> {
+        self.has_data().then(|| self.id())
+    }
 }
 
 /// What a tile shows a layer of a type without a source: nothing.
@@ -258,6 +273,10 @@ impl FindView<'_> for NoTileView {
 
     fn at(_content: TileContent<'_>, _place: ViewPlace) -> Option<Self> {
         None
+    }
+
+    fn data(self) -> Option<SimpleIdentity> {
+        match self {}
     }
 }
 

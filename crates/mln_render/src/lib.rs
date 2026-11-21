@@ -79,6 +79,7 @@ mod tile_mask;
 mod tile_matrix;
 mod tile_parameters;
 mod tile_render_data;
+mod tile_values;
 mod update_parameters;
 
 pub use bucket::LayerFeatureStates;

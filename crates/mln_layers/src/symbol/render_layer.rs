@@ -1,8 +1,8 @@
 // A tile's draws read the bucket's layout vertices and copies of what
 // placement lays out. When placement, sorting or feature state change the
-// bucket (the changes the tile's entry in the layer's `TileMap` collects),
-// the draw update replaces just those attributes (opacity, dynamic
-// positions, binders) and the triangle indices of the tile's draws.
+// bucket (the changes the engine collects for the tile's value), the draw
+// update replaces just those attributes (opacity, dynamic positions,
+// binders) and the triangle indices of the tile's draws.
 
 use std::sync::Arc;
 
@@ -314,13 +314,12 @@ pub struct SymbolTile {
     collision: Vec<CollisionDraw>,
 }
 
-/// The layer's drawing: what it keeps of each tile, its draws of the frame,
-/// each of the draw at its index among its tile's, and as its overlay those
-/// of the tiles' collision boxes and circles, from the first tile that has
-/// any, each of the collision draw at its index among its tile's.
+/// The layer's drawing: its draws of the frame, each of the draw at its
+/// index among its tile's, and as its overlay those of the tiles' collision
+/// boxes and circles, from the first tile that has any, each of the
+/// collision draw at its index among its tile's.
 #[derive(Default)]
 pub struct SymbolDrawing {
-    tiles: TileMap<SymbolTile>,
     frame: Option<LayerDraws<usize>>,
     overlay: Option<LayerDraws<usize>>,
 }
@@ -329,7 +328,7 @@ impl SymbolDrawing {
     /// The GPU objects of `draw`, the draw at `index` of its tile, with what
     /// gives them the textures of the tile's atlases.
     fn objects<'a>(tiles: &'a mut TileMap<SymbolTile>, draw: &FrameDraw, index: usize) -> Option<DrawObjectsMut<'a>> {
-        let draw = tiles.get_mut(&draw.tile?)?.draws.get_mut(index)?;
+        let draw = tiles.find_mut(&draw.tile?)?.draws.get_mut(index)?;
         Some(DrawObjectsMut { objects: &mut draw.objects, atlases: Some(&draw.atlases) })
     }
 
@@ -339,33 +338,41 @@ impl SymbolDrawing {
         draw: &FrameDraw,
         index: usize,
     ) -> Option<DrawObjectsMut<'a>> {
-        Some((&mut tiles.get_mut(&draw.tile?)?.collision.get_mut(index)?.draw.objects).into())
+        Some((&mut tiles.find_mut(&draw.tile?)?.collision.get_mut(index)?.draw.objects).into())
     }
 
-    /// Draws the pass's draws of the layer's draw group, if it has it.
-    fn render_frame(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
+    /// Draws the pass's draws of the layer's draw group, if it has it, with
+    /// the GPU objects in `tiles`.
+    fn render_frame(
+        &mut self,
+        tiles: &mut TileMap<SymbolTile>,
+        gpu: &mut dyn Gpu,
+        parameters: &mut PaintParameters<'_>,
+        order: DrawOrder,
+    ) {
         if let Some(frame) = &self.frame {
-            frame.render(&mut self.tiles, Self::objects, gpu, parameters);
+            frame.render(tiles, Self::objects, gpu, parameters);
             order.step(parameters);
         }
     }
 
-    /// Draws the pass's draws of the overlay, if the layer has it.
-    fn render_overlay(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
+    /// Draws the pass's draws of the overlay, if the layer has it, with the
+    /// GPU objects in `tiles`.
+    fn render_overlay(
+        &mut self,
+        tiles: &mut TileMap<SymbolTile>,
+        gpu: &mut dyn Gpu,
+        parameters: &mut PaintParameters<'_>,
+        order: DrawOrder,
+    ) {
         if let Some(overlay) = &self.overlay {
-            overlay.render(&mut self.tiles, Self::collision_objects, gpu, parameters);
+            overlay.render(tiles, Self::collision_objects, gpu, parameters);
             order.step(parameters);
         }
     }
 }
 
-impl LayerDrawing for SymbolDrawing {
-    type Tile = SymbolTile;
-
-    fn tiles(&mut self) -> Option<&mut TileMap<SymbolTile>> {
-        Some(&mut self.tiles)
-    }
-
+impl LayerDrawing<SymbolTile> for SymbolDrawing {
     fn visit_groups<'a>(&'a self, visit: &mut dyn FnMut(DrawGroup<'a>)) {
         for draws in [&self.frame, &self.overlay].into_iter().flatten() {
             visit(DrawGroup::Draws(draws.frame()));
@@ -373,7 +380,6 @@ impl LayerDrawing for SymbolDrawing {
     }
 
     fn clear(&mut self) {
-        self.tiles.clear();
         self.clear_frame();
     }
 
@@ -387,24 +393,30 @@ impl LayerDrawing for SymbolDrawing {
         }
     }
 
-    fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
+    fn upload(&mut self, tiles: &mut TileMap<SymbolTile>, gpu: &mut dyn Gpu, context: &mut Context) {
         if let Some(frame) = &self.frame {
-            frame.upload(gpu, &mut self.tiles, Self::objects, context);
+            frame.upload(gpu, tiles, Self::objects, context);
         }
         if let Some(overlay) = &self.overlay {
-            overlay.upload(gpu, &mut self.tiles, Self::collision_objects, context);
+            overlay.upload(gpu, tiles, Self::collision_objects, context);
         }
     }
 
-    fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
+    fn render(
+        &mut self,
+        tiles: &mut TileMap<SymbolTile>,
+        gpu: &mut dyn Gpu,
+        parameters: &mut PaintParameters<'_>,
+        order: DrawOrder,
+    ) {
         match order {
             DrawOrder::BottomUp => {
-                self.render_frame(gpu, parameters, order);
-                self.render_overlay(gpu, parameters, order);
+                self.render_frame(tiles, gpu, parameters, order);
+                self.render_overlay(tiles, gpu, parameters, order);
             }
             DrawOrder::TopDown => {
-                self.render_overlay(gpu, parameters, order);
-                self.render_frame(gpu, parameters, order);
+                self.render_overlay(tiles, gpu, parameters, order);
+                self.render_frame(tiles, gpu, parameters, order);
             }
         }
     }
@@ -664,12 +676,13 @@ impl SymbolState {
         }
     }
 
-    /// Makes the frame's draws of `drawing`'s draws of the tiles of `cx` that
-    /// show any symbols, and of their collision boxes
-    /// and circles, and writes the buffers they read.
+    /// Makes the frame's draws of the draws of the tiles of `cx` that show
+    /// any symbols, which their values in `tile_values` keep, and of their
+    /// collision boxes and circles, and writes the buffers they read.
     fn make_frame_draws(
         &mut self,
         drawing: &mut SymbolDrawing,
+        tile_values: &mut TileMap<SymbolTile>,
         gpu: &mut dyn Gpu,
         cx: &mut DrawContext<'_, '_, Symbol>,
     ) {
@@ -677,9 +690,9 @@ impl SymbolState {
         let context = &mut *cx.context;
         let layer_id = layer.id();
         let layer = &*layer.evaluated;
-        for tile in tiles {
+        for (index, tile) in tiles.iter().enumerate() {
             let tile_id = tile.id();
-            let Some(cached) = drawing.tiles.get_mut(&tile_id) else {
+            let Some(cached) = tile_values.get_mut(index).as_mut() else {
                 continue;
             };
             let bucket = tile.view().map(|bucket| bucket.bucket);
@@ -705,7 +718,7 @@ impl SymbolState {
                 .draw_list
                 .finish(draws, gpu, context, |writer| write_uniforms(&layer.paint, frame.placement_fade, writer))
             {
-                for draw in drawing.tiles.values_mut().flat_map(|tile| &mut tile.draws) {
+                for draw in tile_values.values_mut().flat_map(|tile| &mut tile.draws) {
                     draw.objects.drop_bindings();
                 }
             }
@@ -722,14 +735,14 @@ impl SymbolState {
     }
 }
 
-/// Builds the collision draws of the tile `tile_id` in `drawing` anew, in
-/// the projection `variant`, and makes the overlay for the first tile that
-/// has collision boxes or circles.
+/// Builds the collision draws of a tile anew in its value `tile`, in the
+/// projection `variant`, and makes `drawing`'s overlay for the first tile
+/// that has collision boxes or circles.
 fn rebuild_collision(
     drawing: &mut SymbolDrawing,
+    tile: &mut Option<SymbolTile>,
     variant: ProjectionVariant,
     context: &mut Context,
-    tile_id: &OverscaledTileID,
     bucket: &SymbolBucket,
     evaluated: &SymbolPaintProperties::PossiblyEvaluated,
 ) {
@@ -740,10 +753,8 @@ fn rebuild_collision(
     }
     if has_collision {
         drawing.overlay.get_or_insert_default();
-        if let Some(entry) = drawing.tiles.entry(tile_id) {
-            entry.value.get_or_insert_with(SymbolTile::default).collision = collision;
-        }
-    } else if let Some(cached) = drawing.tiles.get_mut(tile_id) {
+        tile.get_or_insert_with(SymbolTile::default).collision = collision;
+    } else if let Some(cached) = tile {
         cached.collision.clear();
     }
 }
@@ -1055,6 +1066,7 @@ impl LayerType for Symbol {
     type Layout = SymbolLayout;
     type Bucket = SymbolBucket;
     type View<'a> = LayerBucket<'a, Symbol>;
+    type Tile = SymbolTile;
     type Drawing = SymbolDrawing;
     type State = SymbolState;
 
@@ -1123,6 +1135,7 @@ impl LayerType for Symbol {
     fn make_draws(
         state: &mut SymbolState,
         drawing: &mut SymbolDrawing,
+        tile_values: &mut TileMap<SymbolTile>,
         gpu: &mut dyn Gpu,
         cx: &mut DrawContext<'_, '_, Symbol>,
     ) {
@@ -1158,21 +1171,15 @@ impl LayerType for Symbol {
         for (tile_index, tile) in render_tiles.iter().enumerate() {
             let tile_id = tile.id();
 
-            let Some(mut entry) = drawing.tiles.entry(&tile_id) else {
-                continue;
-            };
             let render_data = tile.view_to_draw();
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
-                *entry.value = None;
                 continue;
             };
             let bucket = render_data.bucket;
             let layer_id = render_data.layer.style.base().id.as_str();
 
-            // Draws built from another bucket go.
-            entry.set_bucket(bucket.base.id());
             // What changed since the draws were built or last refreshed.
-            let refresh = entry.take_changes();
+            let refresh = tile_values.take_changes(tile_index);
 
             debug_assert!(bucket.paint_properties.contains_key(layer_id));
             if !bucket.paint_properties.contains_key(layer_id) {
@@ -1182,14 +1189,15 @@ impl LayerType for Symbol {
             let evaluated = &render_data.layer.paint;
 
             // A tile the layer keeps draws of refreshes them.
-            if let Some(cached) = entry.value.as_mut().filter(|cached| !cached.draws.is_empty()) {
+            let value = tile_values.get_mut(tile_index);
+            if let Some(cached) = value.as_mut().filter(|cached| !cached.draws.is_empty()) {
                 // The draws that read the same attributes are next to each
                 // other, as the update builds them.
                 let (context, geometry) = (&mut *cx.context, render_data.geometry());
                 for draws in cached.draws.chunk_by_mut(|a, b| a.attributes_key() == b.attributes_key()) {
                     refresh_draws(context, draws, geometry, bucket, layer_id, evaluated, refresh);
                 }
-                rebuild_collision(drawing, cx.projection_variant, cx.context, &tile_id, bucket, evaluated);
+                rebuild_collision(drawing, value, cx.projection_variant, cx.context, bucket, evaluated);
                 continue;
             }
 
@@ -1244,7 +1252,7 @@ impl LayerType for Symbol {
                 add_renderables(&state.text, SymbolType::Text);
             }
 
-            rebuild_collision(drawing, cx.projection_variant, cx.context, &tile_id, bucket, evaluated);
+            rebuild_collision(drawing, value, cx.projection_variant, cx.context, bucket, evaluated);
         }
 
         // A stable sort keeps segments of the same order in the order they
@@ -1410,14 +1418,13 @@ impl LayerType for Symbol {
                     visible,
                     atlases: draw_atlases.clone(),
                 };
-                if let Some(entry) = drawing.tiles.entry(&tile_id) {
-                    entry.value.get_or_insert_with(SymbolTile::default).draws.push(draw);
-                }
+                debug_assert_eq!(tile_id, tile.id(), "a segment group's tile under another id");
+                tile_values.get_mut(group.tile_index).get_or_insert_with(SymbolTile::default).draws.push(draw);
             }
         }
 
         state.renderable_segments = renderable_segments;
-        state.make_frame_draws(drawing, gpu, cx);
+        state.make_frame_draws(drawing, tile_values, gpu, cx);
     }
 
     /// Collects the symbol buckets of the tiles the layer places, and of

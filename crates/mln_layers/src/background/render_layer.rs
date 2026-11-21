@@ -6,8 +6,8 @@ use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
 use mln_map_types::tile_cover::{TileCoverParameters, tile_cover};
 use mln_render::draw::{
-    DrawDepth, DrawFrame, DrawGeometry, DrawIndexes, DrawList, DrawObjects, FrameDraw, KeptDraw, LayerDrawing,
-    RenderPass, RenderStaticData, Textures, TileDraws, Uniforms, projection_data, raw_vertices, to_projection_ubo,
+    DrawDepth, DrawFrame, DrawGeometry, DrawIndexes, DrawList, DrawObjects, FrameDraw, KeptDraw, RenderPass,
+    RenderStaticData, Textures, TileDraws, TileMap, Uniforms, projection_data, raw_vertices, to_projection_ubo,
 };
 use mln_render::globe::tile_grid;
 use mln_render::layer::{
@@ -124,6 +124,7 @@ impl LayerType for Background {
     type Layout = NoLayout;
     type Bucket = NoBucket;
     type View<'a> = NoTileView;
+    type Tile = KeptDraw;
     type Drawing = TileDraws<KeptDraw>;
     type State = BackgroundState;
 
@@ -137,6 +138,7 @@ impl LayerType for Background {
     fn make_draws(
         state: &mut BackgroundState,
         drawing: &mut TileDraws<KeptDraw>,
+        tile_values: &mut TileMap<KeptDraw>,
         gpu: &mut dyn Gpu,
         cx: &mut DrawContext<'_, '_, Background>,
     ) {
@@ -147,7 +149,7 @@ impl LayerType for Background {
         let has_pattern = !evaluated.background_pattern.faded().to.empty();
 
         if *draws_built_for != Some((*opaque, has_pattern)) {
-            drawing.clear();
+            tile_values.clear();
             *draws_built_for = Some((*opaque, has_pattern));
         }
 
@@ -170,11 +172,11 @@ impl LayerType for Background {
 
         let color_mode = context.color_mode(if *opaque { ColorMode::unblended() } else { ColorMode::alpha_blended() });
         let draw_passes = if *opaque { RenderPass::OPAQUE | RenderPass::TRANSLUCENT } else { RenderPass::TRANSLUCENT };
-        for tile_id in &*tile_cover {
-            let Some(entry) = drawing.tiles_mut().entry(tile_id) else {
-                continue;
-            };
-            let cached = entry.value.get_or_insert_with(|| {
+        // The engine keeps a value of each tile of the cover the update
+        // picked, in its order.
+        debug_assert_eq!(tile_cover.len(), tile_values.len(), "a cover the update didn't pick");
+        for (index, tile_id) in tile_cover.iter().enumerate().take(tile_values.len()) {
+            let cached = tile_values.get_mut(index).get_or_insert_with(|| {
                 KeptDraw::new(BackgroundState::build_tile(tile_id, shader.clone(), color_mode, variant))
             });
             if pattern_texture.is_some() {
@@ -188,7 +190,7 @@ impl LayerType for Background {
             draw_list.push(draw, BackgroundState::uniforms(tile_id, has_pattern, frame));
         }
 
-        drawing.finish(draw_list, gpu, context, |writer| {
+        drawing.finish(draw_list, tile_values, gpu, context, |writer| {
             let opacity = *evaluated.background_opacity.uniform();
             if let Some((from, to)) = pattern_positions {
                 let crossfade = &layer.crossfade;
@@ -248,7 +250,7 @@ impl LayerType for Background {
     /// style replaced.
     fn update(
         state: &mut BackgroundState,
-        drawing: &mut TileDraws<KeptDraw>,
+        _drawing: &mut TileDraws<KeptDraw>,
         cx: &mut UpdateContext<'_, '_, Background>,
     ) {
         let (view, update_parameters) = (cx.view, cx.update_parameters);
@@ -268,7 +270,7 @@ impl LayerType for Background {
             Range::new(0u8, zoom),
             None,
         );
-        drawing.tiles_mut().set_tiles(state.tile_cover.iter().copied());
+        cx.pick_tiles(state.tile_cover.iter().copied());
 
         let faded = cx.layer.evaluated.paint.background_pattern.faded();
         if !faded.to.empty() {

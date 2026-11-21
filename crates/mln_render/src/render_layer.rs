@@ -1,9 +1,10 @@
 // A render layer is the renderer's side of a style layer: a `Layer<T>` of
-// its type `T`, which holds the layer's values and what the engine keeps of
-// it, beside what its type keeps (`LayerType::State` and
-// `LayerType::Drawing`). The engine does what is the same for every type
-// around the type's hooks, and holds the layers as `dyn RenderLayer`. The
-// orchestrator owns the render layers, in the style's order.
+// its type `T`, which holds the layer's values, its values of the frame's
+// tiles and what else the engine keeps of it, beside what its type keeps
+// (`LayerType::State` and `LayerType::Drawing`). The engine does what is
+// the same for every type around the type's hooks, and holds the layers as
+// `dyn RenderLayer`. The orchestrator owns the render layers, in the
+// style's order.
 
 use std::any::Any;
 use std::ops::Range;
@@ -17,6 +18,7 @@ use mln_style::layer_type::{ErasedLayerStyle, LayerStyle, PaintSet, SourceKind};
 use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use mln_style_types::VisibilityType;
 use mln_style_types::image::ImagePosition;
+use mln_util::identity::SimpleIdentity;
 use smallvec::SmallVec;
 
 use crate::bucket::Bucket;
@@ -25,13 +27,14 @@ use crate::erased_layer::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::geometry::feature_index::FeatureIndex;
 use crate::gfx::context::Context;
 use crate::layer::{DrawContext, EndedHost, EvaluateCx, Evaluation, HitTest, LayerType, LayerValues, UpdateContext};
-use crate::layer_drawing::{ChangedBuckets, DrawGroup, DrawOrder, LayerDrawing};
+use crate::layer_drawing::{DrawGroup, DrawOrder, LayerDrawing};
 use crate::paint_parameters::PaintParameters;
 use crate::placement::PlacingLayer;
 use crate::render_source::{RenderSource, TileOrder};
 use crate::render_tile::{FindView, FoundTile, FrameTile, RenderTile, TileContent, ViewPlace};
 use crate::tile::contents::GeometryContents;
 use crate::tile_render_data::TileAtlasTextures;
+use crate::tile_values::{ChangedBuckets, TileMap};
 use crate::update_parameters::UpdateParameters;
 
 /// A layer's bucket in a layout, which the layers of its layout group
@@ -136,6 +139,10 @@ impl<'a, T: LayerType> FindView<'a> for LayerBucket<'a, T> {
 
     fn bucket_index(self) -> Option<usize> {
         Some(self.bucket_index)
+    }
+
+    fn data(self) -> Option<SimpleIdentity> {
+        (self.layer.draws && self.bucket.has_data()).then(|| self.bucket.base().id())
     }
 }
 
@@ -246,6 +253,12 @@ pub(crate) struct Layer<T: LayerType> {
     values: LayerValues<T>,
     state: T::State,
     drawing: T::Drawing,
+    /// The layer's values of the frame's tiles: of its source's, or of
+    /// those a layer without a source picked.
+    tile_values: TileMap<T::Tile>,
+    /// Whether the layer, which has no source, picked tiles in an update
+    /// ([`UpdateContext::pick_tiles`]).
+    picked_tiles: bool,
     /// What the last evaluation of the layer's values said.
     evaluation: Evaluation,
     /// Whether the layer draws: its evaluation says so, or since that
@@ -272,6 +285,8 @@ impl<T: LayerType> Layer<T> {
             values,
             state,
             drawing,
+            tile_values: TileMap::default(),
+            picked_tiles: false,
             evaluation: Evaluation::NONE,
             draws: false,
             renderable: false,
@@ -304,6 +319,8 @@ impl<T: LayerType> Layer<T> {
             images: &crate::image_store::ImageStore::default(),
             source_tiles: Some(source),
             source_max_zoom: None,
+            tile_values: &mut self.tile_values,
+            picked_tiles: &mut self.picked_tiles,
         };
         T::update(&mut self.state, &mut self.drawing, &mut cx);
     }
@@ -320,18 +337,26 @@ impl<T: LayerType> Layer<T> {
         draws
     }
 
-    /// Runs the type's [`LayerType::make_draws`] with `tiles`.
+    /// Runs the type's [`LayerType::make_draws`] with `tiles`, those its
+    /// update found, once it dropped the values of those that show the
+    /// layer nothing to draw or other data than before.
     fn make_draws(&mut self, gpu: &mut dyn Gpu, paint: &mut PaintParameters<'_>, tiles: &[FrameTile<'_, T>]) {
-        if self.begin_frame() {
-            let mut cx = DrawContext {
-                tiles,
-                layer: &self.values,
-                projection_variant: self.projection_variant,
-                context: &mut *paint.context,
-                frame: paint.frame,
-            };
-            T::make_draws(&mut self.state, &mut self.drawing, gpu, &mut cx);
+        if !self.begin_frame() {
+            return;
         }
+        debug_assert!(tiles.is_empty() || tiles.len() == self.tile_values.len(), "tiles the update didn't find");
+        for (index, tile) in tiles.iter().enumerate() {
+            debug_assert_eq!(Some(tile.id()), self.tile_values.id(index), "a tile's value at another's index");
+            self.tile_values.show(index, tile.view().and_then(FindView::data));
+        }
+        let mut cx = DrawContext {
+            tiles,
+            layer: &self.values,
+            projection_variant: self.projection_variant,
+            context: &mut *paint.context,
+            frame: paint.frame,
+        };
+        T::make_draws(&mut self.state, &mut self.drawing, &mut self.tile_values, gpu, &mut cx);
     }
 }
 
@@ -385,8 +410,9 @@ pub(crate) trait RenderLayer: Any {
 
     /// The frame's update of the layer: finds the tiles of `update`'s source
     /// the layer draws, which it adds to `update.found`, draws where one of
-    /// their buckets was laid out with values that draw, keeps entries for
-    /// the tiles, and runs the type's [`LayerType::update`].
+    /// their buckets was laid out with values that draw, moves the layer's
+    /// values of its tiles to them, and runs the type's
+    /// [`LayerType::update`].
     fn update(&mut self, update: &mut LayerUpdate<'_>);
 
     /// The encode's update of the layer's draws: picks the shader variant
@@ -394,9 +420,10 @@ pub(crate) trait RenderLayer: Any {
     /// the draws of a layer that has nothing to draw (still starting the
     /// frame of one on an image source), and otherwise starts its draws of
     /// the frame ([`LayerDrawing::begin_frame`]); drops them again for a
-    /// layer whose evaluation draws nothing, and otherwise runs the type's
-    /// [`LayerType::make_draws`] with the tiles of `source` that its update
-    /// found in `found`.
+    /// layer whose evaluation draws nothing, and otherwise drops the values
+    /// of the tiles that show the layer nothing to draw or other data than
+    /// they were made from, and runs the type's [`LayerType::make_draws`]
+    /// with the tiles of `source` that its update found in `found`.
     fn update_draws(
         &mut self,
         gpu: &mut dyn Gpu,
@@ -406,20 +433,20 @@ pub(crate) trait RenderLayer: Any {
     );
 
     /// Records that the buckets in `changed` changed, for the tiles whose
-    /// draws were built from them.
+    /// values were made from them.
     fn mark_changed(&mut self, changed: &ChangedBuckets);
 
-    /// Moves what the layer keeps for each tile to the tile `wrap_delta`
-    /// world copies east of it: the tiles are the same ones under new ids
-    /// once the map's center has crossed the antimeridian, and their draws
-    /// stay rather than being built again.
+    /// Moves the layer's value of each tile to the tile `wrap_delta` world
+    /// copies east of it: the tiles are the same ones under new ids once the
+    /// map's center has crossed the antimeridian, and their draws stay
+    /// rather than being built again.
     fn handle_wrap_jump(&mut self, wrap_delta: i16);
 
     /// Includes the layer in the frame's drawing or excludes it. A layer
-    /// excluded drops its draws, its tiles' entries and what its type keeps
-    /// for them ([`LayerType::release`]): its updates don't run until it is
-    /// included again, and they then rebuild everything from the source's
-    /// tiles.
+    /// excluded drops its draws, its tiles with their values and what its
+    /// type keeps for them ([`LayerType::release`]): its updates don't run
+    /// until it is included again, and they then rebuild everything from
+    /// the source's tiles.
     fn set_renderable(&mut self, renderable: bool);
 
     /// Whether the frame draws the layer.
@@ -431,8 +458,8 @@ pub(crate) trait RenderLayer: Any {
     /// Whether the layer draws ([`update`](Self::update)) and is visible.
     fn needs_rendering(&self) -> bool;
 
-    /// Drops the frame's draws of the layer and the caches of their GPU
-    /// objects. The tiles' entries stay.
+    /// Drops the frame's draws of the layer, its values of its tiles and the
+    /// other caches of their GPU objects. The tiles stay.
     fn remove_all_draws(&mut self);
 
     /// Visits the layer's draw groups of the frame, in drawing order: none
@@ -552,10 +579,8 @@ impl<T: LayerType> RenderLayer for Layer<T> {
         };
         self.found = start..update.found.len();
         self.draws |= tiles.iter().filter_map(|tile| tile.view()).any(FindView::draws);
-        if T::INFO.source != SourceKind::None
-            && let Some(kept) = self.drawing.tiles()
-        {
-            kept.set_tiles(tiles.iter().map(|tile| tile.id()));
+        if T::INFO.source != SourceKind::None {
+            self.tile_values.set_tiles(tiles.iter().map(|tile| tile.id()));
         }
         let mut cx = UpdateContext {
             tiles: &tiles,
@@ -565,6 +590,8 @@ impl<T: LayerType> RenderLayer for Layer<T> {
             images: update.images,
             source_tiles: update.source.and_then(RenderSource::tiles),
             source_max_zoom: update.source.and_then(RenderSource::max_zoom),
+            tile_values: &mut self.tile_values,
+            picked_tiles: &mut self.picked_tiles,
         };
         T::update(&mut self.state, &mut self.drawing, &mut cx);
     }
@@ -583,8 +610,8 @@ impl<T: LayerType> RenderLayer for Layer<T> {
             T::projection_changed(&mut self.state, variant);
         }
         if T::INFO.source == SourceKind::None {
-            // A layer that keeps tiles draws those its update picked.
-            if self.drawing.tiles().is_some_and(|tiles| tiles.is_empty()) {
+            // A layer that picks tiles draws those its update picked.
+            if self.picked_tiles && self.tile_values.is_empty() {
                 self.remove_all_draws();
             } else {
                 self.make_draws(gpu, paint, &[]);
@@ -608,24 +635,18 @@ impl<T: LayerType> RenderLayer for Layer<T> {
     }
 
     fn mark_changed(&mut self, changed: &ChangedBuckets) {
-        if let Some(tiles) = self.drawing.tiles() {
-            tiles.mark_changed(changed);
-        }
+        self.tile_values.mark_changed(changed);
     }
 
     fn handle_wrap_jump(&mut self, wrap_delta: i16) {
-        if let Some(tiles) = self.drawing.tiles() {
-            tiles.shift_wraps(wrap_delta);
-        }
+        self.tile_values.shift_wraps(wrap_delta);
     }
 
     fn set_renderable(&mut self, renderable: bool) {
         self.renderable = renderable;
         if !renderable {
             self.remove_all_draws();
-            if let Some(kept) = self.drawing.tiles() {
-                kept.clear_tiles();
-            }
+            self.tile_values.clear_tiles();
             T::release(&mut self.state);
         }
     }
@@ -643,6 +664,7 @@ impl<T: LayerType> RenderLayer for Layer<T> {
     }
 
     fn remove_all_draws(&mut self) {
+        self.tile_values.clear();
         self.drawing.clear();
     }
 
@@ -654,13 +676,13 @@ impl<T: LayerType> RenderLayer for Layer<T> {
 
     fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
         if self.renderable {
-            self.drawing.upload(gpu, context);
+            self.drawing.upload(&mut self.tile_values, gpu, context);
         }
     }
 
     fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
         if self.renderable {
-            self.drawing.render(gpu, parameters, order);
+            self.drawing.render(&mut self.tile_values, gpu, parameters, order);
         }
     }
 
@@ -672,7 +694,7 @@ impl<T: LayerType> RenderLayer for Layer<T> {
         if self.renderable
             && let Some(pass) = T::offscreen_pass(&mut self.state, &mut self.drawing)
         {
-            pass.upload(gpu, context);
+            pass.upload(&mut self.tile_values, gpu, context);
         }
     }
 
@@ -680,7 +702,7 @@ impl<T: LayerType> RenderLayer for Layer<T> {
         if self.renderable
             && let Some(pass) = T::offscreen_pass(&mut self.state, &mut self.drawing)
         {
-            pass.render(gpu, parameters);
+            pass.render(&mut self.tile_values, gpu, parameters);
         }
     }
 

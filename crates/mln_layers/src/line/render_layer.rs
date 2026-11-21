@@ -11,7 +11,7 @@ use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_render::draw::{
     AtlasBinding, Composite, Context, DrawGeometry, DrawList, DrawObjects, DrawObjectsMut, FrameDraw, IconFilter,
-    LayerDrawing, SharedAttribute, SharedTexture, Texture2D, Textures, TileDraws, TileObjects, UniformWriter, Uniforms,
+    SharedAttribute, SharedTexture, Texture2D, Textures, TileDraws, TileMap, TileObjects, UniformWriter, Uniforms,
     VertexAttributeArray, bucket_indexes, bucket_vertices, cast_matrix, paint_vertices, projection_data,
     to_projection_ubo,
 };
@@ -244,6 +244,7 @@ impl LayerType for Line {
     type Layout = PatternLayout<LineLayoutSpec>;
     type Bucket = LineBucket;
     type View<'a> = LayerBucket<'a, Line>;
+    type Tile = LineTile;
     type Drawing = TileDraws<LineTile>;
     type State = LineState;
 
@@ -317,6 +318,7 @@ impl LayerType for Line {
     fn make_draws(
         state: &mut LineState,
         drawing: &mut TileDraws<LineTile>,
+        tile_values: &mut TileMap<LineTile>,
         gpu: &mut dyn Gpu,
         cx: &mut DrawContext<'_, '_, Line>,
     ) {
@@ -324,7 +326,7 @@ impl LayerType for Line {
         state.dashes.upload(gpu, cx.context);
         if std::mem::take(&mut state.color_ramp_changed) {
             // The gradients' draws read the old ramp's texture.
-            drawing.clear();
+            tile_values.clear();
         }
 
         let frame = drawing.frame_mut();
@@ -332,16 +334,15 @@ impl LayerType for Line {
         frame.set_composite(Composite::of(*paint.line_layer_opacity.uniform(), *paint.line_layer_blend.uniform()));
         frame.set_stencil_tiles(render_tiles.iter().map(|tile| tile.unwrapped_id()));
 
-        for tile in render_tiles {
+        for (index, tile) in render_tiles.iter().enumerate() {
             let tile_id = tile.id();
 
             let Some(render_data) = tile.view_to_draw() else {
-                drawing.tiles_mut().drop_value(&tile_id);
                 continue;
             };
             let bucket = render_data.bucket;
             if bucket.triangles.is_empty() {
-                drawing.tiles_mut().drop_value(&tile_id);
+                *tile_values.get_mut(index) = None;
                 continue;
             }
             let Some(binders) = bucket.paint_property_binders.get(cx.layer.id()) else {
@@ -349,17 +350,12 @@ impl LayerType for Line {
             };
             let evaluated = &render_data.layer.paint;
 
-            let Some(mut entry) = drawing.tiles_mut().entry(&tile_id) else {
-                continue;
-            };
-            // A draw built from another bucket goes.
-            entry.set_bucket(bucket.base.id());
-
             // The draw's attributes read the bucket's vertices in the
             // context's store, which upload again when they change.
-            let changes = entry.take_changes();
+            let changes = tile_values.take_changes(index);
+            let value = tile_values.get_mut(index);
             let context = &mut *cx.context;
-            let cached = if let Some(cached) = entry.value {
+            let cached = if let Some(cached) = value {
                 refresh_paint_attributes(&mut cached.objects, changes, |attrs| {
                     let buffer = &binders.interleaved_vertex_buffer;
                     let paint =
@@ -370,10 +366,10 @@ impl LayerType for Line {
             } else {
                 let built =
                     state.build_tile(cx.layer, cx.projection_variant, gpu, context, render_data, binders, evaluated);
-                let Some(cached) = built.and_then(|built| drawing.tiles_mut().insert(&tile_id, built).ok()) else {
+                let Some(built) = built else {
                     continue;
                 };
-                cached
+                value.insert(built)
             };
             let tile = tile_id.to_unwrapped();
             if let Some(uniforms) = LineState::uniforms(tile, render_data, binders, cached, &state.dashes, cx) {
@@ -383,7 +379,7 @@ impl LayerType for Line {
         }
 
         let layer = &cx.layer.evaluated;
-        drawing.finish(&mut state.draw_list, gpu, cx.context, |writer| {
+        drawing.finish(&mut state.draw_list, tile_values, gpu, cx.context, |writer| {
             LineState::write_uniforms(layer, writer);
         });
     }
