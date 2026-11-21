@@ -15,8 +15,8 @@
 //   transform.
 
 use mln_gfx::shaders::shader_defines::{
-    DRAWABLE_RESERVED_UBO_COUNT, GLOBAL_UBO_COUNT, LAYER_SSBO_START_ID, LAYER_UBO_START_ID,
-    MAX_TEXTURE_COUNT_PER_SHADER, MAX_UBO_COUNT_PER_SHADER,
+    DRAWABLE_RESERVED_UBO_COUNT, GLOBAL_UBO_COUNT, LAYER_SSBO_START_ID, MAX_TEXTURE_COUNT_PER_SHADER,
+    MAX_UBO_COUNT_PER_SHADER,
 };
 
 /// The descriptor sets of a pipeline layout, by set index.
@@ -96,8 +96,11 @@ impl BufferSetShape {
 pub const GLOBAL_UNIFORM_COUNT: usize = GLOBAL_UBO_COUNT;
 
 /// The storage buffers of the layer set: the bindings from 0
-/// (`layerSSBOStartId` in the GLSL).
-pub const LAYER_STORAGE_COUNT: usize = LAYER_UBO_START_ID - LAYER_SSBO_START_ID;
+/// (`layerSSBOStartId` in the GLSL), for the ids from
+/// `LAYER_SSBO_START_ID` to `DRAWABLE_RESERVED_UBO_COUNT`. That last id is
+/// a layer's first uniform buffer or its tile properties storage buffer,
+/// so the set has a binding of each kind for it.
+pub const LAYER_STORAGE_COUNT: usize = DRAWABLE_RESERVED_UBO_COUNT + 1 - LAYER_SSBO_START_ID;
 /// The uniform buffers of the layer set: the bindings from
 /// `LAYER_STORAGE_COUNT` (`layerUBOStartId` in the GLSL).
 pub const LAYER_UNIFORM_COUNT: usize = MAX_UBO_COUNT_PER_SHADER - DRAWABLE_RESERVED_UBO_COUNT;
@@ -126,7 +129,11 @@ pub const fn global_uniform_binding(id: usize) -> Option<u32> {
 /// The binding in the layer set of the storage buffer `id`.
 #[must_use]
 pub const fn layer_storage_binding(id: usize) -> Option<u32> {
-    if id >= LAYER_SSBO_START_ID && id < LAYER_UBO_START_ID { Some((id - LAYER_SSBO_START_ID) as u32) } else { None }
+    if id >= LAYER_SSBO_START_ID && id < LAYER_SSBO_START_ID + LAYER_STORAGE_COUNT {
+        Some((id - LAYER_SSBO_START_ID) as u32)
+    } else {
+        None
+    }
 }
 
 /// The binding in the layer set of the uniform buffer `id`.
