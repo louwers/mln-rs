@@ -7,8 +7,9 @@
 use std::ops::{Deref, DerefMut};
 use std::time::Duration;
 
+use mln_map::CameraChangeSource;
 use mln_map::transform::{CameraCommandId, Transform, TransformEvent};
-use mln_map::{CameraChangeSource, CameraLimits, ConstrainMode, MomentumDecay, MomentumSnap, ViewportMode};
+use mln_map_types::{CameraLimits, ConstrainMode, MomentumDecay, MomentumSnap, ViewportMode};
 use mln_style_types::ProjectionDefinition;
 use mln_util::LatLng;
 use mln_util::geo::{LatLngBounds, WrapMode};
