@@ -5,7 +5,7 @@
       "height": 512,
       "width": 512,
       "description": "Fill-extrusion over 3D terrain, viewed at a pitch across sloping ground: each building is raised by the DEM elevation at its centroid, so its base follows the hillside. The buildings are inline GeoJSON, so the terrain DEM is the only tile fixture involved.",
-      "allowed": 0.00025
+      "allowed": 0.0008
     }
   },
   "center": [

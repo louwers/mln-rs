@@ -55,6 +55,15 @@ declare -A allowed=(
     # Without the drape's mips: 6451 (RADV), 6408 (lavapipe 26.0.8) and 6409
     # (Mesa 26.0.8's llvmpipe, Mesa 26.2.5's lavapipe and llvmpipe), 9.8%.
     [terrain/rtt-mipmap-minification/pitch-70]=0.02
+    # Drawn better than GL JS's image, which shows a gap under the downhill
+    # walls: their feet stop 10 m below the ground at the polygon's centroid.
+    # Here a ground-level wall's foot reaches the ground under its own end,
+    # so 165 of 262144 px differ on RADV, all along the feet of two
+    # buildings' south walls on the slope; 174 (lavapipe) and 172 (llvmpipe)
+    # on Mesa 26.0.8, 164 on Mesa 26.2.5. Walls not depth-tested against the
+    # ground: 590 (RADV). Buildings at sea level: 3590 (RADV), and 6875 drawn
+    # flat, as before they stood on the ground.
+    [terrain/fill-extrusion]=0.0008
 )
 
 checkout="${usage_checkout:-$PWD/../maplibre-gl-js}"
