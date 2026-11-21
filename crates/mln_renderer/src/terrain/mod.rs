@@ -79,17 +79,24 @@
 //!   sky's `fog-ground-blend`, the surface turns toward `fog-color`, and
 //!   past `horizon-fog-blend` toward `horizon-color`, mixed through a gamma
 //!   of 2.2, by a depth that runs from the camera's distance to sea level
-//!   to the far plane. It fades in from 60° to 70° of pitch, and there is
-//!   none without a sky or in an axonometric view. It lands once on each
-//!   pixel, where GL JS fogs every stack in full and so veils the ground
-//!   again with each stack above the first: the first stack fogs the
-//!   ground, where it has no drape too, and each stack above fogs only
-//!   what it draws, by its coverage, which over opaque content is GL JS's
-//!   fog. No GL JS fixture has fog with two stacks. The layers that don't
-//!   drape aren't fogged, as in GL JS. The fog is in no drape's key: the
-//!   frame's evaluated sky and the view reach only the surface's draws,
-//!   which every frame makes again, so a change of the sky draws no drape
-//!   again.
+//!   to the far plane, read for each pixel from its distance along the view.
+//!   It fades in from 60° to 70° of pitch, and there is none without a sky,
+//!   in an axonometric view, with a ground blend of 1, or where the far
+//!   plane comes before the camera's distance to sea level. A horizon blend
+//!   of 1 fogs with `fog-color` alone. The fog tints what each stack draws
+//!   and never changes how much of a pixel it covers: a color's alpha is
+//!   the strength of its tint, so a transparent fog leaves the ground as it
+//!   is, and ground that the stacks leave transparent stays transparent.
+//!   Each stack fogs what it draws, so every stack's share of a pixel is
+//!   fogged once, however the stacks overlap; over opaque ground in one
+//!   stack this is GL JS's fog. A known limit: each stack is fogged through
+//!   the gamma before it blends over the one below, so a translucent draped
+//!   layer at fog distance comes out a slightly different color by whether
+//!   standing layers put it in a stack of its own or in its ground's. The
+//!   layers that don't drape aren't fogged, as in GL JS. The fog is in no
+//!   drape's key: the frame's evaluated sky and the view reach only the
+//!   surface's draws, which every frame makes again, so a change of the sky
+//!   draws no drape again.
 //! - **The drapes** ([`Drapes`]): a texture for each drawn tile and stack
 //!   whose layers draw something in the tile, which the stack's draped
 //!   layers draw into with the map's camera, through their own draw

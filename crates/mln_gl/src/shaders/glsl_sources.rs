@@ -2652,29 +2652,6 @@ float terrain_elevation(vec2 pos, vec4 dem_coords) {
     };
 }
 
-/// The terrain's fog block, which the surface's vertex and fragment stages
-/// both read. A macro, so that `concat!` puts it in both.
-macro_rules! terrain_fog {
-    () => {
-        r"layout (std140) uniform TerrainFogUBO {
-    highp vec4 u_fog_color;
-    highp vec4 u_horizon_color;
-    // The near and far distances along the view, in pixels, between which the
-    // fog's depth runs from 0 to 1.
-    highp vec2 u_fog_depth_range;
-    highp float u_fog_ground_blend;
-    highp float u_fog_horizon_blend;
-    highp float u_fog_opacity;
-    // 1 to fog the ground, drawn on or not; 0 to fog only what is drawn.
-    highp float u_fog_ground;
-    highp float u_fog_pad0;
-    highp float u_fog_pad1;
-};
-
-"
-    };
-}
-
 /// The terrain's surface: a tile's grid, drawn with the tile's matrix,
 /// raised to the heights of the tile's DEM with its skirts lowered, in the
 /// colors of the tile's drape, fogged as GL JS's terrain is. GL stores the
@@ -2682,7 +2659,6 @@ macro_rules! terrain_fog {
 pub(crate) const TERRAIN_SHADER: GlslShaderSource = GlslShaderSource {
     vertex: concat!(
         terrain_elevation!(),
-        terrain_fog!(),
         r"// x and y in tile units, whether the vertex is a skirt's lower edge, 0.
 layout (location = 0) in vec4 a_pos;
 
@@ -2692,53 +2668,70 @@ layout (std140) uniform TerrainDrawableUBO {
 };
 
 out vec2 v_drape_pos;
-// GL JS's fog depth: a perspective depth from 0 at the near end of the fog's
-// range to 1 at its far end. It lives at 0.95 to 1, so it is highp.
-out highp float v_fog_depth;
+// The distance along the view of the ground before the skirt lowers it, which
+// the fog reads, as in GL JS: the clip w, which is affine in the vertex, so it
+// interpolates exactly.
+out highp float v_view_depth;
 
 void main() {
     float height = terrain_elevation(a_pos.xy, u_dem_coords);
     gl_Position = u_matrix * vec4(a_pos.xy, height - a_pos.z * u_skirt_length, 1.0);
     v_drape_pos = vec2(a_pos.x, 8192.0 - a_pos.y) / 8192.0;
-    // The fog's depth is that of the ground before the skirt lowers it, as in
-    // GL JS: from the view distance w, which the fog matrix shares.
-    float w = u_matrix[0].w * a_pos.x + u_matrix[1].w * a_pos.y + u_matrix[2].w * height + u_matrix[3].w;
-    float fog_near = u_fog_depth_range.x;
-    float fog_far = u_fog_depth_range.y;
-    v_fog_depth = fog_far / (fog_far - fog_near) * (1.0 - fog_near / max(w, 1e-6));
+    v_view_depth = u_matrix[0].w * a_pos.x + u_matrix[1].w * a_pos.y + u_matrix[2].w * height + u_matrix[3].w;
 }
 "
     ),
-    fragment: concat!(
-        r"#ifdef GL_ES
+    fragment: r"#ifdef GL_ES
 precision highp float;
 #endif
 
-",
-        terrain_fog!(),
-        r"in vec2 v_drape_pos;
-in highp float v_fog_depth;
+layout (std140) uniform TerrainFogUBO {
+    // Linear and premultiplied.
+    highp vec4 u_fog_color;
+    highp vec4 u_horizon_color;
+    // The near and far distances along the view, in pixels, between which the
+    // fog's depth runs from 0 to 1.
+    highp vec2 u_fog_depth_range;
+    highp float u_fog_ground_blend;
+    highp float u_fog_horizon_blend;
+    highp float u_fog_opacity;
+    highp float u_fog_pad0;
+    highp float u_fog_pad1;
+    highp float u_fog_pad2;
+};
+
+in vec2 v_drape_pos;
+in highp float v_view_depth;
 
 uniform sampler2D u_drape;
 
 void main() {
     vec4 color = texture(u_drape, v_drape_pos);
     fragColor = color;
-    if (u_fog_opacity <= 0.0 || v_fog_depth <= u_fog_ground_blend) {
+    float fog_near = u_fog_depth_range.x;
+    float fog_far = u_fog_depth_range.y;
+    if (u_fog_opacity <= 0.0 || color.a <= 0.0 || v_view_depth <= fog_near) {
+        return;
+    }
+    // GL JS's fog depth, a perspective depth from 0 at the near end of the
+    // range to 1 at its far end.
+    float fog_depth = min(fog_far / (fog_far - fog_near) * (1.0 - fog_near / v_view_depth), 1.0);
+    if (fog_depth <= u_fog_ground_blend) {
         return;
     }
     // GL JS's fog, mixed in linear space through a gamma of 2.2: toward the
-    // fog's color, and past the horizon blend toward the horizon's. Over the
-    // ground it fogs every texel; above it, only what the drape covers.
-    vec4 gamma = vec4(2.2);
-    float horizon = smoothstep(0.0, 1.0, max((v_fog_depth - u_fog_horizon_blend) / (1.0 - u_fog_horizon_blend), 0.0));
-    float coverage = mix(pow(color.a, 2.2), 1.0, u_fog_ground);
-    vec4 target_color = mix(pow(u_fog_color, gamma), pow(u_horizon_color, gamma), horizon) * coverage;
-    float factor = pow((v_fog_depth - u_fog_ground_blend) / (1.0 - u_fog_ground_blend), 2.0) * u_fog_opacity;
-    fragColor = pow(mix(pow(color, gamma), target_color, factor), 1.0 / gamma);
+    // fog's color, and past the horizon blend toward the horizon's. It tints
+    // the drape's color by the fog's alpha and keeps the drape's coverage.
+    float horizon = smoothstep(0.0, 1.0, (fog_depth - u_fog_horizon_blend) / max(1.0 - u_fog_horizon_blend, 1e-6));
+    vec4 tint = mix(u_fog_color, u_horizon_color, horizon);
+    float along = (fog_depth - u_fog_ground_blend) / (1.0 - u_fog_ground_blend);
+    float strength = along * along * u_fog_opacity;
+    vec3 gamma = vec3(2.2);
+    vec3 surface = pow(color.rgb / color.a, gamma);
+    vec3 fogged = surface * (1.0 - strength * tint.a) + tint.rgb * strength;
+    fragColor = vec4(pow(fogged, 1.0 / gamma) * color.a, color.a);
 }
 ",
-    ),
 };
 
 /// Port-only, for the backend conformance cases: probes of the terrain's

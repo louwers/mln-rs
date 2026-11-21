@@ -39,32 +39,33 @@ pub struct TerrainPropsUBO {
 const _: () = assert!(size_of::<TerrainPropsUBO>() == 2 * 16);
 
 /// The terrain's fog (64 bytes), GL JS's over the surface, which only the
-/// surface's program reads. A stack's draws of the surface fog the ground
-/// under them with `ground` 1, and only what they draw with 0.
+/// surface's fragment stage reads. It tints what a stack's draw covers, by
+/// the colors' alpha, and leaves its coverage as it is.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct TerrainFogUBO {
-    /// Premultiplied.
+    /// Linear, through a gamma of 2.2, and premultiplied.
     /*  0 */
     pub fog_color: [f32; 4],
-    /// Premultiplied: the sky's `horizon-color`, which the fog turns to
-    /// past `horizon_blend`.
+    /// Linear and premultiplied, as `fog_color`: the sky's `horizon-color`,
+    /// which the fog turns to past `horizon_blend`.
     /* 16 */
     pub horizon_color: [f32; 4],
     /// Where the fog's depth runs from 0 to 1: the near and far distances
-    /// along the view, in pixels.
+    /// along the view, in pixels, the far one beyond the near one where
+    /// `opacity` isn't 0.
     /* 32 */
     pub depth_range: [f32; 2],
-    /* 40 */ pub ground_blend: f32,
-    /* 44 */ pub horizon_blend: f32,
+    /// 0 to 1, below 1 with fog.
+    /* 40 */
+    pub ground_blend: f32,
+    /// 0 to 1.
+    /* 44 */
+    pub horizon_blend: f32,
     /// 0 turns the fog off.
     /* 48 */
     pub opacity: f32,
-    /// 1 to fog the ground, drawn on or not; 0 to fog only what the draw
-    /// covers.
-    /* 52 */
-    pub ground: f32,
-    /* 56 */ pub pad: [f32; 2],
+    /* 52 */ pub pad: [f32; 3],
     /* 64 */
 }
 const _: () = assert!(size_of::<TerrainFogUBO>() == 4 * 16);

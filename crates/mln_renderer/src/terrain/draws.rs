@@ -16,7 +16,7 @@ use mln_gfx::shaders::shader_defines::{
     ID_PROJECTION_UBO, ID_TERRAIN_DEM_TEXTURE, ID_TERRAIN_DRAPE_TEXTURE, ID_TERRAIN_DRAWABLE_UBO, ID_TERRAIN_FOG_UBO,
     ID_TERRAIN_POS_VERTEX_ATTRIBUTE, ID_TERRAIN_PROPS_UBO,
 };
-use mln_gfx::shaders::terrain_ubo::{TerrainDrawableUBO, TerrainFogUBO};
+use mln_gfx::shaders::terrain_ubo::TerrainDrawableUBO;
 use mln_gfx::{AttributeDataType, DepthMaskType, DrawMode};
 use mln_util::clip_depth::ClipDepthRange;
 use mln_util::logging::{Event, Log};
@@ -84,8 +84,7 @@ impl TerrainDraws {
     /// stacks of `drapes`, which read their DEM from the tiles of `dem`,
     /// sample the tile's drape of their stack, draw as `surface` says and
     /// fog as `sky` says, or drops the draws and what they share for `None`,
-    /// a frame that draws no surface. The first stack fogs the ground, and
-    /// each above only what it draws.
+    /// a frame that draws no surface.
     #[expect(
         clippy::too_many_arguments,
         reason = "the GPU and frame, and the cover, DEM, surface, sky and drapes the draws are made of"
@@ -181,15 +180,14 @@ impl TerrainDraws {
         }
         self.dem_textures.finish_frame();
         let fog = terrain_fog(sky, view);
-        for (stack, StackDraws { tiles, frame, draw_list }) in self.stacks.iter_mut().enumerate() {
+        for StackDraws { tiles, frame, draw_list } in &mut self.stacks {
             finish_tiles(draw_list, frame, tiles, gpu, context, |writer| {
                 writer.storage(ID_TERRAIN_DRAWABLE_UBO, |drawable| *drawable);
                 // GL's program declares the projection block whether it
                 // reads it or not, so every draw binds one of zeros.
                 writer.storage(ID_PROJECTION_UBO, |_| ProjectionUBO::default());
                 writer.uniform(ID_TERRAIN_PROPS_UBO, &surface.props);
-                let ground = if stack == 0 { 1.0 } else { 0.0 };
-                writer.uniform(ID_TERRAIN_FOG_UBO, &TerrainFogUBO { ground, ..fog });
+                writer.uniform(ID_TERRAIN_FOG_UBO, &fog);
             });
         }
     }

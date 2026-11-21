@@ -6,42 +6,57 @@ use mln_util::Color;
 
 use crate::render_sky::EvaluatedSky;
 
-/// The fog over the surface of a frame of `view` under `sky`, with `ground`
-/// 0, which the draws of the first stack set: GL JS's fog colors and blends,
-/// its opacity by the pitch (`calculateFogBlendOpacity`), and the depth range
-/// of its fog matrix, from the camera's distance to sea level to the far
-/// plane. Without a sky, and in an axonometric view, whose clip w is no
-/// distance, there is no fog.
+/// The fog over the surface of a frame of `view` under `sky`: GL JS's fog
+/// colors and blends, its opacity by the pitch (`calculateFogBlendOpacity`),
+/// and the depth range of its fog matrix, from the camera's distance to sea
+/// level to the far plane. The blends are clamped to 0 and 1, and
+/// the colors are linear, through a gamma of 2.2, and premultiplied. Without a
+/// sky, in an axonometric view, whose clip w is no distance, with a ground
+/// blend of 1, or with a range that ends where it starts, there is no fog.
 pub(crate) fn terrain_fog(sky: Option<&EvaluatedSky>, view: &View) -> TerrainFogUBO {
     let Some(sky) = sky else {
         return TerrainFogUBO::default();
     };
+    let depth_range = [view.camera_to_sea_level_distance() as f32, view.far_z() as f32];
+    let ground_blend = sky.sky_fog_ground_blend.uniform().clamp(0.0, 1.0);
     let pitch = mln_math::rad2deg(view.pitch());
-    let opacity = if view.projection_mode().axonometric == Some(true) || pitch < 60.0 {
+    let opacity = if view.projection_mode().axonometric == Some(true)
+        || pitch < 60.0
+        || ground_blend >= 1.0
+        || depth_range[1] <= depth_range[0]
+    {
         0.0
     } else if pitch < 70.0 {
         (pitch - 60.0) / 10.0
     } else {
         1.0
     };
-    let components = |color: &Color| [color.r, color.g, color.b, color.a];
     TerrainFogUBO {
-        fog_color: components(sky.sky_fog_color.uniform()),
-        horizon_color: components(sky.sky_horizon_color.uniform()),
-        depth_range: [view.camera_to_sea_level_distance() as f32, view.far_z() as f32],
-        ground_blend: *sky.sky_fog_ground_blend.uniform(),
-        horizon_blend: *sky.sky_horizon_fog_blend.uniform(),
+        fog_color: linear(sky.sky_fog_color.uniform()),
+        horizon_color: linear(sky.sky_horizon_color.uniform()),
+        depth_range,
+        ground_blend,
+        horizon_blend: sky.sky_horizon_fog_blend.uniform().clamp(0.0, 1.0),
         opacity: opacity as f32,
-        ground: 0.0,
-        pad: [0.0; 2],
+        pad: [0.0; 3],
     }
+}
+
+/// The linear components of `color`, premultiplied as it is.
+fn linear(color: &Color) -> [f32; 4] {
+    let [r, g, b, a] = [color.r, color.g, color.b, color.a];
+    if a <= 0.0 {
+        return [0.0; 4];
+    }
+    let linear = |c: f32| (c / a).powf(2.2) * a;
+    [linear(r), linear(g), linear(b), a]
 }
 
 #[cfg(test)]
 mod tests {
     use mln_map_types::TransformState;
     use mln_style::evaluated::Evaluated;
-    use mln_util::geo::LatLng;
+    use mln_util::geo::{EdgeInsets, LatLng};
     use mln_util::size::Size;
 
     use super::*;
@@ -90,11 +105,50 @@ mod tests {
         let state = pitched(75.0);
         let view = state.view();
         let fog = terrain_fog(Some(&sky()), view);
-        assert_eq!([0.5, 0.25, 0.0, 0.5], fog.fog_color, "premultiplied");
+        let linear = |c: f32| c.powf(2.2) * 0.5;
+        assert_eq!([linear(1.0), linear(0.5), 0.0, 0.5], fog.fog_color, "linear and premultiplied");
         assert_eq!([0.0, 0.0, 1.0, 1.0], fog.horizon_color);
         assert_eq!((0.5, 0.8), (fog.ground_blend, fog.horizon_blend));
         assert_eq!([view.camera_to_sea_level_distance() as f32, view.far_z() as f32], fog.depth_range);
         assert!(fog.depth_range[0] > 0.0 && fog.depth_range[0] < fog.depth_range[1], "{:?}", fog.depth_range);
-        assert_eq!(0.0, fog.ground);
+    }
+
+    #[test]
+    fn a_transparent_fog_color_has_no_color() {
+        let sky = EvaluatedSky { sky_fog_color: Evaluated::Constant(Color::new(0.0, 0.0, 0.0, 0.0)), ..sky() };
+        assert_eq!([0.0; 4], terrain_fog(Some(&sky), pitched(75.0).view()).fog_color);
+    }
+
+    #[test]
+    fn the_blends_are_clamped_to_0_and_1() {
+        let sky = EvaluatedSky {
+            sky_fog_ground_blend: Evaluated::Constant(-0.5),
+            sky_horizon_fog_blend: Evaluated::Constant(1.5),
+            ..sky()
+        };
+        let fog = terrain_fog(Some(&sky), pitched(75.0).view());
+        assert_eq!((0.0, 1.0, 1.0), (fog.ground_blend, fog.horizon_blend, fog.opacity));
+    }
+
+    /// A ground blend of 1 starts the fog where the depth ends, and a large
+    /// inset can pull the far plane in before the fog's near distance.
+    #[test]
+    fn there_is_no_fog_from_a_ground_blend_of_1_or_a_depth_range_that_ends_where_it_starts() {
+        let sky_without_ground = EvaluatedSky { sky_fog_ground_blend: Evaluated::Constant(1.0), ..sky() };
+        assert_eq!(0.0, terrain_fog(Some(&sky_without_ground), pitched(75.0).view()).opacity);
+
+        let mut state = TransformState::default();
+        state.set_size(Size::new(512, 512));
+        state.set_pitch(mln_math::deg2rad(75.0));
+        state.set_padding(&EdgeInsets { bottom: 400.0, ..EdgeInsets::default() });
+        state.set_terrain_min_elevation(Some(0.0));
+        let view = state.view();
+        assert!(
+            view.far_z() <= view.camera_to_sea_level_distance(),
+            "{} to {}",
+            view.camera_to_sea_level_distance(),
+            view.far_z()
+        );
+        assert_eq!(0.0, terrain_fog(Some(&sky()), view).opacity);
     }
 }

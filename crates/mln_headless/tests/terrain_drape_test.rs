@@ -266,6 +266,15 @@ fn a_circle_stands_between_two_stacks_of_draped_layers() {
     assert!(differing <= EDGE_PIXELS, "{differing} pixels differ from the map without terrain");
 }
 
+/// [`fogged_style`] with no blue fill under `sky`, the members of a style's
+/// sky object, in place of [`MAGENTA_FOG`].
+fn sky_style(sky: &str) -> String {
+    fogged_style(Blue::None).replace(MAGENTA_FOG, &format!(r#""sky": {{{sky}}},"#))
+}
+
+/// The far ground of [`fogged_style`], where the fog is strong.
+const FAR_GROUND: [(u32, u32); 2] = [(210, 70), (200, 60)];
+
 /// The fog lands once on each pixel, however many stacks drape the surface:
 /// where the stack above draws nothing, the ground shows as it does without
 /// that stack, and inside its opaque fill, as it does with the fill in the
@@ -281,7 +290,7 @@ fn fog_lands_once_where_stacks_overlap() {
         return;
     };
     // Far ground east of the fill, where the stack above draws nothing.
-    for (x, y) in [(210, 70), (200, 60)] {
+    for (x, y) in FAR_GROUND {
         assert_ne!(pixel(&clear, x, y), pixel(&none, x, y), "the fog at {x}, {y}");
         assert_eq!(pixel(&none, x, y), pixel(&above, x, y), "the ground at {x}, {y}");
     }
@@ -289,5 +298,59 @@ fn fog_lands_once_where_stacks_overlap() {
     for (x, y) in [(40, 70), (30, 100)] {
         assert_ne!(pixel(&none, x, y), pixel(&above, x, y), "the fill at {x}, {y}");
         assert_eq!(pixel(&below, x, y), pixel(&above, x, y), "the fill at {x}, {y}");
+    }
+}
+
+/// Fog tints what is drawn and never changes how much of a pixel the ground
+/// covers: a fog color's alpha is the tint's strength, so a transparent fog
+/// leaves opaque ground as it is, and a translucent one tints it less than
+/// an opaque one does, with the ground still opaque.
+#[test]
+fn fog_tints_the_ground_without_uncovering_it() {
+    let (Some((clear, _)), Some((transparent, _)), Some((translucent, _)), Some((opaque, _))) = (
+        render(&fogged_style(Blue::None).replace(MAGENTA_FOG, ""), ViewportMode::Default),
+        render(
+            &sky_style(r#""fog-color": "transparent", "horizon-fog-blend": 1, "fog-ground-blend": 0"#),
+            ViewportMode::Default,
+        ),
+        render(
+            &sky_style(r#""fog-color": "rgba(255, 0, 255, 0.5)", "horizon-fog-blend": 1, "fog-ground-blend": 0"#),
+            ViewportMode::Default,
+        ),
+        render(
+            &sky_style(r#""fog-color": "magenta", "horizon-fog-blend": 1, "fog-ground-blend": 0"#),
+            ViewportMode::Default,
+        ),
+    ) else {
+        return;
+    };
+    for (x, y) in FAR_GROUND {
+        assert_eq!(pixel(&clear, x, y), pixel(&transparent, x, y), "a transparent fog at {x}, {y}");
+        let [_, clear_green, ..] = pixel(&clear, x, y);
+        let [_, green, _, alpha] = pixel(&translucent, x, y);
+        let [_, opaque_green, _, opaque_alpha] = pixel(&opaque, x, y);
+        assert_eq!((255, 255), (alpha, opaque_alpha), "the ground's coverage at {x}, {y}");
+        assert!(opaque_green < green && green < clear_green, "a translucent fog at {x}, {y}: {green}");
+    }
+}
+
+/// Fog tints only what the stacks draw: ground that a style's draped layers
+/// leave transparent stays transparent, as it is where no layer drapes.
+#[test]
+fn fog_leaves_transparent_ground_transparent() {
+    let background = r#"{"id": "background", "type": "background", "paint": {"background-color": "white"}},"#;
+    let style = fogged_style(Blue::None);
+    let (Some((transparent, _)), Some((undraped, _))) = (
+        render(
+            &style.replace(r#""background-color": "white""#, r#""background-color": "transparent""#),
+            ViewportMode::Default,
+        ),
+        render(&style.replace(background, ""), ViewportMode::Default),
+    ) else {
+        return;
+    };
+    for (x, y) in FAR_GROUND {
+        assert_eq!([0; 4], pixel(&undraped, x, y), "no ground at {x}, {y}");
+        assert_eq!([0; 4], pixel(&transparent, x, y), "the transparent ground at {x}, {y}");
     }
 }

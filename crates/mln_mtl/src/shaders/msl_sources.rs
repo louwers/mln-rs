@@ -4038,8 +4038,9 @@ struct alignas(16) TerrainPropsUBO {
 };
 static_assert(sizeof(TerrainPropsUBO) == 2 * 16, "wrong size");
 
-// Only the surface reads the fog.
+// Only the surface's fragment stage reads the fog.
 struct alignas(16) TerrainFogUBO {
+    // Linear and premultiplied.
     /*  0 */ float4 fog_color;
     /* 16 */ float4 horizon_color;
     // The near and far distances along the view, in pixels, between which the
@@ -4048,9 +4049,9 @@ struct alignas(16) TerrainFogUBO {
     /* 40 */ float ground_blend;
     /* 44 */ float horizon_blend;
     /* 48 */ float opacity;
-    // 1 to fog the ground, drawn on or not; 0 to fog only what is drawn.
-    /* 52 */ float ground;
-    /* 56 */ float2 pad;
+    /* 52 */ float pad0;
+    /* 56 */ float pad1;
+    /* 60 */ float pad2;
     /* 64 */
 };
 static_assert(sizeof(TerrainFogUBO) == 4 * 16, "wrong size");
@@ -4119,31 +4120,26 @@ struct VertexStage {
 struct FragmentStage {
     float4 position [[position, invariant]];
     float2 drape_pos;
-    // GL JS's fog depth: a perspective depth from 0 at the near end of the
-    // fog's range to 1 at its far end.
-    float fog_depth;
+    // The distance along the view of the ground before the skirt lowers it,
+    // which the fog reads, as in GL JS: the clip w, which is affine in the
+    // vertex, so it interpolates exactly.
+    float view_depth;
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const TerrainDrawableUBO* drawableVector [[buffer(idTerrainDrawableUBO)]],
                                 device const TerrainPropsUBO& props [[buffer(idTerrainPropsUBO)]],
-                                device const TerrainFogUBO& fog [[buffer(idTerrainFogUBO)]],
                                 texture2d<float, access::read> dem [[texture(0)]]) {
     device const TerrainDrawableUBO& drawable = drawableVector[uboIndex];
     const float2 pos = float2(vertx.pos.xy);
     const float skirt = float(vertx.pos.z);
     const float height = terrain_elevation(pos, drawable.dem_coords, dem, props);
-    // The fog's depth is that of the ground before the skirt lowers it, as in
-    // GL JS: from the view distance w, which the fog matrix shares.
     const float4x4 m = drawable.matrix;
-    const float w = m[0].w * pos.x + m[1].w * pos.y + m[2].w * height + m[3].w;
-    const float fog_near = fog.depth_range.x;
-    const float fog_far = fog.depth_range.y;
     return {
         .position = m * float4(pos, height - skirt * props.skirt_length, 1.0),
         .drape_pos = pos / 8192.0,
-        .fog_depth = fog_far / (fog_far - fog_near) * (1.0 - fog_near / max(w, 1e-6)),
+        .view_depth = m[0].w * pos.x + m[1].w * pos.y + m[2].w * height + m[3].w,
     };
 }
 
@@ -4152,18 +4148,28 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
                             texture2d<float, access::sample> drape [[texture(1)]],
                             sampler drape_sampler [[sampler(1)]]) {
     const float4 color = drape.sample(drape_sampler, in.drape_pos);
-    if (fog.opacity <= 0.0 || in.fog_depth <= fog.ground_blend) {
+    const float fog_near = fog.depth_range.x;
+    const float fog_far = fog.depth_range.y;
+    if (fog.opacity <= 0.0 || color.a <= 0.0 || in.view_depth <= fog_near) {
+        return half4(color);
+    }
+    // GL JS's fog depth, a perspective depth from 0 at the near end of the
+    // range to 1 at its far end.
+    const float fog_depth = min(fog_far / (fog_far - fog_near) * (1.0 - fog_near / in.view_depth), 1.0);
+    if (fog_depth <= fog.ground_blend) {
         return half4(color);
     }
     // GL JS's fog, mixed in linear space through a gamma of 2.2: toward the
-    // fog's color, and past the horizon blend toward the horizon's. Over the
-    // ground it fogs every texel; above it, only what the drape covers.
-    const float4 gamma = float4(2.2);
-    const float horizon = smoothstep(0.0, 1.0, max((in.fog_depth - fog.horizon_blend) / (1.0 - fog.horizon_blend), 0.0));
-    const float coverage = mix(pow(color.a, 2.2), 1.0, fog.ground);
-    const float4 target_color = mix(pow(fog.fog_color, gamma), pow(fog.horizon_color, gamma), horizon) * coverage;
-    const float factor = pow((in.fog_depth - fog.ground_blend) / (1.0 - fog.ground_blend), 2.0) * fog.opacity;
-    return half4(pow(mix(pow(color, gamma), target_color, factor), 1.0 / gamma));
+    // fog's color, and past the horizon blend toward the horizon's. It tints
+    // the drape's color by the fog's alpha and keeps the drape's coverage.
+    const float horizon = smoothstep(0.0, 1.0, (fog_depth - fog.horizon_blend) / max(1.0 - fog.horizon_blend, 1e-6));
+    const float4 tint = mix(fog.fog_color, fog.horizon_color, horizon);
+    const float along = (fog_depth - fog.ground_blend) / (1.0 - fog.ground_blend);
+    const float strength = along * along * fog.opacity;
+    const float3 gamma = float3(2.2);
+    const float3 surface = pow(color.rgb / color.a, gamma);
+    const float3 fogged = surface * (1.0 - strength * tint.a) + tint.rgb * strength;
+    return half4(float4(pow(fogged, 1.0 / gamma) * color.a, color.a));
 }
 "
     ),

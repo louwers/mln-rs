@@ -2660,27 +2660,11 @@ struct VertexOutput {
     // Where in the drape, its north-west corner at 0 and its rows from the
     // north, as they are drawn.
     @location(0) drape_pos: vec2<f32>,
-    // GL JS's fog depth: a perspective depth from 0 at the near end of the
-    // fog's range to 1 at its far end.
-    @location(1) fog_depth: f32,
+    // The distance along the view of the ground before the skirt lowers it,
+    // which the fog reads, as in GL JS: the clip w, which is affine in the
+    // vertex, so it interpolates exactly.
+    @location(1) view_depth: f32,
 };
-
-struct TerrainFogUBO {
-    fog_color: vec4<f32>,
-    horizon_color: vec4<f32>,
-    // The near and far distances along the view, in pixels, between which
-    // the fog's depth runs from 0 to 1.
-    depth_range: vec2<f32>,
-    ground_blend: f32,
-    horizon_blend: f32,
-    opacity: f32,
-    // 1 to fog the ground, drawn on or not; 0 to fog only what is drawn.
-    ground: f32,
-    pad0: f32,
-    pad1: f32,
-};
-
-@group(0) @binding(6) var<uniform> terrainFog: TerrainFogUBO;
 
 struct TerrainDrawableUBO {
     matrix: mat4x4<f32>,
@@ -2704,13 +2688,8 @@ fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
     out.position = drawable.matrix * vec4<f32>(pos, height - skirt * terrainProps.skirt_length, 1.0);
     out.drape_pos = pos / 8192.0;
-    // The fog's depth is that of the ground before the skirt lowers it, as
-    // in GL JS: from the view distance w, which the fog matrix shares.
     let m = drawable.matrix;
-    let w = m[0].w * pos.x + m[1].w * pos.y + m[2].w * height + m[3].w;
-    let near = terrainFog.depth_range.x;
-    let far = terrainFog.depth_range.y;
-    out.fog_depth = far / (far - near) * (1.0 - near / max(w, 1e-6));
+    out.view_depth = m[0].w * pos.x + m[1].w * pos.y + m[2].w * height + m[3].w;
     return out;
 }
 ",
@@ -2719,10 +2698,11 @@ fn main(in: VertexInput) -> VertexOutput {
         r"
 struct FragmentInput {
     @location(0) drape_pos: vec2<f32>,
-    @location(1) fog_depth: f32,
+    @location(1) view_depth: f32,
 };
 
 struct TerrainFogUBO {
+    // Linear and premultiplied.
     fog_color: vec4<f32>,
     horizon_color: vec4<f32>,
     // The near and far distances along the view, in pixels, between which
@@ -2731,10 +2711,9 @@ struct TerrainFogUBO {
     ground_blend: f32,
     horizon_blend: f32,
     opacity: f32,
-    // 1 to fog the ground, drawn on or not; 0 to fog only what is drawn.
-    ground: f32,
     pad0: f32,
     pad1: f32,
+    pad2: f32,
 };
 
 @group(0) @binding(6) var<uniform> terrainFog: TerrainFogUBO;
@@ -2746,18 +2725,28 @@ struct TerrainFogUBO {
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     let color = textureSample(drape_texture, drape_sampler, in.drape_pos);
     let fog = terrainFog;
-    if (fog.opacity <= 0.0 || in.fog_depth <= fog.ground_blend) {
+    let fog_near = fog.depth_range.x;
+    let fog_far = fog.depth_range.y;
+    if (fog.opacity <= 0.0 || color.a <= 0.0 || in.view_depth <= fog_near) {
+        return color;
+    }
+    // GL JS's fog depth, a perspective depth from 0 at the near end of the
+    // range to 1 at its far end.
+    let fog_depth = min(fog_far / (fog_far - fog_near) * (1.0 - fog_near / in.view_depth), 1.0);
+    if (fog_depth <= fog.ground_blend) {
         return color;
     }
     // GL JS's fog, mixed in linear space through a gamma of 2.2: toward the
-    // fog's color, and past the horizon blend toward the horizon's. Over
-    // the ground it fogs every texel; above it, only what the drape covers.
-    let gamma = vec4<f32>(2.2);
-    let horizon = smoothstep(0.0, 1.0, max((in.fog_depth - fog.horizon_blend) / (1.0 - fog.horizon_blend), 0.0));
-    let coverage = mix(pow(color.a, 2.2), 1.0, fog.ground);
-    let target_color = mix(pow(fog.fog_color, gamma), pow(fog.horizon_color, gamma), horizon) * coverage;
-    let factor = pow((in.fog_depth - fog.ground_blend) / (1.0 - fog.ground_blend), 2.0) * fog.opacity;
-    return pow(mix(pow(color, gamma), target_color, factor), 1.0 / gamma);
+    // fog's color, and past the horizon blend toward the horizon's. It tints
+    // the drape's color by the fog's alpha and keeps the drape's coverage.
+    let horizon = smoothstep(0.0, 1.0, (fog_depth - fog.horizon_blend) / max(1.0 - fog.horizon_blend, 1e-6));
+    let tint = mix(fog.fog_color, fog.horizon_color, horizon);
+    let along = (fog_depth - fog.ground_blend) / (1.0 - fog.ground_blend);
+    let strength = along * along * fog.opacity;
+    let gamma = vec3<f32>(2.2);
+    let surface = pow(color.rgb / color.a, gamma);
+    let fogged = surface * (1.0 - strength * tint.a) + tint.rgb * strength;
+    return vec4<f32>(pow(fogged, 1.0 / gamma) * color.a, color.a);
 }
 ",
     ),
