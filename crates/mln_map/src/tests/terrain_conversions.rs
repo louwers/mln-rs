@@ -10,6 +10,7 @@ use mln_util::geo::{LatLng, ScreenCoordinate, WrapMode};
 use mln_util::queue::Queue;
 
 use super::ground::{STYLE, assert_near, ground_event, pitchable, report, world};
+use crate::transform::TerrainGround;
 use crate::{AnimationOptions, CameraOptions, Map, MapProjection};
 
 /// One pixel at zoom 12, in Web Mercator at zoom 0.
@@ -321,6 +322,43 @@ fn a_projection_before_any_ground_falls_back_as_the_map_does() {
             assert_near(expected.longitude(), actual.longitude(), 1e-9, "longitude");
             let location = expected.wrapped();
             assert_same_pixel(map.pixel_for_lat_lng(&location), projection.pixel_for_lat_lng(&location), 1e-6, "back");
+        }
+    }
+}
+
+/// A projection given terrain again clips to the ground it is given last,
+/// and given none, to the flat map's planes: as a projection given only
+/// that terrain does.
+#[test]
+fn a_projection_given_terrain_again_clips_to_the_last() {
+    let run_loop = Queue::<()>::new();
+    let mut map = pitchable(STYLE, &run_loop);
+    map.set_center_clamped_to_ground(false);
+    map.jump_to(&CameraOptions {
+        center: Some(center()),
+        zoom: Some(12.0),
+        center_altitude: Some(0.0),
+        ..pitched(60.0)
+    });
+    report(&mut map, ground_event(&super::ground::flat(Some(-1000.0), -1000.0)));
+    let view = map.snapshot().view;
+    let level = Some(TerrainGround { elevation: Some(super::ground::flat(Some(0.0), 0.0)), clamped: false });
+    let pairs = [
+        (MapProjection::from_view(&view).unwrap().with_terrain(map.terrain()), map.terrain()),
+        (
+            MapProjection::from_view(&view).unwrap().with_terrain(level.clone()).with_terrain(map.terrain()),
+            map.terrain(),
+        ),
+        (MapProjection::from_view(&view).unwrap().with_terrain(map.terrain()).with_terrain(None), None),
+        (MapProjection::from_view(&view).unwrap().with_terrain(map.terrain()).with_terrain(level.clone()), level),
+    ];
+    for (index, (projection, terrain)) in pairs.into_iter().enumerate() {
+        let once = MapProjection::from_view(&view).unwrap().with_terrain(terrain);
+        for row in 0..8 {
+            let pixel = ScreenCoordinate::new(256.0, 5.0 * f64::from(row));
+            let expected = once.lat_lng_for_pixel(&pixel, WrapMode::Unwrapped).unwrap();
+            let actual = projection.lat_lng_for_pixel(&pixel, WrapMode::Unwrapped).unwrap();
+            assert_eq!(expected, actual, "{index}: row {row}");
         }
     }
 }
