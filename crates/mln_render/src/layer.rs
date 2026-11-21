@@ -62,7 +62,7 @@
 //! and its bucket comes back through the worker codec (`mln_wire::Wire`),
 //! between the wasm instances of a browser build too: the layout and the
 //! bucket are `Send`, and the bucket and the style half's property sets
-//! implement `Wire`. A layer's [`State`](LayerType::State) and
+//! implement `Wire`, which is unstable (`mln_render::unstable`). A layer's [`State`](LayerType::State) and
 //! [`Drawing`](LayerType::Drawing) stay on the renderer's thread.
 //!
 //! The types a layer type draws with, which the hooks name, are the
