@@ -264,9 +264,9 @@ struct alignas(16) ProjectionUBO {
     /* 168 */ float2 translate;
 #if defined(TERRAIN)
     /* 176 */ GroundDrawableUBO ground;
-    /* 240 */
+    /* 224 */
 };
-static_assert(sizeof(ProjectionUBO) == 15 * 16, "wrong size");
+static_assert(sizeof(ProjectionUBO) == 14 * 16, "wrong size");
 #else
     /* 176 */
 };
