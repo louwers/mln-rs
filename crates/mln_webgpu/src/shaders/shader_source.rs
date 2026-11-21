@@ -3,7 +3,8 @@ use mln_gfx::shaders::programs;
 use mln_gfx::shaders::programs::{
     ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE, ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE, ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE,
     ID_LAYER_COMPOSITE_BACKDROP_TEXTURE, ID_LAYER_COMPOSITE_IMAGE_TEXTURE, ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE,
-    ID_SKY_POS_VERTEX_ATTRIBUTE, ID_TILE_DEBUG_DATA_VERTEX_ATTRIBUTE, ID_TILE_DEBUG_POS_NORMAL_VERTEX_ATTRIBUTE,
+    ID_SKY_POS_VERTEX_ATTRIBUTE, ID_TILE_DEBUG_CORNER_VERTEX_ATTRIBUTE, ID_TILE_DEBUG_END_ATTRIBUTE,
+    ID_TILE_DEBUG_START_ATTRIBUTE,
 };
 use mln_gfx::shaders::source::wgsl::{Attribute, Source, Texture};
 
@@ -37,14 +38,13 @@ static GLOBE_DEPTH_SHADER: Source = Source {
     textures: &[],
 };
 
-const TILE_DEBUG_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(4, ID_TILE_DEBUG_POS_NORMAL_VERTEX_ATTRIBUTE),
-    Attribute::new(5, ID_TILE_DEBUG_DATA_VERTEX_ATTRIBUTE),
-];
+const TILE_DEBUG_ATTRIBUTES: &[Attribute] = &[Attribute::new(0, ID_TILE_DEBUG_CORNER_VERTEX_ATTRIBUTE)];
+const TILE_DEBUG_INSTANCE_ATTRIBUTES: &[Attribute] =
+    &[Attribute::new(1, ID_TILE_DEBUG_START_ATTRIBUTE), Attribute::new(2, ID_TILE_DEBUG_END_ATTRIBUTE)];
 static TILE_DEBUG_SHADER: Source = Source {
     wgsl: &wgsl_sources::TILE_DEBUG_SHADER,
     attributes: TILE_DEBUG_ATTRIBUTES,
-    instance_attributes: &[],
+    instance_attributes: TILE_DEBUG_INSTANCE_ATTRIBUTES,
     textures: &[],
 };
 

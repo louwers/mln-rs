@@ -1,9 +1,7 @@
 // The render source of a source with tiles, and the debug overlays of its
 // tiles: the tile borders and the parse status and timestamp text, drawn as
-// polylines by the tile debug shader.
+// segments by the tile debug shader.
 
-use std::collections::BTreeMap;
-use std::mem::offset_of;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -14,20 +12,18 @@ use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::programs;
 use mln_gfx::shaders::programs::{
-    ID_TILE_DEBUG_DATA_VERTEX_ATTRIBUTE, ID_TILE_DEBUG_DRAWABLE_UBO, ID_TILE_DEBUG_POS_NORMAL_VERTEX_ATTRIBUTE,
-    ID_TILE_DEBUG_PROPS_UBO,
+    ID_TILE_DEBUG_CORNER_VERTEX_ATTRIBUTE, ID_TILE_DEBUG_END_ATTRIBUTE, ID_TILE_DEBUG_PROPS_UBO,
+    ID_TILE_DEBUG_START_ATTRIBUTE,
 };
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
-use mln_gfx::shaders::tile_debug_ubo::{TileDebugDrawableElement, TileDebugDrawableUBO, TileDebugPropsUBO};
+use mln_gfx::shaders::tile_debug_ubo::TileDebugPropsUBO;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_map_types::MapDebugOptions;
 use mln_style::Source;
-use mln_style_types::{LineCapType, LineJoinType, TranslateAnchorType};
 use mln_tile_id::OverscaledTileID;
-use mln_tile_id::geometry_tile_data::GeometryCoordinates;
 use mln_util::Color;
-use mln_util::constants::EXTENT;
+use mln_util::constants::{EXTENT, TILE_SIZE};
 use mln_util::error::Error;
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
@@ -38,8 +34,6 @@ use crate::erased_layer::ErasedEvaluatedLayer;
 use crate::erased_source::ErasedOrigin;
 use crate::gfx::context::Context;
 use crate::gfx::indexes::DrawIndexes;
-use crate::gfx::line_mesh::{LineLayoutVertex, LineOptions, LineScratch, add_line};
-use crate::gfx::mesh::Indexed;
 use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::layer_drawing::{DrawDepth, DrawList, DrawObjectsMut, FrameDraw, KeptDraw, LayerDraws};
 use crate::paint_parameters::PaintParameters;
@@ -50,69 +44,61 @@ use crate::tile::job::SourceKey;
 use crate::tile::source_tiles::{CoverUpdate, SourceTiles};
 use crate::tile::store::TileStore;
 use crate::tile::tile::TileKind;
-use crate::tile_matrix::{cast_matrix, projection_data, to_projection_ubo};
+use crate::tile_matrix::to_projection_ubo;
 use crate::tile_parameters::TileParameters;
-use crate::util::subdivision::subdivide_vertex_line;
 
-/// The line properties of a debug overlay's polylines: red tile borders, and
-/// black text over a white outline.
+/// The color and width of a debug overlay's segments: red tile borders, and
+/// black text over a white outline. `update_draws` sets the world's width.
 #[must_use]
-fn debug_line_properties(type_: DebugType) -> TileDebugPropsUBO {
+fn debug_properties(type_: DebugType) -> TileDebugPropsUBO {
     let (color, width) = match type_ {
         DebugType::TextOutline => (Color::white(), 4.0),
         DebugType::Text => (Color::black(), 2.0),
         DebugType::Border => (Color::red(), 4.0),
     };
-    TileDebugPropsUBO {
-        color: color.to_float_array(),
-        blur: 0.0,
-        opacity: 1.0,
-        gapwidth: 0.0,
-        offset: 0.0,
-        width,
-        pad: [0.0; 3],
-    }
+    TileDebugPropsUBO { color: color.to_float_array(), width, world_width: 0.0, pad: [0.0; 2] }
 }
 
-/// The GPU objects of `lines`, as polylines of `options` drawn with `shader`;
-/// `None` where they have no vertices.
-fn polyline_objects(
+/// A segment of a debug overlay, from its first point to its second, in
+/// tile units.
+type Segment = [Point<i16>; 2];
+
+/// The corners of the quad that each segment draws as an instance of: x is
+/// 0 at the segment's start and 1 at its end, y picks its side.
+const SEGMENT_QUAD: [[i16; 2]; 4] = [[0, 0], [0, 1], [1, 0], [1, 1]];
+
+/// The GPU objects that draw `segments` with `shader`; `None` where there
+/// are none.
+fn segment_objects(
     context: &mut Context,
     shader: &ShaderKey,
-    lines: &[GeometryCoordinates],
-    options: &LineOptions,
+    segments: impl IntoIterator<Item = Segment>,
 ) -> Option<DrawObjects> {
-    let mut vertices: Vec<LineLayoutVertex> = Vec::new();
-    let mut segments: Vec<SegmentBase> = Vec::new();
-    let mut indexes: Vec<u16> = Vec::new();
-    let mut scratch = LineScratch::default();
-    for line in lines {
-        let mut triangles = Indexed { indexes: &mut indexes, segments: &mut segments };
-        add_line(&mut vertices, &mut triangles, &mut scratch, line, options);
-    }
-    if vertices.is_empty() {
+    let ends: Vec<[i16; 4]> = segments.into_iter().map(|[a, b]| [a.x, a.y, b.x, b.y]).collect();
+    if ends.is_empty() {
         return None;
     }
-
-    let vertex_count = vertices.len();
-    let stride = size_of::<LineLayoutVertex>() as u32;
-    let shared = context.add_vertices(vertices);
-    let mut attrs = VertexAttributeArray::new();
-    // The position and normal, then the extrusion data.
-    for (id, offset, data_type) in [
-        (ID_TILE_DEBUG_POS_NORMAL_VERTEX_ATTRIBUTE, offset_of!(LineLayoutVertex, a1) as u32, AttributeDataType::Short2),
-        (ID_TILE_DEBUG_DATA_VERTEX_ATTRIBUTE, offset_of!(LineLayoutVertex, a2) as u32, AttributeDataType::UByte4),
-    ] {
-        attrs.set_shared(id, SharedAttribute::new(shared.clone(), data_type, offset, stride));
+    let instance_count = ends.len();
+    let corners = context.add_vertices(SEGMENT_QUAD.to_vec());
+    let ends = context.add_vertices(ends);
+    let point = size_of::<[i16; 2]>() as u32;
+    let mut vertices = VertexAttributeArray::new();
+    vertices.set_shared(
+        ID_TILE_DEBUG_CORNER_VERTEX_ATTRIBUTE,
+        SharedAttribute::new(corners, AttributeDataType::Short2, 0, point),
+    );
+    let mut instances = VertexAttributeArray::new();
+    for (id, offset) in [(ID_TILE_DEBUG_START_ATTRIBUTE, 0), (ID_TILE_DEBUG_END_ATTRIBUTE, point)] {
+        instances.set_shared(id, SharedAttribute::new(ends.clone(), AttributeDataType::Short2, offset, 2 * point));
     }
 
     let geometry = DrawGeometry {
-        vertices: attrs,
-        vertex_count,
-        mode: DrawMode::Triangles(),
-        indexes: DrawIndexes::new(indexes),
-        segments,
-        instances: None,
+        vertices,
+        vertex_count: SEGMENT_QUAD.len(),
+        mode: DrawMode::TriangleStrip(),
+        indexes: DrawIndexes::new(vec![0, 1, 2, 3]),
+        segments: vec![SegmentBase { instance_count, ..SegmentBase::with_lengths(0, 0, 4, 4) }],
+        instances: Some(instances),
     };
     Some(DrawObjects::new(
         shader.clone(),
@@ -123,22 +109,38 @@ fn polyline_objects(
     ))
 }
 
+/// The segments of `lines`, each a polyline.
+fn polyline_segments(lines: &[Vec<Point<i16>>]) -> impl Iterator<Item = Segment> {
+    lines.iter().flat_map(|line| line.windows(2).map(|pair| [pair[0], pair[1]]))
+}
+
+/// The segments of a tile's border, each edge split into `steps` segments
+/// so that it bends with the globe.
+fn border_segments(steps: u32) -> impl Iterator<Item = Segment> {
+    let extent = EXTENT;
+    let edges = [
+        ((0, 0), (extent, 0)),
+        ((extent, 0), (extent, extent)),
+        ((extent, extent), (0, extent)),
+        ((0, extent), (0, 0)),
+    ];
+    let steps = steps.max(1) as i32;
+    edges.into_iter().flat_map(move |((x0, y0), (x1, y1))| {
+        let at = move |i: i32| Point::new((x0 + (x1 - x0) * i / steps) as i16, (y0 + (y1 - y0) * i / steps) as i16);
+        (0..steps).map(move |i| [at(i), at(i + 1)])
+    })
+}
+
 // Debug overlays -------------------------------------------------------------
 
-/// A draw of a debug overlay: polylines over a tile of a source.
+/// A draw of a debug overlay: segments over a tile of a source.
 struct DebugDraw {
     /// The id of the source.
     source: Rc<str>,
     tile: OverscaledTileID,
-    /// The lines of text the polylines spell, of a text overlay.
+    /// The lines of text the segments spell, of a text overlay.
     text: Option<Vec<String>>,
     draw: KeptDraw,
-}
-
-/// A draw's entries in a debug overlay's storage buffers.
-struct DebugUniforms {
-    draw_ubo: TileDebugDrawableElement,
-    projection: ProjectionUBO,
 }
 
 /// The kinds of debug overlays.
@@ -157,15 +159,15 @@ fn debug_layer(debug_layers: &mut DebugLayers, type_: DebugType) -> &mut DebugLa
     debug_layers.entry(type_).or_insert_with(|| DebugLayer::new(type_))
 }
 
-/// A debug overlay: polylines over the tiles of the sources, in the color
-/// and width of its type.
+/// A debug overlay: segments over the tiles of the sources, in the color and
+/// width of its type.
 pub(crate) struct DebugLayer {
     properties: TileDebugPropsUBO,
     /// The overlay's draws, in the order they were made, which is the order
     /// they draw in.
     draws: Vec<DebugDraw>,
     /// The frame's draws as `update_draws` makes them.
-    draw_list: DrawList<DebugUniforms, usize>,
+    draw_list: DrawList<ProjectionUBO, usize>,
     /// The frame's draws of the overlay, each of the overlay's draw at its
     /// index, with the buffers they read.
     frame: LayerDraws<usize>,
@@ -175,7 +177,7 @@ impl DebugLayer {
     #[must_use]
     pub(crate) fn new(type_: DebugType) -> Self {
         DebugLayer {
-            properties: debug_line_properties(type_),
+            properties: debug_properties(type_),
             draws: Vec::new(),
             draw_list: DrawList::default(),
             frame: LayerDraws::default(),
@@ -218,37 +220,17 @@ impl DebugLayer {
     /// Makes the frame's draws of the overlay, and writes the buffers they
     /// read.
     pub(crate) fn update_draws(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        let zoom = parameters.frame.view.zoom();
         for (index, draw) in self.draws.iter().enumerate() {
-            let tile_id = draw.tile.to_unwrapped();
-            let projection = projection_data(
-                &tile_id,
-                &parameters.frame,
-                [0.0, 0.0],
-                TranslateAnchorType::Viewport,
-                false,
-                false,
-                None,
-                false,
-            );
-            let draw_ubo = TileDebugDrawableElement {
-                drawable: TileDebugDrawableUBO {
-                    matrix: cast_matrix(&projection.fallback_matrix),
-                    ratio: 1.0 / tile_id.pixels_to_tile_units(1.0, zoom as f32),
-                    pad: [0.0; 7],
-                },
-                pad: [0.0; 8],
-            };
+            let projection = parameters.frame.projection_data_for_tile(&draw.tile.to_unwrapped(), false);
             let frame_draw = FrameDraw { depth: DrawDepth::Off, ..draw.draw.frame_draw(None) };
-            let uniforms = DebugUniforms { draw_ubo, projection: to_projection_ubo(&projection) };
-            self.draw_list.push_part(frame_draw, index, uniforms);
+            self.draw_list.push_part(frame_draw, index, to_projection_ubo(&projection));
         }
 
+        self.properties.world_width = (TILE_SIZE * parameters.frame.view.zoom().exp2()) as f32;
         let properties = &self.properties;
         let replaced = self.draw_list.finish(&mut self.frame, gpu, parameters.context, |writer| {
             writer.uniform(ID_TILE_DEBUG_PROPS_UBO, properties);
-            writer.storage(ID_TILE_DEBUG_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);
-            writer.storage(ID_PROJECTION_UBO, |uniforms| uniforms.projection);
+            writer.storage(ID_PROJECTION_UBO, |projection| *projection);
         });
         if replaced {
             for draw in &mut self.draws {
@@ -397,9 +379,6 @@ impl RenderSource for RenderTileSource {
     }
 
     /// Updates the source's draws of the debug overlays.
-    ///
-    /// The text is polylines, like the tile borders: WebGPU draws line
-    /// primitives one pixel wide.
     fn update_debug_draws(&self, debug_layers: &mut DebugLayers, parameters: &mut PaintParameters<'_>) {
         if !parameters
             .debug_options
@@ -413,8 +392,7 @@ impl RenderSource for RenderTileSource {
         let globe = parameters.frame.view.is_globe();
         let projection_variant = if globe { ProjectionVariant::Globe } else { ProjectionVariant::Mercator };
 
-        let polyline_shader =
-            parameters.context.shader_key(&programs::TILE_DEBUG, Uniforms::default(), projection_variant);
+        let shader = parameters.context.shader_key(&programs::TILE_DEBUG, Uniforms::default(), projection_variant);
 
         // The tiles to cover, whose draws stay where they were built with
         // the same shader and spell the tile's text: one of the other
@@ -428,7 +406,7 @@ impl RenderSource for RenderTileSource {
             let Some(tile) = new_tiles.get(&draw.tile) else {
                 return false;
             };
-            let same_shader = *draw.draw.objects.shader() == polyline_shader;
+            let same_shader = *draw.draw.objects.shader() == shader;
             let same_text = match (&draw.text, &tile.debug_bucket) {
                 (Some(text), Some(debug_bucket)) => *text == debug_bucket.text,
                 _ => true,
@@ -438,7 +416,6 @@ impl RenderSource for RenderTileSource {
 
         // Timestamps or Parse Status
         if parameters.debug_options.contains(MapDebugOptions::TIMESTAMPS | MapDebugOptions::PARSE_STATUS) {
-            let text_options = LineOptions { join: LineJoinType::Round, cap: LineCapType::Round, ..Default::default() };
             for type_ in [DebugType::TextOutline, DebugType::Text] {
                 let layer = debug_layer(debug_layers, type_);
                 layer.retain(keep);
@@ -454,7 +431,7 @@ impl RenderSource for RenderTileSource {
                     if tile.needs_rendering()
                         && !of_tiles.contains(&tile_id)
                         && let Some(objects) =
-                            polyline_objects(parameters.context, &polyline_shader, &debug_bucket.strokes, &text_options)
+                            segment_objects(parameters.context, &shader, polyline_segments(&debug_bucket.strokes))
                     {
                         of_tiles.insert(tile_id);
                         layer.add(source, tile_id, Some(debug_bucket.text.clone()), objects);
@@ -473,42 +450,19 @@ impl RenderSource for RenderTileSource {
             layer.retain(keep);
             let mut of_tiles = layer.tiles_of(source);
 
-            // add new draws
-            let extent = EXTENT as i16;
-            let tile_border: GeometryCoordinates = vec![
-                Point::new(0, 0),
-                Point::new(extent, 0),
-                Point::new(extent, extent),
-                Point::new(0, extent),
-                Point::new(0, 0),
-            ];
-            // On the globe the edges bend with the sphere: the border
-            // subdivided at the tile mesh's granularity, one per zoom.
-            let mut globe_borders: BTreeMap<u8, GeometryCoordinates> = BTreeMap::new();
-            let border_options = LineOptions { closed: true, ..Default::default() };
+            // add new draws; on the globe the edges bend with the sphere,
+            // split as finely as the tile meshes of the zoom
             for tile in &self.render_tiles {
                 let tile_id = *tile.overscaled_tile_id();
-                if tile.debug_bucket.is_none() || !tile.needs_rendering() {
+                if tile.debug_bucket.is_none() || !tile.needs_rendering() || of_tiles.contains(&tile_id) {
                     continue;
                 }
-                if of_tiles.contains(&tile_id) {
-                    continue;
-                }
-                let border = if globe {
-                    let z = tile_id.canonical.z;
-                    globe_borders.entry(z).or_insert_with(|| {
-                        let steps = SubdivisionGranularitySetting::globe().tile.granularity_for_zoom_level(z);
-                        subdivide_vertex_line(&tile_border, steps, false)
-                    })
+                let steps = if globe {
+                    SubdivisionGranularitySetting::globe().tile.granularity_for_zoom_level(tile_id.canonical.z)
                 } else {
-                    &tile_border
+                    1
                 };
-                if let Some(objects) = polyline_objects(
-                    parameters.context,
-                    &polyline_shader,
-                    std::slice::from_ref(border),
-                    &border_options,
-                ) {
+                if let Some(objects) = segment_objects(parameters.context, &shader, border_segments(steps)) {
                     of_tiles.insert(tile_id);
                     layer.add(source, tile_id, None, objects);
                 }

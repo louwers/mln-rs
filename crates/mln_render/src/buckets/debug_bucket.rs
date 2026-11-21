@@ -1,6 +1,5 @@
-// C++ keeps the text as line-list vertices for the DebugShader. WebGPU draws
-// line primitives one pixel wide, so the text is kept as strokes instead,
-// which the tile source draws as polylines, like the tile borders.
+// The text of a tile's debug overlay, as the strokes of a vector font, which
+// the tile source draws as segments, like the tile borders.
 
 use geometry::Point;
 use mln_map_types::MapDebugOptions;

@@ -330,42 +330,30 @@ pub(crate) const TILE_DEBUG_SHADER: Wgsl = Wgsl {
 override DEVICE_PIXEL_RATIO: f32 = 1.0;
 
 struct VertexInput {
-    @location(4) pos_normal: vec2<i32>,  // packed position and normal
-    @location(5) data: vec4<u32>,        // extrude, direction, linesofar
+    // The quad's corner: x picks the segment's start (0) or end (1), y its side.
+    @location(0) corner: vec2<i32>,
+    // Per instance: where the segment starts and ends, in tile units.
+    @location(1) start_pos: vec2<i32>,
+    @location(2) end_pos: vec2<i32>,
 };
 
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
-    @location(0) v_width2: vec2<f32>,
-    @location(1) v_normal: vec2<f32>,
-    @location(2) v_gamma_scale: f32,
-#ifdef PROJECTION_GLOBE
-    @location(6) v_tile_x: f32,
-#endif
-};
-
-struct TileDebugDrawableUBO {
-    matrix: mat4x4<f32>,
-    ratio: f32,
-    pad0: f32,
-    pad1: f32,
-    pad2: f32,
-    pad3: f32,
-    pad4: f32,
-    pad5: f32,
-    pad6: f32,
+    // The offset in pixels from the segment's start, along the segment and
+    // across it, on the map.
+    @location(0) offset: vec2<f32>,
+    // The segment's length in pixels on the map.
+    @location(1) @interpolate(flat) segment_length: f32,
+    // The pixels on the map that a pixel on screen spans across the segment.
+    @location(2) gamma_scale: f32,
 };
 
 struct TileDebugPropsUBO {
     color: vec4<f32>,
-    blur: f32,
-    opacity: f32,
-    gapwidth: f32,
-    offset: f32,
     width: f32,
+    world_width: f32,
     pad0: f32,
     pad1: f32,
-    pad2: f32,
 };
 
 struct GlobalPaintParamsUBO {
@@ -382,75 +370,47 @@ struct GlobalIndexUBO {
     pad0: vec3<u32>,
 };
 
-struct TileDebugDrawableElement {
-    data: TileDebugDrawableUBO,
-    pad0: vec4<f32>,
-    pad1: vec4<f32>,
-};
-
 @group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
-@group(0) @binding(2) var<storage, read> drawableVector: array<TileDebugDrawableElement>;
+@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
 @group(0) @binding(5) var<uniform> props: TileDebugPropsUBO;
-@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
-    let drawable = drawableVector[globalIndex.value].data;
-    let ratio = max(drawable.ratio, 1e-6);
-    let pixel_ratio = DEVICE_PIXEL_RATIO;
-    let antialiasing = (1.0 / pixel_ratio) * 0.5;
+    let projection = projectionVector[globalIndex.value];
+    let start = vec2<f32>(in.start_pos);
+    let end = vec2<f32>(in.end_pos);
 
-    // Unpack vertex data
-    let a_extrude = vec2<f32>(f32(in.data.x), f32(in.data.y)) - vec2<f32>(128.0, 128.0);
-    let a_direction = f32(in.data.z & 3u) - 1.0;
-    let raw_pos = vec2<f32>(f32(in.pos_normal.x), f32(in.pos_normal.y));
-    let pos = floor(raw_pos * 0.5);
-    var normal = raw_pos - pos * 2.0;
-    normal.y = normal.y * 2.0 - 1.0;
-
-    let gapwidth = props.gapwidth / 2.0;
-    let offset = -props.offset;
-    let width = props.width;
-
-    let halfwidth = width * 0.5;
-    let inset = gapwidth + select(0.0, antialiasing, gapwidth > 0.0);
-    let outset = gapwidth + halfwidth * select(1.0, 2.0, gapwidth > 0.0) +
-                 select(0.0, antialiasing, halfwidth != 0.0);
-
-    // Scale the extrusion vector down to a normal and then up by the line width of this vertex
-    let dist = outset * a_extrude * LINE_NORMAL_SCALE;
-
-    // Calculate the offset when drawing a line that is to the side of the actual line
-    let u = 0.5 * a_direction;
-    let t = 1.0 - abs(u);
-    let offset2 = offset * a_extrude * LINE_NORMAL_SCALE * normal.y * mat2x2<f32>(t, -u, u, t);
-
+    // The tile units a pixel spans; on the globe, more toward the poles,
+    // where a tile unit covers less of the sphere.
+    var units = 1.0 / (projection.tile_mercator_coords.z * props.world_width);
 #ifdef PROJECTION_GLOBE
-    let adjustedThickness = projectLineThickness(pos.y, projectionVector[globalIndex.value]);
-    let projected_no_extrude = projectTile(pos + offset2 / ratio * adjustedThickness, projectionVector[globalIndex.value]);
-    let extrudedPos = pos + (offset2 + dist) / ratio * adjustedThickness;
-    let base = projectTile(extrudedPos, projectionVector[globalIndex.value]);
-    out.v_tile_x = antimeridianClipX(extrudedPos, projectionVector[globalIndex.value]);
-    let projected_extrude = base - projected_no_extrude;
-#else
-    let projected_extrude = drawable.matrix * vec4<f32>(dist / ratio, 0.0, 0.0);
-    let base = drawable.matrix * vec4<f32>(pos + offset2 / ratio, 0.0, 1.0) + projected_extrude;
+    let ratio = circumferenceRatioAtTileY((start.y + end.y) * 0.5, projection);
+    units = units * mix(1.0, 1.0 / ratio, projection.projection_transition);
 #endif
-    let inv_w = 1.0 / base.w;
 
-    out.position = base;
+    // The quad around the segment on the map, reaching half the width and
+    // the antialiased edge past its sides and ends.
+    let tile_length = distance(start, end);
+    var along = vec2<f32>(1.0, 0.0);
+    if (tile_length > 0.0) {
+        along = (end - start) / tile_length;
+    }
+    let across = vec2<f32>(-along.y, along.x);
+    let segment_length = tile_length / units;
+    let reach = props.width * 0.5 + 0.5 / DEVICE_PIXEL_RATIO;
+    let offset = vec2<f32>(select(-reach, segment_length + reach, in.corner.x != 0),
+                           select(-reach, reach, in.corner.y != 0));
+    let base = start + along * (offset.x * units);
+    let corner = projectTile(base + across * (offset.y * units), projection);
+    let middle = projectTile(base, projection);
+    let extent = length((corner.xy - middle.xy) / corner.w * paintParams.units_to_pixels);
 
-    let extrude_length_without_perspective = length(dist);
-    let extrude_length_with_perspective =
-        length((projected_extrude.xy / base.w) * paintParams.units_to_pixels);
-    let gamma_denom = max(extrude_length_with_perspective, 1e-6);
-
-    out.v_width2 = vec2<f32>(outset, inset);
-    out.v_normal = normal;
-    out.v_gamma_scale = extrude_length_without_perspective / gamma_denom;
-
+    out.position = corner;
+    out.offset = offset;
+    out.segment_length = segment_length;
+    out.gamma_scale = reach / max(extent, 1e-6);
     return out;
 }
 ",
@@ -461,62 +421,34 @@ fn main(in: VertexInput) -> VertexOutput {
 override DEVICE_PIXEL_RATIO: f32 = 1.0;
 
 struct FragmentInput {
-    @location(0) v_width2: vec2<f32>,
-    @location(1) v_normal: vec2<f32>,
-    @location(2) v_gamma_scale: f32,
-#ifdef PROJECTION_GLOBE
-    @location(6) v_tile_x: f32,
-#endif
+    @location(0) offset: vec2<f32>,
+    @location(1) @interpolate(flat) segment_length: f32,
+    @location(2) gamma_scale: f32,
 };
 
 struct TileDebugPropsUBO {
     color: vec4<f32>,
-    blur: f32,
-    opacity: f32,
-    gapwidth: f32,
-    offset: f32,
     width: f32,
+    world_width: f32,
     pad0: f32,
     pad1: f32,
-    pad2: f32,
 };
 
-struct GlobalPaintParamsUBO {
-    units_to_pixels: vec2<f32>,
-    world_size: vec2<f32>,
-    camera_to_center_distance: f32,
-    aspect_ratio: f32,
-    pixel_ratio: f32,
-    pad1: f32,
-};
-
-@group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
 @group(0) @binding(5) var<uniform> props: TileDebugPropsUBO;
 
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
-#ifdef PROJECTION_GLOBE
-    if (clippedAtAntimeridian(in.v_tile_x)) {
-        discard;
-    }
-#endif
 #ifdef OVERDRAW_INSPECTOR
-    return vec4<f32>(1.0, 1.0, 1.0, 1.0);
+    return vec4<f32>(1.0);
+#else
+    // The distance from the segment, whose ends are round, and the coverage
+    // of an antialiased edge one device pixel wide on screen.
+    let beyond = max(max(-in.offset.x, in.offset.x - in.segment_length), 0.0);
+    let dist = length(vec2<f32>(beyond, in.offset.y));
+    let edge = max(in.gamma_scale / DEVICE_PIXEL_RATIO, 1e-6);
+    let alpha = clamp((props.width * 0.5 + 0.5 / DEVICE_PIXEL_RATIO - dist) / edge, 0.0, 1.0);
+    return props.color * alpha;
 #endif
-    let color = props.color;
-    let blur = props.blur;
-    let opacity = props.opacity;
-
-    // Calculate the distance of the pixel from the line in pixels
-    let dist = length(in.v_normal) * in.v_width2.x;
-
-    // Calculate the antialiasing fade factor
-    let antialiasing = 0.5 / DEVICE_PIXEL_RATIO;
-    let blur2 = (blur + (1.0 / DEVICE_PIXEL_RATIO)) * in.v_gamma_scale;
-    let denom = max(blur2, 1e-6);
-    let alpha = clamp(min(dist - (in.v_width2.y - blur2), in.v_width2.x - dist) / denom, 0.0, 1.0);
-
-    return color * (alpha * opacity);
 }
 ",
     ),

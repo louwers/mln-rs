@@ -14,8 +14,7 @@ use std::mem::size_of;
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::shaders::program::{GLOBE_DEFINE, Program};
 use mln_gfx::shaders::programs::{
-    ID_ATMOSPHERE_PROPS_UBO, ID_LAYER_COMPOSITE_UBO, ID_SKY_PROPS_UBO, ID_TILE_DEBUG_DRAWABLE_UBO,
-    ID_TILE_DEBUG_PROPS_UBO,
+    ID_ATMOSPHERE_PROPS_UBO, ID_LAYER_COMPOSITE_UBO, ID_SKY_PROPS_UBO, ID_TILE_DEBUG_PROPS_UBO,
 };
 use mln_gfx::shaders::shader_defines::{
     DRAWABLE_RESERVED_UBO_COUNT, ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO, ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO,
@@ -298,10 +297,7 @@ fn ubo_ids(program: &Program, source: &msl::Source) -> Vec<(&'static str, usize)
             ],
             "lineUBOCount",
         ),
-        "TileDebugShader" => (
-            &[("idTileDebugDrawableUBO", ID_TILE_DEBUG_DRAWABLE_UBO), ("idTileDebugPropsUBO", ID_TILE_DEBUG_PROPS_UBO)],
-            "tileDebugUBOCount",
-        ),
+        "TileDebugShader" => (&[("idTileDebugPropsUBO", ID_TILE_DEBUG_PROPS_UBO)], "tileDebugUBOCount"),
         "RasterShader" => (
             &[
                 ("idRasterDrawableUBO", ID_RASTER_DRAWABLE_UBO),
@@ -387,8 +383,6 @@ const UBO_SIZES: &[(&str, usize)] = &[
     ("LineSDFTilePropsUBO", size_of::<mln_layers::line::ubo::LineSDFTilePropsUBO>()),
     ("LineEvaluatedPropsUBO", size_of::<mln_layers::line::ubo::LineEvaluatedPropsUBO>()),
     ("LineDrawableUnionUBO", size_of::<mln_layers::line::ubo::LineDrawableUnionUBO>()),
-    ("TileDebugDrawableUBO", size_of::<tile_debug_ubo::TileDebugDrawableUBO>()),
-    ("TileDebugDrawableElement", size_of::<tile_debug_ubo::TileDebugDrawableElement>()),
     ("TileDebugPropsUBO", size_of::<tile_debug_ubo::TileDebugPropsUBO>()),
     ("LineTilePropsUnionUBO", size_of::<mln_layers::line::ubo::LineTilePropsUnionUBO>()),
     ("RasterDrawableUBO", size_of::<mln_layers::raster::ubo::RasterDrawableUBO>()),

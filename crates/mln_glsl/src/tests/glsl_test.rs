@@ -17,8 +17,7 @@ use mln_gfx::shaders::layer_composite_ubo::LayerCompositeUBO;
 use mln_gfx::shaders::layer_ubo::{GlobalPaintParamsUBO, ProjectionUBO};
 use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::programs::{
-    ID_ATMOSPHERE_PROPS_UBO, ID_LAYER_COMPOSITE_UBO, ID_SKY_PROPS_UBO, ID_TILE_DEBUG_DRAWABLE_UBO,
-    ID_TILE_DEBUG_PROPS_UBO,
+    ID_ATMOSPHERE_PROPS_UBO, ID_LAYER_COMPOSITE_UBO, ID_SKY_PROPS_UBO, ID_TILE_DEBUG_PROPS_UBO,
 };
 use mln_gfx::shaders::shader_defines::{
     DRAWABLE_RESERVED_UBO_COUNT, ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO, ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO,
@@ -26,7 +25,7 @@ use mln_gfx::shaders::shader_defines::{
 };
 use mln_gfx::shaders::sky_ubo::{AtmospherePropsUBO, SkyPropsUBO};
 use mln_gfx::shaders::source::glsl;
-use mln_gfx::shaders::tile_debug_ubo::{TileDebugDrawableElement, TileDebugPropsUBO};
+use mln_gfx::shaders::tile_debug_ubo::TileDebugPropsUBO;
 use mln_layers::background::programs::{ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_PROPS_UBO};
 use mln_layers::background::ubo::{BackgroundDrawableUnionUBO, BackgroundPatternPropsUBO, BackgroundPropsUBO};
 use mln_layers::circle::programs::{ID_CIRCLE_DRAWABLE_UBO, ID_CIRCLE_EVALUATED_PROPS_UBO};
@@ -281,11 +280,7 @@ fn buffers(program: &Program) -> Vec<(Buffer, usize)> {
             (DrawableUniform(ID_HILLSHADE_PREPARE_DRAWABLE_UBO), size_of::<HillshadePrepareDrawableUBO>()),
             (DrawableUniform(ID_HILLSHADE_PREPARE_TILE_PROPS_UBO), size_of::<HillshadePrepareTilePropsUBO>()),
         ],
-        "TileDebugShader" => vec![
-            (LayerStorage(ID_TILE_DEBUG_DRAWABLE_UBO), size_of::<TileDebugDrawableElement>()),
-            projection,
-            (LayerUniform(ID_TILE_DEBUG_PROPS_UBO), size_of::<TileDebugPropsUBO>()),
-        ],
+        "TileDebugShader" => vec![projection, (LayerUniform(ID_TILE_DEBUG_PROPS_UBO), size_of::<TileDebugPropsUBO>())],
         "LineShader" | "LineGradientShader" => vec![
             (LayerStorage(ID_LINE_DRAWABLE_UBO), size_of::<LineDrawableUnionUBO>()),
             projection,
