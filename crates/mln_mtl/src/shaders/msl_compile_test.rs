@@ -292,7 +292,11 @@ fn ubo_ids(program: &Program, source: &ShaderSource) -> Vec<(&'static str, usize
         "SkyShader" => (&[("idSkyPropsUBO", ID_SKY_PROPS_UBO)], "skyUBOCount"),
         "VertexTexelShader" => (&[], "vertexTexelUBOCount"),
         "TerrainShader" | "TerrainProbeShader" => (
-            &[("idTerrainDrawableUBO", ID_TERRAIN_DRAWABLE_UBO), ("idTerrainPropsUBO", ID_TERRAIN_PROPS_UBO)],
+            &[
+                ("idTerrainDrawableUBO", ID_TERRAIN_DRAWABLE_UBO),
+                ("idTerrainPropsUBO", ID_TERRAIN_PROPS_UBO),
+                ("idTerrainFogUBO", ID_TERRAIN_FOG_UBO),
+            ],
             "terrainUBOCount",
         ),
         "SymbolIconShader" | "SymbolSDFShader" | "SymbolTextAndIconShader" => (
@@ -380,6 +384,7 @@ const UBO_SIZES: &[(&str, usize)] = &[
     ("SymbolEvaluatedPropsUBO", size_of::<symbol_layer_ubo::SymbolEvaluatedPropsUBO>()),
     ("TerrainDrawableUBO", size_of::<terrain_ubo::TerrainDrawableUBO>()),
     ("TerrainPropsUBO", size_of::<terrain_ubo::TerrainPropsUBO>()),
+    ("TerrainFogUBO", size_of::<terrain_ubo::TerrainFogUBO>()),
 ];
 
 /// True if `text` declares the struct or union `name`.

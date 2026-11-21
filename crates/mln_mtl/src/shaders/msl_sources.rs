@@ -4017,6 +4017,7 @@ const TERRAIN_PRELUDE: &str = r#"
 enum {
     idTerrainDrawableUBO = idDrawableReservedVertexOnlyUBO,
     idTerrainPropsUBO = drawableReservedUBOCount,
+    idTerrainFogUBO,
     terrainUBOCount
 };
 
@@ -4036,6 +4037,23 @@ struct alignas(16) TerrainPropsUBO {
     /* 32 */
 };
 static_assert(sizeof(TerrainPropsUBO) == 2 * 16, "wrong size");
+
+// Only the surface reads the fog.
+struct alignas(16) TerrainFogUBO {
+    /*  0 */ float4 fog_color;
+    /* 16 */ float4 horizon_color;
+    // The near and far distances along the view, in pixels, between which the
+    // fog's depth runs from 0 to 1.
+    /* 32 */ float2 depth_range;
+    /* 40 */ float ground_blend;
+    /* 44 */ float horizon_blend;
+    /* 48 */ float opacity;
+    // 1 to fog the ground, drawn on or not; 0 to fog only what is drawn.
+    /* 52 */ float ground;
+    /* 56 */ float2 pad;
+    /* 64 */
+};
+static_assert(sizeof(TerrainFogUBO) == 4 * 16, "wrong size");
 
 "#;
 
@@ -4083,8 +4101,8 @@ static float terrain_elevation(float2 pos, float4 dem_coords, texture2d<float, a
 
 /// The terrain's surface: a tile's grid, drawn with the tile's matrix, raised
 /// to the heights of the tile's DEM with its skirts lowered, in the colors of
-/// the tile's drape. Rows of a pass's texture are stored north first, as the
-/// drape is read.
+/// the tile's drape, fogged as GL JS's terrain is. Rows of a pass's texture
+/// are stored north first, as the drape is read.
 pub(crate) const TERRAIN_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
@@ -4101,27 +4119,51 @@ struct VertexStage {
 struct FragmentStage {
     float4 position [[position, invariant]];
     float2 drape_pos;
+    // GL JS's fog depth: a perspective depth from 0 at the near end of the
+    // fog's range to 1 at its far end.
+    float fog_depth;
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const TerrainDrawableUBO* drawableVector [[buffer(idTerrainDrawableUBO)]],
                                 device const TerrainPropsUBO& props [[buffer(idTerrainPropsUBO)]],
+                                device const TerrainFogUBO& fog [[buffer(idTerrainFogUBO)]],
                                 texture2d<float, access::read> dem [[texture(0)]]) {
     device const TerrainDrawableUBO& drawable = drawableVector[uboIndex];
     const float2 pos = float2(vertx.pos.xy);
     const float skirt = float(vertx.pos.z);
-    const float elevation = terrain_elevation(pos, drawable.dem_coords, dem, props) - skirt * props.skirt_length;
+    const float height = terrain_elevation(pos, drawable.dem_coords, dem, props);
+    // The fog's depth is that of the ground before the skirt lowers it, as in
+    // GL JS: from the view distance w, which the fog matrix shares.
+    const float4x4 m = drawable.matrix;
+    const float w = m[0].w * pos.x + m[1].w * pos.y + m[2].w * height + m[3].w;
+    const float fog_near = fog.depth_range.x;
+    const float fog_far = fog.depth_range.y;
     return {
-        .position = drawable.matrix * float4(pos, elevation, 1.0),
+        .position = m * float4(pos, height - skirt * props.skirt_length, 1.0),
         .drape_pos = pos / 8192.0,
+        .fog_depth = fog_far / (fog_far - fog_near) * (1.0 - fog_near / max(w, 1e-6)),
     };
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]],
+                            device const TerrainFogUBO& fog [[buffer(idTerrainFogUBO)]],
                             texture2d<float, access::sample> drape [[texture(1)]],
                             sampler drape_sampler [[sampler(1)]]) {
-    return half4(drape.sample(drape_sampler, in.drape_pos));
+    const float4 color = drape.sample(drape_sampler, in.drape_pos);
+    if (fog.opacity <= 0.0 || in.fog_depth <= fog.ground_blend) {
+        return half4(color);
+    }
+    // GL JS's fog, mixed in linear space through a gamma of 2.2: toward the
+    // fog's color, and past the horizon blend toward the horizon's. Over the
+    // ground it fogs every texel; above it, only what the drape covers.
+    const float4 gamma = float4(2.2);
+    const float horizon = smoothstep(0.0, 1.0, max((in.fog_depth - fog.horizon_blend) / (1.0 - fog.horizon_blend), 0.0));
+    const float coverage = mix(pow(color.a, 2.2), 1.0, fog.ground);
+    const float4 target_color = mix(pow(fog.fog_color, gamma), pow(fog.horizon_color, gamma), horizon) * coverage;
+    const float factor = pow((in.fog_depth - fog.ground_blend) / (1.0 - fog.ground_blend), 2.0) * fog.opacity;
+    return half4(pow(mix(pow(color, gamma), target_color, factor), 1.0 / gamma));
 }
 "
     ),
