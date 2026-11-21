@@ -370,7 +370,9 @@ impl Transform {
     ///
     /// Over terrain that clamps the center, the command takes no altitude,
     /// and the altitude follows `along`, its share of the way, while it
-    /// paces the ease toward the ground ([`Transform::ease_altitude`]).
+    /// paces the ease toward the ground ([`Transform::ease_altitude`]). A
+    /// command of the altitude alone then asks for nothing: it takes no
+    /// field, not even a flight's or an anchor's, and finishes.
     pub(super) fn start_transition(
         &mut self,
         camera: &CameraOptions,
@@ -380,16 +382,16 @@ impl Transform {
         duration: Duration,
         flight: bool,
     ) {
-        let mut fields = camera_fields(camera);
-        if self.clamped() {
-            fields &= !ALTITUDE;
-        }
+        let given = camera_fields(camera);
+        let mut fields = if self.clamped() { given & !ALTITUDE } else { given };
+        let emptied = given != 0 && fields == 0;
+        let flight = flight && !emptied;
         let mut coupled_fields = if flight { CENTER | ZOOM } else { 0 };
         fields |= coupled_fields;
 
         // An anchor controls center together with the properties it
         // transforms. An explicit center takes precedence over an anchor.
-        let mut anchor = if camera.center.is_some() { None } else { camera.anchor };
+        let mut anchor = if camera.center.is_some() || emptied { None } else { camera.anchor };
         let mut anchor_lat_lng = LatLng::default();
         let mut anchor_height = 0.0;
         if let Some(a) = anchor.as_mut() {

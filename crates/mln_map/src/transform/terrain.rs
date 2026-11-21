@@ -114,7 +114,7 @@ impl Transform {
     /// to sea level, and then anchors hold their locations at sea level,
     /// under them in that camera. A rule that applies again starts from the
     /// camera as it is, and a clamp that does takes the running commands'
-    /// altitudes.
+    /// altitudes, and completes the commands left with nothing to move.
     pub fn set_terrain(&mut self, terrain: Option<TerrainGround>) {
         let clamped = self.clamped();
         let clamps = terrain.as_ref().is_some_and(|terrain| terrain.clamped);
@@ -127,6 +127,10 @@ impl Transform {
             for transition in &mut self.transitions {
                 transition.fields &= !ALTITUDE;
             }
+            // Nothing took their fields, so they complete.
+            let emptied = self.transitions.extract_if(.., |transition| transition.fields == 0).collect();
+            self.update_movement_flags();
+            self.finish_transitions(emptied);
         }
         if goes {
             self.gesture.anchor_plane = None;
