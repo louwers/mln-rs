@@ -2,8 +2,7 @@
 #MISE description="Refresh the test data copied from maplibre-native"
 #USAGE arg "[checkout]" help="A maplibre-native checkout (default ../maplibre-native)"
 # The shared suites' directories are copied whole, so new tests come along;
-# every other file that is there, outside tools/c-abi-test (update-ffi-abi), is
-# copied again.
+# every other file that is there, outside tools/c-abi-test, is copied again.
 # The copies are from johncarmack1984/maplibre-native's
 # maplibre-native-next-support-globe-sky branch at d171bf4b9934: the globe
 # branch of maplibre/maplibre-native#4533 (phased/12h), with

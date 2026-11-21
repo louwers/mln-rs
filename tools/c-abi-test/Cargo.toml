@@ -6,8 +6,8 @@ rust-version.workspace = true
 description.workspace = true
 license.workspace = true
 repository.workspace = true
-# Runs maplibre-native-ffi's ABI suite, which CMakeLists.txt builds, against
-# crates/mln_c (`mise run test:c-abi`); never released.
+# Runs the C ABI suite, which CMakeLists.txt builds, against crates/mln_c
+# (`mise run test:c-abi`); never released.
 publish = false
 
 [[bin]]

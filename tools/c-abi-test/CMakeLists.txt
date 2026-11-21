@@ -1,9 +1,8 @@
-# Builds maplibre-native-ffi's ABI suite (testdata/tests/native/abi) against
-# crates/mln_c's headers and library, the way maplibre-native-ffi's
-# cmake/mln_ffi_tests.cmake builds it against its own: the same support files,
-# Unity and graphics fixtures, for one render backend: vulkan, or opengl on EGL,
-# maplibre-native-ffi's Linux OpenGL preset. `mise run test:c-abi` configures it
-# with the library that Cargo built and runs it through src/main.rs.
+# Builds the C ABI suite (testdata/tests/native/abi) against crates/mln_c's
+# headers and library, with its support files, Unity and graphics fixtures, for
+# one render backend: vulkan, or opengl on EGL. `mise run test:c-abi`
+# configures it with the library that Cargo built and runs it through
+# src/main.rs.
 cmake_minimum_required(VERSION 3.25)
 project(mln_c_abi_test C CXX)
 
@@ -33,8 +32,8 @@ if(MLN_C_TEST_BACKEND STREQUAL "opengl")
   find_library(GLES_LIBRARY NAMES GLESv2 REQUIRED)
 endif()
 
-# The library, under the name of maplibre-native-ffi's target. Cargo gives it
-# no soname, so the suite links it by directory and name.
+# The library, under its target name. Cargo gives it no soname, so the suite
+# links it by directory and name.
 add_library(maplibre_native_c SHARED IMPORTED)
 set_target_properties(
   maplibre_native_c
@@ -42,8 +41,8 @@ set_target_properties(
              IMPORTED_NO_SONAME TRUE
              INTERFACE_INCLUDE_DIRECTORIES "${MLN_C_INCLUDE_DIR}")
 
-# The suite's domains and file tags, as maplibre-native-ffi lists them. A file
-# whose name ends in a tag builds only where the tag is active.
+# The suite's domains and file tags. A file whose name ends in a tag builds
+# only where the tag is active.
 set(ABI_DOMAINS
     base
     completion
@@ -204,8 +203,8 @@ target_link_libraries(
           ${CMAKE_DL_LIBS})
 target_link_options(mln_native_abi_tests PRIVATE "LINKER:--allow-shlib-undefined")
 
-# The exit programs (testdata/tests/native/exit), one executable each in exit/,
-# as maplibre-native-ffi's mln_native_add_exit_tests builds them. Each makes
+# The exit programs (testdata/tests/native/exit), one executable each in exit/.
+# Each makes
 # its calls and returns from main while the library's threads are at work, so
 # the process exit that follows is the check: src/main.rs expects each to exit
 # with status 0. A program whose name ends in a tag builds only where the tag

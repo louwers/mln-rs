@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Run maplibre-native-ffi's ABI tests against the C library"
+#MISE description="Run the ABI suite against the C library"
 #USAGE arg "[args]..." var=#true help="Arguments to tools/c-abi-test's runner, such as `--jobs`"
 # Configures and builds tools/c-abi-test in target/c-abi-test-<backend>,
 # against crates/mln_c's shared library, then runs it with

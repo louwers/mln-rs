@@ -1,7 +1,7 @@
 // Resource providers, URL and header transforms, the cache database and
-// offline regions. They follow maplibre-native-ffi's ABI tests
-// (tests/native/abi/resources/{provider,transforms,ambient_cache,offline}.c
-// at eae96a42c) where those test the same rules.
+// offline regions. They follow the C ABI suite (tools/c-abi-test/testdata/
+// tests/native/abi/resources/{provider,transforms,ambient_cache,offline}.c)
+// where it tests the same rules.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};

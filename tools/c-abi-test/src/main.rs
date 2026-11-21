@@ -1,9 +1,8 @@
 //! `c-abi-test <suite> [--exit-programs <dir>] [--jobs <n>]`: runs
-//! maplibre-native-ffi's ABI suite against `crates/mln_c` (`mise run test:c-abi`).
+//! the C ABI suite against `crates/mln_c` (`mise run test:c-abi`).
 //!
 //! The suite binary is the one `CMakeLists.txt` builds. Each test file runs in
-//! a process of its own, in parallel, as maplibre-native-ffi's `CTest` entries
-//! do. A case that fails leaves its handles to the suite's `tearDown`, whose
+//! a process of its own, in parallel. A case that fails leaves its handles to the suite's `tearDown`, whose
 //! callbacks can still reach the failed case's stack, so the file's later cases
 //! each run in a process of their own. When a process dies (a crash, or the
 //! suite's hang watchdog), the case it was running fails.
@@ -11,8 +10,7 @@
 //! With `--exit-programs`, it then runs each exit program that
 //! `CMakeLists.txt` builds into that directory, in parallel. Each returns from
 //! main while the library's threads are at work, so it passes when the process
-//! exit that follows ends it with status 0 within `EXIT_TIMEOUT`, the bound
-//! that maplibre-native-ffi's `CTest` entries give it.
+//! exit that follows ends it with status 0 within `EXIT_TIMEOUT`.
 //!
 //! The run fails when any case fails or any exit program doesn't pass.
 
