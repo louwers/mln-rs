@@ -3,6 +3,8 @@
 
 mod support;
 
+// An image source whose corners make a concave quad draws inside its outline.
+mod concave_image_test;
 mod custom_layer_test;
 // Map::set_debug's tile overlays and the rendering stats view.
 mod debug_options_test;

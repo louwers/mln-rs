@@ -55,6 +55,20 @@ fn is_parallelogram(corners: &GeometryCoordinates) -> bool {
         && top_left.1 + bottom_right.1 == top_right.1 + bottom_left.1
 }
 
+/// The corner of a concave quad of `corners` (top left, top right, bottom
+/// right, bottom left) that points into it, by its index; `None` for a
+/// quad that isn't concave.
+fn concave_corner(corners: &GeometryCoordinates) -> Option<usize> {
+    let point = |i: usize| (i64::from(corners[i % 4].x), i64::from(corners[i % 4].y));
+    // Which way the outline turns at each corner: a concave quad turns
+    // against the other three at one.
+    let turns = [0, 1, 2, 3].map(|i| {
+        let ((ax, ay), (bx, by), (cx, cy)) = (point(i + 3), point(i), point(i + 1));
+        ((bx - ax) * (cy - by) - (by - ay) * (cx - bx)).signum()
+    });
+    (0..4).find(|&i| turns[i] != 0 && (0..4).all(|j| j == i || turns[j] == -turns[i]))
+}
+
 fn image_warp(corners: &GeometryCoordinates) -> ImageWarp {
     const PROJECTIVE_FORESHORTENING: f64 = 4.0;
     const BILINEAR_FORESHORTENING: f64 = 512.0;
@@ -147,8 +161,9 @@ fn to_vertex_coordinate(value: f64) -> i16 {
 }
 
 // The unit square as a grid of `cells` x `cells`, textured edge to edge,
-// which the raster shader puts on the image's quad.
-fn build_image_mesh(bucket: &mut RasterBucket, cells: u32) {
+// which the raster shader puts on the image's quad, each cell split along
+// its diagonal from the top right, or from the top left if `from_top_left`.
+fn build_image_mesh(bucket: &mut RasterBucket, cells: u32, from_top_left: bool) {
     let rows = cells + 1;
     let extent = constants::EXTENT as u32;
     let mut vertices = Vec::with_capacity((rows * rows) as usize);
@@ -165,8 +180,13 @@ fn build_image_mesh(bucket: &mut RasterBucket, cells: u32) {
             let top_right = top_left.wrapping_add(1);
             let bottom_left = top_left.wrapping_add(rows as u16);
             let bottom_right = bottom_left.wrapping_add(1);
-            indices.extend_from_slice(&[top_left, top_right, bottom_left]);
-            indices.extend_from_slice(&[top_right, bottom_left, bottom_right]);
+            if from_top_left {
+                indices.extend_from_slice(&[top_left, top_right, bottom_right]);
+                indices.extend_from_slice(&[top_left, bottom_right, bottom_left]);
+            } else {
+                indices.extend_from_slice(&[top_left, top_right, bottom_left]);
+                indices.extend_from_slice(&[top_right, bottom_left, bottom_right]);
+            }
         }
     }
     let segments = vec![SegmentBase::with_lengths(0, 0, vertices.len(), indices.len())];
@@ -417,11 +437,14 @@ impl RenderSource for RenderImageSource {
         // granularity of its tile. Two triangles draw a parallelogram's
         // affine warp and a projective warp exactly; one blended towards the
         // bilinear warp is neither, and would bend along their diagonal, so
-        // it draws on a grid.
+        // it draws on a grid. A concave quad's bilinear warp folds over
+        // itself, out of the quad: it draws on two triangles split along the
+        // diagonal inside it.
         let warp = image_warp(&geom_coords);
+        let concave = concave_corner(&geom_coords);
         let cells = if view.is_globe() {
             SubdivisionGranularitySetting::globe().tile.granularity_for_zoom_level(self.tile_ids[0].canonical.z)
-        } else if warp.blend > 0.0 && !is_parallelogram(&geom_coords) {
+        } else if warp.blend > 0.0 && !is_parallelogram(&geom_coords) && concave.is_none() {
             BLENDED_WARP_CELLS
         } else {
             1
@@ -429,7 +452,7 @@ impl RenderSource for RenderImageSource {
         // New corners build the mesh again too, so that the drapes that
         // showed the image draw again.
         if !bucket.geometry().has_quads() || geom_coords != self.mesh_corners || cells != self.mesh_cells {
-            build_image_mesh(bucket, cells);
+            build_image_mesh(bucket, cells, matches!(concave, Some(0 | 2)));
             self.quad = ImageQuad::new(&geom_coords, &warp);
             let mut bounds = [i32::MAX, i32::MAX, i32::MIN, i32::MIN];
             for corner in &geom_coords {
