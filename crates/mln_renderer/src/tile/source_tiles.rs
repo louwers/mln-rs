@@ -6,6 +6,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+use mln_map_types::tile_cover::{TileCoverParameters, covering_zoom_level, globe_level_cover, tile_cover};
 use mln_map_types::{MapDebugOptions, MapMode, TileLodMode, VerticalPerspectiveProjection};
 use mln_style::Source;
 use mln_style::property_value::PropertyValue;
@@ -40,7 +41,6 @@ use crate::tile::store::{SourceInfo, StoreContext};
 use crate::tile::tile::{Tile, TileKind, TileLoadOrder, TileNecessity, TileUpdateParameters};
 use crate::tile::tile_mut::{TileMut, WorldCopy, retire};
 use crate::tile_parameters::TileParameters;
-use crate::util::tile_cover::{TileCoverParameters, covering_zoom_level, globe_level_cover, tile_cover};
 
 /// How many times the tiles in view the cache keeps, at least.
 const VIEWS_CACHED: usize = 3;

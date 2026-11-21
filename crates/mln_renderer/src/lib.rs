@@ -63,7 +63,7 @@ mod tile_render_data;
 pub mod unstable;
 mod update_parameters;
 pub mod update_slot;
-pub mod util;
+mod util;
 
 pub use bucket::LayerFeatureStates;
 pub use frame_projection::{ClipDepthRange, FrameProjection};

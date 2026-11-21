@@ -9,6 +9,7 @@ use geometry::Point;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_map_types::TileCoordinate;
 use mln_map_types::tile_coordinate::TileCoordinatePoint;
+use mln_map_types::tile_cover::{TileCoverParameters, tile_cover, tile_cover_bounds};
 use mln_style::Source;
 use mln_tile_id::{GeometryCoordinate, GeometryCoordinates, OverscaledTileID, UnwrappedTileID};
 use mln_util::constants;
@@ -26,7 +27,6 @@ use crate::source::{ImageOf, SourceImage};
 use crate::tile::raster::{RasterContents, RasterLayoutVertex};
 use crate::tile::store::TileStore;
 use crate::tile_parameters::TileParameters;
-use crate::util::tile_cover::{TileCoverParameters, tile_cover, tile_cover_bounds};
 
 // The mapping from the unit square onto the image's corners: the perspective
 // terms of the projective warp and how far it is blended towards the

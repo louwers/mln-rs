@@ -2954,12 +2954,14 @@ dependencies = [
 name = "mln-rs-map-types"
 version = "0.0.13"
 dependencies = [
+ "geo-types",
  "glam",
  "mln-rs-geometry",
  "mln-rs-math",
  "mln-rs-style-types",
  "mln-rs-tile-id",
  "mln-rs-util",
+ "mln-rs-vec-map",
  "mln-rs-wire",
  "thiserror 2.0.21",
 ]
@@ -3193,7 +3195,7 @@ dependencies = [
  "mln-rs-feature",
  "mln-rs-headless",
  "mln-rs-map",
- "mln-rs-renderer",
+ "mln-rs-map-types",
  "mln-rs-storage",
  "mln-rs-style",
  "mln-rs-style-types",

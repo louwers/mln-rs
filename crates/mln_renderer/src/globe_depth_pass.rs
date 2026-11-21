@@ -14,6 +14,7 @@ use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE, ID_PROJECTION_UBO};
 use mln_gfx::{AttributeDataType, DepthMaskType, DrawMode};
 use mln_map_types::View;
+use mln_map_types::tile_cover::{TileCoverParameters, tile_cover};
 use mln_util::range::Range;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
@@ -26,7 +27,6 @@ use crate::layer_drawing::{DrawDepth, DrawList, FrameDraw, KeptDraw, LayerDraws,
 use crate::paint_parameters::PaintParameters;
 use crate::tile_matrix::to_projection_ubo;
 use crate::update_parameters::UpdateParameters;
-use crate::util::tile_cover::{TileCoverParameters, tile_cover};
 
 /// Writes the planet into the depth buffer ahead of the translucent pass, so
 /// that 3D geometry behind the horizon is hidden by the globe the way the 2D
