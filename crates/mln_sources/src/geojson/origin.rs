@@ -21,7 +21,7 @@ use super::{GeoJSONData, GeoJsonSourceType, TileFeatures};
 
 impl SourceType for GeoJsonSourceType {
     fn supply(_source: &Source) -> Supply {
-        Supply::tiles(TileKind::Geometry, true, GeoJsonOrigin { data: None, synchronous: false })
+        Supply::single_layer_tiles(TileKind::Geometry, GeoJsonOrigin { data: None, synchronous: false })
     }
 }
 

@@ -91,7 +91,7 @@ impl<K: Kind> StyleSourceType for Tiles<K> {
 
 impl<K: Kind> SourceType for Tiles<K> {
     fn supply(_source: &Source) -> Supply {
-        Supply::tiles(K::TILES, false, Fetched::<K> { tileset: None, file_source: None, kind: PhantomData })
+        Supply::tiles(K::TILES, Fetched::<K> { tileset: None, file_source: None, kind: PhantomData })
     }
 }
 
@@ -284,9 +284,5 @@ impl<K: Kind> DataOrigin for Fetched<K> {
         resource.prior_expires = from.prior_expires;
         resource.prior_etag.clone_from(&from.prior_etag);
         true
-    }
-
-    fn max_zoom(&self) -> u8 {
-        self.tileset.as_ref().map_or(mln_util::constants::TERRAIN_RGB_MAXZOOM, |tileset| tileset.zoom_range.max)
     }
 }

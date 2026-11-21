@@ -442,7 +442,8 @@ pub struct UpdateContext<'a, 'f, T: LayerType> {
 }
 
 impl<T: LayerType> UpdateContext<'_, '_, T> {
-    /// The deepest zoom the layer's source has tiles of, if it says.
+    /// The deepest zoom that has tiles of its own in the layer's source's
+    /// [`Cover`](crate::source::Cover), once it has one.
     #[must_use]
     pub fn source_max_zoom(&self) -> Option<u8> {
         self.source.and_then(RenderSource::max_zoom)

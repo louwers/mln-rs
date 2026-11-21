@@ -93,6 +93,22 @@ fn style(registry: &Registry, layers: &[Layer], zoom: f32) -> Result<Arc<SourceS
     Ok(Arc::new(SourceStyle { version: 0, layers: evaluated, global_state: None, font_faces: None, glyph_pbfs: true }))
 }
 
+/// Adds tiles `ids` to the source `key` of `store`, laid out with `params`,
+/// and starts their loads as a cover starts them. A tile that the source's
+/// origin makes no load of is left out.
+pub(crate) fn seed(store: &mut TileStore, key: SourceKey, ids: &[OverscaledTileID], params: LayoutParams) {
+    let Some((source, ctx)) = store.source_mut(key) else { return };
+    for id in ids {
+        let Some(tile) = source.info.new_tile(*id, params) else {
+            continue;
+        };
+        source.insert(tile);
+        source.update(id, ctx, |tile| {
+            tile.start_load();
+        });
+    }
+}
+
 /// Tiles of one source, whose data comes from an origin, driven as the
 /// renderer drives them, and laid out on this thread. The test decides
 /// which tiles there are and how much each is needed, as a cover would. A
@@ -126,19 +142,8 @@ impl OriginTiles {
             subdivision_granularity: SubdivisionGranularitySetting::none(),
             first_load: true,
         };
-        let mut tiles = OriginTiles { store, key, params };
-        if let Some((source, ctx)) = tiles.store.source_mut(key) {
-            for id in ids {
-                let Some(tile) = source.info.new_tile(*id, params) else {
-                    continue;
-                };
-                source.insert(tile);
-                source.update(id, ctx, |tile| {
-                    tile.start_load();
-                });
-            }
-        }
-        tiles
+        seed(&mut store, key, ids, params);
+        OriginTiles { store, key, params }
     }
 
     /// Gives every tile the style of `layers`, of the layer types of

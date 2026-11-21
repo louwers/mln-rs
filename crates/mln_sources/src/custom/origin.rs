@@ -27,13 +27,13 @@ use crate::geojson::TileFeatures;
 
 impl SourceType for CustomGeometrySourceType {
     fn supply(_source: &Source) -> Supply {
-        Supply::tiles(TileKind::Geometry, true, CustomOrigin::<Self>::new())
+        Supply::single_layer_tiles(TileKind::Geometry, CustomOrigin::<Self>::new())
     }
 }
 
 impl SourceType for CustomVectorSourceType {
     fn supply(_source: &Source) -> Supply {
-        Supply::tiles(TileKind::Geometry, false, CustomOrigin::<Self>::new())
+        Supply::tiles(TileKind::Geometry, CustomOrigin::<Self>::new())
     }
 }
 

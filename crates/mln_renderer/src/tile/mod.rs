@@ -16,5 +16,3 @@ pub(crate) mod store;
 pub(crate) mod tile_mut;
 pub(crate) mod tile_workers;
 pub mod worker_codec;
-
-pub use tile::TileOperation;

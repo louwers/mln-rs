@@ -58,20 +58,12 @@ pub(crate) fn pool() -> mln_util::pool::Pool {
     mln_util::pool::Pool::new(4)
 }
 
-/// Port-only: a tile store whose jobs run on `workers` and which frees and
-/// parses glyphs on `pool`, with no images and no sprite loaded.
-pub(crate) use crate::testing::tile_store;
+pub(crate) use crate::testing::{tile_store, update};
 
 /// Port-only: a tile store whose jobs run on `pool`.
 pub(crate) fn pool_store(pool: &mln_util::pool::TaskGroup) -> crate::tile::store::TileStore {
     tile_store(pool, Box::new(crate::tile::tile_workers::PoolWorkers::new(pool.clone(), 8)))
 }
-
-/// Port-only: one update of `store`'s tiles, as the renderer's: gives the
-/// images asked for their update, takes in what arrived and starts the next
-/// jobs. Returns whether a tile of a source with synchronous updates laid
-/// out.
-pub(crate) use crate::testing::update;
 
 /// Port-only: one tile of a source of its own in a store, driven as the
 /// renderer drives it, whose data the test gives it.
@@ -120,14 +112,7 @@ impl OneTile {
         let key = store.add_source("source".to_owned(), kind, single_layer, Box::new(origin));
         let mut tiles = OneTile { store, key, id: ids[0], mode };
         let params = tiles.params();
-        let (source, ctx) = tiles.store.source_mut(key).expect("the source");
-        for id in ids {
-            let tile = source.info.new_tile(*id, params).expect("a tile");
-            source.insert(tile);
-            source.update(id, ctx, |tile| {
-                tile.start_load();
-            });
-        }
+        crate::testing::seed(&mut tiles.store, key, ids, params);
         tiles
     }
 

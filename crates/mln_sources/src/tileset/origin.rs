@@ -34,7 +34,7 @@ impl<K: TilesetKind> SourceType for TilesetSourceType<K> {
             SourceKind::RasterDem => TileKind::Dem(RasterEncoding::Mapbox),
             SourceKind::Geometry | SourceKind::None => TileKind::Geometry,
         };
-        Supply::tiles(kind, false, TilesetOrigin::<K> { tileset: None, data: None, kind: PhantomData })
+        Supply::tiles(kind, TilesetOrigin::<K> { tileset: None, data: None, kind: PhantomData })
     }
 }
 
@@ -338,10 +338,6 @@ impl<K: TilesetKind> DataOrigin for TilesetOrigin<K> {
         resource.prior_etag.clone_from(&from.prior_etag);
         resource.prior_data.clone_from(&from.prior_data);
         true
-    }
-
-    fn max_zoom(&self) -> u8 {
-        self.tileset.as_ref().map_or(constants::TERRAIN_RGB_MAXZOOM, |tileset| tileset.zoom_range.max)
     }
 }
 
