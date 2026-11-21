@@ -1,40 +1,32 @@
-use crate::gfx_types::{DrawModeType, PrimitiveType};
+use crate::gfx_types::DrawModeType;
 
-/// A primitive type and its point size or line width. The C++ subclasses
-/// (`Points`, `Lines`, `LineStrip`, `Triangles`, `TriangleStrip`) are
-/// constructor functions here.
+/// The primitives a draw's indexes make.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct DrawMode {
-    pub type_: DrawModeType,
-    pub size: f32,
+pub enum DrawMode {
+    Triangles,
+    TriangleStrip,
+    /// Lines `width` pixels wide, up to the device's widest
+    /// ([`Caps::max_line_width`](crate::gpu::Caps::max_line_width)).
+    Lines { width: f32 },
 }
 
 impl DrawMode {
-    #[expect(non_snake_case, reason = "`DrawMode::Lines(width)` reads as the draw mode's variant")]
+    /// The primitive a pipeline of the mode draws.
     #[must_use]
-    pub fn Lines(line_width: f32) -> DrawMode {
-        debug_assert!(line_width > 0.0);
-        DrawMode { type_: DrawModeType::Lines, size: line_width }
+    pub fn primitive(self) -> DrawModeType {
+        match self {
+            DrawMode::Triangles => DrawModeType::Triangles,
+            DrawMode::TriangleStrip => DrawModeType::TriangleStrip,
+            DrawMode::Lines { .. } => DrawModeType::Lines,
+        }
     }
 
-    #[expect(non_snake_case, reason = "`DrawMode::Triangles()` reads as the draw mode's variant")]
+    /// The width of its lines, 1 for triangles.
     #[must_use]
-    pub fn Triangles() -> DrawMode {
-        DrawMode { type_: DrawModeType::Triangles, size: 0.0 }
-    }
-
-    #[expect(non_snake_case, reason = "`DrawMode::TriangleStrip()` reads as the draw mode's variant")]
-    #[must_use]
-    pub fn TriangleStrip() -> DrawMode {
-        DrawMode { type_: DrawModeType::TriangleStrip, size: 0.0 }
-    }
-
-    #[must_use]
-    pub fn primitive_type(&self) -> PrimitiveType {
-        match self.type_ {
-            DrawModeType::Points => PrimitiveType::Point,
-            DrawModeType::Lines | DrawModeType::LineLoop | DrawModeType::LineStrip => PrimitiveType::Line,
-            _ => PrimitiveType::Triangle,
+    pub fn line_width(self) -> f32 {
+        match self {
+            DrawMode::Lines { width } => width,
+            DrawMode::Triangles | DrawMode::TriangleStrip => 1.0,
         }
     }
 }

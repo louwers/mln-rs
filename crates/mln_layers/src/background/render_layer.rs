@@ -77,7 +77,7 @@ impl BackgroundState {
                 AttributeDataType::Short2,
             ),
             vertex_count,
-            mode: DrawMode::Triangles(),
+            mode: DrawMode::Triangles,
             indexes: DrawIndexes::new(indexes),
             segments: segments.iter().map(SegmentBase::copy).collect(),
             instances: None,

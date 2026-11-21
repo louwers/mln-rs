@@ -262,7 +262,7 @@ fn a_draw_writes_an_update_of_the_vertices_it_binds() {
         let geometry = DrawGeometry {
             vertices: attrs,
             vertex_count: 3,
-            mode: DrawMode::Triangles(),
+            mode: DrawMode::Triangles,
             indexes: DrawIndexes::new(vec![0, 1, 2]),
             segments: vec![SegmentBase::new(0, 0)],
             instances: None,
@@ -310,7 +310,7 @@ fn a_draw_binds_the_vertices_it_reads_as_a_storage_buffer() {
         let geometry = DrawGeometry {
             vertices: VertexAttributeArray::new(),
             vertex_count: 4,
-            mode: DrawMode::Triangles(),
+            mode: DrawMode::Triangles,
             indexes: DrawIndexes::new(vec![0, 2, 1, 1, 2, 3]),
             segments: vec![SegmentBase::new(0, 0)],
             instances: None,

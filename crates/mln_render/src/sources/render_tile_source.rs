@@ -96,7 +96,7 @@ fn segment_objects(
     let geometry = DrawGeometry {
         vertices,
         vertex_count: SEGMENT_QUAD.len(),
-        mode: DrawMode::TriangleStrip(),
+        mode: DrawMode::TriangleStrip,
         indexes: DrawIndexes::Shared(indexes),
         segments: vec![SegmentBase { instance_count, ..SegmentBase::with_lengths(0, 0, 4, 4) }],
         instances: Some(instances),

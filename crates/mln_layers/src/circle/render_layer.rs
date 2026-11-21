@@ -250,7 +250,7 @@ impl LayerType for Circle {
                     DrawGeometry {
                         vertices: attrs,
                         vertex_count,
-                        mode: DrawMode::Triangles(),
+                        mode: DrawMode::Triangles,
                         indexes: indexes.into(),
                         segments: bucket.segments.iter().map(SegmentBase::copy).collect(),
                         instances: None,

@@ -347,7 +347,7 @@ fn raster_geometry(
     DrawGeometry {
         vertices: raster_vertex_attributes(vertices),
         vertex_count,
-        mode: DrawMode::Triangles(),
+        mode: DrawMode::Triangles,
         indexes,
         segments: segments.iter().map(SegmentBase::copy).collect(),
         instances: None,

@@ -360,7 +360,7 @@ impl State {
 
     pub(crate) fn set_line_width(&mut self, gl: &Gl, width: f32) {
         if changed(&mut self.line_width, width) {
-            // SAFETY: the width is positive (`DrawMode`).
+            // SAFETY: the width is in the device's range, which is positive.
             unsafe { gl.line_width(width) };
         }
     }

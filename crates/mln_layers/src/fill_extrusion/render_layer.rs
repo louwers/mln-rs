@@ -575,7 +575,7 @@ impl TileBuilder<'_> {
             vertices: &vertex_attrs,
             instances: None,
             vertex_count,
-            mode: DrawMode::Triangles(),
+            mode: DrawMode::Triangles,
             indexes: &triangles,
             segments: &bucket.triangle_segments,
         };
@@ -590,7 +590,7 @@ impl TileBuilder<'_> {
             vertices: &wall_attrs,
             instances: wall_instance_attrs.as_ref(),
             vertex_count: wall_vertex_count,
-            mode: if self.walls == Walls::Instanced { DrawMode::TriangleStrip() } else { DrawMode::Triangles() },
+            mode: if self.walls == Walls::Instanced { DrawMode::TriangleStrip } else { DrawMode::Triangles },
             indexes: self.static_indices,
             segments: &wall_segments,
         };

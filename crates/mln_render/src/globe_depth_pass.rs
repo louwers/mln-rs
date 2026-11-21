@@ -106,7 +106,7 @@ impl GlobeDepthPass {
                 let geometry = DrawGeometry {
                     vertices,
                     vertex_count,
-                    mode: DrawMode::Triangles(),
+                    mode: DrawMode::Triangles,
                     segments: vec![SegmentBase::with_lengths(0, 0, vertex_count, indices.len())],
                     indexes: DrawIndexes::new(indices),
                     instances: None,

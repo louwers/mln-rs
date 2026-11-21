@@ -13,7 +13,7 @@
 use mln_gfx::color_mode::ColorMode;
 use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::draw_mode::DrawMode;
-use mln_gfx::gfx_types::{AttributeDataType, DrawModeType, PrimitiveType};
+use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
 use mln_gfx::gpu::{
     BindGroupEntry, BindingsDesc, BindingsId, BufferId, DepthState, Draw, DynamicState, FixedState, GeometryDesc,
     GeometryId, Gpu, GpuError, PipelineId, PipelineKey, SamplerId, Scissor, ShaderId, ShaderKey, StencilState,
@@ -392,7 +392,7 @@ impl DrawObjects {
             scissor: scissor.unwrap_or(full),
             stencil_reference: stencil.reference,
             blend_constant: self.color_mode.blend_color,
-            line_width: 1.0,
+            line_width: self.mode.line_width(),
         };
         let (depth, stencil) = (depth.state, stencil.state);
         let mut draws = 0;
@@ -401,7 +401,7 @@ impl DrawObjects {
             if segment.index_length == 0 {
                 continue;
             }
-            let variant = PipelineVariant { primitive: mode.type_, depth, stencil, targets };
+            let variant = PipelineVariant { primitive: mode.primitive(), depth, stencil, targets };
             let pipeline = if let Some(&(_, id)) = self.pipelines.iter().find(|(cached, _)| *cached == variant) {
                 id
             } else {
@@ -415,7 +415,6 @@ impl DrawObjects {
                 self.pipelines.push((variant, id));
                 id
             };
-            let line_width = if mode.primitive_type() == PrimitiveType::Line { mode.size } else { 1.0 };
             gpu.draw(&Draw {
                 pipeline,
                 bindings,
@@ -426,7 +425,7 @@ impl DrawObjects {
                 first_instance: segment.base_instance as u32,
                 instance_count: segment.instance_count as u32,
                 global_index,
-                dynamic: DynamicState { line_width, ..dynamic },
+                dynamic,
             })?;
             draws += 1;
         }

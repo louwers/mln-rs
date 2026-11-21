@@ -36,7 +36,7 @@ fn fullscreen_draw(shader: ShaderKey, vertex_attribute: usize, depth: DrawDepth)
     let geometry = DrawGeometry {
         vertices: raw_vertices(vertex_attribute, vertices, corners.len(), AttributeDataType::Short2),
         vertex_count: corners.len(),
-        mode: DrawMode::Triangles(),
+        mode: DrawMode::Triangles,
         indexes: DrawIndexes::new(RenderStaticData::quad_triangle_indices()),
         segments: RenderStaticData::quad_triangle_segments(),
         instances: None,

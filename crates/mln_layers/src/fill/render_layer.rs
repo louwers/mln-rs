@@ -320,7 +320,7 @@ impl TileBuilder<'_> {
             let fill_geometry = fill_geometry(
                 copy_shared_attributes(&vertex_attrs),
                 fill_vertex_count,
-                DrawMode::Triangles(),
+                DrawMode::Triangles,
                 indexes.into(),
                 &bucket.triangle_segments,
             );
@@ -334,7 +334,7 @@ impl TileBuilder<'_> {
                 let quad_geometry = fill_geometry(
                     VertexAttributeArray::new(),
                     4 * fill_vertex_count,
-                    DrawMode::Triangles(),
+                    DrawMode::Triangles,
                     DrawIndexes::Shared(indexes.clone()),
                     &RenderStaticData::quad_segments(fill_vertex_count),
                 );
@@ -371,7 +371,7 @@ impl TileBuilder<'_> {
                     ..fill_geometry(
                         copy_shared_attributes(&quad.attributes),
                         quad.vertex_count,
-                        DrawMode::TriangleStrip(),
+                        DrawMode::TriangleStrip,
                         DrawIndexes::Shared(quad.indexes.clone()),
                         &[SegmentBase { instance_count: fill_vertex_count, ..SegmentBase::with_lengths(0, 0, 4, 4) }],
                     )
@@ -388,7 +388,7 @@ impl TileBuilder<'_> {
                 let line_geometry = fill_geometry(
                     copy_shared_attributes(&vertex_attrs),
                     fill_vertex_count,
-                    DrawMode::Lines(LINE_WIDTH),
+                    DrawMode::Lines { width: LINE_WIDTH },
                     bucket_indexes(geometry, &bucket.basic_lines)?.into(),
                     &bucket.basic_line_segments,
                 );

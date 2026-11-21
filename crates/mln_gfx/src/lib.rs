@@ -39,7 +39,7 @@ pub use export::{
     ExportedImage, ExportedRing, FrameDepth, NativeTexture,
 };
 pub use frame::{ConsumerSync, FrameImage, FrameTarget, GpuSync, Handoff, SyncKind, SyncKinds};
-pub use gfx_types::{AttributeDataType, DrawModeType, PrimitiveType};
+pub use gfx_types::{AttributeDataType, DrawModeType};
 pub use renderer_backend::RendererBackend;
 pub use scissor_rect::ScissorRect;
 pub use types::DepthMaskType;

@@ -810,13 +810,13 @@ impl SymbolState {
         if has_collision_box {
             let collision_box = if is_text { &state.text_collision_box } else { &state.icon_collision_box };
             if let Some(collision_box) = collision_box {
-                add(collision_box, &programs::COLLISION_BOX, DrawMode::Lines(1.0));
+                add(collision_box, &programs::COLLISION_BOX, DrawMode::Lines { width: 1.0 });
             }
         }
         if has_collision_circle {
             let collision_circle = if is_text { &state.text_collision_circle } else { &state.icon_collision_circle };
             if let Some(collision_circle) = collision_circle {
-                add(collision_circle, &programs::COLLISION_CIRCLE, DrawMode::Triangles());
+                add(collision_circle, &programs::COLLISION_CIRCLE, DrawMode::Triangles);
             }
         }
         true
@@ -1406,7 +1406,7 @@ impl LayerType for Symbol {
                 let geometry = DrawGeometry {
                     vertices: copy_shared_attributes(&vertex_attribs),
                     vertex_count: buffer.attribute_data.len(),
-                    mode: DrawMode::Triangles(),
+                    mode: DrawMode::Triangles,
                     indexes: copied_indexes(&buffer.triangles),
                     segments: segments.iter().map(SegmentBase::copy).collect(),
                     instances: None,

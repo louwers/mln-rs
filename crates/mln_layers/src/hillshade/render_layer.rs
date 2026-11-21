@@ -382,7 +382,7 @@ impl LayerType for Hillshade {
                 DrawGeometry {
                     vertices: hillshade_vertex_attributes(&vertices),
                     vertex_count: if segments.is_empty() { 0 } else { vertex_count },
-                    mode: DrawMode::Triangles(),
+                    mode: DrawMode::Triangles,
                     indexes,
                     segments,
                     instances: None,
@@ -515,7 +515,7 @@ impl DemTarget {
         let geometry = DrawGeometry {
             vertices: attrs,
             vertex_count: 4,
-            mode: DrawMode::Triangles(),
+            mode: DrawMode::Triangles,
             indexes: indexes.clone().into(),
             segments: RenderStaticData::quad_triangle_segments(),
             instances: None,

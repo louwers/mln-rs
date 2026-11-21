@@ -340,7 +340,7 @@ impl HeatmapState {
                 let geometry = DrawGeometry {
                     vertices: attrs,
                     vertex_count: if bucket.segments.is_empty() { 0 } else { bucket.vertices.len() },
-                    mode: DrawMode::Triangles(),
+                    mode: DrawMode::Triangles,
                     indexes: indexes.into(),
                     segments: bucket.segments.iter().map(SegmentBase::copy).collect(),
                     instances: None,
@@ -465,7 +465,7 @@ impl HeatmapState {
             let geometry = DrawGeometry {
                 vertices: attrs,
                 vertex_count: 4,
-                mode: DrawMode::Triangles(),
+                mode: DrawMode::Triangles,
                 indexes: DrawIndexes::new(RenderStaticData::quad_triangle_indices()),
                 segments: RenderStaticData::quad_triangle_segments(),
                 instances: None,

@@ -491,7 +491,7 @@ impl LayerType for ColorRelief {
                     let geometry = DrawGeometry {
                         vertices: color_relief_vertex_attributes(&vertices),
                         vertex_count: if segments.is_empty() { 0 } else { vertex_count },
-                        mode: DrawMode::Triangles(),
+                        mode: DrawMode::Triangles,
                         indexes: indices,
                         segments,
                         instances: None,

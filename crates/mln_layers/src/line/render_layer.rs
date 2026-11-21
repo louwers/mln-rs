@@ -569,7 +569,7 @@ impl LineState {
         let draw_geometry = DrawGeometry {
             vertices: attrs,
             vertex_count: if bucket.segments.is_empty() { 0 } else { bucket.vertices.len() },
-            mode: DrawMode::Triangles(),
+            mode: DrawMode::Triangles,
             indexes: bucket_indexes(geometry, &bucket.triangles)?.into(),
             segments: bucket.segments.iter().map(SegmentBase::copy).collect(),
             instances: None,

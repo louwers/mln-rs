@@ -1,12 +1,3 @@
-/// Graphic primitive type enumeration
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-#[repr(u8)]
-pub enum PrimitiveType {
-    Point,
-    Line,
-    Triangle,
-}
-
 /// Drawing mode type
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(u8)]
