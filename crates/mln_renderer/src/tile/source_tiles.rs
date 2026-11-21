@@ -987,7 +987,7 @@ impl SourceTiles {
         let Some(slot) = self.tiles.get_mut(id).filter(|slot| slot.place.is_cached()) else {
             return false;
         };
-        if !slot.tile.load.shows(mln_util::chrono::now()) {
+        if !slot.tile.load.is_usable(mln_util::chrono::now()) {
             self.evict(id, ctx);
             return false;
         }

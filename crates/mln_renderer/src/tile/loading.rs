@@ -340,13 +340,10 @@ pub(crate) struct TilesetLoad {
     pub(crate) held: Option<Arc<Ancestor>>,
     /// The tile has data of its own, shown or on its way.
     pub(crate) has_data: bool,
-    /// The cache's copy that may not be shown until the network revalidates
-    /// it.
-    pub(crate) withheld: Option<Response>,
     /// A hash of the bytes the tile last took, so that the same bytes
     /// again, as a revalidation without validators brings, aren't laid out
     /// again.
-    pub(crate) taken: Option<u64>,
+    pub(crate) data_hash: Option<u64>,
 }
 
 /// A request answers as load `load`; dropping `request` cancels it.
@@ -421,8 +418,7 @@ impl Load {
                     from_network: false,
                     held: None,
                     has_data: false,
-                    withheld: None,
-                    taken: None,
+                    data_hash: None,
                 }))
             }
             DataOrigin::GeoJson(_) => OriginLoad::GeoJson { load: None },
@@ -483,12 +479,12 @@ impl Load {
         }
     }
 
-    /// Whether the tile's data may show at `now`, if the tile comes back
+    /// Whether the tile's data may be used at `now`, if the tile comes back
     /// from the cache. Only a tileset's data expires.
-    pub(crate) fn shows(&self, now: Timestamp) -> bool {
+    pub(crate) fn is_usable(&self, now: Timestamp) -> bool {
         match &self.origin {
-            OriginLoad::Tileset(tileset) if tileset.has_data => tileset.caching.is_usable(now),
-            OriginLoad::Tileset(_) | OriginLoad::GeoJson { .. } | OriginLoad::Custom(_) => true,
+            OriginLoad::Tileset(tileset) => tileset.caching.is_usable(now),
+            OriginLoad::GeoJson { .. } | OriginLoad::Custom(_) => true,
         }
     }
 
@@ -542,7 +538,6 @@ impl TilesetLoad {
     /// goes.
     pub(crate) fn took(&mut self, modified: Option<Timestamp>, caching: Caching, from_network: bool) {
         (self.modified, self.caching, self.from_network, self.has_data) = (modified, caching, from_network, true);
-        self.withheld = None;
         self.resource.prior_data = None;
     }
 
@@ -552,21 +547,21 @@ impl TilesetLoad {
             resource: self.resource.clone(),
             modified: self.modified,
             caching: self.caching,
-            taken: self.taken,
+            data_hash: self.data_hash,
         }
     }
 
     /// Takes `answered`, of a load of the same resource, as a cache's
     /// answer. Returns false for another resource's, which it leaves.
     pub(crate) fn take_answered(&mut self, answered: TilesetAnswered) -> bool {
-        let TilesetAnswered { resource, modified, caching, taken } = answered;
+        let TilesetAnswered { resource, modified, caching, data_hash } = answered;
         if resource.url != self.resource.url {
             return false;
         }
         self.resource.prior_modified = resource.prior_modified;
         self.resource.prior_caching = resource.prior_caching;
         self.resource.prior_etag = resource.prior_etag;
-        (self.modified, self.caching, self.taken) = (modified, caching, taken);
+        (self.modified, self.caching, self.data_hash) = (modified, caching, data_hash);
         self.has_data = true;
         self.cache_answered = true;
         true
@@ -580,7 +575,7 @@ pub(crate) struct TilesetAnswered {
     resource: Resource,
     modified: Option<Timestamp>,
     caching: Caching,
-    taken: Option<u64>,
+    data_hash: Option<u64>,
 }
 
 /// Asks GeoJSON `data` for `tile`'s features, as load `load`, cut on `pool`

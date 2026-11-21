@@ -204,21 +204,24 @@ impl Resource {
     }
 
     /// Takes the validators and caching rules of `response`, a copy of the
-    /// resource, as the prior copy's. Its data stays.
+    /// resource, as the prior copy's. The requester has that copy, so no data
+    /// waits for it.
     pub fn set_prior(&mut self, response: &Response) {
+        self.prior_data = None;
         self.prior_modified = response.modified;
         self.prior_etag.clone_from(&response.etag);
         self.prior_caching = response.caching;
     }
 
     /// What a revalidation's answer `response` delivers to a requester that
-    /// waits for the prior copy in `prior_data`: that copy, for a 304, which
-    /// takes it. Any other answer as it is.
-    pub fn deliver(&mut self, mut response: Response) -> Response {
+    /// waits for the prior copy in `prior_data`: that copy, for a 304. Any
+    /// other answer as it is.
+    #[must_use]
+    pub fn deliver(&self, mut response: Response) -> Response {
         if response.not_modified
-            && let Some(data) = self.prior_data.take()
+            && let Some(data) = &self.prior_data
         {
-            response.data = Some(data);
+            response.data = Some(Arc::clone(data));
             response.not_modified = false;
             response.prior = true;
             response.modified = response.modified.or(self.prior_modified);
@@ -356,7 +359,7 @@ mod tests {
 
         #[test]
         fn a_304_delivers_the_copy_with_its_caching_rules() {
-            let mut resource = waiting(Caching { expires: Some(at(-10)), ..Caching::default() });
+            let resource = waiting(Caching { expires: Some(at(-10)), ..Caching::default() });
             let renewed = Response {
                 not_modified: true,
                 caching: Caching { expires: Some(at(100)), ..Caching::default() },
@@ -366,7 +369,6 @@ mod tests {
             assert!(!delivered.not_modified);
             assert_eq!(Some(b"cached".as_slice()), delivered.data.as_deref().map(Vec::as_slice));
             assert_eq!((Some(at(100)), Some("a")), (delivered.caching.expires, delivered.etag.as_deref()));
-            assert!(resource.prior_data.is_none(), "the requester has it");
         }
     }
 

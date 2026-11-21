@@ -4,7 +4,6 @@ pub const MLN_DIAGNOSTIC_MESSAGE_CAPACITY: u32 = 4096;
 pub const MLN_C_VERSION: u32 = 0;
 pub const MLN_TEXTURE_RING_MAX_DEPTH: u32 = 8;
 pub const MLN_GESTURE_RESULT_EVENT_CAPACITY: u32 = 4;
-pub const MLN_FRAME_DEMAND_TOKEN_STILL_IMAGE: i32 = -1;
 pub const MLN_STATUS_OK: mln_status = 0;
 /// An argument is invalid, such as malformed JSON or a value out of range.
 pub const MLN_STATUS_INVALID_ARGUMENT: mln_status = -1;
@@ -168,8 +167,9 @@ pub type mln_network_status = u32;
  Offline regions keep their resources.*/
 pub const MLN_CACHE_DATABASE_OPERATION_CLEAR: mln_cache_database_operation = 1;
 /** Keeps the ambient cache's resources, but makes them stale: maps check each
- one with the server when they next use it, and show it meanwhile. Offline
- regions keep their resources as they are.*/
+ one with the server when they next use it, and show it meanwhile unless
+ the server requires checking it first. Offline regions keep their
+ resources as they are.*/
 pub const MLN_CACHE_DATABASE_OPERATION_INVALIDATE: mln_cache_database_operation = 2;
 /** Compacts the whole database file to free the disk space that it no longer
  uses.*/

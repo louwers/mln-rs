@@ -212,18 +212,10 @@ impl<'a> TileMut<'a> {
                 return;
             }
             tileset.failed = false;
-            match tileset.withheld.take() {
-                // The network renewed the copy the tile held back.
-                Some(mut withheld) if res.not_modified => {
-                    withheld.caching = res.caching;
-                    withheld.modified = res.modified.or(withheld.modified);
-                    if res.etag.is_some() {
-                        withheld.etag.clone_from(&res.etag);
-                    }
-                    self.take_response(method, &withheld);
-                }
-                _ => self.take_response(method, res),
-            }
+            // A 304 renews the copy the tile held back, if the file source
+            // didn't deliver it.
+            let delivered = res.not_modified.then(|| tileset.resource.deliver(res.clone()));
+            self.take_response(method, delivered.as_ref().unwrap_or(res));
             return;
         }
         // A cache-only request answers once.
@@ -238,10 +230,8 @@ impl<'a> TileMut<'a> {
             if res.caching.is_usable(now) {
                 self.take_response(method, res);
             } else {
-                // The network request carries it too, so that the file
-                // source can deliver it for a 304.
+                // The network request carries it, so that a 304 delivers it.
                 tileset.resource.prior_data.clone_from(&res.data);
-                tileset.withheld = Some(res.clone());
             }
         }
         if self.tile.load.necessity == TileNecessity::Required
@@ -495,7 +485,7 @@ impl<'a> TileMut<'a> {
         self.tile.settled = false;
         // The tile has no data to compare the next with.
         if let OriginLoad::Tileset(tileset) = &mut self.tile.load.origin {
-            tileset.taken = None;
+            tileset.data_hash = None;
         }
         let generation = self.source.next();
         if let Pipeline::Layout(layout) = &mut self.tile.pipeline {
@@ -759,7 +749,7 @@ impl<'a> TileMut<'a> {
         (resource.prior_modified, resource.prior_etag) = (modified, etag);
         resource.prior_caching = caching;
         tileset.took(modified, caching, true);
-        tileset.taken = None;
+        tileset.data_hash = None;
         tileset.held = held;
         self.take_input(TileInput::Geometry { data: Some(data), missing: false });
         true
@@ -779,9 +769,9 @@ impl<'a> TileMut<'a> {
         }
         tileset.took(res.modified, res.caching, method == Method::Network);
         let hash = res.data.as_deref().filter(|_| !res.no_content).map(|data| hash_bytes(data));
-        let unchanged = res.not_modified || hash.is_some_and(|hash| tileset.taken == Some(hash));
+        let unchanged = res.not_modified || hash.is_some_and(|hash| tileset.data_hash == Some(hash));
         if !unchanged {
-            tileset.taken = hash;
+            tileset.data_hash = hash;
         }
         self.action(match method {
             Method::Network => TileOperation::LoadFromNetwork,

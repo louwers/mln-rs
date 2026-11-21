@@ -190,13 +190,12 @@ fn build_response(resource: &Resource, transfer: Result<Transfer, Box<ResourceEr
     // A response the cache may keep, and a 304 that renews the cached copy,
     // carry caching rules; an error doesn't.
     let not_modified = transfer.status == 304;
-    if not_modified && cache_control.is_none() && expires.is_none() {
-        // A 304 should carry the caching headers its 200 would (RFC 9110
-        // §15.4.5). Without them, the renewed copy keeps whether it must
-        // revalidate, and is stale at once rather than given a lifetime the
-        // resource may not have.
-        response.caching.expires = Some(now());
-        response.caching.must_revalidate = resource.prior_caching.must_revalidate;
+    if not_modified && cache_control.is_none() && expires.is_none() && resource.prior_caching.must_revalidate {
+        // A 304 carries the caching headers its 200 would (RFC 9110
+        // §15.4.5), so without them the 200 had none either, and the
+        // heuristic below applies. A copy that must revalidate, though, came
+        // with `Cache-Control`: it stays one, stale at once.
+        response.caching = Caching { expires: Some(now()), must_revalidate: true };
     } else if matches!(transfer.status, 200 | 204 | 206 | 304)
         || (transfer.status == 404 && resource.kind == Kind::Tile)
     {
@@ -483,6 +482,15 @@ mod tests {
         let res = response(304, &[("ETag", "\"a\"")], &resource);
         assert!(res.caching.must_revalidate);
         assert!(lifetime(&res) <= 0);
+    }
+
+    #[test]
+    fn a_304_without_caching_headers_gets_the_heuristic_lifetime() {
+        let mut resource = tile();
+        resource.prior_modified = Some(Timestamp::from_secs(now().secs_since_epoch() - 1000));
+        let res = response(304, &[("ETag", "\"a\"")], &resource);
+        assert!(!res.caching.must_revalidate);
+        assert_about(100, lifetime(&res));
     }
 
     #[test]

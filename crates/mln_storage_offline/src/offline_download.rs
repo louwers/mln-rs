@@ -37,22 +37,30 @@ use mln_util::range::Range;
 use mln_util::tileset::Tileset;
 use mln_vec_map::VecMap;
 
-/// The most downloaded resources that wait to be stored in one transaction.
-const RESOURCES_BATCH_SIZE: usize = 64;
-/// The most stored resources that wait to be added to the region in one
-/// transaction.
-const MARK_BATCH_SIZE: usize = 200;
+const K_RESOURCES_BATCH_SIZE: usize = 64;
+const K_MARK_BATCH_SIZE: usize = 200;
 
-/// The zoom levels of `zoom_range` whose tiles the region covers, for tiles
-/// of `tile_size`.
+// Generic functions
+
 fn covering_zoom_range(
     definition: &OfflineRegionDefinition,
     round_zoom: bool,
     tile_size: u16,
     zoom_range: Range<u8>,
 ) -> Range<u8> {
-    let zoom = |zoom: f64| covering_zoom_level(zoom, round_zoom, tile_size).clamp(0, i32::from(u8::MAX)) as u8;
-    Range::new(zoom(definition.min_zoom()).max(zoom_range.min), zoom(definition.max_zoom()).min(zoom_range.max))
+    // `std::max<double>` / `std::min<double>`.
+    let a = f64::from(covering_zoom_level(definition.min_zoom(), round_zoom, tile_size));
+    let b = f64::from(zoom_range.min);
+    let min_z = if a < b { b } else { a };
+    let a = f64::from(covering_zoom_level(definition.max_zoom(), round_zoom, tile_size));
+    let b = f64::from(zoom_range.max);
+    let max_z = if b < a { b } else { a };
+
+    debug_assert!(min_z >= 0.0);
+    debug_assert!(max_z >= 0.0);
+    debug_assert!(min_z < f64::from(u8::MAX));
+    debug_assert!(max_z < f64::from(u8::MAX));
+    Range::new(min_z as u8, max_z as u8)
 }
 
 fn tile_cover(
@@ -509,7 +517,7 @@ impl OfflineDownload {
             }
         }
 
-        if self.resources_to_be_marked_as_used.len() >= MARK_BATCH_SIZE {
+        if self.resources_to_be_marked_as_used.len() >= K_MARK_BATCH_SIZE {
             self.mark_pending_used_resources(db);
         }
 
@@ -700,7 +708,7 @@ impl OfflineDownload {
         // Flush buffer periodically.
         // Have to keep `resourcesRemaining.empty()` as the following
         // condition would fail otherwise.
-        if self.buffer.len() == RESOURCES_BATCH_SIZE || self.resources_remaining.is_empty() {
+        if self.buffer.len() == K_RESOURCES_BATCH_SIZE || self.resources_remaining.is_empty() {
             self.flush_resources_buffer(db);
         }
 

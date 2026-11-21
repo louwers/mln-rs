@@ -531,12 +531,12 @@ impl OnlineCore {
 
         let resource = &mut req.resource;
         let mut response = resource.deliver(response);
-        // A response without validators keeps the copy's.
-        if response.modified.is_none() {
-            response.modified = resource.prior_modified;
-        }
-        if response.etag.is_none() {
-            response.etag.clone_from(&resource.prior_etag);
+        // A 304 without validators keeps the copy's.
+        if response.not_modified {
+            response.modified = response.modified.or(resource.prior_modified);
+            if response.etag.is_none() {
+                response.etag.clone_from(&resource.prior_etag);
+            }
         }
         if response.error.is_none() {
             // The next revalidation is of this copy.

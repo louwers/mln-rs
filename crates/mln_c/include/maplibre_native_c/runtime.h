@@ -42,8 +42,9 @@ typedef enum mln_cache_database_operation : uint32_t {
   MLN_CACHE_DATABASE_OPERATION_CLEAR = 1,
   /**
    * Keeps the ambient cache's resources, but makes them stale: maps check each
-   * one with the server when they next use it, and show it meanwhile. Offline
-   * regions keep their resources as they are.
+   * one with the server when they next use it, and show it meanwhile unless
+   * the server requires checking it first. Offline regions keep their
+   * resources as they are.
    */
   MLN_CACHE_DATABASE_OPERATION_INVALIDATE = 2,
   /**

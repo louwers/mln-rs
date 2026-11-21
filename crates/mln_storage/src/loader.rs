@@ -144,13 +144,13 @@ impl Sources {
 
             // A cached copy.
             if response.error.is_none() && !response.no_content {
+                res.set_prior(&response);
                 if response.caching.is_usable(now()) {
                     responder.send(response.clone());
                     res.set_priority(Priority::Low);
                 } else {
                     res.prior_data = response.data.clone();
                 }
-                res.set_prior(&response);
             }
 
             sources.request_from_network(&resource_copy, &res, &chain, &responder);

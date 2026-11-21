@@ -117,8 +117,9 @@ struct SpriteLoad {
     /// Whether the sprite loaded or failed for good. A style without a
     /// sprite that has no file source never loads.
     loaded: bool,
-    /// The last response was an error (`error_streak`).
-    failing: bool,
+    /// The last response to the JSON request, and to the image request, was
+    /// an error (`error_streak`).
+    failing: [bool; 2],
 }
 
 /// Loads a map's style document, its sprites and its sources' descriptions
@@ -500,7 +501,7 @@ impl StyleLoader {
         events: &mut Vec<LoadEvent>,
     ) {
         let Some(entry) = self.sprite_load(id, load) else { return };
-        if let Err(error) = error_streak(&mut entry.failing, &res) {
+        if let Err(error) = error_streak(&mut entry.failing[part as usize], &res) {
             if let Some(error) = error {
                 let sprite = entry.sprite.clone();
                 self.sprite_failed(sprite, Error::native(error.message.clone()), events);
@@ -629,7 +630,7 @@ const DEFAULT_SPRITE: &str = "default";
 
 impl SpriteLoad {
     fn new(sprite: Option<Sprite>, load: u64) -> Self {
-        SpriteLoad { sprite, load, json: None, image: None, requests: Vec::new(), loaded: false, failing: false }
+        SpriteLoad { sprite, load, json: None, image: None, requests: Vec::new(), loaded: false, failing: [false; 2] }
     }
 
     fn id(&self) -> &str {

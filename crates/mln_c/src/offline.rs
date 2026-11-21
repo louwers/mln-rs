@@ -50,7 +50,10 @@ struct LentRegion {
 
 impl LentRegion {
     fn new(region: &OfflineRegion) -> Self {
-        let OfflineRegion { id, definition, metadata } = region;
+        Self::from_parts(region.id, &region.definition, &region.metadata)
+    }
+
+    fn from_parts(id: mln_offline_region_id, definition: &OfflineRegionDefinition, metadata: &[u8]) -> Self {
         let shape = match definition {
             OfflineRegionDefinition::TilePyramid(pyramid) => Shape::TilePyramid(mln_lat_lng_bounds {
                 southwest: geo::from_lat_lng(pyramid.bounds.southwest()),
@@ -61,14 +64,14 @@ impl LentRegion {
             }
         };
         LentRegion {
-            id: *id,
+            id,
             shape,
             style_url: LentText::new(definition.style_url()),
             min_zoom: definition.min_zoom(),
             max_zoom: definition.max_zoom(),
             pixel_ratio: definition.pixel_ratio(),
             include_ideographs: definition.include_ideographs(),
-            metadata: metadata.clone(),
+            metadata: metadata.to_vec(),
         }
     }
 
@@ -595,11 +598,6 @@ mod tests {
         unsafe { definition(descriptor) }
     }
 
-    fn region(id: i64, descriptor: &mln_offline_region_definition, metadata: Vec<u8>) -> OfflineRegion {
-        let definition = convert(descriptor).unwrap();
-        OfflineRegion { id, definition, metadata }
-    }
-
     #[test]
     fn an_expiry_sets_the_times_it_has() {
         let none = expiry(&OfflineRegionExpiry::default());
@@ -631,7 +629,7 @@ mod tests {
     fn a_region_lends_the_definition_it_was_created_with() {
         let line = r#"{"type":"LineString","coordinates":[[2,1],[4,3]]}"#;
         for descriptor in [pyramid(), shaped(line)] {
-            let lent = LentRegion::new(&region(7, &descriptor, vec![1, 2]));
+            let lent = LentRegion::from_parts(7, &convert(&descriptor).unwrap(), &[1, 2]);
             let info = lent.info();
             assert_eq!((info.id, info.metadata_size), (7, 2));
             assert_eq!(info.definition.type_, descriptor.type_);
@@ -652,7 +650,7 @@ mod tests {
                 }
             }
         }
-        let empty = LentRegion::new(&region(8, &pyramid(), Vec::new()));
+        let empty = LentRegion::from_parts(8, &convert(&pyramid()).unwrap(), &[]);
         assert!(empty.info().metadata.is_null());
     }
 
