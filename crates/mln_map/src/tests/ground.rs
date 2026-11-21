@@ -287,6 +287,39 @@ fn a_camera_at_rest_stands_on_the_ground_and_a_moving_one_holds() {
     assert!((altitude - 800.0).abs() < 1e-6, "{altitude}");
 }
 
+/// The terrain moves a camera at rest without camera events, whatever moves
+/// it: ground that loads, changes or stops drawing under it, the clamp
+/// turned on, and the style dropping its terrain. Hosts see those moves in
+/// the snapshot.
+#[test]
+fn ground_at_rest_emits_no_camera_events() {
+    let run_loop = Queue::<()>::new();
+    let mut map = map(MapMode::Continuous, &run_loop);
+    map.drain_events();
+    let silent = |map: &mut Map, altitude: f64, what: &str| {
+        assert_eq!(altitude, ground(map).0, "{what}");
+        assert_eq!(0, camera_events(&map.drain_events()), "{what}");
+    };
+
+    report(&mut map, ground_event(&flat(Some(500.0), 300.0)));
+    silent(&mut map, 500.0, "ground that loads");
+    report(&mut map, ground_event(&flat(Some(800.0), 700.0)));
+    silent(&mut map, 800.0, "ground that changes");
+    report(&mut map, ground_event(&flat(None, 0.0)));
+    silent(&mut map, 800.0, "ground that loads again");
+    map.set_center_clamped_to_ground(false);
+    report(&mut map, ground_event(&flat(Some(200.0), 100.0)));
+    silent(&mut map, 800.0, "unclamped ground");
+    map.set_center_clamped_to_ground(true);
+    silent(&mut map, 200.0, "the clamp turned on");
+    report(&mut map, RendererEvent::TerrainElevation(None));
+    silent(&mut map, 0.0, "ground that stops drawing");
+    report(&mut map, ground_event(&flat(Some(500.0), 300.0)));
+    silent(&mut map, 500.0, "ground that draws again");
+    map.edit_style(|style| style.apply(Edit::SetTerrain(None))).unwrap();
+    silent(&mut map, 0.0, "the style's terrain dropped");
+}
+
 /// The map answers each ground the renderer tells of with an update that
 /// carries it, though the camera doesn't move: the renderer completes a
 /// frame only of an update that stands the camera as it does.

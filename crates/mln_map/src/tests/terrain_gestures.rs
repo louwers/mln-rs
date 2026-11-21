@@ -156,6 +156,73 @@ fn a_momentum_end_moves_neither_the_eye_nor_the_picture() {
     assert_still_at(&mut map, &*ground, eye, 1e-3, &points, &drawn);
 }
 
+/// The camera events since the last drain, as (whether it is a
+/// `CameraDidChange`, its source).
+fn camera_events(map: &mut Map) -> Vec<(bool, CameraChangeSource)> {
+    map.drain_events()
+        .into_iter()
+        .filter_map(|event| match event {
+            MapEvent::CameraWillChange(change) => Some((false, change.source)),
+            MapEvent::CameraDidChange(change) => Some((true, change.source)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A gesture's end, and the end of its momentum, move the center onto the
+/// ground before the change that ends them reports it: a host that reads
+/// the camera on that `CameraDidChange` reads the camera at rest, which
+/// moves no more without another report.
+#[test]
+fn a_gesture_end_reports_the_recentred_camera_with_its_did_change() {
+    let run_loop = Queue::<()>::new();
+    let ground = slope();
+    let (mut map, clock) = map_over(Some(&ground), &run_loop);
+    let at_rest = |map: &mut Map, what: &str| {
+        let view = map.transform_state().view().clone();
+        let center = view.center(WrapMode::Wrapped);
+        assert_eq!(ground.at(center).unwrap(), view.center_altitude(), "{what}: the center stands on the ground");
+        map.trigger_repaint();
+        map.set_frame_time(Some(clock + Duration::from_secs(5)));
+        assert_eq!(view, *map.transform_state().view(), "{what}: the camera moves no more");
+        assert_eq!(Vec::<(bool, CameraChangeSource)>::new(), camera_events(map), "{what}");
+    };
+
+    map.apply_camera_delta(&delta(GesturePhase::Begin, Some((-60.0, 40.0)), None)).unwrap();
+    map.apply_camera_delta(&delta(GesturePhase::Update, None, Some(1.5))).unwrap();
+    assert_eq!(0.0, map.transform_state().view().center_altitude(), "the gesture holds the altitude");
+    camera_events(&mut map);
+    map.apply_camera_delta(&delta(GesturePhase::End, None, None)).unwrap();
+    let altitude = map.transform_state().view().center_altitude();
+    assert!(altitude > 10.0, "the end moved the center onto the slope, to {altitude} m");
+    let gesture = CameraChangeSource::Gesture;
+    assert_eq!(vec![(false, gesture), (true, gesture)], camera_events(&mut map), "the end");
+    at_rest(&mut map, "after the end");
+
+    // A glide of exactly a second.
+    let (mut map, clock) = map_over(Some(&ground), &run_loop);
+    map.apply_camera_delta(&delta(GesturePhase::Begin, Some((-60.0, 40.0)), None)).unwrap();
+    let decay = MomentumDecay {
+        model: MomentumDecayModel::Curve {
+            reference_speed: 1000.0,
+            duration: Duration::from_secs(1),
+            exponent: 0.5,
+            easing: MomentumEasing::ANDROID_FLING,
+        },
+        ..MomentumDecay::DEFAULT
+    };
+    let glide = MomentumGlide { velocity: ScreenCoordinate::new(-600.0, 800.0), decay };
+    let momentum = CameraMomentum { pan: Some(glide), ..Default::default() };
+    map.apply_camera_delta(&CameraDelta { momentum: Some(momentum), ..delta(GesturePhase::End, None, None) }).unwrap();
+    map.set_frame_time(Some(clock + Duration::from_millis(999)));
+    assert_eq!(0.0, map.transform_state().view().center_altitude(), "the glide holds the altitude");
+    camera_events(&mut map);
+    map.set_frame_time(Some(clock + Duration::from_secs(1)));
+    assert!(map.transform_state().view().center_altitude().abs() > 500.0, "the end moved the center onto the slope");
+    assert_eq!(vec![(true, CameraChangeSource::Momentum)], camera_events(&mut map), "the glide's end");
+    at_rest(&mut map, "after the glide");
+}
+
 /// A cone of ground 3000 m high, sloping 45 degrees, `north` meters north
 /// of the start.
 #[derive(Debug)]

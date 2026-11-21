@@ -1,3 +1,4 @@
+mod center_altitude;
 mod ground;
 mod map_events;
 mod map_snapshot;
