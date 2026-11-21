@@ -473,3 +473,46 @@ fn a_turn_under_a_roll_holds_only_a_point_on_the_ground() {
     let error = on_screen(&map, grabbed.world, grabbed.height).distance(ground);
     assert!(error < 0.01, "the ground moved {error} px from the anchor");
 }
+
+/// A command that gave up its anchor and its center, as a tilt that carries
+/// its anchor into the sky does, keeps the rest of its fields when a command
+/// of the center alone starts: a pitch on its way to 85 degrees gets there.
+#[test]
+fn a_center_command_leaves_the_pitch_of_a_command_that_gave_up_its_center() {
+    let run_loop = Queue::<()>::new();
+    let (mut map, clock) = map_over(Some(&slope()), &run_loop);
+    map.jump_to(&CameraOptions { pitch: Some(60.0), ..Default::default() });
+    let anchor = ScreenCoordinate::new(330.0, horizon(&map) + 150.0);
+    let eased = |duration: u64| AnimationOptions {
+        duration: Some(Duration::from_millis(duration)),
+        easing: Some(DEFAULT_TRANSITION_EASE),
+        ..Default::default()
+    };
+    map.update_camera(&CameraUpdate {
+        mode: CameraUpdateMode::Ease,
+        camera: CameraOptions { pitch: Some(85.0), anchor: Some(anchor), ..Default::default() },
+        animation: eased(1000),
+        ..Default::default()
+    });
+    let mut moved = false;
+    frames(&mut map, clock, Duration::from_secs(2), |map, elapsed| {
+        if elapsed == Duration::from_millis(800) {
+            assert!(anchor.y < horizon(map), "the anchor is in the sky, and the command gave it up");
+            let center = map.transform_state().view().center(WrapMode::Unwrapped);
+            map.update_camera(&CameraUpdate {
+                mode: CameraUpdateMode::Ease,
+                camera: CameraOptions {
+                    center: Some(LatLng::new(center.latitude(), center.longitude() + 0.001).unwrap()),
+                    ..Default::default()
+                },
+                animation: eased(100),
+                ..Default::default()
+            });
+            moved = true;
+        }
+    });
+    assert!(moved);
+    assert!(!map.snapshot().transition_in_progress);
+    let pitch = map.transform_state().view().pitch().to_degrees();
+    assert!((pitch - 85.0).abs() < 1e-9, "the pitch stopped at {pitch}");
+}

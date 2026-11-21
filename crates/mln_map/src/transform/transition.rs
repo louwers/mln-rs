@@ -637,8 +637,11 @@ impl Transform {
     pub(super) fn release_fields(&mut self, fields: u16) -> Vec<Transition> {
         for active in &mut self.transitions {
             let mut replaced = fields;
-            if active.coupled_fields & replaced != 0 {
-                replaced |= active.coupled_fields;
+            // Only the fields it still owns are coupled: one that gave up its
+            // anchor and its center keeps the rest.
+            let coupled = active.coupled_fields & active.fields;
+            if coupled & replaced != 0 {
+                replaced |= coupled;
             }
             // An altitude eased onto the ground at the end goes with the
             // center that ends there.
