@@ -4,7 +4,7 @@ use mln_tile_id::geometry_tile_data::{GeometryCoordinate, GeometryCoordinates};
 use mln_util::constants::EXTENT;
 use mln_util::subdivision_granularity::SubdivisionGranularityExpression;
 
-use crate::globe::{NORTH_POLE_Y, SOUTH_POLE_Y, grid, subdivide_line, subdivide_ring};
+use crate::globe::{NORTH_POLE_Y, SOUTH_POLE_Y, grid, masked_tile_grids, subdivide_line, subdivide_ring};
 
 /// `EXTENT` as a tile coordinate.
 const EXTENT_I16: i16 = EXTENT as i16;
@@ -89,6 +89,21 @@ fn quad_and_grid() {
     assert_eq!(7 * 7, bordered_polar.vertices.len());
     assert_eq!(NORTH_POLE_Y, bordered_polar.vertices[0][1]);
     assert_eq!(EXTENT_I16 + EXTENT_I16 / 128, bordered_polar.vertices[7 * 7 - 1][1]);
+}
+
+/// A mask's parts at zoom 32, the deepest a tile id has, have grids, also
+/// those 32 zooms below their tile; a part on the bottom row reaches the
+/// south pole.
+#[test]
+fn masked_parts_at_zoom_32() {
+    let bottom = CanonicalTileID::new(31, 5, (1 << 31) - 1);
+    let grids: Vec<_> = masked_tile_grids(&bottom, &[CanonicalTileID::new(1, 1, 1)].into()).collect();
+    assert_eq!(1, grids.len());
+    assert_eq!(SOUTH_POLE_Y, grids[0].vertices.last().expect("a vertex")[1]);
+
+    let world = CanonicalTileID::new(0, 0, 0);
+    let part = CanonicalTileID::new(32, 1 << 31, 1 << 31);
+    assert_eq!(1, masked_tile_grids(&world, &[part].into()).count());
 }
 
 /// A granularity past what 16-bit indices can address is capped to the
