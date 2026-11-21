@@ -11,7 +11,7 @@ use feature::Value;
 use mln_util::constants::DEFAULT_TRANSITION_DURATION;
 use mln_util::error::Error;
 
-use crate::conversion::borrowed_conversion::{Json, borrowed_json_to_value, member, members};
+use crate::conversion::borrowed::{Json, borrowed_json_to_value, member, members};
 use crate::conversion::{
     Converter, Convertible, convert_layer, convert_light, convert_projection, convert_sky, value_to_json,
 };

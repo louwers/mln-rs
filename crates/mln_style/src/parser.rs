@@ -1,6 +1,6 @@
 // The style's text is read into a `serde_json_borrow` tree, whose strings
 // borrow from the text and whose objects keep their members in document
-// order (conversion/borrowed_conversion.rs). The message of a JSON
+// order (conversion/borrowed.rs). The message of a JSON
 // syntax error is serde_json's.
 
 use std::sync::Arc;
@@ -11,7 +11,7 @@ use mln_util::hash::{HashMap, HashSet};
 use mln_util::logging::{Event, Log};
 use mln_vec_map::VecSet;
 
-use crate::conversion::borrowed_conversion::{Json, JsonObject, borrowed_json_to_value, member, members};
+use crate::conversion::borrowed::{Json, JsonObject, borrowed_json_to_value, member, members};
 use crate::conversion::layer::{InvalidProperty, convert_layer_with, set_paint_properties};
 use crate::conversion::{Convertible, Error, convert, convert_light, convert_projection, convert_sky, convert_source};
 use crate::expression::GlobalStateMap;
