@@ -1,12 +1,6 @@
-// The C++ overloads get distinct names: `tileCover(const TileCoverParameters&,
-// ...)` is `tile_cover`, `tileCover(const LatLngBounds&, z)` is
-// `tile_cover_bounds`, `tileCover(const Geometry<double>&, z)` is
-// `tile_cover_geometry`, and `tileCount` likewise. The two `TileCover`
-// constructors are `TileCover::new_from_bounds` / `new_from_geometry`.
-//
-// The geometry entry points return `Result`: C++ throws `std::domain_error`
-// from the `LatLng` constructor while projecting a point whose latitude is
-// out of range.
+//! The tiles that cover a view ([`tile_cover`], [`globe_level_cover`]),
+//! bounds ([`tile_cover_bounds`]) or a geometry ([`TileCover`]) at a zoom,
+//! and how many there are ([`tile_count_bounds`], [`tile_count_geometry`]).
 
 use geo_types::{Coord, Geometry, LineString, Polygon};
 use geometry::Point;
@@ -170,12 +164,16 @@ fn tile_cover_points(
     result
 }
 
-/// Helper class to stream tile-cover results per row
+/// The tiles that cover bounds or a geometry at a zoom, row by row from the
+/// north.
 pub struct TileCover {
     impl_: Box<Impl>,
 }
 
 impl TileCover {
+    /// The cover at zoom `z` of `bounds_`, with its latitudes clamped to the
+    /// Mercator range. Empty bounds, or bounds outside that range, cover the
+    /// world.
     #[must_use]
     pub fn new_from_bounds(bounds_: &LatLngBounds, z: u8) -> TileCover {
         let mut bounds = LatLngBounds::hull(
@@ -203,11 +201,6 @@ impl TileCover {
     /// that isn't a valid `LatLng`.
     pub fn new_from_geometry(geom: &Geometry<f64>, z: u8) -> Result<TileCover, Error> {
         Ok(TileCover { impl_: Box::new(Impl::new_projected(i32::from(z), geom)?) })
-    }
-
-    #[must_use]
-    pub fn has_next(&self) -> bool {
-        self.impl_.has_next()
     }
 }
 
@@ -990,6 +983,9 @@ fn sort_by_distance<T>(tiles: &mut [T], sqr_dist: impl Fn(&T) -> f64) {
     tiles.sort_by(|a, b| sqr_dist(a).total_cmp(&sqr_dist(b)));
 }
 
+/// The tiles that cover `bounds_` at zoom `z`, nearest its center first,
+/// with its latitudes clamped to the Mercator range. Empty bounds, or bounds
+/// outside that range, have none.
 #[must_use]
 pub fn tile_cover_bounds(bounds_: &LatLngBounds, z: u8) -> Vec<UnwrappedTileID> {
     if bounds_.is_empty() || bounds_.south() > constants::LATITUDE_MAX || bounds_.north() < -constants::LATITUDE_MAX {
@@ -1012,22 +1008,10 @@ pub fn tile_cover_bounds(bounds_: &LatLngBounds, z: u8) -> Vec<UnwrappedTileID> 
     )
 }
 
-#[cfg(test)]
-fn tile_cover_geometry(geometry: &Geometry<f64>, z: u8) -> Result<Vec<UnwrappedTileID>, Error> {
-    let mut result = Vec::new();
-    let mut tc = TileCover::new_from_geometry(geometry, z)?;
-    while tc.has_next() {
-        result.push(tc.next().expect("has_next"));
-    }
-
-    Ok(result)
-}
-
-/// Compute only the count of tiles needed for tileCover.
-///
-/// Taken from <https://github.com/mapbox/sphericalmercator#xyzbbox-zoom-tms_style-srs>
-/// Computes the projected tiles for the lower left and upper right points of the bounds
-/// and uses that to compute the tile cover count
+/// How many tiles of zoom `zoom` the box from `bounds`' southwest to its
+/// northeast corner spans, from the tiles of those corners, as
+/// [sphericalmercator's `xyz`](https://github.com/mapbox/sphericalmercator#xyzbbox-zoom-tms_style-srs)
+/// does.
 #[must_use]
 pub fn tile_count_bounds(bounds: &LatLngBounds, zoom: u8) -> u64 {
     if zoom == 0 {
@@ -1048,14 +1032,10 @@ pub fn tile_count_bounds(bounds: &LatLngBounds, zoom: u8) -> u64 {
     ((dx + 1.0) * (dy + 1.0)) as u64
 }
 
+/// How many tiles [`TileCover::new_from_geometry`] covers `geometry` with
+/// at zoom `z`, and fails as it does.
 pub fn tile_count_geometry(geometry: &Geometry<f64>, z: u8) -> Result<u64, Error> {
-    let mut tile_count: u64 = 0;
-
-    let mut tc = TileCover::new_from_geometry(geometry, z)?;
-    while tc.next().is_some() {
-        tile_count += 1;
-    }
-    Ok(tile_count)
+    Ok(TileCover::new_from_geometry(geometry, z)?.count() as u64)
 }
 
 #[cfg(test)]
@@ -1082,7 +1062,7 @@ mod tests {
             vec![(-121.493_682_861_328_12, 38.579_037_146_674_59), (-122.442_283_630_371_1, 37.773_157_169_570_695)];
         let geom = Geometry::LineString(line.into());
         assert_eq!(7, tile_count_geometry(&geom, 10).unwrap());
-        assert_eq!(7, tile_cover_geometry(&geom, 10).unwrap().len());
+        assert_eq!(7, TileCover::new_from_geometry(&geom, 10).unwrap().count());
         assert!(tile_count_geometry(&Geometry::Point(geo_types::Point::new(0.0, 97.0)), 2).is_err());
     }
 }
