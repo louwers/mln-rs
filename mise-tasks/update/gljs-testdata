@@ -77,6 +77,14 @@ declare -A allowed=(
     # GeoJSON tiles overlap. Kernels hidden behind the ground: 29095 (RADV).
     # Kernels at sea level: 62776 (RADV).
     [terrain/heatmap]=0.007
+    # GL JS draws a terrain's DEM source at twice its declared tile size,
+    # which this fixture's hillshade shares, so its far hills shade from DEM
+    # tiles a zoom coarser; mln-rs keeps the declared size. 210 of 262144 px
+    # differ on RADV (WebGPU), single pixels and short runs on the far hills;
+    # 58, which pass, with the hillshade on a copy of the source declared
+    # 512 px. The label hidden or missing: 1160 (RADV). Seams where DEM tiles
+    # of two overscaled zooms meet: 481 (RADV).
+    [terrain/symbol-height-offset-occluded-ground]=0.0012
 )
 
 checkout="${usage_checkout:-$PWD/../maplibre-gl-js}"

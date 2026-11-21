@@ -8,7 +8,6 @@
     "../testdata/metrics/ignores/platform-macos-webgpu.json",
     "../testdata/metrics/ignores/platform-linux.json",
     "../ignores/rust-port.json",
-    "../ignores/rust-port-terrain.json",
     "../ignores/rust-port-metal-outlines.json"
   ],
   "metric_path": "../testdata/metrics/linux-gcc8-release"

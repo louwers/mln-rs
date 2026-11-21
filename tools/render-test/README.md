@@ -26,8 +26,6 @@ cache's resources at the same `local://` paths. The tests beside that directory
 from it, as GL JS's test server does, so a file missing there is not found; the
 other tests fall back to the cache. `mise run update:gljs-testdata <checkout>`
 copies them again, and `mise run update:testdata` leaves them alone.
-`ignores/rust-port-terrain.json` lists each with the phase of the terrain work
-(louwers/mln-rs#532) that will make it pass.
 
 Part of [mln-rs](https://github.com/louwers/mln-rs), a Rust port of the
 [MapLibre Native](https://github.com/maplibre/maplibre-native) map rendering
