@@ -14,9 +14,6 @@ struct VertexOutput {
     @location(0) tex_coord: vec2<f32>,
 };
 
-@group(0) @binding(2) var<uniform> drawable: HillshadePrepareDrawableUBO;
-@group(0) @binding(5) var<uniform> tileProps: HillshadePrepareTilePropsUBO;
-
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
@@ -33,7 +30,6 @@ struct FragmentInput {
     @location(0) tex_coord: vec2<f32>,
 };
 
-@group(0) @binding(5) var<uniform> tileProps: HillshadePrepareTilePropsUBO;
 @group(1) @binding(0) var texture_sampler: sampler;
 @group(1) @binding(1) var dem_texture: texture_2d<f32>;
 
@@ -101,8 +97,6 @@ struct VertexOutput {
     @location(0) tex_coord: vec2<f32>,
 };
 
-@group(0) @binding(2) var<storage, read> drawableVector: array<HillshadeDrawableUBO>;
-
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
@@ -127,8 +121,6 @@ struct FragmentInput {
     @location(0) tex_coord: vec2<f32>,
 };
 
-@group(0) @binding(3) var<storage, read> tilePropsVector: array<HillshadeTilePropsUBO>;
-@group(0) @binding(5) var<uniform> props: HillshadeEvaluatedPropsUBO;
 @group(1) @binding(0) var texture_sampler: sampler;
 @group(1) @binding(1) var hillshade_texture: texture_2d<f32>;
 

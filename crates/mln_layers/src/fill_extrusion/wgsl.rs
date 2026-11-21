@@ -30,8 +30,6 @@ struct FragmentInput {
     #property varying pattern_to 4 flat
 };
 
-@group(0) @binding(5) var<storage, read> tilePropsVector: array<FillExtrusionTilePropsUBO>;
-@group(0) @binding(6) var<uniform> props: FillExtrusionPropsUBO;
 @group(1) @binding(0) var texture_sampler: sampler;
 @group(1) @binding(1) var pattern_texture: texture_2d<f32>;
 
@@ -92,9 +90,6 @@ struct VertexOutput {
     @location(0) color: vec4<f32>,
 };
 
-@group(0) @binding(2) var<storage, read> drawableVector: array<FillExtrusionDrawableUBO>;
-@group(0) @binding(6) var<uniform> props: FillExtrusionPropsUBO;
-
 // The color of a surface facing `normal`, at `t` (0 at the base, 1 at the
 // top) of a wall.
 fn lit_color(in_color: vec4<f32>, normal: vec3<f32>, t: f32, baseValue: f32, heightValue: f32) -> vec4<f32> {
@@ -138,10 +133,6 @@ struct VertexOutput {
     #property varying pattern_from 3 flat
     #property varying pattern_to 4 flat
 };
-
-@group(0) @binding(2) var<storage, read> drawableVector: array<FillExtrusionDrawableUBO>;
-@group(0) @binding(5) var<storage, read> tilePropsVector: array<FillExtrusionTilePropsUBO>;
-@group(0) @binding(6) var<uniform> props: FillExtrusionPropsUBO;
 
 // The lighting of a surface facing `normal`, at `t` (0 at the base, 1 at the
 // top) of a wall.
@@ -348,26 +339,6 @@ fn main(in: VertexInput) -> VertexOutput {
     prelude: "",
 };
 
-/// The paint values' buffer of the pulled walls, where a paint property is
-/// data-driven.
-macro_rules! wall_paint {
-    () => {
-        r"
-#ifndef HAS_UNIFORM_u_color
-@group(0) @binding(8) var<storage, read> wallPaint: array<f32>;
-#else
-#ifndef HAS_UNIFORM_u_base
-@group(0) @binding(8) var<storage, read> wallPaint: array<f32>;
-#else
-#ifndef HAS_UNIFORM_u_height
-@group(0) @binding(8) var<storage, read> wallPaint: array<f32>;
-#endif
-#endif
-#endif
-"
-    };
-}
-
 /// The pulled fill extrusion walls.
 pub(super) const FILL_EXTRUSION_PULLED_SHADER: Wgsl = Wgsl {
     vertex: concat!(
@@ -393,12 +364,8 @@ struct VertexInput {
         plain_declarations!(),
         wall_normal!(),
         r"
-// The bucket's vertices, two words each: the position's x and y in the
+// `wallVertices` holds two words a vertex: the position's x and y in the
 // halves of the first, `decimals_ed`'s in those of the second.
-@group(0) @binding(7) var<storage, read> wallVertices: array<u32>;
-",
-        wall_paint!(),
-        r"
 @vertex
 fn main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     var out: VertexOutput;

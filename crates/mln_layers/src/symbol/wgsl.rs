@@ -45,16 +45,12 @@ struct VertexOutput {
     @location(1) not_used: f32,
 };
 
-@group(0) @binding(2) var<uniform> drawable: CollisionDrawableUBO;
-@group(0) @binding(4) var<uniform> projection: ProjectionUBO;
-@group(0) @binding(5) var<uniform> tile_props: CollisionTilePropsUBO;
-
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
 
 #ifdef PROJECTION_GLOBE
-    let projected_point = projectTileWithElevation(vec2<f32>(f32(in.anchor_position.x), f32(in.anchor_position.y)), in.height_offset, projection);
+    let projected_point = projectTileWithElevation(vec2<f32>(f32(in.anchor_position.x), f32(in.anchor_position.y)), in.height_offset, drawProjection);
 #else
     let projected_point = drawable.matrix * vec4<f32>(f32(in.anchor_position.x), f32(in.anchor_position.y), in.height_offset, 1.0);
 #endif
@@ -66,7 +62,7 @@ fn main(in: VertexInput) -> VertexOutput {
         4.0);
 
 #ifdef PROJECTION_GLOBE
-    out.position = projectTileWithElevation(vec2<f32>(f32(in.position.x), f32(in.position.y)), in.height_offset, projection);
+    out.position = projectTileWithElevation(vec2<f32>(f32(in.position.x), f32(in.position.y)), in.height_offset, drawProjection);
     // Boxes just past the horizon stay visible, as in GL JS; ones far behind it are clipped.
     if (out.position.z / out.position.w < 1.1) {
         out.position.z = 0.0;
@@ -75,8 +71,8 @@ fn main(in: VertexInput) -> VertexOutput {
     out.position = drawable.matrix * vec4<f32>(f32(in.position.x), f32(in.position.y), in.height_offset, 1.0);
 #endif
     let extrude_shift = vec2<f32>(f32(in.extrude.x), f32(in.extrude.y)) + in.shift;
-    out.position.x += extrude_shift.x * tile_props.extrude_scale.x * out.position.w * collision_perspective_ratio;
-    out.position.y += extrude_shift.y * tile_props.extrude_scale.y * out.position.w * collision_perspective_ratio;
+    out.position.x += extrude_shift.x * tileProps.extrude_scale.x * out.position.w * collision_perspective_ratio;
+    out.position.y += extrude_shift.y * tileProps.extrude_scale.y * out.position.w * collision_perspective_ratio;
 
     out.placed = f32(in.placed.x);
     out.not_used = f32(in.placed.y);
@@ -131,16 +127,12 @@ struct VertexOutput {
     @location(4) extrude_scale: vec2<f32>,
 };
 
-@group(0) @binding(2) var<uniform> drawable: CollisionDrawableUBO;
-@group(0) @binding(4) var<uniform> projection: ProjectionUBO;
-@group(0) @binding(5) var<uniform> tile_props: CollisionTilePropsUBO;
-
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
 
 #ifdef PROJECTION_GLOBE
-    let projected_point = projectTile(vec2<f32>(f32(in.anchor_position.x), f32(in.anchor_position.y)), projection);
+    let projected_point = projectTile(vec2<f32>(f32(in.anchor_position.x), f32(in.anchor_position.y)), drawProjection);
 #else
     let projected_point = drawable.matrix * vec4<f32>(f32(in.anchor_position.x), f32(in.anchor_position.y), 0.0, 1.0);
 #endif
@@ -153,7 +145,7 @@ fn main(in: VertexInput) -> VertexOutput {
         4.0);
 
 #ifdef PROJECTION_GLOBE
-    var position = projectTile(vec2<f32>(f32(in.position.x), f32(in.position.y)), projection);
+    var position = projectTile(vec2<f32>(f32(in.position.x), f32(in.position.y)), drawProjection);
     // Circles just past the horizon stay visible, as in GL JS; ones far behind it are clipped.
     if (position.z / position.w < 1.1) {
         position.z = 0.0;
@@ -163,8 +155,8 @@ fn main(in: VertexInput) -> VertexOutput {
 #endif
     let padding_factor = 1.2;
     let extrude_vec = vec2<f32>(f32(in.extrude.x), f32(in.extrude.y));
-    position.x += extrude_vec.x * tile_props.extrude_scale.x * padding_factor * position.w * collision_perspective_ratio;
-    position.y += extrude_vec.y * tile_props.extrude_scale.y * padding_factor * position.w * collision_perspective_ratio;
+    position.x += extrude_vec.x * tileProps.extrude_scale.x * padding_factor * position.w * collision_perspective_ratio;
+    position.y += extrude_vec.y * tileProps.extrude_scale.y * padding_factor * position.w * collision_perspective_ratio;
 
     out.position = position;
 
@@ -172,7 +164,7 @@ fn main(in: VertexInput) -> VertexOutput {
     out.not_used = f32(in.placed.y);
     out.radius = abs(f32(in.extrude.y));
     out.extrude = extrude_vec * padding_factor;
-    out.extrude_scale = tile_props.extrude_scale * view.camera_to_center_distance * collision_perspective_ratio;
+    out.extrude_scale = tileProps.extrude_scale * view.camera_to_center_distance * collision_perspective_ratio;
     return out;
 }
 ",
@@ -184,8 +176,6 @@ struct FragmentInput {
     @location(3) extrude: vec2<f32>,
     @location(4) extrude_scale: vec2<f32>,
 };
-
-@group(0) @binding(5) var<uniform> tile_props: CollisionTilePropsUBO;
 
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
@@ -206,7 +196,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     // Add circle outline effect
     let extrude_scale_length = max(length(in.extrude_scale), 1e-6);
     let extrude_length = length(in.extrude) * extrude_scale_length;
-    let overscale = max(tile_props.overscale_factor, 1.0);
+    let overscale = max(tileProps.overscale_factor, 1.0);
     let stroke_width = 15.0 * extrude_scale_length / overscale;
     let radius = in.radius * extrude_scale_length;
     let distance_to_edge = abs(extrude_length - radius);
@@ -238,9 +228,6 @@ struct VertexOutput {
     #property varying opacity 2
     @location(3) @interpolate(flat) tex_origin: vec2<f32>,
 };
-
-@group(0) @binding(2) var<storage, read> drawableVector: array<SymbolDrawableUBO>;
-@group(0) @binding(5) var<uniform> props: SymbolEvaluatedPropsUBO;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
@@ -378,8 +365,6 @@ struct FragmentInput {
     @location(3) @interpolate(flat) tex_origin: vec2<f32>,
 };
 
-@group(0) @binding(3) var<storage, read> tilePropsVector: array<SymbolTilePropsUBO>;
-@group(0) @binding(5) var<uniform> props: SymbolEvaluatedPropsUBO;
 @group(1) @binding(0) var texture_sampler: sampler;
 @group(1) @binding(1) var image: texture_2d<f32>;
 
@@ -437,9 +422,6 @@ struct VertexOutput {
     #property varying halo_color 5
     @location(9) @interpolate(flat) tex_origin: vec2<f32>,
 };
-
-@group(0) @binding(2) var<storage, read> drawableVector: array<SymbolDrawableUBO>;
-@group(0) @binding(5) var<uniform> props: SymbolEvaluatedPropsUBO;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
@@ -601,8 +583,6 @@ struct FragmentInput {
     @location(9) @interpolate(flat) tex_origin: vec2<f32>,
 };
 
-@group(0) @binding(3) var<storage, read> tilePropsVector: array<SymbolTilePropsUBO>;
-@group(0) @binding(5) var<uniform> props: SymbolEvaluatedPropsUBO;
 @group(1) @binding(0) var texture_sampler: sampler;
 @group(1) @binding(1) var glyph_atlas: texture_2d<f32>;
 
@@ -691,9 +671,6 @@ struct VertexOutput {
     #property varying halo_color 6
     @location(10) @interpolate(flat) tex_origin: vec2<f32>,
 };
-
-@group(0) @binding(2) var<storage, read> drawableVector: array<SymbolDrawableUBO>;
-@group(0) @binding(5) var<uniform> props: SymbolEvaluatedPropsUBO;
 
 const SDF = 1.0;
 const ICON = 0.0;
@@ -863,8 +840,6 @@ struct FragmentInput {
     @location(10) @interpolate(flat) tex_origin: vec2<f32>,
 };
 
-@group(0) @binding(3) var<storage, read> tilePropsVector: array<SymbolTilePropsUBO>;
-@group(0) @binding(5) var<uniform> props: SymbolEvaluatedPropsUBO;
 @group(1) @binding(0) var glyph_sampler: sampler;
 @group(1) @binding(1) var glyph_image: texture_2d<f32>;
 @group(1) @binding(2) var icon_sampler: sampler;

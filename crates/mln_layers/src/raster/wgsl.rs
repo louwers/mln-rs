@@ -15,9 +15,6 @@ struct VertexOutput {
     @location(1) pos1: vec2<f32>,
 };
 
-@group(0) @binding(2) var<storage, read> drawableVector: array<RasterDrawableUBO>;
-@group(0) @binding(5) var<uniform> props: RasterEvaluatedPropsUBO;
-
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
@@ -40,7 +37,6 @@ struct FragmentInput {
     @location(1) pos1: vec2<f32>,
 };
 
-@group(0) @binding(5) var<uniform> props: RasterEvaluatedPropsUBO;
 @group(1) @binding(0) var texture_sampler: sampler;
 @group(1) @binding(1) var image0: texture_2d<f32>;
 @group(1) @binding(2) var image1: texture_2d<f32>;

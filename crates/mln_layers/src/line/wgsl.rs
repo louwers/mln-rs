@@ -80,9 +80,6 @@ struct VertexOutput {
 #endif
 };
 
-@group(0) @binding(2) var<storage, read> drawableVector: array<LineSDFDrawableUBO>;
-@group(0) @binding(5) var<uniform> props: LineEvaluatedPropsUBO;
-
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
@@ -207,8 +204,6 @@ struct FragmentInput {
 #endif
 };
 
-@group(0) @binding(3) var<storage, read> tilePropsVector: array<LineSDFTilePropsUBO>;
-@group(0) @binding(5) var<uniform> props: LineEvaluatedPropsUBO;
 @group(1) @binding(0) var gradient_sampler: sampler;
 @group(1) @binding(1) var gradient_texture: texture_2d<f32>;
 @group(1) @binding(2) var dash_sampler: sampler;
@@ -289,9 +284,6 @@ struct VertexOutput {
     @location(6) v_tile_x: f32,
 #endif
 };
-
-@group(0) @binding(2) var<storage, read> drawableVector: array<LineGradientDrawableUBO>;
-@group(0) @binding(5) var<uniform> props: LineEvaluatedPropsUBO;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
@@ -375,7 +367,6 @@ struct FragmentInput {
 #endif
 };
 
-@group(0) @binding(5) var<uniform> props: LineEvaluatedPropsUBO;
 @group(1) @binding(0) var gradient_sampler: sampler;
 @group(1) @binding(1) var gradient_texture: texture_2d<f32>;
 
@@ -443,10 +434,6 @@ struct VertexOutput {
     @location(9) v_tile_x: f32,
 #endif
 };
-
-@group(0) @binding(2) var<storage, read> drawableVector: array<LinePatternDrawableUBO>;
-@group(0) @binding(3) var<storage, read> tilePropsVector: array<LinePatternTilePropsUBO>;
-@group(0) @binding(5) var<uniform> props: LineEvaluatedPropsUBO;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
@@ -539,8 +526,6 @@ struct FragmentInput {
 #endif
 };
 
-@group(0) @binding(3) var<storage, read> tilePropsVector: array<LinePatternTilePropsUBO>;
-@group(0) @binding(5) var<uniform> props: LineEvaluatedPropsUBO;
 @group(1) @binding(0) var pattern_sampler: sampler;
 @group(1) @binding(1) var pattern_texture: texture_2d<f32>;
 
@@ -661,10 +646,6 @@ struct VertexOutput {
     @location(10) @interpolate(flat) v_dash_width: f32,
 #endif
 };
-
-@group(0) @binding(2) var<storage, read> drawableVector: array<LineSDFDrawableUBO>;
-@group(0) @binding(3) var<storage, read> tilePropsVector: array<LineSDFTilePropsUBO>;
-@group(0) @binding(5) var<uniform> props: LineEvaluatedPropsUBO;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
@@ -789,8 +770,6 @@ struct FragmentInput {
 #endif
 };
 
-@group(0) @binding(3) var<storage, read> tilePropsVector: array<LineSDFTilePropsUBO>;
-@group(0) @binding(5) var<uniform> props: LineEvaluatedPropsUBO;
 @group(1) @binding(0) var sdf_sampler: sampler;
 @group(1) @binding(1) var sdf_texture: texture_2d<f32>;
 
@@ -868,9 +847,6 @@ struct VertexOutput {
     @location(6) v_tile_x: f32,
 #endif
 };
-
-@group(0) @binding(2) var<storage, read> drawableVector: array<LineDrawableUBO>;
-@group(0) @binding(5) var<uniform> props: LineEvaluatedPropsUBO;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
@@ -951,8 +927,6 @@ struct FragmentInput {
     @location(6) v_tile_x: f32,
 #endif
 };
-
-@group(0) @binding(5) var<uniform> props: LineEvaluatedPropsUBO;
 
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {

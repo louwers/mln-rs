@@ -155,6 +155,17 @@ fn no_source_declares_a_block() {
     }
 }
 
+/// No source declares a buffer: the backend declares the engine's and its
+/// program's, by their names.
+#[test]
+fn no_source_declares_a_buffer() {
+    for (program, source) in programs() {
+        for text in [source.prelude, source.vertex, source.fragment] {
+            assert!(!text.contains("@group(0)"), "{} declares a buffer", program.name);
+        }
+    }
+}
+
 /// WGSL lays out every block's struct, padded to its buffer's stride, as
 /// its Rust struct is laid out.
 #[test]

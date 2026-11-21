@@ -1,5 +1,8 @@
 //! The WGSL prelude every shader compiles after, and the declarations of
-//! the engine's buffers that a stage reads.
+//! the buffers that a stage reads.
+
+use mln_gfx::gfx_types::AttributeDataType;
+use mln_gfx::shaders::program::{Buffer, BufferKind, DRAW_PROJECTION_BUFFER, PROJECTION_BUFFER, VIEW_BUFFER};
 
 /// The WGSL every program compiles after.
 pub(crate) const PRELUDE: &str = r"
@@ -181,10 +184,32 @@ fn projectTileFor3D(pos: vec2<f32>, elevation: f32, projection: ProjectionUBO) -
 
 ";
 
-/// The declarations of the engine's buffers: the view's block, the draw's
-/// index and the projection blocks, each with the name a stage reads it by.
-pub(crate) const RESERVED_BINDINGS: [(&str, &str); 3] = [
-    ("view", "@group(0) @binding(0) var<uniform> view: ViewUBO;"),
-    ("globalIndex", "@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;"),
-    ("projectionVector", "@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;"),
-];
+/// The declaration of the draw's index into the storage buffers it reads,
+/// which a stage reads as `globalIndex`.
+pub(crate) const GLOBAL_INDEX_DECLARATION: &str = "@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;";
+
+/// The engine's buffers that a stage may read without declaring them,
+/// besides `globalIndex`: the view's block and the projection blocks.
+pub(crate) const ENGINE_BINDINGS: [Buffer; 3] = [VIEW_BUFFER, PROJECTION_BUFFER, DRAW_PROJECTION_BUFFER];
+
+/// The declaration of `buffer` at the binding of its id in group 0, by its
+/// name: a block as a uniform, and an array of the elements or the vertex
+/// words of a storage buffer.
+pub(crate) fn declaration(buffer: &Buffer) -> String {
+    let (space, ty) = match buffer.kind {
+        BufferKind::Uniform(block) | BufferKind::DrawUniform(block) => ("uniform", block.name.to_owned()),
+        BufferKind::Storage { block, .. } => ("storage, read", format!("array<{}>", block.name)),
+        BufferKind::Vertices { format } => ("storage, read", format!("array<{}>", word(format))),
+    };
+    format!("@group(0) @binding({}) var<{space}> {}: {ty};", buffer.id, buffer.name)
+}
+
+/// The 32-bit words that a stage reads vertices of `format` as.
+fn word(format: AttributeDataType) -> &'static str {
+    use AttributeDataType::{Float, Float2, Float3, Float4, Int, Int2, Int3, Int4};
+    match format {
+        Float | Float2 | Float3 | Float4 => "f32",
+        Int | Int2 | Int3 | Int4 => "i32",
+        _ => "u32",
+    }
+}

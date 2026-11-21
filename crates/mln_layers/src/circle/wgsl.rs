@@ -166,7 +166,5 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 }
 ",
     prelude: r"
-@group(0) @binding(2) var<storage, read> drawableVector: array<CircleDrawableUBO>;
-@group(0) @binding(5) var<uniform> props: CircleEvaluatedPropsUBO;
 ",
 };

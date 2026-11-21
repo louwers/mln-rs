@@ -16,9 +16,6 @@ struct VertexOutput {
     @location(1) extrude: vec2<f32>,
 };
 
-@group(0) @binding(2) var<storage, read> drawableVector: array<HeatmapDrawableUBO>;
-@group(0) @binding(5) var<uniform> props: HeatmapEvaluatedPropsUBO;
-
 const ZERO: f32 = 1.0 / 255.0 / 16.0;
 const GAUSS_COEF: f32 = 0.3989422804014327;
 
@@ -64,8 +61,6 @@ struct FragmentInput {
 
 const GAUSS_COEF: f32 = 0.3989422804014327;
 
-@group(0) @binding(5) var<uniform> props: HeatmapEvaluatedPropsUBO;
-
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 #ifdef OVERDRAW_INSPECTOR
@@ -92,8 +87,6 @@ struct VertexOutput {
     @location(0) tex_coord: vec2<f32>,
 };
 
-@group(0) @binding(5) var<uniform> ubo: HeatmapTexturePropsUBO;
-
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
@@ -101,7 +94,7 @@ fn main(in: VertexInput) -> VertexOutput {
     let quad_pos = vec2<f32>(f32(in.position.x), f32(in.position.y));
     let scaled = quad_pos * view.target_size;
 
-    out.position = ubo.matrix * vec4<f32>(scaled, 0.0, 1.0);
+    out.position = props.matrix * vec4<f32>(scaled, 0.0, 1.0);
     out.tex_coord = quad_pos;
 
     return out;
@@ -112,7 +105,6 @@ struct FragmentInput {
     @location(0) tex_coord: vec2<f32>,
 };
 
-@group(0) @binding(5) var<uniform> ubo: HeatmapTexturePropsUBO;
 @group(1) @binding(0) var texture_sampler: sampler;
 @group(1) @binding(1) var heatmap_texture: texture_2d<f32>;
 @group(1) @binding(2) var color_ramp_texture: texture_2d<f32>;
@@ -125,7 +117,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 
     let t = textureSample(heatmap_texture, texture_sampler, in.tex_coord).r;
     let color = textureSample(color_ramp_texture, texture_sampler, vec2<f32>(t, 0.5));
-    return color * ubo.opacity;
+    return color * props.opacity;
 }
 ",
     prelude: "",

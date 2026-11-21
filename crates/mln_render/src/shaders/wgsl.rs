@@ -13,8 +13,6 @@ struct VertexOutput {
     @location(0) view_direction: vec3<f32>,
 };
 
-@group(0) @binding(5) var<uniform> atmosphere: AtmospherePropsUBO;
-
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     let pos = vec2<f32>(f32(in.position.x), f32(in.position.y));
@@ -31,8 +29,6 @@ fn main(in: VertexInput) -> VertexOutput {
 struct FragmentInput {
     @location(0) view_direction: vec3<f32>,
 };
-
-@group(0) @binding(5) var<uniform> atmosphere: AtmospherePropsUBO;
 
 const ATMOSPHERE_PI: f32 = 3.141592653589793;
 const PRIMARY_STEPS: i32 = 5;
@@ -139,13 +135,11 @@ struct VertexOutput {
     @builtin(position) position: vec4<f32>,
 };
 
-@group(0) @binding(4) var<uniform> projection: ProjectionUBO;
-
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
     let pos = vec2<f32>(f32(in.position.x), f32(in.position.y));
-    out.position = projectTileWithPoles(pos, pos, projection);
+    out.position = projectTileWithPoles(pos, pos, drawProjection);
     return out;
 }
 ",
@@ -200,7 +194,6 @@ fn main(in: VertexInput) -> @builtin(position) vec4<f32> {
 }
 ",
     fragment: r"
-@group(0) @binding(5) var<uniform> props: LayerCompositeUBO;
 @group(1) @binding(1) var image_texture: texture_2d<f32>;
 @group(1) @binding(2) var backdrop_texture: texture_2d<f32>;
 
@@ -307,8 +300,6 @@ struct VertexOutput {
 #endif
 };
 
-@group(0) @binding(5) var<uniform> props: TileDebugPropsUBO;
-
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
@@ -367,8 +358,6 @@ struct FragmentInput {
 #endif
 };
 
-@group(0) @binding(5) var<uniform> props: TileDebugPropsUBO;
-
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 #ifdef PROJECTION_GLOBE
@@ -416,8 +405,6 @@ fn main(in: VertexInput) -> VertexOutput {
 struct FragmentInput {
     @location(0) pos: vec2<f32>,
 };
-
-@group(0) @binding(5) var<uniform> sky: SkyPropsUBO;
 
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {

@@ -16,9 +16,6 @@ struct VertexOutput {
     @location(1) pos_b: vec2<f32>,
 };
 
-@group(0) @binding(2) var<storage, read> drawableVector: array<BackgroundPatternDrawableUBO>;
-@group(0) @binding(5) var<uniform> props: BackgroundPatternPropsUBO;
-
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
@@ -55,7 +52,6 @@ struct FragmentInput {
     @location(1) pos_b: vec2<f32>,
 };
 
-@group(0) @binding(5) var<uniform> props: BackgroundPatternPropsUBO;
 @group(1) @binding(0) var texture_sampler: sampler;
 @group(1) @binding(1) var pattern_texture: texture_2d<f32>;
 
@@ -98,9 +94,6 @@ struct VertexOutput {
     @builtin(position) position: vec4<f32>,
 };
 
-@group(0) @binding(2) var<storage, read> drawableVector: array<BackgroundDrawableUBO>;
-@group(0) @binding(5) var<uniform> props: BackgroundPropsUBO;
-
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
@@ -112,7 +105,6 @@ fn main(in: VertexInput) -> VertexOutput {
 }
 ",
     fragment: r"
-@group(0) @binding(5) var<uniform> props: BackgroundPropsUBO;
 
 @fragment
 fn main() -> @location(0) vec4<f32> {

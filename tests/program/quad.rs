@@ -48,8 +48,6 @@ struct VertexOutput {
     @location(0) uv: vec2<f32>,
 };
 
-@group(0) @binding(5) var<uniform> props: QuadUBO;
-
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
@@ -63,7 +61,6 @@ struct FragmentInput {
     @location(0) uv: vec2<f32>,
 };
 
-@group(0) @binding(5) var<uniform> props: QuadUBO;
 @group(1) @binding(0) var image_sampler: sampler;
 @group(1) @binding(1) var image: texture_2d<f32>;
 

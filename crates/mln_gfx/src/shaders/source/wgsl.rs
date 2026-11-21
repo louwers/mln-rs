@@ -25,9 +25,15 @@ use crate::shaders::source::{Named, Stage, expand as expand_properties, per_vert
 /// own that both stages read.
 ///
 /// A stage compiles from the backend's prelude, the structs of the engine's
-/// blocks and the program's, the declarations of the engine's buffers that
-/// `prelude` or the stage names (`view`, `globalIndex` and
-/// `projectionVector`), `prelude` and the stage's source.
+/// blocks and the program's, the declarations of the buffers that `prelude`
+/// or the stage names, `prelude` and the stage's source. The backend
+/// declares `globalIndex`, the draw's index into the storage buffers it
+/// reads, the engine's buffers and the program's, each by its
+/// [`name`](crate::shaders::program::Buffer::name) at its id in group 0: a
+/// block as a `var<uniform>`, and an array of the elements, or of the
+/// vertices' 32-bit words, of a storage buffer as a `var<storage, read>`.
+/// A stage that names a block in any variant declares it in every variant,
+/// and a vertex buffer only in the variants that name it.
 #[derive(Debug)]
 pub struct Wgsl {
     /// The vertex stage.

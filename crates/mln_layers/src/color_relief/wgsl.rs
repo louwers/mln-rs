@@ -14,9 +14,6 @@ struct VertexOutput {
     @location(0) frag_position: vec2<f32>,
 };
 
-@group(0) @binding(2) var<storage, read> drawableVector: array<ColorReliefDrawableUBO>;
-@group(0) @binding(5) var<storage, read> tilePropsVector: array<ColorReliefTilePropsUBO>;
-
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
@@ -43,8 +40,6 @@ struct FragmentInput {
     @location(0) frag_position: vec2<f32>,
 };
 
-@group(0) @binding(5) var<storage, read> tilePropsVector: array<ColorReliefTilePropsUBO>;
-@group(0) @binding(6) var<uniform> props: ColorReliefEvaluatedPropsUBO;
 @group(1) @binding(0) var dem_sampler: sampler;
 @group(1) @binding(1) var dem_texture: texture_2d<f32>;
 @group(1) @binding(2) var elevation_stops_sampler: sampler;

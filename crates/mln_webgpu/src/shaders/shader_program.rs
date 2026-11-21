@@ -8,18 +8,18 @@ use std::borrow::Cow;
 use mln_gfx::color_mode::BlendFunction;
 use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
 use mln_gfx::gpu::{FixedState, GpuError, ShaderKey, VertexBufferLayout, VertexStep};
-use mln_gfx::shaders::program::Program;
+use mln_gfx::shaders::program::{Buffer, Program};
 use mln_gfx::shaders::source::identifiers;
 use mln_gfx::shaders::source::wgsl::{self, Wgsl};
 use mln_gfx::types::{
     ColorBlendEquationType, ColorBlendFactorType, CullFaceSideType, CullFaceWindingType, DepthFunctionType,
     StencilFunctionType, StencilOpType,
 };
-use mln_util::hash::HashMap;
+use mln_util::hash::{HashMap, HashSet};
 use mln_vec_map::VecMap;
 
 use crate::shaders::wgsl_preprocessor::{is_space, preprocess_wgsl};
-use crate::shaders::wgsl_sources::{PRELUDE, RESERVED_BINDINGS};
+use crate::shaders::wgsl_sources::{ENGINE_BINDINGS, GLOBAL_INDEX_DECLARATION, PRELUDE, declaration};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum BindingType {
@@ -800,9 +800,9 @@ pub(crate) fn compile(
 
 /// The vertex and fragment stages of `key`'s program: the common prelude,
 /// the structs of the engine's blocks and the program's, the declarations of
-/// the engine's buffers that the stage reads, the program's own prelude and
-/// the stage with its properties written out ([`wgsl::expand`]),
-/// preprocessed with the key's defines. Fails with
+/// the buffers that the stage reads ([`declarations`]), the program's own
+/// prelude and the stage with its properties written out
+/// ([`wgsl::expand`]), preprocessed with the key's defines. Fails with
 /// [`GpuError::Unsupported`] for a program without WGSL, and as
 /// [`wgsl::expand`] does.
 pub(crate) fn stage_sources(key: &ShaderKey) -> Result<[String; 2], GpuError> {
@@ -813,34 +813,52 @@ pub(crate) fn stage_sources(key: &ShaderKey) -> Result<[String; 2], GpuError> {
     // its `#ifdef`s see the defines.
     let shader_prelude = source.prelude;
     let blocks = wgsl::blocks(program);
-    let assemble = |stage: &str| {
-        format!("{PRELUDE}\n{blocks}{}{shader_prelude}{stage}", reserved_bindings(&[shader_prelude, stage]))
-    };
     // WGSL reads no define's value; the pixel ratio's is an override's.
     let defines: HashMap<String, bool> = key.define_values().map(|(name, _)| (name.to_owned(), true)).collect();
-    Ok(wgsl::expand(program, source)?.map(|stage| preprocess_wgsl(&assemble(&stage), &defines)))
+    Ok(wgsl::expand(program, source)?.map(|stage| {
+        let declarations = declarations(program, &format!("{shader_prelude}{stage}"), &defines);
+        preprocess_wgsl(&format!("{PRELUDE}\n{blocks}{declarations}{shader_prelude}{stage}"), &defines)
+    }))
 }
 
-/// The declarations of the engine's buffers that `texts`, a stage and the
-/// program's prelude, read: of each one whose variable they name outside
-/// their comments.
-fn reserved_bindings(texts: &[&str]) -> String {
-    let named = |name: &str| texts.iter().any(|text| identifiers(text).any(|identifier| identifier == name));
+/// The declarations of the buffers that `text`, a stage and the program's
+/// prelude, reads, of each one whose name it names outside its comments:
+/// `globalIndex`, the engine's buffers and the blocks of `program`'s, which
+/// a draw binds in every variant, where the text names them in any variant,
+/// and its vertex buffers, which a draw binds where it has them, where the
+/// text names them in the variant of `defines`. WebGPU lays out the
+/// bindings that a variant declares, whether it reads them or not.
+fn declarations(program: &Program, text: &str, defines: &HashMap<String, bool>) -> String {
+    let named: HashSet<&str> = identifiers(text).collect();
     let mut declarations = String::new();
-    for (_, declaration) in RESERVED_BINDINGS.iter().filter(|(name, _)| named(name)) {
-        declarations.push_str(declaration);
+    if named.contains("globalIndex") {
+        declarations.push_str(GLOBAL_INDEX_DECLARATION);
         declarations.push('\n');
+    }
+    let (blocks, vertices): (Vec<&Buffer>, Vec<&Buffer>) =
+        program.buffers.iter().partition(|buffer| buffer.block().is_some());
+    for buffer in ENGINE_BINDINGS.iter().chain(blocks).filter(|buffer| named.contains(buffer.name)) {
+        declarations.push_str(&declaration(buffer));
+        declarations.push('\n');
+    }
+    if !vertices.is_empty() {
+        let preprocessed = preprocess_wgsl(text, defines);
+        let named: HashSet<&str> = identifiers(&preprocessed).collect();
+        for buffer in vertices.into_iter().filter(|buffer| named.contains(buffer.name)) {
+            declarations.push_str(&declaration(buffer));
+            declarations.push('\n');
+        }
     }
     declarations
 }
 
-/// How the backend declares `globalIndex`.
-const GLOBAL_INDEX_DECLARATION: &str = "@group(0) @binding(1) var<uniform> globalIndex:";
+/// How the backend declares `globalIndex`, to its type.
+const GLOBAL_INDEX: &str = "@group(0) @binding(1) var<uniform> globalIndex:";
 
 /// The group after the last one `sources` use, if they declare `globalIndex`
 /// in group 0.
 fn index_group_of(sources: &[&str]) -> Option<u32> {
-    if !sources.iter().any(|source| source.contains(GLOBAL_INDEX_DECLARATION)) {
+    if !sources.iter().any(|source| source.contains(GLOBAL_INDEX)) {
         return None;
     }
     let last = sources
@@ -853,9 +871,9 @@ fn index_group_of(sources: &[&str]) -> Option<u32> {
 
 /// `source` with its `globalIndex` declaration in `group`.
 fn move_global_index(source: &str, group: u32) -> Cow<'_, str> {
-    if source.contains(GLOBAL_INDEX_DECLARATION) {
-        let declaration = GLOBAL_INDEX_DECLARATION.replacen("@group(0)", &format!("@group({group})"), 1);
-        Cow::Owned(source.replacen(GLOBAL_INDEX_DECLARATION, &declaration, 1))
+    if source.contains(GLOBAL_INDEX) {
+        let declaration = GLOBAL_INDEX.replacen("@group(0)", &format!("@group({group})"), 1);
+        Cow::Owned(source.replacen(GLOBAL_INDEX, &declaration, 1))
     } else {
         Cow::Borrowed(source)
     }
@@ -863,24 +881,56 @@ fn move_global_index(source: &str, group: u32) -> Cow<'_, str> {
 
 #[cfg(test)]
 mod tests {
-    use mln_gfx::shaders::bindings::{DRAW_INDEX_ID, PROJECTION_BUFFER_ID, VIEW_BUFFER_ID};
-    use mln_gfx::shaders::program::Sources;
+    use mln_gfx::gfx_types::AttributeDataType::{Float, Short4};
+    use mln_gfx::shaders::bindings::DRAW_INDEX_ID;
+    use mln_gfx::shaders::layer_ubo::ViewUBO;
+    use mln_gfx::shaders::program::{DRAW_PROJECTION_BUFFER, PROJECTION_BUFFER, Sources, VIEW_BUFFER};
 
     use super::*;
 
     #[test]
     fn the_engines_buffers_bind_at_their_ids() {
-        let ids = [VIEW_BUFFER_ID, DRAW_INDEX_ID, PROJECTION_BUFFER_ID];
-        for (&(_, declaration), id) in RESERVED_BINDINGS.iter().zip(ids) {
-            assert!(declaration.starts_with(&format!("@group(0) @binding({id}) ")), "{declaration}");
-        }
-        assert!(RESERVED_BINDINGS[1].1.starts_with(GLOBAL_INDEX_DECLARATION));
+        assert!(GLOBAL_INDEX_DECLARATION.starts_with(&format!("{GLOBAL_INDEX} ")));
+        assert!(GLOBAL_INDEX.starts_with(&format!("@group(0) @binding({DRAW_INDEX_ID}) ")));
+        assert_eq!(declaration(&VIEW_BUFFER), "@group(0) @binding(0) var<uniform> view: ViewUBO;");
+        assert_eq!(
+            declaration(&PROJECTION_BUFFER),
+            "@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;"
+        );
+        assert_eq!(declaration(&DRAW_PROJECTION_BUFFER), "@group(0) @binding(4) var<uniform> drawProjection: ProjectionUBO;");
     }
 
     #[test]
-    fn a_stage_declares_the_engines_buffers_it_names() {
-        let declared = reserved_bindings(&["", "let p = projectionVector[globalIndex.value]; // view"]);
-        assert_eq!(declared, format!("{}\n{}\n", RESERVED_BINDINGS[1].1, RESERVED_BINDINGS[2].1));
+    fn a_stage_declares_the_buffers_it_names() {
+        static PROGRAM: Program = Program {
+            name: "pulled",
+            buffers: &[Buffer::vertices("paint", 0, Float), Buffer::uniform::<ViewUBO>("props", 0)],
+            attributes: &[],
+            instance_attributes: &[],
+            textures: &[],
+            properties: &[],
+            sources: Sources::NONE,
+        };
+        let text = "let p = projectionVector[globalIndex.value]; // view\n#ifdef PAINT\nlet x = paint[0];\n#endif\nprops";
+        let declared = |defines: &[&str]| {
+            declarations(&PROGRAM, text, &defines.iter().map(|&name| (name.to_owned(), true)).collect())
+        };
+        let (props, paint) = (declaration(&PROGRAM.buffers[1]), declaration(&PROGRAM.buffers[0]));
+        let engine = format!("{GLOBAL_INDEX_DECLARATION}\n{}\n{props}\n", declaration(&PROJECTION_BUFFER));
+        assert_eq!(declared(&[]), engine);
+        assert_eq!(declared(&["PAINT"]), format!("{engine}{paint}\n"));
+    }
+
+    #[test]
+    fn a_vertex_buffer_is_an_array_of_its_words() {
+        assert_eq!(
+            declaration(&Buffer::vertices("walls", 0, Short4)),
+            "@group(0) @binding(7) var<storage, read> walls: array<u32>;"
+        );
+        assert_eq!(
+            declaration(&Buffer::vertices("paint", 1, Float)),
+            "@group(0) @binding(8) var<storage, read> paint: array<f32>;"
+        );
     }
 
     #[test]

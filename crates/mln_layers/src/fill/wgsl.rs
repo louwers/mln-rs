@@ -39,10 +39,6 @@ struct VertexOutput {
     #property varying opacity 6
 };
 
-@group(0) @binding(2) var<storage, read> drawableVector: array<FillPatternDrawableUBO>;
-@group(0) @binding(5) var<storage, read> tilePropsVector: array<FillPatternTilePropsUBO>;
-@group(0) @binding(6) var<uniform> props: FillEvaluatedPropsUBO;
-
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
@@ -121,8 +117,6 @@ struct FragmentInput {
     #property varying opacity 6
 };
 
-@group(0) @binding(5) var<storage, read> tilePropsVector: array<FillPatternTilePropsUBO>;
-@group(0) @binding(6) var<uniform> props: FillEvaluatedPropsUBO;
 @group(1) @binding(0) var texture_sampler: sampler;
 @group(1) @binding(1) var pattern_texture: texture_2d<f32>;
 
@@ -202,9 +196,6 @@ struct VertexOutput {
     @location(2) pos: vec2<f32>,
 };
 
-@group(0) @binding(2) var<storage, read> drawableVector: array<FillOutlineDrawableUBO>;
-@group(0) @binding(6) var<uniform> props: FillEvaluatedPropsUBO;
-
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
@@ -227,7 +218,6 @@ fn main(in: VertexInput) -> VertexOutput {
 }
 ",
     fragment: r"
-@group(0) @binding(6) var<uniform> props: FillEvaluatedPropsUBO;
 
 struct FragmentInput {
     @builtin(position) position: vec4<f32>,
@@ -283,10 +273,6 @@ struct VertexOutput {
     #property varying pattern_to 4 flat
     #property varying opacity 5
 };
-
-@group(0) @binding(2) var<storage, read> drawableVector: array<FillPatternDrawableUBO>;
-@group(0) @binding(5) var<storage, read> tilePropsVector: array<FillPatternTilePropsUBO>;
-@group(0) @binding(6) var<uniform> props: FillEvaluatedPropsUBO;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
@@ -359,8 +345,6 @@ struct FragmentInput {
     #property varying opacity 5
 };
 
-@group(0) @binding(5) var<storage, read> tilePropsVector: array<FillPatternTilePropsUBO>;
-@group(0) @binding(6) var<uniform> props: FillEvaluatedPropsUBO;
 @group(1) @binding(0) var texture_sampler: sampler;
 @group(1) @binding(1) var pattern_texture: texture_2d<f32>;
 
@@ -432,9 +416,6 @@ struct VertexOutput {
     #property varying opacity 1
 };
 
-@group(0) @binding(2) var<storage, read> drawableVector: array<FillDrawableUBO>;
-@group(0) @binding(6) var<uniform> props: FillEvaluatedPropsUBO;
-
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
@@ -452,7 +433,6 @@ fn main(in: VertexInput) -> VertexOutput {
 }
 ",
     fragment: r"
-@group(0) @binding(6) var<uniform> props: FillEvaluatedPropsUBO;
 
 struct FragmentInput {
     @builtin(position) position: vec4<f32>,
@@ -553,8 +533,6 @@ struct VertexOutput {
     @location(2) pos: vec2<f32>,
 };
 
-@group(0) @binding(2) var<storage, read> drawableVector: array<FillOutlineDrawableUBO>;
-@group(0) @binding(6) var<uniform> props: FillEvaluatedPropsUBO;
 "
     };
 }
@@ -605,18 +583,9 @@ pub(super) const FILL_OUTLINE_PULLED_SHADER: Wgsl = Wgsl {
     vertex: concat!(
         plain_declarations!(),
         r"
-// The fill's vertices and the ends of the outline segments that start at
-// them, a word each: x and y in its halves.
-@group(0) @binding(7) var<storage, read> outlineVertices: array<u32>;
-@group(0) @binding(8) var<storage, read> outlineEnds: array<u32>;
-#ifndef HAS_UNIFORM_u_outline_color
-@group(0) @binding(9) var<storage, read> outlinePaint: array<f32>;
-#else
-#ifndef HAS_UNIFORM_u_opacity
-@group(0) @binding(9) var<storage, read> outlinePaint: array<f32>;
-#endif
-#endif
-
+// `outlineVertices` holds the fill's vertices and `outlineEnds` the ends of
+// the outline segments that start at them, a word each: x and y in its
+// halves.
 fn tile_position(word: u32) -> vec2<f32> {
     return vec2<f32>(vec2<i32>(i32(word << 16u) >> 16u, i32(word) >> 16u));
 }
@@ -688,9 +657,6 @@ struct VertexOutput {
     #property varying opacity 6
 };
 
-@group(0) @binding(2) var<storage, read> drawableVector: array<FillPatternDrawableUBO>;
-@group(0) @binding(5) var<storage, read> tilePropsVector: array<FillPatternTilePropsUBO>;
-@group(0) @binding(6) var<uniform> props: FillEvaluatedPropsUBO;
 ",
         outline_corner!(),
         r"
