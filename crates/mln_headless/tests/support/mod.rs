@@ -10,7 +10,7 @@
 // - test/include/mln/test/fixture_log_observer.hpp (`FixtureLog`, per
 //   thread: Rust runs tests on parallel threads of one process);
 // - the `MapTest` fixture of test/map/map.test.cpp (C++ `MapAdapter` is
-//   `Map::new`).
+//   `MapCore::new`).
 //
 // Fixtures are read from the copy of the C++ repository's files in
 // testdata/; paths are written as in C++, relative to the maplibre-native
@@ -26,7 +26,7 @@ use std::sync::{Arc, OnceLock};
 
 use mln_headless::{HeadlessFrontend, RenderResult};
 use mln_render::{FontStack, GlyphRange, OverscaledTileID, TileOperation, UpdateReader};
-use mln_runtime::map::{Map, MapEvent, MapMode, MapOptions, RenderFrameStatus};
+use mln_runtime::map::{MapCore, MapCoreOptions, MapEvent, MapMode, RenderFrameStatus};
 use mln_sources::custom::geometry::CustomGeometrySourceHandle;
 use mln_sources::custom::provider::TileFunction;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
@@ -71,7 +71,7 @@ pub(crate) fn geojson_source_with_data(
 }
 
 /// Replaces the data of `map`'s GeoJSON source `id` with `geojson`.
-pub(crate) fn set_geojson(map: &mut Map, id: &str, geojson: geojson::GeoJson) {
+pub(crate) fn set_geojson(map: &mut MapCore, id: &str, geojson: geojson::GeoJson) {
     use mln_sources::geojson::GeoJsonSourceType;
     use mln_style::source_type::SourceData;
     let source = map.source(id).expect("the source");
@@ -292,7 +292,7 @@ impl StubMapObserver {
     /// Takes the map's events and calls their callbacks, which may use the
     /// map. Does nothing while someone holds the map: they dispatch the
     /// events when they let go of it.
-    pub(crate) fn dispatch_events(&self, map: &RefCell<Map>) {
+    pub(crate) fn dispatch_events(&self, map: &RefCell<MapCore>) {
         let Ok(mut map) = map.try_borrow_mut() else {
             return;
         };
@@ -308,12 +308,12 @@ impl StubMapObserver {
     /// renders `map`, it also draws each update that the map publishes
     /// first, as a window's frontend draws when the display asks for a
     /// frame, and repaints the map when it changes next on its own
-    /// ([`Map::repaint_at`]); while someone else holds the frontend, they
+    /// ([`MapCore::repaint_at`]); while someone else holds the frontend, they
     /// draw.
     pub(crate) fn observe(
         self: &Rc<Self>,
         run_loop: &TestLoop,
-        map: &Rc<RefCell<Map>>,
+        map: &Rc<RefCell<MapCore>>,
         frontend: Option<&Rc<RefCell<HeadlessFrontend>>>,
     ) -> Observing {
         let turn: Rc<dyn Fn()> = {
@@ -637,7 +637,7 @@ impl Drop for LoopTimer {
 /// observers get the calls at once. Otherwise they come in the loop's turns.
 pub(crate) struct MapTest<FS: FileSource + 'static = StubFileSource> {
     events: Observing,
-    pub map: Rc<RefCell<Map>>,
+    pub map: Rc<RefCell<MapCore>>,
     pub frontend: Rc<RefCell<HeadlessFrontend>>,
     pub observer: Rc<StubMapObserver>,
     pub file_source: Arc<FS>,
@@ -675,8 +675,8 @@ impl<FS: FileSource + 'static> MapTest<FS> {
         let pool = Pool::new(4);
         let mut frontend =
             HeadlessFrontend::with_pixel_ratio(pixel_ratio, run_loop.queue(), &pool).expect("a headless frontend");
-        let options = MapOptions { map_mode: mode, size: frontend.size(), pixel_ratio, ..Default::default() };
-        let mut map = Map::new(Arc::<FS>::clone(&file_source), options, registry(), &pool).unwrap();
+        let options = MapCoreOptions { map_mode: mode, size: frontend.size(), pixel_ratio, ..Default::default() };
+        let mut map = MapCore::new(Arc::<FS>::clone(&file_source), options, registry(), &pool).unwrap();
         frontend.attach(&mut map);
         let map = Rc::new(RefCell::new(map));
         let frontend = Rc::new(RefCell::new(frontend));
@@ -699,7 +699,7 @@ impl<FS: FileSource + 'static> MapTest<FS> {
     }
 
     /// A handle for callbacks (no reference cycle through the observer).
-    pub(crate) fn weak_map(&self) -> Weak<RefCell<Map>> {
+    pub(crate) fn weak_map(&self) -> Weak<RefCell<MapCore>> {
         Rc::downgrade(&self.map)
     }
 
@@ -725,20 +725,20 @@ impl<FS: FileSource + 'static> MapTest<FS> {
 /// The map of a [`MapTest`], borrowed. When it drops, the observer gets the
 /// map's events.
 pub(crate) struct MapGuard<'a> {
-    map: Option<RefMut<'a, Map>>,
-    cell: &'a RefCell<Map>,
+    map: Option<RefMut<'a, MapCore>>,
+    cell: &'a RefCell<MapCore>,
     observer: &'a StubMapObserver,
 }
 
 impl Deref for MapGuard<'_> {
-    type Target = Map;
-    fn deref(&self) -> &Map {
+    type Target = MapCore;
+    fn deref(&self) -> &MapCore {
         self.map.as_deref().expect("the map")
     }
 }
 
 impl DerefMut for MapGuard<'_> {
-    fn deref_mut(&mut self) -> &mut Map {
+    fn deref_mut(&mut self) -> &mut MapCore {
         self.map.as_deref_mut().expect("the map")
     }
 }

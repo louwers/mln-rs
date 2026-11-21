@@ -18,14 +18,14 @@ use mln_util::queue::Queue;
 use mln_util::size::Size;
 use mln_util::tileset::PartialTileset;
 
-use crate::map::{Map, MapEvent, MapOptions};
+use crate::map::{MapCore, MapCoreOptions, MapEvent};
 
 const EMPTY_GEOJSON_SOURCE: &str = r#"{"type":"geojson","data":{"type":"FeatureCollection","features":[]}}"#;
 
-fn loaded_map(run_loop: &Queue<()>) -> Map {
+fn loaded_map(run_loop: &Queue<()>) -> MapCore {
     let file_source = StubFileSource::on_queue(run_loop, ResponseType::Asynchronous);
-    let mut map =
-        Map::new(file_source, MapOptions::default(), crate::map::tests::registry(), &Pool::local()).expect("map");
+    let mut map = MapCore::new(file_source, MapCoreOptions::default(), crate::map::tests::registry(), &Pool::local())
+        .expect("map");
     map.load_style_json(r#"{"version":8,"sources":{},"layers":[]}"#);
     map
 }
@@ -34,7 +34,7 @@ fn vector_source(id: &str) -> mln_style::Source {
     tileset_vector_source(id, Some("mptiler://tiles/contours".to_owned()), PartialTileset::default())
 }
 
-fn record_ids(map: &Map) -> Vec<String> {
+fn record_ids(map: &MapCore) -> Vec<String> {
     map.style().get_sources().iter().map(|source| source.id().to_owned()).collect()
 }
 
@@ -108,8 +108,8 @@ fn malformed_sources_are_invalid_arguments() {
 fn a_source_json_needs_a_loaded_style() {
     let run_loop = Queue::<()>::new();
     let file_source = StubFileSource::on_queue(&run_loop, ResponseType::Asynchronous);
-    let mut map =
-        Map::new(file_source, MapOptions::default(), crate::map::tests::registry(), &Pool::local()).expect("map");
+    let mut map = MapCore::new(file_source, MapCoreOptions::default(), crate::map::tests::registry(), &Pool::local())
+        .expect("map");
     let error = map.add_source_json("points", EMPTY_GEOJSON_SOURCE).unwrap_err();
     assert_eq!(ErrorKind::InvalidState, error.kind);
     assert_eq!("style is not loaded", error.message);
@@ -119,17 +119,17 @@ fn a_source_json_needs_a_loaded_style() {
 
 /// A map over `file_source` whose style has no sources, and whose
 /// background work runs when the test runs its pool.
-fn map_over(file_source: &Arc<StubFileSource>) -> Map {
+fn map_over(file_source: &Arc<StubFileSource>) -> MapCore {
     let file_source: Arc<dyn mln_storage::FileSource> = Arc::<StubFileSource>::clone(file_source);
-    let mut map =
-        Map::new(file_source, MapOptions::default(), crate::map::tests::registry(), &Pool::local()).expect("map");
+    let mut map = MapCore::new(file_source, MapCoreOptions::default(), crate::map::tests::registry(), &Pool::local())
+        .expect("map");
     map.load_style_json(r#"{"version":8,"sources":{},"layers":[]}"#);
     map
 }
 
 /// Runs `map`'s pool and `run_loop`, and handles `map`'s reports, until
 /// `done` holds.
-fn run_until(map: &mut Map, run_loop: &Queue<()>, mut done: impl FnMut(&Map) -> bool) {
+fn run_until(map: &mut MapCore, run_loop: &Queue<()>, mut done: impl FnMut(&MapCore) -> bool) {
     let deadline = mln_util::time::Instant::now() + std::time::Duration::from_secs(10);
     loop {
         map.process_events();
@@ -159,7 +159,7 @@ fn geojson_points(count: usize) -> Vec<u8> {
 
 /// The number of features in tile 0/0/0 of the data of `map`'s GeoJSON
 /// source `id`.
-fn feature_count(map: &Map, id: &str) -> usize {
+fn feature_count(map: &MapCore, id: &str) -> usize {
     let Some(data) = map.source(id).and_then(geojson_data).cloned() else { return 0 };
     let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let counted = Arc::clone(&count);
@@ -171,7 +171,7 @@ fn feature_count(map: &Map, id: &str) -> usize {
     count.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-fn set_geojson_url(map: &mut Map, id: &str, url: &str) {
+fn set_geojson_url(map: &mut MapCore, id: &str, url: &str) {
     let edit = GeoJsonSourceType::set_url(id, url);
     map.edit_style(|style| style.apply(edit)).unwrap();
 }
@@ -213,7 +213,7 @@ fn a_tilejson_describes_its_source() {
     let mut map = map_over(&file_source);
     map.add_source(tileset_vector_source("source", Some("url".to_owned()), PartialTileset::default())).unwrap();
     assert!(!map.style_loaded());
-    run_until(&mut map, &run_loop, Map::style_loaded);
+    run_until(&mut map, &run_loop, MapCore::style_loaded);
     assert_eq!(Some("a".to_owned()), map.source("source").unwrap().data().attribution());
     assert_eq!(["source"], *source_changes(&map.drain_events()));
 }
@@ -248,7 +248,7 @@ fn geojson_source_url_update() {
     assert!(map.style_loaded());
     set_geojson_url(&mut map, "source", "http://source-url.ext");
     assert!(!map.style_loaded());
-    run_until(&mut map, &run_loop, Map::style_loaded);
+    run_until(&mut map, &run_loop, MapCore::style_loaded);
     assert!(map.source("source").and_then(geojson_data).is_some());
 }
 
@@ -300,7 +300,7 @@ fn geojson_source_url_replaces_building_url_data() {
     assert_eq!(0, feature_count(&map, "source"));
 
     file_source.respond_to_all();
-    run_until(&mut map, &run_loop, Map::style_loaded);
+    run_until(&mut map, &run_loop, MapCore::style_loaded);
     assert_eq!(2, feature_count(&map, "source"));
 }
 
@@ -322,7 +322,7 @@ fn a_geojson_build_keeps_the_synchronous_update_override() {
     map.edit_style(|style| style.apply(edit)).unwrap();
     assert_eq!(["source"], *source_changes(&map.drain_events()));
 
-    run_until(&mut map, &run_loop, Map::style_loaded);
+    run_until(&mut map, &run_loop, MapCore::style_loaded);
     assert_eq!(1, feature_count(&map, "source"));
     assert!(!map.source("source").unwrap().data().is_update_synchronous());
 }
@@ -342,9 +342,10 @@ fn image_source_image_update() {
     map.add_source(image_source("source", [LatLng::default(); 4])).unwrap();
     let edit = ImageSourceType::set_url("source", "http://url");
     map.edit_style(|style| style.apply(edit)).unwrap();
-    run_until(&mut map, &run_loop, Map::style_loaded);
-    let image =
-        |map: &Map| SourceData::<ImageSourceType>::recover(map.source("source").unwrap()).unwrap().description.clone();
+    run_until(&mut map, &run_loop, MapCore::style_loaded);
+    let image = |map: &MapCore| {
+        SourceData::<ImageSourceType>::recover(map.source("source").unwrap()).unwrap().description.clone()
+    };
     assert!(image(&map).is_some());
     map.drain_events();
 

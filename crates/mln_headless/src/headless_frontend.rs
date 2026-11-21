@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use mln_gfx::rendering_stats::RenderingStats;
 use mln_render::{Renderer, RendererEvent, RendererEvents, UpdateParameters, UpdateReader};
-use mln_runtime::map::Map;
+use mln_runtime::map::MapCore;
 use mln_runtime::{BackendRef, BackendType, Device, DeviceOptions, GlApi, LocalTarget};
 use mln_text::GlyphCache;
 use mln_text::local_glyph_rasterizer::LocalGlyphs;
@@ -167,7 +167,7 @@ impl HeadlessFrontend {
     }
 
     /// Renders at `pixel_ratio` from now on, which should be the map's
-    /// (`Map::set_pixel_ratio`): sizes the backend for it, and sets the
+    /// (`MapCore::set_pixel_ratio`): sizes the backend for it, and sets the
     /// renderer's.
     pub fn set_pixel_ratio(&mut self, pixel_ratio: f32) {
         if self.pixel_ratio != pixel_ratio {
@@ -184,7 +184,7 @@ impl HeadlessFrontend {
     /// [`waker`](Self::waker), which [`render`](Self::render) needs: an owner
     /// that sets a waker of its own after must have it wake the queue too.
     /// Attaching to the map it renders already does nothing.
-    pub fn attach(&mut self, map: &mut Map) {
+    pub fn attach(&mut self, map: &mut MapCore) {
         let reader = map.update_reader();
         if self.updates.as_ref().is_some_and(|updates| updates.ptr_eq(&reader)) {
             return;
@@ -270,7 +270,7 @@ impl HeadlessFrontend {
     /// happens, until the map's waker wakes it (see [`attach`](Self::attach)).
     /// The map handles its renderer's events meanwhile, and keeps its own
     /// events for its owner.
-    pub fn render(&mut self, map: &mut Map) -> Result<RenderResult, Error> {
+    pub fn render(&mut self, map: &mut MapCore) -> Result<RenderResult, Error> {
         // C++ spins on runOnce, which costs a core per renderer while the
         // workers parse tiles. Parking as soon as the queue is idle delays
         // the short waits of a single renderer; spinning briefly keeps them.

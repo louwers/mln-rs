@@ -173,7 +173,7 @@ impl WebMap {
 
         let size = Size::new(width.max(1), height.max(1));
         let options = MapOptions {
-            map: mln_runtime::map::MapOptions { size, pixel_ratio: pixel_ratio as f32, ..Default::default() },
+            map: mln_runtime::map::MapCoreOptions { size, pixel_ratio: pixel_ratio as f32, ..Default::default() },
             event_mask: EventMask::NONE
                 .with(EventType::MapLoadingFinished)
                 .with(EventType::MapLoadingFailed)

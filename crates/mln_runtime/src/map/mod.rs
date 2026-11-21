@@ -1,4 +1,4 @@
-//! The map: [`Map`], its options, the transform that moves its camera, and
+//! The map: [`MapCore`], its options, the transform that moves its camera, and
 //! the events it reports. It runs on one thread, which the runtime's handles
 //! drive. The map vocabulary that lower crates need (`CameraOptions`,
 //! `MapMode`, `TransformState`, ...) lives in `mln_map_types` and is
@@ -15,9 +15,9 @@ mod rendering_stats_view;
 mod style_loader;
 pub mod transform;
 
-pub use map_core::Map;
+pub use map_core::MapCore;
 pub use map_event::{CameraChange, CameraChangeMode, CameraChangeSource, MapEvent, RenderFrameStatus};
-pub use map_options::MapOptions;
+pub use map_options::MapCoreOptions;
 pub use map_projection::MapProjection;
 pub use map_snapshot::{CameraBounds, FreeCamera, MapSnapshot, TileSettings};
 pub use mln_map_types::{

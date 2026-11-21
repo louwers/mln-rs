@@ -30,7 +30,7 @@ fn style(color: &str) -> String {
 
 fn red_map(runtime: &Runtime) -> Map {
     let options = MapOptions {
-        map: mln_runtime::map::MapOptions { size: SIZE, map_mode: MapMode::Continuous, ..Default::default() },
+        map: mln_runtime::map::MapCoreOptions { size: SIZE, map_mode: MapMode::Continuous, ..Default::default() },
         ..Default::default()
     };
     let (map, created) = runtime.create_map(options).unwrap();
@@ -490,7 +490,7 @@ mod linux {
 
     fn session_map(runtime: &Runtime, style: &str) -> Map {
         let options = MapOptions {
-            map: mln_runtime::map::MapOptions { size: SIZE, map_mode: MapMode::Continuous, ..Default::default() },
+            map: mln_runtime::map::MapCoreOptions { size: SIZE, map_mode: MapMode::Continuous, ..Default::default() },
             ..Default::default()
         };
         let (map, created) = runtime.create_map(options).unwrap();
@@ -1032,7 +1032,7 @@ mod android {
             return None;
         }
         let options = MapOptions {
-            map: mln_runtime::map::MapOptions { size: SIZE, map_mode: MapMode::Continuous, ..Default::default() },
+            map: mln_runtime::map::MapCoreOptions { size: SIZE, map_mode: MapMode::Continuous, ..Default::default() },
             ..Default::default()
         };
         let (map, created) = runtime.create_map(options).unwrap();

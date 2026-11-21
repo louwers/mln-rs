@@ -1,5 +1,5 @@
 use mln_map_types::CameraOptions;
-use mln_runtime::map::Map;
+use mln_runtime::map::MapCore;
 use mln_style::conversion::Convertible;
 use mln_style::{Edit, Style};
 
@@ -72,7 +72,7 @@ pub(crate) fn set_layer_filter(
 
 /// Sets the global state property `name`. Its error (style not loaded) is
 /// a [`MapError::Exception`], as the C++ runner doesn't catch it.
-pub(crate) fn set_global_state_property(map: &mut Map, name: &str, value: &feature::Value) -> Result<(), MapError> {
+pub(crate) fn set_global_state_property(map: &mut MapCore, name: &str, value: &feature::Value) -> Result<(), MapError> {
     let edit = Edit::SetGlobalState { name: name.to_owned(), value: value.clone() };
     map.edit_loaded_style(|style| style.apply(edit)).map_err(|e| MapError::Exception(e.to_string()))
 }
@@ -85,7 +85,7 @@ pub(crate) fn remove_layer(style: &mut Style, layer_name: &str) -> bool {
 /// Parses a source named `source_name` from `json` and adds it to the
 /// map's style. A duplicate id is a [`MapError::Exception`], as C++ throws
 /// an exception the runner doesn't catch.
-pub(crate) fn add_source(map: &mut Map, source_name: &str, json: &str) -> Result<(), MapError> {
+pub(crate) fn add_source(map: &mut MapCore, source_name: &str, json: &str) -> Result<(), MapError> {
     let value: serde_json::Value = match serde_json::from_str(json) {
         Ok(value) => value,
         Err(e) => return Err(MapError::Conversion(e.to_string())),
@@ -118,7 +118,7 @@ pub(crate) fn set_light(style: &mut Style, json: &str) -> Result<(), MapError> {
 }
 
 /// Removes the source `source_name`, and returns whether there was one.
-pub(crate) fn remove_source(map: &mut Map, source_name: &str) -> bool {
+pub(crate) fn remove_source(map: &mut MapCore, source_name: &str) -> bool {
     map.remove_source(source_name).is_some()
 }
 

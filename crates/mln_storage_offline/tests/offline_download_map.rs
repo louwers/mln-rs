@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use mln_headless::HeadlessFrontend;
-use mln_runtime::map::{CameraOptions, Map, MapEvent, MapMode, MapOptions, RenderFrameStatus, RenderMode};
+use mln_runtime::map::{CameraOptions, MapCore, MapCoreOptions, MapEvent, MapMode, RenderFrameStatus, RenderMode};
 use mln_storage::offline::{
     OfflineRegionDownloadState, OfflineRegionMetadata, OfflineRegionObserver, OfflineRegionStatus,
     OfflineTilePyramidRegionDefinition,
@@ -168,9 +168,9 @@ fn resource_offline_usage_unset() {
     });
 
     let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0, &queue, &pool).expect("a headless frontend");
-    let mut map = Map::new(
+    let mut map = MapCore::new(
         stubfile_source,
-        MapOptions { map_mode: MapMode::Continuous, size: frontend.size(), ..Default::default() },
+        MapCoreOptions { map_mode: MapMode::Continuous, size: frontend.size(), ..Default::default() },
         Arc::clone(mln_rs::builtin_registry().style()),
         &pool,
     )

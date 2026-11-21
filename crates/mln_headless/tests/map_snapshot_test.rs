@@ -1,7 +1,7 @@
-//! What rendering changes in `Map::snapshot`.
+//! What rendering changes in `MapCore::snapshot`.
 
 use mln_headless::HeadlessFrontend;
-use mln_runtime::map::{Map, MapMode, MapOptions};
+use mln_runtime::map::{MapCore, MapCoreOptions, MapMode};
 use mln_util::pool::Pool;
 use mln_util::queue::Queue;
 use mln_util::size::Size;
@@ -12,8 +12,8 @@ fn a_rendered_still_shows_in_the_snapshot() {
     let pool = Pool::new(4);
     let size = Size::new(64, 64);
     let mut frontend = HeadlessFrontend::new(size, 1.0, &run_loop, &pool).expect("a headless frontend");
-    let mut map = Map::with_resource_options(
-        MapOptions { map_mode: MapMode::Static, size, ..Default::default() },
+    let mut map = MapCore::with_resource_options(
+        MapCoreOptions { map_mode: MapMode::Static, size, ..Default::default() },
         &mln_storage::ResourceOptions::default(),
         crate::support::registry(),
         &pool,

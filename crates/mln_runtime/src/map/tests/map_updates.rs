@@ -15,11 +15,11 @@ use mln_util::queue::Queue;
 use mln_util::size::Size;
 use parking_lot::Mutex;
 
-use crate::map::{CameraOptions, ErrorKind, Map, MapOptions, TileSettings, UpdateReader};
+use crate::map::{CameraOptions, ErrorKind, MapCore, MapCoreOptions, TileSettings, UpdateReader};
 
-fn map(run_loop: &Queue<()>) -> Map {
-    let options = MapOptions { size: Size::new(256, 256), ..Default::default() };
-    Map::new(
+fn map(run_loop: &Queue<()>) -> MapCore {
+    let options = MapCoreOptions { size: Size::new(256, 256), ..Default::default() };
+    MapCore::new(
         StubFileSource::on_queue(run_loop, ResponseType::Asynchronous),
         options,
         crate::map::tests::registry(),
@@ -29,7 +29,7 @@ fn map(run_loop: &Queue<()>) -> Map {
 }
 
 /// A reader of `map`'s updates, and the times that it woke.
-fn count_wakes(map: &Map) -> (UpdateReader, Arc<AtomicU64>) {
+fn count_wakes(map: &MapCore) -> (UpdateReader, Arc<AtomicU64>) {
     let reader = map.update_reader();
     let wakes = Arc::new(AtomicU64::new(0));
     let counter = Arc::clone(&wakes);
@@ -202,9 +202,9 @@ fn a_url_style_never_publishes_its_sources_with_the_old_feature_state() {
         response.data = Some(Arc::new(style.as_bytes().to_vec()));
         Some(response)
     });
-    let options = MapOptions { size: Size::new(256, 256), ..Default::default() };
+    let options = MapCoreOptions { size: Size::new(256, 256), ..Default::default() };
     let mut map =
-        Map::new(file_source, options, crate::map::tests::registry(), &crate::map::tests::pool()).expect("map");
+        MapCore::new(file_source, options, crate::map::tests::registry(), &crate::map::tests::pool()).expect("map");
     map.jump_to(&CameraOptions::default());
     map.set_feature_state("points", None, "1", hover(true));
 
@@ -295,7 +295,7 @@ fn publishes_synchronous(update: &Update) -> bool {
     update.parameters.style.get_sources().iter().next().expect("a source").data().is_update_synchronous()
 }
 
-fn set_override_synchronous_update(map: &mut Map, value: bool) {
+fn set_override_synchronous_update(map: &mut MapCore, value: bool) {
     let edit = GeoJsonSourceType::set_synchronous("points", value);
     map.edit_style(|style| style.apply(edit)).expect("a GeoJSON source");
 }

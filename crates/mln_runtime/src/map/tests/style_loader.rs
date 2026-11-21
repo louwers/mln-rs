@@ -9,7 +9,7 @@ use mln_storage::{Kind, Resource, Response};
 use mln_style::{Edit, StyleLoadError};
 use mln_util::queue::Queue;
 
-use crate::map::{Map, MapEvent, MapOptions};
+use crate::map::{MapCore, MapCoreOptions, MapEvent};
 
 /// A path of this crate's test data.
 fn testdata(relative: &str) -> String {
@@ -20,18 +20,18 @@ fn testdata(relative: &str) -> String {
         .into_owned()
 }
 
-fn map_over(file_source: Arc<StubFileSource>, options: MapOptions) -> Map {
-    Map::new(file_source, options, crate::map::tests::registry(), &crate::map::tests::pool()).expect("map")
+fn map_over(file_source: Arc<StubFileSource>, options: MapCoreOptions) -> MapCore {
+    MapCore::new(file_source, options, crate::map::tests::registry(), &crate::map::tests::pool()).expect("map")
 }
 
 /// A map whose style requests `respond` answers.
 fn map_with_style_response(
     responder: impl Fn(&Resource) -> Option<Response> + Send + Sync + 'static,
-) -> (Map, Queue<()>) {
+) -> (MapCore, Queue<()>) {
     let run_loop = Queue::<()>::new();
     let file_source = StubFileSource::on_queue(&run_loop, ResponseType::Asynchronous);
     file_source.set_response(Kind::Style, responder);
-    (map_over(file_source, MapOptions::default()), run_loop)
+    (map_over(file_source, MapCoreOptions::default()), run_loop)
 }
 
 fn style_response(json: &str) -> Response {
@@ -144,9 +144,9 @@ fn load_json_cancels_pending_load_url() {
     let run_loop = Queue::<()>::new();
     let file_source = Arc::new(StubFileSource::new(ResponseType::Manual));
     file_source.set_response(Kind::Style, |_| Some(style_response(r#"{"version": 8, "name": "Streets"}"#)));
-    let mut map = Map::new(
+    let mut map = MapCore::new(
         Arc::<StubFileSource>::clone(&file_source),
-        MapOptions::default(),
+        MapCoreOptions::default(),
         crate::map::tests::registry(),
         &crate::map::tests::pool(),
     )
@@ -174,7 +174,7 @@ fn load_json_cancels_pending_load_url() {
 // gtest: Style.PublicLoadStateDoesNotWaitForResources
 #[test]
 fn public_load_state_does_not_wait_for_resources() {
-    let mut map = map_over(Arc::new(StubFileSource::new(ResponseType::Manual)), MapOptions::default());
+    let mut map = map_over(Arc::new(StubFileSource::new(ResponseType::Manual)), MapCoreOptions::default());
     assert!(!map.style_document_loaded());
 
     map.load_style_json(
@@ -237,8 +237,8 @@ fn load_sprite(
     sprite_path: &str,
     pixel_ratio: f32,
     run_loop: &Queue<()>,
-) -> (Map, MapEvent) {
-    let options = MapOptions { pixel_ratio, ..Default::default() };
+) -> (MapCore, MapEvent) {
+    let options = MapCoreOptions { pixel_ratio, ..Default::default() };
     let mut map = map_over(file_source, options);
     let handle = run_loop.clone();
     map.set_reports_waker(Some(Arc::new(move || handle.stop())));
@@ -345,7 +345,7 @@ fn loading_cancel() {
     file_source.set_response(Kind::SpriteImage, end.clone());
     file_source.set_response(Kind::SpriteJSON, end);
 
-    let mut map = map_over(file_source, MapOptions::default());
+    let mut map = map_over(file_source, MapCoreOptions::default());
     map.load_style_json(&sprite_style(&default_sprite_path()));
     run_loop.run(&mut ());
     let events = map.drain_events();
@@ -387,7 +387,7 @@ fn edits_fail_while_the_style_is_not_loaded() {
 #[test]
 fn global_state_property_requires_loaded_style() {
     let (mut map, _run_loop) = map_with_style_response(|_| None);
-    let set = |map: &mut Map, value: bool| {
+    let set = |map: &mut MapCore, value: bool| {
         let value = feature::Value::Bool(value);
         map.edit_loaded_style(|style| style.apply(Edit::SetGlobalState { name: "showLabels".to_owned(), value }))
     };
@@ -406,8 +406,8 @@ fn edits_fail_during_a_url_load_and_the_old_version_stays_published() {
     let run_loop = Queue::<()>::new();
     let file_source = Arc::new(StubFileSource::new(ResponseType::Manual));
     file_source.set_response(Kind::Style, |_| Some(style_response(REMOTE)));
-    let options = MapOptions { map_mode: crate::map::MapMode::Continuous, ..MapOptions::default() };
-    let mut map = Map::new(
+    let options = MapCoreOptions { map_mode: crate::map::MapMode::Continuous, ..MapCoreOptions::default() };
+    let mut map = MapCore::new(
         Arc::<StubFileSource>::clone(&file_source),
         options,
         crate::map::tests::registry(),

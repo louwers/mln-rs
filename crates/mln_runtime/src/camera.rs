@@ -72,7 +72,7 @@ pub struct TileOptions {
 /// and for padding that leaves no room for it, for which the core would keep
 /// the zoom.
 pub(crate) fn camera_for(
-    map: &crate::map::Map,
+    map: &crate::map::MapCore,
     area: &CameraFitArea,
     options: &CameraFitOptions,
 ) -> Result<CameraOptions, Error> {
@@ -99,7 +99,7 @@ pub(crate) fn camera_for(
     }
 }
 
-pub(crate) fn set_viewport(map: &mut crate::map::Map, options: &ViewportOptions) {
+pub(crate) fn set_viewport(map: &mut crate::map::MapCore, options: &ViewportOptions) {
     let mut viewport = map.snapshot().view.viewport;
     viewport.north_orientation = options.north_orientation.unwrap_or(viewport.north_orientation);
     viewport.constrain_mode = options.constrain_mode.unwrap_or(viewport.constrain_mode);
@@ -108,7 +108,7 @@ pub(crate) fn set_viewport(map: &mut crate::map::Map, options: &ViewportOptions)
     map.set_viewport(&viewport);
 }
 
-pub(crate) fn set_tile_options(map: &mut crate::map::Map, options: &TileOptions) {
+pub(crate) fn set_tile_options(map: &mut crate::map::MapCore, options: &TileOptions) {
     let mut tile = map.snapshot().tile;
     tile.prefetch_zoom_delta = options.prefetch_zoom_delta.unwrap_or(tile.prefetch_zoom_delta);
     tile.lod_min_radius = options.lod_min_radius.unwrap_or(tile.lod_min_radius);

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use mln_headless::HeadlessFrontend;
 use mln_render::tile::worker_codec::{RemoteWorkers, ThreadWorkerInstances};
 use mln_rs::mln_layers::symbol::placement::PlacedSymbols as _;
-use mln_runtime::map::{BoundOptions, Map, MapOptions, ProjectionMode};
+use mln_runtime::map::{BoundOptions, MapCore, MapCoreOptions, ProjectionMode};
 use mln_storage::{FileSource, FileSourceExt};
 use mln_style::Edit;
 use mln_util::image::PremultipliedImage;
@@ -31,7 +31,7 @@ pub(crate) struct Impl {
     /// The `ProxyFileSource` over the cache database at the resource
     /// options' cache path.
     pub(crate) file_source: Option<Arc<dyn FileSource>>,
-    pub(crate) map: Map,
+    pub(crate) map: MapCore,
     /// The runner's queue, which the frontend runs while it waits.
     queue: Queue<()>,
 }
@@ -62,9 +62,9 @@ impl Impl {
             frontend.renderer().set_tile_workers(workers);
         }
         let file_source = proxy_loader(&resource_options, pool);
-        let mut map = Map::new(
+        let mut map = MapCore::new(
             Arc::clone(&file_source),
-            MapOptions {
+            MapCoreOptions {
                 map_mode: map_mode(metadata.map_mode),
                 size: metadata.size,
                 pixel_ratio: metadata.pixel_ratio,

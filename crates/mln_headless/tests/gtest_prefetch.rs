@@ -3,7 +3,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_headless::HeadlessFrontend;
-use mln_runtime::map::{CameraOptions, Map, MapMode, MapOptions, TileSettings};
+use mln_runtime::map::{CameraOptions, MapCore, MapCoreOptions, MapMode, TileSettings};
 use mln_storage::Resource;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_util::geo::LatLng;
@@ -15,7 +15,7 @@ use crate::support::*;
 
 /// Parses the leading, optionally signed, decimal integer of `s`, as
 /// `std::stoi` does.
-fn set_prefetch_zoom_delta(map: &RefCell<Map>, prefetch_zoom_delta: u8) {
+fn set_prefetch_zoom_delta(map: &RefCell<MapCore>, prefetch_zoom_delta: u8) {
     let tile = TileSettings { prefetch_zoom_delta, ..map.borrow().snapshot().tile };
     map.borrow_mut().set_tile_settings(&tile);
 }
@@ -47,9 +47,9 @@ fn prefetch_tiles() {
 
     let mut frontend =
         HeadlessFrontend::new(Size::new(512, 512), 1.0, run_loop.queue(), &pool).expect("a headless frontend");
-    let mut map = Map::new(
+    let mut map = MapCore::new(
         Arc::<StubFileSource>::clone(&file_source),
-        MapOptions { map_mode: MapMode::Continuous, size: frontend.size(), ..Default::default() },
+        MapCoreOptions { map_mode: MapMode::Continuous, size: frontend.size(), ..Default::default() },
         registry(),
         &pool,
     )
@@ -76,7 +76,7 @@ fn prefetch_tiles() {
         });
     }
 
-    let check_tiles_for_zoom = |map: &RefCell<Map>, zoom: i32, expected: &[i32]| {
+    let check_tiles_for_zoom = |map: &RefCell<MapCore>, zoom: i32, expected: &[i32]| {
         tiles.lock().clear();
 
         {

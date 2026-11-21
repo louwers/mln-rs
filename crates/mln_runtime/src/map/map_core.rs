@@ -30,19 +30,19 @@ use mln_util::time::Instant;
 
 use crate::map::feature_state::FeatureStateStore;
 use crate::map::map_event::{MapEvent, RenderFrameStatus};
-use crate::map::map_options::{MapOptions, UnusedStyleImagePolicy};
+use crate::map::map_options::{MapCoreOptions, UnusedStyleImagePolicy};
 use crate::map::map_snapshot::{CameraBounds, FreeCamera, MapSnapshot, TileSettings};
 use crate::map::rendering_stats_view::{RenderingStatsView, RenderingStatsViewOptions};
 use crate::map::style_loader::{LoadEvent, StyleLoader};
 use crate::map::transform::{CameraCommandId, CommandEnd, FrameClock, Transform, TransformEvent};
 
-/// Where a still image that [`Map::render_still`] asked for stands.
+/// Where a still image that [`MapCore::render_still`] asked for stands.
 #[derive(Debug, PartialEq)]
 enum StillImage {
     None,
     /// Waits for a complete frame.
     Pending,
-    /// Ended, until [`Map::take_still_image`] takes it.
+    /// Ended, until [`MapCore::take_still_image`] takes it.
     Ended(Result<(), Error>),
 }
 
@@ -62,7 +62,7 @@ enum StillImage {
 /// the map reports to its owner waits in another queue, for `drain_events`.
 /// An owner sets a waker ([`set_waker`](Self::set_waker)) that schedules
 /// those calls on its thread.
-pub struct Map {
+pub struct MapCore {
     updates: UpdateSlot,
     transform: Transform,
 
@@ -90,7 +90,7 @@ pub struct Map {
     /// When the last frame said the map changes next on its own, until an
     /// update goes out.
     repaint_at: Option<Instant>,
-    /// A still image that [`Map::render_still`] asked for, until it ends.
+    /// A still image that [`MapCore::render_still`] asked for, until it ends.
     still_image: StillImage,
     /// Counts the still image requests, so the renderer can tell a new one.
     still_image_request_id: u64,
@@ -110,7 +110,7 @@ pub struct Map {
     pool: Pool,
 }
 
-impl Map {
+impl MapCore {
     // gtests-core: the C++ tests' `MapAdapter` (test/include/mln/test/
     // map_adapter.hpp): a map over a given file source.
     /// A map whose resources come from `file_source` and whose style parses
@@ -123,10 +123,10 @@ impl Map {
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an empty `map_options.size`.
     pub fn new(
         file_source: Arc<dyn FileSource>,
-        map_options: MapOptions,
+        map_options: MapCoreOptions,
         registry: Arc<StyleRegistry>,
         pool: &Pool,
-    ) -> Result<Map, Error> {
+    ) -> Result<MapCore, Error> {
         let events = EventQueue::new();
         let renderer_events = RendererEvents::new();
         let pixel_ratio = map_options.pixel_ratio;
@@ -134,7 +134,7 @@ impl Map {
         let loader = StyleLoader::new(Some(Arc::clone(&file_source)), pool, pixel_ratio);
         let mut transform = Transform::new(map_options.constrain_mode, map_options.viewport_mode);
         transform.set_north_orientation(map_options.north_orientation);
-        let mut map = Map {
+        let mut map = MapCore {
             updates: UpdateSlot::new(),
             transform,
             mode: map_options.map_mode,
@@ -178,11 +178,11 @@ impl Map {
     /// as [`new`](Self::new).
     #[cfg(not(target_family = "wasm"))]
     pub fn with_resource_options(
-        map_options: MapOptions,
+        map_options: MapCoreOptions,
         resource_options: &ResourceOptions,
         registry: Arc<StyleRegistry>,
         pool: &Pool,
-    ) -> Result<Map, Error> {
+    ) -> Result<MapCore, Error> {
         let loader: Arc<dyn FileSource> = Arc::new(Loader::new(resource_options, pool));
         Self::new(loader, map_options, registry, pool)
     }
@@ -1488,7 +1488,7 @@ pub(crate) fn camera_for_lat_lngs(
     }
 }
 
-/// Fails as `Map::camera_for_lat_lngs` does.
+/// Fails as `MapCore::camera_for_lat_lngs` does.
 fn camera_for_lat_lngs_on_screen(
     lat_lngs: &[LatLng],
     transform: &Transform,
@@ -1592,7 +1592,7 @@ fn keep_smallest_scale(smallest: &mut f64, candidate: Option<f64>) {
 /// GL JS `VerticalPerspectiveCameraHelper.cameraForBoxAndBearing`: fit the
 /// flat world first, then scale the globe until every corner and edge
 /// midpoint of the bounds is inside the padded viewport, with no pitch.
-/// Fails as `Map::camera_for_lat_lngs` does.
+/// Fails as `MapCore::camera_for_lat_lngs` does.
 fn camera_for_lat_lngs_on_globe(
     lat_lngs: &[LatLng],
     transform: &Transform,
@@ -1677,7 +1677,7 @@ fn camera_for_lat_lngs_on_globe(
 /// GL JS's globe bounds: the farthest of eight edge points on each side of
 /// the center, where points off the planet fall on its horizon, widened to
 /// every longitude when a pole is on screen.
-/// Fails as `Map::lat_lng_bounds_for_camera` does.
+/// Fails as `MapCore::lat_lng_bounds_for_camera` does.
 fn globe_bounds(transform: &Transform) -> Result<LatLngBounds, Error> {
     let width = f64::from(transform.state().view().size().width);
     let height = f64::from(transform.state().view().size().height);

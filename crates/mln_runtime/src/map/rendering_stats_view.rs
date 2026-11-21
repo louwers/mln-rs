@@ -9,7 +9,7 @@ use mln_util::Color;
 use mln_util::constants::EXTENT;
 use mln_util::time::Instant;
 
-use crate::map::Map;
+use crate::map::MapCore;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RenderingStatsViewOptions {
@@ -54,7 +54,7 @@ impl RenderingStatsView {
 
     /// `create(style)`: adds the source and the layer, if the map's style
     /// lacks them.
-    pub(crate) fn create(&self, map: &mut Map) {
+    pub(crate) fn create(&self, map: &mut MapCore) {
         if map.source(RENDERING_STATS_SOURCE_ID).is_none() {
             // A GeoJSON source of one point, which the layer labels. The view
             // names the source type as style JSON does, so a registry
@@ -105,7 +105,7 @@ impl RenderingStatsView {
 
     /// `destroy(style)`: removes the layer and the source.
     #[expect(clippy::unused_self, reason = "the view removes what it added, as its `create` does")]
-    pub(crate) fn destroy(&self, map: &mut Map) {
+    pub(crate) fn destroy(&self, map: &mut MapCore) {
         let _ = map.apply_loaded(Edit::RemoveLayer(RENDERING_STATS_LAYER_ID.to_owned()));
         map.remove_source(RENDERING_STATS_SOURCE_ID);
     }
@@ -113,7 +113,7 @@ impl RenderingStatsView {
     /// `update(style, stats)`: counts a frame, and shows the stats of the
     /// frame and the mean times since the last update once the update
     /// interval has passed. Adds the layer back if the style lost it.
-    pub(crate) fn update(&mut self, map: &mut Map, stats: &RenderingStats) {
+    pub(crate) fn update(&mut self, map: &mut MapCore, stats: &RenderingStats) {
         if map.style().get_layer(RENDERING_STATS_LAYER_ID).is_none() {
             self.create(map);
         }

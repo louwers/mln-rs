@@ -13,7 +13,7 @@ const LIBERTY: &str = "https://tiles.openfreemap.org/styles/liberty";
 fn loads_liberty_over_https() {
     let runtime = mln_rs::start_runtime(&RuntimeOptions::default()).unwrap();
     let options = MapOptions {
-        map: mln_runtime::map::MapOptions { size: Size::new(256, 256), pixel_ratio: 1.0, ..Default::default() },
+        map: mln_runtime::map::MapCoreOptions { size: Size::new(256, 256), pixel_ratio: 1.0, ..Default::default() },
         ..Default::default()
     };
     let (map, created) = runtime.create_map(options).unwrap();

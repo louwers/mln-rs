@@ -5,7 +5,7 @@ use mln_map_types::{Camera, CameraOptions, MapView, TransformState};
 use mln_util::error::Error;
 use mln_util::geo::{LatLng, ScreenCoordinate, WrapMode};
 
-use crate::map::map_core::Map;
+use crate::map::map_core::MapCore;
 use crate::map::transform::Transform;
 
 /// Converts coordinates for one camera and size, without a map. It holds only
@@ -21,7 +21,7 @@ const _: () = {
 
 impl MapProjection {
     #[must_use]
-    pub fn new(map: &Map) -> Self {
+    pub fn new(map: &MapCore) -> Self {
         Self::from_state(map.transform_state().clone())
     }
 

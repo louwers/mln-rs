@@ -1,6 +1,6 @@
 //! What a map reports to its owner: camera changes, loading, frames, and
 //! the activity of its style, glyphs and tiles. The map queues the events,
-//! and its owner drains them with [`Map::drain_events`](crate::map::Map::drain_events).
+//! and its owner drains them with [`MapCore::drain_events`](crate::map::MapCore::drain_events).
 
 use std::sync::Arc;
 
@@ -50,7 +50,7 @@ pub struct RenderFrameStatus {
     pub mode: RenderMode,
     /// In continuous mode, the map changes after this frame without new
     /// commands: a transition runs, or a placement is due
-    /// ([`Map::repaint_at`](crate::map::Map::repaint_at)).
+    /// ([`MapCore::repaint_at`](crate::map::MapCore::repaint_at)).
     pub needs_repaint: bool,
     pub placement_changed: bool,
     /// The render context's counters after this frame: per-frame ones such
@@ -64,7 +64,7 @@ pub struct RenderFrameStatus {
 ///
 /// The render events come in continuous mode only. A static map reports
 /// its still images through the callback of
-/// [`Map::render_still`](crate::map::Map::render_still).
+/// [`MapCore::render_still`](crate::map::MapCore::render_still).
 #[derive(Clone, Debug)]
 pub enum MapEvent {
     /// A camera command starts.

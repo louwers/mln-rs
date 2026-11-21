@@ -44,7 +44,7 @@ fn style() -> String {
 /// and bearing.
 fn map_of(runtime: &Runtime) -> Map {
     let options = MapOptions {
-        map: mln_runtime::map::MapOptions { size: SIZE, map_mode: MapMode::Continuous, ..Default::default() },
+        map: mln_runtime::map::MapCoreOptions { size: SIZE, map_mode: MapMode::Continuous, ..Default::default() },
         ..Default::default()
     };
     let (map, created) = runtime.create_map(options).unwrap();
