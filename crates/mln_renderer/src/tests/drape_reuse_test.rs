@@ -1397,11 +1397,21 @@ fn assert_one_a_frame(drapes: &BTreeSet<OverscaledTileID>, frames: &[BTreeSet<Ov
 }
 
 /// A zoom change keeps the drapes while the camera moves. At rest, the
-/// drapes draw again one a frame, nearest the center first, and each frame
-/// until the last is incomplete and asks for the next.
+/// drapes draw again one a frame, of those drawn in the same frame the
+/// nearest the center first, and each frame until the last is incomplete
+/// and asks for the next.
 #[test]
 fn a_zoom_change_keeps_the_drapes_while_the_camera_moves_and_draws_them_one_a_frame_at_rest() {
     let (mut map, drapes) = settled(Tiles::default());
+    // The drapes drew as their tiles arrived, over one frame or several: a
+    // paint change draws them all in one, so that the center alone orders
+    // their turns.
+    map.edit(Edit::SetLayerProperty {
+        layer: "line".to_owned(),
+        name: "line-color".to_owned(),
+        value: serde_json::json!("green"),
+    });
+    assert_eq!(drapes, map.frame().1, "a paint change draws every drape");
     map.camera_moving = true;
     map.transform.jump_to(&CameraOptions { zoom: Some(2.05), ..Default::default() });
     let (full, passes) = map.frame();
