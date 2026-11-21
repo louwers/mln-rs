@@ -80,4 +80,4 @@ pub use render::{
 };
 pub use resources::{CacheDatabaseOperation, ResourceProvider, ResourceRequest, is_managed_http_header};
 pub use runtime::{Runtime, RuntimeOptions};
-pub use style::{LayerInfo, NewSourceData, PrepareSourceData, SourceInfo, SourceTiles};
+pub use style::{LayerInfo, PrepareSourceData, SourceInfo, SourceTiles};
