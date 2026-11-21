@@ -17,7 +17,7 @@ use crate::buckets::symbol_bucket::{Buffer, CollisionBuffer, SymbolBucket, Symbo
 use crate::layout::symbol_instance::{Justification, SymbolInstance, TextPart};
 use crate::layout::symbol_projection::{
     LabelHeight, LabelPlaneProjector, LineLabelAlignment, SymbolElevation, add_dynamic_attributes,
-    evaluate_size_for_feature, hide_glyphs, measured_from_ground, reproject_line_labels, symbol_ground,
+    evaluate_size_for_feature, hide_glyphs, reproject_line_labels, symbol_ground,
     tile_skew_vectors,
 };
 use crate::render_layer::BucketPlacementData;
@@ -228,7 +228,7 @@ impl Placement {
         // Labels along lines and at variable anchors stand on the ground.
         let ground = ground.filter(|_| along_line || has_variable_anchors);
         let ground = symbol_ground(ground, &tile.overscaled_id, &bucket.layout);
-        let elevation = SymbolElevation::new(ground.as_ref(), measured_from_ground(&bucket.layout));
+        let elevation = SymbolElevation::of(ground.as_ref(), &bucket.layout);
         if along_line {
             let mut laid_out = false;
             if *layout.icon_rotation_alignment.uniform() == AlignmentType::Map {

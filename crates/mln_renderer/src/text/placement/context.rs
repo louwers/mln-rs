@@ -161,6 +161,8 @@ impl<'a> PlacementContext<'a> {
         let text_always = text_overlap_mode == OverlapMode::Always;
         let icon_always = icon_overlap_mode == OverlapMode::Always;
         let has_icons = bucket.has_icon_data() || bucket.has_sdf_icon_data();
+        let ground = symbol_ground(ground, &overscaled_id, layout);
+        let from_ground = ground.is_some() && measured_from_ground(layout);
         PlacementContext {
             bucket,
             data,
@@ -174,8 +176,8 @@ impl<'a> PlacementContext<'a> {
             text_plane: plane(pitch_text_with_map, rotate_text_with_map, text_translation),
             icon_plane: plane(pitch_icon_with_map, rotate_icon_with_map, icon_translation),
             tile_projector,
-            ground: symbol_ground(ground, &overscaled_id, layout),
-            from_ground: measured_from_ground(layout),
+            ground,
+            from_ground,
             text_translation,
             icon_translation,
             collision_group,

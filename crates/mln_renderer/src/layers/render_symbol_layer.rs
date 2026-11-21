@@ -1043,16 +1043,21 @@ impl RenderSymbolLayer {
             };
             let bucket = tile.bucket().map(|bucket| bucket.bucket);
             debug_assert!(bucket.is_some() || cached.draws.is_empty());
-            let reads = self.ground_reads.get(tile_index);
-            // Symbols measured from sea level stand on a flat ground.
-            let flat = bucket.is_some_and(|bucket| !measured_from_ground(&bucket.layout));
+            // Over terrain, what the tile's draws read of the ground, which
+            // is flat for symbols measured from sea level.
+            let ground = stands.then(|| self.ground_reads.get(tile_index)).flatten().map(|reads| {
+                let flat = bucket.is_some_and(|bucket| !measured_from_ground(&bucket.layout));
+                (reads, flat)
+            });
             for (index, draw) in cached.draws.iter_mut().enumerate().filter(|(_, draw)| draw.visible) {
                 let Some(uniforms) =
                     bucket.and_then(|bucket| Self::uniforms(layer_id, layer, &tile_id, bucket, draw, paint_parameters))
                 else {
                     continue;
                 };
-                if let Some(read) = reads.and_then(|reads| reads.get(draw.part)) {
+                if let Some((reads, flat)) = ground
+                    && let Some(read) = reads.get(draw.part)
+                {
                     draw.objects.set_texture(ID_GROUND_DEM_TEXTURE, Some(&read.texture));
                     let dem_coords = if flat { [0.0; 4] } else { read.ubo.dem_coords };
                     self.grounds.push(GroundDrawableUBO { dem_coords, ..read.ubo });

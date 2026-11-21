@@ -156,6 +156,17 @@ impl<'a> SymbolElevation<'a> {
         SymbolElevation { ground, from_ground }
     }
 
+    /// What the symbols of a bucket laid out by `layout` stand on, over
+    /// `ground`, which [`symbol_ground`] gives: on a flat map, sea level,
+    /// with nothing of `layout` read.
+    #[must_use]
+    pub(crate) fn of(
+        ground: Option<&'a TileGround<'a>>,
+        layout: &SymbolLayoutProperties::PossiblyEvaluated,
+    ) -> SymbolElevation<'a> {
+        SymbolElevation { ground, from_ground: ground.is_some() && measured_from_ground(layout) }
+    }
+
     /// The height in meters above sea level of a symbol `offset` meters up
     /// whose untranslated anchor is `anchor` and which draws at `at`, both
     /// in tile units: its offset, plus the ground at `at` where it is
