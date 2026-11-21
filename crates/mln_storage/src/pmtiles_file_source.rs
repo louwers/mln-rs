@@ -3,6 +3,10 @@
 // and each step continues on the thread that answers the one before. A
 // request's sub-request replaces the one before, and goes when the request
 // is cancelled.
+//
+// The first read takes the archive's first 16 KiB, which hold the header and
+// the root directory. A cache-only request reads only the cache, and a miss
+// at any step answers that the cache has nothing.
 
 use std::fmt::Write as _;
 use std::sync::Arc;
@@ -25,6 +29,9 @@ use crate::response::{Reason, ResourceError, Response};
 // https://github.com/protomaps/PMTiles/blob/main/spec/v3/spec.md#3-header
 const PMTILES_HEADER_OFFSET: u64 = 0;
 const PMTILES_HEADER_LENGTH: u64 = 127;
+/// The bytes that hold the header and the root directory: the spec keeps
+/// both in the first 16 KiB.
+const PMTILES_FIRST_READ: u64 = 16_384;
 
 // To avoid allocating lots of memory with PMTiles directory caching, set a
 // limit so it doesn't grow unlimited
@@ -85,6 +92,24 @@ struct State {
     directory_cache_control: Mutex<VecMap<String, Vec<String>>>,
 }
 
+/// Answers `r` with `response`: for a cache-only request, an error at any
+/// step means that the cache lacks what the request needs.
+fn answer(r: &Responder, cache_only: bool, response: Response) {
+    if cache_only && response.error.is_some() {
+        let mut nothing = Response::new();
+        nothing.no_content = true;
+        r.send(nothing);
+    } else {
+        r.send(response);
+    }
+}
+
+/// How a request's reads load: only from the cache for a cache-only
+/// request, else from the cache and the network.
+fn loading_method(cache_only: bool) -> LoadingMethod {
+    if cache_only { LoadingMethod::CacheOnly } else { LoadingMethod::All }
+}
+
 impl State {
     /// Requests `resource` for `task`, in place of its sub-request before.
     fn request(&self, req: &Task, resource: &Resource, callback: impl FnMut(Response) + Send + 'static) {
@@ -94,16 +119,15 @@ impl State {
         self.file_source.load(resource, responder);
     }
 
-    fn get_header(self: &Arc<Self>, url: &str, req: &Task, callback: AsyncCallback) {
+    fn get_header(self: &Arc<Self>, url: &str, req: &Task, cache_only: bool, callback: AsyncCallback) {
         if self.header_cache.lock().contains_key(url) {
             callback(None);
             return;
         }
 
         let mut resource = Resource::new(Kind::Source, url);
-        resource.loading_method = LoadingMethod::All;
-
-        resource.data_range = Some((PMTILES_HEADER_OFFSET, PMTILES_HEADER_OFFSET + PMTILES_HEADER_LENGTH - 1));
+        resource.loading_method = loading_method(cache_only);
+        resource.data_range = Some((PMTILES_HEADER_OFFSET, PMTILES_HEADER_OFFSET + PMTILES_FIRST_READ - 1));
 
         let this = Arc::downgrade(self);
         let url = url.to_owned();
@@ -134,15 +158,17 @@ impl State {
                 return;
             };
 
-            let header = deserialize_header(&data[..data.len().min(127)]).and_then(|header| {
-                let supported = |c: Compression| c == Compression::None || c == Compression::Gzip;
-                if !supported(header.internal_compression()) || !supported(header.tile_compression) {
-                    return Err("Compression method not supported".to_owned());
-                }
-                Ok(header)
-            });
+            let header =
+                deserialize_header(&data[..data.len().min(PMTILES_HEADER_LENGTH as usize)]).and_then(|header| {
+                    let supported = |c: Compression| c == Compression::None || c == Compression::Gzip;
+                    if !supported(header.internal_compression()) || !supported(header.tile_compression) {
+                        return Err("Compression method not supported".to_owned());
+                    }
+                    Ok(header)
+                });
             match header {
                 Ok(header) => {
+                    this.store_root_directory(&url, &header, data);
                     this.header_cache.lock().entry(url.clone()).or_insert_with(|| Arc::new(header));
                     callback(None);
                 }
@@ -151,7 +177,21 @@ impl State {
         });
     }
 
-    fn get_metadata(self: &Arc<Self>, url: &str, req: &Task, callback: AsyncCallback) {
+    /// Stores the root directory of the archive at `url`, whose header is
+    /// `header`, from `first`, the archive's first bytes, if they hold it.
+    /// One that doesn't parse is left for its own read, which reports why.
+    fn store_root_directory(&self, url: &str, header: &Header, first: &[u8]) {
+        let (offset, length) = (header.root_offset(), header.root_length());
+        let Some(end) = offset.checked_add(length).filter(|&end| end <= first.len() as u64) else { return };
+        let mut directory = first[offset as usize..end as usize].to_vec();
+        if header.internal_compression() == Compression::Gzip {
+            let Ok(decompressed) = decompress(&directory) else { return };
+            directory = decompressed;
+        }
+        let _ = self.store_directory(url, offset, length, directory);
+    }
+
+    fn get_metadata(self: &Arc<Self>, url: &str, req: &Task, cache_only: bool, callback: AsyncCallback) {
         if self.metadata_cache.lock().contains_key(url) {
             callback(None);
             return;
@@ -163,6 +203,7 @@ impl State {
         self.get_header(
             &url.clone(),
             req,
+            cache_only,
             Arc::new(move |error_ptr: ErrorPtr| {
                 let Some(this) = this.upgrade() else { return };
                 if error_ptr.is_some() {
@@ -208,7 +249,7 @@ impl State {
 
                 if header.metadata_length() > 0 {
                     let mut resource = Resource::new(Kind::Source, url.clone());
-                    resource.loading_method = LoadingMethod::All;
+                    resource.loading_method = loading_method(cache_only);
                     resource.data_range = Some((
                         header.metadata_offset(),
                         header.metadata_offset().wrapping_add(header.metadata_length()).wrapping_sub(1),
@@ -303,6 +344,7 @@ impl State {
         req: &Task,
         directory_offset: u64,
         directory_length: u32,
+        cache_only: bool,
         callback: AsyncCallback,
     ) {
         let directory_cache_key = format!("{url}|{directory_offset}|{directory_length}");
@@ -329,6 +371,7 @@ impl State {
         self.get_header(
             &url.clone(),
             req,
+            cache_only,
             Arc::new(move |error_ptr: ErrorPtr| {
                 let Some(this) = this.upgrade() else { return };
                 if error_ptr.is_some() {
@@ -339,7 +382,7 @@ impl State {
                 let header = Arc::clone(&this.header_cache.lock()[&url]);
 
                 let mut resource = Resource::new(Kind::Source, url.clone());
-                resource.loading_method = LoadingMethod::All;
+                resource.loading_method = loading_method(cache_only);
                 resource.data_range = Some((
                     directory_offset,
                     directory_offset.wrapping_add(u64::from(directory_length)).wrapping_sub(1),
@@ -389,7 +432,7 @@ impl State {
 
     #[expect(
         clippy::too_many_arguments,
-        reason = "the request, tile and directory location of one step of the directory walk, and its callback"
+        reason = "the request, tile and directory location of one step of the directory walk, how to read it, and its callback"
     )]
     fn get_tile_address(
         self: &Arc<Self>,
@@ -399,6 +442,7 @@ impl State {
         directory_offset: u64,
         directory_length: u32,
         directory_depth: u32,
+        cache_only: bool,
         callback: AsyncTileCallback,
     ) {
         if directory_depth > 3 {
@@ -421,6 +465,7 @@ impl State {
             req,
             directory_offset,
             directory_length,
+            cache_only,
             Arc::new(move |error_ptr: ErrorPtr| {
                 let Some(this) = this.upgrade() else { return };
                 if error_ptr.is_some() {
@@ -450,6 +495,7 @@ impl State {
                         header.leaf_offset().wrapping_add(entry.offset()),
                         entry.length(),
                         directory_depth + 1,
+                        cache_only,
                         Arc::clone(&callback),
                     );
                     return;
@@ -465,24 +511,26 @@ impl State {
     /// Generate a tilejson resource from .pmtiles file
     fn request_tilejson(self: &Arc<Self>, req: &Task, resource: &Resource, r: &Responder) {
         let url = extract_url(&resource.url);
+        let cache_only = resource.loading_method == LoadingMethod::CacheOnly;
 
         let (this, r, url2) = (Arc::downgrade(self), r.clone(), url.clone());
         self.get_metadata(
             &url,
             req,
+            cache_only,
             Arc::new(move |error_ptr: ErrorPtr| {
                 let Some(this) = this.upgrade() else { return };
                 let mut response = Response::new();
 
                 if error_ptr.is_some() {
                     response.error = error_ptr;
-                    r.send(response);
+                    answer(&r, cache_only, response);
                     return;
                 }
 
                 let metadata = this.metadata_cache.lock()[&url2].clone();
                 response.data = Some(Arc::new(metadata.into_bytes()));
-                r.send(response);
+                answer(&r, cache_only, response);
             }),
         );
     }
@@ -490,11 +538,12 @@ impl State {
     /// Load data for specific tile
     fn request_tile(self: &Arc<Self>, req: &Task, resource: &Resource, r: &Responder) {
         let url = extract_url(&resource.url);
+        let cache_only = resource.loading_method == LoadingMethod::CacheOnly;
         // C++ dereferences `resource.tileData` unchecked.
         let Some(tile_data) = resource.tile_data.clone() else {
             let mut response = Response::new();
             response.error = Some(Box::new(ResourceError::new(Reason::Other, "tile resource without tile data")));
-            r.send(response);
+            answer(r, cache_only, response);
             return;
         };
 
@@ -503,13 +552,14 @@ impl State {
         self.get_header(
             &url,
             req,
+            cache_only,
             Arc::new(move |error_ptr: ErrorPtr| {
                 let Some(this) = this.upgrade() else { return };
                 if error_ptr.is_some() {
                     let mut response = Response::new();
                     response.no_content = true;
                     response.error = error_ptr;
-                    r.send(response);
+                    answer(&r, cache_only, response);
                     return;
                 }
 
@@ -520,7 +570,7 @@ impl State {
                 if z < i32::from(header.min_zoom) || z > i32::from(header.max_zoom) {
                     let mut response = Response::new();
                     response.no_content = true;
-                    r.send(response);
+                    answer(&r, cache_only, response);
                     return;
                 }
 
@@ -530,7 +580,7 @@ impl State {
                         let mut response = Response::new();
                         response.no_content = true;
                         response.error = Some(Box::new(error(Reason::Other, format!("Invalid tile: {e}"))));
-                        r.send(response);
+                        answer(&r, cache_only, response);
                         return;
                     }
                 };
@@ -543,25 +593,26 @@ impl State {
                     header.root_offset(),
                     header.root_length() as u32,
                     0,
+                    cache_only,
                     Arc::new(move |tile_address: (u64, u32), tile_error: ErrorPtr| {
                         let Some(this2) = this2.upgrade() else { return };
                         if tile_error.is_some() {
                             let mut response = Response::new();
                             response.no_content = true;
                             response.error = tile_error;
-                            r.send(response);
+                            answer(&r, cache_only, response);
                             return;
                         }
 
                         if tile_address.0 == 0 && tile_address.1 == 0 {
                             let mut response = Response::new();
                             response.no_content = true;
-                            r.send(response);
+                            answer(&r, cache_only, response);
                             return;
                         }
 
                         let mut tile_resource = Resource::new(Kind::Source, url.clone());
-                        tile_resource.loading_method = LoadingMethod::All;
+                        tile_resource.loading_method = loading_method(cache_only);
                         tile_resource.data_range = Some((
                             tile_address.0,
                             tile_address.0.wrapping_add(u64::from(tile_address.1)).wrapping_sub(1),
@@ -577,7 +628,7 @@ impl State {
                                     e.reason,
                                     format!("Error fetching PMTiles tile: {}", e.message),
                                 )));
-                                r.send(response);
+                                answer(&r, cache_only, response);
                                 return;
                             }
 
@@ -590,7 +641,7 @@ impl State {
                                     Reason::Other,
                                     "Error fetching PMTiles tile: response has no data",
                                 )));
-                                r.send(response);
+                                answer(&r, cache_only, response);
                                 return;
                             };
 
@@ -617,7 +668,7 @@ impl State {
                                 }
                             }
 
-                            r.send(response);
+                            answer(&r, cache_only, response);
                         });
                     }),
                 );
@@ -673,5 +724,110 @@ impl FileSource for PMTilesFileSource {
 
     fn can_request(&self, resource: &Resource) -> bool {
         accepts_url(&resource.url)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use mln_util::tileset::Scheme;
+
+    use super::*;
+    use crate::local_file_request::read_file;
+
+    /// Holds the archive's reads until the test answers them.
+    #[derive(Default)]
+    struct Held(Mutex<Vec<(Resource, Responder)>>);
+
+    impl FileSource for Held {
+        fn load(&self, resource: &Resource, responder: Responder) {
+            self.0.lock().push((resource.clone(), responder));
+        }
+
+        fn can_request(&self, _resource: &Resource) -> bool {
+            true
+        }
+    }
+
+    impl Held {
+        /// The reads waiting, as their ranges and loading methods.
+        fn waiting(&self) -> Vec<((u64, u64), LoadingMethod)> {
+            let held = self.0.lock();
+            held.iter()
+                .filter(|(_, r)| !r.is_cancelled())
+                .map(|(res, _)| (res.data_range.unwrap(), res.loading_method))
+                .collect()
+        }
+
+        /// Answers the reads waiting from the archive, or with `error`.
+        fn answer(&self, error: Option<Reason>) {
+            let held = std::mem::take(&mut *self.0.lock());
+            for (resource, responder) in held {
+                let mut response = Response::new();
+                match error {
+                    Some(reason) => response.error = Some(Box::new(ResourceError::new(reason, "down"))),
+                    None => response.data = read_file(&path(), resource.data_range).map(Arc::new),
+                }
+                responder.send(response);
+            }
+        }
+    }
+
+    fn path() -> std::path::PathBuf {
+        crate::tests::cpp_path("test/fixtures/storage/pmtiles/geography-class-png.pmtiles")
+    }
+
+    type Answers = Arc<Mutex<Vec<Response>>>;
+
+    /// Requests tile `x`/`y` of zoom 1, as `method`, of a source over `held`.
+    fn request(source: &PMTilesFileSource, x: i32, y: i32, method: LoadingMethod) -> (Task, Request, Answers) {
+        let url = format!("{PMTILES_PROTOCOL}{FILE_PROTOCOL}{}", path().display());
+        let answers = Answers::default();
+        let saved = Arc::clone(&answers);
+        let (request, responder) = Request::new(move |response| saved.lock().push(response));
+        let task = Task::default();
+        source.state.request_tile(&task, &Resource::tile(&url, 1.0, x, y, 1, Scheme::XYZ, method), &responder);
+        (task, request, answers)
+    }
+
+    fn source() -> (Arc<Held>, PMTilesFileSource) {
+        let held = Arc::new(Held::default());
+        (Arc::clone(&held), PMTilesFileSource::new(held, crate::tests::pool()))
+    }
+
+    /// A tile reads the header and the root directory in one read of the
+    /// archive's first 16 KiB, then its own range.
+    #[test]
+    fn a_tile_reads_the_header_and_root_directory_at_once() {
+        let (held, source) = source();
+        let (_task, _request, answers) = request(&source, 0, 0, LoadingMethod::All);
+        assert_eq!(held.waiting(), [((0, 16_383), LoadingMethod::All)]);
+        held.answer(None);
+        let tile = held.waiting();
+        assert!(matches!(tile[..], [((first, _), _)] if first > 16_383), "the tile's range, not a directory: {tile:?}");
+        held.answer(None);
+        assert!(answers.lock()[0].data.is_some());
+    }
+
+    /// A cache-only request reads only the cache, at every step, and a miss
+    /// there answers that the cache has nothing, not an error.
+    #[test]
+    fn a_cache_only_request_reads_only_the_cache() {
+        let (held, archive) = source();
+        let (_task, _request, answers) = request(&archive, 0, 0, LoadingMethod::CacheOnly);
+        assert_eq!(held.waiting(), [((0, 16_383), LoadingMethod::CacheOnly)]);
+        held.answer(None);
+        let tile = held.waiting();
+        assert!(matches!(tile[..], [((first, _), LoadingMethod::CacheOnly)] if first > 16_383), "{tile:?}");
+        held.answer(Some(Reason::NotFound));
+        let answers = answers.lock();
+        assert!(answers[0].no_content && answers[0].error.is_none());
+
+        let (held, archive) = source();
+        let (_task, _request, answers) = request(&archive, 0, 0, LoadingMethod::CacheOnly);
+        let (_, responder) = held.0.lock().pop().unwrap();
+        let mut miss = Response::new();
+        miss.no_content = true;
+        responder.send(miss);
+        assert!(answers.lock()[0].no_content, "a miss of the header");
     }
 }
