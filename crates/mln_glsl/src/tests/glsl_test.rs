@@ -432,7 +432,8 @@ fn vertex_inputs_are_the_programs_attributes() {
 }
 
 // A fill extrusion wall reads its next outline vertex from the buffer of its
-// outline vertex, a vertex further on: the two have the same formats.
+// outline vertex, a vertex further on: the last two instance attributes, the
+// next outline vertex's, have the formats of the first two.
 #[test]
 fn a_walls_next_outline_vertex_has_the_formats_of_its_outline_vertex() {
     let instanced: Vec<_> = programs()
@@ -441,15 +442,8 @@ fn a_walls_next_outline_vertex_has_the_formats_of_its_outline_vertex() {
         .collect();
     assert_eq!(instanced.len(), 2);
     for (program, _) in instanced {
-        let format = |name: &str| {
-            let mut found = program.instance_attributes.iter().filter(|attr| attr.name == name);
-            let attr = found.next().unwrap_or_else(|| panic!("{}: no instance attribute {name}", program.name));
-            assert!(found.next().is_none());
-            attr.format
-        };
-        for (name, next) in [("a_outline_pos", "a_next_outline_pos"), ("a_decimals_ed", "a_next_decimals_ed")] {
-            assert_eq!(format(name), format(next), "{}", program.name);
-        }
+        let formats: Vec<_> = program.instance_attributes.iter().map(|attribute| attribute.format).collect();
+        assert_eq!(formats[..2], formats[formats.len() - 2..], "{}", program.name);
     }
 }
 

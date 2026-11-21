@@ -113,10 +113,8 @@ fn quads(gpu: &mut impl Gpu) -> Result<(), GpuError> {
         targets,
     })?;
     let whole = |id, buffer, data: &[u8]| BindGroupEntry::Buffer { id, buffer, offset: 0, size: data.len() as u64 };
-    let entries = [
-        whole(ID_QUAD_UBO as u32, block_buffer, block),
-        BindGroupEntry::Texture { id: 0, texture: image, sampler },
-    ];
+    let entries =
+        [whole(ID_QUAD_UBO as u32, block_buffer, block), BindGroupEntry::Texture { id: 0, texture: image, sampler }];
     let bindings = gpu.create_bindings(&BindingsDesc { label: "quads", shader, entries: &entries })?;
     let geometry = gpu.create_geometry(&GeometryDesc {
         shader,

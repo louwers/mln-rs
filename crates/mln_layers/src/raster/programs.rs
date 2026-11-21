@@ -25,8 +25,8 @@ pub static RASTER: Program = Program {
         Buffer::uniform::<RasterEvaluatedPropsUBO>(ID_RASTER_EVALUATED_PROPS_UBO),
     ],
     attributes: &[
-        Attribute::new(ID_RASTER_POS_VERTEX_ATTRIBUTE, "a_pos", Short2),
-        Attribute::new(ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE, "a_texture_pos", Short2),
+        Attribute { id: ID_RASTER_POS_VERTEX_ATTRIBUTE, format: Short2 },
+        Attribute { id: ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE, format: Short2 },
     ],
     instance_attributes: &[],
     textures: &[Texture::new("u_image0"), Texture::new("u_image1")],

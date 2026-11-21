@@ -28,8 +28,8 @@ pub static COLOR_RELIEF: Program = Program {
         Buffer::uniform::<ColorReliefEvaluatedPropsUBO>(ID_COLOR_RELIEF_EVALUATED_PROPS_UBO),
     ],
     attributes: &[
-        Attribute::new(ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE, "a_pos", Short2),
-        Attribute::new(ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE, "a_texture_pos", Short2),
+        Attribute { id: ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE, format: Short2 },
+        Attribute { id: ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE, format: Short2 },
     ],
     instance_attributes: &[],
     textures: &[Texture::new("u_image"), Texture::unfilterable("u_elevation_stops"), Texture::new("u_color_stops")],

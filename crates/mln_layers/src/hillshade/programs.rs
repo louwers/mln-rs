@@ -33,8 +33,8 @@ pub static HILLSHADE: Program = Program {
         Buffer::uniform::<HillshadeEvaluatedPropsUBO>(ID_HILLSHADE_EVALUATED_PROPS_UBO),
     ],
     attributes: &[
-        Attribute::new(ID_HILLSHADE_POS_VERTEX_ATTRIBUTE, "a_pos", Short2),
-        Attribute::new(ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE, "a_texture_pos", Short2),
+        Attribute { id: ID_HILLSHADE_POS_VERTEX_ATTRIBUTE, format: Short2 },
+        Attribute { id: ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE, format: Short2 },
     ],
     instance_attributes: &[],
     textures: &[Texture::new("u_image")],
@@ -53,8 +53,8 @@ pub static HILLSHADE_PREPARE: Program = Program {
         Buffer::uniform::<HillshadePrepareTilePropsUBO>(ID_HILLSHADE_PREPARE_TILE_PROPS_UBO),
     ],
     attributes: &[
-        Attribute::new(ID_HILLSHADE_POS_VERTEX_ATTRIBUTE, "a_pos", Short2),
-        Attribute::new(ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE, "a_texture_pos", Short2),
+        Attribute { id: ID_HILLSHADE_POS_VERTEX_ATTRIBUTE, format: Short2 },
+        Attribute { id: ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE, format: Short2 },
     ],
     instance_attributes: &[],
     textures: &[Texture::new("u_image")],

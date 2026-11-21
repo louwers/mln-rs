@@ -29,9 +29,9 @@ pub static HEATMAP: Program = Program {
         Buffer::uniform::<HeatmapEvaluatedPropsUBO>(ID_HEATMAP_EVALUATED_PROPS_UBO),
     ],
     attributes: &[
-        Attribute::new(ID_HEATMAP_POS_VERTEX_ATTRIBUTE, "a_pos", Short2),
-        Attribute::new(ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE, "a_weight", Float2),
-        Attribute::new(ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE, "a_radius", Float2),
+        Attribute { id: ID_HEATMAP_POS_VERTEX_ATTRIBUTE, format: Short2 },
+        Attribute { id: ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE, format: Float2 },
+        Attribute { id: ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE, format: Float2 },
     ],
     instance_attributes: &[],
     textures: &[],
@@ -49,7 +49,7 @@ pub static HEATMAP: Program = Program {
 pub static HEATMAP_TEXTURE: Program = Program {
     name: "heatmap-texture",
     buffers: &[Buffer::uniform::<HeatmapTexturePropsUBO>(ID_HEATMAP_TEXTURE_PROPS_UBO)],
-    attributes: &[Attribute::new(ID_HEATMAP_POS_VERTEX_ATTRIBUTE, "a_pos", Short2)],
+    attributes: &[Attribute { id: ID_HEATMAP_POS_VERTEX_ATTRIBUTE, format: Short2 }],
     instance_attributes: &[],
     textures: &[Texture::new("u_image"), Texture::new("u_color_ramp")],
     properties: &[],

@@ -28,8 +28,8 @@ pub(crate) const ID_OFFSET: usize = 1;
 pub(crate) static QUAD: Program = Program {
     name: "quad",
     buffers: &[Buffer::uniform::<QuadUBO>(ID_QUAD_UBO)],
-    attributes: &[Attribute::new(ID_CORNER, "a_corner", Float2)],
-    instance_attributes: &[Attribute::new(ID_OFFSET, "a_offset", Float2)],
+    attributes: &[Attribute { id: ID_CORNER, format: Float2 }],
+    instance_attributes: &[Attribute { id: ID_OFFSET, format: Float2 }],
     textures: &[Texture::new("u_image")],
     properties: &[],
     sources: Sources { wgsl: Some(&WGSL), msl: Some(&MSL), glsl_es: Some(&GLSL_ES), glsl: Some(&GLSL) },

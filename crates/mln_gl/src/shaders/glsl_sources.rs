@@ -315,10 +315,10 @@ pub(crate) fn stage_sources(key: &ShaderKey, desktop: bool, highp_fragment: bool
         let blocks: String = blocks.iter().map(|block| glsl_es::declaration(block)).collect();
         [version, &defines, stage_defines, precision, &blocks, prelude, glsl].concat()
     };
-    let vertex_prelude = if projects { [PRELUDE.vertex, PROJECTION_PRELUDE].concat() } else { PRELUDE.vertex.to_owned() };
+    let vertex_prelude =
+        if projects { [PRELUDE.vertex, PROJECTION_PRELUDE].concat() } else { PRELUDE.vertex.to_owned() };
     Ok([
         stage("", PRECISION.vertex, &vertex_blocks, &vertex_prelude, &vertex),
         stage(fragment_defines, PRECISION.fragment, &fragment_blocks, PRELUDE.fragment, &fragment),
     ])
 }
-

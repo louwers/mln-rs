@@ -33,7 +33,7 @@ pub(crate) const ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE: usize = 0;
 pub(crate) static CLIPPING_MASK: Program = Program {
     name: "clipping-mask",
     buffers: &[],
-    attributes: &[Attribute::new(ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE, "a_pos", Short2)],
+    attributes: &[Attribute { id: ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE, format: Short2 }],
     instance_attributes: &[],
     textures: &[],
     properties: &[],
@@ -48,7 +48,7 @@ pub(crate) static CLIPPING_MASK: Program = Program {
 pub(crate) static GLOBE_DEPTH: Program = Program {
     name: "globe-depth",
     buffers: &[],
-    attributes: &[Attribute::new(ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE, "a_pos", Short2)],
+    attributes: &[Attribute { id: ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE, format: Short2 }],
     instance_attributes: &[],
     textures: &[],
     properties: &[],
@@ -63,7 +63,7 @@ pub(crate) static GLOBE_DEPTH: Program = Program {
 pub(crate) static SKY: Program = Program {
     name: "sky",
     buffers: &[Buffer::uniform::<SkyPropsUBO>(ID_SKY_PROPS_UBO)],
-    attributes: &[Attribute::new(ID_SKY_POS_VERTEX_ATTRIBUTE, "a_pos", Short2)],
+    attributes: &[Attribute { id: ID_SKY_POS_VERTEX_ATTRIBUTE, format: Short2 }],
     instance_attributes: &[],
     textures: &[],
     properties: &[],
@@ -78,7 +78,7 @@ pub(crate) static SKY: Program = Program {
 pub(crate) static ATMOSPHERE: Program = Program {
     name: "atmosphere",
     buffers: &[Buffer::uniform::<AtmospherePropsUBO>(ID_ATMOSPHERE_PROPS_UBO)],
-    attributes: &[Attribute::new(ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE, "a_pos", Short2)],
+    attributes: &[Attribute { id: ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE, format: Short2 }],
     instance_attributes: &[],
     textures: &[],
     properties: &[],
@@ -93,7 +93,7 @@ pub(crate) static ATMOSPHERE: Program = Program {
 pub(crate) static LAYER_COMPOSITE: Program = Program {
     name: "layer-composite",
     buffers: &[Buffer::uniform::<LayerCompositeUBO>(ID_LAYER_COMPOSITE_UBO)],
-    attributes: &[Attribute::new(ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE, "a_pos", Short2)],
+    attributes: &[Attribute { id: ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE, format: Short2 }],
     instance_attributes: &[],
     textures: &[Texture::new("u_image"), Texture::new("u_backdrop")],
     properties: &[],
@@ -112,10 +112,10 @@ pub(crate) static LAYER_COMPOSITE: Program = Program {
 pub(crate) static TILE_DEBUG: Program = Program {
     name: "tile-debug",
     buffers: &[Buffer::uniform::<TileDebugPropsUBO>(ID_TILE_DEBUG_PROPS_UBO)],
-    attributes: &[Attribute::new(ID_TILE_DEBUG_CORNER_VERTEX_ATTRIBUTE, "a_corner", Short2)],
+    attributes: &[Attribute { id: ID_TILE_DEBUG_CORNER_VERTEX_ATTRIBUTE, format: Short2 }],
     instance_attributes: &[
-        Attribute::new(ID_TILE_DEBUG_START_ATTRIBUTE, "a_start", Short2),
-        Attribute::new(ID_TILE_DEBUG_END_ATTRIBUTE, "a_end", Short2),
+        Attribute { id: ID_TILE_DEBUG_START_ATTRIBUTE, format: Short2 },
+        Attribute { id: ID_TILE_DEBUG_END_ATTRIBUTE, format: Short2 },
     ],
     textures: &[],
     properties: &[],

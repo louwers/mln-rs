@@ -804,16 +804,28 @@ impl GlGpu {
                         program.textures.push(slot);
                     }
                 }
-                for (infos, locations) in [
-                    (declared.attributes, &mut program.vertex_locations),
-                    (declared.instance_attributes, &mut program.instance_locations),
-                ] {
-                    for info in infos {
-                        if let Some(location) = gl.get_attrib_location(object, info.name) {
-                            locations.push((info.id as u32, location));
-                        }
-                    }
+                // The attributes the program reads, which are at the locations
+                // the declaration gives them.
+                let vertices = declared.attributes.len();
+                for index in 0..gl.get_active_attributes(object) {
+                    let Some(location) = gl
+                        .get_active_attribute(object, index)
+                        .and_then(|active| gl.get_attrib_location(object, &active.name))
+                    else {
+                        continue;
+                    };
+                    let at = location as usize;
+                    let (attribute, locations) = match at.checked_sub(vertices) {
+                        None => (declared.attributes.get(at), &mut program.vertex_locations),
+                        Some(at) => (declared.instance_attributes.get(at), &mut program.instance_locations),
+                    };
+                    let attribute = attribute.ok_or_else(|| {
+                        GpuError::Invalid(format!("{name} reads an attribute at location {location}, which it lacks"))
+                    })?;
+                    locations.push((attribute.id as u32, location));
                 }
+                program.vertex_locations.sort_unstable_by_key(|&(_, location)| location);
+                program.instance_locations.sort_unstable_by_key(|&(_, location)| location);
                 Ok(())
             }
         };

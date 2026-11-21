@@ -218,7 +218,7 @@ mod tests {
     static DOT: Program = Program {
         name: "dot",
         buffers: &[],
-        attributes: &[Attribute::new(0, "a_pos", Short2), Attribute::new(3, "a_color", Float4)],
+        attributes: &[Attribute { id: 0, format: Short2 }, Attribute { id: 3, format: Float4 }],
         instance_attributes: &[],
         textures: &[],
         properties: &[Property::color("color", 3)],

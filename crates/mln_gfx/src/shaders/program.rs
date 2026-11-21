@@ -158,18 +158,8 @@ pub struct Attribute {
     /// The id a draw names it by, which a layer type chooses for its
     /// programs.
     pub id: usize,
-    /// Its name in the GLSL ES.
-    pub name: &'static str,
     /// The format a draw without data for it binds.
     pub format: AttributeDataType,
-}
-
-impl Attribute {
-    /// The attribute `id`, `name` in the GLSL ES, of `format`.
-    #[must_use]
-    pub const fn new(id: usize, name: &'static str, format: AttributeDataType) -> Attribute {
-        Attribute { id, name, format }
-    }
 }
 
 /// A texture a program samples.
