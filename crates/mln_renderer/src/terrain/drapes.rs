@@ -813,7 +813,6 @@ impl Drapes {
                 Err(error) => parameters.context.fail(format!("Making the drapes' depth and stencil failed: {error}")),
             }
         }
-        let stencil_clear_tile = parameters.stencil_clear_tile();
         for Drape { tile, transform, size, stacks, .. } in &mut self.drapes {
             for drape in stacks.iter_mut().filter(|drape| drape.redraws) {
                 let size = Size::new(*size, *size);
@@ -821,6 +820,7 @@ impl Drapes {
                 let drape_parameters =
                     parameters.drape(transform, &mut drape.clip_masks, composite, size, tile.to_unwrapped());
                 let frame = drape_parameters.global_paint_params(pattern_atlas_size);
+                let stencil_clear = drape_parameters.stencil_clear_tiles(&[tile.to_unwrapped()]);
                 let context = &mut *parameters.context;
                 // The drawings read the camera of the frame that updated
                 // them, with the drape's side and the frame's atlas.
@@ -853,7 +853,7 @@ impl Drapes {
                             layer.drawing.visit_groups(visit);
                         }
                     },
-                    stencil_clear_tile.map(|_| tile.to_unwrapped()),
+                    |tiles| if tiles.is_empty() { Vec::new() } else { stencil_clear },
                 );
                 drape.clip_masks.update(gpu, context, false, &drape.groups.clip_tiles, |tile| {
                     to_projection_ubo(&transform.projection_data_for_tile(tile, false))

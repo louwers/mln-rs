@@ -652,8 +652,11 @@ impl Encoder {
 
         // - DRAW UPLOAD ---------------------------------------------------
         orchestrator.upload_draws(gpu, parameters.context);
-        let draw_groups =
-            DrawGroups::of(|visit| orchestrator.visit_draw_groups(visit), parameters.stencil_clear_tile());
+        let draw_groups = DrawGroups::of(
+            |visit| orchestrator.visit_draw_groups(visit),
+            |tiles| parameters.stencil_clear_tiles(tiles),
+        );
+        parameters.stencil_clear.clone_from(&draw_groups.stencil_clear);
         let (proj_state, transform) = (parameters.view, parameters.transform_params);
         parameters.clip_masks.update(gpu, parameters.context, proj_state.is_globe(), &draw_groups.clip_tiles, |tile| {
             to_projection_ubo(&transform.projection_data_for_tile(tile, false))

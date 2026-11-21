@@ -8,7 +8,7 @@ use mln_gfx::stencil_mode::Test;
 use mln_gfx::types::{CullFaceWindingType, DepthFunctionType, StencilOpType};
 use mln_gfx::{DepthMaskType, DepthMode, ScissorRect, StencilMode};
 use mln_map_types::{MapDebugOptions, ProjectionData, View, ViewportMode};
-use mln_tile_id::UnwrappedTileID;
+use mln_tile_id::{CanonicalTileID, UnwrappedTileID};
 use mln_util::constants::EXTENT;
 use mln_util::identity::SimpleIdentity;
 use mln_util::range::Range;
@@ -206,8 +206,12 @@ pub(crate) struct PaintParameters<'a> {
     tile_clipping_mask_ids: VecMap<UnwrappedTileID, i32>,
     next_stencil_id: i32,
     /// The tile of the drape that the draws go into, whose mask covers the
-    /// whole target; `None` for the frame, which the world's covers.
+    /// whole target; `None` for the frame.
     drape_tile: Option<UnwrappedTileID>,
+    /// The tiles whose masks `clear_stencil` draws zero with in the frame,
+    /// from [`stencil_clear_tiles`](Self::stencil_clear_tiles); a drape
+    /// draws its own tile's.
+    pub(crate) stencil_clear: Vec<UnwrappedTileID>,
 
     pub(crate) current_layer: u32,
     pub(crate) depth_range_size: f32,
@@ -271,6 +275,7 @@ impl<'a> PaintParameters<'a> {
             tile_clipping_mask_ids: VecMap::new(),
             next_stencil_id: 1,
             drape_tile: None,
+            stencil_clear: Vec::new(),
             // The renderer sets these before use.
             current_layer: 0,
             depth_range_size: 1.0,
@@ -328,6 +333,7 @@ impl<'a> PaintParameters<'a> {
             tile_clipping_mask_ids: VecMap::new(),
             next_stencil_id: 1,
             drape_tile: Some(tile),
+            stencil_clear: Vec::new(),
             current_layer: 0,
             depth_range_size: 1.0,
             terrain: false,
@@ -535,20 +541,35 @@ impl<'a> PaintParameters<'a> {
         self.next_stencil_id = 1;
         self.tile_clipping_mask_ids.clear();
 
-        match self.stencil_clear_tile() {
-            Some(tile) => self.draw_clip_masks(gpu, &[(tile, 0)]),
-            None => self.restart_pass(gpu, LoadOp::Clear(0)),
+        if self.context.caps().clear_stencil_with_pass {
+            self.restart_pass(gpu, LoadOp::Clear(0));
+        } else {
+            let masks: Vec<_> = match self.drape_tile {
+                Some(tile) => vec![(tile, 0)],
+                None => self.stencil_clear.iter().map(|tile| (*tile, 0)).collect(),
+            };
+            self.draw_clip_masks(gpu, &masks);
         }
         self.context.rendering_stats().stencil_clears += 1;
     }
 
-    /// The tile whose mask `clear_stencil` draws zero with, where the render
-    /// pass clears the stencil buffer only where it begins: one that covers
-    /// the whole target.
+    /// The tiles whose masks `clear_stencil` draws zero with, where the
+    /// render pass clears the stencil buffer only where it begins, when the
+    /// draws clip to the masks of `clip_tiles`: those that cover every mask,
+    /// the drape's own tile in a drape and the world in each world copy of
+    /// `clip_tiles` in the frame.
     #[must_use]
-    pub(crate) fn stencil_clear_tile(&self) -> Option<UnwrappedTileID> {
-        let tile = self.drape_tile.unwrap_or(UnwrappedTileID::new(0, 0, 0));
-        (!self.context.caps().clear_stencil_with_pass).then_some(tile)
+    pub(crate) fn stencil_clear_tiles(&self, clip_tiles: &[UnwrappedTileID]) -> Vec<UnwrappedTileID> {
+        if self.context.caps().clear_stencil_with_pass || clip_tiles.is_empty() {
+            return Vec::new();
+        }
+        if let Some(tile) = self.drape_tile {
+            return vec![tile];
+        }
+        let mut wraps: Vec<i16> = clip_tiles.iter().map(|tile| tile.wrap).collect();
+        wraps.sort_unstable();
+        wraps.dedup();
+        wraps.into_iter().map(|wrap| UnwrappedTileID::with_wrap(wrap, CanonicalTileID::new(0, 0, 0))).collect()
     }
 
     /// Whether the draws go into a terrain tile's drape.

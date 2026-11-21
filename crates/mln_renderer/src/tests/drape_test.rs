@@ -157,7 +157,7 @@ fn a_drape_clears_its_stencil_over_its_whole_target() {
             size,
             scissor,
         );
-        if parameters.stencil_clear_tile().is_none() {
+        if parameters.context.caps().clear_stencil_with_pass {
             return;
         }
         let drape = tile(1, 3, 5, 2);
@@ -165,7 +165,9 @@ fn a_drape_clears_its_stencil_over_its_whole_target() {
         let (mut drape_masks, mut drape_composite) = (ClipMasks::default(), LayerComposite::default());
         let drape_parameters =
             parameters.drape(&transform, &mut drape_masks, &mut drape_composite, Size::new(1024, 1024), drape);
-        let clear = drape_parameters.stencil_clear_tile().expect("a tile that clears the stencil");
+        let [clear] = drape_parameters.stencil_clear_tiles(&[drape])[..] else {
+            panic!("one tile that clears the stencil");
+        };
         let extent = f64::from(EXTENT);
         let (north_west, south_east) = (clip(&transform, clear, 0.0, 0.0), clip(&transform, clear, extent, extent));
         let covers = |corner: DVec4, x: f64, y: f64| corner.x * x >= 1.0 - 1e-9 && corner.y * y >= 1.0 - 1e-9;

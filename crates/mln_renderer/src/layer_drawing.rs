@@ -1058,26 +1058,30 @@ impl<'a> DrawGroup<'a> {
 
 /// What a frame's draw groups, or a drape's, need of the passes: their
 /// number, which sets the passes' depth range; the masks of the tiles they
-/// clip to and, when any of them uses the stencil buffer, of the tile that
-/// clears it; and the groups drawn as a whole, each into the layer
-/// composite's texture and then onto the frame.
+/// clip to and of the tiles that clear the stencil buffer; and the groups
+/// drawn as a whole, each into the layer composite's texture and then onto
+/// the frame.
 #[derive(Default)]
 pub(crate) struct DrawGroups {
     pub(crate) count: usize,
     pub(crate) clip_tiles: Vec<UnwrappedTileID>,
+    /// The tiles whose masks clear the stencil buffer, also in
+    /// `clip_tiles` ([`PaintParameters::stencil_clear`]).
+    pub(crate) stencil_clear: Vec<UnwrappedTileID>,
     pub(crate) composited: Vec<(SimpleIdentity, Composite)>,
 }
 
 impl DrawGroups {
     /// The draw groups that `visit_groups` visits, in drawing order, of
-    /// passes whose stencil `stencil_clear_tile` clears
-    /// ([`PaintParameters::stencil_clear_tile`]). Draw groups of one source
+    /// passes whose stencil the tiles that `stencil_clear_tiles` gives for
+    /// the tiles they clip to clear
+    /// ([`PaintParameters::stencil_clear_tiles`]). Draw groups of one source
     /// clip to the same tiles, which are added once.
     pub(crate) fn of<'a>(
         visit_groups: impl FnOnce(&mut dyn FnMut(DrawGroup<'a>)),
-        stencil_clear_tile: Option<UnwrappedTileID>,
+        stencil_clear_tiles: impl FnOnce(&[UnwrappedTileID]) -> Vec<UnwrappedTileID>,
     ) -> DrawGroups {
-        let mut groups = DrawGroups { count: 0, clip_tiles: Vec::new(), composited: Vec::new() };
+        let mut groups = DrawGroups::default();
         let mut last: Option<&[UnwrappedTileID]> = None;
         visit_groups(&mut |group| {
             groups.count += 1;
@@ -1089,9 +1093,8 @@ impl DrawGroups {
             }
             groups.composited.extend(group.composite());
         });
-        if last.is_some() {
-            groups.clip_tiles.extend(stencil_clear_tile);
-        }
+        groups.stencil_clear = stencil_clear_tiles(&groups.clip_tiles);
+        groups.clip_tiles.extend_from_slice(&groups.stencil_clear);
         if !groups.clip_tiles.is_sorted() {
             groups.clip_tiles.sort_unstable();
         }
