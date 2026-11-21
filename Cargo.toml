@@ -616,6 +616,10 @@ mln_webgpu = { workspace = true, optional = true }
 mln_wire.workspace = true
 polylabel.workspace = true
 
+[dev-dependencies]
+# The bytes of the blocks and vertices that tests/program.rs writes.
+bytemuck.workspace = true
+
 [lints]
 workspace = true
 

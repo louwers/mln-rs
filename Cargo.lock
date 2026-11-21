@@ -2459,6 +2459,7 @@ dependencies = [
 name = "mln-rs"
 version = "0.0.13"
 dependencies = [
+ "bytemuck",
  "geo-types",
  "geojson",
  "glam",
