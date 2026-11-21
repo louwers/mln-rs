@@ -123,6 +123,10 @@ struct Texture {
     /// resource view of the level before and the render target view of the
     /// level, which draw it.
     mips: Vec<(CpuSlot, CpuSlot)>,
+    /// The table of its shader resource view alone, made when bindings
+    /// first read it as the frame's ground depth, which every bindings that
+    /// read it so share, and which goes with it.
+    table: Option<u32>,
 }
 
 /// A compiled program, what it reads from its bindings, and where.
@@ -162,7 +166,8 @@ struct BoundBuffer {
 struct Bindings {
     buffers: Vec<BoundBuffer>,
     textures: Option<(u32, u64)>,
-    /// The table of the frame's ground depth, for a shader that reads it.
+    /// The table of the frame's ground depth, for a shader that reads it,
+    /// which the texture owns ([`Texture::table`]).
     ground_depth: Option<u32>,
     tags: BindingsTags,
 }
@@ -642,13 +647,38 @@ impl D3d12Gpu {
         rest: D3D12_RESOURCE_STATES,
         mipmapped: bool,
     ) -> Result<TextureId, GpuError> {
-        let mut texture =
-            Texture { memory, info, format, rest, srv: None, rtv: None, dsv: None, mipmapped, mips: Vec::new() };
+        let mut texture = Texture {
+            memory,
+            info,
+            format,
+            rest,
+            srv: None,
+            rtv: None,
+            dsv: None,
+            mipmapped,
+            mips: Vec::new(),
+            table: None,
+        };
         if let Err(error) = self.make_views(&mut texture) {
             self.free(Garbage::Texture(texture));
             return Err(error);
         }
         Ok(self.textures.insert(texture))
+    }
+
+    /// The table of the shader resource view of `texture` alone, made the
+    /// first time ([`Texture::table`]).
+    fn texture_table(&mut self, texture: TextureId) -> Result<u32, GpuError> {
+        let entry = self.textures.get_mut(texture).ok_or(GpuError::UnknownId("texture"))?;
+        if let Some(table) = entry.table {
+            return Ok(table);
+        }
+        let srv = entry.srv.ok_or_else(|| GpuError::Invalid("a texture that shaders can't sample".to_owned()))?;
+        let mut views = [None; TABLE_SIZE as usize];
+        views[0] = Some(srv.handle);
+        let table = self.tables.allocate(self.device.device(), &views)?;
+        entry.table = Some(table);
+        Ok(table)
     }
 
     /// Makes the views of `texture` that its usage needs.
@@ -948,6 +978,9 @@ impl D3d12Gpu {
                 for (srv, rtv) in texture.mips {
                     self.srv_heap.free(srv);
                     self.rtv_heap.free(rtv);
+                }
+                if let Some(table) = texture.table {
+                    self.tables.free(table);
                 }
                 self.memory.free_texture(texture.memory);
             }
@@ -1370,7 +1403,7 @@ impl Gpu for D3d12Gpu {
         };
         let ground_depth = if reads_ground_depth {
             let id = ID_GROUND_DEPTH_TEXTURE as u32;
-            let view = desc
+            let table = desc
                 .entries
                 .iter()
                 .find_map(|entry| match *entry {
@@ -1378,16 +1411,8 @@ impl Gpu for D3d12Gpu {
                     _ => None,
                 })
                 .ok_or_else(|| GpuError::Invalid(format!("{name} reads texture {id}, which no entry binds")))
-                .and_then(|texture| {
-                    let texture = self.textures.get(texture).ok_or(GpuError::UnknownId("texture"))?;
-                    texture.srv.ok_or_else(|| GpuError::Invalid("a texture that shaders can't sample".to_owned()))
-                })
-                .and_then(|srv| {
-                    let mut views = [None; TABLE_SIZE as usize];
-                    views[0] = Some(srv.handle);
-                    self.tables.allocate(self.device.device(), &views)
-                });
-            match view {
+                .and_then(|texture| self.texture_table(texture));
+            match table {
                 Ok(table) => Some(table),
                 Err(error) => {
                     if let Some((table, _)) = textures {
@@ -1460,11 +1485,7 @@ impl Gpu for D3d12Gpu {
                 None
             }
             ResourceId::Bindings(id) => {
-                let bindings = self.bindings.remove(id);
-                if let Some(table) = bindings.as_ref().and_then(|bindings| bindings.ground_depth) {
-                    self.garbage.push((self.serial, Garbage::Table(table)));
-                }
-                bindings.and_then(|bindings| bindings.textures).map(|(table, _)| Garbage::Table(table))
+                self.bindings.remove(id).and_then(|bindings| bindings.textures).map(|(table, _)| Garbage::Table(table))
             }
             ResourceId::Geometry(id) => {
                 self.geometries.remove(id);
