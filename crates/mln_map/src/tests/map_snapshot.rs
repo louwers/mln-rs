@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use mln_sources::GeoJsonSourceType;
+use mln_rs::mln_sources::GeoJsonSourceType;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style_types::{ProjectionDefinition, ProjectionType};
 use mln_util::error::ErrorKind;

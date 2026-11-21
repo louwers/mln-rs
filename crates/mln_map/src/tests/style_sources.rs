@@ -2,8 +2,8 @@
 
 use std::sync::Arc;
 
-use mln_sources::geojson::{GeoJSONOptions, GeoJsonSourceType, geojson_data, geojson_source};
-use mln_sources::{ImageSourceType, VectorSourceType, image_source, vector_source as tileset_vector_source};
+use mln_rs::mln_sources::geojson::{GeoJSONOptions, GeoJsonSourceType, geojson_data, geojson_source};
+use mln_rs::mln_sources::{ImageSourceType, VectorSourceType, image_source, vector_source as tileset_vector_source};
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{Kind, Response};
