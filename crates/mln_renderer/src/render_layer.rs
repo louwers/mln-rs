@@ -560,6 +560,14 @@ pub(crate) trait TypedLayer {
     fn parts(&self) -> Parts<'_, Self>;
     fn parts_mut(&mut self) -> PartsMut<'_, Self>;
 
+    /// Whether the layer's draws read the DEM under its tiles over terrain,
+    /// so that the terrain loads the DEM tiles its source's tiles read: a
+    /// standing layer's, but for one whose draws are given flat ground or
+    /// don't stand on the map.
+    fn reads_ground(&self) -> bool {
+        Self::STANDS
+    }
+
     /// Called once the layer's paint values are evaluated for a frame of
     /// `parameters`, before they become the layer's: the layer derives the
     /// values of `evaluated` that its type derives from others, and remakes
@@ -721,6 +729,10 @@ pub(crate) trait LayerParts {
 
     /// Whether the layer stands on terrain ([`TypedLayer::STANDS`]).
     fn stands(&self) -> bool;
+
+    /// Whether the layer's draws read the DEM under its tiles over terrain
+    /// ([`TypedLayer::reads_ground`]).
+    fn reads_ground(&self) -> bool;
 
     /// Whether the ground hides the layer's features behind it
     /// ([`TypedLayer::HIDES_BEHIND_GROUND`]).
@@ -942,6 +954,10 @@ impl<L: TypedLayer> LayerParts for L {
 
     fn stands(&self) -> bool {
         L::STANDS
+    }
+
+    fn reads_ground(&self) -> bool {
+        TypedLayer::reads_ground(self)
     }
 
     fn hides_behind_ground(&self) -> bool {

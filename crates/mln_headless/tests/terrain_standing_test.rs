@@ -474,6 +474,59 @@ fn a_circle_layer_out_of_its_zooms_asks_for_no_dem_tile() {
     }
 }
 
+/// A symbol layer that reads no ground, of a source tiled coarser than the
+/// DEM, asks for no DEM tile of its own: one drawn over the view
+/// (`symbol-screen-space`), and one of point labels measured from sea level
+/// (`symbol-height-anchor: absolute`), here 400 m up, over ground 300 m high.
+/// Looking straight down at zoom 17, the still waits for the surface's DEM
+/// tiles alone, of zoom 15 and the coarse ones that cull the surface. Labels
+/// measured from the ground ask for the DEM tile of their source tile, of
+/// zoom 14. Each draws.
+#[test]
+fn a_symbol_layer_that_reads_no_ground_asks_for_no_dem_tile() {
+    let center = LatLng::new(0.0001, 0.0001).unwrap();
+    for (layout, asks) in [
+        (r#""symbol-screen-space": true"#, false),
+        (r#""symbol-height-anchor": "absolute", "symbol-height-offset": 400"#, false),
+        (r#""symbol-height-anchor": "ground""#, true),
+    ] {
+        let style = format!(
+            r#"{{
+                "version": 8,
+                "glyphs": "glyphs/{{fontstack}}/{{range}}.pbf",
+                "terrain": {{"source": "dem"}},
+                "sources": {{
+                    "dem": {{"type": "raster-dem", "tiles": ["dem/{{z}}/{{x}}/{{y}}.png"], "tileSize": 256, "maxzoom": 15}},
+                    "point": {{
+                        "type": "geojson",
+                        "maxzoom": 14,
+                        "data": {{"type": "Point", "coordinates": [0.0001, 0.0001]}}
+                    }}
+                }},
+                "layers": [
+                    {{"id": "background", "type": "background", "paint": {{"background-color": "white"}}}},
+                    {{
+                        "id": "label",
+                        "type": "symbol",
+                        "source": "point",
+                        "layout": {{"text-field": "HH", "text-font": ["Open Sans Regular"], {layout}}},
+                        "paint": {{"text-color": "red"}}
+                    }}
+                ]
+            }}"#
+        );
+        let camera = CameraOptions { center: Some(center), zoom: Some(17.0), pitch: Some(0.0), ..Default::default() };
+        let Some((image, _, requests)) = render_views(&style, &[camera], |_| dem_png(METERS_300)) else {
+            return;
+        };
+        let zooms: BTreeSet<i8> = requests.lock().iter().map(|&(z, ..)| z).collect();
+        assert!(zooms.contains(&15), "{layout}: the surface's DEM tiles, of zooms {zooms:?}");
+        assert_eq!(asks, zooms.contains(&14), "{layout}: DEM tiles of zooms {zooms:?}");
+        let (_, count) = red_center(&image);
+        assert!(count > 20, "{layout}: {count} red pixels: no label");
+    }
+}
+
 /// The known limit: an extrusion of a source whose deepest zoom, 14, is
 /// coarser than the DEM tiles of zoom 15 that the surface under it reads
 /// stands on the DEM tile of zoom 14 over it, which the ridge's DEM tiles

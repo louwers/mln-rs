@@ -36,7 +36,8 @@ use mln_style::layers::symbol_layer::SymbolLayerPaintPropertyOverrides;
 use mln_style::layers::symbol_layer_properties::{SymbolLayoutProperties, SymbolPaintProperties};
 use mln_style::{PropertyEvaluationParameters, StyleValue as _};
 use mln_style_types::{
-    AlignmentType, IconTextFitType, SymbolPlacementType, TextRotationAlignmentType, TranslateAnchorType,
+    AlignmentType, IconTextFitType, SymbolHeightAnchorType, SymbolPlacementType, TextRotationAlignmentType,
+    TranslateAnchorType,
 };
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::Color;
@@ -145,6 +146,14 @@ pub(crate) fn text_property_values(
         translate: *evaluated.text_translate.uniform(),
         translate_anchor: *evaluated.text_translate_anchor.uniform(),
     }
+}
+
+/// Whether the symbols of `style` draw over the view
+/// (`symbol-screen-space`), with the flat projection, rather than on the
+/// map.
+fn draws_over_view(style: &LayerStyle<Symbol>) -> bool {
+    let screen_space = &style.layout.symbol_screen_space;
+    screen_space.as_constant().copied().unwrap_or_else(SymbolLayoutProperties::Defaults::symbol_screen_space)
 }
 
 /// The tile matrix of screen-space symbols.
@@ -895,11 +904,7 @@ impl RenderSymbolLayer {
         let data = &draw.data;
         let tile_id = tile_id.to_unwrapped();
         let is_text = data.symbol_type == SymbolType::Text;
-        let screen_space_prop = &layer.style.layout.symbol_screen_space;
-        let is_screen_space = screen_space_prop
-            .as_constant()
-            .copied()
-            .unwrap_or_else(SymbolLayoutProperties::Defaults::symbol_screen_space);
+        let is_screen_space = draws_over_view(&layer.style);
 
         let translate = if is_text { &evaluated.text_translate } else { &evaluated.icon_translate };
         let anchor = if is_text { &evaluated.text_translate_anchor } else { &evaluated.icon_translate_anchor };
@@ -1203,6 +1208,20 @@ impl TypedLayer for RenderSymbolLayer {
         PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
     }
 
+    /// Symbols drawn over the view read no ground, nor do point symbols
+    /// whose height is measured from sea level (`symbol-height-anchor:
+    /// absolute`), whose draws are given flat ground. A value that an
+    /// expression gives may read it.
+    fn reads_ground(&self) -> bool {
+        let style = &self.values.style;
+        let layout = &style.layout;
+        let absolute = layout.symbol_height_anchor.as_constant() == Some(&SymbolHeightAnchorType::Absolute);
+        let point = !layout.symbol_placement.is_expression()
+            && layout.symbol_placement.as_constant().is_none_or(|&placement| placement == SymbolPlacementType::Point);
+        let from_sea_level = absolute && point;
+        !(draws_over_view(style) || from_sea_level)
+    }
+
     /// The text of a `text-field` with format sections takes the values
     /// its sections override.
     fn complete_evaluation(
@@ -1266,11 +1285,7 @@ impl TypedLayer for RenderSymbolLayer {
         let constant_sort_key = layout.symbol_sort_key.is_constant();
         // Screen-space symbols are drawn over the view, not projected onto
         // the map.
-        let screen_space_prop = &layout.symbol_screen_space;
-        let is_screen_space = screen_space_prop
-            .as_constant()
-            .copied()
-            .unwrap_or_else(SymbolLayoutProperties::Defaults::symbol_screen_space);
+        let is_screen_space = draws_over_view(&self.values.style);
         let symbol_projection_variant =
             if is_screen_space { ProjectionVariant::Mercator } else { self.base.projection_variant };
         // Over terrain, the symbols stand on the ground, but for those drawn

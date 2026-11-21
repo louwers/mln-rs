@@ -127,7 +127,8 @@
 //!   the DEM, or none is over it, T reads the DEM tile that holds it at its
 //!   own zoom, or at the DEM's deepest if that is shallower, which the cover
 //!   requests for each such tile of the ideal cover of a standing layer the
-//!   frame draws, and a still waits for; while it loads, T reads the deepest
+//!   frame draws that reads the DEM (not symbols drawn over the view or
+//!   measured from sea level), and a still waits for; while it loads, T reads the deepest
 //!   ancestor of it that has loaded, as does a tile drawn in place of an
 //!   ideal one while that loads, for which nothing is requested. Where the
 //!   DEM has no tile that holds T, its lowest zoom deeper than T's, T stands

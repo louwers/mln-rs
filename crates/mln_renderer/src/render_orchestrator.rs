@@ -871,13 +871,14 @@ impl RenderOrchestrator {
             .cover()
             .and_then(|cover| self.sources_by_id.iter().position(|source| source.id() == cover.source_id));
         let order = (0..source_count).filter(|&index| Some(index) != dem_source).chain(dem_source);
-        // The sources with a standing layer that the frame draws.
+        // The sources with a layer that the frame draws that reads the DEM
+        // under their tiles.
         let mut standing_sources: SmallVec<[usize; 2]> = SmallVec::new();
         for (position, source_index) in order.enumerate() {
             let style_source = self.sources_by_id.get(source_index).cloned();
             let mut source_needs_rendering = false;
             let mut source_needs_relayout = false;
-            let mut source_stands = false;
+            let mut source_reads_ground = false;
             // The layers of a source type without a render source are
             // skipped.
             let has_render_source =
@@ -931,7 +932,7 @@ impl RenderOrchestrator {
                             self.filtered_layers_for_source.push(Arc::clone(&layer.base().evaluated_properties));
                             if zoom_fits_layer {
                                 source_needs_rendering = true;
-                                source_stands |= frame.terrain && layer.stands();
+                                source_reads_ground |= frame.terrain && layer.reads_ground();
                                 let source_id = style_source.id().to_owned();
                                 frame
                                     .layers
@@ -981,7 +982,7 @@ impl RenderOrchestrator {
                     });
                     self.terrain.request_standing(standing.flatten());
                 }
-                if source_stands {
+                if source_reads_ground {
                     standing_sources.push(source_index);
                 }
                 let filtered_layers = std::mem::take(&mut self.filtered_layers_for_source);
