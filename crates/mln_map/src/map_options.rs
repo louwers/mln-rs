@@ -44,11 +44,17 @@ pub struct MapOptions {
     /// command that moves the center, by a center or an anchor, eases the
     /// altitude onto the ground at the center it ends on; once that ground
     /// has loaded, the command's own [`CameraOptions::center_altitude`]
-    /// gives way to it, without a warning. A gesture holds the altitude it
+    /// gives way to it, without a warning, and while it loads, the command
+    /// heads for the altitude it was given. A gesture holds the altitude it
     /// begins at, lifted over ground that reaches above its eye, and its
     /// end moves the center along the view onto the ground, with the eye
-    /// where it was. Any other camera that an animation moves keeps its
-    /// altitude, and so does every camera when this is off. On by default.
+    /// where it was; where the view meets no drawn ground, or the zoom
+    /// limits refuse that move, the center stays and stands on the ground
+    /// as at rest. Any other camera that an animation moves keeps its
+    /// altitude. When this is off, every camera keeps the altitude it is
+    /// given, such as the style's `centerAltitude`, and a command or a
+    /// gesture whose eye the ground reaches lowers the pitch and zoom
+    /// instead. Without terrain it changes nothing. On by default.
     /// [`Map::set_center_clamped_to_ground`] changes it.
     ///
     /// [`CameraOptions::center_altitude`]: mln_map_types::CameraOptions::center_altitude

@@ -128,10 +128,15 @@
 //!   blend's backdrop is the drape's own texels.
 //! - **The elevation snapshot** ([`TerrainElevation`]) holds the drawn
 //!   tiles, and the DEM images and sub-rects they read, which don't change
-//!   once it shares them, so the map reads it on its thread. It finds the
-//!   tile at a point through an index of the drawn tiles by zoom, finest
-//!   first, which a ray the map casts against it samples hundreds of times,
-//!   and it keeps the range of the drawn heights, which bounds the ray. The renderer
+//!   once it shares them, so the map reads it on its thread. It answers
+//!   four questions ([`Elevation`]): the height at a location, `None` while
+//!   its DEM loads, which a clamped center stands on; the floor of the tile
+//!   there, which the view's planes fit; the surface as drawn, 0 on a tile
+//!   drawn flat while its DEM loads and `None` where nothing drew, which
+//!   rays, the eye's clearance and screen points over terrain meet; and the
+//!   range of the drawn heights, which bounds a ray. It finds the tile at a
+//!   point through an index of the drawn tiles by zoom, finest first, which
+//!   a ray samples hundreds of times. The renderer
 //!   makes a new one only when the tiles, the DEM images they read, where
 //!   they read them, whether their own DEM loads, or the decode change: a
 //!   fixed camera over loaded tiles keeps one snapshot. It reaches the map
@@ -148,8 +153,10 @@
 //!   two give the same height and floor ([`Elevation::at`] and
 //!   [`Elevation::min_at`]) at the view's center, which is all a camera at
 //!   rest reads of them, or there is neither, without terrain. A camera
-//!   reads more, such as the surface under its eye, only while a command
-//!   or a gesture moves it, which no still waits on. A still image
+//!   reads more (the surface under its eye and near plane, rays through
+//!   the screen, the ground at a command's end) only while a command or a
+//!   gesture moves it, which no still waits on; a gesture's end moves the
+//!   center onto the ground before the camera comes to rest. A still image
 //!   draws only such an update's frame, and a continuous frame of any
 //!   other reports itself partial, so it doesn't make the map idle. A
 //!   snapshot that changes only away from the center holds no frame back.

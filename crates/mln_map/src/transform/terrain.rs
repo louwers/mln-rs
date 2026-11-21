@@ -4,6 +4,15 @@
 //! above the ground while a command or a gesture moves the camera, the
 //! planes that moves around an anchor solve on, and the conversions between
 //! screen points and the ground drawn under them.
+//!
+//! Every rule applies only while the map hands the transform a ground
+//! ([`TerrainGround`]); without one, each path is the flat map's. The
+//! terrain moves a camera at rest, as ground loads or changes under it, the
+//! clamp turns on or the terrain goes, without camera events, as in GL JS:
+//! the map's snapshots show those moves. Everything else that the terrain
+//! does to the camera happens inside the command or gesture that moves it,
+//! before the `CameraDidChange` that ends it, so the camera a host reads on
+//! that event is the one at rest.
 
 use std::sync::Arc;
 

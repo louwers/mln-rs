@@ -16,7 +16,11 @@ use mln_util::geo::{EdgeInsets, LatLng, ScreenCoordinate};
 pub struct CameraOptions {
     /// Coordinate at the center of the map.
     pub center: Option<LatLng>,
-    /// Altitude of the center of the map, in meters above sea level.
+    /// Altitude of the center of the map, in meters above sea level. Over
+    /// terrain that clamps the center (the map's
+    /// `center_clamped_to_ground`), a command's altitude gives way to the
+    /// ground where the command ends, once that ground is known; elsewhere
+    /// it holds.
     pub center_altitude: Option<f64>,
     /// Padding around the interior of the view that affects the frame of
     /// reference for `center`.

@@ -1425,7 +1425,9 @@ impl Map {
     // MARK: - Terrain
 
     /// Sets whether the center stands on the terrain, at its height under
-    /// the center ([`MapOptions::center_clamped_to_ground`]).
+    /// the center ([`MapOptions::center_clamped_to_ground`]). Turning it on
+    /// stands a camera at rest on the ground at once, without camera
+    /// events; turning it off leaves the altitude where it is.
     pub fn set_center_clamped_to_ground(&mut self, clamped: bool) {
         if self.center_clamped_to_ground != clamped {
             self.center_clamped_to_ground = clamped;

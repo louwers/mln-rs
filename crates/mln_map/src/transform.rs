@@ -6,7 +6,8 @@
 //! composes with the other commands' cameras. The transform calls no
 //! observer: it queues what happens as `TransformEvent`s, which its owner
 //! drains once the call returns, so no callback runs while the transform
-//! changes.
+//! changes. Over terrain, the rules of `terrain` stand the camera on the
+//! ground and keep its eye above it.
 
 use std::f64::consts::PI;
 use std::rc::Rc;
