@@ -1,22 +1,20 @@
 // gtests-core: added for test/map/map.test.cpp (LatLngForPixelUnwrapped,
 // PixelForLatLngAfterZoomAroundAPointAcrossTheAntimeridian).
 
-use std::sync::Arc;
-
-use mln_map_types::{Camera, CameraOptions, Elevation, MapView, TransformState};
+use mln_map_types::{Camera, CameraOptions, MapView, TransformState};
 use mln_util::error::Error;
 use mln_util::geo::{LatLng, ScreenCoordinate, WrapMode};
 
 use crate::map::Map;
-use crate::transform::{Transform, flip_y, project_on_ground, unproject_on_ground};
+use crate::transform::{TerrainGround, Transform, flip_y, project_on_ground, unproject_on_ground};
 
 /// Converts coordinates for one camera and size, without a map, on the flat
-/// map or on the terrain's ground ([`with_ground`](Self::with_ground)). It
-/// holds only a transform state and the ground, so it can move to another
+/// map or on the terrain's ground ([`with_terrain`](Self::with_terrain)). It
+/// holds only a transform state and the terrain, so it can move to another
 /// thread.
 pub struct MapProjection {
     state: TransformState,
-    ground: Option<Arc<dyn Elevation>>,
+    terrain: Option<TerrainGround>,
 }
 
 const _: () = {
@@ -25,15 +23,15 @@ const _: () = {
 };
 
 impl MapProjection {
-    /// A projection for the map's camera, on the ground its camera stands
-    /// on ([`Map::ground`]).
+    /// A projection for the map's camera, on the terrain its camera stands
+    /// on ([`Map::terrain`]).
     #[must_use]
     pub fn new(map: &Map) -> Self {
-        Self::from_state(map.transform_state().clone()).with_ground(map.ground())
+        Self::from_state(map.transform_state().clone()).with_terrain(map.terrain())
     }
 
     pub(crate) fn from_state(state: TransformState) -> Self {
-        MapProjection { state, ground: None }
+        MapProjection { state, terrain: None }
     }
 
     /// A projection for one view of a map, from a [`MapSnapshot`] or a
@@ -44,23 +42,30 @@ impl MapProjection {
         Ok(Self::from_state(view.to_state()?))
     }
 
-    /// The projection on `ground`, the terrain a map's camera stands on
-    /// ([`Map::ground`]), as the map converts on it; on the flat map for
-    /// `None`.
+    /// The projection on `terrain`, the terrain a map's camera stands on
+    /// ([`Map::terrain`]), as the map converts on it; on the flat map for
+    /// `None`. A view's near and far planes, which a view rebuilt from a
+    /// [`MapView`] has as on the flat map, fit the terrain's ground as the
+    /// map's do: its lowest under the center.
     #[must_use]
-    pub fn with_ground(self, ground: Option<Arc<dyn Elevation>>) -> Self {
-        MapProjection { ground, ..self }
+    pub fn with_terrain(mut self, terrain: Option<TerrainGround>) -> Self {
+        let ground = terrain.as_ref().and_then(|terrain| terrain.elevation.as_ref());
+        if let Some(ground) = ground.filter(|_| self.state.view().terrain_min_elevation().is_none()) {
+            let center = self.state.view().center(WrapMode::Wrapped);
+            self.state.set_terrain_min_elevation(Some(ground.min_at(center).unwrap_or(0.0)));
+        }
+        MapProjection { terrain, ..self }
     }
 
     /// The screen point of `lat_lng`, in the copy of the world nearest the
-    /// camera's center: standing on the ground where there is one and it
+    /// camera's center: standing on the ground where there is terrain and it
     /// was drawn, else at sea level.
     #[must_use]
     pub fn pixel_for_lat_lng(&self, lat_lng: &LatLng) -> ScreenCoordinate {
         let view = self.state.view();
         let lat_lng = view.lat_lng_near_center(lat_lng);
-        let point = match &self.ground {
-            Some(ground) => project_on_ground(view, Some(ground.as_ref()), &lat_lng),
+        let point = match &self.terrain {
+            Some(terrain) => project_on_ground(view, terrain.elevation.as_deref(), &lat_lng),
             None => view.lat_lng_to_screen_coordinate(&lat_lng),
         };
         flip_y(view, &point)
@@ -73,16 +78,16 @@ impl MapProjection {
         self.state.view().is_location_occluded(lat_lng)
     }
 
-    /// The location under `pixel`: with a ground, where the line of sight
-    /// first meets it, or the plane at the center's altitude where it meets
-    /// no drawn ground; else on the flat map. Fails with
-    /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a NaN or
-    /// infinite pixel.
+    /// The location under `pixel`: with terrain, where the line of sight
+    /// first meets its ground, or the plane at the center's altitude where
+    /// it meets no drawn ground or before any was drawn; else on the flat
+    /// map. Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind)
+    /// for a NaN or infinite pixel.
     pub fn lat_lng_for_pixel(&self, pixel: &ScreenCoordinate, wrap_mode: WrapMode) -> Result<LatLng, Error> {
         let view = self.state.view();
         let point = flip_y(view, pixel);
-        match &self.ground {
-            Some(ground) => unproject_on_ground(view, Some(ground.as_ref()), &point, wrap_mode),
+        match &self.terrain {
+            Some(terrain) => unproject_on_ground(view, terrain.elevation.as_deref(), &point, wrap_mode),
             None => view.screen_coordinate_to_lat_lng(&point, wrap_mode),
         }
     }

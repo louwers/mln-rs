@@ -148,6 +148,11 @@ impl Transform {
         }
     }
 
+    /// The terrain the camera stands on ([`Self::set_terrain`]).
+    pub(crate) fn terrain(&self) -> Option<&TerrainGround> {
+        self.terrain.as_ref()
+    }
+
     /// The ground the renderer last drew, while there is terrain.
     pub(crate) fn ground(&self) -> Option<&Arc<dyn Elevation>> {
         self.terrain.as_ref()?.elevation.as_ref()

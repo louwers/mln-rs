@@ -1452,6 +1452,16 @@ impl Map {
         self.transform.ground().cloned()
     }
 
+    /// The terrain the camera stands on while the style's terrain applies
+    /// on a Mercator view outside tile mode, with its [`ground`] or none
+    /// before the renderer drew any; `None` without terrain.
+    ///
+    /// [`ground`]: Self::ground
+    #[must_use]
+    pub fn terrain(&self) -> Option<TerrainGround> {
+        self.transform.terrain().cloned()
+    }
+
     /// Hands the transform the terrain the camera stands on
     /// ([`Self::terrain_ground`]), and moves the camera onto it
     /// ([`Transform::follow_terrain`]).

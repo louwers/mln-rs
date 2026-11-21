@@ -198,7 +198,7 @@ fn a_projection_from_the_map_carries_its_ground() {
     let view = map.snapshot().view;
     let from_map = MapProjection::new(&map);
     let flat = MapProjection::from_view(&view).unwrap();
-    let grounded = MapProjection::from_view(&view).unwrap().with_ground(map.ground());
+    let grounded = MapProjection::from_view(&view).unwrap().with_terrain(map.terrain());
     let state_view = map.transform_state().view();
     let mut differ = 0;
     for pixel in lower_half() {
@@ -260,6 +260,67 @@ fn without_terrain_conversions_are_unchanged() {
                 assert_eq!(expected, from_map.pixel_for_lat_lng(&location), "{camera:?}");
                 assert_same_pixel(expected, from_view.pixel_for_lat_lng(&location), 1e-6, "from the view");
             }
+        }
+    }
+}
+
+/// A projection rebuilt from a map's view and given its terrain clips as
+/// the map does, to the terrain's lowest ground, so the far rows of a
+/// camera at sea level over ground 1,000 m below it meet that ground.
+#[test]
+fn a_projection_from_a_view_sees_as_far_as_the_map() {
+    let run_loop = Queue::<()>::new();
+    let mut map = pitchable(STYLE, &run_loop);
+    map.set_center_clamped_to_ground(false);
+    map.jump_to(&CameraOptions {
+        center: Some(center()),
+        zoom: Some(12.0),
+        center_altitude: Some(0.0),
+        ..pitched(60.0)
+    });
+    report(&mut map, ground_event(&super::ground::flat(Some(-1000.0), -1000.0)));
+    assert_eq!(Some(-1000.0), map.transform_state().view().terrain_min_elevation());
+
+    let projection = MapProjection::from_view(&map.snapshot().view).unwrap().with_terrain(map.terrain());
+    let mut sunken = 0;
+    for row in 0..8 {
+        let pixel = ScreenCoordinate::new(256.0, 5.0 * f64::from(row));
+        let expected = map.lat_lng_for_pixel(&pixel, WrapMode::Unwrapped).unwrap();
+        let actual = projection.lat_lng_for_pixel(&pixel, WrapMode::Unwrapped).unwrap();
+        assert_near(expected.latitude(), actual.latitude(), 1e-9, "latitude");
+        assert_near(expected.longitude(), actual.longitude(), 1e-9, "longitude");
+        let view = map.transform_state().view();
+        let plane = view.screen_coordinate_to_lat_lng_at(&flipped(view, &pixel), 0.0, WrapMode::Unwrapped).unwrap();
+        sunken += usize::from((plane.latitude() - expected.latitude()).abs() > 1e-6);
+    }
+    assert_eq!(8, sunken, "pixels whose line of sight meets the sunken ground");
+}
+
+/// While terrain applies but the renderer has drawn no ground yet, a
+/// projection of the map, or of its view given its terrain, falls back as
+/// the map does: a pixel unprojects onto the plane at the center's altitude.
+#[test]
+fn a_projection_before_any_ground_falls_back_as_the_map_does() {
+    let run_loop = Queue::<()>::new();
+    let mut map = pitchable(STYLE, &run_loop);
+    map.set_center_clamped_to_ground(false);
+    map.jump_to(&CameraOptions {
+        center: Some(center()),
+        zoom: Some(12.0),
+        center_altitude: Some(1500.0),
+        ..pitched(60.0)
+    });
+    assert!(map.ground().is_none());
+
+    let from_view = MapProjection::from_view(&map.snapshot().view).unwrap().with_terrain(map.terrain());
+    for projection in [MapProjection::new(&map), from_view] {
+        for pixel in lower_half() {
+            let expected = map.lat_lng_for_pixel(&pixel, WrapMode::Unwrapped).unwrap();
+            let actual = projection.lat_lng_for_pixel(&pixel, WrapMode::Unwrapped).unwrap();
+            assert_near(expected.latitude(), actual.latitude(), 1e-9, "latitude");
+            assert_near(expected.longitude(), actual.longitude(), 1e-9, "longitude");
+            let location = expected.wrapped();
+            assert_same_pixel(map.pixel_for_lat_lng(&location), projection.pixel_for_lat_lng(&location), 1e-6, "back");
         }
     }
 }
