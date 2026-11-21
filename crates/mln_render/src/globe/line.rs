@@ -69,6 +69,7 @@ pub fn subdivide_line(line: &[Point<i16>], granularity: u32, is_ring: bool) -> G
     result
 }
 
-fn vec(p: Point<i16>) -> DVec2 {
+/// `p` in floating point.
+pub(super) fn vec(p: Point<i16>) -> DVec2 {
     DVec2::new(f64::from(p.x), f64::from(p.y))
 }
