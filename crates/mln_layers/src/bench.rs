@@ -17,7 +17,7 @@ use mln_util::geo::{LatLng, WrapMode};
 
 use crate::symbol::Symbol;
 use crate::symbol::placement::cross_tile_index::CrossTileSymbolIndex;
-use crate::symbol::placement::{Placement, PlacementInputs};
+use crate::symbol::placement::{Placement, PlacementInputs, leaders};
 
 /// The symbols of laid-out tiles in a view, as a renderer finds which to
 /// show: the view's symbol layers, each updated with the tiles as a frame
@@ -49,11 +49,8 @@ impl SymbolView {
             let view = &cx.update_parameters.view;
             let longitude = view.center(WrapMode::Unwrapped).longitude() as f32;
             let mut added = 0;
-            for layer in cx.layers.iter().rev() {
+            for layer in leaders(cx.layers).rev() {
                 let placed = &layer.state.placement_data;
-                if placed.is_empty() {
-                    continue;
-                }
                 if index.0.index_layer(layer.layer.id(), placed, longitude, view, &mut cx.buckets).buckets_added {
                     added += 1;
                 }
@@ -69,8 +66,7 @@ impl SymbolView {
     /// without one shows nowhere.
     pub fn place(&mut self) -> usize {
         self.0.with_context(|cx| {
-            let leaders = cx.layers.iter().filter(|layer| !layer.state.placement_data.is_empty());
-            let inputs = PlacementInputs::new(cx.update_parameters, leaders, &cx.buckets);
+            let inputs = PlacementInputs::new(cx.update_parameters, leaders(cx.layers), &cx.buckets);
             let groups = CollisionGroups::new(cx.update_parameters.cross_source_collisions);
             let mut placement = Placement::create(Arc::new(inputs), groups, Some(Placement::new_default()));
             // The placement it replaces showed nothing, so it has nothing to
