@@ -895,7 +895,7 @@ impl SourceTiles {
             for contents in contents {
                 for layer in &expression_layers {
                     if let Some(bucket) = contents.bucket(layer.style()) {
-                        max = max.max(layer.entry().max_content_elevation(bucket));
+                        max = max.max(bucket.max_elevation());
                     }
                 }
             }

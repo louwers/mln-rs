@@ -14,10 +14,9 @@ use mln_render::draw::{
     copied_vertices, copy_shared_attributes, paint_vertices, projection_data, to_projection_ubo,
 };
 use mln_render::layer::{
-    Bucket, DrawContext, EvaluatedLayer, FeatureQuery, FrameTile, HitTest, LayerBucket, LayerType, LayerValues,
-    LayoutParameters, RenderPass, SourceLayer,
+    Bucket, DrawContext, EvaluateCx, EvaluatedLayer, Evaluation, FeatureQuery, FrameTile, HitTest, LayerBucket,
+    LayerType, LayerValues, LayoutParameters, SourceLayer,
 };
-use mln_style::PropertyEvaluationParameters;
 use mln_util::Color;
 use mln_util::constants::TILE_SIZE_D;
 use mln_util::error::Error;
@@ -98,9 +97,6 @@ pub(crate) fn outline_paint_layout(attrs: &VertexAttributeArray) -> u32 {
     let stride = [color, opacity].into_iter().find_map(shared).map_or(0, |attribute| words(attribute.stride));
     stride | offset(color) << 8 | offset(opacity) << 16
 }
-
-/// The pass the layer's draws draw in.
-const RENDER_PASS: RenderPass = RenderPass::TRANSLUCENT;
 
 /// A draw the layer keeps of a tile.
 struct FillDraw {
@@ -551,7 +547,6 @@ impl LayerType for Fill {
     type View<'a> = LayerBucket<'a, Fill>;
     type Drawing = TileDraws<FillTile>;
     type State = FillState;
-    const CROSSFADES: bool = true;
 
     /// Whether a layer of the group has a pattern.
     fn layout_can_need_dependencies(group: &[Arc<EvaluatedLayer<Fill>>]) -> bool {
@@ -576,30 +571,21 @@ impl LayerType for Fill {
     }
 
     /// An undefined outline color is the fill color.
-    fn complete_evaluation(
-        _state: &mut FillState,
-        layer: &LayerValues<Fill>,
-        _parameters: &PropertyEvaluationParameters,
-        evaluated: &mut EvaluatedLayer<Fill>,
-    ) {
-        let evaluated = &mut evaluated.paint;
+    fn evaluate(_state: &mut FillState, cx: EvaluateCx<'_, Fill>) -> Evaluation {
+        let (layer, evaluated) = (cx.layer, &mut cx.evaluated.paint);
         if layer.unevaluated.fill_outline_color.is_undefined() {
             evaluated.fill_outline_color = evaluated.fill_color.clone();
         }
-    }
-
-    fn passes(layer: &LayerValues<Fill>, evaluated: &EvaluatedLayer<Fill>) -> RenderPass {
-        let evaluated = &evaluated.paint;
         let opaque = layer.unevaluated.fill_pattern.is_undefined()
             && evaluated.fill_color.constant_or(&Color::default()).a >= 1.0
             && evaluated.fill_opacity.constant_or(&0.0) >= 1.0;
         let shows = *evaluated.fill_layer_opacity.uniform() > 0.0;
         if shows && opaque {
-            RenderPass::TRANSLUCENT | RenderPass::OPAQUE
+            Evaluation::OPAQUE
         } else if shows {
-            RenderPass::TRANSLUCENT
+            Evaluation::TRANSLUCENT
         } else {
-            RenderPass::NONE
+            Evaluation::NONE
         }
     }
 
@@ -654,7 +640,7 @@ impl LayerType for Fill {
                 continue;
             };
 
-            let render_data = tile.view_for_pass(RENDER_PASS);
+            let render_data = tile.view_to_draw();
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
                 *entry.value = None;
                 continue;
@@ -724,7 +710,6 @@ impl LayerType for Fill {
                     continue;
                 };
                 let tile_draw = FrameDraw {
-                    pass: RENDER_PASS,
                     depth: DrawDepth::Layer { sub_layer: draw.sub_layer, mask: draw.depth },
                     clip: true,
                     ..FrameDraw::new(Some(tile_id), draw.id)

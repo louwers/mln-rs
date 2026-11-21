@@ -9,13 +9,14 @@
 //! the type registers it, tile workers' too.
 //!
 //! The engine holds each layer of the type: its values ([`LayerValues`]),
-//! which it transitions and evaluates, the passes it draws in, whether the
-//! frame draws it, and the layer's [`Drawing`](LayerType::Drawing) and
-//! [`State`](LayerType::State), which the layer type keeps. Each frame, the
-//! engine evaluates the layer ([`LayerType::passes`]), finds its tiles and
-//! runs [`LayerType::update`] with an [`UpdateContext`], and in the encode
-//! runs [`LayerType::make_draws`] with a [`DrawContext`]. The engine then
-//! uploads and draws the drawing's draws.
+//! which it transitions and evaluates, what their last evaluation says of
+//! its drawing ([`Evaluation`]), whether the frame draws it, and the
+//! layer's [`Drawing`](LayerType::Drawing) and [`State`](LayerType::State),
+//! which the layer type keeps. The engine runs [`LayerType::evaluate`]
+//! whenever the layer's values may have changed. Each frame, it finds the
+//! layer's tiles and runs [`LayerType::update`] with an [`UpdateContext`],
+//! and in the encode runs [`LayerType::make_draws`] with a [`DrawContext`].
+//! The engine then uploads and draws the drawing's draws.
 //!
 //! The style half declares the type's properties with
 //! [`mln_style::properties!`]. A bucket binds the data-driven paint
@@ -44,8 +45,7 @@
 //! rest ([`MaskedGeometry`]). A layer type without a source gets no tiles.
 //!
 //! What only some layer types do, a type declares as a capability: it
-//! draws 3D geometry ([`LayerType::IS_3D`]), clears the frame to a solid
-//! color ([`LayerType::solid_background`]), answers feature queries
+//! draws 3D geometry ([`LayerType::VOLUME`]), answers feature queries
 //! ([`FeatureQuery`]), draws into textures of its own before the frame's
 //! passes ([`OffscreenPass`]), or draws through a host outside the
 //! renderer ([`LayerHost`]). The engine asks for each, and does without it
@@ -109,7 +109,6 @@ pub use crate::paint_property_binder::{
 pub use crate::paint_property_statistics::StatisticValue;
 use crate::placement::{BucketKey, NewPlacement};
 pub use crate::render_layer::LayerBucket;
-pub use crate::render_pass::RenderPass;
 pub use crate::render_source::TileOrder;
 use crate::render_tile::FindView as _;
 pub use crate::render_tile::{FrameTile, NoTileView, RasterView, TileView};
@@ -150,9 +149,13 @@ pub trait LayerType: StyleLayerType {
     /// color ramp or the textures of its tiles.
     type State;
 
-    /// Whether the type has cross-faded properties, whose evaluation takes
-    /// the frame's cross-fade.
-    const CROSSFADES: bool = false;
+    /// Whether a layer of the type draws 3D geometry, with draws of
+    /// [`DrawDepth::Volume`](crate::draw::DrawDepth::Volume), whether or not
+    /// it draws in a frame. The layers above the lowest such layer draw
+    /// their opaque draws in the translucent pass, and on the globe, the
+    /// planet's depth hides 3D geometry behind the horizon while any such
+    /// layer renders.
+    const VOLUME: bool = false;
 
     /// The order a layer of the type gets its source's tiles in.
     const TILE_ORDER: TileOrder = TileOrder::ById;
@@ -179,21 +182,11 @@ pub trait LayerType: StyleLayerType {
     /// keeps.
     fn new_layer(layer: &LayerValues<Self>) -> (Self::State, Self::Drawing);
 
-    /// The passes a layer of `layer`'s values draws in with `evaluated`, its
-    /// values of a frame.
-    fn passes(layer: &LayerValues<Self>, evaluated: &EvaluatedLayer<Self>) -> RenderPass;
-
-    /// Called once a layer's values are evaluated for a frame of
-    /// `parameters`, before they become the layer's: the layer derives the
-    /// values of `evaluated` that its type derives from others, and remakes
-    /// what it makes of them, such as a color ramp.
-    fn complete_evaluation(
-        _state: &mut Self::State,
-        _layer: &LayerValues<Self>,
-        _parameters: &PropertyEvaluationParameters,
-        _evaluated: &mut EvaluatedLayer<Self>,
-    ) {
-    }
+    /// Called once a layer's values are evaluated, whenever they may have
+    /// changed, before they become the layer's: the layer derives the values
+    /// of `cx.evaluated` that its type derives from others, remakes what it
+    /// makes of them, such as a color ramp, and says how it draws with them.
+    fn evaluate(state: &mut Self::State, cx: EvaluateCx<'_, Self>) -> Evaluation;
 
     /// The frame's update of a layer the frame draws, once the engine found
     /// its tiles and kept their entries in the drawing's tile map. The
@@ -203,7 +196,7 @@ pub trait LayerType: StyleLayerType {
 
     /// Makes a layer's draws of the frame, in the frame's encode, once the
     /// engine started them ([`LayerDrawing::begin_frame`]): from the
-    /// context's tiles, for a layer that draws in a pass and whose source
+    /// context's tiles, for a layer whose evaluation draws and whose source
     /// shows it tiles, or a layer without a source that keeps tiles in its
     /// drawing and picked some. The layer keeps in its drawing what it makes
     /// of them, with the values of their uniforms.
@@ -223,28 +216,7 @@ pub trait LayerType: StyleLayerType {
     /// stops rendering.
     fn release(_state: &mut Self::State) {}
 
-    /// How far above the ground `bucket`'s highest content is raised, for
-    /// a layer whose content elevation
-    /// ([`StyleLayerType::content_elevation`]) is an expression.
-    fn max_content_elevation(_bucket: &Self::Bucket) -> f32 {
-        0.0
-    }
-
     // The capabilities.
-
-    /// Whether a layer of the type draws 3D geometry, with draws of
-    /// [`DrawDepth::Volume`](crate::draw::DrawDepth::Volume). The layers
-    /// above the lowest 3D layer draw their opaque draws in the translucent
-    /// pass, and on the globe, the planet's depth hides 3D geometry behind
-    /// the horizon.
-    const IS_3D: bool = false;
-
-    /// The color a layer with `evaluated` is, where it is one solid color,
-    /// which the frame can clear to instead of drawing the layer when the
-    /// layer is the style's bottom one.
-    fn solid_background(_evaluated: &EvaluatedLayer<Self>) -> Option<Color> {
-        None
-    }
 
     /// How the type's features answer rendered-feature queries; `None` for
     /// a type whose features no query hits.
@@ -416,16 +388,51 @@ impl<T: LayerType> LayerValues<T> {
 
     /// The paint values evaluated for a frame, copying from the last
     /// evaluation each value that can't have changed, with the frame's
-    /// cross-fade for a type that has one, and no render passes yet.
+    /// cross-fade for a type that has one, and not drawing yet.
     pub(crate) fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) -> EvaluatedLayer<T> {
         let paint =
             T::PaintProperties::evaluate_with_previous(&mut self.unevaluated, parameters, &self.evaluated.paint);
         let mut evaluated = EvaluatedLayer::with_paint(Arc::clone(&self.style), paint);
-        if T::CROSSFADES {
+        if T::PaintProperties::CROSSFADES {
             evaluated.crossfade = parameters.get_crossfade_parameters();
         }
         evaluated
     }
+}
+
+/// What a layer's evaluation reads and writes.
+pub struct EvaluateCx<'a, T: LayerType> {
+    /// The layer's values: its style, and its paint values in transition.
+    /// Their `evaluated` is still the last evaluation's.
+    pub layer: &'a LayerValues<T>,
+    /// What the values were evaluated for.
+    pub parameters: &'a PropertyEvaluationParameters,
+    /// The new evaluation of the values, which becomes the layer's once the
+    /// hook returns.
+    pub evaluated: &'a mut EvaluatedLayer<T>,
+}
+
+/// What a layer's evaluation says of how it draws with its values.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Evaluation {
+    /// Whether the layer draws anything.
+    pub draws: bool,
+    /// Whether the layer may draw in the opaque pass, where the frame draws
+    /// opaque geometry front to back before blending the rest; such a layer
+    /// draws in the translucent pass too.
+    pub opaque: bool,
+    /// The one solid color the layer is, which the frame clears to instead
+    /// of drawing the layer when it is the style's bottom layer.
+    pub solid: Option<Color>,
+}
+
+impl Evaluation {
+    /// The layer draws nothing.
+    pub const NONE: Evaluation = Evaluation { draws: false, opaque: false, solid: None };
+    /// The layer draws, in the translucent pass only.
+    pub const TRANSLUCENT: Evaluation = Evaluation { draws: true, opaque: false, solid: None };
+    /// The layer draws, and may draw in the opaque pass.
+    pub const OPAQUE: Evaluation = Evaluation { draws: true, opaque: true, solid: None };
 }
 
 /// What a layer's update reads of the frame.
@@ -481,9 +488,6 @@ pub struct DrawContext<'a, 'f, T: LayerType> {
     pub tiles: &'a [FrameTile<'f, T>],
     /// The layer's values.
     pub layer: &'a LayerValues<T>,
-    /// The passes the layer draws in: those of its values, and those its
-    /// tiles' buckets were laid out to draw in.
-    pub passes: RenderPass,
     /// The projection the layer's draws are built for.
     pub projection_variant: ProjectionVariant,
     /// The renderer's GPU state, whose stores keep the draws' objects.

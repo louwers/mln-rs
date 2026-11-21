@@ -33,9 +33,9 @@ use mln_util::error::Error;
 use mln_vec_map::VecMap;
 
 use crate::layer::{
-    Bucket, BucketBase, BuildParams, DemContents, DrawContext, EvaluatedLayer, FeatureIndexBuilder, FeatureStates,
-    GeometryUpload, GeometryVec, LayerBucket, LayerType, LayerValues, Layout, LayoutParameters, NoBucket, NoLayout,
-    NoTileView, RasterView, RenderPass, Resolved, SourceLayer, layers_by_id,
+    Bucket, BucketBase, BuildParams, DemContents, DrawContext, EvaluateCx, EvaluatedLayer, Evaluation,
+    FeatureIndexBuilder, FeatureStates, GeometryUpload, GeometryVec, LayerBucket, LayerType, LayerValues, Layout,
+    LayoutParameters, NoBucket, NoLayout, NoTileView, RasterView, Resolved, SourceLayer, layers_by_id,
 };
 use crate::layer_drawing::{ChangedBuckets, KeptDraw, TileDraws};
 use crate::placement::{CollisionGroups, Placed, PlacementContext, PlacementPass, PlacementQuery, Prepared};
@@ -287,8 +287,8 @@ impl LayerType for Dot {
         Default::default()
     }
 
-    fn passes(_layer: &LayerValues<Dot>, _evaluated: &EvaluatedLayer<Dot>) -> RenderPass {
-        RenderPass::TRANSLUCENT
+    fn evaluate((): &mut (), _cx: EvaluateCx<'_, Dot>) -> Evaluation {
+        Evaluation::TRANSLUCENT
     }
 
     fn make_draws(
@@ -340,8 +340,8 @@ impl LayerType for Tint {
         Default::default()
     }
 
-    fn passes(_layer: &LayerValues<Tint>, _evaluated: &EvaluatedLayer<Tint>) -> RenderPass {
-        RenderPass::TRANSLUCENT
+    fn evaluate((): &mut (), _cx: EvaluateCx<'_, Tint>) -> Evaluation {
+        Evaluation::TRANSLUCENT
     }
 
     fn make_draws(
@@ -382,8 +382,8 @@ impl LayerType for Shade {
         Default::default()
     }
 
-    fn passes(_layer: &LayerValues<Shade>, _evaluated: &EvaluatedLayer<Shade>) -> RenderPass {
-        RenderPass::TRANSLUCENT
+    fn evaluate((): &mut (), _cx: EvaluateCx<'_, Shade>) -> Evaluation {
+        Evaluation::TRANSLUCENT
     }
 
     fn make_draws(
@@ -425,8 +425,8 @@ impl<const OTHER: bool> LayerType for Mark<OTHER> {
         Default::default()
     }
 
-    fn passes(_layer: &LayerValues<Self>, _evaluated: &EvaluatedLayer<Self>) -> RenderPass {
-        RenderPass::TRANSLUCENT
+    fn evaluate((): &mut (), _cx: EvaluateCx<'_, Self>) -> Evaluation {
+        Evaluation::TRANSLUCENT
     }
 
     fn make_draws(

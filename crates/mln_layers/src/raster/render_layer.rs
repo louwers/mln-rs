@@ -21,8 +21,8 @@ use mln_render::draw::{
     cast_matrix, copied_vertices, projection_data, to_projection_ubo,
 };
 use mln_render::layer::{
-    DrawContext, EvaluatedLayer, LayerType, LayerValues, NoBucket, NoLayout, RasterContents, RasterLayoutVertex,
-    RasterView, RenderPass, UpdateContext,
+    DrawContext, EvaluateCx, Evaluation, LayerType, LayerValues, NoBucket, NoLayout, RasterContents,
+    RasterLayoutVertex, RasterView, UpdateContext,
 };
 use mln_style_types::{RasterResamplingType, ResamplingType, TranslateAnchorType};
 use mln_tile_id::UnwrappedTileID;
@@ -404,8 +404,8 @@ impl LayerType for Raster {
         }
     }
 
-    fn passes(_layer: &LayerValues<Raster>, evaluated: &EvaluatedLayer<Raster>) -> RenderPass {
-        if *evaluated.paint.raster_opacity.uniform() > 0.0 { RenderPass::TRANSLUCENT } else { RenderPass::NONE }
+    fn evaluate(_state: &mut RasterState, cx: EvaluateCx<'_, Raster>) -> Evaluation {
+        if *cx.evaluated.paint.raster_opacity.uniform() > 0.0 { Evaluation::TRANSLUCENT } else { Evaluation::NONE }
     }
 
     /// Makes the frame's draws of the layer: those of an image source's

@@ -22,12 +22,12 @@ use mln_render::draw::{
     tile_unit_translation, to_projection_ubo,
 };
 use mln_render::layer::{
-    Bucket, DrawContext, EvaluatedLayer, FeatureIndex, LayerBucket, LayerType, LayerValues, LayoutParameters,
-    RenderPass, SourceLayer, TileOrder, UpdateContext,
+    Bucket, DrawContext, EvaluateCx, EvaluatedLayer, Evaluation, FeatureIndex, LayerBucket, LayerType, LayerValues,
+    LayoutParameters, SourceLayer, TileOrder, UpdateContext,
 };
 use mln_render::placement::{BucketKey, NewPlacement};
+use mln_style::StyleValue as _;
 use mln_style::layer_type::{ErasedLayerStyle as _, LayerStyle};
-use mln_style::{PropertyEvaluationParameters, StyleValue as _};
 use mln_style_types::{
     AlignmentType, IconTextFitType, SymbolPlacementType, TextRotationAlignmentType, TranslateAnchorType,
 };
@@ -585,9 +585,6 @@ pub struct SymbolState {
     pub(crate) follower_data: Vec<BucketPlacementData>,
     /// The layer's source, which its buckets' placement data shares.
     source_id: Arc<str>,
-
-    /// The passes the layer's draws were built for.
-    draws_passes: RenderPass,
 }
 
 /// The translations of the text and of the icons of a layer with
@@ -668,7 +665,7 @@ impl SymbolState {
     }
 
     /// Makes the frame's draws of `drawing`'s draws of the tiles of `cx` that
-    /// show any symbols, in the layer's passes, and of their collision boxes
+    /// show any symbols, and of their collision boxes
     /// and circles, and writes the buffers they read.
     fn make_frame_draws(
         &mut self,
@@ -676,7 +673,7 @@ impl SymbolState {
         gpu: &mut dyn Gpu,
         cx: &mut DrawContext<'_, '_, Symbol>,
     ) {
-        let (layer, tiles, passes, frame) = (cx.layer, cx.tiles, cx.passes, &cx.frame);
+        let (layer, tiles, frame) = (cx.layer, cx.tiles, &cx.frame);
         let context = &mut *cx.context;
         let layer_id = layer.id();
         let layer = &*layer.evaluated;
@@ -693,13 +690,12 @@ impl SymbolState {
                 else {
                     continue;
                 };
-                let frame_draw = FrameDraw { pass: passes, ..FrameDraw::new(Some(tile_id), draw.id) };
+                let frame_draw = FrameDraw::new(Some(tile_id), draw.id);
                 self.draw_list.push_part(frame_draw, index, uniforms);
             }
             for (index, draw) in cached.collision.iter_mut().enumerate() {
                 write_collision_uniforms(gpu, context, draw, &tile_id, frame);
-                let frame_draw =
-                    FrameDraw { pass: passes, depth: DrawDepth::Off, ..draw.draw.frame_draw(Some(tile_id)) };
+                let frame_draw = FrameDraw { depth: DrawDepth::Off, ..draw.draw.frame_draw(Some(tile_id)) };
                 self.collision_list.push_part(frame_draw, index, ());
             }
         }
@@ -1089,31 +1085,23 @@ impl LayerType for Symbol {
             placement_data: Vec::new(),
             follower_data: Vec::new(),
             source_id: Arc::from(""),
-            draws_passes: RenderPass::NONE,
         };
         (state, SymbolDrawing::default())
     }
 
     /// The text of a `text-field` with format sections takes the values
     /// its sections override.
-    fn complete_evaluation(
-        _state: &mut SymbolState,
-        layer: &LayerValues<Symbol>,
-        parameters: &PropertyEvaluationParameters,
-        evaluated: &mut EvaluatedLayer<Symbol>,
-    ) {
+    fn evaluate(_state: &mut SymbolState, cx: EvaluateCx<'_, Symbol>) -> Evaluation {
+        let layer = cx.layer;
         if SymbolLayerPaintPropertyOverrides::has_overrides(&layer.style.layout.text_field) {
             crate::symbol::format_section_override::set_overrides(
                 &layer.style.layout,
-                &mut evaluated.paint,
+                &mut cx.evaluated.paint,
                 &layer.unevaluated,
-                parameters.global_state.as_ref(),
+                cx.parameters.global_state.as_ref(),
             );
         }
-    }
-
-    fn passes(_layer: &LayerValues<Symbol>, evaluated: &EvaluatedLayer<Symbol>) -> RenderPass {
-        let evaluated = &evaluated.paint;
+        let evaluated = &cx.evaluated.paint;
         let has_icon_opacity = evaluated.icon_color.constant_or(&SymbolPaintProperties::Defaults::icon_color()).a > 0.0
             || evaluated.icon_halo_color.constant_or(&SymbolPaintProperties::Defaults::icon_halo_color()).a > 0.0;
         let has_text_opacity = evaluated.text_color.constant_or(&SymbolPaintProperties::Defaults::text_color()).a > 0.0
@@ -1122,9 +1110,9 @@ impl LayerType for Symbol {
         if (evaluated.icon_opacity.constant_or(&1.0) > 0.0 && has_icon_opacity)
             || (evaluated.text_opacity.constant_or(&1.0) > 0.0 && has_text_opacity)
         {
-            RenderPass::TRANSLUCENT
+            Evaluation::TRANSLUCENT
         } else {
-            RenderPass::NONE
+            Evaluation::NONE
         }
     }
 
@@ -1147,11 +1135,6 @@ impl LayerType for Symbol {
 
         let render_tiles = cx.tiles;
         let transform = cx.frame.view;
-        let passes = cx.passes;
-        if passes != state.draws_passes {
-            drawing.clear();
-            state.draws_passes = passes;
-        }
 
         let layout = &cx.layer.style.layout;
         let sort_features_by_key = layout.symbol_sort_key.is_expression();
@@ -1178,7 +1161,7 @@ impl LayerType for Symbol {
             let Some(mut entry) = drawing.tiles.entry(&tile_id) else {
                 continue;
             };
-            let render_data = tile.view_for_pass(passes);
+            let render_data = tile.view_to_draw();
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
                 *entry.value = None;
                 continue;
@@ -1279,11 +1262,7 @@ impl LayerType for Symbol {
         // Renderables come across tiles, out of order, so the atlases' textures
         // given to a tile's draws are kept by tile.
         let mut tile_atlases: HashMap<UnwrappedTileID, TileAtlases> = HashMap::default();
-        let color_mode = cx.context.color_mode(if passes & RenderPass::TRANSLUCENT == RenderPass::NONE {
-            ColorMode::unblended()
-        } else {
-            ColorMode::alpha_blended()
-        });
+        let color_mode = cx.context.color_mode(ColorMode::alpha_blended());
 
         for group in &renderable_segments {
             let is_text = group.type_ == SymbolType::Text;
@@ -1293,7 +1272,7 @@ impl LayerType for Symbol {
                 continue;
             };
             let tile_id = tile.unwrapped_id().overscale_to(group.overscaled_z);
-            let Some(render_data) = tile.view_for_pass(passes) else {
+            let Some(render_data) = tile.view_to_draw() else {
                 continue;
             };
             let bucket = render_data.bucket;
@@ -1458,9 +1437,5 @@ impl LayerType for Symbol {
 
     fn release(state: &mut SymbolState) {
         state.placement_data.clear();
-    }
-
-    fn max_content_elevation(bucket: &SymbolBucket) -> f32 {
-        bucket.max_height_offset
     }
 }

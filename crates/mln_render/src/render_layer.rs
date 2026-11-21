@@ -17,7 +17,6 @@ use mln_style::layer_type::{ErasedLayerStyle, LayerStyle, PaintSet, SourceKind};
 use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use mln_style_types::VisibilityType;
 use mln_style_types::image::ImagePosition;
-use mln_util::Color;
 use smallvec::SmallVec;
 
 use crate::bucket::Bucket;
@@ -25,11 +24,10 @@ use crate::bucket_geometry::BucketGeometry;
 use crate::erased_layer::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::geometry::feature_index::FeatureIndex;
 use crate::gfx::context::Context;
-use crate::layer::{DrawContext, EndedHost, HitTest, LayerType, LayerValues, UpdateContext};
+use crate::layer::{DrawContext, EndedHost, EvaluateCx, Evaluation, HitTest, LayerType, LayerValues, UpdateContext};
 use crate::layer_drawing::{ChangedBuckets, DrawGroup, DrawOrder, LayerDrawing};
 use crate::paint_parameters::PaintParameters;
 use crate::placement::PlacingLayer;
-use crate::render_pass::RenderPass;
 use crate::render_source::{RenderSource, TileOrder};
 use crate::render_tile::{FindView, FoundTile, FrameTile, RenderTile, TileContent, ViewPlace};
 use crate::tile::contents::GeometryContents;
@@ -132,8 +130,8 @@ impl<'a, T: LayerType> FindView<'a> for LayerBucket<'a, T> {
         self.layer.style.id == layer_id
     }
 
-    fn passes(self) -> RenderPass {
-        self.layer.passes()
+    fn draws(self) -> bool {
+        self.layer.draws
     }
 
     fn bucket_index(self) -> Option<usize> {
@@ -248,7 +246,12 @@ pub(crate) struct Layer<T: LayerType> {
     values: LayerValues<T>,
     state: T::State,
     drawing: T::Drawing,
-    passes: RenderPass,
+    /// What the last evaluation of the layer's values said.
+    evaluation: Evaluation,
+    /// Whether the layer draws: its evaluation says so, or since that
+    /// evaluation one of its tiles had a bucket laid out with values that
+    /// draw.
+    draws: bool,
     style_dependencies: Dependency,
     /// Whether the frame draws the layer.
     renderable: bool,
@@ -269,7 +272,8 @@ impl<T: LayerType> Layer<T> {
             values,
             state,
             drawing,
-            passes: RenderPass::NONE,
+            evaluation: Evaluation::NONE,
+            draws: false,
             renderable: false,
             projection_variant: ProjectionVariant::Mercator,
             found: 0..0,
@@ -305,12 +309,11 @@ impl<T: LayerType> Layer<T> {
     }
 
     /// Starts the frame's draws of the layer, which has something to draw,
-    /// and returns whether it draws in a pass with its values of the frame.
-    /// One that doesn't drops the frame's draws, and keeps what it keeps of
-    /// its tiles.
+    /// and returns whether its evaluation draws. One that doesn't drops the
+    /// frame's draws, and keeps what it keeps of its tiles.
     fn begin_frame(&mut self) -> bool {
         self.drawing.begin_frame();
-        let draws = self.values.evaluated.render_passes != RenderPass::NONE;
+        let draws = self.evaluation.draws;
         if !draws {
             self.drawing.clear_frame();
         }
@@ -323,7 +326,6 @@ impl<T: LayerType> Layer<T> {
             let mut cx = DrawContext {
                 tiles,
                 layer: &self.values,
-                passes: self.passes,
                 projection_variant: self.projection_variant,
                 context: &mut *paint.context,
                 frame: paint.frame,
@@ -368,10 +370,12 @@ pub(crate) trait RenderLayer: Any {
     /// frame, to those of the layer's style.
     fn transition(&mut self, parameters: &TransitionParameters);
 
-    /// Evaluates the layer's paint values for a frame of `parameters`,
-    /// which the layer completes ([`LayerType::complete_evaluation`]), and
-    /// sets the passes the layer draws in with them ([`LayerType::passes`]).
+    /// Evaluates the layer's paint values for a frame of `parameters`, and
+    /// keeps what the layer says of them ([`LayerType::evaluate`]).
     fn evaluate(&mut self, parameters: &PropertyEvaluationParameters);
+
+    /// What the last evaluation of the layer's values said.
+    fn evaluation(&self) -> Evaluation;
 
     /// Whether a paint value of the layer is still in transition.
     fn has_transition(&self) -> bool;
@@ -380,9 +384,9 @@ pub(crate) trait RenderLayer: Any {
     fn has_crossfade(&self) -> bool;
 
     /// The frame's update of the layer: finds the tiles of `update`'s source
-    /// the layer draws, which it adds to `update.found`, adds the passes
-    /// their buckets were laid out for to the layer's, keeps entries for the
-    /// tiles, and runs the type's [`LayerType::update`].
+    /// the layer draws, which it adds to `update.found`, draws where one of
+    /// their buckets was laid out with values that draw, keeps entries for
+    /// the tiles, and runs the type's [`LayerType::update`].
     fn update(&mut self, update: &mut LayerUpdate<'_>);
 
     /// The encode's update of the layer's draws: picks the shader variant
@@ -390,7 +394,7 @@ pub(crate) trait RenderLayer: Any {
     /// the draws of a layer that has nothing to draw (still starting the
     /// frame of one on an image source), and otherwise starts its draws of
     /// the frame ([`LayerDrawing::begin_frame`]); drops them again for a
-    /// layer that draws in no pass, and otherwise runs the type's
+    /// layer whose evaluation draws nothing, and otherwise runs the type's
     /// [`LayerType::make_draws`] with the tiles of `source` that its update
     /// found in `found`.
     fn update_draws(
@@ -424,7 +428,7 @@ pub(crate) trait RenderLayer: Any {
     /// What the layer's paint values depend on.
     fn style_dependencies(&self) -> Dependency;
 
-    /// Whether the layer draws in a pass and is visible.
+    /// Whether the layer draws ([`update`](Self::update)) and is visible.
     fn needs_rendering(&self) -> bool;
 
     /// Drops the frame's draws of the layer and the caches of their GPU
@@ -451,11 +455,8 @@ pub(crate) trait RenderLayer: Any {
         self.style().base().min_zoom <= zoom_or_zero && zoom < self.style().base().max_zoom
     }
 
-    /// See [`LayerType::IS_3D`].
-    fn is_3d(&self) -> bool;
-
-    /// See [`LayerType::solid_background`].
-    fn solid_background(&self) -> Option<Color>;
+    /// See [`LayerType::VOLUME`].
+    fn volume(&self) -> bool;
 
     /// Uploads what the layer draws in its [`OffscreenPass`](crate::layer::OffscreenPass),
     /// if the frame draws it.
@@ -524,10 +525,15 @@ impl<T: LayerType> RenderLayer for Layer<T> {
 
     fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
         let mut evaluated = self.values.evaluate(parameters);
-        T::complete_evaluation(&mut self.state, &self.values, parameters, &mut evaluated);
-        self.passes = T::passes(&self.values, &evaluated);
-        evaluated.render_passes = self.passes;
+        let cx = EvaluateCx { layer: &self.values, parameters, evaluated: &mut evaluated };
+        self.evaluation = T::evaluate(&mut self.state, cx);
+        self.draws = self.evaluation.draws;
+        evaluated.draws = self.evaluation.draws;
         self.values.evaluated = Arc::new(evaluated);
+    }
+
+    fn evaluation(&self) -> Evaluation {
+        self.evaluation
     }
 
     fn has_transition(&self) -> bool {
@@ -535,7 +541,7 @@ impl<T: LayerType> RenderLayer for Layer<T> {
     }
 
     fn has_crossfade(&self) -> bool {
-        T::CROSSFADES && self.values.evaluated.crossfade.t != 1.0
+        T::PaintProperties::CROSSFADES && self.values.evaluated.crossfade.t != 1.0
     }
 
     fn update(&mut self, update: &mut LayerUpdate<'_>) {
@@ -545,9 +551,7 @@ impl<T: LayerType> RenderLayer for Layer<T> {
             None => FrameTiles::new(),
         };
         self.found = start..update.found.len();
-        for bucket in tiles.iter().filter_map(|tile| tile.view()) {
-            self.passes |= bucket.passes();
-        }
+        self.draws |= tiles.iter().filter_map(|tile| tile.view()).any(FindView::draws);
         if T::INFO.source != SourceKind::None
             && let Some(kept) = self.drawing.tiles()
         {
@@ -635,7 +639,7 @@ impl<T: LayerType> RenderLayer for Layer<T> {
     }
 
     fn needs_rendering(&self) -> bool {
-        self.passes != RenderPass::NONE && self.values.style.visibility != VisibilityType::None
+        self.draws && self.values.style.visibility != VisibilityType::None
     }
 
     fn remove_all_draws(&mut self) {
@@ -660,12 +664,8 @@ impl<T: LayerType> RenderLayer for Layer<T> {
         }
     }
 
-    fn is_3d(&self) -> bool {
-        T::IS_3D
-    }
-
-    fn solid_background(&self) -> Option<Color> {
-        T::solid_background(&self.values.evaluated)
+    fn volume(&self) -> bool {
+        T::VOLUME
     }
 
     fn upload_offscreen(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {

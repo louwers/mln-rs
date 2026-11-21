@@ -355,3 +355,13 @@ fn global_state_change_transitions_light_property() {
     assert_float_eq(0.823_099, evaluate_with_state(intensity, width_state(1.0), Duration::from_millis(500)));
     assert_float_eq(1.0, evaluate_with_state(intensity, width_state(1.0), Duration::from_millis(1500)));
 }
+
+// A paint set cross-fades where one of its properties' kinds does.
+const _: () = {
+    use crate::layer_type::{NoProperties, PaintSet};
+    use crate::tests::fixture_layer::{DotPaintProperties, PlainPaintProperties};
+
+    assert!(<PlainPaintProperties::Transitionable as PaintSet>::CROSSFADES);
+    assert!(!<DotPaintProperties::Transitionable as PaintSet>::CROSSFADES);
+    assert!(!<NoProperties as PaintSet>::CROSSFADES);
+};

@@ -22,11 +22,11 @@ use mln_render::draw::{
     tile_objects, to_projection_ubo,
 };
 use mln_render::layer::{
-    DrawContext, EvaluatedLayer, LayerBucket, LayerType, LayerValues, LayoutParameters, OffscreenPass, RenderPass,
-    SourceLayer,
+    DrawContext, EvaluateCx, EvaluatedLayer, Evaluation, LayerBucket, LayerType, LayerValues, LayoutParameters,
+    OffscreenPass, SourceLayer,
 };
+use mln_style::StyleValue as _;
 use mln_style::expression::{Dependency, GlobalStateMap, global_state_refs_intersect};
-use mln_style::{PropertyEvaluationParameters, StyleValue as _};
 use mln_style_types::TranslateAnchorType;
 use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
@@ -44,10 +44,6 @@ use super::ubo::{HeatmapDrawableUBO, HeatmapEvaluatedPropsUBO, HeatmapTexturePro
 use super::{Heatmap, programs};
 use crate::color_ramp::apply_color_ramp;
 use crate::refresh_paint_attributes;
-
-/// The pass the layer's draws draw in, onto the frame and into its render
-/// target.
-const RENDER_PASS: RenderPass = RenderPass::TRANSLUCENT;
 
 /// A tile's draw's entries in the render target's storage buffers.
 struct HeatmapUniforms {
@@ -211,12 +207,9 @@ impl LayerType for Heatmap {
         (state, HeatmapDrawing::default())
     }
 
-    fn complete_evaluation(
-        state: &mut HeatmapState,
-        layer: &LayerValues<Heatmap>,
-        parameters: &PropertyEvaluationParameters,
-        _evaluated: &mut EvaluatedLayer<Heatmap>,
-    ) {
+    /// Remakes the color ramp where its value may have changed.
+    fn evaluate(state: &mut HeatmapState, cx: EvaluateCx<'_, Heatmap>) -> Evaluation {
+        let (layer, parameters) = (cx.layer, cx.parameters);
         // Build the ramp here rather than in transition(), which has no global
         // state. A new or changed layer always needs one; otherwise only a
         // change to a state key that the ramp reads does.
@@ -237,10 +230,7 @@ impl LayerType for Heatmap {
         if ramp_affected {
             state.update_color_ramp(layer);
         }
-    }
-
-    fn passes(_layer: &LayerValues<Heatmap>, evaluated: &EvaluatedLayer<Heatmap>) -> RenderPass {
-        if *evaluated.paint.heatmap_opacity.uniform() > 0.0 { RenderPass::TRANSLUCENT } else { RenderPass::NONE }
+        if *cx.evaluated.paint.heatmap_opacity.uniform() > 0.0 { Evaluation::TRANSLUCENT } else { Evaluation::NONE }
     }
 
     /// Makes the tiles' draws into the render target, which it builds for a
@@ -287,7 +277,7 @@ impl HeatmapState {
         for tile in render_tiles {
             let tile_id = tile.id();
 
-            let Some(render_data) = tile.view_for_pass(RENDER_PASS) else {
+            let Some(render_data) = tile.view_to_draw() else {
                 drawing.tiles.drop_value(&tile_id);
                 continue;
             };

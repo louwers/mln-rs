@@ -7,15 +7,14 @@ use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMod
 use mln_map_types::tile_cover::{TileCoverParameters, tile_cover};
 use mln_render::draw::{
     DrawDepth, DrawFrame, DrawGeometry, DrawIndexes, DrawList, DrawObjects, FrameDraw, KeptDraw, LayerDrawing,
-    RenderStaticData, Textures, TileDraws, Uniforms, projection_data, raw_vertices, to_projection_ubo,
+    RenderPass, RenderStaticData, Textures, TileDraws, Uniforms, projection_data, raw_vertices, to_projection_ubo,
 };
 use mln_render::globe::tile_grid;
 use mln_render::layer::{
-    DrawContext, EvaluatedLayer, LayerType, LayerValues, NoBucket, NoLayout, NoTileView, RenderPass, UpdateContext,
+    DrawContext, EvaluateCx, Evaluation, LayerType, LayerValues, NoBucket, NoLayout, NoTileView, UpdateContext,
 };
 use mln_style_types::TranslateAnchorType;
 use mln_tile_id::OverscaledTileID;
-use mln_util::Color;
 use mln_util::constants::TILE_SIZE_D;
 use mln_util::range::Range;
 
@@ -33,9 +32,11 @@ pub struct BackgroundState {
     /// The frame's draws as the update makes them, with their uniform blocks
     /// and projections.
     draw_list: DrawList<(BackgroundDrawableUnionUBO, ProjectionUBO)>,
-    /// The passes the tiles' draws were built for, and whether with a
+    /// Whether the layer's last evaluation found it opaque.
+    opaque: bool,
+    /// Whether the tiles' draws were built opaque, and whether with a
     /// pattern.
-    draws_built_for: Option<(RenderPass, bool)>,
+    draws_built_for: Option<(bool, bool)>,
     /// The tiles that cover the view, which the frame's update picks for
     /// its encode.
     tile_cover: Vec<OverscaledTileID>,
@@ -125,7 +126,6 @@ impl LayerType for Background {
     type View<'a> = NoTileView;
     type Drawing = TileDraws<KeptDraw>;
     type State = BackgroundState;
-    const CROSSFADES: bool = true;
 
     fn new_layer(_layer: &LayerValues<Background>) -> (BackgroundState, TileDraws<KeptDraw>) {
         Default::default()
@@ -141,15 +141,14 @@ impl LayerType for Background {
         cx: &mut DrawContext<'_, '_, Background>,
     ) {
         let (context, frame, variant) = (&mut *cx.context, &cx.frame, cx.projection_variant);
-        let BackgroundState { draw_list, draws_built_for, tile_cover, patterns } = state;
+        let BackgroundState { opaque, draw_list, draws_built_for, tile_cover, patterns } = state;
         let layer = &*cx.layer.evaluated;
         let evaluated = &layer.paint;
         let has_pattern = !evaluated.background_pattern.faded().to.empty();
-        let draw_passes = layer.passes();
 
-        if *draws_built_for != Some((draw_passes, has_pattern)) {
+        if *draws_built_for != Some((*opaque, has_pattern)) {
             drawing.clear();
-            *draws_built_for = Some((draw_passes, has_pattern));
+            *draws_built_for = Some((*opaque, has_pattern));
         }
 
         let program = if has_pattern { &programs::BACKGROUND_PATTERN } else { &programs::BACKGROUND };
@@ -169,11 +168,8 @@ impl LayerType for Background {
         let pattern_texture = patterns.texture().filter(|_| has_pattern);
         let atlas_size = patterns.size();
 
-        let color_mode = context.color_mode(if draw_passes == RenderPass::TRANSLUCENT {
-            ColorMode::alpha_blended()
-        } else {
-            ColorMode::unblended()
-        });
+        let color_mode = context.color_mode(if *opaque { ColorMode::unblended() } else { ColorMode::alpha_blended() });
+        let draw_passes = if *opaque { RenderPass::OPAQUE | RenderPass::TRANSLUCENT } else { RenderPass::TRANSLUCENT };
         for tile_id in &*tile_cover {
             let Some(entry) = drawing.tiles_mut().entry(tile_id) else {
                 continue;
@@ -227,20 +223,24 @@ impl LayerType for Background {
         });
     }
 
-    /// None where the layer is transparent, and the opaque pass too where
-    /// it is opaque, for the layers below the frame's opaque pass cutoff.
-    fn passes(layer: &LayerValues<Background>, evaluated: &EvaluatedLayer<Background>) -> RenderPass {
-        let evaluated = &evaluated.paint;
-        if *evaluated.background_opacity.uniform() == 0.0 {
-            RenderPass::NONE
-        } else if !layer.unevaluated.background_pattern.is_undefined()
-            || *evaluated.background_opacity.uniform() < 1.0
-            || evaluated.background_color.uniform().a < 1.0
-        {
-            RenderPass::TRANSLUCENT
+    /// Draws nothing where the layer is transparent, and opaque where it
+    /// is, for the layers below the frame's opaque pass cutoff. Without a
+    /// pattern, the layer is one solid color.
+    fn evaluate(state: &mut BackgroundState, cx: EvaluateCx<'_, Background>) -> Evaluation {
+        let evaluated = &cx.evaluated.paint;
+        let opacity = *evaluated.background_opacity.uniform();
+        let color = *evaluated.background_color.uniform();
+        let evaluation = if opacity == 0.0 {
+            Evaluation::NONE
+        } else if !cx.layer.unevaluated.background_pattern.is_undefined() || opacity < 1.0 || color.a < 1.0 {
+            Evaluation::TRANSLUCENT
         } else {
-            RenderPass::OPAQUE | RenderPass::TRANSLUCENT
-        }
+            Evaluation::OPAQUE
+        };
+        state.opaque = evaluation.opaque;
+        let pattern = !evaluated.background_pattern.faded().from.empty();
+        let solid = if pattern || opacity <= 0.0 { None } else { Some(color * opacity) };
+        Evaluation { solid, ..evaluation }
     }
 
     /// Picks the tiles that cover the view, which the layer draws, having no
@@ -277,14 +277,5 @@ impl LayerType for Background {
             state.patterns.add(faded.from.id(), cx.images);
             state.patterns.add(faded.to.id(), cx.images);
         }
-    }
-
-    fn solid_background(layer: &EvaluatedLayer<Background>) -> Option<Color> {
-        let evaluated = &layer.paint;
-        if !evaluated.background_pattern.faded().from.empty() || *evaluated.background_opacity.uniform() <= 0.0 {
-            return None;
-        }
-
-        Some(*evaluated.background_color.uniform() * *evaluated.background_opacity.uniform())
     }
 }

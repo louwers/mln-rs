@@ -42,8 +42,8 @@ use mln_render::draw::{
     projection_data, to_projection_ubo, zero_to_one_clip_z,
 };
 use mln_render::layer::{
-    Bucket, DrawContext, EvaluatedLayer, FeatureQuery, HitTest, LayerBucket, LayerType, LayerValues, LayoutParameters,
-    RenderPass, SourceLayer,
+    Bucket, DrawContext, EvaluateCx, EvaluatedLayer, Evaluation, FeatureQuery, HitTest, LayerBucket, LayerType,
+    LayerValues, LayoutParameters, SourceLayer,
 };
 use mln_style_types::LayerBlendType;
 use mln_tile_id::OverscaledTileID;
@@ -68,9 +68,6 @@ use super::properties::FillExtrusionPaintProperties;
 use super::ubo::{FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO};
 use super::{FillExtrusion, programs};
 use crate::pattern_layout::{PatternLayout, uses_pattern};
-
-/// The pass the layer's draws draw in.
-const RENDER_PASS: RenderPass = RenderPass::TRANSLUCENT;
 
 /// A draw the layer keeps of a tile: of its roofs or its walls, into depth
 /// only or in color.
@@ -288,8 +285,7 @@ impl LayerType for FillExtrusion {
     type View<'a> = LayerBucket<'a, FillExtrusion>;
     type Drawing = TileDraws<ExtrusionTile>;
     type State = ExtrusionState;
-    const CROSSFADES: bool = true;
-    const IS_3D: bool = true;
+    const VOLUME: bool = true;
 
     /// Whether a layer of the group has a pattern.
     fn layout_can_need_dependencies(group: &[Arc<EvaluatedLayer<FillExtrusion>>]) -> bool {
@@ -318,8 +314,8 @@ impl LayerType for FillExtrusion {
         (state, TileDraws::default())
     }
 
-    fn passes(_layer: &LayerValues<FillExtrusion>, evaluated: &EvaluatedLayer<FillExtrusion>) -> RenderPass {
-        if opacity(evaluated) > 0.0 { RenderPass::TRANSLUCENT } else { RenderPass::NONE }
+    fn evaluate(_state: &mut ExtrusionState, cx: EvaluateCx<'_, FillExtrusion>) -> Evaluation {
+        if opacity(cx.evaluated) > 0.0 { Evaluation::TRANSLUCENT } else { Evaluation::NONE }
     }
 
     /// Makes the frame's draws of the layer, those of each of its tiles,
@@ -378,7 +374,7 @@ impl LayerType for FillExtrusion {
                 continue;
             };
 
-            let render_data = tile.view_for_pass(RENDER_PASS);
+            let render_data = tile.view_to_draw();
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
                 *entry.value = None;
                 continue;
@@ -405,7 +401,6 @@ impl LayerType for FillExtrusion {
             for (index, draw) in cached.draws.iter().enumerate() {
                 let frame_draw = FrameDraw {
                     priority: draw.priority,
-                    pass: RENDER_PASS,
                     depth: DrawDepth::Volume { mask: DepthMaskType::ReadWrite },
                     clip: draw.clip,
                     ..FrameDraw::new(Some(tile_id), draw.id)

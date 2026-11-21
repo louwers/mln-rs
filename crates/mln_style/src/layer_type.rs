@@ -68,6 +68,10 @@ pub trait PaintSet: Clone + Default + PartialEq + std::fmt::Debug + Wire + Send 
     /// to [`Evaluated`](Self::Evaluated) for a frame.
     type Unevaluated: Clone + Default + std::fmt::Debug + Send + Sync + 'static;
 
+    /// Whether the set has a cross-faded property, whose evaluation takes
+    /// the frame's cross-fade.
+    const CROSSFADES: bool;
+
     /// The set's values, with nothing to transition from.
     fn untransitioned(&self) -> Self::Unevaluated;
 
@@ -124,6 +128,7 @@ impl LayoutSet for NoProperties {
 impl PaintSet for NoProperties {
     type Evaluated = NoProperties;
     type Unevaluated = NoProperties;
+    const CROSSFADES: bool = false;
 
     fn untransitioned(&self) -> NoProperties {
         NoProperties

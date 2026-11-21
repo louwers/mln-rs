@@ -22,14 +22,13 @@ use mln_render::draw::{
     VertexAttributeArray, cast_matrix, copied_vertices, to_projection_ubo,
 };
 use mln_render::layer::{
-    DemContents, DrawContext, EvaluatedLayer, LayerType, LayerValues, NoBucket, NoLayout, RasterLayoutVertex,
-    RenderPass,
+    DemContents, DrawContext, EvaluateCx, Evaluation, LayerType, LayerValues, NoBucket, NoLayout, RasterLayoutVertex,
 };
+use mln_style::StyleValue as _;
 use mln_style::color_ramp_property_value::ColorRampPropertyValue;
 use mln_style::expression::{
     Dependency, EvaluationContext, GlobalStateMap, from_expression_value, global_state_refs_intersect,
 };
-use mln_style::{PropertyEvaluationParameters, StyleValue as _};
 use mln_style_types::ResamplingType;
 use mln_util::Color;
 use mln_util::hash::{HashMap, HashSet};
@@ -277,12 +276,9 @@ impl LayerType for ColorRelief {
         }
     }
 
-    fn complete_evaluation(
-        state: &mut ReliefState,
-        layer: &LayerValues<ColorRelief>,
-        parameters: &PropertyEvaluationParameters,
-        _evaluated: &mut EvaluatedLayer<ColorRelief>,
-    ) {
+    /// Remakes the color ramp where its value may have changed.
+    fn evaluate(state: &mut ReliefState, cx: EvaluateCx<'_, ColorRelief>) -> Evaluation {
+        let (layer, parameters) = (cx.layer, cx.parameters);
         // Build the ramp here rather than in transition(), which has no global
         // state. A new or changed layer always needs one; otherwise only a
         // change to a state key that the ramp reads does.
@@ -303,10 +299,11 @@ impl LayerType for ColorRelief {
         if ramp_affected {
             state.update_color_ramp(layer);
         }
-    }
-
-    fn passes(_layer: &LayerValues<ColorRelief>, evaluated: &EvaluatedLayer<ColorRelief>) -> RenderPass {
-        if *evaluated.paint.color_relief_opacity.uniform() > 0.0 { RenderPass::TRANSLUCENT } else { RenderPass::NONE }
+        if *cx.evaluated.paint.color_relief_opacity.uniform() > 0.0 {
+            Evaluation::TRANSLUCENT
+        } else {
+            Evaluation::NONE
+        }
     }
 
     /// Makes the frame's draws of the layer, those of each of its tiles,

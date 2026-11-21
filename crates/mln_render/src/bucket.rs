@@ -85,6 +85,14 @@ pub trait Bucket: Any + Send + BucketValue {
     /// Whether the bucket has anything to draw. A layout keeps no bucket
     /// without.
     fn has_data(&self) -> bool;
+
+    /// How far above the ground, in meters, the bucket's highest content is
+    /// raised, for a layer whose content elevation
+    /// ([`StyleLayerType::content_elevation`](mln_style::layer_type::StyleLayerType::content_elevation))
+    /// is an expression. The tiles that cover the view reach that high.
+    fn max_elevation(&self) -> f32 {
+        0.0
+    }
 }
 
 impl dyn Bucket {

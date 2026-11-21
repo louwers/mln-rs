@@ -16,11 +16,11 @@ use mln_render::draw::{
     to_projection_ubo,
 };
 use mln_render::layer::{
-    DrawContext, EvaluatedLayer, FeatureQuery, HitTest, LayerBucket, LayerType, LayerValues, LayoutParameters,
-    RenderPass, SourceLayer, UpdateContext,
+    DrawContext, EvaluateCx, EvaluatedLayer, Evaluation, FeatureQuery, HitTest, LayerBucket, LayerType, LayerValues,
+    LayoutParameters, SourceLayer, UpdateContext,
 };
+use mln_style::StyleValue as _;
 use mln_style::expression::{Dependency, EvaluationContext, GlobalStateMap, global_state_refs_intersect};
-use mln_style::{PropertyEvaluationParameters, StyleValue as _};
 use mln_style_types::LineCapType;
 use mln_tile_id::UnwrappedTileID;
 use mln_util::Color;
@@ -66,8 +66,6 @@ pub struct LineTile {
     id: SimpleIdentity,
     objects: DrawObjects,
     line_type: LineType,
-    /// The passes the draw draws in.
-    pass: RenderPass,
     /// The ends of the dashes of the bucket, which pick its dash texture.
     dash_cap: DashCap,
     /// Gives a pattern draw the texture of the tile's icon atlas.
@@ -248,7 +246,6 @@ impl LayerType for Line {
     type View<'a> = LayerBucket<'a, Line>;
     type Drawing = TileDraws<LineTile>;
     type State = LineState;
-    const CROSSFADES: bool = true;
 
     /// Whether a layer of the group has a pattern.
     fn layout_can_need_dependencies(group: &[Arc<EvaluatedLayer<Line>>]) -> bool {
@@ -279,12 +276,9 @@ impl LayerType for Line {
         (state, TileDraws::default())
     }
 
-    fn complete_evaluation(
-        state: &mut LineState,
-        layer: &LayerValues<Line>,
-        parameters: &PropertyEvaluationParameters,
-        _evaluated: &mut EvaluatedLayer<Line>,
-    ) {
+    /// Remakes the gradient's color ramp where its value may have changed.
+    fn evaluate(state: &mut LineState, cx: EvaluateCx<'_, Line>) -> Evaluation {
+        let (layer, parameters) = (cx.layer, cx.parameters);
         // Build the ramp here rather than in transition(), which has no global
         // state. A new or changed layer always needs one; otherwise only a
         // change to a state key that the ramp reads does.
@@ -305,18 +299,15 @@ impl LayerType for Line {
         if ramp_affected {
             state.update_color_ramp(layer);
         }
-    }
-
-    fn passes(_layer: &LayerValues<Line>, evaluated: &EvaluatedLayer<Line>) -> RenderPass {
-        let evaluated = &evaluated.paint;
+        let evaluated = &cx.evaluated.paint;
         if *evaluated.line_layer_opacity.uniform() > 0.0
             && evaluated.line_opacity.constant_or(&1.0) > 0.0
             && evaluated.line_color.constant_or(&Color::black()).a > 0.0
             && evaluated.line_width.constant_or(&1.0) > 0.0
         {
-            RenderPass::TRANSLUCENT
+            Evaluation::TRANSLUCENT
         } else {
-            RenderPass::NONE
+            Evaluation::NONE
         }
     }
 
@@ -341,12 +332,10 @@ impl LayerType for Line {
         frame.set_composite(Composite::of(*paint.line_layer_opacity.uniform(), *paint.line_layer_blend.uniform()));
         frame.set_stencil_tiles(render_tiles.iter().map(|tile| tile.unwrapped_id()));
 
-        // Lines draw only in the translucent pass.
-        let render_pass = cx.layer.evaluated.passes() & RenderPass::TRANSLUCENT;
         for tile in render_tiles {
             let tile_id = tile.id();
 
-            let Some(render_data) = tile.view_for_pass(render_pass) else {
+            let Some(render_data) = tile.view_to_draw() else {
                 drawing.tiles_mut().drop_value(&tile_id);
                 continue;
             };
@@ -363,10 +352,6 @@ impl LayerType for Line {
             let Some(mut entry) = drawing.tiles_mut().entry(&tile_id) else {
                 continue;
             };
-            if entry.value.as_ref().is_some_and(|cached| cached.pass != render_pass) {
-                // The tile's draw was built for other passes.
-                *entry.value = None;
-            }
             // A draw built from another bucket goes.
             entry.set_bucket(bucket.base.id());
 
@@ -383,16 +368,8 @@ impl LayerType for Line {
                 });
                 cached
             } else {
-                let built = state.build_tile(
-                    cx.layer,
-                    cx.projection_variant,
-                    gpu,
-                    context,
-                    render_data,
-                    binders,
-                    evaluated,
-                    render_pass,
-                );
+                let built =
+                    state.build_tile(cx.layer, cx.projection_variant, gpu, context, render_data, binders, evaluated);
                 let Some(cached) = built.and_then(|built| drawing.tiles_mut().insert(&tile_id, built).ok()) else {
                     continue;
                 };
@@ -400,7 +377,7 @@ impl LayerType for Line {
             };
             let tile = tile_id.to_unwrapped();
             if let Some(uniforms) = LineState::uniforms(tile, render_data, binders, cached, &state.dashes, cx) {
-                let draw = FrameDraw { pass: cached.pass, clip: true, ..FrameDraw::new(Some(tile_id), cached.id) };
+                let draw = FrameDraw { clip: true, ..FrameDraw::new(Some(tile_id), cached.id) };
                 state.draw_list.push(draw, uniforms);
             }
         }
@@ -498,7 +475,6 @@ impl LineState {
         tile_bucket: LayerBucket<'_, Line>,
         binders: &LineBinders,
         evaluated: &LinePaintProperties::PossiblyEvaluated,
-        pass: RenderPass,
     ) -> Option<LineTile> {
         let (bucket, geometry) = (tile_bucket.bucket, tile_bucket.geometry());
         let buffer = &binders.interleaved_vertex_buffer;
@@ -573,20 +549,9 @@ impl LineState {
             segments: bucket.segments.clone(),
             instances: None,
         };
-        let color_mode = context.color_mode(if pass == RenderPass::TRANSLUCENT {
-            ColorMode::alpha_blended()
-        } else {
-            ColorMode::unblended()
-        });
+        let color_mode = context.color_mode(ColorMode::alpha_blended());
         let objects = DrawObjects::new(shader, color_mode, CullFaceMode::disabled(), draw_geometry, textures);
-        Some(LineTile {
-            id: SimpleIdentity::new(),
-            objects,
-            line_type,
-            pass,
-            dash_cap: dash_pattern_cap(bucket),
-            atlases,
-        })
+        Some(LineTile { id: SimpleIdentity::new(), objects, line_type, dash_cap: dash_pattern_cap(bucket), atlases })
     }
 
     /// The texture of the color ramp, which every gradient of the layer

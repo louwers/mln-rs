@@ -14,7 +14,6 @@ use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use crate::buckets::debug_bucket::DebugBucket;
 use crate::layer::LayerType;
 use crate::paint_parameters::TransformParameters;
-use crate::render_pass::RenderPass;
 use crate::render_source::RenderTileParameters;
 use crate::tile::contents::Contents;
 use crate::tile::dem::DemContents;
@@ -179,10 +178,10 @@ pub(crate) trait FindView<'a>: Sized {
         true
     }
 
-    /// The passes the bucket was laid out to draw in, which its layer draws
-    /// in too; none for a bucket that isn't laid out.
-    fn passes(self) -> RenderPass {
-        RenderPass::NONE
+    /// Whether the view is a bucket laid out with values that draw, which
+    /// its layer then draws too; false for a view that isn't a bucket.
+    fn draws(self) -> bool {
+        false
     }
 
     /// The index of the bucket among its layout's buckets; `None` for a
@@ -320,10 +319,11 @@ impl<'a, T: LayerType> FrameTile<'a, T> {
         self.view
     }
 
-    /// [`view`](Self::view), if it was laid out to draw in `pass`.
+    /// [`view`](Self::view), if it is a bucket laid out with values that
+    /// draw.
     #[must_use]
-    pub fn view_for_pass(self, pass: RenderPass) -> Option<T::View<'a>> {
-        self.view.filter(|view| view.passes() & pass != RenderPass::NONE)
+    pub fn view_to_draw(self) -> Option<T::View<'a>> {
+        self.view.filter(|view| view.draws())
     }
 
     /// The tile's id.

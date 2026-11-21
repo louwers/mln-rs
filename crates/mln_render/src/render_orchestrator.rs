@@ -456,7 +456,7 @@ impl RenderOrchestrator {
             }
             if frame.opaque_pass_cutoff == 0 {
                 opaque_pass_cutoff_estimation -= 1;
-                if render_layer.is_3d() {
+                if render_layer.volume() {
                     frame.opaque_pass_cutoff = opaque_pass_cutoff_estimation as u32;
                 }
             }
@@ -884,13 +884,11 @@ impl RenderOrchestrator {
                         && !update_parameters.view.is_globe()
                         && !update_parameters.debug_options.contains(MapDebugOptions::OVERDRAW)
                         && layers.first().is_some_and(|first| std::ptr::addr_eq(style, Arc::as_ptr(first.style())))
+                        && let Some(solid_background) = layer.evaluation().solid
                     {
-                        let solid_background = layer.solid_background();
-                        if let Some(solid_background) = solid_background {
-                            frame.background_color = solid_background;
-                            continue; // This layer is shown with background color,
-                            // and it shall not be added to render items.
-                        }
+                        frame.background_color = solid_background;
+                        continue; // This layer is shown with background color,
+                        // and it shall not be added to render items.
                     }
                     frame.layers.entry(index as u32).or_insert_with(|| FrameLayer { source: None });
                     will_render[index] = true;
@@ -1238,7 +1236,7 @@ impl RenderOrchestrator {
             let source_contents = contents.of(source, &self.tile_store);
             let tiles = source.map(|(_, source)| FrameSourceTiles::new(source, source_contents));
             render_layer.update_draws(gpu, paint_parameters, tiles, &self.found_tiles);
-            needs_globe_depth = needs_globe_depth || render_layer.is_3d();
+            needs_globe_depth = needs_globe_depth || render_layer.volume();
         }
         let state = paint_parameters.frame.view;
         let (renderable_size, pixel_ratio) =

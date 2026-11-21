@@ -13,8 +13,8 @@ use mln_render::draw::{
     projection_data, tile_unit_translation, to_projection_ubo,
 };
 use mln_render::layer::{
-    Bucket, DrawContext, EvaluatedLayer, FeatureQuery, HitTest, LayerBucket, LayerType, LayerValues, LayoutParameters,
-    RenderPass, SourceLayer,
+    Bucket, DrawContext, EvaluateCx, EvaluatedLayer, Evaluation, FeatureQuery, HitTest, LayerBucket, LayerType,
+    LayerValues, LayoutParameters, SourceLayer,
 };
 use mln_style::expression::EvaluationContext;
 use mln_style_types::{AlignmentType, CirclePitchScaleType};
@@ -28,9 +28,6 @@ use super::programs::{DRAWABLE, ID_CIRCLE_POS_VERTEX_ATTRIBUTE, PROPS};
 use super::ubo::{CircleDrawableUBO, CircleEvaluatedPropsUBO};
 use super::{Circle, programs};
 use crate::refresh_paint_attributes;
-
-/// The pass the layer's draws draw in.
-const RENDER_PASS: RenderPass = RenderPass::TRANSLUCENT;
 
 // query
 fn project_point(
@@ -162,17 +159,17 @@ impl LayerType for Circle {
         Default::default()
     }
 
-    fn passes(_layer: &LayerValues<Circle>, evaluated: &EvaluatedLayer<Circle>) -> RenderPass {
-        let evaluated = &evaluated.paint;
+    fn evaluate(_state: &mut CircleState, cx: EvaluateCx<'_, Circle>) -> Evaluation {
+        let evaluated = &cx.evaluated.paint;
         if (evaluated.circle_radius.constant_or(&1.0) > 0.0 || evaluated.circle_stroke_width.constant_or(&1.0) > 0.0)
             && (evaluated.circle_color.constant_or(&Color::black()).a > 0.0
                 || evaluated.circle_stroke_color.constant_or(&Color::black()).a > 0.0)
             && (evaluated.circle_opacity.constant_or(&1.0) > 0.0
                 || evaluated.circle_stroke_opacity.constant_or(&1.0) > 0.0)
         {
-            RenderPass::TRANSLUCENT
+            Evaluation::TRANSLUCENT
         } else {
-            RenderPass::NONE
+            Evaluation::NONE
         }
     }
 
@@ -195,7 +192,7 @@ impl LayerType for Circle {
                 continue;
             };
 
-            let render_data = tile.view_for_pass(RENDER_PASS);
+            let render_data = tile.view_to_draw();
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
                 *entry.value = None;
                 continue;

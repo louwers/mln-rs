@@ -16,10 +16,10 @@
 use std::sync::Arc;
 
 use mln_gfx::gpu::Gpu;
-use mln_render::draw::{Context, DrawGroup, DrawOrder, LayerDrawing, PaintParameters, TileMap};
+use mln_render::draw::{Context, DrawGroup, DrawOrder, LayerDrawing, PaintParameters, RenderPass, TileMap};
 use mln_render::layer::{
-    DrawContext, EndedHost, EvaluatedLayer, LayerHost, LayerType, LayerValues, NoBucket, NoLayout, NoTileView,
-    OffscreenPass, RenderPass,
+    DrawContext, EndedHost, EvaluateCx, Evaluation, LayerHost, LayerType, LayerValues, NoBucket, NoLayout, NoTileView,
+    OffscreenPass,
 };
 use mln_util::logging::{Event, Log};
 
@@ -118,10 +118,10 @@ impl LayerType for Custom {
         ((), drawing)
     }
 
-    /// The layer has no properties: it only keeps drawing in the
-    /// translucent pass.
-    fn passes(_layer: &LayerValues<Custom>, _evaluated: &EvaluatedLayer<Custom>) -> RenderPass {
-        RenderPass::TRANSLUCENT
+    /// The layer has no properties: it always draws, in the translucent
+    /// pass.
+    fn evaluate((): &mut (), _cx: EvaluateCx<'_, Custom>) -> Evaluation {
+        Evaluation::TRANSLUCENT
     }
 
     /// The layer's draws are what its host draws, in its draw group.

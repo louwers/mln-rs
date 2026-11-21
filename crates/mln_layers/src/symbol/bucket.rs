@@ -771,6 +771,10 @@ impl Bucket for SymbolBucket {
             || self.has_text_collision_circle_data()
     }
 
+    fn max_elevation(&self) -> f32 {
+        self.max_height_offset
+    }
+
     fn update(
         &mut self,
         states: &FeatureStates,

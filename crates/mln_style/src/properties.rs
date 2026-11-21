@@ -233,6 +233,24 @@ macro_rules! __property_evaluation {
     };
 }
 
+/// Whether a property kind cross-fades.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __property_crossfades {
+    (cross_faded) => {
+        true
+    };
+    (cross_faded_data_driven) => {
+        true
+    };
+    (cross_faded_or_data_driven) => {
+        true
+    };
+    ($kind:ident) => {
+        false
+    };
+}
+
 /// Whether a property kind may differ by feature.
 #[doc(hidden)]
 #[macro_export]
@@ -281,8 +299,9 @@ macro_rules! __property_data_driven {
 /// The module holds `Defaults`, with a function per property that returns
 /// its default, and the set at each stage:
 /// - A `paint` set transitions. `Transitionable` holds the values as the
-///   style sets them and is the set's [`PaintSet`](crate::layer_type::PaintSet);
-///   `Unevaluated` transitions from earlier values, and `PossiblyEvaluated`
+///   style sets them and is the set's [`PaintSet`](crate::layer_type::PaintSet),
+///   which [`CROSSFADES`](crate::layer_type::PaintSet::CROSSFADES) where a
+///   property's kind cross-fades; `Unevaluated` transitions from earlier values, and `PossiblyEvaluated`
 ///   holds an [`Evaluated`] per property.
 /// - A `layout` set doesn't. `Unevaluated` holds the style's values and is
 ///   the set's [`LayoutSet`](crate::layer_type::LayoutSet);
@@ -380,6 +399,9 @@ macro_rules! properties {
             impl $crate::layer_type::PaintSet for Transitionable {
                 type Evaluated = PossiblyEvaluated;
                 type Unevaluated = Unevaluated;
+                const CROSSFADES: bool = false
+                    $(|| $crate::__property_crossfades!($kind))+
+                    $($(|| $crate::__property_crossfades!($dkind))+)?;
 
                 fn untransitioned(&self) -> Unevaluated {
                     Transitionable::untransitioned(self)

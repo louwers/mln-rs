@@ -28,8 +28,8 @@ use mln_render::draw::{
     projection_data, to_projection_ubo,
 };
 use mln_render::layer::{
-    DemContents, DrawContext, EvaluatedLayer, LayerType, LayerValues, NoBucket, NoLayout, OffscreenPass,
-    RasterLayoutVertex, RenderPass, UpdateContext,
+    DemContents, DrawContext, EvaluateCx, EvaluatedLayer, Evaluation, LayerType, LayerValues, NoBucket, NoLayout,
+    OffscreenPass, RasterLayoutVertex, UpdateContext,
 };
 use mln_style_types::{HillshadeIlluminationAnchorType, HillshadeMethodType, ResamplingType, TranslateAnchorType};
 use mln_tile_id::UnwrappedTileID;
@@ -261,8 +261,12 @@ impl LayerType for Hillshade {
         }
     }
 
-    fn passes(_layer: &LayerValues<Hillshade>, evaluated: &EvaluatedLayer<Hillshade>) -> RenderPass {
-        if *evaluated.paint.hillshade_exaggeration.uniform() > 0.0 { RenderPass::TRANSLUCENT } else { RenderPass::NONE }
+    fn evaluate(_state: &mut HillshadeState, cx: EvaluateCx<'_, Hillshade>) -> Evaluation {
+        if *cx.evaluated.paint.hillshade_exaggeration.uniform() > 0.0 {
+            Evaluation::TRANSLUCENT
+        } else {
+            Evaluation::NONE
+        }
     }
 
     /// Makes the render target of each DEM it has none of, which prepares

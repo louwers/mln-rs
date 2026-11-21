@@ -59,6 +59,7 @@ pub use crate::layer_drawing::{
 };
 pub use crate::paint_parameters::{DrawFrame, PaintParameters};
 pub use crate::render_light::EvaluatedLight;
+pub use crate::render_pass::RenderPass;
 pub use crate::render_static_data::RenderStaticData;
 pub use crate::render_target::{RenderTarget, TargetPasses};
 pub use crate::tile_matrix::{

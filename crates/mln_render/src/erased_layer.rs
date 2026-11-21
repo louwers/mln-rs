@@ -24,7 +24,6 @@ use crate::layout::layout::{BuildParams, Layout, LayoutParameters, SourceLayer};
 use crate::layout::tile_layout::{Built, Resolved};
 use crate::placement::{self, ErasedPlacement};
 use crate::render_layer::{Layer, RenderLayer};
-use crate::render_pass::RenderPass;
 
 /// The values of a layer of the type `T` for a frame.
 pub struct EvaluatedLayer<T: LayerType> {
@@ -34,17 +33,12 @@ pub struct EvaluatedLayer<T: LayerType> {
     pub paint: <T::PaintProperties as PaintSet>::Evaluated,
     /// The default for a type without cross-faded properties.
     pub crossfade: CrossfadeParameters,
-    /// The passes the layer draws in.
-    pub(crate) render_passes: RenderPass,
+    /// Whether the layer draws with these values
+    /// ([`Evaluation::draws`](crate::layer::Evaluation::draws)).
+    pub(crate) draws: bool,
 }
 
 impl<T: LayerType> EvaluatedLayer<T> {
-    /// The render passes the layer draws in.
-    #[must_use]
-    pub fn passes(&self) -> RenderPass {
-        self.render_passes
-    }
-
     /// `layer` as a `T` layer's values, the same allocation, or `None` for
     /// another type's.
     pub(crate) fn recover(layer: &Arc<dyn ErasedEvaluatedLayer>) -> Option<Arc<Self>> {
@@ -53,16 +47,16 @@ impl<T: LayerType> EvaluatedLayer<T> {
     }
 
     /// The values of the layer `style` before its first evaluation: its
-    /// paint properties' defaults, in no pass.
+    /// paint properties' defaults, not drawing.
     #[must_use]
     pub(crate) fn new(style: Arc<LayerStyle<T>>) -> Self {
         EvaluatedLayer::with_paint(style, Default::default())
     }
 
     /// The values of the layer `style` with its paint properties evaluated
-    /// to `paint`, without a cross-fade or render passes.
+    /// to `paint`, without a cross-fade, not drawing.
     pub(crate) fn with_paint(style: Arc<LayerStyle<T>>, paint: <T::PaintProperties as PaintSet>::Evaluated) -> Self {
-        EvaluatedLayer { style, paint, crossfade: CrossfadeParameters::default(), render_passes: RenderPass::NONE }
+        EvaluatedLayer { style, paint, crossfade: CrossfadeParameters::default(), draws: false }
     }
 }
 
@@ -71,7 +65,7 @@ impl<T: LayerType> std::fmt::Debug for EvaluatedLayer<T> {
         f.debug_struct("EvaluatedLayer")
             .field("type", &T::INFO.name)
             .field("id", &self.style.id)
-            .field("render_passes", &self.render_passes)
+            .field("draws", &self.draws)
             .finish_non_exhaustive()
     }
 }
@@ -129,7 +123,7 @@ impl<T: LayerType> ErasedEvaluatedLayer for EvaluatedLayer<T> {
         shared::write::<SharedLayer>(&self.shared_style(), w);
         self.paint.write(w);
         self.crossfade.write(w);
-        self.render_passes.write(w);
+        self.draws.write(w);
     }
 }
 
@@ -166,9 +160,6 @@ pub(crate) trait ErasedLayerType: ErasedStyleLayerType {
     /// 0 for a type whose features no query hits, or a bucket or layer of
     /// another type.
     fn query_radius(&self, bucket: &dyn Bucket, layer: &Arc<dyn ErasedEvaluatedLayer>) -> f32;
-
-    /// [`LayerType::max_content_elevation`]; 0 for a bucket of another type.
-    fn max_content_elevation(&self, bucket: &dyn Bucket) -> f32;
 
     /// Whether the type's layers place ([`LayerType::PLACEMENT`]).
     fn places(&self) -> bool;
@@ -211,10 +202,6 @@ impl<T: LayerType> ErasedLayerType for LayerTypeEntry<T> {
         }
     }
 
-    fn max_content_elevation(&self, bucket: &dyn Bucket) -> f32 {
-        recover_bucket::<T>(bucket).map_or(0.0, T::max_content_elevation)
-    }
-
     fn places(&self) -> bool {
         T::PLACEMENT.is_some()
     }
@@ -232,7 +219,7 @@ impl<T: LayerType> ErasedLayerType for LayerTypeEntry<T> {
             style,
             paint: Wire::read(r)?,
             crossfade: Wire::read(r)?,
-            render_passes: Wire::read(r)?,
+            draws: Wire::read(r)?,
         }))
     }
 
@@ -327,7 +314,7 @@ mod tests {
         let paint = TintPaintProperties::PossiblyEvaluated { tint_opacity: Evaluated::Constant(0.5) };
         let style = Arc::new(LayerStyle::<Tint>::new("tint".to_owned(), "source".to_owned()));
         let crossfade = CrossfadeParameters { from_scale: 2.0, to_scale: 1.0, t: 0.25 };
-        Arc::new(EvaluatedLayer { style, paint, crossfade, render_passes: RenderPass::NONE })
+        Arc::new(EvaluatedLayer { style, paint, crossfade, draws: false })
     }
 
     #[test]

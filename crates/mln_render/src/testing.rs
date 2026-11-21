@@ -71,7 +71,7 @@ pub fn upload_vertices(
 }
 
 /// The values of the layer `style` with its paint properties evaluated to
-/// `paint`, without a cross-fade or render passes.
+/// `paint`, without a cross-fade, not drawing.
 #[must_use]
 pub fn evaluated_layer<T: LayerType>(
     style: Arc<LayerStyle<T>>,

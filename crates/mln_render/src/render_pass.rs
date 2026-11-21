@@ -1,8 +1,8 @@
 use std::ops::{BitAnd, BitOr, BitOrAssign};
 
-/// The render passes a layer draws in. A bitmask (`OPAQUE | TRANSLUCENT` is a
+/// The render passes a draw draws in. A bitmask (`OPAQUE | TRANSLUCENT` is a
 /// valid value), so a newtype rather than a Rust enum.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, mln_wire::Wire)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct RenderPass(u8);
 
 impl RenderPass {
