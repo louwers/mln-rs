@@ -542,6 +542,30 @@ fn a_command_that_completes_ends_at_the_camera_it_asked_for() {
     }
 }
 
+/// An anchored zoom over a slope that a DEM's rounding leaves rough by a
+/// fraction of a millimeter, over which its end can't be solved to a
+/// micrometer, ends at the zoom it asked for, with the ground it grabbed
+/// under its anchor and its center on the ground.
+#[test]
+fn an_anchored_zoom_on_rough_ground_ends_where_it_asked() {
+    let ground: Arc<dyn Elevation> = Arc::new(Incline { height: 1000.0, east: 0.25, north: 0.1, rough: 5e-5 });
+    for anchor in [(120.0, 400.0), (400.0, 300.0), (60.0, 480.0), (256.0, 450.0), (450.0, 200.0)] {
+        let anchor = ScreenCoordinate::new(anchor.0, anchor.1);
+        let what = format!("around {anchor:?}");
+        let run_loop = Queue::<()>::new();
+        let (mut map, clock) = map_over(Some(&ground), &run_loop);
+        let grabbed = ground_under(map.transform_state().view(), &*ground, anchor);
+        let camera = CameraOptions { zoom: Some(13.0), anchor: Some(anchor), ..Default::default() };
+        run(&mut map, CameraUpdateMode::Ease, camera, eased());
+        frames(&mut map, clock, Duration::from_secs(1), |_, _| {});
+        let view = map.transform_state().view().clone();
+        assert_eq!(13.0, view.zoom(), "{what}: the zoom it asked for");
+        assert_holds(&view, grabbed, anchor, &what);
+        assert_on_ground(&view, &*ground, &what);
+        assert_at_rest(&mut map, &what);
+    }
+}
+
 /// A transform under [`ConstrainMode::Screen`], 512 by 512, over ground
 /// that rises to the north, whose bounds end 3 km north of the start: at
 /// rest at the start at zoom 13, pitched 50 degrees.

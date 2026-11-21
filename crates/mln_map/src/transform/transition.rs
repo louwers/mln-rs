@@ -13,7 +13,7 @@ use mln_util::logging::{Event, Log};
 use mln_util::time::Instant;
 
 use super::momentum::MomentumState;
-use super::terrain::{EasedAltitude, sees_plane};
+use super::terrain::{EasedAltitude, ON_GROUND_TOLERANCE, sees_plane};
 use super::{
     ALTITUDE, BEARING, CENTER, CameraCommandId, CommandEnd, FOV, PADDING, PITCH, ROLL, Transform, TransformEvent, ZOOM,
     altitude_pixels, camera_fields, max_pitch_for_padding, set_altitude_pixels,
@@ -253,7 +253,7 @@ fn place(state: &mut TransformState, current: &CameraOptions, camera: &mut Camer
 }
 
 /// How many times an anchored command's end is solved, at most, and how far
-/// off the ground there, in meters, its center may end (see
+/// off the ground there, in meters, the solve aims its center to end (see
 /// [`anchored_end`]).
 const ANCHORED_END_SOLVES: usize = 8;
 const ANCHORED_END_TOLERANCE: f64 = 1e-6;
@@ -296,10 +296,13 @@ fn anchored_end_at(
 /// there, which it ends at: the end at an altitude ([`anchored_end_at`])
 /// depends on the altitude, which is the ground at the end. The two are
 /// solved together, by the secant method from the altitude now, until the
-/// end stands within [`ANCHORED_END_TOLERANCE`] of the ground under it.
-/// `None` where they don't converge within [`ANCHORED_END_SOLVES`], or the
-/// ground at an end tried is unknown: no altitude is known to end where the
-/// anchor puts the center.
+/// end stands within [`ANCHORED_END_TOLERANCE`] of the ground under it, or
+/// for at most [`ANCHORED_END_SOLVES`] ends, or until the ground at an end
+/// tried is unknown. It gives the end that stood nearest the ground, where
+/// that is within the bound a camera at rest stands on the ground by
+/// ([`ON_GROUND_TOLERANCE`]); the command's last frame takes up the rest in
+/// altitude. `None` where no end tried is that near: no altitude is known
+/// to end where the anchor puts the center.
 fn anchored_end(
     state: &TransformState,
     ground: &dyn Elevation,
@@ -308,17 +311,19 @@ fn anchored_end(
     location: &LatLng,
     height: f64,
 ) -> Option<(LatLng, f64)> {
-    let end_at = |altitude: f64| {
-        let end = anchored_end_at(state, camera, anchor, location, height, altitude);
-        Some((end, ground.at(end)?))
-    };
     let mut altitude = state.view().center_altitude();
     let mut last: Option<(f64, f64)> = None;
+    // The end nearest the ground so far, and how far off it that stood.
+    let mut best: Option<((LatLng, f64), f64)> = None;
     for _ in 0..ANCHORED_END_SOLVES {
-        let (end, at_end) = end_at(altitude)?;
+        let end = anchored_end_at(state, camera, anchor, location, height, altitude);
+        let Some(at_end) = ground.at(end) else { break };
         let off = at_end - altitude;
+        if best.is_none_or(|(_, best_off)| off.abs() < best_off) {
+            best = Some(((end, at_end), off.abs()));
+        }
         if off.abs() <= ANCHORED_END_TOLERANCE {
-            return Some((end, at_end));
+            break;
         }
         // The first step goes to the ground found; the next ones follow the
         // line through the last two.
@@ -329,12 +334,12 @@ fn anchored_end(
             _ => at_end,
         };
         if !next.is_finite() {
-            return None;
+            break;
         }
         last = Some((altitude, off));
         altitude = next;
     }
-    None
+    best.filter(|&(_, off)| off <= ON_GROUND_TOLERANCE).map(|(end, _)| end)
 }
 
 /// A command made of several transitions, which ends once with the

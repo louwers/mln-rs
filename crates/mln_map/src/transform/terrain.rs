@@ -62,11 +62,13 @@ use super::{Transform, flip_y};
 /// part of it under the ground.
 const MAX_EYE_RAISES: usize = 3;
 
-/// How many times the end of a motion moves the center onto the ground, and
-/// how far off the ground, in meters, a center at rest may stand without
-/// it (GL JS's `recenterOnTerrain`).
+/// How many times the end of a motion moves the center onto the ground (GL
+/// JS's `recenterOnTerrain`).
 const RECENTER_PASSES: usize = 3;
-const RECENTER_TOLERANCE: f64 = 1e-4;
+
+/// How far off the ground, in meters, a center may stand and count as on it
+/// as a motion ends.
+pub(super) const ON_GROUND_TOLERANCE: f64 = 1e-4;
 
 /// How near the view's center, in squared pixels, an anchor stands at it:
 /// a move around it leaves the center where it is (GL JS's).
@@ -304,7 +306,7 @@ impl Transform {
     /// After a command that `completed`, the camera stays where it asked to
     /// be, and the ground under its center takes it up or down, as at rest.
     /// After anything else, a center that stands farther off the loaded
-    /// ground under it than [`RECENTER_TOLERANCE`] moves along the view
+    /// ground under it than [`ON_GROUND_TOLERANCE`] moves along the view
     /// onto the ground its line of sight meets, with the eye where it is
     /// ([`TransformState::recenter_on`], GL JS's `recenterOnTerrain`), and
     /// then stands on the ground as at rest; where the line meets no drawn
@@ -325,7 +327,7 @@ impl Transform {
         }
         let view = self.view();
         let ground = elevation.at(view.center(WrapMode::Wrapped));
-        if !ground.is_some_and(|ground| (view.center_altitude() - ground).abs() > RECENTER_TOLERANCE) {
+        if !ground.is_some_and(|ground| (view.center_altitude() - ground).abs() > ON_GROUND_TOLERANCE) {
             return false;
         }
         let elevation = Arc::clone(elevation);
@@ -343,7 +345,7 @@ impl Transform {
             let view = self.view();
             let at = world_point(&view.center(WrapMode::Unwrapped));
             let off = elevation.surface_at(at).map_or(0.0, |surface| view.center_altitude() - surface);
-            if off.abs() <= RECENTER_TOLERANCE {
+            if off.abs() <= ON_GROUND_TOLERANCE {
                 break;
             }
         }
