@@ -694,12 +694,20 @@ pub(crate) fn reproject_line_labels(
             continue;
         }
 
-        let perspective_ratio = 0.5 + 0.5 * (anchor.signed_distance_from_camera as f32 / camera_to_center);
-        let font_size = evaluate_size_for_feature(&sizes, symbol);
-        let font_size = if alignment.pitch_with_map {
-            font_size * perspective_ratio * tile_projector.pitched_text_correction(&tile_anchor) as f32
+        // The shaders scale the glyphs by the anchor's perspective ratio, so
+        // they are spaced along the line by it too.
+        let camera_to_anchor = anchor.signed_distance_from_camera as f32;
+        let distance_ratio = if alignment.pitch_with_map {
+            camera_to_anchor / camera_to_center
         } else {
-            font_size / perspective_ratio
+            camera_to_center / camera_to_anchor
+        };
+        let perspective_ratio = (0.5 + 0.5 * distance_ratio).clamp(0.0, 4.0);
+        let font_size = evaluate_size_for_feature(&sizes, symbol) * perspective_ratio;
+        let font_size = if alignment.pitch_with_map {
+            font_size * tile_projector.pitched_text_correction(&tile_anchor) as f32
+        } else {
+            font_size
         };
 
         let mut label = placer.begin(LineLabel::new(symbol, pools), font_size, height);
@@ -979,6 +987,29 @@ mod tests {
         };
         assert!((font_size - size_at(2500.0)).abs() < 1e-3 * font_size, "{font_size} px, {} px", size_at(2500.0));
         assert!((size_at(2500.0) - size_at(0.0)).abs() > 0.05 * font_size, "sea level gives {} px", size_at(0.0));
+    }
+
+    /// A viewport-pitched label along a line away from the view's center is
+    /// spaced by the size its glyphs draw at, which the shaders scale by
+    /// 0.5 + 0.5 × the camera's distance to the center over its distance to
+    /// the anchor.
+    #[test]
+    fn a_viewport_label_is_spaced_by_the_size_its_glyphs_draw_at() {
+        let tile = terrain_tile();
+        let view = terrain_view(12.5);
+        let projector = TileProjector::new(&view, &tile.to_unwrapped());
+        // Below the view's center, nearer the camera.
+        let anchor = Vec2::new(4100.0, 7200.0);
+        let (symbol, pools) = line_label(anchor, &[Point::new(1000, 7200), Point::new(7000, 7200)], &[-40.0, 40.0]);
+        let alignment = LineLabelAlignment { pitch_with_map: false, rotate_with_map: true, keep_upright: false };
+        let glyphs = reprojected(&symbol, &pools, &projector, SymbolElevation::default(), alignment);
+        let [Some(first), Some(last)] = glyphs[..] else { panic!("both glyphs show: {glyphs:?}") };
+        let font_size = first.distance(last) / 80.0 * 24.0;
+
+        let camera_to_anchor = seen_at(&projector, anchor, 0.0).1 / view.camera_to_center_distance();
+        let drawn = 24.0 * (0.5 + 0.5 / camera_to_anchor) as f32;
+        assert!((font_size - drawn).abs() < 1e-3 * drawn, "{font_size} px, drawn at {drawn} px");
+        assert!(camera_to_anchor < 0.8, "{camera_to_anchor} of the camera's distance to the center");
     }
 
     /// A label whose anchor would be more than 256 px off screen at sea
