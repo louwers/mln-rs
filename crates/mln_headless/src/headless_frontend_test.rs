@@ -589,7 +589,8 @@ impl mln_storage::FileSource for HeldDem {
 fn held_dem_map(mode: MapMode, size: Size, pool: &Pool) -> (Map, Arc<HeldDem>) {
     let dem = Arc::new(HeldDem::default());
     let options = MapOptions { map_mode: mode, size, ..Default::default() };
-    let mut map = Map::with_file_source(Arc::<HeldDem>::clone(&dem) as _, options, pool).unwrap();
+    let file_source: Arc<dyn mln_storage::FileSource> = Arc::<HeldDem>::clone(&dem);
+    let mut map = Map::with_file_source(file_source, options, pool).unwrap();
     map.load_style_json(HELD_DEM_STYLE);
     map.process_events();
     let world = |location: &mln_util::geo::LatLng| {

@@ -380,7 +380,7 @@ impl RenderTerrain {
         }
         // The map answers the ground it was told of with an update that
         // carries it, so a held gesture's camera comes to stand on it.
-        alike && (!parameters.camera_moving || seen.is_some_and(|seen| std::ptr::addr_eq(seen, &**drawn)))
+        alike && (!parameters.camera_moving || seen.is_some_and(|seen| std::ptr::addr_eq(seen, &raw const **drawn)))
     }
 
     /// How the surface of the last update's cover draws.
