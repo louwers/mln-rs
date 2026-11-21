@@ -172,6 +172,7 @@ fn a_frame_waiting_for_a_placement_asks_for_no_update_until_then() {
     map.drain_events();
     let frame = |map: &Map, repaint_at| RendererEvent::RenderFrameFinished {
         mode: mln_renderer::RenderMode::Full,
+        complete: true,
         needs_repaint: false,
         repaint_at,
         placement_changed: false,
@@ -225,6 +226,7 @@ fn a_frame_report_adds_no_update_while_the_frame_clock_samples_an_animation() {
     });
     let frame = |map: &Map| RendererEvent::RenderFrameFinished {
         mode: mln_renderer::RenderMode::Full,
+        complete: true,
         needs_repaint: false,
         repaint_at: None,
         placement_changed: false,
@@ -346,6 +348,7 @@ fn a_still_image_completes_with_a_full_frame() {
     let stats = Arc::default();
     let frame = |mode, still_image_request_id| RendererEvent::RenderFrameFinished {
         mode,
+        complete: mode == mln_renderer::RenderMode::Full,
         needs_repaint: false,
         repaint_at: None,
         placement_changed: false,
@@ -377,10 +380,11 @@ fn a_still_image_completes_with_a_full_frame() {
 
 /// The report of a frame of `map`'s latest update, of the still image
 /// `still_image_request_id`, or of none with 0, that failed on the GPU with
-/// `message`, if it did.
+/// `message`, if it did, and was complete but for that.
 fn failed_frame(map: &Map, still_image_request_id: u64, message: Option<&str>) -> RendererEvent {
     RendererEvent::RenderFrameFinished {
         mode: if message.is_some() { mln_renderer::RenderMode::Partial } else { mln_renderer::RenderMode::Full },
+        complete: true,
         needs_repaint: false,
         repaint_at: None,
         placement_changed: false,
@@ -435,8 +439,10 @@ fn a_failed_frame_fails_only_the_still_image_it_was_drawn_for() {
 
 /// A continuous map whose frames keep failing reports the first failure
 /// only, asks for no frame at once and isn't idle; it draws again once a
-/// delay passes, a longer one after each failure in a row, up to a second.
-/// Once a frame draws, the next failure is reported again.
+/// delay passes, as long as its frames have failed and at least 100 ms.
+/// Once they have failed for a second, it draws again only when something
+/// else draws a frame, and a failed frame complete but for its failure
+/// leaves it idle. Once a frame draws, the next failure is reported again.
 #[test]
 fn a_continuous_map_reports_failures_in_a_row_once_and_draws_again_later() {
     let run_loop = Queue::<()>::new();
@@ -444,32 +450,66 @@ fn a_continuous_map_reports_failures_in_a_row_once_and_draws_again_later() {
     map.load_style_json(STYLE);
     map.process_events();
     map.drain_events();
+    let idle = |events: &[MapEvent]| events.iter().any(|event| matches!(event, MapEvent::Idle));
     let mut errors = Vec::new();
-    let mut delays = Vec::new();
-    for _ in 0..8 {
+    let start = Instant::now();
+    // Reports a failed frame, and returns when the map draws again on its
+    // own, from a little before the report.
+    let mut fail = |map: &mut Map, frame: &dyn Fn(&Map) -> RendererEvent| {
         let updates = map.update_generation();
         let before = Instant::now();
-        report(&map, failed_frame(&map, 0, Some("the GPU failed")));
+        report(map, frame(map));
         map.process_events();
-        assert_eq!(map.update_generation(), updates, "a failed frame asked for the next at once");
         let events = map.drain_events();
-        assert!(!events.iter().any(|event| matches!(event, MapEvent::Idle)), "idle after a failed frame");
         errors.extend(render_errors(&events));
-        delays.push(map.repaint_at().expect("a failed frame draws again later") - before);
+        (map.update_generation() != updates, idle(&events), map.repaint_at().map(|at| at - before))
+    };
+    let failed = |map: &Map| failed_frame(map, 0, Some("the GPU failed"));
+    let retry = |delay: Option<Duration>| delay.expect("a failed frame draws again later");
+    for _ in 0..3 {
+        let (asked, went_idle, delay) = fail(&mut map, &failed);
+        assert!(!asked && !went_idle, "a failed frame asked for the next at once, or left the map idle");
+        assert!(retry(delay) >= Duration::from_millis(100) && retry(delay) < Duration::from_millis(400));
         map.trigger_repaint();
     }
+    std::thread::sleep(Duration::from_millis(300));
+    let (asked, went_idle, delay) = fail(&mut map, &failed);
+    assert!(!asked && !went_idle);
+    let failing = start.elapsed();
+    assert!(
+        retry(delay) >= Duration::from_millis(300) && retry(delay) <= failing + Duration::from_millis(50),
+        "{delay:?}"
+    );
+    map.trigger_repaint();
+
+    // The failure lasts. A failed frame still to load leaves the map
+    // waiting; one with something to draw again asks for it; one complete
+    // but for its failure leaves it idle, and it draws again on its own no
+    // more.
+    std::thread::sleep(Duration::from_secs(1));
+    let with = |complete: bool, repaint: bool| {
+        move |map: &Map| {
+            let mut frame = failed(map);
+            if let RendererEvent::RenderFrameFinished { complete: c, needs_repaint, .. } = &mut frame {
+                (*c, *needs_repaint) = (complete, repaint);
+            }
+            frame
+        }
+    };
+    assert_eq!((false, false, None), fail(&mut map, &with(false, false)));
+    assert_eq!((true, false, None), fail(&mut map, &with(true, true)));
+    assert_eq!((false, true, None), fail(&mut map, &failed));
+    map.trigger_repaint();
+    assert_eq!((false, true, None), fail(&mut map, &failed));
     assert_eq!(vec!["the GPU failed".to_owned()], errors);
-    // Each delay is measured from a little before the frame's report.
-    let slack = Duration::from_millis(50);
-    assert!(delays.windows(2).all(|pair| pair[0] <= pair[1] + slack), "{delays:?}");
-    assert!(delays[0] < Duration::from_millis(500), "{delays:?}");
-    assert!(delays[7] > delays[0] && delays[7] <= Duration::from_secs(1) + slack, "{delays:?}");
 
     report(&map, failed_frame(&map, 0, None));
     map.process_events();
     let events = map.drain_events();
-    assert!(events.iter().any(|event| matches!(event, MapEvent::Idle)), "{events:?}");
+    assert!(idle(&events), "{events:?}");
     report(&map, failed_frame(&map, 0, Some("again")));
     map.process_events();
-    assert_eq!(vec!["again".to_owned()], render_errors(&map.drain_events()));
+    let events = map.drain_events();
+    assert_eq!(vec!["again".to_owned()], render_errors(&events));
+    assert!(!idle(&events) && map.repaint_at().is_some(), "a new run of failures draws again on its own");
 }

@@ -248,6 +248,7 @@ fn latest_update(map: &Map) -> u64 {
 fn frame(mode: RenderMode, still_image_request_id: u64, update_id: u64) -> RendererEvent {
     RendererEvent::RenderFrameFinished {
         mode,
+        complete: mode == RenderMode::Full,
         needs_repaint: false,
         repaint_at: None,
         placement_changed: false,

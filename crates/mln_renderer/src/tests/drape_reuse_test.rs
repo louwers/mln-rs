@@ -280,6 +280,8 @@ struct DrapedMap {
     camera_moving: bool,
     /// Whether the last frame asked for another.
     needs_repaint: bool,
+    /// Whether the last frame failed on the GPU.
+    failed: bool,
     /// The ground the renderer last told of, which the updates carry, as a
     /// map's do.
     elevation: Option<Arc<dyn Elevation>>,
@@ -362,6 +364,7 @@ impl DrapedMap {
             transform,
             camera_moving: false,
             needs_repaint: false,
+            failed: false,
             elevation: None,
             drape_byte_cap: None,
             fail: None,
@@ -435,11 +438,13 @@ impl DrapedMap {
         }
         let mut full = false;
         self.needs_repaint = false;
+        self.failed = false;
         for event in self.events.take() {
             match event {
-                RendererEvent::RenderFrameFinished { mode, needs_repaint, .. } => {
+                RendererEvent::RenderFrameFinished { mode, needs_repaint, error, .. } => {
                     full = mode == RenderMode::Full;
                     self.needs_repaint = needs_repaint;
+                    self.failed = error.is_some();
                 }
                 RendererEvent::TerrainElevation(elevation) => self.elevation = elevation,
                 RendererEvent::TileAction { op, id, source_id } => self.work.record(op, (source_id, id)),
@@ -1166,15 +1171,15 @@ fn a_byte_cap_holds_while_drapes_wait_to_grow_alone_at_their_side() {
 }
 
 /// A frame in which drapes fail to draw, drawn from their key or again at a
-/// new side only, is incomplete and asks for the next, which draws them.
+/// new side only, fails, and the next draws them.
 #[test]
-fn a_frame_whose_drapes_fail_to_draw_asks_for_the_next_which_draws_them() {
+fn a_frame_whose_drapes_fail_to_draw_fails_and_the_next_draws_them() {
     let (mut map, drapes) = settled(Tiles::default());
     let fails_then_draws = |map: &mut DrapedMap| {
         map.fail = Some(Fail::DrapePasses);
         let (full, drawn) = map.frame();
         assert!(drawn.is_empty(), "drapes drawn: {drawn:?}");
-        assert!(!full && map.needs_repaint, "a frame whose drapes failed to draw is done");
+        assert!(!full && map.failed, "a frame whose drapes failed to draw is done");
         map.fail = None;
         let (full, drawn) = map.frame();
         assert!(full && !map.needs_repaint);

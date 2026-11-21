@@ -108,6 +108,8 @@ pub struct DrawnFrame {
     /// Whether the host hands the frame off ([`DrawnFrame::presentable`]).
     presentable: bool,
     mode: RenderMode,
+    /// Whether the frame would be `Full` but for its failure.
+    complete: bool,
     needs_repaint: bool,
     /// When the frame's placement wants the next frame, if it does.
     repaint_at: Option<Instant>,
@@ -708,8 +710,8 @@ impl Encoder {
         });
         let mut drew = draw(orchestrator, gpu, &mut parameters, &frame, image, draw_groups.count, depth_range_size);
         orchestrator.terrain().count(parameters.context);
-        // Drapes left for a later frame, stale by the camera or failed to
-        // draw, leave this one incomplete, and ask for the next.
+        // Drapes left for a later frame, stale by the camera, leave this one
+        // incomplete, and ask for the next.
         let drapes_waiting = orchestrator.terrain().drapes_waiting();
         let start_rendering = Instant::now();
         if let Err(error) = parameters.end_pass(gpu).and_then(|()| gpu.flush(false)) {
@@ -725,6 +727,7 @@ impl Encoder {
         self.frame_projection = Some(frame_projection);
         DrawnFrame {
             mode: if complete && error.is_none() { RenderMode::Full } else { RenderMode::Partial },
+            complete,
             presentable: error.is_none() || (drew && update_parameters.mode == MapMode::Continuous),
             error,
             needs_repaint: frame.needs_repaint || drapes_waiting,
@@ -752,6 +755,7 @@ impl Encoder {
             error,
             presentable: _,
             mode,
+            complete,
             needs_repaint,
             repaint_at,
             placement_changed,
@@ -788,6 +792,7 @@ impl Encoder {
             events,
             RendererEvent::RenderFrameFinished {
                 mode,
+                complete,
                 needs_repaint,
                 repaint_at,
                 placement_changed,

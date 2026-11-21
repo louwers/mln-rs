@@ -42,7 +42,12 @@ pub enum RendererEvent {
         ///
         /// [`UpdateParameters::elevation`]: crate::UpdateParameters::elevation
         mode: RenderMode,
-        /// The frame has transitions still running.
+        /// Whether the frame would be `Full` but for its `error`: what it
+        /// draws had loaded, and no drape waits for a later frame.
+        complete: bool,
+        /// The frame has transitions still running, or drapes to draw again
+        /// at rest. A frame that failed doesn't ask for another for what
+        /// failed: its map decides when to draw again.
         needs_repaint: bool,
         /// When, without `needs_repaint`, the map changes next though
         /// nothing asks for a frame before: a frame then places the symbols

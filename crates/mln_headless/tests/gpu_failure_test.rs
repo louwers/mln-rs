@@ -3,7 +3,8 @@
 // rejects a shader would: a still image ends with the error, on a map with
 // terrain and on one without, and the next one draws once the device works;
 // a continuous map reports the failure once, shows what did draw, draws
-// again only now and then, and shows the map once the device works.
+// again only now and then, goes idle once the failure lasts, and shows the
+// map once the device works.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -454,6 +455,62 @@ fn idle_image(style: &str) -> Vec<u8> {
     let mut map = FailingMap::with_style(MapMode::Continuous, style, Fail::DrawsIn("none"));
     assert!(map.run(Duration::from_secs(10), idle).1, "a new map never went idle");
     map.shown.take().expect("a new map showed nothing")
+}
+
+/// A continuous map whose line's shader always fails, as on a backend that
+/// rejects it, with terrain and without, shows the rest of the map, as a
+/// map without the line does, and reports the failure once. Once its frames
+/// have failed for a second, it goes idle and draws no more on its own;
+/// whatever else draws a frame, such as a camera change, still draws.
+#[test]
+fn a_continuous_map_whose_draw_always_fails_shows_the_rest_and_goes_idle() {
+    for terrain in [false, true] {
+        let expected = idle_image(&styled(terrain, false));
+        assert!(expected != idle_image(&style(terrain)), "terrain {terrain}: the line draws nothing");
+        let mut map = FailingMap::new(MapMode::Continuous, terrain, Fail::Shaders("Line"));
+        map.failing = usize::MAX;
+        let start = Instant::now();
+        let (events, went_idle) = map.run(Duration::from_secs(10), idle);
+        assert!(went_idle, "terrain {terrain}: the map never went idle: {events:?}");
+        assert!(start.elapsed() >= Duration::from_secs(1), "terrain {terrain}: idle before the failure lasted");
+        assert_eq!(1, errors(&events), "terrain {terrain}: {events:?}");
+        assert!(map.shown.as_ref() == Some(&expected), "terrain {terrain}: the map shows other pixels");
+
+        let frames = map.frames();
+        let (events, _) = map.run(Duration::from_millis(1500), |_| false);
+        assert!(frames == map.frames() && events.is_empty(), "terrain {terrain}: the idle map drew: {events:?}");
+        map.map.jump_to(&mln_map::CameraOptions { zoom: Some(2.5), ..Default::default() });
+        let (events, went_idle) = map.run(Duration::from_secs(10), idle);
+        assert!(went_idle && map.frames() > frames, "terrain {terrain}: {events:?}");
+        assert_eq!(0, errors(&events), "terrain {terrain}: the same failure reported again");
+    }
+}
+
+/// A continuous map whose frame's own pass fails keeps showing its last good
+/// frame, which the target took, reports the failure once, and goes idle
+/// once it lasts. Once the device works, the next frame that something
+/// draws shows the map.
+#[test]
+fn a_continuous_map_whose_pass_fails_keeps_showing_its_last_good_frame() {
+    let mut map = FailingMap::new(MapMode::Continuous, false, Fail::Passes("main buffer"));
+    assert!(map.run(Duration::from_secs(10), idle).1, "the map never went idle");
+    let (good, handed_off) = (map.shown.clone().expect("the map showed nothing"), map.handed_off);
+    map.failing = usize::MAX;
+    let camera = mln_map::CameraOptions { zoom: Some(2.5), ..Default::default() };
+    map.map.jump_to(&camera);
+    let (events, went_idle) = map.run(Duration::from_secs(10), idle);
+    assert!(went_idle, "the map never went idle: {events:?}");
+    assert_eq!(1, errors(&events), "{events:?}");
+    assert_eq!(handed_off, map.handed_off, "a frame whose pass failed was handed off");
+    assert!(map.shown.as_ref() == Some(&good), "the map shows other pixels than its last good frame");
+
+    map.failing = 0;
+    map.map.trigger_repaint();
+    assert!(map.run(Duration::from_secs(10), idle).1, "the map never went idle once the device worked");
+    let mut expected = FailingMap::new(MapMode::Continuous, false, map.fail);
+    expected.map.jump_to(&camera);
+    assert!(expected.run(Duration::from_secs(10), idle).1, "a new map never went idle");
+    assert!(map.shown == expected.shown, "the map draws other pixels than a new one");
 }
 
 /// A continuous map whose frames fail for half a second, from its first,

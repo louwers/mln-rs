@@ -224,47 +224,74 @@ pub const MLN_RUNTIME_EVENT_MAP_LOADING_FINISHED: mln_runtime_event_type = 6;
 /// The map failed to load a style.
 pub const MLN_RUNTIME_EVENT_MAP_LOADING_FAILED: mln_runtime_event_type = 7;
 /** The map rendered a complete frame and has nothing left to load, animate,
- or redraw.*/
+ or redraw. Once the map's frames have failed on the GPU for a second
+ (MLN_RUNTIME_EVENT_MAP_RENDER_ERROR), a failed frame that is complete but
+ for its failure counts: the map draws no better.*/
 pub const MLN_RUNTIME_EVENT_MAP_IDLE: mln_runtime_event_type = 8;
 /** A frame failed on the GPU, such as a pass that didn't begin, a texture
  that couldn't be made or a shader that the backend rejects: the first of
- the frames in a row that fail, until one draws without failing. A map in
- MLN_MAP_MODE_CONTINUOUS shows what did draw of a failed frame, or keeps
- showing the frame before when the frame's own pass failed, and draws
- again on its own within a second, sooner after one failure than after
- many.*/
+ the frames in a row that fail, until one draws without failing.
+
+ A map in MLN_MAP_MODE_CONTINUOUS shows what did draw of a failed frame,
+ or keeps showing the frame before when the frame's own pass failed. It
+ draws again on its own after as long as its frames have been failing,
+ and at least 100 ms. Once they have failed for a second, it takes the
+ failure as lasting: it draws again only when something else draws a
+ frame, such as a camera change or a tile, and goes idle
+ (MLN_RUNTIME_EVENT_MAP_IDLE) on a frame complete but for its failure,
+ which doesn't finish loading (MLN_RUNTIME_EVENT_MAP_LOADING_FINISHED).*/
 pub const MLN_RUNTIME_EVENT_MAP_RENDER_ERROR: mln_runtime_event_type = 9;
 /** A frame failed on the GPU, such as a pass that didn't begin, a texture
  that couldn't be made or a shader that the backend rejects: the first of
- the frames in a row that fail, until one draws without failing. A map in
- MLN_MAP_MODE_CONTINUOUS shows what did draw of a failed frame, or keeps
- showing the frame before when the frame's own pass failed, and draws
- again on its own within a second, sooner after one failure than after
- many.*/
+ the frames in a row that fail, until one draws without failing.
+
+ A map in MLN_MAP_MODE_CONTINUOUS shows what did draw of a failed frame,
+ or keeps showing the frame before when the frame's own pass failed. It
+ draws again on its own after as long as its frames have been failing,
+ and at least 100 ms. Once they have failed for a second, it takes the
+ failure as lasting: it draws again only when something else draws a
+ frame, such as a camera change or a tile, and goes idle
+ (MLN_RUNTIME_EVENT_MAP_IDLE) on a frame complete but for its failure,
+ which doesn't finish loading (MLN_RUNTIME_EVENT_MAP_LOADING_FINISHED).*/
 pub const MLN_RUNTIME_EVENT_MAP_RENDER_FRAME_STARTED: mln_runtime_event_type = 10;
 /** A frame failed on the GPU, such as a pass that didn't begin, a texture
  that couldn't be made or a shader that the backend rejects: the first of
- the frames in a row that fail, until one draws without failing. A map in
- MLN_MAP_MODE_CONTINUOUS shows what did draw of a failed frame, or keeps
- showing the frame before when the frame's own pass failed, and draws
- again on its own within a second, sooner after one failure than after
- many.*/
+ the frames in a row that fail, until one draws without failing.
+
+ A map in MLN_MAP_MODE_CONTINUOUS shows what did draw of a failed frame,
+ or keeps showing the frame before when the frame's own pass failed. It
+ draws again on its own after as long as its frames have been failing,
+ and at least 100 ms. Once they have failed for a second, it takes the
+ failure as lasting: it draws again only when something else draws a
+ frame, such as a camera change or a tile, and goes idle
+ (MLN_RUNTIME_EVENT_MAP_IDLE) on a frame complete but for its failure,
+ which doesn't finish loading (MLN_RUNTIME_EVENT_MAP_LOADING_FINISHED).*/
 pub const MLN_RUNTIME_EVENT_MAP_RENDER_FRAME_FINISHED: mln_runtime_event_type = 11;
 /** A frame failed on the GPU, such as a pass that didn't begin, a texture
  that couldn't be made or a shader that the backend rejects: the first of
- the frames in a row that fail, until one draws without failing. A map in
- MLN_MAP_MODE_CONTINUOUS shows what did draw of a failed frame, or keeps
- showing the frame before when the frame's own pass failed, and draws
- again on its own within a second, sooner after one failure than after
- many.*/
+ the frames in a row that fail, until one draws without failing.
+
+ A map in MLN_MAP_MODE_CONTINUOUS shows what did draw of a failed frame,
+ or keeps showing the frame before when the frame's own pass failed. It
+ draws again on its own after as long as its frames have been failing,
+ and at least 100 ms. Once they have failed for a second, it takes the
+ failure as lasting: it draws again only when something else draws a
+ frame, such as a camera change or a tile, and goes idle
+ (MLN_RUNTIME_EVENT_MAP_IDLE) on a frame complete but for its failure,
+ which doesn't finish loading (MLN_RUNTIME_EVENT_MAP_LOADING_FINISHED).*/
 pub const MLN_RUNTIME_EVENT_MAP_RENDER_MAP_STARTED: mln_runtime_event_type = 12;
 /** A frame failed on the GPU, such as a pass that didn't begin, a texture
  that couldn't be made or a shader that the backend rejects: the first of
- the frames in a row that fail, until one draws without failing. A map in
- MLN_MAP_MODE_CONTINUOUS shows what did draw of a failed frame, or keeps
- showing the frame before when the frame's own pass failed, and draws
- again on its own within a second, sooner after one failure than after
- many.*/
+ the frames in a row that fail, until one draws without failing.
+
+ A map in MLN_MAP_MODE_CONTINUOUS shows what did draw of a failed frame,
+ or keeps showing the frame before when the frame's own pass failed. It
+ draws again on its own after as long as its frames have been failing,
+ and at least 100 ms. Once they have failed for a second, it takes the
+ failure as lasting: it draws again only when something else draws a
+ frame, such as a camera change or a tile, and goes idle
+ (MLN_RUNTIME_EVENT_MAP_IDLE) on a frame complete but for its failure,
+ which doesn't finish loading (MLN_RUNTIME_EVENT_MAP_LOADING_FINISHED).*/
 pub const MLN_RUNTIME_EVENT_MAP_RENDER_MAP_FINISHED: mln_runtime_event_type = 13;
 /// The style uses an image that it doesn't have.
 pub const MLN_RUNTIME_EVENT_MAP_STYLE_IMAGE_MISSING: mln_runtime_event_type = 14;

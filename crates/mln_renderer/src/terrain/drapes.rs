@@ -576,9 +576,9 @@ impl Drapes {
 
     /// Whether the last frame left drapes stale by the camera only, or
     /// smaller than their tile's side, for a later frame to draw
-    /// ([`choose`](Self::choose), [`finish_update`](Self::finish_update)),
-    /// or drapes that failed to draw ([`render`](Self::render)): the map
-    /// then isn't done drawing.
+    /// ([`choose`](Self::choose), [`finish_update`](Self::finish_update)):
+    /// the map then isn't done drawing. A drape that failed to draw failed
+    /// its frame, which says so, and draws again in the next.
     pub(crate) fn waiting(&self) -> bool {
         self.waiting
     }
@@ -878,8 +878,8 @@ impl Drapes {
     /// composite's frame texture, which is then copied into its own. A
     /// drape that fails to draw, its pass or a draw in it, fails the frame
     /// ([`Context::fail`](crate::gfx::context::Context::fail)), and draws
-    /// again in the next, which it [waits](Self::waiting) for, as does one
-    /// drawn in a frame that something failed in before.
+    /// again in whichever frame comes next, as does one drawn in a frame
+    /// that something failed in before.
     pub(crate) fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
         let formats = TargetFormats { color: Some(COLOR), depth_stencil: Some(DEPTH_STENCIL) };
         for Drape { tile, transform, stacks, .. } in &mut self.drapes {
@@ -967,10 +967,6 @@ impl Drapes {
                 }
             }
         }
-        // A drape that failed to draw has no key left, and draws again in the
-        // next frame, which this one then asks for.
-        let mut stacks = self.drapes.iter().flat_map(|drape| &drape.stacks);
-        self.waiting |= stacks.any(|drape| drape.redraws && drape.drawn.is_none());
     }
 }
 
