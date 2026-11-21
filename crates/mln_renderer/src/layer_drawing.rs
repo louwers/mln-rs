@@ -24,7 +24,6 @@ use mln_gfx::types::DepthMaskType;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::hash::HashMap;
 use mln_util::identity::SimpleIdentity;
-use smallvec::SmallVec;
 
 use crate::draw::DrawObjects;
 use crate::gfx::atlas_binding::AtlasBinding;
@@ -471,52 +470,19 @@ impl TileObjects for KeptDraw {
     }
 }
 
-/// The draws a standing layer keeps of a tile, all of one geometry: over
-/// terrain, one for each part of the tile that reads its own ground
-/// ([`GroundBindings::reads`](crate::terrain::GroundBindings::reads)), most
-/// often one; on a flat map, one. A frame's draw names one by its index.
-///
-/// Its draws have no id of their own: a frame's draws of the layer all carry
-/// the id of the layer's draws ([`LayerDraws::id`]), so they draw in the
-/// order the layer pushes them, that of the frame's tiles and then of each
-/// tile's parts, however long each was kept.
-#[derive(Default)]
-pub(crate) struct StandingDraws(SmallVec<[DrawObjects; 1]>);
+/// The draw a standing layer keeps of a tile. It has no id of its own: a
+/// frame's draws of the layer all carry the id of the layer's draws
+/// ([`LayerDraws::id`]), so they draw in the order the layer pushes them,
+/// that of the frame's tiles, however long each was kept.
+impl TileObjects for DrawObjects {
+    type Part = ();
 
-impl StandingDraws {
-    /// Keeps `count` draws: drops those past it, and makes those it lacks of
-    /// the objects `make` makes, as many as it makes.
-    pub(crate) fn resize(&mut self, count: usize, mut make: impl FnMut() -> Option<DrawObjects>) {
-        self.0.truncate(count);
-        while self.0.len() < count {
-            let Some(objects) = make() else { break };
-            self.0.push(objects);
-        }
-    }
-
-    /// Whether it keeps no draw.
-    pub(crate) fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
-    /// The draws' GPU objects, to change.
-    pub(crate) fn draws_mut(&mut self) -> &mut [DrawObjects] {
-        &mut self.0
-    }
-}
-
-impl TileObjects for StandingDraws {
-    /// The index of the draw among the tile's.
-    type Part = usize;
-
-    fn objects(&mut self, index: usize) -> Option<DrawObjectsMut<'_>> {
-        Some(self.0.get_mut(index)?.into())
+    fn objects(&mut self, (): ()) -> Option<DrawObjectsMut<'_>> {
+        Some(self.into())
     }
 
     fn drop_bindings(&mut self) {
-        for objects in &mut self.0 {
-            objects.drop_bindings();
-        }
+        DrawObjects::drop_bindings(self);
     }
 }
 

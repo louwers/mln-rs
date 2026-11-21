@@ -3,7 +3,7 @@
 //! draws.
 
 use mln_map_types::{TileCoordinate, View};
-use mln_tile_id::{CanonicalTileID, OverscaledTileID};
+use mln_tile_id::{CanonicalTileID, OverscaledTileID, UnwrappedTileID};
 use mln_util::constants;
 use mln_util::dem::DemCoords;
 use mln_util::geo::WrapMode;
@@ -233,12 +233,9 @@ impl TerrainTile {
         let (Some(dem), Some(own)) = (dem, dem_zoom(self.id.canonical.z, dem_zooms)) else {
             return;
         };
-        let own_tile = dem.tile(&self.id.scaled_to(own));
-        self.dem_loading = own_tile.is_some_and(|tile| dem_data(tile).is_none() && !tile.is_complete());
-        let bound = (dem_zooms.min..=own).rev().map(|z| self.id.scaled_to(z)).find(|id| {
-            let tile = if id.canonical.z == own { own_tile } else { dem.tile(id) };
-            tile.and_then(dem_data).is_some()
-        });
+        let own = self.id.scaled_to(own);
+        self.dem_loading = dem.tile(&own).is_some_and(|tile| dem_data(tile).is_none() && !tile.is_complete());
+        let bound = loaded_dem(dem, own, dem_zooms.min);
         self.dem = bound.map(|id| (id, self.dem_coords(id.canonical.z)));
     }
 
@@ -253,6 +250,12 @@ impl TerrainTile {
             offset: [(canonical.x & mask) as f32 / tiles, (canonical.y & mask) as f32 / tiles],
         }
     }
+}
+
+/// Of the DEM tile `id` of `dem` and its ancestors down to `min_zoom`, the
+/// deepest that has data.
+fn loaded_dem(dem: &SourceTiles, id: OverscaledTileID, min_zoom: u8) -> Option<OverscaledTileID> {
+    (min_zoom..=id.canonical.z).rev().map(|z| id.scaled_to(z)).find(|id| dem.tile(id).and_then(dem_data).is_some())
 }
 
 /// The terrain tiles that cover a view, the DEM tiles they read and what
@@ -271,8 +274,13 @@ pub(crate) struct TerrainCover {
     /// in GL JS, whose camera falls back to the DEM tiles at its zoom.
     pub(crate) center: Option<TerrainTile>,
     /// The DEM tiles the source keeps loaded for the tiles and the center,
-    /// whether or not a layer draws them, nearest the center first.
+    /// whether or not a layer draws them, nearest the center first, then the
+    /// `standing_dems`.
     pub(crate) dem_tiles: Vec<OverscaledTileID>,
+    /// The DEM tiles that the standing layers' tiles that no drawn tile
+    /// holds read, of those the tiles and the center don't
+    /// ([`request_standing`](Self::request_standing)).
+    pub(crate) standing_dems: Vec<OverscaledTileID>,
     /// The ranges that cull the tiles, and every source's tiles; the next
     /// update's cover takes them over.
     pub(crate) ranges: ElevationRanges,
@@ -310,7 +318,46 @@ impl TerrainCover {
             .filter(|id| seen.insert(*id))
             .collect();
         let tile_size = terrain_tile_size(dem_tile_size);
-        TerrainCover { source_id: source_id.to_owned(), tile_size, tiles, center, dem_tiles, ranges }
+        let standing_dems = Vec::new();
+        TerrainCover { source_id: source_id.to_owned(), tile_size, tiles, center, dem_tiles, standing_dems, ranges }
+    }
+
+    /// Requests the DEM tiles that `tiles`, the tiles that a standing layer
+    /// of the frame draws, read where no drawn tile holds them: the DEM tile
+    /// that holds each at its own zoom, or at the DEM's deepest if that is
+    /// shallower, so that the terrain's source loads it and keeps it loaded,
+    /// as it does the tiles' own. A tile above the DEM's zoom levels reads
+    /// none.
+    pub(crate) fn request_standing(&mut self, tiles: impl IntoIterator<Item = UnwrappedTileID>) {
+        let dem_zooms = self.ranges.dem_zooms;
+        let mut zooms: Vec<u8> = self.tiles.iter().map(|tile| tile.id.canonical.z).collect();
+        zooms.sort_unstable();
+        zooms.dedup();
+        let drawn: HashSet<UnwrappedTileID> = self.tiles.iter().map(|tile| tile.id.to_unwrapped()).collect();
+        let mut requested: HashSet<OverscaledTileID> = self.dem_tiles.iter().copied().collect();
+        for tile in tiles {
+            let tile = OverscaledTileID::new(tile.canonical.z, tile.wrap, tile.canonical);
+            let z = tile.canonical.z;
+            if zooms.iter().any(|&drawn_z| drawn_z <= z && drawn.contains(&tile.scaled_to(drawn_z).to_unwrapped())) {
+                continue;
+            }
+            let id = tile.scaled_to(z.min(dem_zooms.max));
+            if id.canonical.z >= dem_zooms.min && requested.insert(id) {
+                self.dem_tiles.push(id);
+                self.standing_dems.push(id);
+            }
+        }
+    }
+
+    /// The DEM tiles of `dem`, the terrain's source, that the standing DEM
+    /// tiles bind: each one, or while it loads its deepest ancestor that has
+    /// data; none where none has.
+    pub(crate) fn bound_standing_dems<'a>(
+        &'a self,
+        dem: &'a SourceTiles,
+    ) -> impl Iterator<Item = OverscaledTileID> + 'a {
+        let min_zoom = self.ranges.dem_zooms.min;
+        self.standing_dems.iter().filter_map(move |&id| loaded_dem(dem, id, min_zoom))
     }
 
     /// Binds each tile's DEM from the tiles of `dem`, the terrain's source.

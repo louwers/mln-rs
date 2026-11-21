@@ -20,7 +20,6 @@ use mln_style_types::{AlignmentType, CirclePitchScaleType};
 use mln_tile_id::OverscaledTileID;
 use mln_util::Color;
 use mln_util::error::Error;
-use smallvec::SmallVec;
 
 use super::{cast_matrix, refresh_paint_attributes};
 use crate::bucket::Bucket;
@@ -28,7 +27,7 @@ use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
 use crate::buckets::circle_bucket::{CircleBinders, CircleBucket, CircleLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
-use crate::layer_drawing::{DrawList, FrameDraw, StandingDraws, TileDraws, UniformWriter};
+use crate::layer_drawing::{DrawList, FrameDraw, TileDraws, UniformWriter};
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::circle_layout::CircleLayout;
 use crate::layout::layout::{LayoutParameters, SourceLayer};
@@ -91,9 +90,9 @@ impl LayerType for Circle {
 pub(crate) struct RenderCircleLayer {
     base: RenderLayerBase,
     values: LayerValues<Circle>,
-    drawing: TileDraws<StandingDraws>,
+    drawing: TileDraws<DrawObjects>,
     /// The frame's draws as the update makes them.
-    draw_list: DrawList<CircleUniforms, usize>,
+    draw_list: DrawList<CircleUniforms>,
     /// Over terrain, the ground under each of the frame's draws, in the
     /// order the update makes them.
     grounds: Vec<GroundDrawableUBO>,
@@ -198,7 +197,7 @@ struct CircleUniforms {
 
 impl TypedLayer for RenderCircleLayer {
     type Type = Circle;
-    type Drawing = TileDraws<StandingDraws>;
+    type Drawing = TileDraws<DrawObjects>;
 
     const STANDS: bool = true;
     const HIDES_BEHIND_GROUND: bool = true;
@@ -225,10 +224,9 @@ impl TypedLayer for RenderCircleLayer {
         }
     }
 
-    /// Makes the frame's draws of the layer, one of each of its tiles, or
-    /// over terrain one of each part of a tile that reads its own ground,
-    /// which it builds for a tile it keeps none of, and writes the layer's
-    /// buffers they read.
+    /// Makes the frame's draws of the layer, one of each of its tiles, which
+    /// it builds for a tile it keeps none of, and writes the layer's buffers
+    /// they read.
     fn update_draws(
         &mut self,
         gpu: &mut dyn Gpu,
@@ -244,8 +242,7 @@ impl TypedLayer for RenderCircleLayer {
         let ground = paint_parameters.ground.clone();
         let ground = ground.as_deref();
         self.grounds.clear();
-        // The draws keep the order they're pushed in: the tiles', then their
-        // parts'.
+        // The draws keep the order they're pushed in, the tiles'.
         let order = self.drawing.frame_mut().id();
         for tile in render_tiles {
             let tile_id = tile.id();
@@ -279,19 +276,20 @@ impl TypedLayer for RenderCircleLayer {
             // context's store, which upload again when they change.
             let changes = entry.take_changes();
             let context = &mut *paint_parameters.context;
-            let draws = entry.value.get_or_insert_default();
-            for objects in draws.draws_mut() {
+            let objects = if let Some(objects) = entry.value {
                 refresh_paint_attributes(objects, changes, |attrs| {
                     binders.bind(evaluated, paint(context).as_ref(), attrs, &mut Uniforms::default());
                 });
-            }
-            let reads = ground.map(|ground| ground.reads(&tile_id, TileFeatures::Anchored));
-            draws.resize(reads.as_ref().map_or(1, SmallVec::len), || {
+                objects
+            } else {
                 if bucket.vertices.is_empty() {
-                    return None;
+                    continue;
                 }
-                let (vertices, indexes) =
-                    (bucket_vertices(geometry, &bucket.vertices)?, bucket_indexes(geometry, &bucket.triangles)?);
+                let (Some(vertices), Some(indexes)) =
+                    (bucket_vertices(geometry, &bucket.vertices), bucket_indexes(geometry, &bucket.triangles))
+                else {
+                    continue;
+                };
                 let mut uniforms = Uniforms::default();
                 let mut attrs = VertexAttributeArray::new();
                 binders.bind(evaluated, paint(context).as_ref(), &mut attrs, &mut uniforms);
@@ -305,7 +303,7 @@ impl TypedLayer for RenderCircleLayer {
                     ),
                 );
                 let vertex_count = if bucket.segments.is_empty() { 0 } else { bucket.vertices.len() };
-                Some(DrawObjects::new(
+                entry.value.insert(DrawObjects::new(
                     context.shader_key(&programs::CIRCLE, uniforms, self.base.projection_variant),
                     context.color_mode(ColorMode::alpha_blended()),
                     CullFaceMode::disabled(),
@@ -319,20 +317,15 @@ impl TypedLayer for RenderCircleLayer {
                     },
                     Textures::default(),
                 ))
-            });
-            if draws.is_empty() {
-                *entry.value = None;
-                continue;
-            }
+            };
 
             let uniforms = Self::uniforms(layer, &tile_id, binders, paint_parameters);
-            for (part, objects) in draws.draws_mut().iter_mut().enumerate() {
-                if let Some(read) = reads.as_ref().and_then(|reads| reads.get(part)) {
-                    objects.set_texture(ID_GROUND_DEM_TEXTURE, Some(&read.texture));
-                    self.grounds.push(read.ubo);
-                }
-                self.draw_list.push_part(FrameDraw::new(Some(tile_id), order), part, uniforms);
+            if let Some(ground) = ground {
+                let read = ground.read(&tile_id, TileFeatures::Anchored);
+                objects.set_texture(ID_GROUND_DEM_TEXTURE, Some(&read.texture));
+                self.grounds.push(read.ubo);
             }
+            self.draw_list.push_part(FrameDraw::new(Some(tile_id), order), (), uniforms);
         }
 
         let grounds = ground.map(|_| self.grounds.as_slice());

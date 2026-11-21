@@ -853,30 +853,6 @@ impl RenderOrchestrator {
         clock: &FrameClock,
         frame: &mut Frame,
     ) -> Vec<bool> {
-        let mut tile_parameters = TileParameters {
-            pixel_ratio: update_parameters.pixel_ratio,
-            debug_options: update_parameters.debug_options,
-            view: &update_parameters.view,
-            min_zoom: update_parameters.min_zoom,
-            max_zoom: update_parameters.max_zoom,
-            file_source: update_parameters.file_source.clone(),
-            mode: update_parameters.mode,
-            prefetch_zoom_delta: update_parameters.prefetch_zoom_delta,
-            tile_lod_min_radius: update_parameters.tile_lod_min_radius,
-            tile_lod_scale: update_parameters.tile_lod_scale,
-            tile_lod_pitch_threshold: update_parameters.tile_lod_pitch_threshold,
-            tile_lod_zoom_shift: update_parameters.tile_lod_zoom_shift,
-            tile_lod_mode: update_parameters.tile_lod_mode,
-            subdivision_granularity: update_parameters.subdivision_granularity,
-            layout_terrain: false,
-            global_state: self.global_state.clone(),
-            is_update_synchronous: false,
-            font_faces: update_parameters.style.get_font_faces().cloned(),
-            glyph_pbfs: !update_parameters.style.get_glyph_url().is_empty(),
-            placement_commits: self.placement_controller.commits(),
-            terrain: self.terrain.cover(),
-        };
-
         if !self.sources_by_id.is_empty() {
             self.filtered_layers_for_source.reserve(layers.len());
         }
@@ -886,12 +862,22 @@ impl RenderOrchestrator {
 
         // Each source in turn takes its layers. The layers without a source
         // go with the first, and with no sources the loop runs once for
-        // them.
+        // them. Over terrain, the terrain's source goes last, so that it
+        // loads the DEM tiles that the tiles of the standing layers' sources
+        // read off the surface's.
         let source_count = std::cmp::max(self.sources_by_id.len(), 1);
-        for source_index in 0..source_count {
+        let dem_source = self
+            .terrain
+            .cover()
+            .and_then(|cover| self.sources_by_id.iter().position(|source| source.id() == cover.source_id));
+        let order = (0..source_count).filter(|&index| Some(index) != dem_source).chain(dem_source);
+        // The sources with a standing layer that the frame draws.
+        let mut standing_sources: SmallVec<[usize; 2]> = SmallVec::new();
+        for (position, source_index) in order.enumerate() {
             let style_source = self.sources_by_id.get(source_index).cloned();
             let mut source_needs_rendering = false;
             let mut source_needs_relayout = false;
+            let mut source_stands = false;
             // The layers of a source type without a render source are
             // skipped.
             let has_render_source =
@@ -945,6 +931,7 @@ impl RenderOrchestrator {
                             self.filtered_layers_for_source.push(Arc::clone(&layer.base().evaluated_properties));
                             if zoom_fits_layer {
                                 source_needs_rendering = true;
+                                source_stands |= frame.terrain && layer.stands();
                                 let source_id = style_source.id().to_owned();
                                 frame
                                     .layers
@@ -958,7 +945,7 @@ impl RenderOrchestrator {
                 }
 
                 // Handle layers without source.
-                let is_first_source = source_index == 0;
+                let is_first_source = position == 0;
                 if is_first_source
                     && style.base().visibility != mln_style_types::VisibilityType::None
                     && layer.supports_zoom(self.zoom_history.last_zoom)
@@ -986,12 +973,44 @@ impl RenderOrchestrator {
                 }
             }
             if let Some(style_source) = &style_source {
-                tile_parameters.is_update_synchronous = style_source.data().is_update_synchronous();
+                if Some(source_index) == dem_source {
+                    let (store, render_sources) = (&self.tile_store, &self.render_sources);
+                    let standing = standing_sources.iter().filter_map(|&index| {
+                        let tiles = render_sources.get(self.sources_by_id[index].id())?.tiles()?;
+                        Some(store.source(tiles)?.rendered().map(|rendered| *rendered.id))
+                    });
+                    self.terrain.request_standing(standing.flatten());
+                }
+                if source_stands {
+                    standing_sources.push(source_index);
+                }
                 let filtered_layers = std::mem::take(&mut self.filtered_layers_for_source);
-                // Fill extrusions lay out their polygons' centroids, which
-                // they stand on, only for a style with terrain.
-                tile_parameters.layout_terrain =
-                    has_terrain && filtered_layers.iter().any(|layer| layer.style().info() == FillExtrusion::INFO);
+                let tile_parameters = TileParameters {
+                    pixel_ratio: update_parameters.pixel_ratio,
+                    debug_options: update_parameters.debug_options,
+                    view: &update_parameters.view,
+                    min_zoom: update_parameters.min_zoom,
+                    max_zoom: update_parameters.max_zoom,
+                    file_source: update_parameters.file_source.clone(),
+                    mode: update_parameters.mode,
+                    prefetch_zoom_delta: update_parameters.prefetch_zoom_delta,
+                    tile_lod_min_radius: update_parameters.tile_lod_min_radius,
+                    tile_lod_scale: update_parameters.tile_lod_scale,
+                    tile_lod_pitch_threshold: update_parameters.tile_lod_pitch_threshold,
+                    tile_lod_zoom_shift: update_parameters.tile_lod_zoom_shift,
+                    tile_lod_mode: update_parameters.tile_lod_mode,
+                    subdivision_granularity: update_parameters.subdivision_granularity,
+                    // Fill extrusions lay out their polygons' centroids,
+                    // which they stand on, only for a style with terrain.
+                    layout_terrain: has_terrain
+                        && filtered_layers.iter().any(|layer| layer.style().info() == FillExtrusion::INFO),
+                    global_state: self.global_state.clone(),
+                    is_update_synchronous: style_source.data().is_update_synchronous(),
+                    font_faces: update_parameters.style.get_font_faces().cloned(),
+                    glyph_pbfs: !update_parameters.style.get_glyph_url().is_empty(),
+                    placement_commits: self.placement_controller.commits(),
+                    terrain: self.terrain.cover(),
+                };
                 if let Some(source) = self.render_sources.get_mut(style_source.id()) {
                     source.update(
                         &mut self.tile_store,

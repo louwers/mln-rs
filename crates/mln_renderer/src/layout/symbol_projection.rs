@@ -18,7 +18,7 @@ use crate::buckets::symbol_bucket::{
     PlacedSymbol, PlacedSymbolPools, SymbolBucket, SymbolDynamicLayoutVertex, SymbolSizeBinder, ZoomEvaluatedSize,
 };
 use crate::layout::symbol_instance::WritingModes;
-use crate::terrain::{PartGround, TerrainElevation, TileFeatures, TileGround};
+use crate::terrain::{TerrainElevation, TileGround};
 
 /// The directions on screen that a pitched, unrotated label's east and south
 /// axes take, as unit vectors, or zero where an axis is edge-on.
@@ -134,7 +134,7 @@ pub(crate) fn symbol_ground<'a>(
     layout: &SymbolLayoutProperties::PossiblyEvaluated,
 ) -> Option<TileGround<'a>> {
     let ground = ground.filter(|_| !*layout.symbol_screen_space.uniform())?;
-    Some(ground.ground(tile, TileFeatures::Anchored))
+    Some(ground.ground(tile))
 }
 
 /// What the symbols of a bucket stand on: over terrain, the ground under
@@ -168,31 +168,24 @@ impl<'a> SymbolElevation<'a> {
     }
 
     /// The height in meters above sea level of a symbol `offset` meters up
-    /// whose untranslated anchor is `anchor` and which draws at `at`, both
-    /// in tile units: its offset, plus the ground at `at` where it is
-    /// measured from the ground. `None` where no draw of the tile draws
-    /// the symbol, over terrain.
+    /// that draws at `at`, in tile units: its offset, plus the ground at `at`
+    /// where it is measured from the ground.
     #[must_use]
-    pub(crate) fn at(&self, anchor: Vec2, at: Vec2, offset: f32) -> Option<f32> {
-        let Some(ground) = self.ground else {
-            return Some(offset);
-        };
-        if !self.from_ground {
-            return ground.holds(anchor).then_some(offset);
+    pub(crate) fn at(&self, at: Vec2, offset: f32) -> f32 {
+        match self.ground {
+            Some(ground) if self.from_ground => offset + ground.height(at) as f32,
+            _ => offset,
         }
-        Some(offset + ground.height(anchor, at)? as f32)
     }
 
-    /// What a label along a line whose anchor is `anchor`, in tile units,
-    /// stands on: over terrain, the ground under each of its points, as the
-    /// draw that draws its anchor reads it, with no height offset, whatever
-    /// its `symbol-height-anchor`. `None` where no draw of the tile draws the
-    /// label, over terrain.
+    /// What a label along a line stands on: over terrain, the ground under
+    /// each of its points, as its draw reads it, with no height offset,
+    /// whatever its `symbol-height-anchor`.
     #[must_use]
-    pub(crate) fn along_line(&self, anchor: Vec2) -> Option<LabelHeight<'a>> {
+    pub(crate) fn along_line(&self) -> LabelHeight<'a> {
         match self.ground {
-            None => Some(LabelHeight::Fixed(0.0)),
-            Some(ground) => ground.part(anchor).map(LabelHeight::Ground),
+            None => LabelHeight::Fixed(0.0),
+            Some(ground) => LabelHeight::Ground(ground),
         }
     }
 }
@@ -206,7 +199,7 @@ pub(crate) enum LabelHeight<'a> {
     Fixed(f64),
     /// Each on the ground under it: a line label's over terrain
     /// ([`SymbolElevation::along_line`]).
-    Ground(PartGround<'a>),
+    Ground(&'a TileGround<'a>),
 }
 
 impl LabelHeight<'_> {
@@ -664,6 +657,7 @@ pub(crate) fn reproject_line_labels(
     alignment: LineLabelAlignment,
 ) {
     let (tile_projector, translation, elevation) = placed;
+    let height = elevation.along_line();
     let view = tile_projector.view();
     let zoom = view.zoom() as f32;
     let sizes = size_binder.evaluate_for_zoom(zoom);
@@ -694,11 +688,6 @@ pub(crate) fn reproject_line_labels(
             continue;
         }
 
-        // A label whose tile draws it nowhere shows nowhere either.
-        let Some(height) = elevation.along_line(symbol.anchor_point) else {
-            hide_glyphs(glyph_count, vertices);
-            continue;
-        };
         let tile_anchor = tile_point_f64(symbol.anchor_point);
         let anchor = tile_projector.project(&tile_anchor, height.at(symbol.anchor_point));
         if anchor.occluded || !DVec2::new(anchor.point.x, anchor.point.y).abs().cmple(clip_extent).all() {
@@ -753,7 +742,7 @@ mod tests {
         PlacedSymbolPools, SymbolElevation, SymbolSizeBinder, TileDistance, Unplaced, WritingModes,
         reproject_line_labels,
     };
-    use crate::terrain::{TerrainElevation, TileFeatures};
+    use crate::terrain::TerrainElevation;
     use crate::util::pool::PoolRange;
 
     /// A 512 px square map at zoom 0, where tile 0/0/0 fills the viewport
@@ -898,7 +887,7 @@ mod tests {
     fn a_viewport_label_follows_its_line_on_sloping_ground() {
         let tile = terrain_tile();
         let elevation = TerrainElevation::shaped(tile, |uv| sloped((uv * f64::from(EXTENT)).as_vec2()));
-        let ground = elevation.ground(&tile, TileFeatures::Anchored);
+        let ground = elevation.ground(&tile);
         let view = terrain_view(12.5);
         let projector = TileProjector::new(&view, &tile.to_unwrapped());
         let pixels_to_tile_units = tile.to_unwrapped().pixels_to_tile_units(1.0, 12.5);
@@ -914,7 +903,7 @@ mod tests {
             anchor.distance(vertices[2]) + vertices[2].distance(vertices[3]),
         ];
         let offsets: Vec<f32> = (-12..=12).map(|i| i as f32 * 12.0).collect();
-        let height = SymbolElevation::new(Some(&ground), true).along_line(anchor).expect("the tile draws the label");
+        let height = SymbolElevation::new(Some(&ground), true).along_line();
         let mut placer = LinePlacer::new(&label_plane);
         let mut label =
             placer.begin(LineLabel { segment: 1, ..label(anchor, &line, &tile_distances, &offsets) }, 24.0, height);
@@ -982,7 +971,7 @@ mod tests {
     fn a_map_pitched_label_takes_its_size_from_its_anchor_on_the_ground() {
         let tile = terrain_tile();
         let elevation = TerrainElevation::level(tile, 2500.0);
-        let ground = elevation.ground(&tile, TileFeatures::Anchored);
+        let ground = elevation.ground(&tile);
         let view = terrain_view(12.5);
         let projector = TileProjector::new(&view, &tile.to_unwrapped());
         let anchor = Vec2::new(4100.0, 4000.0);
@@ -1035,7 +1024,7 @@ mod tests {
         let anchor = Vec2::new(6000.0, 8000.0);
         let meters = 2000.0;
         let elevation = TerrainElevation::level(tile, meters);
-        let ground = elevation.ground(&tile, TileFeatures::Anchored);
+        let ground = elevation.ground(&tile);
         let (sea_level, _) = seen_at(&projector, anchor, 0.0);
         let (on_ground, _) = seen_at(&projector, anchor, meters);
         assert!(sea_level.y > 512.0 + 256.0, "at sea level the anchor is at {sea_level}");

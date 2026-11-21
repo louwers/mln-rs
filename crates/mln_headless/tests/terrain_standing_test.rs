@@ -32,8 +32,6 @@ fn dem_png(rgb: [u8; 3]) -> Vec<u8> {
 const METERS_300: [u8; 3] = [1, 146, 88];
 /// (1 · 65536 + 154 · 256 + 40) · 0.1 − 10000 = 500 m.
 const METERS_500: [u8; 3] = [1, 154, 40];
-/// (1 · 65536 + 137 · 256 + 192) · 0.1 − 10000 = 80 m.
-const METERS_80: [u8; 3] = [1, 137, 192];
 /// (1 · 65536 + 136 · 256 + 148) · 0.1 − 10000 = 50 m.
 const METERS_50: [u8; 3] = [1, 136, 148];
 /// (1 · 65536 + 134 · 256 + 160) · 0.1 − 10000 = 0 m.
@@ -305,48 +303,20 @@ fn ridge(tile: &TileData) -> Vec<u8> {
 
 /// A GeoJSON source whose deepest zoom, 14, is coarser than the DEM tiles of
 /// zoom 15 that the surface under it reads at zoom 17: its circle stands on
-/// the surface, 300 m up, where the DEM tile of zoom 14 over it would put it
-/// at 50 m, off the screen. So it does whatever the map loaded before: here
-/// a view at zoom 14, which reads the DEM tile of zoom 14 and its
-/// neighbours.
+/// the DEM tile of zoom 14 over it, which agrees with the surface's on a
+/// plane slope, within 2 px of where the camera sees the surface, in a still,
+/// whether the map drew a view at zoom 14 before or not.
 #[test]
 fn a_circle_of_a_source_tiled_coarser_than_the_dem_stands_on_the_surface() {
-    // Just inside the north-east of the four source tiles that meet at 0, 0:
-    // the south ones, under the camera, are culled by the range of the DEM
-    // tile of zoom 14, 50 m, below the surface at 300 m.
-    let center = LatLng::new(0.0001, 0.0001).unwrap();
+    let center = location_at(15, 16385.5, 16385.5);
+    let x = 16385.5 * 256.0;
     for zooms in [&[17.0][..], &[14.0, 17.0]] {
-        let Some((image, map, _)) = render(&Scene::new(center, 14, 15), zooms, ridge) else {
+        let Some((image, map, _)) = render(&Scene::new(center, 14, 15), zooms, move |tile| slope_png(tile, x, 2.0))
+        else {
             return;
         };
-        assert_circle_at(&image, &map, &center, 300.0);
-        let (ground, coarse) = (seen_at(&map, &center, 300.0), seen_at(&map, &center, 50.0));
-        assert!((ground.0 - coarse.0).hypot(ground.1 - coarse.1) > 20.0, "{zooms:?}: the zooms' DEMs differ on screen");
+        assert_circle_at(&image, &map, &center, 500.0);
     }
-}
-
-/// A circle half opaque, 3 DEM pixels east of the edge between two DEM
-/// tiles of zoom 15 in the middle of its source tile of zoom 14, the west
-/// one 80 m high and the east one 50 m: it draws once, as half opaque as it
-/// is, on the east one.
-#[test]
-fn a_circle_by_an_edge_between_dem_tiles_draws_once() {
-    // The DEM tiles of zoom 15 meet at x 16385, inside the tile of zoom 14
-    // at x 8192.
-    let center = location_at(15, 16385.0 + 3.0 / 256.0, 16385.5);
-    let scene = Scene { translucent: true, ..Scene::new(center, 14, 15) };
-    let dem = |tile: &TileData| match tile.z {
-        15.. if tile.x % 2 == 0 => dem_png(METERS_80),
-        15.. => dem_png(METERS_50),
-        _ => dem_png(SEA_LEVEL),
-    };
-    let Some((image, map, _)) = render(&scene, &[17.0], dem) else {
-        return;
-    };
-    assert_circle_at(&image, &map, &center, 50.0);
-    let [r, g, b, _] = pixel_at(&image, &map, &center, 50.0);
-    // Half of red over white is (255, 128, 128); twice over, (255, 64, 64).
-    assert!(r > 240 && (100..160).contains(&g) && (100..160).contains(&b), "drawn once: {:?}", [r, g, b]);
 }
 
 /// A circle half opaque, 3 DEM pixels east of the edge between two source
@@ -369,13 +339,10 @@ fn a_circle_by_an_edge_between_source_tiles_draws_once() {
 }
 
 /// Two circles, blue in a source tile of zoom 14 and red in its east
-/// neighbour, overlap across the edge between the tiles, by the corner where
-/// the DEM tiles of zoom 15 in them meet. Each draws in a part of its own
-/// tile: the blue one in its tile's south-east part, the last, and the red
-/// one in its tile's north-west part, the first. Their overlap is the same
-/// whether the view is drawn fresh or after a view of the tiles' north
-/// halves, where each tile drew in one part: the frame's order of the tiles,
-/// then of their parts, stacks them, not when the parts were made.
+/// neighbour, overlap across the edge between the tiles. Their overlap is
+/// the same whether the view is drawn fresh or after a view north of them,
+/// which drew the tiles in another order: the frame's order of the tiles
+/// stacks them, not when their draws were made.
 #[test]
 fn circles_by_the_corner_of_source_tiles_stack_alike_however_the_view_is_reached() {
     // The source tiles of zoom 14 meet at x 8192, and the DEM tiles of zoom
@@ -436,52 +403,95 @@ fn circles_by_the_corner_of_source_tiles_stack_alike_however_the_view_is_reached
     assert_eq!(overlaps[0], overlaps[1], "the overlap fresh, then after the north halves");
 }
 
-/// Over a DEM whose lowest zoom, 15, is deeper than the circle's source
-/// tile of zoom 14, the circle stands on the surface's DEM tile of zoom 15,
-/// not at sea level.
+/// That the roof of the extrusion of `image`, which `map` drew, its red,
+/// lit pixels, is centered within 2 px of where the camera sees `location`
+/// `height` meters above sea level. Its walls are darker.
+fn assert_roof_at(image: &PremultipliedImage, map: &Map, location: &LatLng, height: f64) {
+    let ((x, y), count) = red_center(image);
+    let (seen_x, seen_y) = seen_at(map, location, height);
+    let off = (x - seen_x).hypot(y - seen_y);
+    assert!(off <= 2.0, "the roof at {x}, {y}, {off} px off where it is seen at {height} m");
+    assert!(count > 100, "{count} red pixels");
+}
+
+/// The still of a red fill extrusion 400 m tall at `center`, from a GeoJSON
+/// source of the zoom levels up to 14, over DEM tiles of `dem_zooms` that
+/// `dem` answers, seen from straight above a point 0.0006° west of it at
+/// zoom 16, after a view at each of `before`: where the surface's DEM tiles
+/// are of zoom 15, finer than the source's tile. `None` where the machine
+/// has no device.
+fn tall_extrusion(
+    center: LatLng,
+    dem_zooms: (u8, u8),
+    before: &[f64],
+    dem: impl Fn(&TileData) -> Vec<u8> + Send + Sync + 'static,
+) -> Option<(PremultipliedImage, Map, Requests)> {
+    let scene = Scene { dem_zooms, extrusion: Some(400.0), ..Scene::new(center, 14, 15) };
+    let west = LatLng::new(center.latitude(), center.longitude() - 0.0006).unwrap();
+    let camera =
+        |zoom: f64| CameraOptions { center: Some(west), zoom: Some(zoom), pitch: Some(0.0), ..Default::default() };
+    let cameras: Vec<CameraOptions> = before.iter().copied().chain([16.0]).map(camera).collect();
+    render_views(&scene.style(), &cameras, dem)
+}
+
+/// Over a DEM whose lowest zoom, 15, is deeper than an extrusion's source
+/// tile of zoom 14, no DEM tile holds the source tile, which stands at sea
+/// level: its roof, 400 m up, rises above the surface at 300 m, where the
+/// camera sees it 400 m up and not as it would on the surface, 700 m up.
 #[test]
-fn a_circle_over_a_dem_that_starts_deeper_than_its_tile_stands_on_the_surface() {
-    let center = LatLng::new(0.0, 0.0).unwrap();
-    let scene = Scene { dem_zooms: (15, 15), ..Scene::new(center, 14, 15) };
-    let Some((image, map, _)) = render(&scene, &[17.0], |_| dem_png(METERS_300)) else {
+fn an_extrusion_over_a_dem_that_starts_deeper_than_its_tile_stands_at_sea_level() {
+    let center = location_at(15, 16385.5, 16385.5);
+    let Some((image, map, _)) = tall_extrusion(center, (15, 15), &[], |_| dem_png(METERS_300)) else {
         return;
     };
-    assert_circle_at(&image, &map, &center, 300.0);
+    assert_roof_at(&image, &map, &center, 400.0);
+    let (sea, ground) = (seen_at(&map, &center, 400.0), seen_at(&map, &center, 700.0));
+    assert!((sea.0 - ground.0).hypot(sea.1 - ground.1) > 20.0, "the two heights differ on screen");
 }
 
 /// A circle layer out of its zoom levels, of a source tiled coarser than the
-/// DEM, asks for no DEM tile of its own: the still waits for the surface's
-/// DEM tiles alone, which, looking straight down at zoom 17, are of zoom 15
-/// and the coarse ones that cull the surface.
+/// DEM, which a fill layer draws too, asks for no DEM tile of its own: the
+/// still waits for the surface's DEM tiles alone, which, looking straight
+/// down at zoom 17, are of zoom 15 and the coarse ones that cull the
+/// surface. In its zoom levels, it asks for the DEM tile of its source tile,
+/// of zoom 14.
 #[test]
 fn a_circle_layer_out_of_its_zooms_asks_for_no_dem_tile() {
-    let center = LatLng::new(0.0, 0.0).unwrap();
-    let scene = Scene { pitch: 0.0, circle_zooms: (0, 10), ..Scene::new(center, 14, 15) };
-    let Some((image, _, requests)) = render(&scene, &[17.0], ridge) else {
-        return;
-    };
-    let zooms: BTreeSet<i8> = requests.lock().iter().map(|&(z, ..)| z).collect();
-    assert!(!zooms.contains(&14), "DEM tiles of zoom 14 asked for: {zooms:?}");
-    assert!((0..SIDE).all(|y| (0..SIDE).all(|x| !red(pixel(&image, x, y)))), "no circle");
+    let center = LatLng::new(0.0001, 0.0001).unwrap();
+    let fill = r#"{"id": "fill", "type": "fill", "source": "point"},"#;
+    for (circle_zooms, asks) in [((0, 10), false), ((0, 24), true)] {
+        let scene = Scene { pitch: 0.0, circle_zooms, ..Scene::new(center, 14, 15) };
+        let style = scene.style().replacen(r#"{"id": "background""#, &format!(r#"{fill}{{"id": "background""#), 1);
+        let camera = CameraOptions { center: Some(center), zoom: Some(17.0), pitch: Some(0.0), ..Default::default() };
+        let Some((image, _, requests)) = render_views(&style, &[camera], ridge) else {
+            return;
+        };
+        let zooms: BTreeSet<i8> = requests.lock().iter().map(|&(z, ..)| z).collect();
+        assert_eq!(asks, zooms.contains(&14), "layer zooms {circle_zooms:?}: DEM tiles of zooms {zooms:?}");
+        if !asks {
+            assert!((0..SIDE).all(|y| (0..SIDE).all(|x| !red(pixel(&image, x, y)))), "no circle");
+        }
+    }
 }
 
-/// An extrusion of a source whose deepest zoom, 14, is coarser than the DEM
-/// tiles of zoom 15 that the surface under it reads at zoom 17 stands on the
-/// surface, 300 m up, though its tile of zoom 14 draws in a part for each of
-/// the DEM tiles of zoom 15 under it: its roof is where the camera sees it
-/// 300 m and its height up, and not where the DEM tile of zoom 14 would put
-/// it, at 50 m, off the screen.
+/// The known limit: an extrusion of a source whose deepest zoom, 14, is
+/// coarser than the DEM tiles of zoom 15 that the surface under it reads
+/// stands on the DEM tile of zoom 14 over it, which the ridge's DEM tiles
+/// disagree with: at 50 m, with its roof 400 m up at 450 m, and not on the
+/// surface at 300 m, with its roof at 700 m. It does so in a still whether
+/// the map drew a view at zoom 14 before or not.
 #[test]
-fn an_extrusion_of_a_source_tiled_coarser_than_the_dem_stands_on_the_surface() {
+fn an_extrusion_of_a_source_tiled_coarser_than_the_dem_stands_on_its_own_dem_tile() {
     // In the south-east DEM tile of zoom 15 of its tile of zoom 14.
     let center = location_at(15, 16385.5, 16385.5);
-    let scene = Scene { extrusion: Some(20.0), ..Scene::new(center, 14, 15) };
-    let Some((image, map, _)) = render(&scene, &[17.0], ridge) else {
-        return;
-    };
-    assert!(red(pixel_at(&image, &map, &center, 320.0)), "the roof on the ground");
-    let (ground, coarse) = (seen_at(&map, &center, 320.0), seen_at(&map, &center, 70.0));
-    assert!((ground.0 - coarse.0).hypot(ground.1 - coarse.1) > 20.0, "the zooms' DEMs differ on screen");
+    for before in [&[][..], &[14.0]] {
+        let Some((image, map, _)) = tall_extrusion(center, (0, 15), before, ridge) else {
+            return;
+        };
+        assert_roof_at(&image, &map, &center, 450.0);
+        let (own, surface) = (seen_at(&map, &center, 450.0), seen_at(&map, &center, 700.0));
+        assert!((own.0 - surface.0).hypot(own.1 - surface.1) > 20.0, "the two heights differ on screen");
+    }
 }
 
 /// A DEM tile of 256 pixels a side over a slope down to the east, which

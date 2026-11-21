@@ -8,9 +8,8 @@ use mln_map_types::{Elevation, TileCoordinate};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID, UnwrappedTileID};
 use mln_util::dem::{self, DemCoords, DemUnpack};
 use mln_util::geo::LatLng;
-use mln_util::hash::HashMap;
+use mln_util::hash::{HashMap, HashSet};
 use mln_util::image::PremultipliedImage;
-use smallvec::SmallVec;
 
 use crate::terrain::cover::{TerrainCover, dem_bucket, place_in, world_copy};
 use crate::tile::source_tiles::SourceTiles;
@@ -27,15 +26,6 @@ pub(super) struct DrawnDem {
     /// meters, not exaggerated.
     min: f32,
     max: f32,
-}
-
-/// The drawn tiles over a tile ([`TerrainElevation::drawn_over`]), each with
-/// the DEM it reads.
-pub(super) enum DrawnOver<'a> {
-    /// The tile is in one drawn tile, which reads this DEM.
-    Holding(Option<&'a DrawnDem>),
-    /// The drawn tiles inside the tile, by their tile.
-    Inside(SmallVec<[(CanonicalTileID, Option<&'a DrawnDem>); 8]>),
 }
 
 /// A terrain tile as a frame drew it.
@@ -65,12 +55,13 @@ pub(crate) struct TerrainElevation {
     index: HashMap<CanonicalTileID, usize>,
     /// Where each drawn tile is in `tiles`, by its world copy.
     copies: HashMap<UnwrappedTileID, usize>,
-    /// The DEM tiles the cover keeps loaded that no tile reads, as the coarse
-    /// ones that cull it, which hold the ground off the tiles, in the cover's
-    /// order.
-    held: Vec<DrawnDem>,
+    /// The DEM tiles the standing layers' tiles that no drawn tile holds
+    /// read that no tile does ([`TerrainCover::standing_dems`]), each as it
+    /// bound: the requested tile, or while that loads the deepest ancestor of
+    /// it that has loaded; in the cover's order, each once.
+    standing: Vec<DrawnDem>,
     /// Each DEM tile the tiles read or it holds: where the first tile that
-    /// reads it is in `tiles`, or, past their end, where it is in `held`.
+    /// reads it is in `tiles`, or, past their end, where it is in `standing`.
     dems: HashMap<CanonicalTileID, usize>,
     /// [`Elevation::range`]'s.
     range: Option<(f64, f64)>,
@@ -88,15 +79,19 @@ impl fmt::Debug for TerrainElevation {
     }
 }
 
-/// The DEM tiles of `cover` that `dem`, the terrain source's tiles, has data
-/// of and that `read` doesn't say a tile reads, in the cover's order.
-fn held_dems<'a>(
+/// The DEM tiles that the standing DEM tiles of `cover` bind of `dem`, the
+/// terrain source's tiles: each one, or while it loads the deepest ancestor
+/// of it that has loaded, but those that `read` says a tile reads; in the
+/// cover's order, each once.
+fn standing_dems<'a>(
     cover: &'a TerrainCover,
     dem: Option<&'a SourceTiles>,
     read: impl Fn(&OverscaledTileID) -> bool + 'a,
 ) -> impl Iterator<Item = DrawnDem> + 'a {
-    let held = cover.dem_tiles.iter().filter(move |id| !read(id));
-    held.filter_map(move |&id| drawn_dem(dem, Some((id, DemCoords::OWN))))
+    let mut seen = HashSet::default();
+    let bound = dem.into_iter().flat_map(|dem| cover.bound_standing_dems(dem));
+    let bound = bound.filter(move |id| !read(id) && seen.insert(id.canonical));
+    bound.filter_map(move |id| drawn_dem(dem, Some((id, DemCoords::OWN))))
 }
 
 /// The DEM that a tile of `cover` bound, as `dem`, the terrain source's
@@ -137,8 +132,8 @@ impl TerrainElevation {
                 dems.entry(dem.id.canonical).or_insert(at);
             }
         }
-        let held: Vec<DrawnDem> = held_dems(cover, dem, |id| dems.contains_key(&id.canonical)).collect();
-        for (at, dem) in held.iter().enumerate() {
+        let standing: Vec<DrawnDem> = standing_dems(cover, dem, |id| dems.contains_key(&id.canonical)).collect();
+        for (at, dem) in standing.iter().enumerate() {
             dems.entry(dem.id.canonical).or_insert(tiles.len() + at);
         }
         let mut zooms = Vec::new();
@@ -156,13 +151,13 @@ impl TerrainElevation {
             range = Some(range.map_or((min, max), |(low, high)| (low.min(min), high.max(max))));
         }
         zooms.sort_unstable_by(|a, b| b.cmp(a));
-        TerrainElevation { tiles, zooms, index, copies, held, dems, range, unpack, exaggeration }
+        TerrainElevation { tiles, zooms, index, copies, standing, dems, range, unpack, exaggeration }
     }
 
     /// Whether `cover`'s tiles, binding their DEM from `dem`, draw the same
     /// ground, decoded by `unpack` and raised by `exaggeration`: the same
     /// tiles, drawn or kept under the center, reading the same DEM images in
-    /// the same places, and the same DEM images held off them.
+    /// the same places, and the same standing DEM images.
     pub(crate) fn draws_as(
         &self,
         cover: &TerrainCover,
@@ -199,17 +194,17 @@ impl TerrainElevation {
                 // checked above.
                 let read =
                     |id: &OverscaledTileID| self.dems.get(&id.canonical).is_some_and(|&at| at < self.tiles.len());
-                let mut held = held_dems(cover, dem, read);
-                self.held.iter().all(|kept| {
-                    held.next().is_some_and(|dem| kept.id == dem.id && Arc::ptr_eq(&kept.image, &dem.image))
-                }) && held.next().is_none()
+                let mut standing = standing_dems(cover, dem, read);
+                self.standing.iter().all(|kept| {
+                    standing.next().is_some_and(|dem| kept.id == dem.id && Arc::ptr_eq(&kept.image, &dem.image))
+                }) && standing.next().is_none()
             }
     }
 
     /// The bytes of the DEM images it holds, each once.
     pub(crate) fn dem_bytes(&self) -> usize {
         let read = self.tiles.iter().filter_map(|tile| tile.dem.as_ref());
-        let images = read.chain(&self.held).map(|dem| &dem.image);
+        let images = read.chain(&self.standing).map(|dem| &dem.image);
         images
             .clone()
             .enumerate()
@@ -307,31 +302,23 @@ impl TerrainElevation {
     fn dem_at(&self, at: usize) -> Option<&DrawnDem> {
         match self.tiles.get(at) {
             Some(tile) => tile.dem.as_ref(),
-            None => self.held.get(at - self.tiles.len()),
+            None => self.standing.get(at - self.tiles.len()),
         }
     }
 
-    /// The DEM tiles the drawn tiles read, and with `held`, those that the
-    /// tile under the center reads and those it holds off the tiles, each
-    /// once.
-    pub(super) fn dems(&self, held: bool) -> impl Iterator<Item = &DrawnDem> {
+    /// The DEM tiles the drawn tiles read, and with `standing`, those that
+    /// the tile under the center reads and the standing DEM tiles, each once.
+    pub(super) fn dems(&self, standing: bool) -> impl Iterator<Item = &DrawnDem> {
         let drawn = |at: usize| self.tiles.get(at).is_some_and(|tile| tile.drawn);
-        self.dems.values().filter(move |&&at| held || drawn(at)).filter_map(|&at| self.dem_at(at))
+        self.dems.values().filter(move |&&at| standing || drawn(at)).filter_map(|&at| self.dem_at(at))
     }
 
-    /// Of the DEM tiles the tiles read, and those it holds off them, the
-    /// deepest that holds `tile`.
-    pub(super) fn dem_holding(&self, tile: CanonicalTileID) -> Option<&DrawnDem> {
-        (0..=tile.z).rev().find_map(|z| {
-            let dz = tile.z - z;
-            self.dem_at(*self.dems.get(&CanonicalTileID::new(z, tile.x >> dz, tile.y >> dz))?)
-        })
-    }
-
-    /// The drawn tiles over `tile`, in its world copy, and the DEM each
-    /// reads (`None` where flat): the one that holds it, if one does
-    /// ([`DrawnOver::Holding`]), else those inside it.
-    pub(super) fn drawn_over(&self, tile: &OverscaledTileID) -> DrawnOver<'_> {
+    /// The DEM that a tile of a standing layer's source, `tile`, reads
+    /// ([`TerrainElevation::ground`]): that of the drawn tile that holds it,
+    /// or is it, in its world copy (`None` where flat); else the deepest of
+    /// the DEM tiles the tiles read and the standing DEM tiles that holds it,
+    /// if one does.
+    pub(super) fn dem_under(&self, tile: &OverscaledTileID) -> Option<&DrawnDem> {
         let canonical = tile.canonical;
         let holding = self.zooms.iter().filter(|&&z| z <= canonical.z).find_map(|&z| {
             let dz = canonical.z - z;
@@ -339,16 +326,12 @@ impl TerrainElevation {
             self.copies.get(&UnwrappedTileID::with_wrap(tile.wrap, ancestor))
         });
         if let Some(&at) = holding {
-            return DrawnOver::Holding(self.tiles[at].dem.as_ref());
+            return self.tiles[at].dem.as_ref();
         }
-        let inside = self.tiles.iter().filter(|drawn| {
-            let id = drawn.id;
-            drawn.drawn && id.wrap == tile.wrap && id.canonical.z > canonical.z && {
-                let dz = id.canonical.z - canonical.z;
-                id.canonical.x >> dz == canonical.x && id.canonical.y >> dz == canonical.y
-            }
-        });
-        DrawnOver::Inside(inside.map(|drawn| (drawn.id.canonical, drawn.dem.as_ref())).collect())
+        (0..=canonical.z).rev().find_map(|z| {
+            let dz = canonical.z - z;
+            self.dem_at(*self.dems.get(&CanonicalTileID::new(z, canonical.x >> dz, canonical.y >> dz))?)
+        })
     }
 
     /// How the DEM decodes.
@@ -445,7 +428,7 @@ impl TerrainElevation {
             zooms: vec![tile.canonical.z],
             index: [(tile.canonical, 0)].into_iter().collect(),
             copies: [(tile.to_unwrapped(), 0)].into_iter().collect(),
-            held: Vec::new(),
+            standing: Vec::new(),
             dems: [(tile.canonical, 0)].into_iter().collect(),
             range: Some((min, max)),
             unpack: DemUnpack::of(RasterEncoding::Terrarium),
@@ -467,14 +450,12 @@ mod tests {
     fn level_ground_is_as_high_as_it_was_made() {
         use glam::Vec2;
 
-        use crate::terrain::TileFeatures;
-
         let tile = OverscaledTileID::new(12, 0, CanonicalTileID::new(12, 2000, 1500));
         let ground = TerrainElevation::level(tile, 812.25);
         let point = Vec2::new(1000.0, 7000.0);
-        assert_eq!(Some(812.25), ground.ground(&tile, TileFeatures::Anchored).height(point, point));
+        assert_eq!(812.25, ground.ground(&tile).height(point));
         let inside = OverscaledTileID::new(14, 0, CanonicalTileID::new(14, 8001, 6002));
-        assert_eq!(Some(812.25), ground.ground(&inside, TileFeatures::Anchored).height(point, point));
+        assert_eq!(812.25, ground.ground(&inside).height(point));
     }
 
     /// A point in a world copy past the range of the tiles' wraps has no
@@ -493,6 +474,7 @@ mod tests {
             tiles: vec![tile(i16::MAX), tile(i16::MIN)],
             center: None,
             dem_tiles: Vec::new(),
+            standing_dems: Vec::new(),
             ranges: ElevationRanges::default(),
         };
         let ground = TerrainElevation::new(&cover, None, DemUnpack::of(RasterEncoding::Terrarium), 1.0);

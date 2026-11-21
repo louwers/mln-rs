@@ -19,18 +19,19 @@
 //! 1. Before the sources update, [`RenderTerrain::update`] covers the view
 //!    with terrain tiles and lists the DEM tiles they read. Every source
 //!    then covers the view the same way, culled by the same elevation
-//!    ranges, and the terrain's source keeps its DEM tiles loaded, whether
-//!    or not a layer draws them. They count toward the frame's being
-//!    loaded.
+//!    ranges. The terrain's source updates last, once the standing layers'
+//!    tiles are known, whose DEM tiles off the surface's it lists too
+//!    ([`RenderTerrain::request_standing`]), and keeps its DEM tiles loaded,
+//!    whether or not a layer draws them. They count toward the frame's
+//!    being loaded.
 //! 2. Once the sources have updated, [`RenderTerrain::bind`] binds each
 //!    terrain tile's DEM, and tells the map of the ground the tiles draw, if
 //!    it changed.
 //! 3. In the encode, the ground's DEM textures are made first
 //!    ([`RenderTerrain::prepare_ground`]): those the surface reads, and in a
-//!    frame where a layer stands on the ground, those its parts off the
-//!    cover read too, of the coarse DEM tiles that cull the cover; in a frame
-//!    where a layer that the ground hides draws, so is the target of the
-//!    ground's depth. The layers that drape (background, fill, line, hillshade,
+//!    frame where a layer stands on the ground, those its tiles read off
+//!    the surface's too; in a frame where a layer that the ground hides
+//!    draws, so is the target of the ground's depth. The layers that drape (background, fill, line, hillshade,
 //!    color relief, and raster, an image source's too) make no draws in the
 //!    frame: they draw in each drape of their stack whose key changed
 //!    ([`RenderTerrain::begin_drapes`]). The surface makes a draw per tile
@@ -91,8 +92,7 @@
 //!   map-pitched label along a line stands on the ground under it. Placement
 //!   reads the same ground on the CPU ([`TileGround::height`]): it collides a
 //!   point label's box, all of it at its anchor's height, and lays out a
-//!   label at a variable anchor, where the label draws; a label that no draw
-//!   of its tile draws, its anchor off every part, has no box. A new ground
+//!   label at a variable anchor, where the label draws. A new ground
 //!   ([`RenderTerrain::ground`]) makes placement stale, even with the camera
 //!   at rest, and a continuous map places again when placement is next due,
 //!   so a label can stand on the new ground for up to one placement period
@@ -101,8 +101,8 @@
 //!   along a line stands on the ground with no height offset: each update
 //!   lays its glyphs out along its line as it stands on the ground under each
 //!   vertex, and placement collides each of its circles at the ground under
-//!   it, both reading the part that draws its anchor, clamped to its DEM
-//!   tile past its edges. Collision debug boxes and circles draw at sea
+//!   it, both reading its tile's ground, clamped to its DEM tile past its
+//!   edges. Collision debug boxes and circles draw at sea
 //!   level. A polygon's roof and base rise by the ground at its centroid. Where its base is at or
 //!   below 0, each end of a wall's foot sinks to 10 m below the lower of the
 //!   ground at the centroid and the ground under that end, so that no gap
@@ -117,29 +117,31 @@
 //!   variant's draws expand to their vertices, and are laid out with them
 //!   only for a style with terrain: a tile laid out without them lays out
 //!   again while the style has terrain, holding a still as any tile that lays
-//!   out does, and draws nothing over terrain until then. A tile T of theirs
-//!   reads the DEM tiles the surface reads under it, and no others
-//!   ([`TerrainElevation::ground`]): the DEM tile of the terrain tile it is
-//!   in, or, where terrain tiles are inside T, as over a
-//!   source tiled coarser than the DEM, the one each of them reads, on its part
-//!   of T. T draws once for each part, and each draw drops the features whose
-//!   untranslated anchor (an extrusion's centroid) is off its part, so each
-//!   feature draws once, on the DEM tile the surface reads under its anchor:
-//!   the terrain tile's own wherever that has loaded, which a still waits for,
-//!   and while it loads, the ancestor the surface reads in its place. A
-//!   point layer's T (circles and heatmap kernels) draws only the features
-//!   whose anchor is in T, from 0 to under the extent on both axes: a copy in
-//!   T's buffer, which a still's circles keep, is left to the tile that holds
-//!   it, and is absent where that tile doesn't draw, as on a continuous flat
-//!   map ([`TileFeatures::Anchored`]). A fill extrusion's T draws every piece
-//!   of a polygon that its bucket cut at T's edges, its parts on those edges
-//!   reaching past them, so that a piece whose centroid lies outside T draws
-//!   once too ([`TileFeatures::All`]). Off the cover, a part reads the deepest DEM tile that the cover reads, or loads to
-//!   cull its tiles, that holds it, or stands at sea level while none has
-//!   loaded. The CPU reads a feature's height ([`TileGround::height`]) from the
-//!   DEM tile and coordinates its draw reads, by the same height rule. A draw's
-//!   ground (DEM coordinates, part, decode and exaggeration) rides in its
-//!   projection entry, which every standing program's vertex stage reads
+//!   out does, and draws nothing over terrain until then. Each tile T of a
+//!   standing layer reads one DEM tile ([`TerrainElevation::ground`]), as in
+//!   GL JS, MapLibre Native and orbis: where a drawn terrain tile holds T,
+//!   that tile's, at T's place in it, as the surface draws it, its own or,
+//!   while that loads, the ancestor the surface reads in its place. Where
+//!   drawn terrain tiles are inside T, as over a source tiled coarser than
+//!   the DEM, or none is over it, T reads the DEM tile that holds it at its
+//!   own zoom, or at the DEM's deepest if that is shallower, which the cover
+//!   requests for each such tile of a standing layer the frame draws, and a
+//!   still waits for; while it loads, T reads the deepest ancestor of it
+//!   that has loaded. Where the DEM has no tile that holds T, its lowest
+//!   zoom deeper than T's, T stands at sea level. A known limit: features of
+//!   such a T stand on a DEM tile coarser than the surface's under them, off
+//!   the surface by what the DEM tile differs from the finer ones. A point
+//!   layer's T (circles, heatmap kernels and symbols) draws only the
+//!   features whose anchor is in T, from 0 to under the extent on both axes:
+//!   a copy in T's buffer, which a still's circles keep, is left to the tile
+//!   that holds it, and is absent where that tile doesn't draw, as on a
+//!   continuous flat map ([`TileFeatures::Anchored`]). A fill extrusion's T
+//!   draws every piece of a polygon that its bucket cut at T's edges, its
+//!   centroid in T or not ([`TileFeatures::All`]). The CPU reads a feature's
+//!   height ([`TileGround::height`]) from the DEM tile and coordinates its
+//!   draw reads, by the same height rule. A draw's ground (DEM coordinates,
+//!   the anchors it draws, decode and exaggeration) rides in its projection
+//!   entry, which every standing program's vertex stage reads
 //!   ([`TerrainProjectionUBO`]); its DEM texture binds at
 //!   [`ID_GROUND_DEM_TEXTURE`], a slot of the draw's own textures that no
 //!   standing program's other textures take, so a label's glyphs and icons keep
@@ -170,15 +172,9 @@
 //!   heatmap kernel: a kernel adds its density wherever it draws, with ground
 //!   in front of it or not, as in GL JS, so that density doesn't pop in and
 //!   out as the camera moves over hills. The draws of circles and heatmap
-//!   kernels stack in the frame's order of their tiles, and then of each tile's parts, whenever each draw
+//!   kernels stack in the frame's order of their tiles, whenever each draw
 //!   was made, so a view draws alike whatever path the camera took to it;
-//!   what shows of fill extrusions is the depth's to decide. A known limit: a
-//!   tile that draws in several parts, which happens only where the view is
-//!   zoomed past a source's deepest zoom over a deeper DEM, draws its features
-//!   part by part rather than in its bucket's order, so where features of two
-//!   parts overlap, which is on top can differ from a flat map, and symbols
-//!   sort (by key, by viewport y or as their tile's source orders them)
-//!   within each part only, their halos below their fills in every part.
+//!   what shows of fill extrusions is the depth's to decide.
 //! - **The surface** draws once for each stack, its tiles nearest the
 //!   center first, testing and writing the 3D depth range with less or
 //!   equal and blending its drapes over what is under it. A stack above the
@@ -271,9 +267,9 @@
 //!   frame texture, which is copied into the drape before its mips. A
 //!   blend's backdrop is the drape's own texels.
 //! - **The elevation snapshot** ([`TerrainElevation`]) holds the drawn
-//!   tiles and the DEM images and sub-rects they read, and the coarse DEM
-//!   tiles the cover loads to cull them, which the standing layers read off
-//!   the cover. Its images don't change once it shares them, so the map
+//!   tiles and the DEM images and sub-rects they read, and the DEM tiles
+//!   that the standing layers' tiles read off theirs. Its images don't
+//!   change once it shares them, so the map
 //!   reads it on its thread. It answers
 //!   four questions ([`Elevation`]): the height at a location, `None` while
 //!   its DEM loads, which a clamped center stands on; the floor of the tile
@@ -286,8 +282,8 @@
 //!   in the point's world copy, and for the height and floor, which the
 //!   center reads, of any copy. The renderer
 //!   makes a new one only when the tiles, the DEM images they read, where
-//!   they read them, whether their own DEM loads, the coarse DEM tiles it
-//!   holds, or the decode change: a fixed camera over loaded tiles keeps
+//!   they read them, whether their own DEM loads, the standing layers' DEM
+//!   tiles, or the decode change: a fixed camera over loaded tiles keeps
 //!   one snapshot. It reaches the map
 //!   as [`RendererEvent::TerrainElevation`] before the frame of its update
 //!   finishes. The renderer sends its current one again for an update
@@ -332,7 +328,7 @@ pub(crate) use cover::{ElevationRanges, TerrainCover};
 pub(crate) use cover::{REMEMBERED_RANGES, TerrainTile, terrain_tile_size};
 pub(crate) use drapes::Drapes;
 pub(crate) use elevation::TerrainElevation;
-pub(crate) use ground::{GroundBinding, GroundBindings, PartGround, TileFeatures, TileGround, write_projection};
+pub(crate) use ground::{GroundBinding, GroundBindings, TileFeatures, TileGround, write_projection};
 use mln_gfx::gpu::Gpu;
 #[cfg(doc)]
 use mln_gfx::projection_variant::ProjectionVariant;
@@ -561,6 +557,16 @@ impl RenderTerrain {
         self.cover.as_ref()
     }
 
+    /// Requests, while terrain draws, the DEM tiles that `tiles`, the tiles
+    /// that a standing layer draws, read off the surface's
+    /// ([`TerrainCover::request_standing`]), once their source has updated
+    /// and before the terrain's own source does.
+    pub(crate) fn request_standing(&mut self, tiles: impl IntoIterator<Item = mln_tile_id::UnwrappedTileID>) {
+        if let Some(cover) = &mut self.cover {
+            cover.request_standing(tiles);
+        }
+    }
+
     /// The ground the standing layers of the last update stand on, the
     /// ground its cover drew, as [`bind`](Self::bind) left it; `None` while
     /// terrain doesn't draw. [`TerrainElevation::ground`] gives the ground
@@ -573,8 +579,8 @@ impl RenderTerrain {
     /// its ground: the textures of the DEM tiles of the terrain's source,
     /// which `dem` finds by its id, that the surface reads, for the surface
     /// and, where a layer of the frame `stands`, the standing layers, with
-    /// those of the DEM tiles it holds off the drawn tiles, which their parts
-    /// off the cover read; and, where a layer of the frame `hides` behind
+    /// those of the DEM tiles their tiles read off the drawn tiles'; and,
+    /// where a layer of the frame `hides` behind
     /// the ground, the depth of the drawn ground, at the frame's logical
     /// pixels, which [`render_ground_depth`](Self::render_ground_depth)
     /// draws and the context binds for the frame

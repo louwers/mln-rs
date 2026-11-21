@@ -107,8 +107,7 @@ fn indexed_subfeature(
 pub(crate) struct PlacedFeatureResult {
     pub(crate) placed: bool,
     pub(crate) offscreen: bool,
-    /// Behind the planet's horizon, or, over terrain, where no draw of its
-    /// tile draws it: hidden even when overlap is allowed.
+    /// Behind the planet's horizon: hidden even when overlap is allowed.
     pub(crate) occluded: bool,
 }
 
@@ -349,9 +348,7 @@ impl CollisionIndex {
         // A point label and its eight box points stand at its anchor's
         // height, as its draw raises it.
         let anchor = box_.anchor + part.translation;
-        let Some(elevation) = part.elevation.at(box_.anchor, anchor, run.symbol.height_offset) else {
-            return PlacedFeatureResult { placed: false, offscreen: false, occluded: true };
-        };
+        let elevation = part.elevation.at(anchor, run.symbol.height_offset);
         let projected_point = self.project_and_get_perspective_ratio(part.tile_projector, anchor, elevation);
         let mut occluded = projected_point.occluded;
         let collision_boundaries = if part.pitch_with_map || part.rotate_with_map {
@@ -395,9 +392,7 @@ impl CollisionIndex {
     ) -> PlacedFeatureResult {
         let symbol = run.symbol;
         let tile_unit_anchor_point = symbol.anchor_point;
-        let Some(height) = part.elevation.along_line(tile_unit_anchor_point) else {
-            return PlacedFeatureResult { placed: false, offscreen: false, occluded: true };
-        };
+        let height = part.elevation.along_line();
         let anchor = self.project_and_get_perspective_ratio(
             part.tile_projector,
             tile_unit_anchor_point,
@@ -884,11 +879,11 @@ mod tests {
         use crate::buckets::symbol_bucket::PlacedSymbol;
         use crate::layout::symbol_instance::WritingModes;
         use crate::layout::symbol_projection::measured_from_ground;
-        use crate::terrain::{TerrainElevation, TileFeatures};
+        use crate::terrain::TerrainElevation;
 
         let tile = OverscaledTileID::new(12, 0, CanonicalTileID::new(12, 2000, 1500));
         let elevation = TerrainElevation::level(tile, 800.0);
-        let ground = elevation.ground(&tile, TileFeatures::Anchored);
+        let ground = elevation.ground(&tile);
         let zoom = 12.5;
         let mut state = mln_map_types::TransformState::default();
         state.set_size(Size::new(512, 512));
@@ -965,34 +960,11 @@ mod tests {
                 assert!(middle.distance(elsewhere) > 20.0, "{what}: the box at {other} m");
             }
         }
-
-        // An anchor off the tile, which no draw of it draws, has no box.
-        let label_plane = LabelPlaneProjector::new(&tile_projector, false, false, pixels_to_tile_units, Vec2::ZERO);
-        let part = PartCollision {
-            tile_projector: &tile_projector,
-            label_plane: &label_plane,
-            elevation: SymbolElevation::new(Some(&ground), true),
-            translation: Vec2::ZERO,
-            pixel_ratio: 512.0 / 8192.0,
-            scale: 2f32.powf(0.5),
-            overlap_mode: OverlapMode::Always,
-            pitch_with_map: false,
-            rotate_with_map: false,
-            avoid_edges: None,
-            collision_group: None,
-            debug: false,
-        };
-        let off = [CollisionBox::new(Vec2::new(-100.0, 4000.0), -32.0, -16.0, 32.0, 16.0, 0.0)];
-        let mut projected = Vec::new();
-        let placed = index.place_feature(&part, &feature(0), &off, &run, None, &mut projected);
-        assert!(!placed.placed && placed.occluded, "{placed:?}");
-        assert_eq!(projected, []);
     }
 
     /// A line label's collision circles over sloping ground are centered
     /// where the camera sees the line on the ground under each circle, far
-    /// from where it would see it at sea level. A label whose anchor no draw
-    /// of its tile draws gets none.
+    /// from where it would see it at sea level.
     #[test]
     fn a_line_labels_circles_stand_on_the_ground_under_them() {
         use mln_tile_id::{CanonicalTileID, OverscaledTileID};
@@ -1000,13 +972,13 @@ mod tests {
 
         use crate::buckets::symbol_bucket::PlacedSymbol;
         use crate::layout::symbol_instance::WritingModes;
-        use crate::terrain::{TerrainElevation, TileFeatures};
+        use crate::terrain::TerrainElevation;
 
         let tile = OverscaledTileID::new(12, 0, CanonicalTileID::new(12, 2000, 1500));
         // Rising 3,000 m from the tile's west edge to its east one.
         let sloped = |tile_point: Vec2| 200.0 + 3000.0 * f64::from(tile_point.x) / f64::from(EXTENT);
         let elevation = TerrainElevation::shaped(tile, |uv| 200.0 + 3000.0 * uv.x);
-        let ground = elevation.ground(&tile, TileFeatures::Anchored);
+        let ground = elevation.ground(&tile);
         let zoom = 12.5;
         let mut state = mln_map_types::TransformState::default();
         state.set_size(Size::new(512, 512));
@@ -1084,13 +1056,5 @@ mod tests {
             assert!(center.distance(at_sea_level) > 20.0, "{center} is {at_sea_level} at sea level");
         }
         assert!(circles >= 3, "{circles} circles");
-
-        // An anchor past the tile's edge, which a neighbour draws.
-        let (symbol, boxes) = place(Vec2::new(-100.0, 4000.0), &mut pools);
-        let run = LabelRun { symbol: &symbol, pools: &pools, font_size: 16.0 };
-        let mut projected = Vec::new();
-        let placed = index.place_feature(&part, &along_line, &boxes, &run, None, &mut projected);
-        assert!(!placed.placed && placed.occluded, "{placed:?}");
-        assert!(projected.iter().all(Option::is_none), "{projected:?}");
     }
 }

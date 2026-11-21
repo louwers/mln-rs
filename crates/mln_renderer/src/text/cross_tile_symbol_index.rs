@@ -179,7 +179,7 @@ impl LayerIndex {
         let elevation = SymbolElevation::new(Some(&ground), measured_from_ground(&bucket.layout));
         let height = |symbol: &SymbolInstance| {
             let (point, offset) = (symbol.anchor().point, symbol.height_offset());
-            elevation.at(point, point, offset).unwrap_or(offset)
+            elevation.at(point, offset)
         };
         self.add_bucket(tile, projector, height, bucket, ids)
     }

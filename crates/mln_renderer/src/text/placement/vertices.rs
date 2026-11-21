@@ -322,9 +322,7 @@ impl Placement {
         };
         let shifted_anchor = |offset: &VariableOffset, run: &crate::buckets::symbol_bucket::PlacedSymbol| {
             let tile_anchor = run.anchor_point;
-            // A label whose tile draws it nowhere shows nowhere either.
-            let raised = elevation.at(tile_anchor, tile_anchor + translation, run.height_offset);
-            let height = LabelHeight::Fixed(f64::from(raised.unwrap_or(run.height_offset)));
+            let height = LabelHeight::Fixed(f64::from(elevation.at(tile_anchor + translation, run.height_offset)));
             let projected = if pitch_with_map {
                 label_plane.to_clip_space_from_tile(tile_anchor, height)
             } else {

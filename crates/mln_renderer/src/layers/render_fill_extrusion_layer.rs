@@ -23,9 +23,7 @@
 // raise each polygon by the ground at its centroid. A draw expands the
 // bucket's centroids, one a polygon, into one a vertex, which the roofs and
 // the instanced walls read as attributes, the walls that are quads of their
-// own as four a wall, and the pulled walls from a storage buffer. A tile
-// whose ground the surface reads from several DEM tiles draws its draws once
-// for each, each dropping the polygons whose centroid is off its part.
+// own as four a wall, and the pulled walls from a storage buffer.
 //
 // A translucent layer blends only its nearest surface over each pixel. Where
 // the layer composite's texture can draw with the frame's depth, the layer
@@ -67,7 +65,6 @@ use mln_util::constants::TILE_SIZE_D;
 use mln_util::error::Error;
 use mln_util::identity::SimpleIdentity;
 use mln_util::size::Size;
-use smallvec::SmallVec;
 
 use super::cast_matrix;
 use crate::bucket::Bucket;
@@ -123,24 +120,14 @@ struct ExtrusionDraw {
 }
 
 /// What the layer keeps of a tile: the draws of its roofs and walls, as they
-/// were built for the tile's bucket, once for each part of the tile that
-/// reads its own ground over terrain, and once on a flat map.
+/// were built for the tile's bucket.
 pub(crate) struct ExtrusionTile {
-    /// The draws of each of the `parts`, as many each, part after part.
     draws: Vec<ExtrusionDraw>,
-    parts: usize,
     /// Where the pulled walls' shader finds a vertex's paint values
     /// (`FillExtrusionDrawableUBO::paint_layout`).
     paint_layout: u32,
     /// Gives the pattern draws the texture of the tile's icon atlas.
     atlases: Option<AtlasBinding>,
-}
-
-impl ExtrusionTile {
-    /// The part of the tile that its draw `index` draws.
-    fn part_of(&self, index: usize) -> usize {
-        index * self.parts / self.draws.len()
-    }
 }
 
 impl TileObjects for ExtrusionTile {
@@ -395,10 +382,9 @@ impl TypedLayer for RenderFillExtrusionLayer {
         if opacity(evaluated) > 0.0 { RenderPass::Translucent } else { RenderPass::None }
     }
 
-    /// Makes the frame's draws of the layer, those of each of its tiles, or
-    /// over terrain those of each part of a tile that reads its own ground,
-    /// which it builds for a tile it keeps none of or keeps for another
-    /// number of parts, and writes the layer's buffers they read.
+    /// Makes the frame's draws of the layer, those of each of its tiles,
+    /// which it builds for a tile it keeps none of, and writes the layer's
+    /// buffers they read.
     fn update_draws(
         &mut self,
         gpu: &mut dyn Gpu,
@@ -475,13 +461,7 @@ impl TypedLayer for RenderFillExtrusionLayer {
 
             let changes = entry.take_changes();
             let context = &mut *paint_parameters.context;
-            let reads = ground.map(|ground| ground.reads(&tile_id, TileFeatures::All));
-            let parts = reads.as_ref().map_or(1, SmallVec::len);
-            // Draws of as many parts as the tile reads its ground in, made
-            // again where that changed.
-            if entry.value.as_ref().is_some_and(|cached| cached.parts != parts) {
-                *entry.value = None;
-            }
+            let read = ground.map(|ground| ground.read(&tile_id, TileFeatures::All));
             let cached = match entry.value {
                 Some(cached) => {
                     if changes.paint {
@@ -489,12 +469,11 @@ impl TypedLayer for RenderFillExtrusionLayer {
                     }
                     cached
                 }
-                None => entry.value.insert(builder.build(context, render_data, binders, &layer.paint, parts)),
+                None => entry.value.insert(builder.build(context, render_data, binders, &layer.paint)),
             };
             for index in 0..cached.draws.len() {
-                let part = cached.part_of(index);
                 let draw = &mut cached.draws[index];
-                if let Some(read) = reads.as_ref().and_then(|reads| reads.get(part)) {
+                if let Some(read) = &read {
                     draw.objects.set_texture(ID_GROUND_DEM_TEXTURE, Some(&read.texture));
                     self.grounds.push(read.ubo);
                 }
@@ -584,26 +563,25 @@ struct TileBuilder<'a> {
 impl TileBuilder<'_> {
     /// The draws of `tile`'s `bucket`, laid out with the layer's `evaluated`
     /// values: of its roofs, then of its walls, each into depth, where the
-    /// layer draws it, then in color, all once for each of `parts`.
+    /// layer draws it, then in color.
     fn build(
         &self,
         context: &mut Context,
         tile_bucket: LayerBucket<'_, FillExtrusion>,
         binders: &FillExtrusionBinders,
         evaluated: &FillExtrusionPaintProperties::PossiblyEvaluated,
-        parts: usize,
     ) -> ExtrusionTile {
         let (bucket, geometry) = (tile_bucket.bucket, tile_bucket.geometry());
         let (Some(vertices), Some(triangles)) =
             (bucket_vertices(geometry, &bucket.vertices), bucket_indexes(geometry, &bucket.triangles))
         else {
-            return ExtrusionTile { draws: Vec::new(), parts, paint_layout: 0, atlases: None };
+            return ExtrusionTile { draws: Vec::new(), paint_layout: 0, atlases: None };
         };
         let vertex_count = bucket.vertices.len();
         // A bucket laid out before the style had terrain has no centroids to
         // stand on: the tile draws once the one laid out for terrain comes.
         if self.projection_variant == ProjectionVariant::Terrain && bucket.centroids.is_empty() {
-            return ExtrusionTile { draws: Vec::new(), parts, paint_layout: 0, atlases: None };
+            return ExtrusionTile { draws: Vec::new(), paint_layout: 0, atlases: None };
         }
         // A wall from each vertex to the next, but from the last, which
         // ends a ring.
@@ -731,20 +709,18 @@ impl TileBuilder<'_> {
             segments: &wall_segments,
         };
         let mut draws = Vec::new();
-        for _ in 0..parts {
-            if !bucket.triangles.is_empty() && vertex_count > 0 {
-                if self.depth_pass {
-                    draws.push(extrusion_draw(&shader, false, None, false, &roofs, atlases.as_ref()));
-                }
-                draws.push(extrusion_draw(&shader, false, color, clip, &roofs, atlases.as_ref()));
+        if !bucket.triangles.is_empty() && vertex_count > 0 {
+            if self.depth_pass {
+                draws.push(extrusion_draw(&shader, false, None, false, &roofs, atlases.as_ref()));
             }
-            // A tile with one vertex has no wall.
-            if walls > 0 && wall_vertex_count > 0 {
-                if self.depth_pass {
-                    draws.push(extrusion_draw(&wall_shader, true, None, false, &walls_geometry, atlases.as_ref()));
-                }
-                draws.push(extrusion_draw(&wall_shader, true, color, clip, &walls_geometry, atlases.as_ref()));
+            draws.push(extrusion_draw(&shader, false, color, clip, &roofs, atlases.as_ref()));
+        }
+        // A tile with one vertex has no wall.
+        if walls > 0 && wall_vertex_count > 0 {
+            if self.depth_pass {
+                draws.push(extrusion_draw(&wall_shader, true, None, false, &walls_geometry, atlases.as_ref()));
             }
+            draws.push(extrusion_draw(&wall_shader, true, color, clip, &walls_geometry, atlases.as_ref()));
         }
         if self.walls == Walls::Pulled {
             for draw in draws.iter_mut().filter(|draw| draw.walls) {
@@ -754,7 +730,7 @@ impl TileBuilder<'_> {
             }
         }
 
-        ExtrusionTile { draws, parts, paint_layout, atlases }
+        ExtrusionTile { draws, paint_layout, atlases }
     }
 }
 
