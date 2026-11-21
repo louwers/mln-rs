@@ -4,7 +4,9 @@ use mln_tile_id::geometry_tile_data::{GeometryCoordinate, GeometryCoordinates};
 use mln_util::constants::EXTENT;
 use mln_util::subdivision_granularity::SubdivisionGranularityExpression;
 
-use crate::globe::{NORTH_POLE_Y, SOUTH_POLE_Y, grid, masked_tile_grids, subdivide_line, subdivide_ring};
+use crate::globe::{
+    NORTH_POLE_Y, SOUTH_POLE_Y, grid, masked_tile_grids, subdivide_line, subdivide_polygon, subdivide_ring,
+};
 
 /// `EXTENT` as a tile coordinate.
 const EXTENT_I16: i16 = EXTENT as i16;
@@ -59,6 +61,22 @@ fn vertex_line() {
     let closed = subdivide_ring(&ring, 1);
     assert_eq!(ring[0], *closed.last().expect("point"));
     assert_eq!(4, closed.len());
+}
+
+/// A granularity past `EXTENT` subdivides lines and polygons as `EXTENT`
+/// does, where a cell is a tile unit wide.
+#[test]
+fn granularity_past_the_extent_subdivides_by_tile_units() {
+    let line: GeometryCoordinates = vec![p(0, 0), p(16, 0)];
+    assert_eq!(subdivide_line(&line, 8192), subdivide_line(&line, 8193));
+    assert_eq!(subdivide_ring(&line, 8192), subdivide_ring(&line, u32::MAX));
+    assert_eq!(17, subdivide_line(&line, u32::MAX).len());
+
+    let square = vec![vec![p(0, 0), p(4, 0), p(4, 4), p(0, 4)]];
+    let triangles = [[0, 1, 2], [0, 2, 3]];
+    let tile = CanonicalTileID::new(2, 1, 1);
+    let polygon = |granularity| subdivide_polygon(&square.clone().into(), &triangles, &tile, granularity, true);
+    assert_eq!(polygon(8192), polygon(u32::MAX));
 }
 
 // gtest: TileMesh.QuadAndGrid

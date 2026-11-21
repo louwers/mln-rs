@@ -29,7 +29,8 @@ pub struct SubdividedPolygon {
 /// bottom row, the triangles along the pole's edge of the tile extend to
 /// the pole. On the zoom 0 tile, which spans the antimeridian, triangles
 /// and lines that reach outside the tile are dropped. `outline` adds the
-/// lines of the rings, subdivided as well.
+/// lines of the rings, subdivided as well. A cell is at least a tile unit
+/// wide, so a granularity past `EXTENT` subdivides as `EXTENT` does.
 ///
 /// # Panics
 ///
@@ -47,7 +48,7 @@ pub fn subdivide_polygon(
         indices: HashMap::default(),
         tile: *tile,
         granularity,
-        cell_size: f64::from(EXTENT) / f64::from(granularity),
+        cell_size: (f64::from(EXTENT) / f64::from(granularity)).max(1.0),
     };
     let rings: Vec<u32> = polygon.iter().flatten().map(|&p| subdivider.index(vec(p))).collect();
     let triangles: Vec<[u32; 3]> = triangles.iter().map(|triangle| triangle.map(|i| rings[i as usize])).collect();

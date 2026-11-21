@@ -5,7 +5,8 @@ use mln_util::constants::EXTENT;
 
 /// `line` with a vertex inserted wherever it crosses the boundary of a
 /// cell of a grid of `granularity` cells per axis over the tile. A line of
-/// fewer than two points has none.
+/// fewer than two points has none. A cell is at least a tile unit wide, so
+/// a granularity past `EXTENT` subdivides as `EXTENT` does.
 #[must_use]
 pub fn subdivide_line(line: &[Point<i16>], granularity: u32) -> GeometryCoordinates {
     subdivide(line, granularity, false)
@@ -30,7 +31,7 @@ fn subdivide(line: &[Point<i16>], granularity: u32, close: bool) -> GeometryCoor
         return line.iter().chain(close_ring.then_some(&line[0])).copied().collect();
     }
 
-    let cell_size = (f64::from(EXTENT) / f64::from(granularity)).floor();
+    let cell_size = (f64::from(EXTENT) / f64::from(granularity)).floor().max(1.0);
     let mut result = vec![line[0]];
     // The values are integral and in range.
     let mut push = |p: DVec2| {
