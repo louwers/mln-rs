@@ -40,8 +40,8 @@ pub enum RendererEvent {
         /// The frame has transitions still running.
         needs_repaint: bool,
         /// When, without `needs_repaint`, the map changes next though
-        /// nothing asks for a frame before: a frame then places the symbols
-        /// again.
+        /// nothing asks for a frame before: a frame then places the layers'
+        /// contents again.
         repaint_at: Option<Instant>,
         placement_changed: bool,
         /// The still image request of the update that the frame drew, or 0

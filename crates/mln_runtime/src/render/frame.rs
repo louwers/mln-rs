@@ -67,7 +67,7 @@ pub struct FrameResult {
     /// demand that rendered nothing.
     pub frame_generation: u64,
     /// Whether the map changes after this frame without new commands: a
-    /// transition runs, or the symbols wait for a placement, which an update
+    /// transition runs, or a placement is due, which an update
     /// of the map's own draws.
     pub needs_repaint: bool,
     /// The camera and extent that a rendered frame shows.

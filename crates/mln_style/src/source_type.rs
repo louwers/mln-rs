@@ -83,7 +83,7 @@ pub enum OfflineResources {
     /// The TileJSON at `url`, then the tiles, `tile_size` pixels wide, of
     /// the tileset that [`ErasedSource::offline_tileset`] makes of it.
     TileJson { url: String, tile_size: u16 },
-    /// The source's data at `url`: GeoJSON.
+    /// The source's data at `url`, which is one resource.
     Source { url: String },
     /// The source's image at `url`, which is nothing to fetch if empty.
     Image { url: String },

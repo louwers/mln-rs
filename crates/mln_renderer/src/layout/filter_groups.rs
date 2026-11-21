@@ -35,7 +35,7 @@ impl Key {
 }
 
 /// The inputs apart from the feature that an operand is evaluated with:
-/// layouts evaluate with different ones (only symbols pass font faces), so
+/// layouts evaluate with different ones (only some pass font faces), so
 /// an index serves only evaluations with the same ones. The global state,
 /// font faces and available images are compared by address, so a
 /// `FilterGroups` serves only evaluations whose inputs outlive it.

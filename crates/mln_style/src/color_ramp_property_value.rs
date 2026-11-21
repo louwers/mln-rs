@@ -16,8 +16,8 @@ use crate::serialization::optional_expression;
 use crate::style_property::StyleProperty;
 
 /// Special-case implementation of (a subset of) the `PropertyValue<T>`
-/// interface used for building the paint property traits classes for
-/// `HeatmapColor`, `ColorReliefColor`, and `LineGradient`.
+/// interface for the paint properties of a color ramp, which a layer type
+/// draws from a texture of the ramp.
 ///
 /// Generic paint-property evaluation uses a placeholder Color, while the
 /// render layers evaluate the expression separately to build their

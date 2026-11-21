@@ -196,7 +196,7 @@ impl Tile {
     }
 
     /// Whether the tile's render entries are held after they're no longer
-    /// ideal, so that its symbols fade out.
+    /// ideal, so that what its layers placed fades out.
     pub(crate) fn fades_out(&self) -> bool {
         self.pipeline.layout().is_some_and(|layout| layout.params.mode == MapMode::Continuous)
     }

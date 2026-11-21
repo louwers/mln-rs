@@ -32,7 +32,7 @@ use crate::style_property::StyleProperty;
 pub enum SourceKind {
     /// No source: the layer draws without one.
     None,
-    /// Vector or GeoJSON tiles, laid out into buckets.
+    /// Tiles of features, laid out into buckets.
     Geometry,
     Raster,
     RasterDem,

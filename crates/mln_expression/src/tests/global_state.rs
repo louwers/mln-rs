@@ -119,7 +119,7 @@ fn evaluate_in_composition() {
 // PropertyExpressionCapturesGlobalState, PropertyValueConversionKeepsExpression,
 // Filter, ColorRamp and PropertyExpressionGlobalStateRefs are in mln_style's
 // tests (expression_global_state.rs), FormatSectionOverrideUsesCapturedState
-// in mln_style's (tests/format_section_override_test.rs).
+// in mln_layers' (tests/format_section_override_test.rs).
 
 // gtest: GlobalStateExpression.CollectGlobalStateRefs
 #[test]

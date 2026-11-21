@@ -80,9 +80,8 @@ impl TransformParameters {
 
         // Calculate a second projection matrix with the near plane moved
         // further, to a tenth of the far value, so as not to waste depth
-        // buffer precision on very close empty space, for layer types
-        // (fill-extrusion) that use the depth buffer to emulate real-world
-        // space.
+        // buffer precision on very close empty space, for layer types that
+        // use the depth buffer to emulate real-world space.
         let near_z = (0.1 * state.camera_to_center_distance()) as u16;
         let near_clipped_proj_matrix = state.projection_matrix_with(near_z, false);
 

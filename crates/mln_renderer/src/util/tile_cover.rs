@@ -237,7 +237,7 @@ pub struct TileCoverParameters {
     /// instead of flooring them.
     pub round_zoom: bool,
     /// The highest the source's content may reach above the ground, in
-    /// meters, such as its largest `symbol-height-offset`. On the globe,
+    /// meters, as its layers' content elevation raises it. On the globe,
     /// tiles under content this high stay while the content is in view.
     pub max_content_elevation: f64,
 }

@@ -50,7 +50,7 @@ pub enum TileOrder {
     /// By tile id, without the tiles held for fade.
     ById,
     /// By opposite y position, so that the lower of two tiles' overlapping
-    /// symbols draw over the higher's.
+    /// contents draw over the higher's.
     ByY,
 }
 

@@ -36,7 +36,7 @@ pub(crate) struct Frame {
     /// continues.
     pub(crate) needs_repaint: bool,
     /// When, without `needs_repaint`, the map changes next on its own: a
-    /// symbol placement that isn't due yet.
+    /// placement that isn't due yet.
     pub(crate) repaint_at: Option<Instant>,
     /// Whether every source, image and tile the frame needs had loaded.
     pub(crate) loaded: bool,
@@ -45,7 +45,7 @@ pub(crate) struct Frame {
     pub(crate) layers: VecMap<u32, FrameLayer>,
     /// When the frame's update started.
     pub(crate) started: Instant,
-    /// When the frame's update started placing symbols.
+    /// When the frame's update started placing.
     pub(crate) symbols_started: Instant,
 }
 
