@@ -67,7 +67,9 @@ mln_layers = { package = "mln-rs-layers", path = ".", features = [
   "wgsl",
 ] }
 # The transforms whose views the symbols' projection tests read.
-mln_map = { package = "mln-rs-map", path = "../mln_map" }
+mln_runtime = { package = "mln-rs-runtime", path = "../mln_runtime", default-features = false, features = [
+  "webgpu",
+] }
 # The benchmarks' entry points to a tile's layout, which the tests run
 # behind the worker codec.
 mln_render = { workspace = true, features = ["bench"] }

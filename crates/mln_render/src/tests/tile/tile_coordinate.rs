@@ -1,8 +1,8 @@
 use geometry::Point;
-use mln_map::transform::{Transform, TransformEvent};
-use mln_map::{CameraChange, CameraChangeMode};
 use mln_map_types::tile_coordinate::TileCoordinate;
 use mln_map_types::{ConstrainMode, ViewportMode};
+use mln_runtime::map::transform::{Transform, TransformEvent};
+use mln_runtime::map::{CameraChange, CameraChangeMode};
 use mln_tile_id::{CanonicalTileID, UnwrappedTileID};
 use mln_util::constants;
 use mln_util::geo::{LatLng, ScreenCoordinate};

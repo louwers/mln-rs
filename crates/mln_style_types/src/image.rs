@@ -1,4 +1,4 @@
-// Cut point (added by storage): the sprite loader (mln_sprite) creates
+// Cut point (added by storage): the sprite loader (mln_runtime::sprite) creates
 // `style::Image::Impl`s and the style (mln_style) stores them, so the types
 // live below both; `mln_style::image` re-exports them.
 //

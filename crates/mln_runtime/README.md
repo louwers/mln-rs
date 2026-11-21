@@ -20,6 +20,11 @@ results, reads offscreen pixels back, and queries the features drawn. A session
 renders on a thread of its own, or on the host's graphics thread, which runs the
 session's work through its `DriverWork`.
 
+The map that the handles drive, which runs on the runtime's thread, is in `map`,
+a port of `src/mln/map` and `include/mln/map` (`Map`, `MapOptions`, `Transform`,
+the style loader and the events), and the sprite parser is in `sprite`, a port
+of `src/mln/sprite`.
+
 In the browser (wasm32-unknown-unknown, no threads), everything of a runtime
 runs on the thread that made it, in short tasks on the browser's event loop
 (`mln_web_host`'s pump), and nothing waits: a command runs after the call that

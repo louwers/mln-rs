@@ -6,7 +6,7 @@
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Duration;
 
-use mln_map::{
+use mln_runtime::map::{
     AnimationOptions, CameraOptions, CameraUpdate, CameraUpdateMode, NorthOrientation, TileLodMode, TransitionEnd,
     TransitionOutcome,
 };

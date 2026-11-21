@@ -8,9 +8,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::channel;
 
-use mln_map::{AnimationOptions, CameraOptions, CameraUpdate, CameraUpdateMode, MapEvent, MapMode, TileOperation};
 use mln_rs::ClusterQueries;
 use mln_rs::mln_layers::Custom;
+use mln_runtime::map::{
+    AnimationOptions, CameraOptions, CameraUpdate, CameraUpdateMode, MapEvent, MapMode, TileOperation,
+};
 use mln_runtime::{
     AttachOptions, DemandMode, Device, DeviceOptions, Driver, ErrorKind, EventMask, FrameDemand, FrameDisposition,
     FrameResult, LogicalExtent, Map, MapOptions, RenderSession, RenderSessionState, RenderTarget,
@@ -38,7 +40,7 @@ fn style(color: &str) -> String {
 
 fn map_in_mode(runtime: &Runtime, mode: MapMode) -> Map {
     let options = MapOptions {
-        map: mln_map::MapOptions { size: Size::new(256, 256), map_mode: mode, ..Default::default() },
+        map: mln_runtime::map::MapOptions { size: Size::new(256, 256), map_mode: mode, ..Default::default() },
         ..Default::default()
     };
     let (map, created) = runtime.create_map(options).unwrap();
@@ -98,7 +100,7 @@ fn render_until_idle(map: &Map, session: &RenderSession) {
         match frame.disposition {
             FrameDisposition::Rendered => {
                 let snapshot = map.snapshot().unwrap();
-                if frame.mode == mln_map::RenderMode::Full
+                if frame.mode == mln_runtime::map::RenderMode::Full
                     && !frame.needs_repaint
                     && !snapshot.transition_in_progress
                     && frame.map_update_generation >= snapshot.update_generation
@@ -410,7 +412,7 @@ fn demands_share_a_frame_sample_while_the_runtimes_thread_is_busy() {
         drop(open);
         let frames = take_results(&session, 4);
         settle();
-        if start.elapsed() <= mln_map::transform::STALE_FRAME_TIME {
+        if start.elapsed() <= mln_runtime::map::transform::STALE_FRAME_TIME {
             let updates: Vec<u64> = frames.iter().map(|frame| frame.map_update_generation).collect();
             assert_eq!(updates, [latest + 1; 4], "{frames:?}");
             return;
@@ -689,7 +691,7 @@ fn resizes_apply_in_order_and_publish_generations() {
 fn a_session_renders_at_its_maps_pixel_ratio() {
     let runtime = runtime();
     let options = MapOptions {
-        map: mln_map::MapOptions { size: SIZE, pixel_ratio: 2.0, ..Default::default() },
+        map: mln_runtime::map::MapOptions { size: SIZE, pixel_ratio: 2.0, ..Default::default() },
         ..Default::default()
     };
     let (map, created) = runtime.create_map(options).unwrap();
@@ -1428,7 +1430,7 @@ fn render_and_return(tile_cache_enabled: Option<bool>) -> (usize, usize) {
     wait(runtime.set_resource_provider(move |request: ResourceRequest| serving.serve(request)));
     let size = Size::new(256, 256);
     let mut options = MapOptions {
-        map: mln_map::MapOptions { size, map_mode: MapMode::Static, ..Default::default() },
+        map: mln_runtime::map::MapOptions { size, map_mode: MapMode::Static, ..Default::default() },
         ..Default::default()
     };
     if let Some(enabled) = tile_cache_enabled {
@@ -1534,7 +1536,7 @@ fn styled_query_session(
     let loaded = eventually(|| {
         demand(&session, DemandMode::Force, 0);
         let result = take_one(&session);
-        result.mode == mln_map::RenderMode::Full && ready(&session)
+        result.mode == mln_runtime::map::RenderMode::Full && ready(&session)
     });
     assert!(loaded, "the sources never loaded");
     (map, session)

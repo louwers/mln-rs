@@ -2,7 +2,7 @@
 //! gesture or an animation over tiles already there.
 
 use mln_bench_workload::paths::{FRAMES, Path};
-use mln_map::{CameraOptions, MapMode};
+use mln_runtime::map::{CameraOptions, MapMode};
 
 use super::VIEW;
 use crate::scenario::{Bench, Kind, Scenario};

@@ -37,7 +37,6 @@ mln_image = { package = "mln-rs-image", path = "../../crates/mln_image" }
 mln_layers = { package = "mln-rs-layers", path = "../../crates/mln_layers", features = [
   "bench",
 ] }
-mln_map = { package = "mln-rs-map", path = "../../crates/mln_map" }
 # The renderer's internal stages, through its `bench` entry points.
 mln_render = { package = "mln-rs-render", path = "../../crates/mln_render", default-features = false, features = [
   "bench",
@@ -62,8 +61,6 @@ mln_runtime = { package = "mln-rs-runtime", path = "../../crates/mln_runtime", d
 mln_sources = { package = "mln-rs-sources", path = "../../crates/mln_sources" }
 # The file source that reads the fixtures (support/fixtures.rs).
 mln_storage = { package = "mln-rs-storage", path = "../../crates/mln_storage" }
-# The sprite whose images the layouts of symbols use.
-mln_sprite = { package = "mln-rs-sprite", path = "../../crates/mln_sprite" }
 # The style, and its edits.
 mln_style = { package = "mln-rs-style", path = "../../crates/mln_style" }
 mln_style_types = { package = "mln-rs-style-types", path = "../../crates/mln_style_types" }

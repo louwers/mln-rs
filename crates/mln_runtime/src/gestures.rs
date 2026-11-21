@@ -3,12 +3,12 @@
 //! them.
 
 use mln_gestures::{GestureCamera, PendingEnd};
-use mln_map::{CameraDelta, CameraOptions, CameraUpdate, MapProjection, MapSnapshot};
 use mln_util::LatLng;
 use mln_util::geo::{LatLngBounds, ScreenCoordinate, WrapMode};
 use mln_util::logging::{Event, Log};
 
-use crate::map::Map;
+use crate::map::{CameraDelta, CameraOptions, CameraUpdate, MapProjection, MapSnapshot};
+use crate::map_handle::Map;
 
 impl Map {
     /// The map's snapshot for the recognizer, which reads nothing of a map
@@ -40,7 +40,7 @@ impl GestureCamera for Map {
             return (snapshot.bounds.min_zoom, snapshot.bounds.max_zoom);
         };
         let bounds = snapshot.bounds;
-        let limits = mln_map::CameraLimits {
+        let limits = crate::map::CameraLimits {
             bounds: bounds.bounds.unwrap_or_else(LatLngBounds::infinite),
             min_zoom: bounds.min_zoom,
             max_zoom: bounds.max_zoom,

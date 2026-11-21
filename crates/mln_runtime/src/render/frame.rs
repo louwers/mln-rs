@@ -1,7 +1,8 @@
 //! Frame demands and the results that they finish with.
 
-use mln_map::{MapView, RenderMode};
 use mln_render::FrameProjection;
+
+use crate::map::{MapView, RenderMode};
 
 /// When a demand draws a frame.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]

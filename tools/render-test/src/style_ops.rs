@@ -1,5 +1,5 @@
-use mln_map::Map;
 use mln_map_types::CameraOptions;
+use mln_runtime::map::Map;
 use mln_style::conversion::Convertible;
 use mln_style::{Edit, Style};
 

@@ -2472,7 +2472,6 @@ dependencies = [
  "mln-rs-gl",
  "mln-rs-image",
  "mln-rs-layers",
- "mln-rs-map",
  "mln-rs-map-types",
  "mln-rs-math",
  "mln-rs-mtl",
@@ -2480,7 +2479,6 @@ dependencies = [
  "mln-rs-render",
  "mln-rs-runtime",
  "mln-rs-sources",
- "mln-rs-sprite",
  "mln-rs-storage",
  "mln-rs-storage-offline",
  "mln-rs-style",
@@ -2510,12 +2508,10 @@ dependencies = [
  "mln-rs-headless",
  "mln-rs-image",
  "mln-rs-layers",
- "mln-rs-map",
  "mln-rs-mtl",
  "mln-rs-render",
  "mln-rs-runtime",
  "mln-rs-sources",
- "mln-rs-sprite",
  "mln-rs-storage",
  "mln-rs-style",
  "mln-rs-style-types",
@@ -2550,7 +2546,7 @@ dependencies = [
 name = "mln-rs-bench-workload"
 version = "0.0.13"
 dependencies = [
- "mln-rs-map",
+ "mln-rs-map-types",
  "mln-rs-util",
  "serde",
  "serde_json",
@@ -2572,7 +2568,6 @@ dependencies = [
  "mln-rs-frame-pacer",
  "mln-rs-gestures",
  "mln-rs-gl",
- "mln-rs-map",
  "mln-rs-map-types",
  "mln-rs-mtl",
  "mln-rs-runtime",
@@ -2641,7 +2636,6 @@ dependencies = [
  "mln-rs-gfx",
  "mln-rs-gl",
  "mln-rs-image",
- "mln-rs-map",
  "mln-rs-math",
  "mln-rs-mtl",
  "mln-rs-runtime",
@@ -2726,8 +2720,8 @@ dependencies = [
 name = "mln-rs-gestures"
 version = "0.0.13"
 dependencies = [
- "mln-rs-map",
  "mln-rs-map-types",
+ "mln-rs-runtime",
  "mln-rs-style-types",
  "mln-rs-util",
  "parking_lot",
@@ -2792,7 +2786,6 @@ dependencies = [
  "mln-rs-gfx",
  "mln-rs-gl",
  "mln-rs-image",
- "mln-rs-map",
  "mln-rs-map-types",
  "mln-rs-math",
  "mln-rs-mtl",
@@ -2846,11 +2839,11 @@ dependencies = [
  "mln-rs-geometry",
  "mln-rs-gfx",
  "mln-rs-layers",
- "mln-rs-map",
  "mln-rs-map-types",
  "mln-rs-math",
  "mln-rs-polylabel",
  "mln-rs-render",
+ "mln-rs-runtime",
  "mln-rs-style",
  "mln-rs-style-types",
  "mln-rs-text",
@@ -2863,30 +2856,6 @@ dependencies = [
  "mlt-core",
  "parking_lot",
  "proptest",
- "serde_json",
-]
-
-[[package]]
-name = "mln-rs-map"
-version = "0.0.13"
-dependencies = [
- "geo-types",
- "geojson",
- "glam",
- "mln-rs",
- "mln-rs-feature",
- "mln-rs-geometry",
- "mln-rs-map-types",
- "mln-rs-math",
- "mln-rs-render",
- "mln-rs-sprite",
- "mln-rs-storage",
- "mln-rs-style",
- "mln-rs-style-types",
- "mln-rs-text",
- "mln-rs-tile-id",
- "mln-rs-util",
- "parking_lot",
  "serde_json",
 ]
 
@@ -2955,11 +2924,10 @@ dependencies = [
  "mln-rs-geometry",
  "mln-rs-gfx",
  "mln-rs-image",
- "mln-rs-map",
  "mln-rs-map-types",
  "mln-rs-math",
  "mln-rs-pixelmatch",
- "mln-rs-sprite",
+ "mln-rs-runtime",
  "mln-rs-storage",
  "mln-rs-style",
  "mln-rs-style-types",
@@ -2989,11 +2957,11 @@ dependencies = [
  "mln-rs-gfx",
  "mln-rs-headless",
  "mln-rs-image",
- "mln-rs-map",
  "mln-rs-map-types",
  "mln-rs-math",
  "mln-rs-pixelmatch",
  "mln-rs-render",
+ "mln-rs-runtime",
  "mln-rs-storage",
  "mln-rs-style",
  "mln-rs-util",
@@ -3010,6 +2978,7 @@ name = "mln-rs-runtime"
 version = "0.0.13"
 dependencies = [
  "geo-types",
+ "geojson",
  "glam",
  "glow",
  "httpmock",
@@ -3020,11 +2989,13 @@ dependencies = [
  "mln-rs-d3d12",
  "mln-rs-feature",
  "mln-rs-frame-pacer",
+ "mln-rs-geometry",
  "mln-rs-gestures",
  "mln-rs-gfx",
  "mln-rs-gl",
+ "mln-rs-image",
  "mln-rs-layers",
- "mln-rs-map",
+ "mln-rs-map-types",
  "mln-rs-math",
  "mln-rs-mtl",
  "mln-rs-render",
@@ -3075,19 +3046,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mln-rs-sprite"
-version = "0.0.13"
-dependencies = [
- "mln-rs-geometry",
- "mln-rs-image",
- "mln-rs-storage",
- "mln-rs-style-types",
- "mln-rs-util",
- "parking_lot",
- "serde_json",
-]
-
-[[package]]
 name = "mln-rs-storage"
 version = "0.0.13"
 dependencies = [
@@ -3101,7 +3059,7 @@ dependencies = [
  "mln-rs",
  "mln-rs-feature",
  "mln-rs-headless",
- "mln-rs-map",
+ "mln-rs-runtime",
  "mln-rs-test-server",
  "mln-rs-util",
  "mln-rs-vec-map",
@@ -3128,8 +3086,8 @@ dependencies = [
  "mln-rs",
  "mln-rs-feature",
  "mln-rs-headless",
- "mln-rs-map",
  "mln-rs-map-types",
+ "mln-rs-runtime",
  "mln-rs-storage",
  "mln-rs-style",
  "mln-rs-style-types",
@@ -3355,7 +3313,6 @@ dependencies = [
  "mln-rs-gfx",
  "mln-rs-gl",
  "mln-rs-layers",
- "mln-rs-map",
  "mln-rs-runtime",
  "mln-rs-storage",
  "mln-rs-util",

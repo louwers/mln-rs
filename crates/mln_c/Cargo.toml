@@ -37,7 +37,6 @@ geojson.workspace = true
 glam.workspace = true
 mln_frame_pacer.workspace = true
 mln_gestures.workspace = true
-mln_map.workspace = true
 mln_map_types.workspace = true
 # The built-in registrations, which the C API's runtimes have.
 mln_rs.workspace = true

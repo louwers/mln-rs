@@ -119,7 +119,7 @@ fn answer(dependencies: &Dependencies) -> Resolved {
             font_glyphs.insert(*id, glyph);
         }
     }
-    let sprite = mln_sprite::sprite_parser::parse_sprite(
+    let sprite = mln_runtime::sprite::sprite_parser::parse_sprite(
         "default",
         &mln_image::decode_image(&fixture("test/fixtures/annotations/emerald.png")).unwrap(),
         &fixture("test/fixtures/annotations/emerald.json"),

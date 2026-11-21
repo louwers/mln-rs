@@ -15,7 +15,7 @@ use mln_util::range::Range;
 use mln_util::tileset::{RasterEncoding, Scheme, VectorEncoding};
 
 use crate::completion::{Completion, Resolver};
-use crate::map::{Applied, Map, MapEntry, MapId, apply_command, flush, missing_map, style_not_loaded};
+use crate::map_handle::{Applied, Map, MapEntry, MapId, apply_command, flush, missing_map, style_not_loaded};
 use crate::runtime::{Background, Outbox, RuntimeCore, post};
 
 /// The tiles that a source lists in the style itself, rather than at a URL.
@@ -184,7 +184,7 @@ fn quote(id: &str) -> String {
     format!("\"{id}\"")
 }
 
-fn require_loaded(map: &mln_map::Map) -> Result<(), Error> {
+fn require_loaded(map: &crate::map::Map) -> Result<(), Error> {
     if map.style_document_loaded() { Ok(()) } else { Err(style_not_loaded()) }
 }
 
@@ -192,16 +192,16 @@ fn source_not_found(id: &str) -> Error {
     Error::not_found(format!("source {} does not exist", quote(id)))
 }
 
-fn find_source<'a>(map: &'a mln_map::Map, id: &str) -> Result<&'a Source, Error> {
+fn find_source<'a>(map: &'a crate::map::Map, id: &str) -> Result<&'a Source, Error> {
     map.source(id).ok_or_else(|| source_not_found(id))
 }
 
 /// The source `id`, if it's still the source `instance`.
-fn current_source<'a>(map: &'a mln_map::Map, id: &str, instance: SourceInstance) -> Option<&'a Source> {
+fn current_source<'a>(map: &'a crate::map::Map, id: &str, instance: SourceInstance) -> Option<&'a Source> {
     map.source(id).filter(|source| source.instance() == instance)
 }
 
-fn require_new_source(map: &mln_map::Map, id: &str) -> Result<(), Error> {
+fn require_new_source(map: &crate::map::Map, id: &str) -> Result<(), Error> {
     require_loaded(map)?;
     if map.source(id).is_some() {
         return Err(Error::already_exists(format!("source {} already exists", quote(id))));
@@ -279,7 +279,7 @@ impl Map {
     /// made source's ID.
     pub fn add_style_source(
         &self,
-        make: impl FnOnce(&mln_map::Map) -> Result<Source, Error> + Send + 'static,
+        make: impl FnOnce(&crate::map::Map) -> Result<Source, Error> + Send + 'static,
     ) -> Result<Completion<Applied>, Error> {
         self.command(move |map| add_source(map, make).map(drop))
     }
@@ -293,7 +293,7 @@ impl Map {
     /// this command when it fails.
     pub fn add_style_source_keeping(
         &self,
-        make: impl FnOnce(&mln_map::Map) -> Result<Source, Error> + Send + 'static,
+        make: impl FnOnce(&crate::map::Map) -> Result<Source, Error> + Send + 'static,
         kept: Box<dyn Any + Send>,
     ) -> Result<Completion<Applied>, Error> {
         self.send(
@@ -492,8 +492,8 @@ impl Map {
 
 /// Adds the source that `make` makes, and returns its ID and instance.
 fn add_source(
-    map: &mut mln_map::Map,
-    make: impl FnOnce(&mln_map::Map) -> Result<Source, Error>,
+    map: &mut crate::map::Map,
+    make: impl FnOnce(&crate::map::Map) -> Result<Source, Error>,
 ) -> Result<(String, SourceInstance), Error> {
     let source = make(map)?;
     let (id, instance) = (source.id().to_owned(), source.instance());

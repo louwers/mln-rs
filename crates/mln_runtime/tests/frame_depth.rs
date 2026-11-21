@@ -5,7 +5,7 @@
 // machine lacks skips its cases.
 
 use glam::{DMat4, DVec4};
-use mln_map::{CameraOptions, CameraUpdate, MapMode};
+use mln_runtime::map::{CameraOptions, CameraUpdate, MapMode};
 use mln_runtime::{
     AcquiredFrame, AttachOptions, ClipDepthRange, DemandMode, Device, DeviceOptions, ErrorKind, FrameDemand,
     FrameDisposition, FrameProjection, FrameResult, Map, MapOptions, RenderSession, RenderTarget, Runtime, SyncKind,
@@ -44,7 +44,7 @@ fn style() -> String {
 /// and bearing.
 fn map_of(runtime: &Runtime) -> Map {
     let options = MapOptions {
-        map: mln_map::MapOptions { size: SIZE, map_mode: MapMode::Continuous, ..Default::default() },
+        map: mln_runtime::map::MapOptions { size: SIZE, map_mode: MapMode::Continuous, ..Default::default() },
         ..Default::default()
     };
     let (map, created) = runtime.create_map(options).unwrap();
@@ -82,7 +82,7 @@ fn loaded_frame(session: &RenderSession) -> (AcquiredFrame, FrameResult) {
         }
         let Some(frame) = session.acquire_frame().unwrap() else { return false };
         let result = *frame.result();
-        if result.disposition == FrameDisposition::Rendered && result.mode == mln_map::RenderMode::Full {
+        if result.disposition == FrameDisposition::Rendered && result.mode == mln_runtime::map::RenderMode::Full {
             loaded = Some((frame, result));
             return true;
         }

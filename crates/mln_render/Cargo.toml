@@ -62,8 +62,10 @@ mln_wire = { workspace = true, features = ["geo-types", "glam", "parking_lot"] }
 
 [dev-dependencies]
 geojson.workspace = true
-mln_map = { package = "mln-rs-map", path = "../mln_map" }
-mln_sprite = { package = "mln-rs-sprite", path = "../mln_sprite" }
+# The map's transform and sprites, which tests read views and images from.
+mln_runtime = { package = "mln-rs-runtime", path = "../mln_runtime", default-features = false, features = [
+  "webgpu",
+] }
 mln_storage = { workspace = true, features = ["stub-file-source"] }
 mln_webgpu = { package = "mln-rs-webgpu", path = "../mln_webgpu" }
 mlt-core.workspace = true

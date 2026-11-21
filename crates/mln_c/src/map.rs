@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use ::mln_map::{MapMode, MapSnapshot};
+use ::mln_runtime::map::{MapMode, MapSnapshot};
 use ::mln_runtime::{Applied, EventMask, FeatureState, FeatureStateSelector, MapOptions};
 use feature::{Identifier, Value};
 use mln_util::geo::LatLngBounds;
@@ -165,7 +165,7 @@ unsafe fn map_options(options: *const mln_map_options) -> Result<(MapOptions, f6
         Some(faces.to_owned())
     };
     let options = MapOptions {
-        map: ::mln_map::MapOptions {
+        map: ::mln_runtime::map::MapOptions {
             map_mode: mode,
             size: Size::new(extent.width, extent.height),
             pixel_ratio: extent.scale_factor as f32,
@@ -316,8 +316,8 @@ fn from_snapshot(snapshot: &MapSnapshot, event_mask: mln_runtime_event_flags) ->
             lod_pitch_threshold: tile.lod_pitch_threshold,
             lod_zoom_shift: tile.lod_zoom_shift,
             lod_mode: match tile.lod_mode {
-                ::mln_map::TileLodMode::Default => MLN_TILE_LOD_MODE_DEFAULT,
-                ::mln_map::TileLodMode::Distance => MLN_TILE_LOD_MODE_DISTANCE,
+                ::mln_runtime::map::TileLodMode::Default => MLN_TILE_LOD_MODE_DEFAULT,
+                ::mln_runtime::map::TileLodMode::Distance => MLN_TILE_LOD_MODE_DISTANCE,
             },
         },
         bounds: mln_camera_bounds {

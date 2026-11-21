@@ -1,11 +1,11 @@
 // A file source that answers inside `load`, under a `Map` that loads a
-// style through it. A separate test target because it needs `mln_map` and
+// style through it. A separate test target because it needs `mln_runtime` and
 // `mln_headless`, which depend on `mln_storage`.
 
 use std::sync::Arc;
 
 use mln_headless::HeadlessFrontend;
-use mln_map::{Map, MapOptions};
+use mln_runtime::map::{Map, MapOptions};
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::{FileSource, Resource, Responder, Response};
 use mln_util::hash::HashMap;

@@ -2,7 +2,7 @@
 // tree tests this through test/api/*.test.cpp and the render tests), and of
 // the frames the frontend draws when asked.
 
-use mln_map::{CameraOptions, MapMode, MapOptions};
+use mln_runtime::map::{CameraOptions, MapMode, MapOptions};
 use mln_util::pool::Pool;
 
 use super::*;
@@ -63,7 +63,10 @@ fn background_style(color: &str) -> String {
 
 /// How many frames the map's renderer finished since the last call.
 fn frames(map: &mut Map) -> usize {
-    map.drain_events().iter().filter(|event| matches!(event, mln_map::MapEvent::RenderFrameFinished(_))).count()
+    map.drain_events()
+        .iter()
+        .filter(|event| matches!(event, mln_runtime::map::MapEvent::RenderFrameFinished(_)))
+        .count()
 }
 
 #[test]

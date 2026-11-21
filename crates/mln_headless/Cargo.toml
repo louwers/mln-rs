@@ -22,7 +22,6 @@ doctest = false
 
 [dependencies]
 mln_gfx.workspace = true
-mln_map.workspace = true
 mln_render.workspace = true
 # The built-in registrations, and the devices and offscreen targets the
 # frontend renders on, of every backend.

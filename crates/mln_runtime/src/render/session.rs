@@ -10,7 +10,6 @@ use std::thread::ThreadId;
 use std::time::Duration;
 
 use mln_frame_pacer::{FramePacer, RefreshWaiter};
-use mln_map::LogicalExtent;
 use mln_render::query::{RenderedQueryOptions, SourceQueryOptions};
 use mln_style::Source;
 use mln_util::error::Error;
@@ -30,7 +29,8 @@ use super::target::{
 };
 use super::worker::{self, Init, SessionQueue, TargetInit, Worker};
 use crate::completion::{Completion, Home, Resolver};
-use crate::map::{Applied, Map};
+use crate::map::LogicalExtent;
+use crate::map_handle::{Applied, Map};
 use crate::runtime::Outbox;
 
 /// The ID of a render session, unique in the process.
