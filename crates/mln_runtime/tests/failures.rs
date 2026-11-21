@@ -46,6 +46,26 @@ impl CustomLayerHost for Breaking {
 /// offscreen session of `SIZE` on a WebGPU device; `None` where the
 /// machine has no WebGPU device.
 fn broken_map(runtime: &Runtime, mode: MapMode) -> Option<(Map, RenderSession, Arc<AtomicBool>)> {
+    let map = red_map(runtime, mode, SIZE);
+    let broken = Arc::new(AtomicBool::new(false));
+    wait(map.add_custom_layer("breaking", Arc::new(Breaking { broken: Arc::clone(&broken) }), None));
+    let session = offscreen_session(&map, SIZE)?;
+    Some((map, session, broken))
+}
+
+/// A map of `mode` and `size` with a red background.
+fn red_map(runtime: &Runtime, mode: MapMode, size: Size) -> Map {
+    let options =
+        MapOptions { map: mln_map::MapOptions { size, map_mode: mode, ..Default::default() }, ..Default::default() };
+    let (map, created) = runtime.create_map(options).unwrap();
+    result_of(created).unwrap();
+    wait(map.set_style_json(STYLE));
+    map
+}
+
+/// An offscreen session of `map`, of `size`, on a WebGPU device; `None`
+/// where the machine has no WebGPU device.
+fn offscreen_session(map: &Map, size: Size) -> Option<RenderSession> {
     let device = match Device::with_backend(BackendType::WebGPU, DeviceOptions::default()) {
         Ok(device) => device,
         Err(error) if error.kind == ErrorKind::Unsupported => {
@@ -54,19 +74,10 @@ fn broken_map(runtime: &Runtime, mode: MapMode) -> Option<(Map, RenderSession, A
         }
         Err(error) => panic!("a WebGPU device: {error}"),
     };
-    let options = MapOptions {
-        map: mln_map::MapOptions { size: SIZE, map_mode: mode, ..Default::default() },
-        ..Default::default()
-    };
-    let (map, created) = runtime.create_map(options).unwrap();
-    result_of(created).unwrap();
-    wait(map.set_style_json(STYLE));
-    let broken = Arc::new(AtomicBool::new(false));
-    wait(map.add_custom_layer("breaking", Arc::new(Breaking { broken: Arc::clone(&broken) }), None));
-    let target = RenderTarget::Offscreen { size: SIZE, device: Some(device) };
+    let target = RenderTarget::Offscreen { size, device: Some(device) };
     let (session, attached) = map.attach(target, AttachOptions::default()).unwrap();
     result_of(attached).unwrap();
-    Some((map, session, broken))
+    Some(session)
 }
 
 fn center_pixel(session: &RenderSession) -> [u8; 4] {
@@ -111,6 +122,24 @@ fn a_still_image_whose_frame_fails_ends_with_the_error() {
     broken.store(false, Ordering::SeqCst);
     wait(map.request_still_image());
     assert_eq!(RED, center_pixel(&session));
+}
+
+/// A still image whose offscreen target can't make its textures, here for
+/// a width that no WebGPU device takes, ends with the error, its demand's
+/// result with no update, rather than waiting for ever.
+#[test]
+fn a_still_image_whose_target_cant_make_its_textures_ends_with_the_error() {
+    let runtime = runtime();
+    let size = Size::new(1 << 17, 1);
+    let map = red_map(&runtime, MapMode::Static, size);
+    let Some(session) = offscreen_session(&map, size) else { return };
+    let error = result_of(map.request_still_image().unwrap()).expect_err("a still of a target without textures");
+    assert_eq!(ErrorKind::Native, error.kind, "{error}");
+    let results = session.drain_frame_results().unwrap();
+    assert!(
+        matches!(&results[..], [result] if result.token.is_none() && result.disposition == FrameDisposition::NoUpdate),
+        "{results:?}"
+    );
 }
 
 /// A continuous map whose frames keep failing reports it once, isn't idle,
