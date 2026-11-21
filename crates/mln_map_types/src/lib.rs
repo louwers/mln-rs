@@ -1,8 +1,7 @@
 //! The map vocabulary that crates below the map need: camera options and
 //! momentum, map modes, bound options, the transform state, the view it
 //! shows and draws with, and the tiles that cover a view, bounds or a
-//! geometry ([`tile_cover`]). The `Map` itself is `mln_runtime::map`'s, which
-//! re-exports these.
+//! geometry ([`tile_cover`]). The map itself is `mln_runtime`'s.
 
 mod bound_options;
 mod camera;

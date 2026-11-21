@@ -76,12 +76,8 @@ fn tile_cover(
             OfflineRegionDefinition::TilePyramid(reg) => Some(TileCover::new_from_bounds(&reg.bounds, z)),
             OfflineRegionDefinition::Geometry(reg) => TileCover::new_from_geometry(&reg.geometry, z).ok(),
         };
-        if let Some(mut cover) = cover {
-            while cover.has_next() {
-                if let Some(tile) = cover.next() {
-                    f(tile.canonical);
-                }
-            }
+        for tile in cover.into_iter().flatten() {
+            f(tile.canonical);
         }
     }
 }
