@@ -689,11 +689,10 @@ mod tests {
 
         // Two at once take twice as long to receive: 300 ms.
         let mut network = Network::to(Arc::new(Sized), LINK);
-        let (_first, first) = request(&network, "https://t/1000");
-        let (_second, second) = request(&network, "https://t/1000");
+        let (_first, first) = request(&network, "https://t/a/1000");
+        let (_second, second) = request(&network, "https://t/b/1000");
         assert_eq!(frames_until(&mut network, &first, 1), 18);
         assert_eq!(second.lock().len(), 1, "both at once");
-        // Neither had brought the URL when the other started.
         assert_eq!(network.counts(), Counts { requests: 2, bytes: 2600, ..Counts::default() });
     }
 
