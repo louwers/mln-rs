@@ -4,6 +4,7 @@
 pub(crate) mod bucket;
 pub(crate) mod dash_array_binder;
 mod dashes;
+pub(crate) mod mesh;
 pub(crate) mod render_layer;
 #[rustfmt::skip]
 mod properties;

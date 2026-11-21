@@ -1,7 +1,8 @@
 //! The scratch of tessellating a bucket's features.
 
 use geometry::Point;
-use mln_render::unstable::LineScratch;
+
+use crate::line::mesh::LineScratch;
 
 /// Triangulates polygons with earcut and holds the line mesher's scratch,
 /// keeping their buffers from one feature to the next.
@@ -10,7 +11,7 @@ pub struct Tessellator {
     earcut: earcut::Earcut<f64>,
     holes: Vec<u32>,
     indices: Vec<u32>,
-    pub line: LineScratch,
+    pub(crate) line: LineScratch,
 }
 
 impl Tessellator {

@@ -21,7 +21,6 @@ use mln_render::layer::{
     DrawContext, EvaluatedLayer, FeatureQuery, HitTest, LayerBucket, LayerType, LayerValues, LayoutParameters,
     RenderPass, SourceLayer, UpdateContext,
 };
-use mln_render::unstable::LineLayoutVertex;
 use mln_style::expression::{Dependency, EvaluationContext, GlobalStateMap, global_state_refs_intersect};
 use mln_style::{PropertyEvaluationParameters, StyleValue as _};
 use mln_style_types::{AlignmentType, LineCapType};
@@ -35,6 +34,7 @@ use mln_util::size::Size;
 
 use super::bucket::{LineBinders, LineBucket};
 use super::dashes::{DashCap, DashTextures};
+use super::mesh::LineLayoutVertex;
 use super::programs::{
     ID_LINE_DASH_TEXTURE, ID_LINE_DATA_VERTEX_ATTRIBUTE, ID_LINE_DRAWABLE_UBO, ID_LINE_EVALUATED_PROPS_UBO,
     ID_LINE_IMAGE_TEXTURE, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, ID_LINE_TILE_PROPS_UBO,
