@@ -19,7 +19,8 @@ use mln_gfx::gpu::{
 use mln_gfx::offscreen_target::OffscreenTarget;
 use mln_map::transform::{TerrainGround, Transform};
 use mln_map_types::{
-    CameraOptions, ConstrainMode, Elevation, MapDebugOptions, MapMode, TerrainSkirtLength, TileLodMode, ViewportMode,
+    CameraLimits, CameraOptions, ConstrainMode, Elevation, MapDebugOptions, MapMode, TerrainSkirtLength, TileLodMode,
+    ViewportMode,
 };
 use mln_storage::{FileSource, Resource, Responder, Response};
 use mln_style::expression::expression::FeatureState;
@@ -609,6 +610,43 @@ fn a_paint_change_in_a_stack_draws_only_its_drapes_again() {
     let second: BTreeSet<(OverscaledTileID, usize)> = drapes.iter().map(|&tile| (tile, 1)).collect();
     assert_eq!(second, map.frame_passes().1);
     assert!(map.frame_passes().1.is_empty(), "the drapes are drawn again once only");
+}
+
+/// A sky whose fog of `fog_color` covers the ground from the near end of its
+/// depth.
+fn sky(fog_color: &str) -> Edit {
+    let json = format!(
+        r#"{{"version": 8, "sources": {{}}, "layers": [], "sky": {{"fog-color": "{fog_color}", "fog-ground-blend": 0}}}}"#
+    );
+    let parsed = Style::from_json(Registry::with_builtins().style(), &json, None).expect("the style");
+    Edit::SetSky(parsed.get_sky().map(|sky| (**sky).clone()))
+}
+
+/// The fog is in no drape's key: on a map of two stacks pitched far enough
+/// to fog, a change of the fog's color draws no drape again, and the far
+/// ground shows it.
+#[test]
+fn a_fog_change_draws_no_drape_again() {
+    let (mut map, _) = two_stacks();
+    map.edit(sky("red"));
+    // Zoomed in, the ground reaches the horizon.
+    let limits = CameraLimits { max_pitch: mln_math::deg2rad(85.0), ..*map.transform.state().limits() };
+    map.transform.set_limits(limits).unwrap();
+    map.transform.jump_to(&CameraOptions { zoom: Some(4.0), pitch: Some(75.0), ..Default::default() });
+    map.settle();
+    frames_until_full(&mut map);
+    assert_eq!(2, map.renderer.rendering_stats().terrain.stacks);
+    // Far ground, just under the horizon.
+    let horizon = map.transform.view().mercator_horizon();
+    let y = (f64::from(SIDE / 2) - horizon + 4.0) as u32;
+    let red = map.pixel(SIDE / 2, y);
+
+    map.edit(sky("blue"));
+    let (full, passes) = map.frame_passes();
+    assert!(full);
+    assert!(passes.is_empty(), "drapes drawn again: {passes:?}");
+    let blue = map.pixel(SIDE / 2, y);
+    assert!(red[0] > red[2] && blue[2] > blue[0], "the far ground under a red fog {red:?}, then a blue one {blue:?}");
 }
 
 /// [`STYLE`] with a circle under its line, which shows in the north-west

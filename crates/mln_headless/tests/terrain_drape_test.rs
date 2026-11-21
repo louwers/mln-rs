@@ -14,7 +14,7 @@ use mln_gfx::gpu::{
 };
 use mln_gfx::offscreen_target::OffscreenTarget;
 use mln_headless::HeadlessFrontend;
-use mln_map::{Map, MapEvent, MapMode, MapOptions, ViewportMode};
+use mln_map::{BoundOptions, Map, MapEvent, MapMode, MapOptions, ViewportMode};
 use mln_renderer::{Renderer, RendererEvent};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{Kind, Resource, Response};
@@ -136,6 +136,50 @@ fn stacked_style(terrain: bool) -> String {
     )
 }
 
+/// Where the blue fill of [`fogged_style`] is: in the upper stack, in the
+/// lower one, or nowhere.
+#[derive(Clone, Copy, PartialEq)]
+enum Blue {
+    Above,
+    Below,
+    None,
+}
+
+/// A white map over flat terrain pitched 75°, under a magenta fog over the
+/// whole ground, with a circle near the camera and an opaque blue fill over
+/// the ground west of 1° W, in the stack above the circle or below it.
+fn fogged_style(blue: Blue) -> String {
+    let fill = r#"{"id": "blue", "type": "fill", "source": "blue", "paint": {"fill-color": "blue"}}"#;
+    let circle = r#"{"id": "circle", "type": "circle", "source": "point", "paint": {"circle-color": "lime"}}"#;
+    let layers = match blue {
+        Blue::Above => format!("{circle}, {fill}"),
+        Blue::Below => format!("{fill}, {circle}"),
+        Blue::None => circle.to_owned(),
+    };
+    format!(
+        r#"{{
+            "version": 8,
+            "center": [0, 0],
+            "zoom": 4,
+            "pitch": 75,
+            "terrain": {{"source": "dem"}},
+            "sky": {{"fog-color": "magenta", "fog-ground-blend": 0}},
+            "sources": {{
+                "dem": {{"type": "raster-dem", "tiles": ["dem/{{z}}/{{x}}/{{y}}.png"], "tileSize": 256, "maxzoom": 10}},
+                "point": {{"type": "geojson", "data": {{"type": "Point", "coordinates": [0, -4]}}}},
+                "blue": {{
+                    "type": "geojson",
+                    "data": {{"type": "Polygon", "coordinates": [[[-170, -80], [-1, -80], [-1, 80], [-170, 80], [-170, -80]]]}}
+                }}
+            }},
+            "layers": [
+                {{"id": "background", "type": "background", "paint": {{"background-color": "white"}}}},
+                {layers}
+            ]
+        }}"#
+    )
+}
+
 /// The still image of `style` on the harness's device
 /// ([`mln_headless::harness_device`]), and the bytes of the textures that
 /// drew it; `None` where the machine has no such device.
@@ -163,6 +207,7 @@ fn render(style: &str, viewport_mode: ViewportMode) -> Option<(PremultipliedImag
     let options = MapOptions { map_mode: MapMode::Static, size, pixel_ratio: 1.0, viewport_mode, ..Default::default() };
     let mut map = Map::with_file_source(file_source, options, &pool).unwrap();
     frontend.attach(&mut map);
+    map.set_bounds(&BoundOptions { max_pitch: Some(85.0), ..Default::default() }).unwrap();
     map.load_style_json(style);
     let camera = map.style().get_default_camera();
     map.jump_to(&camera);
@@ -476,4 +521,28 @@ fn a_continuous_map_whose_drapes_fail_to_draw_asks_for_frames_until_they_draw() 
         idle
     });
     assert!(idle, "the map never went idle");
+}
+
+/// The fog lands once on each pixel, however many stacks drape the surface:
+/// where the stack above draws nothing, the ground shows as it does without
+/// that stack, and inside its opaque fill, as it does with the fill in the
+/// stack below.
+#[test]
+fn fog_lands_once_where_stacks_overlap() {
+    let (Some((above, _)), Some((none, _)), Some((below, _))) = (
+        render(&fogged_style(Blue::Above), ViewportMode::Default),
+        render(&fogged_style(Blue::None), ViewportMode::Default),
+        render(&fogged_style(Blue::Below), ViewportMode::Default),
+    ) else {
+        return;
+    };
+    // Far ground east of the fill, where the stack above draws nothing.
+    for (x, y) in [(210, 70), (200, 60)] {
+        assert_eq!(pixel(&none, x, y), pixel(&above, x, y), "the ground at {x}, {y}");
+    }
+    // Far ground inside the fill.
+    for (x, y) in [(40, 70), (30, 100)] {
+        assert_ne!(pixel(&none, x, y), pixel(&above, x, y), "the fill at {x}, {y}");
+        assert_eq!(pixel(&below, x, y), pixel(&above, x, y), "the fill at {x}, {y}");
+    }
 }

@@ -75,6 +75,21 @@
 //!   stack's drape is translucent, a farther slope drawn before a nearer
 //!   one in the same draw shows through it, and skirts blend over the
 //!   neighbouring tiles, as in GL JS.
+//! - **The fog** is GL JS's terrain fog, over the surface only: past the
+//!   sky's `fog-ground-blend`, the surface turns toward `fog-color`, and
+//!   past `horizon-fog-blend` toward `horizon-color`, mixed through a gamma
+//!   of 2.2, by a depth that runs from the camera's distance to sea level
+//!   to the far plane. It fades in from 60° to 70° of pitch, and there is
+//!   none without a sky or in an axonometric view. It lands once on each
+//!   pixel, where GL JS fogs every stack in full and so veils the ground
+//!   again with each stack above the first: the first stack fogs the
+//!   ground, where it has no drape too, and each stack above fogs only
+//!   what it draws, by its coverage, which over opaque content is GL JS's
+//!   fog. No GL JS fixture has fog with two stacks. The layers that don't
+//!   drape aren't fogged, as in GL JS. The fog is in no drape's key: the
+//!   frame's evaluated sky and the view reach only the surface's draws,
+//!   which every frame makes again, so a change of the sky draws no drape
+//!   again.
 //! - **The drapes** ([`Drapes`]): a texture for each drawn tile and stack
 //!   whose layers draw something in the tile, which the stack's draped
 //!   layers draw into with the map's camera, through their own draw

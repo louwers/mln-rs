@@ -2646,7 +2646,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 
 /// The terrain's surface: a tile's grid, drawn with the tile's matrix from
 /// `drawableVector`, raised to the heights of the tile's DEM with its skirts
-/// lowered, in the colors of the tile's drape.
+/// lowered, in the colors of the tile's drape, fogged as GL JS's terrain is.
 pub(crate) const TERRAIN_SHADER: WgslShaderSource = WgslShaderSource {
     vertex: Some(
         r"
@@ -2660,7 +2660,27 @@ struct VertexOutput {
     // Where in the drape, its north-west corner at 0 and its rows from the
     // north, as they are drawn.
     @location(0) drape_pos: vec2<f32>,
+    // GL JS's fog depth: a perspective depth from 0 at the near end of the
+    // fog's range to 1 at its far end.
+    @location(1) fog_depth: f32,
 };
+
+struct TerrainFogUBO {
+    fog_color: vec4<f32>,
+    horizon_color: vec4<f32>,
+    // The near and far distances along the view, in pixels, between which
+    // the fog's depth runs from 0 to 1.
+    depth_range: vec2<f32>,
+    ground_blend: f32,
+    horizon_blend: f32,
+    opacity: f32,
+    // 1 to fog the ground, drawn on or not; 0 to fog only what is drawn.
+    ground: f32,
+    pad0: f32,
+    pad1: f32,
+};
+
+@group(0) @binding(6) var<uniform> terrainFog: TerrainFogUBO;
 
 struct TerrainDrawableUBO {
     matrix: mat4x4<f32>,
@@ -2680,10 +2700,17 @@ fn main(in: VertexInput) -> VertexOutput {
     let drawable = drawableVector[globalIndex.value];
     let pos = vec2<f32>(in.pos.xy);
     let skirt = f32(in.pos.z);
-    let elevation = terrain_elevation(pos, drawable.dem_coords) - skirt * terrainProps.skirt_length;
+    let height = terrain_elevation(pos, drawable.dem_coords);
     var out: VertexOutput;
-    out.position = drawable.matrix * vec4<f32>(pos, elevation, 1.0);
+    out.position = drawable.matrix * vec4<f32>(pos, height - skirt * terrainProps.skirt_length, 1.0);
     out.drape_pos = pos / 8192.0;
+    // The fog's depth is that of the ground before the skirt lowers it, as
+    // in GL JS: from the view distance w, which the fog matrix shares.
+    let m = drawable.matrix;
+    let w = m[0].w * pos.x + m[1].w * pos.y + m[2].w * height + m[3].w;
+    let near = terrainFog.depth_range.x;
+    let far = terrainFog.depth_range.y;
+    out.fog_depth = far / (far - near) * (1.0 - near / max(w, 1e-6));
     return out;
 }
 ",
@@ -2692,14 +2719,45 @@ fn main(in: VertexInput) -> VertexOutput {
         r"
 struct FragmentInput {
     @location(0) drape_pos: vec2<f32>,
+    @location(1) fog_depth: f32,
 };
+
+struct TerrainFogUBO {
+    fog_color: vec4<f32>,
+    horizon_color: vec4<f32>,
+    // The near and far distances along the view, in pixels, between which
+    // the fog's depth runs from 0 to 1.
+    depth_range: vec2<f32>,
+    ground_blend: f32,
+    horizon_blend: f32,
+    opacity: f32,
+    // 1 to fog the ground, drawn on or not; 0 to fog only what is drawn.
+    ground: f32,
+    pad0: f32,
+    pad1: f32,
+};
+
+@group(0) @binding(6) var<uniform> terrainFog: TerrainFogUBO;
 
 @group(1) @binding(2) var drape_sampler: sampler;
 @group(1) @binding(3) var drape_texture: texture_2d<f32>;
 
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
-    return textureSample(drape_texture, drape_sampler, in.drape_pos);
+    let color = textureSample(drape_texture, drape_sampler, in.drape_pos);
+    let fog = terrainFog;
+    if (fog.opacity <= 0.0 || in.fog_depth <= fog.ground_blend) {
+        return color;
+    }
+    // GL JS's fog, mixed in linear space through a gamma of 2.2: toward the
+    // fog's color, and past the horizon blend toward the horizon's. Over
+    // the ground it fogs every texel; above it, only what the drape covers.
+    let gamma = vec4<f32>(2.2);
+    let horizon = smoothstep(0.0, 1.0, max((in.fog_depth - fog.horizon_blend) / (1.0 - fog.horizon_blend), 0.0));
+    let coverage = mix(pow(color.a, 2.2), 1.0, fog.ground);
+    let target_color = mix(pow(fog.fog_color, gamma), pow(fog.horizon_color, gamma), horizon) * coverage;
+    let factor = pow((in.fog_depth - fog.ground_blend) / (1.0 - fog.ground_blend), 2.0) * fog.opacity;
+    return pow(mix(pow(color, gamma), target_color, factor), 1.0 / gamma);
 }
 ",
     ),
