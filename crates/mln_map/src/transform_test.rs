@@ -5500,7 +5500,7 @@ fn without_terrain_anchored_moves_hold_the_altitude_in_pixels() {
         anchor: Some(anchor),
         ..Default::default()
     });
-    let expected = [30.128822122977297, 20.072228971547304, 9.2, 50.0, 30.0, 3500.0];
+    let expected = [30.128_822_122_977_297, 20.072_228_971_547_304, 9.2, 50.0, 30.0, 3500.0];
     check(&transform, expected, "a jump of the zoom and the altitude");
 
     let (mut transform, start) = map(800.0, 50.0, true);
@@ -5520,18 +5520,18 @@ fn without_terrain_anchored_moves_hold_the_altitude_in_pixels() {
         transform.update_transitions(Some(start + Duration::from_millis(ms)));
     }
     let expected = [
-        29.88385825236196,
-        20.000727401811673,
-        11.234648613495041,
-        -21.154953783168036,
-        41.7690092433664,
-        964.6198151326721,
+        29.883_858_252_361_96,
+        20.000_727_401_811_673,
+        11.234_648_613_495_041,
+        -21.154_953_783_168_036,
+        41.769_009_243_366_4,
+        964.619_815_132_672_1,
     ];
     check(&transform, expected, "an ease, halfway");
     for ms in [499, 500] {
         transform.update_transitions(Some(start + Duration::from_millis(ms)));
     }
-    let expected = [29.869362034611274, 20.009654279734576, 11.5, -30.0, 40.0, 1000.0];
+    let expected = [29.869_362_034_611_274, 20.009_654_279_734_576, 11.5, -30.0, 40.0, 1000.0];
     check(&transform, expected, "an ease's end");
 
     let (mut transform, start) = map(800.0, 50.0, false);
@@ -5553,7 +5553,7 @@ fn without_terrain_anchored_moves_hold_the_altitude_in_pixels() {
     ] {
         transform.apply_camera_delta(&delta).unwrap();
     }
-    let expected = [29.947803959026174, 19.97978717213664, 10.37851162325373, 8.0, 55.0, 800.0];
+    let expected = [29.947_803_959_026_174, 19.979_787_172_136_64, 10.378_511_623_253_73, 8.0, 55.0, 800.0];
     check(&transform, expected, "a pinch");
     let mut momentum = CameraMomentum { pan: Some(plain(sc(900.0, -1400.0))), ..CameraMomentum::default() };
     momentum.zoom.glide = Some(glide(1.5, MomentumDecay::DEFAULT));
@@ -5572,14 +5572,26 @@ fn without_terrain_anchored_moves_hold_the_altitude_in_pixels() {
     for ms in [16, 33, 100] {
         transform.update_transitions(Some(start + Duration::from_millis(ms)));
     }
-    let expected =
-        [29.9756657317206, 19.936230697029686, 10.479500276115955, 11.154830358741185, 54.21129241021984, 800.0];
+    let expected = [
+        29.975_665_731_720_6,
+        19.936_230_697_029_686,
+        10.479_500_276_115_955,
+        11.154_830_358_741_185,
+        54.211_292_410_219_84,
+        800.0,
+    ];
     check(&transform, expected, "a glide");
     for ms in [400, 3000] {
         transform.update_transitions(Some(start + Duration::from_millis(ms)));
     }
-    let expected =
-        [29.990340872301, 19.873852945169972, 10.479500276115955, 15.877114923253739, 53.182204248479906, 800.0];
+    let expected = [
+        29.990_340_872_301,
+        19.873_852_945_169_972,
+        10.479_500_276_115_955,
+        15.877_114_923_253_739,
+        53.182_204_248_479_906,
+        800.0,
+    ];
     check(&transform, expected, "a glide's end");
 }
 
