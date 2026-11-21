@@ -86,12 +86,15 @@ impl PatternAtlas {
         }
     }
 
-    /// Adds `image` as a pattern; `None` if the atlas has no room for it.
-    fn add_pattern(&mut self, image: &Arc<ImageImpl>) -> Option<()> {
-        let width = u16::try_from(image.image.size.width).ok()?.checked_add(PADDING * 2)?;
-        let height = u16::try_from(image.image.size.height).ok()?.checked_add(PADDING * 2)?;
-
-        let (alloc_id, bin) = self.allocate(width, height)?;
+    /// Adds `image` as a pattern, unless the atlas has no room for it.
+    fn add_pattern(&mut self, image: &Arc<ImageImpl>) {
+        let padded = |side: u32| u16::try_from(side).ok()?.checked_add(PADDING * 2);
+        let (Some(width), Some(height)) = (padded(image.image.size.width), padded(image.image.size.height)) else {
+            return;
+        };
+        let Some((alloc_id, bin)) = self.allocate(width, height) else {
+            return;
+        };
 
         let size = self.pixel_size();
         self.atlas_image.resize(size);
@@ -127,7 +130,6 @@ impl PatternAtlas {
 
         let pattern = Pattern { alloc_id, position: ImagePosition::new(bin, image), image: Arc::clone(image) };
         self.patterns.insert(image.id.clone(), pattern);
-        Some(())
     }
 
     #[must_use]
@@ -192,5 +194,11 @@ impl PatternAtlas {
     #[must_use]
     pub(crate) fn texture(&self) -> Option<&SharedTexture> {
         self.texture.as_ref()
+    }
+
+    /// The size of the atlas image, which `upload` gives the texture.
+    #[must_use]
+    pub(crate) fn size(&self) -> Size {
+        self.atlas_image.size
     }
 }
