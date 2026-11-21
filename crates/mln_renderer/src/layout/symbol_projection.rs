@@ -572,13 +572,18 @@ impl LabelPlacer<'_, '_> {
     /// direction on screen.
     fn check_segment_upright(&self) -> Result<(), Unplaced> {
         let (label_plane, height) = (self.label_plane, self.height);
-        let to_clip = |p: Vec2| label_plane.to_clip_space_from_tile(p, height).point;
+        // The segment's direction is taken from its untranslated points, each
+        // standing on the ground where it draws, translated.
+        let project = |p: Vec2| -> ProjectedPoint {
+            label_plane.tile.project(&tile_point_f64(p), height.at(p + label_plane.translation)).into()
+        };
+        let to_clip = |p: Vec2| project(p).point;
         let anchor = to_clip(self.label.anchor);
         let Some(&end) = self.label.line.get(self.label.segment + 1) else {
             return Err(Unplaced::NotEnoughRoom);
         };
         let end_tile = tile_point(end);
-        let end = label_plane.to_clip_space_from_tile(end_tile, height);
+        let end = project(end_tile);
         // The anchor is in view, but the segment's end may be behind the
         // camera, where any point closer along the segment gives its
         // direction.
@@ -634,6 +639,31 @@ fn tile_point_f64(p: Vec2) -> Point<f64> {
     Point::new(f64::from(p.x), f64::from(p.y))
 }
 
+/// The size in pixels, in its label plane, at which the glyphs of a line
+/// label `size` pixels large draw, its anchor `tile_anchor` (untranslated, in
+/// tile units) seen `camera_to_anchor` from the camera: the shaders scale
+/// them by the anchor's perspective ratio, clamped as they clamp it, and a
+/// map-pitched label's by its pitched text correction too. Its glyphs are
+/// laid out along its line at this size.
+#[must_use]
+pub(crate) fn drawn_line_label_size(
+    tile_projector: &TileProjector<'_>,
+    pitch_with_map: bool,
+    size: f32,
+    tile_anchor: Vec2,
+    camera_to_anchor: f32,
+) -> f32 {
+    let camera_to_center = tile_projector.view().camera_to_center_distance() as f32;
+    let distance_ratio =
+        if pitch_with_map { camera_to_anchor / camera_to_center } else { camera_to_center / camera_to_anchor };
+    let size = size * (0.5 + 0.5 * distance_ratio).clamp(0.0, 4.0);
+    if pitch_with_map {
+        size * tile_projector.pitched_text_correction(&tile_point_f64(tile_anchor)) as f32
+    } else {
+        size
+    }
+}
+
 /// How line labels align with the map.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct LineLabelAlignment {
@@ -662,7 +692,6 @@ pub(crate) fn reproject_line_labels(
     let zoom = view.zoom() as f32;
     let sizes = size_binder.evaluate_for_zoom(zoom);
     let viewport = view.size();
-    let camera_to_center = view.camera_to_center_distance() as f32;
     // Labels whose anchors are more than 256 pixels off screen don't show.
     let clip_extent = 256.0 / DVec2::new(f64::from(viewport.width), f64::from(viewport.height)) * 2.0 + 1.0;
 
@@ -688,28 +717,21 @@ pub(crate) fn reproject_line_labels(
             continue;
         }
 
-        let tile_anchor = tile_point_f64(symbol.anchor_point);
-        let anchor = tile_projector.project(&tile_anchor, height.at(symbol.anchor_point));
+        // The anchor stands on the ground where the label draws, translated.
+        let anchor_height = height.at(symbol.anchor_point + translation);
+        let anchor = tile_projector.project(&tile_point_f64(symbol.anchor_point), anchor_height);
         if anchor.occluded || !DVec2::new(anchor.point.x, anchor.point.y).abs().cmple(clip_extent).all() {
             hide_glyphs(glyph_count, vertices);
             continue;
         }
 
-        // The shaders scale the glyphs by the anchor's perspective ratio, so
-        // they are spaced along the line by it too.
-        let camera_to_anchor = anchor.signed_distance_from_camera as f32;
-        let distance_ratio = if alignment.pitch_with_map {
-            camera_to_anchor / camera_to_center
-        } else {
-            camera_to_center / camera_to_anchor
-        };
-        let perspective_ratio = (0.5 + 0.5 * distance_ratio).clamp(0.0, 4.0);
-        let font_size = evaluate_size_for_feature(&sizes, symbol) * perspective_ratio;
-        let font_size = if alignment.pitch_with_map {
-            font_size * tile_projector.pitched_text_correction(&tile_anchor) as f32
-        } else {
-            font_size
-        };
+        let font_size = drawn_line_label_size(
+            tile_projector,
+            alignment.pitch_with_map,
+            evaluate_size_for_feature(&sizes, symbol),
+            symbol.anchor_point,
+            anchor.signed_distance_from_camera as f32,
+        );
 
         let mut label = placer.begin(LineLabel::new(symbol, pools), font_size, height);
         let mut place = |flip| label.place_glyphs(flip, alignment.keep_upright, alignment.rotate_with_map, vertices);
