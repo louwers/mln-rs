@@ -12,6 +12,7 @@ use mln_style::PropertyEvaluationParameters;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
 use mln_style::evaluated::Evaluated;
 use mln_style::layer_type::LayerStyle;
+use mln_style::property_value::PropertyValue;
 use mln_style_types::image::ImagePositions;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature};
@@ -29,6 +30,9 @@ use crate::fill_extrusion::bucket::{FillExtrusionBucket, tile_units_per_meter};
 use crate::line::LineLayoutProperties;
 use crate::line::bucket::LineBucket;
 use crate::pattern_layout::{PatternBucket, PatternLayerMap};
+use crate::symbol::SymbolLayoutProperties;
+use crate::symbol::bucket::{SymbolBucket, SymbolBucketStyle, SymbolLayoutFlags};
+use crate::symbol::instance::SymbolInstancePools;
 use crate::{Fill, Line};
 
 struct StubGeometryTileFeature {
@@ -70,6 +74,45 @@ fn upload(bucket: &mut dyn Bucket, geometry: &mut BucketGeometry, context: &mut 
 
 fn needs_upload(bucket: &dyn Bucket) -> bool {
     bucket.needs_upload()
+}
+
+// gtest: Buckets.SymbolBucket
+#[test]
+fn symbol_bucket() {
+    let layout = Arc::new(SymbolLayoutProperties::PossiblyEvaluated::default());
+    let (instances, pools) = (Vec::new(), SymbolInstancePools::default());
+    let mut bucket = SymbolBucket::new(
+        SymbolBucketStyle {
+            layout,
+            paint_properties: &VecMap::new(),
+            text_size: &PropertyValue::Constant(16.0),
+            icon_size: &PropertyValue::Constant(1.0),
+            zoom: 0.0,
+            tile_pixel_ratio: 1.0,
+            leader_id: Arc::from("test"),
+        },
+        SymbolLayoutFlags::default(),
+        instances,
+        pools,
+        Vec::new(),
+    );
+    assert!(!bucket.has_icon_data());
+    assert!(!bucket.has_sdf_icon_data());
+    assert!(!bucket.has_text_data());
+    assert!(!bucket.has_icon_collision_box_data());
+    assert!(!bucket.has_text_collision_box_data());
+    assert!(!bucket.has_icon_collision_circle_data());
+    assert!(!bucket.has_text_collision_circle_data());
+    assert!(!bucket.has_data());
+    assert!(!needs_upload(&bucket));
+
+    bucket.state.text.segments.push(SegmentBase::new(0, 0));
+    assert!(bucket.has_text_data());
+    assert!(bucket.has_data());
+    assert!(needs_upload(&bucket));
+
+    with_context(|_, context| upload(&mut bucket, &mut BucketGeometry::default(), context));
+    assert!(!needs_upload(&bucket));
 }
 
 // gtest: Buckets.CircleBucket

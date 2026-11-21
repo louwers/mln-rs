@@ -12,10 +12,10 @@ use mln_gfx::shaders::shader_defines::{
     ID_SYMBOL_COLOR_ATTRIBUTE, ID_SYMBOL_HALO_BLUR_ATTRIBUTE, ID_SYMBOL_HALO_COLOR_ATTRIBUTE,
     ID_SYMBOL_HALO_WIDTH_ATTRIBUTE, ID_SYMBOL_OPACITY_ATTRIBUTE,
 };
+use mln_renderer::layer::{
+    Bucket, BucketBase, EvaluatedLayer, FeatureStates, GeometryUpload, GeometryVec, PaintPropertyBinder,
+};
 use mln_style::expression::EvaluationContext;
-use mln_style::layers::Symbol;
-use mln_style::layers::symbol_layer::SymbolLayerPaintPropertyOverrides;
-use mln_style::layers::symbol_layer_properties::{SymbolLayoutProperties, SymbolPaintProperties};
 use mln_style::property_expression::PropertyExpression;
 use mln_style::property_value::PropertyValue;
 use mln_style_types::TextWritingModeType;
@@ -27,15 +27,13 @@ use mln_util::range::Range;
 use mln_util::serialization::payload::pod;
 use mln_vec_map::VecMap;
 
-use crate::bucket::{Bucket, BucketBase, FeatureStates};
-use crate::bucket_geometry::{GeometryUpload, GeometryVec};
-use crate::erased_layer::EvaluatedLayer;
-use crate::layout::symbol_instance::{SymbolInstance, SymbolInstancePools, WritingModes};
-use crate::paint_property_binder::PaintPropertyBinder;
-use crate::text::quads::SymbolQuad;
-use crate::util::pool::PoolRange;
+use crate::symbol::format_section_override::SymbolLayerPaintPropertyOverrides;
+use crate::symbol::instance::{SymbolInstance, SymbolInstancePools, WritingModes};
+use crate::symbol::pool::PoolRange;
+use crate::symbol::quads::SymbolQuad;
+use crate::symbol::{Symbol, SymbolLayoutProperties, SymbolPaintProperties};
 
-crate::paint_property_binders!(
+mln_renderer::paint_property_binders!(
     pub(crate) struct SymbolIconBinders for SymbolPaintProperties::PossiblyEvaluated {
         icon_opacity: PaintPropertyBinder<f32> => [ID_SYMBOL_OPACITY_ATTRIBUTE],
         icon_color: PaintPropertyBinder<Color> => [ID_SYMBOL_COLOR_ATTRIBUTE],
@@ -45,7 +43,7 @@ crate::paint_property_binders!(
     }
 );
 
-crate::paint_property_binders!(
+mln_renderer::paint_property_binders!(
     pub(crate) struct SymbolTextBinders for SymbolPaintProperties::PossiblyEvaluated {
         text_opacity: PaintPropertyBinder<f32> => [ID_SYMBOL_OPACITY_ATTRIBUTE],
         text_color: PaintPropertyBinder<Color> => [ID_SYMBOL_COLOR_ATTRIBUTE],
@@ -613,7 +611,7 @@ impl SymbolBucket {
             return false;
         }
 
-        self.base.uploaded = false;
+        self.base.set_uploaded(false);
 
         state.text.triangles.clear();
         state.icon.triangles.clear();
@@ -760,7 +758,7 @@ impl Bucket for SymbolBucket {
             let depends_on_feature_state = paint.text_binders.depends_on_feature_state();
             geometry.move_paint(&mut paint.text_binders.interleaved_vertex_buffer, depends_on_feature_state);
         }
-        self.base.uploaded = true;
+        self.base.set_uploaded(true);
     }
 
     fn has_data(&self) -> bool {
@@ -785,7 +783,7 @@ impl Bucket for SymbolBucket {
         };
         binders.icon_binders.update_vertex_vectors(states, layer, image_positions);
         binders.text_binders.update_vertex_vectors(states, layer, image_positions);
-        self.base.uploaded = false;
+        self.base.set_uploaded(false);
         true
     }
 }

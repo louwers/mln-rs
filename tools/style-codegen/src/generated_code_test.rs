@@ -35,11 +35,7 @@ fn every_layer_type_is_generated() {
     assert!(!types.is_empty());
     for t in types.keys() {
         let name = t.replace('-', "_");
-        let path = if style_codegen::LAYERS_CRATE_TYPES.contains(&t.as_str()) {
-            format!("mln_layers/src/{name}/properties.rs")
-        } else {
-            format!("mln_style/src/layers/{name}_layer_properties.rs")
-        };
+        let path = format!("mln_layers/src/{name}/properties.rs");
         assert!(paths.contains(&path.as_str()), "{t}");
     }
     assert!(paths.contains(&"mln_style/src/light_properties.rs"));

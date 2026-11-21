@@ -10,8 +10,8 @@
 "crates/mln_expression/src/match_.rs" = 2
 "crates/mln_image/src/png_writer.rs" = 1
 "crates/mln_layers/src/heatmap/properties.rs" = 1
-"crates/mln_renderer/src/layers/render_symbol_layer.rs" = 1
-"crates/mln_renderer/src/layout/symbol_layout.rs" = 2
+"crates/mln_layers/src/symbol/layout.rs" = 2
+"crates/mln_layers/src/symbol/render_layer.rs" = 1
 "crates/mln_sprite/src/sprite_parser.rs" = 1
 "crates/mln_storage/src/offline_database.rs" = 3
 "crates/mln_storage/src/stub_file_source.rs" = 1

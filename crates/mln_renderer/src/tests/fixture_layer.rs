@@ -5,7 +5,10 @@
 //! each feature's points that its filter selects, with each point's
 //! `dot-color`, which can read feature state, and adds the features to the
 //! tile's feature index. A layer with a `dot-pattern` needs the pattern's
-//! image, as the layer types that draw patterns do.
+//! image, as the layer types that draw patterns do, and one with a
+//! `dot-icon` or a `dot-label` the icon of each feature and the glyphs of
+//! its label in the font stack `dot-font`, as layer types that draw icons
+//! and text do. `dot-size` changes nothing but the layout.
 //!
 //! `tint` is a layer type of a raster or image source, with a constant
 //! `tint-opacity`, and `shade` one of a raster-dem source without
@@ -15,10 +18,13 @@
 
 use std::sync::Arc;
 
+use mln_style::PropertyEvaluationParameters;
 use mln_style::expression::{EvaluationContext, Value};
 use mln_style::layer_type::{LayerStyle, LayerTypeInfo, NoProperties, SourceKind, StyleLayerType};
 use mln_style::property_table::{PropertyInfo, PropertyTable, PropertyVisitor};
+use mln_style::property_value::StyleValue as _;
 use mln_style_types::image::{ImagePositions, ImageType};
+use mln_text::glyph::GlyphID;
 use mln_util::error::Error;
 use mln_vec_map::VecMap;
 
@@ -30,6 +36,18 @@ use crate::layer::{
 use crate::layer_drawing::{KeptDraw, TileDraws};
 
 mln_style::properties!(
+    /// The layout properties of a `dot` layer.
+    #[expect(non_snake_case, reason = "named as the layer types' property sets are")]
+    pub(crate) mod DotLayoutProperties: layout {
+        dot_font: data_driven Vec<String> = Vec::new(),
+        dot_icon: data_driven Image = Image::default(),
+        dot_label: data_driven Formatted = Formatted::default(),
+        dot_size: data_driven f32 = 1.0_f32,
+    }
+    use mln_style::expression::Formatted, mln_style::expression::Image;
+);
+
+mln_style::properties!(
     /// The paint properties of a `dot` layer.
     #[expect(non_snake_case, reason = "named as the layer types' property sets are")]
     pub(crate) mod DotPaintProperties: paint {
@@ -39,12 +57,28 @@ mln_style::properties!(
     use mln_style::expression::Image, mln_util::Color;
 );
 
-static PROPERTIES: PropertyTable =
-    PropertyTable::new(&[PropertyInfo::paint("dot-color").data_driven(), PropertyInfo::paint("dot-pattern")], &[0, 1]);
+static PROPERTIES: PropertyTable = PropertyTable::new(
+    &[
+        PropertyInfo::paint("dot-color").data_driven(),
+        PropertyInfo::paint("dot-pattern"),
+        PropertyInfo::layout("dot-font").data_driven(),
+        PropertyInfo::layout("dot-icon").data_driven(),
+        PropertyInfo::layout("dot-label").data_driven(),
+        PropertyInfo::layout("dot-size").data_driven(),
+    ],
+    &[0, 2, 3, 4, 1, 5],
+);
 
 /// The image of `layer`'s `dot-pattern`, if it has one.
 fn pattern(layer: &EvaluatedLayer<Dot>) -> Option<&str> {
     Some(layer.paint.dot_pattern.faded().to.id()).filter(|id| !id.is_empty())
+}
+
+/// Whether `layer` has an icon or a label, whose layout needs their images
+/// and glyphs.
+fn draws_icons_or_labels(layer: &EvaluatedLayer<Dot>) -> bool {
+    let layout = &layer.style.layout;
+    !layout.dot_icon.is_undefined() || !layout.dot_label.is_undefined()
 }
 
 /// The `dot` layer type.
@@ -54,7 +88,7 @@ impl StyleLayerType for Dot {
     const INFO: LayerTypeInfo = LayerTypeInfo { name: "dot", source: SourceKind::Geometry, from_json: true };
     const PROPERTIES: &'static PropertyTable = &PROPERTIES;
 
-    type LayoutProperties = NoProperties;
+    type LayoutProperties = DotLayoutProperties::Unevaluated;
     type PaintProperties = DotPaintProperties::Transitionable;
     type Extra = ();
 
@@ -62,6 +96,10 @@ impl StyleLayerType for Dot {
         Some(match slot {
             0 => visitor.paint(|s| &s.paint.dot_color, |s| &mut s.paint.dot_color),
             1 => visitor.paint(|s| &s.paint.dot_pattern, |s| &mut s.paint.dot_pattern),
+            2 => visitor.layout(|s| &s.layout.dot_font, |s| &mut s.layout.dot_font),
+            3 => visitor.layout(|s| &s.layout.dot_icon, |s| &mut s.layout.dot_icon),
+            4 => visitor.layout(|s| &s.layout.dot_label, |s| &mut s.layout.dot_label),
+            5 => visitor.layout(|s| &s.layout.dot_size, |s| &mut s.layout.dot_size),
             _ => return None,
         })
     }
@@ -103,7 +141,7 @@ impl Bucket for DotBucket {
         layer_id: &str,
         image_positions: &ImagePositions,
     ) -> bool {
-        let Some(binders) = self.binders.get_mut(layer_id) else {
+        let Some(binders) = self.binders.get_mut(layer_id).filter(|binders| binders.depends_on_feature_state()) else {
             return false;
         };
         binders.update_vertex_vectors(states, layer, image_positions);
@@ -134,13 +172,13 @@ pub(crate) struct DotLayout {
     zoom: f32,
     features: Vec<usize>,
     source_layer: SourceLayer,
-    /// Whether a layer of the group has a pattern.
-    has_pattern: bool,
+    /// Whether a layer of the group has a pattern, an icon or a label.
+    has_dependencies: bool,
 }
 
 impl Layout<Dot> for DotLayout {
     fn has_dependencies(&self) -> bool {
-        self.has_pattern
+        self.has_dependencies
     }
 
     fn create_bucket(
@@ -180,7 +218,7 @@ impl LayerType for Dot {
     type State = ();
 
     fn layout_can_need_dependencies(group: &[Arc<EvaluatedLayer<Dot>>]) -> bool {
-        group.iter().any(|layer| pattern(layer).is_some())
+        group.iter().any(|layer| pattern(layer).is_some() || draws_icons_or_labels(layer))
     }
 
     fn create_layout(
@@ -188,10 +226,10 @@ impl LayerType for Dot {
         parameters: &mut LayoutParameters<'_>,
         source_layer: SourceLayer,
     ) -> Result<Option<DotLayout>, Error> {
-        let mut has_pattern = false;
+        let mut has_dependencies = draws_icons_or_labels(&group[0]);
         for id in group.iter().filter_map(|layer| pattern(layer)) {
             parameters.image_dependencies.entry(id.to_owned()).or_insert(ImageType::Pattern);
-            has_pattern = true;
+            has_dependencies = true;
         }
         let leader = &group[0].style;
         let bucket_parameters = parameters.bucket_parameters;
@@ -199,12 +237,34 @@ impl LayerType for Dot {
         let context = EvaluationContext::new(zoom)
             .with_canonical_tile_id(Some(&bucket_parameters.tile_id.canonical))
             .with_global_state(bucket_parameters.global_state.as_deref());
+        let mut evaluation = PropertyEvaluationParameters::new(zoom);
+        evaluation.global_state.clone_from(&bucket_parameters.global_state);
+        let layout = leader.layout.evaluate(&evaluation);
         let layer = source_layer.layer()?;
         let mut features = Vec::new();
         for i in 0..layer.len() {
             let feature = layer.feature(i)?;
-            if leader.filter.evaluate(&EvaluationContext { feature: Some(&feature), ..context }) {
-                features.push(i);
+            let context = EvaluationContext { feature: Some(&feature), ..context };
+            if !leader.filter.evaluate(&context) {
+                continue;
+            }
+            features.push(i);
+            if !draws_icons_or_labels(&group[0]) {
+                continue;
+            }
+            let images = context
+                .with_available_images(Some(parameters.available_images))
+                .with_unavailable_images(Some(parameters.unavailable_images));
+            let icon = layout.dot_icon.evaluate(&images);
+            if !icon.empty() {
+                parameters.image_dependencies.entry(icon.id().to_owned()).or_insert(ImageType::Icon);
+            }
+            if !leader.layout.dot_label.is_undefined() {
+                let font_stack = layout.dot_font.evaluate(&context);
+                let glyphs = parameters.glyph_dependencies.glyphs.entry(font_stack).or_default();
+                for section in &layout.dot_label.evaluate(&images).sections {
+                    glyphs.extend(section.text.chars().map(|c| GlyphID::from(c as u16)));
+                }
             }
         }
         Ok(Some(DotLayout {
@@ -214,7 +274,7 @@ impl LayerType for Dot {
             zoom,
             features,
             source_layer,
-            has_pattern,
+            has_dependencies,
         }))
     }
 

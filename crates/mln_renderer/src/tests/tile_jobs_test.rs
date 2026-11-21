@@ -129,9 +129,9 @@ pub(super) fn layer(mut json: serde_json::Value) -> Arc<dyn ErasedEvaluatedLayer
     render_layer.evaluated()
 }
 
-/// Icons of `icon-image`, at size `size`.
-pub(super) fn icons(icon_image: &serde_json::Value, size: f32) -> Arc<dyn ErasedEvaluatedLayer> {
-    layer(json!({"id": "icons", "type": "symbol", "layout": {"icon-image": icon_image, "icon-size": size}}))
+/// Icons of `dot-icon`, laid out with `dot-size` `size`.
+pub(super) fn icons(icon: &serde_json::Value, size: f32) -> Arc<dyn ErasedEvaluatedLayer> {
+    layer(json!({"id": "icons", "type": "dot", "layout": {"dot-icon": icon, "dot-size": size}}))
 }
 
 pub(super) fn points() -> TileData {
@@ -437,8 +437,8 @@ fn glyph_and_image_events_keep_their_order() {
     test.tile.store.glyphs().set_url("test://{fontstack}/{range}.pbf");
     test.load(&[layer(json!({
         "id": "labels",
-        "type": "symbol",
-        "layout": {"text-field": "a", "icon-image": "missing"}
+        "type": "dot",
+        "layout": {"dot-label": "a", "dot-font": ["Test"], "dot-icon": "missing"}
     }))]);
     test.update();
     manual.run();

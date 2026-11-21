@@ -14,7 +14,6 @@ mod expression_global_state;
 mod filter;
 pub(crate) mod fixture_layer;
 pub(crate) mod fixture_source;
-mod format_section_override_test;
 mod properties;
 mod property_expression;
 mod style;

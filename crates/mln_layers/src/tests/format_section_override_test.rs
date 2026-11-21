@@ -1,4 +1,4 @@
-// The style tests that need `FormatSectionOverride`:
+// The style tests of the symbol layer type's `FormatSectionOverride`:
 // PropertyExpression.FormatSectionOverride,
 // GlobalStateExpression.FormatSectionOverrideUsesCapturedState and
 // Layer.SymbolLayerOverrides.
@@ -16,22 +16,22 @@ use mln_expression::match_::Match;
 use mln_expression::parsing_context::ParsingContext;
 use mln_expression::type_::Type;
 use mln_expression::value::{ObjectType, Value};
+use mln_style::evaluated::Evaluated;
+use mln_style::expression::Functions;
+use mln_style::layer_type::{ErasedLayerStyle as _, LayerStyle};
+use mln_style::properties::{Transitionable, Transitioning};
+use mln_style::property_expression::PropertyExpression;
+use mln_style::property_value::PropertyValue;
+use mln_style::transition_options::TransitionOptions;
 use mln_tile_id::geometry_tile_data::GeometryTileFeature;
 use mln_util::Color;
 use mln_util::geometry::FeatureType;
 use mln_vec_map::{VecMap, VecSet};
 
-use crate::evaluated::Evaluated;
-use crate::expression::Functions;
-use crate::format_section_override::{format_section_override as new_override, set_overrides};
-use crate::layer_type::LayerStyle;
-use crate::layers::symbol_layer::SymbolLayerPaintPropertyOverrides as MockOverrides;
-use crate::layers::{Symbol, SymbolLayoutProperties, SymbolPaintProperties};
-use crate::properties::{Transitionable, Transitioning};
-use crate::property_expression::PropertyExpression;
-use crate::property_table::layout_properties_differ;
-use crate::property_value::PropertyValue;
-use crate::transition_options::TransitionOptions;
+use crate::symbol::format_section_override::{
+    SymbolLayerPaintPropertyOverrides as MockOverrides, format_section_override as new_override, set_overrides,
+};
+use crate::symbol::{Symbol, SymbolLayoutProperties, SymbolPaintProperties};
 
 /// `test/include/mln/test/stub_geometry_tile_feature.hpp` (the property-map
 /// constructor).
@@ -257,18 +257,19 @@ fn symbol_layer_overrides() {
 
         // A constant overridable property's change counts while a section
         // overrides it.
+        let color =
+            |color| Transitionable { value: PropertyValue::Constant(color), options: TransitionOptions::default() };
         let mut current = LayerStyle::<Symbol>::new(String::new(), String::new());
+        current.layout.text_field = PropertyValue::Constant(overridden_formatted());
+        current.paint.text_color = color(Color::green());
         let mut updated = current.clone();
-        current.paint.text_color =
-            Transitionable { value: PropertyValue::Constant(Color::green()), options: TransitionOptions::default() };
-        updated.paint.text_color =
-            Transitionable { value: PropertyValue::Constant(Color::green()), options: TransitionOptions::default() };
-        assert!(!layout_properties_differ(&current, &updated, true));
+        assert!(!current.layout_difference(&updated));
 
-        current.paint.text_color =
-            Transitionable { value: PropertyValue::Constant(Color::red()), options: TransitionOptions::default() };
-        assert!(layout_properties_differ(&current, &updated, true));
-        assert!(!layout_properties_differ(&current, &updated, false));
+        current.paint.text_color = color(Color::red());
+        assert!(current.layout_difference(&updated));
+        current.layout.text_field = PropertyValue::Undefined;
+        updated.layout.text_field = PropertyValue::Undefined;
+        assert!(!current.layout_difference(&updated));
     }
 
     // Possibly evaluated.
@@ -295,7 +296,7 @@ fn symbol_layer_overrides() {
             &unevaluated_layout_with_text_field(overridden_formatted()),
             &mut paint,
             &SymbolPaintProperties::Unevaluated::default(),
-            &None,
+            None,
         );
         assert!(!paint.text_color.is_constant());
 
@@ -336,7 +337,7 @@ fn symbol_layer_overrides() {
             &unevaluated_layout_with_text_field(overridden_formatted()),
             &mut paint,
             &unevaluated,
-            &Some(state),
+            Some(&state),
         );
 
         let wrapped = &paint.text_color;

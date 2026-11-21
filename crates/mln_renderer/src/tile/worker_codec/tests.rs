@@ -248,16 +248,10 @@ const LEGACY_DOTS: &str = r#"{"id": "water-legacy", "type": "dot", "source": "s"
     "paint": {"dot-color": {"property": "class", "type": "categorical", "stops": [["ocean", "red"]]}}}"#;
 const ADMIN_DOTS: &str = r#"{"id": "admin", "type": "dot", "source": "s", "source-layer": "admin",
     "paint": {"dot-color": ["case", ["==", ["get", "maritime"], 1], "blue", "red"]}}"#;
-const LABELS: &str = r#"{"id": "labels", "type": "symbol", "source": "s", "source-layer": "admin",
-    "layout": {"symbol-placement": "line", "text-field": ["to-string", ["get", "admin_level"]],
-        "text-font": ["Open Sans Regular"], "text-size": ["interpolate", ["linear"], ["zoom"], 0, 10, 10, 20],
-        "icon-image": "interstate_1", "icon-allow-overlap": true, "text-allow-overlap": true},
-    "paint": {"text-color": ["case", ["==", ["get", "maritime"], 1], "blue", "black"]}}"#;
-const LABELS_HALO: &str = r#"{"id": "labels-halo", "type": "symbol", "source": "s", "source-layer": "admin",
-    "layout": {"symbol-placement": "line", "text-field": ["to-string", ["get", "admin_level"]],
-        "text-font": ["Open Sans Regular"], "text-size": ["interpolate", ["linear"], ["zoom"], 0, 10, 10, 20],
-        "icon-image": "interstate_1", "icon-allow-overlap": true, "text-allow-overlap": true},
-    "paint": {"text-halo-color": ["case", ["==", ["get", "disputed"], 1], "red", "white"], "text-halo-width": 1}}"#;
+const LABELS: &str = r#"{"id": "labels", "type": "dot", "source": "s", "source-layer": "admin",
+    "layout": {"dot-label": ["to-string", ["get", "admin_level"]], "dot-font": ["Open Sans Regular"],
+        "dot-size": ["interpolate", ["linear"], ["zoom"], 0, 10, 10, 20], "dot-icon": "interstate_1"},
+    "paint": {"dot-color": ["case", ["==", ["get", "maritime"], 1], "blue", "black"]}}"#;
 /// A job behind the codec lays the tile out as one run directly, for a layer
 /// of every type that takes geometry tiles (each type of the style
 /// specification whose layers do must have a layer here, and its buckets a
@@ -267,8 +261,8 @@ const LABELS_HALO: &str = r#"{"id": "labels-halo", "type": "symbol", "source": "
 fn every_geometry_layer_type_crosses() {
     // The layer types this crate's tests register. The built-in types of
     // mln_layers cross in its tests.
-    let types = ["symbol", "dot", "tint", "shade"];
-    let layers_of_type = [("symbol", vec![LABELS]), ("dot", vec![DOTS, LEGACY_DOTS, ADMIN_DOTS])];
+    let types = ["dot", "tint", "shade"];
+    let layers_of_type = [("dot", vec![DOTS, LEGACY_DOTS, ADMIN_DOTS, LABELS])];
     for type_ in types {
         let layer = convert(&format!(r#"{{"id": "l", "type": "{type_}", "source": "s", "source-layer": "sl"}}"#));
         let takes_geometry_tiles = layer.info().source == mln_style::layer_type::SourceKind::Geometry;
@@ -288,13 +282,13 @@ fn every_geometry_layer_type_crosses() {
     }
 }
 
-/// Symbol layers cross too: the first job answers what it needs, the
-/// second carries the positions it resolved to, and the symbol buckets come
-/// back.
+/// Layouts that wait for glyphs and images cross too: the first job
+/// answers what it needs, the second carries the positions it resolved to,
+/// and the buckets come back.
 #[test]
-fn symbol_layouts_cross_with_their_glyphs_and_images() {
+fn layouts_cross_with_their_glyphs_and_images() {
     let mut codec = ThroughCodec::new();
-    let style = style(&layers(&[LABELS, LABELS_HALO]));
+    let style = style(&layers(&[LABELS]));
     let data = tile_data();
     let JobResult::NeedsDeps(needs) = codec.run(&job(&style, full(&data), Resolved::default())) else {
         panic!("expected the dependencies");
@@ -308,30 +302,8 @@ fn symbol_layouts_cross_with_their_glyphs_and_images() {
         panic!("expected the layout");
     };
     assert_eq!(output.deps.images.keys().collect::<Vec<_>>(), ["interstate_1"]);
-    for (_, render_data) in output.result.layer_render_data.iter() {
-        let symbols = render_data.bucket.downcast_ref::<crate::buckets::symbol_bucket::SymbolBucket>().unwrap();
-        assert!(symbols.has_text_data() && symbols.has_icon_data());
-        assert!(!symbols.state.symbol_instances.is_empty());
-    }
-}
-
-/// A text color in a format section overrides the paint property, which
-/// the symbol layer turns into a `FormatSectionOverride` expression when it
-/// transitions: it crosses with the layer's properties and back with the
-/// binders.
-#[test]
-fn format_section_overrides_cross() {
-    let layer = convert(
-        r#"{"id": "formatted", "type": "symbol", "source": "s", "source-layer": "admin",
-        "layout": {"symbol-placement": "line", "text-font": ["Open Sans Regular"], "text-allow-overlap": true,
-            "text-field": ["format", ["to-string", ["get", "admin_level"]], {"text-color": "red"}]},
-        "paint": {"text-color": "blue"}}"#,
-    );
-    let mut render_layer = crate::tests::render_layer(layer.style());
-    render_layer.transition(&TransitionParameters::new(None, TransitionOptions::default()));
-    render_layer.evaluate(&PropertyEvaluationParameters::new(0.0));
-    let layers = vec![render_layer.evaluated()];
-    cross(&layers, &tile_data());
+    let (_, render_data) = output.result.layer_render_data.iter().next().expect("a bucket");
+    assert!(render_data.bucket.has_data());
 }
 
 /// MLT tile data crosses as its bytes too.
@@ -598,7 +570,7 @@ fn a_missing_layer_type_fails_its_job() {
 
     let mut builder = crate::RegistryBuilder::new();
     mln_style::expression::functions::register_builtin_functions(builder.functions_mut()).unwrap();
-    builder.add_layer_type::<mln_style::layers::Symbol>().unwrap();
+    builder.add_layer_type::<crate::tests::fixture_layer::Tint>().unwrap();
     let Err(error) = WorkerCodec::new(builder.build()).decode_job(body) else {
         panic!("decoded a dot layer without its type");
     };

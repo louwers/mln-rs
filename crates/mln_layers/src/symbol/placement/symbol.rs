@@ -9,10 +9,10 @@ use mln_text::anchor_alignment;
 
 use super::context::PlacementContext;
 use super::{CircleKey, JointPlacement, Placement, VariableOffset};
-use crate::layout::symbol_instance::{IconPart, SymbolInstance, TextPart};
-use crate::layout::symbol_projection::evaluate_size_for_feature;
-use crate::text::collision_feature::CollisionFeature;
-use crate::text::collision_index::{LabelRun, OverlapMode, PlacedFeatureResult};
+use crate::symbol::collision_feature::CollisionFeature;
+use crate::symbol::instance::{IconPart, SymbolInstance, TextPart};
+use crate::symbol::placement::collision_index::{LabelRun, OverlapMode, PlacedFeatureResult};
+use crate::symbol::projection::evaluate_size_for_feature;
 
 impl VariableOffset {
     /// The shift of the label from its anchor, along the label's own axes.
@@ -318,7 +318,7 @@ impl Placement {
                 if !self.can_place_at_variable_anchor(text_box, anchor, screen_shift, anchors, ctx) {
                     continue;
                 }
-                let part = crate::text::collision_index::PartCollision { overlap_mode, ..text_collision };
+                let part = crate::symbol::placement::collision_index::PartCollision { overlap_mode, ..text_collision };
                 let result = self.collision_index.place_feature(
                     &part,
                     feature,

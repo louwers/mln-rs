@@ -9,7 +9,7 @@
 //! - The line mesh ([`add_line`]), which the engine's tile debug overlay
 //!   builds its lines with too.
 //! - The quad and index builders ([`Indexed`], [`add_point_quads`]), which
-//!   the engine's symbol layout and raster tiles share with the buckets.
+//!   the engine's raster tiles share with the layer types' buckets.
 //! - Subdivision and triangulation ([`subdivide_polygon`],
 //!   [`Tessellator`]), geometry builders that the engine's tile debug
 //!   overlay and tests use too.
@@ -20,8 +20,7 @@
 //! contract to be, but outside the engine they're unnameable or
 //! `#[doc(hidden)]`.
 //!
-//! The [placement](crate::placement) capability, which only the engine's
-//! symbol layer type has, is unstable too.
+//! The [placement](crate::placement) capability is unstable too.
 //!
 //! Two more hidden modules serve tools, each behind a feature of its own:
 //! `testing` (`testing`), drivers for the tests of a crate

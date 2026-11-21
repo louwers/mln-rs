@@ -7,10 +7,11 @@
 //! pixels across: the street tiles stop at zoom 14, so the map shows that
 //! tile laid out at zoom 15, with the symbol layers that start there.
 //!
-//! Both stages are the renderer's, reached through its `bench` entry points
-//! (`mln_renderer::bench`).
+//! Both stages are the symbol layer type's, reached through its `bench`
+//! entry points (`mln_layers::bench`).
 
-use mln_renderer::bench::{LaidOut, SymbolIndex, SymbolView};
+use mln_layers::bench::{SymbolIndex, SymbolView};
+use mln_renderer::bench::LaidOut;
 use mln_style::Style;
 
 use super::{DENSE, SPARSE, StreetLayout, StreetTile, loaded_liberty};
@@ -71,15 +72,15 @@ fn index(bench: &mut Bench, tile: StreetTile) {
     let style = loaded_liberty(&fixtures);
     let before = lay_out(&fixtures, &style, tile, ZOOM - 1);
     let after = lay_out(&fixtures, &style, tile, ZOOM);
-    let zoomed_out = view(&style, &before, tile, ZOOM - 1);
-    let zoomed_in = view(&style, &after, tile, ZOOM);
+    let mut zoomed_out = view(&style, &before, tile, ZOOM - 1);
+    let mut zoomed_in = view(&style, &after, tile, ZOOM);
 
     let added = bench.measure(|| {
         (0..tile.repeats)
             .map(|_| {
                 let mut index = SymbolIndex::default();
-                zoomed_out.index(&mut index).unwrap_or_else(|error| panic!("{error}"));
-                zoomed_in.index(&mut index).unwrap_or_else(|error| panic!("{error}"))
+                zoomed_out.index(&mut index);
+                zoomed_in.index(&mut index)
             })
             .sum::<usize>()
     });
@@ -109,8 +110,8 @@ fn place(bench: &mut Bench, tile: StreetTile) {
     let fixtures = Fixtures::open(bench);
     let style = loaded_liberty(&fixtures);
     let symbols = lay_out(&fixtures, &style, tile, ZOOM);
-    let view = view(&style, &symbols, tile, ZOOM);
-    view.index(&mut SymbolIndex::default()).unwrap_or_else(|error| panic!("{error}"));
+    let mut view = view(&style, &symbols, tile, ZOOM);
+    view.index(&mut SymbolIndex::default());
     // The first placement marks the buckets as placed, once.
     let shown = view.place();
     assert!(shown > 0, "the tile shows symbols");

@@ -7,9 +7,9 @@
 //! bucket and its layout; the fill, line and fill-extrusion layouts are a
 //! `PatternLayout` of each type. The raster, hillshade and color-relief
 //! types draw the engine's raster and raster-dem tile contents. The custom
-//! type's module holds the API of the hosts that draw its layers. Symbol,
-//! the one built-in layer type in the engine, registers through
-//! `mln_renderer::builtins::register_layer_types`.
+//! type's module holds the API of the hosts that draw its layers. The symbol
+//! type's module also holds its placement pass, which places the frame's
+//! symbol layers.
 //!
 //! A type that draws also has its programs, the uniform blocks its shaders
 //! read, and its programs' sources in each shading language of the crate's
@@ -17,6 +17,9 @@
 //! features turn on.
 
 pub mod background;
+#[cfg(feature = "bench")]
+#[doc(hidden)]
+pub mod bench;
 pub mod circle;
 mod color_ramp;
 pub mod color_relief;
@@ -31,6 +34,7 @@ pub mod line;
 mod pattern_layout;
 pub mod raster;
 mod shaders;
+pub mod symbol;
 
 pub use background::{Background, BackgroundPaintProperties};
 pub use circle::{Circle, CircleLayoutProperties, CirclePaintProperties};
@@ -46,6 +50,7 @@ use mln_renderer::draw::{BucketChanges, DrawObjects, VertexAttributeArray};
 use mln_renderer::layer::LayerType;
 use mln_renderer::{RegisterError, RegistryBuilder};
 pub use raster::{Raster, RasterPaintProperties};
+pub use symbol::{Symbol, SymbolLayoutProperties, SymbolPaintProperties};
 
 /// Adds the layer types of this crate. Fails for a name that an earlier
 /// call took.
@@ -59,6 +64,7 @@ pub fn register_layer_types(builder: &mut RegistryBuilder) -> Result<(), Registe
     builder.add_layer_type::<Raster>()?;
     builder.add_layer_type::<Hillshade>()?;
     builder.add_layer_type::<ColorRelief>()?;
+    builder.add_layer_type::<Symbol>()?;
     builder.add_layer_type::<Custom>()
 }
 

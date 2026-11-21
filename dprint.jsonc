@@ -45,7 +45,6 @@
     "tools/bench/fixtures.json",
     "crates/mln_c/src/generated/**",
     "crates/mln_layers/src/*/properties.rs",
-    "crates/mln_style/src/layers/*_layer_properties.rs",
     "crates/mln_style/src/light_properties.rs",
     "crates/mln_style/src/sky_properties.rs",
     "crates/mln_text/src/arabic_tables.rs",

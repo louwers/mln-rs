@@ -664,7 +664,7 @@ fn a_relayout_keeps_only_the_bins_it_uses() {
         tile.store.images_mut().add_image(super::tile_jobs_test::image(id));
     }
     tile.store.images_mut().set_loaded(true);
-    let icon = |id: &str| layer(json!({"id": id, "type": "symbol", "layout": {"icon-image": id}}));
+    let icon = |id: &str| layer(json!({"id": id, "type": "dot", "layout": {"dot-icon": id}}));
     tile.set_style(&style(&[icon("a"), icon("b")]));
     tile.set_data(Some(points()));
     for _ in 0..2 {

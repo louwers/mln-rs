@@ -1,17 +1,9 @@
-use std::path::PathBuf;
-
 use feature::Value;
-use mln_vec_map::VecSet;
 
 use super::util::FixtureLog;
 use crate::StyleRegistry;
-use crate::layer::FontStack;
 use crate::parser::Parser;
 use crate::style_property::Kind;
-
-fn fixtures_dir() -> PathBuf {
-    std::path::Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("testdata/test/fixtures/style_parser")
-}
 
 // gtest: StyleParser.SpriteAsString
 #[test]
@@ -91,95 +83,6 @@ fn sprite_as_array_multiple() {
     assert_eq!("default", result[0].id);
     assert_eq!("https://example.com/hiking/markers", result[1].sprite_url);
     assert_eq!("hiking", result[1].id);
-}
-
-// gtest: StyleParser.FontStacks
-#[test]
-fn font_stacks() {
-    let mut parser = Parser::new(&StyleRegistry::with_builtins());
-    let _ = parser.parse(&std::fs::read_to_string(fixtures_dir().join("font_stacks.json")).unwrap());
-    let expected: VecSet<FontStack> = [vec!["a"], vec!["a", "b"], vec!["a", "b", "c"]]
-        .into_iter()
-        .map(|v| v.into_iter().map(str::to_owned).collect())
-        .collect();
-    let result = parser.font_stacks();
-    assert_eq!(expected, result);
-}
-
-fn symbol_font_stacks(layout: &str) -> VecSet<FontStack> {
-    let mut parser = Parser::new(&StyleRegistry::with_builtins());
-    let _ = parser.parse(&format!(
-        r#"{{
-        "version": 8,
-        "layers": [{{
-            "id": "symbol",
-            "type": "symbol",
-            "source": "vector",
-            "layout": {layout}
-        }}]
-    }}"#
-    ));
-    parser.font_stacks()
-}
-
-fn arial_helvetica() -> VecSet<FontStack> {
-    [vec!["Arial".to_owned()], vec!["Helvetica".to_owned()]].into_iter().collect()
-}
-
-// gtest: StyleParser.FontStacksNoTextField
-#[test]
-fn font_stacks_no_text_field() {
-    let result = symbol_font_stacks(r#"{"text-font": ["a"]}"#);
-    assert_eq!(0, result.len());
-}
-
-// gtest: StyleParser.FontStacksCaseExpression
-#[test]
-fn font_stacks_case_expression() {
-    let result = symbol_font_stacks(
-        r#"{
-                "text-field": "a",
-                "text-font": ["case", ["==", "a", ["string", ["get", "text-font"]]], ["literal", ["Arial"]], ["literal", ["Helvetica"]]]
-            }"#,
-    );
-    assert_eq!(arial_helvetica(), result);
-}
-
-// gtest: StyleParser.FontStacksMatchExpression
-#[test]
-fn font_stacks_match_expression() {
-    let result = symbol_font_stacks(
-        r#"{
-                "text-field": "a",
-                "text-font": ["match", ["get", "text-font"], "a", ["literal", ["Arial"]], ["literal", ["Helvetica"]]]
-            }"#,
-    );
-    assert_eq!(arial_helvetica(), result);
-}
-
-// gtest: StyleParser.FontStacksStepExpression
-#[test]
-fn font_stacks_step_expression() {
-    let result = symbol_font_stacks(
-        r#"{
-                "text-field": "a",
-                "text-font": ["array", "string", ["step", ["get", "text-font"], ["literal", ["Arial"]], 0, ["literal", ["Helvetica"]]]]
-            }"#,
-    );
-    assert_eq!(arial_helvetica(), result);
-}
-
-// gtest: StyleParser.FontStacksGetExpression
-#[test]
-fn font_stacks_get_expression() {
-    // Invalid style, but not currently validated.
-    let result = symbol_font_stacks(
-        r#"{
-                "text-field": "a",
-                "text-font": ["array", "string", ["get", "text-font"]]
-            }"#,
-    );
-    assert_eq!(0, result.len());
 }
 
 // gtest: StyleParser.ZoomCurve
@@ -276,8 +179,8 @@ fn deepest_admitted_style_parses_on_a_1_mib_stack() {
             nest(r#"["interpolate", ["linear"], ["get", "a"], 0, X, 1, 0]"#, r#"["number", ["get", "a"]]"#, depth);
         format!(
             r#"{{"version": 8, "sources": {{"s": {{"type": "shapes"}}}},
-                "layers": [{{"id": "c", "type": "symbol", "source": "s", "source-layer": "l",
-                             "filter": {filter}, "paint": {{"text-halo-width": {radius}}}}}]}}"#
+                "layers": [{{"id": "c", "type": "dot", "source": "s", "source-layer": "l",
+                             "filter": {filter}, "paint": {{"dot-width": {radius}}}}}]}}"#
         )
     };
     let fits = |depth: usize| serde_json::from_str::<serde_json::Value>(&style(depth)).is_ok();
@@ -310,10 +213,10 @@ fn invalid_properties_are_skipped() {
         "version": 8,
         "sources": {"s": {"type": "points"}},
         "layers": [
-            {"id": "a", "type": "symbol", "source": "s",
-             "layout": {"visibility": "maybe", "symbol-sort-key": 1},
-             "paint": {"text-color": "not a color", "text-foo": 1, "text-halo-width": 5}},
-            {"id": "b", "ref": "a", "paint": {"text-opacity": "opaque", "text-halo-width": 7}}
+            {"id": "a", "type": "dot", "source": "s",
+             "layout": {"visibility": "maybe", "dot-sort-key": 1},
+             "paint": {"dot-color": "not a color", "dot-foo": 1, "dot-width": 5}},
+            {"id": "b", "ref": "a", "paint": {"dot-opacity": "opaque", "dot-width": 7}}
         ]
     }"#,
         )
@@ -325,19 +228,19 @@ fn invalid_properties_are_skipped() {
         let property = parser.layers[layer].get_property(name);
         (property.get_kind(), property.get_value().clone())
     };
-    assert_eq!(property(0, "text-halo-width"), (Kind::Constant, Value::Double(5.0)));
-    assert_eq!(property(0, "symbol-sort-key"), (Kind::Constant, Value::Double(1.0)));
-    assert_eq!(property(0, "text-color").0, Kind::Undefined);
+    assert_eq!(property(0, "dot-width"), (Kind::Constant, Value::Double(5.0)));
+    assert_eq!(property(0, "dot-sort-key"), (Kind::Constant, Value::Double(1.0)));
+    assert_eq!(property(0, "dot-color").0, Kind::Undefined);
     assert_eq!(property(0, "visibility").0, Kind::Undefined);
-    assert_eq!(property(1, "text-halo-width"), (Kind::Constant, Value::Double(7.0)));
-    assert_eq!(property(1, "text-opacity").0, Kind::Undefined);
+    assert_eq!(property(1, "dot-width"), (Kind::Constant, Value::Double(7.0)));
+    assert_eq!(property(1, "dot-opacity").0, Kind::Undefined);
 
     let mut warnings: Vec<_> = log.messages().into_iter().map(|message| message.msg).collect();
     warnings.sort();
     assert_eq!(
         warnings,
         [
-            "layer 'a' doesn't support property 'text-foo'",
+            "layer 'a' doesn't support property 'dot-foo'",
             "value must be a number",
             "value must be a valid color",
             "value must be a valid enumeration value",

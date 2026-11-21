@@ -47,11 +47,12 @@ enum RenderState {
 /// `render`.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct RenderTimings {
-    /// The update up to symbol placement: the style's changes, the layers'
-    /// values, the sources' tiles and the layers' choice of them.
+    /// The update up to placement: the style's changes, the layers' values,
+    /// the sources' tiles and the layers' choice of them.
     pub sources: Duration,
-    /// The rest of the update: placing symbols across tiles and updating
-    /// their buckets.
+    /// The rest of the update: the placement pass
+    /// ([`placement`](crate::placement)), which places what the layers show
+    /// across tiles, and updates their buckets.
     pub symbols: Duration,
     /// Making the layers' draws from the tiles, with their uniforms.
     pub layers: Duration,

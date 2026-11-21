@@ -383,7 +383,7 @@ pub fn copied_vertices<V: bytemuck::Pod>(context: &mut Context, vertices: &[V]) 
 
 /// Indexes holding a copy of `indexes`, which a draw owns.
 #[must_use]
-pub(crate) fn copied_indexes(indexes: &[u16]) -> DrawIndexes {
+pub fn copied_indexes(indexes: &[u16]) -> DrawIndexes {
     DrawIndexes::new(indexes.to_vec())
 }
 

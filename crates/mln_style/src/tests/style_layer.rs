@@ -34,7 +34,7 @@ fn observer() {
     // calls; in the port a layer changes when its impl `Arc` is replaced
     // (see layer.rs), which is what a style version compares, so each
     // "notifies" check is "the impl pointer changed".
-    let mut layer = new_layer("symbol", "symbol", "source");
+    let mut layer = new_layer("dot", "dot", "source");
     let notified = |layer: &mut Layer, f: &mut dyn FnMut(&mut Layer)| {
         let before = Arc::clone(layer.style());
         f(layer);
@@ -48,25 +48,25 @@ fn observer() {
     assert!(notified(&mut layer, &mut |l| l.set_visibility(VisibilityType::None)));
 
     // Notifies observer on paint property change.
-    assert!(notified(&mut layer, &mut |l| set(l, "text-color", RED)));
+    assert!(notified(&mut layer, &mut |l| set(l, "dot-color", RED)));
 
     // Notifies observer on layout property change.
-    assert!(notified(&mut layer, &mut |l| set(l, "text-transform", r#""uppercase""#)));
+    assert!(notified(&mut layer, &mut |l| set(l, "dot-alignment", r#""map""#)));
 
     // Notifies observer on paint property transition change.
-    assert!(notified(&mut layer, &mut |l| set(l, "text-color-transition", r#"{"duration": 300}"#)));
+    assert!(notified(&mut layer, &mut |l| set(l, "dot-color-transition", r#"{"duration": 300}"#)));
 
     // Does not notify observer on no-op visibility change.
     assert!(!notified(&mut layer, &mut |l| l.set_visibility(VisibilityType::None)));
 
     // Does not notify observer on no-op paint property change.
-    assert!(!notified(&mut layer, &mut |l| set(l, "text-color", RED)));
+    assert!(!notified(&mut layer, &mut |l| set(l, "dot-color", RED)));
 
     // Does not notify observer on no-op layout property change.
-    assert!(!notified(&mut layer, &mut |l| set(l, "text-transform", r#""uppercase""#)));
+    assert!(!notified(&mut layer, &mut |l| set(l, "dot-alignment", r#""map""#)));
 
     // Does not notify observer on no-op paint property transition change.
-    assert!(!notified(&mut layer, &mut |l| set(l, "text-color-transition", r#"{"duration": 300}"#)));
+    assert!(!notified(&mut layer, &mut |l| set(l, "dot-color-transition", r#"{"duration": 300}"#)));
 
     // Notifies observer on source-layer change.
     assert!(notified(&mut layer, &mut |l| l.set_source_layer("roads")));
@@ -96,15 +96,13 @@ fn duplicate_layer() {
     let mut style = style_with_unused_source();
 
     // Add initial layer
-    style
-        .apply(Edit::AddLayer { layer: new_layer("symbol", "symbol", "unusedsource"), before: None })
-        .expect("first add");
+    style.apply(Edit::AddLayer { layer: new_layer("dot", "dot", "unusedsource"), before: None }).expect("first add");
 
     // Try to add duplicate
-    match style.apply(Edit::AddLayer { layer: new_layer("symbol", "symbol", "unusedsource"), before: None }) {
+    match style.apply(Edit::AddLayer { layer: new_layer("dot", "dot", "unusedsource"), before: None }) {
         Ok(()) => panic!("Should not have been allowed to add a duplicate layer id"),
         // Expected
-        Err(e) => assert_eq!(mln_util::Error::already_exists("Layer symbol already exists"), e),
+        Err(e) => assert_eq!(mln_util::Error::already_exists("Layer dot already exists"), e),
     }
 }
 
@@ -125,5 +123,5 @@ fn incompatible_layer() {
     }
 }
 
-// Layer.SymbolLayerOverrides needs mln_renderer's FormatSectionOverride
-// (set_overrides): it is in crates/mln_renderer/tests/format_section_override_test.rs.
+// Layer.SymbolLayerOverrides needs the symbol layer type: it is in
+// mln_layers' tests (format_section_override_test.rs).

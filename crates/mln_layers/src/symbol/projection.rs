@@ -11,10 +11,10 @@ use mln_map_types::{ProjectedTilePoint, TileProjector, View};
 use mln_tile_id::geometry_tile_data::GeometryCoordinate;
 use mln_util::constants::ONE_EM;
 
-use crate::buckets::symbol_bucket::{
+use crate::symbol::bucket::{
     PlacedSymbol, PlacedSymbolPools, SymbolBucket, SymbolDynamicLayoutVertex, SymbolSizeBinder, ZoomEvaluatedSize,
 };
-use crate::layout::symbol_instance::WritingModes;
+use crate::symbol::instance::WritingModes;
 
 /// The directions on screen that a pitched, unrotated label's east and south
 /// axes take, as unit vectors, or zero where an axis is edge-on.

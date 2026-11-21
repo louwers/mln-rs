@@ -9,9 +9,9 @@
 The built-in layer types, outside the engine: each type's properties, its
 style-side and render-side type, its layout and bucket, its drawing, and its
 programs with their shader sources in each shading language of the crate's
-features. They register through `register_layer_types`. With the
-`gpu-conformance` feature, `conformance` holds the frames that the GPU backends'
-tests draw.
+features, and the symbol type's placement. They register through
+`register_layer_types`. With the `gpu-conformance` feature, `conformance` holds
+the frames that the GPU backends' tests draw.
 
 Part of [mln-rs](https://github.com/louwers/mln-rs), a Rust port of the
 [MapLibre Native](https://github.com/maplibre/maplibre-native) map rendering

@@ -10,7 +10,6 @@ use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{FileSource, Kind, Response};
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
 use mln_style::layer_type::LayerStyle;
-use mln_style::layers::Symbol;
 use mln_style_types::image::Impl as ImageImpl;
 use mln_tile_id::OverscaledTileID;
 use mln_util::constants::TILE_SIZE_I;
@@ -46,7 +45,6 @@ fn layer(json: &serde_json::Value) -> Arc<dyn ErasedEvaluatedLayer> {
     let style = layer.style();
     match json["type"].as_str().unwrap() {
         "dot" => Arc::new(EvaluatedLayer::<Dot>::new(LayerStyle::recover(style).unwrap())),
-        "symbol" => Arc::new(EvaluatedLayer::<Symbol>::new(LayerStyle::recover(style).unwrap())),
         other => panic!("no properties for {other}"),
     }
 }
@@ -70,7 +68,7 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn ErasedEvaluatedLayer>]) -> Outcome {
     });
 
     let style_source = fixture_source::source::<Geometry>("source", tileset, TILE_SIZE_I);
-    // A loaded sprite with the icon "v" answers the symbol layer's request,
+    // A loaded sprite with the icon "v" answers the icon layer's request,
     // and missing icons stay missing.
     let mut store = crate::tests::pool_store(&thread_pool);
     let mut icon = PremultipliedImage::new(Size::new(1, 1));
@@ -240,8 +238,8 @@ fn all_layers() -> Vec<Arc<dyn ErasedEvaluatedLayer>> {
     vec![
         dot_layer(Some(json!(["==", ["get", "k"], "v"]))),
         layer(&json!({
-            "id": "symbol", "type": "symbol", "source": "source", "source-layer": "l",
-            "layout": { "icon-image": ["get", "k"], "symbol-sort-key": ["get", "n"] }
+            "id": "icons", "type": "dot", "source": "source", "source-layer": "l",
+            "layout": { "dot-icon": ["get", "k"], "dot-size": ["get", "n"] }
         })),
     ]
 }

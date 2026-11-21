@@ -29,10 +29,19 @@ use mln_gfx::shaders::symbol_layer_ubo::{
 };
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_map_types::{Projection, ProjectionData};
+use mln_renderer::draw::{
+    AtlasBinding, BucketChanges, BucketGeometry, Context, DrawDepth, DrawFrame, DrawGeometry, DrawGroup, DrawList,
+    DrawObjects, DrawObjectsMut, DrawOrder, FrameDraw, KeptDraw, LayerDrawing, LayerDraws, PaintParameters,
+    SharedAttribute, Textures, TileMap, TypedVertices, UniformWriter, Uniforms, VertexAttributeArray, bucket_vertices,
+    cast_matrix, copied_indexes, copied_vertices, copy_shared_attributes, paint_vertices, projection_data,
+    tile_unit_translation, to_projection_ubo,
+};
+use mln_renderer::layer::{
+    Bucket, DrawContext, EvaluatedLayer, FeatureIndex, LayerBucket, LayerType, LayerValues, LayoutParameters,
+    RenderPass, SourceLayer, TileOrder, UpdateContext,
+};
+use mln_renderer::placement::{BucketKey, NewPlacement};
 use mln_style::layer_type::{ErasedLayerStyle as _, LayerStyle};
-use mln_style::layers::Symbol;
-use mln_style::layers::symbol_layer::SymbolLayerPaintPropertyOverrides;
-use mln_style::layers::symbol_layer_properties::{SymbolLayoutProperties, SymbolPaintProperties};
 use mln_style::{PropertyEvaluationParameters, StyleValue as _};
 use mln_style_types::{
     AlignmentType, IconTextFitType, SymbolPlacementType, TextRotationAlignmentType, TranslateAnchorType,
@@ -44,35 +53,15 @@ use mln_util::error::Error;
 use mln_util::hash::HashMap;
 use mln_util::identity::SimpleIdentity;
 
-use crate::bucket::Bucket;
-use crate::bucket_geometry::{BucketGeometry, bucket_vertices, copied_indexes, copied_vertices, paint_vertices};
-use crate::buckets::symbol_bucket::{
+use crate::symbol::bucket::{
     Buffer, CollisionBoxDynamicVertex, CollisionBoxLayoutVertex, CollisionBuffer, PaintProperties, SymbolBucket,
     SymbolDynamicLayoutVertex, SymbolOpacityVertex,
 };
-use crate::draw_objects::{DrawGeometry, DrawObjects, Textures, copy_shared_attributes};
-use crate::geometry::feature_index::FeatureIndex;
-use crate::gfx::atlas_binding::AtlasBinding;
-use crate::gfx::context::Context;
-use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
-use crate::gfx::vertices::TypedVertices;
-use crate::layer::{DrawContext, EvaluatedLayer, LayerType, LayerValues, UpdateContext};
-use crate::layer_drawing::{
-    BucketChanges, DrawDepth, DrawGroup, DrawList, DrawObjectsMut, DrawOrder, FrameDraw, KeptDraw, LayerDrawing,
-    LayerDraws, TileMap, UniformWriter,
-};
-use crate::layout::layout::{LayoutParameters, SourceLayer};
-use crate::layout::symbol_layout::SymbolLayout;
-use crate::layout::symbol_projection::{gl_coord_matrix, label_plane_matrix};
-use crate::paint_parameters::{DrawFrame, PaintParameters};
-use crate::placement::{BucketKey, NewPlacement};
-use crate::render_layer::LayerBucket;
-use crate::render_pass::RenderPass;
-use crate::render_source::TileOrder;
-#[cfg(feature = "bench")]
-use crate::render_tile::RenderTile;
-use crate::text::placement::{BucketPlacementData, PlacedTile, SymbolPlacement, SymbolTranslate};
-use crate::tile_matrix::{cast_matrix, projection_data, tile_unit_translation, to_projection_ubo};
+use crate::symbol::format_section_override::SymbolLayerPaintPropertyOverrides;
+use crate::symbol::layout::SymbolLayout;
+use crate::symbol::placement::{BucketPlacementData, PlacedTile, SymbolPlacement, SymbolTranslate};
+use crate::symbol::projection::{gl_coord_matrix, label_plane_matrix};
+use crate::symbol::{Symbol, SymbolLayoutProperties, SymbolPaintProperties};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SymbolType {
@@ -199,7 +188,7 @@ fn set_binder_attributes(
 
 /// The attributes of the layout vertices.
 fn set_layout_attributes(geometry: &BucketGeometry, buffer: &Buffer, attribs: &mut VertexAttributeArray) {
-    let layout_size = size_of::<crate::buckets::symbol_bucket::SymbolLayoutVertex>() as u32;
+    let layout_size = size_of::<crate::symbol::bucket::SymbolLayoutVertex>() as u32;
     let Some(layout_data) = bucket_vertices(geometry, &buffer.attribute_data) else {
         return;
     };
@@ -601,23 +590,11 @@ pub struct SymbolState {
 
     /// The passes the layer's draws were built for.
     draws_passes: RenderPass,
-    /// The indexes of the buckets `HeldBuckets` holds for the layer.
-    #[cfg(feature = "bench")]
-    held: Vec<usize>,
-}
-
-#[cfg(feature = "bench")]
-impl Drop for SymbolState {
-    fn drop(&mut self) {
-        for &index in &self.held {
-            crate::render_layer::HeldBuckets::release(index);
-        }
-    }
 }
 
 /// The translations of the text and of the icons of a layer with
 /// `layer`'s values.
-pub(crate) fn symbol_translates(layer: &EvaluatedLayer<Symbol>) -> (SymbolTranslate, SymbolTranslate) {
+fn symbol_translates(layer: &EvaluatedLayer<Symbol>) -> (SymbolTranslate, SymbolTranslate) {
     let evaluated = &layer.paint;
     let text_translate = SymbolTranslate {
         offset: *evaluated.text_translate.uniform(),
@@ -692,45 +669,6 @@ impl SymbolState {
         }
     }
 
-    /// [`add_bucket`](Self::add_bucket) of the bucket that
-    /// `HeldBuckets` holds at `bucket` ([`crate::bucket::recover`]), of the
-    /// tile at `tile_index` of `tiles`. The layer frees the bucket when it
-    /// drops.
-    #[cfg(feature = "bench")]
-    pub(crate) fn add_placement_data(
-        &mut self,
-        style: &LayerStyle<Symbol>,
-        tiles: &[RenderTile],
-        tile_index: usize,
-        bucket: usize,
-        feature_index: impl FnOnce() -> Option<Arc<FeatureIndex>>,
-        translates: (SymbolTranslate, SymbolTranslate),
-    ) {
-        use crate::placement::PlacementBuckets;
-        use crate::render_layer::HeldBuckets;
-        self.held.push(bucket);
-        let Some(tile) = tiles.get(tile_index) else {
-            return;
-        };
-        let key = BucketKey {
-            bucket,
-            slot: tile.slot(),
-            tile: *tile.overscaled_tile_id(),
-            source: crate::tile::job::SourceKey(0),
-        };
-        let mut held = HeldBuckets::take();
-        if let Some(bucket) = PlacementBuckets::<Symbol>::new(&mut held).get(&key) {
-            self.add_bucket(style, &PlacedTile::of_render_tile(tile), key, bucket, feature_index, translates);
-        }
-        held.restore();
-    }
-
-    /// Whether the layer places or draws any bucket.
-    #[cfg(feature = "bench")]
-    pub(crate) fn has_placement_data(&self) -> bool {
-        !self.placement_data.is_empty() || !self.follower_data.is_empty()
-    }
-
     /// Makes the frame's draws of `drawing`'s draws of the tiles of `cx` that
     /// show any symbols, in the layer's passes, and of their collision boxes
     /// and circles, and writes the buffers they read.
@@ -763,7 +701,7 @@ impl SymbolState {
             for (index, draw) in cached.collision.iter_mut().enumerate() {
                 write_collision_uniforms(gpu, context, draw, &tile_id, frame);
                 let frame_draw =
-                    FrameDraw { pass: passes, depth: DrawDepth::Off, ..FrameDraw::new(Some(tile_id), draw.draw.id) };
+                    FrameDraw { pass: passes, depth: DrawDepth::Off, ..draw.draw.frame_draw(Some(tile_id)) };
                 self.collision_list.push_part(frame_draw, index, ());
             }
         }
@@ -1149,8 +1087,6 @@ impl LayerType for Symbol {
             follower_data: Vec::new(),
             source_id: Arc::from(""),
             draws_passes: RenderPass::NONE,
-            #[cfg(feature = "bench")]
-            held: Vec::new(),
         };
         (state, SymbolDrawing::default())
     }
@@ -1164,11 +1100,11 @@ impl LayerType for Symbol {
         evaluated: &mut EvaluatedLayer<Symbol>,
     ) {
         if SymbolLayerPaintPropertyOverrides::has_overrides(&layer.style.layout.text_field) {
-            mln_style::format_section_override::set_overrides(
+            crate::symbol::format_section_override::set_overrides(
                 &layer.style.layout,
                 &mut evaluated.paint,
                 &layer.unevaluated,
-                &parameters.global_state,
+                parameters.global_state.as_ref(),
             );
         }
     }
@@ -1248,7 +1184,7 @@ impl LayerType for Symbol {
             let layer_id = render_data.layer.style.base().id.as_str();
 
             // Draws built from another bucket go.
-            entry.set_bucket(bucket.base.bucket_id);
+            entry.set_bucket(bucket.base.id());
             // What changed since the draws were built or last refreshed.
             let refresh = entry.take_changes();
 
@@ -1286,7 +1222,7 @@ impl LayerType for Symbol {
                             sort_key: segment.sort_key,
                             type_,
                             tile_index,
-                            tile_id: tile.tile.id,
+                            tile_id: tile.unwrapped_id(),
                             overscaled_z: tile_id.overscaled_z,
                             segment: Some(i),
                         });
@@ -1300,7 +1236,7 @@ impl LayerType for Symbol {
                         sort_key,
                         type_,
                         tile_index,
-                        tile_id: tile.tile.id,
+                        tile_id: tile.unwrapped_id(),
                         overscaled_z: tile_id.overscaled_z,
                         segment: None,
                     });
@@ -1353,7 +1289,7 @@ impl LayerType for Symbol {
             let Some(tile) = render_tiles.get(group.tile_index) else {
                 continue;
             };
-            let tile_id = tile.tile.id.overscale_to(group.overscaled_z);
+            let tile_id = tile.unwrapped_id().overscale_to(group.overscaled_z);
             let Some(render_data) = tile.view_for_pass(passes) else {
                 continue;
             };
@@ -1427,7 +1363,7 @@ impl LayerType for Symbol {
             };
             for (program, is_halo, _) in halo_and_fill.into_iter().filter(|(_, _, drawn)| *drawn) {
                 // The draws of a tile share the atlases' textures.
-                let tile_atlases = tile_atlases.entry(tile.tile.id).or_default();
+                let tile_atlases = tile_atlases.entry(tile.unwrapped_id()).or_default();
                 let draw_atlases = if is_text {
                     tile_atlases.text.get_or_insert_with(|| {
                         let text_size_is_zoom_constant =

@@ -39,18 +39,16 @@ impl StyleRegistry {
         StyleRegistry { functions, layer_types: layers_by_name, source_types: sources_by_name }
     }
 
-    /// The built-in expression functions, the built-in layer type of this
-    /// crate, and the tests' `plain` and `shade` layer types and fixture
+    /// The built-in expression functions, and the tests' fixture layer and
     /// source types, for this crate's tests, which can't reach the facade's
     /// registry.
     #[cfg(test)]
     pub(crate) fn with_builtins() -> Arc<Self> {
         use crate::layer_type::style_entry;
-        use crate::layers::Symbol;
         use crate::source_type::style_source_entry;
         use crate::tests::fixture_source::{Heights, Points, Shapes};
         let layer_types = [
-            style_entry::<Symbol>(),
+            style_entry::<crate::tests::fixture_layer::Dot>(),
             style_entry::<crate::tests::fixture_layer::Plain>(),
             style_entry::<crate::tests::fixture_layer::Shade>(),
         ];

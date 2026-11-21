@@ -13,14 +13,14 @@ use mln_util::constants::ONE_EM;
 
 use super::context::translation;
 use super::{BucketPlacementData, JointOpacityState, Placement, VariableOffset};
-use crate::buckets::symbol_bucket::{Buffer, CollisionBuffer, SymbolBucket, SymbolBucketState};
-use crate::layout::symbol_instance::{Justification, SymbolInstance, TextPart};
-use crate::layout::symbol_projection::{
+use crate::symbol::bucket::{Buffer, CollisionBuffer, SymbolBucket, SymbolBucketState};
+use crate::symbol::instance::{Justification, SymbolInstance, TextPart};
+use crate::symbol::placement::CircleKey;
+use crate::symbol::placement::collision_index::OverlapMode;
+use crate::symbol::projection::{
     LabelPlaneProjector, LineLabelAlignment, add_dynamic_attributes, evaluate_size_for_feature, hide_glyphs,
     reproject_line_labels, tile_skew_vectors,
 };
-use crate::text::collision_index::OverlapMode;
-use crate::text::placement::CircleKey;
 
 /// Appends `n` copies of `value` to `v`.
 fn extend<T: Copy>(v: &mut Vec<T>, n: usize, value: T) {
@@ -312,7 +312,7 @@ impl Placement {
         } else {
             (Vec2::X, Vec2::Y)
         };
-        let shifted_anchor = |offset: &VariableOffset, run: &crate::buckets::symbol_bucket::PlacedSymbol| {
+        let shifted_anchor = |offset: &VariableOffset, run: &crate::symbol::bucket::PlacedSymbol| {
             let label_plane = label_plane.raised(run.height_offset);
             let tile_anchor = run.anchor_point;
             let projected = if pitch_with_map {
@@ -468,12 +468,7 @@ impl Placement {
 
 /// Sets run `run` of `buffer` hidden or not, and its vertices' opacity to
 /// `vertex`.
-fn set_run_opacity(
-    buffer: &mut Buffer,
-    run: usize,
-    hidden: bool,
-    vertex: crate::buckets::symbol_bucket::SymbolOpacityVertex,
-) {
+fn set_run_opacity(buffer: &mut Buffer, run: usize, hidden: bool, vertex: crate::symbol::bucket::SymbolOpacityVertex) {
     let run = &mut buffer.placed_symbols[run];
     run.hidden = hidden;
     extend(&mut buffer.opacity_attribute_data, 4 * run.glyph_offsets.len(), vertex);

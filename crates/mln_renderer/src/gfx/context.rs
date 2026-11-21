@@ -220,7 +220,7 @@ impl Context {
     /// does, as dynamic vertices, which the holder of the returned handle
     /// updates ([`update_vertices`](Self::update_vertices)), and whose
     /// storage stays across uploads for the next update to fill.
-    pub(crate) fn add_dynamic_vertices<V: bytemuck::Pod>(&mut self, vertices: &[V]) -> TypedVertices<V> {
+    pub fn add_dynamic_vertices<V: bytemuck::Pod>(&mut self, vertices: &[V]) -> TypedVertices<V> {
         self.vertices.add_dynamic(vertices, &self.device.queue)
     }
 
@@ -249,7 +249,7 @@ impl Context {
     /// Replaces the vertices of `typed` with a copy of `data`, as many, which
     /// the next upload writes over their buffer's. Returns false, leaving
     /// them be, for another number of vertices.
-    pub(crate) fn update_vertices<V: bytemuck::Pod>(&mut self, typed: &TypedVertices<V>, data: &[V]) -> bool {
+    pub fn update_vertices<V: bytemuck::Pod>(&mut self, typed: &TypedVertices<V>, data: &[V]) -> bool {
         self.vertices.update(typed, data)
     }
 

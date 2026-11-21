@@ -2,8 +2,7 @@ use mln_conversion::Convertible;
 use mln_style_types::{AnchorOffsetPair, SymbolAnchorType, VariableAnchorOffsetCollection};
 
 use super::util::parse_json;
-use crate::StyleRegistry;
-use crate::conversion::{Converter, Error, convert_layer, convert_property_value};
+use crate::conversion::{Converter, Error, convert_property_value};
 use crate::expression::{EvaluationContext, Functions};
 use crate::property_expression::PropertyExpression;
 use crate::property_value::PropertyValue;
@@ -74,34 +73,6 @@ fn style_conversion() {
         let variable_anchor_offset = parse(json, &mut error);
         assert!(variable_anchor_offset.is_none(), "{json}");
         assert_eq!(error.message, expected_error, "{json}");
-    }
-
-    // parse layer
-    {
-        let json = parse_json(
-            r#"{
-            "type": "symbol",
-            "id": "symbol",
-            "source": "composite",
-            "source-layer": "landmarks",
-            "minzoom": 12,
-            "maxzoom": 18,
-            "layout": {
-                "text-field": "Test Test Test",
-                "icon-image": ["image", ["get", "landmark_image"]],
-                "text-size": 24,
-                "text-justify": "auto",
-                "text-variable-anchor-offset": ["center", [0, 0],"top", [0, 0]]
-            }
-        }"#,
-        );
-        let layer = convert_layer(&StyleRegistry::with_builtins(), &Convertible::from(&json), &mut error);
-        assert!(layer.is_some(), "{}", error.message);
-        let value = layer.unwrap().serialize();
-        match value {
-            feature::Value::Object(object) => assert_eq!(7, object.len()),
-            other => panic!("not an object: {other:?}"),
-        }
     }
 }
 

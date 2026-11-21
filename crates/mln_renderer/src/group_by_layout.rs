@@ -154,7 +154,6 @@ mod tests {
     use mln_style::filter::Filter;
     use mln_style::layer::Layer;
     use mln_style::layer_type::LayerStyle;
-    use mln_style::layers::Symbol;
 
     use super::*;
     use crate::Registry;
@@ -210,7 +209,7 @@ mod tests {
             dot("c", "roads", Some(&motorway)),
             dot("d", "roads", None),
             dot("e", "water", Some(&motorway)),
-            layer::<Symbol>("f", "roads", Some(&motorway)),
+            layer::<Tint>("f", "roads", Some(&motorway)),
             dot("g", "roads", Some(&primary)),
             dot("h", "roads", None),
             // An equal filter that isn't shared: a filterable layer's

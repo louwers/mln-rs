@@ -32,6 +32,12 @@ impl SourceLayer {
         SourceLayer { data, name: name.into() }
     }
 
+    /// The layer's name.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
     /// The layer. The worker only creates layouts for layers the data has,
     /// so neither error is expected.
     pub fn layer(&self) -> Result<TileLayer<'_>, Error> {

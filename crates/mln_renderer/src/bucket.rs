@@ -154,8 +154,3 @@ impl Wire for NoBucket {
         r.fail("a bucket of a layer type that doesn't lay out")
     }
 }
-
-// The benchmarks (`bench.rs`) hold the bucket a benchmark's layer places
-// through this path, which they take in every commit they compare.
-#[cfg(feature = "bench")]
-pub(crate) use crate::render_layer::hold_bucket as recover;

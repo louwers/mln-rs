@@ -17,6 +17,7 @@ use mln_map::{
     NorthOrientation, ProjectionMode, RenderFrameStatus, RenderMode, TileLodMode, TileSettings, Viewport, ViewportMode,
 };
 use mln_renderer::{OverscaledTileID, TileOperation, UpdateParameters, UpdateReader};
+use mln_rs::mln_layers::Symbol;
 use mln_sources::custom::geometry::{self, CustomGeometrySourceHandle, Options as CustomGeometrySourceOptions};
 use mln_sources::custom::provider::TileFunction;
 use mln_sources::geojson::GeoJSONOptions;
@@ -34,7 +35,6 @@ use mln_style::conversion::{Convertible, Error as ConversionError};
 use mln_style::expression::{Formatted, FormattedSection, Functions, Image};
 use mln_style::layer::Layer;
 use mln_style::layer_type::LayerStyle;
-use mln_style::layers::symbol_layer::Symbol;
 use mln_style::projection::Projection;
 use mln_style::source_type::SourceData;
 use mln_style::sprite::Sprite;
@@ -2580,9 +2580,9 @@ fn keep_render_data() {
 #[test]
 #[ignore = "DISABLED_ in C++ (no symbol placement occurs in the MapTiler streets style fixture)"]
 fn disabled_placed_symbol_data() {
-    use mln_renderer::text::placement::PlacedSymbols as _;
+    use mln_rs::mln_layers::symbol::placement::PlacedSymbols as _;
 
-    fn is_inside_tile(box_: &mln_renderer::text::Aabb, padding: f32, viewport_size: Size) -> bool {
+    fn is_inside_tile(box_: &mln_renderer::placement::Aabb, padding: f32, viewport_size: Size) -> bool {
         if box_.min.x - padding < 0.0 {
             return false;
         }
@@ -2623,7 +2623,7 @@ fn disabled_placed_symbol_data() {
     test.render();
 
     let placed_symbols = test.frontend().renderer().placed_symbols_data();
-    assert_ne!(placed_symbols, Vec::<mln_renderer::text::placement::PlacedSymbolData>::new());
+    assert_ne!(placed_symbols, Vec::<mln_rs::mln_layers::symbol::placement::PlacedSymbolData>::new());
 
     let mut placed_text_inside_tile = 0;
     let mut placed_text = 0;
@@ -2673,7 +2673,7 @@ fn disabled_placed_symbol_data() {
 
     assert_eq!(
         test.frontend().renderer().placed_symbols_data(),
-        Vec::<mln_renderer::text::placement::PlacedSymbolData>::new()
+        Vec::<mln_rs::mln_layers::symbol::placement::PlacedSymbolData>::new()
     );
 }
 

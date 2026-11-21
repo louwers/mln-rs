@@ -1,89 +1,30 @@
-// The format section override checks are here; `set_overrides`, which
-// builds `FormatSectionOverride` expressions, is in
-// format_section_override.rs.
+//! The format sections of a symbol layer's `text-field` that override its
+//! paint properties, and the `format-section-override` expressions that
+//! give the overridden properties their sections' values. The only
+//! overridable property is `text-color`.
+
+use std::sync::Arc;
 
 use mln_expression::format_expression::FormatExpressionSection;
+use mln_expression::format_section_override::{FormatSectionOverride, OverrideDefault};
 use mln_expression::value::from_expression_value;
-use mln_util::constants::{LAST_RESORT_ALPHABETIC_FONT, LAST_RESORT_PAN_UNICODE_FONT};
-use mln_util::logging::{Event, Log};
-use mln_vec_map::VecSet;
+use mln_style::evaluated::Evaluated;
+use mln_style::expression::{Dependency, Expr, Formatted, FormattedSection, GlobalStateMap, Type};
+use mln_style::properties::OverridableSection as _;
+use mln_style::property_expression::PropertyExpression;
+use mln_style::property_value::{PropertyValue, StyleValue as _};
 
-use crate::evaluated::Evaluated;
-use crate::expression::{Expr, Formatted, FormattedSection, Type};
-use crate::layer::FontStack;
-use crate::layer_type::{LayerStyle, LayerTypeInfo, SourceKind, StyleLayerType};
-use crate::layers::symbol_layer_properties::{self, SymbolLayoutProperties, SymbolPaintProperties};
-use crate::properties::OverridableSection;
-use crate::property_expression::PropertyExpression;
-use crate::property_table::{PropertyTable, PropertyVisitor};
-use crate::property_value::{PropertyValue, StyleValue as _};
-
-/// The `symbol` layer type.
-pub struct Symbol;
-
-impl StyleLayerType for Symbol {
-    const INFO: LayerTypeInfo = LayerTypeInfo { name: "symbol", source: SourceKind::Geometry, from_json: true };
-    const PROPERTIES: &'static PropertyTable = &symbol_layer_properties::PROPERTIES;
-
-    type LayoutProperties = SymbolLayoutProperties::Unevaluated;
-    type PaintProperties = SymbolPaintProperties::Transitionable;
-    type Extra = ();
-
-    fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(slot: usize, visitor: V) -> Option<V::Output> {
-        symbol_layer_properties::visit(slot, visitor)
-    }
-
-    fn has_section_overrides(style: &LayerStyle<Self>) -> bool {
-        SymbolLayerPaintPropertyOverrides::has_overrides(&style.layout.text_field)
-    }
-
-    fn content_elevation(style: &LayerStyle<Self>) -> Option<&PropertyValue<f32>> {
-        Some(&style.layout.symbol_height_offset)
-    }
-
-    fn populate_font_stack(style: &LayerStyle<Self>, font_stack: &mut VecSet<FontStack>) {
-        if style.layout.text_field.is_undefined() {
-            return;
-        }
-
-        match &style.layout.text_font {
-            PropertyValue::Undefined => {
-                font_stack
-                    .insert(vec![LAST_RESORT_ALPHABETIC_FONT.to_owned(), LAST_RESORT_PAN_UNICODE_FONT.to_owned()]);
-            }
-            PropertyValue::Constant(constant) => {
-                font_stack.insert(constant.clone());
-            }
-            PropertyValue::Expression(function) => {
-                for value in function.possible_outputs() {
-                    if let Some(value) = value {
-                        font_stack.insert(value);
-                    } else {
-                        Log::warning(
-                            Event::ParseStyle,
-                            format!(
-                                "Layer '{}' has an invalid value for text-font and will not render text. Output \
-                                 values must be contained as literals within the expression.",
-                                style.id
-                            ),
-                        );
-                        break;
-                    }
-                }
-            }
-        }
-    }
-}
+use super::{SymbolLayoutProperties, SymbolPaintProperties};
 
 /// The alternatives of a `PropertyValue<Formatted>` or an
 /// `Evaluated<Formatted>` that `has_override` reads.
-pub enum FormattedValue<'a> {
+pub(crate) enum FormattedValue<'a> {
     Undefined,
     Constant(&'a Formatted),
     Expression(&'a PropertyExpression<Formatted>),
 }
 
-pub trait AsFormattedValue {
+pub(crate) trait AsFormattedValue {
     fn as_formatted_value(&self) -> FormattedValue<'_>;
 }
 
@@ -110,7 +51,7 @@ impl AsFormattedValue for Evaluated<Formatted> {
 /// The format section overrides of the symbol paint properties. The only
 /// overridable property is `text-color`, so the checks are written out for it
 /// rather than folded over a list of overridable properties.
-pub struct SymbolLayerPaintPropertyOverrides;
+pub(crate) struct SymbolLayerPaintPropertyOverrides;
 
 impl SymbolLayerPaintPropertyOverrides {
     /// Whether a section of `formatted` overrides a property, as the property's
@@ -179,7 +120,7 @@ impl SymbolLayerPaintPropertyOverrides {
     }
 
     /// Whether `formatted` overrides any overridable property.
-    pub fn has_overrides(formatted: &dyn AsFormattedValue) -> bool {
+    pub(crate) fn has_overrides(formatted: &dyn AsFormattedValue) -> bool {
         let mut result = false;
         result |=
             Self::has_override(formatted, FormattedSection::has_text_color, FormatExpressionSection::has_text_color);
@@ -203,4 +144,53 @@ impl SymbolLayerPaintPropertyOverrides {
             }
         }
     }
+}
+
+/// A `format-section-override` of the color property `property_name`, whose
+/// value is `default_value` where no section overrides it.
+pub(crate) fn format_section_override(default_value: Evaluated<mln_util::Color>, property_name: String) -> Expr {
+    let default_value = match default_value {
+        Evaluated::Constant(color) => OverrideDefault::Constant(color),
+        Evaluated::CrossFaded(faded) => OverrideDefault::Constant(faded.to),
+        Evaluated::PerFeature { expression, .. } => OverrideDefault::Expression {
+            expression: Arc::clone(expression.shared_expression()),
+            captured_global_state: expression.get_captured_global_state().cloned(),
+        },
+    };
+    FormatSectionOverride::new_expr(default_value, property_name)
+}
+
+/// Wraps `overridable`'s `text-color` in a `format-section-override`, for a
+/// layer whose `text-field` in `overrides` has sections that override it:
+/// each such section draws in its own color, and the rest in the
+/// property's. A property folded to a constant from `unevaluated`'s
+/// expression of the style's global state keeps reading `global_state`.
+pub(crate) fn set_overrides(
+    overrides: &SymbolLayoutProperties::Unevaluated,
+    overridable: &mut SymbolPaintProperties::PossiblyEvaluated,
+    unevaluated: &SymbolPaintProperties::Unevaluated,
+    global_state: Option<&Arc<GlobalStateMap>>,
+) {
+    if !SymbolLayerPaintPropertyOverrides::has_overrides(&overrides.text_field) {
+        return;
+    }
+    let value = &mut overridable.text_color;
+    // Wrapping a folded constant would drop the GlobalState dependency from
+    // the wrapper and exempt the bucket from relayout tracking.
+    if value.is_constant() {
+        let unevaluated_value = unevaluated.text_color.get_value();
+        if let Some(expression) = unevaluated_value.as_expression()
+            && unevaluated_value.get_dependencies().intersects(Dependency::GLOBAL_STATE)
+        {
+            let mut retained = expression.clone();
+            retained.capture_global_state(global_state.cloned());
+            *value =
+                Evaluated::PerFeature { expression: retained, default: SymbolPaintProperties::Defaults::text_color() };
+        }
+    }
+    let override_ = format_section_override(std::mem::take(value), "text-color".to_owned());
+    *value = Evaluated::PerFeature {
+        expression: PropertyExpression::new(Arc::new(override_)),
+        default: SymbolPaintProperties::Defaults::text_color(),
+    };
 }

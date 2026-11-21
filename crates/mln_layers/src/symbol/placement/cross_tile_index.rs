@@ -28,16 +28,16 @@ use std::sync::Arc;
 use geometry::Point;
 use glam::{I64Vec2, Vec2};
 use mln_map_types::{TileProjector, View};
-use mln_style::layers::Symbol;
+use mln_renderer::placement::PlacementBuckets;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::constants::EXTENT;
 use mln_util::hash::HashSet;
 use mln_vec_map::{VecMap, VecSet};
 
-use crate::buckets::symbol_bucket::SymbolBucket;
-use crate::layout::symbol_instance::{SymbolInstance, SymbolInstancePools};
-use crate::placement::PlacementBuckets;
-use crate::text::placement::BucketPlacementData;
+use crate::symbol::Symbol;
+use crate::symbol::bucket::SymbolBucket;
+use crate::symbol::instance::{SymbolInstance, SymbolInstancePools};
+use crate::symbol::placement::BucketPlacementData;
 
 /// What adding a layer to the index changed.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -93,22 +93,6 @@ impl CrossTileSymbolIndex {
         }
         let buckets_removed = index.remove_stale_buckets(&self.current_bucket_ids);
         AddLayerResult { buckets_added, buckets_removed }
-    }
-
-    /// [`index_layer`](Self::index_layer) of the buckets that
-    /// `HeldBuckets` holds, for the benchmarks.
-    #[cfg(feature = "bench")]
-    pub(crate) fn add_layer(
-        &mut self,
-        layer_id: &str,
-        placed: &[BucketPlacementData],
-        lng: f32,
-        view: &View,
-    ) -> AddLayerResult {
-        let mut held = crate::render_layer::HeldBuckets::take();
-        let result = self.index_layer(layer_id, placed, lng, view, &mut PlacementBuckets::new(&mut held));
-        held.restore();
-        result
     }
 
     /// Forgets the layers not in `used_layers`.
@@ -405,16 +389,16 @@ fn key_of<'a>(keys: &'a [u8], symbol: &IndexedSymbol) -> &'a [u8] {
 mod tests {
     use std::sync::Arc;
 
-    use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
     use mln_style::property_value::PropertyValue;
     use mln_style_types::ProjectionDefinition;
     use mln_util::geo::LatLng;
     use mln_util::size::Size;
 
     use super::*;
-    use crate::buckets::symbol_bucket::{SymbolBucketStyle, SymbolLayoutFlags};
-    use crate::geometry::anchor::Anchor;
-    use crate::util::pool::PoolRange;
+    use crate::symbol::SymbolLayoutProperties;
+    use crate::symbol::anchor::Anchor;
+    use crate::symbol::bucket::{SymbolBucketStyle, SymbolLayoutFlags};
+    use crate::symbol::pool::PoolRange;
 
     fn make_symbol_instance(x: f32, y: f32, key: &str, pools: &mut SymbolInstancePools) -> SymbolInstance {
         SymbolInstance {

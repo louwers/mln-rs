@@ -1,12 +1,14 @@
 //! The tests of the layer types' buckets, layouts and meshes.
 
-// Ports test/gl/bucket.test.cpp (circle, fill, line; on the WebGPU headless
-// backend) and test/renderer/fill_bucket.test.cpp.
+// Ports test/gl/bucket.test.cpp (circle, fill, line, symbol; on the WebGPU
+// headless backend) and test/renderer/fill_bucket.test.cpp.
 mod bucket_test;
 // The custom layer's host, as its layer keeps it.
 mod custom_test;
 mod fill_mesh_test;
-// Ports test/layout/sort_key.test.cpp (fill, line, circle).
+// The symbol layer type's format sections that override its paint.
+mod format_section_override_test;
+// Ports test/layout/sort_key.test.cpp.
 mod sort_key_test;
 // The fill-extrusion parts of the subdivision tests.
 mod subdivision_test;
@@ -29,7 +31,7 @@ fn with_context(f: impl FnOnce(&mut dyn mln_gfx::gpu::Gpu, &mut mln_renderer::dr
 /// The built-in expression functions and the layer types of this crate, as
 /// this build has them: the tests' layers must be of its types, not of
 /// those of the copy of this crate that the facade registers.
-fn registry() -> &'static std::sync::Arc<mln_renderer::Registry> {
+pub(crate) fn registry() -> &'static std::sync::Arc<mln_renderer::Registry> {
     static REGISTRY: std::sync::LazyLock<std::sync::Arc<mln_renderer::Registry>> = std::sync::LazyLock::new(|| {
         let mut builder = mln_renderer::RegistryBuilder::new();
         mln_style::expression::functions::register_builtin_functions(builder.functions_mut()).unwrap();

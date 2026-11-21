@@ -59,7 +59,6 @@ mln_tile_id.workspace = true
 mln_util.workspace = true
 mln_vec_map.workspace = true
 parking_lot.workspace = true
-polylabel.workspace = true
 smallvec.workspace = true
 mln_wire = { workspace = true, features = ["geo-types", "glam", "parking_lot"] }
 
