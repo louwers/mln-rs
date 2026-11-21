@@ -28,10 +28,7 @@ const PROPS: Buffer = Buffer::uniform::<CircleEvaluatedPropsUBO>("props", 0);
 
 pub static CIRCLE: Program = Program {
     name: "circle",
-    buffers: &[
-        DRAWABLE,
-        PROPS,
-    ],
+    buffers: &[DRAWABLE, PROPS],
     attributes: &[
         Attribute { id: ID_CIRCLE_POS_VERTEX_ATTRIBUTE, format: Short2 },
         Attribute { id: ID_CIRCLE_COLOR_VERTEX_ATTRIBUTE, format: Float4 },

@@ -218,8 +218,7 @@ impl Buffer {
 const UNIFORM_SLOTS: usize = FIRST_VERTEX_BUFFER_ID - FIRST_UNIFORM_ID;
 
 /// The view's block, which the engine binds for every draw.
-pub const VIEW_BUFFER: Buffer =
-    Buffer { id: VIEW_BUFFER_ID, name: "view", kind: BufferKind::Uniform(ViewUBO::BLOCK) };
+pub const VIEW_BUFFER: Buffer = Buffer { id: VIEW_BUFFER_ID, name: "view", kind: BufferKind::Uniform(ViewUBO::BLOCK) };
 
 /// The projection block of each draw, a storage buffer that a layer binds
 /// for the draws of a program whose vertex stage projects with it.
@@ -553,11 +552,27 @@ mod tests {
         let fails = |program: Program| assert!(program.check().is_err(), "{:?}", program.buffers);
         fails(Program { attributes: &[POSITION, POSITION], ..EMPTY });
         let props = Buffer::uniform::<ViewUBO>("props", 0);
-        fails(Program { buffers: const { &[Buffer::uniform::<ViewUBO>("props", 0), Buffer::uniform::<ViewUBO>("other", 0)] }, ..EMPTY });
-        fails(Program { buffers: const { &[Buffer::uniform::<ViewUBO>("props", 0), Buffer::storage::<ViewUBO>("drawable", Stages::Both)] }, ..EMPTY });
-        fails(Program { buffers: const { &[Buffer { id: PROJECTION_BUFFER_ID, ..Buffer::storage::<ViewUBO>("drawable", Stages::Vertex) }] }, ..EMPTY });
+        fails(Program {
+            buffers: const { &[Buffer::uniform::<ViewUBO>("props", 0), Buffer::uniform::<ViewUBO>("other", 0)] },
+            ..EMPTY
+        });
+        fails(Program {
+            buffers: const {
+                &[Buffer::uniform::<ViewUBO>("props", 0), Buffer::storage::<ViewUBO>("drawable", Stages::Both)]
+            },
+            ..EMPTY
+        });
+        fails(Program {
+            buffers: const {
+                &[Buffer { id: PROJECTION_BUFFER_ID, ..Buffer::storage::<ViewUBO>("drawable", Stages::Vertex) }]
+            },
+            ..EMPTY
+        });
         fails(Program { buffers: const { &[Buffer { id: 2, ..Buffer::vertices("vertices", 0, Short2) }] }, ..EMPTY });
-        fails(Program { buffers: const { &[Buffer::vertices("vertices", 0, Short2), Buffer::vertices("vertices", 1, Short2)] }, ..EMPTY });
+        fails(Program {
+            buffers: const { &[Buffer::vertices("vertices", 0, Short2), Buffer::vertices("vertices", 1, Short2)] },
+            ..EMPTY
+        });
         // The view's members again, in one GLSL ES scope with the view's.
         assert_eq!(props.id, 5);
         fails(Program { buffers: const { &[Buffer::uniform::<ViewUBO>("props", 0)] }, ..EMPTY });

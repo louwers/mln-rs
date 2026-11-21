@@ -31,11 +31,7 @@ const PREPARE_TILE_PROPS: Buffer = Buffer::draw_uniform::<HillshadePrepareTilePr
 
 pub static HILLSHADE: Program = Program {
     name: "hillshade",
-    buffers: &[
-        DRAWABLE,
-        TILE_PROPS,
-        PROPS,
-    ],
+    buffers: &[DRAWABLE, TILE_PROPS, PROPS],
     attributes: &[
         Attribute { id: ID_HILLSHADE_POS_VERTEX_ATTRIBUTE, format: Short2 },
         Attribute { id: ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE, format: Short2 },
@@ -52,10 +48,7 @@ pub static HILLSHADE: Program = Program {
 
 pub static HILLSHADE_PREPARE: Program = Program {
     name: "hillshade-prepare",
-    buffers: &[
-        PREPARE_DRAWABLE,
-        PREPARE_TILE_PROPS,
-    ],
+    buffers: &[PREPARE_DRAWABLE, PREPARE_TILE_PROPS],
     attributes: &[
         Attribute { id: ID_HILLSHADE_POS_VERTEX_ATTRIBUTE, format: Short2 },
         Attribute { id: ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE, format: Short2 },

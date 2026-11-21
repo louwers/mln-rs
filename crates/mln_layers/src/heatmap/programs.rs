@@ -27,10 +27,7 @@ const TEXTURE_PROPS: Buffer = Buffer::uniform::<HeatmapTexturePropsUBO>("props",
 
 pub static HEATMAP: Program = Program {
     name: "heatmap",
-    buffers: &[
-        DRAWABLE,
-        PROPS,
-    ],
+    buffers: &[DRAWABLE, PROPS],
     attributes: &[
         Attribute { id: ID_HEATMAP_POS_VERTEX_ATTRIBUTE, format: Short2 },
         Attribute { id: ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE, format: Float2 },

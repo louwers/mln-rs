@@ -22,10 +22,7 @@ const PROPS: Buffer = Buffer::uniform::<RasterEvaluatedPropsUBO>("props", 0);
 
 pub static RASTER: Program = Program {
     name: "raster",
-    buffers: &[
-        DRAWABLE,
-        PROPS,
-    ],
+    buffers: &[DRAWABLE, PROPS],
     attributes: &[
         Attribute { id: ID_RASTER_POS_VERTEX_ATTRIBUTE, format: Short2 },
         Attribute { id: ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE, format: Short2 },

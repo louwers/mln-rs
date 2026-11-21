@@ -43,10 +43,7 @@ const OUTLINE_PAINT: Buffer = Buffer::vertices("outlinePaint", 2, Float);
 
 pub static FILL: Program = Program {
     name: "fill",
-    buffers: &[
-        Buffer::storage_of::<FillDrawableUBO, FillDrawableUnionUBO>("drawableVector", Stages::Vertex),
-        PROPS,
-    ],
+    buffers: &[Buffer::storage_of::<FillDrawableUBO, FillDrawableUnionUBO>("drawableVector", Stages::Vertex), PROPS],
     attributes: &[
         Attribute { id: ID_FILL_POS_VERTEX_ATTRIBUTE, format: Short2 },
         Attribute { id: ID_FILL_COLOR_VERTEX_ATTRIBUTE, format: Float4 },

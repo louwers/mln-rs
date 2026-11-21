@@ -40,7 +40,10 @@ pub static BACKGROUND: Program = Program {
 pub static BACKGROUND_PATTERN: Program = Program {
     name: "background-pattern",
     buffers: &[
-        Buffer::storage_of::<BackgroundPatternDrawableUBO, BackgroundDrawableUnionUBO>("drawableVector", Stages::Vertex),
+        Buffer::storage_of::<BackgroundPatternDrawableUBO, BackgroundDrawableUnionUBO>(
+            "drawableVector",
+            Stages::Vertex,
+        ),
         Buffer::uniform::<BackgroundPatternPropsUBO>("props", 0),
     ],
     attributes: &[Attribute { id: ID_BACKGROUND_POS_VERTEX_ATTRIBUTE, format: Short2 }],

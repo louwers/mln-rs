@@ -46,10 +46,7 @@ const LINE_PROPERTIES: &[Property] = &[
 
 pub static LINE: Program = Program {
     name: "line",
-    buffers: &[
-        Buffer::storage_of::<LineDrawableUBO, LineDrawableUnionUBO>("drawableVector", Stages::Vertex),
-        PROPS,
-    ],
+    buffers: &[Buffer::storage_of::<LineDrawableUBO, LineDrawableUnionUBO>("drawableVector", Stages::Vertex), PROPS],
     attributes: &[
         Attribute { id: ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, format: Short2 },
         Attribute { id: ID_LINE_DATA_VERTEX_ATTRIBUTE, format: UByte4 },

@@ -44,11 +44,7 @@ const WALL_PAINT: Buffer = Buffer::vertices("wallPaint", 1, Float);
 
 pub static FILL_EXTRUSION: Program = Program {
     name: "fill-extrusion",
-    buffers: &[
-        DRAWABLE,
-        TILE_PROPS,
-        PROPS,
-    ],
+    buffers: &[DRAWABLE, TILE_PROPS, PROPS],
     attributes: &[
         Attribute { id: ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, format: Short2 },
         Attribute { id: ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, format: UShort2 },
@@ -72,11 +68,7 @@ pub static FILL_EXTRUSION: Program = Program {
 
 pub static FILL_EXTRUSION_INSTANCED: Program = Program {
     name: "fill-extrusion-instanced",
-    buffers: &[
-        DRAWABLE,
-        TILE_PROPS,
-        PROPS,
-    ],
+    buffers: &[DRAWABLE, TILE_PROPS, PROPS],
     attributes: &[Attribute { id: ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, format: Short2 }],
     instance_attributes: &[
         Attribute { id: ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE, format: Short2 },
@@ -104,11 +96,7 @@ pub static FILL_EXTRUSION_INSTANCED: Program = Program {
 /// vertex, for walls whose quads are in the vertex buffer.
 pub static FILL_EXTRUSION_WALL: Program = Program {
     name: "fill-extrusion-wall",
-    buffers: &[
-        DRAWABLE,
-        TILE_PROPS,
-        PROPS,
-    ],
+    buffers: &[DRAWABLE, TILE_PROPS, PROPS],
     attributes: &[
         Attribute { id: ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, format: Short2 },
         Attribute { id: ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE, format: Short2 },
@@ -137,13 +125,7 @@ pub static FILL_EXTRUSION_WALL: Program = Program {
 /// from storage buffers, by its index.
 pub static FILL_EXTRUSION_PULLED: Program = Program {
     name: "fill-extrusion-pulled",
-    buffers: &[
-        DRAWABLE,
-        TILE_PROPS,
-        PROPS,
-        WALL_VERTICES,
-        WALL_PAINT,
-    ],
+    buffers: &[DRAWABLE, TILE_PROPS, PROPS, WALL_VERTICES, WALL_PAINT],
     attributes: &[],
     instance_attributes: &[],
     textures: &[],
@@ -160,11 +142,7 @@ pub static FILL_EXTRUSION_PULLED: Program = Program {
 
 pub static FILL_EXTRUSION_PATTERN: Program = Program {
     name: "fill-extrusion-pattern",
-    buffers: &[
-        DRAWABLE,
-        TILE_PROPS,
-        PROPS,
-    ],
+    buffers: &[DRAWABLE, TILE_PROPS, PROPS],
     attributes: &[
         Attribute { id: ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, format: Short2 },
         Attribute { id: ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, format: UShort2 },
@@ -190,11 +168,7 @@ pub static FILL_EXTRUSION_PATTERN: Program = Program {
 
 pub static FILL_EXTRUSION_PATTERN_INSTANCED: Program = Program {
     name: "fill-extrusion-pattern-instanced",
-    buffers: &[
-        DRAWABLE,
-        TILE_PROPS,
-        PROPS,
-    ],
+    buffers: &[DRAWABLE, TILE_PROPS, PROPS],
     attributes: &[Attribute { id: ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, format: Short2 }],
     instance_attributes: &[
         Attribute { id: ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE, format: Short2 },
@@ -223,11 +197,7 @@ pub static FILL_EXTRUSION_PATTERN_INSTANCED: Program = Program {
 /// [`FILL_EXTRUSION_WALL`] of the pattern walls.
 pub static FILL_EXTRUSION_PATTERN_WALL: Program = Program {
     name: "fill-extrusion-pattern-wall",
-    buffers: &[
-        DRAWABLE,
-        TILE_PROPS,
-        PROPS,
-    ],
+    buffers: &[DRAWABLE, TILE_PROPS, PROPS],
     attributes: &[
         Attribute { id: ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, format: Short2 },
         Attribute { id: ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE, format: Short2 },

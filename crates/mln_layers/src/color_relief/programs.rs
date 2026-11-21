@@ -26,11 +26,7 @@ pub(crate) const ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE: usize = 1;
 
 pub static COLOR_RELIEF: Program = Program {
     name: "color-relief",
-    buffers: &[
-        DRAWABLE,
-        TILE_PROPS,
-        PROPS,
-    ],
+    buffers: &[DRAWABLE, TILE_PROPS, PROPS],
     attributes: &[
         Attribute { id: ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE, format: Short2 },
         Attribute { id: ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE, format: Short2 },

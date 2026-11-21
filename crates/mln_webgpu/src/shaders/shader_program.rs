@@ -897,7 +897,10 @@ mod tests {
             declaration(&PROJECTION_BUFFER),
             "@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;"
         );
-        assert_eq!(declaration(&DRAW_PROJECTION_BUFFER), "@group(0) @binding(4) var<uniform> drawProjection: ProjectionUBO;");
+        assert_eq!(
+            declaration(&DRAW_PROJECTION_BUFFER),
+            "@group(0) @binding(4) var<uniform> drawProjection: ProjectionUBO;"
+        );
     }
 
     #[test]
@@ -911,7 +914,8 @@ mod tests {
             properties: &[],
             sources: Sources::NONE,
         };
-        let text = "let p = projectionVector[globalIndex.value]; // view\n#ifdef PAINT\nlet x = paint[0];\n#endif\nprops";
+        let text =
+            "let p = projectionVector[globalIndex.value]; // view\n#ifdef PAINT\nlet x = paint[0];\n#endif\nprops";
         let declared = |defines: &[&str]| {
             declarations(&PROGRAM, text, &defines.iter().map(|&name| (name.to_owned(), true)).collect())
         };

@@ -56,11 +56,7 @@ const COLLISION_TILE_PROPS: Buffer = Buffer::draw_uniform::<CollisionTilePropsUB
 
 pub static SYMBOL_ICON: Program = Program {
     name: "symbol-icon",
-    buffers: &[
-        DRAWABLE,
-        TILE_PROPS,
-        PROPS,
-    ],
+    buffers: &[DRAWABLE, TILE_PROPS, PROPS],
     attributes: &[
         Attribute { id: ID_SYMBOL_POS_OFFSET_ATTRIBUTE, format: Short4 },
         Attribute { id: ID_SYMBOL_DATA_ATTRIBUTE, format: UShort4 },
@@ -83,11 +79,7 @@ pub static SYMBOL_ICON: Program = Program {
 
 pub static SYMBOL_SDF: Program = Program {
     name: "symbol-sdf",
-    buffers: &[
-        DRAWABLE,
-        TILE_PROPS,
-        PROPS,
-    ],
+    buffers: &[DRAWABLE, TILE_PROPS, PROPS],
     attributes: &[
         Attribute { id: ID_SYMBOL_POS_OFFSET_ATTRIBUTE, format: Short4 },
         Attribute { id: ID_SYMBOL_DATA_ATTRIBUTE, format: UShort4 },
@@ -120,11 +112,7 @@ pub static SYMBOL_SDF: Program = Program {
 
 pub static SYMBOL_TEXT_AND_ICON: Program = Program {
     name: "symbol-text-and-icon",
-    buffers: &[
-        DRAWABLE,
-        TILE_PROPS,
-        PROPS,
-    ],
+    buffers: &[DRAWABLE, TILE_PROPS, PROPS],
     attributes: &[
         Attribute { id: ID_SYMBOL_POS_OFFSET_ATTRIBUTE, format: Short4 },
         Attribute { id: ID_SYMBOL_DATA_ATTRIBUTE, format: UShort4 },
@@ -156,10 +144,7 @@ pub static SYMBOL_TEXT_AND_ICON: Program = Program {
 
 pub static COLLISION_BOX: Program = Program {
     name: "collision-box",
-    buffers: &[
-        COLLISION_DRAWABLE,
-        COLLISION_TILE_PROPS,
-    ],
+    buffers: &[COLLISION_DRAWABLE, COLLISION_TILE_PROPS],
     attributes: &[
         Attribute { id: ID_COLLISION_POS_VERTEX_ATTRIBUTE, format: Short2 },
         Attribute { id: ID_COLLISION_ANCHOR_POS_VERTEX_ATTRIBUTE, format: Short2 },
@@ -180,10 +165,7 @@ pub static COLLISION_BOX: Program = Program {
 
 pub static COLLISION_CIRCLE: Program = Program {
     name: "collision-circle",
-    buffers: &[
-        COLLISION_DRAWABLE,
-        COLLISION_TILE_PROPS,
-    ],
+    buffers: &[COLLISION_DRAWABLE, COLLISION_TILE_PROPS],
     attributes: &[
         Attribute { id: ID_COLLISION_POS_VERTEX_ATTRIBUTE, format: Short2 },
         Attribute { id: ID_COLLISION_ANCHOR_POS_VERTEX_ATTRIBUTE, format: Short2 },
