@@ -295,15 +295,15 @@ A scenario over the simulated network also counts what a user sees, from what
 the renderer drew for each tile of the view it wanted, each weighed by its area
 on the screen, so that a tilted view's far tiles count little:
 
-| metric                  | what                                                                                                                                             |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `blank_area_frames`     | the view's area where nothing drew, in thousandths of the view, summed over the frames: a wholly blank frame adds 1000                           |
-| `stand_in_area_frames`  | likewise, where a parent or children stood in for a tile that hadn't loaded                                                                      |
-| `frames_to_first_paint` | the frames until one drew a tile (`macro/load`)                                                                                                  |
-| `frames_to_complete`    | the frames from the map's start, or the camera's stop, until one drew every tile at its own zoom with everything loaded; all of them if none did |
-| `requests`              | the transfers started, and of them `requests_cancelled`, which the map dropped before their answer                                               |
-| `retries`, `refetches`  | the transfers of a resource whose last transfer failed, and of one that an earlier transfer brought                                              |
-| `bytes_transferred`     | what came over the network, headers included, and of it `bytes_wasted`, what transfers that were cancelled or failed brought                     |
+| metric                  | what                                                                                                                                                                      |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `blank_area_frames`     | the area of the tiles the view wants, inside each source's bounds, where nothing drew, in thousandths of the view, summed over the frames: a wholly blank frame adds 1000 |
+| `stand_in_area_frames`  | likewise, where a parent or children stood in for a tile that hadn't loaded                                                                                               |
+| `frames_to_first_paint` | the frames until one drew a tile (`macro/load`)                                                                                                                           |
+| `frames_to_complete`    | the frames from the map's start, or the camera's stop, until one drew every tile at its own zoom with everything loaded; all of them if none did                          |
+| `requests`              | the transfers started, and of them `requests_cancelled`, which the map dropped before their answer                                                                        |
+| `retries`, `refetches`  | the transfers of a resource whose last transfer failed, and of one that an earlier transfer brought                                                                       |
+| `bytes_transferred`     | what came over the network, headers included, and of it `bytes_wasted`, what transfers that were cancelled or failed brought                                              |
 
 A frame before the style and its sources load counts as blank. A tile whose load
 failed counts as loaded to the map, which then reports a frame complete while a
@@ -526,10 +526,11 @@ directories and tiles the map reads by byte ranges (the `-pmtiles` scenarios).
 Every answer carries an `ETag`, which a revalidation gets a 304 for. A
 transfer's first byte comes a round trip after it starts, and the transfers
 receiving share the link's bandwidth equally. Faults come from a seed, drawn
-from each transfer's URL and attempt alone, so that a change in what else the
-map requests doesn't move them: a share of the transfers fails with a connection
-error, and an outage fails every transfer in flight at its start and every one
-whose answer would come during it. The profiles:
+from each transfer's URL, its byte range if it has one, and its attempt alone,
+so that a change in what else the map requests doesn't move them: a share of the
+transfers fails with a connection error, and an outage fails every transfer in
+flight at its start and every one whose answer would come during it. The
+profiles:
 
 | profile | round trip | bandwidth  | faults                                                        |
 | ------- | ---------- | ---------- | ------------------------------------------------------------- |
