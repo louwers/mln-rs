@@ -123,7 +123,9 @@ typedef enum mln_runtime_event_type : uint32_t {
   MLN_RUNTIME_EVENT_MAP_IDLE = 8,
   /**
    * A frame failed on the GPU, such as a pass that didn't begin or a texture
-   * that couldn't be made.
+   * that couldn't be made: the first of the frames in a row that fail, until
+   * one draws. A map in MLN_MAP_MODE_CONTINUOUS draws again on its own within
+   * a second, sooner after one failure than after many.
    */
   MLN_RUNTIME_EVENT_MAP_RENDER_ERROR = 9,
   MLN_RUNTIME_EVENT_MAP_RENDER_FRAME_STARTED = 10,

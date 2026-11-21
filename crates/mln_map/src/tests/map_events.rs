@@ -422,3 +422,44 @@ fn a_failed_frame_fails_only_the_still_image_it_was_drawn_for() {
     map.process_events();
     assert_eq!(map.take_still_image(), Some(Ok(())));
 }
+
+/// A continuous map whose frames keep failing reports the first failure
+/// only, asks for no frame at once and isn't idle; it draws again once a
+/// delay passes, a longer one after each failure in a row, up to a second.
+/// Once a frame draws, the next failure is reported again.
+#[test]
+fn a_continuous_map_reports_failures_in_a_row_once_and_draws_again_later() {
+    let run_loop = Queue::<()>::new();
+    let mut map = map(MapOptions { map_mode: MapMode::Continuous, ..Default::default() }, &run_loop);
+    map.load_style_json(STYLE);
+    map.process_events();
+    map.drain_events();
+    let mut errors = Vec::new();
+    let mut delays = Vec::new();
+    for _ in 0..8 {
+        let updates = map.update_generation();
+        let before = Instant::now();
+        report(&map, failed_frame(0, Some("the GPU failed")));
+        map.process_events();
+        assert_eq!(map.update_generation(), updates, "a failed frame asked for the next at once");
+        let events = map.drain_events();
+        assert!(!events.iter().any(|event| matches!(event, MapEvent::Idle)), "idle after a failed frame");
+        errors.extend(render_errors(&events));
+        delays.push(map.repaint_at().expect("a failed frame draws again later") - before);
+        map.trigger_repaint();
+    }
+    assert_eq!(vec!["the GPU failed".to_owned()], errors);
+    // Each delay is measured from a little before the frame's report.
+    let slack = Duration::from_millis(50);
+    assert!(delays.windows(2).all(|pair| pair[0] <= pair[1] + slack), "{delays:?}");
+    assert!(delays[0] < Duration::from_millis(500), "{delays:?}");
+    assert!(delays[7] > delays[0] && delays[7] <= Duration::from_secs(1) + slack, "{delays:?}");
+
+    report(&map, failed_frame(0, None));
+    map.process_events();
+    let events = map.drain_events();
+    assert!(events.iter().any(|event| matches!(event, MapEvent::Idle)), "{events:?}");
+    report(&map, failed_frame(0, Some("again")));
+    map.process_events();
+    assert_eq!(vec!["again".to_owned()], render_errors(&map.drain_events()));
+}

@@ -1,7 +1,8 @@
 // Frames that fail on the GPU, through a GPU that fails a kind of pass, or
 // the draws in one, as a device out of memory would: a still image ends with
 // the error, on a map with terrain and on one without, and the next one draws
-// once the device works; a continuous map draws again until the device works.
+// once the device works; a continuous map reports the failure once, draws
+// again only now and then, and shows the map once the device works.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -293,6 +294,23 @@ impl FailingMap {
         None
     }
 
+    /// Draws until `done` says so of the map's events, or `within` passed,
+    /// and returns the events and whether `done` said so.
+    fn run(&mut self, within: Duration, mut done: impl FnMut(&[MapEvent]) -> bool) -> (Vec<MapEvent>, bool) {
+        let mut events = Vec::new();
+        let start = Instant::now();
+        while start.elapsed() < within {
+            if !self.draw() {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            events.extend(self.map.drain_events());
+            if done(&events) {
+                return (events, true);
+            }
+        }
+        (events, false)
+    }
+
     /// The frames the renderer drew.
     fn frames(&self) -> i32 {
         self.renderer.rendering_stats().num_frames
@@ -377,40 +395,37 @@ fn a_still_whose_drapes_fail_to_draw_in_every_frame_ends_with_the_error() {
     assert_eq!(2, map.frames());
 }
 
-/// A continuous map whose drapes fail to draw reports the error with each
-/// frame, and asks for frame after frame, until they draw, and then goes
-/// idle.
+/// A continuous map whose frames fail for a while, from its first, reports
+/// the first failure only, isn't idle, and draws again only now and then,
+/// not frame after frame; the target takes none of those frames. Once the
+/// device works, it draws what a map that never failed draws, and goes idle.
 #[test]
-fn a_continuous_map_whose_drapes_fail_to_draw_asks_for_frames_until_they_draw() {
-    let mut map = FailingMap::new(MapMode::Continuous, true, Fail::Passes("drape"));
-    // Whether the map went idle, and the errors it reported.
-    let drain = |map: &mut FailingMap| {
-        let events = map.map.drain_events();
-        let idle = events.iter().any(|event| matches!(event, MapEvent::Idle));
-        (idle, events.iter().filter(|event| matches!(event, MapEvent::RenderError(_))).count())
-    };
-    map.failing = usize::MAX;
-    let mut errors = 0;
-    for _ in 0..2_000 {
-        if errors >= 10 {
-            break;
-        }
-        if !map.draw() {
-            std::thread::sleep(Duration::from_millis(1));
-        }
-        let (idle, reported) = drain(&mut map);
-        assert!(!idle, "the map went idle while its drapes failed");
-        errors += reported;
+fn a_continuous_map_whose_frames_fail_for_a_while_reports_once_and_recovers() {
+    let idle = |events: &[MapEvent]| events.iter().any(|event| matches!(event, MapEvent::Idle));
+    let errors = |events: &[MapEvent]| events.iter().filter(|event| matches!(event, MapEvent::RenderError(_))).count();
+    for (terrain, fail) in [(false, Fail::Passes("main buffer")), (true, Fail::DrawsIn("drape"))] {
+        let mut new = FailingMap::new(MapMode::Continuous, terrain, fail);
+        assert!(new.run(Duration::from_secs(10), idle).1, "a new map never went idle");
+        let expected = new.image().expect("a new map's pixels");
+
+        let mut map = FailingMap::new(MapMode::Continuous, terrain, fail);
+        map.failing = usize::MAX;
+        // The map loads what it shows meanwhile.
+        let (mut events, _) = map.run(Duration::from_millis(500), |_| false);
+        let frames = map.frames();
+        let (later, _) = map.run(Duration::from_millis(1500), |_| false);
+        events.extend(later);
+        assert!(!idle(&events), "{fail:?}: the map went idle while its frames failed");
+        assert_eq!(1, errors(&events), "{fail:?}: {events:?}");
+        // At most a second apart by then.
+        let failed = map.frames() - frames;
+        assert!((1..=4).contains(&failed), "{fail:?}: {failed} frames in 1.5 s");
+        assert_eq!(0, map.handed_off, "{fail:?}: a failed frame was handed off");
+
+        map.failing = 0;
+        let (events, recovered) = map.run(Duration::from_secs(10), idle);
+        assert!(recovered, "{fail:?}: the map never went idle once the device worked");
+        assert_eq!(0, errors(&events), "{fail:?}: an error once the device works");
+        assert!(expected == map.image().expect("the map's pixels"), "{fail:?}: the map draws other pixels");
     }
-    assert!(errors >= 10, "{errors} errors: the map stopped asking for frames");
-    map.failing = 0;
-    let idle = (0..2_000).any(|_| {
-        if !map.draw() {
-            std::thread::sleep(Duration::from_millis(1));
-        }
-        let (idle, reported) = drain(&mut map);
-        assert_eq!(0, reported, "an error once the drapes draw");
-        idle
-    });
-    assert!(idle, "the map never went idle");
 }

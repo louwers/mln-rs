@@ -227,19 +227,29 @@ pub const MLN_RUNTIME_EVENT_MAP_LOADING_FAILED: mln_runtime_event_type = 7;
  or redraw.*/
 pub const MLN_RUNTIME_EVENT_MAP_IDLE: mln_runtime_event_type = 8;
 /** A frame failed on the GPU, such as a pass that didn't begin or a texture
- that couldn't be made.*/
+ that couldn't be made: the first of the frames in a row that fail, until
+ one draws. A map in MLN_MAP_MODE_CONTINUOUS draws again on its own within
+ a second, sooner after one failure than after many.*/
 pub const MLN_RUNTIME_EVENT_MAP_RENDER_ERROR: mln_runtime_event_type = 9;
 /** A frame failed on the GPU, such as a pass that didn't begin or a texture
- that couldn't be made.*/
+ that couldn't be made: the first of the frames in a row that fail, until
+ one draws. A map in MLN_MAP_MODE_CONTINUOUS draws again on its own within
+ a second, sooner after one failure than after many.*/
 pub const MLN_RUNTIME_EVENT_MAP_RENDER_FRAME_STARTED: mln_runtime_event_type = 10;
 /** A frame failed on the GPU, such as a pass that didn't begin or a texture
- that couldn't be made.*/
+ that couldn't be made: the first of the frames in a row that fail, until
+ one draws. A map in MLN_MAP_MODE_CONTINUOUS draws again on its own within
+ a second, sooner after one failure than after many.*/
 pub const MLN_RUNTIME_EVENT_MAP_RENDER_FRAME_FINISHED: mln_runtime_event_type = 11;
 /** A frame failed on the GPU, such as a pass that didn't begin or a texture
- that couldn't be made.*/
+ that couldn't be made: the first of the frames in a row that fail, until
+ one draws. A map in MLN_MAP_MODE_CONTINUOUS draws again on its own within
+ a second, sooner after one failure than after many.*/
 pub const MLN_RUNTIME_EVENT_MAP_RENDER_MAP_STARTED: mln_runtime_event_type = 12;
 /** A frame failed on the GPU, such as a pass that didn't begin or a texture
- that couldn't be made.*/
+ that couldn't be made: the first of the frames in a row that fail, until
+ one draws. A map in MLN_MAP_MODE_CONTINUOUS draws again on its own within
+ a second, sooner after one failure than after many.*/
 pub const MLN_RUNTIME_EVENT_MAP_RENDER_MAP_FINISHED: mln_runtime_event_type = 13;
 /// The style uses an image that it doesn't have.
 pub const MLN_RUNTIME_EVENT_MAP_STYLE_IMAGE_MISSING: mln_runtime_event_type = 14;

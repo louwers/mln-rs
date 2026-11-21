@@ -4,6 +4,7 @@
 
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Duration;
 
 use geo_types::Geometry;
 use glam::{DMat4, DVec3};
@@ -43,6 +44,13 @@ use crate::transform::{CameraCommandId, CommandEnd, FrameClock, TerrainGround, T
 /// waits, before the map stops following it for that image: a camera whose
 /// ground changes with each move would otherwise never settle.
 const MAX_GROUND_MOVES_PER_STILL: u32 = 8;
+
+/// How long a continuous map waits after a frame that failed on the GPU
+/// before it draws again, doubled for each failure in a row up to
+/// [`MAX_RETRY_DELAY`]: a device that keeps failing costs a frame a second,
+/// and one that recovers shows the map again within a second.
+const RETRY_DELAY: Duration = Duration::from_millis(100);
+const MAX_RETRY_DELAY: Duration = Duration::from_secs(1);
 
 /// Where a still image that [`Map::render_still`] asked for stands.
 #[derive(Debug, PartialEq)]
@@ -118,6 +126,8 @@ pub struct Map {
     /// When the last frame said the map changes next on its own, until an
     /// update goes out.
     repaint_at: Option<Instant>,
+    /// The frames in a row that failed on the GPU, up to the last frame.
+    render_failures: u32,
     /// A still image that [`Map::render_still`] asked for, until it ends.
     still_image: StillImage,
     /// Counts the still image requests, so the renderer can tell a new one.
@@ -221,6 +231,7 @@ impl Map {
             loading: false,
             renderer_fully_loaded: false,
             repaint_at: None,
+            render_failures: 0,
             still_image: StillImage::None,
             still_image_request_id: 0,
             generation: 1,
@@ -484,8 +495,9 @@ impl Map {
             } => {
                 self.repaint_at = repaint_at.filter(|_| continuous && !needs_repaint);
                 let failed = error.is_some();
-                if let Some(error) = error {
-                    self.on_render_failure(error, still_image_request_id);
+                match error {
+                    Some(error) => self.on_render_failure(error, still_image_request_id),
+                    None => self.render_failures = 0,
                 }
                 let frame = FinishedFrame { mode, needs_repaint, placement_changed, still_image_request_id, failed };
                 self.on_render_frame_finished(frame, stats);
@@ -539,11 +551,19 @@ impl Map {
     }
 
     /// Handles a frame that failed on the GPU, which nothing took: reports
-    /// it, and fails the still image of the frame's
-    /// `still_image_request_id`.
+    /// the first of the frames in a row that fail, and fails the still image
+    /// of the frame's `still_image_request_id`. A continuous map draws again
+    /// once the last frame's [retry delay](RETRY_DELAY) passed.
     fn on_render_failure(&mut self, error: Error, still_image_request_id: u64) {
-        self.emit(MapEvent::RenderError(error.clone()));
-        if still_image_request_id != 0 && still_image_request_id == self.still_image_request_id {
+        self.render_failures = self.render_failures.saturating_add(1);
+        if self.render_failures == 1 {
+            self.emit(MapEvent::RenderError(error.clone()));
+        }
+        if self.mode == MapMode::Continuous {
+            let doublings = (self.render_failures - 1).min(4);
+            let delay = (RETRY_DELAY * (1 << doublings)).min(MAX_RETRY_DELAY);
+            self.repaint_at = Some(Instant::now() + delay);
+        } else if still_image_request_id != 0 && still_image_request_id == self.still_image_request_id {
             self.fail_still_image(error);
         }
     }
@@ -557,8 +577,8 @@ impl Map {
 
     /// Handles the end of a frame. Only a `Full` frame completes a still
     /// image or leaves the map idle; one whose camera hadn't stood on the
-    /// terrain's newest ground, or that failed, isn't `Full`. A continuous
-    /// map draws a frame that failed again.
+    /// terrain's newest ground, or that failed, isn't `Full`. A frame that
+    /// failed asks for no other, as its retry delay does.
     fn on_render_frame_finished(&mut self, frame: FinishedFrame, stats: Arc<RenderingStats>) {
         let FinishedFrame { mode, needs_repaint, placement_changed, still_image_request_id, failed } = frame;
         let fully_loaded = mode == mln_renderer::RenderMode::Full;
@@ -583,7 +603,7 @@ impl Map {
             // animations (`sample_frame`), so a frame's report adds no update
             // for them, which would only repeat the frame's camera.
             let animating = self.transform.in_transition();
-            if failed || needs_repaint || (animating && self.transform.frame_time().is_none()) {
+            if !failed && (needs_repaint || (animating && self.transform.frame_time().is_none())) {
                 self.on_update();
             } else if !animating && self.renderer_fully_loaded && self.repaint_at.is_none() {
                 self.emit(MapEvent::Idle);
@@ -763,8 +783,9 @@ impl Map {
     }
 
     /// When the map changes next on its own, though its last frame asked for
-    /// no other: the owner calls [`trigger_repaint`](Self::trigger_repaint)
-    /// then, by the frame clock. `None` once an update went out since.
+    /// no other, or draws again after a frame that failed on the GPU: the
+    /// owner calls [`trigger_repaint`](Self::trigger_repaint) then, by the
+    /// frame clock. `None` once an update went out since.
     #[must_use]
     pub fn repaint_at(&self) -> Option<Instant> {
         self.repaint_at

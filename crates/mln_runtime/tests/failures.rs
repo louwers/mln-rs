@@ -1,17 +1,19 @@
 // Frames that fail on the GPU, through a session's own WebGPU device: a
 // custom layer that records a draw that WebGPU rejects fails the frame's
 // submit, as a device out of memory would fail it. Such a frame is never the
-// host's: a still image ends with the error.
+// host's: a still image ends with the error, and a continuous map reports it
+// once and draws again later.
 
 #![cfg(all(feature = "webgpu", not(target_family = "wasm")))]
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
-use mln_map::{MapEvent, MapMode};
+use mln_map::{MapEvent, MapMode, RenderMode};
 use mln_runtime::{
-    AttachOptions, BackendType, Device, DeviceOptions, ErrorKind, FrameDisposition, FrameResult, Map, MapOptions,
-    RenderSession, RenderTarget, Runtime, RuntimeEventKind,
+    AttachOptions, BackendType, DemandMode, Device, DeviceOptions, ErrorKind, FrameDemand, FrameDisposition,
+    FrameResult, Map, MapOptions, RenderSession, RenderTarget, Runtime, RuntimeEventKind,
 };
 use mln_style::layers::{CustomLayerHost, CustomLayerRenderParameters};
 use mln_util::size::Size;
@@ -111,4 +113,54 @@ fn a_still_image_whose_frame_fails_ends_with_the_error_and_hands_off_nothing() {
     broken.store(false, Ordering::SeqCst);
     wait(map.request_still_image());
     assert_eq!(RED, center_pixel(&session));
+}
+
+/// A continuous map whose frames keep failing reports it once, isn't idle,
+/// and draws again by itself only now and then, not frame after frame. Once
+/// the device works again, it draws the map and goes idle.
+#[test]
+fn a_continuous_map_whose_frames_fail_reports_once_and_draws_again_later() {
+    let runtime = runtime();
+    let log = EventLog::install(&runtime);
+    let Some((map, session, broken)) = broken_map(&runtime, MapMode::Continuous) else { return };
+    // Demands a frame of each update, and returns the results of `within`.
+    let frames = |within: Duration| {
+        let mut results: Vec<FrameResult> = Vec::new();
+        let start = Instant::now();
+        while start.elapsed() < within {
+            session.demand_frame(FrameDemand::new(DemandMode::WaitForUpdate, 0)).unwrap();
+            let mut taken = Vec::new();
+            eventually(|| {
+                taken.extend(session.drain_frame_results().unwrap());
+                !taken.is_empty() || start.elapsed() >= within
+            });
+            results.extend(taken);
+        }
+        results
+    };
+    session.demand_frame(FrameDemand::new(DemandMode::Force, 0)).unwrap();
+    assert!(eventually(|| session.drain_frame_results().unwrap().iter().any(|result| result.mode == RenderMode::Full)));
+
+    broken.store(true, Ordering::SeqCst);
+    wait(map.request_repaint());
+    let failing = frames(Duration::from_millis(1500));
+    assert!(failing.iter().all(|result| result.disposition != FrameDisposition::Rendered), "{failing:?}");
+    let drawn = failing.iter().filter(|result| result.disposition == FrameDisposition::NoUpdate).count();
+    // 100, 200, 400 and 800 ms apart: four or five in 1.5 s.
+    assert!((1..=8).contains(&drawn), "{drawn} frames in 1.5 s: {failing:?}");
+    let errors = render_errors(&log);
+    assert_eq!(1, errors.len(), "{errors:?}");
+    assert!(!map.snapshot().unwrap().fully_loaded);
+
+    broken.store(false, Ordering::SeqCst);
+    let recovered = frames(Duration::from_millis(1500));
+    assert!(
+        recovered
+            .iter()
+            .any(|result| result.disposition == FrameDisposition::Rendered && result.mode == RenderMode::Full),
+        "{recovered:?}"
+    );
+    assert_eq!(RED, center_pixel(&session));
+    assert_eq!(1, render_errors(&log).len());
+    assert!(log.wait_for(|event| matches!(event.kind, RuntimeEventKind::Map(MapEvent::Idle))).is_some());
 }
