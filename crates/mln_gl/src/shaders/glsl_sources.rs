@@ -299,7 +299,7 @@ pub(crate) fn stage_sources(key: &ShaderKey, desktop: bool, highp_fragment: bool
     let named = |glsl: &str| -> Vec<&Block> {
         let identifiers: HashSet<&str> = identifiers(glsl).collect();
         let reads = |block: &&Block| {
-            let members = block.members.iter().filter(|member| !member.is_padding());
+            let members = block.members.iter().filter(|member| !member.padding);
             members.map(|member| glsl_es::member_name(block, member)).any(|name| identifiers.contains(name.as_str()))
         };
         blocks.iter().copied().filter(reads).collect()

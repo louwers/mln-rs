@@ -1,5 +1,5 @@
 mln_gfx::uniform_block! {
-    /// The heatmap shader's per-drawable uniform block (80 bytes).
+    /// The heatmap shader's per-drawable uniform block.
     pub struct HeatmapDrawableUBO {
         pub matrix: [f32; 4 * 4],
         pub extrude_scale: f32,
@@ -11,27 +11,28 @@ mln_gfx::uniform_block! {
         pub globe_extrude_scale: f32,
     }
 }
-const _: () = assert!(size_of::<HeatmapDrawableUBO>() == 5 * 16);
 
 mln_gfx::uniform_block! {
-    /// Evaluated properties that do not depend on the tile (16 bytes).
+    /// Evaluated properties that do not depend on the tile.
     pub struct HeatmapEvaluatedPropsUBO {
         pub weight: f32,
         pub radius: f32,
         pub intensity: f32,
+        #[padding]
         pub padding: f32,
     }
 }
-const _: () = assert!(size_of::<HeatmapEvaluatedPropsUBO>() == 16);
 
 mln_gfx::uniform_block! {
-    /// The heatmap texture shader's properties uniform block (80 bytes).
+    /// The heatmap texture shader's properties uniform block.
     pub struct HeatmapTexturePropsUBO {
         pub matrix: [f32; 4 * 4],
         pub opacity: f32,
+        #[padding]
         pub pad1: f32,
+        #[padding]
         pub pad2: f32,
+        #[padding]
         pub pad3: f32,
     }
 }
-const _: () = assert!(size_of::<HeatmapTexturePropsUBO>() == 5 * 16);

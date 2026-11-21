@@ -4,7 +4,7 @@ use bytemuck::{Pod, Zeroable};
 // Line
 
 mln_gfx::uniform_block! {
-    /// The line shader's per-drawable uniform block (96 bytes).
+    /// The line shader's per-drawable uniform block.
     pub struct LineDrawableUBO {
         pub matrix: [f32; 4 * 4],
         #[glsl_es(mediump)]
@@ -22,16 +22,16 @@ mln_gfx::uniform_block! {
         pub offset_t: f32,
         #[glsl_es(lowp)]
         pub width_t: f32,
+        #[padding]
         pub pad1: f32,
     }
 }
-const _: () = assert!(size_of::<LineDrawableUBO>() == 6 * 16);
 
 //
 // Line gradient
 
 mln_gfx::uniform_block! {
-    /// The line gradient shader's per-drawable uniform block (96 bytes).
+    /// The line gradient shader's per-drawable uniform block.
     pub struct LineGradientDrawableUBO {
         pub matrix: [f32; 4 * 4],
         #[glsl_es(mediump)]
@@ -47,17 +47,18 @@ mln_gfx::uniform_block! {
         pub offset_t: f32,
         #[glsl_es(lowp)]
         pub width_t: f32,
+        #[padding]
         pub pad1: f32,
+        #[padding]
         pub pad2: f32,
     }
 }
-const _: () = assert!(size_of::<LineGradientDrawableUBO>() == 6 * 16);
 
 //
 // Line pattern
 
 mln_gfx::uniform_block! {
-    /// The line pattern shader's per-drawable uniform block (112 bytes).
+    /// The line pattern shader's per-drawable uniform block.
     pub struct LinePatternDrawableUBO {
         pub matrix: [f32; 4 * 4],
         #[glsl_es(mediump)]
@@ -79,15 +80,17 @@ mln_gfx::uniform_block! {
         pub pattern_to_t: f32,
         #[glsl_es(lowp)]
         pub floorwidth_t: f32,
+        #[padding]
         pub pad1: f32,
+        #[padding]
         pub pad2: f32,
+        #[padding]
         pub pad3: f32,
     }
 }
-const _: () = assert!(size_of::<LinePatternDrawableUBO>() == 7 * 16);
 
 mln_gfx::uniform_block! {
-    /// The line pattern shader's per-tile uniform block (64 bytes).
+    /// The line pattern shader's per-tile uniform block.
     pub struct LinePatternTilePropsUBO {
         pub pattern_from: [f32; 4],
         pub pattern_to: [f32; 4],
@@ -95,16 +98,16 @@ mln_gfx::uniform_block! {
         pub scale: [f32; 4],
         pub texsize: [f32; 2],
         pub fade: f32,
+        #[padding]
         pub pad1: f32,
     }
 }
-const _: () = assert!(size_of::<LinePatternTilePropsUBO>() == 4 * 16);
 
 //
 // Line SDF
 
 mln_gfx::uniform_block! {
-    /// The line SDF shader's per-drawable uniform block (128 bytes).
+    /// The line SDF shader's per-drawable uniform block.
     pub struct LineSDFDrawableUBO {
         pub matrix: [f32; 4 * 4],
         pub patternscale_a: [f32; 2],
@@ -131,24 +134,25 @@ mln_gfx::uniform_block! {
         /// The height of the bucket's dash atlas, where the dash array differs
         /// by feature: the shaders then read the patterns from an attribute.
         pub atlas_height: f32,
+        #[padding]
         pub pad2: f32,
     }
 }
-const _: () = assert!(size_of::<LineSDFDrawableUBO>() == 8 * 16);
 
 mln_gfx::uniform_block! {
-    /// The line SDF shader's per-tile uniform block (16 bytes).
+    /// The line SDF shader's per-tile uniform block.
     pub struct LineSDFTilePropsUBO {
         pub sdfgamma: f32,
         pub mix: f32,
+        #[padding]
         pub pad1: f32,
+        #[padding]
         pub pad2: f32,
     }
 }
-const _: () = assert!(size_of::<LineSDFTilePropsUBO>() == 16);
 
 mln_gfx::uniform_block! {
-    /// Evaluated properties that do not depend on the tile (48 bytes).
+    /// Evaluated properties that do not depend on the tile.
     pub struct LineEvaluatedPropsUBO {
         pub color: [f32; 4],
         #[glsl_es(lowp)]
@@ -163,11 +167,12 @@ mln_gfx::uniform_block! {
         pub width: f32,
         #[glsl_es(lowp)]
         pub floorwidth: f32,
+        #[padding]
         pub pad0: f32,
+        #[padding]
         pub pad1: f32,
     }
 }
-const _: () = assert!(size_of::<LineEvaluatedPropsUBO>() == 3 * 16);
 
 /// Any line per-drawable uniform block, for consolidated UBOs: 128 bytes,
 /// the size of `LineSDFDrawableUBO`.
@@ -176,7 +181,6 @@ const _: () = assert!(size_of::<LineEvaluatedPropsUBO>() == 3 * 16);
 pub struct LineDrawableUnionUBO {
     bytes: [u8; 128],
 }
-const _: () = assert!(size_of::<LineDrawableUnionUBO>() == 8 * 16);
 
 impl Default for LineDrawableUnionUBO {
     fn default() -> Self {
@@ -199,7 +203,6 @@ impl LineDrawableUnionUBO {
 pub struct LineTilePropsUnionUBO {
     bytes: [u8; 64],
 }
-const _: () = assert!(size_of::<LineTilePropsUnionUBO>() == 4 * 16);
 
 impl Default for LineTilePropsUnionUBO {
     fn default() -> Self {

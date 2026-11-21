@@ -1,7 +1,7 @@
 use mln_gfx::shaders::block::Bool32;
 
 mln_gfx::uniform_block! {
-    /// The circle shader's per-drawable uniform block (112 bytes).
+    /// The circle shader's per-drawable uniform block.
     pub struct CircleDrawableUBO {
         pub matrix: [f32; 4 * 4],
         pub extrude_scale: [f32; 2],
@@ -21,14 +21,15 @@ mln_gfx::uniform_block! {
         #[glsl_es(lowp)]
         pub stroke_opacity_t: f32,
         pub globe_extrude_scale: f32,
+        #[padding]
         pub pad2: f32,
+        #[padding]
         pub pad3: f32,
     }
 }
-const _: () = assert!(size_of::<CircleDrawableUBO>() == 7 * 16);
 
 mln_gfx::uniform_block! {
-    /// Evaluated properties that do not depend on the tile (64 bytes). The
+    /// Evaluated properties that do not depend on the tile. The
     /// colors are the premultiplied `mln::Color` as r, g, b, a floats.
     pub struct CircleEvaluatedPropsUBO {
         pub color: [f32; 4],
@@ -45,7 +46,7 @@ mln_gfx::uniform_block! {
         pub stroke_opacity: f32,
         pub scale_with_map: Bool32,
         pub pitch_with_map: Bool32,
+        #[padding]
         pub pad1: f32,
     }
 }
-const _: () = assert!(size_of::<CircleEvaluatedPropsUBO>() == 4 * 16);

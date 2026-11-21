@@ -12,9 +12,9 @@ use std::fmt::Write as _;
 /// in this order, at these offsets: a struct of the block's name in WGSL,
 /// MSL and the Vulkan/D3D12 GLSL, and in GLSL ES a `std140` uniform block of
 /// that name whose members are in the program's scope, each as
-/// [`glsl_es_prefix`](Block::glsl_es_prefix) and its name, and each padding
-/// member, one whose name starts with `pad`, as the block's name, `_` and
-/// its name.
+/// [`glsl_es_prefix`](Block::glsl_es_prefix) and its name, and each
+/// [`padding`](Member::padding) member as the block's name, `_` and its
+/// name.
 #[derive(Debug)]
 pub struct Block {
     /// Its name in every shading language.
@@ -37,6 +37,8 @@ pub struct Member {
     pub offset: usize,
     /// Its precision in GLSL ES.
     pub precision: Precision,
+    /// Whether it is padding that no shader reads.
+    pub padding: bool,
 }
 
 /// The type of a [`Member`], and the Rust type of its field.
@@ -83,15 +85,6 @@ impl Precision {
     }
 }
 
-impl Member {
-    /// Whether it is padding that no shader reads: its name starts with
-    /// `pad`.
-    #[must_use]
-    pub fn is_padding(&self) -> bool {
-        self.name.starts_with("pad")
-    }
-}
-
 /// A `bool` as a uniform block holds it: 4 bytes, 1 for `true` and 0 for
 /// `false`. GLSL ES reads it as a `bool`; WGSL, as a `u32`, and MSL and the
 /// Vulkan/D3D12 GLSL, as an `int`, which none can read a `bool` member as.
@@ -123,6 +116,14 @@ pub trait UniformBlock: bytemuck::Pod {
 pub trait MemberValue: bytemuck::Pod {
     /// Its type in a block.
     const TYPE: MemberType;
+    /// The bytes that its offset in a block is a multiple of, as the
+    /// shading languages lay it out: 4 for a scalar, 8 for a `vec2`, and 16
+    /// for the others.
+    const ALIGN: usize = match Self::TYPE {
+        MemberType::Float | MemberType::Int | MemberType::Uint | MemberType::Bool => 4,
+        MemberType::Vec2 => 8,
+        MemberType::Vec3 | MemberType::Vec4 | MemberType::Mat4 | MemberType::Vec4Array(_) => 16,
+    };
 }
 
 impl MemberValue for f32 {
@@ -166,22 +167,25 @@ impl<const N: usize> MemberValue for [[f32; 4]; N] {
 /// layout, which the backends declare in their shading languages.
 ///
 /// A member's type is one of [`MemberValue`]'s, and the struct has no
-/// padding but its members: a member that the shading languages align to
-/// more than 4 bytes takes an offset that they align it to, which padding
-/// members before it make up. A member's doc comments come before its
-/// GLSL ES precision, `#[glsl_es(lowp)]` or `#[glsl_es(mediump)]`, which is
-/// `highp` without one. The struct's doc comments come before
-/// `#[glsl_es(prefix = "...")]`, which names its members in GLSL ES with
-/// another prefix than `u_`.
+/// padding but its members: each member is at an offset that its
+/// [`ALIGN`](MemberValue::ALIGN) divides, which padding members before it
+/// make up, and the struct's size is a multiple of 16. The compiler checks
+/// both. A member's doc comments come before its GLSL ES precision,
+/// `#[glsl_es(lowp)]` or `#[glsl_es(mediump)]`, which is `highp` without
+/// one, or before `#[padding]`, which marks a member that no shader reads.
+/// The struct's doc comments come before `#[glsl_es(prefix = "...")]`,
+/// which names its members in GLSL ES with another prefix than `u_`.
 ///
 /// ```
 /// mln_gfx::uniform_block! {
-///     /// A dot's color and radius (32 bytes).
+///     /// A dot's color and radius.
 ///     pub struct DotPropsUBO {
 ///         pub color: [f32; 4],
 ///         #[glsl_es(mediump)]
 ///         pub radius: f32,
+///         #[padding]
 ///         pub pad1: f32,
+///         #[padding]
 ///         pub pad2: [f32; 2],
 ///     }
 /// }
@@ -195,6 +199,7 @@ macro_rules! uniform_block {
             $(
                 $(#[doc = $member_doc:literal])*
                 $(#[glsl_es($precision:ident)])?
+                $(#[padding $($padding:tt)*])?
                 pub $member:ident : $ty:ty
             ),* $(,)?
         }
@@ -213,6 +218,10 @@ macro_rules! uniform_block {
                 0 $(+ ::core::mem::size_of::<$ty>())* == ::core::mem::size_of::<$name>(),
                 "a uniform block has no padding but its members",
             );
+            $(assert!(
+                ::core::mem::offset_of!($name, $member) % <$ty as $crate::shaders::block::MemberValue>::ALIGN == 0,
+                ::core::concat!("member ", ::core::stringify!($member), " is at an offset the shading languages don't align it to"),
+            );)*
         };
 
         // SAFETY: the struct is `repr(C)`, its fields are `Pod` and fill it
@@ -231,6 +240,8 @@ macro_rules! uniform_block {
                     ty: <$ty as $crate::shaders::block::MemberValue>::TYPE,
                     offset: ::core::mem::offset_of!($name, $member),
                     precision: $crate::uniform_block!(@precision $($precision)?),
+                    // `true` for a member that `#[padding]` marks.
+                    padding: false $(|| true $($padding)*)?,
                 },)*],
                 glsl_es_prefix: $crate::uniform_block!(@prefix $($prefix)?),
             };
@@ -302,5 +313,23 @@ mod tests {
         );
         assert_eq!(block.members[1].precision, Precision::Low);
         assert_eq!(block.members[0].precision, Precision::High);
+        assert!(block.members.iter().all(|member| !member.padding));
+    }
+
+    crate::uniform_block! {
+        pub(crate) struct PaddedUBO {
+            /// Read, though it starts like padding.
+            pub padding_px: f32,
+            #[padding]
+            pub pad1: f32,
+            #[padding]
+            pub pad2: [f32; 2],
+        }
+    }
+
+    #[test]
+    fn a_member_is_padding_where_it_is_marked() {
+        let members = <PaddedUBO as UniformBlock>::BLOCK.members;
+        assert_eq!(members.iter().map(|member| member.padding).collect::<Vec<_>>(), [false, true, true]);
     }
 }

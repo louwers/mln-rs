@@ -1,43 +1,46 @@
 use bytemuck::{Pod, Zeroable};
 
 mln_gfx::uniform_block! {
-    /// The background shader's per-drawable uniform block (64 bytes).
+    /// The background shader's per-drawable uniform block.
     pub struct BackgroundDrawableUBO {
         pub matrix: [f32; 4 * 4],
     }
 }
-const _: () = assert!(size_of::<BackgroundDrawableUBO>() == 4 * 16);
 
 mln_gfx::uniform_block! {
-    /// Evaluated properties that do not depend on the tile (32 bytes).
+    /// Evaluated properties that do not depend on the tile.
     /// `color` is the premultiplied `mln::Color` as r, g, b, a floats.
     pub struct BackgroundPropsUBO {
         pub color: [f32; 4],
         pub opacity: f32,
+        #[padding]
         pub pad1: f32,
+        #[padding]
         pub pad2: f32,
+        #[padding]
         pub pad3: f32,
     }
 }
-const _: () = assert!(size_of::<BackgroundPropsUBO>() == 2 * 16);
 
 mln_gfx::uniform_block! {
-    /// The background pattern shader's per-drawable uniform block (96 bytes).
+    /// The background pattern shader's per-drawable uniform block.
     pub struct BackgroundPatternDrawableUBO {
         pub matrix: [f32; 4 * 4],
         pub pixel_coord_upper: [f32; 2],
         pub pixel_coord_lower: [f32; 2],
         pub tile_units_to_pixels: f32,
+        #[padding]
         pub pad1: f32,
+        #[padding]
         pub pad2: f32,
+        #[padding]
         pub pad3: f32,
     }
 }
-const _: () = assert!(size_of::<BackgroundPatternDrawableUBO>() == 6 * 16);
 
 mln_gfx::uniform_block! {
     /// Evaluated properties that do not depend on the tile, and the size of the
-    /// pattern atlas in pixels (80 bytes).
+    /// pattern atlas in pixels.
     pub struct BackgroundPatternPropsUBO {
         pub pattern_tl_a: [f32; 2],
         pub pattern_br_a: [f32; 2],
@@ -50,11 +53,12 @@ mln_gfx::uniform_block! {
         pub mix: f32,
         pub opacity: f32,
         pub texsize: [f32; 2],
+        #[padding]
         pub pad1: f32,
+        #[padding]
         pub pad2: f32,
     }
 }
-const _: () = assert!(size_of::<BackgroundPatternPropsUBO>() == 5 * 16);
 
 /// Either background per-drawable uniform block, for consolidated UBOs: the
 /// size of the larger member, 96 bytes. Write either member with
@@ -64,7 +68,6 @@ const _: () = assert!(size_of::<BackgroundPatternPropsUBO>() == 5 * 16);
 pub struct BackgroundDrawableUnionUBO {
     bytes: [u8; 96],
 }
-const _: () = assert!(size_of::<BackgroundDrawableUnionUBO>() == 6 * 16);
 
 impl Default for BackgroundDrawableUnionUBO {
     fn default() -> Self {

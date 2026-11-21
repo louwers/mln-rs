@@ -1,5 +1,5 @@
 mln_gfx::uniform_block! {
-    /// The fill extrusion shader's per-drawable uniform block (112 bytes).
+    /// The fill extrusion shader's per-drawable uniform block.
     pub struct FillExtrusionDrawableUBO {
         pub matrix: [f32; 4 * 4],
         pub pixel_coord_upper: [f32; 2],
@@ -19,26 +19,27 @@ mln_gfx::uniform_block! {
         pub paint_layout: u32,
     }
 }
-const _: () = assert!(size_of::<FillExtrusionDrawableUBO>() == 7 * 16);
 
 mln_gfx::uniform_block! {
-    /// The fill extrusion shader's per-tile uniform block (48 bytes).
+    /// The fill extrusion shader's per-tile uniform block.
     pub struct FillExtrusionTilePropsUBO {
         pub pattern_from: [f32; 4],
         pub pattern_to: [f32; 4],
         pub texsize: [f32; 2],
+        #[padding]
         pub pad1: f32,
+        #[padding]
         pub pad2: f32,
     }
 }
-const _: () = assert!(size_of::<FillExtrusionTilePropsUBO>() == 3 * 16);
 
 mln_gfx::uniform_block! {
-    /// Evaluated properties that do not depend on the tile (80 bytes). `color`
+    /// Evaluated properties that do not depend on the tile. `color`
     /// is the premultiplied `mln::Color` as r, g, b, a floats.
     pub struct FillExtrusionPropsUBO {
         pub color: [f32; 4],
         pub light_color: [f32; 3],
+        #[padding]
         pub pad1: f32,
         pub light_position: [f32; 3],
         pub base: f32,
@@ -49,7 +50,7 @@ mln_gfx::uniform_block! {
         pub fade: f32,
         pub from_scale: f32,
         pub to_scale: f32,
+        #[padding]
         pub pad2: f32,
     }
 }
-const _: () = assert!(size_of::<FillExtrusionPropsUBO>() == 5 * 16);

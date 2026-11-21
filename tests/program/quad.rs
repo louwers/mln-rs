@@ -13,6 +13,7 @@ mln_rs::mln_gfx::uniform_block! {
     /// with.
     pub(crate) struct QuadUBO {
         pub size: [f32; 2],
+        #[padding]
         pub pad: [f32; 2],
         pub tint: [f32; 4],
     }

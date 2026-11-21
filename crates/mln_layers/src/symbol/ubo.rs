@@ -1,7 +1,7 @@
 use mln_gfx::shaders::block::Bool32;
 
 mln_gfx::uniform_block! {
-    /// The symbol shader's per-drawable uniform block (288 bytes).
+    /// The symbol shader's per-drawable uniform block.
     pub struct SymbolDrawableUBO {
         pub matrix: [f32; 4 * 4],
         pub label_plane_matrix: [f32; 4 * 4],
@@ -30,17 +30,17 @@ mln_gfx::uniform_block! {
         pub is_halo_pass: Bool32,
     }
 }
-const _: () = assert!(size_of::<SymbolDrawableUBO>() == 18 * 16);
 
 mln_gfx::uniform_block! {
     pub struct SymbolTilePropsUBO {
         pub is_text: Bool32,
         pub is_halo: Bool32,
+        #[padding]
         pub pad1: f32,
+        #[padding]
         pub pad2: f32,
     }
 }
-const _: () = assert!(size_of::<SymbolTilePropsUBO>() == 16);
 
 mln_gfx::uniform_block! {
     /// The symbol shader's evaluated properties uniform block, and how far the
@@ -52,6 +52,7 @@ mln_gfx::uniform_block! {
         pub text_opacity: f32,
         pub text_halo_width: f32,
         pub text_halo_blur: f32,
+        #[padding]
         pub pad1: f32,
         pub icon_fill_color: [f32; 4],
         pub icon_halo_color: [f32; 4],
@@ -61,20 +62,18 @@ mln_gfx::uniform_block! {
         pub fade_change: f32,
     }
 }
-const _: () = assert!(size_of::<SymbolEvaluatedPropsUBO>() == 6 * 16);
 
 mln_gfx::uniform_block! {
     pub struct CollisionDrawableUBO {
         pub matrix: [f32; 4 * 4],
     }
 }
-const _: () = assert!(size_of::<CollisionDrawableUBO>() == 4 * 16);
 
 mln_gfx::uniform_block! {
     pub struct CollisionTilePropsUBO {
         pub extrude_scale: [f32; 2],
         pub overscale_factor: f32,
+        #[padding]
         pub pad1: f32,
     }
 }
-const _: () = assert!(size_of::<CollisionTilePropsUBO>() == 16);

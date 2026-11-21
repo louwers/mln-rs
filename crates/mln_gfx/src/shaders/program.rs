@@ -113,7 +113,8 @@ impl Buffer {
     /// as a `T`, as of a union of the blocks of a layer's programs.
     #[must_use]
     pub const fn storage_of<T: UniformBlock, Element>(id: usize) -> Buffer {
-        assert!(size_of::<T>() <= size_of::<Element>());
+        assert!(size_of::<T>() <= size_of::<Element>(), "an element holds the block");
+        assert!(size_of::<Element>().is_multiple_of(16), "an element's size is a multiple of 16");
         Buffer { id, kind: BufferKind::Storage { block: T::BLOCK, stride: size_of::<Element>() } }
     }
 
