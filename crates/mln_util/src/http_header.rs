@@ -1,10 +1,10 @@
-//! HTTP response headers: what caching headers allow (RFC 9111, RFC 5861),
+//! HTTP response headers: what caching headers allow (RFC 9111),
 //! and when a rate-limited request may be retried.
 
 use crate::chrono::{Timestamp, now, parse_http_date, parse_timestamp_i32};
 
 /// The directives of a response's `Cache-Control` that a private cache
-/// heeds (RFC 9111 §5.2.2, RFC 5861). Durations are in seconds.
+/// heeds (RFC 9111 §5.2.2). Durations are in seconds.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct CacheControl {
     pub max_age: Option<u64>,
@@ -13,8 +13,6 @@ pub struct CacheControl {
     /// fields, not the response (§5.2.2.4).
     pub no_cache: bool,
     pub no_store: bool,
-    pub stale_while_revalidate: Option<u64>,
-    pub stale_if_error: Option<u64>,
 }
 
 /// The largest delta-seconds a cache needs to tell apart (RFC 9111 §1.2.2).
@@ -85,10 +83,6 @@ impl CacheControl {
                 "must-revalidate" => result.must_revalidate = true,
                 "no-cache" if argument.is_none() => result.no_cache = true,
                 "no-store" => result.no_store = true,
-                "stale-while-revalidate" => {
-                    result.stale_while_revalidate = result.stale_while_revalidate.or_else(seconds);
-                }
-                "stale-if-error" => result.stale_if_error = result.stale_if_error.or_else(seconds),
                 _ => {}
             }
         }
@@ -124,10 +118,6 @@ pub struct Freshness {
     /// or `no-cache`).
     pub must_revalidate: bool,
     pub no_store: bool,
-    /// Until when a stale copy may be used while it revalidates.
-    pub stale_while_revalidate: Option<Timestamp>,
-    /// Until when a stale copy may stand in for an error.
-    pub stale_if_error: Option<Timestamp>,
 }
 
 impl CachingHeaders<'_> {
@@ -138,8 +128,6 @@ impl CachingHeaders<'_> {
     ///   the time since `last_modified`, at most a week, else none.
     /// - It counts from the response's `Age`. The apparent age from `Date`
     ///   isn't added, since it holds the difference between the clocks.
-    /// - `stale-while-revalidate` and `stale-if-error` extend from the end
-    ///   of the lifetime.
     #[must_use]
     pub fn freshness(&self, received: Timestamp) -> Freshness {
         let cc = self.cache_control;
@@ -158,16 +146,10 @@ impl CachingHeaders<'_> {
             0
         };
         let remaining = lifetime as i64 - self.age.unwrap_or(0).min(MAX_DELTA_SECONDS) as i64;
-        let expires = Timestamp::from_secs(received.secs_since_epoch() + remaining);
-        let after = |seconds: Option<u64>| {
-            seconds.map(|seconds| Timestamp::from_secs(expires.secs_since_epoch() + seconds as i64))
-        };
         Freshness {
-            expires,
+            expires: Timestamp::from_secs(received.secs_since_epoch() + remaining),
             must_revalidate: cc.must_revalidate || cc.no_cache,
             no_store: cc.no_store,
-            stale_while_revalidate: after(cc.stale_while_revalidate),
-            stale_if_error: after(cc.stale_if_error),
         }
     }
 }
@@ -238,9 +220,8 @@ mod tests {
 
     #[test]
     fn directives() {
-        let cc = CacheControl::parse("public,max-age=300,stale-while-revalidate=3600,stale-if-error=86400, No-Store");
-        assert_eq!(cc.stale_while_revalidate, Some(3600));
-        assert_eq!(cc.stale_if_error, Some(86400));
+        let cc = CacheControl::parse("public,max-age=300,stale-if-error=86400, No-Store");
+        assert_eq!(cc.max_age, Some(300));
         assert!(cc.no_store && !cc.no_cache);
         assert!(CacheControl::parse("no-cache").no_cache);
         assert!(!CacheControl::parse("no-cache=\"Set-Cookie\"").no_cache);
@@ -281,8 +262,6 @@ mod tests {
             None,
         );
         assert_eq!(f.expires, at(88823 - 67981));
-        assert_eq!(f.stale_while_revalidate, Some(at(88823 - 67981 + 604_800)));
-        assert_eq!(f.stale_if_error, Some(at(88823 - 67981 + 604_800)));
         assert!(!f.must_revalidate);
     }
 

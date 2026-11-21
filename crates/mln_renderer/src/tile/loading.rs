@@ -6,7 +6,7 @@ use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use mln_storage::resource::Priority;
-use mln_storage::response::{Caching, Reason, Reuse};
+use mln_storage::response::{Caching, Reason};
 use mln_storage::{Data, FileSource, LoadingMethod, Request, Resource, Response, StoragePolicy};
 use mln_style::custom_tile_loader::{CustomProvider, CustomTileSubscriber, SubscriberKey};
 use mln_style::sources::custom::{CustomVectorTileData, TileDataFormat};
@@ -200,7 +200,7 @@ impl Ancestors {
     /// expired at `now`.
     fn fresh(&self, id: CanonicalTileID, now: Timestamp) -> Option<(Arc<Ancestor>, Fetched)> {
         let held = self.0.get(&id)?;
-        let fetched = held.fetched.as_ref().filter(|fetched| fetched.caching.reuse(now) == Reuse::Fresh)?;
+        let fetched = held.fetched.as_ref().filter(|fetched| fetched.caching.is_fresh(now))?;
         Some((held.ancestor.upgrade()?, fetched.clone()))
     }
 }
@@ -317,8 +317,8 @@ pub(crate) enum OriginLoad {
 /// it retries an error or revalidates expired data.
 ///
 /// The cache's copy shows at once unless caching rules forbid using it
-/// stale (`Caching::shows_while_revalidating`); then the tile holds it back
-/// until a 304 renews it.
+/// stale (`Caching::is_usable`); then the tile holds it back until a 304
+/// renews it.
 pub(crate) struct TilesetLoad {
     /// Its order follows the tile's place in its source.
     pub(crate) resource: Resource,
@@ -483,11 +483,11 @@ impl Load {
         }
     }
 
-    /// Whether the tile's data may show at `now` while it revalidates, if
-    /// the tile comes back from the cache. Only a tileset's data expires.
+    /// Whether the tile's data may show at `now`, if the tile comes back
+    /// from the cache. Only a tileset's data expires.
     pub(crate) fn shows(&self, now: Timestamp) -> bool {
         match &self.origin {
-            OriginLoad::Tileset(tileset) if tileset.has_data => tileset.caching.shows_while_revalidating(now),
+            OriginLoad::Tileset(tileset) if tileset.has_data => tileset.caching.is_usable(now),
             OriginLoad::Tileset(_) | OriginLoad::GeoJson { .. } | OriginLoad::Custom(_) => true,
         }
     }
@@ -527,7 +527,7 @@ impl TilesetLoad {
     /// Whether the tile has data from the network that hasn't expired. Data
     /// without an expiry stays fresh.
     pub(crate) fn is_fresh(&self, now: Timestamp) -> bool {
-        self.from_network && self.caching.reuse(now) == Reuse::Fresh
+        self.from_network && self.caching.is_fresh(now)
     }
 
     /// Whether a required tile needn't ask the network: its data came from

@@ -968,22 +968,6 @@ fn a_stale_copy_that_must_revalidate_waits_for_the_network() {
     assert!(tile.shows_layout() && tile.tile().is_complete());
 }
 
-/// A copy within its stale-while-revalidate shows at once, and the request
-/// that revalidates it waits behind those of tiles without data.
-#[test]
-fn a_copy_within_stale_while_revalidate_shows_at_once() {
-    let test = Test::new();
-    let file_source = Arc::new(WithCache::default());
-    let cached = {
-        let mut cached = expired(water());
-        cached.caching.stale_while_revalidate = Some(Timestamp::from_secs(i64::MAX));
-        cached
-    };
-    let tile = tile_with_cached(&test, &file_source, cached);
-    assert!(tile.shows_layout());
-    assert_eq!(Priority::Low, file_source.oldest().priority);
-}
-
 /// A stale copy shows while it revalidates, and stays when the server
 /// can't be reached, which the tile reports; one that must revalidate never
 /// shows.

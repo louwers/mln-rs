@@ -126,10 +126,10 @@ impl Sources {
         network.load(res, network_responder);
     }
 
-    /// Loads `resource` from the cache, then from the network. A cached copy
-    /// that may show while it revalidates goes to the requester at once, and
-    /// the network revalidates it at low priority once it expires. Any other
-    /// copy waits for the network, and the requester gets it on a 304
+    /// Loads `resource` from the cache, then from the network. A usable
+    /// cached copy goes to the requester at once, and the network revalidates
+    /// it at low priority once it is stale. A copy that must revalidate first
+    /// waits for the network, and the requester gets it on a 304
     /// (`Resource::deliver`).
     #[cfg(feature = "sqlite")]
     fn request_cached(self: &Arc<Self>, database: &dyn Cache, resource: &Resource, responder: Responder) {
@@ -144,7 +144,7 @@ impl Sources {
 
             // A cached copy.
             if response.error.is_none() && !response.no_content {
-                if response.caching.shows_while_revalidating(now()) {
+                if response.caching.is_usable(now()) {
                     responder.send(response.clone());
                     res.set_priority(Priority::Low);
                 } else {

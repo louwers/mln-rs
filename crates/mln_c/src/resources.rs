@@ -25,7 +25,6 @@ use crate::generated::types::{
     MLN_RESOURCE_LOADING_METHOD_NETWORK_ONLY, MLN_RESOURCE_PRIORITY_LOW, MLN_RESOURCE_PRIORITY_REGULAR,
     MLN_RESOURCE_REQUEST_PRIOR_EXPIRES, MLN_RESOURCE_REQUEST_PRIOR_MODIFIED, MLN_RESOURCE_REQUEST_RANGE,
     MLN_RESOURCE_RESPONSE_EXPIRES, MLN_RESOURCE_RESPONSE_MODIFIED, MLN_RESOURCE_RESPONSE_RETRY_AFTER,
-    MLN_RESOURCE_RESPONSE_STALE_IF_ERROR, MLN_RESOURCE_RESPONSE_STALE_WHILE_REVALIDATE,
     MLN_RESOURCE_RESPONSE_STATUS_ERROR, MLN_RESOURCE_RESPONSE_STATUS_NO_CONTENT,
     MLN_RESOURCE_RESPONSE_STATUS_NOT_MODIFIED, MLN_RESOURCE_RESPONSE_STATUS_OK, MLN_RESOURCE_STORAGE_POLICY_PERMANENT,
     MLN_RESOURCE_STORAGE_POLICY_VOLATILE, MLN_RESOURCE_USAGE_OFFLINE, MLN_RESOURCE_USAGE_ONLINE, MLN_STATUS_OK,
@@ -334,13 +333,11 @@ unsafe fn host_response(response: *const mln_resource_response) -> Result<Respon
         )
     };
     // SAFETY: as above.
-    let (modified, expires, retry_after, stale_while_revalidate, stale_if_error, no_store) = unsafe {
+    let (modified, expires, retry_after, no_store) = unsafe {
         (
             (&raw const (*response).modified_unix_ms).read(),
             (&raw const (*response).expires_unix_ms).read(),
             (&raw const (*response).retry_after_unix_ms).read(),
-            (&raw const (*response).stale_while_revalidate_until_unix_ms).read(),
-            (&raw const (*response).stale_if_error_until_unix_ms).read(),
             (&raw const (*response).no_store).cast::<u8>().read() != 0,
         )
     };
@@ -349,11 +346,7 @@ unsafe fn host_response(response: *const mln_resource_response) -> Result<Respon
     // SAFETY: the caller's contract.
     let error_message = unsafe { url_rules::c_text(error_message, "error_message") }?;
 
-    let known = MLN_RESOURCE_RESPONSE_MODIFIED
-        | MLN_RESOURCE_RESPONSE_EXPIRES
-        | MLN_RESOURCE_RESPONSE_RETRY_AFTER
-        | MLN_RESOURCE_RESPONSE_STALE_WHILE_REVALIDATE
-        | MLN_RESOURCE_RESPONSE_STALE_IF_ERROR;
+    let known = MLN_RESOURCE_RESPONSE_MODIFIED | MLN_RESOURCE_RESPONSE_EXPIRES | MLN_RESOURCE_RESPONSE_RETRY_AFTER;
     if fields & !known != 0 {
         return Ok(failed("mln_resource_response.fields contains unknown bits"));
     }
@@ -369,12 +362,7 @@ unsafe fn host_response(response: *const mln_resource_response) -> Result<Respon
         not_modified: status == MLN_RESOURCE_RESPONSE_STATUS_NOT_MODIFIED,
         modified: set(MLN_RESOURCE_RESPONSE_MODIFIED, modified),
         etag: (!etag.is_empty()).then(|| etag.to_owned()),
-        caching: Caching {
-            expires: set(MLN_RESOURCE_RESPONSE_EXPIRES, expires),
-            must_revalidate,
-            stale_while_revalidate: set(MLN_RESOURCE_RESPONSE_STALE_WHILE_REVALIDATE, stale_while_revalidate),
-            stale_if_error: set(MLN_RESOURCE_RESPONSE_STALE_IF_ERROR, stale_if_error),
-        },
+        caching: Caching { expires: set(MLN_RESOURCE_RESPONSE_EXPIRES, expires), must_revalidate },
         no_store,
         ..Response::default()
     };
@@ -604,26 +592,21 @@ mod tests {
     #[test]
     fn a_response_carries_its_caching_rules() {
         let answer = mln_resource_response {
-            fields: MLN_RESOURCE_RESPONSE_EXPIRES
-                | MLN_RESOURCE_RESPONSE_STALE_WHILE_REVALIDATE
-                | MLN_RESOURCE_RESPONSE_STALE_IF_ERROR,
+            fields: MLN_RESOURCE_RESPONSE_EXPIRES,
             expires_unix_ms: 1_000,
-            stale_while_revalidate_until_unix_ms: 2_000,
-            stale_if_error_until_unix_ms: 3_000,
+            must_revalidate: true,
             no_store: true,
             ..response()
         };
         // SAFETY: a local response.
         let native = unsafe { host_response(&raw const answer) }.unwrap();
-        assert_eq!(native.caching.expires, Some(Timestamp::from_secs(1)));
-        assert_eq!(native.caching.stale_while_revalidate, Some(Timestamp::from_secs(2)));
-        assert_eq!(native.caching.stale_if_error, Some(Timestamp::from_secs(3)));
+        assert_eq!(native.caching, Caching { expires: Some(Timestamp::from_secs(1)), must_revalidate: true });
         assert!(native.no_store);
 
-        let unset = mln_resource_response { stale_if_error_until_unix_ms: 3_000, ..response() };
+        let unset = mln_resource_response { expires_unix_ms: 1_000, ..response() };
         // SAFETY: a local response.
         let native = unsafe { host_response(&raw const unset) }.unwrap();
-        assert_eq!((native.caching.stale_while_revalidate, native.caching.stale_if_error), (None, None));
+        assert_eq!(native.caching, Caching::default());
         assert!(!native.no_store);
     }
 

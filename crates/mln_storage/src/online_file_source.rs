@@ -525,8 +525,8 @@ impl OnlineCore {
             req.failed_requests = 0;
             req.failed_request_reason = Reason::Success;
         }
-        // After an error, the request retries even if a stale copy stands
-        // in for it.
+        // After an error, the request retries, even while the requester
+        // shows a stale copy.
         let interval = req.update_interval(&response, connection_backoff);
 
         let resource = &mut req.resource;

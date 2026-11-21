@@ -1,7 +1,6 @@
 //! The offline regions in a runtime's cache database.
 
 use std::path::Path;
-use std::time::Duration;
 
 use mln_storage::ResourceError;
 use mln_storage::offline::{
@@ -99,19 +98,6 @@ impl<'a> Offline<'a> {
         })
     }
 
-    /// Sets how long past their expiry a region's resources may stand in
-    /// while maps can't reach the server ([`OfflineRegion::max_stale`]), and
-    /// gives the updated region.
-    pub fn set_region_max_stale(
-        &self,
-        region_id: i64,
-        max_stale: Duration,
-    ) -> Result<Completion<OfflineRegion>, Error> {
-        self.runtime.offline_command(move |database, core, resolver| {
-            database.set_offline_region_max_stale(region_id, max_stale, reply_on(core.queue.clone(), resolver));
-        })
-    }
-
     /// Selects the events that the runtime reports about a region's
     /// download, from [`EventMask::ALL_RUNTIME_EVENTS`]. It replaces the
     /// region's earlier selection, and [`EventMask::NONE`] stops them.
@@ -142,10 +128,10 @@ impl<'a> Offline<'a> {
         })
     }
 
-    /// Makes maps check each resource of a region with its server before
-    /// they use it, and the region's next download refresh them all. The
-    /// region keeps its resources, which stand in while maps can't reach the
-    /// server for as long as they could before.
+    /// Makes each resource of a region stale, so maps check it with its
+    /// server when they next use it, and the region's next download
+    /// refreshes them all. The region keeps its resources, which stay usable
+    /// unless their server requires checking them first.
     pub fn invalidate_region(&self, region_id: i64) -> Result<Completion<()>, Error> {
         self.runtime.offline_command(move |database, core, resolver| {
             database.invalidate_offline_region(region_id, reply_on(core.queue.clone(), resolver));

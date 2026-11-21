@@ -1,8 +1,6 @@
 //! `map.h`'s offline regions: the regions in a runtime's cache database,
 //! their downloads, and the events that a download reports.
 
-use std::time::Duration;
-
 use ::mln_runtime::{EventMask, Offline};
 use geo_types::Geometry;
 use mln_storage::offline::{
@@ -48,12 +46,11 @@ struct LentRegion {
     pixel_ratio: f32,
     include_ideographs: bool,
     metadata: Vec<u8>,
-    max_stale_ms: u64,
 }
 
 impl LentRegion {
     fn new(region: &OfflineRegion) -> Self {
-        let OfflineRegion { id, definition, metadata, max_stale } = region;
+        let OfflineRegion { id, definition, metadata } = region;
         let shape = match definition {
             OfflineRegionDefinition::TilePyramid(pyramid) => Shape::TilePyramid(mln_lat_lng_bounds {
                 southwest: geo::from_lat_lng(pyramid.bounds.southwest()),
@@ -72,7 +69,6 @@ impl LentRegion {
             pixel_ratio: definition.pixel_ratio(),
             include_ideographs: definition.include_ideographs(),
             metadata: metadata.clone(),
-            max_stale_ms: u64::try_from(max_stale.as_millis()).unwrap_or(u64::MAX),
         }
     }
 
@@ -115,7 +111,6 @@ impl LentRegion {
             },
             metadata: if self.metadata.is_empty() { core::ptr::null() } else { self.metadata.as_ptr() },
             metadata_size: self.metadata.len(),
-            max_stale_ms: self.max_stale_ms,
         }
     }
 }
@@ -463,33 +458,6 @@ pub(crate) unsafe extern "C" fn mln_runtime_get_offline_region_expiry(
     })
 }
 
-/// `mln_runtime_set_offline_region_max_stale()`.
-///
-/// # Safety
-///
-/// Each pointer is null or valid for the header's use of it.
-#[unsafe(no_mangle)]
-pub(crate) unsafe extern "C" fn mln_runtime_set_offline_region_max_stale(
-    runtime: mln_runtime,
-    region_id: mln_offline_region_id,
-    max_stale_ms: u64,
-    completion: *const mln_completion,
-    out_diagnostic: *mut mln_diagnostic,
-) -> mln_status {
-    export!(out_diagnostic, {
-        let max_stale = Duration::from_millis(max_stale_ms);
-        // SAFETY: the caller's contract.
-        unsafe {
-            operation(
-                runtime,
-                completion,
-                |offline| offline.set_region_max_stale(region_id, max_stale),
-                |region| Regions::new([&region]),
-            )
-        }
-    })
-}
-
 /// `mln_runtime_set_offline_region_observed()`.
 ///
 /// # Safety
@@ -629,7 +597,7 @@ mod tests {
 
     fn region(id: i64, descriptor: &mln_offline_region_definition, metadata: Vec<u8>) -> OfflineRegion {
         let definition = convert(descriptor).unwrap();
-        OfflineRegion { id, definition, metadata, max_stale: Duration::from_secs(90) }
+        OfflineRegion { id, definition, metadata }
     }
 
     #[test]
@@ -665,7 +633,7 @@ mod tests {
         for descriptor in [pyramid(), shaped(line)] {
             let lent = LentRegion::new(&region(7, &descriptor, vec![1, 2]));
             let info = lent.info();
-            assert_eq!((info.id, info.metadata_size, info.max_stale_ms), (7, 2, 90_000));
+            assert_eq!((info.id, info.metadata_size), (7, 2));
             assert_eq!(info.definition.type_, descriptor.type_);
             // SAFETY: the info's views point into `lent`, which is live, and
             // each union read is of the member that the type names.

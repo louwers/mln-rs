@@ -4,9 +4,9 @@
 // cancel handler (`TransferRequest::set_cancel_handler`) stops an in-flight
 // transfer if it has one.
 //
-// Requests send `Range` for data ranges, `If-None-Match` from the prior
-// etag, else `If-Modified-Since` from the prior modification date, and the
-// user agent "MapLibreNative/1.0", and follow redirects. Then come the host's
+// Request headers as in C++: `Range` for data ranges, `If-None-Match` from
+// the prior etag, else `If-Modified-Since` from the prior modification date,
+// user agent "MapLibreNative/1.0", redirects followed. Then the host's
 // headers from the `HttpHeaderTransform`, which a redirect to another origin
 // drops. Response headers are read with case-insensitive names:
 // `Last-Modified`, `ETag`, `Retry-After`, `X-Rate-Limit-Reset`, and the
@@ -90,8 +90,9 @@ impl TransferRequest {
 
     /// Finishes the request with the transfer's result (a transfer that
     /// failed before a response, such as a connection error, is an `Err`):
-    /// builds the response and sends it to the request's callback, unless
-    /// the request was dropped. Any thread may call it.
+    /// builds the response, as the header callback and
+    /// `handleResult(CURLcode)` do, and sends it to the request's callback,
+    /// unless the request was dropped. Any thread may call it.
     pub(crate) fn finish(self, transfer: Result<Transfer, Box<ResourceError>>) {
         self.responder.on_cancel(|| {});
         if !self.is_cancelled() {
@@ -137,7 +138,8 @@ fn default_transport() -> Arc<dyn HttpTransport> {
     Arc::new(crate::ureq_transport::Transport::new())
 }
 
-/// The response to `resource` from a finished transfer.
+/// The response half of `HTTPRequest`, from a finished transfer: the header
+/// callback and `handleResult(CURLcode)`.
 fn build_response(resource: &Resource, transfer: Result<Transfer, Box<ResourceError>>) -> Response {
     let mut response = Response::new();
     let transfer = match transfer {
@@ -204,12 +206,7 @@ fn build_response(resource: &Resource, transfer: Result<Transfer, Box<ResourceEr
             if not_modified { response.modified.or(resource.prior_modified) } else { response.modified };
         let headers = CachingHeaders { cache_control: &cache_control, expires, date, age, last_modified };
         let freshness = headers.freshness(now());
-        response.caching = Caching {
-            expires: Some(freshness.expires),
-            must_revalidate: freshness.must_revalidate,
-            stale_while_revalidate: freshness.stale_while_revalidate,
-            stale_if_error: freshness.stale_if_error,
-        };
+        response.caching = Caching { expires: Some(freshness.expires), must_revalidate: freshness.must_revalidate };
         response.no_store = freshness.no_store;
     }
 
@@ -417,9 +414,7 @@ mod tests {
             &tile(),
         );
         assert_about(88823 - 67981, lifetime(&res));
-        let end = res.caching.expires.unwrap().secs_since_epoch();
-        assert_eq!(Some(Timestamp::from_secs(end + 604_800)), res.caching.stale_while_revalidate);
-        assert_eq!(Some(Timestamp::from_secs(end + 604_800)), res.caching.stale_if_error);
+        assert!(!res.caching.must_revalidate);
     }
 
     #[test]

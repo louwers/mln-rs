@@ -4,7 +4,6 @@
 // Its calls run on the database's thread, after those sent before.
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use mln_storage::database_file_source::DatabaseQueue;
 use mln_storage::offline::{
@@ -111,17 +110,6 @@ pub trait DatabaseFileSourceExt {
         callback: impl FnOnce(Result<OfflineRegionExpiry, DatabaseError>) + Send + 'static,
     );
 
-    /// Sets how long past their expiry the region's resources may stand in
-    /// while maps can't reach the server (`OfflineRegion::max_stale`), and
-    /// gives the updated region. Fails when the database has no region
-    /// `region_id`.
-    fn set_offline_region_max_stale(
-        &self,
-        region_id: i64,
-        max_stale: Duration,
-        callback: impl FnOnce(Result<OfflineRegion, DatabaseError>) + Send + 'static,
-    );
-
     /// Copies the regions of another database, and the resources and tiles
     /// they use, into this one. Identical regions become one. The side
     /// database is upgraded to the current schema in place, so it must be
@@ -137,11 +125,10 @@ pub trait DatabaseFileSourceExt {
     /// `region_id`.
     fn delete_offline_region(&self, region_id: i64, callback: impl FnOnce(Result<(), DatabaseError>) + Send + 'static);
 
-    /// Makes maps revalidate the region's resources with their server before
-    /// they use them, and its next download refresh them, which transfers
-    /// nothing for resources that haven't changed. Each resource keeps
-    /// standing in while maps can't reach the server for as long as it could
-    /// before.
+    /// Makes the region's resources stale, so maps revalidate them with
+    /// their server when they next use them, and its next download refreshes
+    /// them, which transfers nothing for resources that haven't changed.
+    /// Resources that must revalidate can't be used until they have.
     fn invalidate_offline_region(
         &self,
         region_id: i64,
@@ -231,20 +218,6 @@ impl DatabaseFileSourceExt for RegionDatabase {
     ) {
         self.invoke(move |t| {
             callback(require_region(&mut t.db, region_id).and_then(|_| t.db.get_region_expiry(region_id)));
-        });
-    }
-
-    fn set_offline_region_max_stale(
-        &self,
-        region_id: i64,
-        max_stale: Duration,
-        callback: impl FnOnce(Result<OfflineRegion, DatabaseError>) + Send + 'static,
-    ) {
-        self.invoke(move |t| {
-            let result = require_region(&mut t.db, region_id)
-                .and_then(|_| t.db.set_region_max_stale(region_id, max_stale))
-                .and_then(|()| require_region(&mut t.db, region_id));
-            callback(result);
         });
     }
 

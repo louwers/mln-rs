@@ -8,7 +8,8 @@
 //! agent "MapLibreNative/1.0"), plus `Accept-Encoding: identity` with a
 //! `Range`, since a range of a compressed body can't be decompressed. The
 //! response headers the file source reads go to the `Transfer`;
-//! `NSHTTPURLResponse` joins a header's lines with commas. Errors map to `Reason`s as in the .mm, with the
+//! `NSHTTPURLResponse` joins a header's lines with commas. Errors map to
+//! `Reason`s as in the .mm, with the
 //! `NSError`'s localized description as the message.
 //!
 //! The host's headers (`TransferRequest::headers`) go with the request too.

@@ -23,14 +23,14 @@ use mln_util::logging::{Event, EventSeverity, Log};
 use rusqlite::types::FromSqlError;
 use rusqlite::{Connection, OpenFlags, Row, ToSql, ffi, params};
 
-use crate::merge_sideloaded::merge_sideloaded_database_sql;
+use crate::merge_sideloaded::MERGE_SIDELOADED_DATABASE_SQL;
 use crate::offline::{
     OfflineRegion, OfflineRegionDefinition, OfflineRegionExpiry, OfflineRegionMetadata, OfflineRegionStatus,
     OfflineRegions, decode_offline_region_definition, encode_offline_region_definition,
 };
 use crate::offline_schema::OFFLINE_DATABASE_SCHEMA;
 use crate::resource::{Kind, Resource, TileData};
-use crate::response::{Caching, Response, Reuse};
+use crate::response::{Caching, Response};
 
 /// The most rows whose `accessed` timestamp waits to be written. Reads of
 /// other rows while the queue is full don't update their timestamps.
@@ -163,9 +163,6 @@ pub struct OfflineDatabase {
 
     autopack: bool,
     read_only: bool,
-    /// The database has the current schema's columns. A read-only database
-    /// of an older version isn't migrated.
-    current_schema: bool,
 
     /// `accessed` timestamps (seconds) of cache hits not yet written, by
     /// row id.
@@ -203,30 +200,21 @@ impl OfflineDatabase {
     /// The database at `path`, which it creates or migrates to the current
     /// schema. A database it can't open, it opens again at its next use.
     pub fn new(path: impl Into<String>) -> Self {
-        Self::open(path.into(), false)
-    }
-
-    /// The database at `path`, opened read-only: it isn't created, migrated
-    /// or written.
-    pub fn read_only(path: impl Into<String>) -> Self {
-        Self::open(path.into(), true)
-    }
-
-    fn open(path: String, read_only: bool) -> Self {
         let mut db = OfflineDatabase {
-            path,
+            path: path.into(),
             db: None,
             maximum_ambient_cache_size: DEFAULT_MAX_CACHE_SIZE,
             current_ambient_cache_size: None,
             autopack: true,
-            read_only,
-            current_schema: true,
+            read_only: false,
             pending_resource_accessed: BTreeMap::new(),
             pending_tile_accessed: BTreeMap::new(),
             pending_applied_for_eviction: false,
             accessed_flush_failed: false,
             accessed_callback: None,
         };
+        // Assume that we can't open the database right now and work with an
+        // empty database object.
         if let Err(e) = db.initialize() {
             db.handle_error(&e, "open database");
         }
@@ -244,12 +232,11 @@ impl OfflineDatabase {
         let db = self.db.insert(Connection::open_with_flags(&self.path, flags)?);
         db.busy_timeout(Duration::from_millis(i32::MAX as u64))?;
         exec(db, "PRAGMA foreign_keys = ON")?;
-        let user_version = self.get_pragma_i64("PRAGMA user_version")?;
-        self.current_schema = !self.read_only || user_version >= 7;
         if self.read_only {
             return Ok(());
         }
 
+        let user_version = self.get_pragma_i64("PRAGMA user_version")?;
         match user_version {
             0 | 1 => {
                 // Newly created database, or old cache-only database; remove
@@ -258,7 +245,7 @@ impl OfflineDatabase {
                 self.create_schema()?;
                 Ok(())
             }
-            2..=7 => {
+            2..=6 => {
                 if user_version == 2 {
                     self.migrate_to_version3()?;
                 }
@@ -269,10 +256,7 @@ impl OfflineDatabase {
                 if user_version <= 5 {
                     self.migrate_to_version6()?;
                 }
-                if user_version <= 6 {
-                    self.migrate_to_version7()?;
-                }
-                // 7: Happy path; we're done
+                // 6: Happy path; we're done
                 Ok(())
             }
             _ => {
@@ -474,7 +458,7 @@ impl OfflineDatabase {
         self.with_transaction(Begin::Deferred, |this| {
             let db = this.get_db()?;
             exec(db, OFFLINE_DATABASE_SCHEMA)?;
-            exec(db, "PRAGMA user_version = 7")?;
+            exec(db, "PRAGMA user_version = 6")?;
             Ok(())
         })
     }
@@ -509,23 +493,6 @@ impl OfflineDatabase {
             exec(db, "ALTER TABLE resources ADD COLUMN must_revalidate INTEGER NOT NULL DEFAULT 0")?;
             exec(db, "ALTER TABLE tiles ADD COLUMN must_revalidate INTEGER NOT NULL DEFAULT 0")?;
             exec(db, "PRAGMA user_version = 6")?;
-            Ok(())
-        })
-    }
-
-    /// Version 7 keeps a copy's `stale-while-revalidate` and
-    /// `stale-if-error`, which copies stored before don't have, and each
-    /// region's `max_stale`.
-    fn migrate_to_version7(&mut self) -> DbResult<()> {
-        self.check_flags()?;
-        self.with_transaction(Begin::Deferred, |this| {
-            let db = this.get_db()?;
-            for table in ["resources", "tiles"] {
-                exec(db, &format!("ALTER TABLE {table} ADD COLUMN stale_while_revalidate INTEGER"))?;
-                exec(db, &format!("ALTER TABLE {table} ADD COLUMN stale_if_error INTEGER"))?;
-            }
-            exec(db, "ALTER TABLE regions ADD COLUMN max_stale INTEGER NOT NULL DEFAULT 0")?;
-            exec(db, "PRAGMA user_version = 7")?;
             Ok(())
         })
     }
@@ -626,7 +593,7 @@ impl OfflineDatabase {
         let stored = Stored::of(resource);
         let sql = format!(
             "SELECT etag, modified, data, compressed, id, {} FROM {} WHERE {}",
-            self.caching_columns(stored.table()),
+            CACHING_COLUMNS,
             stored.table().name(),
             stored.condition()
         );
@@ -651,7 +618,7 @@ impl OfflineDatabase {
         let stored = Stored::of(resource);
         let sql = format!(
             "SELECT length(data), {} FROM {} WHERE {}",
-            self.caching_columns(stored.table()),
+            CACHING_COLUMNS,
             stored.table().name(),
             stored.condition()
         );
@@ -662,25 +629,9 @@ impl OfflineDatabase {
         Ok(row.flatten())
     }
 
-    /// The columns that `read_caching` reads for a copy's caching rules: its
-    /// own, and the longest `max_stale` of the regions that hold it.
-    fn caching_columns(&self, table: Table) -> String {
-        if !self.current_schema {
-            return "expires, must_revalidate, NULL, NULL, NULL".to_owned();
-        }
-        let (table, (regions, id)) = (table.name(), table.regions());
-        format!(
-            "expires, must_revalidate, stale_while_revalidate, stale_if_error, \
-             (SELECT MAX(regions.max_stale) FROM {regions} \
-              JOIN regions ON regions.id = {regions}.region_id \
-              WHERE {regions}.{id} = {table}.id)"
-        )
-    }
-
-    /// Stores `response` for `resource` in the ambient cache, and gives
-    /// whether it added a row, and the stored size. The ambient cache doesn't
-    /// keep a tile the tileset doesn't have (`Response::tile_not_found`),
-    /// since it would read back as an empty tile.
+    /// `put(const Resource&, const Response&)`: (inserted, stored size). The ambient cache doesn't
+    /// keep a tile the tileset doesn't have (`Response::tile_not_found`), since it would read back as
+    /// an empty tile.
     pub fn put(&mut self, resource: &Resource, response: &Response) -> (bool, u64) {
         if self.read_only || response.tile_not_found {
             return (false, 0);
@@ -758,7 +709,6 @@ impl OfflineDatabase {
     fn write(&mut self, stored: &Stored<'_>, response: &Response, data: &[u8], compressed: bool) -> DbResult<bool> {
         let secs = |time: Option<Timestamp>| time.map(Timestamp::secs_since_epoch);
         let (expires, modified) = (secs(response.caching.expires), secs(response.modified));
-        let (swr, sie) = (secs(response.caching.stale_while_revalidate), secs(response.caching.stale_if_error));
         let accessed = now().secs_since_epoch();
         // An empty body is an empty blob, and no content is NULL.
         let data = (!response.no_content).then_some(data);
@@ -768,8 +718,6 @@ impl OfflineDatabase {
             ("accessed", &accessed),
             ("expires", &expires),
             ("must_revalidate", &response.caching.must_revalidate),
-            ("stale_while_revalidate", &swr),
-            ("stale_if_error", &sie),
         ];
         let renews = renews(response);
         if !renews {
@@ -821,25 +769,13 @@ impl OfflineDatabase {
     }
 
     /// Makes the tiles and resources whose ids match the conditions stale
-    /// now. A copy keeps standing in for the server as long as it could
-    /// before, and so keeps showing while it revalidates: a fresh one that
-    /// must revalidate once stale may stand in until it would have gone
-    /// stale.
+    /// now. A copy that must revalidate then can't be used until it has.
     fn invalidate(&mut self, tiles: &str, resources: &str, params: impl rusqlite::Params + Copy) -> DbResult<()> {
         self.check_flags()?;
         let now = now().secs_since_epoch();
         for (table, ids) in [("tiles", tiles), ("resources", resources)] {
-            // SQLite evaluates every assignment against the row as it was.
             self.execute(
-                &format!(
-                    "UPDATE {table} SET \
-                         stale_if_error = IIF(must_revalidate AND IFNULL(expires > {now}, 1), \
-                                              expires, stale_if_error), \
-                         must_revalidate = must_revalidate AND IFNULL(expires <= {now}, 0), \
-                         expires = MIN(IFNULL(expires, {now}), {now}), \
-                         stale_while_revalidate = NULL \
-                     WHERE {ids}"
-                ),
+                &format!("UPDATE {table} SET expires = MIN(IFNULL(expires, {now}), {now}) WHERE {ids}"),
                 params,
             )?;
         }
@@ -886,13 +822,7 @@ impl OfflineDatabase {
         result
     }
 
-    /// The columns that `read_region` reads, from the regions table `regions`.
-    fn region_columns(&self, regions: &str) -> String {
-        let max_stale = if self.current_schema { format!("{regions}.max_stale") } else { "0".to_owned() };
-        format!("{regions}.id, {regions}.definition, {regions}.description, {max_stale}")
-    }
-
-    /// The regions that `sql` selects with `region_columns`. A region whose
+    /// The regions that `sql` selects: their id, definition and description. A region whose
     /// definition is malformed fails, or, with `skip_malformed`, is left out.
     fn read_regions(
         &mut self,
@@ -905,13 +835,12 @@ impl OfflineDatabase {
             let mut rows = stmt.query(params)?;
             let mut result = Vec::new();
             while let Some(row) = rows.next()? {
-                let max_stale: i64 = row.get(3)?;
-                result.push((row.get(0)?, text_or_blob(row, 1)?, text_or_blob(row, 2)?, max_stale));
+                result.push((row.get(0)?, text_or_blob(row, 1)?, text_or_blob(row, 2)?));
             }
             result
         };
         let mut regions = OfflineRegions::new();
-        for (id, definition, metadata, max_stale) in rows {
+        for (id, definition, metadata) in rows {
             let definition = match decode_offline_region_definition(&definition) {
                 Ok(definition) => definition,
                 Err(e) if skip_malformed => {
@@ -920,23 +849,21 @@ impl OfflineDatabase {
                 }
                 Err(e) => return Err(e.into()),
             };
-            let max_stale = Duration::from_secs(max_stale.max(0) as u64);
-            regions.push(OfflineRegion { id, definition, metadata, max_stale });
+            regions.push(OfflineRegion { id, definition, metadata });
         }
         Ok(regions)
     }
 
     /// Every region whose definition can be read.
     pub fn list_regions(&mut self) -> DbResult<OfflineRegions> {
-        let sql = format!("SELECT {} FROM regions", self.region_columns("regions"));
-        let result = self.read_regions(&sql, [], true);
+        let result = self.read_regions("SELECT id, definition, description FROM regions", [], true);
         self.report(result, "list regions")
     }
 
     /// The region `region_id`, or `None` when the database has none.
     pub fn get_region(&mut self, region_id: i64) -> DbResult<Option<OfflineRegion>> {
-        let sql = format!("SELECT {} FROM regions WHERE id = ?1", self.region_columns("regions"));
-        let result = self.read_regions(&sql, params![region_id], false).map(|regions| regions.into_iter().next());
+        let sql = "SELECT id, definition, description FROM regions WHERE id = ?1";
+        let result = self.read_regions(sql, params![region_id], false).map(|regions| regions.into_iter().next());
         self.report(result, "get region")
     }
 
@@ -956,20 +883,9 @@ impl OfflineDatabase {
                 id: self.last_insert_row_id()?,
                 definition: definition.clone(),
                 metadata: metadata.clone(),
-                max_stale: Duration::ZERO,
             })
         })();
         self.report(result, "create region")
-    }
-
-    /// Sets how long past their expiry the region's resources may stand in
-    /// for the server (`OfflineRegion::max_stale`).
-    pub fn set_region_max_stale(&mut self, region_id: i64, max_stale: Duration) -> DbResult<()> {
-        let result = self.check_flags().and_then(|()| {
-            let secs = i64::try_from(max_stale.as_secs()).unwrap_or(i64::MAX);
-            self.execute("UPDATE regions SET max_stale = ?1 WHERE id = ?2", params![secs, region_id]).map(drop)
-        });
-        self.report(result, "set region max stale")
     }
 
     /// How long the region's stored resources stay usable.
@@ -979,9 +895,8 @@ impl OfflineDatabase {
             for table in [Table::Tiles, Table::Resources] {
                 let (name, (regions, id)) = (table.name(), table.regions());
                 sql.push(format!(
-                    "SELECT {} FROM {regions} AS held JOIN {name} ON {name}.id = held.{id} \
-                     WHERE held.region_id = ?1",
-                    self.caching_columns(table)
+                    "SELECT {CACHING_COLUMNS} FROM {regions} AS held JOIN {name} ON {name}.id = held.{id} \
+                     WHERE held.region_id = ?1"
                 ));
             }
             let now = now();
@@ -992,15 +907,9 @@ impl OfflineDatabase {
                 let caching = read_caching(row, 0)?;
                 let earliest = |a: Option<Timestamp>, b: Option<Timestamp>| a.into_iter().chain(b).min();
                 expiry.stale_after = earliest(expiry.stale_after, caching.expires);
-                expiry.usable_offline_until = earliest(expiry.usable_offline_until, caching.usable_offline_until());
-                match caching.reuse(now) {
-                    Reuse::Fresh => {}
-                    Reuse::WhileRevalidating | Reuse::OnError => expiry.stale_resource_count += 1,
-                    Reuse::Never => {
-                        expiry.stale_resource_count += 1;
-                        expiry.unusable_resource_count += 1;
-                    }
-                }
+                expiry.usable_offline_until = earliest(expiry.usable_offline_until, caching.usable_until());
+                expiry.stale_resource_count += u64::from(!caching.is_fresh(now));
+                expiry.unusable_resource_count += u64::from(!caching.is_usable(now));
             }
             Ok(expiry)
         })();
@@ -1025,32 +934,29 @@ impl OfflineDatabase {
         }
 
         let result = (|| -> DbResult<OfflineRegions> {
-            // A sideloaded database is of version 6 or later, up to the main
-            // database's version.
+            // A sideloaded database has the main database's version, 6.
             let side_user_version = self.get_pragma_i64("PRAGMA side.user_version")?;
             let main_user_version = self.get_pragma_i64("PRAGMA user_version")?;
-            if side_user_version < 6 || side_user_version > main_user_version {
+            if side_user_version != main_user_version {
                 return Err(DatabaseError::Runtime("Merge database has incorrect user_version".to_owned()));
             }
 
             self.with_transaction(Begin::Deferred, |this| {
-                exec(this.get_db()?, &merge_sideloaded_database_sql(side_user_version))?;
+                exec(this.get_db()?, MERGE_SIDELOADED_DATABASE_SQL)?;
                 Ok(())
             })?;
 
-            let sql = format!(
-                "SELECT DISTINCT {} FROM side.regions sr \
-                 JOIN regions r ON sr.definition = r.definition AND sr.description IS r.description \
-                 ORDER BY r.id",
-                self.region_columns("r")
-            );
-            let result = self.read_regions(&sql, [], false)?;
+            let sql = "SELECT DISTINCT r.id, r.definition, r.description FROM side.regions sr \
+                       JOIN regions r ON sr.definition = r.definition AND sr.description IS r.description \
+                       ORDER BY r.id";
+            let result = self.read_regions(sql, [], false)?;
             exec(self.get_db()?, "DETACH DATABASE side")?;
             Ok(result)
         })();
 
         match result {
-            // A logic error leaves the side database attached.
+            // `catch (const std::runtime_error& ex)`: everything but the
+            // logic errors, which propagate (side stays attached).
             Err(e) if !matches!(e, DatabaseError::Logic(_)) => {
                 exec(self.get_db()?, "DETACH DATABASE side")?;
                 Log::error(Event::Database, e.to_string());
@@ -1452,7 +1358,6 @@ impl OfflineDatabase {
         self.autopack = autopack;
     }
 
-    #[cfg(test)]
     pub(crate) fn reopen_database_read_only(&mut self, read_only: bool) {
         if self.read_only == read_only {
             return;
@@ -1628,19 +1533,16 @@ fn read_response(row: &Row<'_>) -> DbResult<(Response, u64, i64)> {
     Ok((response, size, row.get(4)?))
 }
 
-/// Reads the caching columns from `start` on, which
-/// `OfflineDatabase::caching_columns` selects: the copy's rules, with the
-/// longest `max_stale` of the regions that hold it.
+/// The columns that `read_caching` reads.
+const CACHING_COLUMNS: &str = "expires, must_revalidate";
+
+/// Reads `CACHING_COLUMNS` from column `start` on.
 fn read_caching(row: &Row<'_>, start: usize) -> DbResult<Caching> {
-    let time = |column: usize| -> DbResult<Option<Timestamp>> {
-        Ok(row.get::<_, Option<i64>>(start + column)?.map(Timestamp::from_secs))
-    };
-    let caching = Caching {
-        expires: time(0)?,
+    Ok(Caching {
+        expires: row.get::<_, Option<i64>>(start)?.map(Timestamp::from_secs),
         must_revalidate: row.get(start + 1)?,
-        stale_while_revalidate: time(2)?,
-        stale_if_error: time(3)?,
-    };
-    let max_stale = row.get::<_, Option<i64>>(start + 4)?.unwrap_or_default();
-    Ok(caching.with_max_stale(Duration::from_secs(max_stale.max(0) as u64)))
+    })
 }
+// The cached value of offlineTileCount does not need to be
+// updated here because only non-offline tiles can be removed by
+// eviction.

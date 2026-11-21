@@ -22,6 +22,10 @@ use crate::tile::worker_codec::RemoteEvent;
 pub(crate) type Waker = Arc<dyn Fn() + Send + Sync>;
 
 /// Something that arrived for the tiles.
+#[cfg_attr(
+    target_pointer_width = "64",
+    expect(clippy::large_enum_variant, reason = "a reply moves its layout once, from the worker to the tile")
+)]
 pub(crate) enum TileEvent {
     /// A response to the file request that tile load `load` made. It applies
     /// only while the tile still waits for that load.

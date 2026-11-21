@@ -1092,13 +1092,6 @@ const _: unsafe extern "C" fn(
 const _: unsafe extern "C" fn(
     mln_runtime,
     mln_offline_region_id,
-    u64,
-    *const mln_completion,
-    *mut mln_diagnostic,
-) -> mln_status = crate::offline::mln_runtime_set_offline_region_max_stale;
-const _: unsafe extern "C" fn(
-    mln_runtime,
-    mln_offline_region_id,
     mln_runtime_event_flags,
     *const mln_completion,
     *mut mln_diagnostic,

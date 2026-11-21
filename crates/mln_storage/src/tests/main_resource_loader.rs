@@ -16,7 +16,7 @@ use crate::online_file_source::OnlineFileSource;
 use crate::resource::{Kind, LoadingMethod, Resource, StoragePolicy};
 use crate::resource_options::ResourceOptions;
 use crate::resource_transform::FinishedCallback;
-use crate::response::{Caching, Reason, Response, Reuse};
+use crate::response::{Caching, Reason, Response};
 
 /// A loader over an in-memory database and an online file source, and those
 /// two.
@@ -732,7 +732,7 @@ fn respond_to_stale_must_revalidate() {
                     rc.borrow_mut().take();
                     // The cache answers with its copy, which may not be used.
                     assert_eq!(None, res.error);
-                    assert_eq!(Reuse::Never, res.caching.reuse(now()));
+                    assert!(!res.caching.is_usable(now()));
                     assert!(!res.not_modified);
                     assert_eq!(b"Cached value", data(&res));
                     assert_eq!(Some(Timestamp::from_secs(1_417_392_000)), res.caching.expires);
@@ -808,7 +808,6 @@ fn cached_resource_low_priority() {
     let online_response_counter = Rc::new(Cell::new(0usize));
 
     response.caching.expires = Some(one_hour_ago());
-    response.caching.stale_while_revalidate = Some(in_one_hour());
 
     let dbfs = database_file_source(&file_sources);
     let online_fs = online_file_source(&file_sources);
@@ -1080,43 +1079,23 @@ fn with_caching(mut response: Response, change: impl FnOnce(&mut Caching)) -> Re
     response
 }
 
-/// A stale copy within its stale-while-revalidate goes to the requester at
-/// once, and the network's answer follows.
+/// A stale copy goes to the requester at once, and the network's answer
+/// follows; one that must revalidate waits for the network.
 #[test]
-fn a_copy_within_stale_while_revalidate_answers_at_once() {
-    let server = HttpServer::new();
-    let cached = with_caching(stale_copy(), |caching| caching.stale_while_revalidate = Some(in_one_hour()));
-    let answers = answers_with_cached(&server.url("/test"), &cached, 2);
-    assert_eq!(b"Cached value", data(&answers[0]));
-    assert_eq!(b"Hello World!", data(&answers[1]));
-}
-
-/// A stale copy past its stale-while-revalidate still shows while it
-/// revalidates, as it may stand in for a failure; one that must revalidate,
-/// or past its stale-if-error, waits for the network.
-#[test]
-fn a_stale_copy_shows_while_it_revalidates_unless_it_may_not_be_used() {
+fn a_stale_copy_shows_while_it_revalidates_unless_it_must_revalidate() {
     let server = HttpServer::new();
     let url = server.url("/test");
-    for cached in [
-        with_caching(stale_copy(), |caching| caching.stale_while_revalidate = Some(one_hour_ago())),
-        with_caching(stale_copy(), |caching| caching.stale_if_error = Some(in_one_hour())),
-    ] {
-        let answers = answers_with_cached(&url, &cached, 2);
-        assert_eq!(b"Cached value", data(&answers[0]));
-        assert_eq!(b"Hello World!", data(&answers[1]));
-    }
-    for cached in [
-        with_caching(stale_copy(), |caching| caching.must_revalidate = true),
-        with_caching(stale_copy(), |caching| caching.stale_if_error = Some(one_hour_ago())),
-    ] {
-        let answers = answers_with_cached(&url, &cached, 1);
-        assert_eq!(b"Hello World!", data(&answers[0]));
-    }
+    let answers = answers_with_cached(&url, &stale_copy(), 2);
+    assert_eq!(b"Cached value", data(&answers[0]));
+    assert_eq!(b"Hello World!", data(&answers[1]));
+
+    let cached = with_caching(stale_copy(), |caching| caching.must_revalidate = true);
+    let answers = answers_with_cached(&url, &cached, 1);
+    assert_eq!(b"Hello World!", data(&answers[0]));
 }
 
 /// When the server can't be reached, the requester keeps the stale copy it
-/// was shown, and hears of the failure; a copy that may not be used isn't
+/// was shown, and hears of the failure; a copy that must revalidate isn't
 /// delivered.
 #[test]
 fn a_stale_copy_shows_when_the_server_cant_be_reached() {
@@ -1126,11 +1105,7 @@ fn a_stale_copy_shows_when_the_server_cant_be_reached() {
     assert_eq!(b"Cached value", data(&answers[0]));
     assert_eq!(Reason::Connection, answers[1].error.as_ref().expect("an error").reason);
 
-    for cached in [
-        with_caching(stale_copy(), |caching| caching.must_revalidate = true),
-        with_caching(stale_copy(), |caching| caching.stale_if_error = Some(one_hour_ago())),
-    ] {
-        let answers = answers_with_cached(url, &cached, 1);
-        assert_eq!(Reason::Connection, answers[0].error.as_ref().expect("an error").reason);
-    }
+    let cached = with_caching(stale_copy(), |caching| caching.must_revalidate = true);
+    let answers = answers_with_cached(url, &cached, 1);
+    assert_eq!(Reason::Connection, answers[0].error.as_ref().expect("an error").reason);
 }

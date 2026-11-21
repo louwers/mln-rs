@@ -26,7 +26,7 @@ use crate::offline::{
 };
 use crate::offline_database::OfflineDatabase;
 use crate::resource::{Kind, LoadingMethod, Resource, TileData};
-use crate::response::{Caching, Reason, ResourceError, Response, Reuse};
+use crate::response::{Caching, Reason, ResourceError, Response};
 
 fn fixture(name: &str) -> PathBuf {
     cpp_path(&format!("test/fixtures/offline_database/{name}"))
@@ -183,7 +183,7 @@ fn schema_version() {
         let _db = OfflineDatabase::new(&filename);
     }
 
-    assert_eq!(7, database_user_version(&filename));
+    assert_eq!(6, database_user_version(&filename));
 
     let mut db = OfflineDatabase::new(&filename);
     // Now try inserting and reading back to make sure we have a valid
@@ -836,14 +836,14 @@ fn invalidate() {
     let region2_style = style("https://example.com/maps/style_offline_region2");
     db.put_region_resource(region2.id, &region2_style, &response);
 
-    let mut fresh = |r: &Resource| db.get(r).expect("response").caching.reuse(now()) == Reuse::Fresh;
+    let mut fresh = |r: &Resource| db.get(r).expect("response").caching.is_fresh(now());
     for resource in [&ambient_tile, &ambient_style, &region1_tile, &region1_style, &region2_tile, &region2_style] {
         assert!(fresh(resource));
     }
 
     // Invalidating a region leaves the ambient cache and other regions be.
     assert!(db.invalidate_region(region1.id).is_ok());
-    let mut fresh = |r: &Resource| db.get(r).expect("response").caching.reuse(now()) == Reuse::Fresh;
+    let mut fresh = |r: &Resource| db.get(r).expect("response").caching.is_fresh(now());
     assert!(fresh(&ambient_tile) && fresh(&ambient_style));
     assert!(!fresh(&region1_tile) && !fresh(&region1_style));
     assert!(fresh(&region2_tile) && fresh(&region2_style));
@@ -852,8 +852,9 @@ fn invalidate() {
     assert!(db.invalidate_ambient_cache().is_ok());
     let mut get = |r: &Resource| db.get(r).expect("response");
     for resource in [&ambient_tile, &ambient_style, &region1_tile, &region1_style] {
-        // Stale, but still shown while it revalidates, and offline.
-        assert_eq!(get(resource).caching.reuse(now()), Reuse::OnError);
+        // Stale, but still usable.
+        let caching = get(resource).caching;
+        assert!(!caching.is_fresh(now()) && caching.is_usable(now()));
     }
     assert!(get(&region2_tile).caching.expires > Some(now()));
     assert!(get(&region2_style).caching.expires > Some(now()));
@@ -1222,7 +1223,7 @@ fn check_region_resource_and_not_modified_size() {
         assert_eq!(None, db.check_region_resource(&resource));
         assert_eq!(5, db.put_region_resource(region.id, &resource, &response));
         let fresh = |db: &mut OfflineDatabase| {
-            db.check_region_resource(&resource).map(|(size, caching)| (size, caching.reuse(now()) == Reuse::Fresh))
+            db.check_region_resource(&resource).map(|(size, caching)| (size, caching.is_fresh(now())))
         };
         assert_eq!(Some((5, true)), fresh(&mut db));
 
@@ -1291,7 +1292,7 @@ fn migrate_from_v2_schema() {
 
     open_and_delete_regions(&filename);
 
-    assert_eq!(7, database_user_version(&filename));
+    assert_eq!(6, database_user_version(&filename));
     assert!(database_page_count(&filename) < database_page_count(fixture("v2.db").to_str().unwrap()));
 
     check_log_empty(&log);
@@ -1308,7 +1309,7 @@ fn migrate_from_v3_schema() {
 
     open_and_delete_regions(&filename);
 
-    assert_eq!(7, database_user_version(&filename));
+    assert_eq!(6, database_user_version(&filename));
 
     check_log_empty(&log);
 }
@@ -1325,7 +1326,7 @@ fn migrate_from_v4_schema() {
 
     open_and_delete_regions(&filename);
 
-    assert_eq!(7, database_user_version(&filename));
+    assert_eq!(6, database_user_version(&filename));
 
     // Journal mode should be DELETE after migration to v5.
     assert_eq!("delete", database_journal_mode(&filename));
@@ -1336,7 +1337,7 @@ fn migrate_from_v4_schema() {
     check_log_empty(&log);
 }
 
-const TILES_COLUMNS: [&str; 15] = [
+const TILES_COLUMNS: [&str; 13] = [
     "id",
     "url_template",
     "pixel_ratio",
@@ -1350,95 +1351,13 @@ const TILES_COLUMNS: [&str; 15] = [
     "compressed",
     "accessed",
     "must_revalidate",
-    "stale_while_revalidate",
-    "stale_if_error",
-];
-const REGIONS_COLUMNS: [&str; 4] = ["id", "definition", "description", "max_stale"];
-
-const RESOURCES_COLUMNS: [&str; 12] = [
-    "id",
-    "url",
-    "kind",
-    "expires",
-    "modified",
-    "etag",
-    "data",
-    "compressed",
-    "accessed",
-    "must_revalidate",
-    "stale_while_revalidate",
-    "stale_if_error",
 ];
 
-/// A version 6 database, as MapLibre Native writes, keeps its regions and
-/// copies, which have no stale-while-revalidate or stale-if-error times.
-#[test]
-fn migrate_from_v6_schema() {
-    let log = FixtureLog::new();
-    let filename = filename();
-    delete_database_files(&filename);
-    copy_file(&filename, &fixture("satellite_test.db"));
+const RESOURCES_COLUMNS: [&str; 10] =
+    ["id", "url", "kind", "expires", "modified", "etag", "data", "compressed", "accessed", "must_revalidate"];
 
-    let mut db = OfflineDatabase::new(&filename);
-    assert_eq!(1, db.list_regions().unwrap().len());
-    let tile =
-        Resource::tile("maptiler://tiles/tiles/v3/{z}/{x}/{y}.pbf", 1.0, 0, 0, 0, Scheme::XYZ, LoadingMethod::All);
-    let response = db.get(&tile).expect("the region's tile");
-    assert!(response.data.is_some());
-    assert_eq!((None, None), (response.caching.stale_while_revalidate, response.caching.stale_if_error));
-    drop(db);
-
-    assert_eq!(7, database_user_version(&filename));
-    assert_eq!(TILES_COLUMNS.to_vec(), database_table_columns(&filename, "tiles"));
-    assert_eq!(RESOURCES_COLUMNS.to_vec(), database_table_columns(&filename, "resources"));
-    assert_eq!(REGIONS_COLUMNS.to_vec(), database_table_columns(&filename, "regions"));
-    let mut db = OfflineDatabase::new(&filename);
-    assert_eq!(Duration::ZERO, db.list_regions().unwrap()[0].max_stale);
-
-    check_log_empty(&log);
-}
-
-/// A database opened read-only isn't migrated, even when it could be
-/// written.
-#[test]
-fn a_read_only_database_is_not_migrated() {
-    let _log = FixtureLog::new();
-    let filename = filename();
-    delete_database_files(&filename);
-    copy_file(&filename, &fixture("satellite_test.db"));
-    let mut db = OfflineDatabase::read_only(&*filename);
-    assert_eq!(1, db.list_regions().unwrap().len());
-    drop(db);
-    assert_eq!(6, database_user_version(&filename));
-}
-
-/// A version 6 database that can't be written, and so isn't migrated, can
-/// still be read read-only.
-#[cfg(unix)]
-#[test]
-fn a_read_only_v6_database_can_be_read() {
-    use std::os::unix::fs::PermissionsExt;
-
-    let _log = FixtureLog::new();
-    let filename = filename();
-    delete_database_files(&filename);
-    copy_file(&filename, &fixture("satellite_test.db"));
-    std::fs::set_permissions(&*filename, std::fs::Permissions::from_mode(0o444)).unwrap();
-
-    let mut db = OfflineDatabase::read_only(&*filename);
-    let tile =
-        Resource::tile("maptiler://tiles/tiles/v3/{z}/{x}/{y}.pbf", 1.0, 0, 0, 0, Scheme::XYZ, LoadingMethod::All);
-    let response = db.get(&tile).expect("the region's tile");
-    assert!(response.data.is_some());
-    let regions = db.list_regions().unwrap();
-    assert_eq!(Duration::ZERO, regions[0].max_stale);
-    assert!(db.get_region_expiry(regions[0].id).is_ok());
-    drop(db);
-    assert_eq!(6, database_user_version(&filename));
-}
-
-/// A copy keeps its stale-while-revalidate and stale-if-error times, and a
-/// 304, or the copy it delivered, renews them. What the server forbids storing isn't stored.
+/// A 304, or the copy it delivered, renews a copy's caching rules. What the
+/// server forbids storing isn't stored.
 #[test]
 fn caching_rules_are_stored() {
     let log = FixtureLog::new();
@@ -1449,8 +1368,7 @@ fn caching_rules_are_stored() {
         let mut response = Response::new();
         response.data = Some(data("first"));
         response.caching.expires = at(100);
-        response.caching.stale_while_revalidate = at(200);
-        response.caching.stale_if_error = at(300);
+        response.caching.must_revalidate = true;
         db.put(&resource, &response);
         let stored = db.get(&resource).unwrap();
         assert_eq!(response.caching, stored.caching);
@@ -1458,7 +1376,6 @@ fn caching_rules_are_stored() {
         let mut renewed = Response::new();
         renewed.not_modified = true;
         renewed.caching.expires = at(1000);
-        renewed.caching.stale_if_error = at(3000);
         db.put(&resource, &renewed);
         let stored = db.get(&resource).unwrap();
         assert_eq!(renewed.caching, stored.caching);
@@ -1485,56 +1402,8 @@ fn caching_rules_are_stored() {
     check_log_empty(&log);
 }
 
-/// A region's `max_stale` lets its resources stand in for longer than their
-/// `stale-if-error` allows, unless they must revalidate. A resource that
-/// several regions hold gets the longest.
-#[test]
-fn max_stale_widens_stale_if_error_for_the_regions_resources() {
-    let log = FixtureLog::new();
-    let mut db = OfflineDatabase::new(":memory:");
-    let definition: OfflineRegionDefinition = tile_pyramid("", LatLngBounds::world(), 0.0, 1.0, 1.0, false).into();
-    let short = db.create_region(&definition, &OfflineRegionMetadata::new()).unwrap();
-    let long = db.create_region(&definition, &OfflineRegionMetadata::new()).unwrap();
-    assert_eq!(Duration::ZERO, short.max_stale);
-    let day = Duration::from_hours(24);
-    db.set_region_max_stale(short.id, day).unwrap();
-    db.set_region_max_stale(long.id, 2 * day).unwrap();
-    assert_eq!(day, db.get_region(short.id).unwrap().unwrap().max_stale);
-
-    let expires = now().secs_since_epoch() - 3600;
-    let mut response = Response::new();
-    response.data = Some(data("tile"));
-    response.caching.expires = Some(Timestamp::from_secs(expires));
-    response.caching.stale_if_error = Some(Timestamp::from_secs(expires + 60));
-    let shared = tile("https://example.com/{z}/{x}/{y}.pbf", 1.0, 0, 0, 0);
-    let own = tile("https://example.com/{z}/{x}/{y}.pbf", 1.0, 0, 0, 1);
-    let ambient = tile("https://example.com/{z}/{x}/{y}.pbf", 1.0, 1, 0, 1);
-    let must_revalidate = style("https://example.com/style.json");
-    db.put_region_resource(short.id, &shared, &response);
-    db.put_region_resource(long.id, &shared, &response);
-    db.put_region_resource(short.id, &own, &response);
-    db.put(&ambient, &response);
-    db.put_region_resource(
-        short.id,
-        &must_revalidate,
-        &Response { caching: Caching { must_revalidate: true, ..response.caching }, ..response.clone() },
-    );
-
-    let stale_if_error =
-        |db: &mut OfflineDatabase, resource: &Resource| db.get(resource).unwrap().caching.stale_if_error;
-    let at = |secs: i64| Some(Timestamp::from_secs(secs));
-    assert_eq!(at(expires + 2 * 86_400), stale_if_error(&mut db, &shared));
-    assert_eq!(at(expires + 86_400), stale_if_error(&mut db, &own));
-    assert_eq!(at(expires + 60), stale_if_error(&mut db, &ambient));
-    assert_eq!(at(expires + 60), stale_if_error(&mut db, &must_revalidate));
-    let (_, caching) = db.check_region_resource(&own).unwrap();
-    assert_eq!(at(expires + 86_400), caching.stale_if_error);
-
-    check_log_empty(&log);
-}
-
-/// A region's expiry reports when its resources go stale and stop standing
-/// in offline, and how many are stale or unusable now.
+/// A region's expiry reports when its resources go stale and stop being
+/// usable, and how many are stale or unusable now.
 #[test]
 fn region_expiry() {
     let log = FixtureLog::new();
@@ -1552,16 +1421,12 @@ fn region_expiry() {
         db.put_region_resource(region.id, resource, &response);
     };
     let tile = |y: i32| tile("https://example.com/{z}/{x}/{y}.pbf", 1.0, 0, y, 1);
-    // Fresh for an hour, then usable offline until its stale-if-error ends.
-    put(&mut db, &tile(0), Caching { expires: at(3600), stale_if_error: at(7200), ..Caching::default() });
-    // Stale, and usable offline for as long as maps can't reach the server.
-    put(&mut db, &tile(1), Caching { expires: at(-60), ..Caching::default() });
+    // Fresh for an hour, then usable stale.
+    put(&mut db, &tile(0), Caching { expires: at(3600), must_revalidate: false });
+    // Stale, and usable.
+    put(&mut db, &tile(1), Caching { expires: at(-60), must_revalidate: false });
     // Stale, and unusable without the server.
-    put(
-        &mut db,
-        &style("https://example.com/style.json"),
-        Caching { expires: at(-30), must_revalidate: true, ..Caching::default() },
-    );
+    put(&mut db, &style("https://example.com/style.json"), Caching { expires: at(-30), must_revalidate: true });
     // Never stale.
     put(&mut db, &style("https://example.com/sprite.json"), Caching::default());
 
@@ -1573,11 +1438,10 @@ fn region_expiry() {
     check_log_empty(&log);
 }
 
-/// Invalidating makes copies stale, but each keeps standing in offline for
-/// as long as it could before: one that must revalidate once stale until it
-/// would have gone stale.
+/// Invalidating makes copies stale. They stay usable, except those that
+/// must revalidate.
 #[test]
-fn invalidating_keeps_copies_usable_offline() {
+fn invalidating_makes_copies_stale() {
     let log = FixtureLog::new();
     let mut db = OfflineDatabase::new(":memory:");
     let definition: OfflineRegionDefinition = tile_pyramid("", LatLngBounds::world(), 0.0, 1.0, 1.0, false).into();
@@ -1585,47 +1449,26 @@ fn invalidating_keeps_copies_usable_offline() {
     let now = now();
     let at = |secs: i64| Some(Timestamp::from_secs(now.secs_since_epoch() + secs));
     let cases = [
-        // (caching rules, until when the invalidated copy stands in offline)
-        (Caching { expires: at(3600), must_revalidate: true, ..Caching::default() }, at(3600)),
-        (Caching { expires: at(3600), stale_if_error: at(7200), ..Caching::default() }, at(7200)),
-        (Caching { expires: at(3600), stale_while_revalidate: at(7200), ..Caching::default() }, None),
-        (Caching::default(), None),
-        (Caching { expires: at(-60), must_revalidate: true, ..Caching::default() }, at(-60)),
+        Caching { expires: at(3600), must_revalidate: true },
+        Caching { expires: at(3600), must_revalidate: false },
+        Caching::default(),
+        Caching { expires: at(-60), must_revalidate: true },
     ];
-    for (y, (caching, _)) in cases.iter().enumerate() {
+    let tile = |y: usize| tile("https://example.com/{z}/{x}/{y}.pbf", 1.0, 0, y as i32, 1);
+    for (y, caching) in cases.iter().enumerate() {
         let mut response = Response::new();
         response.data = Some(data("data"));
         response.caching = *caching;
-        db.put_region_resource(region.id, &tile("https://example.com/{z}/{x}/{y}.pbf", 1.0, 0, y as i32, 1), &response);
+        db.put_region_resource(region.id, &tile(y), &response);
     }
 
     db.invalidate_region(region.id).unwrap();
 
-    for (y, (before, offline_until)) in cases.iter().enumerate() {
-        let caching = db.get(&tile("https://example.com/{z}/{x}/{y}.pbf", 1.0, 0, y as i32, 1)).unwrap().caching;
-        assert_ne!(Reuse::Fresh, caching.reuse(now), "{before:?}");
-        assert_ne!(Reuse::WhileRevalidating, caching.reuse(now), "{before:?}");
-        assert_eq!(*offline_until, caching.usable_offline_until(), "{before:?}");
+    for (y, before) in cases.iter().enumerate() {
+        let caching = db.get(&tile(y)).unwrap().caching;
+        assert!(!caching.is_fresh(now), "{before:?}");
+        assert_eq!(!before.must_revalidate, caching.is_usable(now), "{before:?}");
     }
-
-    check_log_empty(&log);
-}
-
-/// A merged region keeps its `max_stale`.
-#[test]
-fn merge_keeps_max_stale() {
-    let log = FixtureLog::new();
-    let side_path = filename_sideload();
-    delete_file(&side_path);
-    let definition: OfflineRegionDefinition = tile_pyramid("", LatLngBounds::world(), 0.0, 1.0, 1.0, false).into();
-    let mut side = OfflineDatabase::new(&*side_path);
-    let region = side.create_region(&definition, &OfflineRegionMetadata::new()).unwrap();
-    side.set_region_max_stale(region.id, Duration::from_secs(600)).unwrap();
-    drop(side);
-
-    let mut db = OfflineDatabase::new(":memory:");
-    let merged = db.merge_database(&side_path).unwrap();
-    assert_eq!(vec![Duration::from_secs(600)], merged.iter().map(|region| region.max_stale).collect::<Vec<_>>());
 
     check_log_empty(&log);
 }
@@ -1641,7 +1484,7 @@ fn migrate_from_v5_schema() {
 
     open_and_delete_regions(&filename);
 
-    assert_eq!(7, database_user_version(&filename));
+    assert_eq!(6, database_user_version(&filename));
 
     assert_eq!(TILES_COLUMNS.to_vec(), database_table_columns(&filename, "tiles"));
     assert_eq!(RESOURCES_COLUMNS.to_vec(), database_table_columns(&filename, "resources"));
@@ -1676,7 +1519,7 @@ fn a_new_database_vacuums_incrementally() {
     drop(OfflineDatabase::new(&filename));
 
     assert_eq!(2, database_auto_vacuum(&filename));
-    assert_eq!(7, database_user_version(&filename));
+    assert_eq!(6, database_user_version(&filename));
     check_log_empty(&log);
 }
 
@@ -1695,7 +1538,7 @@ fn downgrade_schema() {
         let _ = db.set_maximum_ambient_cache_size(0);
     }
 
-    assert_eq!(7, database_user_version(&filename));
+    assert_eq!(6, database_user_version(&filename));
 
     assert_eq!(TILES_COLUMNS.to_vec(), database_table_columns(&filename, "tiles"));
     assert_eq!(RESOURCES_COLUMNS.to_vec(), database_table_columns(&filename, "resources"));

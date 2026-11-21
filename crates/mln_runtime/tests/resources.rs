@@ -199,11 +199,7 @@ fn a_not_modified_answer_delivers_the_cached_copy() {
             request.respond(Response { not_modified: true, ..Response::default() }).unwrap();
         } else {
             // A copy that the cache keeps, but must check before each use.
-            let caching = Caching {
-                expires: Some(mln_util::chrono::Timestamp::from_secs(1)),
-                must_revalidate: true,
-                ..Caching::default()
-            };
+            let caching = Caching { expires: Some(mln_util::chrono::Timestamp::from_secs(1)), must_revalidate: true };
             let response = Response { etag: Some("\"v1\"".to_owned()), caching, ..style_response() };
             request.respond(response).unwrap();
         }
@@ -483,21 +479,17 @@ fn an_offline_region_downloads_and_reports_its_progress() {
     assert!(wait(offline.region_status(id)).complete());
 
     // The style came without caching headers, so it was stale on arrival,
-    // and stands in while maps can't reach the server.
+    // and stays usable.
     let expiry = wait(offline.region_expiry(id));
     assert!(expiry.stale_after.is_some());
     assert_eq!(None, expiry.usable_offline_until);
     assert_eq!((1, 0), (expiry.stale_resource_count, expiry.unusable_resource_count));
-    let minute = Duration::from_secs(60);
-    assert_eq!(minute, wait(offline.set_region_max_stale(id, minute)).max_stale);
-    assert_eq!(minute, wait(offline.region(id)).unwrap().max_stale);
 
     wait(offline.invalidate_region(id));
     wait(offline.delete_region(id));
     assert_eq!(wait(offline.regions()), Vec::<mln_storage::offline::OfflineRegion>::new());
     assert_eq!(ErrorKind::NotFound, wait_err(offline.region_status(id)).kind);
     assert_eq!(ErrorKind::NotFound, wait_err(offline.region_expiry(id)).kind);
-    assert_eq!(ErrorKind::NotFound, wait_err(offline.set_region_max_stale(id, minute)).kind);
     assert_eq!(ErrorKind::NotFound, wait_err(offline.delete_region(id)).kind);
     assert_eq!(ErrorKind::NotFound, wait_err(offline.set_region_observed(id, EventMask::NONE)).kind);
     wait(runtime.release());

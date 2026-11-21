@@ -809,8 +809,6 @@ pub struct mln_resource_request_info {
 pub const MLN_RESOURCE_RESPONSE_MODIFIED: mln_resource_response_field = 1;
 pub const MLN_RESOURCE_RESPONSE_EXPIRES: mln_resource_response_field = 2;
 pub const MLN_RESOURCE_RESPONSE_RETRY_AFTER: mln_resource_response_field = 4;
-pub const MLN_RESOURCE_RESPONSE_STALE_WHILE_REVALIDATE: mln_resource_response_field = 8;
-pub const MLN_RESOURCE_RESPONSE_STALE_IF_ERROR: mln_resource_response_field = 16;
 /// The fields that mln_resource_response sets.
 pub type mln_resource_response_field = u32;
 /// A set of mln_resource_response_field bits.
@@ -829,9 +827,9 @@ pub struct mln_resource_response {
     pub byte_count: usize,
     /// A description of the error, for MLN_RESOURCE_RESPONSE_STATUS_ERROR.
     pub error_message: mln_buffer_view,
-    /** Whether the library must not use this copy once it expires without
- requesting the resource again, not even in place of an error, as
- `Cache-Control: must-revalidate` or `no-cache` says.*/
+    /** Whether the library must not use this copy once it expires until it
+ requests the resource again, not even while the server can't be reached,
+ as `Cache-Control: must-revalidate` or `no-cache` says.*/
     pub must_revalidate: bool,
     pub modified_unix_ms: i64,
     /// When this copy stops being fresh. Without it, the copy never expires.
@@ -840,13 +838,6 @@ pub struct mln_resource_response {
     pub etag: mln_buffer_view,
     /// When to retry, for MLN_RESOURCE_RESPONSE_STATUS_ERROR.
     pub retry_after_unix_ms: i64,
-    /** Until when the library may show this copy once it expires while it
- requests the resource again, as `stale-while-revalidate` says.*/
-    pub stale_while_revalidate_until_unix_ms: i64,
-    /** Until when the library may show this copy once it expires in place of a
- server error, as `stale-if-error` says. Without it, an expired copy stands
- in only for a failure to connect, unless `must_revalidate` is set.*/
-    pub stale_if_error_until_unix_ms: i64,
     /** Whether the library must not store this copy, as
  `Cache-Control: no-store` says.*/
     pub no_store: bool,
@@ -1501,10 +1492,6 @@ pub struct mln_offline_region_info {
     pub definition: mln_offline_region_definition,
     pub metadata: *const u8,
     pub metadata_size: usize,
-    /** How long past their expiry the region's resources may stand in while
- maps can't reach the server. mln_runtime_set_offline_region_max_stale()
- describes it.*/
-    pub max_stale_ms: u64,
 }
 pub const MLN_OFFLINE_REGION_EXPIRY_STALE_AFTER: mln_offline_region_expiry_field = 1;
 pub const MLN_OFFLINE_REGION_EXPIRY_USABLE_OFFLINE_UNTIL: mln_offline_region_expiry_field = 2;
@@ -1522,10 +1509,10 @@ pub struct mln_offline_region_expiry {
  unless it must be checked first, and the region's download refreshes it.
  Without it, no resource ever goes stale.*/
     pub stale_after_unix_ms: i64,
-    /** When the first of the region's resources stops standing in while maps
- can't reach the server, which may have passed. Refresh the region before
- then to keep all of it usable offline. Without it, every resource stays
- usable offline.*/
+    /** When the first of the region's resources that the server requires
+ checking once stale stops being usable without the server, which may have
+ passed. Refresh the region before then to keep all of it usable offline.
+ Without it, every resource stays usable offline.*/
     pub usable_offline_until_unix_ms: i64,
     /// The resources that are stale now, tiles included.
     pub stale_resource_count: u64,

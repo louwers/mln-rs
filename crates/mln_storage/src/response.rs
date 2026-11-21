@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::time::Duration;
 
 use mln_util::chrono::Timestamp;
 
@@ -40,7 +39,8 @@ impl ResourceError {
     }
 }
 
-/// A response to a resource request. `Clone` shares the data.
+/// `Response`. `Clone` is the C++ copy constructor (the error is copied,
+/// the data shared).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Response {
     /// Why the request failed; `None` when it succeeded.
@@ -83,91 +83,44 @@ impl Response {
     }
 }
 
-/// What caching rules allow for a copy of a resource (RFC 9111, RFC 5861):
-/// when it stops being fresh, and how it may be used once it is stale.
+/// How a copy of a resource may be reused (RFC 9111): when it stops being
+/// fresh, and whether it may be used once it is stale.
+///
+/// The map accepts a stale copy of any age, as RFC 9111 §5.2.1.2 lets a
+/// client (`max-stale` without a value): it shows the copy while it
+/// revalidates, and while the server can't be reached. Only the server can
+/// forbid that, with `must-revalidate` or `no-cache`. Its
+/// `stale-while-revalidate` and `stale-if-error` (RFC 5861) permit what the
+/// map accepts anyway, so they aren't read.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Caching {
     /// When it stops being fresh; `None` if it never does.
     pub expires: Option<Timestamp>,
-    /// Once stale, it is never used without revalidating it, not even in
-    /// place of an error.
+    /// Once stale, it may not be used until it revalidates, not even while
+    /// the server can't be reached.
     pub must_revalidate: bool,
-    /// Until when it may be used stale while it revalidates.
-    pub stale_while_revalidate: Option<Timestamp>,
-    /// Until when it may be used stale when revalidating it fails, and so
-    /// while it revalidates. Without it, a stale copy may be used for as
-    /// long as it needn't revalidate first.
-    pub stale_if_error: Option<Timestamp>,
-}
-
-/// How a cached copy may be used now.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Reuse {
-    /// It is fresh: use it.
-    Fresh,
-    /// It is stale, within its `stale-while-revalidate`: the server lets it
-    /// be used while it revalidates.
-    WhileRevalidating,
-    /// It is stale, within its `stale-if-error` or without one: the server
-    /// lets it stand in when revalidating it fails. The map shows it while
-    /// it revalidates, too ([`Caching::shows_while_revalidating`]).
-    OnError,
-    /// It is stale and may not be used at all until it revalidates.
-    Never,
 }
 
 impl Caching {
-    /// How the copy may be used at `now`.
+    /// Whether the copy is fresh at `now`: it may be used without asking the
+    /// server.
     #[must_use]
-    pub fn reuse(&self, now: Timestamp) -> Reuse {
-        if self.expires.is_none_or(|expires| expires > now) {
-            Reuse::Fresh
-        } else if self.must_revalidate {
-            Reuse::Never
-        } else if self.stale_while_revalidate.is_some_and(|until| until > now) {
-            Reuse::WhileRevalidating
-        } else if self.stale_if_error.is_none_or(|until| until > now) {
-            Reuse::OnError
-        } else {
-            Reuse::Never
-        }
+    pub fn is_fresh(&self, now: Timestamp) -> bool {
+        self.expires.is_none_or(|expires| expires > now)
     }
 
-    /// Whether the copy may show at `now` while it revalidates: unless it
-    /// may not be used at all. A stale copy that the server lets stand in for
-    /// a failure shows at once, as RFC 9111 §5.2.1.2 lets a client accept
-    /// (`max-stale`): an old map that updates beats a blank one while the
-    /// network answers, and it would show if the network failed anyway.
+    /// Whether the copy may be used at `now`: it is fresh, or it may be used
+    /// stale.
     #[must_use]
-    pub fn shows_while_revalidating(&self, now: Timestamp) -> bool {
-        self.reuse(now) != Reuse::Never
+    pub fn is_usable(&self, now: Timestamp) -> bool {
+        !self.must_revalidate || self.is_fresh(now)
     }
 
-    /// Until when the copy may stand in when the server can't be reached;
-    /// `None` if it always may.
+    /// Until when the copy may be used; `None` if it always may.
     #[must_use]
-    pub fn usable_offline_until(&self) -> Option<Timestamp> {
-        let expires = self.expires?;
-        if self.must_revalidate { Some(expires) } else { self.stale_if_error.map(|until| until.max(expires)) }
+    pub fn usable_until(&self) -> Option<Timestamp> {
+        if self.must_revalidate { self.expires } else { None }
     }
-
-    /// The rules once the client accepts the copy for up to `max_stale` past
-    /// its expiry in place of an error (RFC 9111 §5.2.1.2): that widens a
-    /// `stale-if-error` window, which otherwise limits how long it stands in.
-    /// `must-revalidate` still forbids using it stale.
-    #[must_use]
-    pub fn with_max_stale(mut self, max_stale: Duration) -> Self {
-        if let (Some(expires), Some(until), false) = (self.expires, self.stale_if_error, self.must_revalidate) {
-            self.stale_if_error = Some(until.max(after(expires, max_stale)));
-        }
-        self
-    }
-}
-
-/// `duration` after `time`, at most the last timestamp.
-fn after(time: Timestamp, duration: Duration) -> Timestamp {
-    let secs = i64::try_from(duration.as_secs()).unwrap_or(i64::MAX);
-    Timestamp::from_secs(time.secs_since_epoch().saturating_add(secs))
 }
 
 #[cfg(test)]
@@ -179,54 +132,15 @@ mod tests {
     }
 
     #[test]
-    fn reuse() {
+    fn a_stale_copy_is_usable_unless_it_must_revalidate() {
         let now = at(0);
-        let stale = Caching { expires: Some(at(-10)), ..Caching::default() };
-        assert_eq!(Caching::default().reuse(now), Reuse::Fresh);
-        assert_eq!(Caching { expires: Some(at(10)), must_revalidate: true, ..stale }.reuse(now), Reuse::Fresh);
-        assert_eq!(stale.reuse(now), Reuse::OnError);
-        assert_eq!(Caching { must_revalidate: true, ..stale }.reuse(now), Reuse::Never);
-        let revalidating = Caching { stale_while_revalidate: Some(at(5)), ..stale };
-        assert_eq!(revalidating.reuse(now), Reuse::WhileRevalidating);
-        assert_eq!(Caching { stale_while_revalidate: Some(at(0)), ..stale }.reuse(now), Reuse::OnError);
-        assert_eq!(Caching { must_revalidate: true, ..revalidating }.reuse(now), Reuse::Never);
-        assert_eq!(Caching { stale_if_error: Some(at(5)), ..stale }.reuse(now), Reuse::OnError);
-        assert_eq!(Caching { stale_if_error: Some(at(0)), ..stale }.reuse(now), Reuse::Never);
-    }
-
-    #[test]
-    fn shows_while_revalidating() {
-        let now = at(0);
-        let stale = Caching { expires: Some(at(-10)), ..Caching::default() };
-        assert!(Caching::default().shows_while_revalidating(now));
-        assert!(stale.shows_while_revalidating(now));
-        assert!(Caching { stale_if_error: Some(at(5)), ..stale }.shows_while_revalidating(now));
-        assert!(!Caching { stale_if_error: Some(at(-5)), ..stale }.shows_while_revalidating(now));
-        assert!(!Caching { must_revalidate: true, ..stale }.shows_while_revalidating(now));
-        assert!(Caching { expires: Some(at(10)), must_revalidate: true, ..stale }.shows_while_revalidating(now));
-    }
-
-    #[test]
-    fn usable_offline_until() {
-        assert_eq!(Caching::default().usable_offline_until(), None);
-        let expired = Caching { expires: Some(at(-10)), ..Caching::default() };
-        assert_eq!(expired.usable_offline_until(), None);
-        assert_eq!(Caching { must_revalidate: true, ..expired }.usable_offline_until(), Some(at(-10)));
-        assert_eq!(Caching { stale_if_error: Some(at(5)), ..expired }.usable_offline_until(), Some(at(5)));
-    }
-
-    #[test]
-    fn max_stale_widens_stale_if_error() {
-        let day = Duration::from_hours(24);
-        let if_error = Caching { expires: Some(at(-10)), stale_if_error: Some(at(-5)), ..Caching::default() };
-        let widened = if_error.with_max_stale(day);
-        assert_eq!(widened.stale_if_error, Some(at(86_390)));
-        assert_eq!(widened.reuse(at(0)), Reuse::OnError);
-        assert_eq!(if_error.with_max_stale(Duration::ZERO), if_error);
-        assert_eq!(if_error.with_max_stale(Duration::MAX).stale_if_error, Some(Timestamp::from_secs(i64::MAX)));
-        let unlimited = Caching { stale_if_error: None, ..if_error };
-        assert_eq!(unlimited.with_max_stale(day), unlimited);
-        let must_revalidate = Caching { must_revalidate: true, ..if_error };
-        assert_eq!(must_revalidate.with_max_stale(day), must_revalidate);
+        let stale = Caching { expires: Some(at(-10)), must_revalidate: false };
+        let must_revalidate = Caching { must_revalidate: true, ..stale };
+        assert!(Caching::default().is_fresh(now) && Caching::default().is_usable(now));
+        assert!(!stale.is_fresh(now) && stale.is_usable(now));
+        assert!(!must_revalidate.is_usable(now));
+        assert!(Caching { expires: Some(at(10)), ..must_revalidate }.is_usable(now));
+        assert_eq!(stale.usable_until(), None);
+        assert_eq!(must_revalidate.usable_until(), Some(at(-10)));
     }
 }

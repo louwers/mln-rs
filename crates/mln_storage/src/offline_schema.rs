@@ -9,8 +9,6 @@ pub(crate) const OFFLINE_DATABASE_SCHEMA: &str = "CREATE TABLE resources (
   compressed INTEGER NOT NULL DEFAULT 0,
   accessed INTEGER NOT NULL,
   must_revalidate INTEGER NOT NULL DEFAULT 0,
-  stale_while_revalidate INTEGER,
-  stale_if_error INTEGER,
   UNIQUE (url)
 );
 CREATE TABLE tiles (
@@ -27,15 +25,12 @@ CREATE TABLE tiles (
   compressed INTEGER NOT NULL DEFAULT 0,
   accessed INTEGER NOT NULL,
   must_revalidate INTEGER NOT NULL DEFAULT 0,
-  stale_while_revalidate INTEGER,
-  stale_if_error INTEGER,
   UNIQUE (url_template, pixel_ratio, z, x, y)
 );
 CREATE TABLE regions (
   id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
   definition TEXT NOT NULL,
-  description BLOB,
-  max_stale INTEGER NOT NULL DEFAULT 0
+  description BLOB
 );
 CREATE TABLE region_resources (
   region_id INTEGER NOT NULL REFERENCES regions(id) ON DELETE CASCADE,

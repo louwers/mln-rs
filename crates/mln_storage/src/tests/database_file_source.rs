@@ -11,7 +11,7 @@ use crate::database_file_source::{Cache, DatabaseFileSource};
 use crate::file_source::FileSource;
 use crate::offline_database::{DatabaseError, OfflineDatabase};
 use crate::resource::{Kind, LoadingMethod, Resource, StoragePolicy};
-use crate::response::{Reason, Response, Reuse};
+use crate::response::{Reason, Response};
 
 fn dbfs() -> Arc<DatabaseFileSource> {
     Arc::new(DatabaseFileSource::new(":memory:", None))
@@ -254,9 +254,9 @@ fn cache_maintenance() {
     source.put(&resource, &response);
     assert_eq!(response.data, cached_request(&run_loop, &source, &resource).data);
     maintain(|done| source.invalidate_ambient_cache(done)).unwrap();
-    // Stale, but it still stands in while the server can't be reached.
+    // Stale, but still usable.
     let invalidated = cached_request(&run_loop, &source, &resource);
-    assert_eq!(Reuse::OnError, invalidated.caching.reuse(now()));
+    assert!(!invalidated.caching.is_fresh(now()) && invalidated.caching.is_usable(now()));
 
     source.put(&resource, &response);
     maintain(|done| source.clear_ambient_cache(done)).unwrap();

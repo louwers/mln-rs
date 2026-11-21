@@ -854,8 +854,6 @@ typedef enum MLN_BINDING(
   MLN_RESOURCE_RESPONSE_MODIFIED = 1U << 0U,
   MLN_RESOURCE_RESPONSE_EXPIRES = 1U << 1U,
   MLN_RESOURCE_RESPONSE_RETRY_AFTER = 1U << 2U,
-  MLN_RESOURCE_RESPONSE_STALE_WHILE_REVALIDATE = 1U << 3U,
-  MLN_RESOURCE_RESPONSE_STALE_IF_ERROR = 1U << 4U,
 } mln_resource_response_field;
 
 /** A set of mln_resource_response_field bits. */
@@ -874,9 +872,9 @@ typedef struct mln_resource_response {
   /** A description of the error, for MLN_RESOURCE_RESPONSE_STATUS_ERROR. */
   mln_buffer_view error_message;
   /**
-   * Whether the library must not use this copy once it expires without
-   * requesting the resource again, not even in place of an error, as
-   * `Cache-Control: must-revalidate` or `no-cache` says.
+   * Whether the library must not use this copy once it expires until it
+   * requests the resource again, not even while the server can't be reached,
+   * as `Cache-Control: must-revalidate` or `no-cache` says.
    */
   bool must_revalidate;
   int64_t modified_unix_ms
@@ -889,19 +887,6 @@ typedef struct mln_resource_response {
   /** When to retry, for MLN_RESOURCE_RESPONSE_STATUS_ERROR. */
   int64_t retry_after_unix_ms
     MLN_BINDING("mask=fields;bit=MLN_RESOURCE_RESPONSE_RETRY_AFTER");
-  /**
-   * Until when the library may show this copy once it expires while it
-   * requests the resource again, as `stale-while-revalidate` says.
-   */
-  int64_t stale_while_revalidate_until_unix_ms
-    MLN_BINDING("mask=fields;bit=MLN_RESOURCE_RESPONSE_STALE_WHILE_REVALIDATE");
-  /**
-   * Until when the library may show this copy once it expires in place of a
-   * server error, as `stale-if-error` says. Without it, an expired copy stands
-   * in only for a failure to connect, unless `must_revalidate` is set.
-   */
-  int64_t stale_if_error_until_unix_ms
-    MLN_BINDING("mask=fields;bit=MLN_RESOURCE_RESPONSE_STALE_IF_ERROR");
   /**
    * Whether the library must not store this copy, as
    * `Cache-Control: no-store` says.

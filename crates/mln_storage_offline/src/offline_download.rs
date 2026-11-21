@@ -19,7 +19,7 @@ use mln_storage::offline::{
 };
 use mln_storage::offline_database::{DatabaseError, OfflineDatabase};
 use mln_storage::resource::{Priority, Usage};
-use mln_storage::response::{Caching, Reason, ResourceError, Reuse};
+use mln_storage::response::{Caching, Reason, ResourceError};
 use mln_storage::{FileSource, Kind, LoadingMethod, Request, Resource, Response};
 use mln_style::StyleRegistry;
 use mln_style::parser::Parser;
@@ -605,7 +605,7 @@ impl OfflineDownload {
 
         // The region's copy is complete while it's fresh. A stale one is
         // revalidated, and stays as it is until its refresh arrives.
-        let fresh = |caching: Caching| caching.reuse(now()) == Reuse::Fresh;
+        let fresh = |caching: Caching| caching.is_fresh(now());
         let stale = if then.reads() {
             match db.get_region_resource(&resource) {
                 Some((response, size)) if fresh(response.caching) => {

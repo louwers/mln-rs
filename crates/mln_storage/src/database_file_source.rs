@@ -52,7 +52,10 @@ impl<E: 'static> DatabaseWorker<E> {
         read_only: bool,
         make: MakeExtension<E>,
     ) -> Self {
-        let mut db = if read_only { OfflineDatabase::read_only(cache_path) } else { OfflineDatabase::new(cache_path) };
+        let mut db = OfflineDatabase::new(cache_path);
+        if read_only {
+            db.reopen_database_read_only(true);
+        }
         // A cache hit that leaves `accessed` timestamps to write, while no
         // write is due, makes one due. A failed write isn't retried until
         // the next cache hit, so an idle map stays idle.

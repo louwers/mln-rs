@@ -15,7 +15,7 @@ use mln_storage::offline::{
 };
 use mln_storage::offline_database::{DatabaseError, OfflineDatabase};
 use mln_storage::resource::{Priority, Usage};
-use mln_storage::response::{Reason, ResourceError, Reuse};
+use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{FileSource, Kind, LoadingMethod, Resource, Responder, Response};
 use mln_text::glyph::NON_IDEOGRAPH_GLYPH_RANGES_PER_FONT_STACK;
@@ -1227,7 +1227,7 @@ fn test_refresh_invalidated_region(style_not_modified: bool, tile_not_modified: 
         let stored = test.db().get(resource).expect("stored");
         assert!(!stored.caching.must_revalidate);
         assert_eq!(Some(expires), stored.caching.expires);
-        assert_eq!(stored.caching.reuse(now()), Reuse::Fresh);
+        assert!(stored.caching.is_fresh(now()));
         assert_eq!(data, stored.data.expect("data").as_slice());
         assert_eq!(Some(etag), stored.etag.as_deref());
     };
@@ -1365,7 +1365,7 @@ fn refresh_keeps_tiles_that_only_an_earlier_style_listed() {
     );
 
     let earlier = test.db().get(&xyz_tile(v1, 0, 0, 0)).expect("earlier tile");
-    assert_eq!(Reuse::OnError, earlier.caching.reuse(now()));
+    assert!(!earlier.caching.is_fresh(now()) && earlier.caching.is_usable(now()));
     let current = test.db().get(&xyz_tile(v2, 0, 0, 0)).expect("current tile");
     assert_eq!(format!("tile {v2}").as_bytes(), current.data.expect("data").as_slice());
 }

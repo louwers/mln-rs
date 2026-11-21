@@ -235,7 +235,7 @@ impl<'a> TileMut<'a> {
         // then the tile holds it back for the network request to revalidate.
         if res.error.is_none() {
             tileset.resource.set_prior(res);
-            if res.caching.shows_while_revalidating(now) {
+            if res.caching.is_usable(now) {
                 self.take_response(method, res);
             } else {
                 // The network request carries it too, so that the file
