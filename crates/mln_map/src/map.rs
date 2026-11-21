@@ -496,7 +496,7 @@ impl Map {
                 self.repaint_at = repaint_at.filter(|_| continuous && !needs_repaint);
                 let failed = error.is_some();
                 match error {
-                    Some(error) => self.on_render_failure(error, still_image_request_id),
+                    Some(error) => self.on_render_failure(*error, still_image_request_id),
                     None => self.render_failures = 0,
                 }
                 let frame = FinishedFrame { mode, needs_repaint, placement_changed, still_image_request_id, failed };

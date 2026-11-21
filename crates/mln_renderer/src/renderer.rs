@@ -773,7 +773,7 @@ impl Encoder {
                 placement_changed,
                 still_image_request_id,
                 stats,
-                error,
+                error: error.map(Box::new),
             },
         );
 

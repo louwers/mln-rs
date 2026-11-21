@@ -59,8 +59,9 @@ pub enum RendererEvent {
         /// Why the frame failed on the GPU, if it did
         /// ([`DrawnFrame::error`](crate::DrawnFrame::error)): its image is
         /// wrong, and nothing took it. A still image of the frame's
-        /// `still_image_request_id` fails with the error.
-        error: Option<Error>,
+        /// `still_image_request_id` fails with the error. Boxed, so that
+        /// the events don't grow for it.
+        error: Option<Box<Error>>,
     },
     /// The ground of the terrain changed: the tiles that draw it, or the DEM
     /// data they read; or it comes again for an update that carried a

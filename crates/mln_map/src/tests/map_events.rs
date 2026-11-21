@@ -377,7 +377,7 @@ fn failed_frame(still_image_request_id: u64, message: Option<&str>) -> RendererE
         placement_changed: false,
         still_image_request_id,
         stats: Arc::default(),
-        error: message.map(Error::native),
+        error: message.map(|message| Box::new(Error::native(message))),
     }
 }
 
