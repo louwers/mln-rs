@@ -115,8 +115,8 @@ fn a_still_image_whose_frame_fails_ends_with_the_error() {
 
 /// A continuous map whose frames keep failing reports it once, isn't idle,
 /// and draws again by itself only now and then, not frame after frame, each
-/// frame rendered and partial. Once the device works again, it draws the
-/// map and goes idle.
+/// frame rendered and partial. Once the device works again, the next frame
+/// that anything causes draws the map, and it goes idle.
 #[test]
 fn a_continuous_map_whose_frames_fail_reports_once_and_draws_again_later() {
     let runtime = runtime();
@@ -151,7 +151,10 @@ fn a_continuous_map_whose_frames_fail_reports_once_and_draws_again_later() {
     assert_eq!(1, errors.len(), "{errors:?}");
     assert!(!map.snapshot().unwrap().fully_loaded);
 
+    // A failure that lasts stops retrying by itself, so something else
+    // has to cause the frame.
     broken.store(false, Ordering::SeqCst);
+    wait(map.request_repaint());
     let recovered = frames(Duration::from_millis(1500));
     assert!(
         recovered
