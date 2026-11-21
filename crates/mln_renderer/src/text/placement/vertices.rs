@@ -17,8 +17,7 @@ use crate::buckets::symbol_bucket::{Buffer, CollisionBuffer, SymbolBucket, Symbo
 use crate::layout::symbol_instance::{Justification, SymbolInstance, TextPart};
 use crate::layout::symbol_projection::{
     LabelHeight, LabelPlaneProjector, LineLabelAlignment, SymbolElevation, add_dynamic_attributes,
-    evaluate_size_for_feature, hide_glyphs, reproject_line_labels, symbol_ground,
-    tile_skew_vectors,
+    evaluate_size_for_feature, hide_glyphs, reproject_line_labels, symbol_ground, tile_skew_vectors,
 };
 use crate::render_layer::BucketPlacementData;
 use crate::terrain::TerrainElevation;
