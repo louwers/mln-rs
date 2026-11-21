@@ -5,11 +5,14 @@ use std::hash::{Hash, Hasher};
 use std::{fmt, ptr};
 
 use crate::gfx_types::AttributeDataType;
-use crate::gpu::{ShaderKey, VertexStep};
+use crate::gpu::{GpuError, ShaderKey, VertexStep};
 use crate::projection_variant::ProjectionVariant;
 use crate::shaders::block::{Block, UniformBlock};
 use crate::shaders::layer_ubo::{ProjectionUBO, ViewUBO};
-use crate::shaders::shader_defines::{ID_PROJECTION_UBO, ID_VIEW_UBO};
+use crate::shaders::shader_defines::{
+    DRAWABLE_RESERVED_UBO_COUNT, GLOBAL_UBO_COUNT, ID_PROJECTION_UBO, ID_VIEW_UBO, MAX_ATTRIBUTE_COUNT_PER_SHADER,
+    MAX_TEXTURE_COUNT_PER_SHADER, MAX_UBO_COUNT_PER_SHADER, MAX_VERTEX_BUFFERS,
+};
 use crate::shaders::source::{glsl, glsl_es, msl, wgsl};
 
 /// A program: the buffers, vertex attributes and textures its shaders bind,
@@ -356,6 +359,59 @@ impl Program {
         attributes.iter().position(|attribute| attribute.id == id).map(|index| first + index)
     }
 
+    /// Checks the rules this declaration's doc states, which a backend checks
+    /// before it compiles the program: distinct attribute ids within each
+    /// step, distinct buffer ids in the ranges of their kinds and none of the
+    /// engine's, and no more attributes and textures than a program can
+    /// have. Also that the GLSL ES names of the members of the view's block,
+    /// the projection block and the program's blocks are distinct, since
+    /// GLSL ES has them in one scope.
+    ///
+    /// # Errors
+    ///
+    /// [`GpuError::Invalid`], naming the rule the program breaks.
+    pub fn check(&self) -> Result<(), GpuError> {
+        let invalid = |problem: String| Err(GpuError::Invalid(format!("program {}: {problem}", self.name)));
+        for attributes in [self.attributes, self.instance_attributes] {
+            for (index, attribute) in attributes.iter().enumerate() {
+                if attributes[..index].iter().any(|earlier| earlier.id == attribute.id) {
+                    return invalid(format!("two attributes have the id {}", attribute.id));
+                }
+            }
+        }
+        let attributes = self.attributes.len() + self.instance_attributes.len();
+        if attributes > MAX_ATTRIBUTE_COUNT_PER_SHADER {
+            return invalid(format!("{attributes} attributes, more than {MAX_ATTRIBUTE_COUNT_PER_SHADER}"));
+        }
+        if self.textures.len() > MAX_TEXTURE_COUNT_PER_SHADER {
+            return invalid(format!("{} textures, more than {MAX_TEXTURE_COUNT_PER_SHADER}", self.textures.len()));
+        }
+        for (index, buffer) in self.buffers.iter().enumerate() {
+            let ids = match buffer.kind {
+                BufferKind::Uniform(_) => GLOBAL_UBO_COUNT..MAX_UBO_COUNT_PER_SHADER,
+                BufferKind::Storage { .. } => GLOBAL_UBO_COUNT..DRAWABLE_RESERVED_UBO_COUNT + 1,
+                BufferKind::Vertices { .. } => MAX_UBO_COUNT_PER_SHADER..MAX_UBO_COUNT_PER_SHADER + MAX_VERTEX_BUFFERS,
+            };
+            if !ids.contains(&buffer.id) || buffer.id == ID_PROJECTION_UBO {
+                return invalid(format!(
+                    "buffer id {}, outside the ids of its kind ({ids:?}, but {ID_PROJECTION_UBO})",
+                    buffer.id
+                ));
+            }
+            if self.buffers[..index].iter().any(|earlier| earlier.id == buffer.id) {
+                return invalid(format!("two buffers have the id {}", buffer.id));
+            }
+        }
+        let blocks = || ENGINE_BUFFERS.iter().chain(self.buffers).filter_map(Buffer::block);
+        let mut names: Vec<String> =
+            blocks().flat_map(|block| block.members.iter().map(|member| glsl_es::member_name(block, member))).collect();
+        names.sort_unstable();
+        if let Some(pair) = names.windows(2).find(|pair| pair[0] == pair[1]) {
+            return invalid(format!("two block members are {} in GLSL ES", pair[0]));
+        }
+        Ok(())
+    }
+
     /// The buffer whose block is `name`: one of the program's, or the
     /// view's or the projection block.
     #[must_use]
@@ -387,6 +443,31 @@ impl fmt::Debug for Program {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::gfx_types::AttributeDataType::Short2;
+
+    static EMPTY: Program = Program {
+        name: "empty",
+        buffers: &[],
+        attributes: &[],
+        instance_attributes: &[],
+        textures: &[],
+        properties: &[],
+        sources: Sources::NONE,
+    };
+
+    #[test]
+    fn a_program_breaking_a_rule_of_its_declaration_fails_its_check() {
+        assert!(EMPTY.check().is_ok());
+        const POSITION: Attribute = Attribute { id: 0, format: Short2 };
+        let fails = |program: Program| assert!(program.check().is_err(), "{:?}", program.buffers);
+        fails(Program { attributes: &[POSITION, POSITION], ..EMPTY });
+        fails(Program { buffers: const { &[Buffer::uniform::<ViewUBO>(5), Buffer::uniform::<ViewUBO>(5)] }, ..EMPTY });
+        fails(Program { buffers: const { &[Buffer::storage::<ViewUBO>(ID_PROJECTION_UBO)] }, ..EMPTY });
+        fails(Program { buffers: const { &[Buffer::storage::<ViewUBO>(6)] }, ..EMPTY });
+        fails(Program { buffers: const { &[Buffer::vertices::<[f32; 4]>(2)] }, ..EMPTY });
+        // The view's members again, in one GLSL ES scope with the view's.
+        fails(Program { buffers: const { &[Buffer::uniform::<ViewUBO>(5)] }, ..EMPTY });
+    }
 
     #[test]
     fn parameters_define_the_pixel_ratio_and_the_overdraw_inspector() {

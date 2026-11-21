@@ -16,7 +16,7 @@
 
 use mln_gfx::shaders::shader_defines::{
     DRAWABLE_RESERVED_UBO_COUNT, GLOBAL_UBO_COUNT, LAYER_SSBO_START_ID, MAX_TEXTURE_COUNT_PER_SHADER,
-    MAX_UBO_COUNT_PER_SHADER,
+    MAX_UBO_COUNT_PER_SHADER, MAX_VERTEX_BUFFERS,
 };
 
 /// The descriptor sets of a pipeline layout, by set index.
@@ -112,7 +112,7 @@ pub const DRAWABLE_UNIFORM_COUNT: usize = MAX_UBO_COUNT_PER_SHADER - LAYER_SSBO_
 /// The vertex buffers of the drawable set, which the pulled shaders read as
 /// storage buffers: the bindings after its uniform buffers, for the ids
 /// after `MAX_UBO_COUNT_PER_SHADER`.
-pub const DRAWABLE_VERTEX_COUNT: usize = 3;
+pub const DRAWABLE_VERTEX_COUNT: usize = MAX_VERTEX_BUFFERS;
 
 /// The textures of the image set: the bindings from 0.
 pub const IMAGE_TEXTURE_COUNT: usize = MAX_TEXTURE_COUNT_PER_SHADER;

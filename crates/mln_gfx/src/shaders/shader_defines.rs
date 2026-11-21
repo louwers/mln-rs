@@ -28,6 +28,9 @@ pub const DRAWABLE_RESERVED_UBO_COUNT: usize = LAYER_SSBO_START_ID + 3;
 /// The end of the buffer ids of a program, but for the vertex buffers it
 /// reads as storage buffers.
 pub const MAX_UBO_COUNT_PER_SHADER: usize = 7;
+/// How many vertex buffers a program's vertex stage can read as storage
+/// buffers, at the ids from [`MAX_UBO_COUNT_PER_SHADER`].
+pub const MAX_VERTEX_BUFFERS: usize = 3;
 /// How many textures a program can sample.
 pub const MAX_TEXTURE_COUNT_PER_SHADER: usize = 3;
 /// How many vertex attributes a program can read.

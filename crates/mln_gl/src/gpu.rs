@@ -1324,6 +1324,7 @@ impl Gpu for GlGpu {
     }
 
     fn create_shader(&mut self, key: &ShaderKey) -> Result<ShaderId, GpuError> {
+        key.program().check()?;
         // Mesa's CPU rasterizers lower mediump to half floats, which cost
         // them more instructions than highp.
         let highp_fragment = self.caps.cpu_rasterizer;

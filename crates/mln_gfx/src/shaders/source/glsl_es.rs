@@ -96,7 +96,7 @@ fn declaration(block: &Block) -> String {
 }
 
 /// The name of `member` of `block` in GLSL ES, in the program's scope.
-fn member_name(block: &Block, member: &Member) -> String {
+pub(crate) fn member_name(block: &Block, member: &Member) -> String {
     if member.padding {
         format!("{}_{}", block.name, member.name)
     } else {

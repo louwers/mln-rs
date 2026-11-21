@@ -732,6 +732,7 @@ impl Gpu for WebGpu {
     }
 
     fn create_shader(&mut self, key: &ShaderKey) -> Result<ShaderId, GpuError> {
+        key.program().check()?;
         let program = shader_program::compile(self.device.device(), self.index_table.layout(), key)?;
         let reads = shader_bindings(&program)?;
         Ok(self.shaders.insert(Shader { program, reads }))
