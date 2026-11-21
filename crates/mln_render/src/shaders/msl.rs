@@ -374,7 +374,7 @@ struct FragmentStage {
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
+                                device const ViewUBO& view [[buffer(idViewUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const TileDebugPropsUBO& props [[buffer(idTileDebugPropsUBO)]]) {
@@ -403,7 +403,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float2 tile_pos = base + across * (offset.y * units);
     const float4 corner = projectTile(tile_pos, projection);
     const float4 middle = projectTile(base, projection);
-    const float extent = length((corner.xy - middle.xy) / corner.w * paintParams.units_to_pixels);
+    const float extent = length((corner.xy - middle.xy) / corner.w * view.units_to_pixels);
 
     return {
         .position = corner,

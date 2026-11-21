@@ -240,7 +240,7 @@ struct FragmentStage {
         outline_corner!(),
         r"
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
+                                device const ViewUBO& view [[buffer(idViewUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const FillDrawableUnionUBO* drawableVector [[buffer(idFillDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
@@ -271,7 +271,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float2 pattern_tl_b = pattern_to.xy;
     const float2 pattern_br_b = pattern_to.zw;
 
-    const float pixelRatio = paintParams.pixel_ratio;
+    const float pixelRatio = view.pixel_ratio;
     const float tileZoomRatio = drawable.tile_ratio;
     const float fromScale = props.from_scale;
     const float toScale = props.to_scale;
@@ -282,7 +282,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float2 end = float2(vertx.outline_end);
     const OutlineCorner corner = outline_corner(projectTile(start, start, projectionVector[uboIndex]),
                                                 projectTile(end, end, projectionVector[uboIndex]),
-                                                vertx.position, paintParams.world_size);
+                                                vertx.position, view.target_size);
     const float2 pos2 = mix(start, end, corner.t);
 
     return {
@@ -578,7 +578,7 @@ struct VertexStage {
         outline_stages!(),
         r"
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
+                                device const ViewUBO& view [[buffer(idViewUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const FillDrawableUnionUBO* drawableVector [[buffer(idFillDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]]) {
@@ -589,7 +589,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float2 end = float2(vertx.outline_end);
     const OutlineCorner corner = outline_corner(projectTile(start, start, projectionVector[uboIndex]),
                                                 projectTile(end, end, projectionVector[uboIndex]),
-                                                vertx.position, paintParams.world_size);
+                                                vertx.position, view.target_size);
     return {
         .position       = corner.position,
         .pos            = corner.pos,
@@ -622,7 +622,7 @@ enum {
         outline_stages!(),
         r"
 FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]],
-                                device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
+                                device const ViewUBO& view [[buffer(idViewUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const FillDrawableUnionUBO* drawableVector [[buffer(idFillDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
@@ -640,7 +640,7 @@ FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]],
     const float2 end = float2(outlineEnds[segment]);
     const OutlineCorner corner = outline_corner(projectTile(start, start, projectionVector[uboIndex]),
                                                 projectTile(end, end, projectionVector[uboIndex]),
-                                                short2(quad_corner >> 1, quad_corner & 1), paintParams.world_size);
+                                                short2(quad_corner >> 1, quad_corner & 1), view.target_size);
 
     // The segment's paint values are its start's, where the drawable's
     // `paint_layout` says: the floats a vertex takes, then the offsets of
@@ -832,7 +832,7 @@ struct FragmentStage {
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
+                                device const ViewUBO& view [[buffer(idViewUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const FillDrawableUnionUBO* drawableVector [[buffer(idFillDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
@@ -859,7 +859,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float2 pattern_tl_b = pattern_to.xy;
     const float2 pattern_br_b = pattern_to.zw;
 
-    const float pixelRatio = paintParams.pixel_ratio;
+    const float pixelRatio = view.pixel_ratio;
     const float tileZoomRatio = drawable.tile_ratio;
     const float fromScale = props.from_scale;
     const float toScale = props.to_scale;

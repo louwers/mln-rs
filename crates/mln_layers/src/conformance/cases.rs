@@ -11,9 +11,9 @@ use mln_gfx::gpu::{
     ResourceId, ShaderId, ShaderKey, StencilState, TargetFormats, TextureDesc, TextureFormat, TextureId, TextureRegion,
     TextureUsage, VertexAttribute, VertexBufferLayout, VertexStep, read_texels,
 };
-use mln_gfx::shaders::layer_ubo::{GlobalPaintParamsUBO, ProjectionUBO};
+use mln_gfx::shaders::layer_ubo::{ProjectionUBO, ViewUBO};
 use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::shader_defines::{ID_GLOBAL_PAINT_PARAMS_UBO, ID_PROJECTION_UBO};
+use mln_gfx::shaders::shader_defines::{ID_PROJECTION_UBO, ID_VIEW_UBO};
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::DepthFunctionType;
@@ -911,7 +911,7 @@ pub fn resources_in_use<G: Gpu>(gpu: &mut G) -> Result<(), GpuError> {
     let sampler = gpu.create_sampler(&SamplerState::default())?;
     // The heatmap's texture, the image, looked up in its color ramp, the
     // image again, through the sampler: red over the target.
-    let paint = GlobalPaintParamsUBO { world_size: [1.0, 1.0], ..GlobalPaintParamsUBO::default() };
+    let paint = ViewUBO { target_size: [1.0, 1.0], ..ViewUBO::default() };
     let props = HeatmapTexturePropsUBO { matrix: tile_matrix(1.0), opacity: 1.0, ..HeatmapTexturePropsUBO::default() };
     let (paint, props) = (bytemuck::bytes_of(&paint), bytemuck::bytes_of(&props));
     let paint_buffer = buffer(gpu, BufferUsage::Uniform, paint)?;
@@ -931,7 +931,7 @@ pub fn resources_in_use<G: Gpu>(gpu: &mut G) -> Result<(), GpuError> {
         targets: RGBA8,
     })?;
     let entries = [
-        whole(ID_GLOBAL_PAINT_PARAMS_UBO, paint_buffer, paint),
+        whole(ID_VIEW_UBO, paint_buffer, paint),
         whole(ID_HEATMAP_TEXTURE_PROPS_UBO, props_buffer, props),
         whole(ID_PROJECTION_UBO, projection_buffer, projection),
         BindGroupEntry::Texture { id: ID_HEATMAP_IMAGE_TEXTURE as u32, texture: image, sampler },

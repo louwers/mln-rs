@@ -29,7 +29,7 @@ use mln_util::size::Size;
 use crate::custom_layer::{CustomLayerEncoder, CustomLayerPass, lend_context};
 use crate::enums::{self, AttributeFormat};
 use crate::renderer_backend::GlContext;
-use crate::shaders::glsl_sources::PRELUDE;
+use crate::shaders::glsl_sources::stage_sources;
 use crate::state::State;
 #[cfg(not(target_family = "wasm"))]
 use crate::types::FenceID;
@@ -720,21 +720,13 @@ impl GlGpu {
     fn compile(&mut self, key: &ShaderKey, highp_fragment: bool) -> Result<Program, GpuError> {
         let declared = key.program();
         let name = declared.name;
-        let source = declared.sources.glsl_es.ok_or_else(|| GpuError::Unsupported(format!("no GLSL ES for {name}")))?;
-        // Desktop OpenGL compiles GLSL ES 3.00 only with
-        // `GL_ARB_ES3_compatibility`, and every 3.3 context the GLSL 3.30
-        // that the shaders are as well: what they use of GLSL ES is in it,
-        // and it ignores their precision qualifiers.
-        let version = if self.desktop { "#version 330 core\n" } else { "#version 300 es\n" };
-        let defines: String =
-            key.define_values().flat_map(|(name, value)| ["#define ", name, " ", value, "\n"]).collect();
-        let fragment_defines = if highp_fragment { "#define HIGHP_FRAGMENT\n" } else { "" };
+        let [vertex_source, fragment_source] = stage_sources(key, self.desktop, highp_fragment)?;
         let (gl, state) = self.context.parts();
-        let shader = |stage, stage_defines, prelude, glsl| {
+        let shader = |stage, source: &str| {
             // SAFETY: the shader is new, and deleted if it doesn't compile.
             unsafe {
                 let shader = gl.create_shader(stage).map_err(GpuError::Invalid)?;
-                gl.shader_source(shader, &[version, &defines, stage_defines, prelude, glsl].concat());
+                gl.shader_source(shader, source);
                 gl.compile_shader(shader);
                 if gl.get_shader_compile_status(shader) {
                     return Ok(shader);
@@ -744,8 +736,8 @@ impl GlGpu {
                 Err(GpuError::Invalid(format!("{name} doesn't compile: {log}")))
             }
         };
-        let vertex: ShaderID = shader(glow::VERTEX_SHADER, "", PRELUDE.vertex, source.vertex)?;
-        let fragment = match shader(glow::FRAGMENT_SHADER, fragment_defines, PRELUDE.fragment, source.fragment) {
+        let vertex: ShaderID = shader(glow::VERTEX_SHADER, &vertex_source)?;
+        let fragment = match shader(glow::FRAGMENT_SHADER, &fragment_source) {
             Ok(fragment) => fragment,
             Err(error) => {
                 // SAFETY: the shader is alive and no program has it.

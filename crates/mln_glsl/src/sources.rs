@@ -78,14 +78,14 @@ vec2 get_pattern_pos(const vec2 pixel_coord_upper, const vec2 pixel_coord_lower,
 #define idProjectionUBO                     idDrawableReservedFragmentOnlyUBO + 1
 #define drawableReservedUBOCount            idProjectionUBO + 1
 
-layout(set = GLOBAL_SET_INDEX, binding = 0) uniform GlobalPaintParamsUBO {
+layout(set = GLOBAL_SET_INDEX, binding = 0) uniform ViewUBO {
     vec2 units_to_pixels;
-    vec2 world_size;
+    vec2 target_size;
     float camera_to_center_distance;
     float aspect_ratio;
     float pixel_ratio;
     float pad1;
-} paintParams;
+} view;
 
 struct ProjectionUBO {
     mat4 matrix;
@@ -243,14 +243,14 @@ pub(crate) const PRELUDE_FRAGMENT: &str = r"
 #define idProjectionUBO                     idDrawableReservedFragmentOnlyUBO + 1
 #define drawableReservedUBOCount            idProjectionUBO + 1
 
-layout(set = GLOBAL_SET_INDEX, binding = 0) uniform GlobalPaintParamsUBO {
+layout(set = GLOBAL_SET_INDEX, binding = 0) uniform ViewUBO {
     vec2 units_to_pixels;
-    vec2 world_size;
+    vec2 target_size;
     float camera_to_center_distance;
     float aspect_ratio;
     float pixel_ratio;
     float pad1;
-} paintParams;
+} view;
 
 // The atlas texture coordinate of an image's origin plus an offset from it,
 // both normalized by a power-of-two atlas size. Snapping the offset to 2^-24

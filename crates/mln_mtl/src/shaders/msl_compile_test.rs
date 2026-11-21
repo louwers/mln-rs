@@ -10,7 +10,7 @@
 use std::collections::BTreeSet;
 
 use mln_gfx::gfx_types::AttributeDataType;
-use mln_gfx::shaders::program::{BufferKind, FRAME_BUFFER, GLOBE_DEFINE, PROJECTION_BUFFER, Program};
+use mln_gfx::shaders::program::{BufferKind, GLOBE_DEFINE, PROJECTION_BUFFER, Program, VIEW_BUFFER};
 use mln_gfx::shaders::shader_defines::ID_GLOBAL_UBO_INDEX;
 use mln_gfx::shaders::source::msl::Msl;
 use objc2::rc::Retained;
@@ -229,7 +229,7 @@ fn check_bindings(program: &Program, bindings: &[Retained<ProtocolObject<dyn MTL
             MTLBindingType::Buffer
                 if !binding.isArgument() || first_vertex_buffer.is_some_and(|first| index >= first) => {}
             MTLBindingType::Buffer => {
-                let reserved = [FRAME_BUFFER, PROJECTION_BUFFER];
+                let reserved = [VIEW_BUFFER, PROJECTION_BUFFER];
                 let Some(buffer) = program.buffers.iter().chain(&reserved).find(|buffer| buffer.id == index) else {
                     failures.push(format!("buffer {index} isn't the program's"));
                     continue;

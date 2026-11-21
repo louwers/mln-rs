@@ -235,7 +235,7 @@ void main() {
 
     // calculate how much the perspective view squishes or stretches the extrude
     float extrude_length_without_perspective = length(dist);
-    float extrude_length_with_perspective = length(projected_extrude.xy / gl_Position.w * paintParams.units_to_pixels);
+    float extrude_length_with_perspective = length(projected_extrude.xy / gl_Position.w * view.units_to_pixels);
     frag_gamma_scale = extrude_length_without_perspective / extrude_length_with_perspective;
 
     frag_width2 = vec2(outset, inset);
@@ -485,7 +485,7 @@ void main() {
 
     // calculate how much the perspective view squishes or stretches the extrude
     float extrude_length_without_perspective = length(dist);
-    float extrude_length_with_perspective = length(projected_extrude.xy / gl_Position.w * paintParams.units_to_pixels);
+    float extrude_length_with_perspective = length(projected_extrude.xy / gl_Position.w * view.units_to_pixels);
     frag_gamma_scale = extrude_length_without_perspective / extrude_length_with_perspective;
 
     frag_width2 = vec2(outset, inset);
@@ -766,7 +766,7 @@ void main() {
 
     // calculate how much the perspective view squishes or stretches the extrude
     float extrude_length_without_perspective = length(dist);
-    float extrude_length_with_perspective = length(projected_extrude.xy / gl_Position.w * paintParams.units_to_pixels);
+    float extrude_length_with_perspective = length(projected_extrude.xy / gl_Position.w * view.units_to_pixels);
     frag_gamma_scale = extrude_length_without_perspective / extrude_length_with_perspective;
 
     frag_width2 = vec2(outset, inset);
@@ -1141,7 +1141,7 @@ void main() {
 
     // calculate how much the perspective view squishes or stretches the extrude
     float extrude_length_without_perspective = length(dist);
-    float extrude_length_with_perspective = length(projected_extrude.xy / gl_Position.w * paintParams.units_to_pixels);
+    float extrude_length_with_perspective = length(projected_extrude.xy / gl_Position.w * view.units_to_pixels);
     frag_gamma_scale = extrude_length_without_perspective / extrude_length_with_perspective;
 
     frag_width2 = vec2(outset, inset);
@@ -1486,7 +1486,7 @@ void main() {
 
     // calculate how much the perspective view squishes or stretches the extrude
     float extrude_length_without_perspective = length(dist);
-    float extrude_length_with_perspective = length(projected_extrude.xy / gl_Position.w * paintParams.units_to_pixels);
+    float extrude_length_with_perspective = length(projected_extrude.xy / gl_Position.w * view.units_to_pixels);
     frag_gamma_scale = extrude_length_without_perspective / extrude_length_with_perspective;
 
     frag_width2 = vec2(outset, inset);

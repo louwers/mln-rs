@@ -187,15 +187,6 @@ out vec2 v_pos_a;
 out vec2 v_pos_b;
 out vec4 v_lighting;
 
-layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_units_to_pixels;
-    highp vec2 u_world_size;
-    highp float u_camera_to_center_distance;
-    highp float u_aspect_ratio;
-    highp float u_pixel_ratio;
-    lowp float global_pad1;
-};
-
 layout (std140) uniform FillExtrusionDrawableUBO {
     highp mat4 u_matrix;
     highp vec2 u_pixel_coord_upper;
@@ -431,15 +422,6 @@ layout (location = 1) in vec2 a_decimals_ed;
 out vec2 v_pos_a;
 out vec2 v_pos_b;
 out vec4 v_lighting;
-
-layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_units_to_pixels;
-    highp vec2 u_world_size;
-    highp float u_camera_to_center_distance;
-    highp float u_aspect_ratio;
-    highp float u_pixel_ratio;
-    lowp float global_pad1;
-};
 
 layout (std140) uniform FillExtrusionDrawableUBO {
     highp mat4 u_matrix;

@@ -59,16 +59,16 @@ inline float2 atlas_pos(const float2 origin, const float2 offset) {
     return origin + rint(offset * 16777216.0) / 16777216.0;
 }
 
-struct alignas(16) GlobalPaintParamsUBO {
+struct alignas(16) ViewUBO {
     /*  0 */ float2 units_to_pixels;
-    /*  8 */ float2 world_size;
+    /*  8 */ float2 target_size;
     /* 16 */ float camera_to_center_distance;
     /* 20 */ float aspect_ratio;
     /* 24 */ float pixel_ratio;
     /* 28 */ float pad1;
     /* 32 */
 };
-static_assert(sizeof(GlobalPaintParamsUBO) == 2 * 16, "wrong size");
+static_assert(sizeof(ViewUBO) == 2 * 16, "wrong size");
 
 struct alignas(16) ProjectionUBO {
     /*   0 */ float4x4 matrix;
@@ -209,7 +209,7 @@ inline float4 projectTileFor3D(float2 pos, float elevation, device const Project
 #endif
 
 enum {
-    idGlobalPaintParamsUBO,
+    idViewUBO,
     idGlobalUBOIndex,
     globalUBOCount,
 };

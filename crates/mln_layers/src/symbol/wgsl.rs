@@ -54,16 +54,6 @@ struct CollisionTilePropsUBO {
     pad1: f32,
 };
 
-struct GlobalPaintParamsUBO {
-    units_to_pixels: vec2<f32>,
-    world_size: vec2<f32>,
-    camera_to_center_distance: f32,
-    aspect_ratio: f32,
-    pixel_ratio: f32,
-    pad1: f32,
-};
-
-@group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
 @group(0) @binding(2) var<uniform> drawable: CollisionDrawableUBO;
 @group(0) @binding(4) var<uniform> projection: ProjectionUBO;
 @group(0) @binding(5) var<uniform> tile_props: CollisionTilePropsUBO;
@@ -80,7 +70,7 @@ fn main(in: VertexInput) -> VertexOutput {
     let camera_to_anchor_distance = projected_point.w;
 
     let collision_perspective_ratio = clamp(
-        0.5 + 0.5 * (paintParams.camera_to_center_distance / camera_to_anchor_distance),
+        0.5 + 0.5 * (view.camera_to_center_distance / camera_to_anchor_distance),
         0.0,
         4.0);
 
@@ -154,15 +144,6 @@ struct VertexOutput {
     @location(4) extrude_scale: vec2<f32>,
 };
 
-struct GlobalPaintParamsUBO {
-    units_to_pixels: vec2<f32>,
-    world_size: vec2<f32>,
-    camera_to_center_distance: f32,
-    aspect_ratio: f32,
-    pixel_ratio: f32,
-    pad1: f32,
-};
-
 struct CollisionDrawableUBO {
     matrix: mat4x4<f32>,
 };
@@ -173,7 +154,6 @@ struct CollisionTilePropsUBO {
     pad1: f32,
 };
 
-@group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
 @group(0) @binding(2) var<uniform> drawable: CollisionDrawableUBO;
 @group(0) @binding(4) var<uniform> projection: ProjectionUBO;
 @group(0) @binding(5) var<uniform> tile_props: CollisionTilePropsUBO;
@@ -191,7 +171,7 @@ fn main(in: VertexInput) -> VertexOutput {
 
     let perspective = max(camera_to_anchor_distance, 1e-6);
     let collision_perspective_ratio = clamp(
-        0.5 + 0.5 * (paintParams.camera_to_center_distance / perspective),
+        0.5 + 0.5 * (view.camera_to_center_distance / perspective),
         0.0,
         4.0);
 
@@ -215,7 +195,7 @@ fn main(in: VertexInput) -> VertexOutput {
     out.not_used = f32(in.placed.y);
     out.radius = abs(f32(in.extrude.y));
     out.extrude = extrude_vec * padding_factor;
-    out.extrude_scale = tile_props.extrude_scale * paintParams.camera_to_center_distance * collision_perspective_ratio;
+    out.extrude_scale = tile_props.extrude_scale * view.camera_to_center_distance * collision_perspective_ratio;
     return out;
 }
 ",
@@ -296,10 +276,7 @@ struct VertexOutput {
     @location(3) @interpolate(flat) tex_origin: vec2<f32>,
 };
 
-@group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
-@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(0) @binding(2) var<storage, read> drawableVector: array<SymbolDrawableUBO>;
-@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
 @group(0) @binding(5) var<uniform> props: SymbolEvaluatedPropsUBO;
 
 @vertex
@@ -370,8 +347,8 @@ fn main(in: VertexInput) -> VertexOutput {
     let camera_to_anchor_distance = projectedPoint.w;
     let pitch_with_map = drawable.pitch_with_map != 0u;
     let distance_ratio = select(
-        paintParams.camera_to_center_distance / camera_to_anchor_distance,
-        camera_to_anchor_distance / paintParams.camera_to_center_distance,
+        view.camera_to_center_distance / camera_to_anchor_distance,
+        camera_to_anchor_distance / view.camera_to_center_distance,
         pitch_with_map
     );
     let perspective_ratio = clamp(0.5 + 0.5 * distance_ratio, 0.0, 4.0);
@@ -388,7 +365,7 @@ fn main(in: VertexInput) -> VertexOutput {
         let offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2<f32>(1.0, 0.0), in.height_offset, projection);
         let a = projectedPoint.xy / projectedPoint.w;
         let b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
-        symbol_rotation = atan2((b.y - a.y) / paintParams.aspect_ratio, b.x - a.x);
+        symbol_rotation = atan2((b.y - a.y) / view.aspect_ratio, b.x - a.x);
     }
 
     let angle_sin = sin(segment_angle + symbol_rotation);
@@ -443,7 +420,6 @@ struct FragmentInput {
 };
 
 @group(0) @binding(3) var<storage, read> tilePropsVector: array<SymbolTilePropsUBO>;
-@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(0) @binding(5) var<uniform> props: SymbolEvaluatedPropsUBO;
 @group(1) @binding(0) var texture_sampler: sampler;
 @group(1) @binding(1) var image: texture_2d<f32>;
@@ -469,14 +445,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: Some(concat!(
         unpack_opacity!(),
         r"
-struct GlobalPaintParamsUBO {
-    units_to_pixels: vec2<f32>,
-    world_size: vec2<f32>,
-    camera_to_center_distance: f32,
-    aspect_ratio: f32,
-    pixel_ratio: f32,
-    pad1: f32,
-};
 
 struct SymbolDrawableUBO {
     matrix: mat4x4<f32>,
@@ -533,11 +501,6 @@ struct SymbolEvaluatedPropsUBO {
     fade_change: f32,
 };
 
-struct GlobalIndexUBO {
-    value: u32,
-    pad0: vec3<u32>,
-};
-
 const c_offscreen_degenerate_triangle_location: f32 = -2.0;
 "
     )),
@@ -586,10 +549,7 @@ struct VertexOutput {
     @location(9) @interpolate(flat) tex_origin: vec2<f32>,
 };
 
-@group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
-@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(0) @binding(2) var<storage, read> drawableVector: array<SymbolDrawableUBO>;
-@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
 @group(0) @binding(5) var<uniform> props: SymbolEvaluatedPropsUBO;
 
 @vertex
@@ -659,8 +619,8 @@ fn main(in: VertexInput) -> VertexOutput {
     let camera_to_anchor_distance = projectedPoint.w;
     let pitch_with_map = drawable.pitch_with_map != 0u;
     let distance_ratio = select(
-        paintParams.camera_to_center_distance / camera_to_anchor_distance,
-        camera_to_anchor_distance / paintParams.camera_to_center_distance,
+        view.camera_to_center_distance / camera_to_anchor_distance,
+        camera_to_anchor_distance / view.camera_to_center_distance,
         pitch_with_map
     );
     let perspective_ratio = clamp(0.5 + 0.5 * distance_ratio, 0.0, 4.0);
@@ -677,7 +637,7 @@ fn main(in: VertexInput) -> VertexOutput {
         let offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2<f32>(1.0, 0.0), in.height_offset, projection);
         let a = projectedPoint.xy / projectedPoint.w;
         let b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
-        symbol_rotation = atan2((b.y - a.y) / paintParams.aspect_ratio, b.x - a.x);
+        symbol_rotation = atan2((b.y - a.y) / view.aspect_ratio, b.x - a.x);
     }
 
     let angle_sin = sin(segment_angle + symbol_rotation);
@@ -731,7 +691,7 @@ fn main(in: VertexInput) -> VertexOutput {
 #else
     let halo_blur = select(props.icon_halo_blur, props.text_halo_blur, drawable.is_text_prop != 0u);
 #endif
-    let EDGE_GAMMA = 0.105 / paintParams.pixel_ratio;
+    let EDGE_GAMMA = 0.105 / view.pixel_ratio;
     let halo_blur_gamma = select(0.0, halo_blur * 1.19 / SDF_PX, drawable.is_halo != 0u);
     out.gamma_scaled = (halo_blur_gamma + EDGE_GAMMA) / (fontScale * drawable.gamma_scale) * gamma_scale;
     out.halo_edge = (6.0 - halo_width / fontScale) / SDF_PX;
@@ -762,9 +722,7 @@ struct FragmentInput {
     @location(9) @interpolate(flat) tex_origin: vec2<f32>,
 };
 
-@group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
 @group(0) @binding(3) var<storage, read> tilePropsVector: array<SymbolTilePropsUBO>;
-@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(0) @binding(5) var<uniform> props: SymbolEvaluatedPropsUBO;
 @group(1) @binding(0) var texture_sampler: sampler;
 @group(1) @binding(1) var glyph_atlas: texture_2d<f32>;
@@ -821,14 +779,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
         sdf_px!(),
         unpack_opacity!(),
         r"
-struct GlobalPaintParamsUBO {
-    units_to_pixels: vec2<f32>,
-    world_size: vec2<f32>,
-    camera_to_center_distance: f32,
-    aspect_ratio: f32,
-    pixel_ratio: f32,
-    pad1: f32,
-};
 
 struct SymbolDrawableUBO {
     matrix: mat4x4<f32>,
@@ -885,11 +835,6 @@ struct SymbolEvaluatedPropsUBO {
     fade_change: f32,
 };
 
-struct GlobalIndexUBO {
-    value: u32,
-    pad0: vec3<u32>,
-};
-
 const c_offscreen_degenerate_triangle_location: f32 = -2.0;
 "
     )),
@@ -938,10 +883,7 @@ struct VertexOutput {
     @location(10) @interpolate(flat) tex_origin: vec2<f32>,
 };
 
-@group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
-@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(0) @binding(2) var<storage, read> drawableVector: array<SymbolDrawableUBO>;
-@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
 @group(0) @binding(5) var<uniform> props: SymbolEvaluatedPropsUBO;
 
 const SDF = 1.0;
@@ -1014,8 +956,8 @@ fn main(in: VertexInput) -> VertexOutput {
     let camera_to_anchor_distance = projectedPoint.w;
     let pitch_with_map = drawable.pitch_with_map != 0u;
     let distance_ratio = select(
-        paintParams.camera_to_center_distance / camera_to_anchor_distance,
-        camera_to_anchor_distance / paintParams.camera_to_center_distance,
+        view.camera_to_center_distance / camera_to_anchor_distance,
+        camera_to_anchor_distance / view.camera_to_center_distance,
         pitch_with_map
     );
     let perspective_ratio = clamp(0.5 + 0.5 * distance_ratio, 0.0, 4.0);
@@ -1031,7 +973,7 @@ fn main(in: VertexInput) -> VertexOutput {
         let offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2<f32>(1.0, 0.0), in.height_offset, projection);
         let a = projectedPoint.xy / projectedPoint.w;
         let b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
-        symbol_rotation = atan2((b.y - a.y) / paintParams.aspect_ratio, b.x - a.x);
+        symbol_rotation = atan2((b.y - a.y) / view.aspect_ratio, b.x - a.x);
     }
 
     let angle_sin = sin(segment_angle + symbol_rotation);
@@ -1088,7 +1030,7 @@ fn main(in: VertexInput) -> VertexOutput {
 #else
     let halo_blur = select(props.icon_halo_blur, props.text_halo_blur, drawable.is_text_prop != 0u);
 #endif
-    let EDGE_GAMMA = 0.105 / paintParams.pixel_ratio;
+    let EDGE_GAMMA = 0.105 / view.pixel_ratio;
     let halo_blur_gamma = select(0.0, halo_blur * 1.19 / SDF_PX, drawable.is_halo != 0u);
     out.gamma_scaled = (halo_blur_gamma + EDGE_GAMMA) / (fontScale * drawable.gamma_scale) * gamma_scale;
     out.halo_edge = (6.0 - halo_width / fontScale) / SDF_PX;
@@ -1122,9 +1064,7 @@ struct FragmentInput {
     @location(10) @interpolate(flat) tex_origin: vec2<f32>,
 };
 
-@group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
 @group(0) @binding(3) var<storage, read> tilePropsVector: array<SymbolTilePropsUBO>;
-@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(0) @binding(5) var<uniform> props: SymbolEvaluatedPropsUBO;
 @group(1) @binding(0) var glyph_sampler: sampler;
 @group(1) @binding(1) var glyph_image: texture_2d<f32>;
@@ -1190,14 +1130,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
         sdf_px!(),
         unpack_opacity!(),
         r"
-struct GlobalPaintParamsUBO {
-    units_to_pixels: vec2<f32>,
-    world_size: vec2<f32>,
-    camera_to_center_distance: f32,
-    aspect_ratio: f32,
-    pixel_ratio: f32,
-    pad1: f32,
-};
 
 struct SymbolDrawableUBO {
     matrix: mat4x4<f32>,
@@ -1252,11 +1184,6 @@ struct SymbolEvaluatedPropsUBO {
     icon_halo_width: f32,
     icon_halo_blur: f32,
     fade_change: f32,
-};
-
-struct GlobalIndexUBO {
-    value: u32,
-    pad0: vec3<u32>,
 };
 
 const c_offscreen_degenerate_triangle_location: f32 = -2.0;

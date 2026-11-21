@@ -568,7 +568,7 @@ void main() {
     const vec2 pattern_tl_b = pattern_to.xy;
     const vec2 pattern_br_b = pattern_to.zw;
 
-    const float pixelRatio = paintParams.pixel_ratio;
+    const float pixelRatio = view.pixel_ratio;
     const float tileZoomRatio = drawable.tile_ratio;
     const float fromScale = props.from_scale;
     const float toScale = props.to_scale;
@@ -868,7 +868,7 @@ void main() {
     const vec2 pattern_tl_b = pattern_to.xy;
     const vec2 pattern_br_b = pattern_to.zw;
 
-    const float pixelRatio = paintParams.pixel_ratio;
+    const float pixelRatio = view.pixel_ratio;
     const float tileZoomRatio = drawable.tile_ratio;
     const float fromScale = props.from_scale;
     const float toScale = props.to_scale;

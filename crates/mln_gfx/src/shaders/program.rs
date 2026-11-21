@@ -7,9 +7,9 @@ use std::{fmt, ptr};
 use crate::gfx_types::AttributeDataType;
 use crate::gpu::{ShaderKey, VertexStep};
 use crate::projection_variant::ProjectionVariant;
-use crate::shaders::layer_ubo::{GlobalPaintParamsUBO, ProjectionUBO};
+use crate::shaders::layer_ubo::{ProjectionUBO, ViewUBO};
 use crate::shaders::program_parameters::ProgramParameters;
-use crate::shaders::shader_defines::{ID_GLOBAL_PAINT_PARAMS_UBO, ID_PROJECTION_UBO};
+use crate::shaders::shader_defines::{ID_PROJECTION_UBO, ID_VIEW_UBO};
 use crate::shaders::source::{glsl, glsl_es, msl, wgsl};
 
 /// A program: the buffers, vertex attributes and textures its shaders bind,
@@ -20,12 +20,13 @@ use crate::shaders::source::{glsl, glsl_es, msl, wgsl};
 /// source in the backend's shading language and binds what a draw gives it
 /// where this declaration says:
 ///
-/// - A buffer at the binding of its id. The engine reserves the frame's
-///   block at 0 ([`FRAME_BUFFER`]), the draw's index into the storage
+/// - A buffer at the binding of its id. The engine reserves the view's
+///   block at 0 ([`VIEW_BUFFER`]), the draw's index into the storage
 ///   buffers it reads at 1, which the backend binds itself, and the
 ///   projection block at 4 ([`PROJECTION_BUFFER`]); any program may read
-///   them, and lists none of them in [`buffers`](Program::buffers). A
-///   program's own buffers take the other ids: at 2 a storage buffer that
+///   them, and lists none of them in [`buffers`](Program::buffers): the
+///   backends declare them for the stages that read them. A program's own
+///   buffers take the other ids: at 2 a storage buffer that
 ///   only its vertex stage reads, at 3 one that only its fragment stage
 ///   reads, either a uniform block instead where a draw binds one of its
 ///   own; at 5 and 6 its uniform blocks, or at 5 a storage buffer that both
@@ -117,9 +118,8 @@ impl Buffer {
     }
 }
 
-/// The frame's block, which the engine binds for every draw.
-pub const FRAME_BUFFER: Buffer =
-    Buffer::uniform::<GlobalPaintParamsUBO>(ID_GLOBAL_PAINT_PARAMS_UBO, "GlobalPaintParamsUBO");
+/// The view's block, which the engine binds for every draw.
+pub const VIEW_BUFFER: Buffer = Buffer::uniform::<ViewUBO>(ID_VIEW_UBO, "ViewUBO");
 
 /// The projection block, which a layer binds for its draws.
 pub const PROJECTION_BUFFER: Buffer = Buffer::storage::<ProjectionUBO>(ID_PROJECTION_UBO, "ProjectionUBO");
@@ -246,7 +246,7 @@ impl Program {
     /// frame's or the projection block.
     #[must_use]
     pub fn buffer_named(&self, name: &str) -> Option<&'static Buffer> {
-        static RESERVED: [Buffer; 2] = [FRAME_BUFFER, PROJECTION_BUFFER];
+        static RESERVED: [Buffer; 2] = [VIEW_BUFFER, PROJECTION_BUFFER];
         self.buffers.iter().chain(&RESERVED).find(|buffer| buffer.name == name)
     }
 }

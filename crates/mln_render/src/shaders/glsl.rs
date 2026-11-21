@@ -209,7 +209,7 @@ void main() {
     const vec2 tile_pos = base + across * (offset.y * units);
     const vec4 corner = projectTile(tile_pos, projection);
     const vec4 middle = projectTile(base, projection);
-    const float extent = length((corner.xy - middle.xy) / corner.w * paintParams.units_to_pixels);
+    const float extent = length((corner.xy - middle.xy) / corner.w * view.units_to_pixels);
 
     gl_Position = corner;
     frag_offset = offset;

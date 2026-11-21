@@ -1,4 +1,5 @@
-//! The WGSL prelude every shader compiles after.
+//! The WGSL prelude every shader compiles after, and the declarations of
+//! the engine's buffers that a stage reads.
 
 /// The WGSL every program compiles after.
 pub(crate) const PRELUDE: &str = r"
@@ -53,6 +54,22 @@ fn get_pattern_pos(pixel_coord_upper: vec2<f32>, pixel_coord_lower: vec2<f32>,
     let offset = gl_mod(offset_b, pattern_size);
     return (tile_units_to_pixels * pos + offset) / pattern_size;
 }
+
+// The view's block, at `ID_VIEW_UBO`.
+struct ViewUBO {
+    units_to_pixels: vec2<f32>,
+    target_size: vec2<f32>,
+    camera_to_center_distance: f32,
+    aspect_ratio: f32,
+    pixel_ratio: f32,
+    pad1: f32,
+};
+
+// The draw's index into the storage buffers it reads, at `ID_GLOBAL_UBO_INDEX`.
+struct GlobalIndexUBO {
+    value: u32,
+    pad0: vec3<u32>,
+};
 
 struct ProjectionUBO {
     matrix: mat4x4<f32>,
@@ -200,3 +217,11 @@ fn atlas_pos(origin: vec2<f32>, offset: vec2<f32>) -> vec2<f32> {
     return origin + round(offset * 16777216.0) / 16777216.0;
 }
 ";
+
+/// The declarations of the engine's buffers: the view's block, the draw's
+/// index and the projection blocks, each with the name a stage reads it by.
+pub(crate) const RESERVED_BINDINGS: [(&str, &str); 3] = [
+    ("view", "@group(0) @binding(0) var<uniform> view: ViewUBO;"),
+    ("globalIndex", "@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;"),
+    ("projectionVector", "@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;"),
+];

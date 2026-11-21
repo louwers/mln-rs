@@ -3,16 +3,7 @@
 use mln_gfx::shaders::source::glsl_es::Glsl;
 
 pub(super) const FILL_OUTLINE_PATTERN_SHADER: Glsl = Glsl {
-    vertex: r"layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_units_to_pixels;
-    highp vec2 u_world_size;
-    highp float u_camera_to_center_distance;
-    highp float u_aspect_ratio;
-    highp float u_pixel_ratio;
-    lowp float global_pad1;
-};
-
-layout (std140) uniform FillOutlinePatternDrawableUBO {
+    vertex: r"layout (std140) uniform FillOutlinePatternDrawableUBO {
     highp mat4 u_matrix;
     highp vec2 u_pixel_coord_upper;
     highp vec2 u_pixel_coord_lower;
@@ -107,7 +98,7 @@ highp vec4 pattern_to = u_pattern_to;
     v_pos_a = get_pattern_pos(u_pixel_coord_upper, u_pixel_coord_lower, fromScale * display_size_a, tileRatio, a_pos);
     v_pos_b = get_pattern_pos(u_pixel_coord_upper, u_pixel_coord_lower, toScale * display_size_b, tileRatio, a_pos);
 
-    v_pos = (gl_Position.xy / gl_Position.w + 1.0) / 2.0 * u_world_size;
+    v_pos = (gl_Position.xy / gl_Position.w + 1.0) / 2.0 * u_target_size;
 }
 ",
     fragment: r"#ifdef GL_ES
@@ -207,16 +198,7 @@ highp vec4 pattern_to = u_pattern_to;
 };
 
 pub(super) const FILL_OUTLINE_SHADER: Glsl = Glsl {
-    vertex: r"layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_units_to_pixels;
-    highp vec2 u_world_size;
-    highp float u_camera_to_center_distance;
-    highp float u_aspect_ratio;
-    highp float u_pixel_ratio;
-    lowp float global_pad1;
-};
-
-layout (std140) uniform FillOutlineDrawableUBO {
+    vertex: r"layout (std140) uniform FillOutlineDrawableUBO {
     highp mat4 u_matrix;
     // Interpolations
     highp float u_outline_color_t;
@@ -260,7 +242,7 @@ lowp float opacity = u_opacity;
 #endif
 
     gl_Position = projectTile(a_pos, a_pos);
-    v_pos = (gl_Position.xy / gl_Position.w + 1.0) / 2.0 * u_world_size;
+    v_pos = (gl_Position.xy / gl_Position.w + 1.0) / 2.0 * u_target_size;
 }
 ",
     fragment: r"layout (std140) uniform FillEvaluatedPropsUBO {
@@ -336,8 +318,8 @@ vec4 outline_corner(highp vec4 start, highp vec4 end, vec2 corner, out highp vec
         b = mix(start, end, tb);
     }
 
-    highp vec2 sa = (a.xy / a.w + 1.0) / 2.0 * u_world_size;
-    highp vec2 sb = (b.xy / b.w + 1.0) / 2.0 * u_world_size;
+    highp vec2 sa = (a.xy / a.w + 1.0) / 2.0 * u_target_size;
+    highp vec2 sb = (b.xy / b.w + 1.0) / 2.0 * u_target_size;
     highp vec2 d = sb - sa;
     if (d == vec2(0.0)) {
         return vec4(0.0);
@@ -349,7 +331,7 @@ vec4 outline_corner(highp vec4 start, highp vec4 end, vec2 corner, out highp vec
     highp vec4 clip = at_end ? b : a;
     pos = at_end ? sb : sa;
     t = at_end ? tb : ta;
-    return clip + vec4(offset * 2.0 / u_world_size * clip.w, 0.0, 0.0);
+    return clip + vec4(offset * 2.0 / u_target_size * clip.w, 0.0, 0.0);
 }
 "
     };
@@ -357,16 +339,7 @@ vec4 outline_corner(highp vec4 start, highp vec4 end, vec2 corner, out highp vec
 
 pub(super) const FILL_OUTLINE_INSTANCED_SHADER: Glsl = Glsl {
     vertex: concat!(
-        r"layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_units_to_pixels;
-    highp vec2 u_world_size;
-    highp float u_camera_to_center_distance;
-    highp float u_aspect_ratio;
-    highp float u_pixel_ratio;
-    lowp float global_pad1;
-};
-
-layout (std140) uniform FillOutlineDrawableUBO {
+        r"layout (std140) uniform FillOutlineDrawableUBO {
     highp mat4 u_matrix;
     // Interpolations
     highp float u_outline_color_t;
@@ -426,16 +399,7 @@ lowp float opacity = u_opacity;
 
 pub(super) const FILL_OUTLINE_PATTERN_INSTANCED_SHADER: Glsl = Glsl {
     vertex: concat!(
-        r"layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_units_to_pixels;
-    highp vec2 u_world_size;
-    highp float u_camera_to_center_distance;
-    highp float u_aspect_ratio;
-    highp float u_pixel_ratio;
-    lowp float global_pad1;
-};
-
-layout (std140) uniform FillOutlinePatternDrawableUBO {
+        r"layout (std140) uniform FillOutlinePatternDrawableUBO {
     highp mat4 u_matrix;
     highp vec2 u_pixel_coord_upper;
     highp vec2 u_pixel_coord_lower;
@@ -535,16 +499,7 @@ highp vec4 pattern_to = u_pattern_to;
 };
 
 pub(super) const FILL_PATTERN_SHADER: Glsl = Glsl {
-    vertex: r"layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_units_to_pixels;
-    highp vec2 u_world_size;
-    highp float u_camera_to_center_distance;
-    highp float u_aspect_ratio;
-    highp float u_pixel_ratio;
-    lowp float global_pad1;
-};
-
-layout (std140) uniform FillPatternDrawableUBO {
+    vertex: r"layout (std140) uniform FillPatternDrawableUBO {
     highp mat4 u_matrix;
     highp vec2 u_pixel_coord_upper;
     highp vec2 u_pixel_coord_lower;

@@ -179,7 +179,7 @@ layout(location = 0) out vec2 frag_position;
 
 void main() {
 
-    gl_Position = props.matrix * vec4(in_position * paintParams.world_size, 0, 1);
+    gl_Position = props.matrix * vec4(in_position * view.target_size, 0, 1);
 
     frag_position = in_position;
 }

@@ -236,16 +236,7 @@ void main() {
 };
 
 pub(crate) const TILE_DEBUG_SHADER: Glsl = Glsl {
-    vertex: r"layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_units_to_pixels;
-    highp vec2 u_world_size;
-    highp float u_camera_to_center_distance;
-    highp float u_aspect_ratio;
-    highp float u_pixel_ratio;
-    lowp float global_pad1;
-};
-
-layout (std140) uniform TileDebugPropsUBO {
+    vertex: r"layout (std140) uniform TileDebugPropsUBO {
     highp vec4 u_color;
     highp float u_width;
     highp float u_world_width;

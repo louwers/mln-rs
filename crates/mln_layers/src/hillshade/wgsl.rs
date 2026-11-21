@@ -124,18 +124,11 @@ struct VertexOutput {
     @location(0) tex_coord: vec2<f32>,
 };
 
-struct GlobalIndexUBO {
-    value: u32,
-    pad0: vec3<u32>,
-};
-
 struct HillshadeDrawableUBO {
     matrix: mat4x4<f32>,
 };
 
-@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(0) @binding(2) var<storage, read> drawableVector: array<HillshadeDrawableUBO>;
-@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
@@ -163,11 +156,6 @@ struct FragmentInput {
     @location(0) tex_coord: vec2<f32>,
 };
 
-struct GlobalIndexUBO {
-    value: u32,
-    pad0: vec3<u32>,
-};
-
 struct HillshadeTilePropsUBO {
     latrange: vec2<f32>,
     exaggeration: f32,
@@ -186,7 +174,6 @@ struct HillshadeEvaluatedPropsUBO {
     highlights: array<vec4<f32>, 4>,
 };
 
-@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(0) @binding(3) var<storage, read> tilePropsVector: array<HillshadeTilePropsUBO>;
 @group(0) @binding(5) var<uniform> props: HillshadeEvaluatedPropsUBO;
 @group(1) @binding(0) var texture_sampler: sampler;

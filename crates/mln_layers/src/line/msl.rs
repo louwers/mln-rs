@@ -252,7 +252,7 @@ struct FragmentStage {
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
+                                device const ViewUBO& view [[buffer(idViewUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const LineDrawableUnionUBO* drawableVector [[buffer(idLineDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
@@ -329,7 +329,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 
     // calculate how much the perspective view squishes or stretches the extrude
     const float extrude_length_without_perspective = length(dist);
-    const float extrude_length_with_perspective = length(projected_extrude.xy / position.w * paintParams.units_to_pixels);
+    const float extrude_length_with_perspective = length(projected_extrude.xy / position.w * view.units_to_pixels);
 
 #if defined(HAS_UNIFORM_u_dasharray)
     const float2 patternscale_a = drawable.patternscale_a;
@@ -372,7 +372,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
+                            device const ViewUBO& view [[buffer(idViewUBO)]],
                             device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                             device const LineTilePropsUnionUBO* tilePropsVector [[buffer(idLineTilePropsUBO)]],
                             device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]],
@@ -629,7 +629,7 @@ struct FragmentStage {
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
+                                device const ViewUBO& view [[buffer(idViewUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const LineDrawableUnionUBO* drawableVector [[buffer(idLineDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
@@ -702,7 +702,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 
     // calculate how much the perspective view squishes or stretches the extrude
     const float extrude_length_without_perspective = length(dist);
-    const float extrude_length_with_perspective = length(projected_extrude.xy / position.w * paintParams.units_to_pixels);
+    const float extrude_length_with_perspective = length(projected_extrude.xy / position.w * view.units_to_pixels);
 
     return {
         .position     = position,
@@ -971,7 +971,7 @@ struct FragmentStage {
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
+                                device const ViewUBO& view [[buffer(idViewUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const LineDrawableUnionUBO* drawableVector [[buffer(idLineDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
@@ -1045,7 +1045,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 
     // calculate how much the perspective view squishes or stretches the extrude
     const float extrude_length_without_perspective = length(dist);
-    const float extrude_length_with_perspective = length(projected_extrude.xy / position.w * paintParams.units_to_pixels);
+    const float extrude_length_with_perspective = length(projected_extrude.xy / position.w * view.units_to_pixels);
 
     return {
         .position     = position,
@@ -1076,7 +1076,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
+                            device const ViewUBO& view [[buffer(idViewUBO)]],
                             device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                             device const LineTilePropsUnionUBO* tilePropsVector [[buffer(idLineTilePropsUBO)]],
                             device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]],
@@ -1389,7 +1389,7 @@ struct FragmentStage {
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
+                                device const ViewUBO& view [[buffer(idViewUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const LineDrawableUnionUBO* drawableVector [[buffer(idLineDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
@@ -1465,7 +1465,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 
     // calculate how much the perspective view squishes or stretches the extrude
     const float extrude_length_without_perspective = length(dist);
-    const float extrude_length_with_perspective = length(projected_extrude.xy / position.w * paintParams.units_to_pixels);
+    const float extrude_length_with_perspective = length(projected_extrude.xy / position.w * view.units_to_pixels);
 
 #if defined(HAS_UNIFORM_u_dasharray)
     const float2 patternscale_a = drawable.patternscale_a;
@@ -1510,7 +1510,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
+                            device const ViewUBO& view [[buffer(idViewUBO)]],
                             device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                             device const LineTilePropsUnionUBO* tilePropsVector [[buffer(idLineTilePropsUBO)]],
                             device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]],
@@ -1772,7 +1772,7 @@ struct FragmentStage {
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
+                                device const ViewUBO& view [[buffer(idViewUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const LineDrawableUnionUBO* drawableVector [[buffer(idLineDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
@@ -1840,7 +1840,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 
     // calculate how much the perspective view squishes or stretches the extrude
     const float extrude_length_without_perspective = length(dist);
-    const float extrude_length_with_perspective = length(projected_extrude.xy / position.w * paintParams.units_to_pixels);
+    const float extrude_length_with_perspective = length(projected_extrude.xy / position.w * view.units_to_pixels);
 
     return {
         .position    = position,
@@ -1864,7 +1864,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
+                            device const ViewUBO& view [[buffer(idViewUBO)]],
                             device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]]) {
 #if defined(PROJECTION_GLOBE)
     if (clippedAtAntimeridian(in.tile_x)) {

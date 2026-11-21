@@ -181,11 +181,11 @@ struct FragmentStage {
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
+                                device const ViewUBO& view [[buffer(idViewUBO)]],
                                 device const HeatmapTexturePropsUBO& props [[buffer(idHeatmapTexturePropsUBO)]]) {
 
     const float2 pos = float2(vertx.pos);
-    const float4 position = props.matrix * float4(pos * paintParams.world_size, 0, 1);
+    const float4 position = props.matrix * float4(pos * view.target_size, 0, 1);
 
     return {
         .position    = position,

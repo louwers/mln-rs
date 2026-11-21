@@ -3,8 +3,9 @@
 /// The WGSL of a program: its stages, and the constants and structs of its
 /// own that both stages read.
 ///
-/// A stage compiles from the backend's prelude, `prelude` and the stage's
-/// source.
+/// A stage compiles from the backend's prelude, the declarations of the
+/// engine's buffers that `prelude` or the stage names (`view`, `globalIndex`
+/// and `projectionVector`), `prelude` and the stage's source.
 #[derive(Debug)]
 pub struct Wgsl {
     /// The vertex stage, or `None` for an empty one.

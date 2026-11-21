@@ -15,11 +15,6 @@ struct VertexOutput {
     @location(0) frag_position: vec2<f32>,
 };
 
-struct GlobalIndexUBO {
-    value: u32,
-    pad0: vec3<u32>,
-};
-
 struct ColorReliefDrawableUBO {
     matrix: mat4x4<f32>,
 };
@@ -31,9 +26,7 @@ struct ColorReliefTilePropsUBO {
     pad_tile0: f32,
 };
 
-@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(0) @binding(2) var<storage, read> drawableVector: array<ColorReliefDrawableUBO>;
-@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
 @group(0) @binding(5) var<storage, read> tilePropsVector: array<ColorReliefTilePropsUBO>;
 
 @vertex
@@ -64,11 +57,6 @@ struct FragmentInput {
     @location(0) frag_position: vec2<f32>,
 };
 
-struct GlobalIndexUBO {
-    value: u32,
-    pad0: vec3<u32>,
-};
-
 struct ColorReliefTilePropsUBO {
     unpack: vec4<f32>,
     dimension: vec2<f32>,
@@ -83,7 +71,6 @@ struct ColorReliefEvaluatedPropsUBO {
     pad_eval2: f32,
 };
 
-@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(0) @binding(5) var<storage, read> tilePropsVector: array<ColorReliefTilePropsUBO>;
 @group(0) @binding(6) var<uniform> props: ColorReliefEvaluatedPropsUBO;
 @group(1) @binding(0) var dem_sampler: sampler;

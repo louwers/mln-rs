@@ -178,7 +178,7 @@ void main() {
     gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector.projection_ubo[constant.ubo_index]);
 
     // From the top left, as gl_FragCoord is.
-    frag_position = (vec2(1.0, -1.0) * gl_Position.xy / gl_Position.w + 1.0) / 2.0 * paintParams.world_size;
+    frag_position = (vec2(1.0, -1.0) * gl_Position.xy / gl_Position.w + 1.0) / 2.0 * view.target_size;
 }
 ",
     fragment: r"
@@ -348,7 +348,7 @@ void main() {
     const vec2 pattern_tl_b = frag_pattern_to.xy;
     const vec2 pattern_br_b = frag_pattern_to.zw;
 
-    const float pixelRatio = paintParams.pixel_ratio;
+    const float pixelRatio = view.pixel_ratio;
     const float tileZoomRatio = drawable.tile_ratio;
     const float fromScale = props.from_scale;
     const float toScale = props.to_scale;
@@ -599,7 +599,7 @@ void main() {
     const vec2 pattern_tl_b = frag_pattern_to.xy;
     const vec2 pattern_br_b = frag_pattern_to.zw;
 
-    const float pixelRatio = paintParams.pixel_ratio;
+    const float pixelRatio = view.pixel_ratio;
     const float tileZoomRatio = drawable.tile_ratio;
     const float fromScale = props.from_scale;
     const float toScale = props.to_scale;
@@ -613,7 +613,7 @@ void main() {
     frag_pos_a = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, fromScale * display_size_a, tileZoomRatio, position2),
     frag_pos_b = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, toScale * display_size_b, tileZoomRatio, position2),
     // From the top left, as gl_FragCoord is.
-    frag_pos = (vec2(1.0, -1.0) * gl_Position.xy / gl_Position.w + 1.0) / 2.0 * paintParams.world_size;
+    frag_pos = (vec2(1.0, -1.0) * gl_Position.xy / gl_Position.w + 1.0) / 2.0 * view.target_size;
 }
 ",
     fragment: r"
@@ -774,7 +774,7 @@ vec4 outline_corner(vec4 start, vec4 end, vec2 corner, out vec2 pos, out float t
         b = mix(start, end, tb);
     }
 
-    const vec2 world = paintParams.world_size;
+    const vec2 world = view.target_size;
     const vec2 sa = (a.xy / a.w + 1.0) / 2.0 * world;
     const vec2 sb = (b.xy / b.w + 1.0) / 2.0 * world;
     const vec2 d = sb - sa;
@@ -868,7 +868,7 @@ void main() {
     gl_Position = outline_corner(projectTile(start, start, projection), projectTile(end, end, projection), vec2(in_position), pos, t);
 
     // From the top left, as gl_FragCoord is.
-    frag_position = vec2(pos.x, paintParams.world_size.y - pos.y);
+    frag_position = vec2(pos.x, view.target_size.y - pos.y);
 }
 "
     ),
@@ -997,8 +997,8 @@ void main() {
     frag_opacity = unpack_mix_float(in_opacity, drawable.opacity_t);
 #endif
 
-    const vec2 display_size_a = (frag_pattern_from.zw - frag_pattern_from.xy) / paintParams.pixel_ratio;
-    const vec2 display_size_b = (frag_pattern_to.zw - frag_pattern_to.xy) / paintParams.pixel_ratio;
+    const vec2 display_size_a = (frag_pattern_from.zw - frag_pattern_from.xy) / view.pixel_ratio;
+    const vec2 display_size_b = (frag_pattern_to.zw - frag_pattern_to.xy) / view.pixel_ratio;
 
     const ProjectionUBO projection = projectionVector.projection_ubo[constant.ubo_index];
     const vec2 start = vec2(in_outline_pos);
@@ -1011,7 +1011,7 @@ void main() {
     frag_pos_a = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, props.from_scale * display_size_a, drawable.tile_ratio, position);
     frag_pos_b = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, props.to_scale * display_size_b, drawable.tile_ratio, position);
     // From the top left, as gl_FragCoord is.
-    frag_pos = vec2(pos.x, paintParams.world_size.y - pos.y);
+    frag_pos = vec2(pos.x, view.target_size.y - pos.y);
 }
 "
     ),
@@ -1115,7 +1115,7 @@ void main() {
     gl_Position = outline_corner(projectTile(start, start, projection), projectTile(end, end, projection), corner, pos, t);
 
     // From the top left, as gl_FragCoord is.
-    frag_position = vec2(pos.x, paintParams.world_size.y - pos.y);
+    frag_position = vec2(pos.x, view.target_size.y - pos.y);
 }
 "
     ),

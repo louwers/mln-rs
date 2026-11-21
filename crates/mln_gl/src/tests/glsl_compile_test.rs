@@ -11,12 +11,12 @@ use std::collections::BTreeSet;
 
 use mln_gfx::RendererBackend as _;
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::program::{FRAME_BUFFER, PROJECTION_BUFFER, Program};
+use mln_gfx::shaders::program::{PROJECTION_BUFFER, Program, VIEW_BUFFER};
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::shaders::source::glsl_es::Glsl;
 use mln_util::hash::HashSet;
 
-use crate::shaders::glsl_sources::PRELUDE;
+use crate::shaders::glsl_sources::stage_sources;
 use crate::{Api, Device, DeviceOptions, RendererBackend};
 
 /// A backend on a device of `api` that compiles the built-in layer types'
@@ -113,13 +113,29 @@ fn declared_blocks(glsl: &str) -> BTreeSet<String> {
     declared_blocks_in_order(glsl).into_iter().collect()
 }
 
+/// The vertex and fragment shaders of each variant of each program that
+/// the renderer compiles on OpenGL ES, as the backend composes them.
+fn compiled_stages() -> Vec<(&'static Program, [String; 2])> {
+    let parameters = ProgramParameters::new(1.0, false);
+    let mut stages = Vec::new();
+    for (program, _) in programs() {
+        for variant in [ProjectionVariant::Mercator, ProjectionVariant::Globe] {
+            for uniforms in [&[][..], program.properties] {
+                let key = program.variant_key(&parameters, uniforms, variant);
+                stages.push((program, stage_sources(&key, false, false).expect("GLSL ES")));
+            }
+        }
+    }
+    stages
+}
+
 /// WebGL2 rejects a draw whose program has a uniform block without a buffer,
 /// and whether a block the shader doesn't read counts differs between
 /// compilers. So every block a shader declares needs an id to bind at.
 #[test]
 fn every_declared_uniform_block_is_a_buffer() {
-    for (program, source) in programs() {
-        for glsl in [PRELUDE.vertex, PRELUDE.fragment, source.vertex, source.fragment] {
+    for (program, stages) in compiled_stages() {
+        for glsl in &stages {
             for block in declared_blocks(glsl) {
                 assert!(
                     program.buffer_named(&block).is_some(),
@@ -136,9 +152,9 @@ fn every_declared_uniform_block_is_a_buffer() {
 /// first, in the vertex shader's order (maplibre/maplibre-native#4625).
 #[test]
 fn fragment_shaders_declare_shared_uniform_blocks_first() {
-    for (program, source) in programs() {
-        let vertex = declared_blocks_in_order(source.vertex);
-        let fragment = declared_blocks_in_order(source.fragment);
+    for (program, [vertex, fragment]) in compiled_stages() {
+        let vertex = declared_blocks_in_order(&vertex);
+        let fragment = declared_blocks_in_order(&fragment);
         let shared: Vec<&String> = vertex.iter().filter(|block| fragment.contains(block)).collect();
         let leading: Vec<&String> = fragment.iter().take(shared.len()).collect();
         assert_eq!(leading, shared, "{}: fragment shader's leading uniform blocks", program.name);
@@ -190,7 +206,7 @@ fn every_program_links_and_matches_its_declaration(backend: &mut RendererBackend
                 compiled += 1;
 
                 for block in &program.blocks {
-                    let reserved = [FRAME_BUFFER, PROJECTION_BUFFER];
+                    let reserved = [VIEW_BUFFER, PROJECTION_BUFFER];
                     let info =
                         declared.buffers.iter().chain(&reserved).find(|info| info.id == block.id).unwrap_or_else(
                             || panic!("{what}: block at {} that isn't a buffer of the program's", block.id),

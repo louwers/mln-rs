@@ -157,12 +157,12 @@ void main() {
             // whole circle based on the pitch scaling effect at its central point
 #ifdef PROJECTION_GLOBE
             const vec4 projected_center = interpolateProjection(circle_center, center_vector, 0.0, projection);
-            angle_scale *= (radius + stroke_width) * (projected_center.w / paintParams.camera_to_center_distance);
+            angle_scale *= (radius + stroke_width) * (projected_center.w / view.camera_to_center_distance);
 #else
             const vec4 projected_center = drawable.matrix * vec4(circle_center, 0, 1);
 #endif
             corner_position += scaled_extrude * (radius + stroke_width) *
-                               (projected_center.w / paintParams.camera_to_center_distance);
+                               (projected_center.w / view.camera_to_center_distance);
         }
 
 #ifdef PROJECTION_GLOBE
@@ -181,7 +181,7 @@ void main() {
         gl_Position = drawable.matrix * vec4(circle_center, 0, 1);
 #endif
 
-        const float factor = props.scale_with_map != 0 ? paintParams.camera_to_center_distance : gl_Position.w;
+        const float factor = props.scale_with_map != 0 ? view.camera_to_center_distance : gl_Position.w;
         gl_Position.xy += scaled_extrude * (radius + stroke_width) * factor;
     }
 

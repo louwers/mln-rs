@@ -6,15 +6,6 @@ pub(super) const CIRCLE_SHADER: Glsl = Glsl {
     vertex: r"layout (location = 0) in vec2 a_pos;
 out vec3 v_data;
 
-layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_units_to_pixels;
-    highp vec2 u_world_size;
-    highp float u_camera_to_center_distance;
-    highp float u_aspect_ratio;
-    highp float u_pixel_ratio;
-    lowp float global_pad1;
-};
-
 layout (std140) uniform CircleDrawableUBO {
     highp mat4 u_matrix;
     highp vec2 u_extrude_scale;

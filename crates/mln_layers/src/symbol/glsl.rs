@@ -69,7 +69,7 @@ void main() {
 #endif
     float camera_to_anchor_distance = projectedPoint.w;
     float collision_perspective_ratio = clamp(
-        0.5 + 0.5 * (paintParams.camera_to_center_distance / camera_to_anchor_distance),
+        0.5 + 0.5 * (view.camera_to_center_distance / camera_to_anchor_distance),
         0.0, // Prevents oversized near-field boxes in pitched/overzoomed tiles
         4.0);
 
@@ -155,7 +155,7 @@ void main() {
 #endif
     float camera_to_anchor_distance = projectedPoint.w;
     float collision_perspective_ratio = clamp(
-        0.5 + 0.5 * (paintParams.camera_to_center_distance / camera_to_anchor_distance),
+        0.5 + 0.5 * (view.camera_to_center_distance / camera_to_anchor_distance),
         0.0, // Prevents oversized near-field circles in pitched/overzoomed tiles
         4.0);
 
@@ -175,7 +175,7 @@ void main() {
     frag_notUsed = in_placed.y;
     frag_radius = abs(float(in_extrude.y)); // We don't pitch the circles, so both units of the extrusion vector are equal in magnitude to the radius
     frag_extrude = in_extrude * padding_factor;
-    frag_extrude_scale = tileProps.extrude_scale * paintParams.camera_to_center_distance * collision_perspective_ratio;
+    frag_extrude_scale = tileProps.extrude_scale * view.camera_to_center_distance * collision_perspective_ratio;
 }
 ",
     fragment: r"
@@ -380,8 +380,8 @@ void main() {
     const float camera_to_anchor_distance = projectedPoint.w;
     // See comments in symbol_sdf.vertex
     const float distance_ratio = drawable.pitch_with_map != 0 ?
-        camera_to_anchor_distance / paintParams.camera_to_center_distance :
-        paintParams.camera_to_center_distance / camera_to_anchor_distance;
+        camera_to_anchor_distance / view.camera_to_center_distance :
+        view.camera_to_center_distance / camera_to_anchor_distance;
     const float perspective_ratio = clamp(
             0.5 + 0.5 * distance_ratio,
             0.0, // Prevents oversized near-field symbols in pitched/overzoomed tiles
@@ -400,7 +400,7 @@ void main() {
 
         const vec2 a = projectedPoint.xy / projectedPoint.w;
         const vec2 b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
-        symbol_rotation = atan((b.y - a.y) / paintParams.aspect_ratio, b.x - a.x);
+        symbol_rotation = atan((b.y - a.y) / view.aspect_ratio, b.x - a.x);
     }
 
     const float angle_sin = sin(segment_angle + symbol_rotation);
@@ -678,8 +678,8 @@ void main() {
     // which makes labels in the distance larger relative to the features around
     // them. We counteract part of that effect by dividing by the perspective ratio.
     const float distance_ratio = drawable.pitch_with_map != 0 ?
-        camera_to_anchor_distance / paintParams.camera_to_center_distance :
-        paintParams.camera_to_center_distance / camera_to_anchor_distance;
+        camera_to_anchor_distance / view.camera_to_center_distance :
+        view.camera_to_center_distance / camera_to_anchor_distance;
     const float perspective_ratio = clamp(
             0.5 + 0.5 * distance_ratio,
             0.0, // Prevents oversized near-field symbols in pitched/overzoomed tiles
@@ -700,7 +700,7 @@ void main() {
 
         const vec2 a = projectedPoint.xy / projectedPoint.w;
         const vec2 b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
-        symbol_rotation = atan((b.y - a.y) / paintParams.aspect_ratio, b.x - a.x);
+        symbol_rotation = atan((b.y - a.y) / view.aspect_ratio, b.x - a.x);
     }
 
     const float angle_sin = sin(segment_angle + symbol_rotation);
@@ -1041,8 +1041,8 @@ void main() {
     // which makes labels in the distance larger relative to the features around
     // them. We counteract part of that effect by dividing by the perspective ratio.
     const float distance_ratio = drawable.pitch_with_map != 0 ?
-        camera_to_anchor_distance / paintParams.camera_to_center_distance :
-        paintParams.camera_to_center_distance / camera_to_anchor_distance;
+        camera_to_anchor_distance / view.camera_to_center_distance :
+        view.camera_to_center_distance / camera_to_anchor_distance;
     const float perspective_ratio = clamp(
             0.5 + 0.5 * distance_ratio,
             0.0, // Prevents oversized near-field symbols in pitched/overzoomed tiles
@@ -1063,7 +1063,7 @@ void main() {
 
         const vec2 a = projectedPoint.xy / projectedPoint.w;
         const vec2 b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
-        symbol_rotation = atan((b.y - a.y) / paintParams.aspect_ratio, b.x - a.x);
+        symbol_rotation = atan((b.y - a.y) / view.aspect_ratio, b.x - a.x);
     }
 
     const float angle_sin = sin(segment_angle + symbol_rotation);

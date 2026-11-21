@@ -85,26 +85,9 @@ struct FillEvaluatedPropsUBO {
     to_scale: f32,
 };
 
-struct GlobalPaintParamsUBO {
-    units_to_pixels: vec2<f32>,
-    world_size: vec2<f32>,
-    camera_to_center_distance: f32,
-    aspect_ratio: f32,
-    pixel_ratio: f32,
-    pad1: f32,
-};
-
-struct GlobalIndexUBO {
-    value: u32,
-    pad0: vec3<u32>,
-};
-
-@group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
 @group(0) @binding(2) var<storage, read> drawableVector: array<FillOutlinePatternDrawableUBO>;
-@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
 @group(0) @binding(5) var<storage, read> tilePropsVector: array<FillOutlinePatternTilePropsUBO>;
 @group(0) @binding(6) var<uniform> props: FillEvaluatedPropsUBO;
-@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
@@ -132,7 +115,7 @@ fn main(in: VertexInput) -> VertexOutput {
     let pattern_tl_b = pattern_to.xy;
     let pattern_br_b = pattern_to.zw;
 
-    let pixelRatio = paintParams.pixel_ratio;
+    let pixelRatio = view.pixel_ratio;
     let tileZoomRatio = drawable.tile_ratio;
     let fromScale = props.from_scale;
     let toScale = props.to_scale;
@@ -167,7 +150,7 @@ fn main(in: VertexInput) -> VertexOutput {
         pos
     );
     // Fragment positions use a top-left origin, while NDC Y points up.
-    out.v_pos = (ndcXY * vec2<f32>(1.0, -1.0) + vec2<f32>(1.0, 1.0)) * 0.5 * paintParams.world_size;
+    out.v_pos = (ndcXY * vec2<f32>(1.0, -1.0) + vec2<f32>(1.0, 1.0)) * 0.5 * view.target_size;
 #ifndef HAS_UNIFORM_u_color
     out.color = unpack_mix_color(in.color, drawable.color_t);
 #endif
@@ -223,14 +206,8 @@ struct FillEvaluatedPropsUBO {
     to_scale: f32,
 };
 
-struct GlobalIndexUBO {
-    value: u32,
-    pad0: vec3<u32>,
-};
-
 @group(0) @binding(5) var<storage, read> tilePropsVector: array<FillOutlinePatternTilePropsUBO>;
 @group(0) @binding(6) var<uniform> props: FillEvaluatedPropsUBO;
-@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(1) @binding(0) var texture_sampler: sampler;
 @group(1) @binding(1) var pattern_texture: texture_2d<f32>;
 
@@ -348,15 +325,6 @@ struct FillOutlineDrawableUnionUBO {
     padding2: vec4<f32>,
 };
 
-struct GlobalPaintParamsUBO {
-    units_to_pixels: vec2<f32>,
-    world_size: vec2<f32>,
-    camera_to_center_distance: f32,
-    aspect_ratio: f32,
-    pixel_ratio: f32,
-    pad1: f32,
-};
-
 struct FillOutlineEvaluatedPropsUBO {
     color: vec4<f32>,
     outline_color: vec4<f32>,
@@ -366,15 +334,7 @@ struct FillOutlineEvaluatedPropsUBO {
     to_scale: f32,
 };
 
-struct GlobalIndexUBO {
-    value: u32,
-    pad0: vec3<u32>,
-};
-
-@group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
-@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(0) @binding(2) var<storage, read> drawableVector: array<FillOutlineDrawableUnionUBO>;
-@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
 @group(0) @binding(6) var<uniform> props: FillOutlineEvaluatedPropsUBO;
 
 @vertex
@@ -388,7 +348,7 @@ fn main(in: VertexInput) -> VertexOutput {
     let invW = 1.0 / clip.w;
     let ndcXY = clip.xy * invW;
     out.position = clip;
-    out.pos = (ndcXY * vec2<f32>(1.0, -1.0) + vec2<f32>(1.0)) * 0.5 * paintParams.world_size;
+    out.pos = (ndcXY * vec2<f32>(1.0, -1.0) + vec2<f32>(1.0)) * 0.5 * view.target_size;
 
 #ifndef HAS_UNIFORM_u_outline_color
     out.color = unpack_mix_color(in.outline_color, drawable.outline_color_t);
@@ -524,26 +484,9 @@ struct FillEvaluatedPropsUBO {
     to_scale: f32,
 };
 
-struct GlobalPaintParamsUBO {
-    units_to_pixels: vec2<f32>,
-    world_size: vec2<f32>,
-    camera_to_center_distance: f32,
-    aspect_ratio: f32,
-    pixel_ratio: f32,
-    pad1: f32,
-};
-
-struct GlobalIndexUBO {
-    value: u32,
-    pad0: vec3<u32>,
-};
-
-@group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
 @group(0) @binding(2) var<storage, read> drawableVector: array<FillPatternDrawableUBO>;
-@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
 @group(0) @binding(5) var<storage, read> tilePropsVector: array<FillPatternTilePropsUBO>;
 @group(0) @binding(6) var<uniform> props: FillEvaluatedPropsUBO;
-@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
@@ -571,7 +514,7 @@ fn main(in: VertexInput) -> VertexOutput {
     let pattern_tl_b = pattern_to.xy;
     let pattern_br_b = pattern_to.zw;
 
-    let pixelRatio = paintParams.pixel_ratio;
+    let pixelRatio = view.pixel_ratio;
     let tileZoomRatio = drawable.tile_ratio;
     let fromScale = props.from_scale;
     let toScale = props.to_scale;
@@ -655,14 +598,8 @@ struct FillEvaluatedPropsUBO {
     to_scale: f32,
 };
 
-struct GlobalIndexUBO {
-    value: u32,
-    pad0: vec3<u32>,
-};
-
 @group(0) @binding(5) var<storage, read> tilePropsVector: array<FillPatternTilePropsUBO>;
 @group(0) @binding(6) var<uniform> props: FillEvaluatedPropsUBO;
-@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(1) @binding(0) var texture_sampler: sampler;
 @group(1) @binding(1) var pattern_texture: texture_2d<f32>;
 
@@ -783,14 +720,7 @@ struct FillEvaluatedPropsUBO {
     to_scale: f32,
 };
 
-struct GlobalIndexUBO {
-    value: u32,
-    pad0: vec3<u32>,
-};
-
-@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(0) @binding(2) var<storage, read> drawableVector: array<FillDrawableUnionUBO>;
-@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
 @group(0) @binding(6) var<uniform> props: FillEvaluatedPropsUBO;
 
 @vertex
@@ -905,7 +835,7 @@ fn outline_corner(start: vec4<f32>, end: vec4<f32>, corner: vec2<i32>) -> Outlin
         b = mix(start, end, tb);
     }
 
-    let world = paintParams.world_size;
+    let world = view.target_size;
     let sa = (a.xy / a.w * vec2<f32>(1.0, -1.0) + vec2<f32>(1.0)) * 0.5 * world;
     let sb = (b.xy / b.w * vec2<f32>(1.0, -1.0) + vec2<f32>(1.0)) * 0.5 * world;
     let d = sb - sa;
@@ -955,15 +885,6 @@ struct FillOutlineDrawableUnionUBO {
     padding2: vec4<f32>,
 };
 
-struct GlobalPaintParamsUBO {
-    units_to_pixels: vec2<f32>,
-    world_size: vec2<f32>,
-    camera_to_center_distance: f32,
-    aspect_ratio: f32,
-    pixel_ratio: f32,
-    pad1: f32,
-};
-
 struct FillOutlineEvaluatedPropsUBO {
     color: vec4<f32>,
     outline_color: vec4<f32>,
@@ -973,15 +894,7 @@ struct FillOutlineEvaluatedPropsUBO {
     to_scale: f32,
 };
 
-struct GlobalIndexUBO {
-    value: u32,
-    pad0: vec3<u32>,
-};
-
-@group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
-@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(0) @binding(2) var<storage, read> drawableVector: array<FillOutlineDrawableUnionUBO>;
-@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
 @group(0) @binding(6) var<uniform> props: FillOutlineEvaluatedPropsUBO;
 "#
     };
@@ -1169,26 +1082,9 @@ struct FillEvaluatedPropsUBO {
     to_scale: f32,
 };
 
-struct GlobalPaintParamsUBO {
-    units_to_pixels: vec2<f32>,
-    world_size: vec2<f32>,
-    camera_to_center_distance: f32,
-    aspect_ratio: f32,
-    pixel_ratio: f32,
-    pad1: f32,
-};
-
-struct GlobalIndexUBO {
-    value: u32,
-    pad0: vec3<u32>,
-};
-
-@group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
 @group(0) @binding(2) var<storage, read> drawableVector: array<FillOutlinePatternDrawableUBO>;
-@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
 @group(0) @binding(5) var<storage, read> tilePropsVector: array<FillOutlinePatternTilePropsUBO>;
 @group(0) @binding(6) var<uniform> props: FillEvaluatedPropsUBO;
-@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 "#,
         outline_corner!(),
         r#"
@@ -1214,7 +1110,7 @@ fn main(in: VertexInput) -> VertexOutput {
     pattern_to = vec4<f32>(in.pattern_to);
 #endif
 
-    let pixelRatio = paintParams.pixel_ratio;
+    let pixelRatio = view.pixel_ratio;
     let display_size_a = (pattern_from.zw - pattern_from.xy) / pixelRatio;
     let display_size_b = (pattern_to.zw - pattern_to.xy) / pixelRatio;
 

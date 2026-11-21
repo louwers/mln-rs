@@ -12,12 +12,12 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::shaders::program::{
-    Attribute, Buffer as ProgramBuffer, BufferKind, FRAME_BUFFER, PROJECTION_BUFFER, Program,
+    Attribute, Buffer as ProgramBuffer, BufferKind, PROJECTION_BUFFER, Program, VIEW_BUFFER,
 };
 use mln_gfx::shaders::shader_defines::{
     DRAWABLE_RESERVED_UBO_COUNT, ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO, ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO,
-    ID_GLOBAL_PAINT_PARAMS_UBO, ID_PROJECTION_UBO, LAYER_SSBO_START_ID, MAX_ATTRIBUTE_COUNT_PER_SHADER,
-    MAX_TEXTURE_COUNT_PER_SHADER, MAX_UBO_COUNT_PER_SHADER,
+    ID_PROJECTION_UBO, ID_VIEW_UBO, LAYER_SSBO_START_ID, MAX_ATTRIBUTE_COUNT_PER_SHADER, MAX_TEXTURE_COUNT_PER_SHADER,
+    MAX_UBO_COUNT_PER_SHADER,
 };
 use mln_gfx::shaders::source::glsl::Glsl;
 use naga::{AddressSpace, ArraySize, Binding, Interpolation, Module, ScalarKind, StorageAccess, TypeInner};
@@ -126,7 +126,7 @@ fn buffer_id(set: u32, binding: u32) -> Option<usize> {
 /// The buffer of `program` with `id`: one of its own, or the frame's or the
 /// projection block.
 fn program_buffer(program: &Program, id: usize) -> Option<ProgramBuffer> {
-    program.buffers.iter().copied().chain([FRAME_BUFFER, PROJECTION_BUFFER]).find(|buffer| buffer.id == id)
+    program.buffers.iter().copied().chain([VIEW_BUFFER, PROJECTION_BUFFER]).find(|buffer| buffer.id == id)
 }
 
 /// A resource a module declares in a descriptor set.
@@ -244,7 +244,7 @@ fn resources_are_in_the_descriptor_set_layouts() {
                     if let Err(message) = check_layout(set, binding, resource) {
                         fail(message);
                     }
-                    if set == 0 && global_uniform_binding(ID_GLOBAL_PAINT_PARAMS_UBO) != Some(binding) {
+                    if set == 0 && global_uniform_binding(ID_VIEW_UBO) != Some(binding) {
                         fail(format!("set 0 binding {binding}: not the paint parameters"));
                     }
                 }
@@ -491,7 +491,7 @@ fn stages_agree_on_what_passes_between_them() {
 // the offsets the shader preludes add, and `samplerBindingStartId`.
 #[test]
 fn bindings_follow_from_the_packed_ids() {
-    assert_eq!(global_uniform_binding(ID_GLOBAL_PAINT_PARAMS_UBO), Some(0));
+    assert_eq!(global_uniform_binding(ID_VIEW_UBO), Some(0));
 
     // idDrawableReservedVertexOnlyUBO, idDrawableReservedFragmentOnlyUBO,
     // idProjectionUBO and drawableReservedUBOCount, from layerSSBOStartId.

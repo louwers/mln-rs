@@ -106,7 +106,7 @@ struct FragmentStage {
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
+                                device const ViewUBO& view [[buffer(idViewUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const CircleDrawableUBO* drawableVector [[buffer(idCircleDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
@@ -151,12 +151,12 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
             // whole circle based on the pitch scaling effect at its central point
 #if defined(PROJECTION_GLOBE)
             const float4 projected_center = interpolateProjection(circle_center, center_vector, 0.0, projectionVector[uboIndex]);
-            angle_scale *= (radius + stroke_width) * (projected_center.w / paintParams.camera_to_center_distance);
+            angle_scale *= (radius + stroke_width) * (projected_center.w / view.camera_to_center_distance);
 #else
             const float4 projected_center = drawable.matrix * float4(circle_center, 0, 1);
 #endif
             corner_position += scaled_extrude * (radius + stroke_width) *
-                               (projected_center.w / paintParams.camera_to_center_distance);
+                               (projected_center.w / view.camera_to_center_distance);
         }
 
 #if defined(PROJECTION_GLOBE)
@@ -175,7 +175,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         position = drawable.matrix * float4(circle_center, 0, 1);
 #endif
 
-        const float factor = props.scale_with_map ? paintParams.camera_to_center_distance : position.w;
+        const float factor = props.scale_with_map ? view.camera_to_center_distance : position.w;
         position.xy += scaled_extrude * (radius + stroke_width) * factor;
     }
 

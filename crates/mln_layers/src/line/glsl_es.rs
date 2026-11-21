@@ -70,15 +70,6 @@ pub(super) const LINE_GRADIENT_SDF_SHADER: Glsl = Glsl {
 layout (location = 0) in vec2 a_pos_normal;
 layout (location = 1) in vec4 a_data;
 
-layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_units_to_pixels;
-    highp vec2 u_world_size;
-    highp float u_camera_to_center_distance;
-    highp float u_aspect_ratio;
-    highp float u_pixel_ratio;
-    lowp float global_pad1;
-};
-
 layout (std140) uniform LineSDFDrawableUBO {
     highp mat4 u_matrix;
     highp vec2 u_patternscale_a;
@@ -375,15 +366,6 @@ pub(super) const LINE_GRADIENT_SHADER: Glsl = Glsl {
 layout (location = 0) in vec2 a_pos_normal;
 layout (location = 1) in vec4 a_data;
 
-layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_units_to_pixels;
-    highp vec2 u_world_size;
-    highp float u_camera_to_center_distance;
-    highp float u_aspect_ratio;
-    highp float u_pixel_ratio;
-    lowp float global_pad1;
-};
-
 layout (std140) uniform LineGradientDrawableUBO {
     highp mat4 u_matrix;
     mediump float u_ratio;
@@ -607,14 +589,6 @@ pub(super) const LINE_PATTERN_SHADER: Glsl = Glsl {
 layout (location = 0) in vec2 a_pos_normal;
 layout (location = 1) in vec4 a_data;
 
-layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_units_to_pixels;
-    highp vec2 u_world_size;
-    highp float u_camera_to_center_distance;
-    highp float u_aspect_ratio;
-    highp float u_pixel_ratio;
-    lowp float global_pad1;
-};
 layout (std140) uniform LinePatternDrawableUBO {
     highp mat4 u_matrix;
     mediump float u_ratio;
@@ -940,15 +914,6 @@ pub(super) const LINE_SDF_SHADER: Glsl = Glsl {
 layout (location = 0) in vec2 a_pos_normal;
 layout (location = 1) in vec4 a_data;
 
-layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_units_to_pixels;
-    highp vec2 u_world_size;
-    highp float u_camera_to_center_distance;
-    highp float u_aspect_ratio;
-    highp float u_pixel_ratio;
-    lowp float global_pad1;
-};
-
 layout (std140) uniform LineSDFDrawableUBO {
     highp mat4 u_matrix;
     highp vec2 u_patternscale_a;
@@ -1247,15 +1212,6 @@ pub(super) const LINE_SHADER: Glsl = Glsl {
 
 layout (location = 0) in vec2 a_pos_normal;
 layout (location = 1) in vec4 a_data;
-
-layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_units_to_pixels;
-    highp vec2 u_world_size;
-    highp float u_camera_to_center_distance;
-    highp float u_aspect_ratio;
-    highp float u_pixel_ratio;
-    lowp float global_pad1;
-};
 
 layout (std140) uniform LineDrawableUBO {
     highp mat4 u_matrix;

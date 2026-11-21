@@ -75,7 +75,7 @@ struct FragmentStage {
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
+                                device const ViewUBO& view [[buffer(idViewUBO)]],
                                 device const CollisionDrawableUBO& drawable [[buffer(idCollisionDrawableUBO)]],
                                 device const CollisionTilePropsUBO& tileProps [[buffer(idCollisionTilePropsUBO)]],
                                 device const ProjectionUBO& projection [[buffer(idCollisionProjectionUBO)]]) {
@@ -87,7 +87,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 #endif
     float camera_to_anchor_distance = projectedPoint.w;
     float collision_perspective_ratio = clamp(
-        0.5 + 0.5 * (paintParams.camera_to_center_distance / camera_to_anchor_distance),
+        0.5 + 0.5 * (view.camera_to_center_distance / camera_to_anchor_distance),
         0.0, // Prevents oversized near-field boxes in pitched/overzoomed tiles
         4.0);
 
@@ -181,7 +181,7 @@ struct FragmentStage {
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
+                                device const ViewUBO& view [[buffer(idViewUBO)]],
                                 device const CollisionDrawableUBO& drawable [[buffer(idCollisionDrawableUBO)]],
                                 device const CollisionTilePropsUBO& tileProps [[buffer(idCollisionTilePropsUBO)]],
                                 device const ProjectionUBO& projection [[buffer(idCollisionProjectionUBO)]]) {
@@ -193,7 +193,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 #endif
     float camera_to_anchor_distance = projectedPoint.w;
     float collision_perspective_ratio = clamp(
-        0.5 + 0.5 * (paintParams.camera_to_center_distance / camera_to_anchor_distance),
+        0.5 + 0.5 * (view.camera_to_center_distance / camera_to_anchor_distance),
         0.0, // Prevents oversized near-field circles in pitched/overzoomed tiles
         4.0);
 
@@ -215,7 +215,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     float radius = abs(float(vertx.extrude.y)); // We don't pitch the circles, so both units of the extrusion vector are equal in magnitude to the radius
 
     float2 extrude = float2(vertx.extrude) * padding_factor;
-    float2 extrude_scale = tileProps.extrude_scale * paintParams.camera_to_center_distance * collision_perspective_ratio;
+    float2 extrude_scale = tileProps.extrude_scale * view.camera_to_center_distance * collision_perspective_ratio;
 
     return {
         .position       = position,
@@ -373,7 +373,7 @@ struct FragmentStage {
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
+                                device const ViewUBO& view [[buffer(idViewUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const SymbolDrawableUBO* drawableVector [[buffer(idSymbolDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
@@ -437,8 +437,8 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float camera_to_anchor_distance = projectedPoint.w;
     // See comments in symbol_sdf.vertex
     const float distance_ratio = drawable.pitch_with_map ?
-        camera_to_anchor_distance / paintParams.camera_to_center_distance :
-        paintParams.camera_to_center_distance / camera_to_anchor_distance;
+        camera_to_anchor_distance / view.camera_to_center_distance :
+        view.camera_to_center_distance / camera_to_anchor_distance;
     const float perspective_ratio = clamp(
             0.5 + 0.5 * distance_ratio,
             0.0, // Prevents oversized near-field symbols in pitched/overzoomed tiles
@@ -457,7 +457,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 
         const float2 a = projectedPoint.xy / projectedPoint.w;
         const float2 b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
-        symbol_rotation = atan2((b.y - a.y) / paintParams.aspect_ratio, b.x - a.x);
+        symbol_rotation = atan2((b.y - a.y) / view.aspect_ratio, b.x - a.x);
     }
 
     const float angle_sin = sin(segment_angle + symbol_rotation);
@@ -660,7 +660,7 @@ struct FragmentStage {
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
+                                device const ViewUBO& view [[buffer(idViewUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const SymbolDrawableUBO* drawableVector [[buffer(idSymbolDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
@@ -728,8 +728,8 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     // which makes labels in the distance larger relative to the features around
     // them. We counteract part of that effect by dividing by the perspective ratio.
     const float distance_ratio = drawable.pitch_with_map ?
-        camera_to_anchor_distance / paintParams.camera_to_center_distance :
-        paintParams.camera_to_center_distance / camera_to_anchor_distance;
+        camera_to_anchor_distance / view.camera_to_center_distance :
+        view.camera_to_center_distance / camera_to_anchor_distance;
     const float perspective_ratio = clamp(
         0.5 + 0.5 * distance_ratio,
         0.0, // Prevents oversized near-field symbols in pitched/overzoomed tiles
@@ -751,7 +751,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         const float2 a = projectedPoint.xy / projectedPoint.w;
         const float2 b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
 
-        symbol_rotation = atan2((b.y - a.y) / paintParams.aspect_ratio, b.x - a.x);
+        symbol_rotation = atan2((b.y - a.y) / view.aspect_ratio, b.x - a.x);
     }
 
     const float angle_sin = sin(segment_angle + symbol_rotation);
@@ -1008,7 +1008,7 @@ struct FragmentStage {
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
+                                device const ViewUBO& view [[buffer(idViewUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const SymbolDrawableUBO* drawableVector [[buffer(idSymbolDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
@@ -1076,8 +1076,8 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     // which makes labels in the distance larger relative to the features around
     // them. We counteract part of that effect by dividing by the perspective ratio.
     const float distance_ratio = drawable.pitch_with_map ?
-        camera_to_anchor_distance / paintParams.camera_to_center_distance :
-        paintParams.camera_to_center_distance / camera_to_anchor_distance;
+        camera_to_anchor_distance / view.camera_to_center_distance :
+        view.camera_to_center_distance / camera_to_anchor_distance;
     const float perspective_ratio = clamp(
         0.5 + 0.5 * distance_ratio,
         0.0, // Prevents oversized near-field symbols in pitched/overzoomed tiles
@@ -1099,7 +1099,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         const float2 a = projectedPoint.xy / projectedPoint.w;
         const float2 b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
 
-        symbol_rotation = atan2((b.y - a.y) / paintParams.aspect_ratio, b.x - a.x);
+        symbol_rotation = atan2((b.y - a.y) / view.aspect_ratio, b.x - a.x);
     }
 
     const float angle_sin = sin(segment_angle + symbol_rotation);

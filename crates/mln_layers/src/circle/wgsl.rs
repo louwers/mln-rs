@@ -121,12 +121,12 @@ fn main(in: VertexInput) -> VertexOutput {
         } else {
 #ifdef PROJECTION_GLOBE
             let projected_center = interpolateProjection(circle_center, center_vector, 0.0, projection);
-            angle_scale *= radius_with_stroke * (projected_center.w / paintParams.camera_to_center_distance);
+            angle_scale *= radius_with_stroke * (projected_center.w / view.camera_to_center_distance);
 #else
             let projected_center = drawable.matrix * vec4<f32>(circle_center, 0.0, 1.0);
 #endif
             corner_position += scaled_extrude * radius_with_stroke *
-                               (projected_center.w / paintParams.camera_to_center_distance);
+                               (projected_center.w / view.camera_to_center_distance);
         }
 #ifdef PROJECTION_GLOBE
         let corner_vector = globeRotateVector(center_vector, extrude * angle_scale);
@@ -146,7 +146,7 @@ fn main(in: VertexInput) -> VertexOutput {
 #endif
         var factor = position.w;
         if (scale_with_map) {
-            factor = paintParams.camera_to_center_distance;
+            factor = view.camera_to_center_distance;
         }
         let delta = scaled_extrude * radius_with_stroke * factor;
         position = vec4<f32>(position.x + delta.x, position.y + delta.y, position.z, position.w);
@@ -279,24 +279,7 @@ struct CircleEvaluatedPropsUBO {
     pad1: f32,
 };
 
-struct GlobalPaintParamsUBO {
-    units_to_pixels: vec2<f32>,
-    world_size: vec2<f32>,
-    camera_to_center_distance: f32,
-    aspect_ratio: f32,
-    pixel_ratio: f32,
-    pad1: f32,
-};
-
-struct GlobalIndexUBO {
-    value: u32,
-    pad0: vec3<u32>,
-};
-
-@group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
-@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(0) @binding(2) var<storage, read> drawableVector: array<CircleDrawableUBO>;
-@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
 @group(0) @binding(5) var<uniform> props: CircleEvaluatedPropsUBO;
 ",
     ),

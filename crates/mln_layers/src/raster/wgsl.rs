@@ -35,14 +35,7 @@ struct RasterEvaluatedPropsUBO {
     pad2: f32,
 };
 
-struct GlobalIndexUBO {
-    value: u32,
-    pad0: vec3<u32>,
-};
-
-@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(0) @binding(2) var<storage, read> drawableVector: array<RasterDrawableUBO>;
-@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
 @group(0) @binding(5) var<uniform> props: RasterEvaluatedPropsUBO;
 
 @vertex

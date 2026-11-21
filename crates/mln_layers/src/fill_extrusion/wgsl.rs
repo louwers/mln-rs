@@ -54,14 +54,8 @@ struct FillExtrusionPropsUBO {
     pad2: f32,
 };
 
-struct GlobalIndexUBO {
-    value: u32,
-    pad0: vec3<u32>,
-};
-
 @group(0) @binding(5) var<storage, read> tilePropsVector: array<FillExtrusionPatternTilePropsUBO>;
 @group(0) @binding(6) var<uniform> props: FillExtrusionPropsUBO;
-@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(1) @binding(0) var texture_sampler: sampler;
 @group(1) @binding(1) var pattern_texture: texture_2d<f32>;
 
@@ -158,15 +152,8 @@ struct FillExtrusionPropsUBO {
     pad2: f32,
 };
 
-struct GlobalIndexUBO {
-    value: u32,
-    pad0: vec3<u32>,
-};
-
 @group(0) @binding(2) var<storage, read> drawableVector: array<FillExtrusionDrawableUBO>;
-@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
 @group(0) @binding(6) var<uniform> props: FillExtrusionPropsUBO;
-@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 
 // The color of a surface facing `normal`, at `t` (0 at the base, 1 at the
 // top) of a wall.
@@ -252,26 +239,9 @@ struct FillExtrusionPropsUBO {
     pad2: f32,
 };
 
-struct GlobalPaintParamsUBO {
-    units_to_pixels: vec2<f32>,
-    world_size: vec2<f32>,
-    camera_to_center_distance: f32,
-    aspect_ratio: f32,
-    pixel_ratio: f32,
-    pad1: f32,
-};
-
-struct GlobalIndexUBO {
-    value: u32,
-    pad0: vec3<u32>,
-};
-
-@group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
 @group(0) @binding(2) var<storage, read> drawableVector: array<FillExtrusionPatternDrawableUBO>;
-@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
 @group(0) @binding(5) var<storage, read> tilePropsVector: array<FillExtrusionPatternTilePropsUBO>;
 @group(0) @binding(6) var<uniform> props: FillExtrusionPropsUBO;
-@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 
 // The lighting of a surface facing `normal`, at `t` (0 at the base, 1 at the
 // top) of a wall.
@@ -305,7 +275,7 @@ fn set_pattern(out: ptr<function, VertexOutput>, drawable: FillExtrusionPatternD
     (*out).pattern_to = patternTo;
 #endif
 
-    let pixelRatio = paintParams.pixel_ratio;
+    let pixelRatio = view.pixel_ratio;
     let display_size_a = vec2<f32>((patternFrom.z - patternFrom.x) / pixelRatio,
                                    (patternFrom.w - patternFrom.y) / pixelRatio);
     let display_size_b = vec2<f32>((patternTo.z - patternTo.x) / pixelRatio,

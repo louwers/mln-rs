@@ -18,7 +18,7 @@ use mln_util::hash::HashMap;
 use mln_vec_map::VecMap;
 
 use crate::shaders::wgsl_preprocessor::{is_space, preprocess_wgsl};
-use crate::shaders::wgsl_sources::PRELUDE;
+use crate::shaders::wgsl_sources::{PRELUDE, RESERVED_BINDINGS};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum BindingType {
@@ -770,8 +770,9 @@ fn analyze_shader_bindings(binding_infos: &mut Vec<BindingInfo>, source: &str, s
 }
 
 /// Compiles the program of `key` from its WGSL: the common prelude, the
-/// program's own prelude and each stage, preprocessed with the key's
-/// defines. Fails with [`GpuError::Unsupported`] for a program without WGSL.
+/// declarations of the engine's buffers that the stage reads, the program's
+/// own prelude and each stage, preprocessed with the key's defines. Fails
+/// with [`GpuError::Unsupported`] for a program without WGSL.
 pub(crate) fn compile(
     device: &wgpu::Device,
     index_layout: &wgpu::BindGroupLayout,
@@ -783,7 +784,10 @@ pub(crate) fn compile(
     // The common prelude goes through the preprocessor with the program, so
     // its `#ifdef`s see the defines.
     let shader_prelude = source.prelude.unwrap_or("");
-    let assemble = |stage: Option<&str>| format!("{PRELUDE}\n{shader_prelude}{}", stage.unwrap_or(""));
+    let assemble = |stage: Option<&str>| {
+        let stage = stage.unwrap_or("");
+        format!("{PRELUDE}\n{}{shader_prelude}{stage}", reserved_bindings(&[shader_prelude, stage]))
+    };
     // WGSL reads no define's value; the pixel ratio's is an override's.
     let defines: HashMap<String, bool> = key.define_values().map(|(name, _)| (name.to_owned(), true)).collect();
     let vertex_source = preprocess_wgsl(&assemble(source.vertex), &defines);
@@ -797,7 +801,26 @@ pub(crate) fn compile(
     ShaderProgram::new(device, index_layout, &vertex_source, &fragment_source, program, pixel_ratio)
 }
 
-/// How the vendored sources declare `globalIndex`.
+/// The declarations of the engine's buffers that `texts`, a stage and the
+/// program's prelude, read: of each one whose variable they name outside
+/// their comments.
+fn reserved_bindings(texts: &[&str]) -> String {
+    RESERVED_BINDINGS
+        .iter()
+        .filter(|(name, _)| texts.iter().any(|text| identifiers(text).any(|identifier| identifier == *name)))
+        .map(|(_, declaration)| format!("{declaration}\n"))
+        .collect()
+}
+
+/// The identifiers of `text`, outside its `//` comments.
+fn identifiers(text: &str) -> impl Iterator<Item = &str> {
+    text.lines()
+        .map(|line| line.split_once("//").map_or(line, |(code, _)| code))
+        .flat_map(|code| code.split(|c: char| !c.is_ascii_alphanumeric() && c != '_'))
+        .filter(|word| !word.is_empty())
+}
+
+/// How the backend declares `globalIndex`.
 const GLOBAL_INDEX_DECLARATION: &str = "@group(0) @binding(1) var<uniform> globalIndex:";
 
 /// The group after the last one `sources` use, if they declare `globalIndex`
@@ -826,7 +849,24 @@ fn move_global_index(source: &str, group: u32) -> Cow<'_, str> {
 
 #[cfg(test)]
 mod tests {
+    use mln_gfx::shaders::shader_defines::{ID_GLOBAL_UBO_INDEX, ID_PROJECTION_UBO, ID_VIEW_UBO};
+
     use super::*;
+
+    #[test]
+    fn the_engines_buffers_bind_at_their_ids() {
+        let ids = [ID_VIEW_UBO, ID_GLOBAL_UBO_INDEX, ID_PROJECTION_UBO];
+        for (&(_, declaration), id) in RESERVED_BINDINGS.iter().zip(ids) {
+            assert!(declaration.starts_with(&format!("@group(0) @binding({id}) ")), "{declaration}");
+        }
+        assert!(RESERVED_BINDINGS[1].1.starts_with(GLOBAL_INDEX_DECLARATION));
+    }
+
+    #[test]
+    fn a_stage_declares_the_engines_buffers_it_names() {
+        let declared = reserved_bindings(&["", "let p = projectionVector[globalIndex.value]; // view"]);
+        assert_eq!(declared, format!("{}\n{}\n", RESERVED_BINDINGS[1].1, RESERVED_BINDINGS[2].1));
+    }
 
     #[test]
     fn global_index_moves_to_the_group_after_the_last() {

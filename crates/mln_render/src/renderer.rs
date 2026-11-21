@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, Gpu, LoadOp, TargetFormats};
 use mln_gfx::rendering_stats::RenderingStats;
-use mln_gfx::shaders::layer_ubo::GlobalPaintParamsUBO;
-use mln_gfx::shaders::shader_defines::ID_GLOBAL_PAINT_PARAMS_UBO;
+use mln_gfx::shaders::layer_ubo::ViewUBO;
+use mln_gfx::shaders::shader_defines::ID_VIEW_UBO;
 use mln_gfx::{FrameImage, Handoff, ScissorRect};
 use mln_map_types::{FrameProjection, MapDebugOptions};
 use mln_text::GlyphCache;
@@ -540,18 +540,18 @@ impl Encoder {
             parameters.debug_options.contains(MapDebugOptions::OVERDRAW),
             &draw_groups.composited,
         );
-        let global_paint_params_ubo = GlobalPaintParamsUBO {
+        let view = ViewUBO {
             units_to_pixels: [
                 1.0 / parameters.frame.pixels_to_gl_units[0],
                 1.0 / parameters.frame.pixels_to_gl_units[1],
             ],
-            world_size: [renderable_size.width as f32, renderable_size.height as f32],
+            target_size: [renderable_size.width as f32, renderable_size.height as f32],
             camera_to_center_distance: state.camera_to_center_distance() as f32,
             aspect_ratio: state.size().aspect_ratio(),
             pixel_ratio: parameters.frame.pixel_ratio,
             pad1: 0.0,
         };
-        parameters.context.write_global_uniform_buffer(gpu, ID_GLOBAL_PAINT_PARAMS_UBO, &global_paint_params_ubo);
+        parameters.context.write_global_uniform_buffer(gpu, ID_VIEW_UBO, &view);
         // What the uploads replaced goes before the passes make what
         // replaces it, such as a draw's geometry.
         parameters.context.destroy_released(gpu);

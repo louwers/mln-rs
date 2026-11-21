@@ -124,29 +124,12 @@ struct LineEvaluatedPropsUBO {
     pad1: f32,
 };
 
-struct GlobalPaintParamsUBO {
-    units_to_pixels: vec2<f32>,
-    world_size: vec2<f32>,
-    camera_to_center_distance: f32,
-    aspect_ratio: f32,
-    pixel_ratio: f32,
-    pad1: f32,
-};
-
-struct GlobalIndexUBO {
-    value: u32,
-    pad0: vec3<u32>,
-};
-
 struct LineSDFDrawableEntry {
     data: LineSDFDrawableUBO,
 };
 
-@group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
 @group(0) @binding(2) var<storage, read> drawableVector: array<LineSDFDrawableEntry>;
-@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
 @group(0) @binding(5) var<uniform> props: LineEvaluatedPropsUBO;
-@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
@@ -229,7 +212,7 @@ fn main(in: VertexInput) -> VertexOutput {
 
     // Calculate gamma scale
     let extrude_length_without_perspective = length(dist);
-    let extrude_length_with_perspective = length(projected_extrude.xy / position.w * paintParams.units_to_pixels);
+    let extrude_length_with_perspective = length(projected_extrude.xy / position.w * view.units_to_pixels);
 
     // Calculate texture coordinates
     var patternscale_a = drawable.patternscale_a;
@@ -313,20 +296,6 @@ struct LineSDFTilePropsUBO {
     pad2: f32,
 };
 
-struct GlobalPaintParamsUBO {
-    units_to_pixels: vec2<f32>,
-    world_size: vec2<f32>,
-    camera_to_center_distance: f32,
-    aspect_ratio: f32,
-    pixel_ratio: f32,
-    pad1: f32,
-};
-
-struct GlobalIndexUBO {
-    value: u32,
-    pad0: vec3<u32>,
-};
-
 struct LineSDFTilePropsEntry {
     data: LineSDFTilePropsUBO,
     pad0: vec4<f32>,
@@ -334,9 +303,7 @@ struct LineSDFTilePropsEntry {
     pad2: vec4<f32>,
 };
 
-@group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
 @group(0) @binding(3) var<storage, read> tilePropsVector: array<LineSDFTilePropsEntry>;
-@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(0) @binding(5) var<uniform> props: LineEvaluatedPropsUBO;
 @group(1) @binding(0) var gradient_sampler: sampler;
 @group(1) @binding(1) var gradient_texture: texture_2d<f32>;
@@ -467,31 +434,14 @@ struct LineEvaluatedPropsUBO {
     pad1: f32,
 };
 
-struct GlobalPaintParamsUBO {
-    units_to_pixels: vec2<f32>,
-    world_size: vec2<f32>,
-    camera_to_center_distance: f32,
-    aspect_ratio: f32,
-    pixel_ratio: f32,
-    pad1: f32,
-};
-
-struct GlobalIndexUBO {
-    value: u32,
-    pad0: vec3<u32>,
-};
-
 struct LineGradientDrawableEntry {
     data: LineGradientDrawableUBO,
     pad0: vec4<f32>,
     pad1: vec4<f32>,
 };
 
-@group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
 @group(0) @binding(2) var<storage, read> drawableVector: array<LineGradientDrawableEntry>;
-@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
 @group(0) @binding(5) var<uniform> props: LineEvaluatedPropsUBO;
-@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
@@ -564,7 +514,7 @@ fn main(in: VertexInput) -> VertexOutput {
 
     // Calculate gamma scale
     let extrude_length_without_perspective = length(dist);
-    let extrude_length_with_perspective = length(projected_extrude.xy / position.w * paintParams.units_to_pixels);
+    let extrude_length_with_perspective = length(projected_extrude.xy / position.w * view.units_to_pixels);
 
     out.position = position;
     out.v_width2 = vec2<f32>(outset, inset);
@@ -609,16 +559,6 @@ struct LineEvaluatedPropsUBO {
     pad1: f32,
 };
 
-struct GlobalPaintParamsUBO {
-    units_to_pixels: vec2<f32>,
-    world_size: vec2<f32>,
-    camera_to_center_distance: f32,
-    aspect_ratio: f32,
-    pixel_ratio: f32,
-    pad1: f32,
-};
-
-@group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
 @group(0) @binding(5) var<uniform> props: LineEvaluatedPropsUBO;
 @group(1) @binding(0) var gradient_sampler: sampler;
 @group(1) @binding(1) var gradient_texture: texture_2d<f32>;
@@ -757,20 +697,6 @@ struct LineEvaluatedPropsUBO {
     pad1: f32,
 };
 
-struct GlobalPaintParamsUBO {
-    units_to_pixels: vec2<f32>,
-    world_size: vec2<f32>,
-    camera_to_center_distance: f32,
-    aspect_ratio: f32,
-    pixel_ratio: f32,
-    pad1: f32,
-};
-
-struct GlobalIndexUBO {
-    value: u32,
-    pad0: vec3<u32>,
-};
-
 struct LinePatternDrawableEntry {
     data: LinePatternDrawableUBO,
     pad0: vec4<f32>,
@@ -780,12 +706,9 @@ struct LinePatternTilePropsEntry {
     data: LinePatternTilePropsUBO,
 };
 
-@group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
 @group(0) @binding(2) var<storage, read> drawableVector: array<LinePatternDrawableEntry>;
-@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
 @group(0) @binding(3) var<storage, read> tilePropsVector: array<LinePatternTilePropsEntry>;
 @group(0) @binding(5) var<uniform> props: LineEvaluatedPropsUBO;
-@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
@@ -861,7 +784,7 @@ fn main(in: VertexInput) -> VertexOutput {
 #endif
 
     let extrude_length_without_perspective = length(dist);
-    let extrude_length_with_perspective = length(projected_extrude.xy / position.w * paintParams.units_to_pixels);
+    let extrude_length_with_perspective = length(projected_extrude.xy / position.w * view.units_to_pixels);
     let gamma_scale = extrude_length_without_perspective / max(extrude_length_with_perspective, 1e-6);
 
     out.position = position;
@@ -916,15 +839,6 @@ struct LineEvaluatedPropsUBO {
     pad1: f32,
 };
 
-struct GlobalPaintParamsUBO {
-    units_to_pixels: vec2<f32>,
-    world_size: vec2<f32>,
-    camera_to_center_distance: f32,
-    aspect_ratio: f32,
-    pixel_ratio: f32,
-    pad1: f32,
-};
-
 struct LinePatternTilePropsUBO {
     pattern_from: vec4<f32>,
     pattern_to: vec4<f32>,
@@ -934,18 +848,11 @@ struct LinePatternTilePropsUBO {
     pad2: f32,
 };
 
-struct GlobalIndexUBO {
-    value: u32,
-    pad0: vec3<u32>,
-};
-
 struct LinePatternTilePropsEntry {
     data: LinePatternTilePropsUBO,
 };
 
-@group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
 @group(0) @binding(3) var<storage, read> tilePropsVector: array<LinePatternTilePropsEntry>;
-@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(0) @binding(5) var<uniform> props: LineEvaluatedPropsUBO;
 @group(1) @binding(0) var pattern_sampler: sampler;
 @group(1) @binding(1) var pattern_texture: texture_2d<f32>;
@@ -1145,20 +1052,6 @@ struct LineEvaluatedPropsUBO {
     pad1: f32,
 };
 
-struct GlobalPaintParamsUBO {
-    units_to_pixels: vec2<f32>,
-    world_size: vec2<f32>,
-    camera_to_center_distance: f32,
-    aspect_ratio: f32,
-    pixel_ratio: f32,
-    pad1: f32,
-};
-
-struct GlobalIndexUBO {
-    value: u32,
-    pad0: vec3<u32>,
-};
-
 struct LineSDFDrawableEntry {
     data: LineSDFDrawableUBO,
 };
@@ -1170,12 +1063,9 @@ struct LineSDFTilePropsEntry {
     pad2: vec4<f32>,
 };
 
-@group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
 @group(0) @binding(2) var<storage, read> drawableVector: array<LineSDFDrawableEntry>;
-@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
 @group(0) @binding(3) var<storage, read> tilePropsVector: array<LineSDFTilePropsEntry>;
 @group(0) @binding(5) var<uniform> props: LineEvaluatedPropsUBO;
-@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
@@ -1260,7 +1150,7 @@ fn main(in: VertexInput) -> VertexOutput {
 
     // Calculate gamma scale
     let extrude_length_without_perspective = length(dist);
-    let extrude_length_with_perspective = length(projected_extrude.xy / position.w * paintParams.units_to_pixels);
+    let extrude_length_with_perspective = length(projected_extrude.xy / position.w * view.units_to_pixels);
 
     // Calculate texture coordinates
     var patternscale_a = drawable.patternscale_a;
@@ -1345,20 +1235,6 @@ struct LineSDFTilePropsUBO {
     pad2: f32,
 };
 
-struct GlobalPaintParamsUBO {
-    units_to_pixels: vec2<f32>,
-    world_size: vec2<f32>,
-    camera_to_center_distance: f32,
-    aspect_ratio: f32,
-    pixel_ratio: f32,
-    pad1: f32,
-};
-
-struct GlobalIndexUBO {
-    value: u32,
-    pad0: vec3<u32>,
-};
-
 struct LineSDFTilePropsEntry {
     data: LineSDFTilePropsUBO,
     pad0: vec4<f32>,
@@ -1366,9 +1242,7 @@ struct LineSDFTilePropsEntry {
     pad2: vec4<f32>,
 };
 
-@group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
 @group(0) @binding(3) var<storage, read> tilePropsVector: array<LineSDFTilePropsEntry>;
-@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(0) @binding(5) var<uniform> props: LineEvaluatedPropsUBO;
 @group(1) @binding(0) var sdf_sampler: sampler;
 @group(1) @binding(1) var sdf_texture: texture_2d<f32>;
@@ -1504,31 +1378,14 @@ struct LineEvaluatedPropsUBO {
     pad1: f32,
 };
 
-struct GlobalPaintParamsUBO {
-    units_to_pixels: vec2<f32>,
-    world_size: vec2<f32>,
-    camera_to_center_distance: f32,
-    aspect_ratio: f32,
-    pixel_ratio: f32,
-    pad1: f32,
-};
-
-struct GlobalIndexUBO {
-    value: u32,
-    pad0: vec3<u32>,
-};
-
 struct LineDrawableEntry {
     data: LineDrawableUBO,
     pad0: vec4<f32>,
     pad1: vec4<f32>,
 };
 
-@group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
 @group(0) @binding(2) var<storage, read> drawableVector: array<LineDrawableEntry>;
-@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
 @group(0) @binding(5) var<uniform> props: LineEvaluatedPropsUBO;
-@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
@@ -1602,7 +1459,7 @@ fn main(in: VertexInput) -> VertexOutput {
 
     let extrude_length_without_perspective = length(dist);
     let extrude_length_with_perspective =
-        length((projected_extrude.xy / base.w) * paintParams.units_to_pixels);
+        length((projected_extrude.xy / base.w) * view.units_to_pixels);
     let gamma_denom = max(extrude_length_with_perspective, 1e-6);
 
     out.v_width2 = vec2<f32>(outset, inset);
@@ -1648,16 +1505,6 @@ struct LineEvaluatedPropsUBO {
     pad1: f32,
 };
 
-struct GlobalPaintParamsUBO {
-    units_to_pixels: vec2<f32>,
-    world_size: vec2<f32>,
-    camera_to_center_distance: f32,
-    aspect_ratio: f32,
-    pixel_ratio: f32,
-    pad1: f32,
-};
-
-@group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
 @group(0) @binding(5) var<uniform> props: LineEvaluatedPropsUBO;
 
 @fragment

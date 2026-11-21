@@ -125,15 +125,6 @@ pub(super) const HEATMAP_TEXTURE_SHADER: Glsl = Glsl {
     vertex: r"layout (location = 0) in vec2 a_pos;
 out vec2 v_pos;
 
-layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_units_to_pixels;
-    highp vec2 u_world_size;
-    highp float u_camera_to_center_distance;
-    highp float u_aspect_ratio;
-    highp float u_pixel_ratio;
-    lowp float global_pad1;
-};
-
 layout (std140) uniform HeatmapTexturePropsUBO {
     highp mat4 u_matrix;
     highp float u_opacity;
@@ -143,7 +134,7 @@ layout (std140) uniform HeatmapTexturePropsUBO {
 };
 
 void main() {
-    gl_Position = u_matrix * vec4(a_pos * u_world_size, 0, 1);
+    gl_Position = u_matrix * vec4(a_pos * u_target_size, 0, 1);
 
     v_pos.x = a_pos.x;
     v_pos.y = 1.0 - a_pos.y;

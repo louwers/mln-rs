@@ -413,7 +413,7 @@ struct FragmentOutput {
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
+                                device const ViewUBO& view [[buffer(idViewUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const FillExtrusionDrawableUBO* drawableVector [[buffer(idFillExtrusionDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
@@ -495,7 +495,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float2 pattern_tl_b = pattern_to.xy;
     const float2 pattern_br_b = pattern_to.zw;
 
-    const float pixelRatio = paintParams.pixel_ratio;
+    const float pixelRatio = view.pixel_ratio;
     const float tileZoomRatio = drawable.tile_ratio;
     const float fromScale = props.from_scale;
     const float toScale = props.to_scale;
@@ -682,7 +682,7 @@ struct FragmentOutput {
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
+                                device const ViewUBO& view [[buffer(idViewUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const FillExtrusionDrawableUBO* drawableVector [[buffer(idFillExtrusionDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
@@ -739,7 +739,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float2 pattern_tl_b = pattern_to.xy;
     const float2 pattern_br_b = pattern_to.zw;
 
-    const float pixelRatio = paintParams.pixel_ratio;
+    const float pixelRatio = view.pixel_ratio;
     const float tileZoomRatio = drawable.tile_ratio;
     const float fromScale = props.from_scale;
     const float toScale = props.to_scale;

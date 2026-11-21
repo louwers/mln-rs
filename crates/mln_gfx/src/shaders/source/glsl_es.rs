@@ -10,7 +10,8 @@
 ///
 /// A stage compiles from `#version 300 es`, or `#version 330 core` on
 /// desktop OpenGL, the program's defines, the backend's prelude of that
-/// stage and the shader's.
+/// stage, the view's block (`ViewUBO`) where the stage names one of its
+/// members, and the shader's.
 #[derive(Debug)]
 pub struct Glsl {
     /// The vertex shader.

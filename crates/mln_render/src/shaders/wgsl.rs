@@ -189,14 +189,6 @@ struct VertexOutput {
     @builtin(position) position: vec4<f32>,
 };
 
-struct GlobalIndexUBO {
-    value: u32,
-    pad0: vec3<u32>,
-};
-
-@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
-@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
-
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
@@ -359,23 +351,6 @@ struct TileDebugPropsUBO {
     pad1: f32,
 };
 
-struct GlobalPaintParamsUBO {
-    units_to_pixels: vec2<f32>,
-    world_size: vec2<f32>,
-    camera_to_center_distance: f32,
-    aspect_ratio: f32,
-    pixel_ratio: f32,
-    pad1: f32,
-};
-
-struct GlobalIndexUBO {
-    value: u32,
-    pad0: vec3<u32>,
-};
-
-@group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
-@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
-@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
 @group(0) @binding(5) var<uniform> props: TileDebugPropsUBO;
 
 @vertex
@@ -409,7 +384,7 @@ fn main(in: VertexInput) -> VertexOutput {
     let tile_pos = base + across * (offset.y * units);
     let corner = projectTile(tile_pos, projection);
     let middle = projectTile(base, projection);
-    let extent = length((corner.xy - middle.xy) / corner.w * paintParams.units_to_pixels);
+    let extent = length((corner.xy - middle.xy) / corner.w * view.units_to_pixels);
 
     out.position = corner;
     out.offset = offset;

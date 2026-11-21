@@ -3,9 +3,9 @@
 //! attributes a program can have. [`Program`](crate::shaders::program::Program)
 //! says which ids a program's buffers take.
 
-/// The frame's uniform block
-/// ([`GlobalPaintParamsUBO`](crate::shaders::layer_ubo::GlobalPaintParamsUBO)).
-pub const ID_GLOBAL_PAINT_PARAMS_UBO: usize = 0;
+/// The view's uniform block
+/// ([`ViewUBO`](crate::shaders::layer_ubo::ViewUBO)).
+pub const ID_VIEW_UBO: usize = 0;
 /// The draw's index into the storage buffers it reads, which the backend
 /// binds.
 pub const ID_GLOBAL_UBO_INDEX: usize = 1;

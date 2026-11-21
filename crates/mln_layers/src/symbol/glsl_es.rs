@@ -31,15 +31,6 @@ layout (location = 3) in vec2 a_placed;
 layout (location = 4) in vec2 a_shift;
 layout (location = 5) in float a_height_offset;
 
-layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_units_to_pixels;
-    highp vec2 u_world_size;
-    highp float u_camera_to_center_distance;
-    highp float u_aspect_ratio;
-    highp float u_pixel_ratio;
-    lowp float global_pad1;
-};
-
 layout (std140) uniform CollisionDrawableUBO {
     highp mat4 u_matrix;
 };
@@ -109,15 +100,6 @@ layout (location = 1) in vec2 a_anchor_pos;
 layout (location = 2) in vec2 a_extrude;
 layout (location = 3) in vec2 a_placed;
 
-layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_units_to_pixels;
-    highp vec2 u_world_size;
-    highp float u_camera_to_center_distance;
-    highp float u_aspect_ratio;
-    highp float u_pixel_ratio;
-    lowp float global_pad1;
-};
-
 layout (std140) uniform CollisionDrawableUBO {
     highp mat4 u_matrix;
 };
@@ -167,16 +149,7 @@ void main() {
     v_extrude_scale = u_extrude_scale * u_camera_to_center_distance * collision_perspective_ratio;
 }
 ",
-    fragment: r"layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_units_to_pixels;
-    highp vec2 u_world_size;
-    highp float u_camera_to_center_distance;
-    highp float u_aspect_ratio;
-    highp float u_pixel_ratio;
-    lowp float global_pad1;
-};
-
-layout (std140) uniform CollisionTilePropsUBO {
+    fragment: r"layout (std140) uniform CollisionTilePropsUBO {
     highp vec2 u_extrude_scale;
     highp float u_overscale_factor;
     lowp float drawable_pad1;
@@ -227,15 +200,6 @@ layout (location = 3) in vec3 a_projected_pos;
 layout (location = 4) in float a_fade_opacity;
 layout (location = 6) in vec2 a_tex_origin;
 layout (location = 11) in float a_height_offset;
-
-layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_units_to_pixels;
-    highp vec2 u_world_size;
-    highp float u_camera_to_center_distance;
-    highp float u_aspect_ratio;
-    highp float u_pixel_ratio;
-    lowp float global_pad1;
-};
 
 layout (std140) uniform SymbolDrawableUBO {
     highp mat4 u_matrix;
@@ -471,15 +435,6 @@ layout (location = 11) in float a_height_offset;
 // For composite functions:
 // [ text-size(lowerZoomStop, feature),
 //   text-size(upperZoomStop, feature) ]
-
-layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_units_to_pixels;
-    highp vec2 u_world_size;
-    highp float u_camera_to_center_distance;
-    highp float u_aspect_ratio;
-    highp float u_pixel_ratio;
-    lowp float global_pad1;
-};
 
 layout (std140) uniform SymbolDrawableUBO {
     highp mat4 u_matrix;
@@ -809,15 +764,6 @@ layout (location = 11) in float a_height_offset;
 // For composite functions:
 // [ text-size(lowerZoomStop, feature),
 //   text-size(upperZoomStop, feature) ]
-
-layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_units_to_pixels;
-    highp vec2 u_world_size;
-    highp float u_camera_to_center_distance;
-    highp float u_aspect_ratio;
-    highp float u_pixel_ratio;
-    lowp float global_pad1;
-};
 
 layout (std140) uniform SymbolDrawableUBO {
     highp mat4 u_matrix;
