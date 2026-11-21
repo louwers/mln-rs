@@ -145,8 +145,10 @@ enum Blue {
     None,
 }
 
-/// A white map over flat terrain pitched 75°, under a magenta fog over the
-/// whole ground, with a circle near the camera and an opaque blue fill over
+/// The sky of [`fogged_style`]: a magenta fog over the whole ground.
+const MAGENTA_FOG: &str = r#""sky": {"fog-color": "magenta", "fog-ground-blend": 0},"#;
+
+/// A white map over flat terrain pitched 75°, under [`MAGENTA_FOG`], with a circle near the camera and an opaque blue fill over
 /// the ground west of 1° W, in the stack above the circle or below it.
 fn fogged_style(blue: Blue) -> String {
     let fill = r#"{"id": "blue", "type": "fill", "source": "blue", "paint": {"fill-color": "blue"}}"#;
@@ -163,7 +165,7 @@ fn fogged_style(blue: Blue) -> String {
             "zoom": 4,
             "pitch": 75,
             "terrain": {{"source": "dem"}},
-            "sky": {{"fog-color": "magenta", "fog-ground-blend": 0}},
+            {MAGENTA_FOG}
             "sources": {{
                 "dem": {{"type": "raster-dem", "tiles": ["dem/{{z}}/{{x}}/{{y}}.png"], "tileSize": 256, "maxzoom": 10}},
                 "point": {{"type": "geojson", "data": {{"type": "Point", "coordinates": [0, -4]}}}},
@@ -526,18 +528,20 @@ fn a_continuous_map_whose_drapes_fail_to_draw_asks_for_frames_until_they_draw() 
 /// The fog lands once on each pixel, however many stacks drape the surface:
 /// where the stack above draws nothing, the ground shows as it does without
 /// that stack, and inside its opaque fill, as it does with the fill in the
-/// stack below.
+/// stack below. The far ground it compares is fogged.
 #[test]
 fn fog_lands_once_where_stacks_overlap() {
-    let (Some((above, _)), Some((none, _)), Some((below, _))) = (
+    let (Some((above, _)), Some((none, _)), Some((below, _)), Some((clear, _))) = (
         render(&fogged_style(Blue::Above), ViewportMode::Default),
         render(&fogged_style(Blue::None), ViewportMode::Default),
         render(&fogged_style(Blue::Below), ViewportMode::Default),
+        render(&fogged_style(Blue::None).replace(MAGENTA_FOG, ""), ViewportMode::Default),
     ) else {
         return;
     };
     // Far ground east of the fill, where the stack above draws nothing.
     for (x, y) in [(210, 70), (200, 60)] {
+        assert_ne!(pixel(&clear, x, y), pixel(&none, x, y), "the fog at {x}, {y}");
         assert_eq!(pixel(&none, x, y), pixel(&above, x, y), "the ground at {x}, {y}");
     }
     // Far ground inside the fill.
