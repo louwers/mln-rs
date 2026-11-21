@@ -99,7 +99,7 @@ struct GlyphTypeSpan {
 /// the characters that line breaking and vertical writing place on their
 /// own, such as spaces and CJK (`i18n::breaks_or_stands_upright`). Else the
 /// rest takes its glyphs one at a time, from PBFs or local fonts
-/// (`glyph_store.rs`). Marks and joiners stay with the font of the
+/// (the renderer's glyph store). Marks and joiners stay with the font of the
 /// character before them.
 ///
 /// The spans are sorted and disjoint, so a lookup is a binary search.
