@@ -96,7 +96,9 @@ pub enum RendererEvent {
         id: OverscaledTileID,
         source_id: String,
     },
-    /// A layer or a draw failed to render.
+    /// A layer or a draw failed to render, such as a drape that the GPU
+    /// failed to draw, which the next frame draws again. The frame doesn't
+    /// complete a still image, which fails with the error.
     RenderError(Error),
 }
 

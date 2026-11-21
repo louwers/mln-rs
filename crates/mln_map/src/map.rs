@@ -399,7 +399,7 @@ impl Map {
                     self.emit(MapEvent::StyleLoaded);
                 }
                 LoadEvent::Failed(error) => self.emit(MapEvent::LoadingFailed(error)),
-                LoadEvent::ResourceError(error) => self.on_resource_error(error),
+                LoadEvent::ResourceError(error) => self.fail_still_image(error),
                 LoadEvent::SpriteRequested(sprite) => self.emit(MapEvent::SpriteRequested(sprite)),
                 LoadEvent::SpriteImages(sprite, images) => {
                     // The update this publishes is for *-pattern properties.
@@ -413,7 +413,7 @@ impl Map {
                 }
                 LoadEvent::SourceDescribed { load, result: Err(error) } => {
                     Log::error(Event::Style, format!("Failed to load source {}: {error}", load.id));
-                    self.on_resource_error(error);
+                    self.fail_still_image(error);
                 }
                 LoadEvent::SourceDescribed { load, result: Ok(description) } => {
                     let previous = self.style.get_source(&load.id).cloned();
@@ -457,7 +457,7 @@ impl Map {
         let continuous = self.mode == MapMode::Continuous;
         match event {
             RendererEvent::Invalidate => self.on_update(),
-            RendererEvent::ResourceError(error) => self.on_resource_error(error),
+            RendererEvent::ResourceError(error) => self.fail_still_image(error),
             RendererEvent::RenderFrameStarted => {
                 if continuous {
                     self.emit(MapEvent::RenderFrameStarted);
@@ -519,12 +519,16 @@ impl Map {
                 self.emit(MapEvent::GlyphsError { font_stack, range, error });
             }
             RendererEvent::TileAction { op, id, source_id } => self.emit(MapEvent::TileAction { op, id, source_id }),
-            RendererEvent::RenderError(error) => self.emit(MapEvent::RenderError(error)),
+            // A frame that failed to draw something shows a wrong image.
+            RendererEvent::RenderError(error) => {
+                self.fail_still_image(error.clone());
+                self.emit(MapEvent::RenderError(error));
+            }
         }
     }
 
     /// Fails the still image being rendered.
-    fn on_resource_error(&mut self, error: Error) {
+    fn fail_still_image(&mut self, error: Error) {
         if self.mode != MapMode::Continuous && self.still_image == StillImage::Pending {
             self.still_image = StillImage::Ended(Err(error));
         }

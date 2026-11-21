@@ -1,14 +1,24 @@
 // The layers that drape over terrain draw into the terrain tiles' drapes,
 // which the surface shows: over flat ground, seen from above, the map looks
-// as it does without terrain.
+// as it does without terrain. A drape that fails to draw fails a still image
+// with the GPU's error, and a continuous map draws it again.
 
 use std::sync::Arc;
 
+use mln_gfx::RendererBackend as _;
+use mln_gfx::frame::FrameTarget as _;
+use mln_gfx::gpu::{
+    BindingsDesc, BindingsId, BufferDesc, BufferId, Caps, Draw, GeometryDesc, GeometryId, Gpu, GpuError, PassDesc,
+    PipelineDesc, PipelineId, ReadbackId, ResourceId, SamplerId, ShaderId, ShaderKey, TextureDesc, TextureId,
+    TextureRegion,
+};
+use mln_gfx::offscreen_target::OffscreenTarget;
 use mln_headless::HeadlessFrontend;
-use mln_map::{Map, MapMode, MapOptions, ViewportMode};
+use mln_map::{Map, MapEvent, MapMode, MapOptions, ViewportMode};
+use mln_renderer::{Renderer, RendererEvent};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{Kind, Resource, Response};
-use mln_util::error::ErrorKind;
+use mln_util::error::{Error, ErrorKind};
 use mln_util::image::PremultipliedImage;
 use mln_util::pool::Pool;
 use mln_util::queue::Queue;
@@ -217,4 +227,253 @@ fn a_circle_stands_between_two_stacks_of_draped_layers() {
     assert_eq!([255, 0, 0, 255], pixel(&draped, center - 30, center), "the red fill around the circle");
     let differing = pixelmatch::pixelmatch(&draped.data, &flat.data, SIDE as usize, SIDE as usize, None, 0.1285, false);
     assert!(differing <= EDGE_PIXELS, "{differing} pixels differ from the map without terrain");
+}
+
+/// A GPU that fails the drapes' passes, as a device out of memory would,
+/// and does the rest on `gpu`.
+struct FailingDrapes<'a> {
+    gpu: &'a mut dyn Gpu,
+}
+
+impl Gpu for FailingDrapes<'_> {
+    fn caps(&self) -> &Caps {
+        self.gpu.caps()
+    }
+    fn create_buffer(&mut self, desc: &BufferDesc<'_>) -> Result<BufferId, GpuError> {
+        self.gpu.create_buffer(desc)
+    }
+    fn write_buffer(&mut self, buffer: BufferId, offset: u64, data: &[u8]) -> Result<(), GpuError> {
+        self.gpu.write_buffer(buffer, offset, data)
+    }
+    fn create_texture(&mut self, desc: &TextureDesc<'_>) -> Result<TextureId, GpuError> {
+        self.gpu.create_texture(desc)
+    }
+    fn write_texture(&mut self, texture: TextureId, region: TextureRegion, data: &[u8]) -> Result<(), GpuError> {
+        self.gpu.write_texture(texture, region, data)
+    }
+    fn generate_mipmaps(&mut self, texture: TextureId) -> Result<(), GpuError> {
+        self.gpu.generate_mipmaps(texture)
+    }
+    fn create_sampler(&mut self, state: &mln_gfx::texture2d::SamplerState) -> Result<SamplerId, GpuError> {
+        self.gpu.create_sampler(state)
+    }
+    fn create_shader(&mut self, key: &ShaderKey) -> Result<ShaderId, GpuError> {
+        self.gpu.create_shader(key)
+    }
+    fn create_pipeline(&mut self, desc: &PipelineDesc<'_>) -> Result<PipelineId, GpuError> {
+        self.gpu.create_pipeline(desc)
+    }
+    fn create_bindings(&mut self, desc: &BindingsDesc<'_>) -> Result<BindingsId, GpuError> {
+        self.gpu.create_bindings(desc)
+    }
+    fn create_geometry(&mut self, desc: &GeometryDesc<'_>) -> Result<GeometryId, GpuError> {
+        self.gpu.create_geometry(desc)
+    }
+    fn destroy(&mut self, resource: ResourceId) -> Result<(), GpuError> {
+        self.gpu.destroy(resource)
+    }
+    fn begin_pass(&mut self, desc: &PassDesc<'_>) -> Result<(), GpuError> {
+        if desc.label == "drape" {
+            return Err(GpuError::Invalid("failed on purpose".to_owned()));
+        }
+        self.gpu.begin_pass(desc)
+    }
+    fn attaches_with_any_color(&self, depth_stencil: TextureId) -> bool {
+        self.gpu.attaches_with_any_color(depth_stencil)
+    }
+    fn draw(&mut self, draw: &Draw) -> Result<(), GpuError> {
+        self.gpu.draw(draw)
+    }
+    fn lend(&mut self, f: &mut dyn FnMut(&mut dyn std::any::Any)) -> Result<(), GpuError> {
+        self.gpu.lend(f)
+    }
+    fn end_pass(&mut self) -> Result<(), GpuError> {
+        self.gpu.end_pass()
+    }
+    fn flush(&mut self, wait: bool) -> Result<(), GpuError> {
+        self.gpu.flush(wait)
+    }
+    fn read_texture(&mut self, texture: TextureId, region: TextureRegion) -> Result<ReadbackId, GpuError> {
+        self.gpu.read_texture(texture, region)
+    }
+    fn take_readback(&mut self, readback: ReadbackId, wait: bool) -> Result<Option<Vec<u8>>, GpuError> {
+        self.gpu.take_readback(readback, wait)
+    }
+}
+
+/// A map of [`style`] over flat terrain, and a renderer on WebGPU that
+/// draws each update the map publishes, as a frontend does, through a GPU
+/// that fails the drapes' passes in the next `failing` frames it draws. It
+/// stands in for a [`HeadlessFrontend`], whose target keeps its GPU to
+/// itself.
+struct FailingMap {
+    map: Map,
+    backend: mln_webgpu::RendererBackend,
+    target: OffscreenTarget<mln_webgpu::WebGpu>,
+    renderer: Renderer,
+    /// The generation of the last update drawn.
+    drawn: u64,
+    failing: usize,
+    _pool: Pool,
+}
+
+impl FailingMap {
+    fn new(mode: MapMode) -> Self {
+        let device = mln_webgpu::Device::new(None).expect("a device");
+        let mut backend = mln_webgpu::RendererBackend::new(&device);
+        let pool = Pool::new(4);
+        let size = Size::new(SIDE, SIDE);
+        let file_source = Arc::new(StubFileSource::new(ResponseType::Synchronous));
+        let dem = Arc::new(sea_level_png());
+        file_source.set_response(Kind::Tile, move |_: &Resource| {
+            let mut response = Response::new();
+            response.data = Some(Arc::clone(&dem));
+            Some(response)
+        });
+        let options = MapOptions { map_mode: mode, size, ..Default::default() };
+        let mut map = Map::with_file_source(file_source, options, &pool).unwrap();
+        let events = map.renderer_events();
+        let invalidate = events.clone();
+        let mut renderer = Renderer::new(
+            backend.gpu(),
+            1.0,
+            mln_text::local_glyph_rasterizer::LocalGlyphs::default(),
+            Arc::new(move || invalidate.push(RendererEvent::Invalidate)),
+            &pool,
+        );
+        renderer.set_event_queue(Some(events));
+        map.load_style_json(&style(true));
+        let camera = map.style().get_default_camera();
+        map.jump_to(&camera);
+        let target = OffscreenTarget::new(size);
+        FailingMap { map, backend, target, renderer, drawn: 0, failing: 0, _pool: pool }
+    }
+
+    /// Takes in the renderer's reports, then draws the map's latest update
+    /// unless it drew it already, and returns whether it did. A still that
+    /// hasn't loaded draws no frame.
+    fn draw(&mut self) -> bool {
+        self.map.process_events();
+        let Some(update) = self.map.update_reader().latest().filter(|update| update.generation != self.drawn) else {
+            return false;
+        };
+        self.drawn = update.generation;
+        let gpu = self.backend.gpu();
+        if let Some(frame) = self.renderer.update(gpu, &update.parameters) {
+            let image = self.target.begin_frame(gpu).expect("the frame's image");
+            let drawn = if self.failing > 0 {
+                self.failing -= 1;
+                self.renderer.render(&mut FailingDrapes { gpu }, &image, frame)
+            } else {
+                self.renderer.render(gpu, &image, frame)
+            };
+            let handoff = self.target.end_frame(gpu);
+            self.renderer.finish_frame(gpu, drawn, handoff);
+        }
+        true
+    }
+
+    /// Asks for a still and draws the map's updates until it ends, with its
+    /// pixels, or gives up after a while: `None` for a still that never
+    /// ends.
+    fn still(&mut self) -> Option<Result<Vec<u8>, Error>> {
+        self.map.process_events();
+        self.map.render_still().unwrap();
+        for _ in 0..2_000 {
+            self.map.process_events();
+            if let Some(ended) = self.map.take_still_image() {
+                let image = self.target.read_image(self.backend.gpu()).expect("the still's pixels");
+                return Some(ended.map(|()| image.data));
+            }
+            if !self.draw() {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        }
+        None
+    }
+
+    /// The frames the renderer drew.
+    fn frames(&self) -> i32 {
+        self.renderer.rendering_stats().num_frames
+    }
+}
+
+impl Drop for FailingMap {
+    fn drop(&mut self) {
+        let gpu = self.backend.gpu();
+        self.target.tear_down(gpu);
+    }
+}
+
+/// Asserts that a still ended with the error of a GPU that failed its
+/// drapes.
+fn assert_drapes_failed(ended: Option<Result<Vec<u8>, Error>>) {
+    let error = ended.expect("the still never ended").expect_err("the still drew its drapes");
+    assert_eq!(ErrorKind::Native, error.kind);
+    assert!(error.message.contains("failed on purpose"), "{error}");
+}
+
+/// A still whose drapes fail to draw once, in its one frame, ends with the
+/// GPU's error rather than an image without them, and the next still draws
+/// them, as a new map's does.
+#[test]
+fn a_still_whose_drapes_fail_to_draw_once_ends_with_the_error() {
+    let mut map = FailingMap::new(MapMode::Static);
+    map.failing = 1;
+    assert_drapes_failed(map.still());
+    assert_eq!((0, 1), (map.failing, map.frames()));
+    let image = map.still().expect("the next still never ended").expect("the next still");
+    assert_eq!(2, map.frames());
+    let new = FailingMap::new(MapMode::Static).still().expect("a new map's still never ended").unwrap();
+    assert!(new == image, "a new map's still draws other pixels");
+}
+
+/// A still whose drapes fail to draw in every frame ends with the GPU's
+/// error, in one frame, each time it is asked for.
+#[test]
+fn a_still_whose_drapes_fail_to_draw_in_every_frame_ends_with_the_error() {
+    let mut map = FailingMap::new(MapMode::Static);
+    map.failing = usize::MAX;
+    assert_drapes_failed(map.still());
+    assert_eq!(1, map.frames());
+    assert_drapes_failed(map.still());
+    assert_eq!(2, map.frames());
+}
+
+/// A continuous map whose drapes fail to draw reports the error with each
+/// frame, and asks for frame after frame, until they draw, and then goes
+/// idle.
+#[test]
+fn a_continuous_map_whose_drapes_fail_to_draw_asks_for_frames_until_they_draw() {
+    let mut map = FailingMap::new(MapMode::Continuous);
+    // Whether the map went idle, and the errors it reported.
+    let drain = |map: &mut FailingMap| {
+        let events = map.map.drain_events();
+        let idle = events.iter().any(|event| matches!(event, MapEvent::Idle));
+        (idle, events.iter().filter(|event| matches!(event, MapEvent::RenderError(_))).count())
+    };
+    map.failing = usize::MAX;
+    let mut errors = 0;
+    for _ in 0..2_000 {
+        if errors >= 10 {
+            break;
+        }
+        if !map.draw() {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        let (idle, reported) = drain(&mut map);
+        assert!(!idle, "the map went idle while its drapes failed");
+        errors += reported;
+    }
+    assert!(errors >= 10, "{errors} errors: the map stopped asking for frames");
+    map.failing = 0;
+    let idle = (0..2_000).any(|_| {
+        if !map.draw() {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        let (idle, reported) = drain(&mut map);
+        assert_eq!(0, reported, "an error once the drapes draw");
+        idle
+    });
+    assert!(idle, "the map never went idle");
 }

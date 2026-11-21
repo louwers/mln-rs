@@ -674,8 +674,12 @@ impl Encoder {
         draw(orchestrator, gpu, &mut parameters, &frame, image, draw_groups.count, depth_range_size);
         orchestrator.terrain().count(parameters.context);
         // Drapes left for a later frame, stale by the camera or failed to
-        // draw, leave this one incomplete, and ask for the next.
+        // draw, leave this one incomplete, and ask for the next. A drape that
+        // failed is an error, which ends a still image.
         let drapes_waiting = orchestrator.terrain().drapes_waiting();
+        if let Some(failure) = orchestrator.terrain().drape_failure() {
+            emit(events, RendererEvent::RenderError(mln_util::error::Error::native(failure)));
+        }
         let start_rendering = Instant::now();
         if let Err(error) = parameters.end_pass(gpu).and_then(|()| gpu.flush(false)) {
             Log::error(Event::Render, format!("Submitting the frame failed: {error}"));

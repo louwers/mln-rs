@@ -99,8 +99,10 @@
 //!   every frame, at rest in each, draws its tiles in turn. A frame that
 //!   leaves such drapes for later, or in which a drape failed to draw,
 //!   asks for the next and reports itself partial, so the map isn't idle
-//!   until they have drawn. A drape whose content changed draws at once,
-//!   with the camera-stale drapes of its tile, and a still draws them all.
+//!   until they have drawn. A drape that failed to draw is a render error
+//!   too, with which a still image fails rather than wait or show the map
+//!   without it. A drape whose content changed draws at once, with the
+//!   camera-stale drapes of its tile, and a still draws them all.
 //! - **The drapes' sides.** A tile's drapes take the power of two that
 //!   covers its longest side on screen, level with the view's center, at
 //!   two texels a logical pixel or one a physical pixel, whichever is
@@ -485,6 +487,12 @@ impl RenderTerrain {
     /// isn't complete. It is known once the drapes have drawn.
     pub(crate) fn drapes_waiting(&self) -> bool {
         self.drapes.waiting()
+    }
+
+    /// Why the first drape of the frame that failed to draw did, if one did
+    /// ([`Drapes::failure`]). It is known once the drapes have drawn.
+    pub(crate) fn drape_failure(&self) -> Option<&str> {
+        self.drapes.failure()
     }
 
     /// Uploads the GPU objects of the frame's draws.
