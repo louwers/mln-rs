@@ -122,12 +122,11 @@ struct SourceDataUpdate {
     waiting: Option<(PrepareSourceData, Resolver<Applied>)>,
 }
 
-/// Data being prepared: its number, the load of the source's data that it
-/// started from, and its completion, which resolves when the data is
-/// installed or when something replaced the source's data first.
+/// Data being prepared: its number, and its completion, which resolves when
+/// the data is installed or when something replaced the source's data
+/// first.
 struct Building {
     build: u64,
-    load: u64,
     resolver: Resolver<Applied>,
 }
 
@@ -136,8 +135,7 @@ struct Building {
 pub(crate) struct SourceDataUpdates(HashMap<String, SourceDataUpdate>);
 
 /// Lets go of what the map keeps for the sources that left the style, and
-/// cancels the data that waits for a source that left or whose data
-/// something replaced. What the map kept drops from the outbox, so before
+/// cancels the data being prepared or waiting for them. What the map kept drops from the outbox, so before
 /// the completions that follow, and with the runtime's state unborrowed.
 pub(crate) fn reconcile(entry: &mut MapEntry, outbox: &mut Outbox) {
     let map = &entry.core;
@@ -150,7 +148,8 @@ pub(crate) fn reconcile(entry: &mut MapEntry, outbox: &mut Outbox) {
         outbox.push(move || drop(gone));
     }
     entry.source_data_updates.0.retain(|id, update| {
-        let Some(source) = current(id, update.instance) else {
+        let present = current(id, update.instance).is_some();
+        if !present {
             let cancelled = || Err(Error::cancelled("the source left the style before its data was ready"));
             if let Some(building) = update.building.take() {
                 outbox.resolve(building.resolver, cancelled());
@@ -158,17 +157,8 @@ pub(crate) fn reconcile(entry: &mut MapEntry, outbox: &mut Outbox) {
             if let Some((_, resolver)) = update.waiting.take() {
                 outbox.resolve(resolver, cancelled());
             }
-            return false;
-        };
-        // What replaced the source's data came after the waiting data was
-        // sent. The data being prepared finds out once it's ready.
-        if update.building.as_ref().is_some_and(|building| building.load != source.data().load())
-            && let Some((_, resolver)) = update.waiting.take()
-        {
-            outbox
-                .resolve(resolver, Err(Error::cancelled("the source's data was replaced before this data was ready")));
         }
-        true
+        present
     });
 }
 
@@ -329,6 +319,33 @@ impl Map {
         self.command(move |map| map.edit_loaded_style(|style| style.apply(edit)))
     }
 
+    /// Applies `edit`, which replaces the data of the source `source_id`,
+    /// such as a new URL, as [`apply_style_edit`](Self::apply_style_edit)
+    /// does. Once it applied, the data that a
+    /// [`set_style_source_data`](Self::set_style_source_data) sent before
+    /// and that waits to be prepared completes with
+    /// [`ErrorKind::Cancelled`](mln_util::ErrorKind). The data being
+    /// prepared finds out once it's ready.
+    pub fn replace_style_source_data(
+        &self,
+        source_id: impl Into<String>,
+        edit: Edit,
+    ) -> Result<Completion<Applied>, Error> {
+        let source_id = source_id.into();
+        self.send(
+            move |entry, outbox| {
+                entry.core.edit_loaded_style(|style| style.apply(edit))?;
+                if let Some((_, resolver)) =
+                    entry.source_data_updates.0.get_mut(&source_id).and_then(|update| update.waiting.take())
+                {
+                    outbox.resolve(resolver, Err(Error::cancelled("an edit replaced the source's data")));
+                }
+                Ok(())
+            },
+            |(), entry| entry.applied(),
+        )
+    }
+
     /// Runs `act` on the style's source `source_id` on the runtime's thread,
     /// in the command's place among the map's commands: a command that acts
     /// through the source without editing the style, such as an answer to a
@@ -371,10 +388,11 @@ impl Map {
     /// Completes with [`ErrorKind::InvalidState`](mln_util::ErrorKind) while
     /// the style isn't loaded, with `NotFound` when the style has no such
     /// source, with what `data` or the preparation fails with, and with
-    /// `Cancelled` when newer data replaces it while it waits, or when an
-    /// edit that replaces the source's data (that grows its `load`), the
-    /// source's removal, a style load or the map's release comes before the
-    /// data is ready.
+    /// `Cancelled` when newer data replaces it while it waits, when
+    /// [`replace_style_source_data`](Self::replace_style_source_data) comes
+    /// while it waits, or when an edit that replaces the source's data (that
+    /// grows its `load`), the source's removal, a style load or the map's
+    /// release comes before the data is ready.
     pub fn set_style_source_data(
         &self,
         source_id: impl Into<String>,
@@ -543,7 +561,7 @@ fn start_data(
     static BUILDS: AtomicU64 = AtomicU64::new(0);
     let build = BUILDS.fetch_add(1, Ordering::Relaxed);
     let load = source.data().load();
-    update.building = Some(Building { build, load, resolver });
+    update.building = Some(Building { build, resolver });
     let source_id = source.id().to_owned();
     let next = background.clone();
     background.pool.spawn(move || {
