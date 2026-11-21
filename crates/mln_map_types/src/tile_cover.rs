@@ -219,15 +219,22 @@ impl Iterator for TileCover {
     }
 }
 
-/// The parameters of a tile cover. They own a copy of the transform state,
-/// which C++ holds by reference.
+/// What [`tile_cover`] covers: a view, and how a pitched view's tiles fall
+/// off to lower zooms with their distance.
 #[derive(Clone, Debug)]
-#[doc(hidden)]
 pub struct TileCoverParameters {
+    /// The view the tiles cover.
     pub view: View,
+    /// How many tiles of the cover's zoom, at least, surround the center of
+    /// a pitched view before its tiles fall off to lower zooms.
     pub tile_lod_min_radius: f64,
+    /// How soon a pitched view's tiles fall off to lower zooms with their
+    /// distance: the larger, the sooner.
     pub tile_lod_scale: f64,
+    /// The pitch, in radians, above which tiles fall off to lower zooms.
     pub tile_lod_pitch_threshold: f64,
+    /// Whether a pitched view's tiles fall off from the center or from the
+    /// camera.
     pub tile_lod_mode: TileLodMode,
     /// The zoom the source loads at the center of the view, shifted for its
     /// tile size and not yet clamped to its zoom range; the globe's level of
@@ -776,7 +783,6 @@ mod globe {
 /// Every tile of zoom `z`, the ones behind the planet too, under the ids the
 /// globe's [`tile_cover`] gives the visible ones: the same wraps, and the same
 /// overscaled zoom for `zoom_range` and `overscaled_z`.
-#[doc(hidden)]
 #[must_use]
 pub fn globe_level_cover(
     state: &TileCoverParameters,
@@ -787,7 +793,12 @@ pub fn globe_level_cover(
     globe::level_cover(state, z, zoom_range, overscaled_z)
 }
 
-#[doc(hidden)]
+/// The tiles that cover `state`'s view at zoom `z`, nearest the center
+/// first, or nearest the camera with [`TileLodMode::Distance`]. Past its
+/// pitch threshold, a view's tiles farther away are of lower zooms, down to
+/// `zoom_range.min`, and with [`TileLodMode::Distance`] nearer ones of
+/// higher zooms, up to `zoom_range.max`. The tiles of the deepest zoom take
+/// `overscaled_z` as their overscaled zoom, if it is deeper.
 #[must_use]
 pub fn tile_cover(
     state: &TileCoverParameters,
