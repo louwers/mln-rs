@@ -5,7 +5,9 @@ use mln_render::layer::{
     Bucket, BucketBase, CrossFadedPaintPropertyBinder, EvaluatedLayer, GeometryUpload, GeometryVec, Indexed,
     PaintPropertyBinder,
 };
-use mln_style::expression::{Image, Value};
+use mln_style::evaluated::Evaluated;
+use mln_style::expression::{EvaluationContext, Image, Value};
+use mln_style::{PropertyEvaluationParameters, StyleValue as _};
 use mln_style_types::image::ImagePositions;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate, GeometryTileFeature};
@@ -23,7 +25,7 @@ use super::programs::{
     ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE,
 };
 use super::properties::{FillLayoutProperties, FillPaintProperties};
-use crate::pattern_layout::{PatternBucket, PatternLayerMap};
+use crate::pattern_layout::{PatternBucket, PatternLayerMap, PatternLayoutSpec};
 use crate::tessellator::Tessellator;
 
 mln_render::paint_property_binders!(
@@ -224,5 +226,49 @@ impl Bucket for FillBucket {
         binders.update_vertex_vectors(states, layer, image_positions);
         self.base.set_uploaded(false);
         true
+    }
+}
+
+/// The pattern layout of fill layers.
+pub struct FillLayoutSpec;
+
+impl PatternLayoutSpec for FillLayoutSpec {
+    type Type = Fill;
+    type Bucket = FillBucket;
+    type Layout = FillLayoutProperties::PossiblyEvaluated;
+
+    fn evaluate_layout(layer: &EvaluatedLayer<Fill>, parameters: &PropertyEvaluationParameters) -> Self::Layout {
+        layer.style.layout.evaluate(parameters)
+    }
+    fn pattern_property(layer: &EvaluatedLayer<Fill>) -> &Evaluated<Image> {
+        &layer.paint.fill_pattern
+    }
+    /// Whether the leader's unevaluated layout sets `fill-sort-key`.
+    fn sorted(leader: &EvaluatedLayer<Fill>) -> bool {
+        !leader.style.layout.fill_sort_key.is_undefined()
+    }
+    fn sort_key(
+        layout: &Self::Layout,
+        feature: &dyn GeometryTileFeature,
+        zoom: f32,
+        canonical: &CanonicalTileID,
+    ) -> f32 {
+        layout.fill_sort_key.evaluate(
+            &EvaluationContext::with_zoom_feature(zoom, Some(feature)).with_canonical_tile_id(Some(canonical)),
+        )
+    }
+    fn constant_sort_key(layout: &Self::Layout) -> Option<f32> {
+        layout.fill_sort_key.constant()
+    }
+    fn create_bucket(
+        layout: &Self::Layout,
+        layer_properties_map: &VecMap<String, Arc<EvaluatedLayer<Fill>>>,
+        zoom: f32,
+        overscaling: u32,
+    ) -> FillBucket {
+        FillBucket::new(layout, layer_properties_map, zoom, overscaling)
+    }
+    fn set_subdivision_granularity(bucket: &mut FillBucket, value: &SubdivisionGranularitySetting) {
+        bucket.set_subdivision_granularity(value);
     }
 }

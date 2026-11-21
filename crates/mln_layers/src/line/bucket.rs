@@ -7,7 +7,9 @@ use mln_render::layer::{
     Bucket, BucketBase, CrossFadedPaintPropertyBinder, EvaluatedLayer, GeometryUpload, GeometryVec, Indexed,
     PaintPropertyBinder,
 };
+use mln_style::evaluated::Evaluated;
 use mln_style::expression::{EvaluationContext, Image, Value};
+use mln_style::{PropertyEvaluationParameters, StyleValue as _};
 use mln_style_types::image::ImagePositions;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature};
@@ -28,7 +30,7 @@ use super::programs::{
     ID_LINE_WIDTH_VERTEX_ATTRIBUTE,
 };
 use super::properties::{LineLayoutProperties, LinePaintProperties};
-use crate::pattern_layout::{PatternBucket, PatternLayerMap};
+use crate::pattern_layout::{PatternBucket, PatternLayerMap, PatternLayoutSpec};
 use crate::tessellator::Tessellator;
 
 mln_render::paint_property_binders!(
@@ -236,5 +238,49 @@ impl Bucket for LineBucket {
         binders.update_vertex_vectors(states, layer, image_positions);
         self.base.set_uploaded(false);
         true
+    }
+}
+
+/// The pattern layout of line layers.
+pub struct LineLayoutSpec;
+
+impl PatternLayoutSpec for LineLayoutSpec {
+    type Type = Line;
+    type Bucket = LineBucket;
+    type Layout = LineLayoutProperties::PossiblyEvaluated;
+
+    fn evaluate_layout(layer: &EvaluatedLayer<Line>, parameters: &PropertyEvaluationParameters) -> Self::Layout {
+        layer.style.layout.evaluate(parameters)
+    }
+    fn pattern_property(layer: &EvaluatedLayer<Line>) -> &Evaluated<Image> {
+        &layer.paint.line_pattern
+    }
+    /// Whether the leader's unevaluated layout sets `line-sort-key`.
+    fn sorted(leader: &EvaluatedLayer<Line>) -> bool {
+        !leader.style.layout.line_sort_key.is_undefined()
+    }
+    fn sort_key(
+        layout: &Self::Layout,
+        feature: &dyn GeometryTileFeature,
+        zoom: f32,
+        canonical: &CanonicalTileID,
+    ) -> f32 {
+        layout.line_sort_key.evaluate(
+            &EvaluationContext::with_zoom_feature(zoom, Some(feature)).with_canonical_tile_id(Some(canonical)),
+        )
+    }
+    fn constant_sort_key(layout: &Self::Layout) -> Option<f32> {
+        layout.line_sort_key.constant()
+    }
+    fn create_bucket(
+        layout: &Self::Layout,
+        layer_properties_map: &VecMap<String, Arc<EvaluatedLayer<Line>>>,
+        zoom: f32,
+        overscaling: u32,
+    ) -> LineBucket {
+        LineBucket::new(layout.clone(), layer_properties_map, zoom, overscaling)
+    }
+    fn set_subdivision_granularity(bucket: &mut LineBucket, value: &SubdivisionGranularitySetting) {
+        bucket.set_subdivision_granularity(value);
     }
 }
