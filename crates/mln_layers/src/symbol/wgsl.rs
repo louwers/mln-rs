@@ -589,14 +589,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: Some(concat!(
         unpack_opacity!(),
         r"
-// Symbol shader UBO indices
-const idGlobalPaintParamsUBO = 0u;
-const idGlobalUBOIndex = 1u;
-const idSymbolDrawableUBO = 2u;
-const idSymbolTilePropsUBO = 3u;
-const idSymbolEvaluatedPropsUBO = 4u;
-const symbolUBOCount = 5u;
-
 struct GlobalPaintParamsUBO {
     units_to_pixels: vec2<f32>,
     world_size: vec2<f32>,
@@ -949,14 +941,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
         sdf_px!(),
         unpack_opacity!(),
         r"
-// Symbol shader UBO indices
-const idGlobalPaintParamsUBO = 0u;
-const idGlobalUBOIndex = 1u;
-const idSymbolDrawableUBO = 2u;
-const idSymbolTilePropsUBO = 3u;
-const idSymbolEvaluatedPropsUBO = 4u;
-const symbolUBOCount = 5u;
-
 struct GlobalPaintParamsUBO {
     units_to_pixels: vec2<f32>,
     world_size: vec2<f32>,
@@ -1326,14 +1310,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
         sdf_px!(),
         unpack_opacity!(),
         r"
-// Symbol shader UBO indices
-const idGlobalPaintParamsUBO = 0u;
-const idGlobalUBOIndex = 1u;
-const idSymbolDrawableUBO = 2u;
-const idSymbolTilePropsUBO = 3u;
-const idSymbolEvaluatedPropsUBO = 4u;
-const symbolUBOCount = 5u;
-
 struct GlobalPaintParamsUBO {
     units_to_pixels: vec2<f32>,
     world_size: vec2<f32>,
