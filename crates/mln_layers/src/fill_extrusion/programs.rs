@@ -152,7 +152,7 @@ pub static FILL_EXTRUSION_PATTERN: Program = Program {
         Attribute { id: ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE, format: UShort4 },
     ],
     instance_attributes: &[],
-    textures: &[Texture::new("u_image")],
+    textures: &[Texture::new("image")],
     properties: &[
         Property::float("base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
         Property::float("height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
@@ -180,7 +180,7 @@ pub static FILL_EXTRUSION_PATTERN_INSTANCED: Program = Program {
         Attribute { id: ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE, format: Short2 },
         Attribute { id: ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE, format: UShort2 },
     ],
-    textures: &[Texture::new("u_image")],
+    textures: &[Texture::new("image")],
     properties: &[
         Property::float("base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
         Property::float("height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
@@ -210,7 +210,7 @@ pub static FILL_EXTRUSION_PATTERN_WALL: Program = Program {
         Attribute { id: ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE, format: UShort2 },
     ],
     instance_attributes: &[],
-    textures: &[Texture::new("u_image")],
+    textures: &[Texture::new("image")],
     properties: &[
         Property::float("base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
         Property::float("height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),

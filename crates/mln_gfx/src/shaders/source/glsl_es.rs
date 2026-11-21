@@ -4,7 +4,9 @@
 //! A block's members are in the program's scope, so a stage reads them by
 //! their names alone. `mln_gl` declares a block only for a stage that names
 //! one of them: WebGL2 rejects a draw whose program has a block without a
-//! buffer, whether or not the shader reads it.
+//! buffer, whether or not the shader reads it. A stage reads a texture as
+//! the `sampler2D` `u_<name>`, which `mln_gl` declares for a stage that
+//! names it.
 //!
 //! A property's directives (see [`source`](super#properties)) write, each
 //! a `float` for a float and a `vec4` otherwise, at the precision of the
@@ -32,7 +34,7 @@ use mln_util::hash::HashSet;
 
 use crate::gpu::GpuError;
 use crate::shaders::block::{Block, Member, MemberType};
-use crate::shaders::program::{Buffer, Program, PropertyType, VIEW_BUFFER};
+use crate::shaders::program::{Buffer, Program, PropertyType, Texture, VIEW_BUFFER};
 use crate::shaders::source::{Named, Stage, expand as expand_properties, from_uniform, identifiers, per_vertex};
 
 /// The GLSL of a program.
@@ -40,6 +42,7 @@ use crate::shaders::source::{Named, Stage, expand as expand_properties, from_uni
 /// A stage compiles from `#version 300 es`, or `#version 330 core` on
 /// desktop OpenGL, the program's defines, the blocks of the engine's
 /// buffers and the program's that the stage names a member of, the
+/// declarations of the program's textures that the stage names, the
 /// backend's prelude of that stage, and the shader's. A vertex stage that
 /// names a member of the projection block or one of the backend's
 /// projection helpers also has the block and the helpers.
@@ -62,6 +65,24 @@ pub fn stage_blocks(program: &Program, text: &str) -> Vec<&'static Block> {
         members.any(|member| identifiers.contains(member_name(block, member).as_str()))
     };
     [&VIEW_BUFFER].into_iter().chain(program.buffers).filter_map(Buffer::block).filter(names).collect()
+}
+
+/// The declarations of the textures of `program` that `text`, a stage,
+/// names: each a `uniform sampler2D` of its [`texture_name`].
+#[must_use]
+pub fn textures(program: &Program, text: &str) -> String {
+    let identifiers: HashSet<&str> = identifiers(text).collect();
+    let names = program.textures.iter().map(texture_name).filter(|name| identifiers.contains(name.as_str()));
+    names.fold(String::new(), |mut declarations, name| {
+        _ = writeln!(declarations, "uniform sampler2D {name};");
+        declarations
+    })
+}
+
+/// The name of `texture` in GLSL ES, in the program's scope: `u_<name>`.
+#[must_use]
+pub fn texture_name(texture: &Texture) -> String {
+    format!("u_{}", texture.name)
 }
 
 /// The declarations of `blocks`: each a `std140` uniform block whose

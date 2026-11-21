@@ -23,10 +23,6 @@ void main() {
 precision highp float;
 #endif
 
-uniform sampler2D u_image;
-uniform sampler2D u_elevation_stops;
-uniform sampler2D u_color_stops;
-
 in vec2 v_pos;
 
 float getElevation(vec2 coord) {

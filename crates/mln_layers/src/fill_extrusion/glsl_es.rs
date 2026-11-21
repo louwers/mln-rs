@@ -215,8 +215,6 @@ in vec2 v_pos_a;
 in vec2 v_pos_b;
 in vec4 v_lighting;
 
-uniform sampler2D u_image;
-
 #property varying base
 #property varying height
 #property varying pattern_from flat
@@ -342,8 +340,6 @@ precision highp float;
 in vec2 v_pos_a;
 in vec2 v_pos_b;
 in vec4 v_lighting;
-
-uniform sampler2D u_image;
 
 #property varying base
 #property varying height

@@ -247,13 +247,19 @@ pub struct Attribute {
     pub format: AttributeDataType,
 }
 
-/// A texture a program samples.
+/// A texture a program samples, by its name in the program's shaders.
+///
+/// A stage reads the texture as `<name>` and the sampler that a draw binds
+/// with it as `<name>_sampler`, in WGSL, MSL and GLSL; a stage may sample a
+/// texture with another texture's sampler. GLSL ES reads both as the
+/// combined sampler `u_<name>`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Texture {
-    /// The name of its sampler in the GLSL ES.
+    /// The name its shaders read it by.
     pub name: &'static str,
-    /// Whether it binds with a filtering sampler, which a texture of
-    /// `Rgba32Float` can't.
+    /// Whether its shaders may filter it, with a filtering sampler: not a
+    /// texture of a format that can't be filtered, as `Rgba32Float`, or one
+    /// whose shaders only read texels of it.
     pub filterable: bool,
 }
 
@@ -268,6 +274,12 @@ impl Texture {
     #[must_use]
     pub const fn unfilterable(name: &'static str) -> Texture {
         Texture { name, filterable: false }
+    }
+
+    /// The name its shaders read its sampler by, `<name>_sampler`.
+    #[must_use]
+    pub fn sampler(&self) -> String {
+        format!("{}_sampler", self.name)
     }
 }
 
@@ -440,9 +452,11 @@ impl Program {
     /// before it compiles the program: distinct attribute ids within each
     /// step, buffers at ids of their kinds, as [`Buffer`]'s constructors
     /// give them, each id and each name once, and no more attributes and
-    /// textures than a program can have. Also that the GLSL ES names of the members of the view's block,
-    /// the projection block and the program's blocks are distinct, since
-    /// GLSL ES has them in one scope.
+    /// textures than a program can have, and each texture's name once among
+    /// the textures' and the buffers'. Also that the GLSL ES names of the
+    /// members of the view's block, the projection block and the program's
+    /// blocks, and of the textures, are distinct, since GLSL ES has them in
+    /// one scope.
     ///
     /// # Errors
     ///
@@ -487,16 +501,23 @@ impl Program {
                 return invalid(format!("two buffers are named {}", buffer.name));
             }
         }
+        for (index, texture) in self.textures.iter().enumerate() {
+            let earlier = self.textures[..index].iter().map(|texture| texture.name);
+            if earlier.chain(self.buffers.iter().map(|buffer| buffer.name)).any(|name| name == texture.name) {
+                return invalid(format!("two textures or buffers are named {}", texture.name));
+            }
+        }
         let blocks = || ENGINE_BUFFERS.iter().chain(self.buffers).filter_map(Buffer::block);
         let mut names: Vec<String> =
             blocks().flat_map(|block| block.members.iter().map(|member| glsl_es::member_name(block, member))).collect();
+        names.extend(self.textures.iter().map(glsl_es::texture_name));
         names.sort_unstable();
         let repeated = names.windows(2).find_map(|pair| match pair {
             [name, next] if name == next => Some(name),
             _ => None,
         });
         if let Some(name) = repeated {
-            return invalid(format!("two block members are {name} in GLSL ES"));
+            return invalid(format!("two block members or textures are {name} in GLSL ES"));
         }
         Ok(())
     }

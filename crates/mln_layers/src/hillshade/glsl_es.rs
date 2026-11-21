@@ -21,7 +21,6 @@ precision highp float;
 #endif
 
 in vec2 v_pos;
-uniform sampler2D u_image;
 float getElevation(vec2 coord, float bias) {
     // Convert encoded elevation value to meters
     vec4 data = texture(u_image, coord) * 255.0;
@@ -99,7 +98,6 @@ void main() {
 }
 ",
     fragment: r#"in vec2 v_pos;
-uniform sampler2D u_image;
 
 #define PI 3.141592653589793
 

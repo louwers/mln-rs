@@ -83,7 +83,7 @@ pub static LINE_GRADIENT: Program = Program {
         Attribute { id: ID_LINE_WIDTH_VERTEX_ATTRIBUTE, format: Float2 },
     ],
     instance_attributes: &[],
-    textures: &[Texture::new("u_image")],
+    textures: &[Texture::new("image")],
     properties: &[
         Property::float("blur", ID_LINE_BLUR_VERTEX_ATTRIBUTE),
         Property::float("opacity", ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
@@ -117,7 +117,7 @@ pub static LINE_PATTERN: Program = Program {
         Attribute { id: ID_LINE_PATTERN_TO_VERTEX_ATTRIBUTE, format: UShort4 },
     ],
     instance_attributes: &[],
-    textures: &[Texture::new("u_image")],
+    textures: &[Texture::new("image")],
     properties: &[
         Property::float("blur", ID_LINE_BLUR_VERTEX_ATTRIBUTE),
         Property::float("opacity", ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
@@ -154,7 +154,7 @@ pub static LINE_SDF: Program = Program {
         Attribute { id: ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE, format: Float4 },
     ],
     instance_attributes: &[],
-    textures: &[Texture::new("u_image")],
+    textures: &[Texture::new("image")],
     properties: &[
         Property::color("color", ID_LINE_COLOR_VERTEX_ATTRIBUTE),
         Property::float("blur", ID_LINE_BLUR_VERTEX_ATTRIBUTE),
@@ -191,7 +191,7 @@ pub static LINE_GRADIENT_SDF: Program = Program {
         Attribute { id: ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE, format: Float4 },
     ],
     instance_attributes: &[],
-    textures: &[Texture::new("u_image"), Texture::new("u_image_dash")],
+    textures: &[Texture::new("image"), Texture::new("image_dash")],
     properties: &[
         Property::float("blur", ID_LINE_BLUR_VERTEX_ATTRIBUTE),
         Property::float("opacity", ID_LINE_OPACITY_VERTEX_ATTRIBUTE),

@@ -37,7 +37,7 @@ pub static HILLSHADE: Program = Program {
         Attribute { id: ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE, format: Short2 },
     ],
     instance_attributes: &[],
-    textures: &[Texture::new("u_image")],
+    textures: &[Texture::new("image")],
     properties: &[],
     sources: Sources::NONE
         .wgsl(&wgsl::HILLSHADE_SHADER)
@@ -54,7 +54,7 @@ pub static HILLSHADE_PREPARE: Program = Program {
         Attribute { id: ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE, format: Short2 },
     ],
     instance_attributes: &[],
-    textures: &[Texture::new("u_image")],
+    textures: &[Texture::new("image")],
     properties: &[],
     sources: Sources::NONE
         .wgsl(&wgsl::HILLSHADE_PREPARE_SHADER)

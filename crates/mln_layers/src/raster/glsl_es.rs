@@ -20,9 +20,7 @@ void main() {
     v_pos1 = (v_pos0 * u_scale_parent) + u_tl_parent;
 }
 ",
-    fragment: r"uniform sampler2D u_image0;
-uniform sampler2D u_image1;
-
+    fragment: r"
 in highp vec2 v_pos0;
 in highp vec2 v_pos1;
 

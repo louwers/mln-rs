@@ -68,7 +68,7 @@ pub static SYMBOL_ICON: Program = Program {
         Attribute { id: ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE, format: Float },
     ],
     instance_attributes: &[],
-    textures: &[Texture::new("u_texture")],
+    textures: &[Texture::new("image")],
     properties: &[Property::float("opacity", ID_SYMBOL_OPACITY_ATTRIBUTE)],
     sources: Sources::NONE
         .wgsl(&wgsl::SYMBOL_ICON_SHADER)
@@ -95,7 +95,7 @@ pub static SYMBOL_SDF: Program = Program {
         Attribute { id: ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE, format: Float },
     ],
     instance_attributes: &[],
-    textures: &[Texture::new("u_texture")],
+    textures: &[Texture::new("image")],
     properties: &[
         Property::float("opacity", ID_SYMBOL_OPACITY_ATTRIBUTE),
         Property::color("fill_color", ID_SYMBOL_COLOR_ATTRIBUTE),
@@ -127,7 +127,7 @@ pub static SYMBOL_TEXT_AND_ICON: Program = Program {
         Attribute { id: ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE, format: Float },
     ],
     instance_attributes: &[],
-    textures: &[Texture::new("u_texture"), Texture::new("u_texture_icon")],
+    textures: &[Texture::new("glyph_image"), Texture::new("icon_image")],
     properties: &[
         Property::float("opacity", ID_SYMBOL_OPACITY_ATTRIBUTE),
         Property::color("fill_color", ID_SYMBOL_COLOR_ATTRIBUTE),

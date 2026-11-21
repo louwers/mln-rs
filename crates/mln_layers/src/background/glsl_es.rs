@@ -21,8 +21,7 @@ void main() {
     ),
     fragment: concat!(
         atlas_pos!(glsl_es),
-        r"uniform sampler2D u_image;
-
+        r"
 in mediump vec2 v_pos_a;
 in mediump vec2 v_pos_b;
 

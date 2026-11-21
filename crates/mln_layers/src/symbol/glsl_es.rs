@@ -300,8 +300,7 @@ void main() {
     ),
     fragment: concat!(
         atlas_pos!(glsl_es),
-        r"uniform sampler2D u_texture;
-
+        r"
 in highp vec2 v_tex;
 flat in highp vec2 v_tex_origin;
 in float v_fade_opacity;
@@ -312,7 +311,7 @@ void main() {
 #else
     lowp float alpha = v_fade_opacity;
 #endif
-    fragColor = texture(u_texture, atlas_pos(v_tex_origin, v_tex)) * alpha;
+    fragColor = texture(u_image, atlas_pos(v_tex_origin, v_tex)) * alpha;
 
 #ifdef OVERDRAW_INSPECTOR
     fragColor = vec4(1.0);
@@ -494,8 +493,6 @@ lowp float halo_blur = $u_halo_blur;
         atlas_pos!(glsl_es),
         r"#define SDF_PX 8.0
 
-uniform sampler2D u_texture;
-
 in highp vec2 v_data0;
 flat in highp vec2 v_tex_origin;
 in vec3 v_data1;
@@ -528,7 +525,7 @@ void main() {
         inner_edge = inner_edge + gamma_scaled;
     }
 
-    lowp float dist = texture(u_texture, tex).a;
+    lowp float dist = texture(u_image, tex).a;
     highp float alpha = smoothstep(inner_edge - gamma_scaled, inner_edge + gamma_scaled, dist);
     if (u_is_halo) {
         // When drawing halos, we want the inside of the halo to be transparent as well
@@ -722,9 +719,6 @@ lowp float halo_blur = $u_halo_blur;
         atlas_pos!(glsl_es),
         r"#define SDF_PX 8.0
 
-uniform sampler2D u_texture;
-uniform sampler2D u_texture_icon;
-
 in highp vec2 v_data0;
 flat in highp vec2 v_tex_origin;
 in vec3 v_data1;
@@ -754,7 +748,7 @@ void main() {
 
     if (v_is_icon != 0) {
         lowp float alpha = opacity * fade_opacity;
-        fragColor = texture(u_texture_icon, tex) * alpha;
+        fragColor = texture(u_icon_image, tex) * alpha;
 
 #ifdef OVERDRAW_INSPECTOR
         fragColor = vec4(1.0);
@@ -769,7 +763,7 @@ void main() {
         inner_edge = inner_edge + gamma_scaled;
     }
 
-    lowp float dist = texture(u_texture, tex).a;
+    lowp float dist = texture(u_glyph_image, tex).a;
     highp float alpha = smoothstep(inner_edge - gamma_scaled, inner_edge + gamma_scaled, dist);
     if (u_is_halo) {
         // When drawing halos, we want the inside of the halo to be transparent as well

@@ -56,8 +56,6 @@ void main() {
 precision highp float;
 #endif
 
-uniform sampler2D u_image;
-
 in vec2 v_pos_a;
 in vec2 v_pos_b;
 in vec2 v_pos;
@@ -332,8 +330,6 @@ void main() {
         r"#ifdef GL_ES
 precision highp float;
 #endif
-
-uniform sampler2D u_image;
 
 in vec2 v_pos_a;
 in vec2 v_pos_b;

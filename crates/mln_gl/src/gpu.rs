@@ -17,6 +17,7 @@ use mln_gfx::gpu::{
     TextureDesc, TextureFormat, TextureId, TextureRegion, TextureUsage, VertexBufferLayout, VertexStep,
 };
 use mln_gfx::shaders::program::BufferKind;
+use mln_gfx::shaders::source::glsl_es;
 use mln_gfx::texture2d::{MAX_ACTIVE_TEXTURE_UNITS, SamplerState};
 use mln_gfx::types::TextureFilterType;
 use mln_util::hash::HashMap;
@@ -797,7 +798,7 @@ impl GlGpu {
 
                 state.use_program(gl, Some(object));
                 for (slot, info) in declared.textures.iter().enumerate() {
-                    if let Some(location) = gl.get_uniform_location(object, info.name) {
+                    if let Some(location) = gl.get_uniform_location(object, &glsl_es::texture_name(info)) {
                         if slot >= MAX_ACTIVE_TEXTURE_UNITS as usize {
                             return Err(GpuError::Unsupported(format!("{name} samples texture slot {slot}")));
                         }

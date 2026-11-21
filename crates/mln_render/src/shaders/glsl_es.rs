@@ -158,9 +158,7 @@ void main() {
     gl_Position = vec4(a_pos * 2.0 - 1.0, 0.0, 1.0);
 }
 ",
-    fragment: r"uniform sampler2D u_image;
-uniform sampler2D u_backdrop;
-
+    fragment: r"
 // The blend modes that no blend function expresses, of the W3C compositing
 // spec, on premultiplied colors.
 float lum(vec3 c) {

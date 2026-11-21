@@ -32,7 +32,7 @@ pub static COLOR_RELIEF: Program = Program {
         Attribute { id: ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE, format: Short2 },
     ],
     instance_attributes: &[],
-    textures: &[Texture::new("u_image"), Texture::unfilterable("u_elevation_stops"), Texture::new("u_color_stops")],
+    textures: &[Texture::new("image"), Texture::unfilterable("elevation_stops"), Texture::new("color_stops")],
     properties: &[],
     sources: Sources::NONE
         .wgsl(&wgsl::COLOR_RELIEF_SHADER)

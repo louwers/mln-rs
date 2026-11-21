@@ -28,7 +28,7 @@ pub static RASTER: Program = Program {
         Attribute { id: ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE, format: Short2 },
     ],
     instance_attributes: &[],
-    textures: &[Texture::new("u_image0"), Texture::new("u_image1")],
+    textures: &[Texture::new("image0"), Texture::new("image1")],
     properties: &[],
     sources: Sources::NONE
         .wgsl(&wgsl::RASTER_SHADER)

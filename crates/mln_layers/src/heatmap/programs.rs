@@ -51,7 +51,7 @@ pub static HEATMAP_TEXTURE: Program = Program {
     buffers: &[TEXTURE_PROPS],
     attributes: &[Attribute { id: ID_HEATMAP_POS_VERTEX_ATTRIBUTE, format: Short2 }],
     instance_attributes: &[],
-    textures: &[Texture::new("u_image"), Texture::new("u_color_ramp")],
+    textures: &[Texture::new("image"), Texture::new("color_ramp")],
     properties: &[],
     sources: Sources::NONE
         .wgsl(&wgsl::HEATMAP_TEXTURE_SHADER)

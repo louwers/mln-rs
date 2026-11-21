@@ -94,8 +94,6 @@ void main() {
 }
 ",
     fragment: r"in highp vec2 v_pos;
-uniform sampler2D u_image;
-uniform sampler2D u_color_ramp;
 
 void main() {
     float t = texture(u_image, v_pos).r;

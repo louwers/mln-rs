@@ -186,9 +186,7 @@ lowp float offset = u_offset;
     ),
     fragment: concat!(
         line_fragment_prelude!(),
-        r"uniform sampler2D u_image;
-uniform sampler2D u_image_dash;
-
+        r"
 in vec2 v_normal;
 in vec2 v_width2;
 in highp vec2 v_tex_a;
@@ -354,8 +352,7 @@ mediump float width = $u_width;
     ),
     fragment: concat!(
         line_fragment_prelude!(),
-        r"uniform sampler2D u_image;
-
+        r"
 in vec2 v_width2;
 in vec2 v_normal;
 in float v_gamma_scale;
@@ -519,8 +516,6 @@ mediump float width = $u_width;
         r"#ifdef GL_ES
 precision highp float;
 #endif
-
-uniform sampler2D u_image;
 
 in vec2 v_normal;
 in vec2 v_width2;
@@ -738,8 +733,7 @@ lowp float offset = $u_offset;
     ),
     fragment: concat!(
         line_fragment_prelude!(),
-        r"uniform sampler2D u_image;
-
+        r"
 in vec2 v_normal;
 in vec2 v_width2;
 in highp vec2 v_tex_a;

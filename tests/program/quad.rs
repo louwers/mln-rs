@@ -31,7 +31,7 @@ pub(crate) static QUAD: Program = Program {
     buffers: &[PROPS],
     attributes: &[Attribute { id: ID_CORNER, format: Float2 }],
     instance_attributes: &[Attribute { id: ID_OFFSET, format: Float2 }],
-    textures: &[Texture::new("u_image")],
+    textures: &[Texture::new("image")],
     properties: &[],
     sources: Sources { wgsl: Some(&WGSL), msl: Some(&MSL), glsl_es: Some(&GLSL_ES), glsl: Some(&GLSL) },
 };
@@ -113,8 +113,7 @@ void main() {
     v_uv = a_corner;
 }
 ",
-    fragment: r"uniform sampler2D u_image;
-
+    fragment: r"
 in highp vec2 v_uv;
 
 void main() {

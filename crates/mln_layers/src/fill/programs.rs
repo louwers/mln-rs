@@ -100,7 +100,7 @@ pub static FILL_PATTERN: Program = Program {
         Attribute { id: ID_FILL_OPACITY_VERTEX_ATTRIBUTE, format: Float2 },
     ],
     instance_attributes: &[],
-    textures: &[Texture::new("u_image")],
+    textures: &[Texture::new("image")],
     properties: &[
         Property::color("color", ID_FILL_COLOR_VERTEX_ATTRIBUTE),
         Property::float("opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
@@ -129,7 +129,7 @@ pub static FILL_OUTLINE_PATTERN: Program = Program {
         Attribute { id: ID_FILL_OPACITY_VERTEX_ATTRIBUTE, format: Float2 },
     ],
     instance_attributes: &[],
-    textures: &[Texture::new("u_image")],
+    textures: &[Texture::new("image")],
     properties: &[
         Property::color("color", ID_FILL_COLOR_VERTEX_ATTRIBUTE),
         Property::float("opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
@@ -208,7 +208,7 @@ pub static FILL_OUTLINE_PATTERN_INSTANCED: Program = Program {
         Attribute { id: ID_FILL_OUTLINE_POS_ATTRIBUTE, format: Short2 },
         Attribute { id: ID_FILL_OUTLINE_END_ATTRIBUTE, format: Short2 },
     ],
-    textures: &[Texture::new("u_image")],
+    textures: &[Texture::new("image")],
     properties: &[
         Property::color("color", ID_FILL_COLOR_VERTEX_ATTRIBUTE),
         Property::float("opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),

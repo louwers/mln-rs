@@ -48,7 +48,7 @@ pub static BACKGROUND_PATTERN: Program = Program {
     ],
     attributes: &[Attribute { id: ID_BACKGROUND_POS_VERTEX_ATTRIBUTE, format: Short2 }],
     instance_attributes: &[],
-    textures: &[Texture::new("u_image")],
+    textures: &[Texture::new("image")],
     properties: &[],
     sources: Sources::NONE
         .wgsl(&wgsl::BACKGROUND_PATTERN_SHADER)

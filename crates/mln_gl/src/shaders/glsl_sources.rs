@@ -248,8 +248,9 @@ fn projects(vertex: &HashSet<&str>) -> bool {
 
 /// The vertex and fragment shaders of `key`'s program: `#version 300 es`,
 /// or `#version 330 core` on `desktop` OpenGL, the key's defines, the
-/// stage's precisions, the blocks the stage reads, the prelude of the stage
-/// and the program's GLSL ES of the stage with its properties written out
+/// stage's precisions, the blocks the stage reads, the declarations of the
+/// textures the stage names, the prelude of the stage and the program's
+/// GLSL ES of the stage with its properties written out
 /// ([`glsl_es::expand`]). A fragment shader defaults to highp floats on
 /// OpenGL ES if `highp_fragment`, and to mediump otherwise. Fails with
 /// [`GpuError::Unsupported`] for a program without GLSL ES, and as
@@ -281,7 +282,8 @@ pub(crate) fn stage_sources(key: &ShaderKey, desktop: bool, highp_fragment: bool
     fragment_blocks
         .sort_by_key(|block| vertex_blocks.iter().position(|shared| ptr::eq(*shared, *block)).unwrap_or(usize::MAX));
     let stage = |stage_defines, precision, blocks: &[&Block], prelude, glsl| {
-        [version, &defines, stage_defines, precision, &glsl_es::blocks(blocks), prelude, glsl].concat()
+        let textures = glsl_es::textures(program, glsl);
+        [version, &defines, stage_defines, precision, &glsl_es::blocks(blocks), &textures, prelude, glsl].concat()
     };
     let vertex_prelude =
         if projects { [PRELUDE.vertex, PROJECTION_PRELUDE].concat() } else { PRELUDE.vertex.to_owned() };

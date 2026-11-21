@@ -231,13 +231,14 @@ fn every_program_links_and_matches_its_declaration(backend: &mut RendererBackend
     assert!(compiled >= 2 * programs().len());
 }
 
-/// No source declares a block: the backend declares a stage's blocks, from
-/// their layouts.
+/// No source declares a block or a texture: the backend declares a stage's
+/// blocks, from their layouts, and its textures.
 #[test]
-fn no_source_declares_a_block() {
+fn no_source_declares_a_block_or_a_texture() {
     for (program, source) in programs() {
         for glsl in [source.vertex, source.fragment] {
             assert!(declared_blocks(glsl).is_empty(), "{} declares {:?}", program.name, declared_blocks(glsl));
+            assert!(!glsl.contains("sampler2D"), "{} declares a texture", program.name);
         }
     }
 }
