@@ -63,6 +63,7 @@ enum StillImage {
 }
 
 /// What a renderer's report of a frame says, but its stats.
+#[derive(Clone, Copy)]
 struct FinishedFrame {
     mode: mln_renderer::RenderMode,
     needs_repaint: bool,
