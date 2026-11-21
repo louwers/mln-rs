@@ -32,7 +32,7 @@ use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
-use super::bucket::{LineBinders, LineBucket};
+use super::bucket::{LineBinders, LineBucket, LineLayoutSpec};
 use super::dashes::{DashCap, DashTextures};
 use super::mesh::LineLayoutVertex;
 use super::programs::{
@@ -46,7 +46,7 @@ use super::ubo::{
 };
 use super::{Line, programs};
 use crate::color_ramp::apply_color_ramp;
-use crate::pattern_layout::{LineLayoutSpec, PatternLayout, uses_pattern};
+use crate::pattern_layout::{PatternLayout, uses_pattern};
 use crate::refresh_paint_attributes;
 
 /// What a line draws: its shader and the uniforms it reads.

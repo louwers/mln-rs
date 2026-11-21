@@ -1,6 +1,6 @@
 // A pattern layout lays out the features of a layer type whose spec
-// (`PatternLayoutSpec`) says how it reads patterns and sort keys; the fill
-// and line specs are below. A layout that sorts its features by key, which
+// (`PatternLayoutSpec`) says how it reads patterns and sort keys; each type's
+// spec is in its bucket module. A layout that sorts its features by key, which
 // the spec's `sorted` asks for, keeps them in key order as it accepts them.
 //
 // A `TileLayer` borrows its tile data, so the layout keeps the
@@ -13,9 +13,9 @@ use mln_render::layer::{
     Bucket, BuildParams, EvaluatedLayer, FeatureIndexBuilder, LayerType, Layout, LayoutParameters, PatternDependency,
     Resolved, SourceLayer, layers_by_id,
 };
+use mln_style::PropertyEvaluationParameters;
 use mln_style::evaluated::Evaluated;
 use mln_style::expression::{EvaluationContext, Image};
-use mln_style::{PropertyEvaluationParameters, StyleValue as _};
 use mln_style_types::image::{ImagePositions, ImageType};
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature};
@@ -24,10 +24,6 @@ use mln_util::hash::HashMap;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecMap;
 
-use crate::fill::bucket::FillBucket;
-use crate::fill::{Fill, FillLayoutProperties};
-use crate::line::bucket::LineBucket;
-use crate::line::{Line, LineLayoutProperties};
 use crate::tessellator::Tessellator;
 
 pub(crate) type PatternLayerMap = HashMap<String, PatternDependency>;
@@ -326,92 +322,6 @@ impl<S: PatternLayoutSpec> Layout<S::Type> for PatternLayout<S> {
 
     fn layers(&self) -> &VecMap<String, Arc<EvaluatedLayer<S::Type>>> {
         &self.layer_properties_map
-    }
-}
-
-pub struct FillLayoutSpec;
-
-impl PatternLayoutSpec for FillLayoutSpec {
-    type Type = Fill;
-    type Bucket = FillBucket;
-    type Layout = FillLayoutProperties::PossiblyEvaluated;
-
-    fn evaluate_layout(layer: &EvaluatedLayer<Fill>, parameters: &PropertyEvaluationParameters) -> Self::Layout {
-        layer.style.layout.evaluate(parameters)
-    }
-    fn pattern_property(layer: &EvaluatedLayer<Fill>) -> &Evaluated<Image> {
-        &layer.paint.fill_pattern
-    }
-    /// Whether the leader's unevaluated layout sets `fill-sort-key`.
-    fn sorted(leader: &EvaluatedLayer<Fill>) -> bool {
-        !leader.style.layout.fill_sort_key.is_undefined()
-    }
-    fn sort_key(
-        layout: &Self::Layout,
-        feature: &dyn GeometryTileFeature,
-        zoom: f32,
-        canonical: &CanonicalTileID,
-    ) -> f32 {
-        layout.fill_sort_key.evaluate(
-            &EvaluationContext::with_zoom_feature(zoom, Some(feature)).with_canonical_tile_id(Some(canonical)),
-        )
-    }
-    fn constant_sort_key(layout: &Self::Layout) -> Option<f32> {
-        layout.fill_sort_key.constant()
-    }
-    fn create_bucket(
-        layout: &Self::Layout,
-        layer_properties_map: &VecMap<String, Arc<EvaluatedLayer<Fill>>>,
-        zoom: f32,
-        overscaling: u32,
-    ) -> FillBucket {
-        FillBucket::new(layout, layer_properties_map, zoom, overscaling)
-    }
-    fn set_subdivision_granularity(bucket: &mut FillBucket, value: &SubdivisionGranularitySetting) {
-        bucket.set_subdivision_granularity(value);
-    }
-}
-
-pub struct LineLayoutSpec;
-
-impl PatternLayoutSpec for LineLayoutSpec {
-    type Type = Line;
-    type Bucket = LineBucket;
-    type Layout = LineLayoutProperties::PossiblyEvaluated;
-
-    fn evaluate_layout(layer: &EvaluatedLayer<Line>, parameters: &PropertyEvaluationParameters) -> Self::Layout {
-        layer.style.layout.evaluate(parameters)
-    }
-    fn pattern_property(layer: &EvaluatedLayer<Line>) -> &Evaluated<Image> {
-        &layer.paint.line_pattern
-    }
-    /// Whether the leader's unevaluated layout sets `line-sort-key`.
-    fn sorted(leader: &EvaluatedLayer<Line>) -> bool {
-        !leader.style.layout.line_sort_key.is_undefined()
-    }
-    fn sort_key(
-        layout: &Self::Layout,
-        feature: &dyn GeometryTileFeature,
-        zoom: f32,
-        canonical: &CanonicalTileID,
-    ) -> f32 {
-        layout.line_sort_key.evaluate(
-            &EvaluationContext::with_zoom_feature(zoom, Some(feature)).with_canonical_tile_id(Some(canonical)),
-        )
-    }
-    fn constant_sort_key(layout: &Self::Layout) -> Option<f32> {
-        layout.line_sort_key.constant()
-    }
-    fn create_bucket(
-        layout: &Self::Layout,
-        layer_properties_map: &VecMap<String, Arc<EvaluatedLayer<Line>>>,
-        zoom: f32,
-        overscaling: u32,
-    ) -> LineBucket {
-        LineBucket::new(layout.clone(), layer_properties_map, zoom, overscaling)
-    }
-    fn set_subdivision_granularity(bucket: &mut LineBucket, value: &SubdivisionGranularitySetting) {
-        bucket.set_subdivision_granularity(value);
     }
 }
 

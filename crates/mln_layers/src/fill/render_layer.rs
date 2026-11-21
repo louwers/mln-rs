@@ -27,7 +27,7 @@ use mln_util::error::Error;
 use mln_util::identity::SimpleIdentity;
 use mln_util::size::Size;
 
-use super::bucket::{FillBinders, FillBucket, FillLayoutVertex};
+use super::bucket::{FillBinders, FillBucket, FillLayoutSpec, FillLayoutVertex};
 use super::programs::{
     ID_FILL_DRAWABLE_UBO, ID_FILL_EVALUATED_PROPS_UBO, ID_FILL_IMAGE_TEXTURE, ID_FILL_OPACITY_VERTEX_ATTRIBUTE,
     ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE, ID_FILL_OUTLINE_END_ATTRIBUTE, ID_FILL_OUTLINE_ENDS, ID_FILL_OUTLINE_PAINT,
@@ -39,7 +39,7 @@ use super::ubo::{
     FillPatternTilePropsUBO, FillTilePropsUnionUBO,
 };
 use super::{Fill, programs};
-use crate::pattern_layout::{FillLayoutSpec, PatternLayout, uses_pattern};
+use crate::pattern_layout::{PatternLayout, uses_pattern};
 use crate::refresh_paint_attributes;
 
 /// The outlines' line width, which the style spec doesn't give. The render
