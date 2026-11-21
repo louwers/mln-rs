@@ -87,24 +87,28 @@
 //!   map-pitched label along a line stands on the ground under it. Placement
 //!   reads the same ground on the CPU ([`TileGround::height`]): it collides a
 //!   point label's box, all of it at its anchor's height, and lays out a
-//!   label at a variable anchor, where the label draws, and places again in
-//!   the update that brings a new ground ([`RenderTerrain::ground`]), even
-//!   with the camera at rest; a label that no draw of its tile draws, its
-//!   anchor off every part, has no box. A label along a line stands on the
-//!   ground with no height offset: each update lays its glyphs out along its
-//!   line as it stands on the ground under each vertex, and placement
-//!   collides each of its circles at the ground under it, both reading the
-//!   part that draws its anchor, clamped to its DEM tile past its edges.
-//!   Collision debug boxes still draw at sea level. A polygon's roof and base
-//!   rise by the ground at its centroid. Where its base is at or below 0, each
-//!   end of a wall's foot sinks to 10 m below the lower of the ground at the
-//!   centroid and the ground under that end, so that no gap shows under a
-//!   wall on any slope. Its vertical gradient shades by its own base and
-//!   height, carried on below the base to a foot that sinks, so a wall shades
-//!   where it shows as it would on level ground. Over terrain the extrusions
-//!   project as the surface does, and test and write the depth it writes, so
-//!   the ground hides them, and they hide it, pixel by pixel; on a flat map
-//!   they keep a near plane further out, for the depth buffer's precision.
+//!   label at a variable anchor, where the label draws; a label that no draw
+//!   of its tile draws, its anchor off every part, has no box. A new ground
+//!   ([`RenderTerrain::ground`]) makes placement stale, even with the camera
+//!   at rest, and a continuous map places again when placement is next due,
+//!   so a label can stand on the new ground for up to one placement period
+//!   before its box follows, as it can behind a moving camera; a still
+//!   image places in every update, on the ground of that update. A label
+//!   along a line stands on the ground with no height offset: each update
+//!   lays its glyphs out along its line as it stands on the ground under each
+//!   vertex, and placement collides each of its circles at the ground under
+//!   it, both reading the part that draws its anchor, clamped to its DEM
+//!   tile past its edges. Collision debug boxes and circles draw at sea
+//!   level. A polygon's roof and base rise by the ground at its centroid. Where its base is at or
+//!   below 0, each end of a wall's foot sinks to 10 m below the lower of the
+//!   ground at the centroid and the ground under that end, so that no gap
+//!   shows under a wall on any slope. Its vertical gradient shades by its own
+//!   base and height, carried on below the base to a foot that sinks, so a
+//!   wall shades where it shows as it would on level ground. Over terrain
+//!   the extrusions project as the surface does, and test and write the
+//!   depth it writes, so the ground hides them, and they hide it, pixel by
+//!   pixel; on a flat map they keep a near plane further out, for the depth
+//!   buffer's precision.
 //!   Their buckets keep a centroid for each polygon, which only a terrain
 //!   variant's draws expand to their vertices, and are laid out with them
 //!   only for a style with terrain: a tile laid out without them lays out

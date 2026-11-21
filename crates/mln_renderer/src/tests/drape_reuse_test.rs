@@ -2039,9 +2039,10 @@ fn red_icon(map: &mut DrapedMap, location: LatLng) {
     add_layer(map, &style, None);
 }
 
-/// With the camera at rest, the update that new DEM data under a label
-/// arrives in places the labels again, and its frame draws the label on the
-/// new ground, some 20 px above where it stood at sea level.
+/// With the camera at rest, new DEM data under a label makes placement
+/// stale, so the update it arrives in, in which placement is due as the
+/// harness gives no time, places the labels again, and its frame draws the
+/// label on the new ground, some 20 px above where it stood at sea level.
 #[test]
 fn new_ground_under_a_label_at_rest_places_it_again_and_draws_it_there() {
     let mut map = DrapedMap::new(Tiles::default());
