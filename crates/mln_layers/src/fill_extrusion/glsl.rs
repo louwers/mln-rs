@@ -31,17 +31,11 @@ invariant gl_Position;
 layout(location = 0) in ivec2 in_position;
 layout(location = 1) in uvec2 in_decimals_ed;
 
-#if !defined(HAS_UNIFORM_u_color)
-layout(location = 2) in vec4 in_color;
-#endif
+#property attribute color
 
-#if !defined(HAS_UNIFORM_u_base)
-layout(location = 3) in vec2 in_base;
-#endif
+#property attribute base
 
-#if !defined(HAS_UNIFORM_u_height)
-layout(location = 4) in vec2 in_height;
-#endif
+#property attribute height
 
 layout(push_constant) uniform Constants {
     int ubo_index;
@@ -64,23 +58,11 @@ layout(location = 0) out vec4 frag_color;
 void main() {
     const FillExtrusionDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
 
-#if defined(HAS_UNIFORM_u_base)
-    const float base = max(props.base, 0.0);
-#else
-    const float base = max(unpack_mix_float(in_base, drawable.base_t), 0.0);
-#endif
+    const float base = max($props.base, 0.0);
 
-#if defined(HAS_UNIFORM_u_height)
-    const float height = max(props.height, 0.0);
-#else
-    const float height = max(unpack_mix_float(in_height, drawable.height_t), 0.0);
-#endif
+    const float height = max($props.height, 0.0);
 
-#if defined(HAS_UNIFORM_u_color)
-    vec4 color = props.color;
-#else
-    vec4 color = unpack_mix_color(in_color, drawable.color_t);
-#endif
+    vec4 color = $props.color;
 
     const vec3 normal = vec3(0.0, 0.0, 1.0);
     const float t = 1.0;
@@ -180,23 +162,11 @@ macro_rules! fill_extrusion_wall_main {
 
     const FillExtrusionDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
 
-#if defined(HAS_UNIFORM_u_base)
-    const float base = max(props.base, 0.0);
-#else
-    const float base = max(unpack_mix_float(in_base, drawable.base_t), 0.0);
-#endif
+    const float base = max($props.base, 0.0);
 
-#if defined(HAS_UNIFORM_u_height)
-    const float height = max(props.height, 0.0);
-#else
-    const float height = max(unpack_mix_float(in_height, drawable.height_t), 0.0);
-#endif
+    const float height = max($props.height, 0.0);
 
-#if defined(HAS_UNIFORM_u_color)
-    vec4 color = props.color;
-#else
-    vec4 color = unpack_mix_color(in_color, drawable.color_t);
-#endif
+    vec4 color = $props.color;
     bool isDiscarded = mod(instanceDecimalsEd.x, 2.0) > 0.0;
     if (isDiscarded) {
         gl_Position = vec4(0.0);
@@ -278,17 +248,11 @@ layout(location = 2) in uvec2 in_decimals_ed;
 layout(location = 6) in ivec2 in_next_outline_pos;
 layout(location = 7) in uvec2 in_next_decimals_ed;
 
-#if !defined(HAS_UNIFORM_u_color)
-layout(location = 3) in vec4 in_color;
-#endif
+#property attribute color
 
-#if !defined(HAS_UNIFORM_u_base)
-layout(location = 4) in vec2 in_base;
-#endif
+#property attribute base
 
-#if !defined(HAS_UNIFORM_u_height)
-layout(location = 5) in vec2 in_height;
-#endif
+#property attribute height
 
 ",
         fill_extrusion_wall_declarations!(),
@@ -383,21 +347,13 @@ invariant gl_Position;
 layout(location = 0) in ivec2 in_position;
 layout(location = 1) in uvec2 in_decimals_ed;
 
-#if !defined(HAS_UNIFORM_u_base)
-layout(location = 2) in vec2 in_base;
-#endif
+#property attribute base
 
-#if !defined(HAS_UNIFORM_u_height)
-layout(location = 3) in vec2 in_height;
-#endif
+#property attribute height
 
-#if !defined(HAS_UNIFORM_u_pattern_from)
-layout(location = 4) in uvec4 in_pattern_from;
-#endif
+#property attribute pattern_from
 
-#if !defined(HAS_UNIFORM_u_pattern_to)
-layout(location = 5) in uvec4 in_pattern_to;
-#endif
+#property attribute pattern_to
 
 layout(push_constant) uniform Constants {
     int ubo_index;
@@ -423,29 +379,17 @@ layout(location = 0) out vec4 frag_lighting;
 layout(location = 1) out vec2 frag_pos_a;
 layout(location = 2) out vec2 frag_pos_b;
 
-#if !defined(HAS_UNIFORM_u_pattern_from)
-layout(location = 3) flat out vec4 frag_pattern_from;
-#endif
+#property varying pattern_from 3 flat
 
-#if !defined(HAS_UNIFORM_u_pattern_to)
-layout(location = 4) flat out vec4 frag_pattern_to;
-#endif
+#property varying pattern_to 4 flat
 
 void main() {
     const FillExtrusionDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
     const FillExtrusionTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
 
-#if defined(HAS_UNIFORM_u_base)
-    const float base = max(props.base, 0.0);
-#else
-    const float base = max(unpack_mix_float(in_base, drawable.base_t), 0.0);
-#endif
+    const float base = max($props.base, 0.0);
 
-#if defined(HAS_UNIFORM_u_height)
-    const float height = max(props.height, 0.0);
-#else
-    const float height = max(unpack_mix_float(in_height, drawable.height_t), 0.0);
-#endif
+    const float height = max($props.height, 0.0);
 
     const vec3 normal = vec3(0.0, 0.0, 1.0);
     const float t = 1.0;
@@ -514,13 +458,9 @@ void main() {
     frag_pos_a = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, fromScale * display_size_a, tileZoomRatio, pos);
     frag_pos_b = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, toScale * display_size_b, tileZoomRatio, pos);
 
-#if !defined(HAS_UNIFORM_u_pattern_from)
-    frag_pattern_from = in_pattern_from;
-#endif
+    #property pass pattern_from
 
-#if !defined(HAS_UNIFORM_u_pattern_to)
-    frag_pattern_to = in_pattern_to;
-#endif
+    #property pass pattern_to
 #endif
 }
 ",
@@ -530,13 +470,9 @@ layout(location = 0) in vec4 frag_lighting;
 layout(location = 1) in vec2 frag_pos_a;
 layout(location = 2) in vec2 frag_pos_b;
 
-#if !defined(HAS_UNIFORM_u_pattern_from)
-layout(location = 3) flat in vec4 frag_pattern_from;
-#endif
+#property varying pattern_from 3 flat
 
-#if !defined(HAS_UNIFORM_u_pattern_to)
-layout(location = 4) flat in vec4 frag_pattern_to;
-#endif
+#property varying pattern_to 4 flat
 
 layout(location = 0) out vec4 out_color;
 
@@ -564,16 +500,8 @@ void main() {
 
     const FillExtrusionTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
 
-#if defined(HAS_UNIFORM_u_pattern_from)
-    const vec4 pattern_from = tileProps.pattern_from;
-#else
-    const vec4 pattern_from = frag_pattern_from;
-#endif
-#if defined(HAS_UNIFORM_u_pattern_to)
-    const vec4 pattern_to = tileProps.pattern_to;
-#else
-    const vec4 pattern_to = frag_pattern_to;
-#endif
+    const vec4 pattern_from = $tileProps.pattern_from;
+    const vec4 pattern_to = $tileProps.pattern_to;
 
     const vec2 pattern_tl_a = pattern_from.xy;
     const vec2 pattern_br_a = pattern_from.zw;
@@ -614,21 +542,13 @@ layout(location = 2) in uvec2 in_decimals_ed;
 layout(location = 7) in ivec2 in_next_outline_pos;
 layout(location = 8) in uvec2 in_next_decimals_ed;
 
-#if !defined(HAS_UNIFORM_u_base)
-layout(location = 3) in vec2 in_base;
-#endif
+#property attribute base
 
-#if !defined(HAS_UNIFORM_u_height)
-layout(location = 4) in vec2 in_height;
-#endif
+#property attribute height
 
-#if !defined(HAS_UNIFORM_u_pattern_from)
-layout(location = 5) in uvec4 in_pattern_from;
-#endif
+#property attribute pattern_from
 
-#if !defined(HAS_UNIFORM_u_pattern_to)
-layout(location = 6) in uvec4 in_pattern_to;
-#endif
+#property attribute pattern_to
 
 layout(push_constant) uniform Constants {
     int ubo_index;
@@ -654,13 +574,9 @@ layout(location = 0) out vec4 frag_lighting;
 layout(location = 1) out vec2 frag_pos_a;
 layout(location = 2) out vec2 frag_pos_b;
 
-#if !defined(HAS_UNIFORM_u_pattern_from)
-layout(location = 3) flat out vec4 frag_pattern_from;
-#endif
+#property varying pattern_from 3 flat
 
-#if !defined(HAS_UNIFORM_u_pattern_to)
-layout(location = 4) flat out vec4 frag_pattern_to;
-#endif
+#property varying pattern_to 4 flat
 
 void main() {
     const vec2 instancePos = vec2(in_outline_pos);
@@ -669,17 +585,9 @@ void main() {
     const FillExtrusionDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
     const FillExtrusionTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
 
-#if defined(HAS_UNIFORM_u_base)
-    const float base = max(props.base, 0.0);
-#else
-    const float base = max(unpack_mix_float(in_base, drawable.base_t), 0.0);
-#endif
+    const float base = max($props.base, 0.0);
 
-#if defined(HAS_UNIFORM_u_height)
-    const float height = max(props.height, 0.0);
-#else
-    const float height = max(unpack_mix_float(in_height, drawable.height_t), 0.0);
-#endif
+    const float height = max($props.height, 0.0);
     bool isDiscarded = mod(instanceDecimalsEd.x, 2.0) > 0.0;
     if (isDiscarded) {
         gl_Position = vec4(0.0);
@@ -764,13 +672,9 @@ void main() {
     frag_pos_a = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, fromScale * display_size_a, tileZoomRatio, pos);
     frag_pos_b = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, toScale * display_size_b, tileZoomRatio, pos);
 
-#if !defined(HAS_UNIFORM_u_pattern_from)
-    frag_pattern_from = in_pattern_from;
-#endif
+    #property pass pattern_from
 
-#if !defined(HAS_UNIFORM_u_pattern_to)
-    frag_pattern_to = in_pattern_to;
-#endif
+    #property pass pattern_to
 #endif
 }
 ",
@@ -780,13 +684,9 @@ layout(location = 0) in vec4 frag_lighting;
 layout(location = 1) in vec2 frag_pos_a;
 layout(location = 2) in vec2 frag_pos_b;
 
-#if !defined(HAS_UNIFORM_u_pattern_from)
-layout(location = 3) flat in vec4 frag_pattern_from;
-#endif
+#property varying pattern_from 3 flat
 
-#if !defined(HAS_UNIFORM_u_pattern_to)
-layout(location = 4) flat in vec4 frag_pattern_to;
-#endif
+#property varying pattern_to 4 flat
 
 layout(location = 0) out vec4 out_color;
 
@@ -814,16 +714,8 @@ void main() {
 
     const FillExtrusionTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
 
-#if defined(HAS_UNIFORM_u_pattern_from)
-    const vec4 pattern_from = tileProps.pattern_from;
-#else
-    const vec4 pattern_from = frag_pattern_from;
-#endif
-#if defined(HAS_UNIFORM_u_pattern_to)
-    const vec4 pattern_to = tileProps.pattern_to;
-#else
-    const vec4 pattern_to = frag_pattern_to;
-#endif
+    const vec4 pattern_from = $tileProps.pattern_from;
+    const vec4 pattern_to = $tileProps.pattern_to;
 
     const vec2 pattern_tl_a = pattern_from.xy;
     const vec2 pattern_br_a = pattern_from.zw;

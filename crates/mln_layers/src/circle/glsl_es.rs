@@ -6,71 +6,29 @@ pub(super) const CIRCLE_SHADER: Glsl = Glsl {
     vertex: r"layout (location = 0) in vec2 a_pos;
 out vec3 v_data;
 
-#ifndef HAS_UNIFORM_u_color
-layout (location = 1) in highp vec4 a_color;
-out highp vec4 color;
-#endif
-#ifndef HAS_UNIFORM_u_radius
-layout (location = 2) in mediump vec2 a_radius;
-out mediump float radius;
-#endif
-#ifndef HAS_UNIFORM_u_blur
-layout (location = 3) in lowp vec2 a_blur;
-out lowp float blur;
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-layout (location = 4) in lowp vec2 a_opacity;
-out lowp float opacity;
-#endif
-#ifndef HAS_UNIFORM_u_stroke_color
-layout (location = 5) in highp vec4 a_stroke_color;
-out highp vec4 stroke_color;
-#endif
-#ifndef HAS_UNIFORM_u_stroke_width
-layout (location = 6) in mediump vec2 a_stroke_width;
-out mediump float stroke_width;
-#endif
-#ifndef HAS_UNIFORM_u_stroke_opacity
-layout (location = 7) in lowp vec2 a_stroke_opacity;
-out lowp float stroke_opacity;
-#endif
+#property attribute color
+#property varying color
+#property attribute radius
+#property varying radius
+#property attribute blur
+#property varying blur
+#property attribute opacity
+#property varying opacity
+#property attribute stroke_color
+#property varying stroke_color
+#property attribute stroke_width
+#property varying stroke_width
+#property attribute stroke_opacity
+#property varying stroke_opacity
 
 void main(void) {
-    #ifndef HAS_UNIFORM_u_color
-color = unpack_mix_color(a_color, u_color_t);
-#else
-highp vec4 color = u_color;
-#endif
-    #ifndef HAS_UNIFORM_u_radius
-radius = unpack_mix_vec2(a_radius, u_radius_t);
-#else
-mediump float radius = u_radius;
-#endif
-    #ifndef HAS_UNIFORM_u_blur
-blur = unpack_mix_vec2(a_blur, u_blur_t);
-#else
-lowp float blur = u_blur;
-#endif
-    #ifndef HAS_UNIFORM_u_opacity
-opacity = unpack_mix_vec2(a_opacity, u_opacity_t);
-#else
-lowp float opacity = u_opacity;
-#endif
-    #ifndef HAS_UNIFORM_u_stroke_color
-stroke_color = unpack_mix_color(a_stroke_color, u_stroke_color_t);
-#else
-highp vec4 stroke_color = u_stroke_color;
-#endif
-    #ifndef HAS_UNIFORM_u_stroke_width
-stroke_width = unpack_mix_vec2(a_stroke_width, u_stroke_width_t);
-#else
-mediump float stroke_width = u_stroke_width;
-#endif
-    #ifndef HAS_UNIFORM_u_stroke_opacity
-stroke_opacity = unpack_mix_vec2(a_stroke_opacity, u_stroke_opacity_t);
-#else
-lowp float stroke_opacity = u_stroke_opacity;
-#endif
+#property pass color
+#property pass radius
+#property pass blur
+#property pass opacity
+#property pass stroke_color
+#property pass stroke_width
+#property pass stroke_opacity
 
     // unencode the extrusion vector that we snuck into the a_pos vector
     vec2 extrude = vec2(mod(a_pos, 2.0) * 2.0 - 1.0);
@@ -135,50 +93,22 @@ lowp float stroke_opacity = u_stroke_opacity;
 ",
     fragment: r"in vec3 v_data;
 
-#ifndef HAS_UNIFORM_u_color
-in highp vec4 color;
-#endif
-#ifndef HAS_UNIFORM_u_radius
-in mediump float radius;
-#endif
-#ifndef HAS_UNIFORM_u_blur
-in lowp float blur;
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-in lowp float opacity;
-#endif
-#ifndef HAS_UNIFORM_u_stroke_color
-in highp vec4 stroke_color;
-#endif
-#ifndef HAS_UNIFORM_u_stroke_width
-in mediump float stroke_width;
-#endif
-#ifndef HAS_UNIFORM_u_stroke_opacity
-in lowp float stroke_opacity;
-#endif
+#property varying color
+#property varying radius
+#property varying blur
+#property varying opacity
+#property varying stroke_color
+#property varying stroke_width
+#property varying stroke_opacity
 
 void main() {
-    #ifdef HAS_UNIFORM_u_color
-highp vec4 color = u_color;
-#endif
-    #ifdef HAS_UNIFORM_u_radius
-mediump float radius = u_radius;
-#endif
-    #ifdef HAS_UNIFORM_u_blur
-lowp float blur = u_blur;
-#endif
-    #ifdef HAS_UNIFORM_u_opacity
-lowp float opacity = u_opacity;
-#endif
-    #ifdef HAS_UNIFORM_u_stroke_color
-highp vec4 stroke_color = u_stroke_color;
-#endif
-    #ifdef HAS_UNIFORM_u_stroke_width
-mediump float stroke_width = u_stroke_width;
-#endif
-    #ifdef HAS_UNIFORM_u_stroke_opacity
-lowp float stroke_opacity = u_stroke_opacity;
-#endif
+#property uniform color
+#property uniform radius
+#property uniform blur
+#property uniform opacity
+#property uniform stroke_color
+#property uniform stroke_width
+#property uniform stroke_opacity
 
     vec2 extrude = v_data.xy;
     float extrude_length = length(extrude);

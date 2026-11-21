@@ -789,8 +789,10 @@ pub(crate) fn compile(
 /// The vertex and fragment stages of `key`'s program: the common prelude,
 /// the structs of the engine's blocks and the program's, the declarations of
 /// the engine's buffers that the stage reads, the program's own prelude and
-/// the stage, preprocessed with the key's defines. Fails with
-/// [`GpuError::Unsupported`] for a program without WGSL.
+/// the stage with its properties written out ([`wgsl::expand`]),
+/// preprocessed with the key's defines. Fails with
+/// [`GpuError::Unsupported`] for a program without WGSL, and as
+/// [`wgsl::expand`] does.
 pub(crate) fn stage_sources(key: &ShaderKey) -> Result<[String; 2], GpuError> {
     let program = key.program();
     let source: &Wgsl =
@@ -799,13 +801,12 @@ pub(crate) fn stage_sources(key: &ShaderKey) -> Result<[String; 2], GpuError> {
     // its `#ifdef`s see the defines.
     let shader_prelude = source.prelude.unwrap_or("");
     let blocks = block_declarations(program);
-    let assemble = |stage: Option<&str>| {
-        let stage = stage.unwrap_or("");
+    let assemble = |stage: &str| {
         format!("{PRELUDE}\n{blocks}{}{shader_prelude}{stage}", reserved_bindings(&[shader_prelude, stage]))
     };
     // WGSL reads no define's value; the pixel ratio's is an override's.
     let defines: HashMap<String, bool> = key.define_values().map(|(name, _)| (name.to_owned(), true)).collect();
-    Ok([source.vertex, source.fragment].map(|stage| preprocess_wgsl(&assemble(stage), &defines)))
+    Ok(wgsl::expand(program, source)?.map(|stage| preprocess_wgsl(&assemble(&stage), &defines)))
 }
 
 /// The structs of the blocks of the engine's buffers and `program`'s, each a

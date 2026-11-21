@@ -1,8 +1,24 @@
 //! The GLSL that `mln_glsl` parses with naga's GLSL front end and the
 //! Vulkan and D3D12 backends write as SPIR-V and HLSL, whose buffers and
 //! textures bind at `mln_glsl`'s descriptor set layout.
+//!
+//! A property's directives (see [`source`](super#properties)) write:
+//!
+//! - `#property attribute <name>`: the vertex stage's input
+//!   `layout(location = <location>) in <type> in_<name>`: `vec2` for a
+//!   float, and `vec4`, or `uvec4` for an attribute of `UShort4`, otherwise.
+//! - `#property varying <name> <location> [flat]`: the vertex stage's output
+//!   and the fragment stage's input `frag_<name>` at `<location>`, `float`
+//!   for a float and `vec4` otherwise, `flat` if the directive says so.
+//! - `#property pass <name>`: `frag_<name> = ` its value per vertex.
+//!
+//! A vertex stage reads a property's values per vertex from `in_<name>`,
+//! mixed by `drawable.<name>_t`, and a fragment stage from `frag_<name>`.
 
+use crate::gpu::GpuError;
 use crate::shaders::block::{Block, MemberType, c_like_members};
+use crate::shaders::program::{Program, PropertyType};
+use crate::shaders::source::{Named, Stage, expand as expand_properties, per_vertex};
 
 /// The GLSL of a program.
 ///
@@ -40,4 +56,59 @@ pub fn declaration(block: &Block, size: usize) -> String {
         "vec4",
     );
     format!("struct {} {{\n{members}}};\n", block.name)
+}
+
+/// The vertex and fragment stages of `program`'s GLSL, `glsl`, with its
+/// properties' directives written out, as the [module docs](self) say.
+/// Fails for a directive that names no property of the program, or that is
+/// malformed.
+pub fn expand(program: &Program, glsl: &Glsl) -> Result<[String; 2], GpuError> {
+    let stage = |text, stage| {
+        expand_properties(
+            program,
+            text,
+            "",
+            |role, named| directive(named, role, stage),
+            |named| Ok(value(named, stage)),
+        )
+    };
+    Ok([stage(glsl.vertex, Stage::Vertex)?, stage(glsl.fragment, Stage::Fragment)?])
+}
+
+fn directive(named: &Named<'_>, role: &str, stage: Stage) -> Result<String, GpuError> {
+    let name = named.name();
+    let text = match role {
+        "attribute" if stage == Stage::Vertex => {
+            named.flat(0)?;
+            let ty = match named.ty() {
+                PropertyType::Float => "vec2",
+                PropertyType::Vec4 if named.integers() => "uvec4",
+                PropertyType::Color | PropertyType::Vec4 => "vec4",
+            };
+            format!("layout(location = {}) in {ty} in_{name};", named.location()?)
+        }
+        "varying" => {
+            let flat = if named.flat(1)? { "flat " } else { "" };
+            let direction = if stage == Stage::Vertex { "out" } else { "in" };
+            let ty = if named.ty() == PropertyType::Float { "float" } else { "vec4" };
+            format!("layout(location = {}) {flat}{direction} {ty} frag_{name};", named.arg(0)?)
+        }
+        "pass" if stage == Stage::Vertex => {
+            named.flat(0)?;
+            format!("frag_{name} = {};", value(named, stage))
+        }
+        _ => return Err(GpuError::Invalid(format!("no GLSL property directive {role} for {name}"))),
+    };
+    Ok(per_vertex(named, &text))
+}
+
+/// What a stage reads of `named` per vertex.
+fn value(named: &Named<'_>, stage: Stage) -> String {
+    let name = named.name();
+    match (stage, named.ty()) {
+        (Stage::Fragment, _) => format!("frag_{name}"),
+        (Stage::Vertex, PropertyType::Float) => format!("unpack_mix_float(in_{name}, drawable.{name}_t)"),
+        (Stage::Vertex, PropertyType::Color) => format!("unpack_mix_color(in_{name}, drawable.{name}_t)"),
+        (Stage::Vertex, PropertyType::Vec4) => format!("in_{name}"),
+    }
 }

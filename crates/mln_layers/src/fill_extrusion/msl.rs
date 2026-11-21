@@ -48,16 +48,8 @@ FragmentStage wall(thread const Vertex& vertx,
         };
     }
 
-#if defined(HAS_UNIFORM_u_base)
-    const auto base   = max(props.base, 0.0);
-#else
-    const auto base   = max(unpack_mix_float(vertx.base, drawable.base_t), 0.0);
-#endif
-#if defined(HAS_UNIFORM_u_height)
-    const auto height = max(props.height, 0.0);
-#else
-    const auto height = max(unpack_mix_float(vertx.height, drawable.height_t), 0.0);
-#endif
+    const auto base   = max($props.base, 0.0);
+    const auto height = max($props.height, 0.0);
 
     const float2 p1 = float2(vertx.outline_pos);
     const float2 p2 = float2(vertx.next_outline_pos);
@@ -77,11 +69,7 @@ FragmentStage wall(thread const Vertex& vertx,
     };
 #endif
 
-#if defined(HAS_UNIFORM_u_color)
-    auto color = props.color;
-#else
-    auto color = unpack_mix_color(vertx.color, drawable.color_t);
-#endif
+    auto color = $props.color;
 
     // Relative luminance (how dark/bright is the surface color?)
     const float luminance = color.r * 0.2126 + color.g * 0.7152 + color.b * 0.0722;
@@ -157,15 +145,9 @@ struct VertexStage {
     short2 next_outline_pos [[attribute(6)]];
     ushort2 next_decimals_ed [[attribute(7)]];
 
-#if !defined(HAS_UNIFORM_u_color)
-    float4 color [[attribute(3)]];
-#endif
-#if !defined(HAS_UNIFORM_u_base)
-    float2 base [[attribute(4)]];
-#endif
-#if !defined(HAS_UNIFORM_u_height)
-    float2 height [[attribute(5)]];
-#endif
+    #property attribute color
+    #property attribute base
+    #property attribute height
 };
 
 ",
@@ -208,15 +190,9 @@ struct WallVertex {
     ushort2 decimals_ed;
     short2 next_outline_pos;
     ushort2 next_decimals_ed;
-#if !defined(HAS_UNIFORM_u_color)
-    float4 color;
-#endif
-#if !defined(HAS_UNIFORM_u_base)
-    float2 base;
-#endif
-#if !defined(HAS_UNIFORM_u_height)
-    float2 height;
-#endif
+    #property varying color float4
+    #property varying base float2
+    #property varying height float2
 };
 ",
         extrusion_wall!(),
@@ -289,18 +265,10 @@ struct VertexStage {
     short2 next_outline_pos [[attribute(7)]];
     ushort2 next_decimals_ed [[attribute(8)]];
 
-#if !defined(HAS_UNIFORM_u_base)
-    float2 base [[attribute(3)]];
-#endif
-#if !defined(HAS_UNIFORM_u_height)
-    float2 height [[attribute(4)]];
-#endif
-#if !defined(HAS_UNIFORM_u_pattern_from)
-    ushort4 pattern_from [[attribute(5)]];
-#endif
-#if !defined(HAS_UNIFORM_u_pattern_to)
-    ushort4 pattern_to [[attribute(6)]];
-#endif
+    #property attribute base
+    #property attribute height
+    #property attribute pattern_from
+    #property attribute pattern_to
 };
 
 struct FragmentStage {
@@ -309,12 +277,8 @@ struct FragmentStage {
     float2 pos_a;
     float2 pos_b;
 
-#if !defined(HAS_UNIFORM_u_pattern_from)
-    float4 pattern_from [[flat]];
-#endif
-#if !defined(HAS_UNIFORM_u_pattern_to)
-    float4 pattern_to [[flat]];
-#endif
+    #property varying pattern_from float4 flat
+    #property varying pattern_to float4 flat
 };
 
 struct FragmentOutput {
@@ -350,16 +314,8 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     device const FillExtrusionDrawableUBO& drawable = drawableVector[uboIndex];
     device const FillExtrusionTilePropsUBO& tileProps = tilePropsVector[uboIndex];
 
-#if defined(HAS_UNIFORM_u_base)
-    const auto base   = max(props.base, 0.0);
-#else
-    const auto base   = max(unpack_mix_float(vertx.base, drawable.base_t), 0.0);
-#endif
-#if defined(HAS_UNIFORM_u_height)
-    const auto height = max(props.height, 0.0);
-#else
-    const auto height = max(unpack_mix_float(vertx.height, drawable.height_t), 0.0);
-#endif
+    const auto base   = max($props.base, 0.0);
+    const auto height = max($props.height, 0.0);
 
     const float2 p1 = float2(vertx.outline_pos);
     const float2 p2 = float2(vertx.next_outline_pos);
@@ -389,16 +345,8 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     };
 #endif
 
-#if defined(HAS_UNIFORM_u_pattern_from)
-    const auto pattern_from = tileProps.pattern_from;
-#else
-    const auto pattern_from = float4(vertx.pattern_from);
-#endif
-#if defined(HAS_UNIFORM_u_pattern_to)
-    const auto pattern_to   = tileProps.pattern_to;
-#else
-    const auto pattern_to   = float4(vertx.pattern_to);
-#endif
+    const auto pattern_from = $tileProps.pattern_from;
+    const auto pattern_to   = $tileProps.pattern_to;
 
     const float2 pattern_tl_a = pattern_from.xy;
     const float2 pattern_br_a = pattern_from.zw;
@@ -459,16 +407,8 @@ fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]],
 
     device const FillExtrusionTilePropsUBO& tileProps = tilePropsVector[uboIndex];
 
-#if defined(HAS_UNIFORM_u_pattern_from)
-    const auto pattern_from = float4(tileProps.pattern_from);
-#else
-    const auto pattern_from = float4(in.pattern_from);
-#endif
-#if defined(HAS_UNIFORM_u_pattern_to)
-    const auto pattern_to = float4(tileProps.pattern_to);
-#else
-    const auto pattern_to = float4(in.pattern_to);
-#endif
+    const auto pattern_from = float4($tileProps.pattern_from);
+    const auto pattern_to = float4($tileProps.pattern_to);
 
     const float2 pattern_tl_a = pattern_from.xy;
     const float2 pattern_br_a = pattern_from.zw;
@@ -513,18 +453,10 @@ struct VertexStage {
     short2 pos [[attribute(0)]];
     ushort2 decimals_ed [[attribute(1)]];
 
-#if !defined(HAS_UNIFORM_u_base)
-    float2 base [[attribute(2)]];
-#endif
-#if !defined(HAS_UNIFORM_u_height)
-    float2 height [[attribute(3)]];
-#endif
-#if !defined(HAS_UNIFORM_u_pattern_from)
-    ushort4 pattern_from [[attribute(4)]];
-#endif
-#if !defined(HAS_UNIFORM_u_pattern_to)
-    ushort4 pattern_to [[attribute(5)]];
-#endif
+    #property attribute base
+    #property attribute height
+    #property attribute pattern_from
+    #property attribute pattern_to
 };
 
 struct FragmentStage {
@@ -533,12 +465,8 @@ struct FragmentStage {
     float2 pos_a;
     float2 pos_b;
 
-#if !defined(HAS_UNIFORM_u_pattern_from)
-    float4 pattern_from [[flat]];
-#endif
-#if !defined(HAS_UNIFORM_u_pattern_to)
-    float4 pattern_to [[flat]];
-#endif
+    #property varying pattern_from float4 flat
+    #property varying pattern_to float4 flat
 };
 
 struct FragmentOutput {
@@ -557,16 +485,8 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     device const FillExtrusionDrawableUBO& drawable = drawableVector[uboIndex];
     device const FillExtrusionTilePropsUBO& tileProps = tilePropsVector[uboIndex];
 
-#if defined(HAS_UNIFORM_u_base)
-    const auto base   = max(props.base, 0.0);
-#else
-    const auto base   = max(unpack_mix_float(vertx.base, drawable.base_t), 0.0);
-#endif
-#if defined(HAS_UNIFORM_u_height)
-    const auto height = max(props.height, 0.0);
-#else
-    const auto height = max(unpack_mix_float(vertx.height, drawable.height_t), 0.0);
-#endif
+    const auto base   = max($props.base, 0.0);
+    const auto height = max($props.height, 0.0);
 
     const float3 normal = float3(0.0, 0.0, 1.0);
     const float t = 1.0;
@@ -588,16 +508,8 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     };
 #endif
 
-#if defined(HAS_UNIFORM_u_pattern_from)
-    const auto pattern_from = tileProps.pattern_from;
-#else
-    const auto pattern_from = float4(vertx.pattern_from);
-#endif
-#if defined(HAS_UNIFORM_u_pattern_to)
-    const auto pattern_to   = tileProps.pattern_to;
-#else
-    const auto pattern_to   = float4(vertx.pattern_to);
-#endif
+    const auto pattern_from = $tileProps.pattern_from;
+    const auto pattern_to   = $tileProps.pattern_to;
 
     const float2 pattern_tl_a = pattern_from.xy;
     const float2 pattern_br_a = pattern_from.zw;
@@ -657,16 +569,8 @@ fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]],
 
     device const FillExtrusionTilePropsUBO& tileProps = tilePropsVector[uboIndex];
 
-#if defined(HAS_UNIFORM_u_pattern_from)
-    const auto pattern_from = float4(tileProps.pattern_from);
-#else
-    const auto pattern_from = float4(in.pattern_from);
-#endif
-#if defined(HAS_UNIFORM_u_pattern_to)
-    const auto pattern_to = float4(tileProps.pattern_to);
-#else
-    const auto pattern_to = float4(in.pattern_to);
-#endif
+    const auto pattern_from = float4($tileProps.pattern_from);
+    const auto pattern_to = float4($tileProps.pattern_to);
 
     const float2 pattern_tl_a = pattern_from.xy;
     const float2 pattern_br_a = pattern_from.zw;
@@ -711,15 +615,9 @@ struct VertexStage {
     short2 pos [[attribute(0)]];
     ushort2 decimals_ed [[attribute(1)]];
 
-#if !defined(HAS_UNIFORM_u_color)
-    float4 color [[attribute(2)]];
-#endif
-#if !defined(HAS_UNIFORM_u_base)
-    float2 base [[attribute(3)]];
-#endif
-#if !defined(HAS_UNIFORM_u_height)
-    float2 height [[attribute(4)]];
-#endif
+    #property attribute color
+    #property attribute base
+    #property attribute height
 };
 
 struct FragmentStage {
@@ -740,16 +638,8 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 
     device const FillExtrusionDrawableUBO& drawable = drawableVector[uboIndex];
 
-#if defined(HAS_UNIFORM_u_base)
-    const auto base   = max(props.base, 0.0);
-#else
-    const auto base   = max(unpack_mix_float(vertx.base, drawable.base_t), 0.0);
-#endif
-#if defined(HAS_UNIFORM_u_height)
-    const auto height = max(props.height, 0.0);
-#else
-    const auto height = max(unpack_mix_float(vertx.height, drawable.height_t), 0.0);
-#endif
+    const auto base   = max($props.base, 0.0);
+    const auto height = max($props.height, 0.0);
 
     const float3 normal = float3(0.0, 0.0, 1.0);
     const float t = 1.0;
@@ -763,11 +653,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     };
 #endif
 
-#if defined(HAS_UNIFORM_u_color)
-    auto color = props.color;
-#else
-    auto color = unpack_mix_color(vertx.color, drawable.color_t);
-#endif
+    auto color = $props.color;
 
     // Relative luminance (how dark/bright is the surface color?)
     const float luminance = color.r * 0.2126 + color.g * 0.7152 + color.b * 0.0722;

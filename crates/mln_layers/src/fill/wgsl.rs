@@ -21,18 +21,10 @@ pub(super) const FILL_OUTLINE_PATTERN_SHADER: Wgsl = Wgsl {
         r"
 struct VertexInput {
     @location(0) position: vec2<i32>,
-#ifndef HAS_UNIFORM_u_color
-    @location(1) color: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_pattern_from
-    @location(2) pattern_from: vec4<u32>,
-#endif
-#ifndef HAS_UNIFORM_u_pattern_to
-    @location(3) pattern_to: vec4<u32>,
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    @location(4) opacity: vec2<f32>,
-#endif
+    #property attribute color
+    #property attribute pattern_from
+    #property attribute pattern_to
+    #property attribute opacity
 };
 
 struct VertexOutput {
@@ -40,18 +32,10 @@ struct VertexOutput {
     @location(0) v_pos_a: vec2<f32>,
     @location(1) v_pos_b: vec2<f32>,
     @location(2) v_pos: vec2<f32>,
-#ifndef HAS_UNIFORM_u_color
-    @location(3) color: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_pattern_from
-    @location(4) @interpolate(flat) pattern_from: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_pattern_to
-    @location(5) @interpolate(flat) pattern_to: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    @location(6) opacity: f32,
-#endif
+    #property varying color 3
+    #property varying pattern_from 4 flat
+    #property varying pattern_to 5 flat
+    #property varying opacity 6
 };
 
 @group(0) @binding(2) var<storage, read> drawableVector: array<FillPatternDrawableUBO>;
@@ -66,18 +50,10 @@ fn main(in: VertexInput) -> VertexOutput {
     let tileProps = tilePropsVector[index];
 
     var pattern_from: vec4<f32>;
-#ifdef HAS_UNIFORM_u_pattern_from
-    pattern_from = tileProps.pattern_from;
-#else
-    pattern_from = vec4<f32>(in.pattern_from);
-#endif
+    pattern_from = $tileProps.pattern_from;
 
     var pattern_to: vec4<f32>;
-#ifdef HAS_UNIFORM_u_pattern_to
-    pattern_to = tileProps.pattern_to;
-#else
-    pattern_to = vec4<f32>(in.pattern_to);
-#endif
+    pattern_to = $tileProps.pattern_to;
 
     let pattern_tl_a = pattern_from.xy;
     let pattern_br_a = pattern_from.zw;
@@ -120,18 +96,14 @@ fn main(in: VertexInput) -> VertexOutput {
     );
     // Fragment positions use a top-left origin, while NDC Y points up.
     out.v_pos = (ndcXY * vec2<f32>(1.0, -1.0) + vec2<f32>(1.0, 1.0)) * 0.5 * view.target_size;
-#ifndef HAS_UNIFORM_u_color
-    out.color = unpack_mix_color(in.color, drawable.color_t);
-#endif
+    #property pass color
 #ifndef HAS_UNIFORM_u_pattern_from
     out.pattern_from = pattern_from;
 #endif
 #ifndef HAS_UNIFORM_u_pattern_to
     out.pattern_to = pattern_to;
 #endif
-#ifndef HAS_UNIFORM_u_opacity
-    out.opacity = unpack_mix_float(in.opacity, drawable.opacity_t);
-#endif
+    #property pass opacity
 
     return out;
 }
@@ -144,18 +116,10 @@ struct FragmentInput {
     @location(0) v_pos_a: vec2<f32>,
     @location(1) v_pos_b: vec2<f32>,
     @location(2) v_pos: vec2<f32>,
-#ifndef HAS_UNIFORM_u_color
-    @location(3) color: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_pattern_from
-    @location(4) @interpolate(flat) pattern_from: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_pattern_to
-    @location(5) @interpolate(flat) pattern_to: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    @location(6) opacity: f32,
-#endif
+    #property varying color 3
+    #property varying pattern_from 4 flat
+    #property varying pattern_to 5 flat
+    #property varying opacity 6
 };
 
 @group(0) @binding(5) var<storage, read> tilePropsVector: array<FillPatternTilePropsUBO>;
@@ -172,18 +136,10 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     let tileProps = tilePropsVector[globalIndex.value];
 
     let pattern_from =
-#ifdef HAS_UNIFORM_u_pattern_from
-        tileProps.pattern_from;
-#else
-        in.pattern_from;
-#endif
+        $tileProps.pattern_from;
 
     let pattern_to =
-#ifdef HAS_UNIFORM_u_pattern_to
-        tileProps.pattern_to;
-#else
-        in.pattern_to;
-#endif
+        $tileProps.pattern_to;
 
     let pattern_tl_a = pattern_from.xy;
     let pattern_br_a = pattern_from.zw;
@@ -206,18 +162,10 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 
     // Mix patterns and apply opacity
     let opacity =
-#ifdef HAS_UNIFORM_u_opacity
-        props.opacity;
-#else
-        in.opacity;
-#endif
+        $props.opacity;
 
     let color =
-#ifdef HAS_UNIFORM_u_color
-        props.color;
-#else
-        in.color;
-#endif
+        $props.color;
 
     let dist = length(in.v_pos - in.position.xy);
     let alpha = 1.0 - smoothstep(0.0, 1.0, dist);
@@ -244,12 +192,8 @@ pub(super) const FILL_OUTLINE_SHADER: Wgsl = Wgsl {
         r"
 struct VertexInput {
     @location(0) position: vec2<i32>,
-#ifndef HAS_UNIFORM_u_outline_color
-    @location(1) outline_color: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    @location(2) opacity: vec2<f32>,
-#endif
+    #property attribute outline_color
+    #property attribute opacity
 };
 
 struct VertexOutput {
@@ -257,9 +201,7 @@ struct VertexOutput {
 #ifndef HAS_UNIFORM_u_outline_color
     @location(0) color: vec4<f32>,
 #endif
-#ifndef HAS_UNIFORM_u_opacity
-    @location(1) opacity: f32,
-#endif
+    #property varying opacity 1
     @location(2) pos: vec2<f32>,
 };
 
@@ -282,9 +224,7 @@ fn main(in: VertexInput) -> VertexOutput {
 #ifndef HAS_UNIFORM_u_outline_color
     out.color = unpack_mix_color(in.outline_color, drawable.outline_color_t);
 #endif
-#ifndef HAS_UNIFORM_u_opacity
-    out.opacity = unpack_mix_float(in.opacity, drawable.opacity_t);
-#endif
+    #property pass opacity
 
     return out;
 }
@@ -299,9 +239,7 @@ struct FragmentInput {
 #ifndef HAS_UNIFORM_u_outline_color
     @location(0) color: vec4<f32>,
 #endif
-#ifndef HAS_UNIFORM_u_opacity
-    @location(1) opacity: f32,
-#endif
+    #property varying opacity 1
     @location(2) pos: vec2<f32>,
 };
 
@@ -319,11 +257,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 #endif
 
     var opacity: f32;
-#ifdef HAS_UNIFORM_u_opacity
-    opacity = props.opacity;
-#else
-    opacity = in.opacity;
-#endif
+    opacity = $props.opacity;
 
     // The outline fades over a pixel from the line, as in the GL and Vulkan
     // shaders; the C++ WebGPU source leaves `alpha` out here.
@@ -341,36 +275,20 @@ pub(super) const FILL_PATTERN_SHADER: Wgsl = Wgsl {
         r"
 struct VertexInput {
     @location(0) position: vec2<i32>,
-#ifndef HAS_UNIFORM_u_color
-    @location(1) color: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_pattern_from
-    @location(2) pattern_from: vec4<u32>,
-#endif
-#ifndef HAS_UNIFORM_u_pattern_to
-    @location(3) pattern_to: vec4<u32>,
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    @location(4) opacity: vec2<f32>,
-#endif
+    #property attribute color
+    #property attribute pattern_from
+    #property attribute pattern_to
+    #property attribute opacity
 };
 
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) v_pos_a: vec2<f32>,
     @location(1) v_pos_b: vec2<f32>,
-#ifndef HAS_UNIFORM_u_color
-    @location(2) color: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_pattern_from
-    @location(3) @interpolate(flat) pattern_from: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_pattern_to
-    @location(4) @interpolate(flat) pattern_to: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    @location(5) opacity: f32,
-#endif
+    #property varying color 2
+    #property varying pattern_from 3 flat
+    #property varying pattern_to 4 flat
+    #property varying opacity 5
 };
 
 @group(0) @binding(2) var<storage, read> drawableVector: array<FillPatternDrawableUBO>;
@@ -385,18 +303,10 @@ fn main(in: VertexInput) -> VertexOutput {
     let tileProps = tilePropsVector[index];
 
     var pattern_from: vec4<f32>;
-#ifdef HAS_UNIFORM_u_pattern_from
-    pattern_from = tileProps.pattern_from;
-#else
-    pattern_from = vec4<f32>(in.pattern_from);
-#endif
+    pattern_from = $tileProps.pattern_from;
 
     var pattern_to: vec4<f32>;
-#ifdef HAS_UNIFORM_u_pattern_to
-    pattern_to = tileProps.pattern_to;
-#else
-    pattern_to = vec4<f32>(in.pattern_to);
-#endif
+    pattern_to = $tileProps.pattern_to;
 
     let pattern_tl_a = pattern_from.xy;
     let pattern_br_a = pattern_from.zw;
@@ -434,18 +344,14 @@ fn main(in: VertexInput) -> VertexOutput {
         tileZoomRatio,
         pos
     );
-#ifndef HAS_UNIFORM_u_color
-    out.color = unpack_mix_color(in.color, drawable.color_t);
-#endif
+    #property pass color
 #ifndef HAS_UNIFORM_u_pattern_from
     out.pattern_from = pattern_from;
 #endif
 #ifndef HAS_UNIFORM_u_pattern_to
     out.pattern_to = pattern_to;
 #endif
-#ifndef HAS_UNIFORM_u_opacity
-    out.opacity = unpack_mix_float(in.opacity, drawable.opacity_t);
-#endif
+    #property pass opacity
 
     return out;
 }
@@ -456,18 +362,10 @@ fn main(in: VertexInput) -> VertexOutput {
 struct FragmentInput {
     @location(0) v_pos_a: vec2<f32>,
     @location(1) v_pos_b: vec2<f32>,
-#ifndef HAS_UNIFORM_u_color
-    @location(2) color: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_pattern_from
-    @location(3) @interpolate(flat) pattern_from: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_pattern_to
-    @location(4) @interpolate(flat) pattern_to: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    @location(5) opacity: f32,
-#endif
+    #property varying color 2
+    #property varying pattern_from 3 flat
+    #property varying pattern_to 4 flat
+    #property varying opacity 5
 };
 
 @group(0) @binding(5) var<storage, read> tilePropsVector: array<FillPatternTilePropsUBO>;
@@ -484,18 +382,10 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     let tileProps = tilePropsVector[globalIndex.value];
 
     let pattern_from =
-#ifdef HAS_UNIFORM_u_pattern_from
-        tileProps.pattern_from;
-#else
-        in.pattern_from;
-#endif
+        $tileProps.pattern_from;
 
     let pattern_to =
-#ifdef HAS_UNIFORM_u_pattern_to
-        tileProps.pattern_to;
-#else
-        in.pattern_to;
-#endif
+        $tileProps.pattern_to;
 
     let pattern_tl_a = pattern_from.xy;
     let pattern_br_a = pattern_from.zw;
@@ -518,18 +408,10 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 
     // Mix patterns and apply opacity
     let opacity =
-#ifdef HAS_UNIFORM_u_opacity
-        props.opacity;
-#else
-        in.opacity;
-#endif
+        $props.opacity;
 
     let color =
-#ifdef HAS_UNIFORM_u_color
-        props.color;
-#else
-        in.color;
-#endif
+        $props.color;
 
     if (tileProps.sdf > 0.5) {
         let sdf_edge = (256.0 - 64.0) / 256.0;
@@ -551,22 +433,14 @@ pub(super) const FILL_SHADER: Wgsl = Wgsl {
         r"
 struct VertexInput {
     @location(0) position: vec2<i32>,
-#ifndef HAS_UNIFORM_u_color
-    @location(1) color: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    @location(2) opacity: vec2<f32>,
-#endif
+    #property attribute color
+    #property attribute opacity
 };
 
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
-#ifndef HAS_UNIFORM_u_color
-    @location(0) color: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    @location(1) opacity: f32,
-#endif
+    #property varying color 0
+    #property varying opacity 1
 };
 
 @group(0) @binding(2) var<storage, read> drawableVector: array<FillDrawableUBO>;
@@ -582,12 +456,8 @@ fn main(in: VertexInput) -> VertexOutput {
     let clip = projectTileWithPoles(pos, pos, projectionVector[globalIndex.value]);
     out.position = clip;
 
-#ifndef HAS_UNIFORM_u_color
-    out.color = unpack_mix_color(in.color, drawable.color_t);
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    out.opacity = unpack_mix_float(in.opacity, drawable.opacity_t);
-#endif
+    #property pass color
+    #property pass opacity
 
     return out;
 }
@@ -599,12 +469,8 @@ fn main(in: VertexInput) -> VertexOutput {
 
 struct FragmentInput {
     @builtin(position) position: vec4<f32>,
-#ifndef HAS_UNIFORM_u_color
-    @location(0) color: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    @location(1) opacity: f32,
-#endif
+    #property varying color 0
+    #property varying opacity 1
 };
 
 @fragment
@@ -614,18 +480,10 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 #endif
 
     var color: vec4<f32>;
-#ifdef HAS_UNIFORM_u_color
-    color = props.color;
-#else
-    color = in.color;
-#endif
+    color = $props.color;
 
     var opacity: f32;
-#ifdef HAS_UNIFORM_u_opacity
-    opacity = props.opacity;
-#else
-    opacity = in.opacity;
-#endif
+    opacity = $props.opacity;
 
     return color * opacity;
 }
@@ -705,9 +563,7 @@ struct VertexOutput {
 #ifndef HAS_UNIFORM_u_outline_color
     @location(0) color: vec4<f32>,
 #endif
-#ifndef HAS_UNIFORM_u_opacity
-    @location(1) opacity: f32,
-#endif
+    #property varying opacity 1
     @location(2) pos: vec2<f32>,
 };
 
@@ -725,12 +581,8 @@ struct VertexInput {
     @location(0) corner: vec2<i32>,
     @location(3) outline_pos: vec2<i32>,
     @location(4) outline_end: vec2<i32>,
-#ifndef HAS_UNIFORM_u_outline_color
-    @location(1) outline_color: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    @location(2) opacity: vec2<f32>,
-#endif
+    #property attribute outline_color
+    #property attribute opacity
 };
 ",
         plain_declarations!(),
@@ -752,9 +604,7 @@ fn main(in: VertexInput) -> VertexOutput {
 #ifndef HAS_UNIFORM_u_outline_color
     out.color = unpack_mix_color(in.outline_color, drawable.outline_color_t);
 #endif
-#ifndef HAS_UNIFORM_u_opacity
-    out.opacity = unpack_mix_float(in.opacity, drawable.opacity_t);
-#endif
+    #property pass opacity
 
     return out;
 }
@@ -835,18 +685,10 @@ struct VertexInput {
     @location(0) corner: vec2<i32>,
     @location(5) outline_pos: vec2<i32>,
     @location(6) outline_end: vec2<i32>,
-#ifndef HAS_UNIFORM_u_color
-    @location(1) color: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_pattern_from
-    @location(2) pattern_from: vec4<u32>,
-#endif
-#ifndef HAS_UNIFORM_u_pattern_to
-    @location(3) pattern_to: vec4<u32>,
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    @location(4) opacity: vec2<f32>,
-#endif
+    #property attribute color
+    #property attribute pattern_from
+    #property attribute pattern_to
+    #property attribute opacity
 };
 
 struct VertexOutput {
@@ -854,18 +696,10 @@ struct VertexOutput {
     @location(0) v_pos_a: vec2<f32>,
     @location(1) v_pos_b: vec2<f32>,
     @location(2) v_pos: vec2<f32>,
-#ifndef HAS_UNIFORM_u_color
-    @location(3) color: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_pattern_from
-    @location(4) @interpolate(flat) pattern_from: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_pattern_to
-    @location(5) @interpolate(flat) pattern_to: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    @location(6) opacity: f32,
-#endif
+    #property varying color 3
+    #property varying pattern_from 4 flat
+    #property varying pattern_to 5 flat
+    #property varying opacity 6
 };
 
 @group(0) @binding(2) var<storage, read> drawableVector: array<FillPatternDrawableUBO>;
@@ -883,18 +717,10 @@ fn main(in: VertexInput) -> VertexOutput {
     let projection = projectionVector[index];
 
     var pattern_from: vec4<f32>;
-#ifdef HAS_UNIFORM_u_pattern_from
-    pattern_from = tileProps.pattern_from;
-#else
-    pattern_from = vec4<f32>(in.pattern_from);
-#endif
+    pattern_from = $tileProps.pattern_from;
 
     var pattern_to: vec4<f32>;
-#ifdef HAS_UNIFORM_u_pattern_to
-    pattern_to = tileProps.pattern_to;
-#else
-    pattern_to = vec4<f32>(in.pattern_to);
-#endif
+    pattern_to = $tileProps.pattern_to;
 
     let pixelRatio = view.pixel_ratio;
     let display_size_a = (pattern_from.zw - pattern_from.xy) / pixelRatio;
@@ -912,18 +738,14 @@ fn main(in: VertexInput) -> VertexOutput {
     out.v_pos_b = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower,
                                   props.to_scale * display_size_b, drawable.tile_ratio, pos);
     out.v_pos = corner.pos;
-#ifndef HAS_UNIFORM_u_color
-    out.color = unpack_mix_color(in.color, drawable.color_t);
-#endif
+    #property pass color
 #ifndef HAS_UNIFORM_u_pattern_from
     out.pattern_from = pattern_from;
 #endif
 #ifndef HAS_UNIFORM_u_pattern_to
     out.pattern_to = pattern_to;
 #endif
-#ifndef HAS_UNIFORM_u_opacity
-    out.opacity = unpack_mix_float(in.opacity, drawable.opacity_t);
-#endif
+    #property pass opacity
 
     return out;
 }

@@ -64,8 +64,10 @@ pub struct Program {
     pub instance_attributes: &'static [Attribute],
     /// The textures it samples.
     pub textures: &'static [Texture],
-    /// The paint properties it reads: those whose `HAS_UNIFORM_u_<name>`
-    /// its source tests, and no others, since a variant defines only these.
+    /// The paint properties it reads, each from its uniform or per vertex
+    /// as a variant says ([`source`](crate::shaders::source#properties)):
+    /// those whose `HAS_UNIFORM_u_<name>` its sources test once written
+    /// out, and no others, since a variant defines only these.
     pub properties: &'static [Property],
     /// Its source in each shading language it has one in.
     pub sources: Sources,
@@ -196,21 +198,53 @@ impl Texture {
 
 /// A paint property a program reads: from its uniform in a variant that
 /// reads it from there, otherwise from the values a layer binds to its
-/// attribute.
+/// attribute, which a source reads through the directives that
+/// [`source`](crate::shaders::source#properties) describes.
 #[derive(Clone, Copy, Debug)]
 pub struct Property {
     /// The name of the uniform, `u_<name>`.
     pub name: &'static str,
     /// The id of the attribute a layer binds the property's values to.
     pub attribute: usize,
+    /// What its values per vertex are.
+    pub ty: PropertyType,
+}
+
+/// What a [`Property`]'s values per vertex are, of the format of its
+/// attribute.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PropertyType {
+    /// A float at two zooms, `Float2`, which the vertex stage mixes by the
+    /// member `<name>_t` of its draw's block.
+    Float,
+    /// A color at two zooms, `Float4`, each packed in two floats, which the
+    /// vertex stage mixes by `<name>_t` too.
+    Color,
+    /// Four values that the vertex stage doesn't mix, as a pattern's
+    /// rectangle in its atlas, `UShort4`.
+    Vec4,
 }
 
 impl Property {
-    /// The property `u_<name>`, whose values a layer binds to attribute
+    /// The float `u_<name>`, whose values a layer binds to attribute
     /// `attribute`.
     #[must_use]
-    pub const fn new(name: &'static str, attribute: usize) -> Property {
-        Property { name, attribute }
+    pub const fn float(name: &'static str, attribute: usize) -> Property {
+        Property { name, attribute, ty: PropertyType::Float }
+    }
+
+    /// The color `u_<name>`, whose values a layer binds to attribute
+    /// `attribute`.
+    #[must_use]
+    pub const fn color(name: &'static str, attribute: usize) -> Property {
+        Property { name, attribute, ty: PropertyType::Color }
+    }
+
+    /// The unmixed `vec4` `u_<name>`, whose values a layer binds to
+    /// attribute `attribute`.
+    #[must_use]
+    pub const fn vec4(name: &'static str, attribute: usize) -> Property {
+        Property { name, attribute, ty: PropertyType::Vec4 }
     }
 }
 

@@ -13,7 +13,7 @@ use mln_gfx::gpu::{DepthState, FixedState, StencilState, VertexAttribute, Vertex
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::program::{Buffer, PROJECTION_BUFFER, Program, VIEW_BUFFER};
 use mln_gfx::shaders::program_parameters::ProgramParameters;
-use mln_gfx::shaders::source::wgsl::Wgsl;
+use mln_gfx::shaders::source::wgsl::{self, Wgsl};
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::types::DepthFunctionType;
 
@@ -28,11 +28,13 @@ fn programs() -> Vec<(&'static Program, &'static Wgsl)> {
     programs.filter_map(|&program| Some((program, program.sources.wgsl?))).collect()
 }
 
-/// The names after the `HAS_UNIFORM_u_` that `wgsl` tests.
-fn uniforms(wgsl: &Wgsl) -> BTreeSet<String> {
+/// The names after the `HAS_UNIFORM_u_` that `program`'s WGSL, `wgsl`,
+/// tests once its properties are written out.
+fn uniforms(program: &Program, wgsl: &Wgsl) -> BTreeSet<String> {
     const PREFIX: &str = "HAS_UNIFORM_u_";
     let mut names = BTreeSet::new();
-    for text in [wgsl.prelude, wgsl.vertex, wgsl.fragment].into_iter().flatten() {
+    let [vertex, fragment] = wgsl::expand(program, wgsl).expect("expands");
+    for text in [wgsl.prelude.unwrap_or(""), &vertex, &fragment] {
         for (start, _) in text.match_indices(PREFIX) {
             let rest = &text[start + PREFIX.len()..];
             let end = rest.find(|c: char| !c.is_ascii_alphanumeric() && c != '_').unwrap_or(rest.len());
@@ -48,7 +50,7 @@ fn uniforms(wgsl: &Wgsl) -> BTreeSet<String> {
 fn every_program_declares_the_properties_its_wgsl_reads_from_uniforms() {
     for (program, wgsl) in programs() {
         let declared: BTreeSet<String> = program.properties.iter().map(|property| property.name.to_owned()).collect();
-        assert_eq!(uniforms(wgsl), declared, "{}", program.name);
+        assert_eq!(uniforms(program, wgsl), declared, "{}", program.name);
     }
 }
 

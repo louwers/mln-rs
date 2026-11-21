@@ -36,8 +36,8 @@ pub static HEATMAP: Program = Program {
     instance_attributes: &[],
     textures: &[],
     properties: &[
-        Property::new("weight", ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE),
-        Property::new("radius", ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE),
+        Property::float("weight", ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE),
+        Property::float("radius", ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE),
     ],
     sources: sources!(wgsl: HEATMAP_SHADER, msl: HEATMAP_SHADER, glsl_es: HEATMAP_SHADER, glsl: HEATMAP_SHADER,),
 };

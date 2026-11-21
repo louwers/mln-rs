@@ -34,15 +34,9 @@ layout (location = 6) in vec2 a_next_outline_pos;
 layout (location = 7) in vec2 a_next_decimals_ed;
 out vec4 v_color;
 
-#ifndef HAS_UNIFORM_u_base
-layout (location = 4) in highp vec2 a_base;
-#endif
-#ifndef HAS_UNIFORM_u_height
-layout (location = 5) in highp vec2 a_height;
-#endif
-#ifndef HAS_UNIFORM_u_color
-layout (location = 3) in highp vec4 a_color;
-#endif
+#property attribute base
+#property attribute height
+#property attribute color
 
 void main() {
     // The vertex that ends a ring has no wall.
@@ -51,21 +45,9 @@ void main() {
         return;
     }
 
-    #ifndef HAS_UNIFORM_u_base
-highp float base = unpack_mix_vec2(a_base, u_base_t);
-#else
-highp float base = u_base;
-#endif
-    #ifndef HAS_UNIFORM_u_height
-highp float height = unpack_mix_vec2(a_height, u_height_t);
-#else
-highp float height = u_height;
-#endif
-    #ifndef HAS_UNIFORM_u_color
-highp vec4 color = unpack_mix_color(a_color, u_color_t);
-#else
-highp vec4 color = u_color;
-#endif
+highp float base = $u_base;
+highp float height = $u_height;
+highp vec4 color = $u_color;
 
     vec2 p1 = a_outline_pos;
     vec2 p2 = a_next_outline_pos;
@@ -148,22 +130,14 @@ out vec2 v_pos_a;
 out vec2 v_pos_b;
 out vec4 v_lighting;
 
-#ifndef HAS_UNIFORM_u_base
-layout (location = 3) in highp vec2 a_base;
-out highp float base;
-#endif
-#ifndef HAS_UNIFORM_u_height
-layout (location = 4) in highp vec2 a_height;
-out highp float height;
-#endif
-#ifndef HAS_UNIFORM_u_pattern_from
-layout (location = 5) in highp vec4 a_pattern_from;
-flat out highp vec4 pattern_from;
-#endif
-#ifndef HAS_UNIFORM_u_pattern_to
-layout (location = 6) in highp vec4 a_pattern_to;
-flat out highp vec4 pattern_to;
-#endif
+#property attribute base
+#property varying base
+#property attribute height
+#property varying height
+#property attribute pattern_from
+#property varying pattern_from flat
+#property attribute pattern_to
+#property varying pattern_to flat
 
 void main() {
     // The vertex that ends a ring has no wall.
@@ -172,26 +146,10 @@ void main() {
         return;
     }
 
-    #ifndef HAS_UNIFORM_u_base
-base = unpack_mix_vec2(a_base, u_base_t);
-#else
-highp float base = u_base;
-#endif
-    #ifndef HAS_UNIFORM_u_height
-height = unpack_mix_vec2(a_height, u_height_t);
-#else
-highp float height = u_height;
-#endif
-    #ifndef HAS_UNIFORM_u_pattern_from
-pattern_from = a_pattern_from;
-#else
-highp vec4 pattern_from = u_pattern_from;
-#endif
-    #ifndef HAS_UNIFORM_u_pattern_to
-pattern_to = a_pattern_to;
-#else
-highp vec4 pattern_to = u_pattern_to;
-#endif
+#property pass base
+#property pass height
+#property pass pattern_from
+#property pass pattern_to
 
     vec2 pattern_tl_a = pattern_from.xy;
     vec2 pattern_br_a = pattern_from.zw;
@@ -254,32 +212,16 @@ in vec4 v_lighting;
 
 uniform sampler2D u_image;
 
-#ifndef HAS_UNIFORM_u_base
-in highp float base;
-#endif
-#ifndef HAS_UNIFORM_u_height
-in highp float height;
-#endif
-#ifndef HAS_UNIFORM_u_pattern_from
-flat in highp vec4 pattern_from;
-#endif
-#ifndef HAS_UNIFORM_u_pattern_to
-flat in highp vec4 pattern_to;
-#endif
+#property varying base
+#property varying height
+#property varying pattern_from flat
+#property varying pattern_to flat
 
 void main() {
-    #ifdef HAS_UNIFORM_u_base
-highp float base = u_base;
-#endif
-    #ifdef HAS_UNIFORM_u_height
-highp float height = u_height;
-#endif
-    #ifdef HAS_UNIFORM_u_pattern_from
-highp vec4 pattern_from = u_pattern_from;
-#endif
-    #ifdef HAS_UNIFORM_u_pattern_to
-highp vec4 pattern_to = u_pattern_to;
-#endif
+#property uniform base
+#property uniform height
+#property uniform pattern_from
+#property uniform pattern_to
 
     vec2 pattern_tl_a = pattern_from.xy;
     vec2 pattern_br_a = pattern_from.zw;
@@ -321,44 +263,20 @@ out vec2 v_pos_a;
 out vec2 v_pos_b;
 out vec4 v_lighting;
 
-#ifndef HAS_UNIFORM_u_base
-layout (location = 2) in highp vec2 a_base;
-out highp float base;
-#endif
-#ifndef HAS_UNIFORM_u_height
-layout (location = 3) in highp vec2 a_height;
-out highp float height;
-#endif
-#ifndef HAS_UNIFORM_u_pattern_from
-layout (location = 4) in highp vec4 a_pattern_from;
-flat out highp vec4 pattern_from;
-#endif
-#ifndef HAS_UNIFORM_u_pattern_to
-layout (location = 5) in highp vec4 a_pattern_to;
-flat out highp vec4 pattern_to;
-#endif
+#property attribute base
+#property varying base
+#property attribute height
+#property varying height
+#property attribute pattern_from
+#property varying pattern_from flat
+#property attribute pattern_to
+#property varying pattern_to flat
 
 void main() {
-    #ifndef HAS_UNIFORM_u_base
-base = unpack_mix_vec2(a_base, u_base_t);
-#else
-highp float base = u_base;
-#endif
-    #ifndef HAS_UNIFORM_u_height
-height = unpack_mix_vec2(a_height, u_height_t);
-#else
-highp float height = u_height;
-#endif
-    #ifndef HAS_UNIFORM_u_pattern_from
-pattern_from = a_pattern_from;
-#else
-highp vec4 pattern_from = u_pattern_from;
-#endif
-    #ifndef HAS_UNIFORM_u_pattern_to
-pattern_to = a_pattern_to;
-#else
-highp vec4 pattern_to = u_pattern_to;
-#endif
+#property pass base
+#property pass height
+#property pass pattern_from
+#property pass pattern_to
 
     vec2 pattern_tl_a = pattern_from.xy;
     vec2 pattern_br_a = pattern_from.zw;
@@ -416,32 +334,16 @@ in vec4 v_lighting;
 
 uniform sampler2D u_image;
 
-#ifndef HAS_UNIFORM_u_base
-in highp float base;
-#endif
-#ifndef HAS_UNIFORM_u_height
-in highp float height;
-#endif
-#ifndef HAS_UNIFORM_u_pattern_from
-flat in highp vec4 pattern_from;
-#endif
-#ifndef HAS_UNIFORM_u_pattern_to
-flat in highp vec4 pattern_to;
-#endif
+#property varying base
+#property varying height
+#property varying pattern_from flat
+#property varying pattern_to flat
 
 void main() {
-    #ifdef HAS_UNIFORM_u_base
-highp float base = u_base;
-#endif
-    #ifdef HAS_UNIFORM_u_height
-highp float height = u_height;
-#endif
-    #ifdef HAS_UNIFORM_u_pattern_from
-highp vec4 pattern_from = u_pattern_from;
-#endif
-    #ifdef HAS_UNIFORM_u_pattern_to
-highp vec4 pattern_to = u_pattern_to;
-#endif
+#property uniform base
+#property uniform height
+#property uniform pattern_from
+#property uniform pattern_to
 
     vec2 pattern_tl_a = pattern_from.xy;
     vec2 pattern_br_a = pattern_from.zw;
@@ -480,32 +382,14 @@ layout (location = 0) in vec2 a_pos;
 layout (location = 1) in vec2 a_decimals_ed;
 out vec4 v_color;
 
-#ifndef HAS_UNIFORM_u_base
-layout (location = 3) in highp vec2 a_base;
-#endif
-#ifndef HAS_UNIFORM_u_height
-layout (location = 4) in highp vec2 a_height;
-#endif
-#ifndef HAS_UNIFORM_u_color
-layout (location = 2) in highp vec4 a_color;
-#endif
+#property attribute base
+#property attribute height
+#property attribute color
 
 void main() {
-    #ifndef HAS_UNIFORM_u_base
-highp float base = unpack_mix_vec2(a_base, u_base_t);
-#else
-highp float base = u_base;
-#endif
-    #ifndef HAS_UNIFORM_u_height
-highp float height = unpack_mix_vec2(a_height, u_height_t);
-#else
-highp float height = u_height;
-#endif
-    #ifndef HAS_UNIFORM_u_color
-highp vec4 color = unpack_mix_color(a_color, u_color_t);
-#else
-highp vec4 color = u_color;
-#endif
+highp float base = $u_base;
+highp float height = $u_height;
+highp vec4 color = $u_color;
 
     // A roof vertex: the walls are the instanced shader's.
     vec3 normal = vec3(0.0, 0.0, 1.0);

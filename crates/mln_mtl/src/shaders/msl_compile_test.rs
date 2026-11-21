@@ -64,7 +64,7 @@ fn compile(
 }
 
 fn full_source(program: &Program, msl: &Msl) -> String {
-    library_source(program, msl)
+    library_source(program, msl).expect("expands")
 }
 
 /// The `<name>`s of the `HAS_UNIFORM_u_<name>` the shader tests.

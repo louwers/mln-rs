@@ -19,19 +19,13 @@ enum {
 struct VertexStage {
     short2 pos [[attribute(0)]];
 
-#if !defined(HAS_UNIFORM_u_weight)
-    float2 weight [[attribute(1)]];
-#endif
-#if !defined(HAS_UNIFORM_u_radius)
-    float2 radius [[attribute(2)]];
-#endif
+    #property attribute weight
+    #property attribute radius
 };
 
 struct FragmentStage {
     float4 position [[position, invariant]];
-#if !defined(HAS_UNIFORM_u_weight)
-    float weight;
-#endif
+    #property varying weight float
     float2 extrude;
 };
 
@@ -51,16 +45,8 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 
     device const HeatmapDrawableUBO& drawable = drawableVector[uboIndex];
 
-#if defined(HAS_UNIFORM_u_weight)
-    const auto weight = props.weight;
-#else
-    const auto weight = unpack_mix_float(vertx.weight, drawable.weight_t);
-#endif
-#if defined(HAS_UNIFORM_u_radius)
-    const auto radius = props.radius;
-#else
-    const auto radius = unpack_mix_float(vertx.radius, drawable.radius_t);
-#endif
+    const auto weight = $props.weight;
+    const auto radius = $props.radius;
 
     // unencode the extrusion vector that we snuck into the a_pos vector
     const float2 unscaled_extrude = float2(glMod(float2(vertx.pos), 2.0) * 2.0 - 1.0);
@@ -114,11 +100,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 
     // Kernel density estimation with a Gaussian kernel of size 5x5
     const float d = -0.5 * 3.0 * 3.0 * dot(in.extrude, in.extrude);
-#if defined(HAS_UNIFORM_u_weight)
-    const float weight = props.weight;
-#else
-    const float weight = in.weight;
-#endif
+    const float weight = $props.weight;
     const float val = weight * props.intensity * GAUSS_COEF * exp(d);
 
     return half4(val, 1.0, 1.0, 1.0);

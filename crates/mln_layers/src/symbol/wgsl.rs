@@ -233,9 +233,7 @@ struct VertexInput {
     @location(2) pixeloffset: vec4<i32>,
     @location(3) projected_pos: vec3<f32>,
     @location(4) fade_opacity: f32,
-#ifndef HAS_UNIFORM_u_opacity
-    @location(5) opacity: vec2<f32>,
-#endif
+    #property attribute opacity
     @location(6) tex_origin: vec2<u32>,
     @location(7) height_offset: f32,
 };
@@ -244,9 +242,7 @@ struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) tex: vec2<f32>,
     @location(1) fade_opacity: f32,
-#ifndef HAS_UNIFORM_u_opacity
-    @location(2) opacity: f32,
-#endif
+    #property varying opacity 2
     @location(3) @interpolate(flat) tex_origin: vec2<f32>,
 };
 
@@ -387,9 +383,7 @@ fn main(in: VertexInput) -> VertexOutput {
 struct FragmentInput {
     @location(0) tex: vec2<f32>,
     @location(1) fade_opacity: f32,
-#ifndef HAS_UNIFORM_u_opacity
-    @location(2) opacity: f32,
-#endif
+    #property varying opacity 2
     @location(3) @interpolate(flat) tex_origin: vec2<f32>,
 };
 
@@ -434,21 +428,11 @@ struct VertexInput {
     @location(2) pixeloffset: vec4<i32>,
     @location(3) projected_pos: vec3<f32>,
     @location(4) fade_opacity: f32,
-#ifndef HAS_UNIFORM_u_fill_color
-    @location(5) fill_color: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_halo_color
-    @location(6) halo_color: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    @location(7) opacity: vec2<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_halo_width
-    @location(8) halo_width: vec2<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_halo_blur
-    @location(9) halo_blur: vec2<f32>,
-#endif
+    #property attribute fill_color
+    #property attribute halo_color
+    #property attribute opacity
+    #property attribute halo_width
+    #property attribute halo_blur
     @location(10) tex_origin: vec2<u32>,
     @location(11) height_offset: f32,
 };
@@ -459,12 +443,8 @@ struct VertexOutput {
     @location(1) fade_opacity: f32,
     @location(2) gamma_scaled: f32,
     @location(3) halo_edge: f32,
-#ifndef HAS_UNIFORM_u_fill_color
-    @location(4) fill_color: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_halo_color
-    @location(5) halo_color: vec4<f32>,
-#endif
+    #property varying fill_color 4
+    #property varying halo_color 5
     @location(9) @interpolate(flat) tex_origin: vec2<f32>,
 };
 
@@ -614,12 +594,8 @@ fn main(in: VertexInput) -> VertexOutput {
     let halo_blur_gamma = select(0.0, halo_blur * 1.19 / SDF_PX, drawable.is_halo_pass != 0u);
     out.gamma_scaled = (halo_blur_gamma + EDGE_GAMMA) / (fontScale * drawable.gamma_scale) * gamma_scale;
     out.halo_edge = (6.0 - halo_width / fontScale) / SDF_PX;
-#ifndef HAS_UNIFORM_u_fill_color
-    out.fill_color = unpack_mix_color(in.fill_color, drawable.fill_color_t);
-#endif
-#ifndef HAS_UNIFORM_u_halo_color
-    out.halo_color = unpack_mix_color(in.halo_color, drawable.halo_color_t);
-#endif
+    #property pass fill_color
+    #property pass halo_color
 
     return out;
 }
@@ -632,12 +608,8 @@ struct FragmentInput {
     @location(1) fade_opacity: f32,
     @location(2) gamma_scaled: f32,
     @location(3) halo_edge: f32,
-#ifndef HAS_UNIFORM_u_fill_color
-    @location(4) fill_color: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_halo_color
-    @location(5) halo_color: vec4<f32>,
-#endif
+    #property varying fill_color 4
+    #property varying halo_color 5
     @location(9) @interpolate(flat) tex_origin: vec2<f32>,
 };
 
@@ -712,21 +684,11 @@ struct VertexInput {
     @location(1) data: vec4<u32>,
     @location(2) projected_pos: vec3<f32>,
     @location(3) fade_opacity: f32,
-#ifndef HAS_UNIFORM_u_fill_color
-    @location(4) fill_color: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_halo_color
-    @location(5) halo_color: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    @location(6) opacity: vec2<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_halo_width
-    @location(7) halo_width: vec2<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_halo_blur
-    @location(8) halo_blur: vec2<f32>,
-#endif
+    #property attribute fill_color
+    #property attribute halo_color
+    #property attribute opacity
+    #property attribute halo_width
+    #property attribute halo_blur
     @location(9) tex_origin: vec2<u32>,
     @location(10) height_offset: f32,
 };
@@ -738,12 +700,8 @@ struct VertexOutput {
     @location(2) gamma_scaled: f32,
     @location(3) halo_edge: f32,
     @location(4) is_icon: f32,
-#ifndef HAS_UNIFORM_u_fill_color
-    @location(5) fill_color: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_halo_color
-    @location(6) halo_color: vec4<f32>,
-#endif
+    #property varying fill_color 5
+    #property varying halo_color 6
     @location(10) @interpolate(flat) tex_origin: vec2<f32>,
 };
 
@@ -900,12 +858,8 @@ fn main(in: VertexInput) -> VertexOutput {
     out.halo_edge = (6.0 - halo_width / fontScale) / SDF_PX;
     out.is_icon = is_icon;
 
-#ifndef HAS_UNIFORM_u_fill_color
-    out.fill_color = unpack_mix_color(in.fill_color, drawable.fill_color_t);
-#endif
-#ifndef HAS_UNIFORM_u_halo_color
-    out.halo_color = unpack_mix_color(in.halo_color, drawable.halo_color_t);
-#endif
+    #property pass fill_color
+    #property pass halo_color
 
     return out;
 }
@@ -919,12 +873,8 @@ struct FragmentInput {
     @location(2) gamma_scaled: f32,
     @location(3) halo_edge: f32,
     @location(4) is_icon: f32,
-#ifndef HAS_UNIFORM_u_fill_color
-    @location(5) fill_color: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_halo_color
-    @location(6) halo_color: vec4<f32>,
-#endif
+    #property varying fill_color 5
+    #property varying halo_color 6
     @location(10) @interpolate(flat) tex_origin: vec2<f32>,
 };
 

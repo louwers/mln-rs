@@ -19,13 +19,9 @@ pub(super) const FILL_SHADER: Glsl = Glsl {
 
 layout(location = 0) in ivec2 in_position;
 
-#if !defined(HAS_UNIFORM_u_color)
-layout(location = 1) in vec4 in_color;
-#endif
+#property attribute color
 
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 2) in vec2 in_opacity;
-#endif
+#property attribute opacity
 
 layout(push_constant) uniform Constants {
     int ubo_index;
@@ -39,13 +35,9 @@ layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer
     ProjectionUBO projection_ubo[];
 } projectionVector;
 
-#if !defined(HAS_UNIFORM_u_color)
-layout(location = 0) out vec4 frag_color;
-#endif
+#property varying color 0
 
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 1) out float frag_opacity;
-#endif
+#property varying opacity 1
 
 void main() {
     const FillDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
@@ -54,22 +46,16 @@ void main() {
     frag_color = vec4(unpack_mix_color(in_color, drawable.color_t));
 #endif
 
-#if !defined(HAS_UNIFORM_u_opacity)
-    frag_opacity = unpack_mix_float(in_opacity, drawable.opacity_t);
-#endif
+    #property pass opacity
 
     gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector.projection_ubo[constant.ubo_index]);
 }
 ",
     fragment: r"
 
-#if !defined(HAS_UNIFORM_u_color)
-layout(location = 0) in vec4 frag_color;
-#endif
+#property varying color 0
 
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 1) in float frag_opacity;
-#endif
+#property varying opacity 1
 
 layout(location = 0) out vec4 out_color;
 
@@ -84,17 +70,9 @@ void main() {
     return;
 #endif
 
-#if defined(HAS_UNIFORM_u_color)
-    const vec4 color = props.color;
-#else
-    const vec4 color = frag_color;
-#endif
+    const vec4 color = $props.color;
 
-#if defined(HAS_UNIFORM_u_opacity)
-    const float opacity = props.opacity;
-#else
-    const float opacity = frag_opacity;
-#endif
+    const float opacity = $props.opacity;
 
     out_color = color * opacity;
 }
@@ -111,9 +89,7 @@ layout(location = 0) in ivec2 in_position;
 layout(location = 1) in vec4 in_color;
 #endif
 
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 2) in vec2 in_opacity;
-#endif
+#property attribute opacity
 
 layout(push_constant) uniform Constants {
     int ubo_index;
@@ -131,9 +107,7 @@ layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer
 layout(location = 0) out vec4 frag_color;
 #endif
 
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 1) out float frag_opacity;
-#endif
+#property varying opacity 1
 
 layout(location = 2) out vec2 frag_position;
 
@@ -144,9 +118,7 @@ void main() {
     frag_color = vec4(unpack_mix_color(in_color, drawable.outline_color_t));
 #endif
 
-#if !defined(HAS_UNIFORM_u_opacity)
-    frag_opacity = unpack_mix_float(in_opacity, drawable.opacity_t);
-#endif
+    #property pass opacity
 
     gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector.projection_ubo[constant.ubo_index]);
 
@@ -160,9 +132,7 @@ void main() {
 layout(location = 0) in vec4 frag_color;
 #endif
 
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 1) in float frag_opacity;
-#endif
+#property varying opacity 1
 
 layout(location = 2) in vec2 frag_position;
 
@@ -185,11 +155,7 @@ void main() {
     const vec4 color = frag_color;
 #endif
 
-#if defined(HAS_UNIFORM_u_opacity)
-    const float opacity = props.opacity;
-#else
-    const float opacity = frag_opacity;
-#endif
+    const float opacity = $props.opacity;
 
     float dist = length(frag_position - gl_FragCoord.xy);
     float alpha = 1.0 - smoothstep(0.0, 1.0, dist);
@@ -204,21 +170,13 @@ pub(super) const FILL_PATTERN_SHADER: Glsl = Glsl {
 
 layout(location = 0) in ivec2 in_position;
 
-#if !defined(HAS_UNIFORM_u_color)
-layout(location = 1) in vec4 in_color;
-#endif
+#property attribute color
 
-#if !defined(HAS_UNIFORM_u_pattern_from)
-layout(location = 2) in uvec4 in_pattern_from;
-#endif
+#property attribute pattern_from
 
-#if !defined(HAS_UNIFORM_u_pattern_to)
-layout(location = 3) in uvec4 in_pattern_to;
-#endif
+#property attribute pattern_to
 
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 4) in vec2 in_opacity;
-#endif
+#property attribute opacity
 
 layout(push_constant) uniform Constants {
     int ubo_index;
@@ -243,29 +201,19 @@ layout(set = LAYER_SET_INDEX, binding = idFillEvaluatedPropsUBO) uniform FillEva
 layout(location = 0) out vec2 frag_pos_a;
 layout(location = 1) out vec2 frag_pos_b;
 
-#if !defined(HAS_UNIFORM_u_color)
-layout(location = 2) out vec4 frag_color;
-#endif
+#property varying color 2
 
-#if !defined(HAS_UNIFORM_u_pattern_from)
-layout(location = 3) flat out vec4 frag_pattern_from;
-#endif
+#property varying pattern_from 3 flat
 
-#if !defined(HAS_UNIFORM_u_pattern_to)
-layout(location = 4) flat out vec4 frag_pattern_to;
-#endif
+#property varying pattern_to 4 flat
 
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 5) out float frag_opacity;
-#endif
+#property varying opacity 5
 
 void main() {
     const FillPatternDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
     const FillPatternTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
 
-#if !defined(HAS_UNIFORM_u_color)
-    frag_color = unpack_mix_color(in_color, drawable.color_t);
-#endif
+    #property pass color
 
 #if defined(HAS_UNIFORM_u_pattern_from)
     const vec4 frag_pattern_from = tileProps.pattern_from;
@@ -279,9 +227,7 @@ void main() {
     frag_pattern_to = in_pattern_to;
 #endif
 
-#if !defined(HAS_UNIFORM_u_opacity)
-    frag_opacity = unpack_mix_float(in_opacity, drawable.opacity_t);
-#endif
+    #property pass opacity
 
     const vec2 pattern_tl_a = frag_pattern_from.xy;
     const vec2 pattern_br_a = frag_pattern_from.zw;
@@ -307,21 +253,13 @@ void main() {
 layout(location = 0) in vec2 frag_pos_a;
 layout(location = 1) in vec2 frag_pos_b;
 
-#if !defined(HAS_UNIFORM_u_color)
-layout(location = 2) in vec4 frag_color;
-#endif
+#property varying color 2
 
-#if !defined(HAS_UNIFORM_u_pattern_from)
-layout(location = 3) flat in vec4 frag_pattern_from;
-#endif
+#property varying pattern_from 3 flat
 
-#if !defined(HAS_UNIFORM_u_pattern_to)
-layout(location = 4) flat in vec4 frag_pattern_to;
-#endif
+#property varying pattern_to 4 flat
 
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 5) in float frag_opacity;
-#endif
+#property varying opacity 5
 
 layout(location = 0) out vec4 out_color;
 
@@ -349,29 +287,13 @@ void main() {
 
     const FillPatternTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
 
-#if defined(HAS_UNIFORM_u_pattern_from)
-    const vec4 pattern_from = tileProps.pattern_from;
-#else
-    const vec4 pattern_from = frag_pattern_from;
-#endif
+    const vec4 pattern_from = $tileProps.pattern_from;
 
-#if defined(HAS_UNIFORM_u_pattern_to)
-    const vec4 pattern_to = tileProps.pattern_to;
-#else
-    const vec4 pattern_to = frag_pattern_to;
-#endif
+    const vec4 pattern_to = $tileProps.pattern_to;
 
-#if defined(HAS_UNIFORM_u_opacity)
-    const float opacity = props.opacity;
-#else
-    const float opacity = frag_opacity;
-#endif
+    const float opacity = $props.opacity;
 
-#if defined(HAS_UNIFORM_u_color)
-    const vec4 color = props.color;
-#else
-    const vec4 color = frag_color;
-#endif
+    const vec4 color = $props.color;
 
     const vec2 pattern_tl_a = pattern_from.xy;
     const vec2 pattern_br_a = pattern_from.zw;
@@ -413,21 +335,13 @@ pub(super) const FILL_OUTLINE_PATTERN_SHADER: Glsl = Glsl {
 
 layout(location = 0) in ivec2 in_position;
 
-#if !defined(HAS_UNIFORM_u_color)
-layout(location = 1) in vec4 in_color;
-#endif
+#property attribute color
 
-#if !defined(HAS_UNIFORM_u_pattern_from)
-layout(location = 2) in uvec4 in_pattern_from;
-#endif
+#property attribute pattern_from
 
-#if !defined(HAS_UNIFORM_u_pattern_to)
-layout(location = 3) in uvec4 in_pattern_to;
-#endif
+#property attribute pattern_to
 
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 4) in vec2 in_opacity;
-#endif
+#property attribute opacity
 
 layout(push_constant) uniform Constants {
     int ubo_index;
@@ -453,29 +367,19 @@ layout(location = 0) out vec2 frag_pos_a;
 layout(location = 1) out vec2 frag_pos_b;
 layout(location = 2) out vec2 frag_pos;
 
-#if !defined(HAS_UNIFORM_u_color)
-layout(location = 3) out vec4 frag_color;
-#endif
+#property varying color 3
 
-#if !defined(HAS_UNIFORM_u_pattern_from)
-layout(location = 4) flat out vec4 frag_pattern_from;
-#endif
+#property varying pattern_from 4 flat
 
-#if !defined(HAS_UNIFORM_u_pattern_to)
-layout(location = 5) flat out vec4 frag_pattern_to;
-#endif
+#property varying pattern_to 5 flat
 
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 6) out float frag_opacity;
-#endif
+#property varying opacity 6
 
 void main() {
     const FillPatternDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
     const FillPatternTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
 
-#if !defined(HAS_UNIFORM_u_color)
-    frag_color = unpack_mix_color(in_color, drawable.color_t);
-#endif
+    #property pass color
 
 #if defined(HAS_UNIFORM_u_pattern_from)
     const vec4 frag_pattern_from = tileProps.pattern_from;
@@ -489,9 +393,7 @@ void main() {
     frag_pattern_to = in_pattern_to;
 #endif
 
-#if !defined(HAS_UNIFORM_u_opacity)
-    frag_opacity = unpack_mix_float(in_opacity, drawable.opacity_t);
-#endif
+    #property pass opacity
 
     const vec2 pattern_tl_a = frag_pattern_from.xy;
     const vec2 pattern_br_a = frag_pattern_from.zw;
@@ -521,21 +423,13 @@ layout(location = 0) in vec2 frag_pos_a;
 layout(location = 1) in vec2 frag_pos_b;
 layout(location = 2) in vec2 frag_pos;
 
-#if !defined(HAS_UNIFORM_u_color)
-layout(location = 3) in vec4 frag_color;
-#endif
+#property varying color 3
 
-#if !defined(HAS_UNIFORM_u_pattern_from)
-layout(location = 4) flat in vec4 frag_pattern_from;
-#endif
+#property varying pattern_from 4 flat
 
-#if !defined(HAS_UNIFORM_u_pattern_to)
-layout(location = 5) flat in vec4 frag_pattern_to;
-#endif
+#property varying pattern_to 5 flat
 
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 6) in float frag_opacity;
-#endif
+#property varying opacity 6
 
 layout(location = 0) out vec4 out_color;
 
@@ -563,29 +457,13 @@ void main() {
 
     const FillPatternTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
 
-#if defined(HAS_UNIFORM_u_pattern_from)
-    const vec4 pattern_from = tileProps.pattern_from;
-#else
-    const vec4 pattern_from = frag_pattern_from;
-#endif
+    const vec4 pattern_from = $tileProps.pattern_from;
 
-#if defined(HAS_UNIFORM_u_pattern_to)
-    const vec4 pattern_to = tileProps.pattern_to;
-#else
-    const vec4 pattern_to = frag_pattern_to;
-#endif
+    const vec4 pattern_to = $tileProps.pattern_to;
 
-#if defined(HAS_UNIFORM_u_opacity)
-    const float opacity = props.opacity;
-#else
-    const float opacity = frag_opacity;
-#endif
+    const float opacity = $props.opacity;
 
-#if defined(HAS_UNIFORM_u_color)
-    const vec4 color = props.color;
-#else
-    const vec4 color = frag_color;
-#endif
+    const vec4 color = $props.color;
 
     const vec2 pattern_tl_a = pattern_from.xy;
     const vec2 pattern_br_a = pattern_from.zw;
@@ -696,9 +574,7 @@ layout(location = 4) in ivec2 in_outline_end;
 layout(location = 1) in vec4 in_color;
 #endif
 
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 2) in vec2 in_opacity;
-#endif
+#property attribute opacity
 
 layout(push_constant) uniform Constants {
     int ubo_index;
@@ -716,9 +592,7 @@ layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer
 layout(location = 0) out vec4 frag_color;
 #endif
 
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 1) out float frag_opacity;
-#endif
+#property varying opacity 1
 
 layout(location = 2) out vec2 frag_position;
 ",
@@ -731,9 +605,7 @@ void main() {
     frag_color = vec4(unpack_mix_color(in_color, drawable.outline_color_t));
 #endif
 
-#if !defined(HAS_UNIFORM_u_opacity)
-    frag_opacity = unpack_mix_float(in_opacity, drawable.opacity_t);
-#endif
+    #property pass opacity
 
     const ProjectionUBO projection = projectionVector.projection_ubo[constant.ubo_index];
     const vec2 start = vec2(in_outline_pos);
@@ -762,21 +634,13 @@ layout(location = 0) in ivec2 in_position;
 layout(location = 5) in ivec2 in_outline_pos;
 layout(location = 6) in ivec2 in_outline_end;
 
-#if !defined(HAS_UNIFORM_u_color)
-layout(location = 1) in vec4 in_color;
-#endif
+#property attribute color
 
-#if !defined(HAS_UNIFORM_u_pattern_from)
-layout(location = 2) in uvec4 in_pattern_from;
-#endif
+#property attribute pattern_from
 
-#if !defined(HAS_UNIFORM_u_pattern_to)
-layout(location = 3) in uvec4 in_pattern_to;
-#endif
+#property attribute pattern_to
 
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 4) in vec2 in_opacity;
-#endif
+#property attribute opacity
 
 layout(push_constant) uniform Constants {
     int ubo_index;
@@ -802,21 +666,13 @@ layout(location = 0) out vec2 frag_pos_a;
 layout(location = 1) out vec2 frag_pos_b;
 layout(location = 2) out vec2 frag_pos;
 
-#if !defined(HAS_UNIFORM_u_color)
-layout(location = 3) out vec4 frag_color;
-#endif
+#property varying color 3
 
-#if !defined(HAS_UNIFORM_u_pattern_from)
-layout(location = 4) flat out vec4 frag_pattern_from;
-#endif
+#property varying pattern_from 4 flat
 
-#if !defined(HAS_UNIFORM_u_pattern_to)
-layout(location = 5) flat out vec4 frag_pattern_to;
-#endif
+#property varying pattern_to 5 flat
 
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 6) out float frag_opacity;
-#endif
+#property varying opacity 6
 ",
         outline_corner!(),
         r"
@@ -824,9 +680,7 @@ void main() {
     const FillPatternDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
     const FillPatternTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
 
-#if !defined(HAS_UNIFORM_u_color)
-    frag_color = unpack_mix_color(in_color, drawable.color_t);
-#endif
+    #property pass color
 
 #if defined(HAS_UNIFORM_u_pattern_from)
     const vec4 frag_pattern_from = tileProps.pattern_from;
@@ -840,9 +694,7 @@ void main() {
     frag_pattern_to = in_pattern_to;
 #endif
 
-#if !defined(HAS_UNIFORM_u_opacity)
-    frag_opacity = unpack_mix_float(in_opacity, drawable.opacity_t);
-#endif
+    #property pass opacity
 
     const vec2 display_size_a = (frag_pattern_from.zw - frag_pattern_from.xy) / view.pixel_ratio;
     const vec2 display_size_b = (frag_pattern_to.zw - frag_pattern_to.xy) / view.pixel_ratio;
@@ -906,9 +758,7 @@ layout(std430, set = DRAWABLE_UBO_SET_INDEX, binding = idFillOutlinePaint) reado
 layout(location = 0) out vec4 frag_color;
 #endif
 
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 1) out float frag_opacity;
-#endif
+#property varying opacity 1
 
 layout(location = 2) out vec2 frag_position;
 

@@ -24,12 +24,8 @@ struct FragmentInput {
     @location(0) lighting: vec4<f32>,
     @location(1) pos_a: vec2<f32>,
     @location(2) pos_b: vec2<f32>,
-#ifndef HAS_UNIFORM_u_pattern_from
-    @location(3) @interpolate(flat) pattern_from: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_pattern_to
-    @location(4) @interpolate(flat) pattern_to: vec4<f32>,
-#endif
+    #property varying pattern_from 3 flat
+    #property varying pattern_to 4 flat
 };
 
 @group(0) @binding(5) var<storage, read> tilePropsVector: array<FillExtrusionTilePropsUBO>;
@@ -45,17 +41,9 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 
     let tileProps = tilePropsVector[globalIndex.value];
 
-#ifdef HAS_UNIFORM_u_pattern_from
-    let pattern_from = tileProps.pattern_from;
-#else
-    let pattern_from = in.pattern_from;
-#endif
+    let pattern_from = $tileProps.pattern_from;
 
-#ifdef HAS_UNIFORM_u_pattern_to
-    let pattern_to = tileProps.pattern_to;
-#else
-    let pattern_to = in.pattern_to;
-#endif
+    let pattern_to = $tileProps.pattern_to;
 
     let pattern_tl_a = pattern_from.xy;
     let pattern_br_a = pattern_from.zw;
@@ -145,12 +133,8 @@ struct VertexOutput {
     @location(0) lighting: vec4<f32>,
     @location(1) pos_a: vec2<f32>,
     @location(2) pos_b: vec2<f32>,
-#ifndef HAS_UNIFORM_u_pattern_from
-    @location(3) @interpolate(flat) pattern_from: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_pattern_to
-    @location(4) @interpolate(flat) pattern_to: vec4<f32>,
-#endif
+    #property varying pattern_from 3 flat
+    #property varying pattern_to 4 flat
 };
 
 @group(0) @binding(2) var<storage, read> drawableVector: array<FillExtrusionDrawableUBO>;
@@ -215,17 +199,9 @@ fn set_pattern(out: ptr<function, VertexOutput>, drawable: FillExtrusionDrawable
 macro_rules! base_and_height {
     () => {
         r"
-#ifndef HAS_UNIFORM_u_base
-    let baseValue = max(unpack_mix_float(in.base, drawable.base_t), 0.0);
-#else
-    let baseValue = max(props.base, 0.0);
-#endif
+    let baseValue = max($props.base, 0.0);
 
-#ifndef HAS_UNIFORM_u_height
-    let heightValue = max(unpack_mix_float(in.height, drawable.height_t), 0.0);
-#else
-    let heightValue = max(props.height, 0.0);
-#endif
+    let heightValue = max($props.height, 0.0);
 "
     };
 }
@@ -298,15 +274,9 @@ pub(super) const FILL_EXTRUSION_SHADER: Wgsl = Wgsl {
 struct VertexInput {
     @location(0) position: vec2<i32>,
     @location(1) decimals_ed: vec2<u32>,
-#ifndef HAS_UNIFORM_u_color
-    @location(2) color: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_base
-    @location(3) base: vec2<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_height
-    @location(4) height: vec2<f32>,
-#endif
+    #property attribute color
+    #property attribute base
+    #property attribute height
 };
 ",
         plain_declarations!(),
@@ -325,11 +295,7 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 #endif
 
-#ifndef HAS_UNIFORM_u_color
-    let color = unpack_mix_color(in.color, drawable.color_t);
-#else
-    let color = props.color;
-#endif
+    let color = $props.color;
     out.color = lit_color(color, vec3<f32>(0.0, 0.0, 1.0), 1.0, baseValue, heightValue);
     return out;
 }
@@ -349,15 +315,9 @@ struct VertexInput {
     @location(2) decimals_ed: vec2<u32>,
     @location(6) next_outline_pos: vec2<i32>,
     @location(7) next_decimals_ed: vec2<u32>,
-#ifndef HAS_UNIFORM_u_color
-    @location(3) color: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_base
-    @location(4) base: vec2<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_height
-    @location(5) height: vec2<f32>,
-#endif
+    #property attribute color
+    #property attribute base
+    #property attribute height
 };
 ",
         plain_declarations!(),
@@ -376,11 +336,7 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 #endif
 
-#ifndef HAS_UNIFORM_u_color
-    let color = unpack_mix_color(in.color, drawable.color_t);
-#else
-    let color = props.color;
-#endif
+    let color = $props.color;
     out.color = lit_color(color, normal, t, baseValue, heightValue);
     return out;
 }
@@ -487,11 +443,7 @@ fn main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     return out;
 #endif
 
-#ifndef HAS_UNIFORM_u_color
-    let color = unpack_mix_color(in.color, drawable.color_t);
-#else
-    let color = props.color;
-#endif
+    let color = $props.color;
     out.color = lit_color(color, normal, t, baseValue, heightValue);
     return out;
 }
@@ -508,18 +460,10 @@ pub(super) const FILL_EXTRUSION_PATTERN_SHADER: Wgsl = Wgsl {
 struct VertexInput {
     @location(0) position: vec2<i32>,
     @location(1) decimals_ed: vec2<u32>,
-#ifndef HAS_UNIFORM_u_base
-    @location(2) base: vec2<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_height
-    @location(3) height: vec2<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_pattern_from
-    @location(4) pattern_from: vec4<u32>,
-#endif
-#ifndef HAS_UNIFORM_u_pattern_to
-    @location(5) pattern_to: vec4<u32>,
-#endif
+    #property attribute base
+    #property attribute height
+    #property attribute pattern_from
+    #property attribute pattern_to
 };
 ",
         pattern_declarations!(),
@@ -554,18 +498,10 @@ struct VertexInput {
     @location(2) decimals_ed: vec2<u32>,
     @location(7) next_outline_pos: vec2<i32>,
     @location(8) next_decimals_ed: vec2<u32>,
-#ifndef HAS_UNIFORM_u_base
-    @location(3) base: vec2<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_height
-    @location(4) height: vec2<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_pattern_from
-    @location(5) pattern_from: vec4<u32>,
-#endif
-#ifndef HAS_UNIFORM_u_pattern_to
-    @location(6) pattern_to: vec4<u32>,
-#endif
+    #property attribute base
+    #property attribute height
+    #property attribute pattern_from
+    #property attribute pattern_to
 };
 ",
         pattern_declarations!(),

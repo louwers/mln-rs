@@ -10,54 +10,26 @@ override DEVICE_PIXEL_RATIO: f32 = 1.0;
 
 struct VertexInput {
     @location(0) position: vec2<i32>,
-#ifndef HAS_UNIFORM_u_color
-    @location(1) color: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_radius
-    @location(2) radius: vec2<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_blur
-    @location(3) blur: vec2<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    @location(4) opacity: vec2<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_stroke_color
-    @location(5) stroke_color: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_stroke_width
-    @location(6) stroke_width: vec2<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_stroke_opacity
-    @location(7) stroke_opacity: vec2<f32>,
-#endif
+    #property attribute color
+    #property attribute radius
+    #property attribute blur
+    #property attribute opacity
+    #property attribute stroke_color
+    #property attribute stroke_width
+    #property attribute stroke_opacity
 };
 
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) extrude: vec2<f32>,
     @location(1) antialiasblur: f32,
-#ifndef HAS_UNIFORM_u_color
-    @location(2) color: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_radius
-    @location(3) radius: f32,
-#endif
-#ifndef HAS_UNIFORM_u_blur
-    @location(4) blur: f32,
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    @location(5) opacity: f32,
-#endif
-#ifndef HAS_UNIFORM_u_stroke_color
-    @location(6) stroke_color: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_stroke_width
-    @location(7) stroke_width: f32,
-#endif
-#ifndef HAS_UNIFORM_u_stroke_opacity
-    @location(8) stroke_opacity: f32,
-#endif
+    #property varying color 2
+    #property varying radius 3
+    #property varying blur 4
+    #property varying opacity 5
+    #property varying stroke_color 6
+    #property varying stroke_width 7
+    #property varying stroke_opacity 8
 };
 
 @vertex
@@ -87,21 +59,11 @@ fn main(in: VertexInput) -> VertexOutput {
     out.stroke_width = stroke_width;
 #endif
 
-#ifndef HAS_UNIFORM_u_color
-    out.color = unpack_mix_color(in.color, drawable.color_t);
-#endif
-#ifndef HAS_UNIFORM_u_blur
-    out.blur = unpack_mix_float(in.blur, drawable.blur_t);
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    out.opacity = unpack_mix_float(in.opacity, drawable.opacity_t);
-#endif
-#ifndef HAS_UNIFORM_u_stroke_color
-    out.stroke_color = unpack_mix_color(in.stroke_color, drawable.stroke_color_t);
-#endif
-#ifndef HAS_UNIFORM_u_stroke_opacity
-    out.stroke_opacity = unpack_mix_float(in.stroke_opacity, drawable.stroke_opacity_t);
-#endif
+    #property pass color
+    #property pass blur
+    #property pass opacity
+    #property pass stroke_color
+    #property pass stroke_opacity
 
     let radius_with_stroke = radius + stroke_width;
 
@@ -167,27 +129,13 @@ fn main(in: VertexInput) -> VertexOutput {
 struct FragmentInput {
     @location(0) extrude: vec2<f32>,
     @location(1) antialiasblur: f32,
-#ifndef HAS_UNIFORM_u_color
-    @location(2) color: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_radius
-    @location(3) radius: f32,
-#endif
-#ifndef HAS_UNIFORM_u_blur
-    @location(4) blur: f32,
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    @location(5) opacity: f32,
-#endif
-#ifndef HAS_UNIFORM_u_stroke_color
-    @location(6) stroke_color: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_stroke_width
-    @location(7) stroke_width: f32,
-#endif
-#ifndef HAS_UNIFORM_u_stroke_opacity
-    @location(8) stroke_opacity: f32,
-#endif
+    #property varying color 2
+    #property varying radius 3
+    #property varying blur 4
+    #property varying opacity 5
+    #property varying stroke_color 6
+    #property varying stroke_width 7
+    #property varying stroke_opacity 8
 };
 
 @fragment
@@ -198,41 +146,13 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 
     let extrude_length = length(in.extrude);
     let antialiasblur = in.antialiasblur;
-#ifdef HAS_UNIFORM_u_color
-    let color = props.color;
-#else
-    let color = in.color;
-#endif
-#ifdef HAS_UNIFORM_u_radius
-    let radius = props.radius;
-#else
-    let radius = in.radius;
-#endif
-#ifdef HAS_UNIFORM_u_blur
-    let blur = props.blur;
-#else
-    let blur = in.blur;
-#endif
-#ifdef HAS_UNIFORM_u_opacity
-    let opacity = props.opacity;
-#else
-    let opacity = in.opacity;
-#endif
-#ifdef HAS_UNIFORM_u_stroke_color
-    let stroke_color = props.stroke_color;
-#else
-    let stroke_color = in.stroke_color;
-#endif
-#ifdef HAS_UNIFORM_u_stroke_width
-    let stroke_width = props.stroke_width;
-#else
-    let stroke_width = in.stroke_width;
-#endif
-#ifdef HAS_UNIFORM_u_stroke_opacity
-    let stroke_opacity = props.stroke_opacity;
-#else
-    let stroke_opacity = in.stroke_opacity;
-#endif
+    let color = $props.color;
+    let radius = $props.radius;
+    let blur = $props.blur;
+    let opacity = $props.opacity;
+    let stroke_color = $props.stroke_color;
+    let stroke_width = $props.stroke_width;
+    let stroke_opacity = $props.stroke_opacity;
     let antialiased_blur = -max(blur, antialiasblur);
 
     let opacity_t = smoothstep(0.0, antialiased_blur, extrude_length - 1.0);

@@ -6,13 +6,9 @@ pub(super) const HEATMAP_SHADER: Glsl = Glsl {
     vertex: r#"layout (location = 0) in vec2 a_pos;
 out vec2 v_extrude;
 
-#ifndef HAS_UNIFORM_u_weight
-layout (location = 1) in highp vec2 a_weight;
-out highp float weight;
-#endif
-#ifndef HAS_UNIFORM_u_radius
-layout (location = 2) in mediump vec2 a_radius;
-#endif
+#property attribute weight
+#property varying weight
+#property attribute radius mediump
 
 // Effective "0" in the kernel density texture to adjust the kernel size to;
 // this empirically chosen number minimizes artifacts on overlapping kernels
@@ -23,16 +19,8 @@ const highp float ZERO = 1.0 / 255.0 / 16.0;
 #define GAUSS_COEF 0.3989422804014327
 
 void main(void) {
-    #ifndef HAS_UNIFORM_u_weight
-weight = unpack_mix_vec2(a_weight, u_weight_t);
-#else
-highp float weight = u_weight;
-#endif
-    #ifndef HAS_UNIFORM_u_radius
-mediump float radius = unpack_mix_vec2(a_radius, u_radius_t);
-#else
-mediump float radius = u_radius;
-#endif
+#property pass weight
+mediump float radius = $u_radius;
 
     // unencode the extrusion vector that we snuck into the a_pos vector
     vec2 unscaled_extrude = vec2(mod(a_pos, 2.0) * 2.0 - 1.0);
@@ -73,17 +61,13 @@ mediump float radius = u_radius;
 "#,
     fragment: r"in vec2 v_extrude;
 
-#ifndef HAS_UNIFORM_u_weight
-in highp float weight;
-#endif
+#property varying weight
 
 // Gaussian kernel coefficient: 1 / sqrt(2 * PI)
 #define GAUSS_COEF 0.3989422804014327
 
 void main() {
-    #ifdef HAS_UNIFORM_u_weight
-highp float weight = u_weight;
-#endif
+#property uniform weight
 
     // Kernel density estimation with a Gaussian kernel of size 5x5
     float d = -0.5 * 3.0 * 3.0 * dot(v_extrude, v_extrude);

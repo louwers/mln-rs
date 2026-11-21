@@ -77,28 +77,16 @@ out highp vec2 v_tex_b;
 out float v_gamma_scale;
 out highp float v_lineprogress;
 
-#ifndef HAS_UNIFORM_u_blur
-layout (location = 2) in lowp vec2 a_blur;
-out lowp float blur;
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-layout (location = 3) in lowp vec2 a_opacity;
-out lowp float opacity;
-#endif
-#ifndef HAS_UNIFORM_u_gapwidth
-layout (location = 4) in mediump vec2 a_gapwidth;
-#endif
-#ifndef HAS_UNIFORM_u_offset
-layout (location = 5) in mediump vec2 a_offset;
-#endif
-#ifndef HAS_UNIFORM_u_width
-layout (location = 6) in mediump vec2 a_width;
-out mediump float width;
-#endif
-#ifndef HAS_UNIFORM_u_floorwidth
-layout (location = 7) in lowp vec2 a_floorwidth;
-out lowp float floorwidth;
-#endif
+#property attribute blur
+#property varying blur
+#property attribute opacity
+#property varying opacity
+#property attribute gapwidth
+#property attribute offset mediump
+#property attribute width
+#property varying width
+#property attribute floorwidth
+#property varying floorwidth
 #ifndef HAS_UNIFORM_u_dasharray
 layout (location = 8) in highp vec4 a_dasharray;
 flat out highp float v_dash_width;
@@ -109,36 +97,16 @@ out float v_tile_x;
 #endif
 
 void main() {
-    #ifndef HAS_UNIFORM_u_blur
-blur = unpack_mix_vec2(a_blur, u_blur_t);
-#else
-lowp float blur = u_blur;
-#endif
-    #ifndef HAS_UNIFORM_u_opacity
-opacity = unpack_mix_vec2(a_opacity, u_opacity_t);
-#else
-lowp float opacity = u_opacity;
-#endif
-    #ifndef HAS_UNIFORM_u_gapwidth
-mediump float gapwidth = unpack_mix_vec2(a_gapwidth, u_gapwidth_t);
-#else
-mediump float gapwidth = u_gapwidth;
-#endif
+#property pass blur
+#property pass opacity
+mediump float gapwidth = $u_gapwidth;
     #ifndef HAS_UNIFORM_u_offset
 mediump float offset = unpack_mix_vec2(a_offset, u_offset_t);
 #else
 lowp float offset = u_offset;
 #endif
-    #ifndef HAS_UNIFORM_u_width
-width = unpack_mix_vec2(a_width, u_width_t);
-#else
-mediump float width = u_width;
-#endif
-    #ifndef HAS_UNIFORM_u_floorwidth
-floorwidth = unpack_mix_vec2(a_floorwidth, u_floorwidth_t);
-#else
-lowp float floorwidth = u_floorwidth;
-#endif
+#property pass width
+#property pass floorwidth
 
     // the distance over which the line edge fades out.
     // Retina devices need a smaller distance to avoid aliasing.
@@ -226,18 +194,10 @@ in highp vec2 v_tex_b;
 in float v_gamma_scale;
 in highp float v_lineprogress;
 
-#ifndef HAS_UNIFORM_u_blur
-in lowp float blur;
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-in lowp float opacity;
-#endif
-#ifndef HAS_UNIFORM_u_width
-in mediump float width;
-#endif
-#ifndef HAS_UNIFORM_u_floorwidth
-in lowp float floorwidth;
-#endif
+#property varying blur
+#property varying opacity
+#property varying width
+#property varying floorwidth
 #ifndef HAS_UNIFORM_u_dasharray
 flat in highp float v_dash_width;
 #endif
@@ -252,18 +212,10 @@ void main() {
         discard;
     }
 #endif
-    #ifdef HAS_UNIFORM_u_blur
-lowp float blur = u_blur;
-#endif
-    #ifdef HAS_UNIFORM_u_opacity
-lowp float opacity = u_opacity;
-#endif
-    #ifdef HAS_UNIFORM_u_width
-mediump float width = u_width;
-#endif
-    #ifdef HAS_UNIFORM_u_floorwidth
-lowp float floorwidth = u_floorwidth;
-#endif
+#property uniform blur
+#property uniform opacity
+#property uniform width
+#property uniform floorwidth
 
     // Calculate the distance of the pixel from the line in pixels.
     float dist = length(v_normal) * v_width2.s;
@@ -321,54 +273,24 @@ out vec2 v_width2;
 out float v_gamma_scale;
 out highp float v_lineprogress;
 
-#ifndef HAS_UNIFORM_u_blur
-layout (location = 2) in lowp vec2 a_blur;
-out lowp float blur;
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-layout (location = 3) in lowp vec2 a_opacity;
-out lowp float opacity;
-#endif
-#ifndef HAS_UNIFORM_u_gapwidth
-layout (location = 4) in mediump vec2 a_gapwidth;
-#endif
-#ifndef HAS_UNIFORM_u_offset
-layout (location = 5) in lowp vec2 a_offset;
-#endif
-#ifndef HAS_UNIFORM_u_width
-layout (location = 6) in mediump vec2 a_width;
-#endif
+#property attribute blur
+#property varying blur
+#property attribute opacity
+#property varying opacity
+#property attribute gapwidth
+#property attribute offset
+#property attribute width
 
 #ifdef PROJECTION_GLOBE
 out float v_tile_x;
 #endif
 
 void main() {
-    #ifndef HAS_UNIFORM_u_blur
-blur = unpack_mix_vec2(a_blur, u_blur_t);
-#else
-lowp float blur = u_blur;
-#endif
-    #ifndef HAS_UNIFORM_u_opacity
-opacity = unpack_mix_vec2(a_opacity, u_opacity_t);
-#else
-lowp float opacity = u_opacity;
-#endif
-    #ifndef HAS_UNIFORM_u_gapwidth
-mediump float gapwidth = unpack_mix_vec2(a_gapwidth, u_gapwidth_t);
-#else
-mediump float gapwidth = u_gapwidth;
-#endif
-    #ifndef HAS_UNIFORM_u_offset
-lowp float offset = unpack_mix_vec2(a_offset, u_offset_t);
-#else
-lowp float offset = u_offset;
-#endif
-    #ifndef HAS_UNIFORM_u_width
-mediump float width = unpack_mix_vec2(a_width, u_width_t);
-#else
-mediump float width = u_width;
-#endif
+#property pass blur
+#property pass opacity
+mediump float gapwidth = $u_gapwidth;
+lowp float offset = $u_offset;
+mediump float width = $u_width;
 
     // the distance over which the line edge fades out.
     // Retina devices need a smaller distance to avoid aliasing.
@@ -437,12 +359,8 @@ in vec2 v_normal;
 in float v_gamma_scale;
 in highp float v_lineprogress;
 
-#ifndef HAS_UNIFORM_u_blur
-in lowp float blur;
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-in lowp float opacity;
-#endif
+#property varying blur
+#property varying opacity
 
 #ifdef PROJECTION_GLOBE
 in highp float v_tile_x;
@@ -454,12 +372,8 @@ void main() {
         discard;
     }
 #endif
-    #ifdef HAS_UNIFORM_u_blur
-lowp float blur = u_blur;
-#endif
-    #ifdef HAS_UNIFORM_u_opacity
-lowp float opacity = u_opacity;
-#endif
+#property uniform blur
+#property uniform opacity
 
     // Calculate the distance of the pixel from the line in pixels.
     float dist = length(v_normal) * v_width2.s;
@@ -508,72 +422,30 @@ out float v_linesofar;
 out float v_gamma_scale;
 out float v_floorwidth;
 
-#ifndef HAS_UNIFORM_u_blur
-layout (location = 2) in lowp vec2 a_blur;
-out lowp float blur;
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-layout (location = 3) in lowp vec2 a_opacity;
-out lowp float opacity;
-#endif
-#ifndef HAS_UNIFORM_u_offset
-layout (location = 5) in lowp vec2 a_offset;
-#endif
-#ifndef HAS_UNIFORM_u_gapwidth
-layout (location = 4) in mediump vec2 a_gapwidth;
-#endif
-#ifndef HAS_UNIFORM_u_width
-layout (location = 6) in mediump vec2 a_width;
-#endif
-#ifndef HAS_UNIFORM_u_pattern_from
-layout (location = 7) in highp vec4 a_pattern_from;
-flat out highp vec4 pattern_from;
-#endif
-#ifndef HAS_UNIFORM_u_pattern_to
-layout (location = 8) in highp vec4 a_pattern_to;
-flat out highp vec4 pattern_to;
-#endif
+#property attribute blur
+#property varying blur
+#property attribute opacity
+#property varying opacity
+#property attribute offset
+#property attribute gapwidth
+#property attribute width
+#property attribute pattern_from
+#property varying pattern_from flat
+#property attribute pattern_to
+#property varying pattern_to flat
 
 #ifdef PROJECTION_GLOBE
 out float v_tile_x;
 #endif
 
 void main() {
-    #ifndef HAS_UNIFORM_u_blur
-blur = unpack_mix_vec2(a_blur, u_blur_t);
-#else
-lowp float blur = u_blur;
-#endif
-    #ifndef HAS_UNIFORM_u_opacity
-opacity = unpack_mix_vec2(a_opacity, u_opacity_t);
-#else
-lowp float opacity = u_opacity;
-#endif
-    #ifndef HAS_UNIFORM_u_offset
-lowp float offset = unpack_mix_vec2(a_offset, u_offset_t);
-#else
-lowp float offset = u_offset;
-#endif
-    #ifndef HAS_UNIFORM_u_gapwidth
-mediump float gapwidth = unpack_mix_vec2(a_gapwidth, u_gapwidth_t);
-#else
-mediump float gapwidth = u_gapwidth;
-#endif
-    #ifndef HAS_UNIFORM_u_width
-mediump float width = unpack_mix_vec2(a_width, u_width_t);
-#else
-mediump float width = u_width;
-#endif
-    #ifndef HAS_UNIFORM_u_pattern_from
-pattern_from = a_pattern_from;
-#else
-highp vec4 pattern_from = u_pattern_from;
-#endif
-    #ifndef HAS_UNIFORM_u_pattern_to
-pattern_to = a_pattern_to;
-#else
-highp vec4 pattern_to = u_pattern_to;
-#endif
+#property pass blur
+#property pass opacity
+lowp float offset = $u_offset;
+mediump float gapwidth = $u_gapwidth;
+mediump float width = $u_width;
+#property pass pattern_from
+#property pass pattern_to
 
 #ifndef HAS_UNIFORM_u_width
     v_floorwidth = unpack_mix_vec2(a_width, u_floorwidth_t);
@@ -653,18 +525,10 @@ in float v_linesofar;
 in float v_gamma_scale;
 in float v_floorwidth;
 
-#ifndef HAS_UNIFORM_u_pattern_from
-flat in highp vec4 pattern_from;
-#endif
-#ifndef HAS_UNIFORM_u_pattern_to
-flat in highp vec4 pattern_to;
-#endif
-#ifndef HAS_UNIFORM_u_blur
-in lowp float blur;
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-in lowp float opacity;
-#endif
+#property varying pattern_from flat
+#property varying pattern_to flat
+#property varying blur
+#property varying opacity
 
 #ifdef PROJECTION_GLOBE
 in highp float v_tile_x;
@@ -676,19 +540,11 @@ void main() {
         discard;
     }
 #endif
-    #ifdef HAS_UNIFORM_u_pattern_from
-highp vec4 pattern_from = u_pattern_from;
-#endif
-    #ifdef HAS_UNIFORM_u_pattern_to
-highp vec4 pattern_to = u_pattern_to;
-#endif
+#property uniform pattern_from
+#property uniform pattern_to
 
-    #ifdef HAS_UNIFORM_u_blur
-lowp float blur = u_blur;
-#endif
-    #ifdef HAS_UNIFORM_u_opacity
-lowp float opacity = u_opacity;
-#endif
+#property uniform blur
+#property uniform opacity
 
     vec2 pattern_tl_a = pattern_from.xy;
     vec2 pattern_br_a = pattern_from.zw;
@@ -774,32 +630,18 @@ out vec2 v_tex_a;
 out vec2 v_tex_b;
 out float v_gamma_scale;
 
-#ifndef HAS_UNIFORM_u_color
-layout (location = 2) in highp vec4 a_color;
-out highp vec4 color;
-#endif
-#ifndef HAS_UNIFORM_u_blur
-layout (location = 3) in lowp vec2 a_blur;
-out lowp float blur;
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-layout (location = 4) in lowp vec2 a_opacity;
-out lowp float opacity;
-#endif
-#ifndef HAS_UNIFORM_u_gapwidth
-layout (location = 5) in mediump vec2 a_gapwidth;
-#endif
-#ifndef HAS_UNIFORM_u_offset
-layout (location = 6) in lowp vec2 a_offset;
-#endif
-#ifndef HAS_UNIFORM_u_width
-layout (location = 7) in mediump vec2 a_width;
-out mediump float width;
-#endif
-#ifndef HAS_UNIFORM_u_floorwidth
-layout (location = 8) in lowp vec2 a_floorwidth;
-out lowp float floorwidth;
-#endif
+#property attribute color
+#property varying color
+#property attribute blur
+#property varying blur
+#property attribute opacity
+#property varying opacity
+#property attribute gapwidth
+#property attribute offset
+#property attribute width
+#property varying width
+#property attribute floorwidth
+#property varying floorwidth
 #ifndef HAS_UNIFORM_u_dasharray
 layout (location = 9) in highp vec4 a_dasharray;
 flat out highp float v_dash_width;
@@ -810,41 +652,13 @@ out float v_tile_x;
 #endif
 
 void main() {
-    #ifndef HAS_UNIFORM_u_color
-color = unpack_mix_color(a_color, u_color_t);
-#else
-highp vec4 color = u_color;
-#endif
-    #ifndef HAS_UNIFORM_u_blur
-blur = unpack_mix_vec2(a_blur, u_blur_t);
-#else
-lowp float blur = u_blur;
-#endif
-    #ifndef HAS_UNIFORM_u_opacity
-opacity = unpack_mix_vec2(a_opacity, u_opacity_t);
-#else
-lowp float opacity = u_opacity;
-#endif
-    #ifndef HAS_UNIFORM_u_gapwidth
-mediump float gapwidth = unpack_mix_vec2(a_gapwidth, u_gapwidth_t);
-#else
-mediump float gapwidth = u_gapwidth;
-#endif
-    #ifndef HAS_UNIFORM_u_offset
-lowp float offset = unpack_mix_vec2(a_offset, u_offset_t);
-#else
-lowp float offset = u_offset;
-#endif
-    #ifndef HAS_UNIFORM_u_width
-width = unpack_mix_vec2(a_width, u_width_t);
-#else
-mediump float width = u_width;
-#endif
-    #ifndef HAS_UNIFORM_u_floorwidth
-floorwidth = unpack_mix_vec2(a_floorwidth, u_floorwidth_t);
-#else
-lowp float floorwidth = u_floorwidth;
-#endif
+#property pass color
+#property pass blur
+#property pass opacity
+mediump float gapwidth = $u_gapwidth;
+lowp float offset = $u_offset;
+#property pass width
+#property pass floorwidth
 
     // the distance over which the line edge fades out.
     // Retina devices need a smaller distance to avoid aliasing.
@@ -929,21 +743,11 @@ in highp vec2 v_tex_a;
 in highp vec2 v_tex_b;
 in float v_gamma_scale;
 
-#ifndef HAS_UNIFORM_u_color
-in highp vec4 color;
-#endif
-#ifndef HAS_UNIFORM_u_blur
-in lowp float blur;
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-in lowp float opacity;
-#endif
-#ifndef HAS_UNIFORM_u_width
-in mediump float width;
-#endif
-#ifndef HAS_UNIFORM_u_floorwidth
-in lowp float floorwidth;
-#endif
+#property varying color
+#property varying blur
+#property varying opacity
+#property varying width
+#property varying floorwidth
 #ifndef HAS_UNIFORM_u_dasharray
 flat in highp float v_dash_width;
 #endif
@@ -958,21 +762,11 @@ void main() {
         discard;
     }
 #endif
-    #ifdef HAS_UNIFORM_u_color
-highp vec4 color = u_color;
-#endif
-    #ifdef HAS_UNIFORM_u_blur
-lowp float blur = u_blur;
-#endif
-    #ifdef HAS_UNIFORM_u_opacity
-lowp float opacity = u_opacity;
-#endif
-    #ifdef HAS_UNIFORM_u_width
-mediump float width = u_width;
-#endif
-    #ifdef HAS_UNIFORM_u_floorwidth
-lowp float floorwidth = u_floorwidth;
-#endif
+#property uniform color
+#property uniform blur
+#property uniform opacity
+#property uniform width
+#property uniform floorwidth
 
     // Calculate the distance of the pixel from the line in pixels.
     float dist = length(v_normal) * v_width2.s;
@@ -1022,63 +816,27 @@ out vec2 v_width2;
 out float v_gamma_scale;
 out highp float v_linesofar;
 
-#ifndef HAS_UNIFORM_u_color
-layout (location = 2) in highp vec4 a_color;
-out highp vec4 color;
-#endif
-#ifndef HAS_UNIFORM_u_blur
-layout (location = 3) in lowp vec2 a_blur;
-out lowp float blur;
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-layout (location = 4) in lowp vec2 a_opacity;
-out lowp float opacity;
-#endif
-#ifndef HAS_UNIFORM_u_gapwidth
-layout (location = 5) in mediump vec2 a_gapwidth;
-#endif
-#ifndef HAS_UNIFORM_u_offset
-layout (location = 6) in lowp vec2 a_offset;
-#endif
-#ifndef HAS_UNIFORM_u_width
-layout (location = 7) in mediump vec2 a_width;
-#endif
+#property attribute color
+#property varying color
+#property attribute blur
+#property varying blur
+#property attribute opacity
+#property varying opacity
+#property attribute gapwidth
+#property attribute offset
+#property attribute width
 
 #ifdef PROJECTION_GLOBE
 out float v_tile_x;
 #endif
 
 void main() {
-    #ifndef HAS_UNIFORM_u_color
-color = unpack_mix_color(a_color, u_color_t);
-#else
-highp vec4 color = u_color;
-#endif
-    #ifndef HAS_UNIFORM_u_blur
-blur = unpack_mix_vec2(a_blur, u_blur_t);
-#else
-lowp float blur = u_blur;
-#endif
-    #ifndef HAS_UNIFORM_u_opacity
-opacity = unpack_mix_vec2(a_opacity, u_opacity_t);
-#else
-lowp float opacity = u_opacity;
-#endif
-    #ifndef HAS_UNIFORM_u_gapwidth
-mediump float gapwidth = unpack_mix_vec2(a_gapwidth, u_gapwidth_t);
-#else
-mediump float gapwidth = u_gapwidth;
-#endif
-    #ifndef HAS_UNIFORM_u_offset
-lowp float offset = unpack_mix_vec2(a_offset, u_offset_t);
-#else
-lowp float offset = u_offset;
-#endif
-    #ifndef HAS_UNIFORM_u_width
-mediump float width = unpack_mix_vec2(a_width, u_width_t);
-#else
-mediump float width = u_width;
-#endif
+#property pass color
+#property pass blur
+#property pass opacity
+mediump float gapwidth = $u_gapwidth;
+lowp float offset = $u_offset;
+mediump float width = $u_width;
 
     // the distance over which the line edge fades out.
     // Retina devices need a smaller distance to avoid aliasing.
@@ -1144,15 +902,9 @@ mediump float width = u_width;
 in vec2 v_normal;
 in float v_gamma_scale;
 
-#ifndef HAS_UNIFORM_u_color
-in highp vec4 color;
-#endif
-#ifndef HAS_UNIFORM_u_blur
-in lowp float blur;
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-in lowp float opacity;
-#endif
+#property varying color
+#property varying blur
+#property varying opacity
 
 #ifdef PROJECTION_GLOBE
 in highp float v_tile_x;
@@ -1164,15 +916,9 @@ void main() {
         discard;
     }
 #endif
-    #ifdef HAS_UNIFORM_u_color
-highp vec4 color = u_color;
-#endif
-    #ifdef HAS_UNIFORM_u_blur
-lowp float blur = u_blur;
-#endif
-    #ifdef HAS_UNIFORM_u_opacity
-lowp float opacity = u_opacity;
-#endif
+#property uniform color
+#property uniform blur
+#property uniform opacity
 
     // Calculate the distance of the pixel from the line in pixels.
     float dist = length(v_normal) * v_width2.s;

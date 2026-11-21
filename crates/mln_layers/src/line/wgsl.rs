@@ -46,27 +46,13 @@ override DEVICE_PIXEL_RATIO: f32 = 1.0;
 struct VertexInput {
     @location(0) pos_normal: vec2<i32>,
     @location(1) data: vec4<u32>,
-#ifndef HAS_UNIFORM_u_blur
-    @location(2) blur: vec2<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    @location(3) opacity: vec2<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_gapwidth
-    @location(4) gapwidth: vec2<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_offset
-    @location(5) offset: vec2<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_width
-    @location(6) width: vec2<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_floorwidth
-    @location(7) floorwidth: vec2<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_dasharray
-    @location(8) dasharray: vec4<f32>,
-#endif
+    #property attribute blur
+    #property attribute opacity
+    #property attribute gapwidth
+    #property attribute offset
+    #property attribute width
+    #property attribute floorwidth
+    #property attribute dasharray
 };
 
 struct VertexOutput {
@@ -76,12 +62,8 @@ struct VertexOutput {
     @location(2) v_gamma_scale: f32,
     @location(3) v_tex_a: vec2<f32>,
     @location(4) v_tex_b: vec2<f32>,
-#ifndef HAS_UNIFORM_u_blur
-    @location(5) blur: f32,
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    @location(6) opacity: f32,
-#endif
+    #property varying blur 5
+    #property varying opacity 6
 #ifndef HAS_UNIFORM_u_floorwidth
     @location(7) v_floorwidth: f32,
 #endif
@@ -119,27 +101,11 @@ fn main(in: VertexInput) -> VertexOutput {
     let v_normal = vec2<f32>(normal.x, normal.y * 2.0 - 1.0);
 
     // Unpack attributes using helper functions
-#ifndef HAS_UNIFORM_u_blur
-    out.blur = unpack_mix_float(in.blur, drawable.blur_t);
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    out.opacity = unpack_mix_float(in.opacity, drawable.opacity_t);
-#endif
-#ifdef HAS_UNIFORM_u_gapwidth
-    let gapwidth = props.gapwidth / 2.0;
-#else
-    let gapwidth = unpack_mix_float(in.gapwidth, drawable.gapwidth_t) / 2.0;
-#endif
-#ifdef HAS_UNIFORM_u_offset
-    let offset = -props.offset;
-#else
-    let offset = -unpack_mix_float(in.offset, drawable.offset_t);
-#endif
-#ifdef HAS_UNIFORM_u_width
-    let width = props.width;
-#else
-    let width = unpack_mix_float(in.width, drawable.width_t);
-#endif
+    #property pass blur
+    #property pass opacity
+    let gapwidth = $props.gapwidth / 2.0;
+    let offset = -$props.offset;
+    let width = $props.width;
 #ifdef HAS_UNIFORM_u_floorwidth
     let floorwidth = props.floorwidth;
 #else
@@ -225,12 +191,8 @@ struct FragmentInput {
     @location(2) v_gamma_scale: f32,
     @location(3) v_tex_a: vec2<f32>,
     @location(4) v_tex_b: vec2<f32>,
-#ifndef HAS_UNIFORM_u_blur
-    @location(5) blur: f32,
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    @location(6) opacity: f32,
-#endif
+    #property varying blur 5
+    #property varying opacity 6
 #ifndef HAS_UNIFORM_u_floorwidth
     @location(7) v_floorwidth: f32,
 #endif
@@ -261,16 +223,8 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     return vec4<f32>(1.0, 1.0, 1.0, 1.0);
 #endif
     let tileProps = tilePropsVector[globalIndex.value];
-#ifdef HAS_UNIFORM_u_blur
-    let blur = props.blur;
-#else
-    let blur = in.blur;
-#endif
-#ifdef HAS_UNIFORM_u_opacity
-    let opacity = props.opacity;
-#else
-    let opacity = in.opacity;
-#endif
+    let blur = $props.blur;
+    let opacity = $props.opacity;
 #ifdef HAS_UNIFORM_u_floorwidth
     let floorwidth = props.floorwidth;
 #else
@@ -316,21 +270,11 @@ override DEVICE_PIXEL_RATIO: f32 = 1.0;
 struct VertexInput {
     @location(0) pos_normal: vec2<i32>,
     @location(1) data: vec4<u32>,
-#ifndef HAS_UNIFORM_u_blur
-    @location(2) blur: vec2<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    @location(3) opacity: vec2<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_gapwidth
-    @location(4) gapwidth: vec2<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_offset
-    @location(5) offset: vec2<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_width
-    @location(6) width: vec2<f32>,
-#endif
+    #property attribute blur
+    #property attribute opacity
+    #property attribute gapwidth
+    #property attribute offset
+    #property attribute width
 };
 
 struct VertexOutput {
@@ -339,12 +283,8 @@ struct VertexOutput {
     @location(1) v_normal: vec2<f32>,
     @location(2) v_gamma_scale: f32,
     @location(3) v_lineprogress: f32,
-#ifndef HAS_UNIFORM_u_blur
-    @location(4) blur: f32,
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    @location(5) opacity: f32,
-#endif
+    #property varying blur 4
+    #property varying opacity 5
 #ifdef PROJECTION_GLOBE
     @location(6) v_tile_x: f32,
 #endif
@@ -374,27 +314,11 @@ fn main(in: VertexInput) -> VertexOutput {
     let v_normal = vec2<f32>(normal.x, normal.y * 2.0 - 1.0);
 
     // Unpack attributes using helper functions
-#ifndef HAS_UNIFORM_u_blur
-    out.blur = unpack_mix_float(in.blur, drawable.blur_t);
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    out.opacity = unpack_mix_float(in.opacity, drawable.opacity_t);
-#endif
-#ifdef HAS_UNIFORM_u_gapwidth
-    let gapwidth = props.gapwidth / 2.0;
-#else
-    let gapwidth = unpack_mix_float(in.gapwidth, drawable.gapwidth_t) / 2.0;
-#endif
-#ifdef HAS_UNIFORM_u_offset
-    let offset = -props.offset;
-#else
-    let offset = -unpack_mix_float(in.offset, drawable.offset_t);
-#endif
-#ifdef HAS_UNIFORM_u_width
-    let width = props.width;
-#else
-    let width = unpack_mix_float(in.width, drawable.width_t);
-#endif
+    #property pass blur
+    #property pass opacity
+    let gapwidth = $props.gapwidth / 2.0;
+    let offset = -$props.offset;
+    let width = $props.width;
 
     let halfwidth = width / 2.0;
     let inset = gapwidth + select(0.0, antialiasing, gapwidth > 0.0);
@@ -446,12 +370,8 @@ struct FragmentInput {
     @location(1) v_normal: vec2<f32>,
     @location(2) v_gamma_scale: f32,
     @location(3) v_lineprogress: f32,
-#ifndef HAS_UNIFORM_u_blur
-    @location(4) blur: f32,
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    @location(5) opacity: f32,
-#endif
+    #property varying blur 4
+    #property varying opacity 5
 #ifdef PROJECTION_GLOBE
     @location(6) v_tile_x: f32,
 #endif
@@ -471,16 +391,8 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 #ifdef OVERDRAW_INSPECTOR
     return vec4<f32>(1.0, 1.0, 1.0, 1.0);
 #endif
-#ifdef HAS_UNIFORM_u_blur
-    let blur = props.blur;
-#else
-    let blur = in.blur;
-#endif
-#ifdef HAS_UNIFORM_u_opacity
-    let opacity = props.opacity;
-#else
-    let opacity = in.opacity;
-#endif
+    let blur = $props.blur;
+    let opacity = $props.opacity;
 
     // Calculate the distance of the pixel from the line
     let dist = length(in.v_normal) * in.v_width2.x;
@@ -509,27 +421,13 @@ override DEVICE_PIXEL_RATIO: f32 = 1.0;
 struct VertexInput {
     @location(0) pos_normal: vec2<i32>,
     @location(1) data: vec4<u32>,
-#ifndef HAS_UNIFORM_u_blur
-    @location(2) blur: vec2<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    @location(3) opacity: vec2<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_gapwidth
-    @location(4) gapwidth: vec2<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_offset
-    @location(5) offset: vec2<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_width
-    @location(6) width: vec2<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_pattern_from
-    @location(7) pattern_from: vec4<u32>,
-#endif
-#ifndef HAS_UNIFORM_u_pattern_to
-    @location(8) pattern_to: vec4<u32>,
-#endif
+    #property attribute blur
+    #property attribute opacity
+    #property attribute gapwidth
+    #property attribute offset
+    #property attribute width
+    #property attribute pattern_from
+    #property attribute pattern_to
 };
 
 struct VertexOutput {
@@ -538,18 +436,10 @@ struct VertexOutput {
     @location(1) v_normal: vec2<f32>,
     @location(2) v_gamma_scale: f32,
     @location(3) v_linesofar: f32,
-#ifndef HAS_UNIFORM_u_blur
-    @location(4) blur: f32,
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    @location(5) opacity: f32,
-#endif
-#ifndef HAS_UNIFORM_u_pattern_from
-    @location(6) @interpolate(flat) pattern_from: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_pattern_to
-    @location(7) @interpolate(flat) pattern_to: vec4<f32>,
-#endif
+    #property varying blur 4
+    #property varying opacity 5
+    #property varying pattern_from 6 flat
+    #property varying pattern_to 7 flat
 #ifndef HAS_UNIFORM_u_width
     @location(8) v_floorwidth: f32,
 #endif
@@ -582,22 +472,10 @@ fn main(in: VertexInput) -> VertexOutput {
     let normal = raw_pos - 2.0 * pos;
     let v_normal = vec2<f32>(normal.x, normal.y * 2.0 - 1.0);
 
-#ifndef HAS_UNIFORM_u_blur
-    out.blur = unpack_mix_float(in.blur, drawable.blur_t);
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    out.opacity = unpack_mix_float(in.opacity, drawable.opacity_t);
-#endif
-#ifdef HAS_UNIFORM_u_gapwidth
-    let gapwidth = props.gapwidth * 0.5;
-#else
-    let gapwidth = unpack_mix_float(in.gapwidth, drawable.gapwidth_t) * 0.5;
-#endif
-#ifdef HAS_UNIFORM_u_offset
-    let offset = -props.offset;
-#else
-    let offset = -unpack_mix_float(in.offset, drawable.offset_t);
-#endif
+    #property pass blur
+    #property pass opacity
+    let gapwidth = $props.gapwidth * 0.5;
+    let offset = -$props.offset;
     // The floor width comes from the width's attribute.
 #ifdef HAS_UNIFORM_u_width
     let width = props.width;
@@ -605,12 +483,8 @@ fn main(in: VertexInput) -> VertexOutput {
     let width = unpack_mix_float(in.width, drawable.width_t);
     out.v_floorwidth = unpack_mix_float(in.width, drawable.floorwidth_t);
 #endif
-#ifndef HAS_UNIFORM_u_pattern_from
-    out.pattern_from = vec4<f32>(in.pattern_from);
-#endif
-#ifndef HAS_UNIFORM_u_pattern_to
-    out.pattern_to = vec4<f32>(in.pattern_to);
-#endif
+    #property pass pattern_from
+    #property pass pattern_to
 
     let halfwidth = width * 0.5;
     let inset = gapwidth + select(0.0, antialiasing, gapwidth > 0.0);
@@ -659,18 +533,10 @@ struct FragmentInput {
     @location(1) v_normal: vec2<f32>,
     @location(2) v_gamma_scale: f32,
     @location(3) v_linesofar: f32,
-#ifndef HAS_UNIFORM_u_blur
-    @location(4) blur: f32,
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    @location(5) opacity: f32,
-#endif
-#ifndef HAS_UNIFORM_u_pattern_from
-    @location(6) @interpolate(flat) pattern_from: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_pattern_to
-    @location(7) @interpolate(flat) pattern_to: vec4<f32>,
-#endif
+    #property varying blur 4
+    #property varying opacity 5
+    #property varying pattern_from 6 flat
+    #property varying pattern_to 7 flat
 #ifndef HAS_UNIFORM_u_width
     @location(8) v_floorwidth: f32,
 #endif
@@ -696,26 +562,10 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 #endif
     let tileProps = tilePropsVector[globalIndex.value];
 
-#ifdef HAS_UNIFORM_u_pattern_from
-    let pattern_from = tileProps.pattern_from;
-#else
-    let pattern_from = in.pattern_from;
-#endif
-#ifdef HAS_UNIFORM_u_pattern_to
-    let pattern_to = tileProps.pattern_to;
-#else
-    let pattern_to = in.pattern_to;
-#endif
-#ifdef HAS_UNIFORM_u_blur
-    let blur = props.blur;
-#else
-    let blur = in.blur;
-#endif
-#ifdef HAS_UNIFORM_u_opacity
-    let opacity = props.opacity;
-#else
-    let opacity = in.opacity;
-#endif
+    let pattern_from = $tileProps.pattern_from;
+    let pattern_to = $tileProps.pattern_to;
+    let blur = $props.blur;
+    let opacity = $props.opacity;
 #ifdef HAS_UNIFORM_u_width
     let floorwidth = max(props.floorwidth, 1e-6);
 #else
@@ -789,30 +639,14 @@ override DEVICE_PIXEL_RATIO: f32 = 1.0;
 struct VertexInput {
     @location(0) pos_normal: vec2<i32>,
     @location(1) data: vec4<u32>,
-#ifndef HAS_UNIFORM_u_color
-    @location(2) color: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_blur
-    @location(3) blur: vec2<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    @location(4) opacity: vec2<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_gapwidth
-    @location(5) gapwidth: vec2<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_offset
-    @location(6) offset: vec2<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_width
-    @location(7) width: vec2<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_floorwidth
-    @location(8) floorwidth: vec2<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_dasharray
-    @location(9) dasharray: vec4<f32>,
-#endif
+    #property attribute color
+    #property attribute blur
+    #property attribute opacity
+    #property attribute gapwidth
+    #property attribute offset
+    #property attribute width
+    #property attribute floorwidth
+    #property attribute dasharray
 };
 
 struct VertexOutput {
@@ -822,15 +656,9 @@ struct VertexOutput {
     @location(2) v_gamma_scale: f32,
     @location(3) v_tex_a: vec2<f32>,
     @location(4) v_tex_b: vec2<f32>,
-#ifndef HAS_UNIFORM_u_color
-    @location(5) color: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_blur
-    @location(6) blur: f32,
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    @location(7) opacity: f32,
-#endif
+    #property varying color 5
+    #property varying blur 6
+    #property varying opacity 7
 #ifndef HAS_UNIFORM_u_floorwidth
     @location(8) v_floorwidth: f32,
 #endif
@@ -867,30 +695,12 @@ fn main(in: VertexInput) -> VertexOutput {
     let v_normal = vec2<f32>(normal.x, normal.y * 2.0 - 1.0);
 
     // Unpack attributes using helper functions
-#ifndef HAS_UNIFORM_u_color
-    out.color = unpack_mix_color(in.color, drawable.color_t);
-#endif
-#ifndef HAS_UNIFORM_u_blur
-    out.blur = unpack_mix_float(in.blur, drawable.blur_t);
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    out.opacity = unpack_mix_float(in.opacity, drawable.opacity_t);
-#endif
-#ifdef HAS_UNIFORM_u_gapwidth
-    let gapwidth = props.gapwidth / 2.0;
-#else
-    let gapwidth = unpack_mix_float(in.gapwidth, drawable.gapwidth_t) / 2.0;
-#endif
-#ifdef HAS_UNIFORM_u_offset
-    let offset = -props.offset;
-#else
-    let offset = -unpack_mix_float(in.offset, drawable.offset_t);
-#endif
-#ifdef HAS_UNIFORM_u_width
-    let width = props.width;
-#else
-    let width = unpack_mix_float(in.width, drawable.width_t);
-#endif
+    #property pass color
+    #property pass blur
+    #property pass opacity
+    let gapwidth = $props.gapwidth / 2.0;
+    let offset = -$props.offset;
+    let width = $props.width;
 #ifdef HAS_UNIFORM_u_floorwidth
     let floorwidth = props.floorwidth;
 #else
@@ -975,15 +785,9 @@ struct FragmentInput {
     @location(2) v_gamma_scale: f32,
     @location(3) v_tex_a: vec2<f32>,
     @location(4) v_tex_b: vec2<f32>,
-#ifndef HAS_UNIFORM_u_color
-    @location(5) color: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_blur
-    @location(6) blur: f32,
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    @location(7) opacity: f32,
-#endif
+    #property varying color 5
+    #property varying blur 6
+    #property varying opacity 7
 #ifndef HAS_UNIFORM_u_floorwidth
     @location(8) v_floorwidth: f32,
 #endif
@@ -1011,21 +815,9 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     return vec4<f32>(1.0, 1.0, 1.0, 1.0);
 #endif
     let tileProps = tilePropsVector[globalIndex.value];
-#ifdef HAS_UNIFORM_u_color
-    let color = props.color;
-#else
-    let color = in.color;
-#endif
-#ifdef HAS_UNIFORM_u_blur
-    let blur = props.blur;
-#else
-    let blur = in.blur;
-#endif
-#ifdef HAS_UNIFORM_u_opacity
-    let opacity = props.opacity;
-#else
-    let opacity = in.opacity;
-#endif
+    let color = $props.color;
+    let blur = $props.blur;
+    let opacity = $props.opacity;
 #ifdef HAS_UNIFORM_u_floorwidth
     let floorwidth = props.floorwidth;
 #else
@@ -1068,24 +860,12 @@ override DEVICE_PIXEL_RATIO: f32 = 1.0;
 struct VertexInput {
     @location(0) pos_normal: vec2<i32>,  // packed position and normal
     @location(1) data: vec4<u32>,        // extrude, direction, linesofar
-#ifndef HAS_UNIFORM_u_color
-    @location(2) color: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_blur
-    @location(3) blur: vec2<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    @location(4) opacity: vec2<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_gapwidth
-    @location(5) gapwidth: vec2<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_offset
-    @location(6) offset: vec2<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_width
-    @location(7) width: vec2<f32>,
-#endif
+    #property attribute color
+    #property attribute blur
+    #property attribute opacity
+    #property attribute gapwidth
+    #property attribute offset
+    #property attribute width
 };
 
 struct VertexOutput {
@@ -1093,15 +873,9 @@ struct VertexOutput {
     @location(0) v_width2: vec2<f32>,
     @location(1) v_normal: vec2<f32>,
     @location(2) v_gamma_scale: f32,
-#ifndef HAS_UNIFORM_u_color
-    @location(3) color: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_blur
-    @location(4) blur: f32,
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    @location(5) opacity: f32,
-#endif
+    #property varying color 3
+    #property varying blur 4
+    #property varying opacity 5
 #ifdef PROJECTION_GLOBE
     @location(6) v_tile_x: f32,
 #endif
@@ -1126,31 +900,13 @@ fn main(in: VertexInput) -> VertexOutput {
     var normal = raw_pos - pos * 2.0;
     normal.y = normal.y * 2.0 - 1.0;
 
-#ifndef HAS_UNIFORM_u_color
-    out.color = unpack_mix_color(in.color, drawable.color_t);
-#endif
-#ifndef HAS_UNIFORM_u_blur
-    out.blur = unpack_mix_float(in.blur, drawable.blur_t);
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    out.opacity = unpack_mix_float(in.opacity, drawable.opacity_t);
-#endif
+    #property pass color
+    #property pass blur
+    #property pass opacity
 
-#ifdef HAS_UNIFORM_u_gapwidth
-    let gapwidth = props.gapwidth / 2.0;
-#else
-    let gapwidth = unpack_mix_float(in.gapwidth, drawable.gapwidth_t) / 2.0;
-#endif
-#ifdef HAS_UNIFORM_u_offset
-    let offset = -props.offset;
-#else
-    let offset = -unpack_mix_float(in.offset, drawable.offset_t);
-#endif
-#ifdef HAS_UNIFORM_u_width
-    let width = props.width;
-#else
-    let width = unpack_mix_float(in.width, drawable.width_t);
-#endif
+    let gapwidth = $props.gapwidth / 2.0;
+    let offset = -$props.offset;
+    let width = $props.width;
 
     let halfwidth = width * 0.5;
     let inset = gapwidth + select(0.0, antialiasing, gapwidth > 0.0);
@@ -1202,15 +958,9 @@ struct FragmentInput {
     @location(0) v_width2: vec2<f32>,
     @location(1) v_normal: vec2<f32>,
     @location(2) v_gamma_scale: f32,
-#ifndef HAS_UNIFORM_u_color
-    @location(3) color: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_blur
-    @location(4) blur: f32,
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    @location(5) opacity: f32,
-#endif
+    #property varying color 3
+    #property varying blur 4
+    #property varying opacity 5
 #ifdef PROJECTION_GLOBE
     @location(6) v_tile_x: f32,
 #endif
@@ -1228,21 +978,9 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 #ifdef OVERDRAW_INSPECTOR
     return vec4<f32>(1.0, 1.0, 1.0, 1.0);
 #endif
-#ifdef HAS_UNIFORM_u_color
-    let color = props.color;
-#else
-    let color = in.color;
-#endif
-#ifdef HAS_UNIFORM_u_blur
-    let blur = props.blur;
-#else
-    let blur = in.blur;
-#endif
-#ifdef HAS_UNIFORM_u_opacity
-    let opacity = props.opacity;
-#else
-    let opacity = in.opacity;
-#endif
+    let color = $props.color;
+    let blur = $props.blur;
+    let opacity = $props.opacity;
 
     // Calculate the distance of the pixel from the line in pixels
     let dist = length(in.v_normal) * in.v_width2.x;

@@ -11,7 +11,9 @@
 //! crate's feature of that name (`glsl-es` for GLSL ES) and where its
 //! backends build: MSL on Apple platforms, GLSL elsewhere but in the
 //! browser. A source binds what its program declares where
-//! `mln_gfx::shaders::program::Program` says.
+//! `mln_gfx::shaders::program::Program` says, and reads the program's
+//! data-driven properties through the directives that
+//! `mln_gfx::shaders::source` describes.
 //!
 //! The vertex buffers that the MSL reads follow the shader's buffers, from
 //! the index after its last one: the layout vertices, then the fill

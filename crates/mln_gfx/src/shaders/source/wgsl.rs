@@ -1,8 +1,25 @@
 //! WGSL, which `mln_webgpu` compiles.
+//!
+//! A property's directives (see [`source`](super#properties)) write:
+//!
+//! - `#property attribute <name>`: a field `@location(<location>) <name>`
+//!   of the vertex input struct: `vec2<f32>` for a float, and `vec4<f32>`,
+//!   or `vec4<u32>` for an attribute of `UShort4`, otherwise.
+//! - `#property varying <name> <location> [flat]`: a field
+//!   `@location(<location>) <name>` of the vertex output and fragment input
+//!   structs, `f32` for a float and `vec4<f32>` otherwise, interpolated
+//!   `flat` if the directive says so.
+//! - `#property pass <name>`: `out.<name> = ` its value per vertex.
+//!
+//! A vertex stage reads a property's values per vertex from `in.<name>`,
+//! mixed by `drawable.<name>_t`, and a fragment stage from `in.<name>`.
 
 use std::fmt::Write as _;
 
+use crate::gpu::GpuError;
 use crate::shaders::block::{Block, MemberType};
+use crate::shaders::program::{Program, PropertyType};
+use crate::shaders::source::{Named, Stage, expand as expand_properties, per_vertex};
 
 /// The WGSL of a program: its stages, and the constants and structs of its
 /// own that both stages read.
@@ -44,4 +61,59 @@ pub fn declaration(block: &Block, size: usize) -> String {
         _ = writeln!(text, "    stride_pad: array<vec4<f32>, {}>,", (size - block.size) / 16);
     }
     text + "};\n"
+}
+
+/// The vertex and fragment stages of `program`'s WGSL, `source`, with its
+/// properties' directives written out, as the [module docs](self) say. A
+/// stage that `source` has none of is empty. Fails for a directive that
+/// names no property of the program, or that is malformed.
+pub fn expand(program: &Program, source: &Wgsl) -> Result<[String; 2], GpuError> {
+    let stage = |text: Option<&str>, stage| {
+        expand_properties(
+            program,
+            text.unwrap_or(""),
+            "",
+            |role, named| directive(named, role, stage),
+            |named| Ok(value(named, stage)),
+        )
+    };
+    Ok([stage(source.vertex, Stage::Vertex)?, stage(source.fragment, Stage::Fragment)?])
+}
+
+fn directive(named: &Named<'_>, role: &str, stage: Stage) -> Result<String, GpuError> {
+    let name = named.name();
+    let text = match role {
+        "attribute" => {
+            named.flat(0)?;
+            let ty = match named.ty() {
+                PropertyType::Float => "vec2<f32>",
+                PropertyType::Vec4 if named.integers() => "vec4<u32>",
+                PropertyType::Color | PropertyType::Vec4 => "vec4<f32>",
+            };
+            format!("@location({}) {name}: {ty},", named.location()?)
+        }
+        "varying" => {
+            let flat = if named.flat(1)? { "@interpolate(flat) " } else { "" };
+            let ty = if named.ty() == PropertyType::Float { "f32" } else { "vec4<f32>" };
+            format!("@location({}) {flat}{name}: {ty},", named.arg(0)?)
+        }
+        "pass" if stage == Stage::Vertex => {
+            named.flat(0)?;
+            format!("out.{name} = {};", value(named, stage))
+        }
+        _ => return Err(GpuError::Invalid(format!("no WGSL property directive {role} for {name}"))),
+    };
+    Ok(per_vertex(named, &text))
+}
+
+/// What a stage reads of `named` per vertex.
+fn value(named: &Named<'_>, stage: Stage) -> String {
+    let name = named.name();
+    match (stage, named.ty()) {
+        (Stage::Vertex, PropertyType::Float) => format!("unpack_mix_float(in.{name}, drawable.{name}_t)"),
+        (Stage::Vertex, PropertyType::Color) => format!("unpack_mix_color(in.{name}, drawable.{name}_t)"),
+        (Stage::Vertex, PropertyType::Vec4) if named.integers() => format!("vec4<f32>(in.{name})"),
+        // A fragment stage's varying, or the values themselves.
+        (Stage::Fragment, _) | (Stage::Vertex, PropertyType::Vec4) => format!("in.{name}"),
+    }
 }

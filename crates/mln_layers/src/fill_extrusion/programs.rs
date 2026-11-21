@@ -55,9 +55,9 @@ pub static FILL_EXTRUSION: Program = Program {
     instance_attributes: &[],
     textures: &[],
     properties: &[
-        Property::new("base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
-        Property::new("color", ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
-        Property::new("height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
+        Property::float("base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
+        Property::color("color", ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
+        Property::float("height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
     ],
     sources: sources!(
         wgsl: FILL_EXTRUSION_SHADER,
@@ -86,9 +86,9 @@ pub static FILL_EXTRUSION_INSTANCED: Program = Program {
     ],
     textures: &[],
     properties: &[
-        Property::new("base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
-        Property::new("color", ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
-        Property::new("height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
+        Property::float("base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
+        Property::color("color", ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
+        Property::float("height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
     ],
     sources: sources!(
         wgsl: FILL_EXTRUSION_INSTANCED_SHADER,
@@ -120,9 +120,9 @@ pub static FILL_EXTRUSION_WALL: Program = Program {
     instance_attributes: &[],
     textures: &[],
     properties: &[
-        Property::new("base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
-        Property::new("color", ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
-        Property::new("height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
+        Property::float("base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
+        Property::color("color", ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
+        Property::float("height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
     ],
     sources: sources!(
         wgsl: FILL_EXTRUSION_INSTANCED_SHADER,
@@ -147,9 +147,9 @@ pub static FILL_EXTRUSION_PULLED: Program = Program {
     instance_attributes: &[],
     textures: &[],
     properties: &[
-        Property::new("base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
-        Property::new("color", ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
-        Property::new("height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
+        Property::float("base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
+        Property::color("color", ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
+        Property::float("height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
     ],
     sources: sources!(
         wgsl: FILL_EXTRUSION_PULLED_SHADER,
@@ -176,10 +176,10 @@ pub static FILL_EXTRUSION_PATTERN: Program = Program {
     instance_attributes: &[],
     textures: &[Texture::new("u_image")],
     properties: &[
-        Property::new("base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
-        Property::new("height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
-        Property::new("pattern_from", ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE),
-        Property::new("pattern_to", ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE),
+        Property::float("base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
+        Property::float("height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
+        Property::vec4("pattern_from", ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE),
+        Property::vec4("pattern_to", ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE),
     ],
     sources: sources!(
         wgsl: FILL_EXTRUSION_PATTERN_SHADER,
@@ -209,10 +209,10 @@ pub static FILL_EXTRUSION_PATTERN_INSTANCED: Program = Program {
     ],
     textures: &[Texture::new("u_image")],
     properties: &[
-        Property::new("base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
-        Property::new("height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
-        Property::new("pattern_from", ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE),
-        Property::new("pattern_to", ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE),
+        Property::float("base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
+        Property::float("height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
+        Property::vec4("pattern_from", ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE),
+        Property::vec4("pattern_to", ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE),
     ],
     sources: sources!(
         wgsl: FILL_EXTRUSION_PATTERN_INSTANCED_SHADER,
@@ -244,10 +244,10 @@ pub static FILL_EXTRUSION_PATTERN_WALL: Program = Program {
     instance_attributes: &[],
     textures: &[Texture::new("u_image")],
     properties: &[
-        Property::new("base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
-        Property::new("height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
-        Property::new("pattern_from", ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE),
-        Property::new("pattern_to", ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE),
+        Property::float("base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
+        Property::float("height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
+        Property::vec4("pattern_from", ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE),
+        Property::vec4("pattern_to", ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE),
     ],
     sources: sources!(
         wgsl: FILL_EXTRUSION_PATTERN_INSTANCED_SHADER,

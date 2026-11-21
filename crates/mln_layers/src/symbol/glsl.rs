@@ -241,9 +241,7 @@ layout(location = 2) in ivec4 in_pixeloffset;
 layout(location = 3) in vec3 in_projected_pos;
 layout(location = 4) in float in_fade_opacity;
 
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 5) in vec2 in_opacity;
-#endif
+#property attribute opacity
 
 // The top-left of the quad's atlas rectangle.
 layout(location = 6) in uvec2 in_tex_origin;
@@ -444,25 +442,15 @@ layout(location = 2) in ivec4 in_pixeloffset;
 layout(location = 3) in vec3 in_projected_pos;
 layout(location = 4) in float in_fade_opacity;
 
-#if !defined(HAS_UNIFORM_u_fill_color)
-layout(location = 5) in vec4 in_fill_color;
-#endif
+#property attribute fill_color
 
-#if !defined(HAS_UNIFORM_u_halo_color)
-layout(location = 6) in vec4 in_halo_color;
-#endif
+#property attribute halo_color
 
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 7) in vec2 in_opacity;
-#endif
+#property attribute opacity
 
-#if !defined(HAS_UNIFORM_u_halo_width)
-layout(location = 8) in vec2 in_halo_width;
-#endif
+#property attribute halo_width
 
-#if !defined(HAS_UNIFORM_u_halo_blur)
-layout(location = 9) in vec2 in_halo_blur;
-#endif
+#property attribute halo_blur
 
 // The top-left of the quad's atlas rectangle.
 layout(location = 10) in uvec2 in_tex_origin;
@@ -493,13 +481,9 @@ layout(location = 1) out float frag_fade_opacity;
 layout(location = 2) out float frag_gamma_scaled;
 layout(location = 3) out float frag_halo_edge;
 
-#if !defined(HAS_UNIFORM_u_fill_color)
-layout(location = 4) out vec4 frag_fill_color;
-#endif
+#property varying fill_color 4
 
-#if !defined(HAS_UNIFORM_u_halo_color)
-layout(location = 5) out vec4 frag_halo_color;
-#endif
+#property varying halo_color 5
 
 // The texture coordinate is relative to the quad's atlas origin, which
 // atlas_pos adds back.
@@ -643,12 +627,8 @@ void main() {
     frag_gamma_scaled = (haloBlurGamma + EDGE_GAMMA) / (fontScale * drawable.gamma_scale) * gl_Position.w;
     frag_halo_edge = (6.0 - halo_width / fontScale) / SDF_PX;
 
-#if !defined(HAS_UNIFORM_u_fill_color)
-    frag_fill_color = unpack_mix_color(in_fill_color, drawable.fill_color_t);
-#endif
-#if !defined(HAS_UNIFORM_u_halo_color)
-    frag_halo_color = unpack_mix_color(in_halo_color, drawable.halo_color_t);
-#endif
+    #property pass fill_color
+    #property pass halo_color
 }
 ",
     fragment: r"
@@ -658,13 +638,9 @@ layout(location = 1) in float frag_fade_opacity;
 layout(location = 2) in float frag_gamma_scaled;
 layout(location = 3) in float frag_halo_edge;
 
-#if !defined(HAS_UNIFORM_u_fill_color)
-layout(location = 4) in vec4 frag_fill_color;
-#endif
+#property varying fill_color 4
 
-#if !defined(HAS_UNIFORM_u_halo_color)
-layout(location = 5) in vec4 frag_halo_color;
-#endif
+#property varying halo_color 5
 
 // The texture coordinate is relative to the quad's atlas origin, which
 // atlas_pos adds back.
@@ -743,25 +719,15 @@ layout(location = 1) in uvec4 in_data;
 layout(location = 2) in vec3 in_projected_pos;
 layout(location = 3) in float in_fade_opacity;
 
-#if !defined(HAS_UNIFORM_u_fill_color)
-layout(location = 4) in vec4 in_fill_color;
-#endif
+#property attribute fill_color
 
-#if !defined(HAS_UNIFORM_u_halo_color)
-layout(location = 5) in vec4 in_halo_color;
-#endif
+#property attribute halo_color
 
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 6) in vec2 in_opacity;
-#endif
+#property attribute opacity
 
-#if !defined(HAS_UNIFORM_u_halo_width)
-layout(location = 7) in vec2 in_halo_width;
-#endif
+#property attribute halo_width
 
-#if !defined(HAS_UNIFORM_u_halo_blur)
-layout(location = 8) in vec2 in_halo_blur;
-#endif
+#property attribute halo_blur
 
 // The top-left of the quad's atlas rectangle.
 layout(location = 9) in uvec2 in_tex_origin;
@@ -792,13 +758,9 @@ layout(location = 1) out float frag_fade_opacity;
 layout(location = 2) out float frag_gamma_scaled;
 layout(location = 3) out float frag_halo_edge;
 
-#if !defined(HAS_UNIFORM_u_fill_color)
-layout(location = 4) out vec4 frag_fill_color;
-#endif
+#property varying fill_color 4
 
-#if !defined(HAS_UNIFORM_u_halo_color)
-layout(location = 5) out vec4 frag_halo_color;
-#endif
+#property varying halo_color 5
 
 layout(location = 9) flat out int frag_is_icon;
 
@@ -948,12 +910,8 @@ void main() {
     frag_gamma_scaled = (haloBlurGamma + EDGE_GAMMA) / (fontScale * drawable.gamma_scale) * gl_Position.w;
     frag_halo_edge = (6.0 - halo_width / fontScale) / SDF_PX;
 
-#if !defined(HAS_UNIFORM_u_fill_color)
-    frag_fill_color = unpack_mix_color(in_fill_color, drawable.fill_color_t);
-#endif
-#if !defined(HAS_UNIFORM_u_halo_color)
-    frag_halo_color = unpack_mix_color(in_halo_color, drawable.halo_color_t);
-#endif
+    #property pass fill_color
+    #property pass halo_color
 }
 ",
     fragment: r"
@@ -963,13 +921,9 @@ layout(location = 1) in float frag_fade_opacity;
 layout(location = 2) in float frag_gamma_scaled;
 layout(location = 3) in float frag_halo_edge;
 
-#if !defined(HAS_UNIFORM_u_fill_color)
-layout(location = 4) in vec4 frag_fill_color;
-#endif
+#property varying fill_color 4
 
-#if !defined(HAS_UNIFORM_u_halo_color)
-layout(location = 5) in vec4 frag_halo_color;
-#endif
+#property varying halo_color 5
 
 layout(location = 9) flat in int frag_is_icon;
 

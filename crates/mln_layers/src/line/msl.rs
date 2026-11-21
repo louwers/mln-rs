@@ -81,27 +81,13 @@ struct VertexStage {
     short2 pos_normal [[attribute(0)]];
     uchar4 data [[attribute(1)]];
 
-#if !defined(HAS_UNIFORM_u_blur)
-    float2 blur [[attribute(2)]];
-#endif
-#if !defined(HAS_UNIFORM_u_opacity)
-    float2 opacity [[attribute(3)]];
-#endif
-#if !defined(HAS_UNIFORM_u_gapwidth)
-    float2 gapwidth [[attribute(4)]];
-#endif
-#if !defined(HAS_UNIFORM_u_offset)
-    float2 offset [[attribute(5)]];
-#endif
-#if !defined(HAS_UNIFORM_u_width)
-    float2 width [[attribute(6)]];
-#endif
-#if !defined(HAS_UNIFORM_u_floorwidth)
-    float2 floorwidth [[attribute(7)]];
-#endif
-#if !defined(HAS_UNIFORM_u_dasharray)
-    float4 dasharray [[attribute(8)]];
-#endif
+    #property attribute blur
+    #property attribute opacity
+    #property attribute gapwidth
+    #property attribute offset
+    #property attribute width
+    #property attribute floorwidth
+    #property attribute dasharray
 };
 
 struct FragmentStage {
@@ -116,15 +102,9 @@ struct FragmentStage {
     half gamma_scale;
     float lineprogress;
 
-#if !defined(HAS_UNIFORM_u_blur)
-    float blur;
-#endif
-#if !defined(HAS_UNIFORM_u_opacity)
-    float opacity;
-#endif
-#if !defined(HAS_UNIFORM_u_floorwidth)
-    float floorwidth;
-#endif
+    #property varying blur float
+    #property varying opacity float
+    #property varying floorwidth float
 #if !defined(HAS_UNIFORM_u_dasharray)
     float dash_width [[flat]];
 #endif
@@ -139,29 +119,13 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 
     device const LineSDFDrawableUBO& drawable = drawableVector[uboIndex];
 
-#if defined(HAS_UNIFORM_u_gapwidth)
-    const auto gapwidth = props.gapwidth / 2.0;
-#else
-    const auto gapwidth = unpack_mix_float(vertx.gapwidth, drawable.gapwidth_t) / 2.0;
-#endif
+    const auto gapwidth = $props.gapwidth / 2.0;
 
-#if defined(HAS_UNIFORM_u_offset)
-    const auto offset   = props.offset * -1.0;
-#else
-    const auto offset   = unpack_mix_float(vertx.offset, drawable.offset_t) * -1.0;
-#endif
+    const auto offset   = $props.offset * -1.0;
 
-#if defined(HAS_UNIFORM_u_width)
-    const auto width    = props.width;
-#else
-    const auto width    = unpack_mix_float(vertx.width, drawable.width_t);
-#endif
+    const auto width    = $props.width;
 
-#if defined(HAS_UNIFORM_u_floorwidth)
-    const auto floorwidth = props.floorwidth;
-#else
-    const auto floorwidth = unpack_mix_float(vertx.floorwidth, drawable.floorwidth_t);
-#endif
+    const auto floorwidth = $props.floorwidth;
 
     // the distance over which the line edge fades out.
     // Retina devices need a smaller distance to avoid aliasing.
@@ -235,12 +199,8 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         .gamma_scale  = half(extrude_length_without_perspective / extrude_length_with_perspective),
         .lineprogress = v_lineprogress,
 
-#if !defined(HAS_UNIFORM_u_blur)
-        .blur         = unpack_mix_float(vertx.blur, drawable.blur_t),
-#endif
-#if !defined(HAS_UNIFORM_u_opacity)
-        .opacity      = unpack_mix_float(vertx.opacity, drawable.opacity_t),
-#endif
+        #property pass blur
+        #property pass opacity
 #if !defined(HAS_UNIFORM_u_floorwidth)
         .floorwidth   = floorwidth,
 #endif
@@ -271,23 +231,11 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 
     device const LineSDFTilePropsUBO& tileProps = tilePropsVector[uboIndex];
 
-#if defined(HAS_UNIFORM_u_blur)
-    const float blur = props.blur;
-#else
-    const float blur = in.blur;
-#endif
+    const float blur = $props.blur;
 
-#if defined(HAS_UNIFORM_u_opacity)
-    const float opacity = props.opacity;
-#else
-    const float opacity = in.opacity;
-#endif
+    const float opacity = $props.opacity;
 
-#if defined(HAS_UNIFORM_u_floorwidth)
-    const auto floorwidth = props.floorwidth;
-#else
-    const auto floorwidth = in.floorwidth;
-#endif
+    const auto floorwidth = $props.floorwidth;
 
     // Calculate the distance of the pixel from the line in pixels.
     const float dist = length(in.normal) * in.width2.x;
@@ -351,21 +299,11 @@ enum {
 struct VertexStage {
     short2 pos_normal [[attribute(0)]];
     uchar4 data [[attribute(1)]];
-#if !defined(HAS_UNIFORM_u_blur)
-    float2 blur [[attribute(2)]];
-#endif
-#if !defined(HAS_UNIFORM_u_opacity)
-    float2 opacity [[attribute(3)]];
-#endif
-#if !defined(HAS_UNIFORM_u_gapwidth)
-    float2 gapwidth [[attribute(4)]];
-#endif
-#if !defined(HAS_UNIFORM_u_offset)
-    float2 offset [[attribute(5)]];
-#endif
-#if !defined(HAS_UNIFORM_u_width)
-    float2 width [[attribute(6)]];
-#endif
+    #property attribute blur
+    #property attribute opacity
+    #property attribute gapwidth
+    #property attribute offset
+    #property attribute width
 };
 
 struct FragmentStage {
@@ -378,12 +316,8 @@ struct FragmentStage {
     half gamma_scale;
     float lineprogress;
 
-#if !defined(HAS_UNIFORM_u_blur)
-    half blur;
-#endif
-#if !defined(HAS_UNIFORM_u_opacity)
-    half opacity;
-#endif
+    #property varying blur half
+    #property varying opacity half
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
@@ -401,21 +335,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 #if !defined(HAS_UNIFORM_u_opacity)
     const auto opacity  = unpack_mix_float(vertx.opacity,  drawable.opacity_t);
 #endif
-#if defined(HAS_UNIFORM_u_gapwidth)
-    const auto gapwidth = props.gapwidth / 2;
-#else
-    const auto gapwidth = unpack_mix_float(vertx.gapwidth, drawable.gapwidth_t) / 2;
-#endif
-#if defined(HAS_UNIFORM_u_offset)
-    const auto offset   = props.offset * -1;
-#else
-    const auto offset   = unpack_mix_float(vertx.offset,   drawable.offset_t) * -1;
-#endif
-#if defined(HAS_UNIFORM_u_width)
-    const auto width    = props.width;
-#else
-    const auto width    = unpack_mix_float(vertx.width,    drawable.width_t);
-#endif
+    const auto gapwidth = $props.gapwidth / 2;
+    const auto offset   = $props.offset * -1;
+    const auto width    = $props.width;
 
     // the distance over which the line edge fades out.
     // Retina devices need a smaller distance to avoid aliasing.
@@ -557,27 +479,13 @@ struct VertexStage {
     short2 pos_normal [[attribute(0)]];
     uchar4 data [[attribute(1)]];
 
-#if !defined(HAS_UNIFORM_u_blur)
-    float2 blur [[attribute(2)]];
-#endif
-#if !defined(HAS_UNIFORM_u_opacity)
-    float2 opacity [[attribute(3)]];
-#endif
-#if !defined(HAS_UNIFORM_u_gapwidth)
-    float2 gapwidth [[attribute(4)]];
-#endif
-#if !defined(HAS_UNIFORM_u_offset)
-    float2 offset [[attribute(5)]];
-#endif
-#if !defined(HAS_UNIFORM_u_width)
-    float2 width [[attribute(6)]];
-#endif
-#if !defined(HAS_UNIFORM_u_pattern_from)
-    ushort4 pattern_from [[attribute(7)]];
-#endif
-#if !defined(HAS_UNIFORM_u_pattern_to)
-    ushort4 pattern_to [[attribute(8)]];
-#endif
+    #property attribute blur
+    #property attribute opacity
+    #property attribute gapwidth
+    #property attribute offset
+    #property attribute width
+    #property attribute pattern_from
+    #property attribute pattern_to
 };
 
 struct FragmentStage {
@@ -590,18 +498,10 @@ struct FragmentStage {
     half2 normal;
     half gamma_scale;
 
-#if !defined(HAS_UNIFORM_u_blur)
-    half blur;
-#endif
-#if !defined(HAS_UNIFORM_u_opacity)
-    half opacity;
-#endif
-#if !defined(HAS_UNIFORM_u_pattern_from)
-    float4 pattern_from [[flat]];
-#endif
-#if !defined(HAS_UNIFORM_u_pattern_to)
-    float4 pattern_to [[flat]];
-#endif
+    #property varying blur half
+    #property varying opacity half
+    #property varying pattern_from float4 flat
+    #property varying pattern_to float4 flat
 #if !defined(HAS_UNIFORM_u_width)
     float floorwidth;
 #endif
@@ -616,23 +516,11 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 
     device const LinePatternDrawableUBO& drawable = drawableVector[uboIndex];
 
-#if defined(HAS_UNIFORM_u_gapwidth)
-    const auto gapwidth = props.gapwidth / 2;
-#else
-    const auto gapwidth = unpack_mix_float(vertx.gapwidth, drawable.gapwidth_t) / 2;
-#endif
+    const auto gapwidth = $props.gapwidth / 2;
 
-#if defined(HAS_UNIFORM_u_offset)
-    const auto offset   = props.offset * -1;
-#else
-    const auto offset   = unpack_mix_float(vertx.offset, drawable.offset_t) * -1;
-#endif
+    const auto offset   = $props.offset * -1;
 
-#if defined(HAS_UNIFORM_u_width)
-    const auto width    = props.width;
-#else
-    const auto width    = unpack_mix_float(vertx.width, drawable.width_t);
-#endif
+    const auto width    = $props.width;
 
 #if !defined(HAS_UNIFORM_u_width)
     const auto floorwidth = unpack_mix_float(vertx.width, drawable.floorwidth_t);
@@ -694,18 +582,10 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         .gamma_scale  = half(extrude_length_without_perspective / extrude_length_with_perspective),
         .linesofar    = linesofar,
 
-#if !defined(HAS_UNIFORM_u_blur)
-        .blur         = half(unpack_mix_float(vertx.blur, drawable.blur_t)),
-#endif
-#if !defined(HAS_UNIFORM_u_opacity)
-        .opacity      = half(unpack_mix_float(vertx.opacity, drawable.opacity_t)),
-#endif
-#if !defined(HAS_UNIFORM_u_pattern_from)
-        .pattern_from = float4(vertx.pattern_from),
-#endif
-#if !defined(HAS_UNIFORM_u_pattern_to)
-        .pattern_to   = float4(vertx.pattern_to),
-#endif
+        #property pass blur
+        #property pass opacity
+        #property pass pattern_from
+        #property pass pattern_to
 #if !defined(HAS_UNIFORM_u_width)
         .floorwidth   = floorwidth,
 #endif
@@ -732,29 +612,13 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 
     device const LinePatternTilePropsUBO& tileProps = tilePropsVector[uboIndex];
 
-#if defined(HAS_UNIFORM_u_blur)
-    const float blur = props.blur;
-#else
-    const float blur = in.blur;
-#endif
+    const float blur = $props.blur;
 
-#if defined(HAS_UNIFORM_u_opacity)
-    const float opacity = props.opacity;
-#else
-    const float opacity = in.opacity;
-#endif
+    const float opacity = $props.opacity;
 
-#if defined(HAS_UNIFORM_u_pattern_from)
-    const auto pattern_from = float4(tileProps.pattern_from);
-#else
-    const auto pattern_from = float4(in.pattern_from);
-#endif
+    const auto pattern_from = float4($tileProps.pattern_from);
 
-#if defined(HAS_UNIFORM_u_pattern_to)
-    const auto pattern_to   = float4(tileProps.pattern_to);
-#else
-    const auto pattern_to   = float4(in.pattern_to);
-#endif
+    const auto pattern_to   = float4($tileProps.pattern_to);
 
     const float2 pattern_tl_a = pattern_from.xy;
     const float2 pattern_br_a = pattern_from.zw;
@@ -850,30 +714,14 @@ struct VertexStage {
     short2 pos_normal [[attribute(0)]];
     uchar4 data [[attribute(1)]];
 
-#if !defined(HAS_UNIFORM_u_color)
-    float4 color [[attribute(2)]];
-#endif
-#if !defined(HAS_UNIFORM_u_blur)
-    float2 blur [[attribute(3)]];
-#endif
-#if !defined(HAS_UNIFORM_u_opacity)
-    float2 opacity [[attribute(4)]];
-#endif
-#if !defined(HAS_UNIFORM_u_gapwidth)
-    float2 gapwidth [[attribute(5)]];
-#endif
-#if !defined(HAS_UNIFORM_u_offset)
-    float2 offset [[attribute(6)]];
-#endif
-#if !defined(HAS_UNIFORM_u_width)
-    float2 width [[attribute(7)]];
-#endif
-#if !defined(HAS_UNIFORM_u_floorwidth)
-    float2 floorwidth [[attribute(8)]];
-#endif
-#if !defined(HAS_UNIFORM_u_dasharray)
-    float4 dasharray [[attribute(9)]];
-#endif
+    #property attribute color
+    #property attribute blur
+    #property attribute opacity
+    #property attribute gapwidth
+    #property attribute offset
+    #property attribute width
+    #property attribute floorwidth
+    #property attribute dasharray
 };
 
 struct FragmentStage {
@@ -887,18 +735,10 @@ struct FragmentStage {
     float2 tex_b;
     half gamma_scale;
 
-#if !defined(HAS_UNIFORM_u_color)
-    float4 color;
-#endif
-#if !defined(HAS_UNIFORM_u_blur)
-    float blur;
-#endif
-#if !defined(HAS_UNIFORM_u_opacity)
-    float opacity;
-#endif
-#if !defined(HAS_UNIFORM_u_floorwidth)
-    float floorwidth;
-#endif
+    #property varying color float4
+    #property varying blur float
+    #property varying opacity float
+    #property varying floorwidth float
 #if !defined(HAS_UNIFORM_u_dasharray)
     float dash_width [[flat]];
 #endif
@@ -913,29 +753,13 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 
     device const LineSDFDrawableUBO& drawable = drawableVector[uboIndex];
 
-#if defined(HAS_UNIFORM_u_gapwidth)
-    const auto gapwidth = props.gapwidth / 2.0;
-#else
-    const auto gapwidth = unpack_mix_float(vertx.gapwidth, drawable.gapwidth_t) / 2.0;
-#endif
+    const auto gapwidth = $props.gapwidth / 2.0;
 
-#if defined(HAS_UNIFORM_u_offset)
-    const auto offset   = props.offset * -1.0;
-#else
-    const auto offset   = unpack_mix_float(vertx.offset, drawable.offset_t) * -1.0;
-#endif
+    const auto offset   = $props.offset * -1.0;
 
-#if defined(HAS_UNIFORM_u_width)
-    const auto width    = props.width;
-#else
-    const auto width    = unpack_mix_float(vertx.width, drawable.width_t);
-#endif
+    const auto width    = $props.width;
 
-#if defined(HAS_UNIFORM_u_floorwidth)
-    const auto floorwidth = props.floorwidth;
-#else
-    const auto floorwidth = unpack_mix_float(vertx.floorwidth, drawable.floorwidth_t);
-#endif
+    const auto floorwidth = $props.floorwidth;
 
     // the distance over which the line edge fades out.
     // Retina devices need a smaller distance to avoid aliasing.
@@ -1007,15 +831,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         .tex_a        = float2(linesofar * patternscale_a.x / floorwidth, v_normal.y * patternscale_a.y + tex_y_a),
         .tex_b        = float2(linesofar * patternscale_b.x / floorwidth, v_normal.y * patternscale_b.y + tex_y_b),
 
-#if !defined(HAS_UNIFORM_u_color)
-        .color        = unpack_mix_color(vertx.color, drawable.color_t),
-#endif
-#if !defined(HAS_UNIFORM_u_blur)
-        .blur         = unpack_mix_float(vertx.blur, drawable.blur_t),
-#endif
-#if !defined(HAS_UNIFORM_u_opacity)
-        .opacity      = unpack_mix_float(vertx.opacity, drawable.opacity_t),
-#endif
+        #property pass color
+        #property pass blur
+        #property pass opacity
 #if !defined(HAS_UNIFORM_u_floorwidth)
         .floorwidth   = floorwidth,
 #endif
@@ -1051,23 +869,11 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     const float4 color = in.color;
 #endif
 
-#if defined(HAS_UNIFORM_u_blur)
-    const float blur = props.blur;
-#else
-    const float blur = in.blur;
-#endif
+    const float blur = $props.blur;
 
-#if defined(HAS_UNIFORM_u_opacity)
-    const float opacity = props.opacity;
-#else
-    const float opacity = in.opacity;
-#endif
+    const float opacity = $props.opacity;
 
-#if defined(HAS_UNIFORM_u_floorwidth)
-    const auto floorwidth = props.floorwidth;
-#else
-    const auto floorwidth = in.floorwidth;
-#endif
+    const auto floorwidth = $props.floorwidth;
 
     // Calculate the distance of the pixel from the line in pixels.
     const float dist = length(in.normal) * in.width2.x;
@@ -1126,24 +932,12 @@ struct VertexStage {
     short2 pos_normal [[attribute(0)]];
     uchar4 data [[attribute(1)]];
 
-#if !defined(HAS_UNIFORM_u_color)
-    float4 color [[attribute(2)]];
-#endif
-#if !defined(HAS_UNIFORM_u_blur)
-    float2 blur [[attribute(3)]];
-#endif
-#if !defined(HAS_UNIFORM_u_opacity)
-    float2 opacity [[attribute(4)]];
-#endif
-#if !defined(HAS_UNIFORM_u_gapwidth)
-    float2 gapwidth [[attribute(5)]];
-#endif
-#if !defined(HAS_UNIFORM_u_offset)
-    float2 offset [[attribute(6)]];
-#endif
-#if !defined(HAS_UNIFORM_u_width)
-    float2 width [[attribute(7)]];
-#endif
+    #property attribute color
+    #property attribute blur
+    #property attribute opacity
+    #property attribute gapwidth
+    #property attribute offset
+    #property attribute width
 };
 
 struct FragmentStage {
@@ -1155,15 +949,9 @@ struct FragmentStage {
     float2 normal;
     half gamma_scale;
 
-#if !defined(HAS_UNIFORM_u_color)
-    float4 color;
-#endif
-#if !defined(HAS_UNIFORM_u_blur)
-    float blur;
-#endif
-#if !defined(HAS_UNIFORM_u_opacity)
-    float opacity;
-#endif
+    #property varying color float4
+    #property varying blur float
+    #property varying opacity float
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
@@ -1175,23 +963,11 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 
     device const LineDrawableUBO& drawable = drawableVector[uboIndex];
 
-#if defined(HAS_UNIFORM_u_gapwidth)
-    const auto gapwidth = props.gapwidth / 2;
-#else
-    const auto gapwidth = unpack_mix_float(vertx.gapwidth, drawable.gapwidth_t) / 2;
-#endif
+    const auto gapwidth = $props.gapwidth / 2;
 
-#if defined(HAS_UNIFORM_u_offset)
-    const auto offset   = props.offset * -1;
-#else
-    const auto offset   = unpack_mix_float(vertx.offset, drawable.offset_t) * -1;
-#endif
+    const auto offset   = $props.offset * -1;
 
-#if defined(HAS_UNIFORM_u_width)
-    const auto width    = props.width;
-#else
-    const auto width    = unpack_mix_float(vertx.width, drawable.width_t);
-#endif
+    const auto width    = $props.width;
 
     // the distance over which the line edge fades out.
     // Retina devices need a smaller distance to avoid aliasing.
@@ -1246,15 +1022,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         .normal      = v_normal,
         .gamma_scale = half(extrude_length_without_perspective / extrude_length_with_perspective),
 
-#if !defined(HAS_UNIFORM_u_color)
-        .color       = unpack_mix_color(vertx.color,   drawable.color_t),
-#endif
-#if !defined(HAS_UNIFORM_u_blur)
-        .blur        = unpack_mix_float(vertx.blur,    drawable.blur_t),
-#endif
-#if !defined(HAS_UNIFORM_u_opacity)
-        .opacity     = unpack_mix_float(vertx.opacity, drawable.opacity_t),
-#endif
+        #property pass color
+        #property pass blur
+        #property pass opacity
     };
 }
 
@@ -1277,17 +1047,9 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     const float4 color = in.color;
 #endif
 
-#if defined(HAS_UNIFORM_u_blur)
-    const float blur = props.blur;
-#else
-    const float blur = in.blur;
-#endif
+    const float blur = $props.blur;
 
-#if defined(HAS_UNIFORM_u_opacity)
-    const float opacity = props.opacity;
-#else
-    const float opacity = in.opacity;
-#endif
+    const float opacity = $props.opacity;
 
     // Calculate the distance of the pixel from the line in pixels.
     const float dist = length(in.normal) * in.width2.x;

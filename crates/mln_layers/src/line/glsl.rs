@@ -74,29 +74,17 @@ pub(super) const LINE_SHADER: Glsl = Glsl {
 layout(location = 0) in ivec2 in_pos_normal;
 layout(location = 1) in uvec4 in_data;
 
-#if !defined(HAS_UNIFORM_u_color)
-layout(location = 2) in vec4 in_color;
-#endif
+#property attribute color
 
-#if !defined(HAS_UNIFORM_u_blur)
-layout(location = 3) in vec2 in_blur;
-#endif
+#property attribute blur
 
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 4) in vec2 in_opacity;
-#endif
+#property attribute opacity
 
-#if !defined(HAS_UNIFORM_u_gapwidth)
-layout(location = 5) in vec2 in_gapwidth;
-#endif
+#property attribute gapwidth
 
-#if !defined(HAS_UNIFORM_u_offset)
-layout(location = 6) in vec2 in_offset;
-#endif
+#property attribute offset
 
-#if !defined(HAS_UNIFORM_u_width)
-layout(location = 7) in vec2 in_width;
-#endif
+#property attribute width
 
 layout(push_constant) uniform Constants {
     int ubo_index;
@@ -118,17 +106,11 @@ layout(location = 0) out vec2 frag_normal;
 layout(location = 1) out vec2 frag_width2;
 layout(location = 2) out float frag_gamma_scale;
 
-#if !defined(HAS_UNIFORM_u_color)
-layout(location = 3) out vec4 frag_color;
-#endif
+#property varying color 3
 
-#if !defined(HAS_UNIFORM_u_blur)
-layout(location = 4) out float frag_blur;
-#endif
+#property varying blur 4
 
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 5) out float frag_opacity;
-#endif
+#property varying opacity 5
 
 #ifdef PROJECTION_GLOBE
 layout(location = 6) out float frag_tile_x;
@@ -137,35 +119,17 @@ layout(location = 6) out float frag_tile_x;
 void main() {
     const LineDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
 
-#ifndef HAS_UNIFORM_u_color
-    frag_color = unpack_mix_color(in_color, drawable.color_t);
-#endif
+    #property pass color
 
-#ifndef HAS_UNIFORM_u_blur
-    frag_blur = unpack_mix_float(in_blur, drawable.blur_t);
-#endif
+    #property pass blur
 
-#ifndef HAS_UNIFORM_u_opacity
-    frag_opacity = unpack_mix_float(in_opacity, drawable.opacity_t);
-#endif
+    #property pass opacity
 
-#ifndef HAS_UNIFORM_u_gapwidth
-    const float gapwidth = unpack_mix_float(in_gapwidth, drawable.gapwidth_t) / 2.0;
-#else
-    const float gapwidth = props.gapwidth / 2.0;
-#endif
+    const float gapwidth = $props.gapwidth / 2.0;
 
-#ifndef HAS_UNIFORM_u_offset
-    const float offset = unpack_mix_float(in_offset, drawable.offset_t) * -1.0;
-#else
-    const float offset = props.offset * -1.0;
-#endif
+    const float offset = $props.offset * -1.0;
 
-#ifndef HAS_UNIFORM_u_width
-    float width = unpack_mix_float(in_width, drawable.width_t);
-#else
-    float width = props.width;
-#endif
+    float width = $props.width;
 
     // the distance over which the line edge fades out.
     // Retina devices need a smaller distance to avoid aliasing.
@@ -227,17 +191,11 @@ layout(location = 0) in vec2 frag_normal;
 layout(location = 1) in vec2 frag_width2;
 layout(location = 2) in float frag_gamma_scale;
 
-#if !defined(HAS_UNIFORM_u_color)
-layout(location = 3) in vec4 frag_color;
-#endif
+#property varying color 3
 
-#if !defined(HAS_UNIFORM_u_blur)
-layout(location = 4) in float frag_blur;
-#endif
+#property varying blur 4
 
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 5) in float frag_opacity;
-#endif
+#property varying opacity 5
 
 layout(location = 0) out vec4 out_color;
 
@@ -261,23 +219,11 @@ void main() {
     return;
 #endif
 
-#ifdef HAS_UNIFORM_u_color
-    vec4 color = props.color;
-#else
-    vec4 color = frag_color;
-#endif
+    vec4 color = $props.color;
 
-#ifdef HAS_UNIFORM_u_blur
-    float blur = props.blur;
-#else
-    float blur = frag_blur;
-#endif
+    float blur = $props.blur;
 
-#ifdef HAS_UNIFORM_u_opacity
-    float opacity = props.opacity;
-#else
-    float opacity = frag_opacity;
-#endif
+    float opacity = $props.opacity;
 
     // Calculate the distance of the pixel from the line in pixels.
     float dist = length(frag_normal) * frag_width2.s;
@@ -303,25 +249,15 @@ pub(super) const LINE_GRADIENT_SHADER: Glsl = Glsl {
 layout(location = 0) in ivec2 in_pos_normal;
 layout(location = 1) in uvec4 in_data;
 
-#if !defined(HAS_UNIFORM_u_blur)
-layout(location = 2) in vec2 in_blur;
-#endif
+#property attribute blur
 
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 3) in vec2 in_opacity;
-#endif
+#property attribute opacity
 
-#if !defined(HAS_UNIFORM_u_gapwidth)
-layout(location = 4) in vec2 in_gapwidth;
-#endif
+#property attribute gapwidth
 
-#if !defined(HAS_UNIFORM_u_offset)
-layout(location = 5) in vec2 in_offset;
-#endif
+#property attribute offset
 
-#if !defined(HAS_UNIFORM_u_width)
-layout(location = 6) in vec2 in_width;
-#endif
+#property attribute width
 
 layout(push_constant) uniform Constants {
     int ubo_index;
@@ -344,13 +280,9 @@ layout(location = 1) out vec2 frag_width2;
 layout(location = 2) out float frag_gamma_scale;
 layout(location = 3) out float frag_lineprogress;
 
-#if !defined(HAS_UNIFORM_u_blur)
-layout(location = 4) out float frag_blur;
-#endif
+#property varying blur 4
 
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 5) out float frag_opacity;
-#endif
+#property varying opacity 5
 
 #ifdef PROJECTION_GLOBE
 layout(location = 6) out float frag_tile_x;
@@ -359,31 +291,15 @@ layout(location = 6) out float frag_tile_x;
 void main() {
     const LineGradientDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
 
-#ifndef HAS_UNIFORM_u_blur
-    frag_blur = unpack_mix_float(in_blur, drawable.blur_t);
-#endif
+    #property pass blur
 
-#ifndef HAS_UNIFORM_u_opacity
-    frag_opacity = unpack_mix_float(in_opacity, drawable.opacity_t);
-#endif
+    #property pass opacity
 
-#ifndef HAS_UNIFORM_u_gapwidth
-    float gapwidth = unpack_mix_float(in_gapwidth, drawable.gapwidth_t) / 2.0;
-#else
-    float gapwidth = props.gapwidth / 2.0;
-#endif
+    float gapwidth = $props.gapwidth / 2.0;
 
-#ifndef HAS_UNIFORM_u_offset
-    const float offset = unpack_mix_float(in_offset, drawable.offset_t) * -1.0;
-#else
-    const float offset = props.offset * -1.0;
-#endif
+    const float offset = $props.offset * -1.0;
 
-#ifndef HAS_UNIFORM_u_width
-    float width = unpack_mix_float(in_width, drawable.width_t);
-#else
-    float width = props.width;
-#endif
+    float width = $props.width;
 
     // the distance over which the line edge fades out.
     // Retina devices need a smaller distance to avoid aliasing.
@@ -447,13 +363,9 @@ layout(location = 1) in vec2 frag_width2;
 layout(location = 2) in float frag_gamma_scale;
 layout(location = 3) in float frag_lineprogress;
 
-#if !defined(HAS_UNIFORM_u_blur)
-layout(location = 4) in float frag_blur;
-#endif
+#property varying blur 4
 
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 5) in float frag_opacity;
-#endif
+#property varying opacity 5
 
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image0_texture;
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image0_sampler;
@@ -480,17 +392,9 @@ void main() {
     return;
 #endif
 
-#ifdef HAS_UNIFORM_u_blur
-    float blur = props.blur;
-#else
-    float blur = frag_blur;
-#endif
+    float blur = $props.blur;
 
-#ifdef HAS_UNIFORM_u_opacity
-    float opacity = props.opacity;
-#else
-    float opacity = frag_opacity;
-#endif
+    float opacity = $props.opacity;
 
     // Calculate the distance of the pixel from the line in pixels.
     float dist = length(frag_normal) * frag_width2.s;
@@ -520,33 +424,19 @@ pub(super) const LINE_PATTERN_SHADER: Glsl = Glsl {
 layout(location = 0) in ivec2 in_pos_normal;
 layout(location = 1) in uvec4 in_data;
 
-#if !defined(HAS_UNIFORM_u_blur)
-layout(location = 2) in vec2 in_blur;
-#endif
+#property attribute blur
 
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 3) in vec2 in_opacity;
-#endif
+#property attribute opacity
 
-#if !defined(HAS_UNIFORM_u_gapwidth)
-layout(location = 4) in vec2 in_gapwidth;
-#endif
+#property attribute gapwidth
 
-#if !defined(HAS_UNIFORM_u_offset)
-layout(location = 5) in vec2 in_offset;
-#endif
+#property attribute offset
 
-#if !defined(HAS_UNIFORM_u_width)
-layout(location = 6) in vec2 in_width;
-#endif
+#property attribute width
 
-#if !defined(HAS_UNIFORM_u_pattern_from)
-layout(location = 7) in uvec4 in_pattern_from;
-#endif
+#property attribute pattern_from
 
-#if !defined(HAS_UNIFORM_u_pattern_to)
-layout(location = 8) in uvec4 in_pattern_to;
-#endif
+#property attribute pattern_to
 
 layout(push_constant) uniform Constants {
     int ubo_index;
@@ -569,21 +459,13 @@ layout(location = 1) out vec2 frag_width2;
 layout(location = 2) out float frag_gamma_scale;
 layout(location = 3) out float frag_linesofar;
 
-#if !defined(HAS_UNIFORM_u_blur)
-layout(location = 4) out float frag_blur;
-#endif
+#property varying blur 4
 
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 5) out float frag_opacity;
-#endif
+#property varying opacity 5
 
-#if !defined(HAS_UNIFORM_u_pattern_from)
-layout(location = 6) flat out vec4 frag_pattern_from;
-#endif
+#property varying pattern_from 6 flat
 
-#if !defined(HAS_UNIFORM_u_pattern_to)
-layout(location = 7) flat out vec4 frag_pattern_to;
-#endif
+#property varying pattern_to 7 flat
 #if !defined(HAS_UNIFORM_u_width)
 layout(location = 8) out float frag_floorwidth;
 #endif
@@ -595,39 +477,19 @@ layout(location = 9) out float frag_tile_x;
 void main() {
     const LinePatternDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
 
-#ifndef HAS_UNIFORM_u_blur
-    frag_blur = unpack_mix_float(in_blur, drawable.blur_t);
-#endif
+    #property pass blur
 
-#ifndef HAS_UNIFORM_u_opacity
-    frag_opacity = unpack_mix_float(in_opacity, drawable.opacity_t);
-#endif
+    #property pass opacity
 
-#ifndef HAS_UNIFORM_u_gapwidth
-    const float gapwidth = unpack_mix_float(in_gapwidth, drawable.gapwidth_t) / 2.0;
-#else
-    const float gapwidth = props.gapwidth / 2.0;
-#endif
+    const float gapwidth = $props.gapwidth / 2.0;
 
-#ifndef HAS_UNIFORM_u_offset
-    const float offset = unpack_mix_float(in_offset, drawable.offset_t) * -1.0;
-#else
-    const float offset = props.offset * -1.0;
-#endif
+    const float offset = $props.offset * -1.0;
 
-#ifndef HAS_UNIFORM_u_width
-    float width = unpack_mix_float(in_width, drawable.width_t);
-#else
-    float width = props.width;
-#endif
+    float width = $props.width;
 
-#ifndef HAS_UNIFORM_u_pattern_from
-    frag_pattern_from = in_pattern_from;
-#endif
+    #property pass pattern_from
 
-#ifndef HAS_UNIFORM_u_pattern_to
-    frag_pattern_to = in_pattern_to;
-#endif
+    #property pass pattern_to
 #ifndef HAS_UNIFORM_u_width
     frag_floorwidth = unpack_mix_float(in_width, drawable.floorwidth_t);
 #endif
@@ -695,21 +557,13 @@ layout(location = 1) in vec2 frag_width2;
 layout(location = 2) in float frag_gamma_scale;
 layout(location = 3) in float frag_linesofar;
 
-#if !defined(HAS_UNIFORM_u_blur)
-layout(location = 4) in float frag_blur;
-#endif
+#property varying blur 4
 
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 5) in float frag_opacity;
-#endif
+#property varying opacity 5
 
-#if !defined(HAS_UNIFORM_u_pattern_from)
-layout(location = 6) flat in vec4 frag_pattern_from;
-#endif
+#property varying pattern_from 6 flat
 
-#if !defined(HAS_UNIFORM_u_pattern_to)
-layout(location = 7) flat in vec4 frag_pattern_to;
-#endif
+#property varying pattern_to 7 flat
 #if !defined(HAS_UNIFORM_u_width)
 layout(location = 8) in float frag_floorwidth;
 #endif
@@ -749,29 +603,13 @@ void main() {
 
     const LinePatternTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
 
-#ifdef HAS_UNIFORM_u_blur
-    const float blur = props.blur;
-#else
-    const float blur = frag_blur;
-#endif
+    const float blur = $props.blur;
 
-#ifdef HAS_UNIFORM_u_opacity
-    const float opacity = props.opacity;
-#else
-    const float opacity = frag_opacity;
-#endif
+    const float opacity = $props.opacity;
 
-#ifdef HAS_UNIFORM_u_pattern_from
-    const vec4 pattern_from = tileProps.pattern_from;
-#else
-    const vec4 pattern_from = frag_pattern_from;
-#endif
+    const vec4 pattern_from = $tileProps.pattern_from;
 
-#ifdef HAS_UNIFORM_u_pattern_to
-    const vec4 pattern_to = tileProps.pattern_to;
-#else
-    const vec4 pattern_to = frag_pattern_to;
-#endif
+    const vec4 pattern_to = $tileProps.pattern_to;
 
     const vec2 pattern_tl_a = pattern_from.xy;
     const vec2 pattern_br_a = pattern_from.zw;
@@ -844,37 +682,21 @@ pub(super) const LINE_SDF_SHADER: Glsl = Glsl {
 layout(location = 0) in ivec2 in_pos_normal;
 layout(location = 1) in uvec4 in_data;
 
-#if !defined(HAS_UNIFORM_u_color)
-layout(location = 2) in vec4 in_color;
-#endif
+#property attribute color
 
-#if !defined(HAS_UNIFORM_u_blur)
-layout(location = 3) in vec2 in_blur;
-#endif
+#property attribute blur
 
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 4) in vec2 in_opacity;
-#endif
+#property attribute opacity
 
-#if !defined(HAS_UNIFORM_u_gapwidth)
-layout(location = 5) in vec2 in_gapwidth;
-#endif
+#property attribute gapwidth
 
-#if !defined(HAS_UNIFORM_u_offset)
-layout(location = 6) in vec2 in_offset;
-#endif
+#property attribute offset
 
-#if !defined(HAS_UNIFORM_u_width)
-layout(location = 7) in vec2 in_width;
-#endif
+#property attribute width
 
-#if !defined(HAS_UNIFORM_u_floorwidth)
-layout(location = 8) in vec2 in_floorwidth;
-#endif
+#property attribute floorwidth
 
-#if !defined(HAS_UNIFORM_u_dasharray)
-layout(location = 9) in vec4 in_dasharray;
-#endif
+#property attribute dasharray
 
 layout(push_constant) uniform Constants {
     int ubo_index;
@@ -898,21 +720,13 @@ layout(location = 2) out float frag_gamma_scale;
 layout(location = 3) out vec2 frag_tex_a;
 layout(location = 4) out vec2 frag_tex_b;
 
-#if !defined(HAS_UNIFORM_u_color)
-layout(location = 5) out vec4 frag_color;
-#endif
+#property varying color 5
 
-#if !defined(HAS_UNIFORM_u_blur)
-layout(location = 6) out float frag_blur;
-#endif
+#property varying blur 6
 
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 7) out float frag_opacity;
-#endif
+#property varying opacity 7
 
-#if !defined(HAS_UNIFORM_u_floorwidth)
-layout(location = 8) out float frag_floorwidth;
-#endif
+#property varying floorwidth 8
 
 #ifdef PROJECTION_GLOBE
 layout(location = 9) out float frag_tile_x;
@@ -925,17 +739,11 @@ layout(location = 10) flat out float frag_dash_width;
 void main() {
     const LineSDFDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
 
-#ifndef HAS_UNIFORM_u_color
-    frag_color = unpack_mix_color(in_color, drawable.color_t);
-#endif
+    #property pass color
 
-#ifndef HAS_UNIFORM_u_blur
-    frag_blur = unpack_mix_float(in_blur, drawable.blur_t);
-#endif
+    #property pass blur
 
-#ifndef HAS_UNIFORM_u_opacity
-    frag_opacity = unpack_mix_float(in_opacity, drawable.opacity_t);
-#endif
+    #property pass opacity
 
 #ifndef HAS_UNIFORM_u_floorwidth
     const float floorwidth = unpack_mix_float(in_floorwidth, drawable.floorwidth_t);
@@ -944,23 +752,11 @@ void main() {
     const float floorwidth = props.floorwidth;
 #endif
 
-#ifndef HAS_UNIFORM_u_offset
-    const float offset = unpack_mix_float(in_offset, drawable.offset_t) * -1.0;
-#else
-    const float offset = props.offset * -1.0;
-#endif
+    const float offset = $props.offset * -1.0;
 
-#ifndef HAS_UNIFORM_u_width
-    const float width = unpack_mix_float(in_width, drawable.width_t);
-#else
-    const float width = props.width;
-#endif
+    const float width = $props.width;
 
-#ifndef HAS_UNIFORM_u_gapwidth
-    const float gapwidth = unpack_mix_float(in_gapwidth, drawable.gapwidth_t) / 2.0;
-#else
-    const float gapwidth = props.gapwidth / 2.0;
-#endif
+    const float gapwidth = $props.gapwidth / 2.0;
 
     // the distance over which the line edge fades out.
     // Retina devices need a smaller distance to avoid aliasing.
@@ -1042,21 +838,13 @@ layout(location = 2) in float frag_gamma_scale;
 layout(location = 3) in vec2 frag_tex_a;
 layout(location = 4) in vec2 frag_tex_b;
 
-#if !defined(HAS_UNIFORM_u_color)
-layout(location = 5) in vec4 frag_color;
-#endif
+#property varying color 5
 
-#if !defined(HAS_UNIFORM_u_blur)
-layout(location = 6) in float frag_blur;
-#endif
+#property varying blur 6
 
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 7) in float frag_opacity;
-#endif
+#property varying opacity 7
 
-#if !defined(HAS_UNIFORM_u_floorwidth)
-layout(location = 8) in float frag_floorwidth;
-#endif
+#property varying floorwidth 8
 
 layout(location = 0) out vec4 out_color;
 
@@ -1097,29 +885,13 @@ void main() {
 
     const LineSDFTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
 
-#ifdef HAS_UNIFORM_u_color
-    const vec4 color = props.color;
-#else
-    const vec4 color = frag_color;
-#endif
+    const vec4 color = $props.color;
 
-#ifdef HAS_UNIFORM_u_blur
-    const float blur = props.blur;
-#else
-    const float blur = frag_blur;
-#endif
+    const float blur = $props.blur;
 
-#ifdef HAS_UNIFORM_u_opacity
-    const float opacity = props.opacity;
-#else
-    const float opacity = frag_opacity;
-#endif
+    const float opacity = $props.opacity;
 
-#ifdef HAS_UNIFORM_u_floorwidth
-    const float floorwidth = props.floorwidth;
-#else
-    const float floorwidth = frag_floorwidth;
-#endif
+    const float floorwidth = $props.floorwidth;
 
     // Calculate the distance of the pixel from the line in pixels.
     const float dist = length(frag_normal) * frag_width2.x;
@@ -1154,33 +926,19 @@ pub(super) const LINE_GRADIENT_SDF_SHADER: Glsl = Glsl {
 layout(location = 0) in ivec2 in_pos_normal;
 layout(location = 1) in uvec4 in_data;
 
-#if !defined(HAS_UNIFORM_u_blur)
-layout(location = 2) in vec2 in_blur;
-#endif
+#property attribute blur
 
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 3) in vec2 in_opacity;
-#endif
+#property attribute opacity
 
-#if !defined(HAS_UNIFORM_u_gapwidth)
-layout(location = 4) in vec2 in_gapwidth;
-#endif
+#property attribute gapwidth
 
-#if !defined(HAS_UNIFORM_u_offset)
-layout(location = 5) in vec2 in_offset;
-#endif
+#property attribute offset
 
-#if !defined(HAS_UNIFORM_u_width)
-layout(location = 6) in vec2 in_width;
-#endif
+#property attribute width
 
-#if !defined(HAS_UNIFORM_u_floorwidth)
-layout(location = 7) in vec2 in_floorwidth;
-#endif
+#property attribute floorwidth
 
-#if !defined(HAS_UNIFORM_u_dasharray)
-layout(location = 8) in vec4 in_dasharray;
-#endif
+#property attribute dasharray
 
 layout(push_constant) uniform Constants {
     int ubo_index;
@@ -1205,17 +963,11 @@ layout(location = 3) out vec2 frag_tex_a;
 layout(location = 4) out vec2 frag_tex_b;
 layout(location = 5) out float frag_lineprogress;
 
-#if !defined(HAS_UNIFORM_u_blur)
-layout(location = 6) out float frag_blur;
-#endif
+#property varying blur 6
 
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 7) out float frag_opacity;
-#endif
+#property varying opacity 7
 
-#if !defined(HAS_UNIFORM_u_floorwidth)
-layout(location = 8) out float frag_floorwidth;
-#endif
+#property varying floorwidth 8
 
 #ifdef PROJECTION_GLOBE
 layout(location = 9) out float frag_tile_x;
@@ -1228,13 +980,9 @@ layout(location = 10) flat out float frag_dash_width;
 void main() {
     const LineSDFDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
 
-#ifndef HAS_UNIFORM_u_blur
-    frag_blur = unpack_mix_float(in_blur, drawable.blur_t);
-#endif
+    #property pass blur
 
-#ifndef HAS_UNIFORM_u_opacity
-    frag_opacity = unpack_mix_float(in_opacity, drawable.opacity_t);
-#endif
+    #property pass opacity
 
 #ifndef HAS_UNIFORM_u_floorwidth
     const float floorwidth = unpack_mix_float(in_floorwidth, drawable.floorwidth_t);
@@ -1243,23 +991,11 @@ void main() {
     const float floorwidth = props.floorwidth;
 #endif
 
-#ifndef HAS_UNIFORM_u_offset
-    const float offset = unpack_mix_float(in_offset, drawable.offset_t) * -1.0;
-#else
-    const float offset = props.offset * -1.0;
-#endif
+    const float offset = $props.offset * -1.0;
 
-#ifndef HAS_UNIFORM_u_width
-    const float width = unpack_mix_float(in_width, drawable.width_t);
-#else
-    const float width = props.width;
-#endif
+    const float width = $props.width;
 
-#ifndef HAS_UNIFORM_u_gapwidth
-    const float gapwidth = unpack_mix_float(in_gapwidth, drawable.gapwidth_t) / 2.0;
-#else
-    const float gapwidth = props.gapwidth / 2.0;
-#endif
+    const float gapwidth = $props.gapwidth / 2.0;
 
     // the distance over which the line edge fades out.
     // Retina devices need a smaller distance to avoid aliasing.
@@ -1343,17 +1079,11 @@ layout(location = 3) in vec2 frag_tex_a;
 layout(location = 4) in vec2 frag_tex_b;
 layout(location = 5) in float frag_lineprogress;
 
-#if !defined(HAS_UNIFORM_u_blur)
-layout(location = 6) in float frag_blur;
-#endif
+#property varying blur 6
 
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 7) in float frag_opacity;
-#endif
+#property varying opacity 7
 
-#if !defined(HAS_UNIFORM_u_floorwidth)
-layout(location = 8) in float frag_floorwidth;
-#endif
+#property varying floorwidth 8
 
 #ifdef PROJECTION_GLOBE
 layout(location = 9) in float frag_tile_x;
@@ -1396,23 +1126,11 @@ void main() {
 
     const LineSDFTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
 
-#ifdef HAS_UNIFORM_u_blur
-    const float blur = props.blur;
-#else
-    const float blur = frag_blur;
-#endif
+    const float blur = $props.blur;
 
-#ifdef HAS_UNIFORM_u_opacity
-    const float opacity = props.opacity;
-#else
-    const float opacity = frag_opacity;
-#endif
+    const float opacity = $props.opacity;
 
-#ifdef HAS_UNIFORM_u_floorwidth
-    const float floorwidth = props.floorwidth;
-#else
-    const float floorwidth = frag_floorwidth;
-#endif
+    const float floorwidth = $props.floorwidth;
 
     // Calculate the distance of the pixel from the line in pixels.
     const float dist = length(frag_normal) * frag_width2.x;

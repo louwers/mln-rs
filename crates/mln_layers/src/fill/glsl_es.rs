@@ -9,44 +9,20 @@ out vec2 v_pos_a;
 out vec2 v_pos_b;
 out vec2 v_pos;
 
-#ifndef HAS_UNIFORM_u_color
-layout (location = 1) in highp vec4 a_color;
-out highp vec4 color;
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-layout (location = 4) in lowp vec2 a_opacity;
-out lowp float opacity;
-#endif
-#ifndef HAS_UNIFORM_u_pattern_from
-layout (location = 2) in highp vec4 a_pattern_from;
-flat out highp vec4 pattern_from;
-#endif
-#ifndef HAS_UNIFORM_u_pattern_to
-layout (location = 3) in highp vec4 a_pattern_to;
-flat out highp vec4 pattern_to;
-#endif
+#property attribute color
+#property varying color
+#property attribute opacity lowp
+#property varying opacity lowp
+#property attribute pattern_from
+#property varying pattern_from flat
+#property attribute pattern_to
+#property varying pattern_to flat
 
 void main() {
-    #ifndef HAS_UNIFORM_u_color
-color = unpack_mix_color(a_color, u_color_t);
-#else
-highp vec4 color = u_color;
-#endif
-    #ifndef HAS_UNIFORM_u_opacity
-opacity = unpack_mix_vec2(a_opacity, u_opacity_t);
-#else
-lowp float opacity = u_opacity;
-#endif
-    #ifndef HAS_UNIFORM_u_pattern_from
-pattern_from = a_pattern_from;
-#else
-highp vec4 pattern_from = u_pattern_from;
-#endif
-    #ifndef HAS_UNIFORM_u_pattern_to
-pattern_to = a_pattern_to;
-#else
-highp vec4 pattern_to = u_pattern_to;
-#endif
+#property pass color
+#property pass opacity lowp
+#property pass pattern_from
+#property pass pattern_to
 
     vec2 pattern_tl_a = pattern_from.xy;
     vec2 pattern_br_a = pattern_from.zw;
@@ -79,32 +55,16 @@ in vec2 v_pos_a;
 in vec2 v_pos_b;
 in vec2 v_pos;
 
-#ifndef HAS_UNIFORM_u_color
-in highp vec4 color;
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-in lowp float opacity;
-#endif
-#ifndef HAS_UNIFORM_u_pattern_from
-flat in highp vec4 pattern_from;
-#endif
-#ifndef HAS_UNIFORM_u_pattern_to
-flat in highp vec4 pattern_to;
-#endif
+#property varying color
+#property varying opacity lowp
+#property varying pattern_from flat
+#property varying pattern_to flat
 
 void main() {
-    #ifdef HAS_UNIFORM_u_color
-highp vec4 color = u_color;
-#endif
-    #ifdef HAS_UNIFORM_u_opacity
-lowp float opacity = u_opacity;
-#endif
-    #ifdef HAS_UNIFORM_u_pattern_from
-highp vec4 pattern_from = u_pattern_from;
-#endif
-    #ifdef HAS_UNIFORM_u_pattern_to
-highp vec4 pattern_to = u_pattern_to;
-#endif
+#property uniform color
+#property uniform opacity lowp
+#property uniform pattern_from
+#property uniform pattern_to
 
     vec2 pattern_tl_a = pattern_from.xy;
     vec2 pattern_br_a = pattern_from.zw;
@@ -153,26 +113,14 @@ pub(super) const FILL_OUTLINE_SHADER: Glsl = Glsl {
 
 out vec2 v_pos;
 
-#ifndef HAS_UNIFORM_u_outline_color
-layout (location = 1) in highp vec4 a_outline_color;
-out highp vec4 outline_color;
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-layout (location = 2) in lowp vec2 a_opacity;
-out lowp float opacity;
-#endif
+#property attribute outline_color
+#property varying outline_color
+#property attribute opacity lowp
+#property varying opacity lowp
 
 void main() {
-    #ifndef HAS_UNIFORM_u_outline_color
-outline_color = unpack_mix_color(a_outline_color, u_outline_color_t);
-#else
-highp vec4 outline_color = u_outline_color;
-#endif
-    #ifndef HAS_UNIFORM_u_opacity
-opacity = unpack_mix_vec2(a_opacity, u_opacity_t);
-#else
-lowp float opacity = u_opacity;
-#endif
+#property pass outline_color
+#property pass opacity lowp
 
     gl_Position = projectTile(a_pos, a_pos);
     v_pos = (gl_Position.xy / gl_Position.w + 1.0) / 2.0 * u_target_size;
@@ -180,20 +128,12 @@ lowp float opacity = u_opacity;
 ",
     fragment: r"in highp vec2 v_pos;
 
-#ifndef HAS_UNIFORM_u_outline_color
-in highp vec4 outline_color;
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-in lowp float opacity;
-#endif
+#property varying outline_color
+#property varying opacity lowp
 
 void main() {
-    #ifdef HAS_UNIFORM_u_outline_color
-highp vec4 outline_color = u_outline_color;
-#endif
-    #ifdef HAS_UNIFORM_u_opacity
-lowp float opacity = u_opacity;
-#endif
+#property uniform outline_color
+#property uniform opacity lowp
 
     float dist = length(v_pos - gl_FragCoord.xy);
     float alpha = 1.0 - smoothstep(0.0, 1.0, dist);
@@ -272,28 +212,16 @@ layout (location = 4) in vec2 a_outline_end;
 
 out vec2 v_pos;
 
-#ifndef HAS_UNIFORM_u_outline_color
-layout (location = 1) in highp vec4 a_outline_color;
-out highp vec4 outline_color;
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-layout (location = 2) in lowp vec2 a_opacity;
-out lowp float opacity;
-#endif
+#property attribute outline_color
+#property varying outline_color
+#property attribute opacity lowp
+#property varying opacity lowp
 ",
         outline_corner!(),
         r"
 void main() {
-    #ifndef HAS_UNIFORM_u_outline_color
-outline_color = unpack_mix_color(a_outline_color, u_outline_color_t);
-#else
-highp vec4 outline_color = u_outline_color;
-#endif
-    #ifndef HAS_UNIFORM_u_opacity
-opacity = unpack_mix_vec2(a_opacity, u_opacity_t);
-#else
-lowp float opacity = u_opacity;
-#endif
+#property pass outline_color
+#property pass opacity lowp
 
     highp float t;
     gl_Position = outline_corner(projectTile(a_outline_pos, a_outline_pos), projectTile(a_outline_end, a_outline_end), a_pos, v_pos, t);
@@ -316,46 +244,22 @@ out vec2 v_pos_a;
 out vec2 v_pos_b;
 out vec2 v_pos;
 
-#ifndef HAS_UNIFORM_u_color
-layout (location = 1) in highp vec4 a_color;
-out highp vec4 color;
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-layout (location = 4) in lowp vec2 a_opacity;
-out lowp float opacity;
-#endif
-#ifndef HAS_UNIFORM_u_pattern_from
-layout (location = 2) in highp vec4 a_pattern_from;
-flat out highp vec4 pattern_from;
-#endif
-#ifndef HAS_UNIFORM_u_pattern_to
-layout (location = 3) in highp vec4 a_pattern_to;
-flat out highp vec4 pattern_to;
-#endif
+#property attribute color
+#property varying color
+#property attribute opacity lowp
+#property varying opacity lowp
+#property attribute pattern_from
+#property varying pattern_from flat
+#property attribute pattern_to
+#property varying pattern_to flat
 ",
         outline_corner!(),
         r"
 void main() {
-    #ifndef HAS_UNIFORM_u_color
-color = unpack_mix_color(a_color, u_color_t);
-#else
-highp vec4 color = u_color;
-#endif
-    #ifndef HAS_UNIFORM_u_opacity
-opacity = unpack_mix_vec2(a_opacity, u_opacity_t);
-#else
-lowp float opacity = u_opacity;
-#endif
-    #ifndef HAS_UNIFORM_u_pattern_from
-pattern_from = a_pattern_from;
-#else
-highp vec4 pattern_from = u_pattern_from;
-#endif
-    #ifndef HAS_UNIFORM_u_pattern_to
-pattern_to = a_pattern_to;
-#else
-highp vec4 pattern_to = u_pattern_to;
-#endif
+#property pass color
+#property pass opacity lowp
+#property pass pattern_from
+#property pass pattern_to
 
     vec2 display_size_a = (pattern_from.zw - pattern_from.xy) / u_pixel_ratio;
     vec2 display_size_b = (pattern_to.zw - pattern_to.xy) / u_pixel_ratio;
@@ -378,44 +282,20 @@ pub(super) const FILL_PATTERN_SHADER: Glsl = Glsl {
 out vec2 v_pos_a;
 out vec2 v_pos_b;
 
-#ifndef HAS_UNIFORM_u_color
-layout (location = 1) in highp vec4 a_color;
-out highp vec4 color;
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-layout (location = 4) in lowp vec2 a_opacity;
-out lowp float opacity;
-#endif
-#ifndef HAS_UNIFORM_u_pattern_from
-layout (location = 2) in highp vec4 a_pattern_from;
-flat out highp vec4 pattern_from;
-#endif
-#ifndef HAS_UNIFORM_u_pattern_to
-layout (location = 3) in highp vec4 a_pattern_to;
-flat out highp vec4 pattern_to;
-#endif
+#property attribute color
+#property varying color
+#property attribute opacity lowp
+#property varying opacity lowp
+#property attribute pattern_from
+#property varying pattern_from flat
+#property attribute pattern_to
+#property varying pattern_to flat
 
 void main() {
-    #ifndef HAS_UNIFORM_u_color
-color = unpack_mix_color(a_color, u_color_t);
-#else
-highp vec4 color = u_color;
-#endif
-    #ifndef HAS_UNIFORM_u_opacity
-opacity = unpack_mix_vec2(a_opacity, u_opacity_t);
-#else
-lowp float opacity = u_opacity;
-#endif
-    #ifndef HAS_UNIFORM_u_pattern_from
-pattern_from = a_pattern_from;
-#else
-highp vec4 pattern_from = u_pattern_from;
-#endif
-    #ifndef HAS_UNIFORM_u_pattern_to
-pattern_to = a_pattern_to;
-#else
-highp vec4 pattern_to = u_pattern_to;
-#endif
+#property pass color
+#property pass opacity lowp
+#property pass pattern_from
+#property pass pattern_to
 
     vec2 pattern_tl_a = pattern_from.xy;
     vec2 pattern_br_a = pattern_from.zw;
@@ -444,32 +324,16 @@ uniform sampler2D u_image;
 in vec2 v_pos_a;
 in vec2 v_pos_b;
 
-#ifndef HAS_UNIFORM_u_color
-in highp vec4 color;
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-in lowp float opacity;
-#endif
-#ifndef HAS_UNIFORM_u_pattern_from
-flat in highp vec4 pattern_from;
-#endif
-#ifndef HAS_UNIFORM_u_pattern_to
-flat in highp vec4 pattern_to;
-#endif
+#property varying color
+#property varying opacity lowp
+#property varying pattern_from flat
+#property varying pattern_to flat
 
 void main() {
-    #ifdef HAS_UNIFORM_u_color
-highp vec4 color = u_color;
-#endif
-    #ifdef HAS_UNIFORM_u_opacity
-lowp float opacity = u_opacity;
-#endif
-    #ifdef HAS_UNIFORM_u_pattern_from
-highp vec4 pattern_from = u_pattern_from;
-#endif
-    #ifdef HAS_UNIFORM_u_pattern_to
-highp vec4 pattern_to = u_pattern_to;
-#endif
+#property uniform color
+#property uniform opacity lowp
+#property uniform pattern_from
+#property uniform pattern_to
 
     vec2 pattern_tl_a = pattern_from.xy;
     vec2 pattern_br_a = pattern_from.zw;
@@ -511,26 +375,14 @@ highp vec4 pattern_to = u_pattern_to;
 pub(super) const FILL_SHADER: Glsl = Glsl {
     vertex: r"layout (location = 0) in vec2 a_pos;
 
-#ifndef HAS_UNIFORM_u_color
-layout (location = 1) in highp vec4 a_color;
-out highp vec4 color;
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-layout (location = 2) in lowp vec2 a_opacity;
-out lowp float opacity;
-#endif
+#property attribute color
+#property varying color
+#property attribute opacity lowp
+#property varying opacity lowp
 
 void main() {
-    #ifndef HAS_UNIFORM_u_color
-color = unpack_mix_color(a_color, u_color_t);
-#else
-highp vec4 color = u_color;
-#endif
-    #ifndef HAS_UNIFORM_u_opacity
-opacity = unpack_mix_vec2(a_opacity, u_opacity_t);
-#else
-lowp float opacity = u_opacity;
-#endif
+#property pass color
+#property pass opacity lowp
 
     gl_Position = projectTile(a_pos, a_pos);
 }
@@ -538,17 +390,11 @@ lowp float opacity = u_opacity;
     fragment: r"#ifndef HAS_UNIFORM_u_color
 in highp vec4 color;
 #endif
-#ifndef HAS_UNIFORM_u_opacity
-in lowp float opacity;
-#endif
+#property varying opacity lowp
 
 void main() {
-    #ifdef HAS_UNIFORM_u_color
-highp vec4 color = u_color;
-#endif
-    #ifdef HAS_UNIFORM_u_opacity
-lowp float opacity = u_opacity;
-#endif
+#property uniform color
+#property uniform opacity lowp
 
     fragColor = color * opacity;
 

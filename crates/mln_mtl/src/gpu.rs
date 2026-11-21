@@ -1348,7 +1348,7 @@ impl Gpu for MetalGpu {
             compile(
                 self.device.device(),
                 program.name,
-                &library_source(program, source),
+                &library_source(program, source)?,
                 source.vertex_main_function,
                 source.fragment_main_function,
                 key.define_values(),

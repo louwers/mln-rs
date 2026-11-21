@@ -257,9 +257,7 @@ struct VertexStage {
     float3 projected_pos [[attribute(3)]];
     float fade_opacity [[attribute(4)]];
 
-#if !defined(HAS_UNIFORM_u_opacity)
-    float2 opacity [[attribute(5)]];
-#endif
+    #property attribute opacity
 
     // The top-left of the quad's atlas rectangle.
     ushort2 tex_origin [[attribute(6)]];
@@ -464,21 +462,11 @@ struct VertexStage {
     float3 projected_pos [[attribute(3)]];
     float fade_opacity [[attribute(4)]];
 
-#if !defined(HAS_UNIFORM_u_fill_color)
-    float4 fill_color [[attribute(5)]];
-#endif
-#if !defined(HAS_UNIFORM_u_halo_color)
-    float4 halo_color [[attribute(6)]];
-#endif
-#if !defined(HAS_UNIFORM_u_opacity)
-    float2 opacity [[attribute(7)]];
-#endif
-#if !defined(HAS_UNIFORM_u_halo_width)
-    float2 halo_width [[attribute(8)]];
-#endif
-#if !defined(HAS_UNIFORM_u_halo_blur)
-    float2 halo_blur [[attribute(9)]];
-#endif
+    #property attribute fill_color
+    #property attribute halo_color
+    #property attribute opacity
+    #property attribute halo_width
+    #property attribute halo_blur
 
     // The top-left of the quad's atlas rectangle.
     ushort2 tex_origin [[attribute(10)]];
@@ -489,12 +477,8 @@ struct VertexStage {
 struct FragmentStage {
     float4 position [[position, invariant]];
 
-#if !defined(HAS_UNIFORM_u_fill_color)
-    half4 fill_color;
-#endif
-#if !defined(HAS_UNIFORM_u_halo_color)
-    half4 halo_color;
-#endif
+    #property varying fill_color half4
+    #property varying halo_color half4
 
     // The texture coordinate relative to the quad's atlas origin, which
     // atlas_pos adds back.
@@ -659,12 +643,8 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 
     return {
         .position     = position,
-#if !defined(HAS_UNIFORM_u_fill_color)
-        .fill_color   = half4(unpack_mix_color(vertx.fill_color, drawable.fill_color_t)),
-#endif
-#if !defined(HAS_UNIFORM_u_halo_color)
-        .halo_color   = half4(unpack_mix_color(vertx.halo_color, drawable.halo_color_t)),
-#endif
+        #property pass fill_color
+        #property pass halo_color
         .tex          = (a_tex - tex_origin) / drawable.texsize,
         .tex_origin   = tex_origin / drawable.texsize,
         .gamma_scaled = half(gamma_scaled),
@@ -750,21 +730,11 @@ struct VertexStage {
     float3 projected_pos [[attribute(2)]];
     float fade_opacity [[attribute(3)]];
 
-#if !defined(HAS_UNIFORM_u_fill_color)
-    float4 fill_color [[attribute(4)]];
-#endif
-#if !defined(HAS_UNIFORM_u_halo_color)
-    float4 halo_color [[attribute(5)]];
-#endif
-#if !defined(HAS_UNIFORM_u_opacity)
-    float2 opacity [[attribute(6)]];
-#endif
-#if !defined(HAS_UNIFORM_u_halo_width)
-    float2 halo_width [[attribute(7)]];
-#endif
-#if !defined(HAS_UNIFORM_u_halo_blur)
-    float2 halo_blur [[attribute(8)]];
-#endif
+    #property attribute fill_color
+    #property attribute halo_color
+    #property attribute opacity
+    #property attribute halo_width
+    #property attribute halo_blur
 
     // The top-left of the quad's atlas rectangle.
     ushort2 tex_origin [[attribute(9)]];
@@ -775,12 +745,8 @@ struct VertexStage {
 struct FragmentStage {
     float4 position [[position, invariant]];
 
-#if !defined(HAS_UNIFORM_u_fill_color)
-    half4 fill_color;
-#endif
-#if !defined(HAS_UNIFORM_u_halo_color)
-    half4 halo_color;
-#endif
+    #property varying fill_color half4
+    #property varying halo_color half4
 
     // The texture coordinate relative to the quad's atlas origin, which
     // atlas_pos adds back.
@@ -949,12 +915,8 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 
     return {
         .position     = position,
-#if !defined(HAS_UNIFORM_u_fill_color)
-        .fill_color   = half4(unpack_mix_color(vertx.fill_color, drawable.fill_color_t)),
-#endif
-#if !defined(HAS_UNIFORM_u_halo_color)
-        .halo_color   = half4(unpack_mix_color(vertx.halo_color, drawable.halo_color_t)),
-#endif
+        #property pass fill_color
+        #property pass halo_color
         .tex          = (a_tex - tex_origin) / texsize,
         .tex_origin   = tex_origin / texsize,
         .gamma_scaled = half(gamma_scaled),

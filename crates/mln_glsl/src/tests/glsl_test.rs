@@ -19,7 +19,7 @@ use mln_gfx::shaders::shader_defines::{
     ID_PROJECTION_UBO, ID_VIEW_UBO, LAYER_SSBO_START_ID, MAX_ATTRIBUTE_COUNT_PER_SHADER, MAX_TEXTURE_COUNT_PER_SHADER,
     MAX_UBO_COUNT_PER_SHADER,
 };
-use mln_gfx::shaders::source::glsl::Glsl;
+use mln_gfx::shaders::source::glsl::{self, Glsl};
 use naga::{AddressSpace, ArraySize, Binding, Interpolation, Module, ScalarKind, StorageAccess, TypeInner};
 
 use crate::front_end::parse;
@@ -47,14 +47,15 @@ fn every_program_declares_the_properties_its_glsl_reads_from_uniforms() {
     const PREFIX: &str = "HAS_UNIFORM_u_";
     for (program, source) in programs() {
         let mut tested = BTreeSet::new();
-        for text in [source.prelude, source.vertex, source.fragment] {
+        let [vertex, fragment] = glsl::expand(program, source).expect("expands");
+        for text in [source.prelude, &vertex, &fragment] {
             for (start, _) in text.match_indices(PREFIX) {
                 let rest = &text[start + PREFIX.len()..];
                 let end = rest.find(|c: char| !c.is_ascii_alphanumeric() && c != '_').unwrap_or(rest.len());
-                tested.insert(&rest[..end]);
+                tested.insert(rest[..end].to_owned());
             }
         }
-        let declared: BTreeSet<&str> = program.properties.iter().map(|property| property.name).collect();
+        let declared: BTreeSet<String> = program.properties.iter().map(|property| property.name.to_owned()).collect();
         assert_eq!(tested, declared, "{}", program.name);
     }
 }
@@ -84,7 +85,7 @@ fn every_layer_program_shows_the_overdraw_inspector() {
 
 /// The module of a stage of `source` with `defines`, unvalidated.
 fn module(program: &Program, source: &Glsl, stage: Stage, defines: &str) -> Module {
-    parse(stage, &compose(program, source, stage, defines))
+    parse(stage, &compose(program, source, stage, defines).expect("expands"))
         .unwrap_or_else(|error| panic!("{} ({stage:?}):\n{error}", program.name))
 }
 
@@ -98,7 +99,8 @@ fn every_stage_validates() {
     for (program, source) in programs() {
         for variant in variants(program, true) {
             for stage in STAGES {
-                match crate::Module::parse(stage, &compose(program, source, stage, &variant.defines)) {
+                match crate::Module::parse(stage, &compose(program, source, stage, &variant.defines).expect("expands"))
+                {
                     Ok(_) => validated += 1,
                     Err(error) => failures.push(format!("{} ({}, {stage:?}):\n{error}", program.name, variant.name)),
                 }

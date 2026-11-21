@@ -67,7 +67,7 @@ pub static SYMBOL_ICON: Program = Program {
     ],
     instance_attributes: &[],
     textures: &[Texture::new("u_texture")],
-    properties: &[Property::new("opacity", ID_SYMBOL_OPACITY_ATTRIBUTE)],
+    properties: &[Property::float("opacity", ID_SYMBOL_OPACITY_ATTRIBUTE)],
     sources: sources!(
         wgsl: SYMBOL_ICON_SHADER,
         msl: SYMBOL_ICON_SHADER,
@@ -100,11 +100,11 @@ pub static SYMBOL_SDF: Program = Program {
     instance_attributes: &[],
     textures: &[Texture::new("u_texture")],
     properties: &[
-        Property::new("opacity", ID_SYMBOL_OPACITY_ATTRIBUTE),
-        Property::new("fill_color", ID_SYMBOL_COLOR_ATTRIBUTE),
-        Property::new("halo_color", ID_SYMBOL_HALO_COLOR_ATTRIBUTE),
-        Property::new("halo_width", ID_SYMBOL_HALO_WIDTH_ATTRIBUTE),
-        Property::new("halo_blur", ID_SYMBOL_HALO_BLUR_ATTRIBUTE),
+        Property::float("opacity", ID_SYMBOL_OPACITY_ATTRIBUTE),
+        Property::color("fill_color", ID_SYMBOL_COLOR_ATTRIBUTE),
+        Property::color("halo_color", ID_SYMBOL_HALO_COLOR_ATTRIBUTE),
+        Property::float("halo_width", ID_SYMBOL_HALO_WIDTH_ATTRIBUTE),
+        Property::float("halo_blur", ID_SYMBOL_HALO_BLUR_ATTRIBUTE),
     ],
     sources: sources!(
         wgsl: SYMBOL_SDF_SHADER,
@@ -137,11 +137,11 @@ pub static SYMBOL_TEXT_AND_ICON: Program = Program {
     instance_attributes: &[],
     textures: &[Texture::new("u_texture"), Texture::new("u_texture_icon")],
     properties: &[
-        Property::new("opacity", ID_SYMBOL_OPACITY_ATTRIBUTE),
-        Property::new("fill_color", ID_SYMBOL_COLOR_ATTRIBUTE),
-        Property::new("halo_color", ID_SYMBOL_HALO_COLOR_ATTRIBUTE),
-        Property::new("halo_width", ID_SYMBOL_HALO_WIDTH_ATTRIBUTE),
-        Property::new("halo_blur", ID_SYMBOL_HALO_BLUR_ATTRIBUTE),
+        Property::float("opacity", ID_SYMBOL_OPACITY_ATTRIBUTE),
+        Property::color("fill_color", ID_SYMBOL_COLOR_ATTRIBUTE),
+        Property::color("halo_color", ID_SYMBOL_HALO_COLOR_ATTRIBUTE),
+        Property::float("halo_width", ID_SYMBOL_HALO_WIDTH_ATTRIBUTE),
+        Property::float("halo_blur", ID_SYMBOL_HALO_BLUR_ATTRIBUTE),
     ],
     sources: sources!(
         wgsl: SYMBOL_TEXT_AND_ICON_SHADER,

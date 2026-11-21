@@ -13,7 +13,7 @@ use mln_gfx::RendererBackend as _;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::program::{PROJECTION_BUFFER, Program, VIEW_BUFFER};
 use mln_gfx::shaders::program_parameters::ProgramParameters;
-use mln_gfx::shaders::source::glsl_es::Glsl;
+use mln_gfx::shaders::source::glsl_es::{self, Glsl};
 use mln_util::hash::HashSet;
 
 use crate::shaders::glsl_sources::stage_sources;
@@ -48,11 +48,12 @@ fn programs() -> Vec<(&'static Program, &'static Glsl)> {
     programs.filter_map(|&program| Some((program, program.sources.glsl_es?))).collect()
 }
 
-/// The names after `HAS_UNIFORM_u_` in a shader's GLSL.
-fn uniforms(source: &Glsl) -> BTreeSet<String> {
+/// The names after `HAS_UNIFORM_u_` in `program`'s GLSL, `source`, once its
+/// properties are written out.
+fn uniforms(program: &Program, source: &Glsl) -> BTreeSet<String> {
     const PREFIX: &str = "HAS_UNIFORM_u_";
     let mut names = BTreeSet::new();
-    for glsl in [source.vertex, source.fragment] {
+    for glsl in glsl_es::expand(program, source).expect("expands") {
         for (start, _) in glsl.match_indices(PREFIX) {
             let rest = &glsl[start + PREFIX.len()..];
             let end = rest.find(|c: char| !c.is_ascii_alphanumeric() && c != '_').unwrap_or(rest.len());
@@ -68,7 +69,7 @@ fn uniforms(source: &Glsl) -> BTreeSet<String> {
 fn every_program_declares_the_properties_its_glsl_reads_from_uniforms() {
     for (program, source) in programs() {
         let declared: BTreeSet<String> = program.properties.iter().map(|property| property.name.to_owned()).collect();
-        assert_eq!(uniforms(source), declared, "{}", program.name);
+        assert_eq!(uniforms(program, source), declared, "{}", program.name);
     }
 }
 

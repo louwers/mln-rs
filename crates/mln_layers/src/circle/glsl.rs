@@ -15,33 +15,19 @@ pub(super) const CIRCLE_SHADER: Glsl = Glsl {
 
 layout(location = 0) in ivec2 in_position;
 
-#if !defined(HAS_UNIFORM_u_color)
-layout(location = 1) in vec4 in_color;
-#endif
+#property attribute color
 
-#if !defined(HAS_UNIFORM_u_radius)
-layout(location = 2) in vec2 in_radius;
-#endif
+#property attribute radius
 
-#if !defined(HAS_UNIFORM_u_blur)
-layout(location = 3) in vec2 in_blur;
-#endif
+#property attribute blur
 
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 4) in vec2 in_opacity;
-#endif
+#property attribute opacity
 
-#if !defined(HAS_UNIFORM_u_stroke_color)
-layout(location = 5) in vec4 in_stroke_color;
-#endif
+#property attribute stroke_color
 
-#if !defined(HAS_UNIFORM_u_stroke_width)
-layout(location = 6) in vec2 in_stroke_width;
-#endif
+#property attribute stroke_width
 
-#if !defined(HAS_UNIFORM_u_stroke_opacity)
-layout(location = 7) in vec2 in_stroke_opacity;
-#endif
+#property attribute stroke_opacity
 
 layout(push_constant) uniform Constants {
     int ubo_index;
@@ -62,48 +48,26 @@ layout(set = LAYER_SET_INDEX, binding = idCircleEvaluatedPropsUBO) uniform Circl
 layout(location = 0) out vec2 frag_extrude;
 layout(location = 1) out float frag_antialiasblur;
 
-#if !defined(HAS_UNIFORM_u_color)
-layout(location = 2) out vec4 frag_color;
-#endif
+#property varying color 2
 
-#if !defined(HAS_UNIFORM_u_radius)
-layout(location = 3) out float frag_radius;
-#endif
+#property varying radius 3
 
-#if !defined(HAS_UNIFORM_u_blur)
-layout(location = 4) out float frag_blur;
-#endif
+#property varying blur 4
 
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 5) out float frag_opacity;
-#endif
+#property varying opacity 5
 
-#if !defined(HAS_UNIFORM_u_stroke_color)
-layout(location = 6) out vec4 frag_stroke_color;
-#endif
+#property varying stroke_color 6
 
-#if !defined(HAS_UNIFORM_u_stroke_width)
-layout(location = 7) out float frag_stroke_width;
-#endif
+#property varying stroke_width 7
 
-#if !defined(HAS_UNIFORM_u_stroke_opacity)
-layout(location = 8) out float frag_stroke_opacity;
-#endif
+#property varying stroke_opacity 8
 
 void main() {
     const CircleDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
 
-#if defined(HAS_UNIFORM_u_radius)
-    const float radius = props.radius;
-#else
-    const float radius = unpack_mix_float(in_radius, drawable.radius_t);
-#endif
+    const float radius = $props.radius;
 
-#if defined(HAS_UNIFORM_u_stroke_width)
-    const float stroke_width = props.stroke_width;
-#else
-    const float stroke_width = unpack_mix_float(in_stroke_width, drawable.stroke_width_t);
-#endif
+    const float stroke_width = $props.stroke_width;
 
     // unencode the extrusion vector that we snuck into the a_pos vector
     const vec2 extrude = mod(in_position, 2.0) * 2.0 - 1.0;
@@ -167,33 +131,23 @@ void main() {
 
     frag_extrude = extrude;
 
-#if !defined(HAS_UNIFORM_u_color)
-    frag_color = unpack_mix_color(in_color, drawable.color_t);
-#endif
+    #property pass color
 
 #if !defined(HAS_UNIFORM_u_radius)
     frag_radius = radius;
 #endif
 
-#if !defined(HAS_UNIFORM_u_blur)
-    frag_blur = unpack_mix_float(in_blur, drawable.blur_t);
-#endif
+    #property pass blur
 
-#if !defined(HAS_UNIFORM_u_opacity)
-    frag_opacity = unpack_mix_float(in_opacity, drawable.opacity_t);
-#endif
+    #property pass opacity
 
-#if !defined(HAS_UNIFORM_u_stroke_color)
-    frag_stroke_color = unpack_mix_color(in_stroke_color, drawable.stroke_color_t);
-#endif
+    #property pass stroke_color
 
 #if !defined(HAS_UNIFORM_u_stroke_width)
     frag_stroke_width = stroke_width;
 #endif
 
-#if !defined(HAS_UNIFORM_u_stroke_opacity)
-    frag_stroke_opacity = unpack_mix_float(in_stroke_opacity, drawable.stroke_opacity_t);
-#endif
+    #property pass stroke_opacity
 }
 ",
     fragment: r"
@@ -201,33 +155,19 @@ void main() {
 layout(location = 0) in vec2 frag_extrude;
 layout(location = 1) in float frag_antialiasblur;
 
-#if !defined(HAS_UNIFORM_u_color)
-layout(location = 2) in vec4 frag_color;
-#endif
+#property varying color 2
 
-#if !defined(HAS_UNIFORM_u_radius)
-layout(location = 3) in float frag_radius;
-#endif
+#property varying radius 3
 
-#if !defined(HAS_UNIFORM_u_blur)
-layout(location = 4) in float frag_blur;
-#endif
+#property varying blur 4
 
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 5) in float frag_opacity;
-#endif
+#property varying opacity 5
 
-#if !defined(HAS_UNIFORM_u_stroke_color)
-layout(location = 6) in vec4 frag_stroke_color;
-#endif
+#property varying stroke_color 6
 
-#if !defined(HAS_UNIFORM_u_stroke_width)
-layout(location = 7) in float frag_stroke_width;
-#endif
+#property varying stroke_width 7
 
-#if !defined(HAS_UNIFORM_u_stroke_opacity)
-layout(location = 8) in float frag_stroke_opacity;
-#endif
+#property varying stroke_opacity 8
 
 layout(location = 0) out vec4 out_color;
 
@@ -242,41 +182,13 @@ void main() {
     return;
 #endif
 
-#if defined(HAS_UNIFORM_u_color)
-    const vec4 color = props.color;
-#else
-    const vec4 color = frag_color;
-#endif
-#if defined(HAS_UNIFORM_u_radius)
-    const float radius = props.radius;
-#else
-    const float radius = frag_radius;
-#endif
-#if defined(HAS_UNIFORM_u_blur)
-    const float blur = props.blur;
-#else
-    const float blur = frag_blur;
-#endif
-#if defined(HAS_UNIFORM_u_opacity)
-    const float opacity = props.opacity;
-#else
-    const float opacity = frag_opacity;
-#endif
-#if defined(HAS_UNIFORM_u_stroke_color)
-    const vec4 stroke_color = props.stroke_color;
-#else
-    const vec4 stroke_color = frag_stroke_color;
-#endif
-#if defined(HAS_UNIFORM_u_stroke_width)
-    const float stroke_width = props.stroke_width;
-#else
-    const float stroke_width = frag_stroke_width;
-#endif
-#if defined(HAS_UNIFORM_u_stroke_opacity)
-    const float stroke_opacity = props.stroke_opacity;
-#else
-    const float stroke_opacity = frag_stroke_opacity;
-#endif
+    const vec4 color = $props.color;
+    const float radius = $props.radius;
+    const float blur = $props.blur;
+    const float opacity = $props.opacity;
+    const vec4 stroke_color = $props.stroke_color;
+    const float stroke_width = $props.stroke_width;
+    const float stroke_opacity = $props.stroke_opacity;
 
     const float extrude_length = length(frag_extrude);
     const float antialiased_blur = -max(blur, frag_antialiasblur);

@@ -53,8 +53,8 @@ pub static FILL: Program = Program {
     instance_attributes: &[],
     textures: &[],
     properties: &[
-        Property::new("color", ID_FILL_COLOR_VERTEX_ATTRIBUTE),
-        Property::new("opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
+        Property::color("color", ID_FILL_COLOR_VERTEX_ATTRIBUTE),
+        Property::float("opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
     ],
     sources: sources!(wgsl: FILL_SHADER, msl: FILL_SHADER, glsl_es: FILL_SHADER, glsl: FILL_SHADER,),
 };
@@ -73,8 +73,8 @@ pub static FILL_OUTLINE: Program = Program {
     instance_attributes: &[],
     textures: &[],
     properties: &[
-        Property::new("opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
-        Property::new("outline_color", ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE),
+        Property::float("opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
+        Property::color("outline_color", ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE),
     ],
     sources: sources!(wgsl: FILL_OUTLINE_SHADER, glsl_es: FILL_OUTLINE_SHADER, glsl: FILL_OUTLINE_SHADER,),
 };
@@ -96,10 +96,10 @@ pub static FILL_PATTERN: Program = Program {
     instance_attributes: &[],
     textures: &[Texture::new("u_image")],
     properties: &[
-        Property::new("color", ID_FILL_COLOR_VERTEX_ATTRIBUTE),
-        Property::new("opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
-        Property::new("pattern_from", ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE),
-        Property::new("pattern_to", ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE),
+        Property::color("color", ID_FILL_COLOR_VERTEX_ATTRIBUTE),
+        Property::float("opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
+        Property::vec4("pattern_from", ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE),
+        Property::vec4("pattern_to", ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE),
     ],
     sources: sources!(
         wgsl: FILL_PATTERN_SHADER,
@@ -126,10 +126,10 @@ pub static FILL_OUTLINE_PATTERN: Program = Program {
     instance_attributes: &[],
     textures: &[Texture::new("u_image")],
     properties: &[
-        Property::new("color", ID_FILL_COLOR_VERTEX_ATTRIBUTE),
-        Property::new("opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
-        Property::new("pattern_from", ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE),
-        Property::new("pattern_to", ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE),
+        Property::color("color", ID_FILL_COLOR_VERTEX_ATTRIBUTE),
+        Property::float("opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
+        Property::vec4("pattern_from", ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE),
+        Property::vec4("pattern_to", ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE),
     ],
     sources: sources!(
         wgsl: FILL_OUTLINE_PATTERN_SHADER,
@@ -153,8 +153,8 @@ pub static FILL_OUTLINE_INSTANCED: Program = Program {
     ],
     textures: &[],
     properties: &[
-        Property::new("opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
-        Property::new("outline_color", ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE),
+        Property::float("opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
+        Property::color("outline_color", ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE),
     ],
     sources: sources!(
         wgsl: FILL_OUTLINE_INSTANCED_SHADER,
@@ -180,8 +180,8 @@ pub static FILL_OUTLINE_PULLED: Program = Program {
     instance_attributes: &[],
     textures: &[],
     properties: &[
-        Property::new("opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
-        Property::new("outline_color", ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE),
+        Property::float("opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
+        Property::color("outline_color", ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE),
     ],
     sources: sources!(
         wgsl: FILL_OUTLINE_PULLED_SHADER,
@@ -208,10 +208,10 @@ pub static FILL_OUTLINE_PATTERN_INSTANCED: Program = Program {
     ],
     textures: &[Texture::new("u_image")],
     properties: &[
-        Property::new("color", ID_FILL_COLOR_VERTEX_ATTRIBUTE),
-        Property::new("opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
-        Property::new("pattern_from", ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE),
-        Property::new("pattern_to", ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE),
+        Property::color("color", ID_FILL_COLOR_VERTEX_ATTRIBUTE),
+        Property::float("opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
+        Property::vec4("pattern_from", ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE),
+        Property::vec4("pattern_to", ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE),
     ],
     sources: sources!(
         wgsl: FILL_OUTLINE_PATTERN_INSTANCED_SHADER,

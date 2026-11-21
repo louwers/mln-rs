@@ -99,18 +99,10 @@ struct VertexStage {
     short2 outline_pos [[attribute(5)]];
     short2 outline_end [[attribute(6)]];
 
-#if !defined(HAS_UNIFORM_u_color)
-    float4 color [[attribute(1)]];
-#endif
-#if !defined(HAS_UNIFORM_u_pattern_from)
-    ushort4 pattern_from [[attribute(2)]];
-#endif
-#if !defined(HAS_UNIFORM_u_pattern_to)
-    ushort4 pattern_to [[attribute(3)]];
-#endif
-#if !defined(HAS_UNIFORM_u_opacity)
-    float2 opacity [[attribute(4)]];
-#endif
+    #property attribute color
+    #property attribute pattern_from
+    #property attribute pattern_to
+    #property attribute opacity
 };
 
 struct FragmentStage {
@@ -119,18 +111,10 @@ struct FragmentStage {
     float2 v_pos_b;
     float2 v_pos;
 
-#if !defined(HAS_UNIFORM_u_color)
-    half4 color;
-#endif
-#if !defined(HAS_UNIFORM_u_pattern_from)
-    float4 pattern_from [[flat]];
-#endif
-#if !defined(HAS_UNIFORM_u_pattern_to)
-    float4 pattern_to [[flat]];
-#endif
-#if !defined(HAS_UNIFORM_u_opacity)
-    half opacity;
-#endif
+    #property varying color half4
+    #property varying pattern_from float4 flat
+    #property varying pattern_to float4 flat
+    #property varying opacity half
 };
 ",
         outline_corner!(),
@@ -146,17 +130,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     device const FillPatternDrawableUBO& drawable = drawableVector[uboIndex];
     device const FillPatternTilePropsUBO& tileProps = tilePropsVector[uboIndex];
 
-#if defined(HAS_UNIFORM_u_pattern_from)
-    const auto pattern_from = tileProps.pattern_from;
-#else
-    const auto pattern_from = float4(vertx.pattern_from);
-#endif
+    const auto pattern_from = $tileProps.pattern_from;
 
-#if defined(HAS_UNIFORM_u_pattern_to)
-    const auto pattern_to   = tileProps.pattern_to;
-#else
-    const auto pattern_to   = float4(vertx.pattern_to);
-#endif
+    const auto pattern_to   = $tileProps.pattern_to;
 
 #if !defined(HAS_UNIFORM_u_opacity)
     const auto opacity      = unpack_mix_float(vertx.opacity, drawable.opacity_t);
@@ -187,9 +163,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         .v_pos_b        = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, toScale * display_size_b, tileZoomRatio, pos2),
         .v_pos          = corner.pos,
 
-#if !defined(HAS_UNIFORM_u_color)
-        .color          = half4(unpack_mix_color(vertx.color, drawable.color_t)),
-#endif
+        #property pass color
 #if !defined(HAS_UNIFORM_u_pattern_from)
         .pattern_from   = pattern_from,
 #endif
@@ -214,23 +188,11 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 
     device const FillPatternTilePropsUBO& tileProps = tilePropsVector[uboIndex];
 
-#if defined(HAS_UNIFORM_u_pattern_from)
-    const auto pattern_from   = float4(tileProps.pattern_from);
-#else
-    const auto pattern_from   = float4(in.pattern_from);
-#endif
+    const auto pattern_from   = float4($tileProps.pattern_from);
 
-#if defined(HAS_UNIFORM_u_pattern_to)
-    const auto pattern_to     = float4(tileProps.pattern_to);
-#else
-    const auto pattern_to     = float4(in.pattern_to);
-#endif
+    const auto pattern_to     = float4($tileProps.pattern_to);
 
-#if defined(HAS_UNIFORM_u_opacity)
-    const auto opacity        = props.opacity;
-#else
-    const auto opacity        = in.opacity;
-#endif
+    const auto opacity        = $props.opacity;
 
 #if defined(HAS_UNIFORM_u_color)
     const auto color          = half4(props.color);
@@ -287,12 +249,8 @@ macro_rules! outline_stages {
 struct FragmentStage {
     float4 position [[position, invariant]];
     float2 pos;
-#if !defined(HAS_UNIFORM_u_outline_color)
-    half4 outline_color;
-#endif
-#if !defined(HAS_UNIFORM_u_opacity)
-    half opacity;
-#endif
+    #property varying outline_color half4
+    #property varying opacity half
 };
 ",
             outline_corner!(),
@@ -314,11 +272,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     const half4 color = in.outline_color;
 #endif
 
-#if defined(HAS_UNIFORM_u_opacity)
-    const half opacity = props.opacity;
-#else
-    const half opacity = in.opacity;
-#endif
+    const half opacity = $props.opacity;
 
     return half4(color * opacity * half(alpha));
 }
@@ -385,12 +339,8 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     return {
         .position       = corner.position,
         .pos            = corner.pos,
-#if !defined(HAS_UNIFORM_u_outline_color)
-        .outline_color  = half4(unpack_mix_color(vertx.outline_color, drawable.outline_color_t)),
-#endif
-#if !defined(HAS_UNIFORM_u_opacity)
-        .opacity        = half(unpack_mix_float(vertx.opacity, drawable.opacity_t)),
-#endif
+        #property pass outline_color
+        #property pass opacity
     };
 }
 
@@ -486,18 +436,10 @@ enum {
 struct VertexStage {
     short2 position [[attribute(0)]];
 
-#if !defined(HAS_UNIFORM_u_color)
-    float4 color [[attribute(1)]];
-#endif
-#if !defined(HAS_UNIFORM_u_pattern_from)
-    ushort4 pattern_from [[attribute(2)]];
-#endif
-#if !defined(HAS_UNIFORM_u_pattern_to)
-    ushort4 pattern_to [[attribute(3)]];
-#endif
-#if !defined(HAS_UNIFORM_u_opacity)
-    float2 opacity [[attribute(4)]];
-#endif
+    #property attribute color
+    #property attribute pattern_from
+    #property attribute pattern_to
+    #property attribute opacity
 };
 
 struct FragmentStage {
@@ -505,18 +447,10 @@ struct FragmentStage {
     float2 v_pos_a;
     float2 v_pos_b;
 
-#if !defined(HAS_UNIFORM_u_color)
-    half4 color;
-#endif
-#if !defined(HAS_UNIFORM_u_pattern_from)
-    float4 pattern_from [[flat]];
-#endif
-#if !defined(HAS_UNIFORM_u_pattern_to)
-    float4 pattern_to [[flat]];
-#endif
-#if !defined(HAS_UNIFORM_u_opacity)
-    half opacity;
-#endif
+    #property varying color half4
+    #property varying pattern_from float4 flat
+    #property varying pattern_to float4 flat
+    #property varying opacity half
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
@@ -560,18 +494,14 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         .position       = projectTile(postion, postion, projectionVector[uboIndex]),
         .v_pos_a        = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, fromScale * display_size_a, tileZoomRatio, postion),
         .v_pos_b        = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, toScale * display_size_b, tileZoomRatio, postion),
-#if !defined(HAS_UNIFORM_u_color)
-        .color          = half4(unpack_mix_color(vertx.color, drawable.color_t)),
-#endif
+        #property pass color
 #if !defined(HAS_UNIFORM_u_pattern_from)
         .pattern_from   = pattern_from,
 #endif
 #if !defined(HAS_UNIFORM_u_pattern_to)
         .pattern_to     = pattern_to,
 #endif
-#if !defined(HAS_UNIFORM_u_opacity)
-        .opacity        = half(unpack_mix_float(vertx.opacity, drawable.opacity_t)),
-#endif
+        #property pass opacity
     };
 }
 
@@ -587,23 +517,11 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 
     device const FillPatternTilePropsUBO& tileProps = tilePropsVector[uboIndex];
 
-#if defined(HAS_UNIFORM_u_pattern_from)
-    const auto pattern_from   = float4(tileProps.pattern_from);
-#else
-    const auto pattern_from   = float4(in.pattern_from);
-#endif
+    const auto pattern_from   = float4($tileProps.pattern_from);
 
-#if defined(HAS_UNIFORM_u_pattern_to)
-    const auto pattern_to     = float4(tileProps.pattern_to);
-#else
-    const auto pattern_to     = float4(in.pattern_to);
-#endif
+    const auto pattern_to     = float4($tileProps.pattern_to);
 
-#if defined(HAS_UNIFORM_u_opacity)
-    const auto opacity        = props.opacity;
-#else
-    const auto opacity        = in.opacity;
-#endif
+    const auto opacity        = $props.opacity;
 
 #if defined(HAS_UNIFORM_u_color)
     const auto color          = half4(props.color);
@@ -673,23 +591,15 @@ enum {
 struct VertexStage {
     short2 position [[attribute(0)]];
 
-#if !defined(HAS_UNIFORM_u_color)
-    float4 color [[attribute(1)]];
-#endif
-#if !defined(HAS_UNIFORM_u_opacity)
-    float2 opacity [[attribute(2)]];
-#endif
+    #property attribute color
+    #property attribute opacity
 };
 
 struct FragmentStage {
     float4 position [[position, invariant]];
 
-#if !defined(HAS_UNIFORM_u_color)
-    half4 color;
-#endif
-#if !defined(HAS_UNIFORM_u_opacity)
-    half opacity;
-#endif
+    #property varying color half4
+    #property varying opacity half
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
@@ -701,12 +611,8 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 
     return {
         .position = projectTile(float2(vertx.position), float2(vertx.position), projectionVector[uboIndex]),
-#if !defined(HAS_UNIFORM_u_color)
-        .color    = half4(unpack_mix_color(vertx.color, drawable.color_t)),
-#endif
-#if !defined(HAS_UNIFORM_u_opacity)
-        .opacity  = half(unpack_mix_float(vertx.opacity, drawable.opacity_t)),
-#endif
+        #property pass color
+        #property pass opacity
     };
 }
 
@@ -722,11 +628,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     const half4 color = in.color;
 #endif
 
-#if defined(HAS_UNIFORM_u_opacity)
-    const half opacity = props.opacity;
-#else
-    const half opacity = in.opacity;
-#endif
+    const half opacity = $props.opacity;
 
     return half4(color * opacity);
 }

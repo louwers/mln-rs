@@ -1078,9 +1078,11 @@ impl VulkanGpu {
             }
         };
         for stage in [Stage::Vertex, Stage::Fragment] {
-            let composed = mln_glsl::compose(program, source, stage, &defines);
-            let result = shaders::compile_program(stage, &composed)
-                .map_err(|error| GpuError::Invalid(format!("{name}: {error}")))
+            let result = mln_glsl::compose(program, source, stage, &defines)
+                .and_then(|composed| {
+                    shaders::compile_program(stage, &composed)
+                        .map_err(|error| GpuError::Invalid(format!("{name}: {error}")))
+                })
                 .and_then(|compiled| {
                     for &ResourceUse { set, binding, size } in &compiled.resources {
                         let (type_, resource) = binding_of(program, set, binding)?;

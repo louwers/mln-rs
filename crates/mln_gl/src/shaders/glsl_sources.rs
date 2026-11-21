@@ -253,9 +253,11 @@ highp vec2 atlas_pos(highp vec2 origin, highp vec2 offset) {
 /// The vertex and fragment shaders of `key`'s program: `#version 300 es`,
 /// or `#version 330 core` on `desktop` OpenGL, the key's defines, the
 /// stage's precisions, the blocks the stage reads, the prelude of the stage
-/// and the program's GLSL ES of the stage. A fragment shader defaults to
-/// highp floats on OpenGL ES if `highp_fragment`, and to mediump otherwise.
-/// Fails with [`GpuError::Unsupported`] for a program without GLSL ES.
+/// and the program's GLSL ES of the stage with its properties written out
+/// ([`glsl_es::expand`]). A fragment shader defaults to highp floats on
+/// OpenGL ES if `highp_fragment`, and to mediump otherwise. Fails with
+/// [`GpuError::Unsupported`] for a program without GLSL ES, and as
+/// [`glsl_es::expand`] does.
 ///
 /// WebGL2 rejects a draw whose program has a block without a buffer, so a
 /// stage declares only the blocks it names a member of: the view's, the
@@ -284,9 +286,10 @@ pub(crate) fn stage_sources(key: &ShaderKey, desktop: bool, highp_fragment: bool
         };
         blocks.iter().copied().filter(reads).collect()
     };
+    let [vertex, fragment] = glsl_es::expand(program, source)?;
     let projection = PROJECTION_BUFFER.block();
-    let vertex_blocks: Vec<&Block> = projection.into_iter().chain(named(source.vertex)).collect();
-    let mut fragment_blocks = named(source.fragment);
+    let vertex_blocks: Vec<&Block> = projection.into_iter().chain(named(&vertex)).collect();
+    let mut fragment_blocks = named(&fragment);
     fragment_blocks
         .sort_by_key(|block| vertex_blocks.iter().position(|shared| ptr::eq(*shared, *block)).unwrap_or(usize::MAX));
     let stage = |stage_defines, precision, blocks: &[&Block], prelude, glsl| {
@@ -294,7 +297,7 @@ pub(crate) fn stage_sources(key: &ShaderKey, desktop: bool, highp_fragment: bool
         [version, &defines, stage_defines, precision, &blocks, prelude, glsl].concat()
     };
     Ok([
-        stage("", PRECISION.vertex, &vertex_blocks, PRELUDE.vertex, source.vertex),
-        stage(fragment_defines, PRECISION.fragment, &fragment_blocks, PRELUDE.fragment, source.fragment),
+        stage("", PRECISION.vertex, &vertex_blocks, PRELUDE.vertex, &vertex),
+        stage(fragment_defines, PRECISION.fragment, &fragment_blocks, PRELUDE.fragment, &fragment),
     ])
 }

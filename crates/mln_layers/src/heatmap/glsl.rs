@@ -23,13 +23,9 @@ const float ZERO = 1.0 / 255.0 / 16.0;
 
 layout(location = 0) in ivec2 in_position;
 
-#if !defined(HAS_UNIFORM_u_weight)
-layout(location = 1) in vec2 in_weight;
-#endif
+#property attribute weight
 
-#if !defined(HAS_UNIFORM_u_radius)
-layout(location = 2) in vec2 in_radius;
-#endif
+#property attribute radius
 
 layout(push_constant) uniform Constants {
     int ubo_index;
@@ -47,25 +43,15 @@ layout(set = LAYER_SET_INDEX, binding = idHeatmapEvaluatedPropsUBO) uniform Heat
     HeatmapEvaluatedPropsUBO props;
 };
 
-#if !defined(HAS_UNIFORM_u_weight)
-layout(location = 0) out float frag_weight;
-#endif
+#property varying weight 0
 layout(location = 1) out vec2 frag_extrude;
 
 void main() {
     const HeatmapDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
 
-#if defined(HAS_UNIFORM_u_weight)
-    const float weight = props.weight;
-#else
-    const float weight = unpack_mix_float(in_weight, drawable.weight_t);
-#endif
+    const float weight = $props.weight;
 
-#if defined(HAS_UNIFORM_u_radius)
-    const float radius = props.radius;
-#else
-    const float radius = unpack_mix_float(in_radius, drawable.radius_t);
-#endif
+    const float radius = $props.radius;
 
     // unencode the extrusion vector that we snuck into the a_pos vector
     const vec2 unscaled_extrude = mod(in_position, 2.0) * 2.0 - 1.0;
@@ -112,9 +98,7 @@ void main() {
 // Gaussian kernel coefficient: 1 / sqrt(2 * PI)
 #define GAUSS_COEF 0.3989422804014327
 
-#if !defined(HAS_UNIFORM_u_weight)
-layout(location = 0) in float frag_weight;
-#endif
+#property varying weight 0
 layout(location = 1) in vec2 frag_extrude;
 
 layout(location = 0) out vec4 out_color;
@@ -132,11 +116,7 @@ void main() {
 
     // Kernel density estimation with a Gaussian kernel of size 5x5
     const float d = -0.5 * 3.0 * 3.0 * dot(frag_extrude, frag_extrude);
-#if defined(HAS_UNIFORM_u_weight)
-    const float weight = props.weight;
-#else
-    const float weight = frag_weight;
-#endif
+    const float weight = $props.weight;
     const float val = weight * props.intensity * GAUSS_COEF * exp(d);
 
     out_color = vec4(val, 1.0, 1.0, 1.0);

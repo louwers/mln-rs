@@ -19,27 +19,13 @@ enum {
 struct VertexStage {
     short2 position [[attribute(0)]];
 
-#if !defined(HAS_UNIFORM_u_color)
-    float4 color [[attribute(1)]];
-#endif
-#if !defined(HAS_UNIFORM_u_radius)
-    float2 radius [[attribute(2)]];
-#endif
-#if !defined(HAS_UNIFORM_u_blur)
-    float2 blur [[attribute(3)]];
-#endif
-#if !defined(HAS_UNIFORM_u_opacity)
-    float2 opacity [[attribute(4)]];
-#endif
-#if !defined(HAS_UNIFORM_u_stroke_color)
-    float4 stroke_color [[attribute(5)]];
-#endif
-#if !defined(HAS_UNIFORM_u_stroke_width)
-    float2 stroke_width [[attribute(6)]];
-#endif
-#if !defined(HAS_UNIFORM_u_stroke_opacity)
-    float2 stroke_opacity [[attribute(7)]];
-#endif
+    #property attribute color
+    #property attribute radius
+    #property attribute blur
+    #property attribute opacity
+    #property attribute stroke_color
+    #property attribute stroke_width
+    #property attribute stroke_opacity
 };
 
 struct FragmentStage {
@@ -47,27 +33,13 @@ struct FragmentStage {
     float2 extrude;
     float antialiasblur;
 
-#if !defined(HAS_UNIFORM_u_color)
-    half4 color;
-#endif
-#if !defined(HAS_UNIFORM_u_radius)
-    float radius;
-#endif
-#if !defined(HAS_UNIFORM_u_blur)
-    half blur;
-#endif
-#if !defined(HAS_UNIFORM_u_opacity)
-    half opacity;
-#endif
-#if !defined(HAS_UNIFORM_u_stroke_color)
-    half4 stroke_color;
-#endif
-#if !defined(HAS_UNIFORM_u_stroke_width)
-    half stroke_width;
-#endif
-#if !defined(HAS_UNIFORM_u_stroke_opacity)
-    half stroke_opacity;
-#endif
+    #property varying color half4
+    #property varying radius float
+    #property varying blur half
+    #property varying opacity half
+    #property varying stroke_color half4
+    #property varying stroke_width half
+    #property varying stroke_opacity half
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
@@ -79,17 +51,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 
     device const CircleDrawableUBO& drawable = drawableVector[uboIndex];
 
-#if defined(HAS_UNIFORM_u_radius)
-    const auto radius       = props.radius;
-#else
-    const auto radius       = unpack_mix_float(vertx.radius, drawable.radius_t);
-#endif
+    const auto radius       = $props.radius;
 
-#if defined(HAS_UNIFORM_u_stroke_width)
-    const auto stroke_width = props.stroke_width;
-#else
-    const auto stroke_width = unpack_mix_float(vertx.stroke_width, drawable.stroke_width_t);
-#endif
+    const auto stroke_width = $props.stroke_width;
 
     // unencode the extrusion vector that we snuck into the a_pos vector
     const float2 extrude = glMod(float2(vertx.position), 2.0) * 2.0 - 1.0;
@@ -154,27 +118,17 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         .extrude        = extrude,
         .antialiasblur  = antialiasblur,
 
-#if !defined(HAS_UNIFORM_u_color)
-        .color          = half4(unpack_mix_color(vertx.color, drawable.color_t)),
-#endif
+        #property pass color
 #if !defined(HAS_UNIFORM_u_radius)
         .radius         = radius,
 #endif
-#if !defined(HAS_UNIFORM_u_blur)
-        .blur           = half(unpack_mix_float(vertx.blur, drawable.blur_t)),
-#endif
-#if !defined(HAS_UNIFORM_u_opacity)
-        .opacity        = half(unpack_mix_float(vertx.opacity, drawable.opacity_t)),
-#endif
-#if !defined(HAS_UNIFORM_u_stroke_color)
-        .stroke_color   = half4(unpack_mix_color(vertx.stroke_color, drawable.stroke_color_t)),
-#endif
+        #property pass blur
+        #property pass opacity
+        #property pass stroke_color
 #if !defined(HAS_UNIFORM_u_stroke_width)
         .stroke_width   = half(stroke_width),
 #endif
-#if !defined(HAS_UNIFORM_u_stroke_opacity)
-        .stroke_opacity = half(unpack_mix_float(vertx.stroke_opacity, drawable.stroke_opacity_t)),
-#endif
+        #property pass stroke_opacity
     };
 }
 
@@ -189,36 +143,16 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 #else
     const half4 color = in.color;
 #endif
-#if defined(HAS_UNIFORM_u_radius)
-    const float radius = props.radius;
-#else
-    const float radius = in.radius;
-#endif
-#if defined(HAS_UNIFORM_u_blur)
-    const float blur = props.blur;
-#else
-    const float blur = in.blur;
-#endif
-#if defined(HAS_UNIFORM_u_opacity)
-    const float opacity = props.opacity;
-#else
-    const float opacity = in.opacity;
-#endif
+    const float radius = $props.radius;
+    const float blur = $props.blur;
+    const float opacity = $props.opacity;
 #if defined(HAS_UNIFORM_u_stroke_color)
     const half4 stroke_color = half4(props.stroke_color);
 #else
     const half4 stroke_color = in.stroke_color;
 #endif
-#if defined(HAS_UNIFORM_u_stroke_width)
-    const float stroke_width = props.stroke_width;
-#else
-    const float stroke_width = in.stroke_width;
-#endif
-#if defined(HAS_UNIFORM_u_stroke_opacity)
-    const float stroke_opacity = props.stroke_opacity;
-#else
-    const float stroke_opacity = in.stroke_opacity;
-#endif
+    const float stroke_width = $props.stroke_width;
+    const float stroke_opacity = $props.stroke_opacity;
 
     const float extrude_length = length(in.extrude);
     const float antialiased_blur = -max(blur, in.antialiasblur);
