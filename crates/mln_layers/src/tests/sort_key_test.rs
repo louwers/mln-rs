@@ -7,6 +7,7 @@ use mln_render::layer::{
     BucketParameters, BuildParams, EvaluatedLayer, FeatureIndexBuilder, FilterGroups, LayerType, Layout,
     LayoutParameters, Resolved, SourceLayer,
 };
+use mln_render::testing::evaluated_layer;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
 use mln_style::expression::image_expression::UnavailableImages;
 use mln_style::layer_type::LayerStyle;
@@ -67,7 +68,7 @@ fn layer<T: LayerType>(mut json: serde_json::Value, sort_key_name: &str, type_: 
     let mut error = ConversionError::default();
     let layer = convert_layer(super::registry().style(), &Convertible::from(&json), &mut error)
         .unwrap_or_else(|| panic!("{}", error.message));
-    Arc::new(EvaluatedLayer::new(LayerStyle::recover(layer.style()).unwrap()))
+    Arc::new(evaluated_layer(LayerStyle::recover(layer.style()).unwrap(), Default::default()))
 }
 
 /// Lays out three features with ranks 2, 0, 1 at x = 100, 200, 300 and

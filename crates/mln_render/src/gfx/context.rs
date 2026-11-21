@@ -79,11 +79,9 @@ pub struct Context {
 
 impl Context {
     /// The renderer's state over a `Gpu` of `caps`, for draws at
-    /// `pixel_ratio` device pixels per logical pixel. Public for tests that
-    /// draw on a bare `Gpu`.
-    #[doc(hidden)]
+    /// `pixel_ratio` device pixels per logical pixel.
     #[must_use]
-    pub fn new(caps: Caps, pixel_ratio: f32) -> Context {
+    pub(crate) fn new(caps: Caps, pixel_ratio: f32) -> Context {
         Context {
             device: Device::default(),
             caps,
@@ -255,10 +253,8 @@ impl Context {
 
     /// The buffer of the vertices of `shared`, made of them by their first
     /// upload and written over after an update, as [`Vertices::upload`]
-    /// says. The engine uploads the vertices that draws bind; public for
-    /// tests.
-    #[doc(hidden)]
-    pub fn upload_vertices(
+    /// says. The engine uploads the vertices that draws bind.
+    pub(crate) fn upload_vertices(
         &mut self,
         gpu: &mut dyn Gpu,
         shared: &SharedVertices,
@@ -521,10 +517,8 @@ impl Context {
 
     /// Destroys what the context made and what the renderer released, and
     /// tells the layers' hosts that it stopped. What drops later
-    /// still goes to the queue, and goes with the `Gpu`. Public for tests
-    /// that draw on a bare `Gpu`.
-    #[doc(hidden)]
-    pub fn tear_down(&mut self, gpu: &mut dyn Gpu) {
+    /// still goes to the queue, and goes with the `Gpu`.
+    pub(crate) fn tear_down(&mut self, gpu: &mut dyn Gpu) {
         self.global_uniform_buffers = UniformBufferArray::new();
         self.default_vertex_buffers.clear();
         self.textures.clear();

@@ -6,7 +6,8 @@ use geometry::Point;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_map_types::MapMode;
 use mln_render::draw::{BucketGeometry, Context, DrawIndexes, bucket_indexes, bucket_vertices, paint_vertices};
-use mln_render::layer::{Bucket, EvaluatedLayer, GeometryUpload};
+use mln_render::layer::{Bucket, GeometryUpload};
+use mln_render::testing::{evaluated_layer, upload_vertices};
 use mln_render::unstable::LineLayoutVertex;
 use mln_style::PropertyEvaluationParameters;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
@@ -265,8 +266,7 @@ fn data_driven_fill_bucket(fill_color: &serde_json::Value) -> FillBucket {
         },
         ..FillPaintProperties::PossiblyEvaluated::default()
     };
-    let properties =
-        Arc::new(EvaluatedLayer::<Fill>::with_paint(LayerStyle::recover(layer.style()).unwrap(), evaluated));
+    let properties = Arc::new(evaluated_layer::<Fill>(LayerStyle::recover(layer.style()).unwrap(), evaluated));
     let mut bucket = FillBucket::new(
         &FillLayoutProperties::PossiblyEvaluated::default(),
         &VecMap::from_iter([("fill".to_owned(), properties)]),
@@ -310,7 +310,7 @@ fn fill_bucket_frees_cpu_geometry_after_upload() {
         assert_eq!(stored.bytes().len(), vertex_count * stored.vertex_size());
 
         // A draw's upload writes them to buffers.
-        let buffer = context.upload_vertices(gpu, &vertices).expect("uploads").expect("a buffer");
+        let buffer = upload_vertices(context, gpu, &vertices).expect("uploads").expect("a buffer");
         let mut triangles = DrawIndexes::from(bucket_indexes(&geometry, &bucket.triangles).expect("moved"));
         triangles.upload(gpu, context).expect("uploads");
 
@@ -328,7 +328,7 @@ fn fill_bucket_frees_cpu_geometry_after_upload() {
         assert!(vertices == again);
         let indexes = DrawIndexes::from(bucket_indexes(&geometry, &bucket.triangles).expect("moved"));
         assert!(indexes.buffer(context).is_some_and(|buffer| triangles.buffer(context) == Some(buffer)));
-        let reused = context.upload_vertices(gpu, &again).expect("uploads").expect("a buffer");
+        let reused = upload_vertices(context, gpu, &again).expect("uploads").expect("a buffer");
         assert_eq!(buffer, reused);
 
         // Data-driven paint values are freed too when nothing can rewrite them.
@@ -337,7 +337,7 @@ fn fill_bucket_frees_cpu_geometry_after_upload() {
         let buffer = &binders.interleaved_vertex_buffer;
         let paint = paint_vertices(context, &geometry, buffer, false).expect("moved");
         assert!(paint.count() > 0);
-        assert!(context.upload_vertices(gpu, &paint).expect("uploads").is_some());
+        assert!(upload_vertices(context, gpu, &paint).expect("uploads").is_some());
         assert!(context.vertices(&paint).is_some_and(|stored| !stored.needs_upload()));
         assert!(buffer.vertices().data().is_empty());
     });
@@ -386,7 +386,7 @@ fn fill_bucket_keeps_paint_data_that_feature_state_rewrites() {
         let buffer = &binders.interleaved_vertex_buffer;
         let paint = paint_vertices(context, &geometry, buffer, binders.depends_on_feature_state()).expect("a copy");
         assert!(paint.count() > 0);
-        assert!(context.upload_vertices(gpu, &paint).expect("uploads").is_some());
+        assert!(upload_vertices(context, gpu, &paint).expect("uploads").is_some());
         assert!(!buffer.vertices().is_moved());
         assert_eq!(buffer.vertices().data().len(), paint.count());
     });
