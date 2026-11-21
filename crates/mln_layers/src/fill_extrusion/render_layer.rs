@@ -38,16 +38,16 @@ use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMod
 use mln_map_types::View;
 use mln_render::draw::{
     AtlasBinding, BucketGeometry, Composite, Context, DrawDepth, DrawGeometry, DrawList, DrawObjects, DrawObjectsMut,
-    DrawPriority, EvaluatedLight, FrameDraw, Indexes, RenderStaticData, SharedAttribute, SharedIndexes, SharedVertices,
-    Texture2D, TileDraws, TileObjects, UniformWriter, Uniforms, VertexAttributeArray, bucket_indexes, bucket_vertices,
-    cast_matrix, copied_vertices, copy_shared_attributes, derived_vertices, paint_vertices, projection_data,
-    to_projection_ubo, zero_to_one_clip_z,
+    DrawPriority, EvaluatedLight, FrameDraw, IconFilter, Indexes, RenderStaticData, SharedAttribute, SharedIndexes,
+    SharedVertices, Texture2D, TileDraws, TileObjects, UniformWriter, Uniforms, VertexAttributeArray, bucket_indexes,
+    bucket_vertices, cast_matrix, copied_vertices, copy_shared_attributes, derived_vertices, paint_vertices,
+    projection_data, to_projection_ubo, zero_to_one_clip_z,
 };
 use mln_render::layer::{
     Bucket, DrawContext, EvaluatedLayer, FeatureQuery, HitTest, LayerBucket, LayerType, LayerValues, LayoutParameters,
     RenderPass, SourceLayer,
 };
-use mln_style_types::{AlignmentType, LayerBlendType};
+use mln_style_types::LayerBlendType;
 use mln_tile_id::OverscaledTileID;
 use mln_util::clip_depth::ClipDepthRange;
 use mln_util::constants::TILE_SIZE_D;
@@ -569,11 +569,8 @@ impl TileBuilder<'_> {
                 Some(atlases.clone()),
                 None,
                 Some(ID_FILL_EXTRUSION_IMAGE_TEXTURE),
-                /*is_text=*/ false,
-                false,
-                AlignmentType::Auto,
-                false,
-                false,
+                /*is_text*/ false,
+                IconFilter::NearestWhenStill { map_aligned: false },
             )
         });
         let mut draws = Vec::new();

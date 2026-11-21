@@ -12,8 +12,8 @@ use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_render::draw::{
-    AtlasBinding, Composite, Context, DrawGeometry, DrawList, DrawObjects, DrawObjectsMut, FrameDraw, LayerDrawing,
-    SharedAttribute, SharedTexture, Texture2D, Textures, TileDraws, TileObjects, UniformWriter, Uniforms,
+    AtlasBinding, Composite, Context, DrawGeometry, DrawList, DrawObjects, DrawObjectsMut, FrameDraw, IconFilter,
+    LayerDrawing, SharedAttribute, SharedTexture, Texture2D, Textures, TileDraws, TileObjects, UniformWriter, Uniforms,
     VertexAttributeArray, bucket_indexes, bucket_vertices, cast_matrix, paint_vertices, projection_data,
     to_projection_ubo,
 };
@@ -23,7 +23,7 @@ use mln_render::layer::{
 };
 use mln_style::expression::{Dependency, EvaluationContext, GlobalStateMap, global_state_refs_intersect};
 use mln_style::{PropertyEvaluationParameters, StyleValue as _};
-use mln_style_types::{AlignmentType, LineCapType};
+use mln_style_types::LineCapType;
 use mln_tile_id::UnwrappedTileID;
 use mln_util::Color;
 use mln_util::error::Error;
@@ -540,10 +540,7 @@ impl LineState {
                 None,
                 Some(ID_LINE_IMAGE_TEXTURE),
                 /*is_text*/ false,
-                /*sdf_icons*/ true, // to force linear filter
-                AlignmentType::Auto,
-                /*icon_scaled*/ false,
-                /*text_size_is_zoom_constant*/ false,
+                IconFilter::Linear,
             ));
             (LineType::Pattern, &programs::LINE_PATTERN)
         } else if has_gradient {

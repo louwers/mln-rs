@@ -19,7 +19,7 @@ use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_map_types::{Projection, ProjectionData};
 use mln_render::draw::{
     AtlasBinding, BucketChanges, BucketGeometry, Context, DrawDepth, DrawFrame, DrawGeometry, DrawGroup, DrawList,
-    DrawObjects, DrawObjectsMut, DrawOrder, FrameDraw, KeptDraw, LayerDrawing, LayerDraws, PaintParameters,
+    DrawObjects, DrawObjectsMut, DrawOrder, FrameDraw, IconFilter, KeptDraw, LayerDrawing, LayerDraws, PaintParameters,
     SharedAttribute, Textures, TileMap, TypedVertices, UniformWriter, Uniforms, VertexAttributeArray, bucket_vertices,
     cast_matrix, copied_indexes, copied_vertices, copy_shared_attributes, paint_vertices, projection_data,
     tile_unit_translation, to_projection_ubo,
@@ -1330,6 +1330,8 @@ impl LayerType for Symbol {
             } else {
                 icon_property_values(evaluated, bucket_layout)
             };
+            // How the atlases filter where nothing scales their images.
+            let sharp = IconFilter::NearestWhenStill { map_aligned: values.rotation_alignment == AlignmentType::Map };
 
             let atlases = render_data.atlas_textures();
 
@@ -1376,31 +1378,31 @@ impl LayerType for Symbol {
                 let tile_atlases = tile_atlases.entry(tile.unwrapped_id()).or_default();
                 let draw_atlases = if is_text {
                     tile_atlases.text.get_or_insert_with(|| {
-                        let text_size_is_zoom_constant =
-                            bucket.text_size_binder.evaluate_for_zoom(current_zoom).is_zoom_constant;
+                        // Text whose size changes with the zoom is drawn
+                        // scaled.
+                        let filter = if bucket.text_size_binder.evaluate_for_zoom(current_zoom).is_zoom_constant {
+                            sharp
+                        } else {
+                            IconFilter::Linear
+                        };
                         AtlasBinding::new(
                             Some(atlases.clone()),
                             Some(ID_SYMBOL_IMAGE_ICON_TEXTURE),
                             Some(ID_SYMBOL_IMAGE_TEXTURE),
                             is_text,
-                            false,
-                            values.rotation_alignment,
-                            false,
-                            text_size_is_zoom_constant,
+                            filter,
                         )
                     })
                 } else {
                     tile_atlases.icon.get_or_insert_with(|| {
                         let icon_scaled = bucket_layout.icon_size.constant_or(&1.0) != 1.0 || bucket.icons_need_linear;
+                        let filter = if sdf_icons || icon_scaled { IconFilter::Linear } else { sharp };
                         AtlasBinding::new(
                             Some(atlases.clone()),
                             Some(ID_SYMBOL_IMAGE_ICON_TEXTURE),
                             Some(ID_SYMBOL_IMAGE_TEXTURE),
                             is_text,
-                            sdf_icons,
-                            values.rotation_alignment,
-                            icon_scaled,
-                            false,
+                            filter,
                         )
                     })
                 };

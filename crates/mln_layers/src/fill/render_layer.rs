@@ -11,16 +11,15 @@ use mln_gfx::shaders::source::ShaderSources;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
 use mln_render::draw::{
     AtlasBinding, Composite, Context, DrawDepth, DrawGeometry, DrawIndexes, DrawList, DrawObjects, DrawObjectsMut,
-    FrameDraw, Indexes, RenderStaticData, SharedAttribute, SharedIndexes, Texture2D, TileDraws, TileObjects,
-    UniformWriter, Uniforms, VertexAttributeArray, bucket_indexes, bucket_vertices, cast_matrix, copied_vertices,
-    copy_shared_attributes, paint_vertices, projection_data, to_projection_ubo,
+    FrameDraw, IconFilter, Indexes, RenderStaticData, SharedAttribute, SharedIndexes, Texture2D, TileDraws,
+    TileObjects, UniformWriter, Uniforms, VertexAttributeArray, bucket_indexes, bucket_vertices, cast_matrix,
+    copied_vertices, copy_shared_attributes, paint_vertices, projection_data, to_projection_ubo,
 };
 use mln_render::layer::{
     Bucket, DrawContext, EvaluatedLayer, FeatureQuery, FrameTile, HitTest, LayerBucket, LayerType, LayerValues,
     LayoutParameters, RenderPass, SourceLayer,
 };
 use mln_style::PropertyEvaluationParameters;
-use mln_style_types::AlignmentType;
 use mln_util::Color;
 use mln_util::constants::TILE_SIZE_D;
 use mln_util::error::Error;
@@ -312,10 +311,7 @@ impl TileBuilder<'_> {
                 None,
                 Some(ID_FILL_IMAGE_TEXTURE),
                 /*is_text*/ false,
-                /*sdf_icons*/ true, // to force linear filter
-                AlignmentType::Auto,
-                /*icon_scaled*/ false,
-                /*text_size_is_zoom_constant*/ false,
+                IconFilter::Linear,
             )
         });
 
