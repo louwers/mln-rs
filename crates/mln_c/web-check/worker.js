@@ -108,8 +108,8 @@ check(wasm.mln_runtime_create(0, out, prepare()), "mln_runtime_create");
 const runtime = view().getBigUint64(out, true);
 log("runtime", runtime);
 
-const options = alloc(56);
-view().setUint32(options, 56, true);
+const options = alloc(64);
+view().setUint32(options, 64, true);
 view().setUint32(options + 8, SIZE, true);
 view().setUint32(options + 12, SIZE, true);
 view().setFloat64(options + 16, 1, true);
