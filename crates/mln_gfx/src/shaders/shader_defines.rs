@@ -26,11 +26,6 @@ pub const ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO: usize = LAYER_SSBO_START_ID + 
 pub const ID_PROJECTION_UBO: usize = LAYER_SSBO_START_ID + 2;
 /// The first id after the reserved ones.
 pub const DRAWABLE_RESERVED_UBO_COUNT: usize = LAYER_SSBO_START_ID + 3;
-/// The end of the ids a layer's storage buffers can have, from
-/// [`LAYER_SSBO_START_ID`]. A layer's uniform buffers have the ids from
-/// [`DRAWABLE_RESERVED_UBO_COUNT`], so that id can be either.
-pub const LAYER_UBO_START_ID: usize = DRAWABLE_RESERVED_UBO_COUNT + 1;
-
 /// The end of the buffer ids of a program, but for the vertex buffers it
 /// reads as storage buffers.
 pub const MAX_UBO_COUNT_PER_SHADER: usize = 7;

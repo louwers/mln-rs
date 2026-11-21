@@ -76,9 +76,11 @@ pub static LAYER_COMPOSITE: Program = Program {
 };
 
 /// The engine's debug overlays of tiles: their borders and their text, drawn
-/// as segments with round ends, one instance of a quad each, extruded on
-/// screen to the width of the overlay's uniform block
-/// ([`tile_debug_ubo`](crate::shaders::tile_debug_ubo)).
+/// as segments with round ends, one instance of a quad each. A segment is
+/// extruded on the map, in the tile's plane, to the width in pixels of the
+/// overlay's uniform block ([`tile_debug_ubo`](crate::shaders::tile_debug_ubo))
+/// at the frame's zoom (on the globe, at the segment's latitude), with an
+/// antialiased edge one device pixel wide.
 pub static TILE_DEBUG: Program = Program {
     name: "TileDebugShader",
     attributes: &[(ID_TILE_DEBUG_CORNER_VERTEX_ATTRIBUTE, Short2)],
