@@ -3,8 +3,8 @@
 //! what its draws share (`store`, `texture2d`, `indexes`, `vertices`), the
 //! queue that releases it in order (`release`), the attributes that read
 //! vertices (`vertex_attribute`), the bindings and geometry made of them
-//! (`owned`, `uniform_buffer`, `upload`), and the meshes of lines
-//! (`line_mesh`) and the segments that draw them (`mesh`).
+//! (`owned`, `uniform_buffer`, `upload`), and the segments that draw meshes
+//! (`mesh`).
 
 pub(crate) mod atlas_binding;
 pub(crate) mod buffer;
@@ -12,7 +12,6 @@ pub(crate) mod context;
 pub(crate) mod dynamic_texture;
 pub(crate) mod dynamic_texture_atlas;
 pub(crate) mod indexes;
-pub(crate) mod line_mesh;
 pub(crate) mod mesh;
 pub(crate) mod owned;
 pub(crate) mod release;

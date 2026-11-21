@@ -4,9 +4,8 @@
 //! [`placement`](crate::placement) module. Anything in either can change or
 //! go in any release.
 //!
-//! - The line mesh ([`add_line`]) and line subdivision
-//!   ([`subdivide_vertex_line`]), which the engine's tile debug overlay
-//!   draws its outlines with too.
+//! - Line subdivision ([`subdivide_vertex_line`]), which the line, fill
+//!   and fill-extrusion layer types split their geometry with on the globe.
 //! - The globe's grids of a tile ([`globe_mesh_data`],
 //!   [`raw_globe_tile_mesh`]), which the engine's clipping masks and globe
 //!   depth draw with too.
@@ -27,6 +26,5 @@
 //! source types drive the engine's parts with, and `bench` (`bench`), the
 //! benchmarks' entry points.
 
-pub use crate::gfx::line_mesh::{LineLayoutVertex, LineOptions, LineScratch, add_line};
 pub use crate::globe_tile_mesh::{GlobeMeshData, RawGlobeTileMesh, globe_mesh_data, raw_globe_tile_mesh};
 pub use crate::util::subdivision::subdivide_vertex_line;

@@ -4,18 +4,17 @@
 
 use geometry::Point;
 use glam::DVec2;
+use mln_render::layer::Indexed;
 use mln_style_types::{LineCapType, LineJoinType};
 use mln_util::constants::{EXTENT, TILE_SIZE_D};
-
-use crate::gfx::mesh::Indexed;
 
 /// A vertex of a line mesh: its position, doubled, with the round and up
 /// flags in the low bits, then its extrusion and distance along the line.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
-pub struct LineLayoutVertex {
-    pub a1: [i16; 2],
-    pub a2: [u8; 4],
+pub(crate) struct LineLayoutVertex {
+    pub(crate) a1: [i16; 2],
+    pub(crate) a2: [u8; 4],
 }
 
 impl LineLayoutVertex {
@@ -63,20 +62,20 @@ const DEGREES_PER_SLICE: f64 = 20.0;
 /// How a line is meshed: the shape of its joins and caps, from its layout
 /// properties.
 #[derive(Clone, Copy, Debug)]
-pub struct LineOptions {
+pub(crate) struct LineOptions {
     /// Whether the line is a polygon's ring, which ends where it starts and
     /// has a join there instead of caps.
-    pub closed: bool,
-    pub join: LineJoinType,
-    pub cap: LineCapType,
-    pub miter_limit: f32,
-    pub round_limit: f32,
+    pub(crate) closed: bool,
+    pub(crate) join: LineJoinType,
+    pub(crate) cap: LineCapType,
+    pub(crate) miter_limit: f32,
+    pub(crate) round_limit: f32,
     /// How many times the tile is magnified past its data's zoom.
-    pub overscaling: u32,
+    pub(crate) overscaling: u32,
     /// The part of the whole line that this one is, from and to a fraction
     /// of its length. Distances along it are then fractions of the whole
     /// line, which `line-gradient` reads, rather than tile units.
-    pub clip: Option<(f64, f64)>,
+    pub(crate) clip: Option<(f64, f64)>,
 }
 
 impl Default for LineOptions {
@@ -95,7 +94,7 @@ impl Default for LineOptions {
 
 /// The buffers that meshing a line reuses.
 #[derive(Default)]
-pub struct LineScratch {
+pub(crate) struct LineScratch {
     points: Vec<Point<i16>>,
     triangles: Vec<[u32; 3]>,
 }
@@ -103,7 +102,7 @@ pub struct LineScratch {
 /// Adds the mesh of `line` to `vertices`, and its triangles to `triangles`.
 /// A line of fewer than two distinct points, or a ring of fewer than three,
 /// adds nothing.
-pub fn add_line(
+pub(crate) fn add_line(
     vertices: &mut Vec<LineLayoutVertex>,
     triangles: &mut Indexed<'_>,
     scratch: &mut LineScratch,

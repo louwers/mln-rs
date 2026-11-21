@@ -6,7 +6,7 @@ use mln_render::layer::{
     Bucket, BucketBase, CrossFadedPaintPropertyBinder, EvaluatedLayer, GeometryUpload, GeometryVec, Indexed,
     PaintPropertyBinder,
 };
-use mln_render::unstable::{LineLayoutVertex, LineOptions, add_line, subdivide_vertex_line};
+use mln_render::unstable::subdivide_vertex_line;
 use mln_style::expression::{EvaluationContext, Image, Value};
 use mln_style_types::image::ImagePositions;
 use mln_tile_id::CanonicalTileID;
@@ -20,6 +20,7 @@ use mln_vec_map::VecMap;
 
 use super::Line;
 use super::dash_array_binder::DashArrayBinder;
+use super::mesh::{LineLayoutVertex, LineOptions, add_line};
 use super::programs::{
     ID_LINE_BLUR_VERTEX_ATTRIBUTE, ID_LINE_COLOR_VERTEX_ATTRIBUTE, ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE,
     ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE, ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE, ID_LINE_OFFSET_VERTEX_ATTRIBUTE,
