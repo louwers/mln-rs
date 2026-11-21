@@ -9,11 +9,6 @@ pub(crate) const PRELUDE: &str = r#"
 #include <metal_stdlib>
 using namespace metal;
 
-// The maximum allowed miter limit is 2.0 at the moment. the extrude normal is stored
-// in a byte (-128..127). We scale regular normals up to length 63, but there are also
-// "special" normals that have a bigger length (of up to 126 in this case).
-#define LINE_NORMAL_SCALE (1.0 / (127 / 2))
-
 // OpenGL `mod` is `x-y*floor(x/y)` where `floor` rounds down.
 // Metal `fmod` is `x-y*trunc(x/y)` where `trunc` rounds toward zero.
 // This function provides GL-compatible modulus for porting GLSL shaders.
@@ -135,14 +130,6 @@ inline float circumferenceRatioAtTileY(float tileY, device const ProjectionUBO& 
     return (2.0 * t) / (t * t + 1.0);
 }
 
-inline float projectLineThickness(float tileY, device const ProjectionUBO& projection) {
-    const float thickness = 1.0 / circumferenceRatioAtTileY(tileY, projection);
-    if (projection.projection_transition < 0.999) {
-        return mix(1.0, thickness, projection.projection_transition);
-    }
-    return thickness;
-}
-
 inline float globeComputeClippingZ(float3 spherePos, device const ProjectionUBO& projection) {
     return 1.0 - (dot(spherePos, projection.clipping_plane.xyz) + projection.clipping_plane.w);
 }
@@ -187,16 +174,6 @@ inline float4 projectTile(float2 pos, device const ProjectionUBO& projection) {
     return interpolateProjection(pos, projectToSphere(pos + projection.translate, float2(0.0, 0.0), projection), 0.0, projection);
 }
 
-// The zoom 0 tile's buffer wraps around the planet onto the tile itself, so the line shaders discard the fragments
-// beyond its X extent; every other tile (a mercator width below the whole world's) hands on a value inside it.
-inline float antimeridianClipX(float2 posInTile, device const ProjectionUBO& projection) {
-    return projection.tile_mercator_coords.z * 8192.0 >= 1.0 ? posInTile.x : 0.0;
-}
-
-inline bool clippedAtAntimeridian(float tileX) {
-    return tileX < 0.0 || tileX >= 8192.0;
-}
-
 // The variant for geometry that can carry pole vertices; rawPos is the untranslated position.
 inline float4 projectTile(float2 pos, float2 rawPos, device const ProjectionUBO& projection) {
     return interpolateProjection(pos, projectToSphere(pos + projection.translate, rawPos, projection), 0.0, projection);
@@ -231,10 +208,6 @@ inline float4 projectTileWithElevation(float2 pos, float elevation, device const
 
 inline float4 projectTileFor3D(float2 pos, float elevation, device const ProjectionUBO& projection) {
     return projection.matrix * float4(pos, elevation, 1.0);
-}
-
-inline float projectLineThickness(float, device const ProjectionUBO&) {
-    return 1.0;
 }
 
 #endif

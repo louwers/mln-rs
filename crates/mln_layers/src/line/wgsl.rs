@@ -97,6 +97,41 @@ static LINE_GRADIENT_SDF: Source = Source {
     textures: LINE_GRADIENT_SDF_TEXTURES,
 };
 
+/// What every stage of the type's programs reads: the scale of the
+/// extrusion vectors, the width of a line on the globe, and the clipping of
+/// the zoom 0 tile's lines at the antimeridian.
+const LINE_PRELUDE: &str = r"
+const LINE_NORMAL_SCALE: f32 = 1.0 / 63.0;  // 1.0 / (127 / 2)
+
+#ifdef PROJECTION_GLOBE
+
+fn projectLineThickness(tileY: f32, projection: ProjectionUBO) -> f32 {
+    let thickness = 1.0 / circumferenceRatioAtTileY(tileY, projection);
+    if (projection.projection_transition < 0.999) {
+        return mix(1.0, thickness, projection.projection_transition);
+    }
+    return thickness;
+}
+
+// The zoom 0 tile's buffer wraps around the planet onto the tile itself, so the line shaders discard the fragments
+// beyond its X extent; every other tile (a mercator width below the whole world's) hands on a value inside it.
+fn antimeridianClipX(posInTile: vec2<f32>, projection: ProjectionUBO) -> f32 {
+    return select(0.0, posInTile.x, projection.tile_mercator_coords.z * 8192.0 >= 1.0);
+}
+
+fn clippedAtAntimeridian(tileX: f32) -> bool {
+    return tileX < 0.0 || tileX >= 8192.0;
+}
+
+#else
+
+fn projectLineThickness(tileY: f32, projection: ProjectionUBO) -> f32 {
+    return 1.0;
+}
+
+#endif
+";
+
 /// The source of each of the type's programs.
 pub(super) static SOURCES: &[(&Program, &Source)] = &[
     (&programs::LINE, &LINE),
@@ -466,7 +501,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 }
 ",
     ),
-    prelude: None,
+    prelude: Some(LINE_PRELUDE),
 };
 
 const LINE_GRADIENT_SHADER: Wgsl = Wgsl {
@@ -728,7 +763,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 }
 ",
     ),
-    prelude: None,
+    prelude: Some(LINE_PRELUDE),
 };
 
 const LINE_PATTERN_SHADER: Wgsl = Wgsl {
@@ -1112,7 +1147,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 }
 ",
     ),
-    prelude: None,
+    prelude: Some(LINE_PRELUDE),
 };
 
 const LINE_SDF_SHADER: Wgsl = Wgsl {
@@ -1498,7 +1533,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 }
 ",
     ),
-    prelude: None,
+    prelude: Some(LINE_PRELUDE),
 };
 
 const LINE_SHADER: Wgsl = Wgsl {
@@ -1768,5 +1803,5 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 }
 ",
     ),
-    prelude: None,
+    prelude: Some(LINE_PRELUDE),
 };

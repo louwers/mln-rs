@@ -155,6 +155,53 @@ static LINE_GRADIENT_SDF: Source = Source {
     textures: &[Texture::new("u_image", ID_LINE_IMAGE_TEXTURE), Texture::new("u_image_dash", ID_LINE_DASH_TEXTURE)],
 };
 
+/// What every vertex stage of the type reads: the width of a line on the
+/// globe, and the tile x that clips the zoom 0 tile's lines at the
+/// antimeridian.
+macro_rules! line_vertex_prelude {
+    () => {
+        r"
+#ifdef PROJECTION_GLOBE
+
+float projectLineThickness(float tileY) {
+    float thickness = 1.0 / circumferenceRatioAtTileY(tileY);
+    if (u_projection_transition < 0.999) {
+        return mix(1.0, thickness, u_projection_transition);
+    }
+    return thickness;
+}
+
+// The zoom 0 tile's buffer wraps around the planet onto the tile itself, so the line shaders discard the fragments
+// beyond its X extent; every other tile (a mercator width below the whole world's) hands on a value inside it.
+float antimeridianClipX(vec2 posInTile) {
+    return u_projection_tile_mercator_coords.z * 8192.0 >= 1.0 ? posInTile.x : 0.0;
+}
+
+#else
+
+float projectLineThickness(float tileY) {
+    return 1.0;
+}
+
+#endif
+"
+    };
+}
+
+/// What every fragment stage of the type reads: whether a fragment is past
+/// the zoom 0 tile's x extent, see `antimeridianClipX`.
+macro_rules! line_fragment_prelude {
+    () => {
+        r"
+#ifdef PROJECTION_GLOBE
+bool clippedAtAntimeridian(highp float tileX) {
+    return tileX < 0.0 || tileX >= 8192.0;
+}
+#endif
+"
+    };
+}
+
 /// The source of each of the type's programs.
 pub(super) static SOURCES: &[(&Program, &Source)] = &[
     (&programs::LINE, &LINE),
@@ -165,7 +212,9 @@ pub(super) static SOURCES: &[(&Program, &Source)] = &[
 ];
 
 const LINE_GRADIENT_SDF_SHADER: Glsl = Glsl {
-    vertex: r#"// floor(127 / 2) == 63.0
+    vertex: concat!(
+        line_vertex_prelude!(),
+        r#"// floor(127 / 2) == 63.0
 // the maximum allowed miter limit is 2.0 at the moment. the extrude normal is
 // stored in a byte (-128..127). we scale regular normals up to length 63, but
 // there are also "special" normals that have a bigger length (of up to 126 in
@@ -367,8 +416,11 @@ lowp float floorwidth = u_floorwidth;
 
     v_width2 = vec2(outset, inset);
 }
-"#,
-    fragment: r"layout (std140) uniform LineEvaluatedPropsUBO {
+"#
+    ),
+    fragment: concat!(
+        line_fragment_prelude!(),
+        r"layout (std140) uniform LineEvaluatedPropsUBO {
     highp vec4 u_color;
     lowp float u_blur;
     lowp float u_opacity;
@@ -465,11 +517,14 @@ lowp float floorwidth = u_floorwidth;
     fragColor = vec4(1.0);
 #endif
 }
-",
+"
+    ),
 };
 
 const LINE_GRADIENT_SHADER: Glsl = Glsl {
-    vertex: r#"
+    vertex: concat!(
+        line_vertex_prelude!(),
+        r#"
 // the attribute conveying progress along a line is scaled to [0, 2^15)
 #define MAX_LINE_DISTANCE 32767.0
 
@@ -630,8 +685,11 @@ mediump float width = u_width;
 
     v_width2 = vec2(outset, inset);
 }
-"#,
-    fragment: r"layout (std140) uniform LineEvaluatedPropsUBO {
+"#
+    ),
+    fragment: concat!(
+        line_fragment_prelude!(),
+        r"layout (std140) uniform LineEvaluatedPropsUBO {
     highp vec4 u_color;
     lowp float u_blur;
     lowp float u_opacity;
@@ -693,11 +751,14 @@ lowp float opacity = u_opacity;
     fragColor = vec4(1.0);
 #endif
 }
-",
+"
+    ),
 };
 
 const LINE_PATTERN_SHADER: Glsl = Glsl {
-    vertex: r#"// floor(127 / 2) == 63.0
+    vertex: concat!(
+        line_vertex_prelude!(),
+        r#"// floor(127 / 2) == 63.0
 // the maximum allowed miter limit is 2.0 at the moment. the extrude normal is
 // stored in a byte (-128..127). we scale regular normals up to length 63, but
 // there are also "special" normals that have a bigger length (of up to 126 in
@@ -895,8 +956,11 @@ highp vec4 pattern_to = u_pattern_to;
     v_linesofar = a_linesofar;
     v_width2 = vec2(outset, inset);
 }
-"#,
-    fragment: r"#ifdef GL_ES
+"#
+    ),
+    fragment: concat!(
+        line_fragment_prelude!(),
+        r"#ifdef GL_ES
 precision highp float;
 #endif
 
@@ -1022,11 +1086,14 @@ lowp float opacity = u_opacity;
     fragColor = vec4(1.0);
 #endif
 }
-",
+"
+    ),
 };
 
 const LINE_SDF_SHADER: Glsl = Glsl {
-    vertex: r#"// floor(127 / 2) == 63.0
+    vertex: concat!(
+        line_vertex_prelude!(),
+        r#"// floor(127 / 2) == 63.0
 // the maximum allowed miter limit is 2.0 at the moment. the extrude normal is
 // stored in a byte (-128..127). we scale regular normals up to length 63, but
 // there are also "special" normals that have a bigger length (of up to 126 in
@@ -1232,8 +1299,11 @@ lowp float floorwidth = u_floorwidth;
 
     v_width2 = vec2(outset, inset);
 }
-"#,
-    fragment: r"layout (std140) uniform LineEvaluatedPropsUBO {
+"#
+    ),
+    fragment: concat!(
+        line_fragment_prelude!(),
+        r"layout (std140) uniform LineEvaluatedPropsUBO {
     highp vec4 u_color;
     lowp float u_blur;
     lowp float u_opacity;
@@ -1330,11 +1400,14 @@ lowp float floorwidth = u_floorwidth;
     fragColor = vec4(1.0);
 #endif
 }
-",
+"
+    ),
 };
 
 const LINE_SHADER: Glsl = Glsl {
-    vertex: r#"// floor(127 / 2) == 63.0
+    vertex: concat!(
+        line_vertex_prelude!(),
+        r#"// floor(127 / 2) == 63.0
 // the maximum allowed miter limit is 2.0 at the moment. the extrude normal is
 // stored in a byte (-128..127). we scale regular normals up to length 63, but
 // there are also "special" normals that have a bigger length (of up to 126 in
@@ -1500,8 +1573,11 @@ mediump float width = u_width;
 
     v_width2 = vec2(outset, inset);
 }
-"#,
-    fragment: r"layout (std140) uniform LineEvaluatedPropsUBO {
+"#
+    ),
+    fragment: concat!(
+        line_fragment_prelude!(),
+        r"layout (std140) uniform LineEvaluatedPropsUBO {
     highp vec4 u_color;
     lowp float u_blur;
     lowp float u_opacity;
@@ -1562,5 +1638,6 @@ lowp float opacity = u_opacity;
     fragColor = vec4(1.0);
 #endif
 }
-",
+"
+    ),
 };

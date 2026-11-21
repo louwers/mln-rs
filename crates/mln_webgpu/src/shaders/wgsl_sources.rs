@@ -462,7 +462,6 @@ pub(crate) const PRELUDE: Wgsl = Wgsl {
         r"
 // Constants
 const PI: f32 = 3.14159265358979323846;
-const LINE_NORMAL_SCALE: f32 = 1.0 / 63.0;  // 1.0 / (127 / 2)
 
 // WebGPU equivalent of GLSL mod function
 fn glMod(x: f32, y: f32) -> f32 {
@@ -567,14 +566,6 @@ fn circumferenceRatioAtTileY(tileY: f32, projection: ProjectionUBO) -> f32 {
     return (2.0 * t) / (t * t + 1.0);
 }
 
-fn projectLineThickness(tileY: f32, projection: ProjectionUBO) -> f32 {
-    let thickness = 1.0 / circumferenceRatioAtTileY(tileY, projection);
-    if (projection.projection_transition < 0.999) {
-        return mix(1.0, thickness, projection.projection_transition);
-    }
-    return thickness;
-}
-
 fn globeComputeClippingZ(spherePos: vec3<f32>, projection: ProjectionUBO) -> f32 {
     return 1.0 - (dot(spherePos, projection.clipping_plane.xyz) + projection.clipping_plane.w);
 }
@@ -620,16 +611,6 @@ fn projectTile(pos: vec2<f32>, projection: ProjectionUBO) -> vec4<f32> {
     return interpolateProjection(pos, projectToSphere(pos + projection.translate, vec2<f32>(0.0, 0.0), projection), 0.0, projection);
 }
 
-// The zoom 0 tile's buffer wraps around the planet onto the tile itself, so the line shaders discard the fragments
-// beyond its X extent; every other tile (a mercator width below the whole world's) hands on a value inside it.
-fn antimeridianClipX(posInTile: vec2<f32>, projection: ProjectionUBO) -> f32 {
-    return select(0.0, posInTile.x, projection.tile_mercator_coords.z * 8192.0 >= 1.0);
-}
-
-fn clippedAtAntimeridian(tileX: f32) -> bool {
-    return tileX < 0.0 || tileX >= 8192.0;
-}
-
 // The variant for geometry that can carry pole vertices; rawPos is the untranslated position.
 fn projectTileWithPoles(pos: vec2<f32>, rawPos: vec2<f32>, projection: ProjectionUBO) -> vec4<f32> {
     return interpolateProjection(pos, projectToSphere(pos + projection.translate, rawPos, projection), 0.0, projection);
@@ -664,10 +645,6 @@ fn projectTileWithElevation(pos: vec2<f32>, elevation: f32, projection: Projecti
 
 fn projectTileFor3D(pos: vec2<f32>, elevation: f32, projection: ProjectionUBO) -> vec4<f32> {
     return projection.matrix * vec4<f32>(pos, elevation, 1.0);
-}
-
-fn projectLineThickness(tileY: f32, projection: ProjectionUBO) -> f32 {
-    return 1.0;
 }
 
 #endif

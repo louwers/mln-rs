@@ -466,14 +466,6 @@ float circumferenceRatioAtTileY(float tileY) {
     return (2.0 * t) / (t * t + 1.0);
 }
 
-float projectLineThickness(float tileY) {
-    float thickness = 1.0 / circumferenceRatioAtTileY(tileY);
-    if (u_projection_transition < 0.999) {
-        return mix(1.0, thickness, u_projection_transition);
-    }
-    return thickness;
-}
-
 float globeComputeClippingZ(vec3 spherePos) {
     return 1.0 - (dot(spherePos, u_projection_clipping_plane.xyz) + u_projection_clipping_plane.w);
 }
@@ -516,12 +508,6 @@ vec4 projectTile(vec2 pos) {
     return interpolateProjection(pos, projectToSphere(pos + u_projection_translate, vec2(0.0, 0.0)), 0.0);
 }
 
-// The zoom 0 tile's buffer wraps around the planet onto the tile itself, so the line shaders discard the fragments
-// beyond its X extent; every other tile (a mercator width below the whole world's) hands on a value inside it.
-float antimeridianClipX(vec2 posInTile) {
-    return u_projection_tile_mercator_coords.z * 8192.0 >= 1.0 ? posInTile.x : 0.0;
-}
-
 // The variant for geometry that can carry pole vertices; rawPos is the untranslated position.
 vec4 projectTile(vec2 pos, vec2 rawPos) {
     return interpolateProjection(pos, projectToSphere(pos + u_projection_translate, rawPos), 0.0);
@@ -558,10 +544,6 @@ vec4 projectTileFor3D(vec2 pos, float elevation) {
     return u_projection_matrix * vec4(pos, elevation, 1.0);
 }
 
-float projectLineThickness(float tileY) {
-    return 1.0;
-}
-
 #endif
 ",
     fragment: r"#ifdef GL_ES
@@ -596,13 +578,6 @@ out highp vec4 fragColor;
 highp vec2 atlas_pos(highp vec2 origin, highp vec2 offset) {
     return origin + roundEven(offset * 16777216.0) / 16777216.0;
 }
-
-#ifdef PROJECTION_GLOBE
-// The line fragments beyond the zoom 0 tile's X extent; see antimeridianClipX in the vertex prelude.
-bool clippedAtAntimeridian(highp float tileX) {
-    return tileX < 0.0 || tileX >= 8192.0;
-}
-#endif
 ",
 };
 
