@@ -34,7 +34,7 @@ where
         }
         parsed?
     } else if value.is_object() {
-        // A function of a color array, a hillshade's, takes single colors.
+        // A function of a color array takes single colors.
         let type_ = match T::expression_type() {
             Type::Array(array) if array.item_type == Type::Color => Color::expression_type(),
             type_ => type_,

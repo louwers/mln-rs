@@ -1,6 +1,6 @@
 // The global state tests on style types (PropertyExpression, PropertyValue,
 // Filter, ColorRampPropertyValue). The expression-only ones are in
-// mln_expression's tests, the FormatSectionOverride one in
+// mln_expression's tests, the FormatSectionOverride one in mln_layers'
 // tests/format_section_override_test.rs.
 
 use std::sync::Arc;

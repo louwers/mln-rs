@@ -1,11 +1,11 @@
-//! Layers drawn as a whole: a layer with `fill-layer-opacity` or
-//! `line-layer-opacity` below 1, or with a `*-layer-blend` other than
-//! `normal`, draws into a texture of the frame's size, which is then
-//! composited onto the frame with that opacity and blend. Its features
-//! overlap within the texture as they would on the frame, so the opacity and
-//! blend apply once to the layer rather than to each feature.
+//! Layers drawn as a whole: a layer with a `*-layer-opacity` below 1, or
+//! with a `*-layer-blend` other than `normal`, draws into a texture of the
+//! frame's size, which is then composited onto the frame with that opacity
+//! and blend. Its features overlap within the texture as they would on the
+//! frame, so the opacity and blend apply once to the layer rather than to
+//! each feature.
 //!
-//! A translucent fill extrusion layer draws the same way, opaque, where the
+//! A translucent layer of 3D geometry draws the same way, opaque, where the
 //! texture's pass can test and write the frame's depth: the nearest of its
 //! surfaces then covers each pixel once, behind and in front of the other
 //! layers' 3D geometry as on the frame.

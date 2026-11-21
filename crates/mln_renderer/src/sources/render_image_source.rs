@@ -1,7 +1,7 @@
 // An image source draws one image, stretched over the quad of its
 // coordinates, in the tiles that the quad covers. Its render tiles are
-// those tiles, each of which shows the image, and the raster layers that
-// draw it borrow its contents from the source for the frame.
+// those tiles, each of which shows the image, and the layers that draw it
+// borrow its contents from the source for the frame.
 
 use std::sync::Arc;
 

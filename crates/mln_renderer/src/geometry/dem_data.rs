@@ -142,10 +142,9 @@ impl DemData {
 
     /// This function takes the `DemData` from a neighboring tile and
     /// backfills the edge/corner data in order to create a one pixel
-    /// "buffer" of image data around the tile. This is necessary because
-    /// the hillshade formula calculates the dx/dz, dy/dz derivatives at each
-    /// pixel of the tile by querying the 8 surrounding pixels, and if we
-    /// don't have the pixel buffer we get seams at tile boundaries.
+    /// "buffer" of image data around the tile. A shader that derives the
+    /// slope (dx/dz, dy/dz) at each pixel of the tile from the 8 surrounding
+    /// pixels needs it, or it draws seams at tile boundaries.
     pub(crate) fn backfill_border(&mut self, border_tile_data: &DemData, dx: i8, dy: i8) {
         let o = border_tile_data;
 

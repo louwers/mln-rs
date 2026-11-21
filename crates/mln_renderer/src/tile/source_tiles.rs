@@ -108,15 +108,15 @@ impl Place {
 }
 
 /// How many placements an entry the view leaves stays rendered for: the
-/// first fades its symbols out and the second ends the fade.
+/// first fades out what its layers placed and the second ends the fade.
 const PLACEMENTS_HELD_FOR_FADE: u64 = 2;
 
 /// A tile an update renders under one unwrapped id.
 #[derive(Clone, Copy, Debug)]
 struct Rendered {
     key: OverscaledTileID,
-    /// For an entry the view left, held so that its symbols fade out, how
-    /// many placements had committed when it left.
+    /// For an entry the view left, held so that what its layers placed
+    /// fades out, how many placements had committed when it left.
     held_since: Option<u64>,
     /// Whether the tile draws a visible layer here.
     needs_rendering: bool,
@@ -137,7 +137,8 @@ pub(crate) struct RenderedTile<'a> {
     pub(crate) tile: &'a Tile,
     /// Where the tile is among the source's tiles (`contents_at`).
     pub(crate) slot: usize,
-    /// The entry is no longer ideal, and stays so that its symbols fade out.
+    /// The entry is no longer ideal, and stays so that what its layers
+    /// placed fades out.
     pub(crate) hold_for_fade: bool,
     pub(crate) needs_rendering: bool,
 }
@@ -157,9 +158,9 @@ pub(crate) struct SourceTiles {
     prev_lng: f32,
     cache_enabled: bool,
     last_subdivision_granularity: SubdivisionGranularitySetting,
-    /// The highest `symbol-height-offset` seen since the tiles were last
+    /// The highest content elevation seen since the tiles were last
     /// cleared, in meters. It doesn't fall when the tile that held it
-    /// unloads, or the tile could not come back while its symbols show.
+    /// unloads, or the tile could not come back while its content shows.
     max_content_elevation: f32,
     style: Option<Arc<SourceStyle>>,
 }
@@ -876,8 +877,9 @@ impl SourceTiles {
         }
     }
 
-    /// Raises the high-water mark of the content elevation, such as
-    /// `symbol-height-offset`, to `layers`' and the cover's, and returns it.
+    /// Raises the high-water mark of the content elevation
+    /// ([`StyleLayerType::content_elevation`](mln_style::layer_type::StyleLayerType::content_elevation))
+    /// to `layers`' and the cover's, and returns it.
     fn update_max_content_elevation(&mut self, layers: &[Arc<dyn ErasedEvaluatedLayer>]) -> f32 {
         let mut max = self.max_content_elevation;
         // Only the buckets know the heights of an expression.
@@ -1516,8 +1518,8 @@ impl SourceTiles {
     }
 
     /// Whether the last update held an entry the view left, which waits for
-    /// placements to fade its symbols out, or for the next update to drop
-    /// it once they have.
+    /// placements to fade out what its layers placed, or for the next update
+    /// to drop it once they have.
     #[must_use]
     pub(crate) fn has_fading_tiles(&self) -> bool {
         self.rendered.values().any(Rendered::is_held)

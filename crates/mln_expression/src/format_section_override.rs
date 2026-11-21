@@ -1,6 +1,7 @@
 //! `format-section-override`: a property's value that a section of a
-//! `formatted` value can override. The style installs it on a symbol layer's
-//! `text-color`; it has no style JSON of its own.
+//! `formatted` value can override. A layer type installs it on a color
+//! property that its `formatted` values' sections set; it has no style JSON
+//! of its own.
 
 use std::sync::Arc;
 
