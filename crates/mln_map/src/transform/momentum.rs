@@ -14,6 +14,7 @@ use mln_util::geo::{LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
 use mln_util::logging::{Event, Log};
 use mln_util::time::Instant;
 
+use super::terrain::sees_plane;
 use super::transition::Transition;
 use super::{
     BEARING, CENTER, PITCH, Transform, TransformEvent, ZOOM, altitude_pixels, max_pitch_for_padding, nanos_from_secs,
@@ -502,9 +503,13 @@ impl Transform {
         }
     }
 
-    /// Moves the center so that `lat_lng` is at `point` again.
+    /// Moves the center so that `lat_lng` is at `point` again; over terrain,
+    /// where the camera can hold it there (see `Transform::hold_anchor`).
     fn hold_momentum_anchor(&mut self, anchor: Option<(ScreenCoordinate, LatLng, f64)>) {
         let Some((point, lat_lng, height)) = anchor else { return };
+        if self.terrain.is_some() && !sees_plane(self.view(), &point, height) {
+            return;
+        }
         if let Err(e) = self.state.move_lat_lng_at(&lat_lng, &point, height) {
             Log::error(Event::General, &e.message);
         }

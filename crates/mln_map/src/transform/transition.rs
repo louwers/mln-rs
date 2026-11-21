@@ -13,7 +13,7 @@ use mln_util::logging::{Event, Log};
 use mln_util::time::Instant;
 
 use super::momentum::MomentumState;
-use super::terrain::EasedAltitude;
+use super::terrain::{EasedAltitude, sees_plane};
 use super::{
     ALTITUDE, BEARING, CENTER, CameraCommandId, CommandEnd, FOV, PADDING, PITCH, ROLL, Transform, TransformEvent, ZOOM,
     altitude_pixels, camera_fields, max_pitch_for_padding, set_altitude_pixels,
@@ -246,8 +246,12 @@ fn anchored_end(
         let mut camera = CameraOptions { center_altitude: Some(altitude), ..current };
         compose(&mut camera, target, fields & !ALTITUDE);
         place(&mut state, &current, &mut camera);
-        // The anchor had a location at the start, so it has one here.
-        let _ = state.move_lat_lng_at(location, anchor, height);
+        // The anchor had a location at the start, so it has one here; a
+        // camera that can't hold it moves around its center, as the frames
+        // do (see `Transform::hold_anchor`).
+        if sees_plane(state.view(), anchor, height) {
+            let _ = state.move_lat_lng_at(location, anchor, height);
+        }
         let end = state.view().center(WrapMode::Wrapped);
         (end, ground.and_then(|ground| ground.at(end)).map(|ground| ground - altitude))
     };
@@ -469,9 +473,9 @@ impl Transform {
 
         // An active anchor also applies to immediate changes of other
         // properties.
-        let anchored = self.transitions.iter().rev().find_map(|transition| {
+        let anchored = self.transitions.iter().enumerate().rev().find_map(|(index, transition)| {
             let anchor = transition.anchor.filter(|_| transition.fields & CENTER != 0)?;
-            Some((anchor, transition.anchor_lat_lng, transition.anchor_height))
+            Some((anchor, transition.anchor_lat_lng, transition.anchor_height, index))
         });
 
         // On the globe the anchor is re-read every frame and the zoom around
@@ -480,7 +484,7 @@ impl Transform {
         // LatLng in a frame is logged, and the anchor's location at the
         // start stands in.
         let globe_zoom_around = match anchored {
-            Some((anchor, anchor_lat_lng, _)) if self.globe_on_screen() => {
+            Some((anchor, anchor_lat_lng, _, _)) if self.globe_on_screen() => {
                 let location =
                     self.state.view().screen_coordinate_to_lat_lng(&anchor, WrapMode::Unwrapped).unwrap_or_else(|e| {
                         Log::error(Event::General, &e.message);
@@ -501,7 +505,7 @@ impl Transform {
         if let Some(pixels) = held_pixels {
             set_altitude_pixels(&mut self.state, pixels);
         }
-        if let Some((anchor, anchor_lat_lng, height)) = anchored {
+        if let Some((anchor, anchor_lat_lng, height, index)) = anchored {
             match globe_zoom_around {
                 Some((location, zoom_before)) if self.state.view().zoom() != zoom_before => {
                     let zoom_delta = self.state.view().zoom() - zoom_before;
@@ -513,7 +517,7 @@ impl Transform {
                         self.globe_free_bearing,
                     );
                 }
-                _ => self.hold_anchor(&anchor_lat_lng, &anchor, height),
+                _ => self.hold_anchor(&anchor_lat_lng, &anchor, height, &current, index),
             }
             if held_pixels.is_some() {
                 self.state.set_center_altitude(camera.center_altitude.unwrap_or_default());
@@ -526,9 +530,35 @@ impl Transform {
     }
 
     /// Moves the center so that `location`, `height` meters up, is at
-    /// `anchor` (y up) again. The anchor had a `LatLng` at the start; a frame
-    /// that has none logs it, as `frame_edge_insets` does.
-    fn hold_anchor(&mut self, location: &LatLng, anchor: &ScreenCoordinate, height: f64) {
+    /// `anchor` (y up) again, for the command at `index`. The anchor had a
+    /// `LatLng` at the start; a frame that has none logs it, as
+    /// `frame_edge_insets` does.
+    ///
+    /// Over terrain, a frame whose camera can't hold it there
+    /// ([`sees_plane`]), such as one whose pitch carries the anchor above the
+    /// horizon, moves around the view's center instead: the center stays
+    /// where it was, in `before`, and the command gives up its anchor and
+    /// the center, and eases its altitude onto the ground there.
+    fn hold_anchor(
+        &mut self,
+        location: &LatLng,
+        anchor: &ScreenCoordinate,
+        height: f64,
+        before: &CameraOptions,
+        index: usize,
+    ) {
+        if self.terrain.is_some() && !sees_plane(self.view(), anchor, height) {
+            let zoom = self.view().zoom();
+            self.state.set_lat_lng_zoom(&before.center.unwrap_or_default(), zoom);
+            let center = self.view().center(WrapMode::Wrapped);
+            let transition = &mut self.transitions[index];
+            transition.anchor = None;
+            transition.fields &= !CENTER;
+            if let Some(eased) = transition.eased_altitude.as_mut() {
+                eased.move_end(center);
+            }
+            return;
+        }
         if let Err(e) = self.state.move_lat_lng_at(location, anchor, height) {
             Log::error(Event::General, &e.message);
         }

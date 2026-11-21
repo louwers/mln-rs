@@ -286,10 +286,9 @@ impl Transform {
     /// line of sight meets.
     ///
     /// `None`, for the plane at the center's altitude, without terrain,
-    /// where the pointer grabbed no drawn ground, for an anchor at the view's
-    /// center or above the horizon, and for a plane nine tenths or more of
-    /// the way up from the center to the eye, where the line of sight meets
-    /// it at too shallow a depth to solve on.
+    /// where the pointer grabbed no drawn ground, for a pivot (`grabbed` is
+    /// `anchor`) at the view's center, and where the plane can't hold the
+    /// anchor or the grabbed point ([`sees_plane`]).
     pub(super) fn anchor_plane(
         &mut self,
         grabbed: &ScreenCoordinate,
@@ -316,11 +315,10 @@ impl Transform {
         }?;
         let view = self.view();
         let center = view.padding().center_in(view.size());
-        let near_center = (anchor.x - center.x).powi(2) + (anchor.y - center.y).powi(2) < NEAR_CENTER;
-        let below_horizon = anchor.y > center.y - view.mercator_horizon();
-        let altitude = view.center_altitude();
-        let solvable = height - altitude < MAX_ANCHOR_RISE * (view.eye_position().z - altitude);
-        (!near_center && below_horizon && solvable).then_some(height)
+        // A pivot at the center leaves the center where it is.
+        let pivot = grabbed == anchor && (anchor.x - center.x).powi(2) + (anchor.y - center.y).powi(2) < NEAR_CENTER;
+        let sees = |point: &ScreenCoordinate| sees_plane(view, &flip_y(view, point), height);
+        (!pivot && sees(anchor) && sees(grabbed)).then_some(height)
     }
 
     /// The height of the plane on which a move around `anchor` holds the
@@ -368,6 +366,18 @@ impl Transform {
             }
         }
     }
+}
+
+/// Whether a move can hold a location on the plane `height` meters above
+/// sea level under `point` of `view`, measured from the bottom edge (y up):
+/// whether the point's line of sight descends, below the horizon, and the
+/// plane stands less than nine tenths of the way up from the center to the
+/// eye, where the line meets it at a depth deep enough to solve on.
+pub(super) fn sees_plane(view: &View, point: &ScreenCoordinate, height: f64) -> bool {
+    let center = view.padding().center_in(view.size());
+    let below_horizon = f64::from(view.size().height) - point.y > center.y - view.mercator_horizon();
+    let altitude = view.center_altitude();
+    below_horizon && height - altitude < MAX_ANCHOR_RISE * (view.eye_position().z - altitude)
 }
 
 /// The location under `point` of `view`, measured from the bottom edge (y

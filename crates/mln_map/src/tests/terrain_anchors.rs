@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use glam::DVec2;
 use mln_map_types::{Elevation, GroundHit, View};
+use mln_util::constants::DEFAULT_TRANSITION_EASE;
 use mln_util::geo::{LatLng, ScreenCoordinate, WrapMode};
 use mln_util::queue::Queue;
 
@@ -15,8 +16,8 @@ use super::ground::{flat, ground_event, report, world};
 use super::terrain_camera::{frames, map_over, pixel, start};
 use super::terrain_gestures::{Hill, meters};
 use crate::{
-    CameraDelta, CameraMomentum, CameraOptions, GesturePhase, Map, MomentumDecay, MomentumDecayModel, MomentumEasing,
-    MomentumGlide,
+    AnimationOptions, CameraDelta, CameraMomentum, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase, Map,
+    MomentumDecay, MomentumDecayModel, MomentumEasing, MomentumGlide,
 };
 
 /// One pixel at zoom 12, in Web Mercator at zoom 0.
@@ -325,4 +326,104 @@ fn a_lifted_pan_moves_on_without_a_jump() {
     }
     assert!(highest > 1000.0, "the hill lifted the camera {highest} m");
     assert_eq!(0.0, map.transform_state().view().center_altitude(), "the lift lowers past the hill");
+}
+
+/// Where the sky starts on `map`'s screen (y down): above it, a line of
+/// sight doesn't descend to the ground.
+fn horizon(map: &Map) -> f64 {
+    let view = map.transform_state().view();
+    view.padding().center_in(view.size()).y - view.mercator_horizon()
+}
+
+/// A drag whose pointer comes back below the horizon after a step above it
+/// grabs no ground on its way back: it moves the map on the plane at the
+/// center's altitude, as a drag without an anchor does, rather than solving
+/// for a point in the sky.
+#[test]
+fn a_drag_back_from_the_sky_pans_on_the_centre_plane() {
+    let run_loop = Queue::<()>::new();
+    let pan = |anchored: bool| {
+        let (mut map, _) = map_over(Some(&slope()), &run_loop);
+        map.jump_to(&CameraOptions { pitch: Some(75.0), ..Default::default() });
+        let below = DVec2::new(330.0, horizon(&map) + 15.0);
+        let offset = DVec2::new(0.0, -30.0);
+        // Up across the horizon, then back.
+        for (step, (offset, pointer)) in [(offset, below + offset), (-offset, below)].into_iter().enumerate() {
+            map.apply_camera_delta(&drag(phase(step as u32), offset, anchored.then_some(pointer))).unwrap();
+        }
+        map.transform_state().camera_options(None)
+    };
+    assert_eq!(pan(false), pan(true));
+}
+
+/// A drag whose pointer passes through the view's middle keeps the ground
+/// it grabbed under the pointer there too.
+#[test]
+fn a_drag_through_the_middle_keeps_the_grabbed_ground_under_the_pointer() {
+    let run_loop = Queue::<()>::new();
+    let (mut map, _) = map_over(Some(&slope()), &run_loop);
+    let offset = DVec2::new(-4.0, -4.0);
+    let mut pointer = MIDDLE - offset * 11.0;
+    let grabbed = ground_under(&map, pointer);
+    assert!(grabbed.height > 50.0, "the pointer grabs the slope at {} m", grabbed.height);
+    for step in 0..20 {
+        pointer += offset;
+        map.apply_camera_delta(&drag(phase(step), offset, Some(pointer))).unwrap();
+        let error = on_screen(&map, grabbed.world, grabbed.height).distance(pointer);
+        assert!(error < 0.01, "step {step} at {pointer}: the grabbed ground is {error} px from the pointer");
+    }
+}
+
+/// A tilt around a point just below the horizon, which carries it above
+/// the horizon, turns the camera around the view's center instead, as a
+/// tilt without an anchor does: a gesture's step, and each frame of a
+/// command.
+#[test]
+fn a_tilt_that_carries_its_anchor_into_the_sky_turns_around_the_center() {
+    let run_loop = Queue::<()>::new();
+    let tilt = |anchored: bool| {
+        let (mut map, _) = map_over(Some(&slope()), &run_loop);
+        map.jump_to(&CameraOptions { pitch: Some(70.0), ..Default::default() });
+        let anchor = ScreenCoordinate::new(330.0, horizon(&map) + 10.0);
+        let delta = CameraDelta {
+            pitch: Some(10.0),
+            anchor: anchored.then_some(anchor),
+            phase: GesturePhase::Begin,
+            ..Default::default()
+        };
+        map.apply_camera_delta(&delta).unwrap();
+        assert!(anchor.y < horizon(&map), "the tilt carries the anchor into the sky");
+        map.transform_state().camera_options(None)
+    };
+    assert_eq!(tilt(false), tilt(true), "a gesture's tilt");
+
+    // A command's frames hold the anchor until it reaches the sky, and then
+    // leave the center where they held it.
+    let (mut map, clock) = map_over(Some(&slope()), &run_loop);
+    map.jump_to(&CameraOptions { pitch: Some(60.0), ..Default::default() });
+    let anchor = ScreenCoordinate::new(330.0, horizon(&map) + 150.0);
+    map.update_camera(&CameraUpdate {
+        mode: CameraUpdateMode::Ease,
+        camera: CameraOptions { pitch: Some(85.0), anchor: Some(anchor), ..Default::default() },
+        animation: AnimationOptions {
+            duration: Some(Duration::from_secs(1)),
+            easing: Some(DEFAULT_TRANSITION_EASE),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+    let mut center = map.transform_state().view().center(WrapMode::Unwrapped);
+    let (mut held, mut skyward) = (0, 0);
+    frames(&mut map, clock, Duration::from_secs(1), |map, elapsed| {
+        let now = map.transform_state().view().center(WrapMode::Unwrapped);
+        if anchor.y < horizon(map) {
+            let moved = (world(&now) - world(&center)).length() / PIXEL;
+            assert!(moved < 1e-6, "{elapsed:?}: the anchor is in the sky, and the center moved {moved} px");
+            skyward += 1;
+        } else {
+            held += 1;
+        }
+        center = now;
+    });
+    assert!(held > 5 && skyward > 5, "{held} frames held the anchor, and {skyward} didn't");
 }

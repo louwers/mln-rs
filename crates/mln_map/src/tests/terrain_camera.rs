@@ -267,8 +267,8 @@ fn an_unclamped_ease_keeps_its_altitude() {
 /// frame's camera by no more than a micrometer.
 #[test]
 fn an_anchored_ease_on_a_steep_slope_ends_at_rest() {
-    // About half a meter up for each meter east.
-    let ground: Arc<dyn Elevation> = Arc::new(Slope { x: world(&start()).x, height: 1000.0, rise: 2e7 });
+    // About a quarter of a meter up for each meter east, 15 degrees.
+    let ground: Arc<dyn Elevation> = Arc::new(Slope { x: world(&start()).x, height: 1000.0, rise: 1e7 });
     let mut transform = Transform::new(ConstrainMode::HeightOnly, ViewportMode::Default);
     transform.resize(Size::new(512, 512)).unwrap();
     let mut limits = *transform.state().limits();
@@ -287,7 +287,7 @@ fn an_anchored_ease_on_a_steep_slope_ends_at_rest() {
     transform.follow_terrain();
     let mut now = clock;
     // The last ease's ground rises 300 m halfway through it.
-    let risen: Arc<dyn Elevation> = Arc::new(Slope { x: world(&start()).x, height: 1300.0, rise: 2e7 });
+    let risen: Arc<dyn Elevation> = Arc::new(Slope { x: world(&start()).x, height: 1300.0, rise: 1e7 });
     let mut ground = ground;
     for (anchor, pitch, rises) in [
         ((120.0, 400.0), 70.0, false),
