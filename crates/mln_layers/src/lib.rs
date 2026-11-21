@@ -84,6 +84,7 @@ pub fn shader_sources() -> ShaderSources {
     Raster::add_shader_sources(&mut sources);
     Hillshade::add_shader_sources(&mut sources);
     ColorRelief::add_shader_sources(&mut sources);
+    Symbol::add_shader_sources(&mut sources);
     sources
 }
 

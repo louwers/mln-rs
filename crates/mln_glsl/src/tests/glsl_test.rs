@@ -19,9 +19,6 @@ use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::shader_defines::*;
 use mln_gfx::shaders::sky_ubo::{AtmospherePropsUBO, SkyPropsUBO};
 use mln_gfx::shaders::source::glsl;
-use mln_gfx::shaders::symbol_layer_ubo::{
-    CollisionDrawableUBO, CollisionTilePropsUBO, SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO,
-};
 use mln_gfx::shaders::tile_debug_ubo::{TileDebugDrawableElement, TileDebugPropsUBO};
 use mln_layers::background::ubo::{BackgroundDrawableUnionUBO, BackgroundPatternPropsUBO, BackgroundPropsUBO};
 use mln_layers::circle::ubo::{CircleDrawableUBO, CircleEvaluatedPropsUBO};
@@ -35,6 +32,9 @@ use mln_layers::hillshade::ubo::{
 };
 use mln_layers::line::ubo::{LineDrawableUnionUBO, LineEvaluatedPropsUBO, LineTilePropsUnionUBO};
 use mln_layers::raster::ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
+use mln_layers::symbol::ubo::{
+    CollisionDrawableUBO, CollisionTilePropsUBO, SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO,
+};
 use naga::{AddressSpace, ArraySize, Binding, Interpolation, Module, ScalarKind, StorageAccess, TypeInner};
 
 use crate::front_end::parse;
@@ -78,7 +78,8 @@ fn every_program_declares_the_properties_its_glsl_reads_from_uniforms() {
 /// inspector, which counts its draws.
 #[test]
 fn every_layer_program_shows_the_overdraw_inspector() {
-    use mln_gfx::shaders::programs::{ATMOSPHERE, CLIPPING_MASK, COLLISION_BOX, COLLISION_CIRCLE, GLOBE_DEPTH, SKY};
+    use mln_gfx::shaders::programs::{ATMOSPHERE, CLIPPING_MASK, GLOBE_DEPTH, SKY};
+    use mln_layers::symbol::programs::{COLLISION_BOX, COLLISION_CIRCLE};
     let not_layers = [&CLIPPING_MASK, &COLLISION_BOX, &COLLISION_CIRCLE, &GLOBE_DEPTH, &SKY, &ATMOSPHERE];
     for (program, source) in programs() {
         if !not_layers.contains(&program) {
