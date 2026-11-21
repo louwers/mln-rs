@@ -135,12 +135,11 @@
 //!   features whose anchor is in T, from 0 to under the extent on both axes:
 //!   a copy in T's buffer, which a still's circles keep, is left to the tile
 //!   that holds it, and is absent where that tile doesn't draw, as on a
-//!   continuous flat map ([`TileFeatures::Anchored`]). A fill extrusion's T
-//!   draws every piece of a polygon that its bucket cut at T's edges, its
-//!   centroid in T or not ([`TileFeatures::All`]). The CPU reads a feature's
-//!   height ([`TileGround::height`]) from the DEM tile and coordinates its
-//!   draw reads, by the same height rule. A draw's ground (DEM coordinates,
-//!   the anchors it draws, decode and exaggeration) rides in its projection
+//!   continuous flat map. A fill extrusion's T draws every piece of a polygon
+//!   that its bucket cut at T's edges, its centroid in T or not. The CPU
+//!   reads a feature's height ([`TileGround::height`]) from the DEM tile and
+//!   coordinates its draw reads, by the same height rule. A draw's ground
+//!   (DEM coordinates, decode and exaggeration) rides in its projection
 //!   entry, which every standing program's vertex stage reads
 //!   ([`TerrainProjectionUBO`]); its DEM texture binds at
 //!   [`ID_GROUND_DEM_TEXTURE`], a slot of the draw's own textures that no
@@ -328,7 +327,7 @@ pub(crate) use cover::{ElevationRanges, TerrainCover};
 pub(crate) use cover::{REMEMBERED_RANGES, TerrainTile, terrain_tile_size};
 pub(crate) use drapes::Drapes;
 pub(crate) use elevation::TerrainElevation;
-pub(crate) use ground::{GroundBinding, GroundBindings, TileFeatures, TileGround, write_projection};
+pub(crate) use ground::{GroundBinding, GroundBindings, TileGround, write_projection};
 use mln_gfx::gpu::Gpu;
 #[cfg(doc)]
 use mln_gfx::projection_variant::ProjectionVariant;

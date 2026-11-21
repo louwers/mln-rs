@@ -98,7 +98,7 @@ use crate::render_light::EvaluatedLight;
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::render_tile::FrameTile;
-use crate::terrain::{TileFeatures, write_projection};
+use crate::terrain::write_projection;
 use crate::tile_matrix::{projection_data, to_projection_ubo};
 
 /// The pass the layer's draws draw in.
@@ -461,7 +461,7 @@ impl TypedLayer for RenderFillExtrusionLayer {
 
             let changes = entry.take_changes();
             let context = &mut *paint_parameters.context;
-            let read = ground.map(|ground| ground.read(&tile_id, TileFeatures::All));
+            let read = ground.map(|ground| ground.read(&tile_id));
             let cached = match entry.value {
                 Some(cached) => {
                     if changes.paint {

@@ -74,7 +74,7 @@ use crate::render_layer::{
 use crate::render_pass::RenderPass;
 use crate::render_source::{RenderSource, TileOrder};
 use crate::render_tile::{FrameTile, RenderTile};
-use crate::terrain::{GroundBinding, TileFeatures, write_projection};
+use crate::terrain::{GroundBinding, write_projection};
 use crate::tile_matrix::{projection_data, to_projection_ubo};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1287,7 +1287,7 @@ impl TypedLayer for RenderSymbolLayer {
         for (tile_index, tile) in render_tiles.iter().enumerate() {
             let tile_id = tile.id();
             if let Some(ground) = &ground {
-                self.ground_reads.push(ground.read(&tile_id, TileFeatures::Anchored));
+                self.ground_reads.push(ground.read(&tile_id));
             }
 
             let Some(mut entry) = self.drawing.tiles.entry(&tile_id) else {

@@ -16,37 +16,6 @@ use super::elevation::{DrawnDem, TerrainElevation, dem_height};
 use crate::gfx::store::SharedTexture;
 use crate::layer_drawing::UniformWriter;
 
-/// How far past a tile's edges the draws of a tile reach where they draw
-/// every feature of the tile ([`TileFeatures::All`]), in tile units: so
-/// far that they hold every point past those edges.
-const BEYOND: f32 = 1.0e9;
-
-/// Which of the features of a tile of a standing layer its draws over
-/// terrain draw, by where the features' anchors are.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum TileFeatures {
-    /// Those whose anchor is in the tile, from 0 to under [`EXTENT`] on both
-    /// axes: points, such as circles and heatmap kernels, whose copy in a
-    /// neighbour's buffer that neighbour's draws leave to the tile that holds
-    /// it.
-    Anchored,
-    /// All of them: the pieces that the tile's bucket cut features into at
-    /// its edges, such as extrusions', whose anchor, a piece's centroid, may
-    /// lie outside the tile.
-    All,
-}
-
-impl TileFeatures {
-    /// [`GroundDrawableUBO::rect`]: where the anchors of the features a draw
-    /// draws are, in tile units: x0, y0, x1, y1.
-    fn rect(self) -> [f32; 4] {
-        match self {
-            TileFeatures::Anchored => [0.0, 0.0, EXTENT as f32, EXTENT as f32],
-            TileFeatures::All => [-BEYOND, -BEYOND, BEYOND, BEYOND],
-        }
-    }
-}
-
 /// Where `tile` is in the DEM tile `dem`, which holds it, or is it: the
 /// scale and offset from the tile's uv to the DEM's.
 fn dem_coords(tile: CanonicalTileID, dem: CanonicalTileID) -> DemCoords {
@@ -144,16 +113,16 @@ impl GroundBindings {
         GroundBindings { elevation, props, textures, flat }
     }
 
-    /// What the draws of `tile`, which draw `features`, bind of its ground
+    /// What the draws of `tile` bind of its ground
     /// ([`TerrainElevation::ground`]).
-    pub(crate) fn read(&self, tile: &OverscaledTileID, features: TileFeatures) -> GroundBinding {
+    pub(crate) fn read(&self, tile: &OverscaledTileID) -> GroundBinding {
         let ground = self.elevation.ground(tile);
         let texture = ground.dem().and_then(|dem| self.textures.get(&dem.canonical));
         let (texture, dem_coords) = match texture {
             Some((texture, _)) => (texture.clone(), ground.coords()),
             None => (self.flat.clone(), [0.0; 4]),
         };
-        GroundBinding { texture, ubo: GroundDrawableUBO { dem_coords, rect: features.rect(), props: self.props } }
+        GroundBinding { texture, ubo: GroundDrawableUBO { dem_coords, props: self.props } }
     }
 
     /// The texture of the DEM tile `dem`, with its width in pixels, if the

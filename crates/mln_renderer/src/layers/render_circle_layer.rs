@@ -37,7 +37,7 @@ use crate::render_layer::{
 };
 use crate::render_pass::RenderPass;
 use crate::render_tile::{FrameTile, RenderTile};
-use crate::terrain::{TileFeatures, write_projection};
+use crate::terrain::write_projection;
 use crate::tile_matrix::{globe_extrude_scale, projection_data, to_projection_ubo};
 
 /// The pass the layer's draws draw in.
@@ -321,7 +321,7 @@ impl TypedLayer for RenderCircleLayer {
 
             let uniforms = Self::uniforms(layer, &tile_id, binders, paint_parameters);
             if let Some(ground) = ground {
-                let read = ground.read(&tile_id, TileFeatures::Anchored);
+                let read = ground.read(&tile_id);
                 objects.set_texture(ID_GROUND_DEM_TEXTURE, Some(&read.texture));
                 self.grounds.push(read.ubo);
             }

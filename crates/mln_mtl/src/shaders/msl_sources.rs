@@ -63,11 +63,12 @@ static float standing_height(float2 pos, device const GroundDrawableUBO& ground,
     return ground_height(pos, ground.dem_coords, dem, ground.props);
 }
 
-// Whether the draw that reads `ground` draws a feature whose untranslated
-// anchor is at `pos`: a draw of a DEM tile under the tile draws the features
-// on its part of the tile.
-static bool ground_holds(float2 pos, device const GroundDrawableUBO& ground) {
-    return all(pos >= ground.rect.xy) && all(pos < ground.rect.zw);
+// Whether a point feature whose untranslated anchor is at `pos`, in tile
+// units, is in the draw's tile, from 0 to under the extent on both axes:
+// only the tile that holds it draws it, not a neighbour whose buffer holds a
+// copy.
+static bool tile_holds(float2 pos) {
+    return all(pos >= float2(0.0)) && all(pos < float2(8192.0));
 }
 
 // A position outside the clip volume, of a vertex the draw drops.
@@ -264,15 +265,13 @@ struct alignas(16) TerrainPropsUBO {
 static_assert(sizeof(TerrainPropsUBO) == 2 * 16, "wrong size");
 
 // Where a terrain variant's draw reads the ground it stands on: where its
-// tile is in the DEM tile it binds, the part of its tile it draws, and how
-// the DEM decodes.
+// tile is in the DEM tile it binds, and how the DEM decodes.
 struct alignas(16) GroundDrawableUBO {
     /*  0 */ float4 dem_coords;
-    /* 16 */ float4 rect;
-    /* 32 */ TerrainPropsUBO props;
-    /* 64 */
+    /* 16 */ TerrainPropsUBO props;
+    /* 48 */
 };
-static_assert(sizeof(GroundDrawableUBO) == 4 * 16, "wrong size");
+static_assert(sizeof(GroundDrawableUBO) == 3 * 16, "wrong size");
 
 struct alignas(16) ProjectionUBO {
     /*   0 */ float4x4 matrix;
@@ -991,7 +990,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float2 circle_center = floor(float2(vertx.position) * 0.5);
 
     // The circle stands on the ground under its center, as it draws,
-    // translated, if its draw draws it.
+    // translated, if its tile holds its center.
 #if defined(TERRAIN)
     device const ProjectionUBO& standing = projectionVector[uboIndex];
     const float ele = standing_height(circle_center + standing.translate, standing.ground, ground_dem);
@@ -1046,7 +1045,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         position.xy += scaled_extrude * (radius + stroke_width) * factor;
     }
 #if defined(TERRAIN)
-    if (!ground_holds(circle_center, standing.ground)) {
+    if (!tile_holds(circle_center)) {
         position = ground_dropped();
     }
 #endif
@@ -1573,19 +1572,15 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 };
 
 /// `ground`, what a fill extrusion's top rises by over terrain: the ground
-/// under its polygon's centroid, `vertx.centroid`, as it draws, translated;
-/// and `ground_kept`, whether the draw draws the polygon, whose centroid is
-/// on the draw's part of its tile.
+/// under its polygon's centroid, `vertx.centroid`, as it draws, translated.
 macro_rules! fill_extrusion_ground {
     () => {
         r"
 #if defined(TERRAIN)
     device const ProjectionUBO& standing = projectionVector[uboIndex];
     const float2 centroid_pos = float2(vertx.centroid);
-    const bool ground_kept = ground_holds(centroid_pos, standing.ground);
     const float ground = standing_height(centroid_pos + standing.translate, standing.ground, ground_dem);
 #else
-    const bool ground_kept = true;
     const float ground = 0.0;
 #endif
 "
@@ -1630,7 +1625,7 @@ macro_rules! fill_extrusion_wall_foot {
 
 // The walls' fragment stage, and `wall`, the vertex of a wall, which reads
 // the instanced walls' attributes as the fields of `vertx`, raised by
-// `ground`, and dropped unless `ground_kept`.
+// `ground`.
 macro_rules! extrusion_wall {
     () => {
         concat!(
@@ -1694,8 +1689,7 @@ FragmentStage wall(thread const Vertex& vertx,
 #if defined(TERRAIN)
                    texture2d<float, access::read> ground_dem,
 #endif
-                   float ground,
-                   bool ground_kept) {
+                   float ground) {
 
     bool isDiscarded = glMod(float(vertx.decimals_ed.x), 2.0) > 0.0;
     if (isDiscarded) {
@@ -1728,7 +1722,7 @@ FragmentStage wall(thread const Vertex& vertx,
             fill_extrusion_base_ground!(),
             fill_extrusion_wall_foot!(),
             r"
-    const float4 position = ground_kept ? projectTileFor3D(end, z, projection) : ground_dropped();
+    const float4 position = projectTileFor3D(end, z, projection);
 
 #if defined(OVERDRAW_INSPECTOR)
     return {
@@ -1869,7 +1863,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 #if defined(TERRAIN)
                 ground_dem,
 #endif
-                ground, ground_kept);
+                ground);
 }
 
 "
@@ -1971,7 +1965,7 @@ FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]],
 #if defined(TERRAIN)
                 ground_dem,
 #endif
-                ground, ground_kept);
+                ground);
 }
 "
     ),
@@ -2162,7 +2156,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 ",
         fill_extrusion_wall_foot!(),
         r"
-    const float4 position = ground_kept ? projectTileFor3D(end, z, projection) : ground_dropped();
+    const float4 position = projectTileFor3D(end, z, projection);
 
 #if defined(OVERDRAW_INSPECTOR)
     return {
@@ -2413,7 +2407,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float3 normal = float3(0.0, 0.0, 1.0);
     const float t = 1.0;
     const float z = height + ground;
-    const float4 position = ground_kept ? projectTileFor3D(float2(vertx.pos), z, projectionVector[uboIndex]) : ground_dropped();
+    const float4 position = projectTileFor3D(float2(vertx.pos), z, projectionVector[uboIndex]);
 
 #if defined(OVERDRAW_INSPECTOR)
     return {
@@ -2652,7 +2646,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float3 normal = float3(0.0, 0.0, 1.0);
     const float t = 1.0;
     const float z = height + ground;
-    const float4 position = ground_kept ? projectTileFor3D(float2(vertx.pos), z, projectionVector[uboIndex]) : ground_dropped();
+    const float4 position = projectTileFor3D(float2(vertx.pos), z, projectionVector[uboIndex]);
 
 #if defined(OVERDRAW_INSPECTOR)
     return {
@@ -4165,13 +4159,13 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float3 corner_vector = globeRotateVector(center_vector, extrude * radius * drawable.globe_extrude_scale);
     const float4 position = interpolateProjection(circle_center + scaled_extrude, corner_vector, 0.0, projectionVector[uboIndex]);
 #else
-    // The kernel lies flat on the ground under its center, if its draw
-    // draws it.
+    // The kernel lies flat on the ground under its center, if its tile
+    // holds its center.
     const float2 center = floor(float2(vertx.pos) * 0.5);
 #if defined(TERRAIN)
     device const GroundDrawableUBO& ground = projectionVector[uboIndex].ground;
     const float ele = standing_height(center, ground, ground_dem);
-    const float4 position = ground_holds(center, ground)
+    const float4 position = tile_holds(center)
         ? drawable.matrix * float4(center + scaled_extrude, ele, 1)
         : ground_dropped();
 #else
@@ -7203,9 +7197,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 
     const float2 translated_a_pos = a_pos + drawable.translation;
     // The symbol stands where its draw's ground says, under its anchor as it
-    // draws, translated, if its draw draws it.
+    // draws, translated, if its tile holds its anchor.
 #if defined(TERRAIN)
-    if (!ground_holds(a_pos, projection.ground)) {
+    if (!tile_holds(a_pos)) {
         return { .position = ground_dropped() };
     }
     const float ele = vertx.height_offset + standing_height(translated_a_pos, projection.ground, ground_dem);
@@ -7519,9 +7513,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 
     const float2 translated_a_pos = a_pos + drawable.translation;
     // The symbol stands where its draw's ground says, under its anchor as it
-    // draws, translated, if its draw draws it.
+    // draws, translated, if its tile holds its anchor.
 #if defined(TERRAIN)
-    if (!ground_holds(a_pos, projection.ground)) {
+    if (!tile_holds(a_pos)) {
         return { .position = ground_dropped() };
     }
     const float ele = vertx.height_offset + standing_height(translated_a_pos, projection.ground, ground_dem);
@@ -7898,9 +7892,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 
     const float2 translated_a_pos = a_pos + drawable.translation;
     // The symbol stands where its draw's ground says, under its anchor as it
-    // draws, translated, if its draw draws it.
+    // draws, translated, if its tile holds its anchor.
 #if defined(TERRAIN)
-    if (!ground_holds(a_pos, projection.ground)) {
+    if (!tile_holds(a_pos)) {
         return { .position = ground_dropped() };
     }
     const float ele = vertx.height_offset + standing_height(translated_a_pos, projection.ground, ground_dem);

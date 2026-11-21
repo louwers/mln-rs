@@ -142,11 +142,12 @@ highp float standing_height(highp vec2 pos) {
     return ground_height(pos, u_ground_dem_coords, u_ground_unpack, u_ground_unpack_scale, u_ground_exaggeration);
 }
 
-// Whether the draw draws a feature whose untranslated anchor is at `pos`: a
-// draw of a DEM tile under the tile draws the features on its part of the
-// tile.
-bool ground_holds(highp vec2 pos) {
-    return all(greaterThanEqual(pos, u_ground_rect.xy)) && all(lessThan(pos, u_ground_rect.zw));
+// Whether a point feature whose untranslated anchor is at `pos`, in tile
+// units, is in the draw's tile, from 0 to under the extent on both axes:
+// only the tile that holds it draws it, not a neighbour whose buffer holds a
+// copy.
+bool tile_holds(highp vec2 pos) {
+    return all(greaterThanEqual(pos, vec2(0.0))) && all(lessThan(pos, vec2(8192.0)));
 }
 
 // A position outside the clip volume, of a vertex the draw drops.
@@ -232,18 +233,12 @@ highp float ground_visibility(highp vec4 clip) {
 /// `groundHeight` and `baseGround`, what a fill extrusion's top and base
 /// rise by: over terrain, the ground under its polygon's centroid,
 /// `a_centroid`, as it draws, translated, and a base at or below 0 sinks
-/// 10 m more, so that no gap shows under a wall downhill. Returns a vertex
-/// the draw drops for a polygon whose centroid is off the draw's part of its
-/// tile.
+/// 10 m more, so that no gap shows under a wall downhill.
 macro_rules! fill_extrusion_ground {
     () => {
         r"
 #ifdef TERRAIN
     highp vec2 centroid_pos = a_centroid;
-    if (!ground_holds(centroid_pos)) {
-        gl_Position = ground_dropped();
-        return;
-    }
     highp float groundHeight = standing_height(centroid_pos + u_projection_translate);
     highp float baseGround = groundHeight - (base > 0.0 ? 0.0 : 10.0);
 #else
@@ -646,7 +641,7 @@ lowp float stroke_opacity = u_stroke_opacity;
     // in extrusion data
     vec2 circle_center = floor(a_pos * 0.5);
     // The circle stands on the ground under its center, as it draws,
-    // translated, if its draw draws it.
+    // translated, if its tile holds its center.
 #ifdef TERRAIN
     highp float ele = standing_height(circle_center + u_projection_translate);
     v_visibility = ground_visibility(u_matrix * vec4(circle_center, ele, 1));
@@ -700,7 +695,7 @@ lowp float stroke_opacity = u_stroke_opacity;
         }
     }
 #ifdef TERRAIN
-    if (!ground_holds(circle_center)) {
+    if (!tile_holds(circle_center)) {
         gl_Position = ground_dropped();
     }
 #endif
@@ -3137,8 +3132,8 @@ mediump float radius = u_radius;
     vec3 corner_vector = globeRotateVector(center_vector, v_extrude * radius * u_globe_extrude_scale);
     gl_Position = interpolateProjection(circle_center + extrude, corner_vector, 0.0);
 #else
-    // The kernel lies flat on the ground under its center, if its draw
-    // draws it.
+    // The kernel lies flat on the ground under its center, if its tile
+    // holds its center.
     vec2 center = floor(a_pos * 0.5);
 #ifdef TERRAIN
     highp float ele = standing_height(center);
@@ -3147,7 +3142,7 @@ mediump float radius = u_radius;
 #endif
     gl_Position = u_matrix * vec4(center + extrude, ele, 1);
 #ifdef TERRAIN
-    if (!ground_holds(center)) {
+    if (!tile_holds(center)) {
         gl_Position = ground_dropped();
     }
 #endif
@@ -5066,10 +5061,8 @@ layout (std140) uniform ProjectionUBO {
     highp vec2 u_projection_translate;
 #ifdef TERRAIN
     // Where a terrain variant's draw reads the ground it stands on: where its
-    // tile is in the DEM tile it binds, the part of its tile it draws, and how
-    // the DEM decodes.
+    // tile is in the DEM tile it binds, and how the DEM decodes.
     highp vec4 u_ground_dem_coords;
-    highp vec4 u_ground_rect;
     highp vec4 u_ground_unpack;
     highp float u_ground_unpack_scale;
     highp float u_ground_exaggeration;
@@ -5554,9 +5547,9 @@ void main() {
 
     vec2 translated_a_pos = a_pos + u_translation;
     // The symbol stands where its draw's ground says, under its anchor as it
-    // draws, translated, if its draw draws it.
+    // draws, translated, if its tile holds its anchor.
 #ifdef TERRAIN
-    if (!ground_holds(a_pos)) {
+    if (!tile_holds(a_pos)) {
         gl_Position = ground_dropped();
         return;
     }
@@ -5865,9 +5858,9 @@ lowp float halo_blur = u_halo_blur;
 
     vec2 translated_a_pos = a_pos + u_translation;
     // The symbol stands where its draw's ground says, under its anchor as it
-    // draws, translated, if its draw draws it.
+    // draws, translated, if its tile holds its anchor.
 #ifdef TERRAIN
-    if (!ground_holds(a_pos)) {
+    if (!tile_holds(a_pos)) {
         gl_Position = ground_dropped();
         return;
     }
@@ -6235,9 +6228,9 @@ lowp float halo_blur = u_halo_blur;
 
     vec2 translated_a_pos = a_pos + u_translation;
     // The symbol stands where its draw's ground says, under its anchor as it
-    // draws, translated, if its draw draws it.
+    // draws, translated, if its tile holds its anchor.
 #ifdef TERRAIN
-    if (!ground_holds(a_pos)) {
+    if (!tile_holds(a_pos)) {
         gl_Position = ground_dropped();
         return;
     }

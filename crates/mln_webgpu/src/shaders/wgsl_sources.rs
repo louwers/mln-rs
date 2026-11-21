@@ -62,11 +62,12 @@ fn standing_height(pos: vec2<f32>, ground: GroundDrawableUBO) -> f32 {
     return ground_height(pos, ground.dem_coords, ground.props);
 }
 
-// Whether the draw that reads `ground` draws a feature whose untranslated
-// anchor is at `pos`: a draw of a DEM tile under the tile draws the features
-// on its part of the tile.
-fn ground_holds(pos: vec2<f32>, ground: GroundDrawableUBO) -> bool {
-    return all(pos >= ground.rect.xy) && all(pos < ground.rect.zw);
+// Whether a point feature whose untranslated anchor is at `pos`, in tile
+// units, is in the draw's tile, from 0 to under the extent on both axes:
+// only the tile that holds it draws it, not a neighbour whose buffer holds a
+// copy.
+fn tile_holds(pos: vec2<f32>) -> bool {
+    return all(pos >= vec2<f32>(0.0)) && all(pos < vec2<f32>(8192.0));
 }
 
 // A position outside the clip volume, of a vertex the draw drops.
@@ -622,9 +623,9 @@ fn main(in: VertexInput) -> VertexOutput {
 
     let projection = projectionVector[globalIndex.value];
     // The circle stands on the ground under its center, as it draws,
-    // translated, if its draw draws it.
+    // translated, if its tile holds its center.
 #ifdef TERRAIN
-    if (!ground_holds(circle_center, projection.ground)) {
+    if (!tile_holds(circle_center)) {
         out.position = ground_dropped();
         return out;
     }
@@ -2685,11 +2686,11 @@ fn main(in: VertexInput) -> VertexOutput {
     let scaled_extrude = extrude * radius * drawable.extrude_scale;
 
     let base = floor(pos * 0.5);
-    // The kernel lies flat on the ground under its center, if its draw
-    // draws it.
+    // The kernel lies flat on the ground under its center, if its tile
+    // holds its center.
 #ifdef TERRAIN
     let ground = projectionVector[globalIndex.value].ground;
-    if (!ground_holds(base, ground)) {
+    if (!tile_holds(base)) {
         out.position = ground_dropped();
         return out;
     }
@@ -5295,11 +5296,9 @@ struct TerrainPropsUBO {
 };
 
 // Where a terrain variant's draw reads the ground it stands on: where its
-// tile is in the DEM tile it binds, the part of its tile it draws, and how
-// the DEM decodes.
+// tile is in the DEM tile it binds, and how the DEM decodes.
 struct GroundDrawableUBO {
     dem_coords: vec4<f32>,
-    rect: vec4<f32>,
     props: TerrainPropsUBO,
 };
 
@@ -5770,9 +5769,9 @@ fn main(in: VertexInput) -> VertexOutput {
     let projection = projectionVector[globalIndex.value];
     let translated_a_pos = a_pos + drawable.translation;
     // The symbol stands where its draw's ground says, under its anchor as it
-    // draws, translated, if its draw draws it.
+    // draws, translated, if its tile holds its anchor.
 #ifdef TERRAIN
-    if (!ground_holds(a_pos, projection.ground)) {
+    if (!tile_holds(a_pos)) {
         out.position = ground_dropped();
         return out;
     }
@@ -6099,9 +6098,9 @@ fn main(in: VertexInput) -> VertexOutput {
     let projection = projectionVector[globalIndex.value];
     let translated_a_pos = a_pos + drawable.translation;
     // The symbol stands where its draw's ground says, under its anchor as it
-    // draws, translated, if its draw draws it.
+    // draws, translated, if its tile holds its anchor.
 #ifdef TERRAIN
-    if (!ground_holds(a_pos, projection.ground)) {
+    if (!tile_holds(a_pos)) {
         out.position = ground_dropped();
         return out;
     }
@@ -6493,9 +6492,9 @@ fn main(in: VertexInput) -> VertexOutput {
     let projection = projectionVector[globalIndex.value];
     let translated_a_pos = a_pos + drawable.translation;
     // The symbol stands where its draw's ground says, under its anchor as it
-    // draws, translated, if its draw draws it.
+    // draws, translated, if its tile holds its anchor.
 #ifdef TERRAIN
-    if (!ground_holds(a_pos, projection.ground)) {
+    if (!tile_holds(a_pos)) {
         out.position = ground_dropped();
         return out;
     }

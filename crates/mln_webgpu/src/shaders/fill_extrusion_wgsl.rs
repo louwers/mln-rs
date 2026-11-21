@@ -256,18 +256,13 @@ macro_rules! base_and_height {
 /// `groundHeight` and `baseGround`, what a polygon's top and base rise by:
 /// over terrain, the ground under its centroid, `in.centroid`, as it draws,
 /// translated, and a base at or below 0 sinks 10 m more, so that no gap
-/// shows under a wall downhill. Returns a vertex the draw drops for a
-/// polygon whose centroid is off the draw's part of its tile.
+/// shows under a wall downhill.
 macro_rules! ground {
     () => {
         r#"
 #ifdef TERRAIN
     let standing = projectionVector[globalIndex.value];
     let centroid = vec2<f32>(in.centroid);
-    if (!ground_holds(centroid, standing.ground)) {
-        out.position = ground_dropped();
-        return out;
-    }
     let groundHeight = standing_height(centroid + standing.translate, standing.ground);
     let baseGround = groundHeight - select(10.0, 0.0, baseValue > 0.0);
 #else
