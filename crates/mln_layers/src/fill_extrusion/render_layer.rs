@@ -29,10 +29,10 @@ use std::mem::offset_of;
 use std::sync::Arc;
 
 use mln_gfx::gpu::{Gpu, ShaderKey};
+use mln_gfx::shaders::bindings::PROJECTION_BUFFER_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
 use mln_map_types::View;
 use mln_render::draw::{
@@ -776,7 +776,7 @@ impl ExtrusionState {
         writer.uniform(ID_FILL_EXTRUSION_PROPS_UBO, &props);
         writer.storage(ID_FILL_EXTRUSION_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);
         writer.storage(ID_FILL_EXTRUSION_TILE_PROPS_UBO, |uniforms| uniforms.tile_props);
-        writer.storage(ID_PROJECTION_UBO, |uniforms| uniforms.projection);
+        writer.storage(PROJECTION_BUFFER_ID, |uniforms| uniforms.projection);
     }
 }
 

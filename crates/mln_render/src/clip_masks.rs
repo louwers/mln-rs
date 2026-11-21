@@ -6,9 +6,9 @@ use mln_gfx::gpu::{
     TargetFormats, VertexAttribute, VertexBufferLayout, VertexStep,
 };
 use mln_gfx::projection_variant::ProjectionVariant;
+use mln_gfx::shaders::bindings::{FIRST_VERTEX_BUFFER_ID, PROJECTION_BUFFER_ID};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::shader_defines::{ID_PROJECTION_UBO, MAX_UBO_COUNT_PER_SHADER};
 use mln_gfx::types::StencilOpType;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawModeType};
 use mln_tile_id::UnwrappedTileID;
@@ -241,8 +241,8 @@ impl ClipMasks {
             let stride = size.next_multiple_of(context.caps().buffer_offset_alignment as usize);
             for slot in 0..projections.size() / stride {
                 let mut entries = Entries::new();
-                for id in 0..MAX_UBO_COUNT_PER_SHADER {
-                    let (buffer, offset, size) = if id == ID_PROJECTION_UBO {
+                for id in 0..FIRST_VERTEX_BUFFER_ID {
+                    let (buffer, offset, size) = if id == PROJECTION_BUFFER_ID {
                         (projections, (slot * stride) as u64, size as u64)
                     } else if let Some(buffer) = global.get(id) {
                         (buffer, 0, buffer.size() as u64)

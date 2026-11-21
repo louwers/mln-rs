@@ -4,7 +4,7 @@
 
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::gpu::{BufferUsage, Gpu, GpuError};
-use mln_gfx::shaders::shader_defines::MAX_ATTRIBUTE_COUNT_PER_SHADER;
+use mln_gfx::shaders::bindings::MAX_ATTRIBUTES;
 
 use crate::gfx::buffer::Buffer;
 use crate::gfx::context::Context;
@@ -138,7 +138,7 @@ impl VertexAttribute {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Uniforms(u16);
 
-const _: () = assert!(MAX_ATTRIBUTE_COUNT_PER_SHADER <= u16::BITS as usize);
+const _: () = assert!(MAX_ATTRIBUTES <= u16::BITS as usize);
 
 impl Uniforms {
     pub(crate) fn insert(&mut self, id: usize) {
@@ -164,7 +164,7 @@ impl FromIterator<usize> for Uniforms {
 /// Vertex attributes by id.
 #[derive(Default)]
 pub struct VertexAttributeArray {
-    attrs: [Option<Box<VertexAttribute>>; MAX_ATTRIBUTE_COUNT_PER_SHADER],
+    attrs: [Option<Box<VertexAttribute>>; MAX_ATTRIBUTES],
 }
 
 impl VertexAttributeArray {

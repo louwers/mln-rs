@@ -4,8 +4,8 @@
 // language.
 
 use mln_rs::mln_gfx::gfx_types::AttributeDataType::Float2;
+use mln_rs::mln_gfx::shaders::bindings::FIRST_UNIFORM_ID;
 use mln_rs::mln_gfx::shaders::program::{Attribute, Buffer, Program, Sources, Texture};
-use mln_rs::mln_gfx::shaders::shader_defines::DRAWABLE_RESERVED_UBO_COUNT;
 use mln_rs::mln_gfx::shaders::source::{glsl, glsl_es, msl, wgsl};
 
 mln_rs::mln_gfx::uniform_block! {
@@ -19,8 +19,8 @@ mln_rs::mln_gfx::uniform_block! {
     }
 }
 
-/// The id of the quads' block: the first a program's own uniform block takes.
-pub(crate) const ID_QUAD_UBO: usize = DRAWABLE_RESERVED_UBO_COUNT;
+/// The id of the quads' block.
+pub(crate) const ID_QUAD_UBO: usize = FIRST_UNIFORM_ID;
 /// The ids of the quads' corner, which steps per vertex, and offset, which
 /// steps per instance.
 pub(crate) const ID_CORNER: usize = 0;

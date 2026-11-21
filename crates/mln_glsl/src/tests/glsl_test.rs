@@ -11,13 +11,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use mln_gfx::gfx_types::AttributeDataType;
+use mln_gfx::shaders::bindings::{
+    FIRST_PROGRAM_BUFFER_ID, FIRST_UNIFORM_ID, FIRST_VERTEX_BUFFER_ID, FRAGMENT_STORAGE_ID, MAX_ATTRIBUTES,
+    MAX_TEXTURES, PROJECTION_BUFFER_ID, VERTEX_STORAGE_ID, VIEW_BUFFER_ID,
+};
 use mln_gfx::shaders::program::{
     Attribute, Buffer as ProgramBuffer, BufferKind, PROJECTION_BUFFER, Program, VIEW_BUFFER,
-};
-use mln_gfx::shaders::shader_defines::{
-    DRAWABLE_RESERVED_UBO_COUNT, ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO, ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO,
-    ID_PROJECTION_UBO, ID_VIEW_UBO, LAYER_SSBO_START_ID, MAX_ATTRIBUTE_COUNT_PER_SHADER, MAX_TEXTURE_COUNT_PER_SHADER,
-    MAX_UBO_COUNT_PER_SHADER,
 };
 use mln_gfx::shaders::source::glsl::{self, Glsl};
 use naga::{AddressSpace, ArraySize, Binding, Interpolation, Module, ScalarKind, StorageAccess, TypeInner};
@@ -111,9 +110,9 @@ fn buffer_id(set: u32, binding: u32) -> Option<usize> {
     let binding = binding as usize;
     match DescriptorSetType::ALL.get(set as usize)? {
         DescriptorSetType::Global => Some(binding),
-        DescriptorSetType::Layer if binding < LAYER_STORAGE_COUNT => Some(binding + LAYER_SSBO_START_ID),
-        DescriptorSetType::Layer => Some(binding - LAYER_STORAGE_COUNT + DRAWABLE_RESERVED_UBO_COUNT),
-        DescriptorSetType::DrawableUniform => Some(binding + LAYER_SSBO_START_ID),
+        DescriptorSetType::Layer if binding < LAYER_STORAGE_COUNT => Some(binding + FIRST_PROGRAM_BUFFER_ID),
+        DescriptorSetType::Layer => Some(binding - LAYER_STORAGE_COUNT + FIRST_UNIFORM_ID),
+        DescriptorSetType::DrawableUniform => Some(binding + FIRST_PROGRAM_BUFFER_ID),
         DescriptorSetType::DrawableImage => None,
     }
 }
@@ -239,7 +238,7 @@ fn resources_are_in_the_descriptor_set_layouts() {
                     if let Err(message) = check_layout(set, binding, resource) {
                         fail(message);
                     }
-                    if set == 0 && global_uniform_binding(ID_VIEW_UBO) != Some(binding) {
+                    if set == 0 && global_uniform_binding(VIEW_BUFFER_ID) != Some(binding) {
                         fail(format!("set 0 binding {binding}: not the paint parameters"));
                     }
                 }
@@ -304,7 +303,9 @@ fn buffers_are_the_programs() {
                         (BufferKind::Uniform(block), Resource::Uniform(_)) => Some(block.size),
                         (BufferKind::Vertices { .. }, Resource::Storage(_)) => None,
                         (BufferKind::Storage { stride, .. }, Resource::Storage(_)) => Some(stride),
-                        (BufferKind::Storage { block, .. }, Resource::Uniform(_)) if buffer.id == ID_PROJECTION_UBO => {
+                        (BufferKind::Storage { block, .. }, Resource::Uniform(_))
+                            if buffer.id == PROJECTION_BUFFER_ID =>
+                        {
                             Some(block.size)
                         }
                         _ => {
@@ -478,28 +479,28 @@ fn stages_agree_on_what_passes_between_them() {
 // the offsets the shader preludes add, and `samplerBindingStartId`.
 #[test]
 fn bindings_follow_from_the_packed_ids() {
-    assert_eq!(global_uniform_binding(ID_VIEW_UBO), Some(0));
+    assert_eq!(global_uniform_binding(VIEW_BUFFER_ID), Some(0));
 
     // idDrawableReservedVertexOnlyUBO, idDrawableReservedFragmentOnlyUBO,
     // idProjectionUBO and drawableReservedUBOCount, from layerSSBOStartId.
-    assert_eq!(layer_storage_binding(ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO), Some(0));
-    assert_eq!(layer_storage_binding(ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO), Some(1));
-    assert_eq!(layer_storage_binding(ID_PROJECTION_UBO), Some(2));
-    assert_eq!(layer_storage_binding(DRAWABLE_RESERVED_UBO_COUNT), Some(3));
+    assert_eq!(layer_storage_binding(VERTEX_STORAGE_ID), Some(0));
+    assert_eq!(layer_storage_binding(FRAGMENT_STORAGE_ID), Some(1));
+    assert_eq!(layer_storage_binding(PROJECTION_BUFFER_ID), Some(2));
+    assert_eq!(layer_storage_binding(FIRST_UNIFORM_ID), Some(3));
     assert_eq!(LAYER_STORAGE_COUNT, 4);
 
     // layerUBOStartId, and the bindings after it.
-    assert_eq!(layer_uniform_binding(DRAWABLE_RESERVED_UBO_COUNT), Some(4));
-    assert_eq!(layer_uniform_binding(DRAWABLE_RESERVED_UBO_COUNT + 1), Some(5));
+    assert_eq!(layer_uniform_binding(FIRST_UNIFORM_ID), Some(4));
+    assert_eq!(layer_uniform_binding(FIRST_UNIFORM_ID + 1), Some(5));
     assert_eq!(LAYER_UNIFORM_COUNT, 2);
 
     // drawableUBOStartId and its offsets, then the vertex buffers of the
     // pulled shaders, from drawableUBOStartId + 5.
-    assert_eq!(drawable_uniform_binding(ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO), Some(0));
-    assert_eq!(drawable_uniform_binding(ID_PROJECTION_UBO), Some(2));
-    assert_eq!(drawable_uniform_binding(DRAWABLE_RESERVED_UBO_COUNT), Some(3));
+    assert_eq!(drawable_uniform_binding(VERTEX_STORAGE_ID), Some(0));
+    assert_eq!(drawable_uniform_binding(PROJECTION_BUFFER_ID), Some(2));
+    assert_eq!(drawable_uniform_binding(FIRST_UNIFORM_ID), Some(3));
     assert_eq!(DRAWABLE_UNIFORM_COUNT, 5);
-    assert_eq!(drawable_vertex_binding(MAX_UBO_COUNT_PER_SHADER), Some(5));
+    assert_eq!(drawable_vertex_binding(FIRST_VERTEX_BUFFER_ID), Some(5));
     assert_eq!(DRAWABLE_VERTEX_COUNT, 3);
 
     // samplerBindingStartId.
@@ -514,8 +515,8 @@ fn bindings_follow_from_the_packed_ids() {
 #[test]
 fn the_programs_fit_a_shader() {
     for (program, _) in programs() {
-        assert!(locations(program).count() <= MAX_ATTRIBUTE_COUNT_PER_SHADER, "{}", program.name);
-        assert!(program.textures.len() <= MAX_TEXTURE_COUNT_PER_SHADER.min(IMAGE_TEXTURE_COUNT), "{}", program.name);
+        assert!(locations(program).count() <= MAX_ATTRIBUTES, "{}", program.name);
+        assert!(program.textures.len() <= MAX_TEXTURES.min(IMAGE_TEXTURE_COUNT), "{}", program.name);
         let instanced = matches!(
             program.name,
             "fill-extrusion-instanced"

@@ -24,8 +24,8 @@ use mln_gfx::gpu::{
     VertexBufferLayout, VertexStep,
 };
 use mln_gfx::projection_variant::ProjectionVariant;
+use mln_gfx::shaders::bindings::{FIRST_VERTEX_BUFFER_ID, PROJECTION_BUFFER_ID};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::shader_defines::{ID_PROJECTION_UBO, MAX_UBO_COUNT_PER_SHADER};
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::ColorBlendFactorType;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawModeType};
@@ -467,10 +467,10 @@ impl LayerComposite {
                     None => (layer, layer),
                 };
                 let mut entries = Entries::new();
-                for id in 0..MAX_UBO_COUNT_PER_SHADER {
+                for id in 0..FIRST_VERTEX_BUFFER_ID {
                     let (buffer, offset, size) = match id {
                         ID_LAYER_COMPOSITE_UBO => (uniforms, (slot * stride) as u64, size as u64),
-                        ID_PROJECTION_UBO => (projection, 0, projection.size() as u64),
+                        PROJECTION_BUFFER_ID => (projection, 0, projection.size() as u64),
                         _ => match global.get(id) {
                             Some(buffer) => (buffer, 0, buffer.size() as u64),
                             None => continue,

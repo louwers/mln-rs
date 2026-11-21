@@ -8,9 +8,9 @@ use std::rc::Rc;
 
 use mln_gfx::gpu::{Gpu, ShaderKey};
 use mln_gfx::projection_variant::ProjectionVariant;
+use mln_gfx::shaders::bindings::PROJECTION_BUFFER_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
@@ -281,7 +281,7 @@ impl RasterState {
             };
             writer.uniform(ID_RASTER_EVALUATED_PROPS_UBO, &props);
             writer.storage(ID_RASTER_DRAWABLE_UBO, |(draw_ubo, _)| *draw_ubo);
-            writer.storage(ID_PROJECTION_UBO, |(_, projection)| *projection);
+            writer.storage(PROJECTION_BUFFER_ID, |(_, projection)| *projection);
         });
         if replaced {
             let objects = &mut drawing.objects;

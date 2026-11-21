@@ -7,12 +7,12 @@ use std::{fmt, ptr};
 use crate::gfx_types::AttributeDataType;
 use crate::gpu::{GpuError, ShaderKey, VertexStep};
 use crate::projection_variant::ProjectionVariant;
+use crate::shaders::bindings::{
+    FIRST_PROGRAM_BUFFER_ID, FIRST_UNIFORM_ID, FIRST_VERTEX_BUFFER_ID, MAX_ATTRIBUTES, MAX_TEXTURES,
+    MAX_VERTEX_BUFFERS, PROJECTION_BUFFER_ID, VIEW_BUFFER_ID,
+};
 use crate::shaders::block::{Block, UniformBlock};
 use crate::shaders::layer_ubo::{ProjectionUBO, ViewUBO};
-use crate::shaders::shader_defines::{
-    DRAWABLE_RESERVED_UBO_COUNT, GLOBAL_UBO_COUNT, ID_PROJECTION_UBO, ID_VIEW_UBO, MAX_ATTRIBUTE_COUNT_PER_SHADER,
-    MAX_TEXTURE_COUNT_PER_SHADER, MAX_UBO_COUNT_PER_SHADER, MAX_VERTEX_BUFFERS,
-};
 use crate::shaders::source::{glsl, glsl_es, msl, wgsl};
 
 /// A program: the buffers, vertex attributes and textures its shaders bind,
@@ -48,13 +48,13 @@ use crate::shaders::source::{glsl, glsl_es, msl, wgsl};
 ///   slots are the program's textures in binding order, and a sampler is
 ///   the one of the texture at the binding after it.
 ///
-/// A program has at most [`MAX_UBO_COUNT_PER_SHADER`] buffer ids before its
-/// vertex buffers', [`MAX_ATTRIBUTE_COUNT_PER_SHADER`] attributes and
-/// [`MAX_TEXTURE_COUNT_PER_SHADER`] textures.
+/// A program has at most [`FIRST_VERTEX_BUFFER_ID`] buffer ids before its
+/// vertex buffers', [`MAX_ATTRIBUTES`] attributes and
+/// [`MAX_TEXTURES`] textures.
 ///
-/// [`MAX_UBO_COUNT_PER_SHADER`]: crate::shaders::shader_defines::MAX_UBO_COUNT_PER_SHADER
-/// [`MAX_ATTRIBUTE_COUNT_PER_SHADER`]: crate::shaders::shader_defines::MAX_ATTRIBUTE_COUNT_PER_SHADER
-/// [`MAX_TEXTURE_COUNT_PER_SHADER`]: crate::shaders::shader_defines::MAX_TEXTURE_COUNT_PER_SHADER
+/// [`FIRST_VERTEX_BUFFER_ID`]: crate::shaders::bindings::FIRST_VERTEX_BUFFER_ID
+/// [`MAX_ATTRIBUTES`]: crate::shaders::bindings::MAX_ATTRIBUTES
+/// [`MAX_TEXTURES`]: crate::shaders::bindings::MAX_TEXTURES
 pub struct Program {
     /// Its name, for logs and labels.
     pub name: &'static str,
@@ -150,11 +150,11 @@ impl Buffer {
 }
 
 /// The view's block, which the engine binds for every draw.
-pub const VIEW_BUFFER: Buffer = Buffer::uniform::<ViewUBO>(ID_VIEW_UBO);
+pub const VIEW_BUFFER: Buffer = Buffer::uniform::<ViewUBO>(VIEW_BUFFER_ID);
 
 /// The projection block, which a layer binds for the draws of a program
 /// whose vertex stage projects with it.
-pub const PROJECTION_BUFFER: Buffer = Buffer::storage::<ProjectionUBO>(ID_PROJECTION_UBO);
+pub const PROJECTION_BUFFER: Buffer = Buffer::storage::<ProjectionUBO>(PROJECTION_BUFFER_ID);
 
 /// The engine's buffers that a program may read without listing them: the
 /// view's block and the projection block.
@@ -380,21 +380,21 @@ impl Program {
             }
         }
         let attributes = self.attributes.len() + self.instance_attributes.len();
-        if attributes > MAX_ATTRIBUTE_COUNT_PER_SHADER {
-            return invalid(format!("{attributes} attributes, more than {MAX_ATTRIBUTE_COUNT_PER_SHADER}"));
+        if attributes > MAX_ATTRIBUTES {
+            return invalid(format!("{attributes} attributes, more than {MAX_ATTRIBUTES}"));
         }
-        if self.textures.len() > MAX_TEXTURE_COUNT_PER_SHADER {
-            return invalid(format!("{} textures, more than {MAX_TEXTURE_COUNT_PER_SHADER}", self.textures.len()));
+        if self.textures.len() > MAX_TEXTURES {
+            return invalid(format!("{} textures, more than {MAX_TEXTURES}", self.textures.len()));
         }
         for (index, buffer) in self.buffers.iter().enumerate() {
             let ids = match buffer.kind {
-                BufferKind::Uniform(_) => GLOBAL_UBO_COUNT..MAX_UBO_COUNT_PER_SHADER,
-                BufferKind::Storage { .. } => GLOBAL_UBO_COUNT..DRAWABLE_RESERVED_UBO_COUNT + 1,
-                BufferKind::Vertices { .. } => MAX_UBO_COUNT_PER_SHADER..MAX_UBO_COUNT_PER_SHADER + MAX_VERTEX_BUFFERS,
+                BufferKind::Uniform(_) => FIRST_PROGRAM_BUFFER_ID..FIRST_VERTEX_BUFFER_ID,
+                BufferKind::Storage { .. } => FIRST_PROGRAM_BUFFER_ID..FIRST_UNIFORM_ID + 1,
+                BufferKind::Vertices { .. } => FIRST_VERTEX_BUFFER_ID..FIRST_VERTEX_BUFFER_ID + MAX_VERTEX_BUFFERS,
             };
-            if !ids.contains(&buffer.id) || buffer.id == ID_PROJECTION_UBO {
+            if !ids.contains(&buffer.id) || buffer.id == PROJECTION_BUFFER_ID {
                 return invalid(format!(
-                    "buffer id {}, outside the ids of its kind ({ids:?}, but {ID_PROJECTION_UBO})",
+                    "buffer id {}, outside the ids of its kind ({ids:?}, but {PROJECTION_BUFFER_ID})",
                     buffer.id
                 ));
             }
@@ -466,7 +466,7 @@ mod tests {
         let fails = |program: Program| assert!(program.check().is_err(), "{:?}", program.buffers);
         fails(Program { attributes: &[POSITION, POSITION], ..EMPTY });
         fails(Program { buffers: const { &[Buffer::uniform::<ViewUBO>(5), Buffer::uniform::<ViewUBO>(5)] }, ..EMPTY });
-        fails(Program { buffers: const { &[Buffer::storage::<ViewUBO>(ID_PROJECTION_UBO)] }, ..EMPTY });
+        fails(Program { buffers: const { &[Buffer::storage::<ViewUBO>(PROJECTION_BUFFER_ID)] }, ..EMPTY });
         fails(Program { buffers: const { &[Buffer::storage::<ViewUBO>(6)] }, ..EMPTY });
         fails(Program { buffers: const { &[Buffer::vertices::<[f32; 4]>(2)] }, ..EMPTY });
         // The view's members again, in one GLSL ES scope with the view's.

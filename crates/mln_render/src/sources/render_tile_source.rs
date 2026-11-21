@@ -9,9 +9,9 @@ use geometry::Point;
 use glam::Vec2;
 use mln_gfx::gpu::{Gpu, ShaderKey};
 use mln_gfx::projection_variant::ProjectionVariant;
+use mln_gfx::shaders::bindings::PROJECTION_BUFFER_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_map_types::MapDebugOptions;
 use mln_style::Source;
@@ -235,7 +235,7 @@ impl DebugLayer {
         let properties = TileDebugPropsUBO { color: color.to_float_array(), width, world_width, pad: [0.0; 2] };
         let replaced = self.draw_list.finish(&mut self.frame, gpu, parameters.context, |writer| {
             writer.uniform(ID_TILE_DEBUG_PROPS_UBO, &properties);
-            writer.storage(ID_PROJECTION_UBO, |projection| *projection);
+            writer.storage(PROJECTION_BUFFER_ID, |projection| *projection);
         });
         if replaced {
             for draw in &mut self.draws {

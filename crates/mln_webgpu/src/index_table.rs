@@ -2,7 +2,7 @@
 //! a group of its own, one table of indices bound at the draw's dynamic
 //! offset.
 
-use mln_gfx::shaders::shader_defines::ID_GLOBAL_UBO_INDEX;
+use mln_gfx::shaders::bindings::DRAW_INDEX_ID;
 
 /// The size of WGSL's `GlobalIndexUBO`: a `u32`, padded by a `vec3<u32>`.
 const INDEX_ENTRY_SIZE: u64 = 32;
@@ -11,7 +11,7 @@ const INDEX_ENTRY_SIZE: u64 = 32;
 /// holds the index a draw asks for.
 const INITIAL_INDEX_CAPACITY: u32 = 256;
 
-/// The group of `globalIndex`, at binding [`ID_GLOBAL_UBO_INDEX`]: one
+/// The group of `globalIndex`, at binding [`DRAW_INDEX_ID`]: one
 /// uniform buffer whose entry `i`, at `i` strides, holds `i`, bound at the
 /// dynamic offset of the draw's index.
 pub(crate) struct IndexTable {
@@ -28,7 +28,7 @@ impl IndexTable {
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("UBO index"),
             entries: &[wgpu::BindGroupLayoutEntry {
-                binding: ID_GLOBAL_UBO_INDEX as u32,
+                binding: DRAW_INDEX_ID as u32,
                 visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
@@ -76,7 +76,7 @@ impl IndexTable {
             label: Some("UBO index"),
             layout: &self.layout,
             entries: &[wgpu::BindGroupEntry {
-                binding: ID_GLOBAL_UBO_INDEX as u32,
+                binding: DRAW_INDEX_ID as u32,
                 resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
                     buffer: &buffer,
                     offset: 0,

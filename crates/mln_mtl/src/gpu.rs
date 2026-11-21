@@ -20,8 +20,8 @@ use mln_gfx::gpu::{
     TextureDesc, TextureFormat, TextureId, TextureRegion, TextureUsage, VertexAttribute as GpuVertexAttribute,
     VertexBufferLayout, VertexStep,
 };
+use mln_gfx::shaders::bindings::{DRAW_INDEX_ID, FIRST_UNIFORM_ID};
 use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::shader_defines::{DRAWABLE_RESERVED_UBO_COUNT, ID_GLOBAL_UBO_INDEX};
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{
     ColorBlendEquationType, ColorBlendFactorType, CullFaceSideType, CullFaceWindingType, DepthFunctionType,
@@ -890,7 +890,7 @@ pub(crate) fn first_vertex_buffer(program: &Program) -> Option<usize> {
         return None;
     }
     let own = program.buffers.iter().map(|buffer| buffer.id + 1).max().unwrap_or(0);
-    Some(own.max(DRAWABLE_RESERVED_UBO_COUNT))
+    Some(own.max(FIRST_UNIFORM_ID))
 }
 
 /// What the pipeline of `reflection` reads, besides its vertex buffers at
@@ -930,7 +930,7 @@ fn shader_bindings(
                     )));
                 }
                 MTLBindingType::Buffer if vertex && vertex_buffer_indices.contains(&Some(index)) => continue,
-                MTLBindingType::Buffer if index == ID_GLOBAL_UBO_INDEX => Resource::GlobalIndex,
+                MTLBindingType::Buffer if index == DRAW_INDEX_ID => Resource::GlobalIndex,
                 MTLBindingType::Buffer => Resource::Buffer(index as u32),
                 MTLBindingType::Texture => Resource::Texture(texture_id()?),
                 MTLBindingType::Sampler => Resource::Sampler(texture_id()?),

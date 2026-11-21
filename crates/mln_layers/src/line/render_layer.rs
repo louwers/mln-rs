@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use mln_gfx::gpu::{Gpu, TextureFormat};
 use mln_gfx::projection_variant::ProjectionVariant;
+use mln_gfx::shaders::bindings::PROJECTION_BUFFER_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
@@ -794,6 +794,6 @@ impl LineState {
         writer.uniform(ID_LINE_EVALUATED_PROPS_UBO, &props);
         writer.storage(ID_LINE_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);
         writer.storage(ID_LINE_TILE_PROPS_UBO, |uniforms| uniforms.tile_props);
-        writer.storage(ID_PROJECTION_UBO, |uniforms| uniforms.projection);
+        writer.storage(PROJECTION_BUFFER_ID, |uniforms| uniforms.projection);
     }
 }

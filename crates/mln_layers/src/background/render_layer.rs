@@ -1,8 +1,8 @@
 use mln_gfx::gpu::{Gpu, ShaderKey};
 use mln_gfx::projection_variant::ProjectionVariant;
+use mln_gfx::shaders::bindings::PROJECTION_BUFFER_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
 use mln_map_types::tile_cover::{TileCoverParameters, tile_cover};
 use mln_render::draw::{
@@ -226,7 +226,7 @@ impl LayerType for Background {
                 writer.uniform(ID_BACKGROUND_PROPS_UBO, &props);
             }
             writer.storage(ID_BACKGROUND_DRAWABLE_UBO, |(draw_ubo, _)| *draw_ubo);
-            writer.storage(ID_PROJECTION_UBO, |(_, projection)| *projection);
+            writer.storage(PROJECTION_BUFFER_ID, |(_, projection)| *projection);
         });
     }
 

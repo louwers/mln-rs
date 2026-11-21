@@ -11,9 +11,9 @@ use mln_gfx::gpu::{
     ResourceId, ShaderId, ShaderKey, StencilState, TargetFormats, TextureDesc, TextureFormat, TextureId, TextureRegion,
     TextureUsage, VertexAttribute, VertexBufferLayout, VertexStep, read_texels,
 };
+use mln_gfx::shaders::bindings::{PROJECTION_BUFFER_ID, VIEW_BUFFER_ID};
 use mln_gfx::shaders::layer_ubo::{ProjectionUBO, ViewUBO};
 use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::shader_defines::{ID_PROJECTION_UBO, ID_VIEW_UBO};
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{ColorBlendFactorType, DepthFunctionType};
 use mln_util::Color;
@@ -82,7 +82,7 @@ fn solid_at(gpu: &mut impl Gpu, format: TextureFormat, color: [f32; 4], matrix: 
     let drawable_buffer = buffer(gpu, BufferUsage::Storage, drawable)?;
     let props_buffer = buffer(gpu, BufferUsage::Uniform, props)?;
     let entries = vec![
-        whole(ID_PROJECTION_UBO, projection_buffer, projection),
+        whole(PROJECTION_BUFFER_ID, projection_buffer, projection),
         whole(ID_BACKGROUND_DRAWABLE_UBO, drawable_buffer, drawable),
         whole(ID_BACKGROUND_PROPS_UBO, props_buffer, props),
     ];
@@ -533,7 +533,7 @@ pub fn vertex_layouts(gpu: &mut impl Gpu) -> Result<(), GpuError> {
         label: "fill layer",
         shader,
         entries: &[
-            whole(ID_PROJECTION_UBO, projection_buffer, projection),
+            whole(PROJECTION_BUFFER_ID, projection_buffer, projection),
             whole(ID_FILL_DRAWABLE_UBO, drawable_buffer, drawable),
             whole(ID_FILL_EVALUATED_PROPS_UBO, props_buffer, props),
         ],
@@ -636,7 +636,7 @@ fn wall_frame(
     let tile_props_buffer = buffer(gpu, BufferUsage::Storage, tile_props)?;
     let props_buffer = buffer(gpu, BufferUsage::Uniform, props)?;
     let mut entries = vec![
-        whole(ID_PROJECTION_UBO, projection_buffer, projection),
+        whole(PROJECTION_BUFFER_ID, projection_buffer, projection),
         whole(ID_FILL_EXTRUSION_DRAWABLE_UBO, drawable_buffer, drawable),
         whole(ID_FILL_EXTRUSION_TILE_PROPS_UBO, tile_props_buffer, tile_props),
         whole(ID_FILL_EXTRUSION_PROPS_UBO, props_buffer, props),
@@ -950,9 +950,9 @@ pub fn resources_in_use<G: Gpu>(gpu: &mut G) -> Result<(), GpuError> {
         targets: RGBA8,
     })?;
     let entries = [
-        whole(ID_VIEW_UBO, paint_buffer, paint),
+        whole(VIEW_BUFFER_ID, paint_buffer, paint),
         whole(ID_HEATMAP_TEXTURE_PROPS_UBO, props_buffer, props),
-        whole(ID_PROJECTION_UBO, projection_buffer, projection),
+        whole(PROJECTION_BUFFER_ID, projection_buffer, projection),
         BindGroupEntry::Texture { id: ID_HEATMAP_IMAGE_TEXTURE as u32, texture: image, sampler },
         BindGroupEntry::Texture { id: ID_HEATMAP_COLOR_RAMP_TEXTURE as u32, texture: image, sampler },
     ];
@@ -1128,7 +1128,7 @@ pub fn host_writes<G: Gpu + ?Sized>(
             label: "host writes",
             shader,
             entries: &[
-                whole(ID_PROJECTION_UBO, projection_buffer, projection),
+                whole(PROJECTION_BUFFER_ID, projection_buffer, projection),
                 whole(ID_BACKGROUND_DRAWABLE_UBO, drawable_buffer, drawable),
                 BindGroupEntry::Buffer {
                     id: ID_BACKGROUND_PROPS_UBO as u32,

@@ -35,9 +35,9 @@ use mln_gfx::gpu::{
     TextureRegion, TextureUsage, VertexAttribute, VertexBufferLayout, VertexStep,
 };
 use mln_gfx::projection_variant::ProjectionVariant;
+use mln_gfx::shaders::bindings::PROJECTION_BUFFER_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program::ProgramParameters;
-use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
 use mln_gfx::types::DepthFunctionType;
 use mln_layers::background::programs::BACKGROUND;
 use mln_layers::background::ubo::{BackgroundDrawableUBO, BackgroundDrawableUnionUBO, BackgroundPropsUBO};
@@ -225,7 +225,7 @@ impl Scene {
         let entries = [
             entry(buffer_id("BackgroundPropsUBO"), props, size_of::<BackgroundPropsUBO>()),
             entry(buffer_id("BackgroundDrawableUBO"), drawable, size_of::<BackgroundDrawableUnionUBO>()),
-            entry(ID_PROJECTION_UBO, projection, size_of::<ProjectionUBO>()),
+            entry(PROJECTION_BUFFER_ID, projection, size_of::<ProjectionUBO>()),
         ];
         let vertices = buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&tile_vertices));
         let indexes = buffer(gpu, BufferUsage::Index, bytemuck::cast_slice(&tile_indexes));

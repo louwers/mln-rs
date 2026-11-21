@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use geometry::Point;
 use mln_gfx::gpu::Gpu;
+use mln_gfx::shaders::bindings::PROJECTION_BUFFER_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_map_types::TileProjector;
 use mln_render::draw::{
@@ -130,7 +130,7 @@ fn write_uniforms(layer: &EvaluatedLayer<Circle>, writer: &mut UniformWriter<'_,
     };
     writer.uniform(ID_CIRCLE_EVALUATED_PROPS_UBO, &props);
     writer.storage(ID_CIRCLE_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);
-    writer.storage(ID_PROJECTION_UBO, |uniforms| uniforms.projection);
+    writer.storage(PROJECTION_BUFFER_ID, |uniforms| uniforms.projection);
 }
 
 /// A draw's entries in the layer's storage buffers.

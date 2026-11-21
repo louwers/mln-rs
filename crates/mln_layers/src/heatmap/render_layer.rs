@@ -9,8 +9,8 @@ use std::sync::Arc;
 use glam::dcamera::rh::proj::opengl::orthographic;
 use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
+use mln_gfx::shaders::bindings::PROJECTION_BUFFER_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
@@ -412,7 +412,7 @@ impl HeatmapState {
         };
         writer.uniform(ID_HEATMAP_EVALUATED_PROPS_UBO, &props);
         writer.storage(ID_HEATMAP_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);
-        writer.storage(ID_PROJECTION_UBO, |uniforms| uniforms.projection);
+        writer.storage(PROJECTION_BUFFER_ID, |uniforms| uniforms.projection);
     }
 
     /// Makes the layer's draw of the frame, which colors the heat of the

@@ -9,8 +9,8 @@ use mln_gfx::gpu::{
     TextureFormat, TextureId, TextureRegion, TextureUsage, VertexAttribute, VertexBufferLayout, VertexStep,
     read_texels,
 };
+use mln_gfx::shaders::bindings::PROJECTION_BUFFER_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
 use mln_gfx::types::DepthFunctionType;
 use mln_layers::background::programs::BACKGROUND;
 use mln_layers::background::ubo::{BackgroundDrawableUnionUBO, BackgroundPropsUBO};
@@ -259,7 +259,7 @@ fn background(gpu: &mut GlGpu, props: &BackgroundPropsUBO) -> Background {
             label: "background layer",
             shader,
             entries: &[
-                whole(ID_PROJECTION_UBO, projection_buffer, projection),
+                whole(PROJECTION_BUFFER_ID, projection_buffer, projection),
                 whole(buffer_id("BackgroundDrawableUBO"), drawable_buffer, drawable),
                 whole(buffer_id("BackgroundPropsUBO"), props_buffer, bytemuck::bytes_of(props)),
             ],

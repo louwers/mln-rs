@@ -295,7 +295,7 @@ fn a_draw_writes_an_update_of_the_vertices_it_binds() {
 fn a_draw_binds_the_vertices_it_reads_as_a_storage_buffer() {
     // A storage buffer id past the uniform buffers', where a program reads
     // vertices.
-    use mln_gfx::shaders::shader_defines::MAX_UBO_COUNT_PER_SHADER as ID;
+    use mln_gfx::shaders::bindings::FIRST_VERTEX_BUFFER_ID as ID;
     use mln_gfx::{ColorMode, CullFaceMode, DrawMode};
 
     use crate::draw_objects::{DrawGeometry, DrawObjects};

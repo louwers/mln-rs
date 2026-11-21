@@ -46,7 +46,7 @@ fn unpack_mix_color(packedColors: vec4<f32>, t: f32) -> vec4<f32> {
     return mix(minColor, maxColor, t);
 }
 
-// The draw's index into the storage buffers it reads, at `ID_GLOBAL_UBO_INDEX`.
+// The draw's index into the storage buffers it reads, at `DRAW_INDEX_ID`.
 struct GlobalIndexUBO {
     value: u32,
     pad0: vec3<u32>,

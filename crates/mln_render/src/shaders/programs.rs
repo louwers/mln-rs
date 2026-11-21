@@ -1,8 +1,8 @@
 //! The engine's programs and the binding ids they read.
 
 use mln_gfx::gfx_types::AttributeDataType::Short2;
+use mln_gfx::shaders::bindings::FIRST_UNIFORM_ID;
 use mln_gfx::shaders::program::{Attribute, Buffer, Program, Sources, Texture};
-use mln_gfx::shaders::shader_defines::DRAWABLE_RESERVED_UBO_COUNT;
 
 use super::ubo::{AtmospherePropsUBO, LayerCompositeUBO, SkyPropsUBO, TileDebugPropsUBO};
 use super::{glsl, glsl_es, msl, wgsl};
@@ -11,7 +11,7 @@ pub(crate) const ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE: usize = 0;
 
 pub(crate) const ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE: usize = 0;
 
-pub(crate) const ID_TILE_DEBUG_PROPS_UBO: usize = DRAWABLE_RESERVED_UBO_COUNT;
+pub(crate) const ID_TILE_DEBUG_PROPS_UBO: usize = FIRST_UNIFORM_ID;
 /// The corner of the quad that draws a segment: x is 0 at the segment's
 /// start and 1 at its end, y picks its side.
 pub(crate) const ID_TILE_DEBUG_CORNER_VERTEX_ATTRIBUTE: usize = 0;
@@ -19,13 +19,13 @@ pub(crate) const ID_TILE_DEBUG_CORNER_VERTEX_ATTRIBUTE: usize = 0;
 pub(crate) const ID_TILE_DEBUG_START_ATTRIBUTE: usize = 1;
 pub(crate) const ID_TILE_DEBUG_END_ATTRIBUTE: usize = 2;
 
-pub(crate) const ID_LAYER_COMPOSITE_UBO: usize = DRAWABLE_RESERVED_UBO_COUNT;
+pub(crate) const ID_LAYER_COMPOSITE_UBO: usize = FIRST_UNIFORM_ID;
 pub(crate) const ID_LAYER_COMPOSITE_IMAGE_TEXTURE: usize = 0;
 pub(crate) const ID_LAYER_COMPOSITE_BACKDROP_TEXTURE: usize = 1;
 pub(crate) const ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE: usize = 0;
 
-pub(crate) const ID_SKY_PROPS_UBO: usize = DRAWABLE_RESERVED_UBO_COUNT;
-pub(crate) const ID_ATMOSPHERE_PROPS_UBO: usize = DRAWABLE_RESERVED_UBO_COUNT;
+pub(crate) const ID_SKY_PROPS_UBO: usize = FIRST_UNIFORM_ID;
+pub(crate) const ID_ATMOSPHERE_PROPS_UBO: usize = FIRST_UNIFORM_ID;
 pub(crate) const ID_SKY_POS_VERTEX_ATTRIBUTE: usize = 0;
 pub(crate) const ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE: usize = 0;
 

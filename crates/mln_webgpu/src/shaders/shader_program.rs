@@ -400,7 +400,7 @@ impl ShaderProgram {
     }
 
     /// The group that holds only `globalIndex`, the index of the draw's
-    /// entries in the layer's UBO vectors, at binding `ID_GLOBAL_UBO_INDEX`.
+    /// entries in the layer's UBO vectors, at binding `DRAW_INDEX_ID`.
     /// Its layout is the index table's, and a draw binds it with the dynamic
     /// offset of its index, so its other groups bind only what it shares
     /// with the layer's other draws.
@@ -850,13 +850,13 @@ fn move_global_index(source: &str, group: u32) -> Cow<'_, str> {
 
 #[cfg(test)]
 mod tests {
-    use mln_gfx::shaders::shader_defines::{ID_GLOBAL_UBO_INDEX, ID_PROJECTION_UBO, ID_VIEW_UBO};
+    use mln_gfx::shaders::bindings::{DRAW_INDEX_ID, PROJECTION_BUFFER_ID, VIEW_BUFFER_ID};
 
     use super::*;
 
     #[test]
     fn the_engines_buffers_bind_at_their_ids() {
-        let ids = [ID_VIEW_UBO, ID_GLOBAL_UBO_INDEX, ID_PROJECTION_UBO];
+        let ids = [VIEW_BUFFER_ID, DRAW_INDEX_ID, PROJECTION_BUFFER_ID];
         for (&(_, declaration), id) in RESERVED_BINDINGS.iter().zip(ids) {
             assert!(declaration.starts_with(&format!("@group(0) @binding({id}) ")), "{declaration}");
         }

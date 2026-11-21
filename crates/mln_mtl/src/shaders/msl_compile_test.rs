@@ -11,8 +11,8 @@ use std::collections::BTreeSet;
 use std::fmt::Write as _;
 
 use mln_gfx::gfx_types::AttributeDataType;
+use mln_gfx::shaders::bindings::DRAW_INDEX_ID;
 use mln_gfx::shaders::program::{Buffer, GLOBE_DEFINE, PROJECTION_BUFFER, Program, VIEW_BUFFER};
-use mln_gfx::shaders::shader_defines::ID_GLOBAL_UBO_INDEX;
 use mln_gfx::shaders::source::msl::{self, Msl};
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
@@ -219,7 +219,7 @@ fn check_bindings(program: &Program, bindings: &[Retained<ProtocolObject<dyn MTL
     for binding in bindings.iter().filter(|binding| binding.isUsed()) {
         let index = binding.index();
         match binding.r#type() {
-            MTLBindingType::Buffer if index == ID_GLOBAL_UBO_INDEX => {}
+            MTLBindingType::Buffer if index == DRAW_INDEX_ID => {}
             MTLBindingType::Buffer
                 if !binding.isArgument() || first_vertex_buffer.is_some_and(|first| index >= first) => {}
             MTLBindingType::Buffer => {

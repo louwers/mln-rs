@@ -16,8 +16,8 @@ use mln_gfx::gpu::{
     ResourceId, SamplerId, Scissor, ShaderId, ShaderKey, SlotMap, TextureDesc, TextureFormat, TextureId, TextureRegion,
     TextureUsage, VertexStep, destroy_unused,
 };
+use mln_gfx::shaders::bindings::{FIRST_PROGRAM_BUFFER_ID, FIRST_UNIFORM_ID};
 use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::shader_defines::{DRAWABLE_RESERVED_UBO_COUNT, LAYER_SSBO_START_ID};
 use mln_gfx::texture2d::SamplerState;
 use mln_glsl::layout::{DescriptorSetType, IMAGE_SAMPLER_START, LAYER_STORAGE_COUNT};
 use mln_util::hash::{HashMap, HashSet};
@@ -397,12 +397,12 @@ fn resource_of(program: &Program, set: u32, binding: u32) -> Result<Resource, Gp
             .then_some(Resource::Texture { id: index, index })
             .ok_or_else(|| GpuError::Invalid(format!("{name}: no texture at index {index} of set {set}")))
     };
-    let start = LAYER_SSBO_START_ID as u32;
+    let start = FIRST_PROGRAM_BUFFER_ID as u32;
     let storage = LAYER_STORAGE_COUNT as u32;
     match DescriptorSetType::ALL.get(set as usize) {
         Some(DescriptorSetType::Global) => Ok(Resource::Buffer(binding)),
         Some(DescriptorSetType::Layer) if binding < storage => Ok(Resource::Buffer(binding + start)),
-        Some(DescriptorSetType::Layer) => Ok(Resource::Buffer(binding - storage + DRAWABLE_RESERVED_UBO_COUNT as u32)),
+        Some(DescriptorSetType::Layer) => Ok(Resource::Buffer(binding - storage + FIRST_UNIFORM_ID as u32)),
         Some(DescriptorSetType::DrawableUniform) => Ok(Resource::Buffer(binding + start)),
         Some(DescriptorSetType::DrawableImage) if binding < IMAGE_SAMPLER_START as u32 => texture(binding),
         Some(DescriptorSetType::DrawableImage) => texture(binding - IMAGE_SAMPLER_START as u32),

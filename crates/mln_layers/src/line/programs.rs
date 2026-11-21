@@ -3,10 +3,8 @@
 //! sources.
 
 use mln_gfx::gfx_types::AttributeDataType::{Float2, Float4, Short2, UByte4, UShort4};
+use mln_gfx::shaders::bindings::{FIRST_UNIFORM_ID, FRAGMENT_STORAGE_ID, VERTEX_STORAGE_ID};
 use mln_gfx::shaders::program::{Attribute, Buffer, Program, Property, Sources, Texture};
-use mln_gfx::shaders::shader_defines::{
-    DRAWABLE_RESERVED_UBO_COUNT, ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO, ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO,
-};
 
 use super::ubo::{
     LineDrawableUBO, LineDrawableUnionUBO, LineEvaluatedPropsUBO, LineGradientDrawableUBO, LinePatternDrawableUBO,
@@ -16,9 +14,9 @@ use super::{glsl, glsl_es, msl, wgsl};
 
 // The binding ids of the programs: their buffers, textures and vertex
 // attributes.
-pub(crate) const ID_LINE_DRAWABLE_UBO: usize = ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO;
-pub(crate) const ID_LINE_TILE_PROPS_UBO: usize = ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO;
-pub(crate) const ID_LINE_EVALUATED_PROPS_UBO: usize = DRAWABLE_RESERVED_UBO_COUNT;
+pub(crate) const ID_LINE_DRAWABLE_UBO: usize = VERTEX_STORAGE_ID;
+pub(crate) const ID_LINE_TILE_PROPS_UBO: usize = FRAGMENT_STORAGE_ID;
+pub(crate) const ID_LINE_EVALUATED_PROPS_UBO: usize = FIRST_UNIFORM_ID;
 pub(crate) const ID_LINE_IMAGE_TEXTURE: usize = 0;
 pub(crate) const ID_LINE_DASH_TEXTURE: usize = 1;
 pub(crate) const ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE: usize = 0;

@@ -3,10 +3,8 @@
 //! sources.
 
 use mln_gfx::gfx_types::AttributeDataType::{Float2, Float4, Short2, UShort4};
+use mln_gfx::shaders::bindings::{FIRST_UNIFORM_ID, FIRST_VERTEX_BUFFER_ID, VERTEX_STORAGE_ID};
 use mln_gfx::shaders::program::{Attribute, Buffer, Program, Property, Sources, Texture};
-use mln_gfx::shaders::shader_defines::{
-    DRAWABLE_RESERVED_UBO_COUNT, ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO, MAX_UBO_COUNT_PER_SHADER,
-};
 
 use super::ubo::{
     FillDrawableUBO, FillDrawableUnionUBO, FillEvaluatedPropsUBO, FillOutlineDrawableUBO, FillPatternDrawableUBO,
@@ -16,8 +14,8 @@ use super::{glsl, glsl_es, msl, wgsl};
 
 // The binding ids of the programs: their buffers, textures and vertex
 // attributes.
-pub(crate) const ID_FILL_DRAWABLE_UBO: usize = ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO;
-pub(crate) const ID_FILL_TILE_PROPS_UBO: usize = DRAWABLE_RESERVED_UBO_COUNT;
+pub(crate) const ID_FILL_DRAWABLE_UBO: usize = VERTEX_STORAGE_ID;
+pub(crate) const ID_FILL_TILE_PROPS_UBO: usize = FIRST_UNIFORM_ID;
 pub(crate) const ID_FILL_EVALUATED_PROPS_UBO: usize = ID_FILL_TILE_PROPS_UBO + 1;
 pub(crate) const ID_FILL_IMAGE_TEXTURE: usize = 0;
 pub(crate) const ID_FILL_POS_VERTEX_ATTRIBUTE: usize = 0;
@@ -35,9 +33,9 @@ pub(crate) const ID_FILL_OUTLINE_END_ATTRIBUTE: usize = 7;
 
 // The vertex buffers that `FillOutlinePulledShader` reads as storage
 // buffers, whose ids follow the uniform buffers'.
-pub(crate) const ID_FILL_OUTLINE_VERTICES: usize = MAX_UBO_COUNT_PER_SHADER;
-pub(crate) const ID_FILL_OUTLINE_ENDS: usize = MAX_UBO_COUNT_PER_SHADER + 1;
-pub(crate) const ID_FILL_OUTLINE_PAINT: usize = MAX_UBO_COUNT_PER_SHADER + 2;
+pub(crate) const ID_FILL_OUTLINE_VERTICES: usize = FIRST_VERTEX_BUFFER_ID;
+pub(crate) const ID_FILL_OUTLINE_ENDS: usize = FIRST_VERTEX_BUFFER_ID + 1;
+pub(crate) const ID_FILL_OUTLINE_PAINT: usize = FIRST_VERTEX_BUFFER_ID + 2;
 
 pub static FILL: Program = Program {
     name: "fill",
