@@ -343,9 +343,6 @@ layout(location = 2) flat in vec2 frag_tex_origin;
 
 layout(location = 0) out vec4 out_color;
 
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image0_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image0_sampler;
-
 void main() {
 #if defined(OVERDRAW_INSPECTOR)
     out_color = vec4(1.0);
@@ -360,7 +357,7 @@ void main() {
     const float opacity = frag_opacity; // fade_opacity is baked in for this case
 #endif
 
-    out_color = texture(sampler2D(image0_texture, image0_sampler), atlas_pos(frag_tex_origin, frag_tex)) * opacity;
+    out_color = texture(sampler2D(image, image_sampler), atlas_pos(frag_tex_origin, frag_tex)) * opacity;
 #endif
 }
 ",
@@ -566,9 +563,6 @@ layout(location = 9) flat in vec2 frag_tex_origin;
 
 layout(location = 0) out vec4 out_color;
 
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image0_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image0_sampler;
-
 void main() {
 
 #if defined(OVERDRAW_INSPECTOR)
@@ -599,7 +593,7 @@ void main() {
     // A halo's inner edge sits a gamma outside the fill's.
     const float fillInnerEdge = (256.0 - 64.0) / 256.0;
     const float innerEdge = tileProps.is_halo != 0 ? fillInnerEdge + gammaScaled : fillInnerEdge;
-    const float dist = texture(sampler2D(image0_texture, image0_sampler), atlas_pos(frag_tex_origin, frag_tex)).a;
+    const float dist = texture(sampler2D(image, image_sampler), atlas_pos(frag_tex_origin, frag_tex)).a;
     float alpha = smoothstep(innerEdge - gammaScaled, innerEdge + gammaScaled, dist);
     if (tileProps.is_halo != 0) {
         // When drawing halos, if the fill is translucent we want
@@ -823,11 +817,6 @@ layout(location = 10) flat in vec2 frag_tex_origin;
 
 layout(location = 0) out vec4 out_color;
 
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D glyph_image_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler glyph_image_sampler;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 1) uniform texture2D icon_image_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId + 1) uniform sampler icon_image_sampler;
-
 void main() {
 #if defined(OVERDRAW_INSPECTOR)
     out_color = vec4(1.0);
@@ -855,7 +844,7 @@ void main() {
     const vec2 pos = atlas_pos(frag_tex_origin, frag_tex);
 
     if (bool(frag_is_icon)) {
-        out_color = texture(sampler2D(icon_image_texture, icon_image_sampler), pos) * opacity;
+        out_color = texture(sampler2D(icon_image, icon_image_sampler), pos) * opacity;
         return;
     }
 
@@ -864,7 +853,7 @@ void main() {
     // A halo's inner edge sits a gamma outside the fill's.
     const float fillInnerEdge = (256.0 - 64.0) / 256.0;
     const float innerEdge = tileProps.is_halo != 0 ? fillInnerEdge + gammaScaled : fillInnerEdge;
-    const float dist = texture(sampler2D(glyph_image_texture, glyph_image_sampler), pos).a;
+    const float dist = texture(sampler2D(glyph_image, glyph_image_sampler), pos).a;
     float alpha = smoothstep(innerEdge - gammaScaled, innerEdge + gammaScaled, dist);
     if (tileProps.is_halo != 0) {
         // When drawing halos, if the fill is translucent we want

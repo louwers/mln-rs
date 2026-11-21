@@ -204,9 +204,6 @@ layout(location = 1) in vec2 frag_pos_b;
 
 layout(location = 0) out vec4 out_color;
 
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image0_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image0_sampler;
-
 void main() {
 
 #if defined(OVERDRAW_INSPECTOR)
@@ -234,13 +231,13 @@ void main() {
     if (props.fade < 1.0) {
         const vec2 imagecoord = mod(frag_pos_a, 1.0);
         const vec2 pos = atlas_pos(pattern_tl_a / tileProps.texsize, (pattern_br_a - pattern_tl_a) / tileProps.texsize * imagecoord);
-        color1 = texture(sampler2D(image0_texture, image0_sampler), pos);
+        color1 = texture(sampler2D(image, image_sampler), pos);
     }
     vec4 color2 = vec4(0.0);
     if (props.fade > 0.0) {
         const vec2 imagecoord_b = mod(frag_pos_b, 1.0);
         const vec2 pos2 = atlas_pos(pattern_tl_b / tileProps.texsize, (pattern_br_b - pattern_tl_b) / tileProps.texsize * imagecoord_b);
-        color2 = texture(sampler2D(image0_texture, image0_sampler), pos2);
+        color2 = texture(sampler2D(image, image_sampler), pos2);
     }
 
     if (tileProps.sdf > 0.5) {
@@ -342,9 +339,6 @@ layout(location = 2) in vec2 frag_pos;
 
 layout(location = 0) out vec4 out_color;
 
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image0_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image0_sampler;
-
 void main() {
 
 #if defined(OVERDRAW_INSPECTOR)
@@ -372,13 +366,13 @@ void main() {
     if (props.fade < 1.0) {
         const vec2 imagecoord = mod(frag_pos_a, 1.0);
         const vec2 pos = atlas_pos(pattern_tl_a / tileProps.texsize, (pattern_br_a - pattern_tl_a) / tileProps.texsize * imagecoord);
-        color1 = texture(sampler2D(image0_texture, image0_sampler), pos);
+        color1 = texture(sampler2D(image, image_sampler), pos);
     }
     vec4 color2 = vec4(0.0);
     if (props.fade > 0.0) {
         const vec2 imagecoord_b = mod(frag_pos_b, 1.0);
         const vec2 pos2 = atlas_pos(pattern_tl_b / tileProps.texsize, (pattern_br_b - pattern_tl_b) / tileProps.texsize * imagecoord_b);
-        color2 = texture(sampler2D(image0_texture, image0_sampler), pos2);
+        color2 = texture(sampler2D(image, image_sampler), pos2);
     }
 
     const float dist = length(frag_pos - gl_FragCoord.xy);

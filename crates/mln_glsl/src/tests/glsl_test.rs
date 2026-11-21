@@ -476,9 +476,8 @@ fn stages_agree_on_what_passes_between_them() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
-// The bindings of the ids in the shared pipeline layout, which the
-// preludes and `compose` declare the buffers at, and the textures' and
-// samplers', which the sources spell out from `samplerBindingStartId`.
+// The bindings of the ids and texture slots in the shared pipeline layout,
+// which the preludes and `compose` declare the buffers and textures at.
 #[test]
 fn bindings_follow_from_the_packed_ids() {
     assert_eq!(global_uniform_binding(VIEW_BUFFER_ID), Some(0));
@@ -504,7 +503,7 @@ fn bindings_follow_from_the_packed_ids() {
     assert_eq!(drawable_vertex_binding(FIRST_VERTEX_BUFFER_ID), Some(5));
     assert_eq!(DRAWABLE_VERTEX_COUNT, 3);
 
-    // samplerBindingStartId.
+    // A texture's sampler, after the image set's textures.
     assert_eq!(IMAGE_SAMPLER_START, 3);
     assert_eq!(image_texture_binding(0), 0);
     assert_eq!(image_sampler_binding(0), 3);
@@ -545,17 +544,15 @@ fn no_stage_flips_y() {
     assert!(!sources::PRELUDE_VERTEX.contains("applySurfaceTransform"));
 }
 
-/// No source declares a buffer: `compose` declares the engine's and its
-/// program's, by their names. A source declares only its textures and
-/// samplers, in the image set.
+/// No source declares a buffer or a texture: `compose` declares the
+/// engine's buffers and its program's buffers and textures, by their names.
 #[test]
-fn no_source_declares_a_buffer() {
+fn no_source_declares_a_buffer_or_a_texture() {
     for (program, source) in programs() {
         for text in [source.prelude, source.vertex, source.fragment] {
-            for line in text.lines().filter(|line| line.contains("layout(") && line.contains("set =")) {
-                assert!(line.contains("set = DRAWABLE_IMAGE_SET_INDEX"), "{}: {line}", program.name);
+            for line in text.lines().filter(|line| line.contains("layout(")) {
+                assert!(!line.contains("binding ="), "{}: {line}", program.name);
             }
-            assert!(!text.contains("readonly buffer"), "{} declares a buffer", program.name);
         }
     }
 }

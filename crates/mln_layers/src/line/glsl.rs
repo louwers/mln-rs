@@ -331,9 +331,6 @@ layout(location = 3) in float frag_lineprogress;
 
 #property varying opacity 5
 
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image0_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image0_sampler;
-
 layout(location = 0) out vec4 out_color;
 
 #ifdef PROJECTION_GLOBE
@@ -367,7 +364,7 @@ void main() {
 
     // For gradient lines, lineprogress is the ratio along the entire line,
     // scaled to [0, 2^15), and the gradient ramp is stored in a texture.
-    const vec4 color = texture(sampler2D(image0_texture, image0_sampler), vec2(frag_lineprogress, 0.5));
+    const vec4 color = texture(sampler2D(image, image_sampler), vec2(frag_lineprogress, 0.5));
 
     out_color = color * (alpha * opacity);
 }
@@ -514,9 +511,6 @@ layout(location = 8) in float frag_floorwidth;
 
 layout(location = 0) out vec4 out_color;
 
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image0_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image0_sampler;
-
 #ifdef PROJECTION_GLOBE
 layout(location = 9) in float frag_tile_x;
 #endif
@@ -586,14 +580,14 @@ void main() {
         const float x_a = mod(frag_linesofar / pattern_size_a.x * aspect_a, 1.0);
         vec2 pos_a = atlas_pos((pattern_tl_a - 1.0) * texel_size, (pattern_br_a - pattern_tl_a + 2.0) * texel_size * vec2(x_a, y));
         pos_a = clamp(pos_a, (pattern_tl_a - 1.0) * texel_size + half_texel, (pattern_br_a + 1.0) * texel_size - half_texel);
-        color_a = texture(sampler2D(image0_texture, image0_sampler), pos_a);
+        color_a = texture(sampler2D(image, image_sampler), pos_a);
     }
     vec4 color_b = vec4(0.0);
     if (tileProps.fade > 0.0) {
         const float x_b = mod(frag_linesofar / pattern_size_b.x * aspect_b, 1.0);
         vec2 pos_b = atlas_pos((pattern_tl_b - 1.0) * texel_size, (pattern_br_b - pattern_tl_b + 2.0) * texel_size * vec2(x_b, y));
         pos_b = clamp(pos_b, (pattern_tl_b - 1.0) * texel_size + half_texel, (pattern_br_b + 1.0) * texel_size - half_texel);
-        color_b = texture(sampler2D(image0_texture, image0_sampler), pos_b);
+        color_b = texture(sampler2D(image, image_sampler), pos_b);
     }
 
     const vec4 color = mix(color_a, color_b, tileProps.fade);
@@ -764,9 +758,6 @@ layout(location = 4) in vec2 frag_tex_b;
 
 layout(location = 0) out vec4 out_color;
 
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image0_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image0_sampler;
-
 #ifdef PROJECTION_GLOBE
 layout(location = 9) in float frag_tile_x;
 #endif
@@ -804,8 +795,8 @@ void main() {
     // line in case of an offset line (`v_width2.y`) or when fading out (`v_width2.x`)
     const float blur2 = (blur + 1.0 / DEVICE_PIXEL_RATIO) * frag_gamma_scale;
 
-    const float sdfdist_a = texture(sampler2D(image0_texture, image0_sampler), frag_tex_a).a;
-    const float sdfdist_b = texture(sampler2D(image0_texture, image0_sampler), frag_tex_b).a;
+    const float sdfdist_a = texture(sampler2D(image, image_sampler), frag_tex_a).a;
+    const float sdfdist_b = texture(sampler2D(image, image_sampler), frag_tex_b).a;
     const float sdfdist = mix(sdfdist_a, sdfdist_b, tileProps.mix);
 #ifdef HAS_UNIFORM_u_dasharray
     const float sdfgamma = tileProps.sdfgamma;
@@ -983,11 +974,6 @@ layout(location = 10) flat in float frag_dash_width;
 
 layout(location = 0) out vec4 out_color;
 
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image0_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image0_sampler;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 1) uniform texture2D image1_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId + 1) uniform sampler image1_sampler;
-
 void main() {
 #ifdef PROJECTION_GLOBE
     if (clippedAtAntimeridian(frag_tile_x)) {
@@ -1015,8 +1001,8 @@ void main() {
     // line in case of an offset line (`v_width2.y`) or when fading out (`v_width2.x`)
     const float blur2 = (blur + 1.0 / DEVICE_PIXEL_RATIO) * frag_gamma_scale;
 
-    const float sdfdist_a = texture(sampler2D(image1_texture, image1_sampler), frag_tex_a).a;
-    const float sdfdist_b = texture(sampler2D(image1_texture, image1_sampler), frag_tex_b).a;
+    const float sdfdist_a = texture(sampler2D(image_dash, image_dash_sampler), frag_tex_a).a;
+    const float sdfdist_b = texture(sampler2D(image_dash, image_dash_sampler), frag_tex_b).a;
     const float sdfdist = mix(sdfdist_a, sdfdist_b, tileProps.mix);
 #ifdef HAS_UNIFORM_u_dasharray
     const float sdfgamma = tileProps.sdfgamma;
@@ -1027,7 +1013,7 @@ void main() {
                         smoothstep(0.5 - sdfgamma / floorwidth, 0.5 + sdfgamma / floorwidth, sdfdist);
 
     // The gradient ramp is stored in a texture indexed by the ratio along the entire line.
-    const vec4 color = texture(sampler2D(image0_texture, image0_sampler), vec2(frag_lineprogress, 0.5));
+    const vec4 color = texture(sampler2D(image, image_sampler), vec2(frag_lineprogress, 0.5));
 
     out_color = color * (alpha * opacity);
 }

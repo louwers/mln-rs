@@ -32,9 +32,6 @@ void main() {
 layout(location = 0) in vec2 frag_position;
 layout(location = 0) out vec4 out_color;
 
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image_sampler;
-
 float get_aspect(vec2 deriv) {
     return deriv.x != 0.0 ? atan(deriv.y, -deriv.x) : PI / 2.0 * (deriv.y > 0.0 ? 1.0 : -1.0);
 }
@@ -167,7 +164,7 @@ void main() {
 
     const HillshadeTilePropsUBO tileProps = tilePropsVector[constant.ubo_index];
 
-    vec4 pixel = texture(sampler2D(image_texture, image_sampler), frag_position);
+    vec4 pixel = texture(sampler2D(image, image_sampler), frag_position);
 
     // Scale the derivative based on the mercator distortion at this latitude
     float scaleFactor = cos(radians((tileProps.latrange[0] - tileProps.latrange[1]) * frag_position.y + tileProps.latrange[1]));
@@ -216,12 +213,9 @@ void main() {
 layout(location = 0) in vec2 frag_position;
 layout(location = 0) out vec4 out_color;
 
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image_sampler;
-
 float getElevation(vec2 coord, float bias, vec4 unpack) {
     // Convert encoded elevation value to meters
-    vec4 data = texture(sampler2D(image_texture, image_sampler), coord) * 255.0;
+    vec4 data = texture(sampler2D(image, image_sampler), coord) * 255.0;
     data.a = -1.0;
     return dot(data, unpack);
 }

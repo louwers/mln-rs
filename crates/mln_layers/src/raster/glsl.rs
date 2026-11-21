@@ -33,11 +33,6 @@ layout(location = 1) in vec2 frag_position1;
 
 layout(location = 0) out vec4 out_color;
 
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image0_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image0_sampler;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 1) uniform texture2D image1_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId + 1) uniform sampler image1_sampler;
-
 void main() {
 
 #if defined(OVERDRAW_INSPECTOR)
@@ -46,8 +41,8 @@ void main() {
 #endif
 
     // read and cross-fade colors from the main and parent tiles
-    vec4 color0 = texture(sampler2D(image0_texture, image0_sampler), frag_position0);
-    vec4 color1 = texture(sampler2D(image1_texture, image1_sampler), frag_position1);
+    vec4 color0 = texture(sampler2D(image0, image0_sampler), frag_position0);
+    vec4 color1 = texture(sampler2D(image1, image1_sampler), frag_position1);
     if (color0.a > 0.0) {
         color0.rgb = color0.rgb / color0.a;
     }

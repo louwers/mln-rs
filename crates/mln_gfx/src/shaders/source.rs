@@ -6,10 +6,11 @@
 //! and `mln_d3d12`. Each backend composes a program's code with a prelude
 //! of its own, of the helpers the shaders share, with the declarations of
 //! the blocks of the engine's buffers and the program's, which it writes
-//! from their [`Block`]s, and with the declarations of the buffers that a
-//! stage names, which it writes from their [`Buffer`]s: a source declares
-//! no block and no buffer itself, and reads a buffer by its
-//! [`name`](Buffer::name).
+//! from their [`Block`]s, and with the declarations of the buffers and
+//! textures that a stage names, which it writes from their [`Buffer`]s and
+//! [`Texture`](crate::shaders::program::Texture)s: a source declares no
+//! block, buffer or texture itself, and reads a buffer or a texture by its
+//! name.
 //!
 //! # Properties
 //!

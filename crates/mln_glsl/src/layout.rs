@@ -37,8 +37,8 @@ impl DescriptorSetType {
         DescriptorSetType::DrawableImage,
     ];
 
-    /// `GLOBAL_SET_INDEX`, `LAYER_SET_INDEX`, `DRAWABLE_UBO_SET_INDEX` and
-    /// `DRAWABLE_IMAGE_SET_INDEX` of the GLSL.
+    /// The set's index, at which `compose` declares the GLSL's buffers and
+    /// textures.
     #[must_use]
     pub const fn set_index(self) -> u32 {
         self as u32
@@ -94,18 +94,16 @@ impl BufferSetShape {
 /// The uniform buffers of the global set, bound at their ids.
 pub const GLOBAL_UNIFORM_COUNT: usize = FIRST_PROGRAM_BUFFER_ID;
 
-/// The storage buffers of the layer set: the bindings from 0
-/// (`layerSSBOStartId` in the GLSL), for the ids from
-/// `FIRST_PROGRAM_BUFFER_ID` to `FIRST_UNIFORM_ID`. That last id is
-/// a layer's first uniform buffer or its tile properties storage buffer,
-/// so the set has a binding of each kind for it.
+/// The storage buffers of the layer set: the bindings from 0, for the ids
+/// from `FIRST_PROGRAM_BUFFER_ID` to `FIRST_UNIFORM_ID`. That last id is a
+/// layer's first uniform buffer or its tile properties storage buffer, so
+/// the set has a binding of each kind for it.
 pub const LAYER_STORAGE_COUNT: usize = FIRST_UNIFORM_ID + 1 - FIRST_PROGRAM_BUFFER_ID;
 /// The uniform buffers of the layer set: the bindings from
-/// `LAYER_STORAGE_COUNT` (`layerUBOStartId` in the GLSL).
+/// `LAYER_STORAGE_COUNT`.
 pub const LAYER_UNIFORM_COUNT: usize = FIRST_VERTEX_BUFFER_ID - FIRST_UNIFORM_ID;
 
-/// The uniform buffers of the drawable set: the bindings from 0
-/// (`drawableUBOStartId` in the GLSL).
+/// The uniform buffers of the drawable set: the bindings from 0.
 pub const DRAWABLE_UNIFORM_COUNT: usize = FIRST_VERTEX_BUFFER_ID - FIRST_PROGRAM_BUFFER_ID;
 
 /// The vertex buffers of the drawable set, which the pulled shaders read as
@@ -115,8 +113,8 @@ pub const DRAWABLE_VERTEX_COUNT: usize = MAX_VERTEX_BUFFERS;
 
 /// The textures of the image set: the bindings from 0.
 pub const IMAGE_TEXTURE_COUNT: usize = MAX_TEXTURES;
-/// The binding of the first sampler of the image set
-/// (`samplerBindingStartId` in the GLSL).
+/// The binding of the first sampler of the image set, the sampler of the
+/// texture at slot 0.
 pub const IMAGE_SAMPLER_START: usize = MAX_TEXTURES;
 
 /// The binding in the global set of the uniform buffer `id`.
@@ -166,8 +164,8 @@ pub const fn drawable_vertex_binding(id: usize) -> Option<u32> {
     }
 }
 
-/// The binding in the image set of the texture at `index`
-/// (`glsl::Texture::index`).
+/// The binding in the image set of the texture at slot `index` of its
+/// program's textures.
 #[must_use]
 pub const fn image_texture_binding(index: usize) -> u32 {
     index as u32

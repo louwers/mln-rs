@@ -30,16 +30,9 @@ void main() {
 layout(location = 0) in vec2 frag_position;
 layout(location = 0) out vec4 out_color;
 
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image_sampler;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 1) uniform texture2D elevation_stops_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId + 1) uniform sampler elevation_stops_sampler;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 2) uniform texture2D color_stops_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId + 2) uniform sampler color_stops_sampler;
-
 float getElevation(vec2 coord, vec4 unpack) {
     // Convert encoded elevation value to meters
-    vec4 data = texture(sampler2D(image_texture, image_sampler), coord) * 255.0;
+    vec4 data = texture(sampler2D(image, image_sampler), coord) * 255.0;
     data.a = -1.0;
     return dot(data, unpack);
 }
@@ -47,12 +40,12 @@ float getElevation(vec2 coord, vec4 unpack) {
 float getElevationStop(int stop, int color_ramp_size) {
     // Elevation stops are plain float values, not terrain-RGB encoded
     float x = (float(stop) + 0.5) / float(color_ramp_size);
-    return texture(sampler2D(elevation_stops_texture, elevation_stops_sampler), vec2(x, 0.5)).r;
+    return texture(sampler2D(elevation_stops, elevation_stops_sampler), vec2(x, 0.5)).r;
 }
 
 vec4 getColorStop(int stop, int color_ramp_size) {
     float x = (float(stop) + 0.5) / float(color_ramp_size);
-    return texture(sampler2D(color_stops_texture, color_stops_sampler), vec2(x, 0.5));
+    return texture(sampler2D(color_stops, color_stops_sampler), vec2(x, 0.5));
 }
 
 void main() {

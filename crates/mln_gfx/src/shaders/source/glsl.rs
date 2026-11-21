@@ -33,7 +33,11 @@ use crate::shaders::source::{Named, Stage, expand as expand_properties, per_vert
 /// `mln_glsl`'s layout, whose one member has the buffer's
 /// [`name`](crate::shaders::program::Buffer::name): the buffer's block, or
 /// an array of the elements, or of the vertices' 32-bit words, of a storage
-/// buffer.
+/// buffer. The declarations also have the program's textures and their
+/// samplers that `prelude` or the stage names, by their names, a
+/// `texture2D` and a `sampler` at the bindings of the texture's slot in the
+/// layout's image set, which a stage combines where it samples:
+/// `texture(sampler2D(image, image_sampler), uv)`.
 #[derive(Debug)]
 pub struct Glsl {
     /// What both stages read before their sources, "" if nothing.

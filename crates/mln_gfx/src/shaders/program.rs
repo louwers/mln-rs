@@ -39,10 +39,9 @@ use crate::shaders::source::{glsl, glsl_es, msl, wgsl};
 ///   [`instance_attributes`](Program::instance_attributes). A draw names an
 ///   attribute by its [`id`](Attribute::id).
 /// - A texture and its sampler at the slot of its index in
-///   [`textures`](Program::textures), which a draw names it by. In WGSL,
-///   where textures and samplers bind in group 1, the slots are the
-///   textures that the program's WGSL declares, in any variant, in binding
-///   order, and a sampler is the one of the texture at the binding after it.
+///   [`textures`](Program::textures), which a draw names it by, and which
+///   a stage that names them declares, as the backend writes them from the
+///   [`Texture`]: a source declares no texture itself.
 ///
 /// A program has at most [`MAX_ATTRIBUTES`] attributes and [`MAX_TEXTURES`]
 /// textures.

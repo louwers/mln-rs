@@ -64,9 +64,6 @@ layout(location = 1) in vec2 frag_pos_b;
 
 layout(location = 0) out vec4 out_color;
 
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image_sampler;
-
 void main() {
 
 #if defined(OVERDRAW_INSPECTOR)
@@ -81,13 +78,13 @@ void main() {
     if (props.mix < 1.0) {
         const vec2 imagecoord = mod(frag_pos_a, 1.0);
         const vec2 pos = atlas_pos(props.pattern_tl_a / texsize, (props.pattern_br_a - props.pattern_tl_a) / texsize * imagecoord);
-        color1 = texture(sampler2D(image_texture, image_sampler), pos);
+        color1 = texture(sampler2D(image, image_sampler), pos);
     }
     vec4 color2 = vec4(0.0);
     if (props.mix > 0.0) {
         const vec2 imagecoord_b = mod(frag_pos_b, 1.0);
         const vec2 pos2 = atlas_pos(props.pattern_tl_b / texsize, (props.pattern_br_b - props.pattern_tl_b) / texsize * imagecoord_b);
-        color2 = texture(sampler2D(image_texture, image_sampler), pos2);
+        color2 = texture(sampler2D(image, image_sampler), pos2);
     }
 
     out_color = mix(color1, color2, props.mix) * props.opacity;

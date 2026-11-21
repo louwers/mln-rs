@@ -135,11 +135,8 @@ layout(location = 0) in vec2 frag_uv;
 
 layout(location = 0) out vec4 out_color;
 
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image_sampler;
-
 void main() {
-    out_color = texture(sampler2D(image_texture, image_sampler), frag_uv) * props.tint;
+    out_color = texture(sampler2D(image, image_sampler), frag_uv) * props.tint;
 }
 ",
 };

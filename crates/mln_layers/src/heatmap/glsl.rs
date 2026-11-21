@@ -117,11 +117,6 @@ void main() {
 layout(location = 0) in vec2 frag_position;
 layout(location = 0) out vec4 out_color;
 
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image_sampler;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 1) uniform texture2D color_ramp_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId + 1) uniform sampler color_ramp_sampler;
-
 void main() {
 
 #if defined(OVERDRAW_INSPECTOR)
@@ -129,8 +124,8 @@ void main() {
     return;
 #endif
 
-    const float t = texture(sampler2D(image_texture, image_sampler), frag_position).r;
-    const vec4 color = texture(sampler2D(color_ramp_texture, color_ramp_sampler), vec2(t, 0.5));
+    const float t = texture(sampler2D(image, image_sampler), frag_position).r;
+    const vec4 color = texture(sampler2D(color_ramp, color_ramp_sampler), vec2(t, 0.5));
     out_color = color * props.opacity;
 }
 ",

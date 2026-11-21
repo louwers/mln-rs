@@ -1,9 +1,7 @@
 // The preludes every stage of the GLSL compiles after, which `mln_glsl`
 // parses with naga's GLSL front end:
 // - The view's block binds where `layout` puts it; `compose` declares the
-//   other buffers.
-// - A texture and its sampler are two bindings, `<name>_texture` and
-//   `<name>_sampler`, combined where they are sampled.
+//   other buffers and the textures.
 // - What naga doesn't take is written another way: no precision qualifiers,
 //   `int` for the `bool` members of buffers, no sampler parameters, `flat` on
 //   an integer output, and an `#else` after the overdraw inspector's early
@@ -191,9 +189,6 @@ vec4 projectTileFor3D(vec2 pos, float elevation, ProjectionUBO projection) {
 pub(crate) const PRELUDE_FRAGMENT: &str = r"
 
 #define M_PI 3.1415926535897932384626433832795
-
-#define DRAWABLE_IMAGE_SET_INDEX            3
-#define samplerBindingStartId               3
 
 layout(std140, set = 0, binding = 0) uniform ViewUBOBlock {
     ViewUBO view;

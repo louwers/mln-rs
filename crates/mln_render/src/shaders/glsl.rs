@@ -41,7 +41,7 @@ void main() {
 
 /// A layer's texture, the size of the frame, composited onto it
 /// texel for texel, with its opacity and, for the blend modes that no blend
-/// function expresses, against a copy of the frame (`backdrop_texture`).
+/// function expresses, against a copy of the frame (`backdrop`).
 pub(crate) const LAYER_COMPOSITE_SHADER: Glsl = Glsl {
     prelude: "",
     vertex: r"
@@ -55,11 +55,6 @@ void main() {
     fragment: r"
 
 layout(location = 0) out vec4 out_color;
-
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image_sampler;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 1) uniform texture2D backdrop_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId + 1) uniform sampler backdrop_sampler;
 
 // The blend modes that no blend function expresses, of the W3C compositing
 // spec, on premultiplied colors.
@@ -104,7 +99,7 @@ vec4 composite(vec4 src, vec4 dst, int mode) {
 
 void main() {
     const ivec2 texel = ivec2(gl_FragCoord.xy);
-    const vec4 color = texelFetch(sampler2D(image_texture, image_sampler), texel, 0);
+    const vec4 color = texelFetch(sampler2D(image, image_sampler), texel, 0);
 
 #if defined(OVERDRAW_INSPECTOR)
     out_color = color;
@@ -113,7 +108,7 @@ void main() {
     if (props.blend == 0) {
         out_color = src;
     } else {
-        out_color = composite(src, texelFetch(sampler2D(backdrop_texture, backdrop_sampler), texel, 0), props.blend);
+        out_color = composite(src, texelFetch(sampler2D(backdrop, backdrop_sampler), texel, 0), props.blend);
     }
 #endif
 }

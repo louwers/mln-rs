@@ -1,4 +1,5 @@
 use std::collections::BTreeSet;
+use std::fmt::Write as _;
 
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::gpu::GpuError;
@@ -11,7 +12,7 @@ use mln_gfx::shaders::source::identifiers;
 use crate::front_end::Stage;
 use crate::layout::{
     DescriptorSetType, drawable_uniform_binding, drawable_vertex_binding, global_uniform_binding,
-    layer_storage_binding, layer_uniform_binding,
+    image_sampler_binding, image_texture_binding, layer_storage_binding, layer_uniform_binding,
 };
 use crate::sources::UBO_INDEX_DECLARATION;
 
@@ -26,10 +27,10 @@ const ENGINE_BINDINGS: [Buffer; 2] = [PROJECTION_BUFFER, DRAW_PROJECTION_BUFFER]
 /// the engine's buffers that the stage or the program's prelude names
 /// (`constant`, the draw's index, and the projection blocks), the structs
 /// of the program's blocks, each a storage buffer's element padded to its
-/// stride, the declarations of the program's buffers that the stage or the
-/// program's prelude names, and the program's own prelude and stage with
-/// its properties written out ([`glsl::expand`]). Fails as
-/// [`glsl::expand`] does.
+/// stride, the declarations of the program's buffers, textures and samplers
+/// that the stage or the program's prelude names, and the program's own
+/// prelude and stage with its properties written out ([`glsl::expand`]).
+/// Fails as [`glsl::expand`] does.
 pub fn compose(program: &Program, glsl: &Glsl, stage: Stage, defines: &str) -> Result<String, GpuError> {
     let source = glsl::expand(program, glsl, stage.into())?;
     let (engine, own) = (glsl::blocks(&ENGINE_BUFFERS), glsl::blocks(program.buffers));
@@ -41,13 +42,35 @@ pub fn compose(program: &Program, glsl: &Glsl, stage: Stage, defines: &str) -> R
     }
     reserved += &declarations(&ENGINE_BINDINGS, &named)?;
     let declared = declarations(program.buffers, &named)?;
+    let textures = texture_declarations(program, &named);
     Ok(crate::front_end::compose(
         stage,
         defines,
         &engine,
-        &[&reserved, &own, &declared, glsl.prelude].concat(),
+        &[&reserved, &own, &declared, &textures, glsl.prelude].concat(),
         &source,
     ))
+}
+
+/// The declarations of those of `program`'s textures and their samplers
+/// that `named` has the names of, by their names, at their slots' bindings
+/// in the image set: a `texture2D` and a `sampler`, which a stage combines
+/// where it samples the texture.
+fn texture_declarations(program: &Program, named: &BTreeSet<&str>) -> String {
+    let set = DescriptorSetType::DrawableImage.set_index();
+    let mut declarations = String::new();
+    for (slot, texture) in program.textures.iter().enumerate() {
+        let sampler = texture.sampler();
+        if named.contains(texture.name) {
+            let binding = image_texture_binding(slot);
+            _ = writeln!(declarations, "layout(set = {set}, binding = {binding}) uniform texture2D {};", texture.name);
+        }
+        if named.contains(sampler.as_str()) {
+            let binding = image_sampler_binding(slot);
+            _ = writeln!(declarations, "layout(set = {set}, binding = {binding}) uniform sampler {sampler};");
+        }
+    }
+    declarations
 }
 
 /// The declarations of those of `buffers` that `named` has the names of.
