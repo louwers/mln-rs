@@ -54,6 +54,7 @@ pub(crate) struct ErasedLayerBucket<'a> {
 /// values it was laid out with and the rest of what the layout's contents
 /// hold for the tile's draws.
 pub struct LayerBucket<'a, T: LayerType> {
+    /// The bucket.
     pub bucket: &'a T::Bucket,
     /// The index of the bucket among the layout's buckets.
     pub(crate) bucket_index: usize,
