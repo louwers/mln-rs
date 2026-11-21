@@ -64,10 +64,11 @@ pub enum RendererEvent {
         /// The context's counters after the frame.
         stats: Arc<RenderingStats>,
         /// Why the frame failed on the GPU, if it did
-        /// ([`DrawnFrame::error`](crate::DrawnFrame::error)): its image is
-        /// wrong, and nothing took it. A still image of the frame's
-        /// `still_image_request_id` fails with the error. Boxed, so that
-        /// the events don't grow for it.
+        /// ([`DrawnFrame::error`](crate::DrawnFrame::error)): its image
+        /// lacks what failed, and a host took it only if it was
+        /// [presentable](crate::DrawnFrame::presentable). A still image of
+        /// the frame's `still_image_request_id` fails with the error. Boxed,
+        /// so that the events don't grow for it.
         error: Option<Box<Error>>,
     },
     /// The ground of the terrain changed: the tiles that draw it, or the DEM

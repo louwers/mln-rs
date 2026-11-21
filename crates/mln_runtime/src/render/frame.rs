@@ -35,11 +35,14 @@ impl FrameDemand {
 /// How a frame demand finished.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum FrameDisposition {
+    /// The target took the frame. A continuous map's frame that failed on
+    /// the GPU in part, which the map reports
+    /// ([`MapEvent::RenderError`](mln_map::MapEvent::RenderError)), is
+    /// rendered too, and shows what drew.
     Rendered,
     /// The map had nothing new to draw, a barrier ended the demand, or the
-    /// frame failed on the GPU, which the map reports
-    /// ([`MapEvent::RenderError`](mln_map::MapEvent::RenderError)): the
-    /// target took nothing of it.
+    /// frame failed on the GPU with nothing to show, as when its own pass
+    /// failed, or was a still's that failed: the target took nothing of it.
     NoUpdate,
     /// The session couldn't take the frame, as after a detach or an abandon.
     TargetNotReady,

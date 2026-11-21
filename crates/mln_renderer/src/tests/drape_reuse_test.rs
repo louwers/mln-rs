@@ -424,8 +424,8 @@ impl DrapedMap {
                 Some(fail) => self.renderer.render(&mut Failing { gpu, fail }, &image, frame),
                 None => self.renderer.render(gpu, &image, frame),
             };
-            // A frame that failed shows a wrong image, which nothing takes.
-            let handoff = if drawn.error().is_none() {
+            // A frame that failed with nothing to show is one nothing takes.
+            let handoff = if drawn.presentable() {
                 self.target.end_frame(gpu)
             } else {
                 self.target.discard_frame();

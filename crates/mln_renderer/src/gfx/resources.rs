@@ -60,7 +60,7 @@ pub(crate) struct Device {
 impl Device {
     /// Logs `message`, why something of the frame being encoded failed on
     /// the GPU, and keeps it as the frame's failure unless one came first.
-    /// A frame that failed shows a wrong image, which isn't handed off.
+    /// A frame that failed lacks what failed, and isn't `Full`.
     pub(crate) fn fail(&mut self, message: String) {
         Log::error(Event::Render, &message);
         self.failure.get_or_insert(message);

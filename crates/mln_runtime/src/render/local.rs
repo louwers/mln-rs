@@ -673,9 +673,9 @@ impl<B: LocalBackend> Gfx for BackendGfx<B> {
         let frame = renderer.update(gpu, update)?;
         let image = target.begin_frame(gpu)?;
         let drawn = renderer.render(gpu, &image, frame);
-        // A frame that failed shows a wrong image, which the target doesn't
-        // hand off.
-        let rendered = match drawn.error() {
+        // A frame that failed with nothing to show, or a still's that
+        // failed, is one that the target doesn't hand off.
+        let rendered = match drawn.error().filter(|_| !drawn.presentable()) {
             None => Ok(target.end_frame(gpu)),
             Some(error) => Err(error.clone()),
         };
@@ -1135,10 +1135,13 @@ impl LocalTarget {
     /// begins the frame, the renderer draws into it, and the target ends
     /// it. Returns where the frame went, or `None` when nothing was drawn:
     /// there is no renderer, the target had nothing to draw into, or there
-    /// was nothing to draw. Fails with the GPU's error, as
-    /// [`ErrorKind::Native`](mln_util::ErrorKind), for a frame that failed
-    /// ([`DrawnFrame::error`](mln_renderer::DrawnFrame::error)), which the
-    /// target doesn't end: a surface shows the frame before, and
+    /// was nothing to draw. A continuous map's frame that failed on the GPU
+    /// but whose own pass drew ends like any other, and shows what drew.
+    /// Fails with the GPU's error, as
+    /// [`ErrorKind::Native`](mln_util::ErrorKind), for one that failed
+    /// with nothing to show, or a still's that failed
+    /// ([`DrawnFrame::presentable`](mln_renderer::DrawnFrame::presentable)),
+    /// which the target doesn't end: a surface shows the frame before, and
     /// [`read_image`](Self::read_image) fails until a frame draws.
     pub fn render(&mut self, update: &Arc<UpdateParameters>) -> Option<Result<Handoff, Error>> {
         self.gfx.render(update)

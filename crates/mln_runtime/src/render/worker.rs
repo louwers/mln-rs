@@ -357,7 +357,8 @@ struct StillDemand {
 /// A frame that the worker rendered, or tried to, and has yet to publish.
 struct RenderedFrame {
     result: FrameResult,
-    /// Whether the frame failed on the GPU, and the target didn't take it.
+    /// Whether the frame failed on the GPU with nothing to show, or was a
+    /// still's that failed, and the target didn't take it.
     failed: bool,
     /// The renderer's events of the frame.
     events: Vec<RendererEvent>,
@@ -998,8 +999,10 @@ impl Worker {
     /// has loaded, and a surface without a texture to render into takes no
     /// frame. A frame that a surface drops, having had no image for it after
     /// all, finishes as not ready, and the next demand draws the map again.
-    /// One that failed on the GPU finishes with no update, and the target
-    /// took nothing of it. Only the still image's own frame completes the
+    /// One that failed on the GPU with nothing to show, or a still's that
+    /// failed, finishes with no update, and the target took nothing of it;
+    /// a continuous map's that failed but drew its own pass is rendered,
+    /// and shows what drew. Only the still image's own frame completes the
     /// image, or fails it.
     fn render(&mut self, token: Option<u64>, update: &Update, slot: Option<usize>) -> RenderedFrame {
         let ready = self.gfx.as_mut().is_some_and(|gfx| gfx.target.ready_for_frame());
@@ -1049,8 +1052,9 @@ impl Worker {
         }
         self.rendered_update = update.generation;
         self.rendered_generation = self.generation();
-        // The target took nothing of a frame that failed: the host gets no
-        // frame, and the map draws the update again once it retries.
+        // The target took nothing of a frame that failed with nothing to
+        // show: the host gets no frame, and the map draws the update again
+        // once it retries.
         if failed {
             let result = FrameResult::unrendered(token, FrameDisposition::NoUpdate, update.generation);
             return RenderedFrame { result, failed, events, slot: slot.map(|slot| (slot, None)) };

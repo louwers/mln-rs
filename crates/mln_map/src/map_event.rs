@@ -89,10 +89,12 @@ pub enum MapEvent {
     Idle,
     /// A frame failed on the GPU, the first of the frames in a row that
     /// fail: a pass didn't begin, a texture couldn't be made or a draw
-    /// failed. Nothing took the frame, so a surface keeps showing the one
-    /// before, and the still image it was drawn for fails with the error. A
-    /// continuous map draws again a while later, sooner after one failure
-    /// than after many, and reports a failure again once a frame drew.
+    /// failed. The still image it was drawn for fails with the error, and
+    /// nothing takes its frame. A continuous map's frame shows what did
+    /// draw, unless the frame's own pass failed, and then nothing takes it
+    /// and a surface keeps showing the one before. A continuous map draws
+    /// again a while later, sooner after one failure than after many, and
+    /// reports a failure again once a frame drew without one.
     RenderError(Error),
     RenderFrameStarted,
     RenderFrameFinished(RenderFrameStatus),
