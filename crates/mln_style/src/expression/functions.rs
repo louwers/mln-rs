@@ -1,16 +1,33 @@
-//! The expression functions: the operators that the parser resolves by name
-//! against a [`Functions`] value and that evaluate their already-parsed
-//! arguments.
+//! The expression function contract: what a crate adds to give styles a
+//! new expression operator. The operators that the parser resolves by name
+//! against a [`Functions`] value are functions, which evaluate their
+//! already-parsed arguments; the style specification's register through
+//! the same contract ([`register_builtin_functions`]).
 //!
-//! A function has one or more overloads, each with its parameter and result
-//! types, the inputs it reads ([`Dependency`]) and an evaluator. Parsing tries
-//! a name's overloads in the order they were added. The expression syntax
-//! (`let`, `match`, `case`, `interpolate` and the other forms that parse their
-//! own arguments) isn't a function and can't be registered as one.
+//! A crate adds a function with [`Functions::add`]: its name and one or
+//! more overloads ([`OverloadSpec`]), each with its parameter and result
+//! types, the inputs it reads ([`Dependency`]), its [`Role`] and an
+//! evaluator ([`Eval`]). A renderer's registry builder hands out the
+//! functions it fills (`mln_render::RegistryBuilder::functions_mut`).
+//! The expression syntax (`let`, `match`, `case`, `interpolate` and the
+//! other forms that parse their own arguments) isn't a function and can't
+//! be registered as one.
+//!
+//! Parsing tries a name's overloads in the order they were added, and takes
+//! the one whose parameters take as many arguments as the expression has.
+//! It parses each argument as the overload's parameter type, so the
+//! evaluator gets arguments that evaluate to those types, and the result
+//! is of the overload's result type. The dependencies decide when a
+//! property evaluates again and what it evaluates with: an overload that
+//! reads the feature, the zoom or other inputs declares them. An evaluator
+//! is a plain `fn`, which runs on whichever thread evaluates the expression:
+//! the map's, the renderer's or a tile worker's.
 //!
 //! A compound expression crosses the worker codec as its function's name and
 //! its overload's position, which the reading side resolves against the
-//! [`Functions`] in the reader's context (`mln_wire::Context`).
+//! [`Functions`] in the reader's context (`mln_wire::Context`). Every
+//! registry that reads a style's expressions, a browser's tile workers'
+//! too, is filled by the same calls.
 
 pub(crate) mod builtin;
 
@@ -89,13 +106,18 @@ impl Eval {
 }
 
 /// An overload as [`Functions::add`] takes it.
-#[doc(hidden)]
 #[derive(Clone, Debug)]
 pub struct OverloadSpec {
+    /// The type it evaluates to, which [`eval`](Self::eval)'s variant
+    /// matches.
     pub result: Type,
+    /// The arguments it takes.
     pub params: Params,
+    /// The inputs it reads besides its arguments.
     pub dependencies: Dependency,
+    /// What the static analyses may assume about it.
     pub role: Role,
+    /// Its evaluator.
     pub eval: Eval,
 }
 
@@ -189,7 +211,6 @@ impl Functions {
     /// two overloads that take the same number of arguments, an evaluator of
     /// another type than its overload's result, or a role that only one
     /// function may have and another has.
-    #[doc(hidden)]
     pub fn add(&mut self, name: &str, overloads: Vec<OverloadSpec>) -> Result<(), RegisterError> {
         if is_special_form(name) {
             return Err(RegisterError::SpecialForm(name.to_owned()));
