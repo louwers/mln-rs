@@ -126,8 +126,8 @@ layout (location = 0) in vec2 a_pos;
 // Per instance: an outline vertex and the one after it.
 layout (location = 1) in vec2 a_outline_pos;
 layout (location = 2) in vec2 a_decimals_ed;
-layout (location = 8) in vec2 a_next_outline_pos;
-layout (location = 9) in vec2 a_next_decimals_ed;
+layout (location = 7) in vec2 a_next_outline_pos;
+layout (location = 8) in vec2 a_next_decimals_ed;
 
 out vec2 v_pos_a;
 out vec2 v_pos_b;

@@ -175,7 +175,7 @@ layout (location = 2) in vec4 a_pixeloffset;
 layout (location = 3) in vec3 a_projected_pos;
 layout (location = 4) in float a_fade_opacity;
 layout (location = 6) in vec2 a_tex_origin;
-layout (location = 11) in float a_height_offset;
+layout (location = 7) in float a_height_offset;
 
 out highp vec2 v_tex;
 flat out highp vec2 v_tex_origin;
@@ -554,7 +554,7 @@ layout (location = 1) in vec4 a_data;
 layout (location = 2) in vec3 a_projected_pos;
 layout (location = 3) in float a_fade_opacity;
 layout (location = 9) in vec2 a_tex_origin;
-layout (location = 11) in float a_height_offset;
+layout (location = 10) in float a_height_offset;
 
 // contents of a_size vary based on the type of property value
 // used for {text,icon}-size.
