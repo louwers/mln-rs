@@ -11,7 +11,7 @@ use mln_map_types::{
     AnimationOptions, BoundOptions, CameraDelta, CameraError, CameraLimits, CameraOptions, CameraUpdate,
     MapDebugOptions, MapMode, ProjectionMode, TileLodMode, TransformState, VerticalPerspectiveProjection, Viewport,
 };
-use mln_render::{RendererEvent, RendererEvents, RenderingStats, UpdateParameters, UpdateReader, UpdateSlot};
+use mln_render::{RendererEvent, RendererEvents, RenderingStats, UpdateParameters};
 use mln_storage::FileSource;
 #[cfg(not(target_family = "wasm"))]
 use mln_storage::{Loader, ResourceOptions};
@@ -35,6 +35,7 @@ use crate::map::map_snapshot::{CameraBounds, FreeCamera, MapSnapshot, TileSettin
 use crate::map::rendering_stats_view::{RenderingStatsView, RenderingStatsViewOptions};
 use crate::map::style_loader::{LoadEvent, StyleLoader};
 use crate::map::transform::{CameraCommandId, CommandEnd, FrameClock, Transform, TransformEvent};
+use crate::map::update_slot::{UpdateReader, UpdateSlot};
 
 /// Where a still image that [`MapCore::render_still`] asked for stands.
 #[derive(Debug, PartialEq)]

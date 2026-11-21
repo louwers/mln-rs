@@ -13,11 +13,10 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use mln_render::UpdateParameters;
 use mln_util::error::Error;
 use mln_util::event_queue::Waker;
 use parking_lot::Mutex;
-
-use crate::update_parameters::UpdateParameters;
 
 /// An update that a slot published.
 #[derive(Clone)]
@@ -63,7 +62,7 @@ impl Shared {
 /// The writing side, which the map owns. Dropping it closes the slot: its
 /// readers see no update from then on.
 #[derive(Default)]
-pub struct UpdateSlot {
+pub(crate) struct UpdateSlot {
     shared: Arc<Shared>,
 }
 
@@ -76,19 +75,19 @@ const _: () = {
 
 impl UpdateSlot {
     #[must_use]
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
     /// A reader of this slot's updates.
     #[must_use]
-    pub fn reader(&self) -> UpdateReader {
+    pub(crate) fn reader(&self) -> UpdateReader {
         self.shared.reader()
     }
 
     /// Makes `parameters` the latest update, or, while a group or the hold
     /// is open, the update that shows when the last of them ends.
-    pub fn publish(&self, parameters: Arc<UpdateParameters>) {
+    pub(crate) fn publish(&self, parameters: Arc<UpdateParameters>) {
         {
             let mut state = self.shared.state.lock();
             if state.group_depth > 0 || state.hold {
@@ -107,7 +106,7 @@ impl UpdateSlot {
 
     /// Counts the updates that readers could see.
     #[must_use]
-    pub fn generation(&self) -> u64 {
+    pub(crate) fn generation(&self) -> u64 {
         self.shared.state.lock().generation
     }
 
@@ -115,13 +114,13 @@ impl UpdateSlot {
     /// the current one, or while a group holds an update back, the one its
     /// end shows.
     #[must_use]
-    pub fn pending_generation(&self) -> u64 {
+    pub(crate) fn pending_generation(&self) -> u64 {
         let state = self.shared.state.lock();
         state.generation + u64::from(state.held.is_some())
     }
 
     /// Opens a command group. Groups nest.
-    pub fn begin_group(&self) {
+    pub(crate) fn begin_group(&self) {
         self.shared.state.lock().group_depth += 1;
     }
 
@@ -129,7 +128,7 @@ impl UpdateSlot {
     /// latest update published inside it shows. Fails with
     /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) when no group is
     /// open.
-    pub fn end_group(&self) -> Result<(), Error> {
+    pub(crate) fn end_group(&self) -> Result<(), Error> {
         let shown = {
             let mut state = self.shared.state.lock();
             if state.group_depth == 0 {
@@ -157,13 +156,13 @@ impl UpdateSlot {
     /// Holds the updates back, as a group does, until
     /// [`release`](Self::release). It doesn't nest, and it doesn't count
     /// as a group.
-    pub fn hold(&self) {
+    pub(crate) fn hold(&self) {
         self.shared.state.lock().hold = true;
     }
 
     /// Ends the hold: the latest update published during it shows, unless
     /// a group still holds it.
-    pub fn release(&self) {
+    pub(crate) fn release(&self) {
         let shown = {
             let mut state = self.shared.state.lock();
             state.hold = false;
@@ -176,7 +175,7 @@ impl UpdateSlot {
 
     /// How many command groups are open.
     #[must_use]
-    pub fn group_depth(&self) -> u32 {
+    pub(crate) fn group_depth(&self) -> u32 {
         self.shared.state.lock().group_depth
     }
 }

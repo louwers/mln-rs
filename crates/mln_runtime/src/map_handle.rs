@@ -7,8 +7,8 @@ use mln_map_types::{
     BoundOptions, Camera, CameraDelta, CameraOptions, CameraUpdate, FreeCameraOptions, LogicalExtent, MapDebugOptions,
     MapMode, ProjectionMode, TransitionEnd, TransitionOutcome,
 };
+use mln_render::Registry;
 use mln_render::text::font_face_engine::FontFaceEngine;
-use mln_render::{Registry, UpdateReader};
 use mln_style::layer::Layer;
 use mln_style::{Edit, StyleLoadError};
 use mln_text::GlyphCache;
@@ -27,7 +27,7 @@ use crate::camera::{self, CameraFitArea, CameraFitOptions, CameraFitUpdate, Tile
 use crate::completion::{Completion, Resolver};
 use crate::event::{EventMask, EventSource, RuntimeEvent, RuntimeEventKind};
 use crate::feature_state::{FeatureState, FeatureStateSelector};
-use crate::map::{CameraCommandId, FrameClock, MapEvent, MapSnapshot};
+use crate::map::{CameraCommandId, FrameClock, MapEvent, MapSnapshot, UpdateReader};
 use crate::render::{
     Abandoner, AttachOptions, RenderSession, RenderTarget, SessionId, SessionQueue, SessionShared, Worker, worker_post,
 };

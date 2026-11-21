@@ -73,7 +73,6 @@ mod tile_matrix;
 mod tile_parameters;
 mod tile_render_data;
 mod update_parameters;
-pub mod update_slot;
 
 pub use bucket::LayerFeatureStates;
 pub use mln_style::expression::functions::RegisterError;
@@ -83,7 +82,6 @@ pub use renderer_event::{
     FontStack, GlyphRange, OverscaledTileID, RenderMode, RendererEvent, RendererEvents, RenderingStats, TileOperation,
 };
 pub use update_parameters::UpdateParameters;
-pub use update_slot::{Update, UpdateReader, UpdateSlot};
 
 /// The crates that the expansion of [`paint_property_binders!`] names, so
 /// that a crate that invokes it needn't depend on them.

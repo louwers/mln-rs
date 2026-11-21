@@ -16,9 +16,9 @@ use mln_map_types::{
     AnimationOptions, BoundOptions, CameraOptions, ConstrainMode, MapMode, NorthOrientation, ProjectionMode,
     TileLodMode, Viewport, ViewportMode,
 };
-use mln_render::{OverscaledTileID, RenderMode, TileOperation, UpdateParameters, UpdateReader};
+use mln_render::{OverscaledTileID, RenderMode, TileOperation, UpdateParameters};
 use mln_rs::mln_layers::Symbol;
-use mln_runtime::map::{MapCore, MapCoreOptions, MapProjection, RenderFrameStatus, TileSettings};
+use mln_runtime::map::{MapCore, MapCoreOptions, MapProjection, RenderFrameStatus, TileSettings, UpdateReader};
 use mln_sources::custom::geometry::{self, CustomGeometrySourceHandle, Options as CustomGeometrySourceOptions};
 use mln_sources::custom::provider::TileFunction;
 use mln_sources::geojson::GeoJSONOptions;

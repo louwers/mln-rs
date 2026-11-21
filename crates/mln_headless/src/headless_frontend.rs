@@ -10,8 +10,8 @@
 use std::sync::Arc;
 
 use mln_gfx::rendering_stats::RenderingStats;
-use mln_render::{Renderer, RendererEvent, RendererEvents, UpdateParameters, UpdateReader};
-use mln_runtime::map::MapCore;
+use mln_render::{Renderer, RendererEvent, RendererEvents, UpdateParameters};
+use mln_runtime::map::{MapCore, UpdateReader};
 use mln_runtime::{BackendRef, BackendType, Device, DeviceOptions, GlApi, LocalTarget};
 use mln_text::GlyphCache;
 use mln_text::local_glyph_rasterizer::LocalGlyphs;

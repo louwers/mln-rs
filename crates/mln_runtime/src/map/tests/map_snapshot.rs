@@ -10,7 +10,6 @@ use mln_map_types::{
     FreeCameraOptions, GesturePhase, MapDebugOptions, MapMode, MapView, NorthOrientation, ProjectionMode, TileLodMode,
     Viewport, ViewportMode,
 };
-use mln_render::UpdateReader;
 use mln_rs::mln_sources::GeoJsonSourceType;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style_types::{ProjectionDefinition, ProjectionType};
@@ -20,7 +19,7 @@ use mln_util::queue::Queue;
 use mln_util::size::Size;
 
 use crate::map::map_snapshot::{CameraBounds, FreeCamera, TileSettings};
-use crate::map::{MapCore, MapCoreOptions, MapProjection};
+use crate::map::{MapCore, MapCoreOptions, MapProjection, UpdateReader};
 
 fn map(options: MapCoreOptions, run_loop: &Queue<()>) -> MapCore {
     MapCore::new(
