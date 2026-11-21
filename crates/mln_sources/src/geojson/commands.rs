@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use geojson::{GeoJson, GeometryValue};
-use mln_runtime::{Applied, Completion, Map, NewSourceData, PrepareSourceData, RenderSession};
+use mln_runtime::{Applied, Completion, Map, PrepareSourceData, RenderSession};
 use mln_style::expression::Functions;
 use mln_style::source_type::{Source, SourceData};
 use mln_util::error::Error;
@@ -194,21 +194,6 @@ fn geojson_data(source: &Source) -> Result<&SourceData<GeoJsonSourceType>, Error
     SourceData::recover(source).ok_or_else(|| not_a(source.id(), "a GeoJSON source"))
 }
 
-/// Parsed GeoJSON for a source, which builds its data with the source's
-/// options.
-struct NewGeoJson(GeoJson);
-
-impl NewSourceData for NewGeoJson {
-    fn prepare(self: Box<Self>, source: &Source) -> PrepareSourceData {
-        let id = source.id().to_owned();
-        let builder = geojson_data(source).map(|data| data.options.data_builder());
-        Box::new(move || {
-            let data = builder?.build(self.0)?;
-            Ok(GeoJsonSourceType::set_data(id, Some(data)))
-        })
-    }
-}
-
 /// A runtime map's commands for its GeoJSON sources.
 pub trait GeoJsonSourceCommands {
     /// Adds a GeoJSON source with no data and `settings`, which stay fixed
@@ -306,7 +291,12 @@ impl GeoJsonSourceCommands for Map {
             if data.options.options.cluster {
                 check_clusterable(&geojson)?;
             }
-            Ok(NewGeoJson(geojson))
+            let (id, builder) = (source.id().to_owned(), data.options.data_builder());
+            let work: PrepareSourceData = Box::new(move || {
+                let data = builder.build(geojson)?;
+                Ok(GeoJsonSourceType::set_data(id, Some(data)))
+            });
+            Ok(work)
         })
     }
 

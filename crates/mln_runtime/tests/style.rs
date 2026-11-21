@@ -14,7 +14,7 @@ use mln_rs::mln_style::source_type::StyleSourceType;
 use mln_rs::{
     CustomSourceCallbacks, CustomSourceCommands, GeoJsonSourceCommands, GeoJsonSourceSettings, ImageSourceCommands,
 };
-use mln_runtime::{ErrorKind, Map, ResourceRequest};
+use mln_runtime::{ErrorKind, Map, PrepareSourceData, ResourceRequest};
 use mln_storage::response::Reason;
 use mln_storage::{ResourceError, Response};
 use mln_style::expression::Functions;
@@ -220,6 +220,37 @@ fn only_the_newest_waiting_geojson_data_follows_the_data_being_built() {
         assert!(result.as_ref().map_or_else(|error| error.kind == ErrorKind::Cancelled, |_| true), "{result:?}");
     }
     removed.wait().unwrap();
+}
+
+#[test]
+fn replacing_the_data_cancels_the_waiting_geojson_data() {
+    for by_url in [true, false] {
+        let (_runtime, map) = styled_map();
+        wait(map.add_geojson_source("points", GeoJsonSourceSettings::default()));
+        // The data being built holds its background thread until released.
+        let (release, held) = std::sync::mpsc::channel::<()>();
+        let building = map
+            .set_style_source_data("points", move |_| {
+                let work: PrepareSourceData = Box::new(move || {
+                    let _ = held.recv();
+                    Ok(GeoJsonSourceType::set_data("points", None))
+                });
+                Ok(work)
+            })
+            .unwrap();
+        let waiting = map.set_geojson_source_data("points", point_collection("waiting")).unwrap();
+        if by_url {
+            wait(map.set_geojson_source_url("points", "fixture://points.geojson"));
+        } else {
+            wait(map.set_geojson_source_synchronous_tiling("points", true));
+            wait(map.set_geojson_source_data("points", point_collection("now")));
+        }
+        // The command that replaced the data cancelled what waited as it ran.
+        assert!(waiting.is_complete(), "by_url: {by_url}");
+        assert_eq!(waiting.wait().unwrap_err().kind, ErrorKind::Cancelled);
+        release.send(()).unwrap();
+        assert_eq!(building.wait().unwrap_err().kind, ErrorKind::Cancelled);
+    }
 }
 
 #[test]

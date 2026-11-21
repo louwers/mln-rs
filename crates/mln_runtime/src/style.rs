@@ -91,18 +91,11 @@ pub struct LayerInfo {
     pub visible: bool,
 }
 
-/// Data for a style source that a background thread prepares, such as a
-/// GeoJSON source's features: what [`Map::set_style_source_data`] gives a
-/// source.
-pub trait NewSourceData: Send + 'static {
-    /// The work that prepares the data for `source`, the source as it is
-    /// when the work starts, and makes the edit that gives the source the
-    /// data. The work runs on a background thread, or on the runtime's
-    /// thread for a source whose updates are synchronous.
-    fn prepare(self: Box<Self>, source: &Source) -> PrepareSourceData;
-}
-
-/// The work that [`NewSourceData::prepare`] returns.
+/// The work that prepares data for a style source, such as a GeoJSON
+/// source's features, and makes the edit that gives the source the data:
+/// what [`Map::set_style_source_data`] runs. The work runs on a background
+/// thread, or on the runtime's thread for a source whose updates are
+/// synchronous.
 pub type PrepareSourceData = Box<dyn FnOnce() -> Result<Edit, Error> + Send>;
 
 /// What a map keeps for a source that [`Map::add_style_source_keeping`]
@@ -126,7 +119,7 @@ struct SourceDataUpdate {
     /// doesn't take it.
     instance: SourceInstance,
     building: Option<Building>,
-    waiting: Option<(Box<dyn NewSourceData>, Resolver<Applied>)>,
+    waiting: Option<(PrepareSourceData, Resolver<Applied>)>,
 }
 
 /// Data being prepared: its number, the load of the source's data that it
@@ -368,8 +361,8 @@ impl Map {
 
     /// Gives the source `source_id` data that a background thread prepares.
     /// On the runtime's thread, in the command's place among the map's
-    /// commands, `data` checks the source and makes the data, which a
-    /// background thread then prepares. The command completes once the
+    /// commands, `data` checks the source and makes the work that prepares
+    /// its data, which a background thread then runs. The command completes once the
     /// source holds the data. Later commands don't wait for it. While the
     /// source is still preparing earlier data, only the newest data waits to
     /// follow it. A source whose updates are synchronous
@@ -382,10 +375,10 @@ impl Map {
     /// edit that replaces the source's data (that grows its `load`), the
     /// source's removal, a style load or the map's release comes before the
     /// data is ready.
-    pub fn set_style_source_data<D: NewSourceData>(
+    pub fn set_style_source_data(
         &self,
         source_id: impl Into<String>,
-        data: impl FnOnce(&Source) -> Result<D, Error> + Send + 'static,
+        data: impl FnOnce(&Source) -> Result<PrepareSourceData, Error> + Send + 'static,
     ) -> Result<Completion<Applied>, Error> {
         let source_id = source_id.into();
         self.post(move |core, outbox, id, sequence, resolver| {
@@ -393,7 +386,6 @@ impl Map {
                 return outbox.resolve(resolver, Err(missing_map()));
             }
             let background = core.background();
-            let data = move |source: &Source| -> Result<Box<dyn NewSourceData>, Error> { Ok(Box::new(data(source)?)) };
             apply_command(
                 core,
                 id,
@@ -492,8 +484,8 @@ fn add_source(
     Ok((id, instance))
 }
 
-/// Takes new data for the source `source_id`, which `data` checks and makes:
-/// prepares it now for a source whose updates are synchronous, and returns
+/// Takes new data for the source `source_id`, whose work `data` checks the
+/// source for and makes: prepares it now for a source whose updates are synchronous, and returns
 /// its resolver for the command to resolve once it ran; otherwise starts
 /// preparing it, or leaves it waiting behind the data being prepared. An
 /// error returns the resolver with it.
@@ -501,7 +493,7 @@ fn queue_data(
     entry: &mut MapEntry,
     map_id: MapId,
     source_id: &str,
-    data: impl FnOnce(&Source) -> Result<Box<dyn NewSourceData>, Error>,
+    data: impl FnOnce(&Source) -> Result<PrepareSourceData, Error>,
     resolver: Resolver<Applied>,
     background: Background,
     outbox: &mut Outbox,
@@ -511,12 +503,11 @@ fn queue_data(
         let source = find_source(&entry.core, source_id)?;
         Ok((source, data(source)?))
     })();
-    let (source, data) = match found {
+    let (source, work) = match found {
         Ok(found) => found,
         Err(error) => return Err((error, resolver)),
     };
     if source.data().is_update_synchronous() {
-        let work = data.prepare(source);
         return match work().and_then(|edit| entry.core.edit_style(|style| style.apply(edit))) {
             Ok(()) => Ok(Some(resolver)),
             Err(error) => Err((error, resolver)),
@@ -530,20 +521,20 @@ fn queue_data(
     });
     if update.building.is_none() {
         update.instance = instance;
-        start_data(update, map_id, source, data, resolver, background);
-    } else if let Some((_, replaced)) = update.waiting.replace((data, resolver)) {
+        start_data(update, map_id, source, work, resolver, background);
+    } else if let Some((_, replaced)) = update.waiting.replace((work, resolver)) {
         outbox.resolve(replaced, Err(Error::cancelled("newer data for the source replaced it")));
     }
     Ok(None)
 }
 
-/// Prepares `data` for `update`'s source, `source`, on a background thread,
-/// then installs it from the runtime's thread.
+/// Runs `work`, which prepares data for `update`'s source, `source`, on a
+/// background thread, then installs the data from the runtime's thread.
 fn start_data(
     update: &mut SourceDataUpdate,
     map_id: MapId,
     source: &Source,
-    data: Box<dyn NewSourceData>,
+    work: PrepareSourceData,
     resolver: Resolver<Applied>,
     background: Background,
 ) {
@@ -553,7 +544,7 @@ fn start_data(
     let build = BUILDS.fetch_add(1, Ordering::Relaxed);
     let load = source.data().load();
     update.building = Some(Building { build, load, resolver });
-    let (source_id, work) = (source.id().to_owned(), data.prepare(source));
+    let source_id = source.id().to_owned();
     let next = background.clone();
     background.pool.spawn(move || {
         let edit = work();
@@ -590,7 +581,7 @@ fn install_data(
         Ok(edit) => entry.core.edit_style(|style| style.apply(edit)),
     };
     match (update.waiting.take(), current_source(&entry.core, source_id, update.instance)) {
-        (Some((data, next)), Some(source)) => start_data(update, map_id, source, data, next, background),
+        (Some((work, next)), Some(source)) => start_data(update, map_id, source, work, next, background),
         (Some((_, next)), None) => outbox.resolve(next, Err(Error::cancelled("the source left the style"))),
         (None, _) => {
             entry.source_data_updates.0.remove(source_id);
