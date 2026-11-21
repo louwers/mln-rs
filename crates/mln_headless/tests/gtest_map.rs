@@ -1072,21 +1072,30 @@ fn style_loaded_signal() {
 /// stack, and on Apple platforms that reads the test binary's directory,
 /// which holds every crate's object files. In a large build directory on a
 /// busy machine that takes longer than the stack's own 60 s request
-/// timeout, so a transfer that times out is asked again, for up to five
-/// minutes. Doing it here keeps the setup out of the tests' timed waits.
+/// timeout, so on Apple platforms a transfer that times out is asked
+/// again, within five minutes in all. Doing it here keeps the setup out of
+/// the tests' timed waits.
 fn online_file_source_test(server: &HttpServer) -> MapTest<OnlineFileSource> {
     let run_loop = TestLoop::new();
     let file_source = Arc::new(OnlineFileSource::new(Arc::new(NetworkStatus::new())));
     let deadline = Instant::now() + Duration::from_secs(300);
     loop {
+        let started = Instant::now();
         let (sent, received) = std::sync::mpsc::channel();
         let _request = file_source.request(&Resource::source(&server.url("/test")), move |response| {
             let _ = sent.send(response.error);
         });
-        let error = received.recv_timeout(Duration::from_secs(120)).expect("a transfer answers within 120 s");
+        let left = deadline.saturating_duration_since(started);
+        let error = received.recv_timeout(left).expect("the first transfer finishes within 5 minutes");
+        // Only a transfer that took about the stack's request timeout.
+        let timed_out = |error: &ResourceError| {
+            cfg!(target_vendor = "apple")
+                && error.reason == Reason::Connection
+                && started.elapsed() >= Duration::from_secs(50)
+        };
         match error {
             None => break,
-            Some(error) if error.reason == Reason::Connection && Instant::now() < deadline => {}
+            Some(error) if timed_out(&error) => {}
             Some(error) => panic!("the first transfer failed: {error:?}"),
         }
     }
