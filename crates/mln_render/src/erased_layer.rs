@@ -28,7 +28,9 @@ use crate::render_pass::RenderPass;
 
 /// The values of a layer of the type `T` for a frame.
 pub struct EvaluatedLayer<T: LayerType> {
+    /// The layer's style, which its layout properties are part of.
     pub style: Arc<LayerStyle<T>>,
+    /// The paint properties, evaluated for the frame.
     pub paint: <T::PaintProperties as PaintSet>::Evaluated,
     /// The default for a type without cross-faded properties.
     pub crossfade: CrossfadeParameters,

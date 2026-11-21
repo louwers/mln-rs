@@ -67,7 +67,9 @@ enum Quads {
 pub struct StoredQuads {
     /// The quads' [`RasterLayoutVertex`]es.
     pub vertices: SharedVertices,
+    /// The quads' triangles.
     pub indexes: SharedIndexes,
+    /// The segments that draw the triangles.
     pub segments: Vec<SegmentBase>,
 }
 
