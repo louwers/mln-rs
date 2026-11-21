@@ -105,7 +105,7 @@ pub(crate) const BYTE_CAP: u64 = if cfg!(any(
 /// as [`Texture2D::bytes`](crate::gfx::texture2d::Texture2D::bytes)
 /// counts them.
 fn texture_bytes(size: u32) -> u64 {
-    let bytes = attachment_bytes(Size::new(size, size), COLOR) as u64;
+    let bytes = attachment_bytes(Size::new(size, size), COLOR);
     bytes + bytes / 3
 }
 
@@ -133,7 +133,7 @@ fn held_bytes(sizes: &[u32], held: &[Held]) -> u64 {
     }
     for (side, composite) in sides {
         let size = Size::new(side, side);
-        bytes += (attachment_bytes(size, DEPTH_STENCIL) + composite.bytes(size)) as u64;
+        bytes += attachment_bytes(size, DEPTH_STENCIL) + composite.bytes(size);
     }
     bytes
 }
@@ -748,20 +748,21 @@ impl Drapes {
         for (texture, _) in textures {
             if let Some(texture) = context.texture(texture).filter(|texture| texture.gpu_texture().is_some()) {
                 drapes += 1;
-                bytes += texture.bytes();
+                bytes += texture.bytes() as u64;
             }
         }
-        let depth_stencil = (self.targets.iter())
+        let depth_stencil: u64 = (self.targets.iter())
             .filter(|targets| targets.depth_stencil.is_some())
             .map(|targets| attachment_bytes(Size::new(targets.size, targets.size), DEPTH_STENCIL))
             .sum();
-        let composite = self.targets.iter().map(|targets| targets.layer_composite.bytes()).sum();
+        let composite: u64 = self.targets.iter().map(|targets| targets.layer_composite.bytes()).sum();
         let stats = &mut context.rendering_stats().terrain;
+        let usize = |bytes: u64| usize::try_from(bytes).unwrap_or(usize::MAX);
         stats.stacks = self.stacks;
         stats.drapes = drapes;
-        stats.mem_drapes = bytes;
-        stats.mem_drape_depth_stencil = depth_stencil;
-        stats.mem_drape_composite = composite;
+        stats.mem_drapes = usize(bytes);
+        stats.mem_drape_depth_stencil = usize(depth_stencil);
+        stats.mem_drape_composite = usize(composite);
     }
 
     /// The tiles and stacks of the drapes drawn since the last call.
@@ -1074,7 +1075,7 @@ mod tests {
     /// the layer composite's textures where a tile's drapes composite.
     #[test]
     fn the_cap_counts_what_each_side_draws_with() {
-        let side = |size: u32| attachment_bytes(Size::new(size, size), COLOR) as u64;
+        let side = |size: u32| attachment_bytes(Size::new(size, size), COLOR);
         assert_eq!(
             4 * texture_bytes(2048) + 2 * texture_bytes(1024) + side(2048) + side(1024),
             held([2048, 2048, 1024])

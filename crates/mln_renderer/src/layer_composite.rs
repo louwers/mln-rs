@@ -161,7 +161,7 @@ impl CompositeTextures {
     }
 
     /// Their bytes on a frame of `size`.
-    pub(crate) fn bytes(self, size: Size) -> usize {
+    pub(crate) fn bytes(self, size: Size) -> u64 {
         let depth_stencil = if self.depth_stencil { attachment_bytes(size, DEPTH_STENCIL) } else { 0 };
         let frame = self.frame.map_or(0, |format| 2 * attachment_bytes(size, format));
         if self.target { attachment_bytes(size, COLOR) + depth_stencil + frame } else { 0 }
@@ -365,7 +365,7 @@ impl LayerComposite {
     /// The bytes of its textures: its target's color, depth and stencil,
     /// and the frame and backdrop of a frame with a layer that blends in
     /// the shader.
-    pub(crate) fn bytes(&self) -> usize {
+    pub(crate) fn bytes(&self) -> u64 {
         let Some(target) = &self.target else { return 0 };
         let textures = CompositeTextures {
             target: true,
