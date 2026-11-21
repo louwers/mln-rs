@@ -64,11 +64,10 @@ pub(crate) trait ErasedOrigin {
         extension_field: &str,
         args: Option<&feature::PropertyMap>,
     ) -> Result<FeatureExtensionValue, Error>;
-    fn max_zoom(&self) -> u8;
 }
 
 /// `load` as a load of `O`'s, which every tile of a source has.
-fn typed<O: DataOrigin>(load: &mut dyn TileLoad) -> Option<&mut O::Load> {
+pub(crate) fn typed<O: DataOrigin>(load: &mut dyn TileLoad) -> Option<&mut O::Load> {
     let load: &mut dyn Any = load;
     let typed = load.downcast_mut();
     debug_assert!(typed.is_some(), "a tile's load is of its source's origin");
@@ -77,18 +76,7 @@ fn typed<O: DataOrigin>(load: &mut dyn TileLoad) -> Option<&mut O::Load> {
 
 impl<O: DataOrigin> ErasedOrigin for O {
     fn update(&mut self, parts: UpdateParts<'_>) -> Option<Cover> {
-        let UpdateParts { previous, source, tiles, ctx, parameters, needs_relayout, fast_pfor_enabled } = parts;
-        let mut update = OriginUpdate {
-            previous,
-            source,
-            tiles,
-            ctx,
-            parameters,
-            needs_relayout,
-            fast_pfor_enabled,
-            origin: PhantomData,
-        };
-        DataOrigin::update(self, &mut update)
+        DataOrigin::update(self, &mut OriginUpdate { parts, origin: PhantomData })
     }
 
     fn new_load(&mut self, tile: &NewTile<'_>) -> Option<Box<dyn TileLoad>> {
@@ -143,9 +131,5 @@ impl<O: DataOrigin> ErasedOrigin for O {
         args: Option<&feature::PropertyMap>,
     ) -> Result<FeatureExtensionValue, Error> {
         DataOrigin::query_feature_extensions(self, feature, extension, extension_field, args)
-    }
-
-    fn max_zoom(&self) -> u8 {
-        DataOrigin::max_zoom(self)
     }
 }

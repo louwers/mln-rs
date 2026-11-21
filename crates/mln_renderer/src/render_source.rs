@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use mln_map_types::MapDebugOptions;
 use mln_style::Source;
+use mln_style::layer_type::SourceKind;
 use mln_util::error::Error;
 
 use crate::erased_layer::ErasedEvaluatedLayer;
@@ -14,7 +15,7 @@ use crate::gfx::context::Context;
 use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::registry::Registry;
 use crate::render_tile::RenderTile;
-use crate::source::{Supplied, Supply};
+use crate::source::{Supplied, Supply, TileKind};
 use crate::sources::render_image_source::RenderImageSource;
 use crate::sources::render_tile_source::{DebugLayers, RenderTileSource};
 use crate::tile::job::SourceKey;
@@ -128,8 +129,9 @@ pub(crate) trait RenderSource {
 
     fn dump_debug_logs(&self);
 
-    /// The deepest zoom the source has tiles of; `None` for a source without
-    /// tiles.
+    /// The deepest zoom that has tiles of its own, as the source's last
+    /// [`Cover`](crate::source::Cover) says; `None` for a source without
+    /// tiles or before its first cover.
     fn max_zoom(&self) -> Option<u8>;
 
     fn is_enabled(&self) -> bool {
@@ -148,6 +150,15 @@ pub(crate) fn create(registry: &Registry, source: &Source, store: &mut TileStore
         return None;
     };
     let Supply(supplied) = source_type.supply(source);
+    debug_assert!(
+        matches!(
+            (&supplied, source.info().layer_kind),
+            (Supplied::Tiles { kind: TileKind::Geometry, .. }, SourceKind::Geometry)
+                | (Supplied::Tiles { kind: TileKind::Raster, .. } | Supplied::Image(_), SourceKind::Raster)
+                | (Supplied::Tiles { kind: TileKind::Dem(_), .. }, SourceKind::RasterDem)
+        ),
+        "source type '{name}' supplies data of another kind than its layers draw"
+    );
     Some(match supplied {
         Supplied::Tiles { kind, single_layer, origin } => {
             Box::new(RenderTileSource::new(source.clone(), kind, single_layer, origin, store))

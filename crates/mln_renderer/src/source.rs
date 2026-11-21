@@ -35,30 +35,30 @@ use mln_storage::{FileSource, RequestOrder};
 use mln_style::Source;
 use mln_style::source_type::StyleSourceType;
 use mln_tile_id::OverscaledTileID;
+use mln_util::LatLng;
 use mln_util::error::Error;
 use mln_util::geo::LatLngBounds;
 use mln_util::image::PremultipliedImage;
 use mln_util::pool::Pool;
 use mln_util::range::Range;
 use mln_util::tileset::RasterEncoding;
-use mln_util::{LatLng, constants};
 
-use crate::erased_source::ErasedOrigin;
+use crate::erased_source::{ErasedOrigin, UpdateParts, typed};
 pub use crate::query::FeatureExtensionValue;
 use crate::tile::inbox::{InboxSender, TileEvent};
 use crate::tile::job::TileKey;
 pub use crate::tile::loading::Freshness;
-use crate::tile::source_tiles::SourceTiles;
-use crate::tile::store::StoreContext;
 pub use crate::tile::tile::{TileInput, TileKind, TileNecessity, TileOperation, TileUpdateParameters};
 use crate::tile::tile_mut::TileMut;
-use crate::tile_parameters::TileParameters;
 
 /// The render half of a source type, whose style half is its
 /// [`StyleSourceType`]: what its sources supply the renderer.
 pub trait SourceType: StyleSourceType {
     /// What `source`, a source of the type, supplies the renderer, which
-    /// makes it once, as the source joins the renderer's style.
+    /// makes it once, as the source joins the renderer's style. The data is
+    /// of the kind the type's [`layer_kind`](mln_style::source_type::SourceTypeInfo::layer_kind)
+    /// names: geometry tiles for `Geometry`, raster tiles or an image for
+    /// `Raster`, raster-dem tiles for `RasterDem`.
     fn supply(source: &Source) -> Supply;
 }
 
@@ -75,12 +75,18 @@ pub(crate) enum Supplied {
 pub type ImageOf = for<'a> fn(&'a Source) -> Option<SourceImage<'a>>;
 
 impl Supply {
-    /// Tiles of `kind`, whose data comes from `origin`. A tile of a
-    /// `single_layer` source holds one source layer, which a source query
-    /// gets whatever source layer it names.
+    /// Tiles of `kind`, whose data comes from `origin`.
     #[must_use]
-    pub fn tiles<O: DataOrigin>(kind: TileKind, single_layer: bool, origin: O) -> Self {
-        Supply(Supplied::Tiles { kind, single_layer, origin: Box::new(origin) })
+    pub fn tiles<O: DataOrigin>(kind: TileKind, origin: O) -> Self {
+        Supply(Supplied::Tiles { kind, single_layer: false, origin: Box::new(origin) })
+    }
+
+    /// Tiles of `kind` that each hold one source layer, which a source
+    /// query gets whatever source layer it names, whose data comes from
+    /// `origin`.
+    #[must_use]
+    pub fn single_layer_tiles<O: DataOrigin>(kind: TileKind, origin: O) -> Self {
+        Supply(Supplied::Tiles { kind, single_layer: true, origin: Box::new(origin) })
     }
 
     /// One image, which `image_of` reads from each version of the source.
@@ -184,18 +190,14 @@ pub trait DataOrigin: 'static {
     ) -> Result<FeatureExtensionValue, Error> {
         Ok(FeatureExtensionValue::default())
     }
-
-    /// The highest zoom level that has tiles, as far as the origin knows.
-    fn max_zoom(&self) -> u8 {
-        constants::TERRAIN_RGB_MAXZOOM
-    }
 }
 
 /// What a [`DataOrigin`] keeps of a tile's loading.
 pub trait TileLoad: Any {
     /// The tile `tile` goes: lets go of what the load holds outside the
     /// tile, such as its place among a provider's subscribers. The engine
-    /// drops the load after.
+    /// drops the load after. Not called as the renderer itself drops; what
+    /// must go then goes in `Drop`.
     fn retire(&mut self, _tile: &OverscaledTileID) {}
 }
 
@@ -231,13 +233,7 @@ impl NewTile<'_> {
 /// the map says of its tiles, and the tiles, which the origin can clear or
 /// load again.
 pub struct OriginUpdate<'a, O: ?Sized> {
-    pub(crate) previous: &'a Source,
-    pub(crate) source: &'a Source,
-    pub(crate) tiles: &'a mut SourceTiles,
-    pub(crate) ctx: &'a mut StoreContext,
-    pub(crate) parameters: &'a TileParameters<'a>,
-    pub(crate) needs_relayout: bool,
-    pub(crate) fast_pfor_enabled: bool,
+    pub(crate) parts: UpdateParts<'a>,
     pub(crate) origin: PhantomData<fn(&mut O)>,
 }
 
@@ -246,64 +242,64 @@ impl<'a, O: DataOrigin> OriginUpdate<'a, O> {
     /// [`source`](Self::source) at its first update.
     #[must_use]
     pub fn previous(&self) -> &'a Source {
-        self.previous
+        self.parts.previous
     }
 
     #[must_use]
     pub fn source(&self) -> &'a Source {
-        self.source
+        self.parts.source
     }
 
     #[must_use]
     pub fn mode(&self) -> MapMode {
-        self.parameters.mode
+        self.parts.parameters.mode
     }
 
     /// The map's highest zoom level.
     #[must_use]
     pub fn max_zoom(&self) -> f64 {
-        self.parameters.max_zoom
+        self.parts.parameters.max_zoom
     }
 
     /// Where the map's resources load from, if anywhere.
     #[must_use]
     pub fn file_source(&self) -> Option<&Arc<dyn FileSource>> {
-        self.parameters.file_source.as_ref()
+        self.parts.parameters.file_source.as_ref()
     }
 
     /// Whether the source's tiles lay out in the update that asks for them.
     #[must_use]
     pub fn is_synchronous(&self) -> bool {
-        self.parameters.is_update_synchronous
+        self.parts.parameters.is_update_synchronous
     }
 
     /// Whether the source's tiles lay out again.
     #[must_use]
     pub fn needs_relayout(&self) -> bool {
-        self.needs_relayout
+        self.parts.needs_relayout
     }
 
     /// Whether MLT tiles decode FastPFOR-compressed streams.
     #[must_use]
     pub fn fast_pfor_enabled(&self) -> bool {
-        self.fast_pfor_enabled
+        self.parts.fast_pfor_enabled
     }
 
     /// Lets go of every tile.
     pub fn clear_tiles(&mut self) {
-        self.tiles.clear_all(self.ctx);
+        self.parts.tiles.clear_all(self.parts.ctx);
     }
 
     /// Lets go of the cached tiles beyond what the cache keeps with less
     /// memory.
     pub fn reduce_memory_use(&mut self) {
-        self.tiles.reduce_memory_use(self.ctx);
+        self.parts.tiles.reduce_memory_use(self.parts.ctx);
     }
 
     /// Decodes the elevations of the tiles made from now on, of a
     /// raster-dem source, as `encoding` says.
     pub fn set_dem_encoding(&mut self, encoding: RasterEncoding) {
-        if let TileKind::Dem(current) = &mut self.tiles.info.kind {
+        if let TileKind::Dem(current) = &mut self.parts.tiles.info.kind {
             *current = encoding;
         }
     }
@@ -315,13 +311,12 @@ impl<'a, O: DataOrigin> OriginUpdate<'a, O> {
         filter: impl Fn(&OverscaledTileID) -> bool,
         mut f: impl FnMut(&mut O::Load, &mut LoadContext<'_, '_, O::Reply>),
     ) {
-        self.tiles.update_each(
-            self.ctx,
+        self.parts.tiles.update_each(
+            self.parts.ctx,
             |slot| !slot.place().is_cached() && filter(&slot.tile.id),
             |tile| {
                 tile.with_load(|load, tile| {
-                    let load: &mut dyn Any = load;
-                    if let Some(load) = load.downcast_mut::<O::Load>() {
+                    if let Some(load) = typed::<O>(load) {
                         f(load, &mut LoadContext::new(tile));
                     }
                 });
@@ -410,6 +405,7 @@ impl<'a, 't, R: Send + 'static> LoadContext<'a, 't, R> {
     }
 
     /// Gives the tile what a load brought, which it lays out or decodes.
+    /// `input` is of the tile's [`kind`](Self::kind).
     pub fn deliver(&mut self, input: TileInput) {
         self.tile.take_input(input);
     }

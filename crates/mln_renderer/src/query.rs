@@ -19,7 +19,8 @@ impl RenderedQueryOptions {
 /// Options for query source features
 #[derive(Clone, Debug, Default)]
 pub struct SourceQueryOptions {
-    /// Required for a vector source, ignored for a GeoJSON source
+    /// Required for a source of several source layers, ignored for a
+    /// single-layer source.
     pub(crate) source_layers: Option<Vec<String>>,
 
     pub(crate) filter: Option<Filter>,

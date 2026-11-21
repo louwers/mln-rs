@@ -1493,11 +1493,6 @@ impl SourceTiles {
         cover
     }
 
-    /// The highest zoom level that has tiles, as far as the origin knows.
-    pub(crate) fn max_zoom(&self) -> u8 {
-        self.info.origin.as_ref().map_or(constants::TERRAIN_RGB_MAXZOOM, |origin| origin.max_zoom())
-    }
-
     /// [`DataOrigin::query_feature_extensions`](crate::source::DataOrigin::query_feature_extensions).
     pub(crate) fn query_feature_extensions(
         &self,

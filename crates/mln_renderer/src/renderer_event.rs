@@ -13,7 +13,7 @@ use mln_util::event_queue::EventQueue;
 pub use mln_util::font_stack::FontStack;
 use mln_util::time::Instant;
 
-pub use crate::tile::TileOperation;
+pub use crate::tile::tile::TileOperation;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]

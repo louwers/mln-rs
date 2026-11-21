@@ -169,6 +169,13 @@ impl<'a> TileMut<'a> {
     /// Takes in what a load delivered. A raster tile without an image shows
     /// nothing at once, renderable unless `missing`.
     pub(crate) fn take_input(&mut self, input: TileInput) {
+        debug_assert!(
+            matches!(
+                (&input, &self.tile.pipeline),
+                (TileInput::Geometry { .. }, Pipeline::Layout(_)) | (TileInput::Image { .. }, Pipeline::Decode(_))
+            ),
+            "a tile takes input of its kind"
+        );
         match input {
             TileInput::Geometry { data, missing } => {
                 let key = DataKey { source: self.source.key, tile: self.tile.id.canonical, load: self.source.next() };

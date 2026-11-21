@@ -266,9 +266,8 @@ pub(crate) struct RenderTileSource {
     id: Rc<str>,
     key: SourceKey,
     fast_pfor_enabled: bool,
-    /// The highest zoom level that has tiles, as the origin knew at its
-    /// last update.
-    max_zoom: u8,
+    /// The deepest zoom of the last cover, `None` before the first.
+    max_zoom: Option<u8>,
     render_tiles: Vec<RenderTile>,
     /// The render tiles in [`TileOrder::ById`], as indexes into them.
     order_by_id: Vec<usize>,
@@ -304,14 +303,13 @@ impl RenderTileSource {
         origin: Box<dyn ErasedOrigin>,
         store: &mut TileStore,
     ) -> Self {
-        let max_zoom = origin.max_zoom();
         let key = store.add_source(style_source.id().to_owned(), kind, single_layer, origin);
         RenderTileSource {
             id: Rc::from(style_source.id()),
             base: RenderSourceBase::new(style_source),
             key,
             fast_pfor_enabled: false,
-            max_zoom,
+            max_zoom: None,
             render_tiles: Vec::new(),
             order_by_id: Vec::new(),
             order_by_y: Vec::new(),
@@ -350,10 +348,10 @@ impl RenderSource for RenderTileSource {
             needs_relayout,
             self.fast_pfor_enabled,
         );
-        self.max_zoom = source.max_zoom();
         let Some(cover) = cover else {
             return;
         };
+        self.max_zoom = Some(cover.zoom_range.max);
         let update = CoverUpdate {
             layers,
             needs_rendering,
@@ -556,6 +554,6 @@ impl RenderSource for RenderTileSource {
     fn dump_debug_logs(&self) {}
 
     fn max_zoom(&self) -> Option<u8> {
-        Some(self.max_zoom)
+        self.max_zoom
     }
 }

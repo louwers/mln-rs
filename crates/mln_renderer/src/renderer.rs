@@ -387,11 +387,11 @@ impl Renderer {
         features
     }
 
-    /// Queries a feature extension: for a GeoJSON source with `cluster` on,
-    /// the "supercluster" extension's "children", "leaves" or
-    /// "expansion-zoom" of a cluster feature (one with a `cluster_id`
-    /// property). Anything else is a null value. `Err` for a cluster ID the
-    /// source doesn't have.
+    /// Queries a feature extension of a feature of the source's tiles, which
+    /// the source's data origin answers
+    /// ([`DataOrigin::query_feature_extensions`](crate::source::DataOrigin::query_feature_extensions)):
+    /// a null value for a source without extensions. `Err` when the
+    /// extension fails to answer.
     pub fn query_feature_extensions(
         &self,
         source_id: &str,
