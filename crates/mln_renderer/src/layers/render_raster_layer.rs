@@ -52,7 +52,7 @@ use crate::render_layer::{
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::render_tile::FrameTile;
-use crate::sources::render_image_source::ImageSourceRenderData;
+use crate::sources::render_image_source::{ImageQuad, ImageSourceRenderData};
 use crate::tile_matrix::{projection_data, to_projection_ubo};
 
 /// What the layer keeps of a tile: its draw, and the generation of the
@@ -303,7 +303,7 @@ impl RenderRasterLayer {
             draw_list.push_part(FrameDraw::new(None, draw.id), RasterPart::Image(index), uniforms);
         }
 
-        self.finish_frame_draws(gpu, paint_parameters.context);
+        self.finish_frame_draws(gpu, paint_parameters.context, &image_data.quad);
     }
 
     /// The entries in the layer's storage buffers of a draw of `tile_id`.
@@ -322,8 +322,9 @@ impl RenderRasterLayer {
     }
 
     /// Makes the draws of the draw list the layer's draws of the frame, and
-    /// writes the layer's buffers of them.
-    fn finish_frame_draws(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
+    /// writes the layer's buffers of them, which put their vertices on
+    /// `quad`.
+    fn finish_frame_draws(&mut self, gpu: &mut dyn Gpu, context: &mut Context, quad: &ImageQuad) {
         let composite = self.composite();
         let Some(frame) = self.drawing.frame.as_mut() else {
             return;
@@ -344,6 +345,9 @@ impl RenderRasterLayer {
                 contrast_factor: contrast_factor(*evaluated.raster_contrast.uniform()),
                 pad1: 0.0,
                 pad2: 0.0,
+                coords_top: quad.coords_top,
+                coords_bottom: quad.coords_bottom,
+                image_warp: quad.warp,
             };
             writer.uniform(ID_RASTER_EVALUATED_PROPS_UBO, &props);
             writer.storage(ID_RASTER_DRAWABLE_UBO, |(draw_ubo, _)| *draw_ubo);
@@ -544,7 +548,7 @@ impl TypedLayer for RenderRasterLayer {
             }
         }
 
-        self.finish_frame_draws(gpu, paint_parameters.context);
+        self.finish_frame_draws(gpu, paint_parameters.context, &ImageQuad::TILE);
     }
 
     fn update_image_draws(

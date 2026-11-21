@@ -713,6 +713,9 @@ fn minified(gpu: &mut impl Gpu, texture: TextureId, state: SamplerState) -> Resu
         opacity: 1.0,
         brightness_high: 1.0,
         contrast_factor: 1.0,
+        coords_top: [0.0, 0.0, 8192.0, 0.0],
+        coords_bottom: [0.0, 8192.0, 8192.0, 8192.0],
+        image_warp: [0.0, 0.0, 1.0, 0.0],
         ..RasterEvaluatedPropsUBO::default()
     };
     let (projection, drawable) = (bytemuck::cast_slice(&projection), bytemuck::cast_slice(&drawable));

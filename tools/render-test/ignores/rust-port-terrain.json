@@ -5,7 +5,6 @@
   "gljs/render-tests/terrain/fill-extrusion-vertical-gradient": "P4 (standing layers): terrain draws, but fill extrusions don't stand on it or test their depth against it yet; 31,201 of 262,144 px differ",
   "gljs/render-tests/terrain/fill-extrusion-vertical-gradient-pattern": "P4 (standing layers): terrain draws, but fill extrusions don't stand on it or test their depth against it yet; 21,220 to 21,371 of 262,144 px differ",
   "gljs/render-tests/terrain/heatmap": "P4 (standing layers): terrain draws, but the heatmap doesn't stand on it yet; its DEM source declares tileSize 256 for tiles/terrain-shading's 512 px tiles",
-  "gljs/render-tests/terrain/image-projective": "The image drapes, but mln-rs textures an image whose corners aren't a parallelogram as two affine triangles, as MapLibre Native does, where GL JS warps it projectively. Its 2D fixtures (render-tests/image/*) expect native's triangles",
   "gljs/render-tests/terrain/occlusion-debug": "P4 (standing layers): terrain draws, but doesn't occlude what stands behind it yet; its DEM source declares tileSize 256 for tiles/terrain-shading's 512 px tiles",
   "gljs/render-tests/terrain/symbol": "P4 (standing layers): terrain draws, but symbols don't stand on it yet",
   "gljs/render-tests/terrain/symbol-add-terrain": "P4 (standing layers): terrain draws, but symbols don't stand on it yet",

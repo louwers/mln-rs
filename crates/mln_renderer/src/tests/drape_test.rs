@@ -21,7 +21,7 @@ use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::render_layer::FrameSourceTiles;
 use crate::render_static_data::RenderStaticData;
 use crate::render_tile::{FoundTile, RenderTile};
-use crate::sources::render_image_source::ImageSourceRenderData;
+use crate::sources::render_image_source::{ImageQuad, ImageSourceRenderData};
 
 /// A camera pitched by `pitch` and turned to `bearing`, in degrees, over a
 /// 512 px view at a fractional zoom.
@@ -201,7 +201,7 @@ fn a_drape_draws_the_tiles_that_overlap_its_tile() {
 /// An image drawn in the tiles `tile_ids` over the box `bounds` of their
 /// tile's units, which hasn't loaded.
 fn image_in(tile_ids: &[UnwrappedTileID], bounds: [i32; 4]) -> ImageSourceRenderData<'_> {
-    ImageSourceRenderData { bucket: None, tile_ids, bounds }
+    ImageSourceRenderData { bucket: None, tile_ids, bounds, quad: ImageQuad::TILE }
 }
 
 /// Each copy of an image overlaps the drapes of its own world copy.
