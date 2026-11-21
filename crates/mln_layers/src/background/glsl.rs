@@ -21,17 +21,9 @@ pub(super) const BACKGROUND_SHADER: Glsl = Glsl {
 
 layout(location = 0) in ivec2 in_position;
 
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
 layout(std140, set = LAYER_SET_INDEX, binding = idBackgroundDrawableUBO) readonly buffer BackgroundDrawableUBOVector {
     BackgroundDrawableUBO drawable_ubo[];
 } drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
 
 void main() {
     const BackgroundDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
@@ -63,17 +55,9 @@ pub(super) const BACKGROUND_PATTERN_SHADER: Glsl = Glsl {
     vertex: r"
 layout(location = 0) in ivec2 in_position;
 
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
 layout(std140, set = LAYER_SET_INDEX, binding = idBackgroundDrawableUBO) readonly buffer BackgroundPatternDrawableUBOVector {
     BackgroundPatternDrawableUBO drawable_ubo[];
 } drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
 
 layout(set = LAYER_SET_INDEX, binding = idBackgroundPropsUBO) uniform BackgroundPatternPropsUBOBlock {
     BackgroundPatternPropsUBO props;

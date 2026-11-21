@@ -43,17 +43,9 @@ layout(location = 1) in uvec2 in_decimals_ed;
 
 #property attribute height
 
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
 layout(std140, set = LAYER_SET_INDEX, binding = idFillExtrusionDrawableUBO) readonly buffer FillExtrusionDrawableUBOVector {
     FillExtrusionDrawableUBO drawable_ubo[];
 } drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
 
 layout(set = LAYER_SET_INDEX, binding = idFillExtrusionPropsUBO) uniform FillExtrusionPropsUBOBlock {
     FillExtrusionPropsUBO props;
@@ -133,17 +125,9 @@ void main() {
 macro_rules! fill_extrusion_wall_declarations {
     () => {
         r"
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
 layout(std140, set = LAYER_SET_INDEX, binding = idFillExtrusionDrawableUBO) readonly buffer FillExtrusionDrawableUBOVector {
     FillExtrusionDrawableUBO drawable_ubo[];
 } drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
 
 layout(set = LAYER_SET_INDEX, binding = idFillExtrusionPropsUBO) uniform FillExtrusionPropsUBOBlock {
     FillExtrusionPropsUBO props;
@@ -361,17 +345,9 @@ layout(location = 1) in uvec2 in_decimals_ed;
 
 #property attribute pattern_to
 
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
 layout(std140, set = LAYER_SET_INDEX, binding = idFillExtrusionDrawableUBO) readonly buffer FillExtrusionDrawableUBOVector {
     FillExtrusionDrawableUBO drawable_ubo[];
 } drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
 
 layout(std140, set = LAYER_SET_INDEX, binding = idFillExtrusionTilePropsUBO) readonly buffer FillExtrusionTilePropsUBOVector {
     FillExtrusionTilePropsUBO tile_props_ubo[];
@@ -482,10 +458,6 @@ layout(location = 2) in vec2 frag_pos_b;
 
 layout(location = 0) out vec4 out_color;
 
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
 layout(std140, set = LAYER_SET_INDEX, binding = idFillExtrusionTilePropsUBO) readonly buffer FillExtrusionTilePropsUBOVector {
     FillExtrusionTilePropsUBO tile_props_ubo[];
 } tilePropsVector;
@@ -556,17 +528,9 @@ layout(location = 8) in uvec2 in_next_decimals_ed;
 
 #property attribute pattern_to
 
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
 layout(std140, set = LAYER_SET_INDEX, binding = idFillExtrusionDrawableUBO) readonly buffer FillExtrusionDrawableUBOVector {
     FillExtrusionDrawableUBO drawable_ubo[];
 } drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
 
 layout(std140, set = LAYER_SET_INDEX, binding = idFillExtrusionTilePropsUBO) readonly buffer FillExtrusionTilePropsUBOVector {
     FillExtrusionTilePropsUBO tile_props_ubo[];
@@ -695,10 +659,6 @@ layout(location = 2) in vec2 frag_pos_b;
 #property varying pattern_to 4 flat
 
 layout(location = 0) out vec4 out_color;
-
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
 
 layout(std140, set = LAYER_SET_INDEX, binding = idFillExtrusionTilePropsUBO) readonly buffer FillExtrusionTilePropsUBOVector {
     FillExtrusionTilePropsUBO tile_props_ubo[];

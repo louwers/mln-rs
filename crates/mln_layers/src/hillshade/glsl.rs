@@ -17,17 +17,9 @@ pub(super) const HILLSHADE_SHADER: Glsl = Glsl {
 layout(location = 0) in ivec2 in_position;
 layout(location = 1) in ivec2 in_texture_position;
 
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
 layout(std140, set = LAYER_SET_INDEX, binding = idHillshadeDrawableUBO) readonly buffer HillshadeDrawableUBOVector {
     HillshadeDrawableUBO drawable_ubo[];
 } drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
 
 layout(location = 0) out vec2 frag_position;
 
@@ -51,10 +43,6 @@ void main() {
 
 layout(location = 0) in vec2 frag_position;
 layout(location = 0) out vec4 out_color;
-
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
 
 layout(std140, set = LAYER_SET_INDEX, binding = idHillshadeTilePropsUBO) readonly buffer HillshadeTilePropsUBOVector {
     HillshadeTilePropsUBO tile_props_ubo[];

@@ -30,14 +30,6 @@ pub(crate) const GLOBE_DEPTH_SHADER: Glsl = Glsl {
 
 layout(location = 0) in ivec2 in_position;
 
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
-
 void main() {
     gl_Position = projectTileFor3D(vec2(in_position), 0.0, projectionVector.projection_ubo[constant.ubo_index]);
 }
@@ -157,14 +149,6 @@ layout(location = 0) in ivec2 in_corner;
 // Per instance: where the segment starts and ends, in tile units.
 layout(location = 1) in ivec2 in_start;
 layout(location = 2) in ivec2 in_end;
-
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
 
 // The offset in pixels from the segment's start, along the segment and
 // across it, on the map; the segment's length in pixels on the map; and the

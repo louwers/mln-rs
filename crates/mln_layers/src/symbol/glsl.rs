@@ -251,17 +251,9 @@ layout(location = 6) in uvec2 in_tex_origin;
 // The symbol's symbol-height-offset, in meters.
 layout(location = 7) in float in_height_offset;
 
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
 layout(std140, set = LAYER_SET_INDEX, binding = idSymbolDrawableUBO) readonly buffer SymbolDrawableUBOVector {
     SymbolDrawableUBO drawable_ubo[];
 } drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
 
 layout(set = LAYER_SET_INDEX, binding = idSymbolEvaluatedPropsUBO) uniform SymbolEvaluatedPropsUBOBlock {
     SymbolEvaluatedPropsUBO props;
@@ -400,10 +392,6 @@ layout(location = 2) flat in vec2 frag_tex_origin;
 
 layout(location = 0) out vec4 out_color;
 
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
 layout(std140, set = LAYER_SET_INDEX, binding = idSymbolTilePropsUBO) readonly buffer SymbolTilePropsUBOVector {
     SymbolTilePropsUBO tile_props_ubo[];
 } tilePropsVector;
@@ -460,17 +448,9 @@ layout(location = 10) in uvec2 in_tex_origin;
 // The symbol's symbol-height-offset, in meters.
 layout(location = 11) in float in_height_offset;
 
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
 layout(std140, set = LAYER_SET_INDEX, binding = idSymbolDrawableUBO) readonly buffer SymbolDrawableUBOVector {
     SymbolDrawableUBO drawable_ubo[];
 } drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
 
 layout(set = LAYER_SET_INDEX, binding = idSymbolEvaluatedPropsUBO) uniform SymbolEvaluatedPropsUBOBlock {
     SymbolEvaluatedPropsUBO props;
@@ -651,10 +631,6 @@ layout(location = 9) flat in vec2 frag_tex_origin;
 
 layout(location = 0) out vec4 out_color;
 
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
 layout(std140, set = LAYER_SET_INDEX, binding = idSymbolTilePropsUBO) readonly buffer SymbolTilePropsUBOVector {
     SymbolTilePropsUBO tile_props_ubo[];
 } tilePropsVector;
@@ -737,17 +713,9 @@ layout(location = 9) in uvec2 in_tex_origin;
 // The symbol's symbol-height-offset, in meters.
 layout(location = 10) in float in_height_offset;
 
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
 layout(std140, set = LAYER_SET_INDEX, binding = idSymbolDrawableUBO) readonly buffer SymbolDrawableUBOVector {
     SymbolDrawableUBO drawable_ubo[];
 } drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
 
 layout(set = LAYER_SET_INDEX, binding = idSymbolEvaluatedPropsUBO) uniform SymbolEvaluatedPropsUBOBlock {
     SymbolEvaluatedPropsUBO props;
@@ -935,10 +903,6 @@ layout(location = 9) flat in int frag_is_icon;
 layout(location = 10) flat in vec2 frag_tex_origin;
 
 layout(location = 0) out vec4 out_color;
-
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
 
 layout(std140, set = LAYER_SET_INDEX, binding = idSymbolTilePropsUBO) readonly buffer SymbolTilePropsUBOVector {
     SymbolTilePropsUBO tile_props_ubo[];

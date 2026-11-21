@@ -226,3 +226,14 @@ layout(set = GLOBAL_SET_INDEX, binding = 0) uniform ViewUBOBlock {
 };
 
 ";
+
+/// The declarations of the engine's buffers that a stage may read without
+/// declaring them, each with the name it reads it by: the draw's index into
+/// its layer's storage buffers, a push constant, and the projection blocks.
+pub(crate) const RESERVED_BINDINGS: [(&str, &str); 2] = [
+    ("constant", "layout(push_constant) uniform Constants {\n    int ubo_index;\n} constant;"),
+    (
+        "projectionVector",
+        "layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {\n    ProjectionUBO projection_ubo[];\n} projectionVector;",
+    ),
+];

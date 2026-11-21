@@ -23,8 +23,10 @@ use crate::shaders::source::{Named, Stage, expand as expand_properties, per_vert
 /// The GLSL of a program.
 ///
 /// A stage compiles from the structs of the engine's blocks, `mln_glsl`'s
-/// prelude of the stage, the structs of the program's blocks, `prelude` and
-/// the stage's source.
+/// prelude of the stage, the declarations of the engine's buffers that
+/// `prelude` or the stage names (`constant`, whose `ubo_index` is the
+/// draw's index into its layer's storage buffers, and `projectionVector`),
+/// the structs of the program's blocks, `prelude` and the stage's source.
 #[derive(Debug)]
 pub struct Glsl {
     /// The shader's own constants (its buffer bindings), "" if none.

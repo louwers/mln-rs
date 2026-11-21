@@ -91,17 +91,9 @@ layout(location = 1) in uvec4 in_data;
 
 #property attribute width
 
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
 layout(std140, set = LAYER_SET_INDEX, binding = idLineDrawableUBO) readonly buffer LineDrawableUBOVector {
     LineDrawableUBO drawable_ubo[];
 } drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
 
 layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEvaluatedPropsUBOBlock {
     LineEvaluatedPropsUBO props;
@@ -264,17 +256,9 @@ layout(location = 1) in uvec4 in_data;
 
 #property attribute width
 
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
 layout(std140, set = LAYER_SET_INDEX, binding = idLineDrawableUBO) readonly buffer LineGradientDrawableUBOVector {
     LineGradientDrawableUBO drawable_ubo[];
 } drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
 
 layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEvaluatedPropsUBOBlock {
     LineEvaluatedPropsUBO props;
@@ -443,17 +427,9 @@ layout(location = 1) in uvec4 in_data;
 
 #property attribute pattern_to
 
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
 layout(std140, set = LAYER_SET_INDEX, binding = idLineDrawableUBO) readonly buffer LinePatternDrawableUBOVector {
     LinePatternDrawableUBO drawable_ubo[];
 } drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
 
 layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEvaluatedPropsUBOBlock {
     LineEvaluatedPropsUBO props;
@@ -574,10 +550,6 @@ layout(location = 8) in float frag_floorwidth;
 #endif
 
 layout(location = 0) out vec4 out_color;
-
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
 
 layout(std140, set = LAYER_SET_INDEX, binding = idLineTilePropsUBO) readonly buffer LinePatternTilePropertiesUBOVector {
     LinePatternTilePropsUBO tile_props_ubo[];
@@ -703,17 +675,9 @@ layout(location = 1) in uvec4 in_data;
 
 #property attribute dasharray
 
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
 layout(std140, set = LAYER_SET_INDEX, binding = idLineDrawableUBO) readonly buffer LineSDFDrawableUBOVector {
     LineSDFDrawableUBO drawable_ubo[];
 } drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
 
 layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEvaluatedPropsUBOBlock {
     LineEvaluatedPropsUBO props;
@@ -853,10 +817,6 @@ layout(location = 4) in vec2 frag_tex_b;
 
 layout(location = 0) out vec4 out_color;
 
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
 layout(std140, set = LAYER_SET_INDEX, binding = idLineTilePropsUBO) readonly buffer LineSDFTilePropsUBOVector {
     LineSDFTilePropsUBO tile_props_ubo[];
 } tilePropsVector;
@@ -945,17 +905,9 @@ layout(location = 1) in uvec4 in_data;
 
 #property attribute dasharray
 
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
 layout(std140, set = LAYER_SET_INDEX, binding = idLineDrawableUBO) readonly buffer LineSDFDrawableUBOVector {
     LineSDFDrawableUBO drawable_ubo[];
 } drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
 
 layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEvaluatedPropsUBOBlock {
     LineEvaluatedPropsUBO props;
@@ -1099,10 +1051,6 @@ layout(location = 10) flat in float frag_dash_width;
 #endif
 
 layout(location = 0) out vec4 out_color;
-
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
 
 layout(std140, set = LAYER_SET_INDEX, binding = idLineTilePropsUBO) readonly buffer LineSDFTilePropsUBOVector {
     LineSDFTilePropsUBO tile_props_ubo[];
