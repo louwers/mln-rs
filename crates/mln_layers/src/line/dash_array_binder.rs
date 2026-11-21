@@ -3,7 +3,6 @@
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_render::draw::{SharedAttribute, SharedVertices};
 use mln_render::layer::{InterleavedVertexBuffer, PaintPropertyBinderBase, PatternDependency};
-use mln_render::unstable::{DashAtlas, LinePatternCap};
 use mln_style::evaluated::Evaluated;
 use mln_style::expression::{EvaluationContext, Value};
 use mln_style::property_expression::PropertyExpression;
@@ -11,6 +10,8 @@ use mln_style_types::LineCapType;
 use mln_style_types::image::ImagePositions;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::GeometryTileFeature;
+
+use super::dashes::{DashAtlas, DashCap};
 
 /// The binder of `line-dasharray`. Where the dash array differs by feature,
 /// each feature's vertices hold its pattern's entry in the bucket's
@@ -107,8 +108,7 @@ impl PaintPropertyBinderBase for DashArrayBinder {
         let context =
             EvaluationContext::with_zoom_feature(*zoom, Some(feature)).with_canonical_tile_id(Some(canonical));
         let dasharray = expression.evaluate(&context, default_value.clone());
-        let cap =
-            if cap.evaluate(&context) == LineCapType::Round { LinePatternCap::Round } else { LinePatternCap::Square };
+        let cap = if cap.evaluate(&context) == LineCapType::Round { DashCap::Round } else { DashCap::Square };
         let entry = atlas.add(&dasharray, cap);
         let value = [entry.y, entry.height, entry.width, 0.0];
         buffer.fill(buffer.vertex_count()..length, vertex_offset, bytemuck::cast_slice(&value));

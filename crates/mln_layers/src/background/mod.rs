@@ -6,6 +6,7 @@ mod properties;
 pub mod programs;
 pub mod ubo;
 crate::shaders::shader_sources!();
+mod pattern_atlas;
 pub(crate) mod render_layer;
 
 use mln_style::layer_type::{LayerStyle, LayerTypeInfo, NoProperties, SourceKind, StyleLayerType};

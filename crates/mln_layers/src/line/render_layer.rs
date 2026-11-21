@@ -21,7 +21,7 @@ use mln_render::layer::{
     DrawContext, EvaluatedLayer, FeatureQuery, HitTest, LayerBucket, LayerType, LayerValues, LayoutParameters,
     RenderPass, SourceLayer, UpdateContext,
 };
-use mln_render::unstable::{LineLayoutVertex, LinePatternCap};
+use mln_render::unstable::LineLayoutVertex;
 use mln_style::expression::{Dependency, EvaluationContext, GlobalStateMap, global_state_refs_intersect};
 use mln_style::{PropertyEvaluationParameters, StyleValue as _};
 use mln_style_types::{AlignmentType, LineCapType};
@@ -34,6 +34,7 @@ use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 use super::bucket::{LineBinders, LineBucket};
+use super::dashes::{DashCap, DashTextures};
 use super::programs::{
     ID_LINE_DASH_TEXTURE, ID_LINE_DATA_VERTEX_ATTRIBUTE, ID_LINE_DRAWABLE_UBO, ID_LINE_EVALUATED_PROPS_UBO,
     ID_LINE_IMAGE_TEXTURE, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, ID_LINE_TILE_PROPS_UBO,
@@ -69,9 +70,8 @@ pub struct LineTile {
     line_type: LineType,
     /// The passes the draw draws in.
     pass: RenderPass,
-    /// The ends of the dashes of the bucket, which pick its pattern in the
-    /// line atlas.
-    dash_cap: LinePatternCap,
+    /// The ends of the dashes of the bucket, which pick its dash texture.
+    dash_cap: DashCap,
     /// Gives a pattern draw the texture of the tile's icon atlas.
     atlases: Option<AtlasBinding>,
 }
@@ -114,11 +114,11 @@ fn cast_tlbr(a: [u16; 4]) -> [f32; 4] {
 /// The ends of a bucket's dashes. A dash pattern is shared by the whole
 /// bucket, so a `line-cap` that varies by feature gets square dashes; each
 /// line still gets its own cap at its ends.
-fn dash_pattern_cap(bucket: &LineBucket) -> LinePatternCap {
+fn dash_pattern_cap(bucket: &LineBucket) -> DashCap {
     if bucket.layout.line_cap.constant_or(&LineCapType::Butt) == LineCapType::Round {
-        LinePatternCap::Round
+        DashCap::Round
     } else {
-        LinePatternCap::Square
+        DashCap::Square
     }
 }
 
@@ -158,6 +158,9 @@ pub struct LineState {
     /// Whether the color ramp changed since the draws that read it were
     /// built, which the next update drops.
     color_ramp_changed: bool,
+    /// The textures of the dash patterns of the layer's `line-dasharray`,
+    /// where it doesn't differ by feature.
+    dashes: DashTextures,
 }
 
 impl LineState {
@@ -277,6 +280,7 @@ impl LayerType for Line {
             color_ramp_global_state: None,
             color_ramp_texture: None,
             color_ramp_changed: false,
+            dashes: DashTextures::default(),
         };
         (state, TileDraws::default())
     }
@@ -332,6 +336,7 @@ impl LayerType for Line {
         cx: &mut DrawContext<'_, '_, Line>,
     ) {
         let render_tiles = cx.tiles;
+        state.dashes.upload(gpu, cx.context);
         if std::mem::take(&mut state.color_ramp_changed) {
             // The gradients' draws read the old ramp's texture.
             drawing.clear();
@@ -399,7 +404,8 @@ impl LayerType for Line {
                 };
                 cached
             };
-            if let Some(uniforms) = LineState::uniforms(tile_id.to_unwrapped(), render_data, binders, cached, cx) {
+            let tile = tile_id.to_unwrapped();
+            if let Some(uniforms) = LineState::uniforms(tile, render_data, binders, cached, &state.dashes, cx) {
                 let draw = FrameDraw { pass: cached.pass, clip: true, ..FrameDraw::new(Some(tile_id), cached.id) };
                 state.draw_list.push(draw, uniforms);
             }
@@ -411,11 +417,11 @@ impl LayerType for Line {
         });
     }
 
-    /// Adds the dash patterns of the tiles' buckets to the line atlas, then
-    /// the layer's own, which the encode draws a dashed tile with when its
-    /// bucket has no per-feature patterns.
-    fn update(_state: &mut LineState, _drawing: &mut TileDraws<LineTile>, cx: &mut UpdateContext<'_, '_, Line>) {
-        let (atlases, tiles) = (&mut *cx.atlases, cx.tiles);
+    /// Makes the dash textures of the tiles' buckets, then the layer's own,
+    /// which the encode draws a dashed tile with when its bucket has no
+    /// per-feature patterns.
+    fn update(state: &mut LineState, _drawing: &mut TileDraws<LineTile>, cx: &mut UpdateContext<'_, '_, Line>) {
+        let (dashes, tiles) = (&mut state.dashes, cx.tiles);
         for tile in tiles {
             let Some(bucket) = tile.view() else {
                 continue;
@@ -425,7 +431,7 @@ impl LayerType for Line {
                 continue;
             }
             let cap = dash_pattern_cap(bucket.bucket);
-            atlases.line.add(dasharray.from, dasharray.to, cap);
+            dashes.add(dasharray.from, dasharray.to, cap);
         }
         // A dashed draw asks for the layer's pattern even where it is empty.
         let layer_dasharray = cx.layer.evaluated.paint.line_dasharray.faded();
@@ -442,7 +448,7 @@ impl LayerType for Line {
                 .is_some_and(|binders| binders.line_dasharray.atlas().is_some());
             if dashed && !per_feature {
                 let cap = dash_pattern_cap(bucket.bucket);
-                atlases.line.add(layer_dasharray.from, layer_dasharray.to, cap);
+                dashes.add(layer_dasharray.from, layer_dasharray.to, cap);
             }
         }
     }
@@ -509,8 +515,8 @@ impl LineState {
 
         let has_dasharray =
             !evaluated.line_dasharray.is_constant() || !evaluated.line_dasharray.faded().from.is_empty();
-        // A constant dash array's texture comes from the line atlas, with the
-        // draw's uniforms.
+        // A constant dash array's texture is the layer's, which the draw's
+        // uniforms take.
         let dash_texture = if evaluated.line_dasharray.is_constant() {
             None
         } else {
@@ -612,19 +618,20 @@ impl LineState {
     /// The entries in the layer's storage buffers of `cached`, the draw of
     /// the tile `tile_id` of `tile_bucket`, whose binders are `binders`, in
     /// the frame of `cx`: its matrix, the interpolation of the layer's
-    /// values, and where its patterns are. A dashed draw of the line atlas's
-    /// pattern takes the atlas's texture here; `None` where it has none yet,
-    /// and doesn't draw.
+    /// values, and where its patterns are. A dashed draw of the layer's dash
+    /// array takes its texture in `dashes` here; `None` where there is none
+    /// yet, and doesn't draw.
     fn uniforms(
         tile_id: UnwrappedTileID,
         tile_bucket: LayerBucket<'_, Line>,
         binders: &LineBinders,
         cached: &mut LineTile,
+        dashes: &DashTextures,
         cx: &DrawContext<'_, '_, Line>,
     ) -> Option<LineUniforms> {
         const NEAR_CLIPPED: bool = false;
         const IN_VIEWPORT_PIXEL_UNITS: bool = false;
-        let (layer, context, frame, line_atlas) = (&*cx.layer.evaluated, &*cx.context, &cx.frame, &cx.atlases.line);
+        let (layer, context, frame) = (&*cx.layer.evaluated, &*cx.context, &cx.frame);
         let evaluated = &layer.paint;
         let crossfade = layer.crossfade;
         let state = frame.view;
@@ -733,7 +740,7 @@ impl LineState {
                     }
                 } else {
                     let dasharray = evaluated.line_dasharray.faded();
-                    let dash_pattern = line_atlas.get(dasharray.from, dasharray.to, cached.dash_cap)?;
+                    let dash_pattern = dashes.get(dasharray.from, dasharray.to, cached.dash_cap)?;
                     cached.objects.texture_or_insert_with(dash_texture_id, || dash_pattern.texture().cloned())?;
 
                     let pos_a = dash_pattern.from();

@@ -1,14 +1,19 @@
+//! The atlas of a background layer's patterns.
+
+use std::sync::Arc;
+
 use etagere::{AllocId, BucketedAtlasAllocator, size2};
 use geometry::Point;
 use mln_gfx::gpu::{Gpu, TextureFormat};
+use mln_gfx::texture2d::SamplerState;
+use mln_gfx::types::{TextureFilterType, TextureWrapType};
+use mln_render::draw::{Context, SharedTexture};
+use mln_render::layer::ImageStore;
 use mln_style_types::image::{ImagePosition, Impl as ImageImpl, RectU16};
 use mln_util::hash::HashMap;
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
-
-use crate::gfx::context::Context;
-use crate::gfx::store::SharedTexture;
 
 /// When copied into the atlas texture, image data is padded by one pixel on
 /// each side. Pattern images are padded with a copy of the image data
@@ -19,11 +24,13 @@ const PADDING: u16 = 1;
 struct Pattern {
     alloc_id: AllocId,
     position: ImagePosition,
+    /// The style's image the pattern was packed from.
+    image: Arc<ImageImpl>,
 }
 
 /// Pattern images packed into one texture, each with a padding that wraps
-/// it, which a frame uploads.
-pub struct PatternAtlas {
+/// it, which the layer's draws upload.
+pub(crate) struct PatternAtlas {
     allocator: BucketedAtlasAllocator,
     patterns: HashMap<String, Pattern>,
     atlas_image: PremultipliedImage,
@@ -33,13 +40,6 @@ pub struct PatternAtlas {
 
 impl Default for PatternAtlas {
     fn default() -> Self {
-        PatternAtlas::new()
-    }
-}
-
-impl PatternAtlas {
-    #[must_use]
-    pub(crate) fn new() -> Self {
         PatternAtlas {
             allocator: BucketedAtlasAllocator::new(size2(64, 64)),
             patterns: HashMap::default(),
@@ -48,19 +48,48 @@ impl PatternAtlas {
             dirty: true,
         }
     }
+}
 
+impl PatternAtlas {
     /// Where the pattern `id` is in the atlas, if it holds it.
     #[must_use]
-    pub fn pattern(&self, id: &str) -> Option<ImagePosition> {
+    pub(crate) fn pattern(&self, id: &str) -> Option<ImagePosition> {
         self.patterns.get(id).map(|pattern| pattern.position.clone())
     }
 
-    /// Adds `image` as a pattern, and returns where it is in the atlas;
-    /// `None` if the atlas holds it already or has no room for it.
-    pub fn add_pattern(&mut self, image: &ImageImpl) -> Option<ImagePosition> {
-        if self.patterns.contains_key(&image.id) {
-            return None;
+    /// Drops the patterns whose images `images` no longer has, or has
+    /// replaced with one of another size or SDF flag.
+    pub(crate) fn remove_stale(&mut self, images: &ImageStore) {
+        let PatternAtlas { allocator, patterns, atlas_image, .. } = self;
+        patterns.retain(|id, pattern| {
+            let current = images.image(id).is_some_and(|image| {
+                image.image.size == pattern.image.image.size && image.sdf == pattern.image.sdf
+            });
+            if !current {
+                let b = pattern.position.padded_rect;
+                let _ = PremultipliedImage::clear(
+                    atlas_image,
+                    Point::new(u32::from(b.x), u32::from(b.y)),
+                    Size::new(u32::from(b.w), u32::from(b.h)),
+                );
+                allocator.deallocate(pattern.alloc_id);
+            }
+            current
+        });
+    }
+
+    /// Adds the image `id` of `images` as a pattern, unless the atlas holds
+    /// it already or `images` has no such image.
+    pub(crate) fn add(&mut self, id: &str, images: &ImageStore) {
+        if !self.patterns.contains_key(id)
+            && let Some(image) = images.image(id)
+        {
+            self.add_pattern(image);
         }
+    }
+
+    /// Adds `image` as a pattern; `None` if the atlas has no room for it.
+    fn add_pattern(&mut self, image: &Arc<ImageImpl>) -> Option<()> {
         let width = u16::try_from(image.image.size.width).ok()?.checked_add(PADDING * 2)?;
         let height = u16::try_from(image.image.size.height).ok()?.checked_add(PADDING * 2)?;
 
@@ -98,27 +127,13 @@ impl PatternAtlas {
 
         self.dirty = true;
 
-        let position = ImagePosition::new(bin, image);
-        self.patterns.insert(image.id.clone(), Pattern { alloc_id, position: position.clone() });
-        Some(position)
-    }
-
-    pub(crate) fn remove_pattern(&mut self, id: &str) {
-        if let Some(pattern) = self.patterns.remove(id) {
-            // Clear pattern from the atlas image.
-            let b = pattern.position.padded_rect;
-            let _ = PremultipliedImage::clear(
-                &mut self.atlas_image,
-                Point::new(u32::from(b.x), u32::from(b.y)),
-                Size::new(u32::from(b.w), u32::from(b.h)),
-            );
-
-            self.allocator.deallocate(pattern.alloc_id);
-        }
+        let pattern = Pattern { alloc_id, position: ImagePosition::new(bin, image), image: Arc::clone(image) };
+        self.patterns.insert(image.id.clone(), pattern);
+        Some(())
     }
 
     #[must_use]
-    pub(crate) fn pixel_size(&self) -> Size {
+    fn pixel_size(&self) -> Size {
         let size = self.allocator.size();
         Size::new(size.width as u32, size.height as u32)
     }
@@ -149,12 +164,20 @@ impl PatternAtlas {
         }
     }
 
-    /// Uploads the atlas image to its texture, which is made again when the
-    /// atlas grew since.
+    /// Uploads the atlas image to its texture, first making the texture,
+    /// unless the atlas is unchanged since the last upload.
     pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
         let texture = match &self.texture {
             None => {
-                let texture = context.add_texture_with(|texture| texture.set_format(TextureFormat::Rgba8Unorm));
+                let texture = context.add_texture_with(|texture| {
+                    texture.set_format(TextureFormat::Rgba8Unorm);
+                    texture.set_sampler(SamplerState {
+                        filter: TextureFilterType::Linear,
+                        wrap_u: TextureWrapType::Clamp,
+                        wrap_v: TextureWrapType::Clamp,
+                        ..Default::default()
+                    });
+                });
                 &*self.texture.insert(texture)
             }
             Some(texture) if self.dirty => texture,
@@ -169,18 +192,7 @@ impl PatternAtlas {
 
     /// The atlas's texture, once `upload` made it.
     #[must_use]
-    pub fn texture(&self) -> Option<&SharedTexture> {
+    pub(crate) fn texture(&self) -> Option<&SharedTexture> {
         self.texture.as_ref()
-    }
-
-    #[cfg(test)]
-    #[must_use]
-    pub(crate) fn atlas_image(&self) -> &PremultipliedImage {
-        &self.atlas_image
-    }
-
-    #[must_use]
-    pub(crate) fn is_empty(&self) -> bool {
-        self.patterns.is_empty()
     }
 }

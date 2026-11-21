@@ -4,10 +4,6 @@
 //! [`placement`](crate::placement) module. Anything in either can change or
 //! go in any release.
 //!
-//! - The frame's shared atlases of dash and pattern images ([`Atlases`],
-//!   [`LineAtlas`], [`DashAtlas`], [`PatternAtlas`]), which the engine keeps
-//!   and uploads: a layer type can't yet declare state that the frame's
-//!   layers share.
 //! - The line mesh ([`add_line`]) and line subdivision
 //!   ([`subdivide_vertex_line`]), which the engine's tile debug overlay
 //!   draws its outlines with too.
@@ -33,7 +29,4 @@
 
 pub use crate::gfx::line_mesh::{LineLayoutVertex, LineOptions, LineScratch, add_line};
 pub use crate::globe_tile_mesh::{GlobeMeshData, RawGlobeTileMesh, globe_mesh_data, raw_globe_tile_mesh};
-pub use crate::line_atlas::{DashAtlas, DashEntry, DashPatternTexture, LineAtlas, LinePatternCap, LinePatternPos};
-pub use crate::pattern_atlas::PatternAtlas;
-pub use crate::render_layer::Atlases;
 pub use crate::util::subdivision::subdivide_vertex_line;

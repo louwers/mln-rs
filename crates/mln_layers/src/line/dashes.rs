@@ -1,35 +1,40 @@
-// The line atlas keys its textures by the dash arrays' values themselves
-// (their float bits) and the cap.
+//! The dash patterns of `line-dasharray`, as signed distance fields: the
+//! textures of the layer's dash arrays, and the per-bucket atlas of dash
+//! arrays that differ by feature. Both find a pattern by the dash array's
+//! values themselves (their float bits) and its cap.
 
 use mln_gfx::gpu::{Gpu, TextureFormat};
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
+use mln_render::draw::{Context, SharedTexture};
 use mln_util::image::AlphaImage;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
-use crate::gfx::context::Context;
-use crate::gfx::store::SharedTexture;
-
+/// Where a dash pattern is in a [`DashTexture`]: its length in dash array
+/// units (the texture's width for a solid line), and its middle row and
+/// height as fractions of the texture's height.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct LinePatternPos {
-    pub width: f32,
-    pub height: f32,
-    pub y: f32,
+pub(crate) struct DashPosition {
+    pub(crate) width: f32,
+    pub(crate) height: f32,
+    pub(crate) y: f32,
 }
 
+/// The ends of a pattern's dashes: square, or round for a round
+/// `line-cap`, which takes 15 rows rather than one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum LinePatternCap {
+pub(crate) enum DashCap {
     Square = 0,
     Round = 1,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct DashRange {
-    pub(crate) left: f32,
-    pub(crate) right: f32,
-    pub(crate) is_dash: bool,
-    pub(crate) is_zero_length: bool,
+struct DashRange {
+    left: f32,
+    right: f32,
+    is_dash: bool,
+    is_zero_length: bool,
 }
 
 fn dash_ranges(dasharray: &[f32], stretch: f32) -> Vec<DashRange> {
@@ -134,7 +139,6 @@ fn add_regular_dash(ranges: &mut Vec<DashRange>, y_offset: u32, image: &mut Alph
     let width = image.size.width;
     let last_index = ranges.len() - 1;
     if ranges[0].is_dash == ranges[last_index].is_dash {
-        // `last.left - image.size.width` (float - uint32_t: float)
         ranges[0].left = ranges[last_index].left - width as f32;
         ranges[last_index].right = ranges[0].right + width as f32;
     }
@@ -160,15 +164,10 @@ fn add_regular_dash(ranges: &mut Vec<DashRange>, y_offset: u32, image: &mut Alph
     }
 }
 
-fn add_dash_pattern(
-    image: &mut AlphaImage,
-    y_offset: u32,
-    dasharray: &[f32],
-    pattern_cap: LinePatternCap,
-) -> LinePatternPos {
-    let n: u8 = if pattern_cap == LinePatternCap::Round { 7 } else { 0 };
+fn add_dash_pattern(image: &mut AlphaImage, y_offset: u32, dasharray: &[f32], pattern_cap: DashCap) -> DashPosition {
+    let n: u8 = if pattern_cap == DashCap::Round { 7 } else { 0 };
     let image_height = image.size.height as f32;
-    let pos = |width| LinePatternPos {
+    let pos = |width| DashPosition {
         y: (0.5 + y_offset as f32 + f32::from(n)) / image_height,
         height: (2.0 * f32::from(n) + 1.0) / image_height,
         width,
@@ -192,7 +191,7 @@ fn add_dash_pattern(
     let stretch = image.size.width as f32 / length;
     let mut ranges = dash_ranges(dasharray, stretch);
 
-    if pattern_cap == LinePatternCap::Round {
+    if pattern_cap == DashCap::Round {
         add_round_dash(&ranges, y_offset, stretch, i32::from(n), image);
     } else {
         add_regular_dash(&mut ranges, y_offset, image);
@@ -203,20 +202,20 @@ fn add_dash_pattern(
 
 /// A texture of two dash patterns, a `line-dasharray`'s at the zooms a
 /// frame cross-fades between, and where each is in it.
-pub struct DashPatternTexture {
-    from: LinePatternPos,
-    to: LinePatternPos,
+pub(crate) struct DashTexture {
+    from: DashPosition,
+    to: DashPosition,
     size: Size,
     /// The patterns, until the texture uploads them.
     image: Option<AlphaImage>,
     texture: Option<SharedTexture>,
 }
 
-impl DashPatternTexture {
+impl DashTexture {
     #[must_use]
-    pub(crate) fn new(from: &[f32], to: &[f32], cap: LinePatternCap) -> Self {
+    fn new(from: &[f32], to: &[f32], cap: DashCap) -> Self {
         let patterns_identical = from == to;
-        let pattern_height: u32 = if cap == LinePatternCap::Round { 15 } else { 1 };
+        let pattern_height: u32 = if cap == DashCap::Round { 15 } else { 1 };
         let height: u32 = (if patterns_identical { 1 } else { 2 }) * pattern_height;
 
         // The patterns repeat horizontally, which a texture whose height
@@ -227,11 +226,11 @@ impl DashPatternTexture {
         let from_pos = add_dash_pattern(&mut image, 0, from, cap);
         let to_pos = if patterns_identical { from_pos } else { add_dash_pattern(&mut image, pattern_height, to, cap) };
 
-        DashPatternTexture { from: from_pos, to: to_pos, size: image.size, image: Some(image), texture: None }
+        DashTexture { from: from_pos, to: to_pos, size: image.size, image: Some(image), texture: None }
     }
 
     /// Makes the texture and uploads the patterns to it, unless it did.
-    pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
+    fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
         let Some(image) = self.image.take() else {
             return;
         };
@@ -252,25 +251,25 @@ impl DashPatternTexture {
 
     /// The texture, once `upload` made it.
     #[must_use]
-    pub fn texture(&self) -> Option<&SharedTexture> {
+    pub(crate) fn texture(&self) -> Option<&SharedTexture> {
         self.texture.as_ref()
     }
 
     /// The size of the texture.
     #[must_use]
-    pub fn size(&self) -> Size {
+    pub(crate) fn size(&self) -> Size {
         self.size
     }
 
     /// Where the pattern of the zoom the frame fades from is.
     #[must_use]
-    pub fn from(&self) -> &LinePatternPos {
+    pub(crate) fn from(&self) -> &DashPosition {
         &self.from
     }
 
     /// Where the pattern of the zoom the frame fades to is.
     #[must_use]
-    pub fn to(&self) -> &LinePatternPos {
+    pub(crate) fn to(&self) -> &DashPosition {
         &self.to
     }
 }
@@ -279,10 +278,10 @@ impl DashPatternTexture {
 /// middle, the distance between its first and last rows, and its length in
 /// dash array units.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct DashEntry {
-    pub y: f32,
-    pub height: f32,
-    pub width: f32,
+pub(crate) struct DashEntry {
+    pub(crate) y: f32,
+    pub(crate) height: f32,
+    pub(crate) width: f32,
 }
 
 /// The dash patterns of one bucket's features, for a `line-dasharray` that
@@ -291,13 +290,13 @@ pub struct DashEntry {
 /// is solid. The texture's height is a power of two, as the patterns repeat
 /// horizontally.
 #[derive(Clone, Debug, Default, PartialEq, mln_wire::Wire)]
-pub struct DashAtlas {
+pub(crate) struct DashAtlas {
     image: AlphaImage,
     #[wire(skip)]
     next_row: u32,
     /// The patterns added so far, by dash array (as float bits) and cap.
     #[wire(skip)]
-    entries: Vec<(Vec<u32>, LinePatternCap, DashEntry)>,
+    entries: Vec<(Vec<u32>, DashCap, DashEntry)>,
 }
 
 /// The tallest a [`DashAtlas`] grows; WebGPU guarantees 8192.
@@ -311,7 +310,7 @@ impl DashAtlas {
     /// The pattern of `dasharray` with `cap` ends, added if it isn't yet. A
     /// dash array with fewer than two parts or no length is solid, as is
     /// every pattern once the atlas is full.
-    pub fn add(&mut self, dasharray: &[f32], cap: LinePatternCap) -> DashEntry {
+    pub(crate) fn add(&mut self, dasharray: &[f32], cap: DashCap) -> DashEntry {
         if self.next_row == 0 {
             self.image = AlphaImage::from_vec(Size::new(DASH_ATLAS_WIDTH, 1), vec![255; DASH_ATLAS_WIDTH as usize]);
             self.next_row = 1;
@@ -324,7 +323,7 @@ impl DashAtlas {
         if let Some((_, _, entry)) = self.entries.iter().find(|(k, c, _)| *k == key && *c == cap) {
             return *entry;
         }
-        let rows: u32 = if cap == LinePatternCap::Round { 15 } else { 1 };
+        let rows: u32 = if cap == DashCap::Round { 15 } else { 1 };
         let y_offset = self.next_row;
         let end = y_offset + rows;
         if end > MAX_DASH_ATLAS_HEIGHT {
@@ -349,43 +348,41 @@ impl DashAtlas {
 
     /// The atlas, empty when no feature has been added.
     #[must_use]
-    pub fn image(&self) -> &AlphaImage {
+    pub(crate) fn image(&self) -> &AlphaImage {
         &self.image
     }
 }
 
 /// The dash arrays of a texture, as the bits of their values, and its cap.
-type DashKey = (Vec<u32>, Vec<u32>, LinePatternCap);
+type DashKey = (Vec<u32>, Vec<u32>, DashCap);
 
-fn dash_key(from: &[f32], to: &[f32], cap: LinePatternCap) -> DashKey {
+fn dash_key(from: &[f32], to: &[f32], cap: DashCap) -> DashKey {
     (from.iter().map(|v| v.to_bits()).collect(), to.iter().map(|v| v.to_bits()).collect(), cap)
 }
 
 /// Whether `key` is that of the dash arrays `from` and `to` with `cap`.
-fn is_dash_key(key: &DashKey, from: &[f32], to: &[f32], cap: LinePatternCap) -> bool {
+fn is_dash_key(key: &DashKey, from: &[f32], to: &[f32], cap: DashCap) -> bool {
     let same = |bits: &[u32], values: &[f32]| bits.iter().copied().eq(values.iter().map(|v| v.to_bits()));
     key.2 == cap && same(&key.0, from) && same(&key.1, to)
 }
 
+/// The textures of a layer's dash arrays, one for each pair of patterns a
+/// frame cross-fades between and their cap, made as the layer's updates
+/// ask for them.
 #[derive(Default)]
-pub struct LineAtlas {
+pub(crate) struct DashTextures {
     /// The textures, in the order they were made, with their keys.
-    textures: Vec<(DashKey, DashPatternTexture)>,
+    textures: Vec<(DashKey, DashTexture)>,
     /// The indexes of the textures that need uploading.
     needs_upload: Vec<usize>,
 }
 
-impl LineAtlas {
-    #[must_use]
-    pub(crate) fn new() -> Self {
-        Self::default()
-    }
-
+impl DashTextures {
     /// The texture of the dash patterns `from` and `to` with `cap` ends,
-    /// made if the atlas has none, which the next upload uploads.
-    pub fn add(&mut self, from: &[f32], to: &[f32], cap: LinePatternCap) -> &DashPatternTexture {
+    /// made if there is none yet, which the next upload uploads.
+    pub(crate) fn add(&mut self, from: &[f32], to: &[f32], cap: DashCap) -> &DashTexture {
         let index = self.textures.iter().position(|(key, _)| is_dash_key(key, from, to, cap)).unwrap_or_else(|| {
-            self.textures.push((dash_key(from, to, cap), DashPatternTexture::new(from, to, cap)));
+            self.textures.push((dash_key(from, to, cap), DashTexture::new(from, to, cap)));
             self.needs_upload.push(self.textures.len() - 1);
             self.textures.len() - 1
         });
@@ -393,22 +390,17 @@ impl LineAtlas {
     }
 
     /// The texture of the dash patterns `from` and `to` with `cap` ends, if
-    /// the atlas has it.
+    /// it was made.
     #[must_use]
-    pub fn get(&self, from: &[f32], to: &[f32], cap: LinePatternCap) -> Option<&DashPatternTexture> {
+    pub(crate) fn get(&self, from: &[f32], to: &[f32], cap: DashCap) -> Option<&DashTexture> {
         self.textures.iter().find(|(key, _)| is_dash_key(key, from, to, cap)).map(|(_, texture)| texture)
     }
 
-    /// Uploads the textures to the GPU to be available when we need it.
+    /// Makes the GPU textures of the textures made since the last upload.
     pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
         for index in self.needs_upload.drain(..) {
             self.textures[index].1.upload(gpu, context);
         }
-    }
-
-    #[must_use]
-    pub(crate) fn is_empty(&self) -> bool {
-        self.textures.is_empty()
     }
 }
 
@@ -419,8 +411,8 @@ mod tests {
     #[test]
     fn a_dash_array_of_fewer_than_two_parts_or_no_length_is_solid() {
         for dasharray in [&[][..], &[3.0], &[0.0, 0.0]] {
-            for (cap, rows) in [(LinePatternCap::Square, 1), (LinePatternCap::Round, 15)] {
-                let texture = DashPatternTexture::new(&[2.0, 1.0], dasharray, cap);
+            for (cap, rows) in [(DashCap::Square, 1), (DashCap::Round, 15)] {
+                let texture = DashTexture::new(&[2.0, 1.0], dasharray, cap);
                 assert_eq!(texture.from().width, 3.0);
                 assert_eq!(texture.to().width, 256.0, "{dasharray:?}");
                 let image = texture.image.as_ref().unwrap();

@@ -73,9 +73,7 @@
 //! the renderer's thread.
 //!
 //! The types a layer type draws with, which the hooks name, are the
-//! [draw services](crate::draw). The frame's [`Atlases`] of dash and
-//! pattern images, which the engine keeps and uploads, are unstable: a
-//! layer type can't yet declare state that the frame's layers share.
+//! [draw services](crate::draw).
 
 use std::sync::Arc;
 
@@ -112,7 +110,6 @@ pub use crate::paint_property_binder::{
 };
 pub use crate::paint_property_statistics::StatisticValue;
 use crate::placement::{BucketKey, NewPlacement};
-use crate::render_layer::Atlases;
 pub use crate::render_layer::LayerBucket;
 pub use crate::render_pass::RenderPass;
 pub use crate::render_source::TileOrder;
@@ -208,8 +205,8 @@ pub trait LayerType: StyleLayerType {
 
     /// The frame's update of a layer the frame draws, once the engine found
     /// its tiles and kept their entries in the drawing's tile map. The
-    /// layer adds what its draws need to the frame's atlases here; a layer
-    /// without a source picks the tiles it keeps.
+    /// layer prepares in its state what its draws need, such as the images
+    /// it packs; a layer without a source picks the tiles it keeps.
     fn update(_state: &mut Self::State, _drawing: &mut Self::Drawing, _cx: &mut UpdateContext<'_, '_, Self>) {}
 
     /// Makes a layer's draws of the frame, in the frame's encode, once the
@@ -438,7 +435,7 @@ impl<T: LayerType> LayerValues<T> {
     }
 }
 
-/// What a layer's update reads of the frame, and the atlases it adds to.
+/// What a layer's update reads of the frame.
 pub struct UpdateContext<'a, 'f, T: LayerType> {
     /// The layer's tiles of the frame, in the order of its type's
     /// [`TILE_ORDER`](LayerType::TILE_ORDER), each with what it shows the
@@ -452,8 +449,6 @@ pub struct UpdateContext<'a, 'f, T: LayerType> {
     pub update_parameters: &'a UpdateParameters,
     /// The images of the style.
     pub images: &'a ImageStore,
-    /// The atlases the layers' draws share, which the encode uploads.
-    pub atlases: &'a mut Atlases,
     /// The tile store's tiles of the layer's source; `None` for a layer
     /// without a source, or a source without tiles.
     pub(crate) source_tiles: Option<SourceKey>,
@@ -498,8 +493,6 @@ pub struct DrawContext<'a, 'f, T: LayerType> {
     pub passes: RenderPass,
     /// The projection the layer's draws are built for.
     pub projection_variant: ProjectionVariant,
-    /// The atlases the layers' draws share.
-    pub atlases: &'a Atlases,
     /// The renderer's GPU state, whose stores keep the draws' objects.
     pub context: &'a mut Context,
     /// The frame the draws are made for.

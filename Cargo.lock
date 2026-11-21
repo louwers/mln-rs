@@ -2832,6 +2832,7 @@ version = "0.0.13"
 dependencies = [
  "bytemuck",
  "earcut",
+ "etagere",
  "geo-types",
  "glam",
  "mln-rs",

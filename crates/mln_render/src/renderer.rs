@@ -536,11 +536,11 @@ impl Encoder {
     /// the layers' draws of `frame` on `gpu`, draws them into `image` and
     /// submits them. It reads the style, the sources, the tiles each layer
     /// draws and the placement as the update left them, and changes only
-    /// what draws them on the GPU: the atlases' textures, the tiles'
-    /// buckets, which it uploads and binds to the atlases' textures, the
+    /// what draws them on the GPU: the tiles' atlas's textures, the tiles'
+    /// buckets, which it uploads and binds to the atlas's textures, the
     /// layers' drawing and the renderer's GPU state.
     ///
-    /// It uploads the atlases and the tiles' buckets; then the draw update
+    /// It uploads the tiles' atlas and buckets; then the draw update
     /// makes the layers' draws of the frame, the draw upload uploads what
     /// they bind, and the draw section encodes the passes and submits them.
     fn encode(
@@ -595,9 +595,9 @@ impl Encoder {
         );
 
         // - UPLOAD --------------------------------------------------------
-        // The atlases first, whose textures the tiles bind, then the tiles'
-        // buckets.
-        orchestrator.upload_atlases(gpu, parameters.context);
+        // The tiles' atlas first, whose textures the tiles bind, then the
+        // tiles' buckets.
+        orchestrator.upload_tile_atlas(gpu, parameters.context);
         orchestrator.upload_sources(parameters.context);
 
         // - DRAW UPDATE ---------------------------------------------------
