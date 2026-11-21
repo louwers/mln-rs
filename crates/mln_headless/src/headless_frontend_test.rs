@@ -2,7 +2,7 @@
 // tree tests this through test/api/*.test.cpp and the render tests), and of
 // the frames the frontend draws when asked.
 
-use mln_map::{CameraOptions, MapMode, MapOptions};
+use mln_map::{CameraOptions, MapMode, MapOptions, View};
 use mln_util::pool::Pool;
 
 use super::*;
@@ -506,6 +506,201 @@ fn a_continuous_map_over_terrain_goes_idle_on_the_ground() {
         .collect();
     assert_eq!(vec![mln_renderer::RenderMode::Partial], modes);
     assert!(!events.iter().any(|event| matches!(event, mln_map::MapEvent::Idle)));
+}
+
+/// Seen from zoom 15 at a pitch of 15°, which shows the ground under the
+/// eye, Terrarium DEM tiles of 256 px.
+const HELD_DEM_STYLE: &str = r#"{
+    "version": 8,
+    "center": [10, 45],
+    "zoom": 15,
+    "pitch": 15,
+    "terrain": {"source": "dem"},
+    "sources": {"dem": {"type": "raster-dem", "tiles": ["dem/{z}/{x}/{y}.png"], "encoding": "terrarium", "tileSize": 256, "maxzoom": 15}},
+    "layers": [{"id": "background", "type": "background", "paint": {"background-color": "red"}}]
+}"#;
+
+/// The DEM of [`HELD_DEM_STYLE`]: 0 m high, but for the tiles finer than
+/// the terrain's culling tiles that hold the point `held` (Web Mercator at
+/// zoom 0), which wait until [`release`](Self::release), and are 3000 m
+/// high from then on, but for a corner.
+#[derive(Default)]
+struct HeldDem {
+    held: Mutex<Option<glam::DVec2>>,
+    waiting: Mutex<Vec<mln_storage::Responder>>,
+    released: std::sync::atomic::AtomicBool,
+}
+
+impl HeldDem {
+    /// A tile `height` m high, but for its south-east pixel at sea level,
+    /// which keeps the ground under the eye from culling the tile.
+    fn terrarium(height: u16) -> mln_storage::Response {
+        let mut dem = PremultipliedImage::new(Size::new(16, 16));
+        let [hi, lo] = (height + 32768).to_be_bytes();
+        for pixel in dem.data.as_chunks_mut::<4>().0 {
+            pixel.copy_from_slice(&[hi, lo, 0, 255]);
+        }
+        let [hi, lo] = 32768u16.to_be_bytes();
+        dem.data[255 * 4..].copy_from_slice(&[hi, lo, 0, 255]);
+        let mut response = mln_storage::Response::new();
+        response.data = Some(Arc::new(mln_image::encode_png(&dem)));
+        response
+    }
+
+    /// Answers the tiles that wait, and every later request.
+    fn release(&self) {
+        self.released.store(true, std::sync::atomic::Ordering::SeqCst);
+        for responder in self.waiting.lock().drain(..) {
+            responder.send(Self::terrarium(3000));
+        }
+    }
+
+    fn waits(&self) -> bool {
+        !self.waiting.lock().is_empty()
+    }
+}
+
+impl mln_storage::FileSource for HeldDem {
+    fn load(&self, resource: &mln_storage::Resource, responder: mln_storage::Responder) {
+        let tile = resource.tile_data.as_ref().expect("a tile");
+        let tiles = f64::from(1u32 << tile.z);
+        let holds = self.held.lock().is_some_and(|point| {
+            tile.z > 5
+                && (point.x * tiles).floor() == f64::from(tile.x)
+                && (point.y * tiles).floor() == f64::from(tile.y)
+        });
+        if !holds {
+            responder.send(Self::terrarium(0));
+        } else if self.released.load(std::sync::atomic::Ordering::SeqCst) {
+            responder.send(Self::terrarium(3000));
+        } else {
+            self.waiting.lock().push(responder);
+        }
+    }
+
+    fn can_request(&self, _resource: &mln_storage::Resource) -> bool {
+        true
+    }
+}
+
+/// A map of [`HELD_DEM_STYLE`] in `mode` whose camera stands where its eye
+/// is over DEM tiles south of the ones under the center, which the terrain
+/// draws flat while they wait ([`HeldDem`]).
+fn held_dem_map(mode: MapMode, size: Size, pool: &Pool) -> (Map, Arc<HeldDem>) {
+    let dem = Arc::new(HeldDem::default());
+    let options = MapOptions { map_mode: mode, size, ..Default::default() };
+    let mut map = Map::with_file_source(Arc::<HeldDem>::clone(&dem) as _, options, pool).unwrap();
+    map.load_style_json(HELD_DEM_STYLE);
+    map.process_events();
+    let world = |location: &mln_util::geo::LatLng| {
+        let point = mln_util::projection::Projection::project(location, 1.0 / mln_util::constants::TILE_SIZE_D);
+        glam::DVec2::new(point.x, point.y)
+    };
+    let view = map.transform_state().view();
+    let offset = view.eye_position().truncate() - world(&view.center(mln_util::geo::WrapMode::Unwrapped));
+    // The eye a tenth of the way down a tile of zoom 15 whose row is even,
+    // which starts its tile of zoom 14 too: the center, north of the eye,
+    // is on neither.
+    let rows = f64::from(1u32 << 15);
+    let eye_y = ((world(&view.center(mln_util::geo::WrapMode::Unwrapped)).y * rows / 2.0).floor() * 2.0 + 0.1) / rows;
+    let center = glam::DVec2::new(world(&view.center(mln_util::geo::WrapMode::Unwrapped)).x, eye_y - offset.y);
+    let center = mln_util::projection::Projection::unproject(
+        &mln_util::geometry::Point::new(center.x, center.y),
+        1.0 / mln_util::constants::TILE_SIZE_D,
+        mln_util::geo::WrapMode::Wrapped,
+    )
+    .unwrap();
+    map.jump_to(&CameraOptions { center: Some(center), ..Default::default() });
+    *dem.held.lock() = Some(map.transform_state().view().eye_position().truncate());
+    (map, dem)
+}
+
+/// Draws `map`'s updates and runs the queue until `done` says so or
+/// nothing happens for a while. Returns whether `done` did, and the view of
+/// the last update the renderer drew a frame of.
+fn draw_until(
+    map: &mut Map,
+    frontend: &mut HeadlessFrontend,
+    run_loop: &Queue<()>,
+    mut done: impl FnMut(&mut Map) -> bool,
+) -> (bool, Option<View>) {
+    let mut drawn = None;
+    let mut quiet = 0;
+    for _ in 0..10_000 {
+        map.process_events();
+        if done(map) {
+            return (true, drawn);
+        }
+        let latest = map.update_reader().latest();
+        let frames = frontend.rendering_stats().num_frames;
+        let drew = frontend.render_update();
+        if frontend.rendering_stats().num_frames > frames {
+            drawn = latest.map(|update| update.parameters.view.clone());
+        }
+        if drew || run_loop.run_once(&mut ()) {
+            quiet = 0;
+        } else {
+            quiet += 1;
+            if quiet > 50 {
+                return (false, drawn);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
+    (false, drawn)
+}
+
+/// A gesture held still over terrain lifts its camera over ground that
+/// loads under its eye ([`held_dem_map`]), though the ground at the center
+/// stays as it was. The map completes a frame in `mode` (goes idle, or ends
+/// its still image) only once it drew the camera that the lift moved: the
+/// frame drawn before the lift, which stood on the ground at the center as
+/// the new one does, isn't complete. The held gesture doesn't keep the map
+/// from completing one.
+fn held_gesture_completes_a_frame_of_its_lifted_camera(mode: MapMode) {
+    let size = Size::new(512, 512);
+    let run_loop = Queue::new();
+    let pool = Pool::new(4);
+    let mut frontend = HeadlessFrontend::new(size, 1.0, &run_loop, &pool).expect("a headless frontend");
+    let (mut map, dem) = held_dem_map(mode, size, &pool);
+    frontend.attach(&mut map);
+    if mode == MapMode::Static {
+        map.render_still().unwrap();
+    }
+    let completed = |map: &mut Map| match mode {
+        MapMode::Static => map.take_still_image().is_some(),
+        _ => map.drain_events().iter().any(|event| matches!(event, mln_map::MapEvent::Idle)),
+    };
+    let (ended, _) = draw_until(&mut map, &mut frontend, &run_loop, completed);
+    assert!(!ended, "the map completed a frame while a DEM tile waits");
+    assert!(dem.waits(), "the DEM tile under the eye is asked for");
+    let eye = map.transform_state().view().eye_position();
+    let ground = map.ground().expect("the ground");
+    assert_eq!(Some(0.0), ground.surface_at(eye.truncate()), "the tile under the eye draws flat");
+    assert!(eye.z < 3000.0, "the eye at {eye}");
+
+    map.apply_camera_delta(&mln_map::CameraDelta { phase: mln_map::GesturePhase::Begin, ..Default::default() })
+        .unwrap();
+    map.drain_events();
+    dem.release();
+    let (ended, drawn) = draw_until(&mut map, &mut frontend, &run_loop, completed);
+    assert!(ended, "the map never completed a frame");
+    let view = map.transform_state().view();
+    assert!(map.snapshot().gesture_in_progress);
+    assert_eq!(Some(3000.0), map.ground().unwrap().surface_at(eye.truncate()));
+    assert!(view.eye_position().z > 3000.0, "the lift, to {}", view.eye_position());
+    let altitudes = (drawn.as_ref().map(View::center_altitude), view.center_altitude());
+    assert!(drawn.as_ref() == Some(view), "the complete frame is of the camera at {altitudes:?} m");
+}
+
+#[test]
+fn a_held_gesture_goes_idle_only_on_a_frame_of_its_lifted_camera() {
+    held_gesture_completes_a_frame_of_its_lifted_camera(MapMode::Continuous);
+}
+
+#[test]
+fn a_held_gesture_ends_a_still_only_on_a_frame_of_its_lifted_camera() {
+    held_gesture_completes_a_frame_of_its_lifted_camera(MapMode::Static);
 }
 
 /// A hillshade lit from the viewport, as its lights are by default, turns

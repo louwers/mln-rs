@@ -157,17 +157,18 @@
 //! - **Stills.** An update carries the snapshot the map's camera stands on
 //!   ([`UpdateParameters::elevation`]), and the map answers each new one
 //!   with an update that carries it. A frame is loaded only for an update
-//!   whose camera wouldn't move on the renderer's current snapshot: the
-//!   two give the same height and floor ([`Elevation::at`] and
-//!   [`Elevation::min_at`]) at the view's center, which is all a camera at
-//!   rest reads of them, or there is neither, without terrain. A camera
-//!   reads more (the surface under its eye and near plane, rays through
-//!   the screen, the ground at a command's end) only while a command or a
-//!   gesture moves it, which no still waits on; a gesture's end moves the
-//!   center onto the ground before the camera comes to rest. A still image
-//!   draws only such an update's frame, and a continuous frame of any
-//!   other reports itself partial, so it doesn't make the map idle. A
-//!   snapshot that changes only away from the center holds no frame back.
+//!   whose camera wouldn't move on the renderer's current snapshot. A
+//!   camera at rest reads only the height and floor ([`Elevation::at`] and
+//!   [`Elevation::min_at`]) at the view's center, so for it the two
+//!   snapshots need only agree there, or there is neither, without
+//!   terrain; a snapshot that changes only away from its center holds no
+//!   frame back. A camera that a gesture or a command moves
+//!   ([`UpdateParameters::camera_moving`]), even a gesture held still,
+//!   reads more (the surface under its eye and near plane, rays through the
+//!   screen, the ground at a command's end), so its update must carry the
+//!   current snapshot itself. A still image draws only such an update's
+//!   frame, and a continuous frame of any other reports itself partial, so
+//!   it doesn't make the map idle.
 
 mod cover;
 mod dem_textures;
@@ -213,10 +214,10 @@ fn skirt_length(length: TerrainSkirtLength, zoom: f64) -> Option<f64> {
     }
 }
 
-/// Whether a camera whose center is at `center` stands on the ground
-/// `seen` as it would on `drawn`: both give the same height and floor
-/// there, which is all the map's camera takes from the ground, or neither
-/// is there. Ground that differs elsewhere doesn't move the camera.
+/// Whether a camera at rest whose center is at `center` stands on the
+/// ground `seen` as it would on `drawn`: both give the same height and
+/// floor there, which is all such a camera takes from the ground, or
+/// neither is there. Ground that differs elsewhere doesn't move it.
 fn stands_alike(seen: Option<&dyn Elevation>, drawn: Option<&dyn Elevation>, center: LatLng) -> bool {
     match (seen, drawn) {
         (None, None) => true,
@@ -347,8 +348,11 @@ impl RenderTerrain {
     /// which another renderer may have drawn.
     ///
     /// Returns whether the update's camera stands as it would on the ground
-    /// the tiles now draw (`stands_alike`), as it does on none while
-    /// terrain doesn't draw.
+    /// the tiles now draw, as it does on none while terrain doesn't draw: a
+    /// camera at rest where the two agree at its center (`stands_alike`),
+    /// and one that a gesture or a command moves
+    /// ([`UpdateParameters::camera_moving`]), which reads the ground away
+    /// from its center too, only on that ground itself.
     pub(crate) fn bind<'a>(
         &mut self,
         dem: impl FnOnce(&str) -> Option<&'a SourceTiles>,
@@ -374,7 +378,9 @@ impl RenderTerrain {
         if new || !alike {
             events.push(RendererEvent::TerrainElevation(Some(Arc::<TerrainElevation>::clone(drawn))));
         }
-        alike
+        // The map answers the ground it was told of with an update that
+        // carries it, so a held gesture's camera comes to stand on it.
+        alike && (!parameters.camera_moving || seen.is_some_and(|seen| std::ptr::addr_eq(seen, &**drawn)))
     }
 
     /// How the surface of the last update's cover draws.

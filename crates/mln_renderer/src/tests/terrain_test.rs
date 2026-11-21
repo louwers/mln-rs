@@ -283,6 +283,8 @@ struct TerrainLoad {
     /// Whether the last update's camera stood on the terrain's current
     /// ground.
     grounded: bool,
+    /// Whether a gesture or a command moves the updates' camera.
+    camera_moving: bool,
 }
 
 impl TerrainLoad {
@@ -317,6 +319,7 @@ impl TerrainLoad {
             events: Vec::new(),
             seen: None,
             grounded: false,
+            camera_moving: false,
         }
     }
 
@@ -332,6 +335,7 @@ impl TerrainLoad {
         crate::tests::update(&mut self.store);
         let parameters = UpdateParameters {
             elevation: self.seen.clone(),
+            camera_moving: self.camera_moving,
             ..update_parameters(self.style.clone(), &self.transform, MapMode::Static)
         };
         let (store, render_source) = (&self.store, &self.render_source);
@@ -823,6 +827,32 @@ fn an_update_stands_on_the_current_ground_when_it_carries_its_height_and_floor()
     load.seen = None;
     load.update();
     assert!(load.grounded);
+}
+
+/// The camera of a gesture or a command reads the ground away from its
+/// center too (under its eye and near plane, along rays): its update stands
+/// on the terrain's current ground only when it carries that ground itself,
+/// not other ground of the same height and floor at the center. The terrain
+/// tells the map of its current ground again only for ground that differs
+/// at the center, as for a camera at rest.
+#[test]
+fn a_moving_camera_stands_on_the_current_ground_only_when_it_carries_it() {
+    let mut load = TerrainLoad::new((0, 14), 1.0);
+    load.camera_moving = true;
+    load.frame();
+    load.answer(|_| Some(terrarium_png(100)));
+    let current = load.ground_events().pop().flatten().expect("the ground");
+    load.seen = Some(Arc::clone(&current));
+    load.frame();
+    assert!(load.grounded);
+
+    load.seen = Some(Arc::new(Uniform { at: Some(100.0), min_at: Some(100.0) }));
+    load.frame();
+    assert!(!load.grounded, "other ground of the same height and floor at the center");
+    assert!(load.ground_events().is_empty());
+    load.camera_moving = false;
+    load.frame();
+    assert!(load.grounded, "at rest");
 }
 
 /// A camera far below raised ground looks over it, which culls every tile;
