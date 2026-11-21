@@ -146,6 +146,7 @@ enum_value_factory!(
     mln_style_types::RasterResamplingType,
     mln_style_types::ResamplingType,
     mln_style_types::SymbolAnchorType,
+    mln_style_types::SymbolHeightAnchorType,
     mln_style_types::SymbolPlacementType,
     mln_style_types::SymbolZOrderType,
     mln_style_types::TextJustifyType,

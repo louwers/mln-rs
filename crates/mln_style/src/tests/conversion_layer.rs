@@ -234,3 +234,29 @@ fn viewport_glyph_only_for_text_rotation_alignment() {
         );
     }
 }
+
+/// `symbol-height-anchor` parses as a constant or a zoom expression, and
+/// evaluates to `ground` where a layer leaves it out.
+#[test]
+fn symbol_height_anchor_parses_and_evaluates() {
+    use mln_style_types::SymbolHeightAnchorType;
+
+    use crate::layers::Symbol;
+    use crate::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
+
+    let evaluate = |layout: &str, zoom: f32| {
+        let src = format!(r#"{{"id": "symbol", "type": "symbol", "source": "s", "layout": {{{layout}}}}}"#);
+        let layer = parse_layer(&src).expect("layer");
+        let layout = style_of::<Symbol>(&layer).layout.evaluate(&PropertyEvaluationParameters::new(zoom));
+        *layout.symbol_height_anchor.uniform()
+    };
+    assert_eq!(SymbolHeightAnchorType::Ground, evaluate("", 10.0));
+    assert_eq!(SymbolHeightAnchorType::Absolute, evaluate(r#""symbol-height-anchor": "absolute""#, 10.0));
+    let step = r#""symbol-height-anchor": ["step", ["zoom"], "ground", 12, "absolute"]"#;
+    assert_eq!(SymbolHeightAnchorType::Ground, evaluate(step, 10.0));
+    assert_eq!(SymbolHeightAnchorType::Absolute, evaluate(step, 13.0));
+    assert!(
+        parse_layer(r#"{"id": "s", "type": "symbol", "source": "s", "layout": {"symbol-height-anchor": "sky"}}"#)
+            .is_none()
+    );
+}

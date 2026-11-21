@@ -113,6 +113,18 @@ pub enum SymbolPlacementType {
     LineCenter,
 }
 
+/// `symbol-height-anchor`: what `symbol-height-offset` is measured from.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, mln_wire::Wire)]
+#[repr(u8)]
+pub enum SymbolHeightAnchorType {
+    /// The ground under the symbol: the terrain's height there, or sea level
+    /// without terrain.
+    #[default]
+    Ground,
+    /// Sea level.
+    Absolute,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, mln_wire::Wire)]
 #[repr(u8)]
 pub enum SymbolZOrderType {
@@ -339,6 +351,11 @@ style_spec_names!(SymbolAnchorType {
     BottomRight => "bottom-right",
 });
 
+style_spec_names!(SymbolHeightAnchorType {
+    Ground => "ground",
+    Absolute => "absolute",
+});
+
 style_spec_names!(SymbolZOrderType {
     Auto => "auto",
     ViewportY => "viewport-y",
@@ -434,6 +451,7 @@ uninterpolated_enums!(
     RotateAnchorType,
     CirclePitchScaleType,
     SymbolPlacementType,
+    SymbolHeightAnchorType,
     SymbolZOrderType,
     AlignmentType,
     TextRotationAlignmentType,
