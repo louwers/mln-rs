@@ -90,14 +90,6 @@ pub enum TranslateAnchorType {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, mln_wire::Wire)]
 #[repr(u8)]
-pub enum RotateAnchorType {
-    #[default]
-    Map,
-    Viewport,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, mln_wire::Wire)]
-#[repr(u8)]
 pub enum CirclePitchScaleType {
     #[default]
     Map,
@@ -299,11 +291,6 @@ style_spec_names!(HillshadeIlluminationAnchorType {
     Viewport => "viewport",
 });
 
-style_spec_names!(RotateAnchorType {
-    Map => "map",
-    Viewport => "viewport",
-});
-
 style_spec_names!(CirclePitchScaleType {
     Map => "map",
     Viewport => "viewport",
@@ -431,7 +418,6 @@ uninterpolated_enums!(
     HillshadeIlluminationAnchorType,
     HillshadeMethodType,
     TranslateAnchorType,
-    RotateAnchorType,
     CirclePitchScaleType,
     SymbolPlacementType,
     SymbolZOrderType,
