@@ -3,17 +3,19 @@
 //! MSL 2.4, fast math unless the program's table turns it off, the
 //! `ProgramParameters` defines, a
 //! `HAS_UNIFORM_u_<name>` define per property passed as a uniform, and
-//! `PROJECTION_GLOBE` for the globe variant. Also checks that the UBO ids and
-//! sizes the MSL declares are the renderer's, and that the shaders' pipelines
-//! build with the vertex layouts their tables describe, in both projection
-//! variants.
+//! `PROJECTION_GLOBE` for the globe variant and `TERRAIN` for the terrain
+//! one. Also checks that the UBO ids and sizes the MSL declares are the
+//! renderer's, and that the shaders' pipelines build with the vertex layouts
+//! their tables describe, in each projection variant.
 
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
 use std::mem::size_of;
 
 use mln_gfx::gfx_types::AttributeDataType;
-use mln_gfx::shaders::program::{GLOBE_DEFINE, Program};
+use mln_gfx::projection_variant::ProjectionVariant;
+use mln_gfx::shaders::program::{GLOBE_DEFINE, Program, TERRAIN_DEFINE};
+use mln_gfx::shaders::programs::projection_variants;
 use mln_gfx::shaders::shader_defines::*;
 use mln_gfx::shaders::*;
 use objc2::rc::Retained;
@@ -32,9 +34,10 @@ fn sources() -> impl Iterator<Item = (&'static Program, &'static ShaderSource)> 
     BUILT_INS.iter().copied()
 }
 
-/// The projection variants of a program: its name, and whether it defines
-/// `PROJECTION_GLOBE`.
-const PROJECTIONS: [(&str, bool); 2] = [("Mercator", false), ("globe", true)];
+/// The projection variants of `program`, by name.
+fn projections(program: &Program) -> impl Iterator<Item = (String, ProjectionVariant)> {
+    projection_variants(program).iter().map(|&variant| (format!("{variant:?}"), variant))
+}
 
 fn device() -> Id<dyn MTLDevice> {
     MTLCreateSystemDefaultDevice().expect("no Metal device")
@@ -87,15 +90,21 @@ fn uniform_properties(text: &str) -> BTreeSet<String> {
     names
 }
 
-/// ProgramParameters(1.0, overdraw), the globe define if `globe`, and a
+/// ProgramParameters(1.0, overdraw), the define of `projection`, and a
 /// uniform define per name.
-fn defines<'a>(overdraw: bool, globe: bool, uniforms: impl IntoIterator<Item = &'a String>) -> Vec<(String, String)> {
+fn defines<'a>(
+    overdraw: bool,
+    projection: ProjectionVariant,
+    uniforms: impl IntoIterator<Item = &'a String>,
+) -> Vec<(String, String)> {
     let mut defines = vec![("DEVICE_PIXEL_RATIO".to_owned(), "1.0".to_owned())];
     if overdraw {
         defines.push(("OVERDRAW_INSPECTOR".to_owned(), String::new()));
     }
-    if globe {
-        defines.push((GLOBE_DEFINE.to_owned(), String::new()));
+    match projection {
+        ProjectionVariant::Mercator => {}
+        ProjectionVariant::Globe => defines.push((GLOBE_DEFINE.to_owned(), String::new())),
+        ProjectionVariant::Terrain => defines.push((TERRAIN_DEFINE.to_owned(), String::new())),
     }
     defines.extend(uniforms.into_iter().map(|name| (format!("HAS_UNIFORM_u_{name}"), String::new())));
     defines
@@ -142,16 +151,16 @@ fn every_shader_source_compiles() {
             "{}: the properties its MSL reads from uniforms",
             program.name
         );
-        for (projection, globe) in PROJECTIONS {
+        for (projection, variant) in projections(program) {
             // Every property per vertex, every property as a uniform, each one
             // alone as a uniform, and the overdraw inspector.
             let mut variants = vec![
-                ("no uniforms".to_owned(), defines(false, globe, [])),
-                ("all uniforms".to_owned(), defines(false, globe, &properties)),
-                ("overdraw inspector".to_owned(), defines(true, globe, [])),
-                ("overdraw inspector, all uniforms".to_owned(), defines(true, globe, &properties)),
+                ("no uniforms".to_owned(), defines(false, variant, [])),
+                ("all uniforms".to_owned(), defines(false, variant, &properties)),
+                ("overdraw inspector".to_owned(), defines(true, variant, [])),
+                ("overdraw inspector, all uniforms".to_owned(), defines(true, variant, &properties)),
             ];
-            variants.extend(properties.iter().map(|name| (format!("uniform {name}"), defines(false, globe, [name]))));
+            variants.extend(properties.iter().map(|name| (format!("uniform {name}"), defines(false, variant, [name]))));
             for (variant, defines) in variants {
                 match compile(&device, &text, &defines, source.fast_math) {
                     Ok(library) => {
@@ -201,6 +210,7 @@ fn ubo_ids(program: &Program, source: &ShaderSource) -> Vec<(&'static str, usize
             &[
                 ("idCircleDrawableUBO", ID_CIRCLE_DRAWABLE_UBO),
                 ("idCircleEvaluatedPropsUBO", ID_CIRCLE_EVALUATED_PROPS_UBO),
+                ("idGroundDrawableUBO", ID_GROUND_DRAWABLE_UBO),
             ],
             "circleUBOCount",
         ),
@@ -252,6 +262,7 @@ fn ubo_ids(program: &Program, source: &ShaderSource) -> Vec<(&'static str, usize
             &[
                 ("idHeatmapDrawableUBO", ID_HEATMAP_DRAWABLE_UBO),
                 ("idHeatmapEvaluatedPropsUBO", ID_HEATMAP_EVALUATED_PROPS_UBO),
+                ("idGroundDrawableUBO", ID_GROUND_DRAWABLE_UBO),
             ],
             "heatmapUBOCount",
         ),
@@ -385,6 +396,7 @@ const UBO_SIZES: &[(&str, usize)] = &[
     ("TerrainDrawableUBO", size_of::<terrain_ubo::TerrainDrawableUBO>()),
     ("TerrainPropsUBO", size_of::<terrain_ubo::TerrainPropsUBO>()),
     ("TerrainFogUBO", size_of::<terrain_ubo::TerrainFogUBO>()),
+    ("GroundDrawableUBO", size_of::<terrain_ubo::GroundDrawableUBO>()),
 ];
 
 /// True if `text` declares the struct or union `name`.
@@ -410,8 +422,8 @@ fn ubo_ids_and_sizes_are_the_renderers() {
             }
         }
         text.push_str(&asserts);
-        for (projection, globe) in PROJECTIONS {
-            if let Err(error) = compile(&device, &text, &defines(false, globe, []), source.fast_math) {
+        for (projection, variant) in projections(program) {
+            if let Err(error) = compile(&device, &text, &defines(false, variant, []), source.fast_math) {
                 failures.push(format!("{} ({projection}):\n{error}", program.name));
             }
         }
@@ -501,10 +513,10 @@ fn pipelines_build_with_the_tables_vertex_layout() {
             ("table formats", vertex_descriptor(source, |data_type| data_type)),
             ("single-value formats", vertex_descriptor(source, narrow)),
         ];
-        let variants = PROJECTIONS.iter().flat_map(|&(projection, globe)| {
+        let variants = projections(program).flat_map(|(projection, variant)| {
             [
-                (format!("{projection}, no uniforms"), defines(false, globe, [])),
-                (format!("{projection}, all uniforms"), defines(false, globe, &properties)),
+                (format!("{projection}, no uniforms"), defines(false, variant, [])),
+                (format!("{projection}, all uniforms"), defines(false, variant, &properties)),
             ]
         });
         for (variant, defines) in variants {

@@ -46,12 +46,17 @@ pub struct Property {
 /// The define that compiles a program's globe variant.
 pub const GLOBE_DEFINE: &str = "PROJECTION_GLOBE";
 
+/// The define that compiles a program's terrain variant
+/// ([`ProjectionVariant::Terrain`]), which reads the ground's DEM.
+pub const TERRAIN_DEFINE: &str = "TERRAIN";
+
 impl Program {
     /// The key of the variant compiled with `parameters` that reads
     /// `uniforms`, properties of the program, from their uniforms, for
     /// `variant`'s projection. It has the parameters' defines
     /// (`DEVICE_PIXEL_RATIO=<ratio>`), a `HAS_UNIFORM_u_<name>` define for
-    /// each of `uniforms`, and the globe's define for its variant.
+    /// each of `uniforms`, and the globe's or the terrain's define for those
+    /// variants.
     #[must_use]
     pub fn variant_key<'a>(
         &'static self,
@@ -64,8 +69,12 @@ impl Program {
             .iter()
             .map(|(name, value)| if value.is_empty() { name.clone() } else { format!("{name}={value}") });
         let uniforms = uniforms.into_iter().map(|property| format!("HAS_UNIFORM_u_{}", property.name));
-        let globe = (variant == ProjectionVariant::Globe).then(|| GLOBE_DEFINE.to_owned());
-        ShaderKey::new(self, parameters.chain(uniforms).chain(globe))
+        let projection = match variant {
+            ProjectionVariant::Mercator => None,
+            ProjectionVariant::Globe => Some(GLOBE_DEFINE.to_owned()),
+            ProjectionVariant::Terrain => Some(TERRAIN_DEFINE.to_owned()),
+        };
+        ShaderKey::new(self, parameters.chain(uniforms).chain(projection))
     }
 }
 

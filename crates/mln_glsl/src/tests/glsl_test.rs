@@ -1,18 +1,19 @@
 //! Parses and validates every program's GLSL with naga, as the backends
 //! compose it: `#version 450`, the `ProgramParameters` defines, a
 //! `HAS_UNIFORM_u_<name>` define per property passed as a uniform,
-//! `PROJECTION_GLOBE` for the globe variant, then the stage's prelude, the
-//! shader's prelude and the stage's source. Also checks that the buffers,
-//! textures, samplers and vertex inputs the GLSL declares are the ones the
-//! descriptor set layouts and the attribute and texture tables describe, that
-//! the buffers have the sizes of what the renderer binds there, and that the
-//! stages of a shader agree on what passes between them, in both projection
-//! variants.
+//! `PROJECTION_GLOBE` for the globe variant and `TERRAIN` for the terrain
+//! one, then the stage's prelude, the shader's prelude and the stage's
+//! source. Also checks that the buffers, textures, samplers and vertex inputs
+//! the GLSL declares are the ones the descriptor set layouts and the attribute
+//! and texture tables describe, that the buffers have the sizes of what the
+//! renderer binds there, and that the stages of a shader agree on what passes
+//! between them, in each projection variant.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::mem::size_of;
 
 use mln_gfx::gfx_types::AttributeDataType;
+use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::background_layer_ubo::{
     BackgroundDrawableUnionUBO, BackgroundPatternPropsUBO, BackgroundPropsUBO,
 };
@@ -32,13 +33,14 @@ use mln_gfx::shaders::layer_composite_ubo::LayerCompositeUBO;
 use mln_gfx::shaders::layer_ubo::{GlobalPaintParamsUBO, ProjectionUBO};
 use mln_gfx::shaders::line_layer_ubo::{LineDrawableUnionUBO, LineEvaluatedPropsUBO, LineTilePropsUnionUBO};
 use mln_gfx::shaders::program::Program;
+use mln_gfx::shaders::programs::projection_variants;
 use mln_gfx::shaders::raster_layer_ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
 use mln_gfx::shaders::shader_defines::*;
 use mln_gfx::shaders::sky_ubo::{AtmospherePropsUBO, SkyPropsUBO};
 use mln_gfx::shaders::symbol_layer_ubo::{
     CollisionDrawableUBO, CollisionTilePropsUBO, SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO,
 };
-use mln_gfx::shaders::terrain_ubo::{TerrainDrawableUBO, TerrainFogUBO, TerrainPropsUBO};
+use mln_gfx::shaders::terrain_ubo::{GroundDrawableUBO, TerrainDrawableUBO, TerrainFogUBO, TerrainPropsUBO};
 use naga::{AddressSpace, ArraySize, Binding, Interpolation, Module, ScalarKind, StorageAccess, TypeInner};
 
 use crate::front_end::parse;
@@ -117,7 +119,7 @@ fn module(program: &Program, source: &ShaderSource, stage: Stage, defines: &str)
 
 // Every stage parses and validates, with every property per vertex, every
 // property as a uniform, each property alone as a uniform, and with the
-// overdraw inspector, in both projections.
+// overdraw inspector, in each projection.
 #[test]
 fn every_stage_validates() {
     let mut failures = Vec::new();
@@ -168,10 +170,11 @@ impl Buffer {
 /// The buffers of each shader, with the size of what the renderer binds: a
 /// uniform buffer's struct, or an element of a storage buffer's vector (the
 /// union of the layer's drawable structs where it has several, a word of a
-/// vertex buffer).
+/// vertex buffer). A terrain variant declares its ground too.
 fn buffers(program: &Program) -> Vec<(Buffer, usize)> {
     use Buffer::{DrawableUniform, DrawableVertex, Global, LayerStorage, LayerUniform};
     let projection = (LayerStorage(ID_PROJECTION_UBO), size_of::<ProjectionUBO>());
+    let ground = (LayerStorage(ID_GROUND_DRAWABLE_UBO), size_of::<GroundDrawableUBO>());
     let mut buffers = vec![(Global(ID_GLOBAL_PAINT_PARAMS_UBO), size_of::<GlobalPaintParamsUBO>())];
     let own: Vec<(Buffer, usize)> = match program.name {
         "AtmosphereShader" => vec![(LayerUniform(ID_ATMOSPHERE_PROPS_UBO), size_of::<AtmospherePropsUBO>())],
@@ -189,6 +192,7 @@ fn buffers(program: &Program) -> Vec<(Buffer, usize)> {
             (LayerStorage(ID_CIRCLE_DRAWABLE_UBO), size_of::<CircleDrawableUBO>()),
             projection,
             (LayerUniform(ID_CIRCLE_EVALUATED_PROPS_UBO), size_of::<CircleEvaluatedPropsUBO>()),
+            ground,
         ],
         "ClippingMaskProgram" => vec![(DrawableUniform(ID_PROJECTION_UBO), size_of::<ProjectionUBO>())],
         "CollisionBoxShader" | "CollisionCircleShader" => vec![
@@ -246,6 +250,7 @@ fn buffers(program: &Program) -> Vec<(Buffer, usize)> {
             (LayerStorage(ID_HEATMAP_DRAWABLE_UBO), size_of::<HeatmapDrawableUBO>()),
             projection,
             (LayerUniform(ID_HEATMAP_EVALUATED_PROPS_UBO), size_of::<HeatmapEvaluatedPropsUBO>()),
+            ground,
         ],
         "HeatmapTextureShader" => {
             vec![(LayerUniform(ID_HEATMAP_TEXTURE_PROPS_UBO), size_of::<HeatmapTexturePropsUBO>())]
@@ -396,8 +401,18 @@ fn resources_are_in_the_descriptor_set_layouts() {
 
     let mut failures = Vec::new();
     for (program, source) in programs() {
-        let table: BTreeSet<u32> = source.textures.iter().map(|texture| image_texture_binding(texture.index)).collect();
+        let stands = projection_variants(program).contains(&ProjectionVariant::Terrain);
         for variant in variants(program, false) {
+            // Of a standing layer's program, only the terrain variant reads
+            // the ground's DEM.
+            let reads =
+                |id: usize| !stands || variant.projection == ProjectionVariant::Terrain || id != ID_GROUND_DEM_TEXTURE;
+            let table: BTreeSet<u32> = source
+                .textures
+                .iter()
+                .filter(|texture| reads(texture.id))
+                .map(|texture| image_texture_binding(texture.index))
+                .collect();
             let mut declared = BTreeSet::new();
             for stage in STAGES {
                 let mut fail = |message: String| {

@@ -46,6 +46,103 @@
 
 use crate::program::GlslShaderSource;
 
+/// The height rule of `mln_util::dem`, over the DEM tile a draw reads: its
+/// RGBA8 texels behind a one-texel border, decoded by a `TerrainProps`. A
+/// macro, so that `concat!` puts it in the vertex stages that read the DEM:
+/// a fragment stage would need a sampler for the texture. The surface's
+/// vertex stage has it, and so does each standing layer's terrain variant's
+/// (`standing_ground`), which reads the same texture binding.
+macro_rules! ground_height {
+    () => {
+        r"
+
+struct TerrainProps {
+    vec4 unpack;
+    float unpack_scale;
+    float exaggeration;
+    float skirt_length;
+    float pad0;
+};
+
+layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 2) uniform texture2D ground_dem_texture;
+
+// The height in meters of the DEM's bordered texel at `texel`, clamped to the
+// texture, decoded by `props`.
+float ground_texel_height(const ivec2 texel, const TerrainProps props) {
+    const ivec2 last = textureSize(ground_dem_texture, 0) - 1;
+    const vec3 rgb = round(texelFetch(ground_dem_texture, clamp(texel, ivec2(0), last), 0).rgb * 255.0);
+    const vec4 unpack = props.unpack;
+    return (rgb.r * unpack.x + rgb.g * unpack.y + rgb.b * unpack.z + unpack.w) * props.unpack_scale;
+}
+
+// The height in meters, exaggerated, at `pos` in tile units of a tile that
+// reads its DEM at `dem_coords`: the DEM uv's scale and offset, then the
+// DEM's width in pixels, 0 for flat ground.
+float ground_height(const vec2 pos, const vec4 dem_coords, const TerrainProps props) {
+    const float dim = dem_coords.w;
+    if (dim == 0.0) {
+        return 0.0;
+    }
+    const vec2 coord = (pos / 8192.0 * dem_coords.x + dem_coords.yz) * dim + 0.5;
+    const vec2 first = floor(coord);
+    const vec2 f = coord - first;
+    const ivec2 texel = ivec2(first);
+    const float tl = ground_texel_height(texel, props);
+    const float tr = ground_texel_height(texel + ivec2(1, 0), props);
+    const float bl = ground_texel_height(texel + ivec2(0, 1), props);
+    const float br = ground_texel_height(texel + ivec2(1, 1), props);
+    const float top = tl * (1.0 - f.x) + tr * f.x;
+    const float bottom = bl * (1.0 - f.x) + br * f.x;
+    return (top * (1.0 - f.y) + bottom * f.y) * props.exaggeration;
+}
+"
+    };
+}
+
+/// The surface's and the probe's uniform block and height rule.
+macro_rules! terrain_props {
+    () => {
+        concat!(
+            ground_height!(),
+            r"
+layout(std140, set = LAYER_SET_INDEX, binding = idTerrainPropsUBO) uniform TerrainPropsUBO {
+    TerrainProps props;
+} terrain_props;
+"
+        )
+    };
+}
+
+/// What a standing layer's terrain variant's vertex stage reads of the
+/// ground, within `#ifdef TERRAIN`: `ground_height`, and each draw's
+/// `GroundDrawableUBO`, which `standing_height` reads.
+macro_rules! standing_ground {
+    () => {
+        concat!(
+            "\n#ifdef TERRAIN\n",
+            ground_height!(),
+            r"
+struct GroundDrawableUBO {
+    vec4 dem_coords;
+    TerrainProps props;
+};
+
+layout(std140, set = LAYER_SET_INDEX, binding = idDrawableReservedFragmentOnlyUBO) readonly buffer GroundDrawableUBOVector {
+    GroundDrawableUBO ground_ubo[];
+} groundVector;
+
+// The height of the ground in meters at `pos`, in tile units of the tile of
+// the draw whose entries are at `index`.
+float standing_height(const vec2 pos, const int index) {
+    const GroundDrawableUBO ground = groundVector.ground_ubo[index];
+    return ground_height(pos, ground.dem_coords, ground.props);
+}
+#endif
+"
+        )
+    };
+}
+
 /// The start of every vertex stage.
 pub(crate) const PRELUDE_VERTEX: &str = r#"
 
@@ -548,7 +645,9 @@ pub(crate) const CIRCLE_SHADER_PRELUDE: &str = r"
 
 pub(crate) const CIRCLE_SHADER: GlslShaderSource = GlslShaderSource {
     prelude: CIRCLE_SHADER_PRELUDE,
-    vertex: r"
+    vertex: concat!(
+        standing_ground!(),
+        r"
 
 layout(location = 0) in ivec2 in_position;
 
@@ -677,6 +776,14 @@ void main() {
 #ifdef PROJECTION_GLOBE
     const ProjectionUBO projection = projectionVector.projection_ubo[constant.ubo_index];
 #endif
+    // The circle stands on the ground under its center, as it draws,
+    // translated.
+#ifdef TERRAIN
+    const vec2 translate = projectionVector.projection_ubo[constant.ubo_index].translate;
+    const float ele = standing_height(circle_center + translate, constant.ubo_index);
+#else
+    const float ele = 0.0;
+#endif
     if (props.pitch_with_map != 0) {
 #ifdef PROJECTION_GLOBE
         const vec3 center_vector = projectToSphere(circle_center + projection.translate, vec2(0.0, 0.0), projection);
@@ -696,7 +803,7 @@ void main() {
             const vec4 projected_center = interpolateProjection(circle_center, center_vector, 0.0, projection);
             angle_scale *= (radius + stroke_width) * (projected_center.w / paintParams.camera_to_center_distance);
 #else
-            const vec4 projected_center = drawable.matrix * vec4(circle_center, 0, 1);
+            const vec4 projected_center = drawable.matrix * vec4(circle_center, ele, 1);
 #endif
             corner_position += scaled_extrude * (radius + stroke_width) *
                                (projected_center.w / paintParams.camera_to_center_distance);
@@ -706,7 +813,7 @@ void main() {
         const vec3 corner_vector = globeRotateVector(center_vector, extrude * angle_scale);
         gl_Position = interpolateProjection(corner_position, corner_vector, 0.0, projection);
 #else
-        gl_Position = drawable.matrix * vec4(corner_position, 0, 1);
+        gl_Position = drawable.matrix * vec4(corner_position, ele, 1);
 #endif
     } else {
 #ifdef PROJECTION_GLOBE
@@ -715,7 +822,7 @@ void main() {
             gl_Position.xy = vec2(10000.0);
         }
 #else
-        gl_Position = drawable.matrix * vec4(circle_center, 0, 1);
+        gl_Position = drawable.matrix * vec4(circle_center, ele, 1);
 #endif
 
         const float factor = props.scale_with_map != 0 ? paintParams.camera_to_center_distance : gl_Position.w;
@@ -757,7 +864,8 @@ void main() {
     frag_stroke_opacity = unpack_mix_float(in_stroke_opacity, drawable.stroke_opacity_t);
 #endif
 }
-",
+"
+    ),
     fragment: r"
 
 layout(location = 0) in vec2 frag_extrude;
@@ -3393,7 +3501,9 @@ pub(crate) const HEATMAP_SHADER_PRELUDE: &str = r"
 
 pub(crate) const HEATMAP_SHADER: GlslShaderSource = GlslShaderSource {
     prelude: HEATMAP_SHADER_PRELUDE,
-    vertex: r#"
+    vertex: concat!(
+        standing_ground!(),
+        r#"
 
 // Effective "0" in the kernel density texture to adjust the kernel size to;
 // this empirically chosen number minimizes artifacts on overlapping kernels
@@ -3492,7 +3602,14 @@ void main() {
     const vec3 corner_vector = globeRotateVector(center_vector, extrude * radius * drawable.globe_extrude_scale);
     gl_Position = interpolateProjection(circle_center + scaled_extrude, corner_vector, 0.0, projectionVector.projection_ubo[constant.ubo_index]);
 #else
-    gl_Position = drawable.matrix * vec4(floor(in_position * 0.5) + scaled_extrude, 0, 1);
+    // The kernel lies flat on the ground under its center.
+    const vec2 center = floor(in_position * 0.5);
+#ifdef TERRAIN
+    const float ele = standing_height(center, constant.ubo_index);
+#else
+    const float ele = 0.0;
+#endif
+    gl_Position = drawable.matrix * vec4(center + scaled_extrude, ele, 1);
 #endif
 
 #if !defined(HAS_UNIFORM_u_weight)
@@ -3500,7 +3617,8 @@ void main() {
 #endif
     frag_extrude = extrude;
 }
-"#,
+"#
+    ),
     fragment: r"
 
 // Gaussian kernel coefficient: 1 / sqrt(2 * PI)
@@ -3718,57 +3836,6 @@ void main() {
 ",
 };
 
-/// The height rule of `mln_util::dem`, over the DEM tile a terrain tile
-/// reads: its RGBA8 texels behind a one-texel border, decoded by `props`
-/// (`terrain_props`). A macro, so that `concat!` puts it in the vertex stages
-/// that read the DEM: a fragment stage would need a sampler for the texture.
-macro_rules! terrain_elevation {
-    () => {
-        r"
-
-layout(std140, set = LAYER_SET_INDEX, binding = idTerrainPropsUBO) uniform TerrainPropsUBO {
-    vec4 unpack;
-    float unpack_scale;
-    float exaggeration;
-    float skirt_length;
-    float pad0;
-} terrain_props;
-
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D dem_texture;
-
-// The height in meters of the DEM's bordered texel at `texel`, clamped to the
-// texture.
-float terrain_texel_height(const ivec2 texel) {
-    const ivec2 last = textureSize(dem_texture, 0) - 1;
-    const vec3 rgb = round(texelFetch(dem_texture, clamp(texel, ivec2(0), last), 0).rgb * 255.0);
-    const vec4 unpack = terrain_props.unpack;
-    return (rgb.r * unpack.x + rgb.g * unpack.y + rgb.b * unpack.z + unpack.w) * terrain_props.unpack_scale;
-}
-
-// The height in meters, exaggerated, at `pos` in tile units of a tile that
-// reads its DEM at `dem_coords`: the DEM uv's scale and offset, then the
-// DEM's width in pixels, 0 for flat ground.
-float terrain_elevation(const vec2 pos, const vec4 dem_coords) {
-    const float dim = dem_coords.w;
-    if (dim == 0.0) {
-        return 0.0;
-    }
-    const vec2 coord = (pos / 8192.0 * dem_coords.x + dem_coords.yz) * dim + 0.5;
-    const vec2 first = floor(coord);
-    const vec2 f = coord - first;
-    const ivec2 texel = ivec2(first);
-    const float tl = terrain_texel_height(texel);
-    const float tr = terrain_texel_height(texel + ivec2(1, 0));
-    const float bl = terrain_texel_height(texel + ivec2(0, 1));
-    const float br = terrain_texel_height(texel + ivec2(1, 1));
-    const float top = tl * (1.0 - f.x) + tr * f.x;
-    const float bottom = bl * (1.0 - f.x) + br * f.x;
-    return (top * (1.0 - f.y) + bottom * f.y) * terrain_props.exaggeration;
-}
-"
-    };
-}
-
 pub(crate) const TERRAIN_SHADER_PRELUDE: &str = r"
 
 #define idTerrainDrawableUBO    idDrawableReservedVertexOnlyUBO
@@ -3785,7 +3852,7 @@ pub(crate) const TERRAIN_SHADER_PRELUDE: &str = r"
 pub(crate) const TERRAIN_SHADER: GlslShaderSource = GlslShaderSource {
     prelude: TERRAIN_SHADER_PRELUDE,
     vertex: concat!(
-        terrain_elevation!(),
+        terrain_props!(),
         r"
 
 // x and y in tile units, whether the vertex is a skirt's lower edge, 0.
@@ -3814,8 +3881,8 @@ void main() {
     const TerrainDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
     const vec2 pos = vec2(in_pos.xy);
     const float skirt = float(in_pos.z);
-    const float height = terrain_elevation(pos, drawable.dem_coords);
-    gl_Position = drawable.matrix * vec4(pos, height - skirt * terrain_props.skirt_length, 1.0);
+    const float height = ground_height(pos, drawable.dem_coords, terrain_props.props);
+    gl_Position = drawable.matrix * vec4(pos, height - skirt * terrain_props.props.skirt_length, 1.0);
     frag_drape_pos = pos / 8192.0;
     const mat4 m = drawable.matrix;
     frag_view_depth = m[0].w * pos.x + m[1].w * pos.y + m[2].w * height + m[3].w;
@@ -3883,7 +3950,7 @@ void main() {
 pub(crate) const TERRAIN_PROBE_SHADER: GlslShaderSource = GlslShaderSource {
     prelude: TERRAIN_SHADER_PRELUDE,
     vertex: concat!(
-        terrain_elevation!(),
+        terrain_props!(),
         r"
 
 // Clip x and y, then where the height is read, in tile units.
@@ -3894,7 +3961,7 @@ layout(location = 1) in vec4 in_dem_coords;
 layout(location = 0) flat out float frag_height;
 
 void main() {
-    frag_height = terrain_elevation(in_pos.zw, in_dem_coords);
+    frag_height = ground_height(in_pos.zw, in_dem_coords, terrain_props.props);
     gl_Position = vec4(in_pos.xy, 0.0, 1.0);
 }
 "

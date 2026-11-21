@@ -154,6 +154,16 @@ pub const ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE: usize = 0;
 pub const ID_VERTEX_TEXEL_TEXTURE: usize = 0;
 pub const ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE: usize = 0;
 
+// --- the ground (port-only): what the terrain variants of the standing
+// layers' programs read of the DEM under them.
+/// Each draw's `GroundDrawableUBO`, which the vertex stage reads: the slot
+/// that the circle, heatmap and fill extrusion programs leave free.
+pub const ID_GROUND_DRAWABLE_UBO: usize = ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO; // SSBO
+/// The DEM texture of a draw's ground, which the vertex stage reads texel by
+/// texel: the last texture slot, which no standing layer's program samples,
+/// and the surface's DEM too, so that one prelude declares it.
+pub const ID_GROUND_DEM_TEXTURE: usize = MAX_TEXTURE_COUNT_PER_SHADER - 1;
+
 // --- terrain: a tile's grid, its DEM and the texture draped over it.
 /// A grid vertex: x and y in tile units, whether it is a skirt's lower edge,
 /// and 0.
@@ -162,7 +172,7 @@ pub const ID_TERRAIN_DRAWABLE_UBO: usize = ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO;
 pub const ID_TERRAIN_PROPS_UBO: usize = DRAWABLE_RESERVED_UBO_COUNT; // packed
 /// The terrain's fog, which only the surface's program reads.
 pub const ID_TERRAIN_FOG_UBO: usize = ID_TERRAIN_PROPS_UBO + 1; // packed
-pub const ID_TERRAIN_DEM_TEXTURE: usize = 0;
+pub const ID_TERRAIN_DEM_TEXTURE: usize = ID_GROUND_DEM_TEXTURE;
 pub const ID_TERRAIN_DRAPE_TEXTURE: usize = 1;
 
 // --- terrain probe (port-only): the conformance case's probes of the height

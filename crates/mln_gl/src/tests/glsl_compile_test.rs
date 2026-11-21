@@ -1,7 +1,7 @@
 #![cfg(not(target_arch = "wasm32"))]
 //! Compiles and links every built-in program's GLSL on an OpenGL ES 3.0
 //! context and on a desktop OpenGL one, through `GlGpu`, with the keys of
-//! the renderer's variants: in both projection variants, with every property
+//! the renderer's variants: in each projection variant, with every property
 //! the program declares read per vertex and with every one read from its
 //! uniform. Also checks each program against its tables:
 //! every uniform block is as large as the UBO the renderer writes for it,
@@ -12,6 +12,8 @@ use std::collections::BTreeSet;
 use mln_gfx::RendererBackend as _;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
+use mln_gfx::shaders::programs::projection_variants;
+use mln_gfx::shaders::shader_defines::ID_GROUND_DEM_TEXTURE;
 use mln_util::hash::HashSet;
 
 use crate::shaders::glsl_sources::PRELUDE;
@@ -173,7 +175,8 @@ fn every_program_links_and_matches_its_tables(backend: &mut RendererBackend) {
         if !program.properties.is_empty() {
             property_sets.push(program.properties);
         }
-        for variant in [ProjectionVariant::Mercator, ProjectionVariant::Globe] {
+        let stands = projection_variants(program).contains(&ProjectionVariant::Terrain);
+        for &variant in projection_variants(program) {
             for (i, &property_set) in property_sets.iter().enumerate() {
                 let what = format!("{} ({variant:?}, {})", program.name, ["attributes", "uniforms"][i]);
                 let key = program.variant_key(&parameters, property_set, variant);
@@ -211,7 +214,10 @@ fn every_program_links_and_matches_its_tables(backend: &mut RendererBackend) {
                 if i == 0 {
                     assert!(!locations.is_empty(), "{what}: no vertex attributes");
                 }
-                for info in source.textures {
+                // Only the terrain variant of a standing layer's program reads
+                // the ground's DEM.
+                let reads = |id: usize| variant == ProjectionVariant::Terrain || !stands || id != ID_GROUND_DEM_TEXTURE;
+                for info in source.textures.iter().filter(|info| reads(info.id)) {
                     assert!(program.textures.contains(&info.id), "{what}: no sampler {}", info.name);
                 }
             }

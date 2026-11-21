@@ -2,6 +2,84 @@
 
 use super::shader_source::WgslShaderSource;
 
+/// The height rule of `mln_util::dem`, over the DEM tile a draw reads: its
+/// RGBA8 texels behind a one-texel border, decoded by a `TerrainPropsUBO`.
+/// The surface's prelude has it, and so does each standing layer's terrain
+/// variant (`standing_ground`), which reads the same texture binding.
+macro_rules! ground_height {
+    () => {
+        r"
+struct TerrainPropsUBO {
+    unpack: vec4<f32>,
+    unpack_scale: f32,
+    exaggeration: f32,
+    skirt_length: f32,
+    pad0: f32,
+};
+
+@group(1) @binding(5) var ground_dem_texture: texture_2d<f32>;
+
+// The height in meters of the DEM's bordered texel at `texel`, clamped to
+// the texture, decoded by `props`.
+fn ground_texel_height(texel: vec2<i32>, props: TerrainPropsUBO) -> f32 {
+    let last = vec2<i32>(textureDimensions(ground_dem_texture)) - 1;
+    let rgb = round(textureLoad(ground_dem_texture, clamp(texel, vec2<i32>(0), last), 0).rgb * 255.0);
+    let unpack = props.unpack;
+    return (rgb.r * unpack.x + rgb.g * unpack.y + rgb.b * unpack.z + unpack.w) * props.unpack_scale;
+}
+
+// The height in meters, exaggerated, at `pos` in tile units of a tile that
+// reads its DEM at `dem_coords`: the DEM uv's scale and offset, then the
+// DEM's width in pixels, 0 for flat ground.
+fn ground_height(pos: vec2<f32>, dem_coords: vec4<f32>, props: TerrainPropsUBO) -> f32 {
+    let dim = dem_coords.w;
+    if (dim == 0.0) {
+        return 0.0;
+    }
+    let coord = (pos / 8192.0 * dem_coords.x + dem_coords.yz) * dim + 0.5;
+    let first = floor(coord);
+    let f = coord - first;
+    let texel = vec2<i32>(first);
+    let tl = ground_texel_height(texel, props);
+    let tr = ground_texel_height(texel + vec2<i32>(1, 0), props);
+    let bl = ground_texel_height(texel + vec2<i32>(0, 1), props);
+    let br = ground_texel_height(texel + vec2<i32>(1, 1), props);
+    let top = tl * (1.0 - f.x) + tr * f.x;
+    let bottom = bl * (1.0 - f.x) + br * f.x;
+    return (top * (1.0 - f.y) + bottom * f.y) * props.exaggeration;
+}
+"
+    };
+}
+
+/// What a standing layer's terrain variant reads of the ground, within
+/// `#ifdef TERRAIN`: `ground_height`, and each draw's `GroundDrawableUBO`,
+/// which `standing_height` reads.
+macro_rules! standing_ground {
+    () => {
+        concat!(
+            "\n#ifdef TERRAIN\n",
+            ground_height!(),
+            r"
+struct GroundDrawableUBO {
+    dem_coords: vec4<f32>,
+    props: TerrainPropsUBO,
+};
+
+@group(0) @binding(3) var<storage, read> groundVector: array<GroundDrawableUBO>;
+
+// The height of the ground in meters at `pos`, in tile units of the draw's
+// tile.
+fn standing_height(pos: vec2<f32>) -> f32 {
+    let ground = groundVector[globalIndex.value];
+    return ground_height(pos, ground.dem_coords, ground.props);
+}
+#endif
+"
+        )
+    };
+}
+
 pub(crate) const ATMOSPHERE_SHADER: WgslShaderSource = WgslShaderSource {
     vertex: Some(
         r"
@@ -364,7 +442,8 @@ fn main() -> @location(0) vec4<f32> {
 };
 
 pub(crate) const CIRCLE_SHADER: WgslShaderSource = WgslShaderSource {
-    vertex: Some(
+    vertex: Some(concat!(
+        standing_ground!(),
         r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
 override DEVICE_PIXEL_RATIO: f32 = 1.0;
@@ -467,6 +546,13 @@ fn main(in: VertexInput) -> VertexOutput {
     let radius_with_stroke = radius + stroke_width;
 
     let projection = projectionVector[globalIndex.value];
+    // The circle stands on the ground under its center, as it draws,
+    // translated.
+#ifdef TERRAIN
+    let ele = standing_height(circle_center + projection.translate);
+#else
+    let ele = 0.0;
+#endif
     var position: vec4<f32>;
     if (pitch_with_map) {
 #ifdef PROJECTION_GLOBE
@@ -484,7 +570,7 @@ fn main(in: VertexInput) -> VertexOutput {
             let projected_center = interpolateProjection(circle_center, center_vector, 0.0, projection);
             angle_scale *= radius_with_stroke * (projected_center.w / paintParams.camera_to_center_distance);
 #else
-            let projected_center = drawable.matrix * vec4<f32>(circle_center, 0.0, 1.0);
+            let projected_center = drawable.matrix * vec4<f32>(circle_center, ele, 1.0);
 #endif
             corner_position += scaled_extrude * radius_with_stroke *
                                (projected_center.w / paintParams.camera_to_center_distance);
@@ -493,7 +579,7 @@ fn main(in: VertexInput) -> VertexOutput {
         let corner_vector = globeRotateVector(center_vector, extrude * angle_scale);
         position = interpolateProjection(corner_position, corner_vector, 0.0, projection);
 #else
-        position = drawable.matrix * vec4<f32>(corner_position, 0.0, 1.0);
+        position = drawable.matrix * vec4<f32>(corner_position, ele, 1.0);
 #endif
     } else {
 #ifdef PROJECTION_GLOBE
@@ -503,7 +589,7 @@ fn main(in: VertexInput) -> VertexOutput {
             position.y = 10000.0;
         }
 #else
-        position = drawable.matrix * vec4<f32>(circle_center, 0.0, 1.0);
+        position = drawable.matrix * vec4<f32>(circle_center, ele, 1.0);
 #endif
         var factor = position.w;
         if (scale_with_map) {
@@ -521,8 +607,8 @@ fn main(in: VertexInput) -> VertexOutput {
 
     return out;
 }
-",
-    ),
+"
+    )),
     fragment: Some(
         r"
 struct FragmentInput {
@@ -2435,7 +2521,8 @@ fn main() -> @location(0) vec4<f32> {
 };
 
 pub(crate) const HEATMAP_SHADER: WgslShaderSource = WgslShaderSource {
-    vertex: Some(
+    vertex: Some(concat!(
+        standing_ground!(),
         r"
 struct VertexInput {
     @location(0) position: vec2<i32>,
@@ -2510,12 +2597,18 @@ fn main(in: VertexInput) -> VertexOutput {
     let scaled_extrude = extrude * radius * drawable.extrude_scale;
 
     let base = floor(pos * 0.5);
+    // The kernel lies flat on the ground under its center.
+#ifdef TERRAIN
+    let ele = standing_height(base);
+#else
+    let ele = 0.0;
+#endif
 #ifdef PROJECTION_GLOBE
     let center_vector = projectToSphere(base, vec2<f32>(0.0, 0.0), projectionVector[globalIndex.value]);
     let corner_vector = globeRotateVector(center_vector, extrude * radius * drawable.globe_extrude_scale);
     out.position = interpolateProjection(base + scaled_extrude, corner_vector, 0.0, projectionVector[globalIndex.value]);
 #else
-    out.position = drawable.matrix * vec4<f32>(base + scaled_extrude, 0.0, 1.0);
+    out.position = drawable.matrix * vec4<f32>(base + scaled_extrude, ele, 1.0);
 #endif
 #ifndef HAS_UNIFORM_u_weight
     out.weight = weight;
@@ -2524,8 +2617,8 @@ fn main(in: VertexInput) -> VertexOutput {
 
     return out;
 }
-",
-    ),
+"
+    )),
     fragment: Some(
         r"
 struct FragmentInput {
@@ -2684,7 +2777,7 @@ fn main(in: VertexInput) -> VertexOutput {
     let drawable = drawableVector[globalIndex.value];
     let pos = vec2<f32>(in.pos.xy);
     let skirt = f32(in.pos.z);
-    let height = terrain_elevation(pos, drawable.dem_coords);
+    let height = ground_height(pos, drawable.dem_coords, terrainProps);
     var out: VertexOutput;
     out.position = drawable.matrix * vec4<f32>(pos, height - skirt * terrainProps.skirt_length, 1.0);
     out.drape_pos = pos / 8192.0;
@@ -2750,7 +2843,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 }
 ",
     ),
-    prelude: Some(TERRAIN_ELEVATION_PRELUDE),
+    prelude: Some(TERRAIN_PRELUDE),
 };
 
 /// Port-only, for the backend conformance cases: probes of the terrain's
@@ -2776,7 +2869,7 @@ struct VertexOutput {
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
     out.position = vec4<f32>(in.pos.xy, 0.0, 1.0);
-    out.height = terrain_elevation(in.pos.zw, in.dem_coords);
+    out.height = ground_height(in.pos.zw, in.dem_coords, terrainProps);
     return out;
 }
 ",
@@ -2791,54 +2884,17 @@ fn main(@location(0) @interpolate(flat) height: f32) -> @location(0) vec4<f32> {
 }
 ",
     ),
-    prelude: Some(TERRAIN_ELEVATION_PRELUDE),
+    prelude: Some(TERRAIN_PRELUDE),
 };
 
-/// The height rule of `mln_util::dem`, over the DEM tile a terrain tile
-/// reads: its RGBA8 texels behind a one-texel border, decoded by
-/// `terrainProps`.
-const TERRAIN_ELEVATION_PRELUDE: &str = r"
-struct TerrainPropsUBO {
-    unpack: vec4<f32>,
-    unpack_scale: f32,
-    exaggeration: f32,
-    skirt_length: f32,
-    pad0: f32,
-};
-
+/// The surface's and the probe's prelude: the terrain's uniform block and
+/// the height rule.
+const TERRAIN_PRELUDE: &str = concat!(
+    ground_height!(),
+    r"
 @group(0) @binding(5) var<uniform> terrainProps: TerrainPropsUBO;
-@group(1) @binding(1) var dem_texture: texture_2d<f32>;
-
-// The height in meters of the DEM's bordered texel at `texel`, clamped to
-// the texture.
-fn terrain_texel_height(texel: vec2<i32>) -> f32 {
-    let last = vec2<i32>(textureDimensions(dem_texture)) - 1;
-    let rgb = round(textureLoad(dem_texture, clamp(texel, vec2<i32>(0), last), 0).rgb * 255.0);
-    let unpack = terrainProps.unpack;
-    return (rgb.r * unpack.x + rgb.g * unpack.y + rgb.b * unpack.z + unpack.w) * terrainProps.unpack_scale;
-}
-
-// The height in meters, exaggerated, at `pos` in tile units of a tile that
-// reads its DEM at `dem_coords`: the DEM uv's scale and offset, then the
-// DEM's width in pixels, 0 for flat ground.
-fn terrain_elevation(pos: vec2<f32>, dem_coords: vec4<f32>) -> f32 {
-    let dim = dem_coords.w;
-    if (dim == 0.0) {
-        return 0.0;
-    }
-    let coord = (pos / 8192.0 * dem_coords.x + dem_coords.yz) * dim + 0.5;
-    let first = floor(coord);
-    let f = coord - first;
-    let texel = vec2<i32>(first);
-    let tl = terrain_texel_height(texel);
-    let tr = terrain_texel_height(texel + vec2<i32>(1, 0));
-    let bl = terrain_texel_height(texel + vec2<i32>(0, 1));
-    let br = terrain_texel_height(texel + vec2<i32>(1, 1));
-    let top = tl * (1.0 - f.x) + tr * f.x;
-    let bottom = bl * (1.0 - f.x) + br * f.x;
-    return (top * (1.0 - f.y) + bottom * f.y) * terrainProps.exaggeration;
-}
-";
+"
+);
 
 /// Port-only, for the backend conformance cases: quads at clip positions,
 /// each vertex colored by the texel of `image_texture` it names, which the

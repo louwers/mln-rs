@@ -38,6 +38,19 @@ pub struct TerrainPropsUBO {
 }
 const _: () = assert!(size_of::<TerrainPropsUBO>() == 2 * 16);
 
+/// Where a standing draw reads its ground (48 bytes), an entry of the
+/// storage buffer that a terrain variant's draws index by `globalIndex`:
+/// the draw's DEM coordinates, as [`TerrainDrawableUBO::dem_coords`] has
+/// them for the draw's tile, and how the DEM decodes, as the surface's.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
+#[repr(C, align(16))]
+pub struct GroundDrawableUBO {
+    /* 0 */ pub dem_coords: [f32; 4],
+    /* 16 */ pub props: TerrainPropsUBO,
+    /* 48 */
+}
+const _: () = assert!(size_of::<GroundDrawableUBO>() == 3 * 16);
+
 /// The terrain's fog (64 bytes), GL JS's over the surface, which only the
 /// surface's fragment stage reads. It tints what a stack's draw covers, by
 /// the colors' alpha, and leaves its coverage as it is.

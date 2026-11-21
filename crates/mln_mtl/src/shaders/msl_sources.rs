@@ -4,6 +4,91 @@
 use super::shader_source::MslShaderSource;
 
 /// The start of every shader's source.
+/// The height rule of `mln_util::dem`, over the DEM tile a draw reads: its
+/// RGBA8 texels behind a one-texel border, decoded by a `TerrainPropsUBO`.
+/// The surface's source has it, and so does each standing layer's
+/// (`standing_ground`).
+macro_rules! ground_height {
+    () => {
+        r#"
+
+struct alignas(16) TerrainPropsUBO {
+    /*  0 */ float4 unpack;
+    /* 16 */ float unpack_scale;
+    /* 20 */ float exaggeration;
+    /* 24 */ float skirt_length;
+    /* 28 */ float pad;
+    /* 32 */
+};
+static_assert(sizeof(TerrainPropsUBO) == 2 * 16, "wrong size");
+
+// The height in meters of the DEM's bordered texel at `texel`, clamped to the
+// texture.
+static float ground_texel_height(texture2d<float, access::read> dem, int2 texel,
+                                 device const TerrainPropsUBO& props) {
+    const int2 last = int2(int(dem.get_width()), int(dem.get_height())) - 1;
+    const float3 rgb = round(dem.read(uint2(clamp(texel, int2(0), last))).rgb * 255.0);
+    return (rgb.r * props.unpack.x + rgb.g * props.unpack.y + rgb.b * props.unpack.z + props.unpack.w) *
+        props.unpack_scale;
+}
+
+// The height in meters, exaggerated, at `pos` in tile units of a tile that
+// reads its DEM at `dem_coords`: the DEM uv's scale and offset, then the DEM's
+// width in pixels, 0 for flat ground.
+static float ground_height(float2 pos, float4 dem_coords, texture2d<float, access::read> dem,
+                           device const TerrainPropsUBO& props) {
+    const float dim = dem_coords.w;
+    if (dim == 0.0) {
+        return 0.0;
+    }
+    const float2 coord = (pos / 8192.0 * dem_coords.x + dem_coords.yz) * dim + 0.5;
+    const float2 first = floor(coord);
+    const float2 f = coord - first;
+    const int2 texel = int2(first);
+    const float tl = ground_texel_height(dem, texel, props);
+    const float tr = ground_texel_height(dem, texel + int2(1, 0), props);
+    const float bl = ground_texel_height(dem, texel + int2(0, 1), props);
+    const float br = ground_texel_height(dem, texel + int2(1, 1), props);
+    const float top = tl * (1.0 - f.x) + tr * f.x;
+    const float bottom = bl * (1.0 - f.x) + br * f.x;
+    return (top * (1.0 - f.y) + bottom * f.y) * props.exaggeration;
+}
+
+"#
+    };
+}
+
+/// What a standing layer's terrain variant reads of the ground:
+/// `ground_height`, and each draw's `GroundDrawableUBO`, which
+/// `standing_height` reads. Only the variant's vertex function takes them.
+macro_rules! standing_ground {
+    () => {
+        concat!(
+            ground_height!(),
+            r#"
+enum {
+    idGroundDrawableUBO = idDrawableReservedFragmentOnlyUBO,
+};
+
+struct alignas(16) GroundDrawableUBO {
+    /*  0 */ float4 dem_coords;
+    /* 16 */ TerrainPropsUBO props;
+    /* 48 */
+};
+static_assert(sizeof(GroundDrawableUBO) == 3 * 16, "wrong size");
+
+// The height of the ground in meters at `pos`, in tile units of the tile of
+// the draw that reads `ground` and `dem`.
+static float standing_height(float2 pos, device const GroundDrawableUBO& ground,
+                             texture2d<float, access::read> dem) {
+    return ground_height(pos, ground.dem_coords, dem, ground.props);
+}
+
+"#
+        )
+    };
+}
+
 pub(crate) const PRELUDE: &str = r#"
 #include <metal_stdlib>
 using namespace metal;
@@ -718,7 +803,9 @@ struct alignas(16) CircleEvaluatedPropsUBO {
 static_assert(sizeof(CircleEvaluatedPropsUBO) == 4 * 16, "wrong size");
 
 "#,
-    source: r"
+    source: concat!(
+        standing_ground!(),
+        r"
 
 struct VertexStage {
     short2 position [[attribute(0)]];
@@ -779,6 +866,10 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const CircleDrawableUBO* drawableVector [[buffer(idCircleDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
+#if defined(TERRAIN)
+                                device const GroundDrawableUBO* groundVector [[buffer(idGroundDrawableUBO)]],
+                                texture2d<float, access::read> ground_dem [[texture(2)]],
+#endif
                                 device const CircleEvaluatedPropsUBO& props [[buffer(idCircleEvaluatedPropsUBO)]]) {
 
     device const CircleDrawableUBO& drawable = drawableVector[uboIndex];
@@ -802,6 +893,15 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     // multiply a_pos by 0.5, since we had it * 2 in order to sneak in extrusion data
     const float2 circle_center = floor(float2(vertx.position) * 0.5);
 
+    // The circle stands on the ground under its center, as it draws,
+    // translated.
+#if defined(TERRAIN)
+    const float2 translate = projectionVector[uboIndex].translate;
+    const float ele = standing_height(circle_center + translate, groundVector[uboIndex], ground_dem);
+#else
+    const float ele = 0.0;
+#endif
+
     float4 position;
     if (props.pitch_with_map) {
 #if defined(PROJECTION_GLOBE)
@@ -822,7 +922,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
             const float4 projected_center = interpolateProjection(circle_center, center_vector, 0.0, projectionVector[uboIndex]);
             angle_scale *= (radius + stroke_width) * (projected_center.w / paintParams.camera_to_center_distance);
 #else
-            const float4 projected_center = drawable.matrix * float4(circle_center, 0, 1);
+            const float4 projected_center = drawable.matrix * float4(circle_center, ele, 1);
 #endif
             corner_position += scaled_extrude * (radius + stroke_width) *
                                (projected_center.w / paintParams.camera_to_center_distance);
@@ -832,7 +932,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         const float3 corner_vector = globeRotateVector(center_vector, extrude * angle_scale);
         position = interpolateProjection(corner_position, corner_vector, 0.0, projectionVector[uboIndex]);
 #else
-        position = drawable.matrix * float4(corner_position, 0, 1);
+        position = drawable.matrix * float4(corner_position, ele, 1);
 #endif
     } else {
 #if defined(PROJECTION_GLOBE)
@@ -841,7 +941,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
             position.xy = float2(10000.0);
         }
 #else
-        position = drawable.matrix * float4(circle_center, 0, 1);
+        position = drawable.matrix * float4(circle_center, ele, 1);
 #endif
 
         const float factor = props.scale_with_map ? paintParams.camera_to_center_distance : position.w;
@@ -932,7 +1032,8 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 
     return half4(opacity_t * mix(color * opacity, stroke_color * stroke_opacity, color_t));
 }
-",
+"
+    ),
 };
 
 pub(crate) const CLIPPING_MASK_PROGRAM: MslShaderSource = MslShaderSource {
@@ -3698,7 +3799,9 @@ struct alignas(16) HeatmapEvaluatedPropsUBO {
 static_assert(sizeof(HeatmapEvaluatedPropsUBO) == 16, "wrong size");
 
 "#,
-    source: r#"
+    source: concat!(
+        standing_ground!(),
+        r#"
 
 struct VertexStage {
     short2 pos [[attribute(0)]];
@@ -3731,6 +3834,10 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const HeatmapDrawableUBO* drawableVector [[buffer(idHeatmapDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
+#if defined(TERRAIN)
+                                device const GroundDrawableUBO* groundVector [[buffer(idGroundDrawableUBO)]],
+                                texture2d<float, access::read> ground_dem [[texture(2)]],
+#endif
                                 device const HeatmapEvaluatedPropsUBO& props [[buffer(idHeatmapEvaluatedPropsUBO)]]) {
 
     device const HeatmapDrawableUBO& drawable = drawableVector[uboIndex];
@@ -3777,8 +3884,14 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float3 corner_vector = globeRotateVector(center_vector, extrude * radius * drawable.globe_extrude_scale);
     const float4 position = interpolateProjection(circle_center + scaled_extrude, corner_vector, 0.0, projectionVector[uboIndex]);
 #else
-    const float4 pos = float4(floor(float2(vertx.pos) * 0.5) + scaled_extrude, 0, 1);
-    const float4 position = drawable.matrix * pos;
+    // The kernel lies flat on the ground under its center.
+    const float2 center = floor(float2(vertx.pos) * 0.5);
+#if defined(TERRAIN)
+    const float ele = standing_height(center, groundVector[uboIndex], ground_dem);
+#else
+    const float ele = 0.0;
+#endif
+    const float4 position = drawable.matrix * float4(center + scaled_extrude, ele, 1);
 #endif
 
     return {
@@ -3807,7 +3920,8 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 
     return half4(val, 1.0, 1.0, 1.0);
 }
-"#,
+"#
+    ),
 };
 
 pub(crate) const HEATMAP_TEXTURE_SHADER: MslShaderSource = MslShaderSource {
@@ -4028,16 +4142,6 @@ struct alignas(16) TerrainDrawableUBO {
 };
 static_assert(sizeof(TerrainDrawableUBO) == 5 * 16, "wrong size");
 
-struct alignas(16) TerrainPropsUBO {
-    /*  0 */ float4 unpack;
-    /* 16 */ float unpack_scale;
-    /* 20 */ float exaggeration;
-    /* 24 */ float skirt_length;
-    /* 28 */ float pad;
-    /* 32 */
-};
-static_assert(sizeof(TerrainPropsUBO) == 2 * 16, "wrong size");
-
 // Only the surface's fragment stage reads the fog.
 struct alignas(16) TerrainFogUBO {
     // Linear and premultiplied.
@@ -4058,48 +4162,6 @@ static_assert(sizeof(TerrainFogUBO) == 4 * 16, "wrong size");
 
 "#;
 
-// The height rule of `mln_util::dem`, over the DEM tile a terrain tile reads:
-// its RGBA8 texels behind a one-texel border, decoded by `TerrainPropsUBO`.
-macro_rules! terrain_elevation {
-    () => {
-        r"
-
-// The height in meters of the DEM's bordered texel at `texel`, clamped to the
-// texture.
-static float terrain_texel_height(texture2d<float, access::read> dem, int2 texel,
-                                  device const TerrainPropsUBO& props) {
-    const int2 last = int2(int(dem.get_width()), int(dem.get_height())) - 1;
-    const float3 rgb = round(dem.read(uint2(clamp(texel, int2(0), last))).rgb * 255.0);
-    return (rgb.r * props.unpack.x + rgb.g * props.unpack.y + rgb.b * props.unpack.z + props.unpack.w) *
-        props.unpack_scale;
-}
-
-// The height in meters, exaggerated, at `pos` in tile units of a tile that
-// reads its DEM at `dem_coords`: the DEM uv's scale and offset, then the DEM's
-// width in pixels, 0 for flat ground.
-static float terrain_elevation(float2 pos, float4 dem_coords, texture2d<float, access::read> dem,
-                               device const TerrainPropsUBO& props) {
-    const float dim = dem_coords.w;
-    if (dim == 0.0) {
-        return 0.0;
-    }
-    const float2 coord = (pos / 8192.0 * dem_coords.x + dem_coords.yz) * dim + 0.5;
-    const float2 first = floor(coord);
-    const float2 f = coord - first;
-    const int2 texel = int2(first);
-    const float tl = terrain_texel_height(dem, texel, props);
-    const float tr = terrain_texel_height(dem, texel + int2(1, 0), props);
-    const float bl = terrain_texel_height(dem, texel + int2(0, 1), props);
-    const float br = terrain_texel_height(dem, texel + int2(1, 1), props);
-    const float top = tl * (1.0 - f.x) + tr * f.x;
-    const float bottom = bl * (1.0 - f.x) + br * f.x;
-    return (top * (1.0 - f.y) + bottom * f.y) * props.exaggeration;
-}
-
-"
-    };
-}
-
 /// The terrain's surface: a tile's grid, drawn with the tile's matrix, raised
 /// to the heights of the tile's DEM with its skirts lowered, in the colors of
 /// the tile's drape, fogged as GL JS's terrain is. Rows of a pass's texture
@@ -4109,7 +4171,7 @@ pub(crate) const TERRAIN_SHADER: MslShaderSource = MslShaderSource {
     fragment_main_function: r"fragmentMain",
     prelude: TERRAIN_PRELUDE,
     source: concat!(
-        terrain_elevation!(),
+        ground_height!(),
         r"
 
 struct VertexStage {
@@ -4130,11 +4192,11 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const TerrainDrawableUBO* drawableVector [[buffer(idTerrainDrawableUBO)]],
                                 device const TerrainPropsUBO& props [[buffer(idTerrainPropsUBO)]],
-                                texture2d<float, access::read> dem [[texture(0)]]) {
+                                texture2d<float, access::read> dem [[texture(2)]]) {
     device const TerrainDrawableUBO& drawable = drawableVector[uboIndex];
     const float2 pos = float2(vertx.pos.xy);
     const float skirt = float(vertx.pos.z);
-    const float height = terrain_elevation(pos, drawable.dem_coords, dem, props);
+    const float height = ground_height(pos, drawable.dem_coords, dem, props);
     const float4x4 m = drawable.matrix;
     return {
         .position = m * float4(pos, height - skirt * props.skirt_length, 1.0),
@@ -4184,7 +4246,7 @@ pub(crate) const TERRAIN_PROBE_SHADER: MslShaderSource = MslShaderSource {
     fragment_main_function: r"fragmentMain",
     prelude: TERRAIN_PRELUDE,
     source: concat!(
-        terrain_elevation!(),
+        ground_height!(),
         r"
 
 struct VertexStage {
@@ -4201,10 +4263,10 @@ struct FragmentStage {
 
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const TerrainPropsUBO& props [[buffer(idTerrainPropsUBO)]],
-                                texture2d<float, access::read> dem [[texture(0)]]) {
+                                texture2d<float, access::read> dem [[texture(2)]]) {
     return {
         .position = float4(vertx.pos.xy, 0.0, 1.0),
-        .height = terrain_elevation(vertx.pos.zw, vertx.dem_coords, dem, props),
+        .height = ground_height(vertx.pos.zw, vertx.dem_coords, dem, props),
     };
 }
 

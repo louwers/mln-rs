@@ -4,8 +4,8 @@ use mln_gfx::gpu::conformance::{
     topologies, transparent_replace, vertex_layouts, wall_quads, written_vertex_texels,
 };
 use mln_gfx::gpu::{Gpu as _, GpuError};
-use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
+use mln_gfx::shaders::programs::projection_variants;
 use mln_glsl::BUILT_INS;
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_UNKNOWN};
 
@@ -131,7 +131,7 @@ fn every_program_compiles_for_gpu() {
     let mut gpu = gpu();
     let parameters = ProgramParameters::new(1.0, false);
     for &(program, _) in BUILT_INS {
-        for variant in [ProjectionVariant::Mercator, ProjectionVariant::Globe] {
+        for &variant in projection_variants(program) {
             for uniforms in [&[][..], program.properties] {
                 let key = program.variant_key(&parameters, uniforms, variant);
                 if let Err(error) = gpu.create_shader(&key) {
