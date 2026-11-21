@@ -58,11 +58,19 @@ pub(crate) enum DataOrigin {
 
 impl DataOrigin {
     /// What response `res` to a tileset tile's request delivers, from the
-    /// network or only the cache. A 404, unlike an empty response (204, or
-    /// no tile in an archive), says the tileset has no tile here: a vector
-    /// tile is then empty, as in GL JS, and a raster tile missing. A sparse
-    /// tileset's empty tiles are missing.
-    pub(crate) fn input(&mut self, kind: TileKind, id: &OverscaledTileID, res: &Response, network: bool) -> TileInput {
+    /// network or only the cache, and the data at the tileset's last zoom
+    /// that the tile holds for the tiles cut from it, if it is that data. A
+    /// 404, unlike an empty response (204, or no tile in an archive), says
+    /// the tileset has no tile here: a vector tile is then empty, as in GL
+    /// JS, and a raster tile missing. A sparse tileset's empty tiles are
+    /// missing.
+    pub(crate) fn input(
+        &mut self,
+        kind: TileKind,
+        id: &OverscaledTileID,
+        res: &Response,
+        network: bool,
+    ) -> (TileInput, Option<Arc<Ancestor>>) {
         let sparse = match self {
             DataOrigin::Tileset { tileset, .. } => tileset.sparse,
             DataOrigin::GeoJson(_) | DataOrigin::Custom { .. } => false,
@@ -75,39 +83,62 @@ impl DataOrigin {
         match kind {
             TileKind::Geometry => {
                 let fetched = network.then(|| Fetched::of(res));
-                TileInput::Geometry { data: data.map(|data| self.decode(id, data, fetched)), missing }
+                let (data, held) = match data.map(|data| self.decode(id, data, fetched)) {
+                    Some((data, held)) => (Some(data), held),
+                    None => (None, None),
+                };
+                (TileInput::Geometry { data, missing }, held)
             }
-            TileKind::Raster | TileKind::Dem(_) => TileInput::Image { data, missing },
+            TileKind::Raster | TileKind::Dem(_) => (TileInput::Image { data, missing }, None),
         }
     }
 
-    /// Tile `id`'s data, from `data`: of its ancestor if it is cut from one,
-    /// which `fetched` brought from the network if it isn't `None`.
-    fn decode(&mut self, id: &OverscaledTileID, data: Data, fetched: Option<Fetched>) -> TileData {
+    /// Tile `id`'s data, from `data`, which `fetched` brought from the
+    /// network if it isn't `None`: of its ancestor if it is cut from one.
+    /// A tile at the tileset's last zoom shares its data with the tiles cut
+    /// from it, and holds it for them.
+    fn decode(
+        &mut self,
+        id: &OverscaledTileID,
+        data: Data,
+        fetched: Option<Fetched>,
+    ) -> (TileData, Option<Arc<Ancestor>>) {
         match self {
             DataOrigin::Tileset { tileset, encoding, ancestors, .. } => {
+                let loaded = loaded_tile(tileset, id);
                 match Cut::of(&id.canonical, tileset.zoom_range.max) {
                     Some(cut) => {
-                        let ancestor = ancestors.get(loaded_tile(tileset, id), data, *encoding, fetched);
-                        TileData::Cut(Arc::new(CutData::new(ancestor, cut)))
+                        let ancestor = ancestors.get(loaded, data, *encoding, fetched);
+                        (TileData::Cut(Arc::new(CutData::new(ancestor, cut))), None)
                     }
-                    None => encoding.decode(data),
+                    None if loaded.z == tileset.zoom_range.max => {
+                        let ancestor = ancestors.get(loaded, data, *encoding, fetched);
+                        (ancestor.data().clone(), Some(ancestor))
+                    }
+                    None => (encoding.decode(data), None),
                 }
             }
-            DataOrigin::GeoJson(_) | DataOrigin::Custom { .. } => VectorTileEncoding::Mvt.decode(data),
+            DataOrigin::GeoJson(_) | DataOrigin::Custom { .. } => (VectorTileEncoding::Mvt.decode(data), None),
         }
     }
 
-    /// Tile `id`'s data cut from its ancestor, if another tile's load brought
-    /// that from the network and it hasn't expired at `now`, with what that
-    /// load knew of it.
-    pub(crate) fn cut_in_memory(&mut self, id: &OverscaledTileID, now: Timestamp) -> Option<(TileData, Fetched)> {
+    /// Tile `id`'s data from another tile's, if that load brought it from
+    /// the network and it hasn't expired at `now`, with what that load knew
+    /// of it: cut from its ancestor at the tileset's last zoom, or for a
+    /// tile at that zoom, its own, which it then holds as the second value.
+    pub(crate) fn in_memory(
+        &mut self,
+        id: &OverscaledTileID,
+        now: Timestamp,
+    ) -> Option<(TileData, Fetched, Option<Arc<Ancestor>>)> {
         let DataOrigin::Tileset { tileset, ancestors, .. } = self else {
             return None;
         };
-        let cut = Cut::of(&id.canonical, tileset.zoom_range.max)?;
         let (ancestor, fetched) = ancestors.fresh(loaded_tile(tileset, id), now)?;
-        Some((TileData::Cut(Arc::new(CutData::new(ancestor, cut))), fetched))
+        match Cut::of(&id.canonical, tileset.zoom_range.max) {
+            Some(cut) => Some((TileData::Cut(Arc::new(CutData::new(ancestor, cut))), fetched, None)),
+            None => Some((ancestor.data().clone(), fetched, Some(ancestor))),
+        }
     }
 }
 
@@ -132,7 +163,7 @@ fn loaded_tile(tileset: &Tileset, id: &OverscaledTileID) -> CanonicalTileID {
 }
 
 /// The ancestors that a tileset's cut tiles share, by their tile id, while
-/// a tile cut from them holds them. A tile cut from an ancestor whose data
+/// a tile cut from them, or the tile at the last zoom itself, holds them. A tile cut from an ancestor whose data
 /// is fresh from the network takes it as it is; otherwise it loads the
 /// ancestor, and those whose loads bring the same data share it, decoded
 /// once.
@@ -298,6 +329,9 @@ pub(crate) struct TilesetLoad {
     pub(crate) expires: Option<Timestamp>,
     /// The data the tile has came from the network, not only the cache.
     pub(crate) from_network: bool,
+    /// For a tile at its tileset's last zoom, its data, which the tiles cut
+    /// from it find while it holds it.
+    pub(crate) held: Option<Arc<Ancestor>>,
 }
 
 /// A request answers as load `load`; dropping `request` cancels it.
@@ -370,6 +404,7 @@ impl Load {
                     modified: None,
                     expires: None,
                     from_network: false,
+                    held: None,
                 }))
             }
             DataOrigin::GeoJson(_) => OriginLoad::GeoJson { load: None },
