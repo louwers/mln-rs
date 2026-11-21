@@ -36,7 +36,7 @@ use crate::layer_drawing::{ChangedBuckets, DrawGroup, DrawOrder, SingleDraw};
 use crate::line_atlas::LineAtlas;
 use crate::paint_parameters::PaintParameters;
 use crate::pattern_atlas::PatternAtlas;
-use crate::placement::{CollisionGroups, ErasedPlacement, PlacementFrame, PlacementQuery, Prepared, Schedule};
+use crate::placement::{CollisionGroups, ErasedFrame, ErasedPlacement, PlacementQuery, Prepared, Schedule};
 use crate::render_layer::{Atlases, EndedHosts, FrameSourceTiles, LayerUpdate, RenderLayer};
 use crate::render_source::{self, RenderSource, RenderTileParameters, TileOrder};
 use crate::render_tile::{FoundTile, RenderTile, TileContent};
@@ -391,8 +391,7 @@ impl RenderOrchestrator {
         if let Some(pass) = &mut self.placement {
             let layers: SmallVec<[&dyn RenderLayer; 8]> =
                 self.placing_layers.iter().map(|&index| &*self.layers[index]).collect();
-            let mut placement_frame =
-                PlacementFrame { layers: &layers, update_parameters, buckets: &mut self.tile_store };
+            let mut placement_frame = ErasedFrame { layers: &layers, update_parameters, buckets: &mut self.tile_store };
             pass.update_buckets(&mut placement_frame, &mut changed_buckets);
         }
         if !changed_buckets.is_empty() {
@@ -940,30 +939,33 @@ impl RenderOrchestrator {
             self.placing_layers.iter().map(|&index| &*self.layers[index]).collect();
         let prepared = match &mut self.placement {
             Some(pass) => {
-                pass.prepare(&mut PlacementFrame { layers: &layers, update_parameters, buckets: &mut self.tile_store })
+                pass.prepare(&mut ErasedFrame { layers: &layers, update_parameters, buckets: &mut self.tile_store })
             }
             None => Prepared::default(),
         };
-        let pass = self.placement.as_mut().filter(|_| prepared.places);
-
-        let Some(pass) = pass else {
-            frame.symbol_fade_change = 1.0;
-            if continuous {
-                // Nothing to place: the placement and what the pass keeps go.
-                frame.placement_changed = self.schedule.reset();
-                if let Some(pass) = &mut self.placement {
-                    pass.reset();
+        let pass = match &mut self.placement {
+            Some(pass) if prepared.places => pass,
+            pass => {
+                frame.symbol_fade_change = 1.0;
+                if continuous {
+                    // Nothing to place: the placement and what the pass
+                    // keeps go.
+                    frame.placement_changed = self.schedule.reset();
+                    if let Some(pass) = pass {
+                        pass.reset();
+                    }
+                    frame.needs_repaint = self.has_transitions(time_point);
+                } else {
+                    // A still image keeps nothing of the buckets between
+                    // frames.
+                    if let Some(pass) = pass {
+                        pass.forget_buckets();
+                    }
+                    frame.placement_changed = false;
+                    frame.needs_repaint = false;
                 }
-                frame.needs_repaint = self.has_transitions(time_point);
-            } else {
-                // A still image keeps nothing of the buckets between frames.
-                if let Some(pass) = &mut self.placement {
-                    pass.forget_buckets();
-                }
-                frame.placement_changed = false;
-                frame.needs_repaint = false;
+                return;
             }
-            return;
         };
 
         let groups = || CollisionGroups::new(update_parameters.cross_source_collisions);
@@ -993,7 +995,7 @@ impl RenderOrchestrator {
             if frame.placement_changed {
                 let fade = self.schedule.fade_change(time_point);
                 let mut placement_frame =
-                    PlacementFrame { layers: &layers, update_parameters, buckets: &mut self.tile_store };
+                    ErasedFrame { layers: &layers, update_parameters, buckets: &mut self.tile_store };
                 let placed = pass.place(&mut placement_frame, groups(), fade);
                 self.schedule.commit(update_parameters.mode, transition_options, zoom, time_point, placed);
             } else if stale {
@@ -1003,8 +1005,7 @@ impl RenderOrchestrator {
             frame.needs_repaint = self.has_transitions(time_point);
         } else {
             frame.placement_changed = true;
-            let mut placement_frame =
-                PlacementFrame { layers: &layers, update_parameters, buckets: &mut self.tile_store };
+            let mut placement_frame = ErasedFrame { layers: &layers, update_parameters, buckets: &mut self.tile_store };
             let placed = pass.place(&mut placement_frame, groups(), 1.0);
             self.schedule.commit(update_parameters.mode, transition_options, zoom, time_point, placed);
             // A still image keeps nothing of the buckets between frames.

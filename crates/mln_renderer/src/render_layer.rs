@@ -137,7 +137,7 @@ impl<'a, T: LayerType> FindView<'a> for LayerBucket<'a, T> {
         self.layer.passes()
     }
 
-    fn bucket_index(&self) -> Option<usize> {
+    fn bucket_index(self) -> Option<usize> {
         Some(self.bucket_index)
     }
 }
@@ -296,8 +296,9 @@ impl<T: LayerType> Layer<T> {
     }
 
     /// Runs the type's [`LayerType::update`] with `tiles`, the tiles of the
-    /// tile store's `source`, as a frame's update does, without images or
-    /// atlases: for the benchmarks, which make the tiles without a frame.
+    /// tile store's `source`, as a frame's update does, but without images,
+    /// atlases or the source's max zoom: for the benchmarks, which make the
+    /// tiles without a frame.
     #[cfg(feature = "bench")]
     pub(crate) fn update_tiles(
         &mut self,

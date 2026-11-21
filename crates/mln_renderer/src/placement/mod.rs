@@ -32,7 +32,7 @@ use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
 use mln_util::geo::ScreenCoordinate;
 
-pub(crate) use self::erased::{ErasedPlacement, LaidBuckets, PlacementFrame, typed};
+pub(crate) use self::erased::{ErasedFrame, ErasedPlacement, LaidBuckets, typed};
 pub use self::grid::{Aabb, Grid, Shape};
 pub use self::groups::CollisionGroups;
 pub(crate) use self::schedule::Schedule;

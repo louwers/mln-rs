@@ -24,7 +24,7 @@ pub(crate) trait LaidBuckets {
 
 /// What the engine hands its placement pass of a frame: the frame's layers
 /// of the pass's type, bottom to top, its update and its tiles' buckets.
-pub(crate) struct PlacementFrame<'a> {
+pub(crate) struct ErasedFrame<'a> {
     pub(crate) layers: &'a [&'a dyn RenderLayer],
     pub(crate) update_parameters: &'a UpdateParameters,
     pub(crate) buckets: &'a mut dyn LaidBuckets,
@@ -34,13 +34,13 @@ pub(crate) struct PlacementFrame<'a> {
 /// frame's layers as the engine holds them.
 pub(crate) trait ErasedPlacement {
     /// See [`PlacementPass::prepare`].
-    fn prepare(&mut self, frame: &mut PlacementFrame<'_>) -> Prepared;
+    fn prepare(&mut self, frame: &mut ErasedFrame<'_>) -> Prepared;
 
     /// See [`PlacementPass::place`].
-    fn place(&mut self, frame: &mut PlacementFrame<'_>, groups: CollisionGroups, fade: f32) -> Placed;
+    fn place(&mut self, frame: &mut ErasedFrame<'_>, groups: CollisionGroups, fade: f32) -> Placed;
 
     /// See [`PlacementPass::update_buckets`].
-    fn update_buckets(&mut self, frame: &mut PlacementFrame<'_>, changed: &mut ChangedBuckets);
+    fn update_buckets(&mut self, frame: &mut ErasedFrame<'_>, changed: &mut ChangedBuckets);
 
     /// See [`PlacementPass::forget_buckets`].
     fn forget_buckets(&mut self);
@@ -69,7 +69,7 @@ pub(crate) fn typed<T: LayerType>(pass: Box<dyn PlacementPass<T>>) -> Box<dyn Er
 /// Runs `hook` with the context of `frame` for a pass of the type `T`: the
 /// frame's layers of the type, as the type sees them.
 fn with_context<T: LayerType, R>(
-    frame: &mut PlacementFrame<'_>,
+    frame: &mut ErasedFrame<'_>,
     hook: impl FnOnce(&mut PlacementContext<'_, T>) -> R,
 ) -> R {
     let layers: SmallVec<[PlacingLayer<'_, T>; 8]> = frame
@@ -89,15 +89,15 @@ fn with_context<T: LayerType, R>(
 }
 
 impl<T: LayerType> ErasedPlacement for TypedPlacement<T> {
-    fn prepare(&mut self, frame: &mut PlacementFrame<'_>) -> Prepared {
+    fn prepare(&mut self, frame: &mut ErasedFrame<'_>) -> Prepared {
         with_context(frame, |cx| self.0.prepare(cx))
     }
 
-    fn place(&mut self, frame: &mut PlacementFrame<'_>, groups: CollisionGroups, fade: f32) -> Placed {
+    fn place(&mut self, frame: &mut ErasedFrame<'_>, groups: CollisionGroups, fade: f32) -> Placed {
         with_context(frame, |cx| self.0.place(cx, groups, fade))
     }
 
-    fn update_buckets(&mut self, frame: &mut PlacementFrame<'_>, changed: &mut ChangedBuckets) {
+    fn update_buckets(&mut self, frame: &mut ErasedFrame<'_>, changed: &mut ChangedBuckets) {
         with_context(frame, |cx| self.0.update_buckets(cx, changed));
     }
 
