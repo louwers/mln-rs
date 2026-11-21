@@ -368,7 +368,7 @@ impl TestRunner {
         output_path: PathBuf,
     ) -> Self {
         // The expected images are of `en-US` where a style names no locale.
-        mln_expression::set_default_locale("en-US").expect("the default locale");
+        mln_style::expression::set_default_locale("en-US").expect("the default locale");
         TestRunner {
             maps: HashMap::default(),
             manifest,

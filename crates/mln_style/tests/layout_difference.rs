@@ -1,8 +1,8 @@
 // What changes of a layer lay its tiles out again: the rule of
 // `layer_type::layout_difference`, per layer type.
 
-use mln_conversion::Convertible;
 use mln_rs::builtin_registry;
+use mln_style::conversion::Convertible;
 use mln_style::layer::Layer;
 
 fn parse_json(json: &str) -> serde_json::Value {

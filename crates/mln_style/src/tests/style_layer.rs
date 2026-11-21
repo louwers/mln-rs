@@ -1,10 +1,9 @@
 use std::sync::Arc;
 
-use mln_conversion::{Convertible, Error};
 use mln_style_types::VisibilityType;
 
 use super::util::{new_layer, parse_json};
-use crate::conversion::convert_filter;
+use crate::conversion::{Convertible, Error, convert_filter};
 use crate::edit::Edit;
 use crate::expression::Functions;
 use crate::filter::Filter;

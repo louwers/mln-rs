@@ -41,8 +41,6 @@ earcut.workspace = true
 feature.workspace = true
 geometry.workspace = true
 glam.workspace = true
-mln_conversion.workspace = true
-mln_expression.workspace = true
 mln_gfx.workspace = true
 mln_map_types.workspace = true
 mln_math.workspace = true
@@ -61,7 +59,7 @@ serde_json.workspace = true
 [dev-dependencies]
 geo-types.workspace = true
 # The expression builders of the format section override tests.
-mln_expression = { workspace = true, features = ["dsl"] }
+mln_style = { workspace = true, features = ["dsl"] }
 # The WGSL sources, which the tests' WebGPU backend compiles, and the
 # entry points to the symbol layer type's placement.
 mln_layers = { package = "mln-rs-layers", path = ".", features = [

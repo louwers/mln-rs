@@ -2,7 +2,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use feature::Value;
-use mln_conversion::Convertible;
 use mln_style_types::{ProjectionDefinition, VisibilityType};
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
@@ -10,6 +9,7 @@ use mln_util::{Color, LatLng};
 
 use super::fixture_layer::Dot;
 use super::util::{FixtureLog, new_layer, parse_json};
+use crate::conversion::Convertible;
 use crate::edit::Edit;
 use crate::expression::Functions;
 use crate::layer_type::LayerStyle;

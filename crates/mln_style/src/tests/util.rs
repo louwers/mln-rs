@@ -62,7 +62,7 @@ pub(crate) fn parse_json(json: &str) -> serde_json::Value {
     serde_json::from_str(json).expect("test JSON must parse")
 }
 
-pub(super) use mln_conversion::value_to_json;
+pub(super) use crate::conversion::value_to_json;
 
 pub(crate) struct StubGeometryTileFeature {
     pub(crate) properties: feature::PropertyMap,
@@ -163,10 +163,10 @@ impl crate::Style {
     /// adds one.
     pub(crate) fn add_source_json(&mut self, id: &str, json: &str) {
         let value: serde_json::Value = serde_json::from_str(json).expect("JSON");
-        let mut error = mln_conversion::Error::default();
+        let mut error = crate::conversion::Error::default();
         let registry = Arc::clone(self.registry());
         let source =
-            crate::conversion::convert_source(&mln_conversion::Convertible::from(&value), &mut error, id, &registry)
+            crate::conversion::convert_source(&crate::conversion::Convertible::from(&value), &mut error, id, &registry)
                 .expect("a source");
         let _ = self.apply(crate::edit::Edit::AddSource(source));
     }

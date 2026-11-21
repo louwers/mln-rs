@@ -8,7 +8,7 @@ use mln_wire::{Reader, Wire, Writer};
 use crate::bucket_geometry::GeometryUpload;
 
 /// The state of each feature of a source layer, by the feature's id.
-pub type FeatureStates = mln_util::hash::HashMap<String, mln_style::expression::expression::FeatureState>;
+pub type FeatureStates = mln_util::hash::HashMap<String, mln_style::expression::expr::FeatureState>;
 pub type LayerFeatureStates = mln_util::hash::HashMap<String, FeatureStates>;
 
 /// What every bucket keeps for the engine: its identity, and whether its

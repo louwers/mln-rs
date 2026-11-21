@@ -4,8 +4,8 @@
 //! The declarations name only what they import, so the macros' expansions
 //! need nothing else of this crate.
 
-use mln_conversion::Convertible;
 use mln_renderer::layer::{CrossFadedPaintPropertyBinder, PaintPropertyBinder};
+use mln_style::conversion::Convertible;
 use mln_style::evaluated::Evaluated;
 use mln_style::expression::{Functions, Image};
 use mln_style::layer::Layer;

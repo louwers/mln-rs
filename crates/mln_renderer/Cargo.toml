@@ -43,7 +43,6 @@ feature.workspace = true
 geo-types.workspace = true
 geo-index.workspace = true
 geometry.workspace = true
-mln_expression.workspace = true
 mln_gfx.workspace = true
 mln_image.workspace = true
 mln_map_types.workspace = true
@@ -63,7 +62,6 @@ mln_wire = { workspace = true, features = ["geo-types", "glam", "parking_lot"] }
 
 [dev-dependencies]
 geojson.workspace = true
-mln_conversion = { package = "mln-rs-conversion", path = "../mln_conversion" }
 mln_map = { package = "mln-rs-map", path = "../mln_map" }
 mln_sprite = { package = "mln-rs-sprite", path = "../mln_sprite" }
 mln_storage = { workspace = true, features = ["stub-file-source"] }

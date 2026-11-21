@@ -12,11 +12,11 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use feature::ValueObject;
-use mln_conversion::Convertible;
 use mln_style_types::VisibilityType;
 use mln_vec_map::VecSet;
 use mln_wire::{Reader, Wire, Writer};
 
+use crate::conversion::Convertible;
 use crate::expression::{Dependency, Expr, Functions};
 use crate::filter::Filter;
 use crate::layer::FontStack;

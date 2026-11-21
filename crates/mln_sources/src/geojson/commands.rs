@@ -145,8 +145,8 @@ fn parse_cluster_properties(json: &str, functions: &Arc<Functions>) -> Result<Cl
         return Err(Error::invalid_argument("cluster_properties must contain a JSON object"));
     }
     let wrapper = serde_json::json!({ "clusterProperties": value });
-    let mut error = mln_conversion::Error::default();
-    let options = convert_geojson_options(&mln_conversion::Convertible::from(&wrapper), functions, &mut error)
+    let mut error = mln_style::conversion::Error::default();
+    let options = convert_geojson_options(&mln_style::conversion::Convertible::from(&wrapper), functions, &mut error)
         .ok_or_else(|| Error::invalid_argument(format!("GeoJSON source options: {}", error.message)))?;
     Ok(options.cluster_properties)
 }
@@ -161,7 +161,7 @@ fn cluster_properties_json(options: &GeoJSONOptions) -> Option<String> {
         .iter()
         .map(|(key, (map, reduce))| {
             let pair = feature::Value::Array(vec![reduce.serialize(), map.serialize()]);
-            (key.clone(), mln_conversion::value_to_json(&pair))
+            (key.clone(), mln_style::conversion::value_to_json(&pair))
         })
         .collect::<serde_json::Map<_, _>>();
     Some(serde_json::Value::Object(members).to_string())

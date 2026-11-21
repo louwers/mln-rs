@@ -3,12 +3,11 @@
 
 use std::sync::Arc;
 
-use mln_conversion::{Convertible, Error};
 use mln_image::decoder;
 use mln_renderer::source::{SourceImage, SourceType, Supply};
 use mln_storage::{Data, Resource};
 use mln_style::Edit;
-use mln_style::conversion::convert;
+use mln_style::conversion::{Convertible, Error, convert};
 use mln_style::expression::Functions;
 use mln_style::layer_type::SourceKind;
 use mln_style::source_type::{

@@ -31,7 +31,7 @@ pub fn find_metrics_dir() -> Option<PathBuf> {
 /// When the process's default locale was set to another before.
 #[must_use]
 pub fn run(metrics: &Path, test_names: &[String], filter: Option<&str>, verbose: bool) -> TestStats {
-    mln_expression::set_default_locale("en-US").expect("the default locale");
+    mln_style::expression::set_default_locale("en-US").expect("the default locale");
     let root_path = metrics.join("integration/expression-tests");
     let test_paths = collect_test_paths(&root_path, test_names, filter);
     let ignores = parse_expression_ignores(&metrics.join("ignores/platform-all.json"));

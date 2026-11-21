@@ -5,8 +5,8 @@
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use mln_conversion::{Convertible, Error};
 use mln_storage::{Data, Resource};
+use mln_style::conversion::{Convertible, Error};
 use mln_style::expression::Functions;
 use mln_style::layer_type::SourceKind;
 use mln_style::source_type::{

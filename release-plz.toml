@@ -48,9 +48,7 @@ name = "mln-rs"
 changelog_update = true
 # The commits of every published package: mln-rs re-exports the libraries.
 changelog_include = [
-  "mln-rs-conversion",
   "mln-rs-d3d12",
-  "mln-rs-expression",
   "mln-rs-feature",
   "mln-rs-frame-pacer",
   "mln-rs-geojson",

@@ -4,9 +4,8 @@
 
 use std::sync::Arc;
 
-use mln_conversion::Convertible;
-use mln_style::conversion::Error;
 use mln_style::conversion::source::convert_source;
+use mln_style::conversion::{Convertible, Error};
 use mln_style::source_type::{Described, ErasedDescription, Load, Source, SourceData};
 use mln_style::{Edit, Style};
 use mln_util::tileset::{PartialTileset, RasterEncoding, Tileset, VectorEncoding};

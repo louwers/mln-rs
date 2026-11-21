@@ -1,5 +1,5 @@
 // Ported gtests of test/text/*.test.cpp that need mln_renderer (GlyphStore),
-// sit above mln_text (Formatted is mln_expression's) or read its fixtures
+// sit above mln_text (Formatted is mln_style's) or read its fixtures
 // (GlyphCache), one module per C++ file. The others are ported next to their
 // code: bidi, tagged_string, glyph_pbf and shaping in mln_text;
 // calculate_tile_distances, quads, get_anchors and cross_tile_symbol_index

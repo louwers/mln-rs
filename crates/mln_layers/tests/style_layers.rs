@@ -3,9 +3,9 @@
 
 use std::sync::Arc;
 
-use mln_conversion::Convertible;
 use mln_layers::{Circle, Fill, Line, Raster};
 use mln_rs::builtin_registry;
+use mln_style::conversion::Convertible;
 use mln_style::expression::Image;
 use mln_style::layer::Layer;
 use mln_style::layer_type::{LayerStyle, StyleLayerType};

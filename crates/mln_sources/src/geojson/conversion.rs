@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use geojson::GeoJson;
-use mln_conversion::{Convertible, Error};
+use mln_style::conversion::{Convertible, Error};
 use mln_style::expression::Functions;
 use mln_style::expression::parsing_context::create_expression;
 use mln_style::source_type::SourceData;

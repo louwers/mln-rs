@@ -285,9 +285,9 @@ impl TestRunnerImpl for Impl {
         // converts).
         let filter = match &options.filter {
             Some(json) => {
-                let mut error = mln_conversion::Error::default();
+                let mut error = mln_style::conversion::Error::default();
                 match mln_style::conversion::convert_filter(
-                    &mln_conversion::Convertible::from(json),
+                    &mln_style::conversion::Convertible::from(json),
                     self.map.style().registry().functions(),
                     &mut error,
                 ) {

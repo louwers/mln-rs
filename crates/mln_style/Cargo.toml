@@ -15,29 +15,70 @@ name = "mln_style"
 # The doc comments have no examples to run.
 doctest = false
 
+[features]
+# `dsl`, the functions that build expressions in the tests of this crate's
+# dependents (`expression::dsl`).
+dsl = []
+
 [dependencies]
+cheap-ruler.workspace = true
 feature.workspace = true
-mln_conversion.workspace = true
-mln_expression.workspace = true
+geo-types.workspace = true
+geojson.workspace = true
+geometry.workspace = true
 mln_map_types.workspace = true
+mln_math.workspace = true
 mln_storage.workspace = true
 mln_style_types.workspace = true
 mln_text.workspace = true
+mln_tile_id.workspace = true
 mln_util.workspace = true
 mln_vec_map.workspace = true
 mln_wire.workspace = true
+serde.workspace = true
 serde_json.workspace = true
+serde_json_borrow.workspace = true
+smallvec.workspace = true
 thiserror.workspace = true
 
+# The locale services of the locale-sensitive expressions
+# (src/expression/locale): the platform's where it has them (Foundation and
+# the system ICU on Apple platforms, android.icu through JNI on Android, the
+# browser's Intl on wasm), else ICU4X with the CLDR data it compiles in.
+[target.'cfg(target_vendor = "apple")'.dependencies]
+objc2.workspace = true
+objc2-foundation = { workspace = true, features = [
+  "NSArray",
+  "NSLocale",
+  "NSObjCRuntime",
+  "NSRange",
+  "NSString",
+] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni.workspace = true
+parking_lot.workspace = true
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+js-sys.workspace = true
+wasm-bindgen.workspace = true
+
+[target.'cfg(not(any(target_family = "wasm", target_vendor = "apple", target_os = "android")))'.dependencies]
+fixed_decimal.workspace = true
+icu_collator.workspace = true
+icu_decimal.workspace = true
+icu_experimental.workspace = true
+icu_locale.workspace = true
+icu_plurals.workspace = true
+icu_provider.workspace = true
+writeable.workspace = true
+
 [dev-dependencies]
-geo-types.workspace = true
-mln_expression = { workspace = true, features = ["dsl"] }
 # The built-in layer types, whose layers tests/ reads.
 mln_layers = { package = "mln-rs-layers", path = "../mln_layers" }
 # The built-in registrations, for tests/'s styles of every type.
 mln_rs = { package = "mln-rs", path = "../..", default-features = false }
 mln_storage = { workspace = true, features = ["stub-file-source"] }
-mln_tile_id.workspace = true
 parking_lot.workspace = true
 
 [lints]

@@ -7,10 +7,9 @@ use std::path::Path;
 use std::sync::Arc;
 
 use feature::Value;
-use mln_conversion::{Convertible, Error};
 use mln_layers::FillExtrusion;
 use mln_rs::builtin_registry;
-use mln_style::conversion::convert_layer;
+use mln_style::conversion::{Convertible, Error, convert_layer};
 use mln_style::expression::Functions;
 use mln_style::layer::Layer;
 use mln_style::layer_type::{ErasedLayerStyle, LayerStyle};
@@ -47,7 +46,7 @@ fn parse_json(json: &str) -> serde_json::Value {
 }
 
 fn json(value: &Value) -> serde_json::Value {
-    mln_conversion::value_to_json(value)
+    mln_style::conversion::value_to_json(value)
 }
 
 fn layer(type_: &str, kind: &str, properties: &str) -> Layer {

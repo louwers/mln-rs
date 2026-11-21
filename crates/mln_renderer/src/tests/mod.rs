@@ -13,7 +13,7 @@ mod gtest_subdivision;
 // mln_map's Transform (tests/tile/main.rs lists them).
 mod tile;
 // gtests-data: the test/text gtests that need mln_renderer (GlyphStore) or
-// mln_expression's Formatted (tests/text/main.rs lists them).
+// mln_style's Formatted (tests/text/main.rs lists them).
 mod text;
 // gtests-core: test/renderer/image_manager.test.cpp.
 mod gtest_image_store;

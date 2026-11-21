@@ -1,5 +1,4 @@
-use mln_conversion::Convertible;
-use mln_style::conversion::Error;
+use mln_style::conversion::{Convertible, Error};
 use mln_style::expression::Functions;
 
 use super::parse_json;
@@ -103,7 +102,7 @@ fn cluster_property_reduces_its_key() {
         .unwrap_or_else(|| panic!("{}", error.message));
     let (_, reduce) = &converted.cluster_properties[r#"a"b"#];
     assert_eq!(
-        mln_conversion::value_to_json(&reduce.serialize()),
+        mln_style::conversion::value_to_json(&reduce.serialize()),
         serde_json::json!(["+", ["number", ["accumulated"]], ["number", ["get", r#"a"b"#]]])
     );
 }

@@ -5,11 +5,11 @@ use std::sync::{Arc, OnceLock};
 
 use feature::{Feature, PropertyMap, Value};
 use geojson::GeoJson;
-use mln_conversion::{Convertible, Error as ConversionError};
-use mln_expression::expression::evaluate_accumulated;
 use mln_geojson::{cluster, tile};
 use mln_storage::{Data, Resource};
 use mln_style::Edit;
+use mln_style::conversion::{Convertible, Error as ConversionError};
+use mln_style::expression::expr::evaluate_accumulated;
 use mln_style::expression::{Expr, Functions, from_expression_value};
 use mln_style::layer_type::SourceKind;
 use mln_style::source_type::{

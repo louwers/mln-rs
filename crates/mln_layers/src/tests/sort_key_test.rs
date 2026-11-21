@@ -2,13 +2,13 @@ use std::sync::Arc;
 
 use feature::{Feature, Identifier, PropertyMap, Value};
 use geo_types::{Geometry, LineString, Point, Polygon};
-use mln_expression::image_expression::UnavailableImages;
 use mln_map_types::MapMode;
 use mln_renderer::layer::{
     BucketParameters, BuildParams, EvaluatedLayer, FeatureIndexBuilder, FilterGroups, LayerType, Layout,
     LayoutParameters, Resolved, SourceLayer,
 };
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
+use mln_style::expression::image_expression::UnavailableImages;
 use mln_style::layer_type::LayerStyle;
 use mln_style_types::image::{ImageDependencies, ImagePosition, ImagePositions, Impl as ImageImpl, RectU16};
 use mln_text::glyph::GlyphDependencies;

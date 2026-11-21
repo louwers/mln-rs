@@ -7,8 +7,8 @@ use std::hint::black_box;
 use std::sync::Arc;
 
 use feature::{Identifier, PropertyMap, Value};
-use mln_conversion::Convertible;
-use mln_expression::{EvaluationContext, Expr, Functions, ParsingContext, Type, is_expression};
+use mln_style::conversion::Convertible;
+use mln_style::expression::{EvaluationContext, Expr, Functions, ParsingContext, Type, is_expression};
 use mln_tile::TileData;
 use mln_tile_id::{GeometryCollection, GeometryTileFeature};
 use mln_util::error::Error;

@@ -6,11 +6,10 @@ use std::borrow::Cow;
 use std::sync::Arc;
 
 use feature::{PropertyMap, Value as MbglValue};
-use mln_conversion::{Convertible, Error};
-use mln_expression::dsl::{interpolate, linear, literal, zoom};
-use mln_expression::parsing_context::create_expression_from_str;
-use mln_expression::{EvaluationContext, Functions};
-use mln_style::conversion::convert_property_value;
+use mln_style::conversion::{Convertible, Error, convert_property_value};
+use mln_style::expression::dsl::{interpolate, linear, literal, zoom};
+use mln_style::expression::parsing_context::create_expression_from_str;
+use mln_style::expression::{EvaluationContext, Functions};
 use mln_style::property_expression::PropertyExpression;
 use mln_style::property_value::PropertyValue;
 use mln_tile_id::geometry_tile_data::GeometryTileFeature;

@@ -1,20 +1,19 @@
 // The style's text is read into a `serde_json_borrow` tree, whose strings
 // borrow from the text and whose objects keep their members in document
-// order (mln_conversion's borrowed_conversion.rs). The message of a JSON
+// order (conversion/borrowed_conversion.rs). The message of a JSON
 // syntax error is serde_json's.
 
 use std::sync::Arc;
 
-use mln_conversion::borrowed_conversion::{Json, JsonObject, borrowed_json_to_value, member, members};
-use mln_conversion::{Convertible, Error};
 use mln_util::LatLng;
 use mln_util::constants::DEFAULT_TRANSITION_DURATION;
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::logging::{Event, Log};
 use mln_vec_map::VecSet;
 
+use crate::conversion::borrowed_conversion::{Json, JsonObject, borrowed_json_to_value, member, members};
 use crate::conversion::layer::{InvalidProperty, convert_layer_with, set_paint_properties};
-use crate::conversion::{convert, convert_light, convert_projection, convert_sky, convert_source};
+use crate::conversion::{Convertible, Error, convert, convert_light, convert_projection, convert_sky, convert_source};
 use crate::expression::GlobalStateMap;
 use crate::layer::{FontStack, Layer};
 use crate::light::Light;

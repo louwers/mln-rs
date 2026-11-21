@@ -34,11 +34,9 @@ pub use geo_types;
 pub use geojson;
 pub use geometry;
 pub use glam;
-pub use mln_conversion;
 /// Empty except on Windows.
 #[cfg(feature = "d3d12")]
 pub use mln_d3d12;
-pub use mln_expression;
 pub use mln_frame_pacer;
 pub use mln_geojson;
 pub use mln_gestures;

@@ -5,9 +5,9 @@
 use std::sync::Arc;
 
 use feature::{Value, ValueObject};
-use mln_conversion::Convertible;
 
 use super::Error;
+use crate::conversion::Convertible;
 use crate::expression::{Expr, Functions, ParsingContext, Type};
 
 /// The parser's errors for an expression a conversion wrote, without their
@@ -444,7 +444,7 @@ mod tests {
     use super::*;
 
     fn tokens(source: &str) -> String {
-        mln_conversion::value_to_json(&token_string_expression(source)).to_string()
+        crate::conversion::value_to_json(&token_string_expression(source)).to_string()
     }
 
     // gtest: StyleConversion.TokenStrings

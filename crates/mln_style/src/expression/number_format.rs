@@ -1,0 +1,321 @@
+use feature::{Value as MbglValue, ValueObject};
+
+use crate::conversion::Convertible;
+use crate::expression::expr::{EvalResult, EvaluationContext, EvaluationError, Expr, Node};
+use crate::expression::locale::{self, FractionDigits, Style, Unit, currency_code};
+use crate::expression::parsing_context::{ParseResult, ParsingContext};
+use crate::expression::type_::{self, Type};
+use crate::expression::value::to_string;
+
+const LOCALE_KEY: &str = "locale";
+const CURRENCY_KEY: &str = "currency";
+const UNIT_KEY: &str = "unit";
+const MIN_FRACTION_DIGITS_KEY: &str = "min-fraction-digits";
+const MAX_FRACTION_DIGITS_KEY: &str = "max-fraction-digits";
+
+/// Formats `number` in a BCP 47 locale.
+///
+/// The platform's default locale stands in when the locale is empty,
+/// malformed or its language unsupported. The number is rounded half to even
+/// to at most `max` fraction digits and padded to at least `min`. Omitted
+/// limits default to 0 and 3, or to the currency's digits for currency, and
+/// an explicit maximum wins over a minimum. With an ISO 4217 currency code, it
+/// formats as an amount of that currency, with the locale's pattern and
+/// symbol. Otherwise, with a unit `Intl.NumberFormat` takes, it formats as a
+/// measure in that unit, with the locale's short pattern for it. An empty
+/// currency or unit means none.
+///
+/// # Errors
+///
+/// When the currency isn't three ASCII letters, the unit isn't one
+/// `Intl.NumberFormat` takes, or the platform fails to format.
+fn format_number(
+    number: f64,
+    locale: &str,
+    currency: &str,
+    unit: &str,
+    min: Option<u8>,
+    max: Option<u8>,
+) -> Result<String, String> {
+    let currency = currency_code(currency)?;
+    let style = match (&currency, Unit::parse(unit)?) {
+        (Some(currency), _) => Style::Currency(currency),
+        (None, Some(unit)) => Style::Unit(unit),
+        (None, None) => Style::Decimal,
+    };
+    locale::format_number(number, locale, style, FractionDigits::new(min, max))
+}
+
+/// `["number-format", number, options]`.
+#[derive(Clone, PartialEq, mln_wire::Wire)]
+pub(crate) struct NumberFormat {
+    number: Expr,
+    locale: Option<Expr>,
+    currency: Option<Expr>,
+    unit: Option<Expr>,
+    min_fraction_digits: Option<Expr>,
+    max_fraction_digits: Option<Expr>,
+}
+
+/// Truncates `d` to `u8` through `i32`, as C++ `static_cast<uint8_t>(double)`
+/// does on x86-64.
+fn static_cast_u8(d: f64) -> u8 {
+    (if d > -2_147_483_649.0 && d < 2_147_483_648.0 { d as i32 } else { i32::MIN }) as u8
+}
+
+impl NumberFormat {
+    pub(crate) fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
+        let length = value.array_length();
+
+        if length != 3 {
+            ctx.error(format!("Expected two arguments, but found {length} instead."));
+            return None;
+        }
+
+        let Some(number_result) = ctx.parse(&value.array_member(1), 1, Some(Type::Number), None) else {
+            ctx.error("Failed to parse the number.".to_owned());
+            return None;
+        };
+
+        let t = number_result.get_type();
+        if t != Type::Number {
+            ctx.error(format!("Expected argument of type number, but found {} instead.", type_::to_string(&t)));
+            return None;
+        }
+
+        let options = value.array_member(2);
+        if !options.is_object() {
+            ctx.error("Number-format options argument must be an object.".to_owned());
+            return None;
+        }
+
+        let mut parse_option = |key: &str, t: Type, message: &str| -> Result<Option<Expr>, ()> {
+            if let Some(option) = options.object_member(key) {
+                if let Some(r) = ctx.parse(&option, 1, Some(t), None) {
+                    Ok(Some(r))
+                } else {
+                    ctx.error(message.to_owned());
+                    Err(())
+                }
+            } else {
+                Ok(None)
+            }
+        };
+
+        let locale_result = parse_option(LOCALE_KEY, Type::String, "Number-format locale parsing failed.").ok()?;
+        let currency_result =
+            parse_option(CURRENCY_KEY, Type::String, "Number-format currency parsing failed.").ok()?;
+        let unit_result = parse_option(UNIT_KEY, Type::String, "Number-format unit parsing failed.").ok()?;
+        if currency_result.is_some() && unit_result.is_some() {
+            ctx.error("NumberFormat options `currency` and `unit` are mutually exclusive".to_owned());
+            return None;
+        }
+        let min_fraction_digits_result =
+            parse_option(MIN_FRACTION_DIGITS_KEY, Type::Number, "Number-format min-fraction-digits parsing failed.")
+                .ok()?;
+        let max_fraction_digits_result =
+            parse_option(MAX_FRACTION_DIGITS_KEY, Type::Number, "Number-format max-fraction-digits parsing failed.")
+                .ok()?;
+
+        Some(Expr::new(Node::NumberFormat(Box::new(NumberFormat {
+            number: number_result,
+            locale: locale_result,
+            currency: currency_result,
+            unit: unit_result,
+            min_fraction_digits: min_fraction_digits_result,
+            max_fraction_digits: max_fraction_digits_result,
+        }))))
+    }
+
+    pub(crate) fn eval_str(&self, params: &EvaluationContext<'_>) -> EvalResult<String> {
+        let evaluated_number = self.number.eval_num(params)?;
+
+        let mut evaluated_locale = String::new();
+        if let Some(locale) = &self.locale {
+            evaluated_locale = to_string(&*locale.evaluate_ref(params)?);
+        }
+
+        let mut evaluated_currency = String::new();
+        if let Some(currency) = &self.currency {
+            evaluated_currency = to_string(&*currency.evaluate_ref(params)?);
+        }
+
+        let mut evaluated_unit = String::new();
+        if let Some(unit) = &self.unit {
+            evaluated_unit = to_string(&*unit.evaluate_ref(params)?);
+        }
+
+        let mut evaluated_min_fraction_digits = None;
+        if let Some(min) = &self.min_fraction_digits {
+            evaluated_min_fraction_digits = Some(static_cast_u8(min.eval_num(params)?));
+        }
+
+        let mut evaluated_max_fraction_digits = None;
+        if let Some(max) = &self.max_fraction_digits {
+            evaluated_max_fraction_digits = Some(static_cast_u8(max.eval_num(params)?));
+        }
+
+        format_number(
+            evaluated_number,
+            &evaluated_locale,
+            &evaluated_currency,
+            &evaluated_unit,
+            evaluated_min_fraction_digits,
+            evaluated_max_fraction_digits,
+        )
+        .map_err(EvaluationError::new)
+    }
+
+    pub(crate) fn each_child<'a>(&'a self, visit: &mut dyn FnMut(&'a Expr)) {
+        visit(&self.number);
+        for e in [&self.locale, &self.currency, &self.unit, &self.min_fraction_digits, &self.max_fraction_digits]
+            .into_iter()
+            .flatten()
+        {
+            visit(e);
+        }
+    }
+
+    pub(crate) fn serialize(&self) -> MbglValue {
+        let mut options = ValueObject::new();
+        if let Some(locale) = &self.locale {
+            options.insert(LOCALE_KEY.to_owned(), locale.serialize());
+        }
+        if let Some(currency) = &self.currency {
+            options.insert(CURRENCY_KEY.to_owned(), currency.serialize());
+        }
+        if let Some(unit) = &self.unit {
+            options.insert(UNIT_KEY.to_owned(), unit.serialize());
+        }
+        if let Some(min) = &self.min_fraction_digits {
+            options.insert(MIN_FRACTION_DIGITS_KEY.to_owned(), min.serialize());
+        }
+        if let Some(max) = &self.max_fraction_digits {
+            options.insert(MAX_FRACTION_DIGITS_KEY.to_owned(), max.serialize());
+        }
+        MbglValue::Array(vec![
+            MbglValue::String("number-format".to_owned()),
+            self.number.serialize(),
+            MbglValue::Object(options),
+        ])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_number;
+
+    fn format(number: f64, locale: &str, currency: &str, min: Option<u8>, max: Option<u8>) -> String {
+        format_number(number, locale, currency, "", min, max).expect("formatted number")
+    }
+
+    #[test]
+    fn decimals_round_half_to_even_within_the_fraction_limits() {
+        assert_eq!(format(123_456.789, "en-US", "", None, None), "123,456.789");
+        assert_eq!(format(987_654_321.234_567, "en-US", "", Some(15), Some(20)), "987,654,321.234567000000000");
+        assert_eq!(format(987_654_321.234_567, "en-US", "", Some(2), Some(4)), "987,654,321.2346");
+        assert_eq!(format(12.3, "en-US", "", Some(4), None), "12.3000");
+        assert_eq!(format(12.355, "en-US", "", Some(4), Some(2)), "12.36");
+        assert_eq!(format(12.345, "en-US", "", None, Some(2)), "12.34");
+        assert_eq!(format(0.5, "en-US", "", None, Some(0)), "0");
+        assert_eq!(format(1.5, "en-US", "", None, Some(0)), "2");
+        assert_eq!(format(0.0005, "en-US", "", None, None), "0");
+        assert_eq!(format(-1234.5, "en-US", "", None, None), "-1,234.5");
+    }
+
+    #[test]
+    fn decimals_follow_the_locale() {
+        assert_eq!(format(1234.5, "de-DE", "", None, None), "1.234,5");
+        assert_eq!(format(1_234_567.5, "fr-FR", "", None, None), "1\u{202f}234\u{202f}567,5");
+        assert_eq!(format(1_234_567.5, "hi-IN", "", None, None), "12,34,567.5");
+        assert_eq!(format(1234.5, "ar-EG", "", None, None), "١٬٢٣٤٫٥");
+        assert_eq!(format(1234.5, "xx-ZZ", "", None, None), format(1234.5, "", "", None, None));
+    }
+
+    #[test]
+    fn currencies_take_their_digits_and_the_locale_pattern() {
+        assert_eq!(format(123_456.789, "en-US", "JPY", None, None), "¥123,457");
+        assert_eq!(format(123_456.789, "en-US", "EUR", None, None), "€123,456.79");
+        assert_eq!(format(1234.5, "de-DE", "EUR", None, None), "1.234,50\u{a0}€");
+        // CLDR gives Japanese the full-width yen sign; macOS 27's ICU gives
+        // the ordinary one.
+        let yen = format(1234.6, "ja-JP", "JPY", None, None);
+        if cfg!(target_vendor = "apple") {
+            assert!(["¥1,235", "￥1,235"].contains(&yen.as_str()), "{yen}");
+        } else {
+            assert_eq!(yen, "￥1,235");
+        }
+        assert_eq!(format(12.3, "en-US", "USD", None, Some(0)), "$12");
+        assert_eq!(format(12.3, "en-US", "usd", Some(3), None), "$12.300");
+        assert_eq!(format(-12.3, "en-US", "USD", None, None), "-$12.30");
+        assert_eq!(format(12.0, "en-US", "XYZ", None, None), "XYZ\u{a0}12.00");
+    }
+
+    #[test]
+    fn non_finite_numbers_have_no_digits() {
+        assert_eq!(format(f64::NAN, "en-US", "", None, None), "NaN");
+        assert_eq!(format(f64::INFINITY, "en-US", "", None, None), "∞");
+        assert_eq!(format(f64::NEG_INFINITY, "en-US", "", None, None), "-∞");
+        assert_eq!(format(f64::NEG_INFINITY, "en-US", "USD", None, None), "-$∞");
+    }
+
+    fn format_unit(number: f64, locale: &str, unit: &str, min: Option<u8>, max: Option<u8>) -> String {
+        format_number(number, locale, "", unit, min, max).expect("formatted number")
+    }
+
+    #[test]
+    fn units_take_the_locale_short_pattern() {
+        assert_eq!(format_unit(1234.567, "en-US", "meter", None, None), "1,234.567 m");
+        assert_eq!(format_unit(1234.567, "de-DE", "kilometer", None, None), "1.234,567 km");
+        assert_eq!(format_unit(1.0, "en-US", "hour", Some(2), None), "1.00 hr");
+        assert_eq!(format_unit(-1234.5678, "en-US", "meter", None, None), "-1,234.568 m");
+        assert_eq!(format_unit(f64::NAN, "en-US", "meter", None, None), "NaN m");
+        assert_eq!(format_unit(f64::INFINITY, "en-US", "meter", None, None), "∞ m");
+    }
+
+    #[test]
+    fn percent_is_already_a_percentage() {
+        assert_eq!(format_unit(0.5, "en-US", "percent", None, None), "0.5%");
+        assert_eq!(format_unit(1234.567, "en-US", "percent", None, None), "1,234.567%");
+        assert_eq!(format_unit(1234.567, "fr-FR", "percent", None, Some(1)), "1\u{202f}234,6\u{a0}%");
+    }
+
+    #[test]
+    #[cfg(target_vendor = "apple")]
+    fn the_system_icu_formats_every_unit() {
+        assert_eq!(format_unit(1234.567, "en-US", "celsius", None, None), "1,234.567°C");
+        assert_eq!(format_unit(1234.567, "en-US", "kilobyte", None, None), "1,234.567 kB");
+        assert_eq!(format_unit(1234.567, "de-DE", "kilometer-per-hour", None, None), "1.234,567 km/h");
+        assert_eq!(format_unit(1.0, "en-US", "day", None, None), "1 day");
+        assert_eq!(format_unit(2.5, "en-US", "year", None, None), "2.5 yrs");
+        assert_eq!(format_unit(12.5, "en-US", "liter-per-kilometer", None, None), "12.5 L/km");
+    }
+
+    #[test]
+    #[cfg(not(any(target_family = "wasm", target_vendor = "apple", target_os = "android")))]
+    fn icu4x_unit_names_take_the_plural_form() {
+        assert_eq!(format_unit(1.0, "en-US", "day", None, None), "1 day");
+        assert_eq!(format_unit(2.0, "en-US", "day", None, None), "2 days");
+        assert_eq!(format_unit(f64::NEG_INFINITY, "en-US", "percent", None, None), "-∞%");
+    }
+
+    #[test]
+    #[cfg(not(any(target_family = "wasm", target_vendor = "apple", target_os = "android")))]
+    fn units_icu4x_lacks_fail() {
+        assert!(format_number(1.0, "en-US", "", "celsius", None, None).is_err());
+        assert!(format_number(1.0, "en-US", "", "kilobyte", None, None).is_err());
+        assert!(format_number(1.0, "en-US", "", "kilometer-per-hour", None, None).is_err());
+    }
+
+    #[test]
+    fn a_unit_that_intl_does_not_take_fails() {
+        assert!(format_number(1.0, "en-US", "", "square-meter", None, None).is_err());
+        assert!(format_number(1.0, "en-US", "", "Meter", None, None).is_err());
+    }
+
+    #[test]
+    fn a_currency_that_is_not_an_iso_4217_code_fails() {
+        assert!(format_number(1.0, "en-US", "US$", "", None, None).is_err());
+        assert!(format_number(1.0, "en-US", "EURO", "", None, None).is_err());
+    }
+}

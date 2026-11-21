@@ -1,5 +1,5 @@
-use mln_expression::formatted::{Formatted, FormattedSection};
-use mln_expression::image::Image;
+use mln_style::expression::formatted::{Formatted, FormattedSection};
+use mln_style::expression::image::Image;
 
 fn image_section(image: Image) -> FormattedSection {
     FormattedSection::from_image(image)

@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use mln_expression::image_expression::UnavailableImages;
+use mln_style::expression::image_expression::UnavailableImages;
 use mln_style_types::image::ImageDependencies;
 use mln_text::glyph::GlyphDependencies;
 use mln_tile::{TileData, TileLayer};
