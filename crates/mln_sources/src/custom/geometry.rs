@@ -15,8 +15,7 @@ use mln_util::pool::Pool;
 use mln_util::range::Range;
 
 use super::provider::{CustomProvider, TileFunction};
-pub use super::{CustomGeometryProvider, TileOptions};
-use super::{CustomGeometrySourceOptions, CustomGeometrySourceType};
+use super::{CustomGeometryProvider, CustomGeometrySourceOptions, CustomGeometrySourceType, TileOptions};
 use crate::geojson::TileFeatures;
 
 #[derive(Clone)]

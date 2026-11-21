@@ -5,7 +5,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use mln_rs::mln_sources::custom::geometry::TileOptions;
+use mln_rs::mln_sources::custom::TileOptions;
 use mln_rs::mln_sources::{
     CustomGeometrySourceType, CustomVectorSourceType, GeoJsonSourceType, ImageSourceType, RasterSourceType,
     TileDataFormat, VectorSourceType,
