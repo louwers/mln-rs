@@ -9,9 +9,10 @@ use mln_gfx::shaders::shader_defines::{
     ID_LINE_WIDTH_VERTEX_ATTRIBUTE,
 };
 use mln_renderer::layer::{
-    Bucket, BucketBase, CrossFadedPaintPropertyBinder, EvaluatedLayer, GeometryUpload, GeometryVec, PaintPropertyBinder,
+    Bucket, BucketBase, CrossFadedPaintPropertyBinder, EvaluatedLayer, GeometryUpload, GeometryVec, Indexed,
+    PaintPropertyBinder,
 };
-use mln_renderer::unstable::{Indexed, LineLayoutVertex, LineOptions, Tessellator, add_line, subdivide_vertex_line};
+use mln_renderer::unstable::{LineLayoutVertex, LineOptions, add_line, subdivide_vertex_line};
 use mln_style::expression::{EvaluationContext, Image, Value};
 use mln_style_types::image::ImagePositions;
 use mln_tile_id::CanonicalTileID;
@@ -27,6 +28,7 @@ use super::Line;
 use super::dash_array_binder::DashArrayBinder;
 use super::properties::{LineLayoutProperties, LinePaintProperties};
 use crate::pattern_layout::{PatternBucket, PatternLayerMap};
+use crate::tessellator::Tessellator;
 
 mln_renderer::paint_property_binders!(
     pub(crate) struct LineBinders for LinePaintProperties::PossiblyEvaluated {

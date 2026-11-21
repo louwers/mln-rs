@@ -13,9 +13,10 @@ use mln_gfx::shaders::shader_defines::{
 };
 use mln_map_types::View;
 use mln_renderer::layer::{
-    Bucket, BucketBase, CrossFadedPaintPropertyBinder, EvaluatedLayer, GeometryUpload, GeometryVec, PaintPropertyBinder,
+    Bucket, BucketBase, CrossFadedPaintPropertyBinder, EvaluatedLayer, GeometryUpload, GeometryVec, Indexed,
+    PaintPropertyBinder,
 };
-use mln_renderer::unstable::{Indexed, SubdividedPolygon, Tessellator, subdivide_polygon, subdivide_vertex_line};
+use mln_renderer::unstable::subdivide_vertex_line;
 use mln_style::PropertyEvaluationParameters;
 use mln_style::evaluated::Evaluated;
 use mln_style::expression::{Image, Value};
@@ -34,6 +35,8 @@ use mln_vec_map::VecMap;
 use super::FillExtrusion;
 use super::properties::{FillExtrusionLayoutProperties, FillExtrusionPaintProperties};
 use crate::pattern_layout::{PatternBucket, PatternLayerMap, PatternLayoutSpec};
+use crate::subdivision::{SubdividedPolygon, subdivide_polygon};
+use crate::tessellator::Tessellator;
 
 mln_renderer::paint_property_binders!(
     pub(crate) struct FillExtrusionBinders for FillExtrusionPaintProperties::PossiblyEvaluated {

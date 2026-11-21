@@ -30,7 +30,6 @@ use mln_renderer::layer::{
     DemContents, DrawContext, EvaluatedLayer, LayerType, LayerValues, NoBucket, NoLayout, RasterLayoutVertex,
     RenderPass,
 };
-use mln_renderer::unstable::GlobeTileMeshCache;
 use mln_style::color_ramp_property_value::ColorRampPropertyValue;
 use mln_style::expression::{
     Dependency, EvaluationContext, GlobalStateMap, from_expression_value, global_state_refs_intersect,
@@ -46,6 +45,7 @@ use mln_util::size::Size;
 
 use super::ubo::{ColorReliefDrawableUBO, ColorReliefEvaluatedPropsUBO, ColorReliefTilePropsUBO};
 use super::{ColorRelief, programs};
+use crate::mesh::GlobeTileMeshCache;
 
 /// What the layer keeps of a tile: the draw that colors its contents' DEM,
 /// with the generation of the contents' geometry and the DEM's properties it

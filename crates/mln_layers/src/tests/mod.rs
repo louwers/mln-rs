@@ -8,6 +8,10 @@ mod custom_test;
 mod fill_mesh_test;
 // The symbol layer type's format sections that override its paint.
 mod format_section_override_test;
+// The globe meshes that the raster layer types keep.
+mod globe_mesh_test;
+// The subdivision of polygons for the globe.
+mod polygon_subdivision_test;
 // Ports test/layout/sort_key.test.cpp.
 mod sort_key_test;
 // The fill-extrusion parts of the subdivision tests.

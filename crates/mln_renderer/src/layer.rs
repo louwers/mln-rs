@@ -30,8 +30,9 @@
 //! [`LayerType::create_layout`] makes of a group of layers with the tile's
 //! [`LayoutParameters`] and [`SourceLayer`], selects the features and
 //! records the images they need, and once those are [`Resolved`], makes the
-//! bucket, keeping its geometry in [`GeometryVec`]s, and adds the features
-//! to the tile's [`FeatureIndexBuilder`].
+//! bucket, keeping its geometry in [`GeometryVec`]s, indexed in segments of
+//! a draw each ([`Indexed`]), and adds the features to the tile's
+//! [`FeatureIndexBuilder`].
 //!
 //! A layer's tiles are those of its source, each as a [`FrameTile`] with
 //! what it shows the layer, the type's [`TileView`]: its bucket in the
@@ -53,8 +54,8 @@
 //! [unstable](crate::placement).
 //!
 //! The types a layer type draws with, which the hooks name, are the
-//! [draw services](crate::draw). The frame's [`Atlases`], which the engine
-//! declares for line and background, are in the engine's unstable module: a
+//! [draw services](crate::draw). The frame's [`Atlases`] of dash and
+//! pattern images, which the engine keeps and uploads, are unstable: a
 //! layer type can't yet declare state that the frame's layers share.
 
 use std::sync::Arc;
@@ -79,6 +80,7 @@ pub use crate::erased_layer::EvaluatedLayer;
 pub use crate::geometry::dem_data::DemData;
 pub use crate::geometry::feature_index::{FeatureIndex, FeatureIndexBuilder};
 use crate::gfx::context::Context;
+pub use crate::gfx::mesh::Indexed;
 pub use crate::image_store::ImageStore;
 use crate::layer_drawing::LayerDrawing;
 pub use crate::layout::filter_groups::FilterGroups;

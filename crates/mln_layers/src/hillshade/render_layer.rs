@@ -36,7 +36,6 @@ use mln_renderer::layer::{
     DemContents, DrawContext, EvaluatedLayer, LayerType, LayerValues, NoBucket, NoLayout, OffscreenPass,
     RasterLayoutVertex, RenderPass, UpdateContext,
 };
-use mln_renderer::unstable::GlobeTileMeshCache;
 use mln_style_types::{HillshadeIlluminationAnchorType, HillshadeMethodType, ResamplingType, TranslateAnchorType};
 use mln_tile_id::UnwrappedTileID;
 use mln_util::Color;
@@ -51,6 +50,7 @@ use super::ubo::{
     HillshadeTilePropsUBO, MAX_ILLUMINATION_SOURCES,
 };
 use super::{Hillshade, HillshadePaintProperties, programs};
+use crate::mesh::GlobeTileMeshCache;
 
 /// What the layer keeps of a DEM: the render target its slopes
 /// are prepared in, and the draw that prepares them.

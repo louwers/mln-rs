@@ -2897,6 +2897,7 @@ name = "mln-rs-layers"
 version = "0.0.13"
 dependencies = [
  "bytemuck",
+ "earcut",
  "geo-types",
  "glam",
  "mln-rs",
@@ -3034,7 +3035,6 @@ name = "mln-rs-renderer"
 version = "0.0.13"
 dependencies = [
  "bytemuck",
- "earcut",
  "etagere",
  "geo-index",
  "geo-types",

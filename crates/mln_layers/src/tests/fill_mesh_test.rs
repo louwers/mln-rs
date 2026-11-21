@@ -2,15 +2,15 @@ use std::sync::Arc;
 
 use geometry::Point;
 use mln_gfx::shaders::segment::{MAX_SEGMENT_VERTICES, SegmentBase};
-use mln_renderer::unstable::{
-    Indexed, SubdividedPolygon, TILE_BORDER_STRIP_WIDTH, Tessellator, add_tile_border_strips, subdivide_polygon,
-};
+use mln_renderer::layer::Indexed;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate, GeometryCoordinates};
 use mln_util::constants::EXTENT;
 
 use crate::fill::bucket::FillLayoutVertex;
 use crate::fill::mesh::FillBuffers;
+use crate::subdivision::{SubdividedPolygon, TILE_BORDER_STRIP_WIDTH, add_tile_border_strips, subdivide_polygon};
+use crate::tessellator::Tessellator;
 
 /// `EXTENT` as a tile coordinate.
 const EXTENT_I16: i16 = EXTENT as i16;

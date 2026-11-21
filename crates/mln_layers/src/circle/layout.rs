@@ -7,10 +7,9 @@ use std::sync::Arc;
 use geometry::Point;
 use mln_map_types::MapMode;
 use mln_renderer::layer::{
-    BucketParameters, BuildParams, EvaluatedLayer, FeatureIndexBuilder, FilterGroups, Layout, Resolved, SourceLayer,
-    layers_by_id,
+    BucketParameters, BuildParams, EvaluatedLayer, FeatureIndexBuilder, FilterGroups, Indexed, Layout, Resolved,
+    SourceLayer, layers_by_id,
 };
-use mln_renderer::unstable::{Indexed, add_point_quads};
 use mln_style::expression::{EvaluationContext, Value};
 use mln_style::{PropertyEvaluationParameters, StyleValue as _};
 use mln_style_types::image::ImagePositions;
@@ -22,6 +21,7 @@ use mln_vec_map::VecMap;
 
 use super::bucket::{CircleBucket, CircleLayoutVertex};
 use super::{Circle, CircleLayoutProperties};
+use crate::mesh::add_point_quads;
 
 /// A feature the filter accepted, by index (see the file comment).
 #[derive(Clone, Copy, Debug)]

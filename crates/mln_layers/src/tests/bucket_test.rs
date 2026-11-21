@@ -7,7 +7,7 @@ use mln_gfx::shaders::segment::SegmentBase;
 use mln_map_types::MapMode;
 use mln_renderer::draw::{BucketGeometry, Context, DrawIndexes, bucket_indexes, bucket_vertices, paint_vertices};
 use mln_renderer::layer::{Bucket, EvaluatedLayer, GeometryUpload};
-use mln_renderer::unstable::{LineLayoutVertex, Tessellator};
+use mln_renderer::unstable::LineLayoutVertex;
 use mln_style::PropertyEvaluationParameters;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
 use mln_style::evaluated::Evaluated;
@@ -33,6 +33,7 @@ use crate::pattern_layout::{PatternBucket, PatternLayerMap};
 use crate::symbol::SymbolLayoutProperties;
 use crate::symbol::bucket::{SymbolBucket, SymbolBucketStyle, SymbolLayoutFlags};
 use crate::symbol::instance::SymbolInstancePools;
+use crate::tessellator::Tessellator;
 use crate::{Fill, Line};
 
 struct StubGeometryTileFeature {
