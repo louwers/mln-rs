@@ -100,20 +100,6 @@ vec2 get_pattern_pos(const vec2 pixel_coord_upper, const vec2 pixel_coord_lower,
     return (tile_units_to_pixels * pos + offset) / pattern_size;
 }
 
-vec2 unpack_int(int value) {
-    const int low  = (value << 16) >> 16;
-    const int high = value >> 16;
-
-    return vec2(low, high);
-}
-
-vec2 unpack_uint(uint value) {
-    const uint low  = value & 0xFFFF;
-    const uint high = (value >> 16) & 0xFFFF;
-
-    return vec2(low, high);
-}
-
 #define GLOBAL_SET_INDEX                    0
 #define LAYER_SET_INDEX                     1
 #define DRAWABLE_UBO_SET_INDEX              2

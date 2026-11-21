@@ -537,15 +537,10 @@ pub(crate) const PRELUDE: Wgsl = Wgsl {
 // Constants
 const PI: f32 = 3.14159265358979323846;
 const LINE_NORMAL_SCALE: f32 = 1.0 / 63.0;  // 1.0 / (127 / 2)
-const MAX_LINE_DISTANCE: f32 = 32767.0;
 const SDF_PX: f32 = 8.0;
 
 // WebGPU equivalent of GLSL mod function
 fn glMod(x: f32, y: f32) -> f32 {
-    return x - y * floor(x / y);
-}
-
-fn glMod2(x: vec2<f32>, y: f32) -> vec2<f32> {
     return x - y * floor(x / y);
 }
 
