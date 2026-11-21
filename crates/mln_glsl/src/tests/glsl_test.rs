@@ -16,22 +16,57 @@ use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::shaders::layer_composite_ubo::LayerCompositeUBO;
 use mln_gfx::shaders::layer_ubo::{GlobalPaintParamsUBO, ProjectionUBO};
 use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::shader_defines::*;
+use mln_gfx::shaders::programs::{
+    ID_ATMOSPHERE_PROPS_UBO, ID_LAYER_COMPOSITE_UBO, ID_SKY_PROPS_UBO, ID_TILE_DEBUG_DRAWABLE_UBO,
+    ID_TILE_DEBUG_PROPS_UBO,
+};
+use mln_gfx::shaders::shader_defines::{
+    DRAWABLE_RESERVED_UBO_COUNT, ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO, ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO,
+    ID_GLOBAL_PAINT_PARAMS_UBO, ID_PROJECTION_UBO, MAX_ATTRIBUTE_COUNT_PER_SHADER, MAX_TEXTURE_COUNT_PER_SHADER,
+};
 use mln_gfx::shaders::sky_ubo::{AtmospherePropsUBO, SkyPropsUBO};
 use mln_gfx::shaders::source::glsl;
 use mln_gfx::shaders::tile_debug_ubo::{TileDebugDrawableElement, TileDebugPropsUBO};
+use mln_layers::background::programs::{ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_PROPS_UBO};
 use mln_layers::background::ubo::{BackgroundDrawableUnionUBO, BackgroundPatternPropsUBO, BackgroundPropsUBO};
+use mln_layers::circle::programs::{ID_CIRCLE_DRAWABLE_UBO, ID_CIRCLE_EVALUATED_PROPS_UBO};
 use mln_layers::circle::ubo::{CircleDrawableUBO, CircleEvaluatedPropsUBO};
+use mln_layers::color_relief::programs::{
+    ID_COLOR_RELIEF_DRAWABLE_UBO, ID_COLOR_RELIEF_EVALUATED_PROPS_UBO, ID_COLOR_RELIEF_TILE_PROPS_UBO,
+};
 use mln_layers::color_relief::ubo::{ColorReliefDrawableUBO, ColorReliefEvaluatedPropsUBO, ColorReliefTilePropsUBO};
+use mln_layers::fill::programs::{
+    ID_FILL_DRAWABLE_UBO, ID_FILL_EVALUATED_PROPS_UBO, ID_FILL_OUTLINE_ENDS, ID_FILL_OUTLINE_PAINT,
+    ID_FILL_OUTLINE_VERTICES, ID_FILL_TILE_PROPS_UBO,
+};
 use mln_layers::fill::ubo::{FillDrawableUnionUBO, FillEvaluatedPropsUBO, FillTilePropsUnionUBO};
+use mln_layers::fill_extrusion::programs::{
+    ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_DRAWABLE_UBO,
+    ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE,
+    ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE, ID_FILL_EXTRUSION_PROPS_UBO, ID_FILL_EXTRUSION_TILE_PROPS_UBO,
+    ID_FILL_EXTRUSION_WALL_PAINT, ID_FILL_EXTRUSION_WALL_VERTICES,
+};
 use mln_layers::fill_extrusion::ubo::{FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO};
+use mln_layers::heatmap::programs::{
+    ID_HEATMAP_DRAWABLE_UBO, ID_HEATMAP_EVALUATED_PROPS_UBO, ID_HEATMAP_TEXTURE_PROPS_UBO,
+};
 use mln_layers::heatmap::ubo::{HeatmapDrawableUBO, HeatmapEvaluatedPropsUBO, HeatmapTexturePropsUBO};
+use mln_layers::hillshade::programs::{
+    ID_HILLSHADE_DRAWABLE_UBO, ID_HILLSHADE_EVALUATED_PROPS_UBO, ID_HILLSHADE_PREPARE_DRAWABLE_UBO,
+    ID_HILLSHADE_PREPARE_TILE_PROPS_UBO, ID_HILLSHADE_TILE_PROPS_UBO,
+};
 use mln_layers::hillshade::ubo::{
     HillshadeDrawableUBO, HillshadeEvaluatedPropsUBO, HillshadePrepareDrawableUBO, HillshadePrepareTilePropsUBO,
     HillshadeTilePropsUBO,
 };
+use mln_layers::line::programs::{ID_LINE_DRAWABLE_UBO, ID_LINE_EVALUATED_PROPS_UBO, ID_LINE_TILE_PROPS_UBO};
 use mln_layers::line::ubo::{LineDrawableUnionUBO, LineEvaluatedPropsUBO, LineTilePropsUnionUBO};
+use mln_layers::raster::programs::{ID_RASTER_DRAWABLE_UBO, ID_RASTER_EVALUATED_PROPS_UBO};
 use mln_layers::raster::ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
+use mln_layers::symbol::programs::{
+    ID_COLLISION_DRAWABLE_UBO, ID_COLLISION_PROJECTION_UBO, ID_COLLISION_TILE_PROPS_UBO, ID_SYMBOL_DRAWABLE_UBO,
+    ID_SYMBOL_EVALUATED_PROPS_UBO, ID_SYMBOL_TILE_PROPS_UBO,
+};
 use mln_layers::symbol::ubo::{
     CollisionDrawableUBO, CollisionTilePropsUBO, SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO,
 };
@@ -247,9 +282,9 @@ fn buffers(program: &Program) -> Vec<(Buffer, usize)> {
             (DrawableUniform(ID_HILLSHADE_PREPARE_TILE_PROPS_UBO), size_of::<HillshadePrepareTilePropsUBO>()),
         ],
         "TileDebugShader" => vec![
-            (LayerStorage(ID_LINE_DRAWABLE_UBO), size_of::<TileDebugDrawableElement>()),
+            (LayerStorage(ID_TILE_DEBUG_DRAWABLE_UBO), size_of::<TileDebugDrawableElement>()),
             projection,
-            (LayerUniform(ID_LINE_EVALUATED_PROPS_UBO), size_of::<TileDebugPropsUBO>()),
+            (LayerUniform(ID_TILE_DEBUG_PROPS_UBO), size_of::<TileDebugPropsUBO>()),
         ],
         "LineShader" | "LineGradientShader" => vec![
             (LayerStorage(ID_LINE_DRAWABLE_UBO), size_of::<LineDrawableUnionUBO>()),

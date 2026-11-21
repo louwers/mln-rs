@@ -15,14 +15,14 @@
 //! hold them for the fill, bound as storage buffers.
 
 use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::shader_defines::{
+use mln_gfx::shaders::source::wgsl::{Attribute, Source, Texture, Wgsl};
+
+use super::programs;
+use super::programs::{
     ID_FILL_COLOR_VERTEX_ATTRIBUTE, ID_FILL_IMAGE_TEXTURE, ID_FILL_OPACITY_VERTEX_ATTRIBUTE,
     ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE, ID_FILL_OUTLINE_END_ATTRIBUTE, ID_FILL_OUTLINE_POS_ATTRIBUTE,
     ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE, ID_FILL_POS_VERTEX_ATTRIBUTE,
 };
-use mln_gfx::shaders::source::wgsl::{Attribute, Source, Texture, Wgsl};
-
-use super::programs;
 
 const FILL_ATTRIBUTES: &[Attribute] = &[
     Attribute::new(0, ID_FILL_POS_VERTEX_ATTRIBUTE),

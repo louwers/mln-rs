@@ -6,11 +6,6 @@ use std::sync::Arc;
 
 use geometry::Point;
 use mln_gfx::shaders::segment::{MAX_SEGMENT_VERTICES, SegmentBase};
-use mln_gfx::shaders::shader_defines::{
-    ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE,
-    ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE,
-    ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE,
-};
 use mln_map_types::View;
 use mln_render::layer::{
     Bucket, BucketBase, CrossFadedPaintPropertyBinder, EvaluatedLayer, GeometryUpload, GeometryVec, Indexed,
@@ -31,6 +26,11 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecMap;
 
 use super::FillExtrusion;
+use super::programs::{
+    ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE,
+    ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE,
+    ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE,
+};
 use super::properties::{FillExtrusionLayoutProperties, FillExtrusionPaintProperties};
 use crate::pattern_layout::{PatternBucket, PatternLayerMap, PatternLayoutSpec};
 use crate::subdivision::{SubdividedPolygon, subdivide_polygon};

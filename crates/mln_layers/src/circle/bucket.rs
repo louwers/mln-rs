@@ -4,11 +4,6 @@
 use std::sync::Arc;
 
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::shader_defines::{
-    ID_CIRCLE_BLUR_VERTEX_ATTRIBUTE, ID_CIRCLE_COLOR_VERTEX_ATTRIBUTE, ID_CIRCLE_OPACITY_VERTEX_ATTRIBUTE,
-    ID_CIRCLE_RADIUS_VERTEX_ATTRIBUTE, ID_CIRCLE_STROKE_COLOR_VERTEX_ATTRIBUTE,
-    ID_CIRCLE_STROKE_OPACITY_VERTEX_ATTRIBUTE, ID_CIRCLE_STROKE_WIDTH_VERTEX_ATTRIBUTE,
-};
 use mln_map_types::MapMode;
 use mln_render::layer::{Bucket, BucketBase, EvaluatedLayer, GeometryUpload, GeometryVec, PaintPropertyBinder};
 use mln_style_types::image::ImagePositions;
@@ -16,6 +11,11 @@ use mln_util::Color;
 use mln_vec_map::VecMap;
 
 use super::Circle;
+use super::programs::{
+    ID_CIRCLE_BLUR_VERTEX_ATTRIBUTE, ID_CIRCLE_COLOR_VERTEX_ATTRIBUTE, ID_CIRCLE_OPACITY_VERTEX_ATTRIBUTE,
+    ID_CIRCLE_RADIUS_VERTEX_ATTRIBUTE, ID_CIRCLE_STROKE_COLOR_VERTEX_ATTRIBUTE,
+    ID_CIRCLE_STROKE_OPACITY_VERTEX_ATTRIBUTE, ID_CIRCLE_STROKE_WIDTH_VERTEX_ATTRIBUTE,
+};
 use super::properties::CirclePaintProperties;
 
 mln_render::paint_property_binders!(

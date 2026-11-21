@@ -11,11 +11,11 @@
 //! records it at once.
 //!
 //! Bindings use the shaders' own numbering: a buffer binds at its uniform
-//! or storage buffer id (`shaders::shader_defines`, e.g.
-//! `ID_GLOBAL_PAINT_PARAMS_UBO`), a texture at its texture id (e.g.
-//! `ID_LINE_DASH_TEXTURE`) and a vertex attribute at its attribute id (e.g.
-//! `ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE`). Each backend maps them to its own
-//! slots, groups, descriptor sets or shader locations.
+//! or storage buffer id (the engine's in `shaders::shader_defines`, such as
+//! `ID_GLOBAL_PAINT_PARAMS_UBO`, the others its program's), a texture at
+//! its texture id and a vertex attribute at its attribute id, both its
+//! program's. Each backend maps them to its own slots, groups, descriptor
+//! sets or shader locations.
 //!
 //! This is the GPU backend contract. A backend implements [`Gpu`], and a
 //! [`RendererBackend`](crate::RendererBackend) that owns it and lends it;

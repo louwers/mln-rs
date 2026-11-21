@@ -5,9 +5,7 @@ use geometry::Point;
 use mln_gfx::gpu::Gpu;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::shader_defines::{
-    ID_CIRCLE_DRAWABLE_UBO, ID_CIRCLE_EVALUATED_PROPS_UBO, ID_CIRCLE_POS_VERTEX_ATTRIBUTE, ID_PROJECTION_UBO,
-};
+use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
 use mln_gfx::shaders::source::ShaderSources;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_map_types::TileProjector;
@@ -28,6 +26,7 @@ use mln_util::error::Error;
 
 use super::bucket::{CircleBinders, CircleBucket, CircleLayoutVertex};
 use super::layout::CircleLayout;
+use super::programs::{ID_CIRCLE_DRAWABLE_UBO, ID_CIRCLE_EVALUATED_PROPS_UBO, ID_CIRCLE_POS_VERTEX_ATTRIBUTE};
 use super::ubo::{CircleDrawableUBO, CircleEvaluatedPropsUBO};
 use super::{Circle, programs};
 use crate::refresh_paint_attributes;

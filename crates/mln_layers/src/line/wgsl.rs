@@ -1,16 +1,16 @@
 //! The programs of the `line` layer type in WGSL, for `mln_webgpu`.
 
 use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::shader_defines::{
+use mln_gfx::shaders::source::wgsl::{Attribute, Source, Texture, Wgsl};
+
+use super::programs;
+use super::programs::{
     ID_LINE_BLUR_VERTEX_ATTRIBUTE, ID_LINE_COLOR_VERTEX_ATTRIBUTE, ID_LINE_DASH_TEXTURE,
     ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE, ID_LINE_DATA_VERTEX_ATTRIBUTE, ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE,
     ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE, ID_LINE_IMAGE_TEXTURE, ID_LINE_OFFSET_VERTEX_ATTRIBUTE,
     ID_LINE_OPACITY_VERTEX_ATTRIBUTE, ID_LINE_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_LINE_PATTERN_TO_VERTEX_ATTRIBUTE,
     ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, ID_LINE_WIDTH_VERTEX_ATTRIBUTE,
 };
-use mln_gfx::shaders::source::wgsl::{Attribute, Source, Texture, Wgsl};
-
-use super::programs;
 
 const LINE_ATTRIBUTES: &[Attribute] = &[
     Attribute::new(4, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),

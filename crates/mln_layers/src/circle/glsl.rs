@@ -2,14 +2,14 @@
 
 use mln_gfx::gfx_types::AttributeDataType::{Float2, Float4, Short2};
 use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::shader_defines::{
+use mln_gfx::shaders::source::glsl::{Attribute, Glsl, Source};
+
+use super::programs;
+use super::programs::{
     ID_CIRCLE_BLUR_VERTEX_ATTRIBUTE, ID_CIRCLE_COLOR_VERTEX_ATTRIBUTE, ID_CIRCLE_OPACITY_VERTEX_ATTRIBUTE,
     ID_CIRCLE_POS_VERTEX_ATTRIBUTE, ID_CIRCLE_RADIUS_VERTEX_ATTRIBUTE, ID_CIRCLE_STROKE_COLOR_VERTEX_ATTRIBUTE,
     ID_CIRCLE_STROKE_OPACITY_VERTEX_ATTRIBUTE, ID_CIRCLE_STROKE_WIDTH_VERTEX_ATTRIBUTE,
 };
-use mln_gfx::shaders::source::glsl::{Attribute, Glsl, Source};
-
-use super::programs;
 
 const CIRCLE_ATTRIBUTES: &[Attribute] = &[
     Attribute::new(0, Short2, ID_CIRCLE_POS_VERTEX_ATTRIBUTE),

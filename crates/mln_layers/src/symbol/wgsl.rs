@@ -2,7 +2,10 @@
 //! boxes and circles, in WGSL, for `mln_webgpu`.
 
 use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::shader_defines::{
+use mln_gfx::shaders::source::wgsl::{Attribute, Source, Texture, Wgsl};
+
+use super::programs;
+use super::programs::{
     ID_COLLISION_ANCHOR_POS_VERTEX_ATTRIBUTE, ID_COLLISION_EXTRUDE_VERTEX_ATTRIBUTE,
     ID_COLLISION_HEIGHT_OFFSET_VERTEX_ATTRIBUTE, ID_COLLISION_PLACED_VERTEX_ATTRIBUTE,
     ID_COLLISION_POS_VERTEX_ATTRIBUTE, ID_COLLISION_SHIFT_VERTEX_ATTRIBUTE, ID_SYMBOL_COLOR_ATTRIBUTE,
@@ -12,9 +15,6 @@ use mln_gfx::shaders::shader_defines::{
     ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE, ID_SYMBOL_POS_OFFSET_ATTRIBUTE, ID_SYMBOL_PROJECTED_POS_ATTRIBUTE,
     ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE,
 };
-use mln_gfx::shaders::source::wgsl::{Attribute, Source, Texture, Wgsl};
-
-use super::programs;
 
 /// `unpack_opacity`, a symbol's fade opacity and whether it fades in, from
 /// the packed value of its vertex.

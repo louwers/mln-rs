@@ -1,7 +1,8 @@
 // The GLSL of the engine's shaders, and the tables of where their uniform
 // blocks, attributes and textures bind:
-// - The ids are shader_defines.rs's, so a shader's uniform blocks bind where
-//   the renderer puts their buffers.
+// - The ids are the programs' (`mln_gfx::shaders::programs`) and the
+//   engine's reserved ones, so a shader's uniform blocks bind where the
+//   renderer puts their buffers.
 // - A block's entry has the size of its UBO, which the compile test checks
 //   against the program, and, where the renderer writes the block for every
 //   drawable of a layer into one buffer, the size of that buffer's elements.
@@ -13,13 +14,14 @@ use mln_gfx::shaders::layer_composite_ubo::LayerCompositeUBO;
 use mln_gfx::shaders::layer_ubo::{GlobalPaintParamsUBO, ProjectionUBO};
 use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::programs;
-use mln_gfx::shaders::shader_defines::{
+use mln_gfx::shaders::programs::{
     ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE, ID_ATMOSPHERE_PROPS_UBO, ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE,
-    ID_GLOBAL_PAINT_PARAMS_UBO, ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE, ID_LAYER_COMPOSITE_BACKDROP_TEXTURE,
-    ID_LAYER_COMPOSITE_IMAGE_TEXTURE, ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE, ID_LAYER_COMPOSITE_UBO,
-    ID_LINE_DATA_VERTEX_ATTRIBUTE, ID_LINE_DRAWABLE_UBO, ID_LINE_EVALUATED_PROPS_UBO,
-    ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, ID_PROJECTION_UBO, ID_SKY_POS_VERTEX_ATTRIBUTE, ID_SKY_PROPS_UBO,
+    ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE, ID_LAYER_COMPOSITE_BACKDROP_TEXTURE, ID_LAYER_COMPOSITE_IMAGE_TEXTURE,
+    ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE, ID_LAYER_COMPOSITE_UBO, ID_SKY_POS_VERTEX_ATTRIBUTE, ID_SKY_PROPS_UBO,
+    ID_TILE_DEBUG_DATA_VERTEX_ATTRIBUTE, ID_TILE_DEBUG_DRAWABLE_UBO, ID_TILE_DEBUG_POS_NORMAL_VERTEX_ATTRIBUTE,
+    ID_TILE_DEBUG_PROPS_UBO,
 };
+use mln_gfx::shaders::shader_defines::{ID_GLOBAL_PAINT_PARAMS_UBO, ID_PROJECTION_UBO};
 use mln_gfx::shaders::sky_ubo::{AtmospherePropsUBO, SkyPropsUBO};
 use mln_gfx::shaders::source::glsl_es::{Attribute, Source, Texture, UniformBlock};
 use mln_gfx::shaders::tile_debug_ubo::{TileDebugDrawableElement, TileDebugDrawableUBO, TileDebugPropsUBO};
@@ -91,13 +93,13 @@ static TILE_DEBUG_SHADER: Source = Source {
         UniformBlock::new::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
         UniformBlock::element::<TileDebugDrawableUBO, TileDebugDrawableElement>(
             "TileDebugDrawableUBO",
-            ID_LINE_DRAWABLE_UBO,
+            ID_TILE_DEBUG_DRAWABLE_UBO,
         ),
-        UniformBlock::new::<TileDebugPropsUBO>("TileDebugPropsUBO", ID_LINE_EVALUATED_PROPS_UBO),
+        UniformBlock::new::<TileDebugPropsUBO>("TileDebugPropsUBO", ID_TILE_DEBUG_PROPS_UBO),
     ],
     attributes: &[
-        Attribute::new("a_pos_normal", ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
-        Attribute::new("a_data", ID_LINE_DATA_VERTEX_ATTRIBUTE),
+        Attribute::new("a_pos_normal", ID_TILE_DEBUG_POS_NORMAL_VERTEX_ATTRIBUTE),
+        Attribute::new("a_data", ID_TILE_DEBUG_DATA_VERTEX_ATTRIBUTE),
     ],
     instance_attributes: &[],
     textures: &[],

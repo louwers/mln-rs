@@ -8,10 +8,6 @@ use std::sync::Arc;
 
 use glam::Vec2;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::shader_defines::{
-    ID_SYMBOL_COLOR_ATTRIBUTE, ID_SYMBOL_HALO_BLUR_ATTRIBUTE, ID_SYMBOL_HALO_COLOR_ATTRIBUTE,
-    ID_SYMBOL_HALO_WIDTH_ATTRIBUTE, ID_SYMBOL_OPACITY_ATTRIBUTE,
-};
 use mln_render::layer::{
     Bucket, BucketBase, EvaluatedLayer, FeatureStates, GeometryUpload, GeometryVec, PaintPropertyBinder,
 };
@@ -27,6 +23,10 @@ use mln_util::range::Range;
 use mln_util::serialization::payload::pod;
 use mln_vec_map::VecMap;
 
+use super::programs::{
+    ID_SYMBOL_COLOR_ATTRIBUTE, ID_SYMBOL_HALO_BLUR_ATTRIBUTE, ID_SYMBOL_HALO_COLOR_ATTRIBUTE,
+    ID_SYMBOL_HALO_WIDTH_ATTRIBUTE, ID_SYMBOL_OPACITY_ATTRIBUTE,
+};
 use crate::symbol::format_section_override::SymbolLayerPaintPropertyOverrides;
 use crate::symbol::instance::{SymbolInstance, SymbolInstancePools, WritingModes};
 use crate::symbol::pool::PoolRange;

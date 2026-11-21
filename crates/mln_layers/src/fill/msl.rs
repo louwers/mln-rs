@@ -2,14 +2,14 @@
 
 use mln_gfx::gfx_types::AttributeDataType::{Float2, Float4, Short2, UShort4};
 use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::shader_defines::{
+use mln_gfx::shaders::source::msl::{Attribute, Msl, Source, Texture};
+
+use super::programs;
+use super::programs::{
     FILL_LAYER_UBO_COUNT, ID_FILL_COLOR_VERTEX_ATTRIBUTE, ID_FILL_IMAGE_TEXTURE, ID_FILL_OPACITY_VERTEX_ATTRIBUTE,
     ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE, ID_FILL_OUTLINE_END_ATTRIBUTE, ID_FILL_OUTLINE_POS_ATTRIBUTE,
     ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE, ID_FILL_POS_VERTEX_ATTRIBUTE,
 };
-use mln_gfx::shaders::source::msl::{Attribute, Msl, Source, Texture};
-
-use super::programs;
 
 const FILL_UBO_COUNT: usize = FILL_LAYER_UBO_COUNT;
 

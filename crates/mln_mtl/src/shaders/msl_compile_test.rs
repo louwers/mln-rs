@@ -13,9 +13,42 @@ use std::mem::size_of;
 
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::shaders::program::{GLOBE_DEFINE, Program};
-use mln_gfx::shaders::shader_defines::*;
+use mln_gfx::shaders::programs::{
+    ID_ATMOSPHERE_PROPS_UBO, ID_LAYER_COMPOSITE_UBO, ID_SKY_PROPS_UBO, ID_TILE_DEBUG_DRAWABLE_UBO,
+    ID_TILE_DEBUG_PROPS_UBO,
+};
+use mln_gfx::shaders::shader_defines::{
+    DRAWABLE_RESERVED_UBO_COUNT, ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO, ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO,
+    ID_GLOBAL_PAINT_PARAMS_UBO, ID_GLOBAL_UBO_INDEX, ID_PROJECTION_UBO,
+};
 use mln_gfx::shaders::source::msl;
 use mln_gfx::shaders::*;
+use mln_layers::background::programs::{ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_PROPS_UBO};
+use mln_layers::circle::programs::{ID_CIRCLE_DRAWABLE_UBO, ID_CIRCLE_EVALUATED_PROPS_UBO};
+use mln_layers::color_relief::programs::{
+    ID_COLOR_RELIEF_DRAWABLE_UBO, ID_COLOR_RELIEF_EVALUATED_PROPS_UBO, ID_COLOR_RELIEF_TILE_PROPS_UBO,
+};
+use mln_layers::fill::programs::{
+    ID_FILL_DRAWABLE_UBO, ID_FILL_EVALUATED_PROPS_UBO, ID_FILL_OUTLINE_ENDS, ID_FILL_OUTLINE_PAINT,
+    ID_FILL_OUTLINE_VERTICES, ID_FILL_TILE_PROPS_UBO,
+};
+use mln_layers::fill_extrusion::programs::{
+    ID_FILL_EXTRUSION_DRAWABLE_UBO, ID_FILL_EXTRUSION_PROPS_UBO, ID_FILL_EXTRUSION_TILE_PROPS_UBO,
+    ID_FILL_EXTRUSION_WALL_PAINT, ID_FILL_EXTRUSION_WALL_VERTICES,
+};
+use mln_layers::heatmap::programs::{
+    ID_HEATMAP_DRAWABLE_UBO, ID_HEATMAP_EVALUATED_PROPS_UBO, ID_HEATMAP_TEXTURE_PROPS_UBO,
+};
+use mln_layers::hillshade::programs::{
+    ID_HILLSHADE_DRAWABLE_UBO, ID_HILLSHADE_EVALUATED_PROPS_UBO, ID_HILLSHADE_PREPARE_DRAWABLE_UBO,
+    ID_HILLSHADE_PREPARE_TILE_PROPS_UBO, ID_HILLSHADE_TILE_PROPS_UBO,
+};
+use mln_layers::line::programs::{ID_LINE_DRAWABLE_UBO, ID_LINE_EVALUATED_PROPS_UBO, ID_LINE_TILE_PROPS_UBO};
+use mln_layers::raster::programs::{ID_RASTER_DRAWABLE_UBO, ID_RASTER_EVALUATED_PROPS_UBO};
+use mln_layers::symbol::programs::{
+    ID_COLLISION_DRAWABLE_UBO, ID_COLLISION_PROJECTION_UBO, ID_COLLISION_TILE_PROPS_UBO, ID_SYMBOL_DRAWABLE_UBO,
+    ID_SYMBOL_EVALUATED_PROPS_UBO, ID_SYMBOL_TILE_PROPS_UBO,
+};
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_foundation::{NSDictionary, NSObject, NSString};
@@ -266,7 +299,7 @@ fn ubo_ids(program: &Program, source: &msl::Source) -> Vec<(&'static str, usize)
             "lineUBOCount",
         ),
         "TileDebugShader" => (
-            &[("idTileDebugDrawableUBO", ID_LINE_DRAWABLE_UBO), ("idTileDebugPropsUBO", ID_LINE_EVALUATED_PROPS_UBO)],
+            &[("idTileDebugDrawableUBO", ID_TILE_DEBUG_DRAWABLE_UBO), ("idTileDebugPropsUBO", ID_TILE_DEBUG_PROPS_UBO)],
             "tileDebugUBOCount",
         ),
         "RasterShader" => (
