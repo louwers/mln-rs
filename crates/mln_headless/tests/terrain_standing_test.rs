@@ -609,3 +609,46 @@ fn a_label_at_a_variable_anchor_collides_where_it_stands_on_the_ground() {
     assert!(lower_y - y > 30.0, "the label at sea level {} px lower", lower_y - y);
     assert_eq!(0, query(lower_x, lower_y), "nothing where the label would draw at sea level");
 }
+
+/// Over terrain, with the collision debug option on, a map with a label
+/// draws its frame, collision boxes and circles included.
+#[test]
+fn collision_boxes_draw_over_terrain() {
+    use mln_map::MapDebugOptions;
+
+    let center = LatLng::new(0.0, 0.0).unwrap();
+    let style = r#"{
+        "version": 8,
+        "glyphs": "glyphs/{fontstack}/{range}.pbf",
+        "terrain": {"source": "dem"},
+        "sources": {
+            "dem": {"type": "raster-dem", "tiles": ["dem/{z}/{x}/{y}.png"], "tileSize": 256, "maxzoom": 14},
+            "points": {"type": "geojson", "data": {"type": "LineString", "coordinates": [[-0.01, 0], [0.01, 0]]}}
+        },
+        "layers": [
+            {"id": "background", "type": "background", "paint": {"background-color": "white"}},
+            {
+                "id": "point",
+                "type": "symbol",
+                "source": "points",
+                "layout": {"text-field": "HH", "text-font": ["Open Sans Regular"], "symbol-placement": "point"},
+                "paint": {"text-color": "red"}
+            },
+            {
+                "id": "line",
+                "type": "symbol",
+                "source": "points",
+                "layout": {"text-field": "HH", "text-font": ["Open Sans Regular"], "symbol-placement": "line"},
+                "paint": {"text-color": "red"}
+            }
+        ]
+    }"#;
+    let camera = CameraOptions { center: Some(center), zoom: Some(14.0), pitch: Some(60.0), ..Default::default() };
+    let Some((plain, mut map, _, mut frontend)) = render_with_frontend(style, &[camera], |_| dem_png(METERS_300))
+    else {
+        return;
+    };
+    map.set_debug(MapDebugOptions::COLLISION);
+    let debug = frontend.render(&mut map).expect("a frame with the collision boxes").image;
+    assert_ne!(plain.data, debug.data, "no collision box drew");
+}

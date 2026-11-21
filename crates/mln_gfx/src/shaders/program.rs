@@ -10,6 +10,7 @@ use crate::gfx_types::AttributeDataType;
 use crate::gpu::{GpuError, ShaderKey};
 use crate::projection_variant::ProjectionVariant;
 use crate::shaders::program_parameters::ProgramParameters;
+use crate::shaders::programs::projection_variants;
 
 /// A program: the attributes, textures and paint properties its shader
 /// reads.
@@ -56,7 +57,10 @@ impl Program {
     /// `variant`'s projection. It has the parameters' defines
     /// (`DEVICE_PIXEL_RATIO=<ratio>`), a `HAS_UNIFORM_u_<name>` define for
     /// each of `uniforms`, and the globe's or the terrain's define for those
-    /// variants.
+    /// variants. A program without a terrain variant
+    /// ([`projection_variants`]), such as a standing layer's collision boxes
+    /// or composite, gets its Mercator key for the terrain's projection: it
+    /// draws flat whatever its layer stands on.
     #[must_use]
     pub fn variant_key<'a>(
         &'static self,
@@ -70,6 +74,7 @@ impl Program {
             .map(|(name, value)| if value.is_empty() { name.clone() } else { format!("{name}={value}") });
         let uniforms = uniforms.into_iter().map(|property| format!("HAS_UNIFORM_u_{}", property.name));
         let projection = match variant {
+            ProjectionVariant::Terrain if !projection_variants(self).contains(&variant) => None,
             ProjectionVariant::Mercator => None,
             ProjectionVariant::Globe => Some(GLOBE_DEFINE.to_owned()),
             ProjectionVariant::Terrain => Some(TERRAIN_DEFINE.to_owned()),

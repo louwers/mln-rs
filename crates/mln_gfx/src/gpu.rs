@@ -810,6 +810,23 @@ mod tests {
         }
     }
 
+    // A program without a terrain variant, such as the collision boxes a
+    // standing symbol layer draws, keys its Mercator variant over terrain.
+    #[test]
+    fn only_a_standing_program_keys_a_terrain_variant() {
+        use crate::projection_variant::ProjectionVariant::{Mercator, Terrain};
+        use crate::shaders::program_parameters::ProgramParameters;
+
+        let parameters = ProgramParameters::new(1.0, false);
+        let key = |program: &'static Program, variant| program.variant_key(&parameters, [], variant);
+        for program in [&programs::COLLISION_BOX, &programs::COLLISION_CIRCLE, &programs::HEATMAP_TEXTURE] {
+            assert_eq!(key(program, Terrain), key(program, Mercator), "{program:?}");
+        }
+        for program in [&programs::SYMBOL_SDF, &programs::CIRCLE] {
+            assert_ne!(key(program, Terrain), key(program, Mercator), "{program:?}");
+        }
+    }
+
     #[test]
     fn texture_writes_fit_their_region_and_texture() {
         let size = Size { width: 4, height: 2 };
