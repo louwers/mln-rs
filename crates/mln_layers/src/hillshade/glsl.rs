@@ -1,39 +1,6 @@
 //! The programs of the `hillshade` layer type in GLSL, which `mln_glsl` parses for `mln_vulkan` and `mln_d3d12`.
 
-use mln_gfx::gfx_types::AttributeDataType::Short2;
-use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::source::glsl::{Attribute, Glsl, Source, Texture};
-
-use super::programs;
-use super::programs::{
-    ID_HILLSHADE_IMAGE_TEXTURE, ID_HILLSHADE_POS_VERTEX_ATTRIBUTE, ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE,
-};
-
-const HILLSHADE_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(0, Short2, ID_HILLSHADE_POS_VERTEX_ATTRIBUTE),
-    Attribute::new(1, Short2, ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE),
-];
-const HILLSHADE_PREPARE_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(0, Short2, ID_HILLSHADE_POS_VERTEX_ATTRIBUTE),
-    Attribute::new(1, Short2, ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE),
-];
-const HILLSHADE_TEXTURES: &[Texture] = &[Texture::new(0, ID_HILLSHADE_IMAGE_TEXTURE)];
-static HILLSHADE: Source = Source {
-    glsl: &HILLSHADE_SHADER,
-    attributes: HILLSHADE_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: HILLSHADE_TEXTURES,
-};
-static HILLSHADE_PREPARE: Source = Source {
-    glsl: &HILLSHADE_PREPARE_SHADER,
-    attributes: HILLSHADE_PREPARE_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: HILLSHADE_TEXTURES,
-};
-
-/// The source of each of the type's programs.
-pub(super) static SOURCES: &[(&Program, &Source)] =
-    &[(&programs::HILLSHADE, &HILLSHADE), (&programs::HILLSHADE_PREPARE, &HILLSHADE_PREPARE)];
+use mln_gfx::shaders::source::glsl::Glsl;
 
 const HILLSHADE_SHADER_PRELUDE: &str = r"
 
@@ -43,7 +10,7 @@ const HILLSHADE_SHADER_PRELUDE: &str = r"
 
 ";
 
-const HILLSHADE_SHADER: Glsl = Glsl {
+pub(super) const HILLSHADE_SHADER: Glsl = Glsl {
     prelude: HILLSHADE_SHADER_PRELUDE,
     vertex: r"
 
@@ -283,7 +250,7 @@ const HILLSHADE_PREPARE_SHADER_PRELUDE: &str = r"
 
 ";
 
-const HILLSHADE_PREPARE_SHADER: Glsl = Glsl {
+pub(super) const HILLSHADE_PREPARE_SHADER: Glsl = Glsl {
     prelude: HILLSHADE_PREPARE_SHADER_PRELUDE,
     vertex: r"
 

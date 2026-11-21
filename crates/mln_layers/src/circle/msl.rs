@@ -1,37 +1,8 @@
 //! The programs of the `circle` layer type in MSL, for `mln_mtl`.
 
-use mln_gfx::gfx_types::AttributeDataType::{Float2, Float4, Short2};
-use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::source::msl::{Attribute, Msl, Source};
+use mln_gfx::shaders::source::msl::Msl;
 
-use super::programs;
-use super::programs::{
-    CIRCLE_LAYER_UBO_COUNT, ID_CIRCLE_BLUR_VERTEX_ATTRIBUTE, ID_CIRCLE_COLOR_VERTEX_ATTRIBUTE,
-    ID_CIRCLE_OPACITY_VERTEX_ATTRIBUTE, ID_CIRCLE_POS_VERTEX_ATTRIBUTE, ID_CIRCLE_RADIUS_VERTEX_ATTRIBUTE,
-    ID_CIRCLE_STROKE_COLOR_VERTEX_ATTRIBUTE, ID_CIRCLE_STROKE_OPACITY_VERTEX_ATTRIBUTE,
-    ID_CIRCLE_STROKE_WIDTH_VERTEX_ATTRIBUTE,
-};
-
-const CIRCLE_UBO_COUNT: usize = CIRCLE_LAYER_UBO_COUNT;
-
-const CIRCLE_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(0, Short2, CIRCLE_UBO_COUNT, ID_CIRCLE_POS_VERTEX_ATTRIBUTE),
-    // Data driven
-    Attribute::new(1, Float4, CIRCLE_UBO_COUNT + 1, ID_CIRCLE_COLOR_VERTEX_ATTRIBUTE),
-    Attribute::new(2, Float2, CIRCLE_UBO_COUNT + 1, ID_CIRCLE_RADIUS_VERTEX_ATTRIBUTE),
-    Attribute::new(3, Float2, CIRCLE_UBO_COUNT + 1, ID_CIRCLE_BLUR_VERTEX_ATTRIBUTE),
-    Attribute::new(4, Float2, CIRCLE_UBO_COUNT + 1, ID_CIRCLE_OPACITY_VERTEX_ATTRIBUTE),
-    Attribute::new(5, Float4, CIRCLE_UBO_COUNT + 1, ID_CIRCLE_STROKE_COLOR_VERTEX_ATTRIBUTE),
-    Attribute::new(6, Float2, CIRCLE_UBO_COUNT + 1, ID_CIRCLE_STROKE_WIDTH_VERTEX_ATTRIBUTE),
-    Attribute::new(7, Float2, CIRCLE_UBO_COUNT + 1, ID_CIRCLE_STROKE_OPACITY_VERTEX_ATTRIBUTE),
-];
-static CIRCLE: Source =
-    Source { msl: &CIRCLE_SHADER, attributes: CIRCLE_ATTRIBUTES, instance_attributes: &[], textures: &[] };
-
-/// The source of each of the type's programs.
-pub(super) static SOURCES: &[(&Program, &Source)] = &[(&programs::CIRCLE, &CIRCLE)];
-
-const CIRCLE_SHADER: Msl = Msl {
+pub(super) const CIRCLE_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"

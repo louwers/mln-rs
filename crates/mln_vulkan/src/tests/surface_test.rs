@@ -40,7 +40,7 @@ use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::types::DepthFunctionType;
-use mln_layers::background::programs::{BACKGROUND, ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_PROPS_UBO};
+use mln_layers::background::programs::BACKGROUND;
 use mln_layers::background::ubo::{BackgroundDrawableUBO, BackgroundDrawableUnionUBO, BackgroundPropsUBO};
 use mln_util::Color;
 use mln_util::error::Error;
@@ -187,6 +187,11 @@ struct Scene {
     bindings: BindingsId,
 }
 
+/// The id of the background program's buffer `name`.
+fn buffer_id(name: &str) -> usize {
+    BACKGROUND.buffer_named(name).expect("the background program's buffer").id
+}
+
 /// A buffer of `usage` holding `data`.
 fn buffer(gpu: &mut VulkanGpu, usage: BufferUsage, data: &[u8]) -> BufferId {
     let buffer = gpu.create_buffer(&BufferDesc { label: "scene", usage, size: data.len() as u64 }).expect("buffer");
@@ -197,12 +202,11 @@ fn buffer(gpu: &mut VulkanGpu, usage: BufferUsage, data: &[u8]) -> BufferId {
 impl Scene {
     fn new(backend: &mut Window) -> Scene {
         let gpu = backend.backend.gpu();
-        gpu.add_shader_sources(&mln_layers::shader_sources());
         let program = &BACKGROUND;
         let parameters = ProgramParameters::new(1.0, false);
         let key = program.variant_key(&parameters, [], ProjectionVariant::Mercator);
         let shader = gpu.create_shader(&key).expect("the shader");
-        let (attribute, _) = program.attributes[0];
+        let attribute = program.attributes[0].id;
         let layouts = [VertexBufferLayout {
             stride: 4,
             step: VertexStep::Vertex,
@@ -220,8 +224,8 @@ impl Scene {
             size: size as u64,
         };
         let entries = [
-            entry(ID_BACKGROUND_PROPS_UBO, props, size_of::<BackgroundPropsUBO>()),
-            entry(ID_BACKGROUND_DRAWABLE_UBO, drawable, size_of::<BackgroundDrawableUnionUBO>()),
+            entry(buffer_id("BackgroundPropsUBO"), props, size_of::<BackgroundPropsUBO>()),
+            entry(buffer_id("BackgroundDrawableUBO"), drawable, size_of::<BackgroundDrawableUnionUBO>()),
             entry(ID_PROJECTION_UBO, projection, size_of::<ProjectionUBO>()),
         ];
         let vertices = buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&tile_vertices));

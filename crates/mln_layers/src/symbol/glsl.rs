@@ -9,21 +9,7 @@
 //!   anchor is behind the horizon outside the clip volume, unless the label
 //!   is raised.
 
-use mln_gfx::gfx_types::AttributeDataType::{Float, Float2, Float3, Float4, Short2, Short4, UShort2, UShort4};
-use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::source::glsl::{Attribute, Glsl, Source, Texture};
-
-use super::programs;
-use super::programs::{
-    ID_COLLISION_ANCHOR_POS_VERTEX_ATTRIBUTE, ID_COLLISION_EXTRUDE_VERTEX_ATTRIBUTE,
-    ID_COLLISION_HEIGHT_OFFSET_VERTEX_ATTRIBUTE, ID_COLLISION_PLACED_VERTEX_ATTRIBUTE,
-    ID_COLLISION_POS_VERTEX_ATTRIBUTE, ID_COLLISION_SHIFT_VERTEX_ATTRIBUTE, ID_SYMBOL_COLOR_ATTRIBUTE,
-    ID_SYMBOL_DATA_ATTRIBUTE, ID_SYMBOL_FADE_OPACITY_ATTRIBUTE, ID_SYMBOL_HALO_BLUR_ATTRIBUTE,
-    ID_SYMBOL_HALO_COLOR_ATTRIBUTE, ID_SYMBOL_HALO_WIDTH_ATTRIBUTE, ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE,
-    ID_SYMBOL_IMAGE_ICON_TEXTURE, ID_SYMBOL_IMAGE_TEXTURE, ID_SYMBOL_OPACITY_ATTRIBUTE,
-    ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE, ID_SYMBOL_POS_OFFSET_ATTRIBUTE, ID_SYMBOL_PROJECTED_POS_ATTRIBUTE,
-    ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE,
-};
+use mln_gfx::shaders::source::glsl::Glsl;
 
 /// `unpack_opacity`, a symbol's fade opacity and whether it fades in, from
 /// the packed value of its vertex.
@@ -38,126 +24,6 @@ vec2 unpack_opacity(const float packedOpacity) {
     };
 }
 
-const COLLISION_BOX_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(0, Short2, ID_COLLISION_POS_VERTEX_ATTRIBUTE),
-    Attribute::new(1, Short2, ID_COLLISION_ANCHOR_POS_VERTEX_ATTRIBUTE),
-    Attribute::new(2, Short2, ID_COLLISION_EXTRUDE_VERTEX_ATTRIBUTE),
-    // Dynamic
-    Attribute::new(3, UShort2, ID_COLLISION_PLACED_VERTEX_ATTRIBUTE),
-    Attribute::new(4, Float2, ID_COLLISION_SHIFT_VERTEX_ATTRIBUTE),
-    // Layout
-    Attribute::new(5, Float, ID_COLLISION_HEIGHT_OFFSET_VERTEX_ATTRIBUTE),
-];
-
-const COLLISION_CIRCLE_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(0, Short2, ID_COLLISION_POS_VERTEX_ATTRIBUTE),
-    Attribute::new(1, Short2, ID_COLLISION_ANCHOR_POS_VERTEX_ATTRIBUTE),
-    Attribute::new(2, Short2, ID_COLLISION_EXTRUDE_VERTEX_ATTRIBUTE),
-    // Dynamic
-    Attribute::new(3, UShort2, ID_COLLISION_PLACED_VERTEX_ATTRIBUTE),
-];
-
-static COLLISION_BOX: Source = Source {
-    glsl: &COLLISION_BOX_SHADER,
-    attributes: COLLISION_BOX_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: &[],
-};
-
-static COLLISION_CIRCLE: Source = Source {
-    glsl: &COLLISION_CIRCLE_SHADER,
-    attributes: COLLISION_CIRCLE_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: &[],
-};
-
-// Symbols: the layout vertex (`SymbolLayoutVertex`, with `tex_origin`), the
-// dynamic vertex (`projected_pos`), the opacity vertex (`fade_opacity`) and
-// the interleaved data-driven vertex, in four buffers.
-const SYMBOL_ICON_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(0, Short4, ID_SYMBOL_POS_OFFSET_ATTRIBUTE),
-    Attribute::new(1, UShort4, ID_SYMBOL_DATA_ATTRIBUTE),
-    Attribute::new(2, Short4, ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE),
-    // Dynamic
-    Attribute::new(3, Float3, ID_SYMBOL_PROJECTED_POS_ATTRIBUTE),
-    // Opacity
-    Attribute::new(4, Float, ID_SYMBOL_FADE_OPACITY_ATTRIBUTE),
-    // Data driven
-    Attribute::new(5, Float2, ID_SYMBOL_OPACITY_ATTRIBUTE),
-    // Layout
-    Attribute::new(6, UShort2, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE),
-    Attribute::new(7, Float, ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE),
-];
-
-const SYMBOL_SDF_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(0, Short4, ID_SYMBOL_POS_OFFSET_ATTRIBUTE),
-    Attribute::new(1, UShort4, ID_SYMBOL_DATA_ATTRIBUTE),
-    Attribute::new(2, Short4, ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE),
-    // Dynamic
-    Attribute::new(3, Float3, ID_SYMBOL_PROJECTED_POS_ATTRIBUTE),
-    // Opacity
-    Attribute::new(4, Float, ID_SYMBOL_FADE_OPACITY_ATTRIBUTE),
-    // Data driven
-    Attribute::new(5, Float4, ID_SYMBOL_COLOR_ATTRIBUTE),
-    Attribute::new(6, Float4, ID_SYMBOL_HALO_COLOR_ATTRIBUTE),
-    Attribute::new(7, Float2, ID_SYMBOL_OPACITY_ATTRIBUTE),
-    Attribute::new(8, Float2, ID_SYMBOL_HALO_WIDTH_ATTRIBUTE),
-    Attribute::new(9, Float2, ID_SYMBOL_HALO_BLUR_ATTRIBUTE),
-    // Layout
-    Attribute::new(10, UShort2, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE),
-    Attribute::new(11, Float, ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE),
-];
-
-const SYMBOL_TEXT_AND_ICON_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(0, Short4, ID_SYMBOL_POS_OFFSET_ATTRIBUTE),
-    Attribute::new(1, UShort4, ID_SYMBOL_DATA_ATTRIBUTE),
-    // Dynamic
-    Attribute::new(2, Float3, ID_SYMBOL_PROJECTED_POS_ATTRIBUTE),
-    // Opacity
-    Attribute::new(3, Float, ID_SYMBOL_FADE_OPACITY_ATTRIBUTE),
-    // Data driven
-    Attribute::new(4, Float4, ID_SYMBOL_COLOR_ATTRIBUTE),
-    Attribute::new(5, Float4, ID_SYMBOL_HALO_COLOR_ATTRIBUTE),
-    Attribute::new(6, Float2, ID_SYMBOL_OPACITY_ATTRIBUTE),
-    Attribute::new(7, Float2, ID_SYMBOL_HALO_WIDTH_ATTRIBUTE),
-    Attribute::new(8, Float2, ID_SYMBOL_HALO_BLUR_ATTRIBUTE),
-    // Layout
-    Attribute::new(9, UShort2, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE),
-    Attribute::new(10, Float, ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE),
-];
-
-const SYMBOL_TEXTURES: &[Texture] = &[Texture::new(0, ID_SYMBOL_IMAGE_TEXTURE)];
-
-static SYMBOL_ICON: Source = Source {
-    glsl: &SYMBOL_ICON_SHADER,
-    attributes: SYMBOL_ICON_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: SYMBOL_TEXTURES,
-};
-
-static SYMBOL_SDF: Source = Source {
-    glsl: &SYMBOL_SDF_SHADER,
-    attributes: SYMBOL_SDF_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: SYMBOL_TEXTURES,
-};
-
-static SYMBOL_TEXT_AND_ICON: Source = Source {
-    glsl: &SYMBOL_TEXT_AND_ICON_SHADER,
-    attributes: SYMBOL_TEXT_AND_ICON_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: &[Texture::new(0, ID_SYMBOL_IMAGE_TEXTURE), Texture::new(1, ID_SYMBOL_IMAGE_ICON_TEXTURE)],
-};
-
-/// The source of each of the type's programs.
-pub(super) static SOURCES: &[(&Program, &Source)] = &[
-    (&programs::SYMBOL_ICON, &SYMBOL_ICON),
-    (&programs::SYMBOL_SDF, &SYMBOL_SDF),
-    (&programs::SYMBOL_TEXT_AND_ICON, &SYMBOL_TEXT_AND_ICON),
-    (&programs::COLLISION_BOX, &COLLISION_BOX),
-    (&programs::COLLISION_CIRCLE, &COLLISION_CIRCLE),
-];
-
 const COLLISION_SHADER_PRELUDE: &str = r"
 
 #define idCollisionDrawableUBO      drawableUBOStartId
@@ -166,7 +32,7 @@ const COLLISION_SHADER_PRELUDE: &str = r"
 
 ";
 
-const COLLISION_BOX_SHADER: Glsl = Glsl {
+pub(super) const COLLISION_BOX_SHADER: Glsl = Glsl {
     prelude: COLLISION_SHADER_PRELUDE,
     vertex: r"
 
@@ -251,7 +117,7 @@ void main() {
 ",
 };
 
-const COLLISION_CIRCLE_SHADER: Glsl = Glsl {
+pub(super) const COLLISION_CIRCLE_SHADER: Glsl = Glsl {
     prelude: COLLISION_SHADER_PRELUDE,
     vertex: r"
 
@@ -371,7 +237,7 @@ const SYMBOL_SHADER_PRELUDE: &str = concat!(
     unpack_opacity!()
 );
 
-const SYMBOL_ICON_SHADER: Glsl = Glsl {
+pub(super) const SYMBOL_ICON_SHADER: Glsl = Glsl {
     prelude: SYMBOL_SHADER_PRELUDE,
     vertex: r"
 
@@ -636,7 +502,7 @@ void main() {
 ",
 };
 
-const SYMBOL_SDF_SHADER: Glsl = Glsl {
+pub(super) const SYMBOL_SDF_SHADER: Glsl = Glsl {
     prelude: SYMBOL_SHADER_PRELUDE,
     vertex: r"
 
@@ -995,7 +861,7 @@ void main() {
 ",
 };
 
-const SYMBOL_TEXT_AND_ICON_SHADER: Glsl = Glsl {
+pub(super) const SYMBOL_TEXT_AND_ICON_SHADER: Glsl = Glsl {
     prelude: SYMBOL_SHADER_PRELUDE,
     vertex: r"
 

@@ -108,7 +108,7 @@ impl AtlasBinding {
 
     /// Whether `shader` samples the icon texture.
     fn samples_icon(&self, shader: &ShaderKey) -> bool {
-        self.icon_texture_id.is_some_and(|id| shader.program().textures.contains(&usize::from(id)))
+        self.icon_texture_id.is_some_and(|id| usize::from(id) < shader.program().textures.len())
     }
 }
 

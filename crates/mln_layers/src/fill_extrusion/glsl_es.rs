@@ -1,20 +1,6 @@
 //! The programs of the `fill-extrusion` layer type in GLSL ES, for `mln_gl`.
 
-use mln_gfx::shaders::layer_ubo::{GlobalPaintParamsUBO, ProjectionUBO};
-use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::shader_defines::{ID_GLOBAL_PAINT_PARAMS_UBO, ID_PROJECTION_UBO};
-use mln_gfx::shaders::source::glsl_es::{Attribute, Glsl, Source, Texture, UniformBlock};
-
-use super::programs;
-use super::programs::{
-    ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE,
-    ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_DRAWABLE_UBO, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE,
-    ID_FILL_EXTRUSION_IMAGE_TEXTURE, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE,
-    ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE, ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE,
-    ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE,
-    ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_PROPS_UBO, ID_FILL_EXTRUSION_TILE_PROPS_UBO,
-};
-use super::ubo::{FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO};
+use mln_gfx::shaders::source::glsl_es::Glsl;
 
 /// `wall_normal`, the normal at a wall's end from its outline vertex's
 /// `decimals_ed.x`: the one the walls there share, or else `own`, the
@@ -33,149 +19,7 @@ vec2 wall_normal(const float bits, const vec2 own) {
     };
 }
 
-// Fill Extrusion: the roofs
-const FILL_EXTRUSION_BLOCKS: &[UniformBlock] = &[
-    UniformBlock::element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
-    UniformBlock::element::<FillExtrusionDrawableUBO, FillExtrusionDrawableUBO>(
-        "FillExtrusionDrawableUBO",
-        ID_FILL_EXTRUSION_DRAWABLE_UBO,
-    ),
-    UniformBlock::element::<FillExtrusionTilePropsUBO, FillExtrusionTilePropsUBO>(
-        "FillExtrusionTilePropsUBO",
-        ID_FILL_EXTRUSION_TILE_PROPS_UBO,
-    ),
-    UniformBlock::new::<FillExtrusionPropsUBO>("FillExtrusionPropsUBO", ID_FILL_EXTRUSION_PROPS_UBO),
-];
-static FILL_EXTRUSION: Source = Source {
-    glsl: &FILL_EXTRUSION_SHADER,
-    uniform_blocks: FILL_EXTRUSION_BLOCKS,
-    attributes: &[
-        Attribute::new("a_pos", ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE),
-        Attribute::new("a_decimals_ed", ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
-        Attribute::new("a_base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
-        Attribute::new("a_height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
-        Attribute::new("a_color", ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
-    ],
-    instance_attributes: &[],
-    textures: &[],
-};
-
-// Fill Extrusion Instanced: the walls, an instance per outline vertex
-const FILL_EXTRUSION_INSTANCED_ATTRIBUTES: &[Attribute] =
-    &[Attribute::new("a_pos", ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE)];
-static FILL_EXTRUSION_INSTANCED: Source = Source {
-    glsl: &FILL_EXTRUSION_INSTANCED_SHADER,
-    uniform_blocks: FILL_EXTRUSION_BLOCKS,
-    attributes: FILL_EXTRUSION_INSTANCED_ATTRIBUTES,
-    instance_attributes: &[
-        Attribute::new("a_outline_pos", ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE),
-        Attribute::new("a_decimals_ed", ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
-        Attribute::new("a_next_outline_pos", ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE),
-        Attribute::new("a_next_decimals_ed", ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE),
-        Attribute::new("a_base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
-        Attribute::new("a_height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
-        Attribute::new("a_color", ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
-    ],
-    textures: &[],
-};
-
-// Fill Extrusion Wall: the instanced walls' GLSL with every attribute per
-// vertex, for walls whose quads are in the vertex buffer
-static FILL_EXTRUSION_WALL: Source = Source {
-    glsl: &FILL_EXTRUSION_INSTANCED_SHADER,
-    uniform_blocks: FILL_EXTRUSION_BLOCKS,
-    attributes: &[
-        Attribute::new("a_pos", ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE),
-        Attribute::new("a_outline_pos", ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE),
-        Attribute::new("a_decimals_ed", ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
-        Attribute::new("a_next_outline_pos", ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE),
-        Attribute::new("a_next_decimals_ed", ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE),
-        Attribute::new("a_base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
-        Attribute::new("a_height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
-        Attribute::new("a_color", ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
-    ],
-    instance_attributes: &[],
-    textures: &[],
-};
-
-// Fill Extrusion Pattern: the roofs
-const FILL_EXTRUSION_PATTERN_BLOCKS: &[UniformBlock] = &[
-    UniformBlock::element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
-    UniformBlock::new::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
-    UniformBlock::element::<FillExtrusionDrawableUBO, FillExtrusionDrawableUBO>(
-        "FillExtrusionDrawableUBO",
-        ID_FILL_EXTRUSION_DRAWABLE_UBO,
-    ),
-    UniformBlock::element::<FillExtrusionTilePropsUBO, FillExtrusionTilePropsUBO>(
-        "FillExtrusionTilePropsUBO",
-        ID_FILL_EXTRUSION_TILE_PROPS_UBO,
-    ),
-    UniformBlock::new::<FillExtrusionPropsUBO>("FillExtrusionPropsUBO", ID_FILL_EXTRUSION_PROPS_UBO),
-];
-const FILL_EXTRUSION_PATTERN_TEXTURES: &[Texture] = &[Texture::new("u_image", ID_FILL_EXTRUSION_IMAGE_TEXTURE)];
-static FILL_EXTRUSION_PATTERN: Source = Source {
-    glsl: &FILL_EXTRUSION_PATTERN_SHADER,
-    uniform_blocks: FILL_EXTRUSION_PATTERN_BLOCKS,
-    attributes: &[
-        Attribute::new("a_pos", ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE),
-        Attribute::new("a_decimals_ed", ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
-        Attribute::new("a_base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
-        Attribute::new("a_height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
-        Attribute::new("a_pattern_from", ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE),
-        Attribute::new("a_pattern_to", ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE),
-    ],
-    instance_attributes: &[],
-    textures: FILL_EXTRUSION_PATTERN_TEXTURES,
-};
-
-// Fill Extrusion Pattern Instanced: the walls
-static FILL_EXTRUSION_PATTERN_INSTANCED: Source = Source {
-    glsl: &FILL_EXTRUSION_PATTERN_INSTANCED_SHADER,
-    uniform_blocks: FILL_EXTRUSION_PATTERN_BLOCKS,
-    attributes: FILL_EXTRUSION_INSTANCED_ATTRIBUTES,
-    instance_attributes: &[
-        Attribute::new("a_outline_pos", ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE),
-        Attribute::new("a_decimals_ed", ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
-        Attribute::new("a_next_outline_pos", ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE),
-        Attribute::new("a_next_decimals_ed", ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE),
-        Attribute::new("a_base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
-        Attribute::new("a_height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
-        Attribute::new("a_pattern_from", ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE),
-        Attribute::new("a_pattern_to", ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE),
-    ],
-    textures: FILL_EXTRUSION_PATTERN_TEXTURES,
-};
-
-// Fill Extrusion Pattern Wall: as Fill Extrusion Wall
-static FILL_EXTRUSION_PATTERN_WALL: Source = Source {
-    glsl: &FILL_EXTRUSION_PATTERN_INSTANCED_SHADER,
-    uniform_blocks: FILL_EXTRUSION_PATTERN_BLOCKS,
-    attributes: &[
-        Attribute::new("a_pos", ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE),
-        Attribute::new("a_outline_pos", ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE),
-        Attribute::new("a_decimals_ed", ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
-        Attribute::new("a_next_outline_pos", ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE),
-        Attribute::new("a_next_decimals_ed", ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE),
-        Attribute::new("a_base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
-        Attribute::new("a_height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
-        Attribute::new("a_pattern_from", ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE),
-        Attribute::new("a_pattern_to", ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE),
-    ],
-    instance_attributes: &[],
-    textures: FILL_EXTRUSION_PATTERN_TEXTURES,
-};
-
-/// The source of each of the type's programs.
-pub(super) static SOURCES: &[(&Program, &Source)] = &[
-    (&programs::FILL_EXTRUSION, &FILL_EXTRUSION),
-    (&programs::FILL_EXTRUSION_INSTANCED, &FILL_EXTRUSION_INSTANCED),
-    (&programs::FILL_EXTRUSION_WALL, &FILL_EXTRUSION_WALL),
-    (&programs::FILL_EXTRUSION_PATTERN, &FILL_EXTRUSION_PATTERN),
-    (&programs::FILL_EXTRUSION_PATTERN_INSTANCED, &FILL_EXTRUSION_PATTERN_INSTANCED),
-    (&programs::FILL_EXTRUSION_PATTERN_WALL, &FILL_EXTRUSION_PATTERN_WALL),
-];
-
-const FILL_EXTRUSION_INSTANCED_SHADER: Glsl = Glsl {
+pub(super) const FILL_EXTRUSION_INSTANCED_SHADER: Glsl = Glsl {
     vertex: concat!(
         wall_normal!(),
         r"invariant gl_Position;
@@ -325,7 +169,7 @@ void main() {
 ",
 };
 
-const FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: Glsl = Glsl {
+pub(super) const FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: Glsl = Glsl {
     vertex: concat!(
         wall_normal!(),
         r"invariant gl_Position;
@@ -578,7 +422,7 @@ highp vec4 pattern_to = u_pattern_to;
 ",
 };
 
-const FILL_EXTRUSION_PATTERN_SHADER: Glsl = Glsl {
+pub(super) const FILL_EXTRUSION_PATTERN_SHADER: Glsl = Glsl {
     vertex: r"invariant gl_Position;
 
 layout (location = 0) in vec2 a_pos;
@@ -812,7 +656,7 @@ highp vec4 pattern_to = u_pattern_to;
 ",
 };
 
-const FILL_EXTRUSION_SHADER: Glsl = Glsl {
+pub(super) const FILL_EXTRUSION_SHADER: Glsl = Glsl {
     vertex: r"invariant gl_Position;
 
 layout (location = 0) in vec2 a_pos;

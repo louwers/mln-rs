@@ -1,36 +1,8 @@
 //! The programs of the `heatmap` layer type in WGSL, for `mln_webgpu`.
 
-use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::source::wgsl::{Attribute, Source, Texture, Wgsl};
+use mln_gfx::shaders::source::wgsl::Wgsl;
 
-use super::programs;
-use super::programs::{
-    ID_HEATMAP_COLOR_RAMP_TEXTURE, ID_HEATMAP_IMAGE_TEXTURE, ID_HEATMAP_POS_VERTEX_ATTRIBUTE,
-    ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE, ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE,
-};
-
-const HEATMAP_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(0, ID_HEATMAP_POS_VERTEX_ATTRIBUTE),
-    Attribute::new(1, ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE),
-    Attribute::new(2, ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE),
-];
-static HEATMAP: Source =
-    Source { wgsl: &HEATMAP_SHADER, attributes: HEATMAP_ATTRIBUTES, instance_attributes: &[], textures: &[] };
-const HEATMAP_TEXTURE_ATTRIBUTES: &[Attribute] = &[Attribute::new(5, ID_HEATMAP_POS_VERTEX_ATTRIBUTE)];
-const HEATMAP_TEXTURE_TEXTURES: &[Texture] =
-    &[Texture::new(0, ID_HEATMAP_IMAGE_TEXTURE), Texture::new(1, ID_HEATMAP_COLOR_RAMP_TEXTURE)];
-static HEATMAP_TEXTURE: Source = Source {
-    wgsl: &HEATMAP_TEXTURE_SHADER,
-    attributes: HEATMAP_TEXTURE_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: HEATMAP_TEXTURE_TEXTURES,
-};
-
-/// The source of each of the type's programs.
-pub(super) static SOURCES: &[(&Program, &Source)] =
-    &[(&programs::HEATMAP, &HEATMAP), (&programs::HEATMAP_TEXTURE, &HEATMAP_TEXTURE)];
-
-const HEATMAP_SHADER: Wgsl = Wgsl {
+pub(super) const HEATMAP_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 struct VertexInput {
@@ -162,11 +134,11 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-const HEATMAP_TEXTURE_SHADER: Wgsl = Wgsl {
+pub(super) const HEATMAP_TEXTURE_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 struct VertexInput {
-    @location(5) position: vec2<i32>,
+    @location(0) position: vec2<i32>,
 };
 
 struct VertexOutput {

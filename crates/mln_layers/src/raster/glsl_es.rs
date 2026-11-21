@@ -1,37 +1,8 @@
 //! The programs of the `raster` layer type in GLSL ES, for `mln_gl`.
 
-use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
-use mln_gfx::shaders::source::glsl_es::{Attribute, Glsl, Source, Texture, UniformBlock};
+use mln_gfx::shaders::source::glsl_es::Glsl;
 
-use super::programs;
-use super::programs::{
-    ID_RASTER_DRAWABLE_UBO, ID_RASTER_EVALUATED_PROPS_UBO, ID_RASTER_IMAGE0_TEXTURE, ID_RASTER_IMAGE1_TEXTURE,
-    ID_RASTER_POS_VERTEX_ATTRIBUTE, ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE,
-};
-use super::ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
-
-// Raster
-static RASTER: Source = Source {
-    glsl: &RASTER_SHADER,
-    uniform_blocks: &[
-        UniformBlock::element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
-        UniformBlock::element::<RasterDrawableUBO, RasterDrawableUBO>("RasterDrawableUBO", ID_RASTER_DRAWABLE_UBO),
-        UniformBlock::new::<RasterEvaluatedPropsUBO>("RasterEvaluatedPropsUBO", ID_RASTER_EVALUATED_PROPS_UBO),
-    ],
-    attributes: &[
-        Attribute::new("a_pos", ID_RASTER_POS_VERTEX_ATTRIBUTE),
-        Attribute::new("a_texture_pos", ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE),
-    ],
-    instance_attributes: &[],
-    textures: &[Texture::new("u_image0", ID_RASTER_IMAGE0_TEXTURE), Texture::new("u_image1", ID_RASTER_IMAGE1_TEXTURE)],
-};
-
-/// The source of each of the type's programs.
-pub(super) static SOURCES: &[(&Program, &Source)] = &[(&programs::RASTER, &RASTER)];
-
-const RASTER_SHADER: Glsl = Glsl {
+pub(super) const RASTER_SHADER: Glsl = Glsl {
     vertex: r"layout (std140) uniform RasterDrawableUBO {
     highp mat4 u_matrix;
 };

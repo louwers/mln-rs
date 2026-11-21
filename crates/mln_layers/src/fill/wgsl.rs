@@ -14,109 +14,24 @@
 //! quad, and the segment's ends and paint values come from the buffers that
 //! hold them for the fill, bound as storage buffers.
 
-use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::source::wgsl::{Attribute, Source, Texture, Wgsl};
+use mln_gfx::shaders::source::wgsl::Wgsl;
 
-use super::programs;
-use super::programs::{
-    ID_FILL_COLOR_VERTEX_ATTRIBUTE, ID_FILL_IMAGE_TEXTURE, ID_FILL_OPACITY_VERTEX_ATTRIBUTE,
-    ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE, ID_FILL_OUTLINE_END_ATTRIBUTE, ID_FILL_OUTLINE_POS_ATTRIBUTE,
-    ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE, ID_FILL_POS_VERTEX_ATTRIBUTE,
-};
-
-const FILL_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(0, ID_FILL_POS_VERTEX_ATTRIBUTE),
-    Attribute::new(1, ID_FILL_COLOR_VERTEX_ATTRIBUTE),
-    Attribute::new(2, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
-];
-const FILL_OUTLINE_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(0, ID_FILL_POS_VERTEX_ATTRIBUTE),
-    Attribute::new(1, ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE),
-    Attribute::new(2, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
-];
-const FILL_PATTERN_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(4, ID_FILL_POS_VERTEX_ATTRIBUTE),
-    Attribute::new(5, ID_FILL_COLOR_VERTEX_ATTRIBUTE),
-    Attribute::new(6, ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE),
-    Attribute::new(7, ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE),
-    Attribute::new(8, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
-];
-const FILL_PATTERN_TEXTURES: &[Texture] = &[Texture::new(0, ID_FILL_IMAGE_TEXTURE)];
-// An instance of the instanced outline shaders is a segment of an outline:
-// a vertex and the end of its segment. The quad's corner is the vertex.
-const FILL_OUTLINE_INSTANCED_ATTRIBUTES: &[Attribute] = &[Attribute::new(0, ID_FILL_POS_VERTEX_ATTRIBUTE)];
-const FILL_OUTLINE_INSTANCED_INSTANCE_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(1, ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE),
-    Attribute::new(2, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
-    Attribute::new(3, ID_FILL_OUTLINE_POS_ATTRIBUTE),
-    Attribute::new(4, ID_FILL_OUTLINE_END_ATTRIBUTE),
-];
-const FILL_OUTLINE_PATTERN_INSTANCED_INSTANCE_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(5, ID_FILL_COLOR_VERTEX_ATTRIBUTE),
-    Attribute::new(6, ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE),
-    Attribute::new(7, ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE),
-    Attribute::new(8, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
-    Attribute::new(9, ID_FILL_OUTLINE_POS_ATTRIBUTE),
-    Attribute::new(10, ID_FILL_OUTLINE_END_ATTRIBUTE),
-];
-static FILL_OUTLINE_INSTANCED: Source = Source {
-    wgsl: &FILL_OUTLINE_INSTANCED_SHADER,
-    attributes: FILL_OUTLINE_INSTANCED_ATTRIBUTES,
-    instance_attributes: FILL_OUTLINE_INSTANCED_INSTANCE_ATTRIBUTES,
-    textures: &[],
-};
-static FILL_OUTLINE_PULLED: Source =
-    Source { wgsl: &FILL_OUTLINE_PULLED_SHADER, attributes: &[], instance_attributes: &[], textures: &[] };
-static FILL_OUTLINE_PATTERN_INSTANCED: Source = Source {
-    wgsl: &FILL_OUTLINE_PATTERN_INSTANCED_SHADER,
-    attributes: FILL_OUTLINE_INSTANCED_ATTRIBUTES,
-    instance_attributes: FILL_OUTLINE_PATTERN_INSTANCED_INSTANCE_ATTRIBUTES,
-    textures: FILL_PATTERN_TEXTURES,
-};
-static FILL: Source =
-    Source { wgsl: &FILL_SHADER, attributes: FILL_ATTRIBUTES, instance_attributes: &[], textures: &[] };
-static FILL_OUTLINE: Source =
-    Source { wgsl: &FILL_OUTLINE_SHADER, attributes: FILL_OUTLINE_ATTRIBUTES, instance_attributes: &[], textures: &[] };
-static FILL_PATTERN: Source = Source {
-    wgsl: &FILL_PATTERN_SHADER,
-    attributes: FILL_PATTERN_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: FILL_PATTERN_TEXTURES,
-};
-static FILL_OUTLINE_PATTERN: Source = Source {
-    wgsl: &FILL_OUTLINE_PATTERN_SHADER,
-    attributes: FILL_PATTERN_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: FILL_PATTERN_TEXTURES,
-};
-
-/// The source of each of the type's programs.
-pub(super) static SOURCES: &[(&Program, &Source)] = &[
-    (&programs::FILL_OUTLINE_INSTANCED, &FILL_OUTLINE_INSTANCED),
-    (&programs::FILL_OUTLINE_PULLED, &FILL_OUTLINE_PULLED),
-    (&programs::FILL_OUTLINE_PATTERN_INSTANCED, &FILL_OUTLINE_PATTERN_INSTANCED),
-    (&programs::FILL, &FILL),
-    (&programs::FILL_OUTLINE, &FILL_OUTLINE),
-    (&programs::FILL_PATTERN, &FILL_PATTERN),
-    (&programs::FILL_OUTLINE_PATTERN, &FILL_OUTLINE_PATTERN),
-];
-
-const FILL_OUTLINE_PATTERN_SHADER: Wgsl = Wgsl {
+pub(super) const FILL_OUTLINE_PATTERN_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 struct VertexInput {
-    @location(4) position: vec2<i32>,
+    @location(0) position: vec2<i32>,
 #ifndef HAS_UNIFORM_u_color
-    @location(5) color: vec4<f32>,
+    @location(1) color: vec4<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_pattern_from
-    @location(6) pattern_from: vec4<u32>,
+    @location(2) pattern_from: vec4<u32>,
 #endif
 #ifndef HAS_UNIFORM_u_pattern_to
-    @location(7) pattern_to: vec4<u32>,
+    @location(3) pattern_to: vec4<u32>,
 #endif
 #ifndef HAS_UNIFORM_u_opacity
-    @location(8) opacity: vec2<f32>,
+    @location(4) opacity: vec2<f32>,
 #endif
 };
 
@@ -395,7 +310,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-const FILL_OUTLINE_SHADER: Wgsl = Wgsl {
+pub(super) const FILL_OUTLINE_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 struct VertexInput {
@@ -541,22 +456,22 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-const FILL_PATTERN_SHADER: Wgsl = Wgsl {
+pub(super) const FILL_PATTERN_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 struct VertexInput {
-    @location(4) position: vec2<i32>,
+    @location(0) position: vec2<i32>,
 #ifndef HAS_UNIFORM_u_color
-    @location(5) color: vec4<f32>,
+    @location(1) color: vec4<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_pattern_from
-    @location(6) pattern_from: vec4<u32>,
+    @location(2) pattern_from: vec4<u32>,
 #endif
 #ifndef HAS_UNIFORM_u_pattern_to
-    @location(7) pattern_to: vec4<u32>,
+    @location(3) pattern_to: vec4<u32>,
 #endif
 #ifndef HAS_UNIFORM_u_opacity
-    @location(8) opacity: vec2<f32>,
+    @location(4) opacity: vec2<f32>,
 #endif
 };
 
@@ -822,7 +737,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-const FILL_SHADER: Wgsl = Wgsl {
+pub(super) const FILL_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 struct VertexInput {
@@ -1073,7 +988,7 @@ struct GlobalIndexUBO {
 }
 
 /// The instanced fill outlines.
-const FILL_OUTLINE_INSTANCED_SHADER: Wgsl = Wgsl {
+pub(super) const FILL_OUTLINE_INSTANCED_SHADER: Wgsl = Wgsl {
     vertex: Some(concat!(
         r#"
 struct VertexInput {
@@ -1120,7 +1035,7 @@ fn main(in: VertexInput) -> VertexOutput {
 };
 
 /// The pulled fill outlines.
-const FILL_OUTLINE_PULLED_SHADER: Wgsl = Wgsl {
+pub(super) const FILL_OUTLINE_PULLED_SHADER: Wgsl = Wgsl {
     vertex: Some(concat!(
         plain_declarations!(),
         r#"
@@ -1183,24 +1098,24 @@ fn main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
 };
 
 /// The instanced fill outlines of a pattern.
-const FILL_OUTLINE_PATTERN_INSTANCED_SHADER: Wgsl = Wgsl {
+pub(super) const FILL_OUTLINE_PATTERN_INSTANCED_SHADER: Wgsl = Wgsl {
     vertex: Some(concat!(
         r#"
 struct VertexInput {
     @location(0) corner: vec2<i32>,
-    @location(9) outline_pos: vec2<i32>,
-    @location(10) outline_end: vec2<i32>,
+    @location(5) outline_pos: vec2<i32>,
+    @location(6) outline_end: vec2<i32>,
 #ifndef HAS_UNIFORM_u_color
-    @location(5) color: vec4<f32>,
+    @location(1) color: vec4<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_pattern_from
-    @location(6) pattern_from: vec4<u32>,
+    @location(2) pattern_from: vec4<u32>,
 #endif
 #ifndef HAS_UNIFORM_u_pattern_to
-    @location(7) pattern_to: vec4<u32>,
+    @location(3) pattern_to: vec4<u32>,
 #endif
 #ifndef HAS_UNIFORM_u_opacity
-    @location(8) opacity: vec2<f32>,
+    @location(4) opacity: vec2<f32>,
 #endif
 };
 

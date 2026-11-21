@@ -13,7 +13,6 @@ use mln_gfx::gpu::{
 };
 use mln_gfx::shaders::layer_ubo::{GlobalPaintParamsUBO, ProjectionUBO};
 use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::programs::{CLIPPING_MASK, ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE};
 use mln_gfx::shaders::shader_defines::{ID_GLOBAL_PAINT_PARAMS_UBO, ID_PROJECTION_UBO};
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::texture2d::SamplerState;
@@ -21,7 +20,7 @@ use mln_gfx::types::DepthFunctionType;
 use mln_util::Color;
 use mln_util::size::Size;
 
-use super::{EXTENT, SIZE, buffer, create_shader, draw, fixed, position_layout, quad, tile_matrix, whole};
+use super::{EXTENT, SIZE, buffer, clipping_mask, draw, fixed, position_layout, quad, tile_matrix, whole};
 use crate::background::programs::{
     ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE, ID_BACKGROUND_PROPS_UBO,
 };
@@ -74,7 +73,7 @@ fn solid(gpu: &mut impl Gpu, format: TextureFormat, color: [f32; 4]) -> Result<S
 fn solid_at(gpu: &mut impl Gpu, format: TextureFormat, color: [f32; 4], matrix: [f32; 16]) -> Result<Solid, GpuError> {
     let target = target(gpu, format)?;
     let (quad, indices) = quad(gpu)?;
-    let shader = create_shader(gpu, &ShaderKey::new(&background::programs::BACKGROUND, []))?;
+    let shader = gpu.create_shader(&ShaderKey::new(&background::programs::BACKGROUND, []))?;
     let projection = [ProjectionUBO { matrix, ..ProjectionUBO::default() }];
     let drawable = [BackgroundDrawableUnionUBO::default()];
     let props = BackgroundPropsUBO { color, opacity: 1.0, ..BackgroundPropsUBO::default() };
@@ -234,8 +233,9 @@ pub fn invalid_calls(gpu: &mut impl Gpu) -> Result<(), GpuError> {
         TargetFormats { depth_stencil: Some(TextureFormat::Depth24PlusStencil8), ..RGBA8 },
     ))?;
     assert!(invalid(&with_draw(gpu, frame.draw(depth_pipeline))), "a pipeline for a depth attachment");
-    let mask = gpu.create_shader(&ShaderKey::new(&CLIPPING_MASK, []))?;
-    let mask_layouts = [position_layout(ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE)];
+    let mask_program = clipping_mask()?;
+    let mask = gpu.create_shader(&ShaderKey::new(mask_program, []))?;
+    let mask_layouts = [position_layout(mask_program.attributes[0].id)];
     let mask_geometry = gpu.create_geometry(&GeometryDesc {
         shader: mask,
         layouts: &mask_layouts,
@@ -500,7 +500,7 @@ pub fn depth_only(gpu: &mut impl Gpu) -> Result<(), GpuError> {
 /// Where a check doesn't hold.
 pub fn vertex_layouts(gpu: &mut impl Gpu) -> Result<(), GpuError> {
     let frame = solid(gpu, TextureFormat::Rgba8Unorm, [0.0, 0.0, 0.0, 0.0])?;
-    let shader = create_shader(gpu, &ShaderKey::new(&fill::programs::FILL, []))?;
+    let shader = gpu.create_shader(&ShaderKey::new(&fill::programs::FILL, []))?;
     let projection = [ProjectionUBO { matrix: tile_matrix(1.0), ..ProjectionUBO::default() }];
     let mut drawable = [FillDrawableUnionUBO::default()];
     drawable[0].set_fill(&FillDrawableUBO { matrix: tile_matrix(1.0), ..FillDrawableUBO::default() });
@@ -591,13 +591,10 @@ fn wall_frame(
     more: &[BindGroupEntry],
 ) -> Result<(Solid, ShaderId, BindingsId), GpuError> {
     let frame = solid(gpu, TextureFormat::Rgba8Unorm, [0.0, 0.0, 0.0, 0.0])?;
-    let shader = create_shader(
-        gpu,
-        &ShaderKey::new(
-            program,
-            ["HAS_UNIFORM_u_color", "HAS_UNIFORM_u_base", "HAS_UNIFORM_u_height"].map(String::from),
-        ),
-    )?;
+    let shader = gpu.create_shader(&ShaderKey::new(
+        program,
+        ["HAS_UNIFORM_u_color", "HAS_UNIFORM_u_base", "HAS_UNIFORM_u_height"].map(String::from),
+    ))?;
     // At clip depth 0.5.
     let s = 2.0 / EXTENT;
     let matrix = [s, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, -1.0, -1.0, 0.5, 1.0];
@@ -925,7 +922,7 @@ pub fn resources_in_use<G: Gpu>(gpu: &mut G) -> Result<(), GpuError> {
     let projection = bytemuck::cast_slice(&projection);
     let projection_buffer = buffer(gpu, BufferUsage::Storage, projection)?;
     let (vertices, indices) = quad(gpu)?;
-    let shader = create_shader(gpu, &ShaderKey::new(&heatmap::programs::HEATMAP_TEXTURE, []))?;
+    let shader = gpu.create_shader(&ShaderKey::new(&heatmap::programs::HEATMAP_TEXTURE, []))?;
     let layouts = [position_layout(ID_HEATMAP_POS_VERTEX_ATTRIBUTE)];
     let pipeline = gpu.create_pipeline(&PipelineDesc {
         shader,
@@ -1083,7 +1080,7 @@ pub fn host_writes<G: Gpu + ?Sized>(
 ) -> Result<mln_gfx::gpu::ReadbackId, GpuError> {
     let target = target(gpu, TextureFormat::Rgba8Unorm)?;
     let (quad, indices) = quad(gpu)?;
-    let shader = create_shader(gpu, &ShaderKey::new(&background::programs::BACKGROUND, []))?;
+    let shader = gpu.create_shader(&ShaderKey::new(&background::programs::BACKGROUND, []))?;
     let drawable = [BackgroundDrawableUnionUBO::default()];
     let drawable = bytemuck::cast_slice(&drawable);
     let drawable_buffer = buffer(gpu, BufferUsage::Storage, drawable)?;

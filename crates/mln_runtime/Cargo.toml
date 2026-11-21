@@ -115,6 +115,8 @@ mln_rs = { package = "mln-rs", path = "../..", default-features = false, feature
 # so the tests' renderers draw them on whichever backends this crate's features
 # select.
 mln_layers = { workspace = true, features = ["wgsl", "msl", "glsl-es", "glsl"] }
+# The engine's shaders in every language, as the layer types'.
+mln_render = { workspace = true, features = ["wgsl", "msl", "glsl-es", "glsl"] }
 # Serves the styles of the resource tests.
 httpmock.workspace = true
 pollster.workspace = true

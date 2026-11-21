@@ -8,26 +8,7 @@
 //! - On the globe, the symbol shaders drop a screen-aligned label whose
 //!   anchor is behind the horizon, unless the label is raised.
 
-use mln_gfx::shaders::layer_ubo::{GlobalPaintParamsUBO, ProjectionUBO};
-use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::shader_defines::{ID_GLOBAL_PAINT_PARAMS_UBO, ID_PROJECTION_UBO};
-use mln_gfx::shaders::source::glsl_es::{Attribute, Glsl, Source, Texture, UniformBlock};
-
-use super::programs;
-use super::programs::{
-    ID_COLLISION_ANCHOR_POS_VERTEX_ATTRIBUTE, ID_COLLISION_DRAWABLE_UBO, ID_COLLISION_EXTRUDE_VERTEX_ATTRIBUTE,
-    ID_COLLISION_HEIGHT_OFFSET_VERTEX_ATTRIBUTE, ID_COLLISION_PLACED_VERTEX_ATTRIBUTE,
-    ID_COLLISION_POS_VERTEX_ATTRIBUTE, ID_COLLISION_SHIFT_VERTEX_ATTRIBUTE, ID_COLLISION_TILE_PROPS_UBO,
-    ID_SYMBOL_COLOR_ATTRIBUTE, ID_SYMBOL_DATA_ATTRIBUTE, ID_SYMBOL_DRAWABLE_UBO, ID_SYMBOL_EVALUATED_PROPS_UBO,
-    ID_SYMBOL_FADE_OPACITY_ATTRIBUTE, ID_SYMBOL_HALO_BLUR_ATTRIBUTE, ID_SYMBOL_HALO_COLOR_ATTRIBUTE,
-    ID_SYMBOL_HALO_WIDTH_ATTRIBUTE, ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE, ID_SYMBOL_IMAGE_ICON_TEXTURE,
-    ID_SYMBOL_IMAGE_TEXTURE, ID_SYMBOL_OPACITY_ATTRIBUTE, ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE,
-    ID_SYMBOL_POS_OFFSET_ATTRIBUTE, ID_SYMBOL_PROJECTED_POS_ATTRIBUTE, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE,
-    ID_SYMBOL_TILE_PROPS_UBO,
-};
-use super::ubo::{
-    CollisionDrawableUBO, CollisionTilePropsUBO, SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO,
-};
+use mln_gfx::shaders::source::glsl_es::Glsl;
 
 /// `unpack_opacity`, a symbol's fade opacity and whether it fades in, from
 /// the packed value of its vertex.
@@ -42,138 +23,7 @@ vec2 unpack_opacity(const float packedOpacity) {
     };
 }
 
-// Collision Box
-static COLLISION_BOX: Source = Source {
-    glsl: &COLLISION_BOX_SHADER,
-    uniform_blocks: &[
-        UniformBlock::new::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
-        UniformBlock::element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
-        UniformBlock::new::<CollisionDrawableUBO>("CollisionDrawableUBO", ID_COLLISION_DRAWABLE_UBO),
-        UniformBlock::new::<CollisionTilePropsUBO>("CollisionTilePropsUBO", ID_COLLISION_TILE_PROPS_UBO),
-    ],
-    attributes: &[
-        Attribute::new("a_pos", ID_COLLISION_POS_VERTEX_ATTRIBUTE),
-        Attribute::new("a_anchor_pos", ID_COLLISION_ANCHOR_POS_VERTEX_ATTRIBUTE),
-        Attribute::new("a_extrude", ID_COLLISION_EXTRUDE_VERTEX_ATTRIBUTE),
-        Attribute::new("a_placed", ID_COLLISION_PLACED_VERTEX_ATTRIBUTE),
-        Attribute::new("a_shift", ID_COLLISION_SHIFT_VERTEX_ATTRIBUTE),
-        Attribute::new("a_height_offset", ID_COLLISION_HEIGHT_OFFSET_VERTEX_ATTRIBUTE),
-    ],
-    instance_attributes: &[],
-    textures: &[],
-};
-
-// Collision Circle
-static COLLISION_CIRCLE: Source = Source {
-    glsl: &COLLISION_CIRCLE_SHADER,
-    uniform_blocks: &[
-        UniformBlock::new::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
-        UniformBlock::element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
-        UniformBlock::new::<CollisionDrawableUBO>("CollisionDrawableUBO", ID_COLLISION_DRAWABLE_UBO),
-        UniformBlock::new::<CollisionTilePropsUBO>("CollisionTilePropsUBO", ID_COLLISION_TILE_PROPS_UBO),
-    ],
-    attributes: &[
-        Attribute::new("a_pos", ID_COLLISION_POS_VERTEX_ATTRIBUTE),
-        Attribute::new("a_anchor_pos", ID_COLLISION_ANCHOR_POS_VERTEX_ATTRIBUTE),
-        Attribute::new("a_extrude", ID_COLLISION_EXTRUDE_VERTEX_ATTRIBUTE),
-        Attribute::new("a_placed", ID_COLLISION_PLACED_VERTEX_ATTRIBUTE),
-    ],
-    instance_attributes: &[],
-    textures: &[],
-};
-
-// Symbol Icon
-static SYMBOL_ICON: Source = Source {
-    glsl: &SYMBOL_ICON_SHADER,
-    uniform_blocks: &[
-        UniformBlock::element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
-        UniformBlock::new::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
-        UniformBlock::element::<SymbolDrawableUBO, SymbolDrawableUBO>("SymbolDrawableUBO", ID_SYMBOL_DRAWABLE_UBO),
-        UniformBlock::element::<SymbolTilePropsUBO, SymbolTilePropsUBO>("SymbolTilePropsUBO", ID_SYMBOL_TILE_PROPS_UBO),
-        UniformBlock::new::<SymbolEvaluatedPropsUBO>("SymbolEvaluatedPropsUBO", ID_SYMBOL_EVALUATED_PROPS_UBO),
-    ],
-    attributes: &[
-        Attribute::new("a_pos_offset", ID_SYMBOL_POS_OFFSET_ATTRIBUTE),
-        Attribute::new("a_data", ID_SYMBOL_DATA_ATTRIBUTE),
-        Attribute::new("a_pixeloffset", ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE),
-        Attribute::new("a_projected_pos", ID_SYMBOL_PROJECTED_POS_ATTRIBUTE),
-        Attribute::new("a_fade_opacity", ID_SYMBOL_FADE_OPACITY_ATTRIBUTE),
-        Attribute::new("a_opacity", ID_SYMBOL_OPACITY_ATTRIBUTE),
-        Attribute::new("a_tex_origin", ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE),
-        Attribute::new("a_height_offset", ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE),
-    ],
-    instance_attributes: &[],
-    textures: &[Texture::new("u_texture", ID_SYMBOL_IMAGE_TEXTURE)],
-};
-
-// Symbol SDF
-static SYMBOL_SDF: Source = Source {
-    glsl: &SYMBOL_SDF_SHADER,
-    uniform_blocks: &[
-        UniformBlock::element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
-        UniformBlock::new::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
-        UniformBlock::element::<SymbolDrawableUBO, SymbolDrawableUBO>("SymbolDrawableUBO", ID_SYMBOL_DRAWABLE_UBO),
-        UniformBlock::element::<SymbolTilePropsUBO, SymbolTilePropsUBO>("SymbolTilePropsUBO", ID_SYMBOL_TILE_PROPS_UBO),
-        UniformBlock::new::<SymbolEvaluatedPropsUBO>("SymbolEvaluatedPropsUBO", ID_SYMBOL_EVALUATED_PROPS_UBO),
-    ],
-    attributes: &[
-        Attribute::new("a_pos_offset", ID_SYMBOL_POS_OFFSET_ATTRIBUTE),
-        Attribute::new("a_data", ID_SYMBOL_DATA_ATTRIBUTE),
-        Attribute::new("a_pixeloffset", ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE),
-        Attribute::new("a_projected_pos", ID_SYMBOL_PROJECTED_POS_ATTRIBUTE),
-        Attribute::new("a_fade_opacity", ID_SYMBOL_FADE_OPACITY_ATTRIBUTE),
-        Attribute::new("a_fill_color", ID_SYMBOL_COLOR_ATTRIBUTE),
-        Attribute::new("a_halo_color", ID_SYMBOL_HALO_COLOR_ATTRIBUTE),
-        Attribute::new("a_opacity", ID_SYMBOL_OPACITY_ATTRIBUTE),
-        Attribute::new("a_halo_width", ID_SYMBOL_HALO_WIDTH_ATTRIBUTE),
-        Attribute::new("a_halo_blur", ID_SYMBOL_HALO_BLUR_ATTRIBUTE),
-        Attribute::new("a_tex_origin", ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE),
-        Attribute::new("a_height_offset", ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE),
-    ],
-    instance_attributes: &[],
-    textures: &[Texture::new("u_texture", ID_SYMBOL_IMAGE_TEXTURE)],
-};
-
-// Symbol Text & Icon
-static SYMBOL_TEXT_AND_ICON: Source = Source {
-    glsl: &SYMBOL_TEXT_AND_ICON_SHADER,
-    uniform_blocks: &[
-        UniformBlock::element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
-        UniformBlock::new::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
-        UniformBlock::element::<SymbolDrawableUBO, SymbolDrawableUBO>("SymbolDrawableUBO", ID_SYMBOL_DRAWABLE_UBO),
-        UniformBlock::element::<SymbolTilePropsUBO, SymbolTilePropsUBO>("SymbolTilePropsUBO", ID_SYMBOL_TILE_PROPS_UBO),
-        UniformBlock::new::<SymbolEvaluatedPropsUBO>("SymbolEvaluatedPropsUBO", ID_SYMBOL_EVALUATED_PROPS_UBO),
-    ],
-    attributes: &[
-        Attribute::new("a_pos_offset", ID_SYMBOL_POS_OFFSET_ATTRIBUTE),
-        Attribute::new("a_data", ID_SYMBOL_DATA_ATTRIBUTE),
-        Attribute::new("a_projected_pos", ID_SYMBOL_PROJECTED_POS_ATTRIBUTE),
-        Attribute::new("a_fade_opacity", ID_SYMBOL_FADE_OPACITY_ATTRIBUTE),
-        Attribute::new("a_fill_color", ID_SYMBOL_COLOR_ATTRIBUTE),
-        Attribute::new("a_halo_color", ID_SYMBOL_HALO_COLOR_ATTRIBUTE),
-        Attribute::new("a_opacity", ID_SYMBOL_OPACITY_ATTRIBUTE),
-        Attribute::new("a_halo_width", ID_SYMBOL_HALO_WIDTH_ATTRIBUTE),
-        Attribute::new("a_halo_blur", ID_SYMBOL_HALO_BLUR_ATTRIBUTE),
-        Attribute::new("a_tex_origin", ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE),
-        Attribute::new("a_height_offset", ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE),
-    ],
-    instance_attributes: &[],
-    textures: &[
-        Texture::new("u_texture", ID_SYMBOL_IMAGE_TEXTURE),
-        Texture::new("u_texture_icon", ID_SYMBOL_IMAGE_ICON_TEXTURE),
-    ],
-};
-
-/// The source of each of the type's programs.
-pub(super) static SOURCES: &[(&Program, &Source)] = &[
-    (&programs::SYMBOL_ICON, &SYMBOL_ICON),
-    (&programs::SYMBOL_SDF, &SYMBOL_SDF),
-    (&programs::SYMBOL_TEXT_AND_ICON, &SYMBOL_TEXT_AND_ICON),
-    (&programs::COLLISION_BOX, &COLLISION_BOX),
-    (&programs::COLLISION_CIRCLE, &COLLISION_CIRCLE),
-];
-
-const COLLISION_BOX_SHADER: Glsl = Glsl {
+pub(super) const COLLISION_BOX_SHADER: Glsl = Glsl {
     vertex: r"layout (location = 0) in vec2 a_pos;
 layout (location = 1) in vec2 a_anchor_pos;
 layout (location = 2) in vec2 a_extrude;
@@ -253,7 +103,7 @@ void main() {
 ",
 };
 
-const COLLISION_CIRCLE_SHADER: Glsl = Glsl {
+pub(super) const COLLISION_CIRCLE_SHADER: Glsl = Glsl {
     vertex: r"layout (location = 0) in vec2 a_pos;
 layout (location = 1) in vec2 a_anchor_pos;
 layout (location = 2) in vec2 a_extrude;
@@ -367,7 +217,7 @@ void main() {
 ",
 };
 
-const SYMBOL_ICON_SHADER: Glsl = Glsl {
+pub(super) const SYMBOL_ICON_SHADER: Glsl = Glsl {
     vertex: concat!(
         unpack_opacity!(),
         r"layout (location = 0) in vec4 a_pos_offset;
@@ -601,7 +451,7 @@ void main() {
 ",
 };
 
-const SYMBOL_SDF_SHADER: Glsl = Glsl {
+pub(super) const SYMBOL_SDF_SHADER: Glsl = Glsl {
     vertex: concat!(
         unpack_opacity!(),
         r"#define SDF_PX 8.0
@@ -939,7 +789,7 @@ highp vec4 halo_color = u_halo_color;
 ",
 };
 
-const SYMBOL_TEXT_AND_ICON_SHADER: Glsl = Glsl {
+pub(super) const SYMBOL_TEXT_AND_ICON_SHADER: Glsl = Glsl {
     vertex: concat!(
         unpack_opacity!(),
         r"#define SDF_PX 8.0

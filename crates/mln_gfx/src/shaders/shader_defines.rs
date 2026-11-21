@@ -1,8 +1,7 @@
-//! The buffer ids the engine reserves, and how many buffers, textures and
-//! vertex attributes a program can have. Every other id is its program's:
-//! a program's buffers take the ids from [`DRAWABLE_RESERVED_UBO_COUNT`] to
-//! [`MAX_UBO_COUNT_PER_SHADER`], and the vertex buffers it reads as storage
-//! buffers the ids after those.
+//! The buffer ids the engine reserves, the bounds of the ranges a
+//! program's own ids fall in, and how many buffers, textures and vertex
+//! attributes a program can have. [`Program`](crate::shaders::program::Program)
+//! says which ids a program's buffers take.
 
 /// The frame's uniform block
 /// ([`GlobalPaintParamsUBO`](crate::shaders::layer_ubo::GlobalPaintParamsUBO)).

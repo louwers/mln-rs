@@ -4,71 +4,22 @@
 //! `PROJECTION_GLOBE` for the globe variant, then the stage's prelude, the
 //! shader's prelude and the stage's source. Also checks that the buffers,
 //! textures, samplers and vertex inputs the GLSL declares are the ones the
-//! descriptor set layouts and the attribute and texture tables describe, that
-//! the buffers have the sizes of what the renderer binds there, and that the
-//! stages of a shader agree on what passes between them, in both projection
-//! variants.
+//! descriptor set layouts and the program's declaration describe, that the
+//! buffers have the sizes the program declares, and that the stages of a
+//! shader agree on what passes between them, in both projection variants.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::mem::size_of;
 
 use mln_gfx::gfx_types::AttributeDataType;
-use mln_gfx::shaders::layer_composite_ubo::LayerCompositeUBO;
-use mln_gfx::shaders::layer_ubo::{GlobalPaintParamsUBO, ProjectionUBO};
-use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::programs::{
-    ID_ATMOSPHERE_PROPS_UBO, ID_LAYER_COMPOSITE_UBO, ID_SKY_PROPS_UBO, ID_TILE_DEBUG_PROPS_UBO,
+use mln_gfx::shaders::program::{
+    Attribute, Buffer as ProgramBuffer, BufferKind, FRAME_BUFFER, PROJECTION_BUFFER, Program,
 };
 use mln_gfx::shaders::shader_defines::{
     DRAWABLE_RESERVED_UBO_COUNT, ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO, ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO,
-    ID_GLOBAL_PAINT_PARAMS_UBO, ID_PROJECTION_UBO, MAX_ATTRIBUTE_COUNT_PER_SHADER, MAX_TEXTURE_COUNT_PER_SHADER,
+    ID_GLOBAL_PAINT_PARAMS_UBO, ID_PROJECTION_UBO, LAYER_SSBO_START_ID, MAX_ATTRIBUTE_COUNT_PER_SHADER,
+    MAX_TEXTURE_COUNT_PER_SHADER, MAX_UBO_COUNT_PER_SHADER,
 };
-use mln_gfx::shaders::sky_ubo::{AtmospherePropsUBO, SkyPropsUBO};
-use mln_gfx::shaders::source::glsl;
-use mln_gfx::shaders::tile_debug_ubo::TileDebugPropsUBO;
-use mln_layers::background::programs::{ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_PROPS_UBO};
-use mln_layers::background::ubo::{BackgroundDrawableUnionUBO, BackgroundPatternPropsUBO, BackgroundPropsUBO};
-use mln_layers::circle::programs::{ID_CIRCLE_DRAWABLE_UBO, ID_CIRCLE_EVALUATED_PROPS_UBO};
-use mln_layers::circle::ubo::{CircleDrawableUBO, CircleEvaluatedPropsUBO};
-use mln_layers::color_relief::programs::{
-    ID_COLOR_RELIEF_DRAWABLE_UBO, ID_COLOR_RELIEF_EVALUATED_PROPS_UBO, ID_COLOR_RELIEF_TILE_PROPS_UBO,
-};
-use mln_layers::color_relief::ubo::{ColorReliefDrawableUBO, ColorReliefEvaluatedPropsUBO, ColorReliefTilePropsUBO};
-use mln_layers::fill::programs::{
-    ID_FILL_DRAWABLE_UBO, ID_FILL_EVALUATED_PROPS_UBO, ID_FILL_OUTLINE_ENDS, ID_FILL_OUTLINE_PAINT,
-    ID_FILL_OUTLINE_VERTICES, ID_FILL_TILE_PROPS_UBO,
-};
-use mln_layers::fill::ubo::{FillDrawableUnionUBO, FillEvaluatedPropsUBO, FillTilePropsUnionUBO};
-use mln_layers::fill_extrusion::programs::{
-    ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_DRAWABLE_UBO,
-    ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE,
-    ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE, ID_FILL_EXTRUSION_PROPS_UBO, ID_FILL_EXTRUSION_TILE_PROPS_UBO,
-    ID_FILL_EXTRUSION_WALL_PAINT, ID_FILL_EXTRUSION_WALL_VERTICES,
-};
-use mln_layers::fill_extrusion::ubo::{FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO};
-use mln_layers::heatmap::programs::{
-    ID_HEATMAP_DRAWABLE_UBO, ID_HEATMAP_EVALUATED_PROPS_UBO, ID_HEATMAP_TEXTURE_PROPS_UBO,
-};
-use mln_layers::heatmap::ubo::{HeatmapDrawableUBO, HeatmapEvaluatedPropsUBO, HeatmapTexturePropsUBO};
-use mln_layers::hillshade::programs::{
-    ID_HILLSHADE_DRAWABLE_UBO, ID_HILLSHADE_EVALUATED_PROPS_UBO, ID_HILLSHADE_PREPARE_DRAWABLE_UBO,
-    ID_HILLSHADE_PREPARE_TILE_PROPS_UBO, ID_HILLSHADE_TILE_PROPS_UBO,
-};
-use mln_layers::hillshade::ubo::{
-    HillshadeDrawableUBO, HillshadeEvaluatedPropsUBO, HillshadePrepareDrawableUBO, HillshadePrepareTilePropsUBO,
-    HillshadeTilePropsUBO,
-};
-use mln_layers::line::programs::{ID_LINE_DRAWABLE_UBO, ID_LINE_EVALUATED_PROPS_UBO, ID_LINE_TILE_PROPS_UBO};
-use mln_layers::line::ubo::{LineDrawableUnionUBO, LineEvaluatedPropsUBO, LineTilePropsUnionUBO};
-use mln_layers::raster::programs::{ID_RASTER_DRAWABLE_UBO, ID_RASTER_EVALUATED_PROPS_UBO};
-use mln_layers::raster::ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
-use mln_layers::symbol::programs::{
-    ID_COLLISION_DRAWABLE_UBO, ID_COLLISION_PROJECTION_UBO, ID_COLLISION_TILE_PROPS_UBO, ID_SYMBOL_DRAWABLE_UBO,
-    ID_SYMBOL_EVALUATED_PROPS_UBO, ID_SYMBOL_TILE_PROPS_UBO,
-};
-use mln_layers::symbol::ubo::{
-    CollisionDrawableUBO, CollisionTilePropsUBO, SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO,
-};
+use mln_gfx::shaders::source::glsl::Glsl;
 use naga::{AddressSpace, ArraySize, Binding, Interpolation, Module, ScalarKind, StorageAccess, TypeInner};
 
 use crate::front_end::parse;
@@ -79,12 +30,12 @@ use crate::layout::{
     image_texture_binding, layer_storage_binding, layer_uniform_binding,
 };
 use crate::variants::variants;
-use crate::{BUILT_INS, Stage, compose, sources};
+use crate::{Stage, compose, sources};
 
 /// Each program with GLSL: the engine's and the built-in layer types'.
-fn programs() -> Vec<(&'static Program, &'static glsl::Source)> {
-    let layers = mln_layers::shader_sources();
-    BUILT_INS.iter().copied().chain(layers.of::<glsl::Source>().iter()).collect()
+fn programs() -> Vec<(&'static Program, &'static Glsl)> {
+    let programs = mln_render::PROGRAMS.iter().chain(mln_layers::PROGRAMS);
+    programs.filter_map(|&program| Some((program, program.sources.glsl?))).collect()
 }
 
 const STAGES: [Stage; 2] = [Stage::Vertex, Stage::Fragment];
@@ -96,7 +47,7 @@ fn every_program_declares_the_properties_its_glsl_reads_from_uniforms() {
     const PREFIX: &str = "HAS_UNIFORM_u_";
     for (program, source) in programs() {
         let mut tested = BTreeSet::new();
-        for text in [source.glsl.prelude, source.glsl.vertex, source.glsl.fragment] {
+        for text in [source.prelude, source.vertex, source.fragment] {
             for (start, _) in text.match_indices(PREFIX) {
                 let rest = &text[start + PREFIX.len()..];
                 let end = rest.find(|c: char| !c.is_ascii_alphanumeric() && c != '_').unwrap_or(rest.len());
@@ -112,15 +63,18 @@ fn every_program_declares_the_properties_its_glsl_reads_from_uniforms() {
 /// inspector, which counts its draws.
 #[test]
 fn every_layer_program_shows_the_overdraw_inspector() {
-    use mln_gfx::shaders::programs::{ATMOSPHERE, CLIPPING_MASK, GLOBE_DEPTH, SKY};
-    use mln_layers::symbol::programs::{COLLISION_BOX, COLLISION_CIRCLE};
-    let not_layers = [&CLIPPING_MASK, &COLLISION_BOX, &COLLISION_CIRCLE, &GLOBE_DEPTH, &SKY, &ATMOSPHERE];
+    let not_layers = [
+        "ClippingMaskProgram",
+        "CollisionBoxShader",
+        "CollisionCircleShader",
+        "GlobeDepthShader",
+        "SkyShader",
+        "AtmosphereShader",
+    ];
     for (program, source) in programs() {
-        if !not_layers.contains(&program) {
+        if !not_layers.contains(&program.name) {
             assert!(
-                [source.glsl.prelude, source.glsl.vertex, source.glsl.fragment]
-                    .iter()
-                    .any(|text| text.contains("OVERDRAW_INSPECTOR")),
+                [source.prelude, source.vertex, source.fragment].iter().any(|text| text.contains("OVERDRAW_INSPECTOR")),
                 "{}",
                 program.name
             );
@@ -129,7 +83,7 @@ fn every_layer_program_shows_the_overdraw_inspector() {
 }
 
 /// The module of a stage of `source` with `defines`, unvalidated.
-fn module(program: &Program, source: &glsl::Source, stage: Stage, defines: &str) -> Module {
+fn module(program: &Program, source: &Glsl, stage: Stage, defines: &str) -> Module {
     parse(stage, &compose(source, stage, defines))
         .unwrap_or_else(|error| panic!("{} ({stage:?}):\n{error}", program.name))
 }
@@ -156,158 +110,23 @@ fn every_stage_validates() {
     });
 }
 
-/// A buffer the renderer binds for a shader: the set it is in, with its id.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum Buffer {
-    Global(usize),
-    LayerStorage(usize),
-    LayerUniform(usize),
-    DrawableUniform(usize),
-    /// A vertex buffer that the shader reads as a storage buffer.
-    DrawableVertex(usize),
-}
-
-impl Buffer {
-    /// The set, the binding in it, and whether it is a storage buffer.
-    fn slot(self) -> (DescriptorSetType, u32, bool) {
-        match self {
-            Buffer::Global(id) => (DescriptorSetType::Global, global_uniform_binding(id).unwrap(), false),
-            Buffer::LayerStorage(id) => (DescriptorSetType::Layer, layer_storage_binding(id).unwrap(), true),
-            Buffer::LayerUniform(id) => (DescriptorSetType::Layer, layer_uniform_binding(id).unwrap(), false),
-            Buffer::DrawableUniform(id) => {
-                (DescriptorSetType::DrawableUniform, drawable_uniform_binding(id).unwrap(), false)
-            }
-            Buffer::DrawableVertex(id) => {
-                (DescriptorSetType::DrawableUniform, drawable_vertex_binding(id).unwrap(), true)
-            }
-        }
+/// The id of the buffer at `binding` of `set`: the inverse of the layout's
+/// `*_binding` functions.
+fn buffer_id(set: u32, binding: u32) -> Option<usize> {
+    let binding = binding as usize;
+    match DescriptorSetType::ALL.get(set as usize)? {
+        DescriptorSetType::Global => Some(binding),
+        DescriptorSetType::Layer if binding < LAYER_STORAGE_COUNT => Some(binding + LAYER_SSBO_START_ID),
+        DescriptorSetType::Layer => Some(binding - LAYER_STORAGE_COUNT + DRAWABLE_RESERVED_UBO_COUNT),
+        DescriptorSetType::DrawableUniform => Some(binding + LAYER_SSBO_START_ID),
+        DescriptorSetType::DrawableImage => None,
     }
 }
 
-/// The buffers of each shader, with the size of what the renderer binds: a
-/// uniform buffer's struct, or an element of a storage buffer's vector (the
-/// union of the layer's drawable structs where it has several, a word of a
-/// vertex buffer).
-fn buffers(program: &Program) -> Vec<(Buffer, usize)> {
-    use Buffer::{DrawableUniform, DrawableVertex, Global, LayerStorage, LayerUniform};
-    let projection = (LayerStorage(ID_PROJECTION_UBO), size_of::<ProjectionUBO>());
-    let mut buffers = vec![(Global(ID_GLOBAL_PAINT_PARAMS_UBO), size_of::<GlobalPaintParamsUBO>())];
-    let own: Vec<(Buffer, usize)> = match program.name {
-        "AtmosphereShader" => vec![(LayerUniform(ID_ATMOSPHERE_PROPS_UBO), size_of::<AtmospherePropsUBO>())],
-        "BackgroundShader" => vec![
-            (LayerStorage(ID_BACKGROUND_DRAWABLE_UBO), size_of::<BackgroundDrawableUnionUBO>()),
-            projection,
-            (LayerUniform(ID_BACKGROUND_PROPS_UBO), size_of::<BackgroundPropsUBO>()),
-        ],
-        "BackgroundPatternShader" => vec![
-            (LayerStorage(ID_BACKGROUND_DRAWABLE_UBO), size_of::<BackgroundDrawableUnionUBO>()),
-            projection,
-            (LayerUniform(ID_BACKGROUND_PROPS_UBO), size_of::<BackgroundPatternPropsUBO>()),
-        ],
-        "CircleShader" => vec![
-            (LayerStorage(ID_CIRCLE_DRAWABLE_UBO), size_of::<CircleDrawableUBO>()),
-            projection,
-            (LayerUniform(ID_CIRCLE_EVALUATED_PROPS_UBO), size_of::<CircleEvaluatedPropsUBO>()),
-        ],
-        "ClippingMaskProgram" => vec![(DrawableUniform(ID_PROJECTION_UBO), size_of::<ProjectionUBO>())],
-        "CollisionBoxShader" | "CollisionCircleShader" => vec![
-            (DrawableUniform(ID_COLLISION_DRAWABLE_UBO), size_of::<CollisionDrawableUBO>()),
-            (DrawableUniform(ID_COLLISION_TILE_PROPS_UBO), size_of::<CollisionTilePropsUBO>()),
-            (DrawableUniform(ID_COLLISION_PROJECTION_UBO), size_of::<ProjectionUBO>()),
-        ],
-        "ColorReliefShader" => vec![
-            (LayerStorage(ID_COLOR_RELIEF_DRAWABLE_UBO), size_of::<ColorReliefDrawableUBO>()),
-            projection,
-            (LayerStorage(ID_COLOR_RELIEF_TILE_PROPS_UBO), size_of::<ColorReliefTilePropsUBO>()),
-            (LayerUniform(ID_COLOR_RELIEF_EVALUATED_PROPS_UBO), size_of::<ColorReliefEvaluatedPropsUBO>()),
-        ],
-        "FillShader" | "FillOutlineShader" | "FillOutlineInstancedShader" => vec![
-            (LayerStorage(ID_FILL_DRAWABLE_UBO), size_of::<FillDrawableUnionUBO>()),
-            projection,
-            (LayerUniform(ID_FILL_EVALUATED_PROPS_UBO), size_of::<FillEvaluatedPropsUBO>()),
-        ],
-        "FillOutlinePulledShader" => vec![
-            (LayerStorage(ID_FILL_DRAWABLE_UBO), size_of::<FillDrawableUnionUBO>()),
-            projection,
-            (LayerUniform(ID_FILL_EVALUATED_PROPS_UBO), size_of::<FillEvaluatedPropsUBO>()),
-            (DrawableVertex(ID_FILL_OUTLINE_VERTICES), size_of::<u32>()),
-            (DrawableVertex(ID_FILL_OUTLINE_ENDS), size_of::<u32>()),
-            (DrawableVertex(ID_FILL_OUTLINE_PAINT), size_of::<f32>()),
-        ],
-        "FillPatternShader" | "FillOutlinePatternShader" | "FillOutlinePatternInstancedShader" => vec![
-            (LayerStorage(ID_FILL_DRAWABLE_UBO), size_of::<FillDrawableUnionUBO>()),
-            projection,
-            (LayerStorage(ID_FILL_TILE_PROPS_UBO), size_of::<FillTilePropsUnionUBO>()),
-            (LayerUniform(ID_FILL_EVALUATED_PROPS_UBO), size_of::<FillEvaluatedPropsUBO>()),
-        ],
-        "FillExtrusionShader" | "FillExtrusionInstancedShader" | "FillExtrusionWallShader" => vec![
-            (LayerStorage(ID_FILL_EXTRUSION_DRAWABLE_UBO), size_of::<FillExtrusionDrawableUBO>()),
-            projection,
-            (LayerUniform(ID_FILL_EXTRUSION_PROPS_UBO), size_of::<FillExtrusionPropsUBO>()),
-        ],
-        "FillExtrusionPulledShader" => vec![
-            (LayerStorage(ID_FILL_EXTRUSION_DRAWABLE_UBO), size_of::<FillExtrusionDrawableUBO>()),
-            projection,
-            (LayerUniform(ID_FILL_EXTRUSION_PROPS_UBO), size_of::<FillExtrusionPropsUBO>()),
-            (DrawableVertex(ID_FILL_EXTRUSION_WALL_VERTICES), size_of::<u32>()),
-            (DrawableVertex(ID_FILL_EXTRUSION_WALL_PAINT), size_of::<f32>()),
-        ],
-        "FillExtrusionPatternShader" | "FillExtrusionPatternInstancedShader" | "FillExtrusionPatternWallShader" => {
-            vec![
-                (LayerStorage(ID_FILL_EXTRUSION_DRAWABLE_UBO), size_of::<FillExtrusionDrawableUBO>()),
-                projection,
-                (LayerStorage(ID_FILL_EXTRUSION_TILE_PROPS_UBO), size_of::<FillExtrusionTilePropsUBO>()),
-                (LayerUniform(ID_FILL_EXTRUSION_PROPS_UBO), size_of::<FillExtrusionPropsUBO>()),
-            ]
-        }
-        "GlobeDepthShader" => vec![projection],
-        "HeatmapShader" => vec![
-            (LayerStorage(ID_HEATMAP_DRAWABLE_UBO), size_of::<HeatmapDrawableUBO>()),
-            projection,
-            (LayerUniform(ID_HEATMAP_EVALUATED_PROPS_UBO), size_of::<HeatmapEvaluatedPropsUBO>()),
-        ],
-        "HeatmapTextureShader" => {
-            vec![(LayerUniform(ID_HEATMAP_TEXTURE_PROPS_UBO), size_of::<HeatmapTexturePropsUBO>())]
-        }
-        "LayerCompositeShader" => vec![(LayerUniform(ID_LAYER_COMPOSITE_UBO), size_of::<LayerCompositeUBO>())],
-        "HillshadeShader" => vec![
-            (LayerStorage(ID_HILLSHADE_DRAWABLE_UBO), size_of::<HillshadeDrawableUBO>()),
-            projection,
-            (LayerStorage(ID_HILLSHADE_TILE_PROPS_UBO), size_of::<HillshadeTilePropsUBO>()),
-            (LayerUniform(ID_HILLSHADE_EVALUATED_PROPS_UBO), size_of::<HillshadeEvaluatedPropsUBO>()),
-        ],
-        "HillshadePrepareShader" => vec![
-            (DrawableUniform(ID_HILLSHADE_PREPARE_DRAWABLE_UBO), size_of::<HillshadePrepareDrawableUBO>()),
-            (DrawableUniform(ID_HILLSHADE_PREPARE_TILE_PROPS_UBO), size_of::<HillshadePrepareTilePropsUBO>()),
-        ],
-        "TileDebugShader" => vec![projection, (LayerUniform(ID_TILE_DEBUG_PROPS_UBO), size_of::<TileDebugPropsUBO>())],
-        "LineShader" | "LineGradientShader" => vec![
-            (LayerStorage(ID_LINE_DRAWABLE_UBO), size_of::<LineDrawableUnionUBO>()),
-            projection,
-            (LayerUniform(ID_LINE_EVALUATED_PROPS_UBO), size_of::<LineEvaluatedPropsUBO>()),
-        ],
-        "LinePatternShader" | "LineSDFShader" | "LineGradientSDFShader" => vec![
-            (LayerStorage(ID_LINE_DRAWABLE_UBO), size_of::<LineDrawableUnionUBO>()),
-            projection,
-            (LayerStorage(ID_LINE_TILE_PROPS_UBO), size_of::<LineTilePropsUnionUBO>()),
-            (LayerUniform(ID_LINE_EVALUATED_PROPS_UBO), size_of::<LineEvaluatedPropsUBO>()),
-        ],
-        "RasterShader" => vec![
-            (LayerStorage(ID_RASTER_DRAWABLE_UBO), size_of::<RasterDrawableUBO>()),
-            projection,
-            (LayerUniform(ID_RASTER_EVALUATED_PROPS_UBO), size_of::<RasterEvaluatedPropsUBO>()),
-        ],
-        "SkyShader" => vec![(LayerUniform(ID_SKY_PROPS_UBO), size_of::<SkyPropsUBO>())],
-        "SymbolIconShader" | "SymbolSDFShader" | "SymbolTextAndIconShader" => vec![
-            (LayerStorage(ID_SYMBOL_DRAWABLE_UBO), size_of::<SymbolDrawableUBO>()),
-            projection,
-            (LayerStorage(ID_SYMBOL_TILE_PROPS_UBO), size_of::<SymbolTilePropsUBO>()),
-            (LayerUniform(ID_SYMBOL_EVALUATED_PROPS_UBO), size_of::<SymbolEvaluatedPropsUBO>()),
-        ],
-        name => panic!("no buffers for {name}"),
-    };
-    buffers.extend(own);
-    buffers
+/// The buffer of `program` with `id`: one of its own, or the frame's or the
+/// projection block.
+fn program_buffer(program: &Program, id: usize) -> Option<ProgramBuffer> {
+    program.buffers.iter().copied().chain([FRAME_BUFFER, PROJECTION_BUFFER]).find(|buffer| buffer.id == id)
 }
 
 /// A resource a module declares in a descriptor set.
@@ -439,17 +258,17 @@ fn resources_are_in_the_descriptor_set_layouts() {
                         .collect()
                 };
                 let (textures, samplers) = (bindings_of(Resource::Texture), bindings_of(Resource::Sampler));
-                let table = |binding: fn(usize) -> u32| -> BTreeSet<u32> {
+                let declared = |binding: fn(usize) -> u32| -> BTreeSet<u32> {
                     match stage {
                         Stage::Vertex => BTreeSet::new(),
-                        Stage::Fragment => source.textures.iter().map(|texture| binding(texture.index)).collect(),
+                        Stage::Fragment => (0..program.textures.len()).map(binding).collect(),
                     }
                 };
-                if textures != table(image_texture_binding) {
-                    fail(format!("textures at {textures:?}, the table has {:?}", table(image_texture_binding)));
+                if textures != declared(image_texture_binding) {
+                    fail(format!("textures at {textures:?}, the program has {:?}", declared(image_texture_binding)));
                 }
-                if samplers != table(image_sampler_binding) {
-                    fail(format!("samplers at {samplers:?}, the table has {:?}", table(image_sampler_binding)));
+                if samplers != declared(image_sampler_binding) {
+                    fail(format!("samplers at {samplers:?}, the program has {:?}", declared(image_sampler_binding)));
                 }
 
                 let expected_push_constants = push_constants.map(|_| UBO_INDEX_PUSH_CONSTANT_SIZE);
@@ -462,53 +281,48 @@ fn resources_are_in_the_descriptor_set_layouts() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
-// Every buffer a stage declares is one the renderer binds for the shader, at
-// the binding its id has, as a uniform or a storage buffer as the id is, and
-// with the size of the renderer's struct: the GLSL blocks are std140, as the
-// renderer's `#[repr(C)]` structs are laid out. Every buffer the renderer
-// binds is declared by a stage.
+// Every buffer a stage declares is one of the program's or the engine's, at
+// the binding its id has, and as large as the program declares it: the GLSL
+// blocks are std140, as the `#[repr(C)]` structs of the program's buffers
+// are laid out. A storage buffer has the stride of the program's, but a
+// vertex buffer read as one, whose words the GLSL reads. The projection
+// block is a storage buffer, or a uniform buffer of the draw's own.
 #[test]
-fn buffers_are_the_renderers() {
-    assert_eq!(size_of::<ProjectionUBO>(), 176);
-    assert_eq!(size_of::<GlobalPaintParamsUBO>(), 48);
-
+fn buffers_are_the_programs() {
     let mut failures = Vec::new();
     for (program, source) in programs() {
-        let expected: BTreeMap<(u32, u32), (Buffer, Resource)> = buffers(program)
-            .into_iter()
-            .map(|(buffer, size)| {
-                let (set, binding, storage) = buffer.slot();
-                let size = size as u32;
-                let resource = if storage { Resource::Storage(size) } else { Resource::Uniform(size) };
-                ((set.set_index(), binding), (buffer, resource))
-            })
-            .collect();
-        assert_eq!(expected.len(), buffers(program).len(), "{}: two buffers at a binding", program.name);
-
-        let mut declared = BTreeSet::new();
         for variant in variants(program, false) {
             for stage in STAGES {
                 let at = format!("{} ({}, {stage:?})", program.name, variant.name);
                 let resources = resources(&module(program, source, stage, &variant.defines))
                     .unwrap_or_else(|message| panic!("{at}: {message}"));
-                for (slot, resource) in resources.bindings {
-                    if !matches!(resource, Resource::Uniform(_) | Resource::Storage(_)) {
+                for ((set, binding), resource) in resources.bindings {
+                    let size = match resource {
+                        Resource::Uniform(size) | Resource::Storage(size) => size as usize,
+                        Resource::Texture | Resource::Sampler => continue,
+                    };
+                    let Some(buffer) = buffer_id(set, binding).and_then(|id| program_buffer(program, id)) else {
+                        failures.push(format!("{at}: {resource:?} at set {set} binding {binding} is no buffer of it"));
                         continue;
-                    }
-                    declared.insert(slot);
-                    match expected.get(&slot) {
-                        Some(&(_, expected)) if expected == resource => {}
-                        Some((buffer, expected)) => {
-                            failures.push(format!("{at}: {buffer:?} is {resource:?}, the renderer binds {expected:?}"));
+                    };
+                    let expected = match (buffer.kind, resource) {
+                        (BufferKind::Uniform, Resource::Uniform(_)) => Some(buffer.size),
+                        (BufferKind::Storage { .. }, Resource::Storage(_)) if buffer.id >= MAX_UBO_COUNT_PER_SHADER => {
+                            None
                         }
-                        None => failures.push(format!("{at}: {resource:?} at {slot:?} is no buffer of the shader")),
+                        (BufferKind::Storage { stride }, Resource::Storage(_)) => Some(stride),
+                        (BufferKind::Storage { .. }, Resource::Uniform(_)) if buffer.id == ID_PROJECTION_UBO => {
+                            Some(buffer.size)
+                        }
+                        _ => {
+                            failures.push(format!("{at}: {} is {resource:?}, not {:?}", buffer.name, buffer.kind));
+                            continue;
+                        }
+                    };
+                    if expected.is_some_and(|expected| expected != size) {
+                        failures.push(format!("{at}: {} is {size} bytes, not {expected:?}", buffer.name));
                     }
                 }
-            }
-        }
-        for (slot, (buffer, _)) in &expected {
-            if !declared.contains(slot) {
-                failures.push(format!("{}: no stage declares {buffer:?}", program.name));
             }
         }
     }
@@ -578,44 +392,46 @@ fn stage_outputs(module: &Module) -> BTreeMap<u32, Varying> {
     outputs
 }
 
-/// The vertex and instance attributes of a table.
-fn all_attributes(source: &glsl::Source) -> impl Iterator<Item = &glsl::Attribute> {
-    source.attributes.iter().chain(source.instance_attributes)
+/// Each attribute of `program` with its location: the vertex attributes,
+/// then the instance attributes.
+fn locations(program: &'static Program) -> impl Iterator<Item = (usize, &'static Attribute)> {
+    program.attributes.iter().chain(program.instance_attributes).enumerate()
 }
 
-/// The attributes a table has that the GLSL doesn't read, by shader and
-/// index: the color relief's texture position, which its vertex stage works
-/// out from the position.
+/// The attributes a program declares that the GLSL doesn't read, by shader
+/// and location: the color relief's texture position, which its vertex
+/// stage works out from the position.
 const UNREAD_ATTRIBUTES: &[(&str, usize)] = &[("ColorReliefShader", 1)];
 
 // The inputs of a vertex stage are the vertex and instance attributes of the
-// shader's tables, at the locations of their indices and in the types that
-// read their formats. With a property as a uniform, the stage reads a subset
-// of them.
+// shader's program, at their locations, in types of the scalar kinds of their
+// formats with as many components or more. With a property as a uniform, the
+// stage reads a subset of them.
 #[test]
-fn vertex_inputs_are_the_attribute_tables() {
+fn vertex_inputs_are_the_programs_attributes() {
     let mut failures = Vec::new();
     for (program, source) in programs() {
-        let indices: BTreeSet<usize> = all_attributes(source).map(|attr| attr.index).collect();
-        assert_eq!(indices.len(), all_attributes(source).count(), "{}: attribute indices repeat", program.name);
         for variant in variants(program, true) {
-            let table: BTreeMap<u32, (ScalarKind, u32)> = all_attributes(source)
-                .filter(|attr| !UNREAD_ATTRIBUTES.contains(&(program.name, attr.index)))
-                .map(|attr| (attr.index as u32, input_type(attr.data_type)))
+            let declared: BTreeMap<u32, (ScalarKind, u32)> = locations(program)
+                .filter(|&(location, _)| !UNREAD_ATTRIBUTES.contains(&(program.name, location)))
+                .map(|(location, attribute)| (location as u32, input_type(attribute.format)))
                 .collect();
             let inputs: BTreeMap<u32, (ScalarKind, u32)> =
                 stage_inputs(&module(program, source, Stage::Vertex, &variant.defines))
                     .into_iter()
                     .map(|(location, (kind, components, _))| (location, (kind, components)))
                     .collect();
-            let matches = if variant.per_vertex {
-                inputs == table
-            } else {
-                inputs.iter().all(|(location, input)| table.get(location) == Some(input))
+            let reads = |location: &u32, &(kind, components): &(ScalarKind, u32)| {
+                declared.get(location).is_some_and(|&(declared_kind, declared_components)| {
+                    declared_kind == kind && declared_components <= components
+                })
             };
-            if !matches {
-                failures
-                    .push(format!("{} ({}): inputs {inputs:?}, the table has {table:?}", program.name, variant.name));
+            let all = !variant.per_vertex || inputs.len() == declared.len();
+            if !all || !inputs.iter().all(|(location, input)| reads(location, input)) {
+                failures.push(format!(
+                    "{} ({}): inputs {inputs:?}, the program has {declared:?}",
+                    program.name, variant.name
+                ));
             }
         }
     }
@@ -628,26 +444,24 @@ fn vertex_inputs_are_the_attribute_tables() {
 fn a_walls_next_outline_vertex_has_the_formats_of_its_outline_vertex() {
     let instanced: Vec<_> = programs()
         .into_iter()
-        .filter(|(program, source)| program.name.starts_with("FillExtrusion") && !source.instance_attributes.is_empty())
+        .filter(|(program, _)| program.name.starts_with("FillExtrusion") && !program.instance_attributes.is_empty())
         .collect();
     assert_eq!(instanced.len(), 2);
-    for (program, source) in instanced {
-        let format = |id: usize| {
-            let mut found = source.instance_attributes.iter().filter(|attr| attr.id == id);
-            let attr = found.next().unwrap_or_else(|| panic!("{}: no instance attribute {id}", program.name));
+    for (program, _) in instanced {
+        let format = |name: &str| {
+            let mut found = program.instance_attributes.iter().filter(|attr| attr.name == name);
+            let attr = found.next().unwrap_or_else(|| panic!("{}: no instance attribute {name}", program.name));
             assert!(found.next().is_none());
-            attr.data_type
+            attr.format
         };
-        for (id, next_id) in [
-            (ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE),
-            (ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE),
-        ] {
-            assert_eq!(format(id), format(next_id), "{}", program.name);
+        for (name, next) in [("a_outline_pos", "a_next_outline_pos"), ("a_decimals_ed", "a_next_decimals_ed")] {
+            assert_eq!(format(name), format(next), "{}", program.name);
         }
     }
 }
 
-// compiled with the same defines writes there, flat where the other is, and
+// A fragment stage reads each of its inputs where its vertex stage,
+// compiled with the same defines, writes it, flat where the other is, and
 // the fragment stage writes one color.
 #[test]
 fn stages_agree_on_what_passes_between_them() {
@@ -685,44 +499,21 @@ fn bindings_follow_from_the_packed_ids() {
     assert_eq!(layer_storage_binding(ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO), Some(1));
     assert_eq!(layer_storage_binding(ID_PROJECTION_UBO), Some(2));
     assert_eq!(layer_storage_binding(DRAWABLE_RESERVED_UBO_COUNT), Some(3));
-    for id in [ID_FILL_TILE_PROPS_UBO, ID_FILL_EXTRUSION_TILE_PROPS_UBO, ID_COLOR_RELIEF_TILE_PROPS_UBO] {
-        assert_eq!(layer_storage_binding(id), Some(3));
-    }
     assert_eq!(LAYER_STORAGE_COUNT, 4);
 
-    // layerUBOStartId.
-    for id in [
-        ID_BACKGROUND_PROPS_UBO,
-        ID_CIRCLE_EVALUATED_PROPS_UBO,
-        ID_HEATMAP_EVALUATED_PROPS_UBO,
-        ID_HEATMAP_TEXTURE_PROPS_UBO,
-        ID_HILLSHADE_EVALUATED_PROPS_UBO,
-        ID_LINE_EVALUATED_PROPS_UBO,
-        ID_RASTER_EVALUATED_PROPS_UBO,
-        ID_SYMBOL_EVALUATED_PROPS_UBO,
-        ID_SKY_PROPS_UBO,
-        ID_ATMOSPHERE_PROPS_UBO,
-    ] {
-        assert_eq!(layer_uniform_binding(id), Some(4));
-    }
-    // layerUBOStartId + 1: the layers with a tile properties storage buffer.
-    for id in [ID_FILL_EVALUATED_PROPS_UBO, ID_FILL_EXTRUSION_PROPS_UBO, ID_COLOR_RELIEF_EVALUATED_PROPS_UBO] {
-        assert_eq!(layer_uniform_binding(id), Some(5));
-    }
+    // layerUBOStartId, and the bindings after it.
+    assert_eq!(layer_uniform_binding(DRAWABLE_RESERVED_UBO_COUNT), Some(4));
+    assert_eq!(layer_uniform_binding(DRAWABLE_RESERVED_UBO_COUNT + 1), Some(5));
+    assert_eq!(LAYER_UNIFORM_COUNT, 2);
 
-    // drawableUBOStartId and its offsets.
-    assert_eq!(drawable_uniform_binding(ID_COLLISION_DRAWABLE_UBO), Some(0));
-    assert_eq!(drawable_uniform_binding(ID_COLLISION_PROJECTION_UBO), Some(2));
-    assert_eq!(drawable_uniform_binding(ID_COLLISION_TILE_PROPS_UBO), Some(3));
-    assert_eq!(drawable_uniform_binding(ID_HILLSHADE_PREPARE_DRAWABLE_UBO), Some(0));
-    assert_eq!(drawable_uniform_binding(ID_HILLSHADE_PREPARE_TILE_PROPS_UBO), Some(3));
-    // The pulled shaders' vertex buffers, from drawableUBOStartId + 5.
+    // drawableUBOStartId and its offsets, then the vertex buffers of the
+    // pulled shaders, from drawableUBOStartId + 5.
+    assert_eq!(drawable_uniform_binding(ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO), Some(0));
+    assert_eq!(drawable_uniform_binding(ID_PROJECTION_UBO), Some(2));
+    assert_eq!(drawable_uniform_binding(DRAWABLE_RESERVED_UBO_COUNT), Some(3));
     assert_eq!(DRAWABLE_UNIFORM_COUNT, 5);
-    assert_eq!(drawable_vertex_binding(ID_FILL_EXTRUSION_WALL_VERTICES), Some(5));
-    assert_eq!(drawable_vertex_binding(ID_FILL_EXTRUSION_WALL_PAINT), Some(6));
-    assert_eq!(drawable_vertex_binding(ID_FILL_OUTLINE_VERTICES), Some(5));
-    assert_eq!(drawable_vertex_binding(ID_FILL_OUTLINE_ENDS), Some(6));
-    assert_eq!(drawable_vertex_binding(ID_FILL_OUTLINE_PAINT), Some(7));
+    assert_eq!(drawable_vertex_binding(MAX_UBO_COUNT_PER_SHADER), Some(5));
+    assert_eq!(DRAWABLE_VERTEX_COUNT, 3);
 
     // samplerBindingStartId.
     assert_eq!(IMAGE_SAMPLER_START, 3);
@@ -730,29 +521,27 @@ fn bindings_follow_from_the_packed_ids() {
     assert_eq!(image_sampler_binding(0), 3);
 }
 
-// No table has more attributes and textures than a shader can have. Only
-// the fill extrusion walls and the instanced fill outlines have instance
-// attributes.
+// No program has more attributes and textures than a shader can have. Only
+// the fill extrusion walls, the instanced fill outlines and the tile debug
+// overlay's segments have instance attributes.
 #[test]
-fn the_tables_fit_a_shader() {
-    for (program, source) in programs() {
-        assert!(all_attributes(source).count() <= MAX_ATTRIBUTE_COUNT_PER_SHADER, "{}", program.name);
-        assert!(source.textures.len() <= MAX_TEXTURE_COUNT_PER_SHADER, "{}", program.name);
+fn the_programs_fit_a_shader() {
+    for (program, _) in programs() {
+        assert!(locations(program).count() <= MAX_ATTRIBUTE_COUNT_PER_SHADER, "{}", program.name);
+        assert!(program.textures.len() <= MAX_TEXTURE_COUNT_PER_SHADER.min(IMAGE_TEXTURE_COUNT), "{}", program.name);
         let instanced = matches!(
             program.name,
             "FillExtrusionInstancedShader"
                 | "FillExtrusionPatternInstancedShader"
                 | "FillOutlineInstancedShader"
                 | "FillOutlinePatternInstancedShader"
+                | "TileDebugShader"
         );
-        assert_eq!(!source.instance_attributes.is_empty(), instanced, "{}", program.name);
-        let ids: BTreeSet<usize> = source.attributes.iter().map(|attr| attr.id).collect();
-        assert_eq!(ids.len(), source.attributes.len(), "{}: attribute ids repeat", program.name);
-        let ids: BTreeSet<usize> = source.instance_attributes.iter().map(|attr| attr.id).collect();
-        assert_eq!(ids.len(), source.instance_attributes.len(), "{}: instance attribute ids repeat", program.name);
-        let textures: BTreeSet<usize> = source.textures.iter().map(|texture| texture.index).collect();
-        assert_eq!(textures.len(), source.textures.len(), "{}: texture indices repeat", program.name);
-        assert!(textures.iter().all(|&index| index < IMAGE_TEXTURE_COUNT), "{}", program.name);
+        assert_eq!(!program.instance_attributes.is_empty(), instanced, "{}", program.name);
+        let ids: BTreeSet<usize> = program.attributes.iter().map(|attr| attr.id).collect();
+        assert_eq!(ids.len(), program.attributes.len(), "{}: attribute ids repeat", program.name);
+        let ids: BTreeSet<usize> = program.instance_attributes.iter().map(|attr| attr.id).collect();
+        assert_eq!(ids.len(), program.instance_attributes.len(), "{}: instance attribute ids repeat", program.name);
     }
 }
 
@@ -761,7 +550,7 @@ fn the_tables_fit_a_shader() {
 #[test]
 fn no_stage_flips_y() {
     for (program, source) in programs() {
-        let text: String = source.glsl.vertex.chars().filter(|c| !c.is_whitespace()).collect();
+        let text: String = source.vertex.chars().filter(|c| !c.is_whitespace()).collect();
         assert!(!text.contains("gl_Position.y*=-1"), "{}", program.name);
         assert!(!text.contains("applySurfaceTransform"), "{}", program.name);
     }

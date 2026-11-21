@@ -1,28 +1,8 @@
 //! The programs of the `background` layer type in MSL, for `mln_mtl`.
 
-use mln_gfx::gfx_types::AttributeDataType::Short2;
-use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::source::msl::{Attribute, Msl, Source, Texture};
+use mln_gfx::shaders::source::msl::Msl;
 
-use super::programs;
-use super::programs::{BACKGROUND_UBO_COUNT, ID_BACKGROUND_IMAGE_TEXTURE, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE};
-
-const BACKGROUND_ATTRIBUTES: &[Attribute] =
-    &[Attribute::new(0, Short2, BACKGROUND_UBO_COUNT, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE)];
-static BACKGROUND: Source =
-    Source { msl: &BACKGROUND_SHADER, attributes: BACKGROUND_ATTRIBUTES, instance_attributes: &[], textures: &[] };
-static BACKGROUND_PATTERN: Source = Source {
-    msl: &BACKGROUND_PATTERN_SHADER,
-    attributes: BACKGROUND_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: &[Texture::new(0, ID_BACKGROUND_IMAGE_TEXTURE)],
-};
-
-/// The source of each of the type's programs.
-pub(super) static SOURCES: &[(&Program, &Source)] =
-    &[(&programs::BACKGROUND, &BACKGROUND), (&programs::BACKGROUND_PATTERN, &BACKGROUND_PATTERN)];
-
-const BACKGROUND_PATTERN_SHADER: Msl = Msl {
+pub(super) const BACKGROUND_PATTERN_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -159,7 +139,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-const BACKGROUND_SHADER: Msl = Msl {
+pub(super) const BACKGROUND_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"

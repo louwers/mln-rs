@@ -1,28 +1,6 @@
 //! The programs of the `raster` layer type in GLSL, which `mln_glsl` parses for `mln_vulkan` and `mln_d3d12`.
 
-use mln_gfx::gfx_types::AttributeDataType::Short2;
-use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::source::glsl::{Attribute, Glsl, Source, Texture};
-
-use super::programs;
-use super::programs::{
-    ID_RASTER_IMAGE0_TEXTURE, ID_RASTER_IMAGE1_TEXTURE, ID_RASTER_POS_VERTEX_ATTRIBUTE,
-    ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE,
-};
-
-const RASTER_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(0, Short2, ID_RASTER_POS_VERTEX_ATTRIBUTE),
-    Attribute::new(1, Short2, ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE),
-];
-static RASTER: Source = Source {
-    glsl: &RASTER_SHADER,
-    attributes: RASTER_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: &[Texture::new(0, ID_RASTER_IMAGE0_TEXTURE), Texture::new(1, ID_RASTER_IMAGE1_TEXTURE)],
-};
-
-/// The source of each of the type's programs.
-pub(super) static SOURCES: &[(&Program, &Source)] = &[(&programs::RASTER, &RASTER)];
+use mln_gfx::shaders::source::glsl::Glsl;
 
 const RASTER_SHADER_PRELUDE: &str = r"
 
@@ -31,7 +9,7 @@ const RASTER_SHADER_PRELUDE: &str = r"
 
 ";
 
-const RASTER_SHADER: Glsl = Glsl {
+pub(super) const RASTER_SHADER: Glsl = Glsl {
     prelude: RASTER_SHADER_PRELUDE,
     vertex: r"
 

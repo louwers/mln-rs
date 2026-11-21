@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use mln_gfx::gpu::{GpuError, ShaderKey};
 use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::source::glsl;
+use mln_gfx::shaders::source::glsl::Glsl;
 use mln_glsl::{Module, ResourceUse, Stage};
 use mln_util::hash::HashMap;
 use parking_lot::Mutex;
@@ -30,8 +30,8 @@ pub struct CompiledProgram {
     pub fragment: Vec<u8>,
     /// The resources the stages use, each once.
     pub resources: Vec<ResourceUse>,
-    pub attributes: &'static [glsl::Attribute],
-    pub instance_attributes: &'static [glsl::Attribute],
+    /// What it binds, by which its attributes have their locations.
+    pub program: &'static Program,
     /// Whether the vertex stage reads the vertex index, which includes the
     /// base vertex in naga's special constants.
     pub reads_vertex_index: bool,
@@ -45,21 +45,24 @@ impl ShaderCompiler {
         Ok(ShaderCompiler { dxc })
     }
 
-    /// The program of `key` with its defines, compiled from `source` once a
+    /// The program of `key` with its defines, compiled from its GLSL once a
     /// process: it doesn't depend on the device, and every renderer compiles
-    /// the same.
-    pub fn compile(&self, key: &ShaderKey, source: &'static glsl::Source) -> Result<Arc<CompiledProgram>, GpuError> {
+    /// the same. Fails with [`GpuError::Unsupported`] for a program without
+    /// GLSL.
+    pub fn compile(&self, key: &ShaderKey) -> Result<Arc<CompiledProgram>, GpuError> {
         static PROGRAMS: Mutex<Option<HashMap<ShaderKey, Arc<CompiledProgram>>>> = Mutex::new(None);
         if let Some(program) = PROGRAMS.lock().get_or_insert_default().get(key) {
             return Ok(Arc::clone(program));
         }
-        let program = Arc::new(self.compile_uncached(key, source)?);
+        let program = Arc::new(self.compile_uncached(key)?);
         PROGRAMS.lock().get_or_insert_default().insert(key.clone(), Arc::clone(&program));
         Ok(program)
     }
 
-    fn compile_uncached(&self, key: &ShaderKey, source: &'static glsl::Source) -> Result<CompiledProgram, GpuError> {
+    fn compile_uncached(&self, key: &ShaderKey) -> Result<CompiledProgram, GpuError> {
         let program = key.program();
+        let source =
+            program.sources.glsl.ok_or_else(|| GpuError::Unsupported(format!("no GLSL for {}", program.name)))?;
         let mut defines = String::new();
         for (name, value) in key.define_values() {
             let _ = writeln!(defines, "#define {name} {value}");
@@ -80,7 +83,7 @@ impl ShaderCompiler {
     pub(crate) fn compile_source(
         &self,
         program: &'static Program,
-        source: &'static glsl::Source,
+        source: &Glsl,
         defines: &str,
     ) -> Result<CompiledProgram, String> {
         let mut resources: Vec<ResourceUse> = Vec::new();
@@ -102,14 +105,6 @@ impl ShaderCompiler {
         };
         let vertex = compile(Stage::Vertex)?;
         let fragment = compile(Stage::Fragment)?;
-        Ok(CompiledProgram {
-            name: program.name,
-            vertex,
-            fragment,
-            resources,
-            attributes: source.attributes,
-            instance_attributes: source.instance_attributes,
-            reads_vertex_index,
-        })
+        Ok(CompiledProgram { name: program.name, vertex, fragment, resources, program, reads_vertex_index })
     }
 }

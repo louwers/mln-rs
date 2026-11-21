@@ -134,8 +134,7 @@ impl Renderer {
     /// renderer.
     ///
     /// The renderer draws with `gpu` and only with it: every later call
-    /// that takes a `Gpu` takes this one. It adds `registry`'s shader sources
-    /// to `gpu` ([`Gpu::add_shader_sources`]).
+    /// that takes a `Gpu` takes this one.
     #[expect(clippy::too_many_arguments, reason = "each argument is a part of the renderer that its host picks")]
     pub fn new(
         gpu: &mut dyn Gpu,
@@ -147,7 +146,6 @@ impl Renderer {
         waker: Waker,
         pool: &Pool,
     ) -> Self {
-        gpu.add_shader_sources(registry.shader_sources());
         Renderer {
             orchestrator: RenderOrchestrator::new(
                 true,

@@ -1,32 +1,8 @@
 //! The programs of the `raster` layer type in MSL, for `mln_mtl`.
 
-use mln_gfx::gfx_types::AttributeDataType::Short2;
-use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::source::msl::{Attribute, Msl, Source, Texture};
+use mln_gfx::shaders::source::msl::Msl;
 
-use super::programs;
-use super::programs::{
-    ID_RASTER_IMAGE0_TEXTURE, ID_RASTER_IMAGE1_TEXTURE, ID_RASTER_POS_VERTEX_ATTRIBUTE,
-    ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE, RASTER_LAYER_UBO_COUNT,
-};
-
-const RASTER_UBO_COUNT: usize = RASTER_LAYER_UBO_COUNT;
-
-const RASTER_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(0, Short2, RASTER_UBO_COUNT, ID_RASTER_POS_VERTEX_ATTRIBUTE),
-    Attribute::new(1, Short2, RASTER_UBO_COUNT, ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE),
-];
-static RASTER: Source = Source {
-    msl: &RASTER_SHADER,
-    attributes: RASTER_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: &[Texture::new(0, ID_RASTER_IMAGE0_TEXTURE), Texture::new(1, ID_RASTER_IMAGE1_TEXTURE)],
-};
-
-/// The source of each of the type's programs.
-pub(super) static SOURCES: &[(&Program, &Source)] = &[(&programs::RASTER, &RASTER)];
-
-const RASTER_SHADER: Msl = Msl {
+pub(super) const RASTER_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"

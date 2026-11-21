@@ -10,20 +10,17 @@
 //! between [`Gpu::begin_pass`] and [`Gpu::end_pass`], and the backend
 //! records it at once.
 //!
-//! Bindings use the shaders' own numbering: a buffer binds at its uniform
-//! or storage buffer id (the engine's in `shaders::shader_defines`, such as
-//! `ID_GLOBAL_PAINT_PARAMS_UBO`, the others its program's), a texture at
-//! its texture id and a vertex attribute at its attribute id, both its
-//! program's. Each backend maps them to its own slots, groups, descriptor
-//! sets or shader locations.
+//! Bindings use the numbering of the shader's [`Program`]: a buffer binds at
+//! its id, a texture at its slot and a vertex attribute at its attribute id.
+//! Each backend maps them to its own slots, groups, descriptor sets or
+//! shader locations as the program's declaration says.
 //!
 //! This is the GPU backend contract. A backend implements [`Gpu`], and a
 //! [`RendererBackend`](crate::RendererBackend) that owns it and lends it;
 //! no registry holds it. A renderer takes the `Gpu` at each call that draws,
 //! on the thread that owns the backend, so a `Gpu` needn't be `Send`. The
-//! renderer adds its registry's shader sources to it
-//! ([`Gpu::add_shader_sources`]), and the backend compiles the programs it
-//! draws from those and its own. The frames of `mln_layers::conformance`
+//! backend compiles each program from the source it carries in the
+//! backend's shading language. The frames of `mln_layers::conformance`
 //! (feature `gpu-conformance`) are what every backend's tests draw alike.
 
 mod ids;
@@ -46,7 +43,6 @@ use crate::cull_face_mode::CullFaceMode;
 use crate::depth_mode::DepthMode;
 use crate::gfx_types::{AttributeDataType, DrawModeType};
 use crate::shaders::program::Program;
-use crate::shaders::source::ShaderSources;
 use crate::stencil_mode::{StencilMode, Test};
 use crate::texture2d::SamplerState;
 use crate::types::{DepthFunctionType, DepthMaskType, StencilOpType};
@@ -430,7 +426,7 @@ pub enum BindGroupEntry {
     /// id `id`. A shader reads a [`Vertex`](BufferUsage::Vertex) buffer as
     /// a storage buffer ([`Caps::binds_vertex_buffers`]).
     Buffer { id: u32, buffer: BufferId, offset: u64, size: u64 },
-    /// `texture`, sampled with `sampler`, at texture id `id`.
+    /// `texture`, sampled with `sampler`, at texture slot `id`.
     Texture { id: u32, texture: TextureId, sampler: SamplerId },
 }
 
@@ -594,15 +590,9 @@ pub trait Gpu {
 
     fn create_sampler(&mut self, state: &SamplerState) -> Result<SamplerId, GpuError>;
 
-    /// Adds the sources of `sources` in the backend's shading language to
-    /// the programs it compiles, in place of any it had for them. A
-    /// replacement applies to later compilations, not to shaders the backend
-    /// has already compiled. A backend has the engine's own programs' sources
-    /// itself
-    /// ([`programs`](crate::shaders::programs)).
-    fn add_shader_sources(&mut self, sources: &ShaderSources);
-    /// Compiles the program of `key`. Fails with [`GpuError::Unsupported`]
-    /// for a program the backend has no source for.
+    /// Compiles the program of `key` from its source in the backend's
+    /// shading language ([`Program::sources`]). Fails with
+    /// [`GpuError::Unsupported`] for a program without one.
     fn create_shader(&mut self, key: &ShaderKey) -> Result<ShaderId, GpuError>;
     /// Makes a pipeline of `desc`'s shader and state. Fails with
     /// [`GpuError::Unsupported`] for a primitive the backend doesn't draw.
@@ -710,14 +700,25 @@ pub fn destroy_unused(gpu: &mut (impl Gpu + ?Sized), resources: impl IntoIterato
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shaders::programs;
+    use crate::shaders::program::Sources;
+
+    static A: Program = Program {
+        name: "A",
+        buffers: &[],
+        attributes: &[],
+        instance_attributes: &[],
+        textures: &[],
+        properties: &[],
+        sources: Sources::NONE,
+    };
+    static B: Program = Program { name: "B", ..A };
 
     #[test]
     fn shader_keys_ignore_define_order_and_repeats() {
-        let key = |defines: &[&str]| ShaderKey::new(&programs::SKY, defines.iter().map(|&d| d.to_owned()));
+        let key = |defines: &[&str]| ShaderKey::new(&A, defines.iter().map(|&d| d.to_owned()));
         assert_eq!(key(&["B", "A", "B"]), key(&["A", "B"]));
         assert_eq!(key(&["B", "A"]).defines(), ["A", "B"]);
-        assert_ne!(key(&["A"]), ShaderKey::new(&programs::ATMOSPHERE, ["A".to_owned()]));
+        assert_ne!(key(&["A"]), ShaderKey::new(&B, ["A".to_owned()]));
         assert_eq!(key(&["B=2.0", "A"]).define_values().collect::<Vec<_>>(), [("A", ""), ("B", "2.0")]);
     }
 

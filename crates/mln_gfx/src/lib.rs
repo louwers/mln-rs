@@ -9,7 +9,7 @@
 //! draws bind, which the renderer keeps in `mln_render`. The targets that
 //! draw into rings of the host's textures, or of images they export, are
 //! generic over each backend's part, in [`ring`]. What each program reads is
-//! in `shaders::program`, and the engine's programs in `shaders::programs`.
+//! in `shaders::program`.
 
 pub mod backend;
 pub mod color_mode;

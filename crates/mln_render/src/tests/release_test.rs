@@ -5,8 +5,6 @@ use mln_gfx::gpu::{
     VertexBufferLayout, VertexStep,
 };
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::programs;
-use mln_gfx::shaders::programs::ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE;
 use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
 use mln_util::Color;
 use mln_util::size::Size;
@@ -14,6 +12,8 @@ use mln_util::size::Size;
 use super::with_context;
 use crate::gfx::indexes::{DrawIndexes, Indexes};
 use crate::gfx::owned::Held;
+use crate::shaders::programs;
+use crate::shaders::programs::ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE;
 
 // A texture that a resize replaced, and vertices and indexes of the
 // context's stores that their owners let go of, stay while the bindings and

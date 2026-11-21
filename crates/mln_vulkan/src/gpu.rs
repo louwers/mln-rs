@@ -21,15 +21,15 @@ use mln_gfx::gpu::{
     ResourceId, SamplerId, ShaderId, ShaderKey, SlotMap, TargetFormats, TextureDesc, TextureFormat, TextureId,
     TextureRegion, TextureUsage, VertexStep,
 };
+use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::shader_defines::{DRAWABLE_RESERVED_UBO_COUNT, LAYER_SSBO_START_ID};
-use mln_gfx::shaders::source::{ShaderSources, Sources, glsl};
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{DepthFunctionType, TextureFilterType, TextureWrapType};
 use mln_glsl::layout::{
     DescriptorSetType, IMAGE_SAMPLER_START, IMAGE_TEXTURE_COUNT, LAYER_STORAGE_COUNT, UBO_INDEX_PUSH_CONSTANT_SIZE,
     image_sampler_binding, image_texture_binding,
 };
-use mln_glsl::{BUILT_INS, ResourceUse, Stage};
+use mln_glsl::{ResourceUse, Stage};
 use mln_util::hash::HashMap;
 use mln_util::size::Size;
 
@@ -175,23 +175,16 @@ pub(crate) struct Shader {
     bindings: [Vec<(u32, Binding)>; DescriptorSetType::COUNT],
     /// What its stages read from its bindings, by the shaders' ids.
     reads: Vec<ShaderBinding>,
-    /// The location of each per-vertex attribute, by id.
-    attributes: &'static [glsl::Attribute],
-    /// The location of each per-instance attribute, by id.
-    instance_attributes: &'static [glsl::Attribute],
+    /// What it binds, by which its attributes have their locations.
+    program: &'static Program,
 }
 
 impl Shader {
     /// The location of the per-vertex or per-instance attribute `id`.
     fn location(&self, step: VertexStep, id: u32) -> Result<u32, GpuError> {
-        let attributes = match step {
-            VertexStep::Vertex => self.attributes,
-            VertexStep::Instance => self.instance_attributes,
-        };
-        attributes
-            .iter()
-            .find(|attribute| attribute.id == id as usize)
-            .map(|attribute| attribute.index as u32)
+        self.program
+            .location(step, id as usize)
+            .map(|location| location as u32)
             .ok_or_else(|| GpuError::Invalid(format!("{} has no {step:?} attribute {id}", self.name)))
     }
 }
@@ -372,8 +365,6 @@ pub struct VulkanGpu {
     buffers: SlotMap<BufferId, Buffer>,
     textures: SlotMap<TextureId, Texture>,
     samplers: SlotMap<SamplerId, vk::Sampler>,
-    /// The source each program compiles from.
-    sources: Sources<glsl::Source>,
     shaders: SlotMap<ShaderId, Shader>,
     layout_tags: LayoutTags,
     pipelines: SlotMap<PipelineId, Pipeline>,
@@ -470,17 +461,11 @@ fn clear_color(color: mln_util::Color) -> vk::ClearValue {
 
 /// The resource of `binding` in `set` of the shared layout, by the shaders'
 /// ids: the inverse of `mln_glsl::layout`'s `*_binding` functions.
-fn binding_of(
-    name: &str,
-    textures: &[glsl::Texture],
-    set: u32,
-    binding: u32,
-) -> Result<(DescriptorSetType, Binding), GpuError> {
+fn binding_of(program: &Program, set: u32, binding: u32) -> Result<(DescriptorSetType, Binding), GpuError> {
+    let name = program.name;
     let texture_id = |index: u32| {
-        textures
-            .iter()
-            .find(|texture| texture.index == index as usize)
-            .map(|texture| texture.id as u32)
+        ((index as usize) < program.textures.len())
+            .then_some(index)
             .ok_or_else(|| GpuError::Invalid(format!("{name}: no texture at index {index} of set {set}")))
     };
     let start = LAYER_SSBO_START_ID as u32;
@@ -653,7 +638,6 @@ impl VulkanGpu {
             buffers: SlotMap::with_key(),
             textures: SlotMap::with_key(),
             samplers: SlotMap::with_key(),
-            sources: Sources::new(BUILT_INS),
             shaders: SlotMap::with_key(),
             layout_tags: LayoutTags::default(),
             pipelines: SlotMap::with_key(),
@@ -1074,8 +1058,9 @@ impl VulkanGpu {
 
     /// Compiles the program of `key`.
     fn compile(&self, key: &ShaderKey) -> Result<Shader, GpuError> {
-        let name = key.program().name;
-        let source = self.sources.get(key.program())?;
+        let program = key.program();
+        let name = program.name;
+        let source = program.sources.glsl.ok_or_else(|| GpuError::Unsupported(format!("no GLSL for {name}")))?;
         let mut defines = String::new();
         for (name, value) in key.define_values() {
             let _ = writeln!(defines, "#define {name} {value}");
@@ -1098,7 +1083,7 @@ impl VulkanGpu {
                 .map_err(|error| GpuError::Invalid(format!("{name}: {error}")))
                 .and_then(|compiled| {
                     for &ResourceUse { set, binding, size } in &compiled.resources {
-                        let (type_, resource) = binding_of(name, source.textures, set, binding)?;
+                        let (type_, resource) = binding_of(program, set, binding)?;
                         let set_bindings = &mut bindings[type_ as usize];
                         if !set_bindings.contains(&(binding, resource)) {
                             set_bindings.push((binding, resource));
@@ -1122,15 +1107,7 @@ impl VulkanGpu {
         }
         self.device.set_debug_name(modules[0], &format!("{name}.vert"));
         self.device.set_debug_name(modules[1], &format!("{name}.frag"));
-        Ok(Shader {
-            name,
-            vertex: modules[0],
-            fragment: modules[1],
-            bindings,
-            reads,
-            attributes: source.attributes,
-            instance_attributes: source.instance_attributes,
-        })
+        Ok(Shader { name, vertex: modules[0], fragment: modules[1], bindings, reads, program })
     }
 
     /// The render pass of `key`, made on first use.
@@ -2286,10 +2263,6 @@ impl Gpu for VulkanGpu {
         // SAFETY: the create info is valid for the device.
         let sampler = unsafe { self.vk().create_sampler(&create_info, None) }.map_err(vk_error("sampler"))?;
         Ok(self.samplers.insert(sampler))
-    }
-
-    fn add_shader_sources(&mut self, sources: &ShaderSources) {
-        self.sources.extend(sources.of::<glsl::Source>().iter());
     }
 
     fn create_shader(&mut self, key: &ShaderKey) -> Result<ShaderId, GpuError> {

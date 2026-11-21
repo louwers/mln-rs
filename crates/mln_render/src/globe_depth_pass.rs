@@ -9,8 +9,6 @@ use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::programs;
-use mln_gfx::shaders::programs::ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
 use mln_gfx::{AttributeDataType, DepthMaskType, DrawMode};
@@ -25,6 +23,8 @@ use crate::gfx::vertex_attribute::Uniforms;
 use crate::globe::{TileGrid, grid, surface_granularity};
 use crate::layer_drawing::{DrawDepth, DrawList, FrameDraw, KeptDraw, LayerDraws, TileMap, finish_tiles, tile_objects};
 use crate::paint_parameters::PaintParameters;
+use crate::shaders::programs;
+use crate::shaders::programs::ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE;
 use crate::tile_matrix::to_projection_ubo;
 use crate::update_parameters::UpdateParameters;
 

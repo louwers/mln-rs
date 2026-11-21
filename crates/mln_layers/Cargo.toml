@@ -72,8 +72,9 @@ mln_runtime = { package = "mln-rs-runtime", path = "../mln_runtime", default-fea
   "webgpu",
 ] }
 # The benchmarks' entry points to a tile's layout, which the tests run
-# behind the worker codec, and the draw services on a bare `Gpu`.
-mln_render = { workspace = true, features = ["bench", "testing"] }
+# behind the worker codec, the draw services on a bare `Gpu`, and the WGSL of
+# the engine's programs, which the tests' WebGPU backend compiles.
+mln_render = { workspace = true, features = ["bench", "testing", "wgsl"] }
 # The built-in registrations that the tests' styles parse against.
 mln_rs = { package = "mln-rs", path = "../..", default-features = false }
 mln_webgpu = { package = "mln-rs-webgpu", path = "../mln_webgpu" }

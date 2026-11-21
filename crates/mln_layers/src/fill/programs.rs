@@ -1,44 +1,54 @@
-//! The programs of the `fill` layer type: the attributes, textures and
-//! paint properties of its shaders.
+//! The programs of the `fill` layer type: the buffers,
+//! attributes, textures and paint properties of its shaders, and their
+//! sources.
 
 use mln_gfx::gfx_types::AttributeDataType::{Float2, Float4, Short2, UShort4};
-use mln_gfx::shaders::program::{Program, Property};
+use mln_gfx::shaders::program::{Attribute, Buffer, Program, Property, Texture};
 use mln_gfx::shaders::shader_defines::{
     DRAWABLE_RESERVED_UBO_COUNT, ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO, MAX_UBO_COUNT_PER_SHADER,
 };
 
+use super::ubo::{
+    FillDrawableUBO, FillDrawableUnionUBO, FillEvaluatedPropsUBO, FillOutlineDrawableUBO, FillPatternDrawableUBO,
+    FillPatternTilePropsUBO, FillTilePropsUnionUBO,
+};
+use crate::shaders::sources;
+
 // The binding ids of the programs: their buffers, textures and vertex
 // attributes.
-pub const ID_FILL_DRAWABLE_UBO: usize = ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO; // SSBO
-pub const ID_FILL_TILE_PROPS_UBO: usize = DRAWABLE_RESERVED_UBO_COUNT; // SSBO
-pub const ID_FILL_EVALUATED_PROPS_UBO: usize = ID_FILL_TILE_PROPS_UBO + 1;
-pub const FILL_LAYER_UBO_COUNT: usize = ID_FILL_EVALUATED_PROPS_UBO + 1;
-pub const ID_FILL_IMAGE_TEXTURE: usize = 0;
-pub const ID_FILL_POS_VERTEX_ATTRIBUTE: usize = 0;
+pub(crate) const ID_FILL_DRAWABLE_UBO: usize = ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO;
+pub(crate) const ID_FILL_TILE_PROPS_UBO: usize = DRAWABLE_RESERVED_UBO_COUNT;
+pub(crate) const ID_FILL_EVALUATED_PROPS_UBO: usize = ID_FILL_TILE_PROPS_UBO + 1;
+pub(crate) const ID_FILL_IMAGE_TEXTURE: usize = 0;
+pub(crate) const ID_FILL_POS_VERTEX_ATTRIBUTE: usize = 0;
 
 // Data-driven properties.
-pub const ID_FILL_COLOR_VERTEX_ATTRIBUTE: usize = 1;
-pub const ID_FILL_OPACITY_VERTEX_ATTRIBUTE: usize = 2;
-pub const ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE: usize = 3;
-pub const ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE: usize = 4;
-pub const ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE: usize = 5;
+pub(crate) const ID_FILL_COLOR_VERTEX_ATTRIBUTE: usize = 1;
+pub(crate) const ID_FILL_OPACITY_VERTEX_ATTRIBUTE: usize = 2;
+pub(crate) const ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE: usize = 3;
+pub(crate) const ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE: usize = 4;
+pub(crate) const ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE: usize = 5;
 /// An outline instance's vertex, and where its segment of the
 /// outline ends, which the instanced outline shaders read per instance.
-pub const ID_FILL_OUTLINE_POS_ATTRIBUTE: usize = 6;
-pub const ID_FILL_OUTLINE_END_ATTRIBUTE: usize = 7;
+pub(crate) const ID_FILL_OUTLINE_POS_ATTRIBUTE: usize = 6;
+pub(crate) const ID_FILL_OUTLINE_END_ATTRIBUTE: usize = 7;
 
 // The vertex buffers that `FillOutlinePulledShader` reads as storage
 // buffers, whose ids follow the uniform buffers'.
-pub const ID_FILL_OUTLINE_VERTICES: usize = MAX_UBO_COUNT_PER_SHADER;
-pub const ID_FILL_OUTLINE_ENDS: usize = MAX_UBO_COUNT_PER_SHADER + 1;
-pub const ID_FILL_OUTLINE_PAINT: usize = MAX_UBO_COUNT_PER_SHADER + 2;
+pub(crate) const ID_FILL_OUTLINE_VERTICES: usize = MAX_UBO_COUNT_PER_SHADER;
+pub(crate) const ID_FILL_OUTLINE_ENDS: usize = MAX_UBO_COUNT_PER_SHADER + 1;
+pub(crate) const ID_FILL_OUTLINE_PAINT: usize = MAX_UBO_COUNT_PER_SHADER + 2;
 
 pub static FILL: Program = Program {
     name: "FillShader",
+    buffers: &[
+        Buffer::storage_of::<FillDrawableUBO, FillDrawableUnionUBO>(ID_FILL_DRAWABLE_UBO, "FillDrawableUBO"),
+        Buffer::uniform::<FillEvaluatedPropsUBO>(ID_FILL_EVALUATED_PROPS_UBO, "FillEvaluatedPropsUBO"),
+    ],
     attributes: &[
-        (ID_FILL_POS_VERTEX_ATTRIBUTE, Short2),
-        (ID_FILL_COLOR_VERTEX_ATTRIBUTE, Float4),
-        (ID_FILL_OPACITY_VERTEX_ATTRIBUTE, Float2),
+        Attribute::new(ID_FILL_POS_VERTEX_ATTRIBUTE, "a_pos", Short2),
+        Attribute::new(ID_FILL_COLOR_VERTEX_ATTRIBUTE, "a_color", Float4),
+        Attribute::new(ID_FILL_OPACITY_VERTEX_ATTRIBUTE, "a_opacity", Float2),
     ],
     instance_attributes: &[],
     textures: &[],
@@ -46,14 +56,22 @@ pub static FILL: Program = Program {
         Property::new("color", ID_FILL_COLOR_VERTEX_ATTRIBUTE),
         Property::new("opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
     ],
+    sources: sources!(wgsl: FILL_SHADER, msl: FILL_SHADER, glsl_es: FILL_SHADER, glsl: FILL_SHADER,),
 };
 
 pub static FILL_OUTLINE: Program = Program {
     name: "FillOutlineShader",
+    buffers: &[
+        Buffer::storage_of::<FillOutlineDrawableUBO, FillDrawableUnionUBO>(
+            ID_FILL_DRAWABLE_UBO,
+            "FillOutlineDrawableUBO",
+        ),
+        Buffer::uniform::<FillEvaluatedPropsUBO>(ID_FILL_EVALUATED_PROPS_UBO, "FillEvaluatedPropsUBO"),
+    ],
     attributes: &[
-        (ID_FILL_POS_VERTEX_ATTRIBUTE, Short2),
-        (ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE, Float4),
-        (ID_FILL_OPACITY_VERTEX_ATTRIBUTE, Float2),
+        Attribute::new(ID_FILL_POS_VERTEX_ATTRIBUTE, "a_pos", Short2),
+        Attribute::new(ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE, "a_outline_color", Float4),
+        Attribute::new(ID_FILL_OPACITY_VERTEX_ATTRIBUTE, "a_opacity", Float2),
     ],
     instance_attributes: &[],
     textures: &[],
@@ -61,60 +79,107 @@ pub static FILL_OUTLINE: Program = Program {
         Property::new("opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
         Property::new("outline_color", ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE),
     ],
+    sources: sources!(wgsl: FILL_OUTLINE_SHADER, glsl_es: FILL_OUTLINE_SHADER, glsl: FILL_OUTLINE_SHADER,),
 };
 
 pub static FILL_PATTERN: Program = Program {
     name: "FillPatternShader",
+    buffers: &[
+        Buffer::storage_of::<FillPatternDrawableUBO, FillDrawableUnionUBO>(
+            ID_FILL_DRAWABLE_UBO,
+            "FillPatternDrawableUBO",
+        ),
+        Buffer::storage_of::<FillPatternTilePropsUBO, FillTilePropsUnionUBO>(
+            ID_FILL_TILE_PROPS_UBO,
+            "FillPatternTilePropsUBO",
+        ),
+        Buffer::uniform::<FillEvaluatedPropsUBO>(ID_FILL_EVALUATED_PROPS_UBO, "FillEvaluatedPropsUBO"),
+    ],
     attributes: &[
-        (ID_FILL_POS_VERTEX_ATTRIBUTE, Short2),
-        (ID_FILL_COLOR_VERTEX_ATTRIBUTE, Float4),
-        (ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE, UShort4),
-        (ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE, UShort4),
-        (ID_FILL_OPACITY_VERTEX_ATTRIBUTE, Float2),
+        Attribute::new(ID_FILL_POS_VERTEX_ATTRIBUTE, "a_pos", Short2),
+        Attribute::new(ID_FILL_COLOR_VERTEX_ATTRIBUTE, "a_color", Float4),
+        Attribute::new(ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE, "a_pattern_from", UShort4),
+        Attribute::new(ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE, "a_pattern_to", UShort4),
+        Attribute::new(ID_FILL_OPACITY_VERTEX_ATTRIBUTE, "a_opacity", Float2),
     ],
     instance_attributes: &[],
-    textures: &[ID_FILL_IMAGE_TEXTURE],
+    textures: &[Texture::new("u_image")],
     properties: &[
         Property::new("color", ID_FILL_COLOR_VERTEX_ATTRIBUTE),
         Property::new("opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
         Property::new("pattern_from", ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE),
         Property::new("pattern_to", ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE),
     ],
+    sources: sources!(
+        wgsl: FILL_PATTERN_SHADER,
+        msl: FILL_PATTERN_SHADER,
+        glsl_es: FILL_PATTERN_SHADER,
+        glsl: FILL_PATTERN_SHADER,
+    ),
 };
 
 pub static FILL_OUTLINE_PATTERN: Program = Program {
     name: "FillOutlinePatternShader",
+    buffers: &[
+        Buffer::storage_of::<FillPatternDrawableUBO, FillDrawableUnionUBO>(
+            ID_FILL_DRAWABLE_UBO,
+            "FillOutlinePatternDrawableUBO",
+        ),
+        Buffer::storage_of::<FillPatternTilePropsUBO, FillTilePropsUnionUBO>(
+            ID_FILL_TILE_PROPS_UBO,
+            "FillOutlinePatternTilePropsUBO",
+        ),
+        Buffer::uniform::<FillEvaluatedPropsUBO>(ID_FILL_EVALUATED_PROPS_UBO, "FillEvaluatedPropsUBO"),
+    ],
     attributes: &[
-        (ID_FILL_POS_VERTEX_ATTRIBUTE, Short2),
-        (ID_FILL_COLOR_VERTEX_ATTRIBUTE, Float4),
-        (ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE, UShort4),
-        (ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE, UShort4),
-        (ID_FILL_OPACITY_VERTEX_ATTRIBUTE, Float2),
+        Attribute::new(ID_FILL_POS_VERTEX_ATTRIBUTE, "a_pos", Short2),
+        Attribute::new(ID_FILL_COLOR_VERTEX_ATTRIBUTE, "a_color", Float4),
+        Attribute::new(ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE, "a_pattern_from", UShort4),
+        Attribute::new(ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE, "a_pattern_to", UShort4),
+        Attribute::new(ID_FILL_OPACITY_VERTEX_ATTRIBUTE, "a_opacity", Float2),
     ],
     instance_attributes: &[],
-    textures: &[ID_FILL_IMAGE_TEXTURE],
+    textures: &[Texture::new("u_image")],
     properties: &[
         Property::new("color", ID_FILL_COLOR_VERTEX_ATTRIBUTE),
         Property::new("opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
         Property::new("pattern_from", ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE),
         Property::new("pattern_to", ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE),
     ],
+    sources: sources!(
+        wgsl: FILL_OUTLINE_PATTERN_SHADER,
+        glsl_es: FILL_OUTLINE_PATTERN_SHADER,
+        glsl: FILL_OUTLINE_PATTERN_SHADER,
+    ),
 };
 
 pub static FILL_OUTLINE_INSTANCED: Program = Program {
     name: "FillOutlineInstancedShader",
-    attributes: &[(ID_FILL_POS_VERTEX_ATTRIBUTE, Short2)],
+    buffers: &[
+        Buffer::storage_of::<FillOutlineDrawableUBO, FillDrawableUnionUBO>(
+            ID_FILL_DRAWABLE_UBO,
+            "FillOutlineDrawableUBO",
+        ),
+        Buffer::uniform::<FillEvaluatedPropsUBO>(ID_FILL_EVALUATED_PROPS_UBO, "FillEvaluatedPropsUBO"),
+    ],
+    attributes: &[Attribute::new(ID_FILL_POS_VERTEX_ATTRIBUTE, "a_pos", Short2)],
     instance_attributes: &[
-        (ID_FILL_OUTLINE_POS_ATTRIBUTE, Short2),
-        (ID_FILL_OUTLINE_END_ATTRIBUTE, Short2),
-        (ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE, Float4),
-        (ID_FILL_OPACITY_VERTEX_ATTRIBUTE, Float2),
+        Attribute::new(ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE, "a_outline_color", Float4),
+        Attribute::new(ID_FILL_OPACITY_VERTEX_ATTRIBUTE, "a_opacity", Float2),
+        Attribute::new(ID_FILL_OUTLINE_POS_ATTRIBUTE, "a_outline_pos", Short2),
+        Attribute::new(ID_FILL_OUTLINE_END_ATTRIBUTE, "a_outline_end", Short2),
     ],
     textures: &[],
     properties: &[
         Property::new("opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
         Property::new("outline_color", ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE),
     ],
+    sources: sources!(
+        wgsl: FILL_OUTLINE_INSTANCED_SHADER,
+        msl: FILL_OUTLINE_INSTANCED_SHADER,
+        glsl_es: FILL_OUTLINE_INSTANCED_SHADER,
+        glsl: FILL_OUTLINE_INSTANCED_SHADER,
+    ),
 };
 
 /// The outlines of [`FILL_OUTLINE_INSTANCED`] as quads without vertex
@@ -122,6 +187,16 @@ pub static FILL_OUTLINE_INSTANCED: Program = Program {
 /// storage buffers, by its index.
 pub static FILL_OUTLINE_PULLED: Program = Program {
     name: "FillOutlinePulledShader",
+    buffers: &[
+        Buffer::storage_of::<FillOutlineDrawableUBO, FillDrawableUnionUBO>(
+            ID_FILL_DRAWABLE_UBO,
+            "FillOutlineDrawableUBO",
+        ),
+        Buffer::uniform::<FillEvaluatedPropsUBO>(ID_FILL_EVALUATED_PROPS_UBO, "FillEvaluatedPropsUBO"),
+        Buffer::storage::<[i16; 2]>(ID_FILL_OUTLINE_VERTICES, "FillOutlineVertices"),
+        Buffer::storage::<[i16; 2]>(ID_FILL_OUTLINE_ENDS, "FillOutlineEnds"),
+        Buffer::storage::<f32>(ID_FILL_OUTLINE_PAINT, "FillOutlinePaint"),
+    ],
     attributes: &[],
     instance_attributes: &[],
     textures: &[],
@@ -129,24 +204,46 @@ pub static FILL_OUTLINE_PULLED: Program = Program {
         Property::new("opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
         Property::new("outline_color", ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE),
     ],
+    sources: sources!(
+        wgsl: FILL_OUTLINE_PULLED_SHADER,
+        msl: FILL_OUTLINE_PULLED_SHADER,
+        glsl: FILL_OUTLINE_PULLED_SHADER,
+    ),
 };
 
 pub static FILL_OUTLINE_PATTERN_INSTANCED: Program = Program {
     name: "FillOutlinePatternInstancedShader",
-    attributes: &[(ID_FILL_POS_VERTEX_ATTRIBUTE, Short2)],
-    instance_attributes: &[
-        (ID_FILL_OUTLINE_POS_ATTRIBUTE, Short2),
-        (ID_FILL_OUTLINE_END_ATTRIBUTE, Short2),
-        (ID_FILL_COLOR_VERTEX_ATTRIBUTE, Float4),
-        (ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE, UShort4),
-        (ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE, UShort4),
-        (ID_FILL_OPACITY_VERTEX_ATTRIBUTE, Float2),
+    buffers: &[
+        Buffer::storage_of::<FillPatternDrawableUBO, FillDrawableUnionUBO>(
+            ID_FILL_DRAWABLE_UBO,
+            "FillOutlinePatternDrawableUBO",
+        ),
+        Buffer::storage_of::<FillPatternTilePropsUBO, FillTilePropsUnionUBO>(
+            ID_FILL_TILE_PROPS_UBO,
+            "FillOutlinePatternTilePropsUBO",
+        ),
+        Buffer::uniform::<FillEvaluatedPropsUBO>(ID_FILL_EVALUATED_PROPS_UBO, "FillEvaluatedPropsUBO"),
     ],
-    textures: &[ID_FILL_IMAGE_TEXTURE],
+    attributes: &[Attribute::new(ID_FILL_POS_VERTEX_ATTRIBUTE, "a_pos", Short2)],
+    instance_attributes: &[
+        Attribute::new(ID_FILL_COLOR_VERTEX_ATTRIBUTE, "a_color", Float4),
+        Attribute::new(ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE, "a_pattern_from", UShort4),
+        Attribute::new(ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE, "a_pattern_to", UShort4),
+        Attribute::new(ID_FILL_OPACITY_VERTEX_ATTRIBUTE, "a_opacity", Float2),
+        Attribute::new(ID_FILL_OUTLINE_POS_ATTRIBUTE, "a_outline_pos", Short2),
+        Attribute::new(ID_FILL_OUTLINE_END_ATTRIBUTE, "a_outline_end", Short2),
+    ],
+    textures: &[Texture::new("u_image")],
     properties: &[
         Property::new("color", ID_FILL_COLOR_VERTEX_ATTRIBUTE),
         Property::new("opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
         Property::new("pattern_from", ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE),
         Property::new("pattern_to", ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE),
     ],
+    sources: sources!(
+        wgsl: FILL_OUTLINE_PATTERN_INSTANCED_SHADER,
+        msl: FILL_OUTLINE_PATTERN_INSTANCED_SHADER,
+        glsl_es: FILL_OUTLINE_PATTERN_INSTANCED_SHADER,
+        glsl: FILL_OUTLINE_PATTERN_INSTANCED_SHADER,
+    ),
 };

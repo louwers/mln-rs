@@ -5,7 +5,7 @@
 mod properties;
 pub mod programs;
 pub mod ubo;
-crate::shaders::shader_sources!();
+crate::shaders::language_modules!();
 mod pattern_atlas;
 pub(crate) mod render_layer;
 

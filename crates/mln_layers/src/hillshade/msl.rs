@@ -1,45 +1,8 @@
 //! The programs of the `hillshade` layer type in MSL, for `mln_mtl`.
 
-use mln_gfx::gfx_types::AttributeDataType::Short2;
-use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::source::msl::{Attribute, Msl, Source, Texture};
+use mln_gfx::shaders::source::msl::Msl;
 
-use super::programs;
-use super::programs::{
-    HILLSHADE_LAYER_UBO_COUNT, ID_HILLSHADE_IMAGE_TEXTURE, ID_HILLSHADE_POS_VERTEX_ATTRIBUTE,
-    ID_HILLSHADE_PREPARE_TILE_PROPS_UBO, ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE,
-};
-
-const HILLSHADE_PREPARE_UBO_COUNT: usize = ID_HILLSHADE_PREPARE_TILE_PROPS_UBO + 1;
-const HILLSHADE_UBO_COUNT: usize = HILLSHADE_LAYER_UBO_COUNT;
-
-const HILLSHADE_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(0, Short2, HILLSHADE_UBO_COUNT, ID_HILLSHADE_POS_VERTEX_ATTRIBUTE),
-    Attribute::new(1, Short2, HILLSHADE_UBO_COUNT, ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE),
-];
-const HILLSHADE_PREPARE_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(0, Short2, HILLSHADE_PREPARE_UBO_COUNT, ID_HILLSHADE_POS_VERTEX_ATTRIBUTE),
-    Attribute::new(1, Short2, HILLSHADE_PREPARE_UBO_COUNT, ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE),
-];
-const HILLSHADE_TEXTURES: &[Texture] = &[Texture::new(0, ID_HILLSHADE_IMAGE_TEXTURE)];
-static HILLSHADE: Source = Source {
-    msl: &HILLSHADE_SHADER,
-    attributes: HILLSHADE_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: HILLSHADE_TEXTURES,
-};
-static HILLSHADE_PREPARE: Source = Source {
-    msl: &HILLSHADE_PREPARE_SHADER,
-    attributes: HILLSHADE_PREPARE_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: HILLSHADE_TEXTURES,
-};
-
-/// The source of each of the type's programs.
-pub(super) static SOURCES: &[(&Program, &Source)] =
-    &[(&programs::HILLSHADE, &HILLSHADE), (&programs::HILLSHADE_PREPARE, &HILLSHADE_PREPARE)];
-
-const HILLSHADE_PREPARE_SHADER: Msl = Msl {
+pub(super) const HILLSHADE_PREPARE_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -162,7 +125,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-const HILLSHADE_SHADER: Msl = Msl {
+pub(super) const HILLSHADE_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"

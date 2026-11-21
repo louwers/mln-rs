@@ -1,52 +1,8 @@
 //! The programs of the `color-relief` layer type in GLSL ES, for `mln_gl`.
 
-use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
-use mln_gfx::shaders::source::glsl_es::{Attribute, Glsl, Source, Texture, UniformBlock};
+use mln_gfx::shaders::source::glsl_es::Glsl;
 
-use super::programs;
-use super::programs::{
-    ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE, ID_COLOR_RELIEF_DRAWABLE_UBO, ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE,
-    ID_COLOR_RELIEF_EVALUATED_PROPS_UBO, ID_COLOR_RELIEF_IMAGE_TEXTURE, ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE,
-    ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE, ID_COLOR_RELIEF_TILE_PROPS_UBO,
-};
-use super::ubo::{ColorReliefDrawableUBO, ColorReliefEvaluatedPropsUBO, ColorReliefTilePropsUBO};
-
-// Color Relief
-static COLOR_RELIEF: Source = Source {
-    glsl: &COLOR_RELIEF_SHADER,
-    uniform_blocks: &[
-        UniformBlock::element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
-        UniformBlock::element::<ColorReliefDrawableUBO, ColorReliefDrawableUBO>(
-            "ColorReliefDrawableUBO",
-            ID_COLOR_RELIEF_DRAWABLE_UBO,
-        ),
-        UniformBlock::element::<ColorReliefTilePropsUBO, ColorReliefTilePropsUBO>(
-            "ColorReliefTilePropsUBO",
-            ID_COLOR_RELIEF_TILE_PROPS_UBO,
-        ),
-        UniformBlock::new::<ColorReliefEvaluatedPropsUBO>(
-            "ColorReliefEvaluatedPropsUBO",
-            ID_COLOR_RELIEF_EVALUATED_PROPS_UBO,
-        ),
-    ],
-    attributes: &[
-        Attribute::new("a_pos", ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE),
-        Attribute::new("a_texture_pos", ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE),
-    ],
-    instance_attributes: &[],
-    textures: &[
-        Texture::new("u_image", ID_COLOR_RELIEF_IMAGE_TEXTURE),
-        Texture::new("u_elevation_stops", ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE),
-        Texture::new("u_color_stops", ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE),
-    ],
-};
-
-/// The source of each of the type's programs.
-pub(super) static SOURCES: &[(&Program, &Source)] = &[(&programs::COLOR_RELIEF, &COLOR_RELIEF)];
-
-const COLOR_RELIEF_SHADER: Glsl = Glsl {
+pub(super) const COLOR_RELIEF_SHADER: Glsl = Glsl {
     vertex: r"layout(std140) uniform ColorReliefDrawableUBO {
     highp mat4 u_matrix;
 };

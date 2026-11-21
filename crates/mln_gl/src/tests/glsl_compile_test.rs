@@ -3,22 +3,20 @@
 //! context and on a desktop OpenGL one, through `GlGpu`, with the keys of
 //! the renderer's variants: in both projection variants, with every property
 //! the program declares read per vertex and with every one read from its
-//! uniform. Also checks each program against its tables:
-//! every uniform block is as large as the UBO the renderer writes for it,
-//! and every attribute and sampler the program has is in them.
+//! uniform. Also checks each program against its declaration: every uniform
+//! block is a buffer of the program's or the engine's, as large as the
+//! declaration says, and every sampler it declares is in the shader.
 
 use std::collections::BTreeSet;
 
 use mln_gfx::RendererBackend as _;
-use mln_gfx::gpu::Gpu as _;
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::program::Program;
+use mln_gfx::shaders::program::{FRAME_BUFFER, PROJECTION_BUFFER, Program};
 use mln_gfx::shaders::program_parameters::ProgramParameters;
-use mln_gfx::shaders::source::glsl_es;
+use mln_gfx::shaders::source::glsl_es::Glsl;
 use mln_util::hash::HashSet;
 
 use crate::shaders::glsl_sources::PRELUDE;
-use crate::shaders::shader_source::BUILT_INS;
 use crate::{Api, Device, DeviceOptions, RendererBackend};
 
 /// A backend on a device of `api` that compiles the built-in layer types'
@@ -33,10 +31,7 @@ fn headless_backend(api: Api) -> Option<RendererBackend> {
         Api::Gl => "gl-desktop",
     };
     match Device::with_options(options).and_then(|device| RendererBackend::new(&device)) {
-        Ok(mut backend) => {
-            backend.gpu().add_shader_sources(&mln_layers::shader_sources());
-            Some(backend)
-        }
+        Ok(backend) => Some(backend),
         Err(error) if std::env::var("MLN_RENDER_BACKEND").is_ok_and(|backend| backend.eq_ignore_ascii_case(knob)) => {
             panic!("{error}")
         }
@@ -48,16 +43,16 @@ fn headless_backend(api: Api) -> Option<RendererBackend> {
 }
 
 /// Each program with GLSL: the engine's and the built-in layer types'.
-fn programs() -> Vec<(&'static Program, &'static glsl_es::Source)> {
-    let layers = mln_layers::shader_sources();
-    BUILT_INS.iter().copied().chain(layers.of::<glsl_es::Source>().iter()).collect()
+fn programs() -> Vec<(&'static Program, &'static Glsl)> {
+    let programs = mln_render::PROGRAMS.iter().chain(mln_layers::PROGRAMS);
+    programs.filter_map(|&program| Some((program, program.sources.glsl_es?))).collect()
 }
 
 /// The names after `HAS_UNIFORM_u_` in a shader's GLSL.
-fn uniforms(source: &glsl_es::Source) -> BTreeSet<String> {
+fn uniforms(source: &Glsl) -> BTreeSet<String> {
     const PREFIX: &str = "HAS_UNIFORM_u_";
     let mut names = BTreeSet::new();
-    for glsl in [source.glsl.vertex, source.glsl.fragment] {
+    for glsl in [source.vertex, source.fragment] {
         for (start, _) in glsl.match_indices(PREFIX) {
             let rest = &glsl[start + PREFIX.len()..];
             let end = rest.find(|c: char| !c.is_ascii_alphanumeric() && c != '_').unwrap_or(rest.len());
@@ -81,13 +76,18 @@ fn every_program_declares_the_properties_its_glsl_reads_from_uniforms() {
 /// inspector, which counts its draws.
 #[test]
 fn every_layer_program_shows_the_overdraw_inspector() {
-    use mln_gfx::shaders::programs::{ATMOSPHERE, CLIPPING_MASK, GLOBE_DEPTH, SKY};
-    use mln_layers::symbol::programs::{COLLISION_BOX, COLLISION_CIRCLE};
-    let not_layers = [&CLIPPING_MASK, &COLLISION_BOX, &COLLISION_CIRCLE, &GLOBE_DEPTH, &SKY, &ATMOSPHERE];
+    let not_layers = [
+        "ClippingMaskProgram",
+        "CollisionBoxShader",
+        "CollisionCircleShader",
+        "GlobeDepthShader",
+        "SkyShader",
+        "AtmosphereShader",
+    ];
     for (program, source) in programs() {
-        if !not_layers.contains(&program) {
+        if !not_layers.contains(&program.name) {
             assert!(
-                [source.glsl.vertex, source.glsl.fragment].iter().any(|text| text.contains("OVERDRAW_INSPECTOR")),
+                [source.vertex, source.fragment].iter().any(|text| text.contains("OVERDRAW_INSPECTOR")),
                 "{}",
                 program.name
             );
@@ -117,13 +117,13 @@ fn declared_blocks(glsl: &str) -> BTreeSet<String> {
 /// and whether a block the shader doesn't read counts differs between
 /// compilers. So every block a shader declares needs an id to bind at.
 #[test]
-fn every_declared_uniform_block_has_a_table_entry() {
+fn every_declared_uniform_block_is_a_buffer() {
     for (program, source) in programs() {
-        for glsl in [PRELUDE.vertex, PRELUDE.fragment, source.glsl.vertex, source.glsl.fragment] {
+        for glsl in [PRELUDE.vertex, PRELUDE.fragment, source.vertex, source.fragment] {
             for block in declared_blocks(glsl) {
                 assert!(
-                    source.uniform_blocks.iter().any(|info| info.name == block),
-                    "{}: uniform block {block} has no table entry",
+                    program.buffer_named(&block).is_some(),
+                    "{}: uniform block {block} is no buffer of the program's",
                     program.name
                 );
             }
@@ -137,8 +137,8 @@ fn every_declared_uniform_block_has_a_table_entry() {
 #[test]
 fn fragment_shaders_declare_shared_uniform_blocks_first() {
     for (program, source) in programs() {
-        let vertex = declared_blocks_in_order(source.glsl.vertex);
-        let fragment = declared_blocks_in_order(source.glsl.fragment);
+        let vertex = declared_blocks_in_order(source.vertex);
+        let fragment = declared_blocks_in_order(source.fragment);
         let shared: Vec<&String> = vertex.iter().filter(|block| fragment.contains(block)).collect();
         let leading: Vec<&String> = fragment.iter().take(shared.len()).collect();
         assert_eq!(leading, shared, "{}: fragment shader's leading uniform blocks", program.name);
@@ -146,29 +146,30 @@ fn fragment_shaders_declare_shared_uniform_blocks_first() {
 }
 
 #[test]
-fn every_program_links_and_matches_its_tables_on_open_gl_es() {
+fn every_program_links_and_matches_its_declaration_on_open_gl_es() {
     if let Some(mut backend) = headless_backend(Api::Gles) {
         assert!(glow::HasContext::version(backend.context().gl()).is_embedded);
-        every_program_links_and_matches_its_tables(&mut backend);
+        every_program_links_and_matches_its_declaration(&mut backend);
     }
 }
 
 /// The programs compile as GLSL 3.30 there.
 #[test]
-fn every_program_links_and_matches_its_tables_on_desktop_open_gl() {
+fn every_program_links_and_matches_its_declaration_on_desktop_open_gl() {
     if let Some(mut backend) = headless_backend(Api::Gl) {
         assert!(!glow::HasContext::version(backend.context().gl()).is_embedded);
-        every_program_links_and_matches_its_tables(&mut backend);
+        every_program_links_and_matches_its_declaration(&mut backend);
     }
 }
 
-fn every_program_links_and_matches_its_tables(backend: &mut RendererBackend) {
+fn every_program_links_and_matches_its_declaration(backend: &mut RendererBackend) {
     let version = glow::HasContext::version(backend.context().gl());
     println!("GL_RENDERER: {}, GL_VERSION: {}", backend.get_renderer_name(), version.vendor_info);
     let parameters = ProgramParameters::new(1.0, false);
 
     let mut compiled = 0;
-    for (program, source) in programs() {
+    for (program, _) in programs() {
+        let declared = program;
         let mut property_sets = vec![&[][..]];
         if !program.properties.is_empty() {
             property_sets.push(program.properties);
@@ -189,11 +190,11 @@ fn every_program_links_and_matches_its_tables(backend: &mut RendererBackend) {
                 compiled += 1;
 
                 for block in &program.blocks {
-                    let info = source
-                        .uniform_blocks
-                        .iter()
-                        .find(|info| info.id == block.id)
-                        .unwrap_or_else(|| panic!("{what}: block at {} without a table entry", block.id));
+                    let reserved = [FRAME_BUFFER, PROJECTION_BUFFER];
+                    let info =
+                        declared.buffers.iter().chain(&reserved).find(|info| info.id == block.id).unwrap_or_else(
+                            || panic!("{what}: block at {} that isn't a buffer of the program's", block.id),
+                        );
                     assert_eq!(
                         block.size.next_multiple_of(16),
                         info.size,
@@ -211,8 +212,8 @@ fn every_program_links_and_matches_its_tables(backend: &mut RendererBackend) {
                 if i == 0 {
                     assert!(!locations.is_empty(), "{what}: no vertex attributes");
                 }
-                for info in source.textures {
-                    assert!(program.textures.contains(&info.id), "{what}: no sampler {}", info.name);
+                for (slot, info) in declared.textures.iter().enumerate() {
+                    assert!(program.textures.contains(&slot), "{what}: no sampler {}", info.name);
                 }
             }
         }

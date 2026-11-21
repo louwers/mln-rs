@@ -10,14 +10,8 @@ use glam::Vec2;
 use mln_gfx::gpu::{Gpu, ShaderKey};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::programs;
-use mln_gfx::shaders::programs::{
-    ID_TILE_DEBUG_CORNER_VERTEX_ATTRIBUTE, ID_TILE_DEBUG_END_ATTRIBUTE, ID_TILE_DEBUG_PROPS_UBO,
-    ID_TILE_DEBUG_START_ATTRIBUTE,
-};
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
-use mln_gfx::shaders::tile_debug_ubo::TileDebugPropsUBO;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_map_types::MapDebugOptions;
 use mln_style::Source;
@@ -40,6 +34,12 @@ use crate::layer_drawing::{DrawDepth, DrawList, DrawObjectsMut, FrameDraw, KeptD
 use crate::paint_parameters::PaintParameters;
 use crate::render_source::{RenderSource, RenderSourceBase, RenderTileParameters, TileOrder};
 use crate::render_tile::RenderTile;
+use crate::shaders::programs;
+use crate::shaders::programs::{
+    ID_TILE_DEBUG_CORNER_VERTEX_ATTRIBUTE, ID_TILE_DEBUG_END_ATTRIBUTE, ID_TILE_DEBUG_PROPS_UBO,
+    ID_TILE_DEBUG_START_ATTRIBUTE,
+};
+use crate::shaders::ubo::TileDebugPropsUBO;
 use crate::tile::job::SourceKey;
 use crate::tile::source_tiles::{CoverUpdate, SourceTiles};
 use crate::tile::store::TileStore;

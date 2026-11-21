@@ -1,32 +1,6 @@
 //! The programs of the `circle` layer type in GLSL, which `mln_glsl` parses for `mln_vulkan` and `mln_d3d12`.
 
-use mln_gfx::gfx_types::AttributeDataType::{Float2, Float4, Short2};
-use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::source::glsl::{Attribute, Glsl, Source};
-
-use super::programs;
-use super::programs::{
-    ID_CIRCLE_BLUR_VERTEX_ATTRIBUTE, ID_CIRCLE_COLOR_VERTEX_ATTRIBUTE, ID_CIRCLE_OPACITY_VERTEX_ATTRIBUTE,
-    ID_CIRCLE_POS_VERTEX_ATTRIBUTE, ID_CIRCLE_RADIUS_VERTEX_ATTRIBUTE, ID_CIRCLE_STROKE_COLOR_VERTEX_ATTRIBUTE,
-    ID_CIRCLE_STROKE_OPACITY_VERTEX_ATTRIBUTE, ID_CIRCLE_STROKE_WIDTH_VERTEX_ATTRIBUTE,
-};
-
-const CIRCLE_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(0, Short2, ID_CIRCLE_POS_VERTEX_ATTRIBUTE),
-    // Data driven
-    Attribute::new(1, Float4, ID_CIRCLE_COLOR_VERTEX_ATTRIBUTE),
-    Attribute::new(2, Float2, ID_CIRCLE_RADIUS_VERTEX_ATTRIBUTE),
-    Attribute::new(3, Float2, ID_CIRCLE_BLUR_VERTEX_ATTRIBUTE),
-    Attribute::new(4, Float2, ID_CIRCLE_OPACITY_VERTEX_ATTRIBUTE),
-    Attribute::new(5, Float4, ID_CIRCLE_STROKE_COLOR_VERTEX_ATTRIBUTE),
-    Attribute::new(6, Float2, ID_CIRCLE_STROKE_WIDTH_VERTEX_ATTRIBUTE),
-    Attribute::new(7, Float2, ID_CIRCLE_STROKE_OPACITY_VERTEX_ATTRIBUTE),
-];
-static CIRCLE: Source =
-    Source { glsl: &CIRCLE_SHADER, attributes: CIRCLE_ATTRIBUTES, instance_attributes: &[], textures: &[] };
-
-/// The source of each of the type's programs.
-pub(super) static SOURCES: &[(&Program, &Source)] = &[(&programs::CIRCLE, &CIRCLE)];
+use mln_gfx::shaders::source::glsl::Glsl;
 
 const CIRCLE_SHADER_PRELUDE: &str = r"
 
@@ -35,7 +9,7 @@ const CIRCLE_SHADER_PRELUDE: &str = r"
 
 ";
 
-const CIRCLE_SHADER: Glsl = Glsl {
+pub(super) const CIRCLE_SHADER: Glsl = Glsl {
     prelude: CIRCLE_SHADER_PRELUDE,
     vertex: r"
 

@@ -2613,6 +2613,7 @@ dependencies = [
  "mln-rs-gfx",
  "mln-rs-glsl",
  "mln-rs-layers",
+ "mln-rs-render",
  "mln-rs-util",
  "naga",
  "parking_lot",
@@ -2754,6 +2755,7 @@ dependencies = [
  "libloading",
  "mln-rs-gfx",
  "mln-rs-layers",
+ "mln-rs-render",
  "mln-rs-tile-id",
  "mln-rs-util",
  "parking_lot",
@@ -2769,6 +2771,7 @@ version = "0.0.13"
 dependencies = [
  "mln-rs-gfx",
  "mln-rs-layers",
+ "mln-rs-render",
  "naga",
 ]
 
@@ -2889,6 +2892,7 @@ dependencies = [
  "bytemuck",
  "mln-rs-gfx",
  "mln-rs-layers",
+ "mln-rs-render",
  "mln-rs-tile-id",
  "mln-rs-util",
  "objc2 0.6.5",
@@ -2929,6 +2933,7 @@ dependencies = [
  "mln-rs-map-types",
  "mln-rs-math",
  "mln-rs-pixelmatch",
+ "mln-rs-render",
  "mln-rs-runtime",
  "mln-rs-storage",
  "mln-rs-style",
@@ -3290,6 +3295,7 @@ dependencies = [
  "mln-rs-gfx",
  "mln-rs-glsl",
  "mln-rs-layers",
+ "mln-rs-render",
  "mln-rs-tile-id",
  "mln-rs-util",
  "naga",
@@ -3355,6 +3361,7 @@ version = "0.0.13"
 dependencies = [
  "mln-rs-gfx",
  "mln-rs-layers",
+ "mln-rs-render",
  "mln-rs-util",
  "mln-rs-vec-map",
  "parking_lot",

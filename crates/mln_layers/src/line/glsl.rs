@@ -1,103 +1,6 @@
 //! The programs of the `line` layer type in GLSL, which `mln_glsl` parses for `mln_vulkan` and `mln_d3d12`.
 
-use mln_gfx::gfx_types::AttributeDataType::{Float2, Float4, Short2, UByte4, UShort4};
-use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::source::glsl::{Attribute, Glsl, Source, Texture};
-
-use super::programs;
-use super::programs::{
-    ID_LINE_BLUR_VERTEX_ATTRIBUTE, ID_LINE_COLOR_VERTEX_ATTRIBUTE, ID_LINE_DASH_TEXTURE,
-    ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE, ID_LINE_DATA_VERTEX_ATTRIBUTE, ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE,
-    ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE, ID_LINE_IMAGE_TEXTURE, ID_LINE_OFFSET_VERTEX_ATTRIBUTE,
-    ID_LINE_OPACITY_VERTEX_ATTRIBUTE, ID_LINE_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_LINE_PATTERN_TO_VERTEX_ATTRIBUTE,
-    ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, ID_LINE_WIDTH_VERTEX_ATTRIBUTE,
-};
-
-const LINE_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(0, Short2, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
-    Attribute::new(1, UByte4, ID_LINE_DATA_VERTEX_ATTRIBUTE),
-    // Data driven
-    Attribute::new(2, Float4, ID_LINE_COLOR_VERTEX_ATTRIBUTE),
-    Attribute::new(3, Float2, ID_LINE_BLUR_VERTEX_ATTRIBUTE),
-    Attribute::new(4, Float2, ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
-    Attribute::new(5, Float2, ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
-    Attribute::new(6, Float2, ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
-    Attribute::new(7, Float2, ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
-];
-const LINE_GRADIENT_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(0, Short2, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
-    Attribute::new(1, UByte4, ID_LINE_DATA_VERTEX_ATTRIBUTE),
-    // Data driven
-    Attribute::new(2, Float2, ID_LINE_BLUR_VERTEX_ATTRIBUTE),
-    Attribute::new(3, Float2, ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
-    Attribute::new(4, Float2, ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
-    Attribute::new(5, Float2, ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
-    Attribute::new(6, Float2, ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
-];
-const LINE_PATTERN_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(0, Short2, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
-    Attribute::new(1, UByte4, ID_LINE_DATA_VERTEX_ATTRIBUTE),
-    // Data driven
-    Attribute::new(2, Float2, ID_LINE_BLUR_VERTEX_ATTRIBUTE),
-    Attribute::new(3, Float2, ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
-    Attribute::new(4, Float2, ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
-    Attribute::new(5, Float2, ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
-    Attribute::new(6, Float2, ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
-    Attribute::new(7, UShort4, ID_LINE_PATTERN_FROM_VERTEX_ATTRIBUTE),
-    Attribute::new(8, UShort4, ID_LINE_PATTERN_TO_VERTEX_ATTRIBUTE),
-];
-const LINE_SDF_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(0, Short2, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
-    Attribute::new(1, UByte4, ID_LINE_DATA_VERTEX_ATTRIBUTE),
-    // Data driven
-    Attribute::new(2, Float4, ID_LINE_COLOR_VERTEX_ATTRIBUTE),
-    Attribute::new(3, Float2, ID_LINE_BLUR_VERTEX_ATTRIBUTE),
-    Attribute::new(4, Float2, ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
-    Attribute::new(5, Float2, ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
-    Attribute::new(6, Float2, ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
-    Attribute::new(7, Float2, ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
-    Attribute::new(8, Float2, ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE),
-    Attribute::new(9, Float4, ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE),
-];
-const LINE_GRADIENT_SDF_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(0, Short2, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
-    Attribute::new(1, UByte4, ID_LINE_DATA_VERTEX_ATTRIBUTE),
-    // Data driven
-    Attribute::new(2, Float2, ID_LINE_BLUR_VERTEX_ATTRIBUTE),
-    Attribute::new(3, Float2, ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
-    Attribute::new(4, Float2, ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
-    Attribute::new(5, Float2, ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
-    Attribute::new(6, Float2, ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
-    Attribute::new(7, Float2, ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE),
-    Attribute::new(8, Float4, ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE),
-];
-const LINE_IMAGE_TEXTURES: &[Texture] = &[Texture::new(0, ID_LINE_IMAGE_TEXTURE)];
-static LINE: Source =
-    Source { glsl: &LINE_SHADER, attributes: LINE_ATTRIBUTES, instance_attributes: &[], textures: &[] };
-static LINE_GRADIENT: Source = Source {
-    glsl: &LINE_GRADIENT_SHADER,
-    attributes: LINE_GRADIENT_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: LINE_IMAGE_TEXTURES,
-};
-static LINE_PATTERN: Source = Source {
-    glsl: &LINE_PATTERN_SHADER,
-    attributes: LINE_PATTERN_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: LINE_IMAGE_TEXTURES,
-};
-static LINE_SDF: Source = Source {
-    glsl: &LINE_SDF_SHADER,
-    attributes: LINE_SDF_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: LINE_IMAGE_TEXTURES,
-};
-static LINE_GRADIENT_SDF: Source = Source {
-    glsl: &LINE_GRADIENT_SDF_SHADER,
-    attributes: LINE_GRADIENT_SDF_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: &[Texture::new(0, ID_LINE_IMAGE_TEXTURE), Texture::new(1, ID_LINE_DASH_TEXTURE)],
-};
+use mln_gfx::shaders::source::glsl::Glsl;
 
 /// What every vertex stage of the type reads: the scale of the extrusion
 /// vectors, the width of a line on the globe, and the tile x that clips the
@@ -151,15 +54,6 @@ bool clippedAtAntimeridian(float tileX) {
     };
 }
 
-/// The source of each of the type's programs.
-pub(super) static SOURCES: &[(&Program, &Source)] = &[
-    (&programs::LINE, &LINE),
-    (&programs::LINE_GRADIENT, &LINE_GRADIENT),
-    (&programs::LINE_PATTERN, &LINE_PATTERN),
-    (&programs::LINE_SDF, &LINE_SDF),
-    (&programs::LINE_GRADIENT_SDF, &LINE_GRADIENT_SDF),
-];
-
 const LINE_SHADE_PRELUDE: &str = r"
 
 #define idLineDrawableUBO           idDrawableReservedVertexOnlyUBO
@@ -171,7 +65,7 @@ const LINE_SHADE_PRELUDE: &str = r"
 
 ";
 
-const LINE_SHADER: Glsl = Glsl {
+pub(super) const LINE_SHADER: Glsl = Glsl {
     prelude: LINE_SHADE_PRELUDE,
     vertex: concat!(
         line_vertex_prelude!(),
@@ -431,7 +325,7 @@ void main() {
     ),
 };
 
-const LINE_GRADIENT_SHADER: Glsl = Glsl {
+pub(super) const LINE_GRADIENT_SHADER: Glsl = Glsl {
     prelude: LINE_SHADE_PRELUDE,
     vertex: concat!(
         line_vertex_prelude!(),
@@ -679,7 +573,7 @@ void main() {
     ),
 };
 
-const LINE_PATTERN_SHADER: Glsl = Glsl {
+pub(super) const LINE_PATTERN_SHADER: Glsl = Glsl {
     prelude: LINE_SHADE_PRELUDE,
     vertex: concat!(
         line_vertex_prelude!(),
@@ -1046,7 +940,7 @@ void main() {
     ),
 };
 
-const LINE_SDF_SHADER: Glsl = Glsl {
+pub(super) const LINE_SDF_SHADER: Glsl = Glsl {
     prelude: LINE_SHADE_PRELUDE,
     vertex: concat!(
         line_vertex_prelude!(),
@@ -1401,7 +1295,7 @@ void main() {
     ),
 };
 
-const LINE_GRADIENT_SDF_SHADER: Glsl = Glsl {
+pub(super) const LINE_GRADIENT_SDF_SHADER: Glsl = Glsl {
     prelude: LINE_SHADE_PRELUDE,
     vertex: concat!(
         line_vertex_prelude!(),

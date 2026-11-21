@@ -1,100 +1,6 @@
 //! The programs of the `fill` layer type in GLSL, which `mln_glsl` parses for `mln_vulkan` and `mln_d3d12`.
 
-use mln_gfx::gfx_types::AttributeDataType::{Float2, Float4, Short2, UShort4};
-use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::source::glsl::{Attribute, Glsl, Source, Texture};
-
-use super::programs;
-use super::programs::{
-    ID_FILL_COLOR_VERTEX_ATTRIBUTE, ID_FILL_IMAGE_TEXTURE, ID_FILL_OPACITY_VERTEX_ATTRIBUTE,
-    ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE, ID_FILL_OUTLINE_END_ATTRIBUTE, ID_FILL_OUTLINE_POS_ATTRIBUTE,
-    ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE, ID_FILL_POS_VERTEX_ATTRIBUTE,
-};
-
-const FILL_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(0, Short2, ID_FILL_POS_VERTEX_ATTRIBUTE),
-    // Data driven
-    Attribute::new(1, Float4, ID_FILL_COLOR_VERTEX_ATTRIBUTE),
-    Attribute::new(2, Float2, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
-];
-const FILL_OUTLINE_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(0, Short2, ID_FILL_POS_VERTEX_ATTRIBUTE),
-    // Data driven
-    Attribute::new(1, Float4, ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE),
-    Attribute::new(2, Float2, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
-];
-const FILL_PATTERN_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(0, Short2, ID_FILL_POS_VERTEX_ATTRIBUTE),
-    // Data driven
-    Attribute::new(1, Float4, ID_FILL_COLOR_VERTEX_ATTRIBUTE),
-    Attribute::new(2, UShort4, ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE),
-    Attribute::new(3, UShort4, ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE),
-    Attribute::new(4, Float2, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
-];
-const FILL_PATTERN_TEXTURES: &[Texture] = &[Texture::new(0, ID_FILL_IMAGE_TEXTURE)];
-static FILL: Source =
-    Source { glsl: &FILL_SHADER, attributes: FILL_ATTRIBUTES, instance_attributes: &[], textures: &[] };
-static FILL_OUTLINE: Source =
-    Source { glsl: &FILL_OUTLINE_SHADER, attributes: FILL_OUTLINE_ATTRIBUTES, instance_attributes: &[], textures: &[] };
-static FILL_PATTERN: Source = Source {
-    glsl: &FILL_PATTERN_SHADER,
-    attributes: FILL_PATTERN_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: FILL_PATTERN_TEXTURES,
-};
-static FILL_OUTLINE_PATTERN: Source = Source {
-    glsl: &FILL_OUTLINE_PATTERN_SHADER,
-    attributes: FILL_PATTERN_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: FILL_PATTERN_TEXTURES,
-};
-
-// An instance of the instanced outline shaders is a segment of an outline:
-// a vertex and the end of its segment. The quad's corner is the vertex.
-const FILL_OUTLINE_INSTANCED_ATTRIBUTES: &[Attribute] = &[Attribute::new(0, Short2, ID_FILL_POS_VERTEX_ATTRIBUTE)];
-const FILL_OUTLINE_INSTANCED_INSTANCE_ATTRIBUTES: &[Attribute] = &[
-    // Data driven
-    Attribute::new(1, Float4, ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE),
-    Attribute::new(2, Float2, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
-    // The segment
-    Attribute::new(3, Short2, ID_FILL_OUTLINE_POS_ATTRIBUTE),
-    Attribute::new(4, Short2, ID_FILL_OUTLINE_END_ATTRIBUTE),
-];
-const FILL_OUTLINE_PATTERN_INSTANCED_INSTANCE_ATTRIBUTES: &[Attribute] = &[
-    // Data driven
-    Attribute::new(1, Float4, ID_FILL_COLOR_VERTEX_ATTRIBUTE),
-    Attribute::new(2, UShort4, ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE),
-    Attribute::new(3, UShort4, ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE),
-    Attribute::new(4, Float2, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
-    // The segment
-    Attribute::new(5, Short2, ID_FILL_OUTLINE_POS_ATTRIBUTE),
-    Attribute::new(6, Short2, ID_FILL_OUTLINE_END_ATTRIBUTE),
-];
-static FILL_OUTLINE_INSTANCED: Source = Source {
-    glsl: &FILL_OUTLINE_INSTANCED_SHADER,
-    attributes: FILL_OUTLINE_INSTANCED_ATTRIBUTES,
-    instance_attributes: FILL_OUTLINE_INSTANCED_INSTANCE_ATTRIBUTES,
-    textures: &[],
-};
-static FILL_OUTLINE_PATTERN_INSTANCED: Source = Source {
-    glsl: &FILL_OUTLINE_PATTERN_INSTANCED_SHADER,
-    attributes: FILL_OUTLINE_INSTANCED_ATTRIBUTES,
-    instance_attributes: FILL_OUTLINE_PATTERN_INSTANCED_INSTANCE_ATTRIBUTES,
-    textures: FILL_PATTERN_TEXTURES,
-};
-static FILL_OUTLINE_PULLED: Source =
-    Source { glsl: &FILL_OUTLINE_PULLED_SHADER, attributes: &[], instance_attributes: &[], textures: &[] };
-
-/// The source of each of the type's programs.
-pub(super) static SOURCES: &[(&Program, &Source)] = &[
-    (&programs::FILL, &FILL),
-    (&programs::FILL_OUTLINE, &FILL_OUTLINE),
-    (&programs::FILL_PATTERN, &FILL_PATTERN),
-    (&programs::FILL_OUTLINE_PATTERN, &FILL_OUTLINE_PATTERN),
-    (&programs::FILL_OUTLINE_INSTANCED, &FILL_OUTLINE_INSTANCED),
-    (&programs::FILL_OUTLINE_PATTERN_INSTANCED, &FILL_OUTLINE_PATTERN_INSTANCED),
-    (&programs::FILL_OUTLINE_PULLED, &FILL_OUTLINE_PULLED),
-];
+use mln_gfx::shaders::source::glsl::Glsl;
 
 const FILL_SHADER_PRELUDE: &str = r"
 
@@ -107,7 +13,7 @@ const FILL_SHADER_PRELUDE: &str = r"
 
 ";
 
-const FILL_SHADER: Glsl = Glsl {
+pub(super) const FILL_SHADER: Glsl = Glsl {
     prelude: FILL_SHADER_PRELUDE,
     vertex: r"
 
@@ -211,7 +117,7 @@ void main() {
 ",
 };
 
-const FILL_OUTLINE_SHADER: Glsl = Glsl {
+pub(super) const FILL_OUTLINE_SHADER: Glsl = Glsl {
     prelude: FILL_SHADER_PRELUDE,
     vertex: r"
 
@@ -324,7 +230,7 @@ void main() {
 ",
 };
 
-const FILL_PATTERN_SHADER: Glsl = Glsl {
+pub(super) const FILL_PATTERN_SHADER: Glsl = Glsl {
     prelude: FILL_SHADER_PRELUDE,
     vertex: r"
 
@@ -574,7 +480,7 @@ void main() {
 ",
 };
 
-const FILL_OUTLINE_PATTERN_SHADER: Glsl = Glsl {
+pub(super) const FILL_OUTLINE_PATTERN_SHADER: Glsl = Glsl {
     prelude: FILL_SHADER_PRELUDE,
     vertex: r"
 
@@ -888,7 +794,7 @@ vec4 outline_corner(vec4 start, vec4 end, vec2 corner, out vec2 pos, out float t
     };
 }
 
-const FILL_OUTLINE_INSTANCED_SHADER: Glsl = Glsl {
+pub(super) const FILL_OUTLINE_INSTANCED_SHADER: Glsl = Glsl {
     prelude: FILL_SHADER_PRELUDE,
     vertex: concat!(
         r"
@@ -969,7 +875,7 @@ void main() {
     fragment: FILL_OUTLINE_SHADER.fragment,
 };
 
-const FILL_OUTLINE_PATTERN_INSTANCED_SHADER: Glsl = Glsl {
+pub(super) const FILL_OUTLINE_PATTERN_INSTANCED_SHADER: Glsl = Glsl {
     prelude: FILL_SHADER_PRELUDE,
     vertex: concat!(
         r"
@@ -1115,7 +1021,7 @@ void main() {
 /// Port-only: the outlines of the instanced outlines as quads without vertex
 /// inputs. A vertex reads its segment's ends and paint values from storage
 /// buffers, by its index.
-const FILL_OUTLINE_PULLED_SHADER: Glsl = Glsl {
+pub(super) const FILL_OUTLINE_PULLED_SHADER: Glsl = Glsl {
     prelude: FILL_SHADER_PRELUDE,
     vertex: concat!(
         r"

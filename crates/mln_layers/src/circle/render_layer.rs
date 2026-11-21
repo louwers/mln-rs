@@ -6,7 +6,6 @@ use mln_gfx::gpu::Gpu;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
-use mln_gfx::shaders::source::ShaderSources;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_map_types::TileProjector;
 use mln_render::draw::{
@@ -147,10 +146,6 @@ impl LayerType for Circle {
     type View<'a> = LayerBucket<'a, Circle>;
     type Drawing = TileDraws<KeptDraw>;
     type State = CircleState;
-
-    fn add_shader_sources(sources: &mut ShaderSources) {
-        super::add_shader_sources(sources);
-    }
 
     fn create_layout(
         group: &[Arc<EvaluatedLayer<Circle>>],

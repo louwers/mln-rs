@@ -25,6 +25,8 @@ naga.workspace = true
 mln_layers = { package = "mln-rs-layers", path = "../mln_layers", features = [
   "glsl",
 ] }
+# The engine's programs, which the tests compile.
+mln_render = { workspace = true, features = ["glsl"] }
 
 [features]
 # `variants`, the sets of defines that the backends' tests compile each

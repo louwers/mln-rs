@@ -1,14 +1,10 @@
-//! The backend-independent shader code: uniform buffer layouts, binding ids
-//! and defines, what each program reads, and the shader sources backends
-//! compile programs from.
+//! The backend-independent shader code: the engine's uniform blocks and
+//! reserved binding ids, what a program binds and reads, and the code of its
+//! shaders in each shading language.
 
-pub mod layer_composite_ubo;
 pub mod layer_ubo;
 pub mod program;
 pub mod program_parameters;
-pub mod programs;
 pub mod segment;
 pub mod shader_defines;
-pub mod sky_ubo;
 pub mod source;
-pub mod tile_debug_ubo;

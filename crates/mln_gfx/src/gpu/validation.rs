@@ -47,7 +47,7 @@ pub enum ShaderBinding {
     /// size of each of its elements, of which a draw reads the one at
     /// `globalIndex`. 0 where the backend can't tell.
     Buffer { id: u32, min_size: u64 },
-    /// The texture at texture id `id`, and its sampler.
+    /// The texture at texture slot `id`, and its sampler.
     Texture { id: u32 },
 }
 
@@ -108,7 +108,7 @@ pub fn check_bindings(
             BindGroupEntry::Texture { id, texture, sampler } => {
                 let info = (lookup.texture)(texture).ok_or(GpuError::UnknownId("texture"))?;
                 if !info.usage.sampled {
-                    return Err(GpuError::Invalid(format!("{label}: texture id {id}: a texture that isn't sampled")));
+                    return Err(GpuError::Invalid(format!("{label}: texture slot {id}: a texture that isn't sampled")));
                 }
                 if !(lookup.sampler)(sampler) {
                     return Err(GpuError::UnknownId("sampler"));

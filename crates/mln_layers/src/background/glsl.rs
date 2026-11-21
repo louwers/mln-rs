@@ -1,25 +1,6 @@
 //! The programs of the `background` layer type in GLSL, which `mln_glsl` parses for `mln_vulkan` and `mln_d3d12`.
 
-use mln_gfx::gfx_types::AttributeDataType::Short2;
-use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::source::glsl::{Attribute, Glsl, Source, Texture};
-
-use super::programs;
-use super::programs::{ID_BACKGROUND_IMAGE_TEXTURE, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE};
-
-const BACKGROUND_ATTRIBUTES: &[Attribute] = &[Attribute::new(0, Short2, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE)];
-static BACKGROUND: Source =
-    Source { glsl: &BACKGROUND_SHADER, attributes: BACKGROUND_ATTRIBUTES, instance_attributes: &[], textures: &[] };
-static BACKGROUND_PATTERN: Source = Source {
-    glsl: &BACKGROUND_PATTERN_SHADER,
-    attributes: BACKGROUND_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: &[Texture::new(0, ID_BACKGROUND_IMAGE_TEXTURE)],
-};
-
-/// The source of each of the type's programs.
-pub(super) static SOURCES: &[(&Program, &Source)] =
-    &[(&programs::BACKGROUND, &BACKGROUND), (&programs::BACKGROUND_PATTERN, &BACKGROUND_PATTERN)];
+use mln_gfx::shaders::source::glsl::Glsl;
 
 const BACKGROUND_SHADER_PRELUDE: &str = r"
 
@@ -28,7 +9,7 @@ const BACKGROUND_SHADER_PRELUDE: &str = r"
 
 ";
 
-const BACKGROUND_SHADER: Glsl = Glsl {
+pub(super) const BACKGROUND_SHADER: Glsl = Glsl {
     prelude: BACKGROUND_SHADER_PRELUDE,
     vertex: r"
 
@@ -81,7 +62,7 @@ void main() {
 ",
 };
 
-const BACKGROUND_PATTERN_SHADER: Glsl = Glsl {
+pub(super) const BACKGROUND_PATTERN_SHADER: Glsl = Glsl {
     prelude: BACKGROUND_SHADER_PRELUDE,
     vertex: r"
 layout(location = 0) in ivec2 in_position;

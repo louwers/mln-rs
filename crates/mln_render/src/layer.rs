@@ -4,8 +4,7 @@
 //! A layer type is a marker type that implements `mln_style`'s
 //! `StyleLayerType`, its style half, and [`LayerType`], its render half. A
 //! [`RegistryBuilder`](crate::RegistryBuilder) registers it by name with
-//! [`add_layer_type`](crate::RegistryBuilder::add_layer_type), with the
-//! sources of its programs ([`LayerType::add_shader_sources`]), which fails
+//! [`add_layer_type`](crate::RegistryBuilder::add_layer_type), which fails
 //! for a name that another type took. Every registry that reads a style of
 //! the type registers it, tile workers' too.
 //!
@@ -52,9 +51,7 @@
 //! renderer ([`LayerHost`]). The engine asks for each, and does without it
 //! for a type that has none.
 //!
-//! [`LayerType::add_shader_sources`] runs once, when the type registers,
-//! on the thread that registers it. The engine runs the other hooks one at
-//! a time on the renderer's thread, but for a tile's layout
+//! The engine runs the hooks one at a time on the renderer's thread, but for a tile's layout
 //! ([`LayerType::layout_can_need_dependencies`],
 //! [`LayerType::create_layout`] and the [`Layout`]), which runs with the
 //! tile's other work on the thread that runs the tile's job: another
@@ -81,7 +78,6 @@ use std::sync::Arc;
 
 use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::source::ShaderSources;
 use mln_map_types::{TileProjector, View};
 use mln_style::PropertyEvaluationParameters;
 use mln_style::expression::expr::FeatureState;
@@ -160,12 +156,6 @@ pub trait LayerType: StyleLayerType {
 
     /// The order a layer of the type gets its source's tiles in.
     const TILE_ORDER: TileOrder = TileOrder::ById;
-
-    /// Adds the sources of the programs the type draws with, in each
-    /// shading language it has them in, which a renderer's backend compiles
-    /// the programs from. [`add_layer_type`](crate::RegistryBuilder::add_layer_type)
-    /// calls it.
-    fn add_shader_sources(_sources: &mut ShaderSources) {}
 
     /// Whether the layout of `group` can need glyphs or images. A tile
     /// makes such a group's layout before the dependencies are resolved,

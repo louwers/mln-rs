@@ -1,101 +1,6 @@
 //! The programs of the `line` layer type in WGSL, for `mln_webgpu`.
 
-use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::source::wgsl::{Attribute, Source, Texture, Wgsl};
-
-use super::programs;
-use super::programs::{
-    ID_LINE_BLUR_VERTEX_ATTRIBUTE, ID_LINE_COLOR_VERTEX_ATTRIBUTE, ID_LINE_DASH_TEXTURE,
-    ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE, ID_LINE_DATA_VERTEX_ATTRIBUTE, ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE,
-    ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE, ID_LINE_IMAGE_TEXTURE, ID_LINE_OFFSET_VERTEX_ATTRIBUTE,
-    ID_LINE_OPACITY_VERTEX_ATTRIBUTE, ID_LINE_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_LINE_PATTERN_TO_VERTEX_ATTRIBUTE,
-    ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, ID_LINE_WIDTH_VERTEX_ATTRIBUTE,
-};
-
-const LINE_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(4, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
-    Attribute::new(5, ID_LINE_DATA_VERTEX_ATTRIBUTE),
-    Attribute::new(6, ID_LINE_COLOR_VERTEX_ATTRIBUTE),
-    Attribute::new(7, ID_LINE_BLUR_VERTEX_ATTRIBUTE),
-    Attribute::new(8, ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
-    Attribute::new(9, ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
-    Attribute::new(10, ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
-    Attribute::new(11, ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
-];
-const LINE_GRADIENT_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(4, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
-    Attribute::new(5, ID_LINE_DATA_VERTEX_ATTRIBUTE),
-    Attribute::new(6, ID_LINE_BLUR_VERTEX_ATTRIBUTE),
-    Attribute::new(7, ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
-    Attribute::new(8, ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
-    Attribute::new(9, ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
-    Attribute::new(10, ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
-];
-const LINE_IMAGE_TEXTURES: &[Texture] = &[Texture::new(0, ID_LINE_IMAGE_TEXTURE)];
-const LINE_PATTERN_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(4, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
-    Attribute::new(5, ID_LINE_DATA_VERTEX_ATTRIBUTE),
-    Attribute::new(6, ID_LINE_BLUR_VERTEX_ATTRIBUTE),
-    Attribute::new(7, ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
-    Attribute::new(8, ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
-    Attribute::new(9, ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
-    Attribute::new(10, ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
-    Attribute::new(11, ID_LINE_PATTERN_FROM_VERTEX_ATTRIBUTE),
-    Attribute::new(12, ID_LINE_PATTERN_TO_VERTEX_ATTRIBUTE),
-];
-const LINE_SDF_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(4, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
-    Attribute::new(5, ID_LINE_DATA_VERTEX_ATTRIBUTE),
-    Attribute::new(6, ID_LINE_COLOR_VERTEX_ATTRIBUTE),
-    Attribute::new(7, ID_LINE_BLUR_VERTEX_ATTRIBUTE),
-    Attribute::new(8, ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
-    Attribute::new(9, ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
-    Attribute::new(10, ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
-    Attribute::new(11, ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
-    Attribute::new(12, ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE),
-    Attribute::new(13, ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE),
-];
-const LINE_GRADIENT_SDF_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(4, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
-    Attribute::new(5, ID_LINE_DATA_VERTEX_ATTRIBUTE),
-    Attribute::new(6, ID_LINE_BLUR_VERTEX_ATTRIBUTE),
-    Attribute::new(7, ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
-    Attribute::new(8, ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
-    Attribute::new(9, ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
-    Attribute::new(10, ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
-    Attribute::new(11, ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE),
-    Attribute::new(12, ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE),
-];
-// A texture at location L binds its sampler at L and the texture at L + 1,
-// so the dash atlas sits at 2.
-const LINE_GRADIENT_SDF_TEXTURES: &[Texture] =
-    &[Texture::new(0, ID_LINE_IMAGE_TEXTURE), Texture::new(2, ID_LINE_DASH_TEXTURE)];
-static LINE: Source =
-    Source { wgsl: &LINE_SHADER, attributes: LINE_ATTRIBUTES, instance_attributes: &[], textures: &[] };
-static LINE_GRADIENT: Source = Source {
-    wgsl: &LINE_GRADIENT_SHADER,
-    attributes: LINE_GRADIENT_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: LINE_IMAGE_TEXTURES,
-};
-static LINE_PATTERN: Source = Source {
-    wgsl: &LINE_PATTERN_SHADER,
-    attributes: LINE_PATTERN_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: LINE_IMAGE_TEXTURES,
-};
-static LINE_SDF: Source = Source {
-    wgsl: &LINE_SDF_SHADER,
-    attributes: LINE_SDF_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: LINE_IMAGE_TEXTURES,
-};
-static LINE_GRADIENT_SDF: Source = Source {
-    wgsl: &LINE_GRADIENT_SDF_SHADER,
-    attributes: LINE_GRADIENT_SDF_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: LINE_GRADIENT_SDF_TEXTURES,
-};
+use mln_gfx::shaders::source::wgsl::Wgsl;
 
 /// What every stage of the type's programs reads: the scale of the
 /// extrusion vectors, the width of a line on the globe, and the clipping of
@@ -132,44 +37,35 @@ fn projectLineThickness(tileY: f32, projection: ProjectionUBO) -> f32 {
 #endif
 ";
 
-/// The source of each of the type's programs.
-pub(super) static SOURCES: &[(&Program, &Source)] = &[
-    (&programs::LINE, &LINE),
-    (&programs::LINE_GRADIENT, &LINE_GRADIENT),
-    (&programs::LINE_PATTERN, &LINE_PATTERN),
-    (&programs::LINE_SDF, &LINE_SDF),
-    (&programs::LINE_GRADIENT_SDF, &LINE_GRADIENT_SDF),
-];
-
-const LINE_GRADIENT_SDF_SHADER: Wgsl = Wgsl {
+pub(super) const LINE_GRADIENT_SDF_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
 override DEVICE_PIXEL_RATIO: f32 = 1.0;
 
 struct VertexInput {
-    @location(4) pos_normal: vec2<i32>,
-    @location(5) data: vec4<u32>,
+    @location(0) pos_normal: vec2<i32>,
+    @location(1) data: vec4<u32>,
 #ifndef HAS_UNIFORM_u_blur
-    @location(6) blur: vec2<f32>,
+    @location(2) blur: vec2<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_opacity
-    @location(7) opacity: vec2<f32>,
+    @location(3) opacity: vec2<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_gapwidth
-    @location(8) gapwidth: vec2<f32>,
+    @location(4) gapwidth: vec2<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_offset
-    @location(9) offset: vec2<f32>,
+    @location(5) offset: vec2<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_width
-    @location(10) width: vec2<f32>,
+    @location(6) width: vec2<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_floorwidth
-    @location(11) floorwidth: vec2<f32>,
+    @location(7) floorwidth: vec2<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_dasharray
-    @location(12) dasharray: vec4<f32>,
+    @location(8) dasharray: vec4<f32>,
 #endif
 };
 
@@ -504,29 +400,29 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: Some(LINE_PRELUDE),
 };
 
-const LINE_GRADIENT_SHADER: Wgsl = Wgsl {
+pub(super) const LINE_GRADIENT_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
 override DEVICE_PIXEL_RATIO: f32 = 1.0;
 
 struct VertexInput {
-    @location(4) pos_normal: vec2<i32>,
-    @location(5) data: vec4<u32>,
+    @location(0) pos_normal: vec2<i32>,
+    @location(1) data: vec4<u32>,
 #ifndef HAS_UNIFORM_u_blur
-    @location(6) blur: vec2<f32>,
+    @location(2) blur: vec2<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_opacity
-    @location(7) opacity: vec2<f32>,
+    @location(3) opacity: vec2<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_gapwidth
-    @location(8) gapwidth: vec2<f32>,
+    @location(4) gapwidth: vec2<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_offset
-    @location(9) offset: vec2<f32>,
+    @location(5) offset: vec2<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_width
-    @location(10) width: vec2<f32>,
+    @location(6) width: vec2<f32>,
 #endif
 };
 
@@ -766,35 +662,35 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: Some(LINE_PRELUDE),
 };
 
-const LINE_PATTERN_SHADER: Wgsl = Wgsl {
+pub(super) const LINE_PATTERN_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
 override DEVICE_PIXEL_RATIO: f32 = 1.0;
 
 struct VertexInput {
-    @location(4) pos_normal: vec2<i32>,
-    @location(5) data: vec4<u32>,
+    @location(0) pos_normal: vec2<i32>,
+    @location(1) data: vec4<u32>,
 #ifndef HAS_UNIFORM_u_blur
-    @location(6) blur: vec2<f32>,
+    @location(2) blur: vec2<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_opacity
-    @location(7) opacity: vec2<f32>,
+    @location(3) opacity: vec2<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_gapwidth
-    @location(8) gapwidth: vec2<f32>,
+    @location(4) gapwidth: vec2<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_offset
-    @location(9) offset: vec2<f32>,
+    @location(5) offset: vec2<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_width
-    @location(10) width: vec2<f32>,
+    @location(6) width: vec2<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_pattern_from
-    @location(11) pattern_from: vec4<u32>,
+    @location(7) pattern_from: vec4<u32>,
 #endif
 #ifndef HAS_UNIFORM_u_pattern_to
-    @location(12) pattern_to: vec4<u32>,
+    @location(8) pattern_to: vec4<u32>,
 #endif
 };
 
@@ -1150,38 +1046,38 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: Some(LINE_PRELUDE),
 };
 
-const LINE_SDF_SHADER: Wgsl = Wgsl {
+pub(super) const LINE_SDF_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
 override DEVICE_PIXEL_RATIO: f32 = 1.0;
 
 struct VertexInput {
-    @location(4) pos_normal: vec2<i32>,
-    @location(5) data: vec4<u32>,
+    @location(0) pos_normal: vec2<i32>,
+    @location(1) data: vec4<u32>,
 #ifndef HAS_UNIFORM_u_color
-    @location(6) color: vec4<f32>,
+    @location(2) color: vec4<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_blur
-    @location(7) blur: vec2<f32>,
+    @location(3) blur: vec2<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_opacity
-    @location(8) opacity: vec2<f32>,
+    @location(4) opacity: vec2<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_gapwidth
-    @location(9) gapwidth: vec2<f32>,
+    @location(5) gapwidth: vec2<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_offset
-    @location(10) offset: vec2<f32>,
+    @location(6) offset: vec2<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_width
-    @location(11) width: vec2<f32>,
+    @location(7) width: vec2<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_floorwidth
-    @location(12) floorwidth: vec2<f32>,
+    @location(8) floorwidth: vec2<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_dasharray
-    @location(13) dasharray: vec4<f32>,
+    @location(9) dasharray: vec4<f32>,
 #endif
 };
 
@@ -1536,32 +1432,32 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: Some(LINE_PRELUDE),
 };
 
-const LINE_SHADER: Wgsl = Wgsl {
+pub(super) const LINE_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
 override DEVICE_PIXEL_RATIO: f32 = 1.0;
 
 struct VertexInput {
-    @location(4) pos_normal: vec2<i32>,  // packed position and normal
-    @location(5) data: vec4<u32>,        // extrude, direction, linesofar
+    @location(0) pos_normal: vec2<i32>,  // packed position and normal
+    @location(1) data: vec4<u32>,        // extrude, direction, linesofar
 #ifndef HAS_UNIFORM_u_color
-    @location(6) color: vec4<f32>,
+    @location(2) color: vec4<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_blur
-    @location(7) blur: vec2<f32>,
+    @location(3) blur: vec2<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_opacity
-    @location(8) opacity: vec2<f32>,
+    @location(4) opacity: vec2<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_gapwidth
-    @location(9) gapwidth: vec2<f32>,
+    @location(5) gapwidth: vec2<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_offset
-    @location(10) offset: vec2<f32>,
+    @location(6) offset: vec2<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_width
-    @location(11) width: vec2<f32>,
+    @location(7) width: vec2<f32>,
 #endif
 };
 

@@ -1,71 +1,8 @@
 //! The programs of the `hillshade` layer type in GLSL ES, for `mln_gl`.
 
-use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
-use mln_gfx::shaders::source::glsl_es::{Attribute, Glsl, Source, Texture, UniformBlock};
+use mln_gfx::shaders::source::glsl_es::Glsl;
 
-use super::programs;
-use super::programs::{
-    ID_HILLSHADE_DRAWABLE_UBO, ID_HILLSHADE_EVALUATED_PROPS_UBO, ID_HILLSHADE_IMAGE_TEXTURE,
-    ID_HILLSHADE_POS_VERTEX_ATTRIBUTE, ID_HILLSHADE_PREPARE_DRAWABLE_UBO, ID_HILLSHADE_PREPARE_TILE_PROPS_UBO,
-    ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE, ID_HILLSHADE_TILE_PROPS_UBO,
-};
-use super::ubo::{
-    HillshadeDrawableUBO, HillshadeEvaluatedPropsUBO, HillshadePrepareDrawableUBO, HillshadePrepareTilePropsUBO,
-    HillshadeTilePropsUBO,
-};
-
-// Hillshade Prepare
-static HILLSHADE_PREPARE: Source = Source {
-    glsl: &HILLSHADE_PREPARE_SHADER,
-    uniform_blocks: &[
-        UniformBlock::element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
-        UniformBlock::new::<HillshadePrepareDrawableUBO>(
-            "HillshadePrepareDrawableUBO",
-            ID_HILLSHADE_PREPARE_DRAWABLE_UBO,
-        ),
-        UniformBlock::new::<HillshadePrepareTilePropsUBO>(
-            "HillshadePrepareTilePropsUBO",
-            ID_HILLSHADE_PREPARE_TILE_PROPS_UBO,
-        ),
-    ],
-    attributes: &[
-        Attribute::new("a_pos", ID_HILLSHADE_POS_VERTEX_ATTRIBUTE),
-        Attribute::new("a_texture_pos", ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE),
-    ],
-    instance_attributes: &[],
-    textures: &[Texture::new("u_image", ID_HILLSHADE_IMAGE_TEXTURE)],
-};
-
-// Hillshade
-static HILLSHADE: Source = Source {
-    glsl: &HILLSHADE_SHADER,
-    uniform_blocks: &[
-        UniformBlock::element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
-        UniformBlock::element::<HillshadeDrawableUBO, HillshadeDrawableUBO>(
-            "HillshadeDrawableUBO",
-            ID_HILLSHADE_DRAWABLE_UBO,
-        ),
-        UniformBlock::element::<HillshadeTilePropsUBO, HillshadeTilePropsUBO>(
-            "HillshadeTilePropsUBO",
-            ID_HILLSHADE_TILE_PROPS_UBO,
-        ),
-        UniformBlock::new::<HillshadeEvaluatedPropsUBO>("HillshadeEvaluatedPropsUBO", ID_HILLSHADE_EVALUATED_PROPS_UBO),
-    ],
-    attributes: &[
-        Attribute::new("a_pos", ID_HILLSHADE_POS_VERTEX_ATTRIBUTE),
-        Attribute::new("a_texture_pos", ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE),
-    ],
-    instance_attributes: &[],
-    textures: &[Texture::new("u_image", ID_HILLSHADE_IMAGE_TEXTURE)],
-};
-
-/// The source of each of the type's programs.
-pub(super) static SOURCES: &[(&Program, &Source)] =
-    &[(&programs::HILLSHADE_PREPARE, &HILLSHADE_PREPARE), (&programs::HILLSHADE, &HILLSHADE)];
-
-const HILLSHADE_PREPARE_SHADER: Glsl = Glsl {
+pub(super) const HILLSHADE_PREPARE_SHADER: Glsl = Glsl {
     vertex: r"layout (location = 0) in vec2 a_pos;
 layout (location = 1) in vec2 a_texture_pos;
 
@@ -168,7 +105,7 @@ void main() {
 ",
 };
 
-const HILLSHADE_SHADER: Glsl = Glsl {
+pub(super) const HILLSHADE_SHADER: Glsl = Glsl {
     vertex: r"layout (location = 0) in vec2 a_pos;
 layout (location = 1) in vec2 a_texture_pos;
 

@@ -14,7 +14,6 @@ use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
-use mln_gfx::shaders::source::ShaderSources;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_map_types::{Projection, ProjectionData};
 use mln_render::draw::{
@@ -1070,10 +1069,6 @@ impl LayerType for Symbol {
     const TILE_ORDER: TileOrder = TileOrder::ByY;
 
     const PLACEMENT: Option<NewPlacement<Symbol>> = Some(|| Box::<SymbolPlacement>::default());
-
-    fn add_shader_sources(sources: &mut ShaderSources) {
-        super::add_shader_sources(sources);
-    }
 
     /// A symbol layout always waits for its glyphs and images.
     fn layout_can_need_dependencies(_group: &[Arc<EvaluatedLayer<Symbol>>]) -> bool {

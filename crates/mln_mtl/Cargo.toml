@@ -51,6 +51,8 @@ mln_layers = { package = "mln-rs-layers", path = "../mln_layers", features = [
   "msl",
   "gpu-conformance",
 ] }
+# The engine's programs, which the tests compile.
+mln_render = { workspace = true, features = ["msl"] }
 
 [lints]
 workspace = true

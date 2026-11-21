@@ -1,41 +1,8 @@
 //! The programs of the `heatmap` layer type in MSL, for `mln_mtl`.
 
-use mln_gfx::gfx_types::AttributeDataType::{Float2, Short2};
-use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::source::msl::{Attribute, Msl, Source, Texture};
+use mln_gfx::shaders::source::msl::Msl;
 
-use super::programs;
-use super::programs::{
-    HEATMAP_LAYER_UBO_COUNT, ID_HEATMAP_COLOR_RAMP_TEXTURE, ID_HEATMAP_IMAGE_TEXTURE, ID_HEATMAP_POS_VERTEX_ATTRIBUTE,
-    ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE, ID_HEATMAP_TEXTURE_PROPS_UBO, ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE,
-};
-
-const HEATMAP_UBO_COUNT: usize = HEATMAP_LAYER_UBO_COUNT;
-const HEATMAP_TEXTURE_UBO_COUNT: usize = ID_HEATMAP_TEXTURE_PROPS_UBO + 1;
-
-const HEATMAP_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(0, Short2, HEATMAP_UBO_COUNT, ID_HEATMAP_POS_VERTEX_ATTRIBUTE),
-    // Data driven
-    Attribute::new(1, Float2, HEATMAP_UBO_COUNT + 1, ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE),
-    Attribute::new(2, Float2, HEATMAP_UBO_COUNT + 1, ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE),
-];
-static HEATMAP: Source =
-    Source { msl: &HEATMAP_SHADER, attributes: HEATMAP_ATTRIBUTES, instance_attributes: &[], textures: &[] };
-
-const HEATMAP_TEXTURE_ATTRIBUTES: &[Attribute] =
-    &[Attribute::new(0, Short2, HEATMAP_TEXTURE_UBO_COUNT, ID_HEATMAP_POS_VERTEX_ATTRIBUTE)];
-static HEATMAP_TEXTURE: Source = Source {
-    msl: &HEATMAP_TEXTURE_SHADER,
-    attributes: HEATMAP_TEXTURE_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: &[Texture::new(0, ID_HEATMAP_IMAGE_TEXTURE), Texture::new(1, ID_HEATMAP_COLOR_RAMP_TEXTURE)],
-};
-
-/// The source of each of the type's programs.
-pub(super) static SOURCES: &[(&Program, &Source)] =
-    &[(&programs::HEATMAP, &HEATMAP), (&programs::HEATMAP_TEXTURE, &HEATMAP_TEXTURE)];
-
-const HEATMAP_SHADER: Msl = Msl {
+pub(super) const HEATMAP_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -181,7 +148,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 "#,
 };
 
-const HEATMAP_TEXTURE_SHADER: Msl = Msl {
+pub(super) const HEATMAP_TEXTURE_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"

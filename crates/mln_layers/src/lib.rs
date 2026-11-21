@@ -14,7 +14,7 @@
 //! A type that draws also has its programs, the uniform blocks its shaders
 //! read, and its programs' sources in each shading language of the crate's
 //! features: `wgsl`, `msl`, `glsl-es` and `glsl`, which the facade's backend
-//! features turn on.
+//! features turn on. [`PROGRAMS`] lists the programs.
 
 pub mod background;
 #[cfg(feature = "bench")]
@@ -47,9 +47,8 @@ pub use fill_extrusion::{FillExtrusion, FillExtrusionLayoutProperties, FillExtru
 pub use heatmap::{Heatmap, HeatmapPaintProperties};
 pub use hillshade::{Hillshade, HillshadePaintProperties};
 pub use line::{Line, LineLayoutProperties, LinePaintProperties};
-use mln_gfx::shaders::source::ShaderSources;
+use mln_gfx::shaders::program::Program;
 use mln_render::draw::{BucketChanges, DrawObjects, VertexAttributeArray};
-use mln_render::layer::LayerType;
 use mln_render::{RegisterError, RegistryBuilder};
 pub use raster::{Raster, RasterPaintProperties};
 pub use symbol::{Symbol, SymbolLayoutProperties, SymbolPaintProperties};
@@ -70,25 +69,43 @@ pub fn register_layer_types(builder: &mut RegistryBuilder) -> Result<(), Registe
     builder.add_layer_type::<Custom>()
 }
 
-/// The sources of this crate's programs in the shading languages of its
-/// features, which [`register_layer_types`] adds to a registry, for a `Gpu`
-/// that draws them without one
-/// ([`Gpu::add_shader_sources`](mln_gfx::gpu::Gpu::add_shader_sources)).
-#[must_use]
-pub fn shader_sources() -> ShaderSources {
-    let mut sources = ShaderSources::default();
-    Background::add_shader_sources(&mut sources);
-    Fill::add_shader_sources(&mut sources);
-    Line::add_shader_sources(&mut sources);
-    Circle::add_shader_sources(&mut sources);
-    FillExtrusion::add_shader_sources(&mut sources);
-    Heatmap::add_shader_sources(&mut sources);
-    Raster::add_shader_sources(&mut sources);
-    Hillshade::add_shader_sources(&mut sources);
-    ColorRelief::add_shader_sources(&mut sources);
-    Symbol::add_shader_sources(&mut sources);
-    sources
-}
+/// The programs of this crate's layer types, each with its sources in the
+/// shading languages of the crate's features.
+pub static PROGRAMS: &[&Program] = &[
+    &background::programs::BACKGROUND,
+    &background::programs::BACKGROUND_PATTERN,
+    &fill::programs::FILL,
+    &fill::programs::FILL_OUTLINE,
+    &fill::programs::FILL_PATTERN,
+    &fill::programs::FILL_OUTLINE_PATTERN,
+    &fill::programs::FILL_OUTLINE_INSTANCED,
+    &fill::programs::FILL_OUTLINE_PULLED,
+    &fill::programs::FILL_OUTLINE_PATTERN_INSTANCED,
+    &line::programs::LINE,
+    &line::programs::LINE_GRADIENT,
+    &line::programs::LINE_PATTERN,
+    &line::programs::LINE_SDF,
+    &line::programs::LINE_GRADIENT_SDF,
+    &circle::programs::CIRCLE,
+    &fill_extrusion::programs::FILL_EXTRUSION,
+    &fill_extrusion::programs::FILL_EXTRUSION_INSTANCED,
+    &fill_extrusion::programs::FILL_EXTRUSION_WALL,
+    &fill_extrusion::programs::FILL_EXTRUSION_PULLED,
+    &fill_extrusion::programs::FILL_EXTRUSION_PATTERN,
+    &fill_extrusion::programs::FILL_EXTRUSION_PATTERN_INSTANCED,
+    &fill_extrusion::programs::FILL_EXTRUSION_PATTERN_WALL,
+    &heatmap::programs::HEATMAP,
+    &heatmap::programs::HEATMAP_TEXTURE,
+    &raster::programs::RASTER,
+    &hillshade::programs::HILLSHADE,
+    &hillshade::programs::HILLSHADE_PREPARE,
+    &color_relief::programs::COLOR_RELIEF,
+    &symbol::programs::SYMBOL_ICON,
+    &symbol::programs::SYMBOL_SDF,
+    &symbol::programs::SYMBOL_TEXT_AND_ICON,
+    &symbol::programs::COLLISION_BOX,
+    &symbol::programs::COLLISION_CIRCLE,
+];
 
 /// Copies a bucket's data-driven attributes into a draw again where
 /// `changes` says their values changed: `refresh(attrs)` reads them into its

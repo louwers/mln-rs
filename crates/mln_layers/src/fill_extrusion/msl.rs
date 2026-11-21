@@ -1,18 +1,6 @@
 //! The programs of the `fill-extrusion` layer type in MSL, for `mln_mtl`.
 
-use mln_gfx::gfx_types::AttributeDataType::{Float2, Float4, Short2, UShort2, UShort4};
-use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::source::msl::{Attribute, Msl, Source, Texture};
-
-use super::programs;
-use super::programs::{
-    FILL_EXTRUSION_LAYER_UBO_COUNT, ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE,
-    ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE,
-    ID_FILL_EXTRUSION_IMAGE_TEXTURE, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE,
-    ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE, ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE,
-    ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE,
-    ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE,
-};
+use mln_gfx::shaders::source::msl::Msl;
 
 /// `wall_normal`, the normal at a wall's end from its outline vertex's
 /// `decimals_ed.x`: the one the walls there share, or else `own`, the
@@ -30,92 +18,6 @@ float2 wall_normal(const uint bits, const float2 own) {
 "
     };
 }
-
-const FILL_EXTRUSION_UBO_COUNT: usize = FILL_EXTRUSION_LAYER_UBO_COUNT;
-
-// An instance of the instanced shaders is an outline vertex, and the vertex
-// after it.
-const FILL_EXTRUSION_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(0, Short2, FILL_EXTRUSION_UBO_COUNT, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE),
-    Attribute::new(1, UShort2, FILL_EXTRUSION_UBO_COUNT, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
-    // Data driven
-    Attribute::new(2, Float4, FILL_EXTRUSION_UBO_COUNT + 1, ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
-    Attribute::new(3, Float2, FILL_EXTRUSION_UBO_COUNT + 1, ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
-    Attribute::new(4, Float2, FILL_EXTRUSION_UBO_COUNT + 1, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
-];
-const FILL_EXTRUSION_INSTANCED_ATTRIBUTES: &[Attribute] =
-    &[Attribute::new(0, Short2, FILL_EXTRUSION_UBO_COUNT, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE)];
-const FILL_EXTRUSION_INSTANCED_INSTANCE_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(1, Short2, FILL_EXTRUSION_UBO_COUNT + 1, ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE),
-    Attribute::new(2, UShort2, FILL_EXTRUSION_UBO_COUNT + 1, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
-    // Data driven
-    Attribute::new(3, Float4, FILL_EXTRUSION_UBO_COUNT + 2, ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
-    Attribute::new(4, Float2, FILL_EXTRUSION_UBO_COUNT + 2, ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
-    Attribute::new(5, Float2, FILL_EXTRUSION_UBO_COUNT + 2, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
-    // The next outline vertex
-    Attribute::new(6, Short2, FILL_EXTRUSION_UBO_COUNT + 3, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE),
-    Attribute::new(7, UShort2, FILL_EXTRUSION_UBO_COUNT + 3, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE),
-];
-const FILL_EXTRUSION_PATTERN_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(0, Short2, FILL_EXTRUSION_UBO_COUNT, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE),
-    Attribute::new(1, UShort2, FILL_EXTRUSION_UBO_COUNT, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
-    // Data driven
-    Attribute::new(2, Float2, FILL_EXTRUSION_UBO_COUNT + 1, ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
-    Attribute::new(3, Float2, FILL_EXTRUSION_UBO_COUNT + 1, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
-    Attribute::new(4, UShort4, FILL_EXTRUSION_UBO_COUNT + 1, ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE),
-    Attribute::new(5, UShort4, FILL_EXTRUSION_UBO_COUNT + 1, ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE),
-];
-const FILL_EXTRUSION_PATTERN_INSTANCED_INSTANCE_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(1, Short2, FILL_EXTRUSION_UBO_COUNT + 1, ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE),
-    Attribute::new(2, UShort2, FILL_EXTRUSION_UBO_COUNT + 1, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
-    // Data driven
-    Attribute::new(3, Float2, FILL_EXTRUSION_UBO_COUNT + 2, ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
-    Attribute::new(4, Float2, FILL_EXTRUSION_UBO_COUNT + 2, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
-    Attribute::new(5, UShort4, FILL_EXTRUSION_UBO_COUNT + 2, ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE),
-    Attribute::new(6, UShort4, FILL_EXTRUSION_UBO_COUNT + 2, ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE),
-    // The next outline vertex
-    Attribute::new(7, Short2, FILL_EXTRUSION_UBO_COUNT + 3, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE),
-    Attribute::new(8, UShort2, FILL_EXTRUSION_UBO_COUNT + 3, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE),
-];
-const FILL_EXTRUSION_PATTERN_TEXTURES: &[Texture] = &[Texture::new(0, ID_FILL_EXTRUSION_IMAGE_TEXTURE)];
-static FILL_EXTRUSION: Source = Source {
-    msl: &FILL_EXTRUSION_SHADER,
-    attributes: FILL_EXTRUSION_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: &[],
-};
-static FILL_EXTRUSION_INSTANCED: Source = Source {
-    msl: &FILL_EXTRUSION_INSTANCED_SHADER,
-    attributes: FILL_EXTRUSION_INSTANCED_ATTRIBUTES,
-    instance_attributes: FILL_EXTRUSION_INSTANCED_INSTANCE_ATTRIBUTES,
-    textures: &[],
-};
-// The pulled walls read the bucket's vertices and paint values by vertex
-// index, four vertices a wall, as storage buffers
-// (`ID_FILL_EXTRUSION_WALL_VERTICES` and on).
-static FILL_EXTRUSION_PULLED: Source =
-    Source { msl: &FILL_EXTRUSION_PULLED_SHADER, attributes: &[], instance_attributes: &[], textures: &[] };
-static FILL_EXTRUSION_PATTERN: Source = Source {
-    msl: &FILL_EXTRUSION_PATTERN_SHADER,
-    attributes: FILL_EXTRUSION_PATTERN_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: FILL_EXTRUSION_PATTERN_TEXTURES,
-};
-static FILL_EXTRUSION_PATTERN_INSTANCED: Source = Source {
-    msl: &FILL_EXTRUSION_PATTERN_INSTANCED_SHADER,
-    attributes: FILL_EXTRUSION_INSTANCED_ATTRIBUTES,
-    instance_attributes: FILL_EXTRUSION_PATTERN_INSTANCED_INSTANCE_ATTRIBUTES,
-    textures: FILL_EXTRUSION_PATTERN_TEXTURES,
-};
-
-/// The source of each of the type's programs.
-pub(super) static SOURCES: &[(&Program, &Source)] = &[
-    (&programs::FILL_EXTRUSION, &FILL_EXTRUSION),
-    (&programs::FILL_EXTRUSION_INSTANCED, &FILL_EXTRUSION_INSTANCED),
-    (&programs::FILL_EXTRUSION_PULLED, &FILL_EXTRUSION_PULLED),
-    (&programs::FILL_EXTRUSION_PATTERN, &FILL_EXTRUSION_PATTERN),
-    (&programs::FILL_EXTRUSION_PATTERN_INSTANCED, &FILL_EXTRUSION_PATTERN_INSTANCED),
-];
 
 // The walls' fragment stage, and `wall`, the vertex of a wall, which reads
 // the instanced walls' attributes as the fields of `vertx`.
@@ -229,7 +131,7 @@ fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]]) {
     };
 }
 
-const FILL_EXTRUSION_INSTANCED_SHADER: Msl = Msl {
+pub(super) const FILL_EXTRUSION_INSTANCED_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: concat!(
@@ -326,7 +228,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     ),
 };
 
-const FILL_EXTRUSION_PULLED_SHADER: Msl = Msl {
+pub(super) const FILL_EXTRUSION_PULLED_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: FILL_EXTRUSION_INSTANCED_SHADER.prelude,
@@ -407,7 +309,7 @@ FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]],
     ),
 };
 
-const FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: Msl = Msl {
+pub(super) const FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: concat!(
@@ -682,7 +584,7 @@ fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-const FILL_EXTRUSION_PATTERN_SHADER: Msl = Msl {
+pub(super) const FILL_EXTRUSION_PATTERN_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -925,7 +827,7 @@ fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-const FILL_EXTRUSION_SHADER: Msl = Msl {
+pub(super) const FILL_EXTRUSION_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"

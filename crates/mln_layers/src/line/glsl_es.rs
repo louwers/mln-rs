@@ -1,159 +1,6 @@
 //! The programs of the `line` layer type in GLSL ES, for `mln_gl`.
 
-use mln_gfx::shaders::layer_ubo::{GlobalPaintParamsUBO, ProjectionUBO};
-use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::shader_defines::{ID_GLOBAL_PAINT_PARAMS_UBO, ID_PROJECTION_UBO};
-use mln_gfx::shaders::source::glsl_es::{Attribute, Glsl, Source, Texture, UniformBlock};
-
-use super::programs;
-use super::programs::{
-    ID_LINE_BLUR_VERTEX_ATTRIBUTE, ID_LINE_COLOR_VERTEX_ATTRIBUTE, ID_LINE_DASH_TEXTURE,
-    ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE, ID_LINE_DATA_VERTEX_ATTRIBUTE, ID_LINE_DRAWABLE_UBO,
-    ID_LINE_EVALUATED_PROPS_UBO, ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE, ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE,
-    ID_LINE_IMAGE_TEXTURE, ID_LINE_OFFSET_VERTEX_ATTRIBUTE, ID_LINE_OPACITY_VERTEX_ATTRIBUTE,
-    ID_LINE_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_LINE_PATTERN_TO_VERTEX_ATTRIBUTE, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE,
-    ID_LINE_TILE_PROPS_UBO, ID_LINE_WIDTH_VERTEX_ATTRIBUTE,
-};
-use super::ubo::{
-    LineDrawableUBO, LineDrawableUnionUBO, LineEvaluatedPropsUBO, LineGradientDrawableUBO, LinePatternDrawableUBO,
-    LinePatternTilePropsUBO, LineSDFDrawableUBO, LineSDFTilePropsUBO, LineTilePropsUnionUBO,
-};
-
-// Line
-static LINE: Source = Source {
-    glsl: &LINE_SHADER,
-    uniform_blocks: &[
-        UniformBlock::element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
-        UniformBlock::new::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
-        UniformBlock::element::<LineDrawableUBO, LineDrawableUnionUBO>("LineDrawableUBO", ID_LINE_DRAWABLE_UBO),
-        UniformBlock::new::<LineEvaluatedPropsUBO>("LineEvaluatedPropsUBO", ID_LINE_EVALUATED_PROPS_UBO),
-    ],
-    attributes: &[
-        Attribute::new("a_pos_normal", ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
-        Attribute::new("a_data", ID_LINE_DATA_VERTEX_ATTRIBUTE),
-        Attribute::new("a_color", ID_LINE_COLOR_VERTEX_ATTRIBUTE),
-        Attribute::new("a_blur", ID_LINE_BLUR_VERTEX_ATTRIBUTE),
-        Attribute::new("a_opacity", ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
-        Attribute::new("a_gapwidth", ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
-        Attribute::new("a_offset", ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
-        Attribute::new("a_width", ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
-    ],
-    instance_attributes: &[],
-    textures: &[],
-};
-
-// Line Gradient
-static LINE_GRADIENT: Source = Source {
-    glsl: &LINE_GRADIENT_SHADER,
-    uniform_blocks: &[
-        UniformBlock::element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
-        UniformBlock::new::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
-        UniformBlock::element::<LineGradientDrawableUBO, LineDrawableUnionUBO>(
-            "LineGradientDrawableUBO",
-            ID_LINE_DRAWABLE_UBO,
-        ),
-        UniformBlock::new::<LineEvaluatedPropsUBO>("LineEvaluatedPropsUBO", ID_LINE_EVALUATED_PROPS_UBO),
-    ],
-    attributes: &[
-        Attribute::new("a_pos_normal", ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
-        Attribute::new("a_data", ID_LINE_DATA_VERTEX_ATTRIBUTE),
-        Attribute::new("a_blur", ID_LINE_BLUR_VERTEX_ATTRIBUTE),
-        Attribute::new("a_opacity", ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
-        Attribute::new("a_gapwidth", ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
-        Attribute::new("a_offset", ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
-        Attribute::new("a_width", ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
-    ],
-    instance_attributes: &[],
-    textures: &[Texture::new("u_image", ID_LINE_IMAGE_TEXTURE)],
-};
-
-// Line Pattern
-static LINE_PATTERN: Source = Source {
-    glsl: &LINE_PATTERN_SHADER,
-    uniform_blocks: &[
-        UniformBlock::element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
-        UniformBlock::new::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
-        UniformBlock::element::<LinePatternDrawableUBO, LineDrawableUnionUBO>(
-            "LinePatternDrawableUBO",
-            ID_LINE_DRAWABLE_UBO,
-        ),
-        UniformBlock::element::<LinePatternTilePropsUBO, LineTilePropsUnionUBO>(
-            "LinePatternTilePropsUBO",
-            ID_LINE_TILE_PROPS_UBO,
-        ),
-        UniformBlock::new::<LineEvaluatedPropsUBO>("LineEvaluatedPropsUBO", ID_LINE_EVALUATED_PROPS_UBO),
-    ],
-    attributes: &[
-        Attribute::new("a_pos_normal", ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
-        Attribute::new("a_data", ID_LINE_DATA_VERTEX_ATTRIBUTE),
-        Attribute::new("a_blur", ID_LINE_BLUR_VERTEX_ATTRIBUTE),
-        Attribute::new("a_opacity", ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
-        Attribute::new("a_offset", ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
-        Attribute::new("a_gapwidth", ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
-        Attribute::new("a_width", ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
-        Attribute::new("a_pattern_from", ID_LINE_PATTERN_FROM_VERTEX_ATTRIBUTE),
-        Attribute::new("a_pattern_to", ID_LINE_PATTERN_TO_VERTEX_ATTRIBUTE),
-    ],
-    instance_attributes: &[],
-    textures: &[Texture::new("u_image", ID_LINE_IMAGE_TEXTURE)],
-};
-
-// Line SDF
-static LINE_SDF: Source = Source {
-    glsl: &LINE_SDF_SHADER,
-    uniform_blocks: &[
-        UniformBlock::element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
-        UniformBlock::new::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
-        UniformBlock::element::<LineSDFDrawableUBO, LineDrawableUnionUBO>("LineSDFDrawableUBO", ID_LINE_DRAWABLE_UBO),
-        UniformBlock::element::<LineSDFTilePropsUBO, LineTilePropsUnionUBO>(
-            "LineSDFTilePropsUBO",
-            ID_LINE_TILE_PROPS_UBO,
-        ),
-        UniformBlock::new::<LineEvaluatedPropsUBO>("LineEvaluatedPropsUBO", ID_LINE_EVALUATED_PROPS_UBO),
-    ],
-    attributes: &[
-        Attribute::new("a_pos_normal", ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
-        Attribute::new("a_data", ID_LINE_DATA_VERTEX_ATTRIBUTE),
-        Attribute::new("a_color", ID_LINE_COLOR_VERTEX_ATTRIBUTE),
-        Attribute::new("a_blur", ID_LINE_BLUR_VERTEX_ATTRIBUTE),
-        Attribute::new("a_opacity", ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
-        Attribute::new("a_gapwidth", ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
-        Attribute::new("a_offset", ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
-        Attribute::new("a_width", ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
-        Attribute::new("a_floorwidth", ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE),
-        Attribute::new("a_dasharray", ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE),
-    ],
-    instance_attributes: &[],
-    textures: &[Texture::new("u_image", ID_LINE_IMAGE_TEXTURE)],
-};
-
-// Line gradient SDF
-static LINE_GRADIENT_SDF: Source = Source {
-    glsl: &LINE_GRADIENT_SDF_SHADER,
-    uniform_blocks: &[
-        UniformBlock::element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
-        UniformBlock::new::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
-        UniformBlock::element::<LineSDFDrawableUBO, LineDrawableUnionUBO>("LineSDFDrawableUBO", ID_LINE_DRAWABLE_UBO),
-        UniformBlock::element::<LineSDFTilePropsUBO, LineTilePropsUnionUBO>(
-            "LineSDFTilePropsUBO",
-            ID_LINE_TILE_PROPS_UBO,
-        ),
-        UniformBlock::new::<LineEvaluatedPropsUBO>("LineEvaluatedPropsUBO", ID_LINE_EVALUATED_PROPS_UBO),
-    ],
-    attributes: &[
-        Attribute::new("a_pos_normal", ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
-        Attribute::new("a_data", ID_LINE_DATA_VERTEX_ATTRIBUTE),
-        Attribute::new("a_blur", ID_LINE_BLUR_VERTEX_ATTRIBUTE),
-        Attribute::new("a_opacity", ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
-        Attribute::new("a_gapwidth", ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
-        Attribute::new("a_offset", ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
-        Attribute::new("a_width", ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
-        Attribute::new("a_floorwidth", ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE),
-        Attribute::new("a_dasharray", ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE),
-    ],
-    instance_attributes: &[],
-    textures: &[Texture::new("u_image", ID_LINE_IMAGE_TEXTURE), Texture::new("u_image_dash", ID_LINE_DASH_TEXTURE)],
-};
+use mln_gfx::shaders::source::glsl_es::Glsl;
 
 /// What every vertex stage of the type reads: the width of a line on the
 /// globe, and the tile x that clips the zoom 0 tile's lines at the
@@ -202,16 +49,7 @@ bool clippedAtAntimeridian(highp float tileX) {
     };
 }
 
-/// The source of each of the type's programs.
-pub(super) static SOURCES: &[(&Program, &Source)] = &[
-    (&programs::LINE, &LINE),
-    (&programs::LINE_GRADIENT, &LINE_GRADIENT),
-    (&programs::LINE_PATTERN, &LINE_PATTERN),
-    (&programs::LINE_SDF, &LINE_SDF),
-    (&programs::LINE_GRADIENT_SDF, &LINE_GRADIENT_SDF),
-];
-
-const LINE_GRADIENT_SDF_SHADER: Glsl = Glsl {
+pub(super) const LINE_GRADIENT_SDF_SHADER: Glsl = Glsl {
     vertex: concat!(
         line_vertex_prelude!(),
         r#"// floor(127 / 2) == 63.0
@@ -519,7 +357,7 @@ lowp float floorwidth = u_floorwidth;
     ),
 };
 
-const LINE_GRADIENT_SHADER: Glsl = Glsl {
+pub(super) const LINE_GRADIENT_SHADER: Glsl = Glsl {
     vertex: concat!(
         line_vertex_prelude!(),
         r#"
@@ -751,7 +589,7 @@ lowp float opacity = u_opacity;
     ),
 };
 
-const LINE_PATTERN_SHADER: Glsl = Glsl {
+pub(super) const LINE_PATTERN_SHADER: Glsl = Glsl {
     vertex: concat!(
         line_vertex_prelude!(),
         r#"// floor(127 / 2) == 63.0
@@ -1084,7 +922,7 @@ lowp float opacity = u_opacity;
     ),
 };
 
-const LINE_SDF_SHADER: Glsl = Glsl {
+pub(super) const LINE_SDF_SHADER: Glsl = Glsl {
     vertex: concat!(
         line_vertex_prelude!(),
         r#"// floor(127 / 2) == 63.0
@@ -1396,7 +1234,7 @@ lowp float floorwidth = u_floorwidth;
     ),
 };
 
-const LINE_SHADER: Glsl = Glsl {
+pub(super) const LINE_SHADER: Glsl = Glsl {
     vertex: concat!(
         line_vertex_prelude!(),
         r#"// floor(127 / 2) == 63.0

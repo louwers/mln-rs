@@ -1,57 +1,8 @@
 //! The programs of the `background` layer type in GLSL ES, for `mln_gl`.
 
-use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
-use mln_gfx::shaders::source::glsl_es::{Attribute, Glsl, Source, Texture, UniformBlock};
+use mln_gfx::shaders::source::glsl_es::Glsl;
 
-use super::programs;
-use super::programs::{
-    ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_IMAGE_TEXTURE, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE,
-    ID_BACKGROUND_PROPS_UBO,
-};
-use super::ubo::{
-    BackgroundDrawableUBO, BackgroundDrawableUnionUBO, BackgroundPatternDrawableUBO, BackgroundPatternPropsUBO,
-    BackgroundPropsUBO,
-};
-
-// Background
-static BACKGROUND: Source = Source {
-    glsl: &BACKGROUND_SHADER,
-    uniform_blocks: &[
-        UniformBlock::element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
-        UniformBlock::element::<BackgroundDrawableUBO, BackgroundDrawableUnionUBO>(
-            "BackgroundDrawableUBO",
-            ID_BACKGROUND_DRAWABLE_UBO,
-        ),
-        UniformBlock::new::<BackgroundPropsUBO>("BackgroundPropsUBO", ID_BACKGROUND_PROPS_UBO),
-    ],
-    attributes: &[Attribute::new("a_pos", ID_BACKGROUND_POS_VERTEX_ATTRIBUTE)],
-    instance_attributes: &[],
-    textures: &[],
-};
-
-// Background Pattern
-static BACKGROUND_PATTERN: Source = Source {
-    glsl: &BACKGROUND_PATTERN_SHADER,
-    uniform_blocks: &[
-        UniformBlock::element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
-        UniformBlock::element::<BackgroundPatternDrawableUBO, BackgroundDrawableUnionUBO>(
-            "BackgroundPatternDrawableUBO",
-            ID_BACKGROUND_DRAWABLE_UBO,
-        ),
-        UniformBlock::new::<BackgroundPatternPropsUBO>("BackgroundPatternPropsUBO", ID_BACKGROUND_PROPS_UBO),
-    ],
-    attributes: &[Attribute::new("a_pos", ID_BACKGROUND_POS_VERTEX_ATTRIBUTE)],
-    instance_attributes: &[],
-    textures: &[Texture::new("u_image", ID_BACKGROUND_IMAGE_TEXTURE)],
-};
-
-/// The source of each of the type's programs.
-pub(super) static SOURCES: &[(&Program, &Source)] =
-    &[(&programs::BACKGROUND, &BACKGROUND), (&programs::BACKGROUND_PATTERN, &BACKGROUND_PATTERN)];
-
-const BACKGROUND_PATTERN_SHADER: Glsl = Glsl {
+pub(super) const BACKGROUND_PATTERN_SHADER: Glsl = Glsl {
     vertex: r"layout (std140) uniform BackgroundPatternDrawableUBO {
     highp mat4 u_matrix;
     highp vec2 u_pixel_coord_upper;
@@ -134,7 +85,7 @@ void main() {
 ",
 };
 
-const BACKGROUND_SHADER: Glsl = Glsl {
+pub(super) const BACKGROUND_SHADER: Glsl = Glsl {
     vertex: r"layout (location = 0) in vec2 a_pos;
 layout (std140) uniform BackgroundDrawableUBO {
     highp mat4 u_matrix;

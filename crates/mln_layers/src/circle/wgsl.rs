@@ -1,33 +1,8 @@
 //! The programs of the `circle` layer type in WGSL, for `mln_webgpu`.
 
-use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::source::wgsl::{Attribute, Source, Wgsl};
+use mln_gfx::shaders::source::wgsl::Wgsl;
 
-use super::programs;
-use super::programs::{
-    ID_CIRCLE_BLUR_VERTEX_ATTRIBUTE, ID_CIRCLE_COLOR_VERTEX_ATTRIBUTE, ID_CIRCLE_OPACITY_VERTEX_ATTRIBUTE,
-    ID_CIRCLE_POS_VERTEX_ATTRIBUTE, ID_CIRCLE_RADIUS_VERTEX_ATTRIBUTE, ID_CIRCLE_STROKE_COLOR_VERTEX_ATTRIBUTE,
-    ID_CIRCLE_STROKE_OPACITY_VERTEX_ATTRIBUTE, ID_CIRCLE_STROKE_WIDTH_VERTEX_ATTRIBUTE,
-};
-
-const CIRCLE_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(0, ID_CIRCLE_POS_VERTEX_ATTRIBUTE),
-    Attribute::new(1, ID_CIRCLE_COLOR_VERTEX_ATTRIBUTE),
-    Attribute::new(2, ID_CIRCLE_RADIUS_VERTEX_ATTRIBUTE),
-    Attribute::new(3, ID_CIRCLE_BLUR_VERTEX_ATTRIBUTE),
-    Attribute::new(4, ID_CIRCLE_OPACITY_VERTEX_ATTRIBUTE),
-    Attribute::new(5, ID_CIRCLE_STROKE_COLOR_VERTEX_ATTRIBUTE),
-    Attribute::new(6, ID_CIRCLE_STROKE_WIDTH_VERTEX_ATTRIBUTE),
-    Attribute::new(7, ID_CIRCLE_STROKE_OPACITY_VERTEX_ATTRIBUTE),
-];
-
-static CIRCLE: Source =
-    Source { wgsl: &CIRCLE_SHADER, attributes: CIRCLE_ATTRIBUTES, instance_attributes: &[], textures: &[] };
-
-/// The source of each of the type's programs.
-pub(super) static SOURCES: &[(&Program, &Source)] = &[(&programs::CIRCLE, &CIRCLE)];
-
-const CIRCLE_SHADER: Wgsl = Wgsl {
+pub(super) const CIRCLE_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.

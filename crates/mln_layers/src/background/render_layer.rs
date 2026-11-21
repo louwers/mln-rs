@@ -3,7 +3,6 @@ use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
-use mln_gfx::shaders::source::ShaderSources;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
 use mln_map_types::tile_cover::{TileCoverParameters, tile_cover};
 use mln_render::draw::{
@@ -130,10 +129,6 @@ impl LayerType for Background {
     type Drawing = TileDraws<KeptDraw>;
     type State = BackgroundState;
     const CROSSFADES: bool = true;
-
-    fn add_shader_sources(sources: &mut ShaderSources) {
-        super::add_shader_sources(sources);
-    }
 
     fn new_layer(_layer: &LayerValues<Background>) -> (BackgroundState, TileDraws<KeptDraw>) {
         Default::default()

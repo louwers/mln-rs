@@ -1,46 +1,8 @@
 //! The programs of the `circle` layer type in GLSL ES, for `mln_gl`.
 
-use mln_gfx::shaders::layer_ubo::{GlobalPaintParamsUBO, ProjectionUBO};
-use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::shader_defines::{ID_GLOBAL_PAINT_PARAMS_UBO, ID_PROJECTION_UBO};
-use mln_gfx::shaders::source::glsl_es::{Attribute, Glsl, Source, UniformBlock};
+use mln_gfx::shaders::source::glsl_es::Glsl;
 
-use super::programs;
-use super::programs::{
-    ID_CIRCLE_BLUR_VERTEX_ATTRIBUTE, ID_CIRCLE_COLOR_VERTEX_ATTRIBUTE, ID_CIRCLE_DRAWABLE_UBO,
-    ID_CIRCLE_EVALUATED_PROPS_UBO, ID_CIRCLE_OPACITY_VERTEX_ATTRIBUTE, ID_CIRCLE_POS_VERTEX_ATTRIBUTE,
-    ID_CIRCLE_RADIUS_VERTEX_ATTRIBUTE, ID_CIRCLE_STROKE_COLOR_VERTEX_ATTRIBUTE,
-    ID_CIRCLE_STROKE_OPACITY_VERTEX_ATTRIBUTE, ID_CIRCLE_STROKE_WIDTH_VERTEX_ATTRIBUTE,
-};
-use super::ubo::{CircleDrawableUBO, CircleEvaluatedPropsUBO};
-
-// Circle
-static CIRCLE: Source = Source {
-    glsl: &CIRCLE_SHADER,
-    uniform_blocks: &[
-        UniformBlock::element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
-        UniformBlock::new::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
-        UniformBlock::element::<CircleDrawableUBO, CircleDrawableUBO>("CircleDrawableUBO", ID_CIRCLE_DRAWABLE_UBO),
-        UniformBlock::new::<CircleEvaluatedPropsUBO>("CircleEvaluatedPropsUBO", ID_CIRCLE_EVALUATED_PROPS_UBO),
-    ],
-    attributes: &[
-        Attribute::new("a_pos", ID_CIRCLE_POS_VERTEX_ATTRIBUTE),
-        Attribute::new("a_color", ID_CIRCLE_COLOR_VERTEX_ATTRIBUTE),
-        Attribute::new("a_radius", ID_CIRCLE_RADIUS_VERTEX_ATTRIBUTE),
-        Attribute::new("a_blur", ID_CIRCLE_BLUR_VERTEX_ATTRIBUTE),
-        Attribute::new("a_opacity", ID_CIRCLE_OPACITY_VERTEX_ATTRIBUTE),
-        Attribute::new("a_stroke_color", ID_CIRCLE_STROKE_COLOR_VERTEX_ATTRIBUTE),
-        Attribute::new("a_stroke_width", ID_CIRCLE_STROKE_WIDTH_VERTEX_ATTRIBUTE),
-        Attribute::new("a_stroke_opacity", ID_CIRCLE_STROKE_OPACITY_VERTEX_ATTRIBUTE),
-    ],
-    instance_attributes: &[],
-    textures: &[],
-};
-
-/// The source of each of the type's programs.
-pub(super) static SOURCES: &[(&Program, &Source)] = &[(&programs::CIRCLE, &CIRCLE)];
-
-const CIRCLE_SHADER: Glsl = Glsl {
+pub(super) const CIRCLE_SHADER: Glsl = Glsl {
     vertex: r"layout (location = 0) in vec2 a_pos;
 out vec3 v_data;
 

@@ -14,9 +14,7 @@ use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::types::DepthFunctionType;
-use mln_layers::background::programs::{
-    BACKGROUND, ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE, ID_BACKGROUND_PROPS_UBO,
-};
+use mln_layers::background::programs::BACKGROUND;
 use mln_layers::background::ubo::{BackgroundDrawableUnionUBO, BackgroundPropsUBO};
 use mln_layers::conformance::{
     clip_mask_and_background, custom_layers, depth_only, foreign_ids, imported_textures, instanced_walls,
@@ -179,7 +177,7 @@ fn layouts() -> [VertexBufferLayout; 1] {
         stride: 4,
         step: VertexStep::Vertex,
         attributes: vec![VertexAttribute {
-            id: ID_BACKGROUND_POS_VERTEX_ATTRIBUTE as u32,
+            id: BACKGROUND.attributes[0].id as u32,
             format: AttributeDataType::Short2,
             offset: 0,
         }],
@@ -231,8 +229,12 @@ impl Background {
     }
 }
 
+/// The id of the background program's buffer `name`.
+fn buffer_id(name: &str) -> usize {
+    BACKGROUND.buffer_named(name).expect("the background program's buffer").id
+}
+
 fn background(gpu: &mut GlGpu, props: &BackgroundPropsUBO) -> Background {
-    gpu.add_shader_sources(&mln_layers::shader_sources());
     let shader = gpu.create_shader(&ShaderKey::new(&BACKGROUND, [])).unwrap();
     let quad = buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&[[-1i16, -1], [1, -1], [-1, 1], [1, 1]]));
     let indices = buffer(gpu, BufferUsage::Index, bytemuck::cast_slice(&[0u16, 1, 2, 1, 2, 3]));
@@ -252,8 +254,8 @@ fn background(gpu: &mut GlGpu, props: &BackgroundPropsUBO) -> Background {
             shader,
             entries: &[
                 whole(ID_PROJECTION_UBO, projection_buffer, projection),
-                whole(ID_BACKGROUND_DRAWABLE_UBO, drawable_buffer, drawable),
-                whole(ID_BACKGROUND_PROPS_UBO, props_buffer, bytemuck::bytes_of(props)),
+                whole(buffer_id("BackgroundDrawableUBO"), drawable_buffer, drawable),
+                whole(buffer_id("BackgroundPropsUBO"), props_buffer, bytemuck::bytes_of(props)),
             ],
         })
         .unwrap();

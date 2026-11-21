@@ -3,6 +3,7 @@
 
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::gpu::{BufferId, Gpu, GpuError};
+use mln_gfx::shaders::program::Attribute;
 
 use crate::gfx::context::Context;
 use crate::gfx::owned::Held;
@@ -50,14 +51,14 @@ pub(crate) type AttributeBindingArray = Vec<AttributeBinding>;
 pub(crate) fn update_attribute_bindings(
     gpu: &mut dyn Gpu,
     context: &mut Context,
-    attributes: &[(usize, AttributeDataType)],
+    attributes: &[Attribute],
     overrides: &mut VertexAttributeArray,
     vertex_count: usize,
     bindings: &mut AttributeBindingArray,
 ) -> Result<bool, GpuError> {
     bindings.reserve_exact(attributes.len().saturating_sub(bindings.len()));
     let mut changed = false;
-    for (index, &(id, default)) in attributes.iter().enumerate() {
+    for (index, &Attribute { id, format: default, .. }) in attributes.iter().enumerate() {
         let binding = match overrides.get_mut(id) {
             Some(attribute) => attribute.binding(gpu, context)?,
             None => None,
@@ -94,10 +95,8 @@ pub(crate) fn update_attribute_bindings(
 /// ([`VertexAttribute::needs_upload`]).
 ///
 /// [`VertexAttribute::needs_upload`]: crate::gfx::vertex_attribute::VertexAttribute::needs_upload
-pub(crate) fn needs_upload(
-    context: &Context,
-    attributes: &[(usize, AttributeDataType)],
-    overrides: &VertexAttributeArray,
-) -> bool {
-    attributes.iter().any(|&(id, _)| overrides.get(id).is_some_and(|attribute| attribute.needs_upload(context)))
+pub(crate) fn needs_upload(context: &Context, attributes: &[Attribute], overrides: &VertexAttributeArray) -> bool {
+    attributes
+        .iter()
+        .any(|attribute| overrides.get(attribute.id).is_some_and(|attribute| attribute.needs_upload(context)))
 }

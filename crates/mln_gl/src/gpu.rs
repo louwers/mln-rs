@@ -17,7 +17,7 @@ use mln_gfx::gpu::{
     PipelineDesc, PipelineId, ReadbackId, ResourceId, SamplerId, ShaderId, ShaderKey, SlotMap, StencilState,
     TextureDesc, TextureFormat, TextureId, TextureRegion, TextureUsage, VertexBufferLayout, VertexStep,
 };
-use mln_gfx::shaders::source::{ShaderSources, Sources, glsl_es};
+use mln_gfx::shaders::program::BufferKind;
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::texture2d::{MAX_ACTIVE_TEXTURE_UNITS, SamplerState};
 use mln_gfx::types::{DepthMaskType, TextureFilterType};
@@ -30,7 +30,6 @@ use crate::custom_layer::{CustomLayerEncoder, CustomLayerPass, lend_context};
 use crate::enums::{self, AttributeFormat};
 use crate::renderer_backend::GlContext;
 use crate::shaders::glsl_sources::PRELUDE;
-use crate::shaders::shader_source::BUILT_INS;
 use crate::state::State;
 #[cfg(not(target_family = "wasm"))]
 use crate::types::FenceID;
@@ -198,8 +197,8 @@ pub(crate) struct Program {
     name: &'static str,
     object: ProgramID,
     pub(crate) blocks: Vec<Block>,
-    /// The ids of the textures it samples. A texture's sampler reads the
-    /// texture unit of its id.
+    /// The slots of the textures it samples. A texture's sampler reads the
+    /// texture unit of its slot.
     pub(crate) textures: Vec<usize>,
     /// The location of each per-vertex attribute, by id.
     pub(crate) vertex_locations: Vec<(u32, u32)>,
@@ -248,7 +247,7 @@ struct BlockBinding {
     size: usize,
 }
 
-/// A texture a draw samples, at the texture unit of its id.
+/// A texture a draw samples, at the texture unit of its slot.
 struct TextureBinding {
     unit: u32,
     /// The GL texture, `None` for a framebuffer's attachment.
@@ -442,8 +441,6 @@ pub struct GlGpu {
     elements: SlotMap<ElementsId, Elements>,
     textures: SlotMap<TextureId, Texture>,
     samplers: SlotMap<SamplerId, SamplerID>,
-    /// The source each program compiles from.
-    sources: Sources<glsl_es::Source>,
     shaders: SlotMap<ShaderId, Program>,
     layout_tags: LayoutTags,
     pipelines: SlotMap<PipelineId, Pipeline>,
@@ -528,7 +525,6 @@ impl GlGpu {
             elements: SlotMap::with_key(),
             textures: SlotMap::with_key(),
             samplers: SlotMap::with_key(),
-            sources: Sources::new(BUILT_INS),
             shaders: SlotMap::with_key(),
             layout_tags: LayoutTags::default(),
             pipelines: SlotMap::with_key(),
@@ -722,8 +718,9 @@ impl GlGpu {
     /// shader defaults to highp floats if `highp_fragment`, and to mediump
     /// otherwise.
     fn compile(&mut self, key: &ShaderKey, highp_fragment: bool) -> Result<Program, GpuError> {
-        let source = self.sources.get(key.program())?;
-        let name = key.program().name;
+        let declared = key.program();
+        let name = declared.name;
+        let source = declared.sources.glsl_es.ok_or_else(|| GpuError::Unsupported(format!("no GLSL ES for {name}")))?;
         // Desktop OpenGL compiles GLSL ES 3.00 only with
         // `GL_ARB_ES3_compatibility`, and every 3.3 context the GLSL 3.30
         // that the shaders are as well: what they use of GLSL ES is in it,
@@ -747,8 +744,8 @@ impl GlGpu {
                 Err(GpuError::Invalid(format!("{name} doesn't compile: {log}")))
             }
         };
-        let vertex: ShaderID = shader(glow::VERTEX_SHADER, "", PRELUDE.vertex, source.glsl.vertex)?;
-        let fragment = match shader(glow::FRAGMENT_SHADER, fragment_defines, PRELUDE.fragment, source.glsl.fragment) {
+        let vertex: ShaderID = shader(glow::VERTEX_SHADER, "", PRELUDE.vertex, source.vertex)?;
+        let fragment = match shader(glow::FRAGMENT_SHADER, fragment_defines, PRELUDE.fragment, source.fragment) {
             Ok(fragment) => fragment,
             Err(error) => {
                 // SAFETY: the shader is alive and no program has it.
@@ -778,10 +775,10 @@ impl GlGpu {
         let mut program = Program {
             name,
             object,
-            blocks: Vec::with_capacity(source.uniform_blocks.len()),
-            textures: Vec::with_capacity(source.textures.len()),
-            vertex_locations: Vec::with_capacity(source.attributes.len()),
-            instance_locations: Vec::with_capacity(source.instance_attributes.len()),
+            blocks: Vec::with_capacity(declared.buffers.len()),
+            textures: Vec::with_capacity(declared.textures.len()),
+            vertex_locations: Vec::with_capacity(declared.attributes.len()),
+            instance_locations: Vec::with_capacity(declared.instance_attributes.len()),
         };
         // A closure, so that its early returns reach the program's deletion
         // below.
@@ -792,33 +789,35 @@ impl GlGpu {
                 let block_count = gl.get_program_parameter_i32(object, glow::ACTIVE_UNIFORM_BLOCKS).max(0) as u32;
                 (0..block_count).try_for_each(|index| {
                     let block_name = gl.get_active_uniform_block_name(object, index);
-                    let info =
-                        source.uniform_blocks.iter().find(|info| info.name == block_name).ok_or_else(|| {
-                            GpuError::Invalid(format!("{name}'s uniform block {block_name} has no id"))
-                        })?;
+                    let info = declared
+                        .buffer_named(&block_name)
+                        .ok_or_else(|| GpuError::Invalid(format!("{name}'s uniform block {block_name} has no id")))?;
                     let size = gl.get_active_uniform_block_parameter_i32(object, index, glow::UNIFORM_BLOCK_DATA_SIZE);
                     gl.uniform_block_binding(object, index, info.id as u32);
                     program.blocks.push(Block {
                         id: info.id,
                         size: size.max(0) as usize,
-                        element_size: info.element_size,
+                        element_size: match info.kind {
+                            BufferKind::Uniform => 0,
+                            BufferKind::Storage { stride } => stride,
+                        },
                     });
                     Ok(())
                 })?;
 
                 state.use_program(gl, Some(object));
-                for info in source.textures {
+                for (slot, info) in declared.textures.iter().enumerate() {
                     if let Some(location) = gl.get_uniform_location(object, info.name) {
-                        if info.id >= MAX_ACTIVE_TEXTURE_UNITS as usize {
-                            return Err(GpuError::Unsupported(format!("{name} samples texture id {}", info.id)));
+                        if slot >= MAX_ACTIVE_TEXTURE_UNITS as usize {
+                            return Err(GpuError::Unsupported(format!("{name} samples texture slot {slot}")));
                         }
-                        gl.uniform_1_i32(Some(&location), info.id as i32);
-                        program.textures.push(info.id);
+                        gl.uniform_1_i32(Some(&location), slot as i32);
+                        program.textures.push(slot);
                     }
                 }
                 for (infos, locations) in [
-                    (source.attributes, &mut program.vertex_locations),
-                    (source.instance_attributes, &mut program.instance_locations),
+                    (declared.attributes, &mut program.vertex_locations),
+                    (declared.instance_attributes, &mut program.instance_locations),
                 ] {
                     for info in infos {
                         if let Some(location) = gl.get_attrib_location(object, info.name) {
@@ -1333,10 +1332,6 @@ impl Gpu for GlGpu {
             }
         })?;
         Ok(self.samplers.insert(sampler))
-    }
-
-    fn add_shader_sources(&mut self, sources: &ShaderSources) {
-        self.sources.extend(sources.of::<glsl_es::Source>().iter());
     }
 
     fn create_shader(&mut self, key: &ShaderKey) -> Result<ShaderId, GpuError> {

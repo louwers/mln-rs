@@ -1,20 +1,7 @@
 //! The programs of the `symbol` layer type, its symbols and their collision
 //! boxes and circles, in WGSL, for `mln_webgpu`.
 
-use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::source::wgsl::{Attribute, Source, Texture, Wgsl};
-
-use super::programs;
-use super::programs::{
-    ID_COLLISION_ANCHOR_POS_VERTEX_ATTRIBUTE, ID_COLLISION_EXTRUDE_VERTEX_ATTRIBUTE,
-    ID_COLLISION_HEIGHT_OFFSET_VERTEX_ATTRIBUTE, ID_COLLISION_PLACED_VERTEX_ATTRIBUTE,
-    ID_COLLISION_POS_VERTEX_ATTRIBUTE, ID_COLLISION_SHIFT_VERTEX_ATTRIBUTE, ID_SYMBOL_COLOR_ATTRIBUTE,
-    ID_SYMBOL_DATA_ATTRIBUTE, ID_SYMBOL_FADE_OPACITY_ATTRIBUTE, ID_SYMBOL_HALO_BLUR_ATTRIBUTE,
-    ID_SYMBOL_HALO_COLOR_ATTRIBUTE, ID_SYMBOL_HALO_WIDTH_ATTRIBUTE, ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE,
-    ID_SYMBOL_IMAGE_ICON_TEXTURE, ID_SYMBOL_IMAGE_TEXTURE, ID_SYMBOL_OPACITY_ATTRIBUTE,
-    ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE, ID_SYMBOL_POS_OFFSET_ATTRIBUTE, ID_SYMBOL_PROJECTED_POS_ATTRIBUTE,
-    ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE,
-};
+use mln_gfx::shaders::source::wgsl::Wgsl;
 
 /// `unpack_opacity`, a symbol's fade opacity and whether it fades in, from
 /// the packed value of its vertex.
@@ -39,123 +26,16 @@ const SDF_PX: f32 = 8.0;
     };
 }
 
-const SYMBOL_ICON_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(3, ID_SYMBOL_POS_OFFSET_ATTRIBUTE),
-    Attribute::new(4, ID_SYMBOL_DATA_ATTRIBUTE),
-    Attribute::new(5, ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE),
-    Attribute::new(6, ID_SYMBOL_PROJECTED_POS_ATTRIBUTE),
-    Attribute::new(7, ID_SYMBOL_FADE_OPACITY_ATTRIBUTE),
-    Attribute::new(8, ID_SYMBOL_OPACITY_ATTRIBUTE),
-    Attribute::new(9, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE),
-    Attribute::new(10, ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE),
-];
-
-const SYMBOL_ICON_TEXTURES: &[Texture] = &[Texture::new(0, ID_SYMBOL_IMAGE_TEXTURE)];
-
-const SYMBOL_SDF_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(3, ID_SYMBOL_POS_OFFSET_ATTRIBUTE),
-    Attribute::new(4, ID_SYMBOL_DATA_ATTRIBUTE),
-    Attribute::new(5, ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE),
-    Attribute::new(6, ID_SYMBOL_PROJECTED_POS_ATTRIBUTE),
-    Attribute::new(7, ID_SYMBOL_FADE_OPACITY_ATTRIBUTE),
-    Attribute::new(8, ID_SYMBOL_COLOR_ATTRIBUTE),
-    Attribute::new(9, ID_SYMBOL_HALO_COLOR_ATTRIBUTE),
-    Attribute::new(10, ID_SYMBOL_OPACITY_ATTRIBUTE),
-    Attribute::new(11, ID_SYMBOL_HALO_WIDTH_ATTRIBUTE),
-    Attribute::new(12, ID_SYMBOL_HALO_BLUR_ATTRIBUTE),
-    Attribute::new(13, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE),
-    Attribute::new(14, ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE),
-];
-
-const SYMBOL_SDF_TEXTURES: &[Texture] = &[Texture::new(0, ID_SYMBOL_IMAGE_TEXTURE)];
-
-const SYMBOL_TEXT_AND_ICON_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(3, ID_SYMBOL_POS_OFFSET_ATTRIBUTE),
-    Attribute::new(4, ID_SYMBOL_DATA_ATTRIBUTE),
-    Attribute::new(5, ID_SYMBOL_PROJECTED_POS_ATTRIBUTE),
-    Attribute::new(6, ID_SYMBOL_FADE_OPACITY_ATTRIBUTE),
-    Attribute::new(7, ID_SYMBOL_COLOR_ATTRIBUTE),
-    Attribute::new(8, ID_SYMBOL_HALO_COLOR_ATTRIBUTE),
-    Attribute::new(9, ID_SYMBOL_OPACITY_ATTRIBUTE),
-    Attribute::new(10, ID_SYMBOL_HALO_WIDTH_ATTRIBUTE),
-    Attribute::new(11, ID_SYMBOL_HALO_BLUR_ATTRIBUTE),
-    Attribute::new(12, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE),
-    Attribute::new(13, ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE),
-];
-
-const SYMBOL_TEXT_AND_ICON_TEXTURES: &[Texture] =
-    &[Texture::new(0, ID_SYMBOL_IMAGE_TEXTURE), Texture::new(2, ID_SYMBOL_IMAGE_ICON_TEXTURE)];
-
-static SYMBOL_ICON: Source = Source {
-    wgsl: &SYMBOL_ICON_SHADER,
-    attributes: SYMBOL_ICON_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: SYMBOL_ICON_TEXTURES,
-};
-
-static SYMBOL_SDF: Source = Source {
-    wgsl: &SYMBOL_SDF_SHADER,
-    attributes: SYMBOL_SDF_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: SYMBOL_SDF_TEXTURES,
-};
-
-static SYMBOL_TEXT_AND_ICON: Source = Source {
-    wgsl: &SYMBOL_TEXT_AND_ICON_SHADER,
-    attributes: SYMBOL_TEXT_AND_ICON_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: SYMBOL_TEXT_AND_ICON_TEXTURES,
-};
-
-const COLLISION_BOX_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(3, ID_COLLISION_POS_VERTEX_ATTRIBUTE),
-    Attribute::new(4, ID_COLLISION_ANCHOR_POS_VERTEX_ATTRIBUTE),
-    Attribute::new(5, ID_COLLISION_EXTRUDE_VERTEX_ATTRIBUTE),
-    Attribute::new(6, ID_COLLISION_PLACED_VERTEX_ATTRIBUTE),
-    Attribute::new(7, ID_COLLISION_SHIFT_VERTEX_ATTRIBUTE),
-    Attribute::new(8, ID_COLLISION_HEIGHT_OFFSET_VERTEX_ATTRIBUTE),
-];
-
-const COLLISION_CIRCLE_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(3, ID_COLLISION_POS_VERTEX_ATTRIBUTE),
-    Attribute::new(4, ID_COLLISION_ANCHOR_POS_VERTEX_ATTRIBUTE),
-    Attribute::new(5, ID_COLLISION_EXTRUDE_VERTEX_ATTRIBUTE),
-    Attribute::new(6, ID_COLLISION_PLACED_VERTEX_ATTRIBUTE),
-];
-
-static COLLISION_BOX: Source = Source {
-    wgsl: &COLLISION_BOX_SHADER,
-    attributes: COLLISION_BOX_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: &[],
-};
-
-static COLLISION_CIRCLE: Source = Source {
-    wgsl: &COLLISION_CIRCLE_SHADER,
-    attributes: COLLISION_CIRCLE_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: &[],
-};
-
-/// The source of each of the type's programs.
-pub(super) static SOURCES: &[(&Program, &Source)] = &[
-    (&programs::SYMBOL_ICON, &SYMBOL_ICON),
-    (&programs::SYMBOL_SDF, &SYMBOL_SDF),
-    (&programs::SYMBOL_TEXT_AND_ICON, &SYMBOL_TEXT_AND_ICON),
-    (&programs::COLLISION_BOX, &COLLISION_BOX),
-    (&programs::COLLISION_CIRCLE, &COLLISION_CIRCLE),
-];
-
-const COLLISION_BOX_SHADER: Wgsl = Wgsl {
+pub(super) const COLLISION_BOX_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 struct VertexInput {
-    @location(3) position: vec2<i32>,
-    @location(4) anchor_position: vec2<i32>,
-    @location(5) extrude: vec2<i32>,
-    @location(6) placed: vec2<u32>,
-    @location(7) shift: vec2<f32>,
-    @location(8) height_offset: f32,
+    @location(0) position: vec2<i32>,
+    @location(1) anchor_position: vec2<i32>,
+    @location(2) extrude: vec2<i32>,
+    @location(3) placed: vec2<u32>,
+    @location(4) shift: vec2<f32>,
+    @location(5) height_offset: f32,
 };
 
 struct VertexOutput {
@@ -255,14 +135,14 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-const COLLISION_CIRCLE_SHADER: Wgsl = Wgsl {
+pub(super) const COLLISION_CIRCLE_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 struct VertexInput {
-    @location(3) position: vec2<i32>,
-    @location(4) anchor_position: vec2<i32>,
-    @location(5) extrude: vec2<i32>,
-    @location(6) placed: vec2<u32>,
+    @location(0) position: vec2<i32>,
+    @location(1) anchor_position: vec2<i32>,
+    @location(2) extrude: vec2<i32>,
+    @location(3) placed: vec2<u32>,
 };
 
 struct VertexOutput {
@@ -390,20 +270,20 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-const SYMBOL_ICON_SHADER: Wgsl = Wgsl {
+pub(super) const SYMBOL_ICON_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 struct VertexInput {
-    @location(3) pos_offset: vec4<i32>,
-    @location(4) data: vec4<u32>,
-    @location(5) pixeloffset: vec4<i32>,
-    @location(6) projected_pos: vec3<f32>,
-    @location(7) fade_opacity: f32,
+    @location(0) pos_offset: vec4<i32>,
+    @location(1) data: vec4<u32>,
+    @location(2) pixeloffset: vec4<i32>,
+    @location(3) projected_pos: vec3<f32>,
+    @location(4) fade_opacity: f32,
 #ifndef HAS_UNIFORM_u_opacity
-    @location(8) opacity: vec2<f32>,
+    @location(5) opacity: vec2<f32>,
 #endif
-    @location(9) tex_origin: vec2<u32>,
-    @location(10) height_offset: f32,
+    @location(6) tex_origin: vec2<u32>,
+    @location(7) height_offset: f32,
 };
 
 struct VertexOutput {
@@ -663,32 +543,32 @@ const c_offscreen_degenerate_triangle_location: f32 = -2.0;
     )),
 };
 
-const SYMBOL_SDF_SHADER: Wgsl = Wgsl {
+pub(super) const SYMBOL_SDF_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 struct VertexInput {
-    @location(3) pos_offset: vec4<i32>,
-    @location(4) data: vec4<u32>,
-    @location(5) pixeloffset: vec4<i32>,
-    @location(6) projected_pos: vec3<f32>,
-    @location(7) fade_opacity: f32,
+    @location(0) pos_offset: vec4<i32>,
+    @location(1) data: vec4<u32>,
+    @location(2) pixeloffset: vec4<i32>,
+    @location(3) projected_pos: vec3<f32>,
+    @location(4) fade_opacity: f32,
 #ifndef HAS_UNIFORM_u_fill_color
-    @location(8) fill_color: vec4<f32>,
+    @location(5) fill_color: vec4<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_halo_color
-    @location(9) halo_color: vec4<f32>,
+    @location(6) halo_color: vec4<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_opacity
-    @location(10) opacity: vec2<f32>,
+    @location(7) opacity: vec2<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_halo_width
-    @location(11) halo_width: vec2<f32>,
+    @location(8) halo_width: vec2<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_halo_blur
-    @location(12) halo_blur: vec2<f32>,
+    @location(9) halo_blur: vec2<f32>,
 #endif
-    @location(13) tex_origin: vec2<u32>,
-    @location(14) height_offset: f32,
+    @location(10) tex_origin: vec2<u32>,
+    @location(11) height_offset: f32,
 };
 
 struct VertexOutput {
@@ -1015,31 +895,31 @@ const c_offscreen_degenerate_triangle_location: f32 = -2.0;
     )),
 };
 
-const SYMBOL_TEXT_AND_ICON_SHADER: Wgsl = Wgsl {
+pub(super) const SYMBOL_TEXT_AND_ICON_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 struct VertexInput {
-    @location(3) pos_offset: vec4<i32>,
-    @location(4) data: vec4<u32>,
-    @location(5) projected_pos: vec3<f32>,
-    @location(6) fade_opacity: f32,
+    @location(0) pos_offset: vec4<i32>,
+    @location(1) data: vec4<u32>,
+    @location(2) projected_pos: vec3<f32>,
+    @location(3) fade_opacity: f32,
 #ifndef HAS_UNIFORM_u_fill_color
-    @location(7) fill_color: vec4<f32>,
+    @location(4) fill_color: vec4<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_halo_color
-    @location(8) halo_color: vec4<f32>,
+    @location(5) halo_color: vec4<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_opacity
-    @location(9) opacity: vec2<f32>,
+    @location(6) opacity: vec2<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_halo_width
-    @location(10) halo_width: vec2<f32>,
+    @location(7) halo_width: vec2<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_halo_blur
-    @location(11) halo_blur: vec2<f32>,
+    @location(8) halo_blur: vec2<f32>,
 #endif
-    @location(12) tex_origin: vec2<u32>,
-    @location(13) height_offset: f32,
+    @location(9) tex_origin: vec2<u32>,
+    @location(10) height_offset: f32,
 };
 
 struct VertexOutput {

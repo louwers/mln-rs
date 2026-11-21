@@ -8,7 +8,7 @@ pub(crate) mod render_layer;
 mod properties;
 pub mod programs;
 pub mod ubo;
-crate::shaders::shader_sources!();
+crate::shaders::language_modules!();
 
 use mln_style::layer_type::{LayerStyle, LayerTypeInfo, NoProperties, SourceKind, StyleLayerType};
 use mln_style::property_table::{PropertyTable, PropertyVisitor};

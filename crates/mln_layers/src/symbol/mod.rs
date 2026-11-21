@@ -26,7 +26,7 @@ mod properties;
 mod quads;
 pub(crate) mod render_layer;
 pub mod ubo;
-crate::shaders::shader_sources!();
+crate::shaders::language_modules!();
 
 use mln_style::layer::FontStack;
 use mln_style::layer_type::{LayerStyle, LayerTypeInfo, SourceKind, StyleLayerType};

@@ -34,11 +34,9 @@ fn subdivide(
 /// tears down.
 fn with_context(f: impl FnOnce(&mut dyn mln_gfx::gpu::Gpu, &mut mln_render::draw::Context)) {
     use mln_gfx::RendererBackend as _;
-    use mln_gfx::gpu::Gpu as _;
     let device = mln_webgpu::Device::new(None).expect("device");
     let mut backend = mln_webgpu::RendererBackend::new(&device);
     let gpu = backend.gpu();
-    gpu.add_shader_sources(&crate::shader_sources());
     mln_render::testing::with_context(gpu, 1.0, f);
 }
 

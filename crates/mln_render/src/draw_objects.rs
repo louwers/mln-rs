@@ -20,7 +20,7 @@ use mln_gfx::gpu::{
     GeometryId, Gpu, GpuError, PipelineId, PipelineKey, SamplerId, Scissor, ShaderId, ShaderKey, StencilState,
     TargetFormats, TextureId, VertexAttribute as GpuVertexAttribute, VertexBufferLayout, VertexStep,
 };
-use mln_gfx::shaders::program::Program;
+use mln_gfx::shaders::program::{Attribute, Program};
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{MAX_TEXTURE_COUNT_PER_SHADER, MAX_UBO_COUNT_PER_SHADER};
 use mln_gfx::stencil_mode::StencilMode;
@@ -451,7 +451,7 @@ impl DrawObjects {
         frame: &UniformBufferArray,
     ) -> Result<BindingsId, GpuError> {
         let mut textures = [None; MAX_TEXTURE_COUNT_PER_SHADER];
-        for &id in self.shader.program().textures {
+        for id in 0..self.shader.program().textures.len() {
             if let Some(texture) = self.textures.get(id).and_then(Option::as_ref) {
                 textures[id] = Some(context.texture_binding(gpu, texture)?);
             }
@@ -497,10 +497,9 @@ impl DrawObjects {
                 entries.push(BindGroupEntry::Texture { id: id as u32, texture, sampler });
             }
         }
-        let textures = self.shader.program().textures.iter();
+        let textures = 0..self.shader.program().textures.len();
         held.extend(
-            textures
-                .filter_map(|&id| context.gpu_texture(self.textures.get(id)?.as_ref()?).cloned().map(Held::Texture)),
+            textures.filter_map(|id| context.gpu_texture(self.textures.get(id)?.as_ref()?).cloned().map(Held::Texture)),
         );
         let bindings = gpu.create_bindings(&BindingsDesc {
             label: self.shader.program().name,
@@ -674,7 +673,7 @@ fn vertex_slots(
                 VertexStep::Vertex => program.attributes,
                 VertexStep::Instance => program.instance_attributes,
             };
-            let Some(&(id, _)) = attributes.get(index) else { continue };
+            let Some(&Attribute { id, .. }) = attributes.get(index) else { continue };
             let offset = u64::from(binding.vertex_offset) * u64::from(binding.vertex_stride);
             let attribute = GpuVertexAttribute {
                 id: id as u32,

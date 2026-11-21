@@ -1,14 +1,13 @@
 use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::source::glsl;
-use mln_glsl::BUILT_INS;
+use mln_gfx::shaders::source::glsl::Glsl;
 use mln_glsl::variants::variants;
 
 use crate::ShaderCompiler;
 
 /// Each program with GLSL: the engine's and the built-in layer types'.
-fn programs() -> Vec<(&'static Program, &'static glsl::Source)> {
-    let layers = mln_layers::shader_sources();
-    BUILT_INS.iter().copied().chain(layers.of::<glsl::Source>().iter()).collect()
+fn programs() -> Vec<(&'static Program, &'static Glsl)> {
+    let programs = mln_render::PROGRAMS.iter().chain(mln_layers::PROGRAMS);
+    programs.filter_map(|&program| Some((program, program.sources.glsl?))).collect()
 }
 
 /// The first bytes of a DXIL container.

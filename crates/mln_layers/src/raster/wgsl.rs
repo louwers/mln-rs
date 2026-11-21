@@ -1,25 +1,8 @@
 //! The programs of the `raster` layer type in WGSL, for `mln_webgpu`.
 
-use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::source::wgsl::{Attribute, Source, Texture, Wgsl};
+use mln_gfx::shaders::source::wgsl::Wgsl;
 
-use super::programs;
-use super::programs::{
-    ID_RASTER_IMAGE0_TEXTURE, ID_RASTER_IMAGE1_TEXTURE, ID_RASTER_POS_VERTEX_ATTRIBUTE,
-    ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE,
-};
-
-const RASTER_ATTRIBUTES: &[Attribute] =
-    &[Attribute::new(0, ID_RASTER_POS_VERTEX_ATTRIBUTE), Attribute::new(1, ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE)];
-const RASTER_TEXTURES: &[Texture] =
-    &[Texture::new(0, ID_RASTER_IMAGE0_TEXTURE), Texture::new(1, ID_RASTER_IMAGE1_TEXTURE)];
-static RASTER: Source =
-    Source { wgsl: &RASTER_SHADER, attributes: RASTER_ATTRIBUTES, instance_attributes: &[], textures: RASTER_TEXTURES };
-
-/// The source of each of the type's programs.
-pub(super) static SOURCES: &[(&Program, &Source)] = &[(&programs::RASTER, &RASTER)];
-
-const RASTER_SHADER: Wgsl = Wgsl {
+pub(super) const RASTER_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 struct VertexInput {

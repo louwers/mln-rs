@@ -1,6 +1,5 @@
-//! The OpenGL shaders: their GLSL, sources, programs and shader groups.
+//! The OpenGL shaders: the prelude of their GLSL.
 
-/// The GLSL of every shader.
+/// The prelude of every shader.
 #[rustfmt::skip]
 pub(crate) mod glsl_sources;
-pub(crate) mod shader_source;

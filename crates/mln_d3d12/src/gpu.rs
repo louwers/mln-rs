@@ -16,10 +16,9 @@ use mln_gfx::gpu::{
     ResourceId, SamplerId, Scissor, ShaderId, ShaderKey, SlotMap, TextureDesc, TextureFormat, TextureId, TextureRegion,
     TextureUsage, VertexStep, destroy_unused,
 };
+use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::shader_defines::{DRAWABLE_RESERVED_UBO_COUNT, LAYER_SSBO_START_ID};
-use mln_gfx::shaders::source::{ShaderSources, Sources, glsl};
 use mln_gfx::texture2d::SamplerState;
-use mln_glsl::BUILT_INS;
 use mln_glsl::layout::{DescriptorSetType, IMAGE_SAMPLER_START, LAYER_STORAGE_COUNT};
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::size::Size;
@@ -281,8 +280,6 @@ pub struct D3d12Gpu {
     /// The upload memory that holds each set of sampler indices bindings
     /// point at, kept as long as the `D3d12Gpu`, as there are few sets.
     sampler_indices: HashMap<[u32; TABLE_SIZE as usize], BufferMemory>,
-    /// The source each program compiles from.
-    sources: Sources<glsl::Source>,
     shaders: SlotMap<ShaderId, Shader>,
     layout_tags: LayoutTags,
     pipelines: SlotMap<PipelineId, Pipeline>,
@@ -393,12 +390,11 @@ enum Resource {
     },
 }
 
-fn resource_of(name: &str, textures: &[glsl::Texture], set: u32, binding: u32) -> Result<Resource, GpuError> {
+fn resource_of(program: &Program, set: u32, binding: u32) -> Result<Resource, GpuError> {
+    let name = program.name;
     let texture = |index: u32| {
-        textures
-            .iter()
-            .find(|texture| texture.index == index as usize)
-            .map(|texture| Resource::Texture { id: texture.id as u32, index })
+        ((index as usize) < program.textures.len())
+            .then_some(Resource::Texture { id: index, index })
             .ok_or_else(|| GpuError::Invalid(format!("{name}: no texture at index {index} of set {set}")))
     };
     let start = LAYER_SSBO_START_ID as u32;
@@ -462,7 +458,6 @@ impl D3d12Gpu {
             sampler_heap: SamplerHeap::new(d3d)?,
             samplers: SlotMap::with_key(),
             sampler_indices: HashMap::default(),
-            sources: Sources::new(BUILT_INS),
             shaders: SlotMap::with_key(),
             layout_tags: LayoutTags::default(),
             pipelines: SlotMap::with_key(),
@@ -1102,19 +1097,13 @@ impl Gpu for D3d12Gpu {
         Ok(self.samplers.insert(slot))
     }
 
-    fn add_shader_sources(&mut self, sources: &ShaderSources) {
-        self.sources.extend(sources.of::<glsl::Source>().iter());
-    }
-
     fn create_shader(&mut self, key: &ShaderKey) -> Result<ShaderId, GpuError> {
-        let source = self.sources.get(key.program())?;
-        let program = self.compiler.compile(key, source)?;
-        let source_textures = source.textures;
+        let program = self.compiler.compile(key)?;
         let mut reads: Vec<ShaderBinding> = Vec::new();
         let mut buffers = Vec::new();
         let mut textures = Vec::new();
         for resource in &program.resources {
-            match resource_of(program.name, source_textures, resource.set, resource.binding)? {
+            match resource_of(program.program, resource.set, resource.binding)? {
                 Resource::Buffer(id) => {
                     let (parameter, view) = root_signature::buffer_parameter(resource.set, resource.binding)
                         .ok_or_else(|| {
@@ -1767,18 +1756,17 @@ fn create_pipeline_state(
 ) -> Result<ID3D12PipelineState, GpuError> {
     let mut elements = Vec::new();
     for (slot, layout) in desc.vertex_buffers.iter().enumerate() {
-        let (table, class, rate) = match layout.step {
-            VertexStep::Vertex => (program.attributes, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0),
-            VertexStep::Instance => (program.instance_attributes, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1),
+        let (class, rate) = match layout.step {
+            VertexStep::Vertex => (D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0),
+            VertexStep::Instance => (D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1),
         };
         for attribute in &layout.attributes {
             let format = conv::vertex_format(attribute.format)
                 .ok_or_else(|| GpuError::Unsupported(format!("vertex attribute format {:?}", attribute.format)))?;
-            let location = table
-                .iter()
-                .find(|info| info.id == attribute.id as usize)
-                .ok_or_else(|| GpuError::Invalid(format!("{} has no attribute {}", program.name, attribute.id)))?
-                .index;
+            let location = program
+                .program
+                .location(layout.step, attribute.id as usize)
+                .ok_or_else(|| GpuError::Invalid(format!("{} has no attribute {}", program.name, attribute.id)))?;
             elements.push(D3D12_INPUT_ELEMENT_DESC {
                 // naga's HLSL names a vertex input of location N `LOC`N.
                 SemanticName: s!("LOC"),

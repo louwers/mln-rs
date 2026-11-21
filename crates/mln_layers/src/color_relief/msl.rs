@@ -1,37 +1,8 @@
 //! The programs of the `color-relief` layer type in MSL, for `mln_mtl`.
 
-use mln_gfx::gfx_types::AttributeDataType::Short2;
-use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::source::msl::{Attribute, Msl, Source, Texture};
+use mln_gfx::shaders::source::msl::Msl;
 
-use super::programs;
-use super::programs::{
-    COLOR_RELIEF_LAYER_UBO_COUNT, ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE, ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE,
-    ID_COLOR_RELIEF_IMAGE_TEXTURE, ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE, ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE,
-};
-
-const COLOR_RELIEF_UBO_COUNT: usize = COLOR_RELIEF_LAYER_UBO_COUNT;
-
-const COLOR_RELIEF_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(0, Short2, COLOR_RELIEF_UBO_COUNT, ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE),
-    Attribute::new(1, Short2, COLOR_RELIEF_UBO_COUNT, ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE),
-];
-const COLOR_RELIEF_TEXTURES: &[Texture] = &[
-    Texture::new(0, ID_COLOR_RELIEF_IMAGE_TEXTURE),
-    Texture::new(1, ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE),
-    Texture::new(2, ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE),
-];
-static COLOR_RELIEF: Source = Source {
-    msl: &COLOR_RELIEF_SHADER,
-    attributes: COLOR_RELIEF_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: COLOR_RELIEF_TEXTURES,
-};
-
-/// The source of each of the type's programs.
-pub(super) static SOURCES: &[(&Program, &Source)] = &[(&programs::COLOR_RELIEF, &COLOR_RELIEF)];
-
-const COLOR_RELIEF_SHADER: Msl = Msl {
+pub(super) const COLOR_RELIEF_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"

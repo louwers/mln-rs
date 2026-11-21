@@ -1,39 +1,13 @@
 //! The programs of the `color-relief` layer type in WGSL, for `mln_webgpu`.
 
-use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::source::wgsl::{Attribute, Source, Texture, Wgsl};
+use mln_gfx::shaders::source::wgsl::Wgsl;
 
-use super::programs;
-use super::programs::{
-    ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE, ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE, ID_COLOR_RELIEF_IMAGE_TEXTURE,
-    ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE, ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE,
-};
-
-const COLOR_RELIEF_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(5, ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE),
-    Attribute::new(6, ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE),
-];
-const COLOR_RELIEF_TEXTURES: &[Texture] = &[
-    Texture::new(0, ID_COLOR_RELIEF_IMAGE_TEXTURE),
-    Texture::unfilterable(2, ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE),
-    Texture::new(4, ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE),
-];
-static COLOR_RELIEF: Source = Source {
-    wgsl: &COLOR_RELIEF_SHADER,
-    attributes: COLOR_RELIEF_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: COLOR_RELIEF_TEXTURES,
-};
-
-/// The source of each of the type's programs.
-pub(super) static SOURCES: &[(&Program, &Source)] = &[(&programs::COLOR_RELIEF, &COLOR_RELIEF)];
-
-const COLOR_RELIEF_SHADER: Wgsl = Wgsl {
+pub(super) const COLOR_RELIEF_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 struct VertexInput {
-    @location(5) position: vec2<i32>,
-    @location(6) texture_pos: vec2<i32>,
+    @location(0) position: vec2<i32>,
+    @location(1) texture_pos: vec2<i32>,
 };
 
 struct VertexOutput {

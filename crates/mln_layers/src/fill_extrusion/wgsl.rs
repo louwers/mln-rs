@@ -16,127 +16,7 @@
 //! outline vertex, the next one and its paint values come from the buffers
 //! that hold them for the roofs, bound as storage buffers.
 
-use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::source::wgsl::{Attribute, Source, Texture, Wgsl};
-
-use super::programs;
-use super::programs::{
-    ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE,
-    ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE,
-    ID_FILL_EXTRUSION_IMAGE_TEXTURE, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE,
-    ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE, ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE,
-    ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE,
-    ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE,
-};
-
-const FILL_EXTRUSION_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(0, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE),
-    Attribute::new(1, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
-    Attribute::new(2, ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
-    Attribute::new(3, ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
-    Attribute::new(4, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
-];
-const FILL_EXTRUSION_INSTANCED_ATTRIBUTES: &[Attribute] = &[Attribute::new(0, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE)];
-const FILL_EXTRUSION_INSTANCED_INSTANCE_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(1, ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE),
-    Attribute::new(2, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
-    Attribute::new(3, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE),
-    Attribute::new(4, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE),
-    Attribute::new(5, ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
-    Attribute::new(6, ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
-    Attribute::new(7, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
-];
-const FILL_EXTRUSION_PATTERN_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(0, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE),
-    Attribute::new(1, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
-    Attribute::new(2, ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
-    Attribute::new(3, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
-    Attribute::new(4, ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE),
-    Attribute::new(5, ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE),
-];
-const FILL_EXTRUSION_PATTERN_INSTANCED_INSTANCE_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(1, ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE),
-    Attribute::new(2, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
-    Attribute::new(3, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE),
-    Attribute::new(4, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE),
-    Attribute::new(5, ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
-    Attribute::new(6, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
-    Attribute::new(7, ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE),
-    Attribute::new(8, ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE),
-];
-// The wall shaders run the instanced walls' WGSL with every attribute per
-// vertex, for walls whose quads are in the vertex buffer.
-const FILL_EXTRUSION_WALL_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(0, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE),
-    Attribute::new(1, ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE),
-    Attribute::new(2, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
-    Attribute::new(3, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE),
-    Attribute::new(4, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE),
-    Attribute::new(5, ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
-    Attribute::new(6, ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
-    Attribute::new(7, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
-];
-const FILL_EXTRUSION_PATTERN_WALL_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(0, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE),
-    Attribute::new(1, ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE),
-    Attribute::new(2, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
-    Attribute::new(3, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE),
-    Attribute::new(4, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE),
-    Attribute::new(5, ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
-    Attribute::new(6, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
-    Attribute::new(7, ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE),
-    Attribute::new(8, ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE),
-];
-const FILL_EXTRUSION_PATTERN_TEXTURES: &[Texture] = &[Texture::new(0, ID_FILL_EXTRUSION_IMAGE_TEXTURE)];
-static FILL_EXTRUSION: Source = Source {
-    wgsl: &FILL_EXTRUSION_SHADER,
-    attributes: FILL_EXTRUSION_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: &[],
-};
-static FILL_EXTRUSION_INSTANCED: Source = Source {
-    wgsl: &FILL_EXTRUSION_INSTANCED_SHADER,
-    attributes: FILL_EXTRUSION_INSTANCED_ATTRIBUTES,
-    instance_attributes: FILL_EXTRUSION_INSTANCED_INSTANCE_ATTRIBUTES,
-    textures: &[],
-};
-static FILL_EXTRUSION_PATTERN: Source = Source {
-    wgsl: &FILL_EXTRUSION_PATTERN_SHADER,
-    attributes: FILL_EXTRUSION_PATTERN_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: FILL_EXTRUSION_PATTERN_TEXTURES,
-};
-static FILL_EXTRUSION_PATTERN_INSTANCED: Source = Source {
-    wgsl: &FILL_EXTRUSION_PATTERN_INSTANCED_SHADER,
-    attributes: FILL_EXTRUSION_INSTANCED_ATTRIBUTES,
-    instance_attributes: FILL_EXTRUSION_PATTERN_INSTANCED_INSTANCE_ATTRIBUTES,
-    textures: FILL_EXTRUSION_PATTERN_TEXTURES,
-};
-static FILL_EXTRUSION_WALL: Source = Source {
-    wgsl: &FILL_EXTRUSION_INSTANCED_SHADER,
-    attributes: FILL_EXTRUSION_WALL_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: &[],
-};
-static FILL_EXTRUSION_PULLED: Source =
-    Source { wgsl: &FILL_EXTRUSION_PULLED_SHADER, attributes: &[], instance_attributes: &[], textures: &[] };
-static FILL_EXTRUSION_PATTERN_WALL: Source = Source {
-    wgsl: &FILL_EXTRUSION_PATTERN_INSTANCED_SHADER,
-    attributes: FILL_EXTRUSION_PATTERN_WALL_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: FILL_EXTRUSION_PATTERN_TEXTURES,
-};
-
-/// The source of each of the type's programs.
-pub(super) static SOURCES: &[(&Program, &Source)] = &[
-    (&programs::FILL_EXTRUSION, &FILL_EXTRUSION),
-    (&programs::FILL_EXTRUSION_INSTANCED, &FILL_EXTRUSION_INSTANCED),
-    (&programs::FILL_EXTRUSION_PATTERN, &FILL_EXTRUSION_PATTERN),
-    (&programs::FILL_EXTRUSION_PATTERN_INSTANCED, &FILL_EXTRUSION_PATTERN_INSTANCED),
-    (&programs::FILL_EXTRUSION_WALL, &FILL_EXTRUSION_WALL),
-    (&programs::FILL_EXTRUSION_PULLED, &FILL_EXTRUSION_PULLED),
-    (&programs::FILL_EXTRUSION_PATTERN_WALL, &FILL_EXTRUSION_PATTERN_WALL),
-];
+use mln_gfx::shaders::source::wgsl::Wgsl;
 
 /// The fragment stage of the pattern shaders.
 const PATTERN_FRAGMENT: &str = r"
@@ -528,8 +408,7 @@ macro_rules! wall {
     };
 }
 
-/// The fill extrusion roofs.
-const FILL_EXTRUSION_SHADER: Wgsl = Wgsl {
+pub(super) const FILL_EXTRUSION_SHADER: Wgsl = Wgsl {
     vertex: Some(concat!(
         r#"
 struct VertexInput {
@@ -577,23 +456,23 @@ fn main(in: VertexInput) -> VertexOutput {
 };
 
 /// The instanced fill extrusion walls.
-const FILL_EXTRUSION_INSTANCED_SHADER: Wgsl = Wgsl {
+pub(super) const FILL_EXTRUSION_INSTANCED_SHADER: Wgsl = Wgsl {
     vertex: Some(concat!(
         r#"
 struct VertexInput {
     @location(0) position: vec2<i32>,
     @location(1) outline_pos: vec2<i32>,
     @location(2) decimals_ed: vec2<u32>,
-    @location(3) next_outline_pos: vec2<i32>,
-    @location(4) next_decimals_ed: vec2<u32>,
+    @location(6) next_outline_pos: vec2<i32>,
+    @location(7) next_decimals_ed: vec2<u32>,
 #ifndef HAS_UNIFORM_u_color
-    @location(5) color: vec4<f32>,
+    @location(3) color: vec4<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_base
-    @location(6) base: vec2<f32>,
+    @location(4) base: vec2<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_height
-    @location(7) height: vec2<f32>,
+    @location(5) height: vec2<f32>,
 #endif
 };
 "#,
@@ -648,7 +527,7 @@ macro_rules! wall_paint {
 }
 
 /// The pulled fill extrusion walls.
-const FILL_EXTRUSION_PULLED_SHADER: Wgsl = Wgsl {
+pub(super) const FILL_EXTRUSION_PULLED_SHADER: Wgsl = Wgsl {
     vertex: Some(concat!(
         r#"
 // What the instanced walls read as attributes.
@@ -739,7 +618,7 @@ fn main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
 };
 
 /// The fill extrusion pattern roofs.
-const FILL_EXTRUSION_PATTERN_SHADER: Wgsl = Wgsl {
+pub(super) const FILL_EXTRUSION_PATTERN_SHADER: Wgsl = Wgsl {
     vertex: Some(concat!(
         r#"
 struct VertexInput {
@@ -782,26 +661,26 @@ fn main(in: VertexInput) -> VertexOutput {
 };
 
 /// The instanced fill extrusion pattern walls.
-const FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: Wgsl = Wgsl {
+pub(super) const FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: Wgsl = Wgsl {
     vertex: Some(concat!(
         r#"
 struct VertexInput {
     @location(0) position: vec2<i32>,
     @location(1) outline_pos: vec2<i32>,
     @location(2) decimals_ed: vec2<u32>,
-    @location(3) next_outline_pos: vec2<i32>,
-    @location(4) next_decimals_ed: vec2<u32>,
+    @location(7) next_outline_pos: vec2<i32>,
+    @location(8) next_decimals_ed: vec2<u32>,
 #ifndef HAS_UNIFORM_u_base
-    @location(5) base: vec2<f32>,
+    @location(3) base: vec2<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_height
-    @location(6) height: vec2<f32>,
+    @location(4) height: vec2<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_pattern_from
-    @location(7) pattern_from: vec4<u32>,
+    @location(5) pattern_from: vec4<u32>,
 #endif
 #ifndef HAS_UNIFORM_u_pattern_to
-    @location(8) pattern_to: vec4<u32>,
+    @location(6) pattern_to: vec4<u32>,
 #endif
 };
 "#,

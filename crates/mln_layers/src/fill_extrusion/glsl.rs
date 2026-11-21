@@ -1,144 +1,6 @@
 //! The programs of the `fill-extrusion` layer type in GLSL, which `mln_glsl` parses for `mln_vulkan` and `mln_d3d12`.
 
-use mln_gfx::gfx_types::AttributeDataType::{Float2, Float4, Short2, UShort2, UShort4};
-use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::source::glsl::{Attribute, Glsl, Source, Texture};
-
-use super::programs;
-use super::programs::{
-    ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE,
-    ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE,
-    ID_FILL_EXTRUSION_IMAGE_TEXTURE, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE,
-    ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE, ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE,
-    ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE,
-    ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE,
-};
-
-// An instance of the instanced fill extrusion shaders is an outline vertex
-// and the vertex after it.
-const FILL_EXTRUSION_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(0, Short2, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE),
-    Attribute::new(1, UShort2, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
-    // Data driven
-    Attribute::new(2, Float4, ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
-    Attribute::new(3, Float2, ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
-    Attribute::new(4, Float2, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
-];
-const FILL_EXTRUSION_INSTANCED_ATTRIBUTES: &[Attribute] =
-    &[Attribute::new(0, Short2, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE)];
-const FILL_EXTRUSION_INSTANCED_INSTANCE_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(1, Short2, ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE),
-    Attribute::new(2, UShort2, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
-    // Data driven
-    Attribute::new(3, Float4, ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
-    Attribute::new(4, Float2, ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
-    Attribute::new(5, Float2, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
-    // The next outline vertex
-    Attribute::new(6, Short2, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE),
-    Attribute::new(7, UShort2, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE),
-];
-const FILL_EXTRUSION_PATTERN_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(0, Short2, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE),
-    Attribute::new(1, UShort2, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
-    // Data driven
-    Attribute::new(2, Float2, ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
-    Attribute::new(3, Float2, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
-    Attribute::new(4, UShort4, ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE),
-    Attribute::new(5, UShort4, ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE),
-];
-const FILL_EXTRUSION_PATTERN_INSTANCED_INSTANCE_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(1, Short2, ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE),
-    Attribute::new(2, UShort2, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
-    // Data driven
-    Attribute::new(3, Float2, ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
-    Attribute::new(4, Float2, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
-    Attribute::new(5, UShort4, ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE),
-    Attribute::new(6, UShort4, ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE),
-    // The next outline vertex
-    Attribute::new(7, Short2, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE),
-    Attribute::new(8, UShort2, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE),
-];
-// The wall shaders run the instanced ones' GLSL with every attribute per
-// vertex, for walls whose quads are in the vertex buffer.
-const FILL_EXTRUSION_WALL_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(0, Short2, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE),
-    Attribute::new(1, Short2, ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE),
-    Attribute::new(2, UShort2, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
-    // Data driven
-    Attribute::new(3, Float4, ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
-    Attribute::new(4, Float2, ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
-    Attribute::new(5, Float2, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
-    // The next outline vertex
-    Attribute::new(6, Short2, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE),
-    Attribute::new(7, UShort2, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE),
-];
-const FILL_EXTRUSION_PATTERN_WALL_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(0, Short2, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE),
-    Attribute::new(1, Short2, ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE),
-    Attribute::new(2, UShort2, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
-    // Data driven
-    Attribute::new(3, Float2, ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
-    Attribute::new(4, Float2, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
-    Attribute::new(5, UShort4, ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE),
-    Attribute::new(6, UShort4, ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE),
-    // The next outline vertex
-    Attribute::new(7, Short2, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE),
-    Attribute::new(8, UShort2, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE),
-];
-const FILL_EXTRUSION_PATTERN_TEXTURES: &[Texture] = &[Texture::new(0, ID_FILL_EXTRUSION_IMAGE_TEXTURE)];
-static FILL_EXTRUSION: Source = Source {
-    glsl: &FILL_EXTRUSION_SHADER,
-    attributes: FILL_EXTRUSION_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: &[],
-};
-static FILL_EXTRUSION_INSTANCED: Source = Source {
-    glsl: &FILL_EXTRUSION_INSTANCED_SHADER,
-    attributes: FILL_EXTRUSION_INSTANCED_ATTRIBUTES,
-    instance_attributes: FILL_EXTRUSION_INSTANCED_INSTANCE_ATTRIBUTES,
-    textures: &[],
-};
-static FILL_EXTRUSION_PATTERN: Source = Source {
-    glsl: &FILL_EXTRUSION_PATTERN_SHADER,
-    attributes: FILL_EXTRUSION_PATTERN_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: FILL_EXTRUSION_PATTERN_TEXTURES,
-};
-static FILL_EXTRUSION_PATTERN_INSTANCED: Source = Source {
-    glsl: &FILL_EXTRUSION_PATTERN_INSTANCED_SHADER,
-    attributes: FILL_EXTRUSION_INSTANCED_ATTRIBUTES,
-    instance_attributes: FILL_EXTRUSION_PATTERN_INSTANCED_INSTANCE_ATTRIBUTES,
-    textures: FILL_EXTRUSION_PATTERN_TEXTURES,
-};
-// The walls whose quads are in the vertex buffer run the instanced walls'
-// GLSL with every attribute per vertex.
-static FILL_EXTRUSION_WALL: Source = Source {
-    glsl: &FILL_EXTRUSION_INSTANCED_SHADER,
-    attributes: FILL_EXTRUSION_WALL_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: &[],
-};
-static FILL_EXTRUSION_PATTERN_WALL: Source = Source {
-    glsl: &FILL_EXTRUSION_PATTERN_INSTANCED_SHADER,
-    attributes: FILL_EXTRUSION_PATTERN_WALL_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: FILL_EXTRUSION_PATTERN_TEXTURES,
-};
-// The pulled walls and outlines have no vertex inputs: they read the
-// vertices from storage buffers.
-static FILL_EXTRUSION_PULLED: Source =
-    Source { glsl: &FILL_EXTRUSION_PULLED_SHADER, attributes: &[], instance_attributes: &[], textures: &[] };
-
-/// The source of each of the type's programs.
-pub(super) static SOURCES: &[(&Program, &Source)] = &[
-    (&programs::FILL_EXTRUSION, &FILL_EXTRUSION),
-    (&programs::FILL_EXTRUSION_INSTANCED, &FILL_EXTRUSION_INSTANCED),
-    (&programs::FILL_EXTRUSION_PATTERN, &FILL_EXTRUSION_PATTERN),
-    (&programs::FILL_EXTRUSION_PATTERN_INSTANCED, &FILL_EXTRUSION_PATTERN_INSTANCED),
-    (&programs::FILL_EXTRUSION_WALL, &FILL_EXTRUSION_WALL),
-    (&programs::FILL_EXTRUSION_PATTERN_WALL, &FILL_EXTRUSION_PATTERN_WALL),
-    (&programs::FILL_EXTRUSION_PULLED, &FILL_EXTRUSION_PULLED),
-];
+use mln_gfx::shaders::source::glsl::Glsl;
 
 const FILL_EXTRUSION_SHADER_PRELUDE: &str = r"
 
@@ -161,7 +23,7 @@ vec2 wall_normal(const uint bits, const vec2 own) {
 
 ";
 
-const FILL_EXTRUSION_SHADER: Glsl = Glsl {
+pub(super) const FILL_EXTRUSION_SHADER: Glsl = Glsl {
     prelude: FILL_EXTRUSION_SHADER_PRELUDE,
     vertex: r"
 invariant gl_Position;
@@ -452,7 +314,7 @@ macro_rules! fill_extrusion_wall_main {
     };
 }
 
-const FILL_EXTRUSION_INSTANCED_SHADER: Glsl = Glsl {
+pub(super) const FILL_EXTRUSION_INSTANCED_SHADER: Glsl = Glsl {
     prelude: FILL_EXTRUSION_SHADER_PRELUDE,
     vertex: concat!(
         r"
@@ -502,7 +364,7 @@ void main() {
 /// Port-only: the walls of the instanced walls as quads without vertex
 /// inputs. A vertex reads its wall's outline vertices and paint values from
 /// storage buffers, by its index.
-const FILL_EXTRUSION_PULLED_SHADER: Glsl = Glsl {
+pub(super) const FILL_EXTRUSION_PULLED_SHADER: Glsl = Glsl {
     prelude: FILL_EXTRUSION_SHADER_PRELUDE,
     vertex: concat!(
         r"
@@ -564,7 +426,7 @@ void main() {
     fragment: FILL_EXTRUSION_INSTANCED_SHADER.fragment,
 };
 
-const FILL_EXTRUSION_PATTERN_SHADER: Glsl = Glsl {
+pub(super) const FILL_EXTRUSION_PATTERN_SHADER: Glsl = Glsl {
     prelude: FILL_EXTRUSION_SHADER_PRELUDE,
     vertex: r"
 invariant gl_Position;
@@ -840,7 +702,7 @@ void main() {
 ",
 };
 
-const FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: Glsl = Glsl {
+pub(super) const FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: Glsl = Glsl {
     prelude: FILL_EXTRUSION_SHADER_PRELUDE,
     vertex: r"
 invariant gl_Position;

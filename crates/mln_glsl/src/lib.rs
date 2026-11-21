@@ -1,9 +1,10 @@
 //! The GLSL of the Vulkan and D3D12 backends, and naga's front end for it:
 //! each backend writes the module naga parses as its own shading language.
 //!
-//! The GLSL (`sources`) is MapLibre Native's Vulkan GLSL, written for naga's
-//! GLSL front end ([`Module::parse`]). Its clip space is y-up, as naga's IR
-//! is: a back end for a y-down clip space flips Y.
+//! A program's GLSL ([`Glsl`](mln_gfx::shaders::source::glsl::Glsl)) is
+//! written for naga's GLSL front end ([`Module::parse`]), after the preludes
+//! of this crate ([`compose`]). Its clip space is y-up, as naga's IR is: a
+//! back end for a y-down clip space flips Y.
 //!
 //! The descriptor sets ([`layout`]) are the global uniform buffers, a layer's
 //! buffers, a drawable's uniform buffers with the vertex buffers its shader
@@ -23,14 +24,14 @@
 mod front_end;
 pub mod layout;
 mod program;
-/// MapLibre Native's Vulkan GLSL, written for naga's GLSL front end.
+/// The preludes of the GLSL.
 #[rustfmt::skip]
 mod sources;
 #[cfg(any(test, feature = "variants"))]
 pub mod variants;
 
 pub use front_end::{Module, ResourceUse, Stage};
-pub use program::{BUILT_INS, compose};
+pub use program::compose;
 
 #[cfg(test)]
 mod tests;

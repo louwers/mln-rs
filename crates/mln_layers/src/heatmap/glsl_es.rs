@@ -1,56 +1,8 @@
 //! The programs of the `heatmap` layer type in GLSL ES, for `mln_gl`.
 
-use mln_gfx::shaders::layer_ubo::{GlobalPaintParamsUBO, ProjectionUBO};
-use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::shader_defines::{ID_GLOBAL_PAINT_PARAMS_UBO, ID_PROJECTION_UBO};
-use mln_gfx::shaders::source::glsl_es::{Attribute, Glsl, Source, Texture, UniformBlock};
+use mln_gfx::shaders::source::glsl_es::Glsl;
 
-use super::programs;
-use super::programs::{
-    ID_HEATMAP_COLOR_RAMP_TEXTURE, ID_HEATMAP_DRAWABLE_UBO, ID_HEATMAP_EVALUATED_PROPS_UBO, ID_HEATMAP_IMAGE_TEXTURE,
-    ID_HEATMAP_POS_VERTEX_ATTRIBUTE, ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE, ID_HEATMAP_TEXTURE_PROPS_UBO,
-    ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE,
-};
-use super::ubo::{HeatmapDrawableUBO, HeatmapEvaluatedPropsUBO, HeatmapTexturePropsUBO};
-
-// Heatmap
-static HEATMAP: Source = Source {
-    glsl: &HEATMAP_SHADER,
-    uniform_blocks: &[
-        UniformBlock::element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
-        UniformBlock::element::<HeatmapDrawableUBO, HeatmapDrawableUBO>("HeatmapDrawableUBO", ID_HEATMAP_DRAWABLE_UBO),
-        UniformBlock::new::<HeatmapEvaluatedPropsUBO>("HeatmapEvaluatedPropsUBO", ID_HEATMAP_EVALUATED_PROPS_UBO),
-    ],
-    attributes: &[
-        Attribute::new("a_pos", ID_HEATMAP_POS_VERTEX_ATTRIBUTE),
-        Attribute::new("a_weight", ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE),
-        Attribute::new("a_radius", ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE),
-    ],
-    instance_attributes: &[],
-    textures: &[],
-};
-
-// Heatmap Texture
-static HEATMAP_TEXTURE: Source = Source {
-    glsl: &HEATMAP_TEXTURE_SHADER,
-    uniform_blocks: &[
-        UniformBlock::element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
-        UniformBlock::new::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
-        UniformBlock::new::<HeatmapTexturePropsUBO>("HeatmapTexturePropsUBO", ID_HEATMAP_TEXTURE_PROPS_UBO),
-    ],
-    attributes: &[Attribute::new("a_pos", ID_HEATMAP_POS_VERTEX_ATTRIBUTE)],
-    instance_attributes: &[],
-    textures: &[
-        Texture::new("u_image", ID_HEATMAP_IMAGE_TEXTURE),
-        Texture::new("u_color_ramp", ID_HEATMAP_COLOR_RAMP_TEXTURE),
-    ],
-};
-
-/// The source of each of the type's programs.
-pub(super) static SOURCES: &[(&Program, &Source)] =
-    &[(&programs::HEATMAP, &HEATMAP), (&programs::HEATMAP_TEXTURE, &HEATMAP_TEXTURE)];
-
-const HEATMAP_SHADER: Glsl = Glsl {
+pub(super) const HEATMAP_SHADER: Glsl = Glsl {
     vertex: r#"layout (location = 0) in vec2 a_pos;
 out vec2 v_extrude;
 
@@ -169,7 +121,7 @@ highp float weight = u_weight;
 ",
 };
 
-const HEATMAP_TEXTURE_SHADER: Glsl = Glsl {
+pub(super) const HEATMAP_TEXTURE_SHADER: Glsl = Glsl {
     vertex: r"layout (location = 0) in vec2 a_pos;
 out vec2 v_pos;
 

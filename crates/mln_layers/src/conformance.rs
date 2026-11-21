@@ -16,8 +16,8 @@
 //! [`transparent_replace`] does to check that `Replace` doesn't blend. On
 //! wasm, [`host_writes`] checks writes from JS arrays.
 //!
-//! The cases draw with the engine's programs and this crate's, whose
-//! sources they add to the `Gpu` ([`shader_sources`](crate::shader_sources)).
+//! The cases draw with the engine's clipping mask program
+//! ([`mln_render::PROGRAMS`]) and this crate's.
 
 mod cases;
 
@@ -32,7 +32,7 @@ use mln_gfx::gpu::{
     TextureFormat, TextureId, TextureUsage, VertexAttribute, VertexBufferLayout, VertexStep,
 };
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::programs::{CLIPPING_MASK, ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE};
+use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
 use mln_gfx::stencil_mode::{StencilMode, Test};
 use mln_gfx::types::StencilOpType;
@@ -58,11 +58,15 @@ fn tile_matrix(x_max: f32) -> [f32; 16] {
     [sx, 0.0, 0.0, 0.0, 0.0, sy, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, -1.0, -1.0, 0.0, 1.0]
 }
 
-/// The shader of `key`, a program of the engine's or this crate's, whose
-/// sources it adds to `gpu` first.
-fn create_shader(gpu: &mut (impl Gpu + ?Sized), key: &ShaderKey) -> Result<ShaderId, GpuError> {
-    gpu.add_shader_sources(&crate::shader_sources());
-    gpu.create_shader(key)
+/// The engine's program of a tile's clipping mask, which draws the quad of
+/// its one attribute's positions through the projection block into the
+/// stencil.
+fn clipping_mask() -> Result<&'static Program, GpuError> {
+    mln_render::PROGRAMS
+        .iter()
+        .copied()
+        .find(|program| program.name == "ClippingMaskProgram")
+        .ok_or_else(|| GpuError::Unsupported("no clipping mask program".to_owned()))
 }
 
 fn buffer(gpu: &mut (impl Gpu + ?Sized), usage: BufferUsage, data: &[u8]) -> Result<BufferId, GpuError> {
@@ -219,8 +223,9 @@ fn clipped_frame(gpu: &mut impl Gpu) -> Result<ClippedFrame, GpuError> {
     };
     let (quad, indices) = quad(gpu)?;
 
-    let mask_shader = gpu.create_shader(&ShaderKey::new(&CLIPPING_MASK, []))?;
-    let mask_layouts = [position_layout(ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE)];
+    let mask_program = clipping_mask()?;
+    let mask_shader = gpu.create_shader(&ShaderKey::new(mask_program, []))?;
+    let mask_layouts = [position_layout(mask_program.attributes[0].id)];
     let mask_pipeline = gpu.create_pipeline(&PipelineDesc {
         shader: mask_shader,
         vertex_buffers: &mask_layouts,
@@ -248,7 +253,7 @@ fn clipped_frame(gpu: &mut impl Gpu) -> Result<ClippedFrame, GpuError> {
         index_buffer: indices,
     })?;
 
-    let background_shader = create_shader(gpu, &ShaderKey::new(&background::programs::BACKGROUND, []))?;
+    let background_shader = gpu.create_shader(&ShaderKey::new(&background::programs::BACKGROUND, []))?;
     let background_layouts = [position_layout(ID_BACKGROUND_POS_VERTEX_ATTRIBUTE)];
     let background_pipeline = gpu.create_pipeline(&PipelineDesc {
         shader: background_shader,

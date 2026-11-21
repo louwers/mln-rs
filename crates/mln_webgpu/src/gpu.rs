@@ -14,7 +14,6 @@ use mln_gfx::gpu::{
     ResourceId, SamplerId, Scissor, ShaderId, ShaderKey, SlotMap, TextureDesc, TextureFormat, TextureId, TextureRegion,
     TextureUsage,
 };
-use mln_gfx::shaders::source::{ShaderSources, Sources, wgsl};
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_util::Color;
@@ -22,7 +21,6 @@ use mln_util::size::Size;
 
 use crate::index_table::IndexTable;
 use crate::shaders::shader_program::{self, BindingType, ShaderProgram, validated};
-use crate::shaders::shader_source::BUILT_INS;
 use crate::writes::Writes;
 use crate::{CustomLayerEncoder, CustomLayerPass, Device};
 
@@ -176,8 +174,6 @@ pub struct WebGpu {
     writes: Writes,
     textures: SlotMap<TextureId, Texture>,
     samplers: SlotMap<SamplerId, wgpu::Sampler>,
-    /// The source each program compiles from.
-    sources: Sources<wgsl::Source>,
     shaders: SlotMap<ShaderId, Shader>,
     layout_tags: LayoutTags,
     pipelines: SlotMap<PipelineId, Pipeline>,
@@ -231,7 +227,6 @@ impl WebGpu {
             writes: Writes::default(),
             textures: SlotMap::with_key(),
             samplers: SlotMap::with_key(),
-            sources: Sources::new(BUILT_INS),
             shaders: SlotMap::with_key(),
             layout_tags: LayoutTags::default(),
             pipelines: SlotMap::with_key(),
@@ -518,10 +513,9 @@ fn shader_bindings(shader: &ShaderProgram) -> Result<Vec<ShaderBinding>, GpuErro
                 | BindingType::NonFilteringSampler
                 | BindingType::Texture
                 | BindingType::UnfilterableTexture => {
-                    let sampler = matches!(info.type_, BindingType::Sampler | BindingType::NonFilteringSampler);
-                    let id = shader.texture_at(info.binding, sampler).ok_or_else(|| {
+                    let id = shader.texture_at(info.binding).ok_or_else(|| {
                         GpuError::Invalid(format!(
-                            "{} reads binding {} with no texture id",
+                            "{} reads binding {} with no texture slot",
                             shader.name(),
                             info.binding
                         ))
@@ -737,13 +731,8 @@ impl Gpu for WebGpu {
         Ok(self.samplers.insert(sampler))
     }
 
-    fn add_shader_sources(&mut self, sources: &ShaderSources) {
-        self.sources.extend(sources.of::<wgsl::Source>().iter());
-    }
-
     fn create_shader(&mut self, key: &ShaderKey) -> Result<ShaderId, GpuError> {
-        let source = self.sources.get(key.program())?;
-        let program = shader_program::compile(self.device.device(), self.index_table.layout(), key, source)?;
+        let program = shader_program::compile(self.device.device(), self.index_table.layout(), key)?;
         let reads = shader_bindings(&program)?;
         Ok(self.shaders.insert(Shader { program, reads }))
     }
@@ -820,7 +809,7 @@ impl Gpu for WebGpu {
                     | BindingType::Texture
                     | BindingType::UnfilterableTexture => {
                         let sampler = matches!(info.type_, BindingType::Sampler | BindingType::NonFilteringSampler);
-                        let texture_id = program.texture_at(info.binding, sampler).ok_or_else(missing)? as u32;
+                        let texture_id = program.texture_at(info.binding).ok_or_else(missing)? as u32;
                         let (texture, texture_sampler) = desc
                             .entries
                             .iter()

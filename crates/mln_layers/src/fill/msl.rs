@@ -1,92 +1,6 @@
 //! The programs of the `fill` layer type in MSL, for `mln_mtl`.
 
-use mln_gfx::gfx_types::AttributeDataType::{Float2, Float4, Short2, UShort4};
-use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::source::msl::{Attribute, Msl, Source, Texture};
-
-use super::programs;
-use super::programs::{
-    FILL_LAYER_UBO_COUNT, ID_FILL_COLOR_VERTEX_ATTRIBUTE, ID_FILL_IMAGE_TEXTURE, ID_FILL_OPACITY_VERTEX_ATTRIBUTE,
-    ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE, ID_FILL_OUTLINE_END_ATTRIBUTE, ID_FILL_OUTLINE_POS_ATTRIBUTE,
-    ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE, ID_FILL_POS_VERTEX_ATTRIBUTE,
-};
-
-const FILL_UBO_COUNT: usize = FILL_LAYER_UBO_COUNT;
-
-const FILL_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(0, Short2, FILL_UBO_COUNT, ID_FILL_POS_VERTEX_ATTRIBUTE),
-    // Data driven
-    Attribute::new(1, Float4, FILL_UBO_COUNT + 1, ID_FILL_COLOR_VERTEX_ATTRIBUTE),
-    Attribute::new(2, Float2, FILL_UBO_COUNT + 1, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
-];
-const FILL_PATTERN_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(0, Short2, FILL_UBO_COUNT, ID_FILL_POS_VERTEX_ATTRIBUTE),
-    // Data driven
-    Attribute::new(1, Float4, FILL_UBO_COUNT + 1, ID_FILL_COLOR_VERTEX_ATTRIBUTE),
-    Attribute::new(2, UShort4, FILL_UBO_COUNT + 1, ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE),
-    Attribute::new(3, UShort4, FILL_UBO_COUNT + 1, ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE),
-    Attribute::new(4, Float2, FILL_UBO_COUNT + 1, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
-];
-const FILL_PATTERN_TEXTURES: &[Texture] = &[Texture::new(0, ID_FILL_IMAGE_TEXTURE)];
-static FILL: Source =
-    Source { msl: &FILL_SHADER, attributes: FILL_ATTRIBUTES, instance_attributes: &[], textures: &[] };
-static FILL_PATTERN: Source = Source {
-    msl: &FILL_PATTERN_SHADER,
-    attributes: FILL_PATTERN_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: FILL_PATTERN_TEXTURES,
-};
-
-// An instance of the outline shaders is a segment of an outline: a vertex
-// and the end of its segment, which the same vertices and a buffer of the
-// ends provide. The quad's corner is the vertex. Metal draws no lines wider
-// than 1 px, so it draws every outline with these.
-const FILL_OUTLINE_INSTANCED_ATTRIBUTES: &[Attribute] =
-    &[Attribute::new(0, Short2, FILL_UBO_COUNT, ID_FILL_POS_VERTEX_ATTRIBUTE)];
-const FILL_OUTLINE_INSTANCED_INSTANCE_ATTRIBUTES: &[Attribute] = &[
-    // Data driven
-    Attribute::new(1, Float4, FILL_UBO_COUNT + 1, ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE),
-    Attribute::new(2, Float2, FILL_UBO_COUNT + 1, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
-    // The segment
-    Attribute::new(3, Short2, FILL_UBO_COUNT + 2, ID_FILL_OUTLINE_POS_ATTRIBUTE),
-    Attribute::new(4, Short2, FILL_UBO_COUNT + 3, ID_FILL_OUTLINE_END_ATTRIBUTE),
-];
-const FILL_OUTLINE_PATTERN_INSTANCED_INSTANCE_ATTRIBUTES: &[Attribute] = &[
-    // Data driven
-    Attribute::new(1, Float4, FILL_UBO_COUNT + 1, ID_FILL_COLOR_VERTEX_ATTRIBUTE),
-    Attribute::new(2, UShort4, FILL_UBO_COUNT + 1, ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE),
-    Attribute::new(3, UShort4, FILL_UBO_COUNT + 1, ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE),
-    Attribute::new(4, Float2, FILL_UBO_COUNT + 1, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
-    // The segment
-    Attribute::new(5, Short2, FILL_UBO_COUNT + 2, ID_FILL_OUTLINE_POS_ATTRIBUTE),
-    Attribute::new(6, Short2, FILL_UBO_COUNT + 3, ID_FILL_OUTLINE_END_ATTRIBUTE),
-];
-static FILL_OUTLINE_INSTANCED: Source = Source {
-    msl: &FILL_OUTLINE_INSTANCED_SHADER,
-    attributes: FILL_OUTLINE_INSTANCED_ATTRIBUTES,
-    instance_attributes: FILL_OUTLINE_INSTANCED_INSTANCE_ATTRIBUTES,
-    textures: &[],
-};
-// The pulled outlines read the same vertices, ends and paint values by
-// vertex index, four vertices a segment, as storage buffers
-// (`ID_FILL_OUTLINE_VERTICES` and on).
-static FILL_OUTLINE_PULLED: Source =
-    Source { msl: &FILL_OUTLINE_PULLED_SHADER, attributes: &[], instance_attributes: &[], textures: &[] };
-static FILL_OUTLINE_PATTERN_INSTANCED: Source = Source {
-    msl: &FILL_OUTLINE_PATTERN_INSTANCED_SHADER,
-    attributes: FILL_OUTLINE_INSTANCED_ATTRIBUTES,
-    instance_attributes: FILL_OUTLINE_PATTERN_INSTANCED_INSTANCE_ATTRIBUTES,
-    textures: FILL_PATTERN_TEXTURES,
-};
-
-/// The source of each of the type's programs.
-pub(super) static SOURCES: &[(&Program, &Source)] = &[
-    (&programs::FILL, &FILL),
-    (&programs::FILL_PATTERN, &FILL_PATTERN),
-    (&programs::FILL_OUTLINE_INSTANCED, &FILL_OUTLINE_INSTANCED),
-    (&programs::FILL_OUTLINE_PULLED, &FILL_OUTLINE_PULLED),
-    (&programs::FILL_OUTLINE_PATTERN_INSTANCED, &FILL_OUTLINE_PATTERN_INSTANCED),
-];
+use mln_gfx::shaders::source::msl::Msl;
 
 /// `outline_corner`, the corner of an instanced fill outline's quad.
 macro_rules! outline_corner {
@@ -149,8 +63,7 @@ OutlineCorner outline_corner(float4 start, float4 end, short2 corner, float2 wor
     };
 }
 
-/// The pattern fill outline, drawn as an instance of a quad per segment.
-const FILL_OUTLINE_PATTERN_INSTANCED_SHADER: Msl = Msl {
+pub(super) const FILL_OUTLINE_PATTERN_INSTANCED_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -518,7 +431,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     };
 }
 
-const FILL_OUTLINE_INSTANCED_SHADER: Msl = Msl {
+pub(super) const FILL_OUTLINE_INSTANCED_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -693,7 +606,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     ),
 };
 
-const FILL_OUTLINE_PULLED_SHADER: Msl = Msl {
+pub(super) const FILL_OUTLINE_PULLED_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: FILL_OUTLINE_INSTANCED_SHADER.prelude,
@@ -751,7 +664,7 @@ FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]],
     ),
 };
 
-const FILL_PATTERN_SHADER: Msl = Msl {
+pub(super) const FILL_PATTERN_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -1042,7 +955,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-const FILL_SHADER: Msl = Msl {
+pub(super) const FILL_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"

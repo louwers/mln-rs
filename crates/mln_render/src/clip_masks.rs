@@ -7,8 +7,6 @@ use mln_gfx::gpu::{
 };
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::programs;
-use mln_gfx::shaders::programs::ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{ID_PROJECTION_UBO, MAX_UBO_COUNT_PER_SHADER};
 use mln_gfx::stencil_mode::Test;
@@ -26,6 +24,8 @@ use crate::gfx::vertex_attribute::Uniforms;
 use crate::globe::grid;
 use crate::paint_parameters::DrawTarget;
 use crate::render_static_data::RenderStaticData;
+use crate::shaders::programs;
+use crate::shaders::programs::ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE;
 
 /// The vertex layout of the masks' meshes: a tile position of two shorts.
 fn layout() -> VertexBufferLayout {

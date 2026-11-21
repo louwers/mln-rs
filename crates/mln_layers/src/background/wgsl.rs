@@ -1,33 +1,12 @@
 //! The programs of the `background` layer type in WGSL, for `mln_webgpu`.
 
-use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::source::wgsl::{Attribute, Source, Texture, Wgsl};
+use mln_gfx::shaders::source::wgsl::Wgsl;
 
-use super::programs;
-use super::programs::{ID_BACKGROUND_IMAGE_TEXTURE, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE};
-
-const BACKGROUND_ATTRIBUTES: &[Attribute] = &[Attribute { index: 3, id: ID_BACKGROUND_POS_VERTEX_ATTRIBUTE }];
-const BACKGROUND_PATTERN_TEXTURES: &[Texture] = &[Texture::new(0, ID_BACKGROUND_IMAGE_TEXTURE)];
-
-static BACKGROUND: Source =
-    Source { wgsl: &BACKGROUND_SHADER, attributes: BACKGROUND_ATTRIBUTES, instance_attributes: &[], textures: &[] };
-
-static BACKGROUND_PATTERN: Source = Source {
-    wgsl: &BACKGROUND_PATTERN_SHADER,
-    attributes: BACKGROUND_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: BACKGROUND_PATTERN_TEXTURES,
-};
-
-/// The source of each of the type's programs.
-pub(super) static SOURCES: &[(&Program, &Source)] =
-    &[(&programs::BACKGROUND, &BACKGROUND), (&programs::BACKGROUND_PATTERN, &BACKGROUND_PATTERN)];
-
-const BACKGROUND_PATTERN_SHADER: Wgsl = Wgsl {
+pub(super) const BACKGROUND_PATTERN_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 struct VertexInput {
-    @location(3) position: vec2<i32>,
+    @location(0) position: vec2<i32>,
 };
 
 struct VertexOutput {
@@ -163,11 +142,11 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-const BACKGROUND_SHADER: Wgsl = Wgsl {
+pub(super) const BACKGROUND_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 struct VertexInput {
-    @location(3) position: vec2<i32>,
+    @location(0) position: vec2<i32>,
 };
 
 struct VertexOutput {

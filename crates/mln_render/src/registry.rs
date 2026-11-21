@@ -3,7 +3,6 @@
 
 use std::sync::Arc;
 
-use mln_gfx::shaders::source::ShaderSources;
 use mln_style::StyleRegistry;
 use mln_style::expression::Functions;
 use mln_style::expression::functions::RegisterError;
@@ -29,7 +28,6 @@ use crate::source::SourceType;
 pub struct RegistryBuilder {
     functions: Functions,
     layer_types: VecMap<&'static str, &'static dyn ErasedLayerType>,
-    shader_sources: ShaderSources,
     source_types: VecMap<&'static str, &'static dyn ErasedSourceType>,
 }
 
@@ -38,7 +36,6 @@ impl std::fmt::Debug for RegistryBuilder {
         f.debug_struct("RegistryBuilder")
             .field("functions", &self.functions)
             .field("layer_types", &self.layer_types.keys().collect::<Vec<_>>())
-            .field("shader_sources", &self.shader_sources)
             .field("source_types", &self.source_types.keys().collect::<Vec<_>>())
             .finish()
     }
@@ -56,9 +53,7 @@ impl RegistryBuilder {
         &mut self.functions
     }
 
-    /// Adds the layer type `T`, with the sources of its programs
-    /// ([`LayerType::add_shader_sources`]). Fails for a name that an earlier
-    /// type took, and for a second type whose layers place
+    /// Adds the layer type `T`. Fails for a name that an earlier type took, and for a second type whose layers place
     /// ([`LayerType::PLACEMENT`]). A type whose [`View`](LayerType::View) is
     /// of another kind of source than its style half's doesn't compile.
     pub fn add_layer_type<T: LayerType>(&mut self) -> Result<(), RegisterError> {
@@ -76,7 +71,6 @@ impl RegistryBuilder {
             return Err(RegisterError::RoleTaken(name.to_owned()));
         }
         self.layer_types.insert(name, entry::<T>());
-        T::add_shader_sources(&mut self.shader_sources);
         Ok(())
     }
 
@@ -92,7 +86,7 @@ impl RegistryBuilder {
 
     #[must_use]
     pub fn build(self) -> Arc<Registry> {
-        Registry::new(Arc::new(self.functions), self.layer_types, self.shader_sources, self.source_types)
+        Registry::new(Arc::new(self.functions), self.layer_types, self.source_types)
     }
 }
 
@@ -114,7 +108,6 @@ fn style_source_half(source_type: &'static dyn ErasedSourceType) -> &'static dyn
 pub struct Registry {
     style: Arc<StyleRegistry>,
     layer_types: VecMap<&'static str, &'static dyn ErasedLayerType>,
-    shader_sources: ShaderSources,
     source_types: VecMap<&'static str, &'static dyn ErasedSourceType>,
 }
 
@@ -148,13 +141,12 @@ impl Registry {
     fn new(
         functions: Arc<Functions>,
         layer_types: VecMap<&'static str, &'static dyn ErasedLayerType>,
-        shader_sources: ShaderSources,
         source_types: VecMap<&'static str, &'static dyn ErasedSourceType>,
     ) -> Arc<Registry> {
         let style_halves = layer_types.values().map(|&layer_type| style_half(layer_type));
         let style_source_halves = source_types.values().map(|&source_type| style_source_half(source_type));
         let style = StyleRegistry::new(functions, style_halves, style_source_halves);
-        Arc::new(Registry { style: Arc::new(style), layer_types, shader_sources, source_types })
+        Arc::new(Registry { style: Arc::new(style), layer_types, source_types })
     }
 
     #[must_use]
@@ -165,13 +157,6 @@ impl Registry {
     #[must_use]
     pub fn functions(&self) -> &Arc<Functions> {
         self.style.functions()
-    }
-
-    /// The sources of the programs of the layer types, which a renderer's
-    /// backend compiles them from.
-    #[must_use]
-    pub fn shader_sources(&self) -> &ShaderSources {
-        &self.shader_sources
     }
 
     pub(crate) fn layer_type(&self, name: &str) -> Option<&'static dyn ErasedLayerType> {

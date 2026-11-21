@@ -1,41 +1,13 @@
 //! The programs of the `hillshade` layer type in WGSL, for `mln_webgpu`.
 
-use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::source::wgsl::{Attribute, Source, Texture, Wgsl};
+use mln_gfx::shaders::source::wgsl::Wgsl;
 
-use super::programs;
-use super::programs::{
-    ID_HILLSHADE_IMAGE_TEXTURE, ID_HILLSHADE_POS_VERTEX_ATTRIBUTE, ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE,
-};
-
-const HILLSHADE_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(5, ID_HILLSHADE_POS_VERTEX_ATTRIBUTE),
-    Attribute::new(6, ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE),
-];
-const HILLSHADE_TEXTURES: &[Texture] = &[Texture::new(0, ID_HILLSHADE_IMAGE_TEXTURE)];
-static HILLSHADE: Source = Source {
-    wgsl: &HILLSHADE_SHADER,
-    attributes: HILLSHADE_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: HILLSHADE_TEXTURES,
-};
-static HILLSHADE_PREPARE: Source = Source {
-    wgsl: &HILLSHADE_PREPARE_SHADER,
-    attributes: HILLSHADE_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: HILLSHADE_TEXTURES,
-};
-
-/// The source of each of the type's programs.
-pub(super) static SOURCES: &[(&Program, &Source)] =
-    &[(&programs::HILLSHADE, &HILLSHADE), (&programs::HILLSHADE_PREPARE, &HILLSHADE_PREPARE)];
-
-const HILLSHADE_PREPARE_SHADER: Wgsl = Wgsl {
+pub(super) const HILLSHADE_PREPARE_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 struct VertexInput {
-    @location(5) position: vec2<i32>,
-    @location(6) texcoord: vec2<i32>,
+    @location(0) position: vec2<i32>,
+    @location(1) texcoord: vec2<i32>,
 };
 
 struct VertexOutput {
@@ -139,12 +111,12 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-const HILLSHADE_SHADER: Wgsl = Wgsl {
+pub(super) const HILLSHADE_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 struct VertexInput {
-    @location(5) position: vec2<i32>,
-    @location(6) texcoord: vec2<i32>,
+    @location(0) position: vec2<i32>,
+    @location(1) texcoord: vec2<i32>,
 };
 
 struct VertexOutput {

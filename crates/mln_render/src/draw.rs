@@ -9,9 +9,9 @@
 //! engine moves into those stores when it uploads the bucket
 //! ([`BucketGeometry`]), is read with [`bucket_vertices`],
 //! [`bucket_indexes`] and [`paint_vertices`]. A draw names its program's
-//! shader by the key the context gives ([`Context::shader_key`]); the layer
-//! type adds its programs' sources to the registry
-//! ([`LayerType::add_shader_sources`](crate::layer::LayerType::add_shader_sources)).
+//! shader by the key the context gives ([`Context::shader_key`]) for one of
+//! the type's programs, each a `static`
+//! [`Program`](mln_gfx::shaders::program::Program) that carries its sources.
 //!
 //! Each frame, [`LayerType::make_draws`](crate::layer::LayerType::make_draws)
 //! makes the layer's draws of the frame from its

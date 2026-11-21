@@ -10,11 +10,12 @@
 //! - [`source`]: a source type's render half and the data origin of its
 //!   tiles.
 //! - [`RegistryBuilder`]: where both register, with the expression
-//!   functions (`mln_style::expression::functions`) and the layer types'
-//!   shader sources (`mln_gfx::shaders::source`).
+//!   functions (`mln_style::expression::functions`).
 //!
 //! The GPU backend that a renderer draws through is `mln_gfx::gpu`'s
-//! `Gpu`.
+//! `Gpu`. A layer type draws with programs it declares
+//! (`mln_gfx::shaders::program`), and the engine with its own
+//! ([`PROGRAMS`]).
 //!
 //! Not a contract yet, and hidden from the documentation: the symbol type's
 //! placement goes through the `placement` module, `LayerType::PLACEMENT`,
@@ -65,6 +66,7 @@ mod render_target;
 mod render_tile;
 mod renderer;
 mod renderer_event;
+mod shaders;
 mod sky_pass;
 pub mod source;
 pub mod source_state;
@@ -87,6 +89,7 @@ pub use renderer::{DrawnFrame, Renderer, UpdatedFrame};
 pub use renderer_event::{
     FontStack, GlyphRange, OverscaledTileID, RenderMode, RendererEvent, RendererEvents, RenderingStats, TileOperation,
 };
+pub use shaders::programs::PROGRAMS;
 pub use update_parameters::UpdateParameters;
 
 /// The crates that the expansion of [`paint_property_binders!`] names, so
