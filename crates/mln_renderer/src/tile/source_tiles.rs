@@ -282,8 +282,8 @@ impl RenderablesContext for CoverContext<'_, '_, '_> {
         if !found && parameters.view.is_globe() {
             found = self.source.cache_pop_any_wrap(id, self.ctx);
         }
-        // A tile cached before the pixel ratio changed lays out again as
-        // it is retained.
+        // A tile cached before the pixel ratio changed, or laid out without
+        // the terrain it needs, lays out again as it is retained.
         if found {
             return Some(*id);
         }
@@ -342,11 +342,14 @@ impl RenderablesContext for CoverContext<'_, '_, '_> {
                 tile.set_update_parameters(update_parameters);
                 tile.set_necessity(necessity);
             }
-            // A new pixel ratio lays the tile out again, without the
-            // relayout that drops the cached tiles.
-            let pixel_ratio_changed =
-                tile.tile().pipeline.layout().is_some_and(|layout| layout.params.pixel_ratio != parameters.pixel_ratio);
-            if needs_relayout || pixel_ratio_changed {
+            // A new pixel ratio lays the tile out again, as does terrain
+            // that a tile laid out without needs, without the relayout that
+            // drops the cached tiles.
+            let outdated = tile.tile().pipeline.layout().is_some_and(|layout| {
+                layout.params.pixel_ratio != parameters.pixel_ratio
+                    || (parameters.layout_terrain && !layout.params.terrain)
+            });
+            if needs_relayout || outdated {
                 tile.set_style(
                     style,
                     parameters.pixel_ratio,

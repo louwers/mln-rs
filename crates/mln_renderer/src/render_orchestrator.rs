@@ -141,9 +141,6 @@ pub(crate) struct RenderOrchestrator {
     events: Vec<RendererEvent>,
 
     zoom_history: ZoomHistory,
-    /// Whether the tiles lay out for a style with terrain
-    /// (`TileParameters::layout_terrain`).
-    layout_terrain: bool,
     /// The still image request the last update was for.
     still_image_request_id: u64,
     view: View,
@@ -234,7 +231,6 @@ impl RenderOrchestrator {
             registry,
             events: Vec::new(),
             zoom_history: ZoomHistory::default(),
-            layout_terrain: false,
             still_image_request_id: 0,
             view: View::default(),
             tile_store,
@@ -340,8 +336,7 @@ impl RenderOrchestrator {
 
         let render_layers_remade = self.apply_layer_changes(&layer_changes, &layers, &clock);
         let drapes = style.get_terrain().is_some();
-        let mut relayouts = self.evaluate_layers(&layer_changes, render_layers_remade, drapes, &mut clock);
-        self.lay_out_for_terrain(drapes, &mut relayouts);
+        let constants_mask_changed = self.evaluate_layers(&layer_changes, render_layers_remade, drapes, &mut clock);
         self.apply_source_diff(&source_diff, update_parameters);
 
         // A still image fails at the first resource error, and nothing
@@ -361,8 +356,14 @@ impl RenderOrchestrator {
         let (store, render_sources) = (&self.tile_store, &self.render_sources);
         let dem = |id: &str| store.source(render_sources.get(id)?.tiles()?);
         frame.terrain = self.terrain.update(update_parameters, dem).is_some();
-        let will_render =
-            self.update_sources(update_parameters, &layers, &layer_changes, &relayouts, &clock, &mut frame);
+        let will_render = self.update_sources(
+            update_parameters,
+            &layers,
+            &layer_changes,
+            &constants_mask_changed,
+            &clock,
+            &mut frame,
+        );
         let (store, render_sources) = (&self.tile_store, &self.render_sources);
         let dem = |id: &str| store.source(render_sources.get(id)?.tiles()?);
         let grounded = self.terrain.bind(dem, update_parameters, &mut self.events);
@@ -836,21 +837,6 @@ impl RenderOrchestrator {
         }
     }
 
-    /// Notes whether the tiles lay out for a style with terrain
-    /// (`TileParameters::layout_terrain`): `terrain`. Fill extrusions lay out
-    /// their polygons' centroids only then, so when terrain comes their
-    /// layers join `relayouts`, the layers whose tiles lay out again. Without
-    /// terrain the centroids are idle, and the tiles keep them.
-    fn lay_out_for_terrain(&mut self, terrain: bool, relayouts: &mut VecSet<String>) {
-        let came = terrain && !self.layout_terrain;
-        self.layout_terrain = terrain;
-        if came {
-            for layer in self.layers.iter().filter(|layer| layer.base().style.info() == FillExtrusion::INFO) {
-                relayouts.insert(layer.id().to_owned());
-            }
-        }
-    }
-
     /// Chooses the layers the frame draws, into `frame`, and updates each
     /// source's tiles for the layers it has: whether it needs tiles at all,
     /// and whether they lay out again. Returns whether each layer draws.
@@ -859,7 +845,7 @@ impl RenderOrchestrator {
         update_parameters: &UpdateParameters,
         layers: &LayerList,
         layer_changes: &LayerChanges,
-        relayouts: &VecSet<String>,
+        constants_mask_changed: &VecSet<String>,
         clock: &FrameClock,
         frame: &mut Frame,
     ) -> Vec<bool> {
@@ -878,7 +864,7 @@ impl RenderOrchestrator {
             tile_lod_zoom_shift: update_parameters.tile_lod_zoom_shift,
             tile_lod_mode: update_parameters.tile_lod_mode,
             subdivision_granularity: update_parameters.subdivision_granularity,
-            layout_terrain: self.layout_terrain,
+            layout_terrain: false,
             global_state: self.global_state.clone(),
             is_update_synchronous: false,
             font_faces: update_parameters.style.get_font_faces().cloned(),
@@ -892,6 +878,7 @@ impl RenderOrchestrator {
         }
 
         let mut will_render: Vec<bool> = vec![false; self.layers.len()];
+        let has_terrain = update_parameters.style.get_terrain().is_some();
 
         // Each source in turn takes its layers. The layers without a source
         // go with the first, and with no sources the loop runs once for
@@ -947,7 +934,7 @@ impl RenderOrchestrator {
                             }
                         };
                         source_needs_relayout = source_needs_relayout
-                            || relayouts.contains(&layer_id)
+                            || constants_mask_changed.contains(&layer_id)
                             || layer_changes.get(&layer_id).is_some_and(LayerChange::relayouts)
                             || global_state_requires_relayout;
                         if layer_is_visible {
@@ -997,6 +984,10 @@ impl RenderOrchestrator {
             if let Some(style_source) = &style_source {
                 tile_parameters.is_update_synchronous = style_source.data().is_update_synchronous();
                 let filtered_layers = std::mem::take(&mut self.filtered_layers_for_source);
+                // Fill extrusions lay out their polygons' centroids, which
+                // they stand on, only for a style with terrain.
+                tile_parameters.layout_terrain =
+                    has_terrain && filtered_layers.iter().any(|layer| layer.style().info() == FillExtrusion::INFO);
                 if let Some(source) = self.render_sources.get_mut(style_source.id()) {
                     source.update(
                         &mut self.tile_store,
