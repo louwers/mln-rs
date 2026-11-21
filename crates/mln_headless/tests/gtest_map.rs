@@ -4756,6 +4756,34 @@ fn image_readded_before_relayout() {
     assert!(same_color(pixel, BLUE), "{pixel:?}");
 }
 
+/// A background pattern shows its image's new pixels once the style
+/// replaces the image, at the same size too, and nothing once it removes it.
+#[test]
+fn a_background_pattern_follows_its_image() {
+    let test = MapTest::with_mode(1.0, MapMode::Continuous);
+    test.load_json(
+        r#"{
+      "version": 8,
+      "sources": {},
+      "layers": [{"id": "background", "type": "background", "paint": {"background-pattern": "icon"}}]
+    }"#,
+    );
+    test.map().edit_style(|style| style.apply(Edit::AddImage(solid_icon(Size::new(8, 8), RED)))).unwrap();
+    render_until_idle(&test);
+    let pixel = center_pixel_of(&test);
+    assert!(same_color(pixel, RED), "{pixel:?}");
+
+    test.map().edit_style(|style| style.apply(Edit::AddImage(solid_icon(Size::new(8, 8), BLUE)))).unwrap();
+    render_until_idle(&test);
+    let pixel = center_pixel_of(&test);
+    assert!(same_color(pixel, BLUE), "{pixel:?}");
+
+    test.map().edit_style(|style| style.apply(Edit::RemoveImage("icon".to_owned()))).unwrap();
+    render_until_idle(&test);
+    let pixel = center_pixel_of(&test);
+    assert!(same_color(pixel, [0, 0, 0, 0]), "{pixel:?}");
+}
+
 // gtest: Map.FallbackFontFacesCoverEveryFontStack
 #[test]
 fn fallback_font_faces_cover_every_font_stack() {
