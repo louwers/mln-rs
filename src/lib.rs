@@ -51,7 +51,7 @@ pub use mln_math;
 /// Empty except on Apple platforms.
 #[cfg(feature = "metal")]
 pub use mln_mtl;
-pub use mln_renderer;
+pub use mln_render;
 // Every runtime type is at the root, so the root can't miss one that a
 // root type's methods take or return.
 #[cfg(feature = "runtime")]

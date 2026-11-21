@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use mln_image::decoder;
-use mln_renderer::source::{SourceImage, SourceType, Supply};
+use mln_render::source::{SourceImage, SourceType, Supply};
 use mln_storage::{Data, Resource};
 use mln_style::Edit;
 use mln_style::conversion::{Convertible, Error, convert};

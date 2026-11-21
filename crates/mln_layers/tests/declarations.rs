@@ -1,10 +1,10 @@
 //! A layer type declared outside the engine crates: its properties through
 //! `mln_style::properties!` and a property table, and the binders of its
-//! data-driven paint properties through `mln_renderer::paint_property_binders!`.
+//! data-driven paint properties through `mln_render::paint_property_binders!`.
 //! The declarations name only what they import, so the macros' expansions
 //! need nothing else of this crate.
 
-use mln_renderer::layer::{CrossFadedPaintPropertyBinder, PaintPropertyBinder};
+use mln_render::layer::{CrossFadedPaintPropertyBinder, PaintPropertyBinder};
 use mln_style::conversion::Convertible;
 use mln_style::evaluated::Evaluated;
 use mln_style::expression::{Functions, Image};
@@ -72,7 +72,7 @@ impl StyleLayerType for Dot {
     }
 }
 
-mln_renderer::paint_property_binders!(
+mln_render::paint_property_binders!(
     /// The binders of a `dot` layer's data-driven paint properties.
     struct DotBinders for DotPaintProperties::PossiblyEvaluated {
         dot_color: PaintPropertyBinder<Color> => [0],

@@ -5,12 +5,12 @@
 //! Each entry point takes and returns public types only, so that the
 //! stages' internals can change without changing what the benchmarks call.
 //! The engine's entry points, which lay tiles out and show them to a frame's
-//! layers, are `mln_renderer::bench`'s.
+//! layers, are `mln_render::bench`'s.
 
 use std::sync::Arc;
 
-use mln_renderer::bench::{LaidOut, PlacementFrame};
-use mln_renderer::placement::CollisionGroups;
+use mln_render::bench::{LaidOut, PlacementFrame};
+use mln_render::placement::CollisionGroups;
 use mln_style::Style;
 use mln_util::error::Error;
 use mln_util::geo::{LatLng, WrapMode};

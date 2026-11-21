@@ -14,8 +14,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_renderer::Registry;
-use mln_renderer::tile::worker_codec::{Encoded, TileWorkerHost};
+use mln_render::Registry;
+use mln_render::tile::worker_codec::{Encoded, TileWorkerHost};
 use mln_util::serialization::payload::Payload;
 use parking_lot::Mutex;
 use wasm_bindgen::prelude::*;

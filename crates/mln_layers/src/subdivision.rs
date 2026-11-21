@@ -4,8 +4,8 @@
 
 use geometry::Point;
 use glam::DVec2;
-use mln_renderer::draw::{NORTH_POLE_Y, SOUTH_POLE_Y};
-use mln_renderer::unstable::subdivide_vertex_line;
+use mln_render::draw::{NORTH_POLE_Y, SOUTH_POLE_Y};
+use mln_render::unstable::subdivide_vertex_line;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::GeometryCollection;
 use mln_util::constants::EXTENT;

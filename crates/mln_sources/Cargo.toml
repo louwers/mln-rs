@@ -27,7 +27,7 @@ mln_geojson.workspace = true
 mln_image.workspace = true
 mln_map_types.workspace = true
 mln_math.workspace = true
-mln_renderer.workspace = true
+mln_render.workspace = true
 mln_runtime = { workspace = true, optional = true }
 mln_storage.workspace = true
 mln_style.workspace = true
@@ -43,7 +43,7 @@ thiserror.workspace = true
 # The built-in layer types, which lay the tests' tiles out.
 mln_layers = { package = "mln-rs-layers", path = "../mln_layers" }
 # The drivers of the tests' tiles.
-mln_renderer = { workspace = true, features = ["testing"] }
+mln_render = { workspace = true, features = ["testing"] }
 mln_storage = { workspace = true, features = ["stub-file-source"] }
 
 [lints]

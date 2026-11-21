@@ -3,7 +3,7 @@ use std::sync::Arc;
 use feature::{Feature, Identifier, PropertyMap, Value};
 use geo_types::{Geometry, LineString, Point, Polygon};
 use mln_map_types::MapMode;
-use mln_renderer::layer::{
+use mln_render::layer::{
     BucketParameters, BuildParams, EvaluatedLayer, FeatureIndexBuilder, FilterGroups, LayerType, Layout,
     LayoutParameters, Resolved, SourceLayer,
 };

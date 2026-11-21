@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use geojson::GeoJson;
 use mln_map_types::{ConstrainMode, MapMode, TransformState, ViewportMode};
-use mln_renderer::testing::{Event, OneSource, View};
+use mln_render::testing::{Event, OneSource, View};
 use mln_storage::FileSource;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style::source_type::{Load, SourceData};

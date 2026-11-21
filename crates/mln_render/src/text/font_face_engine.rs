@@ -55,7 +55,7 @@ pub fn default_engine() -> Arc<dyn FontFaceEngine> {
     struct NoEngine;
     impl FontFaceEngine for NoEngine {
         fn prepare(&self, ready: Box<dyn FnOnce(Result<(), String>) + Send>) {
-            ready(Err("this build has no font-face shaper (mln_renderer's font-face-shaper feature), \
+            ready(Err("this build has no font-face shaper (mln_render's font-face-shaper feature), \
                        and the renderer was given no engine"
                 .to_owned()));
         }

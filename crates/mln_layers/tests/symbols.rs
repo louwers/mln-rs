@@ -1,6 +1,6 @@
 //! Symbol layouts with the glyphs and images they need, behind the worker
 //! codec too, and their placement in a view, through the benchmarks' entry
-//! points (`mln_renderer::bench`, `mln_layers::bench`).
+//! points (`mln_render::bench`, `mln_layers::bench`).
 
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -8,7 +8,7 @@ use std::sync::Arc;
 use feature::{Feature, Identifier, PropertyMap, Value};
 use geo_types::{Geometry, LineString, Point};
 use mln_layers::bench::{SymbolIndex, SymbolView};
-use mln_renderer::bench::{Codec, TileLayout};
+use mln_render::bench::{Codec, TileLayout};
 use mln_rs::builtin_registry;
 use mln_style::{Edit, Style};
 use mln_style_types::image::Impl as ImageImpl;

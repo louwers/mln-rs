@@ -1,5 +1,5 @@
 // The sky conversion tests evaluate through `RenderSky`, which is in
-// mln_renderer, so they live here rather than with the style's conversion
+// mln_render, so they live here rather than with the style's conversion
 // tests.
 
 use std::sync::Arc;

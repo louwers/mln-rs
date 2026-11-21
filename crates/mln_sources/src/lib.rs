@@ -2,7 +2,7 @@
 //! raster-dem, GeoJSON and image sources, and the custom geometry and custom
 //! vector sources, whose data the host gives. Each type's module holds its
 //! style half (`mln_style`'s `StyleSourceType`), its render half and data
-//! origin (the [source type contract](mln_renderer::source)), and the edits
+//! origin (the [source type contract](mln_render::source)), and the edits
 //! and handles its sources take. They register through
 //! [`register_source_types`].
 //!
@@ -27,7 +27,7 @@ pub use geojson::{GeoJSONData, GeoJSONOptions, GeoJsonSourceType, geojson_source
 #[cfg(feature = "runtime")]
 pub use image::ImageSourceCommands;
 pub use image::{ImageSourceType, image_source};
-use mln_renderer::{RegisterError, RegistryBuilder};
+use mln_render::{RegisterError, RegistryBuilder};
 pub use tileset::{
     RasterDemSourceType, RasterSourceType, TilesetSourceType, VectorSourceType, raster_dem_source, raster_source,
     vector_source,

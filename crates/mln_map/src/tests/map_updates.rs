@@ -5,8 +5,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use feature::Value;
-use mln_renderer::RendererEvent;
-use mln_renderer::update_slot::Update;
+use mln_render::RendererEvent;
+use mln_render::update_slot::Update;
 use mln_rs::mln_sources::GeoJsonSourceType;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{Kind, Response};

@@ -4,7 +4,7 @@
 
 use std::sync::{Arc, LazyLock};
 
-use mln_renderer::{RegisterError, Registry, RegistryBuilder};
+use mln_render::{RegisterError, Registry, RegistryBuilder};
 #[cfg(feature = "runtime")]
 use mln_runtime::{Runtime, RuntimeOptions};
 use mln_style::expression::functions::register_builtin_functions;

@@ -3,7 +3,7 @@
 
 use glam::Vec2;
 use mln_map_types::{ProjectionData, TileProjector, View};
-use mln_renderer::draw::tile_unit_translation;
+use mln_render::draw::tile_unit_translation;
 use mln_style_types::{
     AlignmentType, IconTextFitType, SymbolPlacementType, SymbolZOrderType, TextRotationAlignmentType,
 };

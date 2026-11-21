@@ -10,7 +10,7 @@ use mln_gfx::shaders::shader_defines::{
     ID_CIRCLE_STROKE_OPACITY_VERTEX_ATTRIBUTE, ID_CIRCLE_STROKE_WIDTH_VERTEX_ATTRIBUTE,
 };
 use mln_map_types::MapMode;
-use mln_renderer::layer::{Bucket, BucketBase, EvaluatedLayer, GeometryUpload, GeometryVec, PaintPropertyBinder};
+use mln_render::layer::{Bucket, BucketBase, EvaluatedLayer, GeometryUpload, GeometryVec, PaintPropertyBinder};
 use mln_style_types::image::ImagePositions;
 use mln_util::Color;
 use mln_vec_map::VecMap;
@@ -18,7 +18,7 @@ use mln_vec_map::VecMap;
 use super::Circle;
 use super::properties::CirclePaintProperties;
 
-mln_renderer::paint_property_binders!(
+mln_render::paint_property_binders!(
     pub(crate) struct CircleBinders for CirclePaintProperties::PossiblyEvaluated {
         circle_blur: PaintPropertyBinder<f32> => [ID_CIRCLE_BLUR_VERTEX_ATTRIBUTE],
         circle_color: PaintPropertyBinder<Color> => [ID_CIRCLE_COLOR_VERTEX_ATTRIBUTE],
@@ -118,7 +118,7 @@ impl Bucket for CircleBucket {
 
     fn update(
         &mut self,
-        states: &mln_renderer::layer::FeatureStates,
+        states: &mln_render::layer::FeatureStates,
         layer: &mln_tile::TileLayer<'_>,
         layer_id: &str,
         image_positions: &ImagePositions,

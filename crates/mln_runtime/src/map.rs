@@ -8,8 +8,8 @@ use mln_map::{
     LogicalExtent, MapDebugOptions, MapEvent, MapMode, MapSnapshot, ProjectionMode, StyleLoadError, TransitionEnd,
     TransitionOutcome,
 };
-use mln_renderer::text::font_face_engine::FontFaceEngine;
-use mln_renderer::{Registry, UpdateReader};
+use mln_render::text::font_face_engine::FontFaceEngine;
+use mln_render::{Registry, UpdateReader};
 use mln_style::Edit;
 use mln_style::layer::Layer;
 use mln_text::GlyphCache;

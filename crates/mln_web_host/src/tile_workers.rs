@@ -1,4 +1,4 @@
-//! The map side of tile workers in other Web Workers: `mln_renderer`'s
+//! The map side of tile workers in other Web Workers: `mln_render`'s
 //! `WorkerInstances` over a `MessagePort` to each, whose other end a Web
 //! Worker serves with [`tile_worker::serve`](crate::tile_worker::serve).
 //!
@@ -12,8 +12,8 @@
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_renderer::Registry;
-use mln_renderer::tile::worker_codec::{Encoded, RemoteWorkers, ReplySink, WorkerInstances};
+use mln_render::Registry;
+use mln_render::tile::worker_codec::{Encoded, RemoteWorkers, ReplySink, WorkerInstances};
 use mln_util::host_bytes::HostBytes;
 use mln_util::serialization::payload::Payload;
 use wasm_bindgen::prelude::*;

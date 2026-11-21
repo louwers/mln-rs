@@ -33,7 +33,7 @@ mln_image.workspace = true
 mln_map.workspace = true
 mln_map_types.workspace = true
 mln_math.workspace = true
-mln_renderer.workspace = true
+mln_render.workspace = true
 # The built-in registrations, with the style's font faces shaped in-process.
 mln_rs = { workspace = true, features = ["font-face-shaper"] }
 # The ambient cache (cache_path) and mbtiles:// sources, as in C++.

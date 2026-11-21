@@ -14,8 +14,8 @@ use std::sync::{Arc, Weak};
 
 use mln_gfx::{ConsumerSync, GpuSync, Handoff, SyncKind};
 use mln_map::RenderMode;
-use mln_renderer::text::font_face_engine::FontFaceEngine;
-use mln_renderer::{Registry, Renderer, RendererEvent, RendererEvents, Update, UpdateReader};
+use mln_render::text::font_face_engine::FontFaceEngine;
+use mln_render::{Registry, Renderer, RendererEvent, RendererEvents, Update, UpdateReader};
 use mln_text::GlyphCache;
 use mln_text::local_glyph_rasterizer::LocalGlyphs;
 use mln_util::error::Error;

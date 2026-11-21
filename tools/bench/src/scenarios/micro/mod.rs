@@ -15,7 +15,7 @@ pub(crate) mod worker_codec;
 
 use std::sync::Arc;
 
-use mln_renderer::bench::{LaidOut, TileLayout};
+use mln_render::bench::{LaidOut, TileLayout};
 use mln_style::{Edit, Style, StyleRegistry};
 use mln_tile::{MltTile, MvtTile, TileData};
 

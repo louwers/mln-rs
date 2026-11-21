@@ -12,7 +12,7 @@ use mln_gfx::shaders::shader_defines::{
     ID_SYMBOL_COLOR_ATTRIBUTE, ID_SYMBOL_HALO_BLUR_ATTRIBUTE, ID_SYMBOL_HALO_COLOR_ATTRIBUTE,
     ID_SYMBOL_HALO_WIDTH_ATTRIBUTE, ID_SYMBOL_OPACITY_ATTRIBUTE,
 };
-use mln_renderer::layer::{
+use mln_render::layer::{
     Bucket, BucketBase, EvaluatedLayer, FeatureStates, GeometryUpload, GeometryVec, PaintPropertyBinder,
 };
 use mln_style::expression::EvaluationContext;
@@ -33,7 +33,7 @@ use crate::symbol::pool::PoolRange;
 use crate::symbol::quads::SymbolQuad;
 use crate::symbol::{Symbol, SymbolLayoutProperties, SymbolPaintProperties};
 
-mln_renderer::paint_property_binders!(
+mln_render::paint_property_binders!(
     pub(crate) struct SymbolIconBinders for SymbolPaintProperties::PossiblyEvaluated {
         icon_opacity: PaintPropertyBinder<f32> => [ID_SYMBOL_OPACITY_ATTRIBUTE],
         icon_color: PaintPropertyBinder<Color> => [ID_SYMBOL_COLOR_ATTRIBUTE],
@@ -43,7 +43,7 @@ mln_renderer::paint_property_binders!(
     }
 );
 
-mln_renderer::paint_property_binders!(
+mln_render::paint_property_binders!(
     pub(crate) struct SymbolTextBinders for SymbolPaintProperties::PossiblyEvaluated {
         text_opacity: PaintPropertyBinder<f32> => [ID_SYMBOL_OPACITY_ATTRIBUTE],
         text_color: PaintPropertyBinder<Color> => [ID_SYMBOL_COLOR_ATTRIBUTE],

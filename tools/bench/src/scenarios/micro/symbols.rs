@@ -11,7 +11,7 @@
 //! entry points (`mln_layers::bench`).
 
 use mln_layers::bench::{SymbolIndex, SymbolView};
-use mln_renderer::bench::LaidOut;
+use mln_render::bench::LaidOut;
 use mln_style::Style;
 
 use super::{DENSE, SPARSE, StreetLayout, StreetTile, loaded_liberty};

@@ -2,7 +2,7 @@
 //! test/style/conversion/*.test.cpp, test/tile/custom_*_tile.test.cpp), one
 //! module per C++ file, and the port's own. They register this crate's
 //! source types: the facade's registry would hold another copy of them.
-//! Their tiles run through `mln_renderer::testing`.
+//! Their tiles run through `mln_render::testing`.
 
 mod conversion_geojson_options;
 mod conversion_source_options;
@@ -15,8 +15,8 @@ mod tileset_tile;
 
 use std::sync::Arc;
 
-use mln_renderer::testing::{Event, OriginTiles};
-use mln_renderer::{Registry, RegistryBuilder};
+use mln_render::testing::{Event, OriginTiles};
+use mln_render::{Registry, RegistryBuilder};
 use mln_style::StyleRegistry;
 use mln_util::pool::{Pool, TaskGroup};
 

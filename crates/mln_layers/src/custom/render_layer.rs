@@ -16,8 +16,8 @@
 use std::sync::Arc;
 
 use mln_gfx::gpu::Gpu;
-use mln_renderer::draw::{Context, DrawGroup, DrawOrder, LayerDrawing, PaintParameters, TileMap};
-use mln_renderer::layer::{
+use mln_render::draw::{Context, DrawGroup, DrawOrder, LayerDrawing, PaintParameters, TileMap};
+use mln_render::layer::{
     DrawContext, EndedHost, EvaluatedLayer, LayerHost, LayerType, LayerValues, NoBucket, NoLayout, NoTileView,
     OffscreenPass, RenderPass,
 };

@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use mln_renderer::bench::TileLayout;
+use mln_render::bench::TileLayout;
 use mln_rs::builtin_registry;
 use mln_style::{Edit, Style};
 use mln_style_types::image::Impl as ImageImpl;

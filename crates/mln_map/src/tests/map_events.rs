@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use mln_renderer::RendererEvent;
+use mln_render::RendererEvent;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{Kind, Response};
 use mln_style::Edit;
@@ -166,7 +166,7 @@ fn a_frame_waiting_for_a_placement_asks_for_no_update_until_then() {
     map.process_events();
     map.drain_events();
     let frame = |repaint_at| RendererEvent::RenderFrameFinished {
-        mode: mln_renderer::RenderMode::Full,
+        mode: mln_render::RenderMode::Full,
         needs_repaint: false,
         repaint_at,
         placement_changed: false,
@@ -217,7 +217,7 @@ fn a_frame_report_adds_no_update_while_the_frame_clock_samples_an_animation() {
         ..Default::default()
     });
     let frame = || RendererEvent::RenderFrameFinished {
-        mode: mln_renderer::RenderMode::Full,
+        mode: mln_render::RenderMode::Full,
         needs_repaint: false,
         repaint_at: None,
         placement_changed: false,
@@ -343,10 +343,10 @@ fn a_still_image_completes_with_a_full_frame() {
         still_image_request_id,
         stats: Arc::clone(&stats),
     };
-    report(&map, frame(mln_renderer::RenderMode::Partial, 1));
+    report(&map, frame(mln_render::RenderMode::Partial, 1));
     map.process_events();
     assert_eq!(map.take_still_image(), None);
-    report(&map, frame(mln_renderer::RenderMode::Full, 1));
+    report(&map, frame(mln_render::RenderMode::Full, 1));
     map.process_events();
     assert_eq!(map.take_still_image(), Some(Ok(())));
     assert_eq!(map.take_still_image(), None);
@@ -356,10 +356,10 @@ fn a_still_image_completes_with_a_full_frame() {
     // the next image, nor does a request while one is on its way.
     map.render_still().unwrap();
     assert!(map.render_still().is_err());
-    report(&map, frame(mln_renderer::RenderMode::Full, 1));
+    report(&map, frame(mln_render::RenderMode::Full, 1));
     map.process_events();
     assert_eq!(map.take_still_image(), None);
-    report(&map, frame(mln_renderer::RenderMode::Full, 2));
+    report(&map, frame(mln_render::RenderMode::Full, 2));
     map.process_events();
     assert_eq!(map.take_still_image(), Some(Ok(())));
 }

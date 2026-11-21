@@ -16,7 +16,7 @@ use mln_map::{
     AnimationOptions, BoundOptions, CameraOptions, ConstrainMode, Map, MapMode, MapOptions, MapProjection,
     NorthOrientation, ProjectionMode, RenderFrameStatus, RenderMode, TileLodMode, TileSettings, Viewport, ViewportMode,
 };
-use mln_renderer::{OverscaledTileID, TileOperation, UpdateParameters, UpdateReader};
+use mln_render::{OverscaledTileID, TileOperation, UpdateParameters, UpdateReader};
 use mln_rs::mln_layers::Symbol;
 use mln_sources::custom::geometry::{self, CustomGeometrySourceHandle, Options as CustomGeometrySourceOptions};
 use mln_sources::custom::provider::TileFunction;
@@ -2582,7 +2582,7 @@ fn keep_render_data() {
 fn disabled_placed_symbol_data() {
     use mln_rs::mln_layers::symbol::placement::PlacedSymbols as _;
 
-    fn is_inside_tile(box_: &mln_renderer::placement::Aabb, padding: f32, viewport_size: Size) -> bool {
+    fn is_inside_tile(box_: &mln_render::placement::Aabb, padding: f32, viewport_size: Size) -> bool {
         if box_.min.x - padding < 0.0 {
             return false;
         }
@@ -2889,7 +2889,7 @@ fn still_image_retries_failed_glyph_range() {
     let labels = |test: &MapTest| {
         let size = test.frontend().size();
         let center = ScreenCoordinate::new(f64::from(size.width) / 2.0, f64::from(size.height) / 2.0);
-        let options = mln_renderer::query::RenderedQueryOptions::default();
+        let options = mln_render::query::RenderedQueryOptions::default();
         test.frontend().renderer().query_rendered_features_at_point(&center, &options).unwrap().len()
     };
 

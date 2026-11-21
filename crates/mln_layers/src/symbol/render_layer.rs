@@ -26,18 +26,18 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::shaders::source::ShaderSources;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_map_types::{Projection, ProjectionData};
-use mln_renderer::draw::{
+use mln_render::draw::{
     AtlasBinding, BucketChanges, BucketGeometry, Context, DrawDepth, DrawFrame, DrawGeometry, DrawGroup, DrawList,
     DrawObjects, DrawObjectsMut, DrawOrder, FrameDraw, KeptDraw, LayerDrawing, LayerDraws, PaintParameters,
     SharedAttribute, Textures, TileMap, TypedVertices, UniformWriter, Uniforms, VertexAttributeArray, bucket_vertices,
     cast_matrix, copied_indexes, copied_vertices, copy_shared_attributes, paint_vertices, projection_data,
     tile_unit_translation, to_projection_ubo,
 };
-use mln_renderer::layer::{
+use mln_render::layer::{
     Bucket, DrawContext, EvaluatedLayer, FeatureIndex, LayerBucket, LayerType, LayerValues, LayoutParameters,
     RenderPass, SourceLayer, TileOrder, UpdateContext,
 };
-use mln_renderer::placement::{BucketKey, NewPlacement};
+use mln_render::placement::{BucketKey, NewPlacement};
 use mln_style::layer_type::{ErasedLayerStyle as _, LayerStyle};
 use mln_style::{PropertyEvaluationParameters, StyleValue as _};
 use mln_style_types::{

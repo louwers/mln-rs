@@ -21,13 +21,13 @@ use std::sync::Arc;
 
 use glam::DMat4;
 use mln_map_types::{MapDebugOptions, MapMode, ProjectionData, View};
-use mln_renderer::draw::{BucketChanges, ChangedBuckets};
-use mln_renderer::layer::{FeatureIndex, FrameTile};
-use mln_renderer::placement::{
+use mln_render::draw::{BucketChanges, ChangedBuckets};
+use mln_render::layer::{FeatureIndex, FrameTile};
+use mln_render::placement::{
     Aabb, BucketKey, CollisionGroups, IndexedFeature, Placed, PlacementBuckets, PlacementContext, PlacementPass,
     PlacementQuery, PlacingLayer, Prepared, Shape,
 };
-use mln_renderer::{Renderer, UpdateParameters};
+use mln_render::{Renderer, UpdateParameters};
 use mln_style::TransitionOptions;
 use mln_style_types::{SymbolAnchorType, TextWritingModeType, TranslateAnchorType};
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};

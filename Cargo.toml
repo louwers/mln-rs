@@ -67,8 +67,8 @@ mln_mtl = { package = "mln-rs-mtl", path = "crates/mln_mtl", version = "=0.0.13"
 # where they want them.
 mln_rs = { package = "mln-rs", path = ".", version = "=0.0.13", default-features = false }
 # Without its default feature, the in-process font-face shaper: the facade's
-# `font-face-shaper` feature turns it on (crates/mln_renderer/Cargo.toml).
-mln_renderer = { package = "mln-rs-renderer", path = "crates/mln_renderer", version = "=0.0.13", default-features = false }
+# `font-face-shaper` feature turns it on (crates/mln_render/Cargo.toml).
+mln_render = { package = "mln-rs-render", path = "crates/mln_render", version = "=0.0.13", default-features = false }
 # Without its backends (its default features) unless a package asks for
 # them, so that a browser build of mln_c carries one.
 mln_runtime = { package = "mln-rs-runtime", path = "crates/mln_runtime", version = "=0.0.13", default-features = false }
@@ -137,7 +137,7 @@ windows-sys = { version = "0.61.2", features = [
 # crates/mln_gl's window backend: loads libwayland-egl at run time.
 libloading = { version = "0.8.9" }
 memmap2 = { version = "0.9.12" }
-# Polygon triangulation (mln_renderer's fills and fill extrusions), a port of
+# Polygon triangulation (mln_render's fills and fill extrusions), a port of
 # earcut.js, the triangulation GL JS uses.
 earcut = { version = "0.4.5" }
 # MLT decoding: the Rust implementation of the MapLibre Tile spec, instead of
@@ -148,7 +148,7 @@ mlt-core = { version = "0.22.1" }
 # The even-odd union that repairs the polygons of version 1 vector tiles,
 # instead of porting wagyu. mlt-core already depends on it through geo.
 i_overlay = { version = "4.5.2", default-features = false }
-# 2D vector maths (mln_renderer's symbol layout, placement and collision).
+# 2D vector maths (mln_render's symbol layout, placement and collision).
 glam = { version = "0.34.3", default-features = false, features = [
   "std",
   "f64",
@@ -177,7 +177,7 @@ buffa = { version = "0.9.2", default-features = false }
 # its arithmetic in a different order, so a distance can differ from the C++
 # one in the last bits.
 cheap-ruler = { version = "0.4.0" }
-# Packs the glyph, icon and pattern atlases (mln_renderer).
+# Packs the glyph, icon and pattern atlases (mln_render).
 etagere = { version = "0.3.0", default-features = false }
 # PMTiles archives (mln_storage's PMTilesFileSource): their header,
 # directories and tile IDs, in place of a port of the C++ core's vendored
@@ -528,7 +528,7 @@ categories = ["graphics", "rendering::engine", "science::geo"]
 # The runtime's backends (crates/mln_runtime/Cargo.toml), each with its
 # crate and each turning on the runtime; the ambient cache, offline regions
 # and mbtiles:// sources, as in C++; and the style's font faces shaped
-# in-process (crates/mln_renderer/Cargo.toml). A browser build turns on one
+# in-process (crates/mln_render/Cargo.toml). A browser build turns on one
 # backend and leaves SQLite and the shaper out; a native runtime always has
 # SQLite. Without a backend, the crate is the built-in registrations alone,
 # which engine crates' tests use.
@@ -548,7 +548,7 @@ vulkan = ["runtime", "mln_runtime/vulkan", "dep:mln_vulkan", "mln_layers/glsl"]
 d3d12 = ["runtime", "mln_runtime/d3d12", "dep:mln_d3d12", "mln_layers/glsl"]
 gl = ["runtime", "mln_runtime/gl", "dep:mln_gl", "mln_layers/glsl-es"]
 sqlite = ["mln_storage/sqlite", "dep:mln_storage_offline"]
-font-face-shaper = ["mln_renderer/font-face-shaper"]
+font-face-shaper = ["mln_render/font-face-shaper"]
 runtime = ["dep:mln_runtime", "mln_sources/runtime"]
 
 [dependencies]
@@ -569,7 +569,7 @@ mln_map.workspace = true
 mln_map_types.workspace = true
 mln_math.workspace = true
 mln_mtl = { workspace = true, optional = true }
-mln_renderer.workspace = true
+mln_render.workspace = true
 mln_runtime = { workspace = true, optional = true }
 mln_sources.workspace = true
 mln_sprite.workspace = true

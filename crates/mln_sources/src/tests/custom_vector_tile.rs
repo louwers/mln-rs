@@ -5,8 +5,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use mln_map_types::MapMode;
-use mln_renderer::source::{TileKind, TileNecessity};
-use mln_renderer::testing::OriginTiles;
+use mln_render::source::{TileKind, TileNecessity};
+use mln_render::testing::OriginTiles;
 use mln_style::layer::Layer;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;

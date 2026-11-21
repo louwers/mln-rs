@@ -8,11 +8,11 @@ use mln_gfx::shaders::shader_defines::{
     ID_LINE_OPACITY_VERTEX_ATTRIBUTE, ID_LINE_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_LINE_PATTERN_TO_VERTEX_ATTRIBUTE,
     ID_LINE_WIDTH_VERTEX_ATTRIBUTE,
 };
-use mln_renderer::layer::{
+use mln_render::layer::{
     Bucket, BucketBase, CrossFadedPaintPropertyBinder, EvaluatedLayer, GeometryUpload, GeometryVec, Indexed,
     PaintPropertyBinder,
 };
-use mln_renderer::unstable::{LineLayoutVertex, LineOptions, add_line, subdivide_vertex_line};
+use mln_render::unstable::{LineLayoutVertex, LineOptions, add_line, subdivide_vertex_line};
 use mln_style::expression::{EvaluationContext, Image, Value};
 use mln_style_types::image::ImagePositions;
 use mln_tile_id::CanonicalTileID;
@@ -30,7 +30,7 @@ use super::properties::{LineLayoutProperties, LinePaintProperties};
 use crate::pattern_layout::{PatternBucket, PatternLayerMap};
 use crate::tessellator::Tessellator;
 
-mln_renderer::paint_property_binders!(
+mln_render::paint_property_binders!(
     pub(crate) struct LineBinders for LinePaintProperties::PossiblyEvaluated {
         line_blur: PaintPropertyBinder<f32> => [ID_LINE_BLUR_VERTEX_ATTRIBUTE],
         line_color: PaintPropertyBinder<Color> => [ID_LINE_COLOR_VERTEX_ATTRIBUTE],
@@ -224,7 +224,7 @@ impl Bucket for LineBucket {
 
     fn update(
         &mut self,
-        states: &mln_renderer::layer::FeatureStates,
+        states: &mln_render::layer::FeatureStates,
         layer: &mln_tile::TileLayer<'_>,
         layer_id: &str,
         image_positions: &ImagePositions,

@@ -51,7 +51,7 @@
 //! for a type that has none. A type can also place its layers' contents
 //! across tiles, where they collide with nothing placed before them
 //! (`LayerType::PLACEMENT`), which is unstable and hidden from these docs
-//! (`mln_renderer::placement`).
+//! (`mln_render::placement`).
 //!
 //! The types a layer type draws with, which the hooks name, are the
 //! [draw services](crate::draw). The frame's [`Atlases`] of dash and

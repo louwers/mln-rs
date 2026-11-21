@@ -7,8 +7,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use mln_map_types::MapMode;
-use mln_renderer::source::{TileKind, TileNecessity, TileOperation};
-use mln_renderer::testing::{Event, OriginTiles};
+use mln_render::source::{TileKind, TileNecessity, TileOperation};
+use mln_render::testing::{Event, OriginTiles};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;
 use parking_lot::Mutex;

@@ -5,9 +5,9 @@ use feature::{Identifier, PropertyMap, Value};
 use geometry::Point;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_map_types::MapMode;
-use mln_renderer::draw::{BucketGeometry, Context, DrawIndexes, bucket_indexes, bucket_vertices, paint_vertices};
-use mln_renderer::layer::{Bucket, EvaluatedLayer, GeometryUpload};
-use mln_renderer::unstable::LineLayoutVertex;
+use mln_render::draw::{BucketGeometry, Context, DrawIndexes, bucket_indexes, bucket_vertices, paint_vertices};
+use mln_render::layer::{Bucket, EvaluatedLayer, GeometryUpload};
+use mln_render::unstable::LineLayoutVertex;
 use mln_style::PropertyEvaluationParameters;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
 use mln_style::evaluated::Evaluated;
@@ -617,7 +617,7 @@ fn the_paint_layout_of_pulled_walls_is_the_paint_attributes() {
         ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE,
         ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE,
     };
-    use mln_renderer::draw::{SharedAttribute, VertexAttributeArray};
+    use mln_render::draw::{SharedAttribute, VertexAttributeArray};
 
     use crate::fill_extrusion::render_layer::paint_layout;
 
@@ -647,7 +647,7 @@ fn the_paint_layout_of_pulled_outlines_is_the_paint_attributes() {
     use mln_gfx::shaders::shader_defines::{
         ID_FILL_COLOR_VERTEX_ATTRIBUTE, ID_FILL_OPACITY_VERTEX_ATTRIBUTE, ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE,
     };
-    use mln_renderer::draw::{SharedAttribute, VertexAttributeArray};
+    use mln_render::draw::{SharedAttribute, VertexAttributeArray};
 
     use crate::fill::render_layer::outline_paint_layout;
 

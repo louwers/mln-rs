@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use feature::{Feature, Identifier, PropertyMap, Value};
 use geo_types::{Geometry, LineString, Point, Polygon};
-use mln_renderer::bench::{Codec, TileLayout};
+use mln_render::bench::{Codec, TileLayout};
 use mln_rs::builtin_registry;
 use mln_style::layer_type::SourceKind;
 use mln_style::{Edit, Style};

@@ -14,13 +14,13 @@ use mln_gfx::shaders::shader_defines::{
 };
 use mln_gfx::shaders::source::ShaderSources;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
-use mln_renderer::draw::{
+use mln_render::draw::{
     AtlasBinding, Composite, Context, DrawDepth, DrawGeometry, DrawIndexes, DrawList, DrawObjects, DrawObjectsMut,
     FrameDraw, Indexes, RenderStaticData, SharedAttribute, SharedIndexes, Texture2D, TileDraws, TileObjects,
     UniformWriter, Uniforms, VertexAttributeArray, bucket_indexes, bucket_vertices, cast_matrix, copied_vertices,
     copy_shared_attributes, paint_vertices, projection_data, to_projection_ubo,
 };
-use mln_renderer::layer::{
+use mln_render::layer::{
     Bucket, DrawContext, EvaluatedLayer, FeatureQuery, FrameTile, HitTest, LayerBucket, LayerType, LayerValues,
     LayoutParameters, RenderPass, SourceLayer,
 };

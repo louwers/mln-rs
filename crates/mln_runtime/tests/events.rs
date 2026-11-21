@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use httpmock::MockServer;
 use mln_map::MapEvent;
-use mln_renderer::RendererEvent;
+use mln_render::RendererEvent;
 use mln_runtime::{ErrorKind, EventMask, EventSource, EventType, MapOptions, RuntimeEvent, RuntimeEventKind};
 use parking_lot::Mutex;
 

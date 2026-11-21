@@ -1,5 +1,5 @@
 use geometry::Point;
-use mln_renderer::layer::TileMask;
+use mln_render::layer::TileMask;
 use mln_tile_id::CanonicalTileID;
 
 use super::with_context;

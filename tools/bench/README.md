@@ -436,7 +436,7 @@ micro scenario uses, such as the tiles they read, in `src/scenarios/micro/`.
 A micro scenario calls a stage as a function over data. Where the stage is
 internal to its library, the library has a `bench` feature, off by default, and
 behind it a module `bench` (`src/bench.rs`) that is hidden from the
-documentation: `mln_renderer::bench::TileLayout` runs a tile's layout job, for
+documentation: `mln_render::bench::TileLayout` runs a tile's layout job, for
 instance. The harness turns the feature on in its `Cargo.toml`, so builds
 without the harness leave the module out.
 

@@ -1,5 +1,5 @@
 // Ported gtests of test/tile/*.test.cpp that need the renderer's tiles or
-// mln_map's Transform (above mln_renderer), one module per C++ file. The
+// mln_map's Transform (above mln_render), one module per C++ file. The
 // other test/tile files are ported elsewhere: custom_vector_tile and the most
 // of custom_geometry_tile (mln_sources), geojson_tile (geojson_tile_test),
 // vector_tile (vector_tile_test, mln_tile), geometry_tile_data (mln_tile),
