@@ -5,7 +5,7 @@ use mln_tile_id::geometry_tile_data::GeometryCollection;
 use mln_util::constants::EXTENT;
 use mln_util::hash::HashMap;
 
-use super::line::subdivide_line;
+use super::line::{subdivide_line, vec};
 use super::{NORTH_POLE_Y, SOUTH_POLE_Y};
 
 /// A polygon's mesh, with vertices of its own.
@@ -413,8 +413,4 @@ fn scanline_triangulate_vertex_ring(vertices: &[Point<i16>], ring: &[u32], trian
             break;
         }
     }
-}
-
-fn vec(p: Point<i16>) -> DVec2 {
-    DVec2::new(f64::from(p.x), f64::from(p.y))
 }
