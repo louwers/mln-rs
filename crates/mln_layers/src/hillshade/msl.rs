@@ -167,6 +167,10 @@ const HILLSHADE_SHADER: Msl = Msl {
     fragment_main_function: r"fragmentMain",
     prelude: r#"
 
+inline float radians(float degrees) {
+    return M_PI_F * degrees / 180.0;
+}
+
 enum {
     idHillshadeDrawableUBO = idDrawableReservedVertexOnlyUBO,
     idHillshadeTilePropsUBO = idDrawableReservedFragmentOnlyUBO,

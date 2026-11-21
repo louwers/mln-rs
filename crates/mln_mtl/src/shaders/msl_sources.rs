@@ -14,20 +14,11 @@ using namespace metal;
 // "special" normals that have a bigger length (of up to 126 in this case).
 #define LINE_NORMAL_SCALE (1.0 / (127 / 2))
 
-// The attribute conveying progress along a line is scaled to [0, 2^15).
-#define MAX_LINE_DISTANCE 32767.0
-
-#define SDF_PX 8.0
-
 // OpenGL `mod` is `x-y*floor(x/y)` where `floor` rounds down.
 // Metal `fmod` is `x-y*trunc(x/y)` where `trunc` rounds toward zero.
 // This function provides GL-compatible modulus for porting GLSL shaders.
 template <typename T1, typename T2>
 inline auto glMod(T1 x, T2 y) { return x - y * metal::floor(x/y); }
-
-inline float radians(float degrees) {
-    return M_PI_F * degrees / 180.0;
-}
 
 // Unpack a pair of values that have been packed into a single float.
 // The packed values are assumed to be 8-bit unsigned integers, and are
@@ -36,19 +27,6 @@ float2 unpack_float(const float packedValue) {
     const int packedIntValue = int(packedValue);
     const int v0 = packedIntValue / 256;
     return float2(v0, packedIntValue - v0 * 256);
-}
-// The normal at the end of a fill extrusion wall from its outline vertex's
-// packed decimals_ed.x: the one the walls there share, whose angle from -pi
-// its bits 2 to 15 hold where bit 1 is set, or else `own`, the wall's.
-float2 wall_normal(const uint bits, const float2 own) {
-    if ((bits & 2u) == 0u) {
-        return own;
-    }
-    const float angle = float(bits >> 2) * (2.0 * M_PI_F / 16384.0) - M_PI_F;
-    return float2(metal::cos(angle), metal::sin(angle));
-}
-float2 unpack_opacity(const float packedOpacity) {
-    return float2(float(int(packedOpacity) / 2) / 127.0, glMod(packedOpacity, 2.0));
 }
 // To minimize the number of attributes needed, we encode a 4-component
 // color into a pair of floats (i.e. a vec2) as follows:

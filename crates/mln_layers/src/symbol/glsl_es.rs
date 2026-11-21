@@ -31,6 +31,19 @@ use super::ubo::{
     CollisionDrawableUBO, CollisionTilePropsUBO, SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO,
 };
 
+/// `unpack_opacity`, a symbol's fade opacity and whether it fades in, from
+/// the packed value of its vertex.
+macro_rules! unpack_opacity {
+    () => {
+        r"
+vec2 unpack_opacity(const float packedOpacity) {
+    int intOpacity = int(packedOpacity) / 2;
+    return vec2(float(intOpacity) / 127.0, mod(packedOpacity, 2.0));
+}
+"
+    };
+}
+
 // Collision Box
 static COLLISION_BOX: Source = Source {
     glsl: &COLLISION_BOX_SHADER,
@@ -366,7 +379,9 @@ void main() {
 };
 
 const SYMBOL_ICON_SHADER: Glsl = Glsl {
-    vertex: r"layout (location = 0) in vec4 a_pos_offset;
+    vertex: concat!(
+        unpack_opacity!(),
+        r"layout (location = 0) in vec4 a_pos_offset;
 layout (location = 1) in vec4 a_data;
 layout (location = 2) in vec4 a_pixeloffset;
 layout (location = 3) in vec3 a_projected_pos;
@@ -555,7 +570,8 @@ void main() {
     v_tex = (a_tex - a_tex_origin) / u_texsize;
     v_tex_origin = a_tex_origin / u_texsize;
 }
-",
+"
+    ),
     fragment: r"uniform sampler2D u_texture;
 
 layout (std140) uniform SymbolEvaluatedPropsUBO {
@@ -600,7 +616,9 @@ void main() {
 };
 
 const SYMBOL_SDF_SHADER: Glsl = Glsl {
-    vertex: r"#define SDF_PX 8.0
+    vertex: concat!(
+        unpack_opacity!(),
+        r"#define SDF_PX 8.0
 
 layout (location = 0) in vec4 a_pos_offset;
 layout (location = 1) in vec4 a_data;
@@ -853,7 +871,8 @@ lowp float halo_blur = u_halo_blur;
     v_tex_origin = a_tex_origin / u_texsize;
     v_data1 = vec3(gamma_scaled, halo_edge, interpolated_fade_opacity);
 }
-",
+"
+    ),
     fragment: r"#define SDF_PX 8.0
 
 layout (std140) uniform SymbolEvaluatedPropsUBO {
@@ -938,7 +957,9 @@ highp vec4 halo_color = u_halo_color;
 };
 
 const SYMBOL_TEXT_AND_ICON_SHADER: Glsl = Glsl {
-    vertex: r"#define SDF_PX 8.0
+    vertex: concat!(
+        unpack_opacity!(),
+        r"#define SDF_PX 8.0
 #define ICON 0.0
 
 layout (location = 0) in vec4 a_pos_offset;
@@ -1195,7 +1216,8 @@ lowp float halo_blur = u_halo_blur;
     v_data1 = vec3(gamma_scaled, halo_edge, interpolated_fade_opacity);
     v_is_icon = int(is_icon);
 }
-",
+"
+    ),
     fragment: r"#define SDF_PX 8.0
 
 layout (std140) uniform SymbolEvaluatedPropsUBO {

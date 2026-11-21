@@ -33,9 +33,6 @@ pub(crate) const PRELUDE_VERTEX: &str = r#"
 // "special" normals that have a bigger length (of up to 126 in this case).
 #define LINE_NORMAL_SCALE (1.0 / (127 / 2))
 
-// The attribute conveying progress along a line is scaled to [0, 2^15).
-#define MAX_LINE_DISTANCE 32767.0
-
 // Unpack a pair of values that have been packed into a single float.
 // The packed values are assumed to be 8-bit unsigned integers, and are
 // packed like so:
@@ -44,22 +41,6 @@ vec2 unpack_float(const float packedValue) {
     int packedIntValue = int(packedValue);
     int v0 = packedIntValue / 256;
     return vec2(v0, packedIntValue - v0 * 256);
-}
-
-// The normal at the end of a fill extrusion wall from its outline vertex's
-// packed decimals_ed.x: the one the walls there share, whose angle from -pi
-// its bits 2 to 15 hold where bit 1 is set, or else `own`, the wall's.
-vec2 wall_normal(const uint bits, const vec2 own) {
-    if ((bits & 2u) == 0u) {
-        return own;
-    }
-    const float angle = float(bits >> 2u) * (6.283185307179586 / 16384.0) - 3.141592653589793;
-    return vec2(cos(angle), sin(angle));
-}
-
-vec2 unpack_opacity(const float packedOpacity) {
-    int intOpacity = int(packedOpacity) / 2;
-    return vec2(float(intOpacity) / 127.0, mod(packedOpacity, 2.0));
 }
 
 // To minimize the number of attributes needed, we encode a 4-component

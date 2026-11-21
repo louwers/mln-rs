@@ -16,6 +16,23 @@ use mln_gfx::shaders::source::glsl_es::{Attribute, Glsl, Source, Texture, Unifor
 use super::programs;
 use super::ubo::{FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO};
 
+/// `wall_normal`, the normal at a wall's end from its outline vertex's
+/// `decimals_ed.x`: the one the walls there share, or else `own`, the
+/// wall's own.
+macro_rules! wall_normal {
+    () => {
+        r"
+vec2 wall_normal(const float bits, const vec2 own) {
+    if (mod(floor(bits / 2.0), 2.0) == 0.0) {
+        return own;
+    }
+    float angle = floor(bits / 4.0) * (2.0 * PI / 16384.0) - PI;
+    return vec2(cos(angle), sin(angle));
+}
+"
+    };
+}
+
 // Fill Extrusion: the roofs
 const FILL_EXTRUSION_BLOCKS: &[UniformBlock] = &[
     UniformBlock::element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
@@ -159,7 +176,9 @@ pub(super) static SOURCES: &[(&Program, &Source)] = &[
 ];
 
 const FILL_EXTRUSION_INSTANCED_SHADER: Glsl = Glsl {
-    vertex: r"invariant gl_Position;
+    vertex: concat!(
+        wall_normal!(),
+        r"invariant gl_Position;
 
 // The corner of the wall quad: x picks the instance's outline vertex (0) or
 // the next one (1), y the base (0) or the top (1).
@@ -292,7 +311,8 @@ highp vec4 color = u_color;
     v_color.b += clamp(color.b * directional * u_lightcolor.b, mix(0.0, 0.3, 1.0 - u_lightcolor.b), 1.0);
     v_color *= u_opacity;
 }
-",
+"
+    ),
     fragment: r"in vec4 v_color;
 
 void main() {
@@ -306,7 +326,9 @@ void main() {
 };
 
 const FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: Glsl = Glsl {
-    vertex: r"invariant gl_Position;
+    vertex: concat!(
+        wall_normal!(),
+        r"invariant gl_Position;
 
 // The corner of the wall quad: x picks the instance's outline vertex (0) or
 // the next one (1), y the base (0) or the top (1).
@@ -466,7 +488,8 @@ highp vec4 pattern_to = u_pattern_to;
     v_lighting.rgb += clamp(directional * u_lightcolor, mix(vec3(0.0), vec3(0.3), 1.0 - u_lightcolor), vec3(1.0));
     v_lighting *= u_opacity;
 }
-",
+"
+    ),
     fragment: r"#ifdef GL_ES
 precision highp float;
 #endif

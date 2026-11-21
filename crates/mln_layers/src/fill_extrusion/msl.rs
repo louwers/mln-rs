@@ -14,6 +14,23 @@ use mln_gfx::shaders::source::msl::{Attribute, Msl, Source, Texture};
 
 use super::programs;
 
+/// `wall_normal`, the normal at a wall's end from its outline vertex's
+/// `decimals_ed.x`: the one the walls there share, or else `own`, the
+/// wall's own.
+macro_rules! wall_normal {
+    () => {
+        r"
+float2 wall_normal(const uint bits, const float2 own) {
+    if ((bits & 2u) == 0u) {
+        return own;
+    }
+    const float angle = float(bits >> 2) * (2.0 * M_PI_F / 16384.0) - M_PI_F;
+    return float2(metal::cos(angle), metal::sin(angle));
+}
+"
+    };
+}
+
 const FILL_EXTRUSION_UBO_COUNT: usize = FILL_EXTRUSION_LAYER_UBO_COUNT;
 
 // An instance of the instanced shaders is an outline vertex, and the vertex
@@ -215,7 +232,9 @@ fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]]) {
 const FILL_EXTRUSION_INSTANCED_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
+    prelude: concat!(
+        wall_normal!(),
+        r#"
 
 enum {
     idFillExtrusionDrawableUBO = idDrawableReservedVertexOnlyUBO,
@@ -269,7 +288,8 @@ struct alignas(16) FillExtrusionPropsUBO {
 };
 static_assert(sizeof(FillExtrusionPropsUBO) == 5 * 16, "wrong size");
 
-"#,
+"#
+    ),
     source: concat!(
         r"
 
@@ -390,7 +410,9 @@ FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]],
 const FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
+    prelude: concat!(
+        wall_normal!(),
+        r#"
 
 enum {
     idFillExtrusionDrawableUBO = idDrawableReservedVertexOnlyUBO,
@@ -444,7 +466,8 @@ struct alignas(16) FillExtrusionPropsUBO {
 };
 static_assert(sizeof(FillExtrusionPropsUBO) == 5 * 16, "wrong size");
 
-"#,
+"#
+    ),
     source: r"
 
 struct VertexStage {
