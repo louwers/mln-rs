@@ -371,27 +371,6 @@ fn disown_still(events: &mut [RendererEvent], for_demand: bool, dropped: bool) {
     }
 }
 
-/// Settles the reports in `events` of a frame that the target handed off
-/// as `handoff`, and returns whether it dropped the frame, which leaves the
-/// host no picture of it. A `presenting` target drops one when its surface
-/// had no image for it, which a later frame may have. Any other drops one
-/// only when handing it off failed, which fails the frame, so that its
-/// still image ends with the error rather than waits for a frame that would
-/// fail again.
-fn settle_handoff(events: &mut [RendererEvent], for_demand: bool, handoff: Option<Handoff>, presenting: bool) -> bool {
-    let dropped = matches!(handoff, Some(Handoff::Dropped));
-    if dropped && !presenting {
-        for event in events.iter_mut() {
-            if let RendererEvent::RenderFrameFinished { mode, error, .. } = event {
-                *mode = RenderMode::Partial;
-                error.get_or_insert_with(|| Box::new(Error::native("Handing the frame off to the host failed")));
-            }
-        }
-    }
-    disown_still(events, for_demand, dropped);
-    dropped
-}
-
 /// Work that waits for the work sent before it: resizes that haven't
 /// landed, and demands that wait for the map's commands.
 struct Behind {
@@ -1028,11 +1007,10 @@ impl Worker {
     /// ring. Returns the frame, which
     /// [`publish_rendered`](Self::publish_rendered) publishes. A still map draws no frame until everything that it shows
     /// has loaded, and a surface without a texture to render into takes no
-    /// frame. A frame that the target drops finishes as not ready: one that
-    /// a surface had no image for after all is drawn again by the next
-    /// demand, and one that a ring failed to take fails
-    /// ([`settle_handoff`]). Only the still image's own frame completes the
-    /// image or fails it ([`disown_still`]).
+    /// frame. A frame that a surface drops, having had no image for it after
+    /// all, finishes as not ready, and the next demand draws the map again.
+    /// Only the still image's own frame completes the image or fails it
+    /// ([`disown_still`]).
     fn render(&mut self, token: Option<u64>, update: &Update, slot: Option<usize>) -> RenderedFrame {
         let ready = self.gfx.as_mut().is_some_and(|gfx| gfx.target.ready_for_frame());
         let Some(gfx) = self.gfx.as_mut().filter(|_| ready) else {
@@ -1055,9 +1033,11 @@ impl Worker {
             state.graphics_objects = state.graphics_objects.max(Gfx::OBJECTS);
         }
         let mut events = self.renderer_events.take();
-        if settle_handoff(&mut events, token.is_some(), handoff, gfx.target.is_presenting()) {
+        let dropped = gfx.target.is_presenting() && matches!(handoff, Some(Handoff::Dropped));
+        disown_still(&mut events, token.is_some(), dropped);
+        if dropped {
             let result = FrameResult::unrendered(token, FrameDisposition::TargetNotReady, update.generation);
-            return RenderedFrame { result, events, slot: slot.map(|slot| (slot, None)) };
+            return RenderedFrame { result, events, slot: None };
         }
         let projection = gfx.target.renderer().and_then(Renderer::frame_projection);
         // The previous render's sources may hold the last references to
@@ -1732,16 +1712,16 @@ impl Worker {
 mod tests {
     use std::sync::Arc;
 
-    use mln_gfx::{GpuSync, Handoff, SyncKind};
     use mln_map::RenderMode;
     use mln_renderer::RendererEvent;
     use mln_util::error::Error;
 
-    use super::{disown_still, settle_handoff};
+    use super::disown_still;
 
-    /// The report of a frame of the still image 7's update, failed or not.
-    fn frame(failed: bool) -> [RendererEvent; 1] {
-        [RendererEvent::RenderFrameFinished {
+    /// The still image that a frame of the image's update, failed or not,
+    /// ends once its report reaches the map.
+    fn still_ended(failed: bool, for_demand: bool, dropped: bool) -> u64 {
+        let mut events = [RendererEvent::RenderFrameFinished {
             mode: if failed { RenderMode::Partial } else { RenderMode::Full },
             complete: true,
             needs_repaint: false,
@@ -1751,13 +1731,7 @@ mod tests {
             update_id: 1,
             stats: Arc::default(),
             error: failed.then(|| Box::new(Error::native("the device was reset"))),
-        }]
-    }
-
-    /// The still image that a frame of the image's update, failed or not,
-    /// ends once its report reaches the map.
-    fn still_ended(failed: bool, for_demand: bool, dropped: bool) -> u64 {
-        let mut events = frame(failed);
+        }];
         disown_still(&mut events, for_demand, dropped);
         let [RendererEvent::RenderFrameFinished { still_image_request_id, .. }] = events else { unreachable!() };
         still_image_request_id
@@ -1780,38 +1754,5 @@ mod tests {
         for (failed, dropped) in [(false, false), (true, false), (false, true), (true, true)] {
             assert_eq!(0, still_ended(failed, true, dropped), "failed {failed}, dropped {dropped}");
         }
-    }
-
-    /// What the map takes from the report of a frame that drew, for the
-    /// still image or a host's demand, once the target handed it off as
-    /// `handoff`: whether the target dropped it, the still image it ends,
-    /// whether it failed, and whether it was `Full`.
-    fn settled(for_demand: bool, handoff: Handoff, presenting: bool) -> (bool, u64, bool, bool) {
-        let mut events = frame(false);
-        let dropped = settle_handoff(&mut events, for_demand, Some(handoff), presenting);
-        let [RendererEvent::RenderFrameFinished { still_image_request_id, error, mode, .. }] = events else {
-            unreachable!()
-        };
-        (dropped, still_image_request_id, error.is_some(), mode == RenderMode::Full)
-    }
-
-    /// A ring drops a frame only when handing it off failed: the frame
-    /// fails, and the still image it was drawn for ends with the error
-    /// rather than completes without a picture or waits for a frame that
-    /// would fail again. A host's demand fails with it and ends no still.
-    #[test]
-    fn a_frame_that_a_ring_dropped_fails() {
-        assert_eq!(settled(false, Handoff::Dropped, false), (true, 7, true, false));
-        assert_eq!(settled(true, Handoff::Dropped, false), (true, 0, true, false));
-    }
-
-    /// A frame that a surface had no image for is drawn again, and one that
-    /// a target took completes its still image.
-    #[test]
-    fn a_frame_that_a_surface_dropped_is_drawn_again_and_one_taken_completes() {
-        assert_eq!(settled(false, Handoff::Dropped, true), (true, 0, false, true));
-        let given = Handoff::GivenBack { slot: 0, sync: GpuSync::of(SyncKind::QueueOrder) };
-        assert_eq!(settled(false, given, false), (false, 7, false, true));
-        assert_eq!(settled(false, Handoff::Presented, true), (false, 7, false, true));
     }
 }
