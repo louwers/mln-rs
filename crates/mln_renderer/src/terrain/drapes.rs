@@ -22,16 +22,23 @@
 //! more than the device's largest texture. A byte cap ([`BYTE_CAP`]) lowers
 //! the sides of the tiles that show smallest where the drapes that hold a
 //! texture, and what they draw with, would hold more; it never drops a
-//! tile. The frame's sides are settled once the layers have drawn the
-//! drapes that draw again, which tells which of them hold a texture
-//! ([`Drapes::finish_update`]). A drape whose side grows draws again once
-//! the camera rests, as one drawn at another zoom does, and one whose side
-//! shrinks at once, so that the cap holds while the camera moves.
+//! tile. [`Drapes::choose`] picks the drapes whose drawings the frame's
+//! layers update, by their keys alone; the frame's sides are settled once
+//! they have, which tells which drapes hold a texture
+//! ([`Drapes::finish_update`]). A drape's drawings are always those of the
+//! key it draws in the frame or of the key it was drawn from, and don't
+//! depend on its side, whose uniforms are written as it uploads. A drape
+//! whose side changes and that the frame didn't update thus draws again at
+//! the new side from the drawings it has, keeping what it shows: at once
+//! where it shrinks, so that the cap holds in every frame, and where it
+//! grows, once the camera rests, in its tile's turn, as one drawn at
+//! another zoom does.
 
 use std::sync::Arc;
 
 use glam::{DMat4, DVec2, DVec4};
 use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, Gpu, LoadOp, TargetFormats, TextureFormat};
+use mln_gfx::shaders::layer_ubo::GlobalPaintParamsUBO;
 use mln_gfx::shaders::shader_defines::ID_GLOBAL_PAINT_PARAMS_UBO;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
@@ -188,6 +195,17 @@ fn cap_sizes(sizes: &mut [u32], held: &[Held], order: &[usize], cap: u64) {
     }
 }
 
+/// The tile of `drapes` whose drapes take their turn in a frame that takes
+/// turns, of those that `wait`: the one drawn longest ago, the nearest the
+/// center of those, so that a camera that jumps every frame draws each tile
+/// in turn.
+fn turn(drapes: &[Drape], turns: bool, wait: impl Fn(&Drape) -> bool) -> Option<usize> {
+    (drapes.iter().enumerate())
+        .filter(|&(_, drape)| turns && wait(drape))
+        .min_by_key(|&(index, drape)| (drape.drawn_at, index))
+        .map(|(index, _)| index)
+}
+
 /// A drawing of a layer that a drape keeps, with the style it was made for.
 struct DrapeLayer {
     style: Arc<dyn ErasedLayerStyle>,
@@ -195,6 +213,7 @@ struct DrapeLayer {
 }
 
 /// What a draped layer draws a drape with.
+#[cfg_attr(test, derive(Clone))]
 struct LayerKey {
     style: Arc<dyn ErasedLayerStyle>,
     /// The layer's [`paint_revision`](crate::render_layer::RenderLayerBase::paint_revision).
@@ -212,6 +231,7 @@ struct LayerKey {
 /// aren't in it: a change of them makes the drapes they show in draw again
 /// ([`Drapes::redraw`], [`Drapes::mark_changed`]).
 #[derive(Default)]
+#[cfg_attr(test, derive(Clone))]
 struct DrapeKey {
     /// The draped layers, in drawing order.
     layers: Vec<LayerKey>,
@@ -288,13 +308,24 @@ struct StackDrape {
     drawn: Option<DrapeKey>,
     /// What the frame's layers would draw it from.
     key: DrapeKey,
-    /// Whether the frame draws the drape again.
+    /// Whether the frame's layers update its drawings, which it then draws
+    /// from its key.
+    updated: bool,
+    /// Whether the frame draws it again into its texture: updated, where
+    /// its layers draw something, or at a new side from the drawings it
+    /// has.
     redraws: bool,
     /// How its key differs from the one it was drawn from.
     difference: Difference,
     /// What the layer composite holds while its layers draw it, as they
     /// last drew it.
     composite: CompositeTextures,
+    /// The global paint values of the frame that last updated its
+    /// drawings, which its draws read with those of its side.
+    paint: GlobalPaintParamsUBO,
+    /// The key its drawings were made from.
+    #[cfg(test)]
+    drawings: Option<DrapeKey>,
 }
 
 /// A drape's texture, of `size` texels a side, with its mips.
@@ -326,13 +357,6 @@ impl StackDrape {
         self.texture.as_ref().map(|&(_, side)| side)
     }
 
-    /// Whether, with the camera `at_rest`, it waits to draw again in a tile
-    /// whose drapes draw at `size`: its key differs from the one it was
-    /// drawn from by the camera only, or its texture is smaller.
-    fn stale(&self, at_rest: bool, size: u32) -> bool {
-        at_rest && (self.difference == Difference::Camera || self.side().is_some_and(|side| side < size))
-    }
-
     /// A drape not drawn yet, without a texture.
     fn new() -> StackDrape {
         StackDrape {
@@ -343,9 +367,13 @@ impl StackDrape {
             groups: DrawGroups::default(),
             drawn: None,
             key: DrapeKey::default(),
+            updated: false,
             redraws: false,
             difference: Difference::Content,
             composite: CompositeTextures::default(),
+            paint: GlobalPaintParamsUBO::default(),
+            #[cfg(test)]
+            drawings: None,
         }
     }
 }
@@ -356,9 +384,11 @@ struct Drape {
     transform: TransformParameters,
     /// The logical pixels the tile spans on screen ([`shown_px`]).
     shown: f64,
-    /// The side in texels its drapes draw at in the frame.
+    /// The side in texels its drapes draw at in the frame, which
+    /// [`Drapes::finish_update`] settles.
     size: u32,
-    /// The frame that last drew one of its drapes.
+    /// The frame that last updated one of its drapes, or gave them their
+    /// turn ([`turn`]).
     drawn_at: u64,
     stacks: Vec<StackDrape>,
 }
@@ -396,8 +426,10 @@ pub(crate) struct Drapes {
     /// ([`choose`](Self::choose)).
     at_rest: bool,
     paced: bool,
-    /// Whether drapes stale by the camera only, or of another side than
-    /// their tile's, wait for a later frame.
+    /// Whether [`choose`](Self::choose) gave a tile its turn in the frame.
+    turn_taken: bool,
+    /// Whether drapes stale by the camera only, or smaller than their
+    /// tile's side, wait for a later frame.
     waiting: bool,
     /// The tiles and stacks of the drapes drawn since the last
     /// [`take_passes`](Self::take_passes).
@@ -411,12 +443,11 @@ impl Drapes {
     /// `pixel_ratio`, and of `stacks` stacks: keeps the drapes of the tiles
     /// and stacks it had, and drops the others. Each tile's drapes draw at
     /// the side its tile shows at ([`shown_size`]), at most
-    /// `max_texture_size`, which [`choose`](Self::choose) and
-    /// [`finish_update`](Self::finish_update) lower where they would hold
-    /// more than `byte_cap` bytes. The frame's draped layers then give their
-    /// keys ([`key_layer`](Self::key_layer)), which choose the drapes that
-    /// draw again, whose drawings they then update
-    /// ([`update_layer`](Self::update_layer)).
+    /// `max_texture_size`, which [`finish_update`](Self::finish_update)
+    /// lowers where they would hold more than `byte_cap` bytes. The frame's
+    /// draped layers then give their keys ([`key_layer`](Self::key_layer)),
+    /// which [`choose`](Self::choose) the drapes whose drawings they then
+    /// update ([`update_layer`](Self::update_layer)).
     pub(crate) fn begin(
         &mut self,
         (view, projection, pixel_ratio): (&View, &DMat4, f32),
@@ -480,60 +511,41 @@ impl Drapes {
         }
     }
 
-    /// Chooses the drapes the frame draws again, once every draped layer
-    /// gave its key, and the side the drapes of each tile draw at, which
-    /// [`finish_update`](Self::finish_update) settles.
+    /// Chooses the drapes whose drawings the frame's layers update, once
+    /// every draped layer gave its key: those that draw again from their
+    /// key. Their sides don't come into it:
+    /// [`finish_update`](Self::finish_update) settles them.
     ///
     /// A drape not drawn yet or stale, or whose key differs from the one it
     /// was drawn from by its content ([`DrapeKey::difference`]), draws again
     /// at once. With the camera `at_rest`, and in a still, which isn't
-    /// `paced`, a drape whose key differs only by the camera, or whose
-    /// texture is smaller than its tile's side, draws again too: `paced`, in
-    /// a continuous map, only the drapes of one tile a frame, and those of
-    /// the tiles whose content changed, as in GL JS. That tile is the one
-    /// drawn longest ago, the nearest of those, so that a camera that jumps
-    /// every frame draws each tile in turn. The others
-    /// [wait](Self::waiting) for a later frame. While the camera of a
-    /// continuous map moves, a drape drawn at another zoom or bearing stays.
-    ///
-    /// The sides are those the byte cap gives the drapes with a texture and
-    /// those that draw again for their content, which may make one
-    /// ([`cap_sizes`]); a drape whose texture is larger than its side draws
-    /// again at once, so that the cap holds. Their layers' drawings wait for
-    /// the layers to take them.
+    /// `paced`, a drape whose key differs only by the camera draws again
+    /// too: `paced`, in a continuous map, only the drapes of one tile a
+    /// frame, which takes its [`turn`], and those of the tiles whose content
+    /// changed, as in GL JS. The others [wait](Self::waiting) for a later
+    /// frame. While the camera of a continuous map moves, a drape drawn at
+    /// another zoom or bearing stays.
     pub(crate) fn choose(&mut self, at_rest: bool, paced: bool) {
         let at_rest = at_rest || !paced;
         (self.at_rest, self.paced) = (at_rest, paced);
         self.frame += 1;
         for drape in self.drapes.iter_mut().flat_map(|drape| &mut drape.stacks) {
             drape.difference = drape.drawn.as_ref().map_or(Difference::Content, |drawn| drape.key.difference(drawn));
-            drape.redraws = drape.difference == Difference::Content;
+            drape.updated = drape.difference == Difference::Content;
         }
-        // A drape stale by the camera without a texture drew nothing from
-        // the same content: it takes none of the cap until it draws
-        // something, which `finish_update` then counts.
-        self.cap(|drape| drape.redraws || drape.texture.is_some());
-        for Drape { size, stacks, .. } in &mut self.drapes {
-            for drape in stacks {
-                drape.redraws |= drape.side().is_some_and(|side| side > *size);
-            }
-        }
-        let redraws = |drape: &Drape| drape.stacks.iter().any(|drape| drape.redraws);
-        let stale = |drape: &Drape| drape.stacks.iter().any(|stack| stack.stale(at_rest, drape.size));
-        let next = (self.drapes.iter().enumerate())
-            .filter(|(_, drape)| paced && !redraws(drape) && stale(drape))
-            .min_by_key(|&(index, drape)| (drape.drawn_at, index))
-            .map(|(index, _)| index);
+        let updated = |drape: &Drape| drape.stacks.iter().any(|drape| drape.updated);
+        let stale = |drape: &Drape| drape.stacks.iter().any(|drape| drape.difference == Difference::Camera);
+        let next = turn(&self.drapes, paced && at_rest, |drape| !updated(drape) && stale(drape));
+        self.turn_taken = next.is_some();
         for (index, drape) in self.drapes.iter_mut().enumerate() {
-            let now = !paced || next == Some(index) || redraws(drape);
-            let size = drape.size;
+            let now = at_rest && (!paced || next == Some(index) || updated(drape));
             for drape in &mut drape.stacks {
-                drape.redraws |= now && drape.stale(at_rest, size);
-                if drape.redraws {
+                drape.updated |= now && drape.difference == Difference::Camera;
+                if drape.updated {
                     drape.previous = std::mem::take(&mut drape.layers);
                 }
             }
-            if redraws(drape) {
+            if updated(drape) {
                 drape.drawn_at = self.frame;
             }
         }
@@ -562,8 +574,8 @@ impl Drapes {
         }
     }
 
-    /// Whether the last frame left drapes stale by the camera only, or of
-    /// another side than their tile's, for a later frame to draw
+    /// Whether the last frame left drapes stale by the camera only, or
+    /// smaller than their tile's side, for a later frame to draw
     /// ([`choose`](Self::choose), [`finish_update`](Self::finish_update)):
     /// the map then isn't done drawing.
     pub(crate) fn waiting(&self) -> bool {
@@ -571,8 +583,9 @@ impl Drapes {
     }
 
     /// Makes the draws of `layer`, a layer of `stack` that drapes, in every
-    /// drape of the stack that draws again, with the drape's `parameters`,
-    /// from its `source`. The stack's layers update in drawing order.
+    /// drape of the stack that [`choose`](Self::choose) chose, with the
+    /// drape's `parameters`, from its `source`. The stack's layers update in
+    /// drawing order.
     pub(crate) fn update_layer(
         &mut self,
         stack: usize,
@@ -584,16 +597,16 @@ impl Drapes {
     ) {
         let style = Arc::clone(&layer.base().style);
         // The layers' draw updates don't read the composite, which only
-        // the passes do, nor the drape's size, which `finish_update` may
-        // change.
+        // the passes do, nor the drape's size, which `finish_update`
+        // settles.
         let layer_composite = &mut LayerComposite::default();
-        for Drape { tile, transform, size, stacks, .. } in &mut self.drapes {
+        let size = Size::new(self.largest, self.largest);
+        for Drape { tile, transform, stacks, .. } in &mut self.drapes {
             let Some(StackDrape { clip_masks, layers, previous, .. }) =
-                stacks.get_mut(stack).filter(|drape| drape.redraws)
+                stacks.get_mut(stack).filter(|drape| drape.updated)
             else {
                 continue;
             };
-            let size = Size::new(*size, *size);
             // A drawing made for another style of the layer goes, as the
             // layer's own draws do.
             let mut kept = match previous.iter().position(|kept| Arc::ptr_eq(&kept.style, &style)) {
@@ -606,28 +619,35 @@ impl Drapes {
         }
     }
 
-    /// Ends the frame's update of the drapes: the drawings of layers that no
-    /// longer drape in their stack go. A drape that draws again and whose
-    /// layers draw something has a texture of its tile's side, made in
-    /// `context`; one whose layers draw nothing has none and draws no pass,
+    /// Ends the frame's update of the drapes and settles their sides, now
+    /// that it is known which of them hold a texture. The drawings of layers
+    /// that no longer drape in their stack go. A drape the frame's layers
+    /// updated whose layers draw nothing has no texture and draws no pass,
     /// drawn from its key.
     ///
-    /// The sides are then those the byte cap gives the drapes that hold a
-    /// texture once the frame has drawn, so that a still, which draws every
-    /// drape it would draw again, draws them at the sides the same still
-    /// drawn again would. A drape that [`choose`](Self::choose) chose only
-    /// for a side that it no longer takes keeps its texture. A drape kept
-    /// whose texture's side then differs from its tile's, drawn from its
-    /// key, draws again from the drawings its layers made of it: where its
-    /// texture is larger, and, with the camera at rest, where it is smaller
-    /// in a tile that draws now as `choose` draws them. One stale by the
-    /// camera whose texture is larger waits, and draws again smaller in the
-    /// next frame.
+    /// Each tile's drapes then take the side its tile shows at, lowered
+    /// where the drapes that hold a texture after the frame, and what they
+    /// draw with, would hold more than the byte cap ([`cap_sizes`]); a still
+    /// thus draws its drapes at the sides the same still drawn again would.
+    /// A drape updated that draws something draws at its tile's side, into
+    /// a texture of that side, made in `context`. A drape not updated whose
+    /// texture has another side draws again at the new side from the
+    /// drawings it has, which are those of the key it was drawn from, so
+    /// that what it shows stays and only its texels change: at once where
+    /// its texture is larger, so that the cap holds; where it is smaller,
+    /// with the camera at rest, in a tile whose drapes the frame updated, or
+    /// in the tile's [`turn`] if `choose` gave none, as a drape stale by the
+    /// camera draws.
     pub(crate) fn finish_update(&mut self, context: &mut Context) {
         for drape in self.drapes.iter_mut().flat_map(|drape| &mut drape.stacks) {
             drape.previous.clear();
-            if !drape.redraws {
+            drape.redraws = false;
+            if !drape.updated {
                 continue;
+            }
+            #[cfg(test)]
+            {
+                drape.drawings = Some(drape.key.clone());
             }
             let (mut draws, mut composited) = (false, Vec::new());
             for layer in &drape.layers {
@@ -637,39 +657,50 @@ impl Drapes {
                 });
             }
             drape.composite = CompositeTextures::of(composited, Some(COLOR));
+            drape.redraws = draws;
             if !draws {
                 drape.texture = None;
                 drape.drawn = Some(std::mem::take(&mut drape.key));
-                drape.redraws = false;
-                drape.difference = Difference::None;
             }
         }
         self.cap(|drape| drape.redraws || drape.texture.is_some());
         let (at_rest, paced, frame) = (self.at_rest, self.paced, self.frame);
+        let grows = |drape: &Drape| {
+            (drape.stacks.iter()).any(|stack| !stack.updated && stack.side().is_some_and(|side| side < drape.size))
+        };
+        let turns = paced && at_rest && !self.turn_taken;
+        if let Some(index) = turn(&self.drapes, turns, |drape| drape.drawn_at != frame && grows(drape)) {
+            self.drapes[index].drawn_at = frame;
+        }
         self.waiting = false;
         for Drape { size, drawn_at, stacks, .. } in &mut self.drapes {
-            let now = !paced || *drawn_at == frame;
+            let now = at_rest && (!paced || *drawn_at == frame);
             for drape in stacks.iter_mut() {
-                let side = drape.side();
-                // One that `choose` drew again only for a side it no longer
-                // takes keeps its texture.
-                if side == Some(*size) && drape.difference != Difference::Content && !drape.stale(at_rest, *size) {
-                    drape.redraws = false;
+                if let Some(side) = drape.side().filter(|_| !drape.updated) {
+                    drape.redraws = side > *size || (now && side < *size);
                 }
-                let larger = side.is_some_and(|side| side > *size);
-                let resized = larger || (now && at_rest && side.is_some_and(|side| side < *size));
-                if !drape.redraws && resized && drape.difference == Difference::None {
-                    drape.redraws = true;
-                    *drawn_at = frame;
+                if drape.redraws && drape.side() != Some(*size) {
+                    drape.texture = Some((drape_texture(context, *size), *size));
                 }
-                if drape.redraws {
-                    if side != Some(*size) {
-                        drape.texture = Some((drape_texture(context, *size), *size));
-                    }
-                } else {
-                    self.waiting |= larger || drape.stale(at_rest, *size);
-                }
+                let stale = !drape.updated && drape.difference == Difference::Camera;
+                self.waiting |= at_rest && (stale || drape.side().is_some_and(|side| side < *size));
             }
+        }
+        #[cfg(test)]
+        self.assert_drawings();
+    }
+
+    /// Asserts that each drape's drawings are those of the key it draws in
+    /// the frame, where the frame updated them, and else those of the key
+    /// it was drawn from.
+    #[cfg(test)]
+    fn assert_drawings(&self) {
+        for (tile, drape) in self.drapes.iter().flat_map(|drape| drape.stacks.iter().map(|stack| (drape.tile, stack))) {
+            let key = if drape.updated && drape.redraws { Some(&drape.key) } else { drape.drawn.as_ref() };
+            let same = key
+                .zip(drape.drawings.as_ref())
+                .is_some_and(|(key, drawings)| key.difference(drawings) == Difference::None);
+            assert!(same, "the drawings of a drape of {tile:?} aren't those of its key");
         }
     }
 
@@ -784,11 +815,31 @@ impl Drapes {
                 let composite = &mut LayerComposite::default();
                 let drape_parameters =
                     parameters.drape(transform, &mut drape.clip_masks, composite, size, tile.to_unwrapped());
-                let global = drape_parameters.global_paint_params(pattern_atlas_size);
+                let frame = drape_parameters.global_paint_params(pattern_atlas_size);
                 let context = &mut *parameters.context;
+                // The drawings read the camera of the frame that updated
+                // them, with the drape's side and the frame's atlas.
+                if drape.updated {
+                    drape.paint = frame;
+                }
+                let global = GlobalPaintParamsUBO {
+                    pattern_atlas_texsize: frame.pattern_atlas_texsize,
+                    world_size: frame.world_size,
+                    ..drape.paint
+                };
                 for layer in &mut drape.layers {
                     layer.drawing.write_uniform(gpu, ID_GLOBAL_PAINT_PARAMS_UBO, &global, context);
                     layer.drawing.upload(gpu, context);
+                }
+                if let Some((texture, _)) = &drape.texture
+                    && let Err(error) = context.create_texture(gpu, texture)
+                {
+                    Log::error(Event::Render, format!("Making a drape's texture failed: {error}"));
+                }
+                // A drape drawn again only at a new side keeps the groups and
+                // masks of its drawings.
+                if !drape.updated {
+                    continue;
                 }
                 let layers = &drape.layers;
                 drape.groups = DrawGroups::of(
@@ -799,11 +850,6 @@ impl Drapes {
                     },
                     stencil_clear_tile.map(|_| tile.to_unwrapped()),
                 );
-                if let Some((texture, _)) = &drape.texture
-                    && let Err(error) = context.create_texture(gpu, texture)
-                {
-                    Log::error(Event::Render, format!("Making a drape's texture failed: {error}"));
-                }
                 drape.clip_masks.update(gpu, context, false, &drape.groups.clip_tiles, |tile| {
                     to_projection_ubo(&transform.projection_data_for_tile(tile, false))
                 });
@@ -830,9 +876,11 @@ impl Drapes {
         for Drape { tile, transform, stacks, .. } in &mut self.drapes {
             #[cfg_attr(not(test), expect(unused_variables, reason = "only tests record the passes' stacks"))]
             for (stack, drape) in stacks.iter_mut().enumerate().filter(|(_, drape)| drape.redraws) {
-                let StackDrape { texture, clip_masks, layers, groups, drawn, key, .. } = drape;
+                let StackDrape { texture, clip_masks, layers, groups, drawn, key, updated, .. } = drape;
                 // A drape that fails to draw draws again in the next frame.
-                *drawn = None;
+                // One that draws again only at a new side keeps the key it was
+                // drawn from.
+                let kept = drawn.take();
                 let Some((texture, side)) = texture.as_ref() else {
                     continue;
                 };
@@ -895,7 +943,7 @@ impl Drapes {
                 });
                 match drawn_pass.and_then(|()| parameters.context.generate_mipmaps(gpu, texture)) {
                     Ok(()) => {
-                        *drawn = Some(std::mem::take(key));
+                        *drawn = if *updated { Some(std::mem::take(key)) } else { kept };
                         parameters.context.rendering_stats().terrain.drapes_drawn += 1;
                         #[cfg(test)]
                         self.passes.push((*tile, stack));

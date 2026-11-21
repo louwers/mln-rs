@@ -182,6 +182,9 @@ struct DrapedMap {
     /// The ground the renderer last told of, which the updates carry, as a
     /// map's do.
     elevation: Option<Arc<dyn Elevation>>,
+    /// The drapes' byte cap that each frame's drapes, and what they draw
+    /// with, hold to.
+    drape_byte_cap: Option<usize>,
     work: TileWork,
     _pool: mln_util::pool::Pool,
 }
@@ -257,6 +260,7 @@ impl DrapedMap {
             camera_moving: false,
             needs_repaint: false,
             elevation: None,
+            drape_byte_cap: None,
             work: TileWork::default(),
             _pool: pool,
         }
@@ -331,7 +335,17 @@ impl DrapedMap {
         let passes = self.renderer.take_drape_passes();
         let unique: BTreeSet<(OverscaledTileID, usize)> = passes.iter().copied().collect();
         assert_eq!(unique.len(), passes.len(), "a drape drawn twice in a frame");
+        if let Some(cap) = self.drape_byte_cap {
+            let terrain = self.renderer.rendering_stats().terrain;
+            assert!(drapes_held(self) <= cap, "{} > {cap}: {terrain:?}", drapes_held(self));
+        }
         (full, unique)
+    }
+
+    /// Sets the drapes' byte cap, which every frame then holds to.
+    fn set_drape_byte_cap(&mut self, cap: usize) {
+        self.renderer.set_drape_byte_cap(cap);
+        self.drape_byte_cap = Some(cap);
     }
 
     /// The number of draws of the last frame.
@@ -660,20 +674,19 @@ fn a_byte_cap_lowers_the_sides_of_some_drapes_which_draw_again_once() {
     assert_eq!(whole, sides(&mut map), "the tiles show at 512 pixels, at two texels a pixel");
 
     let cap = 3 * drape_bytes(1024);
-    map.renderer.set_drape_byte_cap(cap);
+    map.set_drape_byte_cap(cap);
     let (_, passes) = map.frame();
     let lowered: BTreeSet<_> = sides(&mut map).into_iter().filter(|&(_, side)| side < 1024).collect();
     assert!(!lowered.is_empty(), "{:?}", sides(&mut map));
     assert!(lowered.iter().all(|&(_, side)| side == 512), "a step down: {lowered:?}");
     assert_eq!(lowered.iter().map(|&(tile, _)| tile).collect::<BTreeSet<_>>(), passes, "the lowered drapes draw again");
     let terrain = map.renderer.rendering_stats().terrain;
-    assert!(drapes_held(&map) <= cap, "{} > {cap}", drapes_held(&map));
     assert_eq!(drapes.len(), terrain.drapes, "every tile keeps its drape");
     assert_eq!(drapes.len(), terrain.surface_draw_calls);
     assert!(map.frame().1.is_empty(), "the drapes are drawn again once only");
 
     map.camera_moving = true;
-    map.renderer.set_drape_byte_cap(usize::MAX);
+    map.set_drape_byte_cap(usize::MAX);
     assert!(map.frame().1.is_empty(), "drapes drawn larger while the camera moves");
     map.camera_moving = false;
     let lowered: BTreeSet<_> = lowered.iter().map(|&(tile, _)| tile).collect();
@@ -689,11 +702,10 @@ fn a_byte_cap_holds_while_the_camera_moves() {
     let (mut map, drapes) = settled(Tiles::default());
     map.camera_moving = true;
     let cap = 3 * drape_bytes(1024);
-    map.renderer.set_drape_byte_cap(cap);
+    map.set_drape_byte_cap(cap);
     let (_, passes) = map.frame();
     assert!(!passes.is_empty());
     let terrain = map.renderer.rendering_stats().terrain;
-    assert!(drapes_held(&map) <= cap, "{} > {cap}", drapes_held(&map));
     assert_eq!(drapes.len(), terrain.drapes);
 }
 
@@ -715,7 +727,7 @@ fn drapes_held(map: &DrapedMap) -> usize {
 /// whole side, and the four tiles.
 fn sparse_stack_under_a_cap() -> (DrapedMap, BTreeSet<OverscaledTileID>) {
     let (mut map, drapes) = settled(Tiles::default());
-    map.renderer.set_drape_byte_cap(5 * drape_bytes(1024) + depth_stencil_bytes(1024));
+    map.set_drape_byte_cap(5 * drape_bytes(1024) + depth_stencil_bytes(1024));
     add_layer(&mut map, CIRCLE, Some("line"));
     map.settle();
     frames_until_full(&mut map);
@@ -741,7 +753,6 @@ fn a_byte_cap_counts_no_drape_of_a_stack_that_draws_nothing_there() {
     for _ in 0..100 {
         let (full, drawn) = map.frame();
         assert_eq!(whole, sides(&mut map), "the sides at rest");
-        assert!(drapes_held(&map) <= 5 * drape_bytes(1024) + depth_stencil_bytes(1024));
         frames.push(drawn);
         if full {
             break;
@@ -776,7 +787,7 @@ fn a_still_draws_its_drapes_at_their_sides_under_a_byte_cap_at_once() {
     map.mode = MapMode::Static;
     map.settle();
     let drapes = map.drapes();
-    map.renderer.set_drape_byte_cap(5 * drape_bytes(1024) + depth_stencil_bytes(1024));
+    map.set_drape_byte_cap(5 * drape_bytes(1024) + depth_stencil_bytes(1024));
     add_layer(&mut map, CIRCLE, Some("line"));
     let (first, image) = still(&mut map);
     let whole: BTreeSet<_> = drapes.iter().map(|&tile| (tile, 1024)).collect();
@@ -795,7 +806,7 @@ fn a_still_draws_its_drapes_at_their_sides_under_a_byte_cap_at_once() {
 fn the_drapes_kept_in_a_tile_that_draws_take_its_new_side_at_once() {
     let cap = 5 * drape_bytes(1024) + depth_stencil_bytes(1024);
     let (mut map, drapes) = two_stacks();
-    map.renderer.set_drape_byte_cap(cap);
+    map.set_drape_byte_cap(cap);
     frames_until_full(&mut map);
     let lowered: BTreeSet<_> =
         sides(&mut map).into_iter().filter(|&(_, side)| side < 1024).map(|(tile, _)| tile).collect();
@@ -809,12 +820,11 @@ fn the_drapes_kept_in_a_tile_that_draws_take_its_new_side_at_once() {
     assert_eq!(whole, sides(&mut map));
     let first: BTreeSet<_> = passes.iter().filter(|&&(_, stack)| stack == 0).map(|&(tile, _)| tile).collect();
     assert_eq!(lowered, first, "the first stack's lowered drapes draw again");
-    assert!(drapes_held(&map) <= cap, "{} > {cap}", drapes_held(&map));
     assert!(map.frame().1.is_empty(), "the drapes are drawn again once only");
     let image = map.target.read_image(map.backend.gpu()).expect("the frame's pixels").data;
 
     let mut new = DrapedMap::new(Tiles::default());
-    new.renderer.set_drape_byte_cap(cap);
+    new.set_drape_byte_cap(cap);
     new.style = Arc::clone(&map.style);
     new.settle();
     frames_until_full(&mut new);
@@ -824,12 +834,13 @@ fn the_drapes_kept_in_a_tile_that_draws_take_its_new_side_at_once() {
 }
 
 /// The cap counts, with the drapes' textures, the depth and stencil of each
-/// side and the layer composite's textures in a frame that composites.
+/// side and the layer composite's textures in a frame that composites, at
+/// rest and while the camera moves.
 #[test]
 fn a_byte_cap_holds_with_what_the_drapes_draw_with() {
     let (mut map, drapes) = settled(Tiles::default());
     let cap = 3 * drape_bytes(1024);
-    map.renderer.set_drape_byte_cap(cap);
+    map.set_drape_byte_cap(cap);
     map.edit(Edit::SetLayerProperty {
         layer: "fill".to_owned(),
         name: "fill-layer-opacity".to_owned(),
@@ -838,8 +849,134 @@ fn a_byte_cap_holds_with_what_the_drapes_draw_with() {
     assert_eq!(drapes, map.frame().1);
     let terrain = map.renderer.rendering_stats().terrain;
     assert!(terrain.mem_drape_composite > 0, "the drapes composite");
-    assert!(drapes_held(&map) <= cap, "{} > {cap}: {terrain:?}", drapes_held(&map));
     assert_eq!(drapes.len(), terrain.drapes, "every tile keeps its drape");
+
+    map.camera_moving = true;
+    map.transform.jump_to(&CameraOptions { zoom: Some(2.05), ..Default::default() });
+    map.frame();
+    map.set_drape_byte_cap(drape_bytes(1024));
+    assert!(!map.frame().1.is_empty(), "the drapes draw again smaller");
+    map.camera_moving = false;
+    frames_until_full(&mut map);
+    assert_eq!(drapes.len(), map.renderer.rendering_stats().terrain.drapes, "every tile keeps its drape");
+}
+
+/// A thick line in the corner of the north-west drape's tile that the view
+/// shows, shifted 20 pixels to the right on screen, so that it draws by the
+/// bearing.
+const SHIFTED_LINE: &str = r#"{
+    "version": 8,
+    "sources": {
+        "shifted": {"type": "geojson", "data": {"type": "LineString", "coordinates": [[-6, 2], [-6, 10]]}}
+    },
+    "layers": [{
+        "id": "shifted",
+        "type": "line",
+        "source": "shifted",
+        "paint": {"line-width": 8, "line-translate": [20, 0], "line-translate-anchor": "viewport"}
+    }]
+}"#;
+
+/// Sets the color of [`STYLE`]'s line.
+fn line_color(map: &mut DrapedMap, color: &str) {
+    map.edit(Edit::SetLayerProperty {
+        layer: "line".to_owned(),
+        name: "line-color".to_owned(),
+        value: serde_json::json!(color),
+    });
+}
+
+/// While the camera moves, the drapes stale by the bearing keep the
+/// drawings they were drawn from, though a byte cap would lower their
+/// sides for drapes that then draw nothing: once back at that bearing and
+/// drawn again larger, they draw what a new map draws.
+#[test]
+fn a_gesture_keeps_the_drawings_of_the_drapes_it_leaves_stale() {
+    // Five drapes at 512 texels, then at 1024.
+    let small = 5 * drape_bytes(512) + depth_stencil_bytes(512);
+    let whole = 5 * drape_bytes(1024) + depth_stencil_bytes(1024);
+    let (mut map, drapes) = settled(Tiles::default());
+    // A first stack that draws in every tile, the shifted line in the
+    // north-west one, and a second of the line only, which draws there
+    // only.
+    add_layer(&mut map, SHIFTED_LINE, Some("line"));
+    add_layer(&mut map, CIRCLE, Some("line"));
+    map.set_drape_byte_cap(small);
+    map.settle();
+    frames_until_full(&mut map);
+    assert_eq!(drapes.iter().map(|&tile| (tile, 512)).collect::<BTreeSet<_>>(), sides(&mut map));
+    assert_eq!(drapes.len() + 1, map.renderer.rendering_stats().terrain.drapes);
+
+    // A gesture turns the map while the line's drapes draw again.
+    map.camera_moving = true;
+    map.transform.jump_to(&CameraOptions { bearing: Some(90.0), ..Default::default() });
+    line_color(&mut map, "green");
+    map.frame();
+    map.transform.jump_to(&CameraOptions { bearing: Some(0.0), ..Default::default() });
+    map.frame();
+    // At rest, back at the bearing they were drawn at, a higher cap gives
+    // the drapes their whole side while the line's draw again.
+    map.camera_moving = false;
+    map.set_drape_byte_cap(whole);
+    line_color(&mut map, "blue");
+    frames_until_full(&mut map);
+    assert_eq!(drapes.iter().map(|&tile| (tile, 1024)).collect::<BTreeSet<_>>(), sides(&mut map));
+    let image = map.target.read_image(map.backend.gpu()).expect("the frame's pixels").data;
+
+    let mut new = DrapedMap::new(Tiles::default());
+    new.set_drape_byte_cap(whole);
+    new.style = Arc::clone(&map.style);
+    new.settle();
+    frames_until_full(&mut new);
+    assert_eq!(sides(&mut map), sides(&mut new));
+    let new_image = new.target.read_image(new.backend.gpu()).expect("the frame's pixels").data;
+    assert!(new_image == image, "a new map draws other pixels");
+}
+
+/// Drapes stale by the zoom whose layer composites at the new zoom: as each
+/// draws again in its turn and takes a layer composite, the others, which
+/// wait for theirs, draw again smaller at once from what they show, so that
+/// no frame holds more than the cap.
+#[test]
+fn a_byte_cap_holds_while_drapes_drawn_in_turn_start_to_composite() {
+    let cap = 4 * drape_bytes(1024) + depth_stencil_bytes(1024);
+    let (mut map, drapes) = settled(Tiles::default());
+    map.set_drape_byte_cap(cap);
+    add_layer(
+        &mut map,
+        r#"{
+            "version": 8,
+            "sources": {
+                "veil": {
+                    "type": "geojson",
+                    "data": {"type": "Polygon", "coordinates": [[[-170, -80], [170, -80], [170, 80], [-170, 80], [-170, -80]]]}
+                }
+            },
+            "layers": [{
+                "id": "veil",
+                "type": "fill",
+                "source": "veil",
+                "paint": {
+                    "fill-color": "red",
+                    "fill-opacity": 0.2,
+                    "fill-layer-opacity": ["interpolate", ["linear"], ["zoom"], 2, 1, 2.05, 0.5]
+                }
+            }]
+        }"#,
+        Some("line"),
+    );
+    map.settle();
+    frames_until_full(&mut map);
+    assert_eq!(drapes.iter().map(|&tile| (tile, 1024)).collect::<BTreeSet<_>>(), sides(&mut map));
+    assert_eq!(0, map.renderer.rendering_stats().terrain.mem_drape_composite, "no drape composites");
+
+    map.camera_moving = true;
+    map.transform.jump_to(&CameraOptions { zoom: Some(2.05), ..Default::default() });
+    assert!(map.frame().1.is_empty(), "drapes drawn while the camera moves");
+    map.camera_moving = false;
+    frames_until_full(&mut map);
+    assert!(map.renderer.rendering_stats().terrain.mem_drape_composite > 0, "the drapes composite");
+    assert!(map.frame().1.is_empty(), "the drapes are drawn again once only");
 }
 
 /// [`STYLE`]'s draped layers, removed, and a circle in their place.

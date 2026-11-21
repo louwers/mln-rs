@@ -112,13 +112,16 @@
 //!   on phones and in the browser, 384 MiB elsewhere), the largest side
 //!   allowed falls a step at a time for the tiles that show smallest, below
 //!   a sixteenth if the cap needs it; no tile loses its drape. The frame's
-//!   sides are those of the drapes that hold a texture once its layers
-//!   have drawn the drapes that draw again, so a still's are exact, and a
-//!   stack that draws nothing in a tile takes none of the cap there. A
-//!   drape larger than its side draws again at once, so the cap holds,
-//!   but for one stale by the camera that the frame's own drawing lowered,
-//!   which draws again in the next frame; one smaller draws again at rest,
-//!   as one stale by the camera does.
+//!   sides are settled once, after its layers have updated the drapes that
+//!   draw again from their key, when it is known which drapes hold a
+//!   texture: a still's are exact, a stack that draws nothing in a tile
+//!   takes none of the cap there, and no frame's drapes hold more than the
+//!   cap. A drape's drawings are always those of the key it draws in the
+//!   frame or of the key it was drawn from, whatever its side, so a drape
+//!   whose side changes and that the frame doesn't update draws again at
+//!   the new side from the drawings it has, and shows what it showed: at
+//!   once where it shrinks, and where it grows, at rest, in its tile's
+//!   turn, as a drape stale by the camera does.
 //! - **The drape composite.** A draped layer with a layer opacity below 1
 //!   or a layer blend other than `normal` draws as a whole inside each
 //!   drape, as in 2D (`LayerComposite`): into a texture of the drape's
@@ -465,9 +468,10 @@ impl RenderTerrain {
         self.drapes = Drapes::default();
     }
 
-    /// Whether the frame left drapes stale by the camera only for a later
-    /// frame to draw ([`Drapes::choose`]), which the frame then asks for: a
-    /// frame that did isn't complete.
+    /// Whether the frame left drapes stale by the camera only, or smaller
+    /// than their tile's side, for a later frame to draw
+    /// ([`Drapes::waiting`]), which the frame then asks for: a frame that did
+    /// isn't complete.
     pub(crate) fn drapes_waiting(&self) -> bool {
         self.drapes.waiting()
     }
