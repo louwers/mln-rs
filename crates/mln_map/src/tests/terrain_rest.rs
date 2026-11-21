@@ -566,6 +566,35 @@ fn an_anchored_zoom_on_rough_ground_ends_where_it_asked() {
     }
 }
 
+/// An anchored zoom with a pitch change that ends with it solves its end in
+/// the camera of each frame, the pitch that frame reaches included: sampled
+/// halfway and then at the shared end, it ends at the zoom it asked for,
+/// with the ground it grabbed under its anchor and its center on the ground.
+#[test]
+fn an_anchored_zoom_ending_with_a_pitch_change_solves_its_end_in_the_frame() {
+    let ground = steep();
+    let (mut transform, clock) = transform_over(&ground, 60.0);
+    let anchor = ScreenCoordinate::new(120.0, 400.0);
+    let grabbed = ground_under(transform.view(), &*ground, anchor);
+    transform.ease_to(&CameraOptions { pitch: Some(70.0), ..Default::default() }, &eased());
+    transform.ease_to(&CameraOptions { zoom: Some(13.0), anchor: Some(anchor), ..Default::default() }, &eased());
+    for elapsed in [500, 1000] {
+        let now = clock + Duration::from_millis(elapsed);
+        transform.set_frame_time(Some(now));
+        transform.update_transitions(Some(now));
+        if transform.in_transition() {
+            transform.follow_terrain();
+        }
+    }
+    assert!(!transform.in_transition());
+    let view = transform.view().clone();
+    assert_eq!(13.0, view.zoom(), "the zoom it asked for");
+    assert_eq!(70.0, view.pitch().to_degrees().round());
+    assert_holds(&view, grabbed, anchor, "at the end");
+    assert_on_ground(&view, &*ground, "at the end");
+    assert!(!transform.follow_terrain(), "at rest");
+}
+
 /// A transform under [`ConstrainMode::Screen`], 512 by 512, over ground
 /// that rises to the north, whose bounds end 3 km north of the start: at
 /// rest at the start at zoom 13, pitched 50 degrees.
