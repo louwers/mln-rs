@@ -86,7 +86,6 @@ impl TransferRequest {
     /// finishes, such as cancelling the HTTP stack's task. It runs once, on
     /// the thread that drops the request, or right away if the request is
     /// already dropped; `finish` discards it.
-    #[cfg(any(target_family = "wasm", target_vendor = "apple", target_os = "android"))]
     pub(crate) fn set_cancel_handler(&self, handler: impl FnOnce() + Send + 'static) {
         self.responder.on_cancel(handler);
     }
@@ -109,7 +108,16 @@ impl TransferRequest {
     /// A request for `resource` whose response goes nowhere, until the
     /// returned request drops (tests).
     pub(crate) fn unanswered(resource: Resource) -> (TransferRequest, crate::request::Request) {
-        let (request, responder) = crate::request::Request::new(|_| {});
+        Self::answered(resource, |_| {})
+    }
+
+    /// A request for `resource` whose response goes to `callback`, until
+    /// the returned request drops (tests).
+    pub(crate) fn answered(
+        resource: Resource,
+        callback: impl FnMut(Response) + Send + 'static,
+    ) -> (TransferRequest, crate::request::Request) {
+        let (request, responder) = crate::request::Request::new(callback);
         (TransferRequest { resource, headers: HttpHeaders::new(), responder }, request)
     }
 }
