@@ -60,10 +60,9 @@ pub struct BackgroundPatternPropsUBO {
 }
 const _: () = assert!(size_of::<BackgroundPatternPropsUBO>() == 5 * 16);
 
-/// Either background per-drawable uniform block, for consolidated UBOs: a C++
-/// union, the size of the larger member, 96 bytes. Write either member with
-/// `from_drawable` / `from_pattern_drawable`; the rest stays zero (C++
-/// value-initializes the vector elements).
+/// Either background per-drawable uniform block, for consolidated UBOs: the
+/// size of the larger member, 96 bytes. Write either member with
+/// `from_drawable` / `from_pattern_drawable`; the rest stays zero.
 #[derive(Clone, Copy, Debug, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct BackgroundDrawableUnionUBO {

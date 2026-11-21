@@ -360,8 +360,6 @@ lowp float floorwidth = u_floorwidth;
     normal.y = normal.y * 2.0 - 1.0;
     v_normal = normal;
 
-    // these transformations used to be applied in the JS and native code bases.
-    // moved them into the shader for clarity and simplicity.
     gapwidth = gapwidth / 2.0;
     float halfwidth = width / 2.0;
     offset = -1.0 * offset;
@@ -645,8 +643,6 @@ mediump float width = u_width;
     normal.y = normal.y * 2.0 - 1.0;
     v_normal = normal;
 
-    // these transformations used to be applied in the JS and native code bases.
-    // moved them into the shader for clarity and simplicity.
     gapwidth = gapwidth / 2.0;
     float halfwidth = width / 2.0;
     offset = -1.0 * offset;
@@ -915,8 +911,6 @@ highp vec4 pattern_to = u_pattern_to;
     normal.y = normal.y * 2.0 - 1.0;
     v_normal = normal;
 
-    // these transformations used to be applied in the JS and native code bases.
-    // moved them into the shader for clarity and simplicity.
     gapwidth = gapwidth / 2.0;
     float halfwidth = width / 2.0;
     offset = -1.0 * offset;
@@ -1243,8 +1237,6 @@ lowp float floorwidth = u_floorwidth;
     normal.y = normal.y * 2.0 - 1.0;
     v_normal = normal;
 
-    // these transformations used to be applied in the JS and native code bases.
-    // moved them into the shader for clarity and simplicity.
     gapwidth = gapwidth / 2.0;
     float halfwidth = width / 2.0;
     offset = -1.0 * offset;
@@ -1533,8 +1525,6 @@ mediump float width = u_width;
     normal.y = normal.y * 2.0 - 1.0;
     v_normal = normal;
 
-    // these transformations used to be applied in the JS and native code bases.
-    // moved them into the shader for clarity and simplicity.
     gapwidth = gapwidth / 2.0;
     float halfwidth = width / 2.0;
     offset = -1.0 * offset;

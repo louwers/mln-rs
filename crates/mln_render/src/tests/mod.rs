@@ -9,17 +9,15 @@ mod bucket_test;
 mod fast_camera_test;
 mod gtest_sky;
 mod gtest_subdivision;
-// gtests-data: the test/tile gtests that need the renderer's tiles or
-// the map's Transform (tests/tile/main.rs lists them).
+// Raster, DEM and custom geometry tiles, and tile coordinates.
 mod tile;
-// gtests-data: the test/text gtests that need mln_render (GlyphStore) or
-// mln_style's Formatted (tests/text/main.rs lists them).
+// The glyph store and cache, and formatted text.
 mod text;
-// gtests-core: test/renderer/image_manager.test.cpp.
+// The image store: images, their requests and missing-image events.
 mod gtest_image_store;
-// gtests-core: test/renderer/dynamic_texture_atlas.test.cpp.
+// The dynamic texture atlas's sharing and packing of images and glyphs.
 mod gtest_dynamic_texture_atlas;
-// gtests-core: test/algorithm/update_renderables.test.cpp.
+// The tile cover's choice of ideal, parent and child tiles.
 mod gtest_update_renderables;
 // Ports test/util/tile_range.test.cpp (marker `// gtest: Group.Name`).
 mod gtest_tile_range;

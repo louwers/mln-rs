@@ -310,8 +310,6 @@ void main() {
     vec2 normal = in_pos_normal - 2.0 * pos;
     frag_normal = vec2(normal.x, normal.y * 2.0 - 1.0);
 
-    // these transformations used to be applied in the JS and native code bases.
-    // moved them into the shader for clarity and simplicity.
     float halfwidth = width / 2.0;
 
     float inset = gapwidth + (gapwidth > 0.0 ? ANTIALIASING : 0.0);
@@ -562,8 +560,6 @@ void main() {
     vec2 normal = in_pos_normal - 2.0 * pos;
     frag_normal = vec2(normal.x, normal.y * 2.0 - 1.0);
 
-    // these transformations used to be applied in the JS and native code bases.
-    // moved them into the shader for clarity and simplicity.
     float halfwidth = width / 2.0;
 
     float inset = gapwidth + (gapwidth > 0.0 ? ANTIALIASING : 0.0);
@@ -845,8 +841,6 @@ void main() {
     vec2 normal = in_pos_normal - 2.0 * pos;
     frag_normal = vec2(normal.x, normal.y * 2.0 - 1.0);
 
-    // these transformations used to be applied in the JS and native code bases.
-    // moved them into the shader for clarity and simplicity.
     float halfwidth = width / 2.0;
 
     float inset = gapwidth + (gapwidth > 0.0 ? ANTIALIASING : 0.0);
@@ -1222,8 +1216,6 @@ void main() {
     vec2 normal = in_pos_normal - 2.0 * pos;
     frag_normal = vec2(normal.x, normal.y * 2.0 - 1.0);
 
-    // these transformations used to be applied in the JS and native code bases.
-    // moved them into the shader for clarity and simplicity.
     float halfwidth = width / 2.0;
 
     float inset = gapwidth + (gapwidth > 0.0 ? ANTIALIASING : 0.0);
@@ -1569,8 +1561,6 @@ void main() {
     vec2 normal = in_pos_normal - 2.0 * pos;
     frag_normal = vec2(normal.x, normal.y * 2.0 - 1.0);
 
-    // these transformations used to be applied in the JS and native code bases.
-    // moved them into the shader for clarity and simplicity.
     float halfwidth = width / 2.0;
 
     float inset = gapwidth + (gapwidth > 0.0 ? ANTIALIASING : 0.0);

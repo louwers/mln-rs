@@ -1,9 +1,6 @@
 //! The programs of the `symbol` layer type, its symbols and their collision
 //! boxes and circles, in GLSL ES, for `mln_gl`.
 //!
-//! They are the C++ core's, copied from the raw string literals of
-//! `include/mln/shaders/gl/{collision_box,collision_circle,symbol_icon,symbol_sdf,symbol_text_and_icon}.hpp`,
-//! with the port's changes:
 //! - The symbols' atlas origins reach the fragment shaders `flat`.
 //! - The symbol shaders read `a_tex_origin`, the atlas origin of a quad's
 //!   image, and the symbol and collision box shaders read `a_height_offset`,

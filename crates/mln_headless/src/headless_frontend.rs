@@ -2,10 +2,9 @@
 //! offscreen texture on the calling thread, for the render tests, the tests
 //! that render a map, and the benchmarks.
 
-// C++ renders with the one backend it was built with. The frontend renders
-// on the device it is given, or on WebGPU, or on the backend the
-// environment variable MLN_RENDER_BACKEND names for the test harness:
-// `webgpu`, `metal`, `vulkan`, `d3d12` or `gl`.
+// The frontend renders on the device it is given, or on WebGPU, or on the
+// backend the environment variable MLN_RENDER_BACKEND names for the test
+// harness: `webgpu`, `metal`, `vulkan`, `d3d12` or `gl`.
 
 use std::sync::Arc;
 
@@ -265,16 +264,17 @@ impl HeadlessFrontend {
         self.target.read_image().unwrap_or_else(|_| PremultipliedImage::new(Size::default()))
     }
 
-    /// `render(Map&)`: renders a still image, or fails with the map's still
+    /// Renders a still image, or fails with the map's still
     /// image error. It runs the frontend's queue and draws the map's updates
     /// until the image is complete, and parks on the queue while nothing
     /// happens, until the map's waker wakes it (see [`attach`](Self::attach)).
     /// The map handles its renderer's events meanwhile, and keeps its own
     /// events for its owner.
     pub fn render(&mut self, map: &mut MapCore) -> Result<RenderResult, Error> {
-        // C++ spins on runOnce, which costs a core per renderer while the
-        // workers parse tiles. Parking as soon as the queue is idle delays
-        // the short waits of a single renderer; spinning briefly keeps them.
+        // Spinning until the image is done costs a core per renderer while
+        // the workers parse tiles, and parking as soon as the queue is idle
+        // delays the short waits of a single renderer: the frontend spins
+        // briefly, then parks.
         const SPIN: std::time::Duration = std::time::Duration::from_millis(2);
 
         self.attach(map);
@@ -287,8 +287,8 @@ impl HeadlessFrontend {
         let mut idle_since = mln_util::time::Instant::now();
         let image = loop {
             map.process_events();
-            // C++ reads the image inside the callback, which runs at the end
-            // of the frame; nothing renders in between.
+            // The image is read as soon as the map has it: nothing renders
+            // in between.
             if let Some(result) = map.take_still_image() {
                 result?;
                 break self.target.read_image()?;
