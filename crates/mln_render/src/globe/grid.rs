@@ -35,17 +35,20 @@ pub fn tile_grid(tile: &CanonicalTileID) -> TileGrid {
 /// The grids of the parts of the tile `tile` that `mask` keeps, one per
 /// part, in `tile`'s units. Each part is gridded as the [`tile_grid`] of
 /// the tile it stands in for, so it meets that tile's neighbors edge to
-/// edge, and a part on the top or bottom row reaches its pole.
+/// edge, and a part on the top or bottom row reaches its pole. A part's
+/// zoom, `tile`'s plus its own, is at most 32, as a tile id's is.
 pub fn masked_tile_grids(tile: &CanonicalTileID, mask: &TileMask) -> impl Iterator<Item = TileGrid> {
     mask.iter().map(move |part| {
+        // In 64 bits, where a part of a zoom 0 tile at zoom 32 shifts by 32.
         let z = tile.z + part.z;
-        let part_tile = CanonicalTileID::new(z, (tile.x << part.z) + part.x, (tile.y << part.z) + part.y);
+        let within = |outer: u32, inner: u32| ((u64::from(outer) << part.z) + u64::from(inner)) as u32;
+        let part_tile = CanonicalTileID::new(z, within(tile.x, part.x), within(tile.y, part.y));
         let mut grid = tile_grid(&part_tile);
-        let extent = EXTENT >> part.z;
+        let extent = i64::from(EXTENT) >> part.z;
         for [x, y] in &mut grid.vertices {
-            *x = (part.x as i32 * extent + (i32::from(*x) >> part.z)) as i16;
+            *x = (i64::from(part.x) * extent + (i64::from(*x) >> part.z)) as i16;
             if *y != NORTH_POLE_Y && *y != SOUTH_POLE_Y {
-                *y = (part.y as i32 * extent + (i32::from(*y) >> part.z)) as i16;
+                *y = (i64::from(part.y) * extent + (i64::from(*y) >> part.z)) as i16;
             }
         }
         grid
@@ -62,7 +65,7 @@ pub fn masked_tile_grids(tile: &CanonicalTileID, mask: &TileMask) -> impl Iterat
 #[must_use]
 pub(crate) fn grid(tile: &CanonicalTileID, granularity: u32, borders: bool) -> TileGrid {
     let north_pole = tile.y == 0;
-    let south_pole = tile.y == (1u32 << tile.z) - 1;
+    let south_pole = u64::from(tile.y) == (1u64 << tile.z) - 1;
     let extra_quads_x: i32 = if borders { 2 } else { 0 };
     let extra_quads_y = i32::from(north_pole || borders) + i32::from(south_pole || borders);
     // At most 256 vertices per axis, so every index fits in 16 bits.
