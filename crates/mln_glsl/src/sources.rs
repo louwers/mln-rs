@@ -2860,10 +2860,11 @@ macro_rules! fill_extrusion_wall_main {
     frag_color = wall_color(color, normal, t, base, height);
 #if defined(TERRAIN)
     // The gradient carries on below the base to a foot that sinks, so that
-    // the wall shades where it showed as it did.
+    // the wall shades where it showed as it did. Written out, not with
+    // mix(), which Metal leaves undefined outside [0, 1].
     if (sink > 0.0) {
-        frag_color = mix(frag_color, wall_color(color, normal, 1.0, base, height),
-                         -sink / (height + groundHeight - base - baseGround));
+        vec4 top = wall_color(color, normal, 1.0, base, height);
+        frag_color += (top - frag_color) * (-sink / (height + groundHeight - base - baseGround));
     }
 #endif
 #endif
@@ -3498,10 +3499,11 @@ void main() {
 #if defined(TERRAIN)
     // The gradient carries on below the base to a foot that sinks, so that
     // the wall shades where it showed as it did. The pattern, placed by `z`,
-    // stays where it was.
+    // stays where it was. Written out, not with mix(), which Metal leaves
+    // undefined outside [0, 1].
     if (sink > 0.0) {
-        frag_lighting = mix(frag_lighting, wall_lighting(normal, 1.0, base, height),
-                            -sink / (height + groundHeight - base - baseGround));
+        vec4 top = wall_lighting(normal, 1.0, base, height);
+        frag_lighting += (top - frag_lighting) * (-sink / (height + groundHeight - base - baseGround));
     }
 #endif
     frag_pos_a = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, fromScale * display_size_a, tileZoomRatio, pos);

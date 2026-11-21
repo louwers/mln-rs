@@ -1661,10 +1661,11 @@ FragmentStage wall(thread const Vertex& vertx,
     float4 vcolor = wall_color(color, normal, t, base, height, props);
 #if defined(TERRAIN)
     // The gradient carries on below the base to a foot that sinks, so that
-    // the wall shades where it showed as it did.
+    // the wall shades where it showed as it did. Written out, not with
+    // mix(), which Metal leaves undefined outside [0, 1].
     if (sink > 0.0) {
-        vcolor = mix(vcolor, wall_color(color, normal, 1.0, base, height, props),
-                     -sink / (height + ground - base - base_ground));
+        const float4 top = wall_color(color, normal, 1.0, base, height, props);
+        vcolor += (top - vcolor) * (-sink / (height + ground - base - base_ground));
     }
 #endif
 
@@ -2124,10 +2125,11 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 #if defined(TERRAIN)
     // The gradient carries on below the base to a foot that sinks, so that
     // the wall shades where it showed as it did. The pattern, placed by `z`,
-    // stays where it was.
+    // stays where it was. Written out, not with mix(), which Metal leaves
+    // undefined outside [0, 1].
     if (sink > 0.0) {
-        lighting = mix(lighting, wall_lighting(normal, 1.0, base, height, props),
-                       -sink / (height + ground - base - base_ground));
+        const float4 top = wall_lighting(normal, 1.0, base, height, props);
+        lighting += (top - lighting) * (-sink / (height + ground - base - base_ground));
     }
 #endif
 

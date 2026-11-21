@@ -458,10 +458,11 @@ fn main(in: VertexInput) -> VertexOutput {
     out.color = lit_color(color, normal, t, baseValue, heightValue);
 #ifdef TERRAIN
     // The gradient carries on below the base to a foot that sinks, so that
-    // the wall shades where it showed as it did.
+    // the wall shades where it showed as it did. Written out, not with
+    // mix(), which Metal leaves undefined outside [0, 1].
     if (sink > 0.0) {
-        out.color = mix(out.color, lit_color(color, normal, 1.0, baseValue, heightValue),
-                        -sink / (heightValue + groundHeight - baseValue - baseGround));
+        let top = lit_color(color, normal, 1.0, baseValue, heightValue);
+        out.color += (top - out.color) * (-sink / (heightValue + groundHeight - baseValue - baseGround));
     }
 #endif
     return out;
@@ -592,10 +593,11 @@ fn main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     out.color = lit_color(color, normal, t, baseValue, heightValue);
 #ifdef TERRAIN
     // The gradient carries on below the base to a foot that sinks, so that
-    // the wall shades where it showed as it did.
+    // the wall shades where it showed as it did. Written out, not with
+    // mix(), which Metal leaves undefined outside [0, 1].
     if (sink > 0.0) {
-        out.color = mix(out.color, lit_color(color, normal, 1.0, baseValue, heightValue),
-                        -sink / (heightValue + groundHeight - baseValue - baseGround));
+        let top = lit_color(color, normal, 1.0, baseValue, heightValue);
+        out.color += (top - out.color) * (-sink / (heightValue + groundHeight - baseValue - baseGround));
     }
 #endif
     return out;
@@ -703,10 +705,11 @@ fn main(in: VertexInput) -> VertexOutput {
 #ifdef TERRAIN
     // The gradient carries on below the base to a foot that sinks, so that
     // the wall shades where it showed as it did. The pattern, placed by `z`,
-    // stays where it was.
+    // stays where it was. Written out, not with mix(), which Metal leaves
+    // undefined outside [0, 1].
     if (sink > 0.0) {
-        out.lighting = mix(out.lighting, lighting_of(normal, 1.0, baseValue, heightValue),
-                           -sink / (heightValue + groundHeight - baseValue - baseGround));
+        let top = lighting_of(normal, 1.0, baseValue, heightValue);
+        out.lighting += (top - out.lighting) * (-sink / (heightValue + groundHeight - baseValue - baseGround));
     }
 #endif
     set_pattern(&out, drawable, patternFrom, patternTo, vec2<f32>(edgedistance, z * drawable.height_factor));

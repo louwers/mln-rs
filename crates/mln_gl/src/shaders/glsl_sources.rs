@@ -1208,10 +1208,11 @@ highp vec4 color = u_color;
     v_color = wall_color(color, normal, t, base, height);
 #ifdef TERRAIN
     // The gradient carries on below the base to a foot that sinks, so that
-    // the wall shades where it showed as it did.
+    // the wall shades where it showed as it did. Written out, not with
+    // mix(), which Metal leaves undefined outside [0, 1].
     if (sink > 0.0) {
-        v_color = mix(v_color, wall_color(color, normal, 1.0, base, height),
-                      -sink / (height + groundHeight - base - baseGround));
+        vec4 top = wall_color(color, normal, 1.0, base, height);
+        v_color += (top - v_color) * (-sink / (height + groundHeight - base - baseGround));
     }
 #endif
 }
@@ -1407,10 +1408,11 @@ highp vec4 pattern_to = u_pattern_to;
 #ifdef TERRAIN
     // The gradient carries on below the base to a foot that sinks, so that
     // the wall shades where it showed as it did. The pattern, placed by `z`,
-    // stays where it was.
+    // stays where it was. Written out, not with mix(), which Metal leaves
+    // undefined outside [0, 1].
     if (sink > 0.0) {
-        v_lighting = mix(v_lighting, wall_lighting(normal, 1.0, base, height),
-                         -sink / (height + groundHeight - base - baseGround));
+        vec4 top = wall_lighting(normal, 1.0, base, height);
+        v_lighting += (top - v_lighting) * (-sink / (height + groundHeight - base - baseGround));
     }
 #endif
 }
