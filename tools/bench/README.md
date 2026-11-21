@@ -120,6 +120,10 @@ its sizes are the ones it uses.
 | `macro/load/street`                     | What does showing a city's streets from nothing take, until the first complete frame?                                                      |
 | `macro/load/globe`                      | What does showing the whole world on the globe from nothing take, until the first complete frame?                                          |
 | `macro/load/cjk`                        | What does showing a city labelled in Japanese script from nothing take, until the first complete frame?                                    |
+| `macro/load/street-4g`                  | How long does a city's streets take to show complete from nothing over a mobile link, and how much of the view is blank meanwhile?         |
+| `macro/load/street-slow`                | How long does a city's streets take to show complete from nothing over a slow link, and how much of the view is blank meanwhile?           |
+| `macro/load/street-warm`                | What does a disk cache that holds a city's streets save a map that shows them again over a mobile link?                                    |
+| `macro/load/street-expired`             | What does revalidating a disk cache of a city's streets that has expired cost a map that shows them again over a mobile link?              |
 | `macro/load/runtime`                    | What does showing a city's streets take through the runtime, from its start until a still image?                                           |
 | `macro/frame/street`                    | What does a frame of a city's streets cost while the camera pans, turns and tilts over loaded tiles?                                       |
 | `macro/frame/overzoom`                  | What does a frame of a city's streets cost far past its tiles' maximum zoom, tilted, while the camera turns over loaded tiles?             |
@@ -131,6 +135,9 @@ its sizes are the ones it uses.
 | `macro/navigate/street`                 | What does a flight into a city's streets and back out cost, with tiles arriving while it flies?                                            |
 | `macro/navigate/fly`                    | What does a flight from one city's streets, out over an ocean and into another city's streets, cost, with tiles arriving while it flies?   |
 | `macro/navigate/zoom`                   | What does zooming from a city's streets out to the world and back in cost, with tiles arriving while it zooms?                             |
+| `macro/navigate/fly-4g`                 | How much of the view does a flight from one city to another leave blank over a mobile link, and how many bytes go to tiles it passes over? |
+| `macro/navigate/street-flaky`           | How soon does the view of a city's streets come back complete after the network drops out during a flight?                                 |
+| `macro/navigate/zoom-slow`              | Does zooming out to the world and back in over a slow link fetch again the street tiles the map just let go of?                            |
 | `macro/update/geojson`                  | What does replacing a GeoJSON source's data cost, until the map shows the new data?                                                        |
 | `macro/update/layers`                   | What does adding a batch of layers to a city's map, then removing them, cost until the map shows each?                                     |
 | `macro/update/paint`                    | What does setting a layer's paint property cost, until the map shows the new value?                                                        |
@@ -151,9 +158,11 @@ cost grows shows as a changed ratio between the two.
 Macro scenarios drive a map over the fixtures one step at a time on the
 scenario's own thread (see [Driving a map](#driving-a-map)), the core that the
 runtime runs on its thread, with its background work on that thread too.
-`macro/load/runtime` instead loads a map through `mln_runtime`, as an
-application or the C API does: its thread, its pool's workers and an offscreen
-render session, which interleave differently from run to run.
+`macro/navigate` and the `macro/load/street-` scenarios load over a simulated
+network (see [Network and cache](#network-and-cache)). `macro/load/runtime`
+instead loads a map through `mln_runtime`, as an application or the C API does:
+its thread, its pool's workers and an offscreen render session, which interleave
+differently from run to run.
 
 ## Fixtures
 
@@ -270,15 +279,33 @@ in a benchmark's process (see
 [Reaching a library's internal stages](#reaching-a-librarys-internal-stages)).
 
 A scenario adds its own counts and times, such as `frames`, `frames_incomplete`
-(frames drawn with tiles missing), `tile_requests`, `gpu_buffers` (the bytes of
-the GPU's vertex and index buffers), `gpu_objects` (the textures and buffers the
-renderer made), `gpu_vertex_shader_invocations`, `gpu_primitives` and
+(frames drawn with tiles missing), `gpu_buffers` (the bytes of the GPU's vertex
+and index buffers), `gpu_objects` (the textures and buffers the renderer made),
+`gpu_vertex_shader_invocations`, `gpu_primitives` and
 `gpu_fragment_shader_invocations` (what the GPU's pipeline ran, where the device
 counts it: WebGPU on Vulkan or D3D12, a CPU rasterizer such as lavapipe
 included), or `background_work` (the times a frame started work off the frame,
 such as laying out a tile). A scenario that repeats a unit of work, such as a
 frame or a tile, also reports `instructions`, `allocations` and `allocated` per
 unit, such as `instructions_per_frame`.
+
+A scenario over the simulated network also counts what a user sees, from what
+the renderer drew for each tile of the view it wanted, each weighed by its area
+on the screen, so that a tilted view's far tiles count little:
+
+| metric                  | what                                                                                                                                             |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `blank_area_frames`     | the view's area where nothing drew, in thousandths of the view, summed over the frames: a wholly blank frame adds 1000                           |
+| `stand_in_area_frames`  | likewise, where a parent or children stood in for a tile that hadn't loaded                                                                      |
+| `frames_to_first_paint` | the frames until one drew a tile (`macro/load`)                                                                                                  |
+| `frames_to_complete`    | the frames from the map's start, or the camera's stop, until one drew every tile at its own zoom with everything loaded; all of them if none did |
+| `requests`              | the transfers started, and of them `requests_cancelled`, which the map dropped before their answer                                               |
+| `retries`, `refetches`  | the transfers of a resource whose last transfer failed, and of one that an earlier transfer brought                                              |
+| `bytes_transferred`     | what came over the network, headers included, and of it `bytes_wasted`, what transfers that were cancelled or failed brought                     |
+
+A frame before the style and its sources load counts as blank. A tile whose load
+failed counts as loaded to the map, which then reports a frame complete while a
+parent stands in for it: `frames_to_complete` doesn't count that frame.
 
 A user feels the costliest frames, not the average one: the frame that crosses
 the antimeridian, or the one where a tile arrives. So a scenario whose measured
@@ -437,8 +464,11 @@ A micro scenario calls a stage as a function over data. Where the stage is
 internal to its library, the library has a `bench` feature, off by default, and
 behind it a module `bench` (`src/bench.rs`) that is hidden from the
 documentation: `mln_renderer::bench::TileLayout` runs a tile's layout job, for
-instance. The harness turns the feature on in its `Cargo.toml`, so builds
-without the harness leave the module out.
+instance. Macro scenarios reach internals the same way:
+`mln_renderer::bench::take_coverage` reports what an update's tiles drew, and
+`mln_storage::bench::online_file_source` makes the online file source that the
+simulated network carries. The harness turns the feature on in its `Cargo.toml`,
+so builds without the harness leave the module out.
 
 The `bench` modules are part of the harness: they count in its id, and a
 comparison lays this checkout's over the ref's. An entry point takes and returns
@@ -472,10 +502,57 @@ the scenario drives it, so that it does the same work on every run:
 - `support::map::Frontend` holds the GPU device and target, made apart from the
   map, so that a scenario can leave them out of what it measures. A frame's part
   includes waiting for the GPU to finish it.
-- `support::latency::Latency` holds a file source's answers back for a number of
-  frames: a scenario that calls its `tick` before each frame, then runs the
-  background work, sees each answer arrive the same number of frames after its
-  request on every run.
+- `support::online::OnlineMap` loads the map over the simulated network (see
+  [Network and cache](#network-and-cache)): each frame runs the network's
+  answers and the map's background work, draws, and starts the transfers the
+  frame asked for, all at one time of the network's clock, which then moves a
+  frame on outside the measured part.
+
+### Network and cache
+
+`support::network` simulates a network under the real online file source, as an
+application runs it: its limit of 20 transfers in flight, their priorities,
+cancellation, retries after errors with their backoff, and revalidation of
+expired data. `mln_storage`'s `bench` module hands the source's transfers to the
+simulation, has its deadlines go by the simulation's clock, which moves one 60
+Hz frame per frame, and runs its core on the scenario's thread.
+
+A server answers from the fixtures: Liberty, its TileJSON, sprite and glyphs,
+and the archive's tiles, whose size on the wire is the archive's compressed
+bytes. Every answer carries an `ETag`, which a revalidation gets a 304 for. A
+transfer's first byte comes a round trip after it starts, and the transfers
+receiving share the link's bandwidth equally. Faults come from a seed, drawn
+from each transfer's URL and attempt alone, so that a change in what else the
+map requests doesn't move them: a share of the transfers fails with a connection
+error, and an outage fails every transfer in flight at its start and every one
+whose answer would come during it. The profiles:
+
+| profile | round trip | bandwidth  | faults                                                        |
+| ------- | ---------- | ---------- | ------------------------------------------------------------- |
+| `local` | none       | unlimited  |                                                               |
+| `cdn`   | 50 ms      | 50 Mbit/s  |                                                               |
+| `4g`    | 170 ms     | 9 Mbit/s   |                                                               |
+| `slow`  | 300 ms     | 1.6 Mbit/s |                                                               |
+| `flaky` | as `4g`    | as `4g`    | 2% of transfers fail; all do for 3 s from 1 s into the flight |
+
+A map starts with one of these disk caches, an in-memory database file source
+that the scenario waits for after each request, so that its answers come at the
+same step on every run:
+
+- cold: none, as in `macro/load/street-4g` and `-slow`;
+- warm: what a visit to the view over `local` stored before measuring, still
+  fresh, so that nothing goes to the network (`macro/load/street-warm`);
+- expired: the same, expired, so that the map shows it at once and revalidates
+  each resource (`macro/load/street-expired`).
+
+A view still in the map's own tile cache, as when it comes back to the street
+tiles after a zoom out (`macro/navigate/zoom-slow`), needs none of these. Expiry
+dates go by the system's clock: the server's are a week ahead or long past, so
+that whether one has passed never depends on when a run started.
+
+The navigate scenarios start settled at their first view over `local`, then fly
+over their profile: `macro/navigate/street`, `fly` and `zoom` over `cdn`, the
+others over the link their question names.
 
 ### Repeating counts
 

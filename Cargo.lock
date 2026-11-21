@@ -2525,6 +2525,7 @@ dependencies = [
  "mln-rs-vulkan",
  "mln-rs-webgpu",
  "parking_lot",
+ "percent-encoding",
  "pmtiles",
  "serde",
  "serde_json",
