@@ -2,7 +2,12 @@
 
 use mln_gfx::shaders::source::glsl::Glsl;
 
-const FILL_SHADER_PRELUDE: &str = r"
+use crate::shaders::{atlas_pos, pattern_pos};
+
+const FILL_SHADER_PRELUDE: &str = concat!(
+    pattern_pos!(glsl),
+    atlas_pos!(glsl),
+    r"
 
 #define idFillDrawableUBO           idDrawableReservedVertexOnlyUBO
 #define idFillTilePropsUBO          drawableReservedUBOCount
@@ -11,7 +16,8 @@ const FILL_SHADER_PRELUDE: &str = r"
 #define idFillOutlineEnds           drawableUBOStartId + 6
 #define idFillOutlinePaint          drawableUBOStartId + 7
 
-";
+"
+);
 
 pub(super) const FILL_SHADER: Glsl = Glsl {
     prelude: FILL_SHADER_PRELUDE,

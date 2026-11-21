@@ -11,6 +11,8 @@
 
 use mln_gfx::shaders::source::glsl::Glsl;
 
+use crate::shaders::atlas_pos;
+
 /// `unpack_opacity`, a symbol's fade opacity and whether it fades in, from
 /// the packed value of its vertex.
 macro_rules! unpack_opacity {
@@ -219,6 +221,7 @@ void main() {
 };
 
 const SYMBOL_SHADER_PRELUDE: &str = concat!(
+    atlas_pos!(glsl),
     r"
 
 #define idSymbolDrawableUBO         idDrawableReservedVertexOnlyUBO

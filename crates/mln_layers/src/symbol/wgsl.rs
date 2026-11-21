@@ -3,6 +3,8 @@
 
 use mln_gfx::shaders::source::wgsl::Wgsl;
 
+use crate::shaders::atlas_pos;
+
 /// `unpack_opacity`, a symbol's fade opacity and whether it fades in, from
 /// the packed value of its vertex.
 macro_rules! unpack_opacity {
@@ -399,6 +401,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 }
 ",
     prelude: concat!(
+        atlas_pos!(wgsl),
         unpack_opacity!(),
         r"
 
@@ -651,6 +654,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 }
 ",
     prelude: concat!(
+        atlas_pos!(wgsl),
         sdf_px!(),
         unpack_opacity!(),
         r"
@@ -921,6 +925,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 }
 ",
     prelude: concat!(
+        atlas_pos!(wgsl),
         sdf_px!(),
         unpack_opacity!(),
         r"

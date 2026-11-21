@@ -2,6 +2,8 @@
 
 use mln_gfx::shaders::source::wgsl::Wgsl;
 
+use crate::shaders::{atlas_pos, pattern_pos};
+
 pub(super) const BACKGROUND_PATTERN_SHADER: Wgsl = Wgsl {
     vertex: r"
 struct VertexInput {
@@ -83,7 +85,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     return mix(color_a, color_b, props.mix) * props.opacity;
 }
 ",
-    prelude: "",
+    prelude: concat!(pattern_pos!(wgsl), atlas_pos!(wgsl)),
 };
 
 pub(super) const BACKGROUND_SHADER: Wgsl = Wgsl {

@@ -2,8 +2,12 @@
 
 use mln_gfx::shaders::source::glsl_es::Glsl;
 
+use crate::shaders::{atlas_pos, pattern_pos};
+
 pub(super) const BACKGROUND_PATTERN_SHADER: Glsl = Glsl {
-    vertex: r"layout (location = 0) in vec2 a_pos;
+    vertex: concat!(
+        pattern_pos!(glsl_es),
+        r"layout (location = 0) in vec2 a_pos;
 out mediump vec2 v_pos_a;
 out mediump vec2 v_pos_b;
 
@@ -13,8 +17,11 @@ void main() {
     v_pos_a = get_pattern_pos(u_pixel_coord_upper, u_pixel_coord_lower, u_scale_a * u_pattern_size_a, u_tile_units_to_pixels, a_pos);
     v_pos_b = get_pattern_pos(u_pixel_coord_upper, u_pixel_coord_lower, u_scale_b * u_pattern_size_b, u_tile_units_to_pixels, a_pos);
 }
-",
-    fragment: r"uniform sampler2D u_image;
+"
+    ),
+    fragment: concat!(
+        atlas_pos!(glsl_es),
+        r"uniform sampler2D u_image;
 
 in mediump vec2 v_pos_a;
 in mediump vec2 v_pos_b;
@@ -40,7 +47,8 @@ void main() {
     fragColor = vec4(1.0);
 #endif
 }
-",
+"
+    ),
 };
 
 pub(super) const BACKGROUND_SHADER: Glsl = Glsl {

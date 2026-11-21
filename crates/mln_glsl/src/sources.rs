@@ -57,13 +57,6 @@ vec4 unpack_mix_color(const vec4 packedColors, const float t) {
     return mix(minColor, maxColor, t);
 }
 
-// unpack pattern position
-vec2 get_pattern_pos(const vec2 pixel_coord_upper, const vec2 pixel_coord_lower,
-                        const vec2 pattern_size, const float tile_units_to_pixels, const vec2 pos) {
-    const vec2 offset = mod(mod(mod(pixel_coord_upper, pattern_size) * 256.0, pattern_size) * 256.0 + pixel_coord_lower, pattern_size);
-    return (tile_units_to_pixels * pos + offset) / pattern_size;
-}
-
 #define GLOBAL_SET_INDEX                    0
 #define LAYER_SET_INDEX                     1
 #define DRAWABLE_UBO_SET_INDEX              2
@@ -231,15 +224,5 @@ pub(crate) const PRELUDE_FRAGMENT: &str = r"
 layout(set = GLOBAL_SET_INDEX, binding = 0) uniform ViewUBOBlock {
     ViewUBO view;
 };
-
-// The atlas texture coordinate of an image's origin plus an offset from it,
-// both normalized by a power-of-two atlas size. Snapping the offset to 2^-24
-// makes the sum exact, so the sampled position, and the pixels, don't depend
-// on where the image sits in the atlas. Adding an unsnapped offset rounds it
-// to a precision that depends on the origin. `roundEven` rounds halves to
-// even, as WGSL's `round` does.
-vec2 atlas_pos(const vec2 origin, const vec2 offset) {
-    return origin + roundEven(offset * 16777216.0) / 16777216.0;
-}
 
 ";

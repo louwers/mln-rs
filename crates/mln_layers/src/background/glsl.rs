@@ -2,12 +2,18 @@
 
 use mln_gfx::shaders::source::glsl::Glsl;
 
-const BACKGROUND_SHADER_PRELUDE: &str = r"
+use crate::shaders::{atlas_pos, pattern_pos};
+
+const BACKGROUND_SHADER_PRELUDE: &str = concat!(
+    pattern_pos!(glsl),
+    atlas_pos!(glsl),
+    r"
 
 #define idBackgroundDrawableUBO     idDrawableReservedVertexOnlyUBO
 #define idBackgroundPropsUBO        layerUBOStartId
 
-";
+"
+);
 
 pub(super) const BACKGROUND_SHADER: Glsl = Glsl {
     prelude: BACKGROUND_SHADER_PRELUDE,

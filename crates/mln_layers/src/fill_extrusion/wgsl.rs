@@ -18,6 +18,8 @@
 
 use mln_gfx::shaders::source::wgsl::Wgsl;
 
+use crate::shaders::{atlas_pos, pattern_pos};
+
 /// The fragment stage of the pattern shaders.
 const PATTERN_FRAGMENT: &str = r"
 struct FragmentInput {
@@ -485,7 +487,7 @@ fn main(in: VertexInput) -> VertexOutput {
 "
     ),
     fragment: PATTERN_FRAGMENT,
-    prelude: "",
+    prelude: concat!(pattern_pos!(wgsl), atlas_pos!(wgsl)),
 };
 
 /// The instanced fill extrusion pattern walls.
@@ -527,5 +529,5 @@ fn main(in: VertexInput) -> VertexOutput {
 "
     ),
     fragment: PATTERN_FRAGMENT,
-    prelude: "",
+    prelude: concat!(pattern_pos!(wgsl), atlas_pos!(wgsl)),
 };

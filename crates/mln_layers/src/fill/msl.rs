@@ -2,6 +2,8 @@
 
 use mln_gfx::shaders::source::msl::Msl;
 
+use crate::shaders::{atlas_pos, pattern_pos};
+
 /// `outline_corner`, the corner of an instanced fill outline's quad.
 macro_rules! outline_corner {
     () => {
@@ -66,7 +68,10 @@ OutlineCorner outline_corner(float4 start, float4 end, short2 corner, float2 wor
 pub(super) const FILL_OUTLINE_PATTERN_INSTANCED_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r"
+    prelude: concat!(
+        pattern_pos!(msl),
+        atlas_pos!(msl),
+        r"
 
 enum {
     idFillDrawableUBO = idDrawableReservedVertexOnlyUBO,
@@ -87,7 +92,8 @@ enum {
 //
 // Fill pattern outline
 
-",
+"
+    ),
     source: concat!(
         r"
 
@@ -409,7 +415,10 @@ FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]],
 pub(super) const FILL_PATTERN_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r"
+    prelude: concat!(
+        pattern_pos!(msl),
+        atlas_pos!(msl),
+        r"
 
 enum {
     idFillDrawableUBO = idDrawableReservedVertexOnlyUBO,
@@ -430,7 +439,8 @@ enum {
 //
 // Fill pattern outline
 
-",
+"
+    ),
     source: r"
 
 struct VertexStage {

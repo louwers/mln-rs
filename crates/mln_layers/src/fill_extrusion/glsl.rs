@@ -2,7 +2,12 @@
 
 use mln_gfx::shaders::source::glsl::Glsl;
 
-const FILL_EXTRUSION_SHADER_PRELUDE: &str = r"
+use crate::shaders::{atlas_pos, pattern_pos};
+
+const FILL_EXTRUSION_SHADER_PRELUDE: &str = concat!(
+    pattern_pos!(glsl),
+    atlas_pos!(glsl),
+    r"
 
 #define idFillExtrusionDrawableUBO              idDrawableReservedVertexOnlyUBO
 #define idFillExtrusionTilePropsUBO             drawableReservedUBOCount
@@ -21,7 +26,8 @@ vec2 wall_normal(const uint bits, const vec2 own) {
     return vec2(cos(angle), sin(angle));
 }
 
-";
+"
+);
 
 pub(super) const FILL_EXTRUSION_SHADER: Glsl = Glsl {
     prelude: FILL_EXTRUSION_SHADER_PRELUDE,

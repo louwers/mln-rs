@@ -2,10 +2,15 @@
 
 use mln_gfx::shaders::source::msl::Msl;
 
+use crate::shaders::{atlas_pos, pattern_pos};
+
 pub(super) const BACKGROUND_PATTERN_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r"
+    prelude: concat!(
+        pattern_pos!(msl),
+        atlas_pos!(msl),
+        r"
 
 enum {
     idBackgroundDrawableUBO = idDrawableReservedVertexOnlyUBO,
@@ -19,7 +24,8 @@ enum {
 //
 // Background pattern
 
-",
+"
+    ),
     source: r"
 
 struct VertexStage {

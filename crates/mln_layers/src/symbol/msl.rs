@@ -7,6 +7,8 @@
 
 use mln_gfx::shaders::source::msl::Msl;
 
+use crate::shaders::atlas_pos;
+
 /// `unpack_opacity`, a symbol's fade opacity and whether it fades in, from
 /// the packed value of its vertex.
 macro_rules! unpack_opacity {
@@ -234,6 +236,7 @@ pub(super) const SYMBOL_ICON_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: concat!(
+        atlas_pos!(msl),
         unpack_opacity!(),
         r"
 
@@ -438,6 +441,7 @@ pub(super) const SYMBOL_SDF_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: concat!(
+        atlas_pos!(msl),
         sdf_px!(),
         unpack_opacity!(),
         r"
@@ -704,6 +708,7 @@ pub(super) const SYMBOL_TEXT_AND_ICON_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: concat!(
+        atlas_pos!(msl),
         sdf_px!(),
         unpack_opacity!(),
         r"

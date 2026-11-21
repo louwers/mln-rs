@@ -16,6 +16,8 @@
 
 use mln_gfx::shaders::source::wgsl::Wgsl;
 
+use crate::shaders::{atlas_pos, pattern_pos};
+
 pub(super) const FILL_OUTLINE_PATTERN_SHADER: Wgsl = Wgsl {
     vertex: r"
 struct VertexInput {
@@ -180,7 +182,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     return mix(color_a, color_b, props.fade) * alpha * opacity;
 }
 ",
-    prelude: "",
+    prelude: concat!(pattern_pos!(wgsl), atlas_pos!(wgsl)),
 };
 
 pub(super) const FILL_OUTLINE_SHADER: Wgsl = Wgsl {
@@ -413,7 +415,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     return mix(color_a, color_b, props.fade) * opacity;
 }
 ",
-    prelude: "",
+    prelude: concat!(pattern_pos!(wgsl), atlas_pos!(wgsl)),
 };
 
 pub(super) const FILL_SHADER: Wgsl = Wgsl {
@@ -736,5 +738,5 @@ fn main(in: VertexInput) -> VertexOutput {
 "
     ),
     fragment: FILL_OUTLINE_PATTERN_SHADER.fragment,
-    prelude: "",
+    prelude: concat!(pattern_pos!(wgsl), atlas_pos!(wgsl)),
 };

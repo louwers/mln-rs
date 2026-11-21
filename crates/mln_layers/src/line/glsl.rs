@@ -2,6 +2,8 @@
 
 use mln_gfx::shaders::source::glsl::Glsl;
 
+use crate::shaders::atlas_pos;
+
 /// What every vertex stage of the type reads: the scale of the extrusion
 /// vectors, the width of a line on the globe, and the tile x that clips the
 /// zoom 0 tile's lines at the antimeridian.
@@ -54,7 +56,9 @@ bool clippedAtAntimeridian(float tileX) {
     };
 }
 
-const LINE_SHADE_PRELUDE: &str = r"
+const LINE_SHADE_PRELUDE: &str = concat!(
+    atlas_pos!(glsl),
+    r"
 
 #define idLineDrawableUBO           idDrawableReservedVertexOnlyUBO
 #define idLineTilePropsUBO          idDrawableReservedFragmentOnlyUBO
@@ -63,7 +67,8 @@ const LINE_SHADE_PRELUDE: &str = r"
 // The attribute conveying progress along a line is scaled to [0, 2^15).
 #define MAX_LINE_DISTANCE 32767.0
 
-";
+"
+);
 
 pub(super) const LINE_SHADER: Glsl = Glsl {
     prelude: LINE_SHADE_PRELUDE,

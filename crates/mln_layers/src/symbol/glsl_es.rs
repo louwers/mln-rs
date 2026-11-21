@@ -10,6 +10,8 @@
 
 use mln_gfx::shaders::source::glsl_es::Glsl;
 
+use crate::shaders::atlas_pos;
+
 /// `unpack_opacity`, a symbol's fade opacity and whether it fades in, from
 /// the packed value of its vertex.
 macro_rules! unpack_opacity {
@@ -296,7 +298,9 @@ void main() {
 }
 "
     ),
-    fragment: r"uniform sampler2D u_texture;
+    fragment: concat!(
+        atlas_pos!(glsl_es),
+        r"uniform sampler2D u_texture;
 
 in highp vec2 v_tex;
 flat in highp vec2 v_tex_origin;
@@ -314,7 +318,8 @@ void main() {
     fragColor = vec4(1.0);
 #endif
 }
-",
+"
+    ),
 };
 
 pub(super) const SYMBOL_SDF_SHADER: Glsl = Glsl {
@@ -485,7 +490,9 @@ lowp float halo_blur = $u_halo_blur;
 }
 "
     ),
-    fragment: r"#define SDF_PX 8.0
+    fragment: concat!(
+        atlas_pos!(glsl_es),
+        r"#define SDF_PX 8.0
 
 uniform sampler2D u_texture;
 
@@ -535,7 +542,8 @@ void main() {
     fragColor = vec4(1.0);
 #endif
 }
-",
+"
+    ),
 };
 
 pub(super) const SYMBOL_TEXT_AND_ICON_SHADER: Glsl = Glsl {
@@ -710,7 +718,9 @@ lowp float halo_blur = $u_halo_blur;
 }
 "
     ),
-    fragment: r"#define SDF_PX 8.0
+    fragment: concat!(
+        atlas_pos!(glsl_es),
+        r"#define SDF_PX 8.0
 
 uniform sampler2D u_texture;
 uniform sampler2D u_texture_icon;
@@ -773,5 +783,6 @@ void main() {
     fragColor = vec4(1.0);
 #endif
 }
-",
+"
+    ),
 };

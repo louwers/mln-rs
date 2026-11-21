@@ -2,6 +2,8 @@
 
 use mln_gfx::shaders::source::glsl_es::Glsl;
 
+use crate::shaders::{atlas_pos, pattern_pos};
+
 /// `wall_normal`, the normal at a wall's end from its outline vertex's
 /// `decimals_ed.x`: the one the walls there share, or else `own`, the
 /// wall's own.
@@ -114,6 +116,7 @@ void main() {
 
 pub(super) const FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: Glsl = Glsl {
     vertex: concat!(
+        pattern_pos!(glsl_es),
         wall_normal!(),
         r"invariant gl_Position;
 
@@ -202,7 +205,9 @@ void main() {
 }
 "
     ),
-    fragment: r"#ifdef GL_ES
+    fragment: concat!(
+        atlas_pos!(glsl_es),
+        r"#ifdef GL_ES
 precision highp float;
 #endif
 
@@ -250,11 +255,14 @@ void main() {
     fragColor = vec4(1.0);
 #endif
 }
-",
+"
+    ),
 };
 
 pub(super) const FILL_EXTRUSION_PATTERN_SHADER: Glsl = Glsl {
-    vertex: r"invariant gl_Position;
+    vertex: concat!(
+        pattern_pos!(glsl_es),
+        r"invariant gl_Position;
 
 layout (location = 0) in vec2 a_pos;
 layout (location = 1) in vec2 a_decimals_ed;
@@ -323,8 +331,11 @@ void main() {
     v_lighting.rgb += clamp(directional * u_light_color, mix(vec3(0.0), vec3(0.3), 1.0 - u_light_color), vec3(1.0));
     v_lighting *= u_opacity;
 }
-",
-    fragment: r"#ifdef GL_ES
+"
+    ),
+    fragment: concat!(
+        atlas_pos!(glsl_es),
+        r"#ifdef GL_ES
 precision highp float;
 #endif
 
@@ -372,7 +383,8 @@ void main() {
     fragColor = vec4(1.0);
 #endif
 }
-",
+"
+    ),
 };
 
 pub(super) const FILL_EXTRUSION_SHADER: Glsl = Glsl {

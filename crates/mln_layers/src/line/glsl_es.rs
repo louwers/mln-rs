@@ -2,6 +2,8 @@
 
 use mln_gfx::shaders::source::glsl_es::Glsl;
 
+use crate::shaders::atlas_pos;
+
 /// What every vertex stage of the type reads: the width of a line on the
 /// globe, and the tile x that clips the zoom 0 tile's lines at the
 /// antimeridian.
@@ -512,6 +514,7 @@ mediump float width = $u_width;
 "#
     ),
     fragment: concat!(
+        atlas_pos!(glsl_es),
         line_fragment_prelude!(),
         r"#ifdef GL_ES
 precision highp float;

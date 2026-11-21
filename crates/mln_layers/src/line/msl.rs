@@ -2,6 +2,8 @@
 
 use mln_gfx::shaders::source::msl::Msl;
 
+use crate::shaders::atlas_pos;
+
 /// What every program of the type reads before its own prelude: the scale
 /// of the extrusion vectors, the width of a line on the globe, and the
 /// clipping of the zoom 0 tile's lines at the antimeridian.
@@ -449,6 +451,7 @@ pub(super) const LINE_PATTERN_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: concat!(
+        atlas_pos!(msl),
         line_prelude!(),
         r"
 

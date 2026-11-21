@@ -2,6 +2,8 @@
 
 use mln_gfx::shaders::source::msl::Msl;
 
+use crate::shaders::{atlas_pos, pattern_pos};
+
 /// `wall_normal`, the normal at a wall's end from its outline vertex's
 /// `decimals_ed.x`: the one the walls there share, or else `own`, the
 /// wall's own.
@@ -244,6 +246,8 @@ pub(super) const FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: concat!(
+        pattern_pos!(msl),
+        atlas_pos!(msl),
         wall_normal!(),
         r"
 
@@ -437,7 +441,10 @@ fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]],
 pub(super) const FILL_EXTRUSION_PATTERN_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r"
+    prelude: concat!(
+        pattern_pos!(msl),
+        atlas_pos!(msl),
+        r"
 
 enum {
     idFillExtrusionDrawableUBO = idDrawableReservedVertexOnlyUBO,
@@ -446,7 +453,8 @@ enum {
     fillExtrusionUBOCount
 };
 
-",
+"
+    ),
     source: r"
 
 struct VertexStage {

@@ -97,31 +97,9 @@ vec4 unpack_mix_color(const vec4 packedColors, const float t) {
 // The offset depends on how many pixels are between the world origin and the edge of the tile:
 // vec2 offset = mod(pixel_coord, size)
 //
-// At high zoom levels there are a ton of pixels between the world origin and the edge of the tile.
-// The glsl spec only guarantees 16 bits of precision for highp floats. We need more than that.
-//
-// The pixel_coord is passed in as two 16 bit values:
-// pixel_coord_upper = floor(pixel_coord / 2^16)
-// pixel_coord_lower = mod(pixel_coord, 2^16)
-//
-// The offset is calculated in a series of steps that should preserve this precision:
-vec2 get_pattern_pos(const vec2 pixel_coord_upper, const vec2 pixel_coord_lower,
-    const vec2 pattern_size, const float tile_units_to_pixels, const vec2 pos) {
-
-    vec2 offset = mod(mod(mod(pixel_coord_upper, pattern_size) * 256.0, pattern_size) * 256.0 + pixel_coord_lower, pattern_size);
-    return (tile_units_to_pixels * pos + offset) / pattern_size;
-}
 ",
     fragment: r"out highp vec4 fragColor;
 
-// The atlas texture coordinate of an image's origin plus an offset from it,
-// both normalized by a power-of-two atlas size. Snapping the offset to 2^-24
-// makes the sum exact, so the sampled position, and the pixels, don't depend
-// on where the image sits in the atlas. Adding an unsnapped offset rounds it
-// to a precision that depends on the origin.
-highp vec2 atlas_pos(highp vec2 origin, highp vec2 offset) {
-    return origin + roundEven(offset * 16777216.0) / 16777216.0;
-}
 ",
 };
 

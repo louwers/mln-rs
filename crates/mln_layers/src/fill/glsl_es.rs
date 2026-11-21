@@ -2,8 +2,12 @@
 
 use mln_gfx::shaders::source::glsl_es::Glsl;
 
+use crate::shaders::{atlas_pos, pattern_pos};
+
 pub(super) const FILL_OUTLINE_PATTERN_SHADER: Glsl = Glsl {
-    vertex: r"layout (location = 0) in vec2 a_pos;
+    vertex: concat!(
+        pattern_pos!(glsl_es),
+        r"layout (location = 0) in vec2 a_pos;
 
 out vec2 v_pos_a;
 out vec2 v_pos_b;
@@ -44,8 +48,11 @@ void main() {
 
     v_pos = (gl_Position.xy / gl_Position.w + 1.0) / 2.0 * u_target_size;
 }
-",
-    fragment: r"#ifdef GL_ES
+"
+    ),
+    fragment: concat!(
+        atlas_pos!(glsl_es),
+        r"#ifdef GL_ES
 precision highp float;
 #endif
 
@@ -105,7 +112,8 @@ void main() {
     fragColor = vec4(1.0);
 #endif
 }
-",
+"
+    ),
 };
 
 pub(super) const FILL_OUTLINE_SHADER: Glsl = Glsl {
@@ -233,6 +241,7 @@ void main() {
 
 pub(super) const FILL_OUTLINE_PATTERN_INSTANCED_SHADER: Glsl = Glsl {
     vertex: concat!(
+        pattern_pos!(glsl_es),
         r"// The quad's corner: x picks the segment's start (0) or end (1), y its side.
 layout (location = 0) in vec2 a_pos;
 // Per instance: a vertex of the fill, and the end of the outline segment
@@ -277,7 +286,9 @@ void main() {
 };
 
 pub(super) const FILL_PATTERN_SHADER: Glsl = Glsl {
-    vertex: r"layout (location = 0) in vec2 a_pos;
+    vertex: concat!(
+        pattern_pos!(glsl_es),
+        r"layout (location = 0) in vec2 a_pos;
 
 out vec2 v_pos_a;
 out vec2 v_pos_b;
@@ -314,8 +325,11 @@ void main() {
     v_pos_a = get_pattern_pos(u_pixel_coord_upper, u_pixel_coord_lower, fromScale * display_size_a, tileZoomRatio, a_pos);
     v_pos_b = get_pattern_pos(u_pixel_coord_upper, u_pixel_coord_lower, toScale * display_size_b, tileZoomRatio, a_pos);
 }
-",
-    fragment: r"#ifdef GL_ES
+"
+    ),
+    fragment: concat!(
+        atlas_pos!(glsl_es),
+        r"#ifdef GL_ES
 precision highp float;
 #endif
 
@@ -369,7 +383,8 @@ void main() {
     fragColor = vec4(1.0);
 #endif
 }
-",
+"
+    ),
 };
 
 pub(super) const FILL_SHADER: Glsl = Glsl {

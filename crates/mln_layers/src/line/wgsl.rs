@@ -2,10 +2,14 @@
 
 use mln_gfx::shaders::source::wgsl::Wgsl;
 
+use crate::shaders::atlas_pos;
+
 /// What every stage of the type's programs reads: the scale of the
 /// extrusion vectors, the width of a line on the globe, and the clipping of
 /// the zoom 0 tile's lines at the antimeridian.
-const LINE_PRELUDE: &str = r"
+const LINE_PRELUDE: &str = concat!(
+    atlas_pos!(wgsl),
+    r"
 const LINE_NORMAL_SCALE: f32 = 1.0 / 63.0;  // 1.0 / (127 / 2)
 
 #ifdef PROJECTION_GLOBE
@@ -35,7 +39,8 @@ fn projectLineThickness(tileY: f32, projection: ProjectionUBO) -> f32 {
 }
 
 #endif
-";
+"
+);
 
 pub(super) const LINE_GRADIENT_SDF_SHADER: Wgsl = Wgsl {
     vertex: r"

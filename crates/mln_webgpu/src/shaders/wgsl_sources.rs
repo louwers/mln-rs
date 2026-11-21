@@ -46,15 +46,6 @@ fn unpack_mix_color(packedColors: vec4<f32>, t: f32) -> vec4<f32> {
     return mix(minColor, maxColor, t);
 }
 
-// Get pattern position for texture atlas lookups
-fn get_pattern_pos(pixel_coord_upper: vec2<f32>, pixel_coord_lower: vec2<f32>,
-                   pattern_size: vec2<f32>, tile_units_to_pixels: f32, pos: vec2<f32>) -> vec2<f32> {
-    let offset_a = gl_mod(pixel_coord_upper, pattern_size) * 256.0;
-    let offset_b = gl_mod(offset_a, pattern_size) * 256.0 + pixel_coord_lower;
-    let offset = gl_mod(offset_b, pattern_size);
-    return (tile_units_to_pixels * pos + offset) / pattern_size;
-}
-
 // The draw's index into the storage buffers it reads, at `ID_GLOBAL_UBO_INDEX`.
 struct GlobalIndexUBO {
     value: u32,
@@ -188,14 +179,6 @@ fn projectTileFor3D(pos: vec2<f32>, elevation: f32, projection: ProjectionUBO) -
 
 #endif
 
-// The atlas texture coordinate of an image's origin plus an offset from it,
-// both normalized by a power-of-two atlas size. Snapping the offset to 2^-24
-// makes the sum exact, so the sampled position, and the pixels, don't depend
-// on where the image sits in the atlas. Adding an unsnapped offset rounds it
-// to a precision that depends on the origin.
-fn atlas_pos(origin: vec2<f32>, offset: vec2<f32>) -> vec2<f32> {
-    return origin + round(offset * 16777216.0) / 16777216.0;
-}
 ";
 
 /// The declarations of the engine's buffers: the view's block, the draw's

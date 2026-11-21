@@ -51,23 +51,6 @@ float4 unpack_mix_color(const float4 packedColors, const float t) {
                decode_color(float2(packedColors[2], packedColors[3])), t);
 }
 
-// Unpack pattern position
-inline float2 get_pattern_pos(const float2 pixel_coord_upper, const float2 pixel_coord_lower,
-                     const float2 pattern_size, const float tile_units_to_pixels, const float2 pos) {
-    const float2 offset = glMod(glMod(glMod(pixel_coord_upper, pattern_size) * 256.0, pattern_size) * 256.0 + pixel_coord_lower, pattern_size);
-    return (tile_units_to_pixels * pos + offset) / pattern_size;
-}
-
-// The atlas texture coordinate of an image's origin plus an offset from it,
-// both normalized by a power-of-two atlas size. Snapping the offset to 2^-24
-// makes the sum exact, so the sampled position, and the pixels, don't depend
-// on where the image sits in the atlas. Adding an unsnapped offset rounds it
-// to a precision that depends on the origin. `rint` rounds halves to even,
-// as WGSL's `round` does.
-inline float2 atlas_pos(const float2 origin, const float2 offset) {
-    return origin + rint(offset * 16777216.0) / 16777216.0;
-}
-
 // Pole vertices carry these sentinel Y values in their raw position.
 #define GLOBE_POLE_NORTH_Y -32767.5
 #define GLOBE_POLE_SOUTH_Y 32766.5
