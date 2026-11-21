@@ -3,11 +3,11 @@
 //! sources.
 
 use mln_gfx::gfx_types::AttributeDataType::Short2;
-use mln_gfx::shaders::program::{Attribute, Buffer, Program, Texture};
+use mln_gfx::shaders::program::{Attribute, Buffer, Program, Sources, Texture};
 use mln_gfx::shaders::shader_defines::{DRAWABLE_RESERVED_UBO_COUNT, ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO};
 
 use super::ubo::{ColorReliefDrawableUBO, ColorReliefEvaluatedPropsUBO, ColorReliefTilePropsUBO};
-use crate::shaders::sources;
+use super::{glsl, glsl_es, msl, wgsl};
 
 // The binding ids of the programs: their buffers, textures and vertex
 // attributes.
@@ -21,7 +21,7 @@ pub(crate) const ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE: usize = 0;
 pub(crate) const ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE: usize = 1;
 
 pub static COLOR_RELIEF: Program = Program {
-    name: "ColorReliefShader",
+    name: "color-relief",
     buffers: &[
         Buffer::storage::<ColorReliefDrawableUBO>(ID_COLOR_RELIEF_DRAWABLE_UBO),
         Buffer::storage::<ColorReliefTilePropsUBO>(ID_COLOR_RELIEF_TILE_PROPS_UBO),
@@ -34,10 +34,9 @@ pub static COLOR_RELIEF: Program = Program {
     instance_attributes: &[],
     textures: &[Texture::new("u_image"), Texture::unfilterable("u_elevation_stops"), Texture::new("u_color_stops")],
     properties: &[],
-    sources: sources!(
-        wgsl: COLOR_RELIEF_SHADER,
-        msl: COLOR_RELIEF_SHADER,
-        glsl_es: COLOR_RELIEF_SHADER,
-        glsl: COLOR_RELIEF_SHADER,
-    ),
+    sources: Sources::NONE
+        .wgsl(&wgsl::COLOR_RELIEF_SHADER)
+        .msl(&msl::COLOR_RELIEF_SHADER)
+        .glsl_es(&glsl_es::COLOR_RELIEF_SHADER)
+        .glsl(&glsl::COLOR_RELIEF_SHADER),
 };

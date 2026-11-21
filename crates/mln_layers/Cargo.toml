@@ -19,15 +19,6 @@ name = "mln_layers"
 doctest = false
 
 [features]
-# The programs' sources in each shading language, which a backend compiles:
-# WGSL for mln_webgpu, MSL for mln_mtl (on Apple platforms), GLSL ES for
-# mln_gl, and the GLSL that mln_glsl parses for mln_vulkan and mln_d3d12
-# (outside Apple platforms and the browser). The facade's backend features
-# turn on their languages', so a build carries only its backends' shaders.
-wgsl = []
-msl = []
-glsl-es = []
-glsl = []
 # `conformance`, the frames that the backends' tests draw through their
 # `Gpu`.
 gpu-conformance = []
@@ -61,20 +52,15 @@ serde_json.workspace = true
 geo-types.workspace = true
 # The expression builders of the format section override tests.
 mln_style = { workspace = true, features = ["dsl"] }
-# The WGSL sources, which the tests' WebGPU backend compiles, and the
-# entry points to the symbol layer type's placement.
-mln_layers = { package = "mln-rs-layers", path = ".", features = [
-  "bench",
-  "wgsl",
-] }
+# The entry points to the symbol layer type's placement.
+mln_layers = { package = "mln-rs-layers", path = ".", features = ["bench"] }
 # The transforms whose views the symbols' projection tests read.
 mln_runtime = { package = "mln-rs-runtime", path = "../mln_runtime", default-features = false, features = [
   "webgpu",
 ] }
 # The benchmarks' entry points to a tile's layout, which the tests run
-# behind the worker codec, the draw services on a bare `Gpu`, and the WGSL of
-# the engine's programs, which the tests' WebGPU backend compiles.
-mln_render = { workspace = true, features = ["bench", "testing", "wgsl"] }
+# behind the worker codec, and the draw services on a bare `Gpu`.
+mln_render = { workspace = true, features = ["bench", "testing"] }
 # The built-in registrations that the tests' styles parse against.
 mln_rs = { package = "mln-rs", path = "../..", default-features = false }
 mln_webgpu = { package = "mln-rs-webgpu", path = "../mln_webgpu" }

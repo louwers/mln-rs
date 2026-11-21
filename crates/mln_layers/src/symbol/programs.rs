@@ -3,7 +3,7 @@
 //! collision boxes and circles, and their sources.
 
 use mln_gfx::gfx_types::AttributeDataType::{Float, Float2, Float3, Float4, Short2, Short4, UShort2, UShort4};
-use mln_gfx::shaders::program::{Attribute, Buffer, Program, Property, Texture};
+use mln_gfx::shaders::program::{Attribute, Buffer, Program, Property, Sources, Texture};
 use mln_gfx::shaders::shader_defines::{
     DRAWABLE_RESERVED_UBO_COUNT, ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO, ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO,
     ID_PROJECTION_UBO,
@@ -12,7 +12,7 @@ use mln_gfx::shaders::shader_defines::{
 use super::ubo::{
     CollisionDrawableUBO, CollisionTilePropsUBO, SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO,
 };
-use crate::shaders::sources;
+use super::{glsl, glsl_es, msl, wgsl};
 
 // The binding ids of the programs: their buffers, textures and vertex
 // attributes.
@@ -49,7 +49,7 @@ pub(crate) const ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE: usize = 10;
 pub(crate) const ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE: usize = 11;
 
 pub static SYMBOL_ICON: Program = Program {
-    name: "SymbolIconShader",
+    name: "symbol-icon",
     buffers: &[
         Buffer::storage::<SymbolDrawableUBO>(ID_SYMBOL_DRAWABLE_UBO),
         Buffer::storage::<SymbolTilePropsUBO>(ID_SYMBOL_TILE_PROPS_UBO),
@@ -68,16 +68,15 @@ pub static SYMBOL_ICON: Program = Program {
     instance_attributes: &[],
     textures: &[Texture::new("u_texture")],
     properties: &[Property::float("opacity", ID_SYMBOL_OPACITY_ATTRIBUTE)],
-    sources: sources!(
-        wgsl: SYMBOL_ICON_SHADER,
-        msl: SYMBOL_ICON_SHADER,
-        glsl_es: SYMBOL_ICON_SHADER,
-        glsl: SYMBOL_ICON_SHADER,
-    ),
+    sources: Sources::NONE
+        .wgsl(&wgsl::SYMBOL_ICON_SHADER)
+        .msl(&msl::SYMBOL_ICON_SHADER)
+        .glsl_es(&glsl_es::SYMBOL_ICON_SHADER)
+        .glsl(&glsl::SYMBOL_ICON_SHADER),
 };
 
 pub static SYMBOL_SDF: Program = Program {
-    name: "SymbolSDFShader",
+    name: "symbol-sdf",
     buffers: &[
         Buffer::storage::<SymbolDrawableUBO>(ID_SYMBOL_DRAWABLE_UBO),
         Buffer::storage::<SymbolTilePropsUBO>(ID_SYMBOL_TILE_PROPS_UBO),
@@ -106,16 +105,15 @@ pub static SYMBOL_SDF: Program = Program {
         Property::float("halo_width", ID_SYMBOL_HALO_WIDTH_ATTRIBUTE),
         Property::float("halo_blur", ID_SYMBOL_HALO_BLUR_ATTRIBUTE),
     ],
-    sources: sources!(
-        wgsl: SYMBOL_SDF_SHADER,
-        msl: SYMBOL_SDF_SHADER,
-        glsl_es: SYMBOL_SDF_SHADER,
-        glsl: SYMBOL_SDF_SHADER,
-    ),
+    sources: Sources::NONE
+        .wgsl(&wgsl::SYMBOL_SDF_SHADER)
+        .msl(&msl::SYMBOL_SDF_SHADER)
+        .glsl_es(&glsl_es::SYMBOL_SDF_SHADER)
+        .glsl(&glsl::SYMBOL_SDF_SHADER),
 };
 
 pub static SYMBOL_TEXT_AND_ICON: Program = Program {
-    name: "SymbolTextAndIconShader",
+    name: "symbol-text-and-icon",
     buffers: &[
         Buffer::storage::<SymbolDrawableUBO>(ID_SYMBOL_DRAWABLE_UBO),
         Buffer::storage::<SymbolTilePropsUBO>(ID_SYMBOL_TILE_PROPS_UBO),
@@ -143,16 +141,15 @@ pub static SYMBOL_TEXT_AND_ICON: Program = Program {
         Property::float("halo_width", ID_SYMBOL_HALO_WIDTH_ATTRIBUTE),
         Property::float("halo_blur", ID_SYMBOL_HALO_BLUR_ATTRIBUTE),
     ],
-    sources: sources!(
-        wgsl: SYMBOL_TEXT_AND_ICON_SHADER,
-        msl: SYMBOL_TEXT_AND_ICON_SHADER,
-        glsl_es: SYMBOL_TEXT_AND_ICON_SHADER,
-        glsl: SYMBOL_TEXT_AND_ICON_SHADER,
-    ),
+    sources: Sources::NONE
+        .wgsl(&wgsl::SYMBOL_TEXT_AND_ICON_SHADER)
+        .msl(&msl::SYMBOL_TEXT_AND_ICON_SHADER)
+        .glsl_es(&glsl_es::SYMBOL_TEXT_AND_ICON_SHADER)
+        .glsl(&glsl::SYMBOL_TEXT_AND_ICON_SHADER),
 };
 
 pub static COLLISION_BOX: Program = Program {
-    name: "CollisionBoxShader",
+    name: "collision-box",
     buffers: &[
         Buffer::uniform::<CollisionDrawableUBO>(ID_COLLISION_DRAWABLE_UBO),
         Buffer::uniform::<CollisionTilePropsUBO>(ID_COLLISION_TILE_PROPS_UBO),
@@ -168,16 +165,15 @@ pub static COLLISION_BOX: Program = Program {
     instance_attributes: &[],
     textures: &[],
     properties: &[],
-    sources: sources!(
-        wgsl: COLLISION_BOX_SHADER,
-        msl: COLLISION_BOX_SHADER,
-        glsl_es: COLLISION_BOX_SHADER,
-        glsl: COLLISION_BOX_SHADER,
-    ),
+    sources: Sources::NONE
+        .wgsl(&wgsl::COLLISION_BOX_SHADER)
+        .msl(&msl::COLLISION_BOX_SHADER)
+        .glsl_es(&glsl_es::COLLISION_BOX_SHADER)
+        .glsl(&glsl::COLLISION_BOX_SHADER),
 };
 
 pub static COLLISION_CIRCLE: Program = Program {
-    name: "CollisionCircleShader",
+    name: "collision-circle",
     buffers: &[
         Buffer::uniform::<CollisionDrawableUBO>(ID_COLLISION_DRAWABLE_UBO),
         Buffer::uniform::<CollisionTilePropsUBO>(ID_COLLISION_TILE_PROPS_UBO),
@@ -191,10 +187,9 @@ pub static COLLISION_CIRCLE: Program = Program {
     instance_attributes: &[],
     textures: &[],
     properties: &[],
-    sources: sources!(
-        wgsl: COLLISION_CIRCLE_SHADER,
-        msl: COLLISION_CIRCLE_SHADER,
-        glsl_es: COLLISION_CIRCLE_SHADER,
-        glsl: COLLISION_CIRCLE_SHADER,
-    ),
+    sources: Sources::NONE
+        .wgsl(&wgsl::COLLISION_CIRCLE_SHADER)
+        .msl(&msl::COLLISION_CIRCLE_SHADER)
+        .glsl_es(&glsl_es::COLLISION_CIRCLE_SHADER)
+        .glsl(&glsl::COLLISION_CIRCLE_SHADER),
 };

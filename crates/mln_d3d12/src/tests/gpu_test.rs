@@ -11,9 +11,9 @@ use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FO
 
 use crate::{D3d12Gpu, Device};
 
-/// Each program with GLSL: the engine's and the built-in layer types'.
+/// Each program of the built-in layer types with GLSL.
 fn programs() -> Vec<(&'static Program, &'static Glsl)> {
-    let programs = mln_render::PROGRAMS.iter().chain(mln_layers::PROGRAMS);
+    let programs = mln_layers::PROGRAMS.iter();
     programs.filter_map(|&program| Some((program, program.sources.glsl?))).collect()
 }
 

@@ -247,11 +247,15 @@ impl Property {
     }
 }
 
-/// A program's source in each shading language, `None` in one it has no
-/// source in or that the build leaves out: [`wgsl`] for `mln_webgpu`,
-/// [`msl`] for `mln_mtl`, [`glsl_es`] for `mln_gl`, and [`glsl`] for
-/// `mln_vulkan` and `mln_d3d12`. A backend fails to compile a program
-/// without a source in its language.
+/// A program's source in each shading language: [`wgsl`] for
+/// `mln_webgpu`, [`msl`] for `mln_mtl`, [`glsl_es`] for `mln_gl`, and
+/// [`glsl`] for `mln_vulkan` and `mln_d3d12`. A backend fails to compile a
+/// program without a source in its language.
+///
+/// A program names its sources with the methods of each language, which
+/// keep a source only where the build has a backend of its language, so a
+/// build carries no other backend's shaders:
+/// `Sources::NONE.wgsl(&MY_WGSL).msl(&MY_MSL)`.
 #[derive(Clone, Copy, Debug)]
 pub struct Sources {
     pub wgsl: Option<&'static wgsl::Wgsl>,
@@ -261,9 +265,35 @@ pub struct Sources {
 }
 
 impl Sources {
-    /// No source in any language, to fill in the languages a program
-    /// lacks: `Sources { wgsl: Some(&MY_WGSL), ..Sources::NONE }`.
+    /// No source in any language.
     pub const NONE: Sources = Sources { wgsl: None, msl: None, glsl_es: None, glsl: None };
+
+    /// These sources and `source`, where the build has `mln_webgpu`.
+    #[must_use]
+    pub const fn wgsl(self, source: &'static wgsl::Wgsl) -> Sources {
+        Sources { wgsl: if cfg!(feature = "wgsl") { Some(source) } else { None }, ..self }
+    }
+
+    /// These sources and `source`, where the build has `mln_mtl` on an
+    /// Apple platform.
+    #[must_use]
+    pub const fn msl(self, source: &'static msl::Msl) -> Sources {
+        Sources { msl: if cfg!(all(feature = "msl", target_vendor = "apple")) { Some(source) } else { None }, ..self }
+    }
+
+    /// These sources and `source`, where the build has `mln_gl`.
+    #[must_use]
+    pub const fn glsl_es(self, source: &'static glsl_es::Glsl) -> Sources {
+        Sources { glsl_es: if cfg!(feature = "glsl-es") { Some(source) } else { None }, ..self }
+    }
+
+    /// These sources and `source`, where the build has `mln_glsl` outside
+    /// Apple platforms and the browser.
+    #[must_use]
+    pub const fn glsl(self, source: &'static glsl::Glsl) -> Sources {
+        let has = cfg!(all(feature = "glsl", not(any(target_vendor = "apple", target_family = "wasm"))));
+        Sources { glsl: if has { Some(source) } else { None }, ..self }
+    }
 }
 
 /// The define that compiles a program's globe variant.

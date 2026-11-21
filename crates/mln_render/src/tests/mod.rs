@@ -30,6 +30,8 @@ mod source_test;
 mod drop_on_workers_test;
 // The engine drives a layer type's placement pass on its schedule.
 mod placement_test;
+
+mod programs_test;
 // Port-only: malformed vector tiles become tile errors, not panics.
 mod malformed_tile_test;
 // The context destroys what it released after what was made of it.

@@ -20,9 +20,9 @@ use crate::index_table::IndexTable;
 use crate::shaders::shader_program::{compile, stage_sources};
 use crate::shaders::wgsl_sources::PRELUDE;
 
-/// Each program with WGSL: the engine's and the built-in layer types'.
+/// Each program of the built-in layer types with WGSL.
 fn programs() -> Vec<(&'static Program, &'static Wgsl)> {
-    let programs = mln_render::PROGRAMS.iter().chain(mln_layers::PROGRAMS);
+    let programs = mln_layers::PROGRAMS.iter();
     programs.filter_map(|&program| Some((program, program.sources.wgsl?))).collect()
 }
 
@@ -56,14 +56,7 @@ fn every_program_declares_the_properties_its_wgsl_reads_from_uniforms() {
 /// inspector, which counts its draws.
 #[test]
 fn every_layer_program_shows_the_overdraw_inspector() {
-    let not_layers = [
-        "ClippingMaskProgram",
-        "CollisionBoxShader",
-        "CollisionCircleShader",
-        "GlobeDepthShader",
-        "SkyShader",
-        "AtmosphereShader",
-    ];
+    let not_layers = ["collision-box", "collision-circle"];
     for (program, wgsl) in programs() {
         if !not_layers.contains(&program.name) {
             assert!(

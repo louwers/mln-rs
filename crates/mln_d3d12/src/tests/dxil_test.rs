@@ -4,9 +4,9 @@ use mln_glsl::variants::variants;
 
 use crate::ShaderCompiler;
 
-/// Each program with GLSL: the engine's and the built-in layer types'.
+/// Each program of the built-in layer types with GLSL.
 fn programs() -> Vec<(&'static Program, &'static Glsl)> {
-    let programs = mln_render::PROGRAMS.iter().chain(mln_layers::PROGRAMS);
+    let programs = mln_layers::PROGRAMS.iter();
     programs.filter_map(|&program| Some((program, program.sources.glsl?))).collect()
 }
 

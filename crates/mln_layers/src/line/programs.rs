@@ -3,7 +3,7 @@
 //! sources.
 
 use mln_gfx::gfx_types::AttributeDataType::{Float2, Float4, Short2, UByte4, UShort4};
-use mln_gfx::shaders::program::{Attribute, Buffer, Program, Property, Texture};
+use mln_gfx::shaders::program::{Attribute, Buffer, Program, Property, Sources, Texture};
 use mln_gfx::shaders::shader_defines::{
     DRAWABLE_RESERVED_UBO_COUNT, ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO, ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO,
 };
@@ -12,7 +12,7 @@ use super::ubo::{
     LineDrawableUBO, LineDrawableUnionUBO, LineEvaluatedPropsUBO, LineGradientDrawableUBO, LinePatternDrawableUBO,
     LinePatternTilePropsUBO, LineSDFDrawableUBO, LineSDFTilePropsUBO, LineTilePropsUnionUBO,
 };
-use crate::shaders::sources;
+use super::{glsl, glsl_es, msl, wgsl};
 
 // The binding ids of the programs: their buffers, textures and vertex
 // attributes.
@@ -46,7 +46,7 @@ const LINE_PROPERTIES: &[Property] = &[
 ];
 
 pub static LINE: Program = Program {
-    name: "LineShader",
+    name: "line",
     buffers: &[
         Buffer::storage_of::<LineDrawableUBO, LineDrawableUnionUBO>(ID_LINE_DRAWABLE_UBO),
         Buffer::uniform::<LineEvaluatedPropsUBO>(ID_LINE_EVALUATED_PROPS_UBO),
@@ -64,11 +64,15 @@ pub static LINE: Program = Program {
     instance_attributes: &[],
     textures: &[],
     properties: LINE_PROPERTIES,
-    sources: sources!(wgsl: LINE_SHADER, msl: LINE_SHADER, glsl_es: LINE_SHADER, glsl: LINE_SHADER,),
+    sources: Sources::NONE
+        .wgsl(&wgsl::LINE_SHADER)
+        .msl(&msl::LINE_SHADER)
+        .glsl_es(&glsl_es::LINE_SHADER)
+        .glsl(&glsl::LINE_SHADER),
 };
 
 pub static LINE_GRADIENT: Program = Program {
-    name: "LineGradientShader",
+    name: "line-gradient",
     buffers: &[
         Buffer::storage_of::<LineGradientDrawableUBO, LineDrawableUnionUBO>(ID_LINE_DRAWABLE_UBO),
         Buffer::uniform::<LineEvaluatedPropsUBO>(ID_LINE_EVALUATED_PROPS_UBO),
@@ -91,16 +95,15 @@ pub static LINE_GRADIENT: Program = Program {
         Property::float("offset", ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
         Property::float("width", ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
     ],
-    sources: sources!(
-        wgsl: LINE_GRADIENT_SHADER,
-        msl: LINE_GRADIENT_SHADER,
-        glsl_es: LINE_GRADIENT_SHADER,
-        glsl: LINE_GRADIENT_SHADER,
-    ),
+    sources: Sources::NONE
+        .wgsl(&wgsl::LINE_GRADIENT_SHADER)
+        .msl(&msl::LINE_GRADIENT_SHADER)
+        .glsl_es(&glsl_es::LINE_GRADIENT_SHADER)
+        .glsl(&glsl::LINE_GRADIENT_SHADER),
 };
 
 pub static LINE_PATTERN: Program = Program {
-    name: "LinePatternShader",
+    name: "line-pattern",
     buffers: &[
         Buffer::storage_of::<LinePatternDrawableUBO, LineDrawableUnionUBO>(ID_LINE_DRAWABLE_UBO),
         Buffer::storage_of::<LinePatternTilePropsUBO, LineTilePropsUnionUBO>(ID_LINE_TILE_PROPS_UBO),
@@ -128,16 +131,15 @@ pub static LINE_PATTERN: Program = Program {
         Property::vec4("pattern_from", ID_LINE_PATTERN_FROM_VERTEX_ATTRIBUTE),
         Property::vec4("pattern_to", ID_LINE_PATTERN_TO_VERTEX_ATTRIBUTE),
     ],
-    sources: sources!(
-        wgsl: LINE_PATTERN_SHADER,
-        msl: LINE_PATTERN_SHADER,
-        glsl_es: LINE_PATTERN_SHADER,
-        glsl: LINE_PATTERN_SHADER,
-    ),
+    sources: Sources::NONE
+        .wgsl(&wgsl::LINE_PATTERN_SHADER)
+        .msl(&msl::LINE_PATTERN_SHADER)
+        .glsl_es(&glsl_es::LINE_PATTERN_SHADER)
+        .glsl(&glsl::LINE_PATTERN_SHADER),
 };
 
 pub static LINE_SDF: Program = Program {
-    name: "LineSDFShader",
+    name: "line-sdf",
     buffers: &[
         Buffer::storage_of::<LineSDFDrawableUBO, LineDrawableUnionUBO>(ID_LINE_DRAWABLE_UBO),
         Buffer::storage_of::<LineSDFTilePropsUBO, LineTilePropsUnionUBO>(ID_LINE_TILE_PROPS_UBO),
@@ -167,16 +169,15 @@ pub static LINE_SDF: Program = Program {
         Property::float("floorwidth", ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE),
         Property::vec4("dasharray", ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE),
     ],
-    sources: sources!(
-        wgsl: LINE_SDF_SHADER,
-        msl: LINE_SDF_SHADER,
-        glsl_es: LINE_SDF_SHADER,
-        glsl: LINE_SDF_SHADER,
-    ),
+    sources: Sources::NONE
+        .wgsl(&wgsl::LINE_SDF_SHADER)
+        .msl(&msl::LINE_SDF_SHADER)
+        .glsl_es(&glsl_es::LINE_SDF_SHADER)
+        .glsl(&glsl::LINE_SDF_SHADER),
 };
 
 pub static LINE_GRADIENT_SDF: Program = Program {
-    name: "LineGradientSDFShader",
+    name: "line-gradient-sdf",
     buffers: &[
         Buffer::storage_of::<LineSDFDrawableUBO, LineDrawableUnionUBO>(ID_LINE_DRAWABLE_UBO),
         Buffer::storage_of::<LineSDFTilePropsUBO, LineTilePropsUnionUBO>(ID_LINE_TILE_PROPS_UBO),
@@ -204,10 +205,9 @@ pub static LINE_GRADIENT_SDF: Program = Program {
         Property::float("floorwidth", ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE),
         Property::vec4("dasharray", ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE),
     ],
-    sources: sources!(
-        wgsl: LINE_GRADIENT_SDF_SHADER,
-        msl: LINE_GRADIENT_SDF_SHADER,
-        glsl_es: LINE_GRADIENT_SDF_SHADER,
-        glsl: LINE_GRADIENT_SDF_SHADER,
-    ),
+    sources: Sources::NONE
+        .wgsl(&wgsl::LINE_GRADIENT_SDF_SHADER)
+        .msl(&msl::LINE_GRADIENT_SDF_SHADER)
+        .glsl_es(&glsl_es::LINE_GRADIENT_SDF_SHADER)
+        .glsl(&glsl::LINE_GRADIENT_SDF_SHADER),
 };

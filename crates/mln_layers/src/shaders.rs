@@ -7,10 +7,7 @@
 //! for the programs that read them, and a module of sources for
 //! each shading language: `wgsl` for `mln_webgpu`, `msl` for `mln_mtl`,
 //! `glsl_es` for `mln_gl`, and `glsl` for `mln_vulkan` and `mln_d3d12`,
-//! which parse it with `mln_glsl`. A language's sources build with the
-//! crate's feature of that name (`glsl-es` for GLSL ES) and where its
-//! backends build: MSL on Apple platforms, GLSL elsewhere but in the
-//! browser. A source binds what its program declares where
+//! which parse it with `mln_glsl`. A source binds what its program declares where
 //! `mln_gfx::shaders::program::Program` says, and reads the program's
 //! data-driven properties through the directives that
 //! `mln_gfx::shaders::source` describes.
@@ -47,36 +44,3 @@
 //!   inputs: they read the bucket's vertices from storage buffers in the
 //!   drawable set, by `gl_VertexIndex`.
 //! - The pattern rectangles reach the fragment stage flat.
-
-/// Declares the modules of a layer type's sources, one for each shading
-/// language that the build has, as this module's docs say.
-macro_rules! language_modules {
-    () => {
-        #[cfg(all(feature = "glsl", not(any(target_vendor = "apple", target_family = "wasm"))))]
-        mod glsl;
-        #[cfg(feature = "glsl-es")]
-        mod glsl_es;
-        #[cfg(all(feature = "msl", target_vendor = "apple"))]
-        mod msl;
-        #[cfg(feature = "wgsl")]
-        mod wgsl;
-    };
-}
-pub(crate) use language_modules;
-
-/// The [`Sources`](mln_gfx::shaders::program::Sources) of a program: of
-/// each language the build has, the const named for it in the language's
-/// module of the type ([`language_modules`]), each followed by a comma.
-macro_rules! sources {
-    ($(wgsl: $wgsl:ident,)? $(msl: $msl:ident,)? $(glsl_es: $glsl_es:ident,)? $(glsl: $glsl:ident,)?) => {
-        mln_gfx::shaders::program::Sources {
-            $(#[cfg(feature = "wgsl")] wgsl: Some(&super::wgsl::$wgsl),)?
-            $(#[cfg(all(feature = "msl", target_vendor = "apple"))] msl: Some(&super::msl::$msl),)?
-            $(#[cfg(feature = "glsl-es")] glsl_es: Some(&super::glsl_es::$glsl_es),)?
-            $(#[cfg(all(feature = "glsl", not(any(target_vendor = "apple", target_family = "wasm"))))]
-            glsl: Some(&super::glsl::$glsl),)?
-            ..mln_gfx::shaders::program::Sources::NONE
-        }
-    };
-}
-pub(crate) use sources;

@@ -28,15 +28,6 @@ default = ["font-face-shaper"]
 # into its second module, crates/mln_web_shaper, which its map loads only for
 # styles with font faces.
 font-face-shaper = []
-# The engine's programs' sources in each shading language, which a backend
-# compiles: WGSL for mln_webgpu, MSL for mln_mtl (on Apple platforms), GLSL ES
-# for mln_gl, and the GLSL that mln_glsl parses for mln_vulkan and mln_d3d12
-# (outside Apple platforms and the browser). The facade's backend features
-# turn on their languages', so a build carries only its backends' shaders.
-wgsl = []
-msl = []
-glsl-es = []
-glsl = []
 # `bench`, the entry points to internal stages that the benchmarks
 # (tools/bench) measure. Not API: hidden from the documentation.
 bench = []
@@ -76,15 +67,21 @@ mln_runtime = { package = "mln-rs-runtime", path = "../mln_runtime", default-fea
   "webgpu",
 ] }
 mln_storage = { workspace = true, features = ["stub-file-source"] }
+# The backends that the tests compile the engine's programs on.
+mln_gl = { package = "mln-rs-gl", path = "../mln_gl" }
 mln_webgpu = { package = "mln-rs-webgpu", path = "../mln_webgpu" }
-# The WGSL of the engine's programs, which the tests' WebGPU backend compiles.
-mln_render = { package = "mln-rs-render", path = ".", default-features = false, features = [
-  "wgsl",
-] }
 mlt-core.workspace = true
 pixelmatch = { package = "mln-rs-pixelmatch", path = "../../vendor/pixelmatch" }
 proptest.workspace = true
 serde_json.workspace = true
+
+[target.'cfg(target_vendor = "apple")'.dev-dependencies]
+mln_mtl = { package = "mln-rs-mtl", path = "../mln_mtl" }
+
+[target.'cfg(not(any(target_vendor = "apple", target_family = "wasm")))'.dev-dependencies]
+mln_glsl = { package = "mln-rs-glsl", path = "../mln_glsl", features = [
+  "variants",
+] }
 
 [lints]
 workspace = true

@@ -23,10 +23,13 @@ pub mod programs;
 mod projection;
 #[rustfmt::skip]
 mod properties;
+mod glsl;
+mod glsl_es;
+mod msl;
 mod quads;
 pub(crate) mod render_layer;
 pub mod ubo;
-crate::shaders::language_modules!();
+mod wgsl;
 
 use mln_style::layer::FontStack;
 use mln_style::layer_type::{LayerStyle, LayerTypeInfo, SourceKind, StyleLayerType};

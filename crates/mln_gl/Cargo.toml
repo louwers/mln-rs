@@ -23,7 +23,7 @@ bench = []
 [dependencies]
 bytemuck.workspace = true
 glow.workspace = true
-mln_gfx.workspace = true
+mln_gfx = { workspace = true, features = ["glsl-es"] }
 mln_tile_id.workspace = true
 mln_util.workspace = true
 parking_lot.workspace = true
@@ -61,11 +61,8 @@ web-sys = { workspace = true, features = [
 # The layer types' programs and the conformance cases, which the tests compile
 # and draw.
 mln_layers = { package = "mln-rs-layers", path = "../mln_layers", features = [
-  "glsl-es",
   "gpu-conformance",
 ] }
-# The engine's programs, which the tests compile.
-mln_render = { workspace = true, features = ["glsl-es"] }
 
 [lints]
 workspace = true

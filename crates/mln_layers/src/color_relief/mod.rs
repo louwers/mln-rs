@@ -4,9 +4,12 @@
 pub(crate) mod render_layer;
 #[rustfmt::skip]
 mod properties;
+mod glsl;
+mod glsl_es;
+mod msl;
 pub mod programs;
 pub mod ubo;
-crate::shaders::language_modules!();
+mod wgsl;
 
 use mln_style::layer_type::{LayerStyle, LayerTypeInfo, NoProperties, SourceKind, StyleLayerType};
 use mln_style::property_table::{PropertyTable, PropertyVisitor};

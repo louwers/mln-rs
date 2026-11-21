@@ -3,14 +3,14 @@
 //! sources.
 
 use mln_gfx::gfx_types::AttributeDataType::Short2;
-use mln_gfx::shaders::program::{Attribute, Buffer, Program, Texture};
+use mln_gfx::shaders::program::{Attribute, Buffer, Program, Sources, Texture};
 use mln_gfx::shaders::shader_defines::{DRAWABLE_RESERVED_UBO_COUNT, ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO};
 
 use super::ubo::{
     BackgroundDrawableUBO, BackgroundDrawableUnionUBO, BackgroundPatternDrawableUBO, BackgroundPatternPropsUBO,
     BackgroundPropsUBO,
 };
-use crate::shaders::sources;
+use super::{glsl, glsl_es, msl, wgsl};
 
 // The binding ids of the programs: their buffers, textures and vertex
 // attributes.
@@ -20,7 +20,7 @@ pub(crate) const ID_BACKGROUND_IMAGE_TEXTURE: usize = 0;
 pub(crate) const ID_BACKGROUND_POS_VERTEX_ATTRIBUTE: usize = 0;
 
 pub static BACKGROUND: Program = Program {
-    name: "BackgroundShader",
+    name: "background",
     buffers: &[
         Buffer::storage_of::<BackgroundDrawableUBO, BackgroundDrawableUnionUBO>(ID_BACKGROUND_DRAWABLE_UBO),
         Buffer::uniform::<BackgroundPropsUBO>(ID_BACKGROUND_PROPS_UBO),
@@ -29,16 +29,15 @@ pub static BACKGROUND: Program = Program {
     instance_attributes: &[],
     textures: &[],
     properties: &[],
-    sources: sources!(
-        wgsl: BACKGROUND_SHADER,
-        msl: BACKGROUND_SHADER,
-        glsl_es: BACKGROUND_SHADER,
-        glsl: BACKGROUND_SHADER,
-    ),
+    sources: Sources::NONE
+        .wgsl(&wgsl::BACKGROUND_SHADER)
+        .msl(&msl::BACKGROUND_SHADER)
+        .glsl_es(&glsl_es::BACKGROUND_SHADER)
+        .glsl(&glsl::BACKGROUND_SHADER),
 };
 
 pub static BACKGROUND_PATTERN: Program = Program {
-    name: "BackgroundPatternShader",
+    name: "background-pattern",
     buffers: &[
         Buffer::storage_of::<BackgroundPatternDrawableUBO, BackgroundDrawableUnionUBO>(ID_BACKGROUND_DRAWABLE_UBO),
         Buffer::uniform::<BackgroundPatternPropsUBO>(ID_BACKGROUND_PROPS_UBO),
@@ -47,10 +46,9 @@ pub static BACKGROUND_PATTERN: Program = Program {
     instance_attributes: &[],
     textures: &[Texture::new("u_image")],
     properties: &[],
-    sources: sources!(
-        wgsl: BACKGROUND_PATTERN_SHADER,
-        msl: BACKGROUND_PATTERN_SHADER,
-        glsl_es: BACKGROUND_PATTERN_SHADER,
-        glsl: BACKGROUND_PATTERN_SHADER,
-    ),
+    sources: Sources::NONE
+        .wgsl(&wgsl::BACKGROUND_PATTERN_SHADER)
+        .msl(&msl::BACKGROUND_PATTERN_SHADER)
+        .glsl_es(&glsl_es::BACKGROUND_PATTERN_SHADER)
+        .glsl(&glsl::BACKGROUND_PATTERN_SHADER),
 };

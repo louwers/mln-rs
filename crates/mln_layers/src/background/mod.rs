@@ -3,11 +3,14 @@
 
 #[rustfmt::skip]
 mod properties;
-pub mod programs;
-pub mod ubo;
-crate::shaders::language_modules!();
+mod glsl;
+mod glsl_es;
+mod msl;
 mod pattern_atlas;
+pub mod programs;
 pub(crate) mod render_layer;
+pub mod ubo;
+mod wgsl;
 
 use mln_style::layer_type::{LayerStyle, LayerTypeInfo, NoProperties, SourceKind, StyleLayerType};
 use mln_style::property_table::{PropertyTable, PropertyVisitor};

@@ -41,9 +41,9 @@ fn headless_backend(api: Api) -> Option<RendererBackend> {
     }
 }
 
-/// Each program with GLSL: the engine's and the built-in layer types'.
+/// Each program of the built-in layer types with GLSL.
 fn programs() -> Vec<(&'static Program, &'static Glsl)> {
-    let programs = mln_render::PROGRAMS.iter().chain(mln_layers::PROGRAMS);
+    let programs = mln_layers::PROGRAMS.iter();
     programs.filter_map(|&program| Some((program, program.sources.glsl_es?))).collect()
 }
 
@@ -76,14 +76,7 @@ fn every_program_declares_the_properties_its_glsl_reads_from_uniforms() {
 /// inspector, which counts its draws.
 #[test]
 fn every_layer_program_shows_the_overdraw_inspector() {
-    let not_layers = [
-        "ClippingMaskProgram",
-        "CollisionBoxShader",
-        "CollisionCircleShader",
-        "GlobeDepthShader",
-        "SkyShader",
-        "AtmosphereShader",
-    ];
+    let not_layers = ["collision-box", "collision-circle"];
     for (program, source) in programs() {
         if !not_layers.contains(&program.name) {
             assert!(

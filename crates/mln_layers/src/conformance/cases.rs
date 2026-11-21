@@ -19,7 +19,7 @@ use mln_gfx::types::{ColorBlendFactorType, DepthFunctionType};
 use mln_util::Color;
 use mln_util::size::Size;
 
-use super::{EXTENT, SIZE, buffer, clipping_mask, draw, fixed, position_layout, quad, tile_matrix, whole};
+use super::{EXTENT, SIZE, buffer, draw, fixed, position_layout, quad, tile_matrix, whole};
 use crate::background::programs::{
     ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE, ID_BACKGROUND_PROPS_UBO,
 };
@@ -232,20 +232,12 @@ pub fn invalid_calls(gpu: &mut impl Gpu) -> Result<(), GpuError> {
         TargetFormats { depth_stencil: Some(TextureFormat::Depth24PlusStencil8), ..RGBA8 },
     ))?;
     assert!(invalid(&with_draw(gpu, frame.draw(depth_pipeline))), "a pipeline for a depth attachment");
-    let mask_program = clipping_mask()?;
-    let mask = gpu.create_shader(&ShaderKey::new(mask_program, []))?;
-    let mask_layouts = [position_layout(mask_program.attributes[0].id)];
-    let mask_geometry = gpu.create_geometry(&GeometryDesc {
-        shader: mask,
-        layouts: &mask_layouts,
-        vertex_buffers: &[(frame.quad, 0)],
-        index_buffer: frame.indices,
-    })?;
-    let other_geometry = Draw { geometry: mask_geometry, ..frame.draw(frame.pipeline) };
+    let other = gpu.create_shader(&ShaderKey::new(&background::programs::BACKGROUND_PATTERN, []))?;
+    let other_geometry = background_geometry(gpu, other, frame.quad, frame.indices)?;
+    let other_geometry = Draw { geometry: other_geometry, ..frame.draw(frame.pipeline) };
     assert!(invalid(&with_draw(gpu, other_geometry)), "geometry of another shader");
-    let mask_pipeline =
-        gpu.create_pipeline(&PipelineDesc { shader: mask, vertex_buffers: &mask_layouts, ..background(mask, RGBA8) })?;
-    let other_bindings = Draw { geometry: mask_geometry, ..frame.draw(mask_pipeline) };
+    let other_pipeline = gpu.create_pipeline(&background(other, RGBA8))?;
+    let other_bindings = Draw { geometry: other_geometry.geometry, ..frame.draw(other_pipeline) };
     assert!(invalid(&with_draw(gpu, other_bindings)), "bindings of another shader");
     assert!(invalid(&gpu.draw(&frame.draw(frame.pipeline))), "a draw outside a pass");
 

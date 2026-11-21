@@ -3,13 +3,13 @@
 //! sources.
 
 use mln_gfx::gfx_types::AttributeDataType::{Float2, Float4, Short2, UShort2, UShort4};
-use mln_gfx::shaders::program::{Attribute, Buffer, Program, Property, Texture};
+use mln_gfx::shaders::program::{Attribute, Buffer, Program, Property, Sources, Texture};
 use mln_gfx::shaders::shader_defines::{
     DRAWABLE_RESERVED_UBO_COUNT, ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO, MAX_UBO_COUNT_PER_SHADER,
 };
 
 use super::ubo::{FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO};
-use crate::shaders::sources;
+use super::{glsl, glsl_es, msl, wgsl};
 
 // The binding ids of the programs: their buffers, textures and vertex
 // attributes.
@@ -39,7 +39,7 @@ pub(crate) const ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE: usize = 8;
 pub(crate) const ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE: usize = 9;
 
 pub static FILL_EXTRUSION: Program = Program {
-    name: "FillExtrusionShader",
+    name: "fill-extrusion",
     buffers: &[
         Buffer::storage::<FillExtrusionDrawableUBO>(ID_FILL_EXTRUSION_DRAWABLE_UBO),
         Buffer::storage::<FillExtrusionTilePropsUBO>(ID_FILL_EXTRUSION_TILE_PROPS_UBO),
@@ -59,16 +59,15 @@ pub static FILL_EXTRUSION: Program = Program {
         Property::color("color", ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
         Property::float("height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
     ],
-    sources: sources!(
-        wgsl: FILL_EXTRUSION_SHADER,
-        msl: FILL_EXTRUSION_SHADER,
-        glsl_es: FILL_EXTRUSION_SHADER,
-        glsl: FILL_EXTRUSION_SHADER,
-    ),
+    sources: Sources::NONE
+        .wgsl(&wgsl::FILL_EXTRUSION_SHADER)
+        .msl(&msl::FILL_EXTRUSION_SHADER)
+        .glsl_es(&glsl_es::FILL_EXTRUSION_SHADER)
+        .glsl(&glsl::FILL_EXTRUSION_SHADER),
 };
 
 pub static FILL_EXTRUSION_INSTANCED: Program = Program {
-    name: "FillExtrusionInstancedShader",
+    name: "fill-extrusion-instanced",
     buffers: &[
         Buffer::storage::<FillExtrusionDrawableUBO>(ID_FILL_EXTRUSION_DRAWABLE_UBO),
         Buffer::storage::<FillExtrusionTilePropsUBO>(ID_FILL_EXTRUSION_TILE_PROPS_UBO),
@@ -90,18 +89,17 @@ pub static FILL_EXTRUSION_INSTANCED: Program = Program {
         Property::color("color", ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
         Property::float("height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
     ],
-    sources: sources!(
-        wgsl: FILL_EXTRUSION_INSTANCED_SHADER,
-        msl: FILL_EXTRUSION_INSTANCED_SHADER,
-        glsl_es: FILL_EXTRUSION_INSTANCED_SHADER,
-        glsl: FILL_EXTRUSION_INSTANCED_SHADER,
-    ),
+    sources: Sources::NONE
+        .wgsl(&wgsl::FILL_EXTRUSION_INSTANCED_SHADER)
+        .msl(&msl::FILL_EXTRUSION_INSTANCED_SHADER)
+        .glsl_es(&glsl_es::FILL_EXTRUSION_INSTANCED_SHADER)
+        .glsl(&glsl::FILL_EXTRUSION_INSTANCED_SHADER),
 };
 
 /// The walls of [`FILL_EXTRUSION_INSTANCED`] with every attribute per
 /// vertex, for walls whose quads are in the vertex buffer.
 pub static FILL_EXTRUSION_WALL: Program = Program {
-    name: "FillExtrusionWallShader",
+    name: "fill-extrusion-wall",
     buffers: &[
         Buffer::storage::<FillExtrusionDrawableUBO>(ID_FILL_EXTRUSION_DRAWABLE_UBO),
         Buffer::storage::<FillExtrusionTilePropsUBO>(ID_FILL_EXTRUSION_TILE_PROPS_UBO),
@@ -124,18 +122,17 @@ pub static FILL_EXTRUSION_WALL: Program = Program {
         Property::color("color", ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
         Property::float("height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
     ],
-    sources: sources!(
-        wgsl: FILL_EXTRUSION_INSTANCED_SHADER,
-        glsl_es: FILL_EXTRUSION_INSTANCED_SHADER,
-        glsl: FILL_EXTRUSION_INSTANCED_SHADER,
-    ),
+    sources: Sources::NONE
+        .wgsl(&wgsl::FILL_EXTRUSION_INSTANCED_SHADER)
+        .glsl_es(&glsl_es::FILL_EXTRUSION_INSTANCED_SHADER)
+        .glsl(&glsl::FILL_EXTRUSION_INSTANCED_SHADER),
 };
 
 /// The walls of [`FILL_EXTRUSION_INSTANCED`] as quads without vertex
 /// attributes: a vertex reads its wall's outline vertices and paint values
 /// from storage buffers, by its index.
 pub static FILL_EXTRUSION_PULLED: Program = Program {
-    name: "FillExtrusionPulledShader",
+    name: "fill-extrusion-pulled",
     buffers: &[
         Buffer::storage::<FillExtrusionDrawableUBO>(ID_FILL_EXTRUSION_DRAWABLE_UBO),
         Buffer::storage::<FillExtrusionTilePropsUBO>(ID_FILL_EXTRUSION_TILE_PROPS_UBO),
@@ -151,15 +148,14 @@ pub static FILL_EXTRUSION_PULLED: Program = Program {
         Property::color("color", ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
         Property::float("height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
     ],
-    sources: sources!(
-        wgsl: FILL_EXTRUSION_PULLED_SHADER,
-        msl: FILL_EXTRUSION_PULLED_SHADER,
-        glsl: FILL_EXTRUSION_PULLED_SHADER,
-    ),
+    sources: Sources::NONE
+        .wgsl(&wgsl::FILL_EXTRUSION_PULLED_SHADER)
+        .msl(&msl::FILL_EXTRUSION_PULLED_SHADER)
+        .glsl(&glsl::FILL_EXTRUSION_PULLED_SHADER),
 };
 
 pub static FILL_EXTRUSION_PATTERN: Program = Program {
-    name: "FillExtrusionPatternShader",
+    name: "fill-extrusion-pattern",
     buffers: &[
         Buffer::storage::<FillExtrusionDrawableUBO>(ID_FILL_EXTRUSION_DRAWABLE_UBO),
         Buffer::storage::<FillExtrusionTilePropsUBO>(ID_FILL_EXTRUSION_TILE_PROPS_UBO),
@@ -181,16 +177,15 @@ pub static FILL_EXTRUSION_PATTERN: Program = Program {
         Property::vec4("pattern_from", ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE),
         Property::vec4("pattern_to", ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE),
     ],
-    sources: sources!(
-        wgsl: FILL_EXTRUSION_PATTERN_SHADER,
-        msl: FILL_EXTRUSION_PATTERN_SHADER,
-        glsl_es: FILL_EXTRUSION_PATTERN_SHADER,
-        glsl: FILL_EXTRUSION_PATTERN_SHADER,
-    ),
+    sources: Sources::NONE
+        .wgsl(&wgsl::FILL_EXTRUSION_PATTERN_SHADER)
+        .msl(&msl::FILL_EXTRUSION_PATTERN_SHADER)
+        .glsl_es(&glsl_es::FILL_EXTRUSION_PATTERN_SHADER)
+        .glsl(&glsl::FILL_EXTRUSION_PATTERN_SHADER),
 };
 
 pub static FILL_EXTRUSION_PATTERN_INSTANCED: Program = Program {
-    name: "FillExtrusionPatternInstancedShader",
+    name: "fill-extrusion-pattern-instanced",
     buffers: &[
         Buffer::storage::<FillExtrusionDrawableUBO>(ID_FILL_EXTRUSION_DRAWABLE_UBO),
         Buffer::storage::<FillExtrusionTilePropsUBO>(ID_FILL_EXTRUSION_TILE_PROPS_UBO),
@@ -214,17 +209,16 @@ pub static FILL_EXTRUSION_PATTERN_INSTANCED: Program = Program {
         Property::vec4("pattern_from", ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE),
         Property::vec4("pattern_to", ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE),
     ],
-    sources: sources!(
-        wgsl: FILL_EXTRUSION_PATTERN_INSTANCED_SHADER,
-        msl: FILL_EXTRUSION_PATTERN_INSTANCED_SHADER,
-        glsl_es: FILL_EXTRUSION_PATTERN_INSTANCED_SHADER,
-        glsl: FILL_EXTRUSION_PATTERN_INSTANCED_SHADER,
-    ),
+    sources: Sources::NONE
+        .wgsl(&wgsl::FILL_EXTRUSION_PATTERN_INSTANCED_SHADER)
+        .msl(&msl::FILL_EXTRUSION_PATTERN_INSTANCED_SHADER)
+        .glsl_es(&glsl_es::FILL_EXTRUSION_PATTERN_INSTANCED_SHADER)
+        .glsl(&glsl::FILL_EXTRUSION_PATTERN_INSTANCED_SHADER),
 };
 
 /// [`FILL_EXTRUSION_WALL`] of the pattern walls.
 pub static FILL_EXTRUSION_PATTERN_WALL: Program = Program {
-    name: "FillExtrusionPatternWallShader",
+    name: "fill-extrusion-pattern-wall",
     buffers: &[
         Buffer::storage::<FillExtrusionDrawableUBO>(ID_FILL_EXTRUSION_DRAWABLE_UBO),
         Buffer::storage::<FillExtrusionTilePropsUBO>(ID_FILL_EXTRUSION_TILE_PROPS_UBO),
@@ -249,9 +243,8 @@ pub static FILL_EXTRUSION_PATTERN_WALL: Program = Program {
         Property::vec4("pattern_from", ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE),
         Property::vec4("pattern_to", ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE),
     ],
-    sources: sources!(
-        wgsl: FILL_EXTRUSION_PATTERN_INSTANCED_SHADER,
-        glsl_es: FILL_EXTRUSION_PATTERN_INSTANCED_SHADER,
-        glsl: FILL_EXTRUSION_PATTERN_INSTANCED_SHADER,
-    ),
+    sources: Sources::NONE
+        .wgsl(&wgsl::FILL_EXTRUSION_PATTERN_INSTANCED_SHADER)
+        .glsl_es(&glsl_es::FILL_EXTRUSION_PATTERN_INSTANCED_SHADER)
+        .glsl(&glsl::FILL_EXTRUSION_PATTERN_INSTANCED_SHADER),
 };

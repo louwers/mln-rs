@@ -16,8 +16,8 @@
 //! [`transparent_replace`] does to check that `Replace` doesn't blend. On
 //! wasm, [`host_writes`] checks writes from JS arrays.
 //!
-//! The cases draw with the engine's clipping mask program
-//! ([`mln_render::PROGRAMS`]) and this crate's.
+//! The cases draw with this crate's programs: the mask is the background's,
+//! its color writes off.
 
 mod cases;
 
@@ -31,7 +31,6 @@ use mln_gfx::gpu::{
     TextureDesc, TextureFormat, TextureId, TextureUsage, VertexAttribute, VertexBufferLayout, VertexStep,
 };
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
 use mln_gfx::types::StencilOpType;
 use mln_util::Color;
@@ -54,17 +53,6 @@ fn tile_matrix(x_max: f32) -> [f32; 16] {
     let sx = (x_max + 1.0) / EXTENT;
     let sy = 2.0 / EXTENT;
     [sx, 0.0, 0.0, 0.0, 0.0, sy, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, -1.0, -1.0, 0.0, 1.0]
-}
-
-/// The engine's program of a tile's clipping mask, which draws the quad of
-/// its one attribute's positions through the projection block into the
-/// stencil.
-fn clipping_mask() -> Result<&'static Program, GpuError> {
-    mln_render::PROGRAMS
-        .iter()
-        .copied()
-        .find(|program| program.name == "ClippingMaskProgram")
-        .ok_or_else(|| GpuError::Unsupported("no clipping mask program".to_owned()))
 }
 
 fn buffer(gpu: &mut (impl Gpu + ?Sized), usage: BufferUsage, data: &[u8]) -> Result<BufferId, GpuError> {
@@ -160,9 +148,9 @@ pub fn clip_mask_and_background(gpu: &mut impl Gpu) -> Result<(), GpuError> {
     check_clipped(&read(gpu, color)?);
 
     let unbound = gpu.create_bindings(&BindingsDesc {
-        label: "mask's",
+        label: "projection only",
         shader: frame.background_shader,
-        entries: &frame.mask_entries,
+        entries: &frame.projection_only,
     });
     assert!(matches!(unbound, Err(GpuError::Invalid(_))), "bindings without the shader's buffers");
     Ok(())
@@ -189,8 +177,8 @@ struct ClippedFrame {
     mask: (PipelineId, BindingsId, GeometryId),
     background: (PipelineId, BindingsId, GeometryId),
     background_shader: ShaderId,
-    /// The entries of the mask's bindings.
-    mask_entries: Vec<BindGroupEntry>,
+    /// The projection's entry alone, without the background's own buffers.
+    projection_only: Vec<BindGroupEntry>,
 }
 
 impl ClippedFrame {
@@ -221,12 +209,11 @@ fn clipped_frame(gpu: &mut impl Gpu) -> Result<ClippedFrame, GpuError> {
     };
     let (quad, indices) = quad(gpu)?;
 
-    let mask_program = clipping_mask()?;
-    let mask_shader = gpu.create_shader(&ShaderKey::new(mask_program, []))?;
-    let mask_layouts = [position_layout(mask_program.attributes[0].id)];
+    let background_shader = gpu.create_shader(&ShaderKey::new(&background::programs::BACKGROUND, []))?;
+    let background_layouts = [position_layout(ID_BACKGROUND_POS_VERTEX_ATTRIBUTE)];
     let mask_pipeline = gpu.create_pipeline(&PipelineDesc {
-        shader: mask_shader,
-        vertex_buffers: &mask_layouts,
+        shader: background_shader,
+        vertex_buffers: &background_layouts,
         state: fixed(
             ColorMode::disabled(),
             StencilState {
@@ -239,20 +226,6 @@ fn clipped_frame(gpu: &mut impl Gpu) -> Result<ClippedFrame, GpuError> {
         ),
         targets,
     })?;
-    let clip = ProjectionUBO { matrix: tile_matrix(0.0), ..ProjectionUBO::default() };
-    let clip_buffer = buffer(gpu, BufferUsage::Uniform, bytemuck::bytes_of(&clip))?;
-    let mask_entries = vec![whole(ID_PROJECTION_UBO, clip_buffer, bytemuck::bytes_of(&clip))];
-    let mask_bindings =
-        gpu.create_bindings(&BindingsDesc { label: "clip", shader: mask_shader, entries: &mask_entries })?;
-    let mask_geometry = gpu.create_geometry(&GeometryDesc {
-        shader: mask_shader,
-        layouts: &mask_layouts,
-        vertex_buffers: &[(quad, 0)],
-        index_buffer: indices,
-    })?;
-
-    let background_shader = gpu.create_shader(&ShaderKey::new(&background::programs::BACKGROUND, []))?;
-    let background_layouts = [position_layout(ID_BACKGROUND_POS_VERTEX_ATTRIBUTE)];
     let background_pipeline = gpu.create_pipeline(&PipelineDesc {
         shader: background_shader,
         vertex_buffers: &background_layouts,
@@ -268,8 +241,12 @@ fn clipped_frame(gpu: &mut impl Gpu) -> Result<ClippedFrame, GpuError> {
         ),
         targets,
     })?;
-    let projections =
-        [ProjectionUBO::default(), ProjectionUBO { matrix: tile_matrix(1.0), ..ProjectionUBO::default() }];
+    // The mask's draw reads the first elements, over the left half, and the
+    // background's the second, over the whole target.
+    let projections = [
+        ProjectionUBO { matrix: tile_matrix(0.0), ..ProjectionUBO::default() },
+        ProjectionUBO { matrix: tile_matrix(1.0), ..ProjectionUBO::default() },
+    ];
     let drawables = [BackgroundDrawableUnionUBO::default(); 2];
     let props = BackgroundPropsUBO { color: [1.0, 0.0, 0.0, 1.0], opacity: 1.0, ..BackgroundPropsUBO::default() };
     let projections = bytemuck::cast_slice(&projections);
@@ -278,15 +255,14 @@ fn clipped_frame(gpu: &mut impl Gpu) -> Result<ClippedFrame, GpuError> {
     let projection_buffer = buffer(gpu, BufferUsage::Storage, projections)?;
     let drawable_buffer = buffer(gpu, BufferUsage::Storage, drawables)?;
     let props_buffer = buffer(gpu, BufferUsage::Uniform, props)?;
-    let background_bindings = gpu.create_bindings(&BindingsDesc {
-        label: "background layer",
-        shader: background_shader,
-        entries: &[
-            whole(ID_PROJECTION_UBO, projection_buffer, projections),
-            whole(ID_BACKGROUND_DRAWABLE_UBO, drawable_buffer, drawables),
-            whole(ID_BACKGROUND_PROPS_UBO, props_buffer, props),
-        ],
-    })?;
+    let projection_only = vec![whole(ID_PROJECTION_UBO, projection_buffer, projections)];
+    let entries = [
+        projection_only[0],
+        whole(ID_BACKGROUND_DRAWABLE_UBO, drawable_buffer, drawables),
+        whole(ID_BACKGROUND_PROPS_UBO, props_buffer, props),
+    ];
+    let bindings =
+        gpu.create_bindings(&BindingsDesc { label: "background layer", shader: background_shader, entries: &entries })?;
     let background_geometry = gpu.create_geometry(&GeometryDesc {
         shader: background_shader,
         layouts: &background_layouts,
@@ -294,10 +270,10 @@ fn clipped_frame(gpu: &mut impl Gpu) -> Result<ClippedFrame, GpuError> {
         index_buffer: indices,
     })?;
     Ok(ClippedFrame {
-        mask: (mask_pipeline, mask_bindings, mask_geometry),
-        background: (background_pipeline, background_bindings, background_geometry),
+        mask: (mask_pipeline, bindings, background_geometry),
+        background: (background_pipeline, bindings, background_geometry),
         background_shader,
-        mask_entries,
+        projection_only,
     })
 }
 

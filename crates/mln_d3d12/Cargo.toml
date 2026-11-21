@@ -42,11 +42,8 @@ windows = { workspace = true, features = [
 # The layer types' programs and the conformance cases, which the tests compile
 # and draw.
 mln_layers = { package = "mln-rs-layers", path = "../mln_layers", features = [
-  "glsl",
   "gpu-conformance",
 ] }
-# The engine's programs, which the tests compile.
-mln_render = { workspace = true, features = ["glsl"] }
 mln_glsl = { workspace = true, features = ["variants"] }
 
 [lints]

@@ -17,6 +17,16 @@ name = "mln_gfx"
 # The doc comments have no examples to run.
 doctest = false
 
+[features]
+# The programs' sources in each shading language that a backend of the build
+# compiles (`Sources`): WGSL for mln_webgpu, MSL for mln_mtl, GLSL ES for
+# mln_gl, and the GLSL of mln_glsl for mln_vulkan and mln_d3d12. Each backend
+# turns on its own, so a build carries only its backends' shaders.
+wgsl = []
+msl = []
+glsl-es = []
+glsl = []
+
 [dependencies]
 bytemuck.workspace = true
 mln_util.workspace = true

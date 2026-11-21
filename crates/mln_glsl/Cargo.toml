@@ -17,16 +17,12 @@ doctest = false
 
 # The crate is empty on Apple platforms and in the browser build.
 [target.'cfg(not(any(target_vendor = "apple", target_family = "wasm")))'.dependencies]
-mln_gfx.workspace = true
+mln_gfx = { workspace = true, features = ["glsl"] }
 naga.workspace = true
 
 # The layer types' programs, which the tests parse.
 [target.'cfg(not(any(target_vendor = "apple", target_family = "wasm")))'.dev-dependencies]
-mln_layers = { package = "mln-rs-layers", path = "../mln_layers", features = [
-  "glsl",
-] }
-# The engine's programs, which the tests compile.
-mln_render = { workspace = true, features = ["glsl"] }
+mln_layers = { package = "mln-rs-layers", path = "../mln_layers" }
 
 [features]
 # `variants`, the sets of defines that the backends' tests compile each

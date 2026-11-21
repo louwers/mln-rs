@@ -26,9 +26,9 @@ use objc2_metal::{
 use super::msl_sources::library_source;
 use crate::Id;
 
-/// Each program with MSL: the engine's and the built-in layer types'.
+/// Each program of the built-in layer types with MSL.
 fn sources() -> Vec<(&'static Program, &'static Msl)> {
-    let programs = mln_render::PROGRAMS.iter().chain(mln_layers::PROGRAMS);
+    let programs = mln_layers::PROGRAMS.iter();
     programs.filter_map(|&program| Some((program, program.sources.msl?))).collect()
 }
 
@@ -99,14 +99,7 @@ fn defines<'a>(overdraw: bool, globe: bool, uniforms: impl IntoIterator<Item = &
 /// inspector, which counts its draws.
 #[test]
 fn every_layer_program_shows_the_overdraw_inspector() {
-    let not_layers = [
-        "ClippingMaskProgram",
-        "CollisionBoxShader",
-        "CollisionCircleShader",
-        "GlobeDepthShader",
-        "SkyShader",
-        "AtmosphereShader",
-    ];
+    let not_layers = ["collision-box", "collision-circle"];
     for (program, source) in sources() {
         if !not_layers.contains(&program.name) {
             assert!(full_source(program, source).contains("OVERDRAW_INSPECTOR"), "{}", program.name);

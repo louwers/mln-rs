@@ -541,41 +541,11 @@ default = [
   "sqlite",
   "font-face-shaper",
 ]
-webgpu = [
-  "runtime",
-  "mln_runtime/webgpu",
-  "dep:mln_webgpu",
-  "mln_render/wgsl",
-  "mln_layers/wgsl",
-]
-metal = [
-  "runtime",
-  "mln_runtime/metal",
-  "dep:mln_mtl",
-  "mln_render/msl",
-  "mln_layers/msl",
-]
-vulkan = [
-  "runtime",
-  "mln_runtime/vulkan",
-  "dep:mln_vulkan",
-  "mln_render/glsl",
-  "mln_layers/glsl",
-]
-d3d12 = [
-  "runtime",
-  "mln_runtime/d3d12",
-  "dep:mln_d3d12",
-  "mln_render/glsl",
-  "mln_layers/glsl",
-]
-gl = [
-  "runtime",
-  "mln_runtime/gl",
-  "dep:mln_gl",
-  "mln_render/glsl-es",
-  "mln_layers/glsl-es",
-]
+webgpu = ["runtime", "mln_runtime/webgpu", "dep:mln_webgpu"]
+metal = ["runtime", "mln_runtime/metal", "dep:mln_mtl"]
+vulkan = ["runtime", "mln_runtime/vulkan", "dep:mln_vulkan"]
+d3d12 = ["runtime", "mln_runtime/d3d12", "dep:mln_d3d12"]
+gl = ["runtime", "mln_runtime/gl", "dep:mln_gl"]
 sqlite = ["mln_storage/sqlite", "dep:mln_storage_offline"]
 font-face-shaper = ["mln_render/font-face-shaper"]
 runtime = ["dep:mln_runtime", "mln_sources/runtime"]

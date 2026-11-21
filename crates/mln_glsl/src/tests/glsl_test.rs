@@ -32,9 +32,9 @@ use crate::layout::{
 use crate::variants::variants;
 use crate::{Stage, compose, sources};
 
-/// Each program with GLSL: the engine's and the built-in layer types'.
+/// Each program of the built-in layer types with GLSL.
 fn programs() -> Vec<(&'static Program, &'static Glsl)> {
-    let programs = mln_render::PROGRAMS.iter().chain(mln_layers::PROGRAMS);
+    let programs = mln_layers::PROGRAMS.iter();
     programs.filter_map(|&program| Some((program, program.sources.glsl?))).collect()
 }
 
@@ -64,14 +64,7 @@ fn every_program_declares_the_properties_its_glsl_reads_from_uniforms() {
 /// inspector, which counts its draws.
 #[test]
 fn every_layer_program_shows_the_overdraw_inspector() {
-    let not_layers = [
-        "ClippingMaskProgram",
-        "CollisionBoxShader",
-        "CollisionCircleShader",
-        "GlobeDepthShader",
-        "SkyShader",
-        "AtmosphereShader",
-    ];
+    let not_layers = ["collision-box", "collision-circle"];
     for (program, source) in programs() {
         if !not_layers.contains(&program.name) {
             assert!(
@@ -401,7 +394,7 @@ fn locations(program: &'static Program) -> impl Iterator<Item = (usize, &'static
 /// The attributes a program declares that the GLSL doesn't read, by shader
 /// and location: the color relief's texture position, which its vertex
 /// stage works out from the position.
-const UNREAD_ATTRIBUTES: &[(&str, usize)] = &[("ColorReliefShader", 1)];
+const UNREAD_ATTRIBUTES: &[(&str, usize)] = &[("color-relief", 1)];
 
 // The inputs of a vertex stage are the vertex and instance attributes of the
 // shader's program, at their locations, in types of the scalar kinds of their
@@ -531,11 +524,10 @@ fn the_programs_fit_a_shader() {
         assert!(program.textures.len() <= MAX_TEXTURE_COUNT_PER_SHADER.min(IMAGE_TEXTURE_COUNT), "{}", program.name);
         let instanced = matches!(
             program.name,
-            "FillExtrusionInstancedShader"
-                | "FillExtrusionPatternInstancedShader"
-                | "FillOutlineInstancedShader"
-                | "FillOutlinePatternInstancedShader"
-                | "TileDebugShader"
+            "fill-extrusion-instanced"
+                | "fill-extrusion-pattern-instanced"
+                | "fill-outline-instanced"
+                | "fill-outline-pattern-instanced"
         );
         assert_eq!(!program.instance_attributes.is_empty(), instanced, "{}", program.name);
         let ids: BTreeSet<usize> = program.attributes.iter().map(|attr| attr.id).collect();

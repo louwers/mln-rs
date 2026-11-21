@@ -14,8 +14,7 @@
 //!
 //! The GPU backend that a renderer draws through is `mln_gfx::gpu`'s
 //! `Gpu`. A layer type draws with programs it declares
-//! (`mln_gfx::shaders::program`), and the engine with its own
-//! ([`PROGRAMS`]).
+//! (`mln_gfx::shaders::program`), and the engine with its own.
 //!
 //! Not a contract yet, and hidden from the documentation: the symbol type's
 //! placement goes through the `placement` module, `LayerType::PLACEMENT`,
@@ -89,7 +88,6 @@ pub use renderer::{DrawnFrame, Renderer, UpdatedFrame};
 pub use renderer_event::{
     FontStack, GlyphRange, OverscaledTileID, RenderMode, RendererEvent, RendererEvents, RenderingStats, TileOperation,
 };
-pub use shaders::programs::PROGRAMS;
 pub use update_parameters::UpdateParameters;
 
 /// The crates that the expansion of [`paint_property_binders!`] names, so
