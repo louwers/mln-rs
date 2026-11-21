@@ -6,13 +6,14 @@ use mln_map_types::tile_cover::{
     TileCover, TileCoverParameters, covering_zoom_level, tile_count_bounds, tile_cover, tile_cover_bounds,
 };
 use mln_map_types::{CameraLimits, CameraOptions, ConstrainMode, TileLodMode, ViewportMode};
-use mln_runtime::map::transform::Transform;
 use mln_style_types::ProjectionDefinition;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID, UnwrappedTileID};
 use mln_util::constants;
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, WrapMode};
 use mln_util::range::Range;
 use mln_util::size::Size;
+
+use crate::map::transform::Transform;
 
 const ZOOM_RANGE: Range<u8> = Range::new(0, 14);
 
@@ -1163,24 +1164,15 @@ mod tile_cover_stream {
     fn arctic() {
         let bounds = LatLngBounds::hull(ll(84.0, -180.0), ll(70.0, 180.0));
         let zoom = 3;
-        let mut tc = TileCover::new_from_bounds(&bounds, zoom);
         let results = tile_cover_bounds(&bounds, zoom);
-        let mut t = Vec::new();
-        while tc.has_next() {
-            t.push(tc.next().unwrap());
-        }
-        assert_eq!(t.len(), results.len());
+        assert_eq!(TileCover::new_from_bounds(&bounds, zoom).count(), results.len());
     }
 
     // gtest: TileCoverStream.WorldZ1
     #[test]
     fn world_z1() {
         let zoom = 1;
-        let mut tc = TileCover::new_from_bounds(&LatLngBounds::world(), zoom);
-        let mut t = Vec::new();
-        while tc.has_next() {
-            t.push(tc.next().unwrap());
-        }
+        let t: Vec<_> = TileCover::new_from_bounds(&LatLngBounds::world(), zoom).collect();
         assert_eq!(vec![uw(1, 0, 0), uw(1, 1, 0), uw(1, 0, 1), uw(1, 1, 1)], t);
     }
 }
