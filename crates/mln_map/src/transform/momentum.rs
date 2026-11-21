@@ -355,7 +355,7 @@ impl Transform {
                 self.keep_clear_of_ground();
             }
             // The gesture's end can move the center onto the terrain.
-            let recentered = self.end_gesture_momentum(gesture);
+            let recentered = self.end_momentum_gesture(gesture) && self.come_to_rest(false);
             if settling == 0 && recentered {
                 self.emit(TransformEvent::CameraWillChange(momentum_change(CameraChangeMode::Immediate)));
             }

@@ -671,7 +671,7 @@ impl Transform {
             return;
         }
         for transition in &finished {
-            self.end_gesture_momentum(transition.gesture);
+            self.end_momentum_gesture(transition.gesture);
         }
         self.come_to_rest(finished.iter().any(Transition::completes));
         for transition in finished {

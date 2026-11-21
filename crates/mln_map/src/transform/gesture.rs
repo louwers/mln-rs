@@ -211,22 +211,32 @@ impl Transform {
     }
 
     /// The end of a gesture's momentum ends the gesture, unless another
-    /// gesture started since. Returns whether the end moved the camera.
-    pub(super) fn end_gesture_momentum(&mut self, gesture: Option<u64>) -> bool {
-        gesture == Some(self.gesture.serial) && !self.gesture.active && self.set_gesture_in_progress(false)
+    /// gesture started since, without coming to rest: the caller does that
+    /// once it ends all it ends. Returns whether it ended the gesture.
+    pub(super) fn end_momentum_gesture(&mut self, gesture: Option<u64>) -> bool {
+        gesture == Some(self.gesture.serial) && !self.gesture.active && self.end_gesture()
     }
 
     /// Marks whether a gesture is in progress. The end of one over a clamped
     /// center ends on the ground, unless a command still moves the camera
     /// ([`Self::come_to_rest`]). Returns whether that end moved the camera.
     pub(crate) fn set_gesture_in_progress(&mut self, in_progress: bool) -> bool {
-        let ends = self.gesture_in_progress && !in_progress;
-        self.gesture_in_progress = in_progress;
-        if !ends {
+        if in_progress {
+            self.gesture_in_progress = true;
             return false;
         }
-        self.gesture.hold = None;
-        self.come_to_rest(false)
+        self.end_gesture() && self.come_to_rest(false)
+    }
+
+    /// Ends the gesture in progress, if any, and returns whether there was
+    /// one.
+    fn end_gesture(&mut self) -> bool {
+        let ends = self.gesture_in_progress;
+        self.gesture_in_progress = false;
+        if ends {
+            self.gesture.hold = None;
+        }
+        ends
     }
 
     #[must_use]
