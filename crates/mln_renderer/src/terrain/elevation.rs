@@ -461,9 +461,6 @@ mod tests {
     use super::*;
     use crate::terrain::cover::{ElevationRanges, TerrainTile};
 
-    /// A point in a world copy past the range of the tiles' wraps has no
-    /// surface, though a tile of the last copy in range drew: no copy of
-    /// the point's stands in for it.
     /// Level ground stands as high as it was made, on its tile and on a
     /// tile inside it.
     #[test]
@@ -480,6 +477,9 @@ mod tests {
         assert_eq!(Some(812.25), ground.ground(&inside, TileFeatures::Anchored).height(point, point));
     }
 
+    /// A point in a world copy past the range of the tiles' wraps has no
+    /// surface, though a tile of the last copy in range drew: no copy of
+    /// the point's stands in for it.
     #[test]
     fn a_point_in_a_copy_past_the_wraps_has_no_surface() {
         let tile = |wrap: i16| TerrainTile {
