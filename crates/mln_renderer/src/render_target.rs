@@ -139,13 +139,10 @@ impl TargetPasses {
     }
 
     /// Ends the draws into the render target, through `gpu`, the context's.
-    /// Returns whether the pass ended.
-    pub(crate) fn end(self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) -> bool {
-        let ended = parameters.end_pass(gpu);
-        if let Err(error) = &ended {
+    pub(crate) fn end(self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+        if let Err(error) = parameters.end_pass(gpu) {
             parameters.context.fail(format!("Ending a render target's pass failed: {error}"));
         }
         parameters.scissor_rect = self.prev_scissor_rect;
-        ended.is_ok()
     }
 }

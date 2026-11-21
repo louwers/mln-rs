@@ -121,10 +121,10 @@
 //!   every frame, at rest in each, draws its tiles in turn. A frame that
 //!   leaves such drapes for later asks for the next and reports itself
 //!   partial, so the map isn't idle until they have drawn. A drape that
-//!   failed to draw, its pass or a draw in it, fails the frame as any GPU
-//!   failure does, and keeps no key it was drawn from, so whichever frame
-//!   comes next draws it again. A drape whose content changed draws at once, with the
-//!   camera-stale drapes of its tile, and a still draws them all.
+//!   fails to draw fails the frame as any GPU failure does, and after a
+//!   frame that failed every drape draws again. A drape whose content
+//!   changed draws at once, with the camera-stale drapes of its tile, and a
+//!   still draws them all.
 //! - **The drapes' sides.** A tile's drapes take the power of two that
 //!   covers its longest side on screen, level with the view's center, at
 //!   two texels a logical pixel or one a physical pixel, whichever is
@@ -484,7 +484,7 @@ impl RenderTerrain {
     }
 
     /// Makes every drape draw again in the next frame, for a change that
-    /// their keys don't tell: the style's images.
+    /// their keys don't tell: the style's images, or a frame that failed.
     pub(crate) fn redraw_drapes(&mut self) {
         self.drapes.redraw();
     }

@@ -729,6 +729,13 @@ impl Encoder {
         }
         let error = parameters.context.device().take_failure().map(Error::native);
         drop(parameters);
+        // What the frame prepared for later ones, which record it as drawn
+        // once they encode it, may hold what failed: the next frame that
+        // needs it prepares it again.
+        if error.is_some() {
+            orchestrator.terrain().redraw_drapes();
+            orchestrator.visit_render_layers(|layer| layer.prepare_again());
+        }
         let complete = frame.loaded && !drapes_waiting;
 
         self.timings.layers = layers_updated - uploaded;

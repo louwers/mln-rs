@@ -66,13 +66,6 @@ impl Device {
         self.failure.get_or_insert(message);
     }
 
-    /// Whether something failed since the last
-    /// [`take_failure`](Self::take_failure): in the frame being encoded, so
-    /// far.
-    pub(crate) fn failed(&self) -> bool {
-        self.failure.is_some()
-    }
-
     /// Why the first GPU failure since the last call failed, if one did.
     pub(crate) fn take_failure(&mut self) -> Option<String> {
         self.failure.take()

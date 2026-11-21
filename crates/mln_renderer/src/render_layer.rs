@@ -1118,6 +1118,11 @@ pub(crate) trait RenderLayer: LayerParts {
     /// of the frame's passes, which sample them.
     fn render_targets(&mut self, _gpu: &mut dyn Gpu, _parameters: &mut PaintParameters<'_>) {}
 
+    /// Makes the render targets that the layer keeps prepared across frames
+    /// draw again in the next frame that draws them: a frame that prepared
+    /// them failed on the GPU.
+    fn prepare_again(&mut self) {}
+
     /// Runs a custom layer's prerender through `gpu`, the context's, after
     /// the layers' draws upload and before the frame's first pass.
     fn prerender(&mut self, _gpu: &mut dyn Gpu, _parameters: &mut PaintParameters<'_>) {}

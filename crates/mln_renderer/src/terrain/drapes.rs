@@ -428,8 +428,8 @@ pub(crate) struct Drapes {
     paced: bool,
     /// Whether [`choose`](Self::choose) gave a tile its turn in the frame.
     turn_taken: bool,
-    /// Whether drapes stale by the camera only, smaller than their tile's
-    /// side, or that failed to draw, wait for a later frame.
+    /// Whether drapes stale by the camera only, or smaller than their
+    /// tile's side, wait for a later frame.
     waiting: bool,
     /// The tiles and stacks of the drapes drawn since the last
     /// [`take_passes`](Self::take_passes).
@@ -577,8 +577,7 @@ impl Drapes {
     /// Whether the last frame left drapes stale by the camera only, or
     /// smaller than their tile's side, for a later frame to draw
     /// ([`choose`](Self::choose), [`finish_update`](Self::finish_update)):
-    /// the map then isn't done drawing. A drape that failed to draw failed
-    /// its frame, which says so, and draws again in the next.
+    /// the map then isn't done drawing.
     pub(crate) fn waiting(&self) -> bool {
         self.waiting
     }
@@ -732,7 +731,8 @@ impl Drapes {
     }
 
     /// Makes every drape draw again: what they show changed in a way that
-    /// their keys don't tell, such as the style's images.
+    /// their keys don't tell, such as the style's images, or the frame
+    /// that drew them failed.
     pub(crate) fn redraw(&mut self) {
         for drape in self.drapes.iter_mut().flat_map(|drape| &mut drape.stacks) {
             drape.drawn = None;
@@ -877,9 +877,9 @@ impl Drapes {
     /// drape with a layer that blends in the shader draws into the layer
     /// composite's frame texture, which is then copied into its own. A
     /// drape that fails to draw, its pass or a draw in it, fails the frame
-    /// ([`Context::fail`](crate::gfx::context::Context::fail)), and draws
-    /// again in whichever frame comes next, as does one drawn in a frame
-    /// that something failed in before.
+    /// ([`Context::fail`](crate::gfx::context::Context::fail)), and every
+    /// drape of a frame that failed draws again
+    /// ([`redraw`](Self::redraw)).
     pub(crate) fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
         let formats = TargetFormats { color: Some(COLOR), depth_stencil: Some(DEPTH_STENCIL) };
         for Drape { tile, transform, stacks, .. } in &mut self.drapes {
@@ -953,10 +953,6 @@ impl Drapes {
                     drape_parameters.end_pass(gpu).and(presented)
                 });
                 match drawn_pass.and_then(|()| parameters.context.generate_mipmaps(gpu, texture)) {
-                    // What failed in the frame, before the drape or in its
-                    // draws, said why; what the drape drew from, such as a
-                    // layer's render target, may be wrong.
-                    Ok(()) if parameters.context.failed() => {}
                     Ok(()) => {
                         *drawn = if *updated { Some(std::mem::take(key)) } else { kept };
                         parameters.context.rendering_stats().terrain.drapes_drawn += 1;
