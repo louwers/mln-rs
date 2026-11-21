@@ -64,6 +64,23 @@ declare -A allowed=(
     # ground: 590 (RADV). Buildings at sea level: 3590 (RADV), and 6875 drawn
     # flat, as before they stood on the ground.
     [terrain/fill-extrusion]=0.0008
+    # The labels hide behind the ridges as GL JS's do; 51 of 262144 px differ
+    # on RADV (WebGPU and Vulkan), 50 (OpenGL), 83 on Mesa 26.0.8's lavapipe
+    # and 59 on Mesa 26.2.5's llvmpipe, single pixels along the drapes'
+    # silhouettes. With nothing hidden: 2446 (RADV).
+    [terrain/occlusion-debug]=0.0004
+    # Drawn better than GL JS's image, which leaves kernels behind the
+    # ground glowing: 4 of the fixture's 9 points lie behind the drawn
+    # ground, where an extrusion 400 m tall on each is hidden by the depth
+    # test too, and their kernels are hidden here, as MapLibre Native hides
+    # them. GL JS also colors each tile's kernel density on its own, where
+    # mln-rs sums it across tiles, as both do without terrain (1552 px where
+    # kernels of the fixture's two GeoJSON tiles overlap). 29095 of 262144 px
+    # differ on RADV (WebGPU and Vulkan), 29080 (OpenGL), 29023 on Mesa
+    # 26.0.8's lavapipe, 29205 on Mesa 26.2.5's llvmpipe. Kernels at sea
+    # level: 62776. The tolerance doesn't catch kernels left unhidden (1552);
+    # the headless occlusion tests do.
+    [terrain/heatmap]=0.115
 )
 
 checkout="${usage_checkout:-$PWD/../maplibre-gl-js}"
