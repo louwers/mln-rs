@@ -7,7 +7,8 @@ use mln_gfx::shaders::programs;
 use mln_gfx::shaders::programs::{
     ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE, ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE, ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE,
     ID_LAYER_COMPOSITE_BACKDROP_TEXTURE, ID_LAYER_COMPOSITE_IMAGE_TEXTURE, ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE,
-    ID_SKY_POS_VERTEX_ATTRIBUTE, ID_TILE_DEBUG_DATA_VERTEX_ATTRIBUTE, ID_TILE_DEBUG_POS_NORMAL_VERTEX_ATTRIBUTE,
+    ID_SKY_POS_VERTEX_ATTRIBUTE, ID_TILE_DEBUG_CORNER_VERTEX_ATTRIBUTE, ID_TILE_DEBUG_END_ATTRIBUTE,
+    ID_TILE_DEBUG_START_ATTRIBUTE,
 };
 use mln_gfx::shaders::source::glsl::{Attribute, Source, Texture};
 
@@ -26,7 +27,7 @@ pub fn compose(source: &Source, stage: Stage, defines: &str) -> String {
     crate::front_end::compose(stage, defines, source.glsl.prelude, glsl)
 }
 
-use AttributeDataType::{Short2, UByte4};
+use AttributeDataType::Short2;
 
 const CLIPPING_MASK_ATTRIBUTES: &[Attribute] = &[Attribute::new(0, Short2, ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE)];
 static CLIPPING_MASK_PROGRAM: Source = Source {
@@ -55,15 +56,14 @@ static LAYER_COMPOSITE_SHADER: Source = Source {
     ],
 };
 
-const TILE_DEBUG_ATTRIBUTES: &[Attribute] = &[
-    Attribute::new(0, Short2, ID_TILE_DEBUG_POS_NORMAL_VERTEX_ATTRIBUTE),
-    Attribute::new(1, UByte4, ID_TILE_DEBUG_DATA_VERTEX_ATTRIBUTE),
-];
+const TILE_DEBUG_ATTRIBUTES: &[Attribute] = &[Attribute::new(0, Short2, ID_TILE_DEBUG_CORNER_VERTEX_ATTRIBUTE)];
+const TILE_DEBUG_INSTANCE_ATTRIBUTES: &[Attribute] =
+    &[Attribute::new(1, Short2, ID_TILE_DEBUG_START_ATTRIBUTE), Attribute::new(2, Short2, ID_TILE_DEBUG_END_ATTRIBUTE)];
 
 static TILE_DEBUG_SHADER: Source = Source {
     glsl: &sources::TILE_DEBUG_SHADER,
     attributes: TILE_DEBUG_ATTRIBUTES,
-    instance_attributes: &[],
+    instance_attributes: TILE_DEBUG_INSTANCE_ATTRIBUTES,
     textures: &[],
 };
 

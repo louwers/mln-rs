@@ -18,13 +18,13 @@ use mln_gfx::shaders::programs::{
     ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE, ID_ATMOSPHERE_PROPS_UBO, ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE,
     ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE, ID_LAYER_COMPOSITE_BACKDROP_TEXTURE, ID_LAYER_COMPOSITE_IMAGE_TEXTURE,
     ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE, ID_LAYER_COMPOSITE_UBO, ID_SKY_POS_VERTEX_ATTRIBUTE, ID_SKY_PROPS_UBO,
-    ID_TILE_DEBUG_DATA_VERTEX_ATTRIBUTE, ID_TILE_DEBUG_DRAWABLE_UBO, ID_TILE_DEBUG_POS_NORMAL_VERTEX_ATTRIBUTE,
-    ID_TILE_DEBUG_PROPS_UBO,
+    ID_TILE_DEBUG_CORNER_VERTEX_ATTRIBUTE, ID_TILE_DEBUG_END_ATTRIBUTE, ID_TILE_DEBUG_PROPS_UBO,
+    ID_TILE_DEBUG_START_ATTRIBUTE,
 };
 use mln_gfx::shaders::shader_defines::{ID_GLOBAL_PAINT_PARAMS_UBO, ID_PROJECTION_UBO};
 use mln_gfx::shaders::sky_ubo::{AtmospherePropsUBO, SkyPropsUBO};
 use mln_gfx::shaders::source::glsl_es::{Attribute, Source, Texture, UniformBlock};
-use mln_gfx::shaders::tile_debug_ubo::{TileDebugDrawableElement, TileDebugDrawableUBO, TileDebugPropsUBO};
+use mln_gfx::shaders::tile_debug_ubo::TileDebugPropsUBO;
 
 use super::glsl_sources;
 
@@ -91,17 +91,13 @@ static TILE_DEBUG_SHADER: Source = Source {
     uniform_blocks: &[
         UniformBlock::element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
         UniformBlock::new::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
-        UniformBlock::element::<TileDebugDrawableUBO, TileDebugDrawableElement>(
-            "TileDebugDrawableUBO",
-            ID_TILE_DEBUG_DRAWABLE_UBO,
-        ),
         UniformBlock::new::<TileDebugPropsUBO>("TileDebugPropsUBO", ID_TILE_DEBUG_PROPS_UBO),
     ],
-    attributes: &[
-        Attribute::new("a_pos_normal", ID_TILE_DEBUG_POS_NORMAL_VERTEX_ATTRIBUTE),
-        Attribute::new("a_data", ID_TILE_DEBUG_DATA_VERTEX_ATTRIBUTE),
+    attributes: &[Attribute::new("a_corner", ID_TILE_DEBUG_CORNER_VERTEX_ATTRIBUTE)],
+    instance_attributes: &[
+        Attribute::new("a_start", ID_TILE_DEBUG_START_ATTRIBUTE),
+        Attribute::new("a_end", ID_TILE_DEBUG_END_ATTRIBUTE),
     ],
-    instance_attributes: &[],
     textures: &[],
 };
 

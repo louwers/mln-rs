@@ -3,7 +3,6 @@
 //   include/mln/shaders/gl/atmosphere.hpp
 //   include/mln/shaders/gl/clipping_mask.hpp
 //   include/mln/shaders/gl/globe_depth.hpp
-//   include/mln/shaders/gl/line.hpp (the tile debug shader)
 //   include/mln/shaders/gl/prelude.hpp
 //   include/mln/shaders/gl/shader_group_gl.hpp
 //   include/mln/shaders/gl/shader_info.hpp
@@ -254,18 +253,7 @@ void main() {
 };
 
 pub(crate) const TILE_DEBUG_SHADER: Glsl = Glsl {
-    vertex: r#"// floor(127 / 2) == 63.0
-// the maximum allowed miter limit is 2.0 at the moment. the extrude normal is
-// stored in a byte (-128..127). we scale regular normals up to length 63, but
-// there are also "special" normals that have a bigger length (of up to 126 in
-// this case).
-// #define scale 63.0
-#define scale 0.015873016
-
-layout (location = 0) in vec2 a_pos_normal;
-layout (location = 1) in vec4 a_data;
-
-layout (std140) uniform GlobalPaintParamsUBO {
+    vertex: r"layout (std140) uniform GlobalPaintParamsUBO {
     highp vec2 u_units_to_pixels;
     highp vec2 u_world_size;
     highp float u_camera_to_center_distance;
@@ -274,146 +262,75 @@ layout (std140) uniform GlobalPaintParamsUBO {
     lowp float global_pad1;
 };
 
-layout (std140) uniform TileDebugDrawableUBO {
-    highp mat4 u_matrix;
-    mediump float u_ratio;
-    lowp float drawable_pad0;
-    lowp float drawable_pad1;
-    lowp float drawable_pad2;
-    lowp float drawable_pad3;
-    lowp float drawable_pad4;
-    lowp float drawable_pad5;
-    lowp float drawable_pad6;
-};
-
 layout (std140) uniform TileDebugPropsUBO {
     highp vec4 u_color;
-    lowp float u_blur;
-    lowp float u_opacity;
-    mediump float u_gapwidth;
-    lowp float u_offset;
-    mediump float u_width;
+    highp float u_width;
+    highp float u_world_width;
     lowp float props_pad0;
     lowp float props_pad1;
-    lowp float props_pad2;
 };
 
-out vec2 v_normal;
-out vec2 v_width2;
-out float v_gamma_scale;
-out highp float v_linesofar;
+// The quad's corner: x picks the segment's start (0) or end (1), y its side.
+layout (location = 0) in vec2 a_corner;
+// Per instance: where the segment starts and ends, in tile units.
+layout (location = 1) in vec2 a_start;
+layout (location = 2) in vec2 a_end;
 
-#ifdef PROJECTION_GLOBE
-out float v_tile_x;
-#endif
+// The offset in pixels from the segment's start, along the segment and
+// across it, on the map; the segment's length in pixels on the map; and the
+// pixels on the map that a pixel on screen spans across the segment.
+out highp vec2 v_offset;
+flat out highp float v_length;
+out highp float v_gamma_scale;
 
 void main() {
-    highp vec4 color = u_color;
-    lowp float blur = u_blur;
-    lowp float opacity = u_opacity;
-    mediump float gapwidth = u_gapwidth;
-    lowp float offset = u_offset;
-    mediump float width = u_width;
-
-    // the distance over which the line edge fades out.
-    // Retina devices need a smaller distance to avoid aliasing.
-    float ANTIALIASING = 1.0 / DEVICE_PIXEL_RATIO / 2.0;
-
-    vec2 a_extrude = a_data.xy - 128.0;
-    float a_direction = mod(a_data.z, 4.0) - 1.0;
-
-    v_linesofar = (floor(a_data.z / 4.0) + a_data.w * 64.0) * 2.0;
-
-    vec2 pos = floor(a_pos_normal * 0.5);
-
-    // x is 1 if it's a round cap, 0 otherwise
-    // y is 1 if the normal points up, and -1 if it points down
-    // We store these in the least significant bit of a_pos_normal
-    mediump vec2 normal = a_pos_normal - 2.0 * pos;
-    normal.y = normal.y * 2.0 - 1.0;
-    v_normal = normal;
-
-    // these transformations used to be applied in the JS and native code bases.
-    // moved them into the shader for clarity and simplicity.
-    gapwidth = gapwidth / 2.0;
-    float halfwidth = width / 2.0;
-    offset = -1.0 * offset;
-
-    float inset = gapwidth + (gapwidth > 0.0 ? ANTIALIASING : 0.0);
-    float outset = gapwidth + halfwidth * (gapwidth > 0.0 ? 2.0 : 1.0) + (halfwidth == 0.0 ? 0.0 : ANTIALIASING);
-
-    // Scale the extrusion vector down to a normal and then up by the line width
-    // of this vertex.
-    mediump vec2 dist = outset * a_extrude * scale;
-
-    // Calculate the offset when drawing a line that is to the side of the actual line.
-    // We do this by creating a vector that points towards the extrude, but rotate
-    // it when we're drawing round end points (a_direction = -1 or 1) since their
-    // extrude vector points in another direction.
-    mediump float u = 0.5 * a_direction;
-    mediump float t = 1.0 - abs(u);
-    mediump vec2 offset2 = offset * a_extrude * scale * normal.y * mat2(t, -u, u, t);
-
+    // The tile units a pixel spans; on the globe, more toward the poles,
+    // where a tile unit covers less of the sphere.
+    highp float units = 1.0 / (u_projection_tile_mercator_coords.z * u_world_width);
 #ifdef PROJECTION_GLOBE
-    float adjustedThickness = projectLineThickness(pos.y);
-    vec4 projected_no_extrude = projectTile(pos + offset2 / u_ratio * adjustedThickness);
-    vec2 extrudedPos = pos + (offset2 + dist) / u_ratio * adjustedThickness;
-    gl_Position = projectTile(extrudedPos);
-    v_tile_x = antimeridianClipX(extrudedPos);
-    vec4 projected_extrude = gl_Position - projected_no_extrude;
-#else
-    vec4 projected_extrude = u_matrix * vec4(dist / u_ratio, 0.0, 0.0);
-    gl_Position = u_matrix * vec4(pos + offset2 / u_ratio, 0.0, 1.0) + projected_extrude;
+    highp float ratio = circumferenceRatioAtTileY((a_start.y + a_end.y) * 0.5);
+    units *= mix(1.0, 1.0 / ratio, u_projection_transition);
 #endif
 
-    // calculate how much the perspective view squishes or stretches the extrude
-    float extrude_length_without_perspective = length(dist);
-    float extrude_length_with_perspective = length(projected_extrude.xy / gl_Position.w * u_units_to_pixels);
-    v_gamma_scale = extrude_length_without_perspective / extrude_length_with_perspective;
+    // The quad around the segment on the map, reaching half the width and
+    // the antialiased edge past its sides and ends.
+    highp float tile_length = distance(a_start, a_end);
+    highp vec2 along = tile_length > 0.0 ? (a_end - a_start) / tile_length : vec2(1.0, 0.0);
+    highp vec2 across = vec2(-along.y, along.x);
+    highp float segment_length = tile_length / units;
+    highp float reach = u_width * 0.5 + 0.5 / DEVICE_PIXEL_RATIO;
+    highp vec2 offset = vec2(a_corner.x != 0.0 ? segment_length + reach : -reach, a_corner.y != 0.0 ? reach : -reach);
+    highp vec2 base = a_start + along * (offset.x * units);
+    highp vec4 corner = projectTile(base + across * (offset.y * units));
+    highp vec4 middle = projectTile(base);
+    highp float extent = length((corner.xy - middle.xy) / corner.w * u_units_to_pixels);
 
-    v_width2 = vec2(outset, inset);
+    gl_Position = corner;
+    v_offset = offset;
+    v_length = segment_length;
+    v_gamma_scale = reach / max(extent, 1e-6);
 }
-"#,
+",
     fragment: r"layout (std140) uniform TileDebugPropsUBO {
     highp vec4 u_color;
-    lowp float u_blur;
-    lowp float u_opacity;
-    mediump float u_gapwidth;
-    lowp float u_offset;
-    mediump float u_width;
+    highp float u_width;
+    highp float u_world_width;
     lowp float props_pad0;
     lowp float props_pad1;
-    lowp float props_pad2;
 };
 
-in vec2 v_width2;
-in vec2 v_normal;
-in float v_gamma_scale;
-
-#ifdef PROJECTION_GLOBE
-in highp float v_tile_x;
-#endif
+in highp vec2 v_offset;
+flat in highp float v_length;
+in highp float v_gamma_scale;
 
 void main() {
-#ifdef PROJECTION_GLOBE
-    if (clippedAtAntimeridian(v_tile_x)) {
-        discard;
-    }
-#endif
-    highp vec4 color = u_color;
-    lowp float blur = u_blur;
-    lowp float opacity = u_opacity;
-
-    // Calculate the distance of the pixel from the line in pixels.
-    float dist = length(v_normal) * v_width2.s;
-
-    // Calculate the antialiasing fade factor. This is either when fading in
-    // the line in case of an offset line (v_width2.t) or when fading out
-    // (v_width2.s)
-    float blur2 = (blur + 1.0 / DEVICE_PIXEL_RATIO) * v_gamma_scale;
-    float alpha = clamp(min(dist - (v_width2.t - blur2), v_width2.s - dist) / blur2, 0.0, 1.0);
-
-    fragColor = color * (alpha * opacity);
+    // The distance from the segment, whose ends are round, and the coverage
+    // of an antialiased edge one device pixel wide on screen.
+    highp float beyond = max(max(-v_offset.x, v_offset.x - v_length), 0.0);
+    highp float dist = length(vec2(beyond, v_offset.y));
+    highp float edge = max(v_gamma_scale / DEVICE_PIXEL_RATIO, 1e-6);
+    highp float alpha = clamp((u_width * 0.5 + 0.5 / DEVICE_PIXEL_RATIO - dist) / edge, 0.0, 1.0);
+    fragColor = u_color * alpha;
 
 #ifdef OVERDRAW_INSPECTOR
     fragColor = vec4(1.0);

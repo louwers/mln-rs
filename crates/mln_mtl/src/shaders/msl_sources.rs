@@ -586,155 +586,93 @@ pub(crate) const TILE_DEBUG_SHADER: Msl = Msl {
     prelude: r#"
 
 enum {
-    idTileDebugDrawableUBO = idDrawableReservedVertexOnlyUBO,
     idTileDebugPropsUBO = drawableReservedUBOCount,
     tileDebugUBOCount
 };
 
-struct alignas(16) TileDebugDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float ratio;
-    /* 68 */ float pad[7];
-    /* 96 */
-};
-static_assert(sizeof(TileDebugDrawableUBO) == 6 * 16, "wrong size");
-
-// An element of the overlay's buffer of drawable UBOs.
-struct alignas(16) TileDebugDrawableElement {
-    TileDebugDrawableUBO drawable;
-    float4 pad[2];
-};
-static_assert(sizeof(TileDebugDrawableElement) == 8 * 16, "wrong size");
-
 struct alignas(16) TileDebugPropsUBO {
     /*  0 */ float4 color;
-    /* 16 */ float blur;
-    /* 20 */ float opacity;
-    /* 24 */ float gapwidth;
-    /* 28 */ float offset;
-    /* 32 */ float width;
-    /* 36 */ float pad[3];
-    /* 48 */
+    /* 16 */ float width;
+    /* 20 */ float world_width;
+    /* 24 */ float pad[2];
+    /* 32 */
 };
-static_assert(sizeof(TileDebugPropsUBO) == 3 * 16, "wrong size");
+static_assert(sizeof(TileDebugPropsUBO) == 2 * 16, "wrong size");
 
 "#,
     source: r"
 
 struct VertexStage {
-    short2 pos_normal [[attribute(0)]];
-    uchar4 data [[attribute(1)]];
+    // The quad's corner: x picks the segment's start (0) or end (1), y its side.
+    short2 corner [[attribute(0)]];
+    // Per instance: where the segment starts and ends, in tile units.
+    short2 start_pos [[attribute(1)]];
+    short2 end_pos [[attribute(2)]];
 };
 
 struct FragmentStage {
     float4 position [[position, invariant]];
-#if defined(PROJECTION_GLOBE)
-    float tile_x;
-#endif
-    float2 width2;
-    float2 normal;
-    half gamma_scale;
+    // The offset in pixels from the segment's start, along the segment and
+    // across it, on the map.
+    float2 offset;
+    // The segment's length in pixels on the map.
+    float segment_length [[flat]];
+    // The pixels on the map that a pixel on screen spans across the segment.
+    float gamma_scale;
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const TileDebugDrawableElement* drawableVector [[buffer(idTileDebugDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const TileDebugPropsUBO& props [[buffer(idTileDebugPropsUBO)]]) {
+    device const ProjectionUBO& projection = projectionVector[uboIndex];
+    const float2 start = float2(vertx.start_pos);
+    const float2 end = float2(vertx.end_pos);
 
-    device const TileDebugDrawableUBO& drawable = drawableVector[uboIndex].drawable;
-
-    const auto gapwidth = props.gapwidth / 2;
-
-    const auto offset   = props.offset * -1;
-
-    const auto width    = props.width;
-
-    // the distance over which the line edge fades out.
-    // Retina devices need a smaller distance to avoid aliasing.
-    const float ANTIALIASING = 1.0 / DEVICE_PIXEL_RATIO / 2.0;
-
-    const float2 a_extrude = float2(vertx.data.xy) - 128.0;
-    const float a_direction = glMod(float(vertx.data.z), 4.0) - 1.0;
-    const float2 pos = floor(float2(vertx.pos_normal) * 0.5);
-
-    // x is 1 if it's a round cap, 0 otherwise
-    // y is 1 if the normal points up, and -1 if it points down
-    // We store these in the least significant bit of a_pos_normal
-    const float2 normal = float2(vertx.pos_normal) - 2.0 * pos;
-    const float2 v_normal = float2(normal.x, normal.y * 2.0 - 1.0);
-
-    const float halfwidth = width / 2.0;
-    const float inset = gapwidth + (gapwidth > 0.0 ? ANTIALIASING : 0.0);
-    const float outset = gapwidth + halfwidth * (gapwidth > 0.0 ? 2.0 : 1.0) + (halfwidth == 0.0 ? 0.0 : ANTIALIASING);
-
-    // Scale the extrusion vector down to a normal and then up by the line width of this vertex.
-    const float2 dist = outset * a_extrude * LINE_NORMAL_SCALE;
-
-    // Calculate the offset when drawing a line that is to the side of the actual line.
-    // We do this by creating a vector that points towards the extrude, but rotate
-    // it when we're drawing round end points (a_direction = -1 or 1) since their
-    // extrude vector points in another direction.
-    const float u = 0.5 * a_direction;
-    const float t = 1.0 - abs(u);
-    const float2 offset2 = offset * a_extrude * LINE_NORMAL_SCALE * v_normal.y * float2x2(t, -u, u, t);
-
+    // The tile units a pixel spans; on the globe, more toward the poles,
+    // where a tile unit covers less of the sphere.
+    float units = 1.0 / (projection.tile_mercator_coords.z * props.world_width);
 #if defined(PROJECTION_GLOBE)
-    const float adjustedThickness = projectLineThickness(pos.y, projectionVector[uboIndex]);
-    const float4 projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector[uboIndex]);
-    const float2 extrudedPos = pos + (offset2 + dist) / drawable.ratio * adjustedThickness;
-    const float4 position = projectTile(extrudedPos, projectionVector[uboIndex]);
-    const float4 projected_extrude = position - projected_no_extrude;
-#else
-    const float4 projected_extrude = drawable.matrix * float4(dist / drawable.ratio, 0.0, 0.0);
-    const float4 position = drawable.matrix * float4(pos + offset2 / drawable.ratio, 0.0, 1.0) + projected_extrude;
+    const float ratio = circumferenceRatioAtTileY((start.y + end.y) * 0.5, projection);
+    units *= mix(1.0, 1.0 / ratio, projection.projection_transition);
 #endif
 
-    // calculate how much the perspective view squishes or stretches the extrude
-    const float extrude_length_without_perspective = length(dist);
-    const float extrude_length_with_perspective = length(projected_extrude.xy / position.w * paintParams.units_to_pixels);
+    // The quad around the segment on the map, reaching half the width and
+    // the antialiased edge past its sides and ends.
+    const float tile_length = distance(start, end);
+    const float2 along = tile_length > 0.0 ? (end - start) / tile_length : float2(1.0, 0.0);
+    const float2 across = float2(-along.y, along.x);
+    const float segment_length = tile_length / units;
+    const float reach = props.width * 0.5 + 0.5 / DEVICE_PIXEL_RATIO;
+    const float2 offset = float2(vertx.corner.x != 0 ? segment_length + reach : -reach,
+                                 vertx.corner.y != 0 ? reach : -reach);
+    const float2 base = start + along * (offset.x * units);
+    const float4 corner = projectTile(base + across * (offset.y * units), projection);
+    const float4 middle = projectTile(base, projection);
+    const float extent = length((corner.xy - middle.xy) / corner.w * paintParams.units_to_pixels);
 
     return {
-        .position    = position,
-#if defined(PROJECTION_GLOBE)
-        .tile_x      = antimeridianClipX(extrudedPos, projectionVector[uboIndex]),
-#endif
-        .width2      = float2(outset, inset),
-        .normal      = v_normal,
-        .gamma_scale = half(extrude_length_without_perspective / extrude_length_with_perspective),
-
+        .position = corner,
+        .offset = offset,
+        .segment_length = segment_length,
+        .gamma_scale = reach / max(extent, 1e-6),
     };
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
                             device const TileDebugPropsUBO& props [[buffer(idTileDebugPropsUBO)]]) {
-#if defined(PROJECTION_GLOBE)
-    if (clippedAtAntimeridian(in.tile_x)) {
-        discard_fragment();
-    }
-#endif
-
 #if defined(OVERDRAW_INSPECTOR)
     return half4(1.0);
 #endif
 
-    const auto color     = props.color;
-
-    const float blur = props.blur;
-
-    const float opacity = props.opacity;
-
-    // Calculate the distance of the pixel from the line in pixels.
-    const float dist = length(in.normal) * in.width2.x;
-
-    // Calculate the antialiasing fade factor. This is either when fading in the
-    // line in case of an offset line (v_width2.y) or when fading out (v_width2.x)
-    const float blur2 = (blur + 1.0 / DEVICE_PIXEL_RATIO) * in.gamma_scale;
-    const float alpha = clamp(min(dist - (in.width2.y - blur2), in.width2.x - dist) / blur2, 0.0, 1.0);
-
-    return half4(color * (alpha * opacity));
+    // The distance from the segment, whose ends are round, and the coverage
+    // of an antialiased edge one device pixel wide on screen.
+    const float beyond = max(max(-in.offset.x, in.offset.x - in.segment_length), 0.0);
+    const float dist = length(float2(beyond, in.offset.y));
+    const float edge = max(in.gamma_scale / DEVICE_PIXEL_RATIO, 1e-6);
+    const float alpha = clamp((props.width * 0.5 + 0.5 / DEVICE_PIXEL_RATIO - dist) / edge, 0.0, 1.0);
+    return half4(props.color * alpha);
 }
 ",
 };
