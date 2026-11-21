@@ -14,16 +14,17 @@
 //!   [`raw_globe_tile_mesh`]), which the engine's clipping masks and globe
 //!   depth draw with too.
 //!
-//! The engine types that the contract's hooks name are public too, for the
-//! contract to be, but outside the engine they're unnameable or
-//! `#[doc(hidden)]`.
+//! The [placement](crate::placement) capability is unstable too, with the
+//! hidden items of the contract that serve it: `LayerType::PLACEMENT`,
+//! `UpdateContext::bucket_key` and `Renderer::placement`/`placement_mut`.
 //!
-//! The [placement](crate::placement) capability is unstable too.
+//! The context's store handles name key types of the engine's, which are
+//! public for the handles to be, but unnameable outside it.
 //!
 //! Two more hidden modules serve tools, each behind a feature of its own:
-//! `testing` (`testing`), drivers for the tests of a crate
-//! that adds source types, and `bench` (`bench`), the benchmarks' entry
-//! points.
+//! `testing` (`testing`), what the tests of a crate that adds layer or
+//! source types drive the engine's parts with, and `bench` (`bench`), the
+//! benchmarks' entry points.
 
 pub use crate::gfx::line_mesh::{LineLayoutVertex, LineOptions, LineScratch, add_line};
 pub use crate::globe_tile_mesh::{GlobeMeshData, RawGlobeTileMesh, globe_mesh_data, raw_globe_tile_mesh};

@@ -4,7 +4,8 @@
 //! A source type is a marker type that implements `mln_style`'s
 //! `StyleSourceType`, its style half, and [`SourceType`], its render half. A
 //! [`RegistryBuilder`](crate::RegistryBuilder) registers it by name with
-//! [`add_source_type`](crate::RegistryBuilder::add_source_type).
+//! [`add_source_type`](crate::RegistryBuilder::add_source_type), which
+//! fails for a name that another type took.
 //!
 //! A source [supplies](SourceType::supply) the renderer one of the engine's
 //! kinds of data: tiles of a [`TileKind`] (geometry, a raster image or a
@@ -25,6 +26,13 @@
 //! thread, and gives the tile what the load brought as a [`TileInput`] of
 //! the tile's kind. The engine hands a reply to the origin only while its
 //! load is the tile's latest ([`LoadContext::begin_load`]).
+//!
+//! The engine runs [`SourceType::supply`] and the origin's hooks one at a
+//! time on the renderer's thread, so an origin and its tiles' loads needn't
+//! be `Send`. A load's work can run anywhere, as on the renderer's pool
+//! ([`LoadContext::pool`]): its [`Replier`] and its replies are `Send`. What
+//! the tiles take in lays out or decodes on the tile workers, through the
+//! worker codec where they run apart; an origin's own types don't cross it.
 
 use std::any::Any;
 use std::marker::PhantomData;

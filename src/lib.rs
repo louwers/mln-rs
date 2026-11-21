@@ -8,6 +8,15 @@
 //! expression functions, layer types and source types into the registry
 //! that [`start_runtime`] starts a runtime with.
 //!
+//! Each extension point is one module, whose doc states its contract:
+//! layer types ([`mln_render::layer`], drawing with [`mln_render::draw`]),
+//! source types and their tiles' data origins ([`mln_render::source`]),
+//! expression functions ([`mln_style::expression::functions`]), programs
+//! and their shader sources ([`mln_gfx::shaders::source`]) and GPU
+//! backends ([`mln_gfx::gpu`]). The built-in layer and source types, in
+//! [`mln_layers`] and [`mln_sources`], go through the same contracts, and
+//! [`register_builtins`] adds them to a [`RegistryBuilder`](mln_render::RegistryBuilder).
+//!
 //! The library crates of <https://github.com/louwers/mln-rs> are re-exported
 //! here under their crate names: `mln_rs::mln_style`, `mln_rs::mln_util`,
 //! `mln_rs::mln_geojson`, and so on. They are published as the `mln-rs-*`

@@ -535,9 +535,9 @@ impl Context {
 }
 
 impl Drop for Context {
-    /// A context dropped without [`tear_down`](Context::tear_down) leaves
-    /// what it made to the `Gpu`, which frees it when it drops, and logs
-    /// that it did.
+    /// A context dropped without its renderer's
+    /// [`tear_down`](crate::Renderer::tear_down) leaves what it made to the
+    /// `Gpu`, which frees it when it drops, and logs that it did.
     fn drop(&mut self) {
         if !self.torn_down && !std::thread::panicking() {
             Log::warning(

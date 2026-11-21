@@ -5,7 +5,9 @@
 //! `StyleLayerType`, its style half, and [`LayerType`], its render half. A
 //! [`RegistryBuilder`](crate::RegistryBuilder) registers it by name with
 //! [`add_layer_type`](crate::RegistryBuilder::add_layer_type), with the
-//! sources of its programs ([`LayerType::add_shader_sources`]).
+//! sources of its programs ([`LayerType::add_shader_sources`]), which fails
+//! for a name that another type took. Every registry that reads a style of
+//! the type registers it, tile workers' too.
 //!
 //! The engine holds each layer of the type: its values ([`LayerValues`]),
 //! which it transitions and evaluates, the passes it draws in, whether the
@@ -52,6 +54,16 @@
 //! across tiles, where they collide with nothing placed before them
 //! (`LayerType::PLACEMENT`), which is unstable and hidden from these docs
 //! (`mln_render::placement`).
+//!
+//! The engine runs the hooks one at a time on the renderer's thread, but
+//! for a tile's layout ([`LayerType::layout_can_need_dependencies`],
+//! [`LayerType::create_layout`] and the [`Layout`]), which runs with the
+//! tile's other work on a tile worker. The layer's values go to the worker
+//! and its bucket comes back through the worker codec (`mln_wire::Wire`),
+//! between the wasm instances of a browser build too: the layout and the
+//! bucket are `Send`, and the bucket and the style half's property sets
+//! implement `Wire`. A layer's [`State`](LayerType::State) and
+//! [`Drawing`](LayerType::Drawing) stay on the renderer's thread.
 //!
 //! The types a layer type draws with, which the hooks name, are the
 //! [draw services](crate::draw). The frame's [`Atlases`] of dash and

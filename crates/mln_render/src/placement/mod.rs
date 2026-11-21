@@ -6,7 +6,9 @@
 //! ([`LayerType::PLACEMENT`]): the pass over every layer of the type that
 //! the frame draws, which owns the order it places them in and what it
 //! keeps of their buckets between frames. A registry has at most one such
-//! type.
+//! type: [`add_layer_type`](crate::RegistryBuilder::add_layer_type) refuses
+//! a second. The pass runs on the renderer's thread, and nothing of it
+//! crosses the worker codec.
 //!
 //! The engine keeps the placement's schedule: it decides each frame
 //! whether the pass places again, keeps the clock its fade runs on, and

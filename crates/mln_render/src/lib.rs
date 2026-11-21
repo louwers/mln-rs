@@ -1,5 +1,21 @@
 //! The map renderer: sources and tiles, layouts and buckets, render layers,
 //! and the orchestrator that brings them to each frame's update.
+//!
+//! The renderer names no layer or source type of its own: it draws the
+//! types of the [`Registry`] it is made with. Each module of an extension
+//! point states its contract:
+//!
+//! - [`layer`]: a layer type's render half, with the [`draw`] services it
+//!   draws with.
+//! - [`source`]: a source type's render half and the data origin of its
+//!   tiles.
+//! - [`RegistryBuilder`]: where both register, with the expression
+//!   functions (`mln_style::expression::functions`) and the layer types'
+//!   shader sources (`mln_gfx::shaders::source`).
+//!
+//! The GPU backend that a renderer draws through is `mln_gfx::gpu`'s
+//! `Gpu`. What the engine exposes to the built-in types besides, not yet
+//! meant as a contract, is in the hidden `unstable` module.
 
 mod algorithm;
 #[cfg(feature = "bench")]
