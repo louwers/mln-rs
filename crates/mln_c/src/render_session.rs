@@ -1233,7 +1233,7 @@ pub(crate) mod tests {
             frame_generation: 0,
             needs_repaint: false,
             view: None,
-            mode: ::mln_runtime::map::RenderMode::Partial,
+            mode: ::mln_rs::mln_render::RenderMode::Partial,
             projection: None,
         };
         let converted = frame_result(&result, 2.0);

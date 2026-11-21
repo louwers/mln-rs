@@ -25,8 +25,9 @@ use std::rc::{Rc, Weak};
 use std::sync::{Arc, OnceLock};
 
 use mln_headless::{HeadlessFrontend, RenderResult};
+use mln_map_types::MapMode;
 use mln_render::{FontStack, GlyphRange, OverscaledTileID, TileOperation, UpdateReader};
-use mln_runtime::map::{MapCore, MapCoreOptions, MapEvent, MapMode, RenderFrameStatus};
+use mln_runtime::map::{MapCore, MapCoreOptions, MapEvent, RenderFrameStatus};
 use mln_sources::custom::geometry::CustomGeometrySourceHandle;
 use mln_sources::custom::provider::TileFunction;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};

@@ -8,7 +8,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use mln_headless::{HeadlessFrontend, RenderResult};
-use mln_runtime::map::{CameraOptions, MapCore, MapCoreOptions, MapMode, RenderMode};
+use mln_map_types::{CameraOptions, MapMode};
+use mln_render::RenderMode;
+use mln_runtime::map::{MapCore, MapCoreOptions};
 use mln_storage::Kind;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style::Edit;

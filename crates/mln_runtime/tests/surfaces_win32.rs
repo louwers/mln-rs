@@ -14,7 +14,7 @@ use mln_gfx::window::raw_window_handle::{
     DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle,
     Win32WindowHandle, WindowHandle, WindowsDisplayHandle,
 };
-use mln_runtime::map::MapMode;
+use mln_map_types::MapMode;
 use mln_runtime::{
     AttachOptions, BackendType, DemandMode, Device, DeviceOptions, ErrorKind, FrameDemand, FrameDisposition,
     FrameResult, Map, MapOptions, RenderSession, RenderTarget, Runtime, Surface,

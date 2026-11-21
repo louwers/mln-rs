@@ -17,7 +17,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use mln_runtime::map::RenderMode;
+use mln_rs::mln_render::RenderMode;
 use mln_runtime::{
     AttachOptions, BackendType, Completion, DemandMode, Device, DeviceOptions, Driver, DriverWork, FrameDemand,
     FrameDisposition, Map, RenderSession, RenderTarget, Surface, SurfaceOverlay,

@@ -3,7 +3,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_headless::HeadlessFrontend;
-use mln_runtime::map::{CameraOptions, MapCore, MapCoreOptions, MapMode, TileSettings};
+use mln_map_types::{CameraOptions, MapMode};
+use mln_runtime::map::{MapCore, MapCoreOptions, TileSettings};
 use mln_storage::Resource;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_util::geo::LatLng;

@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
+use mln_map_types::{AnimationOptions, CameraOptions, CameraUpdate, CameraUpdateMode, MapMode};
 use mln_render::RendererEvent;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{Kind, Response};
@@ -16,10 +17,7 @@ use mln_util::size::Size;
 use mln_util::time::Instant;
 
 use crate::map::map_options::UnusedStyleImagePolicy;
-use crate::map::{
-    AnimationOptions, CameraChange, CameraChangeMode, CameraChangeSource, CameraOptions, CameraUpdate,
-    CameraUpdateMode, MapCore, MapCoreOptions, MapEvent, MapMode,
-};
+use crate::map::{CameraChange, CameraChangeMode, CameraChangeSource, MapCore, MapCoreOptions, MapEvent};
 
 fn map(options: MapCoreOptions, run_loop: &Queue<()>) -> MapCore {
     MapCore::new(

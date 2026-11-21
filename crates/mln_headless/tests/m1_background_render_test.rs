@@ -11,7 +11,8 @@ use std::sync::Arc;
 
 use mln_headless::HeadlessFrontend;
 use mln_image::decode_image;
-use mln_runtime::map::{MapCore, MapCoreOptions, MapMode};
+use mln_map_types::MapMode;
+use mln_runtime::map::{MapCore, MapCoreOptions};
 use mln_util::pool::Pool;
 use mln_util::queue::Queue;
 use mln_util::size::Size;

@@ -26,7 +26,7 @@ pub enum CameraChangeSource {
     /// resize keeps the camera within its bounds.
     #[default]
     Command,
-    /// A camera command with a [`GesturePhase`](crate::map::GesturePhase) other
+    /// A camera command with a [`GesturePhase`](mln_map_types::GesturePhase) other
     /// than `None`.
     Gesture,
     /// The momentum, and the snaps, that a gesture's end started.

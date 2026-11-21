@@ -6,10 +6,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use mln_headless::HeadlessFrontend;
+use mln_map_types::MapMode;
 use mln_rs::mln_layers::custom::{
     Custom, CustomLayerHost, CustomLayerPrerenderParameters, CustomLayerRenderParameters,
 };
-use mln_runtime::map::{MapCore, MapCoreOptions, MapMode};
+use mln_runtime::map::{MapCore, MapCoreOptions};
 use mln_runtime::{BackendType, Device, DeviceOptions};
 use mln_util::error::ErrorKind;
 use mln_util::image::PremultipliedImage;

@@ -5,17 +5,19 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use feature::Value;
-use mln_render::RendererEvent;
+use mln_map_types::CameraOptions;
 use mln_render::update_slot::Update;
+use mln_render::{RendererEvent, UpdateReader};
 use mln_rs::mln_sources::GeoJsonSourceType;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{Kind, Response};
 use mln_style::expression::expr::FeatureState;
+use mln_util::ErrorKind;
 use mln_util::queue::Queue;
 use mln_util::size::Size;
 use parking_lot::Mutex;
 
-use crate::map::{CameraOptions, ErrorKind, MapCore, MapCoreOptions, TileSettings, UpdateReader};
+use crate::map::{MapCore, MapCoreOptions, TileSettings};
 
 fn map(run_loop: &Queue<()>) -> MapCore {
     let options = MapCoreOptions { size: Size::new(256, 256), ..Default::default() };

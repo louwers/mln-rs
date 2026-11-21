@@ -2,13 +2,12 @@
 //! calls: fitting an area, the viewport and the tile settings.
 
 use geo_types::Geometry;
+use mln_map_types::{
+    AnimationOptions, CameraOptions, CameraUpdateMode, ConstrainMode, NorthOrientation, TileLodMode, ViewportMode,
+};
 use mln_util::error::Error;
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds};
 use mln_util::geometry::for_each_point;
-
-use crate::map::{
-    AnimationOptions, CameraOptions, CameraUpdateMode, ConstrainMode, NorthOrientation, TileLodMode, ViewportMode,
-};
 
 /// An area for a camera to fit in the map's view.
 #[derive(Clone, Debug, PartialEq)]
@@ -34,7 +33,7 @@ pub struct CameraFitOptions {
     pub pitch: Option<f64>,
 }
 
-/// Moves the camera to fit an area: [`CameraUpdate`](crate::map::CameraUpdate)'s
+/// Moves the camera to fit an area: [`CameraUpdate`](mln_map_types::CameraUpdate)'s
 /// counterpart for [`Map::fit_camera`](crate::Map::fit_camera).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct CameraFitUpdate {

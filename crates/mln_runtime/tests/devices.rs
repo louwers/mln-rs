@@ -4,7 +4,7 @@
 
 #![expect(unsafe_code, reason = "the tests make and wrap the host's devices and targets through each backend's API")]
 
-use mln_runtime::map::MapMode;
+use mln_map_types::MapMode;
 use mln_runtime::{
     Adapter, AttachOptions, BackendType, BorrowedRing, ConsumerSync, DemandMode, Device, DeviceOptions, ErrorKind,
     FrameDemand, FrameDisposition, GlApi, GpuSync, Map, MapOptions, RenderSession, RenderTarget, Runtime, SyncKind,

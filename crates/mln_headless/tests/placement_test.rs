@@ -10,9 +10,9 @@ use std::time::{Duration, Instant};
 use feature::Value;
 use geojson::GeoJson;
 use mln_headless::HeadlessFrontend;
-use mln_runtime::map::{
-    CameraOptions, MapCore, MapCoreOptions, MapDebugOptions, MapMode, RenderFrameStatus, RenderMode,
-};
+use mln_map_types::{CameraOptions, MapDebugOptions, MapMode};
+use mln_render::RenderMode;
+use mln_runtime::map::{MapCore, MapCoreOptions, RenderFrameStatus};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style::Edit;
 use mln_style::expression::expr::FeatureState;

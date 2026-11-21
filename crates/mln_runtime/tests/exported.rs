@@ -6,7 +6,7 @@
 
 #![expect(unsafe_code, reason = "the tests import the exported images through each backend's API")]
 
-use mln_runtime::map::MapMode;
+use mln_map_types::MapMode;
 use mln_runtime::{
     AcquiredFrame, AttachOptions, BackendType, ConsumerSync, DemandMode, Device, DeviceOptions, DmaBufFormat,
     ErrorKind, ExportKind, ExportKinds, ExportedImage, ExportedRing, FrameDemand, FrameDisposition, FrameTextureKind,

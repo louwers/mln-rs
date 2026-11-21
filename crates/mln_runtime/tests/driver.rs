@@ -7,7 +7,7 @@ use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 
-use mln_runtime::map::MapMode;
+use mln_map_types::MapMode;
 use mln_runtime::{
     AttachOptions, BackendType, Completion, DemandMode, Device, DeviceOptions, Driver, DriverWork, ErrorKind,
     FrameDemand, FrameDisposition, FrameResult, LogicalExtent, Map, MapOptions, RenderSession, RenderSessionState,

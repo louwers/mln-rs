@@ -12,12 +12,13 @@ use feature::Value;
 use geo_types::{LineString, Point};
 use geojson::{GeoJson, Geometry};
 use mln_headless::HeadlessFrontend;
-use mln_render::{OverscaledTileID, TileOperation, UpdateParameters, UpdateReader};
-use mln_rs::mln_layers::Symbol;
-use mln_runtime::map::{
-    AnimationOptions, BoundOptions, CameraOptions, ConstrainMode, MapCore, MapCoreOptions, MapMode, MapProjection,
-    NorthOrientation, ProjectionMode, RenderFrameStatus, RenderMode, TileLodMode, TileSettings, Viewport, ViewportMode,
+use mln_map_types::{
+    AnimationOptions, BoundOptions, CameraOptions, ConstrainMode, MapMode, NorthOrientation, ProjectionMode,
+    TileLodMode, Viewport, ViewportMode,
 };
+use mln_render::{OverscaledTileID, RenderMode, TileOperation, UpdateParameters, UpdateReader};
+use mln_rs::mln_layers::Symbol;
+use mln_runtime::map::{MapCore, MapCoreOptions, MapProjection, RenderFrameStatus, TileSettings};
 use mln_sources::custom::geometry::{self, CustomGeometrySourceHandle, Options as CustomGeometrySourceOptions};
 use mln_sources::custom::provider::TileFunction;
 use mln_sources::geojson::GeoJSONOptions;
@@ -352,11 +353,11 @@ fn fly_too_slow_to_time_jumps_and_the_map_goes_idle() {
     assert!(run_until_idle());
 
     let target = CameraOptions { center: Some(ll(40.0, -74.0)), zoom: Some(10.0), ..Default::default() };
-    test.map().update_camera(&mln_runtime::map::CameraUpdate {
-        mode: mln_runtime::map::CameraUpdateMode::Fly,
+    test.map().update_camera(&mln_map_types::CameraUpdate {
+        mode: mln_map_types::CameraUpdateMode::Fly,
         camera: target,
         animation: AnimationOptions { velocity: Some(f64::from_bits(1)), ..AnimationOptions::default() },
-        ..mln_runtime::map::CameraUpdate::default()
+        ..mln_map_types::CameraUpdate::default()
     });
     assert!(!test.map().snapshot().transition_in_progress);
     assert_near(CameraOptions::from(test.map().snapshot().view.camera).zoom.unwrap(), 10.0, 1e-9);
@@ -368,20 +369,20 @@ fn fly_too_slow_to_time_jumps_and_the_map_goes_idle() {
 fn free_camera_options_place_the_camera_and_cancel_commands() {
     let test = MapTest::new();
     let animation = AnimationOptions::new(Duration::from_secs(10));
-    let command = test.map().update_camera(&mln_runtime::map::CameraUpdate {
-        mode: mln_runtime::map::CameraUpdateMode::Ease,
+    let command = test.map().update_camera(&mln_map_types::CameraUpdate {
+        mode: mln_map_types::CameraUpdateMode::Ease,
         camera: CameraOptions { zoom: Some(10.0), ..Default::default() },
         animation,
-        ..mln_runtime::map::CameraUpdate::default()
+        ..mln_map_types::CameraUpdate::default()
     });
     assert!(test.map().snapshot().transition_in_progress);
 
     let position = glam::dvec3(0.25, 0.25, 0.01);
     test.map()
-        .set_free_camera_options(&mln_runtime::map::FreeCameraOptions { position: Some(position), orientation: None });
+        .set_free_camera_options(&mln_map_types::FreeCameraOptions { position: Some(position), orientation: None });
     let ended: Vec<_> =
         test.map().drain_command_ends().filter(|end| end.command == command).map(|end| end.end.outcome).collect();
-    assert_eq!(ended, [mln_runtime::map::TransitionOutcome::Cancelled]);
+    assert_eq!(ended, [mln_map_types::TransitionOutcome::Cancelled]);
     assert!(!test.map().snapshot().transition_in_progress);
     let placed = test.map().snapshot().free_camera.position;
     for (placed, wanted) in placed.to_array().into_iter().zip(position.to_array()) {
@@ -394,7 +395,7 @@ fn free_camera_options_place_the_camera_and_cancel_commands() {
     assert!(center.latitude() > 0.0);
 
     // A NaN position is ignored.
-    test.map().set_free_camera_options(&mln_runtime::map::FreeCameraOptions {
+    test.map().set_free_camera_options(&mln_map_types::FreeCameraOptions {
         position: Some(glam::dvec3(f64::NAN, 0.0, 0.0)),
         orientation: None,
     });
@@ -599,11 +600,11 @@ fn pixel_for_lat_lng_during_a_fling_across_the_antimeridian() {
 
     let degree = 512.0 * 16.0 / 360.0;
     test.map()
-        .apply_camera_delta(&mln_runtime::map::CameraDelta {
+        .apply_camera_delta(&mln_map_types::CameraDelta {
             offset: Some(ScreenCoordinate::new(-2.0 * degree, 0.0)),
             animation: AnimationOptions::new(Duration::from_secs(10)),
-            phase: mln_runtime::map::GesturePhase::Begin,
-            ..mln_runtime::map::CameraDelta::default()
+            phase: mln_map_types::GesturePhase::Begin,
+            ..mln_map_types::CameraDelta::default()
         })
         .unwrap();
     let center = CameraOptions::from(test.map().snapshot().view.camera).center.unwrap().longitude();

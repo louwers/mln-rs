@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use feature::{PropertyMap, Value};
 use geojson::{GeoJson, Geometry};
+use mln_map_types::{CameraOptions, MapMode};
 use mln_render::query::{FeatureExtensionValue, RenderedQueryOptions, SourceQueryOptions};
-use mln_runtime::map::{CameraOptions, MapMode};
 use mln_sources::geojson::{GeoJSONOptions, GeoJsonSourceType};
 use mln_storage::Kind;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};

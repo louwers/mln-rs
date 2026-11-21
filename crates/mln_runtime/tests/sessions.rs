@@ -8,11 +8,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::channel;
 
+use mln_map_types::{AnimationOptions, CameraOptions, CameraUpdate, CameraUpdateMode, MapMode};
+use mln_render::TileOperation;
 use mln_rs::ClusterQueries;
 use mln_rs::mln_layers::Custom;
-use mln_runtime::map::{
-    AnimationOptions, CameraOptions, CameraUpdate, CameraUpdateMode, MapEvent, MapMode, TileOperation,
-};
+use mln_runtime::map::MapEvent;
 use mln_runtime::{
     AttachOptions, DemandMode, Device, DeviceOptions, Driver, ErrorKind, EventMask, FrameDemand, FrameDisposition,
     FrameResult, LogicalExtent, Map, MapOptions, RenderSession, RenderSessionState, RenderTarget,
@@ -100,7 +100,7 @@ fn render_until_idle(map: &Map, session: &RenderSession) {
         match frame.disposition {
             FrameDisposition::Rendered => {
                 let snapshot = map.snapshot().unwrap();
-                if frame.mode == mln_runtime::map::RenderMode::Full
+                if frame.mode == mln_render::RenderMode::Full
                     && !frame.needs_repaint
                     && !snapshot.transition_in_progress
                     && frame.map_update_generation >= snapshot.update_generation
@@ -1536,7 +1536,7 @@ fn styled_query_session(
     let loaded = eventually(|| {
         demand(&session, DemandMode::Force, 0);
         let result = take_one(&session);
-        result.mode == mln_runtime::map::RenderMode::Full && ready(&session)
+        result.mode == mln_render::RenderMode::Full && ready(&session)
     });
     assert!(loaded, "the sources never loaded");
     (map, session)

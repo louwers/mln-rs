@@ -2,7 +2,8 @@
 // tree tests this through test/api/*.test.cpp and the render tests), and of
 // the frames the frontend draws when asked.
 
-use mln_runtime::map::{CameraOptions, MapCoreOptions, MapMode};
+use mln_map_types::{CameraOptions, MapMode};
+use mln_runtime::map::MapCoreOptions;
 use mln_util::pool::Pool;
 
 use super::*;

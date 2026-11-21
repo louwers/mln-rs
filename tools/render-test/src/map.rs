@@ -1,9 +1,10 @@
 use std::sync::Arc;
 
 use mln_headless::HeadlessFrontend;
+use mln_map_types::{BoundOptions, ProjectionMode};
 use mln_render::tile::worker_codec::{RemoteWorkers, ThreadWorkerInstances};
 use mln_rs::mln_layers::symbol::placement::PlacedSymbols as _;
-use mln_runtime::map::{BoundOptions, MapCore, MapCoreOptions, ProjectionMode};
+use mln_runtime::map::{MapCore, MapCoreOptions};
 use mln_storage::{FileSource, FileSourceExt};
 use mln_style::Edit;
 use mln_util::image::PremultipliedImage;
@@ -18,11 +19,11 @@ use crate::runner::{
 };
 use crate::style_ops;
 
-fn map_mode(mode: MapMode) -> mln_runtime::map::MapMode {
+fn map_mode(mode: MapMode) -> mln_map_types::MapMode {
     match mode {
-        MapMode::Continuous => mln_runtime::map::MapMode::Continuous,
-        MapMode::Static => mln_runtime::map::MapMode::Static,
-        MapMode::Tile => mln_runtime::map::MapMode::Tile,
+        MapMode::Continuous => mln_map_types::MapMode::Continuous,
+        MapMode::Static => mln_map_types::MapMode::Static,
+        MapMode::Tile => mln_map_types::MapMode::Tile,
     }
 }
 
@@ -102,7 +103,7 @@ impl TestRunnerImpl for Impl {
                 .with_x_skew(metadata.x_skew)
                 .with_y_skew(metadata.y_skew),
         );
-        self.map.set_debug(mln_runtime::map::MapDebugOptions(metadata.debug.0));
+        self.map.set_debug(mln_map_types::MapDebugOptions(metadata.debug.0));
         self.map.load_style_json(&metadata.document_json);
         // C++ parses a style as it loads: the operations after it see it.
         self.map.process_events();
@@ -145,7 +146,7 @@ impl TestRunnerImpl for Impl {
         camera: &CameraOptions,
         zoom: u8,
     ) -> Result<Vec<crate::runner::TileId>, MapError> {
-        let camera = mln_runtime::map::CameraOptions {
+        let camera = mln_map_types::CameraOptions {
             center: camera.center,
             center_altitude: camera.center_altitude,
             zoom: camera.zoom,
@@ -185,7 +186,7 @@ impl TestRunnerImpl for Impl {
     }
 
     fn jump_to(&mut self, camera: &CameraOptions) -> Result<(), MapError> {
-        let camera = mln_runtime::map::CameraOptions {
+        let camera = mln_map_types::CameraOptions {
             center: camera.center,
             center_altitude: camera.center_altitude,
             zoom: camera.zoom,
@@ -333,8 +334,8 @@ impl TestRunnerImpl for Impl {
     fn set_tile_lod_mode(&mut self, mode: crate::parser::TileLodMode) -> Result<(), MapError> {
         self.set_tile(|tile| {
             tile.lod_mode = match mode {
-                crate::parser::TileLodMode::Default => mln_runtime::map::TileLodMode::Default,
-                crate::parser::TileLodMode::Distance => mln_runtime::map::TileLodMode::Distance,
+                crate::parser::TileLodMode::Default => mln_map_types::TileLodMode::Default,
+                crate::parser::TileLodMode::Distance => mln_map_types::TileLodMode::Distance,
             };
         });
         Ok(())

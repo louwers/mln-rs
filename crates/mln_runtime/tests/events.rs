@@ -54,9 +54,9 @@ fn an_event_comes_after_a_snapshot_that_includes_it() {
         }
     }));
     let applied = wait(map.set_style_json(EMPTY_STYLE));
-    wait(map.update_camera(mln_runtime::map::CameraUpdate {
-        camera: mln_runtime::map::CameraOptions { zoom: Some(2.0), ..Default::default() },
-        ..mln_runtime::map::CameraUpdate::default()
+    wait(map.update_camera(mln_map_types::CameraUpdate {
+        camera: mln_map_types::CameraOptions { zoom: Some(2.0), ..Default::default() },
+        ..mln_map_types::CameraUpdate::default()
     }));
     let checked = checked.lock();
     assert!(!checked.is_empty());

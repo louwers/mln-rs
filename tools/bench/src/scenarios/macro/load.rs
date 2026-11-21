@@ -2,7 +2,7 @@
 //! the style loads, and the tiles, glyphs and sprite it needs load, until
 //! the first frame with nothing missing.
 
-use mln_runtime::map::{CameraOptions, CameraUpdate, MapMode};
+use mln_rs::mln_map_types::{CameraOptions, CameraUpdate, MapMode};
 use mln_runtime::{AttachOptions, MapOptions, RenderTarget, RuntimeOptions};
 use mln_util::geo::LatLng;
 use mln_util::size::Size;

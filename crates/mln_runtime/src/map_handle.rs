@@ -3,10 +3,14 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock, Weak};
 
+use mln_map_types::{
+    BoundOptions, Camera, CameraDelta, CameraOptions, CameraUpdate, FreeCameraOptions, LogicalExtent, MapDebugOptions,
+    MapMode, ProjectionMode, TransitionEnd, TransitionOutcome,
+};
 use mln_render::text::font_face_engine::FontFaceEngine;
 use mln_render::{Registry, UpdateReader};
-use mln_style::Edit;
 use mln_style::layer::Layer;
+use mln_style::{Edit, StyleLoadError};
 use mln_text::GlyphCache;
 use mln_text::local_glyph_rasterizer::{LocalGlyphRasterizer, LocalGlyphs};
 use mln_util::error::{Error, ErrorKind};
@@ -23,11 +27,7 @@ use crate::camera::{self, CameraFitArea, CameraFitOptions, CameraFitUpdate, Tile
 use crate::completion::{Completion, Resolver};
 use crate::event::{EventMask, EventSource, RuntimeEvent, RuntimeEventKind};
 use crate::feature_state::{FeatureState, FeatureStateSelector};
-use crate::map::{
-    BoundOptions, Camera, CameraCommandId, CameraDelta, CameraOptions, CameraUpdate, FrameClock, FreeCameraOptions,
-    LogicalExtent, MapDebugOptions, MapEvent, MapMode, MapSnapshot, ProjectionMode, StyleLoadError, TransitionEnd,
-    TransitionOutcome,
-};
+use crate::map::{CameraCommandId, FrameClock, MapEvent, MapSnapshot};
 use crate::render::{
     Abandoner, AttachOptions, RenderSession, RenderTarget, SessionId, SessionQueue, SessionShared, Worker, worker_post,
 };

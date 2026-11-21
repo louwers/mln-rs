@@ -4,7 +4,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use mln_runtime::map::MapMode;
+use mln_map_types::MapMode;
 use mln_storage::{Kind, Response};
 use mln_util::ErrorKind;
 use mln_util::image::PremultipliedImage;

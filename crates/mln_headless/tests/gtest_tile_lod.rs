@@ -3,7 +3,8 @@ use std::sync::{Arc, OnceLock};
 
 use geojson::{Feature, Geometry};
 use mln_headless::HeadlessFrontend;
-use mln_runtime::map::{CameraOptions, MapCore, MapCoreOptions, MapDebugOptions, MapMode, TileSettings};
+use mln_map_types::{CameraOptions, MapDebugOptions, MapMode};
+use mln_runtime::map::{MapCore, MapCoreOptions, TileSettings};
 use mln_sources::CustomGeometrySourceHandle;
 use mln_sources::custom::geometry::{self, Options as CustomGeometrySourceOptions};
 use mln_storage::ResourceOptions;
