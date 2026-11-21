@@ -339,7 +339,7 @@ impl ShaderProgram {
         let mut binding_infos = Vec::new();
         analyze_shader_bindings(&mut binding_infos, vertex_source, wgpu::ShaderStages::VERTEX);
         analyze_shader_bindings(&mut binding_infos, fragment_source, wgpu::ShaderStages::FRAGMENT);
-        let texture_slots = texture_slots(&binding_infos);
+        let texture_slots = texture_slots(&declared_bindings(program));
         for info in &mut binding_infos {
             let sampler = match info.type_ {
                 BindingType::Sampler => true,
@@ -662,6 +662,19 @@ fn texture_slots(infos: &[BindingInfo]) -> Vec<(u32, usize)> {
     slots
 }
 
+/// The bindings that `program`'s WGSL declares in any of its variants: a
+/// texture's slot follows from these, so that a variant whose `#ifdef`s
+/// leave a texture out keeps the slots of the others.
+fn declared_bindings(program: &Program) -> Vec<BindingInfo> {
+    let mut declared = Vec::new();
+    if let Some(wgsl) = program.sources.wgsl {
+        for text in [wgsl.prelude, wgsl.vertex, wgsl.fragment] {
+            analyze_shader_bindings(&mut declared, text, wgpu::ShaderStages::VERTEX_FRAGMENT);
+        }
+    }
+    declared
+}
+
 /// Adds the bindings of the `@group(N) @binding(M) var<...> name: type`
 /// declarations in `source`, which `stage` reads, to `binding_infos`. A
 /// text scan, not a parse: a texture only `textureLoad` reads is
@@ -851,6 +864,7 @@ fn move_global_index(source: &str, group: u32) -> Cow<'_, str> {
 #[cfg(test)]
 mod tests {
     use mln_gfx::shaders::bindings::{DRAW_INDEX_ID, PROJECTION_BUFFER_ID, VIEW_BUFFER_ID};
+    use mln_gfx::shaders::program::Sources;
 
     use super::*;
 
@@ -867,6 +881,28 @@ mod tests {
     fn a_stage_declares_the_engines_buffers_it_names() {
         let declared = reserved_bindings(&["", "let p = projectionVector[globalIndex.value]; // view"]);
         assert_eq!(declared, format!("{}\n{}\n", RESERVED_BINDINGS[1].1, RESERVED_BINDINGS[2].1));
+    }
+
+    #[test]
+    fn a_texture_keeps_its_slot_in_a_variant_without_an_earlier_one() {
+        static PROGRAM: Program = Program {
+            name: "two textures",
+            buffers: &[],
+            attributes: &[],
+            instance_attributes: &[],
+            textures: &[],
+            properties: &[],
+            sources: Sources {
+                wgsl: Some(&Wgsl {
+                    vertex: "",
+                    fragment: "#ifdef FIRST\n@group(1) @binding(1) var first: texture_2d<f32>;\n#endif\n\
+                               @group(1) @binding(2) var second: texture_2d<f32>;",
+                    prelude: "",
+                }),
+                ..Sources::NONE
+            },
+        };
+        assert_eq!(texture_slots(&declared_bindings(&PROGRAM)), [(1, 0), (2, 1)]);
     }
 
     #[test]
