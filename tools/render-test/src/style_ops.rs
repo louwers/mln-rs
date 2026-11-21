@@ -117,6 +117,12 @@ pub(crate) fn set_light(style: &mut Style, json: &str) -> Result<(), MapError> {
     Ok(())
 }
 
+/// Sets the style's root `terrain` from `json`, or removes it if `json` is
+/// `null`.
+pub(crate) fn set_terrain(style: &mut Style, json: &str) -> Result<(), MapError> {
+    style.set_root_property_json("terrain", json).map_err(|e| MapError::Conversion(e.to_string()))
+}
+
 /// Removes the source `source_name`, and returns whether there was one.
 pub(crate) fn remove_source(map: &mut Map, source_name: &str) -> bool {
     map.remove_source(source_name).is_some()

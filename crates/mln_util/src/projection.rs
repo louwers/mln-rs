@@ -4,7 +4,8 @@ use geometry::Point;
 use mln_math::{clamp_f64, deg2rad, rad2deg};
 
 use crate::constants::{
-    DEGREES_MAX, EARTH_RADIUS_M, LATITUDE_MAX, LONGITUDE_MAX, M2PI, MAX_ZOOM, MIN_ZOOM, TILE_SIZE_D,
+    DEGREES_MAX, EARTH_MEAN_RADIUS_M, EARTH_RADIUS_M, LATITUDE_MAX, LONGITUDE_MAX, M2PI, MAX_ZOOM, MIN_ZOOM,
+    TILE_SIZE_D,
 };
 use crate::error::Error;
 use crate::geo::{LatLng, WrapMode};
@@ -57,10 +58,24 @@ impl Projection {
 
     #[must_use]
     pub fn meters_per_pixel_at_latitude(lat: f64, zoom: f64) -> f64 {
+        Self::meters_per_pixel_on(EARTH_RADIUS_M, lat, zoom)
+    }
+
+    /// The meters of altitude that a pixel spans at `lat` and `zoom`: those
+    /// along the ground of the sphere of [`EARTH_MEAN_RADIUS_M`], on which
+    /// the camera's altitude, terrain and extrusions scale.
+    #[must_use]
+    pub fn altitude_meters_per_pixel(lat: f64, zoom: f64) -> f64 {
+        Self::meters_per_pixel_on(EARTH_MEAN_RADIUS_M, lat, zoom)
+    }
+
+    /// The meters along the ground of a sphere of `radius` that a pixel
+    /// spans at `lat` and `zoom`.
+    fn meters_per_pixel_on(radius: f64, lat: f64, zoom: f64) -> f64 {
         let constrained_zoom = clamp_f64(zoom, MIN_ZOOM, MAX_ZOOM);
         let constrained_scale = 2.0f64.powf(constrained_zoom);
         let constrained_latitude = clamp_f64(lat, -LATITUDE_MAX, LATITUDE_MAX);
-        deg2rad(constrained_latitude).cos() * M2PI * EARTH_RADIUS_M / Self::world_size(constrained_scale)
+        deg2rad(constrained_latitude).cos() * M2PI * radius / Self::world_size(constrained_scale)
     }
 
     #[must_use]

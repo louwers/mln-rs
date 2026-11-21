@@ -18,7 +18,7 @@ use mln_gfx::shaders::shader_defines::{
     ID_COLLISION_ANCHOR_POS_VERTEX_ATTRIBUTE, ID_COLLISION_DRAWABLE_UBO, ID_COLLISION_EXTRUDE_VERTEX_ATTRIBUTE,
     ID_COLLISION_HEIGHT_OFFSET_VERTEX_ATTRIBUTE, ID_COLLISION_PLACED_VERTEX_ATTRIBUTE,
     ID_COLLISION_POS_VERTEX_ATTRIBUTE, ID_COLLISION_PROJECTION_UBO, ID_COLLISION_SHIFT_VERTEX_ATTRIBUTE,
-    ID_COLLISION_TILE_PROPS_UBO, ID_PROJECTION_UBO, ID_SYMBOL_DATA_ATTRIBUTE, ID_SYMBOL_DRAWABLE_UBO,
+    ID_COLLISION_TILE_PROPS_UBO, ID_GROUND_DEM_TEXTURE, ID_SYMBOL_DATA_ATTRIBUTE, ID_SYMBOL_DRAWABLE_UBO,
     ID_SYMBOL_EVALUATED_PROPS_UBO, ID_SYMBOL_FADE_OPACITY_ATTRIBUTE, ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE,
     ID_SYMBOL_IMAGE_ICON_TEXTURE, ID_SYMBOL_IMAGE_TEXTURE, ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE,
     ID_SYMBOL_POS_OFFSET_ATTRIBUTE, ID_SYMBOL_PROJECTED_POS_ATTRIBUTE, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE,
@@ -27,6 +27,7 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::shaders::symbol_layer_ubo::{
     CollisionDrawableUBO, CollisionTilePropsUBO, SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO,
 };
+use mln_gfx::shaders::terrain_ubo::GroundDrawableUBO;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_map_types::{Projection, ProjectionData};
 use mln_style::layer_type::{ErasedLayerStyle as _, LayerStyle};
@@ -43,6 +44,7 @@ use mln_util::constants::EXTENT;
 use mln_util::error::Error;
 use mln_util::hash::HashMap;
 use mln_util::identity::SimpleIdentity;
+use smallvec::SmallVec;
 
 use super::cast_matrix;
 use crate::bucket::Bucket;
@@ -64,7 +66,7 @@ use crate::layer_drawing::{
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::layout::symbol_layout::SymbolLayout;
-use crate::layout::symbol_projection::{gl_coord_matrix, label_plane_matrix};
+use crate::layout::symbol_projection::{gl_coord_matrix, label_plane_matrix, measured_from_ground};
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{
     Atlases, BucketKey, BucketPlacementData, LayerBucket, LayerUpdateParameters, LayerValues, Parts, PartsMut,
@@ -73,6 +75,7 @@ use crate::render_layer::{
 use crate::render_pass::RenderPass;
 use crate::render_source::{RenderSource, TileOrder};
 use crate::render_tile::{FrameTile, RenderTile};
+use crate::terrain::{GroundBinding, TileFeatures, write_projection};
 use crate::tile_matrix::{projection_data, to_projection_ubo};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -308,6 +311,9 @@ struct SymbolDraw {
     visible: bool,
     /// Gives the draw the textures of its tile's atlases.
     atlases: AtlasBinding,
+    /// The part of its tile whose symbols the draw draws over terrain, of
+    /// the parts that read their own ground; 0 on a flat map.
+    part: usize,
 }
 
 /// What tells apart the draws of a tile that read the same attributes: a
@@ -321,10 +327,14 @@ impl SymbolDraw {
 }
 
 /// What the layer keeps of a tile: its draws, as they were built for the
-/// tile's bucket, and those of its collision boxes and circles.
+/// tile's bucket, once for each part of the tile that reads its own ground
+/// over terrain and once on a flat map, and those of its collision boxes and
+/// circles.
 #[derive(Default)]
 pub(crate) struct SymbolTile {
     draws: Vec<SymbolDraw>,
+    /// How many parts the draws were built for.
+    parts: usize,
     collision: Vec<CollisionDraw>,
 }
 
@@ -555,6 +565,8 @@ struct SegmentGroup {
     tile_index: usize,
     tile_id: UnwrappedTileID,
     overscaled_z: u8,
+    /// How many parts of the tile read their own ground: 1 on a flat map.
+    parts: usize,
     /// One segment, for a layer that sorts its features by key, or all
     /// segments of the buffer.
     segment: Option<usize>,
@@ -618,6 +630,12 @@ pub(crate) struct RenderSymbolLayer {
     /// The segments of the tiles the update builds draws of, as it sorts
     /// them, kept from frame to frame for their memory.
     renderable_segments: Vec<SegmentGroup>,
+    /// Over terrain, what the draws of each of the frame's tiles, by its
+    /// index, bind of their ground, a draw for each part of the tile.
+    ground_reads: Vec<SmallVec<[GroundBinding; 1]>>,
+    /// Over terrain, the ground under each of the frame's draws, in the
+    /// order they're pushed.
+    grounds: Vec<GroundDrawableUBO>,
     /// The buckets the layer places, in placement order.
     placement_data: Vec<BucketPlacementData>,
     /// The buckets another layer places and this layer draws.
@@ -765,6 +783,8 @@ impl RenderSymbolLayer {
             draw_list: DrawList::default(),
             collision_list: DrawList::default(),
             renderable_segments: Vec::new(),
+            ground_reads: Vec::new(),
+            grounds: Vec::new(),
             placement_data: Vec::new(),
             follower_data: Vec::new(),
             source_id: Arc::from(""),
@@ -1002,30 +1022,41 @@ impl RenderSymbolLayer {
     }
 
     /// Makes the frame's draws of the layer's draws of `tiles` that show any
-    /// symbols, in `passes`, and of their collision boxes and circles, and
-    /// writes the buffers they read.
+    /// symbols, in `passes`, which over terrain (`stands`) stand on the
+    /// ground of the update's reads, and of their collision boxes and
+    /// circles, and writes the buffers they read.
     fn make_frame_draws(
         &mut self,
         gpu: &mut dyn Gpu,
         tiles: &[FrameTile<'_, Symbol>],
         passes: RenderPass,
+        stands: bool,
         paint_parameters: &mut PaintParameters<'_>,
     ) {
         let layer_id = self.base.style.base().id.as_str();
         let layer = &*self.values.evaluated;
-        for tile in tiles {
+        self.grounds.clear();
+        for (tile_index, tile) in tiles.iter().enumerate() {
             let tile_id = tile.id();
             let Some(cached) = self.drawing.tiles.get_mut(&tile_id) else {
                 continue;
             };
             let bucket = tile.bucket().map(|bucket| bucket.bucket);
             debug_assert!(bucket.is_some() || cached.draws.is_empty());
-            for (index, draw) in cached.draws.iter().enumerate().filter(|(_, draw)| draw.visible) {
+            let reads = self.ground_reads.get(tile_index);
+            // Symbols measured from sea level stand on a flat ground.
+            let flat = bucket.is_some_and(|bucket| !measured_from_ground(&bucket.layout));
+            for (index, draw) in cached.draws.iter_mut().enumerate().filter(|(_, draw)| draw.visible) {
                 let Some(uniforms) =
                     bucket.and_then(|bucket| Self::uniforms(layer_id, layer, &tile_id, bucket, draw, paint_parameters))
                 else {
                     continue;
                 };
+                if let Some(read) = reads.and_then(|reads| reads.get(draw.part)) {
+                    draw.objects.set_texture(ID_GROUND_DEM_TEXTURE, Some(&read.texture));
+                    let dem_coords = if flat { [0.0; 4] } else { read.ubo.dem_coords };
+                    self.grounds.push(GroundDrawableUBO { dem_coords, ..read.ubo });
+                }
                 let frame_draw = FrameDraw { pass: passes, ..FrameDraw::new(Some(tile_id), draw.id) };
                 self.draw_list.push_part(frame_draw, index, uniforms);
             }
@@ -1038,9 +1069,10 @@ impl RenderSymbolLayer {
         }
 
         if let Some(frame) = &mut self.drawing.frame {
+            let grounds = stands.then_some(self.grounds.as_slice());
             if self
                 .draw_list
-                .finish(frame, gpu, paint_parameters.context, |writer| write_uniforms(&layer.paint, writer))
+                .finish(frame, gpu, paint_parameters.context, |writer| write_uniforms(&layer.paint, grounds, writer))
             {
                 for draw in self.drawing.tiles.values_mut().flat_map(|tile| &mut tile.draws) {
                     draw.objects.drop_bindings();
@@ -1060,9 +1092,11 @@ impl RenderSymbolLayer {
 }
 
 /// Writes the buffers of the frame's draws of a layer of the paint values
-/// `evaluated`.
+/// `evaluated`, with the ground under each of them, `grounds`, where they
+/// stand on terrain.
 fn write_uniforms(
     evaluated: &SymbolPaintProperties::PossiblyEvaluated,
+    grounds: Option<&[GroundDrawableUBO]>,
     writer: &mut UniformWriter<'_, SymbolUniforms>,
 ) {
     let props = SymbolEvaluatedPropsUBO {
@@ -1082,7 +1116,7 @@ fn write_uniforms(
     writer.uniform(ID_SYMBOL_EVALUATED_PROPS_UBO, &props);
     writer.storage(ID_SYMBOL_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);
     writer.storage(ID_SYMBOL_TILE_PROPS_UBO, |uniforms| uniforms.tile_props);
-    writer.storage(ID_PROJECTION_UBO, |uniforms| uniforms.projection);
+    write_projection(writer, grounds, |uniforms| uniforms.projection);
 }
 
 /// Writes the buffers of a collision draw of the tile `tile_id`: its matrix,
@@ -1165,6 +1199,8 @@ impl TypedLayer for RenderSymbolLayer {
     /// higher's.
     const TILE_ORDER: TileOrder = TileOrder::ByY;
 
+    const STANDS: bool = true;
+
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
     }
@@ -1206,10 +1242,13 @@ impl TypedLayer for RenderSymbolLayer {
         }
     }
 
-    /// Makes the frame's draws of the layer: those of each of its tiles,
-    /// which it builds for a tile it keeps none of and refreshes where the
-    /// tile's bucket changed, and the collision boxes and circles it draws
-    /// over them, and writes the buffers they read.
+    /// Makes the frame's draws of the layer: those of each of its tiles, or
+    /// over terrain those of each part of a tile that reads its own ground,
+    /// which it builds for a tile it keeps none of, or of another number of
+    /// parts, and refreshes where the tile's bucket changed, and the
+    /// collision boxes and circles it draws over them, and writes the
+    /// buffers they read. Where a tile draws in several parts, its symbols
+    /// keep their order within each part.
     fn update_draws(
         &mut self,
         gpu: &mut dyn Gpu,
@@ -1243,6 +1282,10 @@ impl TypedLayer for RenderSymbolLayer {
             .unwrap_or_else(SymbolLayoutProperties::Defaults::symbol_screen_space);
         let symbol_projection_variant =
             if is_screen_space { ProjectionVariant::Mercator } else { self.base.projection_variant };
+        // Over terrain, the symbols stand on the ground, but for those drawn
+        // over the view.
+        let ground = paint_parameters.ground.clone().filter(|_| !is_screen_space);
+        self.ground_reads.clear();
         let is_offset = !layout.icon_offset.is_undefined();
 
         let current_zoom = transform.zoom() as f32;
@@ -1252,6 +1295,10 @@ impl TypedLayer for RenderSymbolLayer {
 
         for (tile_index, tile) in render_tiles.iter().enumerate() {
             let tile_id = tile.id();
+            if let Some(ground) = &ground {
+                self.ground_reads.push(ground.reads(&tile_id, TileFeatures::Anchored));
+            }
+            let parts = self.ground_reads.get(tile_index).map_or(1, SmallVec::len);
 
             let Some(mut entry) = self.drawing.tiles.entry(&tile_id) else {
                 continue;
@@ -1276,6 +1323,10 @@ impl TypedLayer for RenderSymbolLayer {
 
             let evaluated = &render_data.layer.paint;
 
+            // Draws of another number of parts go.
+            if let Some(cached) = entry.value.as_mut().filter(|cached| cached.parts != parts) {
+                cached.draws.clear();
+            }
             // A tile the layer keeps draws of refreshes them.
             if let Some(cached) = entry.value.as_mut().filter(|cached| !cached.draws.is_empty()) {
                 // The draws that read the same attributes are next to each
@@ -1305,6 +1356,7 @@ impl TypedLayer for RenderSymbolLayer {
                             tile_index,
                             tile_id: tile.tile.id,
                             overscaled_z: tile_id.overscaled_z,
+                            parts,
                             segment: Some(i),
                         });
                     }
@@ -1319,6 +1371,7 @@ impl TypedLayer for RenderSymbolLayer {
                         tile_index,
                         tile_id: tile.tile.id,
                         overscaled_z: tile_id.overscaled_z,
+                        parts,
                         segment: None,
                     });
                     serial_key += 1.0;
@@ -1478,45 +1531,50 @@ impl TypedLayer for RenderSymbolLayer {
                     })
                 };
 
-                // The halo and the fill read the same attributes.
-                let geometry = DrawGeometry {
-                    vertices: copy_shared_attributes(&vertex_attribs),
-                    vertex_count: buffer.attribute_data.len(),
-                    mode: DrawMode::Triangles(),
-                    indexes: copied_indexes(&buffer.triangles),
-                    segments: segments.iter().map(SegmentBase::copy).collect(),
-                    instances: None,
+                let Some(entry) = self.drawing.tiles.entry(&tile_id) else {
+                    continue;
                 };
-                let shader = paint_parameters.context.shader_key(program, uniforms, symbol_projection_variant);
-                let textures = draw_atlases.textures(&shader);
-                let objects = DrawObjects::new(shader, color_mode, CullFaceMode::disabled(), geometry, textures);
-
-                let draw = SymbolDraw {
-                    id: SimpleIdentity::new(),
-                    objects,
-                    placed: placed.clone(),
-                    data: SymbolDrawData {
-                        is_halo,
-                        bucket_variable_placement: state.has_variable_placement,
-                        symbol_type: group.type_,
-                        pitch_alignment: values.pitch_alignment,
-                        rotation_alignment: values.rotation_alignment,
-                        along_line: values.along_line,
-                        text_fit: *bucket_layout.icon_text_fit.uniform(),
-                        is_offset,
-                        segment: group.segment,
-                    },
-                    visible,
-                    atlases: draw_atlases.clone(),
-                };
-                if let Some(entry) = self.drawing.tiles.entry(&tile_id) {
-                    entry.value.get_or_insert_with(SymbolTile::default).draws.push(draw);
+                let kept = entry.value.get_or_insert_with(SymbolTile::default);
+                kept.parts = group.parts;
+                // The halo and the fill, and their draws of each part, read
+                // the same attributes.
+                for part in 0..group.parts {
+                    let geometry = DrawGeometry {
+                        vertices: copy_shared_attributes(&vertex_attribs),
+                        vertex_count: buffer.attribute_data.len(),
+                        mode: DrawMode::Triangles(),
+                        indexes: copied_indexes(&buffer.triangles),
+                        segments: segments.iter().map(SegmentBase::copy).collect(),
+                        instances: None,
+                    };
+                    let shader = paint_parameters.context.shader_key(program, uniforms, symbol_projection_variant);
+                    let textures = draw_atlases.textures(&shader);
+                    let objects = DrawObjects::new(shader, color_mode, CullFaceMode::disabled(), geometry, textures);
+                    kept.draws.push(SymbolDraw {
+                        id: SimpleIdentity::new(),
+                        objects,
+                        placed: placed.clone(),
+                        data: SymbolDrawData {
+                            is_halo,
+                            bucket_variable_placement: state.has_variable_placement,
+                            symbol_type: group.type_,
+                            pitch_alignment: values.pitch_alignment,
+                            rotation_alignment: values.rotation_alignment,
+                            along_line: values.along_line,
+                            text_fit: *bucket_layout.icon_text_fit.uniform(),
+                            is_offset,
+                            segment: group.segment,
+                        },
+                        visible,
+                        atlases: draw_atlases.clone(),
+                        part,
+                    });
                 }
             }
         }
 
         self.renderable_segments = renderable_segments;
-        self.make_frame_draws(gpu, render_tiles, passes, paint_parameters);
+        self.make_frame_draws(gpu, render_tiles, passes, ground.is_some(), paint_parameters);
     }
 
     /// Collects the symbol buckets of the tiles the layer places, and of

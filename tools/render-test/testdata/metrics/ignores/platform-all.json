@@ -79,7 +79,6 @@
     "render-tests/regressions/mapbox-gl-js#6655": "skip - port https://github.com/mapbox/mapbox-gl-js/pull/6263 - needs issue",
     "render-tests/regressions/mapbox-gl-js#6706": "https://github.com/mapbox/mapbox-gl-native/issues/10619",
     "render-tests/regressions/mapbox-gl-js#6806": "pending https://github.com/mapbox/mapbox-gl-js/pull/6812",
-    "render-tests/regressions/mapbox-gl-js#7271": "https://github.com/mapbox/mapbox-gl-native/issues/12888",
     "render-tests/regressions/mapbox-gl-js#7302": "skip - js specific",
     "render-tests/regressions/mapbox-gl-js#7708": "skip - js specific",
     "render-tests/regressions/mapbox-gl-js#8026": "skip - js specific",

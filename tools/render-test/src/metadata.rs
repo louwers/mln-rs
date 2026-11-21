@@ -18,6 +18,15 @@ pub(crate) enum MapMode {
     Tile = 2,
 }
 
+/// How far the skirts of terrain tiles reach down, a map option.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[repr(u32)]
+pub(crate) enum TerrainSkirtLength {
+    #[default]
+    Auto = 0,
+    None = 1,
+}
+
 /// The map's debug overlays, a bit set.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub(crate) struct MapDebugOptions(pub(crate) u32);
@@ -217,6 +226,7 @@ pub struct TestMetadata {
     pub(crate) map_mode: MapMode,
     pub(crate) debug: MapDebugOptions,
     pub(crate) cross_source_collisions: bool,
+    pub(crate) terrain_skirt_length: TerrainSkirtLength,
     pub(crate) axonometric: bool,
     pub(crate) x_skew: f64,
     pub(crate) y_skew: f64,
@@ -272,6 +282,7 @@ impl Default for TestMetadata {
             map_mode: MapMode::Static,
             debug: MapDebugOptions::NO_DEBUG,
             cross_source_collisions: true,
+            terrain_skirt_length: TerrainSkirtLength::Auto,
             axonometric: false,
             x_skew: 0.0,
             y_skew: 1.0,

@@ -2,18 +2,16 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, Gpu, LoadOp, TargetFormats};
-use mln_gfx::rendering_stats::RenderingStats;
-use mln_gfx::shaders::layer_ubo::GlobalPaintParamsUBO;
+use mln_gfx::rendering_stats::{RenderingStats, TerrainStats};
 use mln_gfx::shaders::shader_defines::ID_GLOBAL_PAINT_PARAMS_UBO;
 use mln_gfx::{FrameImage, Handoff, ScissorRect};
 use mln_map_types::MapDebugOptions;
 use mln_style::layers::CustomLayerFrame;
 use mln_text::GlyphCache;
 use mln_text::local_glyph_rasterizer::LocalGlyphs;
-use mln_tile_id::UnwrappedTileID;
 use mln_util::Color;
+use mln_util::error::Error;
 use mln_util::event_queue::Waker;
-use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, Log};
 use mln_util::pool::Pool;
 use mln_util::time::Instant;
@@ -23,8 +21,8 @@ use crate::clip_masks::ClipMasks;
 use crate::frame::Frame;
 use crate::frame_projection::{self, FrameProjection};
 use crate::gfx::context::Context;
-use crate::layer_composite::{Composite, LayerComposite};
-use crate::layer_drawing::DrawOrder;
+use crate::layer_composite::LayerComposite;
+use crate::layer_drawing::{DrawGroups, DrawOrder};
 use crate::layers::render_custom_layer::end_hosts;
 use crate::paint_parameters::{OpenPass, PaintParameters};
 use crate::render_orchestrator::RenderOrchestrator;
@@ -104,13 +102,19 @@ pub struct UpdatedFrame {
 /// [`Renderer::finish_frame`] once the target handed it off.
 #[must_use = "a drawn frame is finished once its target handed it off"]
 pub struct DrawnFrame {
+    /// Why the frame failed on the GPU, if it did.
+    error: Option<Error>,
     mode: RenderMode,
+    /// Whether the frame would be `Full` but for its failure.
+    complete: bool,
     needs_repaint: bool,
     /// When the frame's placement wants the next frame, if it does.
     repaint_at: Option<Instant>,
     placement_changed: bool,
     /// The `still_image_request_id` of a still image's frame, or 0.
     still_image_request_id: u64,
+    /// The `update_id` of the update the frame drew.
+    update_id: u64,
     started: Instant,
     symbols_started: Instant,
     updated: Instant,
@@ -140,6 +144,16 @@ struct Encoder {
     /// Where the last frame drew the map.
     frame_projection: Option<FrameProjection>,
     timings: RenderTimings,
+}
+
+impl DrawnFrame {
+    /// Why the frame failed on the GPU, if something it draws did, such as a
+    /// pass that didn't begin, a texture that couldn't be made or a draw:
+    /// its image lacks what failed, or holds nothing, and it isn't `Full`.
+    #[must_use]
+    pub fn error(&self) -> Option<&Error> {
+        self.error.as_ref()
+    }
 }
 
 impl Renderer {
@@ -245,6 +259,80 @@ impl Renderer {
         self.orchestrator.release_shaders();
     }
 
+    /// The tiles and stacks of the terrain's drapes drawn since the last
+    /// call.
+    #[cfg(test)]
+    pub(crate) fn take_drape_passes(&mut self) -> Vec<(mln_tile_id::OverscaledTileID, usize)> {
+        self.orchestrator.terrain().take_drape_passes()
+    }
+
+    /// Whether the terrain's surface made its shader, and whether it holds
+    /// draws or the grid.
+    #[cfg(test)]
+    pub(crate) fn terrain_surface_holds(&mut self) -> (bool, bool) {
+        let draws = self.orchestrator.terrain().draws();
+        (draws.has_shader(), draws.holds_draws())
+    }
+
+    /// Whether the renderer made the key of a terrain variant, which a
+    /// standing layer draws with over terrain.
+    #[cfg(test)]
+    pub(crate) fn made_terrain_variant(&self) -> bool {
+        self.encoder.context.made_key_for(mln_gfx::projection_variant::ProjectionVariant::Terrain)
+    }
+
+    /// Whether a draw that the layer `id` keeps reads vertices as the
+    /// attribute, instance attribute or storage buffer `vertices`.
+    #[cfg(test)]
+    pub(crate) fn keeps_vertices_of(&mut self, id: &str, vertices: usize) -> bool {
+        self.orchestrator.keeps_vertices_of(id, vertices)
+    }
+
+    /// How many polygon centroids the fill-extrusion buckets of the cover
+    /// tiles of source `id` hold.
+    #[cfg(test)]
+    pub(crate) fn extrusion_centroids(&self, id: &str) -> usize {
+        self.orchestrator.extrusion_centroids(id)
+    }
+
+    /// How many placements the renderer has committed.
+    #[cfg(test)]
+    pub(crate) fn placement_commits(&self) -> u64 {
+        self.orchestrator.placement_commits()
+    }
+
+    /// The projection variant each layer draws with, by its id.
+    #[cfg(test)]
+    pub(crate) fn projection_variants(&self) -> Vec<(String, mln_gfx::projection_variant::ProjectionVariant)> {
+        self.orchestrator.projection_variants()
+    }
+
+    /// How many DEM textures the terrain holds, made or waiting to upload,
+    /// and how many DEM tiles its drawn tiles read.
+    #[cfg(test)]
+    pub(crate) fn dem_textures(&mut self) -> (usize, usize) {
+        self.orchestrator.terrain().dem_textures()
+    }
+
+    /// The tiles of the terrain's drapes and the side their drapes draw at.
+    #[cfg(test)]
+    pub(crate) fn drape_sizes(&mut self) -> Vec<(mln_tile_id::OverscaledTileID, u32)> {
+        self.orchestrator.terrain().drape_sizes()
+    }
+
+    /// Caps the bytes of the terrain's drapes at `bytes`.
+    #[cfg(test)]
+    pub(crate) fn set_drape_byte_cap(&mut self, bytes: usize) {
+        self.orchestrator.terrain().drape_byte_cap = Some(bytes as u64);
+    }
+
+    /// The tiles of the terrain's drapes, those of the last update's cover.
+    #[cfg(test)]
+    pub(crate) fn drape_tiles(&mut self) -> Vec<mln_tile_id::OverscaledTileID> {
+        let cover = self.orchestrator.terrain().cover();
+        cover.map(|cover| cover.tiles.iter().map(|tile| tile.id).collect()).unwrap_or_default()
+    }
+
     /// The device pixels per logical pixel the renderer draws at.
     #[must_use]
     pub fn pixel_ratio(&self) -> f32 {
@@ -301,17 +389,44 @@ impl Renderer {
     /// Draws `frame`, which the last [`update`](Self::update) returned, into
     /// `image`, textures of `gpu` that the host's target began a frame with,
     /// and submits the frame's passes. Returns the frame, which the host
-    /// ends on its target and then [finishes](Self::finish_frame).
+    /// ends on its target, whether or not it failed ([`DrawnFrame::error`]),
+    /// and then [finishes](Self::finish_frame).
     pub fn render(&mut self, gpu: &mut dyn Gpu, image: &FrameImage, frame: UpdatedFrame) -> DrawnFrame {
         self.encoder.encode(gpu, &mut self.orchestrator, self.events.as_ref(), image, frame)
     }
 
+    /// Ends `frame`, which the last [`update`](Self::update) returned, as one
+    /// that failed with `error` before it drew, as when its target couldn't
+    /// make the textures to draw it into: reports it as
+    /// [`finish_frame`](Self::finish_frame) does, so that a still image of
+    /// it fails with the error.
+    pub fn fail_frame(&mut self, gpu: &mut dyn Gpu, frame: UpdatedFrame, error: Error) {
+        let UpdatedFrame { frame, parameters, updated } = frame;
+        let now = Instant::now();
+        let drawn = DrawnFrame {
+            error: Some(error),
+            mode: RenderMode::Partial,
+            complete: frame.loaded,
+            needs_repaint: frame.needs_repaint,
+            repaint_at: frame.repaint_at,
+            placement_changed: frame.placement_changed,
+            still_image_request_id: if parameters.still_image_request { parameters.still_image_request_id } else { 0 },
+            update_id: parameters.update_id,
+            started: frame.started,
+            symbols_started: frame.symbols_started,
+            updated,
+            layers_uploaded: now,
+            start_rendering: now,
+        };
+        self.encoder.finish(gpu, self.events.as_ref(), drawn, Handoff::Dropped);
+    }
+
     /// Ends `frame`, which [`render`](Self::render) drew, once the host's
     /// target handed it off as `handoff`: destroys what the frame replaced
-    /// and reports the frame with its rendering stats.
-    #[expect(clippy::needless_pass_by_value, reason = "a frame is finished once: the call takes it")]
+    /// and reports the frame with its rendering stats, and with its error
+    /// if it failed.
     pub fn finish_frame(&mut self, gpu: &mut dyn Gpu, frame: DrawnFrame, handoff: Handoff) {
-        self.encoder.finish(gpu, self.events.as_ref(), &frame, handoff);
+        self.encoder.finish(gpu, self.events.as_ref(), frame, handoff);
     }
 
     /// Drops `value` on the renderer's workers instead of this
@@ -341,7 +456,7 @@ impl Renderer {
         &mut self,
         geometry: &[mln_util::geo::ScreenCoordinate],
         options: &crate::query::RenderedQueryOptions,
-    ) -> Result<Vec<mln_util::feature::Feature>, mln_util::error::Error> {
+    ) -> Result<Vec<mln_util::feature::Feature>, Error> {
         let features = self.orchestrator.query_rendered_features(geometry, options);
         report(&mut self.orchestrator, self.events.as_ref());
         features
@@ -351,7 +466,7 @@ impl Renderer {
         &mut self,
         point: &mln_util::geo::ScreenCoordinate,
         options: &crate::query::RenderedQueryOptions,
-    ) -> Result<Vec<mln_util::feature::Feature>, mln_util::error::Error> {
+    ) -> Result<Vec<mln_util::feature::Feature>, Error> {
         self.query_rendered_features(&[*point], options)
     }
 
@@ -360,7 +475,7 @@ impl Renderer {
         min: &mln_util::geo::ScreenCoordinate,
         max: &mln_util::geo::ScreenCoordinate,
         options: &crate::query::RenderedQueryOptions,
-    ) -> Result<Vec<mln_util::feature::Feature>, mln_util::error::Error> {
+    ) -> Result<Vec<mln_util::feature::Feature>, Error> {
         use mln_util::geo::ScreenCoordinate;
         self.query_rendered_features(
             &[*min, ScreenCoordinate::new(max.x, min.y), *max, ScreenCoordinate::new(min.x, max.y), *min],
@@ -372,7 +487,7 @@ impl Renderer {
         &mut self,
         source_id: &str,
         options: &crate::query::SourceQueryOptions,
-    ) -> Result<Vec<mln_util::feature::Feature>, mln_util::error::Error> {
+    ) -> Result<Vec<mln_util::feature::Feature>, Error> {
         let features = self.orchestrator.query_source_features(source_id, options);
         report(&mut self.orchestrator, self.events.as_ref());
         features
@@ -390,7 +505,7 @@ impl Renderer {
         extension: &str,
         extension_field: &str,
         args: Option<&feature::PropertyMap>,
-    ) -> Result<crate::query::FeatureExtensionValue, mln_util::error::Error> {
+    ) -> Result<crate::query::FeatureExtensionValue, Error> {
         self.orchestrator.query_feature_extensions(source_id, feature, extension, extension_field, args)
     }
 
@@ -497,6 +612,7 @@ impl Renderer {
     pub fn clear_data(&mut self, gpu: &mut dyn Gpu) {
         self.orchestrator.clear_data();
         end_hosts(gpu, self.orchestrator.take_ended_hosts());
+        report(&mut self.orchestrator, self.events.as_ref());
     }
 
     /// Destroys the renderer's GPU objects on `gpu`, and tells its custom
@@ -543,6 +659,9 @@ impl Encoder {
         {
             let stats = self.context.rendering_stats();
             stats.num_draw_calls = 0;
+            stats.num_render_passes = 0;
+            stats.num_mipmap_generations = 0;
+            stats.terrain = TerrainStats::default();
             stats.num_frames += 1;
         }
         let static_data = &self.static_data;
@@ -600,11 +719,17 @@ impl Encoder {
 
         // - DRAW UPLOAD ---------------------------------------------------
         orchestrator.upload_draws(gpu, parameters.context);
-        let draw_groups = DrawGroups::of(orchestrator, &parameters);
+        let draw_groups = DrawGroups::of(
+            |visit| orchestrator.visit_draw_groups(visit),
+            |tiles| parameters.stencil_clear_tiles(tiles),
+        );
+        parameters.stencil_clear.clone_from(&draw_groups.stencil_clear);
         let (proj_state, transform) = (parameters.view, parameters.transform_params);
         parameters.clip_masks.update(gpu, parameters.context, proj_state.is_globe(), &draw_groups.clip_tiles, |tile| {
             to_projection_ubo(&transform.projection_data_for_tile(tile, false))
         });
+        let pattern_atlas_size = orchestrator.atlases().pattern.pixel_size();
+        orchestrator.terrain().upload_drapes(gpu, &mut parameters, pattern_atlas_size);
         parameters.layer_composite.update(
             gpu,
             parameters.context,
@@ -613,18 +738,7 @@ impl Encoder {
             parameters.debug_options.contains(MapDebugOptions::OVERDRAW),
             &draw_groups.composited,
         );
-        let atlas_size = orchestrator.atlases().pattern.pixel_size();
-        let global_paint_params_ubo = GlobalPaintParamsUBO {
-            pattern_atlas_texsize: [atlas_size.width as f32, atlas_size.height as f32],
-            units_to_pixels: [1.0 / parameters.pixels_to_gl_units[0], 1.0 / parameters.pixels_to_gl_units[1]],
-            world_size: [renderable_size.width as f32, renderable_size.height as f32],
-            camera_to_center_distance: state.camera_to_center_distance() as f32,
-            symbol_fade_change: parameters.symbol_fade_change,
-            aspect_ratio: state.size().aspect_ratio(),
-            pixel_ratio: parameters.pixel_ratio,
-            map_zoom: state.zoom() as f32,
-            pad1: 0.0,
-        };
+        let global_paint_params_ubo = parameters.global_paint_params(orchestrator.atlases().pattern.pixel_size());
         parameters.context.write_global_uniform_buffer(gpu, ID_GLOBAL_PAINT_PARAMS_UBO, &global_paint_params_ubo);
         // What the uploads replaced goes before the passes make what
         // replaces it, such as a draw's geometry.
@@ -635,9 +749,7 @@ impl Encoder {
         // The 3D layers draw into depth from 0 to the passes' depth range
         // size, which the draw groups' count sets, and custom layers record
         // their work with the projection that the frame's result reports.
-        let depth_range_size = 1.0
-            - ((draw_groups.count + 2) * PaintParameters::NUM_SUBLAYERS as usize) as f32
-                * PaintParameters::DEPTH_EPSILON;
+        let depth_range_size = draw_groups.depth_range_size();
         let frame_projection =
             frame_projection::compute(&frame.transform, depth_range_size, parameters.context.caps().clip_depth);
         parameters.custom_layer_frame = Some(CustomLayerFrame {
@@ -647,18 +759,33 @@ impl Encoder {
             height: renderable_size.height,
         });
         draw(orchestrator, gpu, &mut parameters, &frame, image, draw_groups.count, depth_range_size);
+        orchestrator.terrain().count(parameters.context);
+        // Drapes left for a later frame, stale by the camera, leave this one
+        // incomplete, and ask for the next.
+        let drapes_waiting = orchestrator.terrain().drapes_waiting();
         let start_rendering = Instant::now();
         if let Err(error) = parameters.end_pass(gpu).and_then(|()| gpu.flush(false)) {
-            Log::error(Event::Render, format!("Submitting the frame failed: {error}"));
+            parameters.context.fail(format!("Submitting the frame failed: {error}"));
         }
+        let error = parameters.context.device().take_failure().map(Error::native);
         drop(parameters);
+        // What the frame prepared for later ones, which record it as drawn
+        // once they encode it, may hold what failed: the next frame that
+        // needs it prepares it again.
+        if error.is_some() {
+            orchestrator.terrain().redraw_drapes();
+            orchestrator.visit_render_layers(|layer| layer.prepare_again());
+        }
+        let complete = frame.loaded && !drapes_waiting;
 
         self.timings.layers = layers_updated - uploaded;
         self.timings.upload = (uploaded - start) + (layers_uploaded - layers_updated);
         self.frame_projection = Some(frame_projection);
         DrawnFrame {
-            mode: if frame.loaded { RenderMode::Full } else { RenderMode::Partial },
-            needs_repaint: frame.needs_repaint,
+            mode: if complete && error.is_none() { RenderMode::Full } else { RenderMode::Partial },
+            complete,
+            error,
+            needs_repaint: frame.needs_repaint || drapes_waiting,
             repaint_at: frame.repaint_at,
             placement_changed: frame.placement_changed,
             still_image_request_id: if update_parameters.still_image_request {
@@ -666,6 +793,7 @@ impl Encoder {
             } else {
                 0
             },
+            update_id: update_parameters.update_id,
             started: frame.started,
             symbols_started: frame.symbols_started,
             updated,
@@ -677,19 +805,22 @@ impl Encoder {
     /// The end of a frame that [`encode`](Self::encode) drew, once its
     /// target handed it off as `handoff`: destroys what the uploads and the
     /// passes replaced, and reports the frame with the rendering stats.
-    fn finish(&mut self, gpu: &mut dyn Gpu, events: Option<&RendererEvents>, frame: &DrawnFrame, handoff: Handoff) {
+    fn finish(&mut self, gpu: &mut dyn Gpu, events: Option<&RendererEvents>, frame: DrawnFrame, handoff: Handoff) {
         let DrawnFrame {
+            error,
             mode,
+            complete,
             needs_repaint,
             repaint_at,
             placement_changed,
             still_image_request_id,
+            update_id,
             started,
             symbols_started,
             updated,
             layers_uploaded,
             start_rendering,
-        } = *frame;
+        } = frame;
         let submitted = Instant::now();
         let context = &mut self.context;
         {
@@ -715,11 +846,14 @@ impl Encoder {
             events,
             RendererEvent::RenderFrameFinished {
                 mode,
+                complete,
                 needs_repaint,
                 repaint_at,
                 placement_changed,
                 still_image_request_id,
+                update_id,
                 stats,
+                error: error.map(Box::new),
             },
         );
 
@@ -729,44 +863,6 @@ impl Encoder {
             self.render_state = RenderState::Fully;
             emit(events, RendererEvent::RenderMapFinished);
         }
-    }
-}
-
-/// What the frame's draw groups need of the passes: their number, which sets
-/// the passes' depth range; the masks of the tiles they clip to and, when
-/// any of them uses the stencil buffer, of the tile that clears it; and the
-/// groups drawn as a whole, each into the layer composite's texture and then
-/// onto the frame.
-struct DrawGroups {
-    count: usize,
-    clip_tiles: Vec<UnwrappedTileID>,
-    composited: Vec<(SimpleIdentity, Composite)>,
-}
-
-impl DrawGroups {
-    /// The draw groups of `orchestrator`'s layers. Draw groups of one source
-    /// clip to the same tiles, which are added once.
-    fn of(orchestrator: &RenderOrchestrator, parameters: &PaintParameters<'_>) -> DrawGroups {
-        let mut groups = DrawGroups { count: 0, clip_tiles: Vec::new(), composited: Vec::new() };
-        let mut last: Option<&[UnwrappedTileID]> = None;
-        orchestrator.visit_draw_groups(|group| {
-            groups.count += 1;
-            if let Some(tiles) = group.stencil_tiles()
-                && last.is_none_or(|last| last != tiles)
-            {
-                groups.clip_tiles.extend(tiles.iter().copied());
-                last = Some(tiles);
-            }
-            groups.composited.extend(group.composite());
-        });
-        if last.is_some() {
-            groups.clip_tiles.extend(parameters.stencil_clear_tile());
-        }
-        if !groups.clip_tiles.is_sorted() {
-            groups.clip_tiles.sort_unstable();
-        }
-        groups.clip_tiles.dedup();
-        groups
     }
 }
 
@@ -797,8 +893,10 @@ fn draw(
         orchestrator.render_draw_groups(gpu, parameters, DrawOrder::BottomUp);
     }
 
-    // The layers' render targets, which the passes sample.
+    // The layers' render targets, which the passes sample, and the terrain's
+    // drapes, whose draws sample some of them.
     orchestrator.visit_render_layers(|layer| layer.render_targets(gpu, parameters));
+    orchestrator.terrain().render_drapes(gpu, parameters);
 
     // The frame's pass, cleared to the backdrop, which shows where there are
     // no tiles.
@@ -822,7 +920,7 @@ fn draw(
         targets: image.targets,
     };
     if let Err(error) = parameters.begin_pass(gpu, pass) {
-        Log::error(Event::Render, format!("Beginning the frame's pass failed: {error}"));
+        parameters.context.fail(format!("Beginning the frame's pass failed: {error}"));
     }
 
     // The sky.
@@ -846,7 +944,8 @@ fn draw(
     }
 
     // The translucent pass. The planet goes into the depth buffer first, so
-    // 3D geometry behind the horizon stays hidden.
+    // 3D geometry behind the horizon stays hidden. Over terrain, each stack
+    // of draped layers draws its surface where its first layer draws.
     parameters.pass = RenderPass::Translucent;
     parameters.depth_range_size = depth_range_size;
     orchestrator.globe_depth().render(gpu, parameters);
@@ -870,16 +969,16 @@ fn draw(
 
     // The frame, where it drew into the layer composite's texture, copied
     // into the target.
-    parameters.present_frame(
-        gpu,
-        OpenPass {
-            label: "main buffer",
-            color: Some(ColorAttachment { texture: image.color, load: LoadOp::Clear(Color::new(0.0, 0.0, 0.0, 0.0)) }),
-            depth_stencil: None,
-            size: image.size,
-            targets: TargetFormats { color: image.targets.color, depth_stencil: None },
-        },
-    );
+    let present = OpenPass {
+        label: "main buffer",
+        color: Some(ColorAttachment { texture: image.color, load: LoadOp::Clear(Color::new(0.0, 0.0, 0.0, 0.0)) }),
+        depth_stencil: None,
+        size: image.size,
+        targets: TargetFormats { color: image.targets.color, depth_stencil: None },
+    };
+    if let Err(error) = parameters.present_frame(gpu, present) {
+        parameters.context.fail(format!("Copying the frame into its target failed: {error}"));
+    }
 }
 
 /// Pushes what `orchestrator` reported since the last call to `events`, the

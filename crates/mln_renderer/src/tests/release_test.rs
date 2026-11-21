@@ -97,7 +97,13 @@ fn released_shaders_and_pipelines_go() {
         let size = Size::new(1, 1);
         let usage = TextureUsage { render_target: true, ..TextureUsage::default() };
         let target = gpu
-            .create_texture(&TextureDesc { label: "target", size, format: TextureFormat::Rgba8Unorm, usage })
+            .create_texture(&TextureDesc {
+                label: "target",
+                size,
+                format: TextureFormat::Rgba8Unorm,
+                usage,
+                mipmapped: false,
+            })
             .expect("a target");
         let color = Some(ColorAttachment { texture: target, load: LoadOp::Load });
         gpu.begin_pass(&PassDesc { label: "test", color, depth_stencil: None }).expect("the pass");

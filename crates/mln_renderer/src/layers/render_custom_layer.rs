@@ -50,6 +50,7 @@ pub(crate) struct RenderCustomLayer {
 
 /// The layer's drawing, which keeps no tiles and no draws of its own: its
 /// one draw group is what the host draws.
+#[derive(Default)]
 pub(crate) struct CustomDrawing {
     /// The host, while the renderer draws through it.
     host: Option<Arc<dyn CustomLayerHost>>,
@@ -122,7 +123,7 @@ impl CustomDrawing {
             Ok(lent) => {
                 self.used |= lent;
             }
-            Err(error) => Log::error(Event::Render, format!("Lending a custom layer the pass failed: {error}")),
+            Err(error) => parameters.context.fail(format!("Lending a custom layer the pass failed: {error}")),
         }
     }
 }
@@ -198,7 +199,7 @@ impl TypedLayer for RenderCustomLayer {
 impl RenderLayer for RenderCustomLayer {
     /// The layer has no properties: it only keeps drawing in the
     /// translucent pass.
-    fn prerender(&mut self, gpu: &mut dyn Gpu, parameters: &PaintParameters<'_>) {
+    fn prerender(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
         let Some(frame) = parameters.custom_layer_frame else {
             return;
         };
@@ -210,7 +211,7 @@ impl RenderLayer for RenderCustomLayer {
         });
         match lent {
             Ok(()) => drawing.used = true,
-            Err(error) => Log::error(Event::Render, format!("Lending a custom layer the commands failed: {error}")),
+            Err(error) => parameters.context.fail(format!("Lending a custom layer the commands failed: {error}")),
         }
     }
 

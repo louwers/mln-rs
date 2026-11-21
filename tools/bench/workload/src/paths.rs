@@ -49,6 +49,12 @@ pub enum Path {
     /// the camera circles Twin Peaks, turning a quarter turn and back, tilted
     /// between 30 and 45 degrees. It ends where it starts.
     Terrain,
+    /// San Francisco's hills in 3D at zoom 14.25, over
+    /// [`Snapshot::terrain_3d_style`]: the camera circles Twin Peaks,
+    /// turning a quarter turn and back, tilted between 50 and 65 degrees.
+    /// Its draped layers fall into two stacks, which the extruded buildings
+    /// split. It ends where it starts.
+    Terrain3d,
     /// Downtown San Francisco at zoom 16, tilted to 60 degrees, where the
     /// labels are dense: the camera turns a full circle in place over
     /// [`Snapshot::labels_style`], whose POI labels choose among anchors. It
@@ -58,8 +64,16 @@ pub enum Path {
 
 impl Path {
     /// Every path.
-    pub const ALL: [Path; 7] =
-        [Path::Street, Path::Overzoom, Path::Globe, Path::Antimeridian, Path::Earthquakes, Path::Terrain, Path::Labels];
+    pub const ALL: [Path; 8] = [
+        Path::Street,
+        Path::Overzoom,
+        Path::Globe,
+        Path::Antimeridian,
+        Path::Earthquakes,
+        Path::Terrain,
+        Path::Terrain3d,
+        Path::Labels,
+    ];
 
     /// The path named `name`, such as `street`.
     pub fn parse(name: &str) -> Result<Path, String> {
@@ -78,6 +92,7 @@ impl Path {
             Path::Antimeridian => "antimeridian",
             Path::Earthquakes => "earthquakes",
             Path::Terrain => "terrain",
+            Path::Terrain3d => "terrain-3d",
             Path::Labels => "labels",
         }
     }
@@ -91,6 +106,7 @@ impl Path {
             Path::Antimeridian => snapshot.style(Tiles::World),
             Path::Earthquakes => snapshot.earthquakes_style(),
             Path::Terrain => snapshot.terrain_style(),
+            Path::Terrain3d => snapshot.terrain_3d_style(),
             Path::Labels => snapshot.labels_style(),
         }
     }
@@ -106,7 +122,9 @@ impl Path {
                 let (x, y) = tile_at(12, snapshot.area_center(Tiles::Street));
                 tile_center(12, x, y)
             }
-            Path::Globe | Path::Antimeridian | Path::Earthquakes | Path::Terrain | Path::Labels => LatLng::default(),
+            Path::Globe | Path::Antimeridian | Path::Earthquakes | Path::Terrain | Path::Terrain3d | Path::Labels => {
+                LatLng::default()
+            }
         };
         move |frame| {
             let t = frame as f64 / FRAMES as f64;
@@ -162,6 +180,19 @@ impl Path {
                         zoom: Some(13.0),
                         bearing: Some(90.0 * wave),
                         pitch: Some(30.0 + 15.0 * wave),
+                        ..Default::default()
+                    }
+                }
+                Path::Terrain3d => {
+                    let turn = std::f64::consts::TAU * t;
+                    let wave = (std::f64::consts::PI * t).sin();
+                    CameraOptions {
+                        center: Some(
+                            LatLng::new(37.752 + 0.003 * turn.sin(), -122.447 + 0.004 * turn.cos()).expect("a center"),
+                        ),
+                        zoom: Some(14.25),
+                        bearing: Some(90.0 * wave),
+                        pitch: Some(50.0 + 15.0 * wave),
                         ..Default::default()
                     }
                 }

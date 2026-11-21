@@ -224,22 +224,69 @@ pub const MLN_RUNTIME_EVENT_MAP_LOADING_FINISHED: mln_runtime_event_type = 6;
 /// The map failed to load a style.
 pub const MLN_RUNTIME_EVENT_MAP_LOADING_FAILED: mln_runtime_event_type = 7;
 /** The map rendered a complete frame and has nothing left to load, animate,
- or redraw.*/
+ or redraw. Once the map's frames have failed on the GPU for a second
+ (MLN_RUNTIME_EVENT_MAP_RENDER_ERROR), a failed frame that is complete but
+ for its failure counts: the map draws no better.*/
 pub const MLN_RUNTIME_EVENT_MAP_IDLE: mln_runtime_event_type = 8;
-/** The map rendered a complete frame and has nothing left to load, animate,
- or redraw.*/
+/** A frame failed on the GPU, such as a pass that didn't begin, a texture
+ that couldn't be made or a shader that the backend rejects: the first of
+ the frames in a row that fail, until one draws without failing.
+
+ A map in MLN_MAP_MODE_CONTINUOUS shows what did draw of a failed frame.
+ It draws again on its own after as long as its frames have been failing,
+ and at least 100 ms. Once they have failed for a second, it takes the
+ failure as lasting: it draws again only when something else draws a
+ frame, such as a camera change or a tile, and goes idle
+ (MLN_RUNTIME_EVENT_MAP_IDLE) on a frame complete but for its failure,
+ which doesn't finish loading (MLN_RUNTIME_EVENT_MAP_LOADING_FINISHED).*/
 pub const MLN_RUNTIME_EVENT_MAP_RENDER_ERROR: mln_runtime_event_type = 9;
-/** The map rendered a complete frame and has nothing left to load, animate,
- or redraw.*/
+/** A frame failed on the GPU, such as a pass that didn't begin, a texture
+ that couldn't be made or a shader that the backend rejects: the first of
+ the frames in a row that fail, until one draws without failing.
+
+ A map in MLN_MAP_MODE_CONTINUOUS shows what did draw of a failed frame.
+ It draws again on its own after as long as its frames have been failing,
+ and at least 100 ms. Once they have failed for a second, it takes the
+ failure as lasting: it draws again only when something else draws a
+ frame, such as a camera change or a tile, and goes idle
+ (MLN_RUNTIME_EVENT_MAP_IDLE) on a frame complete but for its failure,
+ which doesn't finish loading (MLN_RUNTIME_EVENT_MAP_LOADING_FINISHED).*/
 pub const MLN_RUNTIME_EVENT_MAP_RENDER_FRAME_STARTED: mln_runtime_event_type = 10;
-/** The map rendered a complete frame and has nothing left to load, animate,
- or redraw.*/
+/** A frame failed on the GPU, such as a pass that didn't begin, a texture
+ that couldn't be made or a shader that the backend rejects: the first of
+ the frames in a row that fail, until one draws without failing.
+
+ A map in MLN_MAP_MODE_CONTINUOUS shows what did draw of a failed frame.
+ It draws again on its own after as long as its frames have been failing,
+ and at least 100 ms. Once they have failed for a second, it takes the
+ failure as lasting: it draws again only when something else draws a
+ frame, such as a camera change or a tile, and goes idle
+ (MLN_RUNTIME_EVENT_MAP_IDLE) on a frame complete but for its failure,
+ which doesn't finish loading (MLN_RUNTIME_EVENT_MAP_LOADING_FINISHED).*/
 pub const MLN_RUNTIME_EVENT_MAP_RENDER_FRAME_FINISHED: mln_runtime_event_type = 11;
-/** The map rendered a complete frame and has nothing left to load, animate,
- or redraw.*/
+/** A frame failed on the GPU, such as a pass that didn't begin, a texture
+ that couldn't be made or a shader that the backend rejects: the first of
+ the frames in a row that fail, until one draws without failing.
+
+ A map in MLN_MAP_MODE_CONTINUOUS shows what did draw of a failed frame.
+ It draws again on its own after as long as its frames have been failing,
+ and at least 100 ms. Once they have failed for a second, it takes the
+ failure as lasting: it draws again only when something else draws a
+ frame, such as a camera change or a tile, and goes idle
+ (MLN_RUNTIME_EVENT_MAP_IDLE) on a frame complete but for its failure,
+ which doesn't finish loading (MLN_RUNTIME_EVENT_MAP_LOADING_FINISHED).*/
 pub const MLN_RUNTIME_EVENT_MAP_RENDER_MAP_STARTED: mln_runtime_event_type = 12;
-/** The map rendered a complete frame and has nothing left to load, animate,
- or redraw.*/
+/** A frame failed on the GPU, such as a pass that didn't begin, a texture
+ that couldn't be made or a shader that the backend rejects: the first of
+ the frames in a row that fail, until one draws without failing.
+
+ A map in MLN_MAP_MODE_CONTINUOUS shows what did draw of a failed frame.
+ It draws again on its own after as long as its frames have been failing,
+ and at least 100 ms. Once they have failed for a second, it takes the
+ failure as lasting: it draws again only when something else draws a
+ frame, such as a camera change or a tile, and goes idle
+ (MLN_RUNTIME_EVENT_MAP_IDLE) on a frame complete but for its failure,
+ which doesn't finish loading (MLN_RUNTIME_EVENT_MAP_LOADING_FINISHED).*/
 pub const MLN_RUNTIME_EVENT_MAP_RENDER_MAP_FINISHED: mln_runtime_event_type = 13;
 /// The style uses an image that it doesn't have.
 pub const MLN_RUNTIME_EVENT_MAP_STYLE_IMAGE_MISSING: mln_runtime_event_type = 14;
@@ -342,7 +389,7 @@ pub type mln_map_load_error = u32;
 pub const MLN_RENDER_MODE_PARTIAL: mln_render_mode = 0;
 pub const MLN_RENDER_MODE_FULL: mln_render_mode = 1;
 /** Whether a frame drew the map complete, or lacked resources that are still
- loading.*/
+ loading or showed the camera before it settled on the terrain.*/
 pub type mln_render_mode = u32;
 pub const MLN_TILE_OPERATION_REQUESTED_FROM_CACHE: mln_tile_operation = 0;
 pub const MLN_TILE_OPERATION_REQUESTED_FROM_NETWORK: mln_tile_operation = 1;
@@ -4014,6 +4061,10 @@ pub struct mln_map_projection_camera_result {
     pub size: u32,
     pub camera: mln_camera,
 }
+/** The target took the frame. A frame of a map in MLN_MAP_MODE_CONTINUOUS
+ that failed on the GPU in part, which MLN_RUNTIME_EVENT_MAP_RENDER_ERROR
+ reports, is rendered too: it shows what did draw, and its mode is
+ MLN_RENDER_MODE_PARTIAL.*/
 pub const MLN_RENDER_RESULT_RENDERED: mln_render_result = 0;
 /// The map had nothing new to draw.
 pub const MLN_RENDER_RESULT_NO_UPDATE: mln_render_result = 1;

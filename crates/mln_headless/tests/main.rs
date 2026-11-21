@@ -3,11 +3,18 @@
 
 mod support;
 
+// An image source whose corners make a concave quad draws inside its outline.
+mod concave_image_test;
 mod custom_layer_test;
 // Map::set_debug's tile overlays and the rendering stats view.
 mod debug_options_test;
 // Empty and absent tiles of vector and raster sources through Map -> HeadlessFrontend.
 mod empty_tile_test;
+// A viewport flipped upside down draws the map upside down.
+mod flipped_viewport_test;
+// Frames that fail on the GPU: stills that end with the error, and
+// continuous maps that report it once and draw again later.
+mod gpu_failure_test;
 // gtests-core: test/api/{annotations,api_misuse,custom_geometry_source,
 // custom_layer}.test.cpp and test/api/recycle_map.cpp.
 mod gtest_api;
@@ -38,7 +45,13 @@ mod placement_test;
 mod pixel_ratio_test;
 // Map::set_size and HeadlessFrontend::set_size with a heatmap, which draws into a texture of its own.
 mod resize_test;
+// A frame whose stencil values overflow, with several world copies in view.
+mod stencil_overflow_test;
 // Text that the device's fonts shape, with a font file standing in for them.
 mod system_fonts_test;
+// The layers that drape over terrain, drawn through the terrain's drapes.
+mod terrain_drape_test;
+// Circles that stand on the terrain's ground.
+mod terrain_standing_test;
 // Tiles reloading as their data expires, over an online file source.
 mod tile_expiry_test;

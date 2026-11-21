@@ -1,0 +1,128 @@
+#!/usr/bin/env bash
+#MISE description="Refresh the terrain and image render tests copied from MapLibre GL JS"
+#USAGE arg "[checkout]" help="A maplibre-gl-js checkout (default ../maplibre-gl-js)"
+#USAGE flag "--commit <sha>" help="The checkout's commit, if it isn't a git checkout"
+# Copies the render tests that exercise terrain and the fog that sits on it,
+# and image sources, which GL JS warps as mln-rs does where MapLibre Native's
+# own tests expect two affine triangles, with their expected images, from
+# test/integration/render/tests, and the tile,
+# image and GeoJSON files they load from test/integration/assets, to
+# tools/render-test/testdata/metrics/integration/gljs. That directory is
+# mln-rs's own: `mise run update:testdata` leaves it alone, and this task
+# rewrites it whole. Fixtures that GL JS adds to the selection come along; add
+# those that don't pass to an ignore file in tools/render-test/ignores.
+#
+# GL JS's tests allow a difference of 0.00025 unless they say otherwise,
+# where the runner's default is stricter, so the copy of a test that sets no
+# `allowed` sets GL JS's, and the copy of a test in `allowed` below sets its
+# own. That and the formatting are the only changes to a style.json.
+#
+# Glyphs and sprites aren't copied: the cache the runner reads already has
+# the ones these tests use (tools/render-test/testdata/metrics/cache-style.db).
+set -euo pipefail
+
+# Tests that draw as GL JS's but differ by more than they allow, and why. The
+# numbers are the pixels that differ, measured with WebGPU, Vulkan and OpenGL
+# alike unless they say which: on RADV, on CI's Mesa 26.0.8 (lavapipe, and
+# llvmpipe for OpenGL), and on Mesa 26.2.5's llvmpipe.
+#
+# The terrain samples its drapes with mips and anisotropy, and how a device
+# picks the level of detail of an anisotropic sample isn't specified. Mesa
+# 26.0.8's llvmpipe takes the lengths of the texture coordinates' screen
+# derivatives as the footprint's axes; Mesa 26.2.5's first finds the
+# footprint's ellipse (`GALLIVM_PERF=no_lod_ellipse` brings back 26.0.8's
+# numbers), which picks sharper levels. The drape's edges then look softer or
+# sharper than GL JS's, and its far texels move. No anisotropy changes that:
+# 26.0.8 gives the same numbers from 2 to 16.
+declare -A allowed=(
+    # 7 of 65536 on RADV, 27 on Mesa 26.0.8, 12 on Mesa 26.2.5. Heights read a
+    # texel off: 1785 (RADV), 1881 (lavapipe). Anisotropy 1: 247 (RADV), 141
+    # (lavapipe).
+    [terrain/default]=0.0005
+    # 43 of 262144 on RADV; on Mesa 26.0.8, 189 (lavapipe) and 165 (llvmpipe);
+    # on Mesa 26.2.5, 52 (lavapipe) and 42 (llvmpipe). With skirts: 14467
+    # (RADV), 14506 (lavapipe), 14479 (llvmpipe). Anisotropy 1: 1037 (RADV),
+    # 697 (lavapipe), 686 (llvmpipe). Fill outlines 2 px wide in the drape:
+    # 75 (RADV) and 189 (lavapipe), which pass, and 227 (llvmpipe).
+    [terrain/skirts-none]=0.0008
+    # 40 of 262144 on RADV; on Mesa 26.0.8, 185 (lavapipe) and 165 (llvmpipe);
+    # on Mesa 26.2.5, 50 (lavapipe) and 41 (llvmpipe). Without skirts: 14551
+    # (RADV), 14546 (lavapipe), 14524 (llvmpipe). Anisotropy 1: 1089 (RADV),
+    # 790 (lavapipe), 778 (llvmpipe).
+    [terrain/skirts-auto]=0.0008
+    # The moiré's texels move: 279 of 65536 (0.43%) on RADV, 170 (0.26%) on
+    # Mesa 26.0.8, 1051 (lavapipe) and 1046 (llvmpipe) (1.6%) on Mesa 26.2.5.
+    # Without the drape's mips: 6451 (RADV), 6408 (lavapipe 26.0.8) and 6409
+    # (Mesa 26.0.8's llvmpipe, Mesa 26.2.5's lavapipe and llvmpipe), 9.8%.
+    [terrain/rtt-mipmap-minification/pitch-70]=0.02
+    # Drawn better than GL JS's image, which shows a gap under the downhill
+    # walls: their feet stop 10 m below the ground at the polygon's centroid.
+    # Here a ground-level wall's foot reaches the ground under its own end,
+    # so 165 of 262144 px differ on RADV, all along the feet of two
+    # buildings' south walls on the slope; 174 (lavapipe) and 172 (llvmpipe)
+    # on Mesa 26.0.8, 164 on Mesa 26.2.5. Walls not depth-tested against the
+    # ground: 590 (RADV). Buildings at sea level: 3590 (RADV), and 6875 drawn
+    # flat, as before they stood on the ground.
+    [terrain/fill-extrusion]=0.0008
+)
+
+checkout="${usage_checkout:-$PWD/../maplibre-gl-js}"
+integration="$checkout/test/integration"
+dest=tools/render-test/testdata/metrics/integration/gljs
+
+commit="${usage_commit:-}"
+if [[ -z $commit ]]; then
+    commit="$(git -C "$checkout" rev-parse HEAD)" || {
+        echo "$checkout isn't a git checkout: pass its commit with --commit" >&2
+        exit 1
+    }
+fi
+
+selected='^(terrain/.*|image/.*|regressions/mapbox-gl-js#3010|sky/fog-.*|terrain-shading/default|high-pitch/terrain-pitch95|(fill-layer-blend|fill-layer-opacity|line-layer-blend|line-layer-opacity|line-opacity|raster-layer-blend)/terrain)$'
+# Terrain on the globe is out of scope.
+excluded='^terrain/fog-sky-blend-globe$'
+
+rm -rf "$dest"
+mkdir -p "$dest/render-tests" "$dest/assets"
+assets="$(mktemp)"
+trap 'rm -f "$assets"' EXIT
+
+while IFS= read -r -d '' style; do
+    id="$(dirname "${style#"$integration/render/tests/"}")"
+    if [[ ! $id =~ $selected || $id =~ $excluded ]]; then
+        continue
+    fi
+    mkdir -p "$dest/render-tests/$id"
+    cp "$(dirname "$style")"/expected*.png "$dest/render-tests/$id/"
+    jq --indent 2 --argjson allowed "${allowed[$id]:-null}" \
+        '.metadata.test.allowed = ($allowed // .metadata.test.allowed // 0.00025)' \
+        "$style" >"$dest/render-tests/$id/style.json"
+    jq -r '.. | strings | select(startswith("local://")) | ltrimstr("local://")' "$style" >>"$assets"
+done < <(find "$integration/render/tests" -name style.json -print0 | sort -z)
+
+for id in "${!allowed[@]}"; do
+    if [[ ! -f $dest/render-tests/$id/style.json ]]; then
+        echo "allowed names $id, which isn't copied" >&2
+        exit 1
+    fi
+done
+
+# Each local:// URL names a file, or a template of tiles: every file that
+# fits it is copied.
+sort -u "$assets" | while IFS= read -r url; do
+    case $url in glyphs/* | sprites/*) continue ;; esac
+    pattern="$(sed -e 's/[.]/\\./g' -e 's/{[zxy]}/[0-9]+/g' <<<"$url")"
+    files="$(cd "$integration/assets" && find . -type f | sed 's|^\./||' | grep -E "^$pattern$" || true)"
+    if [[ -z $files ]]; then
+        echo "no asset for local://$url" >&2
+        exit 1
+    fi
+    printf '%s\n' "$files"
+done | sort -u | rsync -a --files-from=- "$integration/assets"/ "$dest/assets"/
+
+cp "$checkout/LICENSE.txt" "$dest/"
+cat >"$dest/README.md" <<EOF
+Render tests copied from MapLibre GL JS at commit $commit, with the assets they
+load, by \`mise run update:gljs-testdata\`. Don't edit them here.
+EOF
+echo "copied from $checkout ($commit): $(find "$dest/render-tests" -name style.json | wc -l) tests, $(find "$dest/assets" -type f | wc -l) assets"

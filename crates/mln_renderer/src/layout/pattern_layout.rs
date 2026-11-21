@@ -86,6 +86,9 @@ pub(crate) trait PatternLayoutSpec: Send + 'static {
     /// Sets the subdivision granularity on the buckets that have one. The
     /// default does nothing.
     fn set_subdivision_granularity(_bucket: &mut Self::Bucket, _value: &SubdivisionGranularitySetting) {}
+    /// Tells the buckets that lay out something only for terrain whether
+    /// the style has terrain. The default does nothing.
+    fn set_terrain(_bucket: &mut Self::Bucket, _terrain: bool) {}
 }
 
 pub(crate) struct PatternLayout<S: PatternLayoutSpec> {
@@ -98,6 +101,7 @@ pub(crate) struct PatternLayout<S: PatternLayoutSpec> {
     pub(crate) zoom: f32,
     pub(crate) overscaling: u32,
     pub(crate) subdivision_granularity: SubdivisionGranularitySetting,
+    pub(crate) terrain: bool,
     pub(crate) source_layer_id: String,
     pub(crate) has_pattern: bool,
 
@@ -242,6 +246,7 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
             zoom,
             overscaling,
             subdivision_granularity: parameters.subdivision_granularity,
+            terrain: parameters.terrain,
             source_layer_id,
             has_pattern,
             source_layer,
@@ -265,6 +270,7 @@ impl<S: PatternLayoutSpec> Layout<S::Type> for PatternLayout<S> {
         let source_layer = self.source_layer.layer()?;
         let mut bucket = S::create_bucket(&self.layout, &self.layer_properties_map, self.zoom, self.overscaling);
         S::set_subdivision_granularity(&mut bucket, &self.subdivision_granularity);
+        S::set_terrain(&mut bucket, self.terrain);
 
         let record_sdf_pattern = |bucket: &mut S::Bucket, layer_id: &str, image_id: &str| {
             if let Some(position) = pattern_positions.get(image_id) {

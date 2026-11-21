@@ -67,9 +67,6 @@ pub(crate) struct LayerSpec {
 pub(crate) fn load(text: &str) -> Result<Value, String> {
     let mut spec: Value = serde_json::from_str(text).map_err(|e| format!("v8.json: {e}"))?;
 
-    // Without terrain, the ground and sea level are the same height.
-    remove(&mut spec, &["layout_symbol"], "symbol-height-anchor")?;
-
     // https://github.com/maplibre/maplibre-native/issues/4517
     zoom_only(&mut spec, "layout_symbol", "icon-rotation-alignment", "data-constant")?;
 
@@ -87,15 +84,6 @@ pub(crate) fn load(text: &str) -> Result<Value, String> {
     });
 
     Ok(spec)
-}
-
-fn remove(spec: &mut Value, path: &[&str], key: &str) -> Result<(), String> {
-    let mut node = &mut *spec;
-    for p in path {
-        node = node.get_mut(*p).ok_or_else(|| format!("spec has no {}", path.join(".")))?;
-    }
-    let object = node.as_object_mut().ok_or_else(|| format!("{} is not an object", path.join(".")))?;
-    object.shift_remove(key).map(|_| ()).ok_or_else(|| format!("spec has no {}.{key}", path.join(".")))
 }
 
 /// Makes a data-driven property follow zoom (and global state) only, as

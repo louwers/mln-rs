@@ -1220,3 +1220,341 @@ mod tile_count {
         assert_eq!(8, tile_count_bounds(&crossing_bounds, 4));
     }
 }
+
+/// The cover over terrain: GL JS `coveringTiles` over Mercator, with each
+/// tile culled by a box that spans its elevation.
+mod terrain_cover {
+    use super::*;
+    use crate::terrain::{ElevationRanges, terrain_tile_size};
+    use crate::util::tile_cover::{mercator_covering_tiles, terrain_tile_cover};
+    use crate::util::tile_lod::TileZoomFunction;
+
+    /// GL JS's `CoveringTilesOptions`.
+    #[derive(Clone, Copy)]
+    struct Options {
+        min_zoom: u8,
+        max_zoom: u8,
+        tile_size: u16,
+        reparse_overscaled: bool,
+    }
+
+    const MERCATOR: Options = Options { min_zoom: 1, max_zoom: 10, tile_size: 512, reparse_overscaled: false };
+
+    /// A camera of GL JS's `mercator` tests: pitch up to 85 degrees.
+    #[derive(Clone, Copy)]
+    struct Camera {
+        size: (u32, u32),
+        /// Longitude, then latitude, as GL JS's `LngLat`.
+        center: (f64, f64),
+        zoom: f64,
+        pitch: f64,
+        bearing: f64,
+        padding_top: f64,
+        elevation: f64,
+        fov: Option<f64>,
+    }
+
+    impl Camera {
+        const fn new(size: (u32, u32), center: (f64, f64), zoom: f64) -> Self {
+            Camera { size, center, zoom, pitch: 0.0, bearing: 0.0, padding_top: 0.0, elevation: 0.0, fov: None }
+        }
+
+        fn transform(&self) -> Transform {
+            let mut transform = transform(self.size.0, self.size.1);
+            transform
+                .set_limits(CameraLimits { max_pitch: mln_math::deg2rad(85.0), ..*transform.state().limits() })
+                .unwrap();
+            transform.jump_to(&CameraOptions {
+                center: Some(ll(self.center.1, self.center.0)),
+                center_altitude: Some(self.elevation),
+                padding: Some(EdgeInsets::new(self.padding_top, 0.0, 0.0, 0.0)),
+                zoom: Some(self.zoom),
+                pitch: Some(self.pitch),
+                bearing: Some(self.bearing),
+                fov: self.fov,
+                ..Default::default()
+            });
+            transform
+        }
+    }
+
+    /// The nominal zoom, the overscaled zoom and the parameters of a source
+    /// with `options` covering the view of `transform`, as GL JS takes them.
+    fn source_cover_inputs(transform: &Transform, options: Options) -> (u8, Option<u8>, TileCoverParameters) {
+        let zoom = transform.view().zoom();
+        let desired = covering_zoom_level(zoom, false, options.tile_size).max(0) as u8;
+        let mut parameters = params(transform);
+        parameters.requested_zoom = Some(zoom + (512.0 / f64::from(options.tile_size)).log2());
+        (desired.min(options.max_zoom), options.reparse_overscaled.then_some(desired), parameters)
+    }
+
+    /// Whether GL JS picks each tile's zoom by its distance without terrain:
+    /// past a pitch that leaves the top of the view near the horizon.
+    fn gljs_allows_variable_zoom(camera: &Camera) -> bool {
+        let fov = camera.fov.unwrap_or(mln_math::rad2deg(constants::DEFAULT_FOV));
+        camera.pitch > (78.5 - fov / 2.0).clamp(0.0, 60.0)
+    }
+
+    /// GL JS `coveringTiles` without terrain, with the tile zoom function
+    /// `variable_zoom`.
+    fn gljs_cover_with(
+        camera: &Camera,
+        options: Options,
+        variable_zoom: &dyn Fn(f64, f64, f64, f64) -> f64,
+    ) -> Vec<OverscaledTileID> {
+        let transform = camera.transform();
+        let (z, overscaled_z, parameters) = source_cover_inputs(&transform, options);
+        let range = Range::new(options.min_zoom, options.max_zoom);
+        let flat = ElevationRanges::default();
+        let variable_zoom = gljs_allows_variable_zoom(camera).then_some(variable_zoom);
+        mercator_covering_tiles(&parameters, z, range, overscaled_z, &flat, variable_zoom)
+    }
+
+    /// GL JS `coveringTiles` without terrain. Where GL JS picks each tile's
+    /// zoom by its distance, the terrain cover over flat ground agrees.
+    fn gljs_cover(camera: &Camera, options: Options) -> Vec<OverscaledTileID> {
+        let fov = camera.transform().view().fov();
+        let tile_zoom = TileZoomFunction::new(
+            mln_math::rad2deg(fov),
+            TileZoomFunction::DEFAULT_MAX_ZOOM_LEVELS_ON_SCREEN,
+            TileZoomFunction::DEFAULT_TILE_COUNT_MAX_MIN_RATIO,
+        );
+        let tiles = gljs_cover_with(camera, options, &|requested, d2, dz, d3| tile_zoom.call(requested, d2, dz, d3));
+        if gljs_allows_variable_zoom(camera) {
+            let transform = camera.transform();
+            let (z, overscaled_z, parameters) = source_cover_inputs(&transform, options);
+            let range = Range::new(options.min_zoom, options.max_zoom);
+            assert_eq!(
+                tiles,
+                terrain_tile_cover(&parameters, z, range, overscaled_z, &ElevationRanges::default()),
+                "the terrain cover over flat ground"
+            );
+        }
+        tiles
+    }
+
+    fn ids(tiles: &[(u8, u32, u32)]) -> Vec<OverscaledTileID> {
+        tiles.iter().map(|&(z, x, y)| os(z, x, y)).collect()
+    }
+
+    // The `mercator` cases of GL JS `covering_tiles.test.ts`, same cameras,
+    // same tiles in the same order. The cases whose center is in another
+    // world copy are left out: a `Transform` brings its center back to the
+    // first.
+    #[test]
+    fn gljs_general() {
+        // Slightly off center, so that the order doesn't hang on precision.
+        let mut camera = Camera::new((200, 200), (-0.01, 0.01), 0.0);
+        assert_eq!(Vec::<OverscaledTileID>::new(), gljs_cover(&camera, MERCATOR));
+
+        camera.zoom = 1.0;
+        assert_eq!(ids(&[(1, 0, 0), (1, 1, 0), (1, 0, 1), (1, 1, 1)]), gljs_cover(&camera, MERCATOR));
+
+        camera.zoom = 2.4;
+        assert_eq!(ids(&[(2, 1, 1), (2, 2, 1), (2, 1, 2), (2, 2, 2)]), gljs_cover(&camera, MERCATOR));
+
+        camera.zoom = 10.0;
+        let z10 = ids(&[(10, 511, 511), (10, 512, 511), (10, 511, 512), (10, 512, 512)]);
+        assert_eq!(z10, gljs_cover(&camera, MERCATOR));
+        camera.zoom = 11.0;
+        assert_eq!(z10, gljs_cover(&camera, MERCATOR));
+
+        camera.size = (2048, 128);
+        camera.zoom = 9.0;
+        camera.padding_top = 16.0;
+        assert_eq!(
+            ids(&[
+                (9, 255, 255),
+                (9, 256, 255),
+                (9, 255, 256),
+                (9, 256, 256),
+                (9, 254, 255),
+                (9, 254, 256),
+                (9, 257, 255),
+                (9, 257, 256),
+                (9, 253, 255),
+                (9, 253, 256),
+            ]),
+            gljs_cover(&camera, MERCATOR)
+        );
+
+        camera.padding_top = 0.0;
+        camera.zoom = 5.1;
+        camera.pitch = 60.0;
+        camera.bearing = 32.0;
+        camera.center = (56.90, 48.20);
+        camera.size = (1024, 768);
+        assert_eq!(
+            ids(&[
+                (5, 21, 11),
+                (5, 20, 11),
+                (5, 21, 10),
+                (5, 20, 10),
+                (5, 21, 12),
+                (5, 22, 11),
+                (5, 20, 12),
+                (5, 22, 10),
+                (5, 21, 9),
+                (5, 20, 9),
+                (5, 22, 9),
+                (5, 23, 10),
+                (5, 21, 8),
+                (5, 20, 8),
+                (5, 23, 9),
+                (5, 22, 8),
+                (5, 23, 8),
+                (5, 21, 7),
+                (5, 20, 7),
+                (5, 24, 9),
+                (5, 22, 7),
+            ]),
+            gljs_cover(&camera, MERCATOR)
+        );
+
+        camera.zoom = 8.0;
+        camera.pitch = 85.0;
+        camera.bearing = 0.0;
+        camera.center = (20.918, 39.232);
+        camera.size = (50, 1000);
+        assert_eq!(
+            ids(&[(8, 142, 98), (7, 71, 48), (5, 17, 11), (5, 17, 10), (9, 285, 198), (9, 285, 199)]),
+            gljs_cover(&camera, MERCATOR)
+        );
+
+        camera.pitch = 60.0;
+        camera.bearing = 45.0;
+        camera.center = (25.02, 60.15);
+        camera.size = (300, 50);
+        assert_eq!(ids(&[(8, 145, 74), (8, 145, 73), (8, 146, 74)]), gljs_cover(&camera, MERCATOR));
+
+        camera.size = (50, 300);
+        assert_eq!(ids(&[(8, 145, 74), (8, 145, 73), (8, 146, 74), (8, 146, 73)]), gljs_cover(&camera, MERCATOR));
+
+        camera.pitch = 70.0;
+        assert_eq!(
+            ids(&[(7, 74, 36), (7, 73, 37), (7, 74, 35), (7, 73, 36), (7, 72, 37), (7, 73, 35), (7, 72, 36)]),
+            gljs_cover_with(&camera, MERCATOR, &|_, _, _, _| 7.0)
+        );
+
+        // The zoom functions of fewer zoom levels on screen and fewer tiles.
+        let with_lod = |max_zoom_levels_on_screen: f64, tile_count_max_min_ratio: f64| {
+            let tile_zoom = TileZoomFunction::new(
+                mln_math::rad2deg(constants::DEFAULT_FOV),
+                max_zoom_levels_on_screen,
+                tile_count_max_min_ratio,
+            );
+            gljs_cover_with(&camera, MERCATOR, &|requested, d2, dz, d3| tile_zoom.call(requested, d2, dz, d3))
+        };
+        assert_eq!(ids(&[(5, 18, 9), (5, 18, 8)]), with_lod(1.0, 1.0));
+        assert_eq!(ids(&[(6, 37, 18), (6, 37, 17), (6, 36, 18), (6, 36, 17)]), with_lod(1.0, 10.0));
+        assert_eq!(
+            ids(&[(7, 73, 37), (7, 73, 36), (7, 72, 36), (6, 37, 18), (5, 18, 8), (9, 290, 148), (9, 291, 148)]),
+            with_lod(10.0, 1.0)
+        );
+    }
+
+    #[test]
+    fn gljs_overscaled_z() {
+        let options = Options { min_zoom: 1, max_zoom: 10, tile_size: 256, reparse_overscaled: true };
+        let camera = Camera { pitch: 85.0, fov: Some(10.0), ..Camera::new((10, 400), (-0.01, 0.01), 10.0) };
+        let tiles = gljs_cover(&camera, options);
+        assert_ne!(tiles, Vec::<OverscaledTileID>::new());
+        for tile in &tiles {
+            assert!(tile.overscaled_z >= tile.canonical.z, "{tile}");
+        }
+    }
+
+    #[test]
+    fn gljs_max_zoom_0() {
+        let options = Options { min_zoom: 0, max_zoom: 0, tile_size: 512, reparse_overscaled: false };
+        let camera = Camera::new((200, 200), (0.01, 0.01), 8.0);
+        assert_eq!(ids(&[(0, 0, 0)]), gljs_cover(&camera, options));
+    }
+
+    #[test]
+    fn gljs_z11() {
+        let options = Options { min_zoom: 1, max_zoom: 15, tile_size: 512, reparse_overscaled: true };
+        for (center, tile) in [
+            ((-179.73, -0.087), (11, 1, 1024)),
+            ((-179.73, 60.02), (11, 1, 594)),
+            ((-179.73, 85.028), (11, 1, 1)),
+            ((-58.97, 60.02), (11, 688, 594)),
+            ((-58.97, -0.087), (11, 688, 1024)),
+        ] {
+            let camera = Camera::new((128, 128), center, 11.0);
+            assert_eq!(ids(&[tile]), gljs_cover(&camera, options), "{center:?}");
+        }
+    }
+
+    #[test]
+    fn gljs_nonzero_center_elevation() {
+        let options = Options { min_zoom: 1, max_zoom: 15, tile_size: 512, reparse_overscaled: true };
+        let camera = Camera { elevation: 20000.0, ..Camera::new((128, 128), (0.03, 0.0915), 11.0) };
+        assert_eq!(ids(&[(11, 1024, 1023), (11, 1023, 1023)]), gljs_cover(&camera, options));
+    }
+
+    /// The terrain cover of `camera` for a source with `options`, culled by
+    /// `ranges`.
+    fn terrain_cover(camera: &Camera, options: Options, ranges: &ElevationRanges) -> Vec<OverscaledTileID> {
+        let transform = camera.transform();
+        let (z, overscaled_z, parameters) = source_cover_inputs(&transform, options);
+        terrain_tile_cover(&parameters, z, Range::new(options.min_zoom, options.max_zoom), overscaled_z, ranges)
+    }
+
+    #[test]
+    fn raised_tiles_stay_where_flat_ones_are_culled() {
+        let options = Options { min_zoom: 0, max_zoom: 22, tile_size: 512, reparse_overscaled: false };
+        let camera = Camera { pitch: 60.0, ..Camera::new((512, 512), (10.0, 45.0), 14.0) };
+        let flat = terrain_cover(&camera, options, &ElevationRanges::default());
+
+        // Mountains 900 m high everywhere, as far as the DEM's root tile
+        // says: 260 px at this zoom, below the camera's 380.
+        let mut mountains = ElevationRanges::default();
+        mountains.insert(cn(0, 0, 0), 0.0, 900.0);
+        let raised = terrain_cover(&camera, options, &mountains);
+
+        // Raised ground in front of the camera, below the bottom edge of the
+        // view, rises into it; the zoom of a tile doesn't hang on its range.
+        for tile in &flat {
+            assert!(raised.contains(tile), "{tile}");
+        }
+        let center_y = mln_util::projection::Projection::project(&ll(45.0, 10.0), 1.0 / constants::TILE_SIZE_D).y;
+        let added: Vec<_> = raised.iter().filter(|tile| !flat.contains(tile)).collect();
+        assert_ne!(added, Vec::<&OverscaledTileID>::new());
+        for tile in added {
+            let top = f64::from(tile.canonical.y) / f64::from(1u32 << tile.canonical.z);
+            assert!(top > center_y, "{tile} is south of the center");
+        }
+
+        // Ground known to be lower than the camera allows near the horizon
+        // culls tiles that the flat allowance keeps.
+        let mut sea = ElevationRanges::default();
+        sea.insert(cn(0, 0, 0), 0.0, 0.0);
+        let horizon = Camera { pitch: 80.0, ..camera };
+        let sea_level = terrain_cover(&horizon, options, &sea);
+        let allowance = terrain_cover(&horizon, options, &ElevationRanges::default());
+        assert!(sea_level.iter().all(|tile| allowance.contains(tile)));
+    }
+
+    #[test]
+    fn a_tile_takes_the_range_of_the_dem_tile_it_reads_or_its_nearest_known_ancestor() {
+        let mut ranges = ElevationRanges::default();
+        assert_eq!(None, ranges.range(cn(3, 2, 2)));
+        ranges.insert(cn(1, 0, 0), -10.0, 100.0);
+        ranges.insert(cn(2, 1, 1), 5.0, 50.0);
+        assert_eq!(Some((5.0, 50.0)), ranges.range(cn(3, 2, 2)));
+        assert_eq!(Some((5.0, 50.0)), ranges.range(cn(4, 7, 7)));
+        assert_eq!(Some((-10.0, 100.0)), ranges.range(cn(3, 0, 3)));
+        // A tile reads the DEM a zoom coarser than its own, not its own zoom.
+        assert_eq!(Some((-10.0, 100.0)), ranges.range(cn(2, 1, 1)));
+        assert_eq!(None, ranges.range(cn(1, 1, 1)));
+        assert_eq!(None, ranges.range(cn(0, 0, 0)));
+    }
+
+    #[test]
+    fn a_terrain_tile_is_twice_as_wide_as_its_dem_tile() {
+        assert_eq!(128, terrain_tile_size(64));
+        assert_eq!(512, terrain_tile_size(256));
+        assert_eq!(1024, terrain_tile_size(512));
+    }
+}

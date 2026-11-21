@@ -1,7 +1,7 @@
 use mln_gfx::gpu::conformance::{
-    clip_mask_and_background, custom_layers, depth_only, foreign_ids, imported_textures, instanced_walls,
-    invalid_calls, pulled_walls, readbacks, resources_in_use, topologies, transparent_replace, vertex_layouts,
-    wall_quads,
+    clip_mask_and_background, custom_layers, depth_only, drawn_vertex_texels, foreign_ids, imported_textures,
+    instanced_walls, invalid_calls, mipmapped_targets, pulled_walls, readbacks, resources_in_use, terrain_heights,
+    topologies, transparent_replace, vertex_layouts, wall_quads, written_vertex_texels,
 };
 use mln_gfx::gpu::{Gpu, TextureDesc, TextureFormat, TextureRegion, TextureUsage};
 use mln_util::size::Size;
@@ -45,6 +45,30 @@ fn depth_only_through_gpu() {
 }
 
 #[test]
+fn written_vertex_texels_through_gpu() {
+    let device = Device::new(None).expect("WebGPU device");
+    written_vertex_texels(&mut WebGpu::new(&device)).expect("the frame");
+}
+
+#[test]
+fn drawn_vertex_texels_through_gpu() {
+    let device = Device::new(None).expect("WebGPU device");
+    drawn_vertex_texels(&mut WebGpu::new(&device)).expect("the frames");
+}
+
+#[test]
+fn terrain_heights_through_gpu() {
+    let device = Device::new(None).expect("WebGPU device");
+    terrain_heights(&mut WebGpu::new(&device)).expect("the frames");
+}
+
+#[test]
+fn mipmapped_targets_through_gpu() {
+    let device = Device::new(None).expect("WebGPU device");
+    mipmapped_targets(&mut WebGpu::new(&device)).expect("the frames");
+}
+
+#[test]
 fn vertex_layouts_through_gpu() {
     let device = Device::new(None).expect("WebGPU device");
     vertex_layouts(&mut WebGpu::new(&device)).expect("the frames");
@@ -75,6 +99,7 @@ fn a_readback_copies_into_the_last_ones_buffer() {
             size,
             format: TextureFormat::Rgba8Unorm,
             usage: TextureUsage { sampled: true, copy_src: true, ..TextureUsage::default() },
+            mipmapped: false,
         })
         .expect("a texture");
     let whole = TextureRegion::whole(size);
@@ -131,4 +156,30 @@ fn imported_textures_through_gpu() {
         Ok(gpu.import_texture(&native))
     })
     .expect("the frames");
+}
+
+/// A submission that WebGPU rejects, here of a pass into a texture
+/// destroyed after the pass recorded, fails the flush that submits it.
+#[test]
+fn a_rejected_submission_fails_the_flush() {
+    use mln_gfx::gpu::{ColorAttachment, LoadOp, PassDesc};
+
+    let device = Device::new(None).expect("WebGPU device");
+    let mut gpu = WebGpu::new(&device);
+    let usage = TextureUsage { render_target: true, ..TextureUsage::default() };
+    let desc = TextureDesc {
+        label: "target",
+        size: Size::new(4, 4),
+        format: TextureFormat::Rgba8Unorm,
+        usage,
+        mipmapped: false,
+    };
+    let texture = gpu.create_texture(&desc).expect("a texture");
+    let color = Some(ColorAttachment { texture, load: LoadOp::Clear(mln_util::Color::new(0.0, 0.0, 0.0, 0.0)) });
+    gpu.begin_pass(&PassDesc { label: "pass", color, depth_stencil: None }).expect("the pass");
+    gpu.end_pass().expect("the pass's end");
+    gpu.native_texture(texture).expect("a texture of the backend's").destroy();
+    // As a frame's, which doesn't wait for the GPU.
+    assert!(gpu.flush(false).is_err(), "a submission of a destroyed texture's pass");
+    gpu.flush(true).expect("the next flush");
 }

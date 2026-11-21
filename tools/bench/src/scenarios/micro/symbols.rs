@@ -10,8 +10,14 @@
 //! Both stages are the renderer's, reached through its `bench` entry points
 //! (`mln_renderer::bench`).
 
+use std::sync::Arc;
+
+use mln_map::{MapDebugOptions, MapMode, TileLodMode, TransformState};
+use mln_renderer::UpdateParameters;
 use mln_renderer::bench::{LaidOut, SymbolIndex, SymbolView};
 use mln_style::Style;
+use mln_util::size::Size;
+use mln_util::time::Instant;
 
 use super::{DENSE, SPARSE, StreetLayout, StreetTile, loaded_liberty};
 use crate::scenario::{Bench, Kind, Scenario};
@@ -129,6 +135,44 @@ fn lay_out(fixtures: &Fixtures, style: &Style, tile: StreetTile, zoom: u8) -> La
 /// The view of `symbols`, at `zoom`, centered on `tile`.
 fn view(style: &Style, symbols: &LaidOut, tile: StreetTile, zoom: u8) -> SymbolView {
     let (z, x, y) = tile.id;
-    SymbolView::new(style, "openmaptiles", &[symbols], tile_center(z, x, y), f64::from(zoom), VIEW)
-        .unwrap_or_else(|error| panic!("{error}"))
+    let mut state = TransformState::default();
+    state.set_size(Size::new(VIEW.0, VIEW.1));
+    state.set_lat_lng_zoom(&tile_center(z, x, y), f64::from(zoom));
+    SymbolView::new("openmaptiles", &[symbols], update(style, &state)).unwrap_or_else(|error| panic!("{error}"))
+}
+
+/// The update that a continuous map at pixel ratio 1 with `style` loaded
+/// gives its renderer for `state`'s view.
+fn update(style: &Style, state: &TransformState) -> UpdateParameters {
+    UpdateParameters {
+        style_loaded: true,
+        mode: MapMode::Continuous,
+        pixel_ratio: 1.0,
+        debug_options: MapDebugOptions::NO_DEBUG,
+        time_point: Some(Instant::now()),
+        view: state.view().clone(),
+        min_zoom: state.min_zoom(),
+        max_zoom: state.limits().max_zoom,
+        camera_moving: false,
+        style: Arc::new(style.clone()),
+        sprite_loaded: true,
+        feature_states: Arc::default(),
+        file_source: None,
+        prefetch_zoom_delta: 0,
+        still_image_request: false,
+        still_image_request_id: 0,
+        update_id: 0,
+        cross_source_collisions: true,
+        fast_pfor_enabled: false,
+        #[cfg(mln_bench_terrain)]
+        terrain_skirt_length: mln_map::TerrainSkirtLength::Auto,
+        #[cfg(mln_bench_terrain)]
+        elevation: None,
+        tile_lod_min_radius: 3.0,
+        tile_lod_scale: 1.0,
+        tile_lod_pitch_threshold: 60.0 * std::f64::consts::PI / 180.0,
+        tile_lod_zoom_shift: 0.0,
+        tile_lod_mode: TileLodMode::Default,
+        subdivision_granularity: style.get_projection().get_subdivision_granularity(),
+    }
 }

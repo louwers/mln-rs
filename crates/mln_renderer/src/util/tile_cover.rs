@@ -13,7 +13,7 @@ use geometry::Point;
 use glam::DVec3;
 use mln_map_types::{TileCoordinate, TileLodMode, View, ViewportMode};
 use mln_math::{fmax, fmin};
-use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
+use mln_tile_id::{CanonicalTileID, OverscaledTileID, UnwrappedTileID};
 use mln_util::bounding_volumes::{AABB, Frustum, IntersectionResult};
 use mln_util::constants;
 use mln_util::error::Error;
@@ -21,7 +21,9 @@ use mln_util::geo::{LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
 use mln_util::projection::Projection;
 use mln_util::range::Range;
 
+use crate::terrain::ElevationRanges;
 use crate::util::tile_cover_impl::Impl;
+use crate::util::tile_lod::{TileZoomFunction, elevation_for_tile_culling};
 
 /// A corner of a `LatLngBounds` with its latitude clamped to
 /// ±`LATITUDE_MAX`.
@@ -229,8 +231,8 @@ pub(crate) struct TileCoverParameters {
     pub(crate) tile_lod_pitch_threshold: f64,
     pub(crate) tile_lod_mode: TileLodMode,
     /// The zoom the source loads at the center of the view, shifted for its
-    /// tile size and not yet clamped to its zoom range; the globe's level of
-    /// detail falls off from it, as GL JS's does.
+    /// tile size and not yet clamped to its zoom range; the level of detail
+    /// of the globe and of terrain falls off from it, as GL JS's does.
     pub(crate) requested_zoom: Option<f64>,
     /// Whether the source rounds zooms to whole tiles, as raster sources do,
     /// instead of flooring them.
@@ -244,7 +246,6 @@ pub(crate) struct TileCoverParameters {
 impl TileCoverParameters {
     /// Parameters for `view`, with the defaults for the other
     /// fields.
-    #[cfg(test)]
     pub(crate) fn new(view: View) -> Self {
         TileCoverParameters {
             view,
@@ -966,6 +967,179 @@ pub(crate) fn tile_cover(
     }
 
     ids
+}
+
+/// The cover of a Mercator view over terrain, and of every source while
+/// terrain draws: GL JS `coveringTiles` with
+/// `MercatorCoveringTilesDetailsProvider` and a terrain. Each tile's zoom
+/// falls off with its distance from the camera at any pitch, and each tile is
+/// culled by a box that spans its elevation range in `ranges`, or GL JS's
+/// flat allowance where the range isn't known.
+///
+/// `z` is the cover's nominal zoom, at most `zoom_range.max`. A tile at the
+/// range's maximum takes the overscaled zoom it would load at,
+/// `overscaled_z` being the nominal zoom before the clamp, for a source that
+/// cuts overscaled tiles (GL JS `reparseOverscaled`); `None` keeps every
+/// tile at its own zoom.
+pub(crate) fn terrain_tile_cover(
+    state: &TileCoverParameters,
+    z: u8,
+    zoom_range: Range<u8>,
+    overscaled_z: Option<u8>,
+    ranges: &ElevationRanges,
+) -> Vec<OverscaledTileID> {
+    let fov_degrees = state.view.fov() * 180.0 / std::f64::consts::PI;
+    let tile_zoom = TileZoomFunction::new(
+        fov_degrees,
+        TileZoomFunction::DEFAULT_MAX_ZOOM_LEVELS_ON_SCREEN,
+        TileZoomFunction::DEFAULT_TILE_COUNT_MAX_MIN_RATIO,
+    );
+    mercator_covering_tiles(
+        state,
+        z,
+        zoom_range,
+        overscaled_z,
+        ranges,
+        Some(&|requested, d2, dz, d3| tile_zoom.call(requested, d2, dz, d3)),
+    )
+}
+
+/// A tile's zoom by its distance from the camera, GL JS's
+/// `CalculateTileZoomFunction`: the requested center zoom and the distances
+/// from the camera to the tile in 2D and along z, and to the center in 3D,
+/// in Mercator units.
+pub(crate) type VariableZoom<'a> = dyn Fn(f64, f64, f64, f64) -> f64 + 'a;
+
+/// GL JS `coveringTiles` over Mercator, which picks each tile's zoom with
+/// `variable_zoom` if there is one, and keeps them all at `z` otherwise.
+pub(crate) fn mercator_covering_tiles(
+    state: &TileCoverParameters,
+    z: u8,
+    zoom_range: Range<u8>,
+    overscaled_z: Option<u8>,
+    ranges: &ElevationRanges,
+    variable_zoom: Option<&VariableZoom<'_>>,
+) -> Vec<OverscaledTileID> {
+    #[derive(Clone, Copy, Debug)]
+    struct Node {
+        zoom: u8,
+        x: u32,
+        y: u32,
+        wrap: i16,
+        fully_visible: bool,
+    }
+
+    let transform = &state.view;
+    let world_size = Projection::world_size(transform.scale());
+    let flipped_y = transform.viewport_mode() == ViewportMode::FlippedY;
+    // x and y in units of the world's width, z in meters, as the boxes are.
+    let frustum =
+        Frustum::from_inv_proj_matrix_metres(&transform.inverse_projection_matrix(), world_size, 0.0, flipped_y);
+
+    let center_lat_lng = transform.center(WrapMode::Unwrapped);
+    let center = Projection::project(&center_lat_lng, 1.0 / constants::TILE_SIZE_D);
+    let meters_per_world =
+        Projection::altitude_meters_per_pixel(center_lat_lng.latitude(), transform.zoom()) * world_size;
+    let center_coord = DVec3::new(center.x, center.y, transform.center_altitude() / meters_per_world);
+    // The camera's position, which is above the elevated center.
+    let Some(camera_coord) = transform.free_camera_options().position else {
+        return Vec::new();
+    };
+    let distance_to_center_2d = (center_coord.x - camera_coord.x).hypot(center_coord.y - camera_coord.y);
+    let distance_z = (center_coord.z - camera_coord.z).abs();
+    let distance_to_center_3d = distance_to_center_2d.hypot(distance_z);
+    let culling_elevation = elevation_for_tile_culling(
+        transform.pitch() * 180.0 / std::f64::consts::PI,
+        transform.fov() * 180.0 / std::f64::consts::PI,
+        transform.center_altitude(),
+        state.max_content_elevation,
+    );
+    let requested_center_zoom =
+        state.requested_zoom.unwrap_or(transform.zoom() + (f64::from(z) - transform.zoom().floor()));
+    let whole_zoom = |zoom: f64| if state.round_zoom { zoom.round() } else { zoom.floor() };
+
+    let (min_zoom, max_zoom) = (zoom_range.min, zoom_range.max);
+    let num_tiles = f64::from(1u32 << z);
+    let center_point = center_coord * num_tiles;
+
+    let mut stack: Vec<Node> = Vec::with_capacity(64);
+    let mut result: Vec<(OverscaledTileID, f64)> = Vec::with_capacity(64);
+    let root = |wrap: i16| Node { zoom: 0, x: 0, y: 0, wrap, fully_visible: false };
+    for i in 1..=3i16 {
+        stack.push(root(-i));
+        stack.push(root(i));
+    }
+    stack.push(root(0));
+
+    while let Some(mut node) = stack.pop() {
+        let tile = CanonicalTileID::new(node.zoom, node.x, node.y);
+        let (min_elevation, max_elevation) =
+            ranges.range(tile).unwrap_or((f64::min(0.0, culling_elevation), f64::max(0.0, culling_elevation)));
+        let tiles_at_zoom = f64::from(1u32 << node.zoom);
+        let aabb = AABB::new(
+            DVec3::new(
+                f64::from(node.wrap) + f64::from(node.x) / tiles_at_zoom,
+                f64::from(node.y) / tiles_at_zoom,
+                min_elevation,
+            ),
+            DVec3::new(
+                f64::from(node.wrap) + f64::from(node.x + 1) / tiles_at_zoom,
+                f64::from(node.y + 1) / tiles_at_zoom,
+                max_elevation,
+            ),
+        );
+
+        if !node.fully_visible {
+            let intersection = frustum.intersects_box(&aabb);
+            if intersection == IntersectionResult::Separate {
+                continue;
+            }
+            node.fully_visible = intersection == IntersectionResult::Contains;
+        }
+
+        let desired_z = match variable_zoom {
+            Some(variable_zoom) => {
+                let distance = aabb.distance_xyz(camera_coord);
+                let distance_to_tile_2d = distance.x.hypot(distance.y);
+                whole_zoom(variable_zoom(requested_center_zoom, distance_to_tile_2d, distance_z, distance_to_center_3d))
+            }
+            None => f64::from(overscaled_z.unwrap_or(z)),
+        };
+        let desired_z = f64::max(0.0, desired_z);
+        let target_zoom = f64::min(desired_z, f64::from(max_zoom)) as u8;
+
+        if node.zoom >= target_zoom {
+            if node.zoom < min_zoom {
+                continue;
+            }
+            let overscaled_zoom = if node.zoom == max_zoom && overscaled_z.is_some() {
+                f64::max(f64::from(node.zoom), desired_z).min(255.0) as u8
+            } else {
+                node.zoom
+            };
+            // GL JS's sort key: the tile's own x and y, whatever its zoom and
+            // world copy, against the center at the nominal zoom.
+            let dx = center_point.x - 0.5 - f64::from(node.x);
+            let dy = center_point.y - 0.5 - f64::from(node.y);
+            result.push((
+                OverscaledTileID::with_zxy(overscaled_zoom, node.wrap, node.zoom, node.x, node.y),
+                dx * dx + dy * dy,
+            ));
+            continue;
+        }
+        for i in 0..4u32 {
+            stack.push(Node {
+                zoom: node.zoom + 1,
+                x: (node.x << 1) + (i % 2),
+                y: (node.y << 1) + (i >> 1),
+                wrap: node.wrap,
+                fully_visible: node.fully_visible,
+            });
+        }
+    }
+
+    sort_by_distance(&mut result, |tile| tile.1);
+    result.into_iter().map(|tile| tile.0).collect()
 }
 
 /// Sorts `tiles` nearest first by `sqr_dist`. As in GL JS, the sort is

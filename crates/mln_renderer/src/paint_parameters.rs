@@ -1,14 +1,17 @@
 use std::any::Any;
+use std::rc::Rc;
 
-use glam::DMat4;
+use glam::{DMat4, DVec4};
+use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, Gpu, GpuError, LoadOp, PassDesc, Scissor, TargetFormats};
+use mln_gfx::shaders::layer_ubo::GlobalPaintParamsUBO;
 use mln_gfx::stencil_mode::Test;
-use mln_gfx::types::{DepthFunctionType, StencilOpType};
+use mln_gfx::types::{CullFaceWindingType, DepthFunctionType, StencilOpType};
 use mln_gfx::{DepthMaskType, DepthMode, ScissorRect, StencilMode};
 use mln_map_types::{MapDebugOptions, ProjectionData, View, ViewportMode};
-use mln_tile_id::UnwrappedTileID;
+use mln_tile_id::{CanonicalTileID, UnwrappedTileID};
+use mln_util::constants::EXTENT;
 use mln_util::identity::SimpleIdentity;
-use mln_util::logging::{Event, Log};
 use mln_util::range::Range;
 use mln_util::size::Size;
 use mln_vec_map::VecMap;
@@ -19,6 +22,7 @@ use crate::gfx::context::Context;
 use crate::layer_composite::LayerComposite;
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
+use crate::terrain::GroundBindings;
 
 /// A draw group drawing into the layer composite's texture, from
 /// [`PaintParameters::begin_composited`] to
@@ -70,26 +74,52 @@ impl TransformParameters {
     pub(crate) fn new(view: &View) -> Self {
         let state = view.clone();
         // Update the default matrices to the current viewport dimensions.
-        let proj_matrix = state.projection_matrix_with(1, false);
+        let proj_matrix = state.projection_matrix_with(state.near_z(), false);
 
         // Also compute a projection matrix that aligns with the current pixel
         // grid, taking into account odd viewport sizes.
-        let aligned_proj_matrix = state.projection_matrix_with(1, true);
+        let aligned_proj_matrix = state.projection_matrix_with(state.near_z(), true);
 
         // Calculate a second projection matrix with the near plane moved
         // further, to a tenth of the far value, so as not to waste depth
         // buffer precision on very close empty space, for layer types
         // (fill-extrusion) that use the depth buffer to emulate real-world
         // space.
-        let near_z = (0.1 * state.camera_to_center_distance()) as u16;
-        let near_clipped_proj_matrix = state.projection_matrix_with(near_z, false);
+        let near_clipped_near_z = f64::from((0.1 * state.camera_to_center_distance()) as u16);
+        let near_clipped_proj_matrix = state.projection_matrix_with(near_clipped_near_z, false);
 
         TransformParameters {
             proj_matrix,
             aligned_proj_matrix,
             near_clipped_proj_matrix,
-            near_clipped_near_z: f64::from(near_z),
+            near_clipped_near_z,
             view: state,
+        }
+    }
+
+    /// The transform of a drape of the tile `tile` in `view`'s map, which
+    /// draws the map's layers into the tile's texture: an orthographic
+    /// projection of the tile's square of the world, in pixels at the
+    /// view's scale, onto the whole target, the tile's north edge at clip
+    /// y = 1, every depth at clip z = 0. The view stays the map's, so zoom
+    /// and bearing are the map's.
+    pub(crate) fn for_drape(view: &View, tile: &UnwrappedTileID) -> Self {
+        // The tile's square of the world: its corner, and its side.
+        let tile_matrix = view.tile_matrix(tile);
+        let (x, y) = (tile_matrix.w_axis.x, tile_matrix.w_axis.y);
+        let side = tile_matrix.x_axis.x * f64::from(EXTENT);
+        let proj_matrix = DMat4::from_cols(
+            DVec4::new(2.0 / side, 0.0, 0.0, 0.0),
+            DVec4::new(0.0, -2.0 / side, 0.0, 0.0),
+            DVec4::ZERO,
+            DVec4::new(-1.0 - 2.0 * x / side, 1.0 + 2.0 * y / side, 0.0, 1.0),
+        );
+        TransformParameters {
+            proj_matrix,
+            aligned_proj_matrix: proj_matrix,
+            near_clipped_proj_matrix: proj_matrix,
+            near_clipped_near_z: 0.0,
+            view: view.clone(),
         }
     }
 
@@ -177,9 +207,22 @@ pub(crate) struct PaintParameters<'a> {
     /// The stencil value of each tile whose mask the stencil buffer holds.
     tile_clipping_mask_ids: VecMap<UnwrappedTileID, i32>,
     next_stencil_id: i32,
+    /// The tile of the drape that the draws go into, whose mask covers the
+    /// whole target; `None` for the frame.
+    drape_tile: Option<UnwrappedTileID>,
+    /// The tiles whose masks `clear_stencil` draws zero with in the frame,
+    /// from [`stencil_clear_tiles`](Self::stencil_clear_tiles); a drape
+    /// draws its own tile's.
+    pub(crate) stencil_clear: Vec<UnwrappedTileID>,
 
     pub(crate) current_layer: u32,
     pub(crate) depth_range_size: f32,
+    /// Whether the frame draws terrain, under which 2D layers draw without
+    /// depth.
+    pub(crate) terrain: bool,
+    /// What the standing layers' draws bind of the ground they stand on,
+    /// while the frame draws terrain; `None` in a drape.
+    pub(crate) ground: Option<Rc<GroundBindings>>,
     pub(crate) opaque_pass_cutoff: u32,
     pub(crate) symbol_fade_change: f32,
 
@@ -236,13 +279,93 @@ impl<'a> PaintParameters<'a> {
             composites_with_frame_depth,
             tile_clipping_mask_ids: VecMap::new(),
             next_stencil_id: 1,
+            drape_tile: None,
+            stencil_clear: Vec::new(),
             // The renderer sets these before use.
             current_layer: 0,
             depth_range_size: 1.0,
+            terrain: frame.terrain,
+            ground: None,
             opaque_pass_cutoff: frame.opaque_pass_cutoff,
             symbol_fade_change: frame.symbol_fade_change,
             scissor_rect,
             custom_layer_frame: None,
+        }
+    }
+
+    /// Culling of the faces turned away from the camera, whose triangles
+    /// wind clockwise on screen, or counterclockwise where a viewport
+    /// flipped upside down turns every triangle round. The globe's
+    /// projection draws the right way up in either mode.
+    pub(crate) fn cull_back_faces(&self) -> CullFaceMode {
+        let turned = self.view.viewport_mode() == ViewportMode::FlippedY && !self.view.is_globe();
+        let winding = if turned { CullFaceWindingType::Clockwise } else { CullFaceWindingType::CounterClockwise };
+        CullFaceMode { winding, ..CullFaceMode::back_ccw() }
+    }
+
+    /// The parameters of the encode of a drape, which draws the frame's
+    /// layers into a texture of `size` over its tile `tile` with `transform`
+    /// ([`TransformParameters::for_drape`]): with the frame's camera, GPU
+    /// state and values, but its own clip masks and stencil values, its
+    /// layers drawn as a whole into and composited by `layer_composite`, of
+    /// `size`, with their own depth, and the whole target as the scissor.
+    /// The layers draw with depth, front to back in the opaque pass. A map pixel is a pixel of the projection, so
+    /// [`pixels_to_gl_units`](Self::pixels_to_gl_units) are its scale.
+    pub(crate) fn drape<'b>(
+        &'b mut self,
+        transform: &'b TransformParameters,
+        clip_masks: &'b mut ClipMasks,
+        layer_composite: &'b mut LayerComposite,
+        size: Size,
+        tile: UnwrappedTileID,
+    ) -> PaintParameters<'b> {
+        let proj_matrix = &transform.proj_matrix;
+        PaintParameters {
+            context: &mut *self.context,
+            open_pass: None,
+            transform_params: transform,
+            view: self.view,
+            camera_moving: self.camera_moving,
+            light: self.light,
+            static_data: self.static_data,
+            pass: RenderPass::Opaque,
+            debug_options: self.debug_options,
+            pixel_ratio: self.pixel_ratio,
+            renderable_size: size,
+            pixels_to_gl_units: [proj_matrix.x_axis.x as f32, proj_matrix.y_axis.y as f32],
+            clip_masks,
+            layer_composite,
+            composites_with_frame_depth: false,
+            tile_clipping_mask_ids: VecMap::new(),
+            next_stencil_id: 1,
+            drape_tile: Some(tile),
+            stencil_clear: Vec::new(),
+            current_layer: 0,
+            depth_range_size: 1.0,
+            terrain: false,
+            ground: None,
+            opaque_pass_cutoff: 0,
+            symbol_fade_change: self.symbol_fade_change,
+            scissor_rect: ScissorRect { x: 0, y: 0, width: size.width, height: size.height },
+            custom_layer_frame: None,
+        }
+    }
+
+    /// What every draw of the encode reads of its frame, with the pattern
+    /// atlas of `pattern_atlas_size`: the target's size and the pixels'
+    /// scale, the camera and the frame's values.
+    #[must_use]
+    pub(crate) fn global_paint_params(&self, pattern_atlas_size: Size) -> GlobalPaintParamsUBO {
+        GlobalPaintParamsUBO {
+            pattern_atlas_texsize: [pattern_atlas_size.width as f32, pattern_atlas_size.height as f32],
+            units_to_pixels: [1.0 / self.pixels_to_gl_units[0], 1.0 / self.pixels_to_gl_units[1]],
+            world_size: [self.renderable_size.width as f32, self.renderable_size.height as f32],
+            camera_to_center_distance: self.view.camera_to_center_distance() as f32,
+            symbol_fade_change: self.symbol_fade_change,
+            aspect_ratio: self.view.size().aspect_ratio(),
+            pixel_ratio: self.pixel_ratio,
+            map_zoom: self.view.zoom() as f32,
+            pad1: 0.0,
         }
     }
 
@@ -262,6 +385,7 @@ impl<'a> PaintParameters<'a> {
     /// into.
     pub(crate) fn begin_pass(&mut self, gpu: &mut dyn Gpu, pass: OpenPass) -> Result<(), GpuError> {
         gpu.begin_pass(&pass.desc())?;
+        self.context.rendering_stats().num_render_passes += 1;
         self.open_pass = Some(pass);
         Ok(())
     }
@@ -282,7 +406,7 @@ impl<'a> PaintParameters<'a> {
         };
         let restarted = self.end_pass(gpu).and_then(|()| self.begin_pass(gpu, pass.loading(stencil)));
         if let Err(error) = restarted {
-            Log::error(Event::Render, format!("Restarting the {} pass failed: {error}", pass.label));
+            self.context.fail(format!("Restarting the {} pass failed: {error}", pass.label));
         }
     }
 
@@ -305,14 +429,16 @@ impl<'a> PaintParameters<'a> {
         {
             drawn = self.begin_pass(gpu, backdrop);
             if drawn.is_ok() {
-                self.copy_frame(gpu);
+                if let Err(error) = self.copy_frame(gpu) {
+                    self.context.fail(format!("Copying the frame failed: {error}"));
+                }
                 drawn = self.end_pass(gpu);
             }
         }
         drawn = drawn.and_then(|()| self.begin_pass(gpu, composite));
         let began = drawn.is_ok();
         if let Err(error) = drawn {
-            Log::error(Event::Render, format!("Beginning the layer composite's pass failed: {error}"));
+            self.context.fail(format!("Beginning the layer composite's pass failed: {error}"));
         }
         let frame_stencil = (began && own_stencil).then(|| {
             (std::mem::take(&mut self.tile_clipping_mask_ids), std::mem::replace(&mut self.next_stencil_id, 1))
@@ -321,9 +447,10 @@ impl<'a> PaintParameters<'a> {
     }
 
     /// Copies the layer composite's frame texture onto the open pass.
-    fn copy_frame(&mut self, gpu: &mut dyn Gpu) {
-        if let Some(target) = self.draw_target() {
-            self.layer_composite.copy_frame(gpu, target, self.context);
+    fn copy_frame(&mut self, gpu: &mut dyn Gpu) -> Result<(), GpuError> {
+        match self.draw_target() {
+            Some(target) => self.layer_composite.copy_frame(gpu, target, self.context),
+            None => Ok(()),
         }
     }
 
@@ -337,10 +464,10 @@ impl<'a> PaintParameters<'a> {
             self.next_stencil_id = next_stencil_id;
         }
         if began && let Err(error) = self.end_pass(gpu) {
-            Log::error(Event::Render, format!("Ending the layer composite's pass failed: {error}"));
+            self.context.fail(format!("Ending the layer composite's pass failed: {error}"));
         }
         if let Err(error) = self.begin_pass(gpu, frame.loading(LoadOp::Load)) {
-            Log::error(Event::Render, format!("Resuming the {} pass failed: {error}", frame.label));
+            self.context.fail(format!("Resuming the {} pass failed: {error}", frame.label));
         } else if began && let Some(target) = self.draw_target() {
             // What drew with the frame's depth tested it as it drew, and
             // left its own there, in front of the layer's. The others
@@ -358,15 +485,13 @@ impl<'a> PaintParameters<'a> {
     /// Ends the frame's pass, which drew into the layer composite's frame
     /// texture, and begins `present`, which the texture is copied into.
     /// Does nothing where the frame drew into its target.
-    pub(crate) fn present_frame(&mut self, gpu: &mut dyn Gpu, present: OpenPass) {
+    pub(crate) fn present_frame(&mut self, gpu: &mut dyn Gpu, present: OpenPass) -> Result<(), GpuError> {
         if self.layer_composite.frame_texture().is_none() {
-            return;
+            return Ok(());
         }
-        if let Err(error) = self.end_pass(gpu).and_then(|()| self.begin_pass(gpu, present)) {
-            Log::error(Event::Render, format!("Beginning the frame's copy failed: {error}"));
-            return;
-        }
-        self.copy_frame(gpu);
+        self.end_pass(gpu)?;
+        self.begin_pass(gpu, present)?;
+        self.copy_frame(gpu)
     }
 
     /// Runs `f` with `gpu`'s, the context's, commands inside the pass
@@ -386,10 +511,11 @@ impl<'a> PaintParameters<'a> {
 
     /// Whether the current layer draws in the opaque pass: front to back,
     /// with depth. On the globe, 2D layers are ordered by draw order alone;
-    /// their Z is the back-hemisphere clip.
+    /// their Z is the back-hemisphere clip. Over terrain they draw flat, on
+    /// top of it.
     #[must_use]
     pub(crate) fn opaque_pass_enabled_for_layer(&self) -> bool {
-        self.current_layer >= self.opaque_pass_cutoff && !self.view.is_globe()
+        self.current_layer >= self.opaque_pass_cutoff && !self.view.is_globe() && !self.terrain
     }
 
     #[must_use]
@@ -422,18 +548,41 @@ impl<'a> PaintParameters<'a> {
         self.next_stencil_id = 1;
         self.tile_clipping_mask_ids.clear();
 
-        match self.stencil_clear_tile() {
-            Some(tile) => self.draw_clip_masks(gpu, &[(tile, 0)]),
-            None => self.restart_pass(gpu, LoadOp::Clear(0)),
+        if self.context.caps().clear_stencil_with_pass {
+            self.restart_pass(gpu, LoadOp::Clear(0));
+        } else {
+            let masks: Vec<_> = match self.drape_tile {
+                Some(tile) => vec![(tile, 0)],
+                None => self.stencil_clear.iter().map(|tile| (*tile, 0)).collect(),
+            };
+            self.draw_clip_masks(gpu, &masks);
         }
         self.context.rendering_stats().stencil_clears += 1;
     }
 
-    /// The tile whose mask `clear_stencil` draws zero with, where the render
-    /// pass clears the stencil buffer only where it begins.
+    /// The tiles whose masks `clear_stencil` draws zero with, where the
+    /// render pass clears the stencil buffer only where it begins, when the
+    /// draws clip to the masks of `clip_tiles`: those that cover every mask,
+    /// the drape's own tile in a drape and the world in each world copy of
+    /// `clip_tiles` in the frame.
     #[must_use]
-    pub(crate) fn stencil_clear_tile(&self) -> Option<UnwrappedTileID> {
-        (!self.context.caps().clear_stencil_with_pass).then(|| UnwrappedTileID::new(0, 0, 0))
+    pub(crate) fn stencil_clear_tiles(&self, clip_tiles: &[UnwrappedTileID]) -> Vec<UnwrappedTileID> {
+        if self.context.caps().clear_stencil_with_pass || clip_tiles.is_empty() {
+            return Vec::new();
+        }
+        if let Some(tile) = self.drape_tile {
+            return vec![tile];
+        }
+        let mut wraps: Vec<i16> = clip_tiles.iter().map(|tile| tile.wrap).collect();
+        wraps.sort_unstable();
+        wraps.dedup();
+        wraps.into_iter().map(|wrap| UnwrappedTileID::with_wrap(wrap, CanonicalTileID::new(0, 0, 0))).collect()
+    }
+
+    /// Whether the draws go into a terrain tile's drape.
+    #[must_use]
+    pub(crate) fn in_drape(&self) -> bool {
+        self.drape_tile.is_some()
     }
 
     fn draw_clip_masks(&mut self, gpu: &mut dyn Gpu, masks: &[(UnwrappedTileID, i32)]) {

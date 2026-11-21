@@ -17,6 +17,7 @@ use crate::sky::Sky;
 use crate::source_type::{
     Described, ErasedDescription, Source, SourceCommon, SourceData, SourceInstance, StyleSourceType,
 };
+use crate::terrain::Terrain;
 use crate::transition_options::TransitionOptions;
 
 /// A change to a style, which [`Style::apply`](crate::Style::apply) makes.
@@ -67,6 +68,9 @@ pub enum Edit {
     },
     /// Sets the sky; `None` removes it.
     SetSky(Option<Sky>),
+    /// Sets the terrain; `None` removes it. Fails with `InvalidArgument` if
+    /// the terrain's source is in the style and isn't a `raster-dem` source.
+    SetTerrain(Option<Terrain>),
     SetProjection(Projection),
     SetTransition(TransitionOptions),
     /// Sets a value that `global-state` expressions read. Null resets it to

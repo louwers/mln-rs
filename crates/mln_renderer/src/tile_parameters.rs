@@ -6,6 +6,8 @@ use mln_style::expression::GlobalStateMap;
 use mln_text::glyph::FontFaces;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
+use crate::terrain::TerrainCover;
+
 /// What a source's update gives its tiles.
 pub(crate) struct TileParameters<'a> {
     pub(crate) pixel_ratio: f32,
@@ -23,6 +25,12 @@ pub(crate) struct TileParameters<'a> {
     pub(crate) tile_lod_zoom_shift: f64,
     pub(crate) tile_lod_mode: TileLodMode,
     pub(crate) subdivision_granularity: SubdivisionGranularitySetting,
+    /// Whether the source's tiles lay out for terrain
+    /// ([`LayoutParams::terrain`]): the style has terrain, and the source a
+    /// fill-extrusion layer. A tile laid out otherwise lays out again.
+    ///
+    /// [`LayoutParams::terrain`]: crate::layout::tile_layout::LayoutParams::terrain
+    pub(crate) layout_terrain: bool,
     pub(crate) global_state: Option<Arc<GlobalStateMap>>,
     pub(crate) is_update_synchronous: bool,
     /// The style's font faces, which the tiles' layouts shape text with.
@@ -33,4 +41,7 @@ pub(crate) struct TileParameters<'a> {
     /// (`PlacementController::commits`), which the tiles the view leaves
     /// stay rendered for while their symbols fade out.
     pub(crate) placement_commits: u64,
+    /// The terrain's cover while terrain draws, whose elevation ranges cull
+    /// the sources' covers.
+    pub(crate) terrain: Option<&'a TerrainCover>,
 }

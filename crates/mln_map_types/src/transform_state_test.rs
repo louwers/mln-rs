@@ -31,7 +31,7 @@ fn pitched(pitch: f64) -> TransformState {
 /// every hundredth of a degree up to 85 degrees north: each point's row
 /// from the top of the view, and its clip z over w.
 fn meridian(state: &TransformState) -> Vec<(f64, f64)> {
-    let proj_matrix = state.view().projection_matrix_with(1, false);
+    let proj_matrix = state.view().projection_matrix_with(1.0, false);
     let height = f64::from(state.view().size().height);
     (0..8500)
         .map(|step| {
@@ -138,6 +138,7 @@ fn numbers_out_of_range_do_not_panic() {
             let _ = s.set_limits(CameraLimits { max_pitch: v, ..*s.limits() });
         }),
         ("center altitude", |s, v| s.set_center_altitude(v)),
+        ("terrain min elevation", |s, v| s.set_terrain_min_elevation(Some(v))),
         ("zoom", |s, v| s.set_lat_lng_zoom(&LatLng::new(10.0, 10.0).unwrap(), v)),
         ("longitude", |s, v| {
             if let Ok(lat_lng) = LatLng::with_mode(0.0, v, WrapMode::Unwrapped) {
@@ -235,4 +236,473 @@ fn equal_zoom_limits_just_below_the_least_zoom_the_view_allows_apply() {
     state.set_size(Size::new(512, 1024));
     let zoom = 0.999_999_999_9;
     state.set_limits(CameraLimits { min_zoom: zoom, max_zoom: zoom, ..*state.limits() }).unwrap();
+}
+
+/// A 301 by 200 view of the Alps, level or with pitch, roll, padding and a
+/// center below sea level.
+fn alpine(pitched: bool) -> TransformState {
+    use mln_util::geo::EdgeInsets;
+
+    let (center_altitude, pitch, roll, top) = if pitched { (-800.0, 72.5, 9.0, 60.0) } else { (0.0, 0.0, 0.0, 0.0) };
+    MapView {
+        camera: Camera {
+            center: LatLng::new(46.5, 7.9).unwrap(),
+            center_altitude,
+            padding: EdgeInsets::new(top, 0.0, 10.0, 25.0),
+            zoom: 12.25,
+            bearing: 20.0,
+            pitch,
+            roll,
+            fov: 37.0,
+        },
+        extent: LogicalExtent::new(Size::new(301, 200), 1.0),
+        projection_mode: ProjectionMode::default(),
+        viewport: Viewport::default(),
+        projection: ProjectionDefinition::default(),
+    }
+    .to_state()
+    .unwrap()
+}
+
+/// Fails unless the numbers are the same but for the last bits, which differ
+/// by the target's math library.
+fn assert_same(expected: &[f64], actual: &[f64]) {
+    for (expected, actual) in expected.iter().zip(actual) {
+        let tolerance = 1e-12 * expected.abs().max(1.0);
+        assert!((expected - actual).abs() <= tolerance, "{actual} isn't {expected}");
+    }
+}
+
+/// Without terrain the planes and matrices are those of the flat map, and a
+/// terrain that goes away restores them.
+#[test]
+fn matrices_without_terrain_are_unchanged() {
+    // Each view's far plane, projection matrix, and the z row of its matrix
+    // with the near plane at a tenth of the distance to the center.
+    let expected = [
+        (
+            alpine(false),
+            301.857_181_237_032_25,
+            [
+                1.866_076_615_892_337_9,
+                1.022_190_496_282_749_3,
+                0.0,
+                0.0,
+                0.679_196_343_045_016_2,
+                -2.808_445_306_917_968_7,
+                0.0,
+                0.0,
+                0.007_517_278_564_121_545,
+                -0.004_525_401_695_601_170_5,
+                -0.091_109_701_677_039_9,
+                -0.090_508_033_912_023_4,
+                -3_028_316.878_903_641,
+                1_147_156.446_909_028_3,
+                298.848_628_475_551_95,
+                298.868_496_274_289_27,
+            ],
+            [0.0, 0.0, -0.109_746_911_712_850_36, 298.233_205_214_500_34],
+        ),
+        (
+            alpine(true),
+            54_505.332_684_338_09,
+            [
+                1.784_059_983_608_735_4,
+                0.661_384_306_806_117_8,
+                0.326_202_377_525_688_9,
+                0.326_190_408_187_028_27,
+                0.833_051_235_020_185_3,
+                -0.450_162_381_905_947_7,
+                -0.896_233_666_424_242_3,
+                -0.896_200_780_936_546_3,
+                -0.024_554_814_939_620_46,
+                0.261_608_349_779_387_8,
+                -0.027_217_289_382_642_18,
+                -0.027_216_290_699_074_892,
+                -3_057_312.575_182_401,
+                -463_638.634_713_357_43,
+                366_351.964_219_291,
+                366_340.521_635_790_1,
+            ],
+            [0.326_537_697_417_830_06, -0.897_154_950_256_194, -0.027_245_267_408_459_74, 366_672.527_115_380_4],
+        ),
+    ];
+    for (mut state, far_z, projection, clipped_z) in expected {
+        let far_z: f64 = far_z;
+        for _ in 0..2 {
+            let view = state.view();
+            assert_eq!(1.0, view.near_z());
+            assert_same(&[far_z], &[view.far_z()]);
+            assert_same(&projection, &view.projection_matrix().to_cols_array());
+            let near_clipped = f64::from((0.1 * view.camera_to_center_distance()) as u16);
+            let clipped = view.projection_matrix_with(near_clipped, false).row(2).to_array();
+            assert_same(&clipped_z, &clipped);
+
+            let before = view.clone();
+            state.set_terrain_min_elevation(Some(-120.0));
+            assert_ne!(before.far_z(), state.view().far_z());
+            state.set_terrain_min_elevation(None);
+            assert_eq!(before, *state.view());
+        }
+    }
+}
+
+/// Meters scale as at the center, as the center's altitude does, so a point
+/// at the center's altitude draws at the center of the view, even where the
+/// camera is far from the center, over another latitude (GL JS's
+/// `pixelsPerMeter`).
+#[test]
+fn the_center_at_its_altitude_draws_at_the_center() {
+    for (zoom, center_altitude) in [(0.0, 9000.0), (3.0, -4000.0), (14.0, 1200.0)] {
+        let state = MapView {
+            camera: Camera {
+                center: LatLng::new(20.0, 10.0).unwrap(),
+                center_altitude,
+                zoom,
+                pitch: 60.0,
+                bearing: 45.0,
+                fov: mln_math::rad2deg(DEFAULT_FOV),
+                ..Camera::default()
+            },
+            extent: LogicalExtent::new(Size::new(512, 512), 1.0),
+            projection_mode: ProjectionMode::default(),
+            viewport: Viewport::default(),
+            projection: ProjectionDefinition::default(),
+        }
+        .to_state()
+        .unwrap();
+        let view = state.view();
+        let center = Projection::project(&view.center(mln_util::geo::WrapMode::Unwrapped), view.scale());
+        let clip = view.projection_matrix() * DVec4::new(center.x, center.y, center_altitude, 1.0);
+        assert!((clip.x / clip.w).abs() < 1e-9 && (clip.y / clip.w).abs() < 1e-9, "zoom {zoom}: {clip}");
+    }
+}
+
+/// The center's altitude is kept in meters: changes of the zoom and the
+/// center, including a move around an anchor, leave it as it was set, and
+/// the matrices still draw the center at that altitude at the center of
+/// the view.
+#[test]
+fn the_center_altitude_holds_in_meters_through_zoom_and_center_changes() {
+    use mln_util::geo::{ScreenCoordinate, WrapMode};
+
+    let mut state = pitched(60.0);
+    state.set_center_altitude(1200.0);
+    let draws_at_center = |state: &TransformState| {
+        let view = state.view();
+        let center = Projection::project(&view.center(WrapMode::Unwrapped), view.scale());
+        let clip = view.projection_matrix() * DVec4::new(center.x, center.y, 1200.0, 1.0);
+        assert!((clip.x / clip.w).abs() < 1e-9 && (clip.y / clip.w).abs() < 1e-9, "{clip}");
+    };
+    draws_at_center(&state);
+
+    state.set_lat_lng_zoom(&LatLng::new(0.0, -60.0).unwrap(), 12.5);
+    assert_eq!(state.view().center_altitude(), 1200.0);
+    draws_at_center(&state);
+
+    state.set_lat_lng_zoom(&LatLng::new(61.0, 25.0).unwrap(), 12.5);
+    assert_eq!(state.view().center_altitude(), 1200.0);
+    draws_at_center(&state);
+
+    let lat_lng = state.view().screen_coordinate_to_lat_lng(&ScreenCoordinate::new(100.0, 150.0), WrapMode::Unwrapped);
+    state.move_lat_lng(&lat_lng.unwrap(), &ScreenCoordinate::new(300.0, 350.0)).unwrap();
+    assert_ne!(state.view().center(WrapMode::Unwrapped).latitude(), 61.0);
+    assert_eq!(state.view().center_altitude(), 1200.0);
+    draws_at_center(&state);
+
+    state.set_lat_lng_zoom(&state.view().center(WrapMode::Unwrapped), 4.0);
+    assert_eq!(state.view().center_altitude(), 1200.0);
+    draws_at_center(&state);
+}
+
+/// Moving a location on a plane above sea level to a point puts it there,
+/// at that height, with the zoom, the angles and the center's altitude
+/// kept; at sea level it is `move_lat_lng`, to the bit.
+#[test]
+fn moving_a_location_on_a_plane_puts_it_at_the_point() {
+    use mln_util::geo::{ScreenCoordinate, WrapMode};
+
+    let mut state = pitched(55.0);
+    state.set_lat_lng_zoom(&LatLng::new(30.0, 20.0).unwrap(), 12.0);
+    state.set_center_altitude(400.0);
+    let (from, to) = (ScreenCoordinate::new(140.0, 120.0), ScreenCoordinate::new(380.0, 200.0));
+    for height in [0.0, 400.0, 1500.0] {
+        let mut moved = state.clone();
+        let location = moved.view().screen_coordinate_to_lat_lng_at(&from, height, WrapMode::Unwrapped).unwrap();
+        moved.move_lat_lng_at(&location, &to, height).unwrap();
+        // The center's altitude in meters draws a little higher or lower at
+        // the center's new latitude.
+        let landed = moved.view().lat_lng_to_screen_coordinate_at(&location, height);
+        assert!((landed.x - to.x).hypot(landed.y - to.y) < 1e-2, "{height} m: {landed:?}");
+        let (before, after) = (state.view(), moved.view());
+        assert_eq!(
+            (before.zoom(), before.angle(), before.pitch(), before.center_altitude()),
+            (after.zoom(), after.angle(), after.pitch(), after.center_altitude())
+        );
+        if height == 0.0 {
+            let mut flat = state.clone();
+            flat.move_lat_lng(&location, &to).unwrap();
+            assert_eq!(flat, moved);
+        }
+    }
+}
+
+/// The eye stands back from the center along the line of sight, and the
+/// near plane's middle point is on that line, the near plane's distance
+/// further. Raising the eye keeps the ground under it and the center it
+/// looks at, with its altitude, the bearing and the roll.
+#[test]
+fn raising_the_eye_keeps_its_place_and_the_center() {
+    use mln_util::geo::WrapMode;
+
+    let mut state = pitched(70.0);
+    state.set_limits(CameraLimits { max_pitch: mln_util::constants::PITCH_MAX, ..*state.limits() }).unwrap();
+    state.set_angle(0.5);
+    state.set_roll(0.1);
+    state.set_center_altitude(1000.0);
+    state.set_terrain_min_elevation(Some(800.0));
+    let view = state.view().clone();
+    let meters_per_pixel = view.meters_per_pixel();
+    let world_size = Projection::world_size(view.scale());
+    let eye = view.eye_position();
+    let rise = mln_math::deg2rad(70.0).cos() * view.camera_to_center_distance() * meters_per_pixel;
+    assert!((eye.z - (1000.0 + rise)).abs() < 1e-6, "{eye}");
+    let middle = view.near_plane_points()[4];
+    let to_middle = DVec3::new(
+        (middle.x - eye.x) * world_size,
+        (middle.y - eye.y) * world_size,
+        (middle.z - eye.z) / meters_per_pixel,
+    );
+    assert!((to_middle.length() - view.near_z()).abs() < 1e-6, "{to_middle}");
+    assert!((to_middle.z / to_middle.length() + mln_math::deg2rad(70.0).cos()).abs() < 1e-9, "{to_middle}");
+
+    assert!(state.raise_eye(500.0));
+    let raised = state.view();
+    let center = |view: &crate::View| view.center(WrapMode::Unwrapped);
+    assert!((center(raised).latitude() - center(&view).latitude()).abs() < 1e-9);
+    assert!((center(raised).longitude() - center(&view).longitude()).abs() < 1e-9);
+    assert_eq!((1000.0, 0.5, 0.1), (raised.center_altitude(), raised.angle(), raised.roll()));
+    assert!(raised.pitch() < view.pitch() && raised.zoom() < view.zoom());
+    let raised_eye = raised.eye_position();
+    assert!((raised_eye.truncate() - eye.truncate()).length() * world_size < 1e-6, "{raised_eye} {eye}");
+    assert!((raised_eye.z - (eye.z + 500.0)).abs() < 1e-6, "{raised_eye} {eye}");
+}
+
+/// An eye below sea level raised to it looks level at a center at sea
+/// level, from as far as it stood across the ground: GL JS's pitch 90 and
+/// zoom for the camera of `high-pitch/terrain-pitch95`.
+#[test]
+fn an_eye_raised_level_with_the_center_looks_level() {
+    let mut state = pitched(95.0);
+    state.set_limits(CameraLimits { max_pitch: mln_util::constants::PITCH_MAX, ..*state.limits() }).unwrap();
+    state.set_pitch(mln_math::deg2rad(95.0));
+    let eye = state.view().eye_position();
+    assert!(eye.z < 0.0, "{eye}");
+    assert!(state.raise_eye(-eye.z));
+    assert!((state.view().pitch() - mln_math::deg2rad(90.0)).abs() < 1e-12);
+    let zoom = 5.0 + (1.0 / mln_math::deg2rad(95.0).sin()).log2();
+    assert!((state.view().zoom() - zoom).abs() < 1e-12, "{}", state.view().zoom());
+}
+
+/// A view at latitude 45, zoom 14 and pitch 60, turned, with the center at
+/// sea level, and the point 1000 m up on its center's line of sight, where
+/// ground that rises in front of the center would meet it.
+fn looking_at_a_rise() -> (TransformState, crate::GroundHit) {
+    use mln_util::geo::WrapMode;
+
+    let mut state = pitched(60.0);
+    state.set_angle(0.5);
+    state.set_lat_lng_zoom(&LatLng::new(45.0, 10.0).unwrap(), 14.0);
+    let view = state.view();
+    let center = view.lat_lng_to_screen_coordinate(&view.center(WrapMode::Unwrapped));
+    let (near, far) = view.line_of_sight(&center).unwrap();
+    let point = near + (far - near) * ((1000.0 - near.z) / (far.z - near.z));
+    (state, crate::GroundHit { world: point.truncate(), height: 1000.0 })
+}
+
+/// Meters along the ground at latitude 45 in a unit of Web Mercator at zoom 0.
+fn meters_at_45() -> f64 {
+    Projection::altitude_meters_per_pixel(45.0, 0.0) * mln_util::constants::TILE_SIZE_D
+}
+
+/// Moving the center along the view onto a point of its line of sight keeps
+/// the eye, the pitch and the bearing, and zooms in to the nearer center,
+/// which stands where the view at the new latitude reaches the point's
+/// height, off it by far less than a meter.
+#[test]
+fn recentering_keeps_the_eye_and_moves_the_center_along_the_view() {
+    use mln_util::geo::WrapMode;
+
+    let (mut state, hit) = looking_at_a_rise();
+    let before = state.view().clone();
+    assert!(state.recenter_on(&hit));
+    let view = state.view();
+    assert_eq!((before.pitch(), before.angle()), (view.pitch(), view.angle()));
+    let moved = view.eye_position() - before.eye_position();
+    let moved = DVec3::new(moved.x * meters_at_45(), moved.y * meters_at_45(), moved.z);
+    assert!(moved.length() < 1e-5, "the eye moved {moved} m");
+    assert!(view.zoom() > before.zoom() + 0.1, "{}", view.zoom());
+    let center = Projection::project(&view.center(WrapMode::Unwrapped), 1.0 / mln_util::constants::TILE_SIZE_D);
+    let off = DVec3::new(
+        (center.x - hit.world.x) * meters_at_45(),
+        (center.y - hit.world.y) * meters_at_45(),
+        view.center_altitude() - hit.height,
+    );
+    assert!(off.length() > 1e-3 && off.length() < 1.0, "the center stands {off} m off the point");
+}
+
+/// A point behind the eye, or a zoom past the limit, leaves the state as it
+/// is.
+#[test]
+fn recentering_refuses_a_point_behind_the_eye_or_past_the_zoom_limit() {
+    let (mut state, hit) = looking_at_a_rise();
+    let before = state.clone();
+    let eye = state.view().eye_position();
+    let behind = crate::GroundHit { world: hit.world + (eye.truncate() - hit.world) * 2.0, height: hit.height };
+    assert!(!state.recenter_on(&behind));
+    assert_eq!(before, state);
+    state.set_limits(CameraLimits { max_zoom: 14.0, ..*state.limits() }).unwrap();
+    let before = state.clone();
+    assert!(!state.recenter_on(&hit));
+    assert_eq!(before, state);
+}
+
+/// With terrain, the near and far planes are GL JS's (`calculateNearFarZ`
+/// in `mercator_camera_math.ts`): the camera below sea level is GL JS's own
+/// test, with its expected far plane, and the others pin the same function
+/// on other cameras.
+#[test]
+fn terrain_planes_are_gl_js_planes() {
+    use mln_util::geo::EdgeInsets;
+
+    struct Case {
+        size: Size,
+        center: (f64, f64),
+        center_altitude: f64,
+        zoom: f64,
+        pitch: f64,
+        top_padding: f64,
+        min_elevation: f64,
+        near_z: f64,
+        far_z: f64,
+    }
+    let cases = [
+        // Ground above sea level, the center on it.
+        Case {
+            size: Size::new(500, 400),
+            center: (46.5, 7.9),
+            center_altitude: 1200.0,
+            zoom: 12.25,
+            pitch: 60.0,
+            top_padding: 0.0,
+            min_elevation: 900.0,
+            near_z: 8.0,
+            far_z: 1_952.897_196_030_780_6,
+        },
+        // Ground below sea level: GL JS's own test of a negative floor.
+        Case {
+            size: Size::new(500, 500),
+            center: (0.0, 0.0),
+            center_altitude: 0.0,
+            zoom: 11.46,
+            pitch: 60.0,
+            top_padding: 0.0,
+            min_elevation: -455.5,
+            near_z: 10.0,
+            far_z: 1_870.705_545_073_004,
+        },
+        // Past the horizon pitch, with the center moved down the view.
+        Case {
+            size: Size::new(512, 384),
+            center: (27.9, 86.9),
+            center_altitude: 300.0,
+            zoom: 13.0,
+            pitch: 85.0,
+            top_padding: 120.0,
+            min_elevation: 250.0,
+            near_z: 7.68,
+            far_z: 18_540.835_075_836_305,
+        },
+    ];
+    for case in cases {
+        let mut state = MapView {
+            camera: Camera {
+                center: LatLng::new(case.center.0, case.center.1).unwrap(),
+                center_altitude: case.center_altitude,
+                padding: EdgeInsets::new(case.top_padding, 0.0, 0.0, 0.0),
+                zoom: case.zoom,
+                bearing: 20.0,
+                pitch: case.pitch,
+                fov: mln_math::rad2deg(DEFAULT_FOV),
+                ..Camera::default()
+            },
+            extent: LogicalExtent::new(case.size, 1.0),
+            projection_mode: ProjectionMode::default(),
+            viewport: Viewport::default(),
+            projection: ProjectionDefinition::default(),
+        }
+        .to_state()
+        .unwrap();
+        state.set_terrain_min_elevation(Some(case.min_elevation));
+        let view = state.view();
+        assert_eq!(case.near_z, view.near_z());
+        let far_z = view.far_z();
+        assert!((far_z - case.far_z).abs() <= case.far_z * 1e-12, "{far_z} vs {}", case.far_z);
+        assert_eq!(view.projection_matrix_with(view.near_z(), false), view.projection_matrix());
+    }
+}
+
+/// The camera's distance to sea level is GL JS's (`cameraToSeaLevelDistance`
+/// in `mercator_camera_math.ts`), at least half the distance to the center:
+/// for a center above, at and below sea level, and past the horizon's pitch.
+#[test]
+fn the_camera_to_sea_level_distance_is_gl_js_s() {
+    let (latitude, zoom) = (46.5, 12.0);
+    // GL JS's `pixelsPerMeter`: the world's pixels over the circumference at
+    // the latitude.
+    let pixels_per_meter =
+        512.0 * 2f64.powf(zoom) / (2.0 * std::f64::consts::PI * 6_371_008.8 * mln_math::deg2rad(latitude).cos());
+    for (pitch, altitude) in [(60.0, 1200.0), (60.0, 0.0), (60.0, -400.0), (60.0, -30_000.0), (89.9, 1200.0)] {
+        let mut state = pitched(pitch);
+        state.set_lat_lng_zoom(&LatLng::new(latitude, 7.9).unwrap(), zoom);
+        state.set_center_altitude(altitude);
+        let view = state.view();
+        let camera_to_center = view.camera_to_center_distance();
+        let limited_pitch = mln_math::deg2rad(f64::min(pitch, 89.25));
+        let expected =
+            f64::max(camera_to_center / 2.0, camera_to_center + altitude * pixels_per_meter / limited_pitch.cos());
+        let distance = view.camera_to_sea_level_distance();
+        assert!((distance - expected).abs() <= expected * 1e-12, "{distance} vs {expected} at {pitch}°, {altitude} m");
+        if altitude == 0.0 {
+            assert_eq!(camera_to_center, distance);
+        }
+        if altitude == -30_000.0 {
+            assert_eq!(camera_to_center / 2.0, distance, "at least half the distance to the center");
+        }
+    }
+}
+
+/// With terrain, the far plane reaches ground 2 km below sea level up to
+/// the top of the view, where the flat map's plane cuts it off.
+#[test]
+fn the_far_plane_reaches_sunken_ground() {
+    let mut state = pitched(60.0);
+    state.set_lat_lng_zoom(&LatLng::new(0.0, -60.0).unwrap(), 13.0);
+    // The depths of the sunken ground north of the center that shows.
+    let depths = |state: &TransformState| -> Vec<f64> {
+        let proj_matrix = state.view().projection_matrix();
+        (0..8500)
+            .filter_map(|step| {
+                let lat_lng = LatLng::new(f64::from(step) / 10_000.0, -60.0).unwrap();
+                let point = Projection::project(&lat_lng, state.view().scale());
+                let clip = proj_matrix * DVec4::new(point.x, point.y, -2000.0, 1.0);
+                (clip.w > 0.0 && clip.y / clip.w <= 1.0).then_some(clip.z / clip.w)
+            })
+            .collect()
+    };
+    let flat = depths(&state);
+    assert!(flat.iter().any(|depth| *depth > 1.0));
+    state.set_terrain_min_elevation(Some(-2000.0));
+    let terrain = depths(&state);
+    assert!(!terrain.is_empty() && terrain.iter().all(|depth| *depth < 1.0));
 }

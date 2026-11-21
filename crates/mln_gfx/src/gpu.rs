@@ -38,7 +38,8 @@ use crate::color_mode::{BlendFunction, Mask};
 use crate::cull_face_mode::CullFaceMode;
 use crate::depth_mode::DepthMode;
 use crate::gfx_types::{AttributeDataType, DrawModeType};
-use crate::shaders::program::Program;
+use crate::shaders::program::{Program, TERRAIN_DEFINE};
+use crate::shaders::programs::{VariantAttributes, terrain_attributes};
 use crate::stencil_mode::{StencilMode, Test};
 use crate::texture2d::SamplerState;
 use crate::types::{DepthFunctionType, DepthMaskType, StencilOpType};
@@ -179,6 +180,16 @@ impl TextureFormat {
     pub fn has_stencil(self) -> bool {
         matches!(self, TextureFormat::Depth24PlusStencil8 | TextureFormat::Depth32FloatStencil8)
     }
+
+    /// Whether a texture of the format can be
+    /// [`mipmapped`](TextureDesc::mipmapped): a color format that every
+    /// backend filters and draws into, as making its mips takes. (A backend
+    /// may still lack a format, as GL lacks the BGRA ones.)
+    #[must_use]
+    pub fn mipmappable(self) -> bool {
+        self.bytes_per_texel().is_some()
+            && !matches!(self, TextureFormat::A8Unorm | TextureFormat::R32Float | TextureFormat::Rgba32Float)
+    }
 }
 
 /// What a texture is used for.
@@ -199,6 +210,20 @@ pub struct TextureDesc<'a> {
     pub size: Size,
     pub format: TextureFormat,
     pub usage: TextureUsage,
+    /// Whether the texture has a full chain of mip levels, each half the
+    /// size of the one before, rounded down, to 1×1, which
+    /// [`generate_mipmaps`](Gpu::generate_mipmaps) fills from level 0.
+    /// Passes, writes and readbacks reach level 0 only.
+    /// [`validation::check_mips`] says what such a texture is.
+    pub mipmapped: bool,
+}
+
+impl TextureDesc<'_> {
+    /// The number of mip levels of the texture: 1 without mips.
+    #[must_use]
+    pub fn mip_level_count(&self) -> u32 {
+        if self.mipmapped { self.size.width.max(self.size.height).max(1).bit_width() } else { 1 }
+    }
 }
 
 /// The texels at `x`, `y` of `size` that a write replaces.
@@ -279,6 +304,8 @@ pub struct VertexBufferLayout {
 pub struct ShaderKey {
     program: &'static Program,
     defines: Arc<[String]>,
+    /// Whether it is the program's terrain variant ([`TERRAIN_DEFINE`]).
+    terrain: bool,
 }
 
 impl ShaderKey {
@@ -290,12 +317,33 @@ impl ShaderKey {
         let mut defines: Vec<String> = defines.into_iter().collect();
         defines.sort_unstable();
         defines.dedup();
-        ShaderKey { program, defines: defines.into() }
+        let terrain = defines.iter().any(|define| define == TERRAIN_DEFINE);
+        ShaderKey { program, defines: defines.into(), terrain }
     }
 
     #[must_use]
     pub fn program(&self) -> &'static Program {
         self.program
+    }
+
+    /// The per-vertex attributes the variant reads, each with the format a
+    /// draw without data for it binds, in the variant's order: the
+    /// program's ([`Program::attributes`]), or more for a terrain variant
+    /// ([`terrain_attributes`]).
+    #[must_use]
+    pub fn attributes(&self) -> &'static [(usize, AttributeDataType)] {
+        self.terrain_attributes().map_or(self.program.attributes, |(attributes, _)| attributes)
+    }
+
+    /// The per-instance attributes the variant reads, as
+    /// [`attributes`](Self::attributes) gives them.
+    #[must_use]
+    pub fn instance_attributes(&self) -> &'static [(usize, AttributeDataType)] {
+        self.terrain_attributes().map_or(self.program.instance_attributes, |(_, instances)| instances)
+    }
+
+    fn terrain_attributes(&self) -> Option<VariantAttributes> {
+        if self.terrain { terrain_attributes(self.program) } else { None }
     }
 
     /// The defines, sorted.
@@ -578,11 +626,20 @@ pub trait Gpu {
         self.write_buffer(buffer, offset, &bytes)
     }
 
+    /// Makes a texture of `desc`. Fails as [`validation::check_mips`] does,
+    /// and for a size or format the backend doesn't make.
     fn create_texture(&mut self, desc: &TextureDesc<'_>) -> Result<TextureId, GpuError>;
     /// Writes `data`, the region's texels in rows from the top with no
     /// padding, to `region` of `texture`, which is
     /// [`sampled`](TextureUsage::sampled).
     fn write_texture(&mut self, texture: TextureId, region: TextureRegion, data: &[u8]) -> Result<(), GpuError>;
+
+    /// Fills mip levels 1 and on of `texture`, which is
+    /// [`mipmapped`](TextureDesc::mipmapped), each with the average of the
+    /// texels of the level before, from what level 0 holds once the work
+    /// recorded so far is done. Fails while a pass is open, and for a
+    /// texture without mips.
+    fn generate_mipmaps(&mut self, texture: TextureId) -> Result<(), GpuError>;
 
     fn create_sampler(&mut self, state: &SamplerState) -> Result<SamplerId, GpuError>;
 
@@ -704,6 +761,53 @@ mod tests {
         assert_eq!(key(&["B", "A"]).defines(), ["A", "B"]);
         assert_ne!(key(&["A"]), ShaderKey::new(&programs::LINE, ["A".to_owned()]));
         assert_eq!(key(&["B=2.0", "A"]).define_values().collect::<Vec<_>>(), [("A", ""), ("B", "2.0")]);
+    }
+
+    // A fill extrusion program's terrain variant reads its own attributes,
+    // in their order, and then the centroid, per vertex or per instance as
+    // its walls step, but the pulled walls, which read it from a storage
+    // buffer; its other variants, and every other program's, read the
+    // program's.
+    #[test]
+    fn only_a_fill_extrusions_terrain_variant_reads_the_centroid() {
+        use crate::projection_variant::ProjectionVariant;
+        use crate::shaders::program_parameters::ProgramParameters;
+        use crate::shaders::shader_defines::ID_FILL_EXTRUSION_CENTROID_ATTRIBUTE as CENTROID;
+
+        let parameters = ProgramParameters::new(1.0, false);
+        let extrusions = [
+            &programs::FILL_EXTRUSION,
+            &programs::FILL_EXTRUSION_INSTANCED,
+            &programs::FILL_EXTRUSION_WALL,
+            &programs::FILL_EXTRUSION_PULLED,
+            &programs::FILL_EXTRUSION_PATTERN,
+            &programs::FILL_EXTRUSION_PATTERN_INSTANCED,
+            &programs::FILL_EXTRUSION_PATTERN_WALL,
+        ];
+        for program in extrusions.into_iter().chain([&programs::FILL, &programs::CIRCLE]) {
+            for &variant in programs::projection_variants(program) {
+                let key = program.variant_key(&parameters, program.properties, variant);
+                let (attributes, instances) = (key.attributes(), key.instance_attributes());
+                let reads = variant == ProjectionVariant::Terrain
+                    && extrusions.contains(&program)
+                    && program != &programs::FILL_EXTRUSION_PULLED;
+                let ids = |attributes: &[(usize, AttributeDataType)]| -> Vec<usize> {
+                    attributes.iter().map(|&(id, _)| id).collect()
+                };
+                let (own, own_instances) = (ids(program.attributes), ids(program.instance_attributes));
+                let (attributes, instances) = (ids(attributes), ids(instances));
+                let added: Vec<usize> = if instances.len() > own_instances.len() {
+                    assert_eq!(attributes, own, "{program:?} {variant:?}");
+                    assert_eq!(instances[..own_instances.len()], own_instances, "{program:?} {variant:?}");
+                    instances[own_instances.len()..].to_vec()
+                } else {
+                    assert_eq!(instances, own_instances, "{program:?} {variant:?}");
+                    assert_eq!(attributes[..own.len()], own, "{program:?} {variant:?}");
+                    attributes[own.len()..].to_vec()
+                };
+                assert_eq!(added, if reads { vec![CENTROID] } else { vec![] }, "{program:?} {variant:?}");
+            }
+        }
     }
 
     #[test]

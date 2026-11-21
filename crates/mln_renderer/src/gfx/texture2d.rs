@@ -22,6 +22,8 @@ pub(crate) struct Texture2D {
     size: Size,
     format: TextureFormat,
     render_target: bool,
+    /// Whether it is made with a full chain of mip levels.
+    mipmapped: bool,
     sampler: SamplerState,
     /// The context's sampler of `sampler`, once a draw bound it.
     sampler_id: Option<SamplerId>,
@@ -37,6 +39,7 @@ impl Texture2D {
             size: Size::new(0, 0),
             format: TextureFormat::Rgba8Unorm,
             render_target: false,
+            mipmapped: false,
             sampler: SamplerState::default(),
             sampler_id: None,
             image: None,
@@ -108,6 +111,7 @@ impl Texture2D {
             size: self.size,
             format: self.format,
             usage: TextureUsage { sampled: true, render_target: self.render_target, copy_src: self.render_target },
+            mipmapped: self.mipmapped,
         };
         let texture = device.texture(gpu, &desc, Some(self.bytes()))?;
         let id = texture.id();
@@ -166,10 +170,12 @@ impl Texture2D {
         self.create(gpu, device)
     }
 
-    /// The bytes the texture takes.
-    fn bytes(&self) -> usize {
+    /// The bytes the texture takes, its mip levels' included.
+    pub(crate) fn bytes(&self) -> usize {
         let texel = self.format.bytes_per_texel().unwrap_or(4) as usize;
-        self.size.width as usize * self.size.height as usize * texel
+        let bytes = self.size.width as usize * self.size.height as usize * texel;
+        // The levels below the first add up to a third of it.
+        if self.mipmapped { bytes + bytes / 3 } else { bytes }
     }
 
     /// Lets go of the backend's texture, which goes once the bindings made
@@ -206,6 +212,15 @@ impl<'a> TextureMut<'a> {
     /// shaders sample.
     pub(crate) fn set_render_target(&mut self) {
         self.texture.render_target = true;
+    }
+
+    /// Makes the texture with a full chain of mip levels, or with one. A
+    /// texture made otherwise goes.
+    pub(crate) fn set_mipmapped(&mut self, mipmapped: bool) {
+        if mipmapped != self.texture.mipmapped {
+            self.texture.release();
+            self.texture.mipmapped = mipmapped;
+        }
     }
 
     /// Sets how shaders sample the texture, with an anisotropy of at least 1.

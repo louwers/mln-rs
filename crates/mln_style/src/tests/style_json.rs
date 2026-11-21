@@ -355,6 +355,34 @@ fn the_sky_and_the_projection_change_and_reset() {
 }
 
 #[test]
+fn the_terrain_changes_resets_and_reads_back() {
+    let mut style = loaded_style();
+    style.add_source_json("dem", DEM_SOURCE);
+    style.add_source_json("points", EMPTY_GEOJSON_SOURCE);
+    assert_eq!(root_property(&style, "terrain"), None);
+
+    style.set_root_property_json("terrain", r#"{"source":"dem"}"#).unwrap();
+    assert_eq!(root_property(&style, "terrain").as_deref(), Some(r#"{"source":"dem","exaggeration":1.0}"#));
+    style.set_root_property_json("terrain", r#"{"source":"dem","exaggeration":2.5}"#).unwrap();
+    assert_eq!(root_property(&style, "terrain").as_deref(), Some(r#"{"source":"dem","exaggeration":2.5}"#));
+
+    for (json, message) in [
+        (r#"{"source":"points"}"#, "not a raster-dem source"),
+        (r#"{"exaggeration":2}"#, "must have a source"),
+        (r#"{"source":3}"#, "source must be a string"),
+        (r#"{"source":"dem","exaggeration":"high"}"#, "exaggeration must be a number"),
+        (r#"{"source":"dem","exaggeration":-1}"#, "exaggeration must be at least 0"),
+        ("[]", "terrain must be an object"),
+    ] {
+        assert_fails(style.set_root_property_json("terrain", json), ErrorKind::InvalidArgument, message);
+    }
+    assert_eq!(root_property(&style, "terrain").as_deref(), Some(r#"{"source":"dem","exaggeration":2.5}"#));
+
+    style.set_root_property_json("terrain", "null").unwrap();
+    assert_eq!(root_property(&style, "terrain"), None);
+}
+
+#[test]
 fn a_new_state_resets_every_global_state_property() {
     let mut style = Style::new(StyleRegistry::with_builtins());
     style.load_json(r#"{"version":8,"sources":{},"layers":[],"state":{"theme":{"default":"light"}}}"#);
@@ -387,7 +415,7 @@ fn other_root_properties_read_as_loaded_and_reject_changes() {
     assert_eq!(root_property(&style, "zoom").as_deref(), Some("3"));
     assert_eq!(root_property(&style, "sprite"), None);
 
-    for (name, value) in [("zoom", "4"), ("sprite", r#""sprite""#), ("glyphs", r#""{fontstack}""#), ("terrain", "{}")] {
+    for (name, value) in [("zoom", "4"), ("sprite", r#""sprite""#), ("glyphs", r#""{fontstack}""#)] {
         assert_fails(style.set_root_property_json(name, value), ErrorKind::Unsupported, &format!("\"{name}\""));
     }
     assert_eq!(root_property(&style, "zoom").as_deref(), Some("3"));

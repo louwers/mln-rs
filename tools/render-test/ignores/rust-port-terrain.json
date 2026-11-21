@@ -1,0 +1,5 @@
+{
+  "gljs/render-tests/terrain/heatmap": "Over terrain, GL JS colors each tile's kernel density on its own and blends the tiles, so where kernels of two tiles overlap their density doesn't add up; mln-rs adds it up across tiles, as both do without terrain. The kernels stand where GL JS draws them; 1,552 of 262,144 px differ, all where kernels of the fixture's two GeoJSON tiles overlap",
+  "gljs/render-tests/terrain/occlusion-debug": "P4 (standing layers): terrain draws, but doesn't occlude what stands behind it yet; its DEM source declares tileSize 256 for tiles/terrain-shading's 512 px tiles",
+  "gljs/render-tests/terrain/symbol-height-offset-occluded-ground": "P4-S5 (terrain hides what stands behind it): the aircraft stands on the ground and draws where GL JS draws it; 481 of 262,144 px differ, along ridges' silhouettes; its DEM source declares tileSize 256 for tiles/terrain-shading's 512 px tiles"
+}

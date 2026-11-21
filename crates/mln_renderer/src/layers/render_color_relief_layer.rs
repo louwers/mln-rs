@@ -54,7 +54,9 @@ use crate::layer_drawing::{DrawList, DrawObjectsMut, KeptDraw, TileDraws, TileOb
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
-use crate::render_layer::{Atlases, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer};
+use crate::render_layer::{
+    Atlases, LayerUpdateParameters, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
+};
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::render_tile::FrameTile;
@@ -290,6 +292,7 @@ fn color_relief_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeA
 impl TypedLayer for RenderColorReliefLayer {
     type Type = ColorRelief;
     type Drawing = TileDraws<ReliefTile>;
+    const DRAPES: bool = true;
 
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
@@ -362,7 +365,6 @@ impl TypedLayer for RenderColorReliefLayer {
             static_data_indices,
             globe_meshes,
             dem_textures,
-            live_buckets,
             ..
         } = self;
 
@@ -391,7 +393,7 @@ impl TypedLayer for RenderColorReliefLayer {
             let data = bytemuck::cast_slice(elevation_stops_data.as_slice());
             if let Err(error) = context.upload_texture_data(gpu, &elevation_stops, data, Size::new(*color_ramp_size, 1))
             {
-                Log::error(Event::Render, format!("Uploading the elevation stops failed: {error}"));
+                context.fail(format!("Uploading the elevation stops failed: {error}"));
             }
             *elevation_stops_texture = Some(elevation_stops);
 
@@ -415,11 +417,6 @@ impl TypedLayer for RenderColorReliefLayer {
         else {
             return;
         };
-
-        // Drop the DEM textures of buckets that are no longer rendered.
-        live_buckets.clear();
-        live_buckets.extend(render_tiles.iter().filter_map(|tile| Some(tile.bucket()?.base.bucket_id)));
-        dem_textures.retain(|id, _| live_buckets.contains(id));
 
         let dem_sampler = SamplerState {
             filter: match *values.evaluated.paint.resampling.uniform() {
@@ -567,6 +564,15 @@ impl TypedLayer for RenderColorReliefLayer {
             writer.storage(ID_COLOR_RELIEF_TILE_PROPS_UBO, |uniforms| uniforms.tile_props);
             writer.storage(ID_PROJECTION_UBO, |uniforms| uniforms.projection);
         });
+    }
+
+    /// Drops the DEM textures of the buckets of tiles the frame doesn't
+    /// draw. The frame's draws and its drapes' share the others.
+    fn update(&mut self, _params: &mut LayerUpdateParameters<'_>, tiles: &[FrameTile<'_, ColorRelief>]) {
+        let live_buckets = &mut self.live_buckets;
+        live_buckets.clear();
+        live_buckets.extend(tiles.iter().filter_map(|tile| Some(tile.bucket()?.base.bucket_id)));
+        self.dem_textures.retain(|id, _| live_buckets.contains(id));
     }
 
     fn release(&mut self) {

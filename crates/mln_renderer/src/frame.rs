@@ -27,6 +27,10 @@ pub(crate) struct Frame {
     pub(crate) sky: Option<EvaluatedSky>,
     /// Whether a layer draws in the 3D pass.
     pub(crate) has_3d: bool,
+    /// Whether the frame draws terrain, which the layers that drape over it
+    /// don't draw onto, and under which the other 2D layers draw without
+    /// depth.
+    pub(crate) terrain: bool,
     /// The number of the frame's layers above its lowest 3D layer, which
     /// draw without a depth test; 0 without 3D layers.
     pub(crate) opaque_pass_cutoff: u32,
@@ -40,7 +44,9 @@ pub(crate) struct Frame {
     /// When, without `needs_repaint`, the map changes next on its own: a
     /// symbol placement that isn't due yet.
     pub(crate) repaint_at: Option<Instant>,
-    /// Whether every source, image and tile the frame needs had loaded.
+    /// Whether the frame is complete: every source, image and tile it needs
+    /// had loaded, and its camera stood as it would on the terrain's current
+    /// ground.
     pub(crate) loaded: bool,
     pub(crate) placement_changed: bool,
     /// The layers the frame draws, by their index in the drawing order.
@@ -62,6 +68,7 @@ impl Frame {
             light: EvaluatedLight::default(),
             sky: None,
             has_3d: false,
+            terrain: false,
             opaque_pass_cutoff: 0,
             background_color: Color::new_unchecked(0.0, 0.0, 0.0, 0.0),
             symbol_fade_change: 0.0,

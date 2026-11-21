@@ -13,6 +13,7 @@ use mln_util::size::Size;
 use crate::camera::{CameraOptions, FreeCameraOptions};
 use crate::camera_limits::CameraLimits;
 use crate::camera_pose::CameraPose;
+use crate::ground::GroundHit;
 use crate::mode::{ConstrainMode, ViewportMode};
 use crate::vertical_perspective_projection::VerticalPerspectiveProjection;
 use crate::view::{NorthOrientation, View, ViewParams, map_offset, max_mercator_horizon_angle, scale_zoom, zoom_scale};
@@ -132,7 +133,7 @@ impl TransformState {
 
         let mercator_z = position.z + dz * travel;
         let alt_m = mercator_z
-            * Projection::meters_per_pixel_at_latitude(self.view.center(WrapMode::Unwrapped).latitude(), 0.0)
+            * Projection::altitude_meters_per_pixel(self.view.center(WrapMode::Unwrapped).latitude(), 0.0)
             * TILE_SIZE_D;
         self.set_center_altitude(alt_m);
         self.set_angle(new_bearing);
@@ -612,6 +613,16 @@ impl TransformState {
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
     /// NaN or infinite anchor.
     pub fn move_lat_lng(&mut self, lat_lng: &LatLng, anchor: &ScreenCoordinate) -> Result<(), Error> {
+        self.move_lat_lng_at(lat_lng, anchor, 0.0)
+    }
+
+    /// Recenters the map so that `lat_lng`, `height` meters above sea level,
+    /// is at `anchor`, a point measured from the bottom edge (y up): the
+    /// center moves across the ground, with the zoom, the angles and the
+    /// center's altitude kept. At height 0 it is
+    /// [`move_lat_lng`](Self::move_lat_lng). The globe holds `lat_lng` on its
+    /// surface, whatever the height. Fails as `move_lat_lng` does.
+    pub fn move_lat_lng_at(&mut self, lat_lng: &LatLng, anchor: &ScreenCoordinate, height: f64) -> Result<(), Error> {
         let view = &self.view;
         if view.is_globe() {
             if let Some(center) = VerticalPerspectiveProjection::center_for_location_at_point(view, lat_lng, anchor) {
@@ -625,24 +636,48 @@ impl TransformState {
             }
             return Ok(());
         }
+        let center = self.center_for_lat_lng_at(lat_lng, anchor, height)?;
+        // Wrapped, as easeTo and GL JS's setLocationAtPoint leave it, unless
+        // bounds keep it in their range.
+        let target = if self.limits.bounds == LatLngBounds::default() { center.wrapped() } else { center };
+        let zoom = self.view.zoom();
+        self.set_lat_lng_zoom(&target, zoom);
+        Ok(())
+    }
+
+    /// The center, unwrapped and before the limits constrain it, that puts
+    /// `lat_lng`, `height` meters above sea level, at `anchor` (y up) on a
+    /// Mercator view: the current center moved across the ground by as far
+    /// as `lat_lng` is from the location the line of sight through `anchor`
+    /// meets at that height (GL JS's `getCameraForLocationAtPoint`). On the
+    /// globe it is the center that holds `lat_lng` on the surface, or fails
+    /// where none does; before the globe has a size, its points are
+    /// Mercator's, as [`crate::View::screen_coordinate_to_lat_lng_at`] reads them.
+    /// Fails as [`move_lat_lng`](Self::move_lat_lng) does.
+    pub fn center_for_lat_lng_at(
+        &self,
+        lat_lng: &LatLng,
+        anchor: &ScreenCoordinate,
+        height: f64,
+    ) -> Result<LatLng, Error> {
+        let view = &self.view;
+        if view.is_globe() && !view.size().is_empty() {
+            return VerticalPerspectiveProjection::center_for_location_at_point(view, lat_lng, anchor)
+                .ok_or_else(|| Error::invalid_argument("no center holds the location at the point"));
+        }
         let scale = view.scale();
         let center_coord = Projection::project(&view.center(WrapMode::Unwrapped), scale);
         let lat_lng_coord = Projection::project(lat_lng, scale);
-        let anchor_coord = Projection::project(&view.screen_coordinate_to_lat_lng(anchor, WrapMode::Unwrapped)?, scale);
-        let center = Projection::unproject(
+        let anchor_coord =
+            Projection::project(&view.screen_coordinate_to_lat_lng_at(anchor, height, WrapMode::Unwrapped)?, scale);
+        Projection::unproject(
             &Point::new(
                 center_coord.x + lat_lng_coord.x - anchor_coord.x,
                 center_coord.y + lat_lng_coord.y - anchor_coord.y,
             ),
             scale,
             WrapMode::Unwrapped,
-        )?;
-        // Wrapped, as easeTo and GL JS's setLocationAtPoint leave it, unless
-        // bounds keep it in their range.
-        let target = if self.limits.bounds == LatLngBounds::default() { center.wrapped() } else { center };
-        let zoom = view.zoom();
-        self.set_lat_lng_zoom(&target, zoom);
-        Ok(())
+        )
     }
 
     pub fn set_lat_lng_zoom(&mut self, lat_lng: &LatLng, zoom: f64) {
@@ -698,15 +733,112 @@ impl TransformState {
         });
     }
 
-    /// Sets the center's altitude, in meters.
+    /// Sets the center's altitude, in meters, which then holds through
+    /// changes of the zoom and the center.
     pub fn set_center_altitude(&mut self, alt_m: f64) {
         if !alt_m.is_finite() {
             return;
         }
+        self.update(|p| p.center_altitude = alt_m);
+    }
+
+    /// Raises the eye by `lift` meters straight up, still looking at the
+    /// center at its altitude: keeps the center, its altitude, the bearing
+    /// and the roll, and solves the pitch and the zoom that put the eye there
+    /// (GL JS's `calculateCameraOptionsFromTo`, from the raised eye to the
+    /// center), within the limits. Heights convert to pixels at the center's
+    /// latitude. Returns whether the view changed; on the globe, or while the
+    /// view shows nothing, it doesn't.
+    pub fn raise_eye(&mut self, lift: f64) -> bool {
         let view = &self.view;
-        let z =
-            alt_m / Projection::meters_per_pixel_at_latitude(view.center(WrapMode::Unwrapped).latitude(), view.zoom());
-        self.update(|p| p.z = z);
+        if !lift.is_finite() || view.is_globe() || !view.is_valid() {
+            return false;
+        }
+        // The eye's offset from the center, in pixels at the zoom: across
+        // the ground, and up.
+        let distance = view.camera_to_center_distance();
+        let across = view.pitch().sin() * distance;
+        let up = view.pitch().cos() * distance + lift / view.meters_per_pixel();
+        let raised = across.hypot(up);
+        if raised == 0.0 {
+            return false;
+        }
+        let pitch = mln_math::clamp_f64(across.atan2(up), self.limits.min_pitch, self.limits.max_pitch);
+        let zoom = view.zoom() + (distance / raised).log2();
+        let center = view.center(WrapMode::Unwrapped);
+        let before = *view.params();
+        self.set_pitch(pitch);
+        self.set_lat_lng_zoom(&center, zoom);
+        *self.view.params() != before
+    }
+
+    /// Moves the center along the view onto `hit`, the ground its line of
+    /// sight meets, with the eye, the pitch and the bearing kept: the center
+    /// stands as far along the view as `hit` is from the eye, at the height
+    /// the view reaches there, and the zoom follows from that distance (GL
+    /// JS's `moveCenterToElevation`, orbis's `recenter_on`). Distances across
+    /// the ground convert to meters at `hit`'s latitude, so where the
+    /// center's latitude was another, the center lands off `hit` by that
+    /// share of the distance between the latitudes' scales.
+    ///
+    /// Returns whether it moved the center there. It leaves the state as it
+    /// is on the globe, while the view shows nothing, where `hit` isn't in
+    /// front of the eye, and where the limits would move the zoom or the
+    /// center: the zoom range, the bounds, and in [`ConstrainMode::Screen`]
+    /// the bounds the screen must stay within.
+    pub fn recenter_on(&mut self, hit: &GroundHit) -> bool {
+        let view = &self.view;
+        if view.is_globe() || !view.is_valid() {
+            return false;
+        }
+        let eye = view.eye_position();
+        let forward = view.camera_pose().forward();
+        // Meters per Web Mercator unit at zoom 0, across the ground at `hit`.
+        let latitude = hit.location(WrapMode::Unwrapped).latitude();
+        let meters = Projection::altitude_meters_per_pixel(latitude, 0.0) * TILE_SIZE_D;
+        let to_hit = DVec3::new((hit.world.x - eye.x) * meters, (hit.world.y - eye.y) * meters, hit.height - eye.z);
+        let distance = to_hit.dot(forward);
+        if !(distance.is_finite() && distance > 0.0) {
+            return false;
+        }
+        let world = Point::new(eye.x + forward.x * distance / meters, eye.y + forward.y * distance / meters);
+        let Ok(center) = Projection::unproject(&world, 1.0 / TILE_SIZE_D, WrapMode::Unwrapped) else {
+            return false;
+        };
+        // Wrapped, as move_lat_lng leaves it, unless bounds keep it in their
+        // range.
+        let center = if self.limits.bounds == LatLngBounds::default() { center.wrapped() } else { center };
+        let zoom = scale_zoom(view.camera_to_center_distance() * meters / distance / TILE_SIZE_D);
+
+        let mut moved = self.clone();
+        moved.set_center_altitude(eye.z + forward.z * distance);
+        moved.set_lat_lng_zoom(&center, zoom);
+        // The limits clamp what they refuse, and the screen's bounds move it.
+        let landed = moved.view.center(WrapMode::Unwrapped);
+        let mut on_screen = CameraOptions { center: Some(landed), ..CameraOptions::default() };
+        let mut screen_zoom = moved.view.zoom();
+        moved.constrain_camera_and_zoom_to_bounds(&mut on_screen, &mut screen_zoom);
+        let refused = (moved.view.zoom() - zoom).abs() > 1e-9
+            || (landed.latitude() - center.latitude()).abs() > 1e-9
+            || (landed.longitude() - center.longitude()).abs() > 1e-9
+            || on_screen.center != Some(landed)
+            || screen_zoom != moved.view.zoom();
+        if refused {
+            return false;
+        }
+        *self = moved;
+        true
+    }
+
+    /// Sets the lowest ground near the center while terrain draws, in
+    /// meters, exaggerated, or `None` without terrain. With it, the view's
+    /// near and far planes fit raised and sunken ground; without it, they
+    /// fit the flat map. A height that isn't finite changes nothing.
+    pub fn set_terrain_min_elevation(&mut self, min_elevation: Option<f64>) {
+        if min_elevation.is_some_and(|min| !min.is_finite()) {
+            return;
+        }
+        self.update(|p| p.terrain_min_elevation = min_elevation);
     }
 }
 

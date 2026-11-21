@@ -1,12 +1,14 @@
 {
   "base_test_path": "../testdata/metrics/integration",
   "cache_path": "../testdata/metrics/cache-style.db",
+  "asset_path": "../testdata/metrics/integration/gljs/assets",
   "expectation_paths": ["../testdata/metrics/expectations/platform-linux"],
   "ignore_paths": [
     "../testdata/metrics/ignores/platform-all.json",
     "../testdata/metrics/ignores/platform-macos-webgpu.json",
     "../testdata/metrics/ignores/platform-linux.json",
     "../ignores/rust-port.json",
+    "../ignores/rust-port-terrain.json",
     "../ignores/rust-port-metal-outlines.json"
   ],
   "metric_path": "../testdata/metrics/linux-gcc8-release"

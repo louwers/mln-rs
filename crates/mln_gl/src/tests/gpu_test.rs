@@ -4,9 +4,9 @@ use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
 use mln_gfx::gpu::conformance::{
-    clip_mask_and_background, custom_layers, depth_only, foreign_ids, imported_textures, instanced_walls,
-    invalid_calls, pulled_walls, readbacks, resources_in_use, topologies, transparent_replace, vertex_layouts,
-    wall_quads,
+    clip_mask_and_background, custom_layers, depth_only, drawn_vertex_texels, foreign_ids, imported_textures,
+    instanced_walls, invalid_calls, mipmapped_targets, pulled_walls, readbacks, resources_in_use, terrain_heights,
+    topologies, transparent_replace, vertex_layouts, wall_quads, written_vertex_texels,
 };
 use mln_gfx::gpu::{
     BindGroupEntry, BindingsDesc, BindingsId, BufferDesc, BufferId, BufferUsage, ColorAttachment, DepthState,
@@ -81,6 +81,38 @@ fn depth_only_through_gpu() {
         return;
     };
     depth_only(&mut gpu).expect("the frame");
+}
+
+#[test]
+fn written_vertex_texels_through_gpu() {
+    let Some(mut gpu) = gpu() else {
+        return;
+    };
+    written_vertex_texels(&mut gpu).expect("the frame");
+}
+
+#[test]
+fn drawn_vertex_texels_through_gpu() {
+    let Some(mut gpu) = gpu() else {
+        return;
+    };
+    drawn_vertex_texels(&mut gpu).expect("the frames");
+}
+
+#[test]
+fn terrain_heights_through_gpu() {
+    let Some(mut gpu) = gpu() else {
+        return;
+    };
+    terrain_heights(&mut gpu).expect("the frames");
+}
+
+#[test]
+fn mipmapped_targets_through_gpu() {
+    let Some(mut gpu) = gpu() else {
+        return;
+    };
+    mipmapped_targets(&mut gpu).expect("the frames");
 }
 
 #[test]
@@ -283,6 +315,7 @@ fn draws_read_only_what_is_bound() {
             size,
             format: TextureFormat::Rgba8Unorm,
             usage: TextureUsage { render_target: true, copy_src: true, ..TextureUsage::default() },
+            mipmapped: false,
         })
         .unwrap();
     let red = BackgroundPropsUBO { color: [1.0, 0.0, 0.0, 1.0], opacity: 1.0, ..BackgroundPropsUBO::default() };
@@ -415,6 +448,7 @@ fn imported_framebuffers_draw_as_they_are() {
             size,
             format: TextureFormat::Depth24PlusStencil8,
             usage: TextureUsage { render_target: true, ..TextureUsage::default() },
+            mipmapped: false,
         })
         .unwrap();
     assert!(matches!(gpu.begin_pass(&pass(Some(color_id), Some(own_depth))), Err(GpuError::Invalid(_))));

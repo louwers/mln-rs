@@ -65,4 +65,58 @@ pub struct RenderingStats {
     pub stencil_clears: i32,
     /// Stencil buffer updates.
     pub stencil_updates: i32,
+    /// Render passes begun during the most recent frame, those of the
+    /// layers' own targets and of the terrain's drapes included.
+    pub num_render_passes: i32,
+    /// Textures whose mip levels the most recent frame generated.
+    pub num_mipmap_generations: i32,
+    /// What 3D terrain holds, and what it drew in the most recent frame.
+    pub terrain: TerrainStats,
+}
+
+/// What 3D terrain holds after the most recent frame, and what that frame
+/// drew of it: all zero for a frame without terrain. Its byte counts are
+/// of what the terrain holds now, as the `mem_*` counters of
+/// [`RenderingStats`] are; a depth and stencil texture counts 4 bytes a
+/// texel, though a backend may store it in more.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TerrainStats {
+    /// Stacks of draped layers, each of which has a drape of every terrain
+    /// tile.
+    pub stacks: usize,
+    /// Drapes whose textures are made: one for each terrain tile and stack.
+    pub drapes: usize,
+    /// Drapes drawn during the most recent frame, each followed by the
+    /// generation of its mips.
+    pub drapes_drawn: usize,
+    /// Render passes of the drapes drawn during the most recent frame,
+    /// among [`RenderingStats::num_render_passes`].
+    pub drape_passes: usize,
+    /// Draw calls into the drapes during the most recent frame, among
+    /// [`RenderingStats::num_draw_calls`].
+    pub drape_draw_calls: usize,
+    /// Draw calls of the terrain's surface during the most recent frame,
+    /// among [`RenderingStats::num_draw_calls`].
+    pub surface_draw_calls: usize,
+    /// Bytes of the drapes' textures, their mips included, which
+    /// [`RenderingStats::mem_textures`] counts too. Every stack's drapes
+    /// take an equal share.
+    pub mem_drapes: usize,
+    /// Bytes of the depth and stencil texture that the drapes draw with in
+    /// turn, which [`RenderingStats::mem_textures`] doesn't count.
+    pub mem_drape_depth_stencil: usize,
+    /// Bytes of the textures of the composite that the drapes draw their
+    /// translucent and blended layers with: its color textures, which
+    /// [`RenderingStats::mem_textures`] counts too, and its depth and
+    /// stencil, which it doesn't.
+    pub mem_drape_composite: usize,
+    /// Bytes of the DEM textures that the surface reads, which
+    /// [`RenderingStats::mem_textures`] counts too.
+    pub mem_dem_textures: usize,
+    /// Bytes of the DEM images that the ground the map's camera stands on
+    /// holds, each once, which the terrain source's tiles share while they
+    /// hold them.
+    pub mem_dem_data: usize,
+    /// Bytes of the table of the DEM tiles' remembered height ranges.
+    pub mem_height_ranges: usize,
 }

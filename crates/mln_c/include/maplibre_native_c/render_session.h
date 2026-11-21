@@ -23,6 +23,12 @@ extern "C" {
 
 /** How a frame demand finished. */
 typedef enum mln_render_result : uint32_t {
+  /**
+   * The target took the frame. A frame of a map in MLN_MAP_MODE_CONTINUOUS
+   * that failed on the GPU in part, which MLN_RUNTIME_EVENT_MAP_RENDER_ERROR
+   * reports, is rendered too: it shows what did draw, and its mode is
+   * MLN_RENDER_MODE_PARTIAL.
+   */
   MLN_RENDER_RESULT_RENDERED = 0,
   /** The map had nothing new to draw. */
   MLN_RENDER_RESULT_NO_UPDATE = 1,

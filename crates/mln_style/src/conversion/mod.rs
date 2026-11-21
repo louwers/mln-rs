@@ -26,6 +26,7 @@ pub(crate) mod rotation;
 pub(crate) mod sky;
 pub mod source;
 pub(crate) mod sprite;
+pub(crate) mod terrain;
 pub mod tileset;
 pub(crate) mod transition_options;
 
@@ -50,3 +51,4 @@ pub use projection::convert_projection;
 pub use property_value::convert_property_value;
 pub use sky::convert_sky;
 pub use source::convert_source;
+pub use terrain::convert_terrain;

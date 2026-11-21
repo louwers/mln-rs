@@ -11,12 +11,19 @@ use mln_util::pool::Pool;
 use mln_util::queue::Queue;
 use mln_util::time::Instant;
 
-use crate::file_source::proxy_loader;
-use crate::metadata::{MapMode, TestMetadata};
+use crate::file_source::{Assets, proxy_loader};
+use crate::metadata::{MapMode, TerrainSkirtLength, TestMetadata};
 use crate::runner::{
     CameraOptions, ImplFactory, ImplOptions, MapError, QueryGeometry, ResourceOptions, TestRunnerImpl,
 };
 use crate::style_ops;
+
+fn terrain_skirt_length(length: TerrainSkirtLength) -> mln_map::TerrainSkirtLength {
+    match length {
+        TerrainSkirtLength::Auto => mln_map::TerrainSkirtLength::Auto,
+        TerrainSkirtLength::None => mln_map::TerrainSkirtLength::None,
+    }
+}
 
 fn map_mode(mode: MapMode) -> mln_map::MapMode {
     match mode {
@@ -46,6 +53,8 @@ impl Impl {
         queue: &Queue<()>,
         pool: &Pool,
     ) -> Result<Impl, String> {
+        let assets = (!resource_options.asset_path.is_empty())
+            .then_some(Assets { path: resource_options.asset_path.as_str(), only: resource_options.assets_only });
         let resource_options = mln_storage::ResourceOptions {
             cache_path: resource_options.cache_path.clone(),
             ..mln_storage::ResourceOptions::default()
@@ -61,7 +70,7 @@ impl Impl {
             });
             frontend.renderer().set_tile_workers(workers);
         }
-        let file_source = proxy_loader(&resource_options, pool);
+        let file_source = proxy_loader(&resource_options, assets, pool);
         let mut map = Map::with_registry(
             Arc::clone(&file_source),
             MapOptions {
@@ -69,6 +78,7 @@ impl Impl {
                 size: metadata.size,
                 pixel_ratio: metadata.pixel_ratio,
                 cross_source_collisions: metadata.cross_source_collisions,
+                terrain_skirt_length: terrain_skirt_length(metadata.terrain_skirt_length),
                 ..Default::default()
             },
             Arc::clone(registry.style()),
@@ -103,6 +113,8 @@ impl TestRunnerImpl for Impl {
                 .with_y_skew(metadata.y_skew),
         );
         self.map.set_debug(mln_map::MapDebugOptions(metadata.debug.0));
+        // A test that unclamps the center leaves the map to the next one.
+        self.map.set_center_clamped_to_ground(true);
         self.map.load_style_json(&metadata.document_json);
         // C++ parses a style as it loads: the operations after it see it.
         self.map.process_events();
@@ -343,6 +355,15 @@ impl TestRunnerImpl for Impl {
     // query: the remaining runner operations.
     fn set_light(&mut self, json: &str) -> Result<(), MapError> {
         self.map.edit_style(|style| style_ops::set_light(style, json))
+    }
+
+    fn set_terrain(&mut self, json: &str) -> Result<(), MapError> {
+        self.map.edit_style(|style| style_ops::set_terrain(style, json))
+    }
+
+    fn set_center_clamped_to_ground(&mut self, clamped: bool) -> Result<(), MapError> {
+        self.map.set_center_clamped_to_ground(clamped);
+        Ok(())
     }
 
     fn add_source(&mut self, id: &str, json: &str) -> Result<(), MapError> {

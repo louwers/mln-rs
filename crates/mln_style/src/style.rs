@@ -21,6 +21,7 @@ use crate::sky::Sky;
 use crate::source_list::SourceList;
 use crate::source_type::Source;
 use crate::sprite::Sprite;
+use crate::terrain::Terrain;
 use crate::transition_options::TransitionOptions;
 
 /// Why a style failed to load.
@@ -51,7 +52,7 @@ pub(crate) type ImageList = Vec<Arc<image::Impl>>;
 ///
 /// A style is a value. [`apply`](Self::apply) makes an [`Edit`]; nothing
 /// else changes it. Its parts (layers, sources, images, light, sky,
-/// projection, global state and the document's own members) sit behind
+/// terrain, projection, global state and the document's own members) sit behind
 /// their own `Arc`s, so a clone is cheap and an edit copies only the part it
 /// changes. Two versions whose part `Arc`s are the same pointer have the
 /// same part, which [`is_same_version`](Self::is_same_version) and
@@ -69,6 +70,7 @@ pub struct Style {
     images: Arc<ImageList>,
     light: Arc<Light>,
     sky: Option<Arc<Sky>>,
+    terrain: Option<Arc<Terrain>>,
     projection: Arc<Projection>,
     transition: TransitionOptions,
     /// What the `global-state` expressions read.
@@ -113,6 +115,7 @@ impl Style {
             images: Arc::default(),
             light: Arc::default(),
             sky: None,
+            terrain: None,
             projection: Arc::default(),
             transition: TransitionOptions::default(),
             global_state: Arc::default(),
@@ -180,6 +183,17 @@ impl Style {
 
         style.light = Arc::new(std::mem::take(&mut parser.light));
         style.sky = parser.sky.take().map(Arc::new);
+        style.terrain = parser
+            .terrain
+            .take()
+            .filter(|terrain| match check_terrain(&style.sources, terrain) {
+                Ok(()) => true,
+                Err(error) => {
+                    Log::error(Event::ParseStyle, error.to_string());
+                    false
+                }
+            })
+            .map(Arc::new);
         style.projection = Arc::new(std::mem::take(&mut parser.projection));
 
         style.sprites = Arc::from(std::mem::take(&mut parser.sprites));
@@ -244,6 +258,11 @@ impl Style {
     #[must_use]
     pub fn get_sky(&self) -> Option<&Arc<Sky>> {
         self.sky.as_ref()
+    }
+
+    #[must_use]
+    pub fn get_terrain(&self) -> Option<&Arc<Terrain>> {
+        self.terrain.as_ref()
     }
 
     #[must_use]
@@ -382,6 +401,14 @@ impl Style {
                 self.light = light;
             }
             Edit::SetSky(sky) => self.sky = sky.map(Arc::new),
+            Edit::SetTerrain(terrain) => {
+                if let Some(terrain) = &terrain {
+                    check_terrain(&self.sources, terrain)?;
+                }
+                if self.terrain.as_deref() != terrain.as_ref() {
+                    self.terrain = terrain.map(Arc::new);
+                }
+            }
             Edit::SetProjection(projection) => self.projection = Arc::new(projection),
             Edit::SetTransition(options) => self.transition = options,
             Edit::SetGlobalState { name, value } => self.set_global_state(&name, &value),
@@ -465,6 +492,7 @@ impl Style {
             && Arc::ptr_eq(&self.images, &other.images)
             && Arc::ptr_eq(&self.light, &other.light)
             && same_option(self.sky.as_ref(), other.sky.as_ref())
+            && same_option(self.terrain.as_ref(), other.terrain.as_ref())
             && Arc::ptr_eq(&self.projection, &other.projection)
             && self.transition == other.transition
             && Arc::ptr_eq(&self.global_state, &other.global_state)
@@ -588,6 +616,22 @@ fn check_layer_source(sources: &SourceList, layer: &Layer) -> Result<(), Error> 
         && source.info().layer_kind != impl_.info().source
     {
         let message = format!("Layer '{}' is not compatible with source '{}'", impl_.base().id, impl_.base().source);
+        return Err(Error::invalid_argument(message));
+    }
+    Ok(())
+}
+
+/// Fails when `terrain`'s exaggeration isn't a finite number of at least 0, or
+/// its source is in `sources` and isn't a `raster-dem` source. A source the
+/// style lacks passes: the terrain then draws as off until the source is added.
+fn check_terrain(sources: &SourceList, terrain: &Terrain) -> Result<(), Error> {
+    if !(terrain.exaggeration >= 0.0 && terrain.exaggeration.is_finite()) {
+        return Err(Error::invalid_argument("Terrain exaggeration must be a finite number of at least 0"));
+    }
+    if let Some(source) = sources.get(&terrain.source)
+        && source.info().layer_kind != SourceKind::RasterDem
+    {
+        let message = format!("Terrain source '{}' is not a raster-dem source", terrain.source);
         return Err(Error::invalid_argument(message));
     }
     Ok(())

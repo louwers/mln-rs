@@ -11,10 +11,9 @@ use mln_map_types::tile_coordinate::TileCoordinatePoint;
 use mln_style::Source;
 use mln_style::source_type::SourceData;
 use mln_style::sources::ImageSourceType;
-use mln_tile_id::{GeometryCoordinate, GeometryCoordinates, UnwrappedTileID};
+use mln_tile_id::{GeometryCoordinates, UnwrappedTileID};
 use mln_util::constants;
 use mln_util::geo::LatLngBounds;
-use mln_util::interpolate::Interpolate;
 use mln_util::logging::{Event, Log};
 use mln_util::range::Range;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
@@ -45,9 +44,38 @@ impl Default for ImageWarp {
     }
 }
 
+/// The cells across a side of the grid that draws a warp blended towards
+/// the bilinear one, GL JS's `SUBDIVIDED_QUAD_GRANULARITY`.
+const BLENDED_WARP_CELLS: u32 = 16;
+
+fn is_parallelogram(corners: &GeometryCoordinates) -> bool {
+    let [top_left, top_right, bottom_right, bottom_left] =
+        [corners[0], corners[1], corners[2], corners[3]].map(|p| (i32::from(p.x), i32::from(p.y)));
+    top_left.0 + bottom_right.0 == top_right.0 + bottom_left.0
+        && top_left.1 + bottom_right.1 == top_right.1 + bottom_left.1
+}
+
+/// The corner of a concave quad of `corners` (top left, top right, bottom
+/// right, bottom left) that points into it, by its index; `None` for a
+/// quad that isn't concave.
+fn concave_corner(corners: &GeometryCoordinates) -> Option<usize> {
+    let point = |i: usize| (i64::from(corners[i % 4].x), i64::from(corners[i % 4].y));
+    // Which way the outline turns at each corner: a concave quad turns
+    // against the other three at one.
+    let turns = [0, 1, 2, 3].map(|i| {
+        let ((ax, ay), (bx, by), (cx, cy)) = (point(i + 3), point(i), point(i + 1));
+        ((bx - ax) * (cy - by) - (by - ay) * (cx - bx)).signum()
+    });
+    (0..4).find(|&i| turns[i] != 0 && (0..4).all(|j| j == i || turns[j] == -turns[i]))
+}
+
 fn image_warp(corners: &GeometryCoordinates) -> ImageWarp {
     const PROJECTIVE_FORESHORTENING: f64 = 4.0;
     const BILINEAR_FORESHORTENING: f64 = 512.0;
+    // A parallelogram is warped affinely either way.
+    if is_parallelogram(corners) {
+        return ImageWarp::default();
+    }
     let top_left = corners[0];
     let top_right = corners[1];
     let bottom_right = corners[2];
@@ -56,10 +84,6 @@ fn image_warp(corners: &GeometryCoordinates) -> ImageWarp {
     let (tr_x, tr_y) = (i32::from(top_right.x), i32::from(top_right.y));
     let (br_x, br_y) = (i32::from(bottom_right.x), i32::from(bottom_right.y));
     let (bl_x, bl_y) = (i32::from(bottom_left.x), i32::from(bottom_left.y));
-    // A parallelogram is warped affinely either way.
-    if tl_x + br_x == tr_x + bl_x && tl_y + br_y == tr_y + bl_y {
-        return ImageWarp::default();
-    }
     let sum_x = f64::from(tl_x - tr_x + br_x - bl_x);
     let sum_y = f64::from(tl_y - tr_y + br_y - bl_y);
     let right_x = f64::from(tr_x - br_x);
@@ -94,56 +118,59 @@ fn image_warp(corners: &GeometryCoordinates) -> ImageWarp {
     ImageWarp { perspective_x, perspective_y, blend }
 }
 
-// Where the unit-square point (u, v) lands on the corners: where a
-// projective warp puts it, blended with where a bilinear one does by
-// `warp.blend`.
-fn warp_position(corners: &GeometryCoordinates, warp: &ImageWarp, u: f64, v: f64) -> Point<f64> {
-    let point = |p: GeometryCoordinate| Point::new(f64::from(p.x), f64::from(p.y));
-    let top_left = point(corners[0]);
-    let top_right = point(corners[1]);
-    let bottom_right = point(corners[2]);
-    let bottom_left = point(corners[3]);
-    let bilinear = top_left.interpolate(&top_right, u).interpolate(&bottom_left.interpolate(&bottom_right, u), v);
-    let denominator = warp.perspective_x * u + warp.perspective_y * v + 1.0;
-    // The homography's columns: the top edge and the left edge, each scaled
-    // by the denominator's change along it.
-    let across_top = Point::new(
-        top_right.x - top_left.x + top_right.x * warp.perspective_x,
-        top_right.y - top_left.y + top_right.y * warp.perspective_x,
-    );
-    let down_left = Point::new(
-        bottom_left.x - top_left.x + bottom_left.x * warp.perspective_y,
-        bottom_left.y - top_left.y + bottom_left.y * warp.perspective_y,
-    );
-    let projective = Point::new(
-        (across_top.x * u + down_left.x * v + top_left.x) / denominator,
-        (across_top.y * u + down_left.y * v + top_left.y) / denominator,
-    );
-    projective.interpolate(&bilinear, warp.blend)
+/// Where the raster shader puts the unit square that a draw's vertices span
+/// (0 to `EXTENT` on both axes), in its tile's units: onto the quad of four
+/// corners, warped by an [`ImageWarp`]. The shader evaluates the warp per
+/// vertex and interpolates the texture coordinates projectively, so a
+/// projective warp draws exactly on two triangles.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct ImageQuad {
+    /// The top left corner's x and y, and the top right's.
+    pub(crate) coords_top: [f32; 4],
+    /// The bottom left corner's x and y, and the bottom right's.
+    pub(crate) coords_bottom: [f32; 4],
+    /// The warp's perspective terms and its blend towards the bilinear warp,
+    /// then padding.
+    pub(crate) warp: [f32; 4],
+}
+
+impl ImageQuad {
+    /// The quad of a tile itself, which draws the vertices where they are.
+    pub(crate) const TILE: ImageQuad = {
+        let extent = constants::EXTENT as f32;
+        ImageQuad {
+            coords_top: [0.0, 0.0, extent, 0.0],
+            coords_bottom: [0.0, extent, extent, extent],
+            warp: [0.0, 0.0, 1.0, 0.0],
+        }
+    };
+
+    fn new(corners: &GeometryCoordinates, warp: &ImageWarp) -> ImageQuad {
+        let [top_left, top_right, bottom_right, bottom_left] =
+            [corners[0], corners[1], corners[2], corners[3]].map(|p| [f32::from(p.x), f32::from(p.y)]);
+        ImageQuad {
+            coords_top: [top_left[0], top_left[1], top_right[0], top_right[1]],
+            coords_bottom: [bottom_left[0], bottom_left[1], bottom_right[0], bottom_right[1]],
+            warp: [warp.perspective_x as f32, warp.perspective_y as f32, warp.blend as f32, 0.0],
+        }
+    }
 }
 
 fn to_vertex_coordinate(value: f64) -> i16 {
     mln_math::clamp_f64(value.round(), f64::from(i16::MIN), f64::from(i16::MAX)) as i16
 }
 
-// The image quad as a grid of `cells` x `cells`, textured edge to edge; one
-// cell is the flat quad.
-fn build_image_mesh(bucket: &mut RasterBucket, corners: &GeometryCoordinates, cells: u32) {
-    let warp = image_warp(corners);
+// The unit square as a grid of `cells` x `cells`, textured edge to edge,
+// which the raster shader puts on the image's quad, each cell split along
+// its diagonal from the top right, or from the top left if `from_top_left`.
+fn build_image_mesh(bucket: &mut RasterBucket, cells: u32, from_top_left: bool) {
     let rows = cells + 1;
+    let extent = constants::EXTENT as u32;
     let mut vertices = Vec::with_capacity((rows * rows) as usize);
     for j in 0..rows {
         for i in 0..rows {
-            let u = f64::from(i) / f64::from(cells);
-            let v = f64::from(j) / f64::from(cells);
-            let position = warp_position(corners, &warp, u, v);
-            vertices.push(RasterLayoutVertex::new(
-                Point::new(to_vertex_coordinate(position.x), to_vertex_coordinate(position.y)),
-                Point::new(
-                    (u * f64::from(constants::EXTENT)).round() as u16,
-                    (v * f64::from(constants::EXTENT)).round() as u16,
-                ),
-            ));
+            let (x, y) = ((i * extent / cells) as u16, (j * extent / cells) as u16);
+            vertices.push(RasterLayoutVertex::new(Point::new(x as i16, y as i16), Point::new(x, y)));
         }
     }
     let mut indices: Vec<u16> = Vec::with_capacity((cells * cells * 6) as usize);
@@ -153,8 +180,13 @@ fn build_image_mesh(bucket: &mut RasterBucket, corners: &GeometryCoordinates, ce
             let top_right = top_left.wrapping_add(1);
             let bottom_left = top_left.wrapping_add(rows as u16);
             let bottom_right = bottom_left.wrapping_add(1);
-            indices.extend_from_slice(&[top_left, top_right, bottom_left]);
-            indices.extend_from_slice(&[top_right, bottom_left, bottom_right]);
+            if from_top_left {
+                indices.extend_from_slice(&[top_left, top_right, bottom_right]);
+                indices.extend_from_slice(&[top_left, bottom_right, bottom_left]);
+            } else {
+                indices.extend_from_slice(&[top_left, top_right, bottom_left]);
+                indices.extend_from_slice(&[top_right, bottom_left, bottom_right]);
+            }
         }
     }
     let segments = vec![SegmentBase::with_lengths(0, 0, vertices.len(), indices.len())];
@@ -166,7 +198,38 @@ fn build_image_mesh(bucket: &mut RasterBucket, corners: &GeometryCoordinates, ce
 #[derive(Clone, Copy)]
 pub(crate) struct ImageSourceRenderData<'a> {
     pub(crate) bucket: Option<&'a RasterBucket>,
+    /// The tile the image draws in, in each world copy it draws in: one
+    /// canonical tile under different wraps.
     pub(crate) tile_ids: &'a [UnwrappedTileID],
+    /// The box of the quad's corners, in the tile units of `tile_ids`'
+    /// canonical tile: min x, min y, max x, max y.
+    pub(crate) bounds: [i32; 4],
+    /// Where the bucket's vertices draw, in the same units.
+    pub(crate) quad: ImageQuad,
+}
+
+impl ImageSourceRenderData<'_> {
+    /// Whether the image drawn in `tile_id`, one of `tile_ids`, covers part
+    /// of the tile `drape`. An image that only touches its edge doesn't.
+    pub(crate) fn overlaps(&self, tile_id: &UnwrappedTileID, drape: &UnwrappedTileID) -> bool {
+        // Both boxes in the tile units of the finer of the two zooms, from
+        // the west edge of world copy 0.
+        let zoom = tile_id.canonical.z.max(drape.canonical.z);
+        let place = |id: &UnwrappedTileID| {
+            let scale = 1i64 << (zoom - id.canonical.z);
+            let extent = i64::from(constants::EXTENT) * scale;
+            let x = ((i64::from(id.wrap) << id.canonical.z) + i64::from(id.canonical.x)) * extent;
+            (x, i64::from(id.canonical.y) * extent, scale)
+        };
+        let (left, top, scale) = place(tile_id);
+        let [min_x, min_y, max_x, max_y] = self.bounds.map(|bound| i64::from(bound) * scale);
+        let (drape_left, drape_top, drape_scale) = place(drape);
+        let drape_extent = i64::from(constants::EXTENT) * drape_scale;
+        left + min_x < drape_left + drape_extent
+            && drape_left < left + max_x
+            && top + min_y < drape_top + drape_extent
+            && drape_top < top + max_y
+    }
 }
 
 pub(crate) struct RenderImageSource {
@@ -174,6 +237,9 @@ pub(crate) struct RenderImageSource {
     bucket: Option<RasterBucket>,
     tile_ids: Vec<UnwrappedTileID>,
     mesh_corners: GeometryCoordinates,
+    /// The box of `mesh_corners`, as [`ImageSourceRenderData::bounds`].
+    bounds: [i32; 4],
+    quad: ImageQuad,
     mesh_cells: u32,
 }
 
@@ -185,6 +251,8 @@ impl RenderImageSource {
             bucket: None,
             tile_ids: Vec::new(),
             mesh_corners: GeometryCoordinates::new(),
+            bounds: [0; 4],
+            quad: ImageQuad::TILE,
             mesh_cells: 0,
         }
     }
@@ -206,8 +274,10 @@ impl RenderSource for RenderImageSource {
         &self.base
     }
 
+    // A source that draws nowhere holds no frame back: the style tracks
+    // the load of its image.
     fn is_loaded(&self, _store: &TileStore) -> bool {
-        self.loaded()
+        !self.base.enabled || self.loaded()
     }
 
     fn update(
@@ -284,37 +354,51 @@ impl RenderSource for RenderImageSource {
         // A wrap does not move a tile on the globe, so the image draws once
         // there, in the world copy the cover chose.
         let globe = view.is_globe();
-        // Add additional wrapped tile ids if necessary
-        let zoom_range = Range::new(0u8, zoom);
-        let ideal_tiles = tile_cover(
-            &TileCoverParameters {
-                view: view.clone(),
-                tile_lod_min_radius: parameters.tile_lod_min_radius,
-                tile_lod_scale: parameters.tile_lod_scale,
-                tile_lod_pitch_threshold: parameters.tile_lod_pitch_threshold,
-                tile_lod_mode: parameters.tile_lod_mode,
-                requested_zoom: None,
-                round_zoom: false,
-                max_content_elevation: 0.0,
-            },
-            view.integer_zoom(),
-            zoom_range,
-            None,
-        );
+        // The image draws in each world copy whose quad overlaps the view's
+        // tiles: while terrain draws, the terrain's, raised ground's too, as
+        // every source covers the view then.
+        let ideal_tiles = match parameters.terrain {
+            Some(terrain) => terrain.tiles.iter().map(|tile| tile.id).collect(),
+            None => tile_cover(
+                &TileCoverParameters {
+                    view: view.clone(),
+                    tile_lod_min_radius: parameters.tile_lod_min_radius,
+                    tile_lod_scale: parameters.tile_lod_scale,
+                    tile_lod_pitch_threshold: parameters.tile_lod_pitch_threshold,
+                    tile_lod_mode: parameters.tile_lod_mode,
+                    requested_zoom: None,
+                    round_zoom: false,
+                    max_content_elevation: 0.0,
+                },
+                view.integer_zoom(),
+                Range::new(0u8, zoom),
+                None,
+            ),
+        };
         for tile in &ideal_tiles {
             for covering_tile in &tile_cover_ids {
                 if covering_tile.canonical == tile.canonical
                     || covering_tile.canonical.is_child_of(&tile.canonical)
                     || tile.canonical.is_child_of(&covering_tile.canonical)
                 {
+                    // The copy that puts this covering tile on the view's
+                    // tile: where the quad crosses the antimeridian, the
+                    // covering tile may lie in the world next to the
+                    // first's, and one view tile may see two copies. A
+                    // copy too many worlds from the first has no tile id.
+                    let wrap = i32::from(tile.wrap) - i32::from(covering_tile.wrap) + i32::from(tile_cover_ids[0].wrap);
+                    let Ok(wrap) = i16::try_from(wrap) else {
+                        continue;
+                    };
                     has_visible_tile = true;
-                    let wrapped_tile_id = UnwrappedTileID::with_wrap(tile.wrap, tile_cover_ids[0].canonical);
+                    let wrapped_tile_id = UnwrappedTileID::with_wrap(wrap, tile_cover_ids[0].canonical);
                     if globe {
                         self.tile_ids = vec![wrapped_tile_id];
-                    } else if tile.wrap != 0 && !self.tile_ids.contains(&wrapped_tile_id) {
+                        break;
+                    }
+                    if !self.tile_ids.contains(&wrapped_tile_id) {
                         self.tile_ids.push(wrapped_tile_id);
                     }
-                    break;
                 }
             }
             if globe && has_visible_tile {
@@ -327,10 +411,19 @@ impl RenderSource for RenderImageSource {
             return;
         }
 
-        // Calculate Geometry Coordinates based on tile cover at ideal zoom
+        // The corners in the units of the cover's first tile, rounded to the
+        // nearest unit as GL JS rounds them, so that an edge falls on the
+        // pixels GL JS draws it on.
+        let tile = tile_cover_ids[0];
+        let scale = 2.0f64.powi(i32::from(tile.canonical.z));
+        let extent = f64::from(constants::EXTENT);
         let geom_coords: GeometryCoordinates = tile_coordinates
             .iter()
-            .map(|tile_coords| TileCoordinate::to_geometry_coordinate(&tile_cover_ids[0], tile_coords))
+            .map(|point| {
+                let x = point.x * scale - f64::from(tile.canonical.x) - f64::from(tile.wrap) * scale;
+                let y = point.y * scale - f64::from(tile.canonical.y);
+                Point::new(to_vertex_coordinate(x * extent), to_vertex_coordinate(y * extent))
+            })
             .collect();
 
         // A changed image gets a new bucket, whose id tells the layers to
@@ -341,14 +434,32 @@ impl RenderSource for RenderImageSource {
         };
 
         // The globe bends the quad over the sphere with the tile mesh
-        // granularity of its tile.
+        // granularity of its tile. Two triangles draw a parallelogram's
+        // affine warp and a projective warp exactly; one blended towards the
+        // bilinear warp is neither, and would bend along their diagonal, so
+        // it draws on a grid. A concave quad's bilinear warp folds over
+        // itself, out of the quad: it draws on two triangles split along the
+        // diagonal inside it.
+        let warp = image_warp(&geom_coords);
+        let concave = concave_corner(&geom_coords);
         let cells = if view.is_globe() {
             SubdivisionGranularitySetting::globe().tile.granularity_for_zoom_level(self.tile_ids[0].canonical.z)
+        } else if warp.blend > 0.0 && !is_parallelogram(&geom_coords) && concave.is_none() {
+            BLENDED_WARP_CELLS
         } else {
             1
         };
+        // New corners build the mesh again too, so that the drapes that
+        // showed the image draw again.
         if !bucket.geometry().has_quads() || geom_coords != self.mesh_corners || cells != self.mesh_cells {
-            build_image_mesh(bucket, &geom_coords, cells);
+            build_image_mesh(bucket, cells, matches!(concave, Some(0 | 2)));
+            self.quad = ImageQuad::new(&geom_coords, &warp);
+            let mut bounds = [i32::MAX, i32::MAX, i32::MIN, i32::MIN];
+            for corner in &geom_coords {
+                let (x, y) = (i32::from(corner.x), i32::from(corner.y));
+                bounds = [bounds[0].min(x), bounds[1].min(y), bounds[2].max(x), bounds[3].max(y)];
+            }
+            self.bounds = bounds;
             self.mesh_corners = geom_coords;
             self.mesh_cells = cells;
         }
@@ -363,8 +474,11 @@ impl RenderSource for RenderImageSource {
     }
 
     fn image_render_data(&self) -> Option<ImageSourceRenderData<'_>> {
-        let tile_ids: &[UnwrappedTileID] = if self.loaded() { &self.tile_ids } else { &[] };
-        Some(ImageSourceRenderData { bucket: self.bucket.as_ref(), tile_ids })
+        // A disabled source's tile ids and corners may be of other
+        // coordinates, and an image shrunk out of sight or out of view draws
+        // nowhere: the drapes that showed it draw again.
+        let tile_ids: &[UnwrappedTileID] = if self.base.enabled && self.loaded() { &self.tile_ids } else { &[] };
+        Some(ImageSourceRenderData { bucket: self.bucket.as_ref(), tile_ids, bounds: self.bounds, quad: self.quad })
     }
 
     fn dump_debug_logs(&self) {

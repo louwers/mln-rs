@@ -20,7 +20,6 @@ use mln_gfx::gpu::{
     GeometryId, Gpu, GpuError, PipelineId, PipelineKey, SamplerId, Scissor, ShaderId, ShaderKey, StencilState,
     TargetFormats, TextureId, VertexAttribute as GpuVertexAttribute, VertexBufferLayout, VertexStep,
 };
-use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{MAX_TEXTURE_COUNT_PER_SHADER, MAX_UBO_COUNT_PER_SHADER};
 use mln_gfx::stencil_mode::StencilMode;
@@ -234,14 +233,14 @@ impl DrawObjects {
     /// buffers and textures, where they changed since the last upload.
     pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
         if let Err(error) = self.upload_in(gpu, context) {
-            Log::error(Event::Render, format!("Uploading a draw of {} failed: {error}", self.shader.program().name));
+            context.fail(format!("Uploading a draw of {} failed: {error}", self.shader.program().name));
         }
     }
 
     fn upload_in(&mut self, gpu: &mut dyn Gpu, context: &mut Context) -> Result<(), GpuError> {
-        let program = self.shader.program();
+        let shader = &self.shader;
         if self.indexes.buffer(context).is_none() && self.indexes.len(context) == 0 {
-            debug_assert!(false, "a draw of {} has no index data", program.name);
+            debug_assert!(false, "a draw of {} has no index data", shader.program().name);
             return Ok(());
         }
         self.indexes.upload(gpu, context)?;
@@ -249,12 +248,12 @@ impl DrawObjects {
         // An attribute binds again where its array changed, or where the
         // upload writes what it reads, which may be new. A failed upload
         // leaves the attributes changed, so the next binds them again.
-        if self.vertex_attributes_changed || upload::needs_upload(context, program.attributes, &self.vertex_attributes)
+        if self.vertex_attributes_changed || upload::needs_upload(context, shader.attributes(), &self.vertex_attributes)
         {
             let updated = upload::update_attribute_bindings(
                 gpu,
                 context,
-                program.attributes,
+                shader.attributes(),
                 &mut self.vertex_attributes,
                 self.vertex_count,
                 &mut self.attribute_bindings,
@@ -270,13 +269,13 @@ impl DrawObjects {
         if let Some(attrs) = self
             .instance_attributes
             .as_mut()
-            .filter(|attrs| changed || upload::needs_upload(context, program.instance_attributes, attrs))
+            .filter(|attrs| changed || upload::needs_upload(context, shader.instance_attributes(), attrs))
         {
             let instance_count = attrs.min_count();
             let updated = upload::update_attribute_bindings(
                 gpu,
                 context,
-                program.instance_attributes,
+                shader.instance_attributes(),
                 attrs,
                 instance_count,
                 &mut self.instance_bindings,
@@ -301,7 +300,7 @@ impl DrawObjects {
 
         for texture in self.textures.iter().flatten() {
             if let Err(error) = context.upload_texture(gpu, texture) {
-                Log::error(Event::Render, format!("Uploading a texture failed: {error}"));
+                context.fail(format!("Uploading a texture failed: {error}"));
             }
         }
 
@@ -311,7 +310,8 @@ impl DrawObjects {
     /// Draws the segments into `parameters`' open pass on `gpu`, the
     /// context's, with `depth_mode` and `stencil_mode`, binding the buffers
     /// of the draws in `frame`. Shaders read the draw's entries in those
-    /// storage buffers at `global_index`.
+    /// storage buffers at `global_index`. A draw that fails is the frame's
+    /// failure ([`Context::fail`](crate::gfx::context::Context::fail)).
     pub(crate) fn draw(
         &mut self,
         gpu: &mut dyn Gpu,
@@ -322,7 +322,7 @@ impl DrawObjects {
         global_index: u32,
     ) {
         if let Err(error) = self.draw_in(gpu, parameters, frame, depth_mode, stencil_mode, global_index) {
-            Log::warning(Event::Render, format!("Drawing a draw of {} failed: {error}", self.shader.program().name));
+            parameters.context.fail(format!("Drawing a draw of {} failed: {error}", self.shader.program().name));
         }
     }
 
@@ -339,14 +339,9 @@ impl DrawObjects {
             return Ok(());
         };
         let context = &mut *parameters.context;
-        let index_buffer = self.indexes.buffer(context);
-        debug_assert!(
-            index_buffer.is_some(),
-            "a draw of {} draws indexes it didn't upload",
-            self.shader.program().name
-        );
-        let Some(index_buffer) = index_buffer else {
-            return Ok(());
+        // A draw whose indexes failed to upload draws nothing, and fails.
+        let Some(index_buffer) = self.indexes.buffer(context) else {
+            return Err(GpuError::Invalid("its indexes aren't uploaded".to_owned()));
         };
 
         let shader_id = match self.shader_id {
@@ -357,7 +352,7 @@ impl DrawObjects {
         let slots = if let Some(slots) = &self.vertex_slots {
             slots
         } else {
-            let slots = vertex_slots(self.shader.program(), &self.attribute_bindings, &self.instance_bindings);
+            let slots = vertex_slots(&self.shader, &self.attribute_bindings, &self.instance_bindings);
             // New buffers in the layouts of the old ones keep the
             // pipelines.
             let layouts = slots.iter().map(|slot| &slot.layout);
@@ -577,6 +572,15 @@ impl DrawObjects {
         self.storage_vertices.iter().find(|(at, ..)| *at == id).and_then(|&(_, _, buffer)| buffer)
     }
 
+    /// Whether the draw reads vertices as the attribute or the instance
+    /// attribute `id`, or as the storage buffer `id`.
+    #[cfg(test)]
+    pub(crate) fn reads_vertices(&self, id: usize) -> bool {
+        self.vertex_attributes.get(id).is_some()
+            || self.instance_attributes.as_ref().is_some_and(|attrs| attrs.get(id).is_some())
+            || self.storage_vertices.iter().any(|(at, ..)| *at == id)
+    }
+
     /// Whether the draw draws instances.
     #[must_use]
     pub(crate) fn has_instances(&self) -> bool {
@@ -624,6 +628,15 @@ impl DrawObjects {
         }
         self.indexes = indexes;
         self.segments = segments;
+    }
+
+    /// Culls faces as `cull_face_mode` says from the next draw on.
+    pub(crate) fn set_cull_face_mode(&mut self, cull_face_mode: CullFaceMode) {
+        if self.cull_face_mode != cull_face_mode {
+            self.cull_face_mode = cull_face_mode;
+            // The pipelines bake the culling in.
+            self.pipelines.clear();
+        }
     }
 
     /// Drops the bindings, for an owner that replaces a buffer they bind.
@@ -686,7 +699,7 @@ fn fixed_state(variant: PipelineVariant, color_mode: &ColorMode, cull: CullFaceM
 /// extrusion wall's outline vertex and the next one) read it through slots
 /// of their own, since an attribute's offset must stay within the stride.
 fn vertex_slots(
-    program: &Program,
+    shader: &ShaderKey,
     attributes: &AttributeBindingArray,
     instances: &AttributeBindingArray,
 ) -> Vec<VertexSlot> {
@@ -695,8 +708,8 @@ fn vertex_slots(
         for (index, binding) in bindings.iter().enumerate() {
             let buffer = &binding.buffer;
             let attributes = match step {
-                VertexStep::Vertex => program.attributes,
-                VertexStep::Instance => program.instance_attributes,
+                VertexStep::Vertex => shader.attributes(),
+                VertexStep::Instance => shader.instance_attributes(),
             };
             let Some(&(id, _)) = attributes.get(index) else { continue };
             let offset = u64::from(binding.vertex_offset) * u64::from(binding.vertex_stride);
@@ -725,7 +738,11 @@ fn vertex_slots(
     if slots.len() > MAX_VERTEX_BUFFERS {
         Log::warning(
             Event::Render,
-            format!("{} reads {} vertex buffers, past the {MAX_VERTEX_BUFFERS} a draw may", program.name, slots.len()),
+            format!(
+                "{} reads {} vertex buffers, past the {MAX_VERTEX_BUFFERS} a draw may",
+                shader.program().name,
+                slots.len()
+            ),
         );
         slots.truncate(MAX_VERTEX_BUFFERS);
     }

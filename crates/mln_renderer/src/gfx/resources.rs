@@ -43,17 +43,34 @@ impl Drop for GpuTexture {
 pub(crate) type SharedGpuTexture = Rc<GpuTexture>;
 
 /// What the renderer makes its buffers and textures with: the rendering
-/// stats that count them, the queue that they go to when they drop, and the
-/// epochs of its uniform buffer arrays.
+/// stats that count them, the queue that they go to when they drop, the
+/// epochs of its uniform buffer arrays, and what failed on the GPU in the
+/// frame being encoded.
 #[derive(Default)]
 pub(crate) struct Device {
     pub(crate) stats: RenderingStats,
     pub(crate) queue: Rc<ReleaseQueue>,
     /// The last epoch a uniform buffer array took.
     uniform_epoch: u64,
+    /// Why the first GPU failure since [`take_failure`](Self::take_failure)
+    /// failed.
+    failure: Option<String>,
 }
 
 impl Device {
+    /// Logs `message`, why something of the frame being encoded failed on
+    /// the GPU, and keeps it as the frame's failure unless one came first.
+    /// A frame that failed lacks what failed, and isn't `Full`.
+    pub(crate) fn fail(&mut self, message: String) {
+        Log::error(Event::Render, &message);
+        self.failure.get_or_insert(message);
+    }
+
+    /// Why the first GPU failure since the last call failed, if one did.
+    pub(crate) fn take_failure(&mut self) -> Option<String> {
+        self.failure.take()
+    }
+
     /// An epoch for a uniform buffer array that changed, one that no array
     /// of the device has had, and never 0.
     pub(crate) fn next_uniform_epoch(&mut self) -> u64 {
@@ -118,15 +135,18 @@ impl Device {
         let usage = if storage { BufferUsage::Storage } else { BufferUsage::Uniform };
         if let Some(buffer) = slot.as_ref().filter(|buffer| buffer.usage() == usage && buffer.size() >= data.len()) {
             if let Err(error) = self.write(gpu, buffer, data) {
-                Log::error(Event::Render, format!("Writing a buffer failed: {error}"));
+                self.fail(format!("Writing a buffer failed: {error}"));
             }
             return false;
         }
         let replaced = slot.is_some();
-        *slot = self
-            .buffer(gpu, usage, data)
-            .inspect_err(|error| Log::error(Event::Render, format!("Making a buffer failed: {error}")))
-            .ok();
+        *slot = match self.buffer(gpu, usage, data) {
+            Ok(buffer) => Some(buffer),
+            Err(error) => {
+                self.fail(format!("Making a buffer failed: {error}"));
+                None
+            }
+        };
         replaced
     }
 
@@ -158,8 +178,21 @@ impl Device {
         format: TextureFormat,
     ) -> Result<GpuTexture, GpuError> {
         let usage = TextureUsage { render_target: true, ..TextureUsage::default() };
-        self.texture(gpu, &TextureDesc { label, size, format, usage }, None)
+        self.texture(gpu, &TextureDesc { label, size, format, usage, mipmapped: false }, None)
     }
+}
+
+/// The bytes a texture of `size` and `format` that passes draw into takes,
+/// as [`RenderingStats`] counts it: a depth and stencil format at 4 bytes a
+/// texel, or 8 with a 32-bit depth and a stencil, though a backend may
+/// store it in more.
+pub(crate) fn attachment_bytes(size: Size, format: TextureFormat) -> u64 {
+    let texel = match format {
+        TextureFormat::Depth32Float | TextureFormat::Depth24PlusStencil8 => 4,
+        TextureFormat::Depth32FloatStencil8 => 8,
+        format => u64::from(format.bytes_per_texel().unwrap_or(4)),
+    };
+    u64::from(size.width) * u64::from(size.height) * texel
 }
 
 /// Writes `data` at the start of `buffer` through `gpu`. Fails if `data` is

@@ -16,7 +16,6 @@ use mln_gfx::stencil_mode::Test;
 use mln_gfx::types::StencilOpType;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMode, DrawModeType, StencilMode};
 use mln_tile_id::UnwrappedTileID;
-use mln_util::logging::{Event, Log};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use crate::draw::Entries;
@@ -72,7 +71,7 @@ impl Mesh {
         match made {
             Ok((vertices, indices)) => Some(Mesh { vertices, indices, segments, geometry: None }),
             Err(error) => {
-                Log::warning(Event::Render, format!("Making a clipping mask's mesh failed: {error}"));
+                context.fail(format!("Making a clipping mask's mesh failed: {error}"));
                 None
             }
         }
@@ -210,7 +209,7 @@ impl ClipMasks {
         context: &mut Context,
     ) {
         if let Err(error) = self.draw_in(gpu, masks, target, context) {
-            Log::warning(Event::Render, format!("Drawing the clipping masks failed: {error}"));
+            context.fail(format!("Drawing the clipping masks failed: {error}"));
         }
     }
 

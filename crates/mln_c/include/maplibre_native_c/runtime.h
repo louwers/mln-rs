@@ -118,9 +118,24 @@ typedef enum mln_runtime_event_type : uint32_t {
   MLN_RUNTIME_EVENT_MAP_LOADING_FAILED = 7,
   /**
    * The map rendered a complete frame and has nothing left to load, animate,
-   * or redraw.
+   * or redraw. Once the map's frames have failed on the GPU for a second
+   * (MLN_RUNTIME_EVENT_MAP_RENDER_ERROR), a failed frame that is complete but
+   * for its failure counts: the map draws no better.
    */
   MLN_RUNTIME_EVENT_MAP_IDLE = 8,
+  /**
+   * A frame failed on the GPU, such as a pass that didn't begin, a texture
+   * that couldn't be made or a shader that the backend rejects: the first of
+   * the frames in a row that fail, until one draws without failing.
+   *
+   * A map in MLN_MAP_MODE_CONTINUOUS shows what did draw of a failed frame.
+   * It draws again on its own after as long as its frames have been failing,
+   * and at least 100 ms. Once they have failed for a second, it takes the
+   * failure as lasting: it draws again only when something else draws a
+   * frame, such as a camera change or a tile, and goes idle
+   * (MLN_RUNTIME_EVENT_MAP_IDLE) on a frame complete but for its failure,
+   * which doesn't finish loading (MLN_RUNTIME_EVENT_MAP_LOADING_FINISHED).
+   */
   MLN_RUNTIME_EVENT_MAP_RENDER_ERROR = 9,
   MLN_RUNTIME_EVENT_MAP_RENDER_FRAME_STARTED = 10,
   MLN_RUNTIME_EVENT_MAP_RENDER_FRAME_FINISHED = 11,
@@ -276,7 +291,7 @@ typedef enum mln_map_load_error : uint32_t {
 
 /**
  * Whether a frame drew the map complete, or lacked resources that are still
- * loading.
+ * loading or showed the camera before it settled on the terrain.
  */
 typedef enum mln_render_mode : uint32_t {
   MLN_RENDER_MODE_PARTIAL = 0,

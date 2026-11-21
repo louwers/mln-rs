@@ -73,11 +73,13 @@ fn tile_parameters(
         tile_lod_zoom_shift: 0.0,
         tile_lod_mode: TileLodMode::Default,
         subdivision_granularity: SubdivisionGranularitySetting::none(),
+        layout_terrain: false,
         global_state: None,
         is_update_synchronous: false,
         font_faces: None,
         glyph_pbfs: true,
         placement_commits: 0,
+        terrain: None,
     }
 }
 
@@ -1505,4 +1507,189 @@ fn raster_dem_borders_across_a_world_wrap() {
         assert_eq!(east.get(16, y), west.get(0, y), "row {y} of the east tile's border");
         assert_eq!(west.get(-1, y), east.get(15, y), "row {y} of the west tile's border");
     }
+}
+
+/// The zoom levels of the tiles a raster source of `tile_size` px tiles and
+/// of the zoom levels from `min_zoom` wants for a camera at `zoom` pitched
+/// to 60 degrees, with the terrain's cover `terrain` or without terrain.
+fn pitched_cover_zooms(
+    terrain: Option<&crate::terrain::TerrainCover>,
+    zoom: f64,
+    (min_zoom, tile_size): (u8, u16),
+) -> std::collections::BTreeSet<u8> {
+    let mut test = SourceTest::new();
+    test.transform.jump_to(&CameraOptions {
+        center: Some(LatLng::new(45.0, 10.0).unwrap()),
+        zoom: Some(zoom),
+        pitch: Some(60.0),
+        ..Default::default()
+    });
+    let file_source: Arc<dyn FileSource> = Arc::new(StubFileSource::new(ResponseType::Manual));
+    let tileset = PartialTileset { min_zoom: Some(min_zoom), ..tiles_tileset() };
+    let source = crate::tests::ready(raster_source("source", None, tileset, tile_size));
+    let mut store = test.store();
+    let mut render_source = crate::tests::create_render_source(&source, &mut store);
+    let mut parameters = test.tile_parameters_with(MapMode::Continuous, Some(file_source));
+    parameters.terrain = terrain;
+    render_source.update(&mut store, source, &Tiled::Raster.layers(), true, false, &parameters);
+    let key = render_source.tiles().expect("the source's tiles");
+    let pyramid = store.source(key).expect("the source's tiles");
+    pyramid.cover().map(|tile| tile.id.canonical.z).collect()
+}
+
+/// The terrain's cover of a view over flat ground.
+fn flat_terrain() -> crate::terrain::TerrainCover {
+    crate::terrain::TerrainCover {
+        source_id: "dem".to_owned(),
+        tile_size: 512,
+        tiles: Vec::new(),
+        center: None,
+        dem_tiles: Vec::new(),
+        ranges: crate::terrain::ElevationRanges::default(),
+    }
+}
+
+/// While terrain draws, a source's tiles get finer toward the camera at any
+/// pitch, as the terrain's do; without terrain, a view pitched to 60 degrees
+/// loads one zoom level.
+#[test]
+fn a_source_covers_the_view_as_the_terrain_does_while_terrain_draws() {
+    assert_eq!(std::collections::BTreeSet::from([12]), pitched_cover_zooms(None, 12.0, (0, 512)));
+    let zooms = pitched_cover_zooms(Some(&flat_terrain()), 12.0, (0, 512));
+    assert!(zooms.len() > 1 && zooms.iter().any(|&z| z > 12), "{zooms:?}");
+}
+
+/// Below a source's lowest zoom, the flat cover has no tiles; while terrain
+/// draws, the source has the tiles near the camera that are fine enough,
+/// as GL JS skips only the tiles below its lowest zoom.
+#[test]
+fn a_source_below_its_lowest_zoom_covers_the_tiles_near_the_camera_while_terrain_draws() {
+    assert_eq!(std::collections::BTreeSet::new(), pitched_cover_zooms(None, 11.4, (12, 512)));
+    let zooms = pitched_cover_zooms(Some(&flat_terrain()), 11.4, (12, 512));
+    assert!(!zooms.is_empty() && zooms.iter().all(|&z| z >= 12), "{zooms:?}");
+    // Tiles of 1024 px at zoom 0 cover at zoom −1, which starts at 0.
+    let zooms = pitched_cover_zooms(Some(&flat_terrain()), 0.0, (0, 1024));
+    assert!(!zooms.is_empty() && zooms.iter().all(|&z| z <= 2), "{zooms:?}");
+}
+
+/// A flat map `width` pixels wide and 256 high at `zoom`, centered at the
+/// equator and `lng`.
+fn image_view(width: u32, zoom: f64, lng: f64) -> SourceTest {
+    let mut test = SourceTest::new();
+    test.transform.resize(Size::new(width, 256)).unwrap();
+    test.transform.jump_to(&CameraOptions {
+        center: Some(LatLng::new(0.0, lng).unwrap()),
+        zoom: Some(zoom),
+        ..Default::default()
+    });
+    test
+}
+
+/// An image source with an image, from `west` to `east` and from 10° north
+/// to 10° south, updated for `test`'s view with `terrain`'s cover.
+fn image_seen_by(
+    test: &SourceTest,
+    terrain: Option<&crate::terrain::TerrainCover>,
+    west: f64,
+    east: f64,
+) -> crate::sources::render_image_source::RenderImageSource {
+    use mln_style::sources::{ImageSourceType, image_source};
+    let corners =
+        [(10.0, west), (10.0, east), (-10.0, east), (-10.0, west)].map(|(lat, lng)| LatLng::new(lat, lng).unwrap());
+    let image = mln_util::image::PremultipliedImage::from_vec(Size::new(1, 1), vec![255, 0, 0, 255]);
+    let source = edited(&image_source("image", corners), ImageSourceType::set_image("image", image));
+    let mut store = test.store();
+    let mut render_source = crate::sources::render_image_source::RenderImageSource::new(source.clone());
+    let mut parameters = test.tile_parameters(MapMode::Static);
+    parameters.terrain = terrain;
+    render_source.update(&mut store, source, &[], true, false, &parameters);
+    render_source
+}
+
+/// The world copies the image of [`image_seen_by`] draws in, by wrap.
+fn image_copies(test: &SourceTest, terrain: Option<&crate::terrain::TerrainCover>, west: f64, east: f64) -> Vec<i16> {
+    let render_source = image_seen_by(test, terrain, west, east);
+    let data = render_source.image_render_data().expect("an image source's render data");
+    let mut wraps: Vec<i16> = data.tile_ids.iter().map(|id| id.wrap).collect();
+    wraps.sort_unstable();
+    wraps
+}
+
+/// The terrain's cover of a view of the world copy 0 that its root tile
+/// covers alone.
+fn root_terrain() -> crate::terrain::TerrainCover {
+    let root = crate::terrain::TerrainTile {
+        id: OverscaledTileID::new(0, 0, CanonicalTileID::new(0, 0, 0)),
+        dem: None,
+        dem_loading: false,
+    };
+    crate::terrain::TerrainCover { tiles: vec![root], ..flat_terrain() }
+}
+
+/// A view of zoom 0 480 px wide sees from -168.75° to 168.75°: both ends
+/// of an image from 150° to 200°, the east one in the world copy west of
+/// the image's own, through the one root tile.
+#[test]
+fn an_image_draws_in_every_world_copy_one_view_tile_sees() {
+    let test = image_view(480, 0.0, 0.0);
+    assert_eq!(vec![-1, 0], image_copies(&test, None, 150.0, 200.0));
+    assert_eq!(vec![-1, 0], image_copies(&test, Some(&root_terrain()), 150.0, 200.0));
+}
+
+/// An image wider than the world draws in each copy that reaches the view:
+/// from -200° to 200°, its own and those a world east and west of it.
+#[test]
+fn an_image_wider_than_the_world_draws_in_each_copy_in_view() {
+    let test = image_view(480, 0.0, 0.0);
+    let wraps = image_copies(&test, None, -200.0, 200.0);
+    assert_eq!(3, wraps.len(), "{wraps:?}");
+    assert!(wraps.windows(2).all(|pair| pair[1] == pair[0] + 1), "{wraps:?}");
+}
+
+/// A view of three world copies sees four copies of an image from 150° to
+/// 200°: one in each world, and the east end of the westernmost.
+#[test]
+fn a_view_of_three_worlds_draws_an_image_in_each() {
+    let test = image_view(3 * 512, 0.0, 0.0);
+    assert_eq!(vec![-2, -1, 0, 1], image_copies(&test, None, 150.0, 200.0));
+}
+
+/// An image in the world copy east of the view's draws in the view's.
+#[test]
+fn an_image_in_another_world_copy_draws_in_the_views() {
+    let test = image_view(256, 3.0, 15.0);
+    let wraps = image_copies(&test, None, 370.0, 380.0);
+    assert!(wraps.contains(&0), "{wraps:?}");
+}
+
+/// The wrap of a copy stays in range whatever the wraps it comes from: an
+/// image 32768 worlds west of the view's draws in the view's.
+#[test]
+fn an_image_far_west_draws_in_the_views_world() {
+    let test = image_view(256, 3.0, 15.0);
+    let worlds = 32768.0 * 360.0;
+    let wraps = image_copies(&test, None, 10.0 - worlds, 20.0 - worlds);
+    assert!(wraps.contains(&0), "{wraps:?}");
+}
+
+/// An image source that draws nowhere holds no frame back, with terrain or
+/// without: the style tracks its image's own load.
+#[test]
+fn an_image_out_of_view_is_loaded() {
+    let test = image_view(256, 3.0, 15.0);
+    let store = test.store();
+    let out_of_view = image_seen_by(&test, None, 100.0, 110.0);
+    assert_eq!(out_of_view.image_render_data().unwrap().tile_ids, []);
+    assert!(out_of_view.is_loaded(&store));
+    let terrain = crate::terrain::TerrainCover {
+        tiles: vec![crate::terrain::TerrainTile {
+            id: OverscaledTileID::new(3, 0, CanonicalTileID::new(3, 4, 3)),
+            dem: None,
+            dem_loading: false,
+        }],
+        ..flat_terrain()
+    };
+    let off_the_terrain = image_seen_by(&test, Some(&terrain), 100.0, 110.0);
+    assert_eq!(off_the_terrain.image_render_data().unwrap().tile_ids, []);
+    assert!(off_the_terrain.is_loaded(&store));
 }

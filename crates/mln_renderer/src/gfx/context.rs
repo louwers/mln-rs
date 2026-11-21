@@ -136,6 +136,13 @@ impl Context {
         &mut self.device.stats
     }
 
+    /// Logs `message`, why something of the frame being encoded failed on
+    /// the GPU, and keeps it as the frame's failure unless one came first
+    /// ([`Device::fail`]).
+    pub(crate) fn fail(&mut self, message: String) {
+        self.device.fail(message);
+    }
+
     /// The rendering stats now. What the renderer released counts until the
     /// next [`destroy_released`](Self::destroy_released) destroys it.
     pub(crate) fn stats(&self) -> RenderingStats {
@@ -324,6 +331,16 @@ impl Context {
         texture.upload_sub_region(gpu, device, data, size, x, y)
     }
 
+    /// Fills the mip levels below the first of the texture of `handle`,
+    /// which is made mipmapped, from what the work recorded so far leaves in
+    /// the first. Fails while a pass is open and for a texture not made.
+    pub(crate) fn generate_mipmaps(&mut self, gpu: &mut dyn Gpu, handle: &SharedTexture) -> Result<(), GpuError> {
+        let texture = self.gpu_texture(handle).ok_or(GpuError::UnknownId("texture"))?;
+        gpu.generate_mipmaps(texture.id())?;
+        self.device.stats.num_mipmap_generations += 1;
+        Ok(())
+    }
+
     /// Writes the image the texture of `handle` was given, if any.
     pub(crate) fn upload_texture(&mut self, gpu: &mut dyn Gpu, handle: &SharedTexture) -> Result<(), GpuError> {
         let (texture, device) = self.texture_entry(handle)?;
@@ -367,6 +384,13 @@ impl Context {
             .entry((program, uniforms, projection))
             .or_insert_with(|| program.variant_key(parameters, read, projection))
             .clone()
+    }
+
+    /// Whether it made the key of a variant for `projection` since the keys
+    /// were last cleared.
+    #[cfg(test)]
+    pub(crate) fn made_key_for(&self, projection: ProjectionVariant) -> bool {
+        self.shader_keys.keys().any(|&(_, _, made)| made == projection)
     }
 
     /// Makes the keys of later variants at `pixel_ratio`, and with the

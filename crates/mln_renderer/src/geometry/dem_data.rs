@@ -1,6 +1,10 @@
-// The DEM owns its image, and textures get a copy of it (`image`): the DEM
-// lives in a bucket, which is Send, and textures live on the render thread.
+// The DEM shares its image, which textures copy (`image`): the DEM lives in
+// a bucket, which is Send, and textures live on the render thread. A
+// backfill copies the image first if anything else holds it.
 
+use std::sync::{Arc, OnceLock};
+
+use mln_util::dem::DemUnpack;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 use mln_util::tileset::RasterEncoding;
@@ -30,7 +34,10 @@ pub(crate) struct DEMData {
     pub(crate) dim: i32,
     pub(crate) stride: i32,
     pub(crate) encoding: RasterEncoding,
-    image: PremultipliedImage,
+    /// [`DEMData::range`], once read: only the terrain reads it, so a map
+    /// without terrain never decodes its DEM tiles' heights.
+    range: OnceLock<(f32, f32)>,
+    image: Arc<PremultipliedImage>,
 }
 
 impl mln_wire::Wire for DEMData {
@@ -103,7 +110,7 @@ impl DEMData {
         // bottom horizontal border with corners
         data.copy_within(dim_u * stride_u * 4..(dim_u + 1) * stride_u * 4, (dim_u + 1) * stride_u * 4);
 
-        Ok(DEMData { dim, stride, encoding, image: out })
+        Ok(DEMData { dim, stride, encoding, range: OnceLock::new(), image: Arc::new(out) })
     }
 
     /// A DEM as another `DEMData` was (its members), as it reads back.
@@ -126,7 +133,28 @@ impl DEMData {
                 image.data.len()
             ));
         }
-        Ok(DEMData { dim, stride, encoding, image })
+        Ok(DEMData { dim, stride, encoding, range: OnceLock::new(), image: Arc::new(image) })
+    }
+
+    /// The lowest and highest elevation of the tile's own pixels, without
+    /// the border, in meters; 0 for a DEM of no pixels. Decoded on the first
+    /// call.
+    pub(crate) fn range(&self) -> (f32, f32) {
+        *self.range.get_or_init(|| {
+            let unpack = DemUnpack::of(self.encoding);
+            let (dim, stride) = (self.dim as usize, self.stride as usize);
+            (0..dim)
+                .flat_map(|y| {
+                    let row = ((y + 1) * stride + 1) * 4;
+                    self.image.data[row..row + dim * 4].as_chunks::<4>().0
+                })
+                .map(|&texel| unpack.decode(texel))
+                .fold(None, |range: Option<(f32, f32)>, height| match range {
+                    Some((min, max)) => Some((min.min(height), max.max(height))),
+                    None => Some((height, height)),
+                })
+                .unwrap_or((0.0, 0.0))
+        })
     }
 
     /// `idx(x, y)`.
@@ -181,11 +209,12 @@ impl DEMData {
         let ox = -dx * dim;
         let oy = -dy * dim;
 
+        debug_assert!(self.idx(x_min, y_min) <= self.idx(x_max - 1, y_max - 1));
+        let (stride, image) = (self.stride, Arc::make_mut(&mut self.image));
         for y in y_min..y_max {
             for x in x_min..x_max {
                 let value = pixel(&o.image.data, o.idx(x + ox, y + oy));
-                let i = self.idx(x, y);
-                set_pixel(&mut self.image.data, i, value);
+                set_pixel(&mut image.data, ((y + 1) * stride + (x + 1)) as usize, value);
             }
         }
     }
@@ -207,6 +236,12 @@ impl DEMData {
 
     #[must_use]
     pub(crate) fn image(&self) -> &PremultipliedImage {
+        &self.image
+    }
+
+    /// The bordered image, to share: a backfill after copies it first.
+    #[must_use]
+    pub(crate) fn shared_image(&self) -> &Arc<PremultipliedImage> {
         &self.image
     }
 }
@@ -260,6 +295,35 @@ mod tests {
         // 10 * 100 + 20 * 10 + 30 * 0.5 - 1000
         assert_eq!(demdata.get(0, 0), 215);
         assert_eq!(demdata.unpack_vector(), [100.0, 10.0, 0.5, 1000.0]);
+    }
+
+    /// The range is of the tile's own pixels, not its border, which a
+    /// neighbour's lower or higher edge fills.
+    #[test]
+    fn range_of_the_interior() {
+        // Terrarium heights 0, 1, 2, 3 m (r 128, g = height).
+        let mut image = PremultipliedImage::new(Size::new(2, 2));
+        for (i, texel) in image.data.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+            *texel = [128, i as u8, 0, 255];
+        }
+        let mut dem = DEMData::new(&image, RasterEncoding::Terrarium).unwrap();
+        assert_eq!(dem.range.get(), None, "decoded only when read");
+        assert_eq!(dem.range(), (0.0, 3.0));
+
+        let mut deep = PremultipliedImage::new(Size::new(2, 2));
+        deep.data.copy_from_slice(&[[0, 0, 0, 255]; 4].concat());
+        let deep = DEMData::new(&deep, RasterEncoding::Terrarium).unwrap();
+        let shared = dem.clone();
+        dem.backfill_border(&deep, -1, 0);
+        assert_eq!(dem.range(), (0.0, 3.0));
+        let mut fresh = DEMData::new(&image, RasterEncoding::Terrarium).unwrap();
+        fresh.backfill_border(&deep, -1, 0);
+        assert_eq!(fresh.range(), (0.0, 3.0), "a range read after a backfill");
+        assert_eq!(dem.get(-1, 0), -32768);
+        assert_eq!(shared.get(-1, 0), 0, "a backfill copies a shared image");
+
+        let empty = DEMData::new(&PremultipliedImage::default(), RasterEncoding::Mapbox).unwrap();
+        assert_eq!(empty.range(), (0.0, 0.0));
     }
 
     #[test]

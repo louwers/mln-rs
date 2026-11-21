@@ -35,6 +35,7 @@ use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::gfx::context::Context;
 use crate::gfx::indexes::{DrawIndexes, Indexes, SharedIndexes};
 use crate::gfx::store::SharedTexture;
+use crate::gfx::uniform_buffer::UniformBufferArray;
 use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::gfx::vertices::SharedVertices;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
@@ -45,11 +46,13 @@ use crate::layer_drawing::{
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
-use crate::render_layer::{Atlases, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer};
+use crate::render_layer::{
+    Atlases, LayerUpdateParameters, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
+};
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::render_tile::FrameTile;
-use crate::sources::render_image_source::ImageSourceRenderData;
+use crate::sources::render_image_source::{ImageQuad, ImageSourceRenderData};
 use crate::tile_matrix::{projection_data, to_projection_ubo};
 
 /// What the layer keeps of a tile: its draw, and the generation of the
@@ -138,6 +141,10 @@ impl LayerDrawing for RasterDrawing {
             frame.render(&mut self.objects, Self::objects, gpu, parameters);
             order.step(parameters);
         }
+    }
+
+    fn frame_buffers(&mut self) -> Option<&mut UniformBufferArray> {
+        Some(self.frame.as_mut()?.uniform_buffers_mut())
     }
 }
 
@@ -296,7 +303,7 @@ impl RenderRasterLayer {
             draw_list.push_part(FrameDraw::new(None, draw.id), RasterPart::Image(index), uniforms);
         }
 
-        self.finish_frame_draws(gpu, paint_parameters.context);
+        self.finish_frame_draws(gpu, paint_parameters.context, &image_data.quad);
     }
 
     /// The entries in the layer's storage buffers of a draw of `tile_id`.
@@ -315,8 +322,9 @@ impl RenderRasterLayer {
     }
 
     /// Makes the draws of the draw list the layer's draws of the frame, and
-    /// writes the layer's buffers of them.
-    fn finish_frame_draws(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
+    /// writes the layer's buffers of them, which put their vertices on
+    /// `quad`.
+    fn finish_frame_draws(&mut self, gpu: &mut dyn Gpu, context: &mut Context, quad: &ImageQuad) {
         let composite = self.composite();
         let Some(frame) = self.drawing.frame.as_mut() else {
             return;
@@ -337,6 +345,9 @@ impl RenderRasterLayer {
                 contrast_factor: contrast_factor(*evaluated.raster_contrast.uniform()),
                 pad1: 0.0,
                 pad2: 0.0,
+                coords_top: quad.coords_top,
+                coords_bottom: quad.coords_bottom,
+                image_warp: quad.warp,
             };
             writer.uniform(ID_RASTER_EVALUATED_PROPS_UBO, &props);
             writer.storage(ID_RASTER_DRAWABLE_UBO, |(draw_ubo, _)| *draw_ubo);
@@ -427,6 +438,7 @@ fn raster_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeArray {
 impl TypedLayer for RenderRasterLayer {
     type Type = Raster;
     type Drawing = RasterDrawing;
+    const DRAPES: bool = true;
 
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
@@ -458,17 +470,11 @@ impl TypedLayer for RenderRasterLayer {
         render_tiles: &[FrameTile<'_, Raster>],
     ) {
         let sampler = self.sampler_state();
-        let RenderRasterLayer {
-            base, drawing, draw_list, static_geometry, globe_meshes, textures, live_buckets, ..
-        } = self;
+        let RenderRasterLayer { base, drawing, draw_list, static_geometry, globe_meshes, textures, .. } = self;
         let raster_shader =
             paint_parameters.context.shader_key(&programs::RASTER, Uniforms::default(), base.projection_variant);
         let static_geometry = static_geometry.get_or_insert_with(|| StaticGeometry::new(paint_parameters.context));
 
-        // Drop the textures of buckets that are no longer rendered.
-        live_buckets.clear();
-        live_buckets.extend(render_tiles.iter().filter_map(|tile| Some(tile.bucket()?.base.bucket_id)));
-        textures.retain(|id, _| live_buckets.contains(id));
         // Kept draws keep their textures, so a changed filter is applied to
         // the textures themselves.
         for texture in textures.values() {
@@ -542,7 +548,7 @@ impl TypedLayer for RenderRasterLayer {
             }
         }
 
-        self.finish_frame_draws(gpu, paint_parameters.context);
+        self.finish_frame_draws(gpu, paint_parameters.context, &ImageQuad::TILE);
     }
 
     fn update_image_draws(
@@ -553,6 +559,19 @@ impl TypedLayer for RenderRasterLayer {
         image: ImageSourceRenderData<'_>,
     ) {
         self.update_image(gpu, image, paint_parameters);
+    }
+
+    /// Drops the textures of the buckets of tiles the frame doesn't draw.
+    /// The frame's draws and its drapes' share the others. An image source's
+    /// draws keep their image's texture themselves.
+    fn update(&mut self, params: &mut LayerUpdateParameters<'_>, tiles: &[FrameTile<'_, Raster>]) {
+        if params.source.is_some_and(|source| source.image_render_data().is_some()) {
+            return;
+        }
+        let live_buckets = &mut self.live_buckets;
+        live_buckets.clear();
+        live_buckets.extend(tiles.iter().filter_map(|tile| Some(tile.bucket()?.base.bucket_id)));
+        self.textures.retain(|id, _| live_buckets.contains(id));
     }
 
     fn release(&mut self) {

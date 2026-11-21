@@ -11,7 +11,7 @@ use mln_conversion::{Convertible, value_to_json};
 use mln_util::constants::DEFAULT_TRANSITION_DURATION;
 use mln_util::error::Error;
 
-use crate::conversion::{Converter, convert_layer, convert_light, convert_projection, convert_sky};
+use crate::conversion::{Converter, convert_layer, convert_light, convert_projection, convert_sky, convert_terrain};
 use crate::edit::Edit;
 use crate::expression::GlobalStateMap;
 use crate::layer::Layer;
@@ -184,7 +184,7 @@ impl Style {
     /// `name` to the JSON value `json`, without reloading the style. A `null`
     /// resets it to its default, as if the style didn't set it.
     ///
-    /// `light`, `sky`, `projection`, `state` and `transition` change. A
+    /// `light`, `sky`, `terrain`, `projection`, `state` and `transition` change. A
     /// `state` sets every global state property to its new default. A
     /// `transition` keeps whether placements fade, which the style spec's
     /// transition doesn't hold.
@@ -193,8 +193,7 @@ impl Style {
     /// `name` isn't a root property, or is `sources` or `layers`, or if
     /// `json` isn't a valid value for it; and with `Unsupported` for the root properties that only
     /// take effect as a style loads (the default camera, the sprite, the
-    /// glyphs and font faces, and the metadata) and for `terrain`, which the
-    /// map doesn't draw.
+    /// glyphs and font faces, and the metadata).
     pub fn set_root_property_json(&mut self, name: &str, json: &str) -> Result<(), Error> {
         require_root_property(name)?;
         let context = format!("style root property {}", quote(name));
@@ -223,6 +222,14 @@ impl Style {
                 };
                 self.apply(Edit::SetSky(sky))?;
             }
+            "terrain" => {
+                let terrain = if value.is_null() {
+                    None
+                } else {
+                    Some(convert_terrain(&convertible, &mut error).ok_or_else(|| conversion_error(&context, &error))?)
+                };
+                self.apply(Edit::SetTerrain(terrain))?;
+            }
             "projection" => {
                 let projection = if value.is_null() {
                     Projection::default()
@@ -247,7 +254,6 @@ impl Style {
                 transition.enable_placement_transitions = placement;
                 self.apply(Edit::SetTransition(transition))?;
             }
-            "terrain" => return Err(Error::unsupported(format!("{context}: the map doesn't draw terrain"))),
             _ => return Err(Error::unsupported(format!("{context} can't change while the style is loaded"))),
         }
         Ok(())
@@ -268,6 +274,9 @@ impl Style {
         let value = match name {
             "light" => defined_properties_json(&**self.get_light()),
             "sky" => self.get_sky().and_then(|sky| defined_properties_json(&**sky)),
+            "terrain" => self
+                .get_terrain()
+                .map(|terrain| serde_json::json!({ "source": terrain.source, "exaggeration": terrain.exaggeration })),
             "projection" => {
                 let projection = self.get_projection();
                 properties_json(&["type"], |name| projection.get_property(name))

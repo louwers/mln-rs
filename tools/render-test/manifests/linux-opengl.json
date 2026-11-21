@@ -1,6 +1,7 @@
 {
   "base_test_path": "../testdata/metrics/integration",
   "cache_path": "../testdata/metrics/cache-style.db",
+  "asset_path": "../testdata/metrics/integration/gljs/assets",
   "expectation_paths": [
     "../testdata/metrics/expectations/platform-linux",
     "../testdata/metrics/expectations/platform-linux-opengl"
@@ -9,7 +10,9 @@
     "../testdata/metrics/ignores/platform-all.json",
     "../testdata/metrics/ignores/platform-linux.json",
     "../testdata/metrics/ignores/platform-linux-opengl.json",
-    "../ignores/rust-port.json"
+    "../ignores/rust-port.json",
+    "../ignores/rust-port-terrain.json",
+    "../ignores/rust-port-llvmpipe.json"
   ],
   "metric_path": "../testdata/metrics/linux-gcc8-release"
 }

@@ -1707,6 +1707,28 @@ fn image_source_beyond_mercator_latitudes() {
     test.frontend().render_frame();
 }
 
+// An image source off screen draws nothing, so a still image of the map
+// doesn't wait for it.
+#[test]
+fn a_still_image_finishes_with_an_image_source_off_screen() {
+    let test = MapTest::new();
+    test.load_json(&read_file("test/fixtures/api/empty.json"));
+    let coordinates = [ll(10.0, 100.0), ll(10.0, 110.0), ll(0.0, 110.0), ll(0.0, 100.0)];
+    let source = image_source_of("image", coordinates, PremultipliedImage::new(Size::new(4, 4)));
+    test.map().add_source(source).unwrap();
+    test.map()
+        .edit_style(|style| {
+            style.apply(Edit::AddLayer {
+                layer: Layer::new(Registry::with_builtins().style(), "raster", "image", "image").unwrap(),
+                before: None,
+            })
+        })
+        .unwrap();
+    test.map().jump_to(&CameraOptions { center: Some(ll(0.0, 0.0)), zoom: Some(4.0), ..Default::default() });
+    let image = test.render().image;
+    assert_eq!(test.frontend().size().width, image.size.width);
+}
+
 // An image source without a url starts empty: it requests nothing and draws
 // nothing until it gets an image or a url.
 #[test]

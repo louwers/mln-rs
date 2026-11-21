@@ -36,6 +36,8 @@ fn main() {
     hash.write(&version);
     println!("cargo::rustc-env=MLN_BENCH_HARNESS={:016x}", hash.0);
     backend_timers(&workspace);
+    terrain_update(&workspace);
+    terrain_stats(&workspace);
     layout_probe();
 }
 
@@ -60,6 +62,34 @@ fn backend_timers(workspace: &Path) {
         if manifest.contains(&format!("\"{library}?/bench\"")) {
             println!("cargo::rustc-cfg={cfg}");
         }
+    }
+}
+
+/// Sets `mln_bench_terrain` where the renderer's `UpdateParameters` has the
+/// terrain's fields, which the symbol scenarios' update must name. A base of
+/// `mln-bench compare` from before the libraries drew terrain builds the
+/// update without them.
+fn terrain_update(workspace: &Path) {
+    let source = workspace.join("crates/mln_renderer/src/update_parameters.rs");
+    println!("cargo::rerun-if-changed={}", source.display());
+    println!("cargo::rustc-check-cfg=cfg(mln_bench_terrain)");
+    let source = std::fs::read_to_string(&source).expect("the renderer's update parameters");
+    if source.contains("pub terrain_skirt_length:") {
+        println!("cargo::rustc-cfg=mln_bench_terrain");
+    }
+}
+
+/// Sets `mln_bench_terrain_stats` where the rendering stats count what the
+/// terrain draws and holds, and the passes and mips of a frame, which the
+/// terrain scenarios report. A base of `mln-bench compare` from before them
+/// reports none of it.
+fn terrain_stats(workspace: &Path) {
+    let source = workspace.join("crates/mln_gfx/src/rendering_stats.rs");
+    println!("cargo::rerun-if-changed={}", source.display());
+    println!("cargo::rustc-check-cfg=cfg(mln_bench_terrain_stats)");
+    let source = std::fs::read_to_string(&source).expect("the rendering stats");
+    if source.contains("pub struct TerrainStats") {
+        println!("cargo::rustc-cfg=mln_bench_terrain_stats");
     }
 }
 

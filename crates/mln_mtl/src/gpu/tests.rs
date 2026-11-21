@@ -2,8 +2,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use mln_gfx::gpu::conformance::{
-    clip_mask_and_background, custom_layers, depth_only, foreign_ids, imported_textures, instanced_walls,
-    invalid_calls, pulled_walls, readbacks, resources_in_use, topologies, transparent_replace, vertex_layouts,
+    clip_mask_and_background, custom_layers, depth_only, drawn_vertex_texels, foreign_ids, imported_textures,
+    instanced_walls, invalid_calls, mipmapped_targets, pulled_walls, readbacks, resources_in_use, terrain_heights,
+    topologies, transparent_replace, vertex_layouts, written_vertex_texels,
 };
 use mln_gfx::gpu::{BufferUsage, ColorAttachment};
 use mln_gfx::shaders::programs;
@@ -63,6 +64,30 @@ fn depth_only_through_gpu() {
 }
 
 #[test]
+fn written_vertex_texels_through_gpu() {
+    let device = Device::new(None).expect("Metal device");
+    written_vertex_texels(&mut MetalGpu::new(&device)).expect("the frame");
+}
+
+#[test]
+fn drawn_vertex_texels_through_gpu() {
+    let device = Device::new(None).expect("Metal device");
+    drawn_vertex_texels(&mut MetalGpu::new(&device)).expect("the frames");
+}
+
+#[test]
+fn terrain_heights_through_gpu() {
+    let device = Device::new(None).expect("Metal device");
+    terrain_heights(&mut MetalGpu::new(&device)).expect("the frames");
+}
+
+#[test]
+fn mipmapped_targets_through_gpu() {
+    let device = Device::new(None).expect("Metal device");
+    mipmapped_targets(&mut MetalGpu::new(&device)).expect("the frames");
+}
+
+#[test]
 fn vertex_layouts_through_gpu() {
     let device = Device::new(None).expect("Metal device");
     vertex_layouts(&mut MetalGpu::new(&device)).expect("the frames");
@@ -98,7 +123,7 @@ fragment half4 fragmentMain() { return half4(1.0); }
     let mut gpu = MetalGpu::new(&device);
     let program = &programs::FILL_EXTRUSION_INSTANCED;
     let (vertex, fragment) =
-        compile(device.device(), "direct read", MSL, "vertexMain", "fragmentMain", []).expect("the MSL compiles");
+        compile(device.device(), "direct read", MSL, "vertexMain", "fragmentMain", [], true).expect("the MSL compiles");
     let source = gpu.sources.get(program).expect("the table");
     let active_attributes = active_attributes(&vertex);
     let shader = gpu.shaders.insert(Shader { program, source, vertex, active_attributes, fragment, table: None });
@@ -142,6 +167,7 @@ fn a_destroyed_buffer_stays_for_the_flushes_before() {
             size: Size { width: 4, height: 4 },
             format: TextureFormat::Rgba8Unorm,
             usage: TextureUsage { render_target: true, ..Default::default() },
+            mipmapped: false,
         })
         .unwrap();
     let pass = PassDesc {
@@ -244,6 +270,7 @@ fn flushes_wait_for_and_signal_events() {
             size: Size { width: 4, height: 4 },
             format: TextureFormat::Rgba8Unorm,
             usage: TextureUsage { render_target: true, ..Default::default() },
+            mipmapped: false,
         })
         .unwrap();
     let pass = PassDesc {

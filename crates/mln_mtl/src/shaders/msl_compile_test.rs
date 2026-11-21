@@ -1,18 +1,21 @@
 //! Compiles every built-in program's MSL with the system's
 //! Metal compiler, the way `MetalGpu` does: `PRELUDE + prelude + source`,
-//! MSL 2.4, fast math, the `ProgramParameters` defines, a
+//! MSL 2.4, fast math unless the program's table turns it off, the
+//! `ProgramParameters` defines, a
 //! `HAS_UNIFORM_u_<name>` define per property passed as a uniform, and
-//! `PROJECTION_GLOBE` for the globe variant. Also checks that the UBO ids and
-//! sizes the MSL declares are the renderer's, and that the shaders' pipelines
-//! build with the vertex layouts their tables describe, in both projection
-//! variants.
+//! `PROJECTION_GLOBE` for the globe variant and `TERRAIN` for the terrain
+//! one. Also checks that the UBO ids and sizes the MSL declares are the
+//! renderer's, and that the shaders' pipelines build with the vertex layouts
+//! their tables describe, in each projection variant.
 
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
 use std::mem::size_of;
 
 use mln_gfx::gfx_types::AttributeDataType;
-use mln_gfx::shaders::program::{GLOBE_DEFINE, Program};
+use mln_gfx::projection_variant::ProjectionVariant;
+use mln_gfx::shaders::program::{GLOBE_DEFINE, Program, TERRAIN_DEFINE};
+use mln_gfx::shaders::programs::projection_variants;
 use mln_gfx::shaders::shader_defines::*;
 use mln_gfx::shaders::*;
 use objc2::rc::Retained;
@@ -31,19 +34,22 @@ fn sources() -> impl Iterator<Item = (&'static Program, &'static ShaderSource)> 
     BUILT_INS.iter().copied()
 }
 
-/// The projection variants of a program: its name, and whether it defines
-/// `PROJECTION_GLOBE`.
-const PROJECTIONS: [(&str, bool); 2] = [("Mercator", false), ("globe", true)];
+/// The projection variants of `program`, by name.
+fn projections(program: &Program) -> impl Iterator<Item = (String, ProjectionVariant)> {
+    projection_variants(program).iter().map(|&variant| (format!("{variant:?}"), variant))
+}
 
 fn device() -> Id<dyn MTLDevice> {
     MTLCreateSystemDefaultDevice().expect("no Metal device")
 }
 
-/// The library of `source` with `defines`, or the compiler's error.
+/// The library of `source` with `defines`, and with fast math if
+/// `fast_math`, or the compiler's error.
 fn compile(
     device: &ProtocolObject<dyn MTLDevice>,
     source: &str,
     defines: &[(String, String)],
+    fast_math: bool,
 ) -> Result<Id<dyn MTLLibrary>, String> {
     let keys: Vec<Retained<NSString>> = defines.iter().map(|(key, _)| NSString::from_str(key)).collect();
     let values: Vec<Retained<NSString>> = defines.iter().map(|(_, value)| NSString::from_str(value)).collect();
@@ -55,6 +61,10 @@ fn compile(
     // SAFETY: the macros map NSString names to NSString values.
     unsafe { options.setPreprocessorMacros(Some(&macros)) };
     // Fast math is Metal's default.
+    if !fast_math {
+        #[expect(deprecated, reason = "its replacement, mathMode, needs macOS 15 and iOS 18")]
+        options.setFastMathEnabled(false);
+    }
     options.setLanguageVersion(MTLLanguageVersion::Version2_4);
     options.setPreserveInvariance(true);
     device
@@ -80,15 +90,21 @@ fn uniform_properties(text: &str) -> BTreeSet<String> {
     names
 }
 
-/// ProgramParameters(1.0, overdraw), the globe define if `globe`, and a
+/// ProgramParameters(1.0, overdraw), the define of `projection`, and a
 /// uniform define per name.
-fn defines<'a>(overdraw: bool, globe: bool, uniforms: impl IntoIterator<Item = &'a String>) -> Vec<(String, String)> {
+fn defines<'a>(
+    overdraw: bool,
+    projection: ProjectionVariant,
+    uniforms: impl IntoIterator<Item = &'a String>,
+) -> Vec<(String, String)> {
     let mut defines = vec![("DEVICE_PIXEL_RATIO".to_owned(), "1.0".to_owned())];
     if overdraw {
         defines.push(("OVERDRAW_INSPECTOR".to_owned(), String::new()));
     }
-    if globe {
-        defines.push((GLOBE_DEFINE.to_owned(), String::new()));
+    match projection {
+        ProjectionVariant::Mercator => {}
+        ProjectionVariant::Globe => defines.push((GLOBE_DEFINE.to_owned(), String::new())),
+        ProjectionVariant::Terrain => defines.push((TERRAIN_DEFINE.to_owned(), String::new())),
     }
     defines.extend(uniforms.into_iter().map(|name| (format!("HAS_UNIFORM_u_{name}"), String::new())));
     defines
@@ -98,8 +114,22 @@ fn defines<'a>(overdraw: bool, globe: bool, uniforms: impl IntoIterator<Item = &
 /// inspector, which counts its draws.
 #[test]
 fn every_layer_program_shows_the_overdraw_inspector() {
-    use mln_gfx::shaders::programs::{ATMOSPHERE, CLIPPING_MASK, COLLISION_BOX, COLLISION_CIRCLE, GLOBE_DEPTH, SKY};
-    let not_layers = [&CLIPPING_MASK, &COLLISION_BOX, &COLLISION_CIRCLE, &GLOBE_DEPTH, &SKY, &ATMOSPHERE];
+    use mln_gfx::shaders::programs::{
+        ATMOSPHERE, CLIPPING_MASK, COLLISION_BOX, COLLISION_CIRCLE, GLOBE_DEPTH, SKY, TERRAIN, TERRAIN_PROBE,
+        VERTEX_TEXEL,
+    };
+    // The terrain shows its drapes, where the draped layers count their draws.
+    let not_layers = [
+        &CLIPPING_MASK,
+        &COLLISION_BOX,
+        &COLLISION_CIRCLE,
+        &GLOBE_DEPTH,
+        &SKY,
+        &ATMOSPHERE,
+        &TERRAIN,
+        &TERRAIN_PROBE,
+        &VERTEX_TEXEL,
+    ];
     for &(program, source) in BUILT_INS {
         if !not_layers.contains(&program) {
             assert!(full_source(source).contains("OVERDRAW_INSPECTOR"), "{}", program.name);
@@ -121,18 +151,18 @@ fn every_shader_source_compiles() {
             "{}: the properties its MSL reads from uniforms",
             program.name
         );
-        for (projection, globe) in PROJECTIONS {
+        for (projection, variant) in projections(program) {
             // Every property per vertex, every property as a uniform, each one
             // alone as a uniform, and the overdraw inspector.
             let mut variants = vec![
-                ("no uniforms".to_owned(), defines(false, globe, [])),
-                ("all uniforms".to_owned(), defines(false, globe, &properties)),
-                ("overdraw inspector".to_owned(), defines(true, globe, [])),
-                ("overdraw inspector, all uniforms".to_owned(), defines(true, globe, &properties)),
+                ("no uniforms".to_owned(), defines(false, variant, [])),
+                ("all uniforms".to_owned(), defines(false, variant, &properties)),
+                ("overdraw inspector".to_owned(), defines(true, variant, [])),
+                ("overdraw inspector, all uniforms".to_owned(), defines(true, variant, &properties)),
             ];
-            variants.extend(properties.iter().map(|name| (format!("uniform {name}"), defines(false, globe, [name]))));
+            variants.extend(properties.iter().map(|name| (format!("uniform {name}"), defines(false, variant, [name]))));
             for (variant, defines) in variants {
-                match compile(&device, &text, &defines) {
+                match compile(&device, &text, &defines, source.fast_math) {
                     Ok(library) => {
                         compiled += 1;
                         for function in [source.msl.vertex_main_function, source.msl.fragment_main_function] {
@@ -269,6 +299,15 @@ fn ubo_ids(program: &Program, source: &ShaderSource) -> Vec<(&'static str, usize
             "rasterUBOCount",
         ),
         "SkyShader" => (&[("idSkyPropsUBO", ID_SKY_PROPS_UBO)], "skyUBOCount"),
+        "VertexTexelShader" => (&[], "vertexTexelUBOCount"),
+        "TerrainShader" | "TerrainProbeShader" => (
+            &[
+                ("idTerrainDrawableUBO", ID_TERRAIN_DRAWABLE_UBO),
+                ("idTerrainPropsUBO", ID_TERRAIN_PROPS_UBO),
+                ("idTerrainFogUBO", ID_TERRAIN_FOG_UBO),
+            ],
+            "terrainUBOCount",
+        ),
         "SymbolIconShader" | "SymbolSDFShader" | "SymbolTextAndIconShader" => (
             &[
                 ("idSymbolDrawableUBO", ID_SYMBOL_DRAWABLE_UBO),
@@ -288,6 +327,7 @@ fn ubo_ids(program: &Program, source: &ShaderSource) -> Vec<(&'static str, usize
         "FillExtrusionPulledShader" => &[
             ("idFillExtrusionWallVertices", ID_FILL_EXTRUSION_WALL_VERTICES),
             ("idFillExtrusionWallPaint", ID_FILL_EXTRUSION_WALL_PAINT),
+            ("idFillExtrusionWallCentroids", ID_FILL_EXTRUSION_WALL_CENTROIDS),
         ],
         "FillOutlinePulledShader" => &[
             ("idFillOutlineVertices", ID_FILL_OUTLINE_VERTICES),
@@ -302,7 +342,6 @@ fn ubo_ids(program: &Program, source: &ShaderSource) -> Vec<(&'static str, usize
 /// The renderer's UBO structs, by the name the MSL gives them.
 const UBO_SIZES: &[(&str, usize)] = &[
     ("GlobalPaintParamsUBO", size_of::<layer_ubo::GlobalPaintParamsUBO>()),
-    ("ProjectionUBO", size_of::<layer_ubo::ProjectionUBO>()),
     ("SkyPropsUBO", size_of::<sky_ubo::SkyPropsUBO>()),
     ("AtmospherePropsUBO", size_of::<sky_ubo::AtmospherePropsUBO>()),
     ("BackgroundDrawableUBO", size_of::<background_layer_ubo::BackgroundDrawableUBO>()),
@@ -352,6 +391,10 @@ const UBO_SIZES: &[(&str, usize)] = &[
     ("SymbolDrawableUBO", size_of::<symbol_layer_ubo::SymbolDrawableUBO>()),
     ("SymbolTilePropsUBO", size_of::<symbol_layer_ubo::SymbolTilePropsUBO>()),
     ("SymbolEvaluatedPropsUBO", size_of::<symbol_layer_ubo::SymbolEvaluatedPropsUBO>()),
+    ("TerrainDrawableUBO", size_of::<terrain_ubo::TerrainDrawableUBO>()),
+    ("TerrainPropsUBO", size_of::<terrain_ubo::TerrainPropsUBO>()),
+    ("TerrainFogUBO", size_of::<terrain_ubo::TerrainFogUBO>()),
+    ("GroundDrawableUBO", size_of::<terrain_ubo::GroundDrawableUBO>()),
 ];
 
 /// True if `text` declares the struct or union `name`.
@@ -376,9 +419,17 @@ fn ubo_ids_and_sizes_are_the_renderers() {
                 let _ = writeln!(asserts, "static_assert(sizeof({name}) == {size}, \"sizeof({name}) != {size}\");");
             }
         }
+        // A terrain variant's projection entries carry the ground under its
+        // draws.
+        let (flat, terrain) = (size_of::<layer_ubo::ProjectionUBO>(), size_of::<terrain_ubo::TerrainProjectionUBO>());
+        let _ = writeln!(
+            asserts,
+            "#if defined(TERRAIN)\nstatic_assert(sizeof(ProjectionUBO) == {terrain}, \"sizeof(ProjectionUBO) != \
+             {terrain}\");\n#else\nstatic_assert(sizeof(ProjectionUBO) == {flat}, \"sizeof(ProjectionUBO) != {flat}\");\n#endif"
+        );
         text.push_str(&asserts);
-        for (projection, globe) in PROJECTIONS {
-            if let Err(error) = compile(&device, &text, &defines(false, globe, [])) {
+        for (projection, variant) in projections(program) {
+            if let Err(error) = compile(&device, &text, &defines(false, variant, []), source.fast_math) {
                 failures.push(format!("{} ({projection}):\n{error}", program.name));
             }
         }
@@ -468,14 +519,14 @@ fn pipelines_build_with_the_tables_vertex_layout() {
             ("table formats", vertex_descriptor(source, |data_type| data_type)),
             ("single-value formats", vertex_descriptor(source, narrow)),
         ];
-        let variants = PROJECTIONS.iter().flat_map(|&(projection, globe)| {
+        let variants = projections(program).flat_map(|(projection, variant)| {
             [
-                (format!("{projection}, no uniforms"), defines(false, globe, [])),
-                (format!("{projection}, all uniforms"), defines(false, globe, &properties)),
+                (format!("{projection}, no uniforms"), defines(false, variant, [])),
+                (format!("{projection}, all uniforms"), defines(false, variant, &properties)),
             ]
         });
         for (variant, defines) in variants {
-            let library = compile(&device, &text, &defines)
+            let library = compile(&device, &text, &defines, source.fast_math)
                 .unwrap_or_else(|error| panic!("{} ({variant}): {error}", program.name));
             let function = |name: &str| library.newFunctionWithName(&NSString::from_str(name)).unwrap();
             let vertex = function(source.msl.vertex_main_function);

@@ -6,12 +6,15 @@ use mln_util::error::Error;
 use mln_util::geo::{LatLng, ScreenCoordinate, WrapMode};
 
 use crate::map::Map;
-use crate::transform::Transform;
+use crate::transform::{TerrainGround, Transform, flip_y, project_on_ground, unproject_on_ground};
 
-/// Converts coordinates for one camera and size, without a map. It holds only
-/// a transform state, so it can move to another thread.
+/// Converts coordinates for one camera and size, without a map, on the flat
+/// map or on the terrain's ground ([`with_terrain`](Self::with_terrain)). It
+/// holds only a transform state and the terrain, so it can move to another
+/// thread.
 pub struct MapProjection {
     state: TransformState,
+    terrain: Option<TerrainGround>,
 }
 
 const _: () = {
@@ -20,30 +23,53 @@ const _: () = {
 };
 
 impl MapProjection {
+    /// A projection for the map's camera, on the terrain its camera stands
+    /// on ([`Map::terrain`]).
     #[must_use]
     pub fn new(map: &Map) -> Self {
-        Self::from_state(map.transform_state().clone())
+        Self::from_state(map.transform_state().clone()).with_terrain(map.terrain())
     }
 
     pub(crate) fn from_state(state: TransformState) -> Self {
-        MapProjection { state }
+        MapProjection { state, terrain: None }
     }
 
     /// A projection for one view of a map, from a [`MapSnapshot`] or a
-    /// rendered frame. `Err`: as [`MapView::to_state`].
+    /// rendered frame, on the flat map. `Err`: as [`MapView::to_state`].
     ///
     /// [`MapSnapshot`]: crate::MapSnapshot
     pub fn from_view(view: &MapView) -> Result<Self, Error> {
         Ok(Self::from_state(view.to_state()?))
     }
 
+    /// The projection on `terrain`, the terrain a map's camera stands on
+    /// ([`Map::terrain`]), as the map converts on it; on the flat map for
+    /// `None`. The view's near and far planes fit the ground given, as the
+    /// map's do, its lowest under the center, or the flat map's without
+    /// one, whatever terrain the projection had before.
+    #[must_use]
+    pub fn with_terrain(mut self, terrain: Option<TerrainGround>) -> Self {
+        let ground = terrain.as_ref().and_then(|terrain| terrain.elevation.as_ref());
+        let center = self.state.view().center(WrapMode::Wrapped);
+        let min_elevation = ground.map(|ground| ground.min_at(center).unwrap_or(0.0));
+        if min_elevation != self.state.view().terrain_min_elevation() {
+            self.state.set_terrain_min_elevation(min_elevation);
+        }
+        MapProjection { terrain, ..self }
+    }
+
     /// The screen point of `lat_lng`, in the copy of the world nearest the
-    /// camera's center.
+    /// camera's center: standing on the ground where there is terrain and it
+    /// was drawn, else at sea level.
     #[must_use]
     pub fn pixel_for_lat_lng(&self, lat_lng: &LatLng) -> ScreenCoordinate {
-        let mut point = self.state.view().lat_lng_to_screen_coordinate(&self.state.view().lat_lng_near_center(lat_lng));
-        point.y = f64::from(self.state.view().size().height) - point.y;
-        point
+        let view = self.state.view();
+        let lat_lng = view.lat_lng_near_center(lat_lng);
+        let point = match &self.terrain {
+            Some(terrain) => project_on_ground(view, terrain.elevation.as_deref(), &lat_lng),
+            None => view.lat_lng_to_screen_coordinate(&lat_lng),
+        };
+        flip_y(view, &point)
     }
 
     /// Whether the globe hides `lat_lng` from the camera; a Mercator view
@@ -53,12 +79,18 @@ impl MapProjection {
         self.state.view().is_location_occluded(lat_lng)
     }
 
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a NaN or infinite
-    /// pixel.
+    /// The location under `pixel`: with terrain, where the line of sight
+    /// first meets its ground, or the plane at the center's altitude where
+    /// it meets no drawn ground or before any was drawn; else on the flat
+    /// map. Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind)
+    /// for a NaN or infinite pixel.
     pub fn lat_lng_for_pixel(&self, pixel: &ScreenCoordinate, wrap_mode: WrapMode) -> Result<LatLng, Error> {
-        let mut flipped = *pixel;
-        flipped.y = f64::from(self.state.view().size().height) - flipped.y;
-        self.state.view().screen_coordinate_to_lat_lng(&flipped, wrap_mode)
+        let view = self.state.view();
+        let point = flip_y(view, pixel);
+        match &self.terrain {
+            Some(terrain) => unproject_on_ground(view, terrain.elevation.as_deref(), &point, wrap_mode),
+            None => view.screen_coordinate_to_lat_lng(&point, wrap_mode),
+        }
     }
 
     pub fn set_camera(&mut self, camera: &CameraOptions) {

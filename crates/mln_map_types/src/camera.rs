@@ -16,7 +16,11 @@ use mln_util::geo::{EdgeInsets, LatLng, ScreenCoordinate};
 pub struct CameraOptions {
     /// Coordinate at the center of the map.
     pub center: Option<LatLng>,
-    /// Altitude of the center of the map, in meters above sea level.
+    /// Altitude of the center of the map, in meters above sea level. Over
+    /// terrain that clamps the center (the map's
+    /// `center_clamped_to_ground`), a command's altitude gives way to the
+    /// ground where the command ends, once that ground is known; elsewhere
+    /// it holds.
     pub center_altitude: Option<f64>,
     /// Padding around the interior of the view that affects the frame of
     /// reference for `center`.
@@ -184,9 +188,9 @@ pub struct CameraDelta {
     /// The screen point that `scale`, `bearing` and `pitch` keep in place,
     /// and that a drag's `offset` holds: on the globe the location under it
     /// follows the drag, as the C++ globe's `moveBy(offset, anchor)` does,
-    /// while a flat map moves the same wherever it is held. It needs one of
-    /// them, and it combines with `offset` and one of the others only in a
-    /// delta without a duration.
+    /// and over terrain the ground under it does, while a flat map moves the
+    /// same wherever it is held. It needs one of them, and it combines with
+    /// `offset` and one of the others only in a delta without a duration.
     pub anchor: Option<ScreenCoordinate>,
     /// How the gesture keeps moving after this delta, which only a delta in
     /// the [`GesturePhase::End`] phase carries. Its parts' snaps apply only

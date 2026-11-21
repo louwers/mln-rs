@@ -295,11 +295,13 @@ impl Scene {
             tile_lod_zoom_shift: 0.0,
             tile_lod_mode: TileLodMode::Default,
             subdivision_granularity: SubdivisionGranularitySetting::none(),
+            layout_terrain: false,
             global_state: None,
             is_update_synchronous: false,
             font_faces: None,
             glyph_pbfs: true,
             placement_commits: 0,
+            terrain: None,
         };
         // The first frame lays the tiles out.
         let relayout = !self.laid_out;

@@ -3,7 +3,9 @@
 // The layer keeps the render targets per bucket id
 // (`bucket_render_targets`), with the bucket's prepare generation (see
 // hillshade_bucket.rs), and a tile's draw takes the bucket's masked geometry
-// again only when it changed.
+// again only when it changed. The slopes depend on nothing but the bucket's
+// DEM and its tile's zoom, so each target is prepared once, and again after
+// a frame that failed on the GPU.
 
 use std::collections::hash_map::Entry;
 use std::mem::offset_of;
@@ -89,6 +91,8 @@ struct BucketTarget {
     prepare: SingleDraw,
     /// The bucket's prepare generation the target was made at.
     generation: u64,
+    /// Whether the target holds the slopes.
+    prepared: bool,
 }
 
 /// What the layer keeps of a tile: the draw that shades the slopes of its
@@ -135,9 +139,8 @@ pub(crate) struct RenderHillshadeLayer {
     bucket_render_targets: HashMap<SimpleIdentity, BucketTarget>,
     /// The buckets of the frame's tiles, which keep their render targets.
     live_buckets: HashSet<SimpleIdentity>,
-    /// The illumination of the evaluation the draws last drew with, and its
-    /// number of light sources: a viewport anchor's takes the bearing of the
-    /// first frame that draws with it.
+    /// The illumination of the evaluation the draws last drew with, before
+    /// a viewport anchor turns it by the map's bearing.
     illumination: Option<(Arc<EvaluatedLayer<Hillshade>>, Illumination)>,
 }
 
@@ -290,6 +293,7 @@ fn hillshade_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeArra
 impl TypedLayer for RenderHillshadeLayer {
     type Type = Hillshade;
     type Drawing = TileDraws<HillshadeTile>;
+    const DRAPES: bool = true;
 
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
@@ -304,6 +308,10 @@ impl TypedLayer for RenderHillshadeLayer {
         if self.base.projection_variant == ProjectionVariant::Mercator {
             self.globe_meshes.clear();
         }
+    }
+
+    fn drapes_by_bearing(&self, evaluated: &EvaluatedLayer<Hillshade>) -> bool {
+        *evaluated.paint.hillshade_illumination_anchor.uniform() == HillshadeIlluminationAnchorType::Viewport
     }
 
     fn passes(&self, evaluated: &EvaluatedLayer<Hillshade>) -> RenderPass {
@@ -344,12 +352,6 @@ impl TypedLayer for RenderHillshadeLayer {
             ResamplingType::Linear => TextureFilterType::Linear,
             ResamplingType::Nearest => TextureFilterType::Nearest,
         };
-
-        // Drop the render targets of buckets that are no longer rendered.
-        let live_buckets = &mut self.live_buckets;
-        live_buckets.clear();
-        live_buckets.extend(render_tiles.iter().filter_map(|tile| Some(tile.bucket()?.base.bucket_id)));
-        self.bucket_render_targets.retain(|id, _| live_buckets.contains(id));
 
         // The illumination, which the first draw computes.
         let mut illumination = None;
@@ -478,11 +480,17 @@ impl TypedLayer for RenderHillshadeLayer {
         });
     }
 
-    /// Keeps the source's maximum zoom, which the DEMs' preparation reads.
-    fn update(&mut self, params: &mut LayerUpdateParameters<'_>, _tiles: &[FrameTile<'_, Hillshade>]) {
+    /// Keeps the source's maximum zoom, which the DEMs' preparation reads,
+    /// and drops the render targets of the buckets of tiles the frame
+    /// doesn't draw. The frame's draws and its drapes' share the others.
+    fn update(&mut self, params: &mut LayerUpdateParameters<'_>, tiles: &[FrameTile<'_, Hillshade>]) {
         if let Some(max_zoom) = params.source.and_then(RenderSource::max_zoom) {
             self.maxzoom = max_zoom;
         }
+        let live_buckets = &mut self.live_buckets;
+        live_buckets.clear();
+        live_buckets.extend(tiles.iter().filter_map(|tile| Some(tile.bucket()?.base.bucket_id)));
+        self.bucket_render_targets.retain(|id, _| live_buckets.contains(id));
     }
 
     fn release(&mut self) {
@@ -493,25 +501,33 @@ impl TypedLayer for RenderHillshadeLayer {
 impl RenderLayer for RenderHillshadeLayer {
     fn upload_render_targets(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
         if self.base.is_renderable {
-            for target in self.bucket_render_targets.values_mut() {
+            for target in self.bucket_render_targets.values_mut().filter(|target| !target.prepared) {
                 target.prepare.upload(gpu, context);
             }
         }
     }
 
+    /// Prepares the slopes of the targets that don't hold them yet.
     fn render_targets(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
         if !self.base.is_renderable {
             return;
         }
-        for BucketTarget { render_target, prepare, .. } in self.bucket_render_targets.values_mut() {
+        for target in self.bucket_render_targets.values_mut().filter(|target| !target.prepared) {
             parameters.current_layer = 0;
-            let Some(mut passes) = render_target.begin(gpu, parameters) else {
+            let Some(mut passes) = target.render_target.begin(gpu, parameters) else {
                 continue;
             };
             while passes.next(parameters) {
-                prepare.render(gpu, parameters);
+                target.prepare.render(gpu, parameters);
             }
             passes.end(gpu, parameters);
+            target.prepared = true;
+        }
+    }
+
+    fn prepare_again(&mut self) {
+        for target in self.bucket_render_targets.values_mut() {
+            target.prepared = false;
         }
     }
 }
@@ -582,7 +598,13 @@ impl BucketTarget {
         };
         prepare.write_pod(gpu, ID_HILLSHADE_PREPARE_TILE_PROPS_UBO, &tile_props, context);
 
-        BucketTarget { render_target, _dem: dem, prepare, generation: bucket.render_target_generation() }
+        BucketTarget {
+            render_target,
+            _dem: dem,
+            prepare,
+            generation: bucket.render_target_generation(),
+            prepared: false,
+        }
     }
 }
 
@@ -613,30 +635,33 @@ impl RenderHillshadeLayer {
         }
     }
 
-    /// The illumination of the layer's evaluation `layer`, kept in `cache`,
-    /// which this computes with the frame's bearing the first time it draws
-    /// with the evaluation.
+    /// The illumination of the layer's evaluation `layer` at the frame's
+    /// bearing, which a viewport anchor turns its lights by. The
+    /// evaluation's own is kept in `cache`, so that a turning map doesn't
+    /// compute it again.
     fn illumination(
         cache: &mut Option<(Arc<EvaluatedLayer<Hillshade>>, Illumination)>,
         layer: &Arc<EvaluatedLayer<Hillshade>>,
         parameters: &PaintParameters<'_>,
     ) -> Illumination {
-        if let Some((cached_layer, illumination)) = cache
-            && Arc::ptr_eq(cached_layer, layer)
-        {
-            return *illumination;
-        }
         let evaluated = &layer.paint;
-        let mut illumination = illumination_properties(evaluated);
+        let mut illumination = match cache {
+            Some((cached_layer, illumination)) if Arc::ptr_eq(cached_layer, layer) => *illumination,
+            _ => {
+                let properties = illumination_properties(evaluated);
+                let props = pack_evaluated_props(&properties, evaluated.hillshade_accent_color.uniform());
+                let illumination = Illumination { props, num_lights: properties.direction_radians.len() };
+                *cache = Some((Arc::clone(layer), illumination));
+                illumination
+            }
+        };
         if *evaluated.hillshade_illumination_anchor.uniform() == HillshadeIlluminationAnchorType::Viewport {
             let bearing = parameters.view.angle() as f32;
-            for azimuth in &mut illumination.direction_radians {
+            let lights = illumination.num_lights.min(illumination.props.azimuths.len());
+            for azimuth in &mut illumination.props.azimuths[..lights] {
                 *azimuth -= bearing;
             }
         }
-        let props = pack_evaluated_props(&illumination, evaluated.hillshade_accent_color.uniform());
-        let illumination = Illumination { props, num_lights: illumination.direction_radians.len() };
-        *cache = Some((Arc::clone(layer), illumination));
         illumination
     }
 }

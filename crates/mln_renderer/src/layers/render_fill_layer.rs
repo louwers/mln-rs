@@ -23,7 +23,7 @@ use mln_style::PropertyEvaluationParameters;
 use mln_style::layer_type::LayerStyle;
 use mln_style::layers::Fill;
 use mln_style::layers::fill_layer_properties::FillPaintProperties;
-use mln_style_types::AlignmentType;
+use mln_style_types::{AlignmentType, TranslateAnchorType};
 use mln_util::Color;
 use mln_util::constants::TILE_SIZE_D;
 use mln_util::error::Error;
@@ -70,6 +70,11 @@ use crate::tile_matrix::{projection_data, to_projection_ubo};
 /// pattern draws instances there too.
 const LINE_WIDTH: f32 = 2.0;
 
+/// The outlines' line width in a terrain tile's drape, in its texels: GL JS
+/// draws them 1 px wide there, which its terrain fixtures' expected images
+/// show at fill edges.
+const DRAPE_LINE_WIDTH: f32 = 1.0;
+
 /// Whether the layer draws the outlines as quads, which read the buckets'
 /// outline ends, rather than as lines (`LINE_WIDTH`).
 pub(crate) fn draws_outline_quads(context: &Context) -> bool {
@@ -90,9 +95,10 @@ enum Outlines {
 }
 
 impl Outlines {
-    /// How the outlines of a layer draw on `context`'s device.
-    fn of(context: &Context, pattern: bool) -> Outlines {
-        if !draws_outline_quads(context) {
+    /// How the outlines of a layer draw on `context`'s device, into a drape
+    /// if `drape`: as lines of 1 px there, which every device draws.
+    fn of(context: &Context, pattern: bool, drape: bool) -> Outlines {
+        if drape || !draws_outline_quads(context) {
             Outlines::Lines
         } else if context.caps().binds_vertex_buffers && !pattern {
             Outlines::Pulled
@@ -256,6 +262,8 @@ struct TileBuilder<'a> {
     /// The triangles of the pulled outlines' quads
     /// (`RenderStaticData::wall_indexes`), where the layer draws them.
     pulled_indexes: Option<&'a SharedIndexes>,
+    /// The width of the outlines where the layer draws them as lines.
+    line_width: f32,
     /// The depth mask of the fills without a pattern, which the first tile
     /// they are built for sets.
     fill_depth: Option<DepthMaskType>,
@@ -400,7 +408,7 @@ impl TileBuilder<'_> {
                 let line_geometry = fill_geometry(
                     copy_shared_attributes(&vertex_attrs),
                     fill_vertex_count,
-                    DrawMode::Lines(LINE_WIDTH),
+                    DrawMode::Lines(self.line_width),
                     bucket_indexes(geometry, &bucket.basic_lines)?.into(),
                     &bucket.basic_line_segments,
                 );
@@ -611,6 +619,7 @@ impl RenderFillLayer {
 impl TypedLayer for RenderFillLayer {
     type Type = Fill;
     type Drawing = TileDraws<FillTile>;
+    const DRAPES: bool = true;
 
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
@@ -630,6 +639,12 @@ impl TypedLayer for RenderFillLayer {
         if self.values.unevaluated.fill_outline_color.is_undefined() {
             evaluated.fill_outline_color = evaluated.fill_color.clone();
         }
+    }
+
+    fn drapes_by_bearing(&self, evaluated: &EvaluatedLayer<Fill>) -> bool {
+        let paint = &evaluated.paint;
+        *paint.fill_translate_anchor.uniform() == TranslateAnchorType::Viewport
+            && *paint.fill_translate.uniform() != [0.0, 0.0]
     }
 
     fn passes(&self, evaluated: &EvaluatedLayer<Fill>) -> RenderPass {
@@ -658,9 +673,10 @@ impl TypedLayer for RenderFillLayer {
         render_tiles: &[FrameTile<'_, Fill>],
     ) {
         let pattern = !self.values.unevaluated.fill_pattern.is_undefined();
-        let outlines = Outlines::of(paint_parameters.context, pattern);
+        let drape = paint_parameters.in_drape();
+        let outlines = Outlines::of(paint_parameters.context, pattern, drape);
         // The outlines draw as lines, or as quads on a device that draws no
-        // `LINE_WIDTH` lines and rasterizes on the GPU.
+        // `LINE_WIDTH` lines and rasterizes on the GPU, outside drapes.
         let (fill_program, outline_program) = match (pattern, outlines) {
             (false, Outlines::Lines) => (&programs::FILL, &programs::FILL_OUTLINE),
             (false, Outlines::Instanced) => (&programs::FILL, &programs::FILL_OUTLINE_INSTANCED),
@@ -686,6 +702,7 @@ impl TypedLayer for RenderFillLayer {
             projection_variant: self.base.projection_variant,
             outline_quad: self.outline_quad.as_ref().filter(|_| outlines == Outlines::Instanced),
             pulled_indexes: self.pulled_indexes.as_ref().filter(|_| outlines == Outlines::Pulled),
+            line_width: if drape { DRAPE_LINE_WIDTH } else { LINE_WIDTH },
             fill_depth: None,
         };
 

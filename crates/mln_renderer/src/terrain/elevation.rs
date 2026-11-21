@@ -1,0 +1,506 @@
+//! The ground a frame drew, as the map's camera reads it.
+
+use std::fmt;
+use std::sync::Arc;
+
+use glam::DVec2;
+use mln_map_types::{Elevation, TileCoordinate};
+use mln_tile_id::{CanonicalTileID, OverscaledTileID, UnwrappedTileID};
+use mln_util::dem::{self, DemCoords, DemUnpack};
+use mln_util::geo::LatLng;
+use mln_util::hash::HashMap;
+use mln_util::image::PremultipliedImage;
+use smallvec::SmallVec;
+
+use crate::terrain::cover::{TerrainCover, dem_bucket, place_in, world_copy};
+use crate::tile::source_tiles::SourceTiles;
+
+/// The DEM a terrain tile drew with.
+pub(super) struct DrawnDem {
+    /// The DEM tile it read.
+    pub(super) id: OverscaledTileID,
+    /// The DEM tile's bordered image, `dim + 2` texels a side.
+    pub(super) image: Arc<PremultipliedImage>,
+    pub(super) dim: u32,
+    coords: DemCoords,
+    /// The lowest and highest heights of the DEM tile's own pixels, in
+    /// meters, not exaggerated.
+    min: f32,
+    max: f32,
+}
+
+/// The drawn tiles over a tile ([`TerrainElevation::drawn_over`]), each with
+/// the DEM it reads.
+pub(super) enum DrawnOver<'a> {
+    /// The tile is in one drawn tile, which reads this DEM.
+    Holding(Option<&'a DrawnDem>),
+    /// The drawn tiles inside the tile, by their tile.
+    Inside(SmallVec<[(CanonicalTileID, Option<&'a DrawnDem>); 8]>),
+}
+
+/// A terrain tile as a frame drew it.
+struct DrawnTile {
+    id: OverscaledTileID,
+    dem: Option<DrawnDem>,
+    /// Whether its own DEM tile is still loading, so that it reads an
+    /// ancestor's or none.
+    loading: bool,
+    /// Whether the frame drew it: all but the tile under the center that
+    /// the cover keeps undrawn ([`TerrainCover::center`]).
+    drawn: bool,
+}
+
+/// The terrain's tiles as a frame drew them, with the DEM data each read: the
+/// map's camera samples it by the height rule the shaders follow, so it
+/// stands on the surface that drew. It shares the DEM tiles' images, which
+/// don't change once shared.
+pub(crate) struct TerrainElevation {
+    /// Nearest the center first, then the tile under the center when none
+    /// drew there ([`TerrainCover::center`]).
+    tiles: Vec<DrawnTile>,
+    /// The zoom levels of the drawn tiles, finest first.
+    zooms: Vec<u8>,
+    /// Where each drawn tile is in `tiles`, the first of its world copies,
+    /// which all read the same DEM.
+    index: HashMap<CanonicalTileID, usize>,
+    /// Where each drawn tile is in `tiles`, by its world copy.
+    copies: HashMap<UnwrappedTileID, usize>,
+    /// The DEM tiles the cover keeps loaded that no tile reads, as the coarse
+    /// ones that cull it, which hold the ground off the tiles, in the cover's
+    /// order.
+    held: Vec<DrawnDem>,
+    /// Each DEM tile the tiles read or it holds: where the first tile that
+    /// reads it is in `tiles`, or, past their end, where it is in `held`.
+    dems: HashMap<CanonicalTileID, usize>,
+    /// [`Elevation::range`]'s.
+    range: Option<(f64, f64)>,
+    unpack: DemUnpack,
+    exaggeration: f32,
+}
+
+impl fmt::Debug for TerrainElevation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TerrainElevation")
+            .field("tiles", &self.tiles.len())
+            .field("unpack", &self.unpack)
+            .field("exaggeration", &self.exaggeration)
+            .finish_non_exhaustive()
+    }
+}
+
+/// The DEM tiles of `cover` that `dem`, the terrain source's tiles, has data
+/// of and that `read` doesn't say a tile reads, in the cover's order.
+fn held_dems<'a>(
+    cover: &'a TerrainCover,
+    dem: Option<&'a SourceTiles>,
+    read: impl Fn(&OverscaledTileID) -> bool + 'a,
+) -> impl Iterator<Item = DrawnDem> + 'a {
+    let held = cover.dem_tiles.iter().filter(move |id| !read(id));
+    held.filter_map(move |&id| drawn_dem(dem, Some((id, DemCoords::OWN))))
+}
+
+/// The DEM that a tile of `cover` bound, as `dem`, the terrain source's
+/// tiles, hold it.
+fn drawn_dem(dem: Option<&SourceTiles>, bound: Option<(OverscaledTileID, DemCoords)>) -> Option<DrawnDem> {
+    let (id, coords) = bound?;
+    let data = dem_bucket(dem?.tile(&id)?)?.dem_data();
+    let dim = u32::try_from(data.dim).ok()?;
+    let (min, max) = data.range();
+    Some(DrawnDem { id, image: Arc::clone(data.shared_image()), dim, coords, min, max })
+}
+
+impl TerrainElevation {
+    /// The ground of the tiles of `cover`, as they bound their DEM from
+    /// `dem`, the terrain source's tiles, decoded by `unpack` and raised by
+    /// `exaggeration`.
+    pub(crate) fn new(
+        cover: &TerrainCover,
+        dem: Option<&SourceTiles>,
+        unpack: DemUnpack,
+        exaggeration: f32,
+    ) -> TerrainElevation {
+        let drawn = cover.tiles.iter().map(|tile| (tile, true));
+        let tiles: Vec<DrawnTile> = drawn
+            .chain(cover.center.iter().map(|tile| (tile, false)))
+            .map(|(tile, drawn)| DrawnTile {
+                id: tile.id,
+                dem: drawn_dem(dem, tile.dem),
+                loading: tile.dem_loading,
+                drawn,
+            })
+            .collect();
+        let mut index = HashMap::default();
+        let mut copies = HashMap::default();
+        let mut dems = HashMap::default();
+        for (at, tile) in tiles.iter().enumerate() {
+            if let Some(dem) = &tile.dem {
+                dems.entry(dem.id.canonical).or_insert(at);
+            }
+        }
+        let held: Vec<DrawnDem> = held_dems(cover, dem, |id| dems.contains_key(&id.canonical)).collect();
+        for (at, dem) in held.iter().enumerate() {
+            dems.entry(dem.id.canonical).or_insert(tiles.len() + at);
+        }
+        let mut zooms = Vec::new();
+        let mut range: Option<(f64, f64)> = None;
+        for (at, tile) in tiles.iter().enumerate().filter(|(_, tile)| tile.drawn) {
+            index.entry(tile.id.canonical).or_insert(at);
+            copies.insert(tile.id.to_unwrapped(), at);
+            if !zooms.contains(&tile.id.canonical.z) {
+                zooms.push(tile.id.canonical.z);
+            }
+            let (min, max) = tile.dem.as_ref().map_or((0.0, 0.0), |dem| {
+                let (min, max) = (f64::from(dem.min * exaggeration), f64::from(dem.max * exaggeration));
+                (min.min(max), min.max(max))
+            });
+            range = Some(range.map_or((min, max), |(low, high)| (low.min(min), high.max(max))));
+        }
+        zooms.sort_unstable_by(|a, b| b.cmp(a));
+        TerrainElevation { tiles, zooms, index, copies, held, dems, range, unpack, exaggeration }
+    }
+
+    /// Whether `cover`'s tiles, binding their DEM from `dem`, draw the same
+    /// ground, decoded by `unpack` and raised by `exaggeration`: the same
+    /// tiles, drawn or kept under the center, reading the same DEM images in
+    /// the same places, and the same DEM images held off them.
+    pub(crate) fn draws_as(
+        &self,
+        cover: &TerrainCover,
+        dem: Option<&SourceTiles>,
+        unpack: DemUnpack,
+        exaggeration: f32,
+    ) -> bool {
+        // A DEM image this holds can't be freed and its address reused, and
+        // one that changes after it is shared is copied first, so equal
+        // addresses are equal images.
+        let same_dem = |drawn: &Option<DrawnDem>, bound: Option<(OverscaledTileID, DemCoords)>| match (
+            drawn,
+            drawn_dem(dem, bound),
+        ) {
+            (None, None) => true,
+            (Some(drawn), Some(bound)) => {
+                drawn.id == bound.id && drawn.coords == bound.coords && Arc::ptr_eq(&drawn.image, &bound.image)
+            }
+            _ => false,
+        };
+        self.unpack == unpack
+            && self.exaggeration == exaggeration
+            && self.tiles.len() == cover.tiles.len() + usize::from(cover.center.is_some())
+            && self.tiles.iter().zip(cover.tiles.iter().chain(&cover.center)).enumerate().all(
+                |(index, (drawn, tile))| {
+                    drawn.id == tile.id
+                        && drawn.loading == tile.dem_loading
+                        && drawn.drawn == (index < cover.tiles.len())
+                        && same_dem(&drawn.dem, tile.dem)
+                },
+            )
+            && {
+                // The cover's tiles read the DEM tiles this one's do, as
+                // checked above.
+                let read =
+                    |id: &OverscaledTileID| self.dems.get(&id.canonical).is_some_and(|&at| at < self.tiles.len());
+                let mut held = held_dems(cover, dem, read);
+                self.held.iter().all(|kept| {
+                    held.next().is_some_and(|dem| kept.id == dem.id && Arc::ptr_eq(&kept.image, &dem.image))
+                }) && held.next().is_none()
+            }
+    }
+
+    /// The bytes of the DEM images it holds, each once.
+    pub(crate) fn dem_bytes(&self) -> usize {
+        let read = self.tiles.iter().filter_map(|tile| tile.dem.as_ref());
+        let images = read.chain(&self.held).map(|dem| &dem.image);
+        images
+            .clone()
+            .enumerate()
+            .filter(|&(index, image)| !images.clone().take(index).any(|before| Arc::ptr_eq(before, image)))
+            .map(|(_, image)| image.bytes())
+            .sum()
+    }
+
+    /// The drawn tile at `world`, a Web Mercator point at zoom 0 whose y is
+    /// within the world, and where in it, from 0 to 1 across, y down: the
+    /// finest that has it ([`place_in`]'s, which puts a point on an edge
+    /// between tiles in one of them). In `world`'s copy (`in_copy`), else in
+    /// any copy: every world copy of a tile reads the same DEM.
+    fn drawn_tile_at(&self, world: DVec2, in_copy: bool) -> Option<(&DrawnTile, [f32; 2])> {
+        if !world.x.is_finite() {
+            return None;
+        }
+        let (copy, x) = world_copy(world.x);
+        // No tile is in a copy past the range of the wraps.
+        let wrap = if in_copy { Some(i16::try_from(copy as i64).ok()?) } else { None };
+        self.zooms.iter().find_map(|&z| {
+            let tiles = f64::from(1u32 << z);
+            let (u, v) = (x * tiles, world.y * tiles);
+            // The world's bottom edge is in the last row's tiles.
+            let (column, row) = (u.floor(), v.floor().min(tiles - 1.0));
+            let canonical = CanonicalTileID::new(z, column as u32, row as u32);
+            let at = match wrap {
+                Some(wrap) => self.copies.get(&UnwrappedTileID::with_wrap(wrap, canonical)),
+                None => self.index.get(&canonical),
+            };
+            Some((&self.tiles[*at?], [(u - column) as f32, (v - row) as f32]))
+        })
+    }
+
+    /// The tile at `location`, and where in it: a drawn one, else the tile
+    /// the cover keeps under the center.
+    fn tile_at_location(&self, location: LatLng) -> Option<(&DrawnTile, [f32; 2])> {
+        let world = TileCoordinate::from_lat_lng(0.0, &location).p;
+        let world = DVec2::new(world.x, world.y.clamp(0.0, 1.0));
+        self.drawn_tile_at(world, false).or_else(|| {
+            let center = self.tiles.last().filter(|tile| !tile.drawn)?;
+            let [u, v] = place_in(center.id.canonical, [world.x, world.y])?;
+            Some((center, [u as f32, v as f32]))
+        })
+    }
+
+    /// [`Elevation::at`] and [`Elevation::min_at`] as the tiles, scanned in
+    /// order, give them, which the index must agree with.
+    #[cfg(test)]
+    pub(crate) fn scanned(&self, location: LatLng) -> (Option<f64>, Option<f64>) {
+        let world = TileCoordinate::from_lat_lng(0.0, &location).p;
+        let found = self.tiles.iter().find_map(|tile| {
+            let [u, v] = place_in(tile.id.canonical, [world.x, world.y])?;
+            Some((tile, [u as f32, v as f32]))
+        });
+        found.map_or((None, None), |(tile, uv)| (self.height_of(tile, uv), Some(self.min_of(tile))))
+    }
+
+    /// [`Elevation::surface_at`] as the drawn tiles of `world`'s copy,
+    /// scanned in order, give it, which the index must agree with.
+    #[cfg(test)]
+    pub(crate) fn scanned_surface(&self, world: DVec2) -> Option<f64> {
+        let copy = world_copy(world.x).0;
+        let found = self.tiles.iter().filter(|tile| tile.drawn && f64::from(tile.id.wrap) == copy).find_map(|tile| {
+            let [u, v] = place_in(tile.id.canonical, [world.x, world.y])?;
+            Some((tile, [u as f32, v as f32]))
+        });
+        let (tile, uv) = found?;
+        Some(tile.dem.as_ref().map_or(0.0, |dem| self.height(dem, uv)))
+    }
+
+    /// The height `tile` gives at `uv`: `None` while its own DEM tile loads
+    /// with no ancestor's in its place.
+    fn height_of(&self, tile: &DrawnTile, uv: [f32; 2]) -> Option<f64> {
+        // A tile whose own DEM tile loads draws an ancestor's in its place,
+        // which the camera stands on meanwhile, as in GL JS.
+        match &tile.dem {
+            Some(dem) => Some(self.height(dem, uv)),
+            None => (!tile.loading).then_some(0.0),
+        }
+    }
+
+    /// The lowest height of the DEM `tile` reads, 0 for none.
+    fn min_of(&self, tile: &DrawnTile) -> f64 {
+        tile.dem.as_ref().map_or(0.0, |dem| f64::from(dem.min * self.exaggeration))
+    }
+
+    /// The height that `dem` gives at `uv` by the height rule, in meters with
+    /// the exaggeration.
+    fn height(&self, dem: &DrawnDem, uv: [f32; 2]) -> f64 {
+        dem_height(&dem.image, dem.dim, dem.coords, uv, self.unpack, self.exaggeration)
+    }
+
+    /// The DEM tile at `at` of `dems`.
+    fn dem_at(&self, at: usize) -> Option<&DrawnDem> {
+        match self.tiles.get(at) {
+            Some(tile) => tile.dem.as_ref(),
+            None => self.held.get(at - self.tiles.len()),
+        }
+    }
+
+    /// The DEM tiles the drawn tiles read, and with `held`, those that the
+    /// tile under the center reads and those it holds off the tiles, each
+    /// once.
+    pub(super) fn dems(&self, held: bool) -> impl Iterator<Item = &DrawnDem> {
+        let drawn = |at: usize| self.tiles.get(at).is_some_and(|tile| tile.drawn);
+        self.dems.values().filter(move |&&at| held || drawn(at)).filter_map(|&at| self.dem_at(at))
+    }
+
+    /// Of the DEM tiles the tiles read, and those it holds off them, the
+    /// deepest that holds `tile`.
+    pub(super) fn dem_holding(&self, tile: CanonicalTileID) -> Option<&DrawnDem> {
+        (0..=tile.z).rev().find_map(|z| {
+            let dz = tile.z - z;
+            self.dem_at(*self.dems.get(&CanonicalTileID::new(z, tile.x >> dz, tile.y >> dz))?)
+        })
+    }
+
+    /// The drawn tiles over `tile`, in its world copy, and the DEM each
+    /// reads (`None` where flat): the one that holds it, if one does
+    /// ([`DrawnOver::Holding`]), else those inside it.
+    pub(super) fn drawn_over(&self, tile: &OverscaledTileID) -> DrawnOver<'_> {
+        let canonical = tile.canonical;
+        let holding = self.zooms.iter().filter(|&&z| z <= canonical.z).find_map(|&z| {
+            let dz = canonical.z - z;
+            let ancestor = CanonicalTileID::new(z, canonical.x >> dz, canonical.y >> dz);
+            self.copies.get(&UnwrappedTileID::with_wrap(tile.wrap, ancestor))
+        });
+        if let Some(&at) = holding {
+            return DrawnOver::Holding(self.tiles[at].dem.as_ref());
+        }
+        let inside = self.tiles.iter().filter(|drawn| {
+            let id = drawn.id;
+            drawn.drawn && id.wrap == tile.wrap && id.canonical.z > canonical.z && {
+                let dz = id.canonical.z - canonical.z;
+                id.canonical.x >> dz == canonical.x && id.canonical.y >> dz == canonical.y
+            }
+        });
+        DrawnOver::Inside(inside.map(|drawn| (drawn.id.canonical, drawn.dem.as_ref())).collect())
+    }
+
+    /// How the DEM decodes.
+    pub(crate) fn unpack(&self) -> DemUnpack {
+        self.unpack
+    }
+
+    /// What the heights are raised by.
+    pub(crate) fn exaggeration(&self) -> f32 {
+        self.exaggeration
+    }
+}
+
+/// The height, in meters raised by `exaggeration`, that the DEM of `dim`
+/// pixels a side whose bordered image is `image` gives at `uv` through
+/// `coords`, decoded by `unpack`: the height rule of `mln_util::dem`, which
+/// the shaders follow.
+pub(crate) fn dem_height(
+    image: &PremultipliedImage,
+    dim: u32,
+    coords: DemCoords,
+    uv: [f32; 2],
+    unpack: DemUnpack,
+    exaggeration: f32,
+) -> f64 {
+    let stride = dim as usize + 2;
+    let texel = |x: u32, y: u32| {
+        let start = (y as usize * stride + x as usize) * 4;
+        let texel: [u8; 4] = image.data[start..start + 4].try_into().unwrap_or_default();
+        unpack.decode(texel)
+    };
+    f64::from(dem::sample(dim, coords, uv, texel) * exaggeration)
+}
+
+impl Elevation for TerrainElevation {
+    fn at(&self, location: LatLng) -> Option<f64> {
+        let (tile, uv) = self.tile_at_location(location)?;
+        self.height_of(tile, uv)
+    }
+
+    fn min_at(&self, location: LatLng) -> Option<f64> {
+        let (tile, _) = self.tile_at_location(location)?;
+        Some(self.min_of(tile))
+    }
+
+    fn surface_at(&self, world: DVec2) -> Option<f64> {
+        if !(0.0..=1.0).contains(&world.y) {
+            return None;
+        }
+        let (tile, uv) = self.drawn_tile_at(world, true)?;
+        Some(tile.dem.as_ref().map_or(0.0, |dem| self.height(dem, uv)))
+    }
+
+    fn range(&self) -> Option<(f64, f64)> {
+        self.range
+    }
+}
+
+#[cfg(test)]
+impl TerrainElevation {
+    /// Ground `meters` high everywhere on `tile`, a drawn terrain tile that
+    /// reads its own DEM tile, Terrarium encoded, and flat off it.
+    pub(crate) fn level(tile: OverscaledTileID, meters: f64) -> TerrainElevation {
+        TerrainElevation::shaped(tile, |_| meters)
+    }
+
+    /// Ground on `tile`, a drawn terrain tile that reads its own DEM tile,
+    /// Terrarium encoded, and flat off it, as high in meters as `meters`
+    /// gives at the centers of its DEM pixels, from the tile's uv: linear in
+    /// uv everywhere on the tile where `meters` is.
+    pub(crate) fn shaped(tile: OverscaledTileID, meters: impl Fn(DVec2) -> f64) -> TerrainElevation {
+        use mln_util::size::Size;
+        use mln_util::tileset::RasterEncoding;
+
+        let dim = 64;
+        let mut image = PremultipliedImage::new(Size::new(dim + 2, dim + 2));
+        let (mut min, mut max) = (f64::INFINITY, f64::NEG_INFINITY);
+        let width = dim as usize + 2;
+        for (index, texel) in image.data.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+            // The border pixels, outside the tile, at -1 and dim.
+            let pixel = DVec2::new((index % width) as f64, (index / width) as f64);
+            let meters = meters((pixel - 0.5) / f64::from(dim));
+            (min, max) = (min.min(meters), max.max(meters));
+            // Terrarium: r · 256 + g + b / 256 − 32768 meters.
+            let encoded = meters + 32768.0;
+            let (r, g) = ((encoded / 256.0).floor(), encoded.rem_euclid(256.0).floor());
+            let b = ((encoded - r * 256.0 - g) * 256.0).round();
+            *texel = [r as u8, g as u8, b as u8, 255];
+        }
+        let dem = DrawnDem { id: tile, image: Arc::new(image), dim, coords: DemCoords::OWN, min: 0.0, max: 0.0 };
+        let drawn = DrawnTile { id: tile, dem: Some(dem), loading: false, drawn: true };
+        TerrainElevation {
+            tiles: vec![drawn],
+            zooms: vec![tile.canonical.z],
+            index: [(tile.canonical, 0)].into_iter().collect(),
+            copies: [(tile.to_unwrapped(), 0)].into_iter().collect(),
+            held: Vec::new(),
+            dems: [(tile.canonical, 0)].into_iter().collect(),
+            range: Some((min, max)),
+            unpack: DemUnpack::of(RasterEncoding::Terrarium),
+            exaggeration: 1.0,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use mln_util::tileset::RasterEncoding;
+
+    use super::*;
+    use crate::terrain::cover::{ElevationRanges, TerrainTile};
+
+    /// A point in a world copy past the range of the tiles' wraps has no
+    /// surface, though a tile of the last copy in range drew: no copy of
+    /// the point's stands in for it.
+    /// Level ground stands as high as it was made, on its tile and on a
+    /// tile inside it.
+    #[test]
+    fn level_ground_is_as_high_as_it_was_made() {
+        use glam::Vec2;
+
+        use crate::terrain::TileFeatures;
+
+        let tile = OverscaledTileID::new(12, 0, CanonicalTileID::new(12, 2000, 1500));
+        let ground = TerrainElevation::level(tile, 812.25);
+        let point = Vec2::new(1000.0, 7000.0);
+        assert_eq!(Some(812.25), ground.ground(&tile, TileFeatures::Anchored).height(point, point));
+        let inside = OverscaledTileID::new(14, 0, CanonicalTileID::new(14, 8001, 6002));
+        assert_eq!(Some(812.25), ground.ground(&inside, TileFeatures::Anchored).height(point, point));
+    }
+
+    #[test]
+    fn a_point_in_a_copy_past_the_wraps_has_no_surface() {
+        let tile = |wrap: i16| TerrainTile {
+            id: OverscaledTileID::new(0, wrap, CanonicalTileID::new(0, 0, 0)),
+            dem: None,
+            dem_loading: false,
+        };
+        let cover = TerrainCover {
+            source_id: "dem".to_owned(),
+            tile_size: 512,
+            tiles: vec![tile(i16::MAX), tile(i16::MIN)],
+            center: None,
+            dem_tiles: Vec::new(),
+            ranges: ElevationRanges::default(),
+        };
+        let ground = TerrainElevation::new(&cover, None, DemUnpack::of(RasterEncoding::Terrarium), 1.0);
+        for copy in [i16::MAX, i16::MIN] {
+            assert_eq!(Some(0.0), ground.surface_at(DVec2::new(f64::from(copy) + 0.5, 0.5)), "copy {copy}");
+        }
+        for x in [f64::from(i16::MAX) + 1.5, 1e12, f64::from(i16::MIN) - 0.5, -1e12] {
+            assert_eq!(None, ground.surface_at(DVec2::new(x, 0.5)), "x {x}");
+        }
+    }
+}

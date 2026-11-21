@@ -3,7 +3,6 @@ use mln_gfx::scissor_rect::ScissorRect;
 use mln_gfx::texture2d::{SamplerState, texture_format};
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TexturePixelType, TextureWrapType};
 use mln_util::Color;
-use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 use crate::gfx::context::Context;
@@ -55,12 +54,12 @@ impl RenderTarget {
         let pass = match self.pass(gpu, parameters.context) {
             Ok(pass) => pass,
             Err(error) => {
-                Log::error(Event::Render, format!("Beginning a render target's pass failed: {error}"));
+                parameters.context.fail(format!("Beginning a render target's pass failed: {error}"));
                 return None;
             }
         };
         if let Err(error) = parameters.begin_pass(gpu, pass) {
-            Log::error(Event::Render, format!("Beginning a render target's pass failed: {error}"));
+            parameters.context.fail(format!("Beginning a render target's pass failed: {error}"));
             return None;
         }
         let prev_scissor_rect = parameters.scissor_rect;
@@ -142,7 +141,7 @@ impl TargetPasses {
     /// Ends the draws into the render target, through `gpu`, the context's.
     pub(crate) fn end(self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
         if let Err(error) = parameters.end_pass(gpu) {
-            Log::error(Event::Render, format!("Ending a render target's pass failed: {error}"));
+            parameters.context.fail(format!("Ending a render target's pass failed: {error}"));
         }
         parameters.scissor_rect = self.prev_scissor_rect;
     }

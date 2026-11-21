@@ -25,6 +25,7 @@ pub mod exported_target;
 mod gpu;
 mod heaps;
 mod memory;
+mod mipmaps;
 mod renderer_backend;
 mod root_signature;
 mod shaders;

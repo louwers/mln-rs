@@ -4,12 +4,14 @@
 
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Duration;
 
 use geo_types::Geometry;
 use glam::{DMat4, DVec3};
 use mln_map_types::{
-    AnimationOptions, BoundOptions, CameraDelta, CameraError, CameraLimits, CameraOptions, CameraUpdate,
-    MapDebugOptions, MapMode, ProjectionMode, TileLodMode, TransformState, VerticalPerspectiveProjection, Viewport,
+    AnimationOptions, BoundOptions, CameraDelta, CameraError, CameraLimits, CameraOptions, CameraUpdate, Elevation,
+    MapDebugOptions, MapMode, ProjectionMode, TerrainSkirtLength, TileLodMode, TransformState,
+    VerticalPerspectiveProjection, Viewport,
 };
 use mln_renderer::{
     Registry, RendererEvent, RendererEvents, RenderingStats, UpdateParameters, UpdateReader, UpdateSlot,
@@ -36,7 +38,20 @@ use crate::map_options::{MapOptions, UnusedStyleImagePolicy};
 use crate::map_snapshot::{CameraBounds, FreeCamera, MapSnapshot, TileSettings};
 use crate::rendering_stats_view::{RenderingStatsView, RenderingStatsViewOptions};
 use crate::style_loader::{LoadEvent, StyleLoader};
-use crate::transform::{CameraCommandId, CommandEnd, FrameClock, Transform, TransformEvent};
+use crate::transform::{CameraCommandId, CommandEnd, FrameClock, TerrainGround, Transform, TransformEvent};
+
+/// How many times the terrain may move the camera while a still image
+/// waits, before the map stops following it for that image: a camera whose
+/// ground changes with each move would otherwise never settle.
+const MAX_GROUND_MOVES_PER_STILL: u32 = 8;
+
+/// How long a continuous map waits at least after a frame that failed on
+/// the GPU before it draws again; after a run of failures, as long as the
+/// run has lasted: 100, 200, 400 and 800 ms and 1.6 s after its first.
+const RETRY_DELAY: Duration = Duration::from_millis(100);
+/// How long a continuous map's frames fail in a row before the map takes
+/// the failure as lasting, stops drawing again on its own and goes idle.
+const LASTING_FAILURE: Duration = Duration::from_secs(1);
 
 /// Where a still image that [`Map::render_still`] asked for stands.
 #[derive(Debug, PartialEq)]
@@ -46,6 +61,23 @@ enum StillImage {
     Pending,
     /// Ended, until [`Map::take_still_image`] takes it.
     Ended(Result<(), Error>),
+}
+
+/// What a renderer's report of a frame says, but its stats.
+#[derive(Clone, Copy)]
+struct FinishedFrame {
+    mode: mln_renderer::RenderMode,
+    needs_repaint: bool,
+    placement_changed: bool,
+    still_image_request_id: u64,
+    /// The update the frame drew.
+    update_id: u64,
+    /// Whether the frame failed on the GPU, and the map draws again by its
+    /// retry delay.
+    retries: bool,
+    /// Whether the frame is the best the map can draw: `Full`, or complete
+    /// but for a failure that lasts.
+    best: bool,
 }
 
 /// A map: its style, its camera, and the updates it publishes for its
@@ -64,6 +96,19 @@ enum StillImage {
 /// the map reports to its owner waits in another queue, for `drain_events`.
 /// An owner sets a waker ([`set_waker`](Self::set_waker)) that schedules
 /// those calls on its thread.
+///
+/// A frame that fails on the GPU isn't `Full`, and the map reports the
+/// first of the frames in a row that fail ([`MapEvent::RenderError`]). A
+/// continuous map then draws again on its own, after as long as its frames
+/// have been failing and at least 100 ms: 0.1, 0.2, 0.4, 0.8 and 1.6 s
+/// after the first failure, so a failure that passes is soon gone. Once
+/// its frames have failed for a second, the map takes the failure as one
+/// that lasts, such as a layer's shader that the backend rejects: it stops
+/// drawing again on its own, a failed frame that is complete but for its
+/// failure leaves it idle ([`MapEvent::Idle`]), though loading finishes
+/// ([`MapEvent::LoadingFinished`]) only on a frame that draws whole, and
+/// whatever else draws a frame, such as a camera change, an edit or a tile,
+/// tries again. A frame that draws without failing ends the run.
 pub struct Map {
     updates: UpdateSlot,
     transform: Transform,
@@ -73,6 +118,16 @@ pub struct Map {
     cross_source_collisions: bool,
     fast_pfor_enabled: bool,
     unused_style_image_policy: UnusedStyleImagePolicy,
+    /// Whether the center stands on the terrain.
+    center_clamped_to_ground: bool,
+    terrain_skirt_length: TerrainSkirtLength,
+    /// The ground of the terrain as the renderer last drew it, while
+    /// terrain draws. Each update carries it, and the renderer completes a
+    /// frame only of an update whose ground gives the height and floor at
+    /// the center that its newest gives.
+    elevation: Option<Arc<dyn Elevation>>,
+    /// The terrain's moves of the camera while the still image waits.
+    ground_moves: u32,
 
     debug_options: MapDebugOptions,
     rendering_stats_view: Option<RenderingStatsView>,
@@ -92,10 +147,15 @@ pub struct Map {
     /// When the last frame said the map changes next on its own, until an
     /// update goes out.
     repaint_at: Option<Instant>,
+    /// When the first of the frames in a row that failed on the GPU, up to
+    /// the last frame, finished.
+    failing_since: Option<Instant>,
     /// A still image that [`Map::render_still`] asked for, until it ends.
     still_image: StillImage,
     /// Counts the still image requests, so the renderer can tell a new one.
     still_image_request_id: u64,
+    /// The `update_id` of the last update the map made.
+    update_id: u64,
 
     /// Grows with each change to the map's state.
     generation: u64,
@@ -173,6 +233,10 @@ impl Map {
             cross_source_collisions: map_options.cross_source_collisions,
             fast_pfor_enabled: map_options.fast_pfor_enabled,
             unused_style_image_policy: map_options.unused_style_image_policy,
+            center_clamped_to_ground: map_options.center_clamped_to_ground,
+            terrain_skirt_length: map_options.terrain_skirt_length,
+            elevation: None,
+            ground_moves: 0,
             debug_options: MapDebugOptions::NO_DEBUG,
             rendering_stats_view: None,
             style,
@@ -191,8 +255,10 @@ impl Map {
             loading: false,
             renderer_fully_loaded: false,
             repaint_at: None,
+            failing_since: None,
             still_image: StillImage::None,
             still_image_request_id: 0,
+            update_id: 0,
             generation: 1,
             renderer_events,
             events,
@@ -379,7 +445,7 @@ impl Map {
                     self.emit(MapEvent::StyleLoaded);
                 }
                 LoadEvent::Failed(error) => self.emit(MapEvent::LoadingFailed(error)),
-                LoadEvent::ResourceError(error) => self.on_resource_error(error),
+                LoadEvent::ResourceError(error) => self.fail_still_image(error),
                 LoadEvent::SpriteRequested(sprite) => self.emit(MapEvent::SpriteRequested(sprite)),
                 LoadEvent::SpriteImages(sprite, images) => {
                     // The update this publishes is for *-pattern properties.
@@ -393,7 +459,7 @@ impl Map {
                 }
                 LoadEvent::SourceDescribed { load, result: Err(error) } => {
                     Log::error(Event::Style, format!("Failed to load source {}: {error}", load.id));
-                    self.on_resource_error(error);
+                    self.fail_still_image(error);
                 }
                 LoadEvent::SourceDescribed { load, result: Ok(description) } => {
                     let previous = self.style.get_source(&load.id).cloned();
@@ -437,7 +503,7 @@ impl Map {
         let continuous = self.mode == MapMode::Continuous;
         match event {
             RendererEvent::Invalidate => self.on_update(),
-            RendererEvent::ResourceError(error) => self.on_resource_error(error),
+            RendererEvent::ResourceError(error) => self.fail_still_image(error),
             RendererEvent::RenderFrameStarted => {
                 if continuous {
                     self.emit(MapEvent::RenderFrameStarted);
@@ -445,14 +511,39 @@ impl Map {
             }
             RendererEvent::RenderFrameFinished {
                 mode,
+                complete,
                 needs_repaint,
                 repaint_at,
                 placement_changed,
                 still_image_request_id,
+                update_id,
                 stats,
+                error,
             } => {
                 self.repaint_at = repaint_at.filter(|_| continuous && !needs_repaint);
-                self.on_render_frame_finished(mode, needs_repaint, placement_changed, still_image_request_id, stats);
+                let failed = error.is_some();
+                if !failed {
+                    self.failing_since = None;
+                }
+                let lasting = error.is_some_and(|error| self.on_render_failure(*error, still_image_request_id));
+                let frame = FinishedFrame {
+                    mode,
+                    needs_repaint,
+                    placement_changed,
+                    still_image_request_id,
+                    update_id,
+                    retries: failed && !lasting,
+                    best: mode == mln_renderer::RenderMode::Full || (lasting && complete),
+                };
+                self.on_render_frame_finished(frame, stats);
+            }
+            // The renderer completes a frame only of an update whose ground
+            // stands the camera as its newest does, so the map answers each
+            // with one, whether or not the camera moves onto it
+            // (`follow_terrain`).
+            RendererEvent::TerrainElevation(elevation) => {
+                self.elevation = elevation;
+                self.on_update();
             }
             RendererEvent::RenderMapStarted => {
                 if continuous {
@@ -491,25 +582,53 @@ impl Map {
                 self.emit(MapEvent::GlyphsError { font_stack, range, error });
             }
             RendererEvent::TileAction { op, id, source_id } => self.emit(MapEvent::TileAction { op, id, source_id }),
-            RendererEvent::RenderError(error) => self.emit(MapEvent::RenderError(error)),
         }
     }
 
+    /// Handles a frame that failed on the GPU: reports the first of the
+    /// frames in a row that fail, and fails the still image of the frame's
+    /// `still_image_request_id`. A continuous map draws again once the
+    /// [retry delay](RETRY_DELAY) passed, until its frames have failed for
+    /// [`LASTING_FAILURE`]. Returns whether they have.
+    fn on_render_failure(&mut self, error: Error, still_image_request_id: u64) -> bool {
+        let now = Instant::now();
+        if self.failing_since.is_none() {
+            self.emit(MapEvent::RenderError(error.clone()));
+        }
+        let since = *self.failing_since.get_or_insert(now);
+        if self.mode != MapMode::Continuous {
+            if still_image_request_id != 0 && still_image_request_id == self.still_image_request_id {
+                self.fail_still_image(error);
+            }
+            return false;
+        }
+        let failing = now - since;
+        if failing >= LASTING_FAILURE {
+            return true;
+        }
+        self.repaint_at = Some(now + failing.max(RETRY_DELAY));
+        false
+    }
+
     /// Fails the still image being rendered.
-    fn on_resource_error(&mut self, error: Error) {
+    fn fail_still_image(&mut self, error: Error) {
         if self.mode != MapMode::Continuous && self.still_image == StillImage::Pending {
             self.still_image = StillImage::Ended(Err(error));
         }
     }
 
-    fn on_render_frame_finished(
-        &mut self,
-        mode: mln_renderer::RenderMode,
-        needs_repaint: bool,
-        placement_changed: bool,
-        still_image_request_id: u64,
-        stats: Arc<RenderingStats>,
-    ) {
+    /// Handles the end of a frame. Only a `Full` frame completes a still
+    /// image; one whose camera hadn't stood on the terrain's newest ground,
+    /// or that failed, isn't `Full`. Only the best frame the map can draw
+    /// leaves it idle: a `Full` one, or once a failure lasts, one complete
+    /// but for it. Only a frame of the map's last update does: the map may
+    /// have made one since the renderer took the frame's, such as its
+    /// answer to the new ground or to a tile's data that the frame itself
+    /// took in, and that update's frame is still to come. A frame that the
+    /// map draws again by its retry delay asks for no other.
+    fn on_render_frame_finished(&mut self, frame: FinishedFrame, stats: Arc<RenderingStats>) {
+        let FinishedFrame { mode, needs_repaint, placement_changed, still_image_request_id, update_id, retries, best } =
+            frame;
         let fully_loaded = mode == mln_renderer::RenderMode::Full;
         if std::mem::replace(&mut self.renderer_fully_loaded, fully_loaded) != fully_loaded {
             self.changed();
@@ -532,9 +651,9 @@ impl Map {
             // animations (`sample_frame`), so a frame's report adds no update
             // for them, which would only repeat the frame's camera.
             let animating = self.transform.in_transition();
-            if needs_repaint || (animating && self.transform.frame_time().is_none()) {
+            if !retries && (needs_repaint || (animating && self.transform.frame_time().is_none())) {
                 self.on_update();
-            } else if !animating && self.renderer_fully_loaded && self.repaint_at.is_none() {
+            } else if !animating && best && self.repaint_at.is_none() && update_id == self.update_id {
                 self.emit(MapEvent::Idle);
             }
         } else if self.renderer_fully_loaded
@@ -565,6 +684,8 @@ impl Map {
 
         // Don't load/render anything in still mode until explicitly requested.
         if self.mode != MapMode::Continuous && self.still_image != StillImage::Pending {
+            // The camera stands on the ground all the same.
+            self.follow_terrain();
             return;
         }
 
@@ -578,10 +699,15 @@ impl Map {
             (time_point, _) => time_point,
         };
 
+        // The frame's commands ease onto the newest ground.
+        let ground = self.terrain_ground();
+        self.transform.set_terrain(ground);
         self.transform.update_transitions(time_point);
         let projection = self.projection_at(self.transform.view().zoom());
         self.transform.set_projection_definition(&projection);
+        self.follow_terrain();
 
+        self.update_id += 1;
         let params = UpdateParameters {
             style_loaded: self.style_loaded(),
             mode: self.mode,
@@ -599,8 +725,11 @@ impl Map {
             prefetch_zoom_delta: self.tile.prefetch_zoom_delta,
             still_image_request: self.still_image == StillImage::Pending,
             still_image_request_id: self.still_image_request_id,
+            update_id: self.update_id,
             cross_source_collisions: self.cross_source_collisions,
             fast_pfor_enabled: self.fast_pfor_enabled,
+            terrain_skirt_length: self.terrain_skirt_length,
+            elevation: self.elevation.clone(),
             tile_lod_min_radius: self.tile.lod_min_radius,
             tile_lod_scale: self.tile.lod_scale,
             tile_lod_pitch_threshold: mln_math::deg2rad(self.tile.lod_pitch_threshold),
@@ -624,6 +753,9 @@ impl Map {
         let zoom = camera.zoom.unwrap_or_else(|| self.transform.view().zoom());
         let projection = self.projection_at(zoom);
         self.transform.set_projection_definition(&projection);
+        // So does the terrain, which applies only on Mercator.
+        let ground = self.terrain_ground();
+        self.transform.set_terrain(ground);
         self.transform.jump_to(camera);
         self.on_update();
     }
@@ -668,6 +800,7 @@ impl Map {
         }
         self.still_image = StillImage::Pending;
         self.still_image_request_id += 1;
+        self.ground_moves = 0;
         self.on_update();
         Ok(())
     }
@@ -700,8 +833,9 @@ impl Map {
     }
 
     /// When the map changes next on its own, though its last frame asked for
-    /// no other: the owner calls [`trigger_repaint`](Self::trigger_repaint)
-    /// then, by the frame clock. `None` once an update went out since.
+    /// no other, or draws again after a frame that failed on the GPU: the
+    /// owner calls [`trigger_repaint`](Self::trigger_repaint) then, by the
+    /// frame clock. `None` once an update went out since.
     #[must_use]
     pub fn repaint_at(&self) -> Option<Instant> {
         self.repaint_at
@@ -1336,14 +1470,21 @@ impl Map {
     // gtests-core: projection and prefetch zoom delta (test/map, test/api).
     // MARK: - Projection
 
+    /// The screen point of `lat_lng`, in the copy of the world nearest the
+    /// camera's center: while the style's terrain applies, standing on the
+    /// ground the renderer drew there ([`Self::ground`]), or at sea level
+    /// where it drew none.
     #[must_use]
     pub fn pixel_for_lat_lng(&self, lat_lng: &LatLng) -> ScreenCoordinate {
         let transform = &self.transform;
         transform.lat_lng_to_screen_coordinate(&transform.state().view().lat_lng_near_center(lat_lng))
     }
 
-    /// The location under `pixel`. Fails with
-    /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a NaN or infinite pixel.
+    /// The location under `pixel`: while the style's terrain applies, where
+    /// the line of sight first meets the ground the renderer drew
+    /// ([`Self::ground`]), or the plane at the center's altitude where it
+    /// meets none. Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind)
+    /// for a NaN or infinite pixel.
     pub fn lat_lng_for_pixel(&self, pixel: &ScreenCoordinate, wrap_mode: WrapMode) -> Result<LatLng, Error> {
         self.transform.screen_coordinate_to_lat_lng(pixel, wrap_mode)
     }
@@ -1355,6 +1496,8 @@ impl Map {
         self.transform.is_location_occluded(lat_lng)
     }
 
+    /// [`lat_lng_for_pixel`](Self::lat_lng_for_pixel) of each pixel. Fails
+    /// as that does for any of them.
     pub fn lat_lngs_for_pixels(
         &self,
         screen_coords: &[ScreenCoordinate],
@@ -1371,6 +1514,85 @@ impl Map {
         self.transform.set_free_camera_options(camera);
         self.camera_mutated = true;
         self.on_update();
+    }
+
+    // MARK: - Terrain
+
+    /// Sets whether the center stands on the terrain, at its height under
+    /// the center ([`MapOptions::center_clamped_to_ground`]). Turning it on
+    /// stands a camera at rest on the ground at once, without camera
+    /// events; turning it off leaves the altitude where it is.
+    pub fn set_center_clamped_to_ground(&mut self, clamped: bool) {
+        if self.center_clamped_to_ground != clamped {
+            self.center_clamped_to_ground = clamped;
+            self.on_update();
+        }
+    }
+
+    /// Whether the center stands on the terrain.
+    #[must_use]
+    pub fn center_clamped_to_ground(&self) -> bool {
+        self.center_clamped_to_ground
+    }
+
+    /// The ground the camera stands on: the terrain the renderer last drew,
+    /// while the style's terrain applies on a Mercator view outside tile
+    /// mode. `None` without terrain, and before the renderer drew any.
+    #[must_use]
+    pub fn ground(&self) -> Option<Arc<dyn Elevation>> {
+        self.transform.ground().cloned()
+    }
+
+    /// The terrain the camera stands on while the style's terrain applies
+    /// on a Mercator view outside tile mode, with its [`ground`] or none
+    /// before the renderer drew any; `None` without terrain.
+    ///
+    /// [`ground`]: Self::ground
+    #[must_use]
+    pub fn terrain(&self) -> Option<TerrainGround> {
+        self.transform.terrain().cloned()
+    }
+
+    /// Hands the transform the terrain the camera stands on
+    /// ([`Self::terrain_ground`]), and moves the camera onto it
+    /// ([`Transform::follow_terrain`]).
+    ///
+    /// The moves report no camera change. A still image stops following the
+    /// terrain after [`MAX_GROUND_MOVES_PER_STILL`] of them, though it still
+    /// goes back to the flat map, and its updates still carry the newest
+    /// ground, so its frame draws.
+    fn follow_terrain(&mut self) {
+        let ground = self.terrain_ground();
+        let grounded = ground.as_ref().is_some_and(|ground| ground.elevation.is_some());
+        self.transform.set_terrain(ground);
+        let still = self.mode != MapMode::Continuous && self.still_image == StillImage::Pending;
+        if still && grounded && self.ground_moves >= MAX_GROUND_MOVES_PER_STILL {
+            return;
+        }
+        if self.transform.follow_terrain() && still && grounded {
+            self.ground_moves += 1;
+            if self.ground_moves == MAX_GROUND_MOVES_PER_STILL {
+                Log::warning(
+                    Event::Render,
+                    "The camera didn't settle on the terrain: the still image shows it where it last moved",
+                );
+            }
+        }
+    }
+
+    /// The terrain the camera stands on: the ground the renderer last drew,
+    /// while the style has terrain on a Mercator view outside tile mode,
+    /// where terrain draws; else none, which turns the camera's rules over
+    /// terrain off.
+    fn terrain_ground(&mut self) -> Option<TerrainGround> {
+        // The renderer tells of the ground only after it draws an update
+        // without it, so the map, which owns the style, lets go first.
+        if self.style.get_terrain().is_none() {
+            self.elevation = None;
+        }
+        let applies =
+            self.style.get_terrain().is_some() && self.mode != MapMode::Tile && !self.transform.view().is_globe();
+        applies.then(|| TerrainGround { elevation: self.elevation.clone(), clamped: self.center_clamped_to_ground })
     }
 
     // MARK: - Debug
@@ -1516,7 +1738,9 @@ fn camera_for_lat_lngs_on_screen(
     let mut ne_pixel = ScreenCoordinate::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
     let mut sw_pixel = ScreenCoordinate::new(f64::INFINITY, f64::INFINITY);
     for lat_lng in lat_lngs {
-        let pixel = transform.lat_lng_to_screen_coordinate(lat_lng);
+        // The camera fits the locations on the flat map, as GL JS's does,
+        // whatever the terrain.
+        let pixel = transform.lat_lng_to_screen_coordinate_at(lat_lng, 0.0);
         // std::min / std::max
         sw_pixel.x = if pixel.x < sw_pixel.x { pixel.x } else { sw_pixel.x };
         ne_pixel.x = if ne_pixel.x < pixel.x { pixel.x } else { ne_pixel.x };
@@ -1556,7 +1780,7 @@ fn camera_for_lat_lngs_on_screen(
         ScreenCoordinate::new(f64::midpoint(ne_pixel.x, sw_pixel.x), f64::midpoint(ne_pixel.y, sw_pixel.y));
 
     Ok(CameraOptions {
-        center: Some(transform.screen_coordinate_to_lat_lng(&center_pixel, WrapMode::Wrapped)?),
+        center: Some(transform.screen_coordinate_to_lat_lng_at(&center_pixel, 0.0, WrapMode::Wrapped)?),
         padding: Some(*padding),
         zoom: Some(zoom),
         ..Default::default()

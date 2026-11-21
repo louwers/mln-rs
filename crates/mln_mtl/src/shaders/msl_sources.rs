@@ -3,6 +3,83 @@
 
 use super::shader_source::MslShaderSource;
 
+/// The height rule of `mln_util::dem`, over the DEM tile a draw reads: its
+/// RGBA8 texels behind a one-texel border, decoded by a `TerrainPropsUBO`
+/// (the prelude's). The surface's source has it, and so does each standing
+/// layer's (`standing_ground`).
+macro_rules! ground_height {
+    () => {
+        r#"
+
+// The height in meters of the DEM's bordered texel at `texel`, clamped to the
+// texture.
+static float ground_texel_height(texture2d<float, access::read> dem, int2 texel,
+                                 device const TerrainPropsUBO& props) {
+    const int2 last = int2(int(dem.get_width()), int(dem.get_height())) - 1;
+    const float3 rgb = round(dem.read(uint2(clamp(texel, int2(0), last))).rgb * 255.0);
+    return (rgb.r * props.unpack.x + rgb.g * props.unpack.y + rgb.b * props.unpack.z + props.unpack.w) *
+        props.unpack_scale;
+}
+
+// The height in meters, exaggerated, at `pos` in tile units of a tile that
+// reads its DEM at `dem_coords`: the DEM uv's scale and offset, then the DEM's
+// width in pixels, 0 for flat ground.
+static float ground_height(float2 pos, float4 dem_coords, texture2d<float, access::read> dem,
+                           device const TerrainPropsUBO& props) {
+    const float dim = dem_coords.w;
+    if (dim == 0.0) {
+        return 0.0;
+    }
+    const float2 coord = (pos / 8192.0 * dem_coords.x + dem_coords.yz) * dim + 0.5;
+    const float2 first = floor(coord);
+    const float2 f = coord - first;
+    const int2 texel = int2(first);
+    const float tl = ground_texel_height(dem, texel, props);
+    const float tr = ground_texel_height(dem, texel + int2(1, 0), props);
+    const float bl = ground_texel_height(dem, texel + int2(0, 1), props);
+    const float br = ground_texel_height(dem, texel + int2(1, 1), props);
+    const float top = tl * (1.0 - f.x) + tr * f.x;
+    const float bottom = bl * (1.0 - f.x) + br * f.x;
+    return (top * (1.0 - f.y) + bottom * f.y) * props.exaggeration;
+}
+
+"#
+    };
+}
+
+/// What a standing layer's terrain variant reads of the ground:
+/// `ground_height`, and what reads the ground of its draw in its projection
+/// entry (`ProjectionUBO::ground`). Only the variant's vertex function takes
+/// the DEM texture.
+macro_rules! standing_ground {
+    () => {
+        concat!(
+            ground_height!(),
+            r#"
+// The height of the ground in meters at `pos`, in tile units of the draw's
+// tile, which reads `ground` and `dem`.
+static float standing_height(float2 pos, device const GroundDrawableUBO& ground,
+                             texture2d<float, access::read> dem) {
+    return ground_height(pos, ground.dem_coords, dem, ground.props);
+}
+
+// Whether the draw that reads `ground` draws a feature whose untranslated
+// anchor is at `pos`: a draw of a DEM tile under the tile draws the features
+// on its part of the tile.
+static bool ground_holds(float2 pos, device const GroundDrawableUBO& ground) {
+    return all(pos >= ground.rect.xy) && all(pos < ground.rect.zw);
+}
+
+// A position outside the clip volume, of a vertex the draw drops.
+static float4 ground_dropped() {
+    return float4(-2.0, -2.0, -2.0, 1.0);
+}
+
+"#
+        )
+    };
+}
+
 /// The start of every shader's source.
 pub(crate) const PRELUDE: &str = r#"
 #include <metal_stdlib>
@@ -104,6 +181,28 @@ struct alignas(16) GlobalPaintParamsUBO {
 };
 static_assert(sizeof(GlobalPaintParamsUBO) == 3 * 16, "wrong size");
 
+// How the terrain's DEM decodes, its exaggeration and its skirts' length.
+struct alignas(16) TerrainPropsUBO {
+    /*  0 */ float4 unpack;
+    /* 16 */ float unpack_scale;
+    /* 20 */ float exaggeration;
+    /* 24 */ float skirt_length;
+    /* 28 */ float pad;
+    /* 32 */
+};
+static_assert(sizeof(TerrainPropsUBO) == 2 * 16, "wrong size");
+
+// Where a terrain variant's draw reads the ground it stands on: where its
+// tile is in the DEM tile it binds, the part of its tile it draws, and how
+// the DEM decodes.
+struct alignas(16) GroundDrawableUBO {
+    /*  0 */ float4 dem_coords;
+    /* 16 */ float4 rect;
+    /* 32 */ TerrainPropsUBO props;
+    /* 64 */
+};
+static_assert(sizeof(GroundDrawableUBO) == 4 * 16, "wrong size");
+
 struct alignas(16) ProjectionUBO {
     /*   0 */ float4x4 matrix;
     /*  64 */ float4x4 fallback_matrix;
@@ -112,9 +211,16 @@ struct alignas(16) ProjectionUBO {
     /* 160 */ float projection_transition;
     /* 164 */ float depth_offset;
     /* 168 */ float2 translate;
+#if defined(TERRAIN)
+    /* 176 */ GroundDrawableUBO ground;
+    /* 240 */
+};
+static_assert(sizeof(ProjectionUBO) == 15 * 16, "wrong size");
+#else
     /* 176 */
 };
 static_assert(sizeof(ProjectionUBO) == 11 * 16, "wrong size");
+#endif
 
 // Pole vertices carry these sentinel Y values in their raw position.
 #define GLOBE_POLE_NORTH_Y -32767.5
@@ -718,7 +824,9 @@ struct alignas(16) CircleEvaluatedPropsUBO {
 static_assert(sizeof(CircleEvaluatedPropsUBO) == 4 * 16, "wrong size");
 
 "#,
-    source: r"
+    source: concat!(
+        standing_ground!(),
+        r"
 
 struct VertexStage {
     short2 position [[attribute(0)]];
@@ -779,6 +887,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const CircleDrawableUBO* drawableVector [[buffer(idCircleDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
+#if defined(TERRAIN)
+                                texture2d<float, access::read> ground_dem [[texture(2)]],
+#endif
                                 device const CircleEvaluatedPropsUBO& props [[buffer(idCircleEvaluatedPropsUBO)]]) {
 
     device const CircleDrawableUBO& drawable = drawableVector[uboIndex];
@@ -802,6 +913,15 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     // multiply a_pos by 0.5, since we had it * 2 in order to sneak in extrusion data
     const float2 circle_center = floor(float2(vertx.position) * 0.5);
 
+    // The circle stands on the ground under its center, as it draws,
+    // translated, if its draw draws it.
+#if defined(TERRAIN)
+    device const ProjectionUBO& standing = projectionVector[uboIndex];
+    const float ele = standing_height(circle_center + standing.translate, standing.ground, ground_dem);
+#else
+    const float ele = 0.0;
+#endif
+
     float4 position;
     if (props.pitch_with_map) {
 #if defined(PROJECTION_GLOBE)
@@ -822,7 +942,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
             const float4 projected_center = interpolateProjection(circle_center, center_vector, 0.0, projectionVector[uboIndex]);
             angle_scale *= (radius + stroke_width) * (projected_center.w / paintParams.camera_to_center_distance);
 #else
-            const float4 projected_center = drawable.matrix * float4(circle_center, 0, 1);
+            const float4 projected_center = drawable.matrix * float4(circle_center, ele, 1);
 #endif
             corner_position += scaled_extrude * (radius + stroke_width) *
                                (projected_center.w / paintParams.camera_to_center_distance);
@@ -832,7 +952,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         const float3 corner_vector = globeRotateVector(center_vector, extrude * angle_scale);
         position = interpolateProjection(corner_position, corner_vector, 0.0, projectionVector[uboIndex]);
 #else
-        position = drawable.matrix * float4(corner_position, 0, 1);
+        position = drawable.matrix * float4(corner_position, ele, 1);
 #endif
     } else {
 #if defined(PROJECTION_GLOBE)
@@ -841,12 +961,17 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
             position.xy = float2(10000.0);
         }
 #else
-        position = drawable.matrix * float4(circle_center, 0, 1);
+        position = drawable.matrix * float4(circle_center, ele, 1);
 #endif
 
         const float factor = props.scale_with_map ? paintParams.camera_to_center_distance : position.w;
         position.xy += scaled_extrude * (radius + stroke_width) * factor;
     }
+#if defined(TERRAIN)
+    if (!ground_holds(circle_center, standing.ground)) {
+        position = ground_dropped();
+    }
+#endif
 
     // This is a minimum blur distance that serves as a faux-antialiasing for
     // the circle. since blur is a ratio of the circle's size and the intent is
@@ -932,7 +1057,8 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 
     return half4(opacity_t * mix(color * opacity, stroke_color * stroke_opacity, color_t));
 }
-",
+"
+    ),
 };
 
 pub(crate) const CLIPPING_MASK_PROGRAM: MslShaderSource = MslShaderSource {
@@ -1361,11 +1487,69 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-// The walls' fragment stage, and `wall`, the vertex of a wall, which reads
-// the instanced walls' attributes as the fields of `vertx`.
-macro_rules! extrusion_wall {
+/// `ground`, what a fill extrusion's top rises by over terrain: the ground
+/// under its polygon's centroid, `vertx.centroid`, as it draws, translated;
+/// and `ground_kept`, whether the draw draws the polygon, whose centroid is
+/// on the draw's part of its tile.
+macro_rules! fill_extrusion_ground {
     () => {
         r"
+#if defined(TERRAIN)
+    device const ProjectionUBO& standing = projectionVector[uboIndex];
+    const float2 centroid_pos = float2(vertx.centroid);
+    const bool ground_kept = ground_holds(centroid_pos, standing.ground);
+    const float ground = standing_height(centroid_pos + standing.translate, standing.ground, ground_dem);
+#else
+    const bool ground_kept = true;
+    const float ground = 0.0;
+#endif
+"
+    };
+}
+
+/// `base_ground`, what a fill extrusion's base rises by over terrain: the
+/// ground, and a base at or below 0 sinks 10 m more, so that no gap shows
+/// under a wall downhill.
+macro_rules! fill_extrusion_base_ground {
+    () => {
+        r"
+#if defined(TERRAIN)
+    const float base_ground = ground - (base > 0.0 ? 0.0 : 10.0);
+#else
+    const float base_ground = ground;
+#endif
+"
+    };
+}
+
+/// `z`, the height of a fill extrusion wall's corner at `t` (0 at the base,
+/// 1 at the top) of its `end`, from `projection`. Over terrain, the foot of a
+/// wall of a polygon whose base is at or below 0 reaches down to the ground
+/// under its own end, read from `ground_dem`, where that is lower than under
+/// the centroid, so that no gap shows under a wall on a steep slope: `sink`
+/// is how much lower, 0 elsewhere.
+macro_rules! fill_extrusion_wall_foot {
+    () => {
+        r"
+#if defined(TERRAIN)
+    const float sink = (t == 0.0 && base <= 0.0)
+        ? max(ground - standing_height(end + projection.translate, projection.ground, ground_dem), 0.0)
+        : 0.0;
+    const float z = (t != 0.0) ? height + ground : base + base_ground - sink;
+#else
+    const float z = (t != 0.0) ? height + ground : base + base_ground;
+#endif
+"
+    };
+}
+
+// The walls' fragment stage, and `wall`, the vertex of a wall, which reads
+// the instanced walls' attributes as the fields of `vertx`, raised by
+// `ground`, and dropped unless `ground_kept`.
+macro_rules! extrusion_wall {
+    () => {
+        concat!(
+            r"
 struct FragmentStage {
     float4 position [[position, invariant]];
     half4 color;
@@ -1376,55 +1560,9 @@ struct FragmentOutput {
     //float depth [[depth(less)]]; // Write depth value if it's less than what's already there
 };
 
-template <typename Vertex>
-FragmentStage wall(thread const Vertex& vertx,
-                   device const FillExtrusionDrawableUBO& drawable,
-                   device const ProjectionUBO& projection,
-                   device const FillExtrusionPropsUBO& props) {
-
-    bool isDiscarded = glMod(float(vertx.decimals_ed.x), 2.0) > 0.0;
-    if (isDiscarded) {
-        return {
-            .position = float4(0.0),
-            .color    = half4(0.0),
-        };
-    }
-
-#if defined(HAS_UNIFORM_u_base)
-    const auto base   = max(props.light_position_base.w, 0.0);
-#else
-    const auto base   = max(unpack_mix_float(vertx.base, drawable.base_t), 0.0);
-#endif
-#if defined(HAS_UNIFORM_u_height)
-    const auto height = max(props.height, 0.0);
-#else
-    const auto height = max(unpack_mix_float(vertx.height, drawable.height_t), 0.0);
-#endif
-
-    const float2 p1 = float2(vertx.outline_pos);
-    const float2 p2 = float2(vertx.next_outline_pos);
-    const float2 edgevector = normalize(p2 - p1);
-    const float2 own = float2(-edgevector.y, edgevector.x);
-
-    const float3 normal = float3(vertx.pos.x == 0 ? wall_normal(vertx.decimals_ed.x, own) : wall_normal(vertx.next_decimals_ed.x, own), 0.0);
-    const float t = float(vertx.pos.y);
-    const float z = (t != 0.0) ? height : base;     // TODO: This would come out wrong on GL for negative values, check it...
-
-    const float4 position = projectTileFor3D(vertx.pos.x == 0.0 ? p1 : p2, z, projection);
-
-#if defined(OVERDRAW_INSPECTOR)
-    return {
-        .position = position,
-        .color    = half4(1.0),
-    };
-#endif
-
-#if defined(HAS_UNIFORM_u_color)
-    auto color = props.color;
-#else
-    auto color = unpack_mix_color(vertx.color, drawable.color_t);
-#endif
-
+// The color of a wall facing `normal` at `t`, 0 at its base and 1 at its top.
+static float4 wall_color(float4 color, float3 normal, float t, float base, float height,
+                         device const FillExtrusionPropsUBO& props) {
     // Relative luminance (how dark/bright is the surface color?)
     const float luminance = color.r * 0.2126 + color.g * 0.7152 + color.b * 0.0722;
 
@@ -1460,9 +1598,80 @@ FragmentStage wall(thread const Vertex& vertx,
     const float3 minLight = mix(0.0, 0.3, 1.0 - light_color.rgb);
     vcolor += float4(clamp(color.rgb * directional * light_color.rgb, minLight, 1.0), 0.0);
 
+    return vcolor * props.opacity;
+}
+
+template <typename Vertex>
+FragmentStage wall(thread const Vertex& vertx,
+                   device const FillExtrusionDrawableUBO& drawable,
+                   device const ProjectionUBO& projection,
+                   device const FillExtrusionPropsUBO& props,
+#if defined(TERRAIN)
+                   texture2d<float, access::read> ground_dem,
+#endif
+                   float ground,
+                   bool ground_kept) {
+
+    bool isDiscarded = glMod(float(vertx.decimals_ed.x), 2.0) > 0.0;
+    if (isDiscarded) {
+        return {
+            .position = float4(0.0),
+            .color    = half4(0.0),
+        };
+    }
+
+#if defined(HAS_UNIFORM_u_base)
+    const auto base   = max(props.light_position_base.w, 0.0);
+#else
+    const auto base   = max(unpack_mix_float(vertx.base, drawable.base_t), 0.0);
+#endif
+#if defined(HAS_UNIFORM_u_height)
+    const auto height = max(props.height, 0.0);
+#else
+    const auto height = max(unpack_mix_float(vertx.height, drawable.height_t), 0.0);
+#endif
+
+    const float2 p1 = float2(vertx.outline_pos);
+    const float2 p2 = float2(vertx.next_outline_pos);
+    const float2 edgevector = normalize(p2 - p1);
+    const float2 own = float2(-edgevector.y, edgevector.x);
+
+    const float3 normal = float3(vertx.pos.x == 0 ? wall_normal(vertx.decimals_ed.x, own) : wall_normal(vertx.next_decimals_ed.x, own), 0.0);
+    const float2 end = vertx.pos.x == 0 ? p1 : p2;
+    const float t = float(vertx.pos.y);
+",
+            fill_extrusion_base_ground!(),
+            fill_extrusion_wall_foot!(),
+            r"
+    const float4 position = ground_kept ? projectTileFor3D(end, z, projection) : ground_dropped();
+
+#if defined(OVERDRAW_INSPECTOR)
     return {
         .position = position,
-        .color    = half4(vcolor * props.opacity),
+        .color    = half4(1.0),
+    };
+#endif
+
+#if defined(HAS_UNIFORM_u_color)
+    auto color = props.color;
+#else
+    auto color = unpack_mix_color(vertx.color, drawable.color_t);
+#endif
+
+    float4 vcolor = wall_color(color, normal, t, base, height, props);
+#if defined(TERRAIN)
+    // The gradient carries on below the base to a foot that sinks, so that
+    // the wall shades where it showed as it did. Written out, not with
+    // mix(), which Metal leaves undefined outside [0, 1].
+    if (sink > 0.0) {
+        const float4 top = wall_color(color, normal, 1.0, base, height, props);
+        vcolor += (top - vcolor) * (-sink / (height + ground - base - base_ground));
+    }
+#endif
+
+    return {
+        .position = position,
+        .color    = half4(vcolor),
     };
 }
 
@@ -1470,6 +1679,7 @@ fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]]) {
     return { in.color/*, in.position.z*/ };
 }
 "
+        )
     };
 }
 
@@ -1532,6 +1742,7 @@ static_assert(sizeof(FillExtrusionPropsUBO) == 5 * 16, "wrong size");
 
 "#,
     source: concat!(
+        standing_ground!(),
         r"
 
 struct VertexStage {
@@ -1550,6 +1761,9 @@ struct VertexStage {
 #if !defined(HAS_UNIFORM_u_height)
     float2 height [[attribute(5)]];
 #endif
+#if defined(TERRAIN)
+    short2 centroid [[attribute(8)]];
+#endif
 };
 
 ",
@@ -1559,8 +1773,18 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const FillExtrusionDrawableUBO* drawableVector [[buffer(idFillExtrusionDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
+#if defined(TERRAIN)
+                                texture2d<float, access::read> ground_dem [[texture(2)]],
+#endif
                                 device const FillExtrusionPropsUBO& props [[buffer(idFillExtrusionPropsUBO)]]) {
-    return wall(vertx, drawableVector[uboIndex], projectionVector[uboIndex], props);
+",
+        fill_extrusion_ground!(),
+        r"
+    return wall(vertx, drawableVector[uboIndex], projectionVector[uboIndex], props,
+#if defined(TERRAIN)
+                ground_dem,
+#endif
+                ground, ground_kept);
 }
 
 "
@@ -1572,11 +1796,13 @@ pub(crate) const FILL_EXTRUSION_PULLED_SHADER: MslShaderSource = MslShaderSource
     fragment_main_function: r"fragmentMain",
     prelude: FILL_EXTRUSION_INSTANCED_SHADER.prelude,
     source: concat!(
+        standing_ground!(),
         r"
 
 enum {
     idFillExtrusionWallVertices = 7,
-    idFillExtrusionWallPaint
+    idFillExtrusionWallPaint,
+    idFillExtrusionWallCentroids
 };
 
 // A vertex of the bucket, which the walls read by index.
@@ -1601,6 +1827,9 @@ struct WallVertex {
 #if !defined(HAS_UNIFORM_u_height)
     float2 height;
 #endif
+#if defined(TERRAIN)
+    short2 centroid;
+#endif
 };
 ",
         extrusion_wall!(),
@@ -1610,6 +1839,10 @@ FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]],
                                 device const FillExtrusionDrawableUBO* drawableVector [[buffer(idFillExtrusionDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const FillExtrusionPropsUBO& props [[buffer(idFillExtrusionPropsUBO)]],
+#if defined(TERRAIN)
+                                texture2d<float, access::read> ground_dem [[texture(2)]],
+                                device const short2* wallCentroids [[buffer(idFillExtrusionWallCentroids)]],
+#endif
                                 device const BucketVertex* wallVertices [[buffer(idFillExtrusionWallVertices)]],
                                 device const float* wallPaint [[buffer(idFillExtrusionWallPaint)]]) {
     device const FillExtrusionDrawableUBO& drawable = drawableVector[uboIndex];
@@ -1626,6 +1859,10 @@ FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]],
     vertx.decimals_ed = outline.decimals_ed;
     vertx.next_outline_pos = next.pos;
     vertx.next_decimals_ed = next.decimals_ed;
+#if defined(TERRAIN)
+    // The centroid that the wall's polygon stands on.
+    vertx.centroid = wallCentroids[wall_index];
+#endif
 
     // The wall's paint values are its outline vertex's, where the drawable's
     // `paint_layout` says: the floats a vertex takes, then the offsets of
@@ -1642,7 +1879,14 @@ FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]],
     vertx.color = float4(*(device const packed_float4*)(paint + (paint_layout >> 24)));
 #endif
 
-    return wall(vertx, drawable, projectionVector[uboIndex], props);
+",
+        fill_extrusion_ground!(),
+        r"
+    return wall(vertx, drawable, projectionVector[uboIndex], props,
+#if defined(TERRAIN)
+                ground_dem,
+#endif
+                ground, ground_kept);
 }
 "
     ),
@@ -1706,7 +1950,9 @@ struct alignas(16) FillExtrusionPropsUBO {
 static_assert(sizeof(FillExtrusionPropsUBO) == 5 * 16, "wrong size");
 
 "#,
-    source: r"
+    source: concat!(
+        standing_ground!(),
+        r"
 
 struct VertexStage {
     short2 pos [[attribute(0)]];
@@ -1726,6 +1972,9 @@ struct VertexStage {
 #endif
 #if !defined(HAS_UNIFORM_u_pattern_to)
     ushort4 pattern_to [[attribute(6)]];
+#endif
+#if defined(TERRAIN)
+    short2 centroid [[attribute(9)]];
 #endif
 };
 
@@ -1748,12 +1997,37 @@ struct FragmentOutput {
     //float depth [[depth(less)]]; // Write depth value if it's less than what's already there
 };
 
+// The lighting of a wall facing `normal` at `t`, 0 at its base and 1 at its
+// top.
+static float4 wall_lighting(float3 normal, float t, float base, float height,
+                            device const FillExtrusionPropsUBO& props) {
+    float4 lighting = float4(0.0, 0.0, 0.0, 1.0);
+    float directional = clamp(dot(normal, props.light_position_base.xyz), 0.0, 1.0);
+    directional = mix((1.0 - props.light_intensity), max((0.5 + props.light_intensity), 1.0), directional);
+
+    if (normal.z == 0.0) {
+        // This avoids another branching statement, but multiplies by a constant of 0.84 if no vertical gradient,
+        // and otherwise calculates the gradient based on base + height
+        // TODO: If we're optimizing to the level of avoiding branches, we should pre-compute
+        //       the square root when height is a uniform.
+        const float fMin = mix(0.7, 0.98, 1.0 - props.light_intensity);
+        const float factor = clamp((t + base) * pow(height / 150.0, 0.5), fMin, 1.0);
+        directional *= (1.0 - props.vertical_gradient) + (props.vertical_gradient * factor);
+    }
+
+    lighting.rgb += clamp(directional * props.light_color_pad.rgb, mix(float3(0.0), float3(0.3), 1.0 - props.light_color_pad.rgb), float3(1.0));
+    return lighting * props.opacity;
+}
+
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const FillExtrusionDrawableUBO* drawableVector [[buffer(idFillExtrusionDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const FillExtrusionTilePropsUBO* tilePropsVector [[buffer(idFillExtrusionTilePropsUBO)]],
+#if defined(TERRAIN)
+                                texture2d<float, access::read> ground_dem [[texture(2)]],
+#endif
                                 device const FillExtrusionPropsUBO& props [[buffer(idFillExtrusionPropsUBO)]]) {
 
     bool isDiscarded = glMod(float(vertx.decimals_ed.x), 2.0) > 0.0;
@@ -1786,7 +2060,10 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 #else
     const auto height = max(unpack_mix_float(vertx.height, drawable.height_t), 0.0);
 #endif
-
+",
+        fill_extrusion_ground!(),
+        fill_extrusion_base_ground!(),
+        r"
     const float2 p1 = float2(vertx.outline_pos);
     const float2 p2 = float2(vertx.next_outline_pos);
     const float2 edgevector = normalize(p2 - p1);
@@ -1794,10 +2071,13 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 
     const float3 normal = float3(vertx.pos.x == 0 ? wall_normal(vertx.decimals_ed.x, own) : wall_normal(vertx.next_decimals_ed.x, own), 0.0);
     const float edgedistance = vertx.pos.x == 0 ? vertx.next_decimals_ed.y : vertx.decimals_ed.y;
+    const float2 end = vertx.pos.x == 0 ? p1 : p2;
     const float t = float(vertx.pos.y);
-    const float z = (t != 0.0) ? height : base;     // TODO: This would come out wrong on GL for negative values, check it...
-
-    const float4 position = projectTileFor3D(vertx.pos.x == 0.0 ? p1 : p2, z, projectionVector[uboIndex]);
+    device const ProjectionUBO& projection = projectionVector[uboIndex];
+",
+        fill_extrusion_wall_foot!(),
+        r"
+    const float4 position = ground_kept ? projectTileFor3D(end, z, projection) : ground_dropped();
 
 #if defined(OVERDRAW_INSPECTOR)
     return {
@@ -1841,22 +2121,17 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 
     const float2 pos = float2(edgedistance, z * drawable.height_factor); // extrusion side
 
-    float4 lighting = float4(0.0, 0.0, 0.0, 1.0);
-    float directional = clamp(dot(normal, props.light_position_base.xyz), 0.0, 1.0);
-    directional = mix((1.0 - props.light_intensity), max((0.5 + props.light_intensity), 1.0), directional);
-
-    if (normal.z == 0.0) {
-        // This avoids another branching statement, but multiplies by a constant of 0.84 if no vertical gradient,
-        // and otherwise calculates the gradient based on base + height
-        // TODO: If we're optimizing to the level of avoiding branches, we should pre-compute
-        //       the square root when height is a uniform.
-        const float fMin = mix(0.7, 0.98, 1.0 - props.light_intensity);
-        const float factor = clamp((t + base) * pow(height / 150.0, 0.5), fMin, 1.0);
-        directional *= (1.0 - props.vertical_gradient) + (props.vertical_gradient * factor);
+    float4 lighting = wall_lighting(normal, t, base, height, props);
+#if defined(TERRAIN)
+    // The gradient carries on below the base to a foot that sinks, so that
+    // the wall shades where it showed as it did. The pattern, placed by `z`,
+    // stays where it was. Written out, not with mix(), which Metal leaves
+    // undefined outside [0, 1].
+    if (sink > 0.0) {
+        const float4 top = wall_lighting(normal, 1.0, base, height, props);
+        lighting += (top - lighting) * (-sink / (height + ground - base - base_ground));
     }
-
-    lighting.rgb += clamp(directional * props.light_color_pad.rgb, mix(float3(0.0), float3(0.3), 1.0 - props.light_color_pad.rgb), float3(1.0));
-    lighting *= props.opacity;
+#endif
 
     return {
         .position       = position,
@@ -1917,7 +2192,8 @@ fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]],
 
     return {half4(mix(color1, color2, props.fade) * in.lighting)/*, in.position.z*/};
 }
-",
+"
+    ),
 };
 
 pub(crate) const FILL_EXTRUSION_PATTERN_SHADER: MslShaderSource = MslShaderSource {
@@ -1978,7 +2254,9 @@ struct alignas(16) FillExtrusionPropsUBO {
 static_assert(sizeof(FillExtrusionPropsUBO) == 5 * 16, "wrong size");
 
 "#,
-    source: r"
+    source: concat!(
+        standing_ground!(),
+        r"
 
 struct VertexStage {
     short2 pos [[attribute(0)]];
@@ -1995,6 +2273,9 @@ struct VertexStage {
 #endif
 #if !defined(HAS_UNIFORM_u_pattern_to)
     ushort4 pattern_to [[attribute(5)]];
+#endif
+#if defined(TERRAIN)
+    short2 centroid [[attribute(6)]];
 #endif
 };
 
@@ -2023,6 +2304,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const FillExtrusionDrawableUBO* drawableVector [[buffer(idFillExtrusionDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const FillExtrusionTilePropsUBO* tilePropsVector [[buffer(idFillExtrusionTilePropsUBO)]],
+#if defined(TERRAIN)
+                                texture2d<float, access::read> ground_dem [[texture(2)]],
+#endif
                                 device const FillExtrusionPropsUBO& props [[buffer(idFillExtrusionPropsUBO)]]) {
 
     device const FillExtrusionDrawableUBO& drawable = drawableVector[uboIndex];
@@ -2038,11 +2322,13 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 #else
     const auto height = max(unpack_mix_float(vertx.height, drawable.height_t), 0.0);
 #endif
-
+",
+        fill_extrusion_ground!(),
+        r"
     const float3 normal = float3(0.0, 0.0, 1.0);
     const float t = 1.0;
-    const float z = (t != 0.0) ? height : base;     // TODO: This would come out wrong on GL for negative values, check it...
-    const float4 position = projectTileFor3D(float2(vertx.pos), z, projectionVector[uboIndex]);
+    const float z = height + ground;
+    const float4 position = ground_kept ? projectTileFor3D(float2(vertx.pos), z, projectionVector[uboIndex]) : ground_dropped();
 
 #if defined(OVERDRAW_INSPECTOR)
     return {
@@ -2160,7 +2446,8 @@ fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]],
 
     return {half4(mix(color1, color2, props.fade) * in.lighting)/*, in.position.z*/};
 }
-",
+"
+    ),
 };
 
 pub(crate) const FILL_EXTRUSION_SHADER: MslShaderSource = MslShaderSource {
@@ -2221,7 +2508,9 @@ struct alignas(16) FillExtrusionPropsUBO {
 static_assert(sizeof(FillExtrusionPropsUBO) == 5 * 16, "wrong size");
 
 "#,
-    source: r"
+    source: concat!(
+        standing_ground!(),
+        r"
 
 struct VertexStage {
     short2 pos [[attribute(0)]];
@@ -2235,6 +2524,9 @@ struct VertexStage {
 #endif
 #if !defined(HAS_UNIFORM_u_height)
     float2 height [[attribute(4)]];
+#endif
+#if defined(TERRAIN)
+    short2 centroid [[attribute(5)]];
 #endif
 };
 
@@ -2252,6 +2544,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const FillExtrusionDrawableUBO* drawableVector [[buffer(idFillExtrusionDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
+#if defined(TERRAIN)
+                                texture2d<float, access::read> ground_dem [[texture(2)]],
+#endif
                                 device const FillExtrusionPropsUBO& props [[buffer(idFillExtrusionPropsUBO)]]) {
 
     device const FillExtrusionDrawableUBO& drawable = drawableVector[uboIndex];
@@ -2266,11 +2561,13 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 #else
     const auto height = max(unpack_mix_float(vertx.height, drawable.height_t), 0.0);
 #endif
-
+",
+        fill_extrusion_ground!(),
+        r"
     const float3 normal = float3(0.0, 0.0, 1.0);
     const float t = 1.0;
-    const float z = (t != 0.0) ? height : base;     // TODO: This would come out wrong on GL for negative values, check it...
-    const float4 position = projectTileFor3D(float2(vertx.pos), z, projectionVector[uboIndex]);
+    const float z = height + ground;
+    const float4 position = ground_kept ? projectTileFor3D(float2(vertx.pos), z, projectionVector[uboIndex]) : ground_dropped();
 
 #if defined(OVERDRAW_INSPECTOR)
     return {
@@ -2329,7 +2626,8 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]]) {
     return { in.color/*, in.position.z*/ };
 }
-",
+"
+    ),
 };
 
 /// `outline_corner`, the corner of an instanced fill outline's quad.
@@ -2388,6 +2686,106 @@ OutlineCorner outline_corner(float4 start, float4 end, short2 corner, float2 wor
     result.pos = at_end ? sb : sa;
     result.t = at_end ? tb : ta;
     return result;
+}
+"
+    };
+}
+
+// The pattern outlines' fragment stage, which fades the pattern over a pixel
+// from the line.
+macro_rules! outline_pattern_stages {
+    () => {
+        r"
+struct FragmentStage {
+    float4 position [[position, invariant]];
+    float2 v_pos_a;
+    float2 v_pos_b;
+    float2 v_pos;
+
+#if !defined(HAS_UNIFORM_u_color)
+    half4 color;
+#endif
+#if !defined(HAS_UNIFORM_u_pattern_from)
+    float4 pattern_from [[flat]];
+#endif
+#if !defined(HAS_UNIFORM_u_pattern_to)
+    float4 pattern_to [[flat]];
+#endif
+#if !defined(HAS_UNIFORM_u_opacity)
+    half opacity;
+#endif
+};
+
+half4 fragment fragmentMain(FragmentStage in [[stage_in]],
+                            device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
+                            device const FillTilePropsUnionUBO* tilePropsVector [[buffer(idFillTilePropsUBO)]],
+                            device const FillEvaluatedPropsUBO& props [[buffer(idFillEvaluatedPropsUBO)]],
+                            texture2d<float, access::sample> image0 [[texture(0)]],
+                            sampler image0_sampler [[sampler(0)]]) {
+#if defined(OVERDRAW_INSPECTOR)
+    return half4(1.0);
+#endif
+
+    device const FillOutlinePatternTilePropsUBO& tileProps = tilePropsVector[uboIndex].fillOutlinePatternTilePropsUBO;
+
+#if defined(HAS_UNIFORM_u_pattern_from)
+    const auto pattern_from   = float4(tileProps.pattern_from);
+#else
+    const auto pattern_from   = float4(in.pattern_from);
+#endif
+
+#if defined(HAS_UNIFORM_u_pattern_to)
+    const auto pattern_to     = float4(tileProps.pattern_to);
+#else
+    const auto pattern_to     = float4(in.pattern_to);
+#endif
+
+#if defined(HAS_UNIFORM_u_opacity)
+    const auto opacity        = props.opacity;
+#else
+    const auto opacity        = in.opacity;
+#endif
+
+#if defined(HAS_UNIFORM_u_color)
+    const auto color          = half4(props.color);
+#else
+    const auto color          = in.color;
+#endif
+
+    const float2 pattern_tl_a = pattern_from.xy;
+    const float2 pattern_br_a = pattern_from.zw;
+    const float2 pattern_tl_b = pattern_to.xy;
+    const float2 pattern_br_b = pattern_to.zw;
+
+    // A crossfade at 0 or 1 shows one pattern, so skip the other.
+    float4 color1 = float4(0.0);
+    if (props.fade < 1.0) {
+        const float2 imagecoord = glMod(in.v_pos_a, 1.0);
+        const float2 pos = atlas_pos(pattern_tl_a / tileProps.texsize, (pattern_br_a - pattern_tl_a) / tileProps.texsize * imagecoord);
+        color1 = image0.sample(image0_sampler, pos);
+    }
+    float4 color2 = float4(0.0);
+    if (props.fade > 0.0) {
+        const float2 imagecoord_b = glMod(in.v_pos_b, 1.0);
+        const float2 pos2 = atlas_pos(pattern_tl_b / tileProps.texsize, (pattern_br_b - pattern_tl_b) / tileProps.texsize * imagecoord_b);
+        color2 = image0.sample(image0_sampler, pos2);
+    }
+
+    // TODO: Should triangate the lines into triangles to support thick line and edge antialiased.
+    const float dist = length(in.v_pos - in.position.xy);
+    const float alpha = 1.0 - smoothstep(0.0, 1.0, dist);
+
+    if (tileProps.sdf > 0.5) {
+        const float sdf_edge = (256.0 - 64.0) / 256.0;
+        const float sdf_gamma_a = max(fwidth(color1.a) * 0.5, 1.0 / 255.0 / 16.0);
+        const float sdf_gamma_b = max(fwidth(color2.a) * 0.5, 1.0 / 255.0 / 16.0);
+        const float sdf_alpha_a = smoothstep(sdf_edge - sdf_gamma_a, sdf_edge + sdf_gamma_a, color1.a);
+        const float sdf_alpha_b = smoothstep(sdf_edge - sdf_gamma_b, sdf_edge + sdf_gamma_b, color2.a);
+        return half4(mix(color * sdf_alpha_a, color * sdf_alpha_b, props.fade) * alpha * opacity);
+    }
+    // The outline fades over a pixel from the line, as in the GL and Vulkan
+    // shaders.
+    return half4(mix(color1, color2, props.fade) * alpha * opacity);
 }
 "
     };
@@ -2548,26 +2946,8 @@ struct VertexStage {
 #endif
 };
 
-struct FragmentStage {
-    float4 position [[position, invariant]];
-    float2 v_pos_a;
-    float2 v_pos_b;
-    float2 v_pos;
-
-#if !defined(HAS_UNIFORM_u_color)
-    half4 color;
-#endif
-#if !defined(HAS_UNIFORM_u_pattern_from)
-    float4 pattern_from [[flat]];
-#endif
-#if !defined(HAS_UNIFORM_u_pattern_to)
-    float4 pattern_to [[flat]];
-#endif
-#if !defined(HAS_UNIFORM_u_opacity)
-    half opacity;
-#endif
-};
 ",
+        outline_pattern_stages!(),
         outline_corner!(),
         r"
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
@@ -2635,78 +3015,6 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         .opacity        = half(opacity),
 #endif
     };
-}
-
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                            device const FillTilePropsUnionUBO* tilePropsVector [[buffer(idFillTilePropsUBO)]],
-                            device const FillEvaluatedPropsUBO& props [[buffer(idFillEvaluatedPropsUBO)]],
-                            texture2d<float, access::sample> image0 [[texture(0)]],
-                            sampler image0_sampler [[sampler(0)]]) {
-#if defined(OVERDRAW_INSPECTOR)
-    return half4(1.0);
-#endif
-
-    device const FillOutlinePatternTilePropsUBO& tileProps = tilePropsVector[uboIndex].fillOutlinePatternTilePropsUBO;
-
-#if defined(HAS_UNIFORM_u_pattern_from)
-    const auto pattern_from   = float4(tileProps.pattern_from);
-#else
-    const auto pattern_from   = float4(in.pattern_from);
-#endif
-
-#if defined(HAS_UNIFORM_u_pattern_to)
-    const auto pattern_to     = float4(tileProps.pattern_to);
-#else
-    const auto pattern_to     = float4(in.pattern_to);
-#endif
-
-#if defined(HAS_UNIFORM_u_opacity)
-    const auto opacity        = props.opacity;
-#else
-    const auto opacity        = in.opacity;
-#endif
-
-#if defined(HAS_UNIFORM_u_color)
-    const auto color          = half4(props.color);
-#else
-    const auto color          = in.color;
-#endif
-
-    const float2 pattern_tl_a = pattern_from.xy;
-    const float2 pattern_br_a = pattern_from.zw;
-    const float2 pattern_tl_b = pattern_to.xy;
-    const float2 pattern_br_b = pattern_to.zw;
-
-    // A crossfade at 0 or 1 shows one pattern, so skip the other.
-    float4 color1 = float4(0.0);
-    if (props.fade < 1.0) {
-        const float2 imagecoord = glMod(in.v_pos_a, 1.0);
-        const float2 pos = atlas_pos(pattern_tl_a / tileProps.texsize, (pattern_br_a - pattern_tl_a) / tileProps.texsize * imagecoord);
-        color1 = image0.sample(image0_sampler, pos);
-    }
-    float4 color2 = float4(0.0);
-    if (props.fade > 0.0) {
-        const float2 imagecoord_b = glMod(in.v_pos_b, 1.0);
-        const float2 pos2 = atlas_pos(pattern_tl_b / tileProps.texsize, (pattern_br_b - pattern_tl_b) / tileProps.texsize * imagecoord_b);
-        color2 = image0.sample(image0_sampler, pos2);
-    }
-
-    // TODO: Should triangate the lines into triangles to support thick line and edge antialiased.
-    const float dist = length(in.v_pos - in.position.xy);
-    const float alpha = 1.0 - smoothstep(0.0, 1.0, dist);
-
-    if (tileProps.sdf > 0.5) {
-        const float sdf_edge = (256.0 - 64.0) / 256.0;
-        const float sdf_gamma_a = max(fwidth(color1.a) * 0.5, 1.0 / 255.0 / 16.0);
-        const float sdf_gamma_b = max(fwidth(color2.a) * 0.5, 1.0 / 255.0 / 16.0);
-        const float sdf_alpha_a = smoothstep(sdf_edge - sdf_gamma_a, sdf_edge + sdf_gamma_a, color1.a);
-        const float sdf_alpha_b = smoothstep(sdf_edge - sdf_gamma_b, sdf_edge + sdf_gamma_b, color2.a);
-        return half4(mix(color * sdf_alpha_a, color * sdf_alpha_b, props.fade) * alpha * opacity);
-    }
-    // The outline fades over a pixel from the line, as in the GL and Vulkan
-    // shaders.
-    return half4(mix(color1, color2, props.fade) * alpha * opacity);
 }
 "
     ),
@@ -2988,6 +3296,146 @@ FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]],
 #if !defined(HAS_UNIFORM_u_opacity)
         .opacity        = half(unpack_mix_float(float2(*(device const packed_float2*)(paint + ((paint_layout >> 16) & 0xff))),
                                                 drawable.opacity_t)),
+#endif
+    };
+}
+"
+    ),
+};
+
+/// The fill outline, drawn as lines of 1 px, which a terrain tile's drape
+/// draws (Metal draws no wider lines).
+pub(crate) const FILL_OUTLINE_SHADER: MslShaderSource = MslShaderSource {
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
+    prelude: FILL_OUTLINE_INSTANCED_SHADER.prelude,
+    source: concat!(
+        r"
+
+struct VertexStage {
+    short2 position [[attribute(0)]];
+
+#if !defined(HAS_UNIFORM_u_outline_color)
+    float4 outline_color [[attribute(1)]];
+#endif
+#if !defined(HAS_UNIFORM_u_opacity)
+    float2 opacity [[attribute(2)]];
+#endif
+};
+
+",
+        outline_stages!(),
+        r"
+FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
+                                device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
+                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
+                                device const FillDrawableUnionUBO* drawableVector [[buffer(idFillDrawableUBO)]],
+                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]]) {
+
+    device const FillOutlineDrawableUBO& drawable = drawableVector[uboIndex].fillOutlineDrawableUBO;
+
+    const float2 position = float2(vertx.position);
+    const float4 clip = projectTile(position, position, projectionVector[uboIndex]);
+    return {
+        .position       = clip,
+        // The vertex from the top left in pixels, as the fragments' position.
+        .pos            = (clip.xy / clip.w * float2(1.0, -1.0) + 1.0) / 2.0 * paintParams.world_size,
+#if !defined(HAS_UNIFORM_u_outline_color)
+        .outline_color  = half4(unpack_mix_color(vertx.outline_color, drawable.outline_color_t)),
+#endif
+#if !defined(HAS_UNIFORM_u_opacity)
+        .opacity        = half(unpack_mix_float(vertx.opacity, drawable.opacity_t)),
+#endif
+    };
+}
+"
+    ),
+};
+
+/// The pattern fill outline, drawn as lines of 1 px, which a terrain tile's
+/// drape draws (Metal draws no wider lines).
+pub(crate) const FILL_OUTLINE_PATTERN_SHADER: MslShaderSource = MslShaderSource {
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
+    prelude: FILL_OUTLINE_PATTERN_INSTANCED_SHADER.prelude,
+    source: concat!(
+        r"
+
+struct VertexStage {
+    short2 position [[attribute(0)]];
+
+#if !defined(HAS_UNIFORM_u_color)
+    float4 color [[attribute(1)]];
+#endif
+#if !defined(HAS_UNIFORM_u_pattern_from)
+    ushort4 pattern_from [[attribute(2)]];
+#endif
+#if !defined(HAS_UNIFORM_u_pattern_to)
+    ushort4 pattern_to [[attribute(3)]];
+#endif
+#if !defined(HAS_UNIFORM_u_opacity)
+    float2 opacity [[attribute(4)]];
+#endif
+};
+",
+        outline_pattern_stages!(),
+        r"
+FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
+                                device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
+                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
+                                device const FillDrawableUnionUBO* drawableVector [[buffer(idFillDrawableUBO)]],
+                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
+                                device const FillTilePropsUnionUBO* tilePropsVector [[buffer(idFillTilePropsUBO)]],
+                                device const FillEvaluatedPropsUBO& props [[buffer(idFillEvaluatedPropsUBO)]]) {
+
+    device const FillOutlinePatternDrawableUBO& drawable = drawableVector[uboIndex].fillOutlinePatternDrawableUBO;
+    device const FillOutlinePatternTilePropsUBO& tileProps = tilePropsVector[uboIndex].fillOutlinePatternTilePropsUBO;
+
+#if defined(HAS_UNIFORM_u_pattern_from)
+    const auto pattern_from = tileProps.pattern_from;
+#else
+    const auto pattern_from = float4(vertx.pattern_from);
+#endif
+
+#if defined(HAS_UNIFORM_u_pattern_to)
+    const auto pattern_to   = tileProps.pattern_to;
+#else
+    const auto pattern_to   = float4(vertx.pattern_to);
+#endif
+
+    const float2 pattern_tl_a = pattern_from.xy;
+    const float2 pattern_br_a = pattern_from.zw;
+    const float2 pattern_tl_b = pattern_to.xy;
+    const float2 pattern_br_b = pattern_to.zw;
+
+    const float pixelRatio = paintParams.pixel_ratio;
+    const float tileZoomRatio = drawable.tile_ratio;
+    const float fromScale = props.from_scale;
+    const float toScale = props.to_scale;
+
+    const float2 display_size_a = float2((pattern_br_a.x - pattern_tl_a.x) / pixelRatio, (pattern_br_a.y - pattern_tl_a.y) / pixelRatio);
+    const float2 display_size_b = float2((pattern_br_b.x - pattern_tl_b.x) / pixelRatio, (pattern_br_b.y - pattern_tl_b.y) / pixelRatio);
+    const float2 position = float2(vertx.position);
+    const float4 clip = projectTile(position, position, projectionVector[uboIndex]);
+
+    return {
+        .position       = clip,
+        .v_pos_a        = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, fromScale * display_size_a, tileZoomRatio, position),
+        .v_pos_b        = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, toScale * display_size_b, tileZoomRatio, position),
+        // The vertex from the top left in pixels, as the fragments' position.
+        .v_pos          = (clip.xy / clip.w * float2(1.0, -1.0) + 1.0) / 2.0 * paintParams.world_size,
+
+#if !defined(HAS_UNIFORM_u_color)
+        .color          = half4(unpack_mix_color(vertx.color, drawable.color_t)),
+#endif
+#if !defined(HAS_UNIFORM_u_pattern_from)
+        .pattern_from   = pattern_from,
+#endif
+#if !defined(HAS_UNIFORM_u_pattern_to)
+        .pattern_to     = pattern_to,
+#endif
+#if !defined(HAS_UNIFORM_u_opacity)
+        .opacity        = half(unpack_mix_float(vertx.opacity, drawable.opacity_t)),
 #endif
     };
 }
@@ -3548,7 +3996,9 @@ struct alignas(16) HeatmapEvaluatedPropsUBO {
 static_assert(sizeof(HeatmapEvaluatedPropsUBO) == 16, "wrong size");
 
 "#,
-    source: r#"
+    source: concat!(
+        standing_ground!(),
+        r#"
 
 struct VertexStage {
     short2 pos [[attribute(0)]];
@@ -3581,6 +4031,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const HeatmapDrawableUBO* drawableVector [[buffer(idHeatmapDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
+#if defined(TERRAIN)
+                                texture2d<float, access::read> ground_dem [[texture(2)]],
+#endif
                                 device const HeatmapEvaluatedPropsUBO& props [[buffer(idHeatmapEvaluatedPropsUBO)]]) {
 
     device const HeatmapDrawableUBO& drawable = drawableVector[uboIndex];
@@ -3627,8 +4080,18 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float3 corner_vector = globeRotateVector(center_vector, extrude * radius * drawable.globe_extrude_scale);
     const float4 position = interpolateProjection(circle_center + scaled_extrude, corner_vector, 0.0, projectionVector[uboIndex]);
 #else
-    const float4 pos = float4(floor(float2(vertx.pos) * 0.5) + scaled_extrude, 0, 1);
-    const float4 position = drawable.matrix * pos;
+    // The kernel lies flat on the ground under its center, if its draw
+    // draws it.
+    const float2 center = floor(float2(vertx.pos) * 0.5);
+#if defined(TERRAIN)
+    device const GroundDrawableUBO& ground = projectionVector[uboIndex].ground;
+    const float ele = standing_height(center, ground, ground_dem);
+    const float4 position = ground_holds(center, ground)
+        ? drawable.matrix * float4(center + scaled_extrude, ele, 1)
+        : ground_dropped();
+#else
+    const float4 position = drawable.matrix * float4(center + scaled_extrude, 0, 1);
+#endif
 #endif
 
     return {
@@ -3657,7 +4120,8 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 
     return half4(val, 1.0, 1.0, 1.0);
 }
-"#,
+"#
+    ),
 };
 
 pub(crate) const HEATMAP_TEXTURE_SHADER: MslShaderSource = MslShaderSource {
@@ -3821,6 +4285,198 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 #endif
 }
 ",
+};
+
+/// Port-only, for the backend conformance cases: quads at clip positions,
+/// each vertex colored by the texel of `image` it names, which the vertex
+/// function reads.
+pub(crate) const VERTEX_TEXEL_SHADER: MslShaderSource = MslShaderSource {
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
+    prelude: r"
+
+enum {
+    vertexTexelUBOCount = drawableReservedUBOCount
+};
+
+",
+    source: r"
+
+struct VertexStage {
+    short4 pos_texel [[attribute(0)]];
+};
+
+struct FragmentStage {
+    float4 position [[position, invariant]];
+    float4 color;
+};
+
+FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
+                                texture2d<float, access::read> image [[texture(0)]]) {
+    return {
+        .position = float4(float2(vertx.pos_texel.xy), 0.0, 1.0),
+        .color = image.read(uint2(vertx.pos_texel.zw)),
+    };
+}
+
+half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
+    return half4(in.color);
+}
+",
+};
+
+/// The UBO ids and structs of the terrain's shaders.
+const TERRAIN_PRELUDE: &str = r#"
+
+enum {
+    idTerrainDrawableUBO = idDrawableReservedVertexOnlyUBO,
+    idTerrainPropsUBO = drawableReservedUBOCount,
+    idTerrainFogUBO,
+    terrainUBOCount
+};
+
+struct alignas(16) TerrainDrawableUBO {
+    /*  0 */ float4x4 matrix;
+    /* 64 */ float4 dem_coords;
+    /* 80 */
+};
+static_assert(sizeof(TerrainDrawableUBO) == 5 * 16, "wrong size");
+
+// Only the surface's fragment stage reads the fog.
+struct alignas(16) TerrainFogUBO {
+    // Linear and premultiplied.
+    /*  0 */ float4 fog_color;
+    /* 16 */ float4 horizon_color;
+    // The near and far distances along the view, in pixels, between which the
+    // fog's depth runs from 0 to 1.
+    /* 32 */ float2 depth_range;
+    /* 40 */ float ground_blend;
+    /* 44 */ float horizon_blend;
+    /* 48 */ float opacity;
+    /* 52 */ float pad0;
+    /* 56 */ float pad1;
+    /* 60 */ float pad2;
+    /* 64 */
+};
+static_assert(sizeof(TerrainFogUBO) == 4 * 16, "wrong size");
+
+"#;
+
+/// The terrain's surface: a tile's grid, drawn with the tile's matrix, raised
+/// to the heights of the tile's DEM with its skirts lowered, in the colors of
+/// the tile's drape, fogged as GL JS's terrain is. Rows of a pass's texture
+/// are stored north first, as the drape is read.
+pub(crate) const TERRAIN_SHADER: MslShaderSource = MslShaderSource {
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
+    prelude: TERRAIN_PRELUDE,
+    source: concat!(
+        ground_height!(),
+        r"
+
+struct VertexStage {
+    // x and y in tile units, whether the vertex is a skirt's lower edge, 0.
+    short4 pos [[attribute(0)]];
+};
+
+struct FragmentStage {
+    float4 position [[position, invariant]];
+    float2 drape_pos;
+    // The distance along the view of the ground before the skirt lowers it,
+    // which the fog reads, as in GL JS: the clip w, which is affine in the
+    // vertex, so it interpolates exactly.
+    float view_depth;
+};
+
+FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
+                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
+                                device const TerrainDrawableUBO* drawableVector [[buffer(idTerrainDrawableUBO)]],
+                                device const TerrainPropsUBO& props [[buffer(idTerrainPropsUBO)]],
+                                texture2d<float, access::read> dem [[texture(2)]]) {
+    device const TerrainDrawableUBO& drawable = drawableVector[uboIndex];
+    const float2 pos = float2(vertx.pos.xy);
+    const float skirt = float(vertx.pos.z);
+    const float height = ground_height(pos, drawable.dem_coords, dem, props);
+    const float4x4 m = drawable.matrix;
+    return {
+        .position = m * float4(pos, height - skirt * props.skirt_length, 1.0),
+        .drape_pos = pos / 8192.0,
+        .view_depth = m[0].w * pos.x + m[1].w * pos.y + m[2].w * height + m[3].w,
+    };
+}
+
+half4 fragment fragmentMain(FragmentStage in [[stage_in]],
+                            device const TerrainFogUBO& fog [[buffer(idTerrainFogUBO)]],
+                            texture2d<float, access::sample> drape [[texture(1)]],
+                            sampler drape_sampler [[sampler(1)]]) {
+    const float4 color = drape.sample(drape_sampler, in.drape_pos);
+    const float fog_near = fog.depth_range.x;
+    const float fog_far = fog.depth_range.y;
+    if (fog.opacity <= 0.0 || color.a <= 0.0 || in.view_depth <= fog_near) {
+        return half4(color);
+    }
+    // GL JS's fog depth, a perspective depth from 0 at the near end of the
+    // range to 1 at its far end.
+    const float fog_depth = min(fog_far / (fog_far - fog_near) * (1.0 - fog_near / in.view_depth), 1.0);
+    if (fog_depth <= fog.ground_blend) {
+        return half4(color);
+    }
+    // GL JS's fog, mixed in linear space through a gamma of 2.2: toward the
+    // fog's color, and past the horizon blend toward the horizon's. It tints
+    // the drape's color by the fog's alpha and keeps the drape's coverage.
+    const float horizon = smoothstep(0.0, 1.0, (fog_depth - fog.horizon_blend) / max(1.0 - fog.horizon_blend, 1e-6));
+    const float4 tint = mix(fog.fog_color, fog.horizon_color, horizon);
+    const float along = (fog_depth - fog.ground_blend) / (1.0 - fog.ground_blend);
+    const float strength = along * along * fog.opacity;
+    const float3 gamma = float3(2.2);
+    const float3 surface = pow(color.rgb / color.a, gamma);
+    const float3 fogged = surface * (1.0 - strength * tint.a) + tint.rgb * strength;
+    return half4(float4(pow(fogged, 1.0 / gamma) * color.a, color.a));
+}
+"
+    ),
+};
+
+/// Port-only, for the backend conformance cases: probes of the terrain's
+/// height rule. Each probe is a quad at clip positions whose vertices read the
+/// height at a place of a tile, and whose fragments write that height's bits,
+/// least significant byte first, as the texel's channels.
+pub(crate) const TERRAIN_PROBE_SHADER: MslShaderSource = MslShaderSource {
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
+    prelude: TERRAIN_PRELUDE,
+    source: concat!(
+        ground_height!(),
+        r"
+
+struct VertexStage {
+    // Clip x and y, then where the height is read, in tile units.
+    float4 pos [[attribute(0)]];
+    // The DEM uv's scale and offset, then the DEM's width in pixels.
+    float4 dem_coords [[attribute(1)]];
+};
+
+struct FragmentStage {
+    float4 position [[position, invariant]];
+    float height [[flat]];
+};
+
+FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
+                                device const TerrainPropsUBO& props [[buffer(idTerrainPropsUBO)]],
+                                texture2d<float, access::read> dem [[texture(2)]]) {
+    return {
+        .position = float4(vertx.pos.xy, 0.0, 1.0),
+        .height = ground_height(vertx.pos.zw, vertx.dem_coords, dem, props),
+    };
+}
+
+float4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
+    const uint bits = as_type<uint>(in.height);
+    const uint4 bytes = uint4(bits, bits >> 8, bits >> 16, bits >> 24) & uint4(255);
+    return float4(bytes) / 255.0;
+}
+"
+    ),
 };
 
 pub(crate) const HILLSHADE_PREPARE_SHADER: MslShaderSource = MslShaderSource {
@@ -6064,9 +6720,12 @@ struct alignas(16) RasterEvaluatedPropsUBO {
     /* 52 */ float contrast_factor;
     /* 56 */ float pad1;
     /* 60 */ float pad2;
-    /* 64 */
+    /* 64 */ float4 coords_top;
+    /* 80 */ float4 coords_bottom;
+    /* 96 */ float4 image_warp;
+    /* 112 */
 };
-static_assert(sizeof(RasterEvaluatedPropsUBO) == 4 * 16, "wrong size");
+static_assert(sizeof(RasterEvaluatedPropsUBO) == 7 * 16, "wrong size");
 
 "#,
     source: r"
@@ -6078,8 +6737,8 @@ struct VertexStage {
 
 struct FragmentStage {
     float4 position [[position, invariant]];
-    float2 pos0;
-    float2 pos1;
+    float3 pos0;
+    float3 pos1;
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
@@ -6090,7 +6749,21 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 
     device const RasterDrawableUBO& drawable = drawableVector[uboIndex];
 
-    const float4 position = projectTile(float2(vertx.pos), float2(vertx.pos), projectionVector[uboIndex]);
+    // The vertices span the unit square, which the warp puts on the quad
+    // of the corners: blended from the projective warp towards the
+    // bilinear one, whose homogeneous denominator is one at the top left.
+    const float2 fractional = float2(vertx.pos) / 8192.0;
+    const float2 top_left = props.coords_top.xy;
+    const float2 top_right = props.coords_top.zw;
+    const float2 bottom_left = props.coords_bottom.xy;
+    const float2 bottom_right = props.coords_bottom.zw;
+    const float2 bilinear = mix(mix(top_left, top_right, fractional.x), mix(bottom_left, bottom_right, fractional.x), fractional.y);
+    const float denominator = dot(props.image_warp.xy, fractional) + 1.0;
+    const float2 across_top = top_right - top_left + props.image_warp.x * top_right;
+    const float2 down_left = bottom_left - top_left + props.image_warp.y * bottom_left;
+    const float2 projective = (across_top * fractional.x + down_left * fractional.y + top_left) / denominator;
+    const float2 warped = mix(projective, bilinear, props.image_warp.z);
+    const float4 position = projectTile(warped, warped, projectionVector[uboIndex]);
 
     // We are using Int16 for texture position coordinates to give us enough precision for
     // fractional coordinates. We use 8192 to scale the texture coordinates in the buffer
@@ -6099,11 +6772,14 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     // so math for modifying either is consistent.
     const float2 pos0 = (((float2(vertx.texture_pos) / 8192.0) - 0.5) / props.buffer_scale ) + 0.5;
     const float2 pos1 = (pos0 * props.scale_parent) + props.tl_parent;
+    // The texture coordinates weighted by the reciprocal of the
+    // denominator, blended as the position is, interpolate projectively.
+    const float weight = mix(1.0 / denominator, 1.0, props.image_warp.z);
 
     return {
         .position    = position,
-        .pos0        = pos0,
-        .pos1        = pos1,
+        .pos0        = float3(pos0 * weight, weight),
+        .pos1        = float3(pos1 * weight, weight),
     };
 }
 
@@ -6118,8 +6794,8 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 #endif
 
     // read and cross-fade colors from the main and parent tiles
-    float4 color0 = image0.sample(image0_sampler, in.pos0);
-    float4 color1 = image1.sample(image1_sampler, in.pos1);
+    float4 color0 = image0.sample(image0_sampler, in.pos0.xy / in.pos0.z);
+    float4 color1 = image1.sample(image1_sampler, in.pos1.xy / in.pos1.z);
     if (color0.a > 0.0) {
         color0.rgb = color0.rgb / color0.a;
     }
@@ -6299,7 +6975,9 @@ static_assert(sizeof(SymbolEvaluatedPropsUBO) == 6 * 16, "wrong size");
 #define c_offscreen_degenerate_triangle_location -2.0
 
 "#,
-    source: r"
+    source: concat!(
+        standing_ground!(),
+        r"
 
 struct VertexStage {
     short4 pos_offset [[attribute(0)]];
@@ -6338,7 +7016,11 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const SymbolDrawableUBO* drawableVector [[buffer(idSymbolDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]]) {
+                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]]
+#if defined(TERRAIN)
+                                , texture2d<float, access::read> ground_dem [[texture(2)]]
+#endif
+                                ) {
 
     device const SymbolDrawableUBO& drawable = drawableVector[uboIndex];
     device const ProjectionUBO& projection = projectionVector[uboIndex];
@@ -6385,9 +7067,19 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     }
 
     const float2 translated_a_pos = a_pos + drawable.translation;
-    const float4 projectedPoint = projectTileWithElevation(translated_a_pos, vertx.height_offset, projection);
+    // The symbol stands where its draw's ground says, under its anchor as it
+    // draws, translated, if its draw draws it.
+#if defined(TERRAIN)
+    if (!ground_holds(a_pos, projection.ground)) {
+        return { .position = ground_dropped() };
+    }
+    const float ele = vertx.height_offset + standing_height(translated_a_pos, projection.ground, ground_dem);
+#else
+    const float ele = vertx.height_offset;
+#endif
+    const float4 projectedPoint = projectTileWithElevation(translated_a_pos, ele, projection);
 #if defined(PROJECTION_GLOBE)
-    if (!drawable.pitch_with_map && vertx.height_offset <= 0.0 && projectedPoint.z > projectedPoint.w) {
+    if (!drawable.pitch_with_map && ele <= 0.0 && projectedPoint.z > projectedPoint.w) {
         return {
             .position = float4(c_offscreen_degenerate_triangle_location,
                                c_offscreen_degenerate_triangle_location,
@@ -6414,7 +7106,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     float symbol_rotation = 0.0;
     if (drawable.rotate_symbol) {
         // See comments in symbol_sdf.vertex
-        const float4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + float2(1, 0), vertx.height_offset, projection);
+        const float4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + float2(1, 0), ele, projection);
 
         const float2 a = projectedPoint.xy / projectedPoint.w;
         const float2 b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
@@ -6428,11 +7120,11 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float2 projected_pos_xy = vertx.projected_pos.xy;
     float4 projected_pos;
     if (drawable.is_along_line || drawable.is_variable_anchor) {
-        projected_pos = float4(projected_pos_xy, vertx.height_offset, 1.0);
+        projected_pos = float4(projected_pos_xy, ele, 1.0);
     } else if (drawable.pitch_with_map) {
-        projected_pos = drawable.label_plane_matrix * float4(projected_pos_xy + drawable.translation, vertx.height_offset, 1.0);
+        projected_pos = drawable.label_plane_matrix * float4(projected_pos_xy + drawable.translation, ele, 1.0);
     } else {
-        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(projected_pos_xy + drawable.translation, vertx.height_offset, projection);
+        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(projected_pos_xy + drawable.translation, ele, projection);
     }
 
     const float z = float(drawable.pitch_with_map) * projected_pos.z / projected_pos.w;
@@ -6448,6 +7140,13 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float2 posOffset = a_offset * max(a_minFontScale, fontScale) / 32.0 + a_pxoffset / 16.0;
     float4 position = drawable.coord_matrix * float4(projected_pos.xy / projected_pos.w + rotation_matrix * posOffset * projectionScaling, z, 1.0);
     if (drawable.pitch_with_map) {
+#if defined(TERRAIN)
+        // A label along a line stands on the ground under each of its
+        // glyphs' vertices.
+        if (drawable.is_along_line) {
+            position.z = vertx.height_offset + standing_height(position.xy, projection.ground, ground_dem);
+        }
+#endif
         position = projectTileWithElevation(position.xy, position.z, projection);
     }
     const float2 tex_origin = float2(vertx.tex_origin);
@@ -6483,7 +7182,8 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 
     return half4(image.sample(image_sampler, atlas_pos(in.tex_origin, in.tex)) * opacity);
 }
-",
+"
+    ),
 };
 
 pub(crate) const SYMBOL_SDF_SHADER: MslShaderSource = MslShaderSource {
@@ -6562,7 +7262,9 @@ static_assert(sizeof(SymbolEvaluatedPropsUBO) == 6 * 16, "wrong size");
 #define c_offscreen_degenerate_triangle_location -2.0
 
 "#,
-    source: r"
+    source: concat!(
+        standing_ground!(),
+        r"
 
 struct VertexStage {
     short4 pos_offset [[attribute(0)]];
@@ -6621,6 +7323,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const SymbolDrawableUBO* drawableVector [[buffer(idSymbolDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
+#if defined(TERRAIN)
+                                texture2d<float, access::read> ground_dem [[texture(2)]],
+#endif
                                 device const SymbolEvaluatedPropsUBO& props [[buffer(idSymbolEvaluatedPropsUBO)]]) {
 
     device const SymbolDrawableUBO& drawable = drawableVector[uboIndex];
@@ -6667,9 +7372,19 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     }
 
     const float2 translated_a_pos = a_pos + drawable.translation;
-    const float4 projectedPoint = projectTileWithElevation(translated_a_pos, vertx.height_offset, projection);
+    // The symbol stands where its draw's ground says, under its anchor as it
+    // draws, translated, if its draw draws it.
+#if defined(TERRAIN)
+    if (!ground_holds(a_pos, projection.ground)) {
+        return { .position = ground_dropped() };
+    }
+    const float ele = vertx.height_offset + standing_height(translated_a_pos, projection.ground, ground_dem);
+#else
+    const float ele = vertx.height_offset;
+#endif
+    const float4 projectedPoint = projectTileWithElevation(translated_a_pos, ele, projection);
 #if defined(PROJECTION_GLOBE)
-    if (!drawable.pitch_with_map && vertx.height_offset <= 0.0 && projectedPoint.z > projectedPoint.w) {
+    if (!drawable.pitch_with_map && ele <= 0.0 && projectedPoint.z > projectedPoint.w) {
         return {
             .position = float4(c_offscreen_degenerate_triangle_location,
                                c_offscreen_degenerate_triangle_location,
@@ -6703,7 +7418,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         // Point labels with 'rotation-alignment: map' are horizontal with respect to tile units
         // To figure out that angle in projected space, we draw a short horizontal line in tile
         // space, project it, and measure its angle in projected space.
-        const float4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + float2(1, 0), vertx.height_offset, projection);
+        const float4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + float2(1, 0), ele, projection);
 
         const float2 a = projectedPoint.xy / projectedPoint.w;
         const float2 b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
@@ -6717,11 +7432,11 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float2 projected_pos_xy = vertx.projected_pos.xy;
     float4 projected_pos;
     if (drawable.is_along_line || drawable.is_variable_anchor) {
-        projected_pos = float4(projected_pos_xy, vertx.height_offset, 1.0);
+        projected_pos = float4(projected_pos_xy, ele, 1.0);
     } else if (drawable.pitch_with_map) {
-        projected_pos = drawable.label_plane_matrix * float4(projected_pos_xy + drawable.translation, vertx.height_offset, 1.0);
+        projected_pos = drawable.label_plane_matrix * float4(projected_pos_xy + drawable.translation, ele, 1.0);
     } else {
-        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(projected_pos_xy + drawable.translation, vertx.height_offset, projection);
+        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(projected_pos_xy + drawable.translation, ele, projection);
     }
 
     const float z = float(drawable.pitch_with_map) * projected_pos.z / projected_pos.w;
@@ -6737,6 +7452,13 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float2 pos_rot = a_offset / 32.0 * fontScale + a_pxoffset;
     float4 position = drawable.coord_matrix * float4(projected_pos.xy / projected_pos.w + rotation_matrix * pos_rot * projectionScaling, z, 1.0);
     if (drawable.pitch_with_map) {
+#if defined(TERRAIN)
+        // A label along a line stands on the ground under each of its
+        // glyphs' vertices.
+        if (drawable.is_along_line) {
+            position.z = vertx.height_offset + standing_height(position.xy, projection.ground, ground_dem);
+        }
+#endif
         position = projectTileWithElevation(position.xy, position.z, projection);
     }
     const float2 tex_origin = float2(vertx.tex_origin);
@@ -6824,7 +7546,8 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 
     return half4(color * (alpha * opacity));
 }
-",
+"
+    ),
 };
 
 pub(crate) const SYMBOL_TEXT_AND_ICON_SHADER: MslShaderSource = MslShaderSource {
@@ -6903,7 +7626,9 @@ static_assert(sizeof(SymbolEvaluatedPropsUBO) == 6 * 16, "wrong size");
 #define c_offscreen_degenerate_triangle_location -2.0
 
 "#,
-    source: r"
+    source: concat!(
+        standing_ground!(),
+        r"
 
 #define SDF 1.0
 #define ICON 0.0
@@ -6966,6 +7691,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const SymbolDrawableUBO* drawableVector [[buffer(idSymbolDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
+#if defined(TERRAIN)
+                                texture2d<float, access::read> ground_dem [[texture(2)]],
+#endif
                                 device const SymbolEvaluatedPropsUBO& props [[buffer(idSymbolEvaluatedPropsUBO)]]) {
 
     device const SymbolDrawableUBO& drawable = drawableVector[uboIndex];
@@ -7012,9 +7740,19 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     }
 
     const float2 translated_a_pos = a_pos + drawable.translation;
-    const float4 projectedPoint = projectTileWithElevation(translated_a_pos, vertx.height_offset, projection);
+    // The symbol stands where its draw's ground says, under its anchor as it
+    // draws, translated, if its draw draws it.
+#if defined(TERRAIN)
+    if (!ground_holds(a_pos, projection.ground)) {
+        return { .position = ground_dropped() };
+    }
+    const float ele = vertx.height_offset + standing_height(translated_a_pos, projection.ground, ground_dem);
+#else
+    const float ele = vertx.height_offset;
+#endif
+    const float4 projectedPoint = projectTileWithElevation(translated_a_pos, ele, projection);
 #if defined(PROJECTION_GLOBE)
-    if (!drawable.pitch_with_map && vertx.height_offset <= 0.0 && projectedPoint.z > projectedPoint.w) {
+    if (!drawable.pitch_with_map && ele <= 0.0 && projectedPoint.z > projectedPoint.w) {
         return {
             .position = float4(c_offscreen_degenerate_triangle_location,
                                c_offscreen_degenerate_triangle_location,
@@ -7048,7 +7786,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         // Point labels with 'rotation-alignment: map' are horizontal with respect to tile units
         // To figure out that angle in projected space, we draw a short horizontal line in tile
         // space, project it, and measure its angle in projected space.
-        const float4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + float2(1, 0), vertx.height_offset, projection);
+        const float4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + float2(1, 0), ele, projection);
 
         const float2 a = projectedPoint.xy / projectedPoint.w;
         const float2 b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
@@ -7063,11 +7801,11 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float2 projected_pos_xy = vertx.projected_pos.xy;
     float4 projected_pos;
     if (drawable.is_along_line || drawable.is_variable_anchor) {
-        projected_pos = float4(projected_pos_xy, vertx.height_offset, 1.0);
+        projected_pos = float4(projected_pos_xy, ele, 1.0);
     } else if (drawable.pitch_with_map) {
-        projected_pos = drawable.label_plane_matrix * float4(projected_pos_xy + drawable.translation, vertx.height_offset, 1.0);
+        projected_pos = drawable.label_plane_matrix * float4(projected_pos_xy + drawable.translation, ele, 1.0);
     } else {
-        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(projected_pos_xy + drawable.translation, vertx.height_offset, projection);
+        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(projected_pos_xy + drawable.translation, ele, projection);
     }
 
     const float z = float(drawable.pitch_with_map) * projected_pos.z / projected_pos.w;
@@ -7083,6 +7821,13 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float2 pos_rot = a_offset / 32.0 * fontScale;
     float4 position = drawable.coord_matrix * float4(projected_pos.xy / projected_pos.w + rotation_matrix * pos_rot * projectionScaling, z, 1.0);
     if (drawable.pitch_with_map) {
+#if defined(TERRAIN)
+        // A label along a line stands on the ground under each of its
+        // glyphs' vertices.
+        if (drawable.is_along_line) {
+            position.z = vertx.height_offset + standing_height(position.xy, projection.ground, ground_dem);
+        }
+#endif
         position = projectTileWithElevation(position.xy, position.z, projection);
     }
     const bool is_icon = (is_sdf == ICON);
@@ -7181,5 +7926,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 
     return half4(color * (alpha * opacity));
 }
-",
+"
+    ),
 };

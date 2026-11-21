@@ -21,10 +21,10 @@ pub use map_projection::MapProjection;
 pub use map_snapshot::{CameraBounds, FreeCamera, MapSnapshot, TileSettings};
 pub use mln_map_types::{
     AnchoredMomentum, AnimationOptions, BoundOptions, Camera, CameraDelta, CameraError, CameraLimits, CameraMomentum,
-    CameraOptions, CameraUpdate, CameraUpdateMode, CameraVelocity, ConstrainMode, FreeCameraOptions, GesturePhase,
-    InvalidMomentum, LogicalExtent, MapDebugOptions, MapMode, MapView, MomentumDecay, MomentumDecayModel,
-    MomentumEasing, MomentumGlide, MomentumSnap, NorthOrientation, ProjectionMode, TileLodMode, TransformState,
-    TransitionEnd, TransitionOutcome, View, Viewport, ViewportMode,
+    CameraOptions, CameraUpdate, CameraUpdateMode, CameraVelocity, ConstrainMode, Elevation, FreeCameraOptions,
+    GesturePhase, InvalidMomentum, LogicalExtent, MapDebugOptions, MapMode, MapView, MomentumDecay, MomentumDecayModel,
+    MomentumEasing, MomentumGlide, MomentumSnap, NorthOrientation, ProjectionMode, TerrainSkirtLength, TileLodMode,
+    TransformState, TransitionEnd, TransitionOutcome, View, Viewport, ViewportMode,
 };
 pub use mln_renderer::{
     OverscaledTileID, RenderMode, RendererEvents, RenderingStats, TileOperation, Update, UpdateReader,

@@ -83,9 +83,20 @@ pub enum MapEvent {
     LoadingFinished,
     /// The style failed to load.
     LoadingFailed(StyleLoadError),
-    /// Everything has loaded and no transition runs.
+    /// A complete frame of the map's last update drew: everything has
+    /// loaded, no transition runs, and no frame follows until something
+    /// changes the map. Once a continuous map's frames have failed on the
+    /// GPU for a second ([`RenderError`](Self::RenderError)), a failed frame
+    /// that is complete but for its failure counts: the map draws no better.
     Idle,
-    /// A layer or a drawable failed to render.
+    /// A frame failed on the GPU, the first of the frames in a row that
+    /// fail: a pass didn't begin, a texture couldn't be made or a draw
+    /// failed. The still image it was drawn for fails with the error. A
+    /// continuous map's frame shows what did draw, and the map draws again
+    /// on its own, sooner after one failure than after many, until
+    /// its frames have failed for a second; then it draws again only when
+    /// something else draws a frame, and goes idle. It reports a failure
+    /// again once a frame drew without one.
     RenderError(Error),
     RenderFrameStarted,
     RenderFrameFinished(RenderFrameStatus),

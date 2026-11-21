@@ -123,6 +123,9 @@ pub const FILL_EXTRUSION_LAYER_UBO_COUNT: usize = ID_FILL_EXTRUSION_PROPS_UBO + 
 // buffers, whose ids follow the uniform buffers'.
 pub const ID_FILL_EXTRUSION_WALL_VERTICES: usize = MAX_UBO_COUNT_PER_SHADER;
 pub const ID_FILL_EXTRUSION_WALL_PAINT: usize = MAX_UBO_COUNT_PER_SHADER + 1;
+/// Port-only: in the terrain variant of `FillExtrusionPulledShader`, the
+/// centroid each bucket vertex's polygon stands on.
+pub const ID_FILL_EXTRUSION_WALL_CENTROIDS: usize = MAX_UBO_COUNT_PER_SHADER + 2;
 pub const ID_FILL_EXTRUSION_IMAGE_TEXTURE: usize = 0;
 pub const ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE: usize = 0;
 pub const ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE: usize = 1;
@@ -138,6 +141,10 @@ pub const ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE: usize = 6;
 pub const ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE: usize = 7;
 pub const ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE: usize = 8;
 pub const ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE: usize = 9;
+/// Port-only: the centroid of a vertex's polygon, which the terrain variants
+/// of the fill extrusion programs read, per vertex or per wall instance, to
+/// stand the polygon on the ground there.
+pub const ID_FILL_EXTRUSION_CENTROID_ATTRIBUTE: usize = 10;
 
 pub const ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE: usize = 0;
 
@@ -148,6 +155,39 @@ pub const LAYER_COMPOSITE_UBO_COUNT: usize = ID_LAYER_COMPOSITE_UBO + 1;
 pub const ID_LAYER_COMPOSITE_IMAGE_TEXTURE: usize = 0;
 pub const ID_LAYER_COMPOSITE_BACKDROP_TEXTURE: usize = 1;
 pub const ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE: usize = 0;
+
+// --- vertex texel (port-only): the backend conformance cases' quads, whose
+// vertex stage reads a texture.
+pub const ID_VERTEX_TEXEL_TEXTURE: usize = 0;
+pub const ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE: usize = 0;
+
+// --- the ground (port-only): what the terrain variants of the standing
+// layers' programs read of the ground under them. Each draw's ground rides in
+// its projection entry (`TerrainProjectionUBO`), which every standing
+// program's vertex stage reads.
+/// The DEM texture of a draw's ground, which the vertex stage reads texel by
+/// texel, and the surface's DEM, so that one prelude declares it. The shader
+/// sources write this slot as a literal.
+pub const ID_GROUND_DEM_TEXTURE: usize = 2;
+
+// --- terrain: a tile's grid, its DEM and the texture draped over it.
+/// A grid vertex: x and y in tile units, whether it is a skirt's lower edge,
+/// and 0.
+pub const ID_TERRAIN_POS_VERTEX_ATTRIBUTE: usize = 0;
+pub const ID_TERRAIN_DRAWABLE_UBO: usize = ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO; // SSBO
+pub const ID_TERRAIN_PROPS_UBO: usize = DRAWABLE_RESERVED_UBO_COUNT; // packed
+/// The terrain's fog, which only the surface's program reads.
+pub const ID_TERRAIN_FOG_UBO: usize = ID_TERRAIN_PROPS_UBO + 1; // packed
+pub const ID_TERRAIN_DEM_TEXTURE: usize = ID_GROUND_DEM_TEXTURE;
+pub const ID_TERRAIN_DRAPE_TEXTURE: usize = 1;
+
+// --- terrain probe (port-only): the conformance case's probes of the height
+// rule, which read the terrain's props and DEM texture.
+/// Where a probe draws, in clip x and y, then where it reads the height, in
+/// tile units.
+pub const ID_TERRAIN_PROBE_POS_VERTEX_ATTRIBUTE: usize = 0;
+/// Where the probe reads its DEM, as the terrain's `dem_coords`.
+pub const ID_TERRAIN_PROBE_DEM_COORDS_VERTEX_ATTRIBUTE: usize = 1;
 
 // --- sky (`idSkyPropsUBO` / `idAtmospherePropsUBO = getEnumValue(drawableReservedUBOCount, layerUBOStartId)`)
 pub const ID_SKY_PROPS_UBO: usize = DRAWABLE_RESERVED_UBO_COUNT; // packed

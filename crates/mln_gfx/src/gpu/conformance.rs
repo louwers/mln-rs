@@ -11,17 +11,24 @@
 //! or geometry were made of does.
 //! [`instanced_walls`] draws fill extrusion walls over the left half, and
 //! [`wall_quads`] draws them again from quads of their own, as
-//! [`pulled_walls`] does from a vertex buffer it reads by vertex index. The
-//! other cases draw one color over the whole target, as
-//! [`transparent_replace`] does to check that `Replace` doesn't blend. On
-//! wasm, [`host_writes`] checks writes from JS arrays.
+//! [`pulled_walls`] does from a vertex buffer it reads by vertex index.
+//! [`written_vertex_texels`] and [`drawn_vertex_texels`] draw each quarter of
+//! the target in the color of a texel that the vertex stage reads, of a
+//! texture written or drawn into just before. [`mipmapped_targets`] samples
+//! the mips of a texture drawn into, minified. The other cases draw one color
+//! over the whole target, as [`transparent_replace`] does to check that
+//! `Replace` doesn't blend. On wasm, [`host_writes`] checks writes from JS
+//! arrays. [`terrain_heights`] reads back the heights that the terrain's
+//! height rule reads on the GPU, against the CPU's.
 
 mod cases;
+mod terrain;
 
 use mln_util::Color;
 use mln_util::size::Size;
 
 pub use self::cases::*;
+pub use self::terrain::terrain_heights;
 use super::{
     BindGroupEntry, BindingsDesc, BindingsId, BufferDesc, BufferId, BufferUsage, ColorAttachment, DepthState,
     DepthStencilAttachment, Draw, DynamicState, FixedState, GeometryDesc, GeometryId, Gpu, GpuError, LoadOp, PassDesc,
@@ -135,12 +142,14 @@ pub fn clip_mask_and_background(gpu: &mut impl Gpu) -> Result<(), GpuError> {
         size: SIZE,
         format: TextureFormat::Rgba8Unorm,
         usage: TextureUsage { render_target: true, copy_src: true, ..TextureUsage::default() },
+        mipmapped: false,
     })?;
     let depth_stencil = gpu.create_texture(&TextureDesc {
         label: "depth-stencil",
         size: SIZE,
         format: TextureFormat::Depth24PlusStencil8,
         usage: TextureUsage { render_target: true, ..TextureUsage::default() },
+        mipmapped: false,
     })?;
     let frame = clipped_frame(gpu)?;
     frame.draw(gpu, frame_pass(color, depth_stencil), true)?;
@@ -322,12 +331,14 @@ pub fn imported_textures<G: Gpu>(
         size: SIZE,
         format: TextureFormat::Rgba8Unorm,
         usage: TextureUsage { render_target: true, copy_src: true, ..TextureUsage::default() },
+        mipmapped: false,
     })?;
     let depth_stencil = gpu.create_texture(&TextureDesc {
         label: "native depth-stencil",
         size: SIZE,
         format: TextureFormat::Depth24PlusStencil8,
         usage: TextureUsage { render_target: true, ..TextureUsage::default() },
+        mipmapped: false,
     })?;
     let (imported_color, imported_depth_stencil) = (import(gpu, color)?, import(gpu, depth_stencil)?);
     let frame = clipped_frame(gpu)?;

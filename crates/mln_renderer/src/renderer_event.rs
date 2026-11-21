@@ -6,6 +6,7 @@
 use std::sync::Arc;
 
 pub use mln_gfx::rendering_stats::RenderingStats;
+use mln_map_types::Elevation;
 pub use mln_text::glyph::GlyphRange;
 pub use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
@@ -35,9 +36,18 @@ pub enum RendererEvent {
     RenderFrameStarted,
     /// The renderer drew a frame.
     RenderFrameFinished {
-        /// `Full` when everything the frame shows has loaded.
+        /// `Full` when everything the frame shows has loaded, and its camera
+        /// stood as it would on the terrain's current ground
+        /// ([`UpdateParameters::elevation`]), and nothing of it failed.
+        ///
+        /// [`UpdateParameters::elevation`]: crate::UpdateParameters::elevation
         mode: RenderMode,
-        /// The frame has transitions still running.
+        /// Whether the frame would be `Full` but for its `error`: what it
+        /// draws had loaded, and no drape waits for a later frame.
+        complete: bool,
+        /// The frame has transitions still running, or drapes to draw again
+        /// at rest. A frame that failed doesn't ask for another for what
+        /// failed: its map decides when to draw again.
         needs_repaint: bool,
         /// When, without `needs_repaint`, the map changes next though
         /// nothing asks for a frame before: a frame then places the symbols
@@ -49,9 +59,33 @@ pub enum RendererEvent {
         /// updates completes it, not one of an earlier update that a renderer
         /// on another thread drew late.
         still_image_request_id: u64,
+        /// The [`update_id`] of the update that the frame drew. Only a
+        /// frame of the map's last update leaves a continuous map idle: an
+        /// update the map made after the renderer took the frame's, such as
+        /// its answer to the frame's own reports, has a frame to come.
+        ///
+        /// [`update_id`]: crate::UpdateParameters::update_id
+        update_id: u64,
         /// The context's counters after the frame.
         stats: Arc<RenderingStats>,
+        /// Why the frame failed on the GPU, if it did
+        /// ([`DrawnFrame::error`](crate::DrawnFrame::error)): its image
+        /// lacks what failed. A still image of the frame's
+        /// `still_image_request_id` fails with the error. Boxed, so that the
+        /// events don't grow for it.
+        error: Option<Box<Error>>,
     },
+    /// The ground of the terrain changed: the tiles that draw it, or the DEM
+    /// data they read; or it comes again for an update that carried a
+    /// ground that differs from it at the view's center. `None` once terrain
+    /// stops drawing, and for an update that carries a ground while terrain
+    /// doesn't draw. It comes before the frame of its update finishes. The
+    /// map's camera stands on it, and the map answers it with an update that
+    /// carries it ([`UpdateParameters::elevation`]), which a still image
+    /// waits for.
+    ///
+    /// [`UpdateParameters::elevation`]: crate::UpdateParameters::elevation
+    TerrainElevation(Option<Arc<dyn Elevation>>),
     /// The renderer drew its first frame with everything loaded.
     RenderMapFinished,
     /// A layer uses an image that the style lacks. The renderer lays out
@@ -80,8 +114,6 @@ pub enum RendererEvent {
         id: OverscaledTileID,
         source_id: String,
     },
-    /// A layer or a draw failed to render.
-    RenderError(Error),
 }
 
 /// The queue a renderer pushes its events to.

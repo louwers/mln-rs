@@ -671,7 +671,17 @@ impl<B: LocalBackend> Gfx for BackendGfx<B> {
         let mut gpu = self.backend.gpu();
         let gpu = &mut *gpu;
         let frame = renderer.update(gpu, update)?;
-        let image = target.begin_frame(gpu)?;
+        let Some(image) = target.begin_frame(gpu) else {
+            // An offscreen target without a frame couldn't make its
+            // textures, which no later frame will either: the frame fails,
+            // so that a still image of it ends.
+            #[cfg(not(target_family = "wasm"))]
+            if matches!(self.frames, Frames::Offscreen(_)) {
+                let error = Error::native("Making an offscreen frame's textures failed");
+                renderer.fail_frame(gpu, frame, error);
+            }
+            return None;
+        };
         let drawn = renderer.render(gpu, &image, frame);
         let handoff = target.end_frame(gpu);
         renderer.finish_frame(gpu, drawn, handoff);
@@ -679,6 +689,12 @@ impl<B: LocalBackend> Gfx for BackendGfx<B> {
     }
 
     fn ready_for_frame(&mut self) -> bool {
+        // An offscreen target answers without making its textures: a frame
+        // whose textures it can't make fails in `render`.
+        #[cfg(not(target_family = "wasm"))]
+        if let Frames::Offscreen(target) = &self.frames {
+            return !target.size().is_empty();
+        }
         let Some(target) = self.frames.target() else { return false };
         target.begin_frame(&mut self.backend.gpu()).is_some()
     }
@@ -1126,7 +1142,10 @@ impl LocalTarget {
     /// begins the frame, the renderer draws into it, and the target ends
     /// it. Returns where the frame went, or `None` when nothing was drawn:
     /// there is no renderer, the target had nothing to draw into, or there
-    /// was nothing to draw.
+    /// was nothing to draw. A frame that failed on the GPU ends like any
+    /// other, and the renderer reports its error
+    /// ([`DrawnFrame::error`](mln_renderer::DrawnFrame::error)), as it does
+    /// for a frame that an offscreen target couldn't make the textures of.
     pub fn render(&mut self, update: &Arc<UpdateParameters>) -> Option<Handoff> {
         self.gfx.render(update)
     }
@@ -1143,7 +1162,9 @@ impl LocalTarget {
 
     /// Whether the target can take a frame now: its window, if any, has an
     /// area to present to, and it begins a frame, which a surface needs a
-    /// texture for, and which the next render draws into.
+    /// texture for, and which the next render draws into. An offscreen
+    /// target can unless it has no pixels, and its render fails a frame
+    /// whose textures it can't make.
     pub fn ready_for_frame(&mut self) -> bool {
         self.window_has_area() && self.gfx.ready_for_frame()
     }

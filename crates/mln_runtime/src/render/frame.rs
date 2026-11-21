@@ -35,6 +35,9 @@ impl FrameDemand {
 /// How a frame demand finished.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum FrameDisposition {
+    /// The target took the frame, which shows what drew of it, though some
+    /// of it may have failed on the GPU
+    /// ([`MapEvent::RenderError`](mln_map::MapEvent::RenderError)).
     Rendered,
     /// The map had nothing new to draw, or a barrier ended the demand.
     NoUpdate,

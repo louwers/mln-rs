@@ -3,16 +3,16 @@ use std::rc::Rc;
 
 use ash::vk;
 use mln_gfx::gpu::conformance::{
-    clip_mask_and_background, custom_layers, depth_only, foreign_ids, imported_textures, instanced_walls,
-    invalid_calls, pulled_walls, readbacks, resources_in_use, topologies, transparent_replace, vertex_layouts,
-    wall_quads,
+    clip_mask_and_background, custom_layers, depth_only, drawn_vertex_texels, foreign_ids, imported_textures,
+    instanced_walls, invalid_calls, mipmapped_targets, pulled_walls, readbacks, resources_in_use, terrain_heights,
+    topologies, transparent_replace, vertex_layouts, wall_quads, written_vertex_texels,
 };
 use mln_gfx::gpu::{
     ColorAttachment, Gpu as _, GpuError, LoadOp, PassDesc, TextureDesc, TextureFormat, TextureRegion, TextureUsage,
     read_texels,
 };
-use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
+use mln_gfx::shaders::programs::projection_variants;
 use mln_glsl::BUILT_INS;
 use mln_util::Color;
 use mln_util::size::Size;
@@ -96,6 +96,30 @@ fn depth_only_through_gpu() {
     depth_only(&mut VulkanGpu::new(&device).expect("VulkanGpu")).expect("the frame");
 }
 
+#[test]
+fn written_vertex_texels_through_gpu() {
+    let device = Device::new(None).expect("Vulkan device");
+    written_vertex_texels(&mut VulkanGpu::new(&device).expect("VulkanGpu")).expect("the frame");
+}
+
+#[test]
+fn drawn_vertex_texels_through_gpu() {
+    let device = Device::new(None).expect("Vulkan device");
+    drawn_vertex_texels(&mut VulkanGpu::new(&device).expect("VulkanGpu")).expect("the frames");
+}
+
+#[test]
+fn terrain_heights_through_gpu() {
+    let device = Device::new(None).expect("Vulkan device");
+    terrain_heights(&mut VulkanGpu::new(&device).expect("VulkanGpu")).expect("the frames");
+}
+
+#[test]
+fn mipmapped_targets_through_gpu() {
+    let device = Device::new(None).expect("Vulkan device");
+    mipmapped_targets(&mut VulkanGpu::new(&device).expect("VulkanGpu")).expect("the frames");
+}
+
 // What `destroy_later` destroys waits for the next flush, or goes with the
 // `Gpu`.
 #[test]
@@ -125,7 +149,7 @@ fn every_program_compiles_for_gpu() {
     let mut gpu = VulkanGpu::new(&device).expect("VulkanGpu");
     let parameters = ProgramParameters::new(1.0, false);
     for &(program, _) in BUILT_INS {
-        for variant in [ProjectionVariant::Mercator, ProjectionVariant::Globe] {
+        for &variant in projection_variants(program) {
             for uniforms in [&[][..], program.properties] {
                 let key = program.variant_key(&parameters, uniforms, variant);
                 if let Err(error) = gpu.create_shader(&key) {
@@ -175,6 +199,7 @@ fn imported_images_go_to_their_queue_family_and_signal() {
             size,
             format: TextureFormat::Rgba8Unorm,
             usage: TextureUsage { render_target: true, copy_src: true, ..TextureUsage::default() },
+            mipmapped: false,
         })
         .unwrap();
     let imported = gpu.as_imported(owned).unwrap();

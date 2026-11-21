@@ -40,14 +40,13 @@ use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMode, DrawModeTyp
 use mln_style_types::LayerBlendType;
 use mln_util::Color;
 use mln_util::identity::SimpleIdentity;
-use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 use crate::draw::Entries;
 use crate::gfx::buffer::Buffer;
 use crate::gfx::context::Context;
 use crate::gfx::owned::Owned;
-use crate::gfx::resources::GpuTexture;
+use crate::gfx::resources::{GpuTexture, attachment_bytes};
 use crate::gfx::vertex_attribute::Uniforms;
 use crate::paint_parameters::{DrawTarget, OpenPass};
 use crate::render_static_data::RenderStaticData;
@@ -128,6 +127,46 @@ impl Composite {
     }
 }
 
+/// The textures a layer composite holds for a frame's composited groups,
+/// as [`LayerComposite::update`] makes them without the overdraw
+/// inspector: its target's color, its depth and stencil where a group
+/// draws with its own, and the frame and backdrop, of the frame's color
+/// format, where a group blends in the shader.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct CompositeTextures {
+    target: bool,
+    depth_stencil: bool,
+    frame: Option<TextureFormat>,
+}
+
+impl CompositeTextures {
+    /// Those of `groups` on a frame whose color is of `format`.
+    pub(crate) fn of(groups: impl IntoIterator<Item = Composite>, format: Option<TextureFormat>) -> CompositeTextures {
+        groups.into_iter().fold(CompositeTextures::default(), |textures, composite| CompositeTextures {
+            target: true,
+            depth_stencil: textures.depth_stencil || !composite.frame_depth,
+            frame: textures.frame.or(format.filter(|_| composite.reads_backdrop())),
+        })
+    }
+
+    /// Those of the groups of both.
+    #[must_use]
+    pub(crate) fn union(self, other: CompositeTextures) -> CompositeTextures {
+        CompositeTextures {
+            target: self.target || other.target,
+            depth_stencil: self.depth_stencil || other.depth_stencil,
+            frame: self.frame.or(other.frame),
+        }
+    }
+
+    /// Their bytes on a frame of `size`.
+    pub(crate) fn bytes(self, size: Size) -> u64 {
+        let depth_stencil = if self.depth_stencil { attachment_bytes(size, DEPTH_STENCIL) } else { 0 };
+        let frame = self.frame.map_or(0, |format| 2 * attachment_bytes(size, format));
+        if self.target { attachment_bytes(size, COLOR) + depth_stencil + frame } else { 0 }
+    }
+}
+
 /// A texture that passes draw into and draws sample, with the sampler
 /// they sample it with.
 struct Texture {
@@ -138,7 +177,7 @@ struct Texture {
 impl Texture {
     fn new(gpu: &mut dyn Gpu, context: &mut Context, size: Size, format: TextureFormat) -> Result<Texture, GpuError> {
         let usage = TextureUsage { sampled: true, render_target: true, copy_src: true };
-        let desc = TextureDesc { label: "render target", size, format, usage };
+        let desc = TextureDesc { label: "render target", size, format, usage, mipmapped: false };
         let bytes = size.width as usize * size.height as usize * format.bytes_per_texel().unwrap_or(4) as usize;
         let texture = context.device().texture(gpu, &desc, Some(bytes))?;
         Ok(Texture { texture, sampler: context.sampler(gpu, SamplerState::default())? })
@@ -234,7 +273,7 @@ impl LayerComposite {
         }
         let frame_format = format.filter(|_| self.groups.iter().any(|(_, c)| c.reads_backdrop()));
         if let Err(error) = self.make(gpu, context, size, frame_format) {
-            Log::warning(Event::Render, format!("Making the layer composite's textures failed: {error}"));
+            context.fail(format!("Making the layer composite's textures failed: {error}"));
             self.groups.clear();
             self.drop_textures();
             return;
@@ -322,11 +361,35 @@ impl LayerComposite {
         Ok(())
     }
 
+    /// The bytes of its textures: its target's color, depth and stencil,
+    /// and the frame and backdrop of a frame with a layer that blends in
+    /// the shader.
+    pub(crate) fn bytes(&self) -> u64 {
+        let Some(target) = &self.target else { return 0 };
+        let textures = CompositeTextures {
+            target: true,
+            depth_stencil: target.depth_stencil.is_some(),
+            frame: self.frame.as_ref().map(|frame| frame.format),
+        };
+        textures.bytes(target.size)
+    }
+
     /// The texture the frame draws into rather than its target's, where a
     /// layer of the frame blends in the shader.
     #[must_use]
     pub(crate) fn frame_texture(&self) -> Option<TextureId> {
         self.frame.as_ref().map(|frame| frame.frame.id())
+    }
+
+    /// The texture a pass whose draw groups are `groups` draws into rather
+    /// than its own target: the frame copy's, where one of them blends in the
+    /// shader in this frame; `None` otherwise.
+    #[must_use]
+    pub(crate) fn frame_texture_for(&self, groups: &[(SimpleIdentity, Composite)]) -> Option<TextureId> {
+        let reads_backdrop = |group: &SimpleIdentity| {
+            self.groups.iter().any(|(id, composite)| id == group && composite.reads_backdrop())
+        };
+        self.frame_texture().filter(|_| groups.iter().any(|(group, _)| reads_backdrop(group)))
     }
 
     /// The pass that copies the frame's texture into the backdrop before the
@@ -407,20 +470,22 @@ impl LayerComposite {
         };
         let blend = self.groups[slot].1.blend_function();
         if let Err(error) = self.draw_quad(gpu, target, context, slot, blend, depth) {
-            Log::warning(Event::Render, format!("Compositing a layer failed: {error}"));
+            context.fail(format!("Compositing a layer failed: {error}"));
         }
     }
 
     /// Copies the frame's texture onto the open pass, over what it holds.
-    pub(crate) fn copy_frame(&mut self, gpu: &mut dyn Gpu, target: DrawTarget, context: &mut Context) {
+    pub(crate) fn copy_frame(
+        &mut self,
+        gpu: &mut dyn Gpu,
+        target: DrawTarget,
+        context: &mut Context,
+    ) -> Result<(), GpuError> {
         if self.frame.is_none() {
-            return;
+            return Ok(());
         }
         let slot = self.groups.len();
-        let blend = BlendFunction::Replace;
-        if let Err(error) = self.draw_quad(gpu, target, context, slot, blend, DepthMode::disabled()) {
-            Log::warning(Event::Render, format!("Copying the frame failed: {error}"));
-        }
+        self.draw_quad(gpu, target, context, slot, BlendFunction::Replace, DepthMode::disabled())
     }
 
     /// Draws the quad with the uniforms of `slot`: a group's, which reads the
