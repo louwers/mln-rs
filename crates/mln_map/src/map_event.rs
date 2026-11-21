@@ -85,8 +85,10 @@ pub enum MapEvent {
     LoadingFailed(StyleLoadError),
     /// Everything has loaded and no transition runs.
     Idle,
-    /// A layer or a draw failed to render. A still image that waits fails
-    /// with the error.
+    /// A frame failed on the GPU: a pass didn't begin, a texture couldn't be
+    /// made or a draw failed. Nothing took the frame, so a surface keeps
+    /// showing the one before, and the still image it was drawn for fails
+    /// with the error. A continuous map draws it again.
     RenderError(Error),
     RenderFrameStarted,
     RenderFrameFinished(RenderFrameStatus),

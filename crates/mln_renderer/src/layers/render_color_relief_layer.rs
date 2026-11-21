@@ -393,7 +393,7 @@ impl TypedLayer for RenderColorReliefLayer {
             let data = bytemuck::cast_slice(elevation_stops_data.as_slice());
             if let Err(error) = context.upload_texture_data(gpu, &elevation_stops, data, Size::new(*color_ramp_size, 1))
             {
-                Log::error(Event::Render, format!("Uploading the elevation stops failed: {error}"));
+                context.fail(format!("Uploading the elevation stops failed: {error}"));
             }
             *elevation_stops_texture = Some(elevation_stops);
 

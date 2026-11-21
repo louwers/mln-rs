@@ -315,9 +315,10 @@ fn invalidate(events: &RendererEvents) -> Waker {
 }
 
 /// Whether the map fails the still image that waits on `event`: a resource
-/// that failed to load, or a draw that failed.
+/// that failed to load. A frame that fails fails the image it was drawn for
+/// alone.
 fn fails_still_image(event: &RendererEvent) -> bool {
-    matches!(event, RendererEvent::ResourceError(_) | RendererEvent::RenderError(_))
+    matches!(event, RendererEvent::ResourceError(_))
 }
 
 /// In the browser, puts the renderer's tile workers in the instance's Web
@@ -356,6 +357,8 @@ struct StillDemand {
 /// A frame that the worker rendered, or tried to, and has yet to publish.
 struct RenderedFrame {
     result: FrameResult,
+    /// Whether the frame failed on the GPU, and the target didn't take it.
+    failed: bool,
     /// The renderer's events of the frame.
     events: Vec<RendererEvent>,
     /// The ring slot that the frame rendered into, with what the host may
@@ -437,9 +440,9 @@ pub(crate) struct Worker {
     /// The `still_image_request_id` of the last still image that the
     /// session rendered.
     still_rendered: u64,
-    /// The `still_image_request_id` of the still image that a resource or
-    /// render error on its way to the map fails
-    /// ([`fails_still_image`]). The session draws no frame for it.
+    /// The `still_image_request_id` of the still image that a resource
+    /// error on its way to the map fails ([`fails_still_image`]), or whose
+    /// frame failed. The session draws no frame for it.
     still_failing: Cell<u64>,
     /// Whether the target holds a frame since it attached or resized.
     has_frame: bool,
@@ -680,8 +683,8 @@ impl Worker {
 
     fn forward(&self, events: Vec<RendererEvent>) {
         // The map fails the still image that waits when it takes a resource
-        // or render error, so a frame for that image drawn before the map
-        // says so would show a failed image.
+        // error, so a frame for that image drawn before the map says so
+        // would show a failed image.
         if events.iter().any(fails_still_image) {
             self.still_failing.set(self.pending_still_image());
         }
@@ -939,18 +942,18 @@ impl Worker {
             RingPick::Slot(slot) => Some(slot),
         };
         let frame = self.render(None, &update, slot);
-        // A tile that failed during the frame counts as loaded, and a draw
-        // that failed is left out, so the frame drew the map without them,
-        // but the map fails the image on the error.
-        let fails = frame.events.iter().any(fails_still_image);
-        match frame.result.disposition {
-            FrameDisposition::Rendered if fails => {
-                self.still_failing.set(pending);
-                if let Some((slot, _)) = frame.slot {
-                    self.end_slot(slot, None);
-                }
-                self.forward(frame.events);
+        // A tile that failed during the frame counts as loaded, so the frame
+        // drew the map without it, but the map fails the image on the error,
+        // as it does on the frame's own failure, which the target didn't
+        // take.
+        if frame.failed || frame.events.iter().any(fails_still_image) {
+            self.still_failing.set(pending);
+            if let Some((slot, _)) = frame.slot {
+                self.end_slot(slot, None);
             }
+            return self.forward(frame.events);
+        }
+        match frame.result.disposition {
             FrameDisposition::Rendered => {
                 self.still = None;
                 self.still_rendered = pending;
@@ -995,7 +998,9 @@ impl Worker {
     /// has loaded, and a surface without a texture to render into takes no
     /// frame. A frame that a surface drops, having had no image for it after
     /// all, finishes as not ready, and the next demand draws the map again.
-    /// Only the still image's own frame completes the image.
+    /// One that failed on the GPU finishes with no update, and the target
+    /// took nothing of it. Only the still image's own frame completes the
+    /// image, or fails it.
     fn render(&mut self, token: Option<u64>, update: &Update, slot: Option<usize>) -> RenderedFrame {
         let ready = self.gfx.as_mut().is_some_and(|gfx| gfx.target.ready_for_frame());
         let Some(gfx) = self.gfx.as_mut().filter(|_| ready) else {
@@ -1003,16 +1008,18 @@ impl Worker {
                 self.end_slot(slot, None);
             }
             let result = FrameResult::unrendered(token, FrameDisposition::TargetNotReady, update.generation);
-            return RenderedFrame { result, events: Vec::new(), slot: None };
+            return RenderedFrame { result, failed: false, events: Vec::new(), slot: None };
         };
         if let Some(slot) = slot
             && gfx.target.select_slot(slot).is_err()
         {
             self.end_slot(slot, None);
             let result = FrameResult::unrendered(token, FrameDisposition::TargetNotReady, update.generation);
-            return RenderedFrame { result, events: Vec::new(), slot: None };
+            return RenderedFrame { result, failed: false, events: Vec::new(), slot: None };
         }
-        let handoff = gfx.target.render(&update.parameters);
+        let rendered = gfx.target.render(&update.parameters);
+        let failed = matches!(rendered, Some(Err(_)));
+        let handoff = rendered.and_then(Result::ok);
         {
             let mut state = self.shared.state.lock();
             state.graphics_objects = state.graphics_objects.max(Gfx::OBJECTS);
@@ -1028,7 +1035,7 @@ impl Worker {
         }
         if dropped {
             let result = FrameResult::unrendered(token, FrameDisposition::TargetNotReady, update.generation);
-            return RenderedFrame { result, events, slot: None };
+            return RenderedFrame { result, failed, events, slot: None };
         }
         let projection = gfx.target.renderer().and_then(Renderer::frame_projection);
         // The previous render's sources may hold the last references to
@@ -1042,6 +1049,12 @@ impl Worker {
         }
         self.rendered_update = update.generation;
         self.rendered_generation = self.generation();
+        // The target took nothing of a frame that failed: the host gets no
+        // frame, and the map draws the update again once it retries.
+        if failed {
+            let result = FrameResult::unrendered(token, FrameDisposition::NoUpdate, update.generation);
+            return RenderedFrame { result, failed, events, slot: slot.map(|slot| (slot, None)) };
+        }
         let report = events.iter().rev().find_map(|event| match event {
             RendererEvent::RenderFrameFinished { mode, needs_repaint, repaint_at, .. } => {
                 Some(FrameReport { mode: *mode, needs_repaint: *needs_repaint || repaint_at.is_some() })
@@ -1086,7 +1099,7 @@ impl Worker {
             };
             (slot, published)
         });
-        RenderedFrame { result, events, slot }
+        RenderedFrame { result, failed, events, slot }
     }
 
     /// Publishes a frame: its result and ring slot, then the renderer's

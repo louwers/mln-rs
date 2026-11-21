@@ -36,7 +36,10 @@ impl FrameDemand {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum FrameDisposition {
     Rendered,
-    /// The map had nothing new to draw, or a barrier ended the demand.
+    /// The map had nothing new to draw, a barrier ended the demand, or the
+    /// frame failed on the GPU, which the map reports
+    /// ([`MapEvent::RenderError`](mln_map::MapEvent::RenderError)): the
+    /// target took nothing of it.
     NoUpdate,
     /// The session couldn't take the frame, as after a detach or an abandon.
     TargetNotReady,

@@ -234,7 +234,7 @@ impl DrawObjects {
     /// buffers and textures, where they changed since the last upload.
     pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
         if let Err(error) = self.upload_in(gpu, context) {
-            Log::error(Event::Render, format!("Uploading a draw of {} failed: {error}", self.shader.program().name));
+            context.fail(format!("Uploading a draw of {} failed: {error}", self.shader.program().name));
         }
     }
 
@@ -301,7 +301,7 @@ impl DrawObjects {
 
         for texture in self.textures.iter().flatten() {
             if let Err(error) = context.upload_texture(gpu, texture) {
-                Log::error(Event::Render, format!("Uploading a texture failed: {error}"));
+                context.fail(format!("Uploading a texture failed: {error}"));
             }
         }
 
@@ -311,7 +311,9 @@ impl DrawObjects {
     /// Draws the segments into `parameters`' open pass on `gpu`, the
     /// context's, with `depth_mode` and `stencil_mode`, binding the buffers
     /// of the draws in `frame`. Shaders read the draw's entries in those
-    /// storage buffers at `global_index`. Returns whether it didn't fail.
+    /// storage buffers at `global_index`. Returns whether it didn't fail: a
+    /// draw that fails is the frame's failure
+    /// ([`Context::fail`](crate::gfx::context::Context::fail)).
     pub(crate) fn draw(
         &mut self,
         gpu: &mut dyn Gpu,
@@ -323,7 +325,7 @@ impl DrawObjects {
     ) -> bool {
         let drawn = self.draw_in(gpu, parameters, frame, depth_mode, stencil_mode, global_index);
         if let Err(error) = &drawn {
-            Log::warning(Event::Render, format!("Drawing a draw of {} failed: {error}", self.shader.program().name));
+            parameters.context.fail(format!("Drawing a draw of {} failed: {error}", self.shader.program().name));
         }
         drawn.is_ok()
     }

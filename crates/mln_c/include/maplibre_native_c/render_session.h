@@ -24,7 +24,11 @@ extern "C" {
 /** How a frame demand finished. */
 typedef enum mln_render_result : uint32_t {
   MLN_RENDER_RESULT_RENDERED = 0,
-  /** The map had nothing new to draw. */
+  /**
+   * The map had nothing new to draw, or the frame failed on the GPU, which
+   * MLN_RUNTIME_EVENT_MAP_RENDER_ERROR reports. A target takes nothing of a
+   * frame that failed: a surface keeps showing the frame before.
+   */
   MLN_RENDER_RESULT_NO_UPDATE = 1,
   /**
    * The target couldn't take a frame, such as while a window is hidden or

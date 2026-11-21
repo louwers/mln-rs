@@ -8,6 +8,9 @@ mod custom_layer_test;
 mod debug_options_test;
 // Empty and absent tiles of vector and raster sources through Map -> HeadlessFrontend.
 mod empty_tile_test;
+// Frames that fail on the GPU: stills that end with the error, and
+// continuous maps that report it once and draw again later.
+mod gpu_failure_test;
 // gtests-core: test/api/{annotations,api_misuse,custom_geometry_source,
 // custom_layer}.test.cpp and test/api/recycle_map.cpp.
 mod gtest_api;
@@ -40,8 +43,7 @@ mod pixel_ratio_test;
 mod resize_test;
 // Text that the device's fonts shape, with a font file standing in for them.
 mod system_fonts_test;
-// The layers that drape over terrain, drawn through the terrain's drapes,
-// and drapes that fail to draw.
+// The layers that drape over terrain, drawn through the terrain's drapes.
 mod terrain_drape_test;
 // Tiles reloading as their data expires, over an online file source.
 mod tile_expiry_test;

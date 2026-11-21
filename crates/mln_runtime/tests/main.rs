@@ -9,6 +9,7 @@ mod devices;
 mod driver;
 mod events;
 mod exported;
+mod failures;
 mod feature_state;
 mod frame_depth;
 mod gestures;

@@ -121,6 +121,10 @@ typedef enum mln_runtime_event_type : uint32_t {
    * or redraw.
    */
   MLN_RUNTIME_EVENT_MAP_IDLE = 8,
+  /**
+   * A frame failed on the GPU, such as a pass that didn't begin or a texture
+   * that couldn't be made.
+   */
   MLN_RUNTIME_EVENT_MAP_RENDER_ERROR = 9,
   MLN_RUNTIME_EVENT_MAP_RENDER_FRAME_STARTED = 10,
   MLN_RUNTIME_EVENT_MAP_RENDER_FRAME_FINISHED = 11,

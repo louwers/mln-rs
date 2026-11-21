@@ -517,7 +517,7 @@ trait Gfx {
     fn renderer_or(&mut self, make: &mut dyn FnMut(&dyn Gpu) -> Renderer) -> &mut Renderer;
     fn with_gpu(&mut self, f: &mut dyn FnMut(&mut dyn Gpu, Option<&mut Renderer>));
     fn tear_down_renderer(&mut self) -> Option<RenderingStats>;
-    fn render(&mut self, update: &Arc<UpdateParameters>) -> Option<Handoff>;
+    fn render(&mut self, update: &Arc<UpdateParameters>) -> Option<Result<Handoff, Error>>;
     fn ready_for_frame(&mut self) -> bool;
     fn with_frame(&mut self, draw: &mut dyn FnMut(&mut dyn Gpu, &FrameImage));
     fn select_slot(&mut self, slot: usize) -> Result<(), Error>;
@@ -665,7 +665,7 @@ impl<B: LocalBackend> Gfx for BackendGfx<B> {
         Some(renderer.tear_down(&mut *self.backend.gpu()))
     }
 
-    fn render(&mut self, update: &Arc<UpdateParameters>) -> Option<Handoff> {
+    fn render(&mut self, update: &Arc<UpdateParameters>) -> Option<Result<Handoff, Error>> {
         let renderer = self.renderer.as_mut()?;
         let target = self.frames.target()?;
         let mut gpu = self.backend.gpu();
@@ -673,9 +673,18 @@ impl<B: LocalBackend> Gfx for BackendGfx<B> {
         let frame = renderer.update(gpu, update)?;
         let image = target.begin_frame(gpu)?;
         let drawn = renderer.render(gpu, &image, frame);
-        let handoff = target.end_frame(gpu);
-        renderer.finish_frame(gpu, drawn, handoff);
-        Some(handoff)
+        // A frame that failed shows a wrong image, which the target doesn't
+        // hand off.
+        let rendered = match drawn.error() {
+            None => Ok(target.end_frame(gpu)),
+            Some(error) => Err(error.clone()),
+        };
+        #[cfg(not(target_family = "wasm"))]
+        if let (Err(_), Frames::Offscreen(target)) = (&rendered, &mut self.frames) {
+            target.discard_frame();
+        }
+        renderer.finish_frame(gpu, drawn, *rendered.as_ref().unwrap_or(&Handoff::Dropped));
+        Some(rendered)
     }
 
     fn ready_for_frame(&mut self) -> bool {
@@ -1126,8 +1135,12 @@ impl LocalTarget {
     /// begins the frame, the renderer draws into it, and the target ends
     /// it. Returns where the frame went, or `None` when nothing was drawn:
     /// there is no renderer, the target had nothing to draw into, or there
-    /// was nothing to draw.
-    pub fn render(&mut self, update: &Arc<UpdateParameters>) -> Option<Handoff> {
+    /// was nothing to draw. Fails with the GPU's error, as
+    /// [`ErrorKind::Native`](mln_util::ErrorKind), for a frame that failed
+    /// ([`DrawnFrame::error`](mln_renderer::DrawnFrame::error)), which the
+    /// target doesn't end: a surface shows the frame before, and
+    /// [`read_image`](Self::read_image) fails until a frame draws.
+    pub fn render(&mut self, update: &Arc<UpdateParameters>) -> Option<Result<Handoff, Error>> {
         self.gfx.render(update)
     }
 

@@ -246,6 +246,7 @@ fn frame(mode: RenderMode, still_image_request_id: u64) -> RendererEvent {
         placement_changed: false,
         still_image_request_id,
         stats: Arc::default(),
+        error: None,
     }
 }
 

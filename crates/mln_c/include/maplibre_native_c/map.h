@@ -1325,7 +1325,7 @@ MLN_API mln_status mln_map_remove_feature_state(
  * Completes with:
  * - MLN_STATUS_CANCELLED when the map is released before the image is done.
  * - MLN_STATUS_NATIVE_ERROR when the style or a resource that the image needs
- *   fails to load.
+ *   fails to load, or the image's frame fails on the GPU.
  */
 MLN_BINDING("execution=operation")
 MLN_API mln_status mln_map_request_still_image(

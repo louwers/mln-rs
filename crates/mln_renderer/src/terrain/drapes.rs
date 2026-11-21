@@ -47,7 +47,6 @@ use mln_style::layer_type::ErasedLayerStyle;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::Color;
 use mln_util::constants::EXTENT;
-use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 use super::TerrainCover;
@@ -432,8 +431,6 @@ pub(crate) struct Drapes {
     /// Whether drapes stale by the camera only, smaller than their tile's
     /// side, or that failed to draw, wait for a later frame.
     waiting: bool,
-    /// Why the first drape of the frame that failed to draw did.
-    failure: Option<String>,
     /// The tiles and stacks of the drapes drawn since the last
     /// [`take_passes`](Self::take_passes).
     #[cfg(test)]
@@ -584,12 +581,6 @@ impl Drapes {
     /// then isn't done drawing.
     pub(crate) fn waiting(&self) -> bool {
         self.waiting
-    }
-
-    /// Why the first drape of the last frame that failed to draw did, if one
-    /// did ([`render`](Self::render)).
-    pub(crate) fn failure(&self) -> Option<&str> {
-        self.failure.as_deref()
     }
 
     /// Makes the draws of `layer`, a layer of `stack` that drapes, in every
@@ -791,7 +782,6 @@ impl Drapes {
     /// composite, which takes the composited draw groups of those that draw
     /// again, and drops its textures where there are none.
     pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, pattern_atlas_size: Size) {
-        self.failure = None;
         if self.drapes.is_empty() {
             self.targets.clear();
             return;
@@ -820,7 +810,7 @@ impl Drapes {
             // The drapes of the side then fail to draw.
             match parameters.context.device().attachment(gpu, "drape depth and stencil", size, DEPTH_STENCIL) {
                 Ok(depth_stencil) => targets.depth_stencil = Some(depth_stencil),
-                Err(error) => fail(&mut self.failure, format!("Making the drapes' depth and stencil failed: {error}")),
+                Err(error) => parameters.context.fail(format!("Making the drapes' depth and stencil failed: {error}")),
             }
         }
         let stencil_clear_tile = parameters.stencil_clear_tile();
@@ -849,7 +839,7 @@ impl Drapes {
                 if let Some((texture, _)) = &drape.texture
                     && let Err(error) = context.create_texture(gpu, texture)
                 {
-                    Log::error(Event::Render, format!("Making a drape's texture failed: {error}"));
+                    context.fail(format!("Making a drape's texture failed: {error}"));
                 }
                 // A drape drawn again only at a new side keeps the groups and
                 // masks of its drawings.
@@ -886,9 +876,10 @@ impl Drapes {
     /// their translucent ones back to front, over transparent texels. A
     /// drape with a layer that blends in the shader draws into the layer
     /// composite's frame texture, which is then copied into its own. A
-    /// drape that fails to draw draws again in the next frame, which it
-    /// [waits](Self::waiting) for, and the frame keeps the first
-    /// [failure](Self::failure).
+    /// drape that fails to draw, its pass or a draw in it, fails the frame
+    /// ([`Context::fail`](crate::gfx::context::Context::fail)), and draws
+    /// again in the next, which it [waits](Self::waiting) for, as does one
+    /// drawn in a frame that something failed in before.
     pub(crate) fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
         let formats = TargetFormats { color: Some(COLOR), depth_stencil: Some(DEPTH_STENCIL) };
         for Drape { tile, transform, stacks, .. } in &mut self.drapes {
@@ -900,7 +891,7 @@ impl Drapes {
                 // drawn from.
                 let kept = drawn.take();
                 let Some((texture, side)) = texture.as_ref() else {
-                    fail(&mut self.failure, "Drawing a drape failed: it has no texture".to_owned());
+                    parameters.context.fail("Drawing a drape failed: it has no texture".to_owned());
                     continue;
                 };
                 // Without its side's depth and stencil, the upload said why.
@@ -913,7 +904,7 @@ impl Drapes {
                 let color = match parameters.context.create_texture(gpu, texture) {
                     Ok(color) => color,
                     Err(error) => {
-                        fail(&mut self.failure, format!("Making a drape's texture failed: {error}"));
+                        parameters.context.fail(format!("Making a drape's texture failed: {error}"));
                         continue;
                     }
                 };
@@ -962,13 +953,17 @@ impl Drapes {
                     drape_parameters.end_pass(gpu).and(presented)
                 });
                 match drawn_pass.and_then(|()| parameters.context.generate_mipmaps(gpu, texture)) {
+                    // What failed in the frame, before the drape or in its
+                    // draws, said why; what the drape drew from, such as a
+                    // layer's render target, may be wrong.
+                    Ok(()) if parameters.context.failed() => {}
                     Ok(()) => {
                         *drawn = if *updated { Some(std::mem::take(key)) } else { kept };
                         parameters.context.rendering_stats().terrain.drapes_drawn += 1;
                         #[cfg(test)]
                         self.passes.push((*tile, stack));
                     }
-                    Err(error) => fail(&mut self.failure, format!("Drawing a drape failed: {error}")),
+                    Err(error) => parameters.context.fail(format!("Drawing a drape failed: {error}")),
                 }
             }
         }
@@ -977,13 +972,6 @@ impl Drapes {
         let mut stacks = self.drapes.iter().flat_map(|drape| &drape.stacks);
         self.waiting |= stacks.any(|drape| drape.redraws && drape.drawn.is_none());
     }
-}
-
-/// Logs why a drape failed to draw, and keeps it as the frame's `failure`
-/// unless one failed before.
-fn fail(failure: &mut Option<String>, message: String) {
-    Log::error(Event::Render, &message);
-    failure.get_or_insert(message);
 }
 
 #[cfg(test)]

@@ -226,20 +226,20 @@ pub const MLN_RUNTIME_EVENT_MAP_LOADING_FAILED: mln_runtime_event_type = 7;
 /** The map rendered a complete frame and has nothing left to load, animate,
  or redraw.*/
 pub const MLN_RUNTIME_EVENT_MAP_IDLE: mln_runtime_event_type = 8;
-/** The map rendered a complete frame and has nothing left to load, animate,
- or redraw.*/
+/** A frame failed on the GPU, such as a pass that didn't begin or a texture
+ that couldn't be made.*/
 pub const MLN_RUNTIME_EVENT_MAP_RENDER_ERROR: mln_runtime_event_type = 9;
-/** The map rendered a complete frame and has nothing left to load, animate,
- or redraw.*/
+/** A frame failed on the GPU, such as a pass that didn't begin or a texture
+ that couldn't be made.*/
 pub const MLN_RUNTIME_EVENT_MAP_RENDER_FRAME_STARTED: mln_runtime_event_type = 10;
-/** The map rendered a complete frame and has nothing left to load, animate,
- or redraw.*/
+/** A frame failed on the GPU, such as a pass that didn't begin or a texture
+ that couldn't be made.*/
 pub const MLN_RUNTIME_EVENT_MAP_RENDER_FRAME_FINISHED: mln_runtime_event_type = 11;
-/** The map rendered a complete frame and has nothing left to load, animate,
- or redraw.*/
+/** A frame failed on the GPU, such as a pass that didn't begin or a texture
+ that couldn't be made.*/
 pub const MLN_RUNTIME_EVENT_MAP_RENDER_MAP_STARTED: mln_runtime_event_type = 12;
-/** The map rendered a complete frame and has nothing left to load, animate,
- or redraw.*/
+/** A frame failed on the GPU, such as a pass that didn't begin or a texture
+ that couldn't be made.*/
 pub const MLN_RUNTIME_EVENT_MAP_RENDER_MAP_FINISHED: mln_runtime_event_type = 13;
 /// The style uses an image that it doesn't have.
 pub const MLN_RUNTIME_EVENT_MAP_STYLE_IMAGE_MISSING: mln_runtime_event_type = 14;
@@ -4015,7 +4015,9 @@ pub struct mln_map_projection_camera_result {
     pub camera: mln_camera,
 }
 pub const MLN_RENDER_RESULT_RENDERED: mln_render_result = 0;
-/// The map had nothing new to draw.
+/** The map had nothing new to draw, or the frame failed on the GPU, which
+ MLN_RUNTIME_EVENT_MAP_RENDER_ERROR reports. A target takes nothing of a
+ frame that failed: a surface keeps showing the frame before.*/
 pub const MLN_RENDER_RESULT_NO_UPDATE: mln_render_result = 1;
 /** The target couldn't take a frame, such as while a window is hidden or
  destroyed, or after mln_render_session_release_target(). Demand a frame

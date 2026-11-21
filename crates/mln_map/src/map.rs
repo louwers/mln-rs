@@ -54,6 +54,16 @@ enum StillImage {
     Ended(Result<(), Error>),
 }
 
+/// What a renderer's report of a frame says, but its stats.
+struct FinishedFrame {
+    mode: mln_renderer::RenderMode,
+    needs_repaint: bool,
+    placement_changed: bool,
+    still_image_request_id: u64,
+    /// Whether the frame failed on the GPU.
+    failed: bool,
+}
+
 /// A map: its style, its camera, and the updates it publishes for its
 /// renderer.
 ///
@@ -470,9 +480,15 @@ impl Map {
                 placement_changed,
                 still_image_request_id,
                 stats,
+                error,
             } => {
                 self.repaint_at = repaint_at.filter(|_| continuous && !needs_repaint);
-                self.on_render_frame_finished(mode, needs_repaint, placement_changed, still_image_request_id, stats);
+                let failed = error.is_some();
+                if let Some(error) = error {
+                    self.on_render_failure(error, still_image_request_id);
+                }
+                let frame = FinishedFrame { mode, needs_repaint, placement_changed, still_image_request_id, failed };
+                self.on_render_frame_finished(frame, stats);
             }
             // The renderer completes a frame only of an update whose ground
             // stands the camera as its newest does, so the map answers each
@@ -519,11 +535,16 @@ impl Map {
                 self.emit(MapEvent::GlyphsError { font_stack, range, error });
             }
             RendererEvent::TileAction { op, id, source_id } => self.emit(MapEvent::TileAction { op, id, source_id }),
-            // A frame that failed to draw something shows a wrong image.
-            RendererEvent::RenderError(error) => {
-                self.fail_still_image(error.clone());
-                self.emit(MapEvent::RenderError(error));
-            }
+        }
+    }
+
+    /// Handles a frame that failed on the GPU, which nothing took: reports
+    /// it, and fails the still image of the frame's
+    /// `still_image_request_id`.
+    fn on_render_failure(&mut self, error: Error, still_image_request_id: u64) {
+        self.emit(MapEvent::RenderError(error.clone()));
+        if still_image_request_id != 0 && still_image_request_id == self.still_image_request_id {
+            self.fail_still_image(error);
         }
     }
 
@@ -536,15 +557,10 @@ impl Map {
 
     /// Handles the end of a frame. Only a `Full` frame completes a still
     /// image or leaves the map idle; one whose camera hadn't stood on the
-    /// terrain's newest ground isn't `Full`.
-    fn on_render_frame_finished(
-        &mut self,
-        mode: mln_renderer::RenderMode,
-        needs_repaint: bool,
-        placement_changed: bool,
-        still_image_request_id: u64,
-        stats: Arc<RenderingStats>,
-    ) {
+    /// terrain's newest ground, or that failed, isn't `Full`. A continuous
+    /// map draws a frame that failed again.
+    fn on_render_frame_finished(&mut self, frame: FinishedFrame, stats: Arc<RenderingStats>) {
+        let FinishedFrame { mode, needs_repaint, placement_changed, still_image_request_id, failed } = frame;
         let fully_loaded = mode == mln_renderer::RenderMode::Full;
         if std::mem::replace(&mut self.renderer_fully_loaded, fully_loaded) != fully_loaded {
             self.changed();
@@ -567,7 +583,7 @@ impl Map {
             // animations (`sample_frame`), so a frame's report adds no update
             // for them, which would only repeat the frame's camera.
             let animating = self.transform.in_transition();
-            if needs_repaint || (animating && self.transform.frame_time().is_none()) {
+            if failed || needs_repaint || (animating && self.transform.frame_time().is_none()) {
                 self.on_update();
             } else if !animating && self.renderer_fully_loaded && self.repaint_at.is_none() {
                 self.emit(MapEvent::Idle);

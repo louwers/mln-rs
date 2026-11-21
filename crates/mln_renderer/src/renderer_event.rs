@@ -38,7 +38,7 @@ pub enum RendererEvent {
     RenderFrameFinished {
         /// `Full` when everything the frame shows has loaded, and its camera
         /// stood as it would on the terrain's current ground
-        /// ([`UpdateParameters::elevation`]).
+        /// ([`UpdateParameters::elevation`]), and nothing of it failed.
         ///
         /// [`UpdateParameters::elevation`]: crate::UpdateParameters::elevation
         mode: RenderMode,
@@ -56,6 +56,11 @@ pub enum RendererEvent {
         still_image_request_id: u64,
         /// The context's counters after the frame.
         stats: Arc<RenderingStats>,
+        /// Why the frame failed on the GPU, if it did
+        /// ([`DrawnFrame::error`](crate::DrawnFrame::error)): its image is
+        /// wrong, and nothing took it. A still image of the frame's
+        /// `still_image_request_id` fails with the error.
+        error: Option<Error>,
     },
     /// The ground of the terrain changed: the tiles that draw it, or the DEM
     /// data they read; or it comes again for an update that carried a
@@ -96,10 +101,6 @@ pub enum RendererEvent {
         id: OverscaledTileID,
         source_id: String,
     },
-    /// A layer or a draw failed to render, such as a drape that the GPU
-    /// failed to draw, which the next frame draws again. The frame doesn't
-    /// complete a still image, which fails with the error.
-    RenderError(Error),
 }
 
 /// The queue a renderer pushes its events to.

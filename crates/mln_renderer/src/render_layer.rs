@@ -1120,7 +1120,7 @@ pub(crate) trait RenderLayer: LayerParts {
 
     /// Runs a custom layer's prerender through `gpu`, the context's, after
     /// the layers' draws upload and before the frame's first pass.
-    fn prerender(&mut self, _gpu: &mut dyn Gpu, _parameters: &PaintParameters<'_>) {}
+    fn prerender(&mut self, _gpu: &mut dyn Gpu, _parameters: &mut PaintParameters<'_>) {}
 
     /// Lets go of a custom layer's host as the layer leaves the renderer: a
     /// host that drew goes to `ended`, to hear that the renderer stopped.

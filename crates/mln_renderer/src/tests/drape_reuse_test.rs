@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use mln_gfx::RendererBackend as _;
-use mln_gfx::frame::FrameTarget;
+use mln_gfx::frame::{FrameTarget, Handoff};
 use mln_gfx::gpu::{
     BindingsDesc, BindingsId, BufferDesc, BufferId, BufferUsage, Caps, Draw, GeometryDesc, GeometryId, Gpu, GpuError,
     PassDesc, PipelineDesc, PipelineId, ReadbackId, ResourceId, SamplerId, ShaderId, ShaderKey, TextureDesc, TextureId,
@@ -423,7 +423,13 @@ impl DrapedMap {
                 Some(fail) => self.renderer.render(&mut Failing { gpu, fail }, &image, frame),
                 None => self.renderer.render(gpu, &image, frame),
             };
-            let handoff = self.target.end_frame(gpu);
+            // A frame that failed shows a wrong image, which nothing takes.
+            let handoff = if drawn.error().is_none() {
+                self.target.end_frame(gpu)
+            } else {
+                self.target.discard_frame();
+                Handoff::Dropped
+            };
             self.renderer.finish_frame(gpu, drawn, handoff);
         }
         let mut full = false;
@@ -1183,14 +1189,14 @@ fn a_frame_whose_drapes_fail_to_draw_asks_for_the_next_which_draws_them() {
 }
 
 /// A draw whose indexes failed to upload fails, in any build, and draws
-/// once they upload: here the surface's, and those of drapes drawn again.
+/// once they upload: here the surface's, and those of the drapes, which
+/// keep no key of the frames they failed in and draw again.
 #[test]
 fn a_draw_whose_indexes_failed_to_upload_fails_and_draws_once_they_do() {
     let mut map = DrapedMap::new(Tiles::default());
     map.fail = Some(Fail::IndexBuffers);
     map.settle();
     map.fail = None;
-    line_color(&mut map, "green");
     map.settle();
     frames_until_full(&mut map);
     let image = map.target.read_image(map.backend.gpu()).expect("the frame's pixels").data;

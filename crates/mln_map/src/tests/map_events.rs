@@ -9,6 +9,7 @@ use mln_renderer::RendererEvent;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{Kind, Response};
 use mln_style::Edit;
+use mln_util::error::{Error, ErrorKind};
 use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
 use mln_util::queue::Queue;
@@ -171,6 +172,7 @@ fn a_frame_waiting_for_a_placement_asks_for_no_update_until_then() {
         placement_changed: false,
         still_image_request_id: 0,
         stats: Arc::default(),
+        error: None,
     };
     let finished = |map: &mut Map| {
         let events = map.drain_events();
@@ -222,6 +224,7 @@ fn a_frame_report_adds_no_update_while_the_frame_clock_samples_an_animation() {
         placement_changed: false,
         still_image_request_id: 0,
         stats: Arc::default(),
+        error: None,
     };
     let moving =
         |events: &[MapEvent]| events.iter().filter(|event| matches!(event, MapEvent::CameraIsChanging)).count();
@@ -341,6 +344,7 @@ fn a_still_image_completes_with_a_full_frame() {
         placement_changed: false,
         still_image_request_id,
         stats: Arc::clone(&stats),
+        error: None,
     };
     report(&map, frame(mln_renderer::RenderMode::Partial, 1));
     map.process_events();
@@ -359,6 +363,62 @@ fn a_still_image_completes_with_a_full_frame() {
     map.process_events();
     assert_eq!(map.take_still_image(), None);
     report(&map, frame(mln_renderer::RenderMode::Full, 2));
+    map.process_events();
+    assert_eq!(map.take_still_image(), Some(Ok(())));
+}
+
+/// The report of a frame of the still image `still_image_request_id`, or of
+/// none with 0, that failed on the GPU with `message`, if it did.
+fn failed_frame(still_image_request_id: u64, message: Option<&str>) -> RendererEvent {
+    RendererEvent::RenderFrameFinished {
+        mode: if message.is_some() { mln_renderer::RenderMode::Partial } else { mln_renderer::RenderMode::Full },
+        needs_repaint: false,
+        repaint_at: None,
+        placement_changed: false,
+        still_image_request_id,
+        stats: Arc::default(),
+        error: message.map(Error::native),
+    }
+}
+
+/// The render errors in `events`.
+fn render_errors(events: &[MapEvent]) -> Vec<String> {
+    let errors = events.iter().filter_map(|event| match event {
+        MapEvent::RenderError(error) => Some(error.message.clone()),
+        _ => None,
+    });
+    errors.collect()
+}
+
+/// A frame that failed fails the still image it was drawn for, with its
+/// error, and no other: not one asked for after that image ended, which a
+/// late frame of the first would otherwise fail before it drew, nor one
+/// that waits while a frame of the host's own fails.
+#[test]
+fn a_failed_frame_fails_only_the_still_image_it_was_drawn_for() {
+    let run_loop = Queue::<()>::new();
+    let mut map = map(MapOptions { map_mode: MapMode::Static, ..Default::default() }, &run_loop);
+    map.load_style_json(STYLE);
+    map.process_events();
+    map.render_still().unwrap();
+    report(&map, failed_frame(1, Some("the GPU failed")));
+    map.process_events();
+    let ended = map.take_still_image().expect("the image ended").expect_err("the image succeeded");
+    assert_eq!(("the GPU failed", ErrorKind::Native), (ended.message.as_str(), ended.kind));
+    assert_eq!(vec!["the GPU failed".to_owned()], render_errors(&map.drain_events()));
+
+    // The first image ends, by a resource that failed, before its frame
+    // does; that frame, failed, doesn't fail the next image.
+    map.render_still().unwrap();
+    report(&map, RendererEvent::ResourceError(Error::native("a tile failed")));
+    map.process_events();
+    assert!(map.take_still_image().expect("the image ended").is_err());
+    map.render_still().unwrap();
+    report(&map, failed_frame(2, Some("late")));
+    report(&map, failed_frame(0, Some("the host's frame")));
+    map.process_events();
+    assert_eq!(map.take_still_image(), None, "a frame of another image failed this one");
+    report(&map, failed_frame(3, None));
     map.process_events();
     assert_eq!(map.take_still_image(), Some(Ok(())));
 }
