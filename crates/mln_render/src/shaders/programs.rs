@@ -99,7 +99,7 @@ pub(crate) static LAYER_COMPOSITE: Program = Program {
     buffers: &[LAYER_COMPOSITE_PROPS],
     attributes: &[Attribute { id: ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE, format: Short2 }],
     instance_attributes: &[],
-    textures: &[Texture::new("image"), Texture::new("backdrop")],
+    textures: &[Texture::unfilterable("image"), Texture::unfilterable("backdrop")],
     properties: &[],
     sources: Sources::NONE
         .wgsl(&wgsl::LAYER_COMPOSITE_SHADER)

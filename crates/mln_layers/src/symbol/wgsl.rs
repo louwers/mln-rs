@@ -365,9 +365,6 @@ struct FragmentInput {
     @location(3) @interpolate(flat) tex_origin: vec2<f32>,
 };
 
-@group(1) @binding(0) var texture_sampler: sampler;
-@group(1) @binding(1) var image: texture_2d<f32>;
-
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 #ifdef OVERDRAW_INSPECTOR
@@ -382,7 +379,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     // The vertex stage multiplies the fade opacity in.
     let opacity = in.opacity;
 #endif
-    return textureSample(image, texture_sampler, atlas_pos(in.tex_origin, in.tex)) * opacity;
+    return textureSample(image, image_sampler, atlas_pos(in.tex_origin, in.tex)) * opacity;
 }
 ",
     prelude: concat!(
@@ -583,9 +580,6 @@ struct FragmentInput {
     @location(9) @interpolate(flat) tex_origin: vec2<f32>,
 };
 
-@group(1) @binding(0) var texture_sampler: sampler;
-@group(1) @binding(1) var glyph_atlas: texture_2d<f32>;
-
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 #ifdef OVERDRAW_INSPECTOR
@@ -618,7 +612,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
         inner_edge = inner_edge + gamma_scaled;
     }
 
-    let sample = textureSample(glyph_atlas, texture_sampler, atlas_pos(in.tex_origin, in.tex));
+    let sample = textureSample(image, image_sampler, atlas_pos(in.tex_origin, in.tex));
     let dist = select(sample.a, sample.r, tileProps.is_text != 0u);
     var alpha = smoothstep(inner_edge - gamma_scaled, inner_edge + gamma_scaled, dist);
 
@@ -840,11 +834,6 @@ struct FragmentInput {
     @location(10) @interpolate(flat) tex_origin: vec2<f32>,
 };
 
-@group(1) @binding(0) var glyph_sampler: sampler;
-@group(1) @binding(1) var glyph_image: texture_2d<f32>;
-@group(1) @binding(2) var icon_sampler: sampler;
-@group(1) @binding(3) var icon_image: texture_2d<f32>;
-
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 #ifdef OVERDRAW_INSPECTOR
@@ -870,7 +859,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 
     if (in.is_icon != 0.0) {
         let alpha = opacity;
-        let iconSample = textureSampleLevel(icon_image, icon_sampler, atlas_pos(in.tex_origin, in.tex), 0.0);
+        let iconSample = textureSampleLevel(icon_image, icon_image_sampler, atlas_pos(in.tex_origin, in.tex), 0.0);
         return iconSample * alpha;
     }
 
@@ -883,7 +872,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
         inner_edge = inner_edge + gamma_scaled;
     }
 
-    let sample = textureSampleLevel(glyph_image, glyph_sampler, atlas_pos(in.tex_origin, in.tex), 0.0);
+    let sample = textureSampleLevel(glyph_image, glyph_image_sampler, atlas_pos(in.tex_origin, in.tex), 0.0);
     let dist = select(sample.a, sample.r, tileProps.is_text != 0u);
     var alpha = smoothstep(inner_edge - gamma_scaled, inner_edge + gamma_scaled, dist);
 

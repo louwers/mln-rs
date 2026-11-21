@@ -105,18 +105,14 @@ struct FragmentInput {
     @location(0) tex_coord: vec2<f32>,
 };
 
-@group(1) @binding(0) var texture_sampler: sampler;
-@group(1) @binding(1) var heatmap_texture: texture_2d<f32>;
-@group(1) @binding(2) var color_ramp_texture: texture_2d<f32>;
-
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 #ifdef OVERDRAW_INSPECTOR
     return vec4<f32>(1.0, 1.0, 1.0, 1.0);
 #endif
 
-    let t = textureSample(heatmap_texture, texture_sampler, in.tex_coord).r;
-    let color = textureSample(color_ramp_texture, texture_sampler, vec2<f32>(t, 0.5));
+    let t = textureSample(image, image_sampler, in.tex_coord).r;
+    let color = textureSample(color_ramp, image_sampler, vec2<f32>(t, 0.5));
     return color * props.opacity;
 }
 ",

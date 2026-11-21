@@ -32,8 +32,11 @@ use crate::shaders::source::{Named, Stage, expand as expand_properties, per_vert
 /// [`name`](crate::shaders::program::Buffer::name) at its id in group 0: a
 /// block as a `var<uniform>`, and an array of the elements, or of the
 /// vertices' 32-bit words, of a storage buffer as a `var<storage, read>`.
-/// A stage that names a block in any variant declares it in every variant,
-/// and a vertex buffer only in the variants that name it.
+/// It declares the program's textures and their samplers in group 1, by
+/// their names, as a `texture_2d<f32>` and a `sampler` at bindings of the
+/// texture's slot. A stage that names a block, a texture or a sampler in any
+/// variant declares it in every variant, and a vertex buffer only in the
+/// variants that name it.
 #[derive(Debug)]
 pub struct Wgsl {
     /// The vertex stage.

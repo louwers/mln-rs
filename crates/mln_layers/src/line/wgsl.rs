@@ -204,11 +204,6 @@ struct FragmentInput {
 #endif
 };
 
-@group(1) @binding(0) var gradient_sampler: sampler;
-@group(1) @binding(1) var gradient_texture: texture_2d<f32>;
-@group(1) @binding(2) var dash_sampler: sampler;
-@group(1) @binding(3) var dash_texture: texture_2d<f32>;
-
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 #ifdef PROJECTION_GLOBE
@@ -237,8 +232,8 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     let alpha = clamp(min(dist - (in.v_width2.y - blur2), in.v_width2.x - dist) / blur2, 0.0, 1.0);
 
     // Sample SDF texture
-    let dist_a = textureSample(dash_texture, dash_sampler, in.v_tex_a).r;
-    let dist_b = textureSample(dash_texture, dash_sampler, in.v_tex_b).r;
+    let dist_a = textureSample(image_dash, image_dash_sampler, in.v_tex_a).r;
+    let dist_b = textureSample(image_dash, image_dash_sampler, in.v_tex_b).r;
     let sdfdist = mix(dist_a, dist_b, tileProps.mix);
     var sdfgamma = tileProps.sdfgamma;
 #ifndef HAS_UNIFORM_u_dasharray
@@ -249,7 +244,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     let sdf_alpha = smoothstep(0.5 - sdfgamma / floorwidth, 0.5 + sdfgamma / floorwidth, sdfdist);
 
     // The gradient ramp is stored in a texture indexed by the ratio along the entire line
-    let color = textureSample(gradient_texture, gradient_sampler, vec2<f32>(in.v_lineprogress, 0.5));
+    let color = textureSample(image, image_sampler, vec2<f32>(in.v_lineprogress, 0.5));
 
     return color * (alpha * opacity * sdf_alpha);
 }
@@ -367,9 +362,6 @@ struct FragmentInput {
 #endif
 };
 
-@group(1) @binding(0) var gradient_sampler: sampler;
-@group(1) @binding(1) var gradient_texture: texture_2d<f32>;
-
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 #ifdef PROJECTION_GLOBE
@@ -392,7 +384,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     let alpha = clamp(min(dist - (in.v_width2.y - blur2), in.v_width2.x - dist) / blur2, 0.0, 1.0);
 
     // Sample gradient texture
-    let color = textureSample(gradient_texture, gradient_sampler, vec2<f32>(in.v_lineprogress, 0.5));
+    let color = textureSample(image, image_sampler, vec2<f32>(in.v_lineprogress, 0.5));
 
     return color * (alpha * opacity);
 }
@@ -526,9 +518,6 @@ struct FragmentInput {
 #endif
 };
 
-@group(1) @binding(0) var pattern_sampler: sampler;
-@group(1) @binding(1) var pattern_texture: texture_2d<f32>;
-
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 #ifdef PROJECTION_GLOBE
@@ -590,14 +579,14 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
         let x_a = glMod(in.v_linesofar / patternSizeAX * aspect_a, 1.0);
         var pos_a = atlas_pos((pattern_tl_a - 1.0) * texel_size, (pattern_br_a - pattern_tl_a + 2.0) * texel_size * vec2<f32>(x_a, y));
         pos_a = clamp(pos_a, (pattern_tl_a - 1.0) * texel_size + half_texel, (pattern_br_a + 1.0) * texel_size - half_texel);
-        color_a = textureSample(pattern_texture, pattern_sampler, pos_a);
+        color_a = textureSample(image, image_sampler, pos_a);
     }
     var color_b = vec4<f32>(0.0);
     if (tileProps.fade > 0.0) {
         let x_b = glMod(in.v_linesofar / patternSizeBX * aspect_b, 1.0);
         var pos_b = atlas_pos((pattern_tl_b - 1.0) * texel_size, (pattern_br_b - pattern_tl_b + 2.0) * texel_size * vec2<f32>(x_b, y));
         pos_b = clamp(pos_b, (pattern_tl_b - 1.0) * texel_size + half_texel, (pattern_br_b + 1.0) * texel_size - half_texel);
-        color_b = textureSample(pattern_texture, pattern_sampler, pos_b);
+        color_b = textureSample(image, image_sampler, pos_b);
     }
 
     let pattern_color = mix(color_a, color_b, tileProps.fade);
@@ -770,9 +759,6 @@ struct FragmentInput {
 #endif
 };
 
-@group(1) @binding(0) var sdf_sampler: sampler;
-@group(1) @binding(1) var sdf_texture: texture_2d<f32>;
-
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 #ifdef PROJECTION_GLOBE
@@ -802,8 +788,8 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     let alpha = clamp(min(dist - (in.v_width2.y - blur2), in.v_width2.x - dist) / blur2, 0.0, 1.0);
 
     // Sample SDF texture
-    let dist_a = textureSample(sdf_texture, sdf_sampler, in.v_tex_a).r;
-    let dist_b = textureSample(sdf_texture, sdf_sampler, in.v_tex_b).r;
+    let dist_a = textureSample(image, image_sampler, in.v_tex_a).r;
+    let dist_b = textureSample(image, image_sampler, in.v_tex_b).r;
     let sdfdist = mix(dist_a, dist_b, tileProps.mix);
     var sdfgamma = tileProps.sdfgamma;
 #ifndef HAS_UNIFORM_u_dasharray

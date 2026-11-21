@@ -19,7 +19,9 @@ use mln_util::hash::{HashMap, HashSet};
 use mln_vec_map::VecMap;
 
 use crate::shaders::wgsl_preprocessor::{is_space, preprocess_wgsl};
-use crate::shaders::wgsl_sources::{ENGINE_BINDINGS, GLOBAL_INDEX_DECLARATION, PRELUDE, declaration};
+use crate::shaders::wgsl_sources::{
+    ENGINE_BINDINGS, GLOBAL_INDEX_DECLARATION, PRELUDE, TEXTURE_GROUP, declaration, texture_declarations, texture_slot,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum BindingType {
@@ -30,8 +32,7 @@ pub(crate) enum BindingType {
     /// The sampler of an unfilterable texture.
     NonFilteringSampler,
     Texture,
-    /// A texture whose format can't be filtered, or that the shader only
-    /// reads with `textureLoad`.
+    /// A texture that its program declares unfilterable.
     UnfilterableTexture,
 }
 
@@ -265,9 +266,6 @@ pub(crate) struct ShaderProgram {
     pipeline_layout: wgpu::PipelineLayout,
     /// What the program binds, by which its inputs have their locations.
     program: &'static Program,
-    /// The texture slot of each binding of a texture or a sampler
-    /// ([`texture_slots`]).
-    texture_slots: Vec<(u32, usize)>,
     bindings_per_group: Vec<Vec<BindingInfo>>,
     /// The bytes of each buffer the sources read (`buffer_sizes`).
     buffer_sizes: Vec<((u32, u32), u64)>,
@@ -339,15 +337,9 @@ impl ShaderProgram {
         let mut binding_infos = Vec::new();
         analyze_shader_bindings(&mut binding_infos, vertex_source, wgpu::ShaderStages::VERTEX);
         analyze_shader_bindings(&mut binding_infos, fragment_source, wgpu::ShaderStages::FRAGMENT);
-        let texture_slots = texture_slots(&declared_bindings(program));
-        for info in &mut binding_infos {
-            let sampler = match info.type_ {
-                BindingType::Sampler => true,
-                BindingType::Texture => false,
-                _ => continue,
-            };
-            let slot = texture_slots.iter().find(|&&(binding, _)| binding == info.binding).map(|&(_, slot)| slot);
-            if slot.and_then(|slot| program.textures.get(slot)).is_some_and(|texture| !texture.filterable) {
+        for info in binding_infos.iter_mut().filter(|info| info.group == TEXTURE_GROUP) {
+            let (slot, sampler) = texture_slot(info.binding);
+            if program.textures.get(slot).is_some_and(|texture| !texture.filterable) {
                 info.type_ = if sampler { BindingType::NonFilteringSampler } else { BindingType::UnfilterableTexture };
             }
         }
@@ -369,7 +361,6 @@ impl ShaderProgram {
             index_group,
             pipeline_layout,
             program,
-            texture_slots,
             bindings_per_group: groups.bindings,
             buffer_sizes: buffer_sizes(&[vertex_source, fragment_source]),
             vertex_constants: constants(vertex_source, pixel_ratio),
@@ -413,9 +404,9 @@ impl ShaderProgram {
     }
 
     /// The slot of the program's texture whose texture or sampler the
-    /// shader declares at `binding`.
+    /// shader declares at `binding` of the texture group.
     pub(crate) fn texture_at(&self, binding: u32) -> Option<usize> {
-        let slot = self.texture_slots.iter().find(|&&(at, _)| at == binding).map(|&(_, slot)| slot)?;
+        let (slot, _) = texture_slot(binding);
         (slot < self.program.textures.len()).then_some(slot)
     }
 
@@ -644,41 +635,9 @@ impl BindingType {
     }
 }
 
-/// The texture slot of each texture and sampler binding of `infos`: the
-/// textures take the slots in binding order, and a sampler is the one of the
-/// texture at the binding after it.
-fn texture_slots(infos: &[BindingInfo]) -> Vec<(u32, usize)> {
-    let is_texture =
-        |info: &&BindingInfo| matches!(info.type_, BindingType::Texture | BindingType::UnfilterableTexture);
-    let mut textures: Vec<u32> = infos.iter().filter(is_texture).map(|info| info.binding).collect();
-    textures.sort_unstable();
-    textures.dedup();
-    let mut slots: Vec<(u32, usize)> = textures.iter().enumerate().map(|(slot, &binding)| (binding, slot)).collect();
-    for info in infos.iter().filter(|info| info.type_ == BindingType::Sampler) {
-        if let Some(slot) = textures.iter().position(|&binding| binding == info.binding + 1) {
-            slots.push((info.binding, slot));
-        }
-    }
-    slots
-}
-
-/// The bindings that `program`'s WGSL declares in any of its variants: a
-/// texture's slot follows from these, so that a variant whose `#ifdef`s
-/// leave a texture out keeps the slots of the others.
-fn declared_bindings(program: &Program) -> Vec<BindingInfo> {
-    let mut declared = Vec::new();
-    if let Some(wgsl) = program.sources.wgsl {
-        for text in [wgsl.prelude, wgsl.vertex, wgsl.fragment] {
-            analyze_shader_bindings(&mut declared, text, wgpu::ShaderStages::VERTEX_FRAGMENT);
-        }
-    }
-    declared
-}
-
 /// Adds the bindings of the `@group(N) @binding(M) var<...> name: type`
-/// declarations in `source`, which `stage` reads, to `binding_infos`. A
-/// text scan, not a parse: a texture only `textureLoad` reads is
-/// unfilterable.
+/// declarations in `source`, which `stage` reads, to `binding_infos`: a
+/// text scan, not a parse.
 fn analyze_shader_bindings(binding_infos: &mut Vec<BindingInfo>, source: &str, stage: wgpu::ShaderStages) {
     let b = source.as_bytes();
     let find = |pat: &str, from: usize| source.get(from..).and_then(|s| s.find(pat)).map(|p| p + from);
@@ -743,7 +702,6 @@ fn analyze_shader_bindings(binding_infos: &mut Vec<BindingInfo>, source: &str, s
         }
 
         let Some(colon_pos) = find_char(':', after_var) else { break };
-        let var_name = trim_string(&source[after_var..colon_pos]);
         let type_start = colon_pos + 1;
         let mut type_end = type_start;
         while type_end < b.len() {
@@ -759,13 +717,7 @@ fn analyze_shader_bindings(binding_infos: &mut Vec<BindingInfo>, source: &str, s
             if type_name.contains("sampler") {
                 type_ = BindingType::Sampler;
             } else if type_name.contains("texture") {
-                let uses_texture_load = source.contains(&format!("textureLoad({var_name}"));
-                let uses_texture_sample = source.contains(&format!("textureSample({var_name}"));
-                type_ = if uses_texture_load && !uses_texture_sample {
-                    BindingType::UnfilterableTexture
-                } else {
-                    BindingType::Texture
-                };
+                type_ = BindingType::Texture;
             }
         }
 
@@ -821,13 +773,14 @@ pub(crate) fn stage_sources(key: &ShaderKey) -> Result<[String; 2], GpuError> {
     }))
 }
 
-/// The declarations of the buffers that `text`, a stage and the program's
-/// prelude, reads, of each one whose name it names outside its comments:
-/// `globalIndex`, the engine's buffers and the blocks of `program`'s, which
-/// a draw binds in every variant, where the text names them in any variant,
-/// and its vertex buffers, which a draw binds where it has them, where the
-/// text names them in the variant of `defines`. WebGPU lays out the
-/// bindings that a variant declares, whether it reads them or not.
+/// The declarations of the buffers and textures that `text`, a stage and
+/// the program's prelude, reads, of each one whose name it names outside
+/// its comments: `globalIndex`, the engine's buffers, the blocks of
+/// `program`'s and its textures and their samplers, which a draw binds in
+/// every variant, where the text names them in any variant, and its vertex
+/// buffers, which a draw binds where it has them, where the text names them
+/// in the variant of `defines`. WebGPU lays out the bindings that a variant
+/// declares, whether it reads them or not.
 fn declarations(program: &Program, text: &str, defines: &HashMap<String, bool>) -> String {
     let named: HashSet<&str> = identifiers(text).collect();
     let mut declarations = String::new();
@@ -847,6 +800,15 @@ fn declarations(program: &Program, text: &str, defines: &HashMap<String, bool>) 
         for buffer in vertices.into_iter().filter(|buffer| named.contains(buffer.name)) {
             declarations.push_str(&declaration(buffer));
             declarations.push('\n');
+        }
+    }
+    for (slot, texture) in program.textures.iter().enumerate() {
+        let [texture_declaration, sampler_declaration] = texture_declarations(slot, texture);
+        for (name, declaration) in [(texture.name, texture_declaration), (&*texture.sampler(), sampler_declaration)] {
+            if named.contains(name) {
+                declarations.push_str(&declaration);
+                declarations.push('\n');
+            }
         }
     }
     declarations
@@ -884,7 +846,7 @@ mod tests {
     use mln_gfx::gfx_types::AttributeDataType::{Float, Short4};
     use mln_gfx::shaders::bindings::DRAW_INDEX_ID;
     use mln_gfx::shaders::layer_ubo::ViewUBO;
-    use mln_gfx::shaders::program::{DRAW_PROJECTION_BUFFER, PROJECTION_BUFFER, Sources, VIEW_BUFFER};
+    use mln_gfx::shaders::program::{DRAW_PROJECTION_BUFFER, PROJECTION_BUFFER, Sources, Texture, VIEW_BUFFER};
 
     use super::*;
 
@@ -938,25 +900,22 @@ mod tests {
     }
 
     #[test]
-    fn a_texture_keeps_its_slot_in_a_variant_without_an_earlier_one() {
+    fn a_stage_declares_the_textures_and_samplers_it_names_at_their_slots() {
         static PROGRAM: Program = Program {
             name: "two textures",
             buffers: &[],
             attributes: &[],
             instance_attributes: &[],
-            textures: &[],
+            textures: &[Texture::new("first"), Texture::unfilterable("second")],
             properties: &[],
-            sources: Sources {
-                wgsl: Some(&Wgsl {
-                    vertex: "",
-                    fragment: "#ifdef FIRST\n@group(1) @binding(1) var first: texture_2d<f32>;\n#endif\n\
-                               @group(1) @binding(2) var second: texture_2d<f32>;",
-                    prelude: "",
-                }),
-                ..Sources::NONE
-            },
+            sources: Sources::NONE,
         };
-        assert_eq!(texture_slots(&declared_bindings(&PROGRAM)), [(1, 0), (2, 1)]);
+        let declared = declarations(&PROGRAM, "textureSample(second, first_sampler, uv)", &HashMap::default());
+        assert_eq!(
+            declared,
+            "@group(1) @binding(0) var first_sampler: sampler;\n@group(1) @binding(3) var second: texture_2d<f32>;\n"
+        );
+        assert_eq!([0, 1, 2, 3].map(texture_slot), [(0, true), (0, false), (1, true), (1, false)]);
     }
 
     #[test]

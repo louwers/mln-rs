@@ -1,8 +1,8 @@
 //! The WGSL prelude every shader compiles after, and the declarations of
-//! the buffers that a stage reads.
+//! the buffers and textures that a stage reads.
 
 use mln_gfx::gfx_types::AttributeDataType;
-use mln_gfx::shaders::program::{Buffer, BufferKind, DRAW_PROJECTION_BUFFER, PROJECTION_BUFFER, VIEW_BUFFER};
+use mln_gfx::shaders::program::{Buffer, BufferKind, DRAW_PROJECTION_BUFFER, PROJECTION_BUFFER, Texture, VIEW_BUFFER};
 
 /// The WGSL every program compiles after.
 pub(crate) const PRELUDE: &str = r"
@@ -202,6 +202,32 @@ pub(crate) fn declaration(buffer: &Buffer) -> String {
         BufferKind::Vertices { format } => ("storage, read", format!("array<{}>", word(format))),
     };
     format!("@group(0) @binding({}) var<{space}> {}: {ty};", buffer.id, buffer.name)
+}
+
+/// The group that textures and their samplers bind in.
+pub(crate) const TEXTURE_GROUP: u32 = 1;
+
+/// The binding in [`TEXTURE_GROUP`] of the texture at slot `slot`, and of
+/// its sampler, at the binding before it.
+pub(crate) const fn texture_bindings(slot: usize) -> [u32; 2] {
+    let sampler = 2 * slot as u32;
+    [sampler + 1, sampler]
+}
+
+/// The texture slot of `binding` in [`TEXTURE_GROUP`], and whether it is
+/// the sampler's binding: the inverse of [`texture_bindings`].
+pub(crate) const fn texture_slot(binding: u32) -> (usize, bool) {
+    ((binding / 2) as usize, binding.is_multiple_of(2))
+}
+
+/// The declarations of `texture`, at slot `slot`, and of its sampler, by
+/// their names.
+pub(crate) fn texture_declarations(slot: usize, texture: &Texture) -> [String; 2] {
+    let [texture_binding, sampler_binding] = texture_bindings(slot);
+    [
+        format!("@group({TEXTURE_GROUP}) @binding({texture_binding}) var {}: texture_2d<f32>;", texture.name),
+        format!("@group({TEXTURE_GROUP}) @binding({sampler_binding}) var {}: sampler;", texture.sampler()),
+    ]
 }
 
 /// The 32-bit words that a stage reads vertices of `format` as.

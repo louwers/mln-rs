@@ -30,11 +30,8 @@ struct FragmentInput {
     @location(0) tex_coord: vec2<f32>,
 };
 
-@group(1) @binding(0) var texture_sampler: sampler;
-@group(1) @binding(1) var dem_texture: texture_2d<f32>;
-
 fn getElevation(coord: vec2<f32>) -> f32 {
-    var data = textureSample(dem_texture, texture_sampler, coord) * 255.0;
+    var data = textureSample(image, image_sampler, coord) * 255.0;
     data.a = -1.0;
     return dot(data, tileProps.unpack);
 }
@@ -120,9 +117,6 @@ const BASIC: i32 = 4;
 struct FragmentInput {
     @location(0) tex_coord: vec2<f32>,
 };
-
-@group(1) @binding(0) var texture_sampler: sampler;
-@group(1) @binding(1) var hillshade_texture: texture_2d<f32>;
 
 fn get_aspect(deriv: vec2<f32>) -> f32 {
     let aspectDefault = 0.5 * PI * select(-1.0, 1.0, deriv.y > 0.0);
@@ -233,7 +227,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 #endif
 
     let tileProps = tilePropsVector[globalIndex.value];
-    let pixel = textureSample(hillshade_texture, texture_sampler, in.tex_coord);
+    let pixel = textureSample(image, image_sampler, in.tex_coord);
 
     let latRange = tileProps.latrange;
     let latitude = (latRange.x - latRange.y) * in.tex_coord.y + latRange.y;

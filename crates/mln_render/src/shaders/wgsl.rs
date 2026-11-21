@@ -180,7 +180,7 @@ fn main() -> @location(0) vec4<f32> {
 
 /// A layer's texture, the size of the frame, composited onto it
 /// texel for texel, with its opacity and, for the blend modes that no blend
-/// function expresses, against a copy of the frame (`backdrop_texture`).
+/// function expresses, against a copy of the frame (`backdrop`).
 pub(crate) const LAYER_COMPOSITE_SHADER: Wgsl = Wgsl {
     vertex: r"
 struct VertexInput {
@@ -194,8 +194,6 @@ fn main(in: VertexInput) -> @builtin(position) vec4<f32> {
 }
 ",
     fragment: r"
-@group(1) @binding(1) var image_texture: texture_2d<f32>;
-@group(1) @binding(2) var backdrop_texture: texture_2d<f32>;
 
 // The blend modes that no blend function expresses, of the W3C compositing
 // spec, on premultiplied colors.
@@ -257,7 +255,7 @@ fn composite(src: vec4<f32>, dst: vec4<f32>, mode: i32) -> vec4<f32> {
 @fragment
 fn main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
     let texel = vec2<i32>(position.xy);
-    let color = textureLoad(image_texture, texel, 0);
+    let color = textureLoad(image, texel, 0);
 #ifdef OVERDRAW_INSPECTOR
     return color;
 #else
@@ -265,7 +263,7 @@ fn main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
     if (props.blend == 0) {
         return src;
     }
-    return composite(src, textureLoad(backdrop_texture, texel, 0), props.blend);
+    return composite(src, textureLoad(backdrop, texel, 0), props.blend);
 #endif
 }
 ",

@@ -40,15 +40,8 @@ struct FragmentInput {
     @location(0) frag_position: vec2<f32>,
 };
 
-@group(1) @binding(0) var dem_sampler: sampler;
-@group(1) @binding(1) var dem_texture: texture_2d<f32>;
-@group(1) @binding(2) var elevation_stops_sampler: sampler;
-@group(1) @binding(3) var elevation_stops_texture: texture_2d<f32>;
-@group(1) @binding(4) var color_stops_sampler: sampler;
-@group(1) @binding(5) var color_stops_texture: texture_2d<f32>;
-
 fn getElevation(coord: vec2<f32>, unpack: vec4<f32>) -> f32 {
-    var data = textureSample(dem_texture, dem_sampler, coord) * 255.0;
+    var data = textureSample(image, image_sampler, coord) * 255.0;
     data.a = -1.0;
     return dot(data, unpack);
 }
@@ -58,12 +51,12 @@ fn getElevation(coord: vec2<f32>, unpack: vec4<f32>) -> f32 {
 // length, where WGSL allows no implicit level.
 fn getElevationStop(stop: i32, color_ramp_size: i32) -> f32 {
     let x = (f32(stop) + 0.5) / f32(color_ramp_size);
-    return textureSampleLevel(elevation_stops_texture, elevation_stops_sampler, vec2<f32>(x, 0.5), 0.0).r;
+    return textureSampleLevel(elevation_stops, elevation_stops_sampler, vec2<f32>(x, 0.5), 0.0).r;
 }
 
 fn getColorStop(stop: i32, color_ramp_size: i32) -> vec4<f32> {
     let x = (f32(stop) + 0.5) / f32(color_ramp_size);
-    return textureSample(color_stops_texture, color_stops_sampler, vec2<f32>(x, 0.5));
+    return textureSample(color_stops, color_stops_sampler, vec2<f32>(x, 0.5));
 }
 
 @fragment

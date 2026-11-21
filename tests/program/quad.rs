@@ -61,9 +61,6 @@ struct FragmentInput {
     @location(0) uv: vec2<f32>,
 };
 
-@group(1) @binding(0) var image_sampler: sampler;
-@group(1) @binding(1) var image: texture_2d<f32>;
-
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     return textureSample(image, image_sampler, in.uv) * props.tint;

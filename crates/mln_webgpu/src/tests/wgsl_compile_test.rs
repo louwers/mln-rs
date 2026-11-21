@@ -155,13 +155,13 @@ fn no_source_declares_a_block() {
     }
 }
 
-/// No source declares a buffer: the backend declares the engine's and its
-/// program's, by their names.
+/// No source declares a buffer or a texture: the backend declares the
+/// engine's buffers and its program's buffers and textures, by their names.
 #[test]
-fn no_source_declares_a_buffer() {
+fn no_source_declares_a_buffer_or_a_texture() {
     for (program, source) in programs() {
         for text in [source.prelude, source.vertex, source.fragment] {
-            assert!(!text.contains("@group(0)"), "{} declares a buffer", program.name);
+            assert!(!text.contains("@group("), "{} declares a binding", program.name);
         }
     }
 }

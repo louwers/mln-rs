@@ -37,18 +37,14 @@ struct FragmentInput {
     @location(1) pos1: vec2<f32>,
 };
 
-@group(1) @binding(0) var texture_sampler: sampler;
-@group(1) @binding(1) var image0: texture_2d<f32>;
-@group(1) @binding(2) var image1: texture_2d<f32>;
-
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 #ifdef OVERDRAW_INSPECTOR
     return vec4<f32>(1.0, 1.0, 1.0, 1.0);
 #endif
 
-    var color0 = textureSample(image0, texture_sampler, in.pos0);
-    var color1 = textureSample(image1, texture_sampler, in.pos1);
+    var color0 = textureSample(image0, image0_sampler, in.pos0);
+    var color1 = textureSample(image1, image0_sampler, in.pos1);
 
     if (color0.a > 0.0) {
         color0 = vec4<f32>(color0.rgb / color0.a, color0.a);
