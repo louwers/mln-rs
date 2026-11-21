@@ -13,8 +13,8 @@
 //!   still loading.
 //! - **A command** that moves the center eases its altitude onto the ground
 //!   at the center it ends on ([`EasedAltitude`]).
-//! - **A gesture** owns the altitude from when its fingers go down: the
-//!   running commands stop easing theirs, and the gesture holds the
+//! - **A gesture** owns the altitude from when its fingers go down: it
+//!   takes the altitude from every running command, and holds the
 //!   altitude the camera has then, lifted over ground that reaches above
 //!   the eye or the near plane, through its momentum. A command that takes
 //!   the center from the momentum eases the altitude again, and the gesture

@@ -47,7 +47,7 @@ pub struct MapOptions {
     /// gives way to it, without a warning, and while it loads, the command
     /// heads for the altitude it was given. A gesture holds the altitude
     /// the camera has when its fingers go down, lifted over ground that
-    /// reaches above its eye, and the commands running then stop easing
+    /// reaches above its eye, and the commands running then give up
     /// theirs. A command that takes the center from a gesture's momentum
     /// eases the altitude as any command does. Any other camera that an
     /// animation moves keeps its altitude. A command that completes ends at
