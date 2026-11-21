@@ -125,12 +125,14 @@
 //!   drawn terrain tiles are inside T, as over a source tiled coarser than
 //!   the DEM, or none is over it, T reads the DEM tile that holds it at its
 //!   own zoom, or at the DEM's deepest if that is shallower, which the cover
-//!   requests for each such tile of a standing layer the frame draws, and a
-//!   still waits for; while it loads, T reads the deepest ancestor of it
-//!   that has loaded. Where the DEM has no tile that holds T, its lowest
-//!   zoom deeper than T's, T stands at sea level. A known limit: features of
-//!   such a T stand on a DEM tile coarser than the surface's under them, off
-//!   the surface by what the DEM tile differs from the finer ones. A point
+//!   requests for each such tile of the ideal cover of a standing layer the
+//!   frame draws, and a still waits for; while it loads, T reads the deepest
+//!   ancestor of it that has loaded, as does a tile drawn in place of an
+//!   ideal one while that loads, for which nothing is requested. Where the
+//!   DEM has no tile that holds T, its lowest zoom deeper than T's, T stands
+//!   at sea level. A known limit: features of such a T stand on a DEM tile
+//!   coarser than the surface's under them, off the surface by what the DEM
+//!   tile differs from the finer ones. A point
 //!   layer's T (circles, heatmap kernels and symbols) draws only the
 //!   features whose anchor is in T, from 0 to under the extent on both axes:
 //!   a copy in T's buffer, which a still's circles keep, is left to the tile
@@ -556,11 +558,11 @@ impl RenderTerrain {
         self.cover.as_ref()
     }
 
-    /// Requests, while terrain draws, the DEM tiles that `tiles`, the tiles
-    /// that a standing layer draws, read off the surface's
+    /// Requests, while terrain draws, the DEM tiles that `tiles`, the ideal
+    /// tiles of a standing layer's source, read off the surface's
     /// ([`TerrainCover::request_standing`]), once their source has updated
     /// and before the terrain's own source does.
-    pub(crate) fn request_standing(&mut self, tiles: impl IntoIterator<Item = mln_tile_id::UnwrappedTileID>) {
+    pub(crate) fn request_standing(&mut self, tiles: impl IntoIterator<Item = mln_tile_id::OverscaledTileID>) {
         if let Some(cover) = &mut self.cover {
             cover.request_standing(tiles);
         }

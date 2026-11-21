@@ -164,9 +164,12 @@ pub(crate) struct SourceTiles {
     /// unloads, or the tile could not come back while its symbols show.
     max_content_elevation: f32,
     style: Option<Arc<SourceStyle>>,
-    /// The last update's ideal cover, inside the source's bounds, for the
-    /// benchmarks' measure of what a frame shows (`crate::bench`).
-    #[cfg(feature = "bench")]
+    /// The last update's ideal cover, inside the source's bounds, while
+    /// terrain draws: the tiles whose DEM tiles off the surface's the terrain
+    /// requests for a standing layer
+    /// ([`TerrainCover::request_standing`](crate::terrain::TerrainCover::request_standing)).
+    /// The benchmarks keep it always, for their measure of what a frame
+    /// shows (`crate::bench`).
     pub(crate) ideal: Vec<OverscaledTileID>,
 }
 
@@ -409,7 +412,6 @@ impl SourceTiles {
             last_subdivision_granularity: SubdivisionGranularitySetting::none(),
             max_content_elevation: 0.0,
             style: None,
-            #[cfg(feature = "bench")]
             ideal: Vec::new(),
         }
     }
@@ -620,7 +622,6 @@ impl SourceTiles {
             // So are the tiles that went on loading in the cache.
             self.cache_release_loading(ctx, |_| false);
             self.rendered.clear();
-            #[cfg(feature = "bench")]
             self.ideal.clear();
             if self.info.kind != TileKind::Geometry {
                 std::mem::swap(&mut self.masked, &mut self.masked_before);
@@ -757,9 +758,8 @@ impl SourceTiles {
             tile_range = Some(TileRange::from_lat_lng_bounds_range(bounds, zoom_range.min, max_zoom as u8));
         }
 
-        #[cfg(feature = "bench")]
-        {
-            self.ideal.clear();
+        self.ideal.clear();
+        if cfg!(feature = "bench") || parameters.terrain.is_some() {
             let inside = |id: &&OverscaledTileID| tile_range.as_ref().is_none_or(|range| range.contains(&id.canonical));
             self.ideal.extend(ideal_tiles.iter().filter(inside));
         }

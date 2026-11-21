@@ -3,7 +3,7 @@
 //! draws.
 
 use mln_map_types::{TileCoordinate, View};
-use mln_tile_id::{CanonicalTileID, OverscaledTileID, UnwrappedTileID};
+use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::constants;
 use mln_util::dem::DemCoords;
 use mln_util::geo::WrapMode;
@@ -322,27 +322,23 @@ impl TerrainCover {
         TerrainCover { source_id: source_id.to_owned(), tile_size, tiles, center, dem_tiles, standing_dems, ranges }
     }
 
-    /// Requests the DEM tiles that `tiles`, the tiles that a standing layer
-    /// of the frame draws, read where no drawn tile holds them: the DEM tile
-    /// that holds each at its own zoom, or at the DEM's deepest if that is
-    /// shallower, so that the terrain's source loads it and keeps it loaded,
-    /// as it does the tiles' own. A tile above the DEM's zoom levels reads
-    /// none.
-    pub(crate) fn request_standing(&mut self, tiles: impl IntoIterator<Item = UnwrappedTileID>) {
+    /// Requests the DEM tiles that `tiles`, the ideal tiles of the source of
+    /// a standing layer the frame draws, read where no drawn tile holds them:
+    /// the DEM tile that holds each at its own zoom, or at the DEM's deepest
+    /// if that is shallower, so that the terrain's source loads it and keeps
+    /// it loaded, as it does the tiles' own. A tile above the DEM's zoom
+    /// levels reads none. A tile the source draws in place of an ideal one
+    /// while that loads requests nothing: it reads what has loaded.
+    pub(crate) fn request_standing(&mut self, tiles: impl IntoIterator<Item = OverscaledTileID>) {
         let dem_zooms = self.ranges.dem_zooms;
-        let mut zooms: Vec<u8> = self.tiles.iter().map(|tile| tile.id.canonical.z).collect();
-        zooms.sort_unstable();
-        zooms.dedup();
-        let drawn: HashSet<UnwrappedTileID> = self.tiles.iter().map(|tile| tile.id.to_unwrapped()).collect();
-        let mut requested: HashSet<OverscaledTileID> = self.dem_tiles.iter().copied().collect();
         for tile in tiles {
-            let tile = OverscaledTileID::new(tile.canonical.z, tile.wrap, tile.canonical);
             let z = tile.canonical.z;
-            if zooms.iter().any(|&drawn_z| drawn_z <= z && drawn.contains(&tile.scaled_to(drawn_z).to_unwrapped())) {
-                continue;
-            }
+            let held = self.tiles.iter().any(|drawn| {
+                let (wrap, canonical) = (drawn.id.wrap, drawn.id.canonical);
+                wrap == tile.wrap && canonical.z <= z && tile.scaled_to(canonical.z).canonical == canonical
+            });
             let id = tile.scaled_to(z.min(dem_zooms.max));
-            if id.canonical.z >= dem_zooms.min && requested.insert(id) {
+            if !held && id.canonical.z >= dem_zooms.min && !self.dem_tiles.contains(&id) {
                 self.dem_tiles.push(id);
                 self.standing_dems.push(id);
             }

@@ -977,7 +977,7 @@ impl RenderOrchestrator {
                     let (store, render_sources) = (&self.tile_store, &self.render_sources);
                     let standing = standing_sources.iter().filter_map(|&index| {
                         let tiles = render_sources.get(self.sources_by_id[index].id())?.tiles()?;
-                        Some(store.source(tiles)?.rendered().map(|rendered| *rendered.id))
+                        Some(store.source(tiles)?.ideal.iter().copied())
                     });
                     self.terrain.request_standing(standing.flatten());
                 }

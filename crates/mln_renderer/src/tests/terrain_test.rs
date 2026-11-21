@@ -15,7 +15,7 @@ use mln_style::sources::raster_dem_source;
 use mln_style::terrain::Terrain;
 use mln_style::{Edit, Source, Style};
 use mln_style_types::ProjectionDefinition;
-use mln_tile_id::{CanonicalTileID, OverscaledTileID, UnwrappedTileID};
+use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::dem::{DemCoords, DemUnpack};
 use mln_util::geo::{LatLng, WrapMode};
 use mln_util::image::PremultipliedImage;
@@ -286,8 +286,8 @@ struct TerrainLoad {
     grounded: bool,
     /// Whether a gesture or a command moves the updates' camera.
     camera_moving: bool,
-    /// The tiles of a standing layer's source that each update draws.
-    standing: Vec<UnwrappedTileID>,
+    /// The ideal tiles of a standing layer's source in each update.
+    standing: Vec<OverscaledTileID>,
 }
 
 impl TerrainLoad {
@@ -1334,7 +1334,12 @@ fn the_ground_of_a_terrain_tile_is_the_surface_it_draws() {
 fn a_source_tile_inside_a_terrain_tile_reads_its_dem() {
     let mut load = TerrainLoad::with_tile_size((0, 14), 1.0, 512);
     let cover = load.frame();
-    load.standing = cover.tiles.iter().flat_map(|tile| tile.id.to_unwrapped().children()).collect();
+    load.standing = cover
+        .tiles
+        .iter()
+        .flat_map(|tile| tile.id.to_unwrapped().children())
+        .map(|child| OverscaledTileID::new(child.canonical.z, child.wrap, child.canonical))
+        .collect();
     load.frame();
     load.answer(|_| Some(terrarium_slope()));
     assert!(load.is_loaded());
@@ -1379,7 +1384,7 @@ fn a_source_tile_coarser_than_the_terrain_tiles_reads_its_own_dem_tile() {
     let zooms: BTreeSet<u8> = cover.tiles.iter().map(|tile| tile.id.canonical.z).collect();
     assert!(zooms.iter().all(|&z| z >= 16), "terrain tiles that read the DEM at 15: {zooms:?}");
     let sources: BTreeSet<OverscaledTileID> = cover.tiles.iter().map(|tile| tile.id.scaled_to(14)).collect();
-    load.standing = sources.iter().map(OverscaledTileID::to_unwrapped).collect();
+    load.standing = sources.iter().copied().collect();
     let cover = load.frame();
     let requested: BTreeSet<OverscaledTileID> = cover.standing_dems.iter().copied().collect();
     assert_eq!(sources, requested);
@@ -1415,11 +1420,11 @@ fn a_source_tile_off_the_cover_reads_the_dem_tile_requested_for_it() {
     let cover = load.frame();
     // Far east of the view, at the zoom of the terrain's tiles.
     let z = cover.tiles[0].id.canonical.z;
-    let off = UnwrappedTileID::with_wrap(0, CanonicalTileID::new(z, (1 << z) - 1, 0));
-    assert!(cover.tiles.iter().all(|tile| !tile.id.to_unwrapped().is_child_of(&off) && tile.id.to_unwrapped() != off));
+    let off = OverscaledTileID::new(z, 0, CanonicalTileID::new(z, (1 << z) - 1, 0));
+    assert!(cover.tiles.iter().all(|tile| !tile.id.is_child_of(&off) && tile.id != off));
     load.standing = vec![off];
     let cover = load.frame();
-    let dem = OverscaledTileID::new(z, 0, off.canonical);
+    let dem = off;
     assert_eq!(vec![dem], cover.standing_dems);
     load.answer(|_| Some(terrarium_png(321)));
     assert!(load.is_loaded());
