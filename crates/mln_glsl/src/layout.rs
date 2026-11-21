@@ -2,9 +2,9 @@
 // texture in them, for the ids in the ranges of
 // mln_gfx::shaders::bindings (see the crate's doc comment).
 //
-// - A layer's uniform buffer binds at its id less one: the first one of a
-//   layer has the id 5, or 6 for the layers with a tile properties storage
-//   buffer at 5 (fill, fill extrusion, color relief), and binds at 4 or 5.
+// - A uniform block of a slot binds in the layer set at its id less one,
+//   4 or 5: a program whose buffer of each draw's values that both stages
+//   read takes id 5 has its uniform block at slot 1, id 6.
 // - A drawable's uniform buffers are the drawable set, with the vertex
 //   buffers that the pulled shaders read as storage buffers after them, at
 //   the ids after the uniform buffers'.

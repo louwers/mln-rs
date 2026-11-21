@@ -1,7 +1,7 @@
 // The preludes every stage of the GLSL compiles after, which `mln_glsl`
 // parses with naga's GLSL front end:
-// - The view's block binds where `layout` puts it; `compose` declares the
-//   other buffers and the textures.
+// - `compose` declares the buffers and the textures, where `layout` puts
+//   them.
 // - What naga doesn't take is written another way: no precision qualifiers,
 //   `int` for the `bool` members of buffers, no sampler parameters, `flat` on
 //   an integer output, and an `#else` after the overdraw inspector's early
@@ -54,10 +54,6 @@ vec4 unpack_mix_color(const vec4 packedColors, const float t) {
     vec4 maxColor = decode_color(vec2(packedColors[2], packedColors[3]));
     return mix(minColor, maxColor, t);
 }
-
-layout(std140, set = 0, binding = 0) uniform ViewUBOBlock {
-    ViewUBO view;
-};
 
 // Pole vertices carry these sentinel Y values in their raw position.
 #define GLOBE_POLE_NORTH_Y -32767.5
@@ -189,10 +185,6 @@ vec4 projectTileFor3D(vec2 pos, float elevation, ProjectionUBO projection) {
 pub(crate) const PRELUDE_FRAGMENT: &str = r"
 
 #define M_PI 3.1415926535897932384626433832795
-
-layout(std140, set = 0, binding = 0) uniform ViewUBOBlock {
-    ViewUBO view;
-};
 
 ";
 

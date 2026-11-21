@@ -432,7 +432,6 @@ fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
     let index = drawIndex;
     let drawable = drawableVector[index];
-    let tileProps = tilePropsVector[index];
 
     let ratio = max(drawable.ratio, 1e-6);
     let antialiasing = 0.5 / DEVICE_PIXEL_RATIO;
@@ -641,7 +640,6 @@ fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
     let index = drawIndex;
     let drawable = drawableVector[index];
-    let tileProps = tilePropsVector[index];
 
     // Constants
     let LINE_DISTANCE_SCALE = 2.0;

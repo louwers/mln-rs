@@ -3,11 +3,10 @@
 
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::gpu::GpuError;
-use mln_gfx::shaders::program::{
-    Buffer, BufferKind, DRAW_PROJECTION_BUFFER, ENGINE_BUFFERS, PROJECTION_BUFFER, Program, Texture, VIEW_BUFFER,
-};
-use mln_gfx::shaders::source::identifiers;
+use mln_gfx::shaders::bindings::DRAW_INDEX_ID;
+use mln_gfx::shaders::program::{Binding, BufferKind, ENGINE_BUFFERS, Program};
 use mln_gfx::shaders::source::msl::{self, Msl};
+use mln_gfx::shaders::source::{Stage, identifiers};
 use mln_util::hash::HashSet;
 
 /// The start of every library.
@@ -184,73 +183,51 @@ inline float4 projectTileFor3D(float2 pos, float elevation, device const Project
 
 ";
 
-/// The parameter of the draw's index into its layer's storage buffers,
-/// which a main function reads as `drawIndex`.
-const DRAW_INDEX_PARAMETER: &str = "device const uint32_t& drawIndex [[buffer(1)]]";
-
-/// The engine's buffers that a main function may read without declaring
-/// them, besides `drawIndex`: the view's block and the projection blocks.
-const ENGINE_PARAMETERS: [Buffer; 3] = [VIEW_BUFFER, PROJECTION_BUFFER, DRAW_PROJECTION_BUFFER];
-
-/// The parameter of `buffer` at the buffer index of its id, by its name: a
-/// reference to a block, and a pointer to the elements or the vertices of a
-/// storage buffer.
-fn parameter(buffer: &Buffer) -> String {
-    let (ty, by) = match buffer.kind {
-        BufferKind::Uniform(block) | BufferKind::DrawUniform(block) => (block.name, '&'),
-        BufferKind::Storage { block, .. } => (block.name, '*'),
-        BufferKind::Vertices { format } => (vertex_type(format), '*'),
-    };
-    format!("device const {ty}{by} {} [[buffer({})]]", buffer.name, buffer.id)
-}
-
-/// The parameters of `texture`, at slot `slot`, and of its sampler, at the
-/// texture and sampler indexes of the slot, by their names.
-fn texture_parameters(slot: usize, texture: &Texture) -> [String; 2] {
-    [
-        format!("texture2d<float, access::sample> {} [[texture({slot})]]", texture.name),
-        format!("sampler {} [[sampler({slot})]]", texture.sampler_name()),
-    ]
+/// The parameter of `binding`, by its name: the draw's index at
+/// [`DRAW_INDEX_ID`], a buffer at the buffer index of its id, a reference to
+/// a block and a pointer to the elements or the vertices of a storage
+/// buffer, and a texture at slot `slot` and its sampler at texture and
+/// sampler index `slot`.
+fn parameter(binding: &Binding<'_>) -> String {
+    let name = binding.name();
+    match *binding {
+        Binding::DrawIndex => format!("device const uint32_t& {name} [[buffer({DRAW_INDEX_ID})]]"),
+        Binding::Buffer(buffer) => {
+            let (ty, by) = match buffer.kind {
+                BufferKind::Uniform(block) | BufferKind::DrawUniform(block) => (block.name, '&'),
+                BufferKind::Storage { block, .. } => (block.name, '*'),
+                BufferKind::Vertices { format } => (vertex_type(format), '*'),
+            };
+            format!("device const {ty}{by} {name} [[buffer({})]]", buffer.id)
+        }
+        Binding::Texture(slot, _) => format!("texture2d<float, access::sample> {name} [[texture({slot})]]"),
+        Binding::Sampler(slot, _) => format!("sampler {name} [[sampler({slot})]]"),
+    }
 }
 
 /// The type of a vertex of `format`.
 fn vertex_type(format: AttributeDataType) -> &'static str {
     use AttributeDataType::{
-        Byte, Byte2, Byte3, Byte4, Float, Float2, Float3, Float4, Int, Int2, Int3, Int4, Invalid, Short, Short2,
-        Short3, Short4, UByte, UByte2, UByte3, UByte4, UByte4Normalized, UInt, UInt2, UInt3, UInt4, UShort, UShort2,
-        UShort3, UShort4, UShort8,
+        Byte4, Float, Float2, Float4, Int, Int2, Int4, Short2, Short4, UByte4, UInt, UInt2, UInt4, UShort2, UShort4,
     };
     match format {
-        Byte => "char",
-        Byte2 => "char2",
-        Byte3 => "char3",
         Byte4 => "char4",
-        UByte => "uchar",
-        UByte2 => "uchar2",
-        UByte3 => "uchar3",
-        UByte4 | UByte4Normalized => "uchar4",
-        Short => "short",
+        UByte4 => "uchar4",
         Short2 => "short2",
-        Short3 => "short3",
         Short4 => "short4",
-        UShort => "ushort",
         UShort2 => "ushort2",
-        UShort3 => "ushort3",
         UShort4 => "ushort4",
         Int => "int",
         Int2 => "int2",
-        Int3 => "int3",
         Int4 => "int4",
         UInt => "uint",
         UInt2 => "uint2",
-        UInt3 => "uint3",
         UInt4 => "uint4",
         Float => "float",
         Float2 => "float2",
-        Float3 => "float3",
         Float4 => "float4",
-        // `Program::check` rejects a vertex buffer of these.
-        UShort8 | Invalid => "void",
+        // `Program::check` rejects a vertex buffer of the others.
+        _ => "void",
     }
 }
 
@@ -258,24 +235,24 @@ fn vertex_type(format: AttributeDataType) -> &'static str {
 /// structs of the engine's blocks, the prelude, the structs of the
 /// program's blocks, each a storage buffer's element padded to its stride,
 /// and the program's own prelude and source with its properties written
-/// out ([`msl::expand`]), and each main function with the parameters of the
-/// buffers that it names, the engine's and the program's, and of the
-/// program's textures and samplers that it names. Fails as [`msl::expand`]
-/// does.
+/// out ([`msl::expand`]), and each main function with the parameters of
+/// what it names of what its stage may read ([`with_parameters`]). Fails
+/// as [`msl::expand`] does.
 pub(crate) fn library_source(program: &Program, source: &Msl) -> Result<String, GpuError> {
     let (engine, own) = (msl::blocks(&ENGINE_BUFFERS), msl::blocks(program.buffers));
     let mut functions = msl::expand(program, source)?;
-    for main in [source.vertex_main_function, source.fragment_main_function] {
-        functions = with_parameters(&functions, main, program);
+    for (main, stage) in
+        [(source.vertex_main_function, Stage::Vertex), (source.fragment_main_function, Stage::Fragment)]
+    {
+        functions = with_parameters(&functions, main, program, stage);
     }
     Ok([HEADER, &engine, PRELUDE, &own, source.prelude, &functions].concat())
 }
 
-/// `functions` with the parameters of what the main function `main` names
-/// in its body added to its parameters: `drawIndex`, the engine's buffers,
-/// `program`'s buffers, and its textures and their samplers, each at the
-/// index of its slot.
-fn with_parameters(functions: &str, main: &str, program: &Program) -> String {
+/// `functions` with the parameters of what the main function `main` of
+/// `stage` names in its body and may read ([`Program::bindings`]) added to
+/// its parameters.
+fn with_parameters(functions: &str, main: &str, program: &Program, stage: Stage) -> String {
     let Some(name_at) = functions.find(&format!(" {main}(")) else { return functions.to_owned() };
     let Some(close) = matching(functions, name_at, '(', ')') else { return functions.to_owned() };
     let Some(end) = matching(functions, close, '{', '}') else { return functions.to_owned() };
@@ -283,22 +260,9 @@ fn with_parameters(functions: &str, main: &str, program: &Program) -> String {
     let declared: HashSet<&str> = identifiers(parameters).collect();
     let named: HashSet<&str> = identifiers(body).filter(|name| !declared.contains(name)).collect();
     let mut added = String::new();
-    if named.contains("drawIndex") {
+    for binding in program.bindings(stage).filter(|binding| named.contains(&*binding.name())) {
         added.push_str(",\n    ");
-        added.push_str(DRAW_INDEX_PARAMETER);
-    }
-    for buffer in ENGINE_PARAMETERS.iter().chain(program.buffers).filter(|buffer| named.contains(buffer.name)) {
-        added.push_str(",\n    ");
-        added.push_str(&parameter(buffer));
-    }
-    for (slot, texture) in program.textures.iter().enumerate() {
-        let [texture_parameter, sampler_parameter] = texture_parameters(slot, texture);
-        for (name, parameter) in [(texture.name, texture_parameter), (&*texture.sampler_name(), sampler_parameter)] {
-            if named.contains(name) {
-                added.push_str(",\n    ");
-                added.push_str(&parameter);
-            }
-        }
+        added.push_str(&parameter(&binding));
     }
     [&functions[..close], &added, &functions[close..]].concat()
 }
@@ -316,22 +280,31 @@ fn matching(text: &str, from: usize, open: char, close: char) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use mln_gfx::gfx_types::AttributeDataType::Short4;
-    use mln_gfx::shaders::bindings::DRAW_INDEX_ID;
-    use mln_gfx::shaders::program::Sources;
+    use mln_gfx::shaders::program::{Buffer, DRAW_PROJECTION_BUFFER, PROJECTION_BUFFER, Sources, Texture, VIEW_BUFFER};
 
     use super::*;
 
     #[test]
-    fn the_engines_buffers_bind_at_their_ids() {
-        assert!(DRAW_INDEX_PARAMETER.ends_with(&format!("[[buffer({DRAW_INDEX_ID})]]")));
-        assert_eq!(parameter(&VIEW_BUFFER), "device const ViewUBO& view [[buffer(0)]]");
-        assert_eq!(parameter(&PROJECTION_BUFFER), "device const ProjectionUBO* projectionVector [[buffer(4)]]");
-        assert_eq!(parameter(&DRAW_PROJECTION_BUFFER), "device const ProjectionUBO& drawProjection [[buffer(4)]]");
-        assert_eq!(parameter(&Buffer::vertices("walls", 0, Short4)), "device const short4* walls [[buffer(7)]]");
+    fn the_engines_bindings_are_at_their_ids() {
+        let parameter = |binding| parameter(&binding);
+        assert_eq!(parameter(Binding::DrawIndex), "device const uint32_t& drawIndex [[buffer(1)]]");
+        assert_eq!(parameter(Binding::Buffer(&VIEW_BUFFER)), "device const ViewUBO& view [[buffer(0)]]");
+        assert_eq!(
+            parameter(Binding::Buffer(&PROJECTION_BUFFER)),
+            "device const ProjectionUBO* projectionVector [[buffer(4)]]"
+        );
+        assert_eq!(
+            parameter(Binding::Buffer(&DRAW_PROJECTION_BUFFER)),
+            "device const ProjectionUBO& drawProjection [[buffer(4)]]"
+        );
+        assert_eq!(
+            parameter(Binding::Buffer(&Buffer::vertices("walls", 0, Short4))),
+            "device const short4* walls [[buffer(7)]]"
+        );
     }
 
     #[test]
-    fn a_main_function_has_the_parameters_of_the_buffers_and_textures_its_body_names() {
+    fn a_main_function_has_the_parameters_of_what_its_body_names_and_its_stage_may_read() {
         static PROGRAM: Program = Program {
             name: "walls",
             buffers: &[Buffer::vertices("walls", 0, Short4)],
@@ -342,19 +315,17 @@ mod tests {
             sources: Sources::NONE,
         };
         let functions = "void helper(int walls) {}\n\
-                         float4 vertex main(uint id [[vertex_id]]) {\n    return walls[drawIndex] + view.x + second.sample(first_sampler, 0);\n}\n\
-                         half4 fragment other(int view) { return walls; }";
-        let with = with_parameters(functions, "main", &PROGRAM);
+                         float4 vertex main(uint id [[vertex_id]]) {\n    return walls[drawIndex] + view.x;\n}\n\
+                         half4 fragment other(int view) {\n    return walls + second.sample(first_sampler, 0);\n}";
+        let with = with_parameters(functions, "main", &PROGRAM, Stage::Vertex);
+        let with = with_parameters(&with, "other", &PROGRAM, Stage::Fragment);
         assert_eq!(
             with,
-            format!(
-                "void helper(int walls) {{}}\nfloat4 vertex main(uint id [[vertex_id]],\n    {DRAW_INDEX_PARAMETER},\n    {},\n    {},\n    \
-                 sampler first_sampler [[sampler(0)]],\n    texture2d<float, access::sample> second [[texture(1)]]) \
-                 {{\n    return walls[drawIndex] + view.x + second.sample(first_sampler, 0);\n}}\n\
-                 half4 fragment other(int view) {{ return walls; }}",
-                parameter(&VIEW_BUFFER),
-                parameter(&PROGRAM.buffers[0])
-            )
+            "void helper(int walls) {}\nfloat4 vertex main(uint id [[vertex_id]],\n    \
+             device const uint32_t& drawIndex [[buffer(1)]],\n    device const ViewUBO& view [[buffer(0)]],\n    \
+             device const short4* walls [[buffer(7)]]) {\n    return walls[drawIndex] + view.x;\n}\n\
+             half4 fragment other(int view,\n    sampler first_sampler [[sampler(0)]],\n    \
+             texture2d<float, access::sample> second [[texture(1)]]) {\n    return walls + second.sample(first_sampler, 0);\n}"
         );
     }
 }

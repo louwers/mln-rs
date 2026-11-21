@@ -23,18 +23,17 @@ use crate::shaders::source::{Named, Stage, expand as expand_properties, per_vert
 /// The GLSL of a program.
 ///
 /// A stage compiles from the structs of the engine's blocks, `mln_glsl`'s
-/// prelude of the stage, which declares the view's block, the declarations
-/// of the engine's buffers that `prelude` or the stage names (`drawIndex`,
-/// the draw's index into its layer's storage buffers, and the projection
-/// blocks), the structs of the program's blocks, the
-/// declarations of the program's buffers that `prelude` or the stage names,
-/// `prelude` and the stage's source. A buffer's declaration is a block
+/// prelude of the stage, the structs of the program's blocks, the
+/// declarations of what `prelude` or the stage names of what the stage may
+/// read ([`Program::bindings`](crate::shaders::program::Program::bindings)),
+/// `prelude` and the stage's source. `drawIndex`, the draw's index into its
+/// layer's storage buffers, is a push constant. A buffer's declaration is a block
 /// without an instance name, at the set and binding of its id and kind in
 /// `mln_glsl`'s layout, whose one member has the buffer's
 /// [`name`](crate::shaders::program::Buffer::name): the buffer's block, or
 /// an array of the elements, or of the vertices' 32-bit words, of a storage
-/// buffer. The declarations also have the program's textures and their
-/// samplers that `prelude` or the stage names, by their names, a
+/// buffer. A fragment stage's declarations also have the program's textures
+/// and their samplers, by their names, a
 /// `texture2D` and a `sampler` at the bindings of the texture's slot in the
 /// layout's image set, which a stage combines where it samples:
 /// `texture(sampler2D(image, image_sampler), uv)`.

@@ -1,6 +1,7 @@
 //! A program: what its shaders bind and read, the same on every backend,
 //! and its sources in each shading language.
 
+use std::borrow::Cow;
 use std::hash::{Hash, Hasher};
 use std::{fmt, ptr};
 
@@ -13,7 +14,7 @@ use crate::shaders::bindings::{
 };
 use crate::shaders::block::{Block, UniformBlock};
 use crate::shaders::layer_ubo::{ProjectionUBO, ViewUBO};
-use crate::shaders::source::{glsl, glsl_es, msl, wgsl};
+use crate::shaders::source::{Stage, glsl, glsl_es, msl, wgsl};
 
 /// A program: the buffers, vertex attributes and textures its shaders bind,
 /// the paint properties a variant may read from a uniform, and its sources.
@@ -23,16 +24,14 @@ use crate::shaders::source::{glsl, glsl_es, msl, wgsl};
 /// source in the backend's shading language and binds what a draw gives it
 /// where this declaration says:
 ///
-/// - A buffer at the binding of its id, which a stage that names it
-///   declares, as the backend writes it from the [`Buffer`]: a source
-///   declares no buffer itself. The engine reserves the view's block at 0
-///   ([`VIEW_BUFFER`]), the draw's index into the storage buffers it reads
-///   at 1, which the backend binds itself, and the projection block at 4,
-///   an element per draw ([`PROJECTION_BUFFER`]) or a draw's own
-///   ([`DRAW_PROJECTION_BUFFER`]); any program may read them, and lists
-///   none of them in [`buffers`](Program::buffers). A program's own buffers
-///   take the ids that [`Buffer`]'s constructors give them, which the
-///   Vulkan and D3D12 backends' one pipeline layout has places for.
+/// - A buffer at the binding of its id, which a stage that may read it and
+///   names it declares ([`bindings`](Program::bindings)), as the backend
+///   writes it from the [`Buffer`]: a source declares no buffer itself.
+///   The engine's buffers ([`ENGINE_BUFFERS`]) and the draw's index into
+///   the storage buffers it reads ([`DRAW_INDEX`]), which the backend binds
+///   itself, are any program's to read, and it lists none of them in
+///   [`buffers`](Program::buffers). A program's own buffers take the ids
+///   that [`Buffer`]'s constructors give them.
 /// - A vertex attribute at the shader location of its index in
 ///   [`attributes`](Program::attributes), and an instance attribute at the
 ///   location after the vertex attributes' of its index in
@@ -40,8 +39,9 @@ use crate::shaders::source::{glsl, glsl_es, msl, wgsl};
 ///   attribute by its [`id`](Attribute::id).
 /// - A texture and its sampler at the slot of its index in
 ///   [`textures`](Program::textures), which a draw names it by, and which
-///   a stage that names them declares, as the backend writes them from the
-///   [`Texture`]: a source declares no texture itself.
+///   a fragment stage that names them declares, as the backend writes them
+///   from the [`Texture`]: a source declares no texture itself, and a
+///   vertex stage samples none.
 ///
 /// A program has at most [`MAX_ATTRIBUTES`] attributes and [`MAX_TEXTURES`]
 /// textures.
@@ -70,20 +70,21 @@ pub struct Program {
 
 /// A buffer a program reads, by its name in the program's shaders.
 ///
-/// A program's buffers take the ids that the constructors give them:
+/// A program's buffers take the ids that the constructors give them, and
+/// the stages that may read them:
 ///
-/// - a layer's uniform blocks, which all its draws share, the ids of their
-///   slots ([`uniform`](Buffer::uniform));
+/// - a uniform block, the id of its slot, which both stages may read
+///   ([`uniform`](Buffer::uniform));
 /// - the values of each draw, in a storage buffer of an element per draw
-///   ([`storage`](Buffer::storage)) or in a uniform block that each draw binds
-///   one of its own for ([`draw_uniform`](Buffer::draw_uniform)), the id of
-///   the [`Stages`] that read them;
-/// - the vertex buffers that the vertex stage reads as storage buffers, the
-///   ids of their slots ([`vertices`](Buffer::vertices)).
+///   ([`storage`](Buffer::storage)) or in a uniform block of the draw's own
+///   ([`draw_uniform`](Buffer::draw_uniform)), the id of the [`Stages`]
+///   that may read them;
+/// - a vertex buffer that the vertex stage reads as a storage buffer, the
+///   id of its slot ([`vertices`](Buffer::vertices)).
 ///
-/// [`Program::check`] fails for a program with two buffers at one id, as a
-/// uniform block at slot 0 and the values of each draw that both stages
-/// read.
+/// A stage that names a buffer it may not read has no declaration of it,
+/// and fails to compile. [`Program::check`] fails for a program with two
+/// buffers at one id.
 #[derive(Clone, Copy, Debug)]
 pub struct Buffer {
     /// The id a draw binds it by.
@@ -98,10 +99,12 @@ pub struct Buffer {
 /// How a program reads a [`Buffer`].
 #[derive(Clone, Copy, Debug)]
 pub enum BufferKind {
-    /// One block, which all the draws of a layer share.
+    /// One block at a uniform slot's id.
     Uniform(&'static Block),
-    /// One block of a draw's own values, which each draw binds a buffer of
-    /// its own for.
+    /// One block of a draw's values, at the id of the [`Stages`] that may
+    /// read it. It differs from a [`Uniform`](BufferKind::Uniform) only in
+    /// the descriptor set its GLSL declares it in, a draw's own rather than
+    /// a layer's, and the Vulkan and D3D12 backends bind either by its id.
     DrawUniform(&'static Block),
     /// An array of elements `stride` bytes apart, each read as `block`
     /// padded to the stride, which a shader indexes: by its draw's
@@ -117,12 +120,18 @@ pub enum BufferKind {
     /// ([`Caps::binds_vertex_buffers`](crate::gpu::Caps::binds_vertex_buffers)):
     /// in MSL as an array of the vertices, in WGSL and GLSL as one of 32-bit
     /// words, floats for a format of floats, and otherwise integers that
-    /// hold two 16-bit or four 8-bit values each.
+    /// hold two 16-bit or four 8-bit values each. Its format is one that
+    /// every language reads whole words of a vertex of: 1, 2 or 4 `Float`s,
+    /// `Int`s or `UInt`s, 2 or 4 `Short`s or `UShort`s, or 4 `Byte`s or
+    /// `UByte`s.
     Vertices { format: AttributeDataType },
 }
 
-/// The stages of a program that read a buffer of each draw's values, which
-/// give the buffer its id.
+/// The stages of a program that may read a buffer of each draw's values,
+/// which give the buffer its id. A program has one such buffer for each,
+/// and the buffer that both stages may read takes the id of uniform slot 0
+/// ([`Buffer::uniform`]), so a program with one has its uniform block at
+/// slot 1.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stages {
     /// Only the vertex stage.
@@ -134,7 +143,7 @@ pub enum Stages {
 }
 
 impl Stages {
-    /// The id of a buffer of each draw's values that these stages read.
+    /// The id of a buffer of each draw's values that these stages may read.
     #[must_use]
     pub const fn id(self) -> usize {
         match self {
@@ -142,6 +151,14 @@ impl Stages {
             Stages::Fragment => FRAGMENT_STORAGE_ID,
             Stages::Both => FIRST_UNIFORM_ID,
         }
+    }
+
+    /// Whether these stages are `stage` or include it.
+    const fn include(self, stage: Stage) -> bool {
+        matches!(
+            (self, stage),
+            (Stages::Both, _) | (Stages::Vertex, Stage::Vertex) | (Stages::Fragment, Stage::Fragment)
+        )
     }
 }
 
@@ -209,6 +226,20 @@ impl Buffer {
             BufferKind::Vertices { format } => format.stride(),
         }
     }
+
+    /// The stages that may read it, as [`Buffer`] says: both for an
+    /// engine's buffer.
+    const fn stages(&self) -> Stages {
+        match self.kind {
+            BufferKind::Uniform(_) => Stages::Both,
+            BufferKind::DrawUniform(_) | BufferKind::Storage { .. } => match self.id {
+                VERTEX_STORAGE_ID => Stages::Vertex,
+                FRAGMENT_STORAGE_ID => Stages::Fragment,
+                _ => Stages::Both,
+            },
+            BufferKind::Vertices { .. } => Stages::Vertex,
+        }
+    }
 }
 
 /// How many uniform blocks that all of a layer's draws share a program can
@@ -231,10 +262,42 @@ pub const PROJECTION_BUFFER: Buffer = Buffer {
 pub const DRAW_PROJECTION_BUFFER: Buffer =
     Buffer { id: PROJECTION_BUFFER_ID, name: "drawProjection", kind: BufferKind::DrawUniform(ProjectionUBO::BLOCK) };
 
-/// The engine's blocks, which a program may read without listing them: the
-/// view's block and the projection block, of which a stage reads
+/// The engine's buffers, which any program's stages may read without the
+/// program listing them: the view's block, and the projection block as
 /// [`PROJECTION_BUFFER`] or [`DRAW_PROJECTION_BUFFER`].
-pub static ENGINE_BUFFERS: [Buffer; 2] = [VIEW_BUFFER, PROJECTION_BUFFER];
+pub static ENGINE_BUFFERS: [Buffer; 3] = [VIEW_BUFFER, PROJECTION_BUFFER, DRAW_PROJECTION_BUFFER];
+
+/// The name a stage reads the draw's index into the storage buffers it
+/// reads by, the draw's [`global_index`](crate::gpu::Draw::global_index),
+/// which the backend binds.
+pub const DRAW_INDEX: &str = "drawIndex";
+
+/// What a stage of a program may read, which a backend declares for a stage
+/// that names it ([`Program::bindings`]).
+#[derive(Clone, Copy, Debug)]
+pub enum Binding<'a> {
+    /// The draw's index, [`DRAW_INDEX`].
+    DrawIndex,
+    /// One of the engine's buffers or the program's.
+    Buffer(&'a Buffer),
+    /// The texture at a slot of the program's textures.
+    Texture(usize, &'a Texture),
+    /// The sampler of the texture at a slot of the program's textures.
+    Sampler(usize, &'a Texture),
+}
+
+impl Binding<'_> {
+    /// The name a stage reads it by.
+    #[must_use]
+    pub fn name(&self) -> Cow<'static, str> {
+        match *self {
+            Binding::DrawIndex => Cow::Borrowed(DRAW_INDEX),
+            Binding::Buffer(buffer) => Cow::Borrowed(buffer.name),
+            Binding::Texture(_, texture) => Cow::Borrowed(texture.name),
+            Binding::Sampler(_, texture) => Cow::Owned(texture.sampler_name()),
+        }
+    }
+}
 
 /// A vertex or instance attribute of a program.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -248,10 +311,11 @@ pub struct Attribute {
 
 /// A texture a program samples, by its name in the program's shaders.
 ///
-/// A stage reads the texture as `<name>` and the sampler that a draw binds
-/// with it as `<name>_sampler`, in WGSL, MSL and GLSL; a stage may sample a
-/// texture with another texture's sampler. GLSL ES reads both as the
-/// combined sampler `u_<name>`.
+/// A fragment stage reads the texture as `<name>` and the sampler that a
+/// draw binds with it as `<name>_sampler`, in WGSL, MSL and GLSL; it may
+/// sample a texture with another texture's sampler. GLSL ES reads both as
+/// the combined sampler `u_<name>`. A vertex stage samples no texture: the Vulkan and D3D12
+/// backends' layout has textures for the fragment stage only.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Texture {
     /// The name its shaders read it by.
@@ -451,12 +515,13 @@ impl Program {
     /// Checks the rules this declaration's doc states, which a backend checks
     /// before it compiles the program: distinct attribute ids within each
     /// step, buffers at ids of their kinds, as [`Buffer`]'s constructors
-    /// give them, each id and each name once, and no more attributes and
-    /// textures than a program can have, and each texture's name once among
-    /// the textures' and the buffers'. Also that the GLSL ES names of the
-    /// members of the view's block, the projection block and the program's
-    /// blocks, and of the textures, are distinct, since GLSL ES has them in
-    /// one scope.
+    /// give them, each id once, vertex buffers of the formats
+    /// [`BufferKind::Vertices`] names, no more attributes and textures than
+    /// a program can have, and distinct names of the buffers, the textures
+    /// and their samplers, none of them a name of the engine's buffers or
+    /// [`DRAW_INDEX`]. Also that the GLSL ES names of the members of the
+    /// engine's blocks and the program's, and of the textures, are distinct,
+    /// since GLSL ES has them in one scope.
     ///
     /// # Errors
     ///
@@ -489,45 +554,106 @@ impl Program {
             if !fits {
                 return invalid(format!("buffer {} has the id {}, which its kind can't have", buffer.name, buffer.id));
             }
-            if let BufferKind::Vertices { format: format @ (AttributeDataType::UShort8 | AttributeDataType::Invalid) } =
-                buffer.kind
+            if let BufferKind::Vertices { format } = buffer.kind
+                && !reads_whole_words(format)
             {
-                return invalid(format!("buffer {} has vertices of {format:?}, which no language reads", buffer.name));
+                return invalid(format!(
+                    "buffer {} has vertices of {format:?}, which not every language reads",
+                    buffer.name
+                ));
             }
             if let Some(earlier) = self.buffers[..index].iter().find(|earlier| earlier.id == buffer.id) {
+                let slot_0 = |buffer: &Buffer| matches!(buffer.kind, BufferKind::Uniform(_));
+                if slot_0(earlier) || slot_0(buffer) {
+                    return invalid(format!(
+                        "buffers {} and {} have the id {}: uniform slot 0 has the id of the buffer of each draw's \
+                         values that both stages read, so take slot 1",
+                        earlier.name, buffer.name, buffer.id
+                    ));
+                }
                 return invalid(format!("buffers {} and {} have the id {}", earlier.name, buffer.name, buffer.id));
             }
-            if self.buffers[..index].iter().any(|earlier| earlier.name == buffer.name) {
-                return invalid(format!("two buffers are named {}", buffer.name));
+        }
+        let mut names: Vec<Cow<'_, str>> = ENGINE_BUFFERS.iter().map(|buffer| Cow::Borrowed(buffer.name)).collect();
+        names.push(Cow::Borrowed(DRAW_INDEX));
+        names.extend(self.buffers.iter().map(|buffer| Cow::Borrowed(buffer.name)));
+        for (slot, texture) in self.textures.iter().enumerate() {
+            names.extend([Binding::Texture(slot, texture).name(), Binding::Sampler(slot, texture).name()]);
+        }
+        if let Some(name) = repeated(names) {
+            return invalid(format!("two buffers, textures, samplers or the engine's bindings are named {name}"));
+        }
+        // The engine's projection buffers are one block.
+        let mut blocks: Vec<&Block> = Vec::new();
+        for block in ENGINE_BUFFERS.iter().filter_map(Buffer::block) {
+            if !blocks.iter().any(|earlier| earlier.name == block.name) {
+                blocks.push(block);
             }
         }
-        for (index, texture) in self.textures.iter().enumerate() {
-            let earlier = self.textures[..index].iter().map(|texture| texture.name);
-            if earlier.chain(self.buffers.iter().map(|buffer| buffer.name)).any(|name| name == texture.name) {
-                return invalid(format!("two textures or buffers are named {}", texture.name));
-            }
-        }
-        let blocks = || ENGINE_BUFFERS.iter().chain(self.buffers).filter_map(Buffer::block);
-        let mut names: Vec<String> =
-            blocks().flat_map(|block| block.members.iter().map(|member| glsl_es::member_name(block, member))).collect();
+        blocks.extend(self.buffers.iter().filter_map(Buffer::block));
+        let mut names: Vec<String> = blocks
+            .iter()
+            .flat_map(|block| block.members.iter().map(|member| glsl_es::member_name(block, member)))
+            .collect();
         names.extend(self.textures.iter().map(glsl_es::texture_name));
-        names.sort_unstable();
-        let repeated = names.windows(2).find_map(|pair| match pair {
-            [name, next] if name == next => Some(name),
-            _ => None,
-        });
-        if let Some(name) = repeated {
+        if let Some(name) = repeated(names) {
             return invalid(format!("two block members or textures are {name} in GLSL ES"));
         }
         Ok(())
     }
 
+    /// What `stage` may read, in the order a backend declares it in for a
+    /// stage that names it: the draw's index, the engine's buffers, the
+    /// program's buffers that the stage may read, as [`Buffer`] says, and in
+    /// a fragment stage the program's textures, each followed by its
+    /// sampler.
+    pub fn bindings(&self, stage: Stage) -> impl Iterator<Item = Binding<'_>> {
+        let buffers = ENGINE_BUFFERS.iter().chain(self.buffers).filter(move |buffer| buffer.stages().include(stage));
+        let textures = self.textures.iter().enumerate().filter(move |_| stage == Stage::Fragment);
+        std::iter::once(Binding::DrawIndex).chain(buffers.map(Binding::Buffer)).chain(
+            textures.flat_map(|(slot, texture)| [Binding::Texture(slot, texture), Binding::Sampler(slot, texture)]),
+        )
+    }
+
     /// The buffer whose block is `name`: one of the program's, or the
-    /// view's or the projection block.
+    /// engine's, of which [`PROJECTION_BUFFER`] for the projection block.
     #[must_use]
     pub fn buffer_named(&self, name: &str) -> Option<&'static Buffer> {
         self.buffers.iter().chain(&ENGINE_BUFFERS).find(|buffer| buffer.block().is_some_and(|block| block.name == name))
     }
+}
+
+/// Whether every language reads vertices of `format` from a storage buffer
+/// as whole words: the formats of [`BufferKind::Vertices`].
+const fn reads_whole_words(format: AttributeDataType) -> bool {
+    use AttributeDataType::{
+        Byte4, Float, Float2, Float4, Int, Int2, Int4, Short2, Short4, UByte4, UInt, UInt2, UInt4, UShort2, UShort4,
+    };
+    matches!(
+        format,
+        Float
+            | Float2
+            | Float4
+            | Int
+            | Int2
+            | Int4
+            | UInt
+            | UInt2
+            | UInt4
+            | Short2
+            | Short4
+            | UShort2
+            | UShort4
+            | Byte4
+            | UByte4
+    )
+}
+
+/// A name that `names` has twice, if any.
+fn repeated<T: Ord>(mut names: Vec<T>) -> Option<T> {
+    names.sort_unstable();
+    let at = names.windows(2).position(|pair| pair[0] == pair[1])?;
+    Some(names.swap_remove(at))
 }
 
 impl PartialEq for Program {
@@ -553,7 +679,7 @@ impl fmt::Debug for Program {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gfx_types::AttributeDataType::Short2;
+    use crate::gfx_types::AttributeDataType::{Float3, Short2};
 
     static EMPTY: Program = Program {
         name: "empty",
@@ -594,6 +720,40 @@ mod tests {
         });
         // The view's members again, in one GLSL ES scope with the view's.
         fails(Program { buffers: const { &[Buffer::uniform::<ViewUBO>("props", 0)] }, ..EMPTY });
+        // Vertices that MSL reads 16 bytes apart, and WGSL and GLSL 12.
+        fails(Program { buffers: const { &[Buffer::vertices("vertices", 0, Float3)] }, ..EMPTY });
+        // The names of the engine's bindings, and a sampler's name again.
+        fails(Program { buffers: const { &[Buffer::vertices("view", 0, Short2)] }, ..EMPTY });
+        fails(Program { textures: const { &[Texture::new("drawIndex")] }, ..EMPTY });
+        fails(Program {
+            buffers: const { &[Buffer::vertices("image_sampler", 0, Short2)] },
+            textures: const { &[Texture::new("image")] },
+            ..EMPTY
+        });
+    }
+
+    #[test]
+    fn a_stage_may_read_what_its_declaration_says() {
+        static PROGRAM: Program = Program {
+            buffers: const {
+                &[
+                    Buffer::storage::<ViewUBO>("vertexOnly", Stages::Vertex),
+                    Buffer::draw_uniform::<ViewUBO>("fragmentOnly", Stages::Fragment),
+                    Buffer::storage::<ViewUBO>("both", Stages::Both),
+                    Buffer::uniform::<ViewUBO>("props", 1),
+                    Buffer::vertices("vertices", 0, Short2),
+                ]
+            },
+            textures: const { &[Texture::new("image")] },
+            ..EMPTY
+        };
+        let names = |stage| PROGRAM.bindings(stage).map(|binding| binding.name().into_owned()).collect::<Vec<_>>();
+        let engine = ["drawIndex", "view", "projectionVector", "drawProjection"];
+        assert_eq!(names(Stage::Vertex), [&engine[..], &["vertexOnly", "both", "props", "vertices"]].concat());
+        assert_eq!(
+            names(Stage::Fragment),
+            [&engine[..], &["fragmentOnly", "both", "props", "image", "image_sampler"]].concat()
+        );
     }
 
     #[test]

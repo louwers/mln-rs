@@ -2,7 +2,10 @@
 //! the buffers and textures that a stage reads.
 
 use mln_gfx::gfx_types::AttributeDataType;
-use mln_gfx::shaders::program::{Buffer, BufferKind, DRAW_PROJECTION_BUFFER, PROJECTION_BUFFER, Texture, VIEW_BUFFER};
+use mln_gfx::shaders::bindings::DRAW_INDEX_ID;
+use mln_gfx::shaders::program::{Binding, BufferKind};
+
+use crate::shaders::shader_program::BindingType;
 
 /// The WGSL every program compiles after.
 pub(crate) const PRELUDE: &str = r"
@@ -178,58 +181,65 @@ fn projectTileFor3D(pos: vec2<f32>, elevation: f32, projection: ProjectionUBO) -
 
 ";
 
-/// The declaration of the draw's index into the storage buffers it reads,
-/// which a stage reads as `drawIndex`.
-pub(crate) const GLOBAL_INDEX_DECLARATION: &str = "@group(0) @binding(1) var<uniform> drawIndex: u32;";
+/// The group of a program's buffers.
+pub(crate) const BUFFER_GROUP: u32 = 0;
 
-/// The engine's buffers that a stage may read without declaring them,
-/// besides `drawIndex`: the view's block and the projection blocks.
-pub(crate) const ENGINE_BINDINGS: [Buffer; 3] = [VIEW_BUFFER, PROJECTION_BUFFER, DRAW_PROJECTION_BUFFER];
-
-/// The declaration of `buffer` at the binding of its id in group 0, by its
-/// name: a block as a uniform, and an array of the elements or the vertex
-/// words of a storage buffer.
-pub(crate) fn declaration(buffer: &Buffer) -> String {
-    let (space, ty) = match buffer.kind {
-        BufferKind::Uniform(block) | BufferKind::DrawUniform(block) => ("uniform", block.name.to_owned()),
-        BufferKind::Storage { block, .. } => ("storage, read", format!("array<{}>", block.name)),
-        BufferKind::Vertices { format } => ("storage, read", format!("array<{}>", word(format))),
-    };
-    format!("@group(0) @binding({}) var<{space}> {}: {ty};", buffer.id, buffer.name)
-}
-
-/// The group that textures and their samplers bind in.
+/// The group of a program's textures and their samplers.
 pub(crate) const TEXTURE_GROUP: u32 = 1;
 
-/// The binding in [`TEXTURE_GROUP`] of the texture at slot `slot`, and of
-/// its sampler, at the binding before it.
-pub(crate) const fn texture_bindings(slot: usize) -> [u32; 2] {
-    let sampler = 2 * slot as u32;
-    [sampler + 1, sampler]
+/// The group and the binding of `binding`: of a buffer its id in
+/// [`BUFFER_GROUP`], of the draw's index [`DRAW_INDEX_ID`] in
+/// `index_group`, and in [`TEXTURE_GROUP`] of the sampler of the texture at
+/// slot `slot` twice the slot, and of the texture the binding after it.
+pub(crate) fn location(binding: &Binding<'_>, index_group: u32) -> (u32, u32) {
+    match *binding {
+        Binding::DrawIndex => (index_group, DRAW_INDEX_ID as u32),
+        Binding::Buffer(buffer) => (BUFFER_GROUP, buffer.id as u32),
+        Binding::Texture(slot, _) => (TEXTURE_GROUP, 2 * slot as u32 + 1),
+        Binding::Sampler(slot, _) => (TEXTURE_GROUP, 2 * slot as u32),
+    }
 }
 
-/// The texture slot of `binding` in [`TEXTURE_GROUP`], and whether it is
-/// the sampler's binding: the inverse of [`texture_bindings`].
-pub(crate) const fn texture_slot(binding: u32) -> (usize, bool) {
-    ((binding / 2) as usize, binding.is_multiple_of(2))
+/// How a bind group layout binds `binding`.
+pub(crate) fn binding_type(binding: &Binding<'_>) -> BindingType {
+    match *binding {
+        Binding::DrawIndex => BindingType::UniformBuffer,
+        Binding::Buffer(buffer) => match buffer.kind {
+            BufferKind::Uniform(_) | BufferKind::DrawUniform(_) => BindingType::UniformBuffer,
+            BufferKind::Storage { .. } | BufferKind::Vertices { .. } => BindingType::ReadOnlyStorageBuffer,
+        },
+        Binding::Texture(_, texture) if texture.filterable => BindingType::Texture,
+        Binding::Texture(..) => BindingType::UnfilterableTexture,
+        Binding::Sampler(_, texture) if texture.filterable => BindingType::Sampler,
+        Binding::Sampler(..) => BindingType::NonFilteringSampler,
+    }
 }
 
-/// The declarations of `texture`, at slot `slot`, and of its sampler, by
-/// their names.
-pub(crate) fn texture_declarations(slot: usize, texture: &Texture) -> [String; 2] {
-    let [texture_binding, sampler_binding] = texture_bindings(slot);
-    [
-        format!("@group({TEXTURE_GROUP}) @binding({texture_binding}) var {}: texture_2d<f32>;", texture.name),
-        format!("@group({TEXTURE_GROUP}) @binding({sampler_binding}) var {}: sampler;", texture.sampler_name()),
-    ]
+/// The declaration of `binding` at its [`location`], by its name: the
+/// draw's index as a `u32` uniform, a block as a uniform, an array of the
+/// elements or the vertex words of a storage buffer, and a `texture_2d<f32>`
+/// and a `sampler`.
+pub(crate) fn declaration(binding: &Binding<'_>, index_group: u32) -> String {
+    let (group, at) = location(binding, index_group);
+    let (space, ty) = match *binding {
+        Binding::DrawIndex => ("<uniform>", "u32".to_owned()),
+        Binding::Buffer(buffer) => match buffer.kind {
+            BufferKind::Uniform(block) | BufferKind::DrawUniform(block) => ("<uniform>", block.name.to_owned()),
+            BufferKind::Storage { block, .. } => ("<storage, read>", format!("array<{}>", block.name)),
+            BufferKind::Vertices { format } => ("<storage, read>", format!("array<{}>", word(format))),
+        },
+        Binding::Texture(..) => ("", "texture_2d<f32>".to_owned()),
+        Binding::Sampler(..) => ("", "sampler".to_owned()),
+    };
+    format!("@group({group}) @binding({at}) var{space} {}: {ty};", binding.name())
 }
 
 /// The 32-bit words that a stage reads vertices of `format` as.
 fn word(format: AttributeDataType) -> &'static str {
-    use AttributeDataType::{Float, Float2, Float3, Float4, Int, Int2, Int3, Int4};
+    use AttributeDataType::{Float, Float2, Float4, Int, Int2, Int4};
     match format {
-        Float | Float2 | Float3 | Float4 => "f32",
-        Int | Int2 | Int3 | Int4 => "i32",
+        Float | Float2 | Float4 => "f32",
+        Int | Int2 | Int4 => "i32",
         _ => "u32",
     }
 }

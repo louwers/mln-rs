@@ -117,12 +117,21 @@ impl<'a> Named<'a> {
 }
 
 /// The declarations that `declaration` writes of the blocks of `buffers`,
-/// each of a storage buffer's element padded to its stride.
+/// each once, of the first buffer of it: of a storage buffer's element
+/// padded to its stride.
 pub(crate) fn blocks<'a>(
     buffers: impl IntoIterator<Item = &'a Buffer>,
     declaration: impl Fn(&Block, usize) -> String,
 ) -> String {
-    buffers.into_iter().filter_map(|buffer| Some(declaration(buffer.block()?, buffer.size()))).collect()
+    let mut written: Vec<&str> = Vec::new();
+    let mut text = String::new();
+    for buffer in buffers {
+        if let Some(block) = buffer.block().filter(|block| !written.contains(&block.name)) {
+            written.push(block.name);
+            text += &declaration(block, buffer.size());
+        }
+    }
+    text
 }
 
 /// `text` between `#ifndef HAS_UNIFORM_u_<name>` and `#endif`, for the

@@ -12,22 +12,21 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::shaders::bindings::{
-    FIRST_PROGRAM_BUFFER_ID, FIRST_UNIFORM_ID, FIRST_VERTEX_BUFFER_ID, FRAGMENT_STORAGE_ID, MAX_TEXTURES,
-    PROJECTION_BUFFER_ID, VERTEX_STORAGE_ID, VIEW_BUFFER_ID,
+    FIRST_UNIFORM_ID, FIRST_VERTEX_BUFFER_ID, FRAGMENT_STORAGE_ID, MAX_TEXTURES, PROJECTION_BUFFER_ID,
+    VERTEX_STORAGE_ID, VIEW_BUFFER_ID,
 };
-use mln_gfx::shaders::program::{
-    Attribute, Buffer as ProgramBuffer, BufferKind, PROJECTION_BUFFER, Program, VIEW_BUFFER,
-};
+use mln_gfx::shaders::program::{Attribute, Buffer as ProgramBuffer, BufferKind, ENGINE_BUFFERS, Program};
 use mln_gfx::shaders::source::glsl::{self, Glsl};
 use naga::{AddressSpace, ArraySize, Binding, Interpolation, Module, ScalarKind, StorageAccess, TypeInner};
 
 use crate::front_end::parse;
 use crate::layout::{
-    DRAWABLE_UNIFORM_COUNT, DRAWABLE_VERTEX_COUNT, DescriptorSetType, GLOBAL_UNIFORM_COUNT, IMAGE_SAMPLER_START,
-    IMAGE_TEXTURE_COUNT, LAYER_STORAGE_COUNT, LAYER_UNIFORM_COUNT, DRAW_INDEX_PUSH_CONSTANT_SIZE,
+    DRAW_INDEX_PUSH_CONSTANT_SIZE, DRAWABLE_UNIFORM_COUNT, DRAWABLE_VERTEX_COUNT, DescriptorSetType,
+    GLOBAL_UNIFORM_COUNT, IMAGE_SAMPLER_START, IMAGE_TEXTURE_COUNT, LAYER_STORAGE_COUNT, LAYER_UNIFORM_COUNT,
     drawable_uniform_binding, drawable_vertex_binding, global_uniform_binding, image_sampler_binding,
     image_texture_binding, layer_storage_binding, layer_uniform_binding,
 };
+use crate::program::declaration;
 use crate::variants::variants;
 use crate::{Stage, compose, sources};
 
@@ -88,23 +87,12 @@ fn every_stage_validates() {
     });
 }
 
-/// The id of the buffer at `binding` of `set`: the inverse of the layout's
-/// `*_binding` functions.
-fn buffer_id(set: u32, binding: u32) -> Option<usize> {
-    let binding = binding as usize;
-    match DescriptorSetType::ALL.get(set as usize)? {
-        DescriptorSetType::Global => Some(binding),
-        DescriptorSetType::Layer if binding < LAYER_STORAGE_COUNT => Some(binding + FIRST_PROGRAM_BUFFER_ID),
-        DescriptorSetType::Layer => Some(binding - LAYER_STORAGE_COUNT + FIRST_UNIFORM_ID),
-        DescriptorSetType::DrawableUniform => Some(binding + FIRST_PROGRAM_BUFFER_ID),
-        DescriptorSetType::DrawableImage => None,
-    }
-}
-
-/// The buffer of `program` with `id`: one of its own, or the frame's or the
-/// projection block.
-fn program_buffer(program: &Program, id: usize) -> Option<ProgramBuffer> {
-    program.buffers.iter().copied().chain([VIEW_BUFFER, PROJECTION_BUFFER]).find(|buffer| buffer.id == id)
+/// The buffer of `program`, one of its own or of the engine's, that
+/// `compose` declares at `binding` of `set`.
+fn program_buffer(program: &Program, set: u32, binding: u32) -> Option<ProgramBuffer> {
+    let at = format!("set = {set}, binding = {binding})");
+    let declared_at = |buffer: &&ProgramBuffer| declaration(buffer).is_ok_and(|text| text.contains(&at));
+    program.buffers.iter().chain(&ENGINE_BUFFERS).find(declared_at).copied()
 }
 
 /// A resource a module declares in a descriptor set.
@@ -279,7 +267,7 @@ fn buffers_are_the_programs() {
                         Resource::Uniform(size) | Resource::Storage(size) => size as usize,
                         Resource::Texture | Resource::Sampler => continue,
                     };
-                    let Some(buffer) = buffer_id(set, binding).and_then(|id| program_buffer(program, id)) else {
+                    let Some(buffer) = program_buffer(program, set, binding) else {
                         failures.push(format!("{at}: {resource:?} at set {set} binding {binding} is no buffer of it"));
                         continue;
                     };
@@ -289,11 +277,6 @@ fn buffers_are_the_programs() {
                         }
                         (BufferKind::Vertices { .. }, Resource::Storage(_)) => None,
                         (BufferKind::Storage { stride, .. }, Resource::Storage(_)) => Some(stride),
-                        (BufferKind::Storage { block, .. }, Resource::Uniform(_))
-                            if buffer.id == PROJECTION_BUFFER_ID =>
-                        {
-                            Some(block.size)
-                        }
                         _ => {
                             failures.push(format!("{at}: buffer {} is {resource:?}, not {:?}", buffer.id, buffer.kind));
                             continue;
@@ -447,7 +430,7 @@ fn stages_agree_on_what_passes_between_them() {
 // The bindings of the ids and texture slots in the shared pipeline layout,
 // which the preludes and `compose` declare the buffers and textures at.
 #[test]
-fn bindings_follow_from_the_packed_ids() {
+fn ids_bind_where_the_shared_layout_puts_them() {
     assert_eq!(global_uniform_binding(VIEW_BUFFER_ID), Some(0));
 
     // A layer's storage buffers, from binding 0.
@@ -516,11 +499,11 @@ fn no_source_declares_a_buffer_or_a_texture() {
 /// backend declares them, from their layouts.
 #[test]
 fn no_source_declares_a_block() {
-    let engine = [VIEW_BUFFER, PROJECTION_BUFFER];
+    let engine = &ENGINE_BUFFERS;
     let preludes = [sources::PRELUDE_VERTEX, sources::PRELUDE_FRAGMENT].concat();
     for (program, source) in programs() {
         let text = [&preludes, source.prelude, source.vertex, source.fragment].concat();
-        for block in program.buffers.iter().chain(&engine).filter_map(ProgramBuffer::block) {
+        for block in program.buffers.iter().chain(engine).filter_map(ProgramBuffer::block) {
             for declaration in [format!("struct {} {{", block.name), format!("uniform {} {{", block.name)] {
                 assert!(!text.contains(&declaration), "{} declares {}", program.name, block.name);
             }
@@ -532,14 +515,14 @@ fn no_source_declares_a_block() {
 /// as its Rust struct is laid out.
 #[test]
 fn every_block_has_its_layout() {
-    let engine = [VIEW_BUFFER, PROJECTION_BUFFER];
+    let engine = &ENGINE_BUFFERS;
     for (program, source) in programs() {
         let variant = &variants(program, false)[0];
         for stage in STAGES {
             let module = module(program, source, stage, &variant.defines);
             let mut layouter = naga::proc::Layouter::default();
             layouter.update(module.to_ctx()).expect("a layout");
-            for buffer in program.buffers.iter().chain(&engine) {
+            for buffer in program.buffers.iter().chain(engine) {
                 let Some(block) = buffer.block() else { continue };
                 let Some((handle, ty)) = module.types.iter().find(|(_, ty)| ty.name.as_deref() == Some(block.name))
                 else {
@@ -557,16 +540,15 @@ fn every_block_has_its_layout() {
     }
 }
 
-/// A buffer's declaration is at the set and binding of its id and kind: a
-/// layer's uniform block and a storage buffer in the layer set, a draw's
-/// own uniform block and a vertex buffer in the drawable set.
+/// A buffer's declaration is at the set and binding of its id and kind: the
+/// view's block in the global set, a layer's uniform block and a storage
+/// buffer in the layer set, a draw's own uniform block and a vertex buffer
+/// in the drawable set.
 #[test]
 fn a_buffers_declaration_is_at_its_ids_binding() {
     use mln_gfx::gfx_types::AttributeDataType::{Float, Short4};
     use mln_gfx::shaders::layer_ubo::ViewUBO;
-    use mln_gfx::shaders::program::{DRAW_PROJECTION_BUFFER, Stages};
-
-    use crate::program::declaration;
+    use mln_gfx::shaders::program::{DRAW_PROJECTION_BUFFER, PROJECTION_BUFFER, Stages, VIEW_BUFFER};
 
     let at = |buffer: &ProgramBuffer| {
         let text = declaration(buffer).expect("a declaration");
@@ -582,6 +564,7 @@ fn a_buffers_declaration_is_at_its_ids_binding() {
         "layout(std140, set = 2, binding = 3"
     );
     assert_eq!(at(&ProgramBuffer::vertices("wallVertices", 0, Short4)), "layout(std430, set = 2, binding = 5");
+    assert_eq!(at(&VIEW_BUFFER), "layout(std140, set = 0, binding = 0");
     assert_eq!(at(&PROJECTION_BUFFER), "layout(std140, set = 1, binding = 2");
     assert_eq!(at(&DRAW_PROJECTION_BUFFER), "layout(std140, set = 2, binding = 2");
     assert_eq!(

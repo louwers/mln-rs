@@ -507,7 +507,7 @@ fn shader_bindings(shader: &ShaderProgram) -> Result<Vec<ShaderBinding>, GpuErro
         }
         for info in shader.binding_infos(group) {
             let binding = match info.type_ {
-                BindingType::UniformBuffer | BindingType::ReadOnlyStorageBuffer | BindingType::StorageBuffer => {
+                BindingType::UniformBuffer | BindingType::ReadOnlyStorageBuffer => {
                     ShaderBinding::Buffer { id: info.binding, min_size: shader.buffer_size(group, info.binding) }
                 }
                 BindingType::Sampler
@@ -788,7 +788,7 @@ impl Gpu for WebGpu {
                     ))
                 };
                 let resource = match info.type_ {
-                    BindingType::UniformBuffer | BindingType::ReadOnlyStorageBuffer | BindingType::StorageBuffer => {
+                    BindingType::UniformBuffer | BindingType::ReadOnlyStorageBuffer => {
                         let (buffer, offset, size) = desc
                             .entries
                             .iter()

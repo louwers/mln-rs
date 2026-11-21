@@ -11,7 +11,7 @@ use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::gfx_types::DrawModeType;
 use mln_gfx::gpu::{DepthState, FixedState, StencilState, VertexAttribute, VertexBufferLayout, VertexStep};
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::program::{Buffer, PROJECTION_BUFFER, Program, ProgramParameters, VIEW_BUFFER};
+use mln_gfx::shaders::program::{Buffer, ENGINE_BUFFERS, Program, ProgramParameters};
 use mln_gfx::shaders::source::wgsl::{self, Wgsl};
 use mln_gfx::types::DepthFunctionType;
 
@@ -130,10 +130,10 @@ fn layouts(program: &Program) -> Vec<VertexBufferLayout> {
 /// backend declares them, from their layouts.
 #[test]
 fn no_source_declares_a_block() {
-    let engine = [VIEW_BUFFER, PROJECTION_BUFFER];
+    let engine = &ENGINE_BUFFERS;
     for (program, source) in programs() {
         let text = [PRELUDE, source.prelude, source.vertex, source.fragment].concat();
-        for block in program.buffers.iter().chain(&engine).filter_map(Buffer::block) {
+        for block in program.buffers.iter().chain(engine).filter_map(Buffer::block) {
             assert!(!text.contains(&format!("struct {} {{", block.name)), "{} declares {}", program.name, block.name);
         }
     }
@@ -157,15 +157,15 @@ fn every_block_has_its_layout() {
     use wgpu::naga;
 
     let parameters = ProgramParameters { pixel_ratio: 1.0, overdraw: false };
-    let engine = [VIEW_BUFFER, PROJECTION_BUFFER];
+    let engine = &ENGINE_BUFFERS;
     for (program, _) in programs() {
         for variant in [ProjectionVariant::Mercator, ProjectionVariant::Globe] {
             let key = program.variant_key(&parameters, program.properties, variant);
-            for stage in stage_sources(&key).expect("WGSL") {
+            for stage in stage_sources(&key).expect("WGSL").stages {
                 let module = naga::front::wgsl::parse_str(&stage).expect("WGSL that parses");
                 let mut layouter = naga::proc::Layouter::default();
                 layouter.update(module.to_ctx()).expect("a layout");
-                for buffer in program.buffers.iter().chain(&engine) {
+                for buffer in program.buffers.iter().chain(engine) {
                     let Some(block) = buffer.block() else { continue };
                     let (handle, ty) =
                         module.types.iter().find(|(_, ty)| ty.name.as_deref() == Some(block.name)).expect("the struct");

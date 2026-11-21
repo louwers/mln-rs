@@ -8,9 +8,9 @@ use std::borrow::Cow;
 use mln_gfx::color_mode::BlendFunction;
 use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
 use mln_gfx::gpu::{FixedState, GpuError, ShaderKey, VertexBufferLayout, VertexStep};
-use mln_gfx::shaders::program::{Buffer, Program};
-use mln_gfx::shaders::source::identifiers;
+use mln_gfx::shaders::program::{Binding, BufferKind, Program};
 use mln_gfx::shaders::source::wgsl::{self, Wgsl};
+use mln_gfx::shaders::source::{Stage, identifiers};
 use mln_gfx::types::{
     ColorBlendEquationType, ColorBlendFactorType, CullFaceSideType, CullFaceWindingType, DepthFunctionType,
     StencilFunctionType, StencilOpType,
@@ -19,15 +19,12 @@ use mln_util::hash::{HashMap, HashSet};
 use mln_vec_map::VecMap;
 
 use crate::shaders::wgsl_preprocessor::{is_space, preprocess_wgsl};
-use crate::shaders::wgsl_sources::{
-    ENGINE_BINDINGS, GLOBAL_INDEX_DECLARATION, PRELUDE, TEXTURE_GROUP, declaration, texture_declarations, texture_slot,
-};
+use crate::shaders::wgsl_sources::{BUFFER_GROUP, PRELUDE, TEXTURE_GROUP, binding_type, declaration, location};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum BindingType {
     UniformBuffer,
     ReadOnlyStorageBuffer,
-    StorageBuffer,
     Sampler,
     /// The sampler of an unfilterable texture.
     NonFilteringSampler,
@@ -252,7 +249,7 @@ pub(crate) fn vertex_format(type_: AttributeDataType) -> Option<wgpu::VertexForm
 }
 
 /// A WGSL program: its vertex and fragment modules, and its bind group
-/// layouts as its sources declare them.
+/// layouts of the bindings its stages declare.
 pub(crate) struct ShaderProgram {
     shader_name: String,
     device: wgpu::Device,
@@ -291,12 +288,8 @@ fn constants(source: &str, pixel_ratio: f32) -> Vec<(&'static str, f64)> {
 }
 
 impl ShaderProgram {
-    /// `program`, from `vertex_source` and `fragment_source`, its WGSL
-    /// preprocessed already.
-    ///
-    /// A `drawIndex` the sources declare in group 0 moves to a group of its
-    /// own, with layout `index_layout` (see
-    /// [`index_group`](Self::index_group)).
+    /// `program`, from `sources`, with layout `index_layout` for the group
+    /// of `drawIndex` (see [`index_group`](Self::index_group)).
     ///
     /// Its pipelines set the stages' `DEVICE_PIXEL_RATIO` override to
     /// `pixel_ratio`.
@@ -305,18 +298,13 @@ impl ShaderProgram {
     pub(crate) fn new(
         device: &wgpu::Device,
         index_layout: &wgpu::BindGroupLayout,
-        vertex_source: &str,
-        fragment_source: &str,
+        sources: StageSources,
         program: &'static Program,
         pixel_ratio: f32,
     ) -> Result<Self, GpuError> {
         let name = program.name;
-        let index_group = index_group_of(&[vertex_source, fragment_source]);
-        let (vertex_source, fragment_source) = match index_group {
-            Some(group) => (move_global_index(vertex_source, group), move_global_index(fragment_source, group)),
-            None => (Cow::Borrowed(vertex_source), Cow::Borrowed(fragment_source)),
-        };
-        let (vertex_source, fragment_source) = (vertex_source.as_ref(), fragment_source.as_ref());
+        let StageSources { stages: [vertex_source, fragment_source], bindings: binding_infos, index_group } = sources;
+        let (vertex_source, fragment_source) = (vertex_source.as_str(), fragment_source.as_str());
 
         let create_module = |stage: &str, source: &str| -> Result<wgpu::ShaderModule, GpuError> {
             if trim_string(source).is_empty() {
@@ -334,15 +322,6 @@ impl ShaderProgram {
         let vertex_shader_module = create_module("vertex", vertex_source)?;
         let fragment_shader_module = create_module("fragment", fragment_source)?;
 
-        let mut binding_infos = Vec::new();
-        analyze_shader_bindings(&mut binding_infos, vertex_source, wgpu::ShaderStages::VERTEX);
-        analyze_shader_bindings(&mut binding_infos, fragment_source, wgpu::ShaderStages::FRAGMENT);
-        for info in binding_infos.iter_mut().filter(|info| info.group == TEXTURE_GROUP) {
-            let (slot, sampler) = texture_slot(info.binding);
-            if program.textures.get(slot).is_some_and(|texture| !texture.filterable) {
-                info.type_ = if sampler { BindingType::NonFilteringSampler } else { BindingType::UnfilterableTexture };
-            }
-        }
         let groups = BindGroups::new(device, binding_infos, index_group, index_layout);
         let layouts: Vec<Option<&wgpu::BindGroupLayout>> = groups.layouts.iter().map(Some).collect();
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -390,11 +369,8 @@ impl ShaderProgram {
         &self.bind_group_order
     }
 
-    /// The group that holds only `drawIndex`, the index of the draw's
-    /// entries in the layer's UBO vectors, at binding `DRAW_INDEX_ID`.
-    /// Its layout is the index table's, and a draw binds it with the dynamic
-    /// offset of its index, so its other groups bind only what it shares
-    /// with the layer's other draws.
+    /// The group of `drawIndex`, if the stages read it
+    /// ([`StageSources::index_group`]).
     pub(crate) fn index_group(&self) -> Option<u32> {
         self.index_group
     }
@@ -404,9 +380,10 @@ impl ShaderProgram {
     }
 
     /// The slot of the program's texture whose texture or sampler the
-    /// shader declares at `binding` of the texture group.
+    /// shader declares at `binding` of the texture group, as
+    /// [`location`] places them.
     pub(crate) fn texture_at(&self, binding: u32) -> Option<usize> {
-        let (slot, _) = texture_slot(binding);
+        let slot = binding as usize / 2;
         (slot < self.program.textures.len()).then_some(slot)
     }
 
@@ -626,111 +603,11 @@ impl BindingType {
         match self {
             BindingType::UniformBuffer => buffer(wgpu::BufferBindingType::Uniform),
             BindingType::ReadOnlyStorageBuffer => buffer(wgpu::BufferBindingType::Storage { read_only: true }),
-            BindingType::StorageBuffer => buffer(wgpu::BufferBindingType::Storage { read_only: false }),
             BindingType::Sampler => wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
             BindingType::NonFilteringSampler => wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
             BindingType::Texture => texture(true),
             BindingType::UnfilterableTexture => texture(false),
         }
-    }
-}
-
-/// Adds the bindings of the `@group(N) @binding(M) var<...> name: type`
-/// declarations in `source`, which `stage` reads, to `binding_infos`: a
-/// text scan, not a parse.
-fn analyze_shader_bindings(binding_infos: &mut Vec<BindingInfo>, source: &str, stage: wgpu::ShaderStages) {
-    let b = source.as_bytes();
-    let find = |pat: &str, from: usize| source.get(from..).and_then(|s| s.find(pat)).map(|p| p + from);
-    let find_char = |c: char, from: usize| source.get(from..).and_then(|s| s.find(c)).map(|p| p + from);
-    let mut search_pos = 0usize;
-    while let Some(group_token) = find("@group", search_pos) {
-        let Some(group_paren) = find_char('(', group_token) else { break };
-        let mut group_start = group_paren + 1;
-        while group_start < b.len() && is_space(b[group_start]) {
-            group_start += 1;
-        }
-        let mut group_end = group_start;
-        while group_end < b.len() && b[group_end].is_ascii_digit() {
-            group_end += 1;
-        }
-        if group_end == group_start {
-            search_pos = group_end;
-            continue;
-        }
-        let group: u32 = source[group_start..group_end].parse().unwrap_or(0);
-
-        let Some(binding_token) = find("@binding", group_end) else { break };
-        let Some(binding_paren) = find_char('(', binding_token) else { break };
-        let mut binding_start = binding_paren + 1;
-        while binding_start < b.len() && is_space(b[binding_start]) {
-            binding_start += 1;
-        }
-        let mut binding_end = binding_start;
-        while binding_end < b.len() && b[binding_end].is_ascii_digit() {
-            binding_end += 1;
-        }
-        if binding_end == binding_start {
-            search_pos = binding_end;
-            continue;
-        }
-        let binding: u32 = source[binding_start..binding_end].parse().unwrap_or(0);
-
-        let Some(var_pos) = find("var", binding_end) else { break };
-        if var_pos > binding_end && b[var_pos - 1].is_ascii_alphabetic() {
-            search_pos = var_pos + 3;
-            continue;
-        }
-        let mut after_var = var_pos + 3;
-        while after_var < b.len() && is_space(b[after_var]) {
-            after_var += 1;
-        }
-
-        let mut type_ = BindingType::UniformBuffer;
-        if after_var < b.len() && b[after_var] == b'<' {
-            let Some(qualifier_end) = find_char('>', after_var) else { break };
-            let qualifier = trim_string(&source[after_var + 1..qualifier_end]);
-            if qualifier.contains("storage") {
-                type_ = if qualifier.contains("read_write") {
-                    BindingType::StorageBuffer
-                } else {
-                    BindingType::ReadOnlyStorageBuffer
-                };
-            } else {
-                type_ = BindingType::UniformBuffer;
-            }
-            after_var = qualifier_end + 1;
-        }
-
-        let Some(colon_pos) = find_char(':', after_var) else { break };
-        let type_start = colon_pos + 1;
-        let mut type_end = type_start;
-        while type_end < b.len() {
-            let c = b[type_end];
-            if c == b';' || c == b'\n' || c == b'\r' {
-                break;
-            }
-            type_end += 1;
-        }
-        let type_name = trim_string(&source[type_start..type_end]);
-
-        if type_ == BindingType::UniformBuffer {
-            if type_name.contains("sampler") {
-                type_ = BindingType::Sampler;
-            } else if type_name.contains("texture") {
-                type_ = BindingType::Texture;
-            }
-        }
-
-        if let Some(existing) = binding_infos.iter_mut().find(|info| info.group == group && info.binding == binding) {
-            existing.visibility |= stage;
-            if existing.type_ == BindingType::UniformBuffer && type_ != BindingType::UniformBuffer {
-                existing.type_ = type_;
-            }
-        } else {
-            binding_infos.push(BindingInfo { group, binding, type_, visibility: stage });
-        }
-
-        search_pos = type_end;
     }
 }
 
@@ -741,23 +618,37 @@ pub(crate) fn compile(
     index_layout: &wgpu::BindGroupLayout,
     key: &ShaderKey,
 ) -> Result<ShaderProgram, GpuError> {
-    let [vertex_source, fragment_source] = stage_sources(key)?;
+    let sources = stage_sources(key)?;
     let pixel_ratio = key
         .define_values()
         .find(|&(name, _)| name == PIXEL_RATIO_OVERRIDE)
         .and_then(|(_, value)| value.parse().ok())
         .unwrap_or(1.0);
-    ShaderProgram::new(device, index_layout, &vertex_source, &fragment_source, key.program(), pixel_ratio)
+    ShaderProgram::new(device, index_layout, sources, key.program(), pixel_ratio)
+}
+
+/// A program's stages in WGSL, and what they bind.
+pub(crate) struct StageSources {
+    /// The vertex and fragment stages.
+    pub(crate) stages: [String; 2],
+    /// The bindings that the stages declare, each once, visible to the
+    /// stages that declare it.
+    pub(crate) bindings: Vec<BindingInfo>,
+    /// The group of `drawIndex`, the one after the program's others, if a
+    /// stage declares it: its layout is the index table's, and a draw binds
+    /// it at the dynamic offset of its index, so that its other groups bind
+    /// only what it shares with the layer's other draws.
+    pub(crate) index_group: Option<u32>,
 }
 
 /// The vertex and fragment stages of `key`'s program: the common prelude,
 /// the structs of the engine's blocks and the program's, the declarations of
-/// the buffers that the stage reads ([`declarations`]), the program's own
-/// prelude and the stage with its properties written out
+/// what the stage names of what it may read ([`declared`]), the program's
+/// own prelude and the stage with its properties written out
 /// ([`wgsl::expand`]), preprocessed with the key's defines. Fails with
 /// [`GpuError::Unsupported`] for a program without WGSL, and as
 /// [`wgsl::expand`] does.
-pub(crate) fn stage_sources(key: &ShaderKey) -> Result<[String; 2], GpuError> {
+pub(crate) fn stage_sources(key: &ShaderKey) -> Result<StageSources, GpuError> {
     let program = key.program();
     let source: &Wgsl =
         program.sources.wgsl.ok_or_else(|| GpuError::Unsupported(format!("no WGSL for {}", program.name)))?;
@@ -767,102 +658,83 @@ pub(crate) fn stage_sources(key: &ShaderKey) -> Result<[String; 2], GpuError> {
     let blocks = wgsl::blocks(program);
     // WGSL reads no define's value; the pixel ratio's is an override's.
     let defines: HashMap<String, bool> = key.define_values().map(|(name, _)| (name.to_owned(), true)).collect();
-    Ok(wgsl::expand(program, source)?.map(|stage| {
-        let declarations = declarations(program, &format!("{shader_prelude}{stage}"), &defines);
-        preprocess_wgsl(&format!("{PRELUDE}\n{blocks}{declarations}{shader_prelude}{stage}"), &defines)
-    }))
-}
-
-/// The declarations of the buffers and textures that `text`, a stage and
-/// the program's prelude, reads, of each one whose name it names outside
-/// its comments: `drawIndex`, the engine's buffers, the blocks of
-/// `program`'s and its textures and their samplers, which a draw binds in
-/// every variant, where the text names them in any variant, and its vertex
-/// buffers, which a draw binds where it has them, where the text names them
-/// in the variant of `defines`. WebGPU lays out the bindings that a variant
-/// declares, whether it reads them or not.
-fn declarations(program: &Program, text: &str, defines: &HashMap<String, bool>) -> String {
-    let named: HashSet<&str> = identifiers(text).collect();
-    let mut declarations = String::new();
-    if named.contains("drawIndex") {
-        declarations.push_str(GLOBAL_INDEX_DECLARATION);
-        declarations.push('\n');
-    }
-    let (blocks, vertices): (Vec<&Buffer>, Vec<&Buffer>) =
-        program.buffers.iter().partition(|buffer| buffer.block().is_some());
-    for buffer in ENGINE_BINDINGS.iter().chain(blocks).filter(|buffer| named.contains(buffer.name)) {
-        declarations.push_str(&declaration(buffer));
-        declarations.push('\n');
-    }
-    if !vertices.is_empty() {
-        let preprocessed = preprocess_wgsl(text, defines);
-        let named: HashSet<&str> = identifiers(&preprocessed).collect();
-        for buffer in vertices.into_iter().filter(|buffer| named.contains(buffer.name)) {
-            declarations.push_str(&declaration(buffer));
+    let [vertex, fragment] = wgsl::expand(program, source)?;
+    let stages = [(Stage::Vertex, vertex), (Stage::Fragment, fragment)];
+    let declared =
+        stages.each_ref().map(|(stage, text)| declared(program, *stage, &format!("{shader_prelude}{text}"), &defines));
+    let all = || declared.iter().flatten();
+    let index_group = all().any(|binding| matches!(binding, Binding::DrawIndex)).then(|| {
+        let textures = all().any(|binding| matches!(binding, Binding::Texture(..) | Binding::Sampler(..)));
+        if textures { TEXTURE_GROUP + 1 } else { BUFFER_GROUP + 1 }
+    });
+    let mut bindings: Vec<BindingInfo> = Vec::new();
+    let [vertex, fragment] = [0, 1].map(|index| {
+        let (stage, text) = &stages[index];
+        let visibility = match stage {
+            Stage::Vertex => wgpu::ShaderStages::VERTEX,
+            Stage::Fragment => wgpu::ShaderStages::FRAGMENT,
+        };
+        let mut declarations = String::new();
+        for binding in &declared[index] {
+            declarations += &declaration(binding, index_group.unwrap_or_default());
             declarations.push('\n');
-        }
-    }
-    for (slot, texture) in program.textures.iter().enumerate() {
-        let [texture_declaration, sampler_declaration] = texture_declarations(slot, texture);
-        for (name, declaration) in
-            [(texture.name, texture_declaration), (&*texture.sampler_name(), sampler_declaration)]
-        {
-            if named.contains(name) {
-                declarations.push_str(&declaration);
-                declarations.push('\n');
+            let (group, at) = location(binding, index_group.unwrap_or_default());
+            match bindings.iter_mut().find(|info| (info.group, info.binding) == (group, at)) {
+                Some(info) => info.visibility |= visibility,
+                None => bindings.push(BindingInfo { group, binding: at, type_: binding_type(binding), visibility }),
             }
         }
-    }
-    declarations
+        preprocess_wgsl(&format!("{PRELUDE}\n{blocks}{declarations}{shader_prelude}{text}"), &defines)
+    });
+    Ok(StageSources { stages: [vertex, fragment], bindings, index_group })
 }
 
-/// How the backend declares `drawIndex`, to its type.
-const GLOBAL_INDEX: &str = "@group(0) @binding(1) var<uniform> drawIndex:";
-
-/// The group after the last one `sources` use, if they declare `drawIndex`
-/// in group 0.
-fn index_group_of(sources: &[&str]) -> Option<u32> {
-    if !sources.iter().any(|source| source.contains(GLOBAL_INDEX)) {
-        return None;
-    }
-    let last = sources
-        .iter()
-        .flat_map(|source| source.split("@group(").skip(1))
-        .filter_map(|rest| rest.split(')').next()?.trim().parse::<u32>().ok())
-        .max()?;
-    Some(last + 1)
-}
-
-/// `source` with its `drawIndex` declaration in `group`.
-fn move_global_index(source: &str, group: u32) -> Cow<'_, str> {
-    if source.contains(GLOBAL_INDEX) {
-        let declaration = GLOBAL_INDEX.replacen("@group(0)", &format!("@group({group})"), 1);
-        Cow::Owned(source.replacen(GLOBAL_INDEX, &declaration, 1))
-    } else {
-        Cow::Borrowed(source)
-    }
+/// What `text`, a stage and the program's prelude, names outside its
+/// comments of what `stage` may read ([`Program::bindings`]): of the draw's
+/// index, the buffers that have blocks, and the textures and samplers,
+/// which a draw binds in every variant, those it names in any variant, and
+/// of the vertex buffers, which a draw binds where it has them, those it
+/// names in the variant of `defines`. WebGPU lays out the bindings that a
+/// variant declares, whether it reads them or not.
+fn declared<'p>(program: &'p Program, stage: Stage, text: &str, defines: &HashMap<String, bool>) -> Vec<Binding<'p>> {
+    let named: HashSet<&str> = identifiers(text).collect();
+    let vertices = |binding: &Binding<'_>| matches!(binding, Binding::Buffer(buffer) if matches!(buffer.kind, BufferKind::Vertices { .. }));
+    let preprocessed =
+        program.bindings(stage).any(|binding| vertices(&binding)).then(|| preprocess_wgsl(text, defines));
+    let named_in_variant: HashSet<&str> = preprocessed.as_deref().map(identifiers).into_iter().flatten().collect();
+    program
+        .bindings(stage)
+        .filter(|binding| {
+            let named = if vertices(binding) { &named_in_variant } else { &named };
+            named.contains(&*binding.name())
+        })
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use mln_gfx::gfx_types::AttributeDataType::{Float, Short4};
-    use mln_gfx::shaders::bindings::DRAW_INDEX_ID;
     use mln_gfx::shaders::layer_ubo::ViewUBO;
-    use mln_gfx::shaders::program::{DRAW_PROJECTION_BUFFER, PROJECTION_BUFFER, Sources, Texture, VIEW_BUFFER};
+    use mln_gfx::shaders::program::{Buffer, DRAW_PROJECTION_BUFFER, PROJECTION_BUFFER, Sources, Texture, VIEW_BUFFER};
 
     use super::*;
 
+    fn declared_text(program: &Program, stage: Stage, text: &str, defines: &[&str]) -> String {
+        let defines = defines.iter().map(|&name| (name.to_owned(), true)).collect();
+        declared(program, stage, text, &defines).iter().map(|binding| declaration(binding, 2) + "\n").collect()
+    }
+
     #[test]
-    fn the_engines_buffers_bind_at_their_ids() {
-        assert!(GLOBAL_INDEX_DECLARATION.starts_with(&format!("{GLOBAL_INDEX} ")));
-        assert!(GLOBAL_INDEX.starts_with(&format!("@group(0) @binding({DRAW_INDEX_ID}) ")));
-        assert_eq!(declaration(&VIEW_BUFFER), "@group(0) @binding(0) var<uniform> view: ViewUBO;");
+    fn the_engines_bindings_are_at_their_ids() {
+        let declared = |binding| declaration(&binding, 2);
+        assert_eq!(declared(Binding::DrawIndex), "@group(2) @binding(1) var<uniform> drawIndex: u32;");
+        assert_eq!(declared(Binding::Buffer(&VIEW_BUFFER)), "@group(0) @binding(0) var<uniform> view: ViewUBO;");
         assert_eq!(
-            declaration(&PROJECTION_BUFFER),
+            declared(Binding::Buffer(&PROJECTION_BUFFER)),
             "@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;"
         );
         assert_eq!(
-            declaration(&DRAW_PROJECTION_BUFFER),
+            declared(Binding::Buffer(&DRAW_PROJECTION_BUFFER)),
             "@group(0) @binding(4) var<uniform> drawProjection: ProjectionUBO;"
         );
     }
@@ -871,38 +743,42 @@ mod tests {
     fn a_stage_declares_the_buffers_it_names() {
         static PROGRAM: Program = Program {
             name: "pulled",
-            buffers: &[Buffer::vertices("paint", 0, Float), Buffer::uniform::<ViewUBO>("props", 0)],
+            buffers: &[Buffer::uniform::<ViewUBO>("props", 0), Buffer::vertices("paint", 0, Float)],
             attributes: &[],
             instance_attributes: &[],
             textures: &[],
             properties: &[],
             sources: Sources::NONE,
         };
-        let text =
-            "let p = projectionVector[drawIndex]; // view\n#ifdef PAINT\nlet x = paint[0];\n#endif\nprops";
-        let declared = |defines: &[&str]| {
-            declarations(&PROGRAM, text, &defines.iter().map(|&name| (name.to_owned(), true)).collect())
-        };
-        let (props, paint) = (declaration(&PROGRAM.buffers[1]), declaration(&PROGRAM.buffers[0]));
-        let engine = format!("{GLOBAL_INDEX_DECLARATION}\n{}\n{props}\n", declaration(&PROJECTION_BUFFER));
+        let text = "let p = projectionVector[drawIndex]; // view\n#ifdef PAINT\nlet x = paint[0];\n#endif\nprops";
+        let declared = |defines| declared_text(&PROGRAM, Stage::Vertex, text, defines);
+        let [props, paint] =
+            [&PROGRAM.buffers[0], &PROGRAM.buffers[1]].map(|buffer| declaration(&Binding::Buffer(buffer), 2));
+        let engine = format!(
+            "{}\n{}\n{props}\n",
+            declaration(&Binding::DrawIndex, 2),
+            declaration(&Binding::Buffer(&PROJECTION_BUFFER), 2)
+        );
         assert_eq!(declared(&[]), engine);
         assert_eq!(declared(&["PAINT"]), format!("{engine}{paint}\n"));
+        // A vertex buffer is the vertex stage's alone.
+        assert_eq!(declared_text(&PROGRAM, Stage::Fragment, text, &["PAINT"]), engine);
     }
 
     #[test]
     fn a_vertex_buffer_is_an_array_of_its_words() {
         assert_eq!(
-            declaration(&Buffer::vertices("walls", 0, Short4)),
+            declaration(&Binding::Buffer(&Buffer::vertices("walls", 0, Short4)), 2),
             "@group(0) @binding(7) var<storage, read> walls: array<u32>;"
         );
         assert_eq!(
-            declaration(&Buffer::vertices("paint", 1, Float)),
+            declaration(&Binding::Buffer(&Buffer::vertices("paint", 1, Float)), 2),
             "@group(0) @binding(8) var<storage, read> paint: array<f32>;"
         );
     }
 
     #[test]
-    fn a_stage_declares_the_textures_and_samplers_it_names_at_their_slots() {
+    fn a_fragment_stage_declares_the_textures_and_samplers_it_names_at_their_slots() {
         static PROGRAM: Program = Program {
             name: "two textures",
             buffers: &[],
@@ -912,26 +788,14 @@ mod tests {
             properties: &[],
             sources: Sources::NONE,
         };
-        let declared = declarations(&PROGRAM, "textureSample(second, first_sampler, uv)", &HashMap::default());
+        let text = "textureSample(second, first_sampler, uv)";
         assert_eq!(
-            declared,
+            declared_text(&PROGRAM, Stage::Fragment, text, &[]),
             "@group(1) @binding(0) var first_sampler: sampler;\n@group(1) @binding(3) var second: texture_2d<f32>;\n"
         );
-        assert_eq!([0, 1, 2, 3].map(texture_slot), [(0, true), (0, false), (1, true), (1, false)]);
-    }
-
-    #[test]
-    fn global_index_moves_to_the_group_after_the_last() {
-        let vertex = "@group(0) @binding(1) var<uniform> drawIndex: u32;\n\
-                      @group(0) @binding(2) var<storage, read> drawableVector: array<U>;";
-        let fragment = "@group(1) @binding(0) var image_sampler: sampler;";
-        assert_eq!(index_group_of(&[vertex, fragment]), Some(2));
-        assert_eq!(index_group_of(&[fragment]), None);
-        assert_eq!(
-            move_global_index(vertex, 2),
-            "@group(2) @binding(1) var<uniform> drawIndex: u32;\n\
-             @group(0) @binding(2) var<storage, read> drawableVector: array<U>;"
-        );
-        assert!(matches!(move_global_index(fragment, 2), Cow::Borrowed(_)));
+        assert_eq!(declared_text(&PROGRAM, Stage::Vertex, text, &[]), "");
+        let types =
+            declared(&PROGRAM, Stage::Fragment, text, &HashMap::default()).iter().map(binding_type).collect::<Vec<_>>();
+        assert_eq!(types, [BindingType::Sampler, BindingType::UnfilterableTexture]);
     }
 }

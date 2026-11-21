@@ -26,7 +26,7 @@ use mln_gfx::shaders::program::Program;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{DepthFunctionType, TextureFilterType, TextureWrapType};
 use mln_glsl::layout::{
-    DescriptorSetType, IMAGE_SAMPLER_START, IMAGE_TEXTURE_COUNT, LAYER_STORAGE_COUNT, DRAW_INDEX_PUSH_CONSTANT_SIZE,
+    DRAW_INDEX_PUSH_CONSTANT_SIZE, DescriptorSetType, IMAGE_SAMPLER_START, IMAGE_TEXTURE_COUNT, LAYER_STORAGE_COUNT,
     image_sampler_binding, image_texture_binding,
 };
 use mln_glsl::{ResourceUse, Stage};

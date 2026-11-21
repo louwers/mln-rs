@@ -6,9 +6,9 @@ use std::ptr;
 
 use mln_gfx::gpu::{GpuError, ShaderKey};
 use mln_gfx::shaders::block::Block;
-use mln_gfx::shaders::program::{PROJECTION_BUFFER, Program};
+use mln_gfx::shaders::program::{Binding, PROJECTION_BUFFER, Program};
 use mln_gfx::shaders::source::glsl_es::{self, Glsl};
-use mln_gfx::shaders::source::identifiers;
+use mln_gfx::shaders::source::{Stage, identifiers};
 use mln_util::hash::HashSet;
 
 /// The default precisions of each stage, and on desktop OpenGL, which has
@@ -247,12 +247,16 @@ fn projects(vertex: &HashSet<&str>) -> bool {
         || PROJECTION_PRELUDE.lines().filter_map(helper).any(|name| vertex.contains(name))
 }
 
-/// The declarations of the textures of `program` that `stage` names: each
-/// a `uniform sampler2D` of its GLSL ES name.
-fn textures(program: &Program, stage: &str) -> String {
-    let named: HashSet<&str> = identifiers(stage).collect();
-    let names = program.textures.iter().map(glsl_es::texture_name).filter(|name| named.contains(name.as_str()));
-    names.fold(String::new(), |mut declarations, name| {
+/// The declarations of the textures of `program` that `text`, a `stage`,
+/// names and may sample ([`Program::bindings`]): each a `uniform sampler2D`
+/// of its GLSL ES name.
+fn textures(program: &Program, stage: Stage, text: &str) -> String {
+    let named: HashSet<&str> = identifiers(text).collect();
+    let textures = program.bindings(stage).filter_map(|binding| match binding {
+        Binding::Texture(_, texture) => Some(glsl_es::texture_name(texture)),
+        _ => None,
+    });
+    textures.filter(|name| named.contains(name.as_str())).fold(String::new(), |mut declarations, name| {
         _ = writeln!(declarations, "uniform sampler2D {name};");
         declarations
     })
@@ -293,14 +297,14 @@ pub(crate) fn stage_sources(key: &ShaderKey, desktop: bool, highp_fragment: bool
     let mut fragment_blocks = glsl_es::stage_blocks(program, &fragment);
     fragment_blocks
         .sort_by_key(|block| vertex_blocks.iter().position(|shared| ptr::eq(*shared, *block)).unwrap_or(usize::MAX));
-    let stage = |stage_defines, precision, blocks: &[&Block], prelude, glsl| {
-        let textures = textures(program, glsl);
+    let stage = |stage, stage_defines, precision, blocks: &[&Block], prelude, glsl| {
+        let textures = textures(program, stage, glsl);
         [version, &defines, stage_defines, precision, &glsl_es::blocks(blocks), &textures, prelude, glsl].concat()
     };
     let vertex_prelude =
         if projects { [PRELUDE.vertex, PROJECTION_PRELUDE].concat() } else { PRELUDE.vertex.to_owned() };
     Ok([
-        stage("", PRECISION.vertex, &vertex_blocks, &vertex_prelude, &vertex),
-        stage(fragment_defines, PRECISION.fragment, &fragment_blocks, PRELUDE.fragment, &fragment),
+        stage(Stage::Vertex, "", PRECISION.vertex, &vertex_blocks, &vertex_prelude, &vertex),
+        stage(Stage::Fragment, fragment_defines, PRECISION.fragment, &fragment_blocks, PRELUDE.fragment, &fragment),
     ])
 }
