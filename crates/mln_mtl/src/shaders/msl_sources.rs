@@ -3,6 +3,7 @@
 
 use mln_gfx::gpu::GpuError;
 use mln_gfx::shaders::program::{ENGINE_BUFFERS, Program};
+use mln_gfx::shaders::source::identifiers;
 use mln_gfx::shaders::source::msl::{self, Msl};
 
 /// The start of every library.
@@ -192,12 +193,62 @@ enum {
 
 ";
 
+/// The engine's buffers that a main function may read without declaring
+/// them, each with the name it reads it by and its parameter: the view's
+/// block, the draw's index into its layer's storage buffers, and the
+/// projection blocks.
+const RESERVED_PARAMETERS: [(&str, &str); 3] = [
+    ("view", "device const ViewUBO& view [[buffer(idViewUBO)]]"),
+    ("uboIndex", "device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]]"),
+    ("projectionVector", "device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]]"),
+];
+
 /// The source of `program`'s library, of its MSL `source`: the header, the
 /// structs of the engine's blocks, the prelude, the structs of the
 /// program's blocks, each a storage buffer's element padded to its stride,
 /// and the program's own prelude and source with its properties written
-/// out ([`msl::expand`]). Fails as [`msl::expand`] does.
+/// out ([`msl::expand`]), and each main function with the parameters of the
+/// engine's buffers that it names ([`RESERVED_PARAMETERS`]). Fails as
+/// [`msl::expand`] does.
 pub(crate) fn library_source(program: &Program, source: &Msl) -> Result<String, GpuError> {
     let (engine, own) = (msl::blocks(&ENGINE_BUFFERS), msl::blocks(program.buffers));
-    Ok([HEADER, &engine, PRELUDE, &own, source.prelude, &msl::expand(program, source)?].concat())
+    let mut functions = msl::expand(program, source)?;
+    for main in [source.vertex_main_function, source.fragment_main_function] {
+        functions = with_reserved_parameters(&functions, main, source);
+    }
+    Ok([HEADER, &engine, PRELUDE, &own, source.prelude, &functions].concat())
+}
+
+/// `functions` with the parameters of the engine's buffers that the main
+/// function `main` names in its body, to the next main function of
+/// `source`, added to its parameters.
+fn with_reserved_parameters(functions: &str, main: &str, source: &Msl) -> String {
+    let Some(name_at) = functions.find(&format!(" {main}(")) else { return functions.to_owned() };
+    let open = name_at + main.len() + 1;
+    let mut depth = 0;
+    let Some(close) = functions[open..].char_indices().find_map(|(at, c)| {
+        depth += match c {
+            '(' => 1,
+            ')' => -1,
+            _ => 0,
+        };
+        (depth == 0).then_some(open + at)
+    }) else {
+        return functions.to_owned();
+    };
+    let next_main = [source.vertex_main_function, source.fragment_main_function]
+        .iter()
+        .filter_map(|other| functions[close..].find(&format!(" {other}(")))
+        .min()
+        .map_or(functions.len(), |at| close + at);
+    let (parameters, body) = (&functions[open..close], &functions[close..next_main]);
+    let declared: Vec<&str> = identifiers(parameters).collect();
+    let mut added = String::new();
+    for (name, parameter) in RESERVED_PARAMETERS {
+        if !declared.contains(&name) && identifiers(body).any(|word| word == name) {
+            added.push_str(",\n    ");
+            added.push_str(parameter);
+        }
+    }
+    [&functions[..close], &added, &functions[close..]].concat()
 }

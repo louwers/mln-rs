@@ -39,9 +39,7 @@ struct FragmentStage {
 };
 
 FragmentStage vertex vertexMain(VertexStage in [[stage_in]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const BackgroundPatternDrawableUBO* drawableVector [[buffer(idBackgroundDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const BackgroundPatternPropsUBO& props [[buffer(idBackgroundPropsUBO)]]) {
 
     device const BackgroundPatternDrawableUBO& drawable = drawableVector[uboIndex];
@@ -121,9 +119,7 @@ struct FragmentStage {
 };
 
 FragmentStage vertex vertexMain(VertexStage in [[stage_in]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const BackgroundDrawableUBO* drawableVector [[buffer(idBackgroundDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]]) {
+                                device const BackgroundDrawableUBO* drawableVector [[buffer(idBackgroundDrawableUBO)]]) {
 
     device const BackgroundDrawableUBO& drawable = drawableVector[uboIndex];
 

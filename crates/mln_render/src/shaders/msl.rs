@@ -198,9 +198,7 @@ struct FragmentStage {
     float4 position [[position, invariant]];
 };
 
-FragmentStage vertex vertexMain(VertexStage in [[stage_in]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]]) {
+FragmentStage vertex vertexMain(VertexStage in [[stage_in]]) {
     return {
         .position = projectTileFor3D(float2(in.position.xy), 0.0, projectionVector[uboIndex])
     };
@@ -340,9 +338,6 @@ struct FragmentStage {
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
-                                device const ViewUBO& view [[buffer(idViewUBO)]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const TileDebugPropsUBO& props [[buffer(idTileDebugPropsUBO)]]) {
     device const ProjectionUBO& projection = projectionVector[uboIndex];
     const float2 start = float2(vertex_in.start_pos);

@@ -24,7 +24,10 @@ use crate::shaders::source::{Named, Stage, expand as expand_properties, per_vert
 
 /// The MSL of a program. Its library compiles from the backend's prelude,
 /// the structs of the engine's blocks and the program's, `prelude` and
-/// `source`.
+/// `source`. A main function has the parameters of the engine's buffers
+/// that its body names, which the backend adds after its own: `view`,
+/// `uboIndex`, the draw's index into its layer's storage buffers, and
+/// `projectionVector`.
 #[derive(Debug)]
 pub struct Msl {
     /// The name of the vertex function.

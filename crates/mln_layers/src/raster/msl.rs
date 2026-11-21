@@ -28,9 +28,7 @@ struct FragmentStage {
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const RasterDrawableUBO* drawableVector [[buffer(idRasterDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const RasterEvaluatedPropsUBO& props [[buffer(idRasterEvaluatedPropsUBO)]]) {
 
     device const RasterDrawableUBO& drawable = drawableVector[uboIndex];

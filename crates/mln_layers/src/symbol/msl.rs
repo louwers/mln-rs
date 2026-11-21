@@ -63,7 +63,6 @@ struct FragmentStage {
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
-                                device const ViewUBO& view [[buffer(idViewUBO)]],
                                 device const CollisionDrawableUBO& drawable [[buffer(idCollisionDrawableUBO)]],
                                 device const CollisionTilePropsUBO& tileProps [[buffer(idCollisionTilePropsUBO)]],
                                 device const ProjectionUBO& projection [[buffer(idCollisionProjectionUBO)]]) {
@@ -155,7 +154,6 @@ struct FragmentStage {
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
-                                device const ViewUBO& view [[buffer(idViewUBO)]],
                                 device const CollisionDrawableUBO& drawable [[buffer(idCollisionDrawableUBO)]],
                                 device const CollisionTilePropsUBO& tileProps [[buffer(idCollisionTilePropsUBO)]],
                                 device const ProjectionUBO& projection [[buffer(idCollisionProjectionUBO)]]) {
@@ -285,10 +283,7 @@ struct FragmentStage {
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
-                                device const ViewUBO& view [[buffer(idViewUBO)]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const SymbolDrawableUBO* drawableVector [[buffer(idSymbolDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const SymbolEvaluatedPropsUBO& props [[buffer(idSymbolEvaluatedPropsUBO)]]) {
 
     device const SymbolDrawableUBO& drawable = drawableVector[uboIndex];
@@ -416,7 +411,6 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                             device const SymbolTilePropsUBO* tilePropsVector [[buffer(idSymbolTilePropsUBO)]],
                             device const SymbolEvaluatedPropsUBO& props [[buffer(idSymbolEvaluatedPropsUBO)]],
                             texture2d<float, access::sample> image [[texture(0)]],
@@ -498,10 +492,7 @@ struct FragmentStage {
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
-                                device const ViewUBO& view [[buffer(idViewUBO)]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const SymbolDrawableUBO* drawableVector [[buffer(idSymbolDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const SymbolEvaluatedPropsUBO& props [[buffer(idSymbolEvaluatedPropsUBO)]]) {
 
     device const SymbolDrawableUBO& drawable = drawableVector[uboIndex];
@@ -658,7 +649,6 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                             device const SymbolTilePropsUBO* tilePropsVector [[buffer(idSymbolTilePropsUBO)]],
                             device const SymbolEvaluatedPropsUBO& props [[buffer(idSymbolEvaluatedPropsUBO)]],
                             texture2d<float, access::sample> image [[texture(0)]],
@@ -768,10 +758,7 @@ struct FragmentStage {
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
-                                device const ViewUBO& view [[buffer(idViewUBO)]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const SymbolDrawableUBO* drawableVector [[buffer(idSymbolDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const SymbolEvaluatedPropsUBO& props [[buffer(idSymbolEvaluatedPropsUBO)]]) {
 
     device const SymbolDrawableUBO& drawable = drawableVector[uboIndex];
@@ -932,7 +919,6 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                             device const SymbolTilePropsUBO* tilePropsVector [[buffer(idSymbolTilePropsUBO)]],
                             device const SymbolEvaluatedPropsUBO& props [[buffer(idSymbolEvaluatedPropsUBO)]],
                             texture2d<float, access::sample> glyph_image [[texture(0)]],

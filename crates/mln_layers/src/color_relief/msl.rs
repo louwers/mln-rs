@@ -28,9 +28,7 @@ struct FragmentStage {
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const ColorReliefDrawableUBO* drawableVector [[buffer(idColorReliefDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const ColorReliefTilePropsUBO* tilePropsVector [[buffer(idColorReliefTilePropsUBO)]]) {
 
     device const ColorReliefDrawableUBO& drawable = drawableVector[uboIndex];
@@ -74,7 +72,6 @@ float4 getColorStop(int stop, int color_ramp_size, texture2d<float, access::samp
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                             device const ColorReliefTilePropsUBO* tilePropsVector [[buffer(idColorReliefTilePropsUBO)]],
                             device const ColorReliefEvaluatedPropsUBO& props [[buffer(idColorReliefEvaluatedPropsUBO)]],
                             texture2d<float, access::sample> image [[texture(0)]],

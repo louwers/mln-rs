@@ -156,9 +156,7 @@ struct VertexStage {
         extrusion_wall!(),
         r"
 FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const FillExtrusionDrawableUBO* drawableVector [[buffer(idFillExtrusionDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const FillExtrusionPropsUBO& props [[buffer(idFillExtrusionPropsUBO)]]) {
     return wall(vertex_in, drawableVector[uboIndex], projectionVector[uboIndex], props);
 }
@@ -200,9 +198,7 @@ struct WallVertex {
         extrusion_wall!(),
         r"
 FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const FillExtrusionDrawableUBO* drawableVector [[buffer(idFillExtrusionDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const FillExtrusionPropsUBO& props [[buffer(idFillExtrusionPropsUBO)]],
                                 device const BucketVertex* wallVertices [[buffer(idFillExtrusionWallVertices)]],
                                 device const float* wallPaint [[buffer(idFillExtrusionWallPaint)]]) {
@@ -291,10 +287,7 @@ struct FragmentOutput {
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
-                                device const ViewUBO& view [[buffer(idViewUBO)]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const FillExtrusionDrawableUBO* drawableVector [[buffer(idFillExtrusionDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const FillExtrusionTilePropsUBO* tilePropsVector [[buffer(idFillExtrusionTilePropsUBO)]],
                                 device const FillExtrusionPropsUBO& props [[buffer(idFillExtrusionPropsUBO)]]) {
 
@@ -400,7 +393,6 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
 }
 
 fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]],
-                                     device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                      device const FillExtrusionTilePropsUBO* tilePropsVector [[buffer(idFillExtrusionTilePropsUBO)]],
                                      device const FillExtrusionPropsUBO& props [[buffer(idFillExtrusionPropsUBO)]],
                                      texture2d<float, access::sample> image0 [[texture(0)]],
@@ -483,10 +475,7 @@ struct FragmentOutput {
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
-                                device const ViewUBO& view [[buffer(idViewUBO)]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const FillExtrusionDrawableUBO* drawableVector [[buffer(idFillExtrusionDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const FillExtrusionTilePropsUBO* tilePropsVector [[buffer(idFillExtrusionTilePropsUBO)]],
                                 device const FillExtrusionPropsUBO& props [[buffer(idFillExtrusionPropsUBO)]]) {
 
@@ -566,7 +555,6 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
 }
 
 fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]],
-                                     device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                      device const FillExtrusionTilePropsUBO* tilePropsVector [[buffer(idFillExtrusionTilePropsUBO)]],
                                      device const FillExtrusionPropsUBO& props [[buffer(idFillExtrusionPropsUBO)]],
                                      texture2d<float, access::sample> image0 [[texture(0)]],
@@ -639,9 +627,7 @@ struct FragmentOutput {
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const FillExtrusionDrawableUBO* drawableVector [[buffer(idFillExtrusionDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const FillExtrusionPropsUBO& props [[buffer(idFillExtrusionPropsUBO)]]) {
 
     device const FillExtrusionDrawableUBO& drawable = drawableVector[uboIndex];

@@ -113,10 +113,7 @@ struct FragmentStage {
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
-                                device const ViewUBO& view [[buffer(idViewUBO)]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const LineSDFDrawableUBO* drawableVector [[buffer(idLineDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]]) {
 
     device const LineSDFDrawableUBO& drawable = drawableVector[uboIndex];
@@ -213,8 +210,6 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const ViewUBO& view [[buffer(idViewUBO)]],
-                            device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                             device const LineSDFTilePropsUBO* tilePropsVector [[buffer(idLineTilePropsUBO)]],
                             device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]],
                             texture2d<float, access::sample> gradientTexture [[texture(0)]],
@@ -323,10 +318,7 @@ struct FragmentStage {
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
-                                device const ViewUBO& view [[buffer(idViewUBO)]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const LineGradientDrawableUBO* drawableVector [[buffer(idLineDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]]) {
 
     device const LineGradientDrawableUBO& drawable = drawableVector[uboIndex];
@@ -511,10 +503,7 @@ struct FragmentStage {
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
-                                device const ViewUBO& view [[buffer(idViewUBO)]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const LinePatternDrawableUBO* drawableVector [[buffer(idLineDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]]) {
 
     device const LinePatternDrawableUBO& drawable = drawableVector[uboIndex];
@@ -596,8 +585,6 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const ViewUBO& view [[buffer(idViewUBO)]],
-                            device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                             device const LinePatternTilePropsUBO* tilePropsVector [[buffer(idLineTilePropsUBO)]],
                             device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]],
                             texture2d<float, access::sample> image0 [[texture(0)]],
@@ -748,10 +735,7 @@ struct FragmentStage {
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
-                                device const ViewUBO& view [[buffer(idViewUBO)]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const LineSDFDrawableUBO* drawableVector [[buffer(idLineDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]]) {
 
     device const LineSDFDrawableUBO& drawable = drawableVector[uboIndex];
@@ -847,8 +831,6 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const ViewUBO& view [[buffer(idViewUBO)]],
-                            device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                             device const LineSDFTilePropsUBO* tilePropsVector [[buffer(idLineTilePropsUBO)]],
                             device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]],
                             texture2d<float, access::sample> image0 [[texture(0)]],
@@ -958,10 +940,7 @@ struct FragmentStage {
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
-                                device const ViewUBO& view [[buffer(idViewUBO)]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const LineDrawableUBO* drawableVector [[buffer(idLineDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]]) {
 
     device const LineDrawableUBO& drawable = drawableVector[uboIndex];
@@ -1032,7 +1011,6 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const ViewUBO& view [[buffer(idViewUBO)]],
                             device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]]) {
 #if defined(PROJECTION_GLOBE)
     if (clippedAtAntimeridian(in.tile_x)) {

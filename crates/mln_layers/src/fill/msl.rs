@@ -126,10 +126,7 @@ struct FragmentStage {
         outline_corner!(),
         r"
 FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
-                                device const ViewUBO& view [[buffer(idViewUBO)]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const FillPatternDrawableUBO* drawableVector [[buffer(idFillDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const FillPatternTilePropsUBO* tilePropsVector [[buffer(idFillTilePropsUBO)]],
                                 device const FillEvaluatedPropsUBO& props [[buffer(idFillEvaluatedPropsUBO)]]) {
 
@@ -183,7 +180,6 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                             device const FillPatternTilePropsUBO* tilePropsVector [[buffer(idFillTilePropsUBO)]],
                             device const FillEvaluatedPropsUBO& props [[buffer(idFillEvaluatedPropsUBO)]],
                             texture2d<float, access::sample> image0 [[texture(0)]],
@@ -330,10 +326,7 @@ struct VertexStage {
         outline_stages!(),
         r"
 FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
-                                device const ViewUBO& view [[buffer(idViewUBO)]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const FillOutlineDrawableUBO* drawableVector [[buffer(idFillDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]]) {
+                                device const FillOutlineDrawableUBO* drawableVector [[buffer(idFillDrawableUBO)]]) {
 
     device const FillOutlineDrawableUBO& drawable = drawableVector[uboIndex];
 
@@ -370,10 +363,7 @@ enum {
         outline_stages!(),
         r"
 FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]],
-                                device const ViewUBO& view [[buffer(idViewUBO)]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const FillOutlineDrawableUBO* drawableVector [[buffer(idFillDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const short2* outlineVertices [[buffer(idFillOutlineVertices)]],
                                 device const short2* outlineEnds [[buffer(idFillOutlineEnds)]],
                                 device const float* outlinePaint [[buffer(idFillOutlinePaint)]]) {
@@ -464,10 +454,7 @@ struct FragmentStage {
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
-                                device const ViewUBO& view [[buffer(idViewUBO)]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const FillPatternDrawableUBO* drawableVector [[buffer(idFillDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const FillPatternTilePropsUBO* tilePropsVector [[buffer(idFillTilePropsUBO)]],
                                 device const FillEvaluatedPropsUBO& props [[buffer(idFillEvaluatedPropsUBO)]]) {
 
@@ -516,7 +503,6 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                             device const FillPatternTilePropsUBO* tilePropsVector [[buffer(idFillTilePropsUBO)]],
                             device const FillEvaluatedPropsUBO& props [[buffer(idFillEvaluatedPropsUBO)]],
                             texture2d<float, access::sample> image0 [[texture(0)]],
@@ -613,9 +599,7 @@ struct FragmentStage {
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const FillDrawableUBO* drawableVector [[buffer(idFillDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]]) {
+                                device const FillDrawableUBO* drawableVector [[buffer(idFillDrawableUBO)]]) {
 
     device const FillDrawableUBO& drawable = drawableVector[uboIndex];
 
