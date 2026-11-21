@@ -259,9 +259,14 @@ fn with_parameters(functions: &str, main: &str, program: &Program, stage: Stage)
     let (parameters, body) = (&functions[name_at..close], &functions[close..end]);
     let declared: HashSet<&str> = identifiers(parameters).collect();
     let named: HashSet<&str> = identifiers(body).filter(|name| !declared.contains(name)).collect();
+    // The function's own parameters, after ` main(`.
+    let own = &parameters[main.len() + 2..];
     let mut added = String::new();
     for binding in program.bindings(stage).filter(|binding| named.contains(&*binding.name())) {
-        added.push_str(",\n    ");
+        if !added.is_empty() || !own.trim().is_empty() {
+            added.push(',');
+        }
+        added.push_str("\n    ");
         added.push_str(&parameter(&binding));
     }
     [&functions[..close], &added, &functions[close..]].concat()
@@ -326,6 +331,24 @@ mod tests {
              device const short4* walls [[buffer(7)]]) {\n    return walls[drawIndex] + view.x;\n}\n\
              half4 fragment other(int view,\n    sampler first_sampler [[sampler(0)]],\n    \
              texture2d<float, access::sample> second [[texture(1)]]) {\n    return walls + second.sample(first_sampler, 0);\n}"
+        );
+    }
+
+    #[test]
+    fn a_main_function_without_parameters_of_its_own_has_no_leading_comma() {
+        static PROGRAM: Program = Program {
+            name: "plain",
+            buffers: &[],
+            attributes: &[],
+            instance_attributes: &[],
+            textures: &[],
+            properties: &[],
+            sources: Sources::NONE,
+        };
+        let functions = "half4 fragment fragmentMain() {\n    return half4(view.x);\n}";
+        assert_eq!(
+            with_parameters(functions, "fragmentMain", &PROGRAM, Stage::Fragment),
+            "half4 fragment fragmentMain(\n    device const ViewUBO& view [[buffer(0)]]) {\n    return half4(view.x);\n}"
         );
     }
 }
