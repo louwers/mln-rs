@@ -208,7 +208,7 @@ impl RenderedFeatures {
                         LentText::default()
                     } else {
                         let state = feature::Value::Object(feature.state.clone());
-                        LentText::new(&mln_style::conversion::value_conversion::value_to_json(&state).to_string())
+                        LentText::new(&mln_style::conversion::value_to_json(&state).to_string())
                     };
                     [
                         feature_json(feature),

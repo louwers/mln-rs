@@ -1,8 +1,7 @@
 //! Style conversion: `Error`, the type-erased `Convertible` view of a
 //! JSON-like value, its front ends over `serde_json` values, over
-//! `serde_json_borrow` values (`borrowed_conversion`) and over
-//! `feature::Value` (`value_conversion`), `get_json_type`, and the typed
-//! converters from a `Convertible` to style types.
+//! `serde_json_borrow` values and over `feature::Value`, `get_json_type`,
+//! and the typed converters from a `Convertible` to style types.
 //!
 //! `Converter` is a trait for the converters of constants, which take no
 //! arguments besides the value and the error. The converters of what can
@@ -11,14 +10,14 @@
 //! `convert_property_value::<T>(value, error, allow_data_expressions,
 //! convert_tokens, functions)`.
 
-pub mod borrowed_conversion;
+pub(crate) mod borrowed;
 pub(crate) mod color_ramp_property_value;
 pub(crate) mod constant;
 pub(crate) mod convertible;
 pub(crate) mod coordinate;
 pub(crate) mod filter;
 pub mod function;
-pub mod get_json_type;
+mod get_json_type;
 pub(crate) mod image;
 mod json_conversion;
 pub mod layer;
@@ -31,11 +30,11 @@ pub(crate) mod sky;
 pub mod source;
 pub(crate) mod sprite;
 pub(crate) mod transition_options;
-pub mod value_conversion;
+mod value;
 
 pub use convertible::{Convertible, Error, to_geojson};
 pub use get_json_type::get_json_type;
-pub use value_conversion::{json_to_value, value_to_json};
+pub use value::{json_to_value, value_to_json};
 
 /// A conversion from a `Convertible` that takes no arguments besides the value
 /// and the error.

@@ -10,7 +10,7 @@
 use feature::Value;
 use geojson::GeoJson;
 use mln_util::hash::HashSet;
-pub use serde_json_borrow::{Map as JsonObject, Value as Json};
+pub(crate) use serde_json_borrow::{Map as JsonObject, Value as Json};
 
 use crate::conversion::convertible::{ConversionTraits, Convertible, Error};
 
@@ -20,13 +20,13 @@ static NULL: Json<'static> = Json::Null;
 
 /// The value of `object`'s member `key`; of members with that key, the last.
 #[must_use]
-pub fn member<'a, 'ctx>(object: &'a JsonObject<'ctx>, key: &str) -> Option<&'a Json<'ctx>> {
+pub(crate) fn member<'a, 'ctx>(object: &'a JsonObject<'ctx>, key: &str) -> Option<&'a Json<'ctx>> {
     object.as_vec().iter().rev().find(|(name, _)| **name == *key).map(|(_, value)| value)
 }
 
 /// The members of `object` in document order, each key once: at its first
 /// member's position, with its last member's value.
-pub fn members<'a, 'ctx>(object: &'a JsonObject<'ctx>) -> impl Iterator<Item = (&'a str, &'a Json<'ctx>)> {
+pub(crate) fn members<'a, 'ctx>(object: &'a JsonObject<'ctx>) -> impl Iterator<Item = (&'a str, &'a Json<'ctx>)> {
     let entries = object.as_vec();
     let (unique, deduplicated) = if has_duplicate_keys(object) {
         let mut seen = HashSet::default();
@@ -130,7 +130,7 @@ fn number_value(json: &Json<'_>) -> Value {
 /// The value of a JSON value, arrays and objects included, as
 /// [`json_to_value`](crate::conversion::json_to_value) reads `serde_json`'s.
 #[must_use]
-pub fn borrowed_json_to_value(json: &Json<'_>) -> Value {
+pub(crate) fn borrowed_json_to_value(json: &Json<'_>) -> Value {
     match json {
         Json::Null => Value::Null,
         Json::Bool(b) => Value::Bool(*b),

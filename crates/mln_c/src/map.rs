@@ -673,7 +673,7 @@ pub(crate) unsafe extern "C" fn mln_map_get_feature_state(
                 completion,
                 |map| map.feature_state(&selector),
                 |state| {
-                    let json = mln_style::conversion::value_conversion::value_to_json(&Value::Object(state));
+                    let json = mln_style::conversion::value_to_json(&Value::Object(state));
                     LentText::new(&json.to_string())
                 },
             )
