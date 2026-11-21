@@ -85,15 +85,16 @@ use mln_gfx::shaders::shader_defines::{
     ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE, ID_SYMBOL_IMAGE_ICON_TEXTURE, ID_SYMBOL_IMAGE_TEXTURE,
     ID_SYMBOL_OPACITY_ATTRIBUTE, ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE, ID_SYMBOL_POS_OFFSET_ATTRIBUTE,
     ID_SYMBOL_PROJECTED_POS_ATTRIBUTE, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE, ID_SYMBOL_TILE_PROPS_UBO,
-    ID_TERRAIN_DEM_TEXTURE, ID_TERRAIN_DRAPE_TEXTURE, ID_TERRAIN_DRAWABLE_UBO, ID_TERRAIN_POS_VERTEX_ATTRIBUTE,
-    ID_TERRAIN_PROBE_DEM_COORDS_VERTEX_ATTRIBUTE, ID_TERRAIN_PROBE_POS_VERTEX_ATTRIBUTE, ID_TERRAIN_PROPS_UBO,
-    ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE, ID_VERTEX_TEXEL_TEXTURE,
+    ID_TERRAIN_DEM_TEXTURE, ID_TERRAIN_DRAPE_TEXTURE, ID_TERRAIN_DRAWABLE_UBO, ID_TERRAIN_FOG_UBO,
+    ID_TERRAIN_POS_VERTEX_ATTRIBUTE, ID_TERRAIN_PROBE_DEM_COORDS_VERTEX_ATTRIBUTE,
+    ID_TERRAIN_PROBE_POS_VERTEX_ATTRIBUTE, ID_TERRAIN_PROPS_UBO, ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE,
+    ID_VERTEX_TEXEL_TEXTURE,
 };
 use mln_gfx::shaders::sky_ubo::{AtmospherePropsUBO, SkyPropsUBO};
 use mln_gfx::shaders::symbol_layer_ubo::{
     CollisionDrawableUBO, CollisionTilePropsUBO, SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO,
 };
-use mln_gfx::shaders::terrain_ubo::{TerrainDrawableUBO, TerrainPropsUBO};
+use mln_gfx::shaders::terrain_ubo::{TerrainDrawableUBO, TerrainFogUBO, TerrainPropsUBO};
 
 use super::glsl_sources;
 
@@ -337,6 +338,7 @@ shader_source!(
         element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
         element::<TerrainDrawableUBO, TerrainDrawableUBO>("TerrainDrawableUBO", ID_TERRAIN_DRAWABLE_UBO),
         block::<TerrainPropsUBO>("TerrainPropsUBO", ID_TERRAIN_PROPS_UBO),
+        block::<TerrainFogUBO>("TerrainFogUBO", ID_TERRAIN_FOG_UBO),
     ],
     &[attr("a_pos", ID_TERRAIN_POS_VERTEX_ATTRIBUTE)],
     &[tex("u_dem", ID_TERRAIN_DEM_TEXTURE), tex("u_drape", ID_TERRAIN_DRAPE_TEXTURE)]
