@@ -42,11 +42,11 @@
 //!     ground, the rule at rest takes the center up or down instead.
 //!
 //! The clamp decides the altitude, so a command or a gesture takes none it
-//! is given, and one that sets only the altitude moves nothing; the
-//! commands that run when the clamp turns on give theirs up. Where the
-//! ground the altitude would head for is unknown, as before the renderer
-//! drew any, the altitude stays where it is, and heads on from there once
-//! that ground is known.
+//! is given: a command given an altitude does exactly what it would have
+//! done without one. The commands that run when the clamp turns on give
+//! theirs up. Where the ground the altitude would head for is unknown, as
+//! before the renderer drew any, the altitude stays where it is, and heads
+//! on from there once that ground is known.
 //!
 //! The terrain moves a camera at rest, as ground loads or changes under it,
 //! the clamp turns on or the terrain goes, without camera events, as in GL

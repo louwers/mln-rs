@@ -472,34 +472,43 @@ fn terrain_that_arrives_with_mercator_mid_ease_comes_to_rest_without_a_jump() {
     assert!(moved < A_COUPLE_OF_PIXELS, "the frame that brings the camera to rest moves it {moved} px");
 }
 
-/// A pan across the step, joined 400 ms in by a command of the altitude
-/// alone: a flight, or an ease around an anchor. The clamp takes the
-/// altitude, so the command asks for nothing and completes at once, and the
-/// pan, which it took nothing from, completes at its center, on the ground,
-/// without a jump.
+/// A pan across the step, joined 400 ms in by a command given an altitude
+/// or not: a flight that asks for nothing else, an ease around an anchor
+/// that asks for nothing else, or an ease of the zoom. The clamp drops the
+/// altitude, so each
+/// command ends as it does without one, as does the pan under it, and the
+/// camera comes to rest in the same place, on the ground, without a jump.
 #[test]
-fn a_command_of_the_altitude_alone_leaves_a_pan_its_end() {
-    for (mode, anchor) in
-        [(CameraUpdateMode::Fly, None), (CameraUpdateMode::Ease, Some(ScreenCoordinate::new(120.0, 400.0)))]
-    {
-        let what = format!("{mode:?} around {anchor:?}");
-        let (mut transform, ground, clock) = transform_over_step();
-        let pan = transform.ease_to(&CameraOptions { center: Some(at(0.06)), ..Default::default() }, &over(1000));
-        let mut altitude = None;
-        let run = run_until_rest(&mut transform, clock, |transform, elapsed| {
-            if elapsed == Duration::from_millis(400) {
-                altitude = Some(transform.update_camera(&CameraUpdate {
-                    mode,
-                    camera: CameraOptions { center_altitude: Some(2000.0), anchor, ..Default::default() },
-                    animation: over(600),
-                    ..Default::default()
-                }));
-            }
+fn a_command_given_an_altitude_does_what_it_does_without_one() {
+    let anchor = Some(ScreenCoordinate::new(120.0, 400.0));
+    for (mode, camera) in [
+        (CameraUpdateMode::Fly, CameraOptions::default()),
+        (CameraUpdateMode::Ease, CameraOptions { anchor, ..Default::default() }),
+        (CameraUpdateMode::Ease, CameraOptions { zoom: Some(13.5), ..Default::default() }),
+    ] {
+        let runs = [None, Some(2000.0)].map(|center_altitude| {
+            let what = format!("{mode:?} of {camera:?} given {center_altitude:?}");
+            let (mut transform, ground, clock) = transform_over_step();
+            let pan = transform.ease_to(&CameraOptions { center: Some(at(0.06)), ..Default::default() }, &over(1000));
+            let mut command = None;
+            let run = run_until_rest(&mut transform, clock, |transform, elapsed| {
+                if elapsed == Duration::from_millis(400) {
+                    command = Some(transform.update_camera(&CameraUpdate {
+                        mode,
+                        camera: CameraOptions { center_altitude, ..camera },
+                        animation: over(600),
+                        ..Default::default()
+                    }));
+                }
+            });
+            run.assert_rests_without_a_jump(&*ground, &what);
+            ((run.outcome(command.unwrap()), run.outcome(pan)), run.rest, ground)
         });
-        assert_eq!(TransitionOutcome::Completed, run.outcome(altitude.unwrap()), "{what}");
-        assert_eq!(TransitionOutcome::Completed, run.outcome(pan), "{what}");
-        run.assert_rests_at(0.06, 13.0, &what);
-        run.assert_rests_without_a_jump(&*ground, &what);
+        let [(without, rest, ground), (with, given_rest, _)] = runs;
+        let what = format!("{mode:?} of {camera:?}");
+        assert_eq!(without, with, "{what}: the command's and the pan's outcomes");
+        let apart = picture_moved(&rest, &given_rest, &*ground);
+        assert!(apart < 1.0, "{what}: the altitude moves the camera at rest by {apart} px");
     }
 }
 
