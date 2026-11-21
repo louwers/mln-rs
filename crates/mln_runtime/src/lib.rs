@@ -70,8 +70,8 @@ pub use event::{EventHandler, EventMask, EventSource, EventType, RuntimeEvent, R
 pub use feature_state::{FeatureState, FeatureStateSelector};
 pub use map::{LogicalExtent, MapSnapshot};
 pub use map_handle::{Applied, CameraQuery, CommandGroup, Map, MapId, MapOptions};
+pub use mln_map_types::{ClipDepthRange, FrameProjection};
 pub use mln_render::query::{RenderedQueryOptions, SourceQueryOptions};
-pub use mln_render::{ClipDepthRange, FrameProjection};
 pub use mln_util::{Error, ErrorKind};
 pub use offline::Offline;
 pub use render::{

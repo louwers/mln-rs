@@ -5,7 +5,7 @@ use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, Gpu, GpuError, LoadO
 use mln_gfx::stencil_mode::Test;
 use mln_gfx::types::{DepthFunctionType, StencilOpType};
 use mln_gfx::{DepthMaskType, DepthMode, ScissorRect, StencilMode};
-use mln_map_types::{MapDebugOptions, ProjectionData, View, ViewportMode};
+use mln_map_types::{FrameProjection, MapDebugOptions, ProjectionData, View, ViewportMode};
 use mln_tile_id::UnwrappedTileID;
 use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, Log};
@@ -15,7 +15,6 @@ use mln_vec_map::VecMap;
 
 use crate::clip_masks::ClipMasks;
 use crate::frame::Frame;
-use crate::frame_projection::FrameProjection;
 use crate::gfx::context::Context;
 use crate::layer_composite::LayerComposite;
 use crate::render_light::EvaluatedLight;

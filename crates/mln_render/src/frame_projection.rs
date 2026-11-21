@@ -9,7 +9,7 @@
 //! backend.
 
 use glam::{DMat4, DVec3};
-pub use mln_map_types::{ClipDepthRange, FrameProjection};
+use mln_map_types::{ClipDepthRange, FrameProjection};
 use mln_util::projection::Projection;
 
 use crate::paint_parameters::TransformParameters;
