@@ -146,7 +146,7 @@ impl Transform {
     /// reports no camera change. Returns whether the view changed.
     pub fn follow_terrain(&mut self) -> bool {
         let before = self.view().center_altitude();
-        let lifted = self.gesture_in_progress && self.clamped() && {
+        let lifted = self.gesture_holds() && {
             self.lift_hold();
             self.view().center_altitude() != before
         };
@@ -174,8 +174,15 @@ impl Transform {
     }
 
     /// Whether there is terrain and it clamps the center.
-    fn clamped(&self) -> bool {
+    pub(super) fn clamped(&self) -> bool {
         self.terrain.as_ref().is_some_and(|terrain| terrain.clamped)
+    }
+
+    /// Whether a gesture holds the altitude of a center that the terrain
+    /// clamps: while it is in progress, unless a command took the center
+    /// from its momentum.
+    fn gesture_holds(&self) -> bool {
+        self.gesture_in_progress && !self.gesture.ceded && self.clamped()
     }
 
     /// Keeps the eye out of the terrain while a gesture or a command moves
@@ -183,7 +190,7 @@ impl Transform {
     /// holds ([`Self::lift_hold`]), and anything else is raised by pitch and
     /// zoom ([`Self::keep_eye_above`]). Without terrain it does nothing.
     pub(super) fn keep_clear_of_ground(&mut self) {
-        if self.gesture_in_progress && self.clamped() {
+        if self.gesture_holds() {
             self.lift_hold();
         } else {
             self.keep_eye_above();

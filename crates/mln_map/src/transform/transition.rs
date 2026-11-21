@@ -230,11 +230,13 @@ impl Transform {
     /// group stops the whole group, and a command left with no fields
     /// finishes.
     ///
-    /// Outside a gesture, a command that moves the center, by a center or an
-    /// anchor, over terrain that clamps the center eases the altitude onto
-    /// the ground at the center it ends on, along `along`, in place of the
-    /// altitude it was given ([`EasedAltitude`]). It then owns `ALTITUDE`
-    /// too, until it gives up its center.
+    /// Outside a gesture's own moves, a command that moves the center, by a
+    /// center or an anchor, over terrain that clamps the center eases the
+    /// altitude onto the ground at the center it ends on, along `along`, in
+    /// place of the altitude it was given ([`EasedAltitude`]). It then owns
+    /// `ALTITUDE` too, until it gives up its center. One that takes the
+    /// center from a gesture's momentum ends the gesture's hold of the
+    /// altitude, and its move onto the ground at its end.
     pub(super) fn start_transition(
         &mut self,
         camera: &CameraOptions,
@@ -279,8 +281,9 @@ impl Transform {
             | (if scaling { ZOOM } else { 0 })
             | (if rotating { BEARING } else { 0 });
 
-        let clamped = !self.gesture_in_progress && self.terrain.as_ref().is_some_and(|terrain| terrain.clamped);
-        let end = if clamped {
+        // A gesture's own moves hold the altitude; a command eases it, also
+        // one that takes the center from a gesture's momentum.
+        let end = if !self.gesture.active && self.clamped() {
             match anchor {
                 Some(anchor) => Some(self.anchored_end(fields, &target, &anchor, &anchor_lat_lng, anchor_height)),
                 None => camera.center.and(target.center).map(|end| end.wrapped()),
@@ -294,6 +297,10 @@ impl Transform {
         });
         if eased_altitude.is_some() {
             fields |= ALTITUDE;
+            if self.gesture_in_progress {
+                self.gesture.ceded = true;
+                self.gesture.hold = None;
+            }
         }
 
         let start = self.now();

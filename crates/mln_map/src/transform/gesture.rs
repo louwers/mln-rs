@@ -12,7 +12,7 @@ use crate::map_event::{CameraChange, CameraChangeMode, CameraChangeSource};
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct GestureState {
     /// Between its first `Begin` or `Update` and its `End` or `Cancel`.
-    active: bool,
+    pub(super) active: bool,
     /// Counts gestures, so that an earlier gesture's momentum doesn't end a
     /// later gesture.
     serial: u64,
@@ -22,6 +22,10 @@ pub(super) struct GestureState {
     /// The altitude that a gesture in progress over a center the terrain
     /// clamps holds, under its lift ([`Transform::follow_terrain`]).
     pub(super) hold: Option<f64>,
+    /// Whether a command took the center from the gesture's momentum and
+    /// eases the altitude onto the ground it ends on: the gesture then
+    /// neither holds the altitude nor ends on the ground.
+    pub(super) ceded: bool,
     /// The plane over terrain that the gesture's anchored steps solve on
     /// ([`Transform::anchor_plane`]).
     pub(super) anchor_plane: Option<AnchorPlane>,
@@ -206,8 +210,9 @@ impl Transform {
 
     /// Marks whether a gesture is in progress. The end of one that held the
     /// altitude over a center the terrain clamps moves the center onto the
-    /// ground along the view ([`Self::recenter_on_ground`]). Returns whether
-    /// that end moved the camera.
+    /// ground along the view ([`Self::recenter_on_ground`]), unless a
+    /// command took the center from its momentum. Returns whether that end
+    /// moved the camera.
     pub(crate) fn set_gesture_in_progress(&mut self, in_progress: bool) -> bool {
         let ends = self.gesture_in_progress && !in_progress;
         self.gesture_in_progress = in_progress;
@@ -215,7 +220,7 @@ impl Transform {
             return false;
         }
         self.gesture.hold = None;
-        self.recenter_on_ground()
+        !std::mem::take(&mut self.gesture.ceded) && self.recenter_on_ground()
     }
 
     #[must_use]

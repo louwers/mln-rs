@@ -8,15 +8,17 @@ use std::time::Duration;
 
 use glam::{DVec2, DVec3};
 use mln_map_types::{Elevation, View};
+use mln_util::constants::DEFAULT_TRANSITION_EASE;
 use mln_util::geo::{LatLng, ScreenCoordinate, WrapMode};
 use mln_util::projection::Projection;
 use mln_util::queue::Queue;
 
-use super::ground::{Slope, flat, ground, ground_event, report, world};
-use super::terrain_camera::{map_over, pixel, start};
+use super::ground::{Slope, assert_near, flat, ground, ground_event, report, world};
+use super::terrain_camera::{frames, map_over, pixel, start};
 use crate::{
-    BoundOptions, CameraChangeSource, CameraDelta, CameraMomentum, CameraOptions, CameraUpdate, CameraUpdateMode,
-    GesturePhase, Map, MapEvent, MomentumDecay, MomentumDecayModel, MomentumEasing, MomentumGlide,
+    AnchoredMomentum, AnimationOptions, BoundOptions, CameraChangeSource, CameraDelta, CameraMomentum, CameraOptions,
+    CameraUpdate, CameraUpdateMode, GesturePhase, Map, MapEvent, MomentumDecay, MomentumDecayModel, MomentumEasing,
+    MomentumGlide,
 };
 
 /// Ground at sea level under the start that rises about half a meter for
@@ -393,4 +395,77 @@ fn an_unclamped_gesture_keeps_its_altitude_and_is_raised_by_pitch_and_zoom() {
     map.apply_camera_delta(&delta(GesturePhase::End, None, None)).unwrap();
     let ended = map.transform_state().camera_options(None);
     assert_eq!((raised.center, raised.zoom, Some(500.0)), (ended.center, ended.zoom, ended.center_altitude));
+}
+
+/// A glide that lasts `seconds` from `speed`, along a curve that ends at
+/// rest.
+fn decay(seconds: u64, speed: f64) -> MomentumDecay {
+    MomentumDecay {
+        model: MomentumDecayModel::Curve {
+            reference_speed: speed,
+            duration: Duration::from_secs(seconds),
+            exponent: 0.5,
+            easing: MomentumEasing::ANDROID_FLING,
+        },
+        ..MomentumDecay::DEFAULT
+    }
+}
+
+/// A command that takes the center from a gesture's glide, once the fingers
+/// are up, eases its altitude onto the ground it ends on, as any command
+/// does: its last frame stands on that ground, and neither the glide's end,
+/// the turn the glide goes on with, nor the camera at rest moves the center,
+/// the zoom or the altitude after it.
+#[test]
+fn a_command_that_takes_the_center_from_a_glide_ends_on_the_ground() {
+    let destination = LatLng::new(20.0, 10.02).unwrap();
+    for turns in [false, true] {
+        let run_loop = Queue::<()>::new();
+        let ground = slope();
+        let (mut map, clock) = map_over(Some(&ground), &run_loop);
+        map.apply_camera_delta(&delta(GesturePhase::Begin, Some((-60.0, 40.0)), None)).unwrap();
+        let momentum = CameraMomentum {
+            pan: Some(MomentumGlide { velocity: ScreenCoordinate::new(-600.0, 800.0), decay: decay(1, 1000.0) }),
+            bearing: AnchoredMomentum {
+                glide: turns.then_some(MomentumGlide { velocity: 30.0, decay: decay(3, 30.0) }),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        map.apply_camera_delta(&CameraDelta { momentum: Some(momentum), ..delta(GesturePhase::End, None, None) })
+            .unwrap();
+        map.set_frame_time(Some(clock + Duration::from_millis(96)));
+        let from = map.transform_state().view().center_altitude();
+        map.update_camera(&CameraUpdate {
+            mode: CameraUpdateMode::Ease,
+            camera: CameraOptions { center: Some(destination), ..Default::default() },
+            animation: AnimationOptions {
+                duration: Some(Duration::from_secs(1)),
+                easing: Some(DEFAULT_TRANSITION_EASE),
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        let end = ground.at(destination).unwrap();
+        assert!(end > from + 500.0, "{from} m to {end} m");
+        // Every frame stands on the line from where it started to that
+        // ground, at the ease's progress.
+        frames(&mut map, clock + Duration::from_millis(96), Duration::from_secs(1), |map, elapsed| {
+            let k = DEFAULT_TRANSITION_EASE.solve(elapsed.as_secs_f64(), 0.001);
+            let altitude = map.transform_state().view().center_altitude();
+            assert_near(from + (end - from) * k, altitude, 1e-6, &format!("turns {turns}: at {elapsed:?}"));
+        });
+        let ended = map.transform_state().camera_options(None);
+        assert_eq!(Some(end), ended.center_altitude, "turns {turns}: the command ends on the ground");
+        assert_eq!(turns, map.snapshot().gesture_in_progress, "turns {turns}");
+        map.set_frame_time(Some(clock + Duration::from_secs(5)));
+        map.trigger_repaint();
+        assert!(!map.snapshot().gesture_in_progress);
+        let rest = map.transform_state().camera_options(None);
+        assert_eq!(
+            (ended.center, ended.zoom, ended.center_altitude),
+            (rest.center, rest.zoom, rest.center_altitude),
+            "turns {turns}: at rest"
+        );
+    }
 }

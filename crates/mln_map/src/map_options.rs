@@ -50,7 +50,9 @@ pub struct MapOptions {
     /// end moves the center along the view onto the ground, with the eye
     /// where it was; where the view meets no drawn ground, or the zoom
     /// limits refuse that move, the center stays and stands on the ground
-    /// as at rest. Any other camera that an animation moves keeps its
+    /// as at rest. A command that takes the center from a gesture's momentum
+    /// eases the altitude as any command does, and the gesture's end leaves
+    /// the center to it. Any other camera that an animation moves keeps its
     /// altitude. When this is off, every camera keeps the altitude it is
     /// given, such as the style's `centerAltitude`, and a command or a
     /// gesture whose eye the ground reaches lowers the pitch and zoom
