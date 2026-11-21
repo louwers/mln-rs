@@ -101,6 +101,48 @@ static LINE_GRADIENT_SDF: Source = Source {
     textures: &[Texture::new(0, ID_LINE_IMAGE_TEXTURE), Texture::new(1, ID_LINE_DASH_TEXTURE)],
 };
 
+/// What every program of the type reads before its own prelude: the scale
+/// of the extrusion vectors, the width of a line on the globe, and the
+/// clipping of the zoom 0 tile's lines at the antimeridian.
+macro_rules! line_prelude {
+    () => {
+        r#"
+// The maximum allowed miter limit is 2.0 at the moment. the extrude normal is stored
+// in a byte (-128..127). We scale regular normals up to length 63, but there are also
+// "special" normals that have a bigger length (of up to 126 in this case).
+#define LINE_NORMAL_SCALE (1.0 / (127 / 2))
+
+#if defined(PROJECTION_GLOBE)
+
+inline float projectLineThickness(float tileY, device const ProjectionUBO& projection) {
+    const float thickness = 1.0 / circumferenceRatioAtTileY(tileY, projection);
+    if (projection.projection_transition < 0.999) {
+        return mix(1.0, thickness, projection.projection_transition);
+    }
+    return thickness;
+}
+
+// The zoom 0 tile's buffer wraps around the planet onto the tile itself, so the line shaders discard the fragments
+// beyond its X extent; every other tile (a mercator width below the whole world's) hands on a value inside it.
+inline float antimeridianClipX(float2 posInTile, device const ProjectionUBO& projection) {
+    return projection.tile_mercator_coords.z * 8192.0 >= 1.0 ? posInTile.x : 0.0;
+}
+
+inline bool clippedAtAntimeridian(float tileX) {
+    return tileX < 0.0 || tileX >= 8192.0;
+}
+
+#else
+
+inline float projectLineThickness(float, device const ProjectionUBO&) {
+    return 1.0;
+}
+
+#endif
+"#
+    };
+}
+
 /// The source of each of the type's programs.
 pub(super) static SOURCES: &[(&Program, &Source)] = &[
     (&programs::LINE, &LINE),
@@ -113,7 +155,9 @@ pub(super) static SOURCES: &[(&Program, &Source)] = &[
 const LINE_GRADIENT_SDF_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
+    prelude: concat!(
+        line_prelude!(),
+        r#"
 
 // The attribute conveying progress along a line is scaled to [0, 2^15).
 #define MAX_LINE_DISTANCE 32767.0
@@ -258,7 +302,8 @@ union LineTilePropsUnionUBO {
     LineSDFTilePropsUBO lineSDFTilePropsUBO;
 };
 
-"#,
+"#
+    ),
     source: r"
 
 struct VertexStage {
@@ -502,7 +547,9 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 const LINE_GRADIENT_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
+    prelude: concat!(
+        line_prelude!(),
+        r#"
 
 // The attribute conveying progress along a line is scaled to [0, 2^15).
 #define MAX_LINE_DISTANCE 32767.0
@@ -647,7 +694,8 @@ union LineTilePropsUnionUBO {
     LineSDFTilePropsUBO lineSDFTilePropsUBO;
 };
 
-"#,
+"#
+    ),
     source: r"
 
 struct VertexStage {
@@ -828,7 +876,9 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 const LINE_PATTERN_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
+    prelude: concat!(
+        line_prelude!(),
+        r#"
 
 enum {
     idLineDrawableUBO = idDrawableReservedVertexOnlyUBO,
@@ -970,7 +1020,8 @@ union LineTilePropsUnionUBO {
     LineSDFTilePropsUBO lineSDFTilePropsUBO;
 };
 
-"#,
+"#
+    ),
     source: r"
 
 struct VertexStage {
@@ -1239,7 +1290,9 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 const LINE_SDF_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
+    prelude: concat!(
+        line_prelude!(),
+        r#"
 
 enum {
     idLineDrawableUBO = idDrawableReservedVertexOnlyUBO,
@@ -1381,7 +1434,8 @@ union LineTilePropsUnionUBO {
     LineSDFTilePropsUBO lineSDFTilePropsUBO;
 };
 
-"#,
+"#
+    ),
     source: r"
 
 struct VertexStage {
@@ -1633,7 +1687,9 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 const LINE_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
+    prelude: concat!(
+        line_prelude!(),
+        r#"
 
 enum {
     idLineDrawableUBO = idDrawableReservedVertexOnlyUBO,
@@ -1775,7 +1831,8 @@ union LineTilePropsUnionUBO {
     LineSDFTilePropsUBO lineSDFTilePropsUBO;
 };
 
-"#,
+"#
+    ),
     source: r"
 
 struct VertexStage {

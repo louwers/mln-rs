@@ -99,6 +99,58 @@ static LINE_GRADIENT_SDF: Source = Source {
     textures: &[Texture::new(0, ID_LINE_IMAGE_TEXTURE), Texture::new(1, ID_LINE_DASH_TEXTURE)],
 };
 
+/// What every vertex stage of the type reads: the scale of the extrusion
+/// vectors, the width of a line on the globe, and the tile x that clips the
+/// zoom 0 tile's lines at the antimeridian.
+macro_rules! line_vertex_prelude {
+    () => {
+        r"
+// The maximum allowed miter limit is 2.0 at the moment. the extrude normal is stored
+// in a byte (-128..127). We scale regular normals up to length 63, but there are also
+// special normals that have a bigger length (of up to 126 in this case).
+#define LINE_NORMAL_SCALE (1.0 / (127 / 2))
+
+#ifdef PROJECTION_GLOBE
+
+float projectLineThickness(float tileY, ProjectionUBO projection) {
+    const float thickness = 1.0 / circumferenceRatioAtTileY(tileY, projection);
+    if (projection.projection_transition < 0.999) {
+        return mix(1.0, thickness, projection.projection_transition);
+    }
+    return thickness;
+}
+
+// The zoom 0 tile's buffer wraps around the planet onto the tile itself, so the line shaders discard the fragments
+// beyond its X extent; every other tile (a mercator width below the whole world's) hands on a value inside it.
+float antimeridianClipX(vec2 posInTile, ProjectionUBO projection) {
+    return projection.tile_mercator_coords.z * 8192.0 >= 1.0 ? posInTile.x : 0.0;
+}
+
+#else
+
+float projectLineThickness(float tileY, ProjectionUBO projection) {
+    return 1.0;
+}
+
+#endif
+"
+    };
+}
+
+/// What every fragment stage of the type reads: whether a fragment is past
+/// the zoom 0 tile's x extent, see `antimeridianClipX`.
+macro_rules! line_fragment_prelude {
+    () => {
+        r"
+#ifdef PROJECTION_GLOBE
+bool clippedAtAntimeridian(float tileX) {
+    return tileX < 0.0 || tileX >= 8192.0;
+}
+#endif
+"
+    };
+}
+
 /// The source of each of the type's programs.
 pub(super) static SOURCES: &[(&Program, &Source)] = &[
     (&programs::LINE, &LINE),
@@ -121,7 +173,9 @@ const LINE_SHADE_PRELUDE: &str = r"
 
 const LINE_SHADER: Glsl = Glsl {
     prelude: LINE_SHADE_PRELUDE,
-    vertex: r"
+    vertex: concat!(
+        line_vertex_prelude!(),
+        r"
 
 layout(location = 0) in ivec2 in_pos_normal;
 layout(location = 1) in uvec4 in_data;
@@ -294,8 +348,11 @@ void main() {
 
     frag_width2 = vec2(outset, inset);
 }
-",
-    fragment: r"
+"
+    ),
+    fragment: concat!(
+        line_fragment_prelude!(),
+        r"
 
 layout(location = 0) in vec2 frag_normal;
 layout(location = 1) in vec2 frag_width2;
@@ -372,12 +429,15 @@ void main() {
 
     out_color = color * (alpha * opacity);
 }
-",
+"
+    ),
 };
 
 const LINE_GRADIENT_SHADER: Glsl = Glsl {
     prelude: LINE_SHADE_PRELUDE,
-    vertex: r"
+    vertex: concat!(
+        line_vertex_prelude!(),
+        r"
 
 layout(location = 0) in ivec2 in_pos_normal;
 layout(location = 1) in uvec4 in_data;
@@ -540,8 +600,11 @@ void main() {
 
     frag_width2 = vec2(outset, inset);
 }
-",
-    fragment: r"
+"
+    ),
+    fragment: concat!(
+        line_fragment_prelude!(),
+        r"
 
 layout(location = 0) in vec2 frag_normal;
 layout(location = 1) in vec2 frag_width2;
@@ -616,12 +679,15 @@ void main() {
 
     out_color = color * (alpha * opacity);
 }
-",
+"
+    ),
 };
 
 const LINE_PATTERN_SHADER: Glsl = Glsl {
     prelude: LINE_SHADE_PRELUDE,
-    vertex: r"
+    vertex: concat!(
+        line_vertex_prelude!(),
+        r"
 
 layout(location = 0) in ivec2 in_pos_normal;
 layout(location = 1) in uvec4 in_data;
@@ -818,8 +884,11 @@ void main() {
     frag_width2 = vec2(outset, inset);
     frag_linesofar = (floor(in_data.z / 4.0) + in_data.w * 64.0) * LINE_DISTANCE_SCALE;
 }
-",
-    fragment: r"
+"
+    ),
+    fragment: concat!(
+        line_fragment_prelude!(),
+        r"
 
 layout(location = 0) in vec2 frag_normal;
 layout(location = 1) in vec2 frag_width2;
@@ -979,12 +1048,15 @@ void main() {
     out_color = color * (alpha * opacity);
 #endif
 }
-",
+"
+    ),
 };
 
 const LINE_SDF_SHADER: Glsl = Glsl {
     prelude: LINE_SHADE_PRELUDE,
-    vertex: r"
+    vertex: concat!(
+        line_vertex_prelude!(),
+        r"
 
 layout(location = 0) in ivec2 in_pos_normal;
 layout(location = 1) in uvec4 in_data;
@@ -1204,8 +1276,11 @@ void main() {
     frag_tex_a = vec2(linesofar * patternscale_a.x / floorwidth, frag_normal.y * patternscale_a.y + tex_y_a);
     frag_tex_b = vec2(linesofar * patternscale_b.x / floorwidth, frag_normal.y * patternscale_b.y + tex_y_b);
 }
-",
-    fragment: r"
+"
+    ),
+    fragment: concat!(
+        line_fragment_prelude!(),
+        r"
 
 layout(location = 0) in vec2 frag_normal;
 layout(location = 1) in vec2 frag_width2;
@@ -1330,12 +1405,15 @@ void main() {
 
     out_color = color * (alpha * opacity);
 }
-",
+"
+    ),
 };
 
 const LINE_GRADIENT_SDF_SHADER: Glsl = Glsl {
     prelude: LINE_SHADE_PRELUDE,
-    vertex: r"
+    vertex: concat!(
+        line_vertex_prelude!(),
+        r"
 
 layout(location = 0) in ivec2 in_pos_normal;
 layout(location = 1) in uvec4 in_data;
@@ -1545,8 +1623,11 @@ void main() {
     frag_tex_a = vec2(linesofar * patternscale_a.x / floorwidth, frag_normal.y * patternscale_a.y + tex_y_a);
     frag_tex_b = vec2(linesofar * patternscale_b.x / floorwidth, frag_normal.y * patternscale_b.y + tex_y_b);
 }
-",
-    fragment: r"
+"
+    ),
+    fragment: concat!(
+        line_fragment_prelude!(),
+        r"
 
 layout(location = 0) in vec2 frag_normal;
 layout(location = 1) in vec2 frag_width2;
@@ -1667,5 +1748,6 @@ void main() {
 
     out_color = color * (alpha * opacity);
 }
-",
+"
+    ),
 };

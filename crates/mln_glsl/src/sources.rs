@@ -27,11 +27,6 @@ pub(crate) const PRELUDE_VERTEX: &str = r#"
 
 #define M_PI 3.1415926535897932384626433832795
 
-// The maximum allowed miter limit is 2.0 at the moment. the extrude normal is stored
-// in a byte (-128..127). We scale regular normals up to length 63, but there are also
-// "special" normals that have a bigger length (of up to 126 in this case).
-#define LINE_NORMAL_SCALE (1.0 / (127 / 2))
-
 // Unpack a pair of values that have been packed into a single float.
 // The packed values are assumed to be 8-bit unsigned integers, and are
 // packed like so:
@@ -157,14 +152,6 @@ float circumferenceRatioAtTileY(float tileY, ProjectionUBO projection) {
     return (2.0 * t) / (t * t + 1.0);
 }
 
-float projectLineThickness(float tileY, ProjectionUBO projection) {
-    const float thickness = 1.0 / circumferenceRatioAtTileY(tileY, projection);
-    if (projection.projection_transition < 0.999) {
-        return mix(1.0, thickness, projection.projection_transition);
-    }
-    return thickness;
-}
-
 float globeComputeClippingZ(vec3 spherePos, ProjectionUBO projection) {
     return 1.0 - (dot(spherePos, projection.clipping_plane.xyz) + projection.clipping_plane.w);
 }
@@ -207,12 +194,6 @@ vec4 projectTile(vec2 pos, ProjectionUBO projection) {
     return interpolateProjection(pos, projectToSphere(pos + projection.translate, vec2(0.0, 0.0), projection), 0.0, projection);
 }
 
-// The zoom 0 tile's buffer wraps around the planet onto the tile itself, so the line shaders discard the fragments
-// beyond its X extent; every other tile (a mercator width below the whole world's) hands on a value inside it.
-float antimeridianClipX(vec2 posInTile, ProjectionUBO projection) {
-    return projection.tile_mercator_coords.z * 8192.0 >= 1.0 ? posInTile.x : 0.0;
-}
-
 // The variant for geometry that can carry pole vertices; rawPos is the untranslated position.
 vec4 projectTile(vec2 pos, vec2 rawPos, ProjectionUBO projection) {
     return interpolateProjection(pos, projectToSphere(pos + projection.translate, rawPos, projection), 0.0, projection);
@@ -249,10 +230,6 @@ vec4 projectTileFor3D(vec2 pos, float elevation, ProjectionUBO projection) {
     return projection.matrix * vec4(pos, elevation, 1.0);
 }
 
-float projectLineThickness(float tileY, ProjectionUBO projection) {
-    return 1.0;
-}
-
 #endif
 
 "#;
@@ -261,13 +238,6 @@ float projectLineThickness(float tileY, ProjectionUBO projection) {
 pub(crate) const PRELUDE_FRAGMENT: &str = r"
 
 #define M_PI 3.1415926535897932384626433832795
-
-#ifdef PROJECTION_GLOBE
-// The line fragments beyond the zoom 0 tile's X extent; see antimeridianClipX in the vertex prelude.
-bool clippedAtAntimeridian(float tileX) {
-    return tileX < 0.0 || tileX >= 8192.0;
-}
-#endif
 
 #define GLOBAL_SET_INDEX                    0
 #define LAYER_SET_INDEX                     1
