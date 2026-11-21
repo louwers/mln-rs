@@ -1,11 +1,12 @@
 //! The GLSL ES preludes of every shader, and how a stage composes them with
 //! the blocks it reads and the program's GLSL ES.
 
+use std::fmt::Write as _;
 use std::ptr;
 
 use mln_gfx::gpu::{GpuError, ShaderKey};
 use mln_gfx::shaders::block::Block;
-use mln_gfx::shaders::program::PROJECTION_BUFFER;
+use mln_gfx::shaders::program::{PROJECTION_BUFFER, Program};
 use mln_gfx::shaders::source::glsl_es::{self, Glsl};
 use mln_gfx::shaders::source::identifiers;
 use mln_util::hash::HashSet;
@@ -246,6 +247,17 @@ fn projects(vertex: &HashSet<&str>) -> bool {
         || PROJECTION_PRELUDE.lines().filter_map(helper).any(|name| vertex.contains(name))
 }
 
+/// The declarations of the textures of `program` that `stage` names: each
+/// a `uniform sampler2D` of its GLSL ES name.
+fn textures(program: &Program, stage: &str) -> String {
+    let named: HashSet<&str> = identifiers(stage).collect();
+    let names = program.textures.iter().map(glsl_es::texture_name).filter(|name| named.contains(name.as_str()));
+    names.fold(String::new(), |mut declarations, name| {
+        _ = writeln!(declarations, "uniform sampler2D {name};");
+        declarations
+    })
+}
+
 /// The vertex and fragment shaders of `key`'s program: `#version 300 es`,
 /// or `#version 330 core` on `desktop` OpenGL, the key's defines, the
 /// stage's precisions, the blocks the stage reads, the declarations of the
@@ -282,7 +294,7 @@ pub(crate) fn stage_sources(key: &ShaderKey, desktop: bool, highp_fragment: bool
     fragment_blocks
         .sort_by_key(|block| vertex_blocks.iter().position(|shared| ptr::eq(*shared, *block)).unwrap_or(usize::MAX));
     let stage = |stage_defines, precision, blocks: &[&Block], prelude, glsl| {
-        let textures = glsl_es::textures(program, glsl);
+        let textures = textures(program, glsl);
         [version, &defines, stage_defines, precision, &glsl_es::blocks(blocks), &textures, prelude, glsl].concat()
     };
     let vertex_prelude =

@@ -67,18 +67,6 @@ pub fn stage_blocks(program: &Program, text: &str) -> Vec<&'static Block> {
     [&VIEW_BUFFER].into_iter().chain(program.buffers).filter_map(Buffer::block).filter(names).collect()
 }
 
-/// The declarations of the textures of `program` that `text`, a stage,
-/// names: each a `uniform sampler2D` of its [`texture_name`].
-#[must_use]
-pub fn textures(program: &Program, text: &str) -> String {
-    let identifiers: HashSet<&str> = identifiers(text).collect();
-    let names = program.textures.iter().map(texture_name).filter(|name| identifiers.contains(name.as_str()));
-    names.fold(String::new(), |mut declarations, name| {
-        _ = writeln!(declarations, "uniform sampler2D {name};");
-        declarations
-    })
-}
-
 /// The name of `texture` in GLSL ES, in the program's scope: `u_<name>`.
 #[must_use]
 pub fn texture_name(texture: &Texture) -> String {
