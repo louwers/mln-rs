@@ -6,7 +6,7 @@ use mln_gfx::rendering_stats::RenderingStats;
 use mln_gfx::shaders::layer_ubo::GlobalPaintParamsUBO;
 use mln_gfx::shaders::shader_defines::ID_GLOBAL_PAINT_PARAMS_UBO;
 use mln_gfx::{FrameImage, Handoff, ScissorRect};
-use mln_map_types::MapDebugOptions;
+use mln_map_types::{FrameProjection, MapDebugOptions};
 use mln_text::GlyphCache;
 use mln_text::local_glyph_rasterizer::LocalGlyphs;
 use mln_tile_id::UnwrappedTileID;
@@ -17,10 +17,8 @@ use mln_util::logging::{Event, Log};
 use mln_util::pool::Pool;
 use mln_util::time::Instant;
 
-use crate::Registry;
 use crate::clip_masks::ClipMasks;
 use crate::frame::Frame;
-use crate::frame_projection::{self, FrameProjection};
 use crate::gfx::context::Context;
 use crate::layer_composite::{Composite, LayerComposite};
 use crate::layer_drawing::DrawOrder;
@@ -33,6 +31,7 @@ use crate::renderer_event::{RenderMode, RendererEvent, RendererEvents};
 use crate::tile::worker_codec::RemoteWorkers;
 use crate::tile_matrix::to_projection_ubo;
 use crate::update_parameters::UpdateParameters;
+use crate::{Registry, frame_projection};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RenderState {

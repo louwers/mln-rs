@@ -82,7 +82,6 @@ pub mod update_slot;
 mod util;
 
 pub use bucket::LayerFeatureStates;
-pub use frame_projection::{ClipDepthRange, FrameProjection};
 pub use mln_style::expression::functions::RegisterError;
 pub use registry::{Registry, RegistryBuilder};
 pub use renderer::{DrawnFrame, RenderTimings, Renderer, UpdatedFrame};

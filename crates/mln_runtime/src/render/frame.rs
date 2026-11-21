@@ -1,6 +1,6 @@
 //! Frame demands and the results that they finish with.
 
-use mln_render::FrameProjection;
+use mln_map_types::FrameProjection;
 
 use crate::map::{MapView, RenderMode};
 
