@@ -14,13 +14,13 @@
 //!   still loading.
 //! - **While commands of the center or the zoom run**, the altitude heads
 //!   for the ground under the center the camera is expected to end on, to
-//!   arrive as the last of them ends ([`Transform::ease_altitude`]). Each
-//!   frame derives that from the commands running then, so no command owns
-//!   the line: one that is replaced, is cancelled or gives up its center,
-//!   and ground that lands, leave the next frame to head on from where the
-//!   altitude is. Commands of the angles or the altitude alone hold it.
-//! - **A gesture** holds the altitude from when its fingers go down: it
-//!   takes the altitude, alone, from every running command, and holds the
+//!   arrive with the center as the command of the center ends, or else as
+//!   the last zoom ends ([`Transform::ease_altitude`]). Each frame derives
+//!   that from the commands running then, so no command owns the line: one
+//!   that is replaced, is cancelled or gives up its center, and ground that
+//!   lands, leave the next frame to head on from where the altitude is.
+//!   Commands of the angles alone hold it.
+//! - **A gesture** holds the altitude from when its fingers go down: the
 //!   altitude the camera has then, lifted over ground that reaches above
 //!   the eye or the near plane, through its momentum. A command of the
 //!   center or the zoom that runs once the fingers lift eases the altitude
@@ -35,17 +35,18 @@
 //!   - Anything else that brings the camera to rest leaves the center
 //!     wherever the motion stopped, maybe off the ground: a gesture's end,
 //!     a momentum's end, a command cancelled or replaced with nothing left
-//!     moving, or one of the angles or the altitude alone, under which
-//!     ground may have loaded. A center
-//!     off the ground then moves onto it along the view, with the eye where
-//!     it is, where the bounds and the zoom limits take that camera as it
-//!     is; where they don't, or the view meets no drawn ground, the rule at
-//!     rest takes the center up or down instead.
+//!     moving, or one of the angles alone, under which ground may have
+//!     loaded. A center off the ground then moves onto it along the view,
+//!     with the eye where it is, where the bounds and the zoom limits take
+//!     that camera as it is; where they don't, or the view meets no drawn
+//!     ground, the rule at rest takes the center up or down instead.
 //!
-//! An altitude that a command passes places the center while the ground
-//! under the end is unknown, and moves the eye while no command of the
-//! center or the zoom runs; the clamp decides it everywhere else, so it
-//! takes no other field with it when a gesture or command takes it.
+//! The clamp decides the altitude, so a command or a gesture takes none it
+//! is given, and one that sets only the altitude moves nothing; the
+//! commands that run when the clamp turns on give theirs up. Where the
+//! ground the altitude would head for is unknown, as before the renderer
+//! drew any, the altitude stays where it is, and heads on from there once
+//! that ground is known.
 //!
 //! The terrain moves a camera at rest, as ground loads or changes under it,
 //! the clamp turns on or the terrain goes, without camera events, as in GL
@@ -108,22 +109,22 @@ impl Transform {
     /// which turns off every rule of the camera over terrain.
     ///
     /// A rule that stops applying drops what it kept: once the terrain stops
-    /// clamping the center, a gesture no longer holds an altitude, and the
-    /// commands of the center or the zoom hold the altitude the camera has,
-    /// not one they were given; once the terrain goes, the view fits the
-    /// flat map again, a clamped center goes to sea level, and then anchors
-    /// hold their locations at sea level, under them in that camera. A rule
-    /// that applies again starts from the camera as it is.
+    /// clamping the center, a gesture no longer holds an altitude; once the
+    /// terrain goes, the view fits the flat map again, a clamped center goes
+    /// to sea level, and then anchors hold their locations at sea level,
+    /// under them in that camera. A rule that applies again starts from the
+    /// camera as it is, and a clamp that does takes the running commands'
+    /// altitudes.
     pub fn set_terrain(&mut self, terrain: Option<TerrainGround>) {
         let clamped = self.clamped();
-        let unclamps = clamped && !terrain.as_ref().is_some_and(|terrain| terrain.clamped);
+        let clamps = terrain.as_ref().is_some_and(|terrain| terrain.clamped);
         let goes = self.terrain.is_some() && terrain.is_none();
         self.terrain = terrain;
-        if unclamps {
+        if clamped && !clamps {
             self.gesture.hold = None;
-            // The clamp overruled the altitude these were given, so they hold
-            // the altitude the camera has.
-            for transition in self.transitions.iter_mut().filter(|transition| transition.eases_altitude()) {
+        }
+        if clamps && !clamped {
+            for transition in &mut self.transitions {
                 transition.fields &= !ALTITUDE;
             }
         }
@@ -196,8 +197,8 @@ impl Transform {
         } else {
             self.leave_ground(clamped);
         }
-        // A command of the pitch or the altitude alone doesn't count as
-        // moving the camera, but it holds the altitude too.
+        // A command of the pitch alone doesn't count as moving the camera,
+        // but it holds the altitude too.
         let at_rest = !self.is_camera_moving() && !self.in_transition();
         if self.gesture_holds() {
             self.lift_hold();
@@ -231,13 +232,13 @@ impl Transform {
     /// Sets the altitude of `camera`, a frame's camera at `now` composed of
     /// the running commands, while they ease it ([`Self::eases_altitude_now`]):
     /// from the altitude the camera has, toward the ground under the center
-    /// the camera is expected to end on ([`Transition::expected_end`] of the
-    /// command that owns the center, or else the frame's), by this frame's
-    /// share of what is left of the way of the command that ends last, so
-    /// that it arrives as that command ends (GL JS's `_startElevationEasing`,
-    /// turned toward its target each frame). Only the time of the frame
-    /// before carries over from one frame to the next. While that ground is
-    /// unknown, the altitude the commands compose stands.
+    /// the camera is expected to end on ([`Transition::expected_end`]), by
+    /// this frame's share of what is left of the way of the command of the
+    /// center, or else of the zoom that ends last, so that it arrives as
+    /// that command ends (GL JS's `_startElevationEasing`, turned toward its
+    /// target each frame). Only the time of the frame before carries over
+    /// from one frame to the next. While that ground is unknown, the
+    /// altitude stays where it is.
     pub(super) fn ease_altitude(&mut self, camera: &mut CameraOptions, now: Option<Instant>) {
         let before = std::mem::replace(&mut self.last_frame, now);
         if !self.eases_altitude_now() {
@@ -247,13 +248,15 @@ impl Transform {
         self.gesture.hold = None;
         let Some(ground) = self.ground() else { return };
         let easing = || self.transitions.iter().filter(|transition| transition.eases_altitude());
-        let Some(last) = easing().max_by_key(|transition| transition.remaining(now)) else { return };
-        let heading = easing().find(|transition| transition.fields & CENTER != 0).unwrap_or(last);
+        let pacing = easing()
+            .find(|transition| transition.fields & CENTER != 0)
+            .or_else(|| easing().max_by_key(|transition| transition.remaining(now)));
+        let Some(pacing) = pacing else { return };
         let altitude = self.view().center_altitude();
-        let end = heading.expected_end(&self.state, camera, altitude, Some(&**ground));
+        let end = pacing.expected_end(&self.state, camera, altitude, Some(&**ground));
         let Some(target) = ground.at(end) else { return };
-        let share = last.share(now);
-        let reached = before.map_or(0.0, |before| last.share(Some(before))).min(share);
+        let share = pacing.share(now);
+        let reached = before.map_or(0.0, |before| pacing.share(Some(before))).min(share);
         camera.center_altitude = Some(if share < 1.0 {
             altitude + (target - altitude) * (share - reached) / (1.0 - reached)
         } else {

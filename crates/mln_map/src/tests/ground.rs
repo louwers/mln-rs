@@ -393,7 +393,8 @@ fn loading_ground_keeps_the_altitude() {
 }
 
 /// Once terrain stops drawing, the planes fit the flat map and a clamped
-/// center goes back to sea level, once: an altitude given after stays.
+/// center goes back to sea level, once: an altitude the camera takes while
+/// the clamp is off stays once it is on again.
 #[test]
 fn the_camera_returns_to_sea_level_once_terrain_stops() {
     let run_loop = Queue::<()>::new();
@@ -410,7 +411,9 @@ fn the_camera_returns_to_sea_level_once_terrain_stops() {
     assert_eq!((0.0, None), ground(&map));
     assert_eq!(flat_view, *map.transform_state().view());
 
+    map.set_center_clamped_to_ground(false);
     map.jump_to(&CameraOptions { center_altitude: Some(100.0), ..Default::default() });
+    map.set_center_clamped_to_ground(true);
     map.trigger_repaint();
     let (altitude, _) = ground(&map);
     assert!((altitude - 100.0).abs() < 1e-6, "{altitude}");
@@ -549,17 +552,12 @@ fn the_camera_returns_to_sea_level_after_a_still_image_used_its_moves() {
     assert!(carries(&map, None));
 }
 
-/// An animation of the pitch alone, or of the altitude alone, holds the
-/// altitude as any animation does, until it ends.
+/// An animation of the pitch alone holds the altitude as any animation
+/// does, until it ends. One of the altitude alone, which the clamp decides,
+/// has nothing to animate: it ends at once, with the center on the ground.
 #[test]
-fn a_pitch_or_altitude_animation_holds_the_altitude() {
-    for camera in [
-        CameraOptions { pitch: Some(40.0), ..Default::default() },
-        CameraOptions { center_altitude: Some(2000.0), ..Default::default() },
-    ] {
-        let run_loop = Queue::<()>::new();
-        let mut map = map(MapMode::Continuous, &run_loop);
-        report(&mut map, ground_event(&flat(Some(500.0), 300.0)));
+fn a_pitch_animation_holds_the_altitude() {
+    let animate = |map: &mut Map, camera| {
         map.update_camera(&CameraUpdate {
             mode: CameraUpdateMode::Ease,
             camera,
@@ -567,16 +565,21 @@ fn a_pitch_or_altitude_animation_holds_the_altitude() {
             ..Default::default()
         });
         map.trigger_repaint();
-        let held = ground(&map).0;
-        report(&mut map, ground_event(&flat(Some(800.0), 700.0)));
-        let (altitude, floor) = ground(&map);
-        assert!((altitude - held).abs() < 1e-6 && (altitude - 800.0).abs() > 1.0, "{camera:?}: {altitude}");
-        assert_eq!(Some(700.0), floor);
+    };
+    let run_loop = Queue::<()>::new();
+    let mut map = map(MapMode::Continuous, &run_loop);
+    report(&mut map, ground_event(&flat(Some(500.0), 300.0)));
+    animate(&mut map, CameraOptions { center_altitude: Some(2000.0), ..Default::default() });
+    assert!(!map.snapshot().transition_in_progress, "the altitude alone");
+    assert_eq!(500.0, ground(&map).0, "the altitude alone");
 
-        map.cancel_transitions();
-        let (altitude, _) = ground(&map);
-        assert!((altitude - 800.0).abs() < 1e-6, "{camera:?}: {altitude}");
-    }
+    animate(&mut map, CameraOptions { pitch: Some(40.0), ..Default::default() });
+    report(&mut map, ground_event(&flat(Some(800.0), 700.0)));
+    assert_eq!((500.0, Some(700.0)), ground(&map), "the pitch holds the altitude");
+
+    map.cancel_transitions();
+    let (altitude, _) = ground(&map);
+    assert!((altitude - 800.0).abs() < 1e-6, "{altitude}");
 }
 
 /// A jump that would put the eye below sea level before the renderer drew

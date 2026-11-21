@@ -28,7 +28,7 @@ use crate::map_event::{CameraChange, CameraChangeMode, CameraChangeSource};
 pub(super) type FrameFn = Box<dyn Fn(&TransformState, f64) -> CameraOptions>;
 
 /// A command's share of the way to its end center at an eased progress,
-/// which the altitude over terrain follows while the command times it
+/// which the altitude over terrain follows while the command paces it
 /// ([`Transform::ease_altitude`]).
 #[derive(Clone, Copy, Debug)]
 pub(super) enum Along {
@@ -368,9 +368,9 @@ impl Transform {
     /// group stops the whole group, and a command left with no fields
     /// finishes.
     ///
-    /// Over terrain that clamps the center, the altitude follows `along`,
-    /// the command's share of the way, while the command times its ease
-    /// toward the ground ([`Transform::ease_altitude`]).
+    /// Over terrain that clamps the center, the command takes no altitude,
+    /// and the altitude follows `along`, its share of the way, while it
+    /// paces the ease toward the ground ([`Transform::ease_altitude`]).
     pub(super) fn start_transition(
         &mut self,
         camera: &CameraOptions,
@@ -381,6 +381,9 @@ impl Transform {
         flight: bool,
     ) {
         let mut fields = camera_fields(camera);
+        if self.clamped() {
+            fields &= !ALTITUDE;
+        }
         let mut coupled_fields = if flight { CENTER | ZOOM } else { 0 };
         fields |= coupled_fields;
 
@@ -606,15 +609,12 @@ impl Transform {
     /// Takes `fields` from the running commands, and returns the ones left
     /// with no fields, which the caller finishes.
     pub(super) fn release_fields(&mut self, fields: u16) -> Vec<Transition> {
-        let altitude_alone = if self.clamped() { ALTITUDE } else { 0 };
         for active in &mut self.transitions {
             let mut replaced = fields;
             // Only the fields it still owns are coupled: one that gave up its
-            // anchor and its center keeps the rest. Over a clamped center the
-            // clamp decides the altitude, so the altitude alone takes no
-            // other field with it.
+            // anchor and its center keeps the rest.
             let coupled = active.coupled_fields & active.fields;
-            if coupled & replaced & !altitude_alone != 0 {
+            if coupled & replaced != 0 {
                 replaced |= coupled;
             }
             active.fields &= !replaced;

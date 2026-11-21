@@ -210,15 +210,17 @@ fn ground_that_lands_mid_flight_bends_the_altitude_without_a_jump() {
     assert_eq!(1000.0, ground(&map).0);
 }
 
-/// Under a clamped center, a command's own altitude gives way to the ground
-/// at its end once that has loaded, whether it jumps or eases there.
+/// Under a clamped center, the ground decides the altitude, not the one a
+/// command gives, whether it jumps or eases there: before the ground has
+/// loaded, the altitude stays where it is.
 #[test]
 fn a_clamped_command_lets_the_ground_decide_its_altitude() {
     let run_loop = Queue::<()>::new();
     let (mut map, clock) = map_over(None, &run_loop);
     let jump = CameraOptions { center: Some(destination()), center_altitude: Some(5000.0), ..Default::default() };
+    let before = ground(&map).0;
     map.jump_to(&jump);
-    assert_eq!(5000.0, ground(&map).0, "before the ground loads");
+    assert_eq!(before, ground(&map).0, "before the ground loads");
     let ground = slope();
     report(&mut map, ground_event(&ground));
     let at_destination = ground.at(destination()).unwrap();

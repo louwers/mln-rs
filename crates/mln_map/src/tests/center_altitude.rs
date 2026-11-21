@@ -1,6 +1,6 @@
 //! The style's `centerAltitude`, meters above sea level: over terrain that
 //! doesn't clamp the center, it holds through everything that moves the
-//! camera; under a clamp, the ground takes its place once it is known; and
+//! camera; under a clamp, the ground decides the altitude instead; and
 //! without terrain, it holds as on any flat map.
 
 use std::sync::Arc;
@@ -160,17 +160,17 @@ fn a_style_center_altitude_holds_unclamped_over_terrain() {
     holds(&map, "after a raise");
 }
 
-/// Under a clamped center, the style's center altitude holds only until
-/// the ground under the center is known, which then takes its place; so
-/// does the altitude a command gives, where the ground at its end is
-/// known, while a command whose end is still loading heads for its own.
+/// Under a clamped center, the ground decides the altitude, and neither the
+/// style's center altitude nor the altitude a command gives counts: before
+/// the ground under the center is known, and while the ground at a
+/// command's end loads, the altitude stays where it is.
 #[test]
 fn a_clamped_center_lets_the_ground_win_over_center_altitude() {
     let run_loop = Queue::<()>::new();
     let (mut map, clock) = map_of(true, true, &run_loop);
-    assert_eq!(ALTITUDE, ground(&map).0, "before any ground");
+    assert_eq!(0.0, ground(&map).0, "before any ground");
     report(&mut map, ground_event(&flat(None, 0.0)));
-    assert_eq!(ALTITUDE, ground(&map).0, "over loading ground");
+    assert_eq!(0.0, ground(&map).0, "over loading ground");
     report(&mut map, ground_event(&flat(Some(500.0), 500.0)));
     assert_eq!(500.0, ground(&map).0, "once the ground loads");
 
@@ -189,8 +189,8 @@ fn a_clamped_center_lets_the_ground_win_over_center_altitude() {
     );
     assert_eq!(500.0, ground(&map).0, "after an ease");
 
-    // While the ground at its end loads, an ease heads for its own altitude,
-    // which holds at rest until the ground there is known.
+    // While the ground at its end loads, the altitude stays, at rest too,
+    // until the ground there is known.
     report(&mut map, ground_event(&flat(None, 0.0)));
     let clock = clock + Duration::from_secs(1);
     ease(
@@ -199,7 +199,7 @@ fn a_clamped_center_lets_the_ground_win_over_center_altitude() {
         CameraOptions { center: Some(destination), center_altitude: Some(3000.0), ..Default::default() },
         |_, _| {},
     );
-    assert_eq!(3000.0, ground(&map).0, "after an ease whose end loads");
+    assert_eq!(500.0, ground(&map).0, "after an ease whose end loads");
     report(&mut map, ground_event(&flat(Some(700.0), 700.0)));
     assert_eq!(700.0, ground(&map).0, "once that ground loads");
 }

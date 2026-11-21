@@ -40,22 +40,22 @@ pub struct MapOptions {
     /// default, it removes the image.
     pub unused_style_image_policy: UnusedStyleImagePolicy,
     /// Whether the center stands on the terrain, at its height under the
-    /// center, once that has loaded. A camera at rest stands there. A
-    /// command eases the altitude toward the ground under the center it is
-    /// expected to end on; once that ground has loaded, the command's own
-    /// [`CameraOptions::center_altitude`] gives way to it, without a
-    /// warning, and while it loads, the command heads for the altitude it
-    /// was given. A gesture holds the altitude the camera has when its
-    /// fingers go down, lifted over ground that reaches above its eye, and
-    /// the commands running then give up theirs. A command that takes the
-    /// center from a gesture's momentum eases the altitude as any command
-    /// does. A command that runs to its end owning a center or a zoom ends
-    /// at them, standing on the ground there. When anything else brings
-    /// the camera to rest, such as a gesture's end, a cancel or a command
-    /// of the angles alone, a center off the ground moves along the view
-    /// onto it, with the eye where it was; where the view meets no drawn
-    /// ground, or the bounds or zoom limits refuse that move, the center
-    /// stays and stands on the ground as at rest. When this is off, every camera keeps the altitude
+    /// center, once that has loaded. A camera at rest stands there. The
+    /// ground decides the altitude, so a camera ignores the
+    /// [`CameraOptions::center_altitude`] it is given, without a warning,
+    /// and the style's `centerAltitude` too. A command eases the altitude
+    /// toward the ground under the center it is expected to end on; while
+    /// that ground loads, the altitude stays where it is. A gesture holds
+    /// the altitude the camera has when its fingers go down, lifted over
+    /// ground that reaches above its eye. A command that takes the center
+    /// from a gesture's momentum eases the altitude as any command does. A
+    /// command that runs to its end owning a center or a zoom ends at them,
+    /// standing on the ground there. When anything else brings the camera
+    /// to rest, such as a gesture's end, a cancel or a command of the angles
+    /// alone, a center off the ground moves along the view onto it, with the
+    /// eye where it was; where the view meets no drawn ground, or the bounds
+    /// or zoom limits refuse that move, the center stays and stands on the
+    /// ground as at rest. When this is off, every camera keeps the altitude
     /// it is given, such as the style's `centerAltitude`, and a command or
     /// a gesture whose eye the ground reaches lowers the pitch and zoom
     /// instead. Without terrain it changes nothing. On by default.
