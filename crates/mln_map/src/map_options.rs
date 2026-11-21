@@ -56,9 +56,9 @@ pub struct MapOptions {
     /// a center off the ground moves along the view onto it, with the eye
     /// where it was; where the view meets no drawn ground, or the bounds or
     /// zoom limits refuse that move, the center stays and stands on the
-    /// ground as at rest. When this is off, every camera keeps the altitude it is
-    /// given, such as the style's `centerAltitude`, and a command or a
-    /// gesture whose eye the ground reaches lowers the pitch and zoom
+    /// ground as at rest. When this is off, every camera keeps the altitude
+    /// it is given, such as the style's `centerAltitude`, and a command or
+    /// a gesture whose eye the ground reaches lowers the pitch and zoom
     /// instead. Without terrain it changes nothing. On by default.
     /// [`Map::set_center_clamped_to_ground`] changes it.
     ///
