@@ -466,8 +466,11 @@ mod tests {
 
     use feature::{Feature, Identifier, PropertyMap, Value};
     use geo_types::{Geometry, LineString, Point};
+    use mln_style::edit::Edit;
+    use mln_util::tileset::Tileset;
 
     use super::*;
+    use crate::tests::fixture_source::{self, Geometry as Features};
 
     fn feature(id: u64, geometry: Geometry<i16>) -> Feature<i16, Arc<PropertyMap>> {
         let mut properties = PropertyMap::new();
@@ -476,24 +479,31 @@ mod tests {
     }
 
     /// A style of a `dot` layer whose color depends on feature state, and a
-    /// symbol layer, over source `s`.
+    /// symbol layer, over the fixture source `s`.
     fn style() -> Style {
-        Style::from_json(
+        let mut style = Style::from_json(
             Registry::with_builtins().style(),
-            r#"{
-                "version": 8,
-                "glyphs": "local://glyphs/{fontstack}/{range}.pbf",
-                "sources": {"s": {"type": "vector", "tiles": ["local://tiles/{z}-{x}-{y}.mvt"]}},
-                "layers": [
-                    {"id": "roads", "type": "dot", "source": "s", "source-layer": "l",
-                     "paint": {"dot-color": ["case", ["boolean", ["feature-state", "on"], false], "red", "blue"]}},
-                    {"id": "names", "type": "symbol", "source": "s", "source-layer": "l",
-                     "layout": {"text-field": ["get", "name"], "text-font": ["Test"]}}
-                ]
-            }"#,
+            r#"{"version": 8, "glyphs": "local://glyphs/{fontstack}/{range}.pbf", "sources": {}, "layers": []}"#,
             None,
         )
-        .unwrap()
+        .unwrap();
+        let tileset = Tileset { tiles: vec!["local://tiles/{z}-{x}-{y}.mvt".to_owned()], ..Default::default() };
+        style.apply(Edit::AddSource(fixture_source::source::<Features>("s", tileset, 512))).unwrap();
+        style
+            .add_layer_json(
+                r#"{"id": "roads", "type": "dot", "source": "s", "source-layer": "l",
+                    "paint": {"dot-color": ["case", ["boolean", ["feature-state", "on"], false], "red", "blue"]}}"#,
+                None,
+            )
+            .unwrap();
+        style
+            .add_layer_json(
+                r#"{"id": "names", "type": "symbol", "source": "s", "source-layer": "l",
+                    "layout": {"text-field": ["get", "name"], "text-font": ["Test"]}}"#,
+                None,
+            )
+            .unwrap();
+        style
     }
 
     /// A line and a point, both named.
