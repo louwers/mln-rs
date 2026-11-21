@@ -2115,11 +2115,12 @@ fn new_ground_under_a_label_at_rest_places_it_again_and_draws_it_there() {
 
     // (1 · 65536 + 212 · 256 + 192) · 0.1 − 10000 = 2000 m.
     map.tiles.reload_dem([1, 212, 192, 255]);
-    let before = map.elevation.clone().expect("the ground");
+    // The DEM tiles decode on the pool and arrive in any order, over one
+    // update or several: wait for the one under the label.
     for _ in 0..1000 {
         let commits = map.renderer.placement_commits();
         map.frame();
-        let arrived = map.elevation.as_ref().is_some_and(|ground| !Arc::ptr_eq(ground, &before));
+        let arrived = map.elevation.as_ref().and_then(|ground| ground.at(location)).is_some_and(|height| height > 1000.0);
         if arrived {
             assert!(map.renderer.placement_commits() > commits, "the update the ground arrived in placed again");
             assert!(red(map.pixel_at(&location, 2000.0)), "the icon on the new ground");
