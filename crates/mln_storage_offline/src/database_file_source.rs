@@ -4,11 +4,12 @@
 // Its calls run on the database's thread, after those sent before.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use mln_storage::database_file_source::DatabaseQueue;
 use mln_storage::offline::{
-    OfflineRegion, OfflineRegionDefinition, OfflineRegionDownloadState, OfflineRegionMetadata, OfflineRegionObserver,
-    OfflineRegionStatus, OfflineRegions,
+    OfflineRegion, OfflineRegionDefinition, OfflineRegionDownloadState, OfflineRegionExpiry, OfflineRegionMetadata,
+    OfflineRegionObserver, OfflineRegionStatus, OfflineRegions,
 };
 use mln_storage::offline_database::{DatabaseError, OfflineDatabase};
 use mln_storage::{DatabaseFileSource, FileSource};
@@ -94,10 +95,31 @@ pub trait DatabaseFileSourceExt {
         callback: impl FnOnce(Result<(), DatabaseError>) + Send + 'static,
     );
 
+    /// Gives the region's download progress. Fails when the database has no
+    /// region `region_id`.
     fn get_offline_region_status(
         &self,
         region_id: i64,
         callback: impl FnOnce(Result<OfflineRegionStatus, DatabaseError>) + Send + 'static,
+    );
+
+    /// Gives how long the region's stored resources stay usable. Fails when
+    /// the database has no region `region_id`.
+    fn get_offline_region_expiry(
+        &self,
+        region_id: i64,
+        callback: impl FnOnce(Result<OfflineRegionExpiry, DatabaseError>) + Send + 'static,
+    );
+
+    /// Sets how long past their expiry the region's resources may stand in
+    /// while maps can't reach the server (`OfflineRegion::max_stale`), and
+    /// gives the updated region. Fails when the database has no region
+    /// `region_id`.
+    fn set_offline_region_max_stale(
+        &self,
+        region_id: i64,
+        max_stale: Duration,
+        callback: impl FnOnce(Result<OfflineRegion, DatabaseError>) + Send + 'static,
     );
 
     /// Copies the regions of another database, and the resources and tiles
@@ -115,8 +137,11 @@ pub trait DatabaseFileSourceExt {
     /// `region_id`.
     fn delete_offline_region(&self, region_id: i64, callback: impl FnOnce(Result<(), DatabaseError>) + Send + 'static);
 
-    /// Makes the region's resources revalidate with their server before use,
-    /// which transfers nothing for resources that haven't changed.
+    /// Makes maps revalidate the region's resources with their server before
+    /// they use them, and its next download refresh them, which transfers
+    /// nothing for resources that haven't changed. Each resource keeps
+    /// standing in while maps can't reach the server for as long as it could
+    /// before.
     fn invalidate_offline_region(
         &self,
         region_id: i64,
@@ -199,6 +224,30 @@ impl DatabaseFileSourceExt for RegionDatabase {
         });
     }
 
+    fn get_offline_region_expiry(
+        &self,
+        region_id: i64,
+        callback: impl FnOnce(Result<OfflineRegionExpiry, DatabaseError>) + Send + 'static,
+    ) {
+        self.invoke(move |t| {
+            callback(require_region(&mut t.db, region_id).and_then(|_| t.db.get_region_expiry(region_id)));
+        });
+    }
+
+    fn set_offline_region_max_stale(
+        &self,
+        region_id: i64,
+        max_stale: Duration,
+        callback: impl FnOnce(Result<OfflineRegion, DatabaseError>) + Send + 'static,
+    ) {
+        self.invoke(move |t| {
+            let result = require_region(&mut t.db, region_id)
+                .and_then(|_| t.db.set_region_max_stale(region_id, max_stale))
+                .and_then(|()| require_region(&mut t.db, region_id));
+            callback(result);
+        });
+    }
+
     fn merge_offline_regions(
         &self,
         side_database_path: &str,
@@ -212,7 +261,7 @@ impl DatabaseFileSourceExt for RegionDatabase {
         self.invoke(move |t| {
             let result = require_region(&mut t.db, region_id).and_then(|region| {
                 drop(t.extension.remove(region_id));
-                t.db.delete_region(&region).map_or(Ok(()), Err)
+                t.db.delete_region(&region)
             });
             callback(result);
         });
@@ -224,8 +273,7 @@ impl DatabaseFileSourceExt for RegionDatabase {
         callback: impl FnOnce(Result<(), DatabaseError>) + Send + 'static,
     ) {
         self.invoke(move |t| {
-            let result = require_region(&mut t.db, region_id)
-                .and_then(|_| t.db.invalidate_region(region_id).map_or(Ok(()), Err));
+            let result = require_region(&mut t.db, region_id).and_then(|_| t.db.invalidate_region(region_id));
             callback(result);
         });
     }

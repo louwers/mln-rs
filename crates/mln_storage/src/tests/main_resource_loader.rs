@@ -16,7 +16,7 @@ use crate::online_file_source::OnlineFileSource;
 use crate::resource::{Kind, LoadingMethod, Resource, StoragePolicy};
 use crate::resource_options::ResourceOptions;
 use crate::resource_transform::FinishedCallback;
-use crate::response::{Reason, Response};
+use crate::response::{Caching, Reason, Response, Reuse};
 
 /// A loader over an in-memory database and an online file source, and those
 /// two.
@@ -97,8 +97,8 @@ fn cache_response() {
             r1.borrow_mut().take();
             assert_eq!(None, res.error);
             assert_eq!(b"Response 1", data(&res));
-            assert!(res.expires.is_some());
-            assert!(!res.must_revalidate);
+            assert!(res.caching.expires.is_some());
+            assert!(!res.caching.must_revalidate);
             assert!(res.modified.is_none());
             assert!(res.etag.is_none());
             let response = res;
@@ -114,8 +114,8 @@ fn cache_response() {
                     r2c.borrow_mut().take();
                     assert_eq!(response.error, res2.error);
                     assert_eq!(data(&response), data(&res2));
-                    assert_eq!(response.expires, res2.expires);
-                    assert_eq!(response.must_revalidate, res2.must_revalidate);
+                    assert_eq!(response.caching.expires, res2.caching.expires);
+                    assert_eq!(response.caching.must_revalidate, res2.caching.must_revalidate);
                     assert_eq!(response.modified, res2.modified);
                     assert_eq!(response.etag, res2.etag);
 
@@ -196,8 +196,8 @@ fn cache_revalidate(path: &str, check: fn(&Response)) {
             assert_eq!(None, res.error);
             assert!(!res.not_modified);
             assert_eq!(b"Response", data(&res));
-            assert!(res.expires.is_none());
-            assert!(res.must_revalidate);
+            assert!(res.caching.expires.is_some_and(|expires| expires <= now()), "stale at once");
+            assert!(res.caching.must_revalidate);
             check(&res);
 
             // The first response is stored in the cache, but it has
@@ -223,8 +223,8 @@ fn cache_revalidate(path: &str, check: fn(&Response)) {
                         assert_eq!(None, res2.error);
                         assert!(res2.not_modified);
                         assert!(res2.data.is_none());
-                        assert!(res2.expires.is_some());
-                        assert!(res2.must_revalidate);
+                        assert!(res2.caching.expires.is_some());
+                        assert!(res2.caching.must_revalidate);
                         check(&res2);
                         stop.stop();
                     } else {
@@ -238,8 +238,8 @@ fn cache_revalidate(path: &str, check: fn(&Response)) {
                         assert_eq!(None, res2.error);
                         assert!(!res2.not_modified);
                         assert_eq!(b"Response", data(&res2));
-                        assert!(res2.expires.is_some());
-                        assert!(res2.must_revalidate);
+                        assert!(res2.caching.expires.is_some());
+                        assert!(res2.caching.must_revalidate);
                         check(&res2);
                     }
                 }),
@@ -293,8 +293,8 @@ fn cache_revalidate_etag() {
 
             assert_eq!(None, res.error);
             assert_eq!(b"Response 1", data(&res));
-            assert!(res.expires.is_none());
-            assert!(res.must_revalidate);
+            assert!(res.caching.expires.is_some_and(|expires| expires <= now()), "stale at once");
+            assert!(res.caching.must_revalidate);
             assert!(res.modified.is_none());
             assert_eq!(Some("response-1"), res.etag.as_deref());
 
@@ -311,8 +311,8 @@ fn cache_revalidate_etag() {
                     assert!(res2.data.is_some());
                     assert_ne!(res.data, res2.data);
                     assert_eq!(b"Response 2", data(&res2));
-                    assert!(res2.expires.is_none());
-                    assert!(res2.must_revalidate);
+                    assert!(res2.caching.expires.is_some_and(|expires| expires <= now()), "stale at once");
+                    assert!(res2.caching.must_revalidate);
                     assert!(res2.modified.is_none());
                     assert_eq!(Some("response-2"), res2.etag.as_deref());
 
@@ -360,8 +360,8 @@ fn http_issue_1369() {
             r.borrow_mut().take();
             assert_eq!(None, res.error);
             assert_eq!(b"Hello World!", data(&res));
-            assert!(res.expires.is_none());
-            assert!(!res.must_revalidate);
+            assert!(res.caching.expires.is_some_and(|expires| expires <= now()), "stale at once");
+            assert!(!res.caching.must_revalidate);
             assert!(res.modified.is_none());
             assert!(res.etag.is_none());
             stop.stop();
@@ -384,7 +384,7 @@ fn optional_cached(expires: Timestamp) {
 
     let mut response = Response::new();
     response.data = Some(bytes("Cached value"));
-    response.expires = Some(expires);
+    response.caching.expires = Some(expires);
 
     let req = req();
     let dbfs = database_file_source(&file_sources);
@@ -402,9 +402,9 @@ fn optional_cached(expires: Timestamp) {
                     rc.borrow_mut().take();
                     assert_eq!(None, res.error);
                     assert_eq!(b"Cached value", data(&res));
-                    assert!(res.expires.is_some());
-                    assert_eq!(expected.expires, res.expires);
-                    assert!(!res.must_revalidate);
+                    assert!(res.caching.expires.is_some());
+                    assert_eq!(expected.caching.expires, res.caching.expires);
+                    assert!(!res.caching.must_revalidate);
                     assert!(res.modified.is_none());
                     assert!(res.etag.is_none());
                     stop.stop();
@@ -449,8 +449,8 @@ fn optional_not_found() {
             assert_eq!(Reason::NotFound, error.reason);
             assert_eq!("Not found in offline database", error.message);
             assert!(res.data.is_none());
-            assert!(res.expires.is_none());
-            assert!(!res.must_revalidate);
+            assert!(res.caching.expires.is_none());
+            assert!(!res.caching.must_revalidate);
             assert!(res.modified.is_none());
             assert!(res.etag.is_none());
             stop.stop();
@@ -471,7 +471,7 @@ fn no_cache(resource: &Resource, check: impl Fn(&Response) + 'static) {
 
     let mut response = Response::new();
     response.data = Some(bytes("Cached value"));
-    response.expires = Some(in_one_hour());
+    response.caching.expires = Some(in_one_hour());
     let req = req();
     let dbfs = database_file_source(&file_sources);
     let (r, fs2, stop, resource2) = (Rc::clone(&req), Rc::clone(&fs), run_loop.clone(), resource.clone());
@@ -511,9 +511,9 @@ fn no_cache_refresh_etag_not_modified() {
     no_cache(&resource, move |res| {
         assert!(res.not_modified);
         assert!(res.data.is_none());
-        assert!(res.expires.is_some());
-        assert!(Some(Timestamp::from_secs(requested.secs_since_epoch() + 1)) <= res.expires);
-        assert!(res.must_revalidate);
+        assert!(res.caching.expires.is_some());
+        assert!(Some(Timestamp::from_secs(requested.secs_since_epoch() + 1)) <= res.caching.expires);
+        assert!(res.caching.must_revalidate);
         assert!(res.modified.is_none());
         assert_eq!(Some("snowfall"), res.etag.as_deref());
     });
@@ -532,8 +532,8 @@ fn no_cache_refresh_etag_modified() {
     no_cache(&resource, |res| {
         assert!(!res.not_modified);
         assert_eq!(b"Response", data(res));
-        assert!(res.expires.is_none());
-        assert!(res.must_revalidate);
+        assert!(res.caching.expires.is_some_and(|expires| expires <= now()), "stale at once");
+        assert!(res.caching.must_revalidate);
         assert!(res.modified.is_none());
         assert_eq!(Some("snowfall"), res.etag.as_deref());
     });
@@ -551,8 +551,8 @@ fn no_cache_full() {
     no_cache(&resource, |res| {
         assert!(!res.not_modified);
         assert_eq!(b"Response", data(res));
-        assert!(res.expires.is_none());
-        assert!(res.must_revalidate);
+        assert!(res.caching.expires.is_some_and(|expires| expires <= now()), "stale at once");
+        assert!(res.caching.must_revalidate);
         assert!(res.modified.is_none());
         assert_eq!(Some("snowfall"), res.etag.as_deref());
     });
@@ -573,9 +573,9 @@ fn no_cache_refresh_modified_not_modified() {
     no_cache(&resource, move |res| {
         assert!(res.not_modified);
         assert!(res.data.is_none());
-        assert!(res.expires.is_some());
-        assert!(Some(Timestamp::from_secs(requested.secs_since_epoch() + 1)) <= res.expires);
-        assert!(res.must_revalidate);
+        assert!(res.caching.expires.is_some());
+        assert!(Some(Timestamp::from_secs(requested.secs_since_epoch() + 1)) <= res.caching.expires);
+        assert!(res.caching.must_revalidate);
         assert_eq!(Some(Timestamp::from_secs(1_420_070_400)), res.modified);
         assert!(res.etag.is_none());
     });
@@ -594,8 +594,8 @@ fn no_cache_refresh_modified_modified() {
     no_cache(&resource, |res| {
         assert!(!res.not_modified);
         assert_eq!(b"Response", data(res));
-        assert!(res.expires.is_none());
-        assert!(res.must_revalidate);
+        assert!(res.caching.expires.is_some_and(|expires| expires <= now()), "stale at once");
+        assert!(res.caching.must_revalidate);
         assert_eq!(Some(Timestamp::from_secs(1_420_070_400)), res.modified);
         assert!(res.etag.is_none());
     });
@@ -643,8 +643,8 @@ fn set_resource_transform() {
     let check = |res: &Response| {
         assert_eq!(None, res.error);
         assert_eq!(b"Hello World!", data(res));
-        assert!(res.expires.is_none());
-        assert!(!res.must_revalidate);
+        assert!(res.caching.expires.is_some_and(|expires| expires <= now()), "stale at once");
+        assert!(!res.caching.must_revalidate);
         assert!(res.modified.is_none());
         assert!(res.etag.is_none());
     };
@@ -712,8 +712,8 @@ fn respond_to_stale_must_revalidate() {
     let mut response = Response::new();
     response.data = Some(bytes("Cached value"));
     response.modified = Some(Timestamp::from_secs(1_417_392_000)); // December 1, 2014
-    response.expires = Some(Timestamp::from_secs(1_417_392_000));
-    response.must_revalidate = true;
+    response.caching.expires = Some(Timestamp::from_secs(1_417_392_000));
+    response.caching.must_revalidate = true;
     response.etag = Some("snowfall".to_owned());
     let req = req();
     let dbfs = database_file_source(&file_sources);
@@ -730,20 +730,20 @@ fn respond_to_stale_must_revalidate() {
                 &request,
                 Box::new(move |res: Response| {
                     rc.borrow_mut().take();
-                    let error = res.error.as_ref().expect("error");
-                    assert_eq!(Reason::NotFound, error.reason);
-                    assert_eq!("Cached resource is unusable", error.message);
+                    // The cache answers with its copy, which may not be used.
+                    assert_eq!(None, res.error);
+                    assert_eq!(Reuse::Never, res.caching.reuse(now()));
                     assert!(!res.not_modified);
                     assert_eq!(b"Cached value", data(&res));
-                    assert_eq!(Some(Timestamp::from_secs(1_417_392_000)), res.expires);
-                    assert!(res.must_revalidate);
+                    assert_eq!(Some(Timestamp::from_secs(1_417_392_000)), res.caching.expires);
+                    assert!(res.caching.must_revalidate);
                     assert_eq!(Some(Timestamp::from_secs(1_417_392_000)), res.modified);
                     assert_eq!(Some("snowfall"), res.etag.as_deref());
 
                     let mut resource = resource2.borrow_mut();
                     resource.prior_etag = res.etag.clone();
                     resource.prior_modified = res.modified;
-                    resource.prior_expires = res.expires;
+                    resource.prior_caching.expires = res.caching.expires;
                     resource.prior_data = res.data.clone();
 
                     stop.stop();
@@ -780,9 +780,9 @@ fn respond_to_stale_must_revalidate() {
             // be executing a revalidation request which doesn't return new
             // data, only a 304 Not Modified response.
             assert_eq!(b"Prior value", data(&res));
-            assert!(res.expires.is_some());
-            assert!(Some(now()) <= res.expires);
-            assert!(res.must_revalidate);
+            assert!(res.caching.expires.is_some());
+            assert!(Some(now()) <= res.caching.expires);
+            assert!(res.caching.must_revalidate);
             assert_eq!(Some(Timestamp::from_secs(1_417_392_000)), res.modified);
             assert_eq!(Some("snowfall"), res.etag.as_deref());
             stop.stop();
@@ -792,8 +792,8 @@ fn respond_to_stale_must_revalidate() {
     run_loop.run();
 }
 
-// Test that requests for expired resources have lower priority than
-// requests for new resources
+// Test that requests that revalidate cached copies, which the requester gets
+// while they revalidate, have lower priority than requests for new resources
 // Flaky https://github.com/maplibre/maplibre-native/issues/1071
 // gtest: MainResourceLoader.CachedResourceLowPriority
 #[test]
@@ -807,7 +807,8 @@ fn cached_resource_low_priority() {
     let mut response = Response::new();
     let online_response_counter = Rc::new(Cell::new(0usize));
 
-    response.expires = Some(one_hour_ago());
+    response.caching.expires = Some(one_hour_ago());
+    response.caching.stale_while_revalidate = Some(in_one_hour());
 
     let dbfs = database_file_source(&file_sources);
     let online_fs = online_file_source(&file_sources);
@@ -833,6 +834,10 @@ fn cached_resource_low_priority() {
         &local,
         &non_cached0,
         Box::new(move |res: Response| {
+            // Offline, each network request fails first.
+            if res.error.as_ref().is_some_and(|error| error.reason == Reason::Connection) {
+                return;
+            }
             r.borrow_mut().take();
             assert_eq!(counter.get(), 0); // make sure this is responded first
             assert_eq!(b"Request 0", data(&res));
@@ -846,6 +851,10 @@ fn cached_resource_low_priority() {
         &local,
         &non_cached1,
         Box::new(move |res: Response| {
+            // Offline, each network request fails first.
+            if res.error.as_ref().is_some_and(|error| error.reason == Reason::Connection) {
+                return;
+            }
             counter.set(counter.get() + 1);
             r.borrow_mut().take();
             assert_eq!(counter.get(), 1); // make sure this is responded second
@@ -861,6 +870,10 @@ fn cached_resource_low_priority() {
         &local,
         &resource1,
         Box::new(move |res: Response| {
+            // Offline, each network request fails first.
+            if res.error.as_ref().is_some_and(|error| error.reason == Reason::Connection) {
+                return;
+            }
             // Offline callback is received first
             if received.get() {
                 counter.set(counter.get() + 1);
@@ -886,6 +899,10 @@ fn cached_resource_low_priority() {
         &local,
         &resource2,
         Box::new(move |res: Response| {
+            // Offline, each network request fails first.
+            if res.error.as_ref().is_some_and(|error| error.reason == Reason::Connection) {
+                return;
+            }
             // Offline callback is received first
             if received.get() {
                 counter.set(counter.get() + 1);
@@ -907,6 +924,10 @@ fn cached_resource_low_priority() {
         &local,
         &non_cached2,
         Box::new(move |res: Response| {
+            // Offline, each network request fails first.
+            if res.error.as_ref().is_some_and(|error| error.reason == Reason::Connection) {
+                return;
+            }
             counter.set(counter.get() + 1);
             r.borrow_mut().take();
             assert_eq!(counter.get(), 2); // make sure this is responded third
@@ -1006,4 +1027,110 @@ fn unsupported_resource_request() {
     let res = result.borrow_mut().take().expect("response");
     assert!(res.no_content);
     assert_eq!("Unsupported resource request.", res.error.unwrap().message);
+}
+
+/// The first `count` answers to a request of `url`, whose cache holds
+/// `cached`.
+fn answers_with_cached(url: &str, cached: &Response, count: usize) -> Vec<Response> {
+    let file_sources = TestSources::new();
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
+    let queue = local.clone();
+    let fs = main_resource_loader(&file_sources);
+    let resource = Resource::new(Kind::Unknown, url);
+    let answers = Rc::new(RefCell::new(Vec::new()));
+    let req = req();
+    let dbfs = database_file_source(&file_sources);
+    let (r, stop, collected) = (Rc::clone(&req), run_loop.clone(), Rc::clone(&answers));
+    let request = resource.clone();
+    dbfs.put_then(
+        &resource,
+        cached,
+        run_loop.dispatcher().callback(move || {
+            *r.borrow_mut() = Some(fs.request_local(
+                &queue,
+                &request,
+                Box::new(move |res: Response| {
+                    collected.borrow_mut().push(res);
+                    if collected.borrow().len() == count {
+                        stop.stop();
+                    }
+                }),
+            ));
+        }),
+    );
+    // Only catches answers that never come: under the whole suite, a loaded
+    // machine can take several times the second this takes alone.
+    run_loop.fail_after(Duration::from_secs(60), "the answers never came");
+    run_loop.run();
+    req.borrow_mut().take();
+    answers.take()
+}
+
+fn stale_copy() -> Response {
+    let mut response = Response::new();
+    response.data = Some(bytes("Cached value"));
+    response.caching.expires = Some(one_hour_ago());
+    response
+}
+
+/// `response`, with its caching rules changed by `change`.
+fn with_caching(mut response: Response, change: impl FnOnce(&mut Caching)) -> Response {
+    change(&mut response.caching);
+    response
+}
+
+/// A stale copy within its stale-while-revalidate goes to the requester at
+/// once, and the network's answer follows.
+#[test]
+fn a_copy_within_stale_while_revalidate_answers_at_once() {
+    let server = HttpServer::new();
+    let cached = with_caching(stale_copy(), |caching| caching.stale_while_revalidate = Some(in_one_hour()));
+    let answers = answers_with_cached(&server.url("/test"), &cached, 2);
+    assert_eq!(b"Cached value", data(&answers[0]));
+    assert_eq!(b"Hello World!", data(&answers[1]));
+}
+
+/// A stale copy past its stale-while-revalidate still shows while it
+/// revalidates, as it may stand in for a failure; one that must revalidate,
+/// or past its stale-if-error, waits for the network.
+#[test]
+fn a_stale_copy_shows_while_it_revalidates_unless_it_may_not_be_used() {
+    let server = HttpServer::new();
+    let url = server.url("/test");
+    for cached in [
+        with_caching(stale_copy(), |caching| caching.stale_while_revalidate = Some(one_hour_ago())),
+        with_caching(stale_copy(), |caching| caching.stale_if_error = Some(in_one_hour())),
+    ] {
+        let answers = answers_with_cached(&url, &cached, 2);
+        assert_eq!(b"Cached value", data(&answers[0]));
+        assert_eq!(b"Hello World!", data(&answers[1]));
+    }
+    for cached in [
+        with_caching(stale_copy(), |caching| caching.must_revalidate = true),
+        with_caching(stale_copy(), |caching| caching.stale_if_error = Some(one_hour_ago())),
+    ] {
+        let answers = answers_with_cached(&url, &cached, 1);
+        assert_eq!(b"Hello World!", data(&answers[0]));
+    }
+}
+
+/// When the server can't be reached, the requester keeps the stale copy it
+/// was shown, and hears of the failure; a copy that may not be used isn't
+/// delivered.
+#[test]
+fn a_stale_copy_shows_when_the_server_cant_be_reached() {
+    // Nothing listens on port 1.
+    let url = "http://127.0.0.1:1/test";
+    let answers = answers_with_cached(url, &stale_copy(), 2);
+    assert_eq!(b"Cached value", data(&answers[0]));
+    assert_eq!(Reason::Connection, answers[1].error.as_ref().expect("an error").reason);
+
+    for cached in [
+        with_caching(stale_copy(), |caching| caching.must_revalidate = true),
+        with_caching(stale_copy(), |caching| caching.stale_if_error = Some(one_hour_ago())),
+    ] {
+        let answers = answers_with_cached(url, &cached, 1);
+        assert_eq!(Reason::Connection, answers[0].error.as_ref().expect("an error").reason);
+    }
 }

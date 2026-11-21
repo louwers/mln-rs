@@ -12,7 +12,7 @@ use mln_style::property_value::PropertyValue;
 use mln_tile_id::tile_range::TileRange;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::constants;
-use mln_util::geo::{LatLngBounds, WrapMode};
+use mln_util::geo::{LatLngBounds, ScreenCoordinate, WrapMode};
 use mln_util::hash::HashSet;
 use mln_util::logging::{Event, Log};
 use mln_util::projection::Projection;
@@ -25,6 +25,7 @@ use crate::algorithm::update_renderables::{PrefetchedTile, RenderablesContext, u
 use crate::algorithm::update_tile_masks::update_tile_masks;
 use crate::bucket::UploadNeeds;
 use crate::bucket_geometry::BucketGeometry;
+use crate::geometry::feature_index::QueryResults;
 use crate::gfx::context::Context;
 use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas;
 use crate::layer_drawing::ChangedBuckets;
@@ -273,7 +274,7 @@ impl RenderablesContext for CoverContext<'_, '_, '_> {
             return None;
         }
         let parameters = self.update.parameters;
-        let mut found = self.source.cache_pop(id);
+        let mut found = self.source.cache_pop(id, self.ctx);
         if !found && parameters.view.is_globe() {
             found = self.source.cache_pop_any_wrap(id, self.ctx);
         }
@@ -350,7 +351,7 @@ impl RenderablesContext for CoverContext<'_, '_, '_> {
         let id = if self.finds_tiles_across_wraps() { &key.to_unwrapped() } else { id };
         debug_assert!(self.tile(key).is_some_and(Tile::is_renderable));
         self.source.rendered.entry(*id).or_insert(Rendered::ideal(*key));
-        // Still rendering this tile, no need for special fading logic.
+        // Still rendered, so not held for a fade.
         self.previously_rendered.remove(id);
     }
 
@@ -603,11 +604,7 @@ impl SourceTiles {
             self.rendered.clear();
             #[cfg(feature = "bench")]
             self.ideal.clear();
-            if self.info.kind != TileKind::Geometry {
-                std::mem::swap(&mut self.masked, &mut self.masked_before);
-                self.masked.clear();
-                self.unmask_stopped();
-            }
+            self.update_masks();
             return;
         }
 
@@ -755,8 +752,6 @@ impl SourceTiles {
             };
 
             if !pan_tiles.is_empty() {
-                // `[](const UnwrappedTileID&, Tile&) {}` and no prefetched tiles.
-                cover.render = false;
                 update_renderables(&mut cover, &pan_tiles, zoom_range, max_parent_tile_overscale_factor);
             }
 
@@ -862,34 +857,35 @@ impl SourceTiles {
             }
         }
 
-        if self.info.kind != TileKind::Geometry {
-            let renderables: Vec<(UnwrappedTileID, bool)> =
-                self.rendered.iter().map(|(id, entry)| (*id, entry.needs_rendering)).collect();
-            let masks = update_tile_masks(&renderables);
-            let SourceTiles { tiles, rendered, masked, masked_before, .. } = self;
-            std::mem::swap(masked, masked_before);
-            masked.clear();
-            for (entry, mask) in rendered.values().zip(masks) {
-                let Some(contents) = tiles.get_mut(&entry.key).and_then(|slot| slot.tile.contents_mut()) else {
-                    continue;
-                };
-                if let Some(mask) = mask {
-                    contents.set_mask(mask);
-                }
-                if contents.is_masked() {
-                    masked.push(entry.key);
-                }
-            }
-            masked.sort_unstable();
-            self.unmask_stopped();
-        }
+        self.update_masks();
     }
 
-    /// Unmasks the tiles the frame before drew masked and this frame
-    /// doesn't: a tile that stopped drawing drops its quads until it draws
-    /// again, which masks it anew. `masked` is sorted.
-    fn unmask_stopped(&mut self) {
-        let SourceTiles { tiles, masked, masked_before, .. } = self;
+    /// Masks a raster or raster-dem source's rendered tiles to the parts no
+    /// other rendered tile covers, and unmasks the tiles the frame before
+    /// drew masked and this frame doesn't: a tile that stopped drawing drops
+    /// its quads until it draws again, which masks it anew.
+    fn update_masks(&mut self) {
+        if self.info.kind == TileKind::Geometry {
+            return;
+        }
+        let renderables: Vec<(UnwrappedTileID, bool)> =
+            self.rendered.iter().map(|(id, entry)| (*id, entry.needs_rendering)).collect();
+        let masks = update_tile_masks(&renderables);
+        let SourceTiles { tiles, rendered, masked, masked_before, .. } = self;
+        std::mem::swap(masked, masked_before);
+        masked.clear();
+        for (entry, mask) in rendered.values().zip(masks) {
+            let Some(contents) = tiles.get_mut(&entry.key).and_then(|slot| slot.tile.contents_mut()) else {
+                continue;
+            };
+            if let Some(mask) = mask {
+                contents.set_mask(mask);
+            }
+            if contents.is_masked() {
+                masked.push(entry.key);
+            }
+        }
+        masked.sort_unstable();
         for key in masked_before.iter().filter(|key| masked.binary_search(key).is_err()) {
             if let Some(contents) = tiles.get_mut(key).and_then(|slot| slot.tile.contents_mut()) {
                 contents.unmask();
@@ -980,10 +976,17 @@ impl SourceTiles {
         self.cache_trim(ctx);
     }
 
-    fn cache_pop(&mut self, id: &OverscaledTileID) -> bool {
+    /// Moves cached tile `id` back into the cover, unless caching rules
+    /// forbid showing its data while it revalidates: then the tile goes, and
+    /// one made anew holds its data back until it revalidates.
+    fn cache_pop(&mut self, id: &OverscaledTileID, ctx: &mut StoreContext) -> bool {
         let Some(slot) = self.tiles.get_mut(id).filter(|slot| slot.place.is_cached()) else {
             return false;
         };
+        if !slot.tile.load.shows(mln_util::chrono::now()) {
+            self.evict(id, ctx);
+            return false;
+        }
         slot.set_place(Place::Cover { order: TileLoadOrder::UNWANTED });
         true
     }
@@ -1013,7 +1016,9 @@ impl SourceTiles {
         else {
             return false;
         };
-        self.cache_pop(&found);
+        if !self.cache_pop(&found, ctx) {
+            return false;
+        }
         self.rekey(&found, *id, ctx);
         true
     }
@@ -1093,45 +1098,42 @@ impl SourceTiles {
 
     pub(crate) fn query_rendered_features(
         &self,
-        geometry: &[mln_util::geo::ScreenCoordinate],
+        geometry: &[ScreenCoordinate],
         view: &mln_map_types::View,
         layers: &crate::geometry::feature_index::QueryLayers<'_>,
         options: &crate::query::RenderedQueryOptions,
         global_state: Option<&mln_style::expression::GlobalStateMap>,
         proj_matrix: &glam::DMat4,
-    ) -> Result<crate::geometry::feature_index::QueryResults, mln_util::error::Error> {
+    ) -> Result<QueryResults, mln_util::error::Error> {
         use mln_map_types::tile_coordinate::TileCoordinate;
 
         let feature_state = &self.info.feature_state;
 
-        let mut result = crate::geometry::feature_index::QueryResults::default();
+        let mut result = QueryResults::default();
         if self.rendered.is_empty() || geometry.is_empty() {
             return Ok(result);
         }
 
         let height = f64::from(view.size().height);
-        let to_world = |p: &mln_util::geo::ScreenCoordinate| {
-            TileCoordinate::from_screen_coordinate(view, 0, &mln_util::geo::ScreenCoordinate::new(p.x, height - p.y)).p
+        let to_world = |p: &ScreenCoordinate| {
+            TileCoordinate::from_screen_coordinate(view, 0, &ScreenCoordinate::new(p.x, height - p.y)).p
         };
         let globe = view.is_globe();
-        let on_planet = |p: &mln_util::geo::ScreenCoordinate| {
-            VerticalPerspectiveProjection::screen_coordinate_hits_globe(
-                view,
-                &mln_util::geo::ScreenCoordinate::new(p.x, height - p.y),
-            )
+        let on_planet = |p: &ScreenCoordinate| {
+            VerticalPerspectiveProjection::screen_coordinate_hits_globe(view, &ScreenCoordinate::new(p.x, height - p.y))
         };
 
         // Past the planet's edge a query meets the planet only at the horizon,
         // and a point there stands for the nearest horizon point, so a query's
         // corners alone would cut the planet's limb off; its edges are followed
         // in steps.
-        let mut traced: Vec<mln_util::geo::ScreenCoordinate> = Vec::new();
+        let mut traced: Vec<ScreenCoordinate> = Vec::new();
         if globe && geometry.len() > 1 && !geometry.iter().all(on_planet) {
             const STEPS: i32 = 32;
             for i in 0..geometry.len() - 1 {
                 for k in 0..STEPS {
                     let t = f64::from(k) / f64::from(STEPS);
-                    traced.push(mln_util::geo::ScreenCoordinate::new(
+                    traced.push(ScreenCoordinate::new(
                         geometry[i].x + (geometry[i + 1].x - geometry[i].x) * t,
                         geometry[i].y + (geometry[i + 1].y - geometry[i].y) * t,
                     ));
@@ -1139,7 +1141,7 @@ impl SourceTiles {
             }
             traced.extend(geometry.last().copied());
         }
-        let screen_geometry: &[mln_util::geo::ScreenCoordinate] = if traced.is_empty() { geometry } else { &traced };
+        let screen_geometry: &[ScreenCoordinate] = if traced.is_empty() { geometry } else { &traced };
         let mut query_geometry: Vec<geometry::Point<f64>> = screen_geometry.iter().map(to_world).collect();
 
         // The bounding box of points, of which the geometry has at least one.
@@ -1173,10 +1175,10 @@ impl SourceTiles {
             let mut covered = true;
             let mut reaches_into_space = false;
             for corner in [
-                mln_util::geo::ScreenCoordinate::new(screen_min.0, screen_min.1),
-                mln_util::geo::ScreenCoordinate::new(screen_max.0, screen_min.1),
-                mln_util::geo::ScreenCoordinate::new(screen_min.0, screen_max.1),
-                mln_util::geo::ScreenCoordinate::new(screen_max.0, screen_max.1),
+                ScreenCoordinate::new(screen_min.0, screen_min.1),
+                ScreenCoordinate::new(screen_max.0, screen_min.1),
+                ScreenCoordinate::new(screen_min.0, screen_max.1),
+                ScreenCoordinate::new(screen_max.0, screen_max.1),
             ] {
                 if !on_planet(&corner) {
                     reaches_into_space = true;
@@ -1186,7 +1188,7 @@ impl SourceTiles {
                 covered =
                     covered && bounds_min.0 <= c.x && c.x <= bounds_max.0 && bounds_min.1 <= c.y && c.y <= bounds_max.1;
             }
-            let center = mln_util::geo::ScreenCoordinate::new(
+            let center = ScreenCoordinate::new(
                 f64::midpoint(screen_min.0, screen_max.0),
                 f64::midpoint(screen_min.1, screen_max.1),
             );
@@ -1216,21 +1218,10 @@ impl SourceTiles {
         // world, (z, y, x, wrap), so that there the wrap only breaks ties.
         let mut sorted_tiles: Vec<(&UnwrappedTileID, &OverscaledTileID)> =
             self.rendered.iter().map(|(id, entry)| (id, &entry.key)).collect();
-        sorted_tiles.sort_by(|(a, _), (b, _)| {
-            if globe {
-                return (a.canonical.z, a.canonical.y, a.canonical.x, a.wrap).cmp(&(
-                    b.canonical.z,
-                    b.canonical.y,
-                    b.canonical.x,
-                    b.wrap,
-                ));
-            }
-            (a.canonical.z, a.canonical.y, a.wrap, a.canonical.x).cmp(&(
-                b.canonical.z,
-                b.canonical.y,
-                b.wrap,
-                b.canonical.x,
-            ))
+        sorted_tiles.sort_by_key(|(id, _)| {
+            let (x, wrap) = (i64::from(id.canonical.x), i64::from(id.wrap));
+            let (first, second) = if globe { (x, wrap) } else { (wrap, x) };
+            (id.canonical.z, id.canonical.y, first, second)
         });
 
         let max_pitch_scale_factor = view.max_pitch_scale_factor() as f32;
@@ -1292,11 +1283,10 @@ impl SourceTiles {
 
                 let tile_space_query_geometry: mln_tile_id::geometry_tile_data::GeometryCoordinates =
                     query_geometry.iter().map(|c| TileCoordinate::to_geometry_coordinate(copy, c)).collect();
-
-                if !globe {
+                let query = |into: &mut QueryResults| {
                     contents.query_rendered_features(
                         &tile.id,
-                        &mut result,
+                        into,
                         &tile_space_query_geometry,
                         view,
                         layers,
@@ -1304,29 +1294,23 @@ impl SourceTiles {
                         global_state,
                         proj_matrix,
                         feature_state,
-                    )?;
+                    )
+                };
+
+                if !globe {
+                    query(&mut result)?;
                     continue;
                 }
 
-                let mut found = crate::geometry::feature_index::QueryResults::default();
-                contents.query_rendered_features(
-                    &tile.id,
-                    &mut found,
-                    &tile_space_query_geometry,
-                    view,
-                    layers,
-                    options,
-                    global_state,
-                    proj_matrix,
-                    feature_state,
-                )?;
+                let mut found = QueryResults::default();
+                query(&mut found)?;
                 for (layer_id, features) in found {
                     let start = canonical_tile_start.get(&layer_id).copied().unwrap_or(0);
                     let layer_result = result.entry(layer_id).or_default();
                     let end = layer_result.len();
                     for feature in features {
-                        // `other == feature` compares the GeoJSON feature
-                        // base: id, geometry and properties.
+                        // Another copy of the tile finds the same feature,
+                        // with the same id, geometry and properties.
                         if !layer_result[start..end].iter().any(|other| {
                             other.id == feature.id
                                 && other.geometry == feature.geometry
@@ -1394,28 +1378,10 @@ impl SourceTiles {
         }
     }
 
-    /// Reassigns the cover's tiles' wrap values when the map pans by whole
-    /// worlds.
-    ///
-    /// On top of the regular z/x/y values, `TileIDs` have a `wrap` value that
-    /// specify which copy of the world the tile belongs to. For example, at
-    /// `lng: 10` you might render z/x/y/0 while at `lng: 370` you would
-    /// render z/x/y/1.
-    ///
-    /// When lng values get wrapped (going from `lng: 370` to `long: 10`) you
-    /// expect to see the same thing on the screen (370 degrees and 10
-    /// degrees is the same place in the world) but all the `TileIDs` will have
-    /// different wrap values.
-    ///
-    /// In order to make this transition seamless, we calculate the rounded
-    /// difference of "worlds" between the last frame and the current frame.
-    /// If the map panned by a world, then we can assign all the tiles new
-    /// `TileIDs` with updated wrap values. For example, assign z/x/y/1 a new
-    /// id: z/x/y/0. It is the same tile, just rendered in a different
-    /// position.
-    ///
-    /// This enables us to reuse the tiles at more ideal locations and
-    /// prevent flickering.
+    /// Moves the cover's tiles and rendered entries by as many world copies
+    /// as the center's longitude `lng` jumped since the last update, so
+    /// that a jump from 370° to 10°, the same place, keeps the tiles: z/x/y
+    /// of wrap 1 becomes z/x/y of wrap 0 instead of loading again.
     pub(crate) fn handle_wrap_jump(&mut self, lng: f32, ctx: &mut StoreContext) {
         let lng_difference = lng - self.prev_lng;
         let world_difference = lng_difference / 360.0f32;
@@ -1441,7 +1407,7 @@ impl SourceTiles {
             match self.tiles.get(&id) {
                 // A cached tile at the id makes way for the cover's.
                 Some(existing) if existing.place.is_cached() => self.release(&id, ctx),
-                // `emplace` keeps the first tile with an id.
+                // The first cover tile moved to an id keeps it.
                 Some(_) => {
                     retire(&self.info, slot.tile, ctx);
                     continue;

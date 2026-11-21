@@ -9,8 +9,9 @@ use std::sync::Arc;
 use feature::{Feature, PropertyMap};
 use geo_types::{Geometry, Point};
 use mln_map_types::MapMode;
+use mln_storage::resource::Priority;
 use mln_storage::response::{Reason, ResourceError};
-use mln_storage::{FileSource, Resource, Responder, Response};
+use mln_storage::{FileSource, LoadingMethod, Resource, Responder, Response};
 use mln_tile::TileData;
 use mln_tile_id::OverscaledTileID;
 use mln_util::chrono::Timestamp;
@@ -60,6 +61,39 @@ impl FileSource for Held {
     }
 }
 
+/// A file source with a cache, whose requests wait until the test answers
+/// them.
+#[derive(Default)]
+struct WithCache(Mutex<Vec<(Resource, Responder)>>);
+
+impl WithCache {
+    /// Answers the oldest request with `response`; returns what it asked for.
+    fn answer(&self, response: Response) -> Resource {
+        let (resource, responder) = self.0.lock().remove(0);
+        responder.send(response);
+        resource
+    }
+
+    /// The resource of the oldest request.
+    fn oldest(&self) -> Resource {
+        self.0.lock()[0].0.clone()
+    }
+}
+
+impl FileSource for WithCache {
+    fn load(&self, resource: &Resource, responder: Responder) {
+        self.0.lock().push((resource.clone(), responder));
+    }
+
+    fn can_request(&self, _resource: &Resource) -> bool {
+        true
+    }
+
+    fn supports_cache_only(&self) -> bool {
+        true
+    }
+}
+
 /// A response with the bytes of a vector tile with a "water" layer.
 fn water() -> Response {
     let path = std::path::Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap())
@@ -70,9 +104,19 @@ fn water() -> Response {
     response
 }
 
+/// `water()` with other bytes: an unknown field the tile's reader skips.
+fn water_changed() -> Response {
+    let mut response = water();
+    let mut bytes = response.data.as_deref().unwrap().clone();
+    // Field 15, a varint of 1.
+    bytes.extend_from_slice(&[0x78, 0x01]);
+    response.data = Some(Arc::new(bytes));
+    response
+}
+
 /// `response`, expired: a tile that has it requests it again when required.
 fn expired(mut response: Response) -> Response {
-    response.expires = Some(Timestamp::from_secs(0));
+    response.caching.expires = Some(Timestamp::from_secs(0));
     response
 }
 
@@ -112,8 +156,11 @@ impl Test {
     /// Tile 0/0/0 of a vector tileset whose tiles `file_source` answers,
     /// whose jobs run on `workers`.
     fn tileset_tile(&self, file_source: &Arc<Held>, workers: Box<dyn TileWorkers>) -> OneTile {
+        self.tileset_tile_from(Arc::<Held>::clone(file_source), workers)
+    }
+
+    fn tileset_tile_from(&self, file_source: Arc<dyn FileSource>, workers: Box<dyn TileWorkers>) -> OneTile {
         let store = tile_store(&self.pool, workers);
-        let file_source: Arc<dyn FileSource> = Arc::<Held>::clone(file_source);
         let origin = DataOrigin::Tileset {
             tileset: Tileset { tiles: vec!["tiles".to_owned()], ..Default::default() },
             encoding: VectorTileEncoding::Mvt,
@@ -257,11 +304,10 @@ fn fresh_data_is_kept_when_required_again() {
     let id = tile.id;
     tile.set_style(&style(&[water_layer("water", "red")]));
     let later = Timestamp::from_secs(i64::MAX);
-    for expires in [None, Some(later)] {
+    for (expires, mut response) in [(None, water()), (Some(later), water_changed())] {
         tile.set_necessity(&id, TileNecessity::Optional);
         tile.set_necessity(&id, TileNecessity::Required);
-        let mut response = water();
-        response.expires = expires;
+        response.caching.expires = expires;
         file_source.respond(response);
         tile.update();
         manual.run();
@@ -272,12 +318,12 @@ fn fresh_data_is_kept_when_required_again() {
         tile.set_necessity(&id, TileNecessity::Required);
         assert_eq!(file_source.pending(), usize::from(expires.is_some()), "a request only for data that expires");
         let OriginLoad::Tileset(tileset) = &tile.tile().load.origin else { unreachable!() };
-        assert_eq!(tileset.resource.prior_expires, expires, "held until the data expires");
+        assert_eq!(tileset.resource.prior_caching.expires, expires, "held until the data expires");
         assert!(tile.tile().is_complete());
         // Expired, so the next round requests it again.
         tile.with(|tile| {
             let OriginLoad::Tileset(tileset) = &mut tile.parts().1.load.origin else { unreachable!() };
-            tileset.expires = Some(Timestamp::from_secs(0));
+            tileset.caching.expires = Some(Timestamp::from_secs(0));
         });
     }
     assert_eq!(manual.submitted(), 2, "one layout per response");
@@ -811,15 +857,18 @@ fn a_tile_takes_every_answer_to_its_open_request() {
     assert_eq!(tile.actions(), [LoadFromNetwork, StartParse, EndParse]);
     assert!(tile.shows_layout() && tile.tile().is_complete());
 
-    // Revalidations: unchanged, failed, then new data.
+    // Revalidations: unchanged, the same bytes again, failed, then new data.
     responder.send(not_modified());
     tile.update();
     assert_eq!(tile.actions(), [LoadFromNetwork]);
+    responder.send(water());
+    tile.update();
+    assert_eq!(tile.actions(), [LoadFromNetwork], "the same bytes aren't laid out again");
     responder.send(failed());
     tile.update();
     assert_eq!(tile.actions(), [Error]);
     assert!(tile.shows_layout(), "a failed revalidation keeps the data");
-    responder.send(water());
+    responder.send(water_changed());
     tile.update();
     tile.update();
     assert_eq!(tile.actions(), [LoadFromNetwork, StartParse, EndParse]);
@@ -880,4 +929,89 @@ fn a_retried_load_starts_parsing_again() {
     tile.update();
     assert_eq!(tile.actions(), [LoadFromNetwork, EndParse]);
     assert!(tile.shows_layout() && tile.tile().is_complete());
+}
+
+/// A required tile with `file_source`'s cache, whose cache answers with
+/// `cached`.
+fn tile_with_cached(test: &Test, file_source: &Arc<WithCache>, cached: Response) -> OneTile {
+    let mut tile = test.tileset_tile_from(Arc::<WithCache>::clone(file_source), Box::new(InlineWorkers));
+    let id = tile.id;
+    tile.set_style(&style(&[water_layer("water", "red")]));
+    tile.set_necessity(&id, TileNecessity::Required);
+    assert_eq!(LoadingMethod::CacheOnly, file_source.answer(cached).loading_method);
+    tile.update();
+    tile.update();
+    tile
+}
+
+fn connection_error() -> Response {
+    Response { error: Some(Box::new(ResourceError::new(Reason::Connection, "offline"))), ..Response::default() }
+}
+
+/// A stale copy from the cache that must revalidate waits for the network,
+/// which a 304 shows it after.
+#[test]
+fn a_stale_copy_that_must_revalidate_waits_for_the_network() {
+    let test = Test::new();
+    let file_source = Arc::new(WithCache::default());
+    let mut cached = expired(water());
+    cached.caching.must_revalidate = true;
+    let mut tile = tile_with_cached(&test, &file_source, cached);
+    assert!(!tile.shows_layout(), "held back");
+    let network = file_source.oldest();
+    assert_eq!((LoadingMethod::NetworkOnly, Priority::Regular), (network.loading_method, network.priority));
+    assert_eq!(Some("a"), network.prior_etag.as_deref());
+
+    file_source.answer(not_modified());
+    tile.update();
+    tile.update();
+    assert!(tile.shows_layout() && tile.tile().is_complete());
+}
+
+/// A copy within its stale-while-revalidate shows at once, and the request
+/// that revalidates it waits behind those of tiles without data.
+#[test]
+fn a_copy_within_stale_while_revalidate_shows_at_once() {
+    let test = Test::new();
+    let file_source = Arc::new(WithCache::default());
+    let cached = {
+        let mut cached = expired(water());
+        cached.caching.stale_while_revalidate = Some(Timestamp::from_secs(i64::MAX));
+        cached
+    };
+    let tile = tile_with_cached(&test, &file_source, cached);
+    assert!(tile.shows_layout());
+    assert_eq!(Priority::Low, file_source.oldest().priority);
+}
+
+/// A stale copy shows while it revalidates, and stays when the server
+/// can't be reached, which the tile reports; one that must revalidate never
+/// shows.
+#[test]
+fn a_stale_copy_shows_until_it_revalidates() {
+    use TileOperation::Error;
+
+    let test = Test::new();
+    let file_source = Arc::new(WithCache::default());
+    let mut tile = tile_with_cached(&test, &file_source, expired(water()));
+    tile.update();
+    assert!(tile.shows_layout(), "shown at once");
+    let network = file_source.oldest();
+    assert_eq!((LoadingMethod::NetworkOnly, Priority::Low), (network.loading_method, network.priority));
+    tile.actions();
+    file_source.answer(connection_error());
+    tile.update();
+    assert!(tile.shows_layout());
+    assert_eq!(tile.actions(), [Error]);
+
+    let mut tile = tile_with_cached(&test, &file_source, {
+        let mut cached = expired(water());
+        cached.caching.must_revalidate = true;
+        cached
+    });
+    tile.actions();
+    file_source.answer(connection_error());
+    tile.update();
+    assert!(!tile.shows_layout());
+    assert_eq!(tile.actions(), [Error]);
 }

@@ -4,39 +4,36 @@
 // cancel handler (`TransferRequest::set_cancel_handler`) stops an in-flight
 // transfer if it has one.
 //
-// Request headers as in C++: `Range` for data ranges, `If-None-Match` from
-// the prior etag, else `If-Modified-Since` from the prior modification date,
-// user agent "MapLibreNative/1.0", redirects followed. Then the host's
+// Requests send `Range` for data ranges, `If-None-Match` from the prior
+// etag, else `If-Modified-Since` from the prior modification date, and the
+// user agent "MapLibreNative/1.0", and follow redirects. Then come the host's
 // headers from the `HttpHeaderTransform`, which a redirect to another origin
-// drops, as maplibre-native-ffi's HTTP file sources do. Response headers are
-// read in order with curl's header callback rules (case-insensitive names;
-// `Last-Modified`/`Expires` as HTTP dates, `Cache-Control`,
-// `ETag`, `Retry-After`, `X-Rate-Limit-Reset`). Status codes map to the same
-// Response fields and errors, except that a 408 is a connection error, which
-// is retried, and a 5xx takes its `Retry-After` as a 429 does.
+// drops. Response headers are read with case-insensitive names:
+// `Last-Modified`, `ETag`, `Retry-After`, `X-Rate-Limit-Reset`, and the
+// caching headers, which give the response's caching rules together
+// (`CachingHeaders::freshness`) whatever their order: the `Cache-Control`
+// field lines' directives, `Expires`, `Date` and `Age`. A 408 is a connection
+// error, which is retried, and a 5xx takes its `Retry-After` as a 429 does.
 //
 // The transfer itself is an `HttpTransport`, the platform's HTTP stack where
 // it has one: NSURLSession on Apple platforms, HttpURLConnection on Android,
 // ureq elsewhere. In the browser the source calls fetch itself
 // (`fetch_transport`), with the host's preloads, on the thread that owns them.
 //
-// Differences (ureq): ureq sends `Accept-Encoding: gzip` and
-// decodes gzip (curl: "gzip, deflate"); a connection failure's message is
-// ureq's text instead of curl's `curl_easy_strerror: errorbuffer`; dates are
-// read in the three formats of RFC 9110 only, where libcurl's `curl_getdate`
-// also takes other zones and free-form dates.
+// ureq sends `Accept-Encoding: gzip` and decodes gzip. Dates are read in the
+// three formats of RFC 9110 only.
 
 use std::sync::Arc;
 
-use mln_util::chrono::parse_http_date;
-use mln_util::http_header::{CacheControl, parse_retry_headers};
+use mln_util::chrono::{now, parse_http_date};
+use mln_util::http_header::{CacheControl, CachingHeaders, parse_retry_headers};
 
 #[cfg(not(target_family = "wasm"))]
 use crate::file_source::FileSource;
 use crate::http_header_transform::{HttpHeaderTransform, HttpHeaders};
 use crate::request::Responder;
 use crate::resource::{Kind, Resource};
-use crate::response::{Reason, ResourceError, Response};
+use crate::response::{Caching, Reason, ResourceError, Response};
 
 /// The value of `line` if it is the header `name`, matched as an
 /// ASCII-case-insensitive prefix.
@@ -92,9 +89,8 @@ impl TransferRequest {
 
     /// Finishes the request with the transfer's result (a transfer that
     /// failed before a response, such as a connection error, is an `Err`):
-    /// builds the response, as the header callback and
-    /// `handleResult(CURLcode)` do, and sends it to the request's callback,
-    /// unless the request was dropped. Any thread may call it.
+    /// builds the response and sends it to the request's callback, unless
+    /// the request was dropped. Any thread may call it.
     pub(crate) fn finish(self, transfer: Result<Transfer, Box<ResourceError>>) {
         self.responder.on_cancel(|| {});
         if !self.is_cancelled() {
@@ -149,10 +145,8 @@ fn default_transport() -> Arc<dyn HttpTransport> {
     Arc::new(crate::ureq_transport::Transport::new())
 }
 
-/// The response half of `HTTPRequest`, from a finished transfer: the header
-/// callback and `handleResult(CURLcode)`.
+/// The response to `resource` from a finished transfer.
 fn build_response(resource: &Resource, transfer: Result<Transfer, Box<ResourceError>>) -> Response {
-    // Make sure a response object exists in case we haven't got any headers or content.
     let mut response = Response::new();
     let transfer = match transfer {
         Ok(transfer) => transfer,
@@ -164,26 +158,67 @@ fn build_response(resource: &Resource, transfer: Result<Transfer, Box<ResourceEr
 
     let mut retry_after: Option<String> = None;
     let mut x_rate_limit_reset: Option<String> = None;
+    let mut cache_control: Option<String> = None;
+    let mut expires: Option<&str> = None;
+    let mut date = None;
+    let mut age = None;
     for (name, value) in &transfer.headers {
         let (name, value) = (name.as_str(), value.as_str());
         if let Some(value) = header_value(name, "last-modified", value) {
-            // Always overwrite the modification date; We might already have
-            // a value here from the Date header, but this one is more accurate.
             response.modified = parse_http_date(value);
         } else if let Some(value) = header_value(name, "etag", value) {
             response.etag = Some(value.to_owned());
         } else if let Some(value) = header_value(name, "cache-control", value) {
-            let cc = CacheControl::parse(value);
-            response.expires = cc.to_time_point();
-            response.must_revalidate = cc.must_revalidate;
+            // A field's lines are one comma-separated list (RFC 9110 §5.3).
+            match &mut cache_control {
+                Some(list) => {
+                    list.push(',');
+                    list.push_str(value);
+                }
+                None => cache_control = Some(value.to_owned()),
+            }
         } else if let Some(value) = header_value(name, "expires", value) {
-            // An invalid date, such as "0", means already expired (RFC 9111 §5.3).
-            response.expires = Some(parse_http_date(value).unwrap_or_default());
+            expires = Some(value);
+        } else if let Some(value) = header_value(name, "date", value) {
+            date = parse_http_date(value);
+        } else if let Some(value) = header_value(name, "age", value) {
+            // Delta-seconds too large to hold are as old as can be.
+            let value = value.trim();
+            age = (!value.is_empty() && value.bytes().all(|b| b.is_ascii_digit()))
+                .then(|| value.parse::<u64>().unwrap_or(u64::MAX));
         } else if let Some(value) = header_value(name, "retry-after", value) {
             retry_after = Some(value.to_owned());
         } else if let Some(value) = header_value(name, "x-rate-limit-reset", value) {
             x_rate_limit_reset = Some(value.to_owned());
         }
+    }
+
+    // A response the cache may keep, and a 304 that renews the cached copy,
+    // carry caching rules; an error doesn't.
+    let not_modified = transfer.status == 304;
+    if not_modified && cache_control.is_none() && expires.is_none() {
+        // A 304 should carry the caching headers its 200 would (RFC 9110
+        // §15.4.5). Without them, the renewed copy keeps whether it must
+        // revalidate, and is stale at once rather than given a lifetime the
+        // resource may not have.
+        response.caching.expires = Some(now());
+        response.caching.must_revalidate = resource.prior_caching.must_revalidate;
+    } else if matches!(transfer.status, 200 | 204 | 206 | 304)
+        || (transfer.status == 404 && resource.kind == Kind::Tile)
+    {
+        let cache_control = cache_control.as_deref().map(CacheControl::parse).unwrap_or_default();
+        // A 304's heuristic counts from when the copy it renews changed.
+        let last_modified =
+            if not_modified { response.modified.or(resource.prior_modified) } else { response.modified };
+        let headers = CachingHeaders { cache_control: &cache_control, expires, date, age, last_modified };
+        let freshness = headers.freshness(now());
+        response.caching = Caching {
+            expires: Some(freshness.expires),
+            must_revalidate: freshness.must_revalidate,
+            stale_while_revalidate: freshness.stale_while_revalidate,
+            stale_if_error: freshness.stale_if_error,
+        };
+        response.no_store = freshness.no_store;
     }
 
     let response_code = transfer.status;
@@ -343,5 +378,136 @@ impl FileSource for HTTPFileSource {
 
     fn can_request(&self, _resource: &Resource) -> bool {
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use mln_util::chrono::{Timestamp, now, rfc1123};
+
+    use super::*;
+
+    fn response(status: i64, headers: &[(&str, &str)], resource: &Resource) -> Response {
+        let transfer = Transfer {
+            status,
+            headers: headers.iter().map(|(name, value)| ((*name).to_owned(), (*value).to_owned())).collect(),
+            body: Ok(b"tile".to_vec()),
+        };
+        build_response(resource, Ok(transfer))
+    }
+
+    fn tile() -> Resource {
+        Resource::new(Kind::Tile, "https://example.com/0/0/0.png")
+    }
+
+    /// Seconds from now until the response expires.
+    fn lifetime(res: &Response) -> i64 {
+        res.caching.expires.expect("expires").secs_since_epoch() - now().secs_since_epoch()
+    }
+
+    fn assert_about(expected: i64, actual: i64) {
+        assert!((actual - expected).abs() <= 1, "{actual}s, not about {expected}s");
+    }
+
+    // The servers' headers, as tile.openstreetmap.org, tiles.openfreemap.org
+    // and demotiles.maplibre.org sent them.
+
+    #[test]
+    fn max_age_wins_over_an_expires_after_it_and_counts_from_the_age() {
+        let res = response(
+            200,
+            &[
+                ("ETag", "\"a6d2\""),
+                ("Cache-Control", "max-age=88823, stale-while-revalidate=604800, stale-if-error=604800"),
+                ("Expires", "Wed, 18 Nov 2026 02:37:39 GMT"),
+                ("Age", "67981"),
+            ],
+            &tile(),
+        );
+        assert_about(88823 - 67981, lifetime(&res));
+        let end = res.caching.expires.unwrap().secs_since_epoch();
+        assert_eq!(Some(Timestamp::from_secs(end + 604_800)), res.caching.stale_while_revalidate);
+        assert_eq!(Some(Timestamp::from_secs(end + 604_800)), res.caching.stale_if_error);
+    }
+
+    #[test]
+    fn max_age_wins_over_an_expires_before_it() {
+        // NSURLSession's order on Apple platforms.
+        let res = response(
+            200,
+            &[("Cache-Control", "max-age=600"), ("Expires", "Fri, 20 Nov 2026 22:59:19 GMT"), ("Age", "530")],
+            &tile(),
+        );
+        assert_about(70, lifetime(&res));
+        let res = response(
+            200,
+            &[("Expires", "Fri, 20 Nov 2026 22:59:19 GMT"), ("Cache-Control", "max-age=600"), ("Age", "530")],
+            &tile(),
+        );
+        assert_about(70, lifetime(&res));
+    }
+
+    #[test]
+    fn cache_control_lines_are_one_list() {
+        let res = response(
+            200,
+            &[
+                ("Expires", "Sat, 21 Nov 2026 00:21:36 GMT"),
+                ("Cache-Control", "max-age=3600"),
+                ("cache-control", "public"),
+                ("Age", "1134"),
+            ],
+            &tile(),
+        );
+        assert_about(3600 - 1134, lifetime(&res));
+    }
+
+    #[test]
+    fn expires_counts_from_the_date() {
+        let date = Timestamp::from_secs(1_000_000_000);
+        let expires = Timestamp::from_secs(1_000_000_300);
+        let res = response(200, &[("Date", &rfc1123(date)), ("Expires", &rfc1123(expires))], &tile());
+        assert_about(300, lifetime(&res));
+    }
+
+    #[test]
+    fn no_cache_must_revalidate_and_no_store_isnt_stored() {
+        let res = response(200, &[("Cache-Control", "no-cache, max-age=600")], &tile());
+        assert!(res.caching.must_revalidate && lifetime(&res) <= 0);
+        assert!(response(200, &[("Cache-Control", "no-store")], &tile()).no_store);
+    }
+
+    #[test]
+    fn a_304_renews_the_copy_with_a_heuristic_from_its_modified_date() {
+        let mut resource = tile();
+        resource.prior_modified = Some(Timestamp::from_secs(now().secs_since_epoch() - 1000));
+        let res = response(304, &[("Cache-Control", "public")], &resource);
+        assert!(res.not_modified);
+        assert_about(100, lifetime(&res));
+        // A 200 without `Last-Modified` gets no heuristic from the copy's.
+        assert!(lifetime(&response(200, &[("Cache-Control", "public")], &resource)) <= 0);
+    }
+
+    #[test]
+    fn a_304_without_caching_headers_keeps_must_revalidate_and_is_stale() {
+        let mut resource = tile();
+        resource.prior_modified = Some(Timestamp::from_secs(now().secs_since_epoch() - 1000));
+        resource.prior_caching.must_revalidate = true;
+        let res = response(304, &[("ETag", "\"a\"")], &resource);
+        assert!(res.caching.must_revalidate);
+        assert!(lifetime(&res) <= 0);
+    }
+
+    #[test]
+    fn an_age_too_large_to_hold_is_as_old_as_can_be() {
+        let res = response(200, &[("Cache-Control", "max-age=600"), ("Age", "99999999999999999999999")], &tile());
+        assert!(lifetime(&res) <= 0);
+    }
+
+    #[test]
+    fn an_error_has_no_caching_rules() {
+        let res = response(503, &[("Cache-Control", "max-age=600")], &tile());
+        assert!(res.error.is_some());
+        assert_eq!(None, res.caching.expires);
     }
 }

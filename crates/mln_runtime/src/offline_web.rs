@@ -3,8 +3,11 @@
 //! with [`ErrorKind::Unsupported`](mln_util::ErrorKind), as offline.rs's
 //! would on a runtime without a database.
 
+use std::time::Duration;
+
 use mln_storage::offline::{
-    OfflineRegion, OfflineRegionDefinition, OfflineRegionDownloadState, OfflineRegionMetadata, OfflineRegionStatus,
+    OfflineRegion, OfflineRegionDefinition, OfflineRegionDownloadState, OfflineRegionExpiry, OfflineRegionMetadata,
+    OfflineRegionStatus,
 };
 use mln_util::error::Error;
 
@@ -65,6 +68,20 @@ impl<'a> Offline<'a> {
 
     pub fn region_status(&self, region_id: i64) -> Result<Completion<OfflineRegionStatus>, Error> {
         let _ = region_id;
+        no_database(self.runtime)
+    }
+
+    pub fn region_expiry(&self, region_id: i64) -> Result<Completion<OfflineRegionExpiry>, Error> {
+        let _ = region_id;
+        no_database(self.runtime)
+    }
+
+    pub fn set_region_max_stale(
+        &self,
+        region_id: i64,
+        max_stale: Duration,
+    ) -> Result<Completion<OfflineRegion>, Error> {
+        let _ = (region_id, max_stale);
         no_database(self.runtime)
     }
 

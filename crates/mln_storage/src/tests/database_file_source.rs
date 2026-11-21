@@ -3,6 +3,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use mln_util::chrono::now;
 use mln_util::logging::{Event, EventSeverity, Log, Observer};
 
 use super::{LocalRequests, TestLoop, req, temp_path};
@@ -10,7 +11,7 @@ use crate::database_file_source::{Cache, DatabaseFileSource};
 use crate::file_source::FileSource;
 use crate::offline_database::{DatabaseError, OfflineDatabase};
 use crate::resource::{Kind, LoadingMethod, Resource, StoragePolicy};
-use crate::response::{Reason, Response};
+use crate::response::{Reason, Response, Reuse};
 
 fn dbfs() -> Arc<DatabaseFileSource> {
     Arc::new(DatabaseFileSource::new(":memory:", None))
@@ -253,8 +254,9 @@ fn cache_maintenance() {
     source.put(&resource, &response);
     assert_eq!(response.data, cached_request(&run_loop, &source, &resource).data);
     maintain(|done| source.invalidate_ambient_cache(done)).unwrap();
+    // Stale, but it still stands in while the server can't be reached.
     let invalidated = cached_request(&run_loop, &source, &resource);
-    assert_eq!("Cached resource is unusable", invalidated.error.expect("error").message);
+    assert_eq!(Reuse::OnError, invalidated.caching.reuse(now()));
 
     source.put(&resource, &response);
     maintain(|done| source.clear_ambient_cache(done)).unwrap();

@@ -5,7 +5,8 @@
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
-use mln_storage::response::Reason;
+use mln_storage::resource::Priority;
+use mln_storage::response::{Caching, Reason, Reuse};
 use mln_storage::{Data, FileSource, LoadingMethod, Request, Resource, Response, StoragePolicy};
 use mln_style::custom_tile_loader::{CustomProvider, CustomTileSubscriber, SubscriberKey};
 use mln_style::sources::custom::{CustomVectorTileData, TileDataFormat};
@@ -146,13 +147,13 @@ impl DataOrigin {
 #[derive(Clone, Debug)]
 pub(crate) struct Fetched {
     pub(crate) modified: Option<Timestamp>,
-    pub(crate) expires: Option<Timestamp>,
+    pub(crate) caching: Caching,
     pub(crate) etag: Option<String>,
 }
 
 impl Fetched {
     fn of(res: &Response) -> Fetched {
-        Fetched { modified: res.modified, expires: res.expires, etag: res.etag.clone() }
+        Fetched { modified: res.modified, caching: res.caching, etag: res.etag.clone() }
     }
 }
 
@@ -199,7 +200,7 @@ impl Ancestors {
     /// expired at `now`.
     fn fresh(&self, id: CanonicalTileID, now: Timestamp) -> Option<(Arc<Ancestor>, Fetched)> {
         let held = self.0.get(&id)?;
-        let fetched = held.fetched.as_ref().filter(|fetched| fetched.expires.is_none_or(|expires| expires > now))?;
+        let fetched = held.fetched.as_ref().filter(|fetched| fetched.caching.reuse(now) == Reuse::Fresh)?;
         Some((held.ancestor.upgrade()?, fetched.clone()))
     }
 }
@@ -314,6 +315,10 @@ pub(crate) enum OriginLoad {
 /// the tile is required, one to the network. The network request stays
 /// open while the tile is required: the file source answers it again when
 /// it retries an error or revalidates expired data.
+///
+/// The cache's copy shows at once unless caching rules forbid using it
+/// stale (`Caching::shows_while_revalidating`); then the tile holds it back
+/// until a 304 renews it.
 pub(crate) struct TilesetLoad {
     /// Its order follows the tile's place in its source.
     pub(crate) resource: Resource,
@@ -326,12 +331,22 @@ pub(crate) struct TilesetLoad {
     /// A cache-only request has answered.
     pub(crate) cache_answered: bool,
     pub(crate) modified: Option<Timestamp>,
-    pub(crate) expires: Option<Timestamp>,
+    /// What caching rules allow for the data the tile has.
+    pub(crate) caching: Caching,
     /// The data the tile has came from the network, not only the cache.
     pub(crate) from_network: bool,
     /// For a tile at its tileset's last zoom, its data, which the tiles cut
     /// from it find while it holds it.
     pub(crate) held: Option<Arc<Ancestor>>,
+    /// The tile has data of its own, shown or on its way.
+    pub(crate) has_data: bool,
+    /// The cache's copy that may not be shown until the network revalidates
+    /// it.
+    pub(crate) withheld: Option<Response>,
+    /// A hash of the bytes the tile last took, so that the same bytes
+    /// again, as a revalidation without validators brings, aren't laid out
+    /// again.
+    pub(crate) taken: Option<u64>,
 }
 
 /// A request answers as load `load`; dropping `request` cancels it.
@@ -402,9 +417,12 @@ impl Load {
                     failed: false,
                     cache_answered: false,
                     modified: None,
-                    expires: None,
+                    caching: Caching::default(),
                     from_network: false,
                     held: None,
+                    has_data: false,
+                    withheld: None,
+                    taken: None,
                 }))
             }
             DataOrigin::GeoJson(_) => OriginLoad::GeoJson { load: None },
@@ -460,8 +478,17 @@ impl Load {
     /// When the last data was modified, and when it expires.
     pub(crate) fn freshness(&self) -> (Option<Timestamp>, Option<Timestamp>) {
         match &self.origin {
-            OriginLoad::Tileset(tileset) => (tileset.modified, tileset.expires),
+            OriginLoad::Tileset(tileset) => (tileset.modified, tileset.caching.expires),
             OriginLoad::GeoJson { .. } | OriginLoad::Custom(_) => (None, None),
+        }
+    }
+
+    /// Whether the tile's data may show at `now` while it revalidates, if
+    /// the tile comes back from the cache. Only a tileset's data expires.
+    pub(crate) fn shows(&self, now: Timestamp) -> bool {
+        match &self.origin {
+            OriginLoad::Tileset(tileset) if tileset.has_data => tileset.caching.shows_while_revalidating(now),
+            OriginLoad::Tileset(_) | OriginLoad::GeoJson { .. } | OriginLoad::Custom(_) => true,
         }
     }
 
@@ -476,13 +503,15 @@ impl Load {
 impl TilesetLoad {
     /// The resource to request with `method`. Instead of one request that
     /// loads from both, a cache-only request comes first, then a
-    /// network-only one.
+    /// network-only one, which waits behind the requests of tiles without
+    /// data if the tile has some.
     pub(crate) fn resource_for(&mut self, method: Method) -> &Resource {
         let resource = &mut self.resource;
         match method {
             Method::Cache => resource.loading_method = LoadingMethod::CacheOnly,
             Method::Network => {
                 resource.loading_method = LoadingMethod::NetworkOnly;
+                resource.priority = if self.has_data { Priority::Low } else { Priority::Regular };
                 resource.minimum_update_interval = self.update_parameters.minimum_update_interval;
                 resource.storage_policy =
                     if self.update_parameters.is_volatile { StoragePolicy::Volatile } else { StoragePolicy::Permanent };
@@ -498,50 +527,66 @@ impl TilesetLoad {
     /// Whether the tile has data from the network that hasn't expired. Data
     /// without an expiry stays fresh.
     pub(crate) fn is_fresh(&self, now: Timestamp) -> bool {
-        self.from_network && self.expires.is_none_or(|expires| expires > now)
+        self.from_network && self.caching.reuse(now) == Reuse::Fresh
     }
 
     /// Whether a required tile needn't ask the network: its data came from
     /// there and never expires. Data that expires is asked for again, which
     /// the file source holds until it does.
     pub(crate) fn has_lasting_data(&self) -> bool {
-        self.from_network && self.expires.is_none()
+        self.from_network && self.caching.expires.is_none()
+    }
+
+    /// Records that the tile took data last modified at `modified`, under
+    /// `caching`, from the network if `from_network`. A copy it held back
+    /// goes.
+    pub(crate) fn took(&mut self, modified: Option<Timestamp>, caching: Caching, from_network: bool) {
+        (self.modified, self.caching, self.from_network, self.has_data) = (modified, caching, from_network, true);
+        self.withheld = None;
+        self.resource.prior_data = None;
     }
 
     /// What the requests know of the data they brought.
     pub(crate) fn answered(&self) -> TilesetAnswered {
-        TilesetAnswered { resource: self.resource.clone(), modified: self.modified, expires: self.expires }
+        TilesetAnswered {
+            resource: self.resource.clone(),
+            modified: self.modified,
+            caching: self.caching,
+            taken: self.taken,
+        }
     }
 
     /// Takes `answered`, of a load of the same resource, as a cache's
     /// answer. Returns false for another resource's, which it leaves.
     pub(crate) fn take_answered(&mut self, answered: TilesetAnswered) -> bool {
-        let TilesetAnswered { resource, modified, expires } = answered;
+        let TilesetAnswered { resource, modified, caching, taken } = answered;
         if resource.url != self.resource.url {
             return false;
         }
         self.resource.prior_modified = resource.prior_modified;
-        self.resource.prior_expires = resource.prior_expires;
+        self.resource.prior_caching = resource.prior_caching;
         self.resource.prior_etag = resource.prior_etag;
-        self.resource.prior_data = resource.prior_data;
-        (self.modified, self.expires) = (modified, expires);
+        (self.modified, self.caching, self.taken) = (modified, caching, taken);
+        self.has_data = true;
         self.cache_answered = true;
         true
     }
 }
 
 /// What a tileset tile's requests know of the data they brought: the
-/// validators its resource carries, and the data's freshness.
+/// validators its resource carries, the data's caching rules, and the hash
+/// of its bytes.
 pub(crate) struct TilesetAnswered {
     resource: Resource,
     modified: Option<Timestamp>,
-    expires: Option<Timestamp>,
+    caching: Caching,
+    taken: Option<u64>,
 }
 
 /// Asks GeoJSON `data` for `tile`'s features, as load `load`, cut on `pool`
 /// if there is one: returns them if they answer before this returns, else
 /// they go to `inbox`.
-pub(crate) fn get_geojson_tile(
+pub(crate) fn request_geojson_tile(
     data: &Arc<dyn GeoJSONData>,
     tile: TileKey,
     load: u64,

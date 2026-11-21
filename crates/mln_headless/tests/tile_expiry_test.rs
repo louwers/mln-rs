@@ -24,10 +24,11 @@ fn png(color: [u8; 4]) -> Vec<u8> {
     mln_image::encode_png(&image)
 }
 
-/// Runs the map's loop until its centre pixel is `color`, for at most ten
-/// seconds.
+/// Runs the map's loop until its centre pixel is `color`. The deadline only
+/// catches a map that never gets there: a loaded machine, as under the whole
+/// suite, can take several times longer than the few seconds it takes alone.
 fn wait_for_center(test: &MapTest<OnlineFileSource>, color: [u8; 4]) {
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(60);
     loop {
         run_within(&test.run_loop, Duration::from_millis(100));
         let image = test.frontend().read_still_image();
@@ -67,4 +68,43 @@ fn a_tile_reloads_when_its_data_expires() {
         then.status(200).header("Cache-Control", "max-age=3600").body(png(BLUE));
     });
     wait_for_center(&test, BLUE);
+}
+
+/// A map on one view asks again for no tile that the server's caching
+/// headers say is fresh, whatever their order: here tile.openstreetmap.org's,
+/// whose `Expires`, after `max-age`, is in the past.
+#[test]
+fn fresh_tiles_are_not_requested_again() {
+    let server = MockServer::start();
+    let tiles = r"^/\d+/\d+/\d+\.png$";
+    let fetched = server.mock(|when, then| {
+        when.method("GET").path_matches(tiles);
+        then.status(200)
+            .header("ETag", "\"a\"")
+            .header("Cache-Control", "max-age=88823, stale-while-revalidate=604800, stale-if-error=604800")
+            .header("Expires", "Wed, 18 Nov 2026 02:37:39 GMT")
+            .header("Age", "67981")
+            .body(png(GREEN));
+    });
+    let file_source = Arc::new(OnlineFileSource::new(Arc::new(NetworkStatus::new())));
+    let test = MapTest::create(TestLoop::new(), file_source, 1.0, MapMode::Continuous);
+    test.load_json(&format!(
+        r#"{{
+  "version": 8,
+  "center": [0, 0],
+  "zoom": 0,
+  "sources": {{ "tiles": {{ "type": "raster", "tileSize": 256, "tiles": ["{}"] }} }},
+  "layers": [{{ "id": "tiles", "type": "raster", "source": "tiles", "paint": {{ "raster-fade-duration": 0 }} }}]
+}}"#,
+        server.url("/{z}/{x}/{y}.png")
+    ));
+    wait_for_center(&test, GREEN);
+    let loaded = fetched.calls();
+    // Long enough for the retries, after one second and three, of tiles taken
+    // for expired.
+    let start = Instant::now();
+    while start.elapsed() < Duration::from_millis(3500) {
+        run_within(&test.run_loop, Duration::from_millis(100));
+    }
+    assert_eq!(loaded, fetched.calls(), "no tile requested again");
 }

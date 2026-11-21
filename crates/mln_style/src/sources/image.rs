@@ -52,7 +52,7 @@ impl StyleSourceType for ImageSourceType {
     /// The image at the source's URL, if it has one.
     fn load(source: &SourceData<Self>) -> Load<Arc<PremultipliedImage>> {
         match &source.options.url {
-            Some(url) => Load::Fetch(Resource::image(url)),
+            Some(url) => Load::Fetch(Box::new(Resource::image(url))),
             None => Load::Done,
         }
     }

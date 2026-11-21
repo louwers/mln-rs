@@ -70,7 +70,7 @@ fn prefetch_tiles() {
             let mut response = mln_storage::Response::new();
             response.data = Some(Arc::new((*tile).clone()));
             // Expired, so that reloading the style requests the tiles again.
-            response.expires = Some(mln_util::chrono::Timestamp::from_secs(0));
+            response.caching.expires = Some(mln_util::chrono::Timestamp::from_secs(0));
             Some(response)
         });
     }

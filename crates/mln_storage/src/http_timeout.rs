@@ -1,4 +1,4 @@
-// HTTP retry and expiration timeouts. They live here rather than in
+// HTTP retry timeouts. They live here rather than in
 // `mln_util` because they take a response error's `Reason`.
 
 use std::time::Duration;
@@ -9,7 +9,7 @@ use mln_util::constants::DEFAULT_RATE_LIMIT_TIMEOUT;
 use crate::response::Reason;
 
 /// How long from now until `timestamp`; zero once it has passed.
-fn until(timestamp: Timestamp) -> Duration {
+pub(crate) fn until(timestamp: Timestamp) -> Duration {
     Duration::from_secs(u64::try_from(timestamp.secs_since_epoch() - now().secs_since_epoch()).unwrap_or(0))
 }
 
@@ -47,16 +47,6 @@ pub(crate) fn error_retry_timeout(
     }
 }
 
-/// How long until a response expires, or, after it came back expired, the
-/// backoff before asking again; `None` when it never expires.
-#[must_use]
-pub(crate) fn expiration_timeout(expires: Option<Timestamp>, expired_requests: u32) -> Option<Duration> {
-    if expired_requests > 0 {
-        return Some(Duration::from_secs(1 << (expired_requests - 1).min(31)));
-    }
-    expires.map(until)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -82,15 +72,5 @@ mod tests {
         assert!(rate_limited >= Some(Duration::from_secs(59)) && rate_limited <= Some(Duration::from_secs(60)));
         let unavailable = error_retry_timeout(Reason::Server, 1, Some(in_one_minute));
         assert!(unavailable >= Some(Duration::from_secs(59)) && unavailable <= Some(Duration::from_secs(60)));
-    }
-
-    #[test]
-    fn expiration_timeouts() {
-        assert_eq!(expiration_timeout(None, 0), None);
-        assert_eq!(expiration_timeout(None, 1), Some(Duration::from_secs(1)));
-        assert_eq!(expiration_timeout(None, 2), Some(Duration::from_secs(2)));
-        assert_eq!(expiration_timeout(None, 3), Some(Duration::from_secs(4)));
-        let past = Timestamp::from_secs(now().secs_since_epoch() - 10);
-        assert_eq!(expiration_timeout(Some(past), 0), Some(Duration::ZERO));
     }
 }

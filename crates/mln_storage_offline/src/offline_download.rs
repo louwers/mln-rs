@@ -19,7 +19,7 @@ use mln_storage::offline::{
 };
 use mln_storage::offline_database::{DatabaseError, OfflineDatabase};
 use mln_storage::resource::{Priority, Usage};
-use mln_storage::response::{Reason, ResourceError};
+use mln_storage::response::{Caching, Reason, ResourceError, Reuse};
 use mln_storage::{FileSource, Kind, LoadingMethod, Request, Resource, Response};
 use mln_style::StyleRegistry;
 use mln_style::parser::Parser;
@@ -29,6 +29,7 @@ use mln_text::glyph::{
     get_glyph_range,
 };
 use mln_tile_id::tile_id::CanonicalTileID;
+use mln_util::chrono::now;
 use mln_util::constants::DEFAULT_MAXIMUM_CONCURRENT_REQUESTS;
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::i18n::glyph_range_is_entirely_locally_generated;
@@ -36,30 +37,22 @@ use mln_util::range::Range;
 use mln_util::tileset::Tileset;
 use mln_vec_map::VecMap;
 
-const K_RESOURCES_BATCH_SIZE: usize = 64;
-const K_MARK_BATCH_SIZE: usize = 200;
+/// The most downloaded resources that wait to be stored in one transaction.
+const RESOURCES_BATCH_SIZE: usize = 64;
+/// The most stored resources that wait to be added to the region in one
+/// transaction.
+const MARK_BATCH_SIZE: usize = 200;
 
-// Generic functions
-
+/// The zoom levels of `zoom_range` whose tiles the region covers, for tiles
+/// of `tile_size`.
 fn covering_zoom_range(
     definition: &OfflineRegionDefinition,
     round_zoom: bool,
     tile_size: u16,
     zoom_range: Range<u8>,
 ) -> Range<u8> {
-    // `std::max<double>` / `std::min<double>`.
-    let a = f64::from(covering_zoom_level(definition.min_zoom(), round_zoom, tile_size));
-    let b = f64::from(zoom_range.min);
-    let min_z = if a < b { b } else { a };
-    let a = f64::from(covering_zoom_level(definition.max_zoom(), round_zoom, tile_size));
-    let b = f64::from(zoom_range.max);
-    let max_z = if b < a { b } else { a };
-
-    debug_assert!(min_z >= 0.0);
-    debug_assert!(max_z >= 0.0);
-    debug_assert!(min_z < f64::from(u8::MAX));
-    debug_assert!(max_z < f64::from(u8::MAX));
-    Range::new(min_z as u8, max_z as u8)
+    let zoom = |zoom: f64| covering_zoom_level(zoom, round_zoom, tile_size).clamp(0, i32::from(u8::MAX)) as u8;
+    Range::new(zoom(definition.min_zoom()).max(zoom_range.min), zoom(definition.max_zoom()).min(zoom_range.max))
 }
 
 fn tile_cover(
@@ -516,7 +509,7 @@ impl OfflineDownload {
             }
         }
 
-        if self.resources_to_be_marked_as_used.len() >= K_MARK_BATCH_SIZE {
+        if self.resources_to_be_marked_as_used.len() >= MARK_BATCH_SIZE {
             self.mark_pending_used_resources(db);
         }
 
@@ -610,12 +603,12 @@ impl OfflineDownload {
             return;
         };
 
-        // A stored resource that can't be used without revalidating it, such
-        // as one invalidate_region marked, isn't complete. Keep it to
-        // revalidate it with the server.
+        // The region's copy is complete while it's fresh. A stale one is
+        // revalidated, and stays as it is until its refresh arrives.
+        let fresh = |caching: Caching| caching.reuse(now()) == Reuse::Fresh;
         let stale = if then.reads() {
             match db.get_region_resource(&resource) {
-                Some((response, size)) if response.is_usable() => {
+                Some((response, size)) if fresh(response.caching) => {
                     if let Err(error) = self.read(&then, &response) {
                         self.report_unparsable(&resource, &error);
                     }
@@ -626,11 +619,11 @@ impl OfflineDownload {
             }
         } else {
             match db.check_region_resource(&resource) {
-                Some((size, true)) => {
-                    self.complete_stored_resource(db, &resource, size as u64);
+                Some((size, caching)) if fresh(caching) => {
+                    self.complete_stored_resource(db, &resource, size);
                     return;
                 }
-                Some((_, false)) => db.get_region_resource(&resource),
+                Some(_) => db.get_region_resource(&resource),
                 None => None,
             }
         };
@@ -638,8 +631,7 @@ impl OfflineDownload {
         let mut online_resource = resource.clone();
         if let Some((stored, _)) = &stale {
             // Lets the server answer 304 Not Modified.
-            online_resource.prior_etag = stored.etag.clone();
-            online_resource.prior_modified = stored.modified;
+            online_resource.set_prior(stored);
         }
 
         let request = self.next_request();
@@ -708,7 +700,7 @@ impl OfflineDownload {
         // Flush buffer periodically.
         // Have to keep `resourcesRemaining.empty()` as the following
         // condition would fail otherwise.
-        if self.buffer.len() == K_RESOURCES_BATCH_SIZE || self.resources_remaining.is_empty() {
+        if self.buffer.len() == RESOURCES_BATCH_SIZE || self.resources_remaining.is_empty() {
             self.flush_resources_buffer(db);
         }
 

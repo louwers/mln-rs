@@ -377,7 +377,7 @@ impl StyleSourceType for GeoJsonSourceType {
     /// The GeoJSON at the source's URL, if it has one.
     fn load(source: &SourceData<Self>) -> Load<Arc<dyn GeoJSONData>> {
         match &source.options.url {
-            Some(url) => Load::Fetch(Resource::source(url)),
+            Some(url) => Load::Fetch(Box::new(Resource::source(url))),
             None => Load::Done,
         }
     }

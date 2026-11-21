@@ -7,9 +7,8 @@
 //! transport sends (`Range`, `If-None-Match` or `If-Modified-Since`, user
 //! agent "MapLibreNative/1.0"), plus `Accept-Encoding: identity` with a
 //! `Range`, since a range of a compressed body can't be decompressed. The
-//! response headers go to the `Transfer` in a fixed order, `Cache-Control`
-//! before `Expires` as in the .mm (`NSHTTPURLResponse` doesn't keep the
-//! server's order). Errors map to `Reason`s as in the .mm, with the
+//! response headers the file source reads go to the `Transfer`;
+//! `NSHTTPURLResponse` joins a header's lines with commas. Errors map to `Reason`s as in the .mm, with the
 //! `NSError`'s localized description as the message.
 //!
 //! The host's headers (`TransferRequest::headers`) go with the request too.
@@ -46,10 +45,9 @@ const IDLE_TIMEOUT_SECONDS: f64 = 30.0;
 /// `MLNNetworkConfiguration`'s limit (`NSURLSession`'s default is 6).
 const MAXIMUM_CONNECTIONS_PER_HOST: NSInteger = 8;
 
-/// The response headers a `Response` reads, in the order they go to the
-/// `Transfer`.
-const RESPONSE_HEADERS: [&str; 6] =
-    ["Last-Modified", "ETag", "Cache-Control", "Expires", "Retry-After", "X-Rate-Limit-Reset"];
+/// The response headers a `Response` reads.
+const RESPONSE_HEADERS: [&str; 8] =
+    ["Last-Modified", "ETag", "Cache-Control", "Expires", "Date", "Age", "Retry-After", "X-Rate-Limit-Reset"];
 
 /// The request headers this transport sets itself. Every other header of a
 /// request is one of the host's.

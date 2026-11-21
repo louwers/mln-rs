@@ -145,7 +145,7 @@ impl<K: TilesetKind> StyleSourceType for TilesetSourceType<K> {
     /// The TileJSON at the source's URL, or else the tileset the style lists.
     fn load(source: &SourceData<Self>) -> Load<Tileset> {
         match &source.options.url {
-            Some(url) => Load::Fetch(Resource::source(url)),
+            Some(url) => Load::Fetch(Box::new(Resource::source(url))),
             None => Load::Ready(source.options.tileset.clone().into()),
         }
     }
