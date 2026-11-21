@@ -24,7 +24,7 @@ use naga::{AddressSpace, ArraySize, Binding, Interpolation, Module, ScalarKind, 
 use crate::front_end::parse;
 use crate::layout::{
     DRAWABLE_UNIFORM_COUNT, DRAWABLE_VERTEX_COUNT, DescriptorSetType, GLOBAL_UNIFORM_COUNT, IMAGE_SAMPLER_START,
-    IMAGE_TEXTURE_COUNT, LAYER_STORAGE_COUNT, LAYER_UNIFORM_COUNT, UBO_INDEX_PUSH_CONSTANT_SIZE,
+    IMAGE_TEXTURE_COUNT, LAYER_STORAGE_COUNT, LAYER_UNIFORM_COUNT, DRAW_INDEX_PUSH_CONSTANT_SIZE,
     drawable_uniform_binding, drawable_vertex_binding, global_uniform_binding, image_sampler_binding,
     image_texture_binding, layer_storage_binding, layer_uniform_binding,
 };
@@ -249,7 +249,7 @@ fn resources_are_in_the_descriptor_set_layouts() {
                     fail(format!("samplers at {samplers:?}, the program has {:?}", declared(image_sampler_binding)));
                 }
 
-                let expected_push_constants = push_constants.map(|_| UBO_INDEX_PUSH_CONSTANT_SIZE);
+                let expected_push_constants = push_constants.map(|_| DRAW_INDEX_PUSH_CONSTANT_SIZE);
                 if push_constants != expected_push_constants {
                     fail(format!("push constants of {push_constants:?} bytes, not {expected_push_constants:?}"));
                 }

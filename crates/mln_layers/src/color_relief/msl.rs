@@ -20,10 +20,10 @@ struct FragmentStage {
 
 FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
 
-    device const ColorReliefDrawableUBO& drawable = drawableVector[uboIndex];
-    device const ColorReliefTilePropsUBO& tileProps = tilePropsVector[uboIndex];
+    device const ColorReliefDrawableUBO& drawable = drawableVector[drawIndex];
+    device const ColorReliefTilePropsUBO& tileProps = tilePropsVector[drawIndex];
 
-    const float4 position = projectTile(float2(vertex_in.pos), float2(vertex_in.pos), projectionVector[uboIndex]);
+    const float4 position = projectTile(float2(vertex_in.pos), float2(vertex_in.pos), projectionVector[drawIndex]);
 
     // Calculate texture coordinate
     float2 epsilon = 1.0 / tileProps.dimension;
@@ -65,7 +65,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
     return half4(1.0);
 #endif
 
-    device const ColorReliefTilePropsUBO& tileProps = tilePropsVector[uboIndex];
+    device const ColorReliefTilePropsUBO& tileProps = tilePropsVector[drawIndex];
 
     // 1. Get elevation at this pixel from DEM
     float el = getElevation(in.pos, image, image_sampler, tileProps.unpack);

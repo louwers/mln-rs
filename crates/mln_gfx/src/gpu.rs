@@ -568,7 +568,7 @@ pub struct Draw {
     pub base_vertex: i32,
     pub first_instance: u32,
     pub instance_count: u32,
-    /// The value shaders read as `globalIndex`: the index of the draw's
+    /// The value shaders read as `drawIndex`: the index of the draw's
     /// elements in the storage buffers its bindings bind.
     pub global_index: u32,
     pub dynamic: DynamicState,

@@ -13,9 +13,9 @@ layout(location = 0) out vec2 frag_position0;
 layout(location = 1) out vec2 frag_position1;
 
 void main() {
-    const RasterDrawableUBO drawable = drawableVector[constant.ubo_index];
+    const RasterDrawableUBO drawable = drawableVector[drawIndex];
 
-    gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector[constant.ubo_index]);
+    gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector[drawIndex]);
 
     // We are using Int16 for texture position coordinates to give us enough precision for
     // fractional coordinates. We use 8192 to scale the texture coordinates in the buffer

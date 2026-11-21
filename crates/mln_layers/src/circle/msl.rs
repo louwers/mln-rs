@@ -36,7 +36,7 @@ struct FragmentStage {
 
 FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
 
-    device const CircleDrawableUBO& drawable = drawableVector[uboIndex];
+    device const CircleDrawableUBO& drawable = drawableVector[drawIndex];
 
     const auto radius       = $props.radius;
 
@@ -52,7 +52,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
     float4 position;
     if (props.pitch_with_map) {
 #if defined(PROJECTION_GLOBE)
-        const float3 center_vector = projectToSphere(circle_center + projectionVector[uboIndex].translate, float2(0.0, 0.0), projectionVector[uboIndex]);
+        const float3 center_vector = projectToSphere(circle_center + projectionVector[drawIndex].translate, float2(0.0, 0.0), projectionVector[drawIndex]);
         float angle_scale = drawable.globe_extrude_scale;
 #endif
         float2 corner_position = circle_center;
@@ -66,7 +66,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
             // To counteract the effect for pitch-scale: viewport, we rescale the
             // whole circle based on the pitch scaling effect at its central point
 #if defined(PROJECTION_GLOBE)
-            const float4 projected_center = interpolateProjection(circle_center, center_vector, 0.0, projectionVector[uboIndex]);
+            const float4 projected_center = interpolateProjection(circle_center, center_vector, 0.0, projectionVector[drawIndex]);
             angle_scale *= (radius + stroke_width) * (projected_center.w / view.camera_to_center_distance);
 #else
             const float4 projected_center = drawable.matrix * float4(circle_center, 0, 1);
@@ -77,13 +77,13 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
 
 #if defined(PROJECTION_GLOBE)
         const float3 corner_vector = globeRotateVector(center_vector, extrude * angle_scale);
-        position = interpolateProjection(corner_position, corner_vector, 0.0, projectionVector[uboIndex]);
+        position = interpolateProjection(corner_position, corner_vector, 0.0, projectionVector[drawIndex]);
 #else
         position = drawable.matrix * float4(corner_position, 0, 1);
 #endif
     } else {
 #if defined(PROJECTION_GLOBE)
-        position = projectTile(circle_center, projectionVector[uboIndex]);
+        position = projectTile(circle_center, projectionVector[drawIndex]);
         if (position.z / position.w > 1.0) {
             position.xy = float2(10000.0);
         }

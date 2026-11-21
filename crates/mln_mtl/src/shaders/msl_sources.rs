@@ -185,11 +185,11 @@ inline float4 projectTileFor3D(float2 pos, float elevation, device const Project
 ";
 
 /// The parameter of the draw's index into its layer's storage buffers,
-/// which a main function reads as `uboIndex`.
-const UBO_INDEX_PARAMETER: &str = "device const uint32_t& uboIndex [[buffer(1)]]";
+/// which a main function reads as `drawIndex`.
+const DRAW_INDEX_PARAMETER: &str = "device const uint32_t& drawIndex [[buffer(1)]]";
 
 /// The engine's buffers that a main function may read without declaring
-/// them, besides `uboIndex`: the view's block and the projection blocks.
+/// them, besides `drawIndex`: the view's block and the projection blocks.
 const ENGINE_PARAMETERS: [Buffer; 3] = [VIEW_BUFFER, PROJECTION_BUFFER, DRAW_PROJECTION_BUFFER];
 
 /// The parameter of `buffer` at the buffer index of its id, by its name: a
@@ -272,7 +272,7 @@ pub(crate) fn library_source(program: &Program, source: &Msl) -> Result<String, 
 }
 
 /// `functions` with the parameters of what the main function `main` names
-/// in its body added to its parameters: `uboIndex`, the engine's buffers,
+/// in its body added to its parameters: `drawIndex`, the engine's buffers,
 /// `program`'s buffers, and its textures and their samplers, each at the
 /// index of its slot.
 fn with_parameters(functions: &str, main: &str, program: &Program) -> String {
@@ -283,9 +283,9 @@ fn with_parameters(functions: &str, main: &str, program: &Program) -> String {
     let declared: HashSet<&str> = identifiers(parameters).collect();
     let named: HashSet<&str> = identifiers(body).filter(|name| !declared.contains(name)).collect();
     let mut added = String::new();
-    if named.contains("uboIndex") {
+    if named.contains("drawIndex") {
         added.push_str(",\n    ");
-        added.push_str(UBO_INDEX_PARAMETER);
+        added.push_str(DRAW_INDEX_PARAMETER);
     }
     for buffer in ENGINE_PARAMETERS.iter().chain(program.buffers).filter(|buffer| named.contains(buffer.name)) {
         added.push_str(",\n    ");
@@ -323,7 +323,7 @@ mod tests {
 
     #[test]
     fn the_engines_buffers_bind_at_their_ids() {
-        assert!(UBO_INDEX_PARAMETER.ends_with(&format!("[[buffer({DRAW_INDEX_ID})]]")));
+        assert!(DRAW_INDEX_PARAMETER.ends_with(&format!("[[buffer({DRAW_INDEX_ID})]]")));
         assert_eq!(parameter(&VIEW_BUFFER), "device const ViewUBO& view [[buffer(0)]]");
         assert_eq!(parameter(&PROJECTION_BUFFER), "device const ProjectionUBO* projectionVector [[buffer(4)]]");
         assert_eq!(parameter(&DRAW_PROJECTION_BUFFER), "device const ProjectionUBO& drawProjection [[buffer(4)]]");
@@ -342,15 +342,15 @@ mod tests {
             sources: Sources::NONE,
         };
         let functions = "void helper(int walls) {}\n\
-                         float4 vertex main(uint id [[vertex_id]]) {\n    return walls[uboIndex] + view.x + second.sample(first_sampler, 0);\n}\n\
+                         float4 vertex main(uint id [[vertex_id]]) {\n    return walls[drawIndex] + view.x + second.sample(first_sampler, 0);\n}\n\
                          half4 fragment other(int view) { return walls; }";
         let with = with_parameters(functions, "main", &PROGRAM);
         assert_eq!(
             with,
             format!(
-                "void helper(int walls) {{}}\nfloat4 vertex main(uint id [[vertex_id]],\n    {UBO_INDEX_PARAMETER},\n    {},\n    {},\n    \
+                "void helper(int walls) {{}}\nfloat4 vertex main(uint id [[vertex_id]],\n    {DRAW_INDEX_PARAMETER},\n    {},\n    {},\n    \
                  sampler first_sampler [[sampler(0)]],\n    texture2d<float, access::sample> second [[texture(1)]]) \
-                 {{\n    return walls[uboIndex] + view.x + second.sample(first_sampler, 0);\n}}\n\
+                 {{\n    return walls[drawIndex] + view.x + second.sample(first_sampler, 0);\n}}\n\
                  half4 fragment other(int view) {{ return walls; }}",
                 parameter(&VIEW_BUFFER),
                 parameter(&PROGRAM.buffers[0])

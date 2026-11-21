@@ -42,7 +42,7 @@ struct VertexOutput {
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
-    let index = globalIndex.value;
+    let index = drawIndex;
     let drawable = drawableVector[index];
     let tileProps = tilePropsVector[index];
 
@@ -72,7 +72,7 @@ fn main(in: VertexInput) -> VertexOutput {
     );
 
     let pos = vec2<f32>(f32(in.position.x), f32(in.position.y));
-    let clip = projectTileWithPoles(pos, pos, projectionVector[globalIndex.value]);
+    let clip = projectTileWithPoles(pos, pos, projectionVector[drawIndex]);
     let invW = 1.0 / clip.w;
     let ndcXY = clip.xy * invW;
 
@@ -123,7 +123,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     return vec4<f32>(1.0, 1.0, 1.0, 1.0);
 #endif
 
-    let tileProps = tilePropsVector[globalIndex.value];
+    let tileProps = tilePropsVector[drawIndex];
 
     let pattern_from =
         $tileProps.pattern_from;
@@ -198,9 +198,9 @@ fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
 
     // Transform position using the matrix
-    let drawable = drawableVector[globalIndex.value];
+    let drawable = drawableVector[drawIndex];
     let pos = vec2<f32>(f32(in.position.x), f32(in.position.y));
-    let clip = projectTileWithPoles(pos, pos, projectionVector[globalIndex.value]);
+    let clip = projectTileWithPoles(pos, pos, projectionVector[drawIndex]);
     let invW = 1.0 / clip.w;
     let ndcXY = clip.xy * invW;
     out.position = clip;
@@ -274,7 +274,7 @@ struct VertexOutput {
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
-    let index = globalIndex.value;
+    let index = drawIndex;
     let drawable = drawableVector[index];
     let tileProps = tilePropsVector[index];
 
@@ -304,7 +304,7 @@ fn main(in: VertexInput) -> VertexOutput {
     );
 
     let pos = vec2<f32>(f32(in.position.x), f32(in.position.y));
-    let clip = projectTileWithPoles(pos, pos, projectionVector[globalIndex.value]);
+    let clip = projectTileWithPoles(pos, pos, projectionVector[drawIndex]);
     out.position = clip;
     out.v_pos_a = get_pattern_pos(
         drawable.pixel_coord_upper,
@@ -348,7 +348,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     return vec4<f32>(1.0, 1.0, 1.0, 1.0);
 #endif
 
-    let tileProps = tilePropsVector[globalIndex.value];
+    let tileProps = tilePropsVector[drawIndex];
 
     let pattern_from =
         $tileProps.pattern_from;
@@ -415,9 +415,9 @@ fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
 
     // Transform position using the matrix
-    let drawable = drawableVector[globalIndex.value];
+    let drawable = drawableVector[drawIndex];
     let pos = vec2<f32>(f32(in.position.x), f32(in.position.y));
-    let clip = projectTileWithPoles(pos, pos, projectionVector[globalIndex.value]);
+    let clip = projectTileWithPoles(pos, pos, projectionVector[drawIndex]);
     out.position = clip;
 
     #property pass color
@@ -550,8 +550,8 @@ struct VertexInput {
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
 
-    let drawable = drawableVector[globalIndex.value];
-    let projection = projectionVector[globalIndex.value];
+    let drawable = drawableVector[drawIndex];
+    let projection = projectionVector[drawIndex];
     let start = vec2<f32>(in.outline_pos);
     let end = vec2<f32>(in.outline_end);
     let corner = outline_corner(projectTileWithPoles(start, start, projection),
@@ -590,8 +590,8 @@ fn tile_position(word: u32) -> vec2<f32> {
 fn main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     var out: VertexOutput;
 
-    let drawable = drawableVector[globalIndex.value];
-    let projection = projectionVector[globalIndex.value];
+    let drawable = drawableVector[drawIndex];
+    let projection = projectionVector[drawIndex];
     // Four vertices a segment, in the order of the instanced quad's corners.
     let segment = vertex_index / 4u;
     let quad_corner = vertex_index % 4u;
@@ -657,7 +657,7 @@ struct VertexOutput {
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
-    let index = globalIndex.value;
+    let index = drawIndex;
     let drawable = drawableVector[index];
     let tileProps = tilePropsVector[index];
     let projection = projectionVector[index];

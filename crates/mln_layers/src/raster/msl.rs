@@ -21,9 +21,9 @@ struct FragmentStage {
 
 FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
 
-    device const RasterDrawableUBO& drawable = drawableVector[uboIndex];
+    device const RasterDrawableUBO& drawable = drawableVector[drawIndex];
 
-    const float4 position = projectTile(float2(vertex_in.pos), float2(vertex_in.pos), projectionVector[uboIndex]);
+    const float4 position = projectTile(float2(vertex_in.pos), float2(vertex_in.pos), projectionVector[drawIndex]);
 
     // We are using Int16 for texture position coordinates to give us enough precision for
     // fractional coordinates. We use 8192 to scale the texture coordinates in the buffer

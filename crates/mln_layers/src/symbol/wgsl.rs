@@ -233,7 +233,7 @@ struct VertexOutput {
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
 
-    let drawable = drawableVector[globalIndex.value];
+    let drawable = drawableVector[drawIndex];
 
     let raw_fade_opacity = unpack_opacity(in.fade_opacity);
     let fade_change = select(-props.fade_change, props.fade_change, raw_fade_opacity.y > 0.5);
@@ -277,7 +277,7 @@ fn main(in: VertexInput) -> VertexOutput {
         size = drawable.size;
     }
 
-    let projection = projectionVector[globalIndex.value];
+    let projection = projectionVector[drawIndex];
     let translated_a_pos = a_pos + drawable.translation;
     let projectedPoint = projectTileWithElevation(translated_a_pos, in.height_offset, projection);
 #ifdef PROJECTION_GLOBE
@@ -371,7 +371,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     return vec4<f32>(1.0, 1.0, 1.0, 1.0);
 #endif
 
-    let tileProps = tilePropsVector[globalIndex.value];
+    let tileProps = tilePropsVector[drawIndex];
 #ifdef HAS_UNIFORM_u_opacity
     let base_opacity = select(props.icon_opacity, props.text_opacity, tileProps.is_text != 0u);
     let opacity = base_opacity * in.fade_opacity;
@@ -424,7 +424,7 @@ struct VertexOutput {
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
 
-    let drawable = drawableVector[globalIndex.value];
+    let drawable = drawableVector[drawIndex];
 
     let fade_opacity = unpack_opacity(in.fade_opacity);
     let fade_change = select(-props.fade_change, props.fade_change, fade_opacity.y > 0.5);
@@ -467,7 +467,7 @@ fn main(in: VertexInput) -> VertexOutput {
         size = drawable.size;
     }
 
-    let projection = projectionVector[globalIndex.value];
+    let projection = projectionVector[drawIndex];
     let translated_a_pos = a_pos + drawable.translation;
     let projectedPoint = projectTileWithElevation(translated_a_pos, in.height_offset, projection);
 #ifdef PROJECTION_GLOBE
@@ -586,7 +586,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     return vec4<f32>(1.0, 1.0, 1.0, 1.0);
 #endif
 
-    let tileProps = tilePropsVector[globalIndex.value];
+    let tileProps = tilePropsVector[drawIndex];
 #ifndef HAS_UNIFORM_u_fill_color
     let fill_color = in.fill_color;
 #else
@@ -673,7 +673,7 @@ const ICON = 0.0;
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
 
-    let drawable = drawableVector[globalIndex.value];
+    let drawable = drawableVector[drawIndex];
 
     let fade_opacity = unpack_opacity(in.fade_opacity);
     let fade_change = select(-props.fade_change, props.fade_change, fade_opacity.y > 0.5);
@@ -716,7 +716,7 @@ fn main(in: VertexInput) -> VertexOutput {
         size = drawable.size;
     }
 
-    let projection = projectionVector[globalIndex.value];
+    let projection = projectionVector[drawIndex];
     let translated_a_pos = a_pos + drawable.translation;
     let projectedPoint = projectTileWithElevation(translated_a_pos, in.height_offset, projection);
 #ifdef PROJECTION_GLOBE
@@ -840,7 +840,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     return vec4<f32>(1.0, 1.0, 1.0, 1.0);
 #endif
 
-    let tileProps = tilePropsVector[globalIndex.value];
+    let tileProps = tilePropsVector[drawIndex];
 #ifndef HAS_UNIFORM_u_fill_color
     let fill_color = in.fill_color;
 #else

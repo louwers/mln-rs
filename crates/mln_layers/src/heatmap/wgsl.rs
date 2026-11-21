@@ -23,7 +23,7 @@ const GAUSS_COEF: f32 = 0.3989422804014327;
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
 
-    let drawable = drawableVector[globalIndex.value];
+    let drawable = drawableVector[drawIndex];
 
     let weight = $props.weight;
 
@@ -39,9 +39,9 @@ fn main(in: VertexInput) -> VertexOutput {
 
     let base = floor(pos * 0.5);
 #ifdef PROJECTION_GLOBE
-    let center_vector = projectToSphere(base, vec2<f32>(0.0, 0.0), projectionVector[globalIndex.value]);
+    let center_vector = projectToSphere(base, vec2<f32>(0.0, 0.0), projectionVector[drawIndex]);
     let corner_vector = globeRotateVector(center_vector, extrude * radius * drawable.globe_extrude_scale);
-    out.position = interpolateProjection(base + scaled_extrude, corner_vector, 0.0, projectionVector[globalIndex.value]);
+    out.position = interpolateProjection(base + scaled_extrude, corner_vector, 0.0, projectionVector[drawIndex]);
 #else
     out.position = drawable.matrix * vec4<f32>(base + scaled_extrude, 0.0, 1.0);
 #endif

@@ -35,7 +35,7 @@ struct VertexOutput {
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
 
-    let drawable = drawableVector[globalIndex.value];
+    let drawable = drawableVector[drawIndex];
     let scale_with_map = props.scale_with_map != 0;
     let pitch_with_map = props.pitch_with_map != 0;
 
@@ -66,7 +66,7 @@ fn main(in: VertexInput) -> VertexOutput {
 
     let radius_with_stroke = radius + stroke_width;
 
-    let projection = projectionVector[globalIndex.value];
+    let projection = projectionVector[drawIndex];
     var position: vec4<f32>;
     if (pitch_with_map) {
 #ifdef PROJECTION_GLOBE

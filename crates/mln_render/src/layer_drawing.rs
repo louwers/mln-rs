@@ -686,7 +686,7 @@ pub struct FrameDraws {
     /// Tells the draws apart in the layer composite.
     id: SimpleIdentity,
     /// The draws, in [`FrameDraw::order`]. A draw's index is the index of its
-    /// entries in the storage buffers, which shaders read as `globalIndex`.
+    /// entries in the storage buffers, which shaders read as `drawIndex`.
     draws: Vec<FrameDraw>,
     /// The buffers the draws bind, by id.
     pub(crate) uniform_buffers: UniformBufferArray,

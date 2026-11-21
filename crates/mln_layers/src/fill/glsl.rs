@@ -21,7 +21,7 @@ layout(location = 0) in ivec2 in_position;
 #property varying opacity 1
 
 void main() {
-    const FillDrawableUBO drawable = drawableVector[constant.ubo_index];
+    const FillDrawableUBO drawable = drawableVector[drawIndex];
 
 #if !defined(HAS_UNIFORM_u_color)
     frag_color = vec4(unpack_mix_color(in_color, drawable.color_t));
@@ -29,7 +29,7 @@ void main() {
 
     #property pass opacity
 
-    gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector[constant.ubo_index]);
+    gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector[drawIndex]);
 }
 ",
     fragment: r"
@@ -77,7 +77,7 @@ layout(location = 0) out vec4 frag_color;
 layout(location = 2) out vec2 frag_position;
 
 void main() {
-    const FillOutlineDrawableUBO drawable = drawableVector[constant.ubo_index];
+    const FillOutlineDrawableUBO drawable = drawableVector[drawIndex];
 
 #if !defined(HAS_UNIFORM_u_outline_color)
     frag_color = vec4(unpack_mix_color(in_color, drawable.outline_color_t));
@@ -85,7 +85,7 @@ void main() {
 
     #property pass opacity
 
-    gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector[constant.ubo_index]);
+    gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector[drawIndex]);
 
     // From the top left, as gl_FragCoord is.
     frag_position = (vec2(1.0, -1.0) * gl_Position.xy / gl_Position.w + 1.0) / 2.0 * view.target_size;
@@ -151,8 +151,8 @@ layout(location = 1) out vec2 frag_pos_b;
 #property varying opacity 5
 
 void main() {
-    const FillPatternDrawableUBO drawable = drawableVector[constant.ubo_index];
-    const FillPatternTilePropsUBO tileProps = tilePropsVector[constant.ubo_index];
+    const FillPatternDrawableUBO drawable = drawableVector[drawIndex];
+    const FillPatternTilePropsUBO tileProps = tilePropsVector[drawIndex];
 
     #property pass color
 
@@ -186,7 +186,7 @@ void main() {
     frag_pos_a = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, fromScale * display_size_a, tileZoomRatio, in_position),
     frag_pos_b = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, toScale * display_size_b, tileZoomRatio, in_position),
 
-    gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector[constant.ubo_index]);
+    gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector[drawIndex]);
 }
 ",
     fragment: r"
@@ -211,7 +211,7 @@ void main() {
     return;
 #else
 
-    const FillPatternTilePropsUBO tileProps = tilePropsVector[constant.ubo_index];
+    const FillPatternTilePropsUBO tileProps = tilePropsVector[drawIndex];
 
     const vec4 pattern_from = $tileProps.pattern_from;
 
@@ -282,8 +282,8 @@ layout(location = 2) out vec2 frag_pos;
 #property varying opacity 6
 
 void main() {
-    const FillPatternDrawableUBO drawable = drawableVector[constant.ubo_index];
-    const FillPatternTilePropsUBO tileProps = tilePropsVector[constant.ubo_index];
+    const FillPatternDrawableUBO drawable = drawableVector[drawIndex];
+    const FillPatternTilePropsUBO tileProps = tilePropsVector[drawIndex];
 
     #property pass color
 
@@ -315,7 +315,7 @@ void main() {
     const vec2 display_size_b = vec2((pattern_br_b.x - pattern_tl_b.x) / pixelRatio, (pattern_br_b.y - pattern_tl_b.y) / pixelRatio);
 
     const vec2 position2 = in_position.xy;
-    gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector[constant.ubo_index]);
+    gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector[drawIndex]);
 
     frag_pos_a = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, fromScale * display_size_a, tileZoomRatio, position2),
     frag_pos_b = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, toScale * display_size_b, tileZoomRatio, position2),
@@ -346,7 +346,7 @@ void main() {
     return;
 #else
 
-    const FillPatternTilePropsUBO tileProps = tilePropsVector[constant.ubo_index];
+    const FillPatternTilePropsUBO tileProps = tilePropsVector[drawIndex];
 
     const vec4 pattern_from = $tileProps.pattern_from;
 
@@ -478,7 +478,7 @@ layout(location = 2) out vec2 frag_position;
         outline_corner!(),
         r"
 void main() {
-    const FillOutlineDrawableUBO drawable = drawableVector[constant.ubo_index];
+    const FillOutlineDrawableUBO drawable = drawableVector[drawIndex];
 
 #if !defined(HAS_UNIFORM_u_outline_color)
     frag_color = vec4(unpack_mix_color(in_color, drawable.outline_color_t));
@@ -486,7 +486,7 @@ void main() {
 
     #property pass opacity
 
-    const ProjectionUBO projection = projectionVector[constant.ubo_index];
+    const ProjectionUBO projection = projectionVector[drawIndex];
     const vec2 start = vec2(in_outline_pos);
     const vec2 end = vec2(in_outline_end);
     vec2 pos;
@@ -536,8 +536,8 @@ layout(location = 2) out vec2 frag_pos;
         outline_corner!(),
         r"
 void main() {
-    const FillPatternDrawableUBO drawable = drawableVector[constant.ubo_index];
-    const FillPatternTilePropsUBO tileProps = tilePropsVector[constant.ubo_index];
+    const FillPatternDrawableUBO drawable = drawableVector[drawIndex];
+    const FillPatternTilePropsUBO tileProps = tilePropsVector[drawIndex];
 
     #property pass color
 
@@ -558,7 +558,7 @@ void main() {
     const vec2 display_size_a = (frag_pattern_from.zw - frag_pattern_from.xy) / view.pixel_ratio;
     const vec2 display_size_b = (frag_pattern_to.zw - frag_pattern_to.xy) / view.pixel_ratio;
 
-    const ProjectionUBO projection = projectionVector[constant.ubo_index];
+    const ProjectionUBO projection = projectionVector[drawIndex];
     const vec2 start = vec2(in_outline_pos);
     const vec2 end = vec2(in_outline_end);
     vec2 pos;
@@ -606,7 +606,7 @@ vec2 tile_position(const uint word) {
         outline_corner!(),
         r"
 void main() {
-    const FillOutlineDrawableUBO drawable = drawableVector[constant.ubo_index];
+    const FillOutlineDrawableUBO drawable = drawableVector[drawIndex];
 
     // Four vertices a segment, in the order of the instanced quad's corners.
     const uint segment = uint(gl_VertexIndex) / 4u;
@@ -628,7 +628,7 @@ void main() {
     frag_opacity = unpack_mix_float(opacity, drawable.opacity_t);
 #endif
 
-    const ProjectionUBO projection = projectionVector[constant.ubo_index];
+    const ProjectionUBO projection = projectionVector[drawIndex];
     const vec2 start = tile_position(outlineVertices[segment]);
     const vec2 end = tile_position(outlineEnds[segment]);
     const vec2 corner = vec2(float(quad_corner >> 1u), float(quad_corner & 1u));

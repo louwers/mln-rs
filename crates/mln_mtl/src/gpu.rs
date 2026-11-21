@@ -115,7 +115,7 @@ struct ShaderTable {
 /// What a shader reads from its bindings.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Resource {
-    /// `globalIndex`, set with `setVertexBytes`.
+    /// `drawIndex`, set with `setVertexBytes`.
     GlobalIndex,
     /// The buffer at a uniform or storage buffer id.
     Buffer(u32),
@@ -156,7 +156,7 @@ struct Bindings {
     buffers: Vec<(Slot, Id<dyn MTLBuffer>, usize)>,
     textures: Vec<(Slot, Id<dyn MTLTexture>)>,
     samplers: Vec<(Slot, Id<dyn MTLSamplerState>)>,
-    /// Where the functions read `globalIndex`.
+    /// Where the functions read `drawIndex`.
     global_index: Vec<Slot>,
     tags: BindingsTags,
 }

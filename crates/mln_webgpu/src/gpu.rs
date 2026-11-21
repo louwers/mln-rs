@@ -70,7 +70,7 @@ struct Pipeline {
 }
 
 /// A shader's bind groups, by the pipeline layout's slot, and the slot of
-/// its group of `globalIndex`.
+/// its group of `drawIndex`.
 struct Bindings {
     groups: Vec<(u32, wgpu::BindGroup)>,
     index_slot: Option<u32>,
@@ -145,7 +145,7 @@ impl OpenPass {
 /// A [`Gpu`] on a WebGPU [`Device`].
 ///
 /// A shader's groups are WebGPU bind groups, made with the bindings.
-/// `globalIndex` is a dynamic offset into a table of indices. Draws record
+/// `drawIndex` is a dynamic offset into a table of indices. Draws record
 /// into a pass of the frame's command encoder at once, setting only what
 /// changed since the draw before.
 ///

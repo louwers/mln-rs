@@ -24,7 +24,7 @@ layout(location = 0) in ivec2 in_position;
 layout(location = 1) out vec2 frag_extrude;
 
 void main() {
-    const HeatmapDrawableUBO drawable = drawableVector[constant.ubo_index];
+    const HeatmapDrawableUBO drawable = drawableVector[drawIndex];
 
     const float weight = $props.weight;
 
@@ -57,9 +57,9 @@ void main() {
     // in extrusion data
 #ifdef PROJECTION_GLOBE
     const vec2 circle_center = floor(in_position * 0.5);
-    const vec3 center_vector = projectToSphere(circle_center, vec2(0.0, 0.0), projectionVector[constant.ubo_index]);
+    const vec3 center_vector = projectToSphere(circle_center, vec2(0.0, 0.0), projectionVector[drawIndex]);
     const vec3 corner_vector = globeRotateVector(center_vector, extrude * radius * drawable.globe_extrude_scale);
-    gl_Position = interpolateProjection(circle_center + scaled_extrude, corner_vector, 0.0, projectionVector[constant.ubo_index]);
+    gl_Position = interpolateProjection(circle_center + scaled_extrude, corner_vector, 0.0, projectionVector[drawIndex]);
 #else
     gl_Position = drawable.matrix * vec4(floor(in_position * 0.5) + scaled_extrude, 0, 1);
 #endif

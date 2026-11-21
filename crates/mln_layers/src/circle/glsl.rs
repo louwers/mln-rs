@@ -40,7 +40,7 @@ layout(location = 1) out float frag_antialiasblur;
 #property varying stroke_opacity 8
 
 void main() {
-    const CircleDrawableUBO drawable = drawableVector[constant.ubo_index];
+    const CircleDrawableUBO drawable = drawableVector[drawIndex];
 
     const float radius = $props.radius;
 
@@ -54,7 +54,7 @@ void main() {
     const vec2 circle_center = floor(in_position * 0.5);
 
 #ifdef PROJECTION_GLOBE
-    const ProjectionUBO projection = projectionVector[constant.ubo_index];
+    const ProjectionUBO projection = projectionVector[drawIndex];
 #endif
     if (props.pitch_with_map != 0) {
 #ifdef PROJECTION_GLOBE

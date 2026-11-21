@@ -77,8 +77,8 @@ fn every_program_compiles() {
                             let text = [PRELUDE, wgsl.prelude, wgsl.vertex, wgsl.fragment];
                             assert_eq!(
                                 compiled.index_group().is_some(),
-                                text.into_iter().any(|text| text.contains("globalIndex")),
-                                "{} binds globalIndex in a group of its own",
+                                text.into_iter().any(|text| text.contains("drawIndex")),
+                                "{} binds drawIndex in a group of its own",
                                 program.name
                             );
                         }

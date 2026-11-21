@@ -45,7 +45,7 @@ pub enum ShaderBinding {
     /// The buffer at uniform or storage buffer id `id`, of which the
     /// shader reads at least `min_size` bytes: of a storage buffer, the
     /// size of each of its elements, of which a draw reads the one at
-    /// `globalIndex`. 0 where the backend can't tell.
+    /// `drawIndex`. 0 where the backend can't tell.
     Buffer { id: u32, min_size: u64 },
     /// The texture at texture slot `id`, and its sampler.
     Texture { id: u32 },

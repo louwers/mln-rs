@@ -34,7 +34,7 @@ struct FragmentStage {
 
 FragmentStage vertex vertexMain(VertexStage in [[stage_in]]) {
 
-    device const BackgroundPatternDrawableUBO& drawable = drawableVector[uboIndex];
+    device const BackgroundPatternDrawableUBO& drawable = drawableVector[drawIndex];
 
     const float2 pos = float2(in.position);
     const float2 pos_a = get_pattern_pos(drawable.pixel_coord_upper,
@@ -48,7 +48,7 @@ FragmentStage vertex vertexMain(VertexStage in [[stage_in]]) {
                                          drawable.tile_units_to_pixels,
                                          pos);
     return {
-        .position = projectTile(float2(in.position.xy), float2(in.position.xy), projectionVector[uboIndex]),
+        .position = projectTile(float2(in.position.xy), float2(in.position.xy), projectionVector[drawIndex]),
         .pos_a = pos_a,
         .pos_b = pos_b,
     };
@@ -103,10 +103,10 @@ struct FragmentStage {
 
 FragmentStage vertex vertexMain(VertexStage in [[stage_in]]) {
 
-    device const BackgroundDrawableUBO& drawable = drawableVector[uboIndex];
+    device const BackgroundDrawableUBO& drawable = drawableVector[drawIndex];
 
     return {
-        .position = projectTile(float2(in.position.xy), float2(in.position.xy), projectionVector[uboIndex])
+        .position = projectTile(float2(in.position.xy), float2(in.position.xy), projectionVector[drawIndex])
     };
 }
 

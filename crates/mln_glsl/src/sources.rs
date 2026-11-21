@@ -197,6 +197,5 @@ layout(std140, set = 0, binding = 0) uniform ViewUBOBlock {
 ";
 
 /// The declaration of the draw's index into its layer's storage buffers, a
-/// push constant, which a stage reads as `constant.ubo_index`.
-pub(crate) const UBO_INDEX_DECLARATION: &str =
-    "layout(push_constant) uniform Constants {\n    int ubo_index;\n} constant;";
+/// push constant, which a stage reads as `drawIndex`.
+pub(crate) const DRAW_INDEX_DECLARATION: &str = "layout(push_constant) uniform DrawIndex {\n    int drawIndex;\n};";

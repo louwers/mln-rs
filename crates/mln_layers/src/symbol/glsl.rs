@@ -218,8 +218,8 @@ layout(location = 1) out float frag_opacity;
 layout(location = 2) flat out vec2 frag_tex_origin;
 
 void main() {
-    const SymbolDrawableUBO drawable = drawableVector[constant.ubo_index];
-    const ProjectionUBO projection = projectionVector[constant.ubo_index];
+    const SymbolDrawableUBO drawable = drawableVector[drawIndex];
+    const ProjectionUBO projection = projectionVector[drawIndex];
 
     const vec2 raw_fade_opacity = unpack_opacity(in_fade_opacity);
     const float fade_change = raw_fade_opacity[1] > 0.5 ? props.fade_change : -props.fade_change;
@@ -349,7 +349,7 @@ void main() {
     return;
 #else
 
-    const SymbolTilePropsUBO tileProps = tilePropsVector[constant.ubo_index];
+    const SymbolTilePropsUBO tileProps = tilePropsVector[drawIndex];
 
 #if defined(HAS_UNIFORM_u_opacity)
     const float opacity = (tileProps.is_text != 0 ? props.text_opacity : props.icon_opacity) * frag_opacity;
@@ -405,8 +405,8 @@ layout(location = 3) out float frag_halo_edge;
 layout(location = 9) flat out vec2 frag_tex_origin;
 
 void main() {
-    const SymbolDrawableUBO drawable = drawableVector[constant.ubo_index];
-    const ProjectionUBO projection = projectionVector[constant.ubo_index];
+    const SymbolDrawableUBO drawable = drawableVector[drawIndex];
+    const ProjectionUBO projection = projectionVector[drawIndex];
 
     const vec2 raw_fade_opacity = unpack_opacity(in_fade_opacity);
     const float fade_change = raw_fade_opacity[1] > 0.5 ? props.fade_change : -props.fade_change;
@@ -570,7 +570,7 @@ void main() {
     return;
 #else
 
-    const SymbolTilePropsUBO tileProps = tilePropsVector[constant.ubo_index];
+    const SymbolTilePropsUBO tileProps = tilePropsVector[drawIndex];
 
 #if defined(HAS_UNIFORM_u_fill_color)
     const vec4 fill_color = tileProps.is_text != 0 ? props.text_fill_color : props.icon_fill_color;
@@ -653,8 +653,8 @@ layout(location = 9) flat out int frag_is_icon;
 layout(location = 10) flat out vec2 frag_tex_origin;
 
 void main() {
-    const SymbolDrawableUBO drawable = drawableVector[constant.ubo_index];
-    const ProjectionUBO projection = projectionVector[constant.ubo_index];
+    const SymbolDrawableUBO drawable = drawableVector[drawIndex];
+    const ProjectionUBO projection = projectionVector[drawIndex];
 
     const vec2 raw_fade_opacity = unpack_opacity(in_fade_opacity);
     const float fade_change = raw_fade_opacity[1] > 0.5 ? props.fade_change : -props.fade_change;
@@ -823,7 +823,7 @@ void main() {
     return;
 #else
 
-    const SymbolTilePropsUBO tileProps = tilePropsVector[constant.ubo_index];
+    const SymbolTilePropsUBO tileProps = tilePropsVector[drawIndex];
 
 #if defined(HAS_UNIFORM_u_fill_color)
     const vec4 fill_color = tileProps.is_text != 0 ? props.text_fill_color : props.icon_fill_color;

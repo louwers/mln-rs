@@ -165,7 +165,7 @@ struct VertexOutput {
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
-    out.position = projectTileFor3D(vec2<f32>(f32(in.position.x), f32(in.position.y)), 0.0, projectionVector[globalIndex.value]);
+    out.position = projectTileFor3D(vec2<f32>(f32(in.position.x), f32(in.position.y)), 0.0, projectionVector[drawIndex]);
     return out;
 }
 ",
@@ -301,7 +301,7 @@ struct VertexOutput {
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
-    let projection = projectionVector[globalIndex.value];
+    let projection = projectionVector[drawIndex];
     let start = vec2<f32>(in.start_pos);
     let end = vec2<f32>(in.end_pos);
 

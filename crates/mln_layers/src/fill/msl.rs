@@ -120,8 +120,8 @@ struct FragmentStage {
         r"
 FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
 
-    device const FillPatternDrawableUBO& drawable = drawableVector[uboIndex];
-    device const FillPatternTilePropsUBO& tileProps = tilePropsVector[uboIndex];
+    device const FillPatternDrawableUBO& drawable = drawableVector[drawIndex];
+    device const FillPatternTilePropsUBO& tileProps = tilePropsVector[drawIndex];
 
     const auto pattern_from = $tileProps.pattern_from;
 
@@ -145,8 +145,8 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
     const float2 display_size_b = float2((pattern_br_b.x - pattern_tl_b.x) / pixelRatio, (pattern_br_b.y - pattern_tl_b.y) / pixelRatio);
     const float2 start = float2(vertex_in.outline_pos);
     const float2 end = float2(vertex_in.outline_end);
-    const OutlineCorner corner = outline_corner(projectTile(start, start, projectionVector[uboIndex]),
-                                                projectTile(end, end, projectionVector[uboIndex]),
+    const OutlineCorner corner = outline_corner(projectTile(start, start, projectionVector[drawIndex]),
+                                                projectTile(end, end, projectionVector[drawIndex]),
                                                 vertex_in.position, view.target_size);
     const float2 pos2 = mix(start, end, corner.t);
 
@@ -174,7 +174,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
     return half4(1.0);
 #endif
 
-    device const FillPatternTilePropsUBO& tileProps = tilePropsVector[uboIndex];
+    device const FillPatternTilePropsUBO& tileProps = tilePropsVector[drawIndex];
 
     const auto pattern_from   = float4($tileProps.pattern_from);
 
@@ -305,12 +305,12 @@ struct VertexStage {
         r"
 FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
 
-    device const FillOutlineDrawableUBO& drawable = drawableVector[uboIndex];
+    device const FillOutlineDrawableUBO& drawable = drawableVector[drawIndex];
 
     const float2 start = float2(vertex_in.outline_pos);
     const float2 end = float2(vertex_in.outline_end);
-    const OutlineCorner corner = outline_corner(projectTile(start, start, projectionVector[uboIndex]),
-                                                projectTile(end, end, projectionVector[uboIndex]),
+    const OutlineCorner corner = outline_corner(projectTile(start, start, projectionVector[drawIndex]),
+                                                projectTile(end, end, projectionVector[drawIndex]),
                                                 vertex_in.position, view.target_size);
     return {
         .position       = corner.position,
@@ -335,7 +335,7 @@ pub(super) const FILL_OUTLINE_PULLED_SHADER: Msl = Msl {
         r"
 FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]]) {
 
-    device const FillOutlineDrawableUBO& drawable = drawableVector[uboIndex];
+    device const FillOutlineDrawableUBO& drawable = drawableVector[drawIndex];
 
     // Four vertices a segment, in the order of the instanced quad's corners:
     // a vertex of the fill and the end of the segment that starts there.
@@ -343,8 +343,8 @@ FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]]) {
     const uint quad_corner = vertex_id % 4;
     const float2 start = float2(outlineVertices[segment]);
     const float2 end = float2(outlineEnds[segment]);
-    const OutlineCorner corner = outline_corner(projectTile(start, start, projectionVector[uboIndex]),
-                                                projectTile(end, end, projectionVector[uboIndex]),
+    const OutlineCorner corner = outline_corner(projectTile(start, start, projectionVector[drawIndex]),
+                                                projectTile(end, end, projectionVector[drawIndex]),
                                                 short2(quad_corner >> 1, quad_corner & 1), view.target_size);
 
     // The segment's paint values are its start's, where the drawable's
@@ -415,8 +415,8 @@ struct FragmentStage {
 
 FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
 
-    device const FillPatternDrawableUBO& drawable = drawableVector[uboIndex];
-    device const FillPatternTilePropsUBO& tileProps = tilePropsVector[uboIndex];
+    device const FillPatternDrawableUBO& drawable = drawableVector[drawIndex];
+    device const FillPatternTilePropsUBO& tileProps = tilePropsVector[drawIndex];
 
 #if defined(HAS_UNIFORM_u_pattern_from)
     const auto pattern_from = float4(tileProps.pattern_from);
@@ -445,7 +445,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
     const float2 postion = float2(vertex_in.position);
 
     return {
-        .position       = projectTile(postion, postion, projectionVector[uboIndex]),
+        .position       = projectTile(postion, postion, projectionVector[drawIndex]),
         .v_pos_a        = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, fromScale * display_size_a, tileZoomRatio, postion),
         .v_pos_b        = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, toScale * display_size_b, tileZoomRatio, postion),
         #property pass color
@@ -464,7 +464,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
     return half4(1.0);
 #endif
 
-    device const FillPatternTilePropsUBO& tileProps = tilePropsVector[uboIndex];
+    device const FillPatternTilePropsUBO& tileProps = tilePropsVector[drawIndex];
 
     const auto pattern_from   = float4($tileProps.pattern_from);
 
@@ -546,10 +546,10 @@ struct FragmentStage {
 
 FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
 
-    device const FillDrawableUBO& drawable = drawableVector[uboIndex];
+    device const FillDrawableUBO& drawable = drawableVector[drawIndex];
 
     return {
-        .position = projectTile(float2(vertex_in.position), float2(vertex_in.position), projectionVector[uboIndex]),
+        .position = projectTile(float2(vertex_in.position), float2(vertex_in.position), projectionVector[drawIndex]),
         #property pass color
         #property pass opacity
     };

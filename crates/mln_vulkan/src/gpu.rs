@@ -26,7 +26,7 @@ use mln_gfx::shaders::program::Program;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{DepthFunctionType, TextureFilterType, TextureWrapType};
 use mln_glsl::layout::{
-    DescriptorSetType, IMAGE_SAMPLER_START, IMAGE_TEXTURE_COUNT, LAYER_STORAGE_COUNT, UBO_INDEX_PUSH_CONSTANT_SIZE,
+    DescriptorSetType, IMAGE_SAMPLER_START, IMAGE_TEXTURE_COUNT, LAYER_STORAGE_COUNT, DRAW_INDEX_PUSH_CONSTANT_SIZE,
     image_sampler_binding, image_texture_binding,
 };
 use mln_glsl::{ResourceUse, Stage};
@@ -330,7 +330,7 @@ impl OpenPass {
 ///
 /// Bindings are a descriptor set for each set of the shared pipeline layout
 /// that their shader uses (`mln_glsl::layout`), shared by bindings of the
-/// same resources. `globalIndex` is a push constant.
+/// same resources. `drawIndex` is a push constant.
 pub struct VulkanGpu {
     /// Before `device`: it drops while the device it frees memory on lives.
     allocator: Allocator,
@@ -682,7 +682,7 @@ impl VulkanGpu {
                 build_descriptor_set_layout(device, type_, gpu.caps.binds_vertex_buffers).map_err(GpuError::Invalid)?;
         }
         gpu.pipeline_layout =
-            build_pipeline_layout(device, &gpu.set_layouts, UBO_INDEX_PUSH_CONSTANT_SIZE, "Gpu_PipelineLayout")
+            build_pipeline_layout(device, &gpu.set_layouts, DRAW_INDEX_PUSH_CONSTANT_SIZE, "Gpu_PipelineLayout")
                 .map_err(GpuError::Invalid)?;
         let seed = PIPELINE_CACHES
             .lock()

@@ -12,9 +12,9 @@ layout(location = 1) in ivec2 in_texture_position;
 layout(location = 0) out vec2 frag_position;
 
 void main() {
-    const HillshadeDrawableUBO drawable = drawableVector[constant.ubo_index];
+    const HillshadeDrawableUBO drawable = drawableVector[drawIndex];
 
-    gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector[constant.ubo_index]);
+    gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector[drawIndex]);
 
     frag_position = vec2(in_texture_position) / 8192.0;
     frag_position.y = 1.0 - frag_position.y;
@@ -162,7 +162,7 @@ void main() {
     return;
 #endif
 
-    const HillshadeTilePropsUBO tileProps = tilePropsVector[constant.ubo_index];
+    const HillshadeTilePropsUBO tileProps = tilePropsVector[drawIndex];
 
     vec4 pixel = texture(sampler2D(image, image_sampler), frag_position);
 

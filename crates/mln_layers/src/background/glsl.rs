@@ -13,9 +13,9 @@ pub(super) const BACKGROUND_SHADER: Glsl = Glsl {
 layout(location = 0) in ivec2 in_position;
 
 void main() {
-    const BackgroundDrawableUBO drawable = drawableVector[constant.ubo_index];
+    const BackgroundDrawableUBO drawable = drawableVector[drawIndex];
 
-    gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector[constant.ubo_index]);
+    gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector[drawIndex]);
 }
 ",
     fragment: r"
@@ -42,7 +42,7 @@ layout(location = 0) out vec2 frag_pos_a;
 layout(location = 1) out vec2 frag_pos_b;
 
 void main() {
-    const BackgroundPatternDrawableUBO drawable = drawableVector[constant.ubo_index];
+    const BackgroundPatternDrawableUBO drawable = drawableVector[drawIndex];
 
     frag_pos_a = get_pattern_pos(drawable.pixel_coord_upper,
                                  drawable.pixel_coord_lower,
@@ -55,7 +55,7 @@ void main() {
                                  drawable.tile_units_to_pixels,
                                  in_position);
 
-    gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector[constant.ubo_index]);
+    gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector[drawIndex]);
 }
 ",
     fragment: r"

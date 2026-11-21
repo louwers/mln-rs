@@ -1,5 +1,5 @@
 //! The root signature of every pipeline, for the registers that
-//! `shaders::hlsl` puts the shaders' resources in: `ubo_index` as a root
+//! `shaders::hlsl` puts the shaders' resources in: `drawIndex` as a root
 //! constant, each buffer as a root CBV or SRV (a vertex buffer that a
 //! shader reads as a storage buffer too), the textures as one table,
 //! and the sampler heap as another, with the buffer of the indices in it of

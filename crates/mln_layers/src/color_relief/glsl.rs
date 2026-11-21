@@ -11,10 +11,10 @@ layout(location = 0) in ivec2 in_position;
 layout(location = 0) out vec2 frag_position;
 
 void main() {
-    const ColorReliefDrawableUBO drawable = drawableVector[constant.ubo_index];
-    const ColorReliefTilePropsUBO tileProps = tilePropsVector[constant.ubo_index];
+    const ColorReliefDrawableUBO drawable = drawableVector[drawIndex];
+    const ColorReliefTilePropsUBO tileProps = tilePropsVector[drawIndex];
 
-    gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector[constant.ubo_index]);
+    gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector[drawIndex]);
 
     vec2 epsilon = 1.0 / tileProps.dimension;
     float scale = (tileProps.dimension.x - 2.0) / tileProps.dimension.x;
@@ -55,7 +55,7 @@ void main() {
     return;
 #else
 
-    const ColorReliefTilePropsUBO tileProps = tilePropsVector[constant.ubo_index];
+    const ColorReliefTilePropsUBO tileProps = tilePropsVector[drawIndex];
 
     float el = getElevation(frag_position, tileProps.unpack);
 

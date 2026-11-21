@@ -250,8 +250,8 @@ struct FragmentStage {
 
 FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
 
-    device const SymbolDrawableUBO& drawable = drawableVector[uboIndex];
-    device const ProjectionUBO& projection = projectionVector[uboIndex];
+    device const SymbolDrawableUBO& drawable = drawableVector[drawIndex];
+    device const ProjectionUBO& projection = projectionVector[drawIndex];
 
     const float2 raw_fade_opacity = unpack_opacity(vertex_in.fade_opacity);
     const float fade_change = raw_fade_opacity[1] > 0.5 ? props.fade_change : -props.fade_change;
@@ -380,7 +380,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 #endif
 
 #if defined(HAS_UNIFORM_u_opacity)
-    device const SymbolTilePropsUBO& tileProps = tilePropsVector[uboIndex];
+    device const SymbolTilePropsUBO& tileProps = tilePropsVector[drawIndex];
     const float opacity = (tileProps.is_text ? props.text_opacity : props.icon_opacity) * in.fade_opacity;
 #else
     const float opacity = in.opacity; // fade_opacity is baked in for this case
@@ -446,8 +446,8 @@ struct FragmentStage {
 
 FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
 
-    device const SymbolDrawableUBO& drawable = drawableVector[uboIndex];
-    device const ProjectionUBO& projection = projectionVector[uboIndex];
+    device const SymbolDrawableUBO& drawable = drawableVector[drawIndex];
+    device const ProjectionUBO& projection = projectionVector[drawIndex];
 
     const float2 fade_opacity = unpack_opacity(vertex_in.fade_opacity);
     const float fade_change = (fade_opacity[1] > 0.5) ? props.fade_change : -props.fade_change;
@@ -604,7 +604,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
     return half4(1.0);
 #endif
 
-    device const SymbolTilePropsUBO& tileProps = tilePropsVector[uboIndex];
+    device const SymbolTilePropsUBO& tileProps = tilePropsVector[drawIndex];
 
 #if defined(HAS_UNIFORM_u_fill_color)
     const half4 fill_color = half4(tileProps.is_text ? props.text_fill_color : props.icon_fill_color);
@@ -699,8 +699,8 @@ struct FragmentStage {
 
 FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
 
-    device const SymbolDrawableUBO& drawable = drawableVector[uboIndex];
-    device const ProjectionUBO& projection = projectionVector[uboIndex];
+    device const SymbolDrawableUBO& drawable = drawableVector[drawIndex];
+    device const ProjectionUBO& projection = projectionVector[drawIndex];
 
     const float2 fade_opacity = unpack_opacity(vertex_in.fade_opacity);
     const float fade_change = (fade_opacity[1] > 0.5) ? props.fade_change : -props.fade_change;
@@ -861,7 +861,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
     return half4(1.0);
 #endif
 
-    device const SymbolTilePropsUBO& tileProps = tilePropsVector[uboIndex];
+    device const SymbolTilePropsUBO& tileProps = tilePropsVector[drawIndex];
 
 #if defined(HAS_UNIFORM_u_fill_color)
     const half4 fill_color = half4(tileProps.is_text ? props.text_fill_color : props.icon_fill_color);

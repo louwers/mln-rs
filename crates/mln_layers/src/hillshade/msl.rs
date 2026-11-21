@@ -128,9 +128,9 @@ struct FragmentStage {
 
 FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
 
-    device const HillshadeDrawableUBO& drawable = drawableVector[uboIndex];
+    device const HillshadeDrawableUBO& drawable = drawableVector[drawIndex];
 
-    const float4 position = projectTile(float2(vertex_in.pos), float2(vertex_in.pos), projectionVector[uboIndex]);
+    const float4 position = projectTile(float2(vertex_in.pos), float2(vertex_in.pos), projectionVector[drawIndex]);
     float2 pos = float2(vertex_in.texture_pos) / 8192.0;
     // Metal's texture coordinate origin differs from some renderers;
     // restore Y-flip to match prepare pass and historical behavior.
@@ -270,7 +270,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
     return half4(1.0);
 #endif
 
-    device const HillshadeTilePropsUBO& tileProps = tilePropsVector[uboIndex];
+    device const HillshadeTilePropsUBO& tileProps = tilePropsVector[drawIndex];
     thread half4 fragColor;
 
     float4 pixel = image.sample(image_sampler, in.pos);

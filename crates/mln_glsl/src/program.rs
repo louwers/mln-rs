@@ -14,10 +14,10 @@ use crate::layout::{
     DescriptorSetType, drawable_uniform_binding, drawable_vertex_binding, global_uniform_binding,
     image_sampler_binding, image_texture_binding, layer_storage_binding, layer_uniform_binding,
 };
-use crate::sources::UBO_INDEX_DECLARATION;
+use crate::sources::DRAW_INDEX_DECLARATION;
 
 /// The engine's buffers that a stage may read without declaring them,
-/// besides `constant`: the projection blocks. Every stage's prelude
+/// besides `drawIndex`: the projection blocks. Every stage's prelude
 /// declares the view's block.
 const ENGINE_BINDINGS: [Buffer; 2] = [PROJECTION_BUFFER, DRAW_PROJECTION_BUFFER];
 
@@ -25,7 +25,7 @@ const ENGINE_BINDINGS: [Buffer; 2] = [PROJECTION_BUFFER, DRAW_PROJECTION_BUFFER]
 /// end, with `defines` (`#define` lines): the version, the defines, the
 /// structs of the engine's blocks, the stage's prelude, the declarations of
 /// the engine's buffers that the stage or the program's prelude names
-/// (`constant`, the draw's index, and the projection blocks), the structs
+/// (`drawIndex`, the draw's index, and the projection blocks), the structs
 /// of the program's blocks, each a storage buffer's element padded to its
 /// stride, the declarations of the program's buffers, textures and samplers
 /// that the stage or the program's prelude names, and the program's own
@@ -36,8 +36,8 @@ pub fn compose(program: &Program, glsl: &Glsl, stage: Stage, defines: &str) -> R
     let (engine, own) = (glsl::blocks(&ENGINE_BUFFERS), glsl::blocks(program.buffers));
     let named: BTreeSet<&str> = identifiers(glsl.prelude).chain(identifiers(&source)).collect();
     let mut reserved = String::new();
-    if named.contains("constant") {
-        reserved.push_str(UBO_INDEX_DECLARATION);
+    if named.contains("drawIndex") {
+        reserved.push_str(DRAW_INDEX_DECLARATION);
         reserved.push('\n');
     }
     reserved += &declarations(&ENGINE_BINDINGS, &named)?;

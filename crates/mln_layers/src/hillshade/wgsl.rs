@@ -97,9 +97,9 @@ struct VertexOutput {
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
-    let drawable = drawableVector[globalIndex.value];
+    let drawable = drawableVector[drawIndex];
     let pos = vec2<f32>(f32(in.position.x), f32(in.position.y));
-    out.position = projectTileWithPoles(pos, pos, projectionVector[globalIndex.value]);
+    out.position = projectTileWithPoles(pos, pos, projectionVector[drawIndex]);
 
     var tex = vec2<f32>(f32(in.texcoord.x), f32(in.texcoord.y)) / 8192.0;
     tex.y = 1.0 - tex.y;
@@ -226,7 +226,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     return vec4<f32>(1.0, 1.0, 1.0, 1.0);
 #endif
 
-    let tileProps = tilePropsVector[globalIndex.value];
+    let tileProps = tilePropsVector[drawIndex];
     let pixel = textureSample(image, image_sampler, in.tex_coord);
 
     let latRange = tileProps.latrange;

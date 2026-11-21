@@ -36,7 +36,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     return vec4<f32>(1.0, 1.0, 1.0, 1.0);
 #endif
 
-    let tileProps = tilePropsVector[globalIndex.value];
+    let tileProps = tilePropsVector[drawIndex];
 
     let pattern_from = $tileProps.pattern_from;
 
@@ -201,13 +201,13 @@ macro_rules! patterns {
     () => {
         r"
 #ifdef HAS_UNIFORM_u_pattern_from
-    let patternFrom = tilePropsVector[globalIndex.value].pattern_from;
+    let patternFrom = tilePropsVector[drawIndex].pattern_from;
 #else
     let patternFrom = vec4<f32>(in.pattern_from);
 #endif
 
 #ifdef HAS_UNIFORM_u_pattern_to
-    let patternTo = tilePropsVector[globalIndex.value].pattern_to;
+    let patternTo = tilePropsVector[drawIndex].pattern_to;
 #else
     let patternTo = vec4<f32>(in.pattern_to);
 #endif
@@ -253,7 +253,7 @@ macro_rules! wall {
     let t = f32(in.position.y);
     let z = select(baseValue, heightValue, t > 0.0);
 
-    out.position = projectTileFor3D(select(p2, p1, in.position.x == 0), z, projectionVector[globalIndex.value]);
+    out.position = projectTileFor3D(select(p2, p1, in.position.x == 0), z, projectionVector[drawIndex]);
 "
     };
 }
@@ -274,11 +274,11 @@ struct VertexInput {
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
-    let drawable = drawableVector[globalIndex.value];
+    let drawable = drawableVector[drawIndex];
 ",
         base_and_height!(),
         r"
-    out.position = projectTileFor3D(vec2<f32>(in.position), heightValue, projectionVector[globalIndex.value]);
+    out.position = projectTileFor3D(vec2<f32>(in.position), heightValue, projectionVector[drawIndex]);
 
 #ifdef OVERDRAW_INSPECTOR
     out.color = vec4<f32>(1.0, 1.0, 1.0, 1.0);
@@ -316,7 +316,7 @@ struct VertexInput {
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
-    let drawable = drawableVector[globalIndex.value];
+    let drawable = drawableVector[drawIndex];
 ",
         base_and_height!(),
         wall!(),
@@ -366,7 +366,7 @@ struct VertexInput {
 @vertex
 fn main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     var out: VertexOutput;
-    let drawable = drawableVector[globalIndex.value];
+    let drawable = drawableVector[drawIndex];
 
     // Four vertices a wall, in the order of the static quad's corners.
     let wall = vertex_index / 4u;
@@ -437,12 +437,12 @@ struct VertexInput {
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
-    let drawable = drawableVector[globalIndex.value];
+    let drawable = drawableVector[drawIndex];
 ",
         base_and_height!(),
         patterns!(),
         r"
-    out.position = projectTileFor3D(vec2<f32>(in.position), heightValue, projectionVector[globalIndex.value]);
+    out.position = projectTileFor3D(vec2<f32>(in.position), heightValue, projectionVector[drawIndex]);
 
     out.lighting = lighting_of(vec3<f32>(0.0, 0.0, 1.0), 1.0, baseValue, heightValue);
     set_pattern(&out, drawable, patternFrom, patternTo, vec2<f32>(in.position));
@@ -476,7 +476,7 @@ struct VertexInput {
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
-    let drawable = drawableVector[globalIndex.value];
+    let drawable = drawableVector[drawIndex];
 ",
         base_and_height!(),
         patterns!(),

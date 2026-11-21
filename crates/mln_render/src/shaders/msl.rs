@@ -171,7 +171,7 @@ struct FragmentStage {
 
 FragmentStage vertex vertexMain(VertexStage in [[stage_in]]) {
     return {
-        .position = projectTileFor3D(float2(in.position.xy), 0.0, projectionVector[uboIndex])
+        .position = projectTileFor3D(float2(in.position.xy), 0.0, projectionVector[drawIndex])
     };
 }
 
@@ -292,7 +292,7 @@ struct FragmentStage {
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
-    device const ProjectionUBO& projection = projectionVector[uboIndex];
+    device const ProjectionUBO& projection = projectionVector[drawIndex];
     const float2 start = float2(vertex_in.start_pos);
     const float2 end = float2(vertex_in.end_pos);
 

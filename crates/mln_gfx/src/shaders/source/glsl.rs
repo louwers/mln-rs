@@ -24,9 +24,9 @@ use crate::shaders::source::{Named, Stage, expand as expand_properties, per_vert
 ///
 /// A stage compiles from the structs of the engine's blocks, `mln_glsl`'s
 /// prelude of the stage, which declares the view's block, the declarations
-/// of the engine's buffers that `prelude` or the stage names (`constant`,
-/// whose `ubo_index` is the draw's index into its layer's storage buffers,
-/// and the projection blocks), the structs of the program's blocks, the
+/// of the engine's buffers that `prelude` or the stage names (`drawIndex`,
+/// the draw's index into its layer's storage buffers, and the projection
+/// blocks), the structs of the program's blocks, the
 /// declarations of the program's buffers that `prelude` or the stage names,
 /// `prelude` and the stage's source. A buffer's declaration is a block
 /// without an instance name, at the set and binding of its id and kind in

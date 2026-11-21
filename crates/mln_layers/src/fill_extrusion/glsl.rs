@@ -39,7 +39,7 @@ layout(location = 1) in uvec2 in_decimals_ed;
 layout(location = 0) out vec4 frag_color;
 
 void main() {
-    const FillExtrusionDrawableUBO drawable = drawableVector[constant.ubo_index];
+    const FillExtrusionDrawableUBO drawable = drawableVector[drawIndex];
 
     const float base = max($props.base, 0.0);
 
@@ -50,7 +50,7 @@ void main() {
     const vec3 normal = vec3(0.0, 0.0, 1.0);
     const float t = 1.0;
     const float z = t > 0.0 ? height : base;
-    gl_Position = projectTileFor3D(vec2(in_position), z, projectionVector[constant.ubo_index]);
+    gl_Position = projectTileFor3D(vec2(in_position), z, projectionVector[drawIndex]);
 
 #if defined(OVERDRAW_INSPECTOR)
     frag_color = vec4(1.0);
@@ -128,7 +128,7 @@ macro_rules! fill_extrusion_wall_main {
     const vec2 instancePos = vec2(in_outline_pos);
     const vec2 instanceDecimalsEd = vec2(in_decimals_ed);
 
-    const FillExtrusionDrawableUBO drawable = drawableVector[constant.ubo_index];
+    const FillExtrusionDrawableUBO drawable = drawableVector[drawIndex];
 
     const float base = max($props.base, 0.0);
 
@@ -154,7 +154,7 @@ macro_rules! fill_extrusion_wall_main {
     const float t = float(in_position.y);
     const float z = t > 0.0 ? height : base;
 
-    gl_Position = projectTileFor3D(in_position.x == 0.0 ? p1 : p2, z, projectionVector[constant.ubo_index]);
+    gl_Position = projectTileFor3D(in_position.x == 0.0 ? p1 : p2, z, projectionVector[drawIndex]);
 
 #if defined(OVERDRAW_INSPECTOR)
     frag_color = vec4(1.0);
@@ -278,7 +278,7 @@ void main() {
     const uvec2 in_next_decimals_ed = uvec2(next_decimals_ed & 0xffffu, next_decimals_ed >> 16u);
 
     // The wall's paint values are its outline vertex's.
-    const uint paint_layout = drawableVector[constant.ubo_index].paint_layout;
+    const uint paint_layout = drawableVector[drawIndex].paint_layout;
     const uint paint = wall * (paint_layout & 0xffu);
 #if !defined(HAS_UNIFORM_u_base)
     const uint base_at = paint + ((paint_layout >> 8u) & 0xffu);
@@ -326,8 +326,8 @@ layout(location = 2) out vec2 frag_pos_b;
 #property varying pattern_to 4 flat
 
 void main() {
-    const FillExtrusionDrawableUBO drawable = drawableVector[constant.ubo_index];
-    const FillExtrusionTilePropsUBO tileProps = tilePropsVector[constant.ubo_index];
+    const FillExtrusionDrawableUBO drawable = drawableVector[drawIndex];
+    const FillExtrusionTilePropsUBO tileProps = tilePropsVector[drawIndex];
 
     const float base = max($props.base, 0.0);
 
@@ -336,7 +336,7 @@ void main() {
     const vec3 normal = vec3(0.0, 0.0, 1.0);
     const float t = 1.0;
     const float z = t > 0.0 ? height : base;
-    gl_Position = projectTileFor3D(vec2(in_position), z, projectionVector[constant.ubo_index]);
+    gl_Position = projectTileFor3D(vec2(in_position), z, projectionVector[drawIndex]);
 
 #if defined(OVERDRAW_INSPECTOR)
     frag_lighting = vec4(1.0);
@@ -425,7 +425,7 @@ void main() {
     return;
 #else
 
-    const FillExtrusionTilePropsUBO tileProps = tilePropsVector[constant.ubo_index];
+    const FillExtrusionTilePropsUBO tileProps = tilePropsVector[drawIndex];
 
     const vec4 pattern_from = $tileProps.pattern_from;
     const vec4 pattern_to = $tileProps.pattern_to;
@@ -489,8 +489,8 @@ void main() {
     const vec2 instancePos = vec2(in_outline_pos);
     const vec2 instanceDecimalsEd = vec2(in_decimals_ed);
 
-    const FillExtrusionDrawableUBO drawable = drawableVector[constant.ubo_index];
-    const FillExtrusionTilePropsUBO tileProps = tilePropsVector[constant.ubo_index];
+    const FillExtrusionDrawableUBO drawable = drawableVector[drawIndex];
+    const FillExtrusionTilePropsUBO tileProps = tilePropsVector[drawIndex];
 
     const float base = max($props.base, 0.0);
 
@@ -514,7 +514,7 @@ void main() {
     const float t = float(in_position.y);
     const float z = t > 0.0 ? height : base;
 
-    gl_Position = projectTileFor3D(in_position.x == 0.0 ? p1 : p2, z, projectionVector[constant.ubo_index]);
+    gl_Position = projectTileFor3D(in_position.x == 0.0 ? p1 : p2, z, projectionVector[drawIndex]);
 
 #if defined(OVERDRAW_INSPECTOR)
     frag_lighting = vec4(1.0);
@@ -604,7 +604,7 @@ void main() {
     return;
 #else
 
-    const FillExtrusionTilePropsUBO tileProps = tilePropsVector[constant.ubo_index];
+    const FillExtrusionTilePropsUBO tileProps = tilePropsVector[drawIndex];
 
     const vec4 pattern_from = $tileProps.pattern_from;
     const vec4 pattern_to = $tileProps.pattern_to;

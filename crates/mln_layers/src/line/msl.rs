@@ -107,7 +107,7 @@ struct FragmentStage {
 
 FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
 
-    device const LineSDFDrawableUBO& drawable = drawableVector[uboIndex];
+    device const LineSDFDrawableUBO& drawable = drawableVector[drawIndex];
 
     const auto gapwidth = $props.gapwidth / 2.0;
 
@@ -150,10 +150,10 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
     const float2 offset2 = offset * a_extrude * LINE_NORMAL_SCALE * v_normal.y * float2x2(t, -u, u, t);
 
 #if defined(PROJECTION_GLOBE)
-    const float adjustedThickness = projectLineThickness(pos.y, projectionVector[uboIndex]);
-    const float4 projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector[uboIndex]);
+    const float adjustedThickness = projectLineThickness(pos.y, projectionVector[drawIndex]);
+    const float4 projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector[drawIndex]);
     const float2 extrudedPos = pos + (offset2 + dist) / drawable.ratio * adjustedThickness;
-    const float4 position = projectTile(extrudedPos, projectionVector[uboIndex]);
+    const float4 position = projectTile(extrudedPos, projectionVector[drawIndex]);
     const float4 projected_extrude = position - projected_no_extrude;
 #else
     const float4 projected_extrude = drawable.matrix * float4(dist / drawable.ratio, 0.0, 0.0);
@@ -180,7 +180,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
     return {
         .position     = position,
 #if defined(PROJECTION_GLOBE)
-        .tile_x       = antimeridianClipX(extrudedPos, projectionVector[uboIndex]),
+        .tile_x       = antimeridianClipX(extrudedPos, projectionVector[drawIndex]),
 #endif
         .width2       = float2(outset, inset),
         .normal       = v_normal,
@@ -211,7 +211,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
     return half4(1.0);
 #endif
 
-    device const LineSDFTilePropsUBO& tileProps = tilePropsVector[uboIndex];
+    device const LineSDFTilePropsUBO& tileProps = tilePropsVector[drawIndex];
 
     const float blur = $props.blur;
 
@@ -297,7 +297,7 @@ struct FragmentStage {
 
 FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
 
-    device const LineGradientDrawableUBO& drawable = drawableVector[uboIndex];
+    device const LineGradientDrawableUBO& drawable = drawableVector[drawIndex];
 
 #if !defined(HAS_UNIFORM_u_blur)
     const auto blur     = unpack_mix_float(vertex_in.blur,     drawable.blur_t);
@@ -340,10 +340,10 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
     const float2 offset2 = offset * a_extrude * LINE_NORMAL_SCALE * v_normal.y * float2x2(t, -u, u, t);
 
 #if defined(PROJECTION_GLOBE)
-    const float adjustedThickness = projectLineThickness(pos.y, projectionVector[uboIndex]);
-    const float4 projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector[uboIndex]);
+    const float adjustedThickness = projectLineThickness(pos.y, projectionVector[drawIndex]);
+    const float4 projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector[drawIndex]);
     const float2 extrudedPos = pos + (offset2 + dist) / drawable.ratio * adjustedThickness;
-    const float4 position = projectTile(extrudedPos, projectionVector[uboIndex]);
+    const float4 position = projectTile(extrudedPos, projectionVector[drawIndex]);
     const float4 projected_extrude = position - projected_no_extrude;
 #else
     const float4 projected_extrude = drawable.matrix * float4(dist / drawable.ratio, 0.0, 0.0);
@@ -357,7 +357,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
     return {
         .position     = position,
 #if defined(PROJECTION_GLOBE)
-        .tile_x       = antimeridianClipX(extrudedPos, projectionVector[uboIndex]),
+        .tile_x       = antimeridianClipX(extrudedPos, projectionVector[drawIndex]),
 #endif
         .width2       = float2(outset, inset),
         .normal       = half2(v_normal),
@@ -471,7 +471,7 @@ struct FragmentStage {
 
 FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
 
-    device const LinePatternDrawableUBO& drawable = drawableVector[uboIndex];
+    device const LinePatternDrawableUBO& drawable = drawableVector[drawIndex];
 
     const auto gapwidth = $props.gapwidth / 2;
 
@@ -515,10 +515,10 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
     const float2 offset2 = offset * a_extrude * LINE_NORMAL_SCALE * v_normal.y * float2x2(t, -u, u, t);
 
 #if defined(PROJECTION_GLOBE)
-    const float adjustedThickness = projectLineThickness(pos.y, projectionVector[uboIndex]);
-    const float4 projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector[uboIndex]);
+    const float adjustedThickness = projectLineThickness(pos.y, projectionVector[drawIndex]);
+    const float4 projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector[drawIndex]);
     const float2 extrudedPos = pos + (offset2 + dist) / drawable.ratio * adjustedThickness;
-    const float4 position = projectTile(extrudedPos, projectionVector[uboIndex]);
+    const float4 position = projectTile(extrudedPos, projectionVector[drawIndex]);
     const float4 projected_extrude = position - projected_no_extrude;
 #else
     const float4 projected_extrude = drawable.matrix * float4(dist / drawable.ratio, 0.0, 0.0);
@@ -532,7 +532,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
     return {
         .position     = position,
 #if defined(PROJECTION_GLOBE)
-        .tile_x       = antimeridianClipX(extrudedPos, projectionVector[uboIndex]),
+        .tile_x       = antimeridianClipX(extrudedPos, projectionVector[drawIndex]),
 #endif
         .width2       = float2(outset, inset),
         .normal       = half2(v_normal),
@@ -561,7 +561,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
     return half4(1.0);
 #endif
 
-    device const LinePatternTilePropsUBO& tileProps = tilePropsVector[uboIndex];
+    device const LinePatternTilePropsUBO& tileProps = tilePropsVector[drawIndex];
 
     const float blur = $props.blur;
 
@@ -690,7 +690,7 @@ struct FragmentStage {
 
 FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
 
-    device const LineSDFDrawableUBO& drawable = drawableVector[uboIndex];
+    device const LineSDFDrawableUBO& drawable = drawableVector[drawIndex];
 
     const auto gapwidth = $props.gapwidth / 2.0;
 
@@ -732,10 +732,10 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
     const float2 offset2 = offset * a_extrude * LINE_NORMAL_SCALE * v_normal.y * float2x2(t, -u, u, t);
 
 #if defined(PROJECTION_GLOBE)
-    const float adjustedThickness = projectLineThickness(pos.y, projectionVector[uboIndex]);
-    const float4 projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector[uboIndex]);
+    const float adjustedThickness = projectLineThickness(pos.y, projectionVector[drawIndex]);
+    const float4 projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector[drawIndex]);
     const float2 extrudedPos = pos + (offset2 + dist) / drawable.ratio * adjustedThickness;
-    const float4 position = projectTile(extrudedPos, projectionVector[uboIndex]);
+    const float4 position = projectTile(extrudedPos, projectionVector[drawIndex]);
     const float4 projected_extrude = position - projected_no_extrude;
 #else
     const float4 projected_extrude = drawable.matrix * float4(dist / drawable.ratio, 0.0, 0.0);
@@ -762,7 +762,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
     return {
         .position     = position,
 #if defined(PROJECTION_GLOBE)
-        .tile_x       = antimeridianClipX(extrudedPos, projectionVector[uboIndex]),
+        .tile_x       = antimeridianClipX(extrudedPos, projectionVector[drawIndex]),
 #endif
         .width2       = float2(outset, inset),
         .normal       = v_normal,
@@ -794,7 +794,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
     return half4(1.0);
 #endif
 
-    device const LineSDFTilePropsUBO& tileProps = tilePropsVector[uboIndex];
+    device const LineSDFTilePropsUBO& tileProps = tilePropsVector[drawIndex];
 
 #if defined(HAS_UNIFORM_u_color)
     const auto color     = props.color;
@@ -882,7 +882,7 @@ struct FragmentStage {
 
 FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
 
-    device const LineDrawableUBO& drawable = drawableVector[uboIndex];
+    device const LineDrawableUBO& drawable = drawableVector[drawIndex];
 
     const auto gapwidth = $props.gapwidth / 2;
 
@@ -920,10 +920,10 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
     const float2 offset2 = offset * a_extrude * LINE_NORMAL_SCALE * v_normal.y * float2x2(t, -u, u, t);
 
 #if defined(PROJECTION_GLOBE)
-    const float adjustedThickness = projectLineThickness(pos.y, projectionVector[uboIndex]);
-    const float4 projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector[uboIndex]);
+    const float adjustedThickness = projectLineThickness(pos.y, projectionVector[drawIndex]);
+    const float4 projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector[drawIndex]);
     const float2 extrudedPos = pos + (offset2 + dist) / drawable.ratio * adjustedThickness;
-    const float4 position = projectTile(extrudedPos, projectionVector[uboIndex]);
+    const float4 position = projectTile(extrudedPos, projectionVector[drawIndex]);
     const float4 projected_extrude = position - projected_no_extrude;
 #else
     const float4 projected_extrude = drawable.matrix * float4(dist / drawable.ratio, 0.0, 0.0);
@@ -937,7 +937,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
     return {
         .position    = position,
 #if defined(PROJECTION_GLOBE)
-        .tile_x      = antimeridianClipX(extrudedPos, projectionVector[uboIndex]),
+        .tile_x      = antimeridianClipX(extrudedPos, projectionVector[drawIndex]),
 #endif
         .width2      = float2(outset, inset),
         .normal      = v_normal,

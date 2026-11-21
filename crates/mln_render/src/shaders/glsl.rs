@@ -27,7 +27,7 @@ pub(crate) const GLOBE_DEPTH_SHADER: Glsl = Glsl {
 layout(location = 0) in ivec2 in_position;
 
 void main() {
-    gl_Position = projectTileFor3D(vec2(in_position), 0.0, projectionVector[constant.ubo_index]);
+    gl_Position = projectTileFor3D(vec2(in_position), 0.0, projectionVector[drawIndex]);
 }
 ",
     fragment: r"
@@ -137,7 +137,7 @@ layout(location = 3) out float frag_tile_x;
 #endif
 
 void main() {
-    const ProjectionUBO projection = projectionVector[constant.ubo_index];
+    const ProjectionUBO projection = projectionVector[drawIndex];
     const vec2 start = vec2(in_start);
     const vec2 end = vec2(in_end);
 

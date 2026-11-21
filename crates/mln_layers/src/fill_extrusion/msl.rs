@@ -149,7 +149,7 @@ struct VertexStage {
         extrusion_wall!(),
         r"
 FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
-    return wall(vertex_in, drawableVector[uboIndex], projectionVector[uboIndex], props);
+    return wall(vertex_in, drawableVector[drawIndex], projectionVector[drawIndex], props);
 }
 
 "
@@ -178,7 +178,7 @@ struct WallVertex {
         extrusion_wall!(),
         r"
 FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]]) {
-    device const FillExtrusionDrawableUBO& drawable = drawableVector[uboIndex];
+    device const FillExtrusionDrawableUBO& drawable = drawableVector[drawIndex];
 
     // Four vertices a wall, in the order of the static quad's corners.
     const uint wall_index = vertex_id / 4;
@@ -209,7 +209,7 @@ FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]]) {
     vertex_in.color = float4(*(device const packed_float4*)(paint + (paint_layout >> 24)));
 #endif
 
-    return wall(vertex_in, drawable, projectionVector[uboIndex], props);
+    return wall(vertex_in, drawable, projectionVector[drawIndex], props);
 }
 "
     ),
@@ -275,8 +275,8 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
         };
     }
 
-    device const FillExtrusionDrawableUBO& drawable = drawableVector[uboIndex];
-    device const FillExtrusionTilePropsUBO& tileProps = tilePropsVector[uboIndex];
+    device const FillExtrusionDrawableUBO& drawable = drawableVector[drawIndex];
+    device const FillExtrusionTilePropsUBO& tileProps = tilePropsVector[drawIndex];
 
     const auto base   = max($props.base, 0.0);
     const auto height = max($props.height, 0.0);
@@ -291,7 +291,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
     const float t = float(vertex_in.pos.y);
     const float z = (t != 0.0) ? height : base;     // TODO: This would come out wrong on GL for negative values, check it...
 
-    const float4 position = projectTileFor3D(vertex_in.pos.x == 0.0 ? p1 : p2, z, projectionVector[uboIndex]);
+    const float4 position = projectTileFor3D(vertex_in.pos.x == 0.0 ? p1 : p2, z, projectionVector[drawIndex]);
 
 #if defined(OVERDRAW_INSPECTOR)
     return {
@@ -364,7 +364,7 @@ fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]]) {
     return {half4(1.0)/*, in.position.z*/};
 #endif
 
-    device const FillExtrusionTilePropsUBO& tileProps = tilePropsVector[uboIndex];
+    device const FillExtrusionTilePropsUBO& tileProps = tilePropsVector[drawIndex];
 
     const auto pattern_from = float4($tileProps.pattern_from);
     const auto pattern_to = float4($tileProps.pattern_to);
@@ -432,8 +432,8 @@ struct FragmentOutput {
 
 FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
 
-    device const FillExtrusionDrawableUBO& drawable = drawableVector[uboIndex];
-    device const FillExtrusionTilePropsUBO& tileProps = tilePropsVector[uboIndex];
+    device const FillExtrusionDrawableUBO& drawable = drawableVector[drawIndex];
+    device const FillExtrusionTilePropsUBO& tileProps = tilePropsVector[drawIndex];
 
     const auto base   = max($props.base, 0.0);
     const auto height = max($props.height, 0.0);
@@ -441,7 +441,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
     const float3 normal = float3(0.0, 0.0, 1.0);
     const float t = 1.0;
     const float z = (t != 0.0) ? height : base;     // TODO: This would come out wrong on GL for negative values, check it...
-    const float4 position = projectTileFor3D(float2(vertex_in.pos), z, projectionVector[uboIndex]);
+    const float4 position = projectTileFor3D(float2(vertex_in.pos), z, projectionVector[drawIndex]);
 
 #if defined(OVERDRAW_INSPECTOR)
     return {
@@ -512,7 +512,7 @@ fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]]) {
     return {half4(1.0)/*, in.position.z*/};
 #endif
 
-    device const FillExtrusionTilePropsUBO& tileProps = tilePropsVector[uboIndex];
+    device const FillExtrusionTilePropsUBO& tileProps = tilePropsVector[drawIndex];
 
     const auto pattern_from = float4($tileProps.pattern_from);
     const auto pattern_to = float4($tileProps.pattern_to);
@@ -568,7 +568,7 @@ struct FragmentOutput {
 
 FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
 
-    device const FillExtrusionDrawableUBO& drawable = drawableVector[uboIndex];
+    device const FillExtrusionDrawableUBO& drawable = drawableVector[drawIndex];
 
     const auto base   = max($props.base, 0.0);
     const auto height = max($props.height, 0.0);
@@ -576,7 +576,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
     const float3 normal = float3(0.0, 0.0, 1.0);
     const float t = 1.0;
     const float z = (t != 0.0) ? height : base;     // TODO: This would come out wrong on GL for negative values, check it...
-    const float4 position = projectTileFor3D(float2(vertex_in.pos), z, projectionVector[uboIndex]);
+    const float4 position = projectTileFor3D(float2(vertex_in.pos), z, projectionVector[drawIndex]);
 
 #if defined(OVERDRAW_INSPECTOR)
     return {

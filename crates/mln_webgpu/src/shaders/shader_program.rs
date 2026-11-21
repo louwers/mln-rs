@@ -260,7 +260,7 @@ pub(crate) struct ShaderProgram {
     fragment_shader_module: wgpu::ShaderModule,
     bind_group_layouts: Vec<wgpu::BindGroupLayout>,
     bind_group_order: Vec<u32>,
-    /// The group that holds only `globalIndex` (see
+    /// The group that holds only `drawIndex` (see
     /// [`index_group`](Self::index_group)).
     index_group: Option<u32>,
     pipeline_layout: wgpu::PipelineLayout,
@@ -294,7 +294,7 @@ impl ShaderProgram {
     /// `program`, from `vertex_source` and `fragment_source`, its WGSL
     /// preprocessed already.
     ///
-    /// A `globalIndex` the sources declare in group 0 moves to a group of its
+    /// A `drawIndex` the sources declare in group 0 moves to a group of its
     /// own, with layout `index_layout` (see
     /// [`index_group`](Self::index_group)).
     ///
@@ -390,7 +390,7 @@ impl ShaderProgram {
         &self.bind_group_order
     }
 
-    /// The group that holds only `globalIndex`, the index of the draw's
+    /// The group that holds only `drawIndex`, the index of the draw's
     /// entries in the layer's UBO vectors, at binding `DRAW_INDEX_ID`.
     /// Its layout is the index table's, and a draw binds it with the dynamic
     /// offset of its index, so its other groups bind only what it shares
@@ -775,7 +775,7 @@ pub(crate) fn stage_sources(key: &ShaderKey) -> Result<[String; 2], GpuError> {
 
 /// The declarations of the buffers and textures that `text`, a stage and
 /// the program's prelude, reads, of each one whose name it names outside
-/// its comments: `globalIndex`, the engine's buffers, the blocks of
+/// its comments: `drawIndex`, the engine's buffers, the blocks of
 /// `program`'s and its textures and their samplers, which a draw binds in
 /// every variant, where the text names them in any variant, and its vertex
 /// buffers, which a draw binds where it has them, where the text names them
@@ -784,7 +784,7 @@ pub(crate) fn stage_sources(key: &ShaderKey) -> Result<[String; 2], GpuError> {
 fn declarations(program: &Program, text: &str, defines: &HashMap<String, bool>) -> String {
     let named: HashSet<&str> = identifiers(text).collect();
     let mut declarations = String::new();
-    if named.contains("globalIndex") {
+    if named.contains("drawIndex") {
         declarations.push_str(GLOBAL_INDEX_DECLARATION);
         declarations.push('\n');
     }
@@ -816,10 +816,10 @@ fn declarations(program: &Program, text: &str, defines: &HashMap<String, bool>) 
     declarations
 }
 
-/// How the backend declares `globalIndex`, to its type.
-const GLOBAL_INDEX: &str = "@group(0) @binding(1) var<uniform> globalIndex:";
+/// How the backend declares `drawIndex`, to its type.
+const GLOBAL_INDEX: &str = "@group(0) @binding(1) var<uniform> drawIndex:";
 
-/// The group after the last one `sources` use, if they declare `globalIndex`
+/// The group after the last one `sources` use, if they declare `drawIndex`
 /// in group 0.
 fn index_group_of(sources: &[&str]) -> Option<u32> {
     if !sources.iter().any(|source| source.contains(GLOBAL_INDEX)) {
@@ -833,7 +833,7 @@ fn index_group_of(sources: &[&str]) -> Option<u32> {
     Some(last + 1)
 }
 
-/// `source` with its `globalIndex` declaration in `group`.
+/// `source` with its `drawIndex` declaration in `group`.
 fn move_global_index(source: &str, group: u32) -> Cow<'_, str> {
     if source.contains(GLOBAL_INDEX) {
         let declaration = GLOBAL_INDEX.replacen("@group(0)", &format!("@group({group})"), 1);
@@ -879,7 +879,7 @@ mod tests {
             sources: Sources::NONE,
         };
         let text =
-            "let p = projectionVector[globalIndex.value]; // view\n#ifdef PAINT\nlet x = paint[0];\n#endif\nprops";
+            "let p = projectionVector[drawIndex]; // view\n#ifdef PAINT\nlet x = paint[0];\n#endif\nprops";
         let declared = |defines: &[&str]| {
             declarations(&PROGRAM, text, &defines.iter().map(|&name| (name.to_owned(), true)).collect())
         };
@@ -922,14 +922,14 @@ mod tests {
 
     #[test]
     fn global_index_moves_to_the_group_after_the_last() {
-        let vertex = "@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;\n\
+        let vertex = "@group(0) @binding(1) var<uniform> drawIndex: u32;\n\
                       @group(0) @binding(2) var<storage, read> drawableVector: array<U>;";
         let fragment = "@group(1) @binding(0) var image_sampler: sampler;";
         assert_eq!(index_group_of(&[vertex, fragment]), Some(2));
         assert_eq!(index_group_of(&[fragment]), None);
         assert_eq!(
             move_global_index(vertex, 2),
-            "@group(2) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;\n\
+            "@group(2) @binding(1) var<uniform> drawIndex: u32;\n\
              @group(0) @binding(2) var<storage, read> drawableVector: array<U>;"
         );
         assert!(matches!(move_global_index(fragment, 2), Cow::Borrowed(_)));

@@ -83,7 +83,7 @@ struct VertexOutput {
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
-    let index = globalIndex.value;
+    let index = drawIndex;
     let drawable = drawableVector[index];
 
     // Constants
@@ -131,11 +131,11 @@ fn main(in: VertexInput) -> VertexOutput {
     let offset2 = offset * a_extrude * LINE_NORMAL_SCALE * v_normal.y * mat2x2<f32>(t, -u, u, t);
 
 #ifdef PROJECTION_GLOBE
-    let adjustedThickness = projectLineThickness(pos.y, projectionVector[globalIndex.value]);
-    let projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector[globalIndex.value]);
+    let adjustedThickness = projectLineThickness(pos.y, projectionVector[drawIndex]);
+    let projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector[drawIndex]);
     let extrudedPos = pos + (offset2 + dist) / drawable.ratio * adjustedThickness;
-    let position_globe = projectTile(extrudedPos, projectionVector[globalIndex.value]);
-    out.v_tile_x = antimeridianClipX(extrudedPos, projectionVector[globalIndex.value]);
+    let position_globe = projectTile(extrudedPos, projectionVector[drawIndex]);
+    out.v_tile_x = antimeridianClipX(extrudedPos, projectionVector[drawIndex]);
     let projected_extrude = position_globe - projected_no_extrude;
     let position = position_globe;
 #else
@@ -214,7 +214,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 #ifdef OVERDRAW_INSPECTOR
     return vec4<f32>(1.0, 1.0, 1.0, 1.0);
 #endif
-    let tileProps = tilePropsVector[globalIndex.value];
+    let tileProps = tilePropsVector[drawIndex];
     let blur = $props.blur;
     let opacity = $props.opacity;
 #ifdef HAS_UNIFORM_u_floorwidth
@@ -283,7 +283,7 @@ struct VertexOutput {
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
-    let drawable = drawableVector[globalIndex.value];
+    let drawable = drawableVector[drawIndex];
 
     // Constants
     let pixel_ratio = max(DEVICE_PIXEL_RATIO, 1e-6);
@@ -321,11 +321,11 @@ fn main(in: VertexInput) -> VertexOutput {
     let offset2 = offset * a_extrude * LINE_NORMAL_SCALE * v_normal.y * mat2x2<f32>(t, -u, u, t);
 
 #ifdef PROJECTION_GLOBE
-    let adjustedThickness = projectLineThickness(pos.y, projectionVector[globalIndex.value]);
-    let projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector[globalIndex.value]);
+    let adjustedThickness = projectLineThickness(pos.y, projectionVector[drawIndex]);
+    let projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector[drawIndex]);
     let extrudedPos = pos + (offset2 + dist) / drawable.ratio * adjustedThickness;
-    let position_globe = projectTile(extrudedPos, projectionVector[globalIndex.value]);
-    out.v_tile_x = antimeridianClipX(extrudedPos, projectionVector[globalIndex.value]);
+    let position_globe = projectTile(extrudedPos, projectionVector[drawIndex]);
+    out.v_tile_x = antimeridianClipX(extrudedPos, projectionVector[drawIndex]);
     let projected_extrude = position_globe - projected_no_extrude;
     let position = position_globe;
 #else
@@ -430,7 +430,7 @@ struct VertexOutput {
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
-    let index = globalIndex.value;
+    let index = drawIndex;
     let drawable = drawableVector[index];
     let tileProps = tilePropsVector[index];
 
@@ -472,11 +472,11 @@ fn main(in: VertexInput) -> VertexOutput {
     let offset2 = offset * a_extrude * LINE_NORMAL_SCALE * v_normal.y * mat2x2<f32>(t, -u, u, t);
 
 #ifdef PROJECTION_GLOBE
-    let adjustedThickness = projectLineThickness(pos.y, projectionVector[globalIndex.value]);
-    let projected_no_extrude = projectTile(pos + offset2 / ratio * adjustedThickness, projectionVector[globalIndex.value]);
+    let adjustedThickness = projectLineThickness(pos.y, projectionVector[drawIndex]);
+    let projected_no_extrude = projectTile(pos + offset2 / ratio * adjustedThickness, projectionVector[drawIndex]);
     let extrudedPos = pos + (offset2 + dist) / ratio * adjustedThickness;
-    let position_globe = projectTile(extrudedPos, projectionVector[globalIndex.value]);
-    out.v_tile_x = antimeridianClipX(extrudedPos, projectionVector[globalIndex.value]);
+    let position_globe = projectTile(extrudedPos, projectionVector[drawIndex]);
+    out.v_tile_x = antimeridianClipX(extrudedPos, projectionVector[drawIndex]);
     let projected_extrude = position_globe - projected_no_extrude;
     let position = position_globe;
 #else
@@ -528,7 +528,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 #ifdef OVERDRAW_INSPECTOR
     return vec4<f32>(1.0, 1.0, 1.0, 1.0);
 #endif
-    let tileProps = tilePropsVector[globalIndex.value];
+    let tileProps = tilePropsVector[drawIndex];
 
     let pattern_from = $tileProps.pattern_from;
     let pattern_to = $tileProps.pattern_to;
@@ -639,7 +639,7 @@ struct VertexOutput {
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
-    let index = globalIndex.value;
+    let index = drawIndex;
     let drawable = drawableVector[index];
     let tileProps = tilePropsVector[index];
 
@@ -687,11 +687,11 @@ fn main(in: VertexInput) -> VertexOutput {
     let offset2 = offset * a_extrude * LINE_NORMAL_SCALE * v_normal.y * mat2x2<f32>(t, -u, u, t);
 
 #ifdef PROJECTION_GLOBE
-    let adjustedThickness = projectLineThickness(pos.y, projectionVector[globalIndex.value]);
-    let projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector[globalIndex.value]);
+    let adjustedThickness = projectLineThickness(pos.y, projectionVector[drawIndex]);
+    let projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector[drawIndex]);
     let extrudedPos = pos + (offset2 + dist) / drawable.ratio * adjustedThickness;
-    let position_globe = projectTile(extrudedPos, projectionVector[globalIndex.value]);
-    out.v_tile_x = antimeridianClipX(extrudedPos, projectionVector[globalIndex.value]);
+    let position_globe = projectTile(extrudedPos, projectionVector[drawIndex]);
+    out.v_tile_x = antimeridianClipX(extrudedPos, projectionVector[drawIndex]);
     let projected_extrude = position_globe - projected_no_extrude;
     let position = position_globe;
 #else
@@ -769,7 +769,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 #ifdef OVERDRAW_INSPECTOR
     return vec4<f32>(1.0, 1.0, 1.0, 1.0);
 #endif
-    let tileProps = tilePropsVector[globalIndex.value];
+    let tileProps = tilePropsVector[drawIndex];
     let color = $props.color;
     let blur = $props.blur;
     let opacity = $props.opacity;
@@ -837,7 +837,7 @@ struct VertexOutput {
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
-    let drawable = drawableVector[globalIndex.value];
+    let drawable = drawableVector[drawIndex];
     let ratio = max(drawable.ratio, 1e-6);
     let pixel_ratio = DEVICE_PIXEL_RATIO;
     let antialiasing = (1.0 / pixel_ratio) * 0.5;
@@ -872,11 +872,11 @@ fn main(in: VertexInput) -> VertexOutput {
     let offset2 = offset * a_extrude * LINE_NORMAL_SCALE * normal.y * mat2x2<f32>(t, -u, u, t);
 
 #ifdef PROJECTION_GLOBE
-    let adjustedThickness = projectLineThickness(pos.y, projectionVector[globalIndex.value]);
-    let projected_no_extrude = projectTile(pos + offset2 / ratio * adjustedThickness, projectionVector[globalIndex.value]);
+    let adjustedThickness = projectLineThickness(pos.y, projectionVector[drawIndex]);
+    let projected_no_extrude = projectTile(pos + offset2 / ratio * adjustedThickness, projectionVector[drawIndex]);
     let extrudedPos = pos + (offset2 + dist) / ratio * adjustedThickness;
-    let base = projectTile(extrudedPos, projectionVector[globalIndex.value]);
-    out.v_tile_x = antimeridianClipX(extrudedPos, projectionVector[globalIndex.value]);
+    let base = projectTile(extrudedPos, projectionVector[drawIndex]);
+    out.v_tile_x = antimeridianClipX(extrudedPos, projectionVector[drawIndex]);
     let projected_extrude = base - projected_no_extrude;
 #else
     let projected_extrude = drawable.matrix * vec4<f32>(dist / ratio, 0.0, 0.0);

@@ -27,7 +27,7 @@ use crate::shaders::source::{Named, Stage, expand as expand_properties, per_vert
 /// A stage compiles from the backend's prelude, the structs of the engine's
 /// blocks and the program's, the declarations of the buffers that `prelude`
 /// or the stage names, `prelude` and the stage's source. The backend
-/// declares `globalIndex`, the draw's index into the storage buffers it
+/// declares `drawIndex`, the draw's index into the storage buffers it
 /// reads, the engine's buffers and the program's, each by its
 /// [`name`](crate::shaders::program::Buffer::name) at its id in group 0: a
 /// block as a `var<uniform>`, and an array of the elements, or of the

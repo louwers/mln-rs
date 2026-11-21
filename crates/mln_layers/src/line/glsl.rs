@@ -101,7 +101,7 @@ layout(location = 6) out float frag_tile_x;
 #endif
 
 void main() {
-    const LineDrawableUBO drawable = drawableVector[constant.ubo_index];
+    const LineDrawableUBO drawable = drawableVector[drawIndex];
 
     #property pass color
 
@@ -147,11 +147,11 @@ void main() {
     vec2 offset2 = offset * a_extrude * LINE_NORMAL_SCALE * frag_normal.y * mat2(t, -u, u, t);
 
 #ifdef PROJECTION_GLOBE
-    const float adjustedThickness = projectLineThickness(pos.y, projectionVector[constant.ubo_index]);
-    const vec4 projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector[constant.ubo_index]);
+    const float adjustedThickness = projectLineThickness(pos.y, projectionVector[drawIndex]);
+    const vec4 projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector[drawIndex]);
     const vec2 extrudedPos = pos + (offset2 + dist) / drawable.ratio * adjustedThickness;
-    gl_Position = projectTile(extrudedPos, projectionVector[constant.ubo_index]);
-    frag_tile_x = antimeridianClipX(extrudedPos, projectionVector[constant.ubo_index]);
+    gl_Position = projectTile(extrudedPos, projectionVector[drawIndex]);
+    frag_tile_x = antimeridianClipX(extrudedPos, projectionVector[drawIndex]);
     vec4 projected_extrude = gl_Position - projected_no_extrude;
 #else
     vec4 projected_extrude = drawable.matrix * vec4(dist / drawable.ratio, 0.0, 0.0);
@@ -253,7 +253,7 @@ layout(location = 6) out float frag_tile_x;
 #endif
 
 void main() {
-    const LineGradientDrawableUBO drawable = drawableVector[constant.ubo_index];
+    const LineGradientDrawableUBO drawable = drawableVector[drawIndex];
 
     #property pass blur
 
@@ -298,11 +298,11 @@ void main() {
     vec2 offset2 = offset * a_extrude * LINE_NORMAL_SCALE * frag_normal.y * mat2(t, -u, u, t);
 
 #ifdef PROJECTION_GLOBE
-    const float adjustedThickness = projectLineThickness(pos.y, projectionVector[constant.ubo_index]);
-    const vec4 projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector[constant.ubo_index]);
+    const float adjustedThickness = projectLineThickness(pos.y, projectionVector[drawIndex]);
+    const vec4 projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector[drawIndex]);
     const vec2 extrudedPos = pos + (offset2 + dist) / drawable.ratio * adjustedThickness;
-    gl_Position = projectTile(extrudedPos, projectionVector[constant.ubo_index]);
-    frag_tile_x = antimeridianClipX(extrudedPos, projectionVector[constant.ubo_index]);
+    gl_Position = projectTile(extrudedPos, projectionVector[drawIndex]);
+    frag_tile_x = antimeridianClipX(extrudedPos, projectionVector[drawIndex]);
     vec4 projected_extrude = gl_Position - projected_no_extrude;
 #else
     vec4 projected_extrude = drawable.matrix * vec4(dist / drawable.ratio, 0.0, 0.0);
@@ -416,7 +416,7 @@ layout(location = 9) out float frag_tile_x;
 #endif
 
 void main() {
-    const LinePatternDrawableUBO drawable = drawableVector[constant.ubo_index];
+    const LinePatternDrawableUBO drawable = drawableVector[drawIndex];
 
     #property pass blur
 
@@ -468,11 +468,11 @@ void main() {
     vec2 offset2 = offset * a_extrude * LINE_NORMAL_SCALE * frag_normal.y * mat2(t, -u, u, t);
 
 #ifdef PROJECTION_GLOBE
-    const float adjustedThickness = projectLineThickness(pos.y, projectionVector[constant.ubo_index]);
-    const vec4 projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector[constant.ubo_index]);
+    const float adjustedThickness = projectLineThickness(pos.y, projectionVector[drawIndex]);
+    const vec4 projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector[drawIndex]);
     const vec2 extrudedPos = pos + (offset2 + dist) / drawable.ratio * adjustedThickness;
-    gl_Position = projectTile(extrudedPos, projectionVector[constant.ubo_index]);
-    frag_tile_x = antimeridianClipX(extrudedPos, projectionVector[constant.ubo_index]);
+    gl_Position = projectTile(extrudedPos, projectionVector[drawIndex]);
+    frag_tile_x = antimeridianClipX(extrudedPos, projectionVector[drawIndex]);
     vec4 projected_extrude = gl_Position - projected_no_extrude;
 #else
     vec4 projected_extrude = drawable.matrix * vec4(dist / drawable.ratio, 0.0, 0.0);
@@ -527,7 +527,7 @@ void main() {
     return;
 #else
 
-    const LinePatternTilePropsUBO tileProps = tilePropsVector[constant.ubo_index];
+    const LinePatternTilePropsUBO tileProps = tilePropsVector[drawIndex];
 
     const float blur = $props.blur;
 
@@ -647,7 +647,7 @@ layout(location = 10) flat out float frag_dash_width;
 #endif
 
 void main() {
-    const LineSDFDrawableUBO drawable = drawableVector[constant.ubo_index];
+    const LineSDFDrawableUBO drawable = drawableVector[drawIndex];
 
     #property pass color
 
@@ -702,11 +702,11 @@ void main() {
     vec2 offset2 = offset * a_extrude * LINE_NORMAL_SCALE * frag_normal.y * mat2(t, -u, u, t);
 
 #ifdef PROJECTION_GLOBE
-    const float adjustedThickness = projectLineThickness(pos.y, projectionVector[constant.ubo_index]);
-    const vec4 projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector[constant.ubo_index]);
+    const float adjustedThickness = projectLineThickness(pos.y, projectionVector[drawIndex]);
+    const vec4 projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector[drawIndex]);
     const vec2 extrudedPos = pos + (offset2 + dist) / drawable.ratio * adjustedThickness;
-    gl_Position = projectTile(extrudedPos, projectionVector[constant.ubo_index]);
-    frag_tile_x = antimeridianClipX(extrudedPos, projectionVector[constant.ubo_index]);
+    gl_Position = projectTile(extrudedPos, projectionVector[drawIndex]);
+    frag_tile_x = antimeridianClipX(extrudedPos, projectionVector[drawIndex]);
     vec4 projected_extrude = gl_Position - projected_no_extrude;
 #else
     vec4 projected_extrude = drawable.matrix * vec4(dist / drawable.ratio, 0.0, 0.0);
@@ -778,7 +778,7 @@ void main() {
     return;
 #endif
 
-    const LineSDFTilePropsUBO tileProps = tilePropsVector[constant.ubo_index];
+    const LineSDFTilePropsUBO tileProps = tilePropsVector[drawIndex];
 
     const vec4 color = $props.color;
 
@@ -857,7 +857,7 @@ layout(location = 10) flat out float frag_dash_width;
 #endif
 
 void main() {
-    const LineSDFDrawableUBO drawable = drawableVector[constant.ubo_index];
+    const LineSDFDrawableUBO drawable = drawableVector[drawIndex];
 
     #property pass blur
 
@@ -911,11 +911,11 @@ void main() {
     vec2 offset2 = offset * a_extrude * LINE_NORMAL_SCALE * frag_normal.y * mat2(t, -u, u, t);
 
 #ifdef PROJECTION_GLOBE
-    const float adjustedThickness = projectLineThickness(pos.y, projectionVector[constant.ubo_index]);
-    const vec4 projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector[constant.ubo_index]);
+    const float adjustedThickness = projectLineThickness(pos.y, projectionVector[drawIndex]);
+    const vec4 projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector[drawIndex]);
     const vec2 extrudedPos = pos + (offset2 + dist) / drawable.ratio * adjustedThickness;
-    gl_Position = projectTile(extrudedPos, projectionVector[constant.ubo_index]);
-    frag_tile_x = antimeridianClipX(extrudedPos, projectionVector[constant.ubo_index]);
+    gl_Position = projectTile(extrudedPos, projectionVector[drawIndex]);
+    frag_tile_x = antimeridianClipX(extrudedPos, projectionVector[drawIndex]);
     vec4 projected_extrude = gl_Position - projected_no_extrude;
 #else
     vec4 projected_extrude = drawable.matrix * vec4(dist / drawable.ratio, 0.0, 0.0);
@@ -986,7 +986,7 @@ void main() {
     return;
 #endif
 
-    const LineSDFTilePropsUBO tileProps = tilePropsVector[constant.ubo_index];
+    const LineSDFTilePropsUBO tileProps = tilePropsVector[drawIndex];
 
     const float blur = $props.blur;
 

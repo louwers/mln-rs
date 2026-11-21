@@ -26,7 +26,7 @@ use crate::shaders::source::{Named, Stage, expand as expand_properties, per_vert
 /// the structs of the engine's blocks and the program's, `prelude` and
 /// `source`. A main function has the parameters of the buffers and
 /// textures that its body names, which the backend adds after its own:
-/// `uboIndex`, the draw's index into its layer's storage buffers, the
+/// `drawIndex`, the draw's index into its layer's storage buffers, the
 /// engine's buffers and the program's, each by its
 /// [`name`](crate::shaders::program::Buffer::name) at the buffer index of
 /// its id, a reference to a block and a pointer to the elements or the

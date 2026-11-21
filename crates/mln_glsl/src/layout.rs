@@ -178,5 +178,5 @@ pub const fn image_sampler_binding(index: usize) -> u32 {
 }
 
 /// The size of the push constants of the general pipeline layout: the
-/// drawable's index into its layer's consolidated buffers (`int ubo_index`).
-pub const UBO_INDEX_PUSH_CONSTANT_SIZE: u32 = size_of::<u32>() as u32;
+/// drawable's index into its layer's consolidated buffers (`int drawIndex`).
+pub const DRAW_INDEX_PUSH_CONSTANT_SIZE: u32 = size_of::<u32>() as u32;

@@ -11,7 +11,7 @@
 //   (`nagaGroup3SamplerIndexArray`, at `SAMPLER_INDEX_REGISTER` of the image
 //   set's space): a sampler's register is its index in that buffer. The
 //   comparison sampler heap naga also declares is unused.
-// - The push constants (`ubo_index`) are root constants at `b0` of
+// - The push constants (`drawIndex`) are root constants at `b0` of
 //   `ROOT_CONSTANT_SPACE`.
 // - naga's special constants are root constants at
 //   `SPECIAL_CONSTANTS_REGISTER` of that space. naga adds the first, a draw's

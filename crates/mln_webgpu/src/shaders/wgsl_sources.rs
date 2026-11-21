@@ -49,12 +49,6 @@ fn unpack_mix_color(packedColors: vec4<f32>, t: f32) -> vec4<f32> {
     return mix(minColor, maxColor, t);
 }
 
-// The draw's index into the storage buffers it reads, at `DRAW_INDEX_ID`.
-struct GlobalIndexUBO {
-    value: u32,
-    pad0: vec3<u32>,
-};
-
 // Pole vertices carry these sentinel Y values in their raw position.
 const GLOBE_POLE_NORTH_Y: f32 = -32767.5;
 const GLOBE_POLE_SOUTH_Y: f32 = 32766.5;
@@ -185,11 +179,11 @@ fn projectTileFor3D(pos: vec2<f32>, elevation: f32, projection: ProjectionUBO) -
 ";
 
 /// The declaration of the draw's index into the storage buffers it reads,
-/// which a stage reads as `globalIndex`.
-pub(crate) const GLOBAL_INDEX_DECLARATION: &str = "@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;";
+/// which a stage reads as `drawIndex`.
+pub(crate) const GLOBAL_INDEX_DECLARATION: &str = "@group(0) @binding(1) var<uniform> drawIndex: u32;";
 
 /// The engine's buffers that a stage may read without declaring them,
-/// besides `globalIndex`: the view's block and the projection blocks.
+/// besides `drawIndex`: the view's block and the projection blocks.
 pub(crate) const ENGINE_BINDINGS: [Buffer; 3] = [VIEW_BUFFER, PROJECTION_BUFFER, DRAW_PROJECTION_BUFFER];
 
 /// The declaration of `buffer` at the binding of its id in group 0, by its

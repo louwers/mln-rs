@@ -1,17 +1,17 @@
-//! The table of `globalIndex` values: what tells a layer's draws apart is in
+//! The table of `drawIndex` values: what tells a layer's draws apart is in
 //! a group of its own, one table of indices bound at the draw's dynamic
 //! offset.
 
 use mln_gfx::shaders::bindings::DRAW_INDEX_ID;
 
-/// The size of WGSL's `GlobalIndexUBO`: a `u32`, padded by a `vec3<u32>`.
+/// The bytes of an entry: the `u32` that a stage reads as `drawIndex`, padded.
 const INDEX_ENTRY_SIZE: u64 = 32;
 
 /// Entries of the first table, which grows to the next power of two that
 /// holds the index a draw asks for.
 const INITIAL_INDEX_CAPACITY: u32 = 256;
 
-/// The group of `globalIndex`, at binding [`DRAW_INDEX_ID`]: one
+/// The group of `drawIndex`, at binding [`DRAW_INDEX_ID`]: one
 /// uniform buffer whose entry `i`, at `i` strides, holds `i`, bound at the
 /// dynamic offset of the draw's index.
 pub(crate) struct IndexTable {

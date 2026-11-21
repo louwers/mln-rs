@@ -31,7 +31,7 @@ constant const float ZERO = 1.0 / 255.0 / 16.0;
 
 FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
 
-    device const HeatmapDrawableUBO& drawable = drawableVector[uboIndex];
+    device const HeatmapDrawableUBO& drawable = drawableVector[drawIndex];
 
     const auto weight = $props.weight;
     const auto radius = $props.radius;
@@ -63,9 +63,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
     // in extrusion data
 #if defined(PROJECTION_GLOBE)
     const float2 circle_center = floor(float2(vertex_in.pos) * 0.5);
-    const float3 center_vector = projectToSphere(circle_center, float2(0.0, 0.0), projectionVector[uboIndex]);
+    const float3 center_vector = projectToSphere(circle_center, float2(0.0, 0.0), projectionVector[drawIndex]);
     const float3 corner_vector = globeRotateVector(center_vector, extrude * radius * drawable.globe_extrude_scale);
-    const float4 position = interpolateProjection(circle_center + scaled_extrude, corner_vector, 0.0, projectionVector[uboIndex]);
+    const float4 position = interpolateProjection(circle_center + scaled_extrude, corner_vector, 0.0, projectionVector[drawIndex]);
 #else
     const float4 pos = float4(floor(float2(vertex_in.pos) * 0.5) + scaled_extrude, 0, 1);
     const float4 position = drawable.matrix * pos;
