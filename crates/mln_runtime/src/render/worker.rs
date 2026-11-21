@@ -362,6 +362,9 @@ struct RenderedFrame {
 /// which has no picture to complete it with. A dropped frame that failed
 /// keeps it, so that its error fails the still image it was drawn for.
 fn disown_still(events: &mut [RendererEvent], for_demand: bool, dropped: bool) {
+    if !for_demand && !dropped {
+        return;
+    }
     for event in events {
         if let RendererEvent::RenderFrameFinished { still_image_request_id, error, .. } = event
             && (for_demand || (dropped && error.is_none()))
