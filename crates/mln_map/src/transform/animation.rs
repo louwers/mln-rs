@@ -518,8 +518,15 @@ impl Transform {
             // s: The distance traveled along the flight path, measured in
             // ρ-screenfuls.
             let s = k * total_s;
-            // u(s), or nothing where the center stays.
-            let us = if is_close && k < 1.0 { 0.0 } else { along.share(k) };
+            // u(s): all of it at the end, and nothing before where the
+            // center stays.
+            let us = if k == 1.0 {
+                1.0
+            } else if is_close {
+                0.0
+            } else {
+                along.share(k)
+            };
 
             let (frame_lat_lng, frame_zoom) = if globe {
                 let mut frame_lat_lng = lat_lng_end;

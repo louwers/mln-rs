@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use glam::DVec2;
 use mln_map_types::{ConstrainMode, Elevation, TransitionOutcome, View, ViewportMode};
+use mln_util::UnitBezier;
 use mln_util::constants::DEFAULT_TRANSITION_EASE;
 use mln_util::geo::{LatLng, ScreenCoordinate, WrapMode};
 use mln_util::hash::HashMap;
@@ -536,6 +537,38 @@ fn a_clamp_that_empties_an_ease_completes_it() {
         ends.extend(map.drain_command_ends().map(|end| (end.command, end.end.outcome)));
     });
     assert_eq!(Some(&TransitionOutcome::Completed), ends.get(&ease));
+}
+
+/// A flight on a flat map to its own center and zoom at a new altitude,
+/// with an easing that overshoots: the center stays, so the altitude holds
+/// until the flight ends, as for any flight that doesn't move the center,
+/// and then takes the one asked for.
+#[test]
+fn a_flight_that_keeps_its_center_holds_the_altitude_until_its_end() {
+    let mut transform = Transform::new(ConstrainMode::HeightOnly, ViewportMode::Default);
+    transform.resize(Size::new(512, 512)).unwrap();
+    let clock = Instant::now() + Duration::from_secs(3600);
+    transform.set_frame_time(Some(clock));
+    let camera = CameraOptions { center: Some(at(-0.04)), zoom: Some(13.0), ..Default::default() };
+    transform.jump_to(&CameraOptions { pitch: Some(45.0), center_altitude: Some(500.0), ..camera });
+    transform.update_camera(&CameraUpdate {
+        mode: CameraUpdateMode::Fly,
+        camera: CameraOptions { center_altitude: Some(1500.0), ..camera },
+        animation: AnimationOptions { easing: Some(UnitBezier::new(0.25, 1.5, 0.75, 1.5)), ..over(1000) },
+        ..Default::default()
+    });
+    let mut elapsed = Duration::ZERO;
+    while transform.in_transition() {
+        elapsed += FRAME;
+        transform.set_frame_time(Some(clock + elapsed));
+        transform.update_transitions(Some(clock + elapsed));
+        let altitude = transform.view().center_altitude();
+        if transform.in_transition() {
+            assert_eq!(500.0, altitude, "at {elapsed:?}");
+        } else {
+            assert_eq!(1500.0, altitude, "at the end");
+        }
+    }
 }
 
 /// An ease of an endless duration with an easing of its own starts and
