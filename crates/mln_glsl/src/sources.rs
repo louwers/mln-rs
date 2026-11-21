@@ -6387,7 +6387,9 @@ pub(crate) const SYMBOL_SHADER_PRELUDE: &str = r"
 
 pub(crate) const SYMBOL_ICON_SHADER: GlslShaderSource = GlslShaderSource {
     prelude: SYMBOL_SHADER_PRELUDE,
-    vertex: r"
+    vertex: concat!(
+        standing_ground!(),
+        r"
 
 layout(location = 0) in ivec4 in_pos_offset;
 layout(location = 1) in uvec4 in_data;
@@ -6497,7 +6499,18 @@ void main() {
     }
 
     const vec2 translated_a_pos = a_pos + drawable.translation;
-    const vec4 projectedPoint = projectTileWithElevation(translated_a_pos, in_height_offset, projection);
+    // The symbol stands where its draw's ground says, under its anchor as it
+    // draws, translated, if its draw draws it.
+#ifdef TERRAIN
+    if (!ground_holds(a_pos, projection.ground)) {
+        gl_Position = ground_dropped();
+        return;
+    }
+    const float ele = in_height_offset + standing_height(translated_a_pos, projection.ground);
+#else
+    const float ele = in_height_offset;
+#endif
+    const vec4 projectedPoint = projectTileWithElevation(translated_a_pos, ele, projection);
 #ifdef PROJECTION_GLOBE
     // A screen-aligned label whose anchor is behind the horizon goes at
     // once, rather than fading out once placement next finds it occluded:
@@ -6505,7 +6518,7 @@ void main() {
     // vertices go through the globe projection, which clips them.
     // A raised label is left to placement, which hides it once the planet
     // blocks the line of sight to it.
-    if (drawable.pitch_with_map == 0 && in_height_offset <= 0.0 && projectedPoint.z > projectedPoint.w) {
+    if (drawable.pitch_with_map == 0 && ele <= 0.0 && projectedPoint.z > projectedPoint.w) {
         gl_Position = vec4(-2.0, -2.0, -2.0, 1.0);
         return;
     }
@@ -6529,7 +6542,7 @@ void main() {
     float symbol_rotation = 0.0;
     if (drawable.rotate_symbol != 0) {
         // See comments in symbol_sdf.vertex
-        const vec4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2(1, 0), in_height_offset, projection);
+        const vec4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2(1, 0), ele, projection);
 
         const vec2 a = projectedPoint.xy / projectedPoint.w;
         const vec2 b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
@@ -6543,11 +6556,11 @@ void main() {
     const vec2 projected_pos_xy = in_projected_pos.xy;
     vec4 projected_pos;
     if (drawable.is_along_line != 0 || drawable.is_variable_anchor != 0) {
-        projected_pos = vec4(projected_pos_xy, in_height_offset, 1.0);
+        projected_pos = vec4(projected_pos_xy, ele, 1.0);
     } else if (drawable.pitch_with_map != 0) {
-        projected_pos = drawable.label_plane_matrix * vec4(projected_pos_xy + drawable.translation, in_height_offset, 1.0);
+        projected_pos = drawable.label_plane_matrix * vec4(projected_pos_xy + drawable.translation, ele, 1.0);
     } else {
-        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(projected_pos_xy + drawable.translation, in_height_offset, projection);
+        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(projected_pos_xy + drawable.translation, ele, projection);
     }
     const float z = float(drawable.pitch_with_map) * projected_pos.z / projected_pos.w;
 
@@ -6561,6 +6574,13 @@ void main() {
     const vec2 posOffset = a_offset * max(a_minFontScale, fontScale) / 32.0 + a_pxoffset / 16.0;
     gl_Position = drawable.coord_matrix * vec4(projected_pos.xy / projected_pos.w + rotation_matrix * posOffset * projectionScaling, z, 1.0);
     if (drawable.pitch_with_map != 0) {
+#ifdef TERRAIN
+        // A label along a line stands on the ground under each of its
+        // glyphs' vertices.
+        if (drawable.is_along_line != 0) {
+            gl_Position.z = in_height_offset + standing_height(gl_Position.xy, projection.ground);
+        }
+#endif
         gl_Position = projectTileWithElevation(gl_Position.xy, gl_Position.z, projection);
     }
 
@@ -6570,7 +6590,8 @@ void main() {
 
     frag_opacity = visibility;
 }
-",
+"
+    ),
     fragment: r"
 
 layout(location = 0) in vec2 frag_tex;
@@ -6637,7 +6658,9 @@ void main() {
 
 pub(crate) const SYMBOL_SDF_SHADER: GlslShaderSource = GlslShaderSource {
     prelude: SYMBOL_SHADER_PRELUDE,
-    vertex: r"
+    vertex: concat!(
+        standing_ground!(),
+        r"
 
 layout(location = 0) in ivec4 in_pos_offset;
 layout(location = 1) in uvec4 in_data;
@@ -6790,7 +6813,18 @@ void main() {
     }
 
     const vec2 translated_a_pos = a_pos + drawable.translation;
-    const vec4 projectedPoint = projectTileWithElevation(translated_a_pos, in_height_offset, projection);
+    // The symbol stands where its draw's ground says, under its anchor as it
+    // draws, translated, if its draw draws it.
+#ifdef TERRAIN
+    if (!ground_holds(a_pos, projection.ground)) {
+        gl_Position = ground_dropped();
+        return;
+    }
+    const float ele = in_height_offset + standing_height(translated_a_pos, projection.ground);
+#else
+    const float ele = in_height_offset;
+#endif
+    const vec4 projectedPoint = projectTileWithElevation(translated_a_pos, ele, projection);
 #ifdef PROJECTION_GLOBE
     // A screen-aligned label whose anchor is behind the horizon goes at
     // once, rather than fading out once placement next finds it occluded:
@@ -6798,7 +6832,7 @@ void main() {
     // vertices go through the globe projection, which clips them.
     // A raised label is left to placement, which hides it once the planet
     // blocks the line of sight to it.
-    if (drawable.pitch_with_map == 0 && in_height_offset <= 0.0 && projectedPoint.z > projectedPoint.w) {
+    if (drawable.pitch_with_map == 0 && ele <= 0.0 && projectedPoint.z > projectedPoint.w) {
         gl_Position = vec4(-2.0, -2.0, -2.0, 1.0);
         return;
     }
@@ -6829,7 +6863,7 @@ void main() {
         // Point labels with 'rotation-alignment: map' are horizontal with respect to tile units
         // To figure out that angle in projected space, we draw a short horizontal line in tile
         // space, project it, and measure its angle in projected space.
-        const vec4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2(1, 0), in_height_offset, projection);
+        const vec4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2(1, 0), ele, projection);
 
         const vec2 a = projectedPoint.xy / projectedPoint.w;
         const vec2 b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
@@ -6843,11 +6877,11 @@ void main() {
     const vec2 projected_pos_xy = in_projected_pos.xy;
     vec4 projected_pos;
     if (drawable.is_along_line != 0 || drawable.is_variable_anchor != 0) {
-        projected_pos = vec4(projected_pos_xy, in_height_offset, 1.0);
+        projected_pos = vec4(projected_pos_xy, ele, 1.0);
     } else if (drawable.pitch_with_map != 0) {
-        projected_pos = drawable.label_plane_matrix * vec4(projected_pos_xy + drawable.translation, in_height_offset, 1.0);
+        projected_pos = drawable.label_plane_matrix * vec4(projected_pos_xy + drawable.translation, ele, 1.0);
     } else {
-        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(projected_pos_xy + drawable.translation, in_height_offset, projection);
+        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(projected_pos_xy + drawable.translation, ele, projection);
     }
     const float z = float(drawable.pitch_with_map) * projected_pos.z / projected_pos.w;
 
@@ -6861,6 +6895,13 @@ void main() {
     const vec2 pos_rot = a_offset / 32.0 * fontScale + a_pxoffset;
     gl_Position = drawable.coord_matrix * vec4(projected_pos.xy / projected_pos.w + rotation_matrix * pos_rot * projectionScaling, z, 1.0);
     if (drawable.pitch_with_map != 0) {
+#ifdef TERRAIN
+        // A label along a line stands on the ground under each of its
+        // glyphs' vertices.
+        if (drawable.is_along_line != 0) {
+            gl_Position.z = in_height_offset + standing_height(gl_Position.xy, projection.ground);
+        }
+#endif
         gl_Position = projectTileWithElevation(gl_Position.xy, gl_Position.z, projection);
     }
 
@@ -6895,7 +6936,8 @@ void main() {
     frag_halo_color = unpack_mix_color(in_halo_color, drawable.halo_color_t);
 #endif
 }
-",
+"
+    ),
     fragment: r"
 
 layout(location = 0) in vec2 frag_tex;
@@ -6996,7 +7038,9 @@ void main() {
 
 pub(crate) const SYMBOL_TEXT_AND_ICON_SHADER: GlslShaderSource = GlslShaderSource {
     prelude: SYMBOL_SHADER_PRELUDE,
-    vertex: r"
+    vertex: concat!(
+        standing_ground!(),
+        r"
 
 #define SDF 1.0
 #define ICON 0.0
@@ -7153,7 +7197,18 @@ void main() {
     }
 
     const vec2 translated_a_pos = a_pos + drawable.translation;
-    const vec4 projectedPoint = projectTileWithElevation(translated_a_pos, in_height_offset, projection);
+    // The symbol stands where its draw's ground says, under its anchor as it
+    // draws, translated, if its draw draws it.
+#ifdef TERRAIN
+    if (!ground_holds(a_pos, projection.ground)) {
+        gl_Position = ground_dropped();
+        return;
+    }
+    const float ele = in_height_offset + standing_height(translated_a_pos, projection.ground);
+#else
+    const float ele = in_height_offset;
+#endif
+    const vec4 projectedPoint = projectTileWithElevation(translated_a_pos, ele, projection);
 #ifdef PROJECTION_GLOBE
     // A screen-aligned label whose anchor is behind the horizon goes at
     // once, rather than fading out once placement next finds it occluded:
@@ -7161,7 +7216,7 @@ void main() {
     // vertices go through the globe projection, which clips them.
     // A raised label is left to placement, which hides it once the planet
     // blocks the line of sight to it.
-    if (drawable.pitch_with_map == 0 && in_height_offset <= 0.0 && projectedPoint.z > projectedPoint.w) {
+    if (drawable.pitch_with_map == 0 && ele <= 0.0 && projectedPoint.z > projectedPoint.w) {
         gl_Position = vec4(-2.0, -2.0, -2.0, 1.0);
         return;
     }
@@ -7192,7 +7247,7 @@ void main() {
         // Point labels with 'rotation-alignment: map' are horizontal with respect to tile units
         // To figure out that angle in projected space, we draw a short horizontal line in tile
         // space, project it, and measure its angle in projected space.
-        const vec4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2(1, 0), in_height_offset, projection);
+        const vec4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2(1, 0), ele, projection);
 
         const vec2 a = projectedPoint.xy / projectedPoint.w;
         const vec2 b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
@@ -7206,11 +7261,11 @@ void main() {
     const vec2 projected_pos_xy = in_projected_pos.xy;
     vec4 projected_pos;
     if (drawable.is_along_line != 0 || drawable.is_variable_anchor != 0) {
-        projected_pos = vec4(projected_pos_xy, in_height_offset, 1.0);
+        projected_pos = vec4(projected_pos_xy, ele, 1.0);
     } else if (drawable.pitch_with_map != 0) {
-        projected_pos = drawable.label_plane_matrix * vec4(projected_pos_xy + drawable.translation, in_height_offset, 1.0);
+        projected_pos = drawable.label_plane_matrix * vec4(projected_pos_xy + drawable.translation, ele, 1.0);
     } else {
-        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(projected_pos_xy + drawable.translation, in_height_offset, projection);
+        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(projected_pos_xy + drawable.translation, ele, projection);
     }
     const float z = float(drawable.pitch_with_map) * projected_pos.z / projected_pos.w;
 
@@ -7224,6 +7279,13 @@ void main() {
     const vec2 pos_rot = a_offset / 32.0 * fontScale;
     gl_Position = drawable.coord_matrix * vec4(projected_pos.xy / projected_pos.w + rotation_matrix * pos_rot * projectionScaling, z, 1.0);
     if (drawable.pitch_with_map != 0) {
+#ifdef TERRAIN
+        // A label along a line stands on the ground under each of its
+        // glyphs' vertices.
+        if (drawable.is_along_line != 0) {
+            gl_Position.z = in_height_offset + standing_height(gl_Position.xy, projection.ground);
+        }
+#endif
         gl_Position = projectTileWithElevation(gl_Position.xy, gl_Position.z, projection);
     }
 
@@ -7262,7 +7324,8 @@ void main() {
     frag_halo_color = unpack_mix_color(in_halo_color, drawable.halo_color_t);
 #endif
 }
-",
+"
+    ),
     fragment: r"
 
 layout(location = 0) in vec2 frag_tex;

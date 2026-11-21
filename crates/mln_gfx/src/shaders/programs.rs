@@ -50,7 +50,7 @@ pub fn projection_variants(program: &Program) -> &'static [ProjectionVariant] {
     const FLAT: &[ProjectionVariant] = &[ProjectionVariant::Mercator, ProjectionVariant::Globe];
     const STANDING: &[ProjectionVariant] =
         &[ProjectionVariant::Mercator, ProjectionVariant::Globe, ProjectionVariant::Terrain];
-    const STANDING_PROGRAMS: [&Program; 9] = [
+    const STANDING_PROGRAMS: [&Program; 12] = [
         &CIRCLE,
         &HEATMAP,
         &FILL_EXTRUSION,
@@ -60,6 +60,9 @@ pub fn projection_variants(program: &Program) -> &'static [ProjectionVariant] {
         &FILL_EXTRUSION_PATTERN,
         &FILL_EXTRUSION_PATTERN_INSTANCED,
         &FILL_EXTRUSION_PATTERN_WALL,
+        &SYMBOL_ICON,
+        &SYMBOL_SDF,
+        &SYMBOL_TEXT_AND_ICON,
     ];
     if STANDING_PROGRAMS.contains(&program) { STANDING } else { FLAT }
 }
@@ -634,7 +637,7 @@ pub static SYMBOL_ICON: Program = Program {
         (ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE, Float),
     ],
     instance_attributes: &[],
-    textures: &[ID_SYMBOL_IMAGE_TEXTURE],
+    textures: &[ID_SYMBOL_IMAGE_TEXTURE, ID_GROUND_DEM_TEXTURE],
     properties: &[property("opacity", ID_SYMBOL_OPACITY_ATTRIBUTE)],
 };
 
@@ -655,7 +658,7 @@ pub static SYMBOL_SDF: Program = Program {
         (ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE, Float),
     ],
     instance_attributes: &[],
-    textures: &[ID_SYMBOL_IMAGE_TEXTURE],
+    textures: &[ID_SYMBOL_IMAGE_TEXTURE, ID_GROUND_DEM_TEXTURE],
     properties: &[
         property("opacity", ID_SYMBOL_OPACITY_ATTRIBUTE),
         property("fill_color", ID_SYMBOL_COLOR_ATTRIBUTE),
@@ -681,7 +684,7 @@ pub static SYMBOL_TEXT_AND_ICON: Program = Program {
         (ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE, Float),
     ],
     instance_attributes: &[],
-    textures: &[ID_SYMBOL_IMAGE_TEXTURE, ID_SYMBOL_IMAGE_ICON_TEXTURE],
+    textures: &[ID_SYMBOL_IMAGE_TEXTURE, ID_SYMBOL_IMAGE_ICON_TEXTURE, ID_GROUND_DEM_TEXTURE],
     properties: &[
         property("opacity", ID_SYMBOL_OPACITY_ATTRIBUTE),
         property("fill_color", ID_SYMBOL_COLOR_ATTRIBUTE),

@@ -5310,7 +5310,9 @@ void main() {
 };
 
 pub(crate) const SYMBOL_ICON_SHADER: GlslShaderSource = GlslShaderSource {
-    vertex: r"layout (location = 0) in vec4 a_pos_offset;
+    vertex: concat!(
+        standing_ground!(),
+        r"layout (location = 0) in vec4 a_pos_offset;
 layout (location = 1) in vec4 a_data;
 layout (location = 2) in vec4 a_pixeloffset;
 layout (location = 3) in vec3 a_projected_pos;
@@ -5429,7 +5431,18 @@ void main() {
     }
 
     vec2 translated_a_pos = a_pos + u_translation;
-    vec4 projectedPoint = projectTileWithElevation(translated_a_pos, a_height_offset);
+    // The symbol stands where its draw's ground says, under its anchor as it
+    // draws, translated, if its draw draws it.
+#ifdef TERRAIN
+    if (!ground_holds(a_pos)) {
+        gl_Position = ground_dropped();
+        return;
+    }
+    highp float ele = a_height_offset + standing_height(translated_a_pos);
+#else
+    highp float ele = a_height_offset;
+#endif
+    vec4 projectedPoint = projectTileWithElevation(translated_a_pos, ele);
 #ifdef PROJECTION_GLOBE
     // A screen-aligned label whose anchor is behind the horizon goes at
     // once, rather than fading out once placement next finds it occluded:
@@ -5437,7 +5450,7 @@ void main() {
     // vertices go through the globe projection, which clips them.
     // A raised label is left to placement, which hides it once the planet
     // blocks the line of sight to it.
-    if (!u_pitch_with_map && a_height_offset <= 0.0 && projectedPoint.z > projectedPoint.w) {
+    if (!u_pitch_with_map && ele <= 0.0 && projectedPoint.z > projectedPoint.w) {
         gl_Position = vec4(-2.0, -2.0, -2.0, 1.0);
         return;
     }
@@ -5461,7 +5474,7 @@ void main() {
     highp float symbol_rotation = 0.0;
     if (u_rotate_symbol) {
         // See comments in symbol_sdf.vertex
-        vec4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2(1, 0), a_height_offset);
+        vec4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2(1, 0), ele);
 
         vec2 a = projectedPoint.xy / projectedPoint.w;
         vec2 b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
@@ -5475,11 +5488,11 @@ void main() {
 
     vec4 projected_pos;
     if (u_is_along_line || u_is_variable_anchor) {
-        projected_pos = vec4(a_projected_pos.xy, a_height_offset, 1.0);
+        projected_pos = vec4(a_projected_pos.xy, ele, 1.0);
     } else if (u_pitch_with_map) {
-        projected_pos = u_label_plane_matrix * vec4(a_projected_pos.xy + u_translation, a_height_offset, 1.0);
+        projected_pos = u_label_plane_matrix * vec4(a_projected_pos.xy + u_translation, ele, 1.0);
     } else {
-        projected_pos = u_label_plane_matrix * projectTileWithElevation(a_projected_pos.xy + u_translation, a_height_offset);
+        projected_pos = u_label_plane_matrix * projectTileWithElevation(a_projected_pos.xy + u_translation, ele);
     }
     float z = float(u_pitch_with_map) * projected_pos.z / projected_pos.w;
 
@@ -5493,13 +5506,21 @@ void main() {
 
     gl_Position = u_coord_matrix * vec4(projected_pos.xy / projected_pos.w + rotation_matrix * (a_offset / 32.0 * max(a_minFontScale, fontScale) + a_pxoffset / 16.0) * projectionScaling, z, 1.0);
     if (u_pitch_with_map) {
+#ifdef TERRAIN
+        // A label along a line stands on the ground under each of its
+        // glyphs' vertices.
+        if (u_is_along_line) {
+            gl_Position.z = a_height_offset + standing_height(gl_Position.xy);
+        }
+#endif
         gl_Position = projectTileWithElevation(gl_Position.xy, gl_Position.z);
     }
 
     v_tex = (a_tex - a_tex_origin) / u_texsize;
     v_tex_origin = a_tex_origin / u_texsize;
 }
-",
+"
+    ),
     fragment: r"uniform sampler2D u_texture;
 
 layout (std140) uniform SymbolEvaluatedPropsUBO {
@@ -5544,7 +5565,9 @@ void main() {
 };
 
 pub(crate) const SYMBOL_SDF_SHADER: GlslShaderSource = GlslShaderSource {
-    vertex: r"#define SDF_PX 8.0
+    vertex: concat!(
+        standing_ground!(),
+        r"#define SDF_PX 8.0
 
 layout (location = 0) in vec4 a_pos_offset;
 layout (location = 1) in vec4 a_data;
@@ -5709,7 +5732,18 @@ lowp float halo_blur = u_halo_blur;
     }
 
     vec2 translated_a_pos = a_pos + u_translation;
-    vec4 projectedPoint = projectTileWithElevation(translated_a_pos, a_height_offset);
+    // The symbol stands where its draw's ground says, under its anchor as it
+    // draws, translated, if its draw draws it.
+#ifdef TERRAIN
+    if (!ground_holds(a_pos)) {
+        gl_Position = ground_dropped();
+        return;
+    }
+    highp float ele = a_height_offset + standing_height(translated_a_pos);
+#else
+    highp float ele = a_height_offset;
+#endif
+    vec4 projectedPoint = projectTileWithElevation(translated_a_pos, ele);
 #ifdef PROJECTION_GLOBE
     // A screen-aligned label whose anchor is behind the horizon goes at
     // once, rather than fading out once placement next finds it occluded:
@@ -5717,7 +5751,7 @@ lowp float halo_blur = u_halo_blur;
     // vertices go through the globe projection, which clips them.
     // A raised label is left to placement, which hides it once the planet
     // blocks the line of sight to it.
-    if (!u_pitch_with_map && a_height_offset <= 0.0 && projectedPoint.z > projectedPoint.w) {
+    if (!u_pitch_with_map && ele <= 0.0 && projectedPoint.z > projectedPoint.w) {
         gl_Position = vec4(-2.0, -2.0, -2.0, 1.0);
         return;
     }
@@ -5748,7 +5782,7 @@ lowp float halo_blur = u_halo_blur;
         // Point labels with 'rotation-alignment: map' are horizontal with respect to tile units
         // To figure out that angle in projected space, we draw a short horizontal line in tile
         // space, project it, and measure its angle in projected space.
-        vec4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2(1, 0), a_height_offset);
+        vec4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2(1, 0), ele);
 
         vec2 a = projectedPoint.xy / projectedPoint.w;
         vec2 b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
@@ -5762,11 +5796,11 @@ lowp float halo_blur = u_halo_blur;
 
     vec4 projected_pos;
     if (u_is_along_line || u_is_variable_anchor) {
-        projected_pos = vec4(a_projected_pos.xy, a_height_offset, 1.0);
+        projected_pos = vec4(a_projected_pos.xy, ele, 1.0);
     } else if (u_pitch_with_map) {
-        projected_pos = u_label_plane_matrix * vec4(a_projected_pos.xy + u_translation, a_height_offset, 1.0);
+        projected_pos = u_label_plane_matrix * vec4(a_projected_pos.xy + u_translation, ele, 1.0);
     } else {
-        projected_pos = u_label_plane_matrix * projectTileWithElevation(a_projected_pos.xy + u_translation, a_height_offset);
+        projected_pos = u_label_plane_matrix * projectTileWithElevation(a_projected_pos.xy + u_translation, ele);
     }
     float z = float(u_pitch_with_map) * projected_pos.z / projected_pos.w;
 
@@ -5780,6 +5814,13 @@ lowp float halo_blur = u_halo_blur;
 
     gl_Position = u_coord_matrix * vec4(projected_pos.xy / projected_pos.w + rotation_matrix * (a_offset / 32.0 * fontScale + a_pxoffset) * projectionScaling, z, 1.0);
     if (u_pitch_with_map) {
+#ifdef TERRAIN
+        // A label along a line stands on the ground under each of its
+        // glyphs' vertices.
+        if (u_is_along_line) {
+            gl_Position.z = a_height_offset + standing_height(gl_Position.xy);
+        }
+#endif
         gl_Position = projectTileWithElevation(gl_Position.xy, gl_Position.z);
     }
     // A glyph's edge's gamma, scaled by clip w, and the inner edge of its
@@ -5797,7 +5838,8 @@ lowp float halo_blur = u_halo_blur;
     v_tex_origin = a_tex_origin / u_texsize;
     v_data1 = vec3(gamma_scaled, halo_edge, interpolated_fade_opacity);
 }
-",
+"
+    ),
     fragment: r"#define SDF_PX 8.0
 
 layout (std140) uniform SymbolEvaluatedPropsUBO {
@@ -5882,7 +5924,9 @@ highp vec4 halo_color = u_halo_color;
 };
 
 pub(crate) const SYMBOL_TEXT_AND_ICON_SHADER: GlslShaderSource = GlslShaderSource {
-    vertex: r"#define SDF_PX 8.0
+    vertex: concat!(
+        standing_ground!(),
+        r"#define SDF_PX 8.0
 #define ICON 0.0
 
 layout (location = 0) in vec4 a_pos_offset;
@@ -6048,7 +6092,18 @@ lowp float halo_blur = u_halo_blur;
     }
 
     vec2 translated_a_pos = a_pos + u_translation;
-    vec4 projectedPoint = projectTileWithElevation(translated_a_pos, a_height_offset);
+    // The symbol stands where its draw's ground says, under its anchor as it
+    // draws, translated, if its draw draws it.
+#ifdef TERRAIN
+    if (!ground_holds(a_pos)) {
+        gl_Position = ground_dropped();
+        return;
+    }
+    highp float ele = a_height_offset + standing_height(translated_a_pos);
+#else
+    highp float ele = a_height_offset;
+#endif
+    vec4 projectedPoint = projectTileWithElevation(translated_a_pos, ele);
 #ifdef PROJECTION_GLOBE
     // A screen-aligned label whose anchor is behind the horizon goes at
     // once, rather than fading out once placement next finds it occluded:
@@ -6056,7 +6111,7 @@ lowp float halo_blur = u_halo_blur;
     // vertices go through the globe projection, which clips them.
     // A raised label is left to placement, which hides it once the planet
     // blocks the line of sight to it.
-    if (!u_pitch_with_map && a_height_offset <= 0.0 && projectedPoint.z > projectedPoint.w) {
+    if (!u_pitch_with_map && ele <= 0.0 && projectedPoint.z > projectedPoint.w) {
         gl_Position = vec4(-2.0, -2.0, -2.0, 1.0);
         return;
     }
@@ -6087,7 +6142,7 @@ lowp float halo_blur = u_halo_blur;
         // Point labels with 'rotation-alignment: map' are horizontal with respect to tile units
         // To figure out that angle in projected space, we draw a short horizontal line in tile
         // space, project it, and measure its angle in projected space.
-        vec4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2(1, 0), a_height_offset);
+        vec4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2(1, 0), ele);
 
         vec2 a = projectedPoint.xy / projectedPoint.w;
         vec2 b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
@@ -6101,11 +6156,11 @@ lowp float halo_blur = u_halo_blur;
 
     vec4 projected_pos;
     if (u_is_along_line || u_is_variable_anchor) {
-        projected_pos = vec4(a_projected_pos.xy, a_height_offset, 1.0);
+        projected_pos = vec4(a_projected_pos.xy, ele, 1.0);
     } else if (u_pitch_with_map) {
-        projected_pos = u_label_plane_matrix * vec4(a_projected_pos.xy + u_translation, a_height_offset, 1.0);
+        projected_pos = u_label_plane_matrix * vec4(a_projected_pos.xy + u_translation, ele, 1.0);
     } else {
-        projected_pos = u_label_plane_matrix * projectTileWithElevation(a_projected_pos.xy + u_translation, a_height_offset);
+        projected_pos = u_label_plane_matrix * projectTileWithElevation(a_projected_pos.xy + u_translation, ele);
     }
     float z = float(u_pitch_with_map) * projected_pos.z / projected_pos.w;
 
@@ -6119,6 +6174,13 @@ lowp float halo_blur = u_halo_blur;
 
     gl_Position = u_coord_matrix * vec4(projected_pos.xy / projected_pos.w + rotation_matrix * (a_offset / 32.0 * fontScale) * projectionScaling, z, 1.0);
     if (u_pitch_with_map) {
+#ifdef TERRAIN
+        // A label along a line stands on the ground under each of its
+        // glyphs' vertices.
+        if (u_is_along_line) {
+            gl_Position.z = a_height_offset + standing_height(gl_Position.xy);
+        }
+#endif
         gl_Position = projectTileWithElevation(gl_Position.xy, gl_Position.z);
     }
     // A glyph's edge's gamma, scaled by clip w, and the inner edge of its
@@ -6139,7 +6201,8 @@ lowp float halo_blur = u_halo_blur;
     v_data1 = vec3(gamma_scaled, halo_edge, interpolated_fade_opacity);
     v_is_icon = int(is_icon);
 }
-",
+"
+    ),
     fragment: r"#define SDF_PX 8.0
 
 layout (std140) uniform SymbolEvaluatedPropsUBO {

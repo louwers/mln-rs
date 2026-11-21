@@ -5544,7 +5544,8 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const SYMBOL_ICON_SHADER: WgslShaderSource = WgslShaderSource {
-    vertex: Some(
+    vertex: Some(concat!(
+        standing_ground!(),
         r"
 struct VertexInput {
     @location(3) pos_offset: vec4<i32>,
@@ -5624,7 +5625,18 @@ fn main(in: VertexInput) -> VertexOutput {
 
     let projection = projectionVector[globalIndex.value];
     let translated_a_pos = a_pos + drawable.translation;
-    let projectedPoint = projectTileWithElevation(translated_a_pos, in.height_offset, projection);
+    // The symbol stands where its draw's ground says, under its anchor as it
+    // draws, translated, if its draw draws it.
+#ifdef TERRAIN
+    if (!ground_holds(a_pos, projection.ground)) {
+        out.position = ground_dropped();
+        return out;
+    }
+    let ele = in.height_offset + standing_height(translated_a_pos, projection.ground);
+#else
+    let ele = in.height_offset;
+#endif
+    let projectedPoint = projectTileWithElevation(translated_a_pos, ele, projection);
 #ifdef PROJECTION_GLOBE
     // A screen-aligned label whose anchor is behind the horizon goes at
     // once, rather than fading out once placement next finds it occluded:
@@ -5632,7 +5644,7 @@ fn main(in: VertexInput) -> VertexOutput {
     // vertices go through the globe projection, which clips them.
     // A raised label is left to placement, which hides it once the planet
     // blocks the line of sight to it.
-    if (drawable.pitch_with_map == 0u && in.height_offset <= 0.0 && projectedPoint.z > projectedPoint.w) {
+    if (drawable.pitch_with_map == 0u && ele <= 0.0 && projectedPoint.z > projectedPoint.w) {
         out.position = vec4<f32>(c_offscreen_degenerate_triangle_location,
                                  c_offscreen_degenerate_triangle_location,
                                  c_offscreen_degenerate_triangle_location, 1.0);
@@ -5657,7 +5669,7 @@ fn main(in: VertexInput) -> VertexOutput {
 
     var symbol_rotation = 0.0;
     if (drawable.rotate_symbol != 0u) {
-        let offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2<f32>(1.0, 0.0), in.height_offset, projection);
+        let offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2<f32>(1.0, 0.0), ele, projection);
         let a = projectedPoint.xy / projectedPoint.w;
         let b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
         symbol_rotation = atan2((b.y - a.y) / paintParams.aspect_ratio, b.x - a.x);
@@ -5669,11 +5681,11 @@ fn main(in: VertexInput) -> VertexOutput {
 
     var projected_pos: vec4<f32>;
     if (drawable.is_along_line != 0u || drawable.is_variable_anchor != 0u) {
-        projected_pos = vec4<f32>(in.projected_pos.xy, in.height_offset, 1.0);
+        projected_pos = vec4<f32>(in.projected_pos.xy, ele, 1.0);
     } else if (drawable.pitch_with_map != 0u) {
-        projected_pos = drawable.label_plane_matrix * vec4<f32>(in.projected_pos.xy + drawable.translation, in.height_offset, 1.0);
+        projected_pos = drawable.label_plane_matrix * vec4<f32>(in.projected_pos.xy + drawable.translation, ele, 1.0);
     } else {
-        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(in.projected_pos.xy + drawable.translation, in.height_offset, projection);
+        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(in.projected_pos.xy + drawable.translation, ele, projection);
     }
     let z = select(0.0, projected_pos.z / projected_pos.w, drawable.pitch_with_map != 0u);
 
@@ -5687,6 +5699,13 @@ fn main(in: VertexInput) -> VertexOutput {
     let posOffset = a_offset * max(a_minFontScale, vec2<f32>(fontScale)) / 32.0 + a_pxoffset / 16.0;
     var position = drawable.coord_matrix * vec4<f32>(projected_pos.xy / projected_pos.w + rotation_matrix * posOffset * projectionScaling, z, 1.0);
     if (drawable.pitch_with_map != 0u) {
+#ifdef TERRAIN
+        // A label along a line stands on the ground under each of its
+        // glyphs' vertices.
+        if (drawable.is_along_line != 0u) {
+            position.z = in.height_offset + standing_height(position.xy, projection.ground);
+        }
+#endif
         position = projectTileWithElevation(position.xy, position.z, projection);
     }
 
@@ -5701,8 +5720,8 @@ fn main(in: VertexInput) -> VertexOutput {
 
     return out;
 }
-",
-    ),
+"
+    )),
     fragment: Some(
         r"
 struct FragmentInput {
@@ -5826,7 +5845,8 @@ const c_offscreen_degenerate_triangle_location: f32 = -2.0;
 };
 
 pub(crate) const SYMBOL_SDF_SHADER: WgslShaderSource = WgslShaderSource {
-    vertex: Some(
+    vertex: Some(concat!(
+        standing_ground!(),
         r"
 struct VertexInput {
     @location(3) pos_offset: vec4<i32>,
@@ -5923,7 +5943,18 @@ fn main(in: VertexInput) -> VertexOutput {
 
     let projection = projectionVector[globalIndex.value];
     let translated_a_pos = a_pos + drawable.translation;
-    let projectedPoint = projectTileWithElevation(translated_a_pos, in.height_offset, projection);
+    // The symbol stands where its draw's ground says, under its anchor as it
+    // draws, translated, if its draw draws it.
+#ifdef TERRAIN
+    if (!ground_holds(a_pos, projection.ground)) {
+        out.position = ground_dropped();
+        return out;
+    }
+    let ele = in.height_offset + standing_height(translated_a_pos, projection.ground);
+#else
+    let ele = in.height_offset;
+#endif
+    let projectedPoint = projectTileWithElevation(translated_a_pos, ele, projection);
 #ifdef PROJECTION_GLOBE
     // A screen-aligned label whose anchor is behind the horizon goes at
     // once, rather than fading out once placement next finds it occluded:
@@ -5931,7 +5962,7 @@ fn main(in: VertexInput) -> VertexOutput {
     // vertices go through the globe projection, which clips them.
     // A raised label is left to placement, which hides it once the planet
     // blocks the line of sight to it.
-    if (drawable.pitch_with_map == 0u && in.height_offset <= 0.0 && projectedPoint.z > projectedPoint.w) {
+    if (drawable.pitch_with_map == 0u && ele <= 0.0 && projectedPoint.z > projectedPoint.w) {
         out.position = vec4<f32>(c_offscreen_degenerate_triangle_location,
                                  c_offscreen_degenerate_triangle_location,
                                  c_offscreen_degenerate_triangle_location, 1.0);
@@ -5956,7 +5987,7 @@ fn main(in: VertexInput) -> VertexOutput {
 
     var symbol_rotation = 0.0;
     if (drawable.rotate_symbol != 0u) {
-        let offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2<f32>(1.0, 0.0), in.height_offset, projection);
+        let offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2<f32>(1.0, 0.0), ele, projection);
         let a = projectedPoint.xy / projectedPoint.w;
         let b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
         symbol_rotation = atan2((b.y - a.y) / paintParams.aspect_ratio, b.x - a.x);
@@ -5968,11 +5999,11 @@ fn main(in: VertexInput) -> VertexOutput {
 
     var projected_pos: vec4<f32>;
     if (drawable.is_along_line != 0u || drawable.is_variable_anchor != 0u) {
-        projected_pos = vec4<f32>(in.projected_pos.xy, in.height_offset, 1.0);
+        projected_pos = vec4<f32>(in.projected_pos.xy, ele, 1.0);
     } else if (drawable.pitch_with_map != 0u) {
-        projected_pos = drawable.label_plane_matrix * vec4<f32>(in.projected_pos.xy + drawable.translation, in.height_offset, 1.0);
+        projected_pos = drawable.label_plane_matrix * vec4<f32>(in.projected_pos.xy + drawable.translation, ele, 1.0);
     } else {
-        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(in.projected_pos.xy + drawable.translation, in.height_offset, projection);
+        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(in.projected_pos.xy + drawable.translation, ele, projection);
     }
     let z = select(0.0, projected_pos.z / projected_pos.w, drawable.pitch_with_map != 0u);
 
@@ -5986,6 +6017,13 @@ fn main(in: VertexInput) -> VertexOutput {
     let pos_rot = a_offset / 32.0 * fontScale + a_pxoffset;
     var position = drawable.coord_matrix * vec4<f32>(projected_pos.xy / projected_pos.w + rotation_matrix * pos_rot * projectionScaling, z, 1.0);
     if (drawable.pitch_with_map != 0u) {
+#ifdef TERRAIN
+        // A label along a line stands on the ground under each of its
+        // glyphs' vertices.
+        if (drawable.is_along_line != 0u) {
+            position.z = in.height_offset + standing_height(position.xy, projection.ground);
+        }
+#endif
         position = projectTileWithElevation(position.xy, position.z, projection);
     }
 
@@ -6026,8 +6064,8 @@ fn main(in: VertexInput) -> VertexOutput {
 
     return out;
 }
-",
-    ),
+"
+    )),
     fragment: Some(
         r"
 struct FragmentInput {
@@ -6187,7 +6225,8 @@ const c_offscreen_degenerate_triangle_location: f32 = -2.0;
 };
 
 pub(crate) const SYMBOL_TEXT_AND_ICON_SHADER: WgslShaderSource = WgslShaderSource {
-    vertex: Some(
+    vertex: Some(concat!(
+        standing_ground!(),
         r"
 struct VertexInput {
     @location(3) pos_offset: vec4<i32>,
@@ -6287,7 +6326,18 @@ fn main(in: VertexInput) -> VertexOutput {
 
     let projection = projectionVector[globalIndex.value];
     let translated_a_pos = a_pos + drawable.translation;
-    let projectedPoint = projectTileWithElevation(translated_a_pos, in.height_offset, projection);
+    // The symbol stands where its draw's ground says, under its anchor as it
+    // draws, translated, if its draw draws it.
+#ifdef TERRAIN
+    if (!ground_holds(a_pos, projection.ground)) {
+        out.position = ground_dropped();
+        return out;
+    }
+    let ele = in.height_offset + standing_height(translated_a_pos, projection.ground);
+#else
+    let ele = in.height_offset;
+#endif
+    let projectedPoint = projectTileWithElevation(translated_a_pos, ele, projection);
 #ifdef PROJECTION_GLOBE
     // A screen-aligned label whose anchor is behind the horizon goes at
     // once, rather than fading out once placement next finds it occluded:
@@ -6295,7 +6345,7 @@ fn main(in: VertexInput) -> VertexOutput {
     // vertices go through the globe projection, which clips them.
     // A raised label is left to placement, which hides it once the planet
     // blocks the line of sight to it.
-    if (drawable.pitch_with_map == 0u && in.height_offset <= 0.0 && projectedPoint.z > projectedPoint.w) {
+    if (drawable.pitch_with_map == 0u && ele <= 0.0 && projectedPoint.z > projectedPoint.w) {
         out.position = vec4<f32>(c_offscreen_degenerate_triangle_location,
                                  c_offscreen_degenerate_triangle_location,
                                  c_offscreen_degenerate_triangle_location, 1.0);
@@ -6319,7 +6369,7 @@ fn main(in: VertexInput) -> VertexOutput {
 
     var symbol_rotation = 0.0;
     if (drawable.rotate_symbol != 0u) {
-        let offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2<f32>(1.0, 0.0), in.height_offset, projection);
+        let offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2<f32>(1.0, 0.0), ele, projection);
         let a = projectedPoint.xy / projectedPoint.w;
         let b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
         symbol_rotation = atan2((b.y - a.y) / paintParams.aspect_ratio, b.x - a.x);
@@ -6331,11 +6381,11 @@ fn main(in: VertexInput) -> VertexOutput {
 
     var projected_pos: vec4<f32>;
     if (drawable.is_along_line != 0u || drawable.is_variable_anchor != 0u) {
-        projected_pos = vec4<f32>(in.projected_pos.xy, in.height_offset, 1.0);
+        projected_pos = vec4<f32>(in.projected_pos.xy, ele, 1.0);
     } else if (drawable.pitch_with_map != 0u) {
-        projected_pos = drawable.label_plane_matrix * vec4<f32>(in.projected_pos.xy + drawable.translation, in.height_offset, 1.0);
+        projected_pos = drawable.label_plane_matrix * vec4<f32>(in.projected_pos.xy + drawable.translation, ele, 1.0);
     } else {
-        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(in.projected_pos.xy + drawable.translation, in.height_offset, projection);
+        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(in.projected_pos.xy + drawable.translation, ele, projection);
     }
     let z = select(0.0, projected_pos.z / projected_pos.w, drawable.pitch_with_map != 0u);
 
@@ -6349,6 +6399,13 @@ fn main(in: VertexInput) -> VertexOutput {
     let pos_rot = a_offset / 32.0 * fontScale;
     var position = drawable.coord_matrix * vec4<f32>(projected_pos.xy / projected_pos.w + rotation_matrix * pos_rot * projectionScaling, z, 1.0);
     if (drawable.pitch_with_map != 0u) {
+#ifdef TERRAIN
+        // A label along a line stands on the ground under each of its
+        // glyphs' vertices.
+        if (drawable.is_along_line != 0u) {
+            position.z = in.height_offset + standing_height(position.xy, projection.ground);
+        }
+#endif
         position = projectTileWithElevation(position.xy, position.z, projection);
     }
     let gamma_scale = position.w;
@@ -6394,8 +6451,8 @@ fn main(in: VertexInput) -> VertexOutput {
 
     return out;
 }
-",
-    ),
+"
+    )),
     fragment: Some(
         r"
 struct FragmentInput {

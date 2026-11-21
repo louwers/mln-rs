@@ -866,7 +866,7 @@ shader_source!(
         attr("a_tex_origin", ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE),
         attr("a_height_offset", ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE),
     ],
-    &[tex("u_texture", ID_SYMBOL_IMAGE_TEXTURE)]
+    &[tex("u_texture", ID_SYMBOL_IMAGE_TEXTURE), tex("u_ground_dem", ID_GROUND_DEM_TEXTURE)]
 );
 
 // Symbol SDF
@@ -893,7 +893,7 @@ shader_source!(
         attr("a_tex_origin", ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE),
         attr("a_height_offset", ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE),
     ],
-    &[tex("u_texture", ID_SYMBOL_IMAGE_TEXTURE)]
+    &[tex("u_texture", ID_SYMBOL_IMAGE_TEXTURE), tex("u_ground_dem", ID_GROUND_DEM_TEXTURE)]
 );
 
 // Symbol Text & Icon
@@ -919,7 +919,11 @@ shader_source!(
         attr("a_tex_origin", ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE),
         attr("a_height_offset", ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE),
     ],
-    &[tex("u_texture", ID_SYMBOL_IMAGE_TEXTURE), tex("u_texture_icon", ID_SYMBOL_IMAGE_ICON_TEXTURE)]
+    &[
+        tex("u_texture", ID_SYMBOL_IMAGE_TEXTURE),
+        tex("u_texture_icon", ID_SYMBOL_IMAGE_ICON_TEXTURE),
+        tex("u_ground_dem", ID_GROUND_DEM_TEXTURE),
+    ]
 );
 
 /// The source of each built-in program that has GLSL.
