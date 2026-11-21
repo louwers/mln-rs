@@ -60,10 +60,10 @@
 //! a time on the renderer's thread, but for a tile's layout
 //! ([`LayerType::layout_can_need_dependencies`],
 //! [`LayerType::create_layout`] and the [`Layout`]), which runs with the
-//! tile's other work where the renderer's tile workers run it: on another
-//! thread, or on the renderer's thread for a source whose updates are
-//! synchronous or when no worker could start. So the layout and the bucket
-//! are `Send`. A worker that shares the renderer's memory hands the bucket
+//! tile's other work on the thread that runs the tile's job: another
+//! thread, or the renderer's thread for a source whose updates are
+//! synchronous, when no worker could start, or when the host drains the
+//! renderer's pool there. So the layout and the bucket are `Send`. A worker that shares the renderer's memory hands the bucket
 //! back as it is. One that doesn't, such as a browser's Web Worker with its
 //! own wasm instance, gets the layer's values and sends the bucket back
 //! through the worker codec (`mln_wire::Wire`), so the bucket and the style
