@@ -313,9 +313,11 @@ impl<'a> TileMut<'a> {
     pub(crate) fn fail(&mut self, error: Error) {
         self.tile.settled = true;
         // Data that failed isn't fresh: the tile requests it again when
-        // required again.
+        // required again, and no longer holds it for the tiles cut from it,
+        // nor for itself.
         if let OriginLoad::Tileset(tileset) = &mut self.tile.load.origin {
             tileset.from_network = false;
+            tileset.held = None;
         }
         self.action(TileOperation::Error);
         self.store.error(&self.source.id, self.tile.id, error);
@@ -738,6 +740,8 @@ impl<'a> TileMut<'a> {
         let resource = &mut tileset.resource;
         (resource.prior_modified, resource.prior_expires, resource.prior_etag) =
             (fetched.modified, fetched.expires, fetched.etag);
+        // Older data that the cache kept no longer goes with these validators.
+        resource.prior_data = None;
         (tileset.modified, tileset.expires) = (fetched.modified, fetched.expires);
         tileset.from_network = true;
         self.take_input(TileInput::Geometry { data: Some(data), missing: false });
