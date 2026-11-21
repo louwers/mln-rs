@@ -5,15 +5,7 @@ use mln_gfx::shaders::source::msl::Msl;
 pub(super) const RASTER_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r"
-
-enum {
-    idRasterDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idRasterEvaluatedPropsUBO = drawableReservedUBOCount,
-    rasterUBOCount
-};
-
-",
+    prelude: "",
     source: r"
 
 struct VertexStage {
@@ -27,9 +19,7 @@ struct FragmentStage {
     float2 pos1;
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
-                                device const RasterDrawableUBO* drawableVector [[buffer(idRasterDrawableUBO)]],
-                                device const RasterEvaluatedPropsUBO& props [[buffer(idRasterEvaluatedPropsUBO)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
 
     device const RasterDrawableUBO& drawable = drawableVector[uboIndex];
 
@@ -51,7 +41,6 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const RasterEvaluatedPropsUBO& props [[buffer(idRasterEvaluatedPropsUBO)]],
                             texture2d<float, access::sample> image0 [[texture(0)]],
                             texture2d<float, access::sample> image1 [[texture(1)]],
                             sampler image0_sampler [[sampler(0)]],

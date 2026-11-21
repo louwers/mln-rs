@@ -5,15 +5,7 @@ use mln_gfx::shaders::source::msl::Msl;
 pub(super) const HILLSHADE_PREPARE_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r"
-
-enum {
-    idHillshadePrepareDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idHillshadePrepareTilePropsUBO = drawableReservedUBOCount,
-    hillshadePrepareUBOCount
-};
-
-",
+    prelude: "",
     source: r"
 
 struct VertexStage {
@@ -26,9 +18,7 @@ struct FragmentStage {
     float2 pos;
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
-                                device const HillshadePrepareDrawableUBO& drawable [[buffer(idHillshadePrepareDrawableUBO)]],
-                                device const HillshadePrepareTilePropsUBO& tileProps [[buffer(idHillshadePrepareTilePropsUBO)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
 
     const float4 position = drawable.matrix * float4(float2(vertex_in.pos), 0, 1);
 
@@ -50,7 +40,6 @@ float getElevation(float2 coord, float bias, texture2d<float, access::sample> im
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const HillshadePrepareTilePropsUBO& tileProps [[buffer(idHillshadePrepareTilePropsUBO)]],
                             texture2d<float, access::sample> image [[texture(0)]],
                             sampler image_sampler [[sampler(0)]]) {
 #if defined(OVERDRAW_INSPECTOR)
@@ -119,13 +108,6 @@ inline float radians(float degrees) {
     return M_PI_F * degrees / 180.0;
 }
 
-enum {
-    idHillshadeDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idHillshadeTilePropsUBO = idDrawableReservedFragmentOnlyUBO,
-    idHillshadeEvaluatedPropsUBO = drawableReservedUBOCount,
-    hillshadeUBOCount
-};
-
 ",
     source: r"
 
@@ -146,8 +128,7 @@ struct FragmentStage {
     float2 pos;
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
-                                device const HillshadeDrawableUBO* drawableVector [[buffer(idHillshadeDrawableUBO)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
 
     device const HillshadeDrawableUBO& drawable = drawableVector[uboIndex];
 
@@ -287,8 +268,6 @@ void igor_hillshade(float2 deriv, device const HillshadeTilePropsUBO& tileProps,
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const HillshadeTilePropsUBO* tilePropsVector [[buffer(idHillshadeTilePropsUBO)]],
-                            device const HillshadeEvaluatedPropsUBO& props [[buffer(idHillshadeEvaluatedPropsUBO)]],
                             texture2d<float, access::sample> image [[texture(0)]],
                             sampler image_sampler [[sampler(0)]]) {
 #if defined(OVERDRAW_INSPECTOR)

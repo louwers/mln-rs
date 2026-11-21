@@ -34,17 +34,7 @@ macro_rules! sdf_px {
 pub(super) const COLLISION_BOX_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r"
-
-enum {
-    idCollisionDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idCollisionProjectionUBO = idProjectionUBO,
-    // The highest id, so that the vertex buffers start after it.
-    idCollisionTilePropsUBO = drawableReservedUBOCount,
-    collisionUBOCount
-};
-
-",
+    prelude: "",
     source: r"
 
 struct VertexStage {
@@ -62,13 +52,10 @@ struct FragmentStage {
     float notUsed;
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
-                                device const CollisionDrawableUBO& drawable [[buffer(idCollisionDrawableUBO)]],
-                                device const CollisionTilePropsUBO& tileProps [[buffer(idCollisionTilePropsUBO)]],
-                                device const ProjectionUBO& projection [[buffer(idCollisionProjectionUBO)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
 
 #if defined(PROJECTION_GLOBE)
-    float4 projectedPoint = projectTileWithElevation(float2(vertex_in.anchor_pos), vertex_in.height_offset, projection);
+    float4 projectedPoint = projectTileWithElevation(float2(vertex_in.anchor_pos), vertex_in.height_offset, drawProjection);
 #else
     float4 projectedPoint = drawable.matrix * float4(float2(vertex_in.anchor_pos), vertex_in.height_offset, 1);
 #endif
@@ -79,7 +66,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
         4.0);
 
 #if defined(PROJECTION_GLOBE)
-    float4 position = projectTileWithElevation(float2(vertex_in.pos), vertex_in.height_offset, projection);
+    float4 position = projectTileWithElevation(float2(vertex_in.pos), vertex_in.height_offset, drawProjection);
     // Boxes just past the horizon stay visible, as in GL JS; ones far behind it are clipped.
     if (position.z / position.w < 1.1) {
         position.z = 0.0;
@@ -124,17 +111,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 pub(super) const COLLISION_CIRCLE_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r"
-
-enum {
-    idCollisionDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idCollisionProjectionUBO = idProjectionUBO,
-    // The highest id, so that the vertex buffers start after it.
-    idCollisionTilePropsUBO = drawableReservedUBOCount,
-    collisionUBOCount
-};
-
-",
+    prelude: "",
     source: r"
 
 struct VertexStage {
@@ -153,13 +130,10 @@ struct FragmentStage {
     float2 extrude_scale;
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
-                                device const CollisionDrawableUBO& drawable [[buffer(idCollisionDrawableUBO)]],
-                                device const CollisionTilePropsUBO& tileProps [[buffer(idCollisionTilePropsUBO)]],
-                                device const ProjectionUBO& projection [[buffer(idCollisionProjectionUBO)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
 
 #if defined(PROJECTION_GLOBE)
-    float4 projectedPoint = projectTile(float2(vertex_in.anchor_pos), projection);
+    float4 projectedPoint = projectTile(float2(vertex_in.anchor_pos), drawProjection);
 #else
     float4 projectedPoint = drawable.matrix * float4(float2(vertex_in.anchor_pos), 0, 1);
 #endif
@@ -170,7 +144,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
         4.0);
 
 #if defined(PROJECTION_GLOBE)
-    float4 position = projectTile(float2(vertex_in.pos), projection);
+    float4 position = projectTile(float2(vertex_in.pos), drawProjection);
     // Circles just past the horizon stay visible, as in GL JS; ones far behind it are clipped.
     if (position.z / position.w < 1.1) {
         position.z = 0.0;
@@ -199,8 +173,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
     };
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const CollisionTilePropsUBO& tileProps [[buffer(idCollisionTilePropsUBO)]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 
     float alpha = 0.5;
 
@@ -237,13 +210,6 @@ pub(super) const SYMBOL_ICON_SHADER: Msl = Msl {
         atlas_pos!(msl),
         unpack_opacity!(),
         r"
-
-enum {
-    idSymbolDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idSymbolTilePropsUBO = idDrawableReservedFragmentOnlyUBO,
-    idSymbolEvaluatedPropsUBO = drawableReservedUBOCount,
-    symbolUBOCount
-};
 
 #define c_offscreen_degenerate_triangle_location -2.0
 
@@ -282,9 +248,7 @@ struct FragmentStage {
 #endif
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
-                                device const SymbolDrawableUBO* drawableVector [[buffer(idSymbolDrawableUBO)]],
-                                device const SymbolEvaluatedPropsUBO& props [[buffer(idSymbolEvaluatedPropsUBO)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
 
     device const SymbolDrawableUBO& drawable = drawableVector[uboIndex];
     device const ProjectionUBO& projection = projectionVector[uboIndex];
@@ -411,8 +375,6 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const SymbolTilePropsUBO* tilePropsVector [[buffer(idSymbolTilePropsUBO)]],
-                            device const SymbolEvaluatedPropsUBO& props [[buffer(idSymbolEvaluatedPropsUBO)]],
                             texture2d<float, access::sample> image [[texture(0)]],
                             sampler image_sampler [[sampler(0)]]) {
 #if defined(OVERDRAW_INSPECTOR)
@@ -439,13 +401,6 @@ pub(super) const SYMBOL_SDF_SHADER: Msl = Msl {
         sdf_px!(),
         unpack_opacity!(),
         r"
-
-enum {
-    idSymbolDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idSymbolTilePropsUBO = idDrawableReservedFragmentOnlyUBO,
-    idSymbolEvaluatedPropsUBO = drawableReservedUBOCount,
-    symbolUBOCount
-};
 
 #define c_offscreen_degenerate_triangle_location -2.0
 
@@ -491,9 +446,7 @@ struct FragmentStage {
 
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
-                                device const SymbolDrawableUBO* drawableVector [[buffer(idSymbolDrawableUBO)]],
-                                device const SymbolEvaluatedPropsUBO& props [[buffer(idSymbolEvaluatedPropsUBO)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
 
     device const SymbolDrawableUBO& drawable = drawableVector[uboIndex];
     device const ProjectionUBO& projection = projectionVector[uboIndex];
@@ -649,8 +602,6 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const SymbolTilePropsUBO* tilePropsVector [[buffer(idSymbolTilePropsUBO)]],
-                            device const SymbolEvaluatedPropsUBO& props [[buffer(idSymbolEvaluatedPropsUBO)]],
                             texture2d<float, access::sample> image [[texture(0)]],
                             sampler image_sampler [[sampler(0)]]) {
 #if defined(OVERDRAW_INSPECTOR)
@@ -703,13 +654,6 @@ pub(super) const SYMBOL_TEXT_AND_ICON_SHADER: Msl = Msl {
         unpack_opacity!(),
         r"
 
-enum {
-    idSymbolDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idSymbolTilePropsUBO = idDrawableReservedFragmentOnlyUBO,
-    idSymbolEvaluatedPropsUBO = drawableReservedUBOCount,
-    symbolUBOCount
-};
-
 #define c_offscreen_degenerate_triangle_location -2.0
 
 "
@@ -757,9 +701,7 @@ struct FragmentStage {
     bool is_icon;
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
-                                device const SymbolDrawableUBO* drawableVector [[buffer(idSymbolDrawableUBO)]],
-                                device const SymbolEvaluatedPropsUBO& props [[buffer(idSymbolEvaluatedPropsUBO)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
 
     device const SymbolDrawableUBO& drawable = drawableVector[uboIndex];
     device const ProjectionUBO& projection = projectionVector[uboIndex];
@@ -919,8 +861,6 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const SymbolTilePropsUBO* tilePropsVector [[buffer(idSymbolTilePropsUBO)]],
-                            device const SymbolEvaluatedPropsUBO& props [[buffer(idSymbolEvaluatedPropsUBO)]],
                             texture2d<float, access::sample> glyph_image [[texture(0)]],
                             texture2d<float, access::sample> icon_image [[texture(1)]],
                             sampler glyph_sampler [[sampler(0)]],

@@ -12,12 +12,6 @@ pub(super) const BACKGROUND_PATTERN_SHADER: Msl = Msl {
         atlas_pos!(msl),
         r"
 
-enum {
-    idBackgroundDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idBackgroundPropsUBO = drawableReservedUBOCount,
-    backgroundUBOCount
-};
-
 //
 // Background
 
@@ -38,9 +32,7 @@ struct FragmentStage {
     float2 pos_b;
 };
 
-FragmentStage vertex vertexMain(VertexStage in [[stage_in]],
-                                device const BackgroundPatternDrawableUBO* drawableVector [[buffer(idBackgroundDrawableUBO)]],
-                                device const BackgroundPatternPropsUBO& props [[buffer(idBackgroundPropsUBO)]]) {
+FragmentStage vertex vertexMain(VertexStage in [[stage_in]]) {
 
     device const BackgroundPatternDrawableUBO& drawable = drawableVector[uboIndex];
 
@@ -63,7 +55,6 @@ FragmentStage vertex vertexMain(VertexStage in [[stage_in]],
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const BackgroundPatternPropsUBO& props [[buffer(idBackgroundPropsUBO)]],
                             texture2d<float, access::sample> image [[texture(0)]],
                             sampler image_sampler [[sampler(0)]]) {
 #if defined(OVERDRAW_INSPECTOR)
@@ -95,12 +86,6 @@ pub(super) const BACKGROUND_SHADER: Msl = Msl {
     fragment_main_function: r"fragmentMain",
     prelude: r"
 
-enum {
-    idBackgroundDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idBackgroundPropsUBO = drawableReservedUBOCount,
-    backgroundUBOCount
-};
-
 //
 // Background
 
@@ -118,8 +103,7 @@ struct FragmentStage {
     float4 position [[position, invariant]];
 };
 
-FragmentStage vertex vertexMain(VertexStage in [[stage_in]],
-                                device const BackgroundDrawableUBO* drawableVector [[buffer(idBackgroundDrawableUBO)]]) {
+FragmentStage vertex vertexMain(VertexStage in [[stage_in]]) {
 
     device const BackgroundDrawableUBO& drawable = drawableVector[uboIndex];
 
@@ -128,8 +112,7 @@ FragmentStage vertex vertexMain(VertexStage in [[stage_in]],
     };
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const BackgroundPropsUBO& props [[buffer(idBackgroundPropsUBO)]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 #if defined(OVERDRAW_INSPECTOR)
     return half4(1.0);
 #endif

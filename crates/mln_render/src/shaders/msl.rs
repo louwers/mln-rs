@@ -5,19 +5,7 @@ use mln_gfx::shaders::source::msl::Msl;
 pub(crate) const ATMOSPHERE_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r"
-
-enum {
-    idSkyPropsUBO = drawableReservedUBOCount,
-    skyUBOCount
-};
-
-enum {
-    idAtmospherePropsUBO = drawableReservedUBOCount,
-    atmosphereUBOCount
-};
-
-",
+    prelude: "",
     source: r"
 
 struct AtmosphereVertexStage {
@@ -29,9 +17,7 @@ struct AtmosphereFragmentStage {
     float3 view_direction;
 };
 
-AtmosphereFragmentStage vertex vertexMain(
-    AtmosphereVertexStage in [[stage_in]],
-    device const AtmospherePropsUBO& atmosphere [[buffer(idAtmospherePropsUBO)]]) {
+AtmosphereFragmentStage vertex vertexMain(AtmosphereVertexStage in [[stage_in]]) {
     const float2 pos = float2(in.position);
     const float4 target = atmosphere.inv_view_projection * float4(pos, 0.0, 1.0);
     return {
@@ -130,9 +116,7 @@ float4 atmosphereScatter(float3 direction, float3 origin, float3 sun) {
     return float4(color, opacity);
 }
 
-half4 fragment fragmentMain(
-    AtmosphereFragmentStage in [[stage_in]],
-    device const AtmospherePropsUBO& atmosphere [[buffer(idAtmospherePropsUBO)]]) {
+half4 fragment fragmentMain(AtmosphereFragmentStage in [[stage_in]]) {
     const float3 camera = atmosphere.camera_position.xyz * EarthRadius;
     float4 color = atmosphereScatter(in.view_direction, camera, atmosphere.sun_position.xyz);
     color.rgb = 1.0 - exp(-color.rgb);
@@ -145,13 +129,7 @@ half4 fragment fragmentMain(
 pub(crate) const CLIPPING_MASK_PROGRAM: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r"
-
-enum {
-    clippingMaskUBOCount = drawableReservedUBOCount
-};
-
-",
+    prelude: "",
     source: r"
 
 struct VertexStage {
@@ -167,9 +145,8 @@ struct FragmentResult {
     half4 color [[color(0)]];
 };
 
-FragmentStage vertex vertexMain(VertexStage in [[stage_in]],
-                                device const ProjectionUBO& projection [[buffer(idProjectionUBO)]]) {
-    return { projectTile(float2(in.position.xy), float2(in.position.xy), projection) };
+FragmentStage vertex vertexMain(VertexStage in [[stage_in]]) {
+    return { projectTile(float2(in.position.xy), float2(in.position.xy), drawProjection) };
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
@@ -181,13 +158,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 pub(crate) const GLOBE_DEPTH_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r"
-
-enum {
-    globeDepthUBOCount = drawableReservedUBOCount
-};
-
-",
+    prelude: "",
     source: r"
 
 struct VertexStage {
@@ -216,14 +187,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 pub(crate) const LAYER_COMPOSITE_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r"
-
-enum {
-    idLayerCompositeUBO = drawableReservedUBOCount,
-    layerCompositeUBOCount
-};
-
-",
+    prelude: "",
     source: r"
 
 struct VertexStage {
@@ -282,7 +246,6 @@ static float4 composite(float4 src, float4 dst, int mode) {
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const LayerCompositeUBO& props [[buffer(idLayerCompositeUBO)]],
                             texture2d<float, access::sample> image [[texture(0)]],
                             texture2d<float, access::sample> backdrop [[texture(1)]]) {
     const uint2 texel = uint2(in.position.xy);
@@ -304,14 +267,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 pub(crate) const TILE_DEBUG_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r"
-
-enum {
-    idTileDebugPropsUBO = drawableReservedUBOCount,
-    tileDebugUBOCount
-};
-
-",
+    prelude: "",
     source: r"
 
 struct VertexStage {
@@ -337,8 +293,7 @@ struct FragmentStage {
 #endif
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
-                                device const TileDebugPropsUBO& props [[buffer(idTileDebugPropsUBO)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
     device const ProjectionUBO& projection = projectionVector[uboIndex];
     const float2 start = float2(vertex_in.start_pos);
     const float2 end = float2(vertex_in.end_pos);
@@ -379,8 +334,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
     };
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const TileDebugPropsUBO& props [[buffer(idTileDebugPropsUBO)]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 #if defined(PROJECTION_GLOBE)
     if (in.tile_x < 0.0 || in.tile_x >= 8192.0) {
         discard_fragment();
@@ -404,19 +358,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 pub(crate) const SKY_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r"
-
-enum {
-    idSkyPropsUBO = drawableReservedUBOCount,
-    skyUBOCount
-};
-
-enum {
-    idAtmospherePropsUBO = drawableReservedUBOCount,
-    atmosphereUBOCount
-};
-
-",
+    prelude: "",
     source: r"
 
 struct SkyVertexStage {
@@ -436,8 +378,7 @@ SkyFragmentStage vertex vertexMain(SkyVertexStage in [[stage_in]]) {
     };
 }
 
-half4 fragment fragmentMain(SkyFragmentStage in [[stage_in]],
-                            device const SkyPropsUBO& sky [[buffer(idSkyPropsUBO)]]) {
+half4 fragment fragmentMain(SkyFragmentStage in [[stage_in]]) {
     const float2 pixel = (in.pos * 0.5 + 0.5) * sky.viewport_size;
     const float distanceToHorizon = dot(pixel - sky.horizon, sky.horizon_normal);
     float4 color = float4(0.0);

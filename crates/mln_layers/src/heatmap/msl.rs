@@ -5,15 +5,7 @@ use mln_gfx::shaders::source::msl::Msl;
 pub(super) const HEATMAP_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r"
-
-enum {
-    idHeatmapDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idHeatmapEvaluatedPropsUBO = drawableReservedUBOCount,
-    heatmapUBOCount
-};
-
-",
+    prelude: "",
     source: r#"
 
 struct VertexStage {
@@ -37,9 +29,7 @@ constant const float ZERO = 1.0 / 255.0 / 16.0;
 // Gaussian kernel coefficient: 1 / sqrt(2 * PI)
 #define GAUSS_COEF 0.3989422804014327
 
-FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
-                                device const HeatmapDrawableUBO* drawableVector [[buffer(idHeatmapDrawableUBO)]],
-                                device const HeatmapEvaluatedPropsUBO& props [[buffer(idHeatmapEvaluatedPropsUBO)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
 
     device const HeatmapDrawableUBO& drawable = drawableVector[uboIndex];
 
@@ -90,8 +80,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
     };
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const HeatmapEvaluatedPropsUBO& props [[buffer(idHeatmapEvaluatedPropsUBO)]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 #if defined(OVERDRAW_INSPECTOR)
     return half4(1.0);
 #endif
@@ -109,14 +98,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 pub(super) const HEATMAP_TEXTURE_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r"
-
-enum {
-    idHeatmapTexturePropsUBO = drawableReservedUBOCount,
-    heatmapTextureUBOCount
-};
-
-",
+    prelude: "",
     source: r"
 
 struct VertexStage {
@@ -128,8 +110,7 @@ struct FragmentStage {
     float2 pos;
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
-                                device const HeatmapTexturePropsUBO& props [[buffer(idHeatmapTexturePropsUBO)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
 
     const float2 pos = float2(vertex_in.pos);
     const float4 position = props.matrix * float4(pos * view.target_size, 0, 1);
@@ -141,7 +122,6 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const HeatmapTexturePropsUBO& props [[buffer(idHeatmapTexturePropsUBO)]],
                             texture2d<float, access::sample> image [[texture(0)]],
                             texture2d<float, access::sample> color_ramp [[texture(1)]],
                             sampler image_sampler [[sampler(0)]],

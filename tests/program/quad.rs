@@ -87,8 +87,7 @@ struct FragmentStage {
     float2 uv;
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
-                                device const QuadUBO& props [[buffer(5)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
     return {
         .position = float4(vertex_in.offset + vertex_in.corner * props.size, 0.0, 1.0),
         .uv = vertex_in.corner,
@@ -96,7 +95,6 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const QuadUBO& props [[buffer(5)]],
                             texture2d<float, access::sample> image [[texture(0)]],
                             sampler image_sampler [[sampler(0)]]) {
     return half4(image.sample(image_sampler, in.uv) * props.tint);

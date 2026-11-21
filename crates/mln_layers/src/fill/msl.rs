@@ -73,13 +73,6 @@ pub(super) const FILL_OUTLINE_PATTERN_INSTANCED_SHADER: Msl = Msl {
         atlas_pos!(msl),
         r"
 
-enum {
-    idFillDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idFillTilePropsUBO = drawableReservedUBOCount,
-    idFillEvaluatedPropsUBO,
-    fillUBOCount
-};
-
 //
 // Fill
 
@@ -125,10 +118,7 @@ struct FragmentStage {
 ",
         outline_corner!(),
         r"
-FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
-                                device const FillPatternDrawableUBO* drawableVector [[buffer(idFillDrawableUBO)]],
-                                device const FillPatternTilePropsUBO* tilePropsVector [[buffer(idFillTilePropsUBO)]],
-                                device const FillEvaluatedPropsUBO& props [[buffer(idFillEvaluatedPropsUBO)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
 
     device const FillPatternDrawableUBO& drawable = drawableVector[uboIndex];
     device const FillPatternTilePropsUBO& tileProps = tilePropsVector[uboIndex];
@@ -180,8 +170,6 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const FillPatternTilePropsUBO* tilePropsVector [[buffer(idFillTilePropsUBO)]],
-                            device const FillEvaluatedPropsUBO& props [[buffer(idFillEvaluatedPropsUBO)]],
                             texture2d<float, access::sample> image0 [[texture(0)]],
                             sampler image0_sampler [[sampler(0)]]) {
 #if defined(OVERDRAW_INSPECTOR)
@@ -257,8 +245,7 @@ struct FragmentStage {
 ",
             outline_corner!(),
             r"
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const FillEvaluatedPropsUBO& props [[buffer(idFillEvaluatedPropsUBO)]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 #if defined(OVERDRAW_INSPECTOR)
     return half4(1.0);
 #endif
@@ -287,13 +274,6 @@ pub(super) const FILL_OUTLINE_INSTANCED_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r"
-
-enum {
-    idFillDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idFillTilePropsUBO = drawableReservedUBOCount,
-    idFillEvaluatedPropsUBO,
-    fillUBOCount
-};
 
 //
 // Fill
@@ -325,8 +305,7 @@ struct VertexStage {
 ",
         outline_stages!(),
         r"
-FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
-                                device const FillOutlineDrawableUBO* drawableVector [[buffer(idFillDrawableUBO)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
 
     device const FillOutlineDrawableUBO& drawable = drawableVector[uboIndex];
 
@@ -353,20 +332,10 @@ pub(super) const FILL_OUTLINE_PULLED_SHADER: Msl = Msl {
     prelude: FILL_OUTLINE_INSTANCED_SHADER.prelude,
     source: concat!(
         r"
-
-enum {
-    idFillOutlineVertices = 7,
-    idFillOutlineEnds,
-    idFillOutlinePaint
-};
 ",
         outline_stages!(),
         r"
-FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]],
-                                device const FillOutlineDrawableUBO* drawableVector [[buffer(idFillDrawableUBO)]],
-                                device const short2* outlineVertices [[buffer(idFillOutlineVertices)]],
-                                device const short2* outlineEnds [[buffer(idFillOutlineEnds)]],
-                                device const float* outlinePaint [[buffer(idFillOutlinePaint)]]) {
+FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]]) {
 
     device const FillOutlineDrawableUBO& drawable = drawableVector[uboIndex];
 
@@ -410,13 +379,6 @@ pub(super) const FILL_PATTERN_SHADER: Msl = Msl {
         atlas_pos!(msl),
         r"
 
-enum {
-    idFillDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idFillTilePropsUBO = drawableReservedUBOCount,
-    idFillEvaluatedPropsUBO,
-    fillUBOCount
-};
-
 //
 // Fill
 
@@ -453,10 +415,7 @@ struct FragmentStage {
     #property varying opacity half
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
-                                device const FillPatternDrawableUBO* drawableVector [[buffer(idFillDrawableUBO)]],
-                                device const FillPatternTilePropsUBO* tilePropsVector [[buffer(idFillTilePropsUBO)]],
-                                device const FillEvaluatedPropsUBO& props [[buffer(idFillEvaluatedPropsUBO)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
 
     device const FillPatternDrawableUBO& drawable = drawableVector[uboIndex];
     device const FillPatternTilePropsUBO& tileProps = tilePropsVector[uboIndex];
@@ -503,8 +462,6 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const FillPatternTilePropsUBO* tilePropsVector [[buffer(idFillTilePropsUBO)]],
-                            device const FillEvaluatedPropsUBO& props [[buffer(idFillEvaluatedPropsUBO)]],
                             texture2d<float, access::sample> image0 [[texture(0)]],
                             sampler image0_sampler [[sampler(0)]]) {
 #if defined(OVERDRAW_INSPECTOR)
@@ -562,13 +519,6 @@ pub(super) const FILL_SHADER: Msl = Msl {
     fragment_main_function: r"fragmentMain",
     prelude: r"
 
-enum {
-    idFillDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idFillTilePropsUBO = drawableReservedUBOCount,
-    idFillEvaluatedPropsUBO,
-    fillUBOCount
-};
-
 //
 // Fill
 
@@ -598,8 +548,7 @@ struct FragmentStage {
     #property varying opacity half
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
-                                device const FillDrawableUBO* drawableVector [[buffer(idFillDrawableUBO)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
 
     device const FillDrawableUBO& drawable = drawableVector[uboIndex];
 
@@ -610,8 +559,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
     };
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const FillEvaluatedPropsUBO& props [[buffer(idFillEvaluatedPropsUBO)]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 #if defined(OVERDRAW_INSPECTOR)
     return half4(1.0);
 #endif

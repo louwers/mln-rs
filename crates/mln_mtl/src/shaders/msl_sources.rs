@@ -1,10 +1,14 @@
 //! The MSL prelude every shader compiles after, and how a program's library
 //! composes it with the blocks the program reads and its MSL.
 
+use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::gpu::GpuError;
-use mln_gfx::shaders::program::{ENGINE_BUFFERS, Program};
+use mln_gfx::shaders::program::{
+    Buffer, BufferKind, DRAW_PROJECTION_BUFFER, ENGINE_BUFFERS, PROJECTION_BUFFER, Program, VIEW_BUFFER,
+};
 use mln_gfx::shaders::source::identifiers;
 use mln_gfx::shaders::source::msl::{self, Msl};
+use mln_util::hash::HashSet;
 
 /// The start of every library.
 const HEADER: &str = "
@@ -178,77 +182,148 @@ inline float4 projectTileFor3D(float2 pos, float elevation, device const Project
 
 #endif
 
-enum {
-    idViewUBO,
-    idGlobalUBOIndex,
-    globalUBOCount,
-};
-
-enum {
-    idDrawableReservedVertexOnlyUBO = globalUBOCount,
-    idDrawableReservedFragmentOnlyUBO,
-    idProjectionUBO,
-    drawableReservedUBOCount
-};
-
 ";
 
+/// The parameter of the draw's index into its layer's storage buffers,
+/// which a main function reads as `uboIndex`.
+const UBO_INDEX_PARAMETER: &str = "device const uint32_t& uboIndex [[buffer(1)]]";
+
 /// The engine's buffers that a main function may read without declaring
-/// them, each with the name it reads it by and its parameter: the view's
-/// block, the draw's index into its layer's storage buffers, and the
-/// projection blocks.
-const RESERVED_PARAMETERS: [(&str, &str); 3] = [
-    ("view", "device const ViewUBO& view [[buffer(idViewUBO)]]"),
-    ("uboIndex", "device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]]"),
-    ("projectionVector", "device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]]"),
-];
+/// them, besides `uboIndex`: the view's block and the projection blocks.
+const ENGINE_PARAMETERS: [Buffer; 3] = [VIEW_BUFFER, PROJECTION_BUFFER, DRAW_PROJECTION_BUFFER];
+
+/// The parameter of `buffer` at the buffer index of its id, by its name: a
+/// reference to a block, and a pointer to the elements or the vertices of a
+/// storage buffer.
+fn parameter(buffer: &Buffer) -> String {
+    let (ty, by) = match buffer.kind {
+        BufferKind::Uniform(block) | BufferKind::DrawUniform(block) => (block.name, '&'),
+        BufferKind::Storage { block, .. } => (block.name, '*'),
+        BufferKind::Vertices { format } => (vertex_type(format), '*'),
+    };
+    format!("device const {ty}{by} {} [[buffer({})]]", buffer.name, buffer.id)
+}
+
+/// The type of a vertex of `format`.
+fn vertex_type(format: AttributeDataType) -> &'static str {
+    use AttributeDataType::{
+        Byte, Byte2, Byte3, Byte4, Float, Float2, Float3, Float4, Int, Int2, Int3, Int4, Invalid, Short, Short2,
+        Short3, Short4, UByte, UByte2, UByte3, UByte4, UByte4Normalized, UInt, UInt2, UInt3, UInt4, UShort, UShort2,
+        UShort3, UShort4, UShort8,
+    };
+    match format {
+        Byte => "char",
+        Byte2 => "char2",
+        Byte3 => "char3",
+        Byte4 => "char4",
+        UByte => "uchar",
+        UByte2 => "uchar2",
+        UByte3 => "uchar3",
+        UByte4 | UByte4Normalized => "uchar4",
+        Short => "short",
+        Short2 => "short2",
+        Short3 => "short3",
+        Short4 => "short4",
+        UShort => "ushort",
+        UShort2 => "ushort2",
+        UShort3 => "ushort3",
+        UShort4 => "ushort4",
+        Int => "int",
+        Int2 => "int2",
+        Int3 => "int3",
+        Int4 => "int4",
+        UInt => "uint",
+        UInt2 => "uint2",
+        UInt3 => "uint3",
+        UInt4 => "uint4",
+        Float => "float",
+        Float2 => "float2",
+        Float3 => "float3",
+        Float4 => "float4",
+        // `Program::check` rejects a vertex buffer of these.
+        UShort8 | Invalid => "void",
+    }
+}
 
 /// The source of `program`'s library, of its MSL `source`: the header, the
 /// structs of the engine's blocks, the prelude, the structs of the
 /// program's blocks, each a storage buffer's element padded to its stride,
 /// and the program's own prelude and source with its properties written
 /// out ([`msl::expand`]), and each main function with the parameters of the
-/// engine's buffers that it names ([`RESERVED_PARAMETERS`]). Fails as
+/// buffers that it names, the engine's and the program's. Fails as
 /// [`msl::expand`] does.
 pub(crate) fn library_source(program: &Program, source: &Msl) -> Result<String, GpuError> {
     let (engine, own) = (msl::blocks(&ENGINE_BUFFERS), msl::blocks(program.buffers));
     let mut functions = msl::expand(program, source)?;
     for main in [source.vertex_main_function, source.fragment_main_function] {
-        functions = with_reserved_parameters(&functions, main, source);
+        functions = with_parameters(&functions, main, program.buffers);
     }
     Ok([HEADER, &engine, PRELUDE, &own, source.prelude, &functions].concat())
 }
 
-/// `functions` with the parameters of the engine's buffers that the main
-/// function `main` names in its body, to the next main function of
-/// `source`, added to its parameters.
-fn with_reserved_parameters(functions: &str, main: &str, source: &Msl) -> String {
+/// `functions` with the parameters of the buffers that the main function
+/// `main` names in its body added to its parameters: `uboIndex`, the
+/// engine's buffers and `buffers`.
+fn with_parameters(functions: &str, main: &str, buffers: &[Buffer]) -> String {
     let Some(name_at) = functions.find(&format!(" {main}(")) else { return functions.to_owned() };
-    let open = name_at + main.len() + 1;
-    let mut depth = 0;
-    let Some(close) = functions[open..].char_indices().find_map(|(at, c)| {
-        depth += match c {
-            '(' => 1,
-            ')' => -1,
-            _ => 0,
-        };
-        (depth == 0).then_some(open + at)
-    }) else {
-        return functions.to_owned();
-    };
-    let next_main = [source.vertex_main_function, source.fragment_main_function]
-        .iter()
-        .filter_map(|other| functions[close..].find(&format!(" {other}(")))
-        .min()
-        .map_or(functions.len(), |at| close + at);
-    let (parameters, body) = (&functions[open..close], &functions[close..next_main]);
-    let declared: Vec<&str> = identifiers(parameters).collect();
+    let Some(close) = matching(functions, name_at, '(', ')') else { return functions.to_owned() };
+    let Some(end) = matching(functions, close, '{', '}') else { return functions.to_owned() };
+    let (parameters, body) = (&functions[name_at..close], &functions[close..end]);
+    let declared: HashSet<&str> = identifiers(parameters).collect();
+    let named: HashSet<&str> = identifiers(body).filter(|name| !declared.contains(name)).collect();
     let mut added = String::new();
-    for (name, parameter) in RESERVED_PARAMETERS {
-        if !declared.contains(&name) && identifiers(body).any(|word| word == name) {
-            added.push_str(",\n    ");
-            added.push_str(parameter);
-        }
+    if named.contains("uboIndex") {
+        added.push_str(",\n    ");
+        added.push_str(UBO_INDEX_PARAMETER);
+    }
+    for buffer in ENGINE_PARAMETERS.iter().chain(buffers).filter(|buffer| named.contains(buffer.name)) {
+        added.push_str(",\n    ");
+        added.push_str(&parameter(buffer));
     }
     [&functions[..close], &added, &functions[close..]].concat()
+}
+
+/// Where in `text` the `close` is that closes the first `open` from `from`.
+fn matching(text: &str, from: usize, open: char, close: char) -> Option<usize> {
+    let start = from + text[from..].find(open)?;
+    let mut depth = 0;
+    text[start..].char_indices().find_map(|(at, c)| {
+        depth += i32::from(c == open) - i32::from(c == close);
+        (depth == 0).then_some(start + at)
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use mln_gfx::gfx_types::AttributeDataType::Short4;
+    use mln_gfx::shaders::bindings::DRAW_INDEX_ID;
+
+    use super::*;
+
+    #[test]
+    fn the_engines_buffers_bind_at_their_ids() {
+        assert!(UBO_INDEX_PARAMETER.ends_with(&format!("[[buffer({DRAW_INDEX_ID})]]")));
+        assert_eq!(parameter(&VIEW_BUFFER), "device const ViewUBO& view [[buffer(0)]]");
+        assert_eq!(parameter(&PROJECTION_BUFFER), "device const ProjectionUBO* projectionVector [[buffer(4)]]");
+        assert_eq!(parameter(&DRAW_PROJECTION_BUFFER), "device const ProjectionUBO& drawProjection [[buffer(4)]]");
+        assert_eq!(parameter(&Buffer::vertices("walls", 0, Short4)), "device const short4* walls [[buffer(7)]]");
+    }
+
+    #[test]
+    fn a_main_function_has_the_parameters_of_the_buffers_its_body_names() {
+        let walls = Buffer::vertices("walls", 0, Short4);
+        let functions = "void helper(int walls) {}\n\
+                         float4 vertex main(uint id [[vertex_id]]) {\n    return walls[uboIndex] + view.x;\n}\n\
+                         half4 fragment other(int view) { return walls; }";
+        let with = with_parameters(functions, "main", &[walls]);
+        assert_eq!(
+            with,
+            format!(
+                "void helper(int walls) {{}}\nfloat4 vertex main(uint id [[vertex_id]],\n    {UBO_INDEX_PARAMETER},\n    {},\n    {}) \
+                 {{\n    return walls[uboIndex] + view.x;\n}}\nhalf4 fragment other(int view) {{ return walls; }}",
+                parameter(&VIEW_BUFFER),
+                parameter(&walls)
+            )
+        );
+    }
 }

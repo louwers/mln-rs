@@ -5,16 +5,7 @@ use mln_gfx::shaders::source::msl::Msl;
 pub(super) const COLOR_RELIEF_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r"
-
-enum {
-    idColorReliefDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idColorReliefTilePropsUBO = drawableReservedUBOCount,
-    idColorReliefEvaluatedPropsUBO,
-    colorReliefUBOCount
-};
-
-",
+    prelude: "",
     source: r"
 
 struct VertexStage {
@@ -27,9 +18,7 @@ struct FragmentStage {
     float2 pos;
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
-                                device const ColorReliefDrawableUBO* drawableVector [[buffer(idColorReliefDrawableUBO)]],
-                                device const ColorReliefTilePropsUBO* tilePropsVector [[buffer(idColorReliefTilePropsUBO)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
 
     device const ColorReliefDrawableUBO& drawable = drawableVector[uboIndex];
     device const ColorReliefTilePropsUBO& tileProps = tilePropsVector[uboIndex];
@@ -72,8 +61,6 @@ float4 getColorStop(int stop, int color_ramp_size, texture2d<float, access::samp
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const ColorReliefTilePropsUBO* tilePropsVector [[buffer(idColorReliefTilePropsUBO)]],
-                            device const ColorReliefEvaluatedPropsUBO& props [[buffer(idColorReliefEvaluatedPropsUBO)]],
                             texture2d<float, access::sample> image [[texture(0)]],
                             texture2d<float, access::sample> elevationStops [[texture(1)]],
                             texture2d<float, access::sample> colorStops [[texture(2)]],

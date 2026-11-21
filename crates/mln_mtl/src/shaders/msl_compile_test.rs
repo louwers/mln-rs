@@ -338,6 +338,16 @@ fn no_source_declares_a_block() {
     }
 }
 
+/// No source declares a buffer: the backend adds the parameters of the
+/// engine's and its program's to the main functions that name them.
+#[test]
+fn no_source_declares_a_buffer() {
+    for (program, source) in sources() {
+        let text = [source.prelude, source.source].concat();
+        assert!(!text.contains("[[buffer("), "{} declares a buffer", program.name);
+    }
+}
+
 /// MSL lays out every block's struct, padded to its buffer's stride, as its
 /// Rust struct is laid out: a library of each with a `static_assert` of
 /// each member's offset compiles.

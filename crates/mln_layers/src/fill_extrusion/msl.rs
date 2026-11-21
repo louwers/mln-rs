@@ -128,13 +128,6 @@ pub(super) const FILL_EXTRUSION_INSTANCED_SHADER: Msl = Msl {
         wall_normal!(),
         r"
 
-enum {
-    idFillExtrusionDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idFillExtrusionTilePropsUBO = drawableReservedUBOCount,
-    idFillExtrusionPropsUBO,
-    fillExtrusionUBOCount
-};
-
 "
     ),
     source: concat!(
@@ -155,9 +148,7 @@ struct VertexStage {
 ",
         extrusion_wall!(),
         r"
-FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
-                                device const FillExtrusionDrawableUBO* drawableVector [[buffer(idFillExtrusionDrawableUBO)]],
-                                device const FillExtrusionPropsUBO& props [[buffer(idFillExtrusionPropsUBO)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
     return wall(vertex_in, drawableVector[uboIndex], projectionVector[uboIndex], props);
 }
 
@@ -171,17 +162,6 @@ pub(super) const FILL_EXTRUSION_PULLED_SHADER: Msl = Msl {
     prelude: FILL_EXTRUSION_INSTANCED_SHADER.prelude,
     source: concat!(
         r"
-
-enum {
-    idFillExtrusionWallVertices = 7,
-    idFillExtrusionWallPaint
-};
-
-// A vertex of the bucket, which the walls read by index.
-struct BucketVertex {
-    short2 pos;
-    ushort2 decimals_ed;
-};
 
 // What the instanced walls read as attributes.
 struct WallVertex {
@@ -197,25 +177,22 @@ struct WallVertex {
 ",
         extrusion_wall!(),
         r"
-FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]],
-                                device const FillExtrusionDrawableUBO* drawableVector [[buffer(idFillExtrusionDrawableUBO)]],
-                                device const FillExtrusionPropsUBO& props [[buffer(idFillExtrusionPropsUBO)]],
-                                device const BucketVertex* wallVertices [[buffer(idFillExtrusionWallVertices)]],
-                                device const float* wallPaint [[buffer(idFillExtrusionWallPaint)]]) {
+FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]]) {
     device const FillExtrusionDrawableUBO& drawable = drawableVector[uboIndex];
 
     // Four vertices a wall, in the order of the static quad's corners.
     const uint wall_index = vertex_id / 4;
     const uint corner = vertex_id % 4;
-    const BucketVertex outline = wallVertices[wall_index];
-    const BucketVertex next = wallVertices[wall_index + 1];
+    // A vertex of the bucket: its position, then `decimals_ed`.
+    const short4 outline = wallVertices[wall_index];
+    const short4 next = wallVertices[wall_index + 1];
 
     WallVertex vertex_in;
     vertex_in.pos = short2(corner < 2 ? 1 : 0, corner & 1);
-    vertex_in.outline_pos = outline.pos;
-    vertex_in.decimals_ed = outline.decimals_ed;
-    vertex_in.next_outline_pos = next.pos;
-    vertex_in.next_decimals_ed = next.decimals_ed;
+    vertex_in.outline_pos = outline.xy;
+    vertex_in.decimals_ed = ushort2(outline.zw);
+    vertex_in.next_outline_pos = next.xy;
+    vertex_in.next_decimals_ed = ushort2(next.zw);
 
     // The wall's paint values are its outline vertex's, where the drawable's
     // `paint_layout` says: the floats a vertex takes, then the offsets of
@@ -246,13 +223,6 @@ pub(super) const FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: Msl = Msl {
         atlas_pos!(msl),
         wall_normal!(),
         r"
-
-enum {
-    idFillExtrusionDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idFillExtrusionTilePropsUBO = drawableReservedUBOCount,
-    idFillExtrusionPropsUBO,
-    fillExtrusionUBOCount
-};
 
 "
     ),
@@ -286,10 +256,7 @@ struct FragmentOutput {
     //float depth [[depth(less)]]; // Write depth value if it's less than what's already there
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
-                                device const FillExtrusionDrawableUBO* drawableVector [[buffer(idFillExtrusionDrawableUBO)]],
-                                device const FillExtrusionTilePropsUBO* tilePropsVector [[buffer(idFillExtrusionTilePropsUBO)]],
-                                device const FillExtrusionPropsUBO& props [[buffer(idFillExtrusionPropsUBO)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
 
     bool isDiscarded = glMod(float(vertex_in.decimals_ed.x), 2.0) > 0.0;
     if (isDiscarded) {
@@ -393,8 +360,6 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
 }
 
 fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]],
-                                     device const FillExtrusionTilePropsUBO* tilePropsVector [[buffer(idFillExtrusionTilePropsUBO)]],
-                                     device const FillExtrusionPropsUBO& props [[buffer(idFillExtrusionPropsUBO)]],
                                      texture2d<float, access::sample> image0 [[texture(0)]],
                                      sampler image0_sampler [[sampler(0)]]) {
 #if defined(OVERDRAW_INSPECTOR)
@@ -438,13 +403,6 @@ pub(super) const FILL_EXTRUSION_PATTERN_SHADER: Msl = Msl {
         atlas_pos!(msl),
         r"
 
-enum {
-    idFillExtrusionDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idFillExtrusionTilePropsUBO = drawableReservedUBOCount,
-    idFillExtrusionPropsUBO,
-    fillExtrusionUBOCount
-};
-
 "
     ),
     source: r"
@@ -474,10 +432,7 @@ struct FragmentOutput {
     //float depth [[depth(less)]]; // Write depth value if it's less than what's already there
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
-                                device const FillExtrusionDrawableUBO* drawableVector [[buffer(idFillExtrusionDrawableUBO)]],
-                                device const FillExtrusionTilePropsUBO* tilePropsVector [[buffer(idFillExtrusionTilePropsUBO)]],
-                                device const FillExtrusionPropsUBO& props [[buffer(idFillExtrusionPropsUBO)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
 
     device const FillExtrusionDrawableUBO& drawable = drawableVector[uboIndex];
     device const FillExtrusionTilePropsUBO& tileProps = tilePropsVector[uboIndex];
@@ -555,8 +510,6 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
 }
 
 fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]],
-                                     device const FillExtrusionTilePropsUBO* tilePropsVector [[buffer(idFillExtrusionTilePropsUBO)]],
-                                     device const FillExtrusionPropsUBO& props [[buffer(idFillExtrusionPropsUBO)]],
                                      texture2d<float, access::sample> image0 [[texture(0)]],
                                      sampler image0_sampler [[sampler(0)]]) {
 #if defined(OVERDRAW_INSPECTOR)
@@ -595,16 +548,7 @@ fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]],
 pub(super) const FILL_EXTRUSION_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r"
-
-enum {
-    idFillExtrusionDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idFillExtrusionTilePropsUBO = drawableReservedUBOCount,
-    idFillExtrusionPropsUBO,
-    fillExtrusionUBOCount
-};
-
-",
+    prelude: "",
     source: r"
 
 struct VertexStage {
@@ -626,9 +570,7 @@ struct FragmentOutput {
     //float depth [[depth(less)]]; // Write depth value if it's less than what's already there
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
-                                device const FillExtrusionDrawableUBO* drawableVector [[buffer(idFillExtrusionDrawableUBO)]],
-                                device const FillExtrusionPropsUBO& props [[buffer(idFillExtrusionPropsUBO)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
 
     device const FillExtrusionDrawableUBO& drawable = drawableVector[uboIndex];
 

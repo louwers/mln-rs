@@ -56,13 +56,6 @@ pub(super) const LINE_GRADIENT_SDF_SHADER: Msl = Msl {
 // The attribute conveying progress along a line is scaled to [0, 2^15).
 #define MAX_LINE_DISTANCE 32767.0
 
-enum {
-    idLineDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idLineTilePropsUBO = idDrawableReservedFragmentOnlyUBO,
-    idLineEvaluatedPropsUBO = drawableReservedUBOCount,
-    lineUBOCount
-};
-
 //
 // Line
 
@@ -112,9 +105,7 @@ struct FragmentStage {
 #endif
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
-                                device const LineSDFDrawableUBO* drawableVector [[buffer(idLineDrawableUBO)]],
-                                device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
 
     device const LineSDFDrawableUBO& drawable = drawableVector[uboIndex];
 
@@ -210,8 +201,6 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const LineSDFTilePropsUBO* tilePropsVector [[buffer(idLineTilePropsUBO)]],
-                            device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]],
                             texture2d<float, access::sample> gradientTexture [[texture(0)]],
                             texture2d<float, access::sample> dashTexture [[texture(1)]],
                             sampler gradientSampler [[sampler(0)]],
@@ -270,13 +259,6 @@ pub(super) const LINE_GRADIENT_SHADER: Msl = Msl {
 // The attribute conveying progress along a line is scaled to [0, 2^15).
 #define MAX_LINE_DISTANCE 32767.0
 
-enum {
-    idLineDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idLineTilePropsUBO = idDrawableReservedFragmentOnlyUBO,
-    idLineEvaluatedPropsUBO = drawableReservedUBOCount,
-    lineUBOCount
-};
-
 //
 // Line
 
@@ -317,9 +299,7 @@ struct FragmentStage {
     #property varying opacity half
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
-                                device const LineGradientDrawableUBO* drawableVector [[buffer(idLineDrawableUBO)]],
-                                device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
 
     device const LineGradientDrawableUBO& drawable = drawableVector[uboIndex];
 
@@ -398,7 +378,6 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]],
                             texture2d<float, access::sample> gradientTexture [[texture(0)]]) {
 #if defined(PROJECTION_GLOBE)
     if (clippedAtAntimeridian(in.tile_x)) {
@@ -446,13 +425,6 @@ pub(super) const LINE_PATTERN_SHADER: Msl = Msl {
         atlas_pos!(msl),
         line_prelude!(),
         r"
-
-enum {
-    idLineDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idLineTilePropsUBO = idDrawableReservedFragmentOnlyUBO,
-    idLineEvaluatedPropsUBO = drawableReservedUBOCount,
-    lineUBOCount
-};
 
 //
 // Line
@@ -502,9 +474,7 @@ struct FragmentStage {
 #endif
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
-                                device const LinePatternDrawableUBO* drawableVector [[buffer(idLineDrawableUBO)]],
-                                device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
 
     device const LinePatternDrawableUBO& drawable = drawableVector[uboIndex];
 
@@ -585,8 +555,6 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const LinePatternTilePropsUBO* tilePropsVector [[buffer(idLineTilePropsUBO)]],
-                            device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]],
                             texture2d<float, access::sample> image0 [[texture(0)]],
                             sampler image0_sampler [[sampler(0)]]) {
 
@@ -677,13 +645,6 @@ pub(super) const LINE_SDF_SHADER: Msl = Msl {
         line_prelude!(),
         r"
 
-enum {
-    idLineDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idLineTilePropsUBO = idDrawableReservedFragmentOnlyUBO,
-    idLineEvaluatedPropsUBO = drawableReservedUBOCount,
-    lineUBOCount
-};
-
 //
 // Line
 
@@ -734,9 +695,7 @@ struct FragmentStage {
 #endif
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
-                                device const LineSDFDrawableUBO* drawableVector [[buffer(idLineDrawableUBO)]],
-                                device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
 
     device const LineSDFDrawableUBO& drawable = drawableVector[uboIndex];
 
@@ -831,8 +790,6 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const LineSDFTilePropsUBO* tilePropsVector [[buffer(idLineTilePropsUBO)]],
-                            device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]],
                             texture2d<float, access::sample> image0 [[texture(0)]],
                             sampler image0_sampler [[sampler(0)]]) {
 
@@ -890,13 +847,6 @@ pub(super) const LINE_SHADER: Msl = Msl {
         line_prelude!(),
         r"
 
-enum {
-    idLineDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idLineTilePropsUBO = idDrawableReservedFragmentOnlyUBO,
-    idLineEvaluatedPropsUBO = drawableReservedUBOCount,
-    lineUBOCount
-};
-
 //
 // Line
 
@@ -939,9 +889,7 @@ struct FragmentStage {
     #property varying opacity float
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
-                                device const LineDrawableUBO* drawableVector [[buffer(idLineDrawableUBO)]],
-                                device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
 
     device const LineDrawableUBO& drawable = drawableVector[uboIndex];
 
@@ -1010,8 +958,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
     };
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 #if defined(PROJECTION_GLOBE)
     if (clippedAtAntimeridian(in.tile_x)) {
         discard_fragment();

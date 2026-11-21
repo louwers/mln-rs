@@ -5,15 +5,7 @@ use mln_gfx::shaders::source::msl::Msl;
 pub(super) const CIRCLE_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r"
-
-enum {
-    idCircleDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idCircleEvaluatedPropsUBO = drawableReservedUBOCount,
-    circleUBOCount
-};
-
-",
+    prelude: "",
     source: r"
 
 struct VertexStage {
@@ -42,9 +34,7 @@ struct FragmentStage {
     #property varying stroke_opacity half
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
-                                device const CircleDrawableUBO* drawableVector [[buffer(idCircleDrawableUBO)]],
-                                device const CircleEvaluatedPropsUBO& props [[buffer(idCircleEvaluatedPropsUBO)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
 
     device const CircleDrawableUBO& drawable = drawableVector[uboIndex];
 
@@ -129,8 +119,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
     };
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const CircleEvaluatedPropsUBO& props [[buffer(idCircleEvaluatedPropsUBO)]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 #if defined(OVERDRAW_INSPECTOR)
     return half4(1.0);
 #endif
