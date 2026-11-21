@@ -16,6 +16,15 @@
 //! `ID_LINE_DASH_TEXTURE`) and a vertex attribute at its attribute id (e.g.
 //! `ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE`). Each backend maps them to its own
 //! slots, groups, descriptor sets or shader locations.
+//!
+//! This is the GPU backend contract. A backend implements [`Gpu`], and a
+//! [`RendererBackend`](crate::RendererBackend) that owns it and lends it;
+//! no registry holds it. A renderer takes the `Gpu` at each call that draws,
+//! on the thread that owns the backend, so a `Gpu` needn't be `Send`. The
+//! renderer adds its registry's shader sources to it
+//! ([`Gpu::add_shader_sources`]), and the backend compiles the programs it
+//! draws from those and its own. The frames of `mln_layers::conformance`
+//! (feature `gpu-conformance`) are what every backend's tests draw alike.
 
 mod ids;
 pub mod validation;

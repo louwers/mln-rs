@@ -34,6 +34,12 @@
 //! that draws into textures of its own before the frame's passes does in
 //! its [`OffscreenPass`](crate::layer::OffscreenPass), with a
 //! [`RenderTarget`].
+//!
+//! The draw services belong to the renderer's thread: the context and the
+//! handles of its stores are neither `Send` nor `Sync`. An entry of a store
+//! stays while a handle to it does, so a draw never names one that went;
+//! once the last handle drops, the renderer destroys the entry, which work
+//! the GPU already recorded can still read.
 
 pub use crate::bucket_geometry::{
     BucketGeometry, bucket_indexes, bucket_vertices, copied_indexes, copied_vertices, derived_vertices, paint_vertices,

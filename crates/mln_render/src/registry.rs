@@ -4,7 +4,8 @@
 //!
 //! An app fills a [`RegistryBuilder`] by explicit calls and builds the
 //! [`Registry`] once. Tile workers in other wasm instances make the same
-//! calls, since they run the app's own module.
+//! calls, since they run the app's own module. Each registration is by
+//! name and fails for a name taken already ([`RegisterError`]).
 
 use std::sync::Arc;
 
@@ -49,6 +50,8 @@ impl RegistryBuilder {
         RegistryBuilder::default()
     }
 
+    /// The expression functions, to add to
+    /// ([`Functions::add`](mln_style::expression::Functions::add)).
     pub fn functions_mut(&mut self) -> &mut Functions {
         &mut self.functions
     }

@@ -9,12 +9,19 @@
 //! languages are a closed set: [`ShaderSource`] is sealed, so a new one is a
 //! change to this crate.
 //!
-//! A backend compiles the engine's own programs from a table of its own, and
-//! every other program from the sources added to it
-//! ([`Gpu::add_shader_sources`](crate::gpu::Gpu::add_shader_sources)). A
-//! [`ShaderSources`] holds a program's sources in any of the languages: a
-//! layer type adds them to a registry, whose renderer adds them to its
-//! `Gpu`, which takes those of its own language.
+//! This is the program and shader source contract. A layer type declares
+//! each program it draws with as a `static` [`Program`], whose buffers,
+//! textures and attributes bind at the ids of
+//! [`shader_defines`](crate::shaders::shader_defines), and gives its
+//! sources in the languages it has them in through a [`ShaderSources`]
+//! (`mln_render`'s `LayerType::add_shader_sources`, which registering the
+//! type calls). A renderer adds its registry's sources to its `Gpu`
+//! ([`Gpu::add_shader_sources`](crate::gpu::Gpu::add_shader_sources)), which
+//! takes those of its own language; a backend compiles the engine's own
+//! programs from a table of its own. The backend compiles each variant of a
+//! program that a draw needs from its source; compiling a program without
+//! a source in its language fails with [`GpuError::Unsupported`]. Sources
+//! are `'static` data, which every thread's renderers share.
 
 pub mod glsl;
 pub mod glsl_es;
