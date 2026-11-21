@@ -79,7 +79,7 @@ fn directive(named: &Named<'_>, role: &str, stage: Stage) -> Result<String, GpuE
     let name = named.name();
     let text = match role {
         "attribute" if stage == Stage::Vertex => {
-            named.flat(0)?;
+            named.words(false, false, false)?;
             let ty = match named.ty() {
                 PropertyType::Float => "vec2",
                 PropertyType::Vec4 if named.integers() => "uvec4",
@@ -88,13 +88,14 @@ fn directive(named: &Named<'_>, role: &str, stage: Stage) -> Result<String, GpuE
             format!("layout(location = {}) in {ty} in_{name};", named.location()?)
         }
         "varying" => {
-            let flat = if named.flat(1)? { "flat " } else { "" };
+            let value = named.value(true)?;
+            let flat = if named.flat { "flat " } else { "" };
             let direction = if stage == Stage::Vertex { "out" } else { "in" };
             let ty = if named.ty() == PropertyType::Float { "float" } else { "vec4" };
-            format!("layout(location = {}) {flat}{direction} {ty} frag_{name};", named.arg(0)?)
+            format!("layout(location = {value}) {flat}{direction} {ty} frag_{name};")
         }
         "pass" if stage == Stage::Vertex => {
-            named.flat(0)?;
+            named.words(false, false, false)?;
             format!("frag_{name} = {};", value(named, stage))
         }
         _ => return Err(GpuError::Invalid(format!("no GLSL property directive {role} for {name}"))),

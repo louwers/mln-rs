@@ -124,15 +124,11 @@ pub fn expand(program: &Program, glsl: &Glsl) -> Result<[String; 2], GpuError> {
 
 fn directive(program: &Program, named: &Named<'_>, role: &str, stage: Stage) -> Result<String, GpuError> {
     let name = named.name();
+    named.words(false, role == "varying", true)?;
     // A last word that is a precision overrides the uniform's.
-    let (args, precision) = match named.args.split_last() {
-        Some((&last, args)) if ["lowp", "mediump", "highp"].contains(&last) => (args, last),
-        _ => (&named.args[..], uniform(program, named)?.precision.glsl_es()),
-    };
-    let flat = match args {
-        [] => false,
-        ["flat"] if role == "varying" => true,
-        _ => return Err(GpuError::Invalid(format!("bad arguments for property {name}: {:?}", named.args))),
+    let precision = match named.precision {
+        Some(precision) => precision,
+        None => uniform(program, named)?.precision.glsl_es(),
     };
     let ty = if named.ty() == PropertyType::Float { "float" } else { "vec4" };
     let local = format!("{precision} {ty} {name} = u_{name};");
@@ -145,7 +141,7 @@ fn directive(program: &Program, named: &Named<'_>, role: &str, stage: Stage) -> 
             )
         }
         "varying" => {
-            let flat = if flat { "flat " } else { "" };
+            let flat = if named.flat { "flat " } else { "" };
             let direction = if stage == Stage::Vertex { "out" } else { "in" };
             per_vertex(named, &format!("{flat}{direction} {precision} {ty} {name};"))
         }

@@ -37,7 +37,7 @@
 use std::fmt::Write as _;
 
 use crate::gfx_types::AttributeDataType;
-use crate::gpu::{GpuError, VertexStep};
+use crate::gpu::GpuError;
 use crate::shaders::block::Block;
 use crate::shaders::program::{Buffer, Program, Property, PropertyType};
 
@@ -58,11 +58,16 @@ pub(crate) struct Named<'a> {
     pub(crate) property: &'a Property,
     /// The location and format of its attribute, if the program has it.
     attribute: Option<(usize, AttributeDataType)>,
-    /// The words after the name, of a directive.
-    pub(crate) args: Vec<&'a str>,
+    /// A directive's word after the name, but `flat` and a precision.
+    value: Option<&'a str>,
+    /// Whether a directive says `flat`, after its value.
+    pub(crate) flat: bool,
+    /// The precision that a directive's last word names: `lowp`, `mediump`
+    /// or `highp`.
+    pub(crate) precision: Option<&'a str>,
 }
 
-impl Named<'_> {
+impl<'a> Named<'a> {
     pub(crate) fn name(&self) -> &str {
         self.property.name
     }
@@ -84,22 +89,18 @@ impl Named<'_> {
         matches!(self.attribute, Some((_, AttributeDataType::UShort4)))
     }
 
-    /// Whether the directive's word after its `count` arguments is `flat`;
-    /// fails if it has other words.
-    pub(crate) fn flat(&self, count: usize) -> Result<bool, GpuError> {
-        match self.args.get(count) {
-            None if self.args.len() == count => Ok(false),
-            Some(&"flat") if self.args.len() == count + 1 => Ok(true),
-            _ => Err(GpuError::Invalid(format!("bad arguments for property {}: {:?}", self.name(), self.args))),
-        }
+    /// The directive's value, which fails if it has none or, unless `flat`,
+    /// says `flat`, or names a precision.
+    pub(crate) fn value(&self, flat: bool) -> Result<&'a str, GpuError> {
+        self.words(true, flat, false)?;
+        Ok(self.value.unwrap_or_default())
     }
 
-    /// The `index`th word after the name.
-    pub(crate) fn arg(&self, index: usize) -> Result<&str, GpuError> {
-        self.args
-            .get(index)
-            .copied()
-            .ok_or_else(|| GpuError::Invalid(format!("missing argument for property {}", self.name())))
+    /// Fails unless the directive has a value if `value` and no other, says
+    /// `flat` only if `flat`, and names a precision only if `precision`.
+    pub(crate) fn words(&self, value: bool, flat: bool, precision: bool) -> Result<(), GpuError> {
+        let fits = self.value.is_some() == value && (flat || !self.flat) && (precision || self.precision.is_none());
+        fits.then_some(()).ok_or_else(|| GpuError::Invalid(format!("bad arguments for property {}", self.name())))
     }
 }
 
@@ -149,13 +150,16 @@ pub(crate) fn expand(
         if mixed && !blocks().any(|block| block.members.iter().any(|member| member.name == mix)) {
             return Err(GpuError::Invalid(format!("{} has no block with {mix}, which mixes {name}", program.name)));
         }
-        let attribute = [VertexStep::Vertex, VertexStep::Instance].into_iter().find_map(|step| {
-            let location = program.location(step, property.attribute)?;
-            let attributes = if step == VertexStep::Vertex { program.attributes } else { program.instance_attributes };
-            let format = attributes.iter().find(|attribute| attribute.id == property.attribute)?.format;
-            Some((location, format))
-        });
-        Ok(Named { property, attribute, args: Vec::new() })
+        // Its attribute's location: its index, among the instance attributes
+        // after the vertex attributes.
+        let attribute = program
+            .attributes
+            .iter()
+            .chain(program.instance_attributes)
+            .enumerate()
+            .find(|(_, attribute)| attribute.id == property.attribute)
+            .map(|(location, attribute)| (location, attribute.format));
+        Ok(Named { property, attribute, value: None, flat: false, precision: None })
     };
     let mut out = String::with_capacity(text.len());
     for line in text.split_inclusive('\n') {
@@ -166,7 +170,20 @@ pub(crate) fn expand(
                 return Err(GpuError::Invalid(format!("bad property directive in {}: {body}", program.name)));
             };
             let mut named = find(name)?;
-            named.args = words.collect();
+            let mut words: Vec<&str> = words.collect();
+            if let Some(&last) = words.last().filter(|last| ["lowp", "mediump", "highp"].contains(last)) {
+                named.precision = Some(last);
+                words.pop();
+            }
+            named.flat = words.last() == Some(&"flat");
+            if named.flat {
+                words.pop();
+            }
+            named.value = match words[..] {
+                [] => None,
+                [value] => Some(value),
+                _ => return Err(GpuError::Invalid(format!("bad property directive in {}: {body}", program.name))),
+            };
             out.push_str(&directive(role, &named)?);
             out.push_str(newline);
         } else if let Some(start) = body.find('$') {

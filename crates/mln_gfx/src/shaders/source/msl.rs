@@ -96,7 +96,7 @@ pub fn expand(program: &Program, msl: &Msl) -> Result<String, GpuError> {
             let name = named.name();
             let text = match role {
                 "attribute" => {
-                    named.flat(0)?;
+                    named.words(false, false, false)?;
                     let ty = match named.ty() {
                         PropertyType::Float => "float2",
                         PropertyType::Vec4 if named.integers() => "ushort4",
@@ -105,11 +105,12 @@ pub fn expand(program: &Program, msl: &Msl) -> Result<String, GpuError> {
                     format!("{ty} {name} [[attribute({})]];", named.location()?)
                 }
                 "varying" => {
-                    let flat = if named.flat(1)? { " [[flat]]" } else { "" };
-                    format!("{} {name}{flat};", named.arg(0)?)
+                    let value = named.value(true)?;
+                    let flat = if named.flat { " [[flat]]" } else { "" };
+                    format!("{value} {name}{flat};")
                 }
                 "pass" if stage == Stage::Vertex => {
-                    named.flat(0)?;
+                    named.words(false, false, false)?;
                     let ty = varyings.iter().find(|(varying, _)| *varying == name).map_or("", |(_, ty)| *ty);
                     let value = value(named, stage);
                     if ty.starts_with("half") {

@@ -90,7 +90,7 @@ fn directive(named: &Named<'_>, role: &str, stage: Stage) -> Result<String, GpuE
     let name = named.name();
     let text = match role {
         "attribute" => {
-            named.flat(0)?;
+            named.words(false, false, false)?;
             let ty = match named.ty() {
                 PropertyType::Float => "vec2<f32>",
                 PropertyType::Vec4 if named.integers() => "vec4<u32>",
@@ -99,12 +99,13 @@ fn directive(named: &Named<'_>, role: &str, stage: Stage) -> Result<String, GpuE
             format!("@location({}) {name}: {ty},", named.location()?)
         }
         "varying" => {
-            let flat = if named.flat(1)? { "@interpolate(flat) " } else { "" };
+            let value = named.value(true)?;
+            let flat = if named.flat { "@interpolate(flat) " } else { "" };
             let ty = if named.ty() == PropertyType::Float { "f32" } else { "vec4<f32>" };
-            format!("@location({}) {flat}{name}: {ty},", named.arg(0)?)
+            format!("@location({value}) {flat}{name}: {ty},")
         }
         "pass" if stage == Stage::Vertex => {
-            named.flat(0)?;
+            named.words(false, false, false)?;
             format!("out.{name} = {};", value(named, stage))
         }
         _ => return Err(GpuError::Invalid(format!("no WGSL property directive {role} for {name}"))),
