@@ -412,16 +412,30 @@ impl TerrainElevation {
     /// Ground `meters` high everywhere on `tile`, a drawn terrain tile that
     /// reads its own DEM tile, Terrarium encoded, and flat off it.
     pub(crate) fn level(tile: OverscaledTileID, meters: f64) -> TerrainElevation {
+        TerrainElevation::shaped(tile, |_| meters)
+    }
+
+    /// Ground on `tile`, a drawn terrain tile that reads its own DEM tile,
+    /// Terrarium encoded, and flat off it, as high in meters as `meters`
+    /// gives at the centers of its DEM pixels, from the tile's uv: linear in
+    /// uv everywhere on the tile where `meters` is.
+    pub(crate) fn shaped(tile: OverscaledTileID, meters: impl Fn(DVec2) -> f64) -> TerrainElevation {
         use mln_util::size::Size;
         use mln_util::tileset::RasterEncoding;
 
-        // Terrarium: r · 256 + g + b / 256 − 32768 meters.
-        let encoded = meters + 32768.0;
-        let (r, g) = ((encoded / 256.0).floor(), encoded.rem_euclid(256.0).floor());
-        let b = ((encoded - r * 256.0 - g) * 256.0).round();
-        let dim = 4;
+        let dim = 64;
         let mut image = PremultipliedImage::new(Size::new(dim + 2, dim + 2));
-        for texel in image.data.as_chunks_mut::<4>().0 {
+        let (mut min, mut max) = (f64::INFINITY, f64::NEG_INFINITY);
+        let width = dim as usize + 2;
+        for (index, texel) in image.data.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+            // The border pixels, outside the tile, at -1 and dim.
+            let pixel = DVec2::new((index % width) as f64, (index / width) as f64);
+            let meters = meters((pixel - 0.5) / f64::from(dim));
+            (min, max) = (min.min(meters), max.max(meters));
+            // Terrarium: r · 256 + g + b / 256 − 32768 meters.
+            let encoded = meters + 32768.0;
+            let (r, g) = ((encoded / 256.0).floor(), encoded.rem_euclid(256.0).floor());
+            let b = ((encoded - r * 256.0 - g) * 256.0).round();
             *texel = [r as u8, g as u8, b as u8, 255];
         }
         let dem = DrawnDem { id: tile, image: Arc::new(image), dim, coords: DemCoords::OWN, min: 0.0, max: 0.0 };
@@ -433,7 +447,7 @@ impl TerrainElevation {
             copies: [(tile.to_unwrapped(), 0)].into_iter().collect(),
             held: Vec::new(),
             dems: [(tile.canonical, 0)].into_iter().collect(),
-            range: Some((meters, meters)),
+            range: Some((min, max)),
             unpack: DemUnpack::of(RasterEncoding::Terrarium),
             exaggeration: 1.0,
         }

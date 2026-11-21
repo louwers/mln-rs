@@ -204,13 +204,37 @@ impl<'a> TileGround<'a> {
     /// shaders read the DEM by; 0 where flat. `None` where no draw of the
     /// tile draws the feature.
     pub(crate) fn height(&self, anchor: Vec2, at: Vec2) -> Option<f64> {
+        Some(self.part(anchor)?.height(at))
+    }
+
+    /// The ground that the draw of the tile that draws a feature whose
+    /// untranslated anchor is `anchor` reads, in tile units of the tile;
+    /// `None` where no draw of the tile draws the feature.
+    pub(crate) fn part(&self, anchor: Vec2) -> Option<PartGround<'_>> {
         let read = self.reads().iter().find(|read| read.holds(anchor))?;
-        let Some(dem) = read.dem else {
-            return Some(0.0);
+        Some(PartGround { read, decode: self.decode })
+    }
+}
+
+/// The ground one draw of a tile reads ([`TileGround::part`]).
+#[derive(Clone, Copy)]
+pub(crate) struct PartGround<'a> {
+    read: &'a GroundRead<'a>,
+    decode: (DemUnpack, f32),
+}
+
+impl PartGround<'_> {
+    /// The height in meters, with the exaggeration, at `at`, in tile units
+    /// of the tile, by the height rule the shaders read the DEM by: clamped
+    /// to the edges of the DEM tile where `at` is past them, as the shaders
+    /// read it; 0 where flat.
+    pub(crate) fn height(&self, at: Vec2) -> f64 {
+        let Some(dem) = self.read.dem else {
+            return 0.0;
         };
         let extent = EXTENT as f32;
         let (unpack, exaggeration) = self.decode;
-        Some(dem_height(&dem.image, dem.dim, read.coords, [at.x / extent, at.y / extent], unpack, exaggeration))
+        dem_height(&dem.image, dem.dim, self.read.coords, [at.x / extent, at.y / extent], unpack, exaggeration)
     }
 }
 

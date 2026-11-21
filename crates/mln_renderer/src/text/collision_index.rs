@@ -12,7 +12,8 @@ use mln_util::intersection_tests::polygon_intersects_polygon;
 use crate::buckets::symbol_bucket::{PlacedSymbol, PlacedSymbolPools};
 use crate::geometry::feature_index::IndexedSubfeature;
 use crate::layout::symbol_projection::{
-    LabelPlaneProjector, LineLabel, LinePlacer, PlacedGlyph, SymbolElevation, TileDistance, tile_skew_vectors,
+    LabelHeight, LabelPlaneProjector, LineLabel, LinePlacer, PlacedGlyph, SymbolElevation, TileDistance,
+    tile_skew_vectors,
 };
 use crate::text::collision_feature::{CollisionBox, CollisionFeature};
 use crate::text::collision_grid::{Aabb, Grid, Shape};
@@ -383,7 +384,8 @@ impl CollisionIndex {
         PlacedFeatureResult { placed: true, offscreen: self.is_offscreen(&collision_boundaries), occluded: false }
     }
 
-    /// Places a line label's collision circles along its line.
+    /// Places a line label's collision circles along its line, each standing
+    /// on the ground under it, as the label's glyphs do.
     fn place_line_feature(
         &self,
         part: &PartCollision<'_>,
@@ -393,8 +395,14 @@ impl CollisionIndex {
     ) -> PlacedFeatureResult {
         let symbol = run.symbol;
         let tile_unit_anchor_point = symbol.anchor_point;
-        // Line labels are never raised.
-        let anchor = self.project_and_get_perspective_ratio(part.tile_projector, tile_unit_anchor_point, 0.0);
+        let Some(height) = part.elevation.along_line(tile_unit_anchor_point) else {
+            return PlacedFeatureResult { placed: false, offscreen: false, occluded: true };
+        };
+        let anchor = self.project_and_get_perspective_ratio(
+            part.tile_projector,
+            tile_unit_anchor_point,
+            height.at(tile_unit_anchor_point) as f32,
+        );
         if anchor.occluded {
             return PlacedFeatureResult { placed: false, offscreen: false, occluded: true };
         }
@@ -412,7 +420,7 @@ impl CollisionIndex {
             run.font_size
         };
         let first_and_last_glyph = LinePlacer::new(part.label_plane)
-            .begin(LineLabel::new(symbol, run.pools), font_size)
+            .begin(LineLabel::new(symbol, run.pools), font_size, height)
             .first_and_last_glyph(false);
 
         let tile_to_viewport = anchor.perspective_ratio * part.pixel_ratio;
@@ -452,7 +460,8 @@ impl CollisionIndex {
                 previous_center = None;
                 continue;
             }
-            let center = self.project_point_with_projector(part.tile_projector, circle.anchor + part.translation);
+            let center =
+                self.project_point_with_projector(part.tile_projector, circle.anchor + part.translation, height);
             let radius = (circle.x2 - circle.x1) / 2.0 * tile_to_viewport;
             // Circles closer than √2 radii to the last one placed are skipped,
             // which thins them as much as can be with small gaps, unless it is
@@ -597,8 +606,14 @@ impl CollisionIndex {
         }
     }
 
-    fn project_point_with_projector(&self, tile_projector: &TileProjector<'_>, point: Vec2) -> Vec2 {
-        let projected = tile_projector.project(&Point::new(f64::from(point.x), f64::from(point.y)), 0.0);
+    /// Projects `point`, standing at `height`, to the viewport.
+    fn project_point_with_projector(
+        &self,
+        tile_projector: &TileProjector<'_>,
+        point: Vec2,
+        height: LabelHeight<'_>,
+    ) -> Vec2 {
+        let projected = tile_projector.project(&Point::new(f64::from(point.x), f64::from(point.y)), height.at(point));
         let size = self.view.size();
         let viewport_padding = f64::from(self.viewport_padding);
         Vec2::new(
@@ -972,5 +987,110 @@ mod tests {
         let placed = index.place_feature(&part, &feature(0), &off, &run, None, &mut projected);
         assert!(!placed.placed && placed.occluded, "{placed:?}");
         assert_eq!(projected, []);
+    }
+
+    /// A line label's collision circles over sloping ground are centered
+    /// where the camera sees the line on the ground under each circle, far
+    /// from where it would see it at sea level. A label whose anchor no draw
+    /// of its tile draws gets none.
+    #[test]
+    fn a_line_labels_circles_stand_on_the_ground_under_them() {
+        use mln_tile_id::{CanonicalTileID, OverscaledTileID};
+        use mln_util::geo::LatLng;
+
+        use crate::buckets::symbol_bucket::PlacedSymbol;
+        use crate::layout::symbol_instance::WritingModes;
+        use crate::terrain::{TerrainElevation, TileFeatures};
+
+        let tile = OverscaledTileID::new(12, 0, CanonicalTileID::new(12, 2000, 1500));
+        // Rising 3,000 m from the tile's west edge to its east one.
+        let sloped = |tile_point: Vec2| 200.0 + 3000.0 * f64::from(tile_point.x) / f64::from(EXTENT);
+        let elevation = TerrainElevation::shaped(tile, |uv| 200.0 + 3000.0 * uv.x);
+        let ground = elevation.ground(&tile, TileFeatures::Anchored);
+        let zoom = 12.5;
+        let mut state = mln_map_types::TransformState::default();
+        state.set_size(Size::new(512, 512));
+        let n = std::f64::consts::PI * (1.0 - 2.0 * 1500.5 / 4096.0);
+        let center = LatLng::new(n.sinh().atan().to_degrees(), 2000.5 / 4096.0 * 360.0 - 180.0).unwrap();
+        state.set_lat_lng_zoom(&center, zoom);
+        state.set_pitch(55f64.to_radians());
+        state.set_angle(0.4);
+        let view = state.view().clone();
+        let index = CollisionIndex::new(&view, MapMode::Continuous);
+        let tile_projector = TileProjector::new(&view, &tile.to_unwrapped());
+        let pixels_to_tile_units = tile.to_unwrapped().pixels_to_tile_units(1.0, zoom as f32);
+        let label_plane = LabelPlaneProjector::new(&tile_projector, false, true, pixels_to_tile_units, Vec2::ZERO);
+
+        // A label along a line west to east through the tile, with a circle
+        // every 200 tile units.
+        let mut pools = PlacedSymbolPools::default();
+        let line = [Point::new(500, 4000), Point::new(7600, 4000)];
+        let place = |anchor: Vec2, pools: &mut PlacedSymbolPools| {
+            let symbol = PlacedSymbol {
+                anchor_point: anchor,
+                segment: 0,
+                lower_size: 16.0,
+                upper_size: 16.0,
+                line_offset: [0.0; 2],
+                writing_modes: WritingModes { horizontal: true, vertical: false },
+                line: PoolRange::extend(&mut pools.lines, line),
+                tile_distances: PoolRange::extend(&mut pools.tile_distances, [anchor.x - 500.0, 7600.0 - anchor.x]),
+                glyph_offsets: PoolRange::extend(&mut pools.glyph_offsets, [-60.0, 0.0, 60.0]),
+                start_index: 0,
+                angle: 0.0,
+                height_offset: 0.0,
+                hidden: false,
+            };
+            let boxes: Vec<CollisionBox> = (0..30)
+                .map(|i| {
+                    let x = 1100.0 + 200.0 * i as f32;
+                    CollisionBox::new(Vec2::new(x, 4000.0), -60.0, -60.0, 60.0, 60.0, x - anchor.x)
+                })
+                .collect();
+            (symbol, boxes)
+        };
+        let part = PartCollision {
+            tile_projector: &tile_projector,
+            label_plane: &label_plane,
+            elevation: SymbolElevation::new(Some(&ground), true),
+            translation: Vec2::ZERO,
+            pixel_ratio: 512.0 / 8192.0,
+            scale: 2f32.powf(0.5),
+            overlap_mode: OverlapMode::Always,
+            pitch_with_map: false,
+            rotate_with_map: true,
+            avoid_edges: None,
+            collision_group: None,
+            debug: false,
+        };
+        let seen_at = |tile_point: Vec2, meters: f64| {
+            let point = Point::new(f64::from(tile_point.x), f64::from(tile_point.y));
+            index.to_viewport(&tile_projector.project(&point, meters)).point
+        };
+
+        let along_line = CollisionFeature { along_line: true, ..feature(0) };
+        let (symbol, boxes) = place(Vec2::new(4100.0, 4000.0), &mut pools);
+        let run = LabelRun { symbol: &symbol, pools: &pools, font_size: 16.0 };
+        let mut projected = Vec::new();
+        let placed = index.place_feature(&part, &along_line, &boxes, &run, None, &mut projected);
+        assert!(placed.placed, "{placed:?}");
+        let mut circles = 0;
+        for (circle, shape) in boxes.iter().zip(&projected) {
+            let Some(Shape::Circle { center, .. }) = shape else { continue };
+            circles += 1;
+            let seen = seen_at(circle.anchor, sloped(circle.anchor));
+            assert!(center.distance(seen) <= 0.5, "the circle at {} is at {center}, seen at {seen}", circle.anchor);
+            let at_sea_level = seen_at(circle.anchor, 0.0);
+            assert!(center.distance(at_sea_level) > 20.0, "{center} is {at_sea_level} at sea level");
+        }
+        assert!(circles >= 3, "{circles} circles");
+
+        // An anchor past the tile's edge, which a neighbour draws.
+        let (symbol, boxes) = place(Vec2::new(-100.0, 4000.0), &mut pools);
+        let run = LabelRun { symbol: &symbol, pools: &pools, font_size: 16.0 };
+        let mut projected = Vec::new();
+        let placed = index.place_feature(&part, &along_line, &boxes, &run, None, &mut projected);
+        assert!(!placed.placed && placed.occluded, "{placed:?}");
+        assert!(projected.iter().all(Option::is_none), "{projected:?}");
     }
 }

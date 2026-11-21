@@ -90,8 +90,12 @@
 //!   label at a variable anchor, where the label draws, and places again in
 //!   the update that brings a new ground ([`RenderTerrain::ground`]), even
 //!   with the camera at rest; a label that no draw of its tile draws, its
-//!   anchor off every part, has no box. Labels along lines still lay out and
-//!   collide at sea level, and collision debug boxes draw there. A polygon's roof and base
+//!   anchor off every part, has no box. A label along a line stands on the
+//!   ground with no height offset: each update lays its glyphs out along its
+//!   line as it stands on the ground under each vertex, and placement
+//!   collides each of its circles at the ground under it, both reading the
+//!   part that draws its anchor, clamped to its DEM tile past its edges.
+//!   Collision debug boxes still draw at sea level. A polygon's roof and base
 //!   rise by the ground at its centroid. Where its base is at or below 0, each
 //!   end of a wall's foot sinks to 10 m below the lower of the ground at the
 //!   centroid and the ground under that end, so that no gap shows under a
@@ -300,7 +304,7 @@ pub(crate) use cover::{ElevationRanges, TerrainCover};
 pub(crate) use cover::{REMEMBERED_RANGES, TerrainTile, terrain_tile_size};
 pub(crate) use drapes::Drapes;
 pub(crate) use elevation::TerrainElevation;
-pub(crate) use ground::{GroundBinding, GroundBindings, TileFeatures, TileGround, write_projection};
+pub(crate) use ground::{GroundBinding, GroundBindings, PartGround, TileFeatures, TileGround, write_projection};
 use mln_gfx::gpu::Gpu;
 #[cfg(doc)]
 use mln_gfx::projection_variant::ProjectionVariant;
