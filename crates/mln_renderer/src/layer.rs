@@ -50,8 +50,8 @@
 //! renderer ([`LayerHost`]). The engine asks for each, and does without it
 //! for a type that has none. A type can also place its layers' contents
 //! across tiles, where they collide with nothing placed before them
-//! ([`LayerType::PLACEMENT`]), which is
-//! [unstable](crate::placement).
+//! (`LayerType::PLACEMENT`), which is unstable and hidden from these docs
+//! (`mln_renderer::placement`).
 //!
 //! The types a layer type draws with, which the hooks name, are the
 //! [draw services](crate::draw). The frame's [`Atlases`] of dash and
@@ -269,6 +269,7 @@ pub trait LayerType: StyleLayerType {
     /// layers of the type. Placement changes such a layer's buckets where
     /// they are: a tile that fades out keeps drawing the layer, and a
     /// tile's copy for another world copy leaves its buckets out.
+    #[doc(hidden)]
     const PLACEMENT: Option<NewPlacement<Self>> = None;
 }
 
@@ -442,9 +443,11 @@ pub struct UpdateContext<'a, 'f, T: LayerType> {
 }
 
 impl<T: LayerType> UpdateContext<'_, '_, T> {
-    /// The key that the layer's placement finds `tile`'s bucket by among
-    /// the frame's tiles ([`PlacementBuckets`](crate::placement::PlacementBuckets)),
-    /// for a tile that shows the layer a bucket of its layout.
+    /// Unstable: the key that the layer's placement finds `tile`'s bucket
+    /// by among the frame's tiles
+    /// ([`PlacementBuckets`](crate::placement::PlacementBuckets)), for a tile
+    /// that shows the layer a bucket of its layout.
+    #[doc(hidden)]
     #[must_use]
     pub fn bucket_key(&self, tile: FrameTile<'_, T>) -> Option<BucketKey> {
         Some(BucketKey {

@@ -375,7 +375,7 @@ impl RenderOrchestrator {
         self.update_render_tiles(&frame, &mut changed_buckets);
         self.update_layer_tiles(update_parameters, &mut frame);
 
-        frame.symbols_started = Instant::now();
+        frame.placement_started = Instant::now();
         self.place(update_parameters, &mut frame);
 
         if !frame.needs_repaint && frame.loaded {
