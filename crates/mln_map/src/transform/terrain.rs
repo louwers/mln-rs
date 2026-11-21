@@ -191,7 +191,7 @@ impl Transform {
                 (altitude, Some(elevation.min_at(center).unwrap_or(0.0)))
             }
             _ if self.view().terrain_min_elevation().is_some() => (self.clamped_to_ground.then_some(0.0), None),
-            _ => return false,
+            _ => return lifted,
         };
         let ground = |view: &View| (view.terrain_min_elevation(), view.center_altitude());
         let before = ground(self.view());

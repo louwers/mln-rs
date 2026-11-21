@@ -564,3 +564,24 @@ fn a_clamp_turned_on_again_mid_gesture_holds_the_altitude_then() {
     step(&mut map);
     assert_eq!(lifted, map.transform_state().view().center_altitude(), "the gesture holds the altitude it has");
 }
+
+/// A gesture over a clamped center that the terrain lifts before the
+/// renderer drew any ground, to keep the eye above sea level, reports that
+/// the view changed.
+#[test]
+fn a_lift_before_the_first_ground_reports_the_change() {
+    let mut transform = Transform::new(ConstrainMode::HeightOnly, ViewportMode::Default);
+    transform.resize(Size::new(512, 512)).unwrap();
+    // A flat map's eye 3000 m under the sea, then terrain that hasn't drawn.
+    transform.jump_to(&CameraOptions {
+        center: Some(start()),
+        zoom: Some(16.0),
+        center_altitude: Some(-3000.0),
+        ..Default::default()
+    });
+    assert!(transform.view().eye_position().z < 0.0);
+    transform.set_terrain(Some(TerrainGround { elevation: None, clamped: true }));
+    transform.set_gesture_in_progress(true);
+    assert!(transform.follow_terrain(), "the lift changed the view");
+    assert!(transform.view().eye_position().z >= -1e-6, "the eye at {} m", transform.view().eye_position().z);
+}
