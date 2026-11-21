@@ -1,11 +1,5 @@
 //! The registrations that a runtime, its renderers and its tile workers
-//! share: the expression functions, the layer types and their programs'
-//! shader sources, and the source types.
-//!
-//! An app fills a [`RegistryBuilder`] by explicit calls and builds the
-//! [`Registry`] once. Tile workers in other wasm instances make the same
-//! calls, since they run the app's own module. Each registration is by
-//! name and fails for a name taken already ([`RegisterError`]).
+//! share.
 
 use std::sync::Arc;
 
@@ -24,7 +18,13 @@ use crate::placement::ErasedPlacement;
 use crate::render_tile::FindView;
 use crate::source::SourceType;
 
-/// What a [`Registry`] is built from.
+/// What a [`Registry`] is built from: the expression functions, the layer
+/// types and their programs' shader sources, and the source types.
+///
+/// An app fills a builder by explicit calls and builds the [`Registry`]
+/// once. Tile workers in other wasm instances make the same calls, since
+/// they run the app's own module. Each registration is by name and fails
+/// for a name taken already ([`RegisterError`]).
 #[derive(Default)]
 pub struct RegistryBuilder {
     functions: Functions,
