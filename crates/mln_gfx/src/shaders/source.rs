@@ -12,12 +12,13 @@
 //! This is the program and shader source contract. A layer type declares
 //! each program it draws with as a `static` [`Program`], whose buffers,
 //! textures and attributes bind at the ids of
-//! [`shader_defines`](crate::shaders::shader_defines): blocks below
+//! [`shader_defines`](crate::shaders::shader_defines): uniform blocks below
 //! `MAX_UBO_COUNT_PER_SHADER`, the frame's global ones at `ID_GLOBAL_*`, a
 //! draw's own at the drawable-reserved ids (`ID_DRAWABLE_RESERVED_*`,
 //! `ID_PROJECTION_UBO`) and the layer's from `DRAWABLE_RESERVED_UBO_COUNT`
-//! on, and textures and attributes below `MAX_TEXTURE_COUNT_PER_SHADER` and
-//! `MAX_ATTRIBUTE_COUNT_PER_SHADER`. The per-layer ids (`ID_FILL_*`,
+//! on; vertex buffers that the shader reads as storage at and past
+//! `MAX_UBO_COUNT_PER_SHADER`; and textures and attributes below
+//! `MAX_TEXTURE_COUNT_PER_SHADER` and `MAX_ATTRIBUTE_COUNT_PER_SHADER`. The per-layer ids (`ID_FILL_*`,
 //! `ID_LINE_*`, ...) are the built-in layer types' choices within those
 //! ranges. The type gives its sources in the languages it has them in through a [`ShaderSources`]
 //! (`mln_render`'s `LayerType::add_shader_sources`, which registering the

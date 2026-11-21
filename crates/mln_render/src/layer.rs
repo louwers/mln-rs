@@ -55,15 +55,20 @@
 //! (`LayerType::PLACEMENT`), which is unstable and hidden from these docs
 //! (`mln_render::placement`).
 //!
-//! The engine runs the hooks one at a time on the renderer's thread, but
-//! for a tile's layout ([`LayerType::layout_can_need_dependencies`],
+//! [`LayerType::add_shader_sources`] runs once, when the type registers,
+//! on the thread that registers it. The engine runs the other hooks one at
+//! a time on the renderer's thread, but for a tile's layout
+//! ([`LayerType::layout_can_need_dependencies`],
 //! [`LayerType::create_layout`] and the [`Layout`]), which runs with the
-//! tile's other work on a tile worker. The layer's values go to the worker
-//! and its bucket comes back through the worker codec (`mln_wire::Wire`),
-//! between the wasm instances of a browser build too: the layout and the
-//! bucket are `Send`, and the bucket and the style half's property sets
-//! implement `Wire`, which is unstable (`mln_render::unstable`). A layer's [`State`](LayerType::State) and
-//! [`Drawing`](LayerType::Drawing) stay on the renderer's thread.
+//! tile's other work: on a tile worker, or on the renderer's thread for a
+//! source whose updates are synchronous. So the layout and the bucket are
+//! `Send`. A native tile worker hands the bucket back as it is. A browser
+//! build's tile workers are other wasm instances: the layer's values go to
+//! them and the bucket comes back through the worker codec
+//! (`mln_wire::Wire`), so the bucket and the style half's property sets
+//! implement `Wire`, which is unstable (`mln_render::unstable`). A layer's
+//! [`State`](LayerType::State) and [`Drawing`](LayerType::Drawing) stay on
+//! the renderer's thread.
 //!
 //! The types a layer type draws with, which the hooks name, are the
 //! [draw services](crate::draw). The frame's [`Atlases`] of dash and
