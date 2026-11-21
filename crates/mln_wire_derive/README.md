@@ -3,7 +3,8 @@
 > **Warning: this is an internal crate of
 > [mln-rs](https://crates.io/crates/mln-rs).** It is published only because the
 > other mln-rs crates depend on it, and its API can change in any release
-> without notice. mln-rs doesn't re-export it.
+> without notice. Use its derive through `mln_rs::mln_wire::Wire`: mln-rs
+> re-exports `mln-rs-wire`, which re-exports the derive.
 
 `#[derive(Wire)]` for `mln-rs-wire`.
 

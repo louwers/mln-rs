@@ -20,10 +20,10 @@
 //!
 //! The library crates of <https://github.com/louwers/mln-rs> are re-exported
 //! here under their crate names: `mln_rs::mln_style`, `mln_rs::mln_util`,
-//! `mln_rs::mln_geojson`, and so on. They are published as the `mln-rs-*`
-//! packages, which only exist for this crate. The tile worker codec
-//! (`mln_wire`), which a layer type's bucket implements, is not
-//! re-exported.
+//! `mln_rs::mln_geojson`, and so on, with the worker codec that a layer
+//! type's bucket implements, [`mln_wire`], and its `#[derive(Wire)]`. They
+//! are published as the `mln-rs-*` packages, which only exist for this
+//! crate.
 //!
 //! GeoJSON is the `geojson` crate's and feature geometry is `geo_types`'.
 //! Both crates are re-exported.
@@ -92,4 +92,15 @@ pub use mln_vulkan;
 pub use mln_web_host;
 #[cfg(feature = "webgpu")]
 pub use mln_webgpu;
+/// A crate that derives `Wire` through this re-export names it with
+/// `#[wire(crate = ...)]`:
+///
+/// ```
+/// #[derive(mln_rs::mln_wire::Wire)]
+/// #[wire(crate = mln_rs::mln_wire)]
+/// struct Dots {
+///     positions: Vec<[i16; 2]>,
+/// }
+/// ```
+pub use mln_wire;
 pub use polylabel;

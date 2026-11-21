@@ -49,8 +49,9 @@ impl BucketBase {
 /// indices and paint values that a tile's layout made of a layer's features
 /// for the layer's draws.
 ///
-/// Workers build buckets and send them, through the codec, to the render
-/// thread, which owns each one in its tile's contents: it rewrites a
+/// Workers build buckets and send them, through the worker codec
+/// ([`mln_wire::Wire`], which a layer type's bucket implements), to the
+/// render thread, which owns each one in its tile's contents: it rewrites a
 /// bucket's feature-state values ([`update`](Self::update)), moves its
 /// geometry into the stores that the tile's draws share
 /// ([`upload`](Self::upload)), and copies it for the tile's other world

@@ -583,6 +583,7 @@ mln_vec_map.workspace = true
 mln_vulkan = { workspace = true, optional = true }
 mln_web_host.workspace = true
 mln_webgpu = { workspace = true, optional = true }
+mln_wire.workspace = true
 polylabel.workspace = true
 
 [lints]
