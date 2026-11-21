@@ -15,32 +15,6 @@ struct VertexOutput {
     @location(1) pos_b: vec2<f32>,
 };
 
-struct BackgroundPatternDrawableUBO {
-    matrix: mat4x4<f32>,
-    pixel_coord_upper: vec2<f32>,
-    pixel_coord_lower: vec2<f32>,
-    tile_units_to_pixels: f32,
-    pad1: f32,
-    pad2: f32,
-    pad3: f32,
-};
-
-struct BackgroundPatternPropsUBO {
-    pattern_tl_a: vec2<f32>,
-    pattern_br_a: vec2<f32>,
-    pattern_tl_b: vec2<f32>,
-    pattern_br_b: vec2<f32>,
-    pattern_size_a: vec2<f32>,
-    pattern_size_b: vec2<f32>,
-    scale_a: f32,
-    scale_b: f32,
-    mix: f32,
-    opacity: f32,
-    texsize: vec2<f32>,
-    pad1: f32,
-    pad2: f32,
-};
-
 @group(0) @binding(2) var<storage, read> drawableVector: array<BackgroundPatternDrawableUBO>;
 @group(0) @binding(5) var<uniform> props: BackgroundPatternPropsUBO;
 
@@ -80,22 +54,6 @@ fn main(in: VertexInput) -> VertexOutput {
 struct FragmentInput {
     @location(0) pos_a: vec2<f32>,
     @location(1) pos_b: vec2<f32>,
-};
-
-struct BackgroundPatternPropsUBO {
-    pattern_tl_a: vec2<f32>,
-    pattern_br_a: vec2<f32>,
-    pattern_tl_b: vec2<f32>,
-    pattern_br_b: vec2<f32>,
-    pattern_size_a: vec2<f32>,
-    pattern_size_b: vec2<f32>,
-    scale_a: f32,
-    scale_b: f32,
-    mix: f32,
-    opacity: f32,
-    texsize: vec2<f32>,
-    pad1: f32,
-    pad2: f32,
 };
 
 @group(0) @binding(5) var<uniform> props: BackgroundPatternPropsUBO;
@@ -143,19 +101,6 @@ struct VertexOutput {
     @builtin(position) position: vec4<f32>,
 };
 
-struct BackgroundDrawableUBO {
-    matrix: mat4x4<f32>,
-    stride_pad: array<vec4<f32>, 2>,
-};
-
-struct BackgroundPropsUBO {
-    color: vec4<f32>,
-    opacity: f32,
-    pad1: f32,
-    pad2: f32,
-    pad3: f32,
-};
-
 @group(0) @binding(2) var<storage, read> drawableVector: array<BackgroundDrawableUBO>;
 @group(0) @binding(5) var<uniform> props: BackgroundPropsUBO;
 
@@ -172,14 +117,6 @@ fn main(in: VertexInput) -> VertexOutput {
     ),
     fragment: Some(
         r"
-struct BackgroundPropsUBO {
-    color: vec4<f32>,
-    opacity: f32,
-    pad1: f32,
-    pad2: f32,
-    pad3: f32,
-};
-
 @group(0) @binding(5) var<uniform> props: BackgroundPropsUBO;
 
 @fragment

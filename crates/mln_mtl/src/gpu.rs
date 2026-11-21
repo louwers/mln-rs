@@ -50,7 +50,7 @@ use parking_lot::{Condvar, Mutex};
 
 use crate::custom_layer::{AttachmentFormats, CustomLayerEncoder, CustomLayerPass};
 use crate::readback::{buffer_bytes, encode_region_copy};
-use crate::shaders::msl_sources::PRELUDE;
+use crate::shaders::msl_sources::library_source;
 use crate::{Device, Id};
 
 /// The entries of a stage's buffer argument table.
@@ -1348,7 +1348,7 @@ impl Gpu for MetalGpu {
             compile(
                 self.device.device(),
                 program.name,
-                &format!("{PRELUDE}{}{}", source.prelude, source.source),
+                &library_source(program, source),
                 source.vertex_main_function,
                 source.fragment_main_function,
                 key.define_values(),

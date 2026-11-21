@@ -1,9 +1,17 @@
-//! The MSL prelude every shader compiles after.
+//! The MSL prelude every shader compiles after, and how a program's library
+//! composes it with the blocks the program reads and its MSL.
 
-/// The start of every shader's source.
-pub(crate) const PRELUDE: &str = r#"
+use mln_gfx::shaders::program::{Buffer, PROJECTION_BUFFER, Program, VIEW_BUFFER};
+use mln_gfx::shaders::source::msl::{self, Msl};
+
+/// The start of every library.
+const HEADER: &str = "
 #include <metal_stdlib>
 using namespace metal;
+";
+
+/// The helpers every program compiles after.
+const PRELUDE: &str = r"
 
 // OpenGL `mod` is `x-y*floor(x/y)` where `floor` rounds down.
 // Metal `fmod` is `x-y*trunc(x/y)` where `trunc` rounds toward zero.
@@ -58,27 +66,6 @@ inline float2 get_pattern_pos(const float2 pixel_coord_upper, const float2 pixel
 inline float2 atlas_pos(const float2 origin, const float2 offset) {
     return origin + rint(offset * 16777216.0) / 16777216.0;
 }
-
-struct alignas(16) ViewUBO {
-    float2 units_to_pixels;
-    float2 target_size;
-    float camera_to_center_distance;
-    float aspect_ratio;
-    float pixel_ratio;
-    float pad1;
-};
-static_assert(sizeof(ViewUBO) == 32, "wrong size");
-
-struct alignas(16) ProjectionUBO {
-    float4x4 matrix;
-    float4x4 fallback_matrix;
-    float4 tile_mercator_coords;
-    float4 clipping_plane;
-    float transition;
-    float depth_offset;
-    float2 translate;
-};
-static_assert(sizeof(ProjectionUBO) == 176, "wrong size");
 
 // Pole vertices carry these sentinel Y values in their raw position.
 #define GLOBE_POLE_NORTH_Y -32767.5
@@ -219,4 +206,17 @@ enum {
     drawableReservedUBOCount
 };
 
-"#;
+";
+
+/// The source of `program`'s library, of its MSL `source`: the header, the
+/// structs of the engine's blocks, the prelude, the structs of the
+/// program's blocks, each a storage buffer's element padded to its stride,
+/// and the program's own prelude and source.
+pub(crate) fn library_source(program: &Program, source: &Msl) -> String {
+    let declarations = |buffers: &mut dyn Iterator<Item = &Buffer>| -> String {
+        buffers.filter_map(|buffer| Some(msl::declaration(buffer.block()?, buffer.size()))).collect()
+    };
+    let engine = declarations(&mut [&VIEW_BUFFER, &PROJECTION_BUFFER].into_iter());
+    let own = declarations(&mut program.buffers.iter());
+    [HEADER, &engine, PRELUDE, &own, source.prelude, source.source].concat()
+}

@@ -1,10 +1,18 @@
-//! The GLSL ES prelude every shader compiles after, and the declaration of
-//! the view's block, which a stage that reads it compiles after.
+//! The GLSL ES preludes of every shader, and how a stage composes them with
+//! the blocks it reads and the program's GLSL ES.
+
+use std::ptr;
 
 use mln_gfx::gpu::{GpuError, ShaderKey};
-use mln_gfx::shaders::source::glsl_es::Glsl;
+use mln_gfx::shaders::block::Block;
+use mln_gfx::shaders::program::{Buffer, PROJECTION_BUFFER, VIEW_BUFFER};
+use mln_gfx::shaders::source::glsl_es::{self, Glsl};
+use mln_gfx::shaders::source::identifiers;
+use mln_util::hash::HashSet;
 
-const PRELUDE: Glsl = Glsl {
+/// The default precisions of each stage, and on desktop OpenGL, which has
+/// none, no precision qualifiers.
+const PRECISION: Glsl = Glsl {
     vertex: r"#ifdef GL_ES
 precision highp float;
 #else
@@ -22,7 +30,35 @@ precision highp float;
 #endif
 
 #endif
+",
+    fragment: r"#ifdef GL_ES
+#ifdef HIGHP_FRAGMENT
+precision highp float;
+#else
+precision mediump float;
+#endif
+#else
 
+#if !defined(lowp)
+#define lowp
+#endif
+
+#if !defined(mediump)
+#define mediump
+#endif
+
+#if !defined(highp)
+#define highp
+#endif
+
+#endif
+
+",
+};
+
+/// The helpers every stage compiles after.
+const PRELUDE: Glsl = Glsl {
+    vertex: r"
 const float PI = 3.141592653589793;
 
 // Unpack a pair of values that have been packed into a single float.
@@ -75,16 +111,6 @@ vec2 get_pattern_pos(const vec2 pixel_coord_upper, const vec2 pixel_coord_lower,
     vec2 offset = mod(mod(mod(pixel_coord_upper, pattern_size) * 256.0, pattern_size) * 256.0 + pixel_coord_lower, pattern_size);
     return (tile_units_to_pixels * pos + offset) / pattern_size;
 }
-
-layout (std140) uniform ProjectionUBO {
-    highp mat4 u_projection_matrix;
-    highp mat4 u_projection_fallback_matrix;
-    highp vec4 u_projection_tile_mercator_coords;
-    highp vec4 u_projection_clipping_plane;
-    highp float u_projection_transition;
-    highp float u_projection_depth_offset;
-    highp vec2 u_projection_translate;
-};
 
 // Pole vertices carry these sentinel Y values in their raw position.
 #define GLOBE_POLE_NORTH_Y -32767.5
@@ -211,29 +237,7 @@ vec4 projectTileFor3D(vec2 pos, float elevation) {
 
 #endif
 ",
-    fragment: r"#ifdef GL_ES
-#ifdef HIGHP_FRAGMENT
-precision highp float;
-#else
-precision mediump float;
-#endif
-#else
-
-#if !defined(lowp)
-#define lowp
-#endif
-
-#if !defined(mediump)
-#define mediump
-#endif
-
-#if !defined(highp)
-#define highp
-#endif
-
-#endif
-
-out highp vec4 fragColor;
+    fragment: r"out highp vec4 fragColor;
 
 // The atlas texture coordinate of an image's origin plus an offset from it,
 // both normalized by a power-of-two atlas size. Snapping the offset to 2^-24
@@ -246,46 +250,19 @@ highp vec2 atlas_pos(highp vec2 origin, highp vec2 offset) {
 ",
 };
 
-/// The view's block, at `ID_VIEW_UBO`.
-const VIEW_BLOCK: &str = r"layout (std140) uniform ViewUBO {
-    highp vec2 u_units_to_pixels;
-    highp vec2 u_target_size;
-    highp float u_camera_to_center_distance;
-    highp float u_aspect_ratio;
-    highp float u_pixel_ratio;
-    highp float ViewUBO_pad1;
-};
-";
-
-/// The members of [`VIEW_BLOCK`] that a stage reads.
-const VIEW_MEMBERS: [&str; 5] =
-    ["u_units_to_pixels", "u_target_size", "u_camera_to_center_distance", "u_aspect_ratio", "u_pixel_ratio"];
-
-/// Whether `glsl` names one of `names` outside its comments.
-fn reads_any(glsl: &str, names: &[&str]) -> bool {
-    let mut code = String::with_capacity(glsl.len());
-    let mut rest = glsl;
-    while !rest.is_empty() {
-        if let Some(after) = rest.strip_prefix("//") {
-            rest = after.find('\n').map_or("", |end| &after[end..]);
-        } else if let Some(after) = rest.strip_prefix("/*") {
-            rest = after.find("*/").map_or("", |end| &after[end + 2..]);
-            code.push(' ');
-        } else {
-            let c = rest.chars().next().unwrap_or(' ');
-            code.push(c);
-            rest = &rest[c.len_utf8()..];
-        }
-    }
-    code.split(|c: char| !c.is_ascii_alphanumeric() && c != '_').any(|word| names.contains(&word))
-}
-
 /// The vertex and fragment shaders of `key`'s program: `#version 300 es`,
 /// or `#version 330 core` on `desktop` OpenGL, the key's defines, the
-/// prelude of the stage, the view's block where the stage reads it, and the
-/// program's GLSL ES of the stage. A fragment shader defaults to highp
-/// floats on OpenGL ES if `highp_fragment`, and to mediump otherwise. Fails
-/// with [`GpuError::Unsupported`] for a program without GLSL ES.
+/// stage's precisions, the blocks the stage reads, the prelude of the stage
+/// and the program's GLSL ES of the stage. A fragment shader defaults to
+/// highp floats on OpenGL ES if `highp_fragment`, and to mediump otherwise.
+/// Fails with [`GpuError::Unsupported`] for a program without GLSL ES.
+///
+/// WebGL2 rejects a draw whose program has a block without a buffer, so a
+/// stage declares only the blocks it names a member of: the view's, the
+/// program's own, and in the vertex stage the projection block, which the
+/// prelude reads. A fragment shader declares the blocks it shares with the
+/// vertex shader first, in the vertex shader's order, which SwiftShader
+/// needs (maplibre/maplibre-native#4625).
 pub(crate) fn stage_sources(key: &ShaderKey, desktop: bool, highp_fragment: bool) -> Result<[String; 2], GpuError> {
     let program = key.program();
     let source =
@@ -297,11 +274,27 @@ pub(crate) fn stage_sources(key: &ShaderKey, desktop: bool, highp_fragment: bool
     let version = if desktop { "#version 330 core\n" } else { "#version 300 es\n" };
     let defines: String = key.define_values().flat_map(|(name, value)| ["#define ", name, " ", value, "\n"]).collect();
     let fragment_defines = if highp_fragment { "#define HIGHP_FRAGMENT\n" } else { "" };
-    // WebGL2 rejects a draw whose program has a block without a buffer, so
-    // only a stage that reads the view's block declares it.
-    let stage = |stage_defines, prelude, glsl: &str| {
-        let view = if reads_any(glsl, &VIEW_MEMBERS) { VIEW_BLOCK } else { "" };
-        [version, &defines, stage_defines, prelude, view, glsl].concat()
+
+    let blocks: Vec<&Block> = [&VIEW_BUFFER].into_iter().chain(program.buffers).filter_map(Buffer::block).collect();
+    let named = |glsl: &str| -> Vec<&Block> {
+        let identifiers: HashSet<&str> = identifiers(glsl).collect();
+        let reads = |block: &&Block| {
+            let members = block.members.iter().filter(|member| !member.is_padding());
+            members.map(|member| glsl_es::member_name(block, member)).any(|name| identifiers.contains(name.as_str()))
+        };
+        blocks.iter().copied().filter(reads).collect()
     };
-    Ok([stage("", PRELUDE.vertex, source.vertex), stage(fragment_defines, PRELUDE.fragment, source.fragment)])
+    let projection = PROJECTION_BUFFER.block();
+    let vertex_blocks: Vec<&Block> = projection.into_iter().chain(named(source.vertex)).collect();
+    let mut fragment_blocks = named(source.fragment);
+    fragment_blocks
+        .sort_by_key(|block| vertex_blocks.iter().position(|shared| ptr::eq(*shared, *block)).unwrap_or(usize::MAX));
+    let stage = |stage_defines, precision, blocks: &[&Block], prelude, glsl| {
+        let blocks: String = blocks.iter().map(|block| glsl_es::declaration(block)).collect();
+        [version, &defines, stage_defines, precision, &blocks, prelude, glsl].concat()
+    };
+    Ok([
+        stage("", PRECISION.vertex, &vertex_blocks, PRELUDE.vertex, source.vertex),
+        stage(fragment_defines, PRECISION.fragment, &fragment_blocks, PRELUDE.fragment, source.fragment),
+    ])
 }

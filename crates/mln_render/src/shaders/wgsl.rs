@@ -14,12 +14,6 @@ struct VertexOutput {
     @location(0) view_direction: vec3<f32>,
 };
 
-struct AtmospherePropsUBO {
-    inv_view_projection: mat4x4<f32>,
-    camera_position: vec4<f32>,
-    sun_position: vec4<f32>,
-};
-
 @group(0) @binding(5) var<uniform> atmosphere: AtmospherePropsUBO;
 
 @vertex
@@ -39,12 +33,6 @@ fn main(in: VertexInput) -> VertexOutput {
         r"
 struct FragmentInput {
     @location(0) view_direction: vec3<f32>,
-};
-
-struct AtmospherePropsUBO {
-    inv_view_projection: mat4x4<f32>,
-    camera_position: vec4<f32>,
-    sun_position: vec4<f32>,
 };
 
 @group(0) @binding(5) var<uniform> atmosphere: AtmospherePropsUBO;
@@ -227,13 +215,6 @@ fn main(in: VertexInput) -> @builtin(position) vec4<f32> {
     ),
     fragment: Some(
         r"
-struct LayerCompositeUBO {
-    opacity: f32,
-    blend: i32,
-    pad2: f32,
-    pad3: f32,
-};
-
 @group(0) @binding(5) var<uniform> props: LayerCompositeUBO;
 @group(1) @binding(1) var image_texture: texture_2d<f32>;
 @group(1) @binding(2) var backdrop_texture: texture_2d<f32>;
@@ -343,13 +324,6 @@ struct VertexOutput {
 #endif
 };
 
-struct TileDebugPropsUBO {
-    color: vec4<f32>,
-    width: f32,
-    world_width: f32,
-    pad: vec2<f32>,
-};
-
 @group(0) @binding(5) var<uniform> props: TileDebugPropsUBO;
 
 @vertex
@@ -412,13 +386,6 @@ struct FragmentInput {
 #endif
 };
 
-struct TileDebugPropsUBO {
-    color: vec4<f32>,
-    width: f32,
-    world_width: f32,
-    pad: vec2<f32>,
-};
-
 @group(0) @binding(5) var<uniform> props: TileDebugPropsUBO;
 
 @fragment
@@ -471,16 +438,6 @@ fn main(in: VertexInput) -> VertexOutput {
         r"
 struct FragmentInput {
     @location(0) pos: vec2<f32>,
-};
-
-struct SkyPropsUBO {
-    sky_color: vec4<f32>,
-    horizon_color: vec4<f32>,
-    horizon: vec2<f32>,
-    horizon_normal: vec2<f32>,
-    viewport_size: vec2<f32>,
-    sky_horizon_blend: f32,
-    sky_blend: f32,
 };
 
 @group(0) @binding(5) var<uniform> sky: SkyPropsUBO;

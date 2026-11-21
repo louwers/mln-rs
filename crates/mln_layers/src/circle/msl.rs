@@ -5,7 +5,7 @@ use mln_gfx::shaders::source::msl::Msl;
 pub(super) const CIRCLE_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
+    prelude: r"
 
 enum {
     idCircleDrawableUBO = idDrawableReservedVertexOnlyUBO,
@@ -13,38 +13,7 @@ enum {
     circleUBOCount
 };
 
-struct alignas(16) CircleDrawableUBO {
-    float4x4 matrix;
-    float2 extrude_scale;
-    float color_t;
-    float radius_t;
-    float blur_t;
-    float opacity_t;
-    float stroke_color_t;
-    float stroke_width_t;
-    float stroke_opacity_t;
-    float globe_extrude_scale;
-    float pad2;
-    float pad3;
-};
-static_assert(sizeof(CircleDrawableUBO) == 112, "wrong size");
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) CircleEvaluatedPropsUBO {
-    float4 color;
-    float4 stroke_color;
-    float radius;
-    float blur;
-    float opacity;
-    float stroke_width;
-    float stroke_opacity;
-    int scale_with_map;
-    int pitch_with_map;
-    float pad1;
-};
-static_assert(sizeof(CircleEvaluatedPropsUBO) == 64, "wrong size");
-
-"#,
+",
     source: r"
 
 struct VertexStage {

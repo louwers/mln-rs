@@ -102,19 +102,6 @@ layout(push_constant) uniform Constants {
     int ubo_index;
 } constant;
 
-struct LineDrawableUBO {
-    mat4 matrix;
-    float ratio;
-    float color_t;
-    float blur_t;
-    float opacity_t;
-    float gapwidth_t;
-    float offset_t;
-    float width_t;
-    float pad1;
-    vec4 stride_pad[2];
-};
-
 layout(std140, set = LAYER_SET_INDEX, binding = idLineDrawableUBO) readonly buffer LineDrawableUBOVector {
     LineDrawableUBO drawable_ubo[];
 } drawableVector;
@@ -123,17 +110,9 @@ layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer
     ProjectionUBO projection_ubo[];
 } projectionVector;
 
-layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEvaluatedPropsUBO {
-    vec4 color;
-    float blur;
-    float opacity;
-    float gapwidth;
-    float offset;
-    float width;
-    float floorwidth;
-    float pad0;
-    float pad1;
-} props;
+layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEvaluatedPropsUBOBlock {
+    LineEvaluatedPropsUBO props;
+};
 
 layout(location = 0) out vec2 frag_normal;
 layout(location = 1) out vec2 frag_width2;
@@ -262,17 +241,9 @@ layout(location = 5) in float frag_opacity;
 
 layout(location = 0) out vec4 out_color;
 
-layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEvaluatedPropsUBO {
-    vec4 color;
-    float blur;
-    float opacity;
-    float gapwidth;
-    float offset;
-    float width;
-    float floorwidth;
-    float pad0;
-    float pad1;
-} props;
+layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEvaluatedPropsUBOBlock {
+    LineEvaluatedPropsUBO props;
+};
 
 #ifdef PROJECTION_GLOBE
 layout(location = 6) in float frag_tile_x;
@@ -356,19 +327,6 @@ layout(push_constant) uniform Constants {
     int ubo_index;
 } constant;
 
-struct LineGradientDrawableUBO {
-    mat4 matrix;
-    float ratio;
-    float blur_t;
-    float opacity_t;
-    float gapwidth_t;
-    float offset_t;
-    float width_t;
-    float pad1;
-    float pad2;
-    vec4 stride_pad[2];
-};
-
 layout(std140, set = LAYER_SET_INDEX, binding = idLineDrawableUBO) readonly buffer LineGradientDrawableUBOVector {
     LineGradientDrawableUBO drawable_ubo[];
 } drawableVector;
@@ -377,17 +335,9 @@ layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer
     ProjectionUBO projection_ubo[];
 } projectionVector;
 
-layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEvaluatedPropsUBO {
-    vec4 color;
-    float blur;
-    float opacity;
-    float gapwidth;
-    float offset;
-    float width;
-    float floorwidth;
-    float pad0;
-    float pad1;
-} props;
+layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEvaluatedPropsUBOBlock {
+    LineEvaluatedPropsUBO props;
+};
 
 layout(location = 0) out vec2 frag_normal;
 layout(location = 1) out vec2 frag_width2;
@@ -510,17 +460,9 @@ layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform 
 
 layout(location = 0) out vec4 out_color;
 
-layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEvaluatedPropsUBO {
-    vec4 color;
-    float blur;
-    float opacity;
-    float gapwidth;
-    float offset;
-    float width;
-    float floorwidth;
-    float pad0;
-    float pad1;
-} props;
+layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEvaluatedPropsUBOBlock {
+    LineEvaluatedPropsUBO props;
+};
 
 #ifdef PROJECTION_GLOBE
 layout(location = 6) in float frag_tile_x;
@@ -610,23 +552,6 @@ layout(push_constant) uniform Constants {
     int ubo_index;
 } constant;
 
-struct LinePatternDrawableUBO {
-    mat4 matrix;
-    float ratio;
-    float blur_t;
-    float opacity_t;
-    float gapwidth_t;
-    float offset_t;
-    float width_t;
-    float pattern_from_t;
-    float pattern_to_t;
-    float floorwidth_t;
-    float pad1;
-    float pad2;
-    float pad3;
-    vec4 stride_pad[1];
-};
-
 layout(std140, set = LAYER_SET_INDEX, binding = idLineDrawableUBO) readonly buffer LinePatternDrawableUBOVector {
     LinePatternDrawableUBO drawable_ubo[];
 } drawableVector;
@@ -635,17 +560,9 @@ layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer
     ProjectionUBO projection_ubo[];
 } projectionVector;
 
-layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEvaluatedPropsUBO {
-    vec4 color;
-    float blur;
-    float opacity;
-    float gapwidth;
-    float offset;
-    float width;
-    float floorwidth;
-    float pad0;
-    float pad1;
-} props;
+layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEvaluatedPropsUBOBlock {
+    LineEvaluatedPropsUBO props;
+};
 
 layout(location = 0) out vec2 frag_normal;
 layout(location = 1) out vec2 frag_width2;
@@ -803,30 +720,13 @@ layout(push_constant) uniform Constants {
     int ubo_index;
 } constant;
 
-struct LinePatternTilePropsUBO {
-    vec4 pattern_from;
-    vec4 pattern_to;
-    vec4 scale;
-    vec2 texsize;
-    float fade;
-    float pad1;
-};
-
 layout(std140, set = LAYER_SET_INDEX, binding = idLineTilePropsUBO) readonly buffer LinePatternTilePropertiesUBOVector {
     LinePatternTilePropsUBO tile_props_ubo[];
 } tilePropsVector;
 
-layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEvaluatedPropsUBO {
-    vec4 color;
-    float blur;
-    float opacity;
-    float gapwidth;
-    float offset;
-    float width;
-    float floorwidth;
-    float pad0;
-    float pad1;
-} props;
+layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEvaluatedPropsUBOBlock {
+    LineEvaluatedPropsUBO props;
+};
 
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image0_texture;
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image0_sampler;
@@ -980,24 +880,6 @@ layout(push_constant) uniform Constants {
     int ubo_index;
 } constant;
 
-struct LineSDFDrawableUBO {
-    mat4 matrix;
-    vec2 patternscale_a;
-    vec2 patternscale_b;
-    float tex_y_a;
-    float tex_y_b;
-    float ratio;
-    float color_t;
-    float blur_t;
-    float opacity_t;
-    float gapwidth_t;
-    float offset_t;
-    float width_t;
-    float floorwidth_t;
-    float atlas_height;
-    float pad2;
-};
-
 layout(std140, set = LAYER_SET_INDEX, binding = idLineDrawableUBO) readonly buffer LineSDFDrawableUBOVector {
     LineSDFDrawableUBO drawable_ubo[];
 } drawableVector;
@@ -1006,17 +888,9 @@ layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer
     ProjectionUBO projection_ubo[];
 } projectionVector;
 
-layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEvaluatedPropsUBO {
-    vec4 color;
-    float blur;
-    float opacity;
-    float gapwidth;
-    float offset;
-    float width;
-    float floorwidth;
-    float pad0;
-    float pad1;
-} props;
+layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEvaluatedPropsUBOBlock {
+    LineEvaluatedPropsUBO props;
+};
 
 layout(location = 0) out vec2 frag_normal;
 layout(location = 1) out vec2 frag_width2;
@@ -1190,29 +1064,13 @@ layout(push_constant) uniform Constants {
     int ubo_index;
 } constant;
 
-struct LineSDFTilePropsUBO {
-    float sdfgamma;
-    float mix;
-    float pad1;
-    float pad2;
-    vec4 stride_pad[3];
-};
-
 layout(std140, set = LAYER_SET_INDEX, binding = idLineTilePropsUBO) readonly buffer LineSDFTilePropsUBOVector {
     LineSDFTilePropsUBO tile_props_ubo[];
 } tilePropsVector;
 
-layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEvaluatedPropsUBO {
-    vec4 color;
-    float blur;
-    float opacity;
-    float gapwidth;
-    float offset;
-    float width;
-    float floorwidth;
-    float pad0;
-    float pad1;
-} props;
+layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEvaluatedPropsUBOBlock {
+    LineEvaluatedPropsUBO props;
+};
 
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image0_texture;
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image0_sampler;
@@ -1328,24 +1186,6 @@ layout(push_constant) uniform Constants {
     int ubo_index;
 } constant;
 
-struct LineSDFDrawableUBO {
-    mat4 matrix;
-    vec2 patternscale_a;
-    vec2 patternscale_b;
-    float tex_y_a;
-    float tex_y_b;
-    float ratio;
-    float color_t;
-    float blur_t;
-    float opacity_t;
-    float gapwidth_t;
-    float offset_t;
-    float width_t;
-    float floorwidth_t;
-    float atlas_height;
-    float pad2;
-};
-
 layout(std140, set = LAYER_SET_INDEX, binding = idLineDrawableUBO) readonly buffer LineSDFDrawableUBOVector {
     LineSDFDrawableUBO drawable_ubo[];
 } drawableVector;
@@ -1354,17 +1194,9 @@ layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer
     ProjectionUBO projection_ubo[];
 } projectionVector;
 
-layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEvaluatedPropsUBO {
-    vec4 color;
-    float blur;
-    float opacity;
-    float gapwidth;
-    float offset;
-    float width;
-    float floorwidth;
-    float pad0;
-    float pad1;
-} props;
+layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEvaluatedPropsUBOBlock {
+    LineEvaluatedPropsUBO props;
+};
 
 layout(location = 0) out vec2 frag_normal;
 layout(location = 1) out vec2 frag_width2;
@@ -1537,29 +1369,13 @@ layout(push_constant) uniform Constants {
     int ubo_index;
 } constant;
 
-struct LineSDFTilePropsUBO {
-    float sdfgamma;
-    float mix;
-    float pad1;
-    float pad2;
-    vec4 stride_pad[3];
-};
-
 layout(std140, set = LAYER_SET_INDEX, binding = idLineTilePropsUBO) readonly buffer LineSDFTilePropsUBOVector {
     LineSDFTilePropsUBO tile_props_ubo[];
 } tilePropsVector;
 
-layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEvaluatedPropsUBO {
-    vec4 color;
-    float blur;
-    float opacity;
-    float gapwidth;
-    float offset;
-    float width;
-    float floorwidth;
-    float pad0;
-    float pad1;
-} props;
+layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEvaluatedPropsUBOBlock {
+    LineEvaluatedPropsUBO props;
+};
 
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image0_texture;
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image0_sampler;

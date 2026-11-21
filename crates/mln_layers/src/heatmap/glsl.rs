@@ -35,14 +35,6 @@ layout(push_constant) uniform Constants {
     int ubo_index;
 } constant;
 
-struct HeatmapDrawableUBO {
-    mat4 matrix;
-    float extrude_scale;
-    float weight_t;
-    float radius_t;
-    float globe_extrude_scale;
-};
-
 layout(std140, set = LAYER_SET_INDEX, binding = idHeatmapDrawableUBO) readonly buffer HeatmapDrawableUBOVector {
     HeatmapDrawableUBO drawable_ubo[];
 } drawableVector;
@@ -51,12 +43,9 @@ layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer
     ProjectionUBO projection_ubo[];
 } projectionVector;
 
-layout(set = LAYER_SET_INDEX, binding = idHeatmapEvaluatedPropsUBO) uniform HeatmapEvaluatedPropsUBO {
-    float weight;
-    float radius;
-    float intensity;
-    float padding;
-} props;
+layout(set = LAYER_SET_INDEX, binding = idHeatmapEvaluatedPropsUBO) uniform HeatmapEvaluatedPropsUBOBlock {
+    HeatmapEvaluatedPropsUBO props;
+};
 
 #if !defined(HAS_UNIFORM_u_weight)
 layout(location = 0) out float frag_weight;
@@ -130,12 +119,9 @@ layout(location = 1) in vec2 frag_extrude;
 
 layout(location = 0) out vec4 out_color;
 
-layout(set = LAYER_SET_INDEX, binding = idHeatmapEvaluatedPropsUBO) uniform HeatmapEvaluatedPropsUBO {
-    float weight;
-    float radius;
-    float intensity;
-    float padding;
-} props;
+layout(set = LAYER_SET_INDEX, binding = idHeatmapEvaluatedPropsUBO) uniform HeatmapEvaluatedPropsUBOBlock {
+    HeatmapEvaluatedPropsUBO props;
+};
 
 void main() {
 
@@ -166,13 +152,9 @@ pub(super) const HEATMAP_TEXTURE_SHADER: Glsl = Glsl {
 
 layout(location = 0) in ivec2 in_position;
 
-layout(set = LAYER_SET_INDEX, binding = idHeatmapTexturePropsUBO) uniform HeatmapTexturePropsUBO {
-    mat4 matrix;
-    float opacity;
-    float pad1;
-    float pad2;
-    float pad3;
-} props;
+layout(set = LAYER_SET_INDEX, binding = idHeatmapTexturePropsUBO) uniform HeatmapTexturePropsUBOBlock {
+    HeatmapTexturePropsUBO props;
+};
 
 layout(location = 0) out vec2 frag_position;
 
@@ -188,13 +170,9 @@ void main() {
 layout(location = 0) in vec2 frag_position;
 layout(location = 0) out vec4 out_color;
 
-layout(set = LAYER_SET_INDEX, binding = idHeatmapTexturePropsUBO) uniform HeatmapTexturePropsUBO {
-    mat4 matrix;
-    float opacity;
-    float pad1;
-    float pad2;
-    float pad3;
-} props;
+layout(set = LAYER_SET_INDEX, binding = idHeatmapTexturePropsUBO) uniform HeatmapTexturePropsUBOBlock {
+    HeatmapTexturePropsUBO props;
+};
 
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image_texture;
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image_sampler;

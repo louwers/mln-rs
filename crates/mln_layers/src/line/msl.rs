@@ -49,7 +49,7 @@ pub(super) const LINE_GRADIENT_SDF_SHADER: Msl = Msl {
     fragment_main_function: r"fragmentMain",
     prelude: concat!(
         line_prelude!(),
-        r#"
+        r"
 
 // The attribute conveying progress along a line is scaled to [0, 2^15).
 #define MAX_LINE_DISTANCE 32767.0
@@ -64,126 +64,16 @@ enum {
 //
 // Line
 
-struct alignas(16) LineDrawableUBO {
-    float4x4 matrix;
-    float ratio;
-    float color_t;
-    float blur_t;
-    float opacity_t;
-    float gapwidth_t;
-    float offset_t;
-    float width_t;
-    float pad1;
-    float4 stride_pad[2];
-};
-static_assert(sizeof(LineDrawableUBO) == 128, "wrong size");
-
 //
 // Line gradient
-
-struct alignas(16) LineGradientDrawableUBO {
-    float4x4 matrix;
-    float ratio;
-    float blur_t;
-    float opacity_t;
-    float gapwidth_t;
-    float offset_t;
-    float width_t;
-    float pad1;
-    float pad2;
-    float4 stride_pad[2];
-};
-static_assert(sizeof(LineGradientDrawableUBO) == 128, "wrong size");
 
 //
 // Line pattern
 
-struct alignas(16) LinePatternDrawableUBO {
-    float4x4 matrix;
-    float ratio;
-    float blur_t;
-    float opacity_t;
-    float gapwidth_t;
-    float offset_t;
-    float width_t;
-    float pattern_from_t;
-    float pattern_to_t;
-    float floorwidth_t;
-    float pad1;
-    float pad2;
-    float pad3;
-    float4 stride_pad[1];
-};
-static_assert(sizeof(LinePatternDrawableUBO) == 128, "wrong size");
-
-struct alignas(16) LinePatternTilePropsUBO {
-    float4 pattern_from;
-    float4 pattern_to;
-    float4 scale;
-    float2 texsize;
-    float fade;
-    float pad1;
-};
-static_assert(sizeof(LinePatternTilePropsUBO) == 64, "wrong size");
-
 //
 // Line SDF
 
-struct alignas(16) LineSDFDrawableUBO {
-    float4x4 matrix;
-    float2 patternscale_a;
-    float2 patternscale_b;
-    float tex_y_a;
-    float tex_y_b;
-    float ratio;
-    float color_t;
-    float blur_t;
-    float opacity_t;
-    float gapwidth_t;
-    float offset_t;
-    float width_t;
-    float floorwidth_t;
-    float atlas_height;
-    float pad2;
-};
-static_assert(sizeof(LineSDFDrawableUBO) == 128, "wrong size");
-
-struct alignas(16) LineSDFTilePropsUBO {
-    float sdfgamma;
-    float mix;
-    float pad1;
-    float pad2;
-    float4 stride_pad[3];
-};
-static_assert(sizeof(LineSDFTilePropsUBO) == 64, "wrong size");
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) LineEvaluatedPropsUBO {
-    float4 color;
-    float blur;
-    float opacity;
-    float gapwidth;
-    float offset;
-    float width;
-    float floorwidth;
-    float pad0;
-    float pad1;
-};
-static_assert(sizeof(LineEvaluatedPropsUBO) == 48, "wrong size");
-
-union LineDrawableUnionUBO {
-    LineDrawableUBO lineDrawableUBO;
-    LineGradientDrawableUBO lineGradientDrawableUBO;
-    LinePatternDrawableUBO linePatternDrawableUBO;
-    LineSDFDrawableUBO lineSDFDrawableUBO;
-};
-
-union LineTilePropsUnionUBO {
-    LinePatternTilePropsUBO linePatternTilePropsUBO;
-    LineSDFTilePropsUBO lineSDFTilePropsUBO;
-};
-
-"#
+"
     ),
     source: r"
 
@@ -243,11 +133,11 @@ struct FragmentStage {
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const ViewUBO& view [[buffer(idViewUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const LineDrawableUnionUBO* drawableVector [[buffer(idLineDrawableUBO)]],
+                                device const LineSDFDrawableUBO* drawableVector [[buffer(idLineDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]]) {
 
-    device const LineSDFDrawableUBO& drawable = drawableVector[uboIndex].lineSDFDrawableUBO;
+    device const LineSDFDrawableUBO& drawable = drawableVector[uboIndex];
 
 #if defined(HAS_UNIFORM_u_gapwidth)
     const auto gapwidth = props.gapwidth / 2.0;
@@ -363,7 +253,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 half4 fragment fragmentMain(FragmentStage in [[stage_in]],
                             device const ViewUBO& view [[buffer(idViewUBO)]],
                             device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                            device const LineTilePropsUnionUBO* tilePropsVector [[buffer(idLineTilePropsUBO)]],
+                            device const LineSDFTilePropsUBO* tilePropsVector [[buffer(idLineTilePropsUBO)]],
                             device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]],
                             texture2d<float, access::sample> gradientTexture [[texture(0)]],
                             texture2d<float, access::sample> dashTexture [[texture(1)]],
@@ -379,7 +269,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     return half4(1.0);
 #endif
 
-    device const LineSDFTilePropsUBO& tileProps = tilePropsVector[uboIndex].lineSDFTilePropsUBO;
+    device const LineSDFTilePropsUBO& tileProps = tilePropsVector[uboIndex];
 
 #if defined(HAS_UNIFORM_u_blur)
     const float blur = props.blur;
@@ -430,7 +320,7 @@ pub(super) const LINE_GRADIENT_SHADER: Msl = Msl {
     fragment_main_function: r"fragmentMain",
     prelude: concat!(
         line_prelude!(),
-        r#"
+        r"
 
 // The attribute conveying progress along a line is scaled to [0, 2^15).
 #define MAX_LINE_DISTANCE 32767.0
@@ -445,126 +335,16 @@ enum {
 //
 // Line
 
-struct alignas(16) LineDrawableUBO {
-    float4x4 matrix;
-    float ratio;
-    float color_t;
-    float blur_t;
-    float opacity_t;
-    float gapwidth_t;
-    float offset_t;
-    float width_t;
-    float pad1;
-    float4 stride_pad[2];
-};
-static_assert(sizeof(LineDrawableUBO) == 128, "wrong size");
-
 //
 // Line gradient
-
-struct alignas(16) LineGradientDrawableUBO {
-    float4x4 matrix;
-    float ratio;
-    float blur_t;
-    float opacity_t;
-    float gapwidth_t;
-    float offset_t;
-    float width_t;
-    float pad1;
-    float pad2;
-    float4 stride_pad[2];
-};
-static_assert(sizeof(LineGradientDrawableUBO) == 128, "wrong size");
 
 //
 // Line pattern
 
-struct alignas(16) LinePatternDrawableUBO {
-    float4x4 matrix;
-    float ratio;
-    float blur_t;
-    float opacity_t;
-    float gapwidth_t;
-    float offset_t;
-    float width_t;
-    float pattern_from_t;
-    float pattern_to_t;
-    float floorwidth_t;
-    float pad1;
-    float pad2;
-    float pad3;
-    float4 stride_pad[1];
-};
-static_assert(sizeof(LinePatternDrawableUBO) == 128, "wrong size");
-
-struct alignas(16) LinePatternTilePropsUBO {
-    float4 pattern_from;
-    float4 pattern_to;
-    float4 scale;
-    float2 texsize;
-    float fade;
-    float pad1;
-};
-static_assert(sizeof(LinePatternTilePropsUBO) == 64, "wrong size");
-
 //
 // Line SDF
 
-struct alignas(16) LineSDFDrawableUBO {
-    float4x4 matrix;
-    float2 patternscale_a;
-    float2 patternscale_b;
-    float tex_y_a;
-    float tex_y_b;
-    float ratio;
-    float color_t;
-    float blur_t;
-    float opacity_t;
-    float gapwidth_t;
-    float offset_t;
-    float width_t;
-    float floorwidth_t;
-    float atlas_height;
-    float pad2;
-};
-static_assert(sizeof(LineSDFDrawableUBO) == 128, "wrong size");
-
-struct alignas(16) LineSDFTilePropsUBO {
-    float sdfgamma;
-    float mix;
-    float pad1;
-    float pad2;
-    float4 stride_pad[3];
-};
-static_assert(sizeof(LineSDFTilePropsUBO) == 64, "wrong size");
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) LineEvaluatedPropsUBO {
-    float4 color;
-    float blur;
-    float opacity;
-    float gapwidth;
-    float offset;
-    float width;
-    float floorwidth;
-    float pad0;
-    float pad1;
-};
-static_assert(sizeof(LineEvaluatedPropsUBO) == 48, "wrong size");
-
-union LineDrawableUnionUBO {
-    LineDrawableUBO lineDrawableUBO;
-    LineGradientDrawableUBO lineGradientDrawableUBO;
-    LinePatternDrawableUBO linePatternDrawableUBO;
-    LineSDFDrawableUBO lineSDFDrawableUBO;
-};
-
-union LineTilePropsUnionUBO {
-    LinePatternTilePropsUBO linePatternTilePropsUBO;
-    LineSDFTilePropsUBO lineSDFTilePropsUBO;
-};
-
-"#
+"
     ),
     source: r"
 
@@ -609,11 +389,11 @@ struct FragmentStage {
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const ViewUBO& view [[buffer(idViewUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const LineDrawableUnionUBO* drawableVector [[buffer(idLineDrawableUBO)]],
+                                device const LineGradientDrawableUBO* drawableVector [[buffer(idLineDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]]) {
 
-    device const LineGradientDrawableUBO& drawable = drawableVector[uboIndex].lineGradientDrawableUBO;
+    device const LineGradientDrawableUBO& drawable = drawableVector[uboIndex];
 
 #if !defined(HAS_UNIFORM_u_blur)
     const auto blur     = unpack_mix_float(vertx.blur,     drawable.blur_t);
@@ -748,7 +528,7 @@ pub(super) const LINE_PATTERN_SHADER: Msl = Msl {
     fragment_main_function: r"fragmentMain",
     prelude: concat!(
         line_prelude!(),
-        r#"
+        r"
 
 enum {
     idLineDrawableUBO = idDrawableReservedVertexOnlyUBO,
@@ -760,126 +540,16 @@ enum {
 //
 // Line
 
-struct alignas(16) LineDrawableUBO {
-    float4x4 matrix;
-    float ratio;
-    float color_t;
-    float blur_t;
-    float opacity_t;
-    float gapwidth_t;
-    float offset_t;
-    float width_t;
-    float pad1;
-    float4 stride_pad[2];
-};
-static_assert(sizeof(LineDrawableUBO) == 128, "wrong size");
-
 //
 // Line gradient
-
-struct alignas(16) LineGradientDrawableUBO {
-    float4x4 matrix;
-    float ratio;
-    float blur_t;
-    float opacity_t;
-    float gapwidth_t;
-    float offset_t;
-    float width_t;
-    float pad1;
-    float pad2;
-    float4 stride_pad[2];
-};
-static_assert(sizeof(LineGradientDrawableUBO) == 128, "wrong size");
 
 //
 // Line pattern
 
-struct alignas(16) LinePatternDrawableUBO {
-    float4x4 matrix;
-    float ratio;
-    float blur_t;
-    float opacity_t;
-    float gapwidth_t;
-    float offset_t;
-    float width_t;
-    float pattern_from_t;
-    float pattern_to_t;
-    float floorwidth_t;
-    float pad1;
-    float pad2;
-    float pad3;
-    float4 stride_pad[1];
-};
-static_assert(sizeof(LinePatternDrawableUBO) == 128, "wrong size");
-
-struct alignas(16) LinePatternTilePropsUBO {
-    float4 pattern_from;
-    float4 pattern_to;
-    float4 scale;
-    float2 texsize;
-    float fade;
-    float pad1;
-};
-static_assert(sizeof(LinePatternTilePropsUBO) == 64, "wrong size");
-
 //
 // Line SDF
 
-struct alignas(16) LineSDFDrawableUBO {
-    float4x4 matrix;
-    float2 patternscale_a;
-    float2 patternscale_b;
-    float tex_y_a;
-    float tex_y_b;
-    float ratio;
-    float color_t;
-    float blur_t;
-    float opacity_t;
-    float gapwidth_t;
-    float offset_t;
-    float width_t;
-    float floorwidth_t;
-    float atlas_height;
-    float pad2;
-};
-static_assert(sizeof(LineSDFDrawableUBO) == 128, "wrong size");
-
-struct alignas(16) LineSDFTilePropsUBO {
-    float sdfgamma;
-    float mix;
-    float pad1;
-    float pad2;
-    float4 stride_pad[3];
-};
-static_assert(sizeof(LineSDFTilePropsUBO) == 64, "wrong size");
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) LineEvaluatedPropsUBO {
-    float4 color;
-    float blur;
-    float opacity;
-    float gapwidth;
-    float offset;
-    float width;
-    float floorwidth;
-    float pad0;
-    float pad1;
-};
-static_assert(sizeof(LineEvaluatedPropsUBO) == 48, "wrong size");
-
-union LineDrawableUnionUBO {
-    LineDrawableUBO lineDrawableUBO;
-    LineGradientDrawableUBO lineGradientDrawableUBO;
-    LinePatternDrawableUBO linePatternDrawableUBO;
-    LineSDFDrawableUBO lineSDFDrawableUBO;
-};
-
-union LineTilePropsUnionUBO {
-    LinePatternTilePropsUBO linePatternTilePropsUBO;
-    LineSDFTilePropsUBO lineSDFTilePropsUBO;
-};
-
-"#
+"
     ),
     source: r"
 
@@ -940,11 +610,11 @@ struct FragmentStage {
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const ViewUBO& view [[buffer(idViewUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const LineDrawableUnionUBO* drawableVector [[buffer(idLineDrawableUBO)]],
+                                device const LinePatternDrawableUBO* drawableVector [[buffer(idLineDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]]) {
 
-    device const LinePatternDrawableUBO& drawable = drawableVector[uboIndex].linePatternDrawableUBO;
+    device const LinePatternDrawableUBO& drawable = drawableVector[uboIndex];
 
 #if defined(HAS_UNIFORM_u_gapwidth)
     const auto gapwidth = props.gapwidth / 2;
@@ -1045,7 +715,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 half4 fragment fragmentMain(FragmentStage in [[stage_in]],
                             device const ViewUBO& view [[buffer(idViewUBO)]],
                             device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                            device const LineTilePropsUnionUBO* tilePropsVector [[buffer(idLineTilePropsUBO)]],
+                            device const LinePatternTilePropsUBO* tilePropsVector [[buffer(idLineTilePropsUBO)]],
                             device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]],
                             texture2d<float, access::sample> image0 [[texture(0)]],
                             sampler image0_sampler [[sampler(0)]]) {
@@ -1060,7 +730,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     return half4(1.0);
 #endif
 
-    device const LinePatternTilePropsUBO& tileProps = tilePropsVector[uboIndex].linePatternTilePropsUBO;
+    device const LinePatternTilePropsUBO& tileProps = tilePropsVector[uboIndex];
 
 #if defined(HAS_UNIFORM_u_blur)
     const float blur = props.blur;
@@ -1151,7 +821,7 @@ pub(super) const LINE_SDF_SHADER: Msl = Msl {
     fragment_main_function: r"fragmentMain",
     prelude: concat!(
         line_prelude!(),
-        r#"
+        r"
 
 enum {
     idLineDrawableUBO = idDrawableReservedVertexOnlyUBO,
@@ -1163,126 +833,16 @@ enum {
 //
 // Line
 
-struct alignas(16) LineDrawableUBO {
-    float4x4 matrix;
-    float ratio;
-    float color_t;
-    float blur_t;
-    float opacity_t;
-    float gapwidth_t;
-    float offset_t;
-    float width_t;
-    float pad1;
-    float4 stride_pad[2];
-};
-static_assert(sizeof(LineDrawableUBO) == 128, "wrong size");
-
 //
 // Line gradient
-
-struct alignas(16) LineGradientDrawableUBO {
-    float4x4 matrix;
-    float ratio;
-    float blur_t;
-    float opacity_t;
-    float gapwidth_t;
-    float offset_t;
-    float width_t;
-    float pad1;
-    float pad2;
-    float4 stride_pad[2];
-};
-static_assert(sizeof(LineGradientDrawableUBO) == 128, "wrong size");
 
 //
 // Line pattern
 
-struct alignas(16) LinePatternDrawableUBO {
-    float4x4 matrix;
-    float ratio;
-    float blur_t;
-    float opacity_t;
-    float gapwidth_t;
-    float offset_t;
-    float width_t;
-    float pattern_from_t;
-    float pattern_to_t;
-    float floorwidth_t;
-    float pad1;
-    float pad2;
-    float pad3;
-    float4 stride_pad[1];
-};
-static_assert(sizeof(LinePatternDrawableUBO) == 128, "wrong size");
-
-struct alignas(16) LinePatternTilePropsUBO {
-    float4 pattern_from;
-    float4 pattern_to;
-    float4 scale;
-    float2 texsize;
-    float fade;
-    float pad1;
-};
-static_assert(sizeof(LinePatternTilePropsUBO) == 64, "wrong size");
-
 //
 // Line SDF
 
-struct alignas(16) LineSDFDrawableUBO {
-    float4x4 matrix;
-    float2 patternscale_a;
-    float2 patternscale_b;
-    float tex_y_a;
-    float tex_y_b;
-    float ratio;
-    float color_t;
-    float blur_t;
-    float opacity_t;
-    float gapwidth_t;
-    float offset_t;
-    float width_t;
-    float floorwidth_t;
-    float atlas_height;
-    float pad2;
-};
-static_assert(sizeof(LineSDFDrawableUBO) == 128, "wrong size");
-
-struct alignas(16) LineSDFTilePropsUBO {
-    float sdfgamma;
-    float mix;
-    float pad1;
-    float pad2;
-    float4 stride_pad[3];
-};
-static_assert(sizeof(LineSDFTilePropsUBO) == 64, "wrong size");
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) LineEvaluatedPropsUBO {
-    float4 color;
-    float blur;
-    float opacity;
-    float gapwidth;
-    float offset;
-    float width;
-    float floorwidth;
-    float pad0;
-    float pad1;
-};
-static_assert(sizeof(LineEvaluatedPropsUBO) == 48, "wrong size");
-
-union LineDrawableUnionUBO {
-    LineDrawableUBO lineDrawableUBO;
-    LineGradientDrawableUBO lineGradientDrawableUBO;
-    LinePatternDrawableUBO linePatternDrawableUBO;
-    LineSDFDrawableUBO lineSDFDrawableUBO;
-};
-
-union LineTilePropsUnionUBO {
-    LinePatternTilePropsUBO linePatternTilePropsUBO;
-    LineSDFTilePropsUBO lineSDFTilePropsUBO;
-};
-
-"#
+"
     ),
     source: r"
 
@@ -1347,11 +907,11 @@ struct FragmentStage {
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const ViewUBO& view [[buffer(idViewUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const LineDrawableUnionUBO* drawableVector [[buffer(idLineDrawableUBO)]],
+                                device const LineSDFDrawableUBO* drawableVector [[buffer(idLineDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]]) {
 
-    device const LineSDFDrawableUBO& drawable = drawableVector[uboIndex].lineSDFDrawableUBO;
+    device const LineSDFDrawableUBO& drawable = drawableVector[uboIndex];
 
 #if defined(HAS_UNIFORM_u_gapwidth)
     const auto gapwidth = props.gapwidth / 2.0;
@@ -1468,7 +1028,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 half4 fragment fragmentMain(FragmentStage in [[stage_in]],
                             device const ViewUBO& view [[buffer(idViewUBO)]],
                             device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                            device const LineTilePropsUnionUBO* tilePropsVector [[buffer(idLineTilePropsUBO)]],
+                            device const LineSDFTilePropsUBO* tilePropsVector [[buffer(idLineTilePropsUBO)]],
                             device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]],
                             texture2d<float, access::sample> image0 [[texture(0)]],
                             sampler image0_sampler [[sampler(0)]]) {
@@ -1483,7 +1043,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     return half4(1.0);
 #endif
 
-    device const LineSDFTilePropsUBO& tileProps = tilePropsVector[uboIndex].lineSDFTilePropsUBO;
+    device const LineSDFTilePropsUBO& tileProps = tilePropsVector[uboIndex];
 
 #if defined(HAS_UNIFORM_u_color)
     const auto color     = props.color;
@@ -1537,7 +1097,7 @@ pub(super) const LINE_SHADER: Msl = Msl {
     fragment_main_function: r"fragmentMain",
     prelude: concat!(
         line_prelude!(),
-        r#"
+        r"
 
 enum {
     idLineDrawableUBO = idDrawableReservedVertexOnlyUBO,
@@ -1549,126 +1109,16 @@ enum {
 //
 // Line
 
-struct alignas(16) LineDrawableUBO {
-    float4x4 matrix;
-    float ratio;
-    float color_t;
-    float blur_t;
-    float opacity_t;
-    float gapwidth_t;
-    float offset_t;
-    float width_t;
-    float pad1;
-    float4 stride_pad[2];
-};
-static_assert(sizeof(LineDrawableUBO) == 128, "wrong size");
-
 //
 // Line gradient
-
-struct alignas(16) LineGradientDrawableUBO {
-    float4x4 matrix;
-    float ratio;
-    float blur_t;
-    float opacity_t;
-    float gapwidth_t;
-    float offset_t;
-    float width_t;
-    float pad1;
-    float pad2;
-    float4 stride_pad[2];
-};
-static_assert(sizeof(LineGradientDrawableUBO) == 128, "wrong size");
 
 //
 // Line pattern
 
-struct alignas(16) LinePatternDrawableUBO {
-    float4x4 matrix;
-    float ratio;
-    float blur_t;
-    float opacity_t;
-    float gapwidth_t;
-    float offset_t;
-    float width_t;
-    float pattern_from_t;
-    float pattern_to_t;
-    float floorwidth_t;
-    float pad1;
-    float pad2;
-    float pad3;
-    float4 stride_pad[1];
-};
-static_assert(sizeof(LinePatternDrawableUBO) == 128, "wrong size");
-
-struct alignas(16) LinePatternTilePropsUBO {
-    float4 pattern_from;
-    float4 pattern_to;
-    float4 scale;
-    float2 texsize;
-    float fade;
-    float pad1;
-};
-static_assert(sizeof(LinePatternTilePropsUBO) == 64, "wrong size");
-
 //
 // Line SDF
 
-struct alignas(16) LineSDFDrawableUBO {
-    float4x4 matrix;
-    float2 patternscale_a;
-    float2 patternscale_b;
-    float tex_y_a;
-    float tex_y_b;
-    float ratio;
-    float color_t;
-    float blur_t;
-    float opacity_t;
-    float gapwidth_t;
-    float offset_t;
-    float width_t;
-    float floorwidth_t;
-    float atlas_height;
-    float pad2;
-};
-static_assert(sizeof(LineSDFDrawableUBO) == 128, "wrong size");
-
-struct alignas(16) LineSDFTilePropsUBO {
-    float sdfgamma;
-    float mix;
-    float pad1;
-    float pad2;
-    float4 stride_pad[3];
-};
-static_assert(sizeof(LineSDFTilePropsUBO) == 64, "wrong size");
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) LineEvaluatedPropsUBO {
-    float4 color;
-    float blur;
-    float opacity;
-    float gapwidth;
-    float offset;
-    float width;
-    float floorwidth;
-    float pad0;
-    float pad1;
-};
-static_assert(sizeof(LineEvaluatedPropsUBO) == 48, "wrong size");
-
-union LineDrawableUnionUBO {
-    LineDrawableUBO lineDrawableUBO;
-    LineGradientDrawableUBO lineGradientDrawableUBO;
-    LinePatternDrawableUBO linePatternDrawableUBO;
-    LineSDFDrawableUBO lineSDFDrawableUBO;
-};
-
-union LineTilePropsUnionUBO {
-    LinePatternTilePropsUBO linePatternTilePropsUBO;
-    LineSDFTilePropsUBO lineSDFTilePropsUBO;
-};
-
-"#
+"
     ),
     source: r"
 
@@ -1719,11 +1169,11 @@ struct FragmentStage {
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const ViewUBO& view [[buffer(idViewUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const LineDrawableUnionUBO* drawableVector [[buffer(idLineDrawableUBO)]],
+                                device const LineDrawableUBO* drawableVector [[buffer(idLineDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]]) {
 
-    device const LineDrawableUBO& drawable = drawableVector[uboIndex].lineDrawableUBO;
+    device const LineDrawableUBO& drawable = drawableVector[uboIndex];
 
 #if defined(HAS_UNIFORM_u_gapwidth)
     const auto gapwidth = props.gapwidth / 2;

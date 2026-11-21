@@ -5,7 +5,7 @@ use mln_gfx::shaders::source::msl::Msl;
 pub(super) const RASTER_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
+    prelude: r"
 
 enum {
     idRasterDrawableUBO = idDrawableReservedVertexOnlyUBO,
@@ -13,29 +13,7 @@ enum {
     rasterUBOCount
 };
 
-struct alignas(16) RasterDrawableUBO {
-    float4x4 matrix;
-};
-static_assert(sizeof(RasterDrawableUBO) == 64, "wrong size");
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) RasterEvaluatedPropsUBO {
-    float4 spin_weights;
-    float2 tl_parent;
-    float scale_parent;
-    float buffer_scale;
-    float fade_t;
-    float opacity;
-    float brightness_low;
-    float brightness_high;
-    float saturation_factor;
-    float contrast_factor;
-    float pad1;
-    float pad2;
-};
-static_assert(sizeof(RasterEvaluatedPropsUBO) == 64, "wrong size");
-
-"#,
+",
     source: r"
 
 struct VertexStage {

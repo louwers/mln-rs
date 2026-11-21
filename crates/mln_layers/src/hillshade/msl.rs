@@ -5,7 +5,7 @@ use mln_gfx::shaders::source::msl::Msl;
 pub(super) const HILLSHADE_PREPARE_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
+    prelude: r"
 
 enum {
     idHillshadePrepareDrawableUBO = idDrawableReservedVertexOnlyUBO,
@@ -13,20 +13,7 @@ enum {
     hillshadePrepareUBOCount
 };
 
-struct alignas(16) HillshadePrepareDrawableUBO {
-    float4x4 matrix;
-};
-static_assert(sizeof(HillshadePrepareDrawableUBO) == 64, "wrong size");
-
-struct alignas(16) HillshadePrepareTilePropsUBO {
-    float4 unpack;
-    float2 dimension;
-    float zoom;
-    float maxzoom;
-};
-static_assert(sizeof(HillshadePrepareTilePropsUBO) == 32, "wrong size");
-
-"#,
+",
     source: r"
 
 struct VertexStage {
@@ -126,7 +113,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 pub(super) const HILLSHADE_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
+    prelude: r"
 
 inline float radians(float degrees) {
     return M_PI_F * degrees / 180.0;
@@ -139,33 +126,7 @@ enum {
     hillshadeUBOCount
 };
 
-struct alignas(16) HillshadeDrawableUBO {
-    float4x4 matrix;
-};
-static_assert(sizeof(HillshadeDrawableUBO) == 64, "wrong size");
-
-struct alignas(16) HillshadeTilePropsUBO {
-    float2 latrange;
-    float exaggeration;
-    int method;
-    int num_lights;
-    float pad0;
-    float pad1;
-    float pad2;
-};
-static_assert(sizeof(HillshadeTilePropsUBO) == 32, "wrong size");
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) HillshadeEvaluatedPropsUBO {
-    float4 accent;
-    float4 altitudes;
-    float4 azimuths;
-    float4 shadows[4];
-    float4 highlights[4];
-};
-static_assert(sizeof(HillshadeEvaluatedPropsUBO) == 176, "wrong size");
-
-"#,
+",
     source: r"
 
 #define PI 3.141592653589793

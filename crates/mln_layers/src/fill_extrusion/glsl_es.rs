@@ -34,44 +34,6 @@ layout (location = 8) in vec2 a_next_outline_pos;
 layout (location = 9) in vec2 a_next_decimals_ed;
 out vec4 v_color;
 
-layout (std140) uniform FillExtrusionDrawableUBO {
-    highp mat4 u_matrix;
-    highp vec2 u_pixel_coord_upper;
-    highp vec2 u_pixel_coord_lower;
-    highp float u_height_factor;
-    highp float u_tile_ratio;
-    highp float u_base_t;
-    highp float u_height_t;
-    highp float u_color_t;
-    highp float u_pattern_from_t;
-    highp float u_pattern_to_t;
-    highp uint u_paint_layout;
-};
-
-layout (std140) uniform FillExtrusionTilePropsUBO {
-    highp vec4 u_pattern_from;
-    highp vec4 u_pattern_to;
-    highp vec2 u_texsize;
-    highp float FillExtrusionTilePropsUBO_pad1;
-    highp float FillExtrusionTilePropsUBO_pad2;
-};
-
-layout (std140) uniform FillExtrusionPropsUBO {
-    highp vec4 u_color;
-    highp vec3 u_light_color;
-    highp float FillExtrusionPropsUBO_pad1;
-    highp vec3 u_light_position;
-    highp float u_base;
-    highp float u_height;
-    highp float u_light_intensity;
-    highp float u_vertical_gradient;
-    highp float u_opacity;
-    highp float u_fade;
-    highp float u_from_scale;
-    highp float u_to_scale;
-    highp float FillExtrusionPropsUBO_pad2;
-};
-
 #ifndef HAS_UNIFORM_u_base
 layout (location = 3) in highp vec2 a_base;
 #endif
@@ -186,44 +148,6 @@ out vec2 v_pos_a;
 out vec2 v_pos_b;
 out vec4 v_lighting;
 
-layout (std140) uniform FillExtrusionDrawableUBO {
-    highp mat4 u_matrix;
-    highp vec2 u_pixel_coord_upper;
-    highp vec2 u_pixel_coord_lower;
-    highp float u_height_factor;
-    highp float u_tile_ratio;
-    highp float u_base_t;
-    highp float u_height_t;
-    highp float u_color_t;
-    highp float u_pattern_from_t;
-    highp float u_pattern_to_t;
-    highp uint u_paint_layout;
-};
-
-layout (std140) uniform FillExtrusionTilePropsUBO {
-    highp vec4 u_pattern_from;
-    highp vec4 u_pattern_to;
-    highp vec2 u_texsize;
-    highp float FillExtrusionTilePropsUBO_pad1;
-    highp float FillExtrusionTilePropsUBO_pad2;
-};
-
-layout (std140) uniform FillExtrusionPropsUBO {
-    highp vec4 u_color;
-    highp vec3 u_light_color;
-    highp float FillExtrusionPropsUBO_pad1;
-    highp vec3 u_light_position;
-    highp float u_base;
-    highp float u_height;
-    highp float u_light_intensity;
-    highp float u_vertical_gradient;
-    highp float u_opacity;
-    highp float u_fade;
-    highp float u_from_scale;
-    highp float u_to_scale;
-    highp float FillExtrusionPropsUBO_pad2;
-};
-
 #ifndef HAS_UNIFORM_u_base
 layout (location = 3) in highp vec2 a_base;
 out highp float base;
@@ -328,30 +252,6 @@ in vec2 v_pos_a;
 in vec2 v_pos_b;
 in vec4 v_lighting;
 
-layout (std140) uniform FillExtrusionTilePropsUBO {
-    highp vec4 u_pattern_from;
-    highp vec4 u_pattern_to;
-    highp vec2 u_texsize;
-    highp float FillExtrusionTilePropsUBO_pad1;
-    highp float FillExtrusionTilePropsUBO_pad2;
-};
-
-layout (std140) uniform FillExtrusionPropsUBO {
-    highp vec4 u_color;
-    highp vec3 u_light_color;
-    highp float FillExtrusionPropsUBO_pad1;
-    highp vec3 u_light_position;
-    highp float u_base;
-    highp float u_height;
-    highp float u_light_intensity;
-    highp float u_vertical_gradient;
-    highp float u_opacity;
-    highp float u_fade;
-    highp float u_from_scale;
-    highp float u_to_scale;
-    highp float FillExtrusionPropsUBO_pad2;
-};
-
 uniform sampler2D u_image;
 
 #ifndef HAS_UNIFORM_u_base
@@ -420,44 +320,6 @@ layout (location = 1) in vec2 a_decimals_ed;
 out vec2 v_pos_a;
 out vec2 v_pos_b;
 out vec4 v_lighting;
-
-layout (std140) uniform FillExtrusionDrawableUBO {
-    highp mat4 u_matrix;
-    highp vec2 u_pixel_coord_upper;
-    highp vec2 u_pixel_coord_lower;
-    highp float u_height_factor;
-    highp float u_tile_ratio;
-    highp float u_base_t;
-    highp float u_height_t;
-    highp float u_color_t;
-    highp float u_pattern_from_t;
-    highp float u_pattern_to_t;
-    highp uint u_paint_layout;
-};
-
-layout (std140) uniform FillExtrusionTilePropsUBO {
-    highp vec4 u_pattern_from;
-    highp vec4 u_pattern_to;
-    highp vec2 u_texsize;
-    highp float FillExtrusionTilePropsUBO_pad1;
-    highp float FillExtrusionTilePropsUBO_pad2;
-};
-
-layout (std140) uniform FillExtrusionPropsUBO {
-    highp vec4 u_color;
-    highp vec3 u_light_color;
-    highp float FillExtrusionPropsUBO_pad1;
-    highp vec3 u_light_position;
-    highp float u_base;
-    highp float u_height;
-    highp float u_light_intensity;
-    highp float u_vertical_gradient;
-    highp float u_opacity;
-    highp float u_fade;
-    highp float u_from_scale;
-    highp float u_to_scale;
-    highp float FillExtrusionPropsUBO_pad2;
-};
 
 #ifndef HAS_UNIFORM_u_base
 layout (location = 3) in highp vec2 a_base;
@@ -552,30 +414,6 @@ in vec2 v_pos_a;
 in vec2 v_pos_b;
 in vec4 v_lighting;
 
-layout (std140) uniform FillExtrusionTilePropsUBO {
-    highp vec4 u_pattern_from;
-    highp vec4 u_pattern_to;
-    highp vec2 u_texsize;
-    highp float FillExtrusionTilePropsUBO_pad1;
-    highp float FillExtrusionTilePropsUBO_pad2;
-};
-
-layout (std140) uniform FillExtrusionPropsUBO {
-    highp vec4 u_color;
-    highp vec3 u_light_color;
-    highp float FillExtrusionPropsUBO_pad1;
-    highp vec3 u_light_position;
-    highp float u_base;
-    highp float u_height;
-    highp float u_light_intensity;
-    highp float u_vertical_gradient;
-    highp float u_opacity;
-    highp float u_fade;
-    highp float u_from_scale;
-    highp float u_to_scale;
-    highp float FillExtrusionPropsUBO_pad2;
-};
-
 uniform sampler2D u_image;
 
 #ifndef HAS_UNIFORM_u_base
@@ -641,44 +479,6 @@ pub(super) const FILL_EXTRUSION_SHADER: Glsl = Glsl {
 layout (location = 0) in vec2 a_pos;
 layout (location = 1) in vec2 a_decimals_ed;
 out vec4 v_color;
-
-layout (std140) uniform FillExtrusionDrawableUBO {
-    highp mat4 u_matrix;
-    highp vec2 u_pixel_coord_upper;
-    highp vec2 u_pixel_coord_lower;
-    highp float u_height_factor;
-    highp float u_tile_ratio;
-    highp float u_base_t;
-    highp float u_height_t;
-    highp float u_color_t;
-    highp float u_pattern_from_t;
-    highp float u_pattern_to_t;
-    highp uint u_paint_layout;
-};
-
-layout (std140) uniform FillExtrusionTilePropsUBO {
-    highp vec4 u_pattern_from;
-    highp vec4 u_pattern_to;
-    highp vec2 u_texsize;
-    highp float FillExtrusionTilePropsUBO_pad1;
-    highp float FillExtrusionTilePropsUBO_pad2;
-};
-
-layout (std140) uniform FillExtrusionPropsUBO {
-    highp vec4 u_color;
-    highp vec3 u_light_color;
-    highp float FillExtrusionPropsUBO_pad1;
-    highp vec3 u_light_position;
-    highp float u_base;
-    highp float u_height;
-    highp float u_light_intensity;
-    highp float u_vertical_gradient;
-    highp float u_opacity;
-    highp float u_fade;
-    highp float u_from_scale;
-    highp float u_to_scale;
-    highp float FillExtrusionPropsUBO_pad2;
-};
 
 #ifndef HAS_UNIFORM_u_base
 layout (location = 3) in highp vec2 a_base;

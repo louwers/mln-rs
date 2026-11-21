@@ -3,38 +3,7 @@
 use mln_gfx::shaders::source::glsl_es::Glsl;
 
 pub(super) const FILL_OUTLINE_PATTERN_SHADER: Glsl = Glsl {
-    vertex: r"layout (std140) uniform FillPatternDrawableUBO {
-    highp mat4 u_matrix;
-    highp vec2 u_pixel_coord_upper;
-    highp vec2 u_pixel_coord_lower;
-    highp float u_tile_ratio;
-    highp float u_pattern_from_t;
-    highp float u_pattern_to_t;
-    highp float u_opacity_t;
-    highp float u_color_t;
-    highp float FillPatternDrawableUBO_pad1;
-    highp float FillPatternDrawableUBO_pad2;
-    highp float FillPatternDrawableUBO_pad3;
-};
-
-layout (std140) uniform FillPatternTilePropsUBO {
-    highp vec4 u_pattern_from;
-    highp vec4 u_pattern_to;
-    highp vec2 u_texsize;
-    lowp float u_sdf;
-    highp float FillPatternTilePropsUBO_pad2;
-};
-
-layout (std140) uniform FillEvaluatedPropsUBO {
-    highp vec4 u_color;
-    highp vec4 u_outline_color;
-    highp float u_opacity;
-    highp float u_fade;
-    highp float u_from_scale;
-    highp float u_to_scale;
-};
-
-layout (location = 0) in vec2 a_pos;
+    vertex: r"layout (location = 0) in vec2 a_pos;
 
 out vec2 v_pos_a;
 out vec2 v_pos_b;
@@ -103,23 +72,6 @@ highp vec4 pattern_to = u_pattern_to;
     fragment: r"#ifdef GL_ES
 precision highp float;
 #endif
-
-layout (std140) uniform FillPatternTilePropsUBO {
-    highp vec4 u_pattern_from;
-    highp vec4 u_pattern_to;
-    highp vec2 u_texsize;
-    lowp float u_sdf;
-    highp float FillPatternTilePropsUBO_pad2;
-};
-
-layout (std140) uniform FillEvaluatedPropsUBO {
-    highp vec4 u_color;
-    highp vec4 u_outline_color;
-    highp float u_opacity;
-    highp float u_fade;
-    highp float u_from_scale;
-    highp float u_to_scale;
-};
 
 uniform sampler2D u_image;
 
@@ -197,24 +149,7 @@ highp vec4 pattern_to = u_pattern_to;
 };
 
 pub(super) const FILL_OUTLINE_SHADER: Glsl = Glsl {
-    vertex: r"layout (std140) uniform FillOutlineDrawableUBO {
-    highp mat4 u_matrix;
-    highp float u_outline_color_t;
-    highp float u_opacity_t;
-    highp uint u_paint_layout;
-    highp float FillOutlineDrawableUBO_pad2;
-};
-
-layout (std140) uniform FillEvaluatedPropsUBO {
-    highp vec4 u_color;
-    highp vec4 u_outline_color;
-    highp float u_opacity;
-    highp float u_fade;
-    highp float u_from_scale;
-    highp float u_to_scale;
-};
-
-layout (location = 0) in vec2 a_pos;
+    vertex: r"layout (location = 0) in vec2 a_pos;
 
 out vec2 v_pos;
 
@@ -243,16 +178,7 @@ lowp float opacity = u_opacity;
     v_pos = (gl_Position.xy / gl_Position.w + 1.0) / 2.0 * u_target_size;
 }
 ",
-    fragment: r"layout (std140) uniform FillEvaluatedPropsUBO {
-    highp vec4 u_color;
-    highp vec4 u_outline_color;
-    highp float u_opacity;
-    highp float u_fade;
-    highp float u_from_scale;
-    highp float u_to_scale;
-};
-
-in highp vec2 v_pos;
+    fragment: r"in highp vec2 v_pos;
 
 #ifndef HAS_UNIFORM_u_outline_color
 in highp vec4 outline_color;
@@ -337,24 +263,7 @@ vec4 outline_corner(highp vec4 start, highp vec4 end, vec2 corner, out highp vec
 
 pub(super) const FILL_OUTLINE_INSTANCED_SHADER: Glsl = Glsl {
     vertex: concat!(
-        r"layout (std140) uniform FillOutlineDrawableUBO {
-    highp mat4 u_matrix;
-    highp float u_outline_color_t;
-    highp float u_opacity_t;
-    highp uint u_paint_layout;
-    highp float FillOutlineDrawableUBO_pad2;
-};
-
-layout (std140) uniform FillEvaluatedPropsUBO {
-    highp vec4 u_color;
-    highp vec4 u_outline_color;
-    highp float u_opacity;
-    highp float u_fade;
-    highp float u_from_scale;
-    highp float u_to_scale;
-};
-
-// The quad's corner: x picks the segment's start (0) or end (1), y its side.
+        r"// The quad's corner: x picks the segment's start (0) or end (1), y its side.
 layout (location = 0) in vec2 a_pos;
 // Per instance: a vertex of the fill, and the end of the outline segment
 // that starts there.
@@ -396,38 +305,7 @@ lowp float opacity = u_opacity;
 
 pub(super) const FILL_OUTLINE_PATTERN_INSTANCED_SHADER: Glsl = Glsl {
     vertex: concat!(
-        r"layout (std140) uniform FillPatternDrawableUBO {
-    highp mat4 u_matrix;
-    highp vec2 u_pixel_coord_upper;
-    highp vec2 u_pixel_coord_lower;
-    highp float u_tile_ratio;
-    highp float u_pattern_from_t;
-    highp float u_pattern_to_t;
-    highp float u_opacity_t;
-    highp float u_color_t;
-    highp float FillPatternDrawableUBO_pad1;
-    highp float FillPatternDrawableUBO_pad2;
-    highp float FillPatternDrawableUBO_pad3;
-};
-
-layout (std140) uniform FillPatternTilePropsUBO {
-    highp vec4 u_pattern_from;
-    highp vec4 u_pattern_to;
-    highp vec2 u_texsize;
-    lowp float u_sdf;
-    highp float FillPatternTilePropsUBO_pad2;
-};
-
-layout (std140) uniform FillEvaluatedPropsUBO {
-    highp vec4 u_color;
-    highp vec4 u_outline_color;
-    highp float u_opacity;
-    highp float u_fade;
-    highp float u_from_scale;
-    highp float u_to_scale;
-};
-
-// The quad's corner: x picks the segment's start (0) or end (1), y its side.
+        r"// The quad's corner: x picks the segment's start (0) or end (1), y its side.
 layout (location = 0) in vec2 a_pos;
 // Per instance: a vertex of the fill, and the end of the outline segment
 // that starts there.
@@ -495,38 +373,7 @@ highp vec4 pattern_to = u_pattern_to;
 };
 
 pub(super) const FILL_PATTERN_SHADER: Glsl = Glsl {
-    vertex: r"layout (std140) uniform FillPatternDrawableUBO {
-    highp mat4 u_matrix;
-    highp vec2 u_pixel_coord_upper;
-    highp vec2 u_pixel_coord_lower;
-    highp float u_tile_ratio;
-    highp float u_pattern_from_t;
-    highp float u_pattern_to_t;
-    highp float u_opacity_t;
-    highp float u_color_t;
-    highp float FillPatternDrawableUBO_pad1;
-    highp float FillPatternDrawableUBO_pad2;
-    highp float FillPatternDrawableUBO_pad3;
-};
-
-layout (std140) uniform FillPatternTilePropsUBO {
-    highp vec4 u_pattern_from;
-    highp vec4 u_pattern_to;
-    highp vec2 u_texsize;
-    lowp float u_sdf;
-    highp float FillPatternTilePropsUBO_pad2;
-};
-
-layout (std140) uniform FillEvaluatedPropsUBO {
-    highp vec4 u_color;
-    highp vec4 u_outline_color;
-    highp float u_opacity;
-    highp float u_fade;
-    highp float u_from_scale;
-    highp float u_to_scale;
-};
-
-layout (location = 0) in vec2 a_pos;
+    vertex: r"layout (location = 0) in vec2 a_pos;
 
 out vec2 v_pos_a;
 out vec2 v_pos_b;
@@ -591,23 +438,6 @@ highp vec4 pattern_to = u_pattern_to;
     fragment: r"#ifdef GL_ES
 precision highp float;
 #endif
-
-layout (std140) uniform FillPatternTilePropsUBO {
-    highp vec4 u_pattern_from;
-    highp vec4 u_pattern_to;
-    highp vec2 u_texsize;
-    lowp float u_sdf;
-    highp float FillPatternTilePropsUBO_pad2;
-};
-
-layout (std140) uniform FillEvaluatedPropsUBO {
-    highp vec4 u_color;
-    highp vec4 u_outline_color;
-    highp float u_opacity;
-    highp float u_fade;
-    highp float u_from_scale;
-    highp float u_to_scale;
-};
 
 uniform sampler2D u_image;
 
@@ -679,24 +509,7 @@ highp vec4 pattern_to = u_pattern_to;
 };
 
 pub(super) const FILL_SHADER: Glsl = Glsl {
-    vertex: r"layout (std140) uniform FillDrawableUBO {
-    highp mat4 u_matrix;
-    highp float u_color_t;
-    highp float u_opacity_t;
-    highp float FillDrawableUBO_pad1;
-    highp float FillDrawableUBO_pad2;
-};
-
-layout (std140) uniform FillEvaluatedPropsUBO {
-    highp vec4 u_color;
-    highp vec4 u_outline_color;
-    highp float u_opacity;
-    highp float u_fade;
-    highp float u_from_scale;
-    highp float u_to_scale;
-};
-
-layout (location = 0) in vec2 a_pos;
+    vertex: r"layout (location = 0) in vec2 a_pos;
 
 #ifndef HAS_UNIFORM_u_color
 layout (location = 1) in highp vec4 a_color;
@@ -722,16 +535,7 @@ lowp float opacity = u_opacity;
     gl_Position = projectTile(a_pos, a_pos);
 }
 ",
-    fragment: r"layout (std140) uniform FillEvaluatedPropsUBO {
-    highp vec4 u_color;
-    highp vec4 u_outline_color;
-    highp float u_opacity;
-    highp float u_fade;
-    highp float u_from_scale;
-    highp float u_to_scale;
-};
-
-#ifndef HAS_UNIFORM_u_color
+    fragment: r"#ifndef HAS_UNIFORM_u_color
 in highp vec4 color;
 #endif
 #ifndef HAS_UNIFORM_u_opacity

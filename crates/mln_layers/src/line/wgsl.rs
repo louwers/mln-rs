@@ -94,36 +94,6 @@ struct VertexOutput {
 #endif
 };
 
-struct LineSDFDrawableUBO {
-    matrix: mat4x4<f32>,
-    patternscale_a: vec2<f32>,
-    patternscale_b: vec2<f32>,
-    tex_y_a: f32,
-    tex_y_b: f32,
-    ratio: f32,
-    color_t: f32,
-    blur_t: f32,
-    opacity_t: f32,
-    gapwidth_t: f32,
-    offset_t: f32,
-    width_t: f32,
-    floorwidth_t: f32,
-    atlas_height: f32,
-    pad2: f32,
-};
-
-struct LineEvaluatedPropsUBO {
-    color: vec4<f32>,
-    blur: f32,
-    opacity: f32,
-    gapwidth: f32,
-    offset: f32,
-    width: f32,
-    floorwidth: f32,
-    pad0: f32,
-    pad1: f32,
-};
-
 @group(0) @binding(2) var<storage, read> drawableVector: array<LineSDFDrawableUBO>;
 @group(0) @binding(5) var<uniform> props: LineEvaluatedPropsUBO;
 
@@ -273,26 +243,6 @@ struct FragmentInput {
 #endif
 };
 
-struct LineEvaluatedPropsUBO {
-    color: vec4<f32>,
-    blur: f32,
-    opacity: f32,
-    gapwidth: f32,
-    offset: f32,
-    width: f32,
-    floorwidth: f32,
-    pad0: f32,
-    pad1: f32,
-};
-
-struct LineSDFTilePropsUBO {
-    sdfgamma: f32,
-    mix: f32,
-    pad1: f32,
-    pad2: f32,
-    stride_pad: array<vec4<f32>, 3>,
-};
-
 @group(0) @binding(3) var<storage, read> tilePropsVector: array<LineSDFTilePropsUBO>;
 @group(0) @binding(5) var<uniform> props: LineEvaluatedPropsUBO;
 @group(1) @binding(0) var gradient_sampler: sampler;
@@ -398,31 +348,6 @@ struct VertexOutput {
 #ifdef PROJECTION_GLOBE
     @location(6) v_tile_x: f32,
 #endif
-};
-
-struct LineGradientDrawableUBO {
-    matrix: mat4x4<f32>,
-    ratio: f32,
-    blur_t: f32,
-    opacity_t: f32,
-    gapwidth_t: f32,
-    offset_t: f32,
-    width_t: f32,
-    pad1: f32,
-    pad2: f32,
-    stride_pad: array<vec4<f32>, 2>,
-};
-
-struct LineEvaluatedPropsUBO {
-    color: vec4<f32>,
-    blur: f32,
-    opacity: f32,
-    gapwidth: f32,
-    offset: f32,
-    width: f32,
-    floorwidth: f32,
-    pad0: f32,
-    pad1: f32,
 };
 
 @group(0) @binding(2) var<storage, read> drawableVector: array<LineGradientDrawableUBO>;
@@ -532,18 +457,6 @@ struct FragmentInput {
 #endif
 };
 
-struct LineEvaluatedPropsUBO {
-    color: vec4<f32>,
-    blur: f32,
-    opacity: f32,
-    gapwidth: f32,
-    offset: f32,
-    width: f32,
-    floorwidth: f32,
-    pad0: f32,
-    pad1: f32,
-};
-
 @group(0) @binding(5) var<uniform> props: LineEvaluatedPropsUBO;
 @group(1) @binding(0) var gradient_sampler: sampler;
 @group(1) @binding(1) var gradient_texture: texture_2d<f32>;
@@ -643,44 +556,6 @@ struct VertexOutput {
 #ifdef PROJECTION_GLOBE
     @location(9) v_tile_x: f32,
 #endif
-};
-
-struct LinePatternDrawableUBO {
-    matrix: mat4x4<f32>,
-    ratio: f32,
-    blur_t: f32,
-    opacity_t: f32,
-    gapwidth_t: f32,
-    offset_t: f32,
-    width_t: f32,
-    pattern_from_t: f32,
-    pattern_to_t: f32,
-    floorwidth_t: f32,
-    pad1: f32,
-    pad2: f32,
-    pad3: f32,
-    stride_pad: array<vec4<f32>, 1>,
-};
-
-struct LinePatternTilePropsUBO {
-    pattern_from: vec4<f32>,
-    pattern_to: vec4<f32>,
-    scale: vec4<f32>,
-    texsize: vec2<f32>,
-    fade: f32,
-    pad1: f32,
-};
-
-struct LineEvaluatedPropsUBO {
-    color: vec4<f32>,
-    blur: f32,
-    opacity: f32,
-    gapwidth: f32,
-    offset: f32,
-    width: f32,
-    floorwidth: f32,
-    pad0: f32,
-    pad1: f32,
 };
 
 @group(0) @binding(2) var<storage, read> drawableVector: array<LinePatternDrawableUBO>;
@@ -802,27 +677,6 @@ struct FragmentInput {
 #ifdef PROJECTION_GLOBE
     @location(9) v_tile_x: f32,
 #endif
-};
-
-struct LineEvaluatedPropsUBO {
-    color: vec4<f32>,
-    blur: f32,
-    opacity: f32,
-    gapwidth: f32,
-    offset: f32,
-    width: f32,
-    floorwidth: f32,
-    pad0: f32,
-    pad1: f32,
-};
-
-struct LinePatternTilePropsUBO {
-    pattern_from: vec4<f32>,
-    pattern_to: vec4<f32>,
-    scale: vec4<f32>,
-    texsize: vec2<f32>,
-    fade: f32,
-    pad1: f32,
 };
 
 @group(0) @binding(3) var<storage, read> tilePropsVector: array<LinePatternTilePropsUBO>;
@@ -988,44 +842,6 @@ struct VertexOutput {
 #endif
 };
 
-struct LineSDFDrawableUBO {
-    matrix: mat4x4<f32>,
-    patternscale_a: vec2<f32>,
-    patternscale_b: vec2<f32>,
-    tex_y_a: f32,
-    tex_y_b: f32,
-    ratio: f32,
-    color_t: f32,
-    blur_t: f32,
-    opacity_t: f32,
-    gapwidth_t: f32,
-    offset_t: f32,
-    width_t: f32,
-    floorwidth_t: f32,
-    atlas_height: f32,
-    pad2: f32,
-};
-
-struct LineSDFTilePropsUBO {
-    sdfgamma: f32,
-    mix: f32,
-    pad1: f32,
-    pad2: f32,
-    stride_pad: array<vec4<f32>, 3>,
-};
-
-struct LineEvaluatedPropsUBO {
-    color: vec4<f32>,
-    blur: f32,
-    opacity: f32,
-    gapwidth: f32,
-    offset: f32,
-    width: f32,
-    floorwidth: f32,
-    pad0: f32,
-    pad1: f32,
-};
-
 @group(0) @binding(2) var<storage, read> drawableVector: array<LineSDFDrawableUBO>;
 @group(0) @binding(3) var<storage, read> tilePropsVector: array<LineSDFTilePropsUBO>;
 @group(0) @binding(5) var<uniform> props: LineEvaluatedPropsUBO;
@@ -1179,26 +995,6 @@ struct FragmentInput {
 #endif
 };
 
-struct LineEvaluatedPropsUBO {
-    color: vec4<f32>,
-    blur: f32,
-    opacity: f32,
-    gapwidth: f32,
-    offset: f32,
-    width: f32,
-    floorwidth: f32,
-    pad0: f32,
-    pad1: f32,
-};
-
-struct LineSDFTilePropsUBO {
-    sdfgamma: f32,
-    mix: f32,
-    pad1: f32,
-    pad2: f32,
-    stride_pad: array<vec4<f32>, 3>,
-};
-
 @group(0) @binding(3) var<storage, read> tilePropsVector: array<LineSDFTilePropsUBO>;
 @group(0) @binding(5) var<uniform> props: LineEvaluatedPropsUBO;
 @group(1) @binding(0) var sdf_sampler: sampler;
@@ -1311,31 +1107,6 @@ struct VertexOutput {
 #endif
 };
 
-struct LineDrawableUBO {
-    matrix: mat4x4<f32>,
-    ratio: f32,
-    color_t: f32,
-    blur_t: f32,
-    opacity_t: f32,
-    gapwidth_t: f32,
-    offset_t: f32,
-    width_t: f32,
-    pad1: f32,
-    stride_pad: array<vec4<f32>, 2>,
-};
-
-struct LineEvaluatedPropsUBO {
-    color: vec4<f32>,
-    blur: f32,
-    opacity: f32,
-    gapwidth: f32,
-    offset: f32,
-    width: f32,
-    floorwidth: f32,
-    pad0: f32,
-    pad1: f32,
-};
-
 @group(0) @binding(2) var<storage, read> drawableVector: array<LineDrawableUBO>;
 @group(0) @binding(5) var<uniform> props: LineEvaluatedPropsUBO;
 
@@ -1443,18 +1214,6 @@ struct FragmentInput {
 #ifdef PROJECTION_GLOBE
     @location(6) v_tile_x: f32,
 #endif
-};
-
-struct LineEvaluatedPropsUBO {
-    color: vec4<f32>,
-    blur: f32,
-    opacity: f32,
-    gapwidth: f32,
-    offset: f32,
-    width: f32,
-    floorwidth: f32,
-    pad0: f32,
-    pad1: f32,
 };
 
 @group(0) @binding(5) var<uniform> props: LineEvaluatedPropsUBO;

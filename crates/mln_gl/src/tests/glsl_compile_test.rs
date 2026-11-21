@@ -11,9 +11,9 @@ use std::collections::BTreeSet;
 
 use mln_gfx::RendererBackend as _;
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::program::{Buffer, PROJECTION_BUFFER, Program, VIEW_BUFFER};
+use mln_gfx::shaders::program::{PROJECTION_BUFFER, Program, VIEW_BUFFER};
 use mln_gfx::shaders::program_parameters::ProgramParameters;
-use mln_gfx::shaders::source::glsl_es::{self, Glsl};
+use mln_gfx::shaders::source::glsl_es::Glsl;
 use mln_util::hash::HashSet;
 
 use crate::shaders::glsl_sources::stage_sources;
@@ -238,39 +238,13 @@ fn every_program_links_and_matches_its_declaration(backend: &mut RendererBackend
     assert!(compiled >= 2 * programs().len());
 }
 
-/// `text` without its comments, its whitespace runs one space.
-fn normalized(text: &str) -> String {
-    let mut code = String::with_capacity(text.len());
-    let mut rest = text;
-    while !rest.is_empty() {
-        if let Some(after) = rest.strip_prefix("//") {
-            rest = after.find('\n').map_or("", |end| &after[end..]);
-        } else if let Some(after) = rest.strip_prefix("/*") {
-            rest = after.find("*/").map_or("", |end| &after[end + 2..]);
-            code.push(' ');
-        } else {
-            let c = rest.chars().next().unwrap_or(' ');
-            code.push(c);
-            rest = &rest[c.len_utf8()..];
-        }
-    }
-    code.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-/// The stages declare every block they declare as `uniform_block!` lays it
-/// out.
+/// No source declares a block: the backend declares a stage's blocks, from
+/// their layouts.
 #[test]
-fn every_block_is_declared_as_its_layout_says() {
-    for (program, stages) in compiled_stages() {
-        let buffers = program.buffers.iter().chain([&VIEW_BUFFER, &PROJECTION_BUFFER]);
-        for block in buffers.filter_map(Buffer::block) {
-            for stage in &stages {
-                let stage = normalized(stage);
-                if stage.contains(&format!("uniform {} {{", block.name)) {
-                    let declaration = normalized(&glsl_es::declaration(block));
-                    assert!(stage.contains(&declaration), "{}: {declaration}", program.name);
-                }
-            }
+fn no_source_declares_a_block() {
+    for (program, source) in programs() {
+        for glsl in [source.vertex, source.fragment] {
+            assert!(declared_blocks(glsl).is_empty(), "{} declares {:?}", program.name, declared_blocks(glsl));
         }
     }
 }

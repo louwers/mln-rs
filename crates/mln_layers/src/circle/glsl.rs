@@ -47,21 +47,6 @@ layout(push_constant) uniform Constants {
     int ubo_index;
 } constant;
 
-struct CircleDrawableUBO {
-    mat4 matrix;
-    vec2 extrude_scale;
-    float color_t;
-    float radius_t;
-    float blur_t;
-    float opacity_t;
-    float stroke_color_t;
-    float stroke_width_t;
-    float stroke_opacity_t;
-    float globe_extrude_scale;
-    float pad2;
-    float pad3;
-};
-
 layout(std140, set = LAYER_SET_INDEX, binding = idCircleDrawableUBO) readonly buffer CircleDrawableUBOVector {
     CircleDrawableUBO drawable_ubo[];
 } drawableVector;
@@ -70,18 +55,9 @@ layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer
     ProjectionUBO projection_ubo[];
 } projectionVector;
 
-layout(set = LAYER_SET_INDEX, binding = idCircleEvaluatedPropsUBO) uniform CircleEvaluatedPropsUBO {
-    vec4 color;
-    vec4 stroke_color;
-    float radius;
-    float blur;
-    float opacity;
-    float stroke_width;
-    float stroke_opacity;
-    int scale_with_map;
-    int pitch_with_map;
-    float pad1;
-} props;
+layout(set = LAYER_SET_INDEX, binding = idCircleEvaluatedPropsUBO) uniform CircleEvaluatedPropsUBOBlock {
+    CircleEvaluatedPropsUBO props;
+};
 
 layout(location = 0) out vec2 frag_extrude;
 layout(location = 1) out float frag_antialiasblur;
@@ -255,18 +231,9 @@ layout(location = 8) in float frag_stroke_opacity;
 
 layout(location = 0) out vec4 out_color;
 
-layout(set = LAYER_SET_INDEX, binding = idCircleEvaluatedPropsUBO) uniform CircleEvaluatedPropsUBO {
-    vec4 color;
-    vec4 stroke_color;
-    float radius;
-    float blur;
-    float opacity;
-    float stroke_width;
-    float stroke_opacity;
-    int scale_with_map;
-    int pitch_with_map;
-    float pad1;
-} props;
+layout(set = LAYER_SET_INDEX, binding = idCircleEvaluatedPropsUBO) uniform CircleEvaluatedPropsUBOBlock {
+    CircleEvaluatedPropsUBO props;
+};
 
 void main() {
 

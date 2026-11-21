@@ -136,7 +136,7 @@ pub(super) const FILL_EXTRUSION_INSTANCED_SHADER: Msl = Msl {
     fragment_main_function: r"fragmentMain",
     prelude: concat!(
         wall_normal!(),
-        r#"
+        r"
 
 enum {
     idFillExtrusionDrawableUBO = idDrawableReservedVertexOnlyUBO,
@@ -145,49 +145,7 @@ enum {
     fillExtrusionUBOCount
 };
 
-struct alignas(16) FillExtrusionDrawableUBO {
-    float4x4 matrix;
-    float2 pixel_coord_upper;
-    float2 pixel_coord_lower;
-    float height_factor;
-    float tile_ratio;
-    float base_t;
-    float height_t;
-    float color_t;
-    float pattern_from_t;
-    float pattern_to_t;
-    uint paint_layout;
-};
-static_assert(sizeof(FillExtrusionDrawableUBO) == 112, "wrong size");
-
-struct alignas(16) FillExtrusionTilePropsUBO {
-    float4 pattern_from;
-    float4 pattern_to;
-    float2 texsize;
-    float pad1;
-    float pad2;
-};
-static_assert(sizeof(FillExtrusionTilePropsUBO) == 48, "wrong size");
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) FillExtrusionPropsUBO {
-    float4 color;
-    packed_float3 light_color;
-    float pad1;
-    packed_float3 light_position;
-    float base;
-    float height;
-    float light_intensity;
-    float vertical_gradient;
-    float opacity;
-    float fade;
-    float from_scale;
-    float to_scale;
-    float pad2;
-};
-static_assert(sizeof(FillExtrusionPropsUBO) == 80, "wrong size");
-
-"#
+"
     ),
     source: concat!(
         r"
@@ -311,7 +269,7 @@ pub(super) const FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: Msl = Msl {
     fragment_main_function: r"fragmentMain",
     prelude: concat!(
         wall_normal!(),
-        r#"
+        r"
 
 enum {
     idFillExtrusionDrawableUBO = idDrawableReservedVertexOnlyUBO,
@@ -320,49 +278,7 @@ enum {
     fillExtrusionUBOCount
 };
 
-struct alignas(16) FillExtrusionDrawableUBO {
-    float4x4 matrix;
-    float2 pixel_coord_upper;
-    float2 pixel_coord_lower;
-    float height_factor;
-    float tile_ratio;
-    float base_t;
-    float height_t;
-    float color_t;
-    float pattern_from_t;
-    float pattern_to_t;
-    uint paint_layout;
-};
-static_assert(sizeof(FillExtrusionDrawableUBO) == 112, "wrong size");
-
-struct alignas(16) FillExtrusionTilePropsUBO {
-    float4 pattern_from;
-    float4 pattern_to;
-    float2 texsize;
-    float pad1;
-    float pad2;
-};
-static_assert(sizeof(FillExtrusionTilePropsUBO) == 48, "wrong size");
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) FillExtrusionPropsUBO {
-    float4 color;
-    packed_float3 light_color;
-    float pad1;
-    packed_float3 light_position;
-    float base;
-    float height;
-    float light_intensity;
-    float vertical_gradient;
-    float opacity;
-    float fade;
-    float from_scale;
-    float to_scale;
-    float pad2;
-};
-static_assert(sizeof(FillExtrusionPropsUBO) == 80, "wrong size");
-
-"#
+"
     ),
     source: r"
 
@@ -581,7 +497,7 @@ fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]],
 pub(super) const FILL_EXTRUSION_PATTERN_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
+    prelude: r"
 
 enum {
     idFillExtrusionDrawableUBO = idDrawableReservedVertexOnlyUBO,
@@ -590,49 +506,7 @@ enum {
     fillExtrusionUBOCount
 };
 
-struct alignas(16) FillExtrusionDrawableUBO {
-    float4x4 matrix;
-    float2 pixel_coord_upper;
-    float2 pixel_coord_lower;
-    float height_factor;
-    float tile_ratio;
-    float base_t;
-    float height_t;
-    float color_t;
-    float pattern_from_t;
-    float pattern_to_t;
-    uint paint_layout;
-};
-static_assert(sizeof(FillExtrusionDrawableUBO) == 112, "wrong size");
-
-struct alignas(16) FillExtrusionTilePropsUBO {
-    float4 pattern_from;
-    float4 pattern_to;
-    float2 texsize;
-    float pad1;
-    float pad2;
-};
-static_assert(sizeof(FillExtrusionTilePropsUBO) == 48, "wrong size");
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) FillExtrusionPropsUBO {
-    float4 color;
-    packed_float3 light_color;
-    float pad1;
-    packed_float3 light_position;
-    float base;
-    float height;
-    float light_intensity;
-    float vertical_gradient;
-    float opacity;
-    float fade;
-    float from_scale;
-    float to_scale;
-    float pad2;
-};
-static_assert(sizeof(FillExtrusionPropsUBO) == 80, "wrong size");
-
-"#,
+",
     source: r"
 
 struct VertexStage {
@@ -821,7 +695,7 @@ fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]],
 pub(super) const FILL_EXTRUSION_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
+    prelude: r"
 
 enum {
     idFillExtrusionDrawableUBO = idDrawableReservedVertexOnlyUBO,
@@ -830,49 +704,7 @@ enum {
     fillExtrusionUBOCount
 };
 
-struct alignas(16) FillExtrusionDrawableUBO {
-    float4x4 matrix;
-    float2 pixel_coord_upper;
-    float2 pixel_coord_lower;
-    float height_factor;
-    float tile_ratio;
-    float base_t;
-    float height_t;
-    float color_t;
-    float pattern_from_t;
-    float pattern_to_t;
-    uint paint_layout;
-};
-static_assert(sizeof(FillExtrusionDrawableUBO) == 112, "wrong size");
-
-struct alignas(16) FillExtrusionTilePropsUBO {
-    float4 pattern_from;
-    float4 pattern_to;
-    float2 texsize;
-    float pad1;
-    float pad2;
-};
-static_assert(sizeof(FillExtrusionTilePropsUBO) == 48, "wrong size");
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) FillExtrusionPropsUBO {
-    float4 color;
-    packed_float3 light_color;
-    float pad1;
-    packed_float3 light_position;
-    float base;
-    float height;
-    float light_intensity;
-    float vertical_gradient;
-    float opacity;
-    float fade;
-    float from_scale;
-    float to_scale;
-    float pad2;
-};
-static_assert(sizeof(FillExtrusionPropsUBO) == 80, "wrong size");
-
-"#,
+",
     source: r"
 
 struct VertexStage {

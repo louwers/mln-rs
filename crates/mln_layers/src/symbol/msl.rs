@@ -32,7 +32,7 @@ macro_rules! sdf_px {
 pub(super) const COLLISION_BOX_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
+    prelude: r"
 
 enum {
     idCollisionDrawableUBO = idDrawableReservedVertexOnlyUBO,
@@ -42,19 +42,7 @@ enum {
     collisionUBOCount
 };
 
-struct alignas(16) CollisionDrawableUBO {
-    float4x4 matrix;
-};
-static_assert(sizeof(CollisionDrawableUBO) == 64, "wrong size");
-
-struct alignas(16) CollisionTilePropsUBO {
-    float2 extrude_scale;
-    float overscale_factor;
-    float pad1;
-};
-static_assert(sizeof(CollisionTilePropsUBO) == 16, "wrong size");
-
-"#,
+",
     source: r"
 
 struct VertexStage {
@@ -135,7 +123,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 pub(super) const COLLISION_CIRCLE_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
+    prelude: r"
 
 enum {
     idCollisionDrawableUBO = idDrawableReservedVertexOnlyUBO,
@@ -145,19 +133,7 @@ enum {
     collisionUBOCount
 };
 
-struct alignas(16) CollisionDrawableUBO {
-    float4x4 matrix;
-};
-static_assert(sizeof(CollisionDrawableUBO) == 64, "wrong size");
-
-struct alignas(16) CollisionTilePropsUBO {
-    float2 extrude_scale;
-    float overscale_factor;
-    float pad1;
-};
-static_assert(sizeof(CollisionTilePropsUBO) == 16, "wrong size");
-
-"#,
+",
     source: r"
 
 struct VertexStage {
@@ -259,7 +235,7 @@ pub(super) const SYMBOL_ICON_SHADER: Msl = Msl {
     fragment_main_function: r"fragmentMain",
     prelude: concat!(
         unpack_opacity!(),
-        r#"
+        r"
 
 enum {
     idSymbolDrawableUBO = idDrawableReservedVertexOnlyUBO,
@@ -268,62 +244,9 @@ enum {
     symbolUBOCount
 };
 
-struct alignas(16) SymbolDrawableUBO {
-    float4x4 matrix;
-    float4x4 label_plane_matrix;
-    float4x4 coord_matrix;
-    float2 texsize;
-    float2 texsize_icon;
-    int is_text_prop;
-    int rotate_symbol;
-    int pitch_with_map;
-    int is_size_zoom_constant;
-    int is_size_feature_constant;
-    int is_offset;
-    float size_t;
-    float size;
-    float fill_color_t;
-    float halo_color_t;
-    float opacity_t;
-    float halo_width_t;
-    float halo_blur_t;
-    int is_along_line;
-    int is_variable_anchor;
-    float pitched_scale;
-    float2 translation;
-    float gamma_scale;
-    int is_halo_pass;
-};
-static_assert(sizeof(SymbolDrawableUBO) == 288, "wrong size");
-
-struct alignas(16) SymbolTilePropsUBO {
-    int is_text;
-    int is_halo;
-    float pad1;
-    float pad2;
-};
-static_assert(sizeof(SymbolTilePropsUBO) == 16, "wrong size");
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) SymbolEvaluatedPropsUBO {
-    float4 text_fill_color;
-    float4 text_halo_color;
-    float text_opacity;
-    float text_halo_width;
-    float text_halo_blur;
-    float pad1;
-    float4 icon_fill_color;
-    float4 icon_halo_color;
-    float icon_opacity;
-    float icon_halo_width;
-    float icon_halo_blur;
-    float fade_change;
-};
-static_assert(sizeof(SymbolEvaluatedPropsUBO) == 96, "wrong size");
-
 #define c_offscreen_degenerate_triangle_location -2.0
 
-"#
+"
     ),
     source: r"
 
@@ -519,7 +442,7 @@ pub(super) const SYMBOL_SDF_SHADER: Msl = Msl {
     prelude: concat!(
         sdf_px!(),
         unpack_opacity!(),
-        r#"
+        r"
 
 enum {
     idSymbolDrawableUBO = idDrawableReservedVertexOnlyUBO,
@@ -528,62 +451,9 @@ enum {
     symbolUBOCount
 };
 
-struct alignas(16) SymbolDrawableUBO {
-    float4x4 matrix;
-    float4x4 label_plane_matrix;
-    float4x4 coord_matrix;
-    float2 texsize;
-    float2 texsize_icon;
-    int is_text_prop;
-    int rotate_symbol;
-    int pitch_with_map;
-    int is_size_zoom_constant;
-    int is_size_feature_constant;
-    int is_offset;
-    float size_t;
-    float size;
-    float fill_color_t;
-    float halo_color_t;
-    float opacity_t;
-    float halo_width_t;
-    float halo_blur_t;
-    int is_along_line;
-    int is_variable_anchor;
-    float pitched_scale;
-    float2 translation;
-    float gamma_scale;
-    int is_halo_pass;
-};
-static_assert(sizeof(SymbolDrawableUBO) == 288, "wrong size");
-
-struct alignas(16) SymbolTilePropsUBO {
-    int is_text;
-    int is_halo;
-    float pad1;
-    float pad2;
-};
-static_assert(sizeof(SymbolTilePropsUBO) == 16, "wrong size");
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) SymbolEvaluatedPropsUBO {
-    float4 text_fill_color;
-    float4 text_halo_color;
-    float text_opacity;
-    float text_halo_width;
-    float text_halo_blur;
-    float pad1;
-    float4 icon_fill_color;
-    float4 icon_halo_color;
-    float icon_opacity;
-    float icon_halo_width;
-    float icon_halo_blur;
-    float fade_change;
-};
-static_assert(sizeof(SymbolEvaluatedPropsUBO) == 96, "wrong size");
-
 #define c_offscreen_degenerate_triangle_location -2.0
 
-"#
+"
     ),
     source: r"
 
@@ -856,7 +726,7 @@ pub(super) const SYMBOL_TEXT_AND_ICON_SHADER: Msl = Msl {
     prelude: concat!(
         sdf_px!(),
         unpack_opacity!(),
-        r#"
+        r"
 
 enum {
     idSymbolDrawableUBO = idDrawableReservedVertexOnlyUBO,
@@ -865,62 +735,9 @@ enum {
     symbolUBOCount
 };
 
-struct alignas(16) SymbolDrawableUBO {
-    float4x4 matrix;
-    float4x4 label_plane_matrix;
-    float4x4 coord_matrix;
-    float2 texsize;
-    float2 texsize_icon;
-    int is_text_prop;
-    int rotate_symbol;
-    int pitch_with_map;
-    int is_size_zoom_constant;
-    int is_size_feature_constant;
-    int is_offset;
-    float size_t;
-    float size;
-    float fill_color_t;
-    float halo_color_t;
-    float opacity_t;
-    float halo_width_t;
-    float halo_blur_t;
-    int is_along_line;
-    int is_variable_anchor;
-    float pitched_scale;
-    float2 translation;
-    float gamma_scale;
-    int is_halo_pass;
-};
-static_assert(sizeof(SymbolDrawableUBO) == 288, "wrong size");
-
-struct alignas(16) SymbolTilePropsUBO {
-    int is_text;
-    int is_halo;
-    float pad1;
-    float pad2;
-};
-static_assert(sizeof(SymbolTilePropsUBO) == 16, "wrong size");
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) SymbolEvaluatedPropsUBO {
-    float4 text_fill_color;
-    float4 text_halo_color;
-    float text_opacity;
-    float text_halo_width;
-    float text_halo_blur;
-    float pad1;
-    float4 icon_fill_color;
-    float4 icon_halo_color;
-    float icon_opacity;
-    float icon_halo_width;
-    float icon_halo_blur;
-    float fade_change;
-};
-static_assert(sizeof(SymbolEvaluatedPropsUBO) == 96, "wrong size");
-
 #define c_offscreen_degenerate_triangle_location -2.0
 
-"#
+"
     ),
     source: r"
 

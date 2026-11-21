@@ -2,7 +2,9 @@
 //!
 //! A layer type's module has its programs (`programs`), each a `static`
 //! `Program` that declares what its shaders bind and carries their sources,
-//! the uniform blocks its shaders read (`ubo`), and a module of sources for
+//! the uniform blocks its shaders read (`ubo`), each declared once with
+//! `mln_gfx::uniform_block!`, which the backends declare in each language
+//! for the programs that read them, and a module of sources for
 //! each shading language: `wgsl` for `mln_webgpu`, `msl` for `mln_mtl`,
 //! `glsl_es` for `mln_gl`, and `glsl` for `mln_vulkan` and `mln_d3d12`,
 //! which parse it with `mln_glsl`. A language's sources build with the
@@ -32,9 +34,6 @@
 //!   source's maxzoom, their pattern positions outgrow a 16-bit mediump
 //!   float (maplibre/maplibre-native#4951). The background pattern draws at
 //!   the current zoom, so its positions stay small.
-//! - Fragment shaders declare the uniform blocks they share with their
-//!   vertex shader first, in the vertex shader's order, which SwiftShader
-//!   needs (maplibre/maplibre-native#4625, and `line_gradient_sdf`).
 //! - The fill extrusion programs have the roofs' attributes, and the
 //!   instanced ones, which the renderer draws the walls with, the instances'.
 //!

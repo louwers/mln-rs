@@ -54,37 +54,6 @@ struct VertexOutput {
 #endif
 };
 
-struct FillPatternDrawableUBO {
-    matrix: mat4x4<f32>,
-    pixel_coord_upper: vec2<f32>,
-    pixel_coord_lower: vec2<f32>,
-    tile_ratio: f32,
-    pattern_from_t: f32,
-    pattern_to_t: f32,
-    opacity_t: f32,
-    color_t: f32,
-    pad1: f32,
-    pad2: f32,
-    pad3: f32,
-};
-
-struct FillPatternTilePropsUBO {
-    pattern_from: vec4<f32>,
-    pattern_to: vec4<f32>,
-    texsize: vec2<f32>,
-    sdf: f32,
-    pad2: f32,
-};
-
-struct FillEvaluatedPropsUBO {
-    color: vec4<f32>,
-    outline_color: vec4<f32>,
-    opacity: f32,
-    fade: f32,
-    from_scale: f32,
-    to_scale: f32,
-};
-
 @group(0) @binding(2) var<storage, read> drawableVector: array<FillPatternDrawableUBO>;
 @group(0) @binding(5) var<storage, read> tilePropsVector: array<FillPatternTilePropsUBO>;
 @group(0) @binding(6) var<uniform> props: FillEvaluatedPropsUBO;
@@ -187,23 +156,6 @@ struct FragmentInput {
 #ifndef HAS_UNIFORM_u_opacity
     @location(6) opacity: f32,
 #endif
-};
-
-struct FillPatternTilePropsUBO {
-    pattern_from: vec4<f32>,
-    pattern_to: vec4<f32>,
-    texsize: vec2<f32>,
-    sdf: f32,
-    pad2: f32,
-};
-
-struct FillEvaluatedPropsUBO {
-    color: vec4<f32>,
-    outline_color: vec4<f32>,
-    opacity: f32,
-    fade: f32,
-    from_scale: f32,
-    to_scale: f32,
 };
 
 @group(0) @binding(5) var<storage, read> tilePropsVector: array<FillPatternTilePropsUBO>;
@@ -311,24 +263,6 @@ struct VertexOutput {
     @location(2) pos: vec2<f32>,
 };
 
-struct FillOutlineDrawableUBO {
-    matrix: mat4x4<f32>,
-    outline_color_t: f32,
-    opacity_t: f32,
-    paint_layout: u32,
-    pad2: f32,
-    stride_pad: array<vec4<f32>, 2>,
-};
-
-struct FillEvaluatedPropsUBO {
-    color: vec4<f32>,
-    outline_color: vec4<f32>,
-    opacity: f32,
-    fade: f32,
-    from_scale: f32,
-    to_scale: f32,
-};
-
 @group(0) @binding(2) var<storage, read> drawableVector: array<FillOutlineDrawableUBO>;
 @group(0) @binding(6) var<uniform> props: FillEvaluatedPropsUBO;
 
@@ -358,15 +292,6 @@ fn main(in: VertexInput) -> VertexOutput {
     ),
     fragment: Some(
         r"
-struct FillEvaluatedPropsUBO {
-    color: vec4<f32>,
-    outline_color: vec4<f32>,
-    opacity: f32,
-    fade: f32,
-    from_scale: f32,
-    to_scale: f32,
-};
-
 @group(0) @binding(6) var<uniform> props: FillEvaluatedPropsUBO;
 
 struct FragmentInput {
@@ -446,37 +371,6 @@ struct VertexOutput {
 #ifndef HAS_UNIFORM_u_opacity
     @location(5) opacity: f32,
 #endif
-};
-
-struct FillPatternDrawableUBO {
-    matrix: mat4x4<f32>,
-    pixel_coord_upper: vec2<f32>,
-    pixel_coord_lower: vec2<f32>,
-    tile_ratio: f32,
-    pattern_from_t: f32,
-    pattern_to_t: f32,
-    opacity_t: f32,
-    color_t: f32,
-    pad1: f32,
-    pad2: f32,
-    pad3: f32,
-};
-
-struct FillPatternTilePropsUBO {
-    pattern_from: vec4<f32>,
-    pattern_to: vec4<f32>,
-    texsize: vec2<f32>,
-    sdf: f32,
-    pad2: f32,
-};
-
-struct FillEvaluatedPropsUBO {
-    color: vec4<f32>,
-    outline_color: vec4<f32>,
-    opacity: f32,
-    fade: f32,
-    from_scale: f32,
-    to_scale: f32,
 };
 
 @group(0) @binding(2) var<storage, read> drawableVector: array<FillPatternDrawableUBO>;
@@ -574,23 +468,6 @@ struct FragmentInput {
 #ifndef HAS_UNIFORM_u_opacity
     @location(5) opacity: f32,
 #endif
-};
-
-struct FillPatternTilePropsUBO {
-    pattern_from: vec4<f32>,
-    pattern_to: vec4<f32>,
-    texsize: vec2<f32>,
-    sdf: f32,
-    pad2: f32,
-};
-
-struct FillEvaluatedPropsUBO {
-    color: vec4<f32>,
-    outline_color: vec4<f32>,
-    opacity: f32,
-    fade: f32,
-    from_scale: f32,
-    to_scale: f32,
 };
 
 @group(0) @binding(5) var<storage, read> tilePropsVector: array<FillPatternTilePropsUBO>;
@@ -692,24 +569,6 @@ struct VertexOutput {
 #endif
 };
 
-struct FillDrawableUBO {
-    matrix: mat4x4<f32>,
-    color_t: f32,
-    opacity_t: f32,
-    pad1: f32,
-    pad2: f32,
-    stride_pad: array<vec4<f32>, 2>,
-};
-
-struct FillEvaluatedPropsUBO {
-    color: vec4<f32>,
-    outline_color: vec4<f32>,
-    opacity: f32,
-    fade: f32,
-    from_scale: f32,
-    to_scale: f32,
-};
-
 @group(0) @binding(2) var<storage, read> drawableVector: array<FillDrawableUBO>;
 @group(0) @binding(6) var<uniform> props: FillEvaluatedPropsUBO;
 
@@ -736,15 +595,6 @@ fn main(in: VertexInput) -> VertexOutput {
     ),
     fragment: Some(
         r"
-struct FillEvaluatedPropsUBO {
-    color: vec4<f32>,
-    outline_color: vec4<f32>,
-    opacity: f32,
-    fade: f32,
-    from_scale: f32,
-    to_scale: f32,
-};
-
 @group(0) @binding(6) var<uniform> props: FillEvaluatedPropsUBO;
 
 struct FragmentInput {
@@ -787,7 +637,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 /// `outline_corner`, the quad's corner of the attributes' segment.
 macro_rules! outline_corner {
     () => {
-        r#"
+        r"
 // The width of the outline in pixels.
 const LINE_WIDTH: f32 = 2.0;
 
@@ -842,14 +692,14 @@ fn outline_corner(start: vec4<f32>, end: vec4<f32>, corner: vec2<i32>) -> Outlin
     out.t = select(ta, tb, at_end);
     return out;
 }
-"#
+"
     };
 }
 
 /// The vertex output, UBOs and bindings of the outlines without a pattern.
 macro_rules! plain_declarations {
     () => {
-        r#"
+        r"
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
 #ifndef HAS_UNIFORM_u_outline_color
@@ -861,34 +711,16 @@ struct VertexOutput {
     @location(2) pos: vec2<f32>,
 };
 
-struct FillOutlineDrawableUBO {
-    matrix: mat4x4<f32>,
-    outline_color_t: f32,
-    opacity_t: f32,
-    paint_layout: u32,
-    pad2: f32,
-    stride_pad: array<vec4<f32>, 2>,
-};
-
-struct FillEvaluatedPropsUBO {
-    color: vec4<f32>,
-    outline_color: vec4<f32>,
-    opacity: f32,
-    fade: f32,
-    from_scale: f32,
-    to_scale: f32,
-};
-
 @group(0) @binding(2) var<storage, read> drawableVector: array<FillOutlineDrawableUBO>;
 @group(0) @binding(6) var<uniform> props: FillEvaluatedPropsUBO;
-"#
+"
     };
 }
 
 /// The instanced fill outlines.
 pub(super) const FILL_OUTLINE_INSTANCED_SHADER: Wgsl = Wgsl {
     vertex: Some(concat!(
-        r#"
+        r"
 struct VertexInput {
     @location(0) corner: vec2<i32>,
     @location(3) outline_pos: vec2<i32>,
@@ -900,10 +732,10 @@ struct VertexInput {
     @location(2) opacity: vec2<f32>,
 #endif
 };
-"#,
+",
         plain_declarations!(),
         outline_corner!(),
-        r#"
+        r"
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
@@ -926,7 +758,7 @@ fn main(in: VertexInput) -> VertexOutput {
 
     return out;
 }
-"#
+"
     )),
     fragment: FILL_OUTLINE_SHADER.fragment,
     prelude: None,
@@ -936,7 +768,7 @@ fn main(in: VertexInput) -> VertexOutput {
 pub(super) const FILL_OUTLINE_PULLED_SHADER: Wgsl = Wgsl {
     vertex: Some(concat!(
         plain_declarations!(),
-        r#"
+        r"
 // The fill's vertices and the ends of the outline segments that start at
 // them, a word each: x and y in its halves.
 @group(0) @binding(7) var<storage, read> outlineVertices: array<u32>;
@@ -952,9 +784,9 @@ pub(super) const FILL_OUTLINE_PULLED_SHADER: Wgsl = Wgsl {
 fn tile_position(word: u32) -> vec2<f32> {
     return vec2<f32>(vec2<i32>(i32(word << 16u) >> 16u, i32(word) >> 16u));
 }
-"#,
+",
         outline_corner!(),
-        r#"
+        r"
 @vertex
 fn main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     var out: VertexOutput;
@@ -989,7 +821,7 @@ fn main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
 
     return out;
 }
-"#
+"
     )),
     fragment: FILL_OUTLINE_SHADER.fragment,
     prelude: None,
@@ -998,7 +830,7 @@ fn main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
 /// The instanced fill outlines of a pattern.
 pub(super) const FILL_OUTLINE_PATTERN_INSTANCED_SHADER: Wgsl = Wgsl {
     vertex: Some(concat!(
-        r#"
+        r"
 struct VertexInput {
     @location(0) corner: vec2<i32>,
     @location(5) outline_pos: vec2<i32>,
@@ -1036,43 +868,12 @@ struct VertexOutput {
 #endif
 };
 
-struct FillPatternDrawableUBO {
-    matrix: mat4x4<f32>,
-    pixel_coord_upper: vec2<f32>,
-    pixel_coord_lower: vec2<f32>,
-    tile_ratio: f32,
-    pattern_from_t: f32,
-    pattern_to_t: f32,
-    opacity_t: f32,
-    color_t: f32,
-    pad1: f32,
-    pad2: f32,
-    pad3: f32,
-};
-
-struct FillPatternTilePropsUBO {
-    pattern_from: vec4<f32>,
-    pattern_to: vec4<f32>,
-    texsize: vec2<f32>,
-    sdf: f32,
-    pad2: f32,
-};
-
-struct FillEvaluatedPropsUBO {
-    color: vec4<f32>,
-    outline_color: vec4<f32>,
-    opacity: f32,
-    fade: f32,
-    from_scale: f32,
-    to_scale: f32,
-};
-
 @group(0) @binding(2) var<storage, read> drawableVector: array<FillPatternDrawableUBO>;
 @group(0) @binding(5) var<storage, read> tilePropsVector: array<FillPatternTilePropsUBO>;
 @group(0) @binding(6) var<uniform> props: FillEvaluatedPropsUBO;
-"#,
+",
         outline_corner!(),
-        r#"
+        r"
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
@@ -1126,7 +927,7 @@ fn main(in: VertexInput) -> VertexOutput {
 
     return out;
 }
-"#
+"
     )),
     fragment: FILL_OUTLINE_PATTERN_SHADER.fragment,
     prelude: None,

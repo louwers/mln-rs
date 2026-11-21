@@ -5,7 +5,7 @@ use mln_gfx::shaders::source::msl::Msl;
 pub(super) const HEATMAP_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
+    prelude: r"
 
 enum {
     idHeatmapDrawableUBO = idDrawableReservedVertexOnlyUBO,
@@ -13,25 +13,7 @@ enum {
     heatmapUBOCount
 };
 
-struct alignas(16) HeatmapDrawableUBO {
-    float4x4 matrix;
-    float extrude_scale;
-    float weight_t;
-    float radius_t;
-    float globe_extrude_scale;
-};
-static_assert(sizeof(HeatmapDrawableUBO) == 80, "wrong size");
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) HeatmapEvaluatedPropsUBO {
-    float weight;
-    float radius;
-    float intensity;
-    float padding;
-};
-static_assert(sizeof(HeatmapEvaluatedPropsUBO) == 16, "wrong size");
-
-"#,
+",
     source: r#"
 
 struct VertexStage {
@@ -147,23 +129,14 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 pub(super) const HEATMAP_TEXTURE_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
+    prelude: r"
 
 enum {
     idHeatmapTexturePropsUBO = drawableReservedUBOCount,
     heatmapTextureUBOCount
 };
 
-struct alignas(16) HeatmapTexturePropsUBO {
-    float4x4 matrix;
-    float opacity;
-    float pad1;
-    float pad2;
-    float pad3;
-};
-static_assert(sizeof(HeatmapTexturePropsUBO) == 80, "wrong size");
-
-"#,
+",
     source: r"
 
 struct VertexStage {

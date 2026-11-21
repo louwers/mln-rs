@@ -8,8 +8,9 @@ use std::borrow::Cow;
 use mln_gfx::color_mode::BlendFunction;
 use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
 use mln_gfx::gpu::{FixedState, GpuError, ShaderKey, VertexBufferLayout, VertexStep};
-use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::source::wgsl::Wgsl;
+use mln_gfx::shaders::program::{PROJECTION_BUFFER, Program, VIEW_BUFFER};
+use mln_gfx::shaders::source::identifiers;
+use mln_gfx::shaders::source::wgsl::{self, Wgsl};
 use mln_gfx::types::{
     ColorBlendEquationType, ColorBlendFactorType, CullFaceSideType, CullFaceWindingType, DepthFunctionType,
     StencilFunctionType, StencilOpType,
@@ -769,36 +770,55 @@ fn analyze_shader_bindings(binding_infos: &mut Vec<BindingInfo>, source: &str, s
     }
 }
 
-/// Compiles the program of `key` from its WGSL: the common prelude, the
-/// declarations of the engine's buffers that the stage reads, the program's
-/// own prelude and each stage, preprocessed with the key's defines. Fails
+/// Compiles the program of `key` from its WGSL ([`stage_sources`]). Fails
 /// with [`GpuError::Unsupported`] for a program without WGSL.
 pub(crate) fn compile(
     device: &wgpu::Device,
     index_layout: &wgpu::BindGroupLayout,
     key: &ShaderKey,
 ) -> Result<ShaderProgram, GpuError> {
+    let [vertex_source, fragment_source] = stage_sources(key)?;
+    let pixel_ratio = key
+        .define_values()
+        .find(|&(name, _)| name == PIXEL_RATIO_OVERRIDE)
+        .and_then(|(_, value)| value.parse().ok())
+        .unwrap_or(1.0);
+    ShaderProgram::new(device, index_layout, &vertex_source, &fragment_source, key.program(), pixel_ratio)
+}
+
+/// The vertex and fragment stages of `key`'s program: the common prelude,
+/// the structs of the engine's blocks and the program's, the declarations of
+/// the engine's buffers that the stage reads, the program's own prelude and
+/// the stage, preprocessed with the key's defines. Fails with
+/// [`GpuError::Unsupported`] for a program without WGSL.
+pub(crate) fn stage_sources(key: &ShaderKey) -> Result<[String; 2], GpuError> {
     let program = key.program();
     let source: &Wgsl =
         program.sources.wgsl.ok_or_else(|| GpuError::Unsupported(format!("no WGSL for {}", program.name)))?;
     // The common prelude goes through the preprocessor with the program, so
     // its `#ifdef`s see the defines.
     let shader_prelude = source.prelude.unwrap_or("");
+    let blocks = block_declarations(program);
     let assemble = |stage: Option<&str>| {
         let stage = stage.unwrap_or("");
-        format!("{PRELUDE}\n{}{shader_prelude}{stage}", reserved_bindings(&[shader_prelude, stage]))
+        format!("{PRELUDE}\n{blocks}{}{shader_prelude}{stage}", reserved_bindings(&[shader_prelude, stage]))
     };
     // WGSL reads no define's value; the pixel ratio's is an override's.
     let defines: HashMap<String, bool> = key.define_values().map(|(name, _)| (name.to_owned(), true)).collect();
-    let vertex_source = preprocess_wgsl(&assemble(source.vertex), &defines);
-    let fragment_source = preprocess_wgsl(&assemble(source.fragment), &defines);
-    let pixel_ratio = key
-        .define_values()
-        .find(|&(name, _)| name == PIXEL_RATIO_OVERRIDE)
-        .and_then(|(_, value)| value.parse().ok())
-        .unwrap_or(1.0);
+    Ok([source.vertex, source.fragment].map(|stage| preprocess_wgsl(&assemble(stage), &defines)))
+}
 
-    ShaderProgram::new(device, index_layout, &vertex_source, &fragment_source, program, pixel_ratio)
+/// The structs of the blocks of the engine's buffers and `program`'s, each a
+/// storage buffer's element padded to its stride.
+fn block_declarations(program: &Program) -> String {
+    let buffers = [&VIEW_BUFFER, &PROJECTION_BUFFER].into_iter().chain(program.buffers);
+    let mut declarations = String::new();
+    for buffer in buffers {
+        if let Some(block) = buffer.block() {
+            declarations.push_str(&wgsl::declaration(block, buffer.size()));
+        }
+    }
+    declarations
 }
 
 /// The declarations of the engine's buffers that `texts`, a stage and the
@@ -812,14 +832,6 @@ fn reserved_bindings(texts: &[&str]) -> String {
         declarations.push('\n');
     }
     declarations
-}
-
-/// The identifiers of `text`, outside its `//` comments.
-fn identifiers(text: &str) -> impl Iterator<Item = &str> {
-    text.lines()
-        .map(|line| line.split_once("//").map_or(line, |(code, _)| code))
-        .flat_map(|code| code.split(|c: char| !c.is_ascii_alphanumeric() && c != '_'))
-        .filter(|word| !word.is_empty())
 }
 
 /// How the backend declares `globalIndex`.

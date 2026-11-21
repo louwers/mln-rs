@@ -16,25 +16,6 @@ struct VertexOutput {
     @location(1) pos1: vec2<f32>,
 };
 
-struct RasterDrawableUBO {
-    matrix: mat4x4<f32>,
-};
-
-struct RasterEvaluatedPropsUBO {
-    spin_weights: vec4<f32>,
-    tl_parent: vec2<f32>,
-    scale_parent: f32,
-    buffer_scale: f32,
-    fade_t: f32,
-    opacity: f32,
-    brightness_low: f32,
-    brightness_high: f32,
-    saturation_factor: f32,
-    contrast_factor: f32,
-    pad1: f32,
-    pad2: f32,
-};
-
 @group(0) @binding(2) var<storage, read> drawableVector: array<RasterDrawableUBO>;
 @group(0) @binding(5) var<uniform> props: RasterEvaluatedPropsUBO;
 
@@ -60,21 +41,6 @@ fn main(in: VertexInput) -> VertexOutput {
 struct FragmentInput {
     @location(0) pos0: vec2<f32>,
     @location(1) pos1: vec2<f32>,
-};
-
-struct RasterEvaluatedPropsUBO {
-    spin_weights: vec4<f32>,
-    tl_parent: vec2<f32>,
-    scale_parent: f32,
-    buffer_scale: f32,
-    fade_t: f32,
-    opacity: f32,
-    brightness_low: f32,
-    brightness_high: f32,
-    saturation_factor: f32,
-    contrast_factor: f32,
-    pad1: f32,
-    pad2: f32,
 };
 
 @group(0) @binding(5) var<uniform> props: RasterEvaluatedPropsUBO;

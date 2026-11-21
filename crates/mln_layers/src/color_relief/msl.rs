@@ -5,7 +5,7 @@ use mln_gfx::shaders::source::msl::Msl;
 pub(super) const COLOR_RELIEF_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
+    prelude: r"
 
 enum {
     idColorReliefDrawableUBO = idDrawableReservedVertexOnlyUBO,
@@ -14,28 +14,7 @@ enum {
     colorReliefUBOCount
 };
 
-struct alignas(16) ColorReliefDrawableUBO {
-    float4x4 matrix;
-};
-static_assert(sizeof(ColorReliefDrawableUBO) == 64, "wrong size");
-
-struct alignas(16) ColorReliefTilePropsUBO {
-    float4 unpack;
-    float2 dimension;
-    int color_ramp_size;
-    float pad_tile0;
-};
-static_assert(sizeof(ColorReliefTilePropsUBO) == 32, "wrong size");
-
-struct alignas(16) ColorReliefEvaluatedPropsUBO {
-    float opacity;
-    float pad_eval0;
-    float pad_eval1;
-    float pad_eval2;
-};
-static_assert(sizeof(ColorReliefEvaluatedPropsUBO) == 16, "wrong size");
-
-"#,
+",
     source: r"
 
 struct VertexStage {

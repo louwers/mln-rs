@@ -6,21 +6,6 @@ pub(super) const HEATMAP_SHADER: Glsl = Glsl {
     vertex: r#"layout (location = 0) in vec2 a_pos;
 out vec2 v_extrude;
 
-layout (std140) uniform HeatmapDrawableUBO {
-    highp mat4 u_matrix;
-    highp float u_extrude_scale;
-    lowp float u_weight_t;
-    lowp float u_radius_t;
-    highp float u_globe_extrude_scale;
-};
-
-layout (std140) uniform HeatmapEvaluatedPropsUBO {
-    highp float u_weight;
-    highp float u_radius;
-    highp float u_intensity;
-    highp float HeatmapEvaluatedPropsUBO_padding;
-};
-
 #ifndef HAS_UNIFORM_u_weight
 layout (location = 1) in highp vec2 a_weight;
 out highp float weight;
@@ -88,13 +73,6 @@ mediump float radius = u_radius;
 "#,
     fragment: r"in vec2 v_extrude;
 
-layout (std140) uniform HeatmapEvaluatedPropsUBO {
-    highp float u_weight;
-    highp float u_radius;
-    highp float u_intensity;
-    highp float HeatmapEvaluatedPropsUBO_padding;
-};
-
 #ifndef HAS_UNIFORM_u_weight
 in highp float weight;
 #endif
@@ -124,14 +102,6 @@ pub(super) const HEATMAP_TEXTURE_SHADER: Glsl = Glsl {
     vertex: r"layout (location = 0) in vec2 a_pos;
 out vec2 v_pos;
 
-layout (std140) uniform HeatmapTexturePropsUBO {
-    highp mat4 u_matrix;
-    highp float u_opacity;
-    highp float HeatmapTexturePropsUBO_pad1;
-    highp float HeatmapTexturePropsUBO_pad2;
-    highp float HeatmapTexturePropsUBO_pad3;
-};
-
 void main() {
     gl_Position = u_matrix * vec4(a_pos * u_target_size, 0, 1);
 
@@ -142,14 +112,6 @@ void main() {
     fragment: r"in highp vec2 v_pos;
 uniform sampler2D u_image;
 uniform sampler2D u_color_ramp;
-
-layout (std140) uniform HeatmapTexturePropsUBO {
-    highp mat4 u_matrix;
-    highp float u_opacity;
-    highp float HeatmapTexturePropsUBO_pad1;
-    highp float HeatmapTexturePropsUBO_pad2;
-    highp float HeatmapTexturePropsUBO_pad3;
-};
 
 void main() {
     float t = texture(u_image, v_pos).r;

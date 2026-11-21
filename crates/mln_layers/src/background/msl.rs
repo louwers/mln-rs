@@ -5,7 +5,7 @@ use mln_gfx::shaders::source::msl::Msl;
 pub(super) const BACKGROUND_PATTERN_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
+    prelude: r"
 
 enum {
     idBackgroundDrawableUBO = idDrawableReservedVertexOnlyUBO,
@@ -16,60 +16,10 @@ enum {
 //
 // Background
 
-struct alignas(16) BackgroundDrawableUBO {
-    float4x4 matrix;
-    float4 stride_pad[2];
-};
-static_assert(sizeof(BackgroundDrawableUBO) == 96, "wrong size");
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) BackgroundPropsUBO {
-    float4 color;
-    float opacity;
-    float pad1;
-    float pad2;
-    float pad3;
-};
-static_assert(sizeof(BackgroundPropsUBO) == 32, "wrong size");
-
 //
 // Background pattern
 
-struct alignas(16) BackgroundPatternDrawableUBO {
-    float4x4 matrix;
-    float2 pixel_coord_upper;
-    float2 pixel_coord_lower;
-    float tile_units_to_pixels;
-    float pad1;
-    float pad2;
-    float pad3;
-};
-static_assert(sizeof(BackgroundPatternDrawableUBO) == 96, "wrong size");
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) BackgroundPatternPropsUBO {
-    float2 pattern_tl_a;
-    float2 pattern_br_a;
-    float2 pattern_tl_b;
-    float2 pattern_br_b;
-    float2 pattern_size_a;
-    float2 pattern_size_b;
-    float scale_a;
-    float scale_b;
-    float mix;
-    float opacity;
-    float2 texsize;
-    float pad1;
-    float pad2;
-};
-static_assert(sizeof(BackgroundPatternPropsUBO) == 80, "wrong size");
-
-union BackgroundDrawableUnionUBO {
-    BackgroundDrawableUBO backgroundDrawableUBO;
-    BackgroundPatternDrawableUBO backgroundPatternDrawableUBO;
-};
-
-"#,
+",
     source: r"
 
 struct VertexStage {
@@ -84,11 +34,11 @@ struct FragmentStage {
 
 FragmentStage vertex vertexMain(VertexStage in [[stage_in]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const BackgroundDrawableUnionUBO* drawableVector [[buffer(idBackgroundDrawableUBO)]],
+                                device const BackgroundPatternDrawableUBO* drawableVector [[buffer(idBackgroundDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const BackgroundPatternPropsUBO& props [[buffer(idBackgroundPropsUBO)]]) {
 
-    device const BackgroundPatternDrawableUBO& drawable = drawableVector[uboIndex].backgroundPatternDrawableUBO;
+    device const BackgroundPatternDrawableUBO& drawable = drawableVector[uboIndex];
 
     const float2 pos = float2(in.position);
     const float2 pos_a = get_pattern_pos(drawable.pixel_coord_upper,
@@ -139,7 +89,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 pub(super) const BACKGROUND_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
+    prelude: r"
 
 enum {
     idBackgroundDrawableUBO = idDrawableReservedVertexOnlyUBO,
@@ -150,60 +100,10 @@ enum {
 //
 // Background
 
-struct alignas(16) BackgroundDrawableUBO {
-    float4x4 matrix;
-    float4 stride_pad[2];
-};
-static_assert(sizeof(BackgroundDrawableUBO) == 96, "wrong size");
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) BackgroundPropsUBO {
-    float4 color;
-    float opacity;
-    float pad1;
-    float pad2;
-    float pad3;
-};
-static_assert(sizeof(BackgroundPropsUBO) == 32, "wrong size");
-
 //
 // Background pattern
 
-struct alignas(16) BackgroundPatternDrawableUBO {
-    float4x4 matrix;
-    float2 pixel_coord_upper;
-    float2 pixel_coord_lower;
-    float tile_units_to_pixels;
-    float pad1;
-    float pad2;
-    float pad3;
-};
-static_assert(sizeof(BackgroundPatternDrawableUBO) == 96, "wrong size");
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) BackgroundPatternPropsUBO {
-    float2 pattern_tl_a;
-    float2 pattern_br_a;
-    float2 pattern_tl_b;
-    float2 pattern_br_b;
-    float2 pattern_size_a;
-    float2 pattern_size_b;
-    float scale_a;
-    float scale_b;
-    float mix;
-    float opacity;
-    float2 texsize;
-    float pad1;
-    float pad2;
-};
-static_assert(sizeof(BackgroundPatternPropsUBO) == 80, "wrong size");
-
-union BackgroundDrawableUnionUBO {
-    BackgroundDrawableUBO backgroundDrawableUBO;
-    BackgroundPatternDrawableUBO backgroundPatternDrawableUBO;
-};
-
-"#,
+",
     source: r"
 
 struct VertexStage {
@@ -216,10 +116,10 @@ struct FragmentStage {
 
 FragmentStage vertex vertexMain(VertexStage in [[stage_in]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const BackgroundDrawableUnionUBO* drawableVector [[buffer(idBackgroundDrawableUBO)]],
+                                device const BackgroundDrawableUBO* drawableVector [[buffer(idBackgroundDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]]) {
 
-    device const BackgroundDrawableUBO& drawable = drawableVector[uboIndex].backgroundDrawableUBO;
+    device const BackgroundDrawableUBO& drawable = drawableVector[uboIndex];
 
     return {
         .position = projectTile(float2(in.position.xy), float2(in.position.xy), projectionVector[uboIndex])

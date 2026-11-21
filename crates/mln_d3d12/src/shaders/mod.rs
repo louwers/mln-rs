@@ -89,7 +89,7 @@ impl ShaderCompiler {
         let mut resources: Vec<ResourceUse> = Vec::new();
         let mut reads_vertex_index = false;
         let mut compile = |stage| -> Result<Vec<u8>, String> {
-            let module = Module::parse(stage, &mln_glsl::compose(source, stage, defines))?;
+            let module = Module::parse(stage, &mln_glsl::compose(program, source, stage, defines))?;
             reads_vertex_index |= module.module.entry_points.iter().any(|entry_point| {
                 entry_point.function.arguments.iter().any(|argument| {
                     matches!(argument.binding, Some(naga::Binding::BuiltIn(naga::BuiltIn::VertexIndex)))

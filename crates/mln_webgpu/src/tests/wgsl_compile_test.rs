@@ -11,15 +11,15 @@ use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::gfx_types::DrawModeType;
 use mln_gfx::gpu::{DepthState, FixedState, StencilState, VertexAttribute, VertexBufferLayout, VertexStep};
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::program::{PROJECTION_BUFFER, Program, VIEW_BUFFER};
+use mln_gfx::shaders::program::{Buffer, PROJECTION_BUFFER, Program, VIEW_BUFFER};
 use mln_gfx::shaders::program_parameters::ProgramParameters;
-use mln_gfx::shaders::source::wgsl::{self, Wgsl};
+use mln_gfx::shaders::source::wgsl::Wgsl;
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::types::DepthFunctionType;
 
 use crate::Device;
 use crate::index_table::IndexTable;
-use crate::shaders::shader_program::compile;
+use crate::shaders::shader_program::{compile, stage_sources};
 use crate::shaders::wgsl_sources::PRELUDE;
 
 /// Each program with WGSL: the engine's and the built-in layer types'.
@@ -152,42 +152,49 @@ fn layouts(program: &Program) -> Vec<VertexBufferLayout> {
         .collect()
 }
 
-/// `text` without its comments, its whitespace runs one space.
-fn normalized(text: &str) -> String {
-    let mut code = String::with_capacity(text.len());
-    let mut rest = text;
-    while !rest.is_empty() {
-        if let Some(after) = rest.strip_prefix("//") {
-            rest = after.find('\n').map_or("", |end| &after[end..]);
-        } else if let Some(after) = rest.strip_prefix("/*") {
-            rest = after.find("*/").map_or("", |end| &after[end + 2..]);
-            code.push(' ');
-        } else {
-            let c = rest.chars().next().unwrap_or(' ');
-            code.push(c);
-            rest = &rest[c.len_utf8()..];
-        }
-    }
-    code.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-/// The sources declare every buffer's block as `uniform_block!` lays it
-/// out: the prelude the engine's, and a program's WGSL its own.
+/// No source declares a block of the engine's or its program's: the
+/// backend declares them, from their layouts.
 #[test]
-fn every_block_is_declared_as_its_layout_says() {
-    let prelude = normalized(PRELUDE);
-    for buffer in [VIEW_BUFFER, PROJECTION_BUFFER] {
-        let block = buffer.block().expect("a block");
-        assert!(prelude.contains(&normalized(&wgsl::declaration(block, block.size))), "{}", block.name);
-    }
+fn no_source_declares_a_block() {
+    let engine = [VIEW_BUFFER, PROJECTION_BUFFER];
     for (program, source) in programs() {
         let text =
-            normalized(&[source.prelude, source.vertex, source.fragment].map(Option::unwrap_or_default).concat());
-        for buffer in program.buffers {
-            // Only another language reads a block its source doesn't name.
-            if let Some(block) = buffer.block().filter(|block| text.contains(block.name)) {
-                let declaration = normalized(&wgsl::declaration(block, buffer.size()));
-                assert!(text.contains(&declaration), "{}: {declaration}", program.name);
+            [Some(PRELUDE), source.prelude, source.vertex, source.fragment].map(Option::unwrap_or_default).concat();
+        for block in program.buffers.iter().chain(&engine).filter_map(Buffer::block) {
+            assert!(!text.contains(&format!("struct {} {{", block.name)), "{} declares {}", program.name, block.name);
+        }
+    }
+}
+
+/// WGSL lays out every block's struct, padded to its buffer's stride, as
+/// its Rust struct is laid out.
+#[test]
+fn every_block_has_its_layout() {
+    use wgpu::naga;
+
+    let parameters = ProgramParameters::new(1.0, false);
+    let engine = [VIEW_BUFFER, PROJECTION_BUFFER];
+    for (program, _) in programs() {
+        for variant in [ProjectionVariant::Mercator, ProjectionVariant::Globe] {
+            let key = program.variant_key(&parameters, program.properties, variant);
+            for stage in stage_sources(&key).expect("WGSL") {
+                let module = naga::front::wgsl::parse_str(&stage).expect("WGSL that parses");
+                let mut layouter = naga::proc::Layouter::default();
+                layouter.update(module.to_ctx()).expect("a layout");
+                for buffer in program.buffers.iter().chain(&engine) {
+                    let Some(block) = buffer.block() else { continue };
+                    let (handle, ty) =
+                        module.types.iter().find(|(_, ty)| ty.name.as_deref() == Some(block.name)).expect("the struct");
+                    let naga::TypeInner::Struct { members, span } = &ty.inner else {
+                        panic!("{} isn't a struct", block.name)
+                    };
+                    assert_eq!(*span as usize, buffer.size(), "{}: {}", program.name, block.name);
+                    assert_eq!(layouter[handle].size as usize, buffer.size(), "{}: {}", program.name, block.name);
+                    for (member, declared) in members.iter().zip(block.members) {
+                        assert_eq!(member.name.as_deref(), Some(declared.name), "{}", block.name);
+                        assert_eq!(member.offset as usize, declared.offset, "{}.{}", block.name, declared.name);
+                    }
+                }
             }
         }
     }

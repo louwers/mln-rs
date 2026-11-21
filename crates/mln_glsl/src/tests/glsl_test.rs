@@ -19,7 +19,7 @@ use mln_gfx::shaders::shader_defines::{
     ID_PROJECTION_UBO, ID_VIEW_UBO, LAYER_SSBO_START_ID, MAX_ATTRIBUTE_COUNT_PER_SHADER, MAX_TEXTURE_COUNT_PER_SHADER,
     MAX_UBO_COUNT_PER_SHADER,
 };
-use mln_gfx::shaders::source::glsl::{self, Glsl};
+use mln_gfx::shaders::source::glsl::Glsl;
 use naga::{AddressSpace, ArraySize, Binding, Interpolation, Module, ScalarKind, StorageAccess, TypeInner};
 
 use crate::front_end::parse;
@@ -84,7 +84,7 @@ fn every_layer_program_shows_the_overdraw_inspector() {
 
 /// The module of a stage of `source` with `defines`, unvalidated.
 fn module(program: &Program, source: &Glsl, stage: Stage, defines: &str) -> Module {
-    parse(stage, &compose(source, stage, defines))
+    parse(stage, &compose(program, source, stage, defines))
         .unwrap_or_else(|error| panic!("{} ({stage:?}):\n{error}", program.name))
 }
 
@@ -98,7 +98,7 @@ fn every_stage_validates() {
     for (program, source) in programs() {
         for variant in variants(program, true) {
             for stage in STAGES {
-                match crate::Module::parse(stage, &compose(source, stage, &variant.defines)) {
+                match crate::Module::parse(stage, &compose(program, source, stage, &variant.defines)) {
                     Ok(_) => validated += 1,
                     Err(error) => failures.push(format!("{} ({}, {stage:?}):\n{error}", program.name, variant.name)),
                 }
@@ -555,48 +555,47 @@ fn no_stage_flips_y() {
     assert!(!sources::PRELUDE_VERTEX.contains("applySurfaceTransform"));
 }
 
-/// `text` without its comments, its whitespace runs one space.
-fn normalized(text: &str) -> String {
-    let mut code = String::with_capacity(text.len());
-    let mut rest = text;
-    while !rest.is_empty() {
-        if let Some(after) = rest.strip_prefix("//") {
-            rest = after.find('\n').map_or("", |end| &after[end..]);
-        } else if let Some(after) = rest.strip_prefix("/*") {
-            rest = after.find("*/").map_or("", |end| &after[end + 2..]);
-            code.push(' ');
-        } else {
-            let c = rest.chars().next().unwrap_or(' ');
-            code.push(c);
-            rest = &rest[c.len_utf8()..];
+/// No source declares a block of the engine's or its program's: the
+/// backend declares them, from their layouts.
+#[test]
+fn no_source_declares_a_block() {
+    let engine = [VIEW_BUFFER, PROJECTION_BUFFER];
+    let preludes = [sources::PRELUDE_VERTEX, sources::PRELUDE_FRAGMENT].concat();
+    for (program, source) in programs() {
+        let text = [&preludes, source.prelude, source.vertex, source.fragment].concat();
+        for block in program.buffers.iter().chain(&engine).filter_map(ProgramBuffer::block) {
+            for declaration in [format!("struct {} {{", block.name), format!("uniform {} {{", block.name)] {
+                assert!(!text.contains(&declaration), "{} declares {}", program.name, block.name);
+            }
         }
     }
-    code.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// The sources declare every buffer's block as `uniform_block!` lays it
-/// out: as a struct, or as the members of a uniform block of its name.
+/// The GLSL lays out every block's struct, padded to its buffer's stride,
+/// as its Rust struct is laid out.
 #[test]
-fn every_block_is_declared_as_its_layout_says() {
-    let preludes = normalized(&[sources::PRELUDE_VERTEX, sources::PRELUDE_FRAGMENT].concat());
-    let mut checked = 0;
+fn every_block_has_its_layout() {
+    let engine = [VIEW_BUFFER, PROJECTION_BUFFER];
     for (program, source) in programs() {
-        let text = format!("{preludes} {}", normalized(&[source.prelude, source.vertex, source.fragment].concat()));
-        let buffers = program.buffers.iter().chain([&VIEW_BUFFER, &PROJECTION_BUFFER]);
-        for buffer in buffers {
-            let Some(block) = buffer.block() else { continue };
-            let declaration = normalized(&glsl::declaration(block, buffer.size()));
-            if text.contains(&format!("struct {} {{", block.name)) {
-                assert!(text.contains(&declaration), "{}: {declaration}", program.name);
-                checked += 1;
-            }
-            if text.contains(&format!("uniform {} {{", block.name)) {
-                let members = &declaration
-                    [declaration.find('{').expect("a struct")..declaration.rfind('}').expect("a struct") + 1];
-                assert!(text.contains(&format!("uniform {} {members}", block.name)), "{}: {members}", program.name);
-                checked += 1;
+        let variant = &variants(program, false)[0];
+        for stage in STAGES {
+            let module = module(program, source, stage, &variant.defines);
+            let mut layouter = naga::proc::Layouter::default();
+            layouter.update(module.to_ctx()).expect("a layout");
+            for buffer in program.buffers.iter().chain(&engine) {
+                let Some(block) = buffer.block() else { continue };
+                let Some((handle, ty)) = module.types.iter().find(|(_, ty)| ty.name.as_deref() == Some(block.name))
+                else {
+                    panic!("{} ({stage:?}) has no struct {}", program.name, block.name);
+                };
+                let TypeInner::Struct { members, span } = &ty.inner else { panic!("{} isn't a struct", block.name) };
+                assert_eq!(*span as usize, buffer.size(), "{}: {}", program.name, block.name);
+                assert_eq!(layouter[handle].size as usize, buffer.size(), "{}: {}", program.name, block.name);
+                for (member, declared) in members.iter().zip(block.members) {
+                    assert_eq!(member.name.as_deref(), Some(declared.name), "{}", block.name);
+                    assert_eq!(member.offset as usize, declared.offset, "{}.{}", block.name, declared.name);
+                }
             }
         }
     }
-    assert!(checked > 0);
 }

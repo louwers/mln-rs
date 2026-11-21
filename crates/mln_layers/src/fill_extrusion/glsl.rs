@@ -47,20 +47,6 @@ layout(push_constant) uniform Constants {
     int ubo_index;
 } constant;
 
-struct FillExtrusionDrawableUBO {
-    mat4 matrix;
-    vec2 pixel_coord_upper;
-    vec2 pixel_coord_lower;
-    float height_factor;
-    float tile_ratio;
-    float base_t;
-    float height_t;
-    float color_t;
-    float pattern_from_t;
-    float pattern_to_t;
-    uint paint_layout;
-};
-
 layout(std140, set = LAYER_SET_INDEX, binding = idFillExtrusionDrawableUBO) readonly buffer FillExtrusionDrawableUBOVector {
     FillExtrusionDrawableUBO drawable_ubo[];
 } drawableVector;
@@ -69,21 +55,9 @@ layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer
     ProjectionUBO projection_ubo[];
 } projectionVector;
 
-layout(set = LAYER_SET_INDEX, binding = idFillExtrusionPropsUBO) uniform FillExtrusionPropsUBO {
-    vec4 color;
-    vec3 light_color;
-    float pad1;
-    vec3 light_position;
-    float base;
-    float height;
-    float light_intensity;
-    float vertical_gradient;
-    float opacity;
-    float fade;
-    float from_scale;
-    float to_scale;
-    float pad2;
-} props;
+layout(set = LAYER_SET_INDEX, binding = idFillExtrusionPropsUBO) uniform FillExtrusionPropsUBOBlock {
+    FillExtrusionPropsUBO props;
+};
 
 layout(location = 0) out vec4 frag_color;
 
@@ -175,20 +149,6 @@ layout(push_constant) uniform Constants {
     int ubo_index;
 } constant;
 
-struct FillExtrusionDrawableUBO {
-    mat4 matrix;
-    vec2 pixel_coord_upper;
-    vec2 pixel_coord_lower;
-    float height_factor;
-    float tile_ratio;
-    float base_t;
-    float height_t;
-    float color_t;
-    float pattern_from_t;
-    float pattern_to_t;
-    uint paint_layout;
-};
-
 layout(std140, set = LAYER_SET_INDEX, binding = idFillExtrusionDrawableUBO) readonly buffer FillExtrusionDrawableUBOVector {
     FillExtrusionDrawableUBO drawable_ubo[];
 } drawableVector;
@@ -197,21 +157,9 @@ layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer
     ProjectionUBO projection_ubo[];
 } projectionVector;
 
-layout(set = LAYER_SET_INDEX, binding = idFillExtrusionPropsUBO) uniform FillExtrusionPropsUBO {
-    vec4 color;
-    vec3 light_color;
-    float pad1;
-    vec3 light_position;
-    float base;
-    float height;
-    float light_intensity;
-    float vertical_gradient;
-    float opacity;
-    float fade;
-    float from_scale;
-    float to_scale;
-    float pad2;
-} props;
+layout(set = LAYER_SET_INDEX, binding = idFillExtrusionPropsUBO) uniform FillExtrusionPropsUBOBlock {
+    FillExtrusionPropsUBO props;
+};
 
 layout(location = 0) out vec4 frag_color;
 
@@ -455,20 +403,6 @@ layout(push_constant) uniform Constants {
     int ubo_index;
 } constant;
 
-struct FillExtrusionDrawableUBO {
-    mat4 matrix;
-    vec2 pixel_coord_upper;
-    vec2 pixel_coord_lower;
-    float height_factor;
-    float tile_ratio;
-    float base_t;
-    float height_t;
-    float color_t;
-    float pattern_from_t;
-    float pattern_to_t;
-    uint paint_layout;
-};
-
 layout(std140, set = LAYER_SET_INDEX, binding = idFillExtrusionDrawableUBO) readonly buffer FillExtrusionDrawableUBOVector {
     FillExtrusionDrawableUBO drawable_ubo[];
 } drawableVector;
@@ -477,33 +411,13 @@ layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer
     ProjectionUBO projection_ubo[];
 } projectionVector;
 
-struct FillExtrusionTilePropsUBO {
-    vec4 pattern_from;
-    vec4 pattern_to;
-    vec2 texsize;
-    float pad1;
-    float pad2;
-};
-
 layout(std140, set = LAYER_SET_INDEX, binding = idFillExtrusionTilePropsUBO) readonly buffer FillExtrusionTilePropsUBOVector {
     FillExtrusionTilePropsUBO tile_props_ubo[];
 } tilePropsVector;
 
-layout(set = LAYER_SET_INDEX, binding = idFillExtrusionPropsUBO) uniform FillExtrusionPropsUBO {
-    vec4 color;
-    vec3 light_color;
-    float pad1;
-    vec3 light_position;
-    float base;
-    float height;
-    float light_intensity;
-    float vertical_gradient;
-    float opacity;
-    float fade;
-    float from_scale;
-    float to_scale;
-    float pad2;
-} props;
+layout(set = LAYER_SET_INDEX, binding = idFillExtrusionPropsUBO) uniform FillExtrusionPropsUBOBlock {
+    FillExtrusionPropsUBO props;
+};
 
 layout(location = 0) out vec4 frag_lighting;
 layout(location = 1) out vec2 frag_pos_a;
@@ -630,33 +544,13 @@ layout(push_constant) uniform Constants {
     int ubo_index;
 } constant;
 
-struct FillExtrusionTilePropsUBO {
-    vec4 pattern_from;
-    vec4 pattern_to;
-    vec2 texsize;
-    float pad1;
-    float pad2;
-};
-
 layout(std140, set = LAYER_SET_INDEX, binding = idFillExtrusionTilePropsUBO) readonly buffer FillExtrusionTilePropsUBOVector {
     FillExtrusionTilePropsUBO tile_props_ubo[];
 } tilePropsVector;
 
-layout(set = LAYER_SET_INDEX, binding = idFillExtrusionPropsUBO) uniform FillExtrusionPropsUBO {
-    vec4 color;
-    vec3 light_color;
-    float pad1;
-    vec3 light_position;
-    float base;
-    float height;
-    float light_intensity;
-    float vertical_gradient;
-    float opacity;
-    float fade;
-    float from_scale;
-    float to_scale;
-    float pad2;
-} props;
+layout(set = LAYER_SET_INDEX, binding = idFillExtrusionPropsUBO) uniform FillExtrusionPropsUBOBlock {
+    FillExtrusionPropsUBO props;
+};
 
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image0_texture;
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image0_sampler;
@@ -740,20 +634,6 @@ layout(push_constant) uniform Constants {
     int ubo_index;
 } constant;
 
-struct FillExtrusionDrawableUBO {
-    mat4 matrix;
-    vec2 pixel_coord_upper;
-    vec2 pixel_coord_lower;
-    float height_factor;
-    float tile_ratio;
-    float base_t;
-    float height_t;
-    float color_t;
-    float pattern_from_t;
-    float pattern_to_t;
-    uint paint_layout;
-};
-
 layout(std140, set = LAYER_SET_INDEX, binding = idFillExtrusionDrawableUBO) readonly buffer FillExtrusionDrawableUBOVector {
     FillExtrusionDrawableUBO drawable_ubo[];
 } drawableVector;
@@ -762,33 +642,13 @@ layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer
     ProjectionUBO projection_ubo[];
 } projectionVector;
 
-struct FillExtrusionTilePropsUBO {
-    vec4 pattern_from;
-    vec4 pattern_to;
-    vec2 texsize;
-    float pad1;
-    float pad2;
-};
-
 layout(std140, set = LAYER_SET_INDEX, binding = idFillExtrusionTilePropsUBO) readonly buffer FillExtrusionTilePropsUBOVector {
     FillExtrusionTilePropsUBO tile_props_ubo[];
 } tilePropsVector;
 
-layout(set = LAYER_SET_INDEX, binding = idFillExtrusionPropsUBO) uniform FillExtrusionPropsUBO {
-    vec4 color;
-    vec3 light_color;
-    float pad1;
-    vec3 light_position;
-    float base;
-    float height;
-    float light_intensity;
-    float vertical_gradient;
-    float opacity;
-    float fade;
-    float from_scale;
-    float to_scale;
-    float pad2;
-} props;
+layout(set = LAYER_SET_INDEX, binding = idFillExtrusionPropsUBO) uniform FillExtrusionPropsUBOBlock {
+    FillExtrusionPropsUBO props;
+};
 
 layout(location = 0) out vec4 frag_lighting;
 layout(location = 1) out vec2 frag_pos_a;
@@ -934,33 +794,13 @@ layout(push_constant) uniform Constants {
     int ubo_index;
 } constant;
 
-struct FillExtrusionTilePropsUBO {
-    vec4 pattern_from;
-    vec4 pattern_to;
-    vec2 texsize;
-    float pad1;
-    float pad2;
-};
-
 layout(std140, set = LAYER_SET_INDEX, binding = idFillExtrusionTilePropsUBO) readonly buffer FillExtrusionTilePropsUBOVector {
     FillExtrusionTilePropsUBO tile_props_ubo[];
 } tilePropsVector;
 
-layout(set = LAYER_SET_INDEX, binding = idFillExtrusionPropsUBO) uniform FillExtrusionPropsUBO {
-    vec4 color;
-    vec3 light_color;
-    float pad1;
-    vec3 light_position;
-    float base;
-    float height;
-    float light_intensity;
-    float vertical_gradient;
-    float opacity;
-    float fade;
-    float from_scale;
-    float to_scale;
-    float pad2;
-} props;
+layout(set = LAYER_SET_INDEX, binding = idFillExtrusionPropsUBO) uniform FillExtrusionPropsUBOBlock {
+    FillExtrusionPropsUBO props;
+};
 
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image0_texture;
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image0_sampler;

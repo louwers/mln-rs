@@ -66,7 +66,7 @@ OutlineCorner outline_corner(float4 start, float4 end, short2 corner, float2 wor
 pub(super) const FILL_OUTLINE_PATTERN_INSTANCED_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
+    prelude: r"
 
 enum {
     idFillDrawableUBO = idDrawableReservedVertexOnlyUBO,
@@ -78,87 +78,16 @@ enum {
 //
 // Fill
 
-struct alignas(16) FillDrawableUBO {
-    float4x4 matrix;
-    float color_t;
-    float opacity_t;
-    float pad1;
-    float pad2;
-    float4 stride_pad[2];
-};
-static_assert(sizeof(FillDrawableUBO) == 112, "wrong size");
-
 //
 // Fill outline
-
-struct alignas(16) FillOutlineDrawableUBO {
-    float4x4 matrix;
-    float outline_color_t;
-    float opacity_t;
-    uint paint_layout;
-    float pad2;
-    float4 stride_pad[2];
-};
-static_assert(sizeof(FillOutlineDrawableUBO) == 112, "wrong size");
 
 //
 // Fill pattern
 
-struct alignas(16) FillPatternDrawableUBO {
-    float4x4 matrix;
-    float2 pixel_coord_upper;
-    float2 pixel_coord_lower;
-    float tile_ratio;
-    float pattern_from_t;
-    float pattern_to_t;
-    float opacity_t;
-    float color_t;
-    float pad1;
-    float pad2;
-    float pad3;
-};
-static_assert(sizeof(FillPatternDrawableUBO) == 112, "wrong size");
-
-struct alignas(16) FillPatternTilePropsUBO {
-    float4 pattern_from;
-    float4 pattern_to;
-    float2 texsize;
-    float sdf;
-    float pad2;
-};
-static_assert(sizeof(FillPatternTilePropsUBO) == 48, "wrong size");
-
 //
 // Fill pattern outline
 
-
-
-
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) FillEvaluatedPropsUBO {
-    float4 color;
-    float4 outline_color;
-    float opacity;
-    float fade;
-    float from_scale;
-    float to_scale;
-};
-static_assert(sizeof(FillEvaluatedPropsUBO) == 48, "wrong size");
-
-union FillDrawableUnionUBO {
-    FillDrawableUBO fillDrawableUBO;
-    FillOutlineDrawableUBO fillOutlineDrawableUBO;
-    FillPatternDrawableUBO fillPatternDrawableUBO;
-    FillPatternDrawableUBO fillOutlinePatternDrawableUBO;
-};
-
-union FillTilePropsUnionUBO {
-    FillPatternTilePropsUBO fillPatternTilePropsUBO;
-    FillPatternTilePropsUBO fillOutlinePatternTilePropsUBO;
-};
-
-"#,
+",
     source: concat!(
         r"
 
@@ -209,13 +138,13 @@ struct FragmentStage {
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const ViewUBO& view [[buffer(idViewUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const FillDrawableUnionUBO* drawableVector [[buffer(idFillDrawableUBO)]],
+                                device const FillPatternDrawableUBO* drawableVector [[buffer(idFillDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
-                                device const FillTilePropsUnionUBO* tilePropsVector [[buffer(idFillTilePropsUBO)]],
+                                device const FillPatternTilePropsUBO* tilePropsVector [[buffer(idFillTilePropsUBO)]],
                                 device const FillEvaluatedPropsUBO& props [[buffer(idFillEvaluatedPropsUBO)]]) {
 
-    device const FillPatternDrawableUBO& drawable = drawableVector[uboIndex].fillOutlinePatternDrawableUBO;
-    device const FillPatternTilePropsUBO& tileProps = tilePropsVector[uboIndex].fillOutlinePatternTilePropsUBO;
+    device const FillPatternDrawableUBO& drawable = drawableVector[uboIndex];
+    device const FillPatternTilePropsUBO& tileProps = tilePropsVector[uboIndex];
 
 #if defined(HAS_UNIFORM_u_pattern_from)
     const auto pattern_from = tileProps.pattern_from;
@@ -275,7 +204,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]],
                             device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                            device const FillTilePropsUnionUBO* tilePropsVector [[buffer(idFillTilePropsUBO)]],
+                            device const FillPatternTilePropsUBO* tilePropsVector [[buffer(idFillTilePropsUBO)]],
                             device const FillEvaluatedPropsUBO& props [[buffer(idFillEvaluatedPropsUBO)]],
                             texture2d<float, access::sample> image0 [[texture(0)]],
                             sampler image0_sampler [[sampler(0)]]) {
@@ -283,7 +212,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     return half4(1.0);
 #endif
 
-    device const FillPatternTilePropsUBO& tileProps = tilePropsVector[uboIndex].fillOutlinePatternTilePropsUBO;
+    device const FillPatternTilePropsUBO& tileProps = tilePropsVector[uboIndex];
 
 #if defined(HAS_UNIFORM_u_pattern_from)
     const auto pattern_from   = float4(tileProps.pattern_from);
@@ -401,7 +330,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 pub(super) const FILL_OUTLINE_INSTANCED_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
+    prelude: r"
 
 enum {
     idFillDrawableUBO = idDrawableReservedVertexOnlyUBO,
@@ -413,87 +342,16 @@ enum {
 //
 // Fill
 
-struct alignas(16) FillDrawableUBO {
-    float4x4 matrix;
-    float color_t;
-    float opacity_t;
-    float pad1;
-    float pad2;
-    float4 stride_pad[2];
-};
-static_assert(sizeof(FillDrawableUBO) == 112, "wrong size");
-
 //
 // Fill outline
-
-struct alignas(16) FillOutlineDrawableUBO {
-    float4x4 matrix;
-    float outline_color_t;
-    float opacity_t;
-    uint paint_layout;
-    float pad2;
-    float4 stride_pad[2];
-};
-static_assert(sizeof(FillOutlineDrawableUBO) == 112, "wrong size");
 
 //
 // Fill pattern
 
-struct alignas(16) FillPatternDrawableUBO {
-    float4x4 matrix;
-    float2 pixel_coord_upper;
-    float2 pixel_coord_lower;
-    float tile_ratio;
-    float pattern_from_t;
-    float pattern_to_t;
-    float opacity_t;
-    float color_t;
-    float pad1;
-    float pad2;
-    float pad3;
-};
-static_assert(sizeof(FillPatternDrawableUBO) == 112, "wrong size");
-
-struct alignas(16) FillPatternTilePropsUBO {
-    float4 pattern_from;
-    float4 pattern_to;
-    float2 texsize;
-    float sdf;
-    float pad2;
-};
-static_assert(sizeof(FillPatternTilePropsUBO) == 48, "wrong size");
-
 //
 // Fill pattern outline
 
-
-
-
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) FillEvaluatedPropsUBO {
-    float4 color;
-    float4 outline_color;
-    float opacity;
-    float fade;
-    float from_scale;
-    float to_scale;
-};
-static_assert(sizeof(FillEvaluatedPropsUBO) == 48, "wrong size");
-
-union FillDrawableUnionUBO {
-    FillDrawableUBO fillDrawableUBO;
-    FillOutlineDrawableUBO fillOutlineDrawableUBO;
-    FillPatternDrawableUBO fillPatternDrawableUBO;
-    FillPatternDrawableUBO fillOutlinePatternDrawableUBO;
-};
-
-union FillTilePropsUnionUBO {
-    FillPatternTilePropsUBO fillPatternTilePropsUBO;
-    FillPatternTilePropsUBO fillOutlinePatternTilePropsUBO;
-};
-
-"#,
+",
     source: concat!(
         r"
 
@@ -514,10 +372,10 @@ struct VertexStage {
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const ViewUBO& view [[buffer(idViewUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const FillDrawableUnionUBO* drawableVector [[buffer(idFillDrawableUBO)]],
+                                device const FillOutlineDrawableUBO* drawableVector [[buffer(idFillDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]]) {
 
-    device const FillOutlineDrawableUBO& drawable = drawableVector[uboIndex].fillOutlineDrawableUBO;
+    device const FillOutlineDrawableUBO& drawable = drawableVector[uboIndex];
 
     const float2 start = float2(vertx.outline_pos);
     const float2 end = float2(vertx.outline_end);
@@ -558,13 +416,13 @@ enum {
 FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]],
                                 device const ViewUBO& view [[buffer(idViewUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const FillDrawableUnionUBO* drawableVector [[buffer(idFillDrawableUBO)]],
+                                device const FillOutlineDrawableUBO* drawableVector [[buffer(idFillDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const short2* outlineVertices [[buffer(idFillOutlineVertices)]],
                                 device const short2* outlineEnds [[buffer(idFillOutlineEnds)]],
                                 device const float* outlinePaint [[buffer(idFillOutlinePaint)]]) {
 
-    device const FillOutlineDrawableUBO& drawable = drawableVector[uboIndex].fillOutlineDrawableUBO;
+    device const FillOutlineDrawableUBO& drawable = drawableVector[uboIndex];
 
     // Four vertices a segment, in the order of the instanced quad's corners:
     // a vertex of the fill and the end of the segment that starts there.
@@ -601,7 +459,7 @@ FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]],
 pub(super) const FILL_PATTERN_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
+    prelude: r"
 
 enum {
     idFillDrawableUBO = idDrawableReservedVertexOnlyUBO,
@@ -613,87 +471,16 @@ enum {
 //
 // Fill
 
-struct alignas(16) FillDrawableUBO {
-    float4x4 matrix;
-    float color_t;
-    float opacity_t;
-    float pad1;
-    float pad2;
-    float4 stride_pad[2];
-};
-static_assert(sizeof(FillDrawableUBO) == 112, "wrong size");
-
 //
 // Fill outline
-
-struct alignas(16) FillOutlineDrawableUBO {
-    float4x4 matrix;
-    float outline_color_t;
-    float opacity_t;
-    uint paint_layout;
-    float pad2;
-    float4 stride_pad[2];
-};
-static_assert(sizeof(FillOutlineDrawableUBO) == 112, "wrong size");
 
 //
 // Fill pattern
 
-struct alignas(16) FillPatternDrawableUBO {
-    float4x4 matrix;
-    float2 pixel_coord_upper;
-    float2 pixel_coord_lower;
-    float tile_ratio;
-    float pattern_from_t;
-    float pattern_to_t;
-    float opacity_t;
-    float color_t;
-    float pad1;
-    float pad2;
-    float pad3;
-};
-static_assert(sizeof(FillPatternDrawableUBO) == 112, "wrong size");
-
-struct alignas(16) FillPatternTilePropsUBO {
-    float4 pattern_from;
-    float4 pattern_to;
-    float2 texsize;
-    float sdf;
-    float pad2;
-};
-static_assert(sizeof(FillPatternTilePropsUBO) == 48, "wrong size");
-
 //
 // Fill pattern outline
 
-
-
-
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) FillEvaluatedPropsUBO {
-    float4 color;
-    float4 outline_color;
-    float opacity;
-    float fade;
-    float from_scale;
-    float to_scale;
-};
-static_assert(sizeof(FillEvaluatedPropsUBO) == 48, "wrong size");
-
-union FillDrawableUnionUBO {
-    FillDrawableUBO fillDrawableUBO;
-    FillOutlineDrawableUBO fillOutlineDrawableUBO;
-    FillPatternDrawableUBO fillPatternDrawableUBO;
-    FillPatternDrawableUBO fillOutlinePatternDrawableUBO;
-};
-
-union FillTilePropsUnionUBO {
-    FillPatternTilePropsUBO fillPatternTilePropsUBO;
-    FillPatternTilePropsUBO fillOutlinePatternTilePropsUBO;
-};
-
-"#,
+",
     source: r"
 
 struct VertexStage {
@@ -735,13 +522,13 @@ struct FragmentStage {
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const ViewUBO& view [[buffer(idViewUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const FillDrawableUnionUBO* drawableVector [[buffer(idFillDrawableUBO)]],
+                                device const FillPatternDrawableUBO* drawableVector [[buffer(idFillDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
-                                device const FillTilePropsUnionUBO* tilePropsVector [[buffer(idFillTilePropsUBO)]],
+                                device const FillPatternTilePropsUBO* tilePropsVector [[buffer(idFillTilePropsUBO)]],
                                 device const FillEvaluatedPropsUBO& props [[buffer(idFillEvaluatedPropsUBO)]]) {
 
-    device const FillPatternDrawableUBO& drawable = drawableVector[uboIndex].fillPatternDrawableUBO;
-    device const FillPatternTilePropsUBO& tileProps = tilePropsVector[uboIndex].fillPatternTilePropsUBO;
+    device const FillPatternDrawableUBO& drawable = drawableVector[uboIndex];
+    device const FillPatternTilePropsUBO& tileProps = tilePropsVector[uboIndex];
 
 #if defined(HAS_UNIFORM_u_pattern_from)
     const auto pattern_from = float4(tileProps.pattern_from);
@@ -790,7 +577,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]],
                             device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                            device const FillTilePropsUnionUBO* tilePropsVector [[buffer(idFillTilePropsUBO)]],
+                            device const FillPatternTilePropsUBO* tilePropsVector [[buffer(idFillTilePropsUBO)]],
                             device const FillEvaluatedPropsUBO& props [[buffer(idFillEvaluatedPropsUBO)]],
                             texture2d<float, access::sample> image0 [[texture(0)]],
                             sampler image0_sampler [[sampler(0)]]) {
@@ -798,7 +585,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     return half4(1.0);
 #endif
 
-    device const FillPatternTilePropsUBO& tileProps = tilePropsVector[uboIndex].fillPatternTilePropsUBO;
+    device const FillPatternTilePropsUBO& tileProps = tilePropsVector[uboIndex];
 
 #if defined(HAS_UNIFORM_u_pattern_from)
     const auto pattern_from   = float4(tileProps.pattern_from);
@@ -859,7 +646,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 pub(super) const FILL_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
+    prelude: r"
 
 enum {
     idFillDrawableUBO = idDrawableReservedVertexOnlyUBO,
@@ -871,87 +658,16 @@ enum {
 //
 // Fill
 
-struct alignas(16) FillDrawableUBO {
-    float4x4 matrix;
-    float color_t;
-    float opacity_t;
-    float pad1;
-    float pad2;
-    float4 stride_pad[2];
-};
-static_assert(sizeof(FillDrawableUBO) == 112, "wrong size");
-
 //
 // Fill outline
-
-struct alignas(16) FillOutlineDrawableUBO {
-    float4x4 matrix;
-    float outline_color_t;
-    float opacity_t;
-    uint paint_layout;
-    float pad2;
-    float4 stride_pad[2];
-};
-static_assert(sizeof(FillOutlineDrawableUBO) == 112, "wrong size");
 
 //
 // Fill pattern
 
-struct alignas(16) FillPatternDrawableUBO {
-    float4x4 matrix;
-    float2 pixel_coord_upper;
-    float2 pixel_coord_lower;
-    float tile_ratio;
-    float pattern_from_t;
-    float pattern_to_t;
-    float opacity_t;
-    float color_t;
-    float pad1;
-    float pad2;
-    float pad3;
-};
-static_assert(sizeof(FillPatternDrawableUBO) == 112, "wrong size");
-
-struct alignas(16) FillPatternTilePropsUBO {
-    float4 pattern_from;
-    float4 pattern_to;
-    float2 texsize;
-    float sdf;
-    float pad2;
-};
-static_assert(sizeof(FillPatternTilePropsUBO) == 48, "wrong size");
-
 //
 // Fill pattern outline
 
-
-
-
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) FillEvaluatedPropsUBO {
-    float4 color;
-    float4 outline_color;
-    float opacity;
-    float fade;
-    float from_scale;
-    float to_scale;
-};
-static_assert(sizeof(FillEvaluatedPropsUBO) == 48, "wrong size");
-
-union FillDrawableUnionUBO {
-    FillDrawableUBO fillDrawableUBO;
-    FillOutlineDrawableUBO fillOutlineDrawableUBO;
-    FillPatternDrawableUBO fillPatternDrawableUBO;
-    FillPatternDrawableUBO fillOutlinePatternDrawableUBO;
-};
-
-union FillTilePropsUnionUBO {
-    FillPatternTilePropsUBO fillPatternTilePropsUBO;
-    FillPatternTilePropsUBO fillOutlinePatternTilePropsUBO;
-};
-
-"#,
+",
     source: r"
 
 struct VertexStage {
@@ -978,10 +694,10 @@ struct FragmentStage {
 
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const FillDrawableUnionUBO* drawableVector [[buffer(idFillDrawableUBO)]],
+                                device const FillDrawableUBO* drawableVector [[buffer(idFillDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]]) {
 
-    device const FillDrawableUBO& drawable = drawableVector[uboIndex].fillDrawableUBO;
+    device const FillDrawableUBO& drawable = drawableVector[uboIndex];
 
     return {
         .position = projectTile(float2(vertx.position), float2(vertx.position), projectionVector[uboIndex]),

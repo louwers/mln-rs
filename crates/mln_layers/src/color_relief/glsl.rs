@@ -20,17 +20,6 @@ layout(push_constant) uniform Constants {
     int ubo_index;
 } constant;
 
-struct ColorReliefDrawableUBO {
-    mat4 matrix;
-};
-
-struct ColorReliefTilePropsUBO {
-    vec4 unpack;
-    vec2 dimension;
-    int color_ramp_size;
-    float pad_tile0;
-};
-
 layout(std140, set = LAYER_SET_INDEX, binding = idColorReliefDrawableUBO) readonly buffer ColorReliefDrawableUBOVector {
     ColorReliefDrawableUBO drawable_ubo[];
 } drawableVector;
@@ -69,23 +58,13 @@ layout(push_constant) uniform Constants {
     int ubo_index;
 } constant;
 
-struct ColorReliefTilePropsUBO {
-    vec4 unpack;
-    vec2 dimension;
-    int color_ramp_size;
-    float pad_tile0;
-};
-
 layout(std140, set = LAYER_SET_INDEX, binding = idColorReliefTilePropsUBO) readonly buffer ColorReliefTilePropsUBOVector {
     ColorReliefTilePropsUBO tile_props_ubo[];
 } tilePropsVector;
 
-layout(set = LAYER_SET_INDEX, binding = idColorReliefEvaluatedPropsUBO) uniform ColorReliefEvaluatedPropsUBO {
-    float opacity;
-    float pad_eval0;
-    float pad_eval1;
-    float pad_eval2;
-} props;
+layout(set = LAYER_SET_INDEX, binding = idColorReliefEvaluatedPropsUBO) uniform ColorReliefEvaluatedPropsUBOBlock {
+    ColorReliefEvaluatedPropsUBO props;
+};
 
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image_texture;
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image_sampler;

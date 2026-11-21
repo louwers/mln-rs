@@ -15,17 +15,6 @@ struct VertexOutput {
     @location(0) frag_position: vec2<f32>,
 };
 
-struct ColorReliefDrawableUBO {
-    matrix: mat4x4<f32>,
-};
-
-struct ColorReliefTilePropsUBO {
-    unpack: vec4<f32>,
-    dimension: vec2<f32>,
-    color_ramp_size: i32,
-    pad_tile0: f32,
-};
-
 @group(0) @binding(2) var<storage, read> drawableVector: array<ColorReliefDrawableUBO>;
 @group(0) @binding(5) var<storage, read> tilePropsVector: array<ColorReliefTilePropsUBO>;
 
@@ -55,20 +44,6 @@ fn main(in: VertexInput) -> VertexOutput {
         r"
 struct FragmentInput {
     @location(0) frag_position: vec2<f32>,
-};
-
-struct ColorReliefTilePropsUBO {
-    unpack: vec4<f32>,
-    dimension: vec2<f32>,
-    color_ramp_size: i32,
-    pad_tile0: f32,
-};
-
-struct ColorReliefEvaluatedPropsUBO {
-    opacity: f32,
-    pad_eval0: f32,
-    pad_eval1: f32,
-    pad_eval2: f32,
 };
 
 @group(0) @binding(5) var<storage, read> tilePropsVector: array<ColorReliefTilePropsUBO>;

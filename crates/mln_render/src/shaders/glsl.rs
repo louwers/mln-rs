@@ -70,12 +70,9 @@ void main() {
 
 layout(location = 0) out vec4 out_color;
 
-layout(set = LAYER_SET_INDEX, binding = idLayerCompositeUBO) uniform LayerCompositeUBO {
-    float opacity;
-    int blend;
-    float pad2;
-    float pad3;
-} props;
+layout(set = LAYER_SET_INDEX, binding = idLayerCompositeUBO) uniform LayerCompositeUBOBlock {
+    LayerCompositeUBO props;
+};
 
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image_texture;
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image_sampler;
@@ -145,12 +142,9 @@ pub(crate) const TILE_DEBUG_SHADER_PRELUDE: &str = r"
 
 #define idTileDebugPropsUBO     layerUBOStartId
 
-layout(set = LAYER_SET_INDEX, binding = idTileDebugPropsUBO) uniform TileDebugPropsUBO {
-    vec4 color;
-    float width;
-    float world_width;
-    vec2 pad;
-} props;
+layout(set = LAYER_SET_INDEX, binding = idTileDebugPropsUBO) uniform TileDebugPropsUBOBlock {
+    TileDebugPropsUBO props;
+};
 
 ";
 
@@ -275,15 +269,9 @@ void main() {
 layout(location = 0) in vec2 frag_pos;
 layout(location = 0) out vec4 out_color;
 
-layout(set = LAYER_SET_INDEX, binding = idSkyPropsUBO) uniform SkyPropsUBO {
-    vec4 sky_color;
-    vec4 horizon_color;
-    vec2 horizon;
-    vec2 horizon_normal;
-    vec2 viewport_size;
-    float sky_horizon_blend;
-    float sky_blend;
-} sky;
+layout(set = LAYER_SET_INDEX, binding = idSkyPropsUBO) uniform SkyPropsUBOBlock {
+    SkyPropsUBO sky;
+};
 
 void main() {
     vec2 pixel = (frag_pos * 0.5 + 0.5) * sky.viewport_size;
@@ -308,11 +296,9 @@ pub(crate) const ATMOSPHERE_SHADER: Glsl = Glsl {
 layout(location = 0) in ivec2 in_position;
 layout(location = 0) out vec3 frag_view_direction;
 
-layout(set = LAYER_SET_INDEX, binding = idAtmospherePropsUBO) uniform AtmospherePropsUBO {
-    mat4 inv_view_projection;
-    vec4 camera_position;
-    vec4 sun_position;
-} atmosphere;
+layout(set = LAYER_SET_INDEX, binding = idAtmospherePropsUBO) uniform AtmospherePropsUBOBlock {
+    AtmospherePropsUBO atmosphere;
+};
 
 void main() {
     vec2 pos = vec2(in_position);
@@ -327,11 +313,9 @@ void main() {
 layout(location = 0) in vec3 frag_view_direction;
 layout(location = 0) out vec4 out_color;
 
-layout(set = LAYER_SET_INDEX, binding = idAtmospherePropsUBO) uniform AtmospherePropsUBO {
-    mat4 inv_view_projection;
-    vec4 camera_position;
-    vec4 sun_position;
-} atmosphere;
+layout(set = LAYER_SET_INDEX, binding = idAtmospherePropsUBO) uniform AtmospherePropsUBOBlock {
+    AtmospherePropsUBO atmosphere;
+};
 
 const float PI = 3.141592653589793;
 const int PRIMARY_STEPS = 5;

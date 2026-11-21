@@ -70,36 +70,6 @@ pub(super) const LINE_GRADIENT_SDF_SHADER: Glsl = Glsl {
 layout (location = 0) in vec2 a_pos_normal;
 layout (location = 1) in vec4 a_data;
 
-layout (std140) uniform LineSDFDrawableUBO {
-    highp mat4 u_matrix;
-    highp vec2 u_patternscale_a;
-    highp vec2 u_patternscale_b;
-    highp float u_tex_y_a;
-    highp float u_tex_y_b;
-    mediump float u_ratio;
-    lowp float u_color_t;
-    lowp float u_blur_t;
-    lowp float u_opacity_t;
-    lowp float u_gapwidth_t;
-    lowp float u_offset_t;
-    lowp float u_width_t;
-    lowp float u_floorwidth_t;
-    highp float u_atlas_height;
-    highp float LineSDFDrawableUBO_pad2;
-};
-
-layout (std140) uniform LineEvaluatedPropsUBO {
-    highp vec4 u_color;
-    lowp float u_blur;
-    lowp float u_opacity;
-    mediump float u_gapwidth;
-    lowp float u_offset;
-    mediump float u_width;
-    lowp float u_floorwidth;
-    highp float LineEvaluatedPropsUBO_pad0;
-    highp float LineEvaluatedPropsUBO_pad1;
-};
-
 out vec2 v_normal;
 out vec2 v_width2;
 out highp vec2 v_tex_a;
@@ -246,26 +216,7 @@ lowp float floorwidth = u_floorwidth;
     ),
     fragment: concat!(
         line_fragment_prelude!(),
-        r"layout (std140) uniform LineEvaluatedPropsUBO {
-    highp vec4 u_color;
-    lowp float u_blur;
-    lowp float u_opacity;
-    mediump float u_gapwidth;
-    lowp float u_offset;
-    mediump float u_width;
-    lowp float u_floorwidth;
-    highp float LineEvaluatedPropsUBO_pad0;
-    highp float LineEvaluatedPropsUBO_pad1;
-};
-
-layout (std140) uniform LineSDFTilePropsUBO {
-    highp float u_sdfgamma;
-    highp float u_mix;
-    highp float LineSDFTilePropsUBO_pad1;
-    highp float LineSDFTilePropsUBO_pad2;
-};
-
-uniform sampler2D u_image;
+        r"uniform sampler2D u_image;
 uniform sampler2D u_image_dash;
 
 in vec2 v_normal;
@@ -364,30 +315,6 @@ pub(super) const LINE_GRADIENT_SHADER: Glsl = Glsl {
 
 layout (location = 0) in vec2 a_pos_normal;
 layout (location = 1) in vec4 a_data;
-
-layout (std140) uniform LineGradientDrawableUBO {
-    highp mat4 u_matrix;
-    mediump float u_ratio;
-    lowp float u_blur_t;
-    lowp float u_opacity_t;
-    lowp float u_gapwidth_t;
-    lowp float u_offset_t;
-    lowp float u_width_t;
-    highp float LineGradientDrawableUBO_pad1;
-    highp float LineGradientDrawableUBO_pad2;
-};
-
-layout (std140) uniform LineEvaluatedPropsUBO {
-    highp vec4 u_color;
-    lowp float u_blur;
-    lowp float u_opacity;
-    mediump float u_gapwidth;
-    lowp float u_offset;
-    mediump float u_width;
-    lowp float u_floorwidth;
-    highp float LineEvaluatedPropsUBO_pad0;
-    highp float LineEvaluatedPropsUBO_pad1;
-};
 
 out vec2 v_normal;
 out vec2 v_width2;
@@ -503,19 +430,7 @@ mediump float width = u_width;
     ),
     fragment: concat!(
         line_fragment_prelude!(),
-        r"layout (std140) uniform LineEvaluatedPropsUBO {
-    highp vec4 u_color;
-    lowp float u_blur;
-    lowp float u_opacity;
-    mediump float u_gapwidth;
-    lowp float u_offset;
-    mediump float u_width;
-    lowp float u_floorwidth;
-    highp float LineEvaluatedPropsUBO_pad0;
-    highp float LineEvaluatedPropsUBO_pad1;
-};
-
-uniform sampler2D u_image;
+        r"uniform sampler2D u_image;
 
 in vec2 v_width2;
 in vec2 v_normal;
@@ -586,43 +501,6 @@ pub(super) const LINE_PATTERN_SHADER: Glsl = Glsl {
 
 layout (location = 0) in vec2 a_pos_normal;
 layout (location = 1) in vec4 a_data;
-
-layout (std140) uniform LinePatternDrawableUBO {
-    highp mat4 u_matrix;
-    mediump float u_ratio;
-    lowp float u_blur_t;
-    lowp float u_opacity_t;
-    lowp float u_gapwidth_t;
-    lowp float u_offset_t;
-    lowp float u_width_t;
-    lowp float u_pattern_from_t;
-    lowp float u_pattern_to_t;
-    lowp float u_floorwidth_t;
-    highp float LinePatternDrawableUBO_pad1;
-    highp float LinePatternDrawableUBO_pad2;
-    highp float LinePatternDrawableUBO_pad3;
-};
-
-layout (std140) uniform LinePatternTilePropsUBO {
-    highp vec4 u_pattern_from;
-    highp vec4 u_pattern_to;
-    mediump vec4 u_scale;
-    highp vec2 u_texsize;
-    highp float u_fade;
-    highp float LinePatternTilePropsUBO_pad1;
-};
-
-layout (std140) uniform LineEvaluatedPropsUBO {
-    highp vec4 u_color;
-    lowp float u_blur;
-    lowp float u_opacity;
-    mediump float u_gapwidth;
-    lowp float u_offset;
-    mediump float u_width;
-    lowp float u_floorwidth;
-    highp float LineEvaluatedPropsUBO_pad0;
-    highp float LineEvaluatedPropsUBO_pad1;
-};
 
 out vec2 v_normal;
 out vec2 v_width2;
@@ -767,27 +645,6 @@ highp vec4 pattern_to = u_pattern_to;
 precision highp float;
 #endif
 
-layout (std140) uniform LinePatternTilePropsUBO {
-    highp vec4 u_pattern_from;
-    highp vec4 u_pattern_to;
-    mediump vec4 u_scale;
-    highp vec2 u_texsize;
-    highp float u_fade;
-    highp float LinePatternTilePropsUBO_pad1;
-};
-
-layout (std140) uniform LineEvaluatedPropsUBO {
-    highp vec4 u_color;
-    lowp float u_blur;
-    lowp float u_opacity;
-    mediump float u_gapwidth;
-    lowp float u_offset;
-    mediump float u_width;
-    lowp float u_floorwidth;
-    highp float LineEvaluatedPropsUBO_pad0;
-    highp float LineEvaluatedPropsUBO_pad1;
-};
-
 uniform sampler2D u_image;
 
 in vec2 v_normal;
@@ -910,36 +767,6 @@ pub(super) const LINE_SDF_SHADER: Glsl = Glsl {
 
 layout (location = 0) in vec2 a_pos_normal;
 layout (location = 1) in vec4 a_data;
-
-layout (std140) uniform LineSDFDrawableUBO {
-    highp mat4 u_matrix;
-    highp vec2 u_patternscale_a;
-    highp vec2 u_patternscale_b;
-    highp float u_tex_y_a;
-    highp float u_tex_y_b;
-    mediump float u_ratio;
-    lowp float u_color_t;
-    lowp float u_blur_t;
-    lowp float u_opacity_t;
-    lowp float u_gapwidth_t;
-    lowp float u_offset_t;
-    lowp float u_width_t;
-    lowp float u_floorwidth_t;
-    highp float u_atlas_height;
-    highp float LineSDFDrawableUBO_pad2;
-};
-
-layout (std140) uniform LineEvaluatedPropsUBO {
-    highp vec4 u_color;
-    lowp float u_blur;
-    lowp float u_opacity;
-    mediump float u_gapwidth;
-    lowp float u_offset;
-    mediump float u_width;
-    lowp float u_floorwidth;
-    highp float LineEvaluatedPropsUBO_pad0;
-    highp float LineEvaluatedPropsUBO_pad1;
-};
 
 out vec2 v_normal;
 out vec2 v_width2;
@@ -1094,26 +921,7 @@ lowp float floorwidth = u_floorwidth;
     ),
     fragment: concat!(
         line_fragment_prelude!(),
-        r"layout (std140) uniform LineEvaluatedPropsUBO {
-    highp vec4 u_color;
-    lowp float u_blur;
-    lowp float u_opacity;
-    mediump float u_gapwidth;
-    lowp float u_offset;
-    mediump float u_width;
-    lowp float u_floorwidth;
-    highp float LineEvaluatedPropsUBO_pad0;
-    highp float LineEvaluatedPropsUBO_pad1;
-};
-
-layout (std140) uniform LineSDFTilePropsUBO {
-    highp float u_sdfgamma;
-    highp float u_mix;
-    highp float LineSDFTilePropsUBO_pad1;
-    highp float LineSDFTilePropsUBO_pad2;
-};
-
-uniform sampler2D u_image;
+        r"uniform sampler2D u_image;
 
 in vec2 v_normal;
 in vec2 v_width2;
@@ -1208,30 +1016,6 @@ pub(super) const LINE_SHADER: Glsl = Glsl {
 
 layout (location = 0) in vec2 a_pos_normal;
 layout (location = 1) in vec4 a_data;
-
-layout (std140) uniform LineDrawableUBO {
-    highp mat4 u_matrix;
-    mediump float u_ratio;
-    lowp float u_color_t;
-    lowp float u_blur_t;
-    lowp float u_opacity_t;
-    lowp float u_gapwidth_t;
-    lowp float u_offset_t;
-    lowp float u_width_t;
-    highp float LineDrawableUBO_pad1;
-};
-
-layout (std140) uniform LineEvaluatedPropsUBO {
-    highp vec4 u_color;
-    lowp float u_blur;
-    lowp float u_opacity;
-    mediump float u_gapwidth;
-    lowp float u_offset;
-    mediump float u_width;
-    lowp float u_floorwidth;
-    highp float LineEvaluatedPropsUBO_pad0;
-    highp float LineEvaluatedPropsUBO_pad1;
-};
 
 out vec2 v_normal;
 out vec2 v_width2;
@@ -1356,19 +1140,7 @@ mediump float width = u_width;
     ),
     fragment: concat!(
         line_fragment_prelude!(),
-        r"layout (std140) uniform LineEvaluatedPropsUBO {
-    highp vec4 u_color;
-    lowp float u_blur;
-    lowp float u_opacity;
-    mediump float u_gapwidth;
-    lowp float u_offset;
-    mediump float u_width;
-    lowp float u_floorwidth;
-    highp float LineEvaluatedPropsUBO_pad0;
-    highp float LineEvaluatedPropsUBO_pad1;
-};
-
-in vec2 v_width2;
+        r"in vec2 v_width2;
 in vec2 v_normal;
 in float v_gamma_scale;
 

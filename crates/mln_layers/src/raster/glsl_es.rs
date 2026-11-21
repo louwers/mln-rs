@@ -3,25 +3,7 @@
 use mln_gfx::shaders::source::glsl_es::Glsl;
 
 pub(super) const RASTER_SHADER: Glsl = Glsl {
-    vertex: r"layout (std140) uniform RasterDrawableUBO {
-    highp mat4 u_matrix;
-};
-layout (std140) uniform RasterEvaluatedPropsUBO {
-    highp vec4 u_spin_weights;
-    highp vec2 u_tl_parent;
-    highp float u_scale_parent;
-    highp float u_buffer_scale;
-    highp float u_fade_t;
-    highp float u_opacity;
-    highp float u_brightness_low;
-    highp float u_brightness_high;
-    highp float u_saturation_factor;
-    highp float u_contrast_factor;
-    highp float RasterEvaluatedPropsUBO_pad1;
-    highp float RasterEvaluatedPropsUBO_pad2;
-};
-
-layout (location = 0) in vec2 a_pos;
+    vertex: r"layout (location = 0) in vec2 a_pos;
 layout (location = 1) in vec2 a_texture_pos;
 
 out vec2 v_pos0;
@@ -38,21 +20,7 @@ void main() {
     v_pos1 = (v_pos0 * u_scale_parent) + u_tl_parent;
 }
 ",
-    fragment: r"layout (std140) uniform RasterEvaluatedPropsUBO {
-    highp vec4 u_spin_weights;
-    highp vec2 u_tl_parent;
-    highp float u_scale_parent;
-    highp float u_buffer_scale;
-    highp float u_fade_t;
-    highp float u_opacity;
-    highp float u_brightness_low;
-    highp float u_brightness_high;
-    highp float u_saturation_factor;
-    highp float u_contrast_factor;
-    highp float RasterEvaluatedPropsUBO_pad1;
-    highp float RasterEvaluatedPropsUBO_pad2;
-};
-uniform sampler2D u_image0;
+    fragment: r"uniform sampler2D u_image0;
 uniform sampler2D u_image1;
 
 in highp vec2 v_pos0;

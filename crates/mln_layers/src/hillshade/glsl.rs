@@ -21,10 +21,6 @@ layout(push_constant) uniform Constants {
     int ubo_index;
 } constant;
 
-struct HillshadeDrawableUBO {
-    mat4 matrix;
-};
-
 layout(std140, set = LAYER_SET_INDEX, binding = idHillshadeDrawableUBO) readonly buffer HillshadeDrawableUBOVector {
     HillshadeDrawableUBO drawable_ubo[];
 } drawableVector;
@@ -60,27 +56,13 @@ layout(push_constant) uniform Constants {
     int ubo_index;
 } constant;
 
-struct HillshadeTilePropsUBO {
-    vec2 latrange;
-    float exaggeration;
-    int method;
-    int num_lights;
-    float pad0;
-    float pad1;
-    float pad2;
-};
-
 layout(std140, set = LAYER_SET_INDEX, binding = idHillshadeTilePropsUBO) readonly buffer HillshadeTilePropsUBOVector {
     HillshadeTilePropsUBO tile_props_ubo[];
 } tilePropsVector;
 
-layout(set = LAYER_SET_INDEX, binding = idHillshadeEvaluatedPropsUBO) uniform HillshadeEvaluatedPropsUBO {
-    vec4 accent;
-    vec4 altitudes;
-    vec4 azimuths;
-    vec4 shadows[4];
-    vec4 highlights[4];
-} props;
+layout(set = LAYER_SET_INDEX, binding = idHillshadeEvaluatedPropsUBO) uniform HillshadeEvaluatedPropsUBOBlock {
+    HillshadeEvaluatedPropsUBO props;
+};
 
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image_texture;
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image_sampler;
@@ -257,16 +239,13 @@ pub(super) const HILLSHADE_PREPARE_SHADER: Glsl = Glsl {
 layout(location = 0) in ivec2 in_position;
 layout(location = 1) in ivec2 in_texture_position;
 
-layout(set = DRAWABLE_UBO_SET_INDEX, binding = idHillshadePrepareDrawableUBO) uniform HillshadePrepareDrawableUBO {
-    mat4 matrix;
-} drawable;
+layout(set = DRAWABLE_UBO_SET_INDEX, binding = idHillshadePrepareDrawableUBO) uniform HillshadePrepareDrawableUBOBlock {
+    HillshadePrepareDrawableUBO drawable;
+};
 
-layout(set = DRAWABLE_UBO_SET_INDEX, binding = idHillshadePrepareTilePropsUBO) uniform HillshadePrepareTilePropsUBO {
-    vec4 unpack;
-    vec2 dimension;
-    float zoom;
-    float maxzoom;
-} tileProps;
+layout(set = DRAWABLE_UBO_SET_INDEX, binding = idHillshadePrepareTilePropsUBO) uniform HillshadePrepareTilePropsUBOBlock {
+    HillshadePrepareTilePropsUBO tileProps;
+};
 
 layout(location = 0) out vec2 frag_position;
 
@@ -284,12 +263,9 @@ void main() {
 layout(location = 0) in vec2 frag_position;
 layout(location = 0) out vec4 out_color;
 
-layout(set = DRAWABLE_UBO_SET_INDEX, binding = idHillshadePrepareTilePropsUBO) uniform HillshadePrepareTilePropsUBO {
-    vec4 unpack;
-    vec2 dimension;
-    float zoom;
-    float maxzoom;
-} tileProps;
+layout(set = DRAWABLE_UBO_SET_INDEX, binding = idHillshadePrepareTilePropsUBO) uniform HillshadePrepareTilePropsUBOBlock {
+    HillshadePrepareTilePropsUBO tileProps;
+};
 
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image_texture;
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image_sampler;

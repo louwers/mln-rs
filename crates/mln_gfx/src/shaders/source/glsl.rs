@@ -6,7 +6,8 @@ use crate::shaders::block::{Block, MemberType, c_like_members};
 
 /// The GLSL of a program.
 ///
-/// A stage compiles from `mln_glsl`'s prelude of the stage, `prelude` and
+/// A stage compiles from the structs of the engine's blocks, `mln_glsl`'s
+/// prelude of the stage, the structs of the program's blocks, `prelude` and
 /// the stage's source.
 #[derive(Debug)]
 pub struct Glsl {

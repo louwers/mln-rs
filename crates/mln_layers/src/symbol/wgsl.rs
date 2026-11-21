@@ -44,16 +44,6 @@ struct VertexOutput {
     @location(1) not_used: f32,
 };
 
-struct CollisionDrawableUBO {
-    matrix: mat4x4<f32>,
-};
-
-struct CollisionTilePropsUBO {
-    extrude_scale: vec2<f32>,
-    overscale_factor: f32,
-    pad1: f32,
-};
-
 @group(0) @binding(2) var<uniform> drawable: CollisionDrawableUBO;
 @group(0) @binding(4) var<uniform> projection: ProjectionUBO;
 @group(0) @binding(5) var<uniform> tile_props: CollisionTilePropsUBO;
@@ -144,16 +134,6 @@ struct VertexOutput {
     @location(4) extrude_scale: vec2<f32>,
 };
 
-struct CollisionDrawableUBO {
-    matrix: mat4x4<f32>,
-};
-
-struct CollisionTilePropsUBO {
-    extrude_scale: vec2<f32>,
-    overscale_factor: f32,
-    pad1: f32,
-};
-
 @group(0) @binding(2) var<uniform> drawable: CollisionDrawableUBO;
 @group(0) @binding(4) var<uniform> projection: ProjectionUBO;
 @group(0) @binding(5) var<uniform> tile_props: CollisionTilePropsUBO;
@@ -208,12 +188,6 @@ struct FragmentInput {
     @location(2) radius: f32,
     @location(3) extrude: vec2<f32>,
     @location(4) extrude_scale: vec2<f32>,
-};
-
-struct CollisionTilePropsUBO {
-    extrude_scale: vec2<f32>,
-    overscale_factor: f32,
-    pad1: f32,
 };
 
 @group(0) @binding(5) var<uniform> tile_props: CollisionTilePropsUBO;
@@ -445,55 +419,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: Some(concat!(
         unpack_opacity!(),
         r"
-
-struct SymbolDrawableUBO {
-    matrix: mat4x4<f32>,
-    label_plane_matrix: mat4x4<f32>,
-    coord_matrix: mat4x4<f32>,
-    texsize: vec2<f32>,
-    texsize_icon: vec2<f32>,
-    is_text_prop: u32,
-    rotate_symbol: u32,
-    pitch_with_map: u32,
-    is_size_zoom_constant: u32,
-    is_size_feature_constant: u32,
-    is_offset: u32,
-    size_t: f32,
-    size: f32,
-    fill_color_t: f32,
-    halo_color_t: f32,
-    opacity_t: f32,
-    halo_width_t: f32,
-    halo_blur_t: f32,
-    is_along_line: u32,
-    is_variable_anchor: u32,
-    pitched_scale: f32,
-    translation: vec2<f32>,
-    gamma_scale: f32,
-    is_halo_pass: u32,
-};
-
-struct SymbolTilePropsUBO {
-    is_text: u32,
-    is_halo: u32,
-    pad1: f32,
-    pad2: f32,
-};
-
-struct SymbolEvaluatedPropsUBO {
-    text_fill_color: vec4<f32>,
-    text_halo_color: vec4<f32>,
-    text_opacity: f32,
-    text_halo_width: f32,
-    text_halo_blur: f32,
-    pad1: f32,
-    icon_fill_color: vec4<f32>,
-    icon_halo_color: vec4<f32>,
-    icon_opacity: f32,
-    icon_halo_width: f32,
-    icon_halo_blur: f32,
-    fade_change: f32,
-};
 
 const c_offscreen_degenerate_triangle_location: f32 = -2.0;
 "
@@ -773,55 +698,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
         sdf_px!(),
         unpack_opacity!(),
         r"
-
-struct SymbolDrawableUBO {
-    matrix: mat4x4<f32>,
-    label_plane_matrix: mat4x4<f32>,
-    coord_matrix: mat4x4<f32>,
-    texsize: vec2<f32>,
-    texsize_icon: vec2<f32>,
-    is_text_prop: u32,
-    rotate_symbol: u32,
-    pitch_with_map: u32,
-    is_size_zoom_constant: u32,
-    is_size_feature_constant: u32,
-    is_offset: u32,
-    size_t: f32,
-    size: f32,
-    fill_color_t: f32,
-    halo_color_t: f32,
-    opacity_t: f32,
-    halo_width_t: f32,
-    halo_blur_t: f32,
-    is_along_line: u32,
-    is_variable_anchor: u32,
-    pitched_scale: f32,
-    translation: vec2<f32>,
-    gamma_scale: f32,
-    is_halo_pass: u32,
-};
-
-struct SymbolTilePropsUBO {
-    is_text: u32,
-    is_halo: u32,
-    pad1: f32,
-    pad2: f32,
-};
-
-struct SymbolEvaluatedPropsUBO {
-    text_fill_color: vec4<f32>,
-    text_halo_color: vec4<f32>,
-    text_opacity: f32,
-    text_halo_width: f32,
-    text_halo_blur: f32,
-    pad1: f32,
-    icon_fill_color: vec4<f32>,
-    icon_halo_color: vec4<f32>,
-    icon_opacity: f32,
-    icon_halo_width: f32,
-    icon_halo_blur: f32,
-    fade_change: f32,
-};
 
 const c_offscreen_degenerate_triangle_location: f32 = -2.0;
 "
@@ -1118,55 +994,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
         sdf_px!(),
         unpack_opacity!(),
         r"
-
-struct SymbolDrawableUBO {
-    matrix: mat4x4<f32>,
-    label_plane_matrix: mat4x4<f32>,
-    coord_matrix: mat4x4<f32>,
-    texsize: vec2<f32>,
-    texsize_icon: vec2<f32>,
-    is_text_prop: u32,
-    rotate_symbol: u32,
-    pitch_with_map: u32,
-    is_size_zoom_constant: u32,
-    is_size_feature_constant: u32,
-    is_offset: u32,
-    size_t: f32,
-    size: f32,
-    fill_color_t: f32,
-    halo_color_t: f32,
-    opacity_t: f32,
-    halo_width_t: f32,
-    halo_blur_t: f32,
-    is_along_line: u32,
-    is_variable_anchor: u32,
-    pitched_scale: f32,
-    translation: vec2<f32>,
-    gamma_scale: f32,
-    is_halo_pass: u32,
-};
-
-struct SymbolTilePropsUBO {
-    is_text: u32,
-    is_halo: u32,
-    pad1: f32,
-    pad2: f32,
-};
-
-struct SymbolEvaluatedPropsUBO {
-    text_fill_color: vec4<f32>,
-    text_halo_color: vec4<f32>,
-    text_opacity: f32,
-    text_halo_width: f32,
-    text_halo_blur: f32,
-    pad1: f32,
-    icon_fill_color: vec4<f32>,
-    icon_halo_color: vec4<f32>,
-    icon_opacity: f32,
-    icon_halo_width: f32,
-    icon_halo_blur: f32,
-    fade_change: f32,
-};
 
 const c_offscreen_degenerate_triangle_location: f32 = -2.0;
 "

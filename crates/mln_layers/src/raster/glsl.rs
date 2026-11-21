@@ -20,10 +20,6 @@ layout(push_constant) uniform Constants {
     int ubo_index;
 } constant;
 
-struct RasterDrawableUBO {
-    mat4 matrix;
-};
-
 layout(std140, set = LAYER_SET_INDEX, binding = idRasterDrawableUBO) readonly buffer RasterDrawableUBOVector {
     RasterDrawableUBO drawable_ubo[];
 } drawableVector;
@@ -32,20 +28,9 @@ layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer
     ProjectionUBO projection_ubo[];
 } projectionVector;
 
-layout(set = LAYER_SET_INDEX, binding = idRasterEvaluatedPropsUBO) uniform RasterEvaluatedPropsUBO {
-    vec4 spin_weights;
-    vec2 tl_parent;
-    float scale_parent;
-    float buffer_scale;
-    float fade_t;
-    float opacity;
-    float brightness_low;
-    float brightness_high;
-    float saturation_factor;
-    float contrast_factor;
-    float pad1;
-    float pad2;
-} props;
+layout(set = LAYER_SET_INDEX, binding = idRasterEvaluatedPropsUBO) uniform RasterEvaluatedPropsUBOBlock {
+    RasterEvaluatedPropsUBO props;
+};
 
 layout(location = 0) out vec2 frag_position0;
 layout(location = 1) out vec2 frag_position1;
@@ -71,20 +56,9 @@ layout(location = 1) in vec2 frag_position1;
 
 layout(location = 0) out vec4 out_color;
 
-layout(set = LAYER_SET_INDEX, binding = idRasterEvaluatedPropsUBO) uniform RasterEvaluatedPropsUBO {
-    vec4 spin_weights;
-    vec2 tl_parent;
-    float scale_parent;
-    float buffer_scale;
-    float fade_t;
-    float opacity;
-    float brightness_low;
-    float brightness_high;
-    float saturation_factor;
-    float contrast_factor;
-    float pad1;
-    float pad2;
-} props;
+layout(set = LAYER_SET_INDEX, binding = idRasterEvaluatedPropsUBO) uniform RasterEvaluatedPropsUBOBlock {
+    RasterEvaluatedPropsUBO props;
+};
 
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image0_texture;
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image0_sampler;

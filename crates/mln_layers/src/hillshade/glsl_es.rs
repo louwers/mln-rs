@@ -6,17 +6,6 @@ pub(super) const HILLSHADE_PREPARE_SHADER: Glsl = Glsl {
     vertex: r"layout (location = 0) in vec2 a_pos;
 layout (location = 1) in vec2 a_texture_pos;
 
-layout (std140) uniform HillshadePrepareDrawableUBO {
-    highp mat4 u_matrix;
-};
-
-layout (std140) uniform HillshadePrepareTilePropsUBO {
-    highp vec4 u_unpack;
-    highp vec2 u_dimension;
-    highp float u_zoom;
-    highp float u_maxzoom;
-};
-
 out vec2 v_pos;
 
 void main() {
@@ -33,13 +22,6 @@ precision highp float;
 
 in vec2 v_pos;
 uniform sampler2D u_image;
-layout (std140) uniform HillshadePrepareTilePropsUBO {
-    highp vec4 u_unpack;
-    highp vec2 u_dimension;
-    highp float u_zoom;
-    highp float u_maxzoom;
-};
-
 float getElevation(vec2 coord, float bias) {
     // Convert encoded elevation value to meters
     vec4 data = texture(u_image, coord) * 255.0;
@@ -109,10 +91,6 @@ pub(super) const HILLSHADE_SHADER: Glsl = Glsl {
     vertex: r"layout (location = 0) in vec2 a_pos;
 layout (location = 1) in vec2 a_texture_pos;
 
-layout (std140) uniform HillshadeDrawableUBO {
-    highp mat4 u_matrix;
-};
-
 out vec2 v_pos;
 
 void main() {
@@ -122,23 +100,6 @@ void main() {
 ",
     fragment: r#"in vec2 v_pos;
 uniform sampler2D u_image;
-
-layout (std140) uniform HillshadeTilePropsUBO {
-    highp vec2 u_latrange;
-    highp float u_exaggeration;
-    highp int u_method;
-    highp int u_num_lights;
-    highp float HillshadeTilePropsUBO_pad0;
-    highp float HillshadeTilePropsUBO_pad1;
-    highp float HillshadeTilePropsUBO_pad2;
-};
-layout (std140) uniform HillshadeEvaluatedPropsUBO {
-    highp vec4 u_accent;
-    highp vec4 u_altitudes;
-    highp vec4 u_azimuths;
-    highp vec4 u_shadows[4];
-    highp vec4 u_highlights[4];
-};
 
 #define PI 3.141592653589793
 

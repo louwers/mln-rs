@@ -1,5 +1,5 @@
 //! Compiles every built-in program's MSL with the system's
-//! Metal compiler, the way `MetalGpu` does: `PRELUDE + prelude + source`,
+//! Metal compiler, the way `MetalGpu` does: its `library_source`,
 //! MSL 2.4, fast math, the `ProgramParameters` defines, a
 //! `HAS_UNIFORM_u_<name>` define per property passed as a uniform, and
 //! `PROJECTION_GLOBE` for the globe variant. Also checks that the shaders'
@@ -8,9 +8,10 @@
 //! declare.
 
 use std::collections::BTreeSet;
+use std::fmt::Write as _;
 
 use mln_gfx::gfx_types::AttributeDataType;
-use mln_gfx::shaders::program::{GLOBE_DEFINE, PROJECTION_BUFFER, Program, VIEW_BUFFER};
+use mln_gfx::shaders::program::{Buffer, GLOBE_DEFINE, PROJECTION_BUFFER, Program, VIEW_BUFFER};
 use mln_gfx::shaders::shader_defines::ID_GLOBAL_UBO_INDEX;
 use mln_gfx::shaders::source::msl::{self, Msl};
 use objc2::rc::Retained;
@@ -22,7 +23,7 @@ use objc2_metal::{
     MTLVertexDescriptor, MTLVertexFormat, MTLVertexStepFunction,
 };
 
-use super::msl_sources::PRELUDE;
+use super::msl_sources::library_source;
 use crate::Id;
 
 /// Each program with MSL: the engine's and the built-in layer types'.
@@ -62,8 +63,8 @@ fn compile(
         .map_err(|error| error.localizedDescription().to_string())
 }
 
-fn full_source(msl: &Msl) -> String {
-    format!("{PRELUDE}{}{}", msl.prelude, msl.source)
+fn full_source(program: &Program, msl: &Msl) -> String {
+    library_source(program, msl)
 }
 
 /// The `<name>`s of the `HAS_UNIFORM_u_<name>` the shader tests.
@@ -108,7 +109,7 @@ fn every_layer_program_shows_the_overdraw_inspector() {
     ];
     for (program, source) in sources() {
         if !not_layers.contains(&program.name) {
-            assert!(full_source(source).contains("OVERDRAW_INSPECTOR"), "{}", program.name);
+            assert!(full_source(program, source).contains("OVERDRAW_INSPECTOR"), "{}", program.name);
         }
     }
 }
@@ -119,7 +120,7 @@ fn every_shader_source_compiles() {
     let mut failures = Vec::new();
     let mut compiled = 0;
     for (program, source) in sources() {
-        let text = full_source(source);
+        let text = full_source(program, source);
         let properties: BTreeSet<String> = program.properties.iter().map(|property| property.name.to_owned()).collect();
         assert_eq!(
             uniform_properties(&text),
@@ -263,7 +264,7 @@ fn pipelines_build_with_the_programs_vertex_layout() {
     let device = device();
     let mut failures = Vec::new();
     for (program, source) in sources() {
-        let text = full_source(source);
+        let text = full_source(program, source);
         let properties: BTreeSet<String> = program.properties.iter().map(|property| property.name.to_owned()).collect();
         let narrow = |format| match format {
             AttributeDataType::Float2 => AttributeDataType::Float,
@@ -331,42 +332,50 @@ fn pipelines_build_with_the_programs_vertex_layout() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
-/// `text` without its comments, its whitespace runs one space.
-fn normalized(text: &str) -> String {
-    let mut code = String::with_capacity(text.len());
-    let mut rest = text;
-    while !rest.is_empty() {
-        if let Some(after) = rest.strip_prefix("//") {
-            rest = after.find('\n').map_or("", |end| &after[end..]);
-        } else if let Some(after) = rest.strip_prefix("/*") {
-            rest = after.find("*/").map_or("", |end| &after[end + 2..]);
-            code.push(' ');
-        } else {
-            let c = rest.chars().next().unwrap_or(' ');
-            code.push(c);
-            rest = &rest[c.len_utf8()..];
+/// No source declares a block of the engine's or its program's: the
+/// backend declares them, from their layouts.
+#[test]
+fn no_source_declares_a_block() {
+    let engine = [VIEW_BUFFER, PROJECTION_BUFFER];
+    for (program, source) in sources() {
+        let text = [source.prelude, source.source].concat();
+        for block in program.buffers.iter().chain(&engine).filter_map(Buffer::block) {
+            assert!(!text.contains(&format!(" {} {{", block.name)), "{} declares {}", program.name, block.name);
         }
     }
-    code.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// The sources declare every buffer's block as `uniform_block!` lays it
-/// out: the prelude the engine's, and a program's MSL its own.
+/// MSL lays out every block's struct, padded to its buffer's stride, as its
+/// Rust struct is laid out: a library of each with a `static_assert` of
+/// each member's offset compiles.
 #[test]
-fn every_block_is_declared_as_its_layout_says() {
-    let prelude = normalized(PRELUDE);
-    for buffer in [VIEW_BUFFER, PROJECTION_BUFFER] {
-        let block = buffer.block().expect("a block");
-        assert!(prelude.contains(&normalized(&msl::declaration(block, block.size))), "{}", block.name);
-    }
-    for (program, source) in sources() {
-        let text = normalized(&[source.prelude, source.source].concat());
-        for buffer in program.buffers {
-            // Only another language reads a block its source doesn't name.
-            if let Some(block) = buffer.block().filter(|block| text.contains(block.name)) {
-                let declaration = normalized(&msl::declaration(block, buffer.size()));
-                assert!(text.contains(&declaration), "{}: {declaration}", program.name);
+fn every_block_has_its_layout() {
+    let device = device();
+    let engine = [VIEW_BUFFER, PROJECTION_BUFFER];
+    let mut library = String::from("#include <metal_stdlib>\nusing namespace metal;\n");
+    let mut declared = BTreeSet::new();
+    for (program, _) in sources() {
+        for buffer in program.buffers.iter().chain(&engine) {
+            let Some(block) = buffer.block() else { continue };
+            if !declared.insert((block.name, buffer.size())) {
+                continue;
             }
+            // One namespace a block and its stride, as a library declares
+            // each once.
+            _ = writeln!(library, "namespace {}_{} {{", block.name, buffer.size());
+            library += &msl::declaration(block, buffer.size());
+            for member in block.members {
+                let (name, offset) = (member.name, member.offset);
+                _ = writeln!(
+                    library,
+                    "static_assert(__builtin_offsetof({}, {name}) == {offset}, \"{name}\");",
+                    block.name
+                );
+            }
+            library += "}\n";
         }
+    }
+    if let Err(error) = compile(&device, &library, &[]) {
+        panic!("{error}");
     }
 }

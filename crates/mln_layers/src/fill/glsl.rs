@@ -31,15 +31,6 @@ layout(push_constant) uniform Constants {
     int ubo_index;
 } constant;
 
-struct FillDrawableUBO {
-    mat4 matrix;
-    float color_t;
-    float opacity_t;
-    float pad1;
-    float pad2;
-    vec4 stride_pad[2];
-};
-
 layout(std140, set = LAYER_SET_INDEX, binding = idFillDrawableUBO) readonly buffer FillDrawableUBOVector {
     FillDrawableUBO drawable_ubo[];
 } drawableVector;
@@ -82,14 +73,9 @@ layout(location = 1) in float frag_opacity;
 
 layout(location = 0) out vec4 out_color;
 
-layout(set = LAYER_SET_INDEX, binding = idFillEvaluatedPropsUBO) uniform FillEvaluatedPropsUBO {
-    vec4 color;
-    vec4 outline_color;
-    float opacity;
-    float fade;
-    float from_scale;
-    float to_scale;
-} props;
+layout(set = LAYER_SET_INDEX, binding = idFillEvaluatedPropsUBO) uniform FillEvaluatedPropsUBOBlock {
+    FillEvaluatedPropsUBO props;
+};
 
 void main() {
 
@@ -132,15 +118,6 @@ layout(location = 2) in vec2 in_opacity;
 layout(push_constant) uniform Constants {
     int ubo_index;
 } constant;
-
-struct FillOutlineDrawableUBO {
-    mat4 matrix;
-    float outline_color_t;
-    float opacity_t;
-    uint paint_layout;
-    float pad2;
-    vec4 stride_pad[2];
-};
 
 layout(std140, set = LAYER_SET_INDEX, binding = idFillDrawableUBO) readonly buffer FillOutlineDrawableUBOVector {
     FillOutlineDrawableUBO drawable_ubo[];
@@ -191,14 +168,9 @@ layout(location = 2) in vec2 frag_position;
 
 layout(location = 0) out vec4 out_color;
 
-layout(set = LAYER_SET_INDEX, binding = idFillEvaluatedPropsUBO) uniform FillEvaluatedPropsUBO {
-    vec4 color;
-    vec4 outline_color;
-    float opacity;
-    float fade;
-    float from_scale;
-    float to_scale;
-} props;
+layout(set = LAYER_SET_INDEX, binding = idFillEvaluatedPropsUBO) uniform FillEvaluatedPropsUBOBlock {
+    FillEvaluatedPropsUBO props;
+};
 
 void main() {
 
@@ -252,20 +224,6 @@ layout(push_constant) uniform Constants {
     int ubo_index;
 } constant;
 
-struct FillPatternDrawableUBO {
-    mat4 matrix;
-    vec2 pixel_coord_upper;
-    vec2 pixel_coord_lower;
-    float tile_ratio;
-    float pattern_from_t;
-    float pattern_to_t;
-    float opacity_t;
-    float color_t;
-    float pad1;
-    float pad2;
-    float pad3;
-};
-
 layout(std140, set = LAYER_SET_INDEX, binding = idFillDrawableUBO) readonly buffer FillPatternDrawableUBOVector {
     FillPatternDrawableUBO drawable_ubo[];
 } drawableVector;
@@ -274,26 +232,13 @@ layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer
     ProjectionUBO projection_ubo[];
 } projectionVector;
 
-struct FillPatternTilePropsUBO {
-    vec4 pattern_from;
-    vec4 pattern_to;
-    vec2 texsize;
-    float sdf;
-    float pad2;
-};
-
 layout(std140, set = LAYER_SET_INDEX, binding = idFillTilePropsUBO) readonly buffer FillPatternTilePropsUBOVector {
     FillPatternTilePropsUBO tile_props_ubo[];
 } tilePropsVector;
 
-layout(set = LAYER_SET_INDEX, binding = idFillEvaluatedPropsUBO) uniform FillEvaluatedPropsUBO {
-    vec4 color;
-    vec4 outline_color;
-    float opacity;
-    float fade;
-    float from_scale;
-    float to_scale;
-} props;
+layout(set = LAYER_SET_INDEX, binding = idFillEvaluatedPropsUBO) uniform FillEvaluatedPropsUBOBlock {
+    FillEvaluatedPropsUBO props;
+};
 
 layout(location = 0) out vec2 frag_pos_a;
 layout(location = 1) out vec2 frag_pos_b;
@@ -384,26 +329,13 @@ layout(push_constant) uniform Constants {
     int ubo_index;
 } constant;
 
-struct FillPatternTilePropsUBO {
-    vec4 pattern_from;
-    vec4 pattern_to;
-    vec2 texsize;
-    float sdf;
-    float pad2;
-};
-
 layout(std140, set = LAYER_SET_INDEX, binding = idFillTilePropsUBO) readonly buffer FillPatternTilePropsUBOVector {
     FillPatternTilePropsUBO tile_props_ubo[];
 } tilePropsVector;
 
-layout(set = LAYER_SET_INDEX, binding = idFillEvaluatedPropsUBO) uniform FillEvaluatedPropsUBO {
-    vec4 color;
-    vec4 outline_color;
-    float opacity;
-    float fade;
-    float from_scale;
-    float to_scale;
-} props;
+layout(set = LAYER_SET_INDEX, binding = idFillEvaluatedPropsUBO) uniform FillEvaluatedPropsUBOBlock {
+    FillEvaluatedPropsUBO props;
+};
 
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image0_texture;
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image0_sampler;
@@ -501,20 +433,6 @@ layout(push_constant) uniform Constants {
     int ubo_index;
 } constant;
 
-struct FillPatternDrawableUBO {
-    mat4 matrix;
-    vec2 pixel_coord_upper;
-    vec2 pixel_coord_lower;
-    float tile_ratio;
-    float pattern_from_t;
-    float pattern_to_t;
-    float opacity_t;
-    float color_t;
-    float pad1;
-    float pad2;
-    float pad3;
-};
-
 layout(std140, set = LAYER_SET_INDEX, binding = idFillDrawableUBO) readonly buffer FillOutlinePatternDrawableUBOVector {
     FillPatternDrawableUBO drawable_ubo[];
 } drawableVector;
@@ -523,26 +441,13 @@ layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer
     ProjectionUBO projection_ubo[];
 } projectionVector;
 
-struct FillPatternTilePropsUBO {
-    vec4 pattern_from;
-    vec4 pattern_to;
-    vec2 texsize;
-    float sdf;
-    float pad2;
-};
-
 layout(std140, set = LAYER_SET_INDEX, binding = idFillTilePropsUBO) readonly buffer FillOutlinePatternTilePropsUBOVector {
     FillPatternTilePropsUBO tile_props_ubo[];
 } tilePropsVector;
 
-layout(set = LAYER_SET_INDEX, binding = idFillEvaluatedPropsUBO) uniform FillEvaluatedPropsUBO {
-    vec4 color;
-    vec4 outline_color;
-    float opacity;
-    float fade;
-    float from_scale;
-    float to_scale;
-} props;
+layout(set = LAYER_SET_INDEX, binding = idFillEvaluatedPropsUBO) uniform FillEvaluatedPropsUBOBlock {
+    FillEvaluatedPropsUBO props;
+};
 
 layout(location = 0) out vec2 frag_pos_a;
 layout(location = 1) out vec2 frag_pos_b;
@@ -638,26 +543,13 @@ layout(push_constant) uniform Constants {
     int ubo_index;
 } constant;
 
-struct FillPatternTilePropsUBO {
-    vec4 pattern_from;
-    vec4 pattern_to;
-    vec2 texsize;
-    float sdf;
-    float pad2;
-};
-
 layout(std140, set = LAYER_SET_INDEX, binding = idFillTilePropsUBO) readonly buffer FillOutlinePatternTilePropsUBOVector {
     FillPatternTilePropsUBO tile_props_ubo[];
 } tilePropsVector;
 
-layout(set = LAYER_SET_INDEX, binding = idFillEvaluatedPropsUBO) uniform FillEvaluatedPropsUBO {
-    vec4 color;
-    vec4 outline_color;
-    float opacity;
-    float fade;
-    float from_scale;
-    float to_scale;
-} props;
+layout(set = LAYER_SET_INDEX, binding = idFillEvaluatedPropsUBO) uniform FillEvaluatedPropsUBOBlock {
+    FillEvaluatedPropsUBO props;
+};
 
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image0_texture;
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image0_sampler;
@@ -812,15 +704,6 @@ layout(push_constant) uniform Constants {
     int ubo_index;
 } constant;
 
-struct FillOutlineDrawableUBO {
-    mat4 matrix;
-    float outline_color_t;
-    float opacity_t;
-    uint paint_layout;
-    float pad2;
-    vec4 stride_pad[2];
-};
-
 layout(std140, set = LAYER_SET_INDEX, binding = idFillDrawableUBO) readonly buffer FillOutlineDrawableUBOVector {
     FillOutlineDrawableUBO drawable_ubo[];
 } drawableVector;
@@ -899,20 +782,6 @@ layout(push_constant) uniform Constants {
     int ubo_index;
 } constant;
 
-struct FillPatternDrawableUBO {
-    mat4 matrix;
-    vec2 pixel_coord_upper;
-    vec2 pixel_coord_lower;
-    float tile_ratio;
-    float pattern_from_t;
-    float pattern_to_t;
-    float opacity_t;
-    float color_t;
-    float pad1;
-    float pad2;
-    float pad3;
-};
-
 layout(std140, set = LAYER_SET_INDEX, binding = idFillDrawableUBO) readonly buffer FillOutlinePatternDrawableUBOVector {
     FillPatternDrawableUBO drawable_ubo[];
 } drawableVector;
@@ -921,26 +790,13 @@ layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer
     ProjectionUBO projection_ubo[];
 } projectionVector;
 
-struct FillPatternTilePropsUBO {
-    vec4 pattern_from;
-    vec4 pattern_to;
-    vec2 texsize;
-    float sdf;
-    float pad2;
-};
-
 layout(std140, set = LAYER_SET_INDEX, binding = idFillTilePropsUBO) readonly buffer FillOutlinePatternTilePropsUBOVector {
     FillPatternTilePropsUBO tile_props_ubo[];
 } tilePropsVector;
 
-layout(set = LAYER_SET_INDEX, binding = idFillEvaluatedPropsUBO) uniform FillEvaluatedPropsUBO {
-    vec4 color;
-    vec4 outline_color;
-    float opacity;
-    float fade;
-    float from_scale;
-    float to_scale;
-} props;
+layout(set = LAYER_SET_INDEX, binding = idFillEvaluatedPropsUBO) uniform FillEvaluatedPropsUBOBlock {
+    FillEvaluatedPropsUBO props;
+};
 
 layout(location = 0) out vec2 frag_pos_a;
 layout(location = 1) out vec2 frag_pos_b;
@@ -1020,15 +876,6 @@ pub(super) const FILL_OUTLINE_PULLED_SHADER: Glsl = Glsl {
 layout(push_constant) uniform Constants {
     int ubo_index;
 } constant;
-
-struct FillOutlineDrawableUBO {
-    mat4 matrix;
-    float outline_color_t;
-    float opacity_t;
-    uint paint_layout;
-    float pad2;
-    vec4 stride_pad[2];
-};
 
 layout(std140, set = LAYER_SET_INDEX, binding = idFillDrawableUBO) readonly buffer FillOutlineDrawableUBOVector {
     FillOutlineDrawableUBO drawable_ubo[];

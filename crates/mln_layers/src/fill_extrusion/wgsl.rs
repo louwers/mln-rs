@@ -32,30 +32,6 @@ struct FragmentInput {
 #endif
 };
 
-struct FillExtrusionTilePropsUBO {
-    pattern_from: vec4<f32>,
-    pattern_to: vec4<f32>,
-    texsize: vec2<f32>,
-    pad1: f32,
-    pad2: f32,
-};
-
-struct FillExtrusionPropsUBO {
-    color: vec4<f32>,
-    light_color: vec3<f32>,
-    pad1: f32,
-    light_position: vec3<f32>,
-    base: f32,
-    height: f32,
-    light_intensity: f32,
-    vertical_gradient: f32,
-    opacity: f32,
-    fade: f32,
-    from_scale: f32,
-    to_scale: f32,
-    pad2: f32,
-};
-
 @group(0) @binding(5) var<storage, read> tilePropsVector: array<FillExtrusionTilePropsUBO>;
 @group(0) @binding(6) var<uniform> props: FillExtrusionPropsUBO;
 @group(1) @binding(0) var texture_sampler: sampler;
@@ -120,40 +96,10 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 /// The vertex output, UBOs and bindings of the plain shaders.
 macro_rules! plain_declarations {
     () => {
-        r#"
+        r"
 struct VertexOutput {
     @builtin(position) @invariant position: vec4<f32>,
     @location(0) color: vec4<f32>,
-};
-
-struct FillExtrusionDrawableUBO {
-    matrix: mat4x4<f32>,
-    pixel_coord_upper: vec2<f32>,
-    pixel_coord_lower: vec2<f32>,
-    height_factor: f32,
-    tile_ratio: f32,
-    base_t: f32,
-    height_t: f32,
-    color_t: f32,
-    pattern_from_t: f32,
-    pattern_to_t: f32,
-    paint_layout: u32,
-};
-
-struct FillExtrusionPropsUBO {
-    color: vec4<f32>,
-    light_color: vec3<f32>,
-    pad1: f32,
-    light_position: vec3<f32>,
-    base: f32,
-    height: f32,
-    light_intensity: f32,
-    vertical_gradient: f32,
-    opacity: f32,
-    fade: f32,
-    from_scale: f32,
-    to_scale: f32,
-    pad2: f32,
 };
 
 @group(0) @binding(2) var<storage, read> drawableVector: array<FillExtrusionDrawableUBO>;
@@ -186,14 +132,14 @@ fn lit_color(in_color: vec4<f32>, normal: vec3<f32>, t: f32, baseValue: f32, hei
     vcolor += vec4<f32>(lit, 0.0);
     return vcolor * props.opacity;
 }
-"#
+"
     };
 }
 
 /// The vertex output, UBOs and bindings of the pattern shaders.
 macro_rules! pattern_declarations {
     () => {
-        r#"
+        r"
 struct VertexOutput {
     @builtin(position) @invariant position: vec4<f32>,
     @location(0) lighting: vec4<f32>,
@@ -205,44 +151,6 @@ struct VertexOutput {
 #ifndef HAS_UNIFORM_u_pattern_to
     @location(4) @interpolate(flat) pattern_to: vec4<f32>,
 #endif
-};
-
-struct FillExtrusionDrawableUBO {
-    matrix: mat4x4<f32>,
-    pixel_coord_upper: vec2<f32>,
-    pixel_coord_lower: vec2<f32>,
-    height_factor: f32,
-    tile_ratio: f32,
-    base_t: f32,
-    height_t: f32,
-    color_t: f32,
-    pattern_from_t: f32,
-    pattern_to_t: f32,
-    paint_layout: u32,
-};
-
-struct FillExtrusionTilePropsUBO {
-    pattern_from: vec4<f32>,
-    pattern_to: vec4<f32>,
-    texsize: vec2<f32>,
-    pad1: f32,
-    pad2: f32,
-};
-
-struct FillExtrusionPropsUBO {
-    color: vec4<f32>,
-    light_color: vec3<f32>,
-    pad1: f32,
-    light_position: vec3<f32>,
-    base: f32,
-    height: f32,
-    light_intensity: f32,
-    vertical_gradient: f32,
-    opacity: f32,
-    fade: f32,
-    from_scale: f32,
-    to_scale: f32,
-    pad2: f32,
 };
 
 @group(0) @binding(2) var<storage, read> drawableVector: array<FillExtrusionDrawableUBO>;
@@ -298,7 +206,7 @@ fn set_pattern(out: ptr<function, VertexOutput>, drawable: FillExtrusionDrawable
                                    drawable.tile_ratio,
                                    patternPos);
 }
-"#
+"
     };
 }
 
@@ -306,7 +214,7 @@ fn set_pattern(out: ptr<function, VertexOutput>, drawable: FillExtrusionDrawable
 /// `heightValue`, of the attributes or the props.
 macro_rules! base_and_height {
     () => {
-        r#"
+        r"
 #ifndef HAS_UNIFORM_u_base
     let baseValue = max(unpack_mix_float(in.base, drawable.base_t), 0.0);
 #else
@@ -318,14 +226,14 @@ macro_rules! base_and_height {
 #else
     let heightValue = max(props.height, 0.0);
 #endif
-"#
+"
     };
 }
 
 /// The pattern positions in the atlas, of the attributes or the tile props.
 macro_rules! patterns {
     () => {
-        r#"
+        r"
 #ifdef HAS_UNIFORM_u_pattern_from
     let patternFrom = tilePropsVector[globalIndex.value].pattern_from;
 #else
@@ -337,7 +245,7 @@ macro_rules! patterns {
 #else
     let patternTo = vec4<f32>(in.pattern_to);
 #endif
-"#
+"
     };
 }
 
@@ -346,7 +254,7 @@ macro_rules! patterns {
 /// wall's own.
 macro_rules! wall_normal {
     () => {
-        r#"
+        r"
 fn wall_normal(bits: u32, own: vec2<f32>) -> vec2<f32> {
     if ((bits & 2u) == 0u) {
         return own;
@@ -354,7 +262,7 @@ fn wall_normal(bits: u32, own: vec2<f32>) -> vec2<f32> {
     let angle = f32(bits >> 2u) * (6.28318530718 / 16384.0) - 3.14159265359;
     return vec2<f32>(cos(angle), sin(angle));
 }
-"#
+"
     };
 }
 
@@ -362,7 +270,7 @@ fn wall_normal(bits: u32, own: vec2<f32>) -> vec2<f32> {
 /// `normal`, `t` and `z`. Returns `out` for an instance that ends a ring.
 macro_rules! wall {
     () => {
-        r#"
+        r"
     if (glMod(f32(in.decimals_ed.x), 2.0) > 0.0) {
         return out;
     }
@@ -380,13 +288,13 @@ macro_rules! wall {
     let z = select(baseValue, heightValue, t > 0.0);
 
     out.position = projectTileFor3D(select(p2, p1, in.position.x == 0), z, projectionVector[globalIndex.value]);
-"#
+"
     };
 }
 
 pub(super) const FILL_EXTRUSION_SHADER: Wgsl = Wgsl {
     vertex: Some(concat!(
-        r#"
+        r"
 struct VertexInput {
     @location(0) position: vec2<i32>,
     @location(1) decimals_ed: vec2<u32>,
@@ -400,16 +308,16 @@ struct VertexInput {
     @location(4) height: vec2<f32>,
 #endif
 };
-"#,
+",
         plain_declarations!(),
-        r#"
+        r"
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
     let drawable = drawableVector[globalIndex.value];
-"#,
+",
         base_and_height!(),
-        r#"
+        r"
     out.position = projectTileFor3D(vec2<f32>(in.position), heightValue, projectionVector[globalIndex.value]);
 
 #ifdef OVERDRAW_INSPECTOR
@@ -425,7 +333,7 @@ fn main(in: VertexInput) -> VertexOutput {
     out.color = lit_color(color, vec3<f32>(0.0, 0.0, 1.0), 1.0, baseValue, heightValue);
     return out;
 }
-"#
+"
     )),
     fragment: Some(PLAIN_FRAGMENT),
     prelude: None,
@@ -434,7 +342,7 @@ fn main(in: VertexInput) -> VertexOutput {
 /// The instanced fill extrusion walls.
 pub(super) const FILL_EXTRUSION_INSTANCED_SHADER: Wgsl = Wgsl {
     vertex: Some(concat!(
-        r#"
+        r"
 struct VertexInput {
     @location(0) position: vec2<i32>,
     @location(1) outline_pos: vec2<i32>,
@@ -451,18 +359,18 @@ struct VertexInput {
     @location(5) height: vec2<f32>,
 #endif
 };
-"#,
+",
         plain_declarations!(),
         wall_normal!(),
-        r#"
+        r"
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
     let drawable = drawableVector[globalIndex.value];
-"#,
+",
         base_and_height!(),
         wall!(),
-        r#"
+        r"
 #ifdef OVERDRAW_INSPECTOR
     out.color = vec4<f32>(1.0, 1.0, 1.0, 1.0);
     return out;
@@ -476,7 +384,7 @@ fn main(in: VertexInput) -> VertexOutput {
     out.color = lit_color(color, normal, t, baseValue, heightValue);
     return out;
 }
-"#
+"
     )),
     fragment: Some(PLAIN_FRAGMENT),
     prelude: None,
@@ -486,7 +394,7 @@ fn main(in: VertexInput) -> VertexOutput {
 /// data-driven.
 macro_rules! wall_paint {
     () => {
-        r#"
+        r"
 #ifndef HAS_UNIFORM_u_color
 @group(0) @binding(8) var<storage, read> wallPaint: array<f32>;
 #else
@@ -498,14 +406,14 @@ macro_rules! wall_paint {
 #endif
 #endif
 #endif
-"#
+"
     };
 }
 
 /// The pulled fill extrusion walls.
 pub(super) const FILL_EXTRUSION_PULLED_SHADER: Wgsl = Wgsl {
     vertex: Some(concat!(
-        r#"
+        r"
 // What the instanced walls read as attributes.
 struct VertexInput {
     position: vec2<i32>,
@@ -523,16 +431,16 @@ struct VertexInput {
     height: vec2<f32>,
 #endif
 };
-"#,
+",
         plain_declarations!(),
         wall_normal!(),
-        r#"
+        r"
 // The bucket's vertices, two words each: the position's x and y in the
 // halves of the first, `decimals_ed`'s in those of the second.
 @group(0) @binding(7) var<storage, read> wallVertices: array<u32>;
-"#,
+",
         wall_paint!(),
-        r#"
+        r"
 @vertex
 fn main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     var out: VertexOutput;
@@ -570,10 +478,10 @@ fn main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     in.color = vec4<f32>(wallPaint[color_at], wallPaint[color_at + 1u],
                          wallPaint[color_at + 2u], wallPaint[color_at + 3u]);
 #endif
-"#,
+",
         base_and_height!(),
         wall!(),
-        r#"
+        r"
 #ifdef OVERDRAW_INSPECTOR
     out.color = vec4<f32>(1.0, 1.0, 1.0, 1.0);
     return out;
@@ -587,7 +495,7 @@ fn main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     out.color = lit_color(color, normal, t, baseValue, heightValue);
     return out;
 }
-"#
+"
     )),
     fragment: Some(PLAIN_FRAGMENT),
     prelude: None,
@@ -596,7 +504,7 @@ fn main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
 /// The fill extrusion pattern roofs.
 pub(super) const FILL_EXTRUSION_PATTERN_SHADER: Wgsl = Wgsl {
     vertex: Some(concat!(
-        r#"
+        r"
 struct VertexInput {
     @location(0) position: vec2<i32>,
     @location(1) decimals_ed: vec2<u32>,
@@ -613,24 +521,24 @@ struct VertexInput {
     @location(5) pattern_to: vec4<u32>,
 #endif
 };
-"#,
+",
         pattern_declarations!(),
-        r#"
+        r"
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
     let drawable = drawableVector[globalIndex.value];
-"#,
+",
         base_and_height!(),
         patterns!(),
-        r#"
+        r"
     out.position = projectTileFor3D(vec2<f32>(in.position), heightValue, projectionVector[globalIndex.value]);
 
     out.lighting = lighting_of(vec3<f32>(0.0, 0.0, 1.0), 1.0, baseValue, heightValue);
     set_pattern(&out, drawable, patternFrom, patternTo, vec2<f32>(in.position));
     return out;
 }
-"#
+"
     )),
     fragment: Some(PATTERN_FRAGMENT),
     prelude: None,
@@ -639,7 +547,7 @@ fn main(in: VertexInput) -> VertexOutput {
 /// The instanced fill extrusion pattern walls.
 pub(super) const FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: Wgsl = Wgsl {
     vertex: Some(concat!(
-        r#"
+        r"
 struct VertexInput {
     @location(0) position: vec2<i32>,
     @location(1) outline_pos: vec2<i32>,
@@ -659,19 +567,19 @@ struct VertexInput {
     @location(6) pattern_to: vec4<u32>,
 #endif
 };
-"#,
+",
         pattern_declarations!(),
         wall_normal!(),
-        r#"
+        r"
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
     let drawable = drawableVector[globalIndex.value];
-"#,
+",
         base_and_height!(),
         patterns!(),
         wall!(),
-        r#"
+        r"
     // The pattern runs along the outline: p1's side is at the next vertex's
     // edge distance.
     let edgedistance = f32(select(in.decimals_ed.y, in.next_decimals_ed.y, in.position.x == 0));
@@ -680,7 +588,7 @@ fn main(in: VertexInput) -> VertexOutput {
     set_pattern(&out, drawable, patternFrom, patternTo, vec2<f32>(edgedistance, z * drawable.height_factor));
     return out;
 }
-"#
+"
     )),
     fragment: Some(PATTERN_FRAGMENT),
     prelude: None,

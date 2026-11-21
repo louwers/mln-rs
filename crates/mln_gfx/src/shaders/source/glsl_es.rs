@@ -1,10 +1,10 @@
 //! GLSL ES 3.00, which `mln_gl` compiles, as `#version 330 core` on desktop
 //! OpenGL.
 //!
-//! Every uniform block a program's GLSL declares, the prelude's too, is a
-//! buffer of the program's or the engine's, which a draw binds: WebGL2
-//! rejects a draw whose program has a block without a buffer, whether or
-//! not the shader reads it.
+//! A block's members are in the program's scope, so a stage reads them by
+//! their names alone. `mln_gl` declares a block only for a stage that names
+//! one of them: WebGL2 rejects a draw whose program has a block without a
+//! buffer, whether or not the shader reads it.
 
 use std::fmt::Write as _;
 
@@ -13,9 +13,10 @@ use crate::shaders::block::{Block, Member, MemberType};
 /// The GLSL of a program.
 ///
 /// A stage compiles from `#version 300 es`, or `#version 330 core` on
-/// desktop OpenGL, the program's defines, the backend's prelude of that
-/// stage, the view's block (`ViewUBO`) where the stage names one of its
-/// members, and the shader's.
+/// desktop OpenGL, the program's defines, the blocks of the engine's
+/// buffers and the program's that the stage names a member of, and the
+/// projection block in a vertex stage, the backend's prelude of that stage,
+/// and the shader's.
 #[derive(Debug)]
 pub struct Glsl {
     /// The vertex shader.

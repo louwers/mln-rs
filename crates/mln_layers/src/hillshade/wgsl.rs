@@ -15,17 +15,6 @@ struct VertexOutput {
     @location(0) tex_coord: vec2<f32>,
 };
 
-struct HillshadePrepareDrawableUBO {
-    matrix: mat4x4<f32>,
-};
-
-struct HillshadePrepareTilePropsUBO {
-    unpack: vec4<f32>,
-    dimension: vec2<f32>,
-    zoom: f32,
-    maxzoom: f32,
-};
-
 @group(0) @binding(2) var<uniform> drawable: HillshadePrepareDrawableUBO;
 @group(0) @binding(5) var<uniform> tileProps: HillshadePrepareTilePropsUBO;
 
@@ -45,13 +34,6 @@ fn main(in: VertexInput) -> VertexOutput {
         r"
 struct FragmentInput {
     @location(0) tex_coord: vec2<f32>,
-};
-
-struct HillshadePrepareTilePropsUBO {
-    unpack: vec4<f32>,
-    dimension: vec2<f32>,
-    zoom: f32,
-    maxzoom: f32,
 };
 
 @group(0) @binding(5) var<uniform> tileProps: HillshadePrepareTilePropsUBO;
@@ -124,10 +106,6 @@ struct VertexOutput {
     @location(0) tex_coord: vec2<f32>,
 };
 
-struct HillshadeDrawableUBO {
-    matrix: mat4x4<f32>,
-};
-
 @group(0) @binding(2) var<storage, read> drawableVector: array<HillshadeDrawableUBO>;
 
 @vertex
@@ -154,24 +132,6 @@ const BASIC: i32 = 4;
 
 struct FragmentInput {
     @location(0) tex_coord: vec2<f32>,
-};
-
-struct HillshadeTilePropsUBO {
-    latrange: vec2<f32>,
-    exaggeration: f32,
-    method: i32,
-    num_lights: i32,
-    pad0: f32,
-    pad1: f32,
-    pad2: f32,
-};
-
-struct HillshadeEvaluatedPropsUBO {
-    accent: vec4<f32>,
-    altitudes: vec4<f32>,
-    azimuths: vec4<f32>,
-    shadows: array<vec4<f32>, 4>,
-    highlights: array<vec4<f32>, 4>,
 };
 
 @group(0) @binding(3) var<storage, read> tilePropsVector: array<HillshadeTilePropsUBO>;

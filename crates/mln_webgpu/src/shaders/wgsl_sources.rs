@@ -55,30 +55,10 @@ fn get_pattern_pos(pixel_coord_upper: vec2<f32>, pixel_coord_lower: vec2<f32>,
     return (tile_units_to_pixels * pos + offset) / pattern_size;
 }
 
-// The view's block, at `ID_VIEW_UBO`.
-struct ViewUBO {
-    units_to_pixels: vec2<f32>,
-    target_size: vec2<f32>,
-    camera_to_center_distance: f32,
-    aspect_ratio: f32,
-    pixel_ratio: f32,
-    pad1: f32,
-};
-
 // The draw's index into the storage buffers it reads, at `ID_GLOBAL_UBO_INDEX`.
 struct GlobalIndexUBO {
     value: u32,
     pad0: vec3<u32>,
-};
-
-struct ProjectionUBO {
-    matrix: mat4x4<f32>,
-    fallback_matrix: mat4x4<f32>,
-    tile_mercator_coords: vec4<f32>,
-    clipping_plane: vec4<f32>,
-    transition: f32,
-    depth_offset: f32,
-    translate: vec2<f32>,
 };
 
 // Pole vertices carry these sentinel Y values in their raw position.

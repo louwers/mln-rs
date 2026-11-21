@@ -43,15 +43,13 @@ layout(location = 3) in uvec2 in_placed;
 layout(location = 4) in vec2 in_shift;
 layout(location = 5) in float in_height_offset;
 
-layout(set = DRAWABLE_UBO_SET_INDEX, binding = idCollisionDrawableUBO) uniform CollisionDrawableUBO {
-    mat4 matrix;
-} drawable;
+layout(set = DRAWABLE_UBO_SET_INDEX, binding = idCollisionDrawableUBO) uniform CollisionDrawableUBOBlock {
+    CollisionDrawableUBO drawable;
+};
 
-layout(set = DRAWABLE_UBO_SET_INDEX, binding = idCollisionTilePropsUBO) uniform CollisionTilePropsUBO {
-    vec2 extrude_scale;
-    float overscale_factor;
-    float pad1;
-} tileProps;
+layout(set = DRAWABLE_UBO_SET_INDEX, binding = idCollisionTilePropsUBO) uniform CollisionTilePropsUBOBlock {
+    CollisionTilePropsUBO tileProps;
+};
 
 layout(std140, set = DRAWABLE_UBO_SET_INDEX, binding = idCollisionProjectionUBO) uniform CollisionProjectionUBO {
     ProjectionUBO projection;
@@ -126,15 +124,13 @@ layout(location = 1) in ivec2 in_anchor_position;
 layout(location = 2) in ivec2 in_extrude;
 layout(location = 3) in uvec2 in_placed;
 
-layout(set = DRAWABLE_UBO_SET_INDEX, binding = idCollisionDrawableUBO) uniform CollisionDrawableUBO {
-    mat4 matrix;
-} drawable;
+layout(set = DRAWABLE_UBO_SET_INDEX, binding = idCollisionDrawableUBO) uniform CollisionDrawableUBOBlock {
+    CollisionDrawableUBO drawable;
+};
 
-layout(set = DRAWABLE_UBO_SET_INDEX, binding = idCollisionTilePropsUBO) uniform CollisionTilePropsUBO {
-    vec2 extrude_scale;
-    float overscale_factor;
-    float pad1;
-} tileProps;
+layout(set = DRAWABLE_UBO_SET_INDEX, binding = idCollisionTilePropsUBO) uniform CollisionTilePropsUBOBlock {
+    CollisionTilePropsUBO tileProps;
+};
 
 layout(std140, set = DRAWABLE_UBO_SET_INDEX, binding = idCollisionProjectionUBO) uniform CollisionProjectionUBO {
     ProjectionUBO projection;
@@ -188,11 +184,9 @@ layout(location = 4) in vec2 frag_extrude_scale;
 
 layout(location = 0) out vec4 out_color;
 
-layout(set = DRAWABLE_UBO_SET_INDEX, binding = idCollisionTilePropsUBO) uniform CollisionTilePropsUBO {
-    vec2 extrude_scale;
-    float overscale_factor;
-    float pad1;
-} tileProps;
+layout(set = DRAWABLE_UBO_SET_INDEX, binding = idCollisionTilePropsUBO) uniform CollisionTilePropsUBOBlock {
+    CollisionTilePropsUBO tileProps;
+};
 
 void main() {
 
@@ -260,33 +254,6 @@ layout(push_constant) uniform Constants {
     int ubo_index;
 } constant;
 
-struct SymbolDrawableUBO {
-    mat4 matrix;
-    mat4 label_plane_matrix;
-    mat4 coord_matrix;
-    vec2 texsize;
-    vec2 texsize_icon;
-    int is_text_prop;
-    int rotate_symbol;
-    int pitch_with_map;
-    int is_size_zoom_constant;
-    int is_size_feature_constant;
-    int is_offset;
-    float size_t;
-    float size;
-    float fill_color_t;
-    float halo_color_t;
-    float opacity_t;
-    float halo_width_t;
-    float halo_blur_t;
-    int is_along_line;
-    int is_variable_anchor;
-    float pitched_scale;
-    vec2 translation;
-    float gamma_scale;
-    int is_halo_pass;
-};
-
 layout(std140, set = LAYER_SET_INDEX, binding = idSymbolDrawableUBO) readonly buffer SymbolDrawableUBOVector {
     SymbolDrawableUBO drawable_ubo[];
 } drawableVector;
@@ -295,20 +262,9 @@ layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer
     ProjectionUBO projection_ubo[];
 } projectionVector;
 
-layout(set = LAYER_SET_INDEX, binding = idSymbolEvaluatedPropsUBO) uniform SymbolEvaluatedPropsUBO {
-    vec4 text_fill_color;
-    vec4 text_halo_color;
-    float text_opacity;
-    float text_halo_width;
-    float text_halo_blur;
-    float pad1;
-    vec4 icon_fill_color;
-    vec4 icon_halo_color;
-    float icon_opacity;
-    float icon_halo_width;
-    float icon_halo_blur;
-    float fade_change;
-} props;
+layout(set = LAYER_SET_INDEX, binding = idSymbolEvaluatedPropsUBO) uniform SymbolEvaluatedPropsUBOBlock {
+    SymbolEvaluatedPropsUBO props;
+};
 
 layout(location = 0) out vec2 frag_tex;
 layout(location = 1) out float frag_opacity;
@@ -447,31 +403,13 @@ layout(push_constant) uniform Constants {
     int ubo_index;
 } constant;
 
-struct SymbolTilePropsUBO {
-    int is_text;
-    int is_halo;
-    float pad1;
-    float pad2;
-};
-
 layout(std140, set = LAYER_SET_INDEX, binding = idSymbolTilePropsUBO) readonly buffer SymbolTilePropsUBOVector {
     SymbolTilePropsUBO tile_props_ubo[];
 } tilePropsVector;
 
-layout(set = LAYER_SET_INDEX, binding = idSymbolEvaluatedPropsUBO) uniform SymbolEvaluatedPropsUBO {
-    vec4 text_fill_color;
-    vec4 text_halo_color;
-    float text_opacity;
-    float text_halo_width;
-    float text_halo_blur;
-    float pad1;
-    vec4 icon_fill_color;
-    vec4 icon_halo_color;
-    float icon_opacity;
-    float icon_halo_width;
-    float icon_halo_blur;
-    float fade_change;
-} props;
+layout(set = LAYER_SET_INDEX, binding = idSymbolEvaluatedPropsUBO) uniform SymbolEvaluatedPropsUBOBlock {
+    SymbolEvaluatedPropsUBO props;
+};
 
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image0_texture;
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image0_sampler;
@@ -535,33 +473,6 @@ layout(push_constant) uniform Constants {
     int ubo_index;
 } constant;
 
-struct SymbolDrawableUBO {
-    mat4 matrix;
-    mat4 label_plane_matrix;
-    mat4 coord_matrix;
-    vec2 texsize;
-    vec2 texsize_icon;
-    int is_text_prop;
-    int rotate_symbol;
-    int pitch_with_map;
-    int is_size_zoom_constant;
-    int is_size_feature_constant;
-    int is_offset;
-    float size_t;
-    float size;
-    float fill_color_t;
-    float halo_color_t;
-    float opacity_t;
-    float halo_width_t;
-    float halo_blur_t;
-    int is_along_line;
-    int is_variable_anchor;
-    float pitched_scale;
-    vec2 translation;
-    float gamma_scale;
-    int is_halo_pass;
-};
-
 layout(std140, set = LAYER_SET_INDEX, binding = idSymbolDrawableUBO) readonly buffer SymbolDrawableUBOVector {
     SymbolDrawableUBO drawable_ubo[];
 } drawableVector;
@@ -570,20 +481,9 @@ layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer
     ProjectionUBO projection_ubo[];
 } projectionVector;
 
-layout(set = LAYER_SET_INDEX, binding = idSymbolEvaluatedPropsUBO) uniform SymbolEvaluatedPropsUBO {
-    vec4 text_fill_color;
-    vec4 text_halo_color;
-    float text_opacity;
-    float text_halo_width;
-    float text_halo_blur;
-    float pad1;
-    vec4 icon_fill_color;
-    vec4 icon_halo_color;
-    float icon_opacity;
-    float icon_halo_width;
-    float icon_halo_blur;
-    float fade_change;
-} props;
+layout(set = LAYER_SET_INDEX, binding = idSymbolEvaluatedPropsUBO) uniform SymbolEvaluatedPropsUBOBlock {
+    SymbolEvaluatedPropsUBO props;
+};
 
 layout(location = 0) out vec2 frag_tex;
 // The fade opacity, times the opacity when it's per vertex.
@@ -776,31 +676,13 @@ layout(push_constant) uniform Constants {
     int ubo_index;
 } constant;
 
-struct SymbolTilePropsUBO {
-    int is_text;
-    int is_halo;
-    float pad1;
-    float pad2;
-};
-
 layout(std140, set = LAYER_SET_INDEX, binding = idSymbolTilePropsUBO) readonly buffer SymbolTilePropsUBOVector {
     SymbolTilePropsUBO tile_props_ubo[];
 } tilePropsVector;
 
-layout(set = LAYER_SET_INDEX, binding = idSymbolEvaluatedPropsUBO) uniform SymbolEvaluatedPropsUBO {
-    vec4 text_fill_color;
-    vec4 text_halo_color;
-    float text_opacity;
-    float text_halo_width;
-    float text_halo_blur;
-    float pad1;
-    vec4 icon_fill_color;
-    vec4 icon_halo_color;
-    float icon_opacity;
-    float icon_halo_width;
-    float icon_halo_blur;
-    float fade_change;
-} props;
+layout(set = LAYER_SET_INDEX, binding = idSymbolEvaluatedPropsUBO) uniform SymbolEvaluatedPropsUBOBlock {
+    SymbolEvaluatedPropsUBO props;
+};
 
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image0_texture;
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image0_sampler;
@@ -890,33 +772,6 @@ layout(push_constant) uniform Constants {
     int ubo_index;
 } constant;
 
-struct SymbolDrawableUBO {
-    mat4 matrix;
-    mat4 label_plane_matrix;
-    mat4 coord_matrix;
-    vec2 texsize;
-    vec2 texsize_icon;
-    int is_text_prop;
-    int rotate_symbol;
-    int pitch_with_map;
-    int is_size_zoom_constant;
-    int is_size_feature_constant;
-    int is_offset;
-    float size_t;
-    float size;
-    float fill_color_t;
-    float halo_color_t;
-    float opacity_t;
-    float halo_width_t;
-    float halo_blur_t;
-    int is_along_line;
-    int is_variable_anchor;
-    float pitched_scale;
-    vec2 translation;
-    float gamma_scale;
-    int is_halo_pass;
-};
-
 layout(std140, set = LAYER_SET_INDEX, binding = idSymbolDrawableUBO) readonly buffer SymbolDrawableUBOVector {
     SymbolDrawableUBO drawable_ubo[];
 } drawableVector;
@@ -925,20 +780,9 @@ layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer
     ProjectionUBO projection_ubo[];
 } projectionVector;
 
-layout(set = LAYER_SET_INDEX, binding = idSymbolEvaluatedPropsUBO) uniform SymbolEvaluatedPropsUBO {
-    vec4 text_fill_color;
-    vec4 text_halo_color;
-    float text_opacity;
-    float text_halo_width;
-    float text_halo_blur;
-    float pad1;
-    vec4 icon_fill_color;
-    vec4 icon_halo_color;
-    float icon_opacity;
-    float icon_halo_width;
-    float icon_halo_blur;
-    float fade_change;
-} props;
+layout(set = LAYER_SET_INDEX, binding = idSymbolEvaluatedPropsUBO) uniform SymbolEvaluatedPropsUBOBlock {
+    SymbolEvaluatedPropsUBO props;
+};
 
 layout(location = 0) out vec2 frag_tex;
 // The fade opacity, times the opacity when it's per vertex.
@@ -1139,31 +983,13 @@ layout(push_constant) uniform Constants {
     int ubo_index;
 } constant;
 
-struct SymbolTilePropsUBO {
-    int is_text;
-    int is_halo;
-    float pad1;
-    float pad2;
-};
-
 layout(std140, set = LAYER_SET_INDEX, binding = idSymbolTilePropsUBO) readonly buffer SymbolTilePropsUBOVector {
     SymbolTilePropsUBO tile_props_ubo[];
 } tilePropsVector;
 
-layout(set = LAYER_SET_INDEX, binding = idSymbolEvaluatedPropsUBO) uniform SymbolEvaluatedPropsUBO {
-    vec4 text_fill_color;
-    vec4 text_halo_color;
-    float text_opacity;
-    float text_halo_width;
-    float text_halo_blur;
-    float pad1;
-    vec4 icon_fill_color;
-    vec4 icon_halo_color;
-    float icon_opacity;
-    float icon_halo_width;
-    float icon_halo_blur;
-    float fade_change;
-} props;
+layout(set = LAYER_SET_INDEX, binding = idSymbolEvaluatedPropsUBO) uniform SymbolEvaluatedPropsUBOBlock {
+    SymbolEvaluatedPropsUBO props;
+};
 
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D glyph_image_texture;
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler glyph_image_sampler;

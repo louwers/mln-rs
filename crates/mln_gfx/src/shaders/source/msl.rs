@@ -3,7 +3,8 @@
 use crate::shaders::block::{Block, MemberType, c_like_members};
 
 /// The MSL of a program. Its library compiles from the backend's prelude,
-/// `prelude` and `source`.
+/// the structs of the engine's blocks and the program's, `prelude` and
+/// `source`.
 #[derive(Debug)]
 pub struct Msl {
     /// The name of the vertex function.

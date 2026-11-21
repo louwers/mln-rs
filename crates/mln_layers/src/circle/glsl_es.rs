@@ -6,34 +6,6 @@ pub(super) const CIRCLE_SHADER: Glsl = Glsl {
     vertex: r"layout (location = 0) in vec2 a_pos;
 out vec3 v_data;
 
-layout (std140) uniform CircleDrawableUBO {
-    highp mat4 u_matrix;
-    highp vec2 u_extrude_scale;
-    lowp float u_color_t;
-    lowp float u_radius_t;
-    lowp float u_blur_t;
-    lowp float u_opacity_t;
-    lowp float u_stroke_color_t;
-    lowp float u_stroke_width_t;
-    lowp float u_stroke_opacity_t;
-    highp float u_globe_extrude_scale;
-    highp float CircleDrawableUBO_pad2;
-    highp float CircleDrawableUBO_pad3;
-};
-
-layout (std140) uniform CircleEvaluatedPropsUBO {
-    highp vec4 u_color;
-    highp vec4 u_stroke_color;
-    mediump float u_radius;
-    lowp float u_blur;
-    lowp float u_opacity;
-    mediump float u_stroke_width;
-    lowp float u_stroke_opacity;
-    bool u_scale_with_map;
-    bool u_pitch_with_map;
-    highp float CircleEvaluatedPropsUBO_pad1;
-};
-
 #ifndef HAS_UNIFORM_u_color
 layout (location = 1) in highp vec4 a_color;
 out highp vec4 color;
@@ -162,19 +134,6 @@ lowp float stroke_opacity = u_stroke_opacity;
 }
 ",
     fragment: r"in vec3 v_data;
-
-layout (std140) uniform CircleEvaluatedPropsUBO {
-    highp vec4 u_color;
-    highp vec4 u_stroke_color;
-    mediump float u_radius;
-    lowp float u_blur;
-    lowp float u_opacity;
-    mediump float u_stroke_width;
-    lowp float u_stroke_opacity;
-    bool u_scale_with_map;
-    bool u_pitch_with_map;
-    highp float CircleEvaluatedPropsUBO_pad1;
-};
 
 #ifndef HAS_UNIFORM_u_color
 in highp vec4 color;

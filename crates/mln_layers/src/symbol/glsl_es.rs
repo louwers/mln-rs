@@ -31,16 +31,6 @@ layout (location = 3) in vec2 a_placed;
 layout (location = 4) in vec2 a_shift;
 layout (location = 5) in float a_height_offset;
 
-layout (std140) uniform CollisionDrawableUBO {
-    highp mat4 u_matrix;
-};
-
-layout (std140) uniform CollisionTilePropsUBO {
-    highp vec2 u_extrude_scale;
-    highp float u_overscale_factor;
-    highp float CollisionTilePropsUBO_pad1;
-};
-
 out float v_placed;
 out float v_notUsed;
 
@@ -100,16 +90,6 @@ layout (location = 1) in vec2 a_anchor_pos;
 layout (location = 2) in vec2 a_extrude;
 layout (location = 3) in vec2 a_placed;
 
-layout (std140) uniform CollisionDrawableUBO {
-    highp mat4 u_matrix;
-};
-
-layout (std140) uniform CollisionTilePropsUBO {
-    highp vec2 u_extrude_scale;
-    highp float u_overscale_factor;
-    highp float CollisionTilePropsUBO_pad1;
-};
-
 out float v_placed;
 out float v_notUsed;
 out float v_radius;
@@ -149,13 +129,7 @@ void main() {
     v_extrude_scale = u_extrude_scale * u_camera_to_center_distance * collision_perspective_ratio;
 }
 ",
-    fragment: r"layout (std140) uniform CollisionTilePropsUBO {
-    highp vec2 u_extrude_scale;
-    highp float u_overscale_factor;
-    highp float CollisionTilePropsUBO_pad1;
-};
-
-in float v_placed;
+    fragment: r"in float v_placed;
 in float v_notUsed;
 in float v_radius;
 in highp vec2 v_extrude;
@@ -200,48 +174,6 @@ layout (location = 3) in vec3 a_projected_pos;
 layout (location = 4) in float a_fade_opacity;
 layout (location = 6) in vec2 a_tex_origin;
 layout (location = 11) in float a_height_offset;
-
-layout (std140) uniform SymbolDrawableUBO {
-    highp mat4 u_matrix;
-    highp mat4 u_label_plane_matrix;
-    highp mat4 u_coord_matrix;
-    highp vec2 u_texsize;
-    highp vec2 u_texsize_icon;
-    bool u_is_text_prop;
-    bool u_rotate_symbol;
-    bool u_pitch_with_map;
-    bool u_is_size_zoom_constant;
-    bool u_is_size_feature_constant;
-    bool u_is_offset;
-    highp float u_size_t;
-    highp float u_size;
-    highp float u_fill_color_t;
-    highp float u_halo_color_t;
-    highp float u_opacity_t;
-    highp float u_halo_width_t;
-    highp float u_halo_blur_t;
-    bool u_is_along_line;
-    bool u_is_variable_anchor;
-    highp float u_pitched_scale;
-    highp vec2 u_translation;
-    highp float u_gamma_scale;
-    bool u_is_halo_pass;
-};
-
-layout (std140) uniform SymbolEvaluatedPropsUBO {
-    highp vec4 u_text_fill_color;
-    highp vec4 u_text_halo_color;
-    highp float u_text_opacity;
-    highp float u_text_halo_width;
-    highp float u_text_halo_blur;
-    highp float SymbolEvaluatedPropsUBO_pad1;
-    highp vec4 u_icon_fill_color;
-    highp vec4 u_icon_halo_color;
-    highp float u_icon_opacity;
-    highp float u_icon_halo_width;
-    highp float u_icon_halo_blur;
-    highp float u_fade_change;
-};
 
 out highp vec2 v_tex;
 flat out highp vec2 v_tex_origin;
@@ -368,28 +300,6 @@ void main() {
     ),
     fragment: r"uniform sampler2D u_texture;
 
-layout (std140) uniform SymbolEvaluatedPropsUBO {
-    highp vec4 u_text_fill_color;
-    highp vec4 u_text_halo_color;
-    highp float u_text_opacity;
-    highp float u_text_halo_width;
-    highp float u_text_halo_blur;
-    highp float SymbolEvaluatedPropsUBO_pad1;
-    highp vec4 u_icon_fill_color;
-    highp vec4 u_icon_halo_color;
-    highp float u_icon_opacity;
-    highp float u_icon_halo_width;
-    highp float u_icon_halo_blur;
-    highp float u_fade_change;
-};
-
-layout (std140) uniform SymbolTilePropsUBO {
-    bool u_is_text;
-    bool u_is_halo;
-    highp float SymbolTilePropsUBO_pad1;
-    highp float SymbolTilePropsUBO_pad2;
-};
-
 in highp vec2 v_tex;
 flat in highp vec2 v_tex_origin;
 in float v_fade_opacity;
@@ -429,48 +339,6 @@ layout (location = 11) in float a_height_offset;
 // For composite functions:
 // [ text-size(lowerZoomStop, feature),
 //   text-size(upperZoomStop, feature) ]
-
-layout (std140) uniform SymbolDrawableUBO {
-    highp mat4 u_matrix;
-    highp mat4 u_label_plane_matrix;
-    highp mat4 u_coord_matrix;
-    highp vec2 u_texsize;
-    highp vec2 u_texsize_icon;
-    bool u_is_text_prop;
-    bool u_rotate_symbol;
-    bool u_pitch_with_map;
-    bool u_is_size_zoom_constant;
-    bool u_is_size_feature_constant;
-    bool u_is_offset;
-    highp float u_size_t;
-    highp float u_size;
-    highp float u_fill_color_t;
-    highp float u_halo_color_t;
-    highp float u_opacity_t;
-    highp float u_halo_width_t;
-    highp float u_halo_blur_t;
-    bool u_is_along_line;
-    bool u_is_variable_anchor;
-    highp float u_pitched_scale;
-    highp vec2 u_translation;
-    highp float u_gamma_scale;
-    bool u_is_halo_pass;
-};
-
-layout (std140) uniform SymbolEvaluatedPropsUBO {
-    highp vec4 u_text_fill_color;
-    highp vec4 u_text_halo_color;
-    highp float u_text_opacity;
-    highp float u_text_halo_width;
-    highp float u_text_halo_blur;
-    highp float SymbolEvaluatedPropsUBO_pad1;
-    highp vec4 u_icon_fill_color;
-    highp vec4 u_icon_halo_color;
-    highp float u_icon_opacity;
-    highp float u_icon_halo_width;
-    highp float u_icon_halo_blur;
-    highp float u_fade_change;
-};
 
 out highp vec2 v_data0;
 flat out highp vec2 v_tex_origin;
@@ -651,28 +519,6 @@ lowp float halo_blur = u_halo_blur;
     ),
     fragment: r"#define SDF_PX 8.0
 
-layout (std140) uniform SymbolEvaluatedPropsUBO {
-    highp vec4 u_text_fill_color;
-    highp vec4 u_text_halo_color;
-    highp float u_text_opacity;
-    highp float u_text_halo_width;
-    highp float u_text_halo_blur;
-    highp float SymbolEvaluatedPropsUBO_pad1;
-    highp vec4 u_icon_fill_color;
-    highp vec4 u_icon_halo_color;
-    highp float u_icon_opacity;
-    highp float u_icon_halo_width;
-    highp float u_icon_halo_blur;
-    highp float u_fade_change;
-};
-
-layout (std140) uniform SymbolTilePropsUBO {
-    bool u_is_text;
-    bool u_is_halo;
-    highp float SymbolTilePropsUBO_pad1;
-    highp float SymbolTilePropsUBO_pad2;
-};
-
 uniform sampler2D u_texture;
 
 in highp vec2 v_data0;
@@ -752,48 +598,6 @@ layout (location = 11) in float a_height_offset;
 // For composite functions:
 // [ text-size(lowerZoomStop, feature),
 //   text-size(upperZoomStop, feature) ]
-
-layout (std140) uniform SymbolDrawableUBO {
-    highp mat4 u_matrix;
-    highp mat4 u_label_plane_matrix;
-    highp mat4 u_coord_matrix;
-    highp vec2 u_texsize;
-    highp vec2 u_texsize_icon;
-    bool u_is_text_prop;
-    bool u_rotate_symbol;
-    bool u_pitch_with_map;
-    bool u_is_size_zoom_constant;
-    bool u_is_size_feature_constant;
-    bool u_is_offset;
-    highp float u_size_t;
-    highp float u_size;
-    highp float u_fill_color_t;
-    highp float u_halo_color_t;
-    highp float u_opacity_t;
-    highp float u_halo_width_t;
-    highp float u_halo_blur_t;
-    bool u_is_along_line;
-    bool u_is_variable_anchor;
-    highp float u_pitched_scale;
-    highp vec2 u_translation;
-    highp float u_gamma_scale;
-    bool u_is_halo_pass;
-};
-
-layout (std140) uniform SymbolEvaluatedPropsUBO {
-    highp vec4 u_text_fill_color;
-    highp vec4 u_text_halo_color;
-    highp float u_text_opacity;
-    highp float u_text_halo_width;
-    highp float u_text_halo_blur;
-    highp float SymbolEvaluatedPropsUBO_pad1;
-    highp vec4 u_icon_fill_color;
-    highp vec4 u_icon_halo_color;
-    highp float u_icon_opacity;
-    highp float u_icon_halo_width;
-    highp float u_icon_halo_blur;
-    highp float u_fade_change;
-};
 
 out highp vec2 v_data0;
 flat out highp vec2 v_tex_origin;
@@ -977,28 +781,6 @@ lowp float halo_blur = u_halo_blur;
 "
     ),
     fragment: r"#define SDF_PX 8.0
-
-layout (std140) uniform SymbolEvaluatedPropsUBO {
-    highp vec4 u_text_fill_color;
-    highp vec4 u_text_halo_color;
-    highp float u_text_opacity;
-    highp float u_text_halo_width;
-    highp float u_text_halo_blur;
-    highp float SymbolEvaluatedPropsUBO_pad1;
-    highp vec4 u_icon_fill_color;
-    highp vec4 u_icon_halo_color;
-    highp float u_icon_opacity;
-    highp float u_icon_halo_width;
-    highp float u_icon_halo_blur;
-    highp float u_fade_change;
-};
-
-layout (std140) uniform SymbolTilePropsUBO {
-    bool u_is_text;
-    bool u_is_halo;
-    highp float SymbolTilePropsUBO_pad1;
-    highp float SymbolTilePropsUBO_pad2;
-};
 
 uniform sampler2D u_texture;
 uniform sampler2D u_texture_icon;

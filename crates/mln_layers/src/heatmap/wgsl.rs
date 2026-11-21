@@ -23,21 +23,6 @@ struct VertexOutput {
     @location(1) extrude: vec2<f32>,
 };
 
-struct HeatmapDrawableUBO {
-    matrix: mat4x4<f32>,
-    extrude_scale: f32,
-    weight_t: f32,
-    radius_t: f32,
-    globe_extrude_scale: f32,
-};
-
-struct HeatmapEvaluatedPropsUBO {
-    weight: f32,
-    radius: f32,
-    intensity: f32,
-    padding: f32,
-};
-
 @group(0) @binding(2) var<storage, read> drawableVector: array<HeatmapDrawableUBO>;
 @group(0) @binding(5) var<uniform> props: HeatmapEvaluatedPropsUBO;
 
@@ -96,13 +81,6 @@ struct FragmentInput {
     @location(1) extrude: vec2<f32>,
 };
 
-struct HeatmapEvaluatedPropsUBO {
-    weight: f32,
-    radius: f32,
-    intensity: f32,
-    padding: f32,
-};
-
 const GAUSS_COEF: f32 = 0.3989422804014327;
 
 @group(0) @binding(5) var<uniform> props: HeatmapEvaluatedPropsUBO;
@@ -139,14 +117,6 @@ struct VertexOutput {
     @location(0) tex_coord: vec2<f32>,
 };
 
-struct HeatmapTexturePropsUBO {
-    matrix: mat4x4<f32>,
-    opacity: f32,
-    pad1: f32,
-    pad2: f32,
-    pad3: f32,
-};
-
 @group(0) @binding(5) var<uniform> ubo: HeatmapTexturePropsUBO;
 
 @vertex
@@ -167,14 +137,6 @@ fn main(in: VertexInput) -> VertexOutput {
         r"
 struct FragmentInput {
     @location(0) tex_coord: vec2<f32>,
-};
-
-struct HeatmapTexturePropsUBO {
-    matrix: mat4x4<f32>,
-    opacity: f32,
-    pad1: f32,
-    pad2: f32,
-    pad3: f32,
 };
 
 @group(0) @binding(5) var<uniform> ubo: HeatmapTexturePropsUBO;

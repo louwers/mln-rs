@@ -19,11 +19,6 @@ layout(push_constant) uniform Constants {
     int ubo_index;
 } constant;
 
-struct BackgroundDrawableUBO {
-    mat4 matrix;
-    vec4 stride_pad[2];
-};
-
 layout(std140, set = LAYER_SET_INDEX, binding = idBackgroundDrawableUBO) readonly buffer BackgroundDrawableUBOVector {
     BackgroundDrawableUBO drawable_ubo[];
 } drawableVector;
@@ -41,13 +36,9 @@ void main() {
     fragment: r"
 layout(location = 0) out vec4 out_color;
 
-layout(set = LAYER_SET_INDEX, binding = idBackgroundPropsUBO) uniform BackgroundPropsUBO {
-    vec4 color;
-    float opacity;
-    float pad1;
-    float pad2;
-    float pad3;
-} props;
+layout(set = LAYER_SET_INDEX, binding = idBackgroundPropsUBO) uniform BackgroundPropsUBOBlock {
+    BackgroundPropsUBO props;
+};
 
 void main() {
 
@@ -70,16 +61,6 @@ layout(push_constant) uniform Constants {
     int ubo_index;
 } constant;
 
-struct BackgroundPatternDrawableUBO {
-    mat4 matrix;
-    vec2 pixel_coord_upper;
-    vec2 pixel_coord_lower;
-    float tile_units_to_pixels;
-    float pad1;
-    float pad2;
-    float pad3;
-};
-
 layout(std140, set = LAYER_SET_INDEX, binding = idBackgroundDrawableUBO) readonly buffer BackgroundPatternDrawableUBOVector {
     BackgroundPatternDrawableUBO drawable_ubo[];
 } drawableVector;
@@ -88,21 +69,9 @@ layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer
     ProjectionUBO projection_ubo[];
 } projectionVector;
 
-layout(set = LAYER_SET_INDEX, binding = idBackgroundPropsUBO) uniform BackgroundPatternPropsUBO {
-    vec2 pattern_tl_a;
-    vec2 pattern_br_a;
-    vec2 pattern_tl_b;
-    vec2 pattern_br_b;
-    vec2 pattern_size_a;
-    vec2 pattern_size_b;
-    float scale_a;
-    float scale_b;
-    float mix;
-    float opacity;
-    vec2 texsize;
-    float pad1;
-    float pad2;
-} props;
+layout(set = LAYER_SET_INDEX, binding = idBackgroundPropsUBO) uniform BackgroundPatternPropsUBOBlock {
+    BackgroundPatternPropsUBO props;
+};
 
 layout(location = 0) out vec2 frag_pos_a;
 layout(location = 1) out vec2 frag_pos_b;
@@ -130,21 +99,9 @@ layout(location = 1) in vec2 frag_pos_b;
 
 layout(location = 0) out vec4 out_color;
 
-layout(set = LAYER_SET_INDEX, binding = idBackgroundPropsUBO) uniform BackgroundPatternLayerUBO {
-    vec2 pattern_tl_a;
-    vec2 pattern_br_a;
-    vec2 pattern_tl_b;
-    vec2 pattern_br_b;
-    vec2 pattern_size_a;
-    vec2 pattern_size_b;
-    float scale_a;
-    float scale_b;
-    float mix;
-    float opacity;
-    vec2 texsize;
-    float pad1;
-    float pad2;
-} props;
+layout(set = LAYER_SET_INDEX, binding = idBackgroundPropsUBO) uniform BackgroundPatternPropsUBOBlock {
+    BackgroundPatternPropsUBO props;
+};
 
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image_texture;
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image_sampler;

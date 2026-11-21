@@ -7,12 +7,6 @@ use mln_gfx::shaders::source::glsl_es::Glsl;
 pub(crate) const ATMOSPHERE_SHADER: Glsl = Glsl {
     vertex: r"layout(location = 0) in vec2 a_pos;
 
-layout (std140) uniform AtmospherePropsUBO {
-    highp mat4 u_inv_view_projection;
-    highp vec4 u_camera_position;
-    highp vec4 u_sun_position;
-};
-
 out vec3 v_view_direction;
 
 void main() {
@@ -28,12 +22,6 @@ precision highp float;
 #endif
 
 in vec3 v_view_direction;
-
-layout (std140) uniform AtmospherePropsUBO {
-    highp mat4 u_inv_view_projection;
-    highp vec4 u_camera_position;
-    highp vec4 u_sun_position;
-};
 
 const float PI = 3.141592653589793;
 const int PRIMARY_STEPS = 5;
@@ -173,13 +161,6 @@ void main() {
     fragment: r"uniform sampler2D u_image;
 uniform sampler2D u_backdrop;
 
-layout (std140) uniform LayerCompositeUBO {
-    highp float u_opacity;
-    highp int u_blend;
-    highp float LayerCompositeUBO_pad2;
-    highp float LayerCompositeUBO_pad3;
-};
-
 // The blend modes that no blend function expresses, of the W3C compositing
 // spec, on premultiplied colors.
 float lum(vec3 c) {
@@ -236,14 +217,7 @@ void main() {
 };
 
 pub(crate) const TILE_DEBUG_SHADER: Glsl = Glsl {
-    vertex: r"layout (std140) uniform TileDebugPropsUBO {
-    highp vec4 u_color;
-    highp float u_width;
-    highp float u_world_width;
-    highp vec2 TileDebugPropsUBO_pad;
-};
-
-// The quad's corner: x picks the segment's start (0) or end (1), y its side.
+    vertex: r"// The quad's corner: x picks the segment's start (0) or end (1), y its side.
 layout (location = 0) in vec2 a_corner;
 // Per instance: where the segment starts and ends, in tile units.
 layout (location = 1) in vec2 a_start;
@@ -294,14 +268,7 @@ void main() {
 #endif
 }
 ",
-    fragment: r"layout (std140) uniform TileDebugPropsUBO {
-    highp vec4 u_color;
-    highp float u_width;
-    highp float u_world_width;
-    highp vec2 TileDebugPropsUBO_pad;
-};
-
-in highp vec2 v_offset;
+    fragment: r"in highp vec2 v_offset;
 flat in highp float v_length;
 in highp float v_gamma_scale;
 #ifdef PROJECTION_GLOBE
@@ -344,16 +311,6 @@ precision highp float;
 #endif
 
 in vec2 v_pos;
-
-layout (std140) uniform SkyPropsUBO {
-    highp vec4 u_sky_color;
-    highp vec4 u_horizon_color;
-    highp vec2 u_horizon;
-    highp vec2 u_horizon_normal;
-    highp vec2 u_viewport_size;
-    highp float u_sky_horizon_blend;
-    highp float u_sky_blend;
-};
 
 void main() {
     vec2 pixel = (v_pos * 0.5 + 0.5) * u_viewport_size;

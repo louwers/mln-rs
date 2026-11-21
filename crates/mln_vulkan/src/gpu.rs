@@ -1078,7 +1078,7 @@ impl VulkanGpu {
             }
         };
         for stage in [Stage::Vertex, Stage::Fragment] {
-            let composed = mln_glsl::compose(source, stage, &defines);
+            let composed = mln_glsl::compose(program, source, stage, &defines);
             let result = shaders::compile_program(stage, &composed)
                 .map_err(|error| GpuError::Invalid(format!("{name}: {error}")))
                 .and_then(|compiled| {

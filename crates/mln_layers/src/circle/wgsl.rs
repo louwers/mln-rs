@@ -251,34 +251,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     ),
     prelude: Some(
         r"
-struct CircleDrawableUBO {
-    matrix: mat4x4<f32>,
-    extrude_scale: vec2<f32>,
-    color_t: f32,
-    radius_t: f32,
-    blur_t: f32,
-    opacity_t: f32,
-    stroke_color_t: f32,
-    stroke_width_t: f32,
-    stroke_opacity_t: f32,
-    globe_extrude_scale: f32,
-    pad2: f32,
-    pad3: f32,
-};
-
-struct CircleEvaluatedPropsUBO {
-    color: vec4<f32>,
-    stroke_color: vec4<f32>,
-    radius: f32,
-    blur: f32,
-    opacity: f32,
-    stroke_width: f32,
-    stroke_opacity: f32,
-    scale_with_map: u32,
-    pitch_with_map: u32,
-    pad1: f32,
-};
-
 @group(0) @binding(2) var<storage, read> drawableVector: array<CircleDrawableUBO>;
 @group(0) @binding(5) var<uniform> props: CircleEvaluatedPropsUBO;
 ",
