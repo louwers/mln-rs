@@ -11,7 +11,6 @@
 use geo_types::{Coord, Geometry, LineString, Polygon};
 use geometry::Point;
 use glam::DVec3;
-use mln_map_types::{TileCoordinate, TileLodMode, View, ViewportMode};
 use mln_math::{fmax, fmin};
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::bounding_volumes::{AABB, Frustum, IntersectionResult};
@@ -21,7 +20,8 @@ use mln_util::geo::{LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
 use mln_util::projection::Projection;
 use mln_util::range::Range;
 
-use crate::util::tile_cover_impl::Impl;
+use crate::tile_cover_impl::Impl;
+use crate::{TileCoordinate, TileLodMode, View, ViewportMode};
 
 /// A corner of a `LatLngBounds` with its latitude clamped to
 /// ±`LATITUDE_MAX`.
@@ -245,8 +245,8 @@ pub struct TileCoverParameters {
 impl TileCoverParameters {
     /// Parameters for `view`, with the defaults for the other
     /// fields.
-    #[cfg(test)]
-    pub(crate) fn new(view: View) -> Self {
+    #[must_use]
+    pub fn new(view: View) -> Self {
         TileCoverParameters {
             view,
             tile_lod_min_radius: 3.0,
@@ -279,7 +279,6 @@ mod globe {
 
     use geometry::Point;
     use glam::{DVec3, DVec4, Vec4Swizzles};
-    use mln_map_types::VerticalPerspectiveProjection;
     use mln_tile_id::{CanonicalTileID, OverscaledTileID, UnwrappedTileID};
     use mln_util::bounding_volumes::{Frustum, IntersectionResult};
     use mln_util::constants;
@@ -287,7 +286,8 @@ mod globe {
     use mln_util::range::Range;
 
     use super::TileCoverParameters;
-    use crate::util::tile_lod::{TileZoomFunction, elevation_for_tile_culling};
+    use crate::VerticalPerspectiveProjection;
+    use crate::tile_lod::{TileZoomFunction, elevation_for_tile_culling};
 
     /// A tile's bounding volume in unit-sphere space: a box at zoom 0 and 1,
     /// a wedge with up to eight corners after.
@@ -776,7 +776,9 @@ mod globe {
 /// Every tile of zoom `z`, the ones behind the planet too, under the ids the
 /// globe's [`tile_cover`] gives the visible ones: the same wraps, and the same
 /// overscaled zoom for `zoom_range` and `overscaled_z`.
-pub(crate) fn globe_level_cover(
+#[doc(hidden)]
+#[must_use]
+pub fn globe_level_cover(
     state: &TileCoverParameters,
     z: u8,
     zoom_range: Range<u8>,
@@ -1000,7 +1002,7 @@ pub fn tile_cover_bounds(bounds_: &LatLngBounds, z: u8) -> Vec<UnwrappedTileID> 
 }
 
 #[cfg(test)]
-pub(crate) fn tile_cover_geometry(geometry: &Geometry<f64>, z: u8) -> Result<Vec<UnwrappedTileID>, Error> {
+fn tile_cover_geometry(geometry: &Geometry<f64>, z: u8) -> Result<Vec<UnwrappedTileID>, Error> {
     let mut result = Vec::new();
     let mut tc = TileCover::new_from_geometry(geometry, z)?;
     while tc.has_next() {

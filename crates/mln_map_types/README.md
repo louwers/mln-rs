@@ -7,7 +7,8 @@
 > this crate as `mln_rs::mln_map_types`.
 
 Ports the map vocabulary that the crates below the map need (`include/mln/map`):
-the camera, map mode, projection mode, bound options and transform state.
+the camera, map mode, projection mode, bound options and transform state, and
+the tile cover (`src/mln/util/tile_cover.cpp`).
 
 Part of [mln-rs](https://github.com/louwers/mln-rs), a Rust port of the
 [MapLibre Native](https://github.com/maplibre/maplibre-native) map rendering

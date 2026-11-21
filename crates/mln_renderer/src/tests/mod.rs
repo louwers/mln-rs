@@ -21,15 +21,14 @@ mod gtest_image_store;
 mod gtest_dynamic_texture_atlas;
 // gtests-core: test/renderer/pattern_atlas.test.cpp.
 mod gtest_pattern_atlas;
-mod gtest_tile_lod;
 // gtests-core: test/algorithm/update_renderables.test.cpp.
 mod gtest_update_renderables;
 // gtests-core: test/geometry/line_atlas.test.cpp.
 mod gtest_line_atlas;
 // Ports test/util/tile_range.test.cpp (marker `// gtest: Group.Name`).
 mod gtest_tile_range;
-// test/util/tile_cover.test.cpp: needs mln_map's Transform, which is above
-// this crate, so it is an integration test rather than a unit test.
+// test/util/tile_cover.test.cpp, of mln_map_types' tile cover: needs
+// mln_map's Transform, which is above mln_map_types.
 mod tile_cover_test;
 // test/tile/geojson_tile.test.cpp, over features the test gives the tiles.
 mod geojson_tile_test;

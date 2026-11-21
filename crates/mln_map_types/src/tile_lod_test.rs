@@ -1,6 +1,6 @@
 use mln_math::deg2rad;
 
-use crate::util::tile_lod::{self, TileZoomFunction};
+use crate::tile_lod::{self, TileZoomFunction};
 
 // A view's default field of view, in degrees.
 const FOV: f64 = 36.869_897_645_844_02;

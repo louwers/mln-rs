@@ -3,6 +3,9 @@
 
 use geo_types::{Geometry, LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 use mln_map::transform::Transform;
+use mln_map_types::tile_cover::{
+    TileCover, TileCoverParameters, covering_zoom_level, tile_count_bounds, tile_cover, tile_cover_bounds,
+};
 use mln_map_types::{CameraLimits, CameraOptions, ConstrainMode, TileLodMode, ViewportMode};
 use mln_style_types::ProjectionDefinition;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID, UnwrappedTileID};
@@ -11,12 +14,12 @@ use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, WrapMode};
 use mln_util::range::Range;
 use mln_util::size::Size;
 
-use crate::util::tile_cover::{
-    TileCover, TileCoverParameters, covering_zoom_level, tile_count_bounds, tile_cover, tile_cover_bounds,
-    tile_cover_geometry,
-};
-
 const ZOOM_RANGE: Range<u8> = Range::new(0, 14);
+
+/// The tiles of `geometry`'s cover at zoom `z`, in order.
+fn tile_cover_geometry(geometry: &Geometry<f64>, z: u8) -> Result<Vec<UnwrappedTileID>, mln_util::error::Error> {
+    Ok(TileCover::new_from_geometry(geometry, z)?.collect())
+}
 
 fn ll(lat: f64, lon: f64) -> LatLng {
     LatLng::new(lat, lon).unwrap()

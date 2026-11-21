@@ -155,7 +155,7 @@ impl TestRunnerImpl for Impl {
             ..Default::default()
         };
         let bounds = self.map.lat_lng_bounds_for_camera(&camera).map_err(|e| MapError::Exception(e.to_string()))?;
-        Ok(mln_renderer::util::tile_cover::tile_cover_bounds(&bounds, zoom)
+        Ok(mln_map_types::tile_cover::tile_cover_bounds(&bounds, zoom)
             .into_iter()
             .map(|id| crate::runner::TileId { z: id.canonical.z, x: id.canonical.x, y: id.canonical.y, wrap: id.wrap })
             .collect())
