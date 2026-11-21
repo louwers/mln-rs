@@ -446,6 +446,10 @@ layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer
 layout(location = 0) out vec2 frag_offset;
 layout(location = 1) flat out float frag_length;
 layout(location = 2) out float frag_gamma_scale;
+#ifdef PROJECTION_GLOBE
+// The x in tile units on the zoom 0 tile, 0 on other tiles.
+layout(location = 3) out float frag_tile_x;
+#endif
 
 void main() {
     const ProjectionUBO projection = projectionVector.projection_ubo[constant.ubo_index];
@@ -469,7 +473,8 @@ void main() {
     const float reach = props.width * 0.5 + 0.5 / DEVICE_PIXEL_RATIO;
     const vec2 offset = vec2(in_corner.x != 0 ? segment_length + reach : -reach, in_corner.y != 0 ? reach : -reach);
     const vec2 base = start + along * (offset.x * units);
-    const vec4 corner = projectTile(base + across * (offset.y * units), projection);
+    const vec2 tile_pos = base + across * (offset.y * units);
+    const vec4 corner = projectTile(tile_pos, projection);
     const vec4 middle = projectTile(base, projection);
     const float extent = length((corner.xy - middle.xy) / corner.w * paintParams.units_to_pixels);
 
@@ -477,6 +482,11 @@ void main() {
     frag_offset = offset;
     frag_length = segment_length;
     frag_gamma_scale = reach / max(extent, 1e-6);
+#ifdef PROJECTION_GLOBE
+    // The zoom 0 tile's quads reach past its x extent around the planet onto
+    // the tile itself; the fragment stage discards what lies past it.
+    frag_tile_x = projection.tile_mercator_coords.z * 8192.0 >= 1.0 ? tile_pos.x : 0.0;
+#endif
 }
 ",
     fragment: r"
@@ -484,10 +494,18 @@ void main() {
 layout(location = 0) in vec2 frag_offset;
 layout(location = 1) flat in float frag_length;
 layout(location = 2) in float frag_gamma_scale;
+#ifdef PROJECTION_GLOBE
+layout(location = 3) in float frag_tile_x;
+#endif
 
 layout(location = 0) out vec4 out_color;
 
 void main() {
+#ifdef PROJECTION_GLOBE
+    if (frag_tile_x < 0.0 || frag_tile_x >= 8192.0) {
+        discard;
+    }
+#endif
 #ifdef OVERDRAW_INSPECTOR
     out_color = vec4(1.0);
 #else

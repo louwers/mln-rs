@@ -273,6 +273,10 @@ layout (location = 2) in vec2 a_end;
 out highp vec2 v_offset;
 flat out highp float v_length;
 out highp float v_gamma_scale;
+#ifdef PROJECTION_GLOBE
+// The x in tile units on the zoom 0 tile, 0 on other tiles.
+out highp float v_tile_x;
+#endif
 
 void main() {
     // The tile units a pixel spans; on the globe, more toward the poles,
@@ -292,7 +296,8 @@ void main() {
     highp float reach = u_width * 0.5 + 0.5 / DEVICE_PIXEL_RATIO;
     highp vec2 offset = vec2(a_corner.x != 0.0 ? segment_length + reach : -reach, a_corner.y != 0.0 ? reach : -reach);
     highp vec2 base = a_start + along * (offset.x * units);
-    highp vec4 corner = projectTile(base + across * (offset.y * units));
+    highp vec2 tile_pos = base + across * (offset.y * units);
+    highp vec4 corner = projectTile(tile_pos);
     highp vec4 middle = projectTile(base);
     highp float extent = length((corner.xy - middle.xy) / corner.w * u_units_to_pixels);
 
@@ -300,6 +305,11 @@ void main() {
     v_offset = offset;
     v_length = segment_length;
     v_gamma_scale = reach / max(extent, 1e-6);
+#ifdef PROJECTION_GLOBE
+    // The zoom 0 tile's quads reach past its x extent around the planet onto
+    // the tile itself; the fragment stage discards what lies past it.
+    v_tile_x = u_projection_tile_mercator_coords.z * 8192.0 >= 1.0 ? tile_pos.x : 0.0;
+#endif
 }
 ",
     fragment: r"layout (std140) uniform TileDebugPropsUBO {
@@ -313,8 +323,16 @@ void main() {
 in highp vec2 v_offset;
 flat in highp float v_length;
 in highp float v_gamma_scale;
+#ifdef PROJECTION_GLOBE
+in highp float v_tile_x;
+#endif
 
 void main() {
+#ifdef PROJECTION_GLOBE
+    if (v_tile_x < 0.0 || v_tile_x >= 8192.0) {
+        discard;
+    }
+#endif
     // The distance from the segment, whose ends are round, and the coverage
     // of an antialiased edge one device pixel wide on screen.
     highp float beyond = max(max(-v_offset.x, v_offset.x - v_length), 0.0);
