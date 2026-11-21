@@ -187,7 +187,7 @@ pub(crate) trait FindView<'a>: Sized {
 
     /// The index of the bucket among its layout's buckets; `None` for a
     /// view that isn't a bucket.
-    fn bucket_index(&self) -> Option<usize> {
+    fn bucket_index(self) -> Option<usize> {
         None
     }
 }
