@@ -5,7 +5,7 @@
 // machine lacks skips its cases.
 
 use glam::{DMat4, DVec4};
-use mln_runtime::map::{CameraOptions, CameraUpdate, MapMode};
+use mln_map_types::{CameraOptions, CameraUpdate, MapMode};
 use mln_runtime::{
     AcquiredFrame, AttachOptions, ClipDepthRange, DemandMode, Device, DeviceOptions, ErrorKind, FrameDemand,
     FrameDisposition, FrameProjection, FrameResult, Map, MapOptions, RenderSession, RenderTarget, Runtime, SyncKind,
@@ -82,7 +82,7 @@ fn loaded_frame(session: &RenderSession) -> (AcquiredFrame, FrameResult) {
         }
         let Some(frame) = session.acquire_frame().unwrap() else { return false };
         let result = *frame.result();
-        if result.disposition == FrameDisposition::Rendered && result.mode == mln_runtime::map::RenderMode::Full {
+        if result.disposition == FrameDisposition::Rendered && result.mode == mln_render::RenderMode::Full {
             loaded = Some((frame, result));
             return true;
         }

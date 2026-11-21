@@ -6,7 +6,7 @@
 //! as uniforms, or from each feature's data, which they read per vertex.
 
 use mln_bench_workload::paths::{VIEW, tile_center};
-use mln_runtime::map::{CameraOptions, MapMode};
+use mln_rs::mln_map_types::{CameraOptions, MapMode};
 use mln_util::geo::LatLng;
 use serde_json::{Value, json};
 

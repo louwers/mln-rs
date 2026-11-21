@@ -2,7 +2,7 @@
 //! its renderer, reused for each tile, drawing tiles it hasn't drawn
 //! before as still images and reading them back.
 
-use mln_runtime::map::{CameraOptions, MapMode};
+use mln_rs::mln_map_types::{CameraOptions, MapMode};
 use mln_util::size::Size;
 
 use crate::scenario::{Bench, Kind, Scenario};

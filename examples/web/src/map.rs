@@ -15,7 +15,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use mln_gestures::{GestureEvent, GestureRecognizer, Input, Modes, PointerKind};
-use mln_runtime::map::{AnimationOptions, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase, MapEvent};
+use mln_rs::mln_map_types::{AnimationOptions, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase};
+use mln_runtime::map::MapEvent;
 use mln_runtime::{
     AttachOptions, DemandMode, Error, EventMask, EventType, FrameDemand, FrameDisposition, LogicalExtent, Map,
     MapOptions, RenderSession, RenderTarget, Runtime, RuntimeEvent, RuntimeEventKind, RuntimeOptions, Surface,

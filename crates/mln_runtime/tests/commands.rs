@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::channel;
 
-use mln_runtime::map::{CameraOptions, CameraUpdate};
+use mln_map_types::{CameraOptions, CameraUpdate};
 use mln_runtime::{ErrorKind, LogicalExtent, MapOptions, ResourceRequest, Runtime, RuntimeOptions};
 use mln_util::size::Size;
 use parking_lot::Mutex;
@@ -404,7 +404,7 @@ fn only_a_continuous_map_repaints() {
     let runtime = runtime();
     let options = map_options();
     let still = MapOptions {
-        map: mln_runtime::map::MapCoreOptions { map_mode: mln_runtime::map::MapMode::Static, ..options.map },
+        map: mln_runtime::map::MapCoreOptions { map_mode: mln_map_types::MapMode::Static, ..options.map },
         ..options
     };
     let (map, created) = runtime.create_map(still).unwrap();

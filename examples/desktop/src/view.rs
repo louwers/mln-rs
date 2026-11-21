@@ -42,10 +42,11 @@ use std::time::{Duration, Instant};
 
 use mln_frame_pacer::{FramePacer, RefreshWaiter};
 use mln_gestures::{GestureEvent, GestureRecognizer, Input, Modes, NextTick, PinchPhase, PointerKind};
-use mln_runtime::map::{
+use mln_rs::mln_map_types::{
     AnimationOptions, BoundOptions, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase, MapDebugOptions,
-    MapEvent, RenderMode,
 };
+use mln_rs::mln_render::RenderMode;
+use mln_runtime::map::MapEvent;
 use mln_runtime::{
     CacheDatabaseOperation, Completion, DemandMode, Device, ErrorKind, EventMask, EventType, FrameDemand,
     FrameDisposition, LogicalExtent, Map, MapOptions, ResourceRequest, Runtime, RuntimeEventKind, RuntimeOptions,

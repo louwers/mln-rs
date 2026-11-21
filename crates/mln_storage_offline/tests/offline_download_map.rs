@@ -9,7 +9,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use mln_headless::HeadlessFrontend;
-use mln_runtime::map::{CameraOptions, MapCore, MapCoreOptions, MapEvent, MapMode, RenderFrameStatus, RenderMode};
+use mln_map_types::{CameraOptions, MapMode};
+use mln_rs::mln_render::RenderMode;
+use mln_runtime::map::{MapCore, MapCoreOptions, MapEvent, RenderFrameStatus};
 use mln_storage::offline::{
     OfflineRegionDownloadState, OfflineRegionMetadata, OfflineRegionObserver, OfflineRegionStatus,
     OfflineTilePyramidRegionDefinition,

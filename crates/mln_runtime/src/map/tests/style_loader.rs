@@ -406,7 +406,7 @@ fn edits_fail_during_a_url_load_and_the_old_version_stays_published() {
     let run_loop = Queue::<()>::new();
     let file_source = Arc::new(StubFileSource::new(ResponseType::Manual));
     file_source.set_response(Kind::Style, |_| Some(style_response(REMOTE)));
-    let options = MapCoreOptions { map_mode: crate::map::MapMode::Continuous, ..MapCoreOptions::default() };
+    let options = MapCoreOptions { map_mode: mln_map_types::MapMode::Continuous, ..MapCoreOptions::default() };
     let mut map = MapCore::new(
         Arc::<StubFileSource>::clone(&file_source),
         options,

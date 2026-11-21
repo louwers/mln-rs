@@ -5,6 +5,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
+use mln_map_types::{
+    AnimationOptions, BoundOptions, CameraDelta, CameraOptions, CameraUpdate, CameraUpdateMode, ConstrainMode,
+    FreeCameraOptions, GesturePhase, MapDebugOptions, MapMode, MapView, NorthOrientation, ProjectionMode, TileLodMode,
+    Viewport, ViewportMode,
+};
+use mln_render::UpdateReader;
 use mln_rs::mln_sources::GeoJsonSourceType;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style_types::{ProjectionDefinition, ProjectionType};
@@ -14,11 +20,7 @@ use mln_util::queue::Queue;
 use mln_util::size::Size;
 
 use crate::map::map_snapshot::{CameraBounds, FreeCamera, TileSettings};
-use crate::map::{
-    AnimationOptions, BoundOptions, CameraDelta, CameraOptions, CameraUpdate, CameraUpdateMode, ConstrainMode,
-    FreeCameraOptions, GesturePhase, MapCore, MapCoreOptions, MapDebugOptions, MapMode, MapProjection, MapView,
-    NorthOrientation, ProjectionMode, TileLodMode, UpdateReader, Viewport, ViewportMode,
-};
+use crate::map::{MapCore, MapCoreOptions, MapProjection};
 
 fn map(options: MapCoreOptions, run_loop: &Queue<()>) -> MapCore {
     MapCore::new(

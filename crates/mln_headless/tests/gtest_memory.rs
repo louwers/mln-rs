@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use mln_headless::HeadlessFrontend;
-use mln_runtime::map::{CameraOptions, MapCore, MapCoreOptions, MapMode};
+use mln_map_types::{CameraOptions, MapMode};
+use mln_runtime::map::{MapCore, MapCoreOptions};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{Kind, Resource, Response};
 use mln_style::Edit;

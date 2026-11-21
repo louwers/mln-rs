@@ -2,7 +2,7 @@
 // has no surface to give, and what an offscreen session refuses. A window
 // that presents frames is in surfaces_window.rs, which needs a display.
 
-use mln_runtime::map::MapMode;
+use mln_map_types::MapMode;
 use mln_runtime::{
     AttachOptions, Driver, ErrorKind, Map, MapOptions, RenderSessionState, RenderTarget, Runtime, Surface,
 };

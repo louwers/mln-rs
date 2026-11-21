@@ -2,7 +2,7 @@
 // come from the published snapshot, and its commands go out without waiting.
 
 use mln_gestures::{GestureCamera, GestureRecognizer, Input, Modes, PointerKind};
-use mln_runtime::map::{CameraOptions, CameraUpdate};
+use mln_map_types::{CameraOptions, CameraUpdate};
 use mln_util::geo::{LatLng, ScreenCoordinate};
 
 use crate::support::{map, runtime, wait};

@@ -8,7 +8,7 @@ pub(crate) mod tile_server;
 pub(crate) mod update;
 
 pub(crate) use mln_bench_workload::paths::VIEW;
-use mln_runtime::map::CameraOptions;
+use mln_rs::mln_map_types::CameraOptions;
 
 use crate::support::fixtures::{Fixtures, Tiles};
 

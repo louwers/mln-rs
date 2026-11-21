@@ -1,8 +1,7 @@
 //! The map: [`MapCore`], its options, the transform that moves its camera, and
 //! the events it reports. It runs on one thread, which the runtime's handles
 //! drive. The map vocabulary that lower crates need (`CameraOptions`,
-//! `MapMode`, `TransformState`, ...) lives in `mln_map_types` and is
-//! re-exported here.
+//! `MapMode`, `TransformState`, ...) lives in `mln_map_types`.
 
 mod feature_state;
 mod map_core;
@@ -17,22 +16,9 @@ pub mod transform;
 
 pub use map_core::MapCore;
 pub use map_event::{CameraChange, CameraChangeMode, CameraChangeSource, MapEvent, RenderFrameStatus};
-pub use map_options::MapCoreOptions;
+pub use map_options::{MapCoreOptions, UnusedStyleImagePolicy};
 pub use map_projection::MapProjection;
 pub use map_snapshot::{CameraBounds, FreeCamera, MapSnapshot, TileSettings};
-pub use mln_map_types::{
-    AnchoredMomentum, AnimationOptions, BoundOptions, Camera, CameraDelta, CameraError, CameraLimits, CameraMomentum,
-    CameraOptions, CameraUpdate, CameraUpdateMode, CameraVelocity, ConstrainMode, FreeCameraOptions, GesturePhase,
-    InvalidMomentum, LogicalExtent, MapDebugOptions, MapMode, MapView, MomentumDecay, MomentumDecayModel,
-    MomentumEasing, MomentumGlide, MomentumSnap, NorthOrientation, ProjectionMode, TileLodMode, TransformState,
-    TransitionEnd, TransitionOutcome, View, Viewport, ViewportMode,
-};
-pub use mln_render::{
-    OverscaledTileID, RenderMode, RendererEvents, RenderingStats, TileOperation, Update, UpdateReader,
-};
-pub use mln_style::StyleLoadError;
-pub use mln_util::event_queue::Waker;
-pub use mln_util::{Error, ErrorKind};
 pub use transform::{CameraCommandId, CommandEnd, FrameClock};
 
 #[cfg(test)]

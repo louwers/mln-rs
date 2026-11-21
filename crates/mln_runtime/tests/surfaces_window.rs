@@ -10,7 +10,7 @@
 
 use std::sync::Arc;
 
-use mln_runtime::map::MapMode;
+use mln_map_types::MapMode;
 use mln_runtime::{
     AttachOptions, DemandMode, Driver, DriverWork, FrameDemand, FrameDisposition, FrameResult, Map, MapOptions,
     RenderSession, RenderTarget, Runtime, Surface,

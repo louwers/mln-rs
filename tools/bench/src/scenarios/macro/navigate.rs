@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use mln_runtime::map::{CameraOptions, MapMode};
+use mln_rs::mln_map_types::{CameraOptions, MapMode};
 use mln_util::geo::LatLng;
 
 use super::VIEW;
