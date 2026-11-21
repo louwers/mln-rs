@@ -5,7 +5,7 @@ use std::hint::black_box;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use mln_sources::geojson::{GeoJSONOptions, TileFeatures, create_geojson_data};
+use mln_sources::geojson::{GeoJSONOptions, TileFeatures, create_geojson_data, parse_geojson};
 use mln_tile_id::CanonicalTileID;
 
 use crate::scenario::{Bench, Kind, Scenario};
@@ -71,7 +71,7 @@ fn parse_large(bench: &mut Bench) {
 fn parse(bench: &mut Bench, every: usize) {
     let fixtures = Fixtures::open(bench);
     let text = String::from_utf8(countries(&fixtures, every)).expect("UTF-8");
-    let geojson = bench.measure(|| mln_runtime::bench::parse_geojson(black_box(&text)).expect("GeoJSON"));
+    let geojson = bench.measure(|| parse_geojson(black_box(&text)).expect("GeoJSON"));
     drop(black_box(geojson));
     bench.per("kb", (text.len() / 1024) as u64);
 }
@@ -97,7 +97,7 @@ fn cut(bench: &mut Bench, every: usize) {
     let fixtures = Fixtures::open(bench);
     let text = countries(&fixtures, every);
     let text = String::from_utf8(text).expect("UTF-8");
-    let geojson = mln_runtime::bench::parse_geojson(&text).expect("GeoJSON");
+    let geojson = parse_geojson(&text).expect("GeoJSON");
     let options = GeoJSONOptions::default_options();
     let tiles: Vec<CanonicalTileID> = (0..=MAX_ZOOM)
         .flat_map(|z| (0..1u32 << z).flat_map(move |x| (0..1u32 << z).map(move |y| CanonicalTileID::new(z, x, y))))

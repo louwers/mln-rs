@@ -2,9 +2,11 @@
 //!
 //! The root holds the thread-safe handles of `mln_runtime`: a [`Runtime`]
 //! and its [`Map`]s, whose commands run on the runtime's thread and report
-//! through a [`Completion`], and the [`RenderSession`]s that draw them. It
-//! also assembles the built-in expression functions, layer types and source
-//! types into the registry that [`start_runtime`] starts a runtime with.
+//! through a [`Completion`], and the [`RenderSession`]s that draw them, with
+//! the traits through which they take the built-in source types' commands,
+//! such as [`GeoJsonSourceCommands`]. It also assembles the built-in
+//! expression functions, layer types and source types into the registry
+//! that [`start_runtime`] starts a runtime with.
 //!
 //! The library crates of <https://github.com/louwers/mln-rs> are re-exported
 //! here under their crate names: `mln_rs::mln_map`, `mln_rs::mln_util`,
@@ -57,6 +59,13 @@ pub use mln_renderer;
 #[cfg(feature = "runtime")]
 pub use mln_runtime::{self, *};
 pub use mln_sources;
+// The built-in source types' commands and queries, which the runtime's maps
+// and render sessions implement, with the values they take.
+#[cfg(feature = "runtime")]
+pub use mln_sources::{
+    ClusterQueries, CustomSourceCallbacks, CustomSourceCommands, GeoJsonSourceCommands, GeoJsonSourceSettings,
+    ImageSourceCommands,
+};
 pub use mln_sprite;
 pub use mln_storage;
 #[cfg(feature = "sqlite")]

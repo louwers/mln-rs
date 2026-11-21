@@ -6,7 +6,8 @@
 > Depend on [`mln-rs`](https://crates.io/crates/mln-rs) instead: it re-exports
 > this crate's types at its root.
 
-Thread-safe handles over mln-rs's maps, which mirror mln-rs's C API
+Thread-safe handles over mln-rs's maps, which, with the commands that
+`mln_sources` adds for the built-in source types, mirror mln-rs's C API
 (`crates/mln_c`) one to one. A `Runtime` owns a thread, and the file sources,
 cache and offline regions that its maps share. A `Map` handle sends commands to
 the map on that thread: they run in the order they were sent, and each reports

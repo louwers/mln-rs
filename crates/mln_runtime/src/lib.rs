@@ -1,5 +1,6 @@
-//! Thread-safe handles over mln-rs's maps, which mirror
-//! the C API (`mln-rs-c`) one to one.
+//! Thread-safe handles over mln-rs's maps, which, with the commands that
+//! `mln_sources` adds for the built-in source types, mirror the C API
+//! (`mln-rs-c`) one to one.
 //!
 //! A [`Runtime`] owns a thread, and the file sources, cache and offline
 //! regions of its maps. Each [`Map`] lives on its runtime's thread, and its
@@ -12,7 +13,11 @@
 //! or on the host's graphics thread through its [`DriverWork`].
 //!
 //! The synchronous, single-thread core that these handles drive is
-//! `mln_map`'s; [`Map::with_core`] runs a closure on it.
+//! `mln_map`'s; [`Map::with_core`] runs a closure on it. A source type's own
+//! commands go through the map's generic source paths, such as
+//! [`Map::add_style_source`], [`Map::apply_style_edit`] and
+//! [`Map::set_style_source_data`], and its queries of what a session drew
+//! through [`RenderSession::query_rendered_source`].
 //!
 //! Sessions render with the backends of the crate's features: `webgpu`,
 //! `metal`, `vulkan` and `gl`, each where its platform has it. A session's
@@ -36,9 +41,6 @@ compile_error!(
     "mln_runtime renders with at least one backend: enable `webgpu`, `metal`, `vulkan`, `gl` or, on Windows, `d3d12`"
 );
 
-#[cfg(all(feature = "bench", not(target_family = "wasm")))]
-#[doc(hidden)]
-pub mod bench;
 mod camera;
 mod completion;
 mod event;
@@ -78,4 +80,4 @@ pub use render::{
 };
 pub use resources::{CacheDatabaseOperation, ResourceProvider, ResourceRequest, is_managed_http_header};
 pub use runtime::{Runtime, RuntimeOptions};
-pub use style::{CustomSourceCallbacks, GeoJsonSourceOptions, LayerInfo, SourceInfo, SourceKind, SourceTiles};
+pub use style::{LayerInfo, NewSourceData, PrepareSourceData, SourceInfo, SourceTiles};

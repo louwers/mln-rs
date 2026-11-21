@@ -16,8 +16,6 @@ use mln_gfx::{ConsumerSync, GpuSync, Handoff, SyncKind};
 use mln_map::RenderMode;
 use mln_renderer::text::font_face_engine::FontFaceEngine;
 use mln_renderer::{Registry, Renderer, RendererEvent, RendererEvents, Update, UpdateReader};
-use mln_sources::{GeoJSONData, GeoJsonSourceType};
-use mln_style::source_type::SourceData;
 use mln_text::GlyphCache;
 use mln_text::local_glyph_rasterizer::LocalGlyphs;
 use mln_util::error::Error;
@@ -1543,39 +1541,18 @@ impl Worker {
         gfx.target.read_image()
     }
 
-    /// Runs `read` on the data of the clustered GeoJSON source `source_id`
-    /// of the last render, with the children of its cluster `cluster_id`.
-    pub(crate) fn cluster<T>(
+    /// Runs `read` on the source `source_id` of the last render.
+    pub(crate) fn rendered_source<T>(
         &mut self,
         source_id: &str,
-        cluster_id: u32,
-        read: impl FnOnce(&dyn GeoJSONData, Vec<feature::Feature<f64>>) -> Result<T, Error>,
+        read: impl FnOnce(&mln_style::Source) -> Result<T, Error>,
     ) -> Result<T, Error> {
-        // A cluster's ID holds its zoom plus one in its low five bits, so an
-        // ID without them names no cluster, though it would find the points
-        // at zoom 0 as children. An index of no points has no clusters.
-        const ZOOM_BITS: u32 = 0x1F;
-
         self.renderer()?;
         let source =
             self.sources.as_ref().and_then(|sources| sources.get(source_id)).ok_or_else(|| {
                 Error::not_found(format!("the session's last render has no source named {source_id}"))
             })?;
-        let geojson = SourceData::<GeoJsonSourceType>::recover(source)
-            .ok_or_else(|| Error::invalid_argument(format!("source {source_id} is not a GeoJSON source")))?;
-        if !geojson.options.options.cluster {
-            return Err(Error::invalid_argument(format!("GeoJSON source {source_id} does not cluster")));
-        }
-        let data = geojson.description.clone();
-        let children = data
-            .as_ref()
-            .filter(|_| cluster_id & ZOOM_BITS != 0)
-            .and_then(|data| data.get_children(cluster_id).ok())
-            .filter(|children| !children.is_empty());
-        match (data, children) {
-            (Some(data), Some(children)) => read(&*data, children),
-            _ => Err(Error::not_found(format!("the source has no cluster with ID {cluster_id}"))),
-        }
+        read(source)
     }
 
     // MARK: - Lifecycle

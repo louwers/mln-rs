@@ -7,7 +7,8 @@
 > this crate as `mln_rs::mln_sources`.
 
 The built-in source types, outside the engine. They register through
-`register_source_types`.
+`register_source_types`. With the `runtime` feature, each type also has the
+commands of `mln_runtime`'s maps for its sources.
 
 Part of [mln-rs](https://github.com/louwers/mln-rs), a Rust port of the
 [MapLibre Native](https://github.com/maplibre/maplibre-native) map rendering

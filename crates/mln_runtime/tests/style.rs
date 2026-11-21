@@ -5,9 +5,16 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use mln_runtime::{CustomSourceCallbacks, ErrorKind, GeoJsonSourceOptions, Map, ResourceRequest, SourceKind};
-use mln_sources::TileDataFormat;
-use mln_sources::custom::geometry::TileOptions;
+use mln_rs::mln_sources::custom::geometry::TileOptions;
+use mln_rs::mln_sources::{
+    CustomGeometrySourceType, CustomVectorSourceType, GeoJsonSourceType, ImageSourceType, RasterSourceType,
+    TileDataFormat, VectorSourceType,
+};
+use mln_rs::mln_style::source_type::StyleSourceType;
+use mln_rs::{
+    CustomSourceCallbacks, CustomSourceCommands, GeoJsonSourceCommands, GeoJsonSourceSettings, ImageSourceCommands,
+};
+use mln_runtime::{ErrorKind, Map, ResourceRequest};
 use mln_storage::response::Reason;
 use mln_storage::{ResourceError, Response};
 use mln_style::expression::Functions;
@@ -50,7 +57,10 @@ fn a_source_reports_its_url_attribution_and_tiles() {
     wait(map.set_geojson_source_url("geojson", "fixture://second.geojson"));
 
     let remote = wait(map.style_source("remote")).unwrap();
-    assert_eq!((remote.kind, remote.url.as_deref()), (SourceKind::Raster, Some("fixture://tiles.json")));
+    assert_eq!(
+        (remote.source_type, remote.url.as_deref()),
+        (RasterSourceType::INFO.name, Some("fixture://tiles.json"))
+    );
     assert!(remote.tiles.is_none() && remote.attribution.is_none());
     assert_eq!(remote.tile_size, Some(512));
 
@@ -73,8 +83,8 @@ fn sources_list_in_style_order() {
     wait(map.add_style_source_json("third", r#"{"type":"vector","tiles":["fixture://tiles/{z}/{x}/{y}"]}"#));
     wait(map.remove_style_source("first"));
     let sources = wait(map.style_sources());
-    let listed: Vec<_> = sources.iter().map(|source| (source.id.as_str(), source.kind)).collect();
-    assert_eq!(listed, [("second", SourceKind::GeoJson), ("third", SourceKind::Vector)]);
+    let listed: Vec<_> = sources.iter().map(|source| (source.id.as_str(), source.source_type)).collect();
+    assert_eq!(listed, [("second", GeoJsonSourceType::INFO.name), ("third", VectorSourceType::INFO.name)]);
 }
 
 #[test]
@@ -94,7 +104,7 @@ fn a_geojson_source_reports_the_options_its_data_needs() {
     let (_runtime, map) = styled_map();
     let clustered = r#"{"type":"geojson","data":{"type":"FeatureCollection","features":[]},"minzoom":3,"maxzoom":12,"buffer":64,"tolerance":0.5,"cluster":true,"clusterRadius":40,"clusterMaxZoom":10,"clusterMinPoints":3,"clusterProperties":{"total":["+",["get","weight"]]}}"#;
     wait(map.add_style_source_json("clustered", clustered));
-    let options = wait(map.style_source("clustered")).unwrap().geojson.unwrap();
+    let options = wait(map.geojson_source_settings("clustered"));
     assert_eq!((options.min_zoom, options.max_zoom, options.buffer, options.cluster_radius), (3, 12, 64, 40));
     assert_eq!((options.cluster_max_zoom, options.cluster_min_points, options.cluster), (10, 3, true));
     let properties = options.cluster_properties.clone().unwrap();
@@ -103,12 +113,12 @@ fn a_geojson_source_reports_the_options_its_data_needs() {
     // The reported properties parse back into the same expressions.
     let wrapper = format!(r#"{{"type":"geojson","data":"fixture://copy.geojson","clusterProperties":{properties}}}"#);
     wait(map.add_style_source_json("copy", wrapper));
-    let copy = wait(map.style_source("copy")).unwrap().geojson.unwrap();
+    let copy = wait(map.geojson_source_settings("copy"));
     assert_eq!(copy.cluster_properties, options.cluster_properties);
 
     // The same options add a source of their own.
     wait(map.add_geojson_source("added", options.clone()));
-    assert_eq!(wait(map.style_source("added")).unwrap().geojson, Some(options));
+    assert_eq!(wait(map.geojson_source_settings("added")), options);
     assert!(wait(map.style_source("clustered")).unwrap().vector_encoding.is_none());
 }
 
@@ -116,11 +126,11 @@ fn a_geojson_source_reports_the_options_its_data_needs() {
 fn a_geojson_source_keeps_its_attribution_through_new_data() {
     let (_runtime, map) = styled_map();
     let options =
-        GeoJsonSourceOptions { attribution: Some("Fixture data".to_owned()), ..GeoJsonSourceOptions::default() };
+        GeoJsonSourceSettings { attribution: Some("Fixture data".to_owned()), ..GeoJsonSourceSettings::default() };
     wait(map.add_geojson_source("attributed", options));
     wait(map.set_geojson_source_data("attributed", r#"{"type":"Point","coordinates":[0,0]}"#));
     assert_eq!(wait(map.style_source("attributed")).unwrap().attribution.as_deref(), Some("Fixture data"));
-    let error = wait_err(map.add_geojson_source("attributed", GeoJsonSourceOptions::default()));
+    let error = wait_err(map.add_geojson_source("attributed", GeoJsonSourceSettings::default()));
     assert_eq!(
         (error.kind, error.message.as_str()),
         (ErrorKind::AlreadyExists, "source \"attributed\" already exists")
@@ -130,24 +140,24 @@ fn a_geojson_source_keeps_its_attribution_through_new_data() {
 #[test]
 fn a_geojson_source_checks_its_options() {
     let (_runtime, map) = styled_map();
-    let refused = |options: GeoJsonSourceOptions| {
+    let refused = |options: GeoJsonSourceSettings| {
         let error = map.add_geojson_source("refused", options).unwrap_err();
         assert_eq!(error.kind, ErrorKind::InvalidArgument, "{}", error.message);
         error.message
     };
-    let defaults = GeoJsonSourceOptions::default;
-    assert!(refused(GeoJsonSourceOptions { max_zoom: 25, ..defaults() }).contains("[0, 24]"));
-    assert!(refused(GeoJsonSourceOptions { cluster_max_zoom: 31, ..defaults() }).contains("[0, 30]"));
-    assert!(refused(GeoJsonSourceOptions { min_zoom: 10, max_zoom: 4, ..defaults() }).contains("min_zoom"));
-    assert!(refused(GeoJsonSourceOptions { tolerance: f64::NAN, ..defaults() }).contains("tolerance"));
-    assert!(refused(GeoJsonSourceOptions { buffer: 513, ..defaults() }).contains("512"));
-    assert!(refused(GeoJsonSourceOptions { cluster_radius: 4096, ..defaults() }).contains("4095"));
+    let defaults = GeoJsonSourceSettings::default;
+    assert!(refused(GeoJsonSourceSettings { max_zoom: 25, ..defaults() }).contains("[0, 24]"));
+    assert!(refused(GeoJsonSourceSettings { cluster_max_zoom: 31, ..defaults() }).contains("[0, 30]"));
+    assert!(refused(GeoJsonSourceSettings { min_zoom: 10, max_zoom: 4, ..defaults() }).contains("min_zoom"));
+    assert!(refused(GeoJsonSourceSettings { tolerance: f64::NAN, ..defaults() }).contains("tolerance"));
+    assert!(refused(GeoJsonSourceSettings { buffer: 513, ..defaults() }).contains("512"));
+    assert!(refused(GeoJsonSourceSettings { cluster_radius: 4096, ..defaults() }).contains("4095"));
     let limits =
-        GeoJsonSourceOptions { max_zoom: 24, cluster_max_zoom: 30, buffer: 512, cluster_radius: 4095, ..defaults() };
+        GeoJsonSourceSettings { max_zoom: 24, cluster_max_zoom: 30, buffer: 512, cluster_radius: 4095, ..defaults() };
     wait(map.add_geojson_source("limits", limits));
 
     // Cluster properties parse on the runtime's thread.
-    let plain = GeoJsonSourceOptions { cluster_properties: Some(r#"{"total":5}"#.to_owned()), ..defaults() };
+    let plain = GeoJsonSourceSettings { cluster_properties: Some(r#"{"total":5}"#.to_owned()), ..defaults() };
     assert!(plain.check_cluster_properties(&Functions::with_builtins()).is_err());
     let error = wait_err(map.add_geojson_source("plain", plain));
     assert_eq!(error.kind, ErrorKind::InvalidArgument, "{}", error.message);
@@ -157,9 +167,12 @@ fn a_geojson_source_checks_its_options() {
 #[test]
 fn geojson_data_checks_its_source_and_its_options() {
     let (_runtime, map) = styled_map();
-    wait(map.add_geojson_source("plain", GeoJsonSourceOptions::default()));
+    wait(map.add_geojson_source("plain", GeoJsonSourceSettings::default()));
     wait(
-        map.add_geojson_source("clustered", GeoJsonSourceOptions { cluster: true, ..GeoJsonSourceOptions::default() }),
+        map.add_geojson_source(
+            "clustered",
+            GeoJsonSourceSettings { cluster: true, ..GeoJsonSourceSettings::default() },
+        ),
     );
     wait(map.set_geojson_source_data("clustered", point_collection("kept")));
 
@@ -188,7 +201,7 @@ fn geojson_data_checks_its_source_and_its_options() {
 #[test]
 fn only_the_newest_waiting_geojson_data_follows_the_data_being_built() {
     let (_runtime, map) = styled_map();
-    wait(map.add_geojson_source("points", GeoJsonSourceOptions::default()));
+    wait(map.add_geojson_source("points", GeoJsonSourceSettings::default()));
     let first = map.set_geojson_source_data("points", point_collection("first")).unwrap();
     let middle = map.set_geojson_source_data("points", point_collection("middle")).unwrap();
     let last = map.set_geojson_source_data("points", point_collection("last")).unwrap();
@@ -212,7 +225,7 @@ fn only_the_newest_waiting_geojson_data_follows_the_data_being_built() {
 #[test]
 fn synchronous_tiling_installs_data_before_the_next_command() {
     let (_runtime, map) = styled_map();
-    wait(map.add_geojson_source("points", GeoJsonSourceOptions::default()));
+    wait(map.add_geojson_source("points", GeoJsonSourceSettings::default()));
     wait(map.set_geojson_source_synchronous_tiling("points", true));
     let installed = Arc::new(AtomicUsize::new(0));
     let seen = Arc::clone(&installed);
@@ -238,7 +251,7 @@ fn corners(offset: f64) -> [LatLng; 4] {
 fn image_sources_take_corners_images_and_urls() {
     let (_runtime, map) = styled_map();
     wait(map.add_image_source("inline-image", corners(0.0), image(2, 2)));
-    assert_eq!(wait(map.style_source("inline-image")).unwrap().kind, SourceKind::Image);
+    assert_eq!(wait(map.style_source("inline-image")).unwrap().source_type, ImageSourceType::INFO.name);
     assert_eq!(wait(map.image_source_coordinates("inline-image")), corners(0.0));
     wait(map.set_image_source_coordinates("inline-image", corners(4.0)));
     assert_eq!(wait(map.image_source_coordinates("inline-image")), corners(4.0));
@@ -296,7 +309,7 @@ fn a_custom_source_drops_its_callbacks_once_it_leaves_the_style() {
     let (runtime, map) = styled_map();
     let removed = Probe::default();
     add_geometry(&map, "removed", &removed).unwrap();
-    assert_eq!(wait(map.style_source("removed")).unwrap().kind, SourceKind::CustomGeometry);
+    assert_eq!(wait(map.style_source("removed")).unwrap().source_type, CustomGeometrySourceType::INFO.name);
     assert_eq!(removed.drops(), 0);
     wait(map.remove_style_source("removed"));
     assert_eq!(removed.drops(), 1);
@@ -311,7 +324,7 @@ fn a_custom_source_drops_its_callbacks_once_it_leaves_the_style() {
     let vector = Probe::default();
     add_geometry(&map, "replaced", &replaced).unwrap();
     wait(map.add_custom_vector_source("vector", vector.callbacks(), Range::new(0, 18)));
-    assert_eq!(wait(map.style_source("vector")).unwrap().kind, SourceKind::CustomVector);
+    assert_eq!(wait(map.style_source("vector")).unwrap().source_type, CustomVectorSourceType::INFO.name);
     wait(map.set_style_json(r#"{"version":8,"name":"next","sources":{},"layers":[]}"#));
     assert_eq!((replaced.drops(), vector.drops()), (1, 1));
 

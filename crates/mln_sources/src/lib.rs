@@ -5,6 +5,11 @@
 //! origin (the [source type contract](mln_renderer::source)), and the edits
 //! and handles its sources take. They register through
 //! [`register_source_types`].
+//!
+//! With the `runtime` feature, each type's module also has the commands of
+//! `mln_runtime`'s maps for its sources, as a trait that the map implements,
+//! such as `GeoJsonSourceCommands`, over the runtime's generic source
+//! paths.
 
 pub mod custom;
 pub mod geojson;
@@ -14,7 +19,13 @@ pub mod tileset;
 pub use custom::geometry::CustomGeometrySourceHandle;
 pub use custom::vector::CustomVectorSourceHandle;
 pub use custom::{CustomGeometrySourceType, CustomVectorSourceType, TileDataFormat};
+#[cfg(feature = "runtime")]
+pub use custom::{CustomSourceCallbacks, CustomSourceCommands};
+#[cfg(feature = "runtime")]
+pub use geojson::{ClusterQueries, GeoJsonSourceCommands, GeoJsonSourceSettings};
 pub use geojson::{GeoJSONData, GeoJSONOptions, GeoJsonSourceType, geojson_source};
+#[cfg(feature = "runtime")]
+pub use image::ImageSourceCommands;
 pub use image::{ImageSourceType, image_source};
 use mln_renderer::{RegisterError, RegistryBuilder};
 pub use tileset::{
@@ -32,6 +43,13 @@ pub fn register_source_types(builder: &mut RegistryBuilder) -> Result<(), Regist
     builder.add_source_type::<ImageSourceType>()?;
     builder.add_source_type::<CustomGeometrySourceType>()?;
     builder.add_source_type::<CustomVectorSourceType>()
+}
+
+/// The error of a command for the source `id`, which isn't `kind`, as in
+/// `source "water" is not a GeoJSON source`.
+#[cfg(feature = "runtime")]
+fn not_a(id: &str, kind: &str) -> mln_util::Error {
+    mln_util::Error::invalid_argument(format!("source \"{id}\" is not {kind}"))
 }
 
 #[cfg(test)]
