@@ -101,7 +101,8 @@ fn defines<'a>(overdraw: bool, globe: bool, uniforms: impl IntoIterator<Item = &
 /// inspector, which counts its draws.
 #[test]
 fn every_layer_program_shows_the_overdraw_inspector() {
-    use mln_gfx::shaders::programs::{ATMOSPHERE, CLIPPING_MASK, COLLISION_BOX, COLLISION_CIRCLE, GLOBE_DEPTH, SKY};
+    use mln_gfx::shaders::programs::{ATMOSPHERE, CLIPPING_MASK, GLOBE_DEPTH, SKY};
+    use mln_layers::symbol::programs::{COLLISION_BOX, COLLISION_CIRCLE};
     let not_layers = [&CLIPPING_MASK, &COLLISION_BOX, &COLLISION_CIRCLE, &GLOBE_DEPTH, &SKY, &ATMOSPHERE];
     for (program, source) in sources() {
         if !not_layers.contains(&program) {
@@ -319,8 +320,8 @@ const UBO_SIZES: &[(&str, usize)] = &[
     ("BackgroundDrawableUnionUBO", size_of::<mln_layers::background::ubo::BackgroundDrawableUnionUBO>()),
     ("CircleDrawableUBO", size_of::<mln_layers::circle::ubo::CircleDrawableUBO>()),
     ("CircleEvaluatedPropsUBO", size_of::<mln_layers::circle::ubo::CircleEvaluatedPropsUBO>()),
-    ("CollisionDrawableUBO", size_of::<symbol_layer_ubo::CollisionDrawableUBO>()),
-    ("CollisionTilePropsUBO", size_of::<symbol_layer_ubo::CollisionTilePropsUBO>()),
+    ("CollisionDrawableUBO", size_of::<mln_layers::symbol::ubo::CollisionDrawableUBO>()),
+    ("CollisionTilePropsUBO", size_of::<mln_layers::symbol::ubo::CollisionTilePropsUBO>()),
     ("ColorReliefDrawableUBO", size_of::<mln_layers::color_relief::ubo::ColorReliefDrawableUBO>()),
     ("ColorReliefTilePropsUBO", size_of::<mln_layers::color_relief::ubo::ColorReliefTilePropsUBO>()),
     ("ColorReliefEvaluatedPropsUBO", size_of::<mln_layers::color_relief::ubo::ColorReliefEvaluatedPropsUBO>()),
@@ -359,9 +360,9 @@ const UBO_SIZES: &[(&str, usize)] = &[
     ("LineTilePropsUnionUBO", size_of::<mln_layers::line::ubo::LineTilePropsUnionUBO>()),
     ("RasterDrawableUBO", size_of::<mln_layers::raster::ubo::RasterDrawableUBO>()),
     ("RasterEvaluatedPropsUBO", size_of::<mln_layers::raster::ubo::RasterEvaluatedPropsUBO>()),
-    ("SymbolDrawableUBO", size_of::<symbol_layer_ubo::SymbolDrawableUBO>()),
-    ("SymbolTilePropsUBO", size_of::<symbol_layer_ubo::SymbolTilePropsUBO>()),
-    ("SymbolEvaluatedPropsUBO", size_of::<symbol_layer_ubo::SymbolEvaluatedPropsUBO>()),
+    ("SymbolDrawableUBO", size_of::<mln_layers::symbol::ubo::SymbolDrawableUBO>()),
+    ("SymbolTilePropsUBO", size_of::<mln_layers::symbol::ubo::SymbolTilePropsUBO>()),
+    ("SymbolEvaluatedPropsUBO", size_of::<mln_layers::symbol::ubo::SymbolEvaluatedPropsUBO>()),
 ];
 
 /// True if `text` declares the struct or union `name`.

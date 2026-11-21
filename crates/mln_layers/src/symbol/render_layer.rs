@@ -12,7 +12,6 @@ use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
     ID_COLLISION_ANCHOR_POS_VERTEX_ATTRIBUTE, ID_COLLISION_DRAWABLE_UBO, ID_COLLISION_EXTRUDE_VERTEX_ATTRIBUTE,
@@ -24,9 +23,7 @@ use mln_gfx::shaders::shader_defines::{
     ID_SYMBOL_POS_OFFSET_ATTRIBUTE, ID_SYMBOL_PROJECTED_POS_ATTRIBUTE, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE,
     ID_SYMBOL_TILE_PROPS_UBO,
 };
-use mln_gfx::shaders::symbol_layer_ubo::{
-    CollisionDrawableUBO, CollisionTilePropsUBO, SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO,
-};
+use mln_gfx::shaders::source::ShaderSources;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_map_types::{Projection, ProjectionData};
 use mln_renderer::draw::{
@@ -53,6 +50,10 @@ use mln_util::error::Error;
 use mln_util::hash::HashMap;
 use mln_util::identity::SimpleIdentity;
 
+use super::programs;
+use super::ubo::{
+    CollisionDrawableUBO, CollisionTilePropsUBO, SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO,
+};
 use crate::symbol::bucket::{
     Buffer, CollisionBoxDynamicVertex, CollisionBoxLayoutVertex, CollisionBuffer, PaintProperties, SymbolBucket,
     SymbolDynamicLayoutVertex, SymbolOpacityVertex,
@@ -1064,6 +1065,10 @@ impl LayerType for Symbol {
     const TILE_ORDER: TileOrder = TileOrder::ByY;
 
     const PLACEMENT: Option<NewPlacement<Symbol>> = Some(|| Box::<SymbolPlacement>::default());
+
+    fn add_shader_sources(sources: &mut ShaderSources) {
+        super::add_shader_sources(sources);
+    }
 
     /// A symbol layout always waits for its glyphs and images.
     fn layout_can_need_dependencies(_group: &[Arc<EvaluatedLayer<Symbol>>]) -> bool {

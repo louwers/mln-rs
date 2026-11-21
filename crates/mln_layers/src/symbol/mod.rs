@@ -19,11 +19,14 @@ pub(crate) mod instance;
 pub(crate) mod layout;
 pub mod placement;
 mod pool;
+pub mod programs;
 mod projection;
 #[rustfmt::skip]
 mod properties;
 mod quads;
 pub(crate) mod render_layer;
+pub mod ubo;
+crate::shaders::shader_sources!();
 
 use mln_style::layer::FontStack;
 use mln_style::layer_type::{LayerStyle, LayerTypeInfo, SourceKind, StyleLayerType};
