@@ -50,10 +50,7 @@
 //! ([`FeatureQuery`]), draws into textures of its own before the frame's
 //! passes ([`OffscreenPass`]), or draws through a host outside the
 //! renderer ([`LayerHost`]). The engine asks for each, and does without it
-//! for a type that has none. A type can also place its layers' contents
-//! across tiles, where they collide with nothing placed before them
-//! (`LayerType::PLACEMENT`, with the hidden `mln_render::placement`
-//! module); a registry has at most one such type.
+//! for a type that has none.
 //!
 //! [`LayerType::add_shader_sources`] runs once, when the type registers,
 //! on the thread that registers it. The engine runs the other hooks one at
@@ -282,10 +279,11 @@ pub trait LayerType: StyleLayerType {
         None
     }
 
-    /// What makes the placement pass of the type's layers, for a
-    /// type whose layers place what they show where it collides with
-    /// nothing shown already ([`PlacementPass`](crate::placement::PlacementPass));
-    /// `None` for a type whose layers don't. A renderer makes one pass, of
+    /// Not a contract yet (see the crate doc): what makes the placement
+    /// pass of the type's layers, for a type whose layers place what they
+    /// show where it collides with nothing shown already
+    /// ([`PlacementPass`](crate::placement::PlacementPass)); `None` for a
+    /// type whose layers don't. A renderer makes one pass, of
     /// its registry's one type that places, and runs it over the frame's
     /// layers of the type. Placement changes such a layer's buckets where
     /// they are: a tile that fades out keeps drawing the layer, and a
@@ -462,8 +460,8 @@ pub struct UpdateContext<'a, 'f, T: LayerType> {
 }
 
 impl<T: LayerType> UpdateContext<'_, '_, T> {
-    /// The key that the layer's placement finds `tile`'s bucket
-    /// by among the frame's tiles
+    /// Not a contract yet (see the crate doc): the key that the layer's
+    /// placement finds `tile`'s bucket by among the frame's tiles
     /// ([`PlacementBuckets`](crate::placement::PlacementBuckets)), for a tile
     /// that shows the layer a bucket of its layout.
     #[doc(hidden)]

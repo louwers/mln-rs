@@ -15,7 +15,9 @@
 //! ([`mln_style::expression::functions`]), programs and their shader
 //! sources ([`mln_gfx::shaders::source`]) and GPU backends
 //! ([`mln_gfx::gpu`]). The built-in layer and source types, in
-//! [`mln_layers`] and [`mln_sources`], go through the same contracts, and
+//! [`mln_layers`] and [`mln_sources`], go through the same contracts, but
+//! for the symbol type's placement, which goes through hidden items of
+//! `mln_render` that aren't a contract yet (its crate doc names them).
 //! [`register_builtins`] adds them to a [`RegistryBuilder`](mln_render::RegistryBuilder).
 //!
 //! The library crates of <https://github.com/louwers/mln-rs> are re-exported

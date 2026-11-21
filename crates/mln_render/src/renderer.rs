@@ -320,8 +320,9 @@ impl Renderer {
         features
     }
 
-    /// The renderer's placement pass, if it is a `P`: the pass
-    /// of its registry's layer type that places
+    /// Not a contract yet (see the crate doc): the renderer's placement
+    /// pass, if it is a `P`: the pass of its registry's layer type that
+    /// places
     /// ([`LayerType::PLACEMENT`](crate::layer::LayerType::PLACEMENT)), for
     /// the type's own API to reach.
     #[doc(hidden)]
@@ -330,7 +331,7 @@ impl Renderer {
         self.orchestrator.placement()?.pass().downcast_ref()
     }
 
-    /// [`placement`](Self::placement), to change.
+    /// [`placement`](Self::placement), to change; not a contract yet.
     #[doc(hidden)]
     pub fn placement_mut<P: 'static>(&mut self) -> Option<&mut P> {
         self.orchestrator.placement_mut()?.pass_mut().downcast_mut()

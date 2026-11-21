@@ -15,6 +15,12 @@
 //!
 //! The GPU backend that a renderer draws through is `mln_gfx::gpu`'s
 //! `Gpu`.
+//!
+//! Not a contract yet, and hidden from the documentation: the symbol type's
+//! placement goes through the `placement` module, `LayerType::PLACEMENT`,
+//! `UpdateContext::bucket_key` and `Renderer::placement`, and the tests and
+//! benchmarks of `mln_layers` through the `testing` and `bench` features.
+//! They can change or go in any release.
 
 mod algorithm;
 #[cfg(feature = "bench")]
