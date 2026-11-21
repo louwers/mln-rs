@@ -45,6 +45,8 @@ fn ground_height(pos: vec2<f32>, dem_coords: vec4<f32>, props: TerrainPropsUBO) 
     };
 }
 
+pub(crate) use ground_height;
+
 /// What a standing layer's terrain variant reads of the ground, within
 /// `#ifdef TERRAIN`: `ground_height`, and what reads the ground of its draw
 /// in its projection entry (`ProjectionUBO::ground`).
@@ -52,7 +54,7 @@ macro_rules! standing_ground {
     () => {
         concat!(
             "\n#ifdef TERRAIN\n",
-            ground_height!(),
+            $crate::shaders::wgsl_sources::ground_height!(),
             r"
 // The height of the ground in meters at `pos`, in tile units of the draw's
 // tile, which reads `ground`.
@@ -76,6 +78,7 @@ fn ground_dropped() -> vec4<f32> {
         )
     };
 }
+pub(crate) use standing_ground;
 
 pub(crate) const ATMOSPHERE_SHADER: WgslShaderSource = WgslShaderSource {
     vertex: Some(

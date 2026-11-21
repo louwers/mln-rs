@@ -38,7 +38,8 @@ use crate::color_mode::{BlendFunction, Mask};
 use crate::cull_face_mode::CullFaceMode;
 use crate::depth_mode::DepthMode;
 use crate::gfx_types::{AttributeDataType, DrawModeType};
-use crate::shaders::program::Program;
+use crate::shaders::program::{Program, TERRAIN_DEFINE};
+use crate::shaders::programs::{VariantAttributes, terrain_attributes};
 use crate::stencil_mode::{StencilMode, Test};
 use crate::texture2d::SamplerState;
 use crate::types::{DepthFunctionType, DepthMaskType, StencilOpType};
@@ -303,6 +304,8 @@ pub struct VertexBufferLayout {
 pub struct ShaderKey {
     program: &'static Program,
     defines: Arc<[String]>,
+    /// Whether it is the program's terrain variant ([`TERRAIN_DEFINE`]).
+    terrain: bool,
 }
 
 impl ShaderKey {
@@ -314,12 +317,33 @@ impl ShaderKey {
         let mut defines: Vec<String> = defines.into_iter().collect();
         defines.sort_unstable();
         defines.dedup();
-        ShaderKey { program, defines: defines.into() }
+        let terrain = defines.iter().any(|define| define == TERRAIN_DEFINE);
+        ShaderKey { program, defines: defines.into(), terrain }
     }
 
     #[must_use]
     pub fn program(&self) -> &'static Program {
         self.program
+    }
+
+    /// The per-vertex attributes the variant reads, each with the format a
+    /// draw without data for it binds, in the variant's order: the
+    /// program's ([`Program::attributes`]), or more for a terrain variant
+    /// ([`terrain_attributes`]).
+    #[must_use]
+    pub fn attributes(&self) -> &'static [(usize, AttributeDataType)] {
+        self.terrain_attributes().map_or(self.program.attributes, |(attributes, _)| attributes)
+    }
+
+    /// The per-instance attributes the variant reads, as
+    /// [`attributes`](Self::attributes) gives them.
+    #[must_use]
+    pub fn instance_attributes(&self) -> &'static [(usize, AttributeDataType)] {
+        self.terrain_attributes().map_or(self.program.instance_attributes, |(_, instances)| instances)
+    }
+
+    fn terrain_attributes(&self) -> Option<VariantAttributes> {
+        if self.terrain { terrain_attributes(self.program) } else { None }
     }
 
     /// The defines, sorted.

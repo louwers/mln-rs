@@ -327,6 +327,7 @@ fn ubo_ids(program: &Program, source: &ShaderSource) -> Vec<(&'static str, usize
         "FillExtrusionPulledShader" => &[
             ("idFillExtrusionWallVertices", ID_FILL_EXTRUSION_WALL_VERTICES),
             ("idFillExtrusionWallPaint", ID_FILL_EXTRUSION_WALL_PAINT),
+            ("idFillExtrusionWallCentroids", ID_FILL_EXTRUSION_WALL_CENTROIDS),
         ],
         "FillOutlinePulledShader" => &[
             ("idFillOutlineVertices", ID_FILL_OUTLINE_VERTICES),

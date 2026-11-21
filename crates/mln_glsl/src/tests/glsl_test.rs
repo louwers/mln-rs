@@ -239,7 +239,14 @@ fn buffers(program: &Program, variant: ProjectionVariant) -> Vec<(Buffer, usize)
             (LayerUniform(ID_FILL_EXTRUSION_PROPS_UBO), size_of::<FillExtrusionPropsUBO>()),
             (DrawableVertex(ID_FILL_EXTRUSION_WALL_VERTICES), size_of::<u32>()),
             (DrawableVertex(ID_FILL_EXTRUSION_WALL_PAINT), size_of::<f32>()),
-        ],
+        ]
+        .into_iter()
+        // The terrain variant reads the centroids, a word each.
+        .chain(
+            (variant == ProjectionVariant::Terrain)
+                .then_some((DrawableVertex(ID_FILL_EXTRUSION_WALL_CENTROIDS), size_of::<u32>())),
+        )
+        .collect(),
         "FillExtrusionPatternShader" | "FillExtrusionPatternInstancedShader" | "FillExtrusionPatternWallShader" => {
             vec![
                 (LayerStorage(ID_FILL_EXTRUSION_DRAWABLE_UBO), size_of::<FillExtrusionDrawableUBO>()),
@@ -618,8 +625,13 @@ fn vertex_inputs_are_the_attribute_tables() {
         let indices: BTreeSet<usize> = all_attributes(source).map(|attr| attr.index).collect();
         assert_eq!(indices.len(), all_attributes(source).count(), "{}: attribute indices repeat", program.name);
         for variant in variants(program, true) {
+            // A terrain variant may read more than the program's own
+            // attributes (`terrain_attributes`).
+            let terrain = variant.projection == ProjectionVariant::Terrain;
+            let own = |id: usize| program.attributes.iter().chain(program.instance_attributes).any(|&(at, _)| at == id);
             let table: BTreeMap<u32, (ScalarKind, u32)> = all_attributes(source)
                 .filter(|attr| !UNREAD_ATTRIBUTES.contains(&(program.name, attr.index)))
+                .filter(|attr| terrain || own(attr.id))
                 .map(|attr| (attr.index as u32, input_type(attr.data_type)))
                 .collect();
             let inputs: BTreeMap<u32, (ScalarKind, u32)> =
@@ -738,6 +750,7 @@ fn bindings_follow_from_the_packed_ids() {
     assert_eq!(DRAWABLE_UNIFORM_COUNT, 5);
     assert_eq!(drawable_vertex_binding(ID_FILL_EXTRUSION_WALL_VERTICES), Some(5));
     assert_eq!(drawable_vertex_binding(ID_FILL_EXTRUSION_WALL_PAINT), Some(6));
+    assert_eq!(drawable_vertex_binding(ID_FILL_EXTRUSION_WALL_CENTROIDS), Some(7));
     assert_eq!(drawable_vertex_binding(ID_FILL_OUTLINE_VERTICES), Some(5));
     assert_eq!(drawable_vertex_binding(ID_FILL_OUTLINE_ENDS), Some(6));
     assert_eq!(drawable_vertex_binding(ID_FILL_OUTLINE_PAINT), Some(7));

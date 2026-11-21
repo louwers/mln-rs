@@ -159,6 +159,31 @@ vec4 ground_dropped() {
     };
 }
 
+/// `groundHeight` and `baseGround`, what a fill extrusion's top and base
+/// rise by: over terrain, the ground under its polygon's centroid,
+/// `a_centroid`, as it draws, translated, and a base at or below 0 sinks
+/// 10 m more, so that no gap shows under a wall downhill. Returns a vertex
+/// the draw drops for a polygon whose centroid is off the draw's part of its
+/// tile.
+macro_rules! fill_extrusion_ground {
+    () => {
+        r"
+#ifdef TERRAIN
+    highp vec2 centroid_pos = a_centroid;
+    if (!ground_holds(centroid_pos)) {
+        gl_Position = ground_dropped();
+        return;
+    }
+    highp float groundHeight = standing_height(centroid_pos + u_projection_translate);
+    highp float baseGround = groundHeight - (base > 0.0 ? 0.0 : 10.0);
+#else
+    highp float groundHeight = 0.0;
+    highp float baseGround = 0.0;
+#endif
+"
+    };
+}
+
 pub(crate) const ATMOSPHERE_SHADER: GlslShaderSource = GlslShaderSource {
     vertex: r"layout(location = 0) in vec2 a_pos;
 
@@ -1014,7 +1039,9 @@ void main() {
 };
 
 pub(crate) const FILL_EXTRUSION_INSTANCED_SHADER: GlslShaderSource = GlslShaderSource {
-    vertex: r"invariant gl_Position;
+    vertex: concat!(
+        standing_ground!(),
+        r"invariant gl_Position;
 
 // The corner of the wall quad: x picks the instance's outline vertex (0) or
 // the next one (1), y the base (0) or the top (1).
@@ -1074,6 +1101,9 @@ layout (location = 4) in highp vec2 a_height;
 #ifndef HAS_UNIFORM_u_color
 layout (location = 5) in highp vec4 a_color;
 #endif
+#ifdef TERRAIN
+layout (location = 10) in vec2 a_centroid;
+#endif
 
 void main() {
     // The vertex that ends a ring has no wall.
@@ -1106,9 +1136,11 @@ highp vec4 color = u_color;
 
     base = max(0.0, base);
     height = max(0.0, height);
-
+",
+        fill_extrusion_ground!(),
+        r"
     float t = a_pos.y;
-    float z = t > 0.0 ? height : base;
+    float z = t > 0.0 ? height + groundHeight : base + baseGround;
 
     gl_Position = projectTileFor3D(a_pos.x == 0.0 ? p1 : p2, z);
 
@@ -1147,7 +1179,8 @@ highp vec4 color = u_color;
     v_color.b += clamp(color.b * directional * u_lightcolor.b, mix(0.0, 0.3, 1.0 - u_lightcolor.b), 1.0);
     v_color *= u_opacity;
 }
-",
+"
+    ),
     fragment: r"in vec4 v_color;
 
 void main() {
@@ -1161,7 +1194,9 @@ void main() {
 };
 
 pub(crate) const FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: GlslShaderSource = GlslShaderSource {
-    vertex: r"invariant gl_Position;
+    vertex: concat!(
+        standing_ground!(),
+        r"invariant gl_Position;
 
 // The corner of the wall quad: x picks the instance's outline vertex (0) or
 // the next one (1), y the base (0) or the top (1).
@@ -1243,6 +1278,9 @@ flat out highp vec4 pattern_from;
 layout (location = 6) in highp vec4 a_pattern_to;
 flat out highp vec4 pattern_to;
 #endif
+#ifdef TERRAIN
+layout (location = 10) in vec2 a_centroid;
+#endif
 
 void main() {
     // The vertex that ends a ring has no wall.
@@ -1294,9 +1332,11 @@ highp vec4 pattern_to = u_pattern_to;
 
     base = max(0.0, base);
     height = max(0.0, height);
-
+",
+        fill_extrusion_ground!(),
+        r"
     float t = a_pos.y;
-    float z = t > 0.0 ? height : base;
+    float z = t > 0.0 ? height + groundHeight : base + baseGround;
 
     gl_Position = projectTileFor3D(a_pos.x == 0.0 ? p1 : p2, z);
 
@@ -1321,7 +1361,8 @@ highp vec4 pattern_to = u_pattern_to;
     v_lighting.rgb += clamp(directional * u_lightcolor, mix(vec3(0.0), vec3(0.3), 1.0 - u_lightcolor), vec3(1.0));
     v_lighting *= u_opacity;
 }
-",
+"
+    ),
     fragment: r"#ifdef GL_ES
 precision highp float;
 #endif
@@ -1414,7 +1455,9 @@ highp vec4 pattern_to = u_pattern_to;
 };
 
 pub(crate) const FILL_EXTRUSION_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
-    vertex: r"invariant gl_Position;
+    vertex: concat!(
+        standing_ground!(),
+        r"invariant gl_Position;
 
 layout (location = 0) in vec2 a_pos;
 layout (location = 1) in vec2 a_decimals_ed;
@@ -1490,6 +1533,9 @@ flat out highp vec4 pattern_from;
 layout (location = 6) in highp vec4 a_pattern_to;
 flat out highp vec4 pattern_to;
 #endif
+#ifdef TERRAIN
+layout (location = 10) in vec2 a_centroid;
+#endif
 
 void main() {
     #ifndef HAS_UNIFORM_u_base
@@ -1532,9 +1578,11 @@ highp vec4 pattern_to = u_pattern_to;
 
     base = max(0.0, base);
     height = max(0.0, height);
-
+",
+        fill_extrusion_ground!(),
+        r"
     float t = 1.0;
-    float z = height;
+    float z = height + groundHeight;
     gl_Position = projectTileFor3D(a_pos, z);
 
     // extrusion top or side
@@ -1558,7 +1606,8 @@ highp vec4 pattern_to = u_pattern_to;
     v_lighting.rgb += clamp(directional * u_lightcolor, mix(vec3(0.0), vec3(0.3), 1.0 - u_lightcolor), vec3(1.0));
     v_lighting *= u_opacity;
 }
-",
+"
+    ),
     fragment: r"#ifdef GL_ES
 precision highp float;
 #endif
@@ -1651,7 +1700,9 @@ highp vec4 pattern_to = u_pattern_to;
 };
 
 pub(crate) const FILL_EXTRUSION_SHADER: GlslShaderSource = GlslShaderSource {
-    vertex: r"invariant gl_Position;
+    vertex: concat!(
+        standing_ground!(),
+        r"invariant gl_Position;
 
 layout (location = 0) in vec2 a_pos;
 layout (location = 1) in vec2 a_decimals_ed;
@@ -1705,6 +1756,9 @@ layout (location = 4) in highp vec2 a_height;
 #ifndef HAS_UNIFORM_u_color
 layout (location = 5) in highp vec4 a_color;
 #endif
+#ifdef TERRAIN
+layout (location = 10) in vec2 a_centroid;
+#endif
 
 void main() {
     #ifndef HAS_UNIFORM_u_base
@@ -1728,9 +1782,11 @@ highp vec4 color = u_color;
 
     base = max(0.0, base);
     height = max(0.0, height);
-
+",
+        fill_extrusion_ground!(),
+        r"
     float t = 1.0;
-    float z = height;
+    float z = height + groundHeight;
     gl_Position = projectTileFor3D(a_pos, z);
 
     // Relative luminance (how dark/bright is the surface color?)
@@ -1768,7 +1824,8 @@ highp vec4 color = u_color;
     v_color.b += clamp(color.b * directional * u_lightcolor.b, mix(0.0, 0.3, 1.0 - u_lightcolor.b), 1.0);
     v_color *= u_opacity;
 }
-",
+"
+    ),
     fragment: r"in vec4 v_color;
 
 void main() {

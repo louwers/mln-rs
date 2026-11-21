@@ -123,6 +123,9 @@ pub const FILL_EXTRUSION_LAYER_UBO_COUNT: usize = ID_FILL_EXTRUSION_PROPS_UBO + 
 // buffers, whose ids follow the uniform buffers'.
 pub const ID_FILL_EXTRUSION_WALL_VERTICES: usize = MAX_UBO_COUNT_PER_SHADER;
 pub const ID_FILL_EXTRUSION_WALL_PAINT: usize = MAX_UBO_COUNT_PER_SHADER + 1;
+/// Port-only: in the terrain variant of `FillExtrusionPulledShader`, the
+/// centroid each bucket vertex's polygon stands on.
+pub const ID_FILL_EXTRUSION_WALL_CENTROIDS: usize = MAX_UBO_COUNT_PER_SHADER + 2;
 pub const ID_FILL_EXTRUSION_IMAGE_TEXTURE: usize = 0;
 pub const ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE: usize = 0;
 pub const ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE: usize = 1;
@@ -138,6 +141,10 @@ pub const ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE: usize = 6;
 pub const ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE: usize = 7;
 pub const ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE: usize = 8;
 pub const ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE: usize = 9;
+/// Port-only: the centroid of a vertex's polygon, which the terrain variants
+/// of the fill extrusion programs read, per vertex or per wall instance, to
+/// stand the polygon on the ground there.
+pub const ID_FILL_EXTRUSION_CENTROID_ATTRIBUTE: usize = 10;
 
 pub const ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE: usize = 0;
 

@@ -15,9 +15,13 @@
 //! vertex's index picks its wall and its corner of the quad, and the wall's
 //! outline vertex, the next one and its paint values come from the buffers
 //! that hold them for the roofs, bound as storage buffers.
+//!
+//! The terrain variants stand each polygon on the ground under its
+//! centroid, which the roofs and the instanced and quad walls read as an
+//! attribute, and the pulled walls from a storage buffer of their own.
 
 use super::shader_source::WgslShaderSource;
-use super::wgsl_sources;
+use super::wgsl_sources::{self, standing_ground};
 
 /// The vertex output, UBOs and bindings of the plain shaders.
 macro_rules! plain_declarations {
@@ -247,6 +251,31 @@ macro_rules! base_and_height {
     };
 }
 
+/// `groundHeight` and `baseGround`, what a polygon's top and base rise by:
+/// over terrain, the ground under its centroid, `in.centroid`, as it draws,
+/// translated, and a base at or below 0 sinks 10 m more, so that no gap
+/// shows under a wall downhill. Returns a vertex the draw drops for a
+/// polygon whose centroid is off the draw's part of its tile.
+macro_rules! ground {
+    () => {
+        r#"
+#ifdef TERRAIN
+    let standing = projectionVector[globalIndex.value];
+    let centroid = vec2<f32>(in.centroid);
+    if (!ground_holds(centroid, standing.ground)) {
+        out.position = ground_dropped();
+        return out;
+    }
+    let groundHeight = standing_height(centroid + standing.translate, standing.ground);
+    let baseGround = groundHeight - select(10.0, 0.0, baseValue > 0.0);
+#else
+    let groundHeight = 0.0;
+    let baseGround = 0.0;
+#endif
+"#
+    };
+}
+
 /// The pattern positions in the atlas, of the attributes or the tile props.
 macro_rules! patterns {
     () => {
@@ -284,7 +313,8 @@ fn wall_normal(bits: u32, own: vec2<f32>) -> vec2<f32> {
 }
 
 /// A wall instance's two outline vertices, `p1` and `p2`, the corner's
-/// `normal`, `t` and `z`. Returns `out` for an instance that ends a ring.
+/// `normal`, `t` and `z`, with the ground under it (`ground`). Returns `out`
+/// for an instance that ends a ring.
 macro_rules! wall {
     () => {
         r#"
@@ -302,7 +332,7 @@ macro_rules! wall {
     );
 
     let t = f32(in.position.y);
-    let z = select(baseValue, heightValue, t > 0.0);
+    let z = select(baseValue + baseGround, heightValue + groundHeight, t > 0.0);
 
     out.position = projectTileFor3D(select(p2, p1, in.position.x == 0), z, projectionVector[globalIndex.value]);
 "#
@@ -312,6 +342,7 @@ macro_rules! wall {
 /// The fill extrusion roofs.
 pub(crate) const FILL_EXTRUSION_SHADER: WgslShaderSource = WgslShaderSource {
     vertex: Some(concat!(
+        standing_ground!(),
         r#"
 struct VertexInput {
     @location(0) position: vec2<i32>,
@@ -325,6 +356,9 @@ struct VertexInput {
 #ifndef HAS_UNIFORM_u_height
     @location(4) height: vec2<f32>,
 #endif
+#ifdef TERRAIN
+    @location(5) centroid: vec2<i32>,
+#endif
 };
 "#,
         plain_declarations!(),
@@ -335,8 +369,9 @@ fn main(in: VertexInput) -> VertexOutput {
     let drawable = drawableVector[globalIndex.value];
 "#,
         base_and_height!(),
+        ground!(),
         r#"
-    out.position = projectTileFor3D(vec2<f32>(in.position), heightValue, projectionVector[globalIndex.value]);
+    out.position = projectTileFor3D(vec2<f32>(in.position), heightValue + groundHeight, projectionVector[globalIndex.value]);
 
 #ifdef OVERDRAW_INSPECTOR
     out.color = vec4<f32>(1.0, 1.0, 1.0, 1.0);
@@ -360,6 +395,7 @@ fn main(in: VertexInput) -> VertexOutput {
 /// The instanced fill extrusion walls.
 pub(crate) const FILL_EXTRUSION_INSTANCED_SHADER: WgslShaderSource = WgslShaderSource {
     vertex: Some(concat!(
+        standing_ground!(),
         r#"
 struct VertexInput {
     @location(0) position: vec2<i32>,
@@ -376,6 +412,9 @@ struct VertexInput {
 #ifndef HAS_UNIFORM_u_height
     @location(7) height: vec2<f32>,
 #endif
+#ifdef TERRAIN
+    @location(8) centroid: vec2<i32>,
+#endif
 };
 "#,
         plain_declarations!(),
@@ -387,6 +426,7 @@ fn main(in: VertexInput) -> VertexOutput {
     let drawable = drawableVector[globalIndex.value];
 "#,
         base_and_height!(),
+        ground!(),
         wall!(),
         r#"
 #ifdef OVERDRAW_INSPECTOR
@@ -431,6 +471,7 @@ macro_rules! wall_paint {
 /// The pulled fill extrusion walls.
 pub(crate) const FILL_EXTRUSION_PULLED_SHADER: WgslShaderSource = WgslShaderSource {
     vertex: Some(concat!(
+        standing_ground!(),
         r#"
 // What the instanced walls read as attributes.
 struct VertexInput {
@@ -448,6 +489,9 @@ struct VertexInput {
 #ifndef HAS_UNIFORM_u_height
     height: vec2<f32>,
 #endif
+#ifdef TERRAIN
+    centroid: vec2<i32>,
+#endif
 };
 "#,
         plain_declarations!(),
@@ -459,6 +503,12 @@ struct VertexInput {
 "#,
         wall_paint!(),
         r#"
+#ifdef TERRAIN
+// The centroid each bucket vertex's polygon stands on, x and y in the halves
+// of a word.
+@group(0) @binding(9) var<storage, read> wallCentroids: array<u32>;
+#endif
+
 @vertex
 fn main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     var out: VertexOutput;
@@ -479,6 +529,10 @@ fn main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     in.decimals_ed = vec2<u32>(decimals_ed & 0xffffu, decimals_ed >> 16u);
     in.next_outline_pos = vec2<i32>(i32(next_pos << 16u) >> 16u, i32(next_pos) >> 16u);
     in.next_decimals_ed = vec2<u32>(next_decimals_ed & 0xffffu, next_decimals_ed >> 16u);
+#ifdef TERRAIN
+    let centroid_bits = wallCentroids[wall];
+    in.centroid = vec2<i32>(i32(centroid_bits << 16u) >> 16u, i32(centroid_bits) >> 16u);
+#endif
 
     // The wall's paint values are its outline vertex's.
     let paint_layout = drawable.paint_layout;
@@ -498,6 +552,7 @@ fn main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
 #endif
 "#,
         base_and_height!(),
+        ground!(),
         wall!(),
         r#"
 #ifdef OVERDRAW_INSPECTOR
@@ -522,6 +577,7 @@ fn main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
 /// The fill extrusion pattern roofs.
 pub(crate) const FILL_EXTRUSION_PATTERN_SHADER: WgslShaderSource = WgslShaderSource {
     vertex: Some(concat!(
+        standing_ground!(),
         r#"
 struct VertexInput {
     @location(0) position: vec2<i32>,
@@ -538,6 +594,9 @@ struct VertexInput {
 #ifndef HAS_UNIFORM_u_pattern_to
     @location(5) pattern_to: vec4<u32>,
 #endif
+#ifdef TERRAIN
+    @location(6) centroid: vec2<i32>,
+#endif
 };
 "#,
         pattern_declarations!(),
@@ -548,9 +607,10 @@ fn main(in: VertexInput) -> VertexOutput {
     let drawable = drawableVector[globalIndex.value];
 "#,
         base_and_height!(),
+        ground!(),
         patterns!(),
         r#"
-    out.position = projectTileFor3D(vec2<f32>(in.position), heightValue, projectionVector[globalIndex.value]);
+    out.position = projectTileFor3D(vec2<f32>(in.position), heightValue + groundHeight, projectionVector[globalIndex.value]);
 
     out.lighting = lighting_of(vec3<f32>(0.0, 0.0, 1.0), 1.0, baseValue, heightValue);
     set_pattern(&out, drawable, patternFrom, patternTo, vec2<f32>(in.position));
@@ -565,6 +625,7 @@ fn main(in: VertexInput) -> VertexOutput {
 /// The instanced fill extrusion pattern walls.
 pub(crate) const FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: WgslShaderSource = WgslShaderSource {
     vertex: Some(concat!(
+        standing_ground!(),
         r#"
 struct VertexInput {
     @location(0) position: vec2<i32>,
@@ -584,6 +645,9 @@ struct VertexInput {
 #ifndef HAS_UNIFORM_u_pattern_to
     @location(8) pattern_to: vec4<u32>,
 #endif
+#ifdef TERRAIN
+    @location(9) centroid: vec2<i32>,
+#endif
 };
 "#,
         pattern_declarations!(),
@@ -595,6 +659,7 @@ fn main(in: VertexInput) -> VertexOutput {
     let drawable = drawableVector[globalIndex.value];
 "#,
         base_and_height!(),
+        ground!(),
         patterns!(),
         wall!(),
         r#"

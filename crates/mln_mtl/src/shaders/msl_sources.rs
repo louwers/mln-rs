@@ -1487,11 +1487,48 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-// The walls' fragment stage, and `wall`, the vertex of a wall, which reads
-// the instanced walls' attributes as the fields of `vertx`.
-macro_rules! extrusion_wall {
+/// `ground`, what a fill extrusion's top rises by over terrain: the ground
+/// under its polygon's centroid, `vertx.centroid`, as it draws, translated;
+/// and `ground_kept`, whether the draw draws the polygon, whose centroid is
+/// on the draw's part of its tile.
+macro_rules! fill_extrusion_ground {
     () => {
         r"
+#if defined(TERRAIN)
+    device const ProjectionUBO& standing = projectionVector[uboIndex];
+    const float2 centroid_pos = float2(vertx.centroid);
+    const bool ground_kept = ground_holds(centroid_pos, standing.ground);
+    const float ground = standing_height(centroid_pos + standing.translate, standing.ground, ground_dem);
+#else
+    const bool ground_kept = true;
+    const float ground = 0.0;
+#endif
+"
+    };
+}
+
+/// `base_ground`, what a fill extrusion's base rises by over terrain: the
+/// ground, and a base at or below 0 sinks 10 m more, so that no gap shows
+/// under a wall downhill.
+macro_rules! fill_extrusion_base_ground {
+    () => {
+        r"
+#if defined(TERRAIN)
+    const float base_ground = ground - (base > 0.0 ? 0.0 : 10.0);
+#else
+    const float base_ground = ground;
+#endif
+"
+    };
+}
+
+// The walls' fragment stage, and `wall`, the vertex of a wall, which reads
+// the instanced walls' attributes as the fields of `vertx`, raised by
+// `ground`, and dropped unless `ground_kept`.
+macro_rules! extrusion_wall {
+    () => {
+        concat!(
+            r"
 struct FragmentStage {
     float4 position [[position, invariant]];
     half4 color;
@@ -1506,7 +1543,9 @@ template <typename Vertex>
 FragmentStage wall(thread const Vertex& vertx,
                    device const FillExtrusionDrawableUBO& drawable,
                    device const ProjectionUBO& projection,
-                   device const FillExtrusionPropsUBO& props) {
+                   device const FillExtrusionPropsUBO& props,
+                   float ground,
+                   bool ground_kept) {
 
     bool isDiscarded = glMod(float(vertx.decimals_ed.x), 2.0) > 0.0;
     if (isDiscarded) {
@@ -1534,9 +1573,12 @@ FragmentStage wall(thread const Vertex& vertx,
 
     const float3 normal = float3(vertx.pos.x == 0 ? wall_normal(vertx.decimals_ed.x, own) : wall_normal(vertx.next_decimals_ed.x, own), 0.0);
     const float t = float(vertx.pos.y);
-    const float z = (t != 0.0) ? height : base;     // TODO: This would come out wrong on GL for negative values, check it...
+",
+            fill_extrusion_base_ground!(),
+            r"
+    const float z = (t != 0.0) ? height + ground : base + base_ground;
 
-    const float4 position = projectTileFor3D(vertx.pos.x == 0.0 ? p1 : p2, z, projection);
+    const float4 position = ground_kept ? projectTileFor3D(vertx.pos.x == 0.0 ? p1 : p2, z, projection) : ground_dropped();
 
 #if defined(OVERDRAW_INSPECTOR)
     return {
@@ -1596,6 +1638,7 @@ fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]]) {
     return { in.color/*, in.position.z*/ };
 }
 "
+        )
     };
 }
 
@@ -1658,6 +1701,7 @@ static_assert(sizeof(FillExtrusionPropsUBO) == 5 * 16, "wrong size");
 
 "#,
     source: concat!(
+        standing_ground!(),
         r"
 
 struct VertexStage {
@@ -1676,6 +1720,9 @@ struct VertexStage {
 #if !defined(HAS_UNIFORM_u_height)
     float2 height [[attribute(5)]];
 #endif
+#if defined(TERRAIN)
+    short2 centroid [[attribute(8)]];
+#endif
 };
 
 ",
@@ -1685,8 +1732,14 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const FillExtrusionDrawableUBO* drawableVector [[buffer(idFillExtrusionDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
+#if defined(TERRAIN)
+                                texture2d<float, access::read> ground_dem [[texture(2)]],
+#endif
                                 device const FillExtrusionPropsUBO& props [[buffer(idFillExtrusionPropsUBO)]]) {
-    return wall(vertx, drawableVector[uboIndex], projectionVector[uboIndex], props);
+",
+        fill_extrusion_ground!(),
+        r"
+    return wall(vertx, drawableVector[uboIndex], projectionVector[uboIndex], props, ground, ground_kept);
 }
 
 "
@@ -1698,11 +1751,13 @@ pub(crate) const FILL_EXTRUSION_PULLED_SHADER: MslShaderSource = MslShaderSource
     fragment_main_function: r"fragmentMain",
     prelude: FILL_EXTRUSION_INSTANCED_SHADER.prelude,
     source: concat!(
+        standing_ground!(),
         r"
 
 enum {
     idFillExtrusionWallVertices = 7,
-    idFillExtrusionWallPaint
+    idFillExtrusionWallPaint,
+    idFillExtrusionWallCentroids
 };
 
 // A vertex of the bucket, which the walls read by index.
@@ -1727,6 +1782,9 @@ struct WallVertex {
 #if !defined(HAS_UNIFORM_u_height)
     float2 height;
 #endif
+#if defined(TERRAIN)
+    short2 centroid;
+#endif
 };
 ",
         extrusion_wall!(),
@@ -1736,6 +1794,10 @@ FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]],
                                 device const FillExtrusionDrawableUBO* drawableVector [[buffer(idFillExtrusionDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const FillExtrusionPropsUBO& props [[buffer(idFillExtrusionPropsUBO)]],
+#if defined(TERRAIN)
+                                texture2d<float, access::read> ground_dem [[texture(2)]],
+                                device const short2* wallCentroids [[buffer(idFillExtrusionWallCentroids)]],
+#endif
                                 device const BucketVertex* wallVertices [[buffer(idFillExtrusionWallVertices)]],
                                 device const float* wallPaint [[buffer(idFillExtrusionWallPaint)]]) {
     device const FillExtrusionDrawableUBO& drawable = drawableVector[uboIndex];
@@ -1752,6 +1814,10 @@ FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]],
     vertx.decimals_ed = outline.decimals_ed;
     vertx.next_outline_pos = next.pos;
     vertx.next_decimals_ed = next.decimals_ed;
+#if defined(TERRAIN)
+    // The centroid that the wall's polygon stands on.
+    vertx.centroid = wallCentroids[wall_index];
+#endif
 
     // The wall's paint values are its outline vertex's, where the drawable's
     // `paint_layout` says: the floats a vertex takes, then the offsets of
@@ -1768,7 +1834,10 @@ FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]],
     vertx.color = float4(*(device const packed_float4*)(paint + (paint_layout >> 24)));
 #endif
 
-    return wall(vertx, drawable, projectionVector[uboIndex], props);
+",
+        fill_extrusion_ground!(),
+        r"
+    return wall(vertx, drawable, projectionVector[uboIndex], props, ground, ground_kept);
 }
 "
     ),
@@ -1832,7 +1901,9 @@ struct alignas(16) FillExtrusionPropsUBO {
 static_assert(sizeof(FillExtrusionPropsUBO) == 5 * 16, "wrong size");
 
 "#,
-    source: r"
+    source: concat!(
+        standing_ground!(),
+        r"
 
 struct VertexStage {
     short2 pos [[attribute(0)]];
@@ -1852,6 +1923,9 @@ struct VertexStage {
 #endif
 #if !defined(HAS_UNIFORM_u_pattern_to)
     ushort4 pattern_to [[attribute(6)]];
+#endif
+#if defined(TERRAIN)
+    short2 centroid [[attribute(9)]];
 #endif
 };
 
@@ -1880,6 +1954,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const FillExtrusionDrawableUBO* drawableVector [[buffer(idFillExtrusionDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const FillExtrusionTilePropsUBO* tilePropsVector [[buffer(idFillExtrusionTilePropsUBO)]],
+#if defined(TERRAIN)
+                                texture2d<float, access::read> ground_dem [[texture(2)]],
+#endif
                                 device const FillExtrusionPropsUBO& props [[buffer(idFillExtrusionPropsUBO)]]) {
 
     bool isDiscarded = glMod(float(vertx.decimals_ed.x), 2.0) > 0.0;
@@ -1912,7 +1989,10 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 #else
     const auto height = max(unpack_mix_float(vertx.height, drawable.height_t), 0.0);
 #endif
-
+",
+        fill_extrusion_ground!(),
+        fill_extrusion_base_ground!(),
+        r"
     const float2 p1 = float2(vertx.outline_pos);
     const float2 p2 = float2(vertx.next_outline_pos);
     const float2 edgevector = normalize(p2 - p1);
@@ -1921,9 +2001,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float3 normal = float3(vertx.pos.x == 0 ? wall_normal(vertx.decimals_ed.x, own) : wall_normal(vertx.next_decimals_ed.x, own), 0.0);
     const float edgedistance = vertx.pos.x == 0 ? vertx.next_decimals_ed.y : vertx.decimals_ed.y;
     const float t = float(vertx.pos.y);
-    const float z = (t != 0.0) ? height : base;     // TODO: This would come out wrong on GL for negative values, check it...
+    const float z = (t != 0.0) ? height + ground : base + base_ground;
 
-    const float4 position = projectTileFor3D(vertx.pos.x == 0.0 ? p1 : p2, z, projectionVector[uboIndex]);
+    const float4 position = ground_kept ? projectTileFor3D(vertx.pos.x == 0.0 ? p1 : p2, z, projectionVector[uboIndex]) : ground_dropped();
 
 #if defined(OVERDRAW_INSPECTOR)
     return {
@@ -2043,7 +2123,8 @@ fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]],
 
     return {half4(mix(color1, color2, props.fade) * in.lighting)/*, in.position.z*/};
 }
-",
+"
+    ),
 };
 
 pub(crate) const FILL_EXTRUSION_PATTERN_SHADER: MslShaderSource = MslShaderSource {
@@ -2104,7 +2185,9 @@ struct alignas(16) FillExtrusionPropsUBO {
 static_assert(sizeof(FillExtrusionPropsUBO) == 5 * 16, "wrong size");
 
 "#,
-    source: r"
+    source: concat!(
+        standing_ground!(),
+        r"
 
 struct VertexStage {
     short2 pos [[attribute(0)]];
@@ -2121,6 +2204,9 @@ struct VertexStage {
 #endif
 #if !defined(HAS_UNIFORM_u_pattern_to)
     ushort4 pattern_to [[attribute(5)]];
+#endif
+#if defined(TERRAIN)
+    short2 centroid [[attribute(6)]];
 #endif
 };
 
@@ -2149,6 +2235,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const FillExtrusionDrawableUBO* drawableVector [[buffer(idFillExtrusionDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const FillExtrusionTilePropsUBO* tilePropsVector [[buffer(idFillExtrusionTilePropsUBO)]],
+#if defined(TERRAIN)
+                                texture2d<float, access::read> ground_dem [[texture(2)]],
+#endif
                                 device const FillExtrusionPropsUBO& props [[buffer(idFillExtrusionPropsUBO)]]) {
 
     device const FillExtrusionDrawableUBO& drawable = drawableVector[uboIndex];
@@ -2164,11 +2253,13 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 #else
     const auto height = max(unpack_mix_float(vertx.height, drawable.height_t), 0.0);
 #endif
-
+",
+        fill_extrusion_ground!(),
+        r"
     const float3 normal = float3(0.0, 0.0, 1.0);
     const float t = 1.0;
-    const float z = (t != 0.0) ? height : base;     // TODO: This would come out wrong on GL for negative values, check it...
-    const float4 position = projectTileFor3D(float2(vertx.pos), z, projectionVector[uboIndex]);
+    const float z = height + ground;
+    const float4 position = ground_kept ? projectTileFor3D(float2(vertx.pos), z, projectionVector[uboIndex]) : ground_dropped();
 
 #if defined(OVERDRAW_INSPECTOR)
     return {
@@ -2286,7 +2377,8 @@ fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]],
 
     return {half4(mix(color1, color2, props.fade) * in.lighting)/*, in.position.z*/};
 }
-",
+"
+    ),
 };
 
 pub(crate) const FILL_EXTRUSION_SHADER: MslShaderSource = MslShaderSource {
@@ -2347,7 +2439,9 @@ struct alignas(16) FillExtrusionPropsUBO {
 static_assert(sizeof(FillExtrusionPropsUBO) == 5 * 16, "wrong size");
 
 "#,
-    source: r"
+    source: concat!(
+        standing_ground!(),
+        r"
 
 struct VertexStage {
     short2 pos [[attribute(0)]];
@@ -2361,6 +2455,9 @@ struct VertexStage {
 #endif
 #if !defined(HAS_UNIFORM_u_height)
     float2 height [[attribute(4)]];
+#endif
+#if defined(TERRAIN)
+    short2 centroid [[attribute(5)]];
 #endif
 };
 
@@ -2378,6 +2475,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const FillExtrusionDrawableUBO* drawableVector [[buffer(idFillExtrusionDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
+#if defined(TERRAIN)
+                                texture2d<float, access::read> ground_dem [[texture(2)]],
+#endif
                                 device const FillExtrusionPropsUBO& props [[buffer(idFillExtrusionPropsUBO)]]) {
 
     device const FillExtrusionDrawableUBO& drawable = drawableVector[uboIndex];
@@ -2392,11 +2492,13 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 #else
     const auto height = max(unpack_mix_float(vertx.height, drawable.height_t), 0.0);
 #endif
-
+",
+        fill_extrusion_ground!(),
+        r"
     const float3 normal = float3(0.0, 0.0, 1.0);
     const float t = 1.0;
-    const float z = (t != 0.0) ? height : base;     // TODO: This would come out wrong on GL for negative values, check it...
-    const float4 position = projectTileFor3D(float2(vertx.pos), z, projectionVector[uboIndex]);
+    const float z = height + ground;
+    const float4 position = ground_kept ? projectTileFor3D(float2(vertx.pos), z, projectionVector[uboIndex]) : ground_dropped();
 
 #if defined(OVERDRAW_INSPECTOR)
     return {
@@ -2455,7 +2557,8 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]]) {
     return { in.color/*, in.position.z*/ };
 }
-",
+"
+    ),
 };
 
 /// `outline_corner`, the corner of an instanced fill outline's quad.

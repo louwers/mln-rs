@@ -2496,6 +2496,32 @@ void main() {
     fragment: FILL_OUTLINE_SHADER.fragment,
 };
 
+/// `groundHeight` and `baseGround`, what a fill extrusion's top and base
+/// rise by: over terrain, the ground under its polygon's centroid,
+/// `in_centroid`, as it draws, translated, and a base at or below 0 sinks
+/// 10 m more, so that no gap shows under a wall downhill. Returns a vertex
+/// the draw drops for a polygon whose centroid is off the draw's part of its
+/// tile.
+macro_rules! fill_extrusion_ground {
+    () => {
+        r"
+#if defined(TERRAIN)
+    const ProjectionUBO standing = projectionVector.projection_ubo[constant.ubo_index];
+    const vec2 centroid_pos = vec2(in_centroid);
+    if (!ground_holds(centroid_pos, standing.ground)) {
+        gl_Position = ground_dropped();
+        return;
+    }
+    const float groundHeight = standing_height(centroid_pos + standing.translate, standing.ground);
+    const float baseGround = groundHeight - (base > 0.0 ? 0.0 : 10.0);
+#else
+    const float groundHeight = 0.0;
+    const float baseGround = 0.0;
+#endif
+"
+    };
+}
+
 pub(crate) const FILL_EXTRUSION_SHADER_PRELUDE: &str = r"
 
 #define idFillExtrusionDrawableUBO              idDrawableReservedVertexOnlyUBO
@@ -2503,12 +2529,15 @@ pub(crate) const FILL_EXTRUSION_SHADER_PRELUDE: &str = r"
 #define idFillExtrusionPropsUBO                 layerUBOStartId + 1
 #define idFillExtrusionWallVertices             drawableUBOStartId + 5
 #define idFillExtrusionWallPaint                drawableUBOStartId + 6
+#define idFillExtrusionWallCentroids            drawableUBOStartId + 7
 
 ";
 
 pub(crate) const FILL_EXTRUSION_SHADER: GlslShaderSource = GlslShaderSource {
     prelude: FILL_EXTRUSION_SHADER_PRELUDE,
-    vertex: r"
+    vertex: concat!(
+        standing_ground!(),
+        r"
 invariant gl_Position;
 
 layout(location = 0) in ivec2 in_position;
@@ -2524,6 +2553,10 @@ layout(location = 3) in vec2 in_base;
 
 #if !defined(HAS_UNIFORM_u_height)
 layout(location = 4) in vec2 in_height;
+#endif
+
+#if defined(TERRAIN)
+layout(location = 5) in ivec2 in_centroid;
 #endif
 
 layout(push_constant) uniform Constants {
@@ -2583,7 +2616,9 @@ void main() {
 #else
     const float height = max(unpack_mix_float(in_height, drawable.height_t), 0.0);
 #endif
-
+",
+        fill_extrusion_ground!(),
+        r"
 #if defined(HAS_UNIFORM_u_color)
     vec4 color = props.color;
 #else
@@ -2592,7 +2627,7 @@ void main() {
 
     const vec3 normal = vec3(0.0, 0.0, 1.0);
     const float t = 1.0;
-    const float z = t > 0.0 ? height : base;
+    const float z = t > 0.0 ? height + groundHeight : base + baseGround;
     gl_Position = projectTileFor3D(vec2(in_position), z, projectionVector.projection_ubo[constant.ubo_index]);
 
 #if defined(OVERDRAW_INSPECTOR)
@@ -2637,7 +2672,8 @@ void main() {
 
     frag_color = vcolor * props.opacity;
 }
-",
+"
+    ),
     fragment: r"
 
 layout(location = 0) in vec4 frag_color;
@@ -2707,7 +2743,8 @@ layout(location = 0) out vec4 frag_color;
 /// `in_next_decimals_ed`, `in_color`, `in_base` and `in_height`.
 macro_rules! fill_extrusion_wall_main {
     () => {
-        r"
+        concat!(
+            r"
 
     const vec2 instancePos = vec2(in_outline_pos);
     const vec2 instanceDecimalsEd = vec2(in_decimals_ed);
@@ -2725,7 +2762,9 @@ macro_rules! fill_extrusion_wall_main {
 #else
     const float height = max(unpack_mix_float(in_height, drawable.height_t), 0.0);
 #endif
-
+",
+            fill_extrusion_ground!(),
+            r"
 #if defined(HAS_UNIFORM_u_color)
     vec4 color = props.color;
 #else
@@ -2748,7 +2787,7 @@ macro_rules! fill_extrusion_wall_main {
 
     const vec3 normal = vec3(in_position.x == 0.0 ? wall_normal(in_decimals_ed.x, own) : wall_normal(in_next_decimals_ed.x, own), 0.0);
     const float t = float(in_position.y);
-    const float z = t > 0.0 ? height : base;
+    const float z = t > 0.0 ? height + groundHeight : base + baseGround;
 
     gl_Position = projectTileFor3D(in_position.x == 0.0 ? p1 : p2, z, projectionVector.projection_ubo[constant.ubo_index]);
 
@@ -2794,12 +2833,14 @@ macro_rules! fill_extrusion_wall_main {
 
     frag_color = vcolor * props.opacity;
 "
+        )
     };
 }
 
 pub(crate) const FILL_EXTRUSION_INSTANCED_SHADER: GlslShaderSource = GlslShaderSource {
     prelude: FILL_EXTRUSION_SHADER_PRELUDE,
     vertex: concat!(
+        standing_ground!(),
         r"
 invariant gl_Position;
 
@@ -2822,6 +2863,10 @@ layout(location = 4) in vec2 in_base;
 
 #if !defined(HAS_UNIFORM_u_height)
 layout(location = 5) in vec2 in_height;
+#endif
+
+#if defined(TERRAIN)
+layout(location = 8) in ivec2 in_centroid;
 #endif
 
 ",
@@ -2850,6 +2895,7 @@ void main() {
 pub(crate) const FILL_EXTRUSION_PULLED_SHADER: GlslShaderSource = GlslShaderSource {
     prelude: FILL_EXTRUSION_SHADER_PRELUDE,
     vertex: concat!(
+        standing_ground!(),
         r"
 invariant gl_Position;
 
@@ -2861,6 +2907,14 @@ invariant gl_Position;
 layout(std430, set = DRAWABLE_UBO_SET_INDEX, binding = idFillExtrusionWallVertices) readonly buffer FillExtrusionWallVertices {
     uint vertices[];
 } wallVertices;
+
+#if defined(TERRAIN)
+// The centroid each bucket vertex's polygon stands on, x and y in the halves
+// of a word.
+layout(std430, set = DRAWABLE_UBO_SET_INDEX, binding = idFillExtrusionWallCentroids) readonly buffer FillExtrusionWallCentroids {
+    uint centroids[];
+} wallCentroids;
+#endif
 
 #if !defined(HAS_UNIFORM_u_color) || !defined(HAS_UNIFORM_u_base) || !defined(HAS_UNIFORM_u_height)
 // The bucket's paint values, interleaved as the roofs read them.
@@ -2884,6 +2938,10 @@ void main() {
     const uvec2 in_decimals_ed = uvec2(decimals_ed & 0xffffu, decimals_ed >> 16u);
     const ivec2 in_next_outline_pos = ivec2(int(next_pos << 16u) >> 16, int(next_pos) >> 16);
     const uvec2 in_next_decimals_ed = uvec2(next_decimals_ed & 0xffffu, next_decimals_ed >> 16u);
+#if defined(TERRAIN)
+    const uint centroid_bits = wallCentroids.centroids[wall];
+    const ivec2 in_centroid = ivec2(int(centroid_bits << 16u) >> 16, int(centroid_bits) >> 16);
+#endif
 
     // The wall's paint values are its outline vertex's.
     const uint paint_layout = drawableVector.drawable_ubo[constant.ubo_index].paint_layout;
@@ -2911,7 +2969,9 @@ void main() {
 
 pub(crate) const FILL_EXTRUSION_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
     prelude: FILL_EXTRUSION_SHADER_PRELUDE,
-    vertex: r"
+    vertex: concat!(
+        standing_ground!(),
+        r"
 invariant gl_Position;
 
 layout(location = 0) in ivec2 in_position;
@@ -2931,6 +2991,10 @@ layout(location = 4) in uvec4 in_pattern_from;
 
 #if !defined(HAS_UNIFORM_u_pattern_to)
 layout(location = 5) in uvec4 in_pattern_to;
+#endif
+
+#if defined(TERRAIN)
+layout(location = 6) in ivec2 in_centroid;
 #endif
 
 layout(push_constant) uniform Constants {
@@ -3013,10 +3077,12 @@ void main() {
 #else
     const float height = max(unpack_mix_float(in_height, drawable.height_t), 0.0);
 #endif
-
+",
+        fill_extrusion_ground!(),
+        r"
     const vec3 normal = vec3(0.0, 0.0, 1.0);
     const float t = 1.0;
-    const float z = t > 0.0 ? height : base;
+    const float z = t > 0.0 ? height + groundHeight : base + baseGround;
     gl_Position = projectTileFor3D(vec2(in_position), z, projectionVector.projection_ubo[constant.ubo_index]);
 
 #if defined(OVERDRAW_INSPECTOR)
@@ -3090,7 +3156,8 @@ void main() {
 #endif
 #endif
 }
-",
+"
+    ),
     fragment: r"
 
 layout(location = 0) in vec4 frag_lighting;
@@ -3187,7 +3254,9 @@ void main() {
 
 pub(crate) const FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: GlslShaderSource = GlslShaderSource {
     prelude: FILL_EXTRUSION_SHADER_PRELUDE,
-    vertex: r"
+    vertex: concat!(
+        standing_ground!(),
+        r"
 invariant gl_Position;
 
 layout(location = 0) in ivec2 in_position;
@@ -3213,6 +3282,10 @@ layout(location = 5) in uvec4 in_pattern_from;
 
 #if !defined(HAS_UNIFORM_u_pattern_to)
 layout(location = 6) in uvec4 in_pattern_to;
+#endif
+
+#if defined(TERRAIN)
+layout(location = 9) in ivec2 in_centroid;
 #endif
 
 layout(push_constant) uniform Constants {
@@ -3298,7 +3371,9 @@ void main() {
 #else
     const float height = max(unpack_mix_float(in_height, drawable.height_t), 0.0);
 #endif
-    bool isDiscarded = mod(instanceDecimalsEd.x, 2.0) > 0.0;
+",
+        fill_extrusion_ground!(),
+        r"    bool isDiscarded = mod(instanceDecimalsEd.x, 2.0) > 0.0;
     if (isDiscarded) {
         gl_Position = vec4(0.0);
         return;
@@ -3315,7 +3390,7 @@ void main() {
     const vec3 normal = vec3(in_position.x == 0.0 ? wall_normal(in_decimals_ed.x, own) : wall_normal(in_next_decimals_ed.x, own), 0.0);
     const float edgedistance = in_position.x == 0.0 ? nextInstanceDecimalsEd.y : instanceDecimalsEd.y;
     const float t = float(in_position.y);
-    const float z = t > 0.0 ? height : base;
+    const float z = t > 0.0 ? height + groundHeight : base + baseGround;
 
     gl_Position = projectTileFor3D(in_position.x == 0.0 ? p1 : p2, z, projectionVector.projection_ubo[constant.ubo_index]);
 
@@ -3391,7 +3466,8 @@ void main() {
 #endif
 #endif
 }
-",
+"
+    ),
     fragment: r"
 
 layout(location = 0) in vec4 frag_lighting;
