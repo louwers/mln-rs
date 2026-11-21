@@ -329,3 +329,48 @@ fn an_anchored_ease_on_a_steep_slope_ends_at_rest() {
         assert_eq!((view.zoom(), view.pitch(), view.angle()), (rest.zoom(), rest.pitch(), rest.angle()), "{anchor:?}");
     }
 }
+
+/// The update that brings the first ground checks a moving camera's
+/// clearance with the near plane the terrain draws with, which is farther
+/// from the eye than the flat map's: a command's last frame that ends there
+/// ends with its eye and its near plane above the ground.
+#[test]
+fn the_first_ground_clears_the_near_plane_it_draws_with() {
+    let height = 1000.0;
+    let mut transform = Transform::new(ConstrainMode::HeightOnly, ViewportMode::Default);
+    transform.resize(Size::new(512, 512)).unwrap();
+    let mut limits = *transform.state().limits();
+    limits.max_pitch = 85f64.to_radians();
+    transform.set_limits(limits).unwrap();
+    transform.set_terrain(Some(TerrainGround { elevation: None, clamped: false }));
+    let clock = Instant::now() + Duration::from_secs(3600);
+    transform.set_frame_time(Some(clock));
+    let camera = CameraOptions { center: Some(start()), zoom: Some(16.0), pitch: Some(85.0), ..Default::default() };
+    transform.jump_to(&camera);
+    // The eye 3 px above the ground the renderer draws next.
+    let view = transform.view();
+    let meters_per_pixel = Projection::altitude_meters_per_pixel(start().latitude(), 16.0);
+    let altitude = height - (view.eye_position().z - view.center_altitude()) + 3.0 * meters_per_pixel;
+    transform.jump_to(&CameraOptions { center_altitude: Some(altitude), ..Default::default() });
+    transform.follow_terrain();
+    assert!(transform.view().terrain_min_elevation().is_none());
+
+    transform.ease_to(
+        &CameraOptions { bearing: Some(1.0), ..Default::default() },
+        &AnimationOptions { duration: Some(DURATION), ..Default::default() },
+    );
+    // As the map updates on the first ground: the ground, the command's last
+    // frame, then the ground again.
+    transform.set_terrain(Some(TerrainGround { elevation: Some(flat(Some(height), height)), clamped: false }));
+    transform.set_frame_time(Some(clock + DURATION));
+    transform.update_transitions(Some(clock + DURATION));
+    transform.follow_terrain();
+    assert!(!transform.in_transition() && transform.view().terrain_min_elevation().is_some());
+    let view = transform.view();
+    assert!(view.eye_position().z >= height, "the eye under the ground");
+    // GL JS's three raises can leave the near plane a little under it, as
+    // each raise turns the plane down.
+    for point in view.near_plane_points() {
+        assert!(point.z >= height - 0.01, "{point} under the ground at {height} m");
+    }
+}

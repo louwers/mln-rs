@@ -198,8 +198,18 @@ impl Transform {
     /// Keeps the eye out of the terrain while a gesture or a command moves
     /// the camera: a gesture over a clamped center lifts the altitude it
     /// holds ([`Self::lift_hold`]), and anything else is raised by pitch and
-    /// zoom ([`Self::keep_eye_above`]). Without terrain it does nothing.
+    /// zoom ([`Self::keep_eye_above`]). The view's near and far planes fit
+    /// the ground under the center first, as at rest. Without terrain it
+    /// does nothing.
     pub(super) fn keep_clear_of_ground(&mut self) {
+        // The near plane, which the ground at the center fits, is the one the
+        // frame draws with, also on the update that brings the first ground.
+        if let Some(TerrainGround { elevation: Some(elevation), .. }) = &self.terrain {
+            let min_elevation = Some(elevation.min_at(self.view().center(WrapMode::Wrapped)).unwrap_or(0.0));
+            if min_elevation != self.view().terrain_min_elevation() {
+                self.state.set_terrain_min_elevation(min_elevation);
+            }
+        }
         if self.gesture_holds() {
             self.lift_hold();
         } else {
