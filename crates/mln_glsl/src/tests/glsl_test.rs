@@ -437,7 +437,7 @@ fn vertex_inputs_are_the_programs_attributes() {
 fn a_walls_next_outline_vertex_has_the_formats_of_its_outline_vertex() {
     let instanced: Vec<_> = programs()
         .into_iter()
-        .filter(|(program, _)| program.name.starts_with("FillExtrusion") && !program.instance_attributes.is_empty())
+        .filter(|(program, _)| program.name.starts_with("fill-extrusion") && !program.instance_attributes.is_empty())
         .collect();
     assert_eq!(instanced.len(), 2);
     for (program, _) in instanced {

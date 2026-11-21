@@ -50,7 +50,7 @@ fn only_the_pulled_programs_read_the_vertex_index() {
     for (program, source) in programs() {
         for variant in variants(program, false) {
             let compiled = compiler.compile_source(program, source, &variant.defines).expect("the program");
-            let pulled = program.name.contains("Pulled");
+            let pulled = program.name.contains("pulled");
             assert_eq!(compiled.reads_vertex_index, pulled, "{} ({})", program.name, variant.name);
         }
     }
