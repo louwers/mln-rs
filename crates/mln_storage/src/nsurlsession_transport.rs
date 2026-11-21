@@ -258,7 +258,7 @@ fn transfer(
         .collect();
     let status = i64::try_from(response.statusCode()).unwrap_or(0);
     let body = Ok(data.map(NSData::to_vec).unwrap_or_default());
-    Ok(Transfer { status, headers, body })
+    Ok(Transfer { status, headers, body, stale: false })
 }
 
 /// The `NSURLErrorDomain` codes the .mm maps to `Reason::Connection`.

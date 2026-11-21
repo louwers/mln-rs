@@ -7,6 +7,12 @@
 //! fetch's `no-cache` mode, rather than take the browser's copy, which may
 //! be the same stale one under `stale-while-revalidate`.
 //!
+//! When the server can't be reached, a resource that the requester has no
+//! copy of comes from the browser's stored copy, however old, unless the
+//! server requires checking it first (`must-revalidate`, `no-cache`): the
+//! native cache, too, shows a stale copy rather than none, where the
+//! browser's cache would fail the request.
+//!
 //! The host's headers (`TransferRequest::headers`) go with the request, which
 //! makes a cross-origin request one that the server must allow in its CORS
 //! preflight. fetch follows a redirect with every header it was given, and
@@ -21,6 +27,7 @@ use std::pin::pin;
 use std::sync::Arc;
 use std::task::{Poll, Waker};
 
+use mln_util::http_header::CacheControl;
 use parking_lot::Mutex;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
@@ -125,9 +132,18 @@ async fn fetch(
         None if !revalidate => preloaded(take, url).await,
         _ => None,
     };
-    let response = match early {
-        Some(response) => response,
-        None => send(url, range.as_deref(), request.headers(), revalidate, signal).await.map_err(connection_error)?,
+    let cache = if revalidate { web_sys::RequestCache::NoCache } else { web_sys::RequestCache::Default };
+    let (response, stale) = match early {
+        Some(response) => (response, false),
+        None => match send(url, range.as_deref(), request.headers(), signal, cache).await {
+            Ok(response) => (response, false),
+            // A requester with a copy keeps showing it.
+            Err(error) if revalidate => return Err(connection_error(error)),
+            Err(error) => match stored_copy(request, range.as_deref(), signal).await {
+                Some(response) => (response, true),
+                None => return Err(connection_error(error)),
+            },
+        },
     };
     if response.type_() == web_sys::ResponseType::Opaqueredirect {
         return Err(Box::new(ResourceError::new(
@@ -135,10 +151,32 @@ async fn fetch(
             "A request with the host's HTTP headers can't follow a redirect in the browser",
         )));
     }
-    transfer(&response).await.map_err(connection_error)
+    transfer(&response, stale).await.map_err(connection_error)
 }
 
-async fn transfer(response: &web_sys::Response) -> Result<Transfer, JsValue> {
+/// The browser's stored copy of the resource, of any age, for a request that
+/// couldn't reach the server, unless the server requires checking the copy
+/// before each use.
+async fn stored_copy(
+    request: &TransferRequest,
+    range: Option<&str>,
+    signal: Option<&web_sys::AbortSignal>,
+) -> Option<web_sys::Response> {
+    if signal.is_some_and(web_sys::AbortSignal::aborted) {
+        return None;
+    }
+    let url = &request.resource().url;
+    let response = send(url, range, request.headers(), signal, web_sys::RequestCache::ForceCache).await.ok()?;
+    // A copy of the whole resource isn't the range the request asked for.
+    if range.is_some() && response.status() != 206 {
+        return None;
+    }
+    let cache_control = response.headers().get("Cache-Control").ok().flatten();
+    let cache_control = cache_control.as_deref().map(CacheControl::parse).unwrap_or_default();
+    (!cache_control.must_revalidate && !cache_control.no_cache).then_some(response)
+}
+
+async fn transfer(response: &web_sys::Response, stale: bool) -> Result<Transfer, JsValue> {
     let mut headers = Vec::new();
     if let Some(entries) = js_sys::try_iter(&response.headers())? {
         for entry in entries {
@@ -154,21 +192,19 @@ async fn transfer(response: &web_sys::Response) -> Result<Transfer, JsValue> {
         },
         Err(error) => Err(Box::new(ResourceError::new(Reason::Connection, format!("{error:?}")))),
     };
-    Ok(Transfer { status, headers, body })
+    Ok(Transfer { status, headers, body, stale })
 }
 
 async fn send(
     url: &str,
     range: Option<&str>,
     extra: &[(String, String)],
-    revalidate: bool,
     signal: Option<&web_sys::AbortSignal>,
+    cache: web_sys::RequestCache,
 ) -> Result<web_sys::Response, JsValue> {
     let init = web_sys::RequestInit::new();
     init.set_signal(signal);
-    if revalidate {
-        init.set_cache(web_sys::RequestCache::NoCache);
-    }
+    init.set_cache(cache);
     if range.is_some() || !extra.is_empty() {
         let headers = web_sys::Headers::new()?;
         if let Some(range) = range {
