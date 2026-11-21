@@ -517,10 +517,10 @@ layout (location = 3) in lowp vec2 a_opacity;
 out lowp float opacity;
 #endif
 #ifndef HAS_UNIFORM_u_offset
-layout (location = 4) in lowp vec2 a_offset;
+layout (location = 5) in lowp vec2 a_offset;
 #endif
 #ifndef HAS_UNIFORM_u_gapwidth
-layout (location = 5) in mediump vec2 a_gapwidth;
+layout (location = 4) in mediump vec2 a_gapwidth;
 #endif
 #ifndef HAS_UNIFORM_u_width
 layout (location = 6) in mediump vec2 a_width;

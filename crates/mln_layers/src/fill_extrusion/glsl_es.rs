@@ -30,18 +30,18 @@ layout (location = 0) in vec2 a_pos;
 // Per instance: an outline vertex and the one after it.
 layout (location = 1) in vec2 a_outline_pos;
 layout (location = 2) in vec2 a_decimals_ed;
-layout (location = 8) in vec2 a_next_outline_pos;
-layout (location = 9) in vec2 a_next_decimals_ed;
+layout (location = 6) in vec2 a_next_outline_pos;
+layout (location = 7) in vec2 a_next_decimals_ed;
 out vec4 v_color;
 
 #ifndef HAS_UNIFORM_u_base
-layout (location = 3) in highp vec2 a_base;
+layout (location = 4) in highp vec2 a_base;
 #endif
 #ifndef HAS_UNIFORM_u_height
-layout (location = 4) in highp vec2 a_height;
+layout (location = 5) in highp vec2 a_height;
 #endif
 #ifndef HAS_UNIFORM_u_color
-layout (location = 5) in highp vec4 a_color;
+layout (location = 3) in highp vec4 a_color;
 #endif
 
 void main() {
@@ -322,19 +322,19 @@ out vec2 v_pos_b;
 out vec4 v_lighting;
 
 #ifndef HAS_UNIFORM_u_base
-layout (location = 3) in highp vec2 a_base;
+layout (location = 2) in highp vec2 a_base;
 out highp float base;
 #endif
 #ifndef HAS_UNIFORM_u_height
-layout (location = 4) in highp vec2 a_height;
+layout (location = 3) in highp vec2 a_height;
 out highp float height;
 #endif
 #ifndef HAS_UNIFORM_u_pattern_from
-layout (location = 5) in highp vec4 a_pattern_from;
+layout (location = 4) in highp vec4 a_pattern_from;
 flat out highp vec4 pattern_from;
 #endif
 #ifndef HAS_UNIFORM_u_pattern_to
-layout (location = 6) in highp vec4 a_pattern_to;
+layout (location = 5) in highp vec4 a_pattern_to;
 flat out highp vec4 pattern_to;
 #endif
 
@@ -487,7 +487,7 @@ layout (location = 3) in highp vec2 a_base;
 layout (location = 4) in highp vec2 a_height;
 #endif
 #ifndef HAS_UNIFORM_u_color
-layout (location = 5) in highp vec4 a_color;
+layout (location = 2) in highp vec4 a_color;
 #endif
 
 void main() {

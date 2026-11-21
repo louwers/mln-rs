@@ -14,15 +14,15 @@ layout (location = 1) in highp vec4 a_color;
 out highp vec4 color;
 #endif
 #ifndef HAS_UNIFORM_u_opacity
-layout (location = 2) in lowp vec2 a_opacity;
+layout (location = 4) in lowp vec2 a_opacity;
 out lowp float opacity;
 #endif
 #ifndef HAS_UNIFORM_u_pattern_from
-layout (location = 3) in highp vec4 a_pattern_from;
+layout (location = 2) in highp vec4 a_pattern_from;
 flat out highp vec4 pattern_from;
 #endif
 #ifndef HAS_UNIFORM_u_pattern_to
-layout (location = 4) in highp vec4 a_pattern_to;
+layout (location = 3) in highp vec4 a_pattern_to;
 flat out highp vec4 pattern_to;
 #endif
 
@@ -321,15 +321,15 @@ layout (location = 1) in highp vec4 a_color;
 out highp vec4 color;
 #endif
 #ifndef HAS_UNIFORM_u_opacity
-layout (location = 2) in lowp vec2 a_opacity;
+layout (location = 4) in lowp vec2 a_opacity;
 out lowp float opacity;
 #endif
 #ifndef HAS_UNIFORM_u_pattern_from
-layout (location = 3) in highp vec4 a_pattern_from;
+layout (location = 2) in highp vec4 a_pattern_from;
 flat out highp vec4 pattern_from;
 #endif
 #ifndef HAS_UNIFORM_u_pattern_to
-layout (location = 4) in highp vec4 a_pattern_to;
+layout (location = 3) in highp vec4 a_pattern_to;
 flat out highp vec4 pattern_to;
 #endif
 ",
@@ -383,15 +383,15 @@ layout (location = 1) in highp vec4 a_color;
 out highp vec4 color;
 #endif
 #ifndef HAS_UNIFORM_u_opacity
-layout (location = 2) in lowp vec2 a_opacity;
+layout (location = 4) in lowp vec2 a_opacity;
 out lowp float opacity;
 #endif
 #ifndef HAS_UNIFORM_u_pattern_from
-layout (location = 3) in highp vec4 a_pattern_from;
+layout (location = 2) in highp vec4 a_pattern_from;
 flat out highp vec4 pattern_from;
 #endif
 #ifndef HAS_UNIFORM_u_pattern_to
-layout (location = 4) in highp vec4 a_pattern_to;
+layout (location = 3) in highp vec4 a_pattern_to;
 flat out highp vec4 pattern_to;
 #endif
 
