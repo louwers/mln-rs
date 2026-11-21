@@ -63,7 +63,9 @@ struct ErrorMessage {
 }
 
 impl EvaluationError {
-    pub(crate) fn new(message: impl Into<String>) -> Self {
+    /// The error whose [`message`](Self::message) the evaluation reports.
+    #[must_use]
+    pub fn new(message: impl Into<String>) -> Self {
         EvaluationError(Box::new(ErrorMessage { message: message.into() }))
     }
 
