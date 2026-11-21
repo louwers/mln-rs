@@ -3740,7 +3740,6 @@ pub(crate) const HEATMAP_SHADER: GlslShaderSource = GlslShaderSource {
     prelude: HEATMAP_SHADER_PRELUDE,
     vertex: concat!(
         standing_ground!(),
-        ground_visibility!(),
         r#"
 
 // Effective "0" in the kernel density texture to adjust the kernel size to;
@@ -3793,10 +3792,6 @@ layout(set = LAYER_SET_INDEX, binding = idHeatmapEvaluatedPropsUBO) uniform Heat
 layout(location = 0) out float frag_weight;
 #endif
 layout(location = 1) out vec2 frag_extrude;
-#ifdef TERRAIN
-// How much of the kernel the ground in front of its center leaves.
-layout(location = 2) out float frag_visibility;
-#endif
 
 void main() {
     const HeatmapDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
@@ -3850,7 +3845,6 @@ void main() {
 #ifdef TERRAIN
     const GroundDrawableUBO ground = projectionVector.projection_ubo[constant.ubo_index].ground;
     const float ele = standing_height(center, ground);
-    frag_visibility = ground_visibility(drawable.matrix * vec4(center, ele, 1), ground);
 #else
     const float ele = 0.0;
 #endif
@@ -3878,9 +3872,6 @@ void main() {
 layout(location = 0) in float frag_weight;
 #endif
 layout(location = 1) in vec2 frag_extrude;
-#ifdef TERRAIN
-layout(location = 2) in float frag_visibility;
-#endif
 
 layout(location = 0) out vec4 out_color;
 
@@ -3905,11 +3896,7 @@ void main() {
 #else
     const float weight = frag_weight;
 #endif
-#ifdef TERRAIN
-    const float val = weight * frag_visibility * props.intensity * GAUSS_COEF * exp(d);
-#else
     const float val = weight * props.intensity * GAUSS_COEF * exp(d);
-#endif
 
     out_color = vec4(val, 1.0, 1.0, 1.0);
 }

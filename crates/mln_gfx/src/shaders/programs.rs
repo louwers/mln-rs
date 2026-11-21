@@ -578,9 +578,8 @@ pub static HEATMAP: Program = Program {
         (ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE, Float2),
     ],
     instance_attributes: &[],
-    // The terrain variant's ground, and the depth of the ground that hides
-    // kernels behind it.
-    textures: &[ID_GROUND_DEM_TEXTURE, ID_GROUND_DEPTH_TEXTURE],
+    // The terrain variant's ground.
+    textures: &[ID_GROUND_DEM_TEXTURE],
     properties: &[
         property("weight", ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE),
         property("radius", ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE),

@@ -1,6 +1,6 @@
 // Terrain hides the circles and labels that stand behind it, each whole, by
 // the depth of the ground drawn in the same frame, and makes that depth only
-// in a frame that needs it.
+// in a frame that needs it. It hides no heatmap kernel.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -98,6 +98,29 @@ fn circles_style(red: &[LatLng], blue: &[LatLng], terrain: bool) -> String {
                   "paint": {{"circle-color": "blue", "circle-radius": 6}}}}
             ]
         }}"#
+    )
+}
+
+/// A heatmap layer of one kernel at `at`, opaque blue wherever its density
+/// shows, over a white background and a terrain.
+fn heatmap_style(at: &LatLng) -> String {
+    format!(
+        r#"{{
+            "version": 8,
+            "terrain": {{"source": "dem"}},
+            "sources": {{
+                "dem": {{"type": "raster-dem", "tiles": ["dem/{{z}}/{{x}}/{{y}}.png"], "tileSize": 256, "maxzoom": 15}},
+                "point": {{"type": "geojson", "data": {{"type": "Point", "coordinates": [{}, {}]}}}}
+            }},
+            "layers": [
+                {{"id": "background", "type": "background", "paint": {{"background-color": "white"}}}},
+                {{"id": "heatmap", "type": "heatmap", "source": "point",
+                  "paint": {{"heatmap-radius": 10,
+                            "heatmap-color": ["step", ["heatmap-density"], "rgba(0, 0, 0, 0)", 0.05, "blue"]}}}}
+            ]
+        }}"#,
+        at.longitude(),
+        at.latitude()
     )
 }
 
@@ -200,7 +223,8 @@ fn seen_at(map: &Map, location: &LatLng, height: f64) -> Option<(u32, u32)> {
 /// A ridge 60 m high, 120 m north of a red circle at the camera's center,
 /// hides a blue circle 80 m north of it, at sea level, from a camera pitched
 /// 70° looking north, and doesn't hide the red one. Over the same ground at
-/// sea level, the blue circle shows.
+/// sea level, the blue circle shows. A heatmap's kernel where the blue circle
+/// was shows behind the ridge: the ground hides no kernel.
 #[test]
 fn a_ridge_hides_a_circle_behind_it_and_not_one_before_it() {
     let (front, behind) = (north(0.0), north(BEHIND));
@@ -220,6 +244,13 @@ fn a_ridge_hides_a_circle_behind_it_and_not_one_before_it() {
     };
     let (x, y) = seen_at(&level_map, &behind, 0.0).expect("the blue circle in view");
     assert!(blue(pixel(&level, x, y)), "the blue circle over level ground");
+
+    let Some((kernel, kernel_map, _)) = still(&heatmap_style(&behind), size, &view, |tile| dem_of(tile, ridge_height))
+    else {
+        return;
+    };
+    let (x, y) = seen_at(&kernel_map, &behind, 0.0).expect("the kernel in view, behind the ridge");
+    assert!(blue(pixel(&kernel, x, y)), "the heatmap's kernel behind the ridge");
 }
 
 /// A red label on the ground, on a slope that falls 30° to the east, seen
@@ -377,7 +408,8 @@ fn a_resized_map_hides_what_a_map_made_at_its_size_hides() {
 
 /// The ground's depth is drawn in a frame with terrain and a layer it hides,
 /// and in no other: not without terrain, nor over terrain with only layers
-/// that drape or that the depth test hides, such as fill extrusions.
+/// that drape, that the depth test hides, such as fill extrusions, or that
+/// it doesn't hide, such as heatmaps.
 #[test]
 fn only_a_frame_with_terrain_and_a_layer_it_hides_draws_the_ground_depth() {
     let at = north(0.0);
@@ -407,6 +439,7 @@ fn only_a_frame_with_terrain_and_a_layer_it_hides_draws_the_ground_depth() {
     let cases = [
         ("circles without terrain", circles_style(&[at], &[], false), false),
         ("fill extrusions over terrain", extrusion, false),
+        ("a heatmap over terrain", heatmap_style(&at), false),
         ("circles over terrain", circles_style(&[at], &[], true), true),
     ];
     for (name, style, draws) in cases {

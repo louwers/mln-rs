@@ -146,9 +146,9 @@
 //!   0 and 1. A frame without terrain makes no terrain variant, writes no
 //!   ground, binds no ground texture and expands no centroid.
 //! - **What the ground hides.** Fill extrusions hide behind the ground pixel
-//!   by pixel, by the depth they test. A symbol, a circle or a heatmap's
-//!   kernel hides whole, by its anchor or center as it draws, raised: in a
-//!   frame where terrain draws and a layer of theirs does, a pass before the
+//!   by pixel, by the depth they test. A symbol or a circle hides whole, by
+//!   its anchor or center as it draws, raised: in a frame where terrain
+//!   draws and a layer of theirs does, a pass before the
 //!   frame's draws every terrain tile, skirts included, into a texture at the
 //!   frame's logical pixels, with a depth test that keeps each pixel's
 //!   nearest ground, as its eye distance's f32 bits ([`ID_GROUND_DEPTH_TEXTURE`]).
@@ -166,8 +166,11 @@
 //!   changes for it. A hidden label stays in the collision grid. A frame
 //!   without terrain, or without a layer that the ground hides, makes no
 //!   depth and draws no pass for it. A known limit: an axonometric view, whose
-//!   clip w doesn't vary with depth, hides nothing. The draws of circles and heatmap kernels stack in the frame's
-//!   order of their tiles, and then of each tile's parts, whenever each draw
+//!   clip w doesn't vary with depth, hides nothing. The ground hides no
+//!   heatmap kernel: a kernel adds its density wherever it draws, with ground
+//!   in front of it or not, as in GL JS, so that density doesn't pop in and
+//!   out as the camera moves over hills. The draws of circles and heatmap
+//!   kernels stack in the frame's order of their tiles, and then of each tile's parts, whenever each draw
 //!   was made, so a view draws alike whatever path the camera took to it;
 //!   what shows of fill extrusions is the depth's to decide. A known limit: a
 //!   tile that draws in several parts, which happens only where the view is

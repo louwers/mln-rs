@@ -3059,13 +3059,8 @@ void main() {
 pub(crate) const HEATMAP_SHADER: GlslShaderSource = GlslShaderSource {
     vertex: concat!(
         standing_ground!(),
-        ground_visibility!(),
         r#"layout (location = 0) in vec2 a_pos;
 out vec2 v_extrude;
-#ifdef TERRAIN
-// How much of the kernel the ground in front of its center leaves.
-out lowp float v_visibility;
-#endif
 
 layout (std140) uniform HeatmapDrawableUBO {
     highp mat4 u_matrix;
@@ -3147,7 +3142,6 @@ mediump float radius = u_radius;
     vec2 center = floor(a_pos * 0.5);
 #ifdef TERRAIN
     highp float ele = standing_height(center);
-    v_visibility = ground_visibility(u_matrix * vec4(center, ele, 1));
 #else
     highp float ele = 0.0;
 #endif
@@ -3162,9 +3156,6 @@ mediump float radius = u_radius;
 "#
     ),
     fragment: r"in vec2 v_extrude;
-#ifdef TERRAIN
-in lowp float v_visibility;
-#endif
 
 layout (std140) uniform HeatmapEvaluatedPropsUBO {
     highp float u_weight;
@@ -3187,11 +3178,7 @@ highp float weight = u_weight;
 
     // Kernel density estimation with a Gaussian kernel of size 5x5
     float d = -0.5 * 3.0 * 3.0 * dot(v_extrude, v_extrude);
-#ifdef TERRAIN
-    float val = weight * v_visibility * u_intensity * GAUSS_COEF * exp(d);
-#else
     float val = weight * u_intensity * GAUSS_COEF * exp(d);
-#endif
 
     fragColor = vec4(val, 1.0, 1.0, 1.0);
 

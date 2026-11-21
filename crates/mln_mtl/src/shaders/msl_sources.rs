@@ -4083,7 +4083,6 @@ static_assert(sizeof(HeatmapEvaluatedPropsUBO) == 16, "wrong size");
 "#,
     source: concat!(
         standing_ground!(),
-        ground_visibility!(),
         r#"
 
 struct VertexStage {
@@ -4103,10 +4102,6 @@ struct FragmentStage {
     float weight;
 #endif
     float2 extrude;
-#if defined(TERRAIN)
-    // How much of the kernel the ground in front of its center leaves.
-    float visibility;
-#endif
 };
 
 // Effective "0" in the kernel density texture to adjust the kernel size to;
@@ -4123,7 +4118,6 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
 #if defined(TERRAIN)
                                 texture2d<float, access::read> ground_dem [[texture(2)]],
-                                texture2d<float, access::read> ground_depth [[texture(3)]],
 #endif
                                 device const HeatmapEvaluatedPropsUBO& props [[buffer(idHeatmapEvaluatedPropsUBO)]]) {
 
@@ -4177,7 +4171,6 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 #if defined(TERRAIN)
     device const GroundDrawableUBO& ground = projectionVector[uboIndex].ground;
     const float ele = standing_height(center, ground, ground_dem);
-    const float visibility = ground_visibility(drawable.matrix * float4(center, ele, 1), ground, ground_depth);
     const float4 position = ground_holds(center, ground)
         ? drawable.matrix * float4(center + scaled_extrude, ele, 1)
         : ground_dropped();
@@ -4192,9 +4185,6 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         .weight      = weight,
 #endif
         .extrude     = extrude,
-#if defined(TERRAIN)
-        .visibility  = visibility,
-#endif
     };
 }
 
@@ -4211,11 +4201,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 #else
     const float weight = in.weight;
 #endif
-#if defined(TERRAIN)
-    const float val = weight * in.visibility * props.intensity * GAUSS_COEF * exp(d);
-#else
     const float val = weight * props.intensity * GAUSS_COEF * exp(d);
-#endif
 
     return half4(val, 1.0, 1.0, 1.0);
 }

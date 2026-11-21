@@ -2611,7 +2611,6 @@ fn main() -> @location(0) vec4<f32> {
 pub(crate) const HEATMAP_SHADER: WgslShaderSource = WgslShaderSource {
     vertex: Some(concat!(
         standing_ground!(),
-        ground_visibility!(),
         r"
 struct VertexInput {
     @location(0) position: vec2<i32>,
@@ -2629,10 +2628,6 @@ struct VertexOutput {
     @location(0) weight: f32,
 #endif
     @location(1) extrude: vec2<f32>,
-#ifdef TERRAIN
-    // How much of the kernel the ground in front of its center leaves.
-    @location(2) visibility: f32,
-#endif
 };
 
 struct HeatmapDrawableUBO {
@@ -2699,7 +2694,6 @@ fn main(in: VertexInput) -> VertexOutput {
         return out;
     }
     let ele = standing_height(base, ground);
-    out.visibility = ground_visibility(drawable.matrix * vec4<f32>(base, ele, 1.0), ground);
 #else
     let ele = 0.0;
 #endif
@@ -2726,10 +2720,6 @@ struct FragmentInput {
     @location(0) weight: f32,
 #endif
     @location(1) extrude: vec2<f32>,
-#ifdef TERRAIN
-    // How much of the kernel the ground in front of its center leaves.
-    @location(2) visibility: f32,
-#endif
 };
 
 struct HeatmapEvaluatedPropsUBO {
@@ -2754,11 +2744,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 #else
     let weight = in.weight;
 #endif
-#ifdef TERRAIN
-    let val = weight * in.visibility * props.intensity * GAUSS_COEF * exp(d);
-#else
     let val = weight * props.intensity * GAUSS_COEF * exp(d);
-#endif
     return vec4<f32>(val, 1.0, 1.0, 1.0);
 #endif
 }

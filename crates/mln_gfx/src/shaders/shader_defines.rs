@@ -171,8 +171,8 @@ pub const ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE: usize = 0;
 pub const ID_GROUND_DEM_TEXTURE: usize = 2;
 /// The depth of the frame's drawn ground (the eye distance of each logical
 /// pixel's nearest ground, as its f32's bits), which the terrain variants of
-/// the programs that terrain hides (symbols, circles and heatmap kernels)
-/// read at their anchor. It is one texture for the whole frame, past the
+/// the programs that terrain hides (symbols and circles) read at their
+/// anchor. It is one texture for the whole frame, past the
 /// draw's own textures: a draw binds it from the context's frame, not from
 /// its `Textures`, so no flat program's layout or draw changes for it.
 pub const ID_GROUND_DEPTH_TEXTURE: usize = MAX_TEXTURE_COUNT_PER_SHADER;

@@ -663,7 +663,7 @@ shader_source!(
         attr("a_weight", ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE),
         attr("a_radius", ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE),
     ],
-    HIDDEN_GROUND_TEXTURES
+    GROUND_TEXTURES
 );
 
 // Heatmap Texture
