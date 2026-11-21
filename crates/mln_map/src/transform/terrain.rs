@@ -120,11 +120,32 @@ impl EasedAltitude {
 impl Transform {
     /// Sets the terrain the camera stands on, or `None` without terrain,
     /// which turns off every rule of the camera over terrain.
+    ///
+    /// A rule that stops applying drops what it kept: once the terrain stops
+    /// clamping the center, a gesture no longer holds an altitude and
+    /// commands no longer ease theirs, and once the terrain goes, anchors
+    /// hold their locations at sea level, under them now. A rule that
+    /// applies again starts from the camera as it is.
     pub fn set_terrain(&mut self, terrain: Option<TerrainGround>) {
+        let unclamps = self.clamped() && !terrain.as_ref().is_some_and(|terrain| terrain.clamped);
+        let goes = self.terrain.is_some() && terrain.is_none();
         if let Some(terrain) = &terrain {
             self.clamped_to_ground = terrain.clamped;
         }
         self.terrain = terrain;
+        if unclamps {
+            self.gesture.hold = None;
+            for transition in &mut self.transitions {
+                transition.stop_easing_altitude();
+            }
+        }
+        if goes {
+            self.gesture.anchor_plane = None;
+            let view = self.state.view();
+            for transition in &mut self.transitions {
+                transition.hold_anchor_at_sea_level(view);
+            }
+        }
     }
 
     /// The ground the renderer last drew, while there is terrain.

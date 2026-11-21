@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use mln_map_types::{
     AnimationOptions, CameraOptions, CameraVelocity, Elevation, TransformState, TransitionEnd, TransitionOutcome,
-    VerticalPerspectiveProjection,
+    VerticalPerspectiveProjection, View,
 };
 use mln_util::constants::DEFAULT_TRANSITION_EASE;
 use mln_util::geo::{LatLng, ScreenCoordinate, WrapMode};
@@ -100,6 +100,28 @@ impl Transition {
             gesture: None,
             eased_altitude: None,
         }
+    }
+
+    /// Stops easing the altitude onto the ground at the end, which leaves it
+    /// where it is.
+    pub(super) fn stop_easing_altitude(&mut self) {
+        if self.eased_altitude.take().is_some() {
+            self.fields &= !ALTITUDE;
+        }
+    }
+
+    /// Holds the anchor's location at sea level, the location under it in
+    /// `view` now, as the flat map does.
+    pub(super) fn hold_anchor_at_sea_level(&mut self, view: &View) {
+        if self.anchor_height == 0.0 {
+            return;
+        }
+        if let Some(location) =
+            self.anchor.and_then(|anchor| view.screen_coordinate_to_lat_lng(&anchor, WrapMode::Unwrapped).ok())
+        {
+            self.anchor_lat_lng = location;
+        }
+        self.anchor_height = 0.0;
     }
 
     fn mode(&self) -> CameraChangeMode {
@@ -438,35 +460,30 @@ impl Transform {
             let ease = transition.animation.easing.unwrap_or(DEFAULT_TRANSITION_EASE);
             let k = if t == 1.0 { 1.0 } else { ease.solve(t, 0.001) };
             let mut value = (transition.frame)(&self.state, k);
-            if let Some(eased) = transition.eased_altitude.as_mut() {
-                // Once the terrain stops clamping the center, the altitude
-                // stays where it is.
-                value.center_altitude = match clamping {
-                    Some(elevation) => {
-                        let elevation = elevation.as_deref();
-                        let mut ground = elevation.and_then(|elevation| elevation.at(eased.end()));
-                        // An anchored command's end moves with the ground
-                        // there (see `anchored_end`).
-                        if let Some(anchor) =
-                            transition.anchor.filter(|_| ground.is_some_and(|ground| !eased.heads_for(ground)))
-                        {
-                            let target = (transition.frame)(&self.state, 1.0);
-                            let end = anchored_end(
-                                &self.state,
-                                elevation,
-                                transition.fields,
-                                &target,
-                                &anchor,
-                                &transition.anchor_lat_lng,
-                                transition.anchor_height,
-                            );
-                            eased.move_end(end);
-                            ground = elevation.and_then(|elevation| elevation.at(end));
-                        }
-                        Some(eased.at(ground, k))
-                    }
-                    None => current.center_altitude,
-                };
+            // The terrain clamps the center while a command eases its
+            // altitude (see `Transform::set_terrain`).
+            if let (Some(eased), Some(elevation)) = (transition.eased_altitude.as_mut(), clamping) {
+                let elevation = elevation.as_deref();
+                let mut ground = elevation.and_then(|elevation| elevation.at(eased.end()));
+                // An anchored command's end moves with the ground there (see
+                // `anchored_end`).
+                if let Some(anchor) =
+                    transition.anchor.filter(|_| ground.is_some_and(|ground| !eased.heads_for(ground)))
+                {
+                    let target = (transition.frame)(&self.state, 1.0);
+                    let end = anchored_end(
+                        &self.state,
+                        elevation,
+                        transition.fields,
+                        &target,
+                        &anchor,
+                        &transition.anchor_lat_lng,
+                        transition.anchor_height,
+                    );
+                    eased.move_end(end);
+                    ground = elevation.and_then(|elevation| elevation.at(end));
+                }
+                value.center_altitude = Some(eased.at(ground, k));
             }
             compose(&mut camera, &value, transition.fields);
         }

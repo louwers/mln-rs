@@ -536,3 +536,31 @@ fn an_empty_momentum_reports_its_recentre_in_order() {
         .collect();
     assert_eq!(vec!["will Momentum", "ended", "did Momentum"], events);
 }
+
+/// A clamp turned off mid-gesture drops the altitude the gesture holds, and
+/// one turned on again in the same gesture holds the camera's altitude then,
+/// rather than the one the gesture began at.
+#[test]
+fn a_clamp_turned_on_again_mid_gesture_holds_the_altitude_then() {
+    let mut lifted = 0.0;
+    let mut map = over_the_hill(210, |view, _| lifted = view.center_altitude());
+    assert!(lifted > 100.0, "the hill lifted the camera {lifted} m");
+    map.set_center_clamped_to_ground(false);
+    // Back off the hill, where the gesture's first altitude needs no lift.
+    let center = world(&start()) + DVec2::new(0.0, 2000.0 / meters());
+    let center =
+        Projection::unproject(&geometry::Point::new(center.x, center.y), 1.0 / 512.0, WrapMode::Unwrapped).unwrap();
+    let step = |map: &mut Map| {
+        map.update_camera(&CameraUpdate {
+            mode: CameraUpdateMode::Jump,
+            camera: CameraOptions { center: Some(center), ..Default::default() },
+            phase: GesturePhase::Update,
+            ..Default::default()
+        });
+    };
+    step(&mut map);
+    assert_eq!(lifted, map.transform_state().view().center_altitude(), "unclamped, the altitude stays");
+    map.set_center_clamped_to_ground(true);
+    step(&mut map);
+    assert_eq!(lifted, map.transform_state().view().center_altitude(), "the gesture holds the altitude it has");
+}

@@ -374,3 +374,69 @@ fn the_first_ground_clears_the_near_plane_it_draws_with() {
         assert!(point.z >= height - 0.01, "{point} under the ground at {height} m");
     }
 }
+
+/// A clamp turned off mid-ease leaves the altitude where it is, and one
+/// turned on again leaves it there too: the ease no longer eases it, and
+/// the camera at rest stands on the ground.
+#[test]
+fn a_clamp_turned_on_again_mid_ease_keeps_the_altitude() {
+    let run_loop = Queue::<()>::new();
+    let ground = slope();
+    let (mut map, clock) = map_over(Some(&ground), &run_loop);
+    command(&mut map, CameraUpdateMode::Ease, asked());
+    let mut last = self::ground(&map).0;
+    frames(&mut map, clock, DURATION, |map, elapsed| {
+        let altitude = self::ground(map).0;
+        if elapsed == Duration::from_millis(304) {
+            map.set_center_clamped_to_ground(false);
+            last = self::ground(map).0;
+        } else if elapsed == Duration::from_millis(608) {
+            assert_eq!(last, altitude, "unclamped, the altitude stays");
+            map.set_center_clamped_to_ground(true);
+            assert_eq!(last, self::ground(map).0, "clamped again mid-ease, the altitude stays");
+        } else if elapsed > Duration::from_millis(304) && elapsed < DURATION {
+            assert_eq!(last, altitude, "{elapsed:?}");
+        }
+        last = self::ground(map).0;
+    });
+    let center = map.transform_state().view().center(WrapMode::Wrapped);
+    assert_eq!(ground.at(center).unwrap(), self::ground(&map).0, "at rest on the ground");
+}
+
+/// Terrain that goes mid-way through an anchored ease leaves the flat map's
+/// rule from there: the location at sea level under the anchor stays under
+/// it, where the ease had held the ground on a plane above it.
+#[test]
+fn an_anchored_ease_that_loses_its_terrain_holds_the_flat_map() {
+    let height = 1000.0;
+    let mut transform = Transform::new(ConstrainMode::HeightOnly, ViewportMode::Default);
+    transform.resize(Size::new(512, 512)).unwrap();
+    transform.set_terrain(Some(TerrainGround { elevation: Some(flat(Some(height), height)), clamped: false }));
+    let clock = Instant::now() + Duration::from_secs(3600);
+    transform.set_frame_time(Some(clock));
+    let camera = CameraOptions { center: Some(start()), zoom: Some(12.0), pitch: Some(50.0), ..Default::default() };
+    transform.jump_to(&camera);
+    transform.follow_terrain();
+    let anchor = ScreenCoordinate::new(120.0, 400.0);
+    transform.ease_to(
+        &CameraOptions { zoom: Some(13.0), bearing: Some(20.0), anchor: Some(anchor), ..Default::default() },
+        &AnimationOptions { duration: Some(DURATION), easing: Some(DEFAULT_TRANSITION_EASE), ..Default::default() },
+    );
+    let mut now = clock;
+    let mut held = None;
+    while now < clock + DURATION {
+        now += FRAME;
+        if now >= clock + DURATION / 2 && held.is_none() {
+            transform.set_terrain(None);
+            transform.follow_terrain();
+            held = Some(transform.screen_coordinate_to_lat_lng(&anchor, WrapMode::Unwrapped).unwrap());
+        }
+        transform.set_frame_time(Some(now));
+        transform.update_transitions(Some(now));
+        if let Some(held) = held {
+            let point = transform.lat_lng_to_screen_coordinate(&held);
+            let off = (point.x - anchor.x).hypot(point.y - anchor.y);
+            assert!(off < 0.01, "the ground at sea level is {off} px from the anchor");
+        }
+    }
+}
