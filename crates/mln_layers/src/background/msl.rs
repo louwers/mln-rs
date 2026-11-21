@@ -54,9 +54,7 @@ FragmentStage vertex vertexMain(VertexStage in [[stage_in]]) {
     };
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            texture2d<float, access::sample> image [[texture(0)]],
-                            sampler image_sampler [[sampler(0)]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 #if defined(OVERDRAW_INSPECTOR)
     return half4(1.0);
 #endif

@@ -200,11 +200,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
     };
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            texture2d<float, access::sample> gradientTexture [[texture(0)]],
-                            texture2d<float, access::sample> dashTexture [[texture(1)]],
-                            sampler gradientSampler [[sampler(0)]],
-                            sampler dashSampler [[sampler(1)]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 #if defined(PROJECTION_GLOBE)
     if (clippedAtAntimeridian(in.tile_x)) {
         discard_fragment();
@@ -230,8 +226,8 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     // line in case of an offset line (`v_width2.y`) or when fading out (`v_width2.x`)
     const float blur2 = (blur + 1.0 / DEVICE_PIXEL_RATIO) * in.gamma_scale;
 
-    const float sdfdist_a = dashTexture.sample(dashSampler, in.tex_a).a;
-    const float sdfdist_b = dashTexture.sample(dashSampler, in.tex_b).a;
+    const float sdfdist_a = image_dash.sample(image_dash_sampler, in.tex_a).a;
+    const float sdfdist_b = image_dash.sample(image_dash_sampler, in.tex_b).a;
     const float sdfdist = mix(sdfdist_a, sdfdist_b, tileProps.mix);
 #if defined(HAS_UNIFORM_u_dasharray)
     const float sdfgamma = tileProps.sdfgamma;
@@ -242,7 +238,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
                         smoothstep(0.5 - sdfgamma / floorwidth, 0.5 + sdfgamma / floorwidth, sdfdist);
 
     // The gradient ramp is stored in a texture indexed by the ratio along the entire line.
-    const float4 color = gradientTexture.sample(gradientSampler, float2(in.lineprogress, 0.5));
+    const float4 color = image.sample(image_sampler, float2(in.lineprogress, 0.5));
 
     return half4(color * (alpha * opacity));
 }
@@ -377,8 +373,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
     };
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            texture2d<float, access::sample> gradientTexture [[texture(0)]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 #if defined(PROJECTION_GLOBE)
     if (clippedAtAntimeridian(in.tile_x)) {
         discard_fragment();
@@ -411,7 +406,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     // For gradient lines, v_lineprogress is the ratio along the entire line,
     // scaled to [0, 2^15), and the gradient ramp is stored in a texture.
     constexpr sampler sampler2d(coord::normalized, filter::linear);
-    const float4 color = gradientTexture.sample(sampler2d, float2(in.lineprogress, 0.5));
+    const float4 color = image.sample(sampler2d, float2(in.lineprogress, 0.5));
 
     return half4(color * (alpha * opacity));
 }
@@ -554,9 +549,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
     };
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            texture2d<float, access::sample> image0 [[texture(0)]],
-                            sampler image0_sampler [[sampler(0)]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 
 #if defined(PROJECTION_GLOBE)
     if (clippedAtAntimeridian(in.tile_x)) {
@@ -621,14 +614,14 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
         const float x_a = glMod(in.linesofar / pattern_size_a.x * aspect_a, 1.0);
         float2 pos_a = atlas_pos((pattern_tl_a - 1.0) * texel_size, (pattern_br_a - pattern_tl_a + 2.0) * texel_size * float2(x_a, y));
         pos_a = clamp(pos_a, (pattern_tl_a - 1.0) * texel_size + half_texel, (pattern_br_a + 1.0) * texel_size - half_texel);
-        color_a = image0.sample(image0_sampler, pos_a);
+        color_a = image.sample(image_sampler, pos_a);
     }
     float4 color_b = float4(0.0);
     if (tileProps.fade > 0.0) {
         const float x_b = glMod(in.linesofar / pattern_size_b.x * aspect_b, 1.0);
         float2 pos_b = atlas_pos((pattern_tl_b - 1.0) * texel_size, (pattern_br_b - pattern_tl_b + 2.0) * texel_size * float2(x_b, y));
         pos_b = clamp(pos_b, (pattern_tl_b - 1.0) * texel_size + half_texel, (pattern_br_b + 1.0) * texel_size - half_texel);
-        color_b = image0.sample(image0_sampler, pos_b);
+        color_b = image.sample(image_sampler, pos_b);
     }
 
     const float4 color = mix(color_a, color_b, tileProps.fade);
@@ -789,9 +782,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
     };
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            texture2d<float, access::sample> image0 [[texture(0)]],
-                            sampler image0_sampler [[sampler(0)]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 
 #if defined(PROJECTION_GLOBE)
     if (clippedAtAntimeridian(in.tile_x)) {
@@ -824,8 +815,8 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     // line in case of an offset line (`v_width2.y`) or when fading out (`v_width2.x`)
     const float blur2 = (blur + 1.0 / DEVICE_PIXEL_RATIO) * in.gamma_scale;
 
-    const float sdfdist_a = image0.sample(image0_sampler, in.tex_a).a;
-    const float sdfdist_b = image0.sample(image0_sampler, in.tex_b).a;
+    const float sdfdist_a = image.sample(image_sampler, in.tex_a).a;
+    const float sdfdist_b = image.sample(image_sampler, in.tex_b).a;
     const float sdfdist = mix(sdfdist_a, sdfdist_b, tileProps.mix);
 #if defined(HAS_UNIFORM_u_dasharray)
     const float sdfgamma = tileProps.sdfgamma;

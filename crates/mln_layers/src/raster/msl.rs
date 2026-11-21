@@ -40,11 +40,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
     };
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            texture2d<float, access::sample> image0 [[texture(0)]],
-                            texture2d<float, access::sample> image1 [[texture(1)]],
-                            sampler image0_sampler [[sampler(0)]],
-                            sampler image1_sampler [[sampler(1)]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 #if defined(OVERDRAW_INSPECTOR)
     return half4(1.0);
 #endif

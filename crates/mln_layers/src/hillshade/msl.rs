@@ -39,9 +39,7 @@ float getElevation(float2 coord, float bias, texture2d<float, access::sample> im
     return dot(data, unpack);
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            texture2d<float, access::sample> image [[texture(0)]],
-                            sampler image_sampler [[sampler(0)]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 #if defined(OVERDRAW_INSPECTOR)
     return half4(1.0);
 #endif
@@ -267,9 +265,7 @@ void igor_hillshade(float2 deriv, device const HillshadeTilePropsUBO& tileProps,
     fragColor = half4(props.shadows[0] * shadow_strength + props.highlights[0] * highlight_strength);
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            texture2d<float, access::sample> image [[texture(0)]],
-                            sampler image_sampler [[sampler(0)]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 #if defined(OVERDRAW_INSPECTOR)
     return half4(1.0);
 #endif

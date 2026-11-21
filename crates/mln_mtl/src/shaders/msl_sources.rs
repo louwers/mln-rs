@@ -4,7 +4,7 @@
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::gpu::GpuError;
 use mln_gfx::shaders::program::{
-    Buffer, BufferKind, DRAW_PROJECTION_BUFFER, ENGINE_BUFFERS, PROJECTION_BUFFER, Program, VIEW_BUFFER,
+    Buffer, BufferKind, DRAW_PROJECTION_BUFFER, ENGINE_BUFFERS, PROJECTION_BUFFER, Program, Texture, VIEW_BUFFER,
 };
 use mln_gfx::shaders::source::identifiers;
 use mln_gfx::shaders::source::msl::{self, Msl};
@@ -204,6 +204,15 @@ fn parameter(buffer: &Buffer) -> String {
     format!("device const {ty}{by} {} [[buffer({})]]", buffer.name, buffer.id)
 }
 
+/// The parameters of `texture`, at slot `slot`, and of its sampler, at the
+/// texture and sampler indexes of the slot, by their names.
+fn texture_parameters(slot: usize, texture: &Texture) -> [String; 2] {
+    [
+        format!("texture2d<float, access::sample> {} [[texture({slot})]]", texture.name),
+        format!("sampler {} [[sampler({slot})]]", texture.sampler()),
+    ]
+}
+
 /// The type of a vertex of `format`.
 fn vertex_type(format: AttributeDataType) -> &'static str {
     use AttributeDataType::{
@@ -250,21 +259,23 @@ fn vertex_type(format: AttributeDataType) -> &'static str {
 /// program's blocks, each a storage buffer's element padded to its stride,
 /// and the program's own prelude and source with its properties written
 /// out ([`msl::expand`]), and each main function with the parameters of the
-/// buffers that it names, the engine's and the program's. Fails as
-/// [`msl::expand`] does.
+/// buffers that it names, the engine's and the program's, and of the
+/// program's textures and samplers that it names. Fails as [`msl::expand`]
+/// does.
 pub(crate) fn library_source(program: &Program, source: &Msl) -> Result<String, GpuError> {
     let (engine, own) = (msl::blocks(&ENGINE_BUFFERS), msl::blocks(program.buffers));
     let mut functions = msl::expand(program, source)?;
     for main in [source.vertex_main_function, source.fragment_main_function] {
-        functions = with_parameters(&functions, main, program.buffers);
+        functions = with_parameters(&functions, main, program);
     }
     Ok([HEADER, &engine, PRELUDE, &own, source.prelude, &functions].concat())
 }
 
-/// `functions` with the parameters of the buffers that the main function
-/// `main` names in its body added to its parameters: `uboIndex`, the
-/// engine's buffers and `buffers`.
-fn with_parameters(functions: &str, main: &str, buffers: &[Buffer]) -> String {
+/// `functions` with the parameters of what the main function `main` names
+/// in its body added to its parameters: `uboIndex`, the engine's buffers,
+/// `program`'s buffers, and its textures and their samplers, each at the
+/// index of its slot.
+fn with_parameters(functions: &str, main: &str, program: &Program) -> String {
     let Some(name_at) = functions.find(&format!(" {main}(")) else { return functions.to_owned() };
     let Some(close) = matching(functions, name_at, '(', ')') else { return functions.to_owned() };
     let Some(end) = matching(functions, close, '{', '}') else { return functions.to_owned() };
@@ -276,9 +287,18 @@ fn with_parameters(functions: &str, main: &str, buffers: &[Buffer]) -> String {
         added.push_str(",\n    ");
         added.push_str(UBO_INDEX_PARAMETER);
     }
-    for buffer in ENGINE_PARAMETERS.iter().chain(buffers).filter(|buffer| named.contains(buffer.name)) {
+    for buffer in ENGINE_PARAMETERS.iter().chain(program.buffers).filter(|buffer| named.contains(buffer.name)) {
         added.push_str(",\n    ");
         added.push_str(&parameter(buffer));
+    }
+    for (slot, texture) in program.textures.iter().enumerate() {
+        let [texture_parameter, sampler_parameter] = texture_parameters(slot, texture);
+        for (name, parameter) in [(texture.name, texture_parameter), (&*texture.sampler(), sampler_parameter)] {
+            if named.contains(name) {
+                added.push_str(",\n    ");
+                added.push_str(&parameter);
+            }
+        }
     }
     [&functions[..close], &added, &functions[close..]].concat()
 }
@@ -297,6 +317,7 @@ fn matching(text: &str, from: usize, open: char, close: char) -> Option<usize> {
 mod tests {
     use mln_gfx::gfx_types::AttributeDataType::Short4;
     use mln_gfx::shaders::bindings::DRAW_INDEX_ID;
+    use mln_gfx::shaders::program::Sources;
 
     use super::*;
 
@@ -310,19 +331,29 @@ mod tests {
     }
 
     #[test]
-    fn a_main_function_has_the_parameters_of_the_buffers_its_body_names() {
-        let walls = Buffer::vertices("walls", 0, Short4);
+    fn a_main_function_has_the_parameters_of_the_buffers_and_textures_its_body_names() {
+        static PROGRAM: Program = Program {
+            name: "walls",
+            buffers: &[Buffer::vertices("walls", 0, Short4)],
+            attributes: &[],
+            instance_attributes: &[],
+            textures: &[Texture::new("first"), Texture::new("second")],
+            properties: &[],
+            sources: Sources::NONE,
+        };
         let functions = "void helper(int walls) {}\n\
-                         float4 vertex main(uint id [[vertex_id]]) {\n    return walls[uboIndex] + view.x;\n}\n\
+                         float4 vertex main(uint id [[vertex_id]]) {\n    return walls[uboIndex] + view.x + second.sample(first_sampler, 0);\n}\n\
                          half4 fragment other(int view) { return walls; }";
-        let with = with_parameters(functions, "main", &[walls]);
+        let with = with_parameters(functions, "main", &PROGRAM);
         assert_eq!(
             with,
             format!(
-                "void helper(int walls) {{}}\nfloat4 vertex main(uint id [[vertex_id]],\n    {UBO_INDEX_PARAMETER},\n    {},\n    {}) \
-                 {{\n    return walls[uboIndex] + view.x;\n}}\nhalf4 fragment other(int view) {{ return walls; }}",
+                "void helper(int walls) {{}}\nfloat4 vertex main(uint id [[vertex_id]],\n    {UBO_INDEX_PARAMETER},\n    {},\n    {},\n    \
+                 sampler first_sampler [[sampler(0)]],\n    texture2d<float, access::sample> second [[texture(1)]]) \
+                 {{\n    return walls[uboIndex] + view.x + second.sample(first_sampler, 0);\n}}\n\
+                 half4 fragment other(int view) {{ return walls; }}",
                 parameter(&VIEW_BUFFER),
-                parameter(&walls)
+                parameter(&PROGRAM.buffers[0])
             )
         );
     }

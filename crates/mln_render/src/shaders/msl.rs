@@ -245,9 +245,7 @@ static float4 composite(float4 src, float4 dst, int mode) {
     return float4(co, src.a + dst.a * inv_src_a);
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            texture2d<float, access::sample> image [[texture(0)]],
-                            texture2d<float, access::sample> backdrop [[texture(1)]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
     const uint2 texel = uint2(in.position.xy);
     const float4 color = image.read(texel);
 

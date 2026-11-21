@@ -374,9 +374,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
     };
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            texture2d<float, access::sample> image [[texture(0)]],
-                            sampler image_sampler [[sampler(0)]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 #if defined(OVERDRAW_INSPECTOR)
     return half4(1.0);
 #endif
@@ -601,9 +599,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
     };
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            texture2d<float, access::sample> image [[texture(0)]],
-                            sampler image_sampler [[sampler(0)]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 #if defined(OVERDRAW_INSPECTOR)
     return half4(1.0);
 #endif
@@ -860,11 +856,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
     };
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            texture2d<float, access::sample> glyph_image [[texture(0)]],
-                            texture2d<float, access::sample> icon_image [[texture(1)]],
-                            sampler glyph_sampler [[sampler(0)]],
-                            sampler icon_sampler [[sampler(1)]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 #if defined(OVERDRAW_INSPECTOR)
     return half4(1.0);
 #endif
@@ -890,7 +882,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     const float2 pos = atlas_pos(in.tex_origin, in.tex);
 
     if (in.is_icon) {
-        return half4(icon_image.sample(icon_sampler, pos) * float(opacity));
+        return half4(icon_image.sample(icon_image_sampler, pos) * float(opacity));
     }
 
     const float gammaScaled = in.gamma_scaled;
@@ -898,7 +890,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     // A halo's inner edge sits a gamma outside the fill's.
     const float fillInnerEdge = (256.0 - 64.0) / 256.0;
     const float innerEdge = tileProps.is_halo ? fillInnerEdge + gammaScaled : fillInnerEdge;
-    const float dist = glyph_image.sample(glyph_sampler, pos).a;
+    const float dist = glyph_image.sample(glyph_image_sampler, pos).a;
 
     float alpha = smoothstep(innerEdge - gammaScaled, innerEdge + gammaScaled, dist);
     if (tileProps.is_halo) {

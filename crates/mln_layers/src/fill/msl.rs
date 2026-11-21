@@ -169,9 +169,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
     };
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            texture2d<float, access::sample> image0 [[texture(0)]],
-                            sampler image0_sampler [[sampler(0)]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 #if defined(OVERDRAW_INSPECTOR)
     return half4(1.0);
 #endif
@@ -200,13 +198,13 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     if (props.fade < 1.0) {
         const float2 imagecoord = glMod(in.v_pos_a, 1.0);
         const float2 pos = atlas_pos(pattern_tl_a / tileProps.texsize, (pattern_br_a - pattern_tl_a) / tileProps.texsize * imagecoord);
-        color1 = image0.sample(image0_sampler, pos);
+        color1 = image.sample(image_sampler, pos);
     }
     float4 color2 = float4(0.0);
     if (props.fade > 0.0) {
         const float2 imagecoord_b = glMod(in.v_pos_b, 1.0);
         const float2 pos2 = atlas_pos(pattern_tl_b / tileProps.texsize, (pattern_br_b - pattern_tl_b) / tileProps.texsize * imagecoord_b);
-        color2 = image0.sample(image0_sampler, pos2);
+        color2 = image.sample(image_sampler, pos2);
     }
 
     // TODO: Should triangate the lines into triangles to support thick line and edge antialiased.
@@ -461,9 +459,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
     };
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            texture2d<float, access::sample> image0 [[texture(0)]],
-                            sampler image0_sampler [[sampler(0)]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 #if defined(OVERDRAW_INSPECTOR)
     return half4(1.0);
 #endif
@@ -492,13 +488,13 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     if (props.fade < 1.0) {
         const float2 imagecoord = glMod(in.v_pos_a, 1.0);
         const float2 pos = atlas_pos(pattern_tl_a / tileProps.texsize, (pattern_br_a - pattern_tl_a) / tileProps.texsize * imagecoord);
-        color1 = image0.sample(image0_sampler, pos);
+        color1 = image.sample(image_sampler, pos);
     }
     float4 color2 = float4(0.0);
     if (props.fade > 0.0) {
         const float2 imagecoord_b = glMod(in.v_pos_b, 1.0);
         const float2 pos2 = atlas_pos(pattern_tl_b / tileProps.texsize, (pattern_br_b - pattern_tl_b) / tileProps.texsize * imagecoord_b);
-        color2 = image0.sample(image0_sampler, pos2);
+        color2 = image.sample(image_sampler, pos2);
     }
 
     if (tileProps.sdf > 0.5) {

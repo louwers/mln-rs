@@ -338,13 +338,16 @@ fn no_source_declares_a_block() {
     }
 }
 
-/// No source declares a buffer: the backend adds the parameters of the
-/// engine's and its program's to the main functions that name them.
+/// No source declares a buffer or a texture: the backend adds the
+/// parameters of the engine's buffers and its program's buffers, textures
+/// and samplers to the main functions that name them.
 #[test]
-fn no_source_declares_a_buffer() {
+fn no_source_declares_a_buffer_or_a_texture() {
     for (program, source) in sources() {
         let text = [source.prelude, source.source].concat();
-        assert!(!text.contains("[[buffer("), "{} declares a buffer", program.name);
+        for argument in ["[[buffer(", "[[texture(", "[[sampler("] {
+            assert!(!text.contains(argument), "{} declares {argument}", program.name);
+        }
     }
 }
 
