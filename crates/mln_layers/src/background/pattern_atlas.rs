@@ -58,13 +58,11 @@ impl PatternAtlas {
     }
 
     /// Drops the patterns whose images `images` no longer has, or has
-    /// replaced with one of another size or SDF flag.
+    /// replaced since they were packed.
     pub(crate) fn remove_stale(&mut self, images: &ImageStore) {
         let PatternAtlas { allocator, patterns, atlas_image, .. } = self;
         patterns.retain(|id, pattern| {
-            let current = images.image(id).is_some_and(|image| {
-                image.image.size == pattern.image.image.size && image.sdf == pattern.image.sdf
-            });
+            let current = images.image(id).is_some_and(|image| Arc::ptr_eq(image, &pattern.image));
             if !current {
                 let b = pattern.position.padded_rect;
                 let _ = PremultipliedImage::clear(

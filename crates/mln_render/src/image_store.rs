@@ -28,7 +28,10 @@ pub(crate) struct ResolvedImages {
     pub(crate) patterns: ImageMap,
 }
 
-/// The style's images, as a frame's layers read them.
+/// The style's images, as a frame's layers read them. An image the style
+/// adds or replaces is a new `Arc`, so a layer that keeps what it made of
+/// an image sees that the image changed or went by comparing the `Arc` it
+/// made it from with the store's ([`Arc::ptr_eq`]).
 pub struct ImageStore {
     /// Whether the sprite loaded: before, a missing image may still come
     /// with it.
