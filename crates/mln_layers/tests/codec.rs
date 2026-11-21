@@ -78,18 +78,23 @@ fn data() -> TileData {
 }
 
 /// Every layer of [`LAYERS`] lays out, and each of this crate's layer types
-/// that takes geometry tiles has a layer there.
+/// that takes geometry tiles, but `symbol`, whose layouts need glyphs
+/// (tests/symbols.rs), has a layer there. A layout of some layer types lays
+/// out only their layers.
 #[test]
 fn every_geometry_layer_type_lays_out() {
     let (style, data) = (style(), data());
-    for type_ in ["background", "circle", "fill", "fill-extrusion", "heatmap", "line"] {
-        let layer_type = builtin_registry().style().layer_type(type_).unwrap();
-        let takes_geometry_tiles = layer_type.info().source == SourceKind::Geometry;
+    for layer_type in builtin_registry().style().layer_types() {
+        let type_ = layer_type.info().name;
+        let needs_layer = layer_type.info().source == SourceKind::Geometry && type_ != "symbol";
         let has_layer = style.get_layers().any(|layer| layer.info().name == type_);
-        assert_eq!(takes_geometry_tiles, has_layer, "{type_} layers need a layer in LAYERS");
+        assert_eq!(needs_layer, has_layer, "{type_} layers need a layer in LAYERS");
     }
     let layout = TileLayout::new(&builtin_registry(), &style, "s", |_| true, (0, 0, 0), &data, |_| None).unwrap();
-    assert_eq!(layout.run(data).unwrap().buckets(), style.get_layers().len());
+    assert_eq!(layout.run(data.clone()).unwrap().buckets(), style.get_layers().len());
+    let fills = TileLayout::new(&builtin_registry(), &style, "s", |type_| type_ == "fill", (0, 0, 0), &data, |_| None);
+    let fill_layers = style.get_layers().filter(|layer| layer.info().name == "fill").count();
+    assert_eq!(fills.unwrap().run(data).unwrap().buckets(), fill_layers);
 }
 
 /// The buckets of a job behind the codec, the second time too, when the

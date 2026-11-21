@@ -20,6 +20,16 @@ use mln_util::size::Size;
 /// A style of a layer of labels, one of labels and icons whose text color
 /// a format section overrides, and the icon `marker`, over source `s`.
 fn style() -> Style {
+    let mut style = style_without_images();
+    let mut pixels = PremultipliedImage::new(Size::new(4, 4));
+    pixels.data.fill(255);
+    let marker = ImageImpl::new("marker".to_owned(), pixels, 1.0, false, Vec::new(), Vec::new(), None, None, None);
+    style.apply(Edit::AddImage(Arc::new(marker.unwrap()))).unwrap();
+    style
+}
+
+/// The layers of [`style`] without the icon, which they draw none of.
+fn style_without_images() -> Style {
     let json = r#"{"version": 8, "glyphs": "local://glyphs/{fontstack}/{range}.pbf",
         "sources": {"s": {"type": "vector", "tiles": ["local://{z}-{x}-{y}.mvt"]}},
         "layers": [
@@ -30,12 +40,7 @@ fn style() -> Style {
                 "icon-image": "marker", "text-allow-overlap": true, "icon-allow-overlap": true},
              "paint": {"text-color": "blue"}}
         ]}"#;
-    let mut style = Style::from_json(builtin_registry().style(), json, None).unwrap();
-    let mut pixels = PremultipliedImage::new(Size::new(4, 4));
-    pixels.data.fill(255);
-    let marker = ImageImpl::new("marker".to_owned(), pixels, 1.0, false, Vec::new(), Vec::new(), None, None, None);
-    style.apply(Edit::AddImage(Arc::new(marker.unwrap()))).unwrap();
-    style
+    Style::from_json(builtin_registry().style(), json, None).unwrap()
 }
 
 fn feature(id: u64, geometry: Geometry<i16>) -> Feature<i16, Arc<PropertyMap>> {
@@ -73,7 +78,8 @@ fn lays_out_with_the_glyphs_it_loads() {
 
 /// The buckets of a job behind the codec, the second time too, when the
 /// worker has the style's values, are those of the job run directly: with
-/// the glyphs and the icon they were laid out with, and the text color that
+/// the text and the icon of the glyphs and the image they were laid out
+/// with, and the text color that
 /// the format section overrides, which the layer's values and the buckets'
 /// binders carry.
 #[test]
@@ -83,6 +89,29 @@ fn layouts_cross_with_their_glyphs_and_images() {
         TileLayout::new(&builtin_registry(), &style, "s", |_| true, (0, 0, 0), &data, |_| Some(glyphs.clone()))
             .unwrap();
     let direct = layout.run(data.clone()).unwrap();
+    let without_glyphs =
+        TileLayout::new(&builtin_registry(), &style, "s", |_| true, (0, 0, 0), &data, |_| None).unwrap();
+    assert_ne!(
+        without_glyphs.run(data.clone()).unwrap().encoded().unwrap(),
+        direct.encoded().unwrap(),
+        "the layout draws the text of the glyphs it loads",
+    );
+    let without_images = style_without_images();
+    let without_icons = TileLayout::new(
+        &builtin_registry(),
+        &without_images,
+        "s",
+        |_| true,
+        (0, 0, 0),
+        &data,
+        |_| Some(glyphs.clone()),
+    )
+    .unwrap();
+    assert_ne!(
+        without_icons.run(data.clone()).unwrap().encoded().unwrap(),
+        direct.encoded().unwrap(),
+        "the layout draws the icon of the style's image",
+    );
     let mut codec = Codec::new(builtin_registry());
     for _ in 0..2 {
         let reply = codec.send(&layout, data.clone()).unwrap().run();
