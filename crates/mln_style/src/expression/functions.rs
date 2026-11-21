@@ -15,10 +15,12 @@
 //!
 //! Parsing tries a name's overloads in the order they were added, and takes
 //! the one whose parameters take as many arguments as the expression has.
-//! It parses each argument as the overload's parameter type: an argument
-//! whose type is known as it parses must have that type, and one known
-//! only as a value, such as `["get", "x"]`, gets a check that fails its
-//! evaluation when the value has another type. So an evaluator's arguments
+//! It parses each argument as the overload's parameter type, as the style
+//! specification types arguments: an argument whose type is known as it
+//! parses must fit that type, or be one the type converts from, such as a
+//! string for a color, which is converted; and one known only as a value,
+//! such as `["get", "x"]`, gets a check or conversion that fails its
+//! evaluation when the value doesn't fit. So an evaluator's arguments
 //! evaluate to its parameter types or fail. The evaluator returns a value
 //! of the overload's result type, which the engine trusts and doesn't
 //! check. The dependencies decide when a

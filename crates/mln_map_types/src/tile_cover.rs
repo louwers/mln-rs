@@ -171,10 +171,10 @@ pub struct TileCover {
 }
 
 impl TileCover {
-    /// The cover at zoom `z` of `bounds_`, with its latitudes clamped to the
-    /// Mercator range, so that bounds wholly north or south of it cover the
-    /// row of tiles at that edge across the bounds' longitudes. Empty bounds
-    /// cover the world.
+    /// The cover at zoom `z` of `bounds_`, after clamping its latitudes to
+    /// the Mercator range and projecting it, so bounds wholly north or south
+    /// of that range can cover no tiles. Bounds that are empty after the
+    /// clamp cover the world.
     #[must_use]
     pub fn new_from_bounds(bounds_: &LatLngBounds, z: u8) -> TileCover {
         let mut bounds = LatLngBounds::hull(
