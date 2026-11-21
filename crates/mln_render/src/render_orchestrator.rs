@@ -33,11 +33,9 @@ use crate::gfx::context::Context;
 use crate::globe_depth_pass::GlobeDepthPass;
 use crate::image_store::ImageStore;
 use crate::layer_drawing::{ChangedBuckets, DrawGroup, DrawOrder, SingleDraw};
-use crate::line_atlas::LineAtlas;
 use crate::paint_parameters::PaintParameters;
-use crate::pattern_atlas::PatternAtlas;
 use crate::placement::{CollisionGroups, ErasedFrame, ErasedPlacement, PlacementQuery, Prepared, Schedule};
-use crate::render_layer::{Atlases, EndedHosts, FrameSourceTiles, LayerUpdate, RenderLayer};
+use crate::render_layer::{EndedHosts, FrameSourceTiles, LayerUpdate, RenderLayer};
 use crate::render_source::{self, RenderSource, RenderTileParameters, TileOrder};
 use crate::render_tile::{FoundTile, RenderTile, TileContent};
 use crate::renderer_event::RendererEvent;
@@ -133,7 +131,6 @@ pub(crate) struct RenderOrchestrator {
     /// The sources' tiles, with the glyph and image stores their layouts
     /// resolve through and the atlas they pack them into.
     tile_store: TileStore,
-    atlases: Atlases,
     /// The tiles the frame's layers draw, as their updates found them, each
     /// layer's in a range of its own.
     found_tiles: Vec<FoundTile>,
@@ -222,7 +219,6 @@ impl RenderOrchestrator {
             tile_store,
             schedule: Schedule::default(),
             placing_layers: Vec::new(),
-            atlases: Atlases::default(),
             found_tiles: Vec::new(),
             style: None,
             sources_by_id: Vec::new(),
@@ -267,7 +263,7 @@ impl RenderOrchestrator {
     /// their feature state, chooses the layers the frame draws and gives
     /// them their tiles, places what they place and brings their buckets
     /// to the placement. The encode then changes none of this: it changes
-    /// only what draws it on the GPU, uploading the atlases and the tiles'
+    /// only what draws it on the GPU, uploading the tiles' atlas and
     /// buckets and making the layers' draws.
     pub(crate) fn update(&mut self, update_parameters: &Arc<UpdateParameters>) -> Option<Frame> {
         let mut frame =
@@ -454,7 +450,6 @@ impl RenderOrchestrator {
                 source,
                 contents: source_contents,
                 images: self.tile_store.images(),
-                atlases: &mut self.atlases,
                 found: &mut self.found_tiles,
             });
             if render_layer.places() {
@@ -590,7 +585,6 @@ impl RenderOrchestrator {
         let mut relayout_images: HashSet<String> = HashSet::default();
         for id in image_diff.removed.keys() {
             images.remove_image(id);
-            self.atlases.pattern.remove_pattern(id);
             relayout_images.insert(id.clone());
         }
         for image in image_diff.added.values() {
@@ -600,7 +594,6 @@ impl RenderOrchestrator {
         let mut patched = Vec::new();
         for image in image_diff.changed.values() {
             if images.update_image(Arc::clone(image)) {
-                self.atlases.pattern.remove_pattern(&image.id);
                 relayout_images.insert(image.id.clone());
             }
             patched.push(Arc::clone(image));
@@ -1062,12 +1055,6 @@ impl RenderOrchestrator {
         if let Some(pass) = &mut self.placement {
             pass.forget_buckets();
         }
-        if !self.atlases.line.is_empty() {
-            self.atlases.line = LineAtlas::new();
-        }
-        if !self.atlases.pattern.is_empty() {
-            self.atlases.pattern = PatternAtlas::new();
-        }
 
         self.tile_store.images_mut().clear();
         self.tile_store.glyphs().evict(&VecSet::new());
@@ -1085,12 +1072,10 @@ impl RenderOrchestrator {
         self.globe_depth_pass = GlobeDepthPass::default();
     }
 
-    /// Makes the GPU textures of the tiles' atlas and of the layers'
-    /// atlases, and uploads what they queued.
-    pub(crate) fn upload_atlases(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
+    /// Makes the GPU textures of the tiles' atlas, and uploads what it
+    /// queued.
+    pub(crate) fn upload_tile_atlas(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
         self.tile_store.atlas().upload(gpu, context);
-        self.atlases.line.upload(gpu, context);
-        self.atlases.pattern.upload(gpu, context);
     }
 
     /// Takes in what arrived for the tiles, and starts the jobs that it
@@ -1253,7 +1238,7 @@ impl RenderOrchestrator {
             let source = source.map(|(id, source)| (id.as_str(), &**source));
             let source_contents = contents.of(source, &self.tile_store);
             let tiles = source.map(|(_, source)| FrameSourceTiles::new(source, source_contents));
-            render_layer.update_draws(gpu, paint_parameters, &self.atlases, tiles, &self.found_tiles);
+            render_layer.update_draws(gpu, paint_parameters, tiles, &self.found_tiles);
             needs_globe_depth = needs_globe_depth || render_layer.is_3d();
         }
         let state = paint_parameters.frame.view;

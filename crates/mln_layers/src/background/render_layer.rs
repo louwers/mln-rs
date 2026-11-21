@@ -4,8 +4,6 @@ use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
 use mln_gfx::shaders::source::ShaderSources;
-use mln_gfx::texture2d::SamplerState;
-use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
 use mln_map_types::tile_cover::{TileCoverParameters, tile_cover};
 use mln_render::draw::{
@@ -24,6 +22,7 @@ use mln_util::range::Range;
 use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
+use super::pattern_atlas::PatternAtlas;
 use super::programs::{
     ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_IMAGE_TEXTURE, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE,
     ID_BACKGROUND_PROPS_UBO,
@@ -33,15 +32,6 @@ use super::ubo::{
     BackgroundPropsUBO,
 };
 use super::{Background, programs};
-
-/// Adds the image `id` to the pattern atlas if it isn't there yet.
-fn add_pattern_if_needed(id: &str, cx: &mut UpdateContext<'_, '_, Background>) {
-    if cx.atlases.pattern.pattern(id).is_none()
-        && let Some(image) = cx.images.image(id)
-    {
-        cx.atlases.pattern.add_pattern(image);
-    }
-}
 
 /// What a background layer keeps besides its drawing.
 #[derive(Default)]
@@ -55,6 +45,8 @@ pub struct BackgroundState {
     /// The tiles that cover the view, which the frame's update picks for
     /// its encode.
     tile_cover: Vec<OverscaledTileID>,
+    /// The patterns of `background-pattern`.
+    patterns: PatternAtlas,
 }
 
 impl BackgroundState {
@@ -154,8 +146,8 @@ impl LayerType for Background {
         gpu: &mut dyn Gpu,
         cx: &mut DrawContext<'_, '_, Background>,
     ) {
-        let (context, frame, atlases, variant) = (&mut *cx.context, &cx.frame, cx.atlases, cx.projection_variant);
-        let BackgroundState { draw_list, draws_built_for, tile_cover } = state;
+        let (context, frame, variant) = (&mut *cx.context, &cx.frame, cx.projection_variant);
+        let BackgroundState { draw_list, draws_built_for, tile_cover, patterns } = state;
         let layer = &*cx.layer.evaluated;
         let evaluated = &layer.paint;
         let has_pattern = !evaluated.background_pattern.faded().to.empty();
@@ -169,11 +161,10 @@ impl LayerType for Background {
         let program = if has_pattern { &programs::BACKGROUND_PATTERN } else { &programs::BACKGROUND };
         let shader = context.shader_key(program, Uniforms::default(), variant);
 
-        let pattern_atlas = &atlases.pattern;
         let faded = evaluated.background_pattern.faded();
         let pattern_positions = if has_pattern {
-            let (Some(from), Some(to)) = (pattern_atlas.pattern(faded.from.id()), pattern_atlas.pattern(faded.to.id()))
-            else {
+            patterns.upload(gpu, context);
+            let (Some(from), Some(to)) = (patterns.pattern(faded.from.id()), patterns.pattern(faded.to.id())) else {
                 // The pattern isn't valid: the layer draws nothing.
                 return;
             };
@@ -181,17 +172,9 @@ impl LayerType for Background {
         } else {
             None
         };
-        let pattern_texture = pattern_atlas.texture().filter(|_| has_pattern);
+        let pattern_texture = patterns.texture().filter(|_| has_pattern);
         let atlas_size =
             pattern_texture.and_then(|texture| context.texture(texture)).map_or(Size::new(0, 0), Texture2D::size);
-        if let Some(mut texture) = pattern_texture.and_then(|texture| context.texture_mut(texture)) {
-            texture.set_sampler(SamplerState {
-                filter: TextureFilterType::Linear,
-                wrap_u: TextureWrapType::Clamp,
-                wrap_v: TextureWrapType::Clamp,
-                ..Default::default()
-            });
-        }
 
         let color_mode = context.color_mode(if draw_passes == RenderPass::TRANSLUCENT {
             ColorMode::alpha_blended()
@@ -268,7 +251,8 @@ impl LayerType for Background {
     }
 
     /// Picks the tiles that cover the view, which the layer draws, having no
-    /// source, and adds its pattern to the pattern atlas.
+    /// source, and packs its patterns, packing again those whose images the
+    /// style replaced.
     fn update(
         state: &mut BackgroundState,
         drawing: &mut TileDraws<KeptDraw>,
@@ -293,11 +277,12 @@ impl LayerType for Background {
         );
         drawing.tiles_mut().set_tiles(state.tile_cover.iter().copied());
 
-        let evaluated = &cx.layer.evaluated.paint;
-        if !evaluated.background_pattern.faded().to.empty() {
+        let faded = cx.layer.evaluated.paint.background_pattern.faded();
+        if !faded.to.empty() {
             // The encode uploads the atlas image with the patterns.
-            add_pattern_if_needed(evaluated.background_pattern.faded().from.id(), cx);
-            add_pattern_if_needed(evaluated.background_pattern.faded().to.id(), cx);
+            state.patterns.remove_stale(cx.images);
+            state.patterns.add(faded.from.id(), cx.images);
+            state.patterns.add(faded.to.id(), cx.images);
         }
     }
 

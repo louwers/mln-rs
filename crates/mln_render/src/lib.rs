@@ -42,11 +42,9 @@ pub mod layer;
 mod layer_composite;
 mod layer_drawing;
 mod layout;
-mod line_atlas;
 mod paint_parameters;
 mod paint_property_binder;
 mod paint_property_statistics;
-mod pattern_atlas;
 #[doc(hidden)]
 pub mod placement;
 pub mod query;

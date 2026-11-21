@@ -27,9 +27,7 @@ use crate::geometry::feature_index::FeatureIndex;
 use crate::gfx::context::Context;
 use crate::layer::{DrawContext, EndedHost, HitTest, LayerType, LayerValues, UpdateContext};
 use crate::layer_drawing::{ChangedBuckets, DrawGroup, DrawOrder, LayerDrawing};
-use crate::line_atlas::LineAtlas;
 use crate::paint_parameters::PaintParameters;
-use crate::pattern_atlas::PatternAtlas;
 use crate::placement::PlacingLayer;
 use crate::render_pass::RenderPass;
 use crate::render_source::{RenderSource, TileOrder};
@@ -195,18 +193,6 @@ impl<'a> FrameSourceTiles<'a> {
     }
 }
 
-/// The atlases that the layers' draws share: the line atlas of the dash
-/// patterns of `line-dasharray`s that don't differ by feature, and the
-/// pattern atlas of `background-pattern`s. A frame's update adds what its
-/// layers draw, and its encode uploads them and binds their textures.
-#[derive(Default)]
-pub struct Atlases {
-    /// The dash patterns of `line-dasharray`.
-    pub line: LineAtlas,
-    /// The patterns of `background-pattern`.
-    pub pattern: PatternAtlas,
-}
-
 /// The hosts that left the renderer after they drew through its layers
 /// ([`LayerHost`](crate::layer::LayerHost)), until [`end_hosts`] tells
 /// them that it stopped.
@@ -241,7 +227,6 @@ pub(crate) struct LayerUpdate<'a> {
     /// What each of the source's render tiles holds, at its index.
     pub(crate) contents: &'a [Option<TileContent<'a>>],
     pub(crate) images: &'a crate::image_store::ImageStore,
-    pub(crate) atlases: &'a mut Atlases,
     /// The tiles of the frame's layers, as their updates find them, which
     /// the update adds the layer's to: those the encode draws.
     pub(crate) found: &'a mut Vec<FoundTile>,
@@ -297,8 +282,8 @@ impl<T: LayerType> Layer<T> {
     }
 
     /// Runs the type's [`LayerType::update`] with `tiles`, the tiles of the
-    /// tile store's `source`, as a frame's update does, but without images,
-    /// atlases or the source's max zoom: for the benchmarks, which make the
+    /// tile store's `source`, as a frame's update does, but without images
+    /// or the source's max zoom: for the benchmarks, which make the
     /// tiles without a frame.
     #[cfg(feature = "bench")]
     pub(crate) fn update_tiles(
@@ -313,7 +298,6 @@ impl<T: LayerType> Layer<T> {
             view: &update_parameters.view,
             update_parameters,
             images: &crate::image_store::ImageStore::default(),
-            atlases: &mut Atlases::default(),
             source_tiles: Some(source),
             source_max_zoom: None,
         };
@@ -334,20 +318,13 @@ impl<T: LayerType> Layer<T> {
     }
 
     /// Runs the type's [`LayerType::make_draws`] with `tiles`.
-    fn make_draws(
-        &mut self,
-        gpu: &mut dyn Gpu,
-        paint: &mut PaintParameters<'_>,
-        atlases: &Atlases,
-        tiles: &[FrameTile<'_, T>],
-    ) {
+    fn make_draws(&mut self, gpu: &mut dyn Gpu, paint: &mut PaintParameters<'_>, tiles: &[FrameTile<'_, T>]) {
         if self.begin_frame() {
             let mut cx = DrawContext {
                 tiles,
                 layer: &self.values,
                 passes: self.passes,
                 projection_variant: self.projection_variant,
-                atlases,
                 context: &mut *paint.context,
                 frame: paint.frame,
             };
@@ -420,7 +397,6 @@ pub(crate) trait RenderLayer: Any {
         &mut self,
         gpu: &mut dyn Gpu,
         paint: &mut PaintParameters<'_>,
-        atlases: &Atlases,
         source: Option<FrameSourceTiles<'_>>,
         found: &[FoundTile],
     );
@@ -583,7 +559,6 @@ impl<T: LayerType> RenderLayer for Layer<T> {
             view: update.view,
             update_parameters: update.update_parameters,
             images: update.images,
-            atlases: update.atlases,
             source_tiles: update.source.and_then(RenderSource::tiles),
             source_max_zoom: update.source.and_then(RenderSource::max_zoom),
         };
@@ -594,7 +569,6 @@ impl<T: LayerType> RenderLayer for Layer<T> {
         &mut self,
         gpu: &mut dyn Gpu,
         paint: &mut PaintParameters<'_>,
-        atlases: &Atlases,
         source: Option<FrameSourceTiles<'_>>,
         found: &[FoundTile],
     ) {
@@ -609,14 +583,14 @@ impl<T: LayerType> RenderLayer for Layer<T> {
             if self.drawing.tiles().is_some_and(|tiles| tiles.is_empty()) {
                 self.remove_all_draws();
             } else {
-                self.make_draws(gpu, paint, atlases, &[]);
+                self.make_draws(gpu, paint, &[]);
             }
             return;
         }
         match source {
             Some(source) if let Some(found) = found.get(self.found.clone()).filter(|found| !found.is_empty()) => {
                 let tiles = source.at::<T>(found, &self.values.style.id);
-                self.make_draws(gpu, paint, atlases, &tiles);
+                self.make_draws(gpu, paint, &tiles);
             }
             // A layer of an image source takes its place in the layers'
             // order and depth from its first frame, whether or not the image
