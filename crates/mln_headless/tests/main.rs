@@ -8,6 +8,8 @@ mod custom_layer_test;
 mod debug_options_test;
 // Empty and absent tiles of vector and raster sources through Map -> HeadlessFrontend.
 mod empty_tile_test;
+// A viewport flipped upside down draws the map upside down.
+mod flipped_viewport_test;
 // gtests-core: test/api/{annotations,api_misuse,custom_geometry_source,
 // custom_layer}.test.cpp and test/api/recycle_map.cpp.
 mod gtest_api;
