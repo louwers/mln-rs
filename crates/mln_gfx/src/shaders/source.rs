@@ -6,7 +6,7 @@
 //! and `mln_d3d12`. Each backend composes a program's code with a prelude
 //! of its own, of the helpers the shaders share, and with the declarations
 //! of the blocks of the engine's buffers and the program's, which it writes
-//! from their [`Block`](crate::shaders::block::Block)s: a source declares
+//! from their [`Block`]s: a source declares
 //! no block itself.
 //!
 //! # Properties
