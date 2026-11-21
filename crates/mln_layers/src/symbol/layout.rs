@@ -1009,7 +1009,7 @@ impl SymbolLayout {
             }
             SymbolPlacementType::Point => match feature.get_type() {
                 FeatureType::Polygon => {
-                    for polygon in mln_tile::geometry_tile_data::classify_rings(&feature.geometry) {
+                    for polygon in mln_tile_id::geometry_tile_data::classify_rings(&feature.geometry) {
                         let rings: polylabel::Polygon<f64> = polygon
                             .iter()
                             .map(|ring| ring.iter().map(|p| Point::new(f64::from(p.x), f64::from(p.y))).collect())

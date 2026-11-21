@@ -37,7 +37,6 @@ mln_layers = { package = "mln-rs-layers", path = "../mln_layers" }
 # The built-in registrations, for tests/'s styles of every type.
 mln_rs = { package = "mln-rs", path = "../..", default-features = false }
 mln_storage = { workspace = true, features = ["stub-file-source"] }
-mln_tile = { package = "mln-rs-tile", path = "../mln_tile" }
 mln_tile_id.workspace = true
 parking_lot.workspace = true
 

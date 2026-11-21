@@ -9,9 +9,8 @@ use feature::Value as MbglValue;
 use geojson::GeoJson;
 use geometry::Point;
 use mln_conversion::{Convertible, Error};
-use mln_tile::geometry_tile_data::convert_geometry;
 use mln_tile_id::CanonicalTileID;
-use mln_tile_id::geometry_tile_data::GeometryTileFeature;
+use mln_tile_id::geometry_tile_data::{GeometryTileFeature, convert_geometry};
 use mln_util::geometry::{FeatureType, to_feature_type};
 use mln_util::logging::{Event, Log};
 
@@ -1095,8 +1094,7 @@ mod tests {
     use std::borrow::Cow;
 
     use feature::{Identifier, Value as MbglValue};
-    use mln_tile::geometry_tile_data::convert_geometry_to_tile;
-    use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate};
+    use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate, convert_geometry_to_tile};
 
     use super::*;
     use crate::Functions;

@@ -2702,7 +2702,6 @@ dependencies = [
  "mln-rs-math",
  "mln-rs-style-types",
  "mln-rs-text",
- "mln-rs-tile",
  "mln-rs-tile-id",
  "mln-rs-util",
  "mln-rs-vec-map",
@@ -3220,7 +3219,6 @@ dependencies = [
  "mln-rs-storage",
  "mln-rs-style-types",
  "mln-rs-text",
- "mln-rs-tile",
  "mln-rs-tile-id",
  "mln-rs-util",
  "mln-rs-vec-map",
@@ -3326,11 +3324,13 @@ dependencies = [
 name = "mln-rs-tile-id"
 version = "0.0.13"
 dependencies = [
+ "geo-types",
  "mln-rs-feature",
  "mln-rs-geometry",
  "mln-rs-math",
  "mln-rs-util",
  "mln-rs-wire",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

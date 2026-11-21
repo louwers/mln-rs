@@ -271,7 +271,7 @@ fn image_expression() {
 
 /// Converts `geometry` from lon/lat to tile coordinates.
 fn convert_geometry(geometry: &Geometry<f64>, canonical: &CanonicalTileID) -> GeometryCollection {
-    mln_tile::geometry_tile_data::convert_geometry_to_tile(geometry, canonical)
+    mln_tile_id::geometry_tile_data::convert_geometry_to_tile(geometry, canonical)
 }
 
 fn pt(x: f64, y: f64) -> Point<f64> {
