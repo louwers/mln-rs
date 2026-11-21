@@ -325,6 +325,11 @@ impl View {
 
     /// The center's altitude in pixels at the zoom.
     fn center_altitude_pixels(&self) -> f64 {
+        // A center at sea level, as on most maps, spares the conversion's
+        // transcendental functions on every new view.
+        if self.params.center_altitude == 0.0 {
+            return self.params.center_altitude;
+        }
         self.params.center_altitude / self.meters_per_pixel()
     }
 
