@@ -5,7 +5,7 @@ use mln_map_types::{
     GesturePhase, TransitionOutcome,
 };
 
-use super::{BEARING, CameraCommandId, PITCH, Transform, TransformEvent, ZOOM};
+use super::{ALTITUDE, BEARING, CameraCommandId, PITCH, Transform, TransformEvent, ZOOM};
 use crate::map_event::{CameraChange, CameraChangeMode, CameraChangeSource};
 
 /// The gesture that camera deltas and updates with a phase make.
@@ -163,9 +163,11 @@ impl Transform {
     /// gesture ended starts a new one, which an earlier gesture's momentum
     /// no longer ends.
     ///
-    /// When the fingers go down, the gesture owns the altitude: the running
-    /// commands stop easing theirs, and the gesture holds the altitude the
-    /// camera has.
+    /// When the fingers go down over a center the terrain clamps, the
+    /// gesture owns the altitude: it takes `ALTITUDE` from every running
+    /// command, those that ease it onto the ground and those that ease it
+    /// to an altitude they were given, and holds the altitude the camera
+    /// has.
     fn gesture_phase_before(&mut self, phase: GesturePhase) {
         if phase != GesturePhase::None && (phase == GesturePhase::Begin || !self.gesture.active) {
             // A gesture that begins during the last one's momentum keeps its
@@ -179,8 +181,10 @@ impl Transform {
         if matches!(phase, GesturePhase::Begin | GesturePhase::Update) && !self.gesture.active {
             self.gesture.active = true;
             self.set_gesture_in_progress(true);
-            for transition in &mut self.transitions {
-                transition.stop_easing_altitude();
+            if self.clamped() {
+                let finished = self.release_fields(ALTITUDE);
+                self.update_movement_flags();
+                self.finish_transitions(finished);
             }
         }
         if phase == GesturePhase::Begin {

@@ -667,3 +667,43 @@ fn a_gesture_end_that_screen_bounds_refuse_stands_the_center_on_the_ground() {
     assert_on_ground(view, &*lower, "the gesture's end");
     assert_within_screen_bounds(&transform, "the gesture's end");
 }
+
+/// Fingers that go down while a command eases only the altitude take the
+/// altitude from it, as from any command: the gesture holds the altitude
+/// the camera has, and when the fingers lift, nothing moves the camera on
+/// and the motion ends on the ground with the eye where it was.
+#[test]
+fn fingers_down_take_the_altitude_from_an_explicit_altitude_ease() {
+    let run_loop = Queue::<()>::new();
+    let ground = flat(Some(1000.0), 1000.0);
+    let (mut map, clock) = map_over(Some(&ground), &run_loop);
+    assert_eq!(1000.0, map.transform_state().view().center_altitude());
+    run(
+        &mut map,
+        CameraUpdateMode::Ease,
+        CameraOptions { center_altitude: Some(3000.0), ..Default::default() },
+        eased(),
+    );
+    let mut held = None;
+    frames(&mut map, clock, Duration::from_millis(608), |map, elapsed| {
+        let altitude = map.transform_state().view().center_altitude();
+        if elapsed == Duration::from_millis(304) {
+            map.apply_camera_delta(&step(GesturePhase::Update, None, Some(10.0))).unwrap();
+            held = Some(map.transform_state().view().center_altitude());
+        } else if let Some(held) = held {
+            assert_eq!(held, altitude, "the fingers are down at {elapsed:?}");
+        }
+    });
+    let held = held.unwrap();
+    assert!(held > 1100.0, "the command eased the altitude to {held} m");
+    assert!(!map.snapshot().transition_in_progress, "the gesture took the altitude");
+    let eye = map.transform_state().view().eye_position();
+    map.apply_camera_delta(&step(GesturePhase::End, None, None)).unwrap();
+    map.trigger_repaint();
+    let view = map.transform_state().view();
+    let moved = view.eye_position() - eye;
+    let moved = DVec3::new(moved.x * meters(), moved.y * meters(), moved.z).length();
+    assert!(moved < 1e-3, "the eye moved {moved} m");
+    assert_on_ground(view, &*ground, "the gesture's end");
+    assert_at_rest(&mut map, "the gesture's end");
+}
