@@ -644,3 +644,26 @@ fn a_jump_that_screen_bounds_move_ends_within_them() {
     assert_within_screen_bounds(&transform, "the jump");
     assert!(!transform.follow_terrain(), "at rest");
 }
+
+/// A gesture that ends over ground lower than the altitude it held, at the
+/// bounds' north edge under [`ConstrainMode::Screen`], where moving the
+/// center along the view onto the ground would take the view past the
+/// bounds, ends with its center where it was, on the ground there.
+#[test]
+fn a_gesture_end_that_screen_bounds_refuse_stands_the_center_on_the_ground() {
+    let ground = Incline::steady(0.0, 0.25);
+    let mut transform = transform_under_screen_bounds(&ground);
+    transform.jump_to(&CameraOptions { zoom: Some(12.0), ..Default::default() });
+    let center = transform.view().center(WrapMode::Unwrapped);
+    transform.apply_camera_delta(&step(GesturePhase::Begin, None, None)).unwrap();
+    let lower: Arc<dyn Elevation> = Arc::new(Incline { height: 500.0, east: 0.0, north: 0.25, rough: 0.0 });
+    transform.set_terrain(Some(TerrainGround { elevation: Some(Arc::clone(&lower)), clamped: true }));
+    transform.follow_terrain();
+    assert!(transform.view().center_altitude() > lower.at(center).unwrap() + 400.0, "the gesture holds");
+    transform.apply_camera_delta(&step(GesturePhase::End, None, None)).unwrap();
+    let view = transform.view();
+    assert_eq!(center, view.center(WrapMode::Unwrapped));
+    assert_eq!(12.0, view.zoom());
+    assert_on_ground(view, &*lower, "the gesture's end");
+    assert_within_screen_bounds(&transform, "the gesture's end");
+}

@@ -310,8 +310,9 @@ impl Transform {
     /// onto the ground its line of sight meets, with the eye where it is
     /// ([`TransformState::recenter_on`], GL JS's `recenterOnTerrain`), and
     /// then stands on the ground as at rest; where the line meets no drawn
-    /// ground, or the limits refuse the move, the center stays and the
-    /// ground under it takes it up or down.
+    /// ground, or the bounds or the zoom limits would move that camera
+    /// (`recenter_on` refuses it), the center stays and the ground under it
+    /// takes it up or down.
     ///
     /// The caller reports the camera's change. Returns whether the view
     /// changed.
@@ -336,18 +337,26 @@ impl Transform {
         let center = flip_y(self.view(), &self.view().padding().center_in(size));
         // Each pass leaves the center off the ground by the change of the
         // scale of heights between the latitudes it moved across, which the
-        // next pass, from the center's new latitude, all but removes.
+        // next pass, from the center's new latitude, all but removes. A
+        // pass that meets no ground or that the limits refuse leaves the
+        // center where the motion did.
+        let mut recentred = Some(self.state.clone());
         for _ in 0..RECENTER_PASSES {
-            let Some(hit) = self.view().ground_under(&center, &*elevation) else { break };
-            if !self.state.recenter_on(&hit) {
+            let Some(state) = recentred.as_mut() else { break };
+            let hit = state.view().ground_under(&center, &*elevation);
+            if !hit.is_some_and(|hit| state.recenter_on(&hit)) {
+                recentred = None;
                 break;
             }
-            let view = self.view();
+            let view = state.view();
             let at = world_point(&view.center(WrapMode::Unwrapped));
             let off = elevation.surface_at(at).map_or(0.0, |surface| view.center_altitude() - surface);
             if off.abs() <= ON_GROUND_TOLERANCE {
                 break;
             }
+        }
+        if let Some(state) = recentred {
+            self.state = state;
         }
         self.follow_terrain();
         *self.view() != before

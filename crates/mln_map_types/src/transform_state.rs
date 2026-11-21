@@ -781,7 +781,9 @@ impl TransformState {
     ///
     /// Returns whether it moved the center there. It leaves the state as it
     /// is on the globe, while the view shows nothing, where `hit` isn't in
-    /// front of the eye, and where the limits refuse the zoom or the center.
+    /// front of the eye, and where the limits would move the zoom or the
+    /// center: the zoom range, the bounds, and in [`ConstrainMode::Screen`]
+    /// the bounds the screen must stay within.
     pub fn recenter_on(&mut self, hit: &GroundHit) -> bool {
         let view = &self.view;
         if view.is_globe() || !view.is_valid() {
@@ -809,11 +811,16 @@ impl TransformState {
         let mut moved = self.clone();
         moved.set_center_altitude(eye.z + forward.z * distance);
         moved.set_lat_lng_zoom(&center, zoom);
-        // The limits clamp what they refuse.
+        // The limits clamp what they refuse, and the screen's bounds move it.
         let landed = moved.view.center(WrapMode::Unwrapped);
+        let mut on_screen = CameraOptions { center: Some(landed), ..CameraOptions::default() };
+        let mut screen_zoom = moved.view.zoom();
+        moved.constrain_camera_and_zoom_to_bounds(&mut on_screen, &mut screen_zoom);
         let refused = (moved.view.zoom() - zoom).abs() > 1e-9
             || (landed.latitude() - center.latitude()).abs() > 1e-9
-            || (landed.longitude() - center.longitude()).abs() > 1e-9;
+            || (landed.longitude() - center.longitude()).abs() > 1e-9
+            || on_screen.center != Some(landed)
+            || screen_zoom != moved.view.zoom();
         if refused {
             return false;
         }
