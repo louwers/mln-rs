@@ -1,5 +1,7 @@
-//! Port-only: a compact binary encoding for the values that cross between
-//! wasm instances (`mln_render`'s `tile/worker_codec`).
+//! The worker codec: a compact binary encoding for the values that cross
+//! between the wasm instances of one build, such as the buckets that a
+//! browser's Web Workers lay out. Both ends of a crossing run the same
+//! code, so the encoding can change from one release to the next.
 //!
 //! A [`Wire`] type writes itself to a byte vector and reads itself from a
 //! [`Reader`] over a slice. Both are concrete, so each type compiles to one

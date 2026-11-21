@@ -68,7 +68,11 @@
 //! that doesn't, such as a browser's Web Worker with its own wasm instance,
 //! gets the layer's values and sends the bucket back through the worker
 //! codec, so the bucket and the style half's property sets implement
-//! `mln_wire::Wire`. A layer's
+//! [`mln_wire::Wire`]. `#[derive(Wire)]` writes the impl for a struct or an
+//! enum whose fields implement it; a crate that reaches `mln_wire` through
+//! the `mln_rs` facade names it with `#[wire(crate = mln_rs::mln_wire)]`.
+//! The codec only runs between instances of one build, so its encoding
+//! needn't stay the same from one release to the next. A layer's
 //! [`State`](LayerType::State) and [`Drawing`](LayerType::Drawing) stay on
 //! the renderer's thread.
 //!
@@ -135,8 +139,8 @@ pub trait LayerType: StyleLayerType {
     /// [`NoLayout`] for a type that doesn't lay out.
     type Layout: Layout<Self>;
 
-    /// The bucket the layout makes. [`NoBucket`] for a type that doesn't
-    /// lay out.
+    /// The bucket the layout makes, which crosses the worker codec
+    /// ([`Wire`]). [`NoBucket`] for a type that doesn't lay out.
     type Bucket: Bucket + Wire;
 
     /// What a frame's tile shows a layer of the type, which its draws draw:

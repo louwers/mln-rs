@@ -2492,6 +2492,7 @@ dependencies = [
  "mln-rs-vulkan",
  "mln-rs-web-host",
  "mln-rs-webgpu",
+ "mln-rs-wire",
 ]
 
 [[package]]

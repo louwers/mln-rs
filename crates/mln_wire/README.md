@@ -1,13 +1,15 @@
 # mln-rs-wire
 
-> **Warning: this is an unstable crate of
-> [mln-rs](https://crates.io/crates/mln-rs).** It is published because the other
-> mln-rs crates, and crates that add layer types, depend on it, and its API can
-> change in any release without notice. mln-rs doesn't re-export it.
+> **Warning: this is an internal crate of
+> [mln-rs](https://crates.io/crates/mln-rs).** It is published only because
+> mln-rs depends on it, and its API can change in any release without notice.
+> Depend on [`mln-rs`](https://crates.io/crates/mln-rs) instead: it re-exports
+> this crate as `mln_rs::mln_wire`.
 
-A compact binary encoding for the values that cross between the wasm instances
-of the browser build: a `Wire` trait over a byte writer and a slice reader, the
-`Context` that values get registries and side tables from, and
+The worker codec: a compact binary encoding for the values that cross between
+the wasm instances of the browser build, such as a layer type's buckets, which
+implement its `Wire` trait. It has the trait, over a byte writer and a slice
+reader, the `Context` that values get registries and side tables from, and
 `#[derive(Wire)]`.
 
 Part of [mln-rs](https://github.com/louwers/mln-rs), a Rust port of the
