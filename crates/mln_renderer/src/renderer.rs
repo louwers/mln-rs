@@ -267,11 +267,18 @@ impl Renderer {
     }
 
     /// Whether the terrain's surface made its shader, and whether it holds
-    /// draws, the grid or DEM textures.
+    /// draws or the grid.
     #[cfg(test)]
     pub(crate) fn terrain_surface_holds(&mut self) -> (bool, bool) {
         let draws = self.orchestrator.terrain().draws();
         (draws.has_shader(), draws.holds_draws())
+    }
+
+    /// Whether the renderer made the key of a terrain variant, which a
+    /// standing layer draws with over terrain.
+    #[cfg(test)]
+    pub(crate) fn made_terrain_variant(&self) -> bool {
+        self.encoder.context.made_key_for(mln_gfx::projection_variant::ProjectionVariant::Terrain)
     }
 
     /// The tiles of the terrain's drapes and the side their drapes draw at.

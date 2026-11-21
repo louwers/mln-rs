@@ -1217,8 +1217,7 @@ fn only_a_circle(map: &mut DrapedMap) {
 }
 
 /// Without a draped layer, a map over terrain has no drape and draws no
-/// surface: only its circle. The surface lets go of its grid and DEM
-/// textures.
+/// surface: only its circle. The surface lets go of its draws and grid.
 #[test]
 fn a_map_without_a_draped_layer_draws_no_surface() {
     let (mut map, _) = settled(Tiles::default());
@@ -1231,11 +1230,11 @@ fn a_map_without_a_draped_layer_draws_no_surface() {
     assert!(passes.is_empty(), "drapes drawn: {passes:?}");
     assert_eq!(4, map.drapes().len(), "terrain still covers the view");
     assert_eq!(1, map.draw_calls());
-    assert!(!map.renderer.terrain_surface_holds().1, "the surface holds draws, its grid or DEM textures");
+    assert!(!map.renderer.terrain_surface_holds().1, "the surface holds draws or its grid");
 }
 
 /// A map over terrain that never had a draped layer makes nothing for the
-/// surface it doesn't draw: no shader, grid or DEM texture.
+/// surface it doesn't draw: no shader or grid.
 #[test]
 fn a_map_that_never_drapes_makes_no_surface() {
     let mut map = DrapedMap::new(Tiles::default());
@@ -1713,4 +1712,73 @@ fn an_image_moved_onto_raised_ground_draws_there() {
     let center = SIDE / 2;
     let pixel = map.pixel(center, center);
     assert!(red(pixel), "the image at the view's center: {pixel:?}");
+}
+
+/// A red circle 8 px across at `location`.
+fn red_circle(location: LatLng) -> String {
+    format!(
+        r#"{{
+            "version": 8,
+            "sources": {{
+                "point": {{"type": "geojson", "data": {{"type": "Point", "coordinates": [{}, {}]}}}}
+            }},
+            "layers": [{{"id": "circle", "type": "circle", "source": "point", "paint": {{"circle-color": "red", "circle-radius": 4}}}}]
+        }}"#,
+        location.longitude(),
+        location.latitude()
+    )
+}
+
+impl DrapedMap {
+    /// The pixel where the last frame's camera sees `location` `height`
+    /// meters above sea level.
+    fn pixel_at(&mut self, location: &LatLng, height: f64) -> [u8; 4] {
+        let point = self.transform.view().lat_lng_to_screen_coordinate_at(location, height);
+        let (x, y) = (point.x.round() as u32, (f64::from(SIDE) - point.y).round() as u32);
+        assert!(x < SIDE && y < SIDE, "{location:?} at {height} m is off the screen at {x}, {y}");
+        self.pixel(x, y)
+    }
+}
+
+/// A circle stands on the ground: over ground 25 km high, it draws where the
+/// camera sees its center 25 km up, not at sea level. Once the terrain
+/// turns off, the next frame draws it at sea level, and once it turns back
+/// on, the next one on the ground again.
+#[test]
+fn toggling_terrain_moves_a_circle_in_the_next_frame() {
+    let mut map = raised(10.0, 0.0);
+    // About 50 px east of the view's center on the ground, and some 11 px
+    // at sea level, which is farther from the camera.
+    let location = LatLng::new(-10.0, 10.0086).unwrap();
+    add_layer(&mut map, &red_circle(location), None);
+    map.settle();
+    map.frame();
+    assert!(red(map.pixel_at(&location, 25_000.0)), "the circle on the ground");
+    assert!(!red(map.pixel_at(&location, 0.0)), "no circle at sea level");
+
+    let terrain = map.style.get_terrain().map(|terrain| (**terrain).clone());
+    map.edit(Edit::SetTerrain(None));
+    map.frame();
+    assert!(red(map.pixel_at(&location, 0.0)), "the circle at sea level");
+    assert!(!red(map.pixel_at(&location, 25_000.0)), "no circle on the ground that went");
+
+    map.edit(Edit::SetTerrain(terrain));
+    map.frame();
+    assert!(red(map.pixel_at(&location, 25_000.0)), "the circle on the ground again");
+    assert!(!red(map.pixel_at(&location, 0.0)), "no circle at sea level");
+}
+
+/// A map without terrain draws its circles flat, with no terrain variant
+/// and no ground: no DEM texture.
+#[test]
+fn a_map_without_terrain_makes_no_terrain_variant() {
+    let mut map = DrapedMap::new(Tiles::default());
+    map.edit(Edit::SetTerrain(None));
+    add_layer(&mut map, &red_circle(LatLng::new(-10.0, 10.0).unwrap()), None);
+    map.settle();
+    assert!(map.frame().0);
+    let center = SIDE / 2;
+    assert!(red(map.pixel(center, center)), "the circle");
+    assert!(!map.renderer.made_terrain_variant());
+    assert_eq!(0, map.renderer.rendering_stats().terrain.mem_dem_textures);
 }

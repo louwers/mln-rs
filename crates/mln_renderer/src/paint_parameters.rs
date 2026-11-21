@@ -1,4 +1,5 @@
 use std::any::Any;
+use std::rc::Rc;
 
 use glam::{DMat4, DVec4};
 use mln_gfx::cull_face_mode::CullFaceMode;
@@ -21,6 +22,7 @@ use crate::gfx::context::Context;
 use crate::layer_composite::LayerComposite;
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
+use crate::terrain::GroundBindings;
 
 /// A draw group drawing into the layer composite's texture, from
 /// [`PaintParameters::begin_composited`] to
@@ -218,6 +220,9 @@ pub(crate) struct PaintParameters<'a> {
     /// Whether the frame draws terrain, under which 2D layers draw without
     /// depth.
     pub(crate) terrain: bool,
+    /// What the standing layers' draws bind of the ground they stand on,
+    /// while the frame draws terrain; `None` in a drape.
+    pub(crate) ground: Option<Rc<GroundBindings>>,
     pub(crate) opaque_pass_cutoff: u32,
     pub(crate) symbol_fade_change: f32,
 
@@ -280,6 +285,7 @@ impl<'a> PaintParameters<'a> {
             current_layer: 0,
             depth_range_size: 1.0,
             terrain: frame.terrain,
+            ground: None,
             opaque_pass_cutoff: frame.opaque_pass_cutoff,
             symbol_fade_change: frame.symbol_fade_change,
             scissor_rect,
@@ -337,6 +343,7 @@ impl<'a> PaintParameters<'a> {
             current_layer: 0,
             depth_range_size: 1.0,
             terrain: false,
+            ground: None,
             opaque_pass_cutoff: 0,
             symbol_fade_change: self.symbol_fade_change,
             scissor_rect: ScissorRect { x: 0, y: 0, width: size.width, height: size.height },

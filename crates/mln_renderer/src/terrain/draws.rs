@@ -1,7 +1,8 @@
 //! The terrain's draws: one per terrain tile and stack of draped layers, of
 //! the shared grid, each with the tile's matrix and where it reads its DEM
-//! in an entry of its stack's storage buffer, raised by the DEM's texture
-//! and sampling the tile's drape of the stack.
+//! in an entry of its stack's storage buffer, raised by the DEM's texture,
+//! which the frame's ground made, and sampling the tile's drape of the
+//! stack.
 
 use std::mem::size_of;
 
@@ -21,11 +22,9 @@ use mln_gfx::{AttributeDataType, DepthMaskType, DrawMode};
 use mln_util::clip_depth::ClipDepthRange;
 use mln_util::logging::{Event, Log};
 
-use super::cover::dem_bucket;
-use super::dem_textures::DemTextures;
 use super::fog::terrain_fog;
 use super::mesh::{TerrainMesh, TerrainVertex};
-use super::{Drapes, Surface, TerrainCover};
+use super::{Drapes, GroundBindings, Surface, TerrainCover};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::frame_projection::zero_to_one_clip_z;
 use crate::gfx::context::Context;
@@ -37,7 +36,6 @@ use crate::layer_drawing::{DrawDepth, DrawList, FrameDraw, KeptDraw, LayerDraws,
 use crate::layers::cast_matrix;
 use crate::paint_parameters::PaintParameters;
 use crate::render_sky::EvaluatedSky;
-use crate::tile::source_tiles::SourceTiles;
 
 /// The grid, in the context's stores.
 struct SharedMesh {
@@ -73,37 +71,29 @@ pub(crate) struct TerrainDraws {
     stacks: Vec<StackDraws>,
     shader: Option<ShaderKey>,
     mesh: Option<SharedMesh>,
-    /// The textures of the DEM tiles the tiles read.
-    dem_textures: DemTextures,
     /// Whether the backend has no terrain shader, which draws nothing then.
     unsupported: bool,
 }
 
 impl TerrainDraws {
-    /// Makes the frame's draws of `cover`'s tiles, one for each of the
-    /// stacks of `drapes`, which read their DEM from the tiles of `dem`,
-    /// sample the tile's drape of their stack, draw as `surface` says and
-    /// fog as `sky` says, or drops the draws and what they share for `None`,
-    /// a frame that draws no surface.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the GPU and frame, and the cover, DEM, surface, sky and drapes the draws are made of"
-    )]
+    /// Makes the frame's draws of the tiles of `cover`, one for each of the
+    /// stacks of `drapes`, which read the DEM textures of `ground`, sample
+    /// the tile's drape of their stack, draw as `surface` says and fog as
+    /// `sky` says, or drops the draws and what they share for `None`, a
+    /// frame that draws no surface.
     pub(crate) fn update(
         &mut self,
         gpu: &mut dyn Gpu,
         parameters: &mut PaintParameters<'_>,
-        cover: Option<&TerrainCover>,
-        dem: Option<&SourceTiles>,
+        cover: Option<(&TerrainCover, &GroundBindings)>,
         surface: Surface,
         sky: Option<&EvaluatedSky>,
         drapes: &Drapes,
     ) {
         let shader = cover.and_then(|_| self.shader(gpu, parameters));
-        let (Some(cover), Some(shader)) = (cover, shader) else {
+        let (Some((cover, ground)), Some(shader)) = (cover, shader) else {
             self.stacks.clear();
             self.mesh = None;
-            self.dem_textures = DemTextures::default();
             return;
         };
 
@@ -136,16 +126,12 @@ impl TerrainDraws {
             stack.tiles.set_tiles(cover.tiles.iter().map(|tile| tile.id));
         }
         for (index, tile) in cover.tiles.iter().enumerate() {
-            let bound = tile.dem.and_then(|(id, coords)| Some((dem_bucket(dem?.tile(&id)?)?, coords)));
+            let bound = tile.dem.and_then(|(id, coords)| Some((ground.dem(&id)?, coords)));
             let (dem_texture, dem_coords) = match bound {
-                Some((bucket, coords)) => {
-                    let dim = bucket.dem_data().dim as f32;
-                    (
-                        self.dem_textures.texture(context, bucket),
-                        [coords.scale, coords.offset[0], coords.offset[1], dim],
-                    )
+                Some(((texture, dim), coords)) => {
+                    (texture, [coords.scale, coords.offset[0], coords.offset[1], dim as f32])
                 }
-                None => (self.dem_textures.flat(context), [0.0; 4]),
+                None => (ground.flat(), [0.0; 4]),
             };
             let mut matrix = *proj_matrix * view.tile_matrix(&tile.id.to_unwrapped());
             if remap_clip_z {
@@ -161,14 +147,14 @@ impl TerrainDraws {
                 // the stacks above test, so it draws transparent there.
                 let drape = match drapes.texture(stack, index, &tile.id) {
                     Some(drape) => drape.clone(),
-                    None if stack == 0 => self.dem_textures.flat(context),
+                    None if stack == 0 => ground.flat().clone(),
                     None => {
                         *entry.value = None;
                         continue;
                     }
                 };
                 let draw = entry.value.get_or_insert_with(|| KeptDraw::new(mesh_objects(&shader, mesh)));
-                draw.objects.set_texture(ID_TERRAIN_DEM_TEXTURE, Some(&dem_texture));
+                draw.objects.set_texture(ID_TERRAIN_DEM_TEXTURE, Some(dem_texture));
                 draw.objects.set_texture(ID_TERRAIN_DRAPE_TEXTURE, Some(&drape));
                 let frame_draw = FrameDraw {
                     priority: index as i64,
@@ -178,7 +164,6 @@ impl TerrainDraws {
                 draws.draw_list.push(frame_draw, drawable);
             }
         }
-        self.dem_textures.finish_frame();
         let fog = terrain_fog(sky, view);
         for StackDraws { tiles, frame, draw_list } in &mut self.stacks {
             finish_tiles(draw_list, frame, tiles, gpu, context, |writer| {
@@ -223,10 +208,10 @@ impl TerrainDraws {
         self.shader.is_some()
     }
 
-    /// Whether it holds draws, the grid or DEM textures.
+    /// Whether it holds draws or the grid.
     #[cfg(test)]
     pub(crate) fn holds_draws(&self) -> bool {
-        !self.stacks.is_empty() || self.mesh.is_some() || !self.dem_textures.is_empty()
+        !self.stacks.is_empty() || self.mesh.is_some()
     }
 
     /// Uploads the GPU objects of the frame's draws.
@@ -238,11 +223,6 @@ impl TerrainDraws {
 
     /// Draws the frame's draws of `stack` into the open pass of `gpu`, the
     /// context's.
-    /// The bytes of the DEM textures it holds that are made, in `context`.
-    pub(crate) fn dem_bytes(&self, context: &Context) -> usize {
-        self.dem_textures.bytes(context)
-    }
-
     pub(crate) fn render(&mut self, stack: usize, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
         if let Some(StackDraws { tiles, frame, .. }) = self.stacks.get_mut(stack) {
             frame.render(tiles, tile_objects, gpu, parameters);

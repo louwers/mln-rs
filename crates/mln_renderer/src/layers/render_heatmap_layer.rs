@@ -15,9 +15,11 @@ use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
-    ID_HEATMAP_COLOR_RAMP_TEXTURE, ID_HEATMAP_DRAWABLE_UBO, ID_HEATMAP_EVALUATED_PROPS_UBO, ID_HEATMAP_IMAGE_TEXTURE,
-    ID_HEATMAP_POS_VERTEX_ATTRIBUTE, ID_HEATMAP_TEXTURE_PROPS_UBO, ID_PROJECTION_UBO,
+    ID_GROUND_DEM_TEXTURE, ID_GROUND_DRAWABLE_UBO, ID_HEATMAP_COLOR_RAMP_TEXTURE, ID_HEATMAP_DRAWABLE_UBO,
+    ID_HEATMAP_EVALUATED_PROPS_UBO, ID_HEATMAP_IMAGE_TEXTURE, ID_HEATMAP_POS_VERTEX_ATTRIBUTE,
+    ID_HEATMAP_TEXTURE_PROPS_UBO, ID_PROJECTION_UBO,
 };
+use mln_gfx::shaders::terrain_ubo::GroundDrawableUBO;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
@@ -67,6 +69,8 @@ const RENDER_PASS: RenderPass = RenderPass::Translucent;
 struct HeatmapUniforms {
     draw_ubo: HeatmapDrawableUBO,
     projection: ProjectionUBO,
+    /// Where it reads the ground, over terrain.
+    ground: GroundDrawableUBO,
 }
 
 /// The layer's drawing: the tiles' draws into the render target, and the
@@ -225,6 +229,8 @@ impl TypedLayer for RenderHeatmapLayer {
     type Type = Heatmap;
     type Drawing = HeatmapDrawing;
 
+    const STANDS: bool = true;
+
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
     }
@@ -325,6 +331,10 @@ impl RenderHeatmapLayer {
         let RenderHeatmapLayer { base, values, drawing, tile_draws, .. } = self;
 
         let evaluated = &values.evaluated.paint;
+        // Over terrain, the draws are of the terrain variant, whose kernels
+        // lie on the ground.
+        let ground = paint_parameters.ground.clone();
+        let ground = ground.as_deref();
         for tile in render_tiles {
             let tile_id = tile.id();
 
@@ -395,16 +405,22 @@ impl RenderHeatmapLayer {
                 *entry.value = Some(KeptDraw::new(objects));
             }
 
-            let Some(cached) = entry.value.as_ref() else {
+            let Some(cached) = entry.value.as_mut() else {
                 continue;
             };
+            let mut uniforms = Self::tile_uniforms(&tile_id, binders, paint_parameters);
+            if let Some(ground) = ground {
+                let (texture, ubo) = ground.tile(&tile_id);
+                cached.objects.set_texture(ID_GROUND_DEM_TEXTURE, Some(&texture));
+                uniforms.ground = ubo;
+            }
             let draw = FrameDraw { depth: DrawDepth::Off, ..cached.frame_draw(Some(tile_id)) };
-            tile_draws.push(draw, Self::tile_uniforms(&tile_id, binders, paint_parameters));
+            tile_draws.push(draw, uniforms);
         }
 
         let target = drawing.target.get_or_insert_default();
         finish_tiles(tile_draws, target, &mut drawing.tiles, gpu, paint_parameters.context, |writer| {
-            Self::write_tile_uniforms(evaluated, writer);
+            Self::write_tile_uniforms(evaluated, ground.is_some(), writer);
         });
         true
     }
@@ -440,13 +456,16 @@ impl RenderHeatmapLayer {
                 globe_extrude_scale: globe_extrude_scale(&tile_id, zoom, latitude_scale),
             },
             projection: to_projection_ubo(&projection),
+            ground: GroundDrawableUBO::default(),
         }
     }
 
     /// Writes the buffers of the tiles' draws into the render target, of a
-    /// layer of the paint values `evaluated`.
+    /// layer of the paint values `evaluated`, those of the ground under
+    /// them if they stand on terrain.
     fn write_tile_uniforms(
         evaluated: &HeatmapPaintProperties::PossiblyEvaluated,
+        stands: bool,
         writer: &mut UniformWriter<'_, HeatmapUniforms>,
     ) {
         let props = HeatmapEvaluatedPropsUBO {
@@ -458,6 +477,9 @@ impl RenderHeatmapLayer {
         writer.uniform(ID_HEATMAP_EVALUATED_PROPS_UBO, &props);
         writer.storage(ID_HEATMAP_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);
         writer.storage(ID_PROJECTION_UBO, |uniforms| uniforms.projection);
+        if stands {
+            writer.storage(ID_GROUND_DRAWABLE_UBO, |uniforms| uniforms.ground);
+        }
     }
 
     /// Makes the layer's draw of the frame, which colors the heat of the

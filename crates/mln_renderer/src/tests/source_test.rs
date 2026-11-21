@@ -1544,6 +1544,7 @@ fn flat_terrain() -> crate::terrain::TerrainCover {
         tiles: Vec::new(),
         center: None,
         dem_tiles: Vec::new(),
+        standing_dems: Vec::new(),
         ranges: crate::terrain::ElevationRanges::default(),
     }
 }

@@ -546,6 +546,11 @@ pub(crate) trait TypedLayer {
     /// than onto the frame.
     const DRAPES: bool = false;
 
+    /// Whether the layer stands on terrain: over terrain, its draws are of
+    /// the [`ProjectionVariant::Terrain`] variant, which reads the ground
+    /// under them ([`PaintParameters::ground`]).
+    const STANDS: bool = false;
+
     fn parts(&self) -> Parts<'_, Self>;
     fn parts_mut(&mut self) -> PartsMut<'_, Self>;
 
@@ -688,7 +693,8 @@ pub(crate) trait LayerParts {
     fn update(&mut self, parameters: &mut LayerUpdateParameters<'_>);
 
     /// The encode's update of the layer's draws: picks the shader variant
-    /// for the frame's projection, dropping the draws when it changed; drops
+    /// for the frame's projection, and over terrain the terrain variant for
+    /// a layer that stands on it, dropping the draws when it changed; drops
     /// the draws of a layer that has nothing to draw, and otherwise starts
     /// its draws of the frame ([`LayerDrawing::begin_frame`]); drops them
     /// again for a layer that draws in no pass, and otherwise runs the
@@ -706,6 +712,9 @@ pub(crate) trait LayerParts {
 
     /// Whether the layer drapes over terrain ([`TypedLayer::DRAPES`]).
     fn drapes(&self) -> bool;
+
+    /// Whether the layer stands on terrain ([`TypedLayer::STANDS`]).
+    fn stands(&self) -> bool;
 
     /// Whether the layer draws a drape by the map's bearing, with its values
     /// of the frame ([`TypedLayer::drapes_by_bearing`]).
@@ -879,11 +888,14 @@ impl<L: TypedLayer> LayerParts for L {
         atlases: &Atlases,
         source: Option<LayerSource<'_>>,
     ) {
-        let state = parameters.view;
-        use_projection_variant(
-            self,
-            if state.is_globe() { ProjectionVariant::Globe } else { ProjectionVariant::Mercator },
-        );
+        let variant = if parameters.view.is_globe() {
+            ProjectionVariant::Globe
+        } else if L::STANDS && parameters.ground.is_some() {
+            ProjectionVariant::Terrain
+        } else {
+            ProjectionVariant::Mercator
+        };
+        use_projection_variant(self, variant);
         if <L::Type as StyleLayerType>::INFO.source == SourceKind::None {
             // A layer that keeps tiles draws those its update picked.
             if self.parts_mut().drawing.tiles().is_some_and(|tiles| tiles.is_empty()) {
@@ -916,6 +928,10 @@ impl<L: TypedLayer> LayerParts for L {
 
     fn drapes(&self) -> bool {
         L::DRAPES
+    }
+
+    fn stands(&self) -> bool {
+        L::STANDS
     }
 
     fn drapes_by_bearing(&self) -> bool {

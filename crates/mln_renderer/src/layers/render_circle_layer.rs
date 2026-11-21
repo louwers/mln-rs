@@ -8,8 +8,10 @@ use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
-    ID_CIRCLE_DRAWABLE_UBO, ID_CIRCLE_EVALUATED_PROPS_UBO, ID_CIRCLE_POS_VERTEX_ATTRIBUTE, ID_PROJECTION_UBO,
+    ID_CIRCLE_DRAWABLE_UBO, ID_CIRCLE_EVALUATED_PROPS_UBO, ID_CIRCLE_POS_VERTEX_ATTRIBUTE, ID_GROUND_DEM_TEXTURE,
+    ID_GROUND_DRAWABLE_UBO, ID_PROJECTION_UBO,
 };
+use mln_gfx::shaders::terrain_ubo::GroundDrawableUBO;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_map_types::{TileProjector, View};
 use mln_style::expression::EvaluationContext;
@@ -148,11 +150,13 @@ impl RenderCircleLayer {
                 pad3: 0.0,
             },
             projection: to_projection_ubo(&projection),
+            ground: GroundDrawableUBO::default(),
         }
     }
 
-    /// Writes the layer's buffers of the frame's draws.
-    fn write_uniforms(layer: &EvaluatedLayer<Circle>, writer: &mut UniformWriter<'_, CircleUniforms>) {
+    /// Writes the layer's buffers of the frame's draws, those of the ground
+    /// under them if they stand on terrain.
+    fn write_uniforms(layer: &EvaluatedLayer<Circle>, stands: bool, writer: &mut UniformWriter<'_, CircleUniforms>) {
         let evaluated = &layer.paint;
         let props = CircleEvaluatedPropsUBO {
             color: evaluated.circle_color.uniform().to_float_array(),
@@ -169,6 +173,9 @@ impl RenderCircleLayer {
         writer.uniform(ID_CIRCLE_EVALUATED_PROPS_UBO, &props);
         writer.storage(ID_CIRCLE_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);
         writer.storage(ID_PROJECTION_UBO, |uniforms| uniforms.projection);
+        if stands {
+            writer.storage(ID_GROUND_DRAWABLE_UBO, |uniforms| uniforms.ground);
+        }
     }
 }
 
@@ -176,11 +183,15 @@ impl RenderCircleLayer {
 struct CircleUniforms {
     draw_ubo: CircleDrawableUBO,
     projection: ProjectionUBO,
+    /// Where it reads the ground, over terrain.
+    ground: GroundDrawableUBO,
 }
 
 impl TypedLayer for RenderCircleLayer {
     type Type = Circle;
     type Drawing = TileDraws<KeptDraw>;
+
+    const STANDS: bool = true;
 
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
@@ -217,6 +228,10 @@ impl TypedLayer for RenderCircleLayer {
         let layer_id = self.base.style.base().id.as_str();
         let layer = &*self.values.evaluated;
         let evaluated = &layer.paint;
+        // Over terrain, the draws are of the terrain variant, which stands
+        // on the ground.
+        let ground = paint_parameters.ground.clone();
+        let ground = ground.as_deref();
         for tile in render_tiles {
             let tile_id = tile.id();
             let Some(mut entry) = self.drawing.tiles_mut().entry(&tile_id) else {
@@ -287,14 +302,20 @@ impl TypedLayer for RenderCircleLayer {
                 *entry.value = Some(KeptDraw::new(objects));
             }
 
-            let Some(draw) = entry.value.as_ref().map(|cached| cached.frame_draw(Some(tile_id))) else {
+            let Some(cached) = entry.value.as_mut() else {
                 continue;
             };
-            self.draw_list.push(draw, Self::uniforms(layer, &tile_id, binders, paint_parameters));
+            let mut uniforms = Self::uniforms(layer, &tile_id, binders, paint_parameters);
+            if let Some(ground) = ground {
+                let (texture, ubo) = ground.tile(&tile_id);
+                cached.objects.set_texture(ID_GROUND_DEM_TEXTURE, Some(&texture));
+                uniforms.ground = ubo;
+            }
+            self.draw_list.push(cached.frame_draw(Some(tile_id)), uniforms);
         }
 
         self.drawing.finish(&mut self.draw_list, gpu, paint_parameters.context, |writer| {
-            Self::write_uniforms(layer, writer);
+            Self::write_uniforms(layer, ground.is_some(), writer);
         });
     }
 }

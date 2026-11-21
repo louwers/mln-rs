@@ -251,14 +251,45 @@ impl TerrainElevation {
     /// The height that `dem` gives at `uv` by the height rule, in meters with
     /// the exaggeration.
     fn height(&self, dem: &DrawnDem, uv: [f32; 2]) -> f64 {
-        let stride = dem.dim as usize + 2;
-        let texel = |x: u32, y: u32| {
-            let start = (y as usize * stride + x as usize) * 4;
-            let texel: [u8; 4] = dem.image.data[start..start + 4].try_into().unwrap_or_default();
-            self.unpack.decode(texel)
-        };
-        f64::from(dem::sample(dem.dim, dem.coords, uv, texel) * self.exaggeration)
+        dem_height(&dem.image, dem.dim, dem.coords, uv, self.unpack, self.exaggeration)
     }
+
+    /// The DEM tiles the tiles read, with their bordered images and widths
+    /// in pixels, a tile's each time a tile reads it.
+    pub(crate) fn dems(&self) -> impl Iterator<Item = (OverscaledTileID, &Arc<PremultipliedImage>, u32)> {
+        self.tiles.iter().filter_map(|tile| tile.dem.as_ref()).map(|dem| (dem.id, &dem.image, dem.dim))
+    }
+
+    /// How the DEM decodes.
+    pub(crate) fn unpack(&self) -> DemUnpack {
+        self.unpack
+    }
+
+    /// What the heights are raised by.
+    pub(crate) fn exaggeration(&self) -> f32 {
+        self.exaggeration
+    }
+}
+
+/// The height, in meters raised by `exaggeration`, that the DEM of `dim`
+/// pixels a side whose bordered image is `image` gives at `uv` through
+/// `coords`, decoded by `unpack`: the height rule of `mln_util::dem`, which
+/// the shaders follow.
+pub(crate) fn dem_height(
+    image: &PremultipliedImage,
+    dim: u32,
+    coords: DemCoords,
+    uv: [f32; 2],
+    unpack: DemUnpack,
+    exaggeration: f32,
+) -> f64 {
+    let stride = dim as usize + 2;
+    let texel = |x: u32, y: u32| {
+        let start = (y as usize * stride + x as usize) * 4;
+        let texel: [u8; 4] = image.data[start..start + 4].try_into().unwrap_or_default();
+        unpack.decode(texel)
+    };
+    f64::from(dem::sample(dim, coords, uv, texel) * exaggeration)
 }
 
 impl Elevation for TerrainElevation {
@@ -308,6 +339,7 @@ mod tests {
             tiles: vec![tile(i16::MAX), tile(i16::MIN)],
             center: None,
             dem_tiles: Vec::new(),
+            standing_dems: Vec::new(),
             ranges: ElevationRanges::default(),
         };
         let ground = TerrainElevation::new(&cover, None, DemUnpack::of(RasterEncoding::Terrarium), 1.0);

@@ -386,6 +386,13 @@ impl Context {
             .clone()
     }
 
+    /// Whether it made the key of a variant for `projection` since the keys
+    /// were last cleared.
+    #[cfg(test)]
+    pub(crate) fn made_key_for(&self, projection: ProjectionVariant) -> bool {
+        self.shader_keys.keys().any(|&(_, _, made)| made == projection)
+    }
+
     /// Makes the keys of later variants at `pixel_ratio`, and with the
     /// overdraw inspector's define if `overdraw`. The shaders of the earlier
     /// keys stay until [`release_shaders`](Self::release_shaders).

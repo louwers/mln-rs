@@ -66,12 +66,6 @@ impl DemTextures {
         self.textures.values().map(|(texture, _)| made(texture)).sum::<usize>() + self.flat.as_ref().map_or(0, made)
     }
 
-    /// Whether it holds no texture.
-    #[cfg(test)]
-    pub(crate) fn is_empty(&self) -> bool {
-        self.textures.is_empty() && self.flat.is_none()
-    }
-
     /// Drops the textures of the buckets no tile of the frame read, once
     /// the frame's tiles took theirs.
     pub(crate) fn finish_frame(&mut self) {

@@ -42,6 +42,7 @@ use crate::render_pass::RenderPass;
 use crate::render_source::{self, RenderSource, RenderTileParameters, TileOrder};
 use crate::render_tile::{FoundTile, RenderTile};
 use crate::renderer_event::RendererEvent;
+use crate::source_type::deepest_zoom;
 use crate::sources::render_tile_source::{DebugLayer, DebugLayers};
 use crate::terrain::{DrapeStacks, RenderTerrain};
 use crate::text::glyph_store::GlyphStore;
@@ -352,9 +353,10 @@ impl RenderOrchestrator {
         }
         self.view = update_parameters.view.clone();
 
+        let standing_zooms = self.standing_zooms(update_parameters);
         let (store, render_sources) = (&self.tile_store, &self.render_sources);
         let dem = |id: &str| store.source(render_sources.get(id)?.tiles()?);
-        frame.terrain = self.terrain.update(update_parameters, dem).is_some();
+        frame.terrain = self.terrain.update(update_parameters, dem, &standing_zooms).is_some();
         let will_render = self.update_sources(
             update_parameters,
             &layers,
@@ -448,6 +450,27 @@ impl RenderOrchestrator {
         }
 
         Some(frame)
+    }
+
+    /// The deepest zooms of the sources of the visible layers that stand on
+    /// terrain, each once, for a style with terrain; none without.
+    fn standing_zooms(&self, update_parameters: &UpdateParameters) -> SmallVec<[u8; 4]> {
+        let mut zooms = SmallVec::new();
+        let style = &update_parameters.style;
+        if style.get_terrain().is_none() {
+            return zooms;
+        }
+        let standing = self.layers.iter().filter(|layer| {
+            layer.stands() && layer.base().style.base().visibility != mln_style_types::VisibilityType::None
+        });
+        for layer in standing {
+            let source = style.get_source(&layer.base().style.base().source);
+            let zoom = source.and_then(|source| deepest_zoom(source, update_parameters.max_zoom));
+            if let Some(zoom) = zoom.filter(|zoom| !zooms.contains(zoom)) {
+                zooms.push(zoom);
+            }
+        }
+        zooms
     }
 
     /// Brings the feature state of the enabled sources' tiles to the
@@ -1331,7 +1354,9 @@ impl RenderOrchestrator {
 
     /// Makes the draws of the layers the frame draws, of the terrain, and of
     /// the sky and globe depth passes. Over terrain, the layers that drape
-    /// over it make theirs in the terrain's drapes rather than in the frame.
+    /// over it make theirs in the terrain's drapes rather than in the frame,
+    /// and those that stand on it read the ground the terrain prepares
+    /// first ([`PaintParameters::ground`]).
     pub(crate) fn update_layer_draws(
         &mut self,
         gpu: &mut dyn Gpu,
@@ -1339,6 +1364,9 @@ impl RenderOrchestrator {
         paint_parameters: &mut PaintParameters<'_>,
         frame: &Frame,
     ) {
+        let (store, render_sources) = (&self.tile_store, &self.render_sources);
+        let dem = |id: &str| store.source(render_sources.get(id)?.tiles()?);
+        paint_parameters.ground = self.terrain.prepare_ground(paint_parameters, dem);
         let mut needs_globe_depth = false;
         let mut contents = SourceContents::default();
         for (&index, frame_layer) in &frame.layers {
@@ -1400,9 +1428,7 @@ impl RenderOrchestrator {
             update_parameters,
             needs_globe_depth || self.sky_pass.has_atmosphere(),
         );
-        let (store, render_sources) = (&self.tile_store, &self.render_sources);
-        let dem = |id: &str| store.source(render_sources.get(id)?.tiles()?);
-        self.terrain.update_draws(gpu, paint_parameters, dem, frame.sky.as_ref());
+        self.terrain.update_draws(gpu, paint_parameters, frame.sky.as_ref());
     }
 
     /// The render layer at `index` in the drawing order.
