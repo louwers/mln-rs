@@ -135,7 +135,7 @@ windows-sys = { version = "0.61.2", features = [
 # crates/mln_gl's window backend: loads libwayland-egl at run time.
 libloading = { version = "0.8.9" }
 memmap2 = { version = "0.9.12" }
-# Polygon triangulation (mln_render's fills and fill extrusions), a port of
+# Polygon triangulation (mln_layers' fills and fill extrusions), a port of
 # earcut.js, the triangulation GL JS uses.
 earcut = { version = "0.4.5" }
 # MLT decoding: the Rust implementation of the MapLibre Tile spec, instead of
@@ -146,7 +146,7 @@ mlt-core = { version = "0.22.1" }
 # The even-odd union that repairs the polygons of version 1 vector tiles,
 # instead of porting wagyu. mlt-core already depends on it through geo.
 i_overlay = { version = "4.5.2", default-features = false }
-# 2D vector maths (mln_render's symbol layout, placement and collision).
+# Vector and matrix maths.
 glam = { version = "0.34.3", default-features = false, features = [
   "std",
   "f64",
