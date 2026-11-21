@@ -707,3 +707,47 @@ fn fingers_down_take_the_altitude_from_an_explicit_altitude_ease() {
     assert_on_ground(view, &*ground, "the gesture's end");
     assert_at_rest(&mut map, "the gesture's end");
 }
+
+/// Terrain that goes during an anchored ease over a clamped center before
+/// it drew any ground takes the center to sea level, as once it had: the
+/// altitude the command was given, which the ground would have overruled,
+/// doesn't stay.
+#[test]
+fn terrain_that_goes_before_any_ground_takes_a_clamped_center_to_sea_level() {
+    let mut transform = Transform::new(ConstrainMode::HeightOnly, ViewportMode::Default);
+    transform.resize(Size::new(512, 512)).unwrap();
+    transform.set_terrain(Some(TerrainGround { elevation: None, clamped: true }));
+    let clock = Instant::now() + Duration::from_secs(3600);
+    transform.set_frame_time(Some(clock));
+    transform.jump_to(&CameraOptions {
+        center: Some(start()),
+        zoom: Some(12.0),
+        pitch: Some(50.0),
+        center_altitude: Some(1000.0),
+        ..Default::default()
+    });
+    transform.follow_terrain();
+    assert_eq!(1000.0, transform.view().center_altitude(), "the ground is loading");
+    transform.ease_to(
+        &CameraOptions {
+            zoom: Some(13.0),
+            center_altitude: Some(1000.0),
+            anchor: Some(ScreenCoordinate::new(120.0, 400.0)),
+            ..Default::default()
+        },
+        &eased(),
+    );
+    let mut gone = false;
+    transform_frames(&mut transform, clock, clock + Duration::from_secs(1), |transform, now| {
+        if now >= clock + Duration::from_millis(500) && !gone {
+            transform.set_terrain(None);
+            transform.follow_terrain();
+            gone = true;
+        }
+        if gone {
+            assert_eq!(0.0, transform.view().center_altitude(), "at sea level");
+        }
+    });
+    assert!(gone && !transform.in_transition());
+    assert_eq!(0.0, transform.view().center_altitude());
+}

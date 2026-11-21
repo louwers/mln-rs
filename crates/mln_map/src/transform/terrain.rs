@@ -166,6 +166,11 @@ impl Transform {
         }
         if goes {
             self.gesture.anchor_plane = None;
+            // Also before any ground was drawn, as the ground would have
+            // overruled the altitude of a clamped center.
+            if clamped && self.view().center_altitude() != 0.0 {
+                self.state.set_center_altitude(0.0);
+            }
             self.leave_ground(clamped);
             let view = self.state.view();
             for transition in &mut self.transitions {
