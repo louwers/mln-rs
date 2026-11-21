@@ -313,9 +313,11 @@ impl<'a> TileMut<'a> {
     pub(crate) fn fail(&mut self, error: Error) {
         self.tile.settled = true;
         // Data that failed isn't fresh: the tile requests it again when
-        // required again.
+        // required again, and no longer holds it for the tiles cut from it,
+        // nor for itself.
         if let OriginLoad::Tileset(tileset) = &mut self.tile.load.origin {
             tileset.from_network = false;
+            tileset.held = None;
         }
         self.action(TileOperation::Error);
         self.store.error(&self.source.id, self.tile.id, error);
@@ -677,7 +679,7 @@ impl<'a> TileMut<'a> {
     fn request(&mut self, mut method: Method) {
         let fresh =
             matches!(&self.tile.load.origin, OriginLoad::Tileset(tileset) if tileset.is_fresh(mln_util::chrono::now()));
-        if !fresh && self.take_cut_in_memory() {
+        if !fresh && self.take_in_memory() {
             // A required tile whose data expires still asks the network,
             // which the file source holds until the data expires.
             let lasting = matches!(&self.tile.load.origin, OriginLoad::Tileset(tileset) if tileset.has_lasting_data());
@@ -720,22 +722,26 @@ impl<'a> TileMut<'a> {
         };
     }
 
-    /// A tile cut from an ancestor that another tile's load brought fresh
-    /// from the network takes its data from that, as that load's answer,
-    /// instead of loading the ancestor again.
-    fn take_cut_in_memory(&mut self) -> bool {
+    /// A tile whose data at its tileset's last zoom another tile's load
+    /// brought fresh from the network, whether a tile cut from it or the
+    /// tile itself, takes its data from that, as that load's answer, instead
+    /// of loading it again.
+    fn take_in_memory(&mut self) -> bool {
         let Some(origin) = &mut self.source.origin else {
             return false;
         };
-        let Some((data, fetched)) = origin.cut_in_memory(&self.tile.id, mln_util::chrono::now()) else {
+        let Some((data, fetched, held)) = origin.in_memory(&self.tile.id, mln_util::chrono::now()) else {
             return false;
         };
         let OriginLoad::Tileset(tileset) = &mut self.tile.load.origin else {
             return false;
         };
+        tileset.held = held;
         let resource = &mut tileset.resource;
         (resource.prior_modified, resource.prior_expires, resource.prior_etag) =
             (fetched.modified, fetched.expires, fetched.etag);
+        // Older data that the cache kept no longer goes with these validators.
+        resource.prior_data = None;
         (tileset.modified, tileset.expires) = (fetched.modified, fetched.expires);
         tileset.from_network = true;
         self.take_input(TileInput::Geometry { data: Some(data), missing: false });
@@ -775,7 +781,10 @@ impl<'a> TileMut<'a> {
                 self.tile.settled = true;
             }
         } else if let Some(origin) = &mut self.source.origin {
-            let input = origin.input(self.source.kind, &self.tile.id, res, method == Method::Network);
+            let (input, held) = origin.input(self.source.kind, &self.tile.id, res, method == Method::Network);
+            if let OriginLoad::Tileset(tileset) = &mut self.tile.load.origin {
+                tileset.held = held;
+            }
             self.take_input(input);
         }
     }

@@ -325,6 +325,46 @@ fn a_cut_tile_takes_a_fresh_ancestor_from_memory() {
     }
 }
 
+/// The tile at a tileset's last zoom and the tiles cut from it share what
+/// either brought fresh from the network: whichever comes second takes it
+/// from memory, without a request.
+#[test]
+fn a_tile_at_the_last_zoom_and_its_cut_tiles_share_their_data() {
+    let test = Test::new();
+    let (whole, cut) = (OverscaledTileID::from_zxy(0, 0, 0), OverscaledTileID::from_zxy(1, 0, 0));
+    for (first, second) in [(whole, cut), (cut, whole)] {
+        let file_source = Arc::new(Held::default());
+        let file_source_dyn: Arc<dyn FileSource> = Arc::<Held>::clone(&file_source);
+        let origin = DataOrigin::Tileset {
+            tileset: Tileset {
+                tiles: vec!["tiles".to_owned()],
+                zoom_range: mln_util::range::Range::new(0, 0),
+                ..Default::default()
+            },
+            encoding: VectorTileEncoding::Mvt,
+            file_source: Some(file_source_dyn),
+            ancestors: Ancestors::default(),
+        };
+        let store = tile_store(&test.pool, Box::new(InlineWorkers));
+        let mut tiles = OneTile::with_origin(store, TileKind::Geometry, false, origin, &[whole, cut], MapMode::Static);
+        let (styled, params) = (style(&[water_layer("water", "red")]), tiles.tile_params());
+        for id in [whole, cut] {
+            tiles.with_at(&id, |tile| tile.set_style(&styled, params.pixel_ratio, params.subdivision_granularity));
+        }
+        tiles.set_necessity(&first, TileNecessity::Required);
+        file_source.respond(water());
+        tiles.update();
+        tiles.update();
+        assert!(tiles.tile_at(&first).is_complete());
+
+        tiles.set_necessity(&second, TileNecessity::Required);
+        assert_eq!(file_source.pending(), 0, "{second:?} after {first:?}");
+        tiles.update();
+        tiles.update();
+        assert!(tiles.tile_at(&second).is_complete());
+    }
+}
+
 /// A tile whose data failed to lay out requests it again when required
 /// again, though the data has no expiry.
 #[test]

@@ -13,6 +13,9 @@
 pub mod android;
 mod archive_tilejson;
 mod asset_file_source;
+#[cfg(all(feature = "bench", not(target_family = "wasm")))]
+#[doc(hidden)]
+pub mod bench;
 #[cfg(feature = "sqlite")]
 pub mod database_file_source;
 #[cfg(target_family = "wasm")]

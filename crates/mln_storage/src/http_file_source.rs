@@ -284,6 +284,16 @@ impl HTTPFileSource {
         HTTPFileSource { transport: std::sync::OnceLock::new(), header_transform: HttpHeaderTransform::default() }
     }
 
+    /// An HTTP file source over `transport` (`crate::bench`).
+    #[cfg(all(feature = "bench", not(target_family = "wasm")))]
+    #[must_use]
+    pub(crate) fn with_transport(transport: Arc<dyn HttpTransport>) -> Self {
+        HTTPFileSource {
+            transport: std::sync::OnceLock::from(transport),
+            header_transform: HttpHeaderTransform::default(),
+        }
+    }
+
     /// An HTTP file source over the browser's fetch.
     #[cfg(target_family = "wasm")]
     #[must_use]

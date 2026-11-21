@@ -48,8 +48,11 @@ mln_runtime = { package = "mln-rs-runtime", path = "../../crates/mln_runtime", f
   "bench",
   "default",
 ] }
-# The file source that reads the fixtures (support/fixtures.rs).
-mln_storage = { package = "mln-rs-storage", path = "../../crates/mln_storage" }
+# The file source that reads the fixtures (support/fixtures.rs), and the
+# online file source over the simulated network (support/network.rs).
+mln_storage = { package = "mln-rs-storage", path = "../../crates/mln_storage", features = [
+  "bench",
+] }
 # The sprite whose images the layouts of symbols use.
 mln_sprite = { package = "mln-rs-sprite", path = "../../crates/mln_sprite" }
 # The style, and its edits.
@@ -67,6 +70,8 @@ mln_webgpu = { package = "mln-rs-webgpu", path = "../../crates/mln_webgpu", feat
 ] }
 # The latency file source's held answers (support/latency.rs).
 parking_lot = "0.12"
+# The paths of the simulated server's files (support/network.rs).
+percent-encoding = "2"
 # Single tiles of the fixtures' archives (support/fixtures.rs).
 pmtiles = { version = "0.28", default-features = false }
 serde = { version = "1", features = ["derive"] }

@@ -304,6 +304,12 @@ impl TileStore {
         }
     }
 
+    /// The sources' tiles, in the style's order.
+    #[cfg(feature = "bench")]
+    pub(crate) fn sources(&self) -> impl Iterator<Item = &SourceTiles> + '_ {
+        self.order.iter().filter_map(|key| self.sources.get(key))
+    }
+
     pub(crate) fn source(&self, key: SourceKey) -> Option<&SourceTiles> {
         self.sources.get(&key)
     }

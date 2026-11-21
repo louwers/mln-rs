@@ -1,16 +1,18 @@
 //! Camera flights across zooms, as when a user flies to a place and looks
-//! around it, with the tiles they need arriving while they fly.
+//! around it, with the tiles they need arriving over a network while they
+//! fly (`support::network`).
 
 use std::sync::Arc;
 
-use mln_map::{BoundOptions, CameraOptions, MapMode};
+use mln_map::{BoundOptions, CameraOptions};
 use mln_util::geo::LatLng;
 
 use super::VIEW;
 use crate::scenario::{Bench, Kind, Scenario};
 use crate::support::fixtures::{Fixtures, Tiles};
-use crate::support::latency::Latency;
-use crate::support::map::{DrawMeter, Frontend, HeadlessMap, gesture_phase};
+use crate::support::map::{DrawMeter, Frontend, gesture_phase};
+use crate::support::network::{CDN, FLAKY, LOCAL, MOBILE_4G, Network, Profile, SLOW, Serve, Server};
+use crate::support::online::OnlineMap;
 
 pub(crate) const SCENARIOS: &[Scenario] = &[
     Scenario {
@@ -32,6 +34,30 @@ pub(crate) const SCENARIOS: &[Scenario] = &[
         run: zoom,
     },
     Scenario {
+        name: "macro/navigate/fly-4g",
+        kind: Kind::Macro,
+        question: "How much of the view does a flight from one city to another leave blank over a mobile link, and how many bytes go to tiles it passes over?",
+        run: fly_4g,
+    },
+    Scenario {
+        name: "macro/navigate/street-flaky",
+        kind: Kind::Macro,
+        question: "How soon does the view of a city's streets come back complete after the network drops out during a flight?",
+        run: street_flaky,
+    },
+    Scenario {
+        name: "macro/navigate/street-pmtiles-flaky",
+        kind: Kind::Macro,
+        question: "How soon does the view of a city's streets, read from a PMTiles archive by byte ranges, come back complete after the network drops out during a flight?",
+        run: street_pmtiles_flaky,
+    },
+    Scenario {
+        name: "macro/navigate/zoom-slow",
+        kind: Kind::Macro,
+        question: "Does zooming out to the world and back in over a slow link fetch again the street tiles the map just let go of?",
+        run: zoom_slow,
+    },
+    Scenario {
         name: "macro/navigate/terrain-3d",
         kind: Kind::Macro,
         question: "What does a flight over 3D terrain into ground it hasn't loaded cost: pan, zoom and rotate at pitch 60 to 75?",
@@ -42,9 +68,17 @@ pub(crate) const SCENARIOS: &[Scenario] = &[
 /// The steepest pitch a map takes by default, in degrees.
 const DEFAULT_MAX_PITCH: f64 = 60.0;
 
-/// The frames between a request and its answer: 100 ms at 60 Hz, about
-/// what a tile takes to come from a nearby CDN.
-const LATENCY: u64 = 6;
+/// How many frames a flight that waits for the view to complete may draw
+/// after the camera stops: 30 seconds.
+const REST_LIMIT: u64 = 1_800;
+
+/// Whether a flight measures the frames after the camera stops, until the
+/// view is complete.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Rest {
+    Skip,
+    UntilComplete,
+}
 
 /// A point of a flight: at frame `frame`, the camera is over `center`
 /// (latitude, longitude; a longitude past 180 degrees goes on around the
@@ -64,21 +98,79 @@ impl Key {
 }
 
 /// The question: what does flying from a view of San Francisco at zoom 11
-/// into its streets at zoom 15.5 and back out to zoom 12 cost? Four seconds
-/// at 60 Hz: from an overview of the city into its streets, along them,
-/// tilted, and back out. Every center stays inside the street tiles' area,
-/// so the camera only sees tiles of the set.
+/// into its streets at zoom 15.5 and back out to zoom 12 cost
+/// ([`street_keys`]), with tiles coming from a nearby CDN?
 fn street(bench: &mut Bench) {
     let fixtures = Fixtures::open(bench);
+    flight(bench, Server::new(&fixtures, Tiles::Street, Serve::Tiles), &street_keys(&fixtures), CDN, Rest::Skip, None);
+}
+
+/// The question: how soon does the view come back complete after the
+/// network drops out? The flight of `macro/navigate/street` into the
+/// streets, stopping there, tilted at zoom 15.5 after 160 frames, over a
+/// 4G link that drops: every transfer fails for 3 seconds from a second
+/// into the flight, as the street tiles start to load, and 2% of the others
+/// do. Its counts run until the view is complete after the camera stops, so
+/// `frames_to_complete` counts the frames from the end of the flight, which
+/// the outage reaches 1.3 seconds past, until the tiles that failed in it
+/// have come back.
+fn street_flaky(bench: &mut Bench) {
+    let fixtures = Fixtures::open(bench);
+    let keys = street_keys(&fixtures);
+    flight(bench, Server::new(&fixtures, Tiles::Street, Serve::Tiles), &keys[..3], FLAKY, Rest::UntilComplete, None);
+}
+
+/// The question of `macro/navigate/street-flaky`, the tiles read from a
+/// PMTiles archive on the server: each tile's range, and the directories
+/// before it, fail in the outage and come back through the archive's
+/// requests.
+fn street_pmtiles_flaky(bench: &mut Bench) {
+    let fixtures = Fixtures::open(bench);
+    let keys = street_keys(&fixtures);
+    flight(bench, Server::new(&fixtures, Tiles::Street, Serve::Archive), &keys[..3], FLAKY, Rest::UntilComplete, None);
+}
+
+/// The question: what does a flight over San Francisco's hills in 3D cost,
+/// into ground whose tiles haven't loaded, as a user who tilts the map to
+/// look across the hills does? Four seconds at 60 Hz over
+/// [`Snapshot::terrain_3d_style`](mln_bench_workload::Snapshot::terrain_3d_style),
+/// tilted from 60 to 75 degrees all the way: from Ocean Beach at zoom 12 in
+/// to Twin Peaks at 14.5 as the camera turns, across to downtown, and back
+/// out to zoom 13 over the city, turning half a turn in all, with tiles from
+/// a nearby CDN. Each leg needs terrain, DEM and street tiles that the one
+/// before didn't, and the drapes of the tiles that arrive draw as they do.
+/// The camera moves as one gesture moves it, which keeps the drapes it drew
+/// at another zoom or bearing, and the last frame ends the gesture, which
+/// draws them again at the zoom and bearing it ends at. It also reports the
+/// frames' render passes and draw calls, the drapes they drew, and the most
+/// the terrain held ([`DrawMeter`]).
+fn terrain_3d(bench: &mut Bench) {
+    let fixtures = Fixtures::open(bench);
+    let keys = [
+        Key { frame: 0, center: (37.755, -122.495), zoom: 12.0, bearing: 0.0, pitch: 60.0 },
+        Key { frame: 80, center: (37.752, -122.447), zoom: 14.5, bearing: 60.0, pitch: 70.0 },
+        Key { frame: 160, center: (37.788, -122.405), zoom: 14.5, bearing: 120.0, pitch: 75.0 },
+        Key { frame: 240, center: (37.77, -122.43), zoom: 13.0, bearing: 180.0, pitch: 65.0 },
+    ];
+    let style = serde_json::from_str(&fixtures.terrain_3d_style()).expect("the style is JSON");
+    let sets = [("openmaptiles", Tiles::Street), ("terrain", Tiles::Terrain)];
+    let server = Server::for_style(&fixtures, style, &sets, Serve::Tiles);
+    flight(bench, server, &keys, CDN, Rest::Skip, Some(DrawMeter::default()));
+}
+
+/// The flight of `macro/navigate/street`: from a view of San Francisco at
+/// zoom 11 into its streets at zoom 15.5 and back out to zoom 12, four
+/// seconds at 60 Hz, tilted along the streets. Every center stays inside
+/// the street tiles' area, so the camera only sees tiles of the set.
+fn street_keys(fixtures: &Fixtures) -> [Key; 4] {
     let center = fixtures.area_center(Tiles::Street);
     let (lat, lon) = (center.latitude(), center.longitude());
-    let keys = [
+    [
         Key::at(0, (lat - 0.01, lon - 0.03), 11.0),
         Key { frame: 100, center: (lat + 0.012, lon + 0.015), zoom: 15.0, bearing: 20.0, pitch: 30.0 },
         Key { frame: 160, center: (lat + 0.018, lon + 0.035), zoom: 15.5, bearing: 40.0, pitch: 30.0 },
         Key::at(240, (lat, lon), 12.0),
-    ];
-    flight(bench, &fixtures, &fixtures.style(Tiles::Street), &keys, None);
+    ]
 }
 
 /// The question: what does flying from San Francisco's streets to Tokyo's
@@ -91,11 +183,35 @@ fn street(bench: &mut Bench) {
 /// shows only tiles of the set.
 fn fly(bench: &mut Bench) {
     let fixtures = Fixtures::open(bench);
+    flight(bench, Server::new(&fixtures, Tiles::Flight, Serve::Tiles), &fly_keys(&fixtures), CDN, Rest::Skip, None);
+}
+
+/// The question: how much of the view does the flight of
+/// `macro/navigate/fly` leave blank over a 4G link, and what does it spend
+/// on tiles it passes over? `bytes_wasted` counts the bytes of transfers
+/// that the map cancelled once the camera had passed their tiles. Its
+/// counts end with the flight: Tokyo's labels need about 30 MiB of glyphs,
+/// half a minute of the link, which is a question of its own.
+fn fly_4g(bench: &mut Bench) {
+    let fixtures = Fixtures::open(bench);
+    flight(
+        bench,
+        Server::new(&fixtures, Tiles::Flight, Serve::Tiles),
+        &fly_keys(&fixtures),
+        MOBILE_4G,
+        Rest::Skip,
+        None,
+    );
+}
+
+/// The flight of `macro/navigate/fly`: four seconds at 60 Hz, zooming out
+/// over San Francisco from 14 to 3, west across the Pacific and the
+/// antimeridian at zoom 3, and into Tokyo to 14.
+fn fly_keys(fixtures: &Fixtures) -> [Key; 4] {
     let from = fixtures.area_center(Tiles::Street);
     let to = fixtures.area_center(Tiles::Cjk);
     let (from, to) = ((from.latitude(), from.longitude()), (to.latitude(), to.longitude() - 360.0));
-    let keys = [Key::at(0, from, 14.0), Key::at(80, from, 3.0), Key::at(160, to, 3.0), Key::at(240, to, 14.0)];
-    flight(bench, &fixtures, &fixtures.style(Tiles::Flight), &keys, None);
+    [Key::at(0, from, 14.0), Key::at(80, from, 3.0), Key::at(160, to, 3.0), Key::at(240, to, 14.0)]
 }
 
 /// The question: what does zooming out from San Francisco's streets at
@@ -104,50 +220,54 @@ fn fly(bench: &mut Bench) {
 /// tiles on the way out and needs them again on the way back.
 fn zoom(bench: &mut Bench) {
     let fixtures = Fixtures::open(bench);
+    flight(bench, Server::new(&fixtures, Tiles::Street, Serve::Tiles), &zoom_keys(&fixtures), CDN, Rest::Skip, None);
+}
+
+/// The question: does the map fetch again what it just let go of? The zoom
+/// of `macro/navigate/zoom` over a slow link, whose counts run until the
+/// street view is complete again after it: `refetches` counts the
+/// transfers of tiles that an earlier transfer had brought.
+fn zoom_slow(bench: &mut Bench) {
+    let fixtures = Fixtures::open(bench);
+    flight(
+        bench,
+        Server::new(&fixtures, Tiles::Street, Serve::Tiles),
+        &zoom_keys(&fixtures),
+        SLOW,
+        Rest::UntilComplete,
+        None,
+    );
+}
+
+/// The zoom of `macro/navigate/zoom`: from San Francisco's streets at zoom
+/// 15 to the world at zoom 2 and back, a second each way.
+fn zoom_keys(fixtures: &Fixtures) -> [Key; 3] {
     let center = fixtures.area_center(Tiles::Street);
     let center = (center.latitude(), center.longitude());
-    let keys = [Key::at(0, center, 15.0), Key::at(60, center, 2.0), Key::at(120, center, 15.0)];
-    flight(bench, &fixtures, &fixtures.style(Tiles::Street), &keys, None);
+    [Key::at(0, center, 15.0), Key::at(60, center, 2.0), Key::at(120, center, 15.0)]
 }
 
-/// The question: what does a flight over San Francisco's hills in 3D cost,
-/// into ground whose tiles haven't loaded, as a user who tilts the map to
-/// look across the hills does? Four seconds at 60 Hz over
-/// [`Snapshot::terrain_3d_style`](mln_bench_workload::Snapshot::terrain_3d_style),
-/// tilted from 60 to 75 degrees all the way: from Ocean Beach at zoom 12 in
-/// to Twin Peaks at 14.5 as the camera turns, across to downtown, and back
-/// out to zoom 13 over the city, turning half a turn in all. Each leg needs
-/// terrain, DEM and street tiles that the one before didn't, and the drapes
-/// of the tiles that arrive draw as they do. The camera moves as one
-/// gesture moves it, which keeps the drapes it drew at another zoom or
-/// bearing, and the last frame ends the gesture, which draws them again at
-/// the zoom and bearing it ends at. It also reports the frames'
-/// render passes and draw calls, the drapes they drew, and the most the
-/// terrain held ([`DrawMeter`]).
-fn terrain_3d(bench: &mut Bench) {
-    let fixtures = Fixtures::open(bench);
-    let keys = [
-        Key { frame: 0, center: (37.755, -122.495), zoom: 12.0, bearing: 0.0, pitch: 60.0 },
-        Key { frame: 80, center: (37.752, -122.447), zoom: 14.5, bearing: 60.0, pitch: 70.0 },
-        Key { frame: 160, center: (37.788, -122.405), zoom: 14.5, bearing: 120.0, pitch: 75.0 },
-        Key { frame: 240, center: (37.77, -122.43), zoom: 13.0, bearing: 180.0, pitch: 65.0 },
-    ];
-    flight(bench, &fixtures, &fixtures.terrain_3d_style(), &keys, Some(DrawMeter::default()));
-}
-
-/// Flies through `keys` over `style`, such as Liberty, as each tile, glyph range
-/// and image the map asks for arrives [`LATENCY`] frames after it asked,
-/// and measures each frame: sending on the answers due at it, laying out
-/// what they brought, its update, symbol placement, draw calls and the GPU
-/// finishing it. Each leg between keys eases in and out.
+/// Flies through `keys` over Liberty on `tiles`, served as their [`Serve`]
+/// says, every resource coming from the simulated server over `profile`, and measures each frame: the
+/// answers that came since the frame before, laying out what they brought,
+/// its update, symbol placement, draw calls, the GPU finishing it and the
+/// transfers it starts. Each leg between keys eases in and out. With
+/// [`Rest::UntilComplete`], the frames after the camera stops count too,
+/// until one shows the view complete, or [`REST_LIMIT`] of them.
 ///
-/// The map starts settled at the first key. Its frames then show what has
-/// arrived, and parent or child tiles where a tile is missing, as a map does
-/// over a network; tiles arrive on a schedule that only frames advance, so
-/// every run draws the same frames with the same tiles. The map's pitch
-/// may reach the steepest of the keys'. With a `meter`, the camera moves as
-/// one gesture's, and it also reports what the frames drew.
-fn flight(bench: &mut Bench, fixtures: &Fixtures, style: &str, keys: &[Key], mut meter: Option<DrawMeter>) {
+/// The map starts settled at the first key, over a link that takes no
+/// time and has no faults, which then changes to `profile`. Its frames then
+/// show what has arrived, and parent or child tiles where a tile is
+/// missing, as a map does over a network; transfers take a time that only
+/// frames advance, so every run draws the same frames with the same tiles.
+fn flight(
+    bench: &mut Bench,
+    server: Arc<Server>,
+    keys: &[Key],
+    profile: Profile,
+    rest: Rest,
+    mut meter: Option<DrawMeter>,
+) {
     let camera = |frame: usize| {
         let leg = keys.windows(2).find(|leg| frame <= leg[1].frame).expect("a frame of the flight");
         let (from, to) = (&leg[0], &leg[1]);
@@ -167,45 +287,52 @@ fn flight(bench: &mut Bench, fixtures: &Fixtures, style: &str, keys: &[Key], mut
     let frames = keys.last().expect("a flight's keys").frame;
     let frontend = Frontend::new(VIEW);
     bench.gpu = Some(frontend.gpu());
-    let latency = Latency::new(fixtures.file_source(frontend.pool()));
-    let mut map = HeadlessMap::new(frontend, MapMode::Continuous, Arc::<Latency>::clone(&latency));
+    let network = Network::new(server, LOCAL);
+    let mut online = OnlineMap::new(frontend, network, None, &camera(0));
+    online.settle();
+
+    // The path tilts past the map's default bound.
     let max_pitch = keys.iter().map(|key| key.pitch).fold(DEFAULT_MAX_PITCH, f64::max);
     if max_pitch > DEFAULT_MAX_PITCH {
         let bounds = BoundOptions { max_pitch: Some(max_pitch), ..Default::default() };
-        map.map().set_bounds(&bounds).expect("a pitch the map can take");
+        online.map().map().set_bounds(&bounds).expect("a pitch the map can take");
     }
-    map.jump(&camera(0));
-    map.map().load_style_json(style);
-    map.settle();
 
-    latency.set_delay(LATENCY);
-    let incomplete = map.frames_incomplete();
-    let requests = latency.tile_requests();
+    online.network().set_profile(profile);
+    online.network().begin_faults();
+    let incomplete = online.map().frames_incomplete();
+    let counts = online.network().counts();
     for frame in 1..=frames {
         match meter {
-            Some(_) => map.gesture(&camera(frame), gesture_phase(frame - 1, frames)),
-            None => map.jump(&camera(frame)),
+            Some(_) => online.map().gesture(&camera(frame), gesture_phase(frame - 1, frames)),
+            None => online.map().jump(&camera(frame)),
         }
-        bench.measure(|| {
-            latency.tick();
-            map.wait_for_workers();
-            map.draw_frame()
-        });
+        online.frame(bench);
         if let Some(meter) = &mut meter {
-            meter.frame(&map);
+            meter.frame(online.map());
         }
     }
     if let Some(meter) = &meter {
         meter.report(bench);
     }
+    if rest == Rest::UntilComplete {
+        online.sight().rest();
+        for _ in 0..REST_LIMIT {
+            if online.sight().is_complete() {
+                break;
+            }
+            online.frame(bench);
+        }
+    }
     bench.per_part("frame");
-    bench.count("frames_incomplete", map.frames_incomplete() - incomplete);
-    bench.count("tile_requests", latency.tile_requests() - requests);
-    bench.bytes("gpu_buffers", map.gpu_buffer_bytes());
+    bench.count("frames_incomplete", online.map().frames_incomplete() - incomplete);
+    online.sight().declare(bench, false, rest == Rest::UntilComplete);
+    online.network().counts().declare(bench, counts);
+    bench.bytes("gpu_buffers", online.map().gpu_buffer_bytes());
     // The image shows where the flight ends, once everything has arrived.
     if let Some(path) = &bench.image {
-        latency.set_delay(0);
-        map.settle();
-        map.save_image(path);
+        online.network().set_profile(LOCAL);
+        online.settle();
+        online.map().save_image(path);
     }
 }

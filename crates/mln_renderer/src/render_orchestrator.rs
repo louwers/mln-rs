@@ -369,6 +369,9 @@ impl RenderOrchestrator {
         let dem = |id: &str| store.source(render_sources.get(id)?.tiles()?);
         let grounded = self.terrain.bind(dem, update_parameters, &mut self.events);
 
+        #[cfg(feature = "bench")]
+        crate::bench::observe_cover(&self.view, &self.tile_store);
+
         // A synchronous source's tile laid out by its answer isn't in this
         // update's render tiles yet: the next update has it.
         let answered = self.tile_store.drive();
