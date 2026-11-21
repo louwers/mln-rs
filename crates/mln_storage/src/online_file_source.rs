@@ -218,15 +218,6 @@ pub struct OnlineCore {
 }
 
 impl OnlineCore {
-    /// The time that deadlines go by.
-    fn now(&self) -> Instant {
-        #[cfg(all(feature = "bench", not(target_family = "wasm")))]
-        if let Some(clock) = &self.clock {
-            return clock();
-        }
-        Instant::now()
-    }
-
     fn next_generation(&mut self) -> u64 {
         self.generation += 1;
         self.generation
@@ -429,7 +420,11 @@ impl OnlineCore {
 
     /// Requests the resource again after `timeout`, or never for `None`.
     fn schedule(&mut self, id: u64, timeout: Option<Duration>) {
-        let now = self.now();
+        // The time that deadlines go by.
+        #[cfg(all(feature = "bench", not(target_family = "wasm")))]
+        let now = self.clock.as_ref().map_or_else(Instant::now, |clock| clock());
+        #[cfg(not(all(feature = "bench", not(target_family = "wasm"))))]
+        let now = Instant::now();
         let in_progress = self.pending_requests.contains(id) || self.active_requests.contains(&id);
         let offline = self.network.get() == Status::Offline;
         let Some(req) = self.requests.get_mut(&id) else { return };

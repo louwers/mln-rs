@@ -26,7 +26,7 @@ pub(crate) struct Sight {
     blank: u64,
     stand_in: u64,
     first_paint: Option<u64>,
-    /// The frame from which [`frames_to_complete`] counts.
+    /// The frame from which `frames_to_complete` counts.
     rest: u64,
     complete: Option<u64>,
 }
@@ -60,7 +60,7 @@ impl Sight {
         }
     }
 
-    /// Counts [`frames_to_complete`] from the next frame: the camera has
+    /// Counts `frames_to_complete` from the next frame: the camera has
     /// come to rest.
     pub(crate) fn rest(&mut self) {
         self.rest = self.frames;
