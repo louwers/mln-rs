@@ -27,11 +27,12 @@ use crate::shaders::source::{glsl, glsl_es, msl, wgsl};
 ///   declares, as the backend writes it from the [`Buffer`]: a source
 ///   declares no buffer itself. The engine reserves the view's block at 0
 ///   ([`VIEW_BUFFER`]), the draw's index into the storage buffers it reads
-///   at 1, which the backend binds itself, and the projection block at 4
-///   ([`PROJECTION_BUFFER`]); any program may read them, and lists none of
-///   them in [`buffers`](Program::buffers). A program's own buffers take
-///   the ids that [`Buffer`] says, which the Vulkan and D3D12 backends' one
-///   pipeline layout gives places to.
+///   at 1, which the backend binds itself, and the projection block at 4,
+///   an element per draw ([`PROJECTION_BUFFER`]) or a draw's own
+///   ([`DRAW_PROJECTION_BUFFER`]); any program may read them, and lists
+///   none of them in [`buffers`](Program::buffers). A program's own buffers
+///   take the ids that [`Buffer`]'s constructors give them, which the
+///   Vulkan and D3D12 backends' one pipeline layout has places for.
 /// - A vertex attribute at the shader location of its index in
 ///   [`attributes`](Program::attributes), and an instance attribute at the
 ///   location after the vertex attributes' of its index in
@@ -43,11 +44,9 @@ use crate::shaders::source::{glsl, glsl_es, msl, wgsl};
 ///   textures that the program's WGSL declares, in any variant, in binding
 ///   order, and a sampler is the one of the texture at the binding after it.
 ///
-/// A program has at most [`FIRST_VERTEX_BUFFER_ID`] buffer ids before its
-/// vertex buffers', [`MAX_ATTRIBUTES`] attributes and
-/// [`MAX_TEXTURES`] textures.
+/// A program has at most [`MAX_ATTRIBUTES`] attributes and [`MAX_TEXTURES`]
+/// textures.
 ///
-/// [`FIRST_VERTEX_BUFFER_ID`]: crate::shaders::bindings::FIRST_VERTEX_BUFFER_ID
 /// [`MAX_ATTRIBUTES`]: crate::shaders::bindings::MAX_ATTRIBUTES
 /// [`MAX_TEXTURES`]: crate::shaders::bindings::MAX_TEXTURES
 pub struct Program {
@@ -551,7 +550,6 @@ mod tests {
         assert!(EMPTY.check().is_ok());
         let fails = |program: Program| assert!(program.check().is_err(), "{:?}", program.buffers);
         fails(Program { attributes: &[POSITION, POSITION], ..EMPTY });
-        let props = Buffer::uniform::<ViewUBO>("props", 0);
         fails(Program {
             buffers: const { &[Buffer::uniform::<ViewUBO>("props", 0), Buffer::uniform::<ViewUBO>("other", 0)] },
             ..EMPTY
@@ -574,8 +572,18 @@ mod tests {
             ..EMPTY
         });
         // The view's members again, in one GLSL ES scope with the view's.
-        assert_eq!(props.id, 5);
         fails(Program { buffers: const { &[Buffer::uniform::<ViewUBO>("props", 0)] }, ..EMPTY });
+    }
+
+    #[test]
+    fn a_buffer_takes_the_id_of_what_it_is() {
+        let uniforms = [0, 1].map(|slot| Buffer::uniform::<ViewUBO>("props", slot).id);
+        assert_eq!(uniforms, [5, 6]);
+        let per_draw = [Stages::Vertex, Stages::Fragment, Stages::Both];
+        assert_eq!(per_draw.map(|stages| Buffer::storage::<ViewUBO>("values", stages).id), [2, 3, 5]);
+        assert_eq!(per_draw.map(|stages| Buffer::draw_uniform::<ViewUBO>("values", stages).id), [2, 3, 5]);
+        assert_eq!([0, 1, 2].map(|slot| Buffer::vertices("vertices", slot, Short2).id), [7, 8, 9]);
+        assert_eq!(Buffer::vertices("vertices", 0, Short2).size(), 4);
     }
 
     #[test]

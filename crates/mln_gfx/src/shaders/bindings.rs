@@ -1,7 +1,7 @@
 //! The buffer ids the engine reserves, the ranges a program's own ids fall
 //! in, and how many buffers, textures and vertex attributes a program can
-//! have. [`Program`](crate::shaders::program::Program) says which ids a
-//! program's buffers take.
+//! have. [`Buffer`](crate::shaders::program::Buffer)'s constructors give a
+//! program's buffers their ids.
 
 /// The view's uniform block
 /// ([`ViewUBO`](crate::shaders::layer_ubo::ViewUBO)).
