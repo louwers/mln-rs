@@ -1363,9 +1363,10 @@ impl Map {
     }
 
     /// Shows the rendering stats of the last frames in the top right corner,
-    /// with a symbol layer (and its source) that the view adds to the style
-    /// and keeps there, even when the style is replaced. The text needs the
-    /// style's glyphs. Disabling the view removes them.
+    /// with a symbol layer (and its GeoJSON source) that the view adds to the
+    /// style and keeps there, even when the style is replaced. The text needs
+    /// the style's glyphs, and the map's registry the `geojson` source type
+    /// and the `symbol` layer type. Disabling the view removes them.
     pub fn enable_rendering_stats_view(&mut self, value: bool) {
         if value != self.rendering_stats_view.is_some() {
             self.changed();
