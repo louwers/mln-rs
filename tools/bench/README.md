@@ -55,95 +55,97 @@ compares a configuration only with itself.
 Each scenario answers one question; its doc comment says what it runs and why
 its sizes are the ones it uses.
 
-| scenario                                | question                                                                                                                                   |
-| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `micro/style/parse/small`               | What does parsing a style document of 110 layers cost?                                                                                     |
-| `micro/style/parse/large`               | What does parsing a style document of 440 layers cost?                                                                                     |
-| `micro/style/edit/small`                | What do an application's edits to a style of 110 layers cost, each compared with the version before?                                       |
-| `micro/style/edit/large`                | What do an application's edits to a style of 440 layers cost, each compared with the version before?                                       |
-| `micro/expression/parse/liberty`        | What does parsing a style's filters and property expressions cost?                                                                         |
-| `micro/expression/evaluate/liberty`     | What does evaluating a style's filters and property expressions over a tile's features cost?                                               |
-| `micro/decode/mvt/sparse`               | What does decoding a sparse MVT tile cost, its features selected by a style's filters?                                                     |
-| `micro/decode/mvt/dense`                | What does decoding a dense MVT tile cost, its features selected by a style's filters?                                                      |
-| `micro/decode/mlt/sparse`               | What does decoding a sparse MLT tile cost, its features selected by a style's filters?                                                     |
-| `micro/decode/mlt/dense`                | What does decoding a dense MLT tile cost, its features selected by a style's filters?                                                      |
-| `micro/geojson/parse/small`             | What does parsing GeoJSON text of 1.5 MB cost?                                                                                             |
-| `micro/geojson/parse/large`             | What does parsing GeoJSON text of 13 MB cost?                                                                                              |
-| `micro/geojson/cut/small`               | What does cutting the world's tiles of zooms 0 to 4 from 33 countries' borders cost?                                                       |
-| `micro/geojson/cut/large`               | What does cutting the world's tiles of zooms 0 to 4 from 258 countries' borders cost?                                                      |
-| `micro/text/glyph-ranges/small`         | What does parsing 7 glyph ranges, those of a tile's labels in Latin script, cost?                                                          |
-| `micro/text/glyph-ranges/large`         | What does parsing 99 glyph ranges, those of a tile's labels in Japanese script, cost?                                                      |
-| `micro/text/glyph-sdf/sparse`           | What does drawing a sparse tile's Japanese glyphs from a font, as distance fields, cost?                                                   |
-| `micro/text/glyph-sdf/dense`            | What does drawing a dense tile's Japanese glyphs from a font, as distance fields, cost?                                                    |
-| `micro/text/shape/sparse`               | What does shaping a sparse tile's labels into lines of glyphs cost?                                                                        |
-| `micro/text/shape/dense`                | What does shaping a dense tile's labels into lines of glyphs cost?                                                                         |
-| `micro/layout/fill/sparse`              | What does laying out a sparse tile's fill layers cost?                                                                                     |
-| `micro/layout/fill/dense`               | What does laying out a dense tile's fill layers cost?                                                                                      |
-| `micro/layout/line/sparse`              | What does laying out a sparse tile's line layers cost?                                                                                     |
-| `micro/layout/line/dense`               | What does laying out a dense tile's line layers cost?                                                                                      |
-| `micro/layout/fill-extrusion/sparse`    | What does laying out a sparse tile's extruded buildings cost?                                                                              |
-| `micro/layout/fill-extrusion/dense`     | What does laying out a dense tile's extruded buildings cost?                                                                               |
-| `micro/layout/symbol/sparse`            | What does laying out a sparse tile's labels and icons cost?                                                                                |
-| `micro/layout/symbol/dense`             | What does laying out a dense tile's labels and icons cost?                                                                                 |
-| `micro/symbols/index/sparse`            | What does indexing a sparse tile's symbols across zooms cost, as the view zooms in on them?                                                |
-| `micro/symbols/index/dense`             | What does indexing a dense tile's symbols across zooms cost, as the view zooms in on them?                                                 |
-| `micro/symbols/place/sparse`            | What does placing a sparse tile's labels and icons cost, each where it collides with none shown?                                           |
-| `micro/symbols/place/dense`             | What does placing a dense tile's labels and icons cost, each where it collides with none shown?                                            |
-| `micro/feature-state/apply/sparse`      | What does applying feature state to a sparse tile's roads and buildings cost?                                                              |
-| `micro/feature-state/apply/dense`       | What does applying feature state to a dense tile's roads and buildings cost?                                                               |
-| `micro/worker-codec/tile/sparse`        | What does a sparse tile's job and its laid-out reply cost to cross between the map and a worker instance?                                  |
-| `micro/worker-codec/tile/dense`         | What does a dense tile's job and its laid-out reply cost to cross between the map and a worker instance?                                   |
-| `micro/queue/commands/small`            | What does a command cost through a thread's queue and a turn of it, sent one per turn?                                                     |
-| `micro/queue/commands/large`            | What does a command cost through a thread's queue and a turn of it, sent 256 per turn?                                                     |
-| `micro/queue/timers/small`              | What do the deadlines of 64 requests in flight cost a thread's queue?                                                                      |
-| `micro/queue/timers/large`              | What do the deadlines of 4,096 requests in flight cost a thread's queue?                                                                   |
-| `micro/draw/fill/constant`              | What does drawing a city's buildings as fills of one colour cost?                                                                          |
-| `micro/draw/fill/data-driven`           | What does drawing a city's buildings as fills coloured by their height cost?                                                               |
-| `micro/draw/fill/pattern`               | What does drawing a city's buildings as fills of a sprite's pattern cost?                                                                  |
-| `micro/draw/line/constant`              | What does drawing a city's roads as lines of one width and colour cost?                                                                    |
-| `micro/draw/line/data-driven`           | What does drawing a city's roads as lines whose width and colour follow their class cost?                                                  |
-| `micro/draw/line/dash`                  | What does drawing a city's roads as dashed lines cost?                                                                                     |
-| `micro/draw/line/pattern`               | What does drawing a city's roads as lines of a sprite's pattern cost?                                                                      |
-| `micro/draw/line/gradient`              | What does drawing a long route as a line coloured along its length cost?                                                                   |
-| `micro/draw/fill-extrusion/constant`    | What does drawing a city's buildings as extrusions of one height and colour cost, seen tilted?                                             |
-| `micro/draw/fill-extrusion/data-driven` | What does drawing a city's buildings as extrusions of their own height, coloured by it, cost, seen tilted?                                 |
-| `micro/draw/circle/constant`            | What does drawing a month's earthquakes over the world as circles of one size and colour cost?                                             |
-| `micro/draw/circle/data-driven`         | What does drawing a month's earthquakes over the world as circles sized by magnitude and coloured by depth cost?                           |
-| `micro/draw/heatmap/constant`           | What does drawing a month's earthquakes over the world as a heatmap of equal weights cost?                                                 |
-| `micro/draw/heatmap/data-driven`        | What does drawing a month's earthquakes over the world as a heatmap weighted by magnitude cost?                                            |
-| `micro/draw/symbol/icon`                | What does drawing a city's points of interest as icons cost, those that collide hidden?                                                    |
-| `micro/draw/symbol/text`                | What does drawing a city's points of interest as haloed labels cost, those that collide hidden?                                            |
-| `micro/draw/symbol/text-and-icon`       | What does drawing a city's points of interest as haloed labels led by their icon cost, those that collide hidden?                          |
-| `micro/draw/raster/terrain`             | What does drawing a city's terrain tiles as raster images cost?                                                                            |
-| `micro/draw/hillshade/terrain`          | What does hillshading a city's hills cost?                                                                                                 |
-| `micro/draw/color-relief/terrain`       | What does tinting a city's hills by elevation cost?                                                                                        |
-| `macro/load/street`                     | What does showing a city's streets from nothing take, until the first complete frame?                                                      |
-| `macro/load/globe`                      | What does showing the whole world on the globe from nothing take, until the first complete frame?                                          |
-| `macro/load/cjk`                        | What does showing a city labelled in Japanese script from nothing take, until the first complete frame?                                    |
-| `macro/load/street-4g`                  | How long does a city's streets take to show complete from nothing over a mobile link, and how much of the view is blank meanwhile?         |
-| `macro/load/street-slow`                | How long does a city's streets take to show complete from nothing over a slow link, and how much of the view is blank meanwhile?           |
-| `macro/load/street-warm`                | What does a disk cache that holds a city's streets save a map that shows them again over a mobile link?                                    |
-| `macro/load/street-expired`             | What does revalidating a disk cache of a city's streets that has expired cost a map that shows them again over a mobile link?              |
-| `macro/load/runtime`                    | What does showing a city's streets take through the runtime, from its start until a still image?                                           |
-| `macro/frame/street`                    | What does a frame of a city's streets cost while the camera pans, turns and tilts over loaded tiles?                                       |
-| `macro/frame/overzoom`                  | What does a frame of a city's streets cost far past its tiles' maximum zoom, tilted, while the camera turns over loaded tiles?             |
-| `macro/frame/globe`                     | What does a frame of the globe cost while it turns and tilts over loaded tiles?                                                            |
-| `macro/frame/antimeridian`              | What does a frame of the world on a flat map cost while the view crosses the antimeridian over loaded tiles?                               |
-| `macro/frame/earthquakes`               | What does a frame of a map of earthquakes cost, a heatmap that gives way to circles, while the camera circles and zooms in and out?        |
-| `macro/frame/terrain`                   | What does a frame of a city's hills cost, tinted by elevation and hillshaded, while the camera circles, turns and tilts over loaded tiles? |
-| `macro/frame/labels`                    | What does a frame of a city's dense labels cost, POI labels choosing among anchors, while the tilted camera turns over loaded tiles?       |
-| `macro/navigate/street`                 | What does a flight into a city's streets and back out cost, with tiles arriving while it flies?                                            |
-| `macro/navigate/fly`                    | What does a flight from one city's streets, out over an ocean and into another city's streets, cost, with tiles arriving while it flies?   |
-| `macro/navigate/zoom`                   | What does zooming from a city's streets out to the world and back in cost, with tiles arriving while it zooms?                             |
-| `macro/navigate/fly-4g`                 | How much of the view does a flight from one city to another leave blank over a mobile link, and how many bytes go to tiles it passes over? |
-| `macro/navigate/street-flaky`           | How soon does the view of a city's streets come back complete after the network drops out during a flight?                                 |
-| `macro/navigate/zoom-slow`              | Does zooming out to the world and back in over a slow link fetch again the street tiles the map just let go of?                            |
-| `macro/update/geojson`                  | What does replacing a GeoJSON source's data cost, until the map shows the new data?                                                        |
-| `macro/update/layers`                   | What does adding a batch of layers to a city's map, then removing them, cost until the map shows each?                                     |
-| `macro/update/paint`                    | What does setting a layer's paint property cost, until the map shows the new value?                                                        |
-| `macro/update/feature-state`            | What does a frame cost that moves a hover state from one feature to another?                                                               |
-| `macro/update/images`                   | What does adding the images that visible symbols use cost, until the map shows them?                                                       |
-| `macro/tile-server/street`              | What does a tile server's renderer spend on each new tile of a city, from zoom 7 to 14?                                                    |
+| scenario                                | question                                                                                                                                                |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `micro/style/parse/small`               | What does parsing a style document of 110 layers cost?                                                                                                  |
+| `micro/style/parse/large`               | What does parsing a style document of 440 layers cost?                                                                                                  |
+| `micro/style/edit/small`                | What do an application's edits to a style of 110 layers cost, each compared with the version before?                                                    |
+| `micro/style/edit/large`                | What do an application's edits to a style of 440 layers cost, each compared with the version before?                                                    |
+| `micro/expression/parse/liberty`        | What does parsing a style's filters and property expressions cost?                                                                                      |
+| `micro/expression/evaluate/liberty`     | What does evaluating a style's filters and property expressions over a tile's features cost?                                                            |
+| `micro/decode/mvt/sparse`               | What does decoding a sparse MVT tile cost, its features selected by a style's filters?                                                                  |
+| `micro/decode/mvt/dense`                | What does decoding a dense MVT tile cost, its features selected by a style's filters?                                                                   |
+| `micro/decode/mlt/sparse`               | What does decoding a sparse MLT tile cost, its features selected by a style's filters?                                                                  |
+| `micro/decode/mlt/dense`                | What does decoding a dense MLT tile cost, its features selected by a style's filters?                                                                   |
+| `micro/geojson/parse/small`             | What does parsing GeoJSON text of 1.5 MB cost?                                                                                                          |
+| `micro/geojson/parse/large`             | What does parsing GeoJSON text of 13 MB cost?                                                                                                           |
+| `micro/geojson/cut/small`               | What does cutting the world's tiles of zooms 0 to 4 from 33 countries' borders cost?                                                                    |
+| `micro/geojson/cut/large`               | What does cutting the world's tiles of zooms 0 to 4 from 258 countries' borders cost?                                                                   |
+| `micro/text/glyph-ranges/small`         | What does parsing 7 glyph ranges, those of a tile's labels in Latin script, cost?                                                                       |
+| `micro/text/glyph-ranges/large`         | What does parsing 99 glyph ranges, those of a tile's labels in Japanese script, cost?                                                                   |
+| `micro/text/glyph-sdf/sparse`           | What does drawing a sparse tile's Japanese glyphs from a font, as distance fields, cost?                                                                |
+| `micro/text/glyph-sdf/dense`            | What does drawing a dense tile's Japanese glyphs from a font, as distance fields, cost?                                                                 |
+| `micro/text/shape/sparse`               | What does shaping a sparse tile's labels into lines of glyphs cost?                                                                                     |
+| `micro/text/shape/dense`                | What does shaping a dense tile's labels into lines of glyphs cost?                                                                                      |
+| `micro/layout/fill/sparse`              | What does laying out a sparse tile's fill layers cost?                                                                                                  |
+| `micro/layout/fill/dense`               | What does laying out a dense tile's fill layers cost?                                                                                                   |
+| `micro/layout/line/sparse`              | What does laying out a sparse tile's line layers cost?                                                                                                  |
+| `micro/layout/line/dense`               | What does laying out a dense tile's line layers cost?                                                                                                   |
+| `micro/layout/fill-extrusion/sparse`    | What does laying out a sparse tile's extruded buildings cost?                                                                                           |
+| `micro/layout/fill-extrusion/dense`     | What does laying out a dense tile's extruded buildings cost?                                                                                            |
+| `micro/layout/symbol/sparse`            | What does laying out a sparse tile's labels and icons cost?                                                                                             |
+| `micro/layout/symbol/dense`             | What does laying out a dense tile's labels and icons cost?                                                                                              |
+| `micro/symbols/index/sparse`            | What does indexing a sparse tile's symbols across zooms cost, as the view zooms in on them?                                                             |
+| `micro/symbols/index/dense`             | What does indexing a dense tile's symbols across zooms cost, as the view zooms in on them?                                                              |
+| `micro/symbols/place/sparse`            | What does placing a sparse tile's labels and icons cost, each where it collides with none shown?                                                        |
+| `micro/symbols/place/dense`             | What does placing a dense tile's labels and icons cost, each where it collides with none shown?                                                         |
+| `micro/feature-state/apply/sparse`      | What does applying feature state to a sparse tile's roads and buildings cost?                                                                           |
+| `micro/feature-state/apply/dense`       | What does applying feature state to a dense tile's roads and buildings cost?                                                                            |
+| `micro/worker-codec/tile/sparse`        | What does a sparse tile's job and its laid-out reply cost to cross between the map and a worker instance?                                               |
+| `micro/worker-codec/tile/dense`         | What does a dense tile's job and its laid-out reply cost to cross between the map and a worker instance?                                                |
+| `micro/queue/commands/small`            | What does a command cost through a thread's queue and a turn of it, sent one per turn?                                                                  |
+| `micro/queue/commands/large`            | What does a command cost through a thread's queue and a turn of it, sent 256 per turn?                                                                  |
+| `micro/queue/timers/small`              | What do the deadlines of 64 requests in flight cost a thread's queue?                                                                                   |
+| `micro/queue/timers/large`              | What do the deadlines of 4,096 requests in flight cost a thread's queue?                                                                                |
+| `micro/draw/fill/constant`              | What does drawing a city's buildings as fills of one colour cost?                                                                                       |
+| `micro/draw/fill/data-driven`           | What does drawing a city's buildings as fills coloured by their height cost?                                                                            |
+| `micro/draw/fill/pattern`               | What does drawing a city's buildings as fills of a sprite's pattern cost?                                                                               |
+| `micro/draw/line/constant`              | What does drawing a city's roads as lines of one width and colour cost?                                                                                 |
+| `micro/draw/line/data-driven`           | What does drawing a city's roads as lines whose width and colour follow their class cost?                                                               |
+| `micro/draw/line/dash`                  | What does drawing a city's roads as dashed lines cost?                                                                                                  |
+| `micro/draw/line/pattern`               | What does drawing a city's roads as lines of a sprite's pattern cost?                                                                                   |
+| `micro/draw/line/gradient`              | What does drawing a long route as a line coloured along its length cost?                                                                                |
+| `micro/draw/fill-extrusion/constant`    | What does drawing a city's buildings as extrusions of one height and colour cost, seen tilted?                                                          |
+| `micro/draw/fill-extrusion/data-driven` | What does drawing a city's buildings as extrusions of their own height, coloured by it, cost, seen tilted?                                              |
+| `micro/draw/circle/constant`            | What does drawing a month's earthquakes over the world as circles of one size and colour cost?                                                          |
+| `micro/draw/circle/data-driven`         | What does drawing a month's earthquakes over the world as circles sized by magnitude and coloured by depth cost?                                        |
+| `micro/draw/heatmap/constant`           | What does drawing a month's earthquakes over the world as a heatmap of equal weights cost?                                                              |
+| `micro/draw/heatmap/data-driven`        | What does drawing a month's earthquakes over the world as a heatmap weighted by magnitude cost?                                                         |
+| `micro/draw/symbol/icon`                | What does drawing a city's points of interest as icons cost, those that collide hidden?                                                                 |
+| `micro/draw/symbol/text`                | What does drawing a city's points of interest as haloed labels cost, those that collide hidden?                                                         |
+| `micro/draw/symbol/text-and-icon`       | What does drawing a city's points of interest as haloed labels led by their icon cost, those that collide hidden?                                       |
+| `micro/draw/raster/terrain`             | What does drawing a city's terrain tiles as raster images cost?                                                                                         |
+| `micro/draw/hillshade/terrain`          | What does hillshading a city's hills cost?                                                                                                              |
+| `micro/draw/color-relief/terrain`       | What does tinting a city's hills by elevation cost?                                                                                                     |
+| `macro/load/street`                     | What does showing a city's streets from nothing take, until the first complete frame?                                                                   |
+| `macro/load/globe`                      | What does showing the whole world on the globe from nothing take, until the first complete frame?                                                       |
+| `macro/load/cjk`                        | What does showing a city labelled in Japanese script from nothing take, until the first complete frame?                                                 |
+| `macro/load/street-4g`                  | How long does a city's streets take to show complete from nothing over a mobile link, and how much of the view is blank meanwhile?                      |
+| `macro/load/street-pmtiles-4g`          | How long does a city's streets take to show complete from nothing over a mobile link, read from a PMTiles archive by byte ranges?                       |
+| `macro/load/street-slow`                | How long does a city's streets take to show complete from nothing over a slow link, and how much of the view is blank meanwhile?                        |
+| `macro/load/street-warm`                | What does a disk cache that holds a city's streets save a map that shows them again over a mobile link?                                                 |
+| `macro/load/street-expired`             | What does revalidating a disk cache of a city's streets that has expired cost a map that shows them again over a mobile link?                           |
+| `macro/load/runtime`                    | What does showing a city's streets take through the runtime, from its start until a still image?                                                        |
+| `macro/frame/street`                    | What does a frame of a city's streets cost while the camera pans, turns and tilts over loaded tiles?                                                    |
+| `macro/frame/overzoom`                  | What does a frame of a city's streets cost far past its tiles' maximum zoom, tilted, while the camera turns over loaded tiles?                          |
+| `macro/frame/globe`                     | What does a frame of the globe cost while it turns and tilts over loaded tiles?                                                                         |
+| `macro/frame/antimeridian`              | What does a frame of the world on a flat map cost while the view crosses the antimeridian over loaded tiles?                                            |
+| `macro/frame/earthquakes`               | What does a frame of a map of earthquakes cost, a heatmap that gives way to circles, while the camera circles and zooms in and out?                     |
+| `macro/frame/terrain`                   | What does a frame of a city's hills cost, tinted by elevation and hillshaded, while the camera circles, turns and tilts over loaded tiles?              |
+| `macro/frame/labels`                    | What does a frame of a city's dense labels cost, POI labels choosing among anchors, while the tilted camera turns over loaded tiles?                    |
+| `macro/navigate/street`                 | What does a flight into a city's streets and back out cost, with tiles arriving while it flies?                                                         |
+| `macro/navigate/fly`                    | What does a flight from one city's streets, out over an ocean and into another city's streets, cost, with tiles arriving while it flies?                |
+| `macro/navigate/zoom`                   | What does zooming from a city's streets out to the world and back in cost, with tiles arriving while it zooms?                                          |
+| `macro/navigate/fly-4g`                 | How much of the view does a flight from one city to another leave blank over a mobile link, and how many bytes go to tiles it passes over?              |
+| `macro/navigate/street-flaky`           | How soon does the view of a city's streets come back complete after the network drops out during a flight?                                              |
+| `macro/navigate/street-pmtiles-flaky`   | How soon does the view of a city's streets, read from a PMTiles archive by byte ranges, come back complete after the network drops out during a flight? |
+| `macro/navigate/zoom-slow`              | Does zooming out to the world and back in over a slow link fetch again the street tiles the map just let go of?                                         |
+| `macro/update/geojson`                  | What does replacing a GeoJSON source's data cost, until the map shows the new data?                                                                     |
+| `macro/update/layers`                   | What does adding a batch of layers to a city's map, then removing them, cost until the map shows each?                                                  |
+| `macro/update/paint`                    | What does setting a layer's paint property cost, until the map shows the new value?                                                                     |
+| `macro/update/feature-state`            | What does a frame cost that moves a hover state from one feature to another?                                                                            |
+| `macro/update/images`                   | What does adding the images that visible symbols use cost, until the map shows them?                                                                    |
+| `macro/tile-server/street`              | What does a tile server's renderer spend on each new tile of a city, from zoom 7 to 14?                                                                 |
 
 Micro scenarios read what a map over the fixtures reads: Liberty's style, its
 expressions, a sparse and a dense street tile as MVT and MLT, Tokyo's labels,
@@ -517,9 +519,11 @@ expired data. `mln_storage`'s `bench` module hands the source's transfers to the
 simulation, has its deadlines go by the simulation's clock, which moves one 60
 Hz frame per frame, and runs its core on the scenario's thread.
 
-A server answers from the fixtures: Liberty, its TileJSON, sprite and glyphs,
-and the archive's tiles, whose size on the wire is the archive's compressed
-bytes. Every answer carries an `ETag`, which a revalidation gets a 304 for. A
+A server answers from the fixtures: Liberty, its sprite and glyphs, and its tile
+set, either as a TileJSON and a URL per tile, each tile's size on the wire the
+archive's compressed bytes, or as the PMTiles archive itself, whose header,
+directories and tiles the map reads by byte ranges (the `-pmtiles` scenarios).
+Every answer carries an `ETag`, which a revalidation gets a 304 for. A
 transfer's first byte comes a round trip after it starts, and the transfers
 receiving share the link's bandwidth equally. Faults come from a seed, drawn
 from each transfer's URL and attempt alone, so that a change in what else the

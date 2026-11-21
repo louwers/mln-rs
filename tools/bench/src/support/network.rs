@@ -128,8 +128,18 @@ struct Answer {
     wire: u64,
 }
 
-/// A server of a style over the fixtures, at [`ORIGIN`]: the style, the
-/// TileJSON and tiles of a tile set, and the snapshot's sprite and glyphs.
+/// How a server serves a tile set.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Serve {
+    /// A TileJSON and a URL per tile, `z/x/y`.
+    Tiles,
+    /// The PMTiles archive, whose byte ranges the map reads
+    /// (`pmtiles://https://...`).
+    Archive,
+}
+
+/// A server of a style over the fixtures, at [`ORIGIN`]: the style, a tile
+/// set as [`Serve`] says, and the snapshot's sprite and glyphs.
 /// Every answer carries an `ETag`, which a revalidation that sends it back
 /// gets a 304 for, and a `Cache-Control: max-age` of [`Server::MAX_AGE`],
 /// or an `Expires` long past after [`set_expired`](Self::set_expired).
@@ -140,14 +150,16 @@ pub(crate) struct Server {
     dir: PathBuf,
     style: String,
     name: &'static str,
+    archive_path: PathBuf,
     archive: pmtiles::PmTilesReader<std::fs::File, pmtiles::NoCache>,
     tilejson: String,
     expired: AtomicBool,
 }
 
 impl Server {
-    /// Liberty over `tiles`, with every URL the server's.
-    pub(crate) fn new(fixtures: &Fixtures, tiles: Tiles) -> Arc<Server> {
+    /// Liberty over `tiles`, served as `serve` says, with every URL the
+    /// server's.
+    pub(crate) fn new(fixtures: &Fixtures, tiles: Tiles, serve: Serve) -> Arc<Server> {
         let name = tiles.name();
         let path = fixtures.path(&fixtures.tile_set(tiles).archive);
         let archive =
@@ -163,7 +175,11 @@ impl Server {
         })
         .to_string();
         let mut style = fixtures.style_value(tiles);
-        style["sources"]["openmaptiles"]["url"] = format!("{ORIGIN}tiles/{name}.json").into();
+        style["sources"]["openmaptiles"]["url"] = match serve {
+            Serve::Tiles => format!("{ORIGIN}tiles/{name}.json"),
+            Serve::Archive => format!("pmtiles://{ORIGIN}tiles/{name}.pmtiles"),
+        }
+        .into();
         for url in ["sprite", "glyphs"] {
             let local = style[url].as_str().expect("the style's sprite and glyphs");
             style[url] = local.replacen("asset://", ORIGIN, 1).into();
@@ -172,6 +188,7 @@ impl Server {
             dir: fixtures.dir().to_owned(),
             style: style.to_string(),
             name,
+            archive_path: path,
             archive,
             tilejson,
             expired: AtomicBool::new(false),
@@ -190,6 +207,16 @@ impl Server {
     /// Whether what the server answers from now on has expired already.
     pub(crate) fn set_expired(&self, expired: bool) {
         self.expired.store(expired, Ordering::Relaxed);
+    }
+
+    /// The bytes `first` to `last` of the archive, as many as it has.
+    fn read_range(&self, (first, last): (u64, u64)) -> Vec<u8> {
+        use std::io::{Read, Seek, SeekFrom};
+        let mut file = std::fs::File::open(&self.archive_path).expect("the archive opens");
+        file.seek(SeekFrom::Start(first)).expect("the archive seeks");
+        let mut bytes = Vec::new();
+        file.take(last + 1 - first).read_to_end(&mut bytes).expect("the archive reads");
+        bytes
     }
 
     /// The body at `path`, and its size on the wire.
@@ -234,6 +261,12 @@ impl Origin for Server {
             return Answer { status: 304, headers, body: Vec::new(), wire: HEADER_BYTES };
         }
         let path = url.strip_prefix(ORIGIN).unwrap_or_else(|| panic!("a request off the server: {url}"));
+        if path == format!("tiles/{}.pmtiles", self.name) {
+            let range = resource.data_range.expect("a range of the archive");
+            let body = self.read_range(range);
+            let wire = HEADER_BYTES + body.len() as u64;
+            return Answer { status: 206, headers, body, wire };
+        }
         let found = self.read(path);
         let Some((body, wire)) = found else {
             headers.clear();

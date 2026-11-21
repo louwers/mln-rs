@@ -9,7 +9,7 @@ use super::VIEW;
 use crate::scenario::{Bench, Kind, Scenario};
 use crate::support::fixtures::{Fixtures, Tiles};
 use crate::support::map::Frontend;
-use crate::support::network::{CDN, FLAKY, LOCAL, MOBILE_4G, Network, Profile, SLOW, Server};
+use crate::support::network::{CDN, FLAKY, LOCAL, MOBILE_4G, Network, Profile, SLOW, Serve, Server};
 use crate::support::online::OnlineMap;
 
 pub(crate) const SCENARIOS: &[Scenario] = &[
@@ -42,6 +42,12 @@ pub(crate) const SCENARIOS: &[Scenario] = &[
         kind: Kind::Macro,
         question: "How soon does the view of a city's streets come back complete after the network drops out during a flight?",
         run: street_flaky,
+    },
+    Scenario {
+        name: "macro/navigate/street-pmtiles-flaky",
+        kind: Kind::Macro,
+        question: "How soon does the view of a city's streets, read from a PMTiles archive by byte ranges, come back complete after the network drops out during a flight?",
+        run: street_pmtiles_flaky,
     },
     Scenario {
         name: "macro/navigate/zoom-slow",
@@ -85,7 +91,7 @@ impl Key {
 /// ([`street_keys`]), with tiles coming from a nearby CDN?
 fn street(bench: &mut Bench) {
     let fixtures = Fixtures::open(bench);
-    flight(bench, &fixtures, Tiles::Street, &street_keys(&fixtures), CDN, Rest::Skip);
+    flight(bench, &fixtures, (Tiles::Street, Serve::Tiles), &street_keys(&fixtures), CDN, Rest::Skip);
 }
 
 /// The question: how soon does the view come back complete after the
@@ -100,7 +106,17 @@ fn street(bench: &mut Bench) {
 fn street_flaky(bench: &mut Bench) {
     let fixtures = Fixtures::open(bench);
     let keys = street_keys(&fixtures);
-    flight(bench, &fixtures, Tiles::Street, &keys[..3], FLAKY, Rest::UntilComplete);
+    flight(bench, &fixtures, (Tiles::Street, Serve::Tiles), &keys[..3], FLAKY, Rest::UntilComplete);
+}
+
+/// The question of `macro/navigate/street-flaky`, the tiles read from a
+/// PMTiles archive on the server: each tile's range, and the directories
+/// before it, fail in the outage and come back through the archive's
+/// requests.
+fn street_pmtiles_flaky(bench: &mut Bench) {
+    let fixtures = Fixtures::open(bench);
+    let keys = street_keys(&fixtures);
+    flight(bench, &fixtures, (Tiles::Street, Serve::Archive), &keys[..3], FLAKY, Rest::UntilComplete);
 }
 
 /// The flight of `macro/navigate/street`: from a view of San Francisco at
@@ -128,7 +144,7 @@ fn street_keys(fixtures: &Fixtures) -> [Key; 4] {
 /// shows only tiles of the set.
 fn fly(bench: &mut Bench) {
     let fixtures = Fixtures::open(bench);
-    flight(bench, &fixtures, Tiles::Flight, &fly_keys(&fixtures), CDN, Rest::Skip);
+    flight(bench, &fixtures, (Tiles::Flight, Serve::Tiles), &fly_keys(&fixtures), CDN, Rest::Skip);
 }
 
 /// The question: how much of the view does the flight of
@@ -139,7 +155,7 @@ fn fly(bench: &mut Bench) {
 /// half a minute of the link, which is a question of its own.
 fn fly_4g(bench: &mut Bench) {
     let fixtures = Fixtures::open(bench);
-    flight(bench, &fixtures, Tiles::Flight, &fly_keys(&fixtures), MOBILE_4G, Rest::Skip);
+    flight(bench, &fixtures, (Tiles::Flight, Serve::Tiles), &fly_keys(&fixtures), MOBILE_4G, Rest::Skip);
 }
 
 /// The flight of `macro/navigate/fly`: four seconds at 60 Hz, zooming out
@@ -158,7 +174,7 @@ fn fly_keys(fixtures: &Fixtures) -> [Key; 4] {
 /// tiles on the way out and needs them again on the way back.
 fn zoom(bench: &mut Bench) {
     let fixtures = Fixtures::open(bench);
-    flight(bench, &fixtures, Tiles::Street, &zoom_keys(&fixtures), CDN, Rest::Skip);
+    flight(bench, &fixtures, (Tiles::Street, Serve::Tiles), &zoom_keys(&fixtures), CDN, Rest::Skip);
 }
 
 /// The question: does the map fetch again what it just let go of? The zoom
@@ -167,7 +183,7 @@ fn zoom(bench: &mut Bench) {
 /// transfers of tiles that an earlier transfer had brought.
 fn zoom_slow(bench: &mut Bench) {
     let fixtures = Fixtures::open(bench);
-    flight(bench, &fixtures, Tiles::Street, &zoom_keys(&fixtures), SLOW, Rest::UntilComplete);
+    flight(bench, &fixtures, (Tiles::Street, Serve::Tiles), &zoom_keys(&fixtures), SLOW, Rest::UntilComplete);
 }
 
 /// The zoom of `macro/navigate/zoom`: from San Francisco's streets at zoom
@@ -178,8 +194,8 @@ fn zoom_keys(fixtures: &Fixtures) -> [Key; 3] {
     [Key::at(0, center, 15.0), Key::at(60, center, 2.0), Key::at(120, center, 15.0)]
 }
 
-/// Flies through `keys` over Liberty on `tiles`, every resource coming
-/// from the simulated server over `profile`, and measures each frame: the
+/// Flies through `keys` over Liberty on `tiles`, served as their [`Serve`]
+/// says, every resource coming from the simulated server over `profile`, and measures each frame: the
 /// answers that came since the frame before, laying out what they brought,
 /// its update, symbol placement, draw calls, the GPU finishing it and the
 /// transfers it starts. Each leg between keys eases in and out. With
@@ -191,7 +207,14 @@ fn zoom_keys(fixtures: &Fixtures) -> [Key; 3] {
 /// show what has arrived, and parent or child tiles where a tile is
 /// missing, as a map does over a network; transfers take a time that only
 /// frames advance, so every run draws the same frames with the same tiles.
-fn flight(bench: &mut Bench, fixtures: &Fixtures, tiles: Tiles, keys: &[Key], profile: Profile, rest: Rest) {
+fn flight(
+    bench: &mut Bench,
+    fixtures: &Fixtures,
+    (tiles, serve): (Tiles, Serve),
+    keys: &[Key],
+    profile: Profile,
+    rest: Rest,
+) {
     let camera = |frame: usize| {
         let leg = keys.windows(2).find(|leg| frame <= leg[1].frame).expect("a frame of the flight");
         let (from, to) = (&leg[0], &leg[1]);
@@ -211,7 +234,7 @@ fn flight(bench: &mut Bench, fixtures: &Fixtures, tiles: Tiles, keys: &[Key], pr
     let frames = keys.last().expect("a flight's keys").frame;
     let frontend = Frontend::new(VIEW);
     bench.gpu = Some(frontend.gpu());
-    let network = Network::new(Server::new(fixtures, tiles), LOCAL);
+    let network = Network::new(Server::new(fixtures, tiles, serve), LOCAL);
     let mut online = OnlineMap::new(frontend, network, None, &camera(0));
     online.settle();
 
