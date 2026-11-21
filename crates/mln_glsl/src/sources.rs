@@ -450,7 +450,7 @@ bool clippedAtAntimeridian(float tileX) {
 #define layerSSBOStartId                    0
 #define layerUBOStartId                     4
 #define drawableUBOStartId                  0
-#define samplerBindingStartId               4
+#define samplerBindingStartId               3
 
 #define idDrawableReservedVertexOnlyUBO     layerSSBOStartId
 #define idDrawableReservedFragmentOnlyUBO   idDrawableReservedVertexOnlyUBO + 1

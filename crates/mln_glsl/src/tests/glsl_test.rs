@@ -743,9 +743,9 @@ fn bindings_follow_from_the_packed_ids() {
     assert_eq!(drawable_vertex_binding(ID_FILL_OUTLINE_PAINT), Some(7));
 
     // samplerBindingStartId.
-    assert_eq!(IMAGE_SAMPLER_START, 4);
+    assert_eq!(IMAGE_SAMPLER_START, 3);
     assert_eq!(image_texture_binding(0), 0);
-    assert_eq!(image_sampler_binding(0), 4);
+    assert_eq!(image_sampler_binding(0), 3);
 }
 
 // No table has more attributes and textures than a shader can have. Only

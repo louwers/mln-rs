@@ -90,10 +90,16 @@
 //!   reads, by the same height rule. A draw's ground (DEM coordinates,
 //!   part, decode and exaggeration) rides in its projection entry, which
 //!   every standing program's vertex stage reads ([`TerrainProjectionUBO`]);
-//!   its DEM texture binds at [`ID_GROUND_DEM_TEXTURE`], and the depth of
-//!   the drawn ground at [`ID_GROUND_DEPTH_TEXTURE`], so a label's glyphs
-//!   and icons keep 0 and 1. A frame without terrain makes no terrain
-//!   variant, writes no ground and binds no ground texture.
+//!   its DEM texture binds at [`ID_GROUND_DEM_TEXTURE`], a slot of the
+//!   draw's own textures that no standing program's other textures take, so
+//!   a label's glyphs and icons keep 0 and 1. Nothing hides what stands
+//!   behind the ground yet. The depth of the drawn ground that will hide it
+//!   is one texture for the whole frame: it is to bind as the frame's global
+//!   uniform buffers do, from what the context holds for the frame rather
+//!   than among a draw's own textures, at a slot that only the terrain
+//!   variants declare, so that no flat program's layout or draw changes for
+//!   it. A frame without terrain makes no terrain variant, writes no ground
+//!   and binds no ground texture.
 //! - **The surface** draws once for each stack, its tiles nearest the
 //!   center first, testing and writing the 3D depth range with less or
 //!   equal and blending its drapes over what is under it. A stack above the
@@ -253,7 +259,7 @@ use mln_gfx::gpu::Gpu;
 #[cfg(doc)]
 use mln_gfx::projection_variant::ProjectionVariant;
 #[cfg(doc)]
-use mln_gfx::shaders::shader_defines::{ID_GROUND_DEM_TEXTURE, ID_GROUND_DEPTH_TEXTURE};
+use mln_gfx::shaders::shader_defines::ID_GROUND_DEM_TEXTURE;
 #[cfg(doc)]
 use mln_gfx::shaders::terrain_ubo::TerrainProjectionUBO;
 use mln_gfx::shaders::terrain_ubo::TerrainPropsUBO;
