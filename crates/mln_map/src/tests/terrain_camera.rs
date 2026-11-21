@@ -440,3 +440,31 @@ fn an_anchored_ease_that_loses_its_terrain_holds_the_flat_map() {
         }
     }
 }
+
+/// A jump from the globe onto Mercator, where the terrain applies, keeps its
+/// eye above the ground there, as any jump over terrain does: the projection
+/// it jumps into decides which rules it follows.
+#[test]
+fn a_jump_from_the_globe_onto_terrain_keeps_its_eye_above_the_ground() {
+    let style = STYLE.replace(
+        r#""layers": []"#,
+        r#""layers": [], "projection": {"type": ["step", ["zoom"], "vertical-perspective", 6, "mercator"]}"#,
+    );
+    let run_loop = Queue::<()>::new();
+    let mut map = pitchable(&style, &run_loop);
+    map.set_center_clamped_to_ground(false);
+    map.jump_to(&CameraOptions { center: Some(start()), zoom: Some(3.0), ..Default::default() });
+    assert!(map.transform_state().view().is_globe());
+    let height = 3000.0;
+    report(&mut map, ground_event(&flat(Some(height), height)));
+    map.jump_to(&CameraOptions {
+        zoom: Some(14.0),
+        pitch: Some(60.0),
+        center_altitude: Some(500.0),
+        ..Default::default()
+    });
+    let view = map.transform_state().view();
+    assert!(!view.is_globe());
+    assert_eq!(500.0, view.center_altitude());
+    assert!(view.eye_position().z >= height, "the eye at {} m", view.eye_position().z);
+}

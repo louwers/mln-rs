@@ -663,6 +663,9 @@ impl Map {
         let zoom = camera.zoom.unwrap_or_else(|| self.transform.view().zoom());
         let projection = self.projection_at(zoom);
         self.transform.set_projection_definition(&projection);
+        // So does the terrain, which applies only on Mercator.
+        let ground = self.terrain_ground();
+        self.transform.set_terrain(ground);
         self.transform.jump_to(camera);
         self.on_update();
     }
