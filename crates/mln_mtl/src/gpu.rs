@@ -22,7 +22,6 @@ use mln_gfx::gpu::{
 };
 use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::shader_defines::{DRAWABLE_RESERVED_UBO_COUNT, ID_GLOBAL_UBO_INDEX};
-use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{
     ColorBlendEquationType, ColorBlendFactorType, CullFaceSideType, CullFaceWindingType, DepthFunctionType,
@@ -615,7 +614,7 @@ impl MetalGpu {
             blend: BlendFunction::Replace,
             color_mask: Mask { r: true, g: true, b: true, a: true },
             depth: DepthState { compare: DepthFunctionType::Always, write: false },
-            stencil: StencilState::from(&StencilMode::disabled()),
+            stencil: StencilState::DISABLED,
         };
         let targets = TargetFormats { color: Some(TextureFormat::Rgba8Unorm), depth_stencil: None };
         let desc = PipelineDesc { shader, vertex_buffers: &layouts, state, targets };

@@ -1,7 +1,6 @@
 use glow::HasContext as _;
 use mln_gfx::color_mode::ColorMode;
 use mln_gfx::cull_face_mode::CullFaceMode;
-use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
 use mln_gfx::gpu::{
     BindGroupEntry, BindingsDesc, BindingsId, BufferDesc, BufferId, BufferUsage, ColorAttachment, DepthState,
@@ -12,7 +11,6 @@ use mln_gfx::gpu::{
 };
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
-use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::types::DepthFunctionType;
 use mln_layers::background::programs::BACKGROUND;
 use mln_layers::background::ubo::{BackgroundDrawableUnionUBO, BackgroundPropsUBO};
@@ -191,8 +189,8 @@ fn background_state() -> FixedState {
         cull: CullFaceMode::disabled(),
         blend: ColorMode::unblended().blend_function,
         color_mask: ColorMode::unblended().mask,
-        depth: DepthState::from(&DepthMode::disabled()),
-        stencil: StencilState::from(&StencilMode::disabled()),
+        depth: DepthState::DISABLED,
+        stencil: StencilState::DISABLED,
     }
 }
 

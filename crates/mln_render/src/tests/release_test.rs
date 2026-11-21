@@ -136,10 +136,8 @@ fn released_shaders_and_pipelines_go() {
 fn clip_mask_pipeline(shader: mln_gfx::gpu::ShaderId) -> mln_gfx::gpu::PipelineKey {
     use mln_gfx::color_mode::ColorMode;
     use mln_gfx::cull_face_mode::CullFaceMode;
-    use mln_gfx::depth_mode::DepthMode;
     use mln_gfx::gfx_types::DrawModeType;
     use mln_gfx::gpu::{DepthState, FixedState, PipelineKey, StencilState, TargetFormats};
-    use mln_gfx::stencil_mode::StencilMode;
 
     let color = ColorMode::unblended();
     PipelineKey {
@@ -150,8 +148,8 @@ fn clip_mask_pipeline(shader: mln_gfx::gpu::ShaderId) -> mln_gfx::gpu::PipelineK
             cull: CullFaceMode::disabled(),
             blend: color.blend_function,
             color_mask: color.mask,
-            depth: DepthState::from(&DepthMode::disabled()),
-            stencil: StencilState::from(&StencilMode::disabled()),
+            depth: DepthState::DISABLED,
+            stencil: StencilState::DISABLED,
         },
         targets: TargetFormats { color: Some(TextureFormat::Rgba8Unorm), depth_stencil: None },
     }

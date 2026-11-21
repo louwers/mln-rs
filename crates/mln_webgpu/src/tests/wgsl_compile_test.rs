@@ -14,7 +14,6 @@ use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::program::{Buffer, PROJECTION_BUFFER, Program, VIEW_BUFFER};
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::shaders::source::wgsl::{self, Wgsl};
-use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::types::DepthFunctionType;
 
 use crate::Device;
@@ -129,7 +128,7 @@ fn state() -> FixedState {
         blend: BlendFunction::Replace,
         color_mask: Mask { r: true, g: true, b: true, a: true },
         depth: DepthState { compare: DepthFunctionType::Always, write: false },
-        stencil: StencilState::from(&StencilMode::disabled()),
+        stencil: StencilState::DISABLED,
     }
 }
 

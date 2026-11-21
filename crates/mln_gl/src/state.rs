@@ -4,13 +4,12 @@
 use glow::HasContext;
 use mln_gfx::color_mode::{ColorMode, Mask};
 use mln_gfx::cull_face_mode::CullFaceMode;
-use mln_gfx::depth_mode::DepthMode;
+use mln_gfx::gpu::{DepthState, StencilState, StencilTest};
 use mln_gfx::shaders::shader_defines::MAX_UBO_COUNT_PER_SHADER;
-use mln_gfx::stencil_mode::{StencilMode, Test};
 use mln_gfx::texture2d::MAX_ACTIVE_TEXTURE_UNITS;
 use mln_gfx::types::{
     ColorBlendEquationType, ColorBlendFactorType, CullFaceSideType, CullFaceWindingType, DepthFunctionType,
-    DepthMaskType, StencilFunctionType, StencilOpType,
+    StencilFunctionType, StencilOpType,
 };
 use mln_util::Color;
 
@@ -219,8 +218,10 @@ impl State {
         }
     }
 
-    pub(crate) fn set_depth_mode(&mut self, gl: &Gl, depth: &DepthMode) {
-        if depth.func == DepthFunctionType::Always && depth.mask != DepthMaskType::ReadWrite {
+    /// Sets the depth test and write of `depth`, and the depths `range`
+    /// that clip z maps to.
+    pub(crate) fn set_depth(&mut self, gl: &Gl, depth: &DepthState, range: (f32, f32)) {
+        if depth.compare == DepthFunctionType::Always && !depth.write {
             Self::capability(gl, &mut self.depth_test, glow::DEPTH_TEST, false);
             // Depth-related state should not matter when the depth test is
             // disabled, but on Adreno 2xx GPUs it apparently does
@@ -228,16 +229,16 @@ impl State {
         } else {
             Self::capability(gl, &mut self.depth_test, glow::DEPTH_TEST, true);
         }
-        if changed(&mut self.depth_func, depth.func) {
+        if changed(&mut self.depth_func, depth.compare) {
             // SAFETY: a depth function of GL ES 3.0.
-            unsafe { gl.depth_func(enums::depth_function(depth.func)) };
+            unsafe { gl.depth_func(enums::depth_function(depth.compare)) };
         }
-        self.set_depth_mask(gl, depth.mask == DepthMaskType::ReadWrite);
-        if changed(&mut self.depth_range, (depth.range.min, depth.range.max)) {
+        self.set_depth_mask(gl, depth.write);
+        if changed(&mut self.depth_range, range) {
             // `glDepthRange` on desktop OpenGL, which has `glDepthRangef`
             // only from 4.1, and `glDepthRangef` on OpenGL ES.
             // SAFETY: GL clamps the range.
-            unsafe { gl.depth_range(f64::from(depth.range.min), f64::from(depth.range.max)) };
+            unsafe { gl.depth_range(f64::from(range.0), f64::from(range.1)) };
         }
     }
 
@@ -248,13 +249,15 @@ impl State {
         }
     }
 
-    pub(crate) fn set_stencil_mode(&mut self, gl: &Gl, stencil: &StencilMode) {
-        if stencil.test == Test::Always && stencil.mask == 0 {
+    /// Sets the stencil test and operations of `stencil`, which test and
+    /// write `reference`.
+    pub(crate) fn set_stencil(&mut self, gl: &Gl, stencil: &StencilState, reference: i32) {
+        if stencil.test == StencilTest::Always && stencil.write_mask == 0 {
             Self::capability(gl, &mut self.stencil_test, glow::STENCIL_TEST, false);
             return;
         }
         Self::capability(gl, &mut self.stencil_test, glow::STENCIL_TEST, true);
-        self.set_stencil_mask(gl, stencil.mask);
+        self.set_stencil_mask(gl, stencil.write_mask);
         if changed(&mut self.stencil_op, (stencil.fail, stencil.depth_fail, stencil.pass)) {
             // SAFETY: stencil operations of GL ES 3.0.
             unsafe {
@@ -267,9 +270,9 @@ impl State {
         }
         let func = stencil.test.func();
         let mask = stencil.test.masked().unwrap_or(0);
-        if changed(&mut self.stencil_func, (func, stencil.ref_, mask)) {
+        if changed(&mut self.stencil_func, (func, reference, mask)) {
             // SAFETY: a stencil function of GL ES 3.0.
-            unsafe { gl.stencil_func(enums::stencil_function(func), stencil.ref_, mask) };
+            unsafe { gl.stencil_func(enums::stencil_function(func), reference, mask) };
         }
     }
 
@@ -319,7 +322,7 @@ impl State {
         Self::capability(gl, &mut self.cull_face, glow::CULL_FACE, mode.enabled);
         // These shouldn't need to be updated when face culling is disabled,
         // but we might end up having the same issues with Adreno 2xx GPUs as
-        // noted in `set_depth_mode`.
+        // noted in `set_depth`.
         if changed(&mut self.cull_face_side, mode.side) {
             // SAFETY: a face of GL ES 3.0.
             unsafe { gl.cull_face(enums::cull_face_side(mode.side)) };

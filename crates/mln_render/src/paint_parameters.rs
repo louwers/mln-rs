@@ -1,15 +1,16 @@
 use std::any::Any;
 
 use glam::DMat4;
-use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, Gpu, GpuError, LoadOp, PassDesc, Scissor, TargetFormats};
-use mln_gfx::stencil_mode::Test;
+use mln_gfx::gpu::{
+    ColorAttachment, DepthState, DepthStencilAttachment, Gpu, GpuError, LoadOp, PassDesc, Scissor, StencilState,
+    StencilTest, TargetFormats,
+};
 use mln_gfx::types::{DepthFunctionType, StencilOpType};
-use mln_gfx::{DepthMaskType, DepthMode, ScissorRect, StencilMode};
+use mln_gfx::{DepthMaskType, ScissorRect};
 use mln_map_types::{FrameProjection, MapDebugOptions, ProjectionData, View, ViewportMode};
 use mln_tile_id::UnwrappedTileID;
 use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, Log};
-use mln_util::range::Range;
 use mln_util::size::Size;
 use mln_vec_map::VecMap;
 
@@ -386,9 +387,9 @@ impl<'a> PaintParameters<'a> {
             // composite at the depth of the current layer: layers above
             // that drew into the depth buffer hide them.
             let depth = if self.layer_composite.draws_with_frame_depth(group) {
-                DepthMode::disabled()
+                Depth::DISABLED
             } else {
-                self.depth_mode_for_sublayer(0, DepthMaskType::ReadOnly)
+                self.depth_for_sublayer(0, DepthMaskType::ReadOnly)
             };
             self.layer_composite.draw(gpu, target, depth, self.context, group);
         }
@@ -440,19 +441,19 @@ impl<'a> PaintParameters<'a> {
     }
 
     #[must_use]
-    pub(crate) fn depth_mode_for_sublayer(&self, n: u8, mask: DepthMaskType) -> DepthMode {
+    pub(crate) fn depth_for_sublayer(&self, n: u8, mask: DepthMaskType) -> Depth {
         if !self.opaque_pass_enabled_for_layer() {
-            return DepthMode::disabled();
+            return Depth::DISABLED;
         }
 
         // Wrapping unsigned arithmetic, then a float product.
         let steps =
             (1u32.wrapping_add(self.current_layer)).wrapping_mul(Self::NUM_SUBLAYERS as u32).wrapping_add(u32::from(n));
         let depth = self.depth_range_size + steps as f32 * Self::DEPTH_EPSILON;
-        DepthMode { func: DepthFunctionType::LessEqual, mask, range: Range::new(depth, depth) }
+        Depth::less_equal(mask, (depth, depth))
     }
 
-    /// The depth of `depth_mode_for_sublayer(0, ..)` where 2D layers write
+    /// The depth of `depth_for_sublayer(0, ..)` where 2D layers write
     /// depth, whether or not the current layer does.
     #[must_use]
     pub fn layer_depth(&self) -> f32 {
@@ -461,8 +462,8 @@ impl<'a> PaintParameters<'a> {
     }
 
     #[must_use]
-    pub(crate) fn depth_mode_for_3d(&self, mask: DepthMaskType) -> DepthMode {
-        DepthMode { func: DepthFunctionType::LessEqual, mask, range: Range::new(0.0, self.depth_range_size) }
+    pub(crate) fn depth_for_3d(&self, mask: DepthMaskType) -> Depth {
+        Depth::less_equal(mask, (0.0, self.depth_range_size))
     }
 
     pub(crate) fn clear_stencil(&mut self, gpu: &mut dyn Gpu) {
@@ -524,21 +525,23 @@ impl<'a> PaintParameters<'a> {
     }
 
     #[must_use]
-    pub(crate) fn stencil_mode_for_clipping(&self, tile_id: &UnwrappedTileID) -> StencilMode {
+    pub(crate) fn stencil_for_clipping(&self, tile_id: &UnwrappedTileID) -> Stencil {
         let it = self.tile_clipping_mask_ids.get(tile_id);
         debug_assert!(it.is_some());
         let id = it.copied().unwrap_or(0b0000_0000);
-        StencilMode {
-            test: Test::Equal { mask: 0b1111_1111 },
-            ref_: id,
-            mask: 0b0000_0000,
-            fail: StencilOpType::Keep,
-            depth_fail: StencilOpType::Keep,
-            pass: StencilOpType::Replace,
+        Stencil {
+            state: StencilState {
+                test: StencilTest::Equal { mask: 0b1111_1111 },
+                write_mask: 0b0000_0000,
+                fail: StencilOpType::Keep,
+                depth_fail: StencilOpType::Keep,
+                pass: StencilOpType::Replace,
+            },
+            reference: id as u32,
         }
     }
 
-    pub(crate) fn stencil_mode_for_3d(&mut self, gpu: &mut dyn Gpu) -> StencilMode {
+    pub(crate) fn stencil_for_3d(&mut self, gpu: &mut dyn Gpu) -> Stencil {
         if self.next_stencil_id + 1 > Self::MAX_STENCIL_VALUE {
             self.clear_stencil(gpu);
         }
@@ -550,15 +553,49 @@ impl<'a> PaintParameters<'a> {
 
         let id = self.next_stencil_id;
         self.next_stencil_id += 1;
-        StencilMode {
-            test: Test::NotEqual { mask: 0b1111_1111 },
-            ref_: id,
-            mask: 0b1111_1111,
-            fail: StencilOpType::Keep,
-            depth_fail: StencilOpType::Keep,
-            pass: StencilOpType::Replace,
+        Stencil {
+            state: StencilState {
+                test: StencilTest::NotEqual { mask: 0b1111_1111 },
+                write_mask: 0b1111_1111,
+                fail: StencilOpType::Keep,
+                depth_fail: StencilOpType::Keep,
+                pass: StencilOpType::Replace,
+            },
+            reference: id as u32,
         }
     }
+}
+
+/// A draw's depth test and write, and the depths that clip z maps to.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Depth {
+    pub(crate) state: DepthState,
+    /// From near to far.
+    pub(crate) range: (f32, f32),
+}
+
+impl Depth {
+    /// No test and no write, over the whole range.
+    pub(crate) const DISABLED: Depth = Depth { state: DepthState::DISABLED, range: (0.0, 1.0) };
+
+    /// A `LessEqual` test that writes as `mask` says, over `range`.
+    fn less_equal(mask: DepthMaskType, range: (f32, f32)) -> Depth {
+        let state = DepthState { compare: DepthFunctionType::LessEqual, write: mask == DepthMaskType::ReadWrite };
+        Depth { state, range }
+    }
+}
+
+/// A draw's stencil test and operations, and the reference value it tests
+/// and writes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Stencil {
+    pub(crate) state: StencilState,
+    pub(crate) reference: u32,
+}
+
+impl Stencil {
+    /// The stencil left alone.
+    pub(crate) const DISABLED: Stencil = Stencil { state: StencilState::DISABLED, reference: 0 };
 }
 
 /// `rect` within a target of `size`, `None` where nothing of it is.

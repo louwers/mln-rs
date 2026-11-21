@@ -40,12 +40,10 @@ pub use self::ids::{
 };
 use crate::color_mode::{BlendFunction, Mask};
 use crate::cull_face_mode::CullFaceMode;
-use crate::depth_mode::DepthMode;
 use crate::gfx_types::{AttributeDataType, DrawModeType};
 use crate::shaders::program::Program;
-use crate::stencil_mode::{StencilMode, Test};
 use crate::texture2d::SamplerState;
-use crate::types::{DepthFunctionType, DepthMaskType, StencilOpType};
+use crate::types::{DepthFunctionType, StencilFunctionType, StencilOpType};
 
 /// Why a [`Gpu`] call failed.
 #[derive(Debug, thiserror::Error)]
@@ -322,9 +320,54 @@ pub struct DepthState {
     pub write: bool,
 }
 
-impl From<&DepthMode> for DepthState {
-    fn from(mode: &DepthMode) -> DepthState {
-        DepthState { compare: mode.func, write: mode.mask == DepthMaskType::ReadWrite }
+impl DepthState {
+    /// No test and no write.
+    pub const DISABLED: DepthState = DepthState { compare: DepthFunctionType::Always, write: false };
+}
+
+/// A stencil test: the comparison of the draw's reference with the stencil
+/// value, both through the mask where the comparison has one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum StencilTest {
+    Never,
+    Less { mask: u32 },
+    Equal { mask: u32 },
+    LessEqual { mask: u32 },
+    Greater { mask: u32 },
+    NotEqual { mask: u32 },
+    GreaterEqual { mask: u32 },
+    Always,
+}
+
+impl StencilTest {
+    /// The comparison.
+    #[must_use]
+    pub fn func(&self) -> StencilFunctionType {
+        match self {
+            StencilTest::Never => StencilFunctionType::Never,
+            StencilTest::Less { .. } => StencilFunctionType::Less,
+            StencilTest::Equal { .. } => StencilFunctionType::Equal,
+            StencilTest::LessEqual { .. } => StencilFunctionType::LessEqual,
+            StencilTest::Greater { .. } => StencilFunctionType::Greater,
+            StencilTest::NotEqual { .. } => StencilFunctionType::NotEqual,
+            StencilTest::GreaterEqual { .. } => StencilFunctionType::GreaterEqual,
+            StencilTest::Always => StencilFunctionType::Always,
+        }
+    }
+
+    /// The mask the comparison reads through, `None` for `Never` and
+    /// `Always`, which read nothing.
+    #[must_use]
+    pub fn masked(&self) -> Option<u32> {
+        match *self {
+            StencilTest::Never | StencilTest::Always => None,
+            StencilTest::Less { mask }
+            | StencilTest::Equal { mask }
+            | StencilTest::LessEqual { mask }
+            | StencilTest::Greater { mask }
+            | StencilTest::NotEqual { mask }
+            | StencilTest::GreaterEqual { mask } => Some(mask),
+        }
     }
 }
 
@@ -333,7 +376,7 @@ impl From<&DepthMode> for DepthState {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct StencilState {
     /// The comparison, and the mask it reads through.
-    pub test: Test,
+    pub test: StencilTest,
     pub write_mask: u32,
     pub fail: StencilOpType,
     pub depth_fail: StencilOpType,
@@ -341,27 +384,21 @@ pub struct StencilState {
 }
 
 impl StencilState {
-    /// Whether the state leaves the stencil buffer alone: it always passes
-    /// and writes nothing.
+    /// The state that leaves the stencil buffer alone: it always passes and
+    /// writes nothing.
+    pub const DISABLED: StencilState = StencilState {
+        test: StencilTest::Always,
+        write_mask: 0,
+        fail: StencilOpType::Keep,
+        depth_fail: StencilOpType::Keep,
+        pass: StencilOpType::Keep,
+    };
+
+    /// Whether the state leaves the stencil buffer alone, as
+    /// [`DISABLED`](Self::DISABLED) does.
     #[must_use]
     pub fn is_disabled(&self) -> bool {
-        self.test == Test::Always
-            && self.write_mask == 0
-            && self.fail == StencilOpType::Keep
-            && self.depth_fail == StencilOpType::Keep
-            && self.pass == StencilOpType::Keep
-    }
-}
-
-impl From<&StencilMode> for StencilState {
-    fn from(mode: &StencilMode) -> StencilState {
-        StencilState {
-            test: mode.test,
-            write_mask: mode.mask,
-            fail: mode.fail,
-            depth_fail: mode.depth_fail,
-            pass: mode.pass,
-        }
+        *self == StencilState::DISABLED
     }
 }
 
@@ -734,8 +771,8 @@ mod tests {
     }
 
     #[test]
-    fn a_disabled_stencil_mode_leaves_the_stencil_alone() {
-        assert!(StencilState::from(&StencilMode::disabled()).is_disabled());
-        assert!(!StencilState::from(&StencilMode { mask: 0xFF, ..StencilMode::disabled() }).is_disabled());
+    fn a_stencil_state_that_writes_is_not_disabled() {
+        assert!(StencilState::DISABLED.is_disabled());
+        assert!(!StencilState { write_mask: 0xFF, ..StencilState::DISABLED }.is_disabled());
     }
 }

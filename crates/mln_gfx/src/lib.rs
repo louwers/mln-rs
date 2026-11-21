@@ -14,7 +14,6 @@
 pub mod backend;
 pub mod color_mode;
 pub mod cull_face_mode;
-pub mod depth_mode;
 pub mod draw_mode;
 pub mod export;
 pub mod frame;
@@ -27,7 +26,6 @@ pub mod rendering_stats;
 pub mod ring;
 pub mod scissor_rect;
 pub mod shaders;
-pub mod stencil_mode;
 pub mod texture2d;
 pub mod types;
 pub mod util_hash;
@@ -35,7 +33,6 @@ pub mod window;
 
 pub use color_mode::ColorMode;
 pub use cull_face_mode::CullFaceMode;
-pub use depth_mode::DepthMode;
 pub use draw_mode::DrawMode;
 pub use export::{
     DepthStencilFormat, DepthStencilFormats, DmaBufFormat, DmaBufPlane, ExportKind, ExportKinds, ExportedFrame,
@@ -45,7 +42,6 @@ pub use frame::{ConsumerSync, FrameImage, FrameTarget, GpuSync, Handoff, SyncKin
 pub use gfx_types::{AttributeDataType, DrawModeType, PrimitiveType};
 pub use renderer_backend::RendererBackend;
 pub use scissor_rect::ScissorRect;
-pub use stencil_mode::StencilMode;
 pub use types::DepthMaskType;
 pub use window::Window;
 

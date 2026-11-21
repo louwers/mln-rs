@@ -38,7 +38,6 @@ use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
-use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::types::DepthFunctionType;
 use mln_layers::background::programs::BACKGROUND;
 use mln_layers::background::ubo::{BackgroundDrawableUBO, BackgroundDrawableUnionUBO, BackgroundPropsUBO};
@@ -279,7 +278,7 @@ impl Scene {
                     blend: color_mode.blend_function,
                     color_mask: color_mode.mask,
                     depth: DepthState { compare: DepthFunctionType::LessEqual, write: true },
-                    stencil: StencilState::from(&StencilMode::disabled()),
+                    stencil: StencilState::DISABLED,
                 },
                 targets,
             })

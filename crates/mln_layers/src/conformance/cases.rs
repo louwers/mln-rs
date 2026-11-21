@@ -14,7 +14,6 @@ use mln_gfx::gpu::{
 use mln_gfx::shaders::layer_ubo::{ProjectionUBO, ViewUBO};
 use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::shader_defines::{ID_PROJECTION_UBO, ID_VIEW_UBO};
-use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::DepthFunctionType;
 use mln_util::Color;
@@ -130,7 +129,7 @@ fn background(shader: ShaderId, targets: TargetFormats) -> PipelineDesc<'static>
     PipelineDesc {
         shader,
         vertex_buffers: background_layouts(),
-        state: fixed(ColorMode::unblended(), StencilState::from(&StencilMode::disabled())),
+        state: fixed(ColorMode::unblended(), StencilState::DISABLED),
         targets,
     }
 }
@@ -927,7 +926,7 @@ pub fn resources_in_use<G: Gpu>(gpu: &mut G) -> Result<(), GpuError> {
     let pipeline = gpu.create_pipeline(&PipelineDesc {
         shader,
         vertex_buffers: &layouts,
-        state: fixed(ColorMode::unblended(), StencilState::from(&StencilMode::disabled())),
+        state: fixed(ColorMode::unblended(), StencilState::DISABLED),
         targets: RGBA8,
     })?;
     let entries = [
@@ -1002,7 +1001,7 @@ pub fn resources_in_use<G: Gpu>(gpu: &mut G) -> Result<(), GpuError> {
     let destroyed = gpu.create_pipeline(&PipelineDesc {
         shader,
         vertex_buffers: &layouts,
-        state: fixed(ColorMode::unblended(), StencilState::from(&StencilMode::disabled())),
+        state: fixed(ColorMode::unblended(), StencilState::DISABLED),
         targets: RGBA8,
     });
     assert!(matches!(destroyed, Err(GpuError::UnknownId("shader"))), "a pipeline of a destroyed shader");

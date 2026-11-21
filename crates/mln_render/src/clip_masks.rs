@@ -2,16 +2,15 @@ use std::collections::BTreeMap;
 
 use mln_gfx::gpu::{
     BindGroupEntry, BindingsDesc, BindingsId, BufferUsage, DepthState, Draw, DynamicState, FixedState, GeometryDesc,
-    GeometryId, Gpu, GpuError, PipelineId, PipelineKey, Scissor, ShaderId, ShaderKey, StencilState, TargetFormats,
-    VertexAttribute, VertexBufferLayout, VertexStep,
+    GeometryId, Gpu, GpuError, PipelineId, PipelineKey, Scissor, ShaderId, ShaderKey, StencilState, StencilTest,
+    TargetFormats, VertexAttribute, VertexBufferLayout, VertexStep,
 };
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{ID_PROJECTION_UBO, MAX_UBO_COUNT_PER_SHADER};
-use mln_gfx::stencil_mode::Test;
 use mln_gfx::types::StencilOpType;
-use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMode, DrawModeType, StencilMode};
+use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawModeType};
 use mln_tile_id::UnwrappedTileID;
 use mln_util::logging::{Event, Log};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
@@ -22,7 +21,7 @@ use crate::gfx::context::Context;
 use crate::gfx::owned::Owned;
 use crate::gfx::vertex_attribute::Uniforms;
 use crate::globe::grid;
-use crate::paint_parameters::DrawTarget;
+use crate::paint_parameters::{Depth, DrawTarget};
 use crate::render_static_data::RenderStaticData;
 use crate::shaders::programs;
 use crate::shaders::programs::ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE;
@@ -262,10 +261,9 @@ impl ClipMasks {
             self.bindings_made = Some(made);
         }
 
-        let stencil = StencilMode {
-            test: Test::Always,
-            ref_: 0,
-            mask: 0xFF,
+        let stencil = StencilState {
+            test: StencilTest::Always,
+            write_mask: 0xFF,
             fail: StencilOpType::Keep,
             depth_fail: StencilOpType::Keep,
             pass: StencilOpType::Replace,
@@ -284,8 +282,8 @@ impl ClipMasks {
                     cull: if self.globe { CullFaceMode::back_ccw() } else { CullFaceMode::disabled() },
                     blend: disabled.blend_function,
                     color_mask: disabled.mask,
-                    depth: DepthState::from(&DepthMode::disabled()),
-                    stencil: StencilState::from(&stencil),
+                    depth: DepthState::DISABLED,
+                    stencil,
                 },
                 targets,
             };
@@ -294,10 +292,9 @@ impl ClipMasks {
             id
         };
 
-        let depth = DepthMode::disabled().range;
         let full = Scissor { x: 0, y: 0, width: size.width, height: size.height };
         let dynamic = DynamicState {
-            depth_range: (depth.min, depth.max),
+            depth_range: Depth::DISABLED.range,
             scissor: scissor.unwrap_or(full),
             stencil_reference: 0,
             blend_constant: ColorMode::disabled().blend_color,

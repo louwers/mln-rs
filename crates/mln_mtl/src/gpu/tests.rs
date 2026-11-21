@@ -118,8 +118,8 @@ fragment half4 fragmentMain() { return half4(1.0); }
             cull: CullFaceMode::disabled(),
             blend: unblended.blend_function,
             color_mask: unblended.mask,
-            depth: DepthState::from(&mln_gfx::depth_mode::DepthMode::disabled()),
-            stencil: StencilState::from(&StencilMode::disabled()),
+            depth: DepthState::DISABLED,
+            stencil: StencilState::DISABLED,
         },
         targets: TargetFormats { color: Some(TextureFormat::Rgba8Unorm), depth_stencil: None },
     };

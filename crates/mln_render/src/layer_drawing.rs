@@ -16,9 +16,7 @@
 
 use std::ops::BitOrAssign;
 
-use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::gpu::Gpu;
-use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::types::DepthMaskType;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::hash::HashMap;
@@ -29,7 +27,7 @@ use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
 use crate::gfx::uniform_buffer::UniformBufferArray;
 use crate::layer_composite::Composite;
-use crate::paint_parameters::{Composited, PaintParameters};
+use crate::paint_parameters::{Composited, Depth, PaintParameters, Stencil};
 use crate::render_pass::RenderPass;
 
 /// The order of a layer's draws that its draws' ids don't give: lower
@@ -801,7 +799,7 @@ impl FrameDraws {
                 _ => (volume, clips),
             });
         if volume {
-            pass.volume_stencil = volume_clips.then(|| parameters.stencil_mode_for_3d(gpu));
+            pass.volume_stencil = volume_clips.then(|| parameters.stencil_for_3d(gpu));
         } else if drawing && !self.stencil_tiles.is_empty() {
             parameters.render_tile_clipping_masks(gpu, &self.stencil_tiles);
         }
@@ -841,7 +839,7 @@ pub(crate) struct DrawPass<'a> {
     /// and the translucent, or none.
     skip: RenderPass,
     /// The stencil of the 3D draws that clip.
-    volume_stencil: Option<StencilMode>,
+    volume_stencil: Option<Stencil>,
     composited: Option<Composited>,
 }
 
@@ -885,18 +883,15 @@ impl<'a> DrawPass<'a> {
             atlases.bind(objects, parameters);
         }
         let tile_stencil = || match draw.tile.filter(|_| draw.clip) {
-            Some(tile) => parameters.stencil_mode_for_clipping(&tile.to_unwrapped()),
-            None => StencilMode::disabled(),
+            Some(tile) => parameters.stencil_for_clipping(&tile.to_unwrapped()),
+            None => Stencil::DISABLED,
         };
         let (depth, stencil) = match draw.depth {
-            DrawDepth::Off => (DepthMode::disabled(), tile_stencil()),
-            DrawDepth::Layer { sub_layer, mask } => {
-                (parameters.depth_mode_for_sublayer(sub_layer, mask), tile_stencil())
+            DrawDepth::Off => (Depth::DISABLED, tile_stencil()),
+            DrawDepth::Layer { sub_layer, mask } => (parameters.depth_for_sublayer(sub_layer, mask), tile_stencil()),
+            DrawDepth::Volume { mask } => {
+                (parameters.depth_for_3d(mask), self.volume_stencil.filter(|_| draw.clip).unwrap_or(Stencil::DISABLED))
             }
-            DrawDepth::Volume { mask } => (
-                parameters.depth_mode_for_3d(mask),
-                self.volume_stencil.filter(|_| draw.clip).unwrap_or_else(StencilMode::disabled),
-            ),
         };
         objects.draw(gpu, parameters, &self.frame.uniform_buffers, depth, stencil, index as u32);
     }

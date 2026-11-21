@@ -6,7 +6,6 @@ use std::sync::{Arc, Once};
 
 use glow::HasContext;
 use mln_gfx::color_mode::ColorMode;
-use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::gpu::validation::{
     self, BindingsTags, BufferInfo, GeometryTags, LayoutTags, Lookup, PassTarget, PipelineTags, ShaderBinding,
     TextureInfo,
@@ -18,12 +17,10 @@ use mln_gfx::gpu::{
     TextureDesc, TextureFormat, TextureId, TextureRegion, TextureUsage, VertexBufferLayout, VertexStep,
 };
 use mln_gfx::shaders::program::BufferKind;
-use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::texture2d::{MAX_ACTIVE_TEXTURE_UNITS, SamplerState};
-use mln_gfx::types::{DepthMaskType, TextureFilterType};
+use mln_gfx::types::TextureFilterType;
 use mln_util::hash::HashMap;
 use mln_util::logging::{Event, Log};
-use mln_util::range::Range;
 use mln_util::size::Size;
 
 use crate::custom_layer::{CustomLayerEncoder, CustomLayerPass, lend_context};
@@ -972,24 +969,12 @@ fn set_state(
     // An imported framebuffer keeps the attachment that a pass leaves
     // out bound, which the draw leaves alone.
     if differs(|a, b| a.depth_range == b.depth_range) {
-        let depth = if depth_stencil { fixed.depth } else { DepthState::from(&DepthMode::disabled()) };
-        let (min, max) = dynamic.depth_range;
-        let mask = if depth.write { DepthMaskType::ReadWrite } else { DepthMaskType::ReadOnly };
-        state.set_depth_mode(gl, &DepthMode { func: depth.compare, mask, range: Range { min, max } });
+        let depth = if depth_stencil { fixed.depth } else { DepthState::DISABLED };
+        state.set_depth(gl, &depth, dynamic.depth_range);
     }
     if differs(|a, b| a.stencil_reference == b.stencil_reference) {
-        let stencil = if depth_stencil { fixed.stencil } else { StencilState::from(&StencilMode::disabled()) };
-        state.set_stencil_mode(
-            gl,
-            &StencilMode {
-                test: stencil.test,
-                ref_: dynamic.stencil_reference as i32,
-                mask: stencil.write_mask,
-                fail: stencil.fail,
-                depth_fail: stencil.depth_fail,
-                pass: stencil.pass,
-            },
-        );
+        let stencil = if depth_stencil { fixed.stencil } else { StencilState::DISABLED };
+        state.set_stencil(gl, &stencil, dynamic.stencil_reference as i32);
     }
     if differs(|a, b| a.blend_constant == b.blend_constant) {
         let mask = if color { fixed.color_mask } else { ColorMode::disabled().mask };

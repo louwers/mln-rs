@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use mln_gfx::stencil_mode::StencilMode;
+use mln_gfx::gpu::StencilState;
 use mln_util::size::Size;
 
 use crate::renderer_backend::GlContext;
@@ -28,7 +28,7 @@ pub(crate) fn draw(overlay: &mut Overlay, context: &mut GlContext, size: Size) {
     state.bind_framebuffer(gl, None);
     state.set_scissor(gl, None);
     state.set_viewport(gl, (0, 0, size.width as i32, size.height as i32));
-    state.set_stencil_mode(gl, &StencilMode::disabled());
+    state.set_stencil(gl, &StencilState::DISABLED, 0);
     overlay(&OverlayTarget { gl: context.gl_shared(), size });
     context.parts().1.set_dirty();
 }

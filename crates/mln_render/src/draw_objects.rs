@@ -12,7 +12,6 @@
 
 use mln_gfx::color_mode::ColorMode;
 use mln_gfx::cull_face_mode::CullFaceMode;
-use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::draw_mode::DrawMode;
 use mln_gfx::gfx_types::{AttributeDataType, DrawModeType, PrimitiveType};
 use mln_gfx::gpu::{
@@ -23,7 +22,6 @@ use mln_gfx::gpu::{
 use mln_gfx::shaders::program::{Attribute, Program};
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{MAX_TEXTURE_COUNT_PER_SHADER, MAX_UBO_COUNT_PER_SHADER};
-use mln_gfx::stencil_mode::StencilMode;
 use mln_util::logging::{Event, Log};
 
 use crate::gfx::context::Context;
@@ -34,7 +32,7 @@ use crate::gfx::uniform_buffer::UniformBufferArray;
 use crate::gfx::upload::{self, AttributeBindingArray};
 use crate::gfx::vertex_attribute::VertexAttributeArray;
 use crate::gfx::vertices::SharedVertices;
-use crate::paint_parameters::{DrawTarget, PaintParameters};
+use crate::paint_parameters::{Depth, DrawTarget, PaintParameters, Stencil};
 
 /// The textures a draw binds, by texture id.
 pub type Textures = [Option<SharedTexture>; MAX_TEXTURE_COUNT_PER_SHADER];
@@ -305,7 +303,7 @@ impl DrawObjects {
     }
 
     /// Draws the segments into `parameters`' open pass on `gpu`, the
-    /// context's, with `depth_mode` and `stencil_mode`, binding the buffers
+    /// context's, with `depth` and `stencil`, binding the buffers
     /// of the draws in `frame`. Shaders read the draw's entries in those
     /// storage buffers at `global_index`.
     pub(crate) fn draw(
@@ -313,11 +311,11 @@ impl DrawObjects {
         gpu: &mut dyn Gpu,
         parameters: &mut PaintParameters<'_>,
         frame: &UniformBufferArray,
-        depth_mode: DepthMode,
-        stencil_mode: StencilMode,
+        depth: Depth,
+        stencil: Stencil,
         global_index: u32,
     ) {
-        if let Err(error) = self.draw_in(gpu, parameters, frame, depth_mode, stencil_mode, global_index) {
+        if let Err(error) = self.draw_in(gpu, parameters, frame, depth, stencil, global_index) {
             Log::warning(Event::Render, format!("Drawing a draw of {} failed: {error}", self.shader.program().name));
         }
     }
@@ -327,8 +325,8 @@ impl DrawObjects {
         gpu: &mut dyn Gpu,
         parameters: &mut PaintParameters<'_>,
         frame: &UniformBufferArray,
-        depth_mode: DepthMode,
-        stencil_mode: StencilMode,
+        depth: Depth,
+        stencil: Stencil,
         global_index: u32,
     ) -> Result<(), GpuError> {
         let Some(DrawTarget { size, targets, scissor }) = parameters.draw_target() else {
@@ -390,14 +388,13 @@ impl DrawObjects {
 
         let full = Scissor { x: 0, y: 0, width: size.width, height: size.height };
         let dynamic = DynamicState {
-            depth_range: (depth_mode.range.min, depth_mode.range.max),
+            depth_range: depth.range,
             scissor: scissor.unwrap_or(full),
-            stencil_reference: stencil_mode.ref_ as u32,
+            stencil_reference: stencil.reference,
             blend_constant: self.color_mode.blend_color,
             line_width: 1.0,
         };
-        let depth = DepthState::from(&depth_mode);
-        let stencil = StencilState::from(&stencil_mode);
+        let (depth, stencil) = (depth.state, stencil.state);
         let mut draws = 0;
         let mode = self.mode;
         for segment in &self.segments {

@@ -23,18 +23,16 @@ mod cases;
 
 use mln_gfx::color_mode::ColorMode;
 use mln_gfx::cull_face_mode::CullFaceMode;
-use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
 use mln_gfx::gpu::{
     BindGroupEntry, BindingsDesc, BindingsId, BufferDesc, BufferId, BufferUsage, ColorAttachment, DepthState,
     DepthStencilAttachment, Draw, DynamicState, FixedState, GeometryDesc, GeometryId, Gpu, GpuError, LoadOp, PassDesc,
-    PipelineDesc, PipelineId, ResourceId, Scissor, ShaderId, ShaderKey, StencilState, TargetFormats, TextureDesc,
-    TextureFormat, TextureId, TextureUsage, VertexAttribute, VertexBufferLayout, VertexStep,
+    PipelineDesc, PipelineId, ResourceId, Scissor, ShaderId, ShaderKey, StencilState, StencilTest, TargetFormats,
+    TextureDesc, TextureFormat, TextureId, TextureUsage, VertexAttribute, VertexBufferLayout, VertexStep,
 };
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
-use mln_gfx::stencil_mode::{StencilMode, Test};
 use mln_gfx::types::StencilOpType;
 use mln_util::Color;
 use mln_util::size::Size;
@@ -131,7 +129,7 @@ fn fixed(color: ColorMode, stencil: StencilState) -> FixedState {
         cull: CullFaceMode::disabled(),
         blend: color.blend_function,
         color_mask: color.mask,
-        depth: DepthState::from(&DepthMode::disabled()),
+        depth: DepthState::DISABLED,
         stencil,
     }
 }
@@ -232,7 +230,7 @@ fn clipped_frame(gpu: &mut impl Gpu) -> Result<ClippedFrame, GpuError> {
         state: fixed(
             ColorMode::disabled(),
             StencilState {
-                test: Test::Always,
+                test: StencilTest::Always,
                 write_mask: 0xFF,
                 fail: StencilOpType::Keep,
                 depth_fail: StencilOpType::Keep,
@@ -260,14 +258,13 @@ fn clipped_frame(gpu: &mut impl Gpu) -> Result<ClippedFrame, GpuError> {
         vertex_buffers: &background_layouts,
         state: fixed(
             ColorMode::unblended(),
-            StencilState::from(&StencilMode {
-                test: Test::Equal { mask: 0xFF },
-                ref_: 0,
-                mask: 0,
+            StencilState {
+                test: StencilTest::Equal { mask: 0xFF },
+                write_mask: 0,
                 fail: StencilOpType::Keep,
                 depth_fail: StencilOpType::Keep,
                 pass: StencilOpType::Keep,
-            }),
+            },
         ),
         targets,
     })?;

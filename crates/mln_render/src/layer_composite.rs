@@ -18,17 +18,17 @@
 
 use mln_gfx::color_mode::{BlendFunction, LinearBlend};
 use mln_gfx::gpu::{
-    BindGroupEntry, BindingsDesc, BindingsId, BufferUsage, ColorAttachment, DepthState, DepthStencilAttachment, Draw,
-    DynamicState, FixedState, GeometryDesc, GeometryId, Gpu, GpuError, LoadOp, PipelineKey, SamplerId, Scissor,
-    ShaderId, ShaderKey, StencilState, TargetFormats, TextureDesc, TextureFormat, TextureId, TextureUsage,
-    VertexAttribute, VertexBufferLayout, VertexStep,
+    BindGroupEntry, BindingsDesc, BindingsId, BufferUsage, ColorAttachment, DepthStencilAttachment, Draw, DynamicState,
+    FixedState, GeometryDesc, GeometryId, Gpu, GpuError, LoadOp, PipelineKey, SamplerId, Scissor, ShaderId, ShaderKey,
+    StencilState, TargetFormats, TextureDesc, TextureFormat, TextureId, TextureUsage, VertexAttribute,
+    VertexBufferLayout, VertexStep,
 };
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::shader_defines::{ID_PROJECTION_UBO, MAX_UBO_COUNT_PER_SHADER};
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::ColorBlendFactorType;
-use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMode, DrawModeType, StencilMode};
+use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawModeType};
 use mln_style_types::LayerBlendType;
 use mln_util::Color;
 use mln_util::identity::SimpleIdentity;
@@ -41,7 +41,7 @@ use crate::gfx::context::Context;
 use crate::gfx::owned::Owned;
 use crate::gfx::resources::GpuTexture;
 use crate::gfx::vertex_attribute::Uniforms;
-use crate::paint_parameters::{DrawTarget, OpenPass};
+use crate::paint_parameters::{Depth, DrawTarget, OpenPass};
 use crate::render_static_data::RenderStaticData;
 use crate::shaders::programs;
 use crate::shaders::programs::{
@@ -401,7 +401,7 @@ impl LayerComposite {
         &mut self,
         gpu: &mut dyn Gpu,
         target: DrawTarget,
-        depth: DepthMode,
+        depth: Depth,
         context: &mut Context,
         group: SimpleIdentity,
     ) {
@@ -421,7 +421,7 @@ impl LayerComposite {
         }
         let slot = self.groups.len();
         let blend = BlendFunction::Replace;
-        if let Err(error) = self.draw_quad(gpu, target, context, slot, blend, DepthMode::disabled()) {
+        if let Err(error) = self.draw_quad(gpu, target, context, slot, blend, Depth::DISABLED) {
             Log::warning(Event::Render, format!("Copying the frame failed: {error}"));
         }
     }
@@ -435,7 +435,7 @@ impl LayerComposite {
         context: &mut Context,
         slot: usize,
         blend: BlendFunction,
-        depth: DepthMode,
+        depth: Depth,
     ) -> Result<(), GpuError> {
         let (Some(shader), Some(target), Some(quad), Some(uniforms), Some(projection)) =
             (&self.shader, &self.target, &mut self.quad, &self.uniforms, &self.projection)
@@ -523,8 +523,8 @@ impl LayerComposite {
                     cull: CullFaceMode::disabled(),
                     blend,
                     color_mask: ColorMode::alpha_blended().mask,
-                    depth: DepthState::from(&depth),
-                    stencil: StencilState::from(&StencilMode::disabled()),
+                    depth: depth.state,
+                    stencil: StencilState::DISABLED,
                 },
                 targets,
             },
@@ -541,7 +541,7 @@ impl LayerComposite {
             instance_count: 1,
             global_index: 0,
             dynamic: DynamicState {
-                depth_range: (depth.range.min, depth.range.max),
+                depth_range: depth.range,
                 scissor: scissor.unwrap_or(full),
                 stencil_reference: 0,
                 blend_constant: Color::default(),
