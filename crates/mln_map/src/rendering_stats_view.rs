@@ -1,17 +1,12 @@
 use std::fmt::Write;
-use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use feature::Value;
-use geojson::{Feature, GeoJson, Geometry};
 use mln_renderer::RenderingStats;
-use mln_sources::custom::geometry::{self, CustomGeometrySourceHandle, Options as CustomGeometrySourceOptions};
-use mln_style::conversion::Convertible;
+use mln_style::conversion::{Convertible, convert_source};
 use mln_style::{Edit, Layer};
-use mln_tile_id::CanonicalTileID;
 use mln_util::Color;
 use mln_util::constants::EXTENT;
-use mln_util::range::Range;
 use mln_util::time::Instant;
 
 use crate::Map;
@@ -61,23 +56,18 @@ impl RenderingStatsView {
     /// lacks them.
     pub(crate) fn create(&self, map: &mut Map) {
         if map.source(RENDERING_STATS_SOURCE_ID).is_none() {
-            let handle: Arc<OnceLock<CustomGeometrySourceHandle>> = Arc::new(OnceLock::new());
-            let fetch_handle = Arc::clone(&handle);
-            let options = CustomGeometrySourceOptions {
-                fetch_tile_function: Some(Arc::new(move |tile_id: &CanonicalTileID| {
-                    if let Some(handle) = fetch_handle.get() {
-                        let point = Feature::from(Geometry::new_point([0.0, 0.0]));
-                        handle.set_tile_data(*tile_id, GeoJson::from(vec![point]));
-                    }
-                })),
-                zoom_range: Range::new(0, 0),
-                ..Default::default()
-            };
-            // The default tile options are valid, so this always succeeds.
-            if let Ok(source) = geometry::create(RENDERING_STATS_SOURCE_ID, options, map.pool())
-                && let Some(source_handle) = CustomGeometrySourceHandle::of(&source)
-            {
-                let _ = handle.set(source_handle);
+            // A GeoJSON source of one point, which the layer labels. The view
+            // names the source type as style JSON does, so a registry
+            // without it gives no source.
+            let json = serde_json::json!({
+                "type": "geojson",
+                "maxzoom": 0,
+                "data": { "type": "Point", "coordinates": [0.0, 0.0] },
+            });
+            let mut error = mln_style::conversion::Error::default();
+            let registry = map.style().registry();
+            let source = convert_source(&Convertible::from(&json), &mut error, RENDERING_STATS_SOURCE_ID, registry);
+            if let Some(source) = source {
                 let _ = map.add_source(source);
             }
         }
