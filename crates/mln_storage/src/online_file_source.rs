@@ -530,14 +530,7 @@ impl OnlineCore {
         let interval = req.update_interval(&response, connection_backoff);
 
         let resource = &mut req.resource;
-        let mut response = resource.deliver(response);
-        // A 304 without validators keeps the copy's.
-        if response.not_modified {
-            response.modified = response.modified.or(resource.prior_modified);
-            if response.etag.is_none() {
-                response.etag.clone_from(&resource.prior_etag);
-            }
-        }
+        let response = resource.deliver(response);
         if response.error.is_none() {
             // The next revalidation is of this copy.
             resource.set_prior(&response);

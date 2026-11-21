@@ -213,21 +213,22 @@ impl Resource {
         self.prior_caching = response.caching;
     }
 
-    /// What a revalidation's answer `response` delivers to a requester that
-    /// waits for the prior copy in `prior_data`: that copy, for a 304. Any
-    /// other answer as it is.
+    /// What a revalidation's answer `response` delivers: a 304 keeps the
+    /// prior copy's validators it lacks, and to a requester that waits for
+    /// that copy in `prior_data`, delivers it. Any other answer as it is.
     #[must_use]
     pub fn deliver(&self, mut response: Response) -> Response {
-        if response.not_modified
-            && let Some(data) = &self.prior_data
-        {
+        if !response.not_modified {
+            return response;
+        }
+        response.modified = response.modified.or(self.prior_modified);
+        if response.etag.is_none() {
+            response.etag.clone_from(&self.prior_etag);
+        }
+        if let Some(data) = &self.prior_data {
             response.data = Some(Arc::clone(data));
             response.not_modified = false;
             response.prior = true;
-            response.modified = response.modified.or(self.prior_modified);
-            if response.etag.is_none() {
-                response.etag.clone_from(&self.prior_etag);
-            }
         }
         response
     }

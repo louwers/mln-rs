@@ -225,12 +225,14 @@ impl<'a> TileMut<'a> {
         // A cache-only request that found nothing isn't an error. A copy
         // shows while it revalidates unless its caching rules forbid that;
         // then the tile holds it back for the network request to revalidate.
+        // An empty copy has nothing to hold back: the network loads anew.
         if res.error.is_none() {
-            tileset.resource.set_prior(res);
             if res.caching.is_usable(now) {
+                tileset.resource.set_prior(res);
                 self.take_response(method, res);
-            } else {
+            } else if !res.no_content {
                 // The network request carries it, so that a 304 delivers it.
+                tileset.resource.set_prior(res);
                 tileset.resource.prior_data.clone_from(&res.data);
             }
         }
