@@ -184,6 +184,12 @@ pub(crate) trait FindView<'a>: Sized {
     fn passes(self) -> RenderPass {
         RenderPass::NONE
     }
+
+    /// The index of the bucket among its layout's buckets; `None` for a
+    /// view that isn't a bucket.
+    fn bucket_index(&self) -> Option<usize> {
+        None
+    }
 }
 
 /// What a frame's tile shows a layer of a raster source or an image source:
@@ -330,5 +336,25 @@ impl<'a, T: LayerType> FrameTile<'a, T> {
     #[must_use]
     pub fn unwrapped_id(self) -> UnwrappedTileID {
         self.tile.id
+    }
+
+    /// How the frame projects the tile; [`matrix`](Self::matrix) is its
+    /// main matrix.
+    #[must_use]
+    pub fn projection(self) -> ProjectionData {
+        self.tile.projection
+    }
+
+    /// The tile's main matrix for the frame.
+    #[must_use]
+    pub fn matrix(self) -> DMat4 {
+        self.tile.matrix
+    }
+
+    /// Whether the frame keeps the tile, which it no longer needs, while
+    /// what placement showed of it fades out.
+    #[must_use]
+    pub fn held_for_fade(self) -> bool {
+        self.tile.hold_for_fade()
     }
 }

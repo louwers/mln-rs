@@ -150,7 +150,7 @@ pub enum RegisterError {
     AmbiguousArity(String),
     #[error("an overload of \"{0}\" evaluates to another type than its result")]
     EvalMismatch(String),
-    #[error("\"{0}\" claims a role that another function has")]
+    #[error("\"{0}\" claims a role that another registration has")]
     RoleTaken(String),
 }
 

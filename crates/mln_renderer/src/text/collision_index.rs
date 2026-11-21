@@ -10,12 +10,11 @@ use mln_util::hash::{HashMap, HashSet};
 use mln_util::intersection_tests::polygon_intersects_polygon;
 
 use crate::buckets::symbol_bucket::{PlacedSymbol, PlacedSymbolPools};
-use crate::geometry::feature_index::IndexedSubfeature;
 use crate::layout::symbol_projection::{
     LabelPlaneProjector, LineLabel, LinePlacer, PlacedGlyph, TileDistance, tile_skew_vectors,
 };
-use crate::text::collision_feature::{CollisionBox, CollisionFeature};
-use crate::text::collision_grid::{Aabb, Grid, Shape};
+use crate::placement::{Aabb, Grid, Shape};
+use crate::text::collision_feature::{CollisionBox, CollisionFeature, IndexedSubfeature};
 
 /// A box's edges: [x1, y1, x2, y2].
 pub(crate) type CollisionBoundaries = [f32; 4];

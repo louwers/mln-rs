@@ -41,13 +41,13 @@ pub type DrawPriority = i64;
 pub struct BucketChanges {
     /// The values of the paint properties that read feature state.
     pub paint: bool,
-    /// A symbol bucket's opacities, which placement sets.
-    pub(crate) opacity: bool,
-    /// A symbol bucket's positions of labels along lines or at variable
-    /// anchors.
-    pub(crate) dynamic: bool,
-    /// The order of a symbol bucket's triangles.
-    pub(crate) sort: bool,
+    /// The opacities of what a bucket places, which placement sets.
+    pub opacity: bool,
+    /// The positions that placement lays out, such as those of labels along
+    /// lines or at variable anchors.
+    pub dynamic: bool,
+    /// The order of the bucket's triangles, which placement sorts.
+    pub sort: bool,
 }
 
 impl BucketChanges {
@@ -69,13 +69,14 @@ impl BitOrAssign for BucketChanges {
     }
 }
 
-/// The buckets whose vertex data changed, by bucket id, with what changed.
+/// The buckets whose vertex data changed, by bucket id, with what changed,
+/// whose draws copy it again.
 #[derive(Default)]
-pub(crate) struct ChangedBuckets(HashMap<SimpleIdentity, BucketChanges>);
+pub struct ChangedBuckets(HashMap<SimpleIdentity, BucketChanges>);
 
 impl ChangedBuckets {
     /// Records that `changes` of the bucket `bucket` changed.
-    pub(crate) fn mark(&mut self, bucket: SimpleIdentity, changes: BucketChanges) {
+    pub fn mark(&mut self, bucket: SimpleIdentity, changes: BucketChanges) {
         if changes.any() {
             *self.0.entry(bucket).or_default() |= changes;
         }

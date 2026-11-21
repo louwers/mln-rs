@@ -30,7 +30,7 @@ pub(crate) struct TileParameters<'a> {
     /// Whether the style has a `glyphs` URL.
     pub(crate) glyph_pbfs: bool,
     /// How many placements have committed before the update
-    /// (`PlacementController::commits`), which the tiles the view leaves
-    /// stay rendered for while their symbols fade out.
+    /// (`Schedule::commits`), which the tiles the view leaves stay
+    /// rendered for while what placement showed of them fades out.
     pub(crate) placement_commits: u64,
 }

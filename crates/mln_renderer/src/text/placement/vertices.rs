@@ -12,14 +12,13 @@ use mln_style_types::{AlignmentType, IconTextFitType, TextRotationAlignmentType,
 use mln_util::constants::ONE_EM;
 
 use super::context::translation;
-use super::{JointOpacityState, Placement, VariableOffset};
+use super::{BucketPlacementData, JointOpacityState, Placement, VariableOffset};
 use crate::buckets::symbol_bucket::{Buffer, CollisionBuffer, SymbolBucket, SymbolBucketState};
 use crate::layout::symbol_instance::{Justification, SymbolInstance, TextPart};
 use crate::layout::symbol_projection::{
     LabelPlaneProjector, LineLabelAlignment, add_dynamic_attributes, evaluate_size_for_feature, hide_glyphs,
     reproject_line_labels, tile_skew_vectors,
 };
-use crate::render_layer::BucketPlacementData;
 use crate::text::collision_index::OverlapMode;
 use crate::text::placement::CircleKey;
 

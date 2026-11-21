@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use mln_headless::HeadlessFrontend;
 use mln_map::{BoundOptions, Map, MapOptions, ProjectionMode};
+use mln_renderer::text::placement::PlacedSymbols as _;
 use mln_renderer::tile::worker_codec::{RemoteWorkers, ThreadWorkerInstances};
 use mln_storage::{FileSource, FileSourceExt};
 use mln_style::Edit;

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use glam::Vec2;
 use mln_math::deg2radf;
 use mln_text::PositionedIcon;
@@ -6,8 +8,24 @@ use mln_tile_id::geometry_tile_data::GeometryCoordinate;
 use mln_util::Padding;
 
 use crate::geometry::anchor::{Anchor, segments, vertex_behind};
-use crate::geometry::feature_index::IndexedSubfeature;
+use crate::text::collision_index::OverlapMode;
 use crate::util::pool::PoolRange;
+
+/// A feature of a collision index, which a query looks up in its tile's
+/// feature index.
+#[derive(Clone, Debug, PartialEq, mln_wire::Wire)]
+pub(crate) struct IndexedSubfeature {
+    pub(crate) index: usize,
+    pub(crate) source_layer_name: Arc<str>,
+    pub(crate) bucket_leader_id: Arc<str>,
+    pub(crate) sort_index: usize,
+    pub(crate) bucket_instance_id: u32,
+    pub(crate) collision_group_id: u16,
+    /// The overlap mode the symbol was placed with. It's set only in a
+    /// collision index, so the worker codec doesn't carry it.
+    #[wire(skip)]
+    pub(crate) overlap_mode: OverlapMode,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, mln_wire::Wire)]
 pub(crate) struct CollisionBox {

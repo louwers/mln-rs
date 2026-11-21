@@ -9,22 +9,19 @@ use std::any::Any;
 use std::ops::Range;
 use std::sync::Arc;
 
-use glam::DMat4;
 use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_map_types::{ProjectionData, View};
+use mln_map_types::View;
 use mln_style::expression::Dependency;
 use mln_style::layer_type::{ErasedLayerStyle, LayerStyle, PaintSet, SourceKind};
 use mln_style::{PropertyEvaluationParameters, TransitionParameters};
+use mln_style_types::VisibilityType;
 use mln_style_types::image::ImagePosition;
-use mln_style_types::{TranslateAnchorType, VisibilityType};
-use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::Color;
 use smallvec::SmallVec;
 
 use crate::bucket::Bucket;
 use crate::bucket_geometry::BucketGeometry;
-use crate::buckets::symbol_bucket::SymbolBucket;
 use crate::erased_layer::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::geometry::feature_index::FeatureIndex;
 use crate::gfx::context::Context;
@@ -33,11 +30,11 @@ use crate::layer_drawing::{ChangedBuckets, DrawGroup, DrawOrder, LayerDrawing};
 use crate::line_atlas::LineAtlas;
 use crate::paint_parameters::PaintParameters;
 use crate::pattern_atlas::PatternAtlas;
+use crate::placement::PlacingLayer;
 use crate::render_pass::RenderPass;
 use crate::render_source::{RenderSource, TileOrder};
 use crate::render_tile::{FindView, FoundTile, FrameTile, RenderTile, TileContent, ViewPlace};
 use crate::tile::contents::GeometryContents;
-use crate::tile::job::SourceKey;
 use crate::tile_render_data::TileAtlasTextures;
 use crate::update_parameters::UpdateParameters;
 
@@ -96,7 +93,7 @@ impl<'a, T: LayerType> LayerBucket<'a, T> {
 
     /// The feature index of the layout.
     #[must_use]
-    pub(crate) fn feature_index(self) -> &'a Arc<FeatureIndex> {
+    pub fn feature_index(self) -> &'a Arc<FeatureIndex> {
         &self.contents.result.feature_index
     }
 
@@ -139,127 +136,37 @@ impl<'a, T: LayerType> FindView<'a> for LayerBucket<'a, T> {
     fn passes(self) -> RenderPass {
         self.layer.passes()
     }
-}
 
-/// A symbol layer's `*-translate` in pixels, which placement moves the
-/// layer's symbols' collision geometry by.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct SymbolTranslate {
-    pub(crate) offset: [f32; 2],
-    pub(crate) anchor: TranslateAnchorType,
-}
-
-impl Default for SymbolTranslate {
-    fn default() -> Self {
-        SymbolTranslate { offset: [0.0, 0.0], anchor: TranslateAnchorType::Map }
+    fn bucket_index(&self) -> Option<usize> {
+        Some(self.bucket_index)
     }
 }
 
-/// What placement reads of the render tile of a symbol bucket, as the
-/// frame's update that collected the bucket's placement data found it.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct PlacedTile {
-    pub(crate) id: UnwrappedTileID,
-    pub(crate) overscaled_id: OverscaledTileID,
-    pub(crate) hold_for_fade: bool,
-    /// The tile's projection; `matrix` is its main matrix.
-    pub(crate) projection: ProjectionData,
-    pub(crate) matrix: DMat4,
-}
-
-impl PlacedTile {
-    #[must_use]
-    pub(crate) fn new(tile: &RenderTile) -> PlacedTile {
-        PlacedTile {
-            id: tile.id,
-            overscaled_id: *tile.overscaled_tile_id(),
-            hold_for_fade: tile.hold_for_fade(),
-            projection: tile.projection,
-            matrix: tile.matrix,
-        }
-    }
-}
-
-/// Where a symbol bucket is: its tile, in the tile store, with
-/// where the tile is among its source's tiles as the frame's render tiles
-/// found it ([`RenderTile::slot`]), and its index among the tile's buckets.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) struct BucketKey {
-    pub(crate) bucket: usize,
-    pub(crate) slot: Option<usize>,
-    pub(crate) tile: OverscaledTileID,
-    pub(crate) source: SourceKey,
-}
-
-/// The symbol buckets of the frame's tiles, by key.
-pub(crate) trait SymbolBuckets {
-    fn get(&self, key: &BucketKey) -> Option<&SymbolBucket>;
-    fn get_mut(&mut self, key: &BucketKey) -> Option<&mut SymbolBucket>;
-}
-
-/// A symbol bucket a layer places or draws, with its tile.
-#[derive(Clone)]
-pub struct BucketPlacementData {
-    pub(crate) bucket: BucketKey,
-    pub(crate) tile: PlacedTile,
-    pub(crate) feature_index: Option<Arc<FeatureIndex>>,
-    pub(crate) source_id: Arc<str>,
-    pub(crate) sort_key_range: Option<crate::buckets::symbol_bucket::SortKeyRange>,
-    pub(crate) text_translate: SymbolTranslate,
-    pub(crate) icon_translate: SymbolTranslate,
-}
-
-impl PartialEq for BucketPlacementData {
-    fn eq(&self, other: &Self) -> bool {
-        let BucketPlacementData {
-            bucket,
-            tile,
-            feature_index,
-            source_id,
-            sort_key_range,
-            text_translate,
-            icon_translate,
-        } = self;
-        *bucket == other.bucket
-            && *tile == other.tile
-            && match (feature_index, &other.feature_index) {
-                (Some(a), Some(b)) => Arc::ptr_eq(a, b),
-                (None, None) => true,
-                _ => false,
-            }
-            && *source_id == other.source_id
-            && *sort_key_range == other.sort_key_range
-            && *text_translate == other.text_translate
-            && *icon_translate == other.icon_translate
-    }
-}
-
-/// The copies of symbol buckets that benchmarks' layers place, kept
-/// where a tile store would keep the buckets, by their index, which is
-/// their keys' `bucket`. The benchmarks' entry points pass no store, so the
-/// copies are the thread's, and the layer that places one frees it
+/// The copies of buckets that benchmarks' layers place, kept where a tile
+/// store would keep the buckets, by their index, which is their keys'
+/// `bucket`. The benchmarks' entry points pass no store, so the copies are
+/// the thread's, and the layer that places one frees it
 /// ([`HeldBuckets::release`]) when it drops.
 #[cfg(feature = "bench")]
-pub(crate) struct HeldBuckets(Vec<Option<SymbolBucket>>);
+pub(crate) struct HeldBuckets(Vec<Option<Box<dyn Bucket>>>);
 
 #[cfg(feature = "bench")]
 thread_local! {
-    static HELD_BUCKETS: std::cell::Cell<Vec<Option<SymbolBucket>>> = const { std::cell::Cell::new(Vec::new()) };
+    static HELD_BUCKETS: std::cell::Cell<Vec<Option<Box<dyn Bucket>>>> = const { std::cell::Cell::new(Vec::new()) };
 }
 
-/// A copy of the bucket `bucket` points to, if it is a symbol
-/// bucket, which `HeldBuckets` holds for a benchmark's layer to place, at
-/// the index this returns, until the layer drops.
+/// A copy of the bucket `bucket` points to, which `HeldBuckets` holds for
+/// a benchmark's layer to place, at the index this returns, until the layer
+/// drops.
 #[cfg(feature = "bench")]
-pub(crate) fn hold_symbol_bucket(bucket: &impl std::ops::Deref<Target = dyn Bucket>) -> Option<usize> {
-    let bucket = crate::erased_layer::recover_bucket::<mln_style::layers::Symbol>(&**bucket)?;
-    Some(HeldBuckets::hold(bucket.clone()))
+pub(crate) fn hold_bucket(bucket: &impl std::ops::Deref<Target = dyn Bucket>) -> usize {
+    HeldBuckets::hold(bucket.clone_bucket())
 }
 
 #[cfg(feature = "bench")]
 impl HeldBuckets {
     /// Keeps `bucket`, and returns its index.
-    pub(crate) fn hold(bucket: SymbolBucket) -> usize {
+    pub(crate) fn hold(bucket: Box<dyn Bucket>) -> usize {
         let mut buckets = Self::take();
         buckets.0.push(Some(bucket));
         let index = buckets.0.len() - 1;
@@ -291,13 +198,13 @@ impl HeldBuckets {
 }
 
 #[cfg(feature = "bench")]
-impl SymbolBuckets for HeldBuckets {
-    fn get(&self, key: &BucketKey) -> Option<&SymbolBucket> {
-        self.0.get(key.bucket)?.as_ref()
+impl crate::placement::LaidBuckets for HeldBuckets {
+    fn bucket(&self, key: &crate::placement::BucketKey) -> Option<&dyn Bucket> {
+        Some(&**self.0.get(key.bucket)?.as_ref()?)
     }
 
-    fn get_mut(&mut self, key: &BucketKey) -> Option<&mut SymbolBucket> {
-        self.0.get_mut(key.bucket)?.as_mut()
+    fn bucket_mut(&mut self, key: &crate::placement::BucketKey) -> Option<&mut dyn Bucket> {
+        Some(&mut **self.0.get_mut(key.bucket)?.as_mut()?)
     }
 }
 
@@ -449,6 +356,11 @@ impl<T: LayerType> Layer<T> {
         }
     }
 
+    /// The layer as its type's placement pass sees it.
+    pub(crate) fn placing(&self) -> PlacingLayer<'_, T> {
+        PlacingLayer { layer: &self.values, state: &self.state }
+    }
+
     /// What the layer's type keeps of it besides its drawing.
     #[cfg(feature = "bench")]
     pub(crate) fn state(&self) -> &T::State {
@@ -508,7 +420,7 @@ impl<T: LayerType> Layer<T> {
 /// which keeps what the layer keeps of its tiles and uploads and draws its
 /// draw groups. It runs the hooks of the layer's [`LayerType`] with what is
 /// common to every layer type around them.
-pub(crate) trait RenderLayer {
+pub(crate) trait RenderLayer: Any {
     /// The layer's style.
     fn style(&self) -> &dyn ErasedLayerStyle;
 
@@ -644,19 +556,8 @@ pub(crate) trait RenderLayer {
     /// See [`LayerHost::lose_context`](crate::layer::LayerHost::lose_context).
     fn lose_context(&mut self);
 
-    /// See [`LayerType::PLACES_SYMBOLS`].
-    fn places_symbols(&self) -> bool;
-
-    /// Returns true if the layer has to be placed.
-    fn needs_placement(&self) -> bool {
-        !self.placement_data().is_empty()
-    }
-
-    /// See [`LayerType::placement_data`].
-    fn placement_data(&self) -> &[BucketPlacementData];
-
-    /// See [`LayerType::follower_data`].
-    fn follower_data(&self) -> &[BucketPlacementData];
+    /// Whether the layer's type places its layers ([`LayerType::PLACEMENT`]).
+    fn places(&self) -> bool;
 
     /// Whether `test`'s feature, as the layer draws it, intersects the
     /// query's geometry ([`FeatureQuery::intersects`](crate::layer::FeatureQuery::intersects));
@@ -879,16 +780,8 @@ impl<T: LayerType> RenderLayer for Layer<T> {
         }
     }
 
-    fn places_symbols(&self) -> bool {
-        T::PLACES_SYMBOLS
-    }
-
-    fn placement_data(&self) -> &[BucketPlacementData] {
-        T::placement_data(&self.state)
-    }
-
-    fn follower_data(&self) -> &[BucketPlacementData] {
-        T::follower_data(&self.state)
+    fn places(&self) -> bool {
+        T::PLACEMENT.is_some()
     }
 
     fn query_intersects_feature(&self, test: &HitTest<'_>) -> bool {

@@ -47,9 +47,9 @@ pub use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttribut
 pub use crate::gfx::vertices::{SharedVertices, Vertices};
 pub use crate::layer_composite::Composite;
 pub use crate::layer_drawing::{
-    BucketChanges, DrawDepth, DrawGroup, DrawList, DrawObjectsMut, DrawOrder, DrawPriority, FrameDraw, FrameDraws,
-    KeptDraw, LayerDrawing, LayerDraws, SingleDraw, TileDraws, TileEntry, TileMap, TileObjects, UniformWriter,
-    finish_tiles, tile_objects,
+    BucketChanges, ChangedBuckets, DrawDepth, DrawGroup, DrawList, DrawObjectsMut, DrawOrder, DrawPriority, FrameDraw,
+    FrameDraws, KeptDraw, LayerDrawing, LayerDraws, SingleDraw, TileDraws, TileEntry, TileMap, TileObjects,
+    UniformWriter, finish_tiles, tile_objects,
 };
 pub use crate::paint_parameters::{DrawFrame, PaintParameters};
 pub use crate::render_light::EvaluatedLight;

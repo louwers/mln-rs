@@ -1,5 +1,5 @@
-//! A uniform grid of boxes and circles, which placement fills with the
-//! symbols it places and tests each new symbol against.
+//! A uniform grid of boxes and circles, which a placement fills with what
+//! it places and tests each new shape against.
 
 use glam::Vec2;
 
@@ -24,7 +24,7 @@ impl Aabb {
 
 /// A collision shape in viewport pixels.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) enum Shape {
+pub enum Shape {
     Box(Aabb),
     Circle { center: Vec2, radius: f32 },
 }
@@ -32,7 +32,7 @@ pub(crate) enum Shape {
 impl Shape {
     /// The smallest box that holds the shape.
     #[must_use]
-    pub(crate) fn bounds(&self) -> Aabb {
+    pub fn bounds(&self) -> Aabb {
         match *self {
             Shape::Box(aabb) => aabb,
             Shape::Circle { center, radius } => Aabb::new(center - radius, center + radius),
@@ -42,7 +42,7 @@ impl Shape {
     /// Whether the shapes overlap. Boxes that touch overlap; circles that
     /// touch don't.
     #[must_use]
-    pub(crate) fn intersects(&self, other: &Shape) -> bool {
+    pub fn intersects(&self, other: &Shape) -> bool {
         match (self, other) {
             (Shape::Box(a), Shape::Box(b)) => a.intersects(b),
             (Shape::Circle { center: a, radius: ra }, Shape::Circle { center: b, radius: rb }) => {
@@ -70,7 +70,7 @@ impl Shape {
 /// bounds touch it, so a query tests only the shapes that share a cell with
 /// it. A shape outside the plane is listed in the cells at its edge.
 #[derive(Clone, Debug)]
-pub(crate) struct Grid<T> {
+pub struct Grid<T> {
     size: Vec2,
     cell_size: f32,
     columns: usize,
@@ -85,7 +85,7 @@ pub(crate) struct Grid<T> {
 impl<T> Grid<T> {
     /// An empty grid over a plane of `size`, with cells `cell_size` wide.
     #[must_use]
-    pub(crate) fn new(size: Vec2, cell_size: f32) -> Self {
+    pub fn new(size: Vec2, cell_size: f32) -> Self {
         debug_assert!(size.cmpgt(Vec2::ZERO).all() && cell_size > 0.0);
         let cell_counts = (size / cell_size).ceil().max(Vec2::ONE);
         let (columns, rows) = (cell_counts.x as usize, cell_counts.y as usize);
@@ -102,7 +102,7 @@ impl<T> Grid<T> {
 
     /// Empties the grid and sizes it as [`new`](Self::new) does, keeping its
     /// allocations when the size and cell size are the ones it had.
-    pub(crate) fn reset(&mut self, size: Vec2, cell_size: f32) {
+    pub fn reset(&mut self, size: Vec2, cell_size: f32) {
         if size != self.size || cell_size != self.cell_size {
             *self = Grid::new(size, cell_size);
             return;
@@ -114,11 +114,11 @@ impl<T> Grid<T> {
     }
 
     #[must_use]
-    pub(crate) fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.elements.is_empty()
     }
 
-    pub(crate) fn insert(&mut self, value: T, shape: Shape) {
+    pub fn insert(&mut self, value: T, shape: Shape) {
         debug_assert!(self.elements.len() < u32::MAX as usize);
         let id = self.elements.len() as u32;
         let ((x1, y1), (x2, y2)) = self.cell_range(&shape.bounds());
@@ -133,7 +133,7 @@ impl<T> Grid<T> {
     /// Whether `hit` accepts a value whose shape intersects `shape`. It stops
     /// at the first it accepts, and may be called more than once with a
     /// value.
-    pub(crate) fn any(&self, shape: &Shape, mut hit: impl FnMut(&T) -> bool) -> bool {
+    pub fn any(&self, shape: &Shape, mut hit: impl FnMut(&T) -> bool) -> bool {
         self.find_candidate(&shape.bounds(), |id| {
             let (value, other) = &self.elements[id as usize];
             shape.intersects(other) && hit(value)
@@ -142,7 +142,7 @@ impl<T> Grid<T> {
 
     /// The values whose shapes intersect `shape`, each once, in the order
     /// they were inserted, with their shapes.
-    pub(crate) fn query(&self, shape: &Shape) -> impl Iterator<Item = (&T, &Shape)> {
+    pub fn query(&self, shape: &Shape) -> impl Iterator<Item = (&T, &Shape)> {
         let mut ids = Vec::new();
         self.find_candidate(&shape.bounds(), |id| {
             ids.push(id);

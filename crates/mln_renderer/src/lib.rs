@@ -33,6 +33,7 @@ mod paint_parameters;
 mod paint_property_binder;
 mod paint_property_statistics;
 mod pattern_atlas;
+pub mod placement;
 pub mod query;
 mod registry;
 mod render_layer;
