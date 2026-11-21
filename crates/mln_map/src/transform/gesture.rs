@@ -222,7 +222,7 @@ impl Transform {
             return false;
         }
         self.gesture.hold = None;
-        self.come_to_rest()
+        self.come_to_rest(false)
     }
 
     #[must_use]

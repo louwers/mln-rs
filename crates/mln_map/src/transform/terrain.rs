@@ -19,17 +19,22 @@
 //!   the eye or the near plane, through its momentum. A command that takes
 //!   the center from the momentum eases the altitude again, and the gesture
 //!   holds it from where that command leaves it.
-//! - **Every motion ends on the ground.** Commands, a gesture and its
-//!   momentum can move the camera at once, so whatever moves it last can
-//!   leave the center off the ground: a command whose altitude a gesture
-//!   held, one cancelled midway, one whose anchor gave out. When the last
-//!   of them stops, a center that stands off the ground under it moves
-//!   onto the ground along the view, with the eye where it is
-//!   ([`Transform::come_to_rest`]), before the motion's last camera
-//!   event, so that the rule at rest finds nothing left to do. Where the
-//!   view meets no drawn ground or the zoom limits refuse the move, the
-//!   rule at rest takes the center up or down instead. An ease that lands
-//!   on the ground ends at exactly the camera it asked for.
+//! - **Every motion ends on the ground**, before its last camera event, so
+//!   that the rule at rest finds nothing left to do
+//!   ([`Transform::come_to_rest`]). How depends on how the motion ends:
+//!   - A command that completes, reaching its last frame still owning
+//!     every field it took, ends at the center, zoom, bearing and pitch it
+//!     asked for, and its last frame stands on the ground at that center:
+//!     what is left between where its eased altitude headed and that
+//!     ground is taken up in altitude alone. It is never recentred.
+//!   - Anything else that brings the camera to rest leaves the center
+//!     wherever the motion stopped, maybe off the ground: a gesture's end,
+//!     a momentum's end, a command cancelled or replaced with nothing left
+//!     moving, or one that gave up its center or its altitude on the way.
+//!     A center off the ground then moves onto it along the view, with the
+//!     eye where it is, where the bounds and the zoom limits take that
+//!     camera as it is; where they don't, or the view meets no drawn
+//!     ground, the rule at rest takes the center up or down instead.
 //!
 //! The terrain moves a camera at rest, as ground loads or changes under it,
 //! the clamp turns on or the terrain goes, without camera events, as in GL
@@ -295,20 +300,28 @@ impl Transform {
 
     /// Ends a motion over a clamped center on the ground, once nothing moves
     /// the camera any more: no gesture is in progress and no command runs.
-    /// A center that then stands farther off the loaded ground under it
-    /// than [`RECENTER_TOLERANCE`] moves along the view onto the ground its
-    /// line of sight meets, with the eye where it is
+    ///
+    /// After a command that `completed`, the camera stays where it asked to
+    /// be, and the ground under its center takes it up or down, as at rest.
+    /// After anything else, a center that stands farther off the loaded
+    /// ground under it than [`RECENTER_TOLERANCE`] moves along the view
+    /// onto the ground its line of sight meets, with the eye where it is
     /// ([`TransformState::recenter_on`], GL JS's `recenterOnTerrain`), and
-    /// then stands on the ground as at rest. Where the line meets no drawn
+    /// then stands on the ground as at rest; where the line meets no drawn
     /// ground, or the limits refuse the move, the center stays and the
-    /// ground under it takes it up or down. The caller reports the camera's
-    /// change. Returns whether the view changed.
-    pub(super) fn come_to_rest(&mut self) -> bool {
+    /// ground under it takes it up or down.
+    ///
+    /// The caller reports the camera's change. Returns whether the view
+    /// changed.
+    pub(super) fn come_to_rest(&mut self, completed: bool) -> bool {
         let Some(TerrainGround { elevation: Some(elevation), clamped: true }) = &self.terrain else {
             return false;
         };
         if self.gesture_in_progress || !self.transitions.is_empty() {
             return false;
+        }
+        if completed {
+            return self.follow_terrain();
         }
         let view = self.view();
         let ground = elevation.at(view.center(WrapMode::Wrapped));

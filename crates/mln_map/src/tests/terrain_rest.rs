@@ -1,16 +1,17 @@
-//! How a motion over a clamped center comes to rest: whatever moved the
-//! camera last, a command's last frame, a momentum's end or a gesture's
-//! end, leaves the center on the ground under it, moved there along the
-//! view with the eye where it is, before the motion's last camera event,
-//! so the camera at rest moves no more.
+//! How a motion over a clamped center comes to rest, on the ground under
+//! the center, before the motion's last camera event, so the camera at rest
+//! moves no more: a command that completes ends at the camera it asked for,
+//! its altitude on the ground there, and anything else that brings the
+//! camera to rest moves the center onto the ground along the view, with the
+//! eye where it is, where the limits allow it.
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use glam::{DVec2, DVec3};
-use mln_map_types::{ConstrainMode, Elevation, View, ViewportMode};
+use mln_map_types::{CameraLimits, ConstrainMode, Elevation, View, ViewportMode};
 use mln_util::constants::DEFAULT_TRANSITION_EASE;
-use mln_util::geo::{LatLng, ScreenCoordinate, WrapMode};
+use mln_util::geo::{LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
 use mln_util::projection::Projection;
 use mln_util::queue::Queue;
 use mln_util::size::Size;
@@ -407,4 +408,186 @@ fn a_command_ended_on_the_ground_stands_still_on_newer_ground() {
     let newer = flat(Some(hill.at(center).unwrap()), hill.min_at(center).unwrap());
     report(&mut map, ground_event(&newer));
     assert_eq!(view, *map.transform_state().view());
+}
+
+/// Ground `height` meters high at the start that rises `east` meters for
+/// each meter east and `north` for each meter north, and is rough by up to
+/// `rough` meters, as a DEM's rounding leaves it.
+#[derive(Debug)]
+struct Incline {
+    height: f64,
+    east: f64,
+    north: f64,
+    rough: f64,
+}
+
+impl Incline {
+    fn steady(east: f64, north: f64) -> Arc<dyn Elevation> {
+        Arc::new(Incline { height: 1000.0, east, north, rough: 0.0 })
+    }
+
+    fn height(&self, at: DVec2) -> f64 {
+        let moved = (at - world(&start())) * meters();
+        let rough = self.rough * ((at.x * 1e9 + at.y * 3e9).sin() * 43_758.545_3).fract();
+        self.height + self.east * moved.x - self.north * moved.y + rough
+    }
+}
+
+impl Elevation for Incline {
+    fn at(&self, location: LatLng) -> Option<f64> {
+        Some(self.height(world(&location)))
+    }
+
+    fn min_at(&self, _: LatLng) -> Option<f64> {
+        Some(self.height)
+    }
+
+    fn surface_at(&self, world: DVec2) -> Option<f64> {
+        Some(self.height(world))
+    }
+
+    fn range(&self) -> Option<(f64, f64)> {
+        Some((-1e5, 1e5))
+    }
+}
+
+/// Where `ground` draws under `point` (y down) of `view`: the ground there,
+/// and its height.
+fn ground_under(view: &View, ground: &dyn Elevation, point: ScreenCoordinate) -> (DVec2, f64) {
+    let y_up = ScreenCoordinate::new(point.x, f64::from(view.size().height) - point.y);
+    let hit = view.ground_under(&y_up, ground).expect("ground under the point");
+    (hit.world, hit.height)
+}
+
+/// Checks that the ground `held` draws within 0.01 px of `point` (y down)
+/// on `view`.
+fn assert_holds(view: &View, held: (DVec2, f64), point: ScreenCoordinate, what: &str) {
+    let drawn = pixel(view, held.0, held.1);
+    let off = drawn.distance(DVec2::new(point.x, f64::from(view.size().height) - point.y));
+    assert!(off < 0.01, "{what}: the ground under the anchor moved {off} px");
+}
+
+/// Checks that `view`'s center stands exactly on `ground`.
+fn assert_on_ground(view: &View, ground: &dyn Elevation, what: &str) {
+    let at = ground.at(view.center(WrapMode::Wrapped)).unwrap();
+    assert_eq!(at, view.center_altitude(), "{what}: the center stands on the ground");
+}
+
+/// Starts `camera` as a command of `mode` over a second.
+fn run(map: &mut Map, mode: CameraUpdateMode, camera: CameraOptions, animation: AnimationOptions) {
+    map.update_camera(&CameraUpdate { mode, camera, animation, ..Default::default() });
+}
+
+/// Every kind of command that completes over terrain, alone or beside
+/// another command that changes the pitch or the bearing, ends at exactly
+/// the center and zoom it asked for, its altitude on the ground there, and
+/// the next update moves nothing. An anchored command ends with the ground
+/// it grabbed under its anchor.
+#[test]
+fn a_command_that_completes_ends_at_the_camera_it_asked_for() {
+    let destination = LatLng::new(20.02, 10.05).unwrap();
+    let anchor = ScreenCoordinate::new(120.0, 400.0);
+    let to = CameraOptions { center: Some(destination), zoom: Some(13.0), ..Default::default() };
+    let around = CameraOptions { zoom: Some(13.0), anchor: Some(anchor), ..Default::default() };
+    let commands = [
+        ("an ease", CameraUpdateMode::Ease, to),
+        ("a flight", CameraUpdateMode::Fly, to),
+        ("a jump", CameraUpdateMode::Jump, to),
+        ("an anchored ease", CameraUpdateMode::Ease, CameraOptions { bearing: Some(20.0), ..around }),
+        ("an anchored zoom", CameraUpdateMode::Ease, around),
+    ];
+    // Beside it: nothing, the pitch over the same second, or the bearing
+    // from 208 ms to 708 ms.
+    let pitch = CameraOptions { pitch: Some(55.0), ..Default::default() };
+    let bearing = CameraOptions { bearing: Some(-25.0), ..Default::default() };
+    let besides = [("alone", None), ("beside a pitch", Some((pitch, 0))), ("beside a turn", Some((bearing, 208)))];
+    for (name, mode, camera) in commands {
+        for (beside, other) in besides {
+            if camera.bearing.is_some() && other.is_some_and(|(other, _)| other.bearing.is_some()) {
+                continue;
+            }
+            let what = format!("{name} {beside}");
+            let run_loop = Queue::<()>::new();
+            let ground = Incline::steady(0.25, 0.1);
+            let (mut map, clock) = map_over(Some(&ground), &run_loop);
+            let grabbed = ground_under(map.transform_state().view(), &*ground, anchor);
+            let other_animation = |delay| AnimationOptions {
+                duration: Some(Duration::from_millis(if delay == 0 { 1000 } else { 500 })),
+                ..eased()
+            };
+            if let Some((other, 0)) = other {
+                run(&mut map, CameraUpdateMode::Ease, other, other_animation(0));
+            }
+            run(&mut map, mode, camera, eased());
+            frames(&mut map, clock, Duration::from_secs(1), |map, elapsed| {
+                if let Some((other, delay)) = other.filter(|&(_, delay)| delay != 0)
+                    && elapsed == Duration::from_millis(delay)
+                {
+                    run(map, CameraUpdateMode::Ease, other, other_animation(delay));
+                }
+            });
+            assert!(!map.snapshot().transition_in_progress, "{what}");
+            let view = map.transform_state().view().clone();
+            assert_eq!(13.0, view.zoom(), "{what}: the zoom it asked for");
+            if camera.anchor.is_some() {
+                assert_holds(&view, grabbed, anchor, &what);
+            } else {
+                let center = view.center(WrapMode::Wrapped);
+                assert!((center.latitude() - destination.latitude()).abs() < 1e-9, "{what}: {center:?}");
+                assert!((center.longitude() - destination.longitude()).abs() < 1e-9, "{what}: {center:?}");
+            }
+            assert_on_ground(&view, &*ground, &what);
+            assert_at_rest(&mut map, &what);
+        }
+    }
+}
+
+/// A transform under [`ConstrainMode::Screen`], 512 by 512, over ground
+/// that rises to the north, whose bounds end 3 km north of the start: at
+/// rest at the start at zoom 13, pitched 50 degrees.
+fn transform_under_screen_bounds(ground: &Arc<dyn Elevation>) -> Transform {
+    let mut transform = Transform::new(ConstrainMode::Screen, ViewportMode::Default);
+    transform.resize(Size::new(512, 512)).unwrap();
+    let north = north_of_start(3000.0);
+    let bounds = LatLngBounds::hull(
+        LatLng::new(start().latitude() - 1.0, start().longitude() - 1.0).unwrap(),
+        LatLng::new(north.latitude(), start().longitude() + 1.0).unwrap(),
+    );
+    transform.set_limits(CameraLimits { bounds, ..*transform.state().limits() }).unwrap();
+    transform.set_terrain(Some(TerrainGround { elevation: Some(Arc::clone(ground)), clamped: true }));
+    transform.set_frame_time(Some(Instant::now() + Duration::from_secs(3600)));
+    transform.jump_to(&CameraOptions {
+        center: Some(start()),
+        zoom: Some(13.0),
+        pitch: Some(50.0),
+        ..Default::default()
+    });
+    transform.follow_terrain();
+    transform
+}
+
+/// Checks that `transform`'s bounds take its camera as it is.
+fn assert_within_screen_bounds(transform: &Transform, what: &str) {
+    let view = transform.view();
+    let center = view.center(WrapMode::Unwrapped);
+    let mut camera = CameraOptions { center: Some(center), ..Default::default() };
+    let mut zoom = view.zoom();
+    transform.state().constrain_camera_and_zoom_to_bounds(&mut camera, &mut zoom);
+    assert_eq!((Some(center), view.zoom()), (camera.center, zoom), "{what}: the bounds move the camera");
+}
+
+/// A zoom-only jump that the bounds under [`ConstrainMode::Screen`] move
+/// south of its center ends there, at the zoom it asked for, its altitude
+/// on the ground, within the bounds.
+#[test]
+fn a_jump_that_screen_bounds_move_ends_within_them() {
+    let ground = Incline::steady(0.0, 0.25);
+    let mut transform = transform_under_screen_bounds(&ground);
+    transform.jump_to(&CameraOptions { zoom: Some(12.0), ..Default::default() });
+    let view = transform.view();
+    assert_eq!(12.0, view.zoom());
+    assert!(view.center(WrapMode::Wrapped).latitude() < start().latitude(), "the bounds move the center south");
+    assert_on_ground(view, &*ground, "the jump");
+    assert_within_screen_bounds(&transform, "the jump");
+    assert!(!transform.follow_terrain(), "at rest");
 }

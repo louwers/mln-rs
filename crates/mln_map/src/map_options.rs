@@ -50,11 +50,13 @@ pub struct MapOptions {
     /// reaches above its eye, and the commands running then stop easing
     /// theirs. A command that takes the center from a gesture's momentum
     /// eases the altitude as any command does. Any other camera that an
-    /// animation moves keeps its altitude. When the last motion ends, a
-    /// center off the ground moves along the view onto it, with the eye
-    /// where it was; where the view meets no drawn ground, or the zoom
-    /// limits refuse that move, the center stays and stands on the ground
-    /// as at rest. When this is off, every camera keeps the altitude it is
+    /// animation moves keeps its altitude. A command that completes ends at
+    /// the camera it asked for, standing on the ground there. When anything
+    /// else brings the camera to rest, such as a gesture's end or a cancel,
+    /// a center off the ground moves along the view onto it, with the eye
+    /// where it was; where the view meets no drawn ground, or the bounds or
+    /// zoom limits refuse that move, the center stays and stands on the
+    /// ground as at rest. When this is off, every camera keeps the altitude it is
     /// given, such as the style's `centerAltitude`, and a command or a
     /// gesture whose eye the ground reaches lowers the pitch and zoom
     /// instead. Without terrain it changes nothing. On by default.

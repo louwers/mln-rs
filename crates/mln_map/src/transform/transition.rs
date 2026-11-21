@@ -34,6 +34,9 @@ pub(super) struct Transition {
     /// Remaining property ownership; replacement removes fields from this
     /// mask.
     pub(super) fields: u16,
+    /// The fields the command took when it started: it completes only if it
+    /// still owns them all when its time runs out.
+    asked: u16,
     /// Replacing any coupled field relinquishes all coupled fields together.
     coupled_fields: u16,
     /// Properties classified as moving at command start; intersected with
@@ -88,6 +91,7 @@ impl Transition {
     ) -> Transition {
         Transition {
             fields,
+            asked: fields,
             coupled_fields: 0,
             moving_fields,
             start,
@@ -105,6 +109,12 @@ impl Transition {
             eased_altitude: None,
             end_solved_for: None,
         }
+    }
+
+    /// Whether the command completes: it isn't a momentum, nothing stopped
+    /// it, and it still owns every field it took.
+    fn completes(&self) -> bool {
+        self.momentum.is_none() && self.stopped.is_none() && self.fields == self.asked
     }
 
     /// Whether the command eases the altitude onto the ground it ends on.
@@ -356,8 +366,9 @@ impl Transform {
     ///
     /// An anchored command's end is solved with the ground there
     /// ([`anchored_end`]). Where that fails, the command eases toward the
-    /// end at the altitude it starts at, and the end of the motion moves
-    /// the center onto the ground ([`Transform::come_to_rest`]).
+    /// end at the altitude it starts at. Its last frame stands on the ground
+    /// at the center it reaches, which takes up in altitude alone what is
+    /// left between the two ([`Transform::come_to_rest`]).
     pub(super) fn start_transition(
         &mut self,
         camera: &CameraOptions,
@@ -490,17 +501,22 @@ impl Transform {
         // The ground that clamps the center, if any: `Some(None)` before the
         // renderer drew any.
         let clamping = self.terrain.as_ref().filter(|terrain| terrain.clamped).map(|terrain| &terrain.elevation);
-        let active = match only {
-            Some(index) => &mut self.transitions[index..=index],
-            None => &mut self.transitions[..],
+        let (first, active) = match only {
+            Some(index) => (index, &mut self.transitions[index..=index]),
+            None => (0, &mut self.transitions[..]),
         };
-        for transition in active {
+        // The commands that ease their altitude and reach their last frame.
+        let mut landing = Vec::new();
+        for (index, transition) in (first..).zip(active) {
             if transition.momentum.is_some() {
                 continue;
             }
             let t = transition.progress(now);
             let ease = transition.animation.easing.unwrap_or(DEFAULT_TRANSITION_EASE);
             let k = if t == 1.0 { 1.0 } else { ease.solve(t, 0.001) };
+            if k == 1.0 && transition.eased_altitude.is_some() && clamping.is_some() {
+                landing.push(index);
+            }
             let mut value = (transition.frame)(&self.state, k);
             // The terrain clamps the center while a command eases its
             // altitude (see `Transform::set_terrain`).
@@ -584,6 +600,14 @@ impl Transform {
                 self.state.set_center_altitude(camera.center_altitude.unwrap_or_default());
             }
         }
+        // The last frame of a command that completes stands on the ground at
+        // the center it reached, which takes up in altitude alone what is
+        // left between where its altitude headed and that ground.
+        if landing.iter().any(|&index| self.transitions[index].completes())
+            && let Some(ground) = self.ground_at(self.view().center(WrapMode::Wrapped))
+        {
+            self.state.set_center_altitude(ground);
+        }
         // Last, so that the eye stays clear: a gesture's lift that changes
         // this frame moves the anchor's location on the screen a little,
         // and the next step holds the location under it then.
@@ -632,8 +656,9 @@ impl Transform {
 
     /// Ends `finished`: the gestures whose momentum they are, then, once
     /// nothing moves the camera any more, the motion on the ground
-    /// ([`Self::come_to_rest`]), and last the commands' ends and changes,
-    /// which report that move too.
+    /// ([`Self::come_to_rest`]), as a command that completes if any of them
+    /// does, and last the commands' ends and changes, which report that
+    /// move too.
     pub(super) fn finish_transitions(&mut self, finished: Vec<Transition>) {
         if finished.is_empty() {
             return;
@@ -641,7 +666,7 @@ impl Transform {
         for transition in &finished {
             self.end_gesture_momentum(transition.gesture);
         }
-        self.come_to_rest();
+        self.come_to_rest(finished.iter().any(Transition::completes));
         for transition in finished {
             self.report_end(transition.command, transition.animation.transition_id, transition.end());
             // This notification ends a command, not necessarily all camera
