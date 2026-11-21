@@ -17,13 +17,12 @@ use mln_gfx::{AttributeDataType, DepthMaskType, DrawMode};
 use mln_map_types::View;
 use mln_map_types::tile_cover::{TileCoverParameters, tile_cover};
 use mln_util::range::Range;
-use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use crate::draw_objects::{DrawGeometry, DrawObjects, Textures, raw_vertices};
 use crate::gfx::context::Context;
 use crate::gfx::indexes::DrawIndexes;
 use crate::gfx::vertex_attribute::Uniforms;
-use crate::globe::{TileGrid, tile_grid};
+use crate::globe::{TileGrid, grid, surface_granularity};
 use crate::layer_drawing::{DrawDepth, DrawList, FrameDraw, KeptDraw, LayerDraws, TileMap, finish_tiles, tile_objects};
 use crate::paint_parameters::PaintParameters;
 use crate::tile_matrix::to_projection_ubo;
@@ -94,11 +93,8 @@ impl GlobeDepthPass {
                 // touches a pole.
                 let canonical = &tile_id.canonical;
                 let key = (canonical.z, canonical.y == 0, canonical.y == (1u32 << canonical.z) - 1);
-                let mesh = self.meshes.entry(key).or_insert_with(|| {
-                    let granularity =
-                        SubdivisionGranularitySetting::globe().tile.granularity_for_zoom_level(canonical.z);
-                    tile_grid(canonical, granularity, true)
-                });
+                let mesh =
+                    self.meshes.entry(key).or_insert_with(|| grid(canonical, surface_granularity(canonical.z), true));
                 let vertex_count = mesh.vertices.len();
                 let indices = mesh.triangles.as_flattened().to_vec();
                 let vertices = raw_vertices(

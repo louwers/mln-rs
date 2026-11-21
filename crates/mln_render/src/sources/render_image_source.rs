@@ -17,10 +17,10 @@ use mln_util::geo::LatLngBounds;
 use mln_util::interpolate::Interpolate;
 use mln_util::logging::{Event, Log};
 use mln_util::range::Range;
-use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use crate::erased_layer::ErasedEvaluatedLayer;
 use crate::gfx::context::Context;
+use crate::globe::surface_granularity;
 use crate::render_source::{RenderSource, RenderSourceBase, RenderTileParameters, TileOrder};
 use crate::render_tile::RenderTile;
 use crate::source::{ImageOf, SourceImage};
@@ -326,11 +326,7 @@ impl RenderImageSource {
 
         // The globe bends the quad over the sphere with the tile mesh
         // granularity of its tile.
-        let cells = if view.is_globe() {
-            SubdivisionGranularitySetting::globe().tile.granularity_for_zoom_level(self.tile_ids[0].canonical.z)
-        } else {
-            1
-        };
+        let cells = if view.is_globe() { surface_granularity(self.tile_ids[0].canonical.z) } else { 1 };
         if !contents.geometry().has_quads() || geom_coords != self.mesh_corners || cells != self.mesh_cells {
             build_image_mesh(contents, &geom_coords, cells);
             self.mesh_corners = geom_coords;

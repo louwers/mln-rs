@@ -139,7 +139,7 @@ impl LineBucket {
         let granularity = self.subdivision_granularity.line.granularity_for_zoom_level(canonical.z);
         let subdivided;
         let line = if granularity >= 2 {
-            subdivided = subdivide_line(line, granularity, false);
+            subdivided = subdivide_line(line, granularity);
             &subdivided
         } else {
             line

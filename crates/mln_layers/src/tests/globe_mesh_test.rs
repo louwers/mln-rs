@@ -5,7 +5,6 @@ use mln_render::globe::{NORTH_POLE_Y, tile_grid};
 use mln_render::layer::TileMask;
 use mln_tile_id::CanonicalTileID;
 use mln_util::constants::EXTENT;
-use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use super::with_context;
 use crate::mesh::{GlobeTileMeshCache, masked_grid};
@@ -110,7 +109,7 @@ fn globe_mask_keeps_the_uncovered_parts() {
     assert_eq!(33, north_pole);
 
     let full = masked_grid(&tile, &mask(&[(0, 0, 0)]), globe_test_vertex);
-    let grid = tile_grid(&tile, SubdivisionGranularitySetting::globe().tile.granularity_for_zoom_level(1), false);
+    let grid = tile_grid(&tile);
     assert_eq!(grid.vertices.len(), full.vertices.len());
     for (grid, vertex) in grid.vertices.iter().zip(&full.vertices) {
         assert_eq!(*grid, vertex.position);

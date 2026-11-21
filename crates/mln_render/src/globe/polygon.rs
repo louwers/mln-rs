@@ -5,7 +5,7 @@ use mln_tile_id::geometry_tile_data::GeometryCollection;
 use mln_util::constants::EXTENT;
 use mln_util::hash::HashMap;
 
-use super::line::{subdivide_line, vec};
+use super::line::{subdivide_ring, vec};
 use super::{NORTH_POLE_Y, SOUTH_POLE_Y};
 
 /// A polygon's mesh, with vertices of its own.
@@ -30,6 +30,10 @@ pub struct SubdividedPolygon {
 /// the pole. On the zoom 0 tile, which spans the antimeridian, triangles
 /// and lines that reach outside the tile are dropped. `outline` adds the
 /// lines of the rings, subdivided as well.
+///
+/// # Panics
+///
+/// If a triangle has an index past the rings' points.
 #[must_use]
 pub fn subdivide_polygon(
     polygon: &GeometryCollection,
@@ -225,7 +229,7 @@ impl Subdivider {
     fn outline(&mut self, polygon: &GeometryCollection) -> Vec<[u32; 2]> {
         let mut lines = Vec::new();
         for ring in polygon.iter() {
-            let path = subdivide_line(ring, self.granularity, true);
+            let path = subdivide_ring(ring, self.granularity);
             lines.extend(path.windows(2).map(|segment| [self.index(vec(segment[0])), self.index(vec(segment[1]))]));
         }
         lines
@@ -287,11 +291,11 @@ struct Row {
 /// times the widest sliver between the meshes of neighboring zoom levels
 /// (about 2π units with the globe's granularities), and inside the clipping
 /// masks' border.
-pub const TILE_BORDER_STRIP_WIDTH: i16 = (EXTENT / 256) as i16;
+const TILE_BORDER_STRIP_WIDTH: i16 = (EXTENT / 256) as i16;
 
 /// Extends every triangle edge of `mesh` that lies on the border of the
-/// tile `tile` with nothing beyond it by a strip
-/// [`TILE_BORDER_STRIP_WIDTH`] units outside the tile.
+/// tile `tile` with nothing beyond it by a strip `EXTENT / 256` units
+/// outside the tile.
 ///
 /// Tiles of neighboring zoom levels split their shared edge at different
 /// points, and only the clipping masks' borders cover the slivers between

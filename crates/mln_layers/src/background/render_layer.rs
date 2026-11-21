@@ -20,7 +20,6 @@ use mln_util::Color;
 use mln_util::constants::TILE_SIZE_D;
 use mln_util::range::Range;
 use mln_util::size::Size;
-use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use super::pattern_atlas::PatternAtlas;
 use super::programs::{
@@ -61,8 +60,7 @@ impl BackgroundState {
         let (vertices, vertex_count, indexes, segments) = if variant == ProjectionVariant::Globe {
             // The background is not depth tested, so it needs no tile border.
             let canonical = &tile_id.canonical;
-            let granularity = SubdivisionGranularitySetting::globe().tile.granularity_for_zoom_level(canonical.z);
-            let grid = tile_grid(canonical, granularity, false);
+            let grid = tile_grid(canonical);
             let count = grid.vertices.len();
             let indices = grid.triangles.into_flattened();
             let segments = vec![SegmentBase::with_lengths(0, 0, count, indices.len())];

@@ -4,15 +4,26 @@ use mln_tile_id::geometry_tile_data::GeometryCoordinates;
 use mln_util::constants::EXTENT;
 
 /// `line` with a vertex inserted wherever it crosses the boundary of a
-/// cell of a grid of `granularity` cells per axis over the tile. `is_ring`
-/// closes the line first, so the result ends where it starts. A line of
+/// cell of a grid of `granularity` cells per axis over the tile. A line of
 /// fewer than two points has none.
 #[must_use]
-pub fn subdivide_line(line: &[Point<i16>], granularity: u32, is_ring: bool) -> GeometryCoordinates {
+pub fn subdivide_line(line: &[Point<i16>], granularity: u32) -> GeometryCoordinates {
+    subdivide(line, granularity, false)
+}
+
+/// The [`subdivide_line`] of `ring`, closed first if it isn't, so that the
+/// result ends where it starts.
+#[must_use]
+pub fn subdivide_ring(ring: &[Point<i16>], granularity: u32) -> GeometryCoordinates {
+    subdivide(ring, granularity, true)
+}
+
+/// The [`subdivide_line`] of `line`, closed first if `close` and it isn't.
+fn subdivide(line: &[Point<i16>], granularity: u32, close: bool) -> GeometryCoordinates {
     if line.len() < 2 {
         return GeometryCoordinates::new();
     }
-    let close_ring = is_ring && line.first() != line.last();
+    let close_ring = close && line.first() != line.last();
     let segment_ends = line.iter().skip(1).chain(close_ring.then_some(&line[0]));
     let segments = line.iter().zip(segment_ends);
     if granularity < 2 {

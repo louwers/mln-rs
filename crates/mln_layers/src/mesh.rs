@@ -7,11 +7,10 @@ use std::marker::PhantomData;
 use geometry::Point;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_render::draw::{Context, DrawIndexes, Indexes, SharedIndexes, SharedVertices};
-use mln_render::globe::{NORTH_POLE_Y, SOUTH_POLE_Y, tile_grid};
+use mln_render::globe::masked_tile_grids;
 use mln_render::layer::{Indexed, TileMask};
 use mln_tile_id::CanonicalTileID;
 use mln_util::constants::EXTENT;
-use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 /// Adds the quads that points are drawn as, one for each of `points`, and
 /// indexes their triangles. `vertex` makes each corner from the point
@@ -30,10 +29,8 @@ pub(crate) fn add_point_quads<V: Copy>(
     }
 }
 
-/// The globe grid of the parts of a tile that its mask keeps: its
-/// vertices, indices and segments. Each part is gridded like the tile it
-/// stands in for, so it meets that tile's neighbours edge to edge; texture
-/// positions stay inside the tile, so the pole rows sample the tile's edge.
+/// The globe grid of the parts of a tile that its mask keeps
+/// ([`masked_tile_grids`]): its vertices, indices and segments.
 pub(crate) struct MaskedGrid<V> {
     pub(crate) vertices: Vec<V>,
     pub(crate) indices: Vec<u16>,
@@ -42,7 +39,8 @@ pub(crate) struct MaskedGrid<V> {
 
 /// The globe grid of the parts of the tile `canonical` that `mask` keeps,
 /// of `layout_vertex`'s vertices, made of each vertex's position and
-/// texture position.
+/// texture position. Texture positions stay inside the tile, so the pole
+/// rows sample the tile's edge.
 #[must_use]
 pub(crate) fn masked_grid<V: Copy>(
     canonical: &CanonicalTileID,
@@ -51,26 +49,11 @@ pub(crate) fn masked_grid<V: Copy>(
 ) -> MaskedGrid<V> {
     let mut vertices: Vec<V> = Vec::new();
     let (mut indices, mut segments) = (Vec::new(), Vec::new());
-    for part in mask {
-        // The tile that the part stands in for.
-        let z = canonical.z + part.z;
-        let tile = CanonicalTileID::new(z, (canonical.x << part.z) + part.x, (canonical.y << part.z) + part.y);
-        let granularity = SubdivisionGranularitySetting::globe().tile.granularity_for_zoom_level(z);
-        let grid = tile_grid(&tile, granularity, false);
+    for grid in masked_tile_grids(canonical, mask) {
         let first = vertices.len();
-        let extent = EXTENT >> part.z;
         for &[x, y] in &grid.vertices {
-            let position = Point::new(
-                (part.x as i32 * extent + (i32::from(x) >> part.z)) as i16,
-                if y == NORTH_POLE_Y || y == SOUTH_POLE_Y {
-                    y
-                } else {
-                    (part.y as i32 * extent + (i32::from(y) >> part.z)) as i16
-                },
-            );
             let clamp = |value: i16| i32::from(value).clamp(0, EXTENT) as u16;
-            let texture = Point::new(clamp(position.x), clamp(position.y));
-            vertices.push(layout_vertex(position, texture));
+            vertices.push(layout_vertex(Point::new(x, y), Point::new(clamp(x), clamp(y))));
         }
         let mut triangles = Indexed { indexes: &mut indices, segments: &mut segments };
         triangles.add(&mut vertices, first, grid.triangles.iter().map(|t| t.map(u32::from)));

@@ -7,7 +7,7 @@ use std::sync::Arc;
 use geometry::Point;
 use mln_gfx::shaders::segment::{MAX_SEGMENT_VERTICES, SegmentBase};
 use mln_map_types::View;
-use mln_render::globe::{SubdividedPolygon, subdivide_line, subdivide_polygon};
+use mln_render::globe::{SubdividedPolygon, subdivide_polygon, subdivide_ring};
 use mln_render::layer::{
     Bucket, BucketBase, CrossFadedPaintPropertyBinder, EvaluatedLayer, GeometryUpload, GeometryVec, Indexed,
     PaintPropertyBinder,
@@ -367,7 +367,7 @@ impl PatternBucket for FillExtrusionBucket {
             let granularity = self.subdivision_granularity.fill.granularity_for_zoom_level(canonical.z);
             if granularity >= 2 {
                 let subdivided_rings: Vec<GeometryCoordinates> =
-                    polygon.iter().map(|ring| subdivide_line(ring, granularity, true)).collect();
+                    polygon.iter().map(|ring| subdivide_ring(ring, granularity)).collect();
                 let roof =
                     subdivide_polygon(&polygon, tessellator.triangulate(&polygon), canonical, granularity, false);
                 self.add_polygon(&subdivided_rings, Some(&roof), tessellator);
