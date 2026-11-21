@@ -3,6 +3,9 @@ mod map_snapshot;
 mod map_updates;
 mod style_loader;
 mod style_sources;
+// test/util/tile_cover.test.cpp: mln_map_types' tile cover of the views
+// that the map's Transform sets up, and of bounds and geometries.
+mod tile_cover_test;
 
 /// A pool for a test's map.
 fn pool() -> mln_util::pool::Pool {
