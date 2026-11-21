@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use mln_map::{MapEvent, MapMode, RenderMode};
 use mln_runtime::{
     AttachOptions, BackendType, DemandMode, Device, DeviceOptions, ErrorKind, FrameDemand, FrameDisposition,
-    FrameResult, Map, MapOptions, RenderSession, RenderTarget, Runtime, RuntimeEventKind,
+    FrameResult, LogicalExtent, Map, MapOptions, RenderSession, RenderTarget, Runtime, RuntimeEventKind,
 };
 use mln_style::layers::{CustomLayerHost, CustomLayerRenderParameters};
 use mln_util::size::Size;
@@ -140,6 +140,55 @@ fn a_still_image_whose_target_cant_make_its_textures_ends_with_the_error() {
         matches!(&results[..], [result] if result.token.is_none() && result.disposition == FrameDisposition::NoUpdate),
         "{results:?}"
     );
+}
+
+/// The extent of a target whose logical size rounds down to no physical
+/// pixels at its scale factor.
+const NO_PIXELS: LogicalExtent = LogicalExtent { size: Size { width: 1, height: 64 }, scale_factor: 0.5 };
+
+/// A still image of an offscreen target without pixels ends with an error
+/// that says so, its demand's result with no update, rather than waiting
+/// for ever. The GPU had nothing to do with it, so the map reports no
+/// render error.
+#[test]
+fn a_still_image_of_a_target_without_pixels_ends_with_an_error() {
+    let runtime = runtime();
+    let log = EventLog::install(&runtime);
+    let map = red_map(&runtime, MapMode::Static, SIZE);
+    let Some(session) = offscreen_session(&map, SIZE) else { return };
+    wait(session.resize(NO_PIXELS));
+    let error = result_of(map.request_still_image().unwrap()).expect_err("a still of a target without pixels");
+    assert_eq!(ErrorKind::InvalidState, error.kind, "{error}");
+    assert!(error.message.contains("no pixels"), "{error}");
+    let results = session.drain_frame_results().unwrap();
+    assert!(
+        matches!(&results[..], [result] if result.token.is_none() && result.disposition == FrameDisposition::NoUpdate),
+        "{results:?}"
+    );
+    assert!(render_errors(&log).is_empty(), "{:?}", render_errors(&log));
+}
+
+/// A continuous map's demands on an offscreen target without pixels end as
+/// not ready, with no render error, so the map doesn't draw again on the
+/// failure backoff.
+#[test]
+fn a_continuous_map_on_a_target_without_pixels_isnt_ready() {
+    let runtime = runtime();
+    let log = EventLog::install(&runtime);
+    let map = red_map(&runtime, MapMode::Continuous, SIZE);
+    let Some(session) = offscreen_session(&map, SIZE) else { return };
+    wait(session.resize(NO_PIXELS));
+    session.drain_frame_results().unwrap();
+    for _ in 0..3 {
+        session.demand_frame(FrameDemand::new(DemandMode::Force, 0)).unwrap();
+        let mut results = Vec::new();
+        assert!(eventually(|| {
+            results.extend(session.drain_frame_results().unwrap());
+            !results.is_empty()
+        }));
+        assert!(results.iter().all(|result| result.disposition == FrameDisposition::TargetNotReady), "{results:?}");
+    }
+    assert!(render_errors(&log).is_empty(), "{:?}", render_errors(&log));
 }
 
 /// A continuous map whose frames keep failing reports it once, isn't idle,

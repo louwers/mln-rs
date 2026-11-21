@@ -44,6 +44,12 @@ impl<G: Gpu + ?Sized> OffscreenTarget<G> {
         OffscreenTarget { size, image: None, gpu: PhantomData }
     }
 
+    /// The size of its frames in physical pixels.
+    #[must_use]
+    pub fn size(&self) -> Size {
+        self.size
+    }
+
     /// The last frame's pixels: premultiplied RGBA, in rows from the top.
     ///
     /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) before

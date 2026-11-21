@@ -897,7 +897,8 @@ impl Worker {
     /// the image's frame. One that draws nothing, because a resource that
     /// the image needs is still loading, waits for the map's next update,
     /// and one that finds the ring full parks until the host releases a
-    /// frame. A host's demands neither replace nor wait for it. Ending the
+    /// frame. An offscreen target without pixels fails the image rather
+    /// than waits. A host's demands neither replace nor wait for it. Ending the
     /// demands on their way ends it too, until the session can render again:
     /// a barrier demands the image again once it ran, a new target once it
     /// lands, and the next session once it attaches.
@@ -928,11 +929,20 @@ impl Worker {
         // the image waits.
         let asks = update.parameters.still_image_request && update.parameters.still_image_request_id == pending;
         let tried = self.still.as_ref().and_then(|still| still.tried);
-        if !asks
-            || tried == Some(update.generation)
-            || self.retargeting()
-            || !self.gfx.as_mut().is_some_and(|gfx| gfx.target.ready_for_frame())
-        {
+        if !asks || tried == Some(update.generation) || self.retargeting() {
+            return;
+        }
+        if !self.gfx.as_mut().is_some_and(|gfx| gfx.target.ready_for_frame()) {
+            // An offscreen target that isn't ready has no pixels, which
+            // waiting doesn't give it. The map fails the image on the
+            // error, with the demand's result queued first.
+            if self.gfx.as_ref().is_some_and(|gfx| gfx.target.is_offscreen()) {
+                self.still = None;
+                self.still_rendered = pending;
+                self.publish(&FrameResult::unrendered(None, FrameDisposition::NoUpdate, update.generation), outbox);
+                let error = Error::invalid_state("the target has no pixels at its size and scale factor");
+                self.forward(vec![RendererEvent::ResourceError(error)]);
+            }
             return;
         }
         if self.fail_if_device_lost(outbox) {

@@ -689,11 +689,11 @@ impl<B: LocalBackend> Gfx for BackendGfx<B> {
     }
 
     fn ready_for_frame(&mut self) -> bool {
-        // An offscreen target, never of an empty size, has nothing to wait
-        // for: a frame whose textures it can't make fails in `render`.
+        // An offscreen target answers without making its textures: a frame
+        // whose textures it can't make fails in `render`.
         #[cfg(not(target_family = "wasm"))]
-        if matches!(self.frames, Frames::Offscreen(_)) {
-            return true;
+        if let Frames::Offscreen(target) = &self.frames {
+            return !target.size().is_empty();
         }
         let Some(target) = self.frames.target() else { return false };
         target.begin_frame(&mut self.backend.gpu()).is_some()
@@ -1163,8 +1163,8 @@ impl LocalTarget {
     /// Whether the target can take a frame now: its window, if any, has an
     /// area to present to, and it begins a frame, which a surface needs a
     /// texture for, and which the next render draws into. An offscreen
-    /// target always can, and its render fails a frame whose textures it
-    /// can't make.
+    /// target can unless it has no pixels, and its render fails a frame
+    /// whose textures it can't make.
     pub fn ready_for_frame(&mut self) -> bool {
         self.window_has_area() && self.gfx.ready_for_frame()
     }
