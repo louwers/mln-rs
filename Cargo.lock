@@ -2736,7 +2736,6 @@ version = "0.0.13"
 dependencies = [
  "bytemuck",
  "mln-rs-util",
- "mln-rs-vec-map",
  "mln-rs-wire",
  "raw-window-handle",
  "slotmap",

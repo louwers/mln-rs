@@ -81,8 +81,8 @@ fn uniform_properties(text: &str) -> BTreeSet<String> {
     names
 }
 
-/// ProgramParameters(1.0, overdraw), the globe define if `globe`, and a
-/// uniform define per name.
+/// The defines of `ProgramParameters { pixel_ratio: 1.0, overdraw }`, the
+/// globe define if `globe`, and a uniform define per name.
 fn defines<'a>(overdraw: bool, globe: bool, uniforms: impl IntoIterator<Item = &'a String>) -> Vec<(String, String)> {
     let mut defines = vec![("DEVICE_PIXEL_RATIO".to_owned(), "1.0".to_owned())];
     if overdraw {

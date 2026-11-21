@@ -9,7 +9,6 @@ use crate::gpu::{ShaderKey, VertexStep};
 use crate::projection_variant::ProjectionVariant;
 use crate::shaders::block::{Block, UniformBlock};
 use crate::shaders::layer_ubo::{ProjectionUBO, ViewUBO};
-use crate::shaders::program_parameters::ProgramParameters;
 use crate::shaders::shader_defines::{ID_PROJECTION_UBO, ID_VIEW_UBO};
 use crate::shaders::source::{glsl, glsl_es, msl, wgsl};
 
@@ -270,11 +269,35 @@ impl Sources {
 /// The define that compiles a program's globe variant.
 pub const GLOBE_DEFINE: &str = "PROJECTION_GLOBE";
 
+/// What the engine compiles every program with.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ProgramParameters {
+    /// The device pixels per CSS pixel, which shaders read as
+    /// `DEVICE_PIXEL_RATIO`.
+    pub pixel_ratio: f32,
+    /// Whether draws show how often each pixel is drawn, which shaders
+    /// test as `OVERDRAW_INSPECTOR`.
+    pub overdraw: bool,
+}
+
+impl ProgramParameters {
+    /// The defines of the parameters, as [`ShaderKey::new`] takes them:
+    /// `DEVICE_PIXEL_RATIO=<ratio>`, the ratio with a `.0` if it is whole,
+    /// and `OVERDRAW_INSPECTOR` if `overdraw`.
+    pub fn defines(&self) -> impl Iterator<Item = String> + use<> {
+        let ratio = f64::from(self.pixel_ratio);
+        let ratio =
+            if ratio.is_finite() && ratio == ratio.trunc() { format!("{ratio:.1}") } else { format!("{ratio}") };
+        let overdraw = self.overdraw.then(|| "OVERDRAW_INSPECTOR".to_owned());
+        std::iter::once(format!("DEVICE_PIXEL_RATIO={ratio}")).chain(overdraw)
+    }
+}
+
 impl Program {
     /// The key of the variant compiled with `parameters` that reads
     /// `uniforms`, properties of the program, from their uniforms, for
-    /// `variant`'s projection. It has the parameters' defines
-    /// (`DEVICE_PIXEL_RATIO=<ratio>`), a `HAS_UNIFORM_u_<name>` define for
+    /// `variant`'s projection. It has the parameters'
+    /// [`defines`](ProgramParameters::defines), a `HAS_UNIFORM_u_<name>` define for
     /// each of `uniforms`, and the globe's define for its variant.
     #[must_use]
     pub fn variant_key<'a>(
@@ -283,10 +306,7 @@ impl Program {
         uniforms: impl IntoIterator<Item = &'a Property>,
         variant: ProjectionVariant,
     ) -> ShaderKey {
-        let parameters = parameters
-            .defines()
-            .iter()
-            .map(|(name, value)| if value.is_empty() { name.clone() } else { format!("{name}={value}") });
+        let parameters = parameters.defines();
         let uniforms = uniforms.into_iter().map(|property| format!("HAS_UNIFORM_u_{}", property.name));
         let globe = (variant == ProjectionVariant::Globe).then(|| GLOBE_DEFINE.to_owned());
         ShaderKey::new(self, parameters.chain(uniforms).chain(globe))
@@ -328,5 +348,17 @@ impl Hash for Program {
 impl fmt::Debug for Program {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.name)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parameters_define_the_pixel_ratio_and_the_overdraw_inspector() {
+        let defines = |pixel_ratio, overdraw| ProgramParameters { pixel_ratio, overdraw }.defines().collect::<Vec<_>>();
+        assert_eq!(defines(1.0, false), ["DEVICE_PIXEL_RATIO=1.0"]);
+        assert_eq!(defines(1.5, true), ["DEVICE_PIXEL_RATIO=1.5", "OVERDRAW_INSPECTOR"]);
     }
 }

@@ -36,7 +36,7 @@ use mln_gfx::gpu::{
 };
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::program_parameters::ProgramParameters;
+use mln_gfx::shaders::program::ProgramParameters;
 use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
 use mln_gfx::types::DepthFunctionType;
 use mln_layers::background::programs::BACKGROUND;
@@ -202,7 +202,7 @@ impl Scene {
     fn new(backend: &mut Window) -> Scene {
         let gpu = backend.backend.gpu();
         let program = &BACKGROUND;
-        let parameters = ProgramParameters::new(1.0, false);
+        let parameters = ProgramParameters { pixel_ratio: 1.0, overdraw: false };
         let key = program.variant_key(&parameters, [], ProjectionVariant::Mercator);
         let shader = gpu.create_shader(&key).expect("the shader");
         let attribute = program.attributes[0].id;

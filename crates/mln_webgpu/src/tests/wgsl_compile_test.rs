@@ -11,8 +11,7 @@ use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::gfx_types::DrawModeType;
 use mln_gfx::gpu::{DepthState, FixedState, StencilState, VertexAttribute, VertexBufferLayout, VertexStep};
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::program::{Buffer, PROJECTION_BUFFER, Program, VIEW_BUFFER};
-use mln_gfx::shaders::program_parameters::ProgramParameters;
+use mln_gfx::shaders::program::{Buffer, PROJECTION_BUFFER, Program, ProgramParameters, VIEW_BUFFER};
 use mln_gfx::shaders::source::wgsl::{self, Wgsl};
 use mln_gfx::types::DepthFunctionType;
 
@@ -85,7 +84,7 @@ fn every_program_compiles() {
     let device = device.device();
     let index_table = IndexTable::new(device);
     let mut failed = Vec::new();
-    let parameters = [false, true].map(|overdraw| ProgramParameters::new(1.0, overdraw));
+    let parameters = [false, true].map(|overdraw| ProgramParameters { pixel_ratio: 1.0, overdraw });
     for (program, wgsl) in programs() {
         for parameters in &parameters {
             for variant in [ProjectionVariant::Mercator, ProjectionVariant::Globe] {
@@ -173,7 +172,7 @@ fn no_source_declares_a_block() {
 fn every_block_has_its_layout() {
     use wgpu::naga;
 
-    let parameters = ProgramParameters::new(1.0, false);
+    let parameters = ProgramParameters { pixel_ratio: 1.0, overdraw: false };
     let engine = [VIEW_BUFFER, PROJECTION_BUFFER];
     for (program, _) in programs() {
         for variant in [ProjectionVariant::Mercator, ProjectionVariant::Globe] {

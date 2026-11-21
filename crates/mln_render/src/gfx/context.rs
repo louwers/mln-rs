@@ -18,8 +18,7 @@ use mln_gfx::gpu::{
 };
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::rendering_stats::RenderingStats;
-use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::program_parameters::ProgramParameters;
+use mln_gfx::shaders::program::{Program, ProgramParameters};
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::TextureChannelDataType;
 use mln_util::hash::HashMap;
@@ -47,11 +46,9 @@ pub struct Context {
     global_uniform_buffers: UniformBufferArray,
     /// The sampler of each state a texture is sampled with.
     samplers: HashMap<SamplerState, SamplerId>,
-    /// What the programs are compiled with: the pixel ratio's defines, and
-    /// the overdraw inspector's when it's on.
+    /// What the programs are compiled with, and whether the draws show the
+    /// overdraw inspector.
     program_parameters: ProgramParameters,
-    /// Whether the draws show the overdraw inspector.
-    overdraw: bool,
     /// The key of each variant a draw used.
     shader_keys: HashMap<(&'static Program, Uniforms, ProjectionVariant), ShaderKey>,
     /// The shader of each key a draw used.
@@ -87,8 +84,7 @@ impl Context {
             caps,
             global_uniform_buffers: UniformBufferArray::default(),
             samplers: HashMap::default(),
-            program_parameters: ProgramParameters::new(pixel_ratio, false),
-            overdraw: false,
+            program_parameters: ProgramParameters { pixel_ratio, overdraw: false },
             shader_keys: HashMap::default(),
             shaders: HashMap::default(),
             pipelines: HashMap::default(),
@@ -381,21 +377,20 @@ impl Context {
     /// overdraw inspector's define if `overdraw`. The shaders of the earlier
     /// keys stay until [`release_shaders`](Self::release_shaders).
     pub(crate) fn set_program_parameters(&mut self, pixel_ratio: f32, overdraw: bool) {
-        self.program_parameters = ProgramParameters::new(pixel_ratio, overdraw);
-        self.overdraw = overdraw;
+        self.program_parameters = ProgramParameters { pixel_ratio, overdraw };
         self.shader_keys.clear();
     }
 
     /// Whether the draws show the overdraw inspector.
     pub(crate) fn overdraw(&self) -> bool {
-        self.overdraw
+        self.program_parameters.overdraw
     }
 
     /// The color mode of a draw into the frame that blends with `mode`: the
     /// overdraw inspector's when it's on.
     #[must_use]
     pub fn color_mode(&self, mode: ColorMode) -> ColorMode {
-        if self.overdraw { ColorMode::overdraw() } else { mode }
+        if self.program_parameters.overdraw { ColorMode::overdraw() } else { mode }
     }
 
     /// The shader of `key`, made through `gpu` on first use.

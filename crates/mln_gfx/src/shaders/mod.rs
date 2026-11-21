@@ -5,7 +5,6 @@
 pub mod block;
 pub mod layer_ubo;
 pub mod program;
-pub mod program_parameters;
 pub mod segment;
 pub mod shader_defines;
 pub mod source;

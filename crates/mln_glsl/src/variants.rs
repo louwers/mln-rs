@@ -18,8 +18,8 @@ pub struct Variant {
 /// `PROJECTION_GLOBE`.
 const PROJECTIONS: [(&str, bool); 2] = [("Mercator", false), ("globe", true)];
 
-/// The `#define` lines of `ProgramParameters(1.0, overdraw)`, the globe
-/// define if `globe`, and a uniform define per name.
+/// The `#define` lines of `ProgramParameters { pixel_ratio: 1.0, overdraw }`,
+/// the globe define if `globe`, and a uniform define per name.
 fn defines<'a>(overdraw: bool, globe: bool, uniforms: impl IntoIterator<Item = &'a str>) -> String {
     let mut defines = "#define DEVICE_PIXEL_RATIO 1.0\n".to_owned();
     if overdraw {

@@ -11,8 +11,7 @@ use std::collections::BTreeSet;
 
 use mln_gfx::RendererBackend as _;
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::program::{PROJECTION_BUFFER, Program, VIEW_BUFFER};
-use mln_gfx::shaders::program_parameters::ProgramParameters;
+use mln_gfx::shaders::program::{PROJECTION_BUFFER, Program, ProgramParameters, VIEW_BUFFER};
 use mln_gfx::shaders::source::glsl_es::{self, Glsl};
 use mln_util::hash::HashSet;
 
@@ -117,7 +116,7 @@ fn declared_blocks(glsl: &str) -> BTreeSet<String> {
 /// The vertex and fragment shaders of each variant of each program that
 /// the renderer compiles on OpenGL ES, as the backend composes them.
 fn compiled_stages() -> Vec<(&'static Program, [String; 2])> {
-    let parameters = ProgramParameters::new(1.0, false);
+    let parameters = ProgramParameters { pixel_ratio: 1.0, overdraw: false };
     let mut stages = Vec::new();
     for (program, _) in programs() {
         for variant in [ProjectionVariant::Mercator, ProjectionVariant::Globe] {
@@ -182,7 +181,7 @@ fn every_program_links_and_matches_its_declaration_on_desktop_open_gl() {
 fn every_program_links_and_matches_its_declaration(backend: &mut RendererBackend) {
     let version = glow::HasContext::version(backend.context().gl());
     println!("GL_RENDERER: {}, GL_VERSION: {}", backend.get_renderer_name(), version.vendor_info);
-    let parameters = ProgramParameters::new(1.0, false);
+    let parameters = ProgramParameters { pixel_ratio: 1.0, overdraw: false };
 
     let mut compiled = 0;
     for (program, _) in programs() {

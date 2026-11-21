@@ -1,7 +1,6 @@
 use mln_gfx::gpu::{Gpu as _, GpuError};
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::program_parameters::ProgramParameters;
+use mln_gfx::shaders::program::{Program, ProgramParameters};
 use mln_gfx::shaders::source::glsl::Glsl;
 use mln_layers::conformance::{
     clip_mask_and_background, custom_layers, depth_only, foreign_ids, imported_textures, instanced_walls,
@@ -116,7 +115,7 @@ fn imported_textures_through_gpu() {
 #[test]
 fn every_program_compiles_for_gpu() {
     let mut gpu = gpu();
-    let parameters = ProgramParameters::new(1.0, false);
+    let parameters = ProgramParameters { pixel_ratio: 1.0, overdraw: false };
     for (program, _) in programs() {
         for variant in [ProjectionVariant::Mercator, ProjectionVariant::Globe] {
             for uniforms in [&[][..], program.properties] {
