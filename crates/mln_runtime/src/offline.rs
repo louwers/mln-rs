@@ -1,11 +1,12 @@
 //! The offline regions in a runtime's cache database.
 
 use std::path::Path;
+use std::time::Duration;
 
 use mln_storage::ResourceError;
 use mln_storage::offline::{
-    OfflineRegion, OfflineRegionDefinition, OfflineRegionDownloadState, OfflineRegionMetadata, OfflineRegionObserver,
-    OfflineRegionStatus,
+    OfflineRegion, OfflineRegionDefinition, OfflineRegionDownloadState, OfflineRegionExpiry, OfflineRegionMetadata,
+    OfflineRegionObserver, OfflineRegionStatus,
 };
 use mln_storage_offline::DatabaseFileSourceExt;
 use mln_util::error::Error;
@@ -89,6 +90,28 @@ impl<'a> Offline<'a> {
         })
     }
 
+    /// How long a region's stored resources stay usable. Before
+    /// [`usable_offline_until`](OfflineRegionExpiry::usable_offline_until), a
+    /// download refreshes them.
+    pub fn region_expiry(&self, region_id: i64) -> Result<Completion<OfflineRegionExpiry>, Error> {
+        self.runtime.offline_command(move |database, core, resolver| {
+            database.get_offline_region_expiry(region_id, reply_on(core.queue.clone(), resolver));
+        })
+    }
+
+    /// Sets how long past their expiry a region's resources may stand in
+    /// while maps can't reach the server ([`OfflineRegion::max_stale`]), and
+    /// gives the updated region.
+    pub fn set_region_max_stale(
+        &self,
+        region_id: i64,
+        max_stale: Duration,
+    ) -> Result<Completion<OfflineRegion>, Error> {
+        self.runtime.offline_command(move |database, core, resolver| {
+            database.set_offline_region_max_stale(region_id, max_stale, reply_on(core.queue.clone(), resolver));
+        })
+    }
+
     /// Selects the events that the runtime reports about a region's
     /// download, from [`EventMask::ALL_RUNTIME_EVENTS`]. It replaces the
     /// region's earlier selection, and [`EventMask::NONE`] stops them.
@@ -107,7 +130,8 @@ impl<'a> Offline<'a> {
         })
     }
 
-    /// Starts or pauses a region's download.
+    /// Starts or pauses a region's download. A download fetches the
+    /// resources the region lacks, and revalidates those that are stale.
     pub fn set_region_download_state(
         &self,
         region_id: i64,
@@ -119,7 +143,9 @@ impl<'a> Offline<'a> {
     }
 
     /// Makes maps check each resource of a region with its server before
-    /// they use it. The region keeps its resources.
+    /// they use it, and the region's next download refresh them all. The
+    /// region keeps its resources, which stand in while maps can't reach the
+    /// server for as long as they could before.
     pub fn invalidate_region(&self, region_id: i64) -> Result<Completion<()>, Error> {
         self.runtime.offline_command(move |database, core, resolver| {
             database.invalidate_offline_region(region_id, reply_on(core.queue.clone(), resolver));

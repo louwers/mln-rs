@@ -765,7 +765,50 @@ typedef struct mln_offline_region_info {
   mln_offline_region_definition definition;
   const uint8_t* metadata MLN_BINDING("length=metadata_size;encoding=bytes");
   size_t metadata_size;
+  /**
+   * How long past their expiry the region's resources may stand in while
+   * maps can't reach the server. mln_runtime_set_offline_region_max_stale()
+   * describes it.
+   */
+  uint64_t max_stale_ms;
 } mln_offline_region_info;
+
+/** The fields that mln_offline_region_expiry sets. */
+typedef enum MLN_BINDING(
+  "kind=bitmask"
+) mln_offline_region_expiry_field : uint32_t {
+  MLN_OFFLINE_REGION_EXPIRY_STALE_AFTER = 1U << 0U,
+  MLN_OFFLINE_REGION_EXPIRY_USABLE_OFFLINE_UNTIL = 1U << 1U,
+} mln_offline_region_expiry_field;
+
+/** A set of mln_offline_region_expiry_field bits. */
+typedef uint32_t mln_offline_region_expiry_fields;
+
+/** How long the resources that an offline region holds stay usable. */
+typedef struct mln_offline_region_expiry {
+  mln_offline_region_expiry_fields fields;
+  /**
+   * When the first of the region's resources goes stale, which may have
+   * passed. Maps check a stale resource with the server before they use it,
+   * and the region's download refreshes it. Without it, no resource ever goes
+   * stale.
+   */
+  int64_t stale_after_unix_ms
+    MLN_BINDING("mask=fields;bit=MLN_OFFLINE_REGION_EXPIRY_STALE_AFTER");
+  /**
+   * When the first of the region's resources stops standing in while maps
+   * can't reach the server, which may have passed. Refresh the region before
+   * then to keep all of it usable offline. Without it, every resource stays
+   * usable offline.
+   */
+  int64_t usable_offline_until_unix_ms MLN_BINDING(
+    "mask=fields;bit=MLN_OFFLINE_REGION_EXPIRY_USABLE_OFFLINE_UNTIL"
+  );
+  /** The resources that are stale now, tiles included. */
+  uint64_t stale_resource_count;
+  /** The stale resources that maps can't use now without the server. */
+  uint64_t unusable_resource_count;
+} mln_offline_region_expiry;
 
 /**
  * Creates an offline region in the runtime's cache file.
@@ -850,6 +893,37 @@ MLN_API mln_status mln_runtime_get_offline_region_status(
 ) MLN_NOEXCEPT;
 
 /**
+ * Reads how long the resources of the offline region `region_id` stay usable.
+ *
+ * Completes with:
+ * - MLN_STATUS_NOT_FOUND when the cache file has no region `region_id`.
+ */
+MLN_BINDING("execution=query;result=mln_offline_region_expiry")
+MLN_API mln_status mln_runtime_get_offline_region_expiry(
+  mln_runtime runtime, mln_offline_region_id region_id,
+  const mln_completion* completion, mln_diagnostic* out_diagnostic
+) MLN_NOEXCEPT;
+
+/**
+ * Sets how long past their expiry the resources of the offline region
+ * `region_id` may stand in while maps can't reach the server.
+ *
+ * A server's caching headers say how long a stale copy may be used when the
+ * server can't be reached, which may be shorter than an app needs offline.
+ * `max_stale_ms` extends that time for the region's resources, but doesn't
+ * apply to resources whose server requires checking them once stale. The
+ * region starts with 0. The result is the updated region.
+ *
+ * Completes with:
+ * - MLN_STATUS_NOT_FOUND when the cache file has no region `region_id`.
+ */
+MLN_BINDING("execution=operation;result=mln_offline_region_info")
+MLN_API mln_status mln_runtime_set_offline_region_max_stale(
+  mln_runtime runtime, mln_offline_region_id region_id, uint64_t max_stale_ms,
+  const mln_completion* completion, mln_diagnostic* out_diagnostic
+) MLN_NOEXCEPT;
+
+/**
  * Selects the events that the runtime reports about the download of the
  * offline region `region_id`.
  *
@@ -870,8 +944,10 @@ MLN_API mln_status mln_runtime_set_offline_region_observed(
 /**
  * Starts or pauses the download of the offline region `region_id`.
  *
- * Setting the state that the download already has does nothing. A download
- * stops when the runtime closes.
+ * A download fetches the resources that the region lacks, and checks those
+ * that are stale with the server, keeping each stored copy until its refresh
+ * arrives. Setting the state that the download already has does nothing. A
+ * download stops when the runtime closes.
  *
  * Completes with:
  * - MLN_STATUS_NOT_FOUND when the cache file has no region `region_id`.
@@ -887,11 +963,13 @@ MLN_API mln_status mln_runtime_set_offline_region_download_state(
  * Makes maps check each resource of the offline region `region_id` with the
  * server before they use it.
  *
- * The region keeps its resources. Starting its download again fetches the
- * invalidated resources for offline use. If the style or a TileJSON document
- * is then missing or invalid, the download reports an offline region response
- * error and goes on from the stored copy. Resources that the current style no
- * longer lists stay in the region until it's deleted.
+ * The region keeps its resources, and each one stands in while maps can't
+ * reach the server for as long as it could before. Starting the region's
+ * download again checks every resource with the server. If the style or a
+ * TileJSON document is then missing or invalid, the download reports an
+ * offline region response error and goes on from the stored copy. Resources
+ * that the current style no longer lists stay in the region until it's
+ * deleted.
  *
  * Completes with:
  * - MLN_STATUS_NOT_FOUND when the cache file has no region `region_id`.

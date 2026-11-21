@@ -23,7 +23,7 @@
 
 use std::net::TcpListener;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use std::sync::atomic::{AtomicI32, Ordering};
 use std::time::Duration;
 
 use httpmock::{HttpMockRequest, HttpMockResponse, MockServer};
@@ -211,17 +211,14 @@ impl HttpServer {
             });
         });
 
-        let expired_once = Arc::new(AtomicBool::new(true));
+        // A server whose clock is years behind: its `Expires` is a minute
+        // after its `Date`.
         server.mock(|when, then| {
             when.method("GET").path("/clockskew");
             then.respond_with(move |req| {
                 let mut res = Reply::new();
-                let date = if expired_once.swap(false, Ordering::SeqCst) {
-                    "Fri, 01 Jan 2010 10:00:00 GMT"
-                } else {
-                    "Fri, 01 Jan 2010 10:01:00 GMT"
-                };
-                res.set_header("Expires", date);
+                res.set_header("Date", "Fri, 01 Jan 2010 10:00:00 GMT");
+                res.set_header("Expires", "Fri, 01 Jan 2010 10:01:00 GMT");
                 res.status = 200;
                 res.set_content("Response");
                 res.finish(req)
@@ -243,9 +240,11 @@ impl HttpServer {
                     return res.finish(req);
                 }
 
-                // First request must always be revalidated.
+                // First request must always be revalidated: without
+                // `no-cache`, `Last-Modified` would give it a heuristic
+                // lifetime.
                 res.set_header("Last-Modified", rfc1123(jan1));
-                res.set_header("Cache-Control", "must-revalidate");
+                res.set_header("Cache-Control", "no-cache");
                 res.status = 200;
                 res.set_content("Response");
                 res.finish(req)

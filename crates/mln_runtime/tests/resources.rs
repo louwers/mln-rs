@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::time::Duration;
 
 use httpmock::MockServer;
 use mln_runtime::{
@@ -13,6 +14,7 @@ use mln_runtime::{
 };
 use mln_storage::offline::{OfflineRegionDownloadState, OfflineTilePyramidRegionDefinition};
 use mln_storage::resource::Kind;
+use mln_storage::response::Caching;
 use mln_storage::{ResourceError, Response};
 use mln_util::geo::{LatLng, LatLngBounds};
 
@@ -43,7 +45,7 @@ fn a_provider_answers_later_from_another_thread() {
     let runtime = runtime();
     wait(runtime.set_resource_provider(|request: ResourceRequest| {
         std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(20));
+            std::thread::sleep(Duration::from_millis(20));
             request.respond(style_response()).unwrap();
         });
     }));
@@ -60,7 +62,7 @@ struct AnswersInline {
 impl ResourceProvider for AnswersInline {
     fn request(&self, request: ResourceRequest) {
         request.respond(style_response()).unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        std::thread::sleep(Duration::from_millis(100));
         self.returned.store(true, Ordering::SeqCst);
     }
 }
@@ -88,7 +90,7 @@ struct Lingering {
 impl ResourceProvider for Lingering {
     fn request(&self, request: ResourceRequest) {
         self.requests.send(request).unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(200));
+        std::thread::sleep(Duration::from_millis(200));
     }
 }
 
@@ -106,7 +108,7 @@ fn a_replacement_completes_after_the_call_to_the_provider_it_replaces() {
     wait(runtime.set_resource_provider(Lingering { requests, dropped: Arc::clone(&dropped) }));
     let map = map(&runtime);
     let style = map.set_style_url("custom://lingering");
-    let request = received.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
+    let request = received.recv_timeout(Duration::from_secs(10)).unwrap();
 
     // A host frees a provider's state on its release, so once the provider is
     // replaced, nothing may still be calling it.
@@ -197,12 +199,12 @@ fn a_not_modified_answer_delivers_the_cached_copy() {
             request.respond(Response { not_modified: true, ..Response::default() }).unwrap();
         } else {
             // A copy that the cache keeps, but must check before each use.
-            let response = Response {
-                must_revalidate: true,
-                etag: Some("\"v1\"".to_owned()),
+            let caching = Caching {
                 expires: Some(mln_util::chrono::Timestamp::from_secs(1)),
-                ..style_response()
+                must_revalidate: true,
+                ..Caching::default()
             };
+            let response = Response { etag: Some("\"v1\"".to_owned()), caching, ..style_response() };
             request.respond(response).unwrap();
         }
     }));
@@ -476,10 +478,22 @@ fn an_offline_region_downloads_and_reports_its_progress() {
     assert_eq!(EventSource::Runtime, done.source);
     assert!(wait(offline.region_status(id)).complete());
 
+    // The style came without caching headers, so it was stale on arrival,
+    // and stands in while maps can't reach the server.
+    let expiry = wait(offline.region_expiry(id));
+    assert!(expiry.stale_after.is_some());
+    assert_eq!(None, expiry.usable_offline_until);
+    assert_eq!((1, 0), (expiry.stale_resource_count, expiry.unusable_resource_count));
+    let minute = Duration::from_secs(60);
+    assert_eq!(minute, wait(offline.set_region_max_stale(id, minute)).max_stale);
+    assert_eq!(minute, wait(offline.region(id)).unwrap().max_stale);
+
     wait(offline.invalidate_region(id));
     wait(offline.delete_region(id));
     assert_eq!(wait(offline.regions()), Vec::<mln_storage::offline::OfflineRegion>::new());
     assert_eq!(ErrorKind::NotFound, wait_err(offline.region_status(id)).kind);
+    assert_eq!(ErrorKind::NotFound, wait_err(offline.region_expiry(id)).kind);
+    assert_eq!(ErrorKind::NotFound, wait_err(offline.set_region_max_stale(id, minute)).kind);
     assert_eq!(ErrorKind::NotFound, wait_err(offline.delete_region(id)).kind);
     assert_eq!(ErrorKind::NotFound, wait_err(offline.set_region_observed(id, EventMask::NONE)).kind);
     wait(runtime.release());

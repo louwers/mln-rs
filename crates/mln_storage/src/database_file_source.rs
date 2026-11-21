@@ -52,10 +52,7 @@ impl<E: 'static> DatabaseWorker<E> {
         read_only: bool,
         make: MakeExtension<E>,
     ) -> Self {
-        let mut db = OfflineDatabase::new(cache_path);
-        if read_only {
-            db.reopen_database_read_only(true);
-        }
+        let mut db = if read_only { OfflineDatabase::read_only(cache_path) } else { OfflineDatabase::new(cache_path) };
         // A cache hit that leaves `accessed` timestamps to write, while no
         // write is due, makes one due. A failed write isn't retried until
         // the next cache hit, so an idle map stays idle.
@@ -79,34 +76,27 @@ impl<E: 'static> DatabaseWorker<E> {
         self.network.as_ref()
     }
 
+    /// Answers a request with the stored copy, whatever its freshness: its
+    /// caching rules say how it may be used. Without a copy, the answer has
+    /// no content and a `NotFound` error.
     fn request(&mut self, resource: &Resource, responder: &Responder) {
         let offline_response =
             if resource.storage_policy == StoragePolicy::Volatile { None } else { self.db.get(resource) };
-        let response = match offline_response {
-            None => {
-                let mut response = Response::new();
-                response.no_content = true;
-                response.error = Some(Box::new(ResourceError::new(Reason::NotFound, "Not found in offline database")));
-                response
-            }
-            Some(mut response) => {
-                if !response.is_usable() {
-                    response.error =
-                        Some(Box::new(ResourceError::new(Reason::NotFound, "Cached resource is unusable")));
-                }
-                response
-            }
-        };
+        let response = offline_response.unwrap_or_else(|| {
+            let mut response = Response::new();
+            response.no_content = true;
+            response.error = Some(Box::new(ResourceError::new(Reason::NotFound, "Not found in offline database")));
+            response
+        });
         responder.send(response);
     }
 
     fn maintain(
         &mut self,
-        operation: impl FnOnce(&mut OfflineDatabase) -> Option<DatabaseError>,
+        operation: impl FnOnce(&mut OfflineDatabase) -> Result<(), DatabaseError>,
         callback: impl FnOnce(Result<(), DatabaseError>),
     ) {
-        let error = operation(&mut self.db);
-        callback(error.map_or(Ok(()), Err));
+        callback(operation(&mut self.db));
     }
 }
 

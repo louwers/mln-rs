@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+#[cfg(feature = "sqlite")]
+use mln_util::chrono::now;
 use mln_util::pool::Pool;
 use parking_lot::Mutex;
 
@@ -23,6 +25,8 @@ use crate::resource::Priority;
 use crate::resource::{LoadingMethod, Resource};
 #[cfg(not(target_family = "wasm"))]
 use crate::resource_options::ResourceOptions;
+#[cfg(feature = "sqlite")]
+use crate::response::Reuse;
 use crate::response::{Reason, ResourceError, Response};
 
 /// The file sources a [`Loader`] picks from.
@@ -124,9 +128,12 @@ impl Sources {
         network.load(res, network_responder);
     }
 
-    /// Loads `resource` from the cache, then from the network: a usable
-    /// cached response goes to the requester at once, and the network
-    /// revalidates it, or loads it when the cache has none.
+    /// Loads `resource` from the cache, then from the network. A cached copy
+    /// that is fresh, or stale within its `stale-while-revalidate`, goes to
+    /// the requester at once, and the network revalidates it at low priority
+    /// once it expires. Any other copy waits for the network: the requester
+    /// gets it on a 304, or in place of an error that it may stand in for
+    /// (`Resource::deliver`).
     #[cfg(feature = "sqlite")]
     fn request_cached(self: &Arc<Self>, database: &dyn Cache, resource: &Resource, responder: Responder) {
         let task: Task = Arc::default();
@@ -138,24 +145,16 @@ impl Sources {
             let Some(sources) = sources.upgrade() else { return };
             let mut res = resource_copy.clone();
 
-            // Resource is in the cache
-            if !response.no_content {
-                if response.is_usable() {
-                    responder.send(response.clone());
-                    // Set the priority of existing resource to low if it's
-                    // expired but usable.
-                    res.set_priority(Priority::Low);
-                } else {
-                    // Set prior data only if it was not returned to the
-                    // requester. Once we get 304 response from the network,
-                    // we will forward response to the requester.
-                    res.prior_data = response.data.clone();
+            // A cached copy.
+            if response.error.is_none() && !response.no_content {
+                match response.caching.reuse(now()) {
+                    Reuse::Fresh | Reuse::WhileRevalidating => {
+                        responder.send(response.clone());
+                        res.set_priority(Priority::Low);
+                    }
+                    Reuse::OnError | Reuse::Never => res.prior_data = response.data.clone(),
                 }
-
-                // Copy response fields for cache control request
-                res.prior_modified = response.modified;
-                res.prior_expires = response.expires;
-                res.prior_etag = response.etag;
+                res.set_prior(&response);
             }
 
             sources.request_from_network(&resource_copy, &res, &chain, &responder);
@@ -170,8 +169,10 @@ impl Sources {
 ///
 /// A request goes to the first local file source that loads its URL.
 /// Failing that, it goes to the database, and on to the network unless it's
-/// cache-only: the network revalidates a cached response that has expired,
-/// and the database stores what the network answers.
+/// cache-only: the network revalidates a cached copy as its caching rules
+/// say, and the database stores what the network answers. A cache-only
+/// request gets the stored copy whatever its freshness; its caching rules
+/// say how it may be used.
 pub struct Loader {
     sources: Arc<Sources>,
 }

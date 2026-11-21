@@ -672,7 +672,7 @@ fn offline() {
 
     let expired_item = |path: &str| {
         let mut response = file_response(&format!("test/fixtures/map/offline/{path}"));
-        response.expires = Some(Timestamp::from_secs(0));
+        response.caching.expires = Some(Timestamp::from_secs(0));
         response
     };
 
@@ -878,7 +878,7 @@ fn double_style_load() {
 
 fn expired_or_fresh_response(fixture: &str, expires: Timestamp) -> Response {
     let mut response = file_response(fixture);
-    response.expires = Some(expires);
+    response.caching.expires = Some(expires);
     response
 }
 
@@ -939,7 +939,7 @@ fn style_expired() {
 
     // Send a fresh response, and confirm that we didn't overwrite the style,
     // but continue to wait for a fresh response.
-    response.expires = Some(hours_from_now(1));
+    response.caching.expires = Some(hours_from_now(1));
     test.file_source.respond(Kind::Style, &response);
     assert_eq!(1, test.file_source.requests_len());
     assert!(test.map().style().get_layer("bg").is_some());
@@ -1332,7 +1332,7 @@ fn no_content_tiles() {
     // Insert a 204 No Content response for the 0/0/0 tile
     let mut response = Response::new();
     response.no_content = true;
-    response.expires = Some(hours_from_now(1));
+    response.caching.expires = Some(hours_from_now(1));
     // C++ loads the style in the callback (inside render's run loop); see
     // Map.Offline for why the port waits for it first.
     let handle = test.run_loop.handle();
@@ -2401,7 +2401,7 @@ fn expired_sprite_sheet() {
     let make_response = |path: &str, expires: bool| {
         let mut response = Response::new();
         response.data = Some(Arc::new(server.online_fixture(path)));
-        response.expires = Some(if expires { Timestamp::from_secs(0) } else { Timestamp::from_secs(i64::MAX) });
+        response.caching.expires = Some(if expires { Timestamp::from_secs(0) } else { Timestamp::from_secs(i64::MAX) });
         response
     };
 

@@ -1,8 +1,7 @@
-// rapidjson parsing is serde_json (as everywhere in the port); `IsDouble()`
-// is `is_f64()` (a number written with a fraction or exponent, or an integer
-// too large for 64 bits).
+use std::time::Duration;
 
 use geo_types::Geometry;
+use mln_util::chrono::Timestamp;
 use mln_util::error::Error;
 #[cfg(any(test, feature = "sqlite"))]
 use mln_util::geo::LatLng;
@@ -22,16 +21,13 @@ fn check_definition(min_zoom: f64, max_zoom: f64, pixel_ratio: f32) -> Result<()
     Ok(())
 }
 
-/// An offline region defined by a style URL, geographic bounding box, zoom
-/// range, and device pixel ratio.
+/// An offline region that covers a rectangle: the style at `style_url`, and
+/// its sources' tiles within `bounds` from `min_zoom` to `max_zoom`, at
+/// `pixel_ratio`.
 ///
-/// Both minZoom and maxZoom must be ≥ 0, and maxZoom must be ≥ minZoom.
-///
-/// maxZoom may be ∞, in which case for each tile source, the region will
-/// include tiles from minZoom up to the maximum zoom level provided by that
-/// source.
-///
-/// pixelRatio must be ≥ 0 and should typically be 1.0 or 2.0.
+/// `min_zoom` is at least 0 and at most `max_zoom`. An infinite `max_zoom`
+/// takes each source's tiles up to the source's own maximum zoom.
+/// `pixel_ratio` is at least 0, and usually 1 or 2.
 #[derive(Clone, Debug, PartialEq)]
 pub struct OfflineTilePyramidRegionDefinition {
     pub(crate) style_url: String,
@@ -65,16 +61,8 @@ impl OfflineTilePyramidRegionDefinition {
     }
 }
 
-/// An offline region defined by a style URL, geometry, zoom range, and
-/// device pixel ratio.
-///
-/// Both minZoom and maxZoom must be ≥ 0, and maxZoom must be ≥ minZoom.
-///
-/// maxZoom may be ∞, in which case for each tile source, the region will
-/// include tiles from minZoom up to the maximum zoom level provided by that
-/// source.
-///
-/// pixelRatio must be ≥ 0 and should typically be 1.0 or 2.0.
+/// An offline region that covers a geometry, as
+/// [`OfflineTilePyramidRegionDefinition`] covers a rectangle.
 #[derive(Clone, Debug, PartialEq)]
 pub struct OfflineGeometryRegionDefinition {
     pub(crate) style_url: String,
@@ -108,8 +96,7 @@ impl OfflineGeometryRegionDefinition {
     }
 }
 
-/// The offline region definition types supported
-/// (`std::variant<OfflineTilePyramidRegionDefinition, OfflineGeometryRegionDefinition>`).
+/// The area and zoom levels that an offline region covers.
 #[derive(Clone, Debug, PartialEq)]
 pub enum OfflineRegionDefinition {
     TilePyramid(OfflineTilePyramidRegionDefinition),
@@ -129,8 +116,6 @@ impl From<OfflineGeometryRegionDefinition> for OfflineRegionDefinition {
 }
 
 impl OfflineRegionDefinition {
-    // The common members, for the C++ `std::visit([](auto& region) {...})`.
-
     #[must_use]
     pub fn style_url(&self) -> &str {
         match self {
@@ -179,18 +164,16 @@ impl OfflineRegionDefinition {
 pub(crate) fn decode_offline_region_definition(region: &[u8]) -> Result<OfflineRegionDefinition, Error> {
     let malformed = || Error::native("Malformed offline region definition");
 
-    // `doc.Parse<0>(region.c_str())` (stops at the first NUL byte).
+    // The definition ends at the first NUL byte, if any.
     let end = region.iter().position(|&b| b == 0).unwrap_or(region.len());
     let doc: Option<Json> = serde_json::from_slice(&region[..end]).ok();
     let Some(doc) = doc else {
         return Err(malformed());
     };
-    // `HasMember` on a non-object asserts in C++; a definition is always an
-    // object.
     let member = |name: &str| doc.as_object().and_then(|o| o.get(name));
+    // A number written with a fraction or an exponent, as the encoder writes
+    // the zooms and pixel ratio.
     let is_double = |v: Option<&Json>| v.is_some_and(Json::is_f64);
-
-    // validation
 
     let has_valid_bounds =
         || member("bounds").and_then(Json::as_array).is_some_and(|b| b.len() == 4 && b.iter().all(Json::is_f64));
@@ -207,8 +190,6 @@ pub(crate) fn decode_offline_region_definition(region: &[u8]) -> Result<OfflineR
         return Err(malformed());
     }
 
-    // Common properties
-
     let style_url = member("style_url").and_then(Json::as_str).unwrap_or_default().to_owned();
     let min_zoom = member("min_zoom").and_then(Json::as_f64).unwrap_or_default();
     let max_zoom = member("max_zoom").map_or(f64::INFINITY, |v| v.as_f64().unwrap_or_default());
@@ -216,9 +197,7 @@ pub(crate) fn decode_offline_region_definition(region: &[u8]) -> Result<OfflineR
     let include_ideographs = member("include_ideographs").is_none_or(|v| v.as_bool().unwrap_or_default());
 
     if let Some(bounds) = member("bounds") {
-        // `bounds` is present but may be invalid when `geometry` is valid:
-        // C++ then reads the members of whatever it holds (undefined for a
-        // non-array); the port treats that as malformed.
+        // Invalid bounds beside a valid geometry are malformed too.
         let bounds = bounds.as_array().filter(|b| b.len() == 4).ok_or_else(malformed)?;
         let get = |i: usize| bounds[i].as_f64().unwrap_or_default();
         let latlng = |lat: f64, lon: f64| LatLng::new(lat, lon);
@@ -257,7 +236,6 @@ pub(crate) fn decode_offline_region_definition(region: &[u8]) -> Result<OfflineR
 pub(crate) fn encode_offline_region_definition(region: &OfflineRegionDefinition) -> String {
     let mut json = Map::new();
 
-    // Encode common properties
     json.insert("style_url".into(), region.style_url().into());
     json.insert("min_zoom".into(), region.min_zoom().into());
     if region.max_zoom().is_finite() {
@@ -266,7 +244,6 @@ pub(crate) fn encode_offline_region_definition(region: &OfflineRegionDefinition)
     json.insert("pixel_ratio".into(), f64::from(region.pixel_ratio()).into());
     json.insert("include_ideographs".into(), region.include_ideographs().into());
 
-    // Encode specific properties
     match region {
         OfflineRegionDefinition::TilePyramid(region) => {
             let bounds = &region.bounds;
@@ -281,14 +258,13 @@ pub(crate) fn encode_offline_region_definition(region: &OfflineRegionDefinition)
     Json::Object(json).to_string()
 }
 
-/// Arbitrary binary region metadata. The contents are opaque to the mbgl
-/// implementation; it just stores and retrieves a BLOB.
+/// The app's bytes for a region, such as its name, which the database stores
+/// as they are.
 pub type OfflineRegionMetadata = Vec<u8>;
 
-/// A region is either inactive (not downloading, but previously-downloaded
-/// resources are available for use), or active (resources are being
-/// downloaded or will be downloaded, if necessary, when network access is
-/// available).
+/// Whether a region's download runs. An inactive region keeps what it
+/// downloaded; an active one downloads what it lacks or holds stale, as soon
+/// as the network allows.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum OfflineRegionDownloadState {
     #[default]
@@ -296,60 +272,60 @@ pub enum OfflineRegionDownloadState {
     Active,
 }
 
-/// A region's status: its active/inactive state, the number of resources
-/// that have completed downloading and their total size in bytes, and the
-/// total number of resources that are required.
+/// A region's download progress.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct OfflineRegionStatus {
     pub download_state: OfflineRegionDownloadState,
-
-    /// The number of resources that have been fully downloaded and are ready
-    /// for offline access.
+    /// The resources that are downloaded and up to date, tiles included.
     pub completed_resource_count: u64,
-
-    /// The cumulative size, in bytes, of all resources (inclusive of tiles)
-    /// that have been fully downloaded.
+    /// The size in bytes of the completed resources, tiles included.
     pub completed_resource_size: u64,
-
-    /// The number of tiles that are known to be required for this region.
-    /// This is a subset of `completedResourceCount`.
     pub completed_tile_count: u64,
-
-    /// The number of tiles that are known to be required for this region.
     pub required_tile_count: u64,
-
-    /// The cumulative size, in bytes, of all tiles that have been fully
-    /// downloaded. This is a subset of `completedResourceSize`.
+    /// The size in bytes of the completed tiles.
     pub completed_tile_size: u64,
-
-    /// The number of resources that are known to be required for this
-    /// region. See the documentation for `requiredResourceCountIsPrecise`
-    /// for an important caveat about this number.
+    /// The resources that the region needs, tiles included. Until
+    /// `required_resource_count_is_precise`, it's only a lower bound.
     pub required_resource_count: u64,
-
-    /// This property is true when the value of requiredResourceCount is a
-    /// precise count of the number of required resources, and false when it
-    /// is merely a lower bound.
     pub required_resource_count_is_precise: bool,
 }
 
 impl OfflineRegionStatus {
+    /// Whether the region has every resource it needs.
     #[must_use]
     pub fn complete(&self) -> bool {
         self.completed_resource_count >= self.required_resource_count
     }
 }
 
-/// A region can have a single observer, which gets notified whenever a
-/// change to the region's status occurs. The methods run on the database
-/// thread. They take `&self`: the download calls them re-entrantly, e.g. an
-/// observer that deactivates the download from `status_changed` gets a
-/// nested `status_changed`.
+/// How long a region's stored resources stay usable, from their caching
+/// rules and the region's `max_stale`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct OfflineRegionExpiry {
+    /// When the first of the region's resources goes stale, which may have
+    /// passed; `None` if none ever does. Maps revalidate a stale resource
+    /// before they use it, and a download refreshes it.
+    pub stale_after: Option<Timestamp>,
+    /// When the first of its resources stops standing in for the server
+    /// while maps can't reach it, which may have passed; `None` if none ever
+    /// does.
+    pub usable_offline_until: Option<Timestamp>,
+    /// The resources that are stale now, tiles included.
+    pub stale_resource_count: u64,
+    /// The stale resources that maps can't use now while they can't reach
+    /// the server.
+    pub unusable_resource_count: u64,
+}
+
+/// A region notifies its observer as its download goes. The methods run on
+/// the database thread. They take `&self`: the download calls them
+/// re-entrantly, e.g. an observer that deactivates the download from
+/// `status_changed` gets a nested `status_changed`.
 pub trait OfflineRegionObserver {
-    /// Notified of a change in the status of an offline region.
+    /// The region's status changed.
     fn status_changed(&self, _status: OfflineRegionStatus) {}
 
-    /// Notified of errors encountered while downloading regional resources.
+    /// A request of the download failed.
     fn response_error(&self, _error: ResourceError) {}
 }
 
@@ -362,6 +338,10 @@ pub struct OfflineRegion {
     pub definition: OfflineRegionDefinition,
     /// The app's bytes for the region.
     pub metadata: OfflineRegionMetadata,
+    /// How long past their expiry the region's resources may stand in while
+    /// maps can't reach the server, even where their `stale-if-error` allows
+    /// less. Resources that must revalidate once stale aren't used stale.
+    pub max_stale: Duration,
 }
 
 pub type OfflineRegions = Vec<OfflineRegion>;

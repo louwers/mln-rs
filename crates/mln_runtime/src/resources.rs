@@ -7,8 +7,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use mln_storage::http_header_transform::HttpHeaders;
 use mln_storage::resource::Kind;
 use mln_storage::response::Reason;
-use mln_storage::{FileSource, OnlineFileSource, Resource, ResourceError, Responder, Response};
+use mln_storage::{FileSource, LoadingMethod, OnlineFileSource, Resource, ResourceError, Responder, Response};
 use mln_util::error::Error;
+use mln_util::logging::{Event, Log};
 use parking_lot::{Mutex, RwLock};
 
 /// Serves a runtime's network requests in place of the library.
@@ -105,10 +106,7 @@ impl ProviderFileSource {
 
     /// Who loads `resource`, when `provider` is the runtime's provider.
     fn route<'a>(resource: &Resource, provider: Option<&'a dyn ResourceProvider>) -> Route<'a> {
-        if !resource.has_loading_method(mln_storage::LoadingMethod::Network) {
-            return Route::Native { declined: false };
-        }
-        let Some(provider) = provider else {
+        let Some(provider) = provider.filter(|_| resource.has_loading_method(LoadingMethod::Network)) else {
             return Route::Native { declined: false };
         };
         if provider.serves(resource.kind, &resource.url) {
@@ -184,7 +182,12 @@ fn unsupported_scheme(scheme: &str, url: &str, declined: bool) -> Response {
     };
     let message =
         format!("unsupported URL scheme \"{scheme}\" for network request \"{}\"; {advice}", redacted_url(url));
-    // A reason that the library doesn't retry, since no retry can succeed.
+    error_response(message)
+}
+
+/// A response that fails with `message`, for a reason that the library
+/// doesn't retry, since no retry can succeed.
+fn error_response(message: impl Into<String>) -> Response {
     Response { error: Some(Box::new(ResourceError::new(Reason::Other, message))), ..Response::default() }
 }
 
@@ -275,20 +278,11 @@ impl RequestShared {
         }
     }
 
-    fn respond(&self, mut response: Response) {
+    fn respond(&self, response: Response) {
         // A revalidation withholds the cached copy from the requester until
-        // the answer, so a "not modified" answer delivers that copy, as the
-        // online file source's does.
-        if response.not_modified
-            && let Some(data) = &self.resource.prior_data
-        {
-            response.data = Some(Arc::clone(data));
-            response.not_modified = false;
-            response.modified = response.modified.or(self.resource.prior_modified);
-            if response.etag.is_none() {
-                response.etag.clone_from(&self.resource.prior_etag);
-            }
-        }
+        // the answer: a "not modified" answer, or an error the copy may stand
+        // in for, delivers it, as the online file source's do.
+        let response = self.resource.clone().deliver(response, mln_util::chrono::now());
         self.responder.send(response);
     }
 
@@ -386,9 +380,7 @@ impl ResourceRequest {
 impl Drop for ResourceRequest {
     fn drop(&mut self) {
         if self.shared.is_some() {
-            let mut response = Response::new();
-            response.error =
-                Some(Box::new(ResourceError::new(Reason::Other, "resource request was released without a response")));
+            let response = error_response("resource request was released without a response");
             let _ = self.answer(move |target| target.respond(response));
         }
     }
@@ -436,10 +428,7 @@ pub(crate) fn sanitize_headers(headers: HttpHeaders) -> HttpHeaders {
     let mut sanitized: HttpHeaders = Vec::with_capacity(headers.len());
     for (name, value) in headers {
         if is_managed_http_header(&name) {
-            mln_util::logging::Log::warning(
-                mln_util::logging::Event::HttpRequest,
-                format!("a header transform can't set the managed header {name}"),
-            );
+            Log::warning(Event::HttpRequest, format!("a header transform can't set the managed header {name}"));
             continue;
         }
         match sanitized.iter_mut().find(|(existing, _)| existing.eq_ignore_ascii_case(&name)) {

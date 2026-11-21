@@ -4,8 +4,8 @@
 // Statements come from rusqlite's per-connection statement cache
 // (`prepare_cached`), so they are dropped with the connection.
 //
-// Port-only (maplibre/maplibre-native#4748): a cache hit queues its row's
-// `accessed` timestamp instead of writing it in a transaction of its own.
+// A cache hit queues its row's `accessed` timestamp instead of writing it in
+// a transaction of its own.
 // The owner flushes the queue (`flush_accessed`, see `set_accessed_callback`);
 // closing the database, changing its path, reopening it read-only, resizing
 // the cache, deleting a region and a full queue flush it too, and `put`'s
@@ -13,6 +13,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use mln_util::chrono::{Timestamp, now};
 use mln_util::compression::{compress, decompress};
@@ -20,16 +21,16 @@ use mln_util::constants::DEFAULT_MAX_CACHE_SIZE;
 use mln_util::error::{Error, ErrorKind};
 use mln_util::logging::{Event, EventSeverity, Log};
 use rusqlite::types::FromSqlError;
-use rusqlite::{Connection, OpenFlags, Row, ffi, params};
+use rusqlite::{Connection, OpenFlags, Row, ToSql, ffi, params};
 
-use crate::merge_sideloaded::MERGE_SIDELOADED_DATABASE_SQL;
+use crate::merge_sideloaded::merge_sideloaded_database_sql;
 use crate::offline::{
-    OfflineRegion, OfflineRegionDefinition, OfflineRegionMetadata, OfflineRegionStatus, OfflineRegions,
-    decode_offline_region_definition, encode_offline_region_definition,
+    OfflineRegion, OfflineRegionDefinition, OfflineRegionExpiry, OfflineRegionMetadata, OfflineRegionStatus,
+    OfflineRegions, decode_offline_region_definition, encode_offline_region_definition,
 };
 use crate::offline_schema::OFFLINE_DATABASE_SCHEMA;
 use crate::resource::{Kind, Resource, TileData};
-use crate::response::Response;
+use crate::response::{Caching, Response, Reuse};
 
 /// The most rows whose `accessed` timestamp waits to be written. Reads of
 /// other rows while the queue is full don't update their timestamps.
@@ -94,9 +95,8 @@ impl From<DatabaseError> for Error {
 
 type DbResult<T> = Result<T, DatabaseError>;
 
-/// The tile data of a tile resource. C++ dereferences `resource.tileData`
-/// unchecked; a tile resource without it (built by hand) is stored and found
-/// by its URL here, as other resources are.
+/// The tile data of a tile resource. A tile resource without it is stored
+/// and found by its URL, as other resources are.
 fn tile_data(resource: &Resource) -> Option<&TileData> {
     resource.tile_data.as_ref().filter(|_| resource.kind == Kind::Tile)
 }
@@ -107,7 +107,6 @@ fn delete_file(filename: &str) -> DbResult<()> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(e) => {
             let code = e.raw_os_error().unwrap_or(0);
-            // IOException(err, msg): msg + ": " + std::generic_category().message(err)
             let what = std::io::Error::from_raw_os_error(code).to_string();
             let what = what.split(" (os error").next().unwrap_or(&what).to_owned();
             Err(DatabaseError::Io { code, message: format!("Could not delete file {filename}: {what}") })
@@ -164,6 +163,9 @@ pub struct OfflineDatabase {
 
     autopack: bool,
     read_only: bool,
+    /// The database has the current schema's columns. A read-only database
+    /// of an older version isn't migrated.
+    current_schema: bool,
 
     /// `accessed` timestamps (seconds) of cache hits not yet written, by
     /// row id.
@@ -198,14 +200,27 @@ impl OfflineDatabase {
         format!("{}{}_mlnRange={}-{}", resource.url, sep, first, second)
     }
 
+    /// The database at `path`, which it creates or migrates to the current
+    /// schema. A database it can't open, it opens again at its next use.
     pub fn new(path: impl Into<String>) -> Self {
+        Self::open(path.into(), false)
+    }
+
+    /// The database at `path`, opened read-only: it isn't created, migrated
+    /// or written.
+    pub fn read_only(path: impl Into<String>) -> Self {
+        Self::open(path.into(), true)
+    }
+
+    fn open(path: String, read_only: bool) -> Self {
         let mut db = OfflineDatabase {
-            path: path.into(),
+            path,
             db: None,
             maximum_ambient_cache_size: DEFAULT_MAX_CACHE_SIZE,
             current_ambient_cache_size: None,
             autopack: true,
-            read_only: false,
+            read_only,
+            current_schema: true,
             pending_resource_accessed: BTreeMap::new(),
             pending_tile_accessed: BTreeMap::new(),
             pending_applied_for_eviction: false,
@@ -215,8 +230,6 @@ impl OfflineDatabase {
         if let Err(e) = db.initialize() {
             db.handle_error(&e, "open database");
         }
-        // Assume that we can't open the database right now and work with an
-        // empty database object.
         db
     }
 
@@ -229,13 +242,14 @@ impl OfflineDatabase {
             OpenFlags::default()
         };
         let db = self.db.insert(Connection::open_with_flags(&self.path, flags)?);
-        db.busy_timeout(std::time::Duration::from_millis(i32::MAX as u64))?;
+        db.busy_timeout(Duration::from_millis(i32::MAX as u64))?;
         exec(db, "PRAGMA foreign_keys = ON")?;
+        let user_version = self.get_pragma_i64("PRAGMA user_version")?;
+        self.current_schema = !self.read_only || user_version >= 7;
         if self.read_only {
             return Ok(());
         }
 
-        let user_version = self.get_pragma_i64("PRAGMA user_version")?;
         match user_version {
             0 | 1 => {
                 // Newly created database, or old cache-only database; remove
@@ -244,7 +258,7 @@ impl OfflineDatabase {
                 self.create_schema()?;
                 Ok(())
             }
-            2..=6 => {
+            2..=7 => {
                 if user_version == 2 {
                     self.migrate_to_version3()?;
                 }
@@ -255,7 +269,10 @@ impl OfflineDatabase {
                 if user_version <= 5 {
                     self.migrate_to_version6()?;
                 }
-                // 6: Happy path; we're done
+                if user_version <= 6 {
+                    self.migrate_to_version7()?;
+                }
+                // 7: Happy path; we're done
                 Ok(())
             }
             _ => {
@@ -272,7 +289,6 @@ impl OfflineDatabase {
         self.cleanup();
         self.path = path.to_owned();
         if let Err(e) = self.initialize() {
-            // C++ lets this propagate to the caller (the database thread).
             self.handle_error(&e, "open database");
         }
     }
@@ -280,8 +296,6 @@ impl OfflineDatabase {
     fn cleanup(&mut self) {
         self.flush_accessed();
         self.discard_pending_accessed();
-        // Deleting these SQLite objects may result in exceptions (rusqlite
-        // closes on drop and ignores the result).
         self.db = None;
     }
 
@@ -418,7 +432,6 @@ impl OfflineDatabase {
                 Log::error(Event::Database, format!("Can't {action}: {message}"));
             }
             DatabaseError::Logic(_) => {
-                // C++: assert(false) in debug builds.
                 Log::error(Event::Database, format!("Can't {action}"));
             }
             // `RegionNotFound` is the caller's to report.
@@ -461,7 +474,7 @@ impl OfflineDatabase {
         self.with_transaction(Begin::Deferred, |this| {
             let db = this.get_db()?;
             exec(db, OFFLINE_DATABASE_SCHEMA)?;
-            exec(db, "PRAGMA user_version = 6")?;
+            exec(db, "PRAGMA user_version = 7")?;
             Ok(())
         })
     }
@@ -500,6 +513,23 @@ impl OfflineDatabase {
         })
     }
 
+    /// Version 7 keeps until when a stale copy may be used while it
+    /// revalidates and in place of an error, which copies stored before
+    /// don't have, and each region's `max_stale`.
+    fn migrate_to_version7(&mut self) -> DbResult<()> {
+        self.check_flags()?;
+        self.with_transaction(Begin::Deferred, |this| {
+            let db = this.get_db()?;
+            for table in ["resources", "tiles"] {
+                exec(db, &format!("ALTER TABLE {table} ADD COLUMN stale_while_revalidate INTEGER"))?;
+                exec(db, &format!("ALTER TABLE {table} ADD COLUMN stale_if_error INTEGER"))?;
+            }
+            exec(db, "ALTER TABLE regions ADD COLUMN max_stale INTEGER NOT NULL DEFAULT 0")?;
+            exec(db, "PRAGMA user_version = 7")?;
+            Ok(())
+        })
+    }
+
     fn vacuum(&mut self) -> DbResult<()> {
         self.check_flags()?;
         if self.get_pragma_i64("PRAGMA auto_vacuum")? == 2 {
@@ -524,7 +554,7 @@ impl OfflineDatabase {
         Ok(())
     }
 
-    /// `getStatement`'s `if (!db) initialize();`.
+    /// The connection, which opens the database if it isn't open.
     fn get_db(&mut self) -> DbResult<&Connection> {
         if self.db.is_none() {
             self.initialize()?;
@@ -586,62 +616,77 @@ impl OfflineDatabase {
         Ok(self.query_row(sql, [], |row| Ok(row.get(0)?))?.unwrap_or(0))
     }
 
-    /// `get(const Resource&)`.
+    /// The stored copy of `resource`, if any.
     pub fn get(&mut self, resource: &Resource) -> Option<Response> {
-        let result = (|| -> DbResult<Option<Response>> {
-            if self.disabled() {
-                return Ok(None);
-            }
-
-            let result = self.get_internal(resource)?;
-            Ok(result.map(|(response, _size)| response))
-        })();
-        match result {
-            Ok(response) => response,
-            Err(e) => {
-                self.handle_error(&e, "read resource");
-                None
-            }
-        }
+        let result = if self.disabled() { Ok(None) } else { self.get_internal(resource) };
+        self.report(result, "read resource").ok().flatten().map(|(response, _size)| response)
     }
 
     fn get_internal(&mut self, resource: &Resource) -> DbResult<Option<(Response, u64)>> {
-        let result = if let Some(tile_data) = tile_data(resource) {
-            self.get_tile(tile_data)
-        } else {
-            self.get_resource(resource)
-        }?;
+        let stored = Stored::of(resource);
+        let sql = format!(
+            "SELECT etag, modified, data, compressed, id, {} FROM {} WHERE {}",
+            self.caching_columns(stored.table()),
+            stored.table().name(),
+            stored.condition()
+        );
+        let Some((response, size, id)) = self.query_row(&sql, &*stored.params(), read_response)? else {
+            return Ok(None);
+        };
+        self.queue_accessed(stored.is_tile(), id);
         if self.pending_accessed_count() >= MAX_PENDING_ACCESSED && !self.accessed_flush_failed {
             self.flush_accessed();
         }
-        if result.is_some()
-            && self.pending_accessed_count() > 0
+        if self.pending_accessed_count() > 0
             && let Some(callback) = &mut self.accessed_callback
         {
             callback();
         }
-        Ok(result)
+        Ok(Some((response, size)))
     }
 
-    /// (stored size, whether the stored copy can be used without
-    /// revalidating it; see `Response::is_usable`).
-    fn has_internal(&mut self, resource: &Resource) -> DbResult<Option<(i64, bool)>> {
-        if let Some(tile_data) = tile_data(resource) { self.has_tile(tile_data) } else { self.has_resource(resource) }
+    /// The stored size and caching rules of the copy of `resource`; `None`
+    /// without one, or for a copy without data.
+    fn has_internal(&mut self, resource: &Resource) -> DbResult<Option<(u64, Caching)>> {
+        let stored = Stored::of(resource);
+        let sql = format!(
+            "SELECT length(data), {} FROM {} WHERE {}",
+            self.caching_columns(stored.table()),
+            stored.table().name(),
+            stored.condition()
+        );
+        let row = self.query_row(&sql, &*stored.params(), |row| {
+            let size: Option<i64> = row.get(0)?;
+            size.map(|size| Ok((size as u64, read_caching(row, 1)?))).transpose()
+        })?;
+        Ok(row.flatten())
     }
 
-    /// `put(const Resource&, const Response&)`: (inserted, stored size). The ambient cache doesn't
-    /// keep a tile the tileset doesn't have (`Response::tile_not_found`), since it would read back as
-    /// an empty tile.
+    /// The columns that `read_caching` reads for a copy's caching rules: its
+    /// own, and the longest `max_stale` of the regions that hold it.
+    fn caching_columns(&self, table: Table) -> String {
+        if !self.current_schema {
+            return "expires, must_revalidate, NULL, NULL, NULL".to_owned();
+        }
+        let (table, (regions, id)) = (table.name(), table.regions());
+        format!(
+            "expires, must_revalidate, stale_while_revalidate, stale_if_error, \
+             (SELECT MAX(regions.max_stale) FROM {regions} \
+              JOIN regions ON regions.id = {regions}.region_id \
+              WHERE {regions}.{id} = {table}.id)"
+        )
+    }
+
+    /// Stores `response` for `resource` in the ambient cache, and gives
+    /// whether it added a row, and the stored size. The ambient cache doesn't
+    /// keep a tile the tileset doesn't have (`Response::tile_not_found`),
+    /// since it would read back as an empty tile.
     pub fn put(&mut self, resource: &Resource, response: &Response) -> (bool, u64) {
         if self.read_only || response.tile_not_found {
             return (false, 0);
         }
 
         let result = (|| -> DbResult<(bool, u64)> {
-            if self.db.is_none() {
-                self.initialize()?;
-            }
-
             if self.disabled() {
                 return Ok((false, 0));
             }
@@ -653,19 +698,16 @@ impl OfflineDatabase {
             }
             Ok(result)
         })();
-        match result {
-            Ok(result) => result,
-            Err(e) => {
-                self.handle_error(&e, "write resource");
-                (false, 0)
-            }
-        }
+        self.report(result, "write resource").unwrap_or((false, 0))
     }
 
+    /// Stores `response` for `resource`, first making room in the ambient
+    /// cache when `evict` is set.
     fn put_internal(&mut self, resource: &Resource, response: &Response, evict: bool) -> DbResult<(bool, u64)> {
         self.check_flags()?;
 
-        if response.error.is_some() {
+        // An error isn't stored, nor what the server forbids storing.
+        if response.error.is_some() || response.no_store {
             return Ok((false, 0));
         }
 
@@ -674,39 +716,25 @@ impl OfflineDatabase {
             return Ok((false, 0));
         }
 
-        let mut compressed_data = Vec::new();
-        let mut compressed = false;
-        let mut size = 0u64;
+        let compressed = match &response.data {
+            Some(data) => Some(compress(data).map_err(DatabaseError::Runtime)?).filter(|c| c.len() < data.len()),
+            None => None,
+        };
+        let data = compressed.as_deref().or(response.data.as_deref().map(Vec::as_slice)).unwrap_or_default();
+        let size = data.len() as u64;
 
-        if let Some(data) = &response.data {
-            compressed_data = compress(data).map_err(DatabaseError::Runtime)?;
-            compressed = compressed_data.len() < data.len();
-            size = if compressed { compressed_data.len() } else { data.len() } as u64;
-        }
-
-        let mut stats = None;
-        if evict {
-            let s = DatabaseSizeChangeStats::new(self)?;
-            if !self.evict(size, &s, true)? {
+        let stats = if evict {
+            let stats = DatabaseSizeChangeStats::new(self)?;
+            if !self.evict(size, &stats, true)? {
                 Log::info(Event::Database, "Unable to make space for entry");
                 return Ok((false, 0));
             }
-            stats = Some(s);
-        }
-
-        let data: &[u8] = if compressed {
-            &compressed_data
-        } else if let Some(data) = &response.data {
-            data
+            Some(stats)
         } else {
-            b""
+            None
         };
 
-        let inserted = if let Some(tile_data) = tile_data(resource) {
-            self.put_tile(tile_data, response, data, compressed)?
-        } else {
-            self.put_resource(resource, response, data, compressed)?
-        };
+        let inserted = self.write(&Stored::of(resource), response, data, compressed.is_some())?;
 
         if let Some(stats) = stats {
             self.update_ambient_cache_size(&stats)?;
@@ -715,300 +743,101 @@ impl OfflineDatabase {
         Ok((inserted, size))
     }
 
-    /// Reads `etag, expires, must_revalidate, modified, data, compressed,
-    /// id` of the first row, as getResource/getTile do.
-    fn read_response(row: &Row<'_>) -> DbResult<(Response, u64, i64)> {
-        let mut response = Response::new();
-        let mut size = 0u64;
+    /// Writes `response`, with `data` as its stored bytes, to the row of
+    /// `stored`, and gives whether it added the row. A 304 updates only the
+    /// stored copy's caching rules.
+    fn write(&mut self, stored: &Stored<'_>, response: &Response, data: &[u8], compressed: bool) -> DbResult<bool> {
+        let secs = |time: Option<Timestamp>| time.map(Timestamp::secs_since_epoch);
+        let (expires, modified) = (secs(response.caching.expires), secs(response.modified));
+        let (swr, sie) = (secs(response.caching.stale_while_revalidate), secs(response.caching.stale_if_error));
+        let accessed = now().secs_since_epoch();
+        // An empty body is an empty blob, and no content is NULL.
+        let data = (!response.no_content).then_some(data);
+        let compressed = compressed && data.is_some();
 
-        response.etag = row.get(0)?;
-        response.expires = row.get::<_, Option<i64>>(1)?.map(Timestamp::from_secs);
-        response.must_revalidate = row.get(2)?;
-        response.modified = row.get::<_, Option<i64>>(3)?.map(Timestamp::from_secs);
-
-        match row.get_ref(4)?.as_bytes_or_null()? {
-            None => response.no_content = true,
-            Some(data) => {
-                size = data.len() as u64;
-                let data = if row.get(5)? { decompress(data).map_err(DatabaseError::Runtime)? } else { data.to_vec() };
-                response.data = Some(Arc::new(data));
-            }
+        let mut columns: Vec<(&str, &dyn ToSql)> = vec![
+            ("accessed", &accessed),
+            ("expires", &expires),
+            ("must_revalidate", &response.caching.must_revalidate),
+            ("stale_while_revalidate", &swr),
+            ("stale_if_error", &sie),
+        ];
+        if !response.not_modified {
+            columns.extend::<[(&str, &dyn ToSql); 4]>([
+                ("etag", &response.etag),
+                ("modified", &modified),
+                ("data", &data),
+                ("compressed", &compressed),
+            ]);
+            columns.extend(stored.content());
         }
+        let key = stored.key();
+        let params: Vec<&dyn ToSql> = columns.iter().chain(&key).map(|(_, value)| *value).collect();
 
-        Ok((response, size, row.get(6)?))
-    }
-
-    fn get_resource(&mut self, resource: &Resource) -> DbResult<Option<(Response, u64)>> {
-        let key = Self::cache_key(resource);
-        let row = self.query_row(
-            //        0      1            2            3       4      5          6
-            "SELECT etag, expires, must_revalidate, modified, data, compressed, id \
-             FROM resources \
-             WHERE url = ?",
-            params![key],
-            Self::read_response,
-        )?;
-        Ok(row.map(|(response, size, id)| {
-            self.queue_accessed(false, id);
-            (response, size)
-        }))
-    }
-
-    fn has_resource(&mut self, resource: &Resource) -> DbResult<Option<(i64, bool)>> {
-        let key = Self::cache_key(resource);
-        Ok(self
-            .query_row(
-                "SELECT length(data), must_revalidate, expires FROM resources WHERE url = ?",
-                params![key],
-                Self::read_size_and_usable,
-            )?
-            .flatten())
-    }
-
-    /// Reads `length(data), must_revalidate, expires`, as hasResource/hasTile
-    /// do.
-    fn read_size_and_usable(row: &Row<'_>) -> DbResult<Option<(i64, bool)>> {
-        let Some(size) = row.get(0)? else {
-            return Ok(None);
-        };
-        let mut response = Response::new();
-        response.must_revalidate = row.get(1)?;
-        response.expires = row.get::<_, Option<i64>>(2)?.map(Timestamp::from_secs);
-        Ok(Some((size, response.is_usable())))
-    }
-
-    fn put_resource(
-        &mut self,
-        resource: &Resource,
-        response: &Response,
-        data: &[u8],
-        compressed: bool,
-    ) -> DbResult<bool> {
-        self.check_flags()?;
-
-        let key = Self::cache_key(resource);
-        let expires = response.expires.map(Timestamp::secs_since_epoch);
-        let modified = response.modified.map(Timestamp::secs_since_epoch);
-
-        if response.not_modified {
-            self.execute(
-                "UPDATE resources \
-                 SET accessed         = ?1, \
-                     expires          = ?2, \
-                     must_revalidate  = ?3 \
-                 WHERE url    = ?4 ",
-                params![now().secs_since_epoch(), expires, response.must_revalidate, key],
-            )?;
+        // Not REPLACE, which would change the row's id.
+        let assignments: Vec<String> = columns.iter().map(|(column, _)| format!("{column} = ?")).collect();
+        let table = stored.table().name();
+        let sql = format!("UPDATE {table} SET {} WHERE {}", assignments.join(", "), stored.condition());
+        if self.execute(&sql, &*params)? != 0 || response.not_modified {
             return Ok(false);
         }
 
-        // `bindBlob(data.data(), data.size())`: an empty string is an empty
-        // blob, noContent is NULL.
-        let (data, compressed): (Option<&[u8]>, bool) =
-            if response.no_content { (None, false) } else { (Some(data), compressed) };
-
-        // We can't use REPLACE because it would change the id value.
-        let changes = self.execute(
-            "UPDATE resources \
-             SET kind            = ?1, \
-                 etag            = ?2, \
-                 expires         = ?3, \
-                 must_revalidate = ?4, \
-                 modified        = ?5, \
-                 accessed        = ?6, \
-                 data            = ?7, \
-                 compressed      = ?8 \
-             WHERE url           = ?9 ",
-            params![
-                resource.kind as i32,
-                response.etag,
-                expires,
-                response.must_revalidate,
-                modified,
-                now().secs_since_epoch(),
-                data,
-                compressed,
-                key
-            ],
-        )?;
-        if changes != 0 {
-            return Ok(false);
-        }
-
-        self.execute(
-            "INSERT INTO resources (url, kind, etag, expires, must_revalidate, modified, accessed, data, compressed) \
-             VALUES                (?1,  ?2,   ?3,   ?4,      ?5,              ?6,       ?7,       ?8,   ?9) ",
-            params![
-                key,
-                resource.kind as i32,
-                response.etag,
-                expires,
-                response.must_revalidate,
-                modified,
-                now().secs_since_epoch(),
-                data,
-                compressed
-            ],
-        )?;
-
+        let names: Vec<&str> = columns.iter().chain(&key).map(|(column, _)| *column).collect();
+        let sql = format!("INSERT INTO {table} ({}) VALUES ({})", names.join(", "), vec!["?"; names.len()].join(", "));
+        self.execute(&sql, &*params)?;
         Ok(true)
     }
 
-    fn get_tile(&mut self, tile: &TileData) -> DbResult<Option<(Response, u64)>> {
-        let row = self.query_row(
-            //        0      1           2,            3,      4,      5,         6
-            "SELECT etag, expires, must_revalidate, modified, data, compressed, id \
-             FROM tiles \
-             WHERE url_template = ?1 \
-               AND pixel_ratio  = ?2 \
-               AND x            = ?3 \
-               AND y            = ?4 \
-               AND z            = ?5 ",
-            params![tile.url_template, tile.pixel_ratio, tile.x, tile.y, tile.z],
-            Self::read_response,
-        )?;
-        Ok(row.map(|(response, size, id)| {
-            self.queue_accessed(true, id);
-            (response, size)
-        }))
+    /// Makes maps revalidate the ambient cache's copies before they use
+    /// them. See `invalidate`.
+    pub(crate) fn invalidate_ambient_cache(&mut self) -> DbResult<()> {
+        let result = self.invalidate(
+            "id NOT IN (SELECT tile_id FROM region_tiles)",
+            "id NOT IN (SELECT resource_id FROM region_resources)",
+            [],
+        );
+        self.report(result, "invalidate ambient cache")
     }
 
-    fn has_tile(&mut self, tile: &TileData) -> DbResult<Option<(i64, bool)>> {
-        Ok(self
-            .query_row(
-                "SELECT length(data), must_revalidate, expires \
-                 FROM tiles \
-                 WHERE url_template = ?1 \
-                   AND pixel_ratio  = ?2 \
-                   AND x            = ?3 \
-                   AND y            = ?4 \
-                   AND z            = ?5 ",
-                params![tile.url_template, tile.pixel_ratio, tile.x, tile.y, tile.z],
-                Self::read_size_and_usable,
-            )?
-            .flatten())
+    /// Makes maps revalidate the region's copies before they use them, and
+    /// its next download refresh them. See `invalidate`.
+    pub fn invalidate_region(&mut self, region_id: i64) -> DbResult<()> {
+        let result = self.invalidate(
+            "id IN (SELECT tile_id FROM region_tiles WHERE region_id = ?1)",
+            "id IN (SELECT resource_id FROM region_resources WHERE region_id = ?1)",
+            params![region_id],
+        );
+        self.report(result, "invalidate region")
     }
 
-    fn put_tile(&mut self, tile: &TileData, response: &Response, data: &[u8], compressed: bool) -> DbResult<bool> {
+    /// Makes the tiles and resources whose ids match the conditions stale
+    /// now, without letting maps show them while they revalidate. A copy
+    /// keeps standing in for the server as long as it could before: a fresh
+    /// one that must revalidate once stale may stand in until it would have
+    /// gone stale.
+    fn invalidate(&mut self, tiles: &str, resources: &str, params: impl rusqlite::Params + Copy) -> DbResult<()> {
         self.check_flags()?;
-
-        let expires = response.expires.map(Timestamp::secs_since_epoch);
-        let modified = response.modified.map(Timestamp::secs_since_epoch);
-
-        if response.not_modified {
+        let now = now().secs_since_epoch();
+        for (table, ids) in [("tiles", tiles), ("resources", resources)] {
+            // SQLite evaluates every assignment against the row as it was.
             self.execute(
-                "UPDATE tiles \
-                 SET accessed        = ?1, \
-                     expires         = ?2, \
-                     must_revalidate = ?3 \
-                 WHERE url_template  = ?4 \
-                   AND pixel_ratio   = ?5 \
-                   AND x             = ?6 \
-                   AND y             = ?7 \
-                   AND z             = ?8 ",
-                params![
-                    now().secs_since_epoch(),
-                    expires,
-                    response.must_revalidate,
-                    tile.url_template,
-                    tile.pixel_ratio,
-                    tile.x,
-                    tile.y,
-                    tile.z
-                ],
+                &format!(
+                    "UPDATE {table} SET \
+                         stale_if_error = IIF(must_revalidate AND IFNULL(expires > {now}, 1), \
+                                              expires, stale_if_error), \
+                         must_revalidate = must_revalidate AND IFNULL(expires <= {now}, 0), \
+                         expires = MIN(IFNULL(expires, {now}), {now}), \
+                         stale_while_revalidate = NULL \
+                     WHERE {ids}"
+                ),
+                params,
             )?;
-            return Ok(false);
         }
-
-        let (data, compressed): (Option<&[u8]>, bool) =
-            if response.no_content { (None, false) } else { (Some(data), compressed) };
-
-        // We can't use REPLACE because it would change the id value.
-        let changes = self.execute(
-            "UPDATE tiles \
-             SET modified        = ?1, \
-                 etag            = ?2, \
-                 expires         = ?3, \
-                 must_revalidate = ?4, \
-                 accessed        = ?5, \
-                 data            = ?6, \
-                 compressed      = ?7 \
-             WHERE url_template  = ?8 \
-               AND pixel_ratio   = ?9 \
-               AND x             = ?10 \
-               AND y             = ?11 \
-               AND z             = ?12 ",
-            params![
-                modified,
-                response.etag,
-                expires,
-                response.must_revalidate,
-                now().secs_since_epoch(),
-                data,
-                compressed,
-                tile.url_template,
-                tile.pixel_ratio,
-                tile.x,
-                tile.y,
-                tile.z
-            ],
-        )?;
-        if changes != 0 {
-            return Ok(false);
-        }
-
-        self.execute(
-            "INSERT INTO tiles (url_template, pixel_ratio, x,  y,  z,  modified, must_revalidate, etag, expires, accessed,  data, compressed) \
-             VALUES            (?1,           ?2,          ?3, ?4, ?5, ?6,       ?7,              ?8,   ?9,      ?10,       ?11,  ?12)",
-            params![
-                tile.url_template,
-                tile.pixel_ratio,
-                tile.x,
-                tile.y,
-                tile.z,
-                modified,
-                response.must_revalidate,
-                response.etag,
-                expires,
-                now().secs_since_epoch(),
-                data,
-                compressed
-            ],
-        )?;
-
-        Ok(true)
-    }
-
-    /// Forces revalidation of the ambient cache's tiles and resources with
-    /// the server before using them.
-    pub(crate) fn invalidate_ambient_cache(&mut self) -> Option<DatabaseError> {
-        let result = (|| -> DbResult<()> {
-            self.check_flags()?;
-
-            self.execute(
-                "UPDATE tiles \
-                 SET expires = 0, must_revalidate = 1 \
-                 WHERE id NOT IN (\
-                     SELECT tile_id FROM region_tiles\
-                 )",
-                [],
-            )?;
-
-            self.execute(
-                "UPDATE resources \
-                 SET expires = 0, must_revalidate = 1 \
-                 WHERE id NOT IN (\
-                     SELECT resource_id FROM region_resources\
-                 )",
-                [],
-            )?;
-            Ok(())
-        })();
-        self.exception_ptr(result, "invalidate ambient cache")
+        Ok(())
     }
 
     /// Clears the ambient cache, freeing space.
-    pub(crate) fn clear_ambient_cache(&mut self) -> Option<DatabaseError> {
+    pub(crate) fn clear_ambient_cache(&mut self) -> DbResult<()> {
         let result = (|| -> DbResult<()> {
             self.check_flags()?;
             // The deleted rows' ids may be reused.
@@ -1035,128 +864,137 @@ impl OfflineDatabase {
             }
             Ok(())
         })();
-        self.exception_ptr(result, "clear ambient cache")
+        self.report(result, "clear ambient cache")
     }
 
-    pub fn invalidate_region(&mut self, region_id: i64) -> Option<DatabaseError> {
-        let result = (|| -> DbResult<()> {
-            self.check_flags()?;
-
-            self.execute(
-                "UPDATE tiles \
-                 SET expires = 0, must_revalidate = 1 \
-                 WHERE id IN (\
-                     SELECT tile_id FROM region_tiles WHERE region_id = ?\
-                 )",
-                params![region_id],
-            )?;
-
-            self.execute(
-                "UPDATE resources \
-                 SET expires = 0, must_revalidate = 1 \
-                 WHERE id IN (\
-                     SELECT resource_id FROM region_resources WHERE region_id = ?\
-                 )",
-                params![region_id],
-            )?;
-            Ok(())
-        })();
-        self.exception_ptr(result, "invalidate region")
-    }
-
-    /// The `try { ...; return nullptr; } catch (...) { handleError(action);
-    /// return std::current_exception(); }` pattern.
-    fn exception_ptr(&mut self, result: DbResult<()>, action: &str) -> Option<DatabaseError> {
-        match result {
-            Ok(()) => None,
-            Err(e) => {
-                self.handle_error(&e, action);
-                Some(e)
-            }
-        }
-    }
-
-    /// The `try { return ...; } catch (...) { handleError(action); return
-    /// unexpected(std::current_exception()); }` pattern.
-    fn expected<T>(&mut self, result: DbResult<T>, action: &str) -> DbResult<T> {
+    /// Handles `result`'s error, if any (see `handle_error`), and passes
+    /// the result on.
+    fn report<T>(&mut self, result: DbResult<T>, action: &str) -> DbResult<T> {
         if let Err(e) = &result {
             self.handle_error(e, action);
         }
         result
     }
 
-    pub fn list_regions(&mut self) -> Result<OfflineRegions, DatabaseError> {
-        let result = (|| -> DbResult<OfflineRegions> {
-            let rows = {
-                let conn = self.get_db()?;
-                let mut stmt = conn.prepare_cached("SELECT id, definition, description FROM regions")?;
-                let mut rows = stmt.query([])?;
-                let mut result = Vec::new();
-                while let Some(row) = rows.next()? {
-                    result.push((row.get(0)?, text_or_blob(row, 1)?, text_or_blob(row, 2)?));
-                }
-                result
-            };
-            let mut result = OfflineRegions::new();
-            for (id, definition, description) in rows {
-                match decode_offline_region_definition(&definition) {
-                    Ok(definition) => result.push(OfflineRegion { id, definition, metadata: description }),
-                    Err(ex) => {
-                        // Catch errors from malformed offline region
-                        // definitions and skip them.
-                        Log::error(Event::General, &ex.message);
-                    }
-                }
-            }
-            Ok(result)
-        })();
-        self.expected(result, "list regions")
+    /// The columns that `read_region` reads, from the regions table `regions`.
+    fn region_columns(&self, regions: &str) -> String {
+        let max_stale = if self.current_schema { format!("{regions}.max_stale") } else { "0".to_owned() };
+        format!("{regions}.id, {regions}.definition, {regions}.description, {max_stale}")
     }
 
-    pub fn get_region(&mut self, region_id: i64) -> Result<Option<OfflineRegion>, DatabaseError> {
-        let result = (|| -> DbResult<Option<OfflineRegion>> {
-            let row = self.query_row(
-                "SELECT definition, description FROM regions WHERE id = ?1",
-                params![region_id],
-                |row| Ok((text_or_blob(row, 0)?, text_or_blob(row, 1)?)),
-            )?;
-            let Some((definition, description)) = row else {
-                return Ok(None);
-            };
-
-            if definition.is_empty() && description.is_empty() {
-                return Err(DatabaseError::Runtime(format!("Region {region_id} not found in database")));
+    /// The regions that `sql` selects with `region_columns`. A region whose
+    /// definition is malformed fails, or, with `skip_malformed`, is left out.
+    fn read_regions(
+        &mut self,
+        sql: &str,
+        params: impl rusqlite::Params,
+        skip_malformed: bool,
+    ) -> DbResult<OfflineRegions> {
+        let rows = {
+            let mut stmt = self.get_db()?.prepare_cached(sql)?;
+            let mut rows = stmt.query(params)?;
+            let mut result = Vec::new();
+            while let Some(row) = rows.next()? {
+                let max_stale: i64 = row.get(3)?;
+                result.push((row.get(0)?, text_or_blob(row, 1)?, text_or_blob(row, 2)?, max_stale));
             }
-
-            Ok(Some(OfflineRegion {
-                id: region_id,
-                definition: decode_offline_region_definition(&definition)?,
-                metadata: description,
-            }))
-        })();
-        self.expected(result, "get region")
+            result
+        };
+        let mut regions = OfflineRegions::new();
+        for (id, definition, metadata, max_stale) in rows {
+            let definition = match decode_offline_region_definition(&definition) {
+                Ok(definition) => definition,
+                Err(e) if skip_malformed => {
+                    Log::error(Event::General, &e.message);
+                    continue;
+                }
+                Err(e) => return Err(e.into()),
+            };
+            let max_stale = Duration::from_secs(max_stale.max(0) as u64);
+            regions.push(OfflineRegion { id, definition, metadata, max_stale });
+        }
+        Ok(regions)
     }
 
+    /// Every region whose definition can be read.
+    pub fn list_regions(&mut self) -> DbResult<OfflineRegions> {
+        let sql = format!("SELECT {} FROM regions", self.region_columns("regions"));
+        let result = self.read_regions(&sql, [], true);
+        self.report(result, "list regions")
+    }
+
+    /// The region `region_id`, or `None` when the database has none.
+    pub fn get_region(&mut self, region_id: i64) -> DbResult<Option<OfflineRegion>> {
+        let sql = format!("SELECT {} FROM regions WHERE id = ?1", self.region_columns("regions"));
+        let result = self.read_regions(&sql, params![region_id], false).map(|regions| regions.into_iter().next());
+        self.report(result, "get region")
+    }
+
+    /// Creates a region without resources.
     pub fn create_region(
         &mut self,
         definition: &OfflineRegionDefinition,
         metadata: &OfflineRegionMetadata,
-    ) -> Result<OfflineRegion, DatabaseError> {
+    ) -> DbResult<OfflineRegion> {
         let result = (|| -> DbResult<OfflineRegion> {
             self.check_flags()?;
-
             self.execute(
-                "INSERT INTO regions (definition, description) \
-                 VALUES              (?1,         ?2) ",
+                "INSERT INTO regions (definition, description) VALUES (?1, ?2)",
                 params![encode_offline_region_definition(definition), metadata_blob(metadata)],
             )?;
             Ok(OfflineRegion {
                 id: self.last_insert_row_id()?,
                 definition: definition.clone(),
                 metadata: metadata.clone(),
+                max_stale: Duration::ZERO,
             })
         })();
-        self.expected(result, "create region")
+        self.report(result, "create region")
+    }
+
+    /// Sets how long past their expiry the region's resources may stand in
+    /// for the server (`OfflineRegion::max_stale`).
+    pub fn set_region_max_stale(&mut self, region_id: i64, max_stale: Duration) -> DbResult<()> {
+        let result = self.check_flags().and_then(|()| {
+            let secs = i64::try_from(max_stale.as_secs()).unwrap_or(i64::MAX);
+            self.execute("UPDATE regions SET max_stale = ?1 WHERE id = ?2", params![secs, region_id]).map(drop)
+        });
+        self.report(result, "set region max stale")
+    }
+
+    /// How long the region's stored resources stay usable.
+    pub fn get_region_expiry(&mut self, region_id: i64) -> DbResult<OfflineRegionExpiry> {
+        let result = (|| -> DbResult<OfflineRegionExpiry> {
+            let mut sql = Vec::new();
+            for table in [Table::Tiles, Table::Resources] {
+                let (name, (regions, id)) = (table.name(), table.regions());
+                sql.push(format!(
+                    "SELECT {} FROM {regions} AS held JOIN {name} ON {name}.id = held.{id} \
+                     WHERE held.region_id = ?1",
+                    self.caching_columns(table)
+                ));
+            }
+            let now = now();
+            let mut expiry = OfflineRegionExpiry::default();
+            let mut stmt = self.get_db()?.prepare_cached(&sql.join(" UNION ALL "))?;
+            let mut rows = stmt.query(params![region_id])?;
+            while let Some(row) = rows.next()? {
+                let caching = read_caching(row, 0)?;
+                let earliest = |a: Option<Timestamp>, b: Option<Timestamp>| a.into_iter().chain(b).min();
+                expiry.stale_after = earliest(expiry.stale_after, caching.expires);
+                expiry.usable_offline_until = earliest(expiry.usable_offline_until, caching.usable_offline_until());
+                match caching.reuse(now) {
+                    Reuse::Fresh => {}
+                    Reuse::WhileRevalidating | Reuse::OnError => expiry.stale_resource_count += 1,
+                    Reuse::Never => {
+                        expiry.stale_resource_count += 1;
+                        expiry.unusable_resource_count += 1;
+                    }
+                }
+            }
+            Ok(expiry)
+        })();
+        self.report(result, "get region expiry")
     }
 
     pub fn merge_database(&mut self, side_database_path: &str) -> Result<OfflineRegions, DatabaseError> {
@@ -1177,49 +1015,32 @@ impl OfflineDatabase {
         }
 
         let result = (|| -> DbResult<OfflineRegions> {
-            // Support sideloaded databases at user_version = 6. Future schema
-            // version changes will need to implement migration paths for
-            // sideloaded databases at version 6.
-            let side_user_version = self.get_pragma_i64("PRAGMA side.user_version")? as i32;
+            // A sideloaded database is of version 6 or later, up to the main
+            // database's version.
+            let side_user_version = self.get_pragma_i64("PRAGMA side.user_version")?;
             let main_user_version = self.get_pragma_i64("PRAGMA user_version")?;
-            if side_user_version < 6 || i64::from(side_user_version) != main_user_version {
+            if side_user_version < 6 || side_user_version > main_user_version {
                 return Err(DatabaseError::Runtime("Merge database has incorrect user_version".to_owned()));
             }
 
             self.with_transaction(Begin::Deferred, |this| {
-                exec(this.get_db()?, MERGE_SIDELOADED_DATABASE_SQL)?;
+                exec(this.get_db()?, &merge_sideloaded_database_sql(side_user_version))?;
                 Ok(())
             })?;
 
-            let rows = {
-                let conn = self.get_db()?;
-                let mut stmt = conn.prepare_cached(
-                    "SELECT DISTINCT r.id, r.definition, r.description \
-                     FROM side.regions sr \
-                     JOIN regions r ON sr.definition = r.definition  AND sr.description IS r.description",
-                )?;
-                let mut rows = stmt.query([])?;
-                let mut result = Vec::new();
-                while let Some(row) = rows.next()? {
-                    result.push((row.get(0)?, text_or_blob(row, 1)?, text_or_blob(row, 2)?));
-                }
-                result
-            };
-            let mut result = OfflineRegions::new();
-            for (id, definition, description) in rows {
-                result.push(OfflineRegion {
-                    id,
-                    definition: decode_offline_region_definition(&definition)?,
-                    metadata: description,
-                });
-            }
+            let sql = format!(
+                "SELECT DISTINCT {} FROM side.regions sr \
+                 JOIN regions r ON sr.definition = r.definition AND sr.description IS r.description \
+                 ORDER BY r.id",
+                self.region_columns("r")
+            );
+            let result = self.read_regions(&sql, [], false)?;
             exec(self.get_db()?, "DETACH DATABASE side")?;
             Ok(result)
         })();
 
         match result {
-            // `catch (const std::runtime_error& ex)`: everything but the
-            // logic errors, which propagate (side stays attached).
+            // A logic error leaves the side database attached.
             Err(e) if !matches!(e, DatabaseError::Logic(_)) => {
                 exec(self.get_db()?, "DETACH DATABASE side")?;
                 Log::error(Event::Database, e.to_string());
@@ -1245,10 +1066,10 @@ impl OfflineDatabase {
 
             Ok(metadata.clone())
         })();
-        self.expected(result, "update region metadata")
+        self.report(result, "update region metadata")
     }
 
-    pub fn delete_region(&mut self, region: &OfflineRegion) -> Option<DatabaseError> {
+    pub fn delete_region(&mut self, region: &OfflineRegion) -> DbResult<()> {
         let result = (|| -> DbResult<()> {
             self.check_flags()?;
             // Eviction uses the stored timestamps if this fails.
@@ -1264,35 +1085,21 @@ impl OfflineDatabase {
             self.update_ambient_cache_size(&stats)?;
             Ok(())
         })();
-        self.exception_ptr(result, "delete region")
+        self.report(result, "delete region")
     }
 
-    /// The region's stored response for `resource`, with its stored size.
+    /// The stored copy of `resource`, with its stored size, whether or not
+    /// the ambient cache is enabled.
     pub fn get_region_resource(&mut self, resource: &Resource) -> Option<(Response, u64)> {
-        match self.get_internal(resource) {
-            Ok(result) => result,
-            Err(e) => {
-                self.handle_error(&e, "read region resource");
-                None
-            }
-        }
+        let result = self.get_internal(resource);
+        self.report(result, "read region resource").ok().flatten()
     }
 
-    #[cfg(test)]
-    pub(crate) fn has_region_resource(&mut self, resource: &Resource) -> Option<i64> {
-        self.check_region_resource(resource).map(|(size, _)| size)
-    }
-
-    /// The stored size of the region's copy of `resource`, and whether it can
-    /// be used without revalidating it (see `Response::is_usable`).
-    pub fn check_region_resource(&mut self, resource: &Resource) -> Option<(i64, bool)> {
-        match self.has_internal(resource) {
-            Ok(result) => result,
-            Err(e) => {
-                self.handle_error(&e, "query region resource");
-                None
-            }
-        }
+    /// The stored size and caching rules of the copy of `resource`; `None`
+    /// without one, or for a copy without data.
+    pub fn check_region_resource(&mut self, resource: &Resource) -> Option<(u64, Caching)> {
+        let result = self.has_internal(resource);
+        self.report(result, "query region resource").ok().flatten()
     }
 
     pub fn put_region_resource(&mut self, region_id: i64, resource: &Resource, response: &Response) -> u64 {
@@ -1367,7 +1174,7 @@ impl OfflineDatabase {
         let mut size = self.put_internal(resource, response, false)?.1;
         if response.not_modified {
             // A 304 keeps the stored data, so report the size it takes up.
-            size = self.has_internal(resource)?.map_or(0, |(stored, _)| stored as u64);
+            size = self.has_internal(resource)?.map_or(0, |(stored, _)| stored);
         }
         self.mark_used(region_id, resource)?;
         Ok(size)
@@ -1376,35 +1183,25 @@ impl OfflineDatabase {
     /// Adds `resource`, which the database holds, to the region.
     fn mark_used(&mut self, region_id: i64, resource: &Resource) -> DbResult<()> {
         self.check_flags()?;
-
-        if let Some(tile) = tile_data(resource) {
-            self.execute(
-                "INSERT OR IGNORE INTO region_tiles (region_id, tile_id) \
-                 SELECT                              ?1,        tiles.id \
-                 FROM tiles \
-                 WHERE url_template = ?2 \
-                   AND pixel_ratio  = ?3 \
-                   AND x            = ?4 \
-                   AND y            = ?5 \
-                   AND z            = ?6 ",
-                params![region_id, tile.url_template, tile.pixel_ratio, tile.x, tile.y, tile.z],
-            )?;
-        } else {
-            self.execute(
-                "INSERT OR IGNORE INTO region_resources (region_id, resource_id) \
-                 SELECT                                  ?1,        resources.id \
-                 FROM resources \
-                 WHERE resources.url = ?2 ",
-                params![region_id, Self::cache_key(resource)],
-            )?;
-        }
+        let stored = Stored::of(resource);
+        let table = stored.table();
+        let (name, (regions, id)) = (table.name(), table.regions());
+        let mut params: Vec<&dyn ToSql> = vec![&region_id];
+        params.extend(stored.params());
+        self.execute(
+            &format!(
+                "INSERT OR IGNORE INTO {regions} (region_id, {id}) SELECT ?, id FROM {name} WHERE {}",
+                stored.condition()
+            ),
+            &*params,
+        )?;
         Ok(())
     }
 
     #[cfg(test)]
     pub(crate) fn get_region_definition(&mut self, region_id: i64) -> Result<OfflineRegionDefinition, DatabaseError> {
         let result = (|| -> DbResult<OfflineRegionDefinition> {
-            // `query.run(); query.get<std::string>(0)`: no row reads as "".
+            // A missing region reads as an empty, malformed definition.
             let definition = self
                 .query_row("SELECT definition FROM regions WHERE id = ?1", params![region_id], |row| {
                     text_or_blob(row, 0)
@@ -1413,52 +1210,36 @@ impl OfflineDatabase {
 
             Ok(decode_offline_region_definition(&definition)?)
         })();
-        self.expected(result, "load region")
+        self.report(result, "load region")
     }
 
-    pub fn get_region_completed_status(&mut self, region_id: i64) -> Result<OfflineRegionStatus, DatabaseError> {
+    /// The number and size of the resources that the region holds, tiles
+    /// included, and of its tiles.
+    pub fn get_region_completed_status(&mut self, region_id: i64) -> DbResult<OfflineRegionStatus> {
         let result = (|| -> DbResult<OfflineRegionStatus> {
-            let mut result = OfflineRegionStatus::default();
-
-            let (count, size) = self.get_completed_resource_count_and_size(region_id)?;
-            result.completed_resource_count = count as u64;
-            result.completed_resource_size = size as u64;
-            let (count, size) = self.get_completed_tile_count_and_size(region_id)?;
-            result.completed_tile_count = count as u64;
-            result.completed_tile_size = size as u64;
-
-            result.completed_resource_count += result.completed_tile_count;
-            result.completed_resource_size += result.completed_tile_size;
-
-            Ok(result)
+            let mut status = OfflineRegionStatus::default();
+            for table in [Table::Tiles, Table::Resources] {
+                let (name, (regions, id)) = (table.name(), table.regions());
+                let (count, size) = self
+                    .query_row(
+                        &format!(
+                            "SELECT COUNT(*), IFNULL(SUM(LENGTH(data)), 0) FROM {regions} \
+                             JOIN {name} ON {name}.id = {regions}.{id} WHERE region_id = ?1"
+                        ),
+                        params![region_id],
+                        |row| Ok((row.get::<_, i64>(0)? as u64, row.get::<_, i64>(1)? as u64)),
+                    )?
+                    .unwrap_or_default();
+                status.completed_resource_count += count;
+                status.completed_resource_size += size;
+                if let Table::Tiles = table {
+                    status.completed_tile_count = count;
+                    status.completed_tile_size = size;
+                }
+            }
+            Ok(status)
         })();
-        self.expected(result, "get region status")
-    }
-
-    fn get_completed_resource_count_and_size(&mut self, region_id: i64) -> DbResult<(i64, i64)> {
-        Ok(self
-            .query_row(
-                "SELECT COUNT(*), IFNULL(SUM(LENGTH(data)), 0) \
-                 FROM region_resources, resources \
-                 WHERE region_id = ?1 \
-                 AND resource_id = resources.id ",
-                params![region_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )?
-            .unwrap_or_default())
-    }
-
-    fn get_completed_tile_count_and_size(&mut self, region_id: i64) -> DbResult<(i64, i64)> {
-        Ok(self
-            .query_row(
-                "SELECT COUNT(*), IFNULL(SUM(LENGTH(data)), 0) \
-                 FROM region_tiles, tiles \
-                 WHERE region_id = ?1 \
-                 AND tile_id = tiles.id ",
-                params![region_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )?
-            .unwrap_or_default())
+        self.report(result, "get region status")
     }
 
     // Remove least-recently used resources and tiles until the used database
@@ -1482,13 +1263,8 @@ impl OfflineDatabase {
         apply_accessed: bool,
     ) -> DbResult<bool> {
         self.check_flags()?;
-        let ambient_cache_size = if self.init_ambient_cache_size()?.is_none() {
-            self.current_ambient_cache_size.expect("initialized ambient cache size")
-        } else {
-            self.maximum_ambient_cache_size
-        };
         let mut new_ambient_cache_size =
-            ambient_cache_size.wrapping_add(needed_free_size).wrapping_add(stats.page_size());
+            self.ambient_cache_size()?.wrapping_add(needed_free_size).wrapping_add(stats.page_size());
 
         if apply_accessed
             && new_ambient_cache_size > self.maximum_ambient_cache_size
@@ -1550,9 +1326,6 @@ impl OfflineDatabase {
             let released = stats.bytes_released(self)?;
             new_ambient_cache_size = (new_ambient_cache_size as i64).wrapping_sub(released as i64).max(0) as u64;
 
-            // The cached value of offlineTileCount does not need to be
-            // updated here because only non-offline tiles can be removed by
-            // eviction.
             if resource_changes == 0 && tile_changes == 0 {
                 return Ok(false);
             }
@@ -1561,12 +1334,14 @@ impl OfflineDatabase {
         Ok(true)
     }
 
-    /// Lazily initializes currentAmbientCacheSize. `Ok(Some(e))` is the
-    /// returned `exception_ptr` (SQLite errors, handled); `Err` propagates.
-    fn init_ambient_cache_size(&mut self) -> DbResult<Option<DatabaseError>> {
-        if self.current_ambient_cache_size.is_none() {
-            let size = self.query_row(
-                "SELECT SUM(data) \
+    /// The size of the ambient cache's rows, which it reads once and then
+    /// keeps up to date.
+    fn ambient_cache_size(&mut self) -> DbResult<u64> {
+        if let Some(size) = self.current_ambient_cache_size {
+            return Ok(size);
+        }
+        let size = self.query_row(
+            "SELECT SUM(data) \
                  FROM ( \
                      SELECT SUM(IFNULL(LENGTH(data), 0) \
                                 + IFNULL(LENGTH(id), 0) \
@@ -1603,39 +1378,23 @@ impl OfflineDatabase {
                      ON resource_id = resources.id \
                      WHERE resource_id IS NULL \
                  ) ",
-                [],
-                |row| Ok(row.get::<_, Option<i64>>(0)?),
-            );
-            match size {
-                Ok(size) => self.current_ambient_cache_size = Some(size.flatten().unwrap_or(0) as u64),
-                Err(e @ DatabaseError::Sqlite { .. }) => {
-                    self.handle_error(&e, "cannot get current ambient cache size");
-                    return Ok(Some(e));
-                }
-                Err(e) => return Err(e),
-            }
-        }
-
-        Ok(None)
+            [],
+            |row| Ok(row.get::<_, Option<i64>>(0)?),
+        )?;
+        let size = size.flatten().unwrap_or(0) as u64;
+        self.current_ambient_cache_size = Some(size);
+        Ok(size)
     }
 
-    pub(crate) fn set_maximum_ambient_cache_size(&mut self, size: u64) -> Option<DatabaseError> {
+    pub(crate) fn set_maximum_ambient_cache_size(&mut self, size: u64) -> DbResult<()> {
         // Eviction uses the stored timestamps if this fails.
         self.flush_accessed();
         let previous_maximum_ambient_cache_size = self.maximum_ambient_cache_size;
 
-        // C++ lets errors other than SQLite's escape here; they are returned.
-        match self.init_ambient_cache_size() {
-            Ok(Some(exception)) | Err(exception) => return Some(exception),
-            Ok(None) => {}
-        }
-
         let result = (|| -> DbResult<()> {
+            let current = self.ambient_cache_size()?;
             self.maximum_ambient_cache_size = size;
-
-            if self.current_ambient_cache_size.expect("initialized ambient cache size")
-                > self.maximum_ambient_cache_size
-            {
+            if current > size {
                 let stats = DatabaseSizeChangeStats::new(self)?;
                 self.evict(0, &stats, false)?;
                 if self.autopack {
@@ -1643,17 +1402,12 @@ impl OfflineDatabase {
                 }
                 self.update_ambient_cache_size(&stats)?;
             }
-
             Ok(())
         })();
-        match result {
-            Ok(()) => None,
-            Err(e) => {
-                self.maximum_ambient_cache_size = previous_maximum_ambient_cache_size;
-                self.handle_error(&e, "set maximum ambient cache size");
-                Some(e)
-            }
+        if result.is_err() {
+            self.maximum_ambient_cache_size = previous_maximum_ambient_cache_size;
         }
+        self.report(result, "set maximum ambient cache size")
     }
 
     pub fn mark_used_resources(&mut self, region_id: i64, resources: &[Resource]) {
@@ -1673,14 +1427,14 @@ impl OfflineDatabase {
         }
     }
 
-    pub(crate) fn pack(&mut self) -> Option<DatabaseError> {
+    pub(crate) fn pack(&mut self) -> DbResult<()> {
         let result = (|| -> DbResult<()> {
             if self.db.is_none() {
                 self.initialize()?;
             }
             self.vacuum()
         })();
-        self.exception_ptr(result, "pack storage")
+        self.report(result, "pack storage")
     }
 
     #[cfg(test)]
@@ -1688,6 +1442,7 @@ impl OfflineDatabase {
         self.autopack = autopack;
     }
 
+    #[cfg(test)]
     pub(crate) fn reopen_database_read_only(&mut self, read_only: bool) {
         if self.read_only == read_only {
             return;
@@ -1701,9 +1456,9 @@ impl OfflineDatabase {
 
     /// Deletes the database file and starts an empty one. Returns the error,
     /// if any.
-    pub(crate) fn reset_database(&mut self) -> Option<DatabaseError> {
+    pub(crate) fn reset_database(&mut self) -> DbResult<()> {
         let result = self.remove_existing().and_then(|()| self.initialize());
-        self.exception_ptr(result, "reset database")
+        self.report(result, "reset database")
     }
 
     fn update_ambient_cache_size(&mut self, stats: &DatabaseSizeChangeStats) -> DbResult<()> {
@@ -1752,8 +1507,124 @@ fn text_or_blob(row: &Row<'_>, index: usize) -> DbResult<Vec<u8>> {
     Ok(row.get_ref(index)?.as_bytes_or_null()?.unwrap_or_default().to_vec())
 }
 
-/// The metadata as a blob to bind. Empty metadata is stored as NULL, as C++
-/// binds an empty vector's null `data()`.
+/// The metadata as a blob to bind. Empty metadata is stored as NULL.
 fn metadata_blob(metadata: &OfflineRegionMetadata) -> Option<&[u8]> {
     if metadata.is_empty() { None } else { Some(metadata.as_slice()) }
+}
+
+/// A table of copies.
+#[derive(Clone, Copy)]
+enum Table {
+    Tiles,
+    Resources,
+}
+
+impl Table {
+    fn name(self) -> &'static str {
+        match self {
+            Table::Tiles => "tiles",
+            Table::Resources => "resources",
+        }
+    }
+
+    /// The table that links the copies to the regions that hold them, and
+    /// its column for a copy's id.
+    fn regions(self) -> (&'static str, &'static str) {
+        match self {
+            Table::Tiles => ("region_tiles", "tile_id"),
+            Table::Resources => ("region_resources", "resource_id"),
+        }
+    }
+}
+
+/// Where the database stores a resource's copy: a tile by its tileset and
+/// coordinates in `tiles`, another resource by its cache key in `resources`.
+enum Stored<'a> {
+    Tile(&'a TileData),
+    Resource { url: String, kind: i32 },
+}
+
+impl<'a> Stored<'a> {
+    fn of(resource: &'a Resource) -> Self {
+        match tile_data(resource) {
+            Some(tile) => Stored::Tile(tile),
+            None => Stored::Resource { url: OfflineDatabase::cache_key(resource), kind: resource.kind as i32 },
+        }
+    }
+
+    fn is_tile(&self) -> bool {
+        matches!(self, Stored::Tile(_))
+    }
+
+    fn table(&self) -> Table {
+        if self.is_tile() { Table::Tiles } else { Table::Resources }
+    }
+
+    /// The columns that identify the row, with their values, in the order of
+    /// `condition`'s parameters.
+    fn key(&self) -> Vec<(&'static str, &dyn ToSql)> {
+        match self {
+            Stored::Tile(tile) => vec![
+                ("url_template", &tile.url_template),
+                ("pixel_ratio", &tile.pixel_ratio),
+                ("x", &tile.x),
+                ("y", &tile.y),
+                ("z", &tile.z),
+            ],
+            Stored::Resource { url, .. } => vec![("url", url)],
+        }
+    }
+
+    /// The condition that selects the row, over `params`.
+    fn condition(&self) -> &'static str {
+        if self.is_tile() { "url_template = ? AND pixel_ratio = ? AND x = ? AND y = ? AND z = ?" } else { "url = ?" }
+    }
+
+    fn params(&self) -> Vec<&dyn ToSql> {
+        self.key().into_iter().map(|(_, value)| value).collect()
+    }
+
+    /// The columns besides the response's that a write of new content sets.
+    fn content(&self) -> Vec<(&'static str, &dyn ToSql)> {
+        match self {
+            Stored::Tile(_) => Vec::new(),
+            Stored::Resource { kind, .. } => vec![("kind", kind)],
+        }
+    }
+}
+
+/// Reads `etag, modified, data, compressed, id`, then the caching columns:
+/// the response, its stored size, and its row id.
+fn read_response(row: &Row<'_>) -> DbResult<(Response, u64, i64)> {
+    let mut response = Response::new();
+    let mut size = 0u64;
+    response.etag = row.get(0)?;
+    response.modified = row.get::<_, Option<i64>>(1)?.map(Timestamp::from_secs);
+    match row.get_ref(2)?.as_bytes_or_null()? {
+        None => response.no_content = true,
+        Some(data) => {
+            size = data.len() as u64;
+            let data = if row.get(3)? { decompress(data).map_err(DatabaseError::Runtime)? } else { data.to_vec() };
+            response.data = Some(Arc::new(data));
+        }
+    }
+    response.caching = read_caching(row, 5)?;
+    Ok((response, size, row.get(4)?))
+}
+
+/// Reads the caching columns from `start` on, which
+/// `OfflineDatabase::caching_columns` selects: the copy's rules, with the
+/// longest `max_stale` of the regions that hold it.
+fn read_caching(row: &Row<'_>, start: usize) -> DbResult<Caching> {
+    let time = |column: usize| -> DbResult<Option<Timestamp>> {
+        Ok(row.get::<_, Option<i64>>(start + column)?.map(Timestamp::from_secs))
+    };
+    let caching = Caching {
+        expires: time(0)?,
+        must_revalidate: row.get(start + 1)?,
+        stale_while_revalidate: time(2)?,
+        stale_if_error: time(3)?,
+    };
+    let max_stale = row.get::<_, Option<i64>>(start + 4)?.unwrap_or_default();
+    Ok(caching.with_max_stale(Duration::from_secs(max_stale.max(0) as u64)))
 }

@@ -1,8 +1,8 @@
 // The requests run in the online core (`OnlineCore`), which owns their state
 // and runs the tasks of its queue (`OnlineQueue`): an `OnlineRequest` per
 // caller request, started by a deadline (the first request at once, then
-// revalidation when the response expires, or retries with backoff after
-// errors), queued while `maximum_concurrent_requests` transfers are active
+// revalidation when a response that came fresh expires, or retries with
+// backoff after errors), queued while `maximum_concurrent_requests` transfers are active
 // (regular priority before low priority, and within a priority by the
 // resource's `RequestOrder`), and performed by the HTTPFileSource.
 // `requests` is keyed by id, so it iterates in id order.
@@ -31,9 +31,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::time::Duration;
 
 use mln_util::chrono::{Timestamp, now};
-use mln_util::constants::{
-    ASSET_PROTOCOL, CLOCK_SKEW_RETRY_TIMEOUT, DEFAULT_MAXIMUM_CONCURRENT_REQUESTS, FILE_PROTOCOL,
-};
+use mln_util::constants::{ASSET_PROTOCOL, DEFAULT_MAXIMUM_CONCURRENT_REQUESTS, FILE_PROTOCOL};
 use mln_util::logging::{Event, Log};
 use mln_util::queue::{Queue, TimedTask};
 use mln_util::time::Instant;
@@ -42,7 +40,7 @@ use mln_vec_map::VecMap;
 use crate::file_source::FileSource;
 use crate::http_file_source::HTTPFileSource;
 use crate::http_header_transform::HttpHeaderTransform;
-use crate::http_timeout::{error_retry_timeout, expiration_timeout};
+use crate::http_timeout::{error_retry_timeout, until};
 use crate::network_status::{NetworkStatus, Status, Subscription};
 use crate::request::{Request, Responder};
 use crate::resource::{Priority, RequestOrder, Resource};
@@ -63,12 +61,6 @@ struct OnlineRequest {
     transforming: Option<u64>,
     /// The task of the deadline that starts it again, while one runs.
     timer: Option<TimedTask>,
-
-    /// Counts the number of times a response was already expired when
-    /// received. We're using this to add a delay when making a new request
-    /// so we don't keep retrying immediately in case of a server serving
-    /// expired tiles.
-    expired_requests: u32,
 
     /// Counts the number of subsequent failed requests. We're using this
     /// value for exponential backoff when retrying requests.
@@ -171,39 +163,6 @@ impl PendingRequests {
     }
 }
 
-fn interpolate_expiration(current: Timestamp, prior: Option<Timestamp>, expired: &mut bool) -> Timestamp {
-    let now = now();
-    if current > now {
-        return current;
-    }
-
-    let Some(prior) = prior else {
-        *expired = true;
-        return current;
-    };
-
-    // Expiring date is going backwards, fallback to exponential backoff.
-    if current < prior {
-        *expired = true;
-        return current;
-    }
-
-    let delta = current.secs_since_epoch() - prior.secs_since_epoch();
-
-    // Server is serving the same expired resource over and over, fallback
-    // to exponential backoff.
-    if delta == 0 {
-        *expired = true;
-        return current;
-    }
-
-    // Assume that either the client or server clock is wrong and try to
-    // interpolate a valid expiration date (from the client POV) observing a
-    // minimum timeout.
-    let minimum = CLOCK_SKEW_RETRY_TIMEOUT.as_secs() as i64;
-    Timestamp::from_secs(now.secs_since_epoch() + delta.max(minimum))
-}
-
 /// The URL without its query string.
 fn sanitize_url(url: &str) -> &str {
     match url.find('?') {
@@ -213,20 +172,22 @@ fn sanitize_url(url: &str) -> &str {
 }
 
 impl OnlineRequest {
-    /// When to request the resource again, or `None` for never.
-    fn update_interval(&self, expires: Option<Timestamp>, connection_backoff: Option<Duration>) -> Option<Duration> {
-        // Calculate a timeout that depends on how many consecutive errors
-        // we've encountered, and on the expiration time, if present.
-        let error_retry = match connection_backoff {
-            Some(backoff) if self.failed_request_reason == Reason::Connection => Some(backoff),
-            _ => error_retry_timeout(self.failed_request_reason, self.failed_requests, self.retry_after),
-        };
-        let minimum = self.resource.minimum_update_interval;
-        let expiration = expiration_timeout(expires, self.expired_requests).map(|e| e.max(minimum));
-        match (expiration, error_retry) {
-            (Some(expiration), Some(error_retry)) => Some(expiration.min(error_retry)),
-            (expiration, error_retry) => expiration.or(error_retry),
+    /// When to request the resource again after a response: after an error,
+    /// its retry's backoff; else when the data expires, if it came fresh. A
+    /// response that came stale, as one without a freshness lifetime,
+    /// isn't asked for again until it is requested anew.
+    fn update_interval(&self, response: &Response, connection_backoff: Option<Duration>) -> Option<Duration> {
+        if response.error.is_some() {
+            return match connection_backoff {
+                Some(backoff) if self.failed_request_reason == Reason::Connection => Some(backoff),
+                _ => error_retry_timeout(self.failed_request_reason, self.failed_requests, self.retry_after),
+            };
         }
+        response
+            .caching
+            .expires
+            .filter(|&expires| expires > now())
+            .map(|expires| until(expires).max(self.resource.minimum_update_interval))
     }
 }
 
@@ -331,7 +292,6 @@ impl OnlineCore {
                 transfer: None,
                 transforming: None,
                 timer: None,
-                expired_requests: 0,
                 failed_requests: 0,
                 failed_request_reason: Reason::Success,
                 retry_after: None,
@@ -482,13 +442,36 @@ impl OnlineCore {
     }
 
     fn activate(&mut self, id: u64) {
+        // With the network forced offline, a request starts again once the
+        // network is back. A requester that has no copy of the resource hears
+        // at once that it failed to connect, which a stale copy it waits for
+        // may stand in for; one that has a copy keeps it meanwhile.
+        if self.network.get() == Status::Offline {
+            let Some(req) = self.requests.get_mut(&id) else { return };
+            req.failed_request_reason = Reason::Connection;
+            req.failed_requests = 1;
+            let resource = &req.resource;
+            let has_copy = resource.prior_data.is_none()
+                && (resource.prior_caching.expires.is_some()
+                    || resource.prior_etag.is_some()
+                    || resource.prior_modified.is_some());
+            if !has_copy {
+                let mut error = Response::new();
+                error.error =
+                    Some(Box::new(ResourceError::new(Reason::Connection, "Online connectivity is disabled.")));
+                let response = req.resource.deliver(error, now());
+                req.responder.send(response);
+            }
+            return;
+        }
         let Some(req) = self.requests.get(&id) else { return };
-        // Force an immediate first request if we don't have an expiration time.
-        let timeout = match req.resource.prior_expires {
-            Some(prior_expires) => req.update_interval(Some(prior_expires), self.connection_backoff),
-            None => Some(Duration::ZERO),
+        // A copy that is still fresh is revalidated once it expires, and not
+        // before the resource's minimum update interval; anything else at once.
+        let timeout = match req.resource.prior_caching.expires {
+            Some(prior_expires) => until(prior_expires).max(req.resource.minimum_update_interval),
+            None => Duration::ZERO,
         };
-        self.schedule(id, timeout);
+        self.schedule(id, Some(timeout));
     }
 
     /// Requests the resource again after `timeout`, or never for `None`.
@@ -529,52 +512,12 @@ impl OnlineCore {
         }
     }
 
-    fn completed(&mut self, id: u64, mut response: Response) {
+    fn completed(&mut self, id: u64, response: Response) {
         let connection_backoff = self.connection_backoff;
         let Some(req) = self.requests.get_mut(&id) else { return };
-        let resource = &mut req.resource;
-        // If we didn't get various caching headers in the response, continue
-        // using the previous values. Otherwise, update the previous values
-        // to the new values.
-        if response.modified.is_none() {
-            response.modified = resource.prior_modified;
-        } else {
-            resource.prior_modified = response.modified;
-        }
-
-        if response.not_modified && resource.prior_data.is_some() {
-            // When the priorData field is set, it indicates that we had to
-            // revalidate the request and that the requestor hasn't gotten
-            // data yet. If we get a 304 response, this means that we have
-            // send the cached data to give the requestor a chance to
-            // actually obtain the data.
-            response.data = resource.prior_data.take();
-            response.not_modified = false;
-        }
-
-        let mut is_expired = false;
-
-        if let Some(expires) = response.expires {
-            let prior = resource.prior_expires.replace(expires);
-            response.expires = Some(interpolate_expiration(expires, prior, &mut is_expired));
-        }
-
-        if is_expired {
-            req.expired_requests += 1;
-        } else {
-            req.expired_requests = 0;
-        }
-
-        let resource = &mut req.resource;
-        if response.etag.is_none() {
-            response.etag = resource.prior_etag.clone();
-        } else {
-            resource.prior_etag = response.etag.clone();
-        }
-
         if let Some(error) = &response.error {
             if error.reason == Reason::NotFound {
-                Log::error(Event::General, format!("The resource `{}` not found", sanitize_url(&resource.url)));
+                Log::error(Event::General, format!("The resource `{}` not found", sanitize_url(&req.resource.url)));
             }
             req.failed_requests += 1;
             req.failed_request_reason = error.reason;
@@ -583,8 +526,24 @@ impl OnlineCore {
             req.failed_requests = 0;
             req.failed_request_reason = Reason::Success;
         }
+        // After an error, the request retries even if a stale copy stands
+        // in for it.
+        let interval = req.update_interval(&response, connection_backoff);
 
-        let interval = req.update_interval(response.expires, connection_backoff);
+        let resource = &mut req.resource;
+        let mut response = resource.deliver(response, now());
+        // A response without validators keeps the copy's.
+        if response.modified.is_none() {
+            response.modified = resource.prior_modified;
+        }
+        if response.etag.is_none() {
+            response.etag.clone_from(&resource.prior_etag);
+        }
+        if response.error.is_none() {
+            // The next revalidation is of this copy.
+            resource.set_prior(&response);
+        }
+
         self.schedule(id, interval);
 
         if let Some(req) = self.requests.get(&id) {
@@ -1039,7 +998,7 @@ mod tests {
 
         let mut response = Response::new();
         response.data = Some(Arc::new(b"tile".to_vec()));
-        response.expires = Some(Timestamp::from_secs(now().secs_since_epoch() + 60));
+        response.caching.expires = Some(Timestamp::from_secs(now().secs_since_epoch() + 60));
         core.transferred(generation, &response);
         assert_eq!(None, core.requests[&1].timer);
         assert_eq!(None, core.queue.next_deadline());

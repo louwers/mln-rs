@@ -101,7 +101,7 @@ pub enum Load<D> {
     Ready(D),
     /// The resource whose data [`StyleSourceType::describe`] turns into the
     /// description.
-    Fetch(Resource),
+    Fetch(Box<Resource>),
 }
 
 /// What describing a source's fetched data found: its description, `None`

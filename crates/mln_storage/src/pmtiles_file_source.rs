@@ -665,7 +665,7 @@ impl State {
                             response.data = Some(Arc::clone(data));
                             response.no_content = false;
                             response.modified = tile_response.modified;
-                            response.expires = tile_response.expires;
+                            response.caching.expires = tile_response.caching.expires;
                             response.etag = tile_response.etag.clone();
 
                             if header.tile_compression == Compression::Gzip {
