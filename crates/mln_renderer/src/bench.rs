@@ -8,8 +8,10 @@
 use std::collections::BTreeSet;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-use mln_map_types::{MapDebugOptions, MapMode, TileLodMode, TransformState};
+use glam::{DMat4, DVec4};
+use mln_map_types::{MapDebugOptions, MapMode, TileLodMode, TransformState, View};
 use mln_storage::Resource;
 use mln_style::Style;
 use mln_style::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
@@ -19,12 +21,14 @@ use mln_text::glyph::{GlyphMap, get_glyph_range};
 use mln_text::glyph_pbf::parse_glyph_pbf;
 use mln_text::tagged_string::font_stack_hash;
 use mln_tile::TileData;
-use mln_tile_id::{CanonicalTileID, OverscaledTileID};
+use mln_tile_id::{CanonicalTileID, OverscaledTileID, UnwrappedTileID};
+use mln_util::constants::EXTENT;
 use mln_util::error::Error;
 use mln_util::geo::LatLng;
 use mln_util::size::Size;
 use mln_util::time::Instant;
 use mln_vec_map::VecSet;
+use parking_lot::Mutex;
 
 use crate::Registry;
 use crate::bucket::LayerFeatureStates;
@@ -42,6 +46,7 @@ use crate::tile::contents::LayoutResult;
 use crate::tile::job::{
     DataInput, DataKey, Job, JobId, JobResult, JobTimes, LayoutJob, Reply, Run, SourceKey, SourceStyle, TileKey,
 };
+use crate::tile::store::TileStore;
 use crate::tile::tile_workers::InlineWorkers;
 use crate::tile::worker_codec::{Encoded, MapCodec, WorkerCodec, read_job_id, read_reply_header};
 use crate::update_parameters::UpdateParameters;
@@ -451,6 +456,143 @@ fn resolve(
     })
 }
 
+/// What a frame showed of the view, as shares of the view's area: the
+/// area of the tiles that the view wants (its ideal cover, inside each
+/// source's bounds), split by what drew there. Each tile counts by its area
+/// on the screen, so a tilted view's far tiles count little. A view on the
+/// globe isn't measured.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Coverage {
+    /// Drawn by the tiles the view wants.
+    pub ideal: f64,
+    /// Drawn by a parent or children of a tile that hasn't loaded.
+    pub stand_in: f64,
+    /// Where nothing drew.
+    pub blank: f64,
+}
+
+/// Whether [`measure_coverage`] was called.
+static MEASURING_COVERAGE: AtomicBool = AtomicBool::new(false);
+
+/// The coverage of the last update.
+static COVERAGE: Mutex<Option<Coverage>> = Mutex::new(None);
+
+/// Measures each update's [`Coverage`] from now on, for [`take_coverage`].
+pub fn measure_coverage() {
+    MEASURING_COVERAGE.store(true, Ordering::Relaxed);
+}
+
+/// The [`Coverage`] of the renderer's last update since the last call, the
+/// average of the sources that had a cover, or `None` when none had: the
+/// style or its sources hadn't loaded, or the view is on the globe.
+pub fn take_coverage() -> Option<Coverage> {
+    COVERAGE.lock().take()
+}
+
+/// Records the coverage of the sources' covers after an update in `view`
+/// (`RenderOrchestrator::update`).
+pub(crate) fn observe_cover(view: &View, store: &TileStore) {
+    if !MEASURING_COVERAGE.load(Ordering::Relaxed) {
+        return;
+    }
+    let coverage = if view.is_globe() {
+        None
+    } else {
+        let projection = view.projection_matrix_with(1, false);
+        let area = |id: &UnwrappedTileID| screen_share(&(projection * view.tile_matrix(id)));
+        let mut sum = Coverage::default();
+        let mut sources = 0u32;
+        for source in store.sources().filter(|source| !source.ideal.is_empty()) {
+            let rendered: Vec<_> =
+                source.rendered().filter(|tile| !tile.hold_for_fade).map(|tile| (*tile.id, tile.tile.id)).collect();
+            let coverage = cover_coverage(&source.ideal, &rendered, area);
+            sum.ideal += coverage.ideal;
+            sum.stand_in += coverage.stand_in;
+            sum.blank += coverage.blank;
+            sources += 1;
+        }
+        (sources > 0).then(|| {
+            let sources = f64::from(sources);
+            Coverage { ideal: sum.ideal / sources, stand_in: sum.stand_in / sources, blank: sum.blank / sources }
+        })
+    };
+    *COVERAGE.lock() = coverage;
+}
+
+/// The coverage of a source whose ideal cover is `ideal` and which draws
+/// `rendered` (each tile where it draws, and which tile it is), where `area`
+/// gives a tile's share of the view.
+fn cover_coverage(
+    ideal: &[OverscaledTileID],
+    rendered: &[(UnwrappedTileID, OverscaledTileID)],
+    area: impl Fn(&UnwrappedTileID) -> f64,
+) -> Coverage {
+    let mut coverage = Coverage::default();
+    for wanted in ideal {
+        let at = wanted.to_unwrapped();
+        let share = area(&at);
+        if let Some((_, key)) = rendered.iter().find(|(id, _)| *id == at) {
+            if key.overscaled_z == wanted.overscaled_z {
+                coverage.ideal += share;
+            } else {
+                coverage.stand_in += share;
+            }
+        } else if rendered.iter().any(|(id, _)| id.canonical.z < at.canonical.z && at.is_child_of(id)) {
+            coverage.stand_in += share;
+        } else {
+            let children: f64 = rendered
+                .iter()
+                .filter(|(id, _)| id.canonical.z > at.canonical.z && id.is_child_of(&at))
+                .map(|(id, _)| area(id))
+                .sum();
+            let children = children.min(share);
+            coverage.stand_in += children;
+            coverage.blank += share - children;
+        }
+    }
+    coverage
+}
+
+/// The share of the view that a tile covers, drawn with `matrix` (from the
+/// tile's units to clip space): its square clipped to the view, and to the
+/// near side of the camera.
+fn screen_share(matrix: &DMat4) -> f64 {
+    let extent = f64::from(EXTENT);
+    let mut polygon: Vec<DVec4> = [(0.0, 0.0), (extent, 0.0), (extent, extent), (0.0, extent)]
+        .into_iter()
+        .map(|(x, y)| *matrix * DVec4::new(x, y, 0.0, 1.0))
+        .collect();
+    // In front of the camera, then inside each edge of the view: w > 0 and
+    // -w <= x, y <= w.
+    let planes: [fn(DVec4) -> f64; 5] = [|p| p.w - 1e-9, |p| p.w - p.x, |p| p.w + p.x, |p| p.w - p.y, |p| p.w + p.y];
+    for plane in planes {
+        polygon = clip(&polygon, plane);
+        if polygon.is_empty() {
+            return 0.0;
+        }
+    }
+    let points: Vec<(f64, f64)> = polygon.iter().map(|p| (p.x / p.w, p.y / p.w)).collect();
+    let twice: f64 = points.iter().zip(points.iter().cycle().skip(1)).map(|(a, b)| a.0 * b.1 - b.0 * a.1).sum();
+    // The view is 2 by 2 in normalized device coordinates.
+    (twice.abs() / 2.0 / 4.0).min(1.0)
+}
+
+/// The part of `polygon` where `inside` isn't negative (Sutherland-Hodgman).
+fn clip(polygon: &[DVec4], inside: fn(DVec4) -> f64) -> Vec<DVec4> {
+    let mut clipped = Vec::with_capacity(polygon.len() + 1);
+    for (i, &point) in polygon.iter().enumerate() {
+        let previous = polygon[(i + polygon.len() - 1) % polygon.len()];
+        let (d0, d1) = (inside(previous), inside(point));
+        if (d0 >= 0.0) != (d1 >= 0.0) {
+            clipped.push(previous + (point - previous) * (d0 / (d0 - d1)));
+        }
+        if d1 >= 0.0 {
+            clipped.push(point);
+        }
+    }
+    clipped
+}
+
 #[cfg(test)]
 mod tests {
     use std::cell::RefCell;
@@ -583,5 +725,54 @@ mod tests {
             };
             assert_eq!(comparable(&crossed), comparable(&direct));
         }
+    }
+
+    /// The matrix that draws a tile's square over the view's `[x0, x1]` by
+    /// `[y0, y1]` in normalized device coordinates.
+    fn square(x0: f64, x1: f64, y0: f64, y1: f64) -> DMat4 {
+        let scale = glam::DVec3::new((x1 - x0) / f64::from(EXTENT), (y1 - y0) / f64::from(EXTENT), 1.0);
+        DMat4::from_translation(glam::DVec3::new(x0, y0, 0.0)) * DMat4::from_scale(scale)
+    }
+
+    #[test]
+    fn a_tile_counts_by_its_area_inside_the_view() {
+        let near = |share: f64, expected: f64| (share - expected).abs() < 1e-9;
+        assert!(near(screen_share(&square(-1.0, 1.0, -1.0, 1.0)), 1.0));
+        assert!(near(screen_share(&square(0.0, 1.0, 0.0, 1.0)), 0.25));
+        assert!(near(screen_share(&square(-3.0, 3.0, -3.0, 3.0)), 1.0), "clipped to the view");
+        assert!(near(screen_share(&square(0.5, 2.5, -1.0, 1.0)), 0.25), "half of it outside");
+        assert!(near(screen_share(&square(2.0, 3.0, 2.0, 3.0)), 0.0), "outside");
+        let mut behind = square(-1.0, 1.0, -1.0, 1.0);
+        behind.w_axis *= -1.0;
+        assert!(near(screen_share(&behind), 0.0), "behind the camera: w is negative");
+    }
+
+    #[test]
+    fn a_cover_splits_into_ideal_stand_in_and_blank() {
+        let tile = |z: u8, x: u32, y: u32| OverscaledTileID::new(z, 0, CanonicalTileID::new(z, x, y));
+        // Four tiles of zoom 2 fill the view, each a quarter of it.
+        let ideal = [tile(2, 0, 0), tile(2, 1, 0), tile(2, 0, 1), tile(2, 1, 1)];
+        let area = |id: &UnwrappedTileID| 0.25 / f64::from(1u32 << (2 * (id.canonical.z - 2)));
+        let drawn = |id: OverscaledTileID| (id.to_unwrapped(), id);
+        let rendered = [
+            // The first, at its own zoom.
+            drawn(tile(2, 0, 0)),
+            // The second's parent, also the third's and the fourth's.
+            drawn(tile(1, 0, 0)),
+        ];
+        let coverage = cover_coverage(&ideal, &rendered, area);
+        assert_eq!(coverage, Coverage { ideal: 0.25, stand_in: 0.75, blank: 0.0 });
+
+        // Without the parent: two of the fourth's children stand in for
+        // half of it, and the second and third are blank.
+        let rendered = [drawn(tile(2, 0, 0)), drawn(tile(3, 2, 2)), drawn(tile(3, 3, 3))];
+        let coverage = cover_coverage(&ideal, &rendered, area);
+        assert_eq!(coverage, Coverage { ideal: 0.25, stand_in: 0.125, blank: 0.625 });
+
+        // A tile of the right place drawn at another zoom, as an overscaled
+        // tile is while its own loads, stands in.
+        let overscaled = OverscaledTileID::new(3, 0, CanonicalTileID::new(2, 0, 0));
+        let coverage = cover_coverage(&ideal[..1], &[drawn(overscaled)], area);
+        assert_eq!(coverage, Coverage { ideal: 0.0, stand_in: 0.25, blank: 0.0 });
     }
 }

@@ -222,8 +222,21 @@ impl<S> Queue<S> {
     /// now and those they post, with `state`, until none waits. Returns
     /// whether any task ran.
     pub fn run_once(&self, state: &mut S) -> bool {
+        self.run_once_by(state, Instant::now())
+    }
+
+    /// [`run_once`](Self::run_once), with the timed tasks whose deadline is
+    /// `now` or before taken as passed, whatever the time is: for a caller
+    /// that keeps time by a clock of its own, such as the benchmarks'
+    /// simulated network, whose deadlines it gives by that clock too.
+    #[cfg(feature = "bench")]
+    #[doc(hidden)]
+    pub fn run_once_at(&self, state: &mut S, now: Instant) -> bool {
+        self.run_once_by(state, now)
+    }
+
+    fn run_once_by(&self, state: &mut S, now: Instant) -> bool {
         let mut ran = false;
-        let now = Instant::now();
         loop {
             let task = {
                 let mut queue = self.inner.state.lock();

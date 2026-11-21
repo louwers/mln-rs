@@ -211,9 +211,22 @@ pub struct OnlineCore {
     /// Replaces the backoff after a connection error, so that a test can
     /// tell the retries it starts apart from the backoff's.
     connection_backoff: Option<Duration>,
+    /// The clock that the deadlines go by, in place of the system's
+    /// (`crate::bench`).
+    #[cfg(feature = "bench")]
+    clock: Option<crate::bench::Clock>,
 }
 
 impl OnlineCore {
+    /// The time that deadlines go by.
+    fn now(&self) -> Instant {
+        #[cfg(feature = "bench")]
+        if let Some(clock) = &self.clock {
+            return clock();
+        }
+        Instant::now()
+    }
+
     fn next_generation(&mut self) -> u64 {
         self.generation += 1;
         self.generation
@@ -416,6 +429,7 @@ impl OnlineCore {
 
     /// Requests the resource again after `timeout`, or never for `None`.
     fn schedule(&mut self, id: u64, timeout: Option<Duration>) {
+        let now = self.now();
         let in_progress = self.pending_requests.contains(id) || self.active_requests.contains(&id);
         let offline = self.network.get() == Status::Offline;
         let Some(req) = self.requests.get_mut(&id) else { return };
@@ -442,7 +456,7 @@ impl OnlineCore {
         }
 
         // A deadline past what `Instant` can hold never comes.
-        if let Some(due) = Instant::now().checked_add(timeout) {
+        if let Some(due) = now.checked_add(timeout) {
             req.timer = Some(self.queue.post_at(due, move |core| core.deadline_passed(id)));
         }
     }
@@ -527,6 +541,9 @@ pub struct OnlineFileSource {
     _reachability: Subscription,
     #[cfg(not(target_family = "wasm"))]
     thread: Option<std::thread::JoinHandle<()>>,
+    /// The caller runs the core, rather than a thread (`crate::bench`).
+    #[cfg(all(feature = "bench", not(target_family = "wasm")))]
+    driven: bool,
 }
 
 #[cfg(target_family = "wasm")]
@@ -612,6 +629,8 @@ impl OnlineFileSource {
             network,
             reachable,
             connection_backoff: None,
+            #[cfg(feature = "bench")]
+            clock: None,
         };
         let source = OnlineFileSource {
             maximum_concurrent_requests: AtomicU32::new(DEFAULT_MAXIMUM_CONCURRENT_REQUESTS),
@@ -620,8 +639,28 @@ impl OnlineFileSource {
             _reachability: reachability,
             #[cfg(not(target_family = "wasm"))]
             thread: None,
+            #[cfg(all(feature = "bench", not(target_family = "wasm")))]
+            driven: false,
         };
         (source, core)
+    }
+
+    /// A source whose core the caller runs on its own thread, as
+    /// [`local`](Self::local)'s, whose transfers go to `transport` and
+    /// whose deadlines go by `clock` (`crate::bench`).
+    #[cfg(all(feature = "bench", not(target_family = "wasm")))]
+    pub(crate) fn driven(
+        network: Arc<NetworkStatus>,
+        transport: Arc<dyn crate::http_file_source::HttpTransport>,
+        clock: crate::bench::Clock,
+    ) -> (Self, OnlineQueue, OnlineCore) {
+        let (mut source, core) = Self::with_core(network);
+        source.driven = true;
+        let mut core = core();
+        core.http_file_source = HTTPFileSource::with_transport(transport);
+        core.clock = Some(clock);
+        let queue = source.queue.clone();
+        (source, queue, core)
     }
 
     /// The most transfers in flight at once; the requests beyond wait.
@@ -667,9 +706,13 @@ impl OnlineFileSource {
         self.queue.post(move |core| core.connection_backoff = Some(backoff));
     }
 
-    /// Whether a thread runs the source's core.
+    /// Whether a thread, or the caller, runs the source's core.
     #[cfg(not(target_family = "wasm"))]
     fn is_running(&self) -> bool {
+        #[cfg(feature = "bench")]
+        if self.driven {
+            return true;
+        }
         self.thread.is_some()
     }
 

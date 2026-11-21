@@ -349,6 +349,9 @@ impl RenderOrchestrator {
             &mut frame,
         );
 
+        #[cfg(feature = "bench")]
+        crate::bench::observe_cover(&self.view, &self.tile_store);
+
         // A synchronous source's tile laid out by its answer isn't in this
         // update's render tiles yet: the next update has it.
         let answered = self.tile_store.drive();

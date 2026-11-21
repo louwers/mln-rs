@@ -159,6 +159,10 @@ pub(crate) struct SourceTiles {
     /// unloads, or the tile could not come back while its symbols show.
     max_content_elevation: f32,
     style: Option<Arc<SourceStyle>>,
+    /// The last update's ideal cover, inside the source's bounds, for the
+    /// benchmarks' measure of what a frame shows (`crate::bench`).
+    #[cfg(feature = "bench")]
+    pub(crate) ideal: Vec<OverscaledTileID>,
 }
 
 /// Whether every tile of the source's minimum zoom is kept loaded: on the
@@ -387,6 +391,8 @@ impl SourceTiles {
             last_subdivision_granularity: SubdivisionGranularitySetting::none(),
             max_content_elevation: 0.0,
             style: None,
+            #[cfg(feature = "bench")]
+            ideal: Vec::new(),
         }
     }
 
@@ -595,6 +601,8 @@ impl SourceTiles {
             // So are the tiles that went on loading in the cache.
             self.cache_release_loading(ctx, |_| false);
             self.rendered.clear();
+            #[cfg(feature = "bench")]
+            self.ideal.clear();
             if self.info.kind != TileKind::Geometry {
                 std::mem::swap(&mut self.masked, &mut self.masked_before);
                 self.masked.clear();
@@ -710,6 +718,13 @@ impl SourceTiles {
                 std::cmp::min(tile_zoom, i32::from(zoom_range.max))
             };
             tile_range = Some(TileRange::from_lat_lng_bounds_range(bounds, zoom_range.min, max_zoom as u8));
+        }
+
+        #[cfg(feature = "bench")]
+        {
+            self.ideal.clear();
+            let inside = |id: &&OverscaledTileID| tile_range.as_ref().is_none_or(|range| range.contains(&id.canonical));
+            self.ideal.extend(ideal_tiles.iter().filter(inside));
         }
 
         // A tile that failed in the cache goes before the cover could take it
