@@ -1,7 +1,10 @@
-//! The buffer ids the engine reserves, the ranges a program's own ids fall
-//! in, and how many buffers, textures and vertex attributes a program can
-//! have. [`Buffer`](crate::shaders::program::Buffer)'s constructors give a
-//! program's buffers their ids.
+//! The ids that the backends bind buffers at, and how many buffers, textures
+//! and vertex attributes a program can have. A program names its buffers by
+//! their [`Buffer`](crate::shaders::program::Buffer)s, whose constructors
+//! give them their ids, and the engine's by theirs
+//! ([`ENGINE_BUFFERS`](crate::shaders::program::ENGINE_BUFFERS)): the ids
+//! here are the layout that the backends' bindings and those constructors
+//! share.
 
 /// The view's uniform block
 /// ([`ViewUBO`](crate::shaders::layer_ubo::ViewUBO)).

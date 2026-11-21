@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use geometry::Point;
 use mln_gfx::gpu::Gpu;
-use mln_gfx::shaders::bindings::PROJECTION_BUFFER_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
+use mln_gfx::shaders::program::PROJECTION_BUFFER;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_map_types::TileProjector;
 use mln_render::draw::{
@@ -24,7 +24,7 @@ use mln_util::error::Error;
 
 use super::bucket::{CircleBinders, CircleBucket, CircleLayoutVertex};
 use super::layout::CircleLayout;
-use super::programs::{ID_CIRCLE_DRAWABLE_UBO, ID_CIRCLE_EVALUATED_PROPS_UBO, ID_CIRCLE_POS_VERTEX_ATTRIBUTE};
+use super::programs::{DRAWABLE, ID_CIRCLE_POS_VERTEX_ATTRIBUTE, PROPS};
 use super::ubo::{CircleDrawableUBO, CircleEvaluatedPropsUBO};
 use super::{Circle, programs};
 use crate::refresh_paint_attributes;
@@ -128,9 +128,9 @@ fn write_uniforms(layer: &EvaluatedLayer<Circle>, writer: &mut UniformWriter<'_,
         pitch_with_map: (*evaluated.circle_pitch_alignment.uniform() == AlignmentType::Map).into(),
         pad1: 0.0,
     };
-    writer.uniform(ID_CIRCLE_EVALUATED_PROPS_UBO, &props);
-    writer.storage(ID_CIRCLE_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);
-    writer.storage(PROJECTION_BUFFER_ID, |uniforms| uniforms.projection);
+    writer.uniform(PROPS.id, &props);
+    writer.storage(DRAWABLE.id, |uniforms| uniforms.draw_ubo);
+    writer.storage(PROJECTION_BUFFER.id, |uniforms| uniforms.projection);
 }
 
 /// A draw's entries in the layer's storage buffers.

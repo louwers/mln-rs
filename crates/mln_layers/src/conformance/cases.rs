@@ -11,34 +11,28 @@ use mln_gfx::gpu::{
     ResourceId, ShaderId, ShaderKey, StencilState, TargetFormats, TextureDesc, TextureFormat, TextureId, TextureRegion,
     TextureUsage, VertexAttribute, VertexBufferLayout, VertexStep, read_texels,
 };
-use mln_gfx::shaders::bindings::{PROJECTION_BUFFER_ID, VIEW_BUFFER_ID};
 use mln_gfx::shaders::layer_ubo::{ProjectionUBO, ViewUBO};
-use mln_gfx::shaders::program::Program;
+use mln_gfx::shaders::program::{PROJECTION_BUFFER, Program, VIEW_BUFFER};
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{ColorBlendFactorType, DepthFunctionType};
 use mln_util::Color;
 use mln_util::size::Size;
 
 use super::{EXTENT, SIZE, buffer, draw, fixed, position_layout, quad, tile_matrix, whole};
-use crate::background::programs::{
-    ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE, ID_BACKGROUND_PROPS_UBO,
-};
+use crate::background::programs::ID_BACKGROUND_POS_VERTEX_ATTRIBUTE;
 use crate::background::ubo::{BackgroundDrawableUnionUBO, BackgroundPropsUBO};
 use crate::fill::programs::{
-    ID_FILL_COLOR_VERTEX_ATTRIBUTE, ID_FILL_DRAWABLE_UBO, ID_FILL_EVALUATED_PROPS_UBO,
-    ID_FILL_OPACITY_VERTEX_ATTRIBUTE, ID_FILL_POS_VERTEX_ATTRIBUTE,
+    ID_FILL_COLOR_VERTEX_ATTRIBUTE, ID_FILL_OPACITY_VERTEX_ATTRIBUTE, ID_FILL_POS_VERTEX_ATTRIBUTE,
 };
 use crate::fill::ubo::{FillDrawableUBO, FillDrawableUnionUBO, FillEvaluatedPropsUBO};
 use crate::fill_extrusion::programs::{
-    ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_DRAWABLE_UBO,
-    ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE,
-    ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_PROPS_UBO,
-    ID_FILL_EXTRUSION_TILE_PROPS_UBO, ID_FILL_EXTRUSION_WALL_VERTICES,
+    ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE,
+    ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE, ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE,
+    ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE,
 };
 use crate::fill_extrusion::ubo::{FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO};
 use crate::heatmap::programs::{
     ID_HEATMAP_COLOR_RAMP_TEXTURE, ID_HEATMAP_IMAGE_TEXTURE, ID_HEATMAP_POS_VERTEX_ATTRIBUTE,
-    ID_HEATMAP_TEXTURE_PROPS_UBO,
 };
 use crate::heatmap::ubo::HeatmapTexturePropsUBO;
 use crate::{background, fill, fill_extrusion, heatmap};
@@ -82,9 +76,9 @@ fn solid_at(gpu: &mut impl Gpu, format: TextureFormat, color: [f32; 4], matrix: 
     let drawable_buffer = buffer(gpu, BufferUsage::Storage, drawable)?;
     let props_buffer = buffer(gpu, BufferUsage::Uniform, props)?;
     let entries = vec![
-        whole(PROJECTION_BUFFER_ID, projection_buffer, projection),
-        whole(ID_BACKGROUND_DRAWABLE_UBO, drawable_buffer, drawable),
-        whole(ID_BACKGROUND_PROPS_UBO, props_buffer, props),
+        whole(PROJECTION_BUFFER.id, projection_buffer, projection),
+        whole(background::programs::DRAWABLE.id, drawable_buffer, drawable),
+        whole(background::programs::PROPS.id, props_buffer, props),
     ];
     let bindings = gpu.create_bindings(&BindingsDesc { label: "background layer", shader, entries: &entries })?;
     let geometry = background_geometry(gpu, shader, quad, indices)?;
@@ -189,8 +183,12 @@ pub fn invalid_calls(gpu: &mut impl Gpu) -> Result<(), GpuError> {
     let unit = (size_of::<BackgroundPropsUBO>() as u64).next_multiple_of(alignment);
     let uniform =
         gpu.create_buffer(&mln_gfx::gpu::BufferDesc { label: "uniform", usage: BufferUsage::Uniform, size: 2 * unit })?;
-    let props =
-        |buffer, offset, size| BindGroupEntry::Buffer { id: ID_BACKGROUND_PROPS_UBO as u32, buffer, offset, size };
+    let props = |buffer, offset, size| BindGroupEntry::Buffer {
+        id: background::programs::PROPS.id as u32,
+        buffer,
+        offset,
+        size,
+    };
     let with = |entry: Option<BindGroupEntry>| -> Vec<BindGroupEntry> {
         frame.entries[..2].iter().copied().chain(entry).collect()
     };
@@ -301,7 +299,7 @@ pub fn foreign_ids<G: Gpu>(first: &mut G, second: &mut G) -> Result<(), GpuError
     let unknown = |result: Result<(), GpuError>, what| matches!(result, Err(GpuError::UnknownId(kind)) if kind == what);
     assert!(unknown(second.write_buffer(theirs.quad, 0, &[0; 4]), "buffer"), "a write to their buffer");
     let entries =
-        [BindGroupEntry::Buffer { id: ID_BACKGROUND_PROPS_UBO as u32, buffer: theirs.quad, offset: 0, size: 4 }];
+        [BindGroupEntry::Buffer { id: background::programs::PROPS.id as u32, buffer: theirs.quad, offset: 0, size: 4 }];
     let bindings = second.create_bindings(&BindingsDesc { label: "theirs", shader: ours.shader, entries: &entries });
     assert!(unknown(bindings.map(drop), "buffer"), "bindings of their buffer");
     let bindings =
@@ -533,9 +531,9 @@ pub fn vertex_layouts(gpu: &mut impl Gpu) -> Result<(), GpuError> {
         label: "fill layer",
         shader,
         entries: &[
-            whole(PROJECTION_BUFFER_ID, projection_buffer, projection),
-            whole(ID_FILL_DRAWABLE_UBO, drawable_buffer, drawable),
-            whole(ID_FILL_EVALUATED_PROPS_UBO, props_buffer, props),
+            whole(PROJECTION_BUFFER.id, projection_buffer, projection),
+            whole(fill::programs::DRAWABLE.id, drawable_buffer, drawable),
+            whole(fill::programs::PROPS.id, props_buffer, props),
         ],
     })?;
 
@@ -636,10 +634,10 @@ fn wall_frame(
     let tile_props_buffer = buffer(gpu, BufferUsage::Storage, tile_props)?;
     let props_buffer = buffer(gpu, BufferUsage::Uniform, props)?;
     let mut entries = vec![
-        whole(PROJECTION_BUFFER_ID, projection_buffer, projection),
-        whole(ID_FILL_EXTRUSION_DRAWABLE_UBO, drawable_buffer, drawable),
-        whole(ID_FILL_EXTRUSION_TILE_PROPS_UBO, tile_props_buffer, tile_props),
-        whole(ID_FILL_EXTRUSION_PROPS_UBO, props_buffer, props),
+        whole(PROJECTION_BUFFER.id, projection_buffer, projection),
+        whole(fill_extrusion::programs::DRAWABLE.id, drawable_buffer, drawable),
+        whole(fill_extrusion::programs::TILE_PROPS.id, tile_props_buffer, tile_props),
+        whole(fill_extrusion::programs::PROPS.id, props_buffer, props),
     ];
     entries.extend_from_slice(more);
     let bindings = gpu.create_bindings(&BindingsDesc { label: "fill extrusion layer", shader, entries: &entries })?;
@@ -788,7 +786,7 @@ pub fn pulled_walls(gpu: &mut impl Gpu) -> Result<(), GpuError> {
     let outline = wall_outline();
     let outline: &[u8] = bytemuck::cast_slice(&outline);
     let outline_buffer = buffer(gpu, BufferUsage::Vertex, outline)?;
-    let outline = whole(ID_FILL_EXTRUSION_WALL_VERTICES, outline_buffer, outline);
+    let outline = whole(fill_extrusion::programs::WALL_VERTICES.id, outline_buffer, outline);
     if !gpu.caps().binds_vertex_buffers {
         let frame = solid(gpu, TextureFormat::Rgba8Unorm, [0.0; 4])?;
         let entries = [frame.entries.as_slice(), &[outline]].concat();
@@ -950,9 +948,9 @@ pub fn resources_in_use<G: Gpu>(gpu: &mut G) -> Result<(), GpuError> {
         targets: RGBA8,
     })?;
     let entries = [
-        whole(VIEW_BUFFER_ID, paint_buffer, paint),
-        whole(ID_HEATMAP_TEXTURE_PROPS_UBO, props_buffer, props),
-        whole(PROJECTION_BUFFER_ID, projection_buffer, projection),
+        whole(VIEW_BUFFER.id, paint_buffer, paint),
+        whole(heatmap::programs::TEXTURE_PROPS.id, props_buffer, props),
+        whole(PROJECTION_BUFFER.id, projection_buffer, projection),
         BindGroupEntry::Texture { id: ID_HEATMAP_IMAGE_TEXTURE as u32, texture: image, sampler },
         BindGroupEntry::Texture { id: ID_HEATMAP_COLOR_RAMP_TEXTURE as u32, texture: image, sampler },
     ];
@@ -1128,10 +1126,10 @@ pub fn host_writes<G: Gpu + ?Sized>(
             label: "host writes",
             shader,
             entries: &[
-                whole(PROJECTION_BUFFER_ID, projection_buffer, projection),
-                whole(ID_BACKGROUND_DRAWABLE_UBO, drawable_buffer, drawable),
+                whole(PROJECTION_BUFFER.id, projection_buffer, projection),
+                whole(background::programs::DRAWABLE.id, drawable_buffer, drawable),
                 BindGroupEntry::Buffer {
-                    id: ID_BACKGROUND_PROPS_UBO as u32,
+                    id: background::programs::PROPS.id as u32,
                     buffer: props,
                     offset: 0,
                     size: props_size,

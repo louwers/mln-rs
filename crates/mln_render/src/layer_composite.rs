@@ -24,8 +24,9 @@ use mln_gfx::gpu::{
     VertexBufferLayout, VertexStep,
 };
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::bindings::{FIRST_VERTEX_BUFFER_ID, PROJECTION_BUFFER_ID};
+use mln_gfx::shaders::bindings::FIRST_VERTEX_BUFFER_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
+use mln_gfx::shaders::program::PROJECTION_BUFFER;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::ColorBlendFactorType;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawModeType};
@@ -46,7 +47,7 @@ use crate::render_static_data::RenderStaticData;
 use crate::shaders::programs;
 use crate::shaders::programs::{
     ID_LAYER_COMPOSITE_BACKDROP_TEXTURE, ID_LAYER_COMPOSITE_IMAGE_TEXTURE, ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE,
-    ID_LAYER_COMPOSITE_UBO,
+    LAYER_COMPOSITE_PROPS,
 };
 use crate::shaders::ubo::{
     LAYER_COMPOSITE_BLEND_COLOR, LAYER_COMPOSITE_BLEND_LUMINOSITY, LAYER_COMPOSITE_BLEND_MULTIPLY,
@@ -469,8 +470,8 @@ impl LayerComposite {
                 let mut entries = Entries::new();
                 for id in 0..FIRST_VERTEX_BUFFER_ID {
                     let (buffer, offset, size) = match id {
-                        ID_LAYER_COMPOSITE_UBO => (uniforms, (slot * stride) as u64, size as u64),
-                        PROJECTION_BUFFER_ID => (projection, 0, projection.size() as u64),
+                        id if id == LAYER_COMPOSITE_PROPS.id => (uniforms, (slot * stride) as u64, size as u64),
+                        id if id == PROJECTION_BUFFER.id => (projection, 0, projection.size() as u64),
                         _ => match global.get(id) {
                             Some(buffer) => (buffer, 0, buffer.size() as u64),
                             None => continue,

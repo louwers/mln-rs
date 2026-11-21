@@ -11,13 +11,30 @@ use super::ubo::{
 };
 use super::{glsl, glsl_es, msl, wgsl};
 
-// The binding ids of the programs: their buffers, textures and vertex
-// attributes.
-pub(crate) const ID_LINE_DRAWABLE_UBO: usize = Stages::Vertex.id();
-pub(crate) const ID_LINE_TILE_PROPS_UBO: usize = Stages::Fragment.id();
-pub(crate) const ID_LINE_EVALUATED_PROPS_UBO: usize = PROPS.id;
+// A layer binds one buffer of `LineDrawableUnionUBO`s and one of
+// `LineTilePropsUnionUBO`s for all its programs, each of which reads its own
+// block of them.
+pub(crate) const DRAWABLE: Buffer =
+    Buffer::storage_of::<LineDrawableUBO, LineDrawableUnionUBO>("drawableVector", Stages::Vertex);
+const GRADIENT_DRAWABLE: Buffer =
+    Buffer::storage_of::<LineGradientDrawableUBO, LineDrawableUnionUBO>("drawableVector", Stages::Vertex);
+const PATTERN_DRAWABLE: Buffer =
+    Buffer::storage_of::<LinePatternDrawableUBO, LineDrawableUnionUBO>("drawableVector", Stages::Vertex);
+const SDF_DRAWABLE: Buffer =
+    Buffer::storage_of::<LineSDFDrawableUBO, LineDrawableUnionUBO>("drawableVector", Stages::Vertex);
+pub(crate) const PATTERN_TILE_PROPS: Buffer =
+    Buffer::storage_of::<LinePatternTilePropsUBO, LineTilePropsUnionUBO>("tilePropsVector", Stages::Fragment);
+const SDF_TILE_PROPS: Buffer =
+    Buffer::storage_of::<LineSDFTilePropsUBO, LineTilePropsUnionUBO>("tilePropsVector", Stages::Fragment);
+const _: () = assert!(
+    DRAWABLE.id == GRADIENT_DRAWABLE.id
+        && DRAWABLE.id == PATTERN_DRAWABLE.id
+        && DRAWABLE.id == SDF_DRAWABLE.id
+        && PATTERN_TILE_PROPS.id == SDF_TILE_PROPS.id
+);
+pub(crate) const PROPS: Buffer = Buffer::uniform::<LineEvaluatedPropsUBO>("props", 0);
 
-const PROPS: Buffer = Buffer::uniform::<LineEvaluatedPropsUBO>("props", 0);
+// The ids of the programs' textures and vertex attributes.
 pub(crate) const ID_LINE_IMAGE_TEXTURE: usize = 0;
 pub(crate) const ID_LINE_DASH_TEXTURE: usize = 1;
 pub(crate) const ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE: usize = 0;
@@ -46,7 +63,7 @@ const LINE_PROPERTIES: &[Property] = &[
 
 pub static LINE: Program = Program {
     name: "line",
-    buffers: &[Buffer::storage_of::<LineDrawableUBO, LineDrawableUnionUBO>("drawableVector", Stages::Vertex), PROPS],
+    buffers: &[DRAWABLE, PROPS],
     attributes: &[
         Attribute { id: ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, format: Short2 },
         Attribute { id: ID_LINE_DATA_VERTEX_ATTRIBUTE, format: UByte4 },
@@ -69,10 +86,7 @@ pub static LINE: Program = Program {
 
 pub static LINE_GRADIENT: Program = Program {
     name: "line-gradient",
-    buffers: &[
-        Buffer::storage_of::<LineGradientDrawableUBO, LineDrawableUnionUBO>("drawableVector", Stages::Vertex),
-        PROPS,
-    ],
+    buffers: &[GRADIENT_DRAWABLE, PROPS],
     attributes: &[
         Attribute { id: ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, format: Short2 },
         Attribute { id: ID_LINE_DATA_VERTEX_ATTRIBUTE, format: UByte4 },
@@ -100,11 +114,7 @@ pub static LINE_GRADIENT: Program = Program {
 
 pub static LINE_PATTERN: Program = Program {
     name: "line-pattern",
-    buffers: &[
-        Buffer::storage_of::<LinePatternDrawableUBO, LineDrawableUnionUBO>("drawableVector", Stages::Vertex),
-        Buffer::storage_of::<LinePatternTilePropsUBO, LineTilePropsUnionUBO>("tilePropsVector", Stages::Fragment),
-        PROPS,
-    ],
+    buffers: &[PATTERN_DRAWABLE, PATTERN_TILE_PROPS, PROPS],
     attributes: &[
         Attribute { id: ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, format: Short2 },
         Attribute { id: ID_LINE_DATA_VERTEX_ATTRIBUTE, format: UByte4 },
@@ -136,11 +146,7 @@ pub static LINE_PATTERN: Program = Program {
 
 pub static LINE_SDF: Program = Program {
     name: "line-sdf",
-    buffers: &[
-        Buffer::storage_of::<LineSDFDrawableUBO, LineDrawableUnionUBO>("drawableVector", Stages::Vertex),
-        Buffer::storage_of::<LineSDFTilePropsUBO, LineTilePropsUnionUBO>("tilePropsVector", Stages::Fragment),
-        PROPS,
-    ],
+    buffers: &[SDF_DRAWABLE, SDF_TILE_PROPS, PROPS],
     attributes: &[
         Attribute { id: ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, format: Short2 },
         Attribute { id: ID_LINE_DATA_VERTEX_ATTRIBUTE, format: UByte4 },
@@ -174,11 +180,7 @@ pub static LINE_SDF: Program = Program {
 
 pub static LINE_GRADIENT_SDF: Program = Program {
     name: "line-gradient-sdf",
-    buffers: &[
-        Buffer::storage_of::<LineSDFDrawableUBO, LineDrawableUnionUBO>("drawableVector", Stages::Vertex),
-        Buffer::storage_of::<LineSDFTilePropsUBO, LineTilePropsUnionUBO>("tilePropsVector", Stages::Fragment),
-        PROPS,
-    ],
+    buffers: &[SDF_DRAWABLE, SDF_TILE_PROPS, PROPS],
     attributes: &[
         Attribute { id: ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, format: Short2 },
         Attribute { id: ID_LINE_DATA_VERTEX_ATTRIBUTE, format: UByte4 },

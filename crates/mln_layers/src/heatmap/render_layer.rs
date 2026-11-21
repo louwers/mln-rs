@@ -9,8 +9,8 @@ use std::sync::Arc;
 use glam::dcamera::rh::proj::opengl::orthographic;
 use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::bindings::PROJECTION_BUFFER_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
+use mln_gfx::shaders::program::PROJECTION_BUFFER;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
@@ -36,8 +36,8 @@ use mln_util::size::Size;
 use super::bucket::{HeatmapBinders, HeatmapBucket, HeatmapLayoutVertex};
 use super::layout::HeatmapLayout;
 use super::programs::{
-    ID_HEATMAP_COLOR_RAMP_TEXTURE, ID_HEATMAP_DRAWABLE_UBO, ID_HEATMAP_EVALUATED_PROPS_UBO, ID_HEATMAP_IMAGE_TEXTURE,
-    ID_HEATMAP_POS_VERTEX_ATTRIBUTE, ID_HEATMAP_TEXTURE_PROPS_UBO,
+    DRAWABLE, ID_HEATMAP_COLOR_RAMP_TEXTURE, ID_HEATMAP_IMAGE_TEXTURE, ID_HEATMAP_POS_VERTEX_ATTRIBUTE, PROPS,
+    TEXTURE_PROPS,
 };
 use super::properties::{HeatmapPaintProperties, default_heatmap_color};
 use super::ubo::{HeatmapDrawableUBO, HeatmapEvaluatedPropsUBO, HeatmapTexturePropsUBO};
@@ -410,9 +410,9 @@ impl HeatmapState {
             intensity: *evaluated.heatmap_intensity.uniform(),
             padding: 0.0,
         };
-        writer.uniform(ID_HEATMAP_EVALUATED_PROPS_UBO, &props);
-        writer.storage(ID_HEATMAP_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);
-        writer.storage(PROJECTION_BUFFER_ID, |uniforms| uniforms.projection);
+        writer.uniform(PROPS.id, &props);
+        writer.storage(DRAWABLE.id, |uniforms| uniforms.draw_ubo);
+        writer.storage(PROJECTION_BUFFER.id, |uniforms| uniforms.projection);
     }
 
     /// Makes the layer's draw of the frame, which colors the heat of the
@@ -494,7 +494,7 @@ impl HeatmapState {
             pad2: 0.0,
             pad3: 0.0,
         };
-        if draws.write_pod(gpu, ID_HEATMAP_TEXTURE_PROPS_UBO, &props, context)
+        if draws.write_pod(gpu, TEXTURE_PROPS.id, &props, context)
             && let Some(texture) = &mut drawing.texture
         {
             texture.objects.drop_bindings();

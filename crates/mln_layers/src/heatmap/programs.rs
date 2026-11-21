@@ -8,11 +8,7 @@ use mln_gfx::shaders::program::{Attribute, Buffer, Program, Property, Sources, S
 use super::ubo::{HeatmapDrawableUBO, HeatmapEvaluatedPropsUBO, HeatmapTexturePropsUBO};
 use super::{glsl, glsl_es, msl, wgsl};
 
-// The binding ids of the programs: their buffers, textures and vertex
-// attributes.
-pub(crate) const ID_HEATMAP_DRAWABLE_UBO: usize = DRAWABLE.id;
-pub(crate) const ID_HEATMAP_EVALUATED_PROPS_UBO: usize = PROPS.id;
-pub(crate) const ID_HEATMAP_TEXTURE_PROPS_UBO: usize = TEXTURE_PROPS.id;
+// The ids of the programs' textures and vertex attributes.
 pub(crate) const ID_HEATMAP_IMAGE_TEXTURE: usize = 0;
 pub(crate) const ID_HEATMAP_COLOR_RAMP_TEXTURE: usize = 1;
 pub(crate) const ID_HEATMAP_POS_VERTEX_ATTRIBUTE: usize = 0;
@@ -21,9 +17,9 @@ pub(crate) const ID_HEATMAP_POS_VERTEX_ATTRIBUTE: usize = 0;
 pub(crate) const ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE: usize = 1;
 pub(crate) const ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE: usize = 2;
 
-const DRAWABLE: Buffer = Buffer::storage::<HeatmapDrawableUBO>("drawableVector", Stages::Vertex);
-const PROPS: Buffer = Buffer::uniform::<HeatmapEvaluatedPropsUBO>("props", 0);
-const TEXTURE_PROPS: Buffer = Buffer::uniform::<HeatmapTexturePropsUBO>("props", 0);
+pub(crate) const DRAWABLE: Buffer = Buffer::storage::<HeatmapDrawableUBO>("drawableVector", Stages::Vertex);
+pub(crate) const PROPS: Buffer = Buffer::uniform::<HeatmapEvaluatedPropsUBO>("props", 0);
+pub(crate) const TEXTURE_PROPS: Buffer = Buffer::uniform::<HeatmapTexturePropsUBO>("props", 0);
 
 pub static HEATMAP: Program = Program {
     name: "heatmap",

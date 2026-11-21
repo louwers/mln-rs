@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use mln_gfx::gpu::{Gpu, TextureFormat};
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::bindings::PROJECTION_BUFFER_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
+use mln_gfx::shaders::program::PROJECTION_BUFFER;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
@@ -34,8 +34,8 @@ use super::bucket::{LineBinders, LineBucket, LineLayoutSpec};
 use super::dashes::{DashCap, DashTextures};
 use super::mesh::LineLayoutVertex;
 use super::programs::{
-    ID_LINE_DASH_TEXTURE, ID_LINE_DATA_VERTEX_ATTRIBUTE, ID_LINE_DRAWABLE_UBO, ID_LINE_EVALUATED_PROPS_UBO,
-    ID_LINE_IMAGE_TEXTURE, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, ID_LINE_TILE_PROPS_UBO,
+    DRAWABLE, ID_LINE_DASH_TEXTURE, ID_LINE_DATA_VERTEX_ATTRIBUTE, ID_LINE_IMAGE_TEXTURE,
+    ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, PATTERN_TILE_PROPS, PROPS,
 };
 use super::properties::LinePaintProperties;
 use super::ubo::{
@@ -791,9 +791,9 @@ impl LineState {
             pad0: 0.0,
             pad1: 0.0,
         };
-        writer.uniform(ID_LINE_EVALUATED_PROPS_UBO, &props);
-        writer.storage(ID_LINE_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);
-        writer.storage(ID_LINE_TILE_PROPS_UBO, |uniforms| uniforms.tile_props);
-        writer.storage(PROJECTION_BUFFER_ID, |uniforms| uniforms.projection);
+        writer.uniform(PROPS.id, &props);
+        writer.storage(DRAWABLE.id, |uniforms| uniforms.draw_ubo);
+        writer.storage(PATTERN_TILE_PROPS.id, |uniforms| uniforms.tile_props);
+        writer.storage(PROJECTION_BUFFER.id, |uniforms| uniforms.projection);
     }
 }

@@ -14,8 +14,8 @@ use glam::dcamera::rh::proj::opengl::orthographic;
 use glam::{DMat4, DVec3};
 use mln_gfx::gpu::{Gpu, ShaderKey};
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::bindings::PROJECTION_BUFFER_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
+use mln_gfx::shaders::program::PROJECTION_BUFFER;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TextureWrapType};
@@ -41,9 +41,8 @@ use mln_util::identity::SimpleIdentity;
 use mln_util::size::Size;
 
 use super::programs::{
-    ID_HILLSHADE_DRAWABLE_UBO, ID_HILLSHADE_EVALUATED_PROPS_UBO, ID_HILLSHADE_IMAGE_TEXTURE,
-    ID_HILLSHADE_POS_VERTEX_ATTRIBUTE, ID_HILLSHADE_PREPARE_DRAWABLE_UBO, ID_HILLSHADE_PREPARE_TILE_PROPS_UBO,
-    ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE, ID_HILLSHADE_TILE_PROPS_UBO,
+    DRAWABLE, ID_HILLSHADE_IMAGE_TEXTURE, ID_HILLSHADE_POS_VERTEX_ATTRIBUTE, ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE,
+    PREPARE_DRAWABLE, PREPARE_TILE_PROPS, PROPS, TILE_PROPS,
 };
 use super::ubo::{
     HillshadeDrawableUBO, HillshadeEvaluatedPropsUBO, HillshadePrepareDrawableUBO, HillshadePrepareTilePropsUBO,
@@ -421,11 +420,11 @@ impl LayerType for Hillshade {
 
         drawing.finish(&mut state.draw_list, gpu, cx.context, |writer| {
             if let Some(Illumination { props, .. }) = &illumination {
-                writer.uniform(ID_HILLSHADE_EVALUATED_PROPS_UBO, props);
+                writer.uniform(PROPS.id, props);
             }
-            writer.storage(ID_HILLSHADE_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);
-            writer.storage(ID_HILLSHADE_TILE_PROPS_UBO, |uniforms| uniforms.tile_props);
-            writer.storage(PROJECTION_BUFFER_ID, |uniforms| uniforms.projection);
+            writer.storage(DRAWABLE.id, |uniforms| uniforms.draw_ubo);
+            writer.storage(TILE_PROPS.id, |uniforms| uniforms.tile_props);
+            writer.storage(PROJECTION_BUFFER.id, |uniforms| uniforms.projection);
         });
     }
 
@@ -530,14 +529,14 @@ impl DemTarget {
             orthographic(0.0, extent, -extent, 0.0, -1.0, 1.0) * DMat4::from_translation(DVec3::new(0.0, -extent, 0.0));
         prepare.bind_no_projection(gpu, context);
         let draw_ubo = HillshadePrepareDrawableUBO { matrix: cast_matrix(&m) };
-        prepare.write_pod(gpu, ID_HILLSHADE_PREPARE_DRAWABLE_UBO, &draw_ubo, context);
+        prepare.write_pod(gpu, PREPARE_DRAWABLE.id, &draw_ubo, context);
         let tile_props = HillshadePrepareTilePropsUBO {
             unpack,
             dimension: [stride as f32, stride as f32],
             zoom: f32::from(tile_id.canonical.z),
             maxzoom: f32::from(maxzoom),
         };
-        prepare.write_pod(gpu, ID_HILLSHADE_PREPARE_TILE_PROPS_UBO, &tile_props, context);
+        prepare.write_pod(gpu, PREPARE_TILE_PROPS.id, &tile_props, context);
 
         DemTarget { render_target, _dem: dem, prepare, generation: contents.dem_generation() }
     }

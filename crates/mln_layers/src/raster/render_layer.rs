@@ -8,8 +8,8 @@ use std::rc::Rc;
 
 use mln_gfx::gpu::{Gpu, ShaderKey};
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::bindings::PROJECTION_BUFFER_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
+use mln_gfx::shaders::program::PROJECTION_BUFFER;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
@@ -30,8 +30,8 @@ use mln_util::hash::{HashMap, HashSet};
 use mln_util::identity::SimpleIdentity;
 
 use super::programs::{
-    ID_RASTER_DRAWABLE_UBO, ID_RASTER_EVALUATED_PROPS_UBO, ID_RASTER_IMAGE0_TEXTURE, ID_RASTER_IMAGE1_TEXTURE,
-    ID_RASTER_POS_VERTEX_ATTRIBUTE, ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE,
+    DRAWABLE, ID_RASTER_IMAGE0_TEXTURE, ID_RASTER_IMAGE1_TEXTURE, ID_RASTER_POS_VERTEX_ATTRIBUTE,
+    ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE, PROPS,
 };
 use super::ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
 use super::{Raster, programs};
@@ -279,9 +279,9 @@ impl RasterState {
                 pad1: 0.0,
                 pad2: 0.0,
             };
-            writer.uniform(ID_RASTER_EVALUATED_PROPS_UBO, &props);
-            writer.storage(ID_RASTER_DRAWABLE_UBO, |(draw_ubo, _)| *draw_ubo);
-            writer.storage(PROJECTION_BUFFER_ID, |(_, projection)| *projection);
+            writer.uniform(PROPS.id, &props);
+            writer.storage(DRAWABLE.id, |(draw_ubo, _)| *draw_ubo);
+            writer.storage(PROJECTION_BUFFER.id, |(_, projection)| *projection);
         });
         if replaced {
             let objects = &mut drawing.objects;

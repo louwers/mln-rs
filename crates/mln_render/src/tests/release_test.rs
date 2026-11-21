@@ -4,8 +4,8 @@ use mln_gfx::gpu::{
     LoadOp, PassDesc, Scissor, ShaderKey, TextureDesc, TextureFormat, TextureRegion, TextureUsage, VertexAttribute,
     VertexBufferLayout, VertexStep,
 };
-use mln_gfx::shaders::bindings::PROJECTION_BUFFER_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
+use mln_gfx::shaders::program::PROJECTION_BUFFER;
 use mln_util::Color;
 use mln_util::size::Size;
 
@@ -39,7 +39,7 @@ fn bindings_and_geometry_go_before_what_they_were_made_of() {
         let shader = context.shader(gpu, &ShaderKey::new(&programs::CLIPPING_MASK, [])).expect("the shader");
         let entries = [
             BindGroupEntry::Buffer {
-                id: PROJECTION_BUFFER_ID as u32,
+                id: PROJECTION_BUFFER.id as u32,
                 buffer: ubo_id,
                 offset: 0,
                 size: projection as u64,

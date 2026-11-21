@@ -23,7 +23,7 @@ use crate::render_sky::EvaluatedSky;
 use crate::render_static_data::RenderStaticData;
 use crate::shaders::programs;
 use crate::shaders::programs::{
-    ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE, ID_ATMOSPHERE_PROPS_UBO, ID_SKY_POS_VERTEX_ATTRIBUTE, ID_SKY_PROPS_UBO,
+    ATMOSPHERE_PROPS, ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE, ID_SKY_POS_VERTEX_ATTRIBUTE, SKY_PROPS,
 };
 use crate::shaders::ubo::{AtmospherePropsUBO, SkyPropsUBO};
 use crate::tile_matrix::bind_no_projection;
@@ -128,7 +128,7 @@ impl SkyPass {
                 sky_horizon_blend: *evaluated.sky_horizon_blend.uniform() * viewport_size.height as f32 * 0.5,
                 sky_blend: projection_transition as f32,
             };
-            sky.write_pod(gpu, ID_SKY_PROPS_UBO, &props, context);
+            sky.write_pod(gpu, SKY_PROPS.id, &props, context);
             bind_no_projection(gpu, &mut sky.frame.uniform_buffers, context);
         } else {
             self.sky = None;
@@ -155,7 +155,7 @@ impl SkyPass {
             camera_position: camera.as_vec3().extend(0.0).to_array(),
             sun_position: sun_position(light, state, atmosphere_blend),
         };
-        atmosphere.write_pod(gpu, ID_ATMOSPHERE_PROPS_UBO, &props, context);
+        atmosphere.write_pod(gpu, ATMOSPHERE_PROPS.id, &props, context);
         bind_no_projection(gpu, &mut atmosphere.frame.uniform_buffers, context);
     }
 

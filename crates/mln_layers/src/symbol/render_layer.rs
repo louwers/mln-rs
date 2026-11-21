@@ -10,9 +10,8 @@ use glam::dcamera::rh::proj::opengl::orthographic;
 use glam::{DMat4, DVec3};
 use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::bindings::PROJECTION_BUFFER_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::program::Program;
+use mln_gfx::shaders::program::{DRAW_PROJECTION_BUFFER, PROJECTION_BUFFER, Program};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_map_types::{Projection, ProjectionData};
 use mln_render::draw::{
@@ -41,13 +40,13 @@ use mln_util::identity::SimpleIdentity;
 
 use super::programs;
 use super::programs::{
-    ID_COLLISION_ANCHOR_POS_VERTEX_ATTRIBUTE, ID_COLLISION_DRAWABLE_UBO, ID_COLLISION_EXTRUDE_VERTEX_ATTRIBUTE,
-    ID_COLLISION_HEIGHT_OFFSET_VERTEX_ATTRIBUTE, ID_COLLISION_PLACED_VERTEX_ATTRIBUTE,
-    ID_COLLISION_POS_VERTEX_ATTRIBUTE, ID_COLLISION_PROJECTION_UBO, ID_COLLISION_SHIFT_VERTEX_ATTRIBUTE,
-    ID_COLLISION_TILE_PROPS_UBO, ID_SYMBOL_DATA_ATTRIBUTE, ID_SYMBOL_DRAWABLE_UBO, ID_SYMBOL_EVALUATED_PROPS_UBO,
-    ID_SYMBOL_FADE_OPACITY_ATTRIBUTE, ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE, ID_SYMBOL_IMAGE_ICON_TEXTURE,
-    ID_SYMBOL_IMAGE_TEXTURE, ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE, ID_SYMBOL_POS_OFFSET_ATTRIBUTE,
-    ID_SYMBOL_PROJECTED_POS_ATTRIBUTE, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE, ID_SYMBOL_TILE_PROPS_UBO,
+    COLLISION_DRAWABLE, COLLISION_TILE_PROPS, DRAWABLE, ID_COLLISION_ANCHOR_POS_VERTEX_ATTRIBUTE,
+    ID_COLLISION_EXTRUDE_VERTEX_ATTRIBUTE, ID_COLLISION_HEIGHT_OFFSET_VERTEX_ATTRIBUTE,
+    ID_COLLISION_PLACED_VERTEX_ATTRIBUTE, ID_COLLISION_POS_VERTEX_ATTRIBUTE, ID_COLLISION_SHIFT_VERTEX_ATTRIBUTE,
+    ID_SYMBOL_DATA_ATTRIBUTE, ID_SYMBOL_FADE_OPACITY_ATTRIBUTE, ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE,
+    ID_SYMBOL_IMAGE_ICON_TEXTURE, ID_SYMBOL_IMAGE_TEXTURE, ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE,
+    ID_SYMBOL_POS_OFFSET_ATTRIBUTE, ID_SYMBOL_PROJECTED_POS_ATTRIBUTE, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE, PROPS,
+    TILE_PROPS,
 };
 use super::ubo::{
     CollisionDrawableUBO, CollisionTilePropsUBO, SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO,
@@ -980,10 +979,10 @@ fn write_uniforms(
         icon_halo_blur: *evaluated.icon_halo_blur.uniform(),
         fade_change: placement_fade,
     };
-    writer.uniform(ID_SYMBOL_EVALUATED_PROPS_UBO, &props);
-    writer.storage(ID_SYMBOL_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);
-    writer.storage(ID_SYMBOL_TILE_PROPS_UBO, |uniforms| uniforms.tile_props);
-    writer.storage(PROJECTION_BUFFER_ID, |uniforms| uniforms.projection);
+    writer.uniform(PROPS.id, &props);
+    writer.storage(DRAWABLE.id, |uniforms| uniforms.draw_ubo);
+    writer.storage(TILE_PROPS.id, |uniforms| uniforms.tile_props);
+    writer.storage(PROJECTION_BUFFER.id, |uniforms| uniforms.projection);
 }
 
 /// Writes the buffers of a collision draw of the tile `tile_id`: its matrix,
@@ -1018,9 +1017,9 @@ fn write_collision_uniforms(
     let tile_props_ubo =
         CollisionTilePropsUBO { extrude_scale, overscale_factor: tile_id.overscale_factor() as f32, pad1: 0.0 };
     let objects = &mut draw.draw.objects;
-    objects.write_pod(gpu, ID_COLLISION_DRAWABLE_UBO, &draw_ubo, context);
-    objects.write_pod(gpu, ID_COLLISION_TILE_PROPS_UBO, &tile_props_ubo, context);
-    objects.write_pod(gpu, ID_COLLISION_PROJECTION_UBO, &to_projection_ubo(&projection), context);
+    objects.write_pod(gpu, COLLISION_DRAWABLE.id, &draw_ubo, context);
+    objects.write_pod(gpu, COLLISION_TILE_PROPS.id, &tile_props_ubo, context);
+    objects.write_pod(gpu, DRAW_PROJECTION_BUFFER.id, &to_projection_ubo(&projection), context);
 }
 
 fn collision_vertex_attributes(context: &mut Context, buffer: &CollisionBuffer) -> VertexAttributeArray {

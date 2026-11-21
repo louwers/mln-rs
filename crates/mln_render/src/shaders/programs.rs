@@ -10,7 +10,6 @@ pub(crate) const ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE: usize = 0;
 
 pub(crate) const ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE: usize = 0;
 
-pub(crate) const ID_TILE_DEBUG_PROPS_UBO: usize = TILE_DEBUG_PROPS.id;
 /// The corner of the quad that draws a segment: x is 0 at the segment's
 /// start and 1 at its end, y picks its side.
 pub(crate) const ID_TILE_DEBUG_CORNER_VERTEX_ATTRIBUTE: usize = 0;
@@ -18,20 +17,17 @@ pub(crate) const ID_TILE_DEBUG_CORNER_VERTEX_ATTRIBUTE: usize = 0;
 pub(crate) const ID_TILE_DEBUG_START_ATTRIBUTE: usize = 1;
 pub(crate) const ID_TILE_DEBUG_END_ATTRIBUTE: usize = 2;
 
-pub(crate) const ID_LAYER_COMPOSITE_UBO: usize = LAYER_COMPOSITE_PROPS.id;
 pub(crate) const ID_LAYER_COMPOSITE_IMAGE_TEXTURE: usize = 0;
 pub(crate) const ID_LAYER_COMPOSITE_BACKDROP_TEXTURE: usize = 1;
 pub(crate) const ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE: usize = 0;
 
-pub(crate) const ID_SKY_PROPS_UBO: usize = SKY_PROPS.id;
-pub(crate) const ID_ATMOSPHERE_PROPS_UBO: usize = ATMOSPHERE_PROPS.id;
 pub(crate) const ID_SKY_POS_VERTEX_ATTRIBUTE: usize = 0;
 pub(crate) const ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE: usize = 0;
 
-const TILE_DEBUG_PROPS: Buffer = Buffer::uniform::<TileDebugPropsUBO>("props", 0);
-const LAYER_COMPOSITE_PROPS: Buffer = Buffer::uniform::<LayerCompositeUBO>("props", 0);
-const SKY_PROPS: Buffer = Buffer::uniform::<SkyPropsUBO>("sky", 0);
-const ATMOSPHERE_PROPS: Buffer = Buffer::uniform::<AtmospherePropsUBO>("atmosphere", 0);
+pub(crate) const TILE_DEBUG_PROPS: Buffer = Buffer::uniform::<TileDebugPropsUBO>("props", 0);
+pub(crate) const LAYER_COMPOSITE_PROPS: Buffer = Buffer::uniform::<LayerCompositeUBO>("props", 0);
+pub(crate) const SKY_PROPS: Buffer = Buffer::uniform::<SkyPropsUBO>("sky", 0);
+pub(crate) const ATMOSPHERE_PROPS: Buffer = Buffer::uniform::<AtmospherePropsUBO>("atmosphere", 0);
 
 /// The tile's clipping mask, drawn into the stencil buffer.
 pub(crate) static CLIPPING_MASK: Program = Program {

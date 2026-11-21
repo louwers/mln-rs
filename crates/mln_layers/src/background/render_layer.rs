@@ -1,7 +1,7 @@
 use mln_gfx::gpu::{Gpu, ShaderKey};
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::bindings::PROJECTION_BUFFER_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
+use mln_gfx::shaders::program::PROJECTION_BUFFER;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
 use mln_map_types::tile_cover::{TileCoverParameters, tile_cover};
@@ -20,10 +20,7 @@ use mln_util::constants::TILE_SIZE_D;
 use mln_util::range::Range;
 
 use super::pattern_atlas::PatternAtlas;
-use super::programs::{
-    ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_IMAGE_TEXTURE, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE,
-    ID_BACKGROUND_PROPS_UBO,
-};
+use super::programs::{DRAWABLE, ID_BACKGROUND_IMAGE_TEXTURE, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE, PROPS};
 use super::ubo::{
     BackgroundDrawableUBO, BackgroundDrawableUnionUBO, BackgroundPatternDrawableUBO, BackgroundPatternPropsUBO,
     BackgroundPropsUBO,
@@ -214,7 +211,7 @@ impl LayerType for Background {
                     pad1: 0.0,
                     pad2: 0.0,
                 };
-                writer.uniform(ID_BACKGROUND_PROPS_UBO, &props);
+                writer.uniform(PROPS.id, &props);
             } else {
                 let props = BackgroundPropsUBO {
                     color: evaluated.background_color.uniform().to_float_array(),
@@ -223,10 +220,10 @@ impl LayerType for Background {
                     pad2: 0.0,
                     pad3: 0.0,
                 };
-                writer.uniform(ID_BACKGROUND_PROPS_UBO, &props);
+                writer.uniform(PROPS.id, &props);
             }
-            writer.storage(ID_BACKGROUND_DRAWABLE_UBO, |(draw_ubo, _)| *draw_ubo);
-            writer.storage(PROJECTION_BUFFER_ID, |(_, projection)| *projection);
+            writer.storage(DRAWABLE.id, |(draw_ubo, _)| *draw_ubo);
+            writer.storage(PROJECTION_BUFFER.id, |(_, projection)| *projection);
         });
     }
 

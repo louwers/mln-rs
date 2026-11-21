@@ -3,7 +3,6 @@
 //! collision boxes and circles, and their sources.
 
 use mln_gfx::gfx_types::AttributeDataType::{Float, Float2, Float3, Float4, Short2, Short4, UShort2, UShort4};
-use mln_gfx::shaders::bindings::PROJECTION_BUFFER_ID;
 use mln_gfx::shaders::program::{Attribute, Buffer, Program, Property, Sources, Stages, Texture};
 
 use super::ubo::{
@@ -11,16 +10,7 @@ use super::ubo::{
 };
 use super::{glsl, glsl_es, msl, wgsl};
 
-// The binding ids of the programs: their buffers, textures and vertex
-// attributes.
-pub(crate) const ID_SYMBOL_DRAWABLE_UBO: usize = DRAWABLE.id;
-pub(crate) const ID_SYMBOL_TILE_PROPS_UBO: usize = TILE_PROPS.id;
-pub(crate) const ID_SYMBOL_EVALUATED_PROPS_UBO: usize = PROPS.id;
-pub(crate) const ID_COLLISION_DRAWABLE_UBO: usize = COLLISION_DRAWABLE.id;
-pub(crate) const ID_COLLISION_TILE_PROPS_UBO: usize = COLLISION_TILE_PROPS.id;
-/// The projection block of a collision draw's own, which its shaders read
-/// as `drawProjection`.
-pub(crate) const ID_COLLISION_PROJECTION_UBO: usize = PROJECTION_BUFFER_ID;
+// The ids of the programs' textures and vertex attributes.
 pub(crate) const ID_SYMBOL_IMAGE_TEXTURE: usize = 0;
 pub(crate) const ID_SYMBOL_IMAGE_ICON_TEXTURE: usize = 1;
 pub(crate) const ID_COLLISION_POS_VERTEX_ATTRIBUTE: usize = 0;
@@ -47,12 +37,13 @@ pub(crate) const ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE: usize = 10;
 /// The symbol's `symbol-height-offset`.
 pub(crate) const ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE: usize = 11;
 
-const DRAWABLE: Buffer = Buffer::storage::<SymbolDrawableUBO>("drawableVector", Stages::Vertex);
-const TILE_PROPS: Buffer = Buffer::storage::<SymbolTilePropsUBO>("tilePropsVector", Stages::Fragment);
-const PROPS: Buffer = Buffer::uniform::<SymbolEvaluatedPropsUBO>("props", 0);
+pub(crate) const DRAWABLE: Buffer = Buffer::storage::<SymbolDrawableUBO>("drawableVector", Stages::Vertex);
+pub(crate) const TILE_PROPS: Buffer = Buffer::storage::<SymbolTilePropsUBO>("tilePropsVector", Stages::Fragment);
+pub(crate) const PROPS: Buffer = Buffer::uniform::<SymbolEvaluatedPropsUBO>("props", 0);
 /// A collision draw's values, which it binds alone.
-const COLLISION_DRAWABLE: Buffer = Buffer::draw_uniform::<CollisionDrawableUBO>("drawable", Stages::Vertex);
-const COLLISION_TILE_PROPS: Buffer = Buffer::draw_uniform::<CollisionTilePropsUBO>("tileProps", Stages::Both);
+pub(crate) const COLLISION_DRAWABLE: Buffer = Buffer::draw_uniform::<CollisionDrawableUBO>("drawable", Stages::Vertex);
+pub(crate) const COLLISION_TILE_PROPS: Buffer =
+    Buffer::draw_uniform::<CollisionTilePropsUBO>("tileProps", Stages::Both);
 
 pub static SYMBOL_ICON: Program = Program {
     name: "symbol-icon",

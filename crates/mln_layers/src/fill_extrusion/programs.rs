@@ -8,15 +8,7 @@ use mln_gfx::shaders::program::{Attribute, Buffer, Program, Property, Sources, S
 use super::ubo::{FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO};
 use super::{glsl, glsl_es, msl, wgsl};
 
-// The binding ids of the programs: their buffers, textures and vertex
-// attributes.
-pub(crate) const ID_FILL_EXTRUSION_DRAWABLE_UBO: usize = DRAWABLE.id;
-pub(crate) const ID_FILL_EXTRUSION_TILE_PROPS_UBO: usize = TILE_PROPS.id;
-pub(crate) const ID_FILL_EXTRUSION_PROPS_UBO: usize = PROPS.id;
-
-// The vertex buffers that the pulled walls read as storage buffers.
-pub(crate) const ID_FILL_EXTRUSION_WALL_VERTICES: usize = WALL_VERTICES.id;
-pub(crate) const ID_FILL_EXTRUSION_WALL_PAINT: usize = WALL_PAINT.id;
+// The ids of the programs' textures and vertex attributes.
 pub(crate) const ID_FILL_EXTRUSION_IMAGE_TEXTURE: usize = 0;
 pub(crate) const ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE: usize = 0;
 pub(crate) const ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE: usize = 1;
@@ -34,13 +26,13 @@ pub(crate) const ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE: usize = 7;
 pub(crate) const ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE: usize = 8;
 pub(crate) const ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE: usize = 9;
 
-const DRAWABLE: Buffer = Buffer::storage::<FillExtrusionDrawableUBO>("drawableVector", Stages::Vertex);
-const TILE_PROPS: Buffer = Buffer::storage::<FillExtrusionTilePropsUBO>("tilePropsVector", Stages::Both);
-// Slot 0's id is the tile properties'.
-const PROPS: Buffer = Buffer::uniform::<FillExtrusionPropsUBO>("props", 1);
+pub(crate) const DRAWABLE: Buffer = Buffer::storage::<FillExtrusionDrawableUBO>("drawableVector", Stages::Vertex);
+pub(crate) const TILE_PROPS: Buffer = Buffer::storage::<FillExtrusionTilePropsUBO>("tilePropsVector", Stages::Both);
+pub(crate) const PROPS: Buffer = Buffer::uniform::<FillExtrusionPropsUBO>("props", 1);
+// The vertex buffers that the pulled walls read as storage buffers.
 /// The bucket's vertices: the position and `decimals_ed` of each.
-const WALL_VERTICES: Buffer = Buffer::vertices("wallVertices", 0, Short4);
-const WALL_PAINT: Buffer = Buffer::vertices("wallPaint", 1, Float);
+pub(crate) const WALL_VERTICES: Buffer = Buffer::vertices("wallVertices", 0, Short4);
+pub(crate) const WALL_PAINT: Buffer = Buffer::vertices("wallPaint", 1, Float);
 
 pub static FILL_EXTRUSION: Program = Program {
     name: "fill-extrusion",

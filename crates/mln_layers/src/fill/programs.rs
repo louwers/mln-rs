@@ -11,11 +11,7 @@ use super::ubo::{
 };
 use super::{glsl, glsl_es, msl, wgsl};
 
-// The binding ids of the programs: their buffers, textures and vertex
-// attributes.
-pub(crate) const ID_FILL_DRAWABLE_UBO: usize = Stages::Vertex.id();
-pub(crate) const ID_FILL_TILE_PROPS_UBO: usize = Stages::Both.id();
-pub(crate) const ID_FILL_EVALUATED_PROPS_UBO: usize = PROPS.id;
+// The ids of the programs' textures and vertex attributes.
 pub(crate) const ID_FILL_IMAGE_TEXTURE: usize = 0;
 pub(crate) const ID_FILL_POS_VERTEX_ATTRIBUTE: usize = 0;
 
@@ -30,20 +26,27 @@ pub(crate) const ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE: usize = 5;
 pub(crate) const ID_FILL_OUTLINE_POS_ATTRIBUTE: usize = 6;
 pub(crate) const ID_FILL_OUTLINE_END_ATTRIBUTE: usize = 7;
 
+// A layer binds one buffer of `FillDrawableUnionUBO`s and one of
+// `FillTilePropsUnionUBO`s for all its programs, each of which reads its own
+// block of them.
+pub(crate) const DRAWABLE: Buffer =
+    Buffer::storage_of::<FillDrawableUBO, FillDrawableUnionUBO>("drawableVector", Stages::Vertex);
+const OUTLINE_DRAWABLE: Buffer =
+    Buffer::storage_of::<FillOutlineDrawableUBO, FillDrawableUnionUBO>("drawableVector", Stages::Vertex);
+const PATTERN_DRAWABLE: Buffer =
+    Buffer::storage_of::<FillPatternDrawableUBO, FillDrawableUnionUBO>("drawableVector", Stages::Vertex);
+pub(crate) const PATTERN_TILE_PROPS: Buffer =
+    Buffer::storage_of::<FillPatternTilePropsUBO, FillTilePropsUnionUBO>("tilePropsVector", Stages::Both);
+const _: () = assert!(DRAWABLE.id == OUTLINE_DRAWABLE.id && DRAWABLE.id == PATTERN_DRAWABLE.id);
+pub(crate) const PROPS: Buffer = Buffer::uniform::<FillEvaluatedPropsUBO>("props", 1);
 // The vertex buffers that the pulled outlines read as storage buffers.
-pub(crate) const ID_FILL_OUTLINE_VERTICES: usize = OUTLINE_VERTICES.id;
-pub(crate) const ID_FILL_OUTLINE_ENDS: usize = OUTLINE_ENDS.id;
-pub(crate) const ID_FILL_OUTLINE_PAINT: usize = OUTLINE_PAINT.id;
-
-// Slot 0's id is the pattern's tile properties'.
-const PROPS: Buffer = Buffer::uniform::<FillEvaluatedPropsUBO>("props", 1);
-const OUTLINE_VERTICES: Buffer = Buffer::vertices("outlineVertices", 0, Short2);
-const OUTLINE_ENDS: Buffer = Buffer::vertices("outlineEnds", 1, Short2);
-const OUTLINE_PAINT: Buffer = Buffer::vertices("outlinePaint", 2, Float);
+pub(crate) const OUTLINE_VERTICES: Buffer = Buffer::vertices("outlineVertices", 0, Short2);
+pub(crate) const OUTLINE_ENDS: Buffer = Buffer::vertices("outlineEnds", 1, Short2);
+pub(crate) const OUTLINE_PAINT: Buffer = Buffer::vertices("outlinePaint", 2, Float);
 
 pub static FILL: Program = Program {
     name: "fill",
-    buffers: &[Buffer::storage_of::<FillDrawableUBO, FillDrawableUnionUBO>("drawableVector", Stages::Vertex), PROPS],
+    buffers: &[DRAWABLE, PROPS],
     attributes: &[
         Attribute { id: ID_FILL_POS_VERTEX_ATTRIBUTE, format: Short2 },
         Attribute { id: ID_FILL_COLOR_VERTEX_ATTRIBUTE, format: Float4 },
@@ -64,10 +67,7 @@ pub static FILL: Program = Program {
 
 pub static FILL_OUTLINE: Program = Program {
     name: "fill-outline",
-    buffers: &[
-        Buffer::storage_of::<FillOutlineDrawableUBO, FillDrawableUnionUBO>("drawableVector", Stages::Vertex),
-        PROPS,
-    ],
+    buffers: &[OUTLINE_DRAWABLE, PROPS],
     attributes: &[
         Attribute { id: ID_FILL_POS_VERTEX_ATTRIBUTE, format: Short2 },
         Attribute { id: ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE, format: Float4 },
@@ -87,11 +87,7 @@ pub static FILL_OUTLINE: Program = Program {
 
 pub static FILL_PATTERN: Program = Program {
     name: "fill-pattern",
-    buffers: &[
-        Buffer::storage_of::<FillPatternDrawableUBO, FillDrawableUnionUBO>("drawableVector", Stages::Vertex),
-        Buffer::storage_of::<FillPatternTilePropsUBO, FillTilePropsUnionUBO>("tilePropsVector", Stages::Both),
-        PROPS,
-    ],
+    buffers: &[PATTERN_DRAWABLE, PATTERN_TILE_PROPS, PROPS],
     attributes: &[
         Attribute { id: ID_FILL_POS_VERTEX_ATTRIBUTE, format: Short2 },
         Attribute { id: ID_FILL_COLOR_VERTEX_ATTRIBUTE, format: Float4 },
@@ -116,11 +112,7 @@ pub static FILL_PATTERN: Program = Program {
 
 pub static FILL_OUTLINE_PATTERN: Program = Program {
     name: "fill-outline-pattern",
-    buffers: &[
-        Buffer::storage_of::<FillPatternDrawableUBO, FillDrawableUnionUBO>("drawableVector", Stages::Vertex),
-        Buffer::storage_of::<FillPatternTilePropsUBO, FillTilePropsUnionUBO>("tilePropsVector", Stages::Both),
-        PROPS,
-    ],
+    buffers: &[PATTERN_DRAWABLE, PATTERN_TILE_PROPS, PROPS],
     attributes: &[
         Attribute { id: ID_FILL_POS_VERTEX_ATTRIBUTE, format: Short2 },
         Attribute { id: ID_FILL_COLOR_VERTEX_ATTRIBUTE, format: Float4 },
@@ -144,10 +136,7 @@ pub static FILL_OUTLINE_PATTERN: Program = Program {
 
 pub static FILL_OUTLINE_INSTANCED: Program = Program {
     name: "fill-outline-instanced",
-    buffers: &[
-        Buffer::storage_of::<FillOutlineDrawableUBO, FillDrawableUnionUBO>("drawableVector", Stages::Vertex),
-        PROPS,
-    ],
+    buffers: &[OUTLINE_DRAWABLE, PROPS],
     attributes: &[Attribute { id: ID_FILL_POS_VERTEX_ATTRIBUTE, format: Short2 }],
     instance_attributes: &[
         Attribute { id: ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE, format: Float4 },
@@ -172,13 +161,7 @@ pub static FILL_OUTLINE_INSTANCED: Program = Program {
 /// storage buffers, by its index.
 pub static FILL_OUTLINE_PULLED: Program = Program {
     name: "fill-outline-pulled",
-    buffers: &[
-        Buffer::storage_of::<FillOutlineDrawableUBO, FillDrawableUnionUBO>("drawableVector", Stages::Vertex),
-        PROPS,
-        OUTLINE_VERTICES,
-        OUTLINE_ENDS,
-        OUTLINE_PAINT,
-    ],
+    buffers: &[OUTLINE_DRAWABLE, PROPS, OUTLINE_VERTICES, OUTLINE_ENDS, OUTLINE_PAINT],
     attributes: &[],
     instance_attributes: &[],
     textures: &[],
@@ -194,11 +177,7 @@ pub static FILL_OUTLINE_PULLED: Program = Program {
 
 pub static FILL_OUTLINE_PATTERN_INSTANCED: Program = Program {
     name: "fill-outline-pattern-instanced",
-    buffers: &[
-        Buffer::storage_of::<FillPatternDrawableUBO, FillDrawableUnionUBO>("drawableVector", Stages::Vertex),
-        Buffer::storage_of::<FillPatternTilePropsUBO, FillTilePropsUnionUBO>("tilePropsVector", Stages::Both),
-        PROPS,
-    ],
+    buffers: &[PATTERN_DRAWABLE, PATTERN_TILE_PROPS, PROPS],
     attributes: &[Attribute { id: ID_FILL_POS_VERTEX_ATTRIBUTE, format: Short2 }],
     instance_attributes: &[
         Attribute { id: ID_FILL_COLOR_VERTEX_ATTRIBUTE, format: Float4 },

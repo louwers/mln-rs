@@ -144,8 +144,7 @@ pub enum Stages {
 
 impl Stages {
     /// The id of a buffer of each draw's values that these stages may read.
-    #[must_use]
-    pub const fn id(self) -> usize {
+    const fn id(self) -> usize {
         match self {
             Stages::Vertex => VERTEX_STORAGE_ID,
             Stages::Fragment => FRAGMENT_STORAGE_ID,

@@ -8,16 +8,11 @@ use mln_gfx::shaders::program::{Attribute, Buffer, Program, Sources, Stages, Tex
 use super::ubo::{ColorReliefDrawableUBO, ColorReliefEvaluatedPropsUBO, ColorReliefTilePropsUBO};
 use super::{glsl, glsl_es, msl, wgsl};
 
-// The binding ids of the programs: their buffers, textures and vertex
-// attributes.
-pub(crate) const ID_COLOR_RELIEF_DRAWABLE_UBO: usize = DRAWABLE.id;
-pub(crate) const ID_COLOR_RELIEF_TILE_PROPS_UBO: usize = TILE_PROPS.id;
-pub(crate) const ID_COLOR_RELIEF_EVALUATED_PROPS_UBO: usize = PROPS.id;
+pub(crate) const DRAWABLE: Buffer = Buffer::storage::<ColorReliefDrawableUBO>("drawableVector", Stages::Vertex);
+pub(crate) const TILE_PROPS: Buffer = Buffer::storage::<ColorReliefTilePropsUBO>("tilePropsVector", Stages::Both);
+pub(crate) const PROPS: Buffer = Buffer::uniform::<ColorReliefEvaluatedPropsUBO>("props", 1);
 
-const DRAWABLE: Buffer = Buffer::storage::<ColorReliefDrawableUBO>("drawableVector", Stages::Vertex);
-const TILE_PROPS: Buffer = Buffer::storage::<ColorReliefTilePropsUBO>("tilePropsVector", Stages::Both);
-// Slot 0's id is the tile properties'.
-const PROPS: Buffer = Buffer::uniform::<ColorReliefEvaluatedPropsUBO>("props", 1);
+// The ids of the programs' textures and vertex attributes.
 pub(crate) const ID_COLOR_RELIEF_IMAGE_TEXTURE: usize = 0;
 pub(crate) const ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE: usize = 1;
 pub(crate) const ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE: usize = 2;

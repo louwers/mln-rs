@@ -29,9 +29,8 @@ use std::mem::offset_of;
 use std::sync::Arc;
 
 use mln_gfx::gpu::{Gpu, ShaderKey};
-use mln_gfx::shaders::bindings::PROJECTION_BUFFER_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::program::Program;
+use mln_gfx::shaders::program::{PROJECTION_BUFFER, Program};
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
 use mln_map_types::View;
@@ -59,12 +58,11 @@ use super::bucket::{
     FillExtrusionStaticVertex, FillExtrusionWallVertex, WALL_CORNERS, WALL_STRIP_INDICES, wall_quad_paint,
 };
 use super::programs::{
-    ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE,
-    ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_DRAWABLE_UBO, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE,
+    DRAWABLE, ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE,
+    ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE,
     ID_FILL_EXTRUSION_IMAGE_TEXTURE, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE,
     ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE, ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE,
-    ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_PROPS_UBO, ID_FILL_EXTRUSION_TILE_PROPS_UBO,
-    ID_FILL_EXTRUSION_WALL_PAINT, ID_FILL_EXTRUSION_WALL_VERTICES,
+    ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, PROPS, TILE_PROPS, WALL_PAINT, WALL_VERTICES,
 };
 use super::properties::FillExtrusionPaintProperties;
 use super::ubo::{FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO};
@@ -602,8 +600,8 @@ impl TileBuilder<'_> {
         }
         if self.walls == Walls::Pulled {
             for draw in draws.iter_mut().filter(|draw| draw.walls) {
-                draw.objects.read_as_storage(ID_FILL_EXTRUSION_WALL_VERTICES, Some(vertices.clone()));
-                draw.objects.read_as_storage(ID_FILL_EXTRUSION_WALL_PAINT, paint.cloned());
+                draw.objects.read_as_storage(WALL_VERTICES.id, Some(vertices.clone()));
+                draw.objects.read_as_storage(WALL_PAINT.id, paint.cloned());
             }
         }
 
@@ -653,7 +651,7 @@ impl TileBuilder<'_> {
             }
             if self.walls == Walls::Pulled && draw.walls {
                 cached.paint_layout = paint_layout(attrs);
-                draw.objects.read_as_storage(ID_FILL_EXTRUSION_WALL_PAINT, paint.clone());
+                draw.objects.read_as_storage(WALL_PAINT.id, paint.clone());
             }
         }
     }
@@ -773,10 +771,10 @@ impl ExtrusionState {
             to_scale: crossfade.to_scale,
             pad2: 0.0,
         };
-        writer.uniform(ID_FILL_EXTRUSION_PROPS_UBO, &props);
-        writer.storage(ID_FILL_EXTRUSION_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);
-        writer.storage(ID_FILL_EXTRUSION_TILE_PROPS_UBO, |uniforms| uniforms.tile_props);
-        writer.storage(PROJECTION_BUFFER_ID, |uniforms| uniforms.projection);
+        writer.uniform(PROPS.id, &props);
+        writer.storage(DRAWABLE.id, |uniforms| uniforms.draw_ubo);
+        writer.storage(TILE_PROPS.id, |uniforms| uniforms.tile_props);
+        writer.storage(PROJECTION_BUFFER.id, |uniforms| uniforms.projection);
     }
 }
 

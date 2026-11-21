@@ -11,21 +11,24 @@ use super::ubo::{
 };
 use super::{glsl, glsl_es, msl, wgsl};
 
-// The binding ids of the programs: their buffers, textures and vertex
-// attributes.
-pub(crate) const ID_BACKGROUND_DRAWABLE_UBO: usize = Stages::Vertex.id();
-pub(crate) const ID_BACKGROUND_PROPS_UBO: usize = PROPS.id;
+// A layer binds one buffer of `BackgroundDrawableUnionUBO`s for both
+// programs, each of which reads its own block of them, and its block of
+// properties at the one id.
+pub(crate) const DRAWABLE: Buffer =
+    Buffer::storage_of::<BackgroundDrawableUBO, BackgroundDrawableUnionUBO>("drawableVector", Stages::Vertex);
+const PATTERN_DRAWABLE: Buffer =
+    Buffer::storage_of::<BackgroundPatternDrawableUBO, BackgroundDrawableUnionUBO>("drawableVector", Stages::Vertex);
+pub(crate) const PROPS: Buffer = Buffer::uniform::<BackgroundPropsUBO>("props", 0);
+const PATTERN_PROPS: Buffer = Buffer::uniform::<BackgroundPatternPropsUBO>("props", 0);
+const _: () = assert!(DRAWABLE.id == PATTERN_DRAWABLE.id && PROPS.id == PATTERN_PROPS.id);
 
-const PROPS: Buffer = Buffer::uniform::<BackgroundPropsUBO>("props", 0);
+// The ids of the programs' textures and vertex attributes.
 pub(crate) const ID_BACKGROUND_IMAGE_TEXTURE: usize = 0;
 pub(crate) const ID_BACKGROUND_POS_VERTEX_ATTRIBUTE: usize = 0;
 
 pub static BACKGROUND: Program = Program {
     name: "background",
-    buffers: &[
-        Buffer::storage_of::<BackgroundDrawableUBO, BackgroundDrawableUnionUBO>("drawableVector", Stages::Vertex),
-        PROPS,
-    ],
+    buffers: &[DRAWABLE, PROPS],
     attributes: &[Attribute { id: ID_BACKGROUND_POS_VERTEX_ATTRIBUTE, format: Short2 }],
     instance_attributes: &[],
     textures: &[],
@@ -39,13 +42,7 @@ pub static BACKGROUND: Program = Program {
 
 pub static BACKGROUND_PATTERN: Program = Program {
     name: "background-pattern",
-    buffers: &[
-        Buffer::storage_of::<BackgroundPatternDrawableUBO, BackgroundDrawableUnionUBO>(
-            "drawableVector",
-            Stages::Vertex,
-        ),
-        Buffer::uniform::<BackgroundPatternPropsUBO>("props", 0),
-    ],
+    buffers: &[PATTERN_DRAWABLE, PATTERN_PROPS],
     attributes: &[Attribute { id: ID_BACKGROUND_POS_VERTEX_ATTRIBUTE, format: Short2 }],
     instance_attributes: &[],
     textures: &[Texture::new("image")],

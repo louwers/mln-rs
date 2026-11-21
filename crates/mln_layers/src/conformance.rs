@@ -30,17 +30,15 @@ use mln_gfx::gpu::{
     PipelineDesc, PipelineId, ResourceId, Scissor, ShaderId, ShaderKey, StencilState, StencilTest, TargetFormats,
     TextureDesc, TextureFormat, TextureId, TextureUsage, VertexAttribute, VertexBufferLayout, VertexStep,
 };
-use mln_gfx::shaders::bindings::PROJECTION_BUFFER_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
+use mln_gfx::shaders::program::PROJECTION_BUFFER;
 use mln_gfx::types::StencilOpType;
 use mln_util::Color;
 use mln_util::size::Size;
 
 pub use self::cases::*;
 use crate::background;
-use crate::background::programs::{
-    ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE, ID_BACKGROUND_PROPS_UBO,
-};
+use crate::background::programs::ID_BACKGROUND_POS_VERTEX_ATTRIBUTE;
 use crate::background::ubo::{BackgroundDrawableUnionUBO, BackgroundPropsUBO};
 
 /// The size of the frame's color texture.
@@ -255,11 +253,11 @@ fn clipped_frame(gpu: &mut impl Gpu) -> Result<ClippedFrame, GpuError> {
     let projection_buffer = buffer(gpu, BufferUsage::Storage, projections)?;
     let drawable_buffer = buffer(gpu, BufferUsage::Storage, drawables)?;
     let props_buffer = buffer(gpu, BufferUsage::Uniform, props)?;
-    let projection_only = vec![whole(PROJECTION_BUFFER_ID, projection_buffer, projections)];
+    let projection_only = vec![whole(PROJECTION_BUFFER.id, projection_buffer, projections)];
     let entries = [
         projection_only[0],
-        whole(ID_BACKGROUND_DRAWABLE_UBO, drawable_buffer, drawables),
-        whole(ID_BACKGROUND_PROPS_UBO, props_buffer, props),
+        whole(background::programs::DRAWABLE.id, drawable_buffer, drawables),
+        whole(background::programs::PROPS.id, props_buffer, props),
     ];
     let bindings =
         gpu.create_bindings(&BindingsDesc { label: "background layer", shader: background_shader, entries: &entries })?;

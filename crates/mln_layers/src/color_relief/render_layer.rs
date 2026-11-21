@@ -10,8 +10,8 @@ use std::sync::Arc;
 
 use mln_gfx::gpu::{Gpu, TextureFormat};
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::bindings::PROJECTION_BUFFER_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
+use mln_gfx::shaders::program::PROJECTION_BUFFER;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
@@ -39,9 +39,9 @@ use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 use super::programs::{
-    ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE, ID_COLOR_RELIEF_DRAWABLE_UBO, ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE,
-    ID_COLOR_RELIEF_EVALUATED_PROPS_UBO, ID_COLOR_RELIEF_IMAGE_TEXTURE, ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE,
-    ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE, ID_COLOR_RELIEF_TILE_PROPS_UBO,
+    DRAWABLE, ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE, ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE,
+    ID_COLOR_RELIEF_IMAGE_TEXTURE, ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE, ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE,
+    PROPS, TILE_PROPS,
 };
 use super::ubo::{ColorReliefDrawableUBO, ColorReliefEvaluatedPropsUBO, ColorReliefTilePropsUBO};
 use super::{ColorRelief, programs};
@@ -531,10 +531,10 @@ impl LayerType for ColorRelief {
         let opacity = *values.evaluated.paint.color_relief_opacity.uniform();
         drawing.finish(draw_list, gpu, cx.context, |writer| {
             let props = ColorReliefEvaluatedPropsUBO { opacity, pad_eval0: 0.0, pad_eval1: 0.0, pad_eval2: 0.0 };
-            writer.uniform(ID_COLOR_RELIEF_EVALUATED_PROPS_UBO, &props);
-            writer.storage(ID_COLOR_RELIEF_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);
-            writer.storage(ID_COLOR_RELIEF_TILE_PROPS_UBO, |uniforms| uniforms.tile_props);
-            writer.storage(PROJECTION_BUFFER_ID, |uniforms| uniforms.projection);
+            writer.uniform(PROPS.id, &props);
+            writer.storage(DRAWABLE.id, |uniforms| uniforms.draw_ubo);
+            writer.storage(TILE_PROPS.id, |uniforms| uniforms.tile_props);
+            writer.storage(PROJECTION_BUFFER.id, |uniforms| uniforms.projection);
         });
     }
 

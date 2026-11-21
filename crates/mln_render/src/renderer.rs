@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, Gpu, LoadOp, Scissor, TargetFormats};
 use mln_gfx::rendering_stats::RenderingStats;
-use mln_gfx::shaders::bindings::VIEW_BUFFER_ID;
 use mln_gfx::shaders::layer_ubo::ViewUBO;
+use mln_gfx::shaders::program::VIEW_BUFFER;
 use mln_gfx::{FrameImage, Handoff};
 use mln_map_types::{FrameProjection, MapDebugOptions};
 use mln_text::GlyphCache;
@@ -551,7 +551,7 @@ impl Encoder {
             pixel_ratio: parameters.frame.pixel_ratio,
             pad1: 0.0,
         };
-        parameters.context.write_global_uniform_buffer(gpu, VIEW_BUFFER_ID, &view);
+        parameters.context.write_global_uniform_buffer(gpu, VIEW_BUFFER.id, &view);
         // What the uploads replaced goes before the passes make what
         // replaces it, such as a draw's geometry.
         parameters.context.destroy_released(gpu);
