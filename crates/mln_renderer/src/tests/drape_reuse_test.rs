@@ -12,8 +12,8 @@ use std::time::Duration;
 use mln_gfx::RendererBackend as _;
 use mln_gfx::frame::FrameTarget;
 use mln_gfx::gpu::{
-    BindingsDesc, BindingsId, BufferDesc, BufferId, Caps, Draw, GeometryDesc, GeometryId, Gpu, GpuError, PassDesc,
-    PipelineDesc, PipelineId, ReadbackId, ResourceId, SamplerId, ShaderId, ShaderKey, TextureDesc, TextureId,
+    BindingsDesc, BindingsId, BufferDesc, BufferId, BufferUsage, Caps, Draw, GeometryDesc, GeometryId, Gpu, GpuError,
+    PassDesc, PipelineDesc, PipelineId, ReadbackId, ResourceId, SamplerId, ShaderId, ShaderKey, TextureDesc, TextureId,
     TextureRegion,
 };
 use mln_gfx::offscreen_target::OffscreenTarget;
@@ -158,6 +158,8 @@ impl Tiles {
 enum Fail {
     /// Beginning a drape's pass.
     DrapePasses,
+    /// Making an index buffer.
+    IndexBuffers,
 }
 
 /// A GPU that fails what `fail` says, as a device out of memory would, and
@@ -177,7 +179,10 @@ impl Gpu for Failing<'_> {
         self.gpu.caps()
     }
     fn create_buffer(&mut self, desc: &BufferDesc<'_>) -> Result<BufferId, GpuError> {
-        self.gpu.create_buffer(desc)
+        match (self.fail, desc.usage) {
+            (Fail::IndexBuffers, BufferUsage::Index) => failed(),
+            _ => self.gpu.create_buffer(desc),
+        }
     }
     fn write_buffer(&mut self, buffer: BufferId, offset: u64, data: &[u8]) -> Result<(), GpuError> {
         self.gpu.write_buffer(buffer, offset, data)
@@ -1137,6 +1142,26 @@ fn a_frame_whose_drapes_fail_to_draw_asks_for_the_next_which_draws_them() {
         fails_then_draws(&mut map).into_iter().filter(|&tile| sides(&mut map).contains(&(tile, 512))).collect();
     assert!(!lowered.is_empty(), "{:?}", sides(&mut map));
     assert!(map.frame().1.is_empty(), "the drapes are drawn again once only");
+}
+
+/// A draw whose indexes failed to upload fails, in any build, and draws
+/// once they upload: here the surface's, and those of drapes drawn again.
+#[test]
+fn a_draw_whose_indexes_failed_to_upload_fails_and_draws_once_they_do() {
+    let mut map = DrapedMap::new(Tiles::default());
+    map.fail = Some(Fail::IndexBuffers);
+    map.settle();
+    map.fail = None;
+    line_color(&mut map, "green");
+    map.settle();
+    frames_until_full(&mut map);
+    let image = map.target.read_image(map.backend.gpu()).expect("the frame's pixels").data;
+    let mut new = DrapedMap::new(Tiles::default());
+    new.style = Arc::clone(&map.style);
+    new.settle();
+    frames_until_full(&mut new);
+    let new_image = new.target.read_image(new.backend.gpu()).expect("the frame's pixels").data;
+    assert!(new_image == image, "a new map draws other pixels");
 }
 
 /// [`STYLE`]'s draped layers, removed, and a circle in their place.

@@ -341,14 +341,8 @@ impl DrawObjects {
             return Ok(());
         };
         let context = &mut *parameters.context;
-        let index_buffer = self.indexes.buffer(context);
-        debug_assert!(
-            index_buffer.is_some(),
-            "a draw of {} draws indexes it didn't upload",
-            self.shader.program().name
-        );
         // A draw whose indexes failed to upload draws nothing, and fails.
-        let Some(index_buffer) = index_buffer else {
+        let Some(index_buffer) = self.indexes.buffer(context) else {
             return Err(GpuError::Invalid("its indexes aren't uploaded".to_owned()));
         };
 
