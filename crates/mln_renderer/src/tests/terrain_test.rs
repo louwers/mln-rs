@@ -1146,3 +1146,24 @@ impl Elevation for Uniform {
         self.at.map(|at| (at, at))
     }
 }
+
+/// A ray that crosses the antimeridian can sample a hair west of a world
+/// copy, where `x - x.floor()` rounds to the copy's east edge: the surface
+/// there is the first column's of the next copy, as on the edge itself.
+#[test]
+fn the_surface_a_hair_west_of_a_copy_is_its_neighbors() {
+    let mut load = TerrainLoad::new((0, 14), 1.0);
+    load.transform.jump_to(&CameraOptions { center: Some(LatLng::new(45.0, -179.99).unwrap()), ..Default::default() });
+    load.frame();
+    load.answer(|_| Some(terrarium_slope()));
+    let ground = snapshot(&load, 1.0);
+    let y = mln_util::projection::Projection::project(
+        &LatLng::new(45.0, -179.99).unwrap(),
+        1.0 / mln_util::constants::TILE_SIZE_D,
+    )
+    .y;
+    let edge = ground.surface_at(DVec2::new(0.0, y));
+    assert!(edge.is_some(), "the first column drew");
+    assert_eq!(edge, ground.surface_at(DVec2::new(-1e-17, y)));
+    assert_eq!(ground.surface_at(DVec2::new(-1.0, y)), ground.surface_at(DVec2::new(-1.0 - 1e-17, y)));
+}

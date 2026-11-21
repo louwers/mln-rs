@@ -44,13 +44,23 @@ pub(crate) fn dem_zoom(z: u8, dem_zooms: Range<u8>) -> Option<u8> {
     (zoom <= z && zoom <= dem_zooms.max).then_some(zoom)
 }
 
+/// The world copy of `x`, a Web Mercator x at zoom 0, and where it is
+/// across that copy, from 0 up to but not including 1.
+pub(crate) fn world_copy(x: f64) -> (f64, f64) {
+    let copy = x.floor();
+    let across = x - copy;
+    // A hair west of a copy's west edge rounds to its east edge, which is
+    // the next copy's west edge.
+    if across < 1.0 { (copy, across) } else { (copy + 1.0, 0.0) }
+}
+
 /// Where `tile` has the point `world` of the world, in units of the world's
 /// width, y down, from 0 to 1 across the tile; `None` outside it. Every
 /// world copy of the tile has it.
 pub(crate) fn place_in(tile: CanonicalTileID, world: [f64; 2]) -> Option<[f64; 2]> {
     let [x, y] = world;
     let tiles = f64::from(1u32 << tile.z);
-    let u = (x - x.floor()) * tiles - f64::from(tile.x);
+    let u = world_copy(x).1 * tiles - f64::from(tile.x);
     let v = y.clamp(0.0, 1.0) * tiles - f64::from(tile.y);
     ((0.0..1.0).contains(&u) && (0.0..=1.0).contains(&v)).then_some([u, v])
 }
@@ -325,4 +335,23 @@ pub(crate) fn cover_tiles(view: &View, dem_tile_size: u16, ranges: &ElevationRan
     let mut parameters = TileCoverParameters::new(view.clone());
     parameters.requested_zoom = Some(zoom + (constants::TILE_SIZE_D / f64::from(tile_size)).log2());
     terrain_tile_cover(&parameters, z, TERRAIN_ZOOM_RANGE, None, ranges)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A point a hair west of a world copy's west edge, which `x - x.floor()`
+    /// rounds to the copy's east edge, is on the first column of the next
+    /// copy, as the point on the edge is.
+    #[test]
+    fn a_point_a_hair_west_of_a_copy_is_on_the_next_copys_first_column() {
+        for x in [-1e-17, -1.0 - 1e-17] {
+            for z in [1, 3] {
+                let last = (1u32 << z) - 1;
+                assert_eq!(Some([0.0, 0.5]), place_in(CanonicalTileID::new(z, 0, 0), [x, 0.5 / f64::from(1u32 << z)]));
+                assert_eq!(None, place_in(CanonicalTileID::new(z, last, 0), [x, 0.5 / f64::from(1u32 << z)]));
+            }
+        }
+    }
 }

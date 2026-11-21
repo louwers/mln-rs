@@ -11,7 +11,7 @@ use mln_util::geo::LatLng;
 use mln_util::hash::HashMap;
 use mln_util::image::PremultipliedImage;
 
-use crate::terrain::cover::{TerrainCover, dem_bucket, place_in};
+use crate::terrain::cover::{TerrainCover, dem_bucket, place_in, world_copy};
 use crate::tile::source_tiles::SourceTiles;
 
 /// The DEM a terrain tile drew with.
@@ -173,7 +173,7 @@ impl TerrainElevation {
         if !world.x.is_finite() {
             return None;
         }
-        let x = world.x - world.x.floor();
+        let (_, x) = world_copy(world.x);
         self.zooms.iter().find_map(|&z| {
             let tiles = f64::from(1u32 << z);
             let (u, v) = (x * tiles, world.y * tiles);
