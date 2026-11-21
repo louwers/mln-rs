@@ -522,3 +522,38 @@ impl TilesetLoad {
         cx.end_load();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use mln_util::tileset::Scheme;
+
+    use super::*;
+    use crate::tileset::VectorKind;
+
+    fn load(url: &str) -> TilesetLoad {
+        TilesetLoad {
+            resource: Resource::tile(url, 1.0, 0, 0, 0, Scheme::XYZ, LoadingMethod::CacheOnly),
+            fetch: Fetch::Idle,
+        }
+    }
+
+    /// A tile of another world copy takes the validators of the copy's load
+    /// of the same resource, as a cache's answer.
+    #[test]
+    fn a_world_copy_takes_the_validators() {
+        let origin = TilesetOrigin::<VectorKind> { tileset: None, data: None, kind: PhantomData };
+        let mut from = load("a");
+        from.resource.prior_modified = Some(Timestamp::from_secs(1));
+        from.resource.prior_expires = Some(Timestamp::from_secs(2));
+        from.resource.prior_etag = Some("etag".to_owned());
+        from.resource.prior_data = Some(Arc::new(vec![1]));
+        let mut copy = load("a");
+        assert!(origin.take_world_copy(&mut copy, &from));
+        let (resource, from_resource) = (&copy.resource, &from.resource);
+        assert_eq!(resource.prior_modified, from_resource.prior_modified);
+        assert_eq!(resource.prior_expires, from_resource.prior_expires);
+        assert_eq!(resource.prior_etag, from_resource.prior_etag);
+        assert_eq!(resource.prior_data, from_resource.prior_data);
+        assert!(!origin.take_world_copy(&mut load("b"), &from));
+    }
+}
