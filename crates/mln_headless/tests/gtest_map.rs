@@ -2677,6 +2677,31 @@ fn disabled_placed_symbol_data() {
     );
 }
 
+// Port-only: a tile mode map's renderer gives the data of the symbols its
+// placement placed once asked to collect it, through the symbol layer
+// type's placement pass.
+#[test]
+fn placed_symbol_data_of_a_tile() {
+    use mln_rs::mln_layers::symbol::placement::{PlacedSymbols as _, SymbolPlacement};
+
+    let test = MapTest::with_mode(1.0, MapMode::Tile);
+    test.load_json(
+        r#"{
+        "version": 8,
+        "sources": {"point": {"type": "geojson", "data": {"type": "Point", "coordinates": [0, 0]}}},
+        "layers": [{"id": "symbol", "type": "symbol", "source": "point", "layout": {"icon-image": "marker"}}]
+    }"#,
+    );
+    test.map().edit_style(|style| style.apply(Edit::AddImage(style_image("marker", red_image(16, 16), 1.0)))).unwrap();
+    assert!(test.frontend().renderer().placement::<SymbolPlacement>().is_some());
+    test.frontend().renderer().collect_placed_symbol_data(true);
+    test.render();
+    let placed = test.frontend().renderer().placed_symbols_data();
+    assert_eq!(placed.len(), 1, "{placed:?}");
+    assert!(placed[0].icon_placed);
+    assert_eq!(placed[0].layer, "symbol");
+}
+
 // gtest: Map.VolatileSource
 #[test]
 fn volatile_source() {
