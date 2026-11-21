@@ -1,3 +1,0 @@
-{
-  "gljs/render-tests/terrain/symbol-height-offset-occluded-ground": "Not a standing layer's difference: the aircraft draws where GL JS draws it, and hiding what stands behind the ground changes no pixel. 481 of 262,144 px differ on RADV (WebGPU and Vulkan), 484 (OpenGL), 529 on Mesa 26.0.8's lavapipe and 520 on Mesa 26.2.5's llvmpipe, all along thin bright lines that the hillshade drape draws across slopes, where its tiles meet, which GL JS's image doesn't have; its DEM source declares tileSize 256 for tiles/terrain-shading's 512 px tiles"
-}

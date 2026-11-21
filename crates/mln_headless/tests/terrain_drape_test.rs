@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use mln_headless::HeadlessFrontend;
 use mln_map::{BoundOptions, Map, MapMode, MapOptions, ViewportMode};
+use mln_storage::resource::TileData;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{Kind, Resource, Response};
 use mln_util::error::ErrorKind;
@@ -173,9 +174,20 @@ fn fogged_style(blue: Blue) -> String {
 }
 
 /// The still image of `style` on the harness's device
-/// ([`mln_headless::harness_device`]), and the bytes of the textures that
-/// drew it; `None` where the machine has no such device.
+/// ([`mln_headless::harness_device`]), over DEM tiles at sea level, and the
+/// bytes of the textures that drew it; `None` where the machine has no such
+/// device.
 fn render(style: &str, viewport_mode: ViewportMode) -> Option<(PremultipliedImage, i32)> {
+    let dem = Arc::new(sea_level_png());
+    render_over(style, viewport_mode, move |_| dem.to_vec())
+}
+
+/// [`render`] over the DEM tiles that `dem` makes.
+fn render_over(
+    style: &str,
+    viewport_mode: ViewportMode,
+    dem: impl Fn(&TileData) -> Vec<u8> + Send + Sync + 'static,
+) -> Option<(PremultipliedImage, i32)> {
     let size = Size::new(SIDE, SIDE);
     let run_loop = Queue::new();
     let pool = Pool::new(4);
@@ -190,10 +202,9 @@ fn render(style: &str, viewport_mode: ViewportMode) -> Option<(PremultipliedImag
     let mut frontend =
         HeadlessFrontend::with_device(device, size, 1.0, Arc::default(), &run_loop, &pool).expect("a frontend");
     let file_source = Arc::new(StubFileSource::new(ResponseType::Synchronous));
-    let dem = Arc::new(sea_level_png());
-    file_source.set_response(Kind::Tile, move |_: &Resource| {
+    file_source.set_response(Kind::Tile, move |resource: &Resource| {
         let mut response = Response::new();
-        response.data = Some(Arc::clone(&dem));
+        response.data = Some(Arc::new(dem(resource.tile_data.as_ref().expect("a tile"))));
         Some(response)
     });
     let options = MapOptions { map_mode: MapMode::Static, size, pixel_ratio: 1.0, viewport_mode, ..Default::default() };
@@ -353,4 +364,55 @@ fn fog_leaves_transparent_ground_transparent() {
         assert_eq!([0; 4], pixel(&undraped, x, y), "no ground at {x}, {y}");
         assert_eq!([0; 4], pixel(&transparent, x, y), "the transparent ground at {x}, {y}");
     }
+}
+
+/// A DEM tile of 256 pixels a side, in the Mapbox encoding, of a plane that
+/// rises to the north, 1 m for every 4 m of the world's width at the equator,
+/// from 1000 m at the equator.
+fn northward_slope_png(tile: &TileData) -> Vec<u8> {
+    const EQUATOR_TO_POLE: f64 = 40_075_016.685_578_49 / 2.0;
+    let tiles = f64::from(1u32 << tile.z);
+    let mut image = PremultipliedImage::new(Size::new(256, 256));
+    for (index, pixel) in image.data.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+        let y = (f64::from(tile.y) + ((index / 256) as f64 + 0.5) / 256.0) / tiles;
+        let height = 1000.0 + (0.5 - y) * EQUATOR_TO_POLE * 2.0 / 4.0;
+        let value = ((height + 10000.0) * 10.0).round() as u32;
+        *pixel = [(value >> 16) as u8, (value >> 8) as u8, value as u8, 255];
+    }
+    mln_image::encode_png(&image)
+}
+
+/// A hillshade over terrain, seen past its DEM's deepest zoom, shades a plane
+/// slope evenly: no line shows where two of its DEM tiles meet.
+#[test]
+fn a_hillshade_over_terrain_shows_no_seam_where_its_tiles_meet() {
+    let style = r#"{
+        "version": 8,
+        "center": [0.001, 0.001],
+        "zoom": 16,
+        "pitch": 70,
+        "terrain": {"source": "dem"},
+        "sources": {
+            "dem": {"type": "raster-dem", "tiles": ["dem/{z}/{x}/{y}.png"], "tileSize": 256, "minzoom": 13, "maxzoom": 13}
+        },
+        "layers": [
+            {"id": "background", "type": "background", "paint": {"background-color": "white"}},
+            {"id": "hillshade", "type": "hillshade", "source": "dem"}
+        ]
+    }"#;
+    let Some((image, _)) = render_over(style, ViewportMode::Default, northward_slope_png) else {
+        return;
+    };
+    // The slope rises toward the horizon and fills the image.
+    let shade = pixel(&image, SIDE / 2, SIDE - 1);
+    let uneven: Vec<(u32, u32)> = (0..SIDE)
+        .flat_map(|y| (0..SIDE).map(move |x| (x, y)))
+        .filter(|&(x, y)| pixel(&image, x, y).iter().zip(shade).any(|(a, b)| a.abs_diff(b) > 2))
+        .collect();
+    assert!(
+        uneven.is_empty(),
+        "{} pixels shade the slope otherwise than {shade:?}, as at {:?}",
+        uneven.len(),
+        uneven.first()
+    );
 }

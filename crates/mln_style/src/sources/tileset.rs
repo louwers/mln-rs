@@ -55,7 +55,11 @@ impl TilesetKind for RasterDemKind {
         layer_kind: SourceKind::RasterDem,
         from_json: true,
         round_zoom: true,
-        overscale: true,
+        // A DEM tile is the same at any zoom it draws at, and takes its
+        // border only from neighbours whose id has its overscaled zoom: a
+        // cover overscaled to several zooms, as over terrain, would leave
+        // hillshade seams where they meet.
+        overscale: false,
         prefetch: true,
     };
 }
