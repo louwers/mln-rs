@@ -19,8 +19,6 @@ use mln_rs::mln_gfx::gpu::{
     TargetFormats, TextureDesc, TextureFormat, TextureId, TextureRegion, TextureUsage, VertexAttribute,
     VertexBufferLayout, VertexStep, read_texels,
 };
-use mln_rs::mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_rs::mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
 use mln_rs::mln_gfx::texture2d::SamplerState;
 use mln_rs::mln_util::Color;
 use mln_rs::mln_util::size::Size;
@@ -92,10 +90,6 @@ fn quads(gpu: &mut impl Gpu) -> Result<(), GpuError> {
     let block = QuadUBO { size: [1.0, 1.0], tint: [1.0, 1.0, 0.6, 1.0], ..QuadUBO::default() };
     let block = bytemuck::bytes_of(&block);
     let block_buffer = buffer(gpu, BufferUsage::Uniform, block)?;
-    // GL ES declares the projection block in every vertex stage.
-    let projection = ProjectionUBO::default();
-    let projection = bytemuck::bytes_of(&projection);
-    let projection_buffer = buffer(gpu, BufferUsage::Storage, projection)?;
 
     let shader = gpu.create_shader(&ShaderKey::new(&QUAD, []))?;
     let layout = |id, step| VertexBufferLayout {
@@ -121,7 +115,6 @@ fn quads(gpu: &mut impl Gpu) -> Result<(), GpuError> {
     let whole = |id, buffer, data: &[u8]| BindGroupEntry::Buffer { id, buffer, offset: 0, size: data.len() as u64 };
     let entries = [
         whole(ID_QUAD_UBO as u32, block_buffer, block),
-        whole(ID_PROJECTION_UBO as u32, projection_buffer, projection),
         BindGroupEntry::Texture { id: 0, texture: image, sampler },
     ];
     let bindings = gpu.create_bindings(&BindingsDesc { label: "quads", shader, entries: &entries })?;

@@ -148,7 +148,8 @@ impl Buffer {
 /// The view's block, which the engine binds for every draw.
 pub const VIEW_BUFFER: Buffer = Buffer::uniform::<ViewUBO>(ID_VIEW_UBO);
 
-/// The projection block, which a layer binds for its draws.
+/// The projection block, which a layer binds for the draws of a program
+/// whose vertex stage projects with it.
 pub const PROJECTION_BUFFER: Buffer = Buffer::storage::<ProjectionUBO>(ID_PROJECTION_UBO);
 
 /// A vertex or instance attribute of a program.

@@ -37,9 +37,10 @@ use crate::shaders::source::{Named, Stage, expand as expand_properties, from_uni
 ///
 /// A stage compiles from `#version 300 es`, or `#version 330 core` on
 /// desktop OpenGL, the program's defines, the blocks of the engine's
-/// buffers and the program's that the stage names a member of, and the
-/// projection block in a vertex stage, the backend's prelude of that stage,
-/// and the shader's.
+/// buffers and the program's that the stage names a member of, the
+/// backend's prelude of that stage, and the shader's. A vertex stage that
+/// names a member of the projection block or one of the backend's
+/// projection helpers also has the block and the helpers.
 #[derive(Debug)]
 pub struct Glsl {
     /// The vertex shader.

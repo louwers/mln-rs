@@ -111,7 +111,23 @@ vec2 get_pattern_pos(const vec2 pixel_coord_upper, const vec2 pixel_coord_lower,
     vec2 offset = mod(mod(mod(pixel_coord_upper, pattern_size) * 256.0, pattern_size) * 256.0 + pixel_coord_lower, pattern_size);
     return (tile_units_to_pixels * pos + offset) / pattern_size;
 }
+",
+    fragment: r"out highp vec4 fragColor;
 
+// The atlas texture coordinate of an image's origin plus an offset from it,
+// both normalized by a power-of-two atlas size. Snapping the offset to 2^-24
+// makes the sum exact, so the sampled position, and the pixels, don't depend
+// on where the image sits in the atlas. Adding an unsnapped offset rounds it
+// to a precision that depends on the origin.
+highp vec2 atlas_pos(highp vec2 origin, highp vec2 offset) {
+    return origin + roundEven(offset * 16777216.0) / 16777216.0;
+}
+",
+};
+
+/// The helpers of a vertex stage that projects, which read the projection
+/// block: they follow [`PRELUDE`]'s.
+const PROJECTION_PRELUDE: &str = r"
 // Pole vertices carry these sentinel Y values in their raw position.
 #define GLOBE_POLE_NORTH_Y -32767.5
 #define GLOBE_POLE_SOUTH_Y 32766.5
@@ -236,19 +252,21 @@ vec4 projectTileFor3D(vec2 pos, float elevation) {
 }
 
 #endif
-",
-    fragment: r"out highp vec4 fragColor;
+";
 
-// The atlas texture coordinate of an image's origin plus an offset from it,
-// both normalized by a power-of-two atlas size. Snapping the offset to 2^-24
-// makes the sum exact, so the sampled position, and the pixels, don't depend
-// on where the image sits in the atlas. Adding an unsnapped offset rounds it
-// to a precision that depends on the origin.
-highp vec2 atlas_pos(highp vec2 origin, highp vec2 offset) {
-    return origin + roundEven(offset * 16777216.0) / 16777216.0;
+/// Whether `vertex`, a vertex stage, projects: whether it names a member of
+/// the projection block or a helper of [`PROJECTION_PRELUDE`].
+fn projects(vertex: &HashSet<&str>) -> bool {
+    // A helper is a macro its `#define` names, or a function its definition
+    // names before the `(`, at the start of a line.
+    let helper = |line: &'static str| match line.strip_prefix("#define ") {
+        Some(define) => define.split_whitespace().next(),
+        None if !line.starts_with([' ', '/', '#']) => line.split_once('(')?.0.split_whitespace().last(),
+        None => None,
+    };
+    vertex.iter().any(|name| name.starts_with("u_projection_"))
+        || PROJECTION_PRELUDE.lines().filter_map(helper).any(|name| vertex.contains(name))
 }
-",
-};
 
 /// The vertex and fragment shaders of `key`'s program: `#version 300 es`,
 /// or `#version 330 core` on `desktop` OpenGL, the key's defines, the
@@ -260,9 +278,9 @@ highp vec2 atlas_pos(highp vec2 origin, highp vec2 offset) {
 /// [`glsl_es::expand`] does.
 ///
 /// WebGL2 rejects a draw whose program has a block without a buffer, so a
-/// stage declares only the blocks it names a member of: the view's, the
-/// program's own, and in the vertex stage the projection block, which the
-/// prelude reads. A fragment shader declares the blocks it shares with the
+/// stage declares only the blocks it names a member of: the view's and the
+/// program's own. A vertex stage that projects ([`projects`]) also has the
+/// projection block and the helpers that read it. A fragment shader declares the blocks it shares with the
 /// vertex shader first, in the vertex shader's order, which SwiftShader
 /// needs (maplibre/maplibre-native#4625).
 pub(crate) fn stage_sources(key: &ShaderKey, desktop: bool, highp_fragment: bool) -> Result<[String; 2], GpuError> {
@@ -287,7 +305,8 @@ pub(crate) fn stage_sources(key: &ShaderKey, desktop: bool, highp_fragment: bool
         blocks.iter().copied().filter(reads).collect()
     };
     let [vertex, fragment] = glsl_es::expand(program, source)?;
-    let projection = PROJECTION_BUFFER.block();
+    let projects = projects(&identifiers(&vertex).collect());
+    let projection = PROJECTION_BUFFER.block().filter(|_| projects);
     let vertex_blocks: Vec<&Block> = projection.into_iter().chain(named(&vertex)).collect();
     let mut fragment_blocks = named(&fragment);
     fragment_blocks
@@ -296,8 +315,10 @@ pub(crate) fn stage_sources(key: &ShaderKey, desktop: bool, highp_fragment: bool
         let blocks: String = blocks.iter().map(|block| glsl_es::declaration(block)).collect();
         [version, &defines, stage_defines, precision, &blocks, prelude, glsl].concat()
     };
+    let vertex_prelude = if projects { [PRELUDE.vertex, PROJECTION_PRELUDE].concat() } else { PRELUDE.vertex.to_owned() };
     Ok([
-        stage("", PRECISION.vertex, &vertex_blocks, PRELUDE.vertex, &vertex),
+        stage("", PRECISION.vertex, &vertex_blocks, &vertex_prelude, &vertex),
         stage(fragment_defines, PRECISION.fragment, &fragment_blocks, PRELUDE.fragment, &fragment),
     ])
 }
+
