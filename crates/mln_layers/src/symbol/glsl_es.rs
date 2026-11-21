@@ -184,14 +184,11 @@ layout (location = 4) in vec2 a_shift;
 layout (location = 5) in float a_height_offset;
 
 layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_pattern_atlas_texsize;
     highp vec2 u_units_to_pixels;
     highp vec2 u_world_size;
     highp float u_camera_to_center_distance;
-    highp float u_symbol_fade_change;
     highp float u_aspect_ratio;
     highp float u_pixel_ratio;
-    highp float u_map_zoom;
     lowp float global_pad1;
 };
 
@@ -265,14 +262,11 @@ layout (location = 2) in vec2 a_extrude;
 layout (location = 3) in vec2 a_placed;
 
 layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_pattern_atlas_texsize;
     highp vec2 u_units_to_pixels;
     highp vec2 u_world_size;
     highp float u_camera_to_center_distance;
-    highp float u_symbol_fade_change;
     highp float u_aspect_ratio;
     highp float u_pixel_ratio;
-    highp float u_map_zoom;
     lowp float global_pad1;
 };
 
@@ -326,14 +320,11 @@ void main() {
 }
 ",
     fragment: r"layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_pattern_atlas_texsize;
     highp vec2 u_units_to_pixels;
     highp vec2 u_world_size;
     highp float u_camera_to_center_distance;
-    highp float u_symbol_fade_change;
     highp float u_aspect_ratio;
     highp float u_pixel_ratio;
-    highp float u_map_zoom;
     lowp float global_pad1;
 };
 
@@ -390,14 +381,11 @@ layout (location = 6) in vec2 a_tex_origin;
 layout (location = 11) in float a_height_offset;
 
 layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_pattern_atlas_texsize;
     highp vec2 u_units_to_pixels;
     highp vec2 u_world_size;
     highp float u_camera_to_center_distance;
-    highp float u_symbol_fade_change;
     highp float u_aspect_ratio;
     highp float u_pixel_ratio;
-    highp float u_map_zoom;
     lowp float global_pad1;
 };
 
@@ -446,7 +434,7 @@ layout (std140) uniform SymbolEvaluatedPropsUBO {
     highp float u_icon_opacity;
     highp float u_icon_halo_width;
     highp float u_icon_halo_blur;
-    lowp float props_pad2;
+    highp float u_fade_change;
 };
 
 out highp vec2 v_tex;
@@ -462,7 +450,7 @@ void main() {
     highp float u_opacity = u_is_text_prop ? u_text_opacity : u_icon_opacity;
 
     vec2 fade_opacity = unpack_opacity(a_fade_opacity);
-    float fade_change = fade_opacity[1] > 0.5 ? u_symbol_fade_change : -u_symbol_fade_change;
+    float fade_change = fade_opacity[1] > 0.5 ? u_fade_change : -u_fade_change;
     v_fade_opacity = max(0.0, min(1.0, fade_opacity[0] + fade_change));
 #ifndef HAS_UNIFORM_u_opacity
     lowp float opacity = unpack_mix_vec2(a_opacity, u_opacity_t);
@@ -586,7 +574,7 @@ layout (std140) uniform SymbolEvaluatedPropsUBO {
     highp float u_icon_opacity;
     highp float u_icon_halo_width;
     highp float u_icon_halo_blur;
-    lowp float props_pad2;
+    highp float u_fade_change;
 };
 
 layout (std140) uniform SymbolTilePropsUBO {
@@ -637,14 +625,11 @@ layout (location = 11) in float a_height_offset;
 //   text-size(upperZoomStop, feature) ]
 
 layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_pattern_atlas_texsize;
     highp vec2 u_units_to_pixels;
     highp vec2 u_world_size;
     highp float u_camera_to_center_distance;
-    highp float u_symbol_fade_change;
     highp float u_aspect_ratio;
     highp float u_pixel_ratio;
-    highp float u_map_zoom;
     lowp float global_pad1;
 };
 
@@ -693,7 +678,7 @@ layout (std140) uniform SymbolEvaluatedPropsUBO {
     highp float u_icon_opacity;
     highp float u_icon_halo_width;
     highp float u_icon_halo_blur;
-    lowp float props_pad2;
+    highp float u_fade_change;
 };
 
 out highp vec2 v_data0;
@@ -752,7 +737,7 @@ lowp float halo_blur = u_halo_blur;
 #endif
 
     vec2 fade_opacity = unpack_opacity(a_fade_opacity);
-    float fade_change = fade_opacity[1] > 0.5 ? u_symbol_fade_change : -u_symbol_fade_change;
+    float fade_change = fade_opacity[1] > 0.5 ? u_fade_change : -u_fade_change;
     float interpolated_fade_opacity = max(0.0, min(1.0, fade_opacity[0] + fade_change));
 
     // A quad that draws nothing goes to one point off screen, so it's never
@@ -887,7 +872,7 @@ layout (std140) uniform SymbolEvaluatedPropsUBO {
     highp float u_icon_opacity;
     highp float u_icon_halo_width;
     highp float u_icon_halo_blur;
-    lowp float props_pad2;
+    highp float u_fade_change;
 };
 
 layout (std140) uniform SymbolTilePropsUBO {
@@ -978,14 +963,11 @@ layout (location = 11) in float a_height_offset;
 //   text-size(upperZoomStop, feature) ]
 
 layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_pattern_atlas_texsize;
     highp vec2 u_units_to_pixels;
     highp vec2 u_world_size;
     highp float u_camera_to_center_distance;
-    highp float u_symbol_fade_change;
     highp float u_aspect_ratio;
     highp float u_pixel_ratio;
-    highp float u_map_zoom;
     lowp float global_pad1;
 };
 
@@ -1034,7 +1016,7 @@ layout (std140) uniform SymbolEvaluatedPropsUBO {
     highp float u_icon_opacity;
     highp float u_icon_halo_width;
     highp float u_icon_halo_blur;
-    lowp float props_pad2;
+    highp float u_fade_change;
 };
 
 out highp vec2 v_data0;
@@ -1094,7 +1076,7 @@ lowp float halo_blur = u_halo_blur;
 #endif
 
     vec2 fade_opacity = unpack_opacity(a_fade_opacity);
-    float fade_change = fade_opacity[1] > 0.5 ? u_symbol_fade_change : -u_symbol_fade_change;
+    float fade_change = fade_opacity[1] > 0.5 ? u_fade_change : -u_fade_change;
     float interpolated_fade_opacity = max(0.0, min(1.0, fade_opacity[0] + fade_change));
 
     // A quad that draws nothing goes to one point off screen, so it's never
@@ -1232,7 +1214,7 @@ layout (std140) uniform SymbolEvaluatedPropsUBO {
     highp float u_icon_opacity;
     highp float u_icon_halo_width;
     highp float u_icon_halo_blur;
-    lowp float props_pad2;
+    highp float u_fade_change;
 };
 
 layout (std140) uniform SymbolTilePropsUBO {

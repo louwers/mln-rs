@@ -626,19 +626,15 @@ impl Encoder {
             parameters.debug_options.contains(MapDebugOptions::OVERDRAW),
             &draw_groups.composited,
         );
-        let atlas_size = orchestrator.atlases().pattern.pixel_size();
         let global_paint_params_ubo = GlobalPaintParamsUBO {
-            pattern_atlas_texsize: [atlas_size.width as f32, atlas_size.height as f32],
             units_to_pixels: [
                 1.0 / parameters.frame.pixels_to_gl_units[0],
                 1.0 / parameters.frame.pixels_to_gl_units[1],
             ],
             world_size: [renderable_size.width as f32, renderable_size.height as f32],
             camera_to_center_distance: state.camera_to_center_distance() as f32,
-            symbol_fade_change: parameters.symbol_fade_change,
             aspect_ratio: state.size().aspect_ratio(),
             pixel_ratio: parameters.frame.pixel_ratio,
-            map_zoom: state.zoom() as f32,
             pad1: 0.0,
         };
         parameters.context.write_global_uniform_buffer(gpu, ID_GLOBAL_PAINT_PARAMS_UBO, &global_paint_params_ubo);

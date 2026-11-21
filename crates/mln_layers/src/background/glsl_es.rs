@@ -1,10 +1,10 @@
 //! The programs of the `background` layer type in GLSL ES, for `mln_gl`.
 
-use mln_gfx::shaders::layer_ubo::{GlobalPaintParamsUBO, ProjectionUBO};
+use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::shader_defines::{
     ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_IMAGE_TEXTURE, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE,
-    ID_BACKGROUND_PROPS_UBO, ID_GLOBAL_PAINT_PARAMS_UBO, ID_PROJECTION_UBO,
+    ID_BACKGROUND_PROPS_UBO, ID_PROJECTION_UBO,
 };
 use mln_gfx::shaders::source::glsl_es::{Attribute, Glsl, Source, Texture, UniformBlock};
 
@@ -35,7 +35,6 @@ static BACKGROUND_PATTERN: Source = Source {
     glsl: &BACKGROUND_PATTERN_SHADER,
     uniform_blocks: &[
         UniformBlock::element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
-        UniformBlock::new::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
         UniformBlock::element::<BackgroundPatternDrawableUBO, BackgroundDrawableUnionUBO>(
             "BackgroundPatternDrawableUBO",
             ID_BACKGROUND_DRAWABLE_UBO,
@@ -73,6 +72,9 @@ layout (std140) uniform BackgroundPatternPropsUBO {
     highp float u_scale_b;
     highp float u_mix;
     highp float u_opacity;
+    highp vec2 u_texsize;
+    lowp float props_pad1;
+    lowp float props_pad2;
 };
 
 layout (location = 0) in vec2 a_pos;
@@ -97,18 +99,9 @@ void main() {
     highp float u_scale_b;
     highp float u_mix;
     highp float u_opacity;
-};
-
-layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_pattern_atlas_texsize;
-    highp vec2 u_units_to_pixels;
-    highp vec2 u_world_size;
-    highp float u_camera_to_center_distance;
-    highp float u_symbol_fade_change;
-    highp float u_aspect_ratio;
-    highp float u_pixel_ratio;
-    highp float u_map_zoom;
-    lowp float global_pad1;
+    highp vec2 u_texsize;
+    lowp float props_pad1;
+    lowp float props_pad2;
 };
 
 uniform sampler2D u_image;
@@ -121,13 +114,13 @@ void main() {
     vec4 color1 = vec4(0.0);
     if (u_mix < 1.0) {
         vec2 imagecoord = mod(v_pos_a, 1.0);
-        highp vec2 pos = atlas_pos(u_pattern_tl_a / u_pattern_atlas_texsize, (u_pattern_br_a - u_pattern_tl_a) / u_pattern_atlas_texsize * imagecoord);
+        highp vec2 pos = atlas_pos(u_pattern_tl_a / u_texsize, (u_pattern_br_a - u_pattern_tl_a) / u_texsize * imagecoord);
         color1 = texture(u_image, pos);
     }
     vec4 color2 = vec4(0.0);
     if (u_mix > 0.0) {
         vec2 imagecoord_b = mod(v_pos_b, 1.0);
-        highp vec2 pos2 = atlas_pos(u_pattern_tl_b / u_pattern_atlas_texsize, (u_pattern_br_b - u_pattern_tl_b) / u_pattern_atlas_texsize * imagecoord_b);
+        highp vec2 pos2 = atlas_pos(u_pattern_tl_b / u_texsize, (u_pattern_br_b - u_pattern_tl_b) / u_texsize * imagecoord_b);
         color2 = texture(u_image, pos2);
     }
 

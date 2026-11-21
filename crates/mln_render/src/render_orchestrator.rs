@@ -258,11 +258,6 @@ impl RenderOrchestrator {
         std::mem::take(&mut self.events)
     }
 
-    /// The atlases the layers' draws share.
-    pub(crate) fn atlases(&self) -> &Atlases {
-        &self.atlases
-    }
-
     /// The first phase of a frame: brings the orchestrator to
     /// `update_parameters` and returns the frame for the encode, or `None`
     /// for a still image that hasn't loaded yet, which isn't drawn.
@@ -946,7 +941,7 @@ impl RenderOrchestrator {
         let pass = match &mut self.placement {
             Some(pass) if prepared.places => pass,
             pass => {
-                frame.symbol_fade_change = 1.0;
+                frame.placement_fade = 1.0;
                 if continuous {
                     // Nothing to place: the placement and what the pass
                     // keeps go.
@@ -1001,7 +996,7 @@ impl RenderOrchestrator {
             } else if stale {
                 frame.repaint_at = next_placement_at;
             }
-            frame.symbol_fade_change = self.schedule.fade_change(time_point);
+            frame.placement_fade = self.schedule.fade_change(time_point);
             frame.needs_repaint = self.has_transitions(time_point);
         } else {
             frame.placement_changed = true;
@@ -1010,7 +1005,7 @@ impl RenderOrchestrator {
             self.schedule.commit(update_parameters.mode, transition_options, zoom, time_point, placed);
             // A still image keeps nothing of the buckets between frames.
             pass.forget_buckets();
-            frame.symbol_fade_change = 1.0;
+            frame.placement_fade = 1.0;
             frame.needs_repaint = false;
         }
     }

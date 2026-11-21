@@ -13,7 +13,7 @@ use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMod
 use mln_map_types::tile_cover::{TileCoverParameters, tile_cover};
 use mln_render::draw::{
     DrawDepth, DrawFrame, DrawGeometry, DrawIndexes, DrawList, DrawObjects, FrameDraw, KeptDraw, LayerDrawing,
-    RenderStaticData, Textures, TileDraws, Uniforms, projection_data, raw_vertices, to_projection_ubo,
+    RenderStaticData, Texture2D, Textures, TileDraws, Uniforms, projection_data, raw_vertices, to_projection_ubo,
 };
 use mln_render::layer::{
     DrawContext, EvaluatedLayer, LayerType, LayerValues, NoBucket, NoLayout, NoTileView, RenderPass, UpdateContext,
@@ -24,6 +24,7 @@ use mln_tile_id::OverscaledTileID;
 use mln_util::Color;
 use mln_util::constants::TILE_SIZE_D;
 use mln_util::range::Range;
+use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use super::ubo::{
@@ -180,6 +181,8 @@ impl LayerType for Background {
             None
         };
         let pattern_texture = pattern_atlas.texture().filter(|_| has_pattern);
+        let atlas_size =
+            pattern_texture.and_then(|texture| context.texture(texture)).map_or(Size::new(0, 0), Texture2D::size);
         if let Some(mut texture) = pattern_texture.and_then(|texture| context.texture_mut(texture)) {
             texture.set_sampler(SamplerState {
                 filter: TextureFilterType::Linear,
@@ -227,6 +230,9 @@ impl LayerType for Background {
                     scale_b: crossfade.to_scale,
                     mix: crossfade.t,
                     opacity,
+                    texsize: [atlas_size.width as f32, atlas_size.height as f32],
+                    pad1: 0.0,
+                    pad2: 0.0,
                 };
                 writer.uniform(ID_BACKGROUND_PROPS_UBO, &props);
             } else {

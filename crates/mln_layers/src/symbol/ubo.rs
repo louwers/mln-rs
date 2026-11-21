@@ -44,7 +44,8 @@ pub struct SymbolTilePropsUBO {
 }
 const _: () = assert!(size_of::<SymbolTilePropsUBO>() == 16);
 
-/// The symbol shader's evaluated properties uniform block. The colors are
+/// The symbol shader's evaluated properties uniform block, and how far the
+/// placement's fade has come (`DrawFrame::placement_fade`). The colors are
 /// premultiplied r, g, b, a floats.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
@@ -60,7 +61,7 @@ pub struct SymbolEvaluatedPropsUBO {
     /* 80 */ pub icon_opacity: f32,
     /* 84 */ pub icon_halo_width: f32,
     /* 88 */ pub icon_halo_blur: f32,
-    /* 92 */ pub pad2: f32,
+    /* 92 */ pub fade_change: f32,
     /* 96 */
 }
 const _: () = assert!(size_of::<SymbolEvaluatedPropsUBO>() == 6 * 16);

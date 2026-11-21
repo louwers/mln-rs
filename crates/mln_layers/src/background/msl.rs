@@ -82,9 +82,12 @@ struct alignas(16) BackgroundPatternPropsUBO {
     /* 52 */ float scale_b;
     /* 56 */ float mix;
     /* 60 */ float opacity;
-    /* 64 */
+    /* 64 */ float2 texsize;
+    /* 72 */ float pad1;
+    /* 76 */ float pad2;
+    /* 80 */
 };
-static_assert(sizeof(BackgroundPatternPropsUBO) == 4 * 16, "wrong size");
+static_assert(sizeof(BackgroundPatternPropsUBO) == 5 * 16, "wrong size");
 
 union BackgroundDrawableUnionUBO {
     BackgroundDrawableUBO backgroundDrawableUBO;
@@ -131,7 +134,6 @@ FragmentStage vertex vertexMain(VertexStage in [[stage_in]],
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const GlobalPaintParamsUBO& paintParamsUBO [[buffer(idGlobalPaintParamsUBO)]],
                             device const BackgroundPatternPropsUBO& props [[buffer(idBackgroundPropsUBO)]],
                             texture2d<float, access::sample> image [[texture(0)]],
                             sampler image_sampler [[sampler(0)]]) {
@@ -139,7 +141,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     return half4(1.0);
 #endif
 
-    const float2 texsize = paintParamsUBO.pattern_atlas_texsize;
+    const float2 texsize = props.texsize;
     // A crossfade at 0 or 1 shows one pattern, so skip the other.
     float4 color1 = float4(0.0);
     if (props.mix < 1.0) {
@@ -217,9 +219,12 @@ struct alignas(16) BackgroundPatternPropsUBO {
     /* 52 */ float scale_b;
     /* 56 */ float mix;
     /* 60 */ float opacity;
-    /* 64 */
+    /* 64 */ float2 texsize;
+    /* 72 */ float pad1;
+    /* 76 */ float pad2;
+    /* 80 */
 };
-static_assert(sizeof(BackgroundPatternPropsUBO) == 4 * 16, "wrong size");
+static_assert(sizeof(BackgroundPatternPropsUBO) == 5 * 16, "wrong size");
 
 union BackgroundDrawableUnionUBO {
     BackgroundDrawableUBO backgroundDrawableUBO;

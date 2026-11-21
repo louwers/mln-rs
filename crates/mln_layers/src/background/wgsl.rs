@@ -60,6 +60,9 @@ struct BackgroundPatternPropsUBO {
     scale_b: f32,
     mix: f32,
     opacity: f32,
+    texsize: vec2<f32>,
+    pad1: f32,
+    pad2: f32,
 };
 
 struct GlobalIndexUBO {
@@ -121,14 +124,11 @@ struct BackgroundPatternPropsUBO {
     scale_b: f32,
     mix: f32,
     opacity: f32,
+    texsize: vec2<f32>,
+    pad1: f32,
+    pad2: f32,
 };
 
-struct GlobalPaintParamsUBO {
-    pattern_atlas_texsize: vec2<f32>,
-    // other fields...
-};
-
-@group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
 @group(0) @binding(5) var<uniform> props: BackgroundPatternPropsUBO;
 @group(1) @binding(0) var texture_sampler: sampler;
 @group(1) @binding(1) var pattern_texture: texture_2d<f32>;
@@ -139,7 +139,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     return vec4<f32>(1.0, 1.0, 1.0, 1.0);
 #endif
 
-    let texsize = paintParams.pattern_atlas_texsize;
+    let texsize = props.texsize;
 
     // A crossfade at 0 or 1 shows one pattern, so skip the other.
     var color_a = vec4<f32>(0.0);

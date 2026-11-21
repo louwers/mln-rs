@@ -708,7 +708,10 @@ impl SymbolState {
         }
 
         if let Some(draws) = &mut drawing.frame {
-            if self.draw_list.finish(draws, gpu, context, |writer| write_uniforms(&layer.paint, writer)) {
+            if self
+                .draw_list
+                .finish(draws, gpu, context, |writer| write_uniforms(&layer.paint, frame.placement_fade, writer))
+            {
                 for draw in drawing.tiles.values_mut().flat_map(|tile| &mut tile.draws) {
                     draw.objects.drop_bindings();
                 }
@@ -958,9 +961,11 @@ impl SymbolState {
 }
 
 /// Writes the buffers of the frame's draws of a layer of the paint values
-/// `evaluated`.
+/// `evaluated`, in a frame whose placement's fade has come to
+/// `placement_fade`.
 fn write_uniforms(
     evaluated: &SymbolPaintProperties::PossiblyEvaluated,
+    placement_fade: f32,
     writer: &mut UniformWriter<'_, SymbolUniforms>,
 ) {
     let props = SymbolEvaluatedPropsUBO {
@@ -975,7 +980,7 @@ fn write_uniforms(
         icon_opacity: *evaluated.icon_opacity.uniform(),
         icon_halo_width: *evaluated.icon_halo_width.uniform(),
         icon_halo_blur: *evaluated.icon_halo_blur.uniform(),
-        pad2: 0.0,
+        fade_change: placement_fade,
     };
     writer.uniform(ID_SYMBOL_EVALUATED_PROPS_UBO, &props);
     writer.storage(ID_SYMBOL_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);

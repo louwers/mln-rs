@@ -173,14 +173,11 @@ const HEATMAP_TEXTURE_SHADER: Glsl = Glsl {
 out vec2 v_pos;
 
 layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_pattern_atlas_texsize;
     highp vec2 u_units_to_pixels;
     highp vec2 u_world_size;
     highp float u_camera_to_center_distance;
-    highp float u_symbol_fade_change;
     highp float u_aspect_ratio;
     highp float u_pixel_ratio;
-    highp float u_map_zoom;
     lowp float global_pad1;
 };
 

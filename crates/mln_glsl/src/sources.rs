@@ -96,14 +96,11 @@ vec2 get_pattern_pos(const vec2 pixel_coord_upper, const vec2 pixel_coord_lower,
 #define drawableReservedUBOCount            idProjectionUBO + 1
 
 layout(set = GLOBAL_SET_INDEX, binding = 0) uniform GlobalPaintParamsUBO {
-    vec2 pattern_atlas_texsize;
     vec2 units_to_pixels;
     vec2 world_size;
     float camera_to_center_distance;
-    float symbol_fade_change;
     float aspect_ratio;
     float pixel_ratio;
-    float map_zoom;
     float pad1;
 } paintParams;
 
@@ -289,14 +286,11 @@ bool clippedAtAntimeridian(float tileX) {
 #define drawableReservedUBOCount            idProjectionUBO + 1
 
 layout(set = GLOBAL_SET_INDEX, binding = 0) uniform GlobalPaintParamsUBO {
-    vec2 pattern_atlas_texsize;
     vec2 units_to_pixels;
     vec2 world_size;
     float camera_to_center_distance;
-    float symbol_fade_change;
     float aspect_ratio;
     float pixel_ratio;
-    float map_zoom;
     float pad1;
 } paintParams;
 

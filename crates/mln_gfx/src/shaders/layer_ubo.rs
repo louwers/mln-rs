@@ -1,21 +1,21 @@
 use bytemuck::{Pod, Zeroable};
 
-/// The global paint parameters uniform block (48 bytes).
+/// The frame's uniform block (32 bytes), what every draw of the frame reads
+/// of its view: the view's pixels per clip space unit, the target's size in
+/// device pixels, the camera's distance to the view's center in pixels, the
+/// view's aspect ratio and the target's device pixels per logical pixel.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct GlobalPaintParamsUBO {
-    /*  0 */ pub pattern_atlas_texsize: [f32; 2],
-    /*  8 */ pub units_to_pixels: [f32; 2],
-    /* 16 */ pub world_size: [f32; 2],
-    /* 24 */ pub camera_to_center_distance: f32,
-    /* 28 */ pub symbol_fade_change: f32,
-    /* 32 */ pub aspect_ratio: f32,
-    /* 36 */ pub pixel_ratio: f32,
-    /* 40 */ pub map_zoom: f32,
-    /* 44 */ pub pad1: f32,
-    /* 48 */
+    /*  0 */ pub units_to_pixels: [f32; 2],
+    /*  8 */ pub world_size: [f32; 2],
+    /* 16 */ pub camera_to_center_distance: f32,
+    /* 20 */ pub aspect_ratio: f32,
+    /* 24 */ pub pixel_ratio: f32,
+    /* 28 */ pub pad1: f32,
+    /* 32 */
 }
-const _: () = assert!(size_of::<GlobalPaintParamsUBO>() == 3 * 16);
+const _: () = assert!(size_of::<GlobalPaintParamsUBO>() == 2 * 16);
 
 /// The per-drawable projection uniform block (176 bytes); see
 /// `ProjectionData`.

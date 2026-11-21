@@ -183,7 +183,6 @@ struct HeatmapTextureUBO {
 };
 
 struct GlobalPaintParamsUBO {
-    pattern_atlas_texsize: vec2<f32>,
     units_to_pixels: vec2<f32>,
     world_size: vec2<f32>,
     // remaining fields unused

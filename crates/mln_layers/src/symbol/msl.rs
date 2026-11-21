@@ -465,7 +465,7 @@ struct alignas(16) SymbolEvaluatedPropsUBO {
     /* 80 */ float icon_opacity;
     /* 84 */ float icon_halo_width;
     /* 88 */ float icon_halo_blur;
-    /* 92 */ float pad2;
+    /* 92 */ float fade_change;
     /* 96 */
 };
 static_assert(sizeof(SymbolEvaluatedPropsUBO) == 6 * 16, "wrong size");
@@ -513,13 +513,14 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const SymbolDrawableUBO* drawableVector [[buffer(idSymbolDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]]) {
+                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
+                                device const SymbolEvaluatedPropsUBO& props [[buffer(idSymbolEvaluatedPropsUBO)]]) {
 
     device const SymbolDrawableUBO& drawable = drawableVector[uboIndex];
     device const ProjectionUBO& projection = projectionVector[uboIndex];
 
     const float2 raw_fade_opacity = unpack_opacity(vertx.fade_opacity);
-    const float fade_change = raw_fade_opacity[1] > 0.5 ? paintParams.symbol_fade_change : -paintParams.symbol_fade_change;
+    const float fade_change = raw_fade_opacity[1] > 0.5 ? props.fade_change : -props.fade_change;
     const float fade_opacity = max(0.0, min(1.0, raw_fade_opacity[0] + fade_change));
 
 #if defined(HAS_UNIFORM_u_opacity)
@@ -732,7 +733,7 @@ struct alignas(16) SymbolEvaluatedPropsUBO {
     /* 80 */ float icon_opacity;
     /* 84 */ float icon_halo_width;
     /* 88 */ float icon_halo_blur;
-    /* 92 */ float pad2;
+    /* 92 */ float fade_change;
     /* 96 */
 };
 static_assert(sizeof(SymbolEvaluatedPropsUBO) == 6 * 16, "wrong size");
@@ -806,7 +807,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     device const ProjectionUBO& projection = projectionVector[uboIndex];
 
     const float2 fade_opacity = unpack_opacity(vertx.fade_opacity);
-    const float fade_change = (fade_opacity[1] > 0.5) ? paintParams.symbol_fade_change : -paintParams.symbol_fade_change;
+    const float fade_change = (fade_opacity[1] > 0.5) ? props.fade_change : -props.fade_change;
     const half fo = half(max(0.0, min(1.0, fade_opacity[0] + fade_change)));
 #if defined(HAS_UNIFORM_u_opacity)
     const half visibility = fo;
@@ -1077,7 +1078,7 @@ struct alignas(16) SymbolEvaluatedPropsUBO {
     /* 80 */ float icon_opacity;
     /* 84 */ float icon_halo_width;
     /* 88 */ float icon_halo_blur;
-    /* 92 */ float pad2;
+    /* 92 */ float fade_change;
     /* 96 */
 };
 static_assert(sizeof(SymbolEvaluatedPropsUBO) == 6 * 16, "wrong size");
@@ -1154,7 +1155,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     device const ProjectionUBO& projection = projectionVector[uboIndex];
 
     const float2 fade_opacity = unpack_opacity(vertx.fade_opacity);
-    const float fade_change = (fade_opacity[1] > 0.5) ? paintParams.symbol_fade_change : -paintParams.symbol_fade_change;
+    const float fade_change = (fade_opacity[1] > 0.5) ? props.fade_change : -props.fade_change;
     const half fo = half(max(0.0, min(1.0, fade_opacity[0] + fade_change)));
 #if defined(HAS_UNIFORM_u_opacity)
     const half visibility = fo;
