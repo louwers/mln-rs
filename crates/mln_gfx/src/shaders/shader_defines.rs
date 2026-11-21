@@ -160,6 +160,8 @@ pub const ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE: usize = 0;
 pub const ID_TERRAIN_POS_VERTEX_ATTRIBUTE: usize = 0;
 pub const ID_TERRAIN_DRAWABLE_UBO: usize = ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO; // SSBO
 pub const ID_TERRAIN_PROPS_UBO: usize = DRAWABLE_RESERVED_UBO_COUNT; // packed
+/// The terrain's fog, which only the surface's program reads.
+pub const ID_TERRAIN_FOG_UBO: usize = ID_TERRAIN_PROPS_UBO + 1; // packed
 pub const ID_TERRAIN_DEM_TEXTURE: usize = 0;
 pub const ID_TERRAIN_DRAPE_TEXTURE: usize = 1;
 

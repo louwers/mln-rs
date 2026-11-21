@@ -1402,7 +1402,7 @@ impl RenderOrchestrator {
         );
         let (store, render_sources) = (&self.tile_store, &self.render_sources);
         let dem = |id: &str| store.source(render_sources.get(id)?.tiles()?);
-        self.terrain.update_draws(gpu, paint_parameters, dem);
+        self.terrain.update_draws(gpu, paint_parameters, dem, frame.sky.as_ref());
     }
 
     /// The render layer at `index` in the drawing order.

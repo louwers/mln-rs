@@ -180,6 +180,7 @@ mod dem_textures;
 mod drapes;
 mod draws;
 mod elevation;
+mod fog;
 mod mesh;
 mod stacks;
 
@@ -205,6 +206,7 @@ pub(crate) use stacks::DrapeStacks;
 use crate::gfx::context::Context;
 use crate::layer_drawing::ChangedBuckets;
 use crate::paint_parameters::PaintParameters;
+use crate::render_sky::EvaluatedSky;
 use crate::renderer_event::RendererEvent;
 use crate::terrain::draws::TerrainDraws;
 use crate::tile::source_tiles::SourceTiles;
@@ -429,9 +431,10 @@ impl RenderTerrain {
 
     /// Makes the draws of the frame of the last update, a set for each stack
     /// of the drapes the encode began ([`begin_drapes`]), which read the DEM
-    /// tiles of the terrain's source that `dem` finds by its id and sample
-    /// their stack's drapes. Without a stack, which a frame without terrain
-    /// has too, it makes none, and drops what the draws hold.
+    /// tiles of the terrain's source that `dem` finds by its id, sample
+    /// their stack's drapes and fog as the frame's `sky` says. Without a
+    /// stack, which a frame without terrain has too, it makes none, and drops
+    /// what the draws hold.
     ///
     /// [`begin_drapes`]: Self::begin_drapes
     pub(crate) fn update_draws<'a>(
@@ -439,10 +442,11 @@ impl RenderTerrain {
         gpu: &mut dyn Gpu,
         parameters: &mut PaintParameters<'_>,
         dem: impl FnOnce(&str) -> Option<&'a SourceTiles>,
+        sky: Option<&EvaluatedSky>,
     ) {
         let cover = self.cover.as_ref().filter(|_| self.drapes.stacks() > 0);
         let dem = cover.and_then(|cover| dem(&cover.source_id));
-        self.draws.update(gpu, parameters, cover, dem, self.surface, &self.drapes);
+        self.draws.update(gpu, parameters, cover, dem, self.surface, sky, &self.drapes);
     }
 
     /// The surface's draws.

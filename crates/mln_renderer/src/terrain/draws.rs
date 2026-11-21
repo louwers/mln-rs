@@ -13,10 +13,10 @@ use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
-    ID_PROJECTION_UBO, ID_TERRAIN_DEM_TEXTURE, ID_TERRAIN_DRAPE_TEXTURE, ID_TERRAIN_DRAWABLE_UBO,
+    ID_PROJECTION_UBO, ID_TERRAIN_DEM_TEXTURE, ID_TERRAIN_DRAPE_TEXTURE, ID_TERRAIN_DRAWABLE_UBO, ID_TERRAIN_FOG_UBO,
     ID_TERRAIN_POS_VERTEX_ATTRIBUTE, ID_TERRAIN_PROPS_UBO,
 };
-use mln_gfx::shaders::terrain_ubo::TerrainDrawableUBO;
+use mln_gfx::shaders::terrain_ubo::{TerrainDrawableUBO, TerrainFogUBO};
 use mln_gfx::types::CullFaceWindingType;
 use mln_gfx::{AttributeDataType, DepthMaskType, DrawMode};
 use mln_map_types::ViewportMode;
@@ -25,6 +25,7 @@ use mln_util::logging::{Event, Log};
 
 use super::cover::dem_bucket;
 use super::dem_textures::DemTextures;
+use super::fog::terrain_fog;
 use super::mesh::{TerrainMesh, TerrainVertex};
 use super::{Drapes, Surface, TerrainCover};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
@@ -37,6 +38,7 @@ use crate::gfx::vertices::SharedVertices;
 use crate::layer_drawing::{DrawDepth, DrawList, FrameDraw, KeptDraw, LayerDraws, TileMap, finish_tiles, tile_objects};
 use crate::layers::cast_matrix;
 use crate::paint_parameters::PaintParameters;
+use crate::render_sky::EvaluatedSky;
 use crate::tile::source_tiles::SourceTiles;
 
 /// The grid, in the context's stores.
@@ -82,9 +84,14 @@ pub(crate) struct TerrainDraws {
 impl TerrainDraws {
     /// Makes the frame's draws of `cover`'s tiles, one for each of the
     /// stacks of `drapes`, which read their DEM from the tiles of `dem`,
-    /// sample the tile's drape of their stack and draw as `surface` says, or
-    /// drops the draws and what they share for `None`, a frame that draws no
-    /// surface.
+    /// sample the tile's drape of their stack, draw as `surface` says and
+    /// fog as `sky` says, or drops the draws and what they share for `None`,
+    /// a frame that draws no surface. The first stack fogs the ground, and
+    /// each above only what it draws.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the GPU and frame, and the cover, DEM, surface, sky and drapes the draws are made of"
+    )]
     pub(crate) fn update(
         &mut self,
         gpu: &mut dyn Gpu,
@@ -92,6 +99,7 @@ impl TerrainDraws {
         cover: Option<&TerrainCover>,
         dem: Option<&SourceTiles>,
         surface: Surface,
+        sky: Option<&EvaluatedSky>,
         drapes: &Drapes,
     ) {
         let shader = cover.and_then(|_| self.shader(gpu, parameters));
@@ -178,13 +186,16 @@ impl TerrainDraws {
             }
         }
         self.dem_textures.finish_frame();
-        for StackDraws { tiles, frame, draw_list } in &mut self.stacks {
+        let fog = terrain_fog(sky, view);
+        for (stack, StackDraws { tiles, frame, draw_list }) in self.stacks.iter_mut().enumerate() {
             finish_tiles(draw_list, frame, tiles, gpu, context, |writer| {
                 writer.storage(ID_TERRAIN_DRAWABLE_UBO, |drawable| *drawable);
                 // GL's program declares the projection block whether it
                 // reads it or not, so every draw binds one of zeros.
                 writer.storage(ID_PROJECTION_UBO, |_| ProjectionUBO::default());
                 writer.uniform(ID_TERRAIN_PROPS_UBO, &surface.props);
+                let ground = if stack == 0 { 1.0 } else { 0.0 };
+                writer.uniform(ID_TERRAIN_FOG_UBO, &TerrainFogUBO { ground, ..fog });
             });
         }
     }
