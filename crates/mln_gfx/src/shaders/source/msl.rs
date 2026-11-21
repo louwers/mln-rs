@@ -14,7 +14,7 @@
 //!
 //! A main function's stage is the source from its line to the other's, and
 //! the text before both is the vertex stage's. A vertex stage reads a property's values per vertex from
-//! `vertx.<name>`, mixed by `drawable.<name>_t`, and a fragment stage from
+//! `vertex_in.<name>`, mixed by `drawable.<name>_t`, and a fragment stage from
 //! `in.<name>`.
 
 use crate::gpu::GpuError;
@@ -141,9 +141,9 @@ fn value(named: &Named<'_>, stage: Stage) -> String {
     let name = named.name();
     match (stage, named.ty()) {
         (Stage::Fragment, _) => format!("in.{name}"),
-        (Stage::Vertex, PropertyType::Float) => format!("unpack_mix_float(vertx.{name}, drawable.{name}_t)"),
-        (Stage::Vertex, PropertyType::Color) => format!("unpack_mix_color(vertx.{name}, drawable.{name}_t)"),
-        (Stage::Vertex, PropertyType::Vec4) if named.integers() => format!("float4(vertx.{name})"),
-        (Stage::Vertex, PropertyType::Vec4) => format!("vertx.{name}"),
+        (Stage::Vertex, PropertyType::Float) => format!("unpack_mix_float(vertex_in.{name}, drawable.{name}_t)"),
+        (Stage::Vertex, PropertyType::Color) => format!("unpack_mix_color(vertex_in.{name}, drawable.{name}_t)"),
+        (Stage::Vertex, PropertyType::Vec4) if named.integers() => format!("float4(vertex_in.{name})"),
+        (Stage::Vertex, PropertyType::Vec4) => format!("vertex_in.{name}"),
     }
 }

@@ -236,9 +236,9 @@ struct FragmentStage {
     float4 position [[position, invariant]];
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
     return {
-        .position = float4(float2(vertx.pos) * 2.0 - 1.0, 0.0, 1.0),
+        .position = float4(float2(vertex_in.pos) * 2.0 - 1.0, 0.0, 1.0),
     };
 }
 
@@ -339,14 +339,14 @@ struct FragmentStage {
 #endif
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
                                 device const ViewUBO& view [[buffer(idViewUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const TileDebugPropsUBO& props [[buffer(idTileDebugPropsUBO)]]) {
     device const ProjectionUBO& projection = projectionVector[uboIndex];
-    const float2 start = float2(vertx.start_pos);
-    const float2 end = float2(vertx.end_pos);
+    const float2 start = float2(vertex_in.start_pos);
+    const float2 end = float2(vertex_in.end_pos);
 
     // The tile units a pixel spans; on the globe, more toward the poles,
     // where a tile unit covers less of the sphere.
@@ -363,8 +363,8 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float2 across = float2(-along.y, along.x);
     const float segment_length = tile_length / units;
     const float reach = props.width * 0.5 + 0.5 / DEVICE_PIXEL_RATIO;
-    const float2 offset = float2(vertx.corner.x != 0 ? segment_length + reach : -reach,
-                                 vertx.corner.y != 0 ? reach : -reach);
+    const float2 offset = float2(vertex_in.corner.x != 0 ? segment_length + reach : -reach,
+                                 vertex_in.corner.y != 0 ? reach : -reach);
     const float2 base = start + along * (offset.x * units);
     const float2 tile_pos = base + across * (offset.y * units);
     const float4 corner = projectTile(tile_pos, projection);

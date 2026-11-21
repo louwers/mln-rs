@@ -62,16 +62,16 @@ struct FragmentStage {
     float notUsed;
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
                                 device const ViewUBO& view [[buffer(idViewUBO)]],
                                 device const CollisionDrawableUBO& drawable [[buffer(idCollisionDrawableUBO)]],
                                 device const CollisionTilePropsUBO& tileProps [[buffer(idCollisionTilePropsUBO)]],
                                 device const ProjectionUBO& projection [[buffer(idCollisionProjectionUBO)]]) {
 
 #if defined(PROJECTION_GLOBE)
-    float4 projectedPoint = projectTileWithElevation(float2(vertx.anchor_pos), vertx.height_offset, projection);
+    float4 projectedPoint = projectTileWithElevation(float2(vertex_in.anchor_pos), vertex_in.height_offset, projection);
 #else
-    float4 projectedPoint = drawable.matrix * float4(float2(vertx.anchor_pos), vertx.height_offset, 1);
+    float4 projectedPoint = drawable.matrix * float4(float2(vertex_in.anchor_pos), vertex_in.height_offset, 1);
 #endif
     float camera_to_anchor_distance = projectedPoint.w;
     float collision_perspective_ratio = clamp(
@@ -80,18 +80,18 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         4.0);
 
 #if defined(PROJECTION_GLOBE)
-    float4 position = projectTileWithElevation(float2(vertx.pos), vertx.height_offset, projection);
+    float4 position = projectTileWithElevation(float2(vertex_in.pos), vertex_in.height_offset, projection);
     // Boxes just past the horizon stay visible, as in GL JS; ones far behind it are clipped.
     if (position.z / position.w < 1.1) {
         position.z = 0.0;
     }
 #else
-    float4 position = drawable.matrix * float4(float2(vertx.pos), vertx.height_offset, 1.0);
+    float4 position = drawable.matrix * float4(float2(vertex_in.pos), vertex_in.height_offset, 1.0);
 #endif
-    position.xy += (float2(vertx.extrude) + vertx.shift) * tileProps.extrude_scale * position.w * collision_perspective_ratio;
+    position.xy += (float2(vertex_in.extrude) + vertex_in.shift) * tileProps.extrude_scale * position.w * collision_perspective_ratio;
 
-    float placed = float(vertx.placed.x);
-    float notUsed = float(vertx.placed.y);
+    float placed = float(vertex_in.placed.x);
+    float notUsed = float(vertex_in.placed.y);
 
     return {
         .position       = position,
@@ -154,16 +154,16 @@ struct FragmentStage {
     float2 extrude_scale;
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
                                 device const ViewUBO& view [[buffer(idViewUBO)]],
                                 device const CollisionDrawableUBO& drawable [[buffer(idCollisionDrawableUBO)]],
                                 device const CollisionTilePropsUBO& tileProps [[buffer(idCollisionTilePropsUBO)]],
                                 device const ProjectionUBO& projection [[buffer(idCollisionProjectionUBO)]]) {
 
 #if defined(PROJECTION_GLOBE)
-    float4 projectedPoint = projectTile(float2(vertx.anchor_pos), projection);
+    float4 projectedPoint = projectTile(float2(vertex_in.anchor_pos), projection);
 #else
-    float4 projectedPoint = drawable.matrix * float4(float2(vertx.anchor_pos), 0, 1);
+    float4 projectedPoint = drawable.matrix * float4(float2(vertex_in.anchor_pos), 0, 1);
 #endif
     float camera_to_anchor_distance = projectedPoint.w;
     float collision_perspective_ratio = clamp(
@@ -172,23 +172,23 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         4.0);
 
 #if defined(PROJECTION_GLOBE)
-    float4 position = projectTile(float2(vertx.pos), projection);
+    float4 position = projectTile(float2(vertex_in.pos), projection);
     // Circles just past the horizon stay visible, as in GL JS; ones far behind it are clipped.
     if (position.z / position.w < 1.1) {
         position.z = 0.0;
     }
 #else
-    float4 position = drawable.matrix * float4(float2(vertx.pos), 0.0, 1.0);
+    float4 position = drawable.matrix * float4(float2(vertex_in.pos), 0.0, 1.0);
 #endif
 
     float padding_factor = 1.2; // Pad the vertices slightly to make room for anti-alias blur
-    position.xy += float2(vertx.extrude) * tileProps.extrude_scale * padding_factor * position.w * collision_perspective_ratio;
+    position.xy += float2(vertex_in.extrude) * tileProps.extrude_scale * padding_factor * position.w * collision_perspective_ratio;
 
-    float placed = float(vertx.placed.x);
-    float notUsed = float(vertx.placed.y);
-    float radius = abs(float(vertx.extrude.y)); // We don't pitch the circles, so both units of the extrusion vector are equal in magnitude to the radius
+    float placed = float(vertex_in.placed.x);
+    float notUsed = float(vertex_in.placed.y);
+    float radius = abs(float(vertex_in.extrude.y)); // We don't pitch the circles, so both units of the extrusion vector are equal in magnitude to the radius
 
-    float2 extrude = float2(vertx.extrude) * padding_factor;
+    float2 extrude = float2(vertex_in.extrude) * padding_factor;
     float2 extrude_scale = tileProps.extrude_scale * view.camera_to_center_distance * collision_perspective_ratio;
 
     return {
@@ -284,7 +284,7 @@ struct FragmentStage {
 #endif
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
                                 device const ViewUBO& view [[buffer(idViewUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const SymbolDrawableUBO* drawableVector [[buffer(idSymbolDrawableUBO)]],
@@ -294,14 +294,14 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     device const SymbolDrawableUBO& drawable = drawableVector[uboIndex];
     device const ProjectionUBO& projection = projectionVector[uboIndex];
 
-    const float2 raw_fade_opacity = unpack_opacity(vertx.fade_opacity);
+    const float2 raw_fade_opacity = unpack_opacity(vertex_in.fade_opacity);
     const float fade_change = raw_fade_opacity[1] > 0.5 ? props.fade_change : -props.fade_change;
     const float fade_opacity = max(0.0, min(1.0, raw_fade_opacity[0] + fade_change));
 
 #if defined(HAS_UNIFORM_u_opacity)
     const half fo = half(fade_opacity);
 #else
-    const half fo = half(unpack_mix_float(vertx.opacity, drawable.opacity_t) * fade_opacity);
+    const half fo = half(unpack_mix_float(vertex_in.opacity, drawable.opacity_t) * fade_opacity);
 #endif
 
     // This will check to see if the opacity is zero and push the triangle offscreen if it is
@@ -314,17 +314,17 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         };
     }
 
-    const float2 a_pos = float2(vertx.pos_offset.xy);
-    const float2 a_offset = float2(vertx.pos_offset.zw);
+    const float2 a_pos = float2(vertex_in.pos_offset.xy);
+    const float2 a_offset = float2(vertex_in.pos_offset.zw);
 
-    const float2 a_tex = float2(vertx.data.xy);
-    const float2 a_size = float2(vertx.data.zw);
+    const float2 a_tex = float2(vertex_in.data.xy);
+    const float2 a_size = float2(vertex_in.data.zw);
 
     const float a_size_min = floor(a_size[0] * 0.5);
-    const float2 a_pxoffset = float2(vertx.pixeloffset.xy);
-    const float2 a_minFontScale = float2(vertx.pixeloffset.zw) / 256.0;
+    const float2 a_pxoffset = float2(vertex_in.pixeloffset.xy);
+    const float2 a_minFontScale = float2(vertex_in.pixeloffset.zw) / 256.0;
 
-    const float segment_angle = -vertx.projected_pos[2];
+    const float segment_angle = -vertex_in.projected_pos[2];
 
     float size;
     if (!drawable.is_size_zoom_constant && !drawable.is_size_feature_constant) {
@@ -336,9 +336,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     }
 
     const float2 translated_a_pos = a_pos + drawable.translation;
-    const float4 projectedPoint = projectTileWithElevation(translated_a_pos, vertx.height_offset, projection);
+    const float4 projectedPoint = projectTileWithElevation(translated_a_pos, vertex_in.height_offset, projection);
 #if defined(PROJECTION_GLOBE)
-    if (!drawable.pitch_with_map && vertx.height_offset <= 0.0 && projectedPoint.z > projectedPoint.w) {
+    if (!drawable.pitch_with_map && vertex_in.height_offset <= 0.0 && projectedPoint.z > projectedPoint.w) {
         return {
             .position = float4(c_offscreen_degenerate_triangle_location,
                                c_offscreen_degenerate_triangle_location,
@@ -365,7 +365,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     float symbol_rotation = 0.0;
     if (drawable.rotate_symbol) {
         // See comments in symbol_sdf.vertex
-        const float4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + float2(1, 0), vertx.height_offset, projection);
+        const float4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + float2(1, 0), vertex_in.height_offset, projection);
 
         const float2 a = projectedPoint.xy / projectedPoint.w;
         const float2 b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
@@ -376,14 +376,14 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float angle_cos = cos(segment_angle + symbol_rotation);
     const float2x2 rotation_matrix = float2x2(angle_cos, -1.0 * angle_sin, angle_sin, angle_cos);
 
-    const float2 projected_pos_xy = vertx.projected_pos.xy;
+    const float2 projected_pos_xy = vertex_in.projected_pos.xy;
     float4 projected_pos;
     if (drawable.is_along_line || drawable.is_variable_anchor) {
-        projected_pos = float4(projected_pos_xy, vertx.height_offset, 1.0);
+        projected_pos = float4(projected_pos_xy, vertex_in.height_offset, 1.0);
     } else if (drawable.pitch_with_map) {
-        projected_pos = drawable.label_plane_matrix * float4(projected_pos_xy + drawable.translation, vertx.height_offset, 1.0);
+        projected_pos = drawable.label_plane_matrix * float4(projected_pos_xy + drawable.translation, vertex_in.height_offset, 1.0);
     } else {
-        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(projected_pos_xy + drawable.translation, vertx.height_offset, projection);
+        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(projected_pos_xy + drawable.translation, vertex_in.height_offset, projection);
     }
 
     const float z = float(drawable.pitch_with_map) * projected_pos.z / projected_pos.w;
@@ -401,7 +401,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     if (drawable.pitch_with_map) {
         position = projectTileWithElevation(position.xy, position.z, projection);
     }
-    const float2 tex_origin = float2(vertx.tex_origin);
+    const float2 tex_origin = float2(vertex_in.tex_origin);
 
     return {
         .position     = position,
@@ -497,7 +497,7 @@ struct FragmentStage {
 
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
                                 device const ViewUBO& view [[buffer(idViewUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const SymbolDrawableUBO* drawableVector [[buffer(idSymbolDrawableUBO)]],
@@ -507,13 +507,13 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     device const SymbolDrawableUBO& drawable = drawableVector[uboIndex];
     device const ProjectionUBO& projection = projectionVector[uboIndex];
 
-    const float2 fade_opacity = unpack_opacity(vertx.fade_opacity);
+    const float2 fade_opacity = unpack_opacity(vertex_in.fade_opacity);
     const float fade_change = (fade_opacity[1] > 0.5) ? props.fade_change : -props.fade_change;
     const half fo = half(max(0.0, min(1.0, fade_opacity[0] + fade_change)));
 #if defined(HAS_UNIFORM_u_opacity)
     const half visibility = fo;
 #else
-    const half opacity = half(unpack_mix_float(vertx.opacity, drawable.opacity_t));
+    const half opacity = half(unpack_mix_float(vertex_in.opacity, drawable.opacity_t));
     const half visibility = min(fo, opacity);
 #endif
 
@@ -527,16 +527,16 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         };
     }
 
-    const float2 a_pos = float2(vertx.pos_offset.xy);
-    const float2 a_offset = float2(vertx.pos_offset.zw);
+    const float2 a_pos = float2(vertex_in.pos_offset.xy);
+    const float2 a_offset = float2(vertex_in.pos_offset.zw);
 
-    const float2 a_tex = float2(vertx.data.xy);
-    const float2 a_size = float2(vertx.data.zw);
+    const float2 a_tex = float2(vertex_in.data.xy);
+    const float2 a_size = float2(vertex_in.data.zw);
 
     const float a_size_min = floor(a_size[0] * 0.5);
-    const float2 a_pxoffset = float2(vertx.pixeloffset.xy);
+    const float2 a_pxoffset = float2(vertex_in.pixeloffset.xy);
 
-    const float segment_angle = -vertx.projected_pos[2];
+    const float segment_angle = -vertex_in.projected_pos[2];
 
     float size;
     if (!drawable.is_size_zoom_constant && !drawable.is_size_feature_constant) {
@@ -548,9 +548,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     }
 
     const float2 translated_a_pos = a_pos + drawable.translation;
-    const float4 projectedPoint = projectTileWithElevation(translated_a_pos, vertx.height_offset, projection);
+    const float4 projectedPoint = projectTileWithElevation(translated_a_pos, vertex_in.height_offset, projection);
 #if defined(PROJECTION_GLOBE)
-    if (!drawable.pitch_with_map && vertx.height_offset <= 0.0 && projectedPoint.z > projectedPoint.w) {
+    if (!drawable.pitch_with_map && vertex_in.height_offset <= 0.0 && projectedPoint.z > projectedPoint.w) {
         return {
             .position = float4(c_offscreen_degenerate_triangle_location,
                                c_offscreen_degenerate_triangle_location,
@@ -584,7 +584,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         // Point labels with 'rotation-alignment: map' are horizontal with respect to tile units
         // To figure out that angle in projected space, we draw a short horizontal line in tile
         // space, project it, and measure its angle in projected space.
-        const float4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + float2(1, 0), vertx.height_offset, projection);
+        const float4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + float2(1, 0), vertex_in.height_offset, projection);
 
         const float2 a = projectedPoint.xy / projectedPoint.w;
         const float2 b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
@@ -595,14 +595,14 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float angle_sin = sin(segment_angle + symbol_rotation);
     const float angle_cos = cos(segment_angle + symbol_rotation);
     const auto rotation_matrix = float2x2(angle_cos, -1.0 * angle_sin, angle_sin, angle_cos);
-    const float2 projected_pos_xy = vertx.projected_pos.xy;
+    const float2 projected_pos_xy = vertex_in.projected_pos.xy;
     float4 projected_pos;
     if (drawable.is_along_line || drawable.is_variable_anchor) {
-        projected_pos = float4(projected_pos_xy, vertx.height_offset, 1.0);
+        projected_pos = float4(projected_pos_xy, vertex_in.height_offset, 1.0);
     } else if (drawable.pitch_with_map) {
-        projected_pos = drawable.label_plane_matrix * float4(projected_pos_xy + drawable.translation, vertx.height_offset, 1.0);
+        projected_pos = drawable.label_plane_matrix * float4(projected_pos_xy + drawable.translation, vertex_in.height_offset, 1.0);
     } else {
-        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(projected_pos_xy + drawable.translation, vertx.height_offset, projection);
+        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(projected_pos_xy + drawable.translation, vertex_in.height_offset, projection);
     }
 
     const float z = float(drawable.pitch_with_map) * projected_pos.z / projected_pos.w;
@@ -620,7 +620,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     if (drawable.pitch_with_map) {
         position = projectTileWithElevation(position.xy, position.z, projection);
     }
-    const float2 tex_origin = float2(vertx.tex_origin);
+    const float2 tex_origin = float2(vertex_in.tex_origin);
 
     // A glyph's edge's gamma, scaled by clip w, and the inner edge of its
     // halo: the same over a quad but for the clip w, which interpolates
@@ -628,12 +628,12 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 #if defined(HAS_UNIFORM_u_halo_width)
     const float halo_width = drawable.is_text_prop ? props.text_halo_width : props.icon_halo_width;
 #else
-    const float halo_width = unpack_mix_float(vertx.halo_width, drawable.halo_width_t);
+    const float halo_width = unpack_mix_float(vertex_in.halo_width, drawable.halo_width_t);
 #endif
 #if defined(HAS_UNIFORM_u_halo_blur)
     const float halo_blur = drawable.is_text_prop ? props.text_halo_blur : props.icon_halo_blur;
 #else
-    const float halo_blur = unpack_mix_float(vertx.halo_blur, drawable.halo_blur_t);
+    const float halo_blur = unpack_mix_float(vertex_in.halo_blur, drawable.halo_blur_t);
 #endif
     const float EDGE_GAMMA = 0.105 / DEVICE_PIXEL_RATIO;
     const float haloBlurGamma = drawable.is_halo_pass ? halo_blur * 1.19 / SDF_PX : 0.0;
@@ -767,7 +767,7 @@ struct FragmentStage {
     bool is_icon;
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
                                 device const ViewUBO& view [[buffer(idViewUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const SymbolDrawableUBO* drawableVector [[buffer(idSymbolDrawableUBO)]],
@@ -777,13 +777,13 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     device const SymbolDrawableUBO& drawable = drawableVector[uboIndex];
     device const ProjectionUBO& projection = projectionVector[uboIndex];
 
-    const float2 fade_opacity = unpack_opacity(vertx.fade_opacity);
+    const float2 fade_opacity = unpack_opacity(vertex_in.fade_opacity);
     const float fade_change = (fade_opacity[1] > 0.5) ? props.fade_change : -props.fade_change;
     const half fo = half(max(0.0, min(1.0, fade_opacity[0] + fade_change)));
 #if defined(HAS_UNIFORM_u_opacity)
     const half visibility = fo;
 #else
-    const half opacity = half(unpack_mix_float(vertx.opacity, drawable.opacity_t));
+    const half opacity = half(unpack_mix_float(vertex_in.opacity, drawable.opacity_t));
     const half visibility = min(fo, opacity);
 #endif
 
@@ -797,16 +797,16 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         };
     }
 
-    const float2 a_pos = float2(vertx.pos_offset.xy);
-    const float2 a_offset = float2(vertx.pos_offset.zw);
+    const float2 a_pos = float2(vertex_in.pos_offset.xy);
+    const float2 a_offset = float2(vertex_in.pos_offset.zw);
 
-    const float2 a_tex = float2(vertx.data.xy);
-    const float2 a_size = float2(vertx.data.zw);
+    const float2 a_tex = float2(vertex_in.data.xy);
+    const float2 a_size = float2(vertex_in.data.zw);
 
     const float a_size_min = floor(a_size[0] * 0.5);
     const float is_sdf = a_size[0] - 2.0 * a_size_min;
 
-    const float segment_angle = -vertx.projected_pos[2];
+    const float segment_angle = -vertex_in.projected_pos[2];
 
     float size;
     if (!drawable.is_size_zoom_constant && !drawable.is_size_feature_constant) {
@@ -818,9 +818,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     }
 
     const float2 translated_a_pos = a_pos + drawable.translation;
-    const float4 projectedPoint = projectTileWithElevation(translated_a_pos, vertx.height_offset, projection);
+    const float4 projectedPoint = projectTileWithElevation(translated_a_pos, vertex_in.height_offset, projection);
 #if defined(PROJECTION_GLOBE)
-    if (!drawable.pitch_with_map && vertx.height_offset <= 0.0 && projectedPoint.z > projectedPoint.w) {
+    if (!drawable.pitch_with_map && vertex_in.height_offset <= 0.0 && projectedPoint.z > projectedPoint.w) {
         return {
             .position = float4(c_offscreen_degenerate_triangle_location,
                                c_offscreen_degenerate_triangle_location,
@@ -854,7 +854,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         // Point labels with 'rotation-alignment: map' are horizontal with respect to tile units
         // To figure out that angle in projected space, we draw a short horizontal line in tile
         // space, project it, and measure its angle in projected space.
-        const float4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + float2(1, 0), vertx.height_offset, projection);
+        const float4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + float2(1, 0), vertex_in.height_offset, projection);
 
         const float2 a = projectedPoint.xy / projectedPoint.w;
         const float2 b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
@@ -866,14 +866,14 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float angle_cos = cos(segment_angle + symbol_rotation);
     const float2x2 rotation_matrix = float2x2(angle_cos, -1.0 * angle_sin, angle_sin, angle_cos);
 
-    const float2 projected_pos_xy = vertx.projected_pos.xy;
+    const float2 projected_pos_xy = vertex_in.projected_pos.xy;
     float4 projected_pos;
     if (drawable.is_along_line || drawable.is_variable_anchor) {
-        projected_pos = float4(projected_pos_xy, vertx.height_offset, 1.0);
+        projected_pos = float4(projected_pos_xy, vertex_in.height_offset, 1.0);
     } else if (drawable.pitch_with_map) {
-        projected_pos = drawable.label_plane_matrix * float4(projected_pos_xy + drawable.translation, vertx.height_offset, 1.0);
+        projected_pos = drawable.label_plane_matrix * float4(projected_pos_xy + drawable.translation, vertex_in.height_offset, 1.0);
     } else {
-        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(projected_pos_xy + drawable.translation, vertx.height_offset, projection);
+        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(projected_pos_xy + drawable.translation, vertex_in.height_offset, projection);
     }
 
     const float z = float(drawable.pitch_with_map) * projected_pos.z / projected_pos.w;
@@ -893,7 +893,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     }
     const bool is_icon = (is_sdf == ICON);
     const float2 texsize = is_icon ? drawable.texsize_icon : drawable.texsize;
-    const float2 tex_origin = float2(vertx.tex_origin);
+    const float2 tex_origin = float2(vertex_in.tex_origin);
 
     // A glyph's edge's gamma, scaled by clip w, and the inner edge of its
     // halo: the same over a quad but for the clip w, which interpolates
@@ -901,12 +901,12 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 #if defined(HAS_UNIFORM_u_halo_width)
     const float halo_width = drawable.is_text_prop ? props.text_halo_width : props.icon_halo_width;
 #else
-    const float halo_width = unpack_mix_float(vertx.halo_width, drawable.halo_width_t);
+    const float halo_width = unpack_mix_float(vertex_in.halo_width, drawable.halo_width_t);
 #endif
 #if defined(HAS_UNIFORM_u_halo_blur)
     const float halo_blur = drawable.is_text_prop ? props.text_halo_blur : props.icon_halo_blur;
 #else
-    const float halo_blur = unpack_mix_float(vertx.halo_blur, drawable.halo_blur_t);
+    const float halo_blur = unpack_mix_float(vertex_in.halo_blur, drawable.halo_blur_t);
 #endif
     const float EDGE_GAMMA = 0.105 / DEVICE_PIXEL_RATIO;
     const float haloBlurGamma = drawable.is_halo_pass ? halo_blur * 1.19 / SDF_PX : 0.0;

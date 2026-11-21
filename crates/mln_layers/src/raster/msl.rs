@@ -27,7 +27,7 @@ struct FragmentStage {
     float2 pos1;
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const RasterDrawableUBO* drawableVector [[buffer(idRasterDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
@@ -35,14 +35,14 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 
     device const RasterDrawableUBO& drawable = drawableVector[uboIndex];
 
-    const float4 position = projectTile(float2(vertx.pos), float2(vertx.pos), projectionVector[uboIndex]);
+    const float4 position = projectTile(float2(vertex_in.pos), float2(vertex_in.pos), projectionVector[uboIndex]);
 
     // We are using Int16 for texture position coordinates to give us enough precision for
     // fractional coordinates. We use 8192 to scale the texture coordinates in the buffer
     // as an arbitrarily high number to preserve adequate precision when rendering.
     // This is also the same value as the EXTENT we are using for our tile buffer pos coordinates,
     // so math for modifying either is consistent.
-    const float2 pos0 = (((float2(vertx.texture_pos) / 8192.0) - 0.5) / props.buffer_scale ) + 0.5;
+    const float2 pos0 = (((float2(vertex_in.texture_pos) / 8192.0) - 0.5) / props.buffer_scale ) + 0.5;
     const float2 pos1 = (pos0 * props.scale_parent) + props.tl_parent;
 
     return {

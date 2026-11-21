@@ -112,7 +112,7 @@ struct FragmentStage {
 #endif
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
                                 device const ViewUBO& view [[buffer(idViewUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const LineSDFDrawableUBO* drawableVector [[buffer(idLineDrawableUBO)]],
@@ -134,16 +134,16 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float ANTIALIASING = 1.0 / DEVICE_PIXEL_RATIO / 2.0;
     const float LINE_DISTANCE_SCALE = 2.0;
 
-    const float2 a_extrude = float2(vertx.data.xy) - 128.0;
-    const float a_direction = glMod(float(vertx.data.z), 4.0) - 1.0;
-    const float linesofar = (floor(float(vertx.data.z) / 4.0) + float(vertx.data.w) * 64.0) * LINE_DISTANCE_SCALE;
-    const float v_lineprogress = (floor(float(vertx.data.z) / 4.0) + float(vertx.data.w) * 64.0) * 2.0 / MAX_LINE_DISTANCE;
-    const float2 pos = floor(float2(vertx.pos_normal) * 0.5);
+    const float2 a_extrude = float2(vertex_in.data.xy) - 128.0;
+    const float a_direction = glMod(float(vertex_in.data.z), 4.0) - 1.0;
+    const float linesofar = (floor(float(vertex_in.data.z) / 4.0) + float(vertex_in.data.w) * 64.0) * LINE_DISTANCE_SCALE;
+    const float v_lineprogress = (floor(float(vertex_in.data.z) / 4.0) + float(vertex_in.data.w) * 64.0) * 2.0 / MAX_LINE_DISTANCE;
+    const float2 pos = floor(float2(vertex_in.pos_normal) * 0.5);
 
     // x is 1 if it's a round cap, 0 otherwise
     // y is 1 if the normal points up, and -1 if it points down
     // We store these in the least significant bit of a_pos_normal
-    const float2 normal = float2(vertx.pos_normal) - 2.0 * pos;
+    const float2 normal = float2(vertex_in.pos_normal) - 2.0 * pos;
     const float2 v_normal = float2(normal.x, normal.y * 2.0 - 1.0);
 
     const float halfwidth = width / 2.0;
@@ -183,9 +183,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float tex_y_b = drawable.tex_y_b;
 #else
     // The dash attribute: the pattern's middle row, row span and length.
-    const float2 patternscale_a = float2(drawable.patternscale_a.x / vertx.dasharray.z, -vertx.dasharray.y / 2.0 / drawable.atlas_height);
-    const float2 patternscale_b = float2(drawable.patternscale_b.x / vertx.dasharray.z, patternscale_a.y);
-    const float tex_y_a = (vertx.dasharray.x + 0.5) / drawable.atlas_height;
+    const float2 patternscale_a = float2(drawable.patternscale_a.x / vertex_in.dasharray.z, -vertex_in.dasharray.y / 2.0 / drawable.atlas_height);
+    const float2 patternscale_b = float2(drawable.patternscale_b.x / vertex_in.dasharray.z, patternscale_a.y);
+    const float tex_y_a = (vertex_in.dasharray.x + 0.5) / drawable.atlas_height;
     const float tex_y_b = tex_y_a;
 #endif
 
@@ -207,7 +207,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         .floorwidth   = floorwidth,
 #endif
 #if !defined(HAS_UNIFORM_u_dasharray)
-        .dash_width   = vertx.dasharray.z,
+        .dash_width   = vertex_in.dasharray.z,
 #endif
     };
 }
@@ -322,7 +322,7 @@ struct FragmentStage {
     #property varying opacity half
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
                                 device const ViewUBO& view [[buffer(idViewUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const LineGradientDrawableUBO* drawableVector [[buffer(idLineDrawableUBO)]],
@@ -332,10 +332,10 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     device const LineGradientDrawableUBO& drawable = drawableVector[uboIndex];
 
 #if !defined(HAS_UNIFORM_u_blur)
-    const auto blur     = unpack_mix_float(vertx.blur,     drawable.blur_t);
+    const auto blur     = unpack_mix_float(vertex_in.blur,     drawable.blur_t);
 #endif
 #if !defined(HAS_UNIFORM_u_opacity)
-    const auto opacity  = unpack_mix_float(vertx.opacity,  drawable.opacity_t);
+    const auto opacity  = unpack_mix_float(vertex_in.opacity,  drawable.opacity_t);
 #endif
     const auto gapwidth = $props.gapwidth / 2;
     const auto offset   = $props.offset * -1;
@@ -345,15 +345,15 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     // Retina devices need a smaller distance to avoid aliasing.
     const float ANTIALIASING = 1.0 / DEVICE_PIXEL_RATIO / 2.0;
 
-    const float2 a_extrude = float2(vertx.data.xy) - 128.0;
-    const float a_direction = glMod(float(vertx.data.z), 4.0) - 1.0;
-    const float v_lineprogress = (floor(float(vertx.data.z) / 4.0) + vertx.data.w * 64.0) * 2.0 / MAX_LINE_DISTANCE;
-    const float2 pos = floor(float2(vertx.pos_normal) * 0.5);
+    const float2 a_extrude = float2(vertex_in.data.xy) - 128.0;
+    const float a_direction = glMod(float(vertex_in.data.z), 4.0) - 1.0;
+    const float v_lineprogress = (floor(float(vertex_in.data.z) / 4.0) + vertex_in.data.w * 64.0) * 2.0 / MAX_LINE_DISTANCE;
+    const float2 pos = floor(float2(vertex_in.pos_normal) * 0.5);
 
     // x is 1 if it's a round cap, 0 otherwise
     // y is 1 if the normal points up, and -1 if it points down
     // We store these in the least significant bit of a_pos_normal
-    const float2 normal = float2(vertx.pos_normal) - 2.0 * pos;
+    const float2 normal = float2(vertex_in.pos_normal) - 2.0 * pos;
     const float2 v_normal = float2(normal.x, normal.y * 2.0 - 1.0);
 
     const float halfwidth = width / 2.0;
@@ -510,7 +510,7 @@ struct FragmentStage {
 #endif
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
                                 device const ViewUBO& view [[buffer(idViewUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const LinePatternDrawableUBO* drawableVector [[buffer(idLineDrawableUBO)]],
@@ -526,7 +526,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const auto width    = $props.width;
 
 #if !defined(HAS_UNIFORM_u_width)
-    const auto floorwidth = unpack_mix_float(vertx.width, drawable.floorwidth_t);
+    const auto floorwidth = unpack_mix_float(vertex_in.width, drawable.floorwidth_t);
 #endif
 
     // the distance over which the line edge fades out.
@@ -534,15 +534,15 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float ANTIALIASING = 1.0 / DEVICE_PIXEL_RATIO / 2.0;
     const float LINE_DISTANCE_SCALE = 2.0;
 
-    const float2 a_extrude = float2(vertx.data.xy) - 128.0;
-    const float a_direction = glMod(float(vertx.data.z), 4.0) - 1.0;
-    const float linesofar = (floor(vertx.data.z / 4.0) + vertx.data.w * 64.0) * LINE_DISTANCE_SCALE;
-    const float2 pos = floor(float2(vertx.pos_normal) * 0.5);
+    const float2 a_extrude = float2(vertex_in.data.xy) - 128.0;
+    const float a_direction = glMod(float(vertex_in.data.z), 4.0) - 1.0;
+    const float linesofar = (floor(vertex_in.data.z / 4.0) + vertex_in.data.w * 64.0) * LINE_DISTANCE_SCALE;
+    const float2 pos = floor(float2(vertex_in.pos_normal) * 0.5);
 
     // x is 1 if it's a round cap, 0 otherwise
     // y is 1 if the normal points up, and -1 if it points down
     // We store these in the least significant bit of a_pos_normal
-    const float2 normal = float2(vertx.pos_normal) - 2.0 * pos;
+    const float2 normal = float2(vertex_in.pos_normal) - 2.0 * pos;
     const float2 v_normal = float2(normal.x, normal.y * 2.0 - 1.0);
 
     const float halfwidth = width / 2.0;
@@ -747,7 +747,7 @@ struct FragmentStage {
 #endif
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
                                 device const ViewUBO& view [[buffer(idViewUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const LineSDFDrawableUBO* drawableVector [[buffer(idLineDrawableUBO)]],
@@ -769,15 +769,15 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float ANTIALIASING = 1.0 / DEVICE_PIXEL_RATIO / 2.0;
     const float LINE_DISTANCE_SCALE = 2.0;
 
-    const float2 a_extrude = float2(vertx.data.xy) - 128.0;
-    const float a_direction = glMod(float(vertx.data.z), 4.0) - 1.0;
-    float linesofar = (floor(float(vertx.data.z) / 4.0) + float(vertx.data.w) * 64.0) * LINE_DISTANCE_SCALE;
-    const float2 pos = floor(float2(vertx.pos_normal) * 0.5);
+    const float2 a_extrude = float2(vertex_in.data.xy) - 128.0;
+    const float a_direction = glMod(float(vertex_in.data.z), 4.0) - 1.0;
+    float linesofar = (floor(float(vertex_in.data.z) / 4.0) + float(vertex_in.data.w) * 64.0) * LINE_DISTANCE_SCALE;
+    const float2 pos = floor(float2(vertex_in.pos_normal) * 0.5);
 
     // x is 1 if it's a round cap, 0 otherwise
     // y is 1 if the normal points up, and -1 if it points down
     // We store these in the least significant bit of a_pos_normal
-    const float2 normal = float2(vertx.pos_normal) - 2.0 * pos;
+    const float2 normal = float2(vertex_in.pos_normal) - 2.0 * pos;
     const float2 v_normal = float2(normal.x, normal.y * 2.0 - 1.0);
 
     const float halfwidth = width / 2.0;
@@ -817,9 +817,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float tex_y_b = drawable.tex_y_b;
 #else
     // The dash attribute: the pattern's middle row, row span and length.
-    const float2 patternscale_a = float2(drawable.patternscale_a.x / vertx.dasharray.z, -vertx.dasharray.y / 2.0 / drawable.atlas_height);
-    const float2 patternscale_b = float2(drawable.patternscale_b.x / vertx.dasharray.z, patternscale_a.y);
-    const float tex_y_a = (vertx.dasharray.x + 0.5) / drawable.atlas_height;
+    const float2 patternscale_a = float2(drawable.patternscale_a.x / vertex_in.dasharray.z, -vertex_in.dasharray.y / 2.0 / drawable.atlas_height);
+    const float2 patternscale_b = float2(drawable.patternscale_b.x / vertex_in.dasharray.z, patternscale_a.y);
+    const float tex_y_a = (vertex_in.dasharray.x + 0.5) / drawable.atlas_height;
     const float tex_y_b = tex_y_a;
 #endif
 
@@ -841,7 +841,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         .floorwidth   = floorwidth,
 #endif
 #if !defined(HAS_UNIFORM_u_dasharray)
-        .dash_width   = vertx.dasharray.z,
+        .dash_width   = vertex_in.dasharray.z,
 #endif
     };
 }
@@ -957,7 +957,7 @@ struct FragmentStage {
     #property varying opacity float
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
                                 device const ViewUBO& view [[buffer(idViewUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const LineDrawableUBO* drawableVector [[buffer(idLineDrawableUBO)]],
@@ -976,14 +976,14 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     // Retina devices need a smaller distance to avoid aliasing.
     const float ANTIALIASING = 1.0 / DEVICE_PIXEL_RATIO / 2.0;
 
-    const float2 a_extrude = float2(vertx.data.xy) - 128.0;
-    const float a_direction = glMod(float(vertx.data.z), 4.0) - 1.0;
-    const float2 pos = floor(float2(vertx.pos_normal) * 0.5);
+    const float2 a_extrude = float2(vertex_in.data.xy) - 128.0;
+    const float a_direction = glMod(float(vertex_in.data.z), 4.0) - 1.0;
+    const float2 pos = floor(float2(vertex_in.pos_normal) * 0.5);
 
     // x is 1 if it's a round cap, 0 otherwise
     // y is 1 if the normal points up, and -1 if it points down
     // We store these in the least significant bit of a_pos_normal
-    const float2 normal = float2(vertx.pos_normal) - 2.0 * pos;
+    const float2 normal = float2(vertex_in.pos_normal) - 2.0 * pos;
     const float2 v_normal = float2(normal.x, normal.y * 2.0 - 1.0);
 
     const float halfwidth = width / 2.0;

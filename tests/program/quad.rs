@@ -90,11 +90,11 @@ struct FragmentStage {
     float2 uv;
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
                                 device const QuadUBO& props [[buffer(5)]]) {
     return {
-        .position = float4(vertx.offset + vertx.corner * props.size, 0.0, 1.0),
-        .uv = vertx.corner,
+        .position = float4(vertex_in.offset + vertex_in.corner * props.size, 0.0, 1.0),
+        .uv = vertex_in.corner,
     };
 }
 

@@ -27,7 +27,7 @@ struct FragmentStage {
     float2 pos;
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const ColorReliefDrawableUBO* drawableVector [[buffer(idColorReliefDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
@@ -36,16 +36,16 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     device const ColorReliefDrawableUBO& drawable = drawableVector[uboIndex];
     device const ColorReliefTilePropsUBO& tileProps = tilePropsVector[uboIndex];
 
-    const float4 position = projectTile(float2(vertx.pos), float2(vertx.pos), projectionVector[uboIndex]);
+    const float4 position = projectTile(float2(vertex_in.pos), float2(vertex_in.pos), projectionVector[uboIndex]);
 
     // Calculate texture coordinate
     float2 epsilon = 1.0 / tileProps.dimension;
     float scale = (tileProps.dimension.x - 2.0) / tileProps.dimension.x;
-    float2 pos = (float2(vertx.pos) / 8192.0) * scale + epsilon;
+    float2 pos = (float2(vertex_in.pos) / 8192.0) * scale + epsilon;
 
-    // Handle poles (use vertx.pos, not texture_pos, to match GLSL a_pos)
-    if (float(vertx.pos.y) < -32767.5) pos.y = 0.0;
-    if (float(vertx.pos.y) > 32766.5) pos.y = 1.0;
+    // Handle poles (use vertex_in.pos, not texture_pos, to match GLSL a_pos)
+    if (float(vertex_in.pos.y) < -32767.5) pos.y = 0.0;
+    if (float(vertex_in.pos.y) > 32766.5) pos.y = 1.0;
 
     return {
         .position    = position,

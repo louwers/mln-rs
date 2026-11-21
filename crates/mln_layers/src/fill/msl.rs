@@ -125,7 +125,7 @@ struct FragmentStage {
 ",
         outline_corner!(),
         r"
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
                                 device const ViewUBO& view [[buffer(idViewUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const FillPatternDrawableUBO* drawableVector [[buffer(idFillDrawableUBO)]],
@@ -141,7 +141,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const auto pattern_to   = $tileProps.pattern_to;
 
 #if !defined(HAS_UNIFORM_u_opacity)
-    const auto opacity      = unpack_mix_float(vertx.opacity, drawable.opacity_t);
+    const auto opacity      = unpack_mix_float(vertex_in.opacity, drawable.opacity_t);
 #endif
 
     const float2 pattern_tl_a = pattern_from.xy;
@@ -156,11 +156,11 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 
     const float2 display_size_a = float2((pattern_br_a.x - pattern_tl_a.x) / pixelRatio, (pattern_br_a.y - pattern_tl_a.y) / pixelRatio);
     const float2 display_size_b = float2((pattern_br_b.x - pattern_tl_b.x) / pixelRatio, (pattern_br_b.y - pattern_tl_b.y) / pixelRatio);
-    const float2 start = float2(vertx.outline_pos);
-    const float2 end = float2(vertx.outline_end);
+    const float2 start = float2(vertex_in.outline_pos);
+    const float2 end = float2(vertex_in.outline_end);
     const OutlineCorner corner = outline_corner(projectTile(start, start, projectionVector[uboIndex]),
                                                 projectTile(end, end, projectionVector[uboIndex]),
-                                                vertx.position, view.target_size);
+                                                vertex_in.position, view.target_size);
     const float2 pos2 = mix(start, end, corner.t);
 
     return {
@@ -329,7 +329,7 @@ struct VertexStage {
 ",
         outline_stages!(),
         r"
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
                                 device const ViewUBO& view [[buffer(idViewUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const FillOutlineDrawableUBO* drawableVector [[buffer(idFillDrawableUBO)]],
@@ -337,11 +337,11 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 
     device const FillOutlineDrawableUBO& drawable = drawableVector[uboIndex];
 
-    const float2 start = float2(vertx.outline_pos);
-    const float2 end = float2(vertx.outline_end);
+    const float2 start = float2(vertex_in.outline_pos);
+    const float2 end = float2(vertex_in.outline_end);
     const OutlineCorner corner = outline_corner(projectTile(start, start, projectionVector[uboIndex]),
                                                 projectTile(end, end, projectionVector[uboIndex]),
-                                                vertx.position, view.target_size);
+                                                vertex_in.position, view.target_size);
     return {
         .position       = corner.position,
         .pos            = corner.pos,
@@ -463,7 +463,7 @@ struct FragmentStage {
     #property varying opacity half
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
                                 device const ViewUBO& view [[buffer(idViewUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const FillPatternDrawableUBO* drawableVector [[buffer(idFillDrawableUBO)]],
@@ -477,13 +477,13 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 #if defined(HAS_UNIFORM_u_pattern_from)
     const auto pattern_from = float4(tileProps.pattern_from);
 #else
-    const auto pattern_from = float4(vertx.pattern_from);
+    const auto pattern_from = float4(vertex_in.pattern_from);
 #endif
 
 #if defined(HAS_UNIFORM_u_pattern_to)
     const auto pattern_to   = float4(tileProps.pattern_to);
 #else
-    const auto pattern_to   = float4(vertx.pattern_to);
+    const auto pattern_to   = float4(vertex_in.pattern_to);
 #endif
 
     const float2 pattern_tl_a = pattern_from.xy;
@@ -498,7 +498,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 
     const float2 display_size_a = float2((pattern_br_a.x - pattern_tl_a.x) / pixelRatio, (pattern_br_a.y - pattern_tl_a.y) / pixelRatio);
     const float2 display_size_b = float2((pattern_br_b.x - pattern_tl_b.x) / pixelRatio, (pattern_br_b.y - pattern_tl_b.y) / pixelRatio);
-    const float2 postion = float2(vertx.position);
+    const float2 postion = float2(vertex_in.position);
 
     return {
         .position       = projectTile(postion, postion, projectionVector[uboIndex]),
@@ -612,7 +612,7 @@ struct FragmentStage {
     #property varying opacity half
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const FillDrawableUBO* drawableVector [[buffer(idFillDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]]) {
@@ -620,7 +620,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     device const FillDrawableUBO& drawable = drawableVector[uboIndex];
 
     return {
-        .position = projectTile(float2(vertx.position), float2(vertx.position), projectionVector[uboIndex]),
+        .position = projectTile(float2(vertex_in.position), float2(vertex_in.position), projectionVector[uboIndex]),
         #property pass color
         #property pass opacity
     };

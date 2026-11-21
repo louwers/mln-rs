@@ -37,7 +37,7 @@ constant const float ZERO = 1.0 / 255.0 / 16.0;
 // Gaussian kernel coefficient: 1 / sqrt(2 * PI)
 #define GAUSS_COEF 0.3989422804014327
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const HeatmapDrawableUBO* drawableVector [[buffer(idHeatmapDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
@@ -49,7 +49,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const auto radius = $props.radius;
 
     // unencode the extrusion vector that we snuck into the a_pos vector
-    const float2 unscaled_extrude = float2(glMod(float2(vertx.pos), 2.0) * 2.0 - 1.0);
+    const float2 unscaled_extrude = float2(glMod(float2(vertex_in.pos), 2.0) * 2.0 - 1.0);
 
     // This 'extrude' comes in ranging from [-1, -1], to [1, 1].  We'll use
     // it to produce the vertices of a square mesh framing the point feature
@@ -74,12 +74,12 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     // multiply a_pos by 0.5, since we had it * 2 in order to sneak
     // in extrusion data
 #if defined(PROJECTION_GLOBE)
-    const float2 circle_center = floor(float2(vertx.pos) * 0.5);
+    const float2 circle_center = floor(float2(vertex_in.pos) * 0.5);
     const float3 center_vector = projectToSphere(circle_center, float2(0.0, 0.0), projectionVector[uboIndex]);
     const float3 corner_vector = globeRotateVector(center_vector, extrude * radius * drawable.globe_extrude_scale);
     const float4 position = interpolateProjection(circle_center + scaled_extrude, corner_vector, 0.0, projectionVector[uboIndex]);
 #else
-    const float4 pos = float4(floor(float2(vertx.pos) * 0.5) + scaled_extrude, 0, 1);
+    const float4 pos = float4(floor(float2(vertex_in.pos) * 0.5) + scaled_extrude, 0, 1);
     const float4 position = drawable.matrix * pos;
 #endif
 
@@ -130,11 +130,11 @@ struct FragmentStage {
     float2 pos;
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
                                 device const ViewUBO& view [[buffer(idViewUBO)]],
                                 device const HeatmapTexturePropsUBO& props [[buffer(idHeatmapTexturePropsUBO)]]) {
 
-    const float2 pos = float2(vertx.pos);
+    const float2 pos = float2(vertex_in.pos);
     const float4 position = props.matrix * float4(pos * view.target_size, 0, 1);
 
     return {

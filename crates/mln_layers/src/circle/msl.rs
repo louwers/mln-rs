@@ -42,7 +42,7 @@ struct FragmentStage {
     #property varying stroke_opacity half
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
                                 device const ViewUBO& view [[buffer(idViewUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const CircleDrawableUBO* drawableVector [[buffer(idCircleDrawableUBO)]],
@@ -56,11 +56,11 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const auto stroke_width = $props.stroke_width;
 
     // unencode the extrusion vector that we snuck into the a_pos vector
-    const float2 extrude = glMod(float2(vertx.position), 2.0) * 2.0 - 1.0;
+    const float2 extrude = glMod(float2(vertex_in.position), 2.0) * 2.0 - 1.0;
     const float2 scaled_extrude = extrude * drawable.extrude_scale;
 
     // multiply a_pos by 0.5, since we had it * 2 in order to sneak in extrusion data
-    const float2 circle_center = floor(float2(vertx.position) * 0.5);
+    const float2 circle_center = floor(float2(vertex_in.position) * 0.5);
 
     float4 position;
     if (props.pitch_with_map) {

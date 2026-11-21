@@ -143,6 +143,12 @@ pub(crate) fn expand(
             .iter()
             .find(|property| property.name == name)
             .ok_or_else(|| GpuError::Invalid(format!("{} has no property {name}", program.name)))?;
+        let mix = format!("{name}_t");
+        let mixed = matches!(property.ty, PropertyType::Float | PropertyType::Color);
+        let blocks = || program.buffers.iter().filter_map(Buffer::block);
+        if mixed && !blocks().any(|block| block.members.iter().any(|member| member.name == mix)) {
+            return Err(GpuError::Invalid(format!("{} has no block with {mix}, which mixes {name}", program.name)));
+        }
         let attribute = [VertexStep::Vertex, VertexStep::Instance].into_iter().find_map(|step| {
             let location = program.location(step, property.attribute)?;
             let attributes = if step == VertexStep::Vertex { program.attributes } else { program.instance_attributes };
@@ -214,10 +220,21 @@ pub fn identifiers(source: &str) -> impl Iterator<Item = &str> {
 }
 
 #[cfg(test)]
+#[expect(unsafe_code, reason = "`uniform_block!` implements bytemuck's `Pod` for the block it declares")]
 mod tests {
     use crate::gfx_types::AttributeDataType::{Float4, Short2};
-    use crate::shaders::program::{Attribute, Program, Property, Sources};
+    use crate::shaders::program::{Attribute, Buffer, Program, Property, Sources};
     use crate::shaders::source::wgsl::{self, Wgsl};
+
+    crate::uniform_block! {
+        pub(crate) struct DotDrawableUBO {
+            pub color_t: f32,
+            #[padding]
+            pub pad1: f32,
+            #[padding]
+            pub pad2: [f32; 2],
+        }
+    }
 
     #[test]
     fn identifiers_skip_comments() {
@@ -227,7 +244,7 @@ mod tests {
 
     static DOT: Program = Program {
         name: "dot",
-        buffers: &[],
+        buffers: &[Buffer::storage::<DotDrawableUBO>(2)],
         attributes: &[Attribute { id: 0, format: Short2 }, Attribute { id: 3, format: Float4 }],
         instance_attributes: &[],
         textures: &[],
@@ -265,5 +282,12 @@ mod tests {
             let source = Wgsl { vertex, fragment: "", prelude: "" };
             assert!(wgsl::expand(&DOT, &source).is_err(), "{vertex}");
         }
+    }
+
+    #[test]
+    fn a_mixed_property_has_its_mixing_factor_in_a_block() {
+        let unmixed = Program { name: "unmixed", buffers: &[], ..DOT };
+        let source = Wgsl { vertex: "#property attribute color", fragment: "", prelude: "" };
+        assert!(wgsl::expand(&unmixed, &source).is_err());
     }
 }

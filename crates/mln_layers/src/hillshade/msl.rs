@@ -26,15 +26,15 @@ struct FragmentStage {
     float2 pos;
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
                                 device const HillshadePrepareDrawableUBO& drawable [[buffer(idHillshadePrepareDrawableUBO)]],
                                 device const HillshadePrepareTilePropsUBO& tileProps [[buffer(idHillshadePrepareTilePropsUBO)]]) {
 
-    const float4 position = drawable.matrix * float4(float2(vertx.pos), 0, 1);
+    const float4 position = drawable.matrix * float4(float2(vertex_in.pos), 0, 1);
 
     float2 epsilon = 1.0 / tileProps.dimension;
     float scale = (tileProps.dimension.x - 2.0) / tileProps.dimension.x;
-    float2 pos = (float2(vertx.texture_pos) / 8192.0) * scale + epsilon;
+    float2 pos = (float2(vertex_in.texture_pos) / 8192.0) * scale + epsilon;
 
     return {
         .position    = position,
@@ -146,15 +146,15 @@ struct FragmentStage {
     float2 pos;
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const HillshadeDrawableUBO* drawableVector [[buffer(idHillshadeDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]]) {
 
     device const HillshadeDrawableUBO& drawable = drawableVector[uboIndex];
 
-    const float4 position = projectTile(float2(vertx.pos), float2(vertx.pos), projectionVector[uboIndex]);
-    float2 pos = float2(vertx.texture_pos) / 8192.0;
+    const float4 position = projectTile(float2(vertex_in.pos), float2(vertex_in.pos), projectionVector[uboIndex]);
+    float2 pos = float2(vertex_in.texture_pos) / 8192.0;
     // Metal's texture coordinate origin differs from some renderers;
     // restore Y-flip to match prepare pass and historical behavior.
     pos.y = 1.0 - pos.y;

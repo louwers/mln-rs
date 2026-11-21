@@ -195,6 +195,14 @@ impl Texture {
 /// reads it from there, otherwise from the values a layer binds to its
 /// attribute, which a source reads through the directives that
 /// [`source`](crate::shaders::source#properties) describes.
+///
+/// A vertex stage mixes the values of a [`Float`](PropertyType::Float) or a
+/// [`Color`](PropertyType::Color) at two zooms by the member `<name>_t` of
+/// one of the program's blocks, which a backend fails to compile a program
+/// without. The stage reads it as `drawable.<name>_t`, from a block it names
+/// `drawable`, in WGSL, MSL and GLSL, and as `u_<name>_t` in GLSL ES; an MSL
+/// vertex stage reads its per-vertex values from its stage input,
+/// `vertex_in`.
 #[derive(Clone, Copy, Debug)]
 pub struct Property {
     /// The name of the uniform, `u_<name>`.

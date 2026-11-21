@@ -22,7 +22,7 @@ float2 wall_normal(const uint bits, const float2 own) {
 }
 
 // The walls' fragment stage, and `wall`, the vertex of a wall, which reads
-// the instanced walls' attributes as the fields of `vertx`.
+// the instanced walls' attributes as the fields of `vertex_in`.
 macro_rules! extrusion_wall {
     () => {
         r"
@@ -37,12 +37,12 @@ struct FragmentOutput {
 };
 
 template <typename Vertex>
-FragmentStage wall(thread const Vertex& vertx,
+FragmentStage wall(thread const Vertex& vertex_in,
                    device const FillExtrusionDrawableUBO& drawable,
                    device const ProjectionUBO& projection,
                    device const FillExtrusionPropsUBO& props) {
 
-    bool isDiscarded = glMod(float(vertx.decimals_ed.x), 2.0) > 0.0;
+    bool isDiscarded = glMod(float(vertex_in.decimals_ed.x), 2.0) > 0.0;
     if (isDiscarded) {
         return {
             .position = float4(0.0),
@@ -53,16 +53,16 @@ FragmentStage wall(thread const Vertex& vertx,
     const auto base   = max($props.base, 0.0);
     const auto height = max($props.height, 0.0);
 
-    const float2 p1 = float2(vertx.outline_pos);
-    const float2 p2 = float2(vertx.next_outline_pos);
+    const float2 p1 = float2(vertex_in.outline_pos);
+    const float2 p2 = float2(vertex_in.next_outline_pos);
     const float2 edgevector = normalize(p2 - p1);
     const float2 own = float2(-edgevector.y, edgevector.x);
 
-    const float3 normal = float3(vertx.pos.x == 0 ? wall_normal(vertx.decimals_ed.x, own) : wall_normal(vertx.next_decimals_ed.x, own), 0.0);
-    const float t = float(vertx.pos.y);
+    const float3 normal = float3(vertex_in.pos.x == 0 ? wall_normal(vertex_in.decimals_ed.x, own) : wall_normal(vertex_in.next_decimals_ed.x, own), 0.0);
+    const float t = float(vertex_in.pos.y);
     const float z = (t != 0.0) ? height : base;     // TODO: This would come out wrong on GL for negative values, check it...
 
-    const float4 position = projectTileFor3D(vertx.pos.x == 0.0 ? p1 : p2, z, projection);
+    const float4 position = projectTileFor3D(vertex_in.pos.x == 0.0 ? p1 : p2, z, projection);
 
 #if defined(OVERDRAW_INSPECTOR)
     return {
@@ -155,12 +155,12 @@ struct VertexStage {
 ",
         extrusion_wall!(),
         r"
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const FillExtrusionDrawableUBO* drawableVector [[buffer(idFillExtrusionDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const FillExtrusionPropsUBO& props [[buffer(idFillExtrusionPropsUBO)]]) {
-    return wall(vertx, drawableVector[uboIndex], projectionVector[uboIndex], props);
+    return wall(vertex_in, drawableVector[uboIndex], projectionVector[uboIndex], props);
 }
 
 "
@@ -214,12 +214,12 @@ FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]],
     const BucketVertex outline = wallVertices[wall_index];
     const BucketVertex next = wallVertices[wall_index + 1];
 
-    WallVertex vertx;
-    vertx.pos = short2(corner < 2 ? 1 : 0, corner & 1);
-    vertx.outline_pos = outline.pos;
-    vertx.decimals_ed = outline.decimals_ed;
-    vertx.next_outline_pos = next.pos;
-    vertx.next_decimals_ed = next.decimals_ed;
+    WallVertex vertex_in;
+    vertex_in.pos = short2(corner < 2 ? 1 : 0, corner & 1);
+    vertex_in.outline_pos = outline.pos;
+    vertex_in.decimals_ed = outline.decimals_ed;
+    vertex_in.next_outline_pos = next.pos;
+    vertex_in.next_decimals_ed = next.decimals_ed;
 
     // The wall's paint values are its outline vertex's, where the drawable's
     // `paint_layout` says: the floats a vertex takes, then the offsets of
@@ -227,16 +227,16 @@ FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]],
     const uint paint_layout = drawable.paint_layout;
     device const float* paint = wallPaint + wall_index * (paint_layout & 0xff);
 #if !defined(HAS_UNIFORM_u_base)
-    vertx.base = float2(*(device const packed_float2*)(paint + ((paint_layout >> 8) & 0xff)));
+    vertex_in.base = float2(*(device const packed_float2*)(paint + ((paint_layout >> 8) & 0xff)));
 #endif
 #if !defined(HAS_UNIFORM_u_height)
-    vertx.height = float2(*(device const packed_float2*)(paint + ((paint_layout >> 16) & 0xff)));
+    vertex_in.height = float2(*(device const packed_float2*)(paint + ((paint_layout >> 16) & 0xff)));
 #endif
 #if !defined(HAS_UNIFORM_u_color)
-    vertx.color = float4(*(device const packed_float4*)(paint + (paint_layout >> 24)));
+    vertex_in.color = float4(*(device const packed_float4*)(paint + (paint_layout >> 24)));
 #endif
 
-    return wall(vertx, drawable, projectionVector[uboIndex], props);
+    return wall(vertex_in, drawable, projectionVector[uboIndex], props);
 }
 "
     ),
@@ -290,7 +290,7 @@ struct FragmentOutput {
     //float depth [[depth(less)]]; // Write depth value if it's less than what's already there
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
                                 device const ViewUBO& view [[buffer(idViewUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const FillExtrusionDrawableUBO* drawableVector [[buffer(idFillExtrusionDrawableUBO)]],
@@ -298,7 +298,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const FillExtrusionTilePropsUBO* tilePropsVector [[buffer(idFillExtrusionTilePropsUBO)]],
                                 device const FillExtrusionPropsUBO& props [[buffer(idFillExtrusionPropsUBO)]]) {
 
-    bool isDiscarded = glMod(float(vertx.decimals_ed.x), 2.0) > 0.0;
+    bool isDiscarded = glMod(float(vertex_in.decimals_ed.x), 2.0) > 0.0;
     if (isDiscarded) {
         return {
             .position       = float4(0.0),
@@ -321,17 +321,17 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const auto base   = max($props.base, 0.0);
     const auto height = max($props.height, 0.0);
 
-    const float2 p1 = float2(vertx.outline_pos);
-    const float2 p2 = float2(vertx.next_outline_pos);
+    const float2 p1 = float2(vertex_in.outline_pos);
+    const float2 p2 = float2(vertex_in.next_outline_pos);
     const float2 edgevector = normalize(p2 - p1);
     const float2 own = float2(-edgevector.y, edgevector.x);
 
-    const float3 normal = float3(vertx.pos.x == 0 ? wall_normal(vertx.decimals_ed.x, own) : wall_normal(vertx.next_decimals_ed.x, own), 0.0);
-    const float edgedistance = vertx.pos.x == 0 ? vertx.next_decimals_ed.y : vertx.decimals_ed.y;
-    const float t = float(vertx.pos.y);
+    const float3 normal = float3(vertex_in.pos.x == 0 ? wall_normal(vertex_in.decimals_ed.x, own) : wall_normal(vertex_in.next_decimals_ed.x, own), 0.0);
+    const float edgedistance = vertex_in.pos.x == 0 ? vertex_in.next_decimals_ed.y : vertex_in.decimals_ed.y;
+    const float t = float(vertex_in.pos.y);
     const float z = (t != 0.0) ? height : base;     // TODO: This would come out wrong on GL for negative values, check it...
 
-    const float4 position = projectTileFor3D(vertx.pos.x == 0.0 ? p1 : p2, z, projectionVector[uboIndex]);
+    const float4 position = projectTileFor3D(vertex_in.pos.x == 0.0 ? p1 : p2, z, projectionVector[uboIndex]);
 
 #if defined(OVERDRAW_INSPECTOR)
     return {
@@ -482,7 +482,7 @@ struct FragmentOutput {
     //float depth [[depth(less)]]; // Write depth value if it's less than what's already there
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
                                 device const ViewUBO& view [[buffer(idViewUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const FillExtrusionDrawableUBO* drawableVector [[buffer(idFillExtrusionDrawableUBO)]],
@@ -499,7 +499,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float3 normal = float3(0.0, 0.0, 1.0);
     const float t = 1.0;
     const float z = (t != 0.0) ? height : base;     // TODO: This would come out wrong on GL for negative values, check it...
-    const float4 position = projectTileFor3D(float2(vertx.pos), z, projectionVector[uboIndex]);
+    const float4 position = projectTileFor3D(float2(vertex_in.pos), z, projectionVector[uboIndex]);
 
 #if defined(OVERDRAW_INSPECTOR)
     return {
@@ -532,7 +532,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float2 display_size_a = float2((pattern_br_a.x - pattern_tl_a.x) / pixelRatio, (pattern_br_a.y - pattern_tl_a.y) / pixelRatio);
     const float2 display_size_b = float2((pattern_br_b.x - pattern_tl_b.x) / pixelRatio, (pattern_br_b.y - pattern_tl_b.y) / pixelRatio);
 
-    const float2 pos = float2(vertx.pos); // extrusion top
+    const float2 pos = float2(vertex_in.pos); // extrusion top
 
     float4 lighting = float4(0.0, 0.0, 0.0, 1.0);
     float directional = clamp(dot(normal, float3(props.light_position)), 0.0, 1.0);
@@ -638,7 +638,7 @@ struct FragmentOutput {
     //float depth [[depth(less)]]; // Write depth value if it's less than what's already there
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
+FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const FillExtrusionDrawableUBO* drawableVector [[buffer(idFillExtrusionDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
@@ -652,7 +652,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float3 normal = float3(0.0, 0.0, 1.0);
     const float t = 1.0;
     const float z = (t != 0.0) ? height : base;     // TODO: This would come out wrong on GL for negative values, check it...
-    const float4 position = projectTileFor3D(float2(vertx.pos), z, projectionVector[uboIndex]);
+    const float4 position = projectTileFor3D(float2(vertex_in.pos), z, projectionVector[uboIndex]);
 
 #if defined(OVERDRAW_INSPECTOR)
     return {
