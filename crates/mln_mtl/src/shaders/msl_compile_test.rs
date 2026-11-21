@@ -210,7 +210,6 @@ fn ubo_ids(program: &Program, source: &ShaderSource) -> Vec<(&'static str, usize
             &[
                 ("idCircleDrawableUBO", ID_CIRCLE_DRAWABLE_UBO),
                 ("idCircleEvaluatedPropsUBO", ID_CIRCLE_EVALUATED_PROPS_UBO),
-                ("idGroundDrawableUBO", ID_GROUND_DRAWABLE_UBO),
             ],
             "circleUBOCount",
         ),
@@ -262,7 +261,6 @@ fn ubo_ids(program: &Program, source: &ShaderSource) -> Vec<(&'static str, usize
             &[
                 ("idHeatmapDrawableUBO", ID_HEATMAP_DRAWABLE_UBO),
                 ("idHeatmapEvaluatedPropsUBO", ID_HEATMAP_EVALUATED_PROPS_UBO),
-                ("idGroundDrawableUBO", ID_GROUND_DRAWABLE_UBO),
             ],
             "heatmapUBOCount",
         ),
@@ -343,7 +341,6 @@ fn ubo_ids(program: &Program, source: &ShaderSource) -> Vec<(&'static str, usize
 /// The renderer's UBO structs, by the name the MSL gives them.
 const UBO_SIZES: &[(&str, usize)] = &[
     ("GlobalPaintParamsUBO", size_of::<layer_ubo::GlobalPaintParamsUBO>()),
-    ("ProjectionUBO", size_of::<layer_ubo::ProjectionUBO>()),
     ("SkyPropsUBO", size_of::<sky_ubo::SkyPropsUBO>()),
     ("AtmospherePropsUBO", size_of::<sky_ubo::AtmospherePropsUBO>()),
     ("BackgroundDrawableUBO", size_of::<background_layer_ubo::BackgroundDrawableUBO>()),
@@ -421,6 +418,14 @@ fn ubo_ids_and_sizes_are_the_renderers() {
                 let _ = writeln!(asserts, "static_assert(sizeof({name}) == {size}, \"sizeof({name}) != {size}\");");
             }
         }
+        // A terrain variant's projection entries carry the ground under its
+        // draws.
+        let (flat, terrain) = (size_of::<layer_ubo::ProjectionUBO>(), size_of::<terrain_ubo::TerrainProjectionUBO>());
+        let _ = writeln!(
+            asserts,
+            "#if defined(TERRAIN)\nstatic_assert(sizeof(ProjectionUBO) == {terrain}, \"sizeof(ProjectionUBO) != \
+             {terrain}\");\n#else\nstatic_assert(sizeof(ProjectionUBO) == {flat}, \"sizeof(ProjectionUBO) != {flat}\");\n#endif"
+        );
         text.push_str(&asserts);
         for (projection, variant) in projections(program) {
             if let Err(error) = compile(&device, &text, &defines(false, variant, []), source.fast_math) {

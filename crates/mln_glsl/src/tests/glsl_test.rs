@@ -40,7 +40,7 @@ use mln_gfx::shaders::sky_ubo::{AtmospherePropsUBO, SkyPropsUBO};
 use mln_gfx::shaders::symbol_layer_ubo::{
     CollisionDrawableUBO, CollisionTilePropsUBO, SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO,
 };
-use mln_gfx::shaders::terrain_ubo::{GroundDrawableUBO, TerrainDrawableUBO, TerrainFogUBO, TerrainPropsUBO};
+use mln_gfx::shaders::terrain_ubo::{TerrainDrawableUBO, TerrainFogUBO, TerrainProjectionUBO, TerrainPropsUBO};
 use naga::{AddressSpace, ArraySize, Binding, Interpolation, Module, ScalarKind, StorageAccess, TypeInner};
 
 use crate::front_end::parse;
@@ -170,11 +170,15 @@ impl Buffer {
 /// The buffers of each shader, with the size of what the renderer binds: a
 /// uniform buffer's struct, or an element of a storage buffer's vector (the
 /// union of the layer's drawable structs where it has several, a word of a
-/// vertex buffer). A terrain variant declares its ground too.
-fn buffers(program: &Program) -> Vec<(Buffer, usize)> {
+/// vertex buffer), in a variant of `variant`'s projection: a terrain
+/// variant's projection entries carry the ground under its draws.
+fn buffers(program: &Program, variant: ProjectionVariant) -> Vec<(Buffer, usize)> {
     use Buffer::{DrawableUniform, DrawableVertex, Global, LayerStorage, LayerUniform};
-    let projection = (LayerStorage(ID_PROJECTION_UBO), size_of::<ProjectionUBO>());
-    let ground = (LayerStorage(ID_GROUND_DRAWABLE_UBO), size_of::<GroundDrawableUBO>());
+    let projection_size = match variant {
+        ProjectionVariant::Terrain => size_of::<TerrainProjectionUBO>(),
+        ProjectionVariant::Mercator | ProjectionVariant::Globe => size_of::<ProjectionUBO>(),
+    };
+    let projection = (LayerStorage(ID_PROJECTION_UBO), projection_size);
     let mut buffers = vec![(Global(ID_GLOBAL_PAINT_PARAMS_UBO), size_of::<GlobalPaintParamsUBO>())];
     let own: Vec<(Buffer, usize)> = match program.name {
         "AtmosphereShader" => vec![(LayerUniform(ID_ATMOSPHERE_PROPS_UBO), size_of::<AtmospherePropsUBO>())],
@@ -192,7 +196,6 @@ fn buffers(program: &Program) -> Vec<(Buffer, usize)> {
             (LayerStorage(ID_CIRCLE_DRAWABLE_UBO), size_of::<CircleDrawableUBO>()),
             projection,
             (LayerUniform(ID_CIRCLE_EVALUATED_PROPS_UBO), size_of::<CircleEvaluatedPropsUBO>()),
-            ground,
         ],
         "ClippingMaskProgram" => vec![(DrawableUniform(ID_PROJECTION_UBO), size_of::<ProjectionUBO>())],
         "CollisionBoxShader" | "CollisionCircleShader" => vec![
@@ -250,7 +253,6 @@ fn buffers(program: &Program) -> Vec<(Buffer, usize)> {
             (LayerStorage(ID_HEATMAP_DRAWABLE_UBO), size_of::<HeatmapDrawableUBO>()),
             projection,
             (LayerUniform(ID_HEATMAP_EVALUATED_PROPS_UBO), size_of::<HeatmapEvaluatedPropsUBO>()),
-            ground,
         ],
         "HeatmapTextureShader" => {
             vec![(LayerUniform(ID_HEATMAP_TEXTURE_PROPS_UBO), size_of::<HeatmapTexturePropsUBO>())]
@@ -486,19 +488,24 @@ fn buffers_are_the_renderers() {
 
     let mut failures = Vec::new();
     for (program, source) in programs() {
-        let expected: BTreeMap<(u32, u32), (Buffer, Resource)> = buffers(program)
-            .into_iter()
-            .map(|(buffer, size)| {
-                let (set, binding, storage) = buffer.slot();
-                let size = size as u32;
-                let resource = if storage { Resource::Storage(size) } else { Resource::Uniform(size) };
-                ((set.set_index(), binding), (buffer, resource))
-            })
-            .collect();
-        assert_eq!(expected.len(), buffers(program).len(), "{}: two buffers at a binding", program.name);
+        let expected = |projection: ProjectionVariant| -> BTreeMap<(u32, u32), (Buffer, Resource)> {
+            let buffers = buffers(program, projection);
+            let expected: BTreeMap<_, _> = buffers
+                .iter()
+                .map(|&(buffer, size)| {
+                    let (set, binding, storage) = buffer.slot();
+                    let size = size as u32;
+                    let resource = if storage { Resource::Storage(size) } else { Resource::Uniform(size) };
+                    ((set.set_index(), binding), (buffer, resource))
+                })
+                .collect();
+            assert_eq!(expected.len(), buffers.len(), "{}: two buffers at a binding", program.name);
+            expected
+        };
 
         let mut declared = BTreeSet::new();
         for variant in variants(program, false) {
+            let expected = expected(variant.projection);
             for stage in STAGES {
                 let at = format!("{} ({}, {stage:?})", program.name, variant.name);
                 let resources = resources(&module(program, source, stage, &variant.defines))
@@ -518,7 +525,7 @@ fn buffers_are_the_renderers() {
                 }
             }
         }
-        for (slot, (buffer, _)) in &expected {
+        for (slot, (buffer, _)) in &expected(ProjectionVariant::Mercator) {
             if !declared.contains(slot) {
                 failures.push(format!("{}: no stage declares {buffer:?}", program.name));
             }
@@ -736,9 +743,9 @@ fn bindings_follow_from_the_packed_ids() {
     assert_eq!(drawable_vertex_binding(ID_FILL_OUTLINE_PAINT), Some(7));
 
     // samplerBindingStartId.
-    assert_eq!(IMAGE_SAMPLER_START, 3);
+    assert_eq!(IMAGE_SAMPLER_START, 4);
     assert_eq!(image_texture_binding(0), 0);
-    assert_eq!(image_sampler_binding(0), 3);
+    assert_eq!(image_sampler_binding(0), 4);
 }
 
 // No table has more attributes and textures than a shader can have. Only

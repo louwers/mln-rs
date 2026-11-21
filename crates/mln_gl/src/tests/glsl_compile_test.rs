@@ -196,7 +196,8 @@ fn every_program_links_and_matches_its_tables(backend: &mut RendererBackend) {
                         .uniform_blocks
                         .iter()
                         .find(|info| info.id == block.id)
-                        .unwrap_or_else(|| panic!("{what}: block at {} without a table entry", block.id));
+                        .unwrap_or_else(|| panic!("{what}: block at {} without a table entry", block.id))
+                        .in_variant(variant == ProjectionVariant::Terrain);
                     assert_eq!(
                         block.size.next_multiple_of(16),
                         info.size,

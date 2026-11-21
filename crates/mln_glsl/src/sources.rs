@@ -47,7 +47,8 @@
 use crate::program::GlslShaderSource;
 
 /// The height rule of `mln_util::dem`, over the DEM tile a draw reads: its
-/// RGBA8 texels behind a one-texel border, decoded by a `TerrainProps`. A
+/// RGBA8 texels behind a one-texel border, decoded by a `TerrainProps` (the
+/// vertex prelude's). A
 /// macro, so that `concat!` puts it in the vertex stages that read the DEM:
 /// a fragment stage would need a sampler for the texture. The surface's
 /// vertex stage has it, and so does each standing layer's terrain variant's
@@ -55,14 +56,6 @@ use crate::program::GlslShaderSource;
 macro_rules! ground_height {
     () => {
         r"
-
-struct TerrainProps {
-    vec4 unpack;
-    float unpack_scale;
-    float exaggeration;
-    float skirt_length;
-    float pad0;
-};
 
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 2) uniform texture2D ground_dem_texture;
 
@@ -114,28 +107,30 @@ layout(std140, set = LAYER_SET_INDEX, binding = idTerrainPropsUBO) uniform Terra
 }
 
 /// What a standing layer's terrain variant's vertex stage reads of the
-/// ground, within `#ifdef TERRAIN`: `ground_height`, and each draw's
-/// `GroundDrawableUBO`, which `standing_height` reads.
+/// ground, within `#ifdef TERRAIN`: `ground_height`, and what reads the
+/// ground of its draw in its projection entry (`ProjectionUBO::ground`).
 macro_rules! standing_ground {
     () => {
         concat!(
             "\n#ifdef TERRAIN\n",
             ground_height!(),
             r"
-struct GroundDrawableUBO {
-    vec4 dem_coords;
-    TerrainProps props;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idDrawableReservedFragmentOnlyUBO) readonly buffer GroundDrawableUBOVector {
-    GroundDrawableUBO ground_ubo[];
-} groundVector;
-
-// The height of the ground in meters at `pos`, in tile units of the tile of
-// the draw whose entries are at `index`.
-float standing_height(const vec2 pos, const int index) {
-    const GroundDrawableUBO ground = groundVector.ground_ubo[index];
+// The height of the ground in meters at `pos`, in tile units of the draw's
+// tile, which reads `ground`.
+float standing_height(const vec2 pos, const GroundDrawableUBO ground) {
     return ground_height(pos, ground.dem_coords, ground.props);
+}
+
+// Whether the draw that reads `ground` draws a feature whose untranslated
+// anchor is at `pos`: a draw of a DEM tile under the tile draws the features
+// on its part of the tile.
+bool ground_holds(const vec2 pos, const GroundDrawableUBO ground) {
+    return all(greaterThanEqual(pos, ground.rect.xy)) && all(lessThan(pos, ground.rect.zw));
+}
+
+// A position outside the clip volume, of a vertex the draw drops.
+vec4 ground_dropped() {
+    return vec4(-2.0, -2.0, -2.0, 1.0);
 }
 #endif
 "
@@ -260,6 +255,24 @@ layout(set = GLOBAL_SET_INDEX, binding = 0) uniform GlobalPaintParamsUBO {
     float pad1;
 } paintParams;
 
+// How the terrain's DEM decodes, its exaggeration and its skirts' length.
+struct TerrainProps {
+    vec4 unpack;
+    float unpack_scale;
+    float exaggeration;
+    float skirt_length;
+    float pad0;
+};
+
+// Where a terrain variant's draw reads the ground it stands on: where its
+// tile is in the DEM tile it binds, the part of its tile it draws, and how
+// the DEM decodes.
+struct GroundDrawableUBO {
+    vec4 dem_coords;
+    vec4 rect;
+    TerrainProps props;
+};
+
 struct ProjectionUBO {
     mat4 matrix;
     mat4 fallback_matrix;
@@ -268,6 +281,9 @@ struct ProjectionUBO {
     float projection_transition;
     float depth_offset;
     vec2 translate;
+#ifdef TERRAIN
+    GroundDrawableUBO ground;
+#endif
 };
 
 // Pole vertices carry these sentinel Y values in their raw position.
@@ -434,7 +450,7 @@ bool clippedAtAntimeridian(float tileX) {
 #define layerSSBOStartId                    0
 #define layerUBOStartId                     4
 #define drawableUBOStartId                  0
-#define samplerBindingStartId               3
+#define samplerBindingStartId               4
 
 #define idDrawableReservedVertexOnlyUBO     layerSSBOStartId
 #define idDrawableReservedFragmentOnlyUBO   idDrawableReservedVertexOnlyUBO + 1
@@ -777,10 +793,10 @@ void main() {
     const ProjectionUBO projection = projectionVector.projection_ubo[constant.ubo_index];
 #endif
     // The circle stands on the ground under its center, as it draws,
-    // translated.
+    // translated, if its draw draws it.
 #ifdef TERRAIN
-    const vec2 translate = projectionVector.projection_ubo[constant.ubo_index].translate;
-    const float ele = standing_height(circle_center + translate, constant.ubo_index);
+    const ProjectionUBO standing = projectionVector.projection_ubo[constant.ubo_index];
+    const float ele = standing_height(circle_center + standing.translate, standing.ground);
 #else
     const float ele = 0.0;
 #endif
@@ -828,6 +844,11 @@ void main() {
         const float factor = props.scale_with_map != 0 ? paintParams.camera_to_center_distance : gl_Position.w;
         gl_Position.xy += scaled_extrude * (radius + stroke_width) * factor;
     }
+#ifdef TERRAIN
+    if (!ground_holds(circle_center, standing.ground)) {
+        gl_Position = ground_dropped();
+    }
+#endif
 
     // This is a minimum blur distance that serves as a faux-antialiasing for
     // the circle. since blur is a ratio of the circle's size and the intent is
@@ -3602,14 +3623,21 @@ void main() {
     const vec3 corner_vector = globeRotateVector(center_vector, extrude * radius * drawable.globe_extrude_scale);
     gl_Position = interpolateProjection(circle_center + scaled_extrude, corner_vector, 0.0, projectionVector.projection_ubo[constant.ubo_index]);
 #else
-    // The kernel lies flat on the ground under its center.
+    // The kernel lies flat on the ground under its center, if its draw
+    // draws it.
     const vec2 center = floor(in_position * 0.5);
 #ifdef TERRAIN
-    const float ele = standing_height(center, constant.ubo_index);
+    const GroundDrawableUBO ground = projectionVector.projection_ubo[constant.ubo_index].ground;
+    const float ele = standing_height(center, ground);
 #else
     const float ele = 0.0;
 #endif
     gl_Position = drawable.matrix * vec4(center + scaled_extrude, ele, 1);
+#ifdef TERRAIN
+    if (!ground_holds(center, ground)) {
+        gl_Position = ground_dropped();
+    }
+#endif
 #endif
 
 #if !defined(HAS_UNIFORM_u_weight)

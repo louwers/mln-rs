@@ -17,6 +17,7 @@ use mln_gfx::gpu::{
     TextureRegion,
 };
 use mln_gfx::offscreen_target::OffscreenTarget;
+use mln_gfx::projection_variant::ProjectionVariant;
 use mln_map::transform::{TerrainGround, Transform};
 use mln_map_types::{
     CameraLimits, CameraOptions, ConstrainMode, Elevation, MapDebugOptions, MapMode, TerrainSkirtLength, TileLodMode,
@@ -1780,5 +1781,27 @@ fn a_map_without_terrain_makes_no_terrain_variant() {
     let center = SIDE / 2;
     assert!(red(map.pixel(center, center)), "the circle");
     assert!(!map.renderer.made_terrain_variant());
+    assert_eq!(0, map.renderer.rendering_stats().terrain.mem_dem_textures);
+}
+
+/// Once terrain turns off, a circle that stood on it draws with the flat
+/// variant, whose draws are made again without the ground, and the DEM
+/// textures go.
+#[test]
+fn a_map_whose_terrain_turned_off_keeps_no_ground() {
+    let mut map = raised(10.0, 0.0);
+    add_layer(&mut map, &red_circle(LatLng::new(-10.0, 10.0086).unwrap()), None);
+    map.settle();
+    map.frame();
+    let circle = |map: &DrapedMap| {
+        let variants = map.renderer.projection_variants();
+        variants.into_iter().find_map(|(id, variant)| (id == "circle").then_some(variant))
+    };
+    assert_eq!(Some(ProjectionVariant::Terrain), circle(&map));
+    assert_ne!(0, map.renderer.rendering_stats().terrain.mem_dem_textures);
+
+    map.edit(Edit::SetTerrain(None));
+    map.frame();
+    assert_eq!(Some(ProjectionVariant::Mercator), circle(&map));
     assert_eq!(0, map.renderer.rendering_stats().terrain.mem_dem_textures);
 }

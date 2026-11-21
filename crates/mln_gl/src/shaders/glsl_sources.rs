@@ -129,27 +129,29 @@ macro_rules! terrain_props {
 }
 
 /// What a standing layer's terrain variant's vertex stage reads of the
-/// ground, within `#ifdef TERRAIN`: `ground_height`, and the draw's
-/// `GroundDrawableUBO`, which `standing_height` reads.
+/// ground, within `#ifdef TERRAIN`: `ground_height`, and what reads the
+/// ground of its draw in its projection block (`u_ground_*`).
 macro_rules! standing_ground {
     () => {
         concat!(
             "#ifdef TERRAIN\n",
-            r"layout (std140) uniform GroundDrawableUBO {
-    highp vec4 u_ground_dem_coords;
-    highp vec4 u_ground_unpack;
-    highp float u_ground_unpack_scale;
-    highp float u_ground_exaggeration;
-    highp float u_ground_skirt_length;
-    highp float u_ground_pad;
-};
-
-",
             ground_height!(),
             r"// The height of the ground in meters at `pos`, in tile units of the draw's
 // tile.
 highp float standing_height(highp vec2 pos) {
     return ground_height(pos, u_ground_dem_coords, u_ground_unpack, u_ground_unpack_scale, u_ground_exaggeration);
+}
+
+// Whether the draw draws a feature whose untranslated anchor is at `pos`: a
+// draw of a DEM tile under the tile draws the features on its part of the
+// tile.
+bool ground_holds(highp vec2 pos) {
+    return all(greaterThanEqual(pos, u_ground_rect.xy)) && all(lessThan(pos, u_ground_rect.zw));
+}
+
+// A position outside the clip volume, of a vertex the draw drops.
+vec4 ground_dropped() {
+    return vec4(-2.0, -2.0, -2.0, 1.0);
 }
 #endif
 "
@@ -523,7 +525,7 @@ lowp float stroke_opacity = u_stroke_opacity;
     // in extrusion data
     vec2 circle_center = floor(a_pos * 0.5);
     // The circle stands on the ground under its center, as it draws,
-    // translated.
+    // translated, if its draw draws it.
 #ifdef TERRAIN
     highp float ele = standing_height(circle_center + u_projection_translate);
 #else
@@ -575,6 +577,11 @@ lowp float stroke_opacity = u_stroke_opacity;
             gl_Position.xy += extrude * (radius + stroke_width) * u_extrude_scale * gl_Position.w;
         }
     }
+#ifdef TERRAIN
+    if (!ground_holds(circle_center)) {
+        gl_Position = ground_dropped();
+    }
+#endif
 
     // This is a minimum blur distance that serves as a faux-antialiasing for
     // the circle. since blur is a ratio of the circle's size and the intent is
@@ -2899,7 +2906,8 @@ mediump float radius = u_radius;
     vec3 corner_vector = globeRotateVector(center_vector, v_extrude * radius * u_globe_extrude_scale);
     gl_Position = interpolateProjection(circle_center + extrude, corner_vector, 0.0);
 #else
-    // The kernel lies flat on the ground under its center.
+    // The kernel lies flat on the ground under its center, if its draw
+    // draws it.
     vec2 center = floor(a_pos * 0.5);
 #ifdef TERRAIN
     highp float ele = standing_height(center);
@@ -2907,6 +2915,11 @@ mediump float radius = u_radius;
     highp float ele = 0.0;
 #endif
     gl_Position = u_matrix * vec4(center + extrude, ele, 1);
+#ifdef TERRAIN
+    if (!ground_holds(center)) {
+        gl_Position = ground_dropped();
+    }
+#endif
 #endif
 }
 "#
@@ -4820,6 +4833,18 @@ layout (std140) uniform ProjectionUBO {
     highp float u_projection_transition;
     highp float u_projection_depth_offset;
     highp vec2 u_projection_translate;
+#ifdef TERRAIN
+    // Where a terrain variant's draw reads the ground it stands on: where its
+    // tile is in the DEM tile it binds, the part of its tile it draws, and how
+    // the DEM decodes.
+    highp vec4 u_ground_dem_coords;
+    highp vec4 u_ground_rect;
+    highp vec4 u_ground_unpack;
+    highp float u_ground_unpack_scale;
+    highp float u_ground_exaggeration;
+    highp float u_ground_skirt_length;
+    highp float u_ground_pad;
+#endif
 };
 
 // Pole vertices carry these sentinel Y values in their raw position.

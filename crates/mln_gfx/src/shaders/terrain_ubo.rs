@@ -1,5 +1,7 @@
 use bytemuck::{Pod, Zeroable};
 
+use crate::shaders::layer_ubo::ProjectionUBO;
+
 /// A terrain tile's draw block (80 bytes), an entry of the storage buffer
 /// that the terrain's draws index by `globalIndex`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
@@ -38,18 +40,39 @@ pub struct TerrainPropsUBO {
 }
 const _: () = assert!(size_of::<TerrainPropsUBO>() == 2 * 16);
 
-/// Where a standing draw reads its ground (48 bytes), an entry of the
-/// storage buffer that a terrain variant's draws index by `globalIndex`:
-/// the draw's DEM coordinates, as [`TerrainDrawableUBO::dem_coords`] has
-/// them for the draw's tile, and how the DEM decodes, as the surface's.
+/// Where a standing draw reads its ground (64 bytes): the DEM tile it
+/// binds, and the part of its tile that it draws.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct GroundDrawableUBO {
-    /* 0 */ pub dem_coords: [f32; 4],
-    /* 16 */ pub props: TerrainPropsUBO,
-    /* 48 */
+    /// Where the draw's tile is in the DEM tile, as
+    /// [`TerrainDrawableUBO::dem_coords`] has it. A width of 0 is flat
+    /// ground.
+    /* 0 */
+    pub dem_coords: [f32; 4],
+    /// The part of the draw's tile whose features it draws, in tile units:
+    /// x0, y0, x1, y1. A feature draws where its untranslated anchor is at
+    /// least x0 and y0 and under x1 and y1.
+    /* 16 */
+    pub rect: [f32; 4],
+    /// How the DEM decodes, as the surface's.
+    /* 32 */
+    pub props: TerrainPropsUBO,
+    /* 64 */
 }
-const _: () = assert!(size_of::<GroundDrawableUBO>() == 3 * 16);
+const _: () = assert!(size_of::<GroundDrawableUBO>() == 4 * 16);
+
+/// The entry of [`ID_PROJECTION_UBO`](crate::shaders::shader_defines::ID_PROJECTION_UBO)
+/// of a terrain variant's draw (240 bytes): its projection, and the ground
+/// it stands on, which every standing program reads there.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
+#[repr(C, align(16))]
+pub struct TerrainProjectionUBO {
+    /*   0 */ pub projection: ProjectionUBO,
+    /* 176 */ pub ground: GroundDrawableUBO,
+    /* 240 */
+}
+const _: () = assert!(size_of::<TerrainProjectionUBO>() == 15 * 16);
 
 /// The terrain's fog (64 bytes), GL JS's over the surface, which only the
 /// surface's fragment stage reads. It tints what a stack's draw covers, by

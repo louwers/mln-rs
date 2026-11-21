@@ -233,26 +233,26 @@ impl TerrainTile {
         let (Some(dem), Some(own)) = (dem, dem_zoom(self.id.canonical.z, dem_zooms)) else {
             return;
         };
-        let own = self.id.scaled_to(own);
-        self.dem_loading = dem.tile(&own).is_some_and(|tile| dem_data(tile).is_none() && !tile.is_complete());
-        let bound = loaded_dem(dem, own, dem_zooms.min);
-        self.dem = bound.map(|id| (id, dem_coords(self.id.canonical, id.canonical.z)));
+        let own_tile = dem.tile(&self.id.scaled_to(own));
+        self.dem_loading = own_tile.is_some_and(|tile| dem_data(tile).is_none() && !tile.is_complete());
+        let bound = (dem_zooms.min..=own).rev().map(|z| self.id.scaled_to(z)).find(|id| {
+            let tile = if id.canonical.z == own { own_tile } else { dem.tile(id) };
+            tile.and_then(dem_data).is_some()
+        });
+        self.dem = bound.map(|id| (id, self.dem_coords(id.canonical.z)));
     }
-}
 
-/// Of the DEM tile `id` of `dem` and its ancestors down to `min_zoom`, the
-/// deepest that has data.
-pub(crate) fn loaded_dem(dem: &SourceTiles, id: OverscaledTileID, min_zoom: u8) -> Option<OverscaledTileID> {
-    (min_zoom..=id.canonical.z).rev().map(|z| id.scaled_to(z)).find(|id| dem.tile(id).and_then(dem_data).is_some())
-}
-
-/// Where `tile` is in its ancestor at zoom `z` (or itself): the DEM
-/// coordinates of a tile that reads the DEM tile there.
-pub(crate) fn dem_coords(tile: CanonicalTileID, z: u8) -> DemCoords {
-    let dz = tile.z - z;
-    let tiles = (1u32 << dz) as f32;
-    let mask = (1u32 << dz) - 1;
-    DemCoords { scale: 1.0 / tiles, offset: [(tile.x & mask) as f32 / tiles, (tile.y & mask) as f32 / tiles] }
+    /// Where the tile is in its ancestor at zoom `z` (or itself).
+    fn dem_coords(&self, z: u8) -> DemCoords {
+        let canonical = self.id.canonical;
+        let dz = canonical.z - z;
+        let tiles = (1u32 << dz) as f32;
+        let mask = (1u32 << dz) - 1;
+        DemCoords {
+            scale: 1.0 / tiles,
+            offset: [(canonical.x & mask) as f32 / tiles, (canonical.y & mask) as f32 / tiles],
+        }
+    }
 }
 
 /// The terrain tiles that cover a view, the DEM tiles they read and what
@@ -271,14 +271,8 @@ pub(crate) struct TerrainCover {
     /// in GL JS, whose camera falls back to the DEM tiles at its zoom.
     pub(crate) center: Option<TerrainTile>,
     /// The DEM tiles the source keeps loaded for the tiles and the center,
-    /// whether or not a layer draws them, nearest the center first, then
-    /// `standing_dems`.
+    /// whether or not a layer draws them, nearest the center first.
     pub(crate) dem_tiles: Vec<OverscaledTileID>,
-    /// The DEM tiles that the tiles of standing layers' sources tiled
-    /// coarser than the DEM read ([`Ground`](super::ground::Ground)): for each
-    /// tile whose DEM tile is deeper than such a source's deepest zoom, that
-    /// DEM tile's ancestor at the zoom.
-    pub(crate) standing_dems: Vec<OverscaledTileID>,
     /// The ranges that cull the tiles, and every source's tiles; the next
     /// update's cover takes them over.
     pub(crate) ranges: ElevationRanges,
@@ -287,9 +281,7 @@ pub(crate) struct TerrainCover {
 impl TerrainCover {
     /// The terrain tiles of `view`, of the raster-dem source `source_id`
     /// with tiles of `dem_tile_size` and zoom levels `dem_zooms`, culled by
-    /// `ranges`, and the DEM tiles they read, with those the standing
-    /// layers' sources read whose deepest zooms are `standing_zooms`. The
-    /// tiles bind no DEM until [`bind`].
+    /// `ranges`. The tiles bind no DEM until [`bind`].
     ///
     /// [`bind`]: Self::bind
     pub(crate) fn new(
@@ -298,7 +290,6 @@ impl TerrainCover {
         dem_tile_size: u16,
         dem_zooms: Range<u8>,
         ranges: ElevationRanges,
-        standing_zooms: &[u8],
     ) -> Self {
         let tiles: Vec<TerrainTile> =
             cover_tiles(view, dem_tile_size, &ranges).into_iter().map(TerrainTile::new).collect();
@@ -312,36 +303,14 @@ impl TerrainCover {
             TerrainTile::new(OverscaledTileID::with_zxy(z, 0, z, x.min(max), y.min(max)))
         });
         let mut seen = HashSet::default();
-        let mut dem_tiles: Vec<OverscaledTileID> = tiles
+        let dem_tiles = tiles
             .iter()
             .chain(&center)
             .flat_map(|tile| tile.dem_reads(dem_zooms))
             .filter(|id| seen.insert(*id))
             .collect();
-        let mut standing = HashSet::default();
-        let standing_dems: Vec<OverscaledTileID> = tiles
-            .iter()
-            .filter_map(|tile| Some((tile, dem_zoom(tile.id.canonical.z, dem_zooms)?)))
-            .flat_map(|(tile, read)| {
-                let coarser = standing_zooms.iter().filter(move |&&z| z < read && z >= dem_zooms.min);
-                coarser.map(|&z| tile.id.scaled_to(z))
-            })
-            .filter(|id| standing.insert(*id))
-            .collect();
-        dem_tiles.extend(standing_dems.iter().filter(|id| seen.insert(**id)));
         let tile_size = terrain_tile_size(dem_tile_size);
-        TerrainCover { source_id: source_id.to_owned(), tile_size, tiles, center, dem_tiles, standing_dems, ranges }
-    }
-
-    /// The DEM tiles of `dem`, the terrain's source, that the standing DEM
-    /// tiles bind: each one, or its deepest ancestor that has data while it
-    /// loads; none where none has.
-    pub(crate) fn bound_standing_dems<'a>(
-        &'a self,
-        dem: &'a SourceTiles,
-    ) -> impl Iterator<Item = OverscaledTileID> + 'a {
-        let min_zoom = self.ranges.dem_zooms.min;
-        self.standing_dems.iter().filter_map(move |&id| loaded_dem(dem, id, min_zoom))
+        TerrainCover { source_id: source_id.to_owned(), tile_size, tiles, center, dem_tiles, ranges }
     }
 
     /// Binds each tile's DEM from the tiles of `dem`, the terrain's source.

@@ -65,7 +65,7 @@ use mln_gfx::shaders::shader_defines::{
     ID_FILL_IMAGE_TEXTURE, ID_FILL_OPACITY_VERTEX_ATTRIBUTE, ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE,
     ID_FILL_OUTLINE_END_ATTRIBUTE, ID_FILL_OUTLINE_POS_ATTRIBUTE, ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE,
     ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE, ID_FILL_POS_VERTEX_ATTRIBUTE, ID_FILL_TILE_PROPS_UBO,
-    ID_GLOBAL_PAINT_PARAMS_UBO, ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE, ID_GROUND_DEM_TEXTURE, ID_GROUND_DRAWABLE_UBO,
+    ID_GLOBAL_PAINT_PARAMS_UBO, ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE, ID_GROUND_DEM_TEXTURE,
     ID_HEATMAP_COLOR_RAMP_TEXTURE, ID_HEATMAP_DRAWABLE_UBO, ID_HEATMAP_EVALUATED_PROPS_UBO, ID_HEATMAP_IMAGE_TEXTURE,
     ID_HEATMAP_POS_VERTEX_ATTRIBUTE, ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE, ID_HEATMAP_TEXTURE_PROPS_UBO,
     ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE, ID_HILLSHADE_DRAWABLE_UBO, ID_HILLSHADE_EVALUATED_PROPS_UBO,
@@ -94,7 +94,7 @@ use mln_gfx::shaders::sky_ubo::{AtmospherePropsUBO, SkyPropsUBO};
 use mln_gfx::shaders::symbol_layer_ubo::{
     CollisionDrawableUBO, CollisionTilePropsUBO, SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO,
 };
-use mln_gfx::shaders::terrain_ubo::{GroundDrawableUBO, TerrainDrawableUBO, TerrainFogUBO, TerrainPropsUBO};
+use mln_gfx::shaders::terrain_ubo::{TerrainDrawableUBO, TerrainFogUBO, TerrainProjectionUBO, TerrainPropsUBO};
 
 use super::glsl_sources;
 
@@ -121,6 +121,20 @@ pub(crate) struct UniformBlockInfo {
     /// The size of an element of the layer's buffer that holds this block for
     /// each of its drawables, or 0 if the renderer writes no such buffer.
     pub(crate) element_size: usize,
+}
+
+impl UniformBlockInfo {
+    /// The block as a program declares it, with the terrain's define if
+    /// `terrain`: a terrain variant's projection block holds the ground of
+    /// its draw too ([`TerrainProjectionUBO`]).
+    pub(crate) fn in_variant(self, terrain: bool) -> UniformBlockInfo {
+        if terrain && self.id == ID_PROJECTION_UBO {
+            let size = size_of::<TerrainProjectionUBO>();
+            UniformBlockInfo { size, element_size: size, ..self }
+        } else {
+            self
+        }
+    }
 }
 
 /// The vertex attribute `name` reads attribute `id`.
@@ -244,9 +258,8 @@ shader_source!(
     &[]
 );
 
-// A standing layer's terrain variant's ground: the draw's block, and the DEM.
-const GROUND_BLOCK: UniformBlockInfo =
-    element::<GroundDrawableUBO, GroundDrawableUBO>("GroundDrawableUBO", ID_GROUND_DRAWABLE_UBO);
+// A standing layer's terrain variant's ground: the DEM. The rest of the
+// ground is in its projection block (`UniformBlockInfo::in_variant`).
 const GROUND_TEXTURES: &[TextureInfo] = &[tex("u_ground_dem", ID_GROUND_DEM_TEXTURE)];
 
 // Circle
@@ -257,7 +270,6 @@ shader_source!(
         block::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
         element::<CircleDrawableUBO, CircleDrawableUBO>("CircleDrawableUBO", ID_CIRCLE_DRAWABLE_UBO),
         block::<CircleEvaluatedPropsUBO>("CircleEvaluatedPropsUBO", ID_CIRCLE_EVALUATED_PROPS_UBO),
-        GROUND_BLOCK,
     ],
     &[
         attr("a_pos", ID_CIRCLE_POS_VERTEX_ATTRIBUTE),
@@ -621,7 +633,6 @@ shader_source!(
         element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
         element::<HeatmapDrawableUBO, HeatmapDrawableUBO>("HeatmapDrawableUBO", ID_HEATMAP_DRAWABLE_UBO),
         block::<HeatmapEvaluatedPropsUBO>("HeatmapEvaluatedPropsUBO", ID_HEATMAP_EVALUATED_PROPS_UBO),
-        GROUND_BLOCK,
     ],
     &[
         attr("a_pos", ID_HEATMAP_POS_VERTEX_ATTRIBUTE),

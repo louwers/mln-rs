@@ -713,9 +713,6 @@ pub(crate) trait LayerParts {
     /// Whether the layer drapes over terrain ([`TypedLayer::DRAPES`]).
     fn drapes(&self) -> bool;
 
-    /// Whether the layer stands on terrain ([`TypedLayer::STANDS`]).
-    fn stands(&self) -> bool;
-
     /// Whether the layer draws a drape by the map's bearing, with its values
     /// of the frame ([`TypedLayer::drapes_by_bearing`]).
     fn drapes_by_bearing(&self) -> bool;
@@ -928,10 +925,6 @@ impl<L: TypedLayer> LayerParts for L {
 
     fn drapes(&self) -> bool {
         L::DRAPES
-    }
-
-    fn stands(&self) -> bool {
-        L::STANDS
     }
 
     fn drapes_by_bearing(&self) -> bool {

@@ -24,6 +24,7 @@ use mln_gfx::types::DepthMaskType;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::hash::HashMap;
 use mln_util::identity::SimpleIdentity;
+use smallvec::SmallVec;
 
 use crate::draw::DrawObjects;
 use crate::gfx::atlas_binding::AtlasBinding;
@@ -470,6 +471,50 @@ impl TileObjects for KeptDraw {
     }
 }
 
+/// The draws a standing layer keeps of a tile, all of one geometry: over
+/// terrain, one for each part of the tile that reads its own ground
+/// ([`GroundBindings::reads`](crate::terrain::GroundBindings::reads)), most
+/// often one; on a flat map, one. A frame's draw names one by its index.
+#[derive(Default)]
+pub(crate) struct StandingDraws(SmallVec<[KeptDraw; 1]>);
+
+impl StandingDraws {
+    /// Keeps `count` draws: drops those past it, and makes those it lacks of
+    /// the objects `make` makes, as many as it makes.
+    pub(crate) fn resize(&mut self, count: usize, mut make: impl FnMut() -> Option<DrawObjects>) {
+        self.0.truncate(count);
+        while self.0.len() < count {
+            let Some(objects) = make() else { break };
+            self.0.push(KeptDraw::new(objects));
+        }
+    }
+
+    /// Whether it keeps no draw.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// The draws, to change.
+    pub(crate) fn draws_mut(&mut self) -> &mut [KeptDraw] {
+        &mut self.0
+    }
+}
+
+impl TileObjects for StandingDraws {
+    /// The index of the draw among the tile's.
+    type Part = usize;
+
+    fn objects(&mut self, index: usize) -> Option<DrawObjectsMut<'_>> {
+        Some((&mut self.0.get_mut(index)?.objects).into())
+    }
+
+    fn drop_bindings(&mut self) {
+        for draw in &mut self.0 {
+            draw.objects.drop_bindings();
+        }
+    }
+}
+
 /// Makes the draws of `list` those of `layer`, as [`DrawList::finish`]
 /// does, and drops the bindings of the draws of `tiles` where that replaced
 /// a buffer they bind.
@@ -667,6 +712,18 @@ impl<U> UniformWriter<'_, U> {
         self.bytes.clear();
         for &(_, index) in self.draws {
             self.bytes.extend_from_slice(bytemuck::bytes_of(&entry(&self.uniforms[index])));
+        }
+        self.replaced |= self.buffers.write_storage(self.gpu, id, self.bytes, self.context.device());
+    }
+
+    /// Writes each draw's `entry` of its uniform values and its element of
+    /// `extra`, which holds one for each draw in the order they were pushed,
+    /// to the storage buffer `id`.
+    pub(crate) fn storage_with<X, P: bytemuck::Pod>(&mut self, id: usize, extra: &[X], entry: impl Fn(&U, &X) -> P) {
+        debug_assert_eq!(extra.len(), self.uniforms.len(), "an element of `extra` for each draw");
+        self.bytes.clear();
+        for &(_, index) in self.draws {
+            self.bytes.extend_from_slice(bytemuck::bytes_of(&entry(&self.uniforms[index], &extra[index])));
         }
         self.replaced |= self.buffers.write_storage(self.gpu, id, self.bytes, self.context.device());
     }

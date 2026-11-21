@@ -15,9 +15,8 @@ use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
-    ID_GROUND_DEM_TEXTURE, ID_GROUND_DRAWABLE_UBO, ID_HEATMAP_COLOR_RAMP_TEXTURE, ID_HEATMAP_DRAWABLE_UBO,
-    ID_HEATMAP_EVALUATED_PROPS_UBO, ID_HEATMAP_IMAGE_TEXTURE, ID_HEATMAP_POS_VERTEX_ATTRIBUTE,
-    ID_HEATMAP_TEXTURE_PROPS_UBO, ID_PROJECTION_UBO,
+    ID_GROUND_DEM_TEXTURE, ID_HEATMAP_COLOR_RAMP_TEXTURE, ID_HEATMAP_DRAWABLE_UBO, ID_HEATMAP_EVALUATED_PROPS_UBO,
+    ID_HEATMAP_IMAGE_TEXTURE, ID_HEATMAP_POS_VERTEX_ATTRIBUTE, ID_HEATMAP_TEXTURE_PROPS_UBO,
 };
 use mln_gfx::shaders::terrain_ubo::GroundDrawableUBO;
 use mln_gfx::texture2d::SamplerState;
@@ -33,6 +32,7 @@ use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
+use smallvec::SmallVec;
 
 use super::render_line_layer::apply_color_ramp;
 use super::{cast_matrix, refresh_paint_attributes};
@@ -45,8 +45,8 @@ use crate::gfx::store::SharedTexture;
 use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::gfx::vertices::SharedVertices;
 use crate::layer_drawing::{
-    DrawDepth, DrawGroup, DrawList, DrawOrder, FrameDraw, FrameDraws, KeptDraw, LayerDrawing, LayerDraws, TileMap,
-    UniformWriter, finish_tiles, tile_objects,
+    DrawDepth, DrawGroup, DrawList, DrawOrder, FrameDraw, FrameDraws, KeptDraw, LayerDrawing, LayerDraws,
+    StandingDraws, TileMap, UniformWriter, finish_tiles, tile_objects,
 };
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::heatmap_layout::HeatmapLayout;
@@ -59,6 +59,7 @@ use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::render_target::RenderTarget;
 use crate::render_tile::FrameTile;
+use crate::terrain::write_projection;
 use crate::tile_matrix::{bind_no_projection, globe_extrude_scale, projection_data, to_projection_ubo};
 
 /// The pass the layer's draws draw in, onto the frame and into its render
@@ -66,20 +67,19 @@ use crate::tile_matrix::{bind_no_projection, globe_extrude_scale, projection_dat
 const RENDER_PASS: RenderPass = RenderPass::Translucent;
 
 /// A tile's draw's entries in the render target's storage buffers.
+#[derive(Clone, Copy)]
 struct HeatmapUniforms {
     draw_ubo: HeatmapDrawableUBO,
     projection: ProjectionUBO,
-    /// Where it reads the ground, over terrain.
-    ground: GroundDrawableUBO,
 }
 
 /// The layer's drawing: the tiles' draws into the render target, and the
 /// layer's draw of the frame, which colors the render target's heat onto it.
 #[derive(Default)]
 pub(crate) struct HeatmapDrawing {
-    tiles: TileMap<KeptDraw>,
+    tiles: TileMap<StandingDraws>,
     /// The tiles' draws into the render target.
-    target: Option<LayerDraws>,
+    target: Option<LayerDraws<usize>>,
     /// The layer's draw, built on its first frame.
     texture: Option<KeptDraw>,
     /// The texture of the color ramp image that `texture` samples, made
@@ -108,9 +108,9 @@ impl HeatmapDrawing {
 }
 
 impl LayerDrawing for HeatmapDrawing {
-    type Tile = KeptDraw;
+    type Tile = StandingDraws;
 
-    fn tiles(&mut self) -> Option<&mut TileMap<KeptDraw>> {
+    fn tiles(&mut self) -> Option<&mut TileMap<StandingDraws>> {
         Some(&mut self.tiles)
     }
 
@@ -184,7 +184,10 @@ pub(crate) struct RenderHeatmapLayer {
     values: LayerValues<Heatmap>,
     drawing: HeatmapDrawing,
     /// The tiles' draws into the render target as the update makes them.
-    tile_draws: DrawList<HeatmapUniforms>,
+    tile_draws: DrawList<HeatmapUniforms, usize>,
+    /// Over terrain, the ground under each of the tiles' draws, in the order
+    /// the update makes them.
+    grounds: Vec<GroundDrawableUBO>,
     color_ramp: Rc<PremultipliedImage>,
     /// The global-state snapshot used to generate the cached color ramp and
     /// detect when it needs to be rebuilt.
@@ -205,6 +208,7 @@ impl RenderHeatmapLayer {
             values,
             drawing: HeatmapDrawing::default(),
             tile_draws: DrawList::default(),
+            grounds: Vec::new(),
             color_ramp: Rc::new(PremultipliedImage::new(Size::new(256, 1))),
             color_ramp_global_state: None,
             render_target: None,
@@ -328,13 +332,14 @@ impl RenderHeatmapLayer {
         render_tiles: &[FrameTile<'_, Heatmap>],
         paint_parameters: &mut PaintParameters<'_>,
     ) -> bool {
-        let RenderHeatmapLayer { base, values, drawing, tile_draws, .. } = self;
+        let RenderHeatmapLayer { base, values, drawing, tile_draws, grounds, .. } = self;
 
         let evaluated = &values.evaluated.paint;
         // Over terrain, the draws are of the terrain variant, whose kernels
         // lie on the ground.
         let ground = paint_parameters.ground.clone();
         let ground = ground.as_deref();
+        grounds.clear();
         for tile in render_tiles {
             let tile_id = tile.id();
 
@@ -362,18 +367,23 @@ impl RenderHeatmapLayer {
             // A draw built from another bucket goes.
             entry.set_bucket(bucket.base.bucket_id);
 
-            // The draw's attributes read the bucket's vertices in the
+            // The draws' attributes read the bucket's vertices in the
             // context's store, which upload again when they change.
             let changes = entry.take_changes();
             let context = &mut *paint_parameters.context;
-            if let Some(cached) = entry.value.as_mut() {
-                refresh_paint_attributes(&mut cached.objects, changes, |attrs| {
+            let draws = entry.value.get_or_insert_default();
+            for draw in draws.draws_mut() {
+                refresh_paint_attributes(&mut draw.objects, changes, |attrs| {
                     binders.bind(evaluated, paint(context).as_ref(), attrs, &mut Uniforms::default());
                 });
-            } else if !bucket.vertices.is_empty()
-                && let (Some(vertices), Some(indexes)) =
-                    (bucket_vertices(geometry, &bucket.vertices), bucket_indexes(geometry, &bucket.triangles))
-            {
+            }
+            let reads = ground.map(|ground| ground.reads(&tile_id));
+            draws.resize(reads.as_ref().map_or(1, SmallVec::len), || {
+                if bucket.vertices.is_empty() {
+                    return None;
+                }
+                let (vertices, indexes) =
+                    (bucket_vertices(geometry, &bucket.vertices)?, bucket_indexes(geometry, &bucket.triangles)?);
                 let mut uniforms = Uniforms::default();
                 let mut attrs = VertexAttributeArray::new();
                 binders.bind(evaluated, paint(context).as_ref(), &mut attrs, &mut uniforms);
@@ -395,32 +405,34 @@ impl RenderHeatmapLayer {
                     segments: bucket.segments.iter().map(SegmentBase::copy).collect(),
                     instances: None,
                 };
-                let objects = DrawObjects::new(
+                Some(DrawObjects::new(
                     shader,
                     ColorMode::additive(),
                     CullFaceMode::disabled(),
                     geometry,
                     Textures::default(),
-                );
-                *entry.value = Some(KeptDraw::new(objects));
+                ))
+            });
+            if draws.is_empty() {
+                *entry.value = None;
+                continue;
             }
 
-            let Some(cached) = entry.value.as_mut() else {
-                continue;
-            };
-            let mut uniforms = Self::tile_uniforms(&tile_id, binders, paint_parameters);
-            if let Some(ground) = ground {
-                let (texture, ubo) = ground.tile(&tile_id);
-                cached.objects.set_texture(ID_GROUND_DEM_TEXTURE, Some(&texture));
-                uniforms.ground = ubo;
+            let uniforms = Self::tile_uniforms(&tile_id, binders, paint_parameters);
+            for (part, draw) in draws.draws_mut().iter_mut().enumerate() {
+                if let Some(read) = reads.as_ref().and_then(|reads| reads.get(part)) {
+                    draw.objects.set_texture(ID_GROUND_DEM_TEXTURE, Some(&read.texture));
+                    grounds.push(read.ubo);
+                }
+                let frame_draw = FrameDraw { depth: DrawDepth::Off, ..draw.frame_draw(Some(tile_id)) };
+                tile_draws.push_part(frame_draw, part, uniforms);
             }
-            let draw = FrameDraw { depth: DrawDepth::Off, ..cached.frame_draw(Some(tile_id)) };
-            tile_draws.push(draw, uniforms);
         }
 
         let target = drawing.target.get_or_insert_default();
+        let grounds = ground.map(|_| grounds.as_slice());
         finish_tiles(tile_draws, target, &mut drawing.tiles, gpu, paint_parameters.context, |writer| {
-            Self::write_tile_uniforms(evaluated, ground.is_some(), writer);
+            Self::write_tile_uniforms(evaluated, grounds, writer);
         });
         true
     }
@@ -456,16 +468,15 @@ impl RenderHeatmapLayer {
                 globe_extrude_scale: globe_extrude_scale(&tile_id, zoom, latitude_scale),
             },
             projection: to_projection_ubo(&projection),
-            ground: GroundDrawableUBO::default(),
         }
     }
 
     /// Writes the buffers of the tiles' draws into the render target, of a
-    /// layer of the paint values `evaluated`, those of the ground under
-    /// them if they stand on terrain.
+    /// layer of the paint values `evaluated`, with the ground under each of
+    /// them, `grounds`, where they stand on terrain.
     fn write_tile_uniforms(
         evaluated: &HeatmapPaintProperties::PossiblyEvaluated,
-        stands: bool,
+        grounds: Option<&[GroundDrawableUBO]>,
         writer: &mut UniformWriter<'_, HeatmapUniforms>,
     ) {
         let props = HeatmapEvaluatedPropsUBO {
@@ -476,10 +487,7 @@ impl RenderHeatmapLayer {
         };
         writer.uniform(ID_HEATMAP_EVALUATED_PROPS_UBO, &props);
         writer.storage(ID_HEATMAP_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);
-        writer.storage(ID_PROJECTION_UBO, |uniforms| uniforms.projection);
-        if stands {
-            writer.storage(ID_GROUND_DRAWABLE_UBO, |uniforms| uniforms.ground);
-        }
+        write_projection(writer, grounds, |uniforms| uniforms.projection);
     }
 
     /// Makes the layer's draw of the frame, which colors the heat of the

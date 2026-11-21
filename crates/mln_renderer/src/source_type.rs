@@ -17,7 +17,7 @@ use mln_style::layer_type::SourceKind;
 use mln_style::source_type::{ErasedStyleSourceType, SourceData, SourceTypeEntry, StyleSourceType};
 use mln_style::sources::custom::{CustomGeometryProvider, CustomVectorProvider};
 use mln_style::sources::geojson::GeoJSONData;
-use mln_style::sources::tileset::{TilesetKind, TilesetSourceType, VectorKind, VectorSourceType};
+use mln_style::sources::tileset::{TilesetKind, TilesetSourceType};
 use mln_style::sources::{CustomGeometrySourceType, CustomVectorSourceType, GeoJsonSourceType, ImageSourceType};
 use mln_util::constants;
 use mln_util::error::Error;
@@ -136,37 +136,6 @@ impl<K: TilesetKind> SourceType for TilesetSourceType<K> {
 /// from its tiles, as in GL JS.
 const OVERSCALED_ZOOMS: u8 = 4;
 
-/// The zoom levels that have tiles of their own of a source of the tileset
-/// kind `K` from `tileset`, on a map whose deepest zoom is `max_zoom`.
-fn tileset_zooms<K: TilesetKind>(tileset: &Tileset, max_zoom: f64) -> Range<u8> {
-    let mut zoom_range = tileset.zoom_range;
-    if is_vector::<K>() {
-        // Past the tileset's last zoom, tiles are cut from its tiles until
-        // the last few zooms the map can reach, which draw them scaled up.
-        let max_zoom = max_zoom.floor() as i32 - i32::from(OVERSCALED_ZOOMS);
-        zoom_range.max = zoom_range.max.max(max_zoom.clamp(0, i32::from(u8::MAX)) as u8);
-    }
-    zoom_range
-}
-
-/// The deepest zoom that has tiles of its own of `source`, a source of
-/// geometry, on a map whose deepest zoom is `max_zoom`, as its tiles' cover
-/// has it: past it, its tiles draw scaled up. `None` for a source of another
-/// kind, or a tileset that hasn't loaded.
-pub(crate) fn deepest_zoom(source: &Source, max_zoom: f64) -> Option<u8> {
-    if let Some(data) = SourceData::<GeoJsonSourceType>::recover(source) {
-        return Some(data.options.get_zoom_range().max);
-    }
-    if let Some(data) = SourceData::<VectorSourceType>::recover(source) {
-        let tileset = data.description.as_ref()?;
-        return Some(tileset_zooms::<VectorKind>(tileset, max_zoom).max);
-    }
-    if let Some(data) = SourceData::<CustomGeometrySourceType>::recover(source) {
-        return Some(data.options.zoom_range.max);
-    }
-    SourceData::<CustomVectorSourceType>::recover(source).map(|data| data.options.zoom_range.max)
-}
-
 /// A tileset source's tiles: the tileset they were made from.
 struct TilesetOrigin<K> {
     tileset: Option<Tileset>,
@@ -226,7 +195,13 @@ impl<K: TilesetKind> TileOrigin for TilesetOrigin<K> {
             });
         }
         let tile_size = if is_vector::<K>() { constants::TILE_SIZE_I } else { data.options.tile_size };
-        let zoom_range = tileset_zooms::<K>(&tileset, parameters.max_zoom);
+        let mut zoom_range = tileset.zoom_range;
+        if is_vector::<K>() {
+            // Past the tileset's last zoom, tiles are cut from its tiles until
+            // the last few zooms the map can reach, which draw them scaled up.
+            let max_zoom = parameters.max_zoom.floor() as i32 - i32::from(OVERSCALED_ZOOMS);
+            zoom_range.max = zoom_range.max.max(max_zoom.clamp(0, i32::from(u8::MAX)) as u8);
+        }
         Some(Cover { tile_size, zoom_range, bounds: tileset.bounds })
     }
 

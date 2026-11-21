@@ -3,20 +3,13 @@
 use super::shader_source::WgslShaderSource;
 
 /// The height rule of `mln_util::dem`, over the DEM tile a draw reads: its
-/// RGBA8 texels behind a one-texel border, decoded by a `TerrainPropsUBO`.
-/// The surface's prelude has it, and so does each standing layer's terrain
-/// variant (`standing_ground`), which reads the same texture binding.
+/// RGBA8 texels behind a one-texel border, decoded by a `TerrainPropsUBO`
+/// (the prelude's). The surface's prelude has it, and so does each standing
+/// layer's terrain variant (`standing_ground`), which reads the same texture
+/// binding.
 macro_rules! ground_height {
     () => {
         r"
-struct TerrainPropsUBO {
-    unpack: vec4<f32>,
-    unpack_scale: f32,
-    exaggeration: f32,
-    skirt_length: f32,
-    pad0: f32,
-};
-
 @group(1) @binding(5) var ground_dem_texture: texture_2d<f32>;
 
 // The height in meters of the DEM's bordered texel at `texel`, clamped to
@@ -53,26 +46,30 @@ fn ground_height(pos: vec2<f32>, dem_coords: vec4<f32>, props: TerrainPropsUBO) 
 }
 
 /// What a standing layer's terrain variant reads of the ground, within
-/// `#ifdef TERRAIN`: `ground_height`, and each draw's `GroundDrawableUBO`,
-/// which `standing_height` reads.
+/// `#ifdef TERRAIN`: `ground_height`, and what reads the ground of its draw
+/// in its projection entry (`ProjectionUBO::ground`).
 macro_rules! standing_ground {
     () => {
         concat!(
             "\n#ifdef TERRAIN\n",
             ground_height!(),
             r"
-struct GroundDrawableUBO {
-    dem_coords: vec4<f32>,
-    props: TerrainPropsUBO,
-};
-
-@group(0) @binding(3) var<storage, read> groundVector: array<GroundDrawableUBO>;
-
 // The height of the ground in meters at `pos`, in tile units of the draw's
-// tile.
-fn standing_height(pos: vec2<f32>) -> f32 {
-    let ground = groundVector[globalIndex.value];
+// tile, which reads `ground`.
+fn standing_height(pos: vec2<f32>, ground: GroundDrawableUBO) -> f32 {
     return ground_height(pos, ground.dem_coords, ground.props);
+}
+
+// Whether the draw that reads `ground` draws a feature whose untranslated
+// anchor is at `pos`: a draw of a DEM tile under the tile draws the features
+// on its part of the tile.
+fn ground_holds(pos: vec2<f32>, ground: GroundDrawableUBO) -> bool {
+    return all(pos >= ground.rect.xy) && all(pos < ground.rect.zw);
+}
+
+// A position outside the clip volume, of a vertex the draw drops.
+fn ground_dropped() -> vec4<f32> {
+    return vec4<f32>(-2.0, -2.0, -2.0, 1.0);
 }
 #endif
 "
@@ -547,9 +544,13 @@ fn main(in: VertexInput) -> VertexOutput {
 
     let projection = projectionVector[globalIndex.value];
     // The circle stands on the ground under its center, as it draws,
-    // translated.
+    // translated, if its draw draws it.
 #ifdef TERRAIN
-    let ele = standing_height(circle_center + projection.translate);
+    if (!ground_holds(circle_center, projection.ground)) {
+        out.position = ground_dropped();
+        return out;
+    }
+    let ele = standing_height(circle_center + projection.translate, projection.ground);
 #else
     let ele = 0.0;
 #endif
@@ -2597,9 +2598,15 @@ fn main(in: VertexInput) -> VertexOutput {
     let scaled_extrude = extrude * radius * drawable.extrude_scale;
 
     let base = floor(pos * 0.5);
-    // The kernel lies flat on the ground under its center.
+    // The kernel lies flat on the ground under its center, if its draw
+    // draws it.
 #ifdef TERRAIN
-    let ele = standing_height(base);
+    let ground = projectionVector[globalIndex.value].ground;
+    if (!ground_holds(base, ground)) {
+        out.position = ground_dropped();
+        return out;
+    }
+    let ele = standing_height(base, ground);
 #else
     let ele = 0.0;
 #endif
@@ -5132,6 +5139,24 @@ fn get_pattern_pos(pixel_coord_upper: vec2<f32>, pixel_coord_lower: vec2<f32>,
     return (tile_units_to_pixels * pos + offset) / pattern_size;
 }
 
+// How the terrain's DEM decodes, its exaggeration and its skirts' length.
+struct TerrainPropsUBO {
+    unpack: vec4<f32>,
+    unpack_scale: f32,
+    exaggeration: f32,
+    skirt_length: f32,
+    pad0: f32,
+};
+
+// Where a terrain variant's draw reads the ground it stands on: where its
+// tile is in the DEM tile it binds, the part of its tile it draws, and how
+// the DEM decodes.
+struct GroundDrawableUBO {
+    dem_coords: vec4<f32>,
+    rect: vec4<f32>,
+    props: TerrainPropsUBO,
+};
+
 struct ProjectionUBO {
     matrix: mat4x4<f32>,
     fallback_matrix: mat4x4<f32>,
@@ -5140,6 +5165,9 @@ struct ProjectionUBO {
     projection_transition: f32,
     depth_offset: f32,
     translate: vec2<f32>,
+#ifdef TERRAIN
+    ground: GroundDrawableUBO,
+#endif
 };
 
 // Pole vertices carry these sentinel Y values in their raw position.

@@ -55,7 +55,9 @@ pub const ID_BACKGROUND_IMAGE_TEXTURE: usize = 0;
 pub const ID_FILL_IMAGE_TEXTURE: usize = 0;
 pub const ID_LINE_IMAGE_TEXTURE: usize = 0;
 pub const ID_LINE_DASH_TEXTURE: usize = 1;
-pub const MAX_TEXTURE_COUNT_PER_SHADER: usize = 3;
+/// A standing program over terrain reads the ground's DEM and depth besides
+/// two textures of its own, a label's glyphs and icons.
+pub const MAX_TEXTURE_COUNT_PER_SHADER: usize = 4;
 
 // --- vertex attributes ---
 pub const ID_BACKGROUND_POS_VERTEX_ATTRIBUTE: usize = 0;
@@ -155,14 +157,16 @@ pub const ID_VERTEX_TEXEL_TEXTURE: usize = 0;
 pub const ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE: usize = 0;
 
 // --- the ground (port-only): what the terrain variants of the standing
-// layers' programs read of the DEM under them.
-/// Each draw's `GroundDrawableUBO`, which the vertex stage reads: the slot
-/// that the circle, heatmap and fill extrusion programs leave free.
-pub const ID_GROUND_DRAWABLE_UBO: usize = ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO; // SSBO
+// layers' programs read of the ground under them. Each draw's ground rides in
+// its projection entry (`TerrainProjectionUBO`), which every standing
+// program's vertex stage reads.
 /// The DEM texture of a draw's ground, which the vertex stage reads texel by
-/// texel: the last texture slot, which no standing layer's program samples,
-/// and the surface's DEM too, so that one prelude declares it.
-pub const ID_GROUND_DEM_TEXTURE: usize = MAX_TEXTURE_COUNT_PER_SHADER - 1;
+/// texel, and the surface's DEM, so that one prelude declares it.
+pub const ID_GROUND_DEM_TEXTURE: usize = 2;
+/// The depth of the drawn ground, which a standing program reads to fade
+/// what stands behind it: the last slot, so that a program of two textures
+/// of its own (glyphs and icons) has the DEM and the depth too.
+pub const ID_GROUND_DEPTH_TEXTURE: usize = 3;
 
 // --- terrain: a tile's grid, its DEM and the texture draped over it.
 /// A grid vertex: x and y in tile units, whether it is a skirt's lower edge,

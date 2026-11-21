@@ -17,7 +17,7 @@ use mln_gfx::gpu::{
     PipelineDesc, PipelineId, ReadbackId, ResourceId, SamplerId, ShaderId, ShaderKey, SlotMap, StencilState,
     TextureDesc, TextureFormat, TextureId, TextureRegion, TextureUsage, VertexBufferLayout, VertexStep,
 };
-use mln_gfx::shaders::program::Sources;
+use mln_gfx::shaders::program::{Sources, TERRAIN_DEFINE};
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::texture2d::{MAX_ACTIVE_TEXTURE_UNITS, SamplerState};
 use mln_gfx::types::{DepthMaskType, TextureFilterType};
@@ -749,6 +749,7 @@ impl GlGpu {
         let defines: String =
             key.define_values().flat_map(|(name, value)| ["#define ", name, " ", value, "\n"]).collect();
         let fragment_defines = if highp_fragment { "#define HIGHP_FRAGMENT\n" } else { "" };
+        let terrain = key.define_values().any(|(name, _)| name == TERRAIN_DEFINE);
         let (gl, state) = self.context.parts();
         let shader = |stage, stage_defines, prelude, glsl| {
             // SAFETY: the shader is new, and deleted if it doesn't compile.
@@ -814,6 +815,7 @@ impl GlGpu {
                             GpuError::Invalid(format!("{name}'s uniform block {block_name} has no id"))
                         })?;
                     let size = gl.get_active_uniform_block_parameter_i32(object, index, glow::UNIFORM_BLOCK_DATA_SIZE);
+                    let info = info.in_variant(terrain);
                     gl.uniform_block_binding(object, index, info.id as u32);
                     program.blocks.push(Block {
                         id: info.id,

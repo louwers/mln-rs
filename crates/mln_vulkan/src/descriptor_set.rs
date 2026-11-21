@@ -2,7 +2,7 @@
 //! made of them, and the pools the sets are allocated from.
 
 use ash::vk;
-use mln_gfx::shaders::shader_defines::ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO;
+use mln_gfx::shaders::shader_defines::{ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO, ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO};
 use mln_glsl::layout::{
     BufferSetShape, DRAWABLE_UNIFORM_COUNT, DRAWABLE_VERTEX_COUNT, DescriptorSetType, GLOBAL_UNIFORM_COUNT,
     IMAGE_TEXTURE_COUNT, LAYER_STORAGE_COUNT, LAYER_UNIFORM_COUNT, image_sampler_binding, image_texture_binding,
@@ -29,24 +29,26 @@ pub(crate) const fn buffer_shape(type_: DescriptorSetType, vertex_buffers: bool)
 
 /// How many storage buffers the vertex stage of a pipeline reads at most
 /// with the bindings of vertex buffers, which a device's
-/// `maxPerStageDescriptorStorageBuffers` has to allow: the layer set's, and
-/// the vertex buffers.
-pub(crate) const VERTEX_STAGE_STORAGE_BUFFERS: usize = LAYER_STORAGE_COUNT + DRAWABLE_VERTEX_COUNT;
+/// `maxPerStageDescriptorStorageBuffers` has to allow: the layer set's but
+/// its fragment-only one, and the vertex buffers.
+pub(crate) const VERTEX_STAGE_STORAGE_BUFFERS: usize = LAYER_STORAGE_COUNT - 1 + DRAWABLE_VERTEX_COUNT;
 
 /// The stages that read the buffer at `binding` of a set of `type_`: all
 /// but the fragment stage for a layer's vertex-only buffer and for a vertex
-/// buffer. A layer's fragment-only buffer is the ground of a standing
-/// layer's terrain variant too, which its vertex stage reads.
+/// buffer, and all but the vertex stage for a layer's fragment-only buffer.
 fn buffer_stages(type_: DescriptorSetType, binding: u32) -> vk::ShaderStageFlags {
+    let mut stages = vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT;
     let shape = type_.buffer_shape();
-    let vertex_only = binding as usize >= shape.storage + shape.uniform
-        || (type_ == DescriptorSetType::Layer
-            && layer_storage_binding(ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO) == Some(binding));
-    if vertex_only {
-        vk::ShaderStageFlags::VERTEX
-    } else {
-        vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT
+    if binding as usize >= shape.storage + shape.uniform {
+        stages = vk::ShaderStageFlags::VERTEX;
+    } else if type_ == DescriptorSetType::Layer {
+        if layer_storage_binding(ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO) == Some(binding) {
+            stages = vk::ShaderStageFlags::VERTEX;
+        } else if layer_storage_binding(ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO) == Some(binding) {
+            stages = vk::ShaderStageFlags::FRAGMENT;
+        }
     }
+    stages
 }
 
 pub(crate) struct PoolInfo {

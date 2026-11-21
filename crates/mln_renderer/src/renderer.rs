@@ -281,6 +281,12 @@ impl Renderer {
         self.encoder.context.made_key_for(mln_gfx::projection_variant::ProjectionVariant::Terrain)
     }
 
+    /// The projection variant each layer draws with, by its id.
+    #[cfg(test)]
+    pub(crate) fn projection_variants(&self) -> Vec<(String, mln_gfx::projection_variant::ProjectionVariant)> {
+        self.orchestrator.projection_variants()
+    }
+
     /// The tiles of the terrain's drapes and the side their drapes draw at.
     #[cfg(test)]
     pub(crate) fn drape_sizes(&mut self) -> Vec<(mln_tile_id::OverscaledTileID, u32)> {

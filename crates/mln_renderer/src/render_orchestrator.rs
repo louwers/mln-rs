@@ -42,7 +42,6 @@ use crate::render_pass::RenderPass;
 use crate::render_source::{self, RenderSource, RenderTileParameters, TileOrder};
 use crate::render_tile::{FoundTile, RenderTile};
 use crate::renderer_event::RendererEvent;
-use crate::source_type::deepest_zoom;
 use crate::sources::render_tile_source::{DebugLayer, DebugLayers};
 use crate::terrain::{DrapeStacks, RenderTerrain};
 use crate::text::glyph_store::GlyphStore;
@@ -353,10 +352,9 @@ impl RenderOrchestrator {
         }
         self.view = update_parameters.view.clone();
 
-        let standing_zooms = self.standing_zooms(update_parameters);
         let (store, render_sources) = (&self.tile_store, &self.render_sources);
         let dem = |id: &str| store.source(render_sources.get(id)?.tiles()?);
-        frame.terrain = self.terrain.update(update_parameters, dem, &standing_zooms).is_some();
+        frame.terrain = self.terrain.update(update_parameters, dem).is_some();
         let will_render = self.update_sources(
             update_parameters,
             &layers,
@@ -453,27 +451,6 @@ impl RenderOrchestrator {
         }
 
         Some(frame)
-    }
-
-    /// The deepest zooms of the sources of the visible layers that stand on
-    /// terrain, each once, for a style with terrain; none without.
-    fn standing_zooms(&self, update_parameters: &UpdateParameters) -> SmallVec<[u8; 4]> {
-        let mut zooms = SmallVec::new();
-        let style = &update_parameters.style;
-        if style.get_terrain().is_none() {
-            return zooms;
-        }
-        let standing = self.layers.iter().filter(|layer| {
-            layer.stands() && layer.base().style.base().visibility != mln_style_types::VisibilityType::None
-        });
-        for layer in standing {
-            let source = style.get_source(&layer.base().style.base().source);
-            let zoom = source.and_then(|source| deepest_zoom(source, update_parameters.max_zoom));
-            if let Some(zoom) = zoom.filter(|zoom| !zooms.contains(zoom)) {
-                zooms.push(zoom);
-            }
-        }
-        zooms
     }
 
     /// Brings the feature state of the enabled sources' tiles to the
@@ -1458,6 +1435,13 @@ impl RenderOrchestrator {
     /// The terrain, whose drapes draw before the frame's pass.
     pub(crate) fn terrain(&mut self) -> &mut RenderTerrain {
         &mut self.terrain
+    }
+
+    /// The projection variant each layer draws with, by its id.
+    #[cfg(test)]
+    pub(crate) fn projection_variants(&self) -> Vec<(String, mln_gfx::projection_variant::ProjectionVariant)> {
+        let variant = |layer: &dyn RenderLayer| (layer.base().style.base().id.clone(), layer.base().projection_variant);
+        self.layers.iter().map(|layer| variant(&**layer)).collect()
     }
 
     /// Queries the rendered features in `geometry`. `Err` if the query fails

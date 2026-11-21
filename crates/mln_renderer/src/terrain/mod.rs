@@ -13,19 +13,18 @@
 //! The map owns the camera and runs on its own thread; the renderer, which
 //! may run on another, owns [`RenderTerrain`] through its orchestrator, and
 //! with it the cover, the drapes and the layers' drawings in them, the
-//! surface's draws, the DEM textures, the ground the standing layers stand
-//! on, and the last ground it told the map of. In each update:
+//! surface's draws, the DEM textures, and the last ground it told the map
+//! of, which the standing layers stand on. In each update:
 //!
 //! 1. Before the sources update, [`RenderTerrain::update`] covers the view
-//!    with terrain tiles and lists the DEM tiles they read, and those the
-//!    standing layers read. Every source then covers the view the same way,
-//!    culled by the same elevation ranges, and the terrain's source keeps
-//!    its DEM tiles loaded, whether or not a layer draws them. They count
-//!    toward the frame's being loaded.
+//!    with terrain tiles and lists the DEM tiles they read. Every source
+//!    then covers the view the same way, culled by the same elevation
+//!    ranges, and the terrain's source keeps its DEM tiles loaded, whether
+//!    or not a layer draws them. They count toward the frame's being
+//!    loaded.
 //! 2. Once the sources have updated, [`RenderTerrain::bind`] binds each
-//!    terrain tile's DEM, renews the standing layers' [`Ground`] if it
-//!    changed, and tells the map of the ground the tiles draw, if it
-//!    changed.
+//!    terrain tile's DEM, and tells the map of the ground the tiles draw, if
+//!    it changed.
 //! 3. In the encode, the ground's DEM textures are made first
 //!    ([`RenderTerrain::prepare_ground`]), for the standing layers and the
 //!    surface. The layers that drape (background, fill, line, hillshade,
@@ -70,23 +69,31 @@
 //!   layer. A layer the frame doesn't draw, hidden or out of its zooms,
 //!   splits no stack. A style whose layers don't drape has no stack, and
 //!   then no drapes and no surface.
-//! - **Standing layers** (circle and heatmap) stand on the ground under
-//!   them, whether or not a stack draws a surface: over terrain, their draws
-//!   are of the [`ProjectionVariant::Terrain`] variant, which reads the
-//!   height of the ground in the vertex stage, under a circle's center as it
-//!   draws (translated) and a kernel's, by the height rule the surface reads
-//!   its DEM by. A draw of a tile T reads the deepest DEM tile that the
-//!   frame's [`Ground`] holds that holds all of T (rule R), at T's place in
-//!   it: the DEM tile of the terrain tile drawn at T's center wherever that
-//!   holds T, and else, for a source tiled coarser than the cover's DEM
-//!   there, the DEM tile at the source's deepest zoom, which the cover
-//!   requests, so a still waits for it; while it loads, its deepest
-//!   ancestor that has. Where the ground holds none, T stands at sea level.
-//!   The ground is renewed only when the drawn tiles' DEMs, those DEM
-//!   tiles, the decode or the exaggeration change. The CPU reads its heights
-//!   ([`TileGround::height`]) from the same DEM tile and coordinates, by the
-//!   same height rule, as the shaders. A frame without terrain makes no
-//!   terrain variant and binds no ground.
+//! - **Standing layers** (circle and heatmap) stand on the surface as it
+//!   draws, whether or not a stack draws it: over terrain, their draws are
+//!   of the [`ProjectionVariant::Terrain`] variant, which reads the height
+//!   of the ground in the vertex stage, under a circle's center as it draws
+//!   (translated) and a kernel's, by the height rule the surface reads its
+//!   DEM by. A tile T of theirs reads the DEM tiles the surface reads under
+//!   it, and no others ([`TerrainElevation::ground`]): the DEM tile of the
+//!   terrain tile it is in, or, where terrain tiles are inside T, as over
+//!   a source tiled coarser than the DEM, the one each of them reads, on its
+//!   part of T. T draws once for each part, and each draw drops the
+//!   features whose untranslated anchor is off its part, so each feature
+//!   draws once, on the DEM tile the surface reads under its anchor: the
+//!   terrain tile's own wherever that has loaded, which a still waits for,
+//!   and while it loads, the ancestor the surface reads in its place. Off
+//!   the cover, a part reads the deepest DEM tile that the cover reads, or
+//!   loads to cull its tiles, that holds it, or stands at sea level while
+//!   none has loaded. The CPU reads a feature's height
+//!   ([`TileGround::height`]) from the DEM tile and coordinates its draw
+//!   reads, by the same height rule. A draw's ground (DEM coordinates,
+//!   part, decode and exaggeration) rides in its projection entry, which
+//!   every standing program's vertex stage reads ([`TerrainProjectionUBO`]);
+//!   its DEM texture binds at [`ID_GROUND_DEM_TEXTURE`], and the depth of
+//!   the drawn ground at [`ID_GROUND_DEPTH_TEXTURE`], so a label's glyphs
+//!   and icons keep 0 and 1. A frame without terrain makes no terrain
+//!   variant, writes no ground and binds no ground texture.
 //! - **The surface** draws once for each stack, its tiles nearest the
 //!   center first, testing and writing the 3D depth range with less or
 //!   equal and blending its drapes over what is under it. A stack above the
@@ -179,8 +186,10 @@
 //!   frame texture, which is copied into the drape before its mips. A
 //!   blend's backdrop is the drape's own texels.
 //! - **The elevation snapshot** ([`TerrainElevation`]) holds the drawn
-//!   tiles, and the DEM images and sub-rects they read, which don't change
-//!   once it shares them, so the map reads it on its thread. It answers
+//!   tiles and the DEM images and sub-rects they read, and the coarse DEM
+//!   tiles the cover loads to cull them, which the standing layers read off
+//!   the cover. Its images don't change once it shares them, so the map
+//!   reads it on its thread. It answers
 //!   four questions ([`Elevation`]): the height at a location, `None` while
 //!   its DEM loads, which a clamped center stands on; the floor of the tile
 //!   there, which the view's planes fit; the surface as drawn, 0 on a tile
@@ -192,8 +201,9 @@
 //!   in the point's world copy, and for the height and floor, which the
 //!   center reads, of any copy. The renderer
 //!   makes a new one only when the tiles, the DEM images they read, where
-//!   they read them, whether their own DEM loads, or the decode change: a
-//!   fixed camera over loaded tiles keeps one snapshot. It reaches the map
+//!   they read them, whether their own DEM loads, the coarse DEM tiles it
+//!   holds, or the decode change: a fixed camera over loaded tiles keeps
+//!   one snapshot. It reaches the map
 //!   as [`RendererEvent::TerrainElevation`] before the frame of its update
 //!   finishes. The renderer sends its current one again for an update
 //!   whose snapshot differs from it at the view's center, such as an update
@@ -236,12 +246,16 @@ pub(crate) use cover::{ElevationRanges, TerrainCover};
 pub(crate) use cover::{REMEMBERED_RANGES, TerrainTile, terrain_tile_size};
 pub(crate) use drapes::Drapes;
 pub(crate) use elevation::TerrainElevation;
-#[cfg(doc)]
-use ground::TileGround;
-pub(crate) use ground::{Ground, GroundBindings};
+#[cfg(any(doc, test))]
+pub(crate) use ground::TileGround;
+pub(crate) use ground::{GroundBindings, write_projection};
 use mln_gfx::gpu::Gpu;
 #[cfg(doc)]
 use mln_gfx::projection_variant::ProjectionVariant;
+#[cfg(doc)]
+use mln_gfx::shaders::shader_defines::{ID_GROUND_DEM_TEXTURE, ID_GROUND_DEPTH_TEXTURE};
+#[cfg(doc)]
+use mln_gfx::shaders::terrain_ubo::TerrainProjectionUBO;
 use mln_gfx::shaders::terrain_ubo::TerrainPropsUBO;
 use mln_map_types::{Elevation, MapMode, TerrainSkirtLength};
 use mln_style::source_type::SourceData;
@@ -261,7 +275,6 @@ use crate::renderer_event::RendererEvent;
 use crate::terrain::cover::dem_bucket;
 use crate::terrain::dem_textures::DemTextures;
 use crate::terrain::draws::TerrainDraws;
-use crate::terrain::ground::GroundDem;
 use crate::tile::source_tiles::SourceTiles;
 use crate::update_parameters::UpdateParameters;
 
@@ -331,11 +344,9 @@ pub(crate) struct RenderTerrain {
     drapes: Drapes,
     draws: TerrainDraws,
     /// The ground the last update's cover drew, as the renderer last told
-    /// the map; `None` while terrain doesn't draw.
+    /// the map, which the standing layers stand on; `None` while terrain
+    /// doesn't draw.
     elevation: Option<Arc<TerrainElevation>>,
-    /// The ground the last update's standing layers stand on; `None` while
-    /// terrain doesn't draw.
-    ground: Option<Arc<Ground>>,
     /// The textures of the DEM tiles the frame's draws read.
     dem_textures: DemTextures,
     /// Whether it has logged that terrain doesn't draw on the globe.
@@ -349,18 +360,16 @@ impl RenderTerrain {
     /// Brings the terrain to `parameters`, before the sources update: checks
     /// whether it draws, takes in the elevation ranges of the DEM tiles that
     /// have loaded, which the last cover's ranges remember, covers the view
-    /// with its tiles and lists the DEM tiles they read, those of the
-    /// standing layers' sources whose deepest zooms are `standing_zooms`
-    /// too. `dem` finds the tiles of a source by its id. Returns the cover
-    /// while terrain draws; its tiles bind their DEM in [`bind`]. While
-    /// terrain doesn't draw, it remembers no ranges.
+    /// with its tiles and lists the DEM tiles they read. `dem` finds the
+    /// tiles of a source by its id. Returns the cover while terrain draws;
+    /// its tiles bind their DEM in [`bind`]. While terrain doesn't draw, it
+    /// remembers no ranges.
     ///
     /// [`bind`]: Self::bind
     pub(crate) fn update<'a>(
         &mut self,
         parameters: &UpdateParameters,
         dem: impl FnOnce(&str) -> Option<&'a SourceTiles>,
-        standing_zooms: &[u8],
     ) -> Option<&TerrainCover> {
         let mut ranges = self.cover.take().map(|cover| cover.ranges).unwrap_or_default();
         let style = &parameters.style;
@@ -395,15 +404,14 @@ impl RenderTerrain {
         ranges.update(tileset, dem(&terrain.source), f64::from(terrain.exaggeration));
         let tile_size = data.options.tile_size;
         let view = &parameters.view;
-        self.cover = Some(TerrainCover::new(view, &terrain.source, tile_size, dem_zooms, ranges, standing_zooms));
+        self.cover = Some(TerrainCover::new(view, &terrain.source, tile_size, dem_zooms, ranges));
         self.cover.as_ref()
     }
 
     /// Binds each terrain tile's DEM, once the sources have updated, from
     /// the tiles of the terrain's source that `dem` finds by its id. A
     /// frame's bindings are of the DEM tiles it has, so that a frame that
-    /// has loaded draws each tile with its own. Renews the standing layers'
-    /// [`ground`](Self::ground) where it changed.
+    /// has loaded draws each tile with its own.
     ///
     /// When the ground the tiles draw changed, it tells the map in `events`
     /// ([`RendererEvent::TerrainElevation`]), before the frame finishes:
@@ -430,7 +438,6 @@ impl RenderTerrain {
     ) -> bool {
         let seen = parameters.elevation.as_deref();
         let Some(cover) = &mut self.cover else {
-            self.ground = None;
             if self.elevation.take().is_some() || seen.is_some() {
                 events.push(RendererEvent::TerrainElevation(None));
             }
@@ -443,18 +450,6 @@ impl RenderTerrain {
             Some(drawn) if drawn.draws_as(cover, tiles, unpack, exaggeration) => (drawn, false),
             _ => (&*self.elevation.insert(Arc::new(TerrainElevation::new(cover, tiles, unpack, exaggeration))), true),
         };
-        let standing: Vec<GroundDem> = tiles.map_or_else(Vec::new, |tiles| {
-            cover
-                .bound_standing_dems(tiles)
-                .filter_map(|id| {
-                    let data = dem_bucket(tiles.tile(&id)?)?.dem_data();
-                    Some(GroundDem { id, image: Arc::clone(data.shared_image()), dim: u32::try_from(data.dim).ok()? })
-                })
-                .collect()
-        });
-        if !self.ground.as_ref().is_some_and(|ground| ground.is_of(drawn, &standing)) {
-            self.ground = Some(Arc::new(Ground::new(Arc::clone(drawn), standing)));
-        }
         let center = parameters.view.center(WrapMode::Wrapped);
         let alike = stands_alike(seen, Some(&**drawn), center);
         if new || !alike {
@@ -478,16 +473,18 @@ impl RenderTerrain {
         self.cover.as_ref()
     }
 
-    /// The ground the standing layers of the last update stand on, as
-    /// [`bind`](Self::bind) left it; `None` while terrain doesn't draw.
+    /// The ground the standing layers of the last update stand on, the
+    /// ground its cover drew, as [`bind`](Self::bind) left it; `None` while
+    /// terrain doesn't draw. [`TerrainElevation::ground`] gives the ground
+    /// under a tile.
     #[cfg_attr(not(test), expect(dead_code, reason = "only the tests read the ground on the CPU"))]
-    pub(crate) fn ground(&self) -> Option<&Arc<Ground>> {
-        self.ground.as_ref()
+    pub(crate) fn ground(&self) -> Option<&Arc<TerrainElevation>> {
+        self.elevation.as_ref()
     }
 
     /// Makes what the encode's draws of the frame of the last update bind of
     /// its ground: the textures of the DEM tiles of the terrain's source,
-    /// which `dem` finds by its id, that the ground holds, for the standing
+    /// which `dem` finds by its id, that the surface reads, for the standing
     /// layers and the surface. `None`, dropping the DEM textures, for a
     /// frame without terrain.
     pub(crate) fn prepare_ground<'a>(
@@ -495,16 +492,16 @@ impl RenderTerrain {
         parameters: &mut PaintParameters<'_>,
         dem: impl FnOnce(&str) -> Option<&'a SourceTiles>,
     ) -> Option<Rc<GroundBindings>> {
-        let (Some(ground), Some(cover)) = (&self.ground, &self.cover) else {
+        let (Some(ground), Some(cover)) = (&self.elevation, &self.cover) else {
             self.dem_textures = DemTextures::default();
             return None;
         };
         let context = &mut *parameters.context;
         let tiles = dem(&cover.source_id);
         let mut textures = mln_util::hash::HashMap::default();
-        for held in ground.dems() {
-            if let Some(bucket) = tiles.and_then(|tiles| dem_bucket(tiles.tile(&held.id)?)) {
-                textures.insert(held.id.canonical, self.dem_textures.texture(context, bucket));
+        for read in ground.dems() {
+            if let Some(bucket) = tiles.and_then(|tiles| dem_bucket(tiles.tile(&read.id)?)) {
+                textures.insert(read.id.canonical, (self.dem_textures.texture(context, bucket), read.dim));
             }
         }
         self.dem_textures.finish_frame();

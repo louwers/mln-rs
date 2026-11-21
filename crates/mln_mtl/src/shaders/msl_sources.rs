@@ -3,24 +3,13 @@
 
 use super::shader_source::MslShaderSource;
 
-/// The start of every shader's source.
 /// The height rule of `mln_util::dem`, over the DEM tile a draw reads: its
-/// RGBA8 texels behind a one-texel border, decoded by a `TerrainPropsUBO`.
-/// The surface's source has it, and so does each standing layer's
-/// (`standing_ground`).
+/// RGBA8 texels behind a one-texel border, decoded by a `TerrainPropsUBO`
+/// (the prelude's). The surface's source has it, and so does each standing
+/// layer's (`standing_ground`).
 macro_rules! ground_height {
     () => {
         r#"
-
-struct alignas(16) TerrainPropsUBO {
-    /*  0 */ float4 unpack;
-    /* 16 */ float unpack_scale;
-    /* 20 */ float exaggeration;
-    /* 24 */ float skirt_length;
-    /* 28 */ float pad;
-    /* 32 */
-};
-static_assert(sizeof(TerrainPropsUBO) == 2 * 16, "wrong size");
 
 // The height in meters of the DEM's bordered texel at `texel`, clamped to the
 // texture.
@@ -59,29 +48,31 @@ static float ground_height(float2 pos, float4 dem_coords, texture2d<float, acces
 }
 
 /// What a standing layer's terrain variant reads of the ground:
-/// `ground_height`, and each draw's `GroundDrawableUBO`, which
-/// `standing_height` reads. Only the variant's vertex function takes them.
+/// `ground_height`, and what reads the ground of its draw in its projection
+/// entry (`ProjectionUBO::ground`). Only the variant's vertex function takes
+/// the DEM texture.
 macro_rules! standing_ground {
     () => {
         concat!(
             ground_height!(),
             r#"
-enum {
-    idGroundDrawableUBO = idDrawableReservedFragmentOnlyUBO,
-};
-
-struct alignas(16) GroundDrawableUBO {
-    /*  0 */ float4 dem_coords;
-    /* 16 */ TerrainPropsUBO props;
-    /* 48 */
-};
-static_assert(sizeof(GroundDrawableUBO) == 3 * 16, "wrong size");
-
-// The height of the ground in meters at `pos`, in tile units of the tile of
-// the draw that reads `ground` and `dem`.
+// The height of the ground in meters at `pos`, in tile units of the draw's
+// tile, which reads `ground` and `dem`.
 static float standing_height(float2 pos, device const GroundDrawableUBO& ground,
                              texture2d<float, access::read> dem) {
     return ground_height(pos, ground.dem_coords, dem, ground.props);
+}
+
+// Whether the draw that reads `ground` draws a feature whose untranslated
+// anchor is at `pos`: a draw of a DEM tile under the tile draws the features
+// on its part of the tile.
+static bool ground_holds(float2 pos, device const GroundDrawableUBO& ground) {
+    return all(pos >= ground.rect.xy) && all(pos < ground.rect.zw);
+}
+
+// A position outside the clip volume, of a vertex the draw drops.
+static float4 ground_dropped() {
+    return float4(-2.0, -2.0, -2.0, 1.0);
 }
 
 "#
@@ -89,6 +80,7 @@ static float standing_height(float2 pos, device const GroundDrawableUBO& ground,
     };
 }
 
+/// The start of every shader's source.
 pub(crate) const PRELUDE: &str = r#"
 #include <metal_stdlib>
 using namespace metal;
@@ -189,6 +181,28 @@ struct alignas(16) GlobalPaintParamsUBO {
 };
 static_assert(sizeof(GlobalPaintParamsUBO) == 3 * 16, "wrong size");
 
+// How the terrain's DEM decodes, its exaggeration and its skirts' length.
+struct alignas(16) TerrainPropsUBO {
+    /*  0 */ float4 unpack;
+    /* 16 */ float unpack_scale;
+    /* 20 */ float exaggeration;
+    /* 24 */ float skirt_length;
+    /* 28 */ float pad;
+    /* 32 */
+};
+static_assert(sizeof(TerrainPropsUBO) == 2 * 16, "wrong size");
+
+// Where a terrain variant's draw reads the ground it stands on: where its
+// tile is in the DEM tile it binds, the part of its tile it draws, and how
+// the DEM decodes.
+struct alignas(16) GroundDrawableUBO {
+    /*  0 */ float4 dem_coords;
+    /* 16 */ float4 rect;
+    /* 32 */ TerrainPropsUBO props;
+    /* 64 */
+};
+static_assert(sizeof(GroundDrawableUBO) == 4 * 16, "wrong size");
+
 struct alignas(16) ProjectionUBO {
     /*   0 */ float4x4 matrix;
     /*  64 */ float4x4 fallback_matrix;
@@ -197,9 +211,16 @@ struct alignas(16) ProjectionUBO {
     /* 160 */ float projection_transition;
     /* 164 */ float depth_offset;
     /* 168 */ float2 translate;
+#if defined(TERRAIN)
+    /* 176 */ GroundDrawableUBO ground;
+    /* 240 */
+};
+static_assert(sizeof(ProjectionUBO) == 15 * 16, "wrong size");
+#else
     /* 176 */
 };
 static_assert(sizeof(ProjectionUBO) == 11 * 16, "wrong size");
+#endif
 
 // Pole vertices carry these sentinel Y values in their raw position.
 #define GLOBE_POLE_NORTH_Y -32767.5
@@ -867,7 +888,6 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const CircleDrawableUBO* drawableVector [[buffer(idCircleDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
 #if defined(TERRAIN)
-                                device const GroundDrawableUBO* groundVector [[buffer(idGroundDrawableUBO)]],
                                 texture2d<float, access::read> ground_dem [[texture(2)]],
 #endif
                                 device const CircleEvaluatedPropsUBO& props [[buffer(idCircleEvaluatedPropsUBO)]]) {
@@ -894,10 +914,10 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float2 circle_center = floor(float2(vertx.position) * 0.5);
 
     // The circle stands on the ground under its center, as it draws,
-    // translated.
+    // translated, if its draw draws it.
 #if defined(TERRAIN)
-    const float2 translate = projectionVector[uboIndex].translate;
-    const float ele = standing_height(circle_center + translate, groundVector[uboIndex], ground_dem);
+    device const ProjectionUBO& standing = projectionVector[uboIndex];
+    const float ele = standing_height(circle_center + standing.translate, standing.ground, ground_dem);
 #else
     const float ele = 0.0;
 #endif
@@ -947,6 +967,11 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         const float factor = props.scale_with_map ? paintParams.camera_to_center_distance : position.w;
         position.xy += scaled_extrude * (radius + stroke_width) * factor;
     }
+#if defined(TERRAIN)
+    if (!ground_holds(circle_center, standing.ground)) {
+        position = ground_dropped();
+    }
+#endif
 
     // This is a minimum blur distance that serves as a faux-antialiasing for
     // the circle. since blur is a ratio of the circle's size and the intent is
@@ -3835,7 +3860,6 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const HeatmapDrawableUBO* drawableVector [[buffer(idHeatmapDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
 #if defined(TERRAIN)
-                                device const GroundDrawableUBO* groundVector [[buffer(idGroundDrawableUBO)]],
                                 texture2d<float, access::read> ground_dem [[texture(2)]],
 #endif
                                 device const HeatmapEvaluatedPropsUBO& props [[buffer(idHeatmapEvaluatedPropsUBO)]]) {
@@ -3884,14 +3908,18 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float3 corner_vector = globeRotateVector(center_vector, extrude * radius * drawable.globe_extrude_scale);
     const float4 position = interpolateProjection(circle_center + scaled_extrude, corner_vector, 0.0, projectionVector[uboIndex]);
 #else
-    // The kernel lies flat on the ground under its center.
+    // The kernel lies flat on the ground under its center, if its draw
+    // draws it.
     const float2 center = floor(float2(vertx.pos) * 0.5);
 #if defined(TERRAIN)
-    const float ele = standing_height(center, groundVector[uboIndex], ground_dem);
+    device const GroundDrawableUBO& ground = projectionVector[uboIndex].ground;
+    const float ele = standing_height(center, ground, ground_dem);
+    const float4 position = ground_holds(center, ground)
+        ? drawable.matrix * float4(center + scaled_extrude, ele, 1)
+        : ground_dropped();
 #else
-    const float ele = 0.0;
+    const float4 position = drawable.matrix * float4(center + scaled_extrude, 0, 1);
 #endif
-    const float4 position = drawable.matrix * float4(center + scaled_extrude, ele, 1);
 #endif
 
     return {
