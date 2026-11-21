@@ -35,7 +35,10 @@
 //! 4. The drapes draw into their textures before the frame's pass. The
 //!    frame clears to transparent, and its translucent pass draws each
 //!    stack's surface where the stack's first layer draws, and the layers
-//!    that don't drape between the stacks, flat, with their layer depth off.
+//!    that don't drape between the stacks, with their layer depth off: those
+//!    that stand on the ground as it draws (see **Standing layers**), such
+//!    as circles and heatmap kernels, and the others flat, such as fill
+//!    extrusions and symbols for now.
 //!
 //! # Contracts
 //!
@@ -99,7 +102,12 @@
 //!   than among a draw's own textures, at a slot that only the terrain
 //!   variants declare, so that no flat program's layout or draw changes for
 //!   it. A frame without terrain makes no terrain variant, writes no ground
-//!   and binds no ground texture.
+//!   and binds no ground texture. A known limit: a tile that draws in
+//!   several parts, which happens only where the view is zoomed past a
+//!   source's deepest zoom over a deeper DEM, draws its features part by
+//!   part rather than in its bucket's order, so where features of two parts
+//!   overlap, which is on top can differ from a flat map, and symbols would
+//!   sort within each part only.
 //! - **The surface** draws once for each stack, its tiles nearest the
 //!   center first, testing and writing the 3D depth range with less or
 //!   equal and blending its drapes over what is under it. A stack above the
