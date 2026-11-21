@@ -83,7 +83,9 @@ pub enum MapEvent {
     LoadingFinished,
     /// The style failed to load.
     LoadingFailed(StyleLoadError),
-    /// Everything has loaded and no transition runs.
+    /// A complete frame of the map's last update drew: everything has
+    /// loaded, no transition runs, and no frame follows until something
+    /// changes the map.
     Idle,
     /// A frame failed on the GPU, the first of the frames in a row that
     /// fail: a pass didn't begin, a texture couldn't be made or a draw

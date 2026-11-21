@@ -69,6 +69,8 @@ struct FinishedFrame {
     needs_repaint: bool,
     placement_changed: bool,
     still_image_request_id: u64,
+    /// The update the frame drew.
+    update_id: u64,
     /// Whether the frame failed on the GPU.
     failed: bool,
 }
@@ -133,6 +135,8 @@ pub struct Map {
     still_image: StillImage,
     /// Counts the still image requests, so the renderer can tell a new one.
     still_image_request_id: u64,
+    /// The `update_id` of the last update the map made.
+    update_id: u64,
 
     /// Grows with each change to the map's state.
     generation: u64,
@@ -235,6 +239,7 @@ impl Map {
             render_failures: 0,
             still_image: StillImage::None,
             still_image_request_id: 0,
+            update_id: 0,
             generation: 1,
             renderer_events,
             events,
@@ -491,6 +496,7 @@ impl Map {
                 repaint_at,
                 placement_changed,
                 still_image_request_id,
+                update_id,
                 stats,
                 error,
             } => {
@@ -500,7 +506,8 @@ impl Map {
                     Some(error) => self.on_render_failure(*error, still_image_request_id),
                     None => self.render_failures = 0,
                 }
-                let frame = FinishedFrame { mode, needs_repaint, placement_changed, still_image_request_id, failed };
+                let frame =
+                    FinishedFrame { mode, needs_repaint, placement_changed, still_image_request_id, update_id, failed };
                 self.on_render_frame_finished(frame, stats);
             }
             // The renderer completes a frame only of an update whose ground
@@ -578,10 +585,14 @@ impl Map {
 
     /// Handles the end of a frame. Only a `Full` frame completes a still
     /// image or leaves the map idle; one whose camera hadn't stood on the
-    /// terrain's newest ground, or that failed, isn't `Full`. A frame that
-    /// failed asks for no other, as its retry delay does.
+    /// terrain's newest ground, or that failed, isn't `Full`. Only a frame
+    /// of the map's last update leaves it idle: the map may have made one
+    /// since the renderer took the frame's, such as its answer to the new
+    /// ground or to a tile's data that the frame itself took in, and that
+    /// update's frame is still to come. A frame that failed asks for no
+    /// other, as its retry delay does.
     fn on_render_frame_finished(&mut self, frame: FinishedFrame, stats: Arc<RenderingStats>) {
-        let FinishedFrame { mode, needs_repaint, placement_changed, still_image_request_id, failed } = frame;
+        let FinishedFrame { mode, needs_repaint, placement_changed, still_image_request_id, update_id, failed } = frame;
         let fully_loaded = mode == mln_renderer::RenderMode::Full;
         if std::mem::replace(&mut self.renderer_fully_loaded, fully_loaded) != fully_loaded {
             self.changed();
@@ -606,7 +617,11 @@ impl Map {
             let animating = self.transform.in_transition();
             if !failed && (needs_repaint || (animating && self.transform.frame_time().is_none())) {
                 self.on_update();
-            } else if !animating && self.renderer_fully_loaded && self.repaint_at.is_none() {
+            } else if !animating
+                && self.renderer_fully_loaded
+                && self.repaint_at.is_none()
+                && update_id == self.update_id
+            {
                 self.emit(MapEvent::Idle);
             }
         } else if self.renderer_fully_loaded
@@ -660,6 +675,7 @@ impl Map {
         self.transform.set_projection_definition(&projection);
         self.follow_terrain();
 
+        self.update_id += 1;
         let params = UpdateParameters {
             style_loaded: self.style_loaded(),
             mode: self.mode,
@@ -677,6 +693,7 @@ impl Map {
             prefetch_zoom_delta: self.tile.prefetch_zoom_delta,
             still_image_request: self.still_image == StillImage::Pending,
             still_image_request_id: self.still_image_request_id,
+            update_id: self.update_id,
             cross_source_collisions: self.cross_source_collisions,
             fast_pfor_enabled: self.fast_pfor_enabled,
             terrain_skirt_length: self.terrain_skirt_length,

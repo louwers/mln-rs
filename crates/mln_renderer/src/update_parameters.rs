@@ -45,6 +45,12 @@ pub struct UpdateParameters {
     /// Identifies the still image request: each new one retries the
     /// resources that failed to load.
     pub still_image_request_id: u64,
+    /// Identifies the update among its map's, which number them from 1 in
+    /// the order they're made. A frame's report names the update it drew
+    /// ([`RendererEvent::RenderFrameFinished`]).
+    ///
+    /// [`RendererEvent::RenderFrameFinished`]: crate::RendererEvent::RenderFrameFinished
+    pub update_id: u64,
     pub cross_source_collisions: bool,
     pub fast_pfor_enabled: bool,
     /// How far the skirts of terrain tiles reach down.

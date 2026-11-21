@@ -238,16 +238,31 @@ fn carries(map: &Map, elevation: Option<&Arc<dyn Elevation>>) -> bool {
     }
 }
 
-fn frame(mode: RenderMode, still_image_request_id: u64) -> RendererEvent {
+/// The `update_id` of the map's latest update.
+fn latest_update(map: &Map) -> u64 {
+    map.update_reader().latest().map_or(0, |update| update.parameters.update_id)
+}
+
+/// The report of a frame in `mode` of the update `update_id`, of the still
+/// image `still_image_request_id`, or of none with 0.
+fn frame(mode: RenderMode, still_image_request_id: u64, update_id: u64) -> RendererEvent {
     RendererEvent::RenderFrameFinished {
         mode,
         needs_repaint: false,
         repaint_at: None,
         placement_changed: false,
         still_image_request_id,
+        update_id,
         stats: Arc::default(),
         error: None,
     }
+}
+
+/// Reports a frame of the map's latest update in `mode`, of the still image
+/// `still_image_request_id`, or of none with 0.
+fn report_frame(map: &mut Map, mode: RenderMode, still_image_request_id: u64) {
+    let update_id = latest_update(map);
+    report(map, frame(mode, still_image_request_id, update_id));
 }
 
 fn camera_events(events: &[MapEvent]) -> usize {
@@ -424,18 +439,46 @@ fn a_partial_frame_ends_no_still_and_no_idle() {
     let run_loop = Queue::<()>::new();
     let mut map = map(MapMode::Static, &run_loop);
     map.render_still().unwrap();
-    report(&mut map, frame(RenderMode::Partial, 1));
+    report_frame(&mut map, RenderMode::Partial, 1);
     assert_eq!(None, map.take_still_image());
-    report(&mut map, frame(RenderMode::Full, 1));
+    report_frame(&mut map, RenderMode::Full, 1);
     assert_eq!(Some(Ok(())), map.take_still_image());
 
     let mut map = self::map(MapMode::Continuous, &run_loop);
     map.drain_events();
     let idle = |events: Vec<MapEvent>| events.iter().any(|event| matches!(event, MapEvent::Idle));
-    report(&mut map, frame(RenderMode::Partial, 0));
+    report_frame(&mut map, RenderMode::Partial, 0);
     assert!(!idle(map.drain_events()));
-    report(&mut map, frame(RenderMode::Full, 0));
+    report_frame(&mut map, RenderMode::Full, 0);
     assert!(idle(map.drain_events()));
+}
+
+/// A continuous map goes idle only on a frame of its last update. A frame
+/// that took in new ground, or a tile's data whose wake reaches the map
+/// late, reports it before it finishes, and the map answers with an
+/// update: the frame, complete as it is, leaves that update to draw, and
+/// the update's frame leaves the map idle, once.
+#[test]
+fn a_continuous_map_goes_idle_only_on_a_frame_of_its_last_update() {
+    let run_loop = Queue::<()>::new();
+    let mut map = map(MapMode::Continuous, &run_loop);
+    let idle = |map: &mut Map| map.drain_events().iter().filter(|event| matches!(event, MapEvent::Idle)).count();
+    for (what, taken_in) in
+        [("new ground", ground_event(&flat(Some(0.0), 0.0))), ("a late wake", RendererEvent::Invalidate)]
+    {
+        report_frame(&mut map, RenderMode::Full, 0);
+        assert_eq!(1, idle(&mut map), "the map isn't idle before {what}");
+        let drawn = latest_update(&map);
+        map.renderer_events().push(taken_in);
+        map.renderer_events().push(frame(RenderMode::Full, 0, drawn));
+        map.process_events();
+        assert_ne!(drawn, latest_update(&map), "the map answers {what} with an update");
+        assert_eq!(0, idle(&mut map), "idle on a frame before the answer to {what}");
+        let answer = latest_update(&map);
+        report_frame(&mut map, RenderMode::Full, 0);
+        assert_eq!(1, idle(&mut map), "the answer to {what} leaves the map idle");
+        assert_eq!(answer, latest_update(&map), "the idle map asks for another frame after {what}");
+    }
 }
 
 /// A camera whose ground changes with each move stops following it after
@@ -458,7 +501,7 @@ fn a_still_image_stops_following_ground_that_never_settles() {
     let mut moves = [100.0, 200.0].repeat(4);
     moves.extend([200.0; 12]);
     assert_eq!(moves, altitudes);
-    report(&mut map, frame(RenderMode::Full, 1));
+    report_frame(&mut map, RenderMode::Full, 1);
     assert_eq!(Some(Ok(())), map.take_still_image());
 
     // The next still image follows the ground again.

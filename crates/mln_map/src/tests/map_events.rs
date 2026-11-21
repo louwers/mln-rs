@@ -36,6 +36,11 @@ fn report(map: &Map, event: RendererEvent) {
     map.renderer_events().push(event);
 }
 
+/// The `update_id` of the map's latest update, which a frame of it names.
+fn latest_update(map: &Map) -> u64 {
+    map.update_reader().latest().map_or(0, |update| update.parameters.update_id)
+}
+
 const STYLE: &str = r#"{"version": 8, "center": [10, 20], "zoom": 3, "sources": {}, "layers": []}"#;
 
 #[test]
@@ -165,12 +170,13 @@ fn a_frame_waiting_for_a_placement_asks_for_no_update_until_then() {
     map.load_style_json(STYLE);
     map.process_events();
     map.drain_events();
-    let frame = |repaint_at| RendererEvent::RenderFrameFinished {
+    let frame = |map: &Map, repaint_at| RendererEvent::RenderFrameFinished {
         mode: mln_renderer::RenderMode::Full,
         needs_repaint: false,
         repaint_at,
         placement_changed: false,
         still_image_request_id: 0,
+        update_id: latest_update(map),
         stats: Arc::default(),
         error: None,
     };
@@ -187,7 +193,7 @@ fn a_frame_waiting_for_a_placement_asks_for_no_update_until_then() {
     map.set_frame_time(Some(now.checked_sub(Duration::from_millis(20)).unwrap()));
     let at = now.checked_sub(Duration::from_millis(10)).unwrap();
     let updates = map.update_generation();
-    report(&map, frame(Some(at)));
+    report(&map, frame(&map, Some(at)));
     map.process_events();
     assert_eq!(map.update_generation(), updates, "no update until the owner repaints");
     assert_eq!(map.repaint_at(), Some(at));
@@ -197,7 +203,7 @@ fn a_frame_waiting_for_a_placement_asks_for_no_update_until_then() {
     assert_eq!(map.repaint_at(), None);
     let update = map.update_reader().latest().expect("an update");
     assert!(update.parameters.time_point >= Some(at), "the repaint shows the map at its time");
-    report(&map, frame(None));
+    report(&map, frame(&map, None));
     map.process_events();
     assert_eq!(finished(&mut map), (Some(true), true));
 }
@@ -217,12 +223,13 @@ fn a_frame_report_adds_no_update_while_the_frame_clock_samples_an_animation() {
         animation: AnimationOptions { duration: Some(Duration::from_secs(60)), ..Default::default() },
         ..Default::default()
     });
-    let frame = || RendererEvent::RenderFrameFinished {
+    let frame = |map: &Map| RendererEvent::RenderFrameFinished {
         mode: mln_renderer::RenderMode::Full,
         needs_repaint: false,
         repaint_at: None,
         placement_changed: false,
         still_image_request_id: 0,
+        update_id: latest_update(map),
         stats: Arc::default(),
         error: None,
     };
@@ -235,7 +242,7 @@ fn a_frame_report_adds_no_update_while_the_frame_clock_samples_an_animation() {
     assert_eq!(map.update_generation(), updates + 1);
     map.process_events();
     map.drain_events();
-    report(&map, frame());
+    report(&map, frame(&map));
     map.process_events();
     let events = map.drain_events();
     assert_eq!(map.update_generation(), updates + 1);
@@ -244,7 +251,7 @@ fn a_frame_report_adds_no_update_while_the_frame_clock_samples_an_animation() {
     map.set_frame_time(None);
     map.drain_events();
     let updates = map.update_generation();
-    report(&map, frame());
+    report(&map, frame(&map));
     map.process_events();
     let events = map.drain_events();
     assert_eq!(map.update_generation(), updates + 1);
@@ -343,6 +350,7 @@ fn a_still_image_completes_with_a_full_frame() {
         repaint_at: None,
         placement_changed: false,
         still_image_request_id,
+        update_id: 0,
         stats: Arc::clone(&stats),
         error: None,
     };
@@ -367,15 +375,17 @@ fn a_still_image_completes_with_a_full_frame() {
     assert_eq!(map.take_still_image(), Some(Ok(())));
 }
 
-/// The report of a frame of the still image `still_image_request_id`, or of
-/// none with 0, that failed on the GPU with `message`, if it did.
-fn failed_frame(still_image_request_id: u64, message: Option<&str>) -> RendererEvent {
+/// The report of a frame of `map`'s latest update, of the still image
+/// `still_image_request_id`, or of none with 0, that failed on the GPU with
+/// `message`, if it did.
+fn failed_frame(map: &Map, still_image_request_id: u64, message: Option<&str>) -> RendererEvent {
     RendererEvent::RenderFrameFinished {
         mode: if message.is_some() { mln_renderer::RenderMode::Partial } else { mln_renderer::RenderMode::Full },
         needs_repaint: false,
         repaint_at: None,
         placement_changed: false,
         still_image_request_id,
+        update_id: latest_update(map),
         stats: Arc::default(),
         error: message.map(|message| Box::new(Error::native(message))),
     }
@@ -401,7 +411,7 @@ fn a_failed_frame_fails_only_the_still_image_it_was_drawn_for() {
     map.load_style_json(STYLE);
     map.process_events();
     map.render_still().unwrap();
-    report(&map, failed_frame(1, Some("the GPU failed")));
+    report(&map, failed_frame(&map, 1, Some("the GPU failed")));
     map.process_events();
     let ended = map.take_still_image().expect("the image ended").expect_err("the image succeeded");
     assert_eq!(("the GPU failed", ErrorKind::Native), (ended.message.as_str(), ended.kind));
@@ -414,11 +424,11 @@ fn a_failed_frame_fails_only_the_still_image_it_was_drawn_for() {
     map.process_events();
     assert!(map.take_still_image().expect("the image ended").is_err());
     map.render_still().unwrap();
-    report(&map, failed_frame(2, Some("late")));
-    report(&map, failed_frame(0, Some("the host's frame")));
+    report(&map, failed_frame(&map, 2, Some("late")));
+    report(&map, failed_frame(&map, 0, Some("the host's frame")));
     map.process_events();
     assert_eq!(map.take_still_image(), None, "a frame of another image failed this one");
-    report(&map, failed_frame(3, None));
+    report(&map, failed_frame(&map, 3, None));
     map.process_events();
     assert_eq!(map.take_still_image(), Some(Ok(())));
 }
@@ -439,7 +449,7 @@ fn a_continuous_map_reports_failures_in_a_row_once_and_draws_again_later() {
     for _ in 0..8 {
         let updates = map.update_generation();
         let before = Instant::now();
-        report(&map, failed_frame(0, Some("the GPU failed")));
+        report(&map, failed_frame(&map, 0, Some("the GPU failed")));
         map.process_events();
         assert_eq!(map.update_generation(), updates, "a failed frame asked for the next at once");
         let events = map.drain_events();
@@ -455,11 +465,11 @@ fn a_continuous_map_reports_failures_in_a_row_once_and_draws_again_later() {
     assert!(delays[0] < Duration::from_millis(500), "{delays:?}");
     assert!(delays[7] > delays[0] && delays[7] <= Duration::from_secs(1) + slack, "{delays:?}");
 
-    report(&map, failed_frame(0, None));
+    report(&map, failed_frame(&map, 0, None));
     map.process_events();
     let events = map.drain_events();
     assert!(events.iter().any(|event| matches!(event, MapEvent::Idle)), "{events:?}");
-    report(&map, failed_frame(0, Some("again")));
+    report(&map, failed_frame(&map, 0, Some("again")));
     map.process_events();
     assert_eq!(vec!["again".to_owned()], render_errors(&map.drain_events()));
 }

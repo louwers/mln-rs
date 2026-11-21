@@ -389,6 +389,7 @@ impl DrapedMap {
             prefetch_zoom_delta: 0,
             still_image_request: self.mode == MapMode::Static,
             still_image_request_id: 0,
+            update_id: 0,
             cross_source_collisions: true,
             fast_pfor_enabled: false,
             terrain_skirt_length: TerrainSkirtLength::Auto,

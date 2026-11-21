@@ -54,6 +54,13 @@ pub enum RendererEvent {
         /// updates completes it, not one of an earlier update that a renderer
         /// on another thread drew late.
         still_image_request_id: u64,
+        /// The [`update_id`] of the update that the frame drew. Only a
+        /// frame of the map's last update leaves a continuous map idle: an
+        /// update the map made after the renderer took the frame's, such as
+        /// its answer to the frame's own reports, has a frame to come.
+        ///
+        /// [`update_id`]: crate::UpdateParameters::update_id
+        update_id: u64,
         /// The context's counters after the frame.
         stats: Arc<RenderingStats>,
         /// Why the frame failed on the GPU, if it did
