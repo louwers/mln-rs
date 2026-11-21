@@ -167,6 +167,11 @@ pub struct DrawFrame<'a> {
     /// a pass can draw into them together with the layer composite's
     /// texture.
     pub composites_with_frame_depth: bool,
+    /// How far the fade of the current placement has come: from 0 when it
+    /// was committed to 1 once its fade is done, and past 1 after that; 1
+    /// where placements don't fade. What placement shows fades in by it
+    /// and what it hides fades out by it.
+    pub placement_fade: f32,
     /// The frame's projection matrices.
     pub(crate) transform: &'a TransformParameters,
 }
@@ -207,7 +212,6 @@ pub struct PaintParameters<'a> {
     pub(crate) current_layer: u32,
     pub(crate) depth_range_size: f32,
     pub(crate) opaque_pass_cutoff: u32,
-    pub(crate) symbol_fade_change: f32,
 
     pub(crate) scissor_rect: ScissorRect,
     /// Where the frame draws the map, and the depth it writes there, once
@@ -257,6 +261,7 @@ impl<'a> PaintParameters<'a> {
                 light: &frame.light,
                 static_data,
                 composites_with_frame_depth,
+                placement_fade: frame.placement_fade,
                 transform: transform_params,
             },
             pass: RenderPass::OPAQUE,
@@ -269,7 +274,6 @@ impl<'a> PaintParameters<'a> {
             current_layer: 0,
             depth_range_size: 1.0,
             opaque_pass_cutoff: frame.opaque_pass_cutoff,
-            symbol_fade_change: frame.symbol_fade_change,
             scissor_rect,
             frame_projection: None,
         }

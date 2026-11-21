@@ -69,18 +69,15 @@ inline float2 atlas_pos(const float2 origin, const float2 offset) {
 }
 
 struct alignas(16) GlobalPaintParamsUBO {
-    /*  0 */ float2 pattern_atlas_texsize;
-    /*  8 */ float2 units_to_pixels;
-    /* 16 */ float2 world_size;
-    /* 24 */ float camera_to_center_distance;
-    /* 28 */ float symbol_fade_change;
-    /* 32 */ float aspect_ratio;
-    /* 36 */ float pixel_ratio;
-    /* 40 */ float map_zoom;
-    /* 44 */ float pad1;
-    /* 48 */
+    /*  0 */ float2 units_to_pixels;
+    /*  8 */ float2 world_size;
+    /* 16 */ float camera_to_center_distance;
+    /* 20 */ float aspect_ratio;
+    /* 24 */ float pixel_ratio;
+    /* 28 */ float pad1;
+    /* 32 */
 };
-static_assert(sizeof(GlobalPaintParamsUBO) == 3 * 16, "wrong size");
+static_assert(sizeof(GlobalPaintParamsUBO) == 2 * 16, "wrong size");
 
 struct alignas(16) ProjectionUBO {
     /*   0 */ float4x4 matrix;

@@ -175,14 +175,11 @@ struct CollisionTilePropsUBO {
 };
 
 struct GlobalPaintParamsUBO {
-    pattern_atlas_texsize: vec2<f32>,
     units_to_pixels: vec2<f32>,
     world_size: vec2<f32>,
     camera_to_center_distance: f32,
-    symbol_fade_change: f32,
     aspect_ratio: f32,
     pixel_ratio: f32,
-    map_zoom: f32,
     pad1: f32,
 };
 
@@ -278,14 +275,11 @@ struct VertexOutput {
 };
 
 struct GlobalPaintParamsUBO {
-    pattern_atlas_texsize: vec2<f32>,
     units_to_pixels: vec2<f32>,
     world_size: vec2<f32>,
     camera_to_center_distance: f32,
-    symbol_fade_change: f32,
     aspect_ratio: f32,
     pixel_ratio: f32,
-    map_zoom: f32,
     pad1: f32,
 };
 
@@ -426,6 +420,7 @@ struct VertexOutput {
 @group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(0) @binding(2) var<storage, read> drawableVector: array<SymbolDrawableUBO>;
 @group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
+@group(0) @binding(5) var<uniform> props: SymbolEvaluatedPropsUBO;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
@@ -434,7 +429,7 @@ fn main(in: VertexInput) -> VertexOutput {
     let drawable = drawableVector[globalIndex.value];
 
     let raw_fade_opacity = unpack_opacity(in.fade_opacity);
-    let fade_change = select(-paintParams.symbol_fade_change, paintParams.symbol_fade_change, raw_fade_opacity.y > 0.5);
+    let fade_change = select(-props.fade_change, props.fade_change, raw_fade_opacity.y > 0.5);
     let fade_opacity = max(0.0, min(1.0, raw_fade_opacity.x + fade_change));
 
 #ifdef HAS_UNIFORM_u_opacity
@@ -603,14 +598,11 @@ const idSymbolEvaluatedPropsUBO = 4u;
 const symbolUBOCount = 5u;
 
 struct GlobalPaintParamsUBO {
-    pattern_atlas_texsize: vec2<f32>,
     units_to_pixels: vec2<f32>,
     world_size: vec2<f32>,
     camera_to_center_distance: f32,
-    symbol_fade_change: f32,
     aspect_ratio: f32,
     pixel_ratio: f32,
-    map_zoom: f32,
     pad1: f32,
 };
 
@@ -666,7 +658,7 @@ struct SymbolEvaluatedPropsUBO {
     icon_opacity: f32,
     icon_halo_width: f32,
     icon_halo_blur: f32,
-    pad2: f32,
+    fade_change: f32,
 };
 
 struct GlobalIndexUBO {
@@ -735,7 +727,7 @@ fn main(in: VertexInput) -> VertexOutput {
     let drawable = drawableVector[globalIndex.value];
 
     let fade_opacity = unpack_opacity(in.fade_opacity);
-    let fade_change = select(-paintParams.symbol_fade_change, paintParams.symbol_fade_change, fade_opacity.y > 0.5);
+    let fade_change = select(-props.fade_change, props.fade_change, fade_opacity.y > 0.5);
     let fo = max(0.0, min(1.0, fade_opacity.x + fade_change));
 
 #ifdef HAS_UNIFORM_u_opacity
@@ -966,14 +958,11 @@ const idSymbolEvaluatedPropsUBO = 4u;
 const symbolUBOCount = 5u;
 
 struct GlobalPaintParamsUBO {
-    pattern_atlas_texsize: vec2<f32>,
     units_to_pixels: vec2<f32>,
     world_size: vec2<f32>,
     camera_to_center_distance: f32,
-    symbol_fade_change: f32,
     aspect_ratio: f32,
     pixel_ratio: f32,
-    map_zoom: f32,
     pad1: f32,
 };
 
@@ -1029,7 +1018,7 @@ struct SymbolEvaluatedPropsUBO {
     icon_opacity: f32,
     icon_halo_width: f32,
     icon_halo_blur: f32,
-    pad2: f32,
+    fade_change: f32,
 };
 
 struct GlobalIndexUBO {
@@ -1101,7 +1090,7 @@ fn main(in: VertexInput) -> VertexOutput {
     let drawable = drawableVector[globalIndex.value];
 
     let fade_opacity = unpack_opacity(in.fade_opacity);
-    let fade_change = select(-paintParams.symbol_fade_change, paintParams.symbol_fade_change, fade_opacity.y > 0.5);
+    let fade_change = select(-props.fade_change, props.fade_change, fade_opacity.y > 0.5);
     let fo = max(0.0, min(1.0, fade_opacity.x + fade_change));
 
 #ifdef HAS_UNIFORM_u_opacity
@@ -1346,14 +1335,11 @@ const idSymbolEvaluatedPropsUBO = 4u;
 const symbolUBOCount = 5u;
 
 struct GlobalPaintParamsUBO {
-    pattern_atlas_texsize: vec2<f32>,
     units_to_pixels: vec2<f32>,
     world_size: vec2<f32>,
     camera_to_center_distance: f32,
-    symbol_fade_change: f32,
     aspect_ratio: f32,
     pixel_ratio: f32,
-    map_zoom: f32,
     pad1: f32,
 };
 
@@ -1409,7 +1395,7 @@ struct SymbolEvaluatedPropsUBO {
     icon_opacity: f32,
     icon_halo_width: f32,
     icon_halo_blur: f32,
-    pad2: f32,
+    fade_change: f32,
 };
 
 struct GlobalIndexUBO {

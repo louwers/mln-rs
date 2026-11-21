@@ -438,6 +438,21 @@ layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer
     ProjectionUBO projection_ubo[];
 } projectionVector;
 
+layout(set = LAYER_SET_INDEX, binding = idSymbolEvaluatedPropsUBO) uniform SymbolEvaluatedPropsUBO {
+    vec4 text_fill_color;
+    vec4 text_halo_color;
+    float text_opacity;
+    float text_halo_width;
+    float text_halo_blur;
+    float pad1;
+    vec4 icon_fill_color;
+    vec4 icon_halo_color;
+    float icon_opacity;
+    float icon_halo_width;
+    float icon_halo_blur;
+    float fade_change;
+} props;
+
 layout(location = 0) out vec2 frag_tex;
 layout(location = 1) out float frag_opacity;
 
@@ -450,7 +465,7 @@ void main() {
     const ProjectionUBO projection = projectionVector.projection_ubo[constant.ubo_index];
 
     const vec2 raw_fade_opacity = unpack_opacity(in_fade_opacity);
-    const float fade_change = raw_fade_opacity[1] > 0.5 ? paintParams.symbol_fade_change : -paintParams.symbol_fade_change;
+    const float fade_change = raw_fade_opacity[1] > 0.5 ? props.fade_change : -props.fade_change;
     const float fade_opacity = max(0.0, min(1.0, raw_fade_opacity[0] + fade_change));
 #if defined(HAS_UNIFORM_u_opacity)
     const float visibility = fade_opacity;
@@ -598,7 +613,7 @@ layout(set = LAYER_SET_INDEX, binding = idSymbolEvaluatedPropsUBO) uniform Symbo
     float icon_opacity;
     float icon_halo_width;
     float icon_halo_blur;
-    float pad2;
+    float fade_change;
 } props;
 
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image0_texture;
@@ -716,7 +731,7 @@ layout(set = LAYER_SET_INDEX, binding = idSymbolEvaluatedPropsUBO) uniform Symbo
     float icon_opacity;
     float icon_halo_width;
     float icon_halo_blur;
-    float pad2;
+    float fade_change;
 } props;
 
 layout(location = 0) out vec2 frag_tex;
@@ -744,7 +759,7 @@ void main() {
     const ProjectionUBO projection = projectionVector.projection_ubo[constant.ubo_index];
 
     const vec2 raw_fade_opacity = unpack_opacity(in_fade_opacity);
-    const float fade_change = raw_fade_opacity[1] > 0.5 ? paintParams.symbol_fade_change : -paintParams.symbol_fade_change;
+    const float fade_change = raw_fade_opacity[1] > 0.5 ? props.fade_change : -props.fade_change;
     const float fade_opacity = max(0.0, min(1.0, raw_fade_opacity[0] + fade_change));
 #if defined(HAS_UNIFORM_u_opacity)
     const float visibility = fade_opacity;
@@ -933,7 +948,7 @@ layout(set = LAYER_SET_INDEX, binding = idSymbolEvaluatedPropsUBO) uniform Symbo
     float icon_opacity;
     float icon_halo_width;
     float icon_halo_blur;
-    float pad2;
+    float fade_change;
 } props;
 
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image0_texture;
@@ -1077,7 +1092,7 @@ layout(set = LAYER_SET_INDEX, binding = idSymbolEvaluatedPropsUBO) uniform Symbo
     float icon_opacity;
     float icon_halo_width;
     float icon_halo_blur;
-    float pad2;
+    float fade_change;
 } props;
 
 layout(location = 0) out vec2 frag_tex;
@@ -1107,7 +1122,7 @@ void main() {
     const ProjectionUBO projection = projectionVector.projection_ubo[constant.ubo_index];
 
     const vec2 raw_fade_opacity = unpack_opacity(in_fade_opacity);
-    const float fade_change = raw_fade_opacity[1] > 0.5 ? paintParams.symbol_fade_change : -paintParams.symbol_fade_change;
+    const float fade_change = raw_fade_opacity[1] > 0.5 ? props.fade_change : -props.fade_change;
     const float fade_opacity = max(0.0, min(1.0, raw_fade_opacity[0] + fade_change));
 #if defined(HAS_UNIFORM_u_opacity)
     const float visibility = fade_opacity;
@@ -1302,7 +1317,7 @@ layout(set = LAYER_SET_INDEX, binding = idSymbolEvaluatedPropsUBO) uniform Symbo
     float icon_opacity;
     float icon_halo_width;
     float icon_halo_blur;
-    float pad2;
+    float fade_change;
 } props;
 
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D glyph_image_texture;

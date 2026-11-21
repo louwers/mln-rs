@@ -38,7 +38,8 @@ pub struct BackgroundPatternDrawableUBO {
 }
 const _: () = assert!(size_of::<BackgroundPatternDrawableUBO>() == 6 * 16);
 
-/// Evaluated properties that do not depend on the tile (64 bytes).
+/// Evaluated properties that do not depend on the tile, and the size of the
+/// pattern atlas in pixels (80 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct BackgroundPatternPropsUBO {
@@ -52,9 +53,12 @@ pub struct BackgroundPatternPropsUBO {
     /* 52 */ pub scale_b: f32,
     /* 56 */ pub mix: f32,
     /* 60 */ pub opacity: f32,
-    /* 64 */
+    /* 64 */ pub texsize: [f32; 2],
+    /* 72 */ pub pad1: f32,
+    /* 76 */ pub pad2: f32,
+    /* 80 */
 }
-const _: () = assert!(size_of::<BackgroundPatternPropsUBO>() == 4 * 16);
+const _: () = assert!(size_of::<BackgroundPatternPropsUBO>() == 5 * 16);
 
 /// Either background per-drawable uniform block, for consolidated UBOs: a C++
 /// union, the size of the larger member, 96 bytes. Write either member with

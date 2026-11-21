@@ -119,6 +119,9 @@ layout(set = LAYER_SET_INDEX, binding = idBackgroundPropsUBO) uniform Background
     float scale_b;
     float mix;
     float opacity;
+    vec2 texsize;
+    float pad1;
+    float pad2;
 } props;
 
 layout(location = 0) out vec2 frag_pos_a;
@@ -158,6 +161,9 @@ layout(set = LAYER_SET_INDEX, binding = idBackgroundPropsUBO) uniform Background
     float scale_b;
     float mix;
     float opacity;
+    vec2 texsize;
+    float pad1;
+    float pad2;
 } props;
 
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image_texture;
@@ -170,7 +176,7 @@ void main() {
     return;
 #else
 
-    const vec2 texsize = paintParams.pattern_atlas_texsize;
+    const vec2 texsize = props.texsize;
 
     // A crossfade at 0 or 1 shows one pattern, so skip the other.
     vec4 color1 = vec4(0.0);

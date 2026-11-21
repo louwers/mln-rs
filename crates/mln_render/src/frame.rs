@@ -31,7 +31,8 @@ pub(crate) struct Frame {
     /// What the frame clears to: transparent black unless the style's
     /// bottom layer is a solid background.
     pub(crate) background_color: Color,
-    pub(crate) symbol_fade_change: f32,
+    /// How far the current placement's fade has come.
+    pub(crate) placement_fade: f32,
     /// Whether a transition or a fade still runs, which the next frame
     /// continues.
     pub(crate) needs_repaint: bool,
@@ -61,7 +62,7 @@ impl Frame {
             sky: None,
             opaque_pass_cutoff: 0,
             background_color: Color::new_unchecked(0.0, 0.0, 0.0, 0.0),
-            symbol_fade_change: 0.0,
+            placement_fade: 0.0,
             needs_repaint: false,
             repaint_at: None,
             loaded: false,

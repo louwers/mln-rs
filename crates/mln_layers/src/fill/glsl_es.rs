@@ -171,14 +171,11 @@ pub(super) static SOURCES: &[(&Program, &Source)] = &[
 
 const FILL_OUTLINE_PATTERN_SHADER: Glsl = Glsl {
     vertex: r"layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_pattern_atlas_texsize;
     highp vec2 u_units_to_pixels;
     highp vec2 u_world_size;
     highp float u_camera_to_center_distance;
-    highp float u_symbol_fade_change;
     highp float u_aspect_ratio;
     highp float u_pixel_ratio;
-    highp float u_map_zoom;
     lowp float global_pad1;
 };
 
@@ -378,14 +375,11 @@ highp vec4 pattern_to = u_pattern_to;
 
 const FILL_OUTLINE_SHADER: Glsl = Glsl {
     vertex: r"layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_pattern_atlas_texsize;
     highp vec2 u_units_to_pixels;
     highp vec2 u_world_size;
     highp float u_camera_to_center_distance;
-    highp float u_symbol_fade_change;
     highp float u_aspect_ratio;
     highp float u_pixel_ratio;
-    highp float u_map_zoom;
     lowp float global_pad1;
 };
 
@@ -531,14 +525,11 @@ vec4 outline_corner(highp vec4 start, highp vec4 end, vec2 corner, out highp vec
 const FILL_OUTLINE_INSTANCED_SHADER: Glsl = Glsl {
     vertex: concat!(
         r"layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_pattern_atlas_texsize;
     highp vec2 u_units_to_pixels;
     highp vec2 u_world_size;
     highp float u_camera_to_center_distance;
-    highp float u_symbol_fade_change;
     highp float u_aspect_ratio;
     highp float u_pixel_ratio;
-    highp float u_map_zoom;
     lowp float global_pad1;
 };
 
@@ -603,14 +594,11 @@ lowp float opacity = u_opacity;
 const FILL_OUTLINE_PATTERN_INSTANCED_SHADER: Glsl = Glsl {
     vertex: concat!(
         r"layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_pattern_atlas_texsize;
     highp vec2 u_units_to_pixels;
     highp vec2 u_world_size;
     highp float u_camera_to_center_distance;
-    highp float u_symbol_fade_change;
     highp float u_aspect_ratio;
     highp float u_pixel_ratio;
-    highp float u_map_zoom;
     lowp float global_pad1;
 };
 
@@ -715,14 +703,11 @@ highp vec4 pattern_to = u_pattern_to;
 
 const FILL_PATTERN_SHADER: Glsl = Glsl {
     vertex: r"layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_pattern_atlas_texsize;
     highp vec2 u_units_to_pixels;
     highp vec2 u_world_size;
     highp float u_camera_to_center_distance;
-    highp float u_symbol_fade_change;
     highp float u_aspect_ratio;
     highp float u_pixel_ratio;
-    highp float u_map_zoom;
     lowp float global_pad1;
 };
 
