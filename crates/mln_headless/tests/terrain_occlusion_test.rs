@@ -12,7 +12,7 @@ use mln_storage::resource::TileData;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{Kind, Resource, Response};
 use mln_util::error::ErrorKind;
-use mln_util::geo::LatLng;
+use mln_util::geo::{LatLng, ScreenCoordinate, WrapMode};
 use mln_util::image::PremultipliedImage;
 use mln_util::pool::Pool;
 use mln_util::queue::Queue;
@@ -254,12 +254,14 @@ fn a_ridge_hides_a_circle_behind_it_and_not_one_before_it() {
 }
 
 /// A red label on the ground, on a slope that falls 30° to the east, seen
-/// from a camera pitched 70° at each of eight bearings, shows at full
-/// opacity: the ground under it doesn't hide it, though the camera sees it
-/// at a grazing angle where the camera keeps clear of the slope by tilting
-/// up.
+/// from a camera pitched 45° at each of eight bearings, so that the camera
+/// sees the slope at 15° or more from grazing, shows at full opacity: the
+/// ground under it doesn't hide it. Seen at a grazing angle, as looking down
+/// this slope from a pitch of 55° or more, a label standing on the ground can
+/// draw part-faded, as in GL JS: the ground's depth is read at the texel
+/// nearest the label's anchor, which there can lie well in front of it.
 #[test]
-fn a_label_on_a_slope_shows_whole_at_every_bearing() {
+fn a_label_on_a_slope_shows_whole_at_an_ordinary_angle() {
     let top = location_at(MIDDLE, MIDDLE);
     let style = format!(
         r#"{{
@@ -290,11 +292,74 @@ fn a_label_on_a_slope_shows_whole_at_every_bearing() {
     // Opaque red: a label that fades shows pink over the white ground.
     let opaque = |pixel: [u8; 4]| pixel[0] > 200 && pixel[1] < 40 && pixel[2] < 40;
     for bearing in (0..8).map(|step| f64::from(step) * 45.0) {
-        map.jump_to(&camera(top, bearing));
+        map.jump_to(&CameraOptions { pitch: Some(45.0), ..camera(top, bearing) });
         let image = frontend.render(&mut map).expect("the still image").image;
         let shown = count(&image, opaque);
         assert!(shown >= 40, "at a bearing of {bearing}°, {shown} opaque red pixels of the label");
     }
+}
+
+/// A red label on the level ground far behind a ridge, whose anchor the
+/// camera sees a quarter of a pixel above the ridge's silhouette, shows at
+/// full opacity: the ground's depth is read at the texel nearest the anchor,
+/// which holds the ground the label stands on, though the row of texels just
+/// below holds the ridge, much nearer the camera. The ridge is drawn lime,
+/// draped, to find its silhouette.
+#[test]
+fn a_label_just_above_a_ridges_silhouette_shows_whole() {
+    let view = camera(north(0.0), 0.0);
+    let size = Size::new(SIDE, SIDE);
+    let style = |label: Option<&LatLng>| {
+        let (near, far) = (north(RIDGE.1 - 50.0), north(RIDGE.1 + 50.0));
+        let (west, east) = (near.longitude() - 0.02, near.longitude() + 0.02);
+        let (s, n) = (near.latitude(), far.latitude());
+        let point = label.map_or([0.0, 0.0], |at| [at.longitude(), at.latitude()]);
+        let label = if label.is_some() {
+            r#",
+                {"id": "label", "type": "symbol", "source": "label",
+                  "layout": {"text-field": "HH", "text-font": ["Open Sans Regular"], "text-size": 24,
+                             "text-allow-overlap": true, "text-ignore-placement": true},
+                  "paint": {"text-color": "red"}}"#
+        } else {
+            ""
+        };
+        format!(
+            r#"{{
+                "version": 8,
+                "glyphs": "glyphs/{{fontstack}}/{{range}}.pbf",
+                "terrain": {{"source": "dem"}},
+                "sources": {{
+                    "dem": {{"type": "raster-dem", "tiles": ["dem/{{z}}/{{x}}/{{y}}.png"], "tileSize": 256, "maxzoom": 15}},
+                    "ridge": {{"type": "geojson", "data": {{"type": "Polygon", "coordinates": [[
+                        [{west}, {s}], [{east}, {s}], [{east}, {n}], [{west}, {n}], [{west}, {s}]
+                    ]]}}}},
+                    "label": {{"type": "geojson", "data": {{"type": "Point", "coordinates": [{}, {}]}}}}
+                }},
+                "layers": [
+                    {{"id": "background", "type": "background", "paint": {{"background-color": "white"}}}},
+                    {{"id": "ridge", "type": "fill", "source": "ridge", "paint": {{"fill-color": "lime"}}}}{label}
+                ]
+            }}"#,
+            point[0], point[1]
+        )
+    };
+    let Some((ridge, ridge_map, _)) = still(&style(None), size, &view, |tile| dem_of(tile, ridge_height)) else {
+        return;
+    };
+    let green = |pixel: [u8; 4]| pixel[1] > 200 && pixel[0] < 100 && pixel[2] < 100;
+    let top = |column: u32| (0..SIDE).find(|&row| green(pixel(&ridge, column, row))).expect("the ridge in view");
+    let row = top(128);
+    assert_eq!(row, top(127), "the ridge's silhouette across the label's anchor");
+    // A quarter of a pixel above the top of the ridge's first row, in the
+    // row above it, and on the boundary of two columns that both show it.
+    let anchor = ScreenCoordinate::new(f64::from(SIDE / 2), f64::from(SIDE - row) + 0.25);
+    let at = ridge_map.transform_state().view().screen_coordinate_to_lat_lng(&anchor, WrapMode::Unwrapped).unwrap();
+    let Some((image, _, _)) = still(&style(Some(&at)), size, &view, |tile| dem_of(tile, ridge_height)) else {
+        return;
+    };
+    let opaque = |pixel: [u8; 4]| pixel[0] > 200 && pixel[1] < 40 && pixel[2] < 40;
+    let shown = count(&image, opaque);
+    assert!(shown >= 40, "{shown} opaque red pixels of the label");
 }
 
 /// In a continuous map, a ridge whose DEM tile of zoom 15 arrives after the

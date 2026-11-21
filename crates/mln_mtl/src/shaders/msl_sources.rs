@@ -97,35 +97,16 @@ static float ground_depth_at(texture2d<float, access::read> depth, int2 texel) {
 // GL JS's `depthOpacity`: 1 where a point `w` from the eye, at `ndc`, is in
 // front of the ground drawn there, fading to 0 over its depth ramp behind it,
 // in GL's NDC depth, which `depth_factor` scales; 1 where no ground is drawn.
-// The ground's depth there interpolates the reciprocals of the eye distances
-// of the four texels of `depth` around it, as a plane's is in screen space,
-// so ground seen at a grazing angle doesn't hide what stands on it; where one
-// of the four has no ground, it is the nearest texel's. The texels' rows run
-// from the top.
+// The ground's depth there is the texel of `depth` nearest it, as GL JS reads
+// it. The texels' rows run from the top.
 static float ground_depth_opacity(texture2d<float, access::read> depth, float2 ndc, float w, float depth_factor) {
     const int2 size = int2(int(depth.get_width()), int(depth.get_height()));
-    const float2 pos = (float2(ndc.x, -ndc.y) * 0.5 + 0.5) * float2(size) - 0.5;
-    const float2 first = floor(pos);
-    const float2 f = pos - first;
-    const int2 texel = int2(first);
-    const int2 last = size - 1;
-    const float tl = ground_depth_at(depth, clamp(texel, int2(0), last));
-    const float tr = ground_depth_at(depth, clamp(texel + int2(1, 0), int2(0), last));
-    const float bl = ground_depth_at(depth, clamp(texel + int2(0, 1), int2(0), last));
-    const float br = ground_depth_at(depth, clamp(texel + int2(1, 1), int2(0), last));
-    float inverse;
-    if (tl > 0.0 && tr > 0.0 && bl > 0.0 && br > 0.0) {
-        inverse = mix(mix(1.0 / tl, 1.0 / tr, f.x), mix(1.0 / bl, 1.0 / br, f.x), f.y);
-    } else {
-        const float top = f.x >= 0.5 ? tr : tl;
-        const float bottom = f.x >= 0.5 ? br : bl;
-        const float ground = f.y >= 0.5 ? bottom : top;
-        if (!(ground > 0.0)) {
-            return 1.0;
-        }
-        inverse = 1.0 / ground;
+    const float2 pos = (float2(ndc.x, -ndc.y) * 0.5 + 0.5) * float2(size);
+    const float ground = ground_depth_at(depth, clamp(int2(floor(pos)), int2(0), size - 1));
+    if (!(ground > 0.0)) {
+        return 1.0;
     }
-    const float d = depth_factor * (1.0 / w - inverse) + 0.0001;
+    const float d = depth_factor * (1.0 / w - 1.0 / ground) + 0.0001;
     return 1.0 - clamp(-500.0 * d, 0.0, 1.0);
 }
 

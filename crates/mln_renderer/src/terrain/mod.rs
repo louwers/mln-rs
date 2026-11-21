@@ -155,9 +155,8 @@
 //!   frame's draws every terrain tile, skirts included, into a texture at the
 //!   frame's logical pixels, with a depth test that keeps each pixel's
 //!   nearest ground, as its eye distance's f32 bits ([`ID_GROUND_DEPTH_TEXTURE`]).
-//!   The terrain variant reads it where its anchor is seen, the reciprocals of
-//!   the four texels around it interpolated as a plane's are, so that ground
-//!   seen at a grazing angle doesn't hide what stands on it, and fades the
+//!   The terrain variant reads it at the texel nearest where its anchor is
+//!   seen, as GL JS, MapLibre Native and orbis do, and fades the
 //!   feature out over GL JS's ramp in its NDC depth, scaled by the frame's
 //!   near and far planes ([`TerrainPropsUBO::depth_factor`]), averaged with
 //!   the point 0.01 NDC above where it is hidden more than a little; where no
@@ -169,7 +168,10 @@
 //!   changes for it. A hidden label stays in the collision grid. A frame
 //!   without terrain, or without a layer that the ground hides, makes no
 //!   depth and draws no pass for it. A known limit: an axonometric view, whose
-//!   clip w doesn't vary with depth, hides nothing. The ground hides no
+//!   clip w doesn't vary with depth, hides nothing. Another: on ground seen
+//!   at a grazing angle, the texel nearest an anchor can hold ground well in
+//!   front of it, so a feature standing there can draw part-faded, as in GL
+//!   JS. The ground hides no
 //!   heatmap kernel: a kernel adds its density wherever it draws, with ground
 //!   in front of it or not, as in GL JS, so that density doesn't pop in and
 //!   out as the camera moves over hills. The draws of circles and heatmap

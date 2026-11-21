@@ -100,34 +100,16 @@ fn ground_depth_at(texel: vec2<i32>) -> f32 {
 // GL JS's `depthOpacity`: 1 where a point `w` from the eye, at `ndc`, is in
 // front of the ground drawn there, fading to 0 over its depth ramp behind
 // it, in GL's NDC depth, which `depth_factor` scales; 1 where no ground is
-// drawn. The ground's depth there interpolates the reciprocals of the eye
-// distances of the four texels around it, as a plane's is in screen space,
-// so ground seen at a grazing angle doesn't hide what stands on it; where
-// one of the four has no ground, it is the nearest texel's. The texels' rows
-// run from the top.
+// drawn. The ground's depth there is the texel nearest it, as GL JS reads it.
+// The texels' rows run from the top.
 fn ground_depth_opacity(ndc: vec2<f32>, w: f32, depth_factor: f32) -> f32 {
     let size = vec2<i32>(textureDimensions(ground_depth_texture));
-    let pos = (vec2<f32>(ndc.x, -ndc.y) * 0.5 + 0.5) * vec2<f32>(size) - 0.5;
-    let first = floor(pos);
-    let f = pos - first;
-    let texel = vec2<i32>(first);
-    let last = size - 1;
-    let tl = ground_depth_at(clamp(texel, vec2<i32>(0), last));
-    let tr = ground_depth_at(clamp(texel + vec2<i32>(1, 0), vec2<i32>(0), last));
-    let bl = ground_depth_at(clamp(texel + vec2<i32>(0, 1), vec2<i32>(0), last));
-    let br = ground_depth_at(clamp(texel + vec2<i32>(1, 1), vec2<i32>(0), last));
-    var inverse: f32;
-    if (tl > 0.0 && tr > 0.0 && bl > 0.0 && br > 0.0) {
-        inverse = mix(mix(1.0 / tl, 1.0 / tr, f.x), mix(1.0 / bl, 1.0 / br, f.x), f.y);
-    } else {
-        let right = f.x >= 0.5;
-        let ground = select(select(tl, tr, right), select(bl, br, right), f.y >= 0.5);
-        if (!(ground > 0.0)) {
-            return 1.0;
-        }
-        inverse = 1.0 / ground;
+    let pos = (vec2<f32>(ndc.x, -ndc.y) * 0.5 + 0.5) * vec2<f32>(size);
+    let ground = ground_depth_at(clamp(vec2<i32>(floor(pos)), vec2<i32>(0), size - 1));
+    if (!(ground > 0.0)) {
+        return 1.0;
     }
-    let d = depth_factor * (1.0 / w - inverse) + 0.0001;
+    let d = depth_factor * (1.0 / w - 1.0 / ground) + 0.0001;
     return 1.0 - clamp(-500.0 * d, 0.0, 1.0);
 }
 
