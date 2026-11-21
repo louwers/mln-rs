@@ -288,6 +288,12 @@ impl Renderer {
         self.orchestrator.keeps_vertices_of(id, vertices)
     }
 
+    /// How many placements the renderer has committed.
+    #[cfg(test)]
+    pub(crate) fn placement_commits(&self) -> u64 {
+        self.orchestrator.placement_commits()
+    }
+
     /// The projection variant each layer draws with, by its id.
     #[cfg(test)]
     pub(crate) fn projection_variants(&self) -> Vec<(String, mln_gfx::projection_variant::ProjectionVariant)> {

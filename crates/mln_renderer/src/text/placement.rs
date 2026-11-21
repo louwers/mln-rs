@@ -31,6 +31,7 @@ use crate::geometry::feature_index::FeatureIndex;
 use crate::layer_drawing::{BucketChanges, ChangedBuckets};
 use crate::layout::symbol_instance::SymbolInstance;
 use crate::render_layer::{BucketKey, BucketPlacementData, RenderLayer, SymbolBuckets};
+use crate::terrain::TerrainElevation;
 use crate::text::collision_grid::{Aabb, Shape};
 use crate::text::collision_index::CollisionIndex;
 use crate::update_parameters::UpdateParameters;
@@ -175,9 +176,25 @@ pub(crate) struct PlacementInputs {
     transition_options: TransitionOptions,
     cross_source_collisions: bool,
     show_collision_boxes: bool,
+    ground: PlacedGround,
     /// The buckets in the order placement places them: the layers'
     /// buckets, topmost layer first.
     buckets: Vec<PlacedBucket>,
+}
+
+/// The ground the symbols stand on over terrain, the renderer's snapshot
+/// of what its frame draws: equal only to itself, as a new snapshot is a
+/// ground that changed.
+#[derive(Clone, Default)]
+struct PlacedGround(Option<Arc<TerrainElevation>>);
+
+impl PartialEq for PlacedGround {
+    fn eq(&self, other: &Self) -> bool {
+        match (&self.0, &other.0) {
+            (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+            (a, b) => a.is_none() && b.is_none(),
+        }
+    }
 }
 
 /// A bucket a placement places.
@@ -193,10 +210,12 @@ struct PlacedBucket {
 }
 
 impl PlacementInputs {
-    /// The inputs for placing, at `update_parameters`, the buckets in
-    /// `buckets` that `layers` place, which are ordered bottom to top.
+    /// The inputs for placing, at `update_parameters` and over `ground`
+    /// where terrain draws, the buckets in `buckets` that `layers` place,
+    /// which are ordered bottom to top.
     pub(crate) fn new<B: SymbolBuckets + ?Sized>(
         update_parameters: &UpdateParameters,
+        ground: Option<&Arc<TerrainElevation>>,
         layers: &[&dyn RenderLayer],
         buckets: &B,
     ) -> Self {
@@ -217,6 +236,7 @@ impl PlacementInputs {
             transition_options: update_parameters.style.get_transition_options(),
             cross_source_collisions: update_parameters.cross_source_collisions,
             show_collision_boxes: update_parameters.debug_options.contains(MapDebugOptions::COLLISION),
+            ground: PlacedGround(ground.cloned()),
             buckets: placed.collect(),
         }
     }
@@ -507,7 +527,8 @@ impl Placement {
             avoid_edges,
             debug: self.show_collision_boxes,
         };
-        PlacementContext::new(data, bucket, &inputs.view, self.placement_zoom, options)
+        let ground = inputs.ground.0.as_deref();
+        PlacementContext::new(data, bucket, &inputs.view, ground, self.placement_zoom, options)
     }
 
     /// Places the symbols of `ctx`'s bucket that no bucket of their layer
@@ -637,11 +658,13 @@ impl Placement {
     }
 
     /// Brings the vertices of the buckets `layer` places up to date with
-    /// the placement, and adds what changed of them to `changed`.
+    /// the placement, their labels standing on `ground` where terrain
+    /// draws, and adds what changed of them to `changed`.
     pub(crate) fn update_layer_buckets(
         &mut self,
         layer: &dyn RenderLayer,
         view: &View,
+        ground: Option<&TerrainElevation>,
         update_opacities: bool,
         changed: &mut ChangedBuckets,
         buckets: &mut impl SymbolBuckets,
@@ -656,7 +679,7 @@ impl Placement {
                 continue;
             };
             let sorted = update_opacities && self.update_bucket_opacities(bucket, view, &mut seen_cross_tile_ids);
-            let dynamic = self.update_bucket_positions(bucket, view, data, None);
+            let dynamic = self.update_bucket_positions(bucket, view, ground, data, None);
             if update_opacities || dynamic {
                 bucket.base.uploaded = false;
             }
@@ -671,12 +694,14 @@ impl Placement {
     }
 
     /// Lays out the positions of a layer drawn from buckets other layers
-    /// place, after `update_layer_buckets`, and adds the buckets whose
-    /// positions changed to `changed`.
+    /// place, after `update_layer_buckets`, its labels standing on `ground`
+    /// where terrain draws, and adds the buckets whose positions changed to
+    /// `changed`.
     pub(crate) fn update_follower_buckets(
         &self,
         layer: &dyn RenderLayer,
         view: &View,
+        ground: Option<&TerrainElevation>,
         changed: &mut ChangedBuckets,
         buckets: &mut impl SymbolBuckets,
     ) {
@@ -684,7 +709,7 @@ impl Placement {
             let Some(bucket) = buckets.get_mut(&data.bucket) else {
                 continue;
             };
-            if self.update_bucket_positions(bucket, view, data, Some(layer.id())) {
+            if self.update_bucket_positions(bucket, view, ground, data, Some(layer.id())) {
                 bucket.base.uploaded = false;
                 changed.mark(bucket.base.bucket_id, BucketChanges { dynamic: true, ..BucketChanges::default() });
             }
@@ -797,6 +822,7 @@ mod tests {
             transition_options: TransitionOptions::default(),
             cross_source_collisions: true,
             show_collision_boxes: false,
+            ground: PlacedGround::default(),
             buckets: Vec::new(),
         }
     }
@@ -828,5 +854,28 @@ mod tests {
         assert!(controller.is_stale(&inputs()), "a symbol fading out");
         place(&mut controller, inputs(), start + Duration::from_secs(3), &[]);
         assert!(!controller.is_stale(&inputs()), "a symbol faded out");
+    }
+
+    /// A placement is stale once the ground the symbols stand on is a new
+    /// snapshot, whatever it holds, and not while it is the same one.
+    #[test]
+    fn a_placement_is_stale_on_a_new_ground_only() {
+        use mln_tile_id::{CanonicalTileID, OverscaledTileID};
+
+        let tile = OverscaledTileID::new(12, 0, CanonicalTileID::new(12, 2000, 1500));
+        let ground = Arc::new(TerrainElevation::level(tile, 800.0));
+        let over = |ground: &Arc<TerrainElevation>| PlacementInputs {
+            ground: PlacedGround(Some(Arc::clone(ground))),
+            ..inputs()
+        };
+        let mut controller = PlacementController::new();
+        place(&mut controller, over(&ground), Instant::now(), &[]);
+        assert!(!controller.is_stale(&over(&ground)), "the same ground");
+        let same_heights = Arc::new(TerrainElevation::level(tile, 800.0));
+        assert!(controller.is_stale(&over(&same_heights)), "a new ground");
+        assert!(controller.is_stale(&inputs()), "no ground");
+        place(&mut controller, inputs(), Instant::now(), &[]);
+        assert!(!controller.is_stale(&inputs()), "still no ground");
+        assert!(controller.is_stale(&over(&ground)), "a ground again");
     }
 }

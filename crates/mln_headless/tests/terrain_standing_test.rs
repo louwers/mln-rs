@@ -1,5 +1,5 @@
-// Circles stand on the terrain's surface as it draws, where the camera sees
-// their centers at the surface's height.
+// Circles, fill extrusions and labels stand on the terrain's surface as it
+// draws, where the camera sees their anchors at the surface's height.
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -167,6 +167,16 @@ fn render_views(
     cameras: &[CameraOptions],
     dem: impl Fn(&TileData) -> Vec<u8> + Send + Sync + 'static,
 ) -> Option<(PremultipliedImage, Map, Requests)> {
+    render_with_frontend(style, cameras, dem).map(|(image, map, requests, _)| (image, map, requests))
+}
+
+/// [`render_views`], with the frontend that drew the still, which queries
+/// it. The glyphs of every font are those of the test fixtures.
+fn render_with_frontend(
+    style: &str,
+    cameras: &[CameraOptions],
+    dem: impl Fn(&TileData) -> Vec<u8> + Send + Sync + 'static,
+) -> Option<(PremultipliedImage, Map, Requests, HeadlessFrontend)> {
     let size = Size::new(SIDE, SIDE);
     let queue = Queue::new();
     let pool = Pool::new(4);
@@ -190,6 +200,8 @@ fn render_views(
         response.data = Some(Arc::new(dem(tile)));
         Some(response)
     });
+    file_source
+        .set_response(Kind::Glyphs, |_| Some(crate::support::file_response("test/fixtures/resources/glyphs.pbf")));
     let options = MapOptions { map_mode: MapMode::Static, size, pixel_ratio: 1.0, ..Default::default() };
     let mut map = Map::with_file_source(file_source, options, &pool).unwrap();
     frontend.attach(&mut map);
@@ -200,7 +212,7 @@ fn render_views(
         map.jump_to(camera);
         image = Some(frontend.render(&mut map).expect("the still image").image);
     }
-    Some((image.expect("a camera"), map, requests))
+    Some((image.expect("a camera"), map, requests, frontend))
 }
 
 /// The pixel at `x`, `y` of `image`.
@@ -538,4 +550,62 @@ fn a_wall_downhill_reaches_the_ground() {
             "the wall {height} m up on the slope, {pixel:?}, and on level ground, {level:?}"
         );
     }
+}
+
+/// Over ground 300 m high, pitched 60°, a red label whose text takes a
+/// variable anchor draws where the camera sees its anchor 300 m up, shifted
+/// below it, and collides there: a query at the middle of what it draws finds
+/// it, and one where it would draw at sea level finds nothing.
+#[test]
+fn a_label_at_a_variable_anchor_collides_where_it_stands_on_the_ground() {
+    use mln_renderer::query::RenderedQueryOptions;
+    use mln_util::geo::ScreenCoordinate;
+
+    let center = LatLng::new(0.0, 0.0).unwrap();
+    let style = r#"{
+        "version": 8,
+        "glyphs": "glyphs/{fontstack}/{range}.pbf",
+        "terrain": {"source": "dem"},
+        "sources": {
+            "dem": {"type": "raster-dem", "tiles": ["dem/{z}/{x}/{y}.png"], "tileSize": 256, "maxzoom": 14},
+            "point": {"type": "geojson", "data": {"type": "Point", "coordinates": [0, 0]}}
+        },
+        "layers": [
+            {"id": "background", "type": "background", "paint": {"background-color": "white"}},
+            {
+                "id": "label",
+                "type": "symbol",
+                "source": "point",
+                "layout": {
+                    "text-field": "HH",
+                    "text-font": ["Open Sans Regular"],
+                    "text-size": 24,
+                    "text-variable-anchor": ["top"],
+                    "text-radial-offset": 1
+                },
+                "paint": {"text-color": "red"}
+            }
+        ]
+    }"#;
+    let camera = CameraOptions { center: Some(center), zoom: Some(14.0), pitch: Some(60.0), ..Default::default() };
+    let Some((image, map, _, mut frontend)) = render_with_frontend(style, &[camera], |_| dem_png(METERS_300)) else {
+        return;
+    };
+    let ((x, y), count) = red_center(&image);
+    assert!(count > 50, "{count} red pixels: no label");
+    let (anchor_x, anchor_y) = seen_at(&map, &center, 300.0);
+    assert!(
+        (x - anchor_x).abs() < 2.0 && y > anchor_y + 10.0,
+        "the label at {x}, {y}, below its anchor at {anchor_x}, {anchor_y}"
+    );
+
+    let mut query = |x: f64, y: f64| {
+        let options = RenderedQueryOptions::new(Some(vec!["label".to_owned()]), None);
+        frontend.renderer().query_rendered_features_at_point(&ScreenCoordinate::new(x, y), &options).unwrap().len()
+    };
+    assert_eq!(1, query(x, y), "the label where it draws");
+    let (sea_x, sea_y) = seen_at(&map, &center, 0.0);
+    let (lower_x, lower_y) = (x + sea_x - anchor_x, y + sea_y - anchor_y);
+    assert!(lower_y - y > 30.0, "the label at sea level {} px lower", lower_y - y);
+    assert_eq!(0, query(lower_x, lower_y), "nothing where the label would draw at sea level");
 }

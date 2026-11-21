@@ -37,10 +37,10 @@
 //!    frame clears to transparent, and its translucent pass draws each
 //!    stack's surface where the stack's first layer draws, and the layers
 //!    that don't drape between the stacks: those that stand on the ground
-//!    as it draws (see **Standing layers**), such as circles, heatmap
-//!    kernels and fill extrusions, and the others flat, such as symbols for
-//!    now. They draw with their layer depth off, but fill extrusions, which
-//!    test and write the 3D depth that the surface writes.
+//!    as it draws (see **Standing layers**), which are circles, heatmap
+//!    kernels, fill extrusions and symbols, and custom layers, flat. They
+//!    draw with their layer depth off, but fill extrusions, which test and
+//!    write the 3D depth that the surface writes.
 //!
 //! # Contracts
 //!
@@ -74,13 +74,24 @@
 //!   layer. A layer the frame doesn't draw, hidden or out of its zooms,
 //!   splits no stack. A style whose layers don't drape has no stack, and
 //!   then no drapes and no surface.
-//! - **Standing layers** (circle, heatmap and fill extrusion) stand on the
-//!   surface as it draws, whether or not a stack draws it: over terrain, their
-//!   draws are of the [`ProjectionVariant::Terrain`] variant, which reads the
-//!   height of the ground in the vertex stage, under a circle's center as it
-//!   draws (translated), a kernel's, and the centroid of a fill extrusion's
-//!   polygon as it draws (GL JS's: the floored mean of its rings' vertices), by
-//!   the height rule the surface reads its DEM by. A polygon's roof and base
+//! - **Standing layers** (circle, heatmap, fill extrusion and symbol) stand
+//!   on the surface as it draws, whether or not a stack draws it: over
+//!   terrain, their draws are of the [`ProjectionVariant::Terrain`] variant,
+//!   which reads the height of the ground in the vertex stage, under a
+//!   circle's center as it draws (translated), a kernel's, the centroid of a
+//!   fill extrusion's polygon as it draws (GL JS's: the floored mean of its
+//!   rings' vertices), and a symbol's anchor as it draws, by the height rule
+//!   the surface reads its DEM by. A symbol stands its `symbol-height-offset`
+//!   above that ground, or above sea level where its `symbol-height-anchor`
+//!   is `absolute`, which its draw reads as flat ground; each vertex of a
+//!   map-pitched label along a line stands on the ground under it. Placement
+//!   reads the same ground on the CPU ([`TileGround::height`]): it collides a
+//!   point label's box, all of it at its anchor's height, and lays out a
+//!   label at a variable anchor, where the label draws, and places again in
+//!   the update that brings a new ground ([`RenderTerrain::ground`]), even
+//!   with the camera at rest; a label that no draw of its tile draws, its
+//!   anchor off every part, has no box. Labels along lines still lay out and
+//!   collide at sea level, and collision debug boxes draw there. A polygon's roof and base
 //!   rise by the ground at its centroid. Where its base is at or below 0, each
 //!   end of a wall's foot sinks to 10 m below the lower of the ground at the
 //!   centroid and the ground under that end, so that no gap shows under a
@@ -135,7 +146,8 @@
 //!   zoomed past a source's deepest zoom over a deeper DEM, draws its features
 //!   part by part rather than in its bucket's order, so where features of two
 //!   parts overlap, which is on top can differ from a flat map, and symbols
-//!   would sort within each part only.
+//!   sort (by key, by viewport y or as their tile's source orders them)
+//!   within each part only, their halos below their fills in every part.
 //! - **The surface** draws once for each stack, its tiles nearest the
 //!   center first, testing and writing the 3D depth range with less or
 //!   equal and blending its drapes over what is under it. A stack above the
@@ -288,9 +300,7 @@ pub(crate) use cover::{ElevationRanges, TerrainCover};
 pub(crate) use cover::{REMEMBERED_RANGES, TerrainTile, terrain_tile_size};
 pub(crate) use drapes::Drapes;
 pub(crate) use elevation::TerrainElevation;
-#[cfg(any(doc, test))]
-pub(crate) use ground::TileGround;
-pub(crate) use ground::{GroundBindings, TileFeatures, write_projection};
+pub(crate) use ground::{GroundBinding, GroundBindings, TileFeatures, TileGround, write_projection};
 use mln_gfx::gpu::Gpu;
 #[cfg(doc)]
 use mln_gfx::projection_variant::ProjectionVariant;
@@ -519,7 +529,6 @@ impl RenderTerrain {
     /// ground its cover drew, as [`bind`](Self::bind) left it; `None` while
     /// terrain doesn't draw. [`TerrainElevation::ground`] gives the ground
     /// under a tile.
-    #[cfg_attr(not(test), expect(dead_code, reason = "only the tests read the ground on the CPU"))]
     pub(crate) fn ground(&self) -> Option<&Arc<TerrainElevation>> {
         self.elevation.as_ref()
     }

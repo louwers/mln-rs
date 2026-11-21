@@ -137,11 +137,18 @@ impl Tiles {
     /// Answers the DEM requests that stay open again, 25 km up, as the file
     /// source does when their data expires and the server has new data.
     fn reload_dem_high(&self) {
+        self.reload_dem([5, 87, 48, 255]);
+    }
+
+    /// Answers the DEM requests that stay open again with every pixel
+    /// `pixel`, as the file source does when their data expires and the
+    /// server has new data.
+    fn reload_dem(&self, pixel: [u8; 4]) {
         let answered = std::mem::take(&mut *self.dem_answered.lock());
         let open: Vec<Responder> = answered.into_iter().filter(|responder| !responder.is_cancelled()).collect();
         assert!(!open.is_empty(), "no DEM request stays open");
         for responder in &open {
-            responder.send(png(256, [5, 87, 48, 255]));
+            responder.send(png(256, pixel));
         }
         self.dem_answered.lock().extend(open);
     }
@@ -1968,4 +1975,65 @@ fn a_map_without_terrain_keeps_no_extrusion_centroids() {
     map.settle();
     map.frame();
     assert!(keeps(&mut map, ID_FILL_EXTRUSION_CENTROID_ATTRIBUTE), "the roofs' centroids");
+}
+
+/// A red square icon 16 px a side, `marker`, at `location`, which the style
+/// of `map` gets as an image.
+fn red_icon(map: &mut DrapedMap, location: LatLng) {
+    let mut image = PremultipliedImage::new(Size::new(16, 16));
+    for texel in image.data.as_chunks_mut::<4>().0 {
+        *texel = [255, 0, 0, 255];
+    }
+    let marker =
+        mln_style::image::Impl::new("marker".to_owned(), image, 1.0, false, Vec::new(), Vec::new(), None, None, None)
+            .expect("the image");
+    map.edit(Edit::AddImage(Arc::new(marker)));
+    let style = format!(
+        r#"{{
+            "version": 8,
+            "sources": {{
+                "point": {{"type": "geojson", "data": {{"type": "Point", "coordinates": [{}, {}]}}}}
+            }},
+            "layers": [{{"id": "icon", "type": "symbol", "source": "point", "layout": {{"icon-image": "marker"}}}}]
+        }}"#,
+        location.longitude(),
+        location.latitude()
+    );
+    add_layer(map, &style, None);
+}
+
+/// With the camera at rest, the update that new DEM data under a label
+/// arrives in places the labels again, and its frame draws the label on the
+/// new ground, some 20 px above where it stood at sea level.
+#[test]
+fn new_ground_under_a_label_at_rest_places_it_again_and_draws_it_there() {
+    let mut map = DrapedMap::new(Tiles::default());
+    let location = LatLng::new(-10.0, 10.0).unwrap();
+    map.transform.jump_to(&CameraOptions {
+        center: Some(location),
+        zoom: Some(10.0),
+        pitch: Some(60.0),
+        ..Default::default()
+    });
+    red_icon(&mut map, location);
+    map.settle_on_ground();
+    map.frame();
+    assert!(red(map.pixel_at(&location, 0.0)), "the icon at sea level");
+
+    // (1 · 65536 + 212 · 256 + 192) · 0.1 − 10000 = 2000 m.
+    map.tiles.reload_dem([1, 212, 192, 255]);
+    let before = map.elevation.clone().expect("the ground");
+    for _ in 0..1000 {
+        let commits = map.renderer.placement_commits();
+        map.frame();
+        let arrived = map.elevation.as_ref().is_some_and(|ground| !Arc::ptr_eq(ground, &before));
+        if arrived {
+            assert!(map.renderer.placement_commits() > commits, "the update the ground arrived in placed again");
+            assert!(red(map.pixel_at(&location, 2000.0)), "the icon on the new ground");
+            assert!(!red(map.pixel_at(&location, 0.0)), "no icon at sea level");
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    panic!("the new ground never arrived");
 }

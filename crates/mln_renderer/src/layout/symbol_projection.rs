@@ -8,6 +8,9 @@ use std::iter;
 use geometry::Point;
 use glam::{DMat4, DVec2, DVec3, DVec4, Vec2};
 use mln_map_types::{ProjectedTilePoint, TileProjector, View};
+use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
+use mln_style_types::{SymbolHeightAnchorType, SymbolPlacementType};
+use mln_tile_id::OverscaledTileID;
 use mln_tile_id::geometry_tile_data::GeometryCoordinate;
 use mln_util::constants::ONE_EM;
 
@@ -15,6 +18,7 @@ use crate::buckets::symbol_bucket::{
     PlacedSymbol, PlacedSymbolPools, SymbolBucket, SymbolDynamicLayoutVertex, SymbolSizeBinder, ZoomEvaluatedSize,
 };
 use crate::layout::symbol_instance::WritingModes;
+use crate::terrain::{TerrainElevation, TileFeatures, TileGround};
 
 /// The directions on screen that a pitched, unrotated label's east and south
 /// axes take, as unit vectors, or zero where an axis is edge-on.
@@ -110,6 +114,65 @@ pub(crate) fn hide_glyphs(glyph_count: usize, vertices: &mut Vec<SymbolDynamicLa
     vertices.resize(vertices.len() + 4 * glyph_count, hidden);
 }
 
+/// Whether the symbols of a bucket laid out by `layout` measure their height
+/// from the ground under them rather than sea level: point symbols of
+/// `symbol-height-anchor: ground`, and labels along lines, which have no
+/// `symbol-height-offset` to measure.
+#[must_use]
+pub(crate) fn measured_from_ground(layout: &SymbolLayoutProperties::PossiblyEvaluated) -> bool {
+    *layout.symbol_height_anchor.uniform() == SymbolHeightAnchorType::Ground
+        || *layout.symbol_placement.uniform() != SymbolPlacementType::Point
+}
+
+/// The ground under `tile` that the symbols of a bucket of it laid out by
+/// `layout` stand on, over `ground` where terrain draws: `None` on a flat map
+/// and for symbols drawn over the view (`symbol-screen-space`).
+#[must_use]
+pub(crate) fn symbol_ground<'a>(
+    ground: Option<&'a TerrainElevation>,
+    tile: &OverscaledTileID,
+    layout: &SymbolLayoutProperties::PossiblyEvaluated,
+) -> Option<TileGround<'a>> {
+    let ground = ground.filter(|_| !*layout.symbol_screen_space.uniform())?;
+    Some(ground.ground(tile, TileFeatures::Anchored))
+}
+
+/// What the symbols of a bucket stand on: over terrain, the ground under
+/// their tile, which their draws read, and whether their height offset is
+/// measured from it or from sea level.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct SymbolElevation<'a> {
+    /// `None` on a flat map ([`symbol_ground`]).
+    ground: Option<&'a TileGround<'a>>,
+    from_ground: bool,
+}
+
+impl<'a> SymbolElevation<'a> {
+    /// What symbols stand on, over `ground`, which [`symbol_ground`] gives,
+    /// their height offset measured from it if `from_ground`
+    /// ([`measured_from_ground`]) and from sea level otherwise.
+    #[must_use]
+    pub(crate) fn new(ground: Option<&'a TileGround<'a>>, from_ground: bool) -> SymbolElevation<'a> {
+        SymbolElevation { ground, from_ground }
+    }
+
+    /// The height in meters above sea level of a symbol `offset` meters up
+    /// whose untranslated anchor is `anchor` and which draws at `at`, both
+    /// in tile units: its offset, plus the ground at `at` where it is
+    /// measured from the ground. `None` where no draw of the tile draws
+    /// the symbol, over terrain.
+    #[must_use]
+    pub(crate) fn at(&self, anchor: Vec2, at: Vec2, offset: f32) -> Option<f32> {
+        let Some(ground) = self.ground else {
+            return Some(offset);
+        };
+        if !self.from_ground {
+            return ground.holds(anchor).then_some(offset);
+        }
+        Some(offset + ground.height(anchor, at)? as f32)
+    }
+}
+
 /// A point projected for label placement.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct ProjectedPoint {
@@ -141,7 +204,7 @@ pub(crate) struct LabelPlaneProjector<'a> {
     pitched: DMat4,
     pitched_inverse: DMat4,
     viewport: Vec2,
-    /// The symbol's `symbol-height-offset`, in meters.
+    /// How far above sea level the symbol is, in meters.
     elevation: f64,
 }
 
@@ -174,12 +237,12 @@ impl<'a> LabelPlaneProjector<'a> {
         }
     }
 
-    /// This projector for a symbol `height_offset` meters above the ground.
-    /// The pitched label plane is the same at any height; the shaders raise
-    /// it.
+    /// This projector for a symbol `elevation` meters above sea level
+    /// ([`SymbolElevation::at`]). The pitched label plane is the same at any
+    /// height; the shaders raise it.
     #[must_use]
-    pub(crate) fn raised(&self, height_offset: f32) -> Self {
-        LabelPlaneProjector { elevation: f64::from(height_offset), ..self.clone() }
+    pub(crate) fn raised(&self, elevation: f32) -> Self {
+        LabelPlaneProjector { elevation: f64::from(elevation), ..self.clone() }
     }
 
     /// Tile units to the label plane; distance and occlusion come from the

@@ -425,12 +425,15 @@ impl RenderOrchestrator {
         }
 
         // The symbol buckets of the layers that need placement, then the
-        // positions of the layers that draw buckets other layers place.
+        // positions of the layers that draw buckets other layers place, on
+        // the ground the frame draws.
         let placement = self.placement_controller.placement_mut();
+        let ground = self.terrain.ground().map(|ground| &**ground);
         for &index in placed.leaders.iter().rev() {
             placement.update_layer_buckets(
                 &*self.layers[index],
                 &frame.transform.view,
+                ground,
                 update_symbol_opacities,
                 &mut changed_buckets,
                 &mut self.tile_store,
@@ -440,6 +443,7 @@ impl RenderOrchestrator {
             placement.update_follower_buckets(
                 &*self.layers[index],
                 &frame.transform.view,
+                ground,
                 &mut changed_buckets,
                 &mut self.tile_store,
             );
@@ -1022,11 +1026,15 @@ impl RenderOrchestrator {
         let mut symbol_buckets_added = false;
         let mut used_symbol_layers: VecSet<String> = VecSet::new();
         let longitude = update_parameters.view.center(mln_util::geo::WrapMode::Unwrapped).longitude() as f32;
+        // The symbols stand on the ground the frame draws, which a new
+        // snapshot of makes placement stale.
+        let ground = self.terrain.ground();
         for layer in layers_need_placement.iter().rev() {
             let result = self.cross_tile_symbol_index.index_layer(
                 *layer,
                 longitude,
                 &update_parameters.view,
+                ground.map(|ground| &**ground),
                 &mut self.tile_store,
             );
             if continuous {
@@ -1060,7 +1068,7 @@ impl RenderOrchestrator {
             // that wait for placements to fade their symbols out. Until it
             // may, the frame says when, rather than asking for frames that
             // would show the same.
-            let inputs = PlacementInputs::new(update_parameters, &layers_need_placement, &self.tile_store);
+            let inputs = PlacementInputs::new(update_parameters, ground, &layers_need_placement, &self.tile_store);
             let stale = self.placement_controller.is_stale(&inputs) || self.tile_store.has_fading_tiles();
             let next_placement_at = self
                 .placement_controller
@@ -1087,7 +1095,7 @@ impl RenderOrchestrator {
             frame.placement_changed = !layers_need_placement.is_empty();
             symbol_buckets_changed = frame.placement_changed;
             if frame.placement_changed {
-                let inputs = PlacementInputs::new(update_parameters, &layers_need_placement, &self.tile_store);
+                let inputs = PlacementInputs::new(update_parameters, ground, &layers_need_placement, &self.tile_store);
                 let mut placement = Placement::create(Arc::new(inputs), update_parameters.time_point, None);
                 placement.collect_placed_symbol_data(self.placed_symbol_data_collected);
                 placement.place(&mut self.tile_store);
@@ -1451,6 +1459,12 @@ impl RenderOrchestrator {
     #[cfg(test)]
     pub(crate) fn keeps_vertices_of(&mut self, id: &str, vertices: usize) -> bool {
         self.layers.iter_mut().any(|layer| layer.base().style.base().id == id && layer.keeps_vertices_of(vertices))
+    }
+
+    /// How many placements the controller has committed.
+    #[cfg(test)]
+    pub(crate) fn placement_commits(&self) -> u64 {
+        self.placement_controller.commits()
     }
 
     #[cfg(test)]

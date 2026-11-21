@@ -163,6 +163,14 @@ impl<'a> GroundRead<'a> {
     }
 }
 
+/// The reads of a tile's ground: most often one. Unlike a `SmallVec`, it
+/// lets a `TileGround` borrowed for less than its DEM images live read as
+/// one of that shorter life.
+enum Reads<'a> {
+    One(GroundRead<'a>),
+    Parts(Box<[GroundRead<'a>]>),
+}
+
 /// The ground under a tile of a standing layer: the DEM tiles that the
 /// surface reads under it, each with the part of the tile it is under
 /// ([`TerrainElevation::ground`]). A draw of the tile reads one of them, and
@@ -170,31 +178,39 @@ impl<'a> GroundRead<'a> {
 pub(crate) struct TileGround<'a> {
     /// One or more, whose parts hold each point of the tile once, and each
     /// point past its edges once or, for [`TileFeatures::Anchored`], never.
-    reads: SmallVec<[GroundRead<'a>; 1]>,
+    reads: Reads<'a>,
     /// How the DEM decodes, and the exaggeration.
-    #[cfg_attr(not(test), expect(dead_code, reason = "only the tests read the ground's heights on the CPU"))]
     decode: (DemUnpack, f32),
 }
 
 impl<'a> TileGround<'a> {
     /// What the tile's draws read, a draw each.
     pub(crate) fn reads(&self) -> &[GroundRead<'a>] {
-        &self.reads
+        match &self.reads {
+            Reads::One(read) => std::slice::from_ref(read),
+            Reads::Parts(reads) => reads,
+        }
+    }
+
+    /// Whether a draw of the tile draws a feature whose untranslated anchor
+    /// is `anchor`, in tile units of the tile.
+    pub(crate) fn holds(&self, anchor: Vec2) -> bool {
+        self.reads().iter().any(|read| read.holds(anchor))
     }
 
     /// The height in meters, with the exaggeration, at `at` of a feature
     /// whose untranslated anchor is `anchor`, both in tile units of the tile:
     /// as the draw that draws the feature reads it, by the height rule the
-    /// shaders read the DEM by; 0 where flat.
-    #[cfg_attr(not(test), expect(dead_code, reason = "only the tests read the ground's heights on the CPU"))]
-    pub(crate) fn height(&self, anchor: Vec2, at: Vec2) -> f64 {
-        let read = self.reads.iter().find(|read| read.holds(anchor)).unwrap_or(&self.reads[0]);
+    /// shaders read the DEM by; 0 where flat. `None` where no draw of the
+    /// tile draws the feature.
+    pub(crate) fn height(&self, anchor: Vec2, at: Vec2) -> Option<f64> {
+        let read = self.reads().iter().find(|read| read.holds(anchor))?;
         let Some(dem) = read.dem else {
-            return 0.0;
+            return Some(0.0);
         };
         let extent = EXTENT as f32;
         let (unpack, exaggeration) = self.decode;
-        dem_height(&dem.image, dem.dim, read.coords, [at.x / extent, at.y / extent], unpack, exaggeration)
+        Some(dem_height(&dem.image, dem.dim, read.coords, [at.x / extent, at.y / extent], unpack, exaggeration))
     }
 }
 
@@ -210,13 +226,16 @@ impl TerrainElevation {
     pub(crate) fn ground(&self, tile: &OverscaledTileID, features: TileFeatures) -> TileGround<'_> {
         let canonical = tile.canonical;
         let reads = match self.drawn_over(tile) {
-            DrawnOver::Holding(dem) => SmallVec::from_buf([GroundRead::new(canonical, dem, features.whole())]),
+            DrawnOver::Holding(dem) => Reads::One(GroundRead::new(canonical, dem, features.whole())),
             DrawnOver::Inside(under) => {
                 let mut parts = SmallVec::new();
                 let dem_of = |dem: &DrawnDem| dem.id.canonical;
                 partition(canonical, &under, &dem_of, &|part| self.dem_holding(part), &mut parts);
                 let read = |(part, dem)| GroundRead::new(canonical, dem, rect(canonical, part, features));
-                parts.into_iter().map(read).collect()
+                match parts.as_slice() {
+                    &[part] => Reads::One(read(part)),
+                    _ => Reads::Parts(parts.into_iter().map(read).collect()),
+                }
             }
         };
         TileGround { reads, decode: (self.unpack(), self.exaggeration()) }

@@ -1287,7 +1287,7 @@ fn assert_stands_on(ground: &TerrainElevation, tile: &OverscaledTileID, surface:
     let mut drawn_at = 0;
     for uv in grid(n) {
         let point = (uv * f64::from(mln_util::constants::EXTENT)).as_vec2();
-        let height = under.height(point, point);
+        let height = under.height(point, point).expect("a part holds the point");
         let Some(drawn) = surface.surface_at(world_at(tile, uv)) else {
             continue;
         };
@@ -1427,6 +1427,6 @@ fn the_ground_without_a_dem_is_sea_level() {
         let under = ground.ground(&tile.id, TileFeatures::All);
         assert_eq!((None, [0.0; 4]), one_read(&under));
         let point = glam::Vec2::new(4096.0, 4096.0);
-        assert_eq!(0.0, under.height(point, point));
+        assert_eq!(Some(0.0), under.height(point, point));
     }
 }
