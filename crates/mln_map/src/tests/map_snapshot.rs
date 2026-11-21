@@ -58,6 +58,7 @@ fn snapshot_reports_every_member() {
     assert_eq!(snapshot.debug, MapDebugOptions::NO_DEBUG);
     assert!(!snapshot.fully_loaded);
     assert!(!snapshot.rendering_stats_view_enabled);
+    assert!(snapshot.center_clamped_to_ground);
     assert!(!snapshot.gesture_in_progress);
     assert!(!snapshot.transition_in_progress);
     assert_eq!(snapshot.bounds.bounds, None);
@@ -90,6 +91,7 @@ fn snapshot_reports_every_member() {
     });
     map.set_projection_mode(&ProjectionMode::default().with_axonometric(true).with_x_skew(0.25).with_y_skew(0.5));
     map.enable_rendering_stats_view(true);
+    map.set_center_clamped_to_ground(false);
     map.apply_camera_delta(&CameraDelta { phase: GesturePhase::Begin, ..CameraDelta::default() }).unwrap();
     let camera = CameraOptions {
         center: Some(ll(10.0, 20.0)),
@@ -117,6 +119,7 @@ fn snapshot_reports_every_member() {
     let snapshot = map.snapshot();
     assert_eq!(snapshot.debug, MapDebugOptions::TILE_BORDERS | MapDebugOptions::COLLISION);
     assert!(snapshot.rendering_stats_view_enabled);
+    assert!(!snapshot.center_clamped_to_ground);
     assert!(snapshot.gesture_in_progress);
     assert!(snapshot.transition_in_progress);
     assert!(!snapshot.fully_loaded);

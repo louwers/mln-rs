@@ -72,6 +72,19 @@ impl MapProjection {
         flip_y(view, &point)
     }
 
+    /// The height of the ground at `lat_lng`, in meters with the terrain's
+    /// exaggeration, as the frame drew it ([`Elevation::at`]). `None` without
+    /// terrain, which includes the globe and the flat map of
+    /// [`from_view`](Self::from_view), before any ground was drawn, off the
+    /// drawn tiles, and where the ground's data still loads; 0 where no data
+    /// will come.
+    ///
+    /// [`Elevation::at`]: mln_map_types::Elevation::at
+    #[must_use]
+    pub fn terrain_elevation(&self, lat_lng: &LatLng) -> Option<f64> {
+        self.terrain.as_ref()?.elevation.as_ref()?.at(*lat_lng)
+    }
+
     /// Whether the globe hides `lat_lng` from the camera; a Mercator view
     /// hides nothing.
     #[must_use]

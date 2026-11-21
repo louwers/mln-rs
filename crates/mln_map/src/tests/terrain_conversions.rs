@@ -362,3 +362,40 @@ fn a_projection_given_terrain_again_clips_to_the_last() {
         }
     }
 }
+
+/// A projection reports the height of the ground it converts on, as the
+/// renderer drew it, and none where it converts on the flat map: off the
+/// drawn tiles, before any ground was drawn, without terrain, and from a
+/// view alone.
+#[test]
+fn a_projection_reports_the_height_of_its_ground() {
+    let run_loop = Queue::<()>::new();
+    // Drawn only from the center south, so the ridge is drawn and the
+    // ground north of the center isn't.
+    let ridge = Ridge::drawn_from(world(&center()).y);
+    let map = map_over(STYLE, Some(&ridge), pitched(60.0), &run_loop);
+    let location = |pixels_south: f64| {
+        let point = world(&center()) + DVec2::new(0.0, pixels_south * PIXEL);
+        let point = mln_util::geometry::Point::new(point.x, point.y);
+        mln_util::projection::Projection::unproject(&point, 1.0 / mln_util::constants::TILE_SIZE_D, WrapMode::Wrapped)
+            .unwrap()
+    };
+    let (peak, flank, north) = (location(100.0), location(130.0), location(-50.0));
+
+    let projection = MapProjection::new(&map);
+    let height = projection.terrain_elevation(&peak).expect("the peak was drawn");
+    assert_near(Ridge::PEAK, height, 1e-6, "the peak");
+    let height = projection.terrain_elevation(&flank).expect("the flank was drawn");
+    assert_near(Ridge::PEAK / 2.0, height, 1e-6, "halfway down the flank");
+    assert_eq!(None, projection.terrain_elevation(&north), "off the drawn ground");
+    let grounded = MapProjection::from_view(&map.snapshot().view).unwrap().with_terrain(map.terrain());
+    assert_eq!(projection.terrain_elevation(&peak), grounded.terrain_elevation(&peak));
+
+    let from_view = MapProjection::from_view(&map.snapshot().view).unwrap();
+    assert_eq!(None, from_view.terrain_elevation(&peak), "from a view alone");
+    let undrawn = map_over(STYLE, None, pitched(60.0), &run_loop);
+    assert!(undrawn.terrain().is_some());
+    assert_eq!(None, MapProjection::new(&undrawn).terrain_elevation(&peak), "before any ground");
+    let flat = map_over(FLAT_STYLE, None, pitched(60.0), &run_loop);
+    assert_eq!(None, MapProjection::new(&flat).terrain_elevation(&peak), "without terrain");
+}
