@@ -386,22 +386,6 @@ impl Renderer {
         features
     }
 
-    /// Queries a feature extension of a feature of the source's tiles, which
-    /// the source's data origin answers
-    /// ([`DataOrigin::query_feature_extensions`](crate::source::DataOrigin::query_feature_extensions)):
-    /// a null value for a source without extensions. `Err` when the
-    /// extension fails to answer.
-    pub fn query_feature_extensions(
-        &self,
-        source_id: &str,
-        feature: &mln_util::feature::Feature,
-        extension: &str,
-        extension_field: &str,
-        args: Option<&feature::PropertyMap>,
-    ) -> Result<crate::query::FeatureExtensionValue, mln_util::error::Error> {
-        self.orchestrator.query_feature_extensions(source_id, feature, extension, extension_field, args)
-    }
-
     /// The renderer's placement pass, if it is a `P`: the pass
     /// of its registry's layer type that places
     /// ([`LayerType::PLACEMENT`](crate::layer::LayerType::PLACEMENT)), for

@@ -32,18 +32,3 @@ impl SourceQueryOptions {
         SourceQueryOptions { source_layers, filter }
     }
 }
-
-/// The result of `Renderer::query_feature_extensions`: a value or a feature
-/// collection.
-#[derive(Clone, Debug, PartialEq)]
-pub enum FeatureExtensionValue {
-    Value(feature::Value),
-    FeatureCollection(Vec<feature::Feature<f64>>),
-}
-
-impl Default for FeatureExtensionValue {
-    /// A null value, as a default-constructed C++ variant.
-    fn default() -> Self {
-        FeatureExtensionValue::Value(feature::Value::Null)
-    }
-}

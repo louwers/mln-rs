@@ -52,7 +52,6 @@ use mln_util::range::Range;
 use mln_util::tileset::RasterEncoding;
 
 use crate::erased_source::{ErasedOrigin, UpdateParts, typed};
-pub use crate::query::FeatureExtensionValue;
 use crate::tile::inbox::{InboxSender, TileEvent};
 use crate::tile::job::TileKey;
 pub use crate::tile::loading::Freshness;
@@ -181,22 +180,6 @@ pub trait DataOrigin: 'static {
     /// Returns false if the tile loads anew.
     fn take_world_copy(&self, _load: &mut Self::Load, _from: &Self::Load) -> bool {
         false
-    }
-
-    /// The value of a feature extension of a feature of the source's
-    /// tiles; a null value for an origin without extensions.
-    ///
-    /// # Errors
-    ///
-    /// When the extension fails to answer.
-    fn query_feature_extensions(
-        &self,
-        _feature: &mln_util::feature::Feature,
-        _extension: &str,
-        _extension_field: &str,
-        _args: Option<&feature::PropertyMap>,
-    ) -> Result<FeatureExtensionValue, Error> {
-        Ok(FeatureExtensionValue::default())
     }
 }
 

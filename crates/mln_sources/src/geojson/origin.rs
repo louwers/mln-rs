@@ -6,14 +6,12 @@ use std::sync::Arc;
 
 use mln_map_types::MapMode;
 use mln_render::source::{
-    Cover, DataOrigin, FeatureExtensionValue, LoadContext, NewTile, OriginUpdate, Replier, SourceType, Supply,
-    TileInput, TileKind, TileLoad,
+    Cover, DataOrigin, LoadContext, NewTile, OriginUpdate, Replier, SourceType, Supply, TileInput, TileKind, TileLoad,
 };
 use mln_style::Source;
 use mln_style::source_type::SourceData;
 use mln_tile::TileData;
 use mln_util::constants;
-use mln_util::error::Error;
 use mln_util::pool::Pool;
 use parking_lot::Mutex;
 
@@ -89,29 +87,6 @@ impl DataOrigin for GeoJsonOrigin {
     fn receive(&mut self, _load: &mut GeoJsonLoad, data: TileData, cx: &mut LoadContext<'_, '_, TileData>) {
         cx.deliver(TileInput::Geometry { data: Some(data), missing: false });
     }
-
-    /// The "supercluster" extension of a GeoJSON source: a cluster feature's
-    /// "children", "leaves" (`args` "limit", default 10, and "offset",
-    /// default 0) or "expansion-zoom". Anything else is a null value.
-    fn query_feature_extensions(
-        &self,
-        feature: &mln_util::feature::Feature,
-        extension: &str,
-        extension_field: &str,
-        args: Option<&feature::PropertyMap>,
-    ) -> Result<FeatureExtensionValue, Error> {
-        if extension != "supercluster" {
-            return Ok(FeatureExtensionValue::default());
-        }
-        let Some(cluster_id) = get_uint_property(&feature.properties, "cluster_id") else {
-            return Ok(FeatureExtensionValue::default());
-        };
-        let Some(json_data) = &self.data else {
-            return Ok(FeatureExtensionValue::default());
-        };
-        supercluster_extension(&**json_data, extension_field, cluster_id as u32, args)
-            .unwrap_or_else(|| Ok(FeatureExtensionValue::default()))
-    }
 }
 
 /// Loads the tile's features from `data`, cut on the renderer's pool unless
@@ -166,39 +141,4 @@ enum Answered {
     Pending,
     Now(TileData),
     Later,
-}
-
-/// The property `name`, if it is an unsigned integer.
-fn get_uint_property(properties: &feature::PropertyMap, name: &str) -> Option<u64> {
-    match properties.get(name) {
-        Some(feature::Value::Uint(value)) => Some(*value),
-        _ => None,
-    }
-}
-
-/// The supercluster `extensionGetters`: the `extension_field` of cluster
-/// `cluster_id`, or `None` for a field it doesn't have.
-fn supercluster_extension(
-    cluster_data: &dyn GeoJSONData,
-    extension_field: &str,
-    cluster_id: u32,
-    args: Option<&feature::PropertyMap>,
-) -> Option<Result<FeatureExtensionValue, Error>> {
-    Some(match extension_field {
-        "children" => cluster_data.get_children(cluster_id).map(FeatureExtensionValue::FeatureCollection),
-        "leaves" => {
-            // Offset cannot be set without limit.
-            let (limit, offset) = match args.and_then(|args| Some((get_uint_property(args, "limit")?, args))) {
-                Some((limit, args)) => {
-                    (limit as u32, get_uint_property(args, "offset").map_or(0, |offset| offset as u32))
-                }
-                None => (10, 0),
-            };
-            cluster_data.get_leaves(cluster_id, limit, offset).map(FeatureExtensionValue::FeatureCollection)
-        }
-        "expansion-zoom" => cluster_data
-            .get_cluster_expansion_zoom(cluster_id)
-            .map(|zoom| FeatureExtensionValue::Value(feature::Value::Uint(u64::from(zoom)))),
-        _ => return None,
-    })
 }

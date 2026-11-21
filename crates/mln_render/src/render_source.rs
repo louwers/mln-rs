@@ -8,7 +8,6 @@ use std::sync::Arc;
 use mln_map_types::MapDebugOptions;
 use mln_style::Source;
 use mln_style::layer_type::SourceKind;
-use mln_util::error::Error;
 
 use crate::erased_layer::ErasedEvaluatedLayer;
 use crate::gfx::context::Context;
@@ -110,19 +109,6 @@ pub(crate) trait RenderSource {
     /// arrives.
     fn is_image(&self) -> bool {
         false
-    }
-
-    /// Queries a feature extension; sources without extensions return a null
-    /// value.
-    fn query_feature_extensions(
-        &self,
-        _store: &TileStore,
-        _feature: &mln_util::feature::Feature,
-        _extension: &str,
-        _extension_field: &str,
-        _args: Option<&feature::PropertyMap>,
-    ) -> Result<crate::query::FeatureExtensionValue, Error> {
-        Ok(crate::query::FeatureExtensionValue::default())
     }
 
     fn set_fast_pfor_enabled(&mut self, _enable: bool) {}
