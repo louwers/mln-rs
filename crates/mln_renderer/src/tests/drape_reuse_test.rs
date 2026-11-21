@@ -21,7 +21,7 @@ use mln_style::expression::expression::FeatureState;
 use mln_style::sources::{GeoJSONOptions, GeoJsonSourceType, ImageSourceType, image_source};
 use mln_style::{Edit, Style};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
-use mln_util::geo::LatLng;
+use mln_util::geo::{LatLng, WrapMode};
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
@@ -96,6 +96,8 @@ struct Tiles {
     high: bool,
     held: Mutex<Option<(&'static str, CanonicalTileID)>>,
     waiting: Mutex<Vec<(Responder, Response)>>,
+    /// The DEM requests answered, which stay open.
+    dem_answered: Mutex<Vec<Responder>>,
 }
 
 impl FileSource for Tiles {
@@ -113,6 +115,9 @@ impl FileSource for Tiles {
             self.waiting.lock().push((responder, response));
         } else {
             responder.send(response);
+            if data.url_template.starts_with("dem/") {
+                self.dem_answered.lock().push(responder);
+            }
         }
     }
 
@@ -122,6 +127,18 @@ impl FileSource for Tiles {
 }
 
 impl Tiles {
+    /// Answers the DEM requests that stay open again, 25 km up, as the file
+    /// source does when their data expires and the server has new data.
+    fn reload_dem_high(&self) {
+        let answered = std::mem::take(&mut *self.dem_answered.lock());
+        let open: Vec<Responder> = answered.into_iter().filter(|responder| !responder.is_cancelled()).collect();
+        assert!(!open.is_empty(), "no DEM request stays open");
+        for responder in &open {
+            responder.send(png(256, [5, 87, 48, 255]));
+        }
+        self.dem_answered.lock().extend(open);
+    }
+
     /// Answers the held tile.
     fn release(&self) {
         *self.held.lock() = None;
@@ -1123,6 +1140,24 @@ fn a_rotation_draws_a_viewport_lit_hillshade_again_at_rest() {
     let frames = frames_until_full(&mut map);
     assert_one_a_frame(&drapes, &frames);
     assert!(map.frame().1.is_empty());
+}
+
+/// A DEM whose data expires reloads in place when the file source
+/// revalidates it: the hillshade draws every drape that shows it again, and
+/// the map stands on the new ground.
+#[test]
+fn a_reloaded_dem_draws_the_hillshade_drapes_again() {
+    let (mut map, drapes) = settled(Tiles::default());
+    map.edit(hillshade());
+    map.settle();
+    let center = map.transform.view().center(WrapMode::Wrapped);
+    let height = |map: &DrapedMap| map.elevation.as_ref().and_then(|ground| ground.at(center)).expect("the ground");
+    assert!(height(&map).abs() < 1.0, "sea level: {}", height(&map));
+    assert!(map.frame().1.is_empty());
+
+    map.tiles.reload_dem_high();
+    assert_eq!(drapes, map.settle());
+    assert!((height(&map) - 25_000.0).abs() < 1.0, "25 km up: {}", height(&map));
 }
 
 /// Draws a frame, and returns its render passes.

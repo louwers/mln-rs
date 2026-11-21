@@ -54,9 +54,12 @@
 //! - **The DEM bindings.** A tile at zoom z reads the DEM tile at z − 1,
 //!   within the DEM's zoom levels; while that loads, the sub-rect of the
 //!   deepest ancestor that has loaded; else it draws flat. A frame binds the
-//!   DEM tiles it has, so a loaded frame draws each tile with its own. The
-//!   surface reads each DEM's bordered RGBA8 image texel by texel and
-//!   decodes it by the height rule of `mln_util::dem`, as the CPU does.
+//!   DEM tiles it has, so a loaded frame draws each tile with its own, but
+//!   where the DEM tile is missing or its request failed: that tile isn't
+//!   loading, and draws the ancestor until the file source's retry brings
+//!   its DEM. A DEM tile that reloads draws its old DEM until the new one is
+//!   in. The surface reads each DEM's bordered RGBA8 image texel by texel
+//!   and decodes it by the height rule of `mln_util::dem`, as the CPU does.
 //! - **The stacks** ([`DrapeStacks`]) are GL JS's: each a run of the
 //!   frame's layers that drape, ended by one of the frame's layers that
 //!   doesn't, such as a symbol, circle, heatmap, fill extrusion or custom

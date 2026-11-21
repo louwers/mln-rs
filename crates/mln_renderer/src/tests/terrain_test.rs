@@ -162,11 +162,14 @@ fn the_surface_decodes_the_dem_as_its_tileset_says_and_hangs_skirts_as_the_map_s
     assert_eq!(auto.props.unpack, none.props.unpack);
 }
 
-/// A file source whose DEM tile requests wait until the test answers them.
+/// A file source whose DEM tile requests wait until the test answers them,
+/// and that can answer a request that stays open again, as the online file
+/// source does to retry an error or revalidate expired data.
 #[derive(Default)]
 struct DemTiles {
     requested: Mutex<Vec<CanonicalTileID>>,
     pending: Mutex<Vec<(CanonicalTileID, Responder)>>,
+    answered: Mutex<Vec<(CanonicalTileID, Responder)>>,
 }
 
 impl FileSource for DemTiles {
@@ -189,15 +192,36 @@ impl DemTiles {
         let mut waiting = Vec::new();
         for (tile, responder) in pending {
             match answer(tile) {
-                Some(response) => responder.send(response),
+                Some(response) => {
+                    responder.send(response);
+                    self.answered.lock().push((tile, responder));
+                }
                 None => waiting.push((tile, responder)),
             }
         }
         self.pending.lock().extend(waiting);
     }
 
+    /// Answers again the answered requests that are still open and for which
+    /// `answer` has a response.
+    fn answer_again(&self, answer: impl Fn(CanonicalTileID) -> Option<Response>) {
+        let answered = std::mem::take(&mut *self.answered.lock());
+        let open: Vec<_> = answered.into_iter().filter(|(_, responder)| !responder.is_cancelled()).collect();
+        for (tile, responder) in &open {
+            if let Some(response) = answer(*tile) {
+                responder.send(response);
+            }
+        }
+        self.answered.lock().extend(open);
+    }
+
     fn requested(&self) -> BTreeSet<CanonicalTileID> {
         self.requested.lock().iter().copied().collect()
+    }
+
+    /// How many requests `tile` got.
+    fn requests_of(&self, tile: CanonicalTileID) -> usize {
+        self.requested.lock().iter().filter(|&&requested| requested == tile).count()
     }
 }
 
@@ -230,6 +254,12 @@ fn terrarium_slope() -> Response {
 fn not_found() -> Response {
     let mut response = Response::new();
     response.error = Some(Box::new(ResourceError::new(Reason::NotFound, "no such tile")));
+    response
+}
+
+fn connection_error() -> Response {
+    let mut response = Response::new();
+    response.error = Some(Box::new(ResourceError::new(Reason::Connection, "offline")));
     response
 }
 
@@ -430,6 +460,98 @@ fn a_missing_dem_tile_settles() {
     assert!(dem.canonical.z < 9, "{dem}");
     assert_eq!(coords, sub_rect(&first.id, 10 - dem.canonical.z));
     assert!(!first.dem_loading);
+}
+
+/// The terrain tile under the view's center, which the camera stands on.
+fn center_tile(load: &TerrainLoad) -> OverscaledTileID {
+    let center = load.transform.view().center(WrapMode::Wrapped);
+    let world = mln_util::projection::Projection::project(&center, 1.0 / mln_util::constants::TILE_SIZE_D);
+    let cover = load.terrain.cover().expect("terrain draws");
+    let holds = |id: &OverscaledTileID| {
+        let tiles = f64::from(1u32 << id.canonical.z);
+        let (u, v) = (world.x * tiles - f64::from(id.canonical.x), world.y * tiles - f64::from(id.canonical.y));
+        (0.0..1.0).contains(&u) && (0.0..1.0).contains(&v)
+    };
+    cover.tiles.iter().map(|tile| tile.id).find(holds).expect("a tile at the center")
+}
+
+/// A DEM tile whose request fails has done what it can: the terrain loads,
+/// so a still finishes, with the error, and the terrain tile that reads it
+/// draws, and the camera stands, on an ancestor's DEM rather than wait for
+/// its own. Its request stays open, and the file source's retry brings its
+/// DEM without a new request: the tile draws it, the map stands on it, and
+/// the cover culls by its range.
+#[test]
+fn a_failed_dem_tile_draws_an_ancestor_until_the_file_source_retries() {
+    let mut load = TerrainLoad::new((0, 14), 1.0);
+    load.frame();
+    let tile = center_tile(&load);
+    let failing = tile.scaled_to(9).canonical;
+    for _ in 0..10 {
+        load.answer(|dem| Some(if dem == failing { connection_error() } else { terrarium_png(100) }));
+        if load.is_loaded() {
+            break;
+        }
+    }
+    assert!(load.is_loaded(), "a failed DEM tile has done what it can");
+    assert_eq!(1, load.errors);
+    let binding = |load: &TerrainLoad| {
+        let tile = load.terrain.cover().unwrap().tiles.iter().find(|bound| bound.id == tile).copied().unwrap();
+        (tile.dem.map(|(id, coords)| (id.canonical.z, coords)), tile.dem_loading)
+    };
+    let (Some((z, coords)), false) = binding(&load) else { panic!("{:?}", binding(&load)) };
+    assert!(z < 9, "an ancestor's DEM: {z}");
+    assert_eq!(sub_rect(&tile, 10 - z), coords);
+    let center = load.transform.view().center(WrapMode::Wrapped);
+    let ground = load.ground_events().pop().flatten().expect("the ground");
+    assert_eq!(Some(100.0), ground.at(center), "the ancestor's ground");
+    let requests = load.tiles.requests_of(failing);
+
+    // The file source retries, after its backoff.
+    load.tiles.answer_again(|dem| (dem == failing).then(|| terrarium_png(300)));
+    for _ in 0..3 {
+        load.pool.wait();
+        load.frame();
+    }
+    assert!(load.is_loaded());
+    assert_eq!(1, load.errors);
+    assert_eq!((Some((9, sub_rect(&tile, 1))), false), binding(&load));
+    let ground = load.ground_events().pop().flatten().expect("the new ground");
+    assert_eq!(Some(300.0), ground.at(center));
+    assert_eq!(Some((300.0, 300.0)), load.terrain.cover().unwrap().ranges.range(tile.canonical));
+    assert_eq!(requests, load.tiles.requests_of(failing), "the retry made no new request");
+}
+
+/// A DEM tile whose data expires reloads in place when the file source
+/// revalidates it: the terrain tile that reads it draws its DEM throughout,
+/// never waiting on it nor standing on an ancestor's, and then the new DEM,
+/// which the map stands on and the cover culls by.
+#[test]
+fn a_dem_tile_that_reloads_draws_its_new_dem() {
+    let mut load = TerrainLoad::new((0, 14), 1.0);
+    load.frame();
+    load.answer(|_| Some(terrarium_png(100)));
+    assert!(load.is_loaded());
+    let tile = center_tile(&load);
+    let reloaded = tile.scaled_to(9).canonical;
+    let center = load.transform.view().center(WrapMode::Wrapped);
+    assert_eq!(Some(100.0), load.ground_events().pop().flatten().expect("the ground").at(center));
+
+    load.tiles.answer_again(|dem| (dem == reloaded).then(|| terrarium_png(300)));
+    for _ in 0..3 {
+        load.pool.wait();
+        load.frame();
+        let bound = load.terrain.cover().unwrap().tiles.iter().find(|bound| bound.id == tile).copied().unwrap();
+        assert_eq!(
+            (Some((9, sub_rect(&tile, 1))), false),
+            (bound.dem.map(|(id, coords)| (id.canonical.z, coords)), bound.dem_loading)
+        );
+    }
+    assert!(load.is_loaded());
+    let ground = load.ground_events().pop().flatten().expect("the new ground");
+    assert_eq!(Some(300.0), ground.at(center));
+    assert_eq!(Some((300.0, 300.0)), load.terrain.cover().unwrap().ranges.range(tile.canonical));
+    assert_eq!(0, load.errors);
 }
 
 /// A terrain tile draws with its own DEM tile, a quadrant of it; while that
