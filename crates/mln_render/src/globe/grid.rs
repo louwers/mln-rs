@@ -1,9 +1,11 @@
 use mln_tile_id::CanonicalTileID;
 use mln_util::constants::EXTENT;
+use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use super::{NORTH_POLE_Y, SOUTH_POLE_Y};
+use crate::tile_mask::TileMask;
 
-/// How far outside the tile the ring of a [`tile_grid`] with borders lies.
+/// How far outside the tile the ring of a [`grid`] with borders lies.
 const BORDER: i32 = EXTENT / 128;
 
 /// The grid that a tile's surface draws with on the globe.
@@ -16,6 +18,40 @@ pub struct TileGrid {
     pub triangles: Vec<[u16; 3]>,
 }
 
+/// The cells per axis of the grid of a surface on a tile of `zoom`.
+#[must_use]
+pub(crate) fn surface_granularity(zoom: u8) -> u32 {
+    SubdivisionGranularitySetting::globe().tile.granularity_for_zoom_level(zoom)
+}
+
+/// The grid that the surface of the tile `tile` draws with: cells fine
+/// enough at the tile's zoom to follow the sphere. A tile of the top or
+/// bottom row has a row of cells out to its pole.
+#[must_use]
+pub fn tile_grid(tile: &CanonicalTileID) -> TileGrid {
+    grid(tile, surface_granularity(tile.z), false)
+}
+
+/// The grids of the parts of the tile `tile` that `mask` keeps, one per
+/// part, in `tile`'s units. Each part is gridded as the [`tile_grid`] of
+/// the tile it stands in for, so it meets that tile's neighbors edge to
+/// edge, and a part on the top or bottom row reaches its pole.
+pub fn masked_tile_grids(tile: &CanonicalTileID, mask: &TileMask) -> impl Iterator<Item = TileGrid> {
+    mask.iter().map(move |part| {
+        let z = tile.z + part.z;
+        let part_tile = CanonicalTileID::new(z, (tile.x << part.z) + part.x, (tile.y << part.z) + part.y);
+        let mut grid = tile_grid(&part_tile);
+        let extent = EXTENT >> part.z;
+        for [x, y] in &mut grid.vertices {
+            *x = (part.x as i32 * extent + (i32::from(*x) >> part.z)) as i16;
+            if *y != NORTH_POLE_Y && *y != SOUTH_POLE_Y {
+                *y = (part.y as i32 * extent + (i32::from(*y) >> part.z)) as i16;
+            }
+        }
+        grid
+    })
+}
+
 /// The grid of `granularity` cells per axis over the tile `tile`.
 ///
 /// With `borders`, a ring of cells `EXTENT / 128` units wide surrounds the
@@ -24,7 +60,7 @@ pub struct TileGrid {
 /// cells out to its pole instead of the border on that side. The
 /// granularity is capped so that every index fits in 16 bits.
 #[must_use]
-pub fn tile_grid(tile: &CanonicalTileID, granularity: u32, borders: bool) -> TileGrid {
+pub(crate) fn grid(tile: &CanonicalTileID, granularity: u32, borders: bool) -> TileGrid {
     let north_pole = tile.y == 0;
     let south_pole = tile.y == (1u32 << tile.z) - 1;
     let extra_quads_x: i32 = if borders { 2 } else { 0 };

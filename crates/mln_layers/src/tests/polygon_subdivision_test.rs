@@ -1,9 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use geometry::Point;
-use mln_render::globe::{
-    NORTH_POLE_Y, SOUTH_POLE_Y, SubdividedPolygon, TILE_BORDER_STRIP_WIDTH, add_tile_border_strips,
-};
+use mln_render::globe::{NORTH_POLE_Y, SOUTH_POLE_Y, SubdividedPolygon, add_tile_border_strips};
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate};
 use mln_util::constants::EXTENT;
@@ -12,6 +10,9 @@ use super::subdivide;
 
 /// `EXTENT` as a tile coordinate.
 const EXTENT_I16: i16 = EXTENT as i16;
+
+/// How far outside the tile `add_tile_border_strips` reaches.
+const TILE_BORDER_STRIP_WIDTH: i16 = EXTENT_I16 / 256;
 
 fn p(x: i16, y: i16) -> GeometryCoordinate {
     Point::new(x, y)

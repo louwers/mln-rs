@@ -4,7 +4,7 @@ use mln_tile_id::geometry_tile_data::{GeometryCoordinate, GeometryCoordinates};
 use mln_util::constants::EXTENT;
 use mln_util::subdivision_granularity::SubdivisionGranularityExpression;
 
-use crate::globe::{NORTH_POLE_Y, SOUTH_POLE_Y, subdivide_line, tile_grid};
+use crate::globe::{NORTH_POLE_Y, SOUTH_POLE_Y, grid, subdivide_line, subdivide_ring};
 
 /// `EXTENT` as a tile coordinate.
 const EXTENT_I16: i16 = EXTENT as i16;
@@ -44,19 +44,19 @@ fn granularity_keeps_the_surface_granularity() {
 #[test]
 fn vertex_line() {
     let line: GeometryCoordinates = vec![p(0, 0), p(EXTENT_I16, 0)];
-    assert_eq!(line, subdivide_line(&line, 1, false));
-    let split = subdivide_line(&line, 4, false);
+    assert_eq!(line, subdivide_line(&line, 1));
+    let split = subdivide_line(&line, 4);
     assert_eq!(5, split.len());
     assert_eq!(p(EXTENT_I16 / 4, 0), split[1]);
     assert_eq!(p(EXTENT_I16, 0), *split.last().expect("point"));
 
     let diagonal: GeometryCoordinates = vec![p(0, 0), p(EXTENT_I16, EXTENT_I16)];
-    let diagonal_split = subdivide_line(&diagonal, 2, false);
+    let diagonal_split = subdivide_line(&diagonal, 2);
     assert_eq!(3, diagonal_split.len());
     assert_eq!(p(EXTENT_I16 / 2, EXTENT_I16 / 2), diagonal_split[1]);
 
     let ring: GeometryCoordinates = vec![p(0, 0), p(EXTENT_I16, 0), p(EXTENT_I16, EXTENT_I16)];
-    let closed = subdivide_line(&ring, 1, true);
+    let closed = subdivide_ring(&ring, 1);
     assert_eq!(ring[0], *closed.last().expect("point"));
     assert_eq!(4, closed.len());
 }
@@ -65,17 +65,17 @@ fn vertex_line() {
 #[test]
 fn quad_and_grid() {
     let inner = CanonicalTileID::new(2, 1, 1);
-    let quad = tile_grid(&inner, 1, false);
+    let quad = grid(&inner, 1, false);
     assert_eq!(4, quad.vertices.len());
     assert_eq!(2, quad.triangles.len());
 
-    let grid = tile_grid(&inner, 4, true);
-    assert_eq!(7 * 7, grid.vertices.len());
-    assert_eq!(6 * 6 * 2, grid.triangles.len());
-    assert_eq!(-EXTENT_I16 / 128, grid.vertices[0][0]);
-    assert_eq!(EXTENT_I16 + EXTENT_I16 / 128, grid.vertices[7 * 7 - 1][0]);
+    let bordered = grid(&inner, 4, true);
+    assert_eq!(7 * 7, bordered.vertices.len());
+    assert_eq!(6 * 6 * 2, bordered.triangles.len());
+    assert_eq!(-EXTENT_I16 / 128, bordered.vertices[0][0]);
+    assert_eq!(EXTENT_I16 + EXTENT_I16 / 128, bordered.vertices[7 * 7 - 1][0]);
 
-    let polar = tile_grid(&CanonicalTileID::new(0, 0, 0), 2, false);
+    let polar = grid(&CanonicalTileID::new(0, 0, 0), 2, false);
     assert_eq!(3 * 5, polar.vertices.len());
     assert_eq!(NORTH_POLE_Y, polar.vertices[0][1]);
     assert_eq!(SOUTH_POLE_Y, polar.vertices[3 * 5 - 1][1]);
@@ -85,7 +85,7 @@ fn quad_and_grid() {
     }
 
     // A pole row replaces the border on its side.
-    let bordered_polar = tile_grid(&CanonicalTileID::new(1, 0, 0), 4, true);
+    let bordered_polar = grid(&CanonicalTileID::new(1, 0, 0), 4, true);
     assert_eq!(7 * 7, bordered_polar.vertices.len());
     assert_eq!(NORTH_POLE_Y, bordered_polar.vertices[0][1]);
     assert_eq!(EXTENT_I16 + EXTENT_I16 / 128, bordered_polar.vertices[7 * 7 - 1][1]);
@@ -96,7 +96,7 @@ fn quad_and_grid() {
 #[test]
 fn granularity_past_the_index_limit_is_capped() {
     let inner = CanonicalTileID::new(2, 1, 1);
-    let vertex_count = |granularity, borders| tile_grid(&inner, granularity, borders).vertices.len();
+    let vertex_count = |granularity, borders| grid(&inner, granularity, borders).vertices.len();
     assert_eq!(256 * 256, vertex_count(255, false));
     for granularity in [256, 50_000, u32::MAX] {
         assert_eq!(256 * 256, vertex_count(granularity, false));
