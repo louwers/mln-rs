@@ -28,8 +28,8 @@ use mln_storage::network_status::{NetworkStatus, Status as NetworkStatusType};
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{
-    Cache, DatabaseFileSource, FileSource, Kind, Loader, LoadingMethod, OnlineFileSource, Resource,
-    ResourceOptions, Response, StoragePolicy,
+    Cache, DatabaseFileSource, FileSource, Kind, Loader, LoadingMethod, OnlineFileSource, Resource, ResourceOptions,
+    Response, StoragePolicy,
 };
 use mln_style::conversion::layer::convert_layer;
 use mln_style::conversion::{Convertible, Error as ConversionError};
