@@ -31,6 +31,7 @@ mod paint_parameters;
 mod paint_property_binder;
 mod paint_property_statistics;
 mod pattern_atlas;
+#[doc(hidden)]
 pub mod placement;
 pub mod query;
 mod registry;

@@ -46,7 +46,7 @@ pub(crate) struct Frame {
     /// When the frame's update started.
     pub(crate) started: Instant,
     /// When the frame's update started placing.
-    pub(crate) symbols_started: Instant,
+    pub(crate) placement_started: Instant,
 }
 
 impl Frame {
@@ -68,7 +68,7 @@ impl Frame {
             placement_changed: false,
             layers: VecMap::new(),
             started,
-            symbols_started: started,
+            placement_started: started,
         }
     }
 }

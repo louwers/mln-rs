@@ -50,10 +50,9 @@ pub struct RenderTimings {
     /// The update up to placement: the style's changes, the layers' values,
     /// the sources' tiles and the layers' choice of them.
     pub sources: Duration,
-    /// The rest of the update: the placement pass
-    /// ([`placement`](crate::placement)), which places what the layers show
-    /// across tiles, and updates their buckets.
-    pub symbols: Duration,
+    /// The rest of the update: the placement pass, which places what the
+    /// layers show across tiles, and updates their buckets.
+    pub placement: Duration,
     /// Making the layers' draws from the tiles, with their uniforms.
     pub layers: Duration,
     /// Making the shaders when there are none, and uploading buffers and
@@ -113,7 +112,7 @@ pub struct DrawnFrame {
     /// The `still_image_request_id` of a still image's frame, or 0.
     still_image_request_id: u64,
     started: Instant,
-    symbols_started: Instant,
+    placement_started: Instant,
     updated: Instant,
     layers_uploaded: Instant,
     start_rendering: Instant,
@@ -408,12 +407,14 @@ impl Renderer {
     /// of its registry's layer type that places
     /// ([`LayerType::PLACEMENT`](crate::layer::LayerType::PLACEMENT)), for
     /// the type's own API to reach.
+    #[doc(hidden)]
     #[must_use]
     pub fn placement<P: 'static>(&self) -> Option<&P> {
         self.orchestrator.placement()?.pass().downcast_ref()
     }
 
     /// Unstable: [`placement`](Self::placement), to change.
+    #[doc(hidden)]
     pub fn placement_mut<P: 'static>(&mut self) -> Option<&mut P> {
         self.orchestrator.placement_mut()?.pass_mut().downcast_mut()
     }
@@ -679,7 +680,7 @@ impl Encoder {
                 0
             },
             started: frame.started,
-            symbols_started: frame.symbols_started,
+            placement_started: frame.placement_started,
             updated,
             layers_uploaded,
             start_rendering,
@@ -697,7 +698,7 @@ impl Encoder {
             placement_changed,
             still_image_request_id,
             started,
-            symbols_started,
+            placement_started,
             updated,
             layers_uploaded,
             start_rendering,
@@ -719,8 +720,8 @@ impl Encoder {
         }
         let stats = Arc::new(context.stats());
 
-        self.timings.sources = symbols_started - started;
-        self.timings.symbols = updated - symbols_started;
+        self.timings.sources = placement_started - started;
+        self.timings.placement = updated - placement_started;
         self.timings.draw = submitted - layers_uploaded;
 
         emit(
