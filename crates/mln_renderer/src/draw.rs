@@ -19,7 +19,9 @@
 //! uniform values, in a [`DrawList`], which [`DrawList::finish`] orders and
 //! whose values a [`UniformWriter`] writes to the buffers of the layer's
 //! [`LayerDraws`]. The [`DrawFrame`] holds what the draws' uniforms read of
-//! the frame, and [`projection_data`] projects a tile's geometry in it.
+//! the frame, and [`projection_data`] projects a tile's geometry in it. On
+//! the globe, a tile vertex at [`NORTH_POLE_Y`] or [`SOUTH_POLE_Y`] draws at
+//! the pole.
 //!
 //! The layer's [`LayerDrawing`] keeps its draws, those of its tiles in a
 //! [`TileMap`], and gives the engine its draw groups ([`DrawGroup`]). The
@@ -59,3 +61,4 @@ pub use crate::tile_matrix::{
     cast_matrix, globe_extrude_scale, projection_data, tile_unit_translation, to_projection_ubo,
 };
 pub use crate::tile_render_data::TileAtlasTextures;
+pub use crate::util::subdivision::{NORTH_POLE_Y, SOUTH_POLE_Y};

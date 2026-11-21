@@ -1,26 +1,7 @@
 //! Index buffers drawn in segments: a segment's 16-bit indices address at
 //! most [`MAX_SEGMENT_VERTICES`] vertices from its first.
 
-use geometry::Point;
 use mln_gfx::shaders::segment::{MAX_SEGMENT_VERTICES, SegmentBase};
-
-/// Adds the quads that circles and heatmap points are drawn as, one for
-/// each of `points`, and indexes their triangles. `vertex` makes each
-/// corner from the point doubled, with the corner's right and top sides in
-/// the low bits.
-pub fn add_point_quads<V: Copy>(
-    vertices: &mut Vec<V>,
-    triangles: &mut Indexed<'_>,
-    points: impl IntoIterator<Item = Point<i16>>,
-    vertex: impl Fn([i16; 2]) -> V,
-) {
-    for p in points {
-        let (x, y) = (p.x.wrapping_mul(2), p.y.wrapping_mul(2));
-        let first = vertices.len();
-        vertices.extend([[x, y], [x | 1, y], [x | 1, y | 1], [x, y | 1]].map(&vertex));
-        triangles.add(vertices, first, [[0, 1, 2], [0, 3, 2]]);
-    }
-}
 
 /// The indexes of one kind of primitive, such as triangles or lines, over a
 /// vertex buffer, and the segments that draw them.
@@ -28,7 +9,9 @@ pub fn add_point_quads<V: Copy>(
 /// Where a vertex buffer has per-vertex buffers beside it, a mesh larger
 /// than a segment, whose split copies vertices, must extend them after.
 pub struct Indexed<'a> {
+    /// The indexes, each relative to its segment's first vertex.
     pub indexes: &'a mut Vec<u16>,
+    /// The segments, each a draw of a run of the indexes.
     pub segments: &'a mut Vec<SegmentBase>,
 }
 

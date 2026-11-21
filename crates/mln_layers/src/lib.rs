@@ -31,10 +31,13 @@ pub mod fill_extrusion;
 pub mod heatmap;
 pub mod hillshade;
 pub mod line;
+mod mesh;
 mod pattern_layout;
 pub mod raster;
 mod shaders;
+mod subdivision;
 pub mod symbol;
+mod tessellator;
 
 pub use background::{Background, BackgroundPaintProperties};
 pub use circle::{Circle, CircleLayoutProperties, CirclePaintProperties};

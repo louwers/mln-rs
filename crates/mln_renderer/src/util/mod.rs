@@ -1,8 +1,7 @@
-//! Renderer utilities: tile cover, tile level of detail, tile meshes,
-//! subdivision and triangulation.
+//! Renderer utilities: tile cover, tile level of detail, tile meshes and
+//! line subdivision.
 
 pub(crate) mod subdivision;
-pub(crate) mod tessellator;
 pub mod tile_cover;
 pub(crate) mod tile_cover_impl;
 pub(crate) mod tile_lod;

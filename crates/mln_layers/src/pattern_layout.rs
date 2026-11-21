@@ -13,7 +13,6 @@ use mln_renderer::layer::{
     Bucket, BuildParams, EvaluatedLayer, FeatureIndexBuilder, LayerType, Layout, LayoutParameters, PatternDependency,
     Resolved, SourceLayer, layers_by_id,
 };
-use mln_renderer::unstable::Tessellator;
 use mln_style::evaluated::Evaluated;
 use mln_style::expression::{EvaluationContext, Image};
 use mln_style::{PropertyEvaluationParameters, StyleValue as _};
@@ -29,6 +28,7 @@ use crate::fill::bucket::FillBucket;
 use crate::fill::{Fill, FillLayoutProperties};
 use crate::line::bucket::LineBucket;
 use crate::line::{Line, LineLayoutProperties};
+use crate::tessellator::Tessellator;
 
 pub(crate) type PatternLayerMap = HashMap<String, PatternDependency>;
 

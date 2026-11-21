@@ -22,10 +22,9 @@ use mln_expression::Value;
 use mln_expression::formatted::K_FORMATTED_SECTION_TEXT_COLOR;
 use mln_map_types::MapMode;
 use mln_renderer::layer::{
-    BucketParameters, BuildParams, EvaluatedLayer, FeatureIndexBuilder, Layout, LayoutParameters, Resolved,
+    BucketParameters, BuildParams, EvaluatedLayer, FeatureIndexBuilder, Indexed, Layout, LayoutParameters, Resolved,
     ShapeResults, SourceLayer, layers_by_id,
 };
-use mln_renderer::unstable::Indexed;
 use mln_style::evaluated::Evaluated;
 use mln_style::expression::{EvaluationContext, GlobalStateMap};
 use mln_style::property_value::PropertyValue;

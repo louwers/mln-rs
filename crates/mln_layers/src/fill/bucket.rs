@@ -6,9 +6,9 @@ use mln_gfx::shaders::shader_defines::{
     ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE,
 };
 use mln_renderer::layer::{
-    Bucket, BucketBase, CrossFadedPaintPropertyBinder, EvaluatedLayer, GeometryUpload, GeometryVec, PaintPropertyBinder,
+    Bucket, BucketBase, CrossFadedPaintPropertyBinder, EvaluatedLayer, GeometryUpload, GeometryVec, Indexed,
+    PaintPropertyBinder,
 };
-use mln_renderer::unstable::{Indexed, Tessellator};
 use mln_style::expression::{Image, Value};
 use mln_style_types::image::ImagePositions;
 use mln_tile_id::CanonicalTileID;
@@ -24,6 +24,7 @@ use super::Fill;
 use super::mesh::FillBuffers;
 use super::properties::{FillLayoutProperties, FillPaintProperties};
 use crate::pattern_layout::{PatternBucket, PatternLayerMap};
+use crate::tessellator::Tessellator;
 
 mln_renderer::paint_property_binders!(
     pub(crate) struct FillBinders for FillPaintProperties::PossiblyEvaluated {

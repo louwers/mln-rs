@@ -37,6 +37,7 @@ bench = ["mln_renderer/bench"]
 
 [dependencies]
 bytemuck.workspace = true
+earcut.workspace = true
 feature.workspace = true
 geometry.workspace = true
 glam.workspace = true

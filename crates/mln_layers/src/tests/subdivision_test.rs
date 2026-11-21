@@ -3,7 +3,6 @@ use std::borrow::Cow;
 use feature::{Identifier, PropertyMap, Value};
 use geometry::Point;
 use mln_gfx::shaders::segment::MAX_SEGMENT_VERTICES;
-use mln_renderer::unstable::{Tessellator, subdivide_polygon};
 use mln_style_types::image::ImagePositions;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{
@@ -17,6 +16,8 @@ use mln_vec_map::VecMap;
 use crate::fill_extrusion::FillExtrusionLayoutProperties;
 use crate::fill_extrusion::bucket::FillExtrusionBucket;
 use crate::pattern_layout::{PatternBucket, PatternLayerMap};
+use crate::subdivision::subdivide_polygon;
+use crate::tessellator::Tessellator;
 
 /// `EXTENT` as a tile coordinate.
 const EXTENT_I16: i16 = EXTENT as i16;
