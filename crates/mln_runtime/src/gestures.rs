@@ -1,6 +1,6 @@
 //! A map as the camera that `mln_gestures`' recognizer moves: it reads the
-//! map's published snapshot and sends camera commands, without waiting for
-//! them.
+//! map's published snapshot and ground, and sends camera commands, without
+//! waiting for them.
 
 use mln_gestures::{GestureCamera, PendingEnd};
 use mln_map::{CameraDelta, CameraOptions, CameraUpdate, MapProjection, MapSnapshot};
@@ -52,8 +52,12 @@ impl GestureCamera for Map {
         mln_gestures::zoom_range(&state, snapshot.view.camera.center.latitude())
     }
 
+    /// On the ground the map's camera stands on, as the map converts, so a
+    /// box zoom centres on the ground it boxed. The ground may be from a
+    /// state a little newer or older than the snapshot, which only moves
+    /// the point by how far that ground changed.
     fn lat_lng_for_pixel(&self, pixel: ScreenCoordinate) -> Option<LatLng> {
-        let projection = MapProjection::from_view(&self.gesture_snapshot()?.view).ok()?;
+        let projection = MapProjection::from_view(&self.gesture_snapshot()?.view).ok()?.with_ground(self.ground());
         projection.lat_lng_for_pixel(&pixel, WrapMode::Unwrapped).ok()
     }
 

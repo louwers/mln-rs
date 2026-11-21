@@ -4,9 +4,9 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock, Weak};
 
 use mln_map::{
-    BoundOptions, Camera, CameraCommandId, CameraDelta, CameraOptions, CameraUpdate, FrameClock, FreeCameraOptions,
-    LogicalExtent, MapDebugOptions, MapEvent, MapMode, MapSnapshot, ProjectionMode, StyleLoadError, TransitionEnd,
-    TransitionOutcome,
+    BoundOptions, Camera, CameraCommandId, CameraDelta, CameraOptions, CameraUpdate, Elevation, FrameClock,
+    FreeCameraOptions, LogicalExtent, MapDebugOptions, MapEvent, MapMode, MapSnapshot, ProjectionMode, StyleLoadError,
+    TransitionEnd, TransitionOutcome,
 };
 use mln_renderer::text::font_face_engine::FontFaceEngine;
 use mln_renderer::{Registry, UpdateReader};
@@ -116,6 +116,10 @@ pub struct CameraQuery {
 /// What the runtime's thread publishes for a map's handles.
 pub(crate) struct Published {
     snapshot: Mutex<Option<MapSnapshot>>,
+    /// The ground the map's camera stands on (`mln_map::Map::ground`), as
+    /// of the map's last flush, which may be newer or older than the
+    /// snapshot.
+    ground: Mutex<Option<Arc<dyn Elevation>>>,
     /// The map's updates for its renderer, once the map is built.
     updates: OnceLock<UpdateReader>,
     /// The sequence number of the last command that ran and whose changes a
@@ -165,6 +169,7 @@ impl Published {
     pub(crate) fn new(event_mask: EventMask) -> Self {
         Published {
             snapshot: Mutex::new(None),
+            ground: Mutex::new(None),
             updates: OnceLock::new(),
             applied: AtomicU64::new(0),
             frame_clock: OnceLock::new(),
@@ -455,6 +460,17 @@ impl Map {
             snapshot.update_generation = updates.generation();
         }
         Ok(snapshot)
+    }
+
+    /// The ground the map's camera stands on ([`mln_map::Map::ground`]), as
+    /// the map last published it, which can be from a later or an earlier
+    /// state than [`snapshot`](Self::snapshot)'s. `None` without terrain,
+    /// before the renderer drew any, and after the map is released.
+    pub(crate) fn ground(&self) -> Option<Arc<dyn Elevation>> {
+        if self.shared.released.load(Ordering::SeqCst) {
+            return None;
+        }
+        self.shared.published.ground.lock().clone()
     }
 
     /// The events that the map reports, as of the last command that ran.
@@ -1852,6 +1868,7 @@ pub(crate) fn flush(core: &mut RuntimeCore, id: MapId, outbox: &mut Outbox) {
         *published = Some(entry.core.snapshot());
     }
     drop(published);
+    *entry.published.ground.lock() = entry.core.ground();
 
     let mut style_outcome = None;
     let from_json = entry.pending_style.as_ref().is_some_and(|pending| pending.from_json);
@@ -1921,6 +1938,8 @@ fn remove(core: &mut RuntimeCore, id: MapId, done: Option<Resolver<()>>, outbox:
             core.queue.cancel(task);
         }
         entry.core.set_waker(None);
+        // Handles may outlive the map: they keep no terrain alive.
+        entry.published.ground.lock().take();
         if let Some(pending) = entry.pending_style.take() {
             outbox.resolve(pending.resolver, Err(Error::cancelled("the map was released")));
         }
