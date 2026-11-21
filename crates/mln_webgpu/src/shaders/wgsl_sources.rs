@@ -226,7 +226,7 @@ pub(crate) fn texture_declarations(slot: usize, texture: &Texture) -> [String; 2
     let [texture_binding, sampler_binding] = texture_bindings(slot);
     [
         format!("@group({TEXTURE_GROUP}) @binding({texture_binding}) var {}: texture_2d<f32>;", texture.name),
-        format!("@group({TEXTURE_GROUP}) @binding({sampler_binding}) var {}: sampler;", texture.sampler()),
+        format!("@group({TEXTURE_GROUP}) @binding({sampler_binding}) var {}: sampler;", texture.sampler_name()),
     ]
 }
 

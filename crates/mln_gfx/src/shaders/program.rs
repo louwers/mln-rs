@@ -277,7 +277,7 @@ impl Texture {
 
     /// The name its shaders read its sampler by, `<name>_sampler`.
     #[must_use]
-    pub fn sampler(&self) -> String {
+    pub fn sampler_name(&self) -> String {
         format!("{}_sampler", self.name)
     }
 }

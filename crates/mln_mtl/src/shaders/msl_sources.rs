@@ -209,7 +209,7 @@ fn parameter(buffer: &Buffer) -> String {
 fn texture_parameters(slot: usize, texture: &Texture) -> [String; 2] {
     [
         format!("texture2d<float, access::sample> {} [[texture({slot})]]", texture.name),
-        format!("sampler {} [[sampler({slot})]]", texture.sampler()),
+        format!("sampler {} [[sampler({slot})]]", texture.sampler_name()),
     ]
 }
 
@@ -293,7 +293,7 @@ fn with_parameters(functions: &str, main: &str, program: &Program) -> String {
     }
     for (slot, texture) in program.textures.iter().enumerate() {
         let [texture_parameter, sampler_parameter] = texture_parameters(slot, texture);
-        for (name, parameter) in [(texture.name, texture_parameter), (&*texture.sampler(), sampler_parameter)] {
+        for (name, parameter) in [(texture.name, texture_parameter), (&*texture.sampler_name(), sampler_parameter)] {
             if named.contains(name) {
                 added.push_str(",\n    ");
                 added.push_str(&parameter);

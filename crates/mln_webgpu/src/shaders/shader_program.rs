@@ -804,7 +804,9 @@ fn declarations(program: &Program, text: &str, defines: &HashMap<String, bool>) 
     }
     for (slot, texture) in program.textures.iter().enumerate() {
         let [texture_declaration, sampler_declaration] = texture_declarations(slot, texture);
-        for (name, declaration) in [(texture.name, texture_declaration), (&*texture.sampler(), sampler_declaration)] {
+        for (name, declaration) in
+            [(texture.name, texture_declaration), (&*texture.sampler_name(), sampler_declaration)]
+        {
             if named.contains(name) {
                 declarations.push_str(&declaration);
                 declarations.push('\n');

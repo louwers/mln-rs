@@ -60,7 +60,7 @@ fn texture_declarations(program: &Program, named: &BTreeSet<&str>) -> String {
     let set = DescriptorSetType::DrawableImage.set_index();
     let mut declarations = String::new();
     for (slot, texture) in program.textures.iter().enumerate() {
-        let sampler = texture.sampler();
+        let sampler = texture.sampler_name();
         if named.contains(texture.name) {
             let binding = image_texture_binding(slot);
             _ = writeln!(declarations, "layout(set = {set}, binding = {binding}) uniform texture2D {};", texture.name);
