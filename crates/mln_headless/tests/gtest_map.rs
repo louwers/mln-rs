@@ -1071,8 +1071,8 @@ fn style_loaded_signal() {
 /// `server`. The process's first transfer sets up the platform's HTTP
 /// stack, and on Apple platforms that reads the test binary's directory,
 /// which holds every crate's object files. In a large build directory on a
-/// busy machine that takes longer than the stack's own 60 s request
-/// timeout, so on Apple platforms a transfer that times out is asked
+/// busy machine that takes longer than the stack's own request timeout
+/// (30 s), so on Apple platforms a transfer that times out is asked
 /// again, within five minutes in all. Doing it here keeps the setup out of
 /// the tests' timed waits.
 fn online_file_source_test(server: &HttpServer) -> MapTest<OnlineFileSource> {
@@ -1087,11 +1087,11 @@ fn online_file_source_test(server: &HttpServer) -> MapTest<OnlineFileSource> {
         });
         let left = deadline.saturating_duration_since(started);
         let error = received.recv_timeout(left).expect("the first transfer finishes within 5 minutes");
-        // Only a transfer that took about the stack's request timeout.
+        // Only a transfer that took about the stack's 30 s request timeout.
         let timed_out = |error: &ResourceError| {
             cfg!(target_vendor = "apple")
                 && error.reason == Reason::Connection
-                && started.elapsed() >= Duration::from_secs(50)
+                && started.elapsed() >= Duration::from_secs(25)
         };
         match error {
             None => break,
