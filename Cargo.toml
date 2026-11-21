@@ -58,7 +58,6 @@ mln_glsl = { package = "mln-rs-glsl", path = "crates/mln_glsl", version = "=0.0.
 mln_headless = { package = "mln-rs-headless", path = "crates/mln_headless", version = "=0.0.13" }
 mln_image = { package = "mln-rs-image", path = "crates/mln_image", version = "=0.0.13" }
 mln_layers = { package = "mln-rs-layers", path = "crates/mln_layers", version = "=0.0.13" }
-mln_map = { package = "mln-rs-map", path = "crates/mln_map", version = "=0.0.13" }
 mln_map_types = { package = "mln-rs-map-types", path = "crates/mln_map_types", version = "=0.0.13" }
 mln_math = { package = "mln-rs-math", path = "crates/mln_math", version = "=0.0.13" }
 mln_mtl = { package = "mln-rs-mtl", path = "crates/mln_mtl", version = "=0.0.13" }
@@ -73,7 +72,6 @@ mln_render = { package = "mln-rs-render", path = "crates/mln_render", version = 
 # them, so that a browser build of mln_c carries one.
 mln_runtime = { package = "mln-rs-runtime", path = "crates/mln_runtime", version = "=0.0.13", default-features = false }
 mln_sources = { package = "mln-rs-sources", path = "crates/mln_sources", version = "=0.0.13" }
-mln_sprite = { package = "mln-rs-sprite", path = "crates/mln_sprite", version = "=0.0.13" }
 # Without SQLite (its `sqlite` feature) unless a package asks for it, so
 # that examples/web leaves it out.
 mln_storage = { package = "mln-rs-storage", path = "crates/mln_storage", version = "=0.0.13", default-features = false }
@@ -197,7 +195,7 @@ proptest = { version = "1.12.0" }
 # The windows of window targets (mln_gfx::Window), as winit and others hand them out.
 raw-window-handle = { version = "0.6.2" }
 regex = { version = "1.13.1" }
-# tools/render-test's JSON (with serde_json), mln_sprite's sprite index, and
+# tools/render-test's JSON (with serde_json), mln_runtime's sprite index, and
 # the types that cross to a tile worker in another wasm instance (rc: the
 # values behind their `Arc`s).
 serde = { version = "1.0.229", features = ["derive", "rc"] }
@@ -565,14 +563,12 @@ mln_gfx.workspace = true
 mln_gl = { workspace = true, optional = true }
 mln_image.workspace = true
 mln_layers.workspace = true
-mln_map.workspace = true
 mln_map_types.workspace = true
 mln_math.workspace = true
 mln_mtl = { workspace = true, optional = true }
 mln_render.workspace = true
 mln_runtime = { workspace = true, optional = true }
 mln_sources.workspace = true
-mln_sprite.workspace = true
 mln_storage.workspace = true
 mln_storage_offline = { workspace = true, optional = true }
 mln_style.workspace = true

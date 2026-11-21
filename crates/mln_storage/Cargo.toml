@@ -79,7 +79,7 @@ wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
 web-sys.workspace = true
 
-# test/storage/sync_file_source.test.cpp: needs a Map (mln_map,
+# test/storage/sync_file_source.test.cpp: needs a Map (mln_runtime,
 # mln_headless depend on this crate, so not in the unit tests).
 [[test]]
 name = "sync_file_source_test"
@@ -88,7 +88,9 @@ path = "tests/sync_file_source.rs"
 [dev-dependencies]
 httpmock.workspace = true
 mln_headless = { package = "mln-rs-headless", path = "../mln_headless" }
-mln_map = { package = "mln-rs-map", path = "../mln_map" }
+mln_runtime = { package = "mln-rs-runtime", path = "../mln_runtime", default-features = false, features = [
+  "webgpu",
+] }
 # The built-in registrations of the tests' maps.
 mln_rs = { package = "mln-rs", path = "../..", default-features = false }
 mln_test_server = { package = "mln-rs-test-server", path = "../../tools/test-server" }

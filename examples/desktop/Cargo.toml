@@ -30,7 +30,6 @@ mln_bench_workload.workspace = true
 mln_frame_pacer.workspace = true
 mln_gestures.workspace = true
 mln_image.workspace = true
-mln_map.workspace = true
 mln_math.workspace = true
 # The built-in registrations, every backend, and the sessions shape the
 # style's font faces, and the system's fonts that the map falls back to,

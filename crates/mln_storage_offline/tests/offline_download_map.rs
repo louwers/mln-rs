@@ -1,5 +1,5 @@
 // An offline download test that renders a map after the download, in a
-// separate target for the `mln_map` and `mln_headless` dependencies. The
+// separate target for the `mln_runtime` and `mln_headless` dependencies. The
 // database is a file in the temporary directory.
 
 use std::cell::RefCell;
@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use mln_headless::HeadlessFrontend;
-use mln_map::{CameraOptions, Map, MapEvent, MapMode, MapOptions, RenderFrameStatus, RenderMode};
+use mln_runtime::map::{CameraOptions, Map, MapEvent, MapMode, MapOptions, RenderFrameStatus, RenderMode};
 use mln_storage::offline::{
     OfflineRegionDownloadState, OfflineRegionMetadata, OfflineRegionObserver, OfflineRegionStatus,
     OfflineTilePyramidRegionDefinition,

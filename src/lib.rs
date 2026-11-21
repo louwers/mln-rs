@@ -9,7 +9,7 @@
 //! that [`start_runtime`] starts a runtime with.
 //!
 //! The library crates of <https://github.com/louwers/mln-rs> are re-exported
-//! here under their crate names: `mln_rs::mln_map`, `mln_rs::mln_util`,
+//! here under their crate names: `mln_rs::mln_style`, `mln_rs::mln_util`,
 //! `mln_rs::mln_geojson`, and so on. They are published as the `mln-rs-*`
 //! packages, which only exist for this crate. The tile worker codec's
 //! encoding (`mln_wire`) is internal to the port and not re-exported.
@@ -45,7 +45,6 @@ pub use mln_gfx;
 pub use mln_gl;
 pub use mln_image;
 pub use mln_layers;
-pub use mln_map;
 pub use mln_map_types;
 pub use mln_math;
 /// Empty except on Apple platforms.
@@ -64,7 +63,6 @@ pub use mln_sources::{
     ClusterQueries, CustomSourceCallbacks, CustomSourceCommands, GeoJsonSourceCommands, GeoJsonSourceSettings,
     ImageSourceCommands,
 };
-pub use mln_sprite;
 pub use mln_storage;
 #[cfg(feature = "sqlite")]
 pub use mln_storage_offline;

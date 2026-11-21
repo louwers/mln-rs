@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 pub(crate) use mln_bench_workload::paths::{tile_at, tile_center};
 use mln_headless::HeadlessFrontend;
-use mln_map::{CameraOptions, Map, MapEvent, MapMode, MapOptions, RenderFrameStatus, RenderMode};
+use mln_runtime::map::{CameraOptions, Map, MapEvent, MapMode, MapOptions, RenderFrameStatus, RenderMode};
 use mln_runtime::{BackendRef, Device};
 use mln_sources::geojson::{GeoJSONOptions, GeoJsonSourceType, create_geojson_data, geojson_source, parse_geojson};
 use mln_storage::FileSource;

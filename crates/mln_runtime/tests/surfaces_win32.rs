@@ -14,7 +14,7 @@ use mln_gfx::window::raw_window_handle::{
     DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle,
     Win32WindowHandle, WindowHandle, WindowsDisplayHandle,
 };
-use mln_map::MapMode;
+use mln_runtime::map::MapMode;
 use mln_runtime::{
     AttachOptions, BackendType, DemandMode, Device, DeviceOptions, ErrorKind, FrameDemand, FrameDisposition,
     FrameResult, Map, MapOptions, RenderSession, RenderTarget, Runtime, Surface,
@@ -142,7 +142,11 @@ impl HasDisplayHandle for TestWindow {
 
 fn map(runtime: &Runtime) -> Map {
     let options = MapOptions {
-        map: mln_map::MapOptions { size: Size::new(256, 256), map_mode: MapMode::Continuous, ..Default::default() },
+        map: mln_runtime::map::MapOptions {
+            size: Size::new(256, 256),
+            map_mode: MapMode::Continuous,
+            ..Default::default()
+        },
         ..Default::default()
     };
     let (map, created) = runtime.create_map(options).unwrap();

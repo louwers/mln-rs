@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use ::mln_map::{
+use ::mln_runtime::map::{
     AnimationOptions, BoundOptions, Camera, CameraDelta, CameraOptions, CameraUpdate, CameraUpdateMode, ConstrainMode,
     FreeCameraOptions, GesturePhase, MapDebugOptions, NorthOrientation, ProjectionMode, TileLodMode, TransitionEnd,
     TransitionOutcome, ViewportMode,

@@ -13,7 +13,9 @@
 //! or on the host's graphics thread through its [`DriverWork`].
 //!
 //! The synchronous, single-thread core that these handles drive is
-//! `mln_map`'s; [`Map::with_core`] runs a closure on it. A source type's own
+//! [`map::Map`], in the [`map`] module with its transform, style loader and
+//! events, and [`sprite`] parses its sprites; [`Map::with_core`] runs a
+//! closure on it. A source type's own
 //! commands go through the map's generic source paths, such as
 //! [`Map::add_style_source`], [`Map::apply_style_edit`] and
 //! [`Map::set_style_source_data`], and its queries of what a session drew
@@ -46,7 +48,8 @@ mod completion;
 mod event;
 mod feature_state;
 mod gestures;
-mod map;
+pub mod map;
+mod map_handle;
 #[cfg(not(target_family = "wasm"))]
 mod offline;
 #[cfg(target_family = "wasm")]
@@ -56,6 +59,7 @@ pub mod registry;
 mod render;
 mod resources;
 mod runtime;
+pub mod sprite;
 mod style;
 #[cfg(target_family = "wasm")]
 mod web;
@@ -64,8 +68,8 @@ pub use camera::{CameraFitArea, CameraFitOptions, CameraFitUpdate, TileOptions, 
 pub use completion::Completion;
 pub use event::{EventHandler, EventMask, EventSource, EventType, RuntimeEvent, RuntimeEventKind};
 pub use feature_state::{FeatureState, FeatureStateSelector};
-pub use map::{Applied, CameraQuery, CommandGroup, Map, MapId, MapOptions};
-pub use mln_map::{LogicalExtent, MapSnapshot};
+pub use map::{LogicalExtent, MapSnapshot};
+pub use map_handle::{Applied, CameraQuery, CommandGroup, Map, MapId, MapOptions};
 pub use mln_render::query::{RenderedQueryOptions, SourceQueryOptions};
 pub use mln_render::{ClipDepthRange, FrameProjection};
 pub use mln_util::{Error, ErrorKind};

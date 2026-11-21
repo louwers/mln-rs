@@ -8,7 +8,7 @@
 use std::sync::Arc;
 
 use feature::Value;
-use mln_map::{CameraOptions, MapMode};
+use mln_runtime::map::{CameraOptions, MapMode};
 use mln_style::Edit;
 use mln_style::expression::expr::FeatureState;
 use mln_style::image::Impl as StyleImage;

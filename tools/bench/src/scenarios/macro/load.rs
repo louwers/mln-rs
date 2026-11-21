@@ -2,7 +2,7 @@
 //! the style loads, and the tiles, glyphs and sprite it needs load, until
 //! the first frame with nothing missing.
 
-use mln_map::{CameraOptions, CameraUpdate, MapMode};
+use mln_runtime::map::{CameraOptions, CameraUpdate, MapMode};
 use mln_runtime::{AttachOptions, MapOptions, RenderTarget, RuntimeOptions};
 use mln_util::geo::LatLng;
 use mln_util::size::Size;
@@ -128,7 +128,12 @@ fn runtime(bench: &mut Bench) {
     let options =
         RuntimeOptions { asset_path: Some(fixtures.dir().to_owned()), cache_path: None, network_status: None };
     let map_options = MapOptions {
-        map: mln_map::MapOptions { size: VIEW, pixel_ratio: 1.0, map_mode: MapMode::Static, ..Default::default() },
+        map: mln_runtime::map::MapOptions {
+            size: VIEW,
+            pixel_ratio: 1.0,
+            map_mode: MapMode::Static,
+            ..Default::default()
+        },
         // The fonts of the machine would make the work differ between
         // machines: the snapshot's glyphs have every label's.
         system_fonts: false,

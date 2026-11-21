@@ -23,7 +23,9 @@ thiserror.workspace = true
 
 [dev-dependencies]
 # The transform that the recognizer's tests move.
-mln_map = { package = "mln-rs-map", path = "../mln_map" }
+mln_runtime = { package = "mln-rs-runtime", path = "../mln_runtime", default-features = false, features = [
+  "webgpu",
+] }
 # The globe drag test's projection.
 mln_style_types = { package = "mln-rs-style-types", path = "../mln_style_types" }
 

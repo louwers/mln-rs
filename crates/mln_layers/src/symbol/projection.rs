@@ -611,8 +611,8 @@ mod tests {
 
     use geometry::Point;
     use glam::Vec2;
-    use mln_map::transform::Transform;
     use mln_map_types::{ConstrainMode, TileProjector, ViewportMode};
+    use mln_runtime::map::transform::Transform;
     use mln_tile_id::UnwrappedTileID;
     use mln_util::size::Size;
 

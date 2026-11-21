@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use mln_gestures::{GestureEvent, GestureRecognizer, Input, Modes, PointerKind};
-use mln_map::{AnimationOptions, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase, MapEvent};
+use mln_runtime::map::{AnimationOptions, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase, MapEvent};
 use mln_runtime::{
     AttachOptions, DemandMode, Error, EventMask, EventType, FrameDemand, FrameDisposition, LogicalExtent, Map,
     MapOptions, RenderSession, RenderTarget, Runtime, RuntimeEvent, RuntimeEventKind, RuntimeOptions, Surface,
@@ -173,7 +173,7 @@ impl WebMap {
 
         let size = Size::new(width.max(1), height.max(1));
         let options = MapOptions {
-            map: mln_map::MapOptions { size, pixel_ratio: pixel_ratio as f32, ..Default::default() },
+            map: mln_runtime::map::MapOptions { size, pixel_ratio: pixel_ratio as f32, ..Default::default() },
             event_mask: EventMask::NONE
                 .with(EventType::MapLoadingFinished)
                 .with(EventType::MapLoadingFailed)

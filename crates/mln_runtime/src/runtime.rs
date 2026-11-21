@@ -28,7 +28,7 @@ use parking_lot::Mutex;
 
 use crate::completion::{Completion, Resolver};
 use crate::event::{EventHandler, RuntimeEvent};
-use crate::map::{Applied, Map, MapEntry, MapId, MapOptions, MapShared, Published};
+use crate::map_handle::{Applied, Map, MapEntry, MapId, MapOptions, MapShared, Published};
 use crate::offline::Offline;
 use crate::resources::{CacheDatabaseOperation, ProviderFileSource, ResourceHooks, ResourceProvider};
 
@@ -489,9 +489,9 @@ impl RuntimeCore {
             if let Some(entry) = self.maps.get_mut(&id) {
                 entry.core.release_updates();
             }
-            crate::map::flush(self, id, outbox);
+            crate::map_handle::flush(self, id, outbox);
             if let Some(entry) = self.maps.get_mut(&id) {
-                crate::map::report_held(entry);
+                crate::map_handle::report_held(entry);
             }
         }
     }
@@ -788,7 +788,8 @@ impl Runtime {
         let published = Arc::new(Published::new(options.event_mask));
         let map = Map::new(MapShared::new(id, Arc::clone(&self.shared), &options, Arc::clone(&published)));
         let (completion, resolver) = self.shared.completion();
-        self.shared.post(move |core, outbox| crate::map::create(core, id, &options, published, resolver, outbox));
+        self.shared
+            .post(move |core, outbox| crate::map_handle::create(core, id, &options, published, resolver, outbox));
         Ok((map, completion))
     }
 

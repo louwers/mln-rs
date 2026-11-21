@@ -10,7 +10,7 @@ mod fast_camera_test;
 mod gtest_sky;
 mod gtest_subdivision;
 // gtests-data: the test/tile gtests that need the renderer's tiles or
-// mln_map's Transform (tests/tile/main.rs lists them).
+// the map's Transform (tests/tile/main.rs lists them).
 mod tile;
 // gtests-data: the test/text gtests that need mln_render (GlyphStore) or
 // mln_style's Formatted (tests/text/main.rs lists them).
@@ -28,12 +28,12 @@ mod gtest_line_atlas;
 // Ports test/util/tile_range.test.cpp (marker `// gtest: Group.Name`).
 mod gtest_tile_range;
 // test/util/tile_cover.test.cpp, of mln_map_types' tile cover: needs
-// mln_map's Transform, which is above mln_map_types.
+// the map's Transform (mln_runtime), which is above mln_map_types.
 mod tile_cover_test;
 // test/tile/geojson_tile.test.cpp, over features the test gives the tiles.
 mod geojson_tile_test;
 // test/style/source.test.cpp, but for the cases of the built-in source
-// types (in mln_sources): needs mln_map's Transform (above this crate).
+// types (in mln_sources): needs the map's Transform (mln_runtime, above this crate).
 mod source_test;
 // Port-only: the renderer frees what it lets go of on its workers.
 mod drop_on_workers_test;

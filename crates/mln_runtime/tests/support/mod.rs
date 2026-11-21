@@ -57,7 +57,10 @@ impl Drop for TestRuntime {
 }
 
 pub(crate) fn map_options() -> MapOptions {
-    MapOptions { map: mln_map::MapOptions { size: Size::new(256, 256), ..Default::default() }, ..Default::default() }
+    MapOptions {
+        map: mln_runtime::map::MapOptions { size: Size::new(256, 256), ..Default::default() },
+        ..Default::default()
+    }
 }
 
 /// A map that the runtime has built.

@@ -2,12 +2,13 @@
 //! calls: fitting an area, the viewport and the tile settings.
 
 use geo_types::Geometry;
-use mln_map::{
-    AnimationOptions, CameraOptions, CameraUpdateMode, ConstrainMode, NorthOrientation, TileLodMode, ViewportMode,
-};
 use mln_util::error::Error;
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds};
 use mln_util::geometry::for_each_point;
+
+use crate::map::{
+    AnimationOptions, CameraOptions, CameraUpdateMode, ConstrainMode, NorthOrientation, TileLodMode, ViewportMode,
+};
 
 /// An area for a camera to fit in the map's view.
 #[derive(Clone, Debug, PartialEq)]
@@ -33,7 +34,7 @@ pub struct CameraFitOptions {
     pub pitch: Option<f64>,
 }
 
-/// Moves the camera to fit an area: [`CameraUpdate`](mln_map::CameraUpdate)'s
+/// Moves the camera to fit an area: [`CameraUpdate`](crate::map::CameraUpdate)'s
 /// counterpart for [`Map::fit_camera`](crate::Map::fit_camera).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct CameraFitUpdate {
@@ -71,7 +72,7 @@ pub struct TileOptions {
 /// and for padding that leaves no room for it, for which the core would keep
 /// the zoom.
 pub(crate) fn camera_for(
-    map: &mln_map::Map,
+    map: &crate::map::Map,
     area: &CameraFitArea,
     options: &CameraFitOptions,
 ) -> Result<CameraOptions, Error> {
@@ -98,7 +99,7 @@ pub(crate) fn camera_for(
     }
 }
 
-pub(crate) fn set_viewport(map: &mut mln_map::Map, options: &ViewportOptions) {
+pub(crate) fn set_viewport(map: &mut crate::map::Map, options: &ViewportOptions) {
     let mut viewport = map.snapshot().view.viewport;
     viewport.north_orientation = options.north_orientation.unwrap_or(viewport.north_orientation);
     viewport.constrain_mode = options.constrain_mode.unwrap_or(viewport.constrain_mode);
@@ -107,7 +108,7 @@ pub(crate) fn set_viewport(map: &mut mln_map::Map, options: &ViewportOptions) {
     map.set_viewport(&viewport);
 }
 
-pub(crate) fn set_tile_options(map: &mut mln_map::Map, options: &TileOptions) {
+pub(crate) fn set_tile_options(map: &mut crate::map::Map, options: &TileOptions) {
     let mut tile = map.snapshot().tile;
     tile.prefetch_zoom_delta = options.prefetch_zoom_delta.unwrap_or(tile.prefetch_zoom_delta);
     tile.lod_min_radius = options.lod_min_radius.unwrap_or(tile.lod_min_radius);

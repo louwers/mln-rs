@@ -96,7 +96,7 @@ pub(crate) fn with_sprite(fixtures: &Fixtures, mut style: Style) -> Style {
     let path = asset_path(&sprite);
     let png = mln_image::decode_png(&fixtures.read(&format!("{path}.png"))).expect("the sprite's image");
     let index = fixtures.read(&format!("{path}.json"));
-    let images = mln_sprite::parse_sprite("default", &png, &index).expect("the sprite's index");
+    let images = mln_runtime::sprite::parse_sprite("default", &png, &index).expect("the sprite's index");
     style.apply(Edit::AddImages(images)).expect("the sprite's images");
     style
 }

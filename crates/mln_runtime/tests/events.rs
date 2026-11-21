@@ -6,8 +6,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use httpmock::MockServer;
-use mln_map::MapEvent;
 use mln_render::RendererEvent;
+use mln_runtime::map::MapEvent;
 use mln_runtime::{ErrorKind, EventMask, EventSource, EventType, MapOptions, RuntimeEvent, RuntimeEventKind};
 use parking_lot::Mutex;
 
@@ -54,9 +54,9 @@ fn an_event_comes_after_a_snapshot_that_includes_it() {
         }
     }));
     let applied = wait(map.set_style_json(EMPTY_STYLE));
-    wait(map.update_camera(mln_map::CameraUpdate {
-        camera: mln_map::CameraOptions { zoom: Some(2.0), ..Default::default() },
-        ..mln_map::CameraUpdate::default()
+    wait(map.update_camera(mln_runtime::map::CameraUpdate {
+        camera: mln_runtime::map::CameraOptions { zoom: Some(2.0), ..Default::default() },
+        ..mln_runtime::map::CameraUpdate::default()
     }));
     let checked = checked.lock();
     assert!(!checked.is_empty());

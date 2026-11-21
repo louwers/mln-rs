@@ -6,10 +6,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use mln_headless::HeadlessFrontend;
-use mln_map::{Map, MapMode, MapOptions};
 use mln_rs::mln_layers::custom::{
     Custom, CustomLayerHost, CustomLayerPrerenderParameters, CustomLayerRenderParameters,
 };
+use mln_runtime::map::{Map, MapMode, MapOptions};
 use mln_runtime::{BackendType, Device, DeviceOptions};
 use mln_util::error::ErrorKind;
 use mln_util::image::PremultipliedImage;
@@ -378,8 +378,8 @@ mod gl {
     use glow::HasContext as _;
     use khronos_egl as egl;
     use mln_headless::HeadlessFrontend;
-    use mln_map::Map;
     use mln_rs::mln_layers::custom::{CustomLayerPrerenderParameters, CustomLayerRenderParameters};
+    use mln_runtime::map::Map;
     use mln_style::Edit;
 
     use super::{Arc, BackendType, Calls, Custom, CustomLayerHost, Mutex, Ordering, Queue, check, session};

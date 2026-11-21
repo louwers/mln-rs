@@ -3,11 +3,11 @@
 use std::ops::{BitOr, BitOrAssign};
 use std::sync::Arc;
 
-use mln_map::MapEvent;
 use mln_storage::ResourceError;
 use mln_storage::offline::OfflineRegionStatus;
 
-use crate::map::MapId;
+use crate::map::MapEvent;
+use crate::map_handle::MapId;
 
 /// The runtime's event handler. It runs on the runtime's thread with each
 /// batch of events, oldest first.

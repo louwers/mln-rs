@@ -13,7 +13,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
 
 use mln_gfx::{ConsumerSync, GpuSync, Handoff, SyncKind};
-use mln_map::RenderMode;
 use mln_render::text::font_face_engine::FontFaceEngine;
 use mln_render::{Registry, Renderer, RendererEvent, RendererEvents, Update, UpdateReader};
 use mln_text::GlyphCache;
@@ -33,7 +32,8 @@ use super::target::{
     BorrowedRing, Device, DeviceLease, Driver, ExportKind, ExportedRing, SentSurface, Surface, SurfaceOverlay,
 };
 use crate::completion::Resolver;
-use crate::map::Published as MapPublished;
+use crate::map::RenderMode;
+use crate::map_handle::Published as MapPublished;
 use crate::runtime::Outbox;
 
 /// The work of the thread that runs a session, which owns the session's

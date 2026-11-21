@@ -1,7 +1,7 @@
 // The tile debug overlays of `Map::set_debug` (tile borders, parse status,
 // timestamps) and the rendering stats view, on the headless frontend.
 
-use mln_map::{CameraOptions, MapDebugOptions};
+use mln_runtime::map::{CameraOptions, MapDebugOptions};
 use mln_storage::{Kind, Resource};
 use mln_util::chrono::Timestamp;
 use mln_util::geo::LatLng;
