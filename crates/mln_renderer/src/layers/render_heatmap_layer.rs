@@ -340,6 +340,9 @@ impl RenderHeatmapLayer {
         let ground = paint_parameters.ground.clone();
         let ground = ground.as_deref();
         grounds.clear();
+        // The draws keep the order they're pushed in: the tiles', then their
+        // parts'.
+        let order = drawing.target.get_or_insert_default().id();
         for tile in render_tiles {
             let tile_id = tile.id();
 
@@ -372,8 +375,8 @@ impl RenderHeatmapLayer {
             let changes = entry.take_changes();
             let context = &mut *paint_parameters.context;
             let draws = entry.value.get_or_insert_default();
-            for draw in draws.draws_mut() {
-                refresh_paint_attributes(&mut draw.objects, changes, |attrs| {
+            for objects in draws.draws_mut() {
+                refresh_paint_attributes(objects, changes, |attrs| {
                     binders.bind(evaluated, paint(context).as_ref(), attrs, &mut Uniforms::default());
                 });
             }
@@ -419,12 +422,12 @@ impl RenderHeatmapLayer {
             }
 
             let uniforms = Self::tile_uniforms(&tile_id, binders, paint_parameters);
-            for (part, draw) in draws.draws_mut().iter_mut().enumerate() {
+            for (part, objects) in draws.draws_mut().iter_mut().enumerate() {
                 if let Some(read) = reads.as_ref().and_then(|reads| reads.get(part)) {
-                    draw.objects.set_texture(ID_GROUND_DEM_TEXTURE, Some(&read.texture));
+                    objects.set_texture(ID_GROUND_DEM_TEXTURE, Some(&read.texture));
                     grounds.push(read.ubo);
                 }
-                let frame_draw = FrameDraw { depth: DrawDepth::Off, ..draw.frame_draw(Some(tile_id)) };
+                let frame_draw = FrameDraw { depth: DrawDepth::Off, ..FrameDraw::new(Some(tile_id), order) };
                 tile_draws.push_part(frame_draw, part, uniforms);
             }
         }

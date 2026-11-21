@@ -148,6 +148,23 @@ fn render(
     zooms: &[f64],
     dem: impl Fn(&TileData) -> Vec<u8> + Send + Sync + 'static,
 ) -> Option<(PremultipliedImage, Map, Requests)> {
+    let camera = |&zoom: &f64| CameraOptions {
+        center: Some(scene.center),
+        zoom: Some(zoom),
+        pitch: Some(scene.pitch),
+        ..Default::default()
+    };
+    render_views(&scene.style(), &zooms.iter().map(camera).collect::<Vec<_>>(), dem)
+}
+
+/// The still of the map of `style` seen by each of `cameras` in turn, as
+/// [`render`] draws it: the last one, with the map that drew it and the DEM
+/// tiles it asked for.
+fn render_views(
+    style: &str,
+    cameras: &[CameraOptions],
+    dem: impl Fn(&TileData) -> Vec<u8> + Send + Sync + 'static,
+) -> Option<(PremultipliedImage, Map, Requests)> {
     let size = Size::new(SIDE, SIDE);
     let queue = Queue::new();
     let pool = Pool::new(4);
@@ -175,19 +192,13 @@ fn render(
     let mut map = Map::with_file_source(file_source, options, &pool).unwrap();
     frontend.attach(&mut map);
     map.set_bounds(&BoundOptions { max_pitch: Some(85.0), ..Default::default() }).unwrap();
-    map.load_style_json(&scene.style());
+    map.load_style_json(style);
     let mut image = None;
-    for &zoom in zooms {
-        let camera = CameraOptions {
-            center: Some(scene.center),
-            zoom: Some(zoom),
-            pitch: Some(scene.pitch),
-            ..Default::default()
-        };
-        map.jump_to(&camera);
+    for camera in cameras {
+        map.jump_to(camera);
         image = Some(frontend.render(&mut map).expect("the still image").image);
     }
-    Some((image.expect("a zoom"), map, requests))
+    Some((image.expect("a camera"), map, requests))
 }
 
 /// The pixel at `x`, `y` of `image`.
@@ -341,6 +352,74 @@ fn a_circle_by_an_edge_between_source_tiles_draws_once() {
     let [r, g, b, _] = pixel_at(&image, &map, &center, 50.0);
     // Half of red over white is (255, 128, 128); twice over, (255, 64, 64).
     assert!(r > 240 && (100..160).contains(&g) && (100..160).contains(&b), "drawn once: {:?}", [r, g, b]);
+}
+
+/// Two circles, blue in a source tile of zoom 14 and red in its east
+/// neighbour, overlap across the edge between the tiles, by the corner where
+/// the DEM tiles of zoom 15 in them meet. Each draws in a part of its own
+/// tile: the blue one in its tile's south-east part, the last, and the red
+/// one in its tile's north-west part, the first. Their overlap is the same
+/// whether the view is drawn fresh or after a view of the tiles' north
+/// halves, where each tile drew in one part: the frame's order of the tiles,
+/// then of their parts, stacks them, not when the parts were made.
+#[test]
+fn circles_by_the_corner_of_source_tiles_stack_alike_however_the_view_is_reached() {
+    // The source tiles of zoom 14 meet at x 8192, and the DEM tiles of zoom
+    // 15 in them at y 16385. A pixel at zoom 17 is 1 / 2048 of a DEM tile.
+    let corner = (16384.0, 16385.0);
+    let off = 2.0 / 2048.0;
+    let blue = location_at(15, corner.0 - off, corner.1 + off);
+    let red = location_at(15, corner.0 + off, corner.1 - off);
+    let point = |location: &LatLng, color: &str| {
+        let (lng, lat) = (location.longitude(), location.latitude());
+        format!(
+            r#"{{"type": "Feature", "properties": {{"color": "{color}"}},
+                "geometry": {{"type": "Point", "coordinates": [{lng}, {lat}]}}}}"#
+        )
+    };
+    let (blue_point, red_point) = (point(&blue, "blue"), point(&red, "red"));
+    let style = format!(
+        r#"{{
+            "version": 8,
+            "terrain": {{"source": "dem"}},
+            "sources": {{
+                "dem": {{"type": "raster-dem", "tiles": ["dem/{{z}}/{{x}}/{{y}}.png"], "tileSize": 256, "maxzoom": 15}},
+                "points": {{
+                    "type": "geojson",
+                    "maxzoom": 14,
+                    "buffer": 0,
+                    "data": {{"type": "FeatureCollection", "features": [{blue_point}, {red_point}]}}
+                }}
+            }},
+            "layers": [
+                {{"id": "background", "type": "background", "paint": {{"background-color": "white"}}}},
+                {{
+                    "id": "circles",
+                    "type": "circle",
+                    "source": "points",
+                    "paint": {{"circle-color": ["get", "color"], "circle-radius": 6}}
+                }}
+            ]
+        }}"#
+    );
+    let at_corner = location_at(15, corner.0, corner.1);
+    let view = CameraOptions { center: Some(at_corner), zoom: Some(17.0), pitch: Some(60.0), ..Default::default() };
+    let north = CameraOptions { center: Some(location_at(15, corner.0, corner.1 - 0.2)), ..view };
+    let mut overlaps = Vec::new();
+    for cameras in [&[view][..], &[north, view]] {
+        let Some((image, map, _)) = render_views(&style, cameras, |_| dem_png(METERS_50)) else {
+            return;
+        };
+        let [r, g, b, _] = pixel_at(&image, &map, &at_corner, 50.0);
+        assert!(
+            (r > 200 && g < 60 && b < 60) || (r < 60 && g < 60 && b > 200),
+            "{} views: a circle at the overlap, not {:?}",
+            cameras.len(),
+            [r, g, b]
+        );
+        overlaps.push([r, g, b]);
+    }
+    assert_eq!(overlaps[0], overlaps[1], "the overlap fresh, then after the north halves");
 }
 
 /// Over a DEM whose lowest zoom, 15, is deeper than the circle's source

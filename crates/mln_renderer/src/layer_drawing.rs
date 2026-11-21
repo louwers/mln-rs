@@ -475,8 +475,13 @@ impl TileObjects for KeptDraw {
 /// terrain, one for each part of the tile that reads its own ground
 /// ([`GroundBindings::reads`](crate::terrain::GroundBindings::reads)), most
 /// often one; on a flat map, one. A frame's draw names one by its index.
+///
+/// Its draws have no id of their own: a frame's draws of the layer all carry
+/// the id of the layer's draws ([`LayerDraws::id`]), so they draw in the
+/// order the layer pushes them, that of the frame's tiles and then of each
+/// tile's parts, however long each was kept.
 #[derive(Default)]
-pub(crate) struct StandingDraws(SmallVec<[KeptDraw; 1]>);
+pub(crate) struct StandingDraws(SmallVec<[DrawObjects; 1]>);
 
 impl StandingDraws {
     /// Keeps `count` draws: drops those past it, and makes those it lacks of
@@ -485,7 +490,7 @@ impl StandingDraws {
         self.0.truncate(count);
         while self.0.len() < count {
             let Some(objects) = make() else { break };
-            self.0.push(KeptDraw::new(objects));
+            self.0.push(objects);
         }
     }
 
@@ -494,8 +499,8 @@ impl StandingDraws {
         self.0.is_empty()
     }
 
-    /// The draws, to change.
-    pub(crate) fn draws_mut(&mut self) -> &mut [KeptDraw] {
+    /// The draws' GPU objects, to change.
+    pub(crate) fn draws_mut(&mut self) -> &mut [DrawObjects] {
         &mut self.0
     }
 }
@@ -505,12 +510,12 @@ impl TileObjects for StandingDraws {
     type Part = usize;
 
     fn objects(&mut self, index: usize) -> Option<DrawObjectsMut<'_>> {
-        Some((&mut self.0.get_mut(index)?.objects).into())
+        Some(self.0.get_mut(index)?.into())
     }
 
     fn drop_bindings(&mut self) {
-        for draw in &mut self.0 {
-            draw.objects.drop_bindings();
+        for objects in &mut self.0 {
+            objects.drop_bindings();
         }
     }
 }
@@ -560,8 +565,10 @@ pub(crate) enum DrawDepth {
 pub(crate) struct FrameDraw {
     /// The tile whose draw it is, or `None` for a draw of the layer's.
     pub(crate) tile: Option<OverscaledTileID>,
-    /// The id of the draw's GPU objects, which orders the draws by when
-    /// their objects were made.
+    /// The id that orders the layer's draws of one priority: that of the
+    /// draw's GPU objects, which orders them by when the objects were made,
+    /// or one that the layer's draws share, which keeps them in the order
+    /// the layer pushed them.
     pub(crate) id: SimpleIdentity,
     pub(crate) priority: DrawPriority,
     /// The passes the draw draws in.
@@ -589,8 +596,7 @@ impl FrameDraw {
         }
     }
 
-    /// The order of the layer's draws: by priority, then by the id of their
-    /// GPU objects, which is the order the objects were made in.
+    /// The order of the layer's draws: by priority, then by their id.
     #[must_use]
     pub(crate) fn order(&self) -> (DrawPriority, SimpleIdentity) {
         (self.priority, self.id)
@@ -961,6 +967,14 @@ impl<P> Default for LayerDraws<P> {
 }
 
 impl<P: Copy> LayerDraws<P> {
+    /// The id of the draws ([`FrameDraws`]'), which a layer whose draws all
+    /// carry it as theirs ([`FrameDraw::id`]) draws in the order it pushed
+    /// them.
+    #[must_use]
+    pub(crate) fn id(&self) -> SimpleIdentity {
+        self.frame.id
+    }
+
     /// The draws, with what they share.
     #[must_use]
     pub(crate) fn frame(&self) -> &FrameDraws {

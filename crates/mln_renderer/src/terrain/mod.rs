@@ -119,12 +119,15 @@
 //!   at a slot that only the terrain variants declare, so that no flat
 //!   program's layout or draw changes for it. A frame without terrain makes no
 //!   terrain variant, writes no ground, binds no ground texture and expands no
-//!   centroid. A known
-//!   limit: a tile that draws in several parts, which happens only where the
-//!   view is zoomed past a source's deepest zoom over a deeper DEM, draws its
-//!   features part by part rather than in its bucket's order, so where features
-//!   of two parts overlap, which is on top can differ from a flat map, and
-//!   symbols would sort within each part only.
+//!   centroid. The draws of circles and heatmap kernels stack in the frame's
+//!   order of their tiles, and then of each tile's parts, whenever each draw
+//!   was made, so a view draws alike whatever path the camera took to it;
+//!   what shows of fill extrusions is the depth's to decide. A known limit: a
+//!   tile that draws in several parts, which happens only where the view is
+//!   zoomed past a source's deepest zoom over a deeper DEM, draws its features
+//!   part by part rather than in its bucket's order, so where features of two
+//!   parts overlap, which is on top can differ from a flat map, and symbols
+//!   would sort within each part only.
 //! - **The surface** draws once for each stack, its tiles nearest the
 //!   center first, testing and writing the 3D depth range with less or
 //!   equal and blending its drapes over what is under it. A stack above the

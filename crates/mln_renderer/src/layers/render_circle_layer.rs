@@ -28,7 +28,7 @@ use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
 use crate::buckets::circle_bucket::{CircleBinders, CircleBucket, CircleLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
-use crate::layer_drawing::{DrawList, StandingDraws, TileDraws, UniformWriter};
+use crate::layer_drawing::{DrawList, FrameDraw, StandingDraws, TileDraws, UniformWriter};
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::circle_layout::CircleLayout;
 use crate::layout::layout::{LayoutParameters, SourceLayer};
@@ -243,6 +243,9 @@ impl TypedLayer for RenderCircleLayer {
         let ground = paint_parameters.ground.clone();
         let ground = ground.as_deref();
         self.grounds.clear();
+        // The draws keep the order they're pushed in: the tiles', then their
+        // parts'.
+        let order = self.drawing.frame_mut().id();
         for tile in render_tiles {
             let tile_id = tile.id();
             let Some(mut entry) = self.drawing.tiles_mut().entry(&tile_id) else {
@@ -276,8 +279,8 @@ impl TypedLayer for RenderCircleLayer {
             let changes = entry.take_changes();
             let context = &mut *paint_parameters.context;
             let draws = entry.value.get_or_insert_default();
-            for draw in draws.draws_mut() {
-                refresh_paint_attributes(&mut draw.objects, changes, |attrs| {
+            for objects in draws.draws_mut() {
+                refresh_paint_attributes(objects, changes, |attrs| {
                     binders.bind(evaluated, paint(context).as_ref(), attrs, &mut Uniforms::default());
                 });
             }
@@ -322,12 +325,12 @@ impl TypedLayer for RenderCircleLayer {
             }
 
             let uniforms = Self::uniforms(layer, &tile_id, binders, paint_parameters);
-            for (part, draw) in draws.draws_mut().iter_mut().enumerate() {
+            for (part, objects) in draws.draws_mut().iter_mut().enumerate() {
                 if let Some(read) = reads.as_ref().and_then(|reads| reads.get(part)) {
-                    draw.objects.set_texture(ID_GROUND_DEM_TEXTURE, Some(&read.texture));
+                    objects.set_texture(ID_GROUND_DEM_TEXTURE, Some(&read.texture));
                     self.grounds.push(read.ubo);
                 }
-                self.draw_list.push_part(draw.frame_draw(Some(tile_id)), part, uniforms);
+                self.draw_list.push_part(FrameDraw::new(Some(tile_id), order), part, uniforms);
             }
         }
 
