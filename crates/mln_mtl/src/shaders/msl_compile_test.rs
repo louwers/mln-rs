@@ -95,18 +95,6 @@ fn defines<'a>(overdraw: bool, globe: bool, uniforms: impl IntoIterator<Item = &
     defines
 }
 
-/// Every program that draws a layer outputs white for the overdraw
-/// inspector, which counts its draws.
-#[test]
-fn every_layer_program_shows_the_overdraw_inspector() {
-    let not_layers = ["collision-box", "collision-circle"];
-    for (program, source) in sources() {
-        if !not_layers.contains(&program.name) {
-            assert!(full_source(program, source).contains("OVERDRAW_INSPECTOR"), "{}", program.name);
-        }
-    }
-}
-
 #[test]
 fn every_shader_source_compiles() {
     let device = device();

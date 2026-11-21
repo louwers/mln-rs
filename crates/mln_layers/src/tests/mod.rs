@@ -12,6 +12,8 @@ mod format_section_override_test;
 mod globe_mesh_test;
 // The subdivision of polygons for the globe.
 mod polygon_subdivision_test;
+// The programs' declarations and sources.
+mod programs_test;
 // Ports test/layout/sort_key.test.cpp.
 mod sort_key_test;
 // The fill-extrusion parts of the subdivision tests.

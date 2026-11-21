@@ -12,8 +12,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::shaders::bindings::{
-    FIRST_PROGRAM_BUFFER_ID, FIRST_UNIFORM_ID, FIRST_VERTEX_BUFFER_ID, FRAGMENT_STORAGE_ID, MAX_ATTRIBUTES,
-    MAX_TEXTURES, PROJECTION_BUFFER_ID, VERTEX_STORAGE_ID, VIEW_BUFFER_ID,
+    FIRST_PROGRAM_BUFFER_ID, FIRST_UNIFORM_ID, FIRST_VERTEX_BUFFER_ID, FRAGMENT_STORAGE_ID, MAX_TEXTURES,
+    PROJECTION_BUFFER_ID, VERTEX_STORAGE_ID, VIEW_BUFFER_ID,
 };
 use mln_gfx::shaders::program::{
     Attribute, Buffer as ProgramBuffer, BufferKind, PROJECTION_BUFFER, Program, VIEW_BUFFER,
@@ -56,22 +56,6 @@ fn every_program_declares_the_properties_its_glsl_reads_from_uniforms() {
         }
         let declared: BTreeSet<String> = program.properties.iter().map(|property| property.name.to_owned()).collect();
         assert_eq!(tested, declared, "{}", program.name);
-    }
-}
-
-/// Every program that draws a layer outputs white for the overdraw
-/// inspector, which counts its draws.
-#[test]
-fn every_layer_program_shows_the_overdraw_inspector() {
-    let not_layers = ["collision-box", "collision-circle"];
-    for (program, source) in programs() {
-        if !not_layers.contains(&program.name) {
-            assert!(
-                [source.prelude, source.vertex, source.fragment].iter().any(|text| text.contains("OVERDRAW_INSPECTOR")),
-                "{}",
-                program.name
-            );
-        }
     }
 }
 
@@ -434,22 +418,6 @@ fn vertex_inputs_are_the_programs_attributes() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
-// A fill extrusion wall reads its next outline vertex from the buffer of its
-// outline vertex, a vertex further on: the last two instance attributes, the
-// next outline vertex's, have the formats of the first two.
-#[test]
-fn a_walls_next_outline_vertex_has_the_formats_of_its_outline_vertex() {
-    let instanced: Vec<_> = programs()
-        .into_iter()
-        .filter(|(program, _)| program.name.starts_with("fill-extrusion") && !program.instance_attributes.is_empty())
-        .collect();
-    assert_eq!(instanced.len(), 2);
-    for (program, _) in instanced {
-        let formats: Vec<_> = program.instance_attributes.iter().map(|attribute| attribute.format).collect();
-        assert_eq!(formats[..2], formats[formats.len() - 2..], "{}", program.name);
-    }
-}
-
 // A fragment stage reads each of its inputs where its vertex stage,
 // compiled with the same defines, writes it, flat where the other is, and
 // the fragment stage writes one color.
@@ -509,26 +477,13 @@ fn bindings_follow_from_the_packed_ids() {
     assert_eq!(image_sampler_binding(0), 3);
 }
 
-// No program has more attributes and textures than a shader can have. Only
-// the fill extrusion walls, the instanced fill outlines and the tile debug
-// overlay's segments have instance attributes.
+// Every program checks, and has no more textures than the image set has
+// bindings for.
 #[test]
 fn the_programs_fit_a_shader() {
+    const { assert!(MAX_TEXTURES <= IMAGE_TEXTURE_COUNT) };
     for (program, _) in programs() {
-        assert!(locations(program).count() <= MAX_ATTRIBUTES, "{}", program.name);
-        assert!(program.textures.len() <= MAX_TEXTURES.min(IMAGE_TEXTURE_COUNT), "{}", program.name);
-        let instanced = matches!(
-            program.name,
-            "fill-extrusion-instanced"
-                | "fill-extrusion-pattern-instanced"
-                | "fill-outline-instanced"
-                | "fill-outline-pattern-instanced"
-        );
-        assert_eq!(!program.instance_attributes.is_empty(), instanced, "{}", program.name);
-        let ids: BTreeSet<usize> = program.attributes.iter().map(|attr| attr.id).collect();
-        assert_eq!(ids.len(), program.attributes.len(), "{}: attribute ids repeat", program.name);
-        let ids: BTreeSet<usize> = program.instance_attributes.iter().map(|attr| attr.id).collect();
-        assert_eq!(ids.len(), program.instance_attributes.len(), "{}: instance attribute ids repeat", program.name);
+        program.check().unwrap_or_else(|error| panic!("{error}"));
     }
 }
 

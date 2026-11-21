@@ -52,22 +52,6 @@ fn every_program_declares_the_properties_its_wgsl_reads_from_uniforms() {
     }
 }
 
-/// Every program that draws a layer outputs white for the overdraw
-/// inspector, which counts its draws.
-#[test]
-fn every_layer_program_shows_the_overdraw_inspector() {
-    let not_layers = ["collision-box", "collision-circle"];
-    for (program, wgsl) in programs() {
-        if !not_layers.contains(&program.name) {
-            assert!(
-                [wgsl.prelude, wgsl.vertex, wgsl.fragment].into_iter().any(|text| text.contains("OVERDRAW_INSPECTOR")),
-                "{}",
-                program.name
-            );
-        }
-    }
-}
-
 #[test]
 fn every_program_compiles() {
     let device = Device::new(None).expect("device");
