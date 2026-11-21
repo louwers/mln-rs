@@ -248,7 +248,7 @@ impl Transform {
         } else {
             *input_camera
         };
-        self.start_transition(&fields, animation, frame, || Box::new(|t| t), duration, false);
+        self.start_transition(&fields, animation, frame, Box::new(|t| t), duration, false);
     }
 
     /// This method implements an “optimal path” animation, as detailed in:
@@ -518,17 +518,15 @@ impl Transform {
 
         // The altitude follows the center along the path, or the time where
         // the center stays.
-        let along = move || -> AlongFn {
-            Box::new(move |k: f64| {
-                if k == 1.0 {
-                    1.0
-                } else if is_close {
-                    k
-                } else {
-                    u(k * total_s)
-                }
-            })
-        };
+        let along: AlongFn = Box::new(move |k: f64| {
+            if k == 1.0 {
+                1.0
+            } else if is_close {
+                k
+            } else {
+                u(k * total_s)
+            }
+        });
 
         let frame: FrameFn = Box::new(move |_: &TransformState, k: f64| {
             // s: The distance traveled along the flight path, measured in

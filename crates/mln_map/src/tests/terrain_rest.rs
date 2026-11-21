@@ -155,12 +155,13 @@ fn step(phase: GesturePhase, offset: Option<(f64, f64)>, bearing: Option<f64>) -
 }
 
 /// Fingers that go down again while a command eases the center it took from
-/// a gesture's glide own the altitude from then on: the command no longer
-/// eases it, and the gesture holds it where it was. Whether they lift
-/// before the command ends or after, the motion ends on the ground with the
-/// eye where its last frame put it, and the camera at rest moves no more.
+/// a gesture's glide hold the altitude where it was while they are down.
+/// Lifted before the command ends, the command eases the altitude again and
+/// ends at its center, on the ground; lifted after, the motion ends on the
+/// ground with the eye where its last frame put it. Either way the frame
+/// that brings the camera to rest doesn't move it, and it moves no more.
 #[test]
-fn a_second_gesture_during_a_command_holds_the_altitude_until_the_motion_ends() {
+fn a_second_gesture_during_a_command_holds_the_altitude_while_its_fingers_are_down() {
     let destination = LatLng::new(20.0, 10.02).unwrap();
     // Ground at sea level under the start that rises half a meter for each
     // meter east.
@@ -191,7 +192,7 @@ fn a_second_gesture_during_a_command_holds_the_altitude_until_the_motion_ends() 
             if elapsed == down {
                 map.apply_camera_delta(&step(GesturePhase::Update, None, Some(10.0))).unwrap();
                 held = Some(map.transform_state().view().center_altitude());
-            } else if let Some(held) = held {
+            } else if let Some(held) = held.filter(|_| elapsed <= lifted) {
                 assert_eq!(held, altitude, "lifted at {lifted:?}: the altitude at {elapsed:?}");
             }
             if elapsed == lifted {
@@ -208,6 +209,9 @@ fn a_second_gesture_during_a_command_holds_the_altitude_until_the_motion_ends() 
         assert!(!map.snapshot().transition_in_progress);
         if lifted < Duration::from_secs(1) {
             before.assert_kept_by(map.transform_state().view(), &*ground, 0.05, 0.05, "the command's end");
+            let center = map.transform_state().view().center(WrapMode::Wrapped);
+            assert!((center.longitude() - destination.longitude()).abs() < 1e-9, "{center:?}");
+            assert!((center.latitude() - destination.latitude()).abs() < 1e-9, "{center:?}");
         } else {
             assert_eq!(held, map.transform_state().view().center_altitude(), "the fingers are down");
             map.set_frame_time(Some(started + lifted));
@@ -625,7 +629,7 @@ impl Elevation for Escarpment {
 
 /// The largest move, in pixels, from `before` to `after` of the ground
 /// drawn under a grid of points across `before`.
-fn picture_moved(before: &View, after: &View, ground: &dyn Elevation) -> f64 {
+pub(super) fn picture_moved(before: &View, after: &View, ground: &dyn Elevation) -> f64 {
     let size = before.size();
     let mut moved = 0.0f64;
     for x in (0..=size.width).step_by(32) {

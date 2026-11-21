@@ -382,15 +382,19 @@ fn the_first_ground_clears_the_near_plane_it_draws_with() {
 }
 
 /// A clamp turned off mid-ease leaves the altitude where it is, and one
-/// turned on again leaves it there too: the ease no longer eases it, and
-/// the camera at rest stands on the ground.
+/// turned on again leaves it there at first, then heads for the ground
+/// again, no faster than the ease set out: the ease ends at the camera it
+/// asked for, on the ground.
 #[test]
-fn a_clamp_turned_on_again_mid_ease_keeps_the_altitude() {
+fn a_clamp_turned_on_again_mid_ease_heads_for_the_ground_from_where_it_is() {
     let run_loop = Queue::<()>::new();
     let ground = slope();
     let (mut map, clock) = map_over(Some(&ground), &run_loop);
     command(&mut map, CameraUpdateMode::Ease, asked());
     let mut last = self::ground(&map).0;
+    // The largest climb in a frame, before the clamp turns off and after it
+    // turns on again.
+    let (mut before, mut after) = (0.0f64, 0.0f64);
     frames(&mut map, clock, DURATION, |map, elapsed| {
         let altitude = self::ground(map).0;
         if elapsed == Duration::from_millis(304) {
@@ -399,14 +403,23 @@ fn a_clamp_turned_on_again_mid_ease_keeps_the_altitude() {
         } else if elapsed == Duration::from_millis(608) {
             assert_eq!(last, altitude, "unclamped, the altitude stays");
             map.set_center_clamped_to_ground(true);
-            assert_eq!(last, self::ground(map).0, "clamped again mid-ease, the altitude stays");
-        } else if elapsed > Duration::from_millis(304) && elapsed < DURATION {
+            assert_eq!(last, self::ground(map).0, "clamped again, the altitude stays at first");
+        } else if elapsed > Duration::from_millis(304) && elapsed < Duration::from_millis(608) {
             assert_eq!(last, altitude, "{elapsed:?}");
+        } else if elapsed < Duration::from_millis(304) {
+            before = before.max((altitude - last).abs());
+        } else {
+            after = after.max((altitude - last).abs());
         }
         last = self::ground(map).0;
     });
-    let center = map.transform_state().view().center(WrapMode::Wrapped);
-    assert_eq!(ground.at(center).unwrap(), self::ground(&map).0, "at rest on the ground");
+    assert!(after < before, "{after} m in one frame once clamped again, {before} m at the start");
+    let camera = map.transform_state().camera_options(None);
+    let center = camera.center.unwrap();
+    assert_near(destination().latitude(), center.latitude(), 1e-9, "latitude");
+    assert_near(destination().longitude(), center.longitude(), 1e-9, "longitude");
+    assert_eq!(Some(13.0), camera.zoom);
+    assert_eq!(ground.at(center.wrapped()).unwrap(), self::ground(&map).0, "at rest on the ground");
 }
 
 /// Terrain that goes mid-way through an anchored ease leaves the flat map's

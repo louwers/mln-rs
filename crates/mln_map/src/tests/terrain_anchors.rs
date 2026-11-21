@@ -398,7 +398,8 @@ fn a_tilt_that_carries_its_anchor_into_the_sky_turns_around_the_center() {
     assert_eq!(tilt(false), tilt(true), "a gesture's tilt");
 
     // A command's frames hold the anchor until it reaches the sky, and then
-    // leave the center where they held it.
+    // leave the center where they held it. Its end, a pitch's alone by then,
+    // comes to rest with the eye where it is.
     let (mut map, clock) = map_over(Some(&slope()), &run_loop);
     map.jump_to(&CameraOptions { pitch: Some(60.0), ..Default::default() });
     let anchor = ScreenCoordinate::new(330.0, horizon(&map) + 150.0);
@@ -414,9 +415,16 @@ fn a_tilt_that_carries_its_anchor_into_the_sky_turns_around_the_center() {
     });
     let mut center = map.transform_state().view().center(WrapMode::Unwrapped);
     let (mut held, mut skyward) = (0, 0);
+    let mut eye = map.transform_state().view().eye_position();
     frames(&mut map, clock, Duration::from_secs(1), |map, elapsed| {
         let now = map.transform_state().view().center(WrapMode::Unwrapped);
-        if anchor.y < horizon(map) {
+        if elapsed == Duration::from_secs(1) {
+            let moved = map.transform_state().view().eye_position() - eye;
+            assert!(
+                DVec2::new(moved.x, moved.y).length() / PIXEL < 0.1 && moved.z.abs() < 1.0,
+                "the end moved the eye"
+            );
+        } else if anchor.y < horizon(map) {
             let moved = (world(&now) - world(&center)).length() / PIXEL;
             assert!(moved < 1e-6, "{elapsed:?}: the anchor is in the sky, and the center moved {moved} px");
             skyward += 1;
@@ -424,6 +432,7 @@ fn a_tilt_that_carries_its_anchor_into_the_sky_turns_around_the_center() {
             held += 1;
         }
         center = now;
+        eye = map.transform_state().view().eye_position();
     });
     assert!(held > 5 && skyward > 5, "{held} frames held the anchor, and {skyward} didn't");
 }

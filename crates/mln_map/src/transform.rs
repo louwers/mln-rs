@@ -196,6 +196,10 @@ pub struct Transform {
     globe_drag_hold: Option<GlobeDragHold>,
     /// The terrain the camera stands on ([`Self::set_terrain`]).
     terrain: Option<TerrainGround>,
+    /// The time of the last frame that composed the commands' cameras,
+    /// from which the altitude over terrain heads on
+    /// ([`Self::ease_altitude`]).
+    last_frame: Option<Instant>,
 }
 
 /// The location a drag on the globe holds under the cursor, from the step
@@ -234,6 +238,7 @@ impl Transform {
             globe_free_bearing: false,
             globe_drag_hold: None,
             terrain: None,
+            last_frame: None,
         }
     }
 
@@ -427,7 +432,7 @@ impl Transform {
                 bearing: Some(end.bearing),
                 ..Default::default()
             };
-            self.start_transition(&fields, animation, frame, || Box::new(|t| t), duration, false);
+            self.start_transition(&fields, animation, frame, Box::new(|t| t), duration, false);
             return Ok(());
         }
 

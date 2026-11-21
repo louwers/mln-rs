@@ -15,7 +15,7 @@ use mln_util::projection::Projection;
 use mln_util::time::Instant;
 
 use super::momentum::MomentumState;
-use super::terrain::{EasedAltitude, sees_plane};
+use super::terrain::sees_plane;
 use super::{
     ALTITUDE, BEARING, CENTER, CameraCommandId, CommandEnd, FOV, PADDING, PITCH, ROLL, Transform, TransformEvent, ZOOM,
     camera_fields, max_pitch_for_padding,
@@ -28,8 +28,8 @@ use crate::map_event::{CameraChange, CameraChangeMode, CameraChangeSource};
 pub(super) type FrameFn = Box<dyn Fn(&TransformState, f64) -> CameraOptions>;
 
 /// A command's share of the way to its end center at an eased progress,
-/// which its altitude over terrain follows ([`EasedAltitude`]): 1 at its
-/// end.
+/// which the altitude over terrain follows while the command times it
+/// ([`Transform::ease_altitude`]): 1 at its end.
 pub(super) type AlongFn = Box<dyn Fn(f64) -> f64>;
 
 /// One camera command.
@@ -48,6 +48,7 @@ pub(super) struct Transition {
     pub(super) duration: Duration,
     animation: AnimationOptions,
     frame: FrameFn,
+    along: AlongFn,
     anchor: Option<ScreenCoordinate>,
     anchor_lat_lng: LatLng,
     /// The height in meters of the plane the anchor holds its location on
@@ -67,19 +68,11 @@ pub(super) struct Transition {
     /// For a gesture's momentum, the gesture's serial: its end ends the
     /// gesture, unless another one started since.
     pub(super) gesture: Option<u64>,
-    /// For a command over terrain that clamps the center, the altitude it
-    /// eases toward the ground it ends on, while it owns `ALTITUDE`.
-    eased_altitude: Option<EasedAltitude>,
-    /// Whether it started easing its altitude: one that something took that
-    /// from on the way, such as fingers going down, or the clamp turned off,
-    /// held an altitude that the ground at its end needn't be near, so it
-    /// comes to rest as a cancelled command does.
-    eased: bool,
 }
 
 impl Transition {
     /// A command without coupled fields, anchor, momentum, end to report or
-    /// gesture.
+    /// gesture, whose share of the way is its eased progress.
     pub(super) fn new(
         fields: u16,
         moving_fields: u16,
@@ -97,6 +90,7 @@ impl Transition {
             duration,
             animation: *animation,
             frame,
+            along: Box::new(|k| k),
             anchor: None,
             anchor_lat_lng: LatLng::default(),
             anchor_height: 0.0,
@@ -105,18 +99,22 @@ impl Transition {
             source,
             command: None,
             gesture: None,
-            eased_altitude: None,
-            eased: false,
         }
     }
 
+    /// Whether the command is one of the center or the zoom, which over
+    /// terrain that clamps the center eases the altitude toward the ground
+    /// it ends on ([`Transform::ease_altitude`]): a command that still owns
+    /// its center or its zoom, not a momentum or a gesture's own move.
+    pub(super) fn eases_altitude(&self) -> bool {
+        self.source == CameraChangeSource::Command && self.momentum.is_none() && self.fields & (CENTER | ZOOM) != 0
+    }
+
     /// Whether the command keeps the center and the zoom it ends at, as a
-    /// command that asked for either does: it isn't a momentum, nothing
-    /// stopped it, it still owns its center or its zoom, and nothing took
-    /// the altitude it eased.
+    /// command that asked for either does: one that eases the altitude, and
+    /// that nothing stopped.
     fn keeps_center_and_zoom(&self) -> bool {
-        let altitude_kept = !self.eased || self.eased_altitude.is_some();
-        self.momentum.is_none() && self.stopped.is_none() && altitude_kept && self.fields & (CENTER | ZOOM) != 0
+        self.eases_altitude() && self.stopped.is_none()
     }
 
     /// Where the command's center is expected to end, as the frame whose
@@ -124,7 +122,7 @@ impl Transition {
     /// for an anchored command, where its anchor puts the center on the
     /// ground in its camera at the end ([`anchored_end`]); for one that owns
     /// the center, the center it heads for; and for any other, the frame's.
-    fn expected_end(
+    pub(super) fn expected_end(
         &self,
         state: &TransformState,
         frame: &CameraOptions,
@@ -142,19 +140,6 @@ impl Transition {
             None => frame.center,
         };
         center.unwrap_or_else(|| state.view().center(WrapMode::Unwrapped)).wrapped()
-    }
-
-    /// Whether the command eases the altitude toward the ground it ends on.
-    pub(super) fn eases_altitude(&self) -> bool {
-        self.eased_altitude.is_some()
-    }
-
-    /// Stops easing the altitude toward the ground at the end, which leaves it
-    /// where it is.
-    pub(super) fn stop_easing_altitude(&mut self) {
-        if self.eased_altitude.take().is_some() {
-            self.fields &= !ALTITUDE;
-        }
     }
 
     /// Holds the anchor's location at sea level, the location under it in
@@ -205,6 +190,25 @@ impl Transition {
             }
             _ => 1.0,
         }
+    }
+
+    /// The progress at `now` through the command's easing, which its camera
+    /// is at: 1 at its end.
+    fn eased_progress(&self, now: Option<Instant>) -> f64 {
+        let t = self.progress(now);
+        let ease = self.animation.easing.unwrap_or(DEFAULT_TRANSITION_EASE);
+        if t == 1.0 { 1.0 } else { ease.solve(t, 0.001) }
+    }
+
+    /// The command's share of the way to its end at `now` ([`AlongFn`]): 0
+    /// before it starts, 1 from its end on.
+    pub(super) fn share(&self, now: Option<Instant>) -> f64 {
+        (self.along)(self.eased_progress(now))
+    }
+
+    /// The time left of the command at `now`: none without a clock.
+    pub(super) fn remaining(&self, now: Option<Instant>) -> Duration {
+        self.duration.saturating_sub(self.elapsed(now))
     }
 
     /// The time since the command started, at `now`; zero before it, and
@@ -343,24 +347,15 @@ impl Transform {
     /// group stops the whole group, and a command left with no fields
     /// finishes.
     ///
-    /// Outside a gesture's own moves, a command of the center or the zoom
-    /// over terrain that clamps the center eases the altitude toward the
-    /// ground under the center it is expected to end on
-    /// ([`Transition::expected_end`]), along the share of the way that
-    /// `along` makes, which is made only then, in place of the altitude it
-    /// was given ([`EasedAltitude`]). It then owns `ALTITUDE` too, until it
-    /// gives up its center, but leaves the altitude to a running command
-    /// that eases it and ends later. One that takes the center from a
-    /// gesture's momentum takes the altitude from the gesture's hold while it
-    /// eases it, and the gesture holds it from where the command leaves it.
-    /// A command of the angles alone holds the altitude, and comes to rest
-    /// with the eye where it leaves it ([`Transform::come_to_rest`]).
+    /// Over terrain that clamps the center, the altitude follows `along`,
+    /// the command's share of the way, while the command times its ease
+    /// toward the ground ([`Transform::ease_altitude`]).
     pub(super) fn start_transition(
         &mut self,
         camera: &CameraOptions,
         animation: &AnimationOptions,
         frame: FrameFn,
-        along: impl FnOnce() -> AlongFn,
+        along: AlongFn,
         duration: Duration,
         flight: bool,
     ) {
@@ -401,35 +396,15 @@ impl Transform {
 
         let start = self.now();
         let duration = if fields != 0 { duration } else { Duration::ZERO };
-        let mut transition = Transition {
+        let transition = Transition {
             coupled_fields,
+            along,
             anchor,
             anchor_lat_lng,
             anchor_height,
             command: self.reporting(),
             ..Transition::new(fields, moving_fields, start, duration, animation, frame, self.source)
         };
-
-        // A gesture's own moves hold the altitude; a command of the center or
-        // the zoom eases it, also one that takes the center from a gesture's
-        // momentum, unless a command that eases it ends later.
-        let ends = start + duration;
-        let last = self.transitions.iter().filter(|t| t.eases_altitude()).all(|t| t.start + t.duration <= ends);
-        if !self.gesture.active && self.clamped() && fields & (CENTER | ZOOM) != 0 && last {
-            let from = self.view().center_altitude();
-            let ground = self.ground().map(|ground| &**ground);
-            let end = transition.expected_end(&self.state, &self.state.camera_options(None), from, ground);
-            let given = camera.center_altitude.unwrap_or(from);
-            transition.eased_altitude = Some(EasedAltitude::new(from, given, self.ground_at(end), along()));
-            transition.eased = true;
-            transition.fields |= ALTITUDE;
-            fields |= ALTITUDE;
-            // The gesture holds the altitude again from where the command
-            // leaves it.
-            if self.gesture_in_progress {
-                self.gesture.hold = None;
-            }
-        }
         let mode = transition.mode();
 
         let finished = self.release_fields(fields);
@@ -457,45 +432,17 @@ impl Transform {
         let current = self.state.camera_options(None);
         let mut camera = current;
 
-        // The ground that clamps the center, if any: `Some(None)` before the
-        // renderer drew any.
-        let clamping = self.terrain.as_ref().filter(|terrain| terrain.clamped).map(|terrain| &terrain.elevation);
-        let (first, active) = match only {
-            Some(index) => (index, &mut self.transitions[index..=index]),
-            None => (0, &mut self.transitions[..]),
+        let active = match only {
+            Some(index) => &self.transitions[index..=index],
+            None => &self.transitions[..],
         };
-        // The commands that ease their altitude over terrain that clamps the
-        // center (see `Transform::set_terrain`), at their eased progress.
-        let mut easing = Vec::new();
-        for (index, transition) in (first..).zip(active) {
-            if transition.momentum.is_some() {
-                continue;
-            }
-            let t = transition.progress(now);
-            let ease = transition.animation.easing.unwrap_or(DEFAULT_TRANSITION_EASE);
-            let k = if t == 1.0 { 1.0 } else { ease.solve(t, 0.001) };
-            if transition.eased_altitude.is_some() && clamping.is_some() {
-                easing.push((index, k));
-            }
+        for transition in active.iter().filter(|transition| transition.momentum.is_none()) {
+            let k = transition.eased_progress(now);
             compose(&mut camera, &(transition.frame)(&self.state, k), transition.fields);
         }
-        // Each field has one owner, so the eased altitudes come once the
-        // frame has every other field. Each frame estimates the end again in
-        // its own camera, and turns the line toward the ground there.
-        let ground = clamping.and_then(Option::as_deref);
-        for &(index, k) in &easing {
-            let transition = &mut self.transitions[index];
-            let Some(eased) = transition.eased_altitude.as_ref() else { continue };
-            let altitude = eased.at(k);
-            camera.center_altitude = Some(altitude);
-            if k < 1.0
-                && let Some(ground) = ground
-                && let Some(at_end) = ground.at(transition.expected_end(&self.state, &camera, altitude, Some(ground)))
-                && let Some(eased) = transition.eased_altitude.as_mut()
-            {
-                eased.head_for(at_end, k);
-            }
-        }
+        // Once the frame has every other field, as the altitude's end is
+        // estimated in the frame's camera.
+        self.ease_altitude(&mut camera, now);
 
         // An active anchor also applies to immediate changes of other
         // properties.
@@ -554,7 +501,7 @@ impl Transform {
     /// ([`sees_plane`]), such as one whose pitch carries the anchor above the
     /// horizon, moves around the view's center instead: the center stays
     /// where it was, in `before`, and the command gives up its anchor and
-    /// the center, and eases its altitude toward the ground there.
+    /// the center.
     fn hold_anchor(
         &mut self,
         location: &LatLng,
@@ -646,15 +593,7 @@ impl Transform {
             if coupled & replaced != 0 {
                 replaced |= coupled;
             }
-            // An altitude eased onto the ground at the end goes with the
-            // center that ends there.
-            if active.eased_altitude.is_some() && replaced & CENTER != 0 {
-                replaced |= ALTITUDE;
-            }
             active.fields &= !replaced;
-            if active.fields & ALTITUDE == 0 {
-                active.eased_altitude = None;
-            }
             if let Some(momentum) = &mut active.momentum {
                 active.fields = momentum.retain(active.fields);
             }
