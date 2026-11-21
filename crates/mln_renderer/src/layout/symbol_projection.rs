@@ -202,6 +202,7 @@ impl LabelHeight<'_> {
     /// The height in meters above sea level of the point `tile_point`, in
     /// tile units.
     #[must_use]
+    #[inline]
     pub(crate) fn at(&self, tile_point: Vec2) -> f64 {
         match self {
             LabelHeight::Fixed(height) => *height,

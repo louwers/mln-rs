@@ -212,7 +212,7 @@ impl<'a> TileGround<'a> {
     /// `None` where no draw of the tile draws the feature.
     pub(crate) fn part(&self, anchor: Vec2) -> Option<PartGround<'_>> {
         let read = self.reads().iter().find(|read| read.holds(anchor))?;
-        Some(PartGround { read, decode: self.decode })
+        Some(PartGround { read, decode: &self.decode })
     }
 }
 
@@ -220,7 +220,7 @@ impl<'a> TileGround<'a> {
 #[derive(Clone, Copy)]
 pub(crate) struct PartGround<'a> {
     read: &'a GroundRead<'a>,
-    decode: (DemUnpack, f32),
+    decode: &'a (DemUnpack, f32),
 }
 
 impl PartGround<'_> {
@@ -233,7 +233,7 @@ impl PartGround<'_> {
             return 0.0;
         };
         let extent = EXTENT as f32;
-        let (unpack, exaggeration) = self.decode;
+        let (unpack, exaggeration) = *self.decode;
         dem_height(&dem.image, dem.dim, self.read.coords, [at.x / extent, at.y / extent], unpack, exaggeration)
     }
 }
