@@ -2785,6 +2785,7 @@ name = "mln-rs-gestures"
 version = "0.0.13"
 dependencies = [
  "mln-rs-map",
+ "mln-rs-map-types",
  "mln-rs-style-types",
  "mln-rs-util",
  "parking_lot",
