@@ -352,6 +352,7 @@ impl MetalGpu {
             // The pulled quads draw in segments of their index buffer, past
             // the first at a base vertex, which older GPUs don't take.
             binds_vertex_buffers: modern,
+            indexes_storage_buffers: true,
         };
         MetalGpu {
             device: device.clone(),

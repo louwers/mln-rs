@@ -780,6 +780,7 @@ mod tests {
                 cpu_rasterizer: false,
                 max_line_width: 1.0,
                 binds_vertex_buffers: false,
+                indexes_storage_buffers: false,
             };
             &CAPS
         }

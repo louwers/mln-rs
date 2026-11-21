@@ -215,6 +215,7 @@ impl WebGpu {
             cpu_rasterizer: device.adapter_info().device_type == wgpu::DeviceType::Cpu,
             max_line_width: 1.0,
             binds_vertex_buffers: true,
+            indexes_storage_buffers: true,
         };
         WebGpu {
             index_table: IndexTable::new(device.device()),

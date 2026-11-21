@@ -94,6 +94,11 @@ pub struct Caps {
     /// which shaders read as storage buffers, so that a vertex shader can
     /// read any vertex of a buffer, such as its neighbors, by index.
     pub binds_vertex_buffers: bool,
+    /// Whether a shader reads any element of a storage buffer, by an index
+    /// of its own; without, as on GL ES, it reads only the element at its
+    /// draw's [`global_index`](Draw::global_index)
+    /// ([`BufferKind::Storage`](crate::shaders::program::BufferKind::Storage)).
+    pub indexes_storage_buffers: bool,
 }
 
 /// How a buffer is bound.

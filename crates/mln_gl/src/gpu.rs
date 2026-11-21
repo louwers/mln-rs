@@ -504,6 +504,7 @@ impl GlGpu {
                 cpu_rasterizer: renderer.contains("llvmpipe") || renderer.contains("softpipe"),
                 max_line_width,
                 binds_vertex_buffers: false,
+                indexes_storage_buffers: false,
             };
             (caps, anisotropic, line_widths[0].min(1.0)..=max_line_width, renderer)
         };

@@ -597,6 +597,7 @@ impl VulkanGpu {
             max_line_width: line_widths.map_or(1.0, |(_, max)| max),
             binds_vertex_buffers: limits.max_per_stage_descriptor_storage_buffers as usize
                 >= VERTEX_STAGE_STORAGE_BUFFERS,
+            indexes_storage_buffers: true,
         };
         let pool = |type_: DescriptorSetType, textures: usize| {
             let shape = buffer_shape(type_, caps.binds_vertex_buffers);

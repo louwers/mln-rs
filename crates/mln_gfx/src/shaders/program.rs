@@ -88,10 +88,14 @@ pub struct Buffer {
 pub enum BufferKind {
     /// One block.
     Uniform(&'static Block),
-    /// An array of elements `stride` bytes apart, one for each draw of a
-    /// layer, which a draw reads at its index, each read as `block` padded
-    /// to the stride. GLSL ES reads its element as a uniform block bound at
-    /// the element's offset.
+    /// An array of elements `stride` bytes apart, each read as `block`
+    /// padded to the stride, which a shader indexes: by its draw's
+    /// [`global_index`](crate::gpu::Draw::global_index), as for an element
+    /// per draw of a layer, or by an index of its own, as for a value per
+    /// feature. GLSL ES has no storage buffers: a draw binds its element as
+    /// a uniform block, so a shader reads only that one where
+    /// [`Caps::indexes_storage_buffers`](crate::gpu::Caps::indexes_storage_buffers)
+    /// is false.
     Storage { block: &'static Block, stride: usize },
     /// A vertex buffer that the vertex stage reads as a storage buffer, of
     /// vertices `stride` bytes apart, where the backend binds them

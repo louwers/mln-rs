@@ -438,6 +438,7 @@ impl D3d12Gpu {
             // read: a root SRV reads it once the common state it rests in
             // is promoted, as the input assembler does.
             binds_vertex_buffers: true,
+            indexes_storage_buffers: true,
         };
         Ok(D3d12Gpu {
             compiler,
