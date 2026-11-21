@@ -75,6 +75,8 @@ type ErrorPtr = Option<Box<ResourceError>>;
 /// Called when an asynchronous step finishes, with its error if it failed.
 type AsyncCallback = Arc<dyn Fn(ErrorPtr) + Send + Sync>;
 type AsyncTileCallback = Arc<dyn Fn((u64, u32), ErrorPtr) + Send + Sync>;
+/// Called with a directory of the archive, or the error that kept it.
+type DirectoryCallback = Arc<dyn Fn(Result<Arc<Directory>, Box<ResourceError>>) + Send + Sync>;
 /// A request's sub-request in flight.
 type Task = Arc<Mutex<Option<Request>>>;
 
@@ -88,8 +90,46 @@ struct State {
     file_source: Arc<dyn FileSource>,
     header_cache: Mutex<VecMap<String, Arc<Header>>>,
     metadata_cache: Mutex<VecMap<String, String>>,
-    directory_cache: Mutex<VecMap<String, VecMap<String, Directory>>>,
-    directory_cache_control: Mutex<VecMap<String, Vec<String>>>,
+    /// Each archive's directories, by its URL.
+    directory_cache: Mutex<VecMap<String, Directories>>,
+}
+
+/// The directories of an archive that the cache holds, by their place in
+/// it, and the order they go in when it's full: least recently used first,
+/// each once.
+#[derive(Default)]
+struct Directories {
+    by_key: VecMap<String, Arc<Directory>>,
+    order: Vec<String>,
+}
+
+impl Directories {
+    /// Directory `key`, which becomes the most recently used.
+    fn get(&mut self, key: &str) -> Option<Arc<Directory>> {
+        let directory = Arc::clone(self.by_key.get(key)?);
+        if let Some(position) = self.order.iter().position(|held| held == key) {
+            let key = self.order.remove(position);
+            self.order.push(key);
+        }
+        Some(directory)
+    }
+
+    /// Stores `directory` as `key`, unless one is there already, and
+    /// returns the one held, the most recently used: the least recently
+    /// used goes once the cache is full.
+    fn store(&mut self, key: String, directory: Directory) -> Arc<Directory> {
+        if let Some(held) = self.get(&key) {
+            return held;
+        }
+        let directory = Arc::new(directory);
+        self.by_key.insert(key.clone(), Arc::clone(&directory));
+        self.order.push(key);
+        if self.order.len() > MAX_DIRECTORY_CACHE_ENTRIES {
+            let oldest = self.order.remove(0);
+            self.by_key.remove(&oldest);
+        }
+        directory
+    }
 }
 
 /// Answers `r` with `response`: for a cache-only request, an error at any
@@ -308,13 +348,15 @@ impl State {
         );
     }
 
+    /// Stores the directory of the archive at `url` that `directory_data`
+    /// holds, and returns the one the cache holds there.
     fn store_directory(
         &self,
         url: &str,
         directory_offset: u64,
         directory_length: u64,
         directory_data: Vec<u8>,
-    ) -> Result<(), String> {
+    ) -> Result<Arc<Directory>, String> {
         let directory_cache_key = format!("{url}|{directory_offset}|{directory_length}");
         // Unlike C++, the crate refuses a directory with an entry of length 0
         // (C++ reads it, and the entry finds no tile), a first entry whose
@@ -323,19 +365,7 @@ impl State {
         // refuses. Its errors have the crate's texts.
         let directory = Directory::try_from(Bytes::from(directory_data)).map_err(|e| e.to_string())?;
 
-        let mut cache = self.directory_cache.lock();
-        let mut control = self.directory_cache_control.lock();
-        let cache = cache.entry(url.to_owned()).or_default();
-        let control = control.entry(url.to_owned()).or_default();
-
-        cache.entry(directory_cache_key.clone()).or_insert(directory);
-        control.push(directory_cache_key);
-
-        if control.len() > MAX_DIRECTORY_CACHE_ENTRIES {
-            cache.remove(&control[0]);
-            control.remove(0);
-        }
-        Ok(())
+        Ok(self.directory_cache.lock().entry(url.to_owned()).or_default().store(directory_cache_key, directory))
     }
 
     fn get_directory(
@@ -345,23 +375,13 @@ impl State {
         directory_offset: u64,
         directory_length: u32,
         cache_only: bool,
-        callback: AsyncCallback,
+        callback: DirectoryCallback,
     ) {
         let directory_cache_key = format!("{url}|{directory_offset}|{directory_length}");
 
-        let cached = self.directory_cache.lock().get(url).is_some_and(|cache| cache.contains_key(&directory_cache_key));
-        if cached {
-            if let Some(control) = self.directory_cache_control.lock().get_mut(url)
-                && control.last() != Some(&directory_cache_key)
-            {
-                control.push(directory_cache_key.clone());
-
-                if let Some(position) = control.iter().position(|key| *key == directory_cache_key) {
-                    control.remove(position);
-                }
-            }
-
-            callback(None);
+        let cached = self.directory_cache.lock().get_mut(url).and_then(|cache| cache.get(&directory_cache_key));
+        if let Some(directory) = cached {
+            callback(Ok(directory));
             return;
         }
 
@@ -374,8 +394,8 @@ impl State {
             cache_only,
             Arc::new(move |error_ptr: ErrorPtr| {
                 let Some(this) = this.upgrade() else { return };
-                if error_ptr.is_some() {
-                    callback(error_ptr);
+                if let Some(e) = error_ptr {
+                    callback(Err(e));
                     return;
                 }
 
@@ -392,7 +412,7 @@ impl State {
                 this.request(&task, &resource, move |response: Response| {
                     let Some(this2) = this2.upgrade() else { return };
                     if let Some(e) = &response.error {
-                        callback(Some(Box::new(error(
+                        callback(Err(Box::new(error(
                             e.reason,
                             format!("Error fetching PMTiles directory: {}", e.message),
                         ))));
@@ -405,11 +425,11 @@ impl State {
                     }
 
                     let Some(data) = &response.data else {
-                        callback(Some(Box::new(error(Reason::Other, "PMTiles directory response has no data"))));
+                        callback(Err(Box::new(error(Reason::Other, "PMTiles directory response has no data"))));
                         return;
                     };
 
-                    let result = (|| -> Result<(), String> {
+                    let result = (|| -> Result<Arc<Directory>, String> {
                         let mut directory_data: Vec<u8> = data.to_vec();
 
                         if header.internal_compression() == Compression::Gzip {
@@ -418,13 +438,11 @@ impl State {
 
                         this2.store_directory(&url, directory_offset, u64::from(directory_length), directory_data)
                     })();
-                    match result {
-                        Ok(()) => callback(None),
-                        Err(e) => callback(Some(Box::new(error(
-                            Reason::Other,
-                            format!("Error parsing PMTiles directory: {e}"),
-                        )))),
-                    }
+                    callback(
+                        result.map_err(|e| {
+                            Box::new(error(Reason::Other, format!("Error parsing PMTiles directory: {e}")))
+                        }),
+                    );
                 });
             }),
         );
@@ -466,21 +484,20 @@ impl State {
             directory_offset,
             directory_length,
             cache_only,
-            Arc::new(move |error_ptr: ErrorPtr| {
+            Arc::new(move |directory: Result<Arc<Directory>, Box<ResourceError>>| {
                 let Some(this) = this.upgrade() else { return };
-                if error_ptr.is_some() {
-                    callback((0, 0), error_ptr);
-                    return;
-                }
+                let directory = match directory {
+                    Ok(directory) => directory,
+                    Err(e) => {
+                        callback((0, 0), Some(e));
+                        return;
+                    }
+                };
 
                 let header = Arc::clone(&this.header_cache.lock()[&url]);
                 // `find_tile`'s null entry, of length 0, is `None`: the crate
                 // refuses a directory with an entry of length 0.
-                let entry: Option<DirEntry> = {
-                    let cache = this.directory_cache.lock();
-                    let directory = &cache[&url][&format!("{url}|{directory_offset}|{directory_length}")];
-                    directory.find_tile_id(tile_id).copied()
-                };
+                let entry: Option<DirEntry> = directory.find_tile_id(tile_id).copied();
 
                 if let Some(entry) = entry {
                     if entry.run_length() > 0 {
@@ -694,7 +711,6 @@ impl PMTilesFileSource {
                 header_cache: Mutex::new(VecMap::new()),
                 metadata_cache: Mutex::new(VecMap::new()),
                 directory_cache: Mutex::new(VecMap::new()),
-                directory_cache_control: Mutex::new(VecMap::new()),
             }),
             pool,
         }
@@ -829,5 +845,36 @@ mod tests {
         miss.no_content = true;
         responder.send(miss);
         assert!(answers.lock()[0].no_content, "a miss of the header");
+    }
+
+    /// A directory stored again keeps its one place in the order, and the
+    /// directory used most recently goes last.
+    #[test]
+    fn a_directory_goes_once_the_cache_has_used_the_others_since() {
+        let (_, source) = source();
+        let archive = std::fs::read(path()).unwrap();
+        let header = deserialize_header(&archive[..PMTILES_HEADER_LENGTH as usize]).unwrap();
+        let (offset, length) = (header.root_offset() as usize, header.root_length() as usize);
+        let mut root = archive[offset..offset + length].to_vec();
+        if header.internal_compression() == Compression::Gzip {
+            root = decompress(&root).unwrap();
+        }
+        let state = &source.state;
+        let store = |at: u64| state.store_directory("archive", at, 1, root.clone()).unwrap();
+        let first = store(0);
+        assert!(Arc::ptr_eq(&first, &store(0)), "stored again, it's the one held");
+        store(1);
+        for at in 2..MAX_DIRECTORY_CACHE_ENTRIES as u64 {
+            store(at);
+        }
+        let mut cache = state.directory_cache.lock();
+        let directories = cache.get_mut("archive").unwrap();
+        assert!(directories.get("archive|0|1").is_some(), "stored twice, listed once");
+        drop(cache);
+        store(MAX_DIRECTORY_CACHE_ENTRIES as u64);
+        let mut cache = state.directory_cache.lock();
+        let directories = cache.get_mut("archive").unwrap();
+        assert!(directories.get("archive|1|1").is_none(), "the least recently used went");
+        assert!(directories.get("archive|0|1").is_some(), "used since, it stays");
     }
 }
