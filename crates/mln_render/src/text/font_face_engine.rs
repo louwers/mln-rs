@@ -37,9 +37,9 @@ pub trait FontFaceEngine: Send + Sync {
     fn load(&self, type_: GlyphIDType, data: FontData, weight: u16) -> Option<Box<dyn FontFaceShaper>>;
 }
 
-/// The engine of a renderer that wasn't given one
-/// (`Renderer::set_font_face_engine`): `mln_text`'s `Shaper` with the
-/// `font-face-shaper` feature, else one that loads nothing.
+/// The engine for a renderer whose host has none of its own: `mln_text`'s
+/// `Shaper` with the `font-face-shaper` feature, else one that loads
+/// nothing.
 #[cfg(feature = "font-face-shaper")]
 #[must_use]
 pub fn default_engine() -> Arc<dyn FontFaceEngine> {

@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::time::Duration;
 
 use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, Gpu, LoadOp, TargetFormats};
 use mln_gfx::rendering_stats::RenderingStats;
@@ -40,27 +39,6 @@ enum RenderState {
     Fully,
 }
 
-/// What the last frame that [`Renderer::render`] drew spent on
-/// each of its steps, on the CPU, from its [update](Renderer::update) on.
-/// They follow each other, and together take nearly all of `update` and
-/// `render`.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct RenderTimings {
-    /// The update up to placement: the style's changes, the layers' values,
-    /// the sources' tiles and the layers' choice of them.
-    pub sources: Duration,
-    /// The rest of the update: the placement pass, which places what the
-    /// layers show across tiles, and updates their buckets.
-    pub placement: Duration,
-    /// Making the layers' draws from the tiles, with their uniforms.
-    pub layers: Duration,
-    /// Making the shaders when there are none, and uploading buffers and
-    /// textures.
-    pub upload: Duration,
-    /// Encoding the render passes and submitting them.
-    pub draw: Duration,
-}
-
 /// Draws a map's updates into the frames of one backend's [`Gpu`]: it keeps
 /// the map's sources, tiles and layers between frames, and the GPU objects
 /// they draw with.
@@ -96,7 +74,6 @@ pub struct Renderer {
 pub struct UpdatedFrame {
     frame: Frame,
     parameters: Arc<UpdateParameters>,
-    updated: Instant,
 }
 
 /// A frame that [`Renderer::render`] drew, for
@@ -111,9 +88,6 @@ pub struct DrawnFrame {
     /// The `still_image_request_id` of a still image's frame, or 0.
     still_image_request_id: u64,
     started: Instant,
-    placement_started: Instant,
-    updated: Instant,
-    layers_uploaded: Instant,
     start_rendering: Instant,
 }
 
@@ -138,13 +112,16 @@ struct Encoder {
     render_state: RenderState,
     /// Where the last frame drew the map.
     frame_projection: Option<FrameProjection>,
-    timings: RenderTimings,
 }
 
 impl Renderer {
-    /// A renderer with a glyph cache of its own, which draws the layer types
-    /// of `registry`, runs its background work on `pool` and draws
-    /// `local_glyphs` from the device's fonts.
+    /// A renderer that draws the layer types of `registry`, runs its
+    /// background work on `pool`, draws `local_glyphs` from the device's
+    /// fonts, shares the glyphs it parses from glyph PBFs through
+    /// `glyph_cache` with the renderers given the same cache, and loads the
+    /// font files of a style's font faces with `font_face_engine`
+    /// ([`default_engine`](crate::text::font_face_engine::default_engine)
+    /// when the host has none of its own).
     ///
     /// The map that the renderer draws must have a registry filled by the
     /// same calls: a layer whose type `registry` lacks isn't drawn.
@@ -159,37 +136,8 @@ impl Renderer {
     /// The renderer draws with `gpu` and only with it: every later call
     /// that takes a `Gpu` takes this one. It adds `registry`'s shader sources
     /// to `gpu` ([`Gpu::add_shader_sources`]).
-    pub fn new(
-        gpu: &mut dyn Gpu,
-        pixel_ratio: f32,
-        local_glyphs: LocalGlyphs,
-        registry: Arc<Registry>,
-        waker: Waker,
-        pool: &Pool,
-    ) -> Self {
-        Self::with_glyph_cache(gpu, pixel_ratio, local_glyphs, Arc::default(), registry, waker, pool)
-    }
-
-    /// A renderer that uses `glyph_cache`: renderers given the same
-    /// `GlyphCache` share the glyphs they parse from glyph PBFs.
-    pub fn with_glyph_cache(
-        gpu: &mut dyn Gpu,
-        pixel_ratio: f32,
-        local_glyphs: LocalGlyphs,
-        glyph_cache: Arc<GlyphCache>,
-        registry: Arc<Registry>,
-        waker: Waker,
-        pool: &Pool,
-    ) -> Self {
-        let engine = crate::text::font_face_engine::default_engine();
-        Self::with_fonts(gpu, pixel_ratio, local_glyphs, glyph_cache, engine, registry, waker, pool)
-    }
-
-    /// A renderer that uses `glyph_cache`, loads the font files of a style's
-    /// font faces with `font_face_engine` instead of
-    /// `font_face_engine::default_engine()`.
     #[expect(clippy::too_many_arguments, reason = "each argument is a part of the renderer that its host picks")]
-    pub fn with_fonts(
+    pub fn new(
         gpu: &mut dyn Gpu,
         pixel_ratio: f32,
         local_glyphs: LocalGlyphs,
@@ -219,7 +167,6 @@ impl Renderer {
                 shaders_replaced: false,
                 render_state: RenderState::Never,
                 frame_projection: None,
-                timings: RenderTimings::default(),
             },
             events: None,
         }
@@ -251,12 +198,6 @@ impl Renderer {
         encoder.layer_composite = LayerComposite::default();
         encoder.shaders_replaced = true;
         self.orchestrator.release_shaders();
-    }
-
-    /// The device pixels per logical pixel the renderer draws at.
-    #[must_use]
-    pub fn pixel_ratio(&self) -> f32 {
-        self.encoder.pixel_ratio
     }
 
     /// Runs the tiles' jobs, and the raster tiles' workers, in
@@ -303,7 +244,7 @@ impl Renderer {
             encoder.context.release_shaders();
         }
         let frame = frame?;
-        Some(UpdatedFrame { frame, parameters: Arc::clone(update_parameters), updated: Instant::now() })
+        Some(UpdatedFrame { frame, parameters: Arc::clone(update_parameters) })
     }
 
     /// Draws `frame`, which the last [`update`](Self::update) returned, into
@@ -327,13 +268,6 @@ impl Renderer {
     /// sources of an earlier update. The renderer's drop waits for it.
     pub fn drop_on_workers<T: Send + 'static>(&self, value: T) {
         self.orchestrator.drop_on_workers(value);
-    }
-
-    /// What the last frame that [`render`](Self::render) drew
-    /// spent on each of its steps.
-    #[must_use]
-    pub fn render_timings(&self) -> RenderTimings {
-        self.encoder.timings
     }
 
     /// Where the last frame that [`render`](Self::render) drew put the map,
@@ -535,8 +469,7 @@ impl Encoder {
         image: &FrameImage,
         frame: UpdatedFrame,
     ) -> DrawnFrame {
-        let UpdatedFrame { frame, parameters: update_parameters, updated } = frame;
-        let start = Instant::now();
+        let UpdatedFrame { frame, parameters: update_parameters } = frame;
         {
             let stats = self.context.rendering_stats();
             stats.num_draw_calls = 0;
@@ -586,9 +519,7 @@ impl Encoder {
 
         // - DRAW UPDATE ---------------------------------------------------
         // The layers' draws of the frame, and those of the debug overlays.
-        let uploaded = Instant::now();
         orchestrator.update_layer_draws(gpu, &update_parameters, &mut parameters, &frame);
-        let layers_updated = Instant::now();
         orchestrator.update_debug_layers(gpu, &mut parameters);
 
         // What the frame's update and draw update replaced goes before the
@@ -625,7 +556,6 @@ impl Encoder {
         // What the uploads replaced goes before the passes make what
         // replaces it, such as a draw's geometry.
         parameters.context.destroy_released(gpu);
-        let layers_uploaded = Instant::now();
 
         // - DRAW ----------------------------------------------------------
         // The 3D layers draw into depth from 0 to the passes' depth range
@@ -645,8 +575,6 @@ impl Encoder {
         }
         drop(parameters);
 
-        self.timings.layers = layers_updated - uploaded;
-        self.timings.upload = (uploaded - start) + (layers_uploaded - layers_updated);
         self.frame_projection = Some(frame_projection);
         DrawnFrame {
             mode: if frame.loaded { RenderMode::Full } else { RenderMode::Partial },
@@ -659,9 +587,6 @@ impl Encoder {
                 0
             },
             started: frame.started,
-            placement_started: frame.placement_started,
-            updated,
-            layers_uploaded,
             start_rendering,
         }
     }
@@ -677,9 +602,6 @@ impl Encoder {
             placement_changed,
             still_image_request_id,
             started,
-            placement_started,
-            updated,
-            layers_uploaded,
             start_rendering,
         } = *frame;
         let submitted = Instant::now();
@@ -698,10 +620,6 @@ impl Encoder {
             stats.encoding_time = started.elapsed().as_secs_f64() - stats.rendering_time;
         }
         let stats = Arc::new(context.stats());
-
-        self.timings.sources = placement_started - started;
-        self.timings.placement = updated - placement_started;
-        self.timings.draw = submitted - layers_uploaded;
 
         emit(
             events,
