@@ -1884,6 +1884,66 @@ fn toggling_terrain_moves_an_extrusion() {
     assert!(!red(map.pixel_at(&location, 500.0)), "no roof above sea level");
 }
 
+/// A still taken right after terrain comes to a style whose fill
+/// extrusions laid out without it, over DEM tiles loaded before, waits for
+/// their tile to lay out again, as for any tile that lays out, and shows
+/// them on the ground. Once the terrain goes, they draw above sea level
+/// from the same layout.
+#[test]
+fn a_still_right_after_terrain_comes_shows_the_extrusions_on_the_ground() {
+    let mut map = raised(10.0, 0.0);
+    map.mode = MapMode::Static;
+    let location = LatLng::new(-10.0, 10.0086).unwrap();
+    let terrain = map.style.get_terrain().map(|terrain| (**terrain).clone());
+    map.edit(Edit::SetTerrain(None));
+    // The extrusion, and many low ones in the west of its tile, whose layout
+    // takes longer than the terrain needs to draw.
+    let square = |lng: f64, lat: f64, half: f64, height: f64| {
+        let (west, east, south, north) = (lng - half, lng + half, lat - half, lat + half);
+        format!(
+            r#"{{"type": "Feature", "properties": {{"height": {height}}}, "geometry": {{"type": "Polygon",
+                "coordinates": [[[{west}, {south}], [{east}, {south}], [{east}, {north}], [{west}, {north}],
+                [{west}, {south}]]]}}}}"#
+        )
+    };
+    let mut features = vec![square(location.longitude(), location.latitude(), 0.002, 500.0)];
+    for column in 0..100 {
+        for row in 0..150 {
+            features.push(square(9.935 + 0.0005 * f64::from(column), -10.05 + 0.0005 * f64::from(row), 0.0001, 1.0));
+        }
+    }
+    let style = format!(
+        r#"{{
+            "version": 8,
+            "sources": {{"block": {{"type": "geojson", "data": {{"type": "FeatureCollection", "features": [{}]}}}}}},
+            "layers": [{{
+                "id": "extrusion",
+                "type": "fill-extrusion",
+                "source": "block",
+                "paint": {{"fill-extrusion-color": "red", "fill-extrusion-height": ["get", "height"]}}
+            }}]
+        }}"#,
+        features.join(", ")
+    );
+    add_layer(&mut map, &style, None);
+    still(&mut map);
+    assert!(red(map.pixel_at(&location, 500.0)), "the roof above sea level");
+
+    map.edit(Edit::SetTerrain(terrain));
+    still(&mut map);
+    assert!(red(map.pixel_at(&location, 25_500.0)), "the roof on the ground");
+    assert!(!red(map.pixel_at(&location, 500.0)), "no roof above sea level");
+
+    // The view at sea level from the camera 25 km up takes new tiles, but
+    // the extrusion's own doesn't lay out again.
+    map.edit(Edit::SetTerrain(None));
+    map.frame();
+    let own = CanonicalTileID::new(12, 2161, 2162);
+    assert!(!map.work.parsing.iter().any(|(source, id)| source == "block" && id.canonical == own), "laid out again");
+    still(&mut map);
+    assert!(red(map.pixel_at(&location, 500.0)), "the roof above sea level again");
+}
+
 /// A map without terrain draws its fill extrusions flat, with draws that
 /// keep no centroid, per vertex or in a storage buffer. Over terrain they
 /// keep them.
