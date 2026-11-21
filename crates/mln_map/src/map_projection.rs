@@ -44,11 +44,13 @@ impl MapProjection {
 
     /// The projection on `terrain`, the terrain a map's camera stands on
     /// ([`Map::terrain`]), as the map converts on it; on the flat map for
-    /// `None`. The view's near and far planes fit the ground given, as the
-    /// map's do, its lowest under the center, or the flat map's without
-    /// one, whatever terrain the projection had before.
+    /// `None` and for a globe's view, which has no terrain. The view's near
+    /// and far planes fit the ground given, as the map's do, its lowest
+    /// under the center, or the flat map's without one, whatever terrain the
+    /// projection had before.
     #[must_use]
     pub fn with_terrain(mut self, terrain: Option<TerrainGround>) -> Self {
+        let terrain = terrain.filter(|_| !self.state.view().is_globe());
         let ground = terrain.as_ref().and_then(|terrain| terrain.elevation.as_ref());
         let center = self.state.view().center(WrapMode::Wrapped);
         let min_elevation = ground.map(|ground| ground.min_at(center).unwrap_or(0.0));

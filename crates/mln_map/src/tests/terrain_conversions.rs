@@ -399,3 +399,29 @@ fn a_projection_reports_the_height_of_its_ground() {
     let flat = map_over(FLAT_STYLE, None, pitched(60.0), &run_loop);
     assert_eq!(None, MapProjection::new(&flat).terrain_elevation(&peak), "without terrain");
 }
+
+/// A projection of a globe's view has no terrain, whatever terrain it is
+/// given: it reads no height, and converts as the flat projection of the
+/// same view.
+#[test]
+fn a_projection_of_a_globe_view_has_no_terrain() {
+    let run_loop = Queue::<()>::new();
+    let mut map = pitchable(
+        r#"{"version": 8, "center": [10, 20], "zoom": 3, "sources": {}, "layers": [],
+            "projection": {"type": "globe"}}"#,
+        &run_loop,
+    );
+    map.jump_to(&pitched(30.0));
+    let view = map.snapshot().view;
+    assert!(map.snapshot().globe_rendering);
+    let ground = Some(TerrainGround { elevation: Some(super::ground::flat(Some(1000.0), 1000.0)), clamped: true });
+
+    let flat = MapProjection::from_view(&view).unwrap();
+    let globe = MapProjection::from_view(&view).unwrap().with_terrain(ground);
+    assert_eq!(None, globe.terrain_elevation(&center()));
+    for pixel in lower_half() {
+        let expected = flat.lat_lng_for_pixel(&pixel, WrapMode::Unwrapped).unwrap();
+        assert_eq!(expected, globe.lat_lng_for_pixel(&pixel, WrapMode::Unwrapped).unwrap(), "{pixel:?}");
+        assert_eq!(flat.pixel_for_lat_lng(&expected), globe.pixel_for_lat_lng(&expected), "{expected:?}");
+    }
+}
