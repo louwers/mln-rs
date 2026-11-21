@@ -1,8 +1,8 @@
 // Frames that fail on the GPU, through a session's own WebGPU device: a
 // custom layer that records a draw that WebGPU rejects fails the frame's
-// submit, as a device out of memory would fail it. Such a frame is never the
-// host's: a still image ends with the error, and a continuous map reports it
-// once and draws again later.
+// submit, as a device out of memory would fail it. A still image ends with
+// the error, and a continuous map reports it once, shows what drew, and
+// draws again later.
 
 #![cfg(all(feature = "webgpu", not(target_family = "wasm")))]
 
@@ -84,11 +84,11 @@ fn render_errors(log: &EventLog) -> Vec<String> {
     errors.collect()
 }
 
-/// A still image whose frame fails ends with the GPU's error, and the host
-/// gets no frame of it: no rendered result, and nothing to read back. A
-/// still asked for right after draws once the device works again.
+/// A still image whose frame fails ends with the GPU's error, once its
+/// demand's result, with no update, is queued. A still asked for right
+/// after draws once the device works again.
 #[test]
-fn a_still_image_whose_frame_fails_ends_with_the_error_and_hands_off_nothing() {
+fn a_still_image_whose_frame_fails_ends_with_the_error() {
     let runtime = runtime();
     let log = EventLog::install(&runtime);
     let Some((map, session, broken)) = broken_map(&runtime, MapMode::Static) else { return };
@@ -100,14 +100,12 @@ fn a_still_image_whose_frame_fails_ends_with_the_error_and_hands_off_nothing() {
     let error = result_of(map.request_still_image().unwrap()).expect_err("a still whose frame failed");
     assert_eq!(ErrorKind::Native, error.kind);
     assert!(error.message.contains("Submitting the frame failed"), "{error}");
-    let mut results: Vec<FrameResult> = Vec::new();
-    assert!(eventually(|| {
-        results.extend(session.drain_frame_results().unwrap());
-        !results.is_empty()
-    }));
-    assert!(results.iter().all(|result| result.disposition != FrameDisposition::Rendered), "{results:?}");
-    let read = result_of(session.read_texture().unwrap()).expect_err("the failed frame was read");
-    assert_eq!(ErrorKind::InvalidState, read.kind);
+    let results = session.drain_frame_results().unwrap();
+    let still = |result: &FrameResult| result.token.is_none();
+    assert!(
+        matches!(&results[..], [result] if still(result) && result.disposition == FrameDisposition::NoUpdate),
+        "{results:?}"
+    );
     assert_eq!(1, render_errors(&log).len());
 
     broken.store(false, Ordering::SeqCst);
@@ -116,8 +114,9 @@ fn a_still_image_whose_frame_fails_ends_with_the_error_and_hands_off_nothing() {
 }
 
 /// A continuous map whose frames keep failing reports it once, isn't idle,
-/// and draws again by itself only now and then, not frame after frame. Once
-/// the device works again, it draws the map and goes idle.
+/// and draws again by itself only now and then, not frame after frame, each
+/// frame rendered and partial. Once the device works again, it draws the
+/// map and goes idle.
 #[test]
 fn a_continuous_map_whose_frames_fail_reports_once_and_draws_again_later() {
     let runtime = runtime();
@@ -144,8 +143,8 @@ fn a_continuous_map_whose_frames_fail_reports_once_and_draws_again_later() {
     broken.store(true, Ordering::SeqCst);
     wait(map.request_repaint());
     let failing = frames(Duration::from_millis(1500));
-    assert!(failing.iter().all(|result| result.disposition != FrameDisposition::Rendered), "{failing:?}");
-    let drawn = failing.iter().filter(|result| result.disposition == FrameDisposition::NoUpdate).count();
+    assert!(failing.iter().all(|result| result.mode == RenderMode::Partial), "{failing:?}");
+    let drawn = failing.iter().filter(|result| result.disposition == FrameDisposition::Rendered).count();
     // 100, 200, 400 and 800 ms apart: four or five in 1.5 s.
     assert!((1..=8).contains(&drawn), "{drawn} frames in 1.5 s: {failing:?}");
     let errors = render_errors(&log);

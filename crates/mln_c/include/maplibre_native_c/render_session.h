@@ -30,12 +30,7 @@ typedef enum mln_render_result : uint32_t {
    * MLN_RENDER_MODE_PARTIAL.
    */
   MLN_RENDER_RESULT_RENDERED = 0,
-  /**
-   * The map had nothing new to draw, or the frame failed on the GPU with
-   * nothing to show, which MLN_RUNTIME_EVENT_MAP_RENDER_ERROR reports: the
-   * frame's own pass failed, or it was a still image's. A target takes
-   * nothing of such a frame: a surface keeps showing the frame before.
-   */
+  /** The map had nothing new to draw. */
   MLN_RENDER_RESULT_NO_UPDATE = 1,
   /**
    * The target couldn't take a frame, such as while a window is hidden or

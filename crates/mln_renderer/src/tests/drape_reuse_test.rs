@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use mln_gfx::RendererBackend as _;
-use mln_gfx::frame::{FrameTarget, Handoff};
+use mln_gfx::frame::FrameTarget;
 use mln_gfx::gpu::{
     BindingsDesc, BindingsId, BufferDesc, BufferId, BufferUsage, Caps, Draw, GeometryDesc, GeometryId, Gpu, GpuError,
     PassDesc, PipelineDesc, PipelineId, ReadbackId, ResourceId, SamplerId, ShaderId, ShaderKey, TextureDesc, TextureId,
@@ -427,13 +427,7 @@ impl DrapedMap {
                 Some(fail) => self.renderer.render(&mut Failing { gpu, fail }, &image, frame),
                 None => self.renderer.render(gpu, &image, frame),
             };
-            // A frame that failed with nothing to show is one nothing takes.
-            let handoff = if drawn.presentable() {
-                self.target.end_frame(gpu)
-            } else {
-                self.target.discard_frame();
-                Handoff::Dropped
-            };
+            let handoff = self.target.end_frame(gpu);
             self.renderer.finish_frame(gpu, drawn, handoff);
         }
         let mut full = false;

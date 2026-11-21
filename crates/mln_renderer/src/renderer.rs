@@ -5,7 +5,7 @@ use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, Gpu, LoadOp, TargetF
 use mln_gfx::rendering_stats::{RenderingStats, TerrainStats};
 use mln_gfx::shaders::shader_defines::ID_GLOBAL_PAINT_PARAMS_UBO;
 use mln_gfx::{FrameImage, Handoff, ScissorRect};
-use mln_map_types::{MapDebugOptions, MapMode};
+use mln_map_types::MapDebugOptions;
 use mln_style::layers::CustomLayerFrame;
 use mln_text::GlyphCache;
 use mln_text::local_glyph_rasterizer::LocalGlyphs;
@@ -74,8 +74,7 @@ pub struct RenderTimings {
 /// let frame = renderer.update(gpu, &update)?;
 /// let image = target.begin_frame(gpu)?;
 /// let drawn = renderer.render(gpu, &image, frame);
-/// // A frame that failed with nothing to show is one that nothing takes.
-/// let handoff = if drawn.presentable() { target.end_frame(gpu) } else { Handoff::Dropped };
+/// let handoff = target.end_frame(gpu);
 /// renderer.finish_frame(gpu, drawn, handoff);
 /// ```
 ///
@@ -105,8 +104,6 @@ pub struct UpdatedFrame {
 pub struct DrawnFrame {
     /// Why the frame failed on the GPU, if it did.
     error: Option<Error>,
-    /// Whether the host hands the frame off ([`DrawnFrame::presentable`]).
-    presentable: bool,
     mode: RenderMode,
     /// Whether the frame would be `Full` but for its failure.
     complete: bool,
@@ -156,19 +153,6 @@ impl DrawnFrame {
     #[must_use]
     pub fn error(&self) -> Option<&Error> {
         self.error.as_ref()
-    }
-
-    /// Whether the host hands the frame off. A frame that drew without
-    /// failing is, and so is a continuous map's that failed but whose own
-    /// pass began, ended and was submitted: its image shows all that did
-    /// draw, which beats a map frozen on an older frame. A still's frame
-    /// that failed, and a frame whose own pass failed, show a wrong image
-    /// or none: the host doesn't hand those off, so that a surface keeps
-    /// showing the frame before and nothing reads them as the map, and
-    /// [finishes](Renderer::finish_frame) them as [`Handoff::Dropped`].
-    #[must_use]
-    pub fn presentable(&self) -> bool {
-        self.presentable
     }
 }
 
@@ -365,10 +349,36 @@ impl Renderer {
     /// Draws `frame`, which the last [`update`](Self::update) returned, into
     /// `image`, textures of `gpu` that the host's target began a frame with,
     /// and submits the frame's passes. Returns the frame, which the host
-    /// ends on its target, unless it failed ([`DrawnFrame::error`]), and
-    /// then [finishes](Self::finish_frame).
+    /// ends on its target, whether or not it failed ([`DrawnFrame::error`]),
+    /// and then [finishes](Self::finish_frame).
     pub fn render(&mut self, gpu: &mut dyn Gpu, image: &FrameImage, frame: UpdatedFrame) -> DrawnFrame {
         self.encoder.encode(gpu, &mut self.orchestrator, self.events.as_ref(), image, frame)
+    }
+
+    /// Ends `frame`, which the last [`update`](Self::update) returned, as one
+    /// that failed with `error` before it drew, as when its target couldn't
+    /// make the textures to draw it into: reports it as
+    /// [`finish_frame`](Self::finish_frame) does, so that a still image of
+    /// it fails with the error.
+    pub fn fail_frame(&mut self, gpu: &mut dyn Gpu, frame: UpdatedFrame, error: Error) {
+        let UpdatedFrame { frame, parameters, updated } = frame;
+        let now = Instant::now();
+        let drawn = DrawnFrame {
+            error: Some(error),
+            mode: RenderMode::Partial,
+            complete: frame.loaded,
+            needs_repaint: frame.needs_repaint,
+            repaint_at: frame.repaint_at,
+            placement_changed: frame.placement_changed,
+            still_image_request_id: if parameters.still_image_request { parameters.still_image_request_id } else { 0 },
+            update_id: parameters.update_id,
+            started: frame.started,
+            symbols_started: frame.symbols_started,
+            updated,
+            layers_uploaded: now,
+            start_rendering: now,
+        };
+        self.encoder.finish(gpu, self.events.as_ref(), drawn, Handoff::Dropped);
     }
 
     /// Ends `frame`, which [`render`](Self::render) drew, once the host's
@@ -708,7 +718,7 @@ impl Encoder {
             width: renderable_size.width,
             height: renderable_size.height,
         });
-        let mut drew = draw(orchestrator, gpu, &mut parameters, &frame, image, draw_groups.count, depth_range_size);
+        draw(orchestrator, gpu, &mut parameters, &frame, image, draw_groups.count, depth_range_size);
         orchestrator.terrain().count(parameters.context);
         // Drapes left for a later frame, stale by the camera, leave this one
         // incomplete, and ask for the next.
@@ -716,7 +726,6 @@ impl Encoder {
         let start_rendering = Instant::now();
         if let Err(error) = parameters.end_pass(gpu).and_then(|()| gpu.flush(false)) {
             parameters.context.fail(format!("Submitting the frame failed: {error}"));
-            drew = false;
         }
         let error = parameters.context.device().take_failure().map(Error::native);
         drop(parameters);
@@ -728,7 +737,6 @@ impl Encoder {
         DrawnFrame {
             mode: if complete && error.is_none() { RenderMode::Full } else { RenderMode::Partial },
             complete,
-            presentable: error.is_none() || (drew && update_parameters.mode == MapMode::Continuous),
             error,
             needs_repaint: frame.needs_repaint || drapes_waiting,
             repaint_at: frame.repaint_at,
@@ -753,7 +761,6 @@ impl Encoder {
     fn finish(&mut self, gpu: &mut dyn Gpu, events: Option<&RendererEvents>, frame: DrawnFrame, handoff: Handoff) {
         let DrawnFrame {
             error,
-            presentable: _,
             mode,
             complete,
             needs_repaint,
@@ -815,9 +822,7 @@ impl Encoder {
 /// The draw section of a frame's encode: encodes the passes of `frame` into
 /// `image` through `gpu`, which holds the frame's work until it is
 /// submitted, each pass drawing the `num_draw_groups` draw groups at depths
-/// below `depth_range_size`. Returns whether the frame's own pass drew: it
-/// began, as did each pass that went on with it, and it reached the target,
-/// so that its image shows what drew even if something in it failed.
+/// below `depth_range_size`.
 fn draw(
     orchestrator: &mut RenderOrchestrator,
     gpu: &mut dyn Gpu,
@@ -826,7 +831,7 @@ fn draw(
     image: &FrameImage,
     num_draw_groups: usize,
     depth_range_size: f32,
-) -> bool {
+) {
     // Custom layers record their own work before the first pass.
     for &index in frame.layers.keys() {
         orchestrator.layer_mut(index as usize).prerender(gpu, parameters);
@@ -924,13 +929,9 @@ fn draw(
         size: image.size,
         targets: TargetFormats { color: image.targets.color, depth_stencil: None },
     };
-    // A pass that went on with the frame's and didn't begin left none open.
-    let drew = parameters.pass_target().is_some();
     if let Err(error) = parameters.present_frame(gpu, present) {
         parameters.context.fail(format!("Copying the frame into its target failed: {error}"));
-        return false;
     }
-    drew
 }
 
 /// Pushes what `orchestrator` reported since the last call to `events`, the

@@ -517,7 +517,7 @@ trait Gfx {
     fn renderer_or(&mut self, make: &mut dyn FnMut(&dyn Gpu) -> Renderer) -> &mut Renderer;
     fn with_gpu(&mut self, f: &mut dyn FnMut(&mut dyn Gpu, Option<&mut Renderer>));
     fn tear_down_renderer(&mut self) -> Option<RenderingStats>;
-    fn render(&mut self, update: &Arc<UpdateParameters>) -> Option<Result<Handoff, Error>>;
+    fn render(&mut self, update: &Arc<UpdateParameters>) -> Option<Handoff>;
     fn ready_for_frame(&mut self) -> bool;
     fn with_frame(&mut self, draw: &mut dyn FnMut(&mut dyn Gpu, &FrameImage));
     fn select_slot(&mut self, slot: usize) -> Result<(), Error>;
@@ -665,26 +665,27 @@ impl<B: LocalBackend> Gfx for BackendGfx<B> {
         Some(renderer.tear_down(&mut *self.backend.gpu()))
     }
 
-    fn render(&mut self, update: &Arc<UpdateParameters>) -> Option<Result<Handoff, Error>> {
+    fn render(&mut self, update: &Arc<UpdateParameters>) -> Option<Handoff> {
         let renderer = self.renderer.as_mut()?;
         let target = self.frames.target()?;
         let mut gpu = self.backend.gpu();
         let gpu = &mut *gpu;
         let frame = renderer.update(gpu, update)?;
-        let image = target.begin_frame(gpu)?;
-        let drawn = renderer.render(gpu, &image, frame);
-        // A frame that failed with nothing to show, or a still's that
-        // failed, is one that the target doesn't hand off.
-        let rendered = match drawn.error().filter(|_| !drawn.presentable()) {
-            None => Ok(target.end_frame(gpu)),
-            Some(error) => Err(error.clone()),
+        let Some(image) = target.begin_frame(gpu) else {
+            // An offscreen target without a frame couldn't make its
+            // textures, which no later frame will either: the frame fails,
+            // so that a still image of it ends.
+            #[cfg(not(target_family = "wasm"))]
+            if matches!(self.frames, Frames::Offscreen(_)) {
+                let error = Error::native("Making an offscreen frame's textures failed");
+                renderer.fail_frame(gpu, frame, error);
+            }
+            return None;
         };
-        #[cfg(not(target_family = "wasm"))]
-        if let (Err(_), Frames::Offscreen(target)) = (&rendered, &mut self.frames) {
-            target.discard_frame();
-        }
-        renderer.finish_frame(gpu, drawn, *rendered.as_ref().unwrap_or(&Handoff::Dropped));
-        Some(rendered)
+        let drawn = renderer.render(gpu, &image, frame);
+        let handoff = target.end_frame(gpu);
+        renderer.finish_frame(gpu, drawn, handoff);
+        Some(handoff)
     }
 
     fn ready_for_frame(&mut self) -> bool {
@@ -1135,15 +1136,11 @@ impl LocalTarget {
     /// begins the frame, the renderer draws into it, and the target ends
     /// it. Returns where the frame went, or `None` when nothing was drawn:
     /// there is no renderer, the target had nothing to draw into, or there
-    /// was nothing to draw. A continuous map's frame that failed on the GPU
-    /// but whose own pass drew ends like any other, and shows what drew.
-    /// Fails with the GPU's error, as
-    /// [`ErrorKind::Native`](mln_util::ErrorKind), for one that failed
-    /// with nothing to show, or a still's that failed
-    /// ([`DrawnFrame::presentable`](mln_renderer::DrawnFrame::presentable)),
-    /// which the target doesn't end: a surface shows the frame before, and
-    /// [`read_image`](Self::read_image) fails until a frame draws.
-    pub fn render(&mut self, update: &Arc<UpdateParameters>) -> Option<Result<Handoff, Error>> {
+    /// was nothing to draw. A frame that failed on the GPU ends like any
+    /// other, and the renderer reports its error
+    /// ([`DrawnFrame::error`](mln_renderer::DrawnFrame::error)), as it does
+    /// for a frame that an offscreen target couldn't make the textures of.
+    pub fn render(&mut self, update: &Arc<UpdateParameters>) -> Option<Handoff> {
         self.gfx.render(update)
     }
 

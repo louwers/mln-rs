@@ -25,8 +25,6 @@ pub struct OffscreenTarget<G: ?Sized> {
     size: Size,
     /// The textures, made with the first frame of a size.
     image: Option<Image>,
-    /// Whether the last frame was discarded ([`discard_frame`](Self::discard_frame)).
-    discarded: bool,
     gpu: PhantomData<fn(&mut G)>,
 }
 
@@ -43,31 +41,21 @@ impl<G: Gpu + ?Sized> OffscreenTarget<G> {
     /// `Gpu` its calls take.
     #[must_use]
     pub fn new(size: Size) -> Self {
-        OffscreenTarget { size, image: None, discarded: false, gpu: PhantomData }
+        OffscreenTarget { size, image: None, gpu: PhantomData }
     }
 
     /// The last frame's pixels: premultiplied RGBA, in rows from the top.
     ///
     /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) before
-    /// the first frame of the size and after a discarded frame, and with
+    /// the first frame of the size, and with
     /// [`ErrorKind::Native`](mln_util::ErrorKind) where the backend reads
     /// nothing back.
     pub fn read_image(&self, gpu: &mut G) -> Result<PremultipliedImage, Error> {
-        if self.discarded {
-            return Err(Error::invalid_state("the target's last frame failed to draw"));
-        }
         let image =
             self.image.ok_or_else(|| Error::invalid_state("the target has no frame since it was made or resized"))?;
         let texels = read_texels(gpu, image.color, TextureRegion::whole(image.size))
             .map_err(|error| Error::native(format!("reading the frame back failed: {error}")))?;
         Ok(PremultipliedImage::from_vec(image.size, texels))
-    }
-
-    /// Leaves the frame begun unended, as one that failed to draw: its
-    /// image is wrong, and [`read_image`](Self::read_image) fails until a
-    /// frame ends.
-    pub fn discard_frame(&mut self) {
-        self.discarded = true;
     }
 
     fn make_image(gpu: &mut G, size: Size) -> Result<Image, GpuError> {
@@ -121,7 +109,6 @@ impl<G: Gpu + ?Sized> FrameTarget for OffscreenTarget<G> {
 
     /// The frame is read back when it is read.
     fn end_frame(&mut self, _gpu: &mut G) -> Handoff {
-        self.discarded = false;
         if self.image.is_some() { Handoff::ReadBack } else { Handoff::Dropped }
     }
 

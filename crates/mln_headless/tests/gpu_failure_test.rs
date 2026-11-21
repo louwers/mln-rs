@@ -4,19 +4,21 @@
 // terrain and on one without, and the next one draws once the device works;
 // a continuous map reports the failure once, shows what did draw, draws
 // again only now and then, goes idle once the failure lasts, and shows the
-// map once the device works.
+// map once the device works. A still whose target can't make its textures
+// ends with the error too.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use mln_gfx::RendererBackend as _;
-use mln_gfx::frame::{FrameTarget as _, Handoff};
+use mln_gfx::frame::FrameTarget as _;
 use mln_gfx::gpu::{
     BindingsDesc, BindingsId, BufferDesc, BufferId, Caps, Draw, GeometryDesc, GeometryId, Gpu, GpuError, PassDesc,
     PipelineDesc, PipelineId, ReadbackId, ResourceId, SamplerId, ShaderId, ShaderKey, TextureDesc, TextureId,
     TextureRegion,
 };
 use mln_gfx::offscreen_target::OffscreenTarget;
+use mln_headless::HeadlessFrontend;
 use mln_map::{Map, MapEvent, MapMode, MapOptions};
 use mln_renderer::{Renderer, RendererEvent};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
@@ -24,6 +26,7 @@ use mln_storage::{Kind, Resource, Response};
 use mln_util::error::{Error, ErrorKind};
 use mln_util::image::PremultipliedImage;
 use mln_util::pool::Pool;
+use mln_util::queue::Queue;
 use mln_util::size::Size;
 
 const SIDE: u32 = 256;
@@ -209,9 +212,8 @@ impl Gpu for Failing<'_> {
 /// A map of [`style`], and a renderer on WebGPU that draws each update the
 /// map publishes, as a frontend does, through a GPU that fails what `fail`
 /// says in the next `failing` frames it draws. It repaints the map when the
-/// map asks to be ([`Map::repaint_at`]), and hands off only the frames that
-/// are [presentable](mln_renderer::DrawnFrame::presentable), whose pixels
-/// it keeps as a surface shows them. It stands in for a
+/// map asks to be ([`Map::repaint_at`]), and keeps the pixels of the last
+/// frame, as a surface shows them. It stands in for a
 /// [`mln_headless::HeadlessFrontend`], whose target keeps its GPU to itself.
 struct FailingMap {
     map: Map,
@@ -222,9 +224,7 @@ struct FailingMap {
     drawn: u64,
     fail: Fail,
     failing: usize,
-    /// The frames the target took.
-    handed_off: usize,
-    /// The pixels of the last frame the target took.
+    /// The pixels of the last frame.
     shown: Option<Vec<u8>>,
     _pool: Pool,
 }
@@ -262,24 +262,12 @@ impl FailingMap {
         let camera = map.style().get_default_camera();
         map.jump_to(&camera);
         let target = OffscreenTarget::new(size);
-        FailingMap {
-            map,
-            backend,
-            target,
-            renderer,
-            drawn: 0,
-            fail,
-            failing: 0,
-            handed_off: 0,
-            shown: None,
-            _pool: pool,
-        }
+        FailingMap { map, backend, target, renderer, drawn: 0, fail, failing: 0, shown: None, _pool: pool }
     }
 
     /// Takes in the renderer's reports, repaints the map if its time came,
     /// then draws the map's latest update unless it drew it already, and
-    /// returns whether it did. A still that hasn't loaded draws no frame. A
-    /// frame that fails says so before the target would take it.
+    /// returns whether it did. A still that hasn't loaded draws no frame.
     fn draw(&mut self) -> bool {
         self.map.process_events();
         if self.map.repaint_at().is_some_and(|at| Instant::now() >= at) {
@@ -303,15 +291,8 @@ impl FailingMap {
             let failed = drawn.error().is_some();
             let shader = matches!(self.fail, Fail::Shaders(_));
             assert!(failed == failing || (failing && shader), "{:?} failed: {:?}", self.fail, drawn.error());
-            let handoff = if drawn.presentable() {
-                self.handed_off += 1;
-                let handoff = self.target.end_frame(gpu);
-                self.shown = Some(self.target.read_image(gpu).expect("the frame's pixels").data);
-                handoff
-            } else {
-                self.target.discard_frame();
-                Handoff::Dropped
-            };
+            let handoff = self.target.end_frame(gpu);
+            self.shown = Some(self.target.read_image(gpu).expect("the frame's pixels").data);
             self.renderer.finish_frame(gpu, drawn, handoff);
         }
         true
@@ -356,11 +337,6 @@ impl FailingMap {
     fn frames(&self) -> i32 {
         self.renderer.rendering_stats().num_frames
     }
-
-    /// The last frame's pixels.
-    fn image(&mut self) -> Result<Vec<u8>, Error> {
-        Ok(self.target.read_image(self.backend.gpu())?.data)
-    }
 }
 
 impl Drop for FailingMap {
@@ -394,8 +370,7 @@ fn failures(terrain: bool) -> Vec<Fail> {
 
 /// A still whose one frame fails, in any of its passes or draws, on a map
 /// with terrain and on one without, ends with the GPU's error rather than a
-/// wrong image, and the target takes nothing of it. A still asked for right
-/// after draws what a new map's does.
+/// wrong image. A still asked for right after draws what a new map's does.
 #[test]
 fn a_still_whose_frame_fails_ends_with_the_error() {
     for terrain in [false, true] {
@@ -405,13 +380,26 @@ fn a_still_whose_frame_fails_ends_with_the_error() {
             let mut map = FailingMap::new(MapMode::Static, terrain, fail);
             map.failing = 1;
             assert_failed(map.still(), fail);
-            assert_eq!((0, 1, 0), (map.failing, map.frames(), map.handed_off), "{fail:?}");
-            assert_eq!(ErrorKind::InvalidState, map.image().unwrap_err().kind, "the failed frame is readable");
+            assert_eq!((0, 1), (map.failing, map.frames()), "{fail:?}");
             let image = map.still().expect("the next still never ended").expect("the next still");
-            assert_eq!((2, 1), (map.frames(), map.handed_off), "{fail:?}");
+            assert_eq!(2, map.frames(), "{fail:?}");
             assert!(new == image, "the next still after {fail:?} draws other pixels than a new map's");
         }
     }
+}
+
+/// A still whose target can't make the textures to draw it into, here for
+/// a size that no device takes, ends with the error rather than waiting.
+#[test]
+fn a_still_whose_target_cant_make_its_textures_ends_with_the_error() {
+    let (queue, pool) = (Queue::new(), Pool::new(4));
+    let size = Size::new(1 << 17, 1);
+    let mut frontend = HeadlessFrontend::new(size, 1.0, &queue, &pool).expect("a headless frontend");
+    let mut map = Map::new(MapOptions { map_mode: MapMode::Static, size, ..Default::default() }, &pool).unwrap();
+    frontend.attach(&mut map);
+    map.load_style_json(r#"{"version": 8, "sources": {}, "layers": []}"#);
+    let error = frontend.render(&mut map).err().expect("a still of a target without textures");
+    assert_eq!(ErrorKind::Native, error.kind, "{error}");
 }
 
 /// A still whose drapes fail to draw once, in its one frame, ends with the
@@ -484,33 +472,6 @@ fn a_continuous_map_whose_draw_always_fails_shows_the_rest_and_goes_idle() {
         assert!(went_idle && map.frames() > frames, "terrain {terrain}: {events:?}");
         assert_eq!(0, errors(&events), "terrain {terrain}: the same failure reported again");
     }
-}
-
-/// A continuous map whose frame's own pass fails keeps showing its last good
-/// frame, which the target took, reports the failure once, and goes idle
-/// once it lasts. Once the device works, the next frame that something
-/// draws shows the map.
-#[test]
-fn a_continuous_map_whose_pass_fails_keeps_showing_its_last_good_frame() {
-    let mut map = FailingMap::new(MapMode::Continuous, false, Fail::Passes("main buffer"));
-    assert!(map.run(Duration::from_secs(10), idle).1, "the map never went idle");
-    let (good, handed_off) = (map.shown.clone().expect("the map showed nothing"), map.handed_off);
-    map.failing = usize::MAX;
-    let camera = mln_map::CameraOptions { zoom: Some(2.5), ..Default::default() };
-    map.map.jump_to(&camera);
-    let (events, went_idle) = map.run(Duration::from_secs(10), idle);
-    assert!(went_idle, "the map never went idle: {events:?}");
-    assert_eq!(1, errors(&events), "{events:?}");
-    assert_eq!(handed_off, map.handed_off, "a frame whose pass failed was handed off");
-    assert!(map.shown.as_ref() == Some(&good), "the map shows other pixels than its last good frame");
-
-    map.failing = 0;
-    map.map.trigger_repaint();
-    assert!(map.run(Duration::from_secs(10), idle).1, "the map never went idle once the device worked");
-    let mut expected = FailingMap::new(MapMode::Continuous, false, map.fail);
-    expected.map.jump_to(&camera);
-    assert!(expected.run(Duration::from_secs(10), idle).1, "a new map never went idle");
-    assert!(map.shown == expected.shown, "the map draws other pixels than a new one");
 }
 
 /// A continuous map whose frames fail for half a second, from its first,

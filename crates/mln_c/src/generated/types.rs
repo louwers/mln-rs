@@ -232,9 +232,8 @@ pub const MLN_RUNTIME_EVENT_MAP_IDLE: mln_runtime_event_type = 8;
  that couldn't be made or a shader that the backend rejects: the first of
  the frames in a row that fail, until one draws without failing.
 
- A map in MLN_MAP_MODE_CONTINUOUS shows what did draw of a failed frame,
- or keeps showing the frame before when the frame's own pass failed. It
- draws again on its own after as long as its frames have been failing,
+ A map in MLN_MAP_MODE_CONTINUOUS shows what did draw of a failed frame.
+ It draws again on its own after as long as its frames have been failing,
  and at least 100 ms. Once they have failed for a second, it takes the
  failure as lasting: it draws again only when something else draws a
  frame, such as a camera change or a tile, and goes idle
@@ -245,9 +244,8 @@ pub const MLN_RUNTIME_EVENT_MAP_RENDER_ERROR: mln_runtime_event_type = 9;
  that couldn't be made or a shader that the backend rejects: the first of
  the frames in a row that fail, until one draws without failing.
 
- A map in MLN_MAP_MODE_CONTINUOUS shows what did draw of a failed frame,
- or keeps showing the frame before when the frame's own pass failed. It
- draws again on its own after as long as its frames have been failing,
+ A map in MLN_MAP_MODE_CONTINUOUS shows what did draw of a failed frame.
+ It draws again on its own after as long as its frames have been failing,
  and at least 100 ms. Once they have failed for a second, it takes the
  failure as lasting: it draws again only when something else draws a
  frame, such as a camera change or a tile, and goes idle
@@ -258,9 +256,8 @@ pub const MLN_RUNTIME_EVENT_MAP_RENDER_FRAME_STARTED: mln_runtime_event_type = 1
  that couldn't be made or a shader that the backend rejects: the first of
  the frames in a row that fail, until one draws without failing.
 
- A map in MLN_MAP_MODE_CONTINUOUS shows what did draw of a failed frame,
- or keeps showing the frame before when the frame's own pass failed. It
- draws again on its own after as long as its frames have been failing,
+ A map in MLN_MAP_MODE_CONTINUOUS shows what did draw of a failed frame.
+ It draws again on its own after as long as its frames have been failing,
  and at least 100 ms. Once they have failed for a second, it takes the
  failure as lasting: it draws again only when something else draws a
  frame, such as a camera change or a tile, and goes idle
@@ -271,9 +268,8 @@ pub const MLN_RUNTIME_EVENT_MAP_RENDER_FRAME_FINISHED: mln_runtime_event_type = 
  that couldn't be made or a shader that the backend rejects: the first of
  the frames in a row that fail, until one draws without failing.
 
- A map in MLN_MAP_MODE_CONTINUOUS shows what did draw of a failed frame,
- or keeps showing the frame before when the frame's own pass failed. It
- draws again on its own after as long as its frames have been failing,
+ A map in MLN_MAP_MODE_CONTINUOUS shows what did draw of a failed frame.
+ It draws again on its own after as long as its frames have been failing,
  and at least 100 ms. Once they have failed for a second, it takes the
  failure as lasting: it draws again only when something else draws a
  frame, such as a camera change or a tile, and goes idle
@@ -284,9 +280,8 @@ pub const MLN_RUNTIME_EVENT_MAP_RENDER_MAP_STARTED: mln_runtime_event_type = 12;
  that couldn't be made or a shader that the backend rejects: the first of
  the frames in a row that fail, until one draws without failing.
 
- A map in MLN_MAP_MODE_CONTINUOUS shows what did draw of a failed frame,
- or keeps showing the frame before when the frame's own pass failed. It
- draws again on its own after as long as its frames have been failing,
+ A map in MLN_MAP_MODE_CONTINUOUS shows what did draw of a failed frame.
+ It draws again on its own after as long as its frames have been failing,
  and at least 100 ms. Once they have failed for a second, it takes the
  failure as lasting: it draws again only when something else draws a
  frame, such as a camera change or a tile, and goes idle
@@ -4071,10 +4066,7 @@ pub struct mln_map_projection_camera_result {
  reports, is rendered too: it shows what did draw, and its mode is
  MLN_RENDER_MODE_PARTIAL.*/
 pub const MLN_RENDER_RESULT_RENDERED: mln_render_result = 0;
-/** The map had nothing new to draw, or the frame failed on the GPU with
- nothing to show, which MLN_RUNTIME_EVENT_MAP_RENDER_ERROR reports: the
- frame's own pass failed, or it was a still image's. A target takes
- nothing of such a frame: a surface keeps showing the frame before.*/
+/// The map had nothing new to draw.
 pub const MLN_RENDER_RESULT_NO_UPDATE: mln_render_result = 1;
 /** The target couldn't take a frame, such as while a window is hidden or
  destroyed, or after mln_render_session_release_target(). Demand a frame

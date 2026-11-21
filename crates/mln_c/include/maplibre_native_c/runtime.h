@@ -128,9 +128,8 @@ typedef enum mln_runtime_event_type : uint32_t {
    * that couldn't be made or a shader that the backend rejects: the first of
    * the frames in a row that fail, until one draws without failing.
    *
-   * A map in MLN_MAP_MODE_CONTINUOUS shows what did draw of a failed frame,
-   * or keeps showing the frame before when the frame's own pass failed. It
-   * draws again on its own after as long as its frames have been failing,
+   * A map in MLN_MAP_MODE_CONTINUOUS shows what did draw of a failed frame.
+   * It draws again on its own after as long as its frames have been failing,
    * and at least 100 ms. Once they have failed for a second, it takes the
    * failure as lasting: it draws again only when something else draws a
    * frame, such as a camera change or a tile, and goes idle
