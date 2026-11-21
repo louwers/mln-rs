@@ -275,11 +275,11 @@ pub(crate) struct TerrainCover {
     pub(crate) center: Option<TerrainTile>,
     /// The DEM tiles the source keeps loaded for the tiles and the center,
     /// whether or not a layer draws them, nearest the center first, then the
-    /// `standing_dems`.
+    /// `standing_dems` that aren't among them, each once.
     pub(crate) dem_tiles: Vec<OverscaledTileID>,
     /// The DEM tiles that the standing layers' tiles that no drawn tile
-    /// holds read, of those the tiles and the center don't
-    /// ([`request_standing`](Self::request_standing)).
+    /// holds read, each once, whether or not the tiles and the center load
+    /// them too ([`request_standing`](Self::request_standing)).
     pub(crate) standing_dems: Vec<OverscaledTileID>,
     /// The ranges that cull the tiles, and every source's tiles; the next
     /// update's cover takes them over.
@@ -338,9 +338,12 @@ impl TerrainCover {
                 wrap == tile.wrap && canonical.z <= z && tile.scaled_to(canonical.z).canonical == canonical
             });
             let id = tile.scaled_to(z.min(dem_zooms.max));
-            if !held && id.canonical.z >= dem_zooms.min && !self.dem_tiles.contains(&id) {
+            if held || id.canonical.z < dem_zooms.min || self.standing_dems.contains(&id) {
+                continue;
+            }
+            self.standing_dems.push(id);
+            if !self.dem_tiles.contains(&id) {
                 self.dem_tiles.push(id);
-                self.standing_dems.push(id);
             }
         }
     }

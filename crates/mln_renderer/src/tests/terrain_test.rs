@@ -1434,6 +1434,31 @@ fn a_source_tile_off_the_cover_reads_the_dem_tile_requested_for_it() {
     assert_eq!(321.0, under.height(glam::Vec2::splat(4096.0)));
 }
 
+/// A source tile of zoom 5 under terrain tiles of zoom 10 reads the DEM
+/// tile of zoom 5 that also culls them, once the finer DEM tiles the terrain
+/// tiles read have loaded too: which DEM tile a standing tile reads doesn't
+/// depend on whether the cover loads it for something else.
+#[test]
+fn a_source_tile_whose_dem_tile_culls_the_cover_keeps_reading_it() {
+    let mut load = TerrainLoad::new((0, 14), 1.0);
+    let cover = load.frame();
+    assert!(cover.tiles.iter().all(|tile| tile.id.canonical.z == 10));
+    let sources: BTreeSet<OverscaledTileID> = cover.tiles.iter().map(|tile| tile.id.scaled_to(5)).collect();
+    assert!(sources.iter().all(|source| cover.dem_tiles.contains(source)), "the cover culls with them");
+    load.standing = sources.iter().copied().collect();
+    load.answer(|tile| Some(terrarium_of(tile)));
+    assert!(load.is_loaded());
+    let cover = load.terrain.cover().unwrap();
+    assert!(cover.tiles.iter().all(|tile| tile.dem.is_some_and(|(dem, _)| dem.canonical.z == 9)));
+    let ground = Arc::clone(load.terrain.ground().expect("the ground"));
+    for source in &sources {
+        let under = ground.ground(source);
+        assert_eq!(Some(*source), under.dem(), "{source}");
+        let expected = f64::from(50 + 5 * (source.canonical.x % 8) + 13 * (source.canonical.y % 8) + 20);
+        assert_eq!(expected, under.height(glam::Vec2::splat(4096.0)), "{source}");
+    }
+}
+
 /// Before any DEM tile loads, the ground is flat at sea level.
 #[test]
 fn the_ground_without_a_dem_is_sea_level() {
