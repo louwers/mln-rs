@@ -115,8 +115,8 @@ fn defines<'a>(
 #[test]
 fn every_layer_program_shows_the_overdraw_inspector() {
     use mln_gfx::shaders::programs::{
-        ATMOSPHERE, CLIPPING_MASK, COLLISION_BOX, COLLISION_CIRCLE, GLOBE_DEPTH, SKY, TERRAIN, TERRAIN_PROBE,
-        VERTEX_TEXEL,
+        ATMOSPHERE, CLIPPING_MASK, COLLISION_BOX, COLLISION_CIRCLE, GLOBE_DEPTH, SKY, TERRAIN, TERRAIN_DEPTH,
+        TERRAIN_PROBE, VERTEX_TEXEL,
     };
     // The terrain shows its drapes, where the draped layers count their draws.
     let not_layers = [
@@ -127,6 +127,7 @@ fn every_layer_program_shows_the_overdraw_inspector() {
         &SKY,
         &ATMOSPHERE,
         &TERRAIN,
+        &TERRAIN_DEPTH,
         &TERRAIN_PROBE,
         &VERTEX_TEXEL,
     ];
@@ -300,7 +301,7 @@ fn ubo_ids(program: &Program, source: &ShaderSource) -> Vec<(&'static str, usize
         ),
         "SkyShader" => (&[("idSkyPropsUBO", ID_SKY_PROPS_UBO)], "skyUBOCount"),
         "VertexTexelShader" => (&[], "vertexTexelUBOCount"),
-        "TerrainShader" | "TerrainProbeShader" => (
+        "TerrainShader" | "TerrainDepthShader" | "TerrainProbeShader" => (
             &[
                 ("idTerrainDrawableUBO", ID_TERRAIN_DRAWABLE_UBO),
                 ("idTerrainPropsUBO", ID_TERRAIN_PROPS_UBO),

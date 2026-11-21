@@ -22,7 +22,7 @@ use crate::shaders::shader_defines::{
     ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, ID_FILL_IMAGE_TEXTURE,
     ID_FILL_OPACITY_VERTEX_ATTRIBUTE, ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE, ID_FILL_OUTLINE_END_ATTRIBUTE,
     ID_FILL_OUTLINE_POS_ATTRIBUTE, ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE,
-    ID_FILL_POS_VERTEX_ATTRIBUTE, ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE, ID_GROUND_DEM_TEXTURE,
+    ID_FILL_POS_VERTEX_ATTRIBUTE, ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE, ID_GROUND_DEM_TEXTURE, ID_GROUND_DEPTH_TEXTURE,
     ID_HEATMAP_COLOR_RAMP_TEXTURE, ID_HEATMAP_IMAGE_TEXTURE, ID_HEATMAP_POS_VERTEX_ATTRIBUTE,
     ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE, ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE, ID_HILLSHADE_IMAGE_TEXTURE,
     ID_HILLSHADE_POS_VERTEX_ATTRIBUTE, ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE, ID_LAYER_COMPOSITE_BACKDROP_TEXTURE,
@@ -145,8 +145,9 @@ pub static CIRCLE: Program = Program {
         (ID_CIRCLE_STROKE_OPACITY_VERTEX_ATTRIBUTE, Float2),
     ],
     instance_attributes: &[],
-    // The terrain variant's ground.
-    textures: &[ID_GROUND_DEM_TEXTURE],
+    // The terrain variant's ground, and the depth of the ground that hides
+    // circles behind it.
+    textures: &[ID_GROUND_DEM_TEXTURE, ID_GROUND_DEPTH_TEXTURE],
     properties: &[
         property("color", ID_CIRCLE_COLOR_VERTEX_ATTRIBUTE),
         property("radius", ID_CIRCLE_RADIUS_VERTEX_ATTRIBUTE),
@@ -577,8 +578,9 @@ pub static HEATMAP: Program = Program {
         (ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE, Float2),
     ],
     instance_attributes: &[],
-    // The terrain variant's ground.
-    textures: &[ID_GROUND_DEM_TEXTURE],
+    // The terrain variant's ground, and the depth of the ground that hides
+    // kernels behind it.
+    textures: &[ID_GROUND_DEM_TEXTURE, ID_GROUND_DEPTH_TEXTURE],
     properties: &[
         property("weight", ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE),
         property("radius", ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE),
@@ -637,7 +639,7 @@ pub static SYMBOL_ICON: Program = Program {
         (ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE, Float),
     ],
     instance_attributes: &[],
-    textures: &[ID_SYMBOL_IMAGE_TEXTURE, ID_GROUND_DEM_TEXTURE],
+    textures: &[ID_SYMBOL_IMAGE_TEXTURE, ID_GROUND_DEM_TEXTURE, ID_GROUND_DEPTH_TEXTURE],
     properties: &[property("opacity", ID_SYMBOL_OPACITY_ATTRIBUTE)],
 };
 
@@ -658,7 +660,7 @@ pub static SYMBOL_SDF: Program = Program {
         (ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE, Float),
     ],
     instance_attributes: &[],
-    textures: &[ID_SYMBOL_IMAGE_TEXTURE, ID_GROUND_DEM_TEXTURE],
+    textures: &[ID_SYMBOL_IMAGE_TEXTURE, ID_GROUND_DEM_TEXTURE, ID_GROUND_DEPTH_TEXTURE],
     properties: &[
         property("opacity", ID_SYMBOL_OPACITY_ATTRIBUTE),
         property("fill_color", ID_SYMBOL_COLOR_ATTRIBUTE),
@@ -684,7 +686,7 @@ pub static SYMBOL_TEXT_AND_ICON: Program = Program {
         (ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE, Float),
     ],
     instance_attributes: &[],
-    textures: &[ID_SYMBOL_IMAGE_TEXTURE, ID_SYMBOL_IMAGE_ICON_TEXTURE, ID_GROUND_DEM_TEXTURE],
+    textures: &[ID_SYMBOL_IMAGE_TEXTURE, ID_SYMBOL_IMAGE_ICON_TEXTURE, ID_GROUND_DEM_TEXTURE, ID_GROUND_DEPTH_TEXTURE],
     properties: &[
         property("opacity", ID_SYMBOL_OPACITY_ATTRIBUTE),
         property("fill_color", ID_SYMBOL_COLOR_ATTRIBUTE),
@@ -762,6 +764,18 @@ pub static TERRAIN: Program = Program {
     attributes: &[(ID_TERRAIN_POS_VERTEX_ATTRIBUTE, Short4)],
     instance_attributes: &[],
     textures: &[ID_TERRAIN_DEM_TEXTURE, ID_TERRAIN_DRAPE_TEXTURE],
+    properties: &[],
+};
+
+/// The depth of the terrain's surface, which the standing layers that it
+/// hides read: a tile's grid with its skirts, raised by its DEM as the
+/// surface's, whose fragments write the eye distance's (the clip w's) bits,
+/// least significant byte first, as a texel's channels.
+pub static TERRAIN_DEPTH: Program = Program {
+    name: "TerrainDepthShader",
+    attributes: &[(ID_TERRAIN_POS_VERTEX_ATTRIBUTE, Short4)],
+    instance_attributes: &[],
+    textures: &[ID_TERRAIN_DEM_TEXTURE],
     properties: &[],
 };
 

@@ -51,6 +51,8 @@ mod stencil_overflow_test;
 mod system_fonts_test;
 // The layers that drape over terrain, drawn through the terrain's drapes.
 mod terrain_drape_test;
+// What terrain hides behind its ground.
+mod terrain_occlusion_test;
 // Circles that stand on the terrain's ground.
 mod terrain_standing_test;
 // Tiles reloading as their data expires, over an online file source.

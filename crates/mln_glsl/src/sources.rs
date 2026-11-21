@@ -138,6 +138,78 @@ vec4 ground_dropped() {
     };
 }
 
+/// What a terrain variant of a program that terrain hides reads of the
+/// ground's depth, within `#ifdef TERRAIN`, after `standing_ground`:
+/// `ground_visibility`. The depth binds with the global buffers, so no flat
+/// program's layout changes for it.
+macro_rules! ground_visibility {
+    () => {
+        r"
+#ifdef TERRAIN
+layout(set = GLOBAL_SET_INDEX, binding = 2) uniform texture2D ground_depth_texture;
+
+// The eye distance of the ground drawn at `texel`, which holds its float's
+// bits, least significant byte first; 0 where no ground is drawn.
+float ground_depth_at(const ivec2 texel) {
+    const uvec4 bytes = uvec4(round(texelFetch(ground_depth_texture, texel, 0) * 255.0));
+    return uintBitsToFloat(bytes.x | (bytes.y << 8u) | (bytes.z << 16u) | (bytes.w << 24u));
+}
+
+// GL JS's `depthOpacity`: 1 where a point `w` from the eye, at `ndc`, is in
+// front of the ground drawn there, fading to 0 over its depth ramp behind
+// it, in GL's NDC depth, which `depth_factor` scales; 1 where no ground is
+// drawn. The ground's depth there interpolates the reciprocals of the eye
+// distances of the four texels around it, as a plane's is in screen space,
+// so ground seen at a grazing angle doesn't hide what stands on it; where
+// one of the four has no ground, it is the nearest texel's. The texels' rows
+// run from the top.
+float ground_depth_opacity(const vec2 ndc, const float w, const float depth_factor) {
+    const ivec2 size = textureSize(ground_depth_texture, 0);
+    const vec2 pos = (vec2(ndc.x, -ndc.y) * 0.5 + 0.5) * vec2(size) - 0.5;
+    const vec2 first = floor(pos);
+    const vec2 f = pos - first;
+    const ivec2 texel = ivec2(first);
+    const ivec2 last = size - 1;
+    const float tl = ground_depth_at(clamp(texel, ivec2(0), last));
+    const float tr = ground_depth_at(clamp(texel + ivec2(1, 0), ivec2(0), last));
+    const float bl = ground_depth_at(clamp(texel + ivec2(0, 1), ivec2(0), last));
+    const float br = ground_depth_at(clamp(texel + ivec2(1, 1), ivec2(0), last));
+    float inverse;
+    if (tl > 0.0 && tr > 0.0 && bl > 0.0 && br > 0.0) {
+        inverse = mix(mix(1.0 / tl, 1.0 / tr, f.x), mix(1.0 / bl, 1.0 / br, f.x), f.y);
+    } else {
+        const float top = f.x >= 0.5 ? tr : tl;
+        const float bottom = f.x >= 0.5 ? br : bl;
+        const float ground = f.y >= 0.5 ? bottom : top;
+        if (!(ground > 0.0)) {
+            return 1.0;
+        }
+        inverse = 1.0 / ground;
+    }
+    const float d = depth_factor * (1.0 / w - inverse) + 0.0001;
+    return 1.0 - clamp(-500.0 * d, 0.0, 1.0);
+}
+
+// GL JS's `calculate_visibility` of the point at `clip`, whole: 1 where the
+// drawn ground doesn't hide it, 0 where it does, between them on its depth
+// ramp, averaged with the point 0.01 NDC above where that is 0.95 or less.
+float ground_visibility(const vec4 clip, const GroundDrawableUBO ground) {
+    if (clip.w <= 0.0) {
+        return 1.0;
+    }
+    const vec2 ndc = clip.xy / clip.w;
+    const float depth_factor = ground.props.depth_factor;
+    const float visibility = ground_depth_opacity(ndc, clip.w, depth_factor);
+    if (visibility > 0.95) {
+        return 1.0;
+    }
+    return (visibility + ground_depth_opacity(ndc + vec2(0.0, 0.01), clip.w, depth_factor)) / 2.0;
+}
+#endif
+"
+    };
+}
+
 /// The start of every vertex stage.
 pub(crate) const PRELUDE_VERTEX: &str = r#"
 
@@ -261,7 +333,9 @@ struct TerrainProps {
     float unpack_scale;
     float exaggeration;
     float skirt_length;
-    float pad0;
+    // 2fn / (f - n) of the frame's main projection, 0 without the ground's
+    // depth.
+    float depth_factor;
 };
 
 // Where a terrain variant's draw reads the ground it stands on: where its
@@ -663,6 +737,7 @@ pub(crate) const CIRCLE_SHADER: GlslShaderSource = GlslShaderSource {
     prelude: CIRCLE_SHADER_PRELUDE,
     vertex: concat!(
         standing_ground!(),
+        ground_visibility!(),
         r"
 
 layout(location = 0) in ivec2 in_position;
@@ -767,6 +842,11 @@ layout(location = 7) out float frag_stroke_width;
 layout(location = 8) out float frag_stroke_opacity;
 #endif
 
+#ifdef TERRAIN
+// How much of the circle the ground in front of its center leaves.
+layout(location = 9) out float frag_visibility;
+#endif
+
 void main() {
     const CircleDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
 
@@ -797,6 +877,7 @@ void main() {
 #ifdef TERRAIN
     const ProjectionUBO standing = projectionVector.projection_ubo[constant.ubo_index];
     const float ele = standing_height(circle_center + standing.translate, standing.ground);
+    frag_visibility = ground_visibility(drawable.matrix * vec4(circle_center, ele, 1), standing.ground);
 #else
     const float ele = 0.0;
 #endif
@@ -920,6 +1001,10 @@ layout(location = 7) in float frag_stroke_width;
 layout(location = 8) in float frag_stroke_opacity;
 #endif
 
+#ifdef TERRAIN
+layout(location = 9) in float frag_visibility;
+#endif
+
 layout(location = 0) out vec4 out_color;
 
 layout(set = LAYER_SET_INDEX, binding = idCircleEvaluatedPropsUBO) uniform CircleEvaluatedPropsUBO {
@@ -985,6 +1070,9 @@ void main() {
         smoothstep(antialiased_blur, 0.0, extrude_length - radius / (radius + stroke_width));
 
     out_color = opacity_t * mix(color * opacity, stroke_color * stroke_opacity, color_t);
+#ifdef TERRAIN
+    out_color *= frag_visibility;
+#endif
 }
 ",
 };
@@ -3652,6 +3740,7 @@ pub(crate) const HEATMAP_SHADER: GlslShaderSource = GlslShaderSource {
     prelude: HEATMAP_SHADER_PRELUDE,
     vertex: concat!(
         standing_ground!(),
+        ground_visibility!(),
         r#"
 
 // Effective "0" in the kernel density texture to adjust the kernel size to;
@@ -3704,6 +3793,10 @@ layout(set = LAYER_SET_INDEX, binding = idHeatmapEvaluatedPropsUBO) uniform Heat
 layout(location = 0) out float frag_weight;
 #endif
 layout(location = 1) out vec2 frag_extrude;
+#ifdef TERRAIN
+// How much of the kernel the ground in front of its center leaves.
+layout(location = 2) out float frag_visibility;
+#endif
 
 void main() {
     const HeatmapDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
@@ -3757,6 +3850,7 @@ void main() {
 #ifdef TERRAIN
     const GroundDrawableUBO ground = projectionVector.projection_ubo[constant.ubo_index].ground;
     const float ele = standing_height(center, ground);
+    frag_visibility = ground_visibility(drawable.matrix * vec4(center, ele, 1), ground);
 #else
     const float ele = 0.0;
 #endif
@@ -3784,6 +3878,9 @@ void main() {
 layout(location = 0) in float frag_weight;
 #endif
 layout(location = 1) in vec2 frag_extrude;
+#ifdef TERRAIN
+layout(location = 2) in float frag_visibility;
+#endif
 
 layout(location = 0) out vec4 out_color;
 
@@ -3808,7 +3905,11 @@ void main() {
 #else
     const float weight = frag_weight;
 #endif
+#ifdef TERRAIN
+    const float val = weight * frag_visibility * props.intensity * GAUSS_COEF * exp(d);
+#else
     const float val = weight * props.intensity * GAUSS_COEF * exp(d);
+#endif
 
     out_color = vec4(val, 1.0, 1.0, 1.0);
 }
@@ -4095,6 +4196,59 @@ void main() {
     const vec3 surface = pow(color.rgb / color.a, gamma);
     const vec3 fogged = surface * (1.0 - strength * tint.a) + tint.rgb * strength;
     out_color = vec4(pow(fogged, 1.0 / gamma) * color.a, color.a);
+}
+",
+};
+
+/// The depth of the terrain's surface: a tile's grid, drawn with the tile's
+/// matrix from `drawableVector`, raised to the heights of the tile's DEM with
+/// its skirts lowered, as the surface's, whose fragments write the eye
+/// distance (the clip w, which is affine in the vertex, so it interpolates
+/// exactly) as its float's bits, least significant byte first.
+pub(crate) const TERRAIN_DEPTH_SHADER: GlslShaderSource = GlslShaderSource {
+    prelude: TERRAIN_SHADER_PRELUDE,
+    vertex: concat!(
+        terrain_props!(),
+        r"
+
+// x and y in tile units, whether the vertex is a skirt's lower edge, 0.
+layout(location = 0) in ivec4 in_pos;
+
+layout(location = 0) out float frag_eye_distance;
+
+layout(push_constant) uniform Constants {
+    int ubo_index;
+} constant;
+
+struct TerrainDrawableUBO {
+    mat4 matrix;
+    vec4 dem_coords;
+};
+
+layout(std140, set = LAYER_SET_INDEX, binding = idTerrainDrawableUBO) readonly buffer TerrainDrawableUBOVector {
+    TerrainDrawableUBO drawable_ubo[];
+} drawableVector;
+
+void main() {
+    const TerrainDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
+    const vec2 pos = vec2(in_pos.xy);
+    const float skirt = float(in_pos.z);
+    const float height = ground_height(pos, drawable.dem_coords, terrain_props.props);
+    gl_Position = drawable.matrix * vec4(pos, height - skirt * terrain_props.props.skirt_length, 1.0);
+    frag_eye_distance = gl_Position.w;
+}
+"
+    ),
+    fragment: r"
+
+layout(location = 0) in float frag_eye_distance;
+
+layout(location = 0) out vec4 out_color;
+
+void main() {
+    const uint bits = floatBitsToUint(frag_eye_distance);
+    const uvec4 bytes = uvec4(bits, bits >> 8u, bits >> 16u, bits >> 24u) & uvec4(255u);
+    out_color = vec4(bytes) / 255.0;
 }
 ",
 };
@@ -6391,6 +6545,7 @@ pub(crate) const SYMBOL_ICON_SHADER: GlslShaderSource = GlslShaderSource {
     prelude: SYMBOL_SHADER_PRELUDE,
     vertex: concat!(
         standing_ground!(),
+        ground_visibility!(),
         r"
 
 layout(location = 0) in ivec4 in_pos_offset;
@@ -6513,6 +6668,16 @@ void main() {
     const float ele = in_height_offset;
 #endif
     const vec4 projectedPoint = projectTileWithElevation(translated_a_pos, ele, projection);
+    // The ground in front of the anchor hides the whole symbol.
+#ifdef TERRAIN
+    const float ground_seen = ground_visibility(projectedPoint, projection.ground);
+    if (ground_seen == 0.0) {
+        gl_Position = ground_dropped();
+        return;
+    }
+#else
+    const float ground_seen = 1.0;
+#endif
 #ifdef PROJECTION_GLOBE
     // A screen-aligned label whose anchor is behind the horizon goes at
     // once, rather than fading out once placement next finds it occluded:
@@ -6590,7 +6755,7 @@ void main() {
     frag_tex = (a_tex - tex_origin) / drawable.texsize;
     frag_tex_origin = tex_origin / drawable.texsize;
 
-    frag_opacity = visibility;
+    frag_opacity = visibility * ground_seen;
 }
 "
     ),
@@ -6662,6 +6827,7 @@ pub(crate) const SYMBOL_SDF_SHADER: GlslShaderSource = GlslShaderSource {
     prelude: SYMBOL_SHADER_PRELUDE,
     vertex: concat!(
         standing_ground!(),
+        ground_visibility!(),
         r"
 
 layout(location = 0) in ivec4 in_pos_offset;
@@ -6827,6 +6993,16 @@ void main() {
     const float ele = in_height_offset;
 #endif
     const vec4 projectedPoint = projectTileWithElevation(translated_a_pos, ele, projection);
+    // The ground in front of the anchor hides the whole symbol.
+#ifdef TERRAIN
+    const float ground_seen = ground_visibility(projectedPoint, projection.ground);
+    if (ground_seen == 0.0) {
+        gl_Position = ground_dropped();
+        return;
+    }
+#else
+    const float ground_seen = 1.0;
+#endif
 #ifdef PROJECTION_GLOBE
     // A screen-aligned label whose anchor is behind the horizon goes at
     // once, rather than fading out once placement next finds it occluded:
@@ -6911,9 +7087,9 @@ void main() {
     frag_tex = (a_tex - tex_origin) / drawable.texsize;
     frag_tex_origin = tex_origin / drawable.texsize;
 #if defined(HAS_UNIFORM_u_opacity)
-    frag_fade_opacity = fade_opacity;
+    frag_fade_opacity = fade_opacity * ground_seen;
 #else
-    frag_fade_opacity = fade_opacity * opacity;
+    frag_fade_opacity = fade_opacity * opacity * ground_seen;
 #endif
 
 #if defined(HAS_UNIFORM_u_halo_width)
@@ -7042,6 +7218,7 @@ pub(crate) const SYMBOL_TEXT_AND_ICON_SHADER: GlslShaderSource = GlslShaderSourc
     prelude: SYMBOL_SHADER_PRELUDE,
     vertex: concat!(
         standing_ground!(),
+        ground_visibility!(),
         r"
 
 #define SDF 1.0
@@ -7211,6 +7388,16 @@ void main() {
     const float ele = in_height_offset;
 #endif
     const vec4 projectedPoint = projectTileWithElevation(translated_a_pos, ele, projection);
+    // The ground in front of the anchor hides the whole symbol.
+#ifdef TERRAIN
+    const float ground_seen = ground_visibility(projectedPoint, projection.ground);
+    if (ground_seen == 0.0) {
+        gl_Position = ground_dropped();
+        return;
+    }
+#else
+    const float ground_seen = 1.0;
+#endif
 #ifdef PROJECTION_GLOBE
     // A screen-aligned label whose anchor is behind the horizon goes at
     // once, rather than fading out once placement next finds it occluded:
@@ -7299,9 +7486,9 @@ void main() {
     frag_tex = (a_tex - tex_origin) / texsize;
     frag_tex_origin = tex_origin / texsize;
 #if defined(HAS_UNIFORM_u_opacity)
-    frag_fade_opacity = fade_opacity;
+    frag_fade_opacity = fade_opacity * ground_seen;
 #else
-    frag_fade_opacity = fade_opacity * opacity;
+    frag_fade_opacity = fade_opacity * opacity * ground_seen;
 #endif
 
 #if defined(HAS_UNIFORM_u_halo_width)

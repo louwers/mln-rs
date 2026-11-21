@@ -13,7 +13,7 @@ use mln_gfx::RendererBackend as _;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::shaders::programs::projection_variants;
-use mln_gfx::shaders::shader_defines::ID_GROUND_DEM_TEXTURE;
+use mln_gfx::shaders::shader_defines::{ID_GROUND_DEM_TEXTURE, ID_GROUND_DEPTH_TEXTURE};
 use mln_util::hash::HashSet;
 
 use crate::shaders::glsl_sources::PRELUDE;
@@ -71,8 +71,8 @@ fn every_program_declares_the_properties_its_glsl_reads_from_uniforms() {
 #[test]
 fn every_layer_program_shows_the_overdraw_inspector() {
     use mln_gfx::shaders::programs::{
-        ATMOSPHERE, CLIPPING_MASK, COLLISION_BOX, COLLISION_CIRCLE, GLOBE_DEPTH, SKY, TERRAIN, TERRAIN_PROBE,
-        VERTEX_TEXEL,
+        ATMOSPHERE, CLIPPING_MASK, COLLISION_BOX, COLLISION_CIRCLE, GLOBE_DEPTH, SKY, TERRAIN, TERRAIN_DEPTH,
+        TERRAIN_PROBE, VERTEX_TEXEL,
     };
     // The terrain shows its drapes, where the draped layers count their draws.
     let not_layers = [
@@ -83,6 +83,7 @@ fn every_layer_program_shows_the_overdraw_inspector() {
         &SKY,
         &ATMOSPHERE,
         &TERRAIN,
+        &TERRAIN_DEPTH,
         &TERRAIN_PROBE,
         &VERTEX_TEXEL,
     ];
@@ -216,8 +217,12 @@ fn every_program_links_and_matches_its_tables(backend: &mut RendererBackend) {
                     assert!(!locations.is_empty(), "{what}: no vertex attributes");
                 }
                 // Only the terrain variant of a standing layer's program reads
-                // the ground's DEM.
-                let reads = |id: usize| variant == ProjectionVariant::Terrain || !stands || id != ID_GROUND_DEM_TEXTURE;
+                // the ground's DEM and depth.
+                let reads = |id: usize| {
+                    variant == ProjectionVariant::Terrain
+                        || !stands
+                        || (id != ID_GROUND_DEM_TEXTURE && id != ID_GROUND_DEPTH_TEXTURE)
+                };
                 for info in source.textures.iter().filter(|info| reads(info.id)) {
                     assert!(program.textures.contains(&info.id), "{what}: no sampler {}", info.name);
                 }

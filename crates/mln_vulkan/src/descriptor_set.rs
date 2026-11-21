@@ -4,9 +4,9 @@
 use ash::vk;
 use mln_gfx::shaders::shader_defines::{ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO, ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO};
 use mln_glsl::layout::{
-    BufferSetShape, DRAWABLE_UNIFORM_COUNT, DRAWABLE_VERTEX_COUNT, DescriptorSetType, GLOBAL_UNIFORM_COUNT,
-    IMAGE_TEXTURE_COUNT, LAYER_STORAGE_COUNT, LAYER_UNIFORM_COUNT, image_sampler_binding, image_texture_binding,
-    layer_storage_binding,
+    BufferSetShape, DRAWABLE_UNIFORM_COUNT, DRAWABLE_VERTEX_COUNT, DescriptorSetType, GLOBAL_GROUND_DEPTH_BINDING,
+    GLOBAL_UNIFORM_COUNT, IMAGE_TEXTURE_COUNT, LAYER_STORAGE_COUNT, LAYER_UNIFORM_COUNT, image_sampler_binding,
+    image_texture_binding, layer_storage_binding,
 };
 
 use crate::device::Device;
@@ -65,6 +65,7 @@ pub(crate) struct DescriptorPoolGrowable {
     descriptor_storage_per_set: u32,
     descriptor_uniforms_per_set: u32,
     descriptor_textures_per_set: u32,
+    descriptor_samplers_per_set: u32,
     pub(crate) pools: Vec<PoolInfo>,
     current_pool_index: Option<usize>,
 }
@@ -78,12 +79,14 @@ impl DescriptorPoolGrowable {
         descriptor_storage_per_set: u32,
         descriptor_uniforms_per_set: u32,
         descriptor_textures_per_set: u32,
+        descriptor_samplers_per_set: u32,
     ) -> Self {
         DescriptorPoolGrowable {
             max_sets,
             descriptor_storage_per_set,
             descriptor_uniforms_per_set,
             descriptor_textures_per_set,
+            descriptor_samplers_per_set,
             pools: Vec::new(),
             current_pool_index: None,
         }
@@ -96,7 +99,7 @@ impl DescriptorPoolGrowable {
             (self.descriptor_storage_per_set, vk::DescriptorType::STORAGE_BUFFER),
             (self.descriptor_uniforms_per_set, vk::DescriptorType::UNIFORM_BUFFER),
             (self.descriptor_textures_per_set, vk::DescriptorType::SAMPLED_IMAGE),
-            (self.descriptor_textures_per_set, vk::DescriptorType::SAMPLER),
+            (self.descriptor_samplers_per_set, vk::DescriptorType::SAMPLER),
         ] {
             if count > 0 {
                 sizes.push(vk::DescriptorPoolSize { ty: type_, descriptor_count: max_sets * count });
@@ -159,6 +162,17 @@ pub(crate) fn build_descriptor_set_layout(
     vertex_buffers: bool,
 ) -> Result<vk::DescriptorSetLayout, String> {
     let mut bindings = Vec::new();
+    if type_ == DescriptorSetType::Global {
+        // The frame's ground depth, which a vertex stage fetches texels of,
+        // without a sampler.
+        bindings.push(
+            vk::DescriptorSetLayoutBinding::default()
+                .binding(GLOBAL_GROUND_DEPTH_BINDING)
+                .stage_flags(vk::ShaderStageFlags::VERTEX)
+                .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
+                .descriptor_count(1),
+        );
+    }
     if type_ == DescriptorSetType::DrawableImage {
         // A vertex stage fetches texels, without a sampler.
         let texture_stages = vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT;

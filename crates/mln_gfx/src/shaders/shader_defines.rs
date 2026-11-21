@@ -169,6 +169,13 @@ pub const ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE: usize = 0;
 /// texel, and the surface's DEM, so that one prelude declares it. The shader
 /// sources write this slot as a literal.
 pub const ID_GROUND_DEM_TEXTURE: usize = 2;
+/// The depth of the frame's drawn ground (the eye distance of each logical
+/// pixel's nearest ground, as its f32's bits), which the terrain variants of
+/// the programs that terrain hides (symbols, circles and heatmap kernels)
+/// read at their anchor. It is one texture for the whole frame, past the
+/// draw's own textures: a draw binds it from the context's frame, not from
+/// its `Textures`, so no flat program's layout or draw changes for it.
+pub const ID_GROUND_DEPTH_TEXTURE: usize = MAX_TEXTURE_COUNT_PER_SHADER;
 
 // --- terrain: a tile's grid, its DEM and the texture draped over it.
 /// A grid vertex: x and y in tile units, whether it is a skirt's lower edge,

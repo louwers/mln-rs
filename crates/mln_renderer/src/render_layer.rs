@@ -551,6 +551,12 @@ pub(crate) trait TypedLayer {
     /// under them ([`PaintParameters::ground`]).
     const STANDS: bool = false;
 
+    /// Whether the ground hides the layer's features behind it, each whole
+    /// by its anchor or center, through the depth of the drawn ground that
+    /// its terrain variant reads. A standing layer that the depth test hides
+    /// pixel by pixel, as fill extrusions are, needs no such depth.
+    const HIDES_BEHIND_GROUND: bool = false;
+
     fn parts(&self) -> Parts<'_, Self>;
     fn parts_mut(&mut self) -> PartsMut<'_, Self>;
 
@@ -715,6 +721,10 @@ pub(crate) trait LayerParts {
 
     /// Whether the layer stands on terrain ([`TypedLayer::STANDS`]).
     fn stands(&self) -> bool;
+
+    /// Whether the ground hides the layer's features behind it
+    /// ([`TypedLayer::HIDES_BEHIND_GROUND`]).
+    fn hides_behind_ground(&self) -> bool;
 
     /// Whether the layer draws a drape by the map's bearing, with its values
     /// of the frame ([`TypedLayer::drapes_by_bearing`]).
@@ -932,6 +942,10 @@ impl<L: TypedLayer> LayerParts for L {
 
     fn stands(&self) -> bool {
         L::STANDS
+    }
+
+    fn hides_behind_ground(&self) -> bool {
+        L::HIDES_BEHIND_GROUND
     }
 
     fn drapes_by_bearing(&self) -> bool {

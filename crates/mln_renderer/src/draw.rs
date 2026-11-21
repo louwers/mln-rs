@@ -21,7 +21,9 @@ use mln_gfx::gpu::{
     TargetFormats, TextureId, VertexAttribute as GpuVertexAttribute, VertexBufferLayout, VertexStep,
 };
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::shader_defines::{MAX_TEXTURE_COUNT_PER_SHADER, MAX_UBO_COUNT_PER_SHADER};
+use mln_gfx::shaders::shader_defines::{
+    ID_GROUND_DEPTH_TEXTURE, MAX_TEXTURE_COUNT_PER_SHADER, MAX_UBO_COUNT_PER_SHADER,
+};
 use mln_gfx::stencil_mode::StencilMode;
 use mln_util::logging::{Event, Log};
 
@@ -79,11 +81,11 @@ pub(crate) fn raw_vertices(
 const MAX_STORAGE_VERTICES: usize = 3;
 
 /// The most entries bindings have.
-const MAX_ENTRIES: usize = MAX_UBO_COUNT_PER_SHADER + MAX_STORAGE_VERTICES + MAX_TEXTURE_COUNT_PER_SHADER;
+const MAX_ENTRIES: usize = MAX_UBO_COUNT_PER_SHADER + MAX_STORAGE_VERTICES + MAX_TEXTURE_COUNT_PER_SHADER + 1;
 
 /// The entries of bindings, on the stack: at most a buffer at each uniform
-/// buffer id, one of each of the vertices read as storage buffers, and a
-/// texture at each texture id.
+/// buffer id, one of each of the vertices read as storage buffers, a texture
+/// at each texture id, and the frame's ground depth.
 pub(crate) struct Entries {
     entries: [BindGroupEntry; MAX_ENTRIES],
     len: usize,
@@ -501,6 +503,16 @@ impl DrawObjects {
             textures
                 .filter_map(|&id| context.gpu_texture(self.textures.get(id)?.as_ref()?).cloned().map(Held::Texture)),
         );
+        // The frame's ground depth binds with the global buffers, whose epoch
+        // renews when it changes.
+        if let Some(depth) =
+            context.ground_depth().filter(|_| self.shader.program().textures.contains(&ID_GROUND_DEPTH_TEXTURE))
+        {
+            let depth = depth.clone();
+            let (texture, sampler) = context.texture_binding(gpu, &depth)?;
+            entries.push(BindGroupEntry::Texture { id: ID_GROUND_DEPTH_TEXTURE as u32, texture, sampler });
+            held.extend(context.gpu_texture(&depth).cloned().map(Held::Texture));
+        }
         let bindings = gpu.create_bindings(&BindingsDesc {
             label: self.shader.program().name,
             shader: shader_id,

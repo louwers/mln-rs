@@ -98,6 +98,10 @@ pub struct TerrainStats {
     /// Draw calls of the terrain's surface during the most recent frame,
     /// among [`RenderingStats::num_draw_calls`].
     pub surface_draw_calls: usize,
+    /// Draw calls of the ground's depth, which hides the symbols, circles
+    /// and heatmap kernels behind it, during the most recent frame, among
+    /// [`RenderingStats::num_draw_calls`].
+    pub ground_depth_draw_calls: usize,
     /// Bytes of the drapes' textures, their mips included, which
     /// [`RenderingStats::mem_textures`] counts too. Every stack's drapes
     /// take an equal share.
@@ -113,6 +117,9 @@ pub struct TerrainStats {
     /// Bytes of the DEM textures that the surface reads, which
     /// [`RenderingStats::mem_textures`] counts too.
     pub mem_dem_textures: usize,
+    /// Bytes of the ground's depth, which [`RenderingStats::mem_textures`]
+    /// counts too, and of the depth test it is drawn with, which it doesn't.
+    pub mem_ground_depth: usize,
     /// Bytes of the DEM images that the ground the map's camera stands on
     /// holds, each once, which the terrain source's tiles share while they
     /// hold them.

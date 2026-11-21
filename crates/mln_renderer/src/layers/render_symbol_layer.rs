@@ -1205,6 +1205,7 @@ impl TypedLayer for RenderSymbolLayer {
     const TILE_ORDER: TileOrder = TileOrder::ByY;
 
     const STANDS: bool = true;
+    const HIDES_BEHIND_GROUND: bool = true;
 
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }

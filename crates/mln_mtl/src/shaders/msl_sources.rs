@@ -80,6 +80,75 @@ static float4 ground_dropped() {
     };
 }
 
+/// What a terrain variant of a program that terrain hides reads of the
+/// ground's depth: `ground_visibility`. Only the variant's vertex function
+/// takes the depth texture.
+macro_rules! ground_visibility {
+    () => {
+        r#"
+// The eye distance of the ground drawn at `texel` of `depth`, which holds its
+// float's bits, least significant byte first; 0 where no ground is drawn.
+static float ground_depth_at(texture2d<float, access::read> depth, int2 texel) {
+    const uint4 bytes = uint4(round(depth.read(uint2(texel)) * 255.0));
+    return as_type<float>(bytes.x | (bytes.y << 8) | (bytes.z << 16) | (bytes.w << 24));
+}
+
+// GL JS's `depthOpacity`: 1 where a point `w` from the eye, at `ndc`, is in
+// front of the ground drawn there, fading to 0 over its depth ramp behind it,
+// in GL's NDC depth, which `depth_factor` scales; 1 where no ground is drawn.
+// The ground's depth there interpolates the reciprocals of the eye distances
+// of the four texels of `depth` around it, as a plane's is in screen space,
+// so ground seen at a grazing angle doesn't hide what stands on it; where one
+// of the four has no ground, it is the nearest texel's. The texels' rows run
+// from the top.
+static float ground_depth_opacity(texture2d<float, access::read> depth, float2 ndc, float w, float depth_factor) {
+    const int2 size = int2(int(depth.get_width()), int(depth.get_height()));
+    const float2 pos = (float2(ndc.x, -ndc.y) * 0.5 + 0.5) * float2(size) - 0.5;
+    const float2 first = floor(pos);
+    const float2 f = pos - first;
+    const int2 texel = int2(first);
+    const int2 last = size - 1;
+    const float tl = ground_depth_at(depth, clamp(texel, int2(0), last));
+    const float tr = ground_depth_at(depth, clamp(texel + int2(1, 0), int2(0), last));
+    const float bl = ground_depth_at(depth, clamp(texel + int2(0, 1), int2(0), last));
+    const float br = ground_depth_at(depth, clamp(texel + int2(1, 1), int2(0), last));
+    float inverse;
+    if (tl > 0.0 && tr > 0.0 && bl > 0.0 && br > 0.0) {
+        inverse = mix(mix(1.0 / tl, 1.0 / tr, f.x), mix(1.0 / bl, 1.0 / br, f.x), f.y);
+    } else {
+        const float top = f.x >= 0.5 ? tr : tl;
+        const float bottom = f.x >= 0.5 ? br : bl;
+        const float ground = f.y >= 0.5 ? bottom : top;
+        if (!(ground > 0.0)) {
+            return 1.0;
+        }
+        inverse = 1.0 / ground;
+    }
+    const float d = depth_factor * (1.0 / w - inverse) + 0.0001;
+    return 1.0 - clamp(-500.0 * d, 0.0, 1.0);
+}
+
+// GL JS's `calculate_visibility` of the point at `clip`, whole: 1 where the
+// drawn ground doesn't hide it, 0 where it does, between them on its depth
+// ramp, averaged with the point 0.01 NDC above where that is 0.95 or less.
+static float ground_visibility(float4 clip, device const GroundDrawableUBO& ground,
+                               texture2d<float, access::read> depth) {
+    if (clip.w <= 0.0) {
+        return 1.0;
+    }
+    const float2 ndc = clip.xy / clip.w;
+    const float depth_factor = ground.props.depth_factor;
+    const float visibility = ground_depth_opacity(depth, ndc, clip.w, depth_factor);
+    if (visibility > 0.95) {
+        return 1.0;
+    }
+    return (visibility + ground_depth_opacity(depth, ndc + float2(0.0, 0.01), clip.w, depth_factor)) / 2.0;
+}
+
+"#
+    };
+}
+
 /// The start of every shader's source.
 pub(crate) const PRELUDE: &str = r#"
 #include <metal_stdlib>
@@ -187,7 +256,9 @@ struct alignas(16) TerrainPropsUBO {
     /* 16 */ float unpack_scale;
     /* 20 */ float exaggeration;
     /* 24 */ float skirt_length;
-    /* 28 */ float pad;
+    // 2fn / (f - n) of the frame's main projection, 0 without the ground's
+    // depth.
+    /* 28 */ float depth_factor;
     /* 32 */
 };
 static_assert(sizeof(TerrainPropsUBO) == 2 * 16, "wrong size");
@@ -826,6 +897,7 @@ static_assert(sizeof(CircleEvaluatedPropsUBO) == 4 * 16, "wrong size");
 "#,
     source: concat!(
         standing_ground!(),
+        ground_visibility!(),
         r"
 
 struct VertexStage {
@@ -880,6 +952,10 @@ struct FragmentStage {
 #if !defined(HAS_UNIFORM_u_stroke_opacity)
     half stroke_opacity;
 #endif
+#if defined(TERRAIN)
+    // How much of the circle the ground in front of its center leaves.
+    float visibility;
+#endif
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
@@ -889,6 +965,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
 #if defined(TERRAIN)
                                 texture2d<float, access::read> ground_dem [[texture(2)]],
+                                texture2d<float, access::read> ground_depth [[texture(3)]],
 #endif
                                 device const CircleEvaluatedPropsUBO& props [[buffer(idCircleEvaluatedPropsUBO)]]) {
 
@@ -918,6 +995,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 #if defined(TERRAIN)
     device const ProjectionUBO& standing = projectionVector[uboIndex];
     const float ele = standing_height(circle_center + standing.translate, standing.ground, ground_dem);
+    const float visibility = ground_visibility(drawable.matrix * float4(circle_center, ele, 1), standing.ground, ground_depth);
 #else
     const float ele = 0.0;
 #endif
@@ -1004,6 +1082,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 #if !defined(HAS_UNIFORM_u_stroke_opacity)
         .stroke_opacity = half(unpack_mix_float(vertx.stroke_opacity, drawable.stroke_opacity_t)),
 #endif
+#if defined(TERRAIN)
+        .visibility     = visibility,
+#endif
     };
 }
 
@@ -1055,7 +1136,11 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     const float color_t = (stroke_width < 0.01) ? 0.0 :
         smoothstep(antialiased_blur, 0.0, extrude_length - radius / (radius + stroke_width));
 
+#if defined(TERRAIN)
+    return half4(opacity_t * mix(color * opacity, stroke_color * stroke_opacity, color_t) * in.visibility);
+#else
     return half4(opacity_t * mix(color * opacity, stroke_color * stroke_opacity, color_t));
+#endif
 }
 "
     ),
@@ -3998,6 +4083,7 @@ static_assert(sizeof(HeatmapEvaluatedPropsUBO) == 16, "wrong size");
 "#,
     source: concat!(
         standing_ground!(),
+        ground_visibility!(),
         r#"
 
 struct VertexStage {
@@ -4017,6 +4103,10 @@ struct FragmentStage {
     float weight;
 #endif
     float2 extrude;
+#if defined(TERRAIN)
+    // How much of the kernel the ground in front of its center leaves.
+    float visibility;
+#endif
 };
 
 // Effective "0" in the kernel density texture to adjust the kernel size to;
@@ -4033,6 +4123,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
 #if defined(TERRAIN)
                                 texture2d<float, access::read> ground_dem [[texture(2)]],
+                                texture2d<float, access::read> ground_depth [[texture(3)]],
 #endif
                                 device const HeatmapEvaluatedPropsUBO& props [[buffer(idHeatmapEvaluatedPropsUBO)]]) {
 
@@ -4086,6 +4177,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 #if defined(TERRAIN)
     device const GroundDrawableUBO& ground = projectionVector[uboIndex].ground;
     const float ele = standing_height(center, ground, ground_dem);
+    const float visibility = ground_visibility(drawable.matrix * float4(center, ele, 1), ground, ground_depth);
     const float4 position = ground_holds(center, ground)
         ? drawable.matrix * float4(center + scaled_extrude, ele, 1)
         : ground_dropped();
@@ -4100,6 +4192,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         .weight      = weight,
 #endif
         .extrude     = extrude,
+#if defined(TERRAIN)
+        .visibility  = visibility,
+#endif
     };
 }
 
@@ -4116,7 +4211,11 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 #else
     const float weight = in.weight;
 #endif
+#if defined(TERRAIN)
+    const float val = weight * in.visibility * props.intensity * GAUSS_COEF * exp(d);
+#else
     const float val = weight * props.intensity * GAUSS_COEF * exp(d);
+#endif
 
     return half4(val, 1.0, 1.0, 1.0);
 }
@@ -4432,6 +4531,54 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     const float3 surface = pow(color.rgb / color.a, gamma);
     const float3 fogged = surface * (1.0 - strength * tint.a) + tint.rgb * strength;
     return half4(float4(pow(fogged, 1.0 / gamma) * color.a, color.a));
+}
+"
+    ),
+};
+
+/// The depth of the terrain's surface: a tile's grid, drawn with the tile's
+/// matrix, raised to the heights of the tile's DEM with its skirts lowered, as
+/// the surface's, whose fragments write the eye distance (the clip w, which is
+/// affine in the vertex, so it interpolates exactly) as its float's bits,
+/// least significant byte first.
+pub(crate) const TERRAIN_DEPTH_SHADER: MslShaderSource = MslShaderSource {
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
+    prelude: TERRAIN_PRELUDE,
+    source: concat!(
+        ground_height!(),
+        r"
+
+struct VertexStage {
+    // x and y in tile units, whether the vertex is a skirt's lower edge, 0.
+    short4 pos [[attribute(0)]];
+};
+
+struct FragmentStage {
+    float4 position [[position, invariant]];
+    float eye_distance;
+};
+
+FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
+                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
+                                device const TerrainDrawableUBO* drawableVector [[buffer(idTerrainDrawableUBO)]],
+                                device const TerrainPropsUBO& props [[buffer(idTerrainPropsUBO)]],
+                                texture2d<float, access::read> dem [[texture(2)]]) {
+    device const TerrainDrawableUBO& drawable = drawableVector[uboIndex];
+    const float2 pos = float2(vertx.pos.xy);
+    const float skirt = float(vertx.pos.z);
+    const float height = ground_height(pos, drawable.dem_coords, dem, props);
+    const float4 position = drawable.matrix * float4(pos, height - skirt * props.skirt_length, 1.0);
+    return {
+        .position = position,
+        .eye_distance = position.w,
+    };
+}
+
+float4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
+    const uint bits = as_type<uint>(in.eye_distance);
+    const uint4 bytes = uint4(bits, bits >> 8, bits >> 16, bits >> 24) & uint4(255);
+    return float4(bytes) / 255.0;
 }
 "
     ),
@@ -6977,6 +7124,7 @@ static_assert(sizeof(SymbolEvaluatedPropsUBO) == 6 * 16, "wrong size");
 "#,
     source: concat!(
         standing_ground!(),
+        ground_visibility!(),
         r"
 
 struct VertexStage {
@@ -7019,6 +7167,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]]
 #if defined(TERRAIN)
                                 , texture2d<float, access::read> ground_dem [[texture(2)]]
+                                , texture2d<float, access::read> ground_depth [[texture(3)]]
 #endif
                                 ) {
 
@@ -7078,6 +7227,15 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float ele = vertx.height_offset;
 #endif
     const float4 projectedPoint = projectTileWithElevation(translated_a_pos, ele, projection);
+    // The ground in front of the anchor hides the whole symbol.
+#if defined(TERRAIN)
+    const float ground_seen = ground_visibility(projectedPoint, projection.ground, ground_depth);
+    if (ground_seen == 0.0) {
+        return { .position = ground_dropped() };
+    }
+#else
+    const float ground_seen = 1.0;
+#endif
 #if defined(PROJECTION_GLOBE)
     if (!drawable.pitch_with_map && ele <= 0.0 && projectedPoint.z > projectedPoint.w) {
         return {
@@ -7156,9 +7314,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         .tex          = (a_tex - tex_origin) / drawable.texsize,
         .tex_origin   = tex_origin / drawable.texsize,
 #if defined(HAS_UNIFORM_u_opacity)
-        .fade_opacity = fo,
+        .fade_opacity = half(fo * ground_seen),
 #else
-        .opacity      = fo,
+        .opacity      = half(fo * ground_seen),
 #endif
     };
 }
@@ -7264,6 +7422,7 @@ static_assert(sizeof(SymbolEvaluatedPropsUBO) == 6 * 16, "wrong size");
 "#,
     source: concat!(
         standing_ground!(),
+        ground_visibility!(),
         r"
 
 struct VertexStage {
@@ -7325,6 +7484,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
 #if defined(TERRAIN)
                                 texture2d<float, access::read> ground_dem [[texture(2)]],
+                                texture2d<float, access::read> ground_depth [[texture(3)]],
 #endif
                                 device const SymbolEvaluatedPropsUBO& props [[buffer(idSymbolEvaluatedPropsUBO)]]) {
 
@@ -7383,6 +7543,15 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float ele = vertx.height_offset;
 #endif
     const float4 projectedPoint = projectTileWithElevation(translated_a_pos, ele, projection);
+    // The ground in front of the anchor hides the whole symbol.
+#if defined(TERRAIN)
+    const float ground_seen = ground_visibility(projectedPoint, projection.ground, ground_depth);
+    if (ground_seen == 0.0) {
+        return { .position = ground_dropped() };
+    }
+#else
+    const float ground_seen = 1.0;
+#endif
 #if defined(PROJECTION_GLOBE)
     if (!drawable.pitch_with_map && ele <= 0.0 && projectedPoint.z > projectedPoint.w) {
         return {
@@ -7498,7 +7667,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         .tex_origin   = tex_origin / drawable.texsize,
         .gamma_scaled = half(gamma_scaled),
         .halo_edge    = half(halo_edge),
-        .fade_opacity = visible_opacity,
+        .fade_opacity = half(visible_opacity * ground_seen),
     };
 }
 
@@ -7628,6 +7797,7 @@ static_assert(sizeof(SymbolEvaluatedPropsUBO) == 6 * 16, "wrong size");
 "#,
     source: concat!(
         standing_ground!(),
+        ground_visibility!(),
         r"
 
 #define SDF 1.0
@@ -7693,6 +7863,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
 #if defined(TERRAIN)
                                 texture2d<float, access::read> ground_dem [[texture(2)]],
+                                texture2d<float, access::read> ground_depth [[texture(3)]],
 #endif
                                 device const SymbolEvaluatedPropsUBO& props [[buffer(idSymbolEvaluatedPropsUBO)]]) {
 
@@ -7751,6 +7922,15 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float ele = vertx.height_offset;
 #endif
     const float4 projectedPoint = projectTileWithElevation(translated_a_pos, ele, projection);
+    // The ground in front of the anchor hides the whole symbol.
+#if defined(TERRAIN)
+    const float ground_seen = ground_visibility(projectedPoint, projection.ground, ground_depth);
+    if (ground_seen == 0.0) {
+        return { .position = ground_dropped() };
+    }
+#else
+    const float ground_seen = 1.0;
+#endif
 #if defined(PROJECTION_GLOBE)
     if (!drawable.pitch_with_map && ele <= 0.0 && projectedPoint.z > projectedPoint.w) {
         return {
@@ -7869,7 +8049,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         .tex_origin   = tex_origin / texsize,
         .gamma_scaled = half(gamma_scaled),
         .halo_edge    = half(halo_edge),
-        .fade_opacity = visible_opacity,
+        .fade_opacity = half(visible_opacity * ground_seen),
         .is_icon      = is_icon,
     };
 }

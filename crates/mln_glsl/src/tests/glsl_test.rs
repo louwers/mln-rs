@@ -45,10 +45,10 @@ use naga::{AddressSpace, ArraySize, Binding, Interpolation, Module, ScalarKind, 
 
 use crate::front_end::parse;
 use crate::layout::{
-    DRAWABLE_UNIFORM_COUNT, DRAWABLE_VERTEX_COUNT, DescriptorSetType, GLOBAL_UNIFORM_COUNT, IMAGE_SAMPLER_START,
-    IMAGE_TEXTURE_COUNT, LAYER_STORAGE_COUNT, LAYER_UNIFORM_COUNT, UBO_INDEX_PUSH_CONSTANT_SIZE,
-    drawable_uniform_binding, drawable_vertex_binding, global_uniform_binding, image_sampler_binding,
-    image_texture_binding, layer_storage_binding, layer_uniform_binding,
+    DRAWABLE_UNIFORM_COUNT, DRAWABLE_VERTEX_COUNT, DescriptorSetType, GLOBAL_GROUND_DEPTH_BINDING,
+    GLOBAL_UNIFORM_COUNT, IMAGE_SAMPLER_START, IMAGE_TEXTURE_COUNT, LAYER_STORAGE_COUNT, LAYER_UNIFORM_COUNT,
+    UBO_INDEX_PUSH_CONSTANT_SIZE, drawable_uniform_binding, drawable_vertex_binding, global_uniform_binding,
+    image_sampler_binding, image_texture_binding, layer_storage_binding, layer_uniform_binding,
 };
 use crate::variants::variants;
 use crate::{AttributeInfo, BUILT_INS, ShaderSource, Stage, sources};
@@ -83,8 +83,8 @@ fn every_program_declares_the_properties_its_glsl_reads_from_uniforms() {
 #[test]
 fn every_layer_program_shows_the_overdraw_inspector() {
     use mln_gfx::shaders::programs::{
-        ATMOSPHERE, CLIPPING_MASK, COLLISION_BOX, COLLISION_CIRCLE, GLOBE_DEPTH, SKY, TERRAIN, TERRAIN_PROBE,
-        VERTEX_TEXEL,
+        ATMOSPHERE, CLIPPING_MASK, COLLISION_BOX, COLLISION_CIRCLE, GLOBE_DEPTH, SKY, TERRAIN, TERRAIN_DEPTH,
+        TERRAIN_PROBE, VERTEX_TEXEL,
     };
     // The terrain shows its drapes, where the draped layers count their draws.
     let not_layers = [
@@ -95,6 +95,7 @@ fn every_layer_program_shows_the_overdraw_inspector() {
         &SKY,
         &ATMOSPHERE,
         &TERRAIN,
+        &TERRAIN_DEPTH,
         &TERRAIN_PROBE,
         &VERTEX_TEXEL,
     ];
@@ -272,6 +273,10 @@ fn buffers(program: &Program, variant: ProjectionVariant) -> Vec<(Buffer, usize)
             (LayerUniform(ID_TERRAIN_FOG_UBO), size_of::<TerrainFogUBO>()),
         ],
         "TerrainProbeShader" => vec![(LayerUniform(ID_TERRAIN_PROPS_UBO), size_of::<TerrainPropsUBO>())],
+        "TerrainDepthShader" => vec![
+            (LayerStorage(ID_TERRAIN_DRAWABLE_UBO), size_of::<TerrainDrawableUBO>()),
+            (LayerUniform(ID_TERRAIN_PROPS_UBO), size_of::<TerrainPropsUBO>()),
+        ],
         "HillshadeShader" => vec![
             (LayerStorage(ID_HILLSHADE_DRAWABLE_UBO), size_of::<HillshadeDrawableUBO>()),
             projection,
@@ -380,6 +385,7 @@ fn check_layout(set: u32, binding: u32, resource: Resource) -> Result<(), String
     let binding = binding as usize;
     let in_layout = match (set, resource) {
         (0, Resource::Uniform(_)) => binding < GLOBAL_UNIFORM_COUNT,
+        (0, Resource::Texture) => binding == GLOBAL_GROUND_DEPTH_BINDING as usize,
         (1, Resource::Storage(_)) => binding < LAYER_STORAGE_COUNT,
         (1, Resource::Uniform(_)) => {
             (LAYER_STORAGE_COUNT..LAYER_STORAGE_COUNT + LAYER_UNIFORM_COUNT).contains(&binding)
@@ -396,7 +402,9 @@ fn check_layout(set: u32, binding: u32, resource: Resource) -> Result<(), String
 }
 
 // Every resource a stage declares has a binding of its kind in the
-// descriptor set layouts, the global set holds the paint parameters alone,
+// descriptor set layouts, the global set holds the paint parameters and, in
+// the vertex stage of the terrain variant of a program that terrain hides,
+// the ground's depth,
 // the stages declare the textures of the texture table between them, a
 // fragment stage each of its own with its sampler and a vertex stage none,
 // since it fetches texels, and the push constants are the general pipeline
@@ -435,13 +443,22 @@ fn resources_are_in_the_descriptor_set_layouts() {
                             continue;
                         }
                     };
+                // Of the programs that list the ground's depth, only the
+                // terrain variant's vertex stage reads it.
+                let reads_depth = program.textures.contains(&ID_GROUND_DEPTH_TEXTURE)
+                    && variant.projection == ProjectionVariant::Terrain
+                    && stage == Stage::Vertex;
                 for (&(set, binding), &resource) in &bindings {
                     if let Err(message) = check_layout(set, binding, resource) {
                         fail(message);
                     }
-                    if set == 0 && global_uniform_binding(ID_GLOBAL_PAINT_PARAMS_UBO) != Some(binding) {
+                    let depth = resource == Resource::Texture && binding == GLOBAL_GROUND_DEPTH_BINDING;
+                    if set == 0 && !depth && global_uniform_binding(ID_GLOBAL_PAINT_PARAMS_UBO) != Some(binding) {
                         fail(format!("set 0 binding {binding}: not the paint parameters"));
                     }
+                }
+                if bindings.contains_key(&(0, GLOBAL_GROUND_DEPTH_BINDING)) != reads_depth {
+                    fail(format!("the ground's depth declared: {}, not {reads_depth}", !reads_depth));
                 }
 
                 let image_set = DescriptorSetType::DrawableImage.set_index();

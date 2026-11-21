@@ -28,12 +28,16 @@
 //! 3. In the encode, the ground's DEM textures are made first
 //!    ([`RenderTerrain::prepare_ground`]): those the surface reads, and in a
 //!    frame where a layer stands on the ground, those its parts off the
-//!    cover read too, of the coarse DEM tiles that cull the cover. The layers that drape (background, fill, line, hillshade,
+//!    cover read too, of the coarse DEM tiles that cull the cover; in a frame
+//!    where a layer that the ground hides draws, so is the target of the
+//!    ground's depth. The layers that drape (background, fill, line, hillshade,
 //!    color relief, and raster, an image source's too) make no draws in the
 //!    frame: they draw in each drape of their stack whose key changed
 //!    ([`RenderTerrain::begin_drapes`]). The surface makes a draw per tile
 //!    and stack that has a drape there ([`RenderTerrain::update_draws`]).
-//! 4. The drapes draw into their textures before the frame's pass. The
+//! 4. The ground's depth ([`RenderTerrain::render_ground_depth`]) and the
+//!    drapes draw into their textures before the frame's pass, and the
+//!    heatmaps' kernels between them. The
 //!    frame clears to transparent, and its translucent pass draws each
 //!    stack's surface where the stack's first layer draws, and the layers
 //!    that don't drape between the stacks: those that stand on the ground
@@ -139,14 +143,30 @@
 //!   ([`TerrainProjectionUBO`]); its DEM texture binds at
 //!   [`ID_GROUND_DEM_TEXTURE`], a slot of the draw's own textures that no
 //!   standing program's other textures take, so a label's glyphs and icons keep
-//!   0 and 1. Nothing hides the circles and kernels behind the ground yet. The
-//!   depth of the drawn ground that will hide them is one texture for the whole
-//!   frame: it is to bind as the frame's global uniform buffers do, from what
-//!   the context holds for the frame rather than among a draw's own textures,
-//!   at a slot that only the terrain variants declare, so that no flat
-//!   program's layout or draw changes for it. A frame without terrain makes no
-//!   terrain variant, writes no ground, binds no ground texture and expands no
-//!   centroid. The draws of circles and heatmap kernels stack in the frame's
+//!   0 and 1. A frame without terrain makes no terrain variant, writes no
+//!   ground, binds no ground texture and expands no centroid.
+//! - **What the ground hides.** Fill extrusions hide behind the ground pixel
+//!   by pixel, by the depth they test. A symbol, a circle or a heatmap's
+//!   kernel hides whole, by its anchor or center as it draws, raised: in a
+//!   frame where terrain draws and a layer of theirs does, a pass before the
+//!   frame's draws every terrain tile, skirts included, into a texture at the
+//!   frame's logical pixels, with a depth test that keeps each pixel's
+//!   nearest ground, as its eye distance's f32 bits ([`ID_GROUND_DEPTH_TEXTURE`]).
+//!   The terrain variant reads it where its anchor is seen, the reciprocals of
+//!   the four texels around it interpolated as a plane's are, so that ground
+//!   seen at a grazing angle doesn't hide what stands on it, and fades the
+//!   feature out over GL JS's ramp in its NDC depth, scaled by the frame's
+//!   near and far planes ([`TerrainPropsUBO::depth_factor`]), averaged with
+//!   the point 0.01 NDC above where it is hidden more than a little; where no
+//!   ground is drawn, nothing is hidden. The depth is drawn every frame that
+//!   needs it, from that frame's ground, so it holds as DEM tiles arrive, the
+//!   cover changes and the camera moves; its texture stays while the frame's
+//!   size does, and binds as the frame's global buffers do, from the context
+//!   ([`Context::ground_depth`]), so no flat program's layout or draw
+//!   changes for it. A hidden label stays in the collision grid. A frame
+//!   without terrain, or without a layer that the ground hides, makes no
+//!   depth and draws no pass for it. A known limit: an axonometric view, whose
+//!   clip w doesn't vary with depth, hides nothing. The draws of circles and heatmap kernels stack in the frame's
 //!   order of their tiles, and then of each tile's parts, whenever each draw
 //!   was made, so a view draws alike whatever path the camera took to it;
 //!   what shows of fill extrusions is the depth's to decide. A known limit: a
@@ -297,6 +317,7 @@ mod draws;
 mod elevation;
 mod fog;
 mod ground;
+mod ground_depth;
 mod mesh;
 mod stacks;
 
@@ -313,7 +334,7 @@ use mln_gfx::gpu::Gpu;
 #[cfg(doc)]
 use mln_gfx::projection_variant::ProjectionVariant;
 #[cfg(doc)]
-use mln_gfx::shaders::shader_defines::ID_GROUND_DEM_TEXTURE;
+use mln_gfx::shaders::shader_defines::{ID_GROUND_DEM_TEXTURE, ID_GROUND_DEPTH_TEXTURE};
 #[cfg(doc)]
 use mln_gfx::shaders::terrain_ubo::TerrainProjectionUBO;
 use mln_gfx::shaders::terrain_ubo::TerrainPropsUBO;
@@ -335,6 +356,7 @@ use crate::renderer_event::RendererEvent;
 use crate::terrain::cover::dem_bucket;
 use crate::terrain::dem_textures::DemTextures;
 use crate::terrain::draws::TerrainDraws;
+use crate::terrain::ground_depth::GroundDepth;
 use crate::tile::source_tiles::SourceTiles;
 use crate::update_parameters::UpdateParameters;
 
@@ -382,7 +404,7 @@ impl Surface {
             unpack_scale: scale,
             exaggeration,
             skirt_length: skirt_length.unwrap_or(0.0) as f32,
-            pad: 0.0,
+            depth_factor: 0.0,
         };
         Surface { props, skirts: skirt_length.is_some() }
     }
@@ -409,6 +431,9 @@ pub(crate) struct RenderTerrain {
     elevation: Option<Arc<TerrainElevation>>,
     /// The textures of the DEM tiles the frame's draws read.
     dem_textures: DemTextures,
+    /// The depth of the drawn ground, in a frame where a layer that terrain
+    /// hides draws.
+    ground_depth: Option<GroundDepth>,
     /// Whether it has logged that terrain doesn't draw on the globe.
     logged_globe: bool,
     /// The drapes' byte cap in place of [`drapes::BYTE_CAP`].
@@ -546,19 +571,40 @@ impl RenderTerrain {
     /// which `dem` finds by its id, that the surface reads, for the surface
     /// and, where a layer of the frame `stands`, the standing layers, with
     /// those of the DEM tiles it holds off the drawn tiles, which their parts
-    /// off the cover read. `None`, dropping the DEM textures, for a frame
-    /// without terrain.
+    /// off the cover read; and, where a layer of the frame `hides` behind
+    /// the ground, the depth of the drawn ground, at the frame's logical
+    /// pixels, which [`render_ground_depth`](Self::render_ground_depth)
+    /// draws and the context binds for the frame
+    /// ([`Context::ground_depth`]). `None`, dropping the DEM textures and
+    /// the ground's depth, for a frame without terrain.
     pub(crate) fn prepare_ground<'a>(
         &mut self,
         parameters: &mut PaintParameters<'_>,
         dem: impl FnOnce(&str) -> Option<&'a SourceTiles>,
         stands: bool,
+        hides: bool,
     ) -> Option<Rc<GroundBindings>> {
         let (Some(ground), Some(cover)) = (&self.elevation, &self.cover) else {
             self.dem_textures = DemTextures::default();
+            self.ground_depth = None;
+            parameters.context.set_ground_depth(None);
             return None;
         };
+        let (size, pixel_ratio) = (parameters.renderable_size, parameters.pixel_ratio);
         let context = &mut *parameters.context;
+        // The depth keeps its texture, and the draws that bind it their
+        // bindings, while the frame's size stays.
+        self.ground_depth = hides.then(|| match self.ground_depth.take() {
+            Some(depth) if depth.fits(size, pixel_ratio) => depth,
+            _ => GroundDepth::new(context, size, pixel_ratio),
+        });
+        context.set_ground_depth(self.ground_depth.as_ref().map(GroundDepth::texture));
+        let mut props = self.surface.props;
+        if self.ground_depth.is_some() {
+            let view = parameters.view;
+            let (near, far) = (view.near_z(), view.far_z());
+            props.depth_factor = (2.0 * far * near / (far - near)) as f32;
+        }
         let tiles = dem(&cover.source_id);
         let mut textures = mln_util::hash::HashMap::default();
         for read in ground.dems(stands) {
@@ -568,7 +614,7 @@ impl RenderTerrain {
         }
         self.dem_textures.finish_frame();
         let flat = self.dem_textures.flat(context);
-        Some(Rc::new(GroundBindings::new(Arc::clone(ground), self.surface.props, textures, flat)))
+        Some(Rc::new(GroundBindings::new(Arc::clone(ground), props, textures, flat)))
     }
 
     /// Starts the encode's update of the drapes of the frame of the last
@@ -612,8 +658,26 @@ impl RenderTerrain {
         sky: Option<&EvaluatedSky>,
     ) {
         let ground = parameters.ground.clone();
-        let surface = self.cover.as_ref().zip(ground.as_deref()).filter(|_| self.drapes.stacks() > 0);
-        self.draws.update(gpu, parameters, surface, self.surface, sky, &self.drapes);
+        let cover = self.cover.as_ref().zip(ground.as_deref());
+        let depth = self.ground_depth.is_some();
+        self.draws.update(gpu, parameters, cover, self.surface, sky, &self.drapes, depth);
+    }
+
+    /// Draws the depth of the frame's drawn ground, outside any pass, before
+    /// the draws that read it ([`prepare_ground`](Self::prepare_ground)):
+    /// every terrain tile with its skirts, whether or not a stack draws the
+    /// surface. A frame without it draws nothing.
+    pub(crate) fn render_ground_depth(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+        let Some(depth) = self.ground_depth.as_mut().filter(|_| self.draws.draws_depth()) else {
+            return;
+        };
+        let draws = parameters.context.rendering_stats().num_draw_calls;
+        if let Some(frame_scissor) = depth.begin(gpu, parameters) {
+            self.draws.render_depth(gpu, parameters);
+            GroundDepth::end(gpu, parameters, frame_scissor);
+        }
+        let stats = parameters.context.rendering_stats();
+        stats.terrain.ground_depth_draw_calls += usize::try_from(stats.num_draw_calls - draws).unwrap_or(0);
     }
 
     /// The surface's draws.
@@ -707,14 +771,16 @@ impl RenderTerrain {
 
     /// Counts in the rendering stats of `context` what the terrain holds
     /// once a frame has drawn: its stacks and drapes, and the bytes of the
-    /// drapes and what they draw with, of the DEM textures, of the DEM
-    /// images of the ground it last told the map of, and of the elevation
-    /// ranges it remembers.
+    /// drapes and what they draw with, of the DEM textures, of the ground's
+    /// depth, of the DEM images of the ground it last told the map of, and
+    /// of the elevation ranges it remembers.
     pub(crate) fn count(&self, context: &mut Context) {
         self.drapes.count(context);
         let dem_textures = self.dem_textures.bytes(context);
         let stats = &mut context.rendering_stats().terrain;
         stats.mem_dem_textures = dem_textures;
+        stats.mem_ground_depth =
+            self.ground_depth.as_ref().map_or(0, |depth| usize::try_from(depth.bytes()).unwrap_or(usize::MAX));
         stats.mem_dem_data = self.elevation.as_deref().map_or(0, TerrainElevation::dem_bytes);
         stats.mem_height_ranges = self.cover.as_ref().map_or(0, |cover| cover.ranges.bytes());
     }

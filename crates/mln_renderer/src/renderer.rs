@@ -893,8 +893,11 @@ fn draw(
         orchestrator.render_draw_groups(gpu, parameters, DrawOrder::BottomUp);
     }
 
-    // The layers' render targets, which the passes sample, and the terrain's
-    // drapes, whose draws sample some of them.
+    // The depth of the drawn ground, which the heatmap's kernels in the
+    // layers' render targets and the standing layers in the frame's pass
+    // read; the layers' render targets, which the passes sample; and the
+    // terrain's drapes, whose draws sample some of them.
+    orchestrator.terrain().render_ground_depth(gpu, parameters);
     orchestrator.visit_render_layers(|layer| layer.render_targets(gpu, parameters));
     orchestrator.terrain().render_drapes(gpu, parameters);
 

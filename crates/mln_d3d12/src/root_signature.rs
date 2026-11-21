@@ -4,11 +4,13 @@
 //! shader reads as a storage buffer too), the textures as one table for
 //! both stages, the sampler heap as another, with the buffer of the indices
 //! in it of a draw's samplers as a root SRV, both for the pixel stage only,
-//! and naga's special constants as root constants. Binding a draw sets GPU
+//! and naga's special constants as root constants, then the frame's ground
+//! depth as a one-texture table for the vertex stage, which only the terrain
+//! variants of the programs that terrain hides read. Binding a draw sets GPU
 //! addresses and constants only.
 
 use mln_gfx::gpu::GpuError;
-use mln_glsl::layout::DescriptorSetType;
+use mln_glsl::layout::{DescriptorSetType, GLOBAL_GROUND_DEPTH_BINDING};
 use windows::Win32::Graphics::Direct3D::ID3DBlob;
 use windows::Win32::Graphics::Direct3D12::{
     D3D_ROOT_SIGNATURE_VERSION_1, D3D12_DESCRIPTOR_RANGE, D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER,
@@ -54,6 +56,9 @@ pub(crate) const SAMPLER_TABLE: u32 = SAMPLER_INDICES + 1;
 /// The parameter of naga's special constants, whose first value, a draw's
 /// base vertex, a vertex stage's vertex index includes.
 pub(crate) const SPECIAL_CONSTANTS: u32 = SAMPLER_TABLE + 1;
+/// The parameter of the frame's ground depth's table, which a draw of a
+/// shader that doesn't read it leaves unset.
+pub(crate) const GROUND_DEPTH_TABLE: u32 = SPECIAL_CONSTANTS + 1;
 
 /// How a buffer binds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -157,6 +162,16 @@ pub(crate) fn create(device: &ID3D12Device) -> Result<ID3D12RootSignature, GpuEr
         },
         ShaderVisibility: D3D12_SHADER_VISIBILITY_VERTEX,
     });
+    let global = DescriptorSetType::Global.set_index();
+    let ground_depth = D3D12_DESCRIPTOR_RANGE {
+        RangeType: D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
+        NumDescriptors: 1,
+        BaseShaderRegister: GLOBAL_GROUND_DEPTH_BINDING,
+        RegisterSpace: global,
+        OffsetInDescriptorsFromTableStart: 0,
+    };
+    debug_assert_eq!(parameters.len() as u32, GROUND_DEPTH_TABLE);
+    parameters.push(table(&ground_depth, D3D12_SHADER_VISIBILITY_VERTEX));
     let desc = D3D12_ROOT_SIGNATURE_DESC {
         NumParameters: parameters.len() as u32,
         pParameters: parameters.as_ptr(),

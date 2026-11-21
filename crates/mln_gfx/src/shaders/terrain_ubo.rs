@@ -35,7 +35,11 @@ pub struct TerrainPropsUBO {
     /// In meters.
     /* 24 */
     pub skirt_length: f32,
-    /* 28 */ pub pad: f32,
+    /// What the standing layers that terrain hides scale the ground's depth
+    /// by, GL JS's in its NDC depth: `2fn / (f − n)` of the frame's main
+    /// projection, or 0 in a frame without the ground's depth.
+    /* 28 */
+    pub depth_factor: f32,
     /* 32 */
 }
 const _: () = assert!(size_of::<TerrainPropsUBO>() == 2 * 16);

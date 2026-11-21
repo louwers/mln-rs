@@ -608,7 +608,10 @@ fn a_map_of_two_stacks_at_rest_draws_each_terrain_tile_once_a_stack() {
     let (full, passes) = map.frame_passes();
     assert!(full);
     assert!(passes.is_empty(), "drapes drawn again: {passes:?}");
-    assert_eq!(2 * drapes.len() + 1, map.draw_calls());
+    // And the ground's depth, which hides the circle where the ground is in
+    // front of it, once for each terrain tile.
+    assert_eq!(drapes.len(), map.renderer.rendering_stats().terrain.ground_depth_draw_calls);
+    assert_eq!(3 * drapes.len() + 1, map.draw_calls());
 }
 
 /// A change of a layer in the second stack draws only that stack's drapes
@@ -676,10 +679,11 @@ fn a_stack_has_no_drape_where_it_draws_nothing() {
     assert!(passes.is_empty(), "drapes drawn again: {passes:?}");
     let terrain = map.renderer.rendering_stats().terrain;
     assert_eq!(drapes.len() + 1, terrain.drapes, "the line's stack has the north-west drape only");
-    // The first stack's surface, the line's in the north-west tile, and the
-    // circle.
+    // The first stack's surface, the line's in the north-west tile, the
+    // circle, and the ground's depth of each terrain tile.
     assert_eq!(drapes.len() + 1, terrain.surface_draw_calls);
-    assert_eq!(drapes.len() + 2, map.draw_calls());
+    assert_eq!(drapes.len(), terrain.ground_depth_draw_calls);
+    assert_eq!(2 * drapes.len() + 2, map.draw_calls());
 
     // The shapes move out of the north-west tile into the south-west one:
     // the line's drape there is made, and the north-west one goes.
@@ -1225,7 +1229,8 @@ fn only_a_circle(map: &mut DrapedMap) {
 }
 
 /// Without a draped layer, a map over terrain has no drape and draws no
-/// surface: only its circle. The surface lets go of its draws and grid.
+/// surface: only its circle, and the ground's depth that hides it, which
+/// keeps the grid. The surface lets go of its draws.
 #[test]
 fn a_map_without_a_draped_layer_draws_no_surface() {
     let (mut map, _) = settled(Tiles::default());
@@ -1237,8 +1242,9 @@ fn a_map_without_a_draped_layer_draws_no_surface() {
     assert!(full);
     assert!(passes.is_empty(), "drapes drawn: {passes:?}");
     assert_eq!(4, map.drapes().len(), "terrain still covers the view");
-    assert_eq!(1, map.draw_calls());
-    assert!(!map.renderer.terrain_surface_holds().1, "the surface holds draws or its grid");
+    assert_eq!(4, map.renderer.rendering_stats().terrain.ground_depth_draw_calls);
+    assert_eq!(1 + 4, map.draw_calls());
+    assert!(!map.renderer.terrain_surface_holds().1, "the surface holds draws");
 }
 
 /// A map over terrain that never had a draped layer makes nothing for the

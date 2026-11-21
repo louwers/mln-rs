@@ -12,7 +12,9 @@
 //   `MAX_TEXTURE_COUNT_PER_SHADER` bindings after the texture: naga's GLSL
 //   front end has separate textures and samplers only.
 // - The global set has no platform parameters: swapchains have the identity
-//   transform.
+//   transform. After its uniform buffers, it holds the frame's ground depth,
+//   a texture that the terrain variants of the programs that terrain hides
+//   fetch from, so that it binds with the frame's buffers.
 
 use mln_gfx::shaders::shader_defines::{
     DRAWABLE_RESERVED_UBO_COUNT, GLOBAL_UBO_COUNT, LAYER_SSBO_START_ID, LAYER_UBO_START_ID,
@@ -94,6 +96,13 @@ impl BufferSetShape {
 
 /// The uniform buffers of the global set, bound at their ids.
 pub const GLOBAL_UNIFORM_COUNT: usize = GLOBAL_UBO_COUNT;
+
+/// The binding in the global set of the frame's ground depth
+/// (`ID_GROUND_DEPTH_TEXTURE`), after its uniform buffers, which only the
+/// terrain variants of the programs that terrain hides declare, and which
+/// their vertex stages fetch without a sampler. The shader sources write it
+/// as a literal.
+pub const GLOBAL_GROUND_DEPTH_BINDING: u32 = GLOBAL_UNIFORM_COUNT as u32;
 
 /// The storage buffers of the layer set: the bindings from 0
 /// (`layerSSBOStartId` in the GLSL).
