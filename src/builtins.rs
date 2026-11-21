@@ -18,7 +18,6 @@ use mln_util::error::Error;
 pub fn register_builtins(builder: &mut RegistryBuilder) -> Result<(), RegisterError> {
     register_builtin_functions(builder.functions_mut())?;
     mln_layers::register_layer_types(builder)?;
-    mln_renderer::builtins::register_layer_types(builder)?;
     mln_sources::register_source_types(builder)
 }
 

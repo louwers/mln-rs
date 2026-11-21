@@ -138,8 +138,9 @@ impl PropertyExpressionBase {
         self.global_state_pinned = true;
     }
 
+    /// The global state the expression evaluates with, once captured.
     #[must_use]
-    pub(crate) fn get_captured_global_state(&self) -> Option<&Arc<GlobalStateMap>> {
+    pub fn get_captured_global_state(&self) -> Option<&Arc<GlobalStateMap>> {
         self.captured_global_state.as_ref()
     }
 
@@ -149,8 +150,9 @@ impl PropertyExpressionBase {
         self.global_state_refs.as_deref()
     }
 
+    /// What the expression's value depends on.
     #[must_use]
-    pub(crate) fn get_dependencies(&self) -> Dependency {
+    pub fn get_dependencies(&self) -> Dependency {
         self.expression.dependencies()
     }
 
@@ -253,7 +255,10 @@ impl<T: Clone + ValueConverter> PropertyExpression<T> {
         }
     }
 
-    pub(crate) fn possible_outputs(&self) -> Vec<Option<T>> {
+    /// The values the expression can evaluate to, where it can tell them:
+    /// `None` for one it can't.
+    #[must_use]
+    pub fn possible_outputs(&self) -> Vec<Option<T>> {
         from_expression_values::<T>(&self.base.expression.possible_outputs())
     }
 

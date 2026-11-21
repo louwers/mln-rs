@@ -3,7 +3,7 @@
 
 use glam::Vec2;
 use mln_map_types::{ProjectionData, TileProjector, View};
-use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
+use mln_renderer::draw::tile_unit_translation;
 use mln_style_types::{
     AlignmentType, IconTextFitType, SymbolPlacementType, SymbolZOrderType, TextRotationAlignmentType,
 };
@@ -11,10 +11,10 @@ use mln_tile_id::UnwrappedTileID;
 use mln_util::constants::{EXTENT, TILE_SIZE_D};
 
 use super::{BucketPlacementData, PlacedTile, SymbolTranslate};
-use crate::buckets::symbol_bucket::{SymbolBucket, ZoomEvaluatedSize, symbols_by_viewport_y};
-use crate::layout::symbol_projection::LabelPlaneProjector;
-use crate::text::collision_index::{CollisionBoundaries, OverlapMode, PartCollision};
-use crate::tile_matrix::tile_unit_translation;
+use crate::symbol::SymbolLayoutProperties;
+use crate::symbol::bucket::{SymbolBucket, ZoomEvaluatedSize, symbols_by_viewport_y};
+use crate::symbol::placement::collision_index::{CollisionBoundaries, OverlapMode, PartCollision};
+use crate::symbol::projection::LabelPlaneProjector;
 
 /// A symbol layer's `*-translate` in the tile's units.
 pub(crate) fn translation(

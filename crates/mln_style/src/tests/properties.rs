@@ -166,34 +166,34 @@ fn possibly_evaluated_evaluate_per_feature() {
     use mln_style_types::{AlignmentType, TextJustifyType};
     use mln_tile_id::CanonicalTileID;
 
-    use crate::layers::SymbolLayoutProperties;
     use crate::property_expression::PropertyExpression;
+    use crate::tests::fixture_layer::DotLayoutProperties;
     use crate::tests::util::{StubGeometryTileFeature, property_map};
 
     let feature = StubGeometryTileFeature::new(property_map(&[("r", Value::Double(7.5))]));
 
     // A constant.
-    let mut layout = SymbolLayoutProperties::PossiblyEvaluated {
-        icon_size: Evaluated::Constant(3.0),
-        ..SymbolLayoutProperties::PossiblyEvaluated::default()
+    let mut layout = DotLayoutProperties::PossiblyEvaluated {
+        dot_size: Evaluated::Constant(3.0),
+        ..DotLayoutProperties::PossiblyEvaluated::default()
     };
-    assert_eq!(3.0, layout.icon_size.evaluate(&EvaluationContext::with_zoom_feature(10.0, Some(&feature))));
+    assert_eq!(3.0, layout.dot_size.evaluate(&EvaluationContext::with_zoom_feature(10.0, Some(&feature))));
     // A feature expression, with the property's default for a missing value.
-    layout.icon_size =
+    layout.dot_size =
         Evaluated::PerFeature { expression: PropertyExpression::from_expr(number(get_str("r"), None)), default: 5.0 };
-    assert_eq!(7.5, layout.icon_size.evaluate(&EvaluationContext::with_zoom_feature(10.0, Some(&feature))));
+    assert_eq!(7.5, layout.dot_size.evaluate(&EvaluationContext::with_zoom_feature(10.0, Some(&feature))));
     let other = StubGeometryTileFeature::new(property_map(&[]));
-    assert_eq!(5.0, layout.icon_size.evaluate(&EvaluationContext::with_zoom_feature(10.0, Some(&other))));
+    assert_eq!(5.0, layout.dot_size.evaluate(&EvaluationContext::with_zoom_feature(10.0, Some(&other))));
     // A plain (non-data-driven) property.
-    layout.icon_pitch_alignment = Evaluated::Constant(AlignmentType::Map);
+    layout.dot_alignment = Evaluated::Constant(AlignmentType::Map);
     assert_eq!(
         AlignmentType::Map,
-        layout.icon_pitch_alignment.evaluate(&EvaluationContext::with_zoom_feature(10.0, Some(&feature)))
+        layout.dot_alignment.evaluate(&EvaluationContext::with_zoom_feature(10.0, Some(&feature)))
     );
 
     assert_eq!(
         TextJustifyType::default(),
-        layout.text_justify.evaluate(
+        layout.dot_justify.evaluate(
             &EvaluationContext::with_zoom_feature(10.0, Some(&feature))
                 .with_canonical_tile_id(Some(&CanonicalTileID::new(0, 0, 0)))
         )

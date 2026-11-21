@@ -2,20 +2,18 @@
 pub(crate) mod fixture_layer;
 // `tiles`, `raster-tiles` and `dem-tiles`, the tests' source types.
 pub(crate) mod fixture_source;
-// Ports test/gl/bucket.test.cpp (symbol, raster; on the WebGPU headless
-// backend). mln_layers' tests port the circle, fill and line parts.
+// Ports test/gl/bucket.test.cpp (raster; on the WebGPU headless backend).
+// mln_layers' tests port the circle, fill, line and symbol parts.
 mod bucket_test;
 // Cameras that move faster than the network answers.
 mod fast_camera_test;
-// Ports test/layout/sort_key.test.cpp.
 mod gtest_sky;
 mod gtest_subdivision;
-mod sort_key_test;
 // gtests-data: the test/tile gtests that need the renderer's tiles or
 // mln_map's Transform (tests/tile/main.rs lists them).
 mod tile;
-// gtests-data: the test/text gtests that need mln_renderer (GlyphStore,
-// SymbolLayout) or mln_expression's Formatted (tests/text/main.rs lists them).
+// gtests-data: the test/text gtests that need mln_renderer (GlyphStore) or
+// mln_expression's Formatted (tests/text/main.rs lists them).
 mod text;
 // gtests-core: test/renderer/image_manager.test.cpp.
 mod gtest_image_store;

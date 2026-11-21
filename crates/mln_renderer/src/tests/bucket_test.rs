@@ -1,71 +1,13 @@
-use std::sync::Arc;
-
 use geometry::Point;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
-use mln_style::property_value::PropertyValue;
 use mln_tile_id::CanonicalTileID;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
-use mln_vec_map::VecMap;
 
 use super::with_context;
-use crate::bucket::Bucket;
-use crate::bucket_geometry::{BucketGeometry, GeometryUpload};
-use crate::buckets::symbol_bucket::{SymbolBucket, SymbolBucketStyle, SymbolLayoutFlags};
-use crate::gfx::context::Context;
 use crate::gfx::indexes::DrawIndexes;
-use crate::layout::symbol_instance::SymbolInstancePools;
 use crate::tile::raster::{RasterContents, RasterLayoutVertex};
 use crate::tile_mask::TileMask;
-
-/// Uploads `bucket`, keeping its geometry in `geometry`, through `context`.
-fn upload(bucket: &mut dyn Bucket, geometry: &mut BucketGeometry, context: &mut Context) {
-    bucket.upload(&mut GeometryUpload::new(geometry, &[], context));
-}
-
-fn needs_upload(bucket: &dyn Bucket) -> bool {
-    bucket.needs_upload()
-}
-
-// gtest: Buckets.SymbolBucket
-#[test]
-fn symbol_bucket() {
-    let layout = Arc::new(SymbolLayoutProperties::PossiblyEvaluated::default());
-    let (instances, pools) = (Vec::new(), SymbolInstancePools::default());
-    let mut bucket = SymbolBucket::new(
-        SymbolBucketStyle {
-            layout,
-            paint_properties: &VecMap::new(),
-            text_size: &PropertyValue::Constant(16.0),
-            icon_size: &PropertyValue::Constant(1.0),
-            zoom: 0.0,
-            tile_pixel_ratio: 1.0,
-            leader_id: Arc::from("test"),
-        },
-        SymbolLayoutFlags::default(),
-        instances,
-        pools,
-        Vec::new(),
-    );
-    assert!(!bucket.has_icon_data());
-    assert!(!bucket.has_sdf_icon_data());
-    assert!(!bucket.has_text_data());
-    assert!(!bucket.has_icon_collision_box_data());
-    assert!(!bucket.has_text_collision_box_data());
-    assert!(!bucket.has_icon_collision_circle_data());
-    assert!(!bucket.has_text_collision_circle_data());
-    assert!(!bucket.has_data());
-    assert!(!needs_upload(&bucket));
-
-    bucket.state.text.segments.push(SegmentBase::new(0, 0));
-    assert!(bucket.has_text_data());
-    assert!(bucket.has_data());
-    assert!(needs_upload(&bucket));
-
-    with_context(|_, context| upload(&mut bucket, &mut BucketGeometry::default(), context));
-    assert!(!needs_upload(&bucket));
-}
 
 // gtest: Buckets.RasterBucket
 #[test]

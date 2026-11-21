@@ -1,7 +1,7 @@
 use geometry::Point;
 use glam::{DMat4, DVec4, Vec2};
 use mln_map_types::{MapMode, ProjectedTilePoint, TileProjector, View};
-use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
+use mln_renderer::placement::{Aabb, Grid, Shape};
 use mln_style_types::IconOverlapType;
 use mln_tile_id::geometry_tile_data::GeometryCoordinates;
 use mln_util::constants::EXTENT;
@@ -9,12 +9,12 @@ use mln_util::geo::ScreenLineString;
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::intersection_tests::polygon_intersects_polygon;
 
-use crate::buckets::symbol_bucket::{PlacedSymbol, PlacedSymbolPools};
-use crate::layout::symbol_projection::{
+use crate::symbol::SymbolLayoutProperties;
+use crate::symbol::bucket::{PlacedSymbol, PlacedSymbolPools};
+use crate::symbol::collision_feature::{CollisionBox, CollisionFeature, IndexedSubfeature};
+use crate::symbol::projection::{
     LabelPlaneProjector, LineLabel, LinePlacer, PlacedGlyph, TileDistance, tile_skew_vectors,
 };
-use crate::placement::{Aabb, Grid, Shape};
-use crate::text::collision_feature::{CollisionBox, CollisionFeature, IndexedSubfeature};
 
 /// A box's edges: [x1, y1, x2, y2].
 pub(crate) type CollisionBoundaries = [f32; 4];
@@ -773,7 +773,7 @@ mod tests {
     use mln_util::size::Size;
 
     use super::*;
-    use crate::util::pool::PoolRange;
+    use crate::symbol::pool::PoolRange;
 
     fn feature(index: usize) -> CollisionFeature {
         CollisionFeature {

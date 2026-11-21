@@ -7,9 +7,9 @@ use mln_text::glyph::Shaping;
 use mln_tile_id::geometry_tile_data::GeometryCoordinate;
 use mln_util::Padding;
 
-use crate::geometry::anchor::{Anchor, segments, vertex_behind};
-use crate::text::collision_index::OverlapMode;
-use crate::util::pool::PoolRange;
+use crate::symbol::anchor::{Anchor, segments, vertex_behind};
+use crate::symbol::placement::collision_index::OverlapMode;
+use crate::symbol::pool::PoolRange;
 
 /// A feature of a collision index, which a query looks up in its tile's
 /// feature index.

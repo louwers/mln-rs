@@ -1,11 +1,12 @@
 use glam::Vec2;
 use mln_math::deg2radf;
-use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 use mln_style_types::image::{ImagePosition, ImagePositions, ImageStretch, RectU16};
 use mln_style_types::{SymbolPlacementType, TextRotationAlignmentType};
 use mln_text::PositionedIcon;
 use mln_text::glyph::Shaping;
 use mln_util::constants::ONE_EM;
+
+use crate::symbol::SymbolLayoutProperties;
 
 /// A glyph's or an icon's quad, relative to its symbol's anchor.
 #[derive(Clone, Debug, PartialEq)]

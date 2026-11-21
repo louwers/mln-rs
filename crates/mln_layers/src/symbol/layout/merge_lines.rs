@@ -1,7 +1,7 @@
 use mln_tile_id::geometry_tile_data::GeometryCoordinate;
 use mln_util::hash::HashMap;
 
-use crate::layout::symbol_feature::SymbolFeature;
+use crate::symbol::layout::feature::SymbolFeature;
 
 /// A line's end: the index of its feature's text among the distinct texts,
 /// and the end point.

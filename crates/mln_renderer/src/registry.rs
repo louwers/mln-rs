@@ -122,17 +122,15 @@ impl std::fmt::Debug for Registry {
 }
 
 impl Registry {
-    /// The built-in expression functions, the engine's own layer type,
-    /// without the types of `mln_layers` and `mln_sources`, and the tests'
-    /// fixture layer and source types, for this crate's tests, which can't
-    /// reach the facade's registry.
+    /// The built-in expression functions and the tests' fixture layer and
+    /// source types, for this crate's tests, which can't reach the facade's
+    /// registry.
     #[cfg(test)]
     pub(crate) fn with_builtins() -> Arc<Registry> {
         use crate::tests::fixture_source::{Dem, Geometry, Raster, Tiles};
         static BUILTINS: std::sync::LazyLock<Arc<Registry>> = std::sync::LazyLock::new(|| {
             let mut builder = RegistryBuilder::new();
             mln_style::expression::functions::register_builtin_functions(builder.functions_mut()).unwrap();
-            crate::builtins::register_layer_types(&mut builder).unwrap();
             builder.add_layer_type::<crate::tests::fixture_layer::Dot>().unwrap();
             builder.add_layer_type::<crate::tests::fixture_layer::Tint>().unwrap();
             builder.add_layer_type::<crate::tests::fixture_layer::Shade>().unwrap();

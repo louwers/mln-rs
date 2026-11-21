@@ -19,7 +19,8 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
 use serde_json::json;
 
-use crate::{Circle, Fill, Line};
+use crate::symbol::bucket::SortKeyRange;
+use crate::{Circle, Fill, Line, Symbol};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum SortKeyType {
@@ -133,11 +134,11 @@ fn create_bucket<T: LayerType>(layer: &Arc<EvaluatedLayer<T>>, shape: Shape) -> 
         )
         .unwrap(),
     );
-    let mut resolved = Resolved::default();
-    resolved.patterns = ImagePositions::from_iter([(
+    let positions = ImagePositions::from_iter([(
         "marker".to_owned(),
         ImagePosition::new(RectU16 { x: 0, y: 0, w: 18, h: 18 }, &marker),
     )]);
+    let resolved = Resolved { icons: positions.clone(), patterns: positions, ..Resolved::default() };
     let build =
         BuildParams { first_load: true, show_collision_boxes: false, canonical: bucket_parameters.tile_id.canonical };
     layout.create_bucket(Some(&resolved), &mut FeatureIndexBuilder::new(Some(data)), &build).unwrap().unwrap()
@@ -195,5 +196,47 @@ fn circle_order() {
             feature_order(bucket.vertices.data().iter().map(|v| v.a1[0]), 2),
             "{type_:?}"
         );
+    }
+}
+
+fn symbol_layer(type_: SortKeyType, z_order: Option<&str>) -> Arc<EvaluatedLayer<Symbol>> {
+    let mut json = json!({
+        "id": "symbol", "type": "symbol", "source": "source",
+        "layout": { "icon-image": "marker", "icon-allow-overlap": true }
+    });
+    if let Some(z_order) = z_order {
+        json["layout"]["symbol-z-order"] = json!(z_order);
+    }
+    layer(json, "symbol-sort-key", type_)
+}
+
+#[test]
+fn symbol_order() {
+    for type_ in SORT_KEY_TYPES {
+        let bucket = create_bucket(&symbol_layer(type_, None), Shape::Point);
+        let order: Vec<usize> = bucket.state.symbol_instances.iter().map(|symbol| symbol.data_feature_index).collect();
+        assert_eq!(expected_order(type_), order, "{type_:?}");
+        // An explicit constant key still disables viewport-Y sorting for symbol-z-order:auto.
+        assert_eq!(type_ == SortKeyType::Undefined, bucket.sort_features_by_y, "{type_:?}");
+        match type_ {
+            SortKeyType::Undefined => assert_eq!(bucket.sort_key_ranges, Vec::<SortKeyRange>::new()),
+            SortKeyType::Constant | SortKeyType::Camera => {
+                assert_eq!(bucket.sort_key_ranges.len(), 1, "{type_:?}");
+                let range = bucket.sort_key_ranges[0];
+                assert_eq!((range.sort_key, range.start, range.end), (5.0, 0, 3), "{type_:?}");
+            }
+            SortKeyType::DataDriven => assert_eq!(bucket.sort_key_ranges.len(), 3),
+        }
+    }
+}
+
+#[test]
+fn symbol_viewport_y() {
+    for type_ in SORT_KEY_TYPES {
+        let bucket = create_bucket(&symbol_layer(type_, Some("viewport-y")), Shape::Point);
+        assert!(bucket.sort_features_by_y, "{type_:?}");
+        assert!(bucket.sort_key_ranges.is_empty(), "{type_:?}");
+        let order: Vec<usize> = bucket.state.symbol_instances.iter().map(|symbol| symbol.data_feature_index).collect();
+        assert_eq!(vec![0, 1, 2], order, "{type_:?}");
     }
 }

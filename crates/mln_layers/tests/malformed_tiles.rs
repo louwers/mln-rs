@@ -5,21 +5,28 @@ use std::sync::Arc;
 
 use mln_renderer::bench::TileLayout;
 use mln_rs::builtin_registry;
-use mln_style::Style;
+use mln_style::{Edit, Style};
+use mln_style_types::image::Impl as ImageImpl;
 use mln_tile::{MvtTile, TileData};
 use mln_util::error::Error;
+use mln_util::image::PremultipliedImage;
+use mln_util::size::Size;
 use proptest::prelude::*;
 use serde_json::json;
 
 /// The layout of the z0 tile `tile` by `layers`, layers of the source
-/// `source` and the source layer `l`.
+/// `source` and the source layer `l`, with the icon `v`.
 fn lay_out(tile: Vec<u8>, layers: &serde_json::Value) -> Result<usize, Error> {
     let json = json!({
         "version": 8,
         "sources": {"source": {"type": "vector", "tiles": ["local://{z}-{x}-{y}.mvt"]}},
         "layers": layers,
     });
-    let style = Style::from_json(builtin_registry().style(), &json.to_string(), None).unwrap();
+    let mut style = Style::from_json(builtin_registry().style(), &json.to_string(), None).unwrap();
+    let mut pixels = PremultipliedImage::new(Size::new(1, 1));
+    pixels.data.fill(255);
+    let icon = ImageImpl::new("v".to_owned(), pixels, 1.0, false, Vec::new(), Vec::new(), None, None, None).unwrap();
+    style.apply(Edit::AddImage(Arc::new(icon))).unwrap();
     let data = TileData::Mvt(MvtTile::new(Arc::new(tile)));
     let layout = TileLayout::new(&builtin_registry(), &style, "source", |_| true, (0, 0, 0), &data, |_| None)?;
     Ok(layout.run(data)?.buckets())
@@ -131,12 +138,16 @@ fn all_layers() -> serde_json::Value {
             "layout": { "circle-sort-key": ["get", "n"] }
         },
         { "id": "heatmap", "type": "heatmap", "source": "source", "source-layer": "l" },
+        {
+            "id": "symbol", "type": "symbol", "source": "source", "source-layer": "l",
+            "layout": { "icon-image": ["get", "k"], "symbol-sort-key": ["get", "n"] }
+        },
     ])
 }
 
 #[test]
 fn valid_tile_lays_out() {
-    assert_eq!(lay_out(valid_tile(), &all_layers()).unwrap(), 6);
+    assert_eq!(lay_out(valid_tile(), &all_layers()).unwrap(), 7);
 }
 
 // As C++ Source.VectorTileCorrupt, with a truncated tile.

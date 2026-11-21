@@ -529,7 +529,7 @@ impl DrawObjects {
     /// The vertex attributes, to change, which the next upload binds again.
     /// The draw drops its geometry where they have values of their own,
     /// whose buffers a change may drop.
-    pub(crate) fn vertex_attributes_mut(&mut self) -> &mut VertexAttributeArray {
+    pub fn vertex_attributes_mut(&mut self) -> &mut VertexAttributeArray {
         self.vertex_attributes_changed = true;
         if self.vertex_attributes.has_own() {
             self.geometry = None;
@@ -614,7 +614,7 @@ impl DrawObjects {
     }
 
     /// Replaces the indexes and the segments drawn from them.
-    pub(crate) fn replace_indexes(&mut self, indexes: DrawIndexes, segments: Vec<SegmentBase>) {
+    pub fn replace_indexes(&mut self, indexes: DrawIndexes, segments: Vec<SegmentBase>) {
         if let DrawIndexes::Own(_) = self.indexes {
             self.geometry = None;
         }
@@ -629,15 +629,9 @@ impl DrawObjects {
         self.bindings = None;
     }
 
-    /// Writes `value` to the draw's own uniform buffer `id`, as
-    /// [`UniformBufferArray::write_pod`] does.
-    pub(crate) fn write_pod<T: bytemuck::Pod>(
-        &mut self,
-        gpu: &mut dyn Gpu,
-        id: usize,
-        value: &T,
-        context: &mut Context,
-    ) {
+    /// Writes `value` to the draw's own uniform buffer `id`, which the draw
+    /// binds again where the write replaced the buffer.
+    pub fn write_pod<T: bytemuck::Pod>(&mut self, gpu: &mut dyn Gpu, id: usize, value: &T, context: &mut Context) {
         if self.uniform_buffers.write_pod(gpu, id, value, context.device()) {
             self.drop_bindings();
         }

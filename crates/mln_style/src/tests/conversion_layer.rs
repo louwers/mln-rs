@@ -86,68 +86,10 @@ fn roundtrip_with_transitions() {
     assert_eq!(3, object_len(&round_tripped_value));
 }
 
-fn object_member_len(value: &Value, member: &str) -> usize {
-    match value {
-        Value::Object(o) => object_len(o.get(member).expect(member)),
-        _ => panic!("not an object"),
-    }
-}
-
-/// The layer as JSON text. The text only feeds the round trip, so its
-/// whitespace does not matter.
-fn stringify_layer(value: &Value) -> String {
-    serde_json::to_string_pretty(&value_to_json(value)).unwrap()
-}
-
 fn parse_filter(expression: &str) -> Filter {
     let mut error = Error::default();
     let json = parse_json(expression);
     convert_filter(&Convertible::from(&json), &Functions::with_builtins(), &mut error).expect("filter")
-}
-
-// gtest: StyleConversion.OverrideDefaults
-#[test]
-fn override_defaults() {
-    let layer = parse_layer(
-        r#"{
-        "type": "symbol",
-        "id": "symbol",
-        "source": "composite",
-        "source-layer": "landmarks",
-        "filter": ["has", "monuments"],
-        "minzoom": 12,
-        "maxzoom": 18,
-        "layout": {
-            "visibility": "none",
-            "text-field": ["format",
-                            "Hello",
-                            ["image", ["get", "world"]],
-                            "Example", {"text-color": "rgba(128, 255, 39, 1)"}
-                          ],
-            "icon-image": ["image", ["get", "landmark_image"]],
-            "text-size": 24
-        },
-        "paint": {
-            "text-color": "turquoise",
-            "text-color-transition": {
-                "duration": 300,
-                "delay": 100
-            }
-        }
-    }"#,
-    );
-
-    let layer = layer.expect("layer");
-    let value = layer.serialize();
-    assert_eq!(9, object_len(&value));
-    assert_eq!(4, object_member_len(&value, "layout"));
-    assert_eq!(2, object_member_len(&value, "paint"));
-
-    let round_tripped = parse_layer(&stringify_layer(&value)).expect("round trip");
-    let round_tripped_value = round_tripped.serialize();
-    assert_eq!(9, object_len(&round_tripped_value));
-    assert_eq!(4, object_member_len(&round_tripped_value, "layout"));
-    assert_eq!(2, object_member_len(&round_tripped_value, "paint"));
 }
 
 // gtest: StyleConversion.SetGenericProperties
@@ -155,8 +97,8 @@ fn override_defaults() {
 fn set_generic_properties() {
     let mut layer = parse_layer(
         r#"{
-        "type": "symbol",
-        "id": "symbol",
+        "type": "dot",
+        "id": "dot",
         "source": "composite",
         "source-layer": "landmarks",
         "filter": ["has", "monuments"],
@@ -187,50 +129,4 @@ fn set_generic_properties() {
     let new_max_zoom = serde_json::json!(f64::from(22.0_f32));
     layer.set_property("maxzoom", &Convertible::from(&new_max_zoom), None);
     assert_eq!(22.0_f32, layer.get_max_zoom());
-}
-
-// A `text-field` array that isn't an expression, such as an array of sections,
-// is a conversion error.
-#[test]
-fn text_field_array_not_an_expression() {
-    for field in [r#"[["foo"]]"#, r#"[["foo", {"font-scale": 2}], [["image", "bar"]]]"#, "[1]"] {
-        let src =
-            format!(r#"{{"id": "symbol", "type": "symbol", "source": "s", "layout": {{"text-field": {field}}}}}"#);
-        let mut error = Error::default();
-        assert!(
-            convert_layer(&StyleRegistry::with_builtins(), &Convertible::from(&parse_json(&src)), &mut error).is_none(),
-            "{field}"
-        );
-        assert_eq!(error.message, "value must be a string");
-    }
-}
-
-// An image property's array that isn't an expression is a conversion error.
-#[test]
-fn image_array_not_an_expression() {
-    let src = r#"{"id": "symbol", "type": "symbol", "source": "s", "layout": {"icon-image": [["foo"]]}}"#;
-    let mut error = Error::default();
-    assert!(convert_layer(&StyleRegistry::with_builtins(), &Convertible::from(&parse_json(src)), &mut error).is_none());
-    assert_eq!(error.message, "value must be a string");
-}
-
-// `viewport-glyph` is a value of `text-rotation-alignment` only.
-#[test]
-fn viewport_glyph_only_for_text_rotation_alignment() {
-    for (property, parses) in [
-        ("text-rotation-alignment", true),
-        ("text-pitch-alignment", false),
-        ("icon-rotation-alignment", false),
-        ("icon-pitch-alignment", false),
-    ] {
-        let src = format!(
-            r#"{{"id": "symbol", "type": "symbol", "source": "s", "layout": {{"{property}": "viewport-glyph"}}}}"#
-        );
-        let mut error = Error::default();
-        assert_eq!(
-            convert_layer(&StyleRegistry::with_builtins(), &Convertible::from(&parse_json(&src)), &mut error).is_some(),
-            parses,
-            "{property}"
-        );
-    }
 }

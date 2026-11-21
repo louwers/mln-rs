@@ -23,7 +23,8 @@ use crate::property_table::SetPropertyError;
 use crate::registry::StyleRegistry;
 use crate::style_property::StyleProperty;
 
-pub(crate) type FontStack = Vec<String>;
+/// A font stack: the names of its fonts, in order.
+pub type FontStack = Vec<String>;
 
 /// The font stacks `layers` use, found by statically evaluating their
 /// `text-font` values.

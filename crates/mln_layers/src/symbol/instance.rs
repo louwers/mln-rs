@@ -10,10 +10,10 @@ use mln_text::glyph::Shaping;
 use mln_tile_id::geometry_tile_data::GeometryCoordinates;
 use mln_util::serialization::payload::pod;
 
-use crate::geometry::anchor::Anchor;
-use crate::text::collision_feature::{CollisionBox, CollisionFeature};
-use crate::text::quads::SymbolQuads;
-use crate::util::pool::PoolRange;
+use crate::symbol::anchor::Anchor;
+use crate::symbol::collision_feature::{CollisionBox, CollisionFeature};
+use crate::symbol::pool::PoolRange;
+use crate::symbol::quads::SymbolQuads;
 
 /// The writing modes that a symbol's text, or a run of its quads, shows in.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, mln_wire::Wire)]

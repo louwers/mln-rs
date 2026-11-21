@@ -94,11 +94,12 @@ use crate::placement::{BucketKey, NewPlacement};
 use crate::render_layer::Atlases;
 pub use crate::render_layer::LayerBucket;
 pub use crate::render_pass::RenderPass;
-use crate::render_source::RenderSource;
 pub use crate::render_source::TileOrder;
 use crate::render_tile::FindView as _;
 pub use crate::render_tile::{FrameTile, NoTileView, RasterView, TileView};
+pub use crate::text::glyph_store::ShapeResults;
 pub use crate::tile::dem::DemContents;
+use crate::tile::job::SourceKey;
 pub use crate::tile::raster::{MaskedGeometry, RasterContents, RasterLayoutVertex, StoredQuads};
 pub use crate::tile_mask::TileMask;
 use crate::update_parameters::UpdateParameters;
@@ -431,8 +432,11 @@ pub struct UpdateContext<'a, 'f, T: LayerType> {
     pub images: &'a ImageStore,
     /// The atlases the layers' draws share, which the encode uploads.
     pub atlases: &'a mut Atlases,
-    /// The layer's source, `None` for a layer without one.
-    pub(crate) source: Option<&'a dyn RenderSource>,
+    /// The tile store's tiles of the layer's source; `None` for a layer
+    /// without a source, or a source without tiles.
+    pub(crate) source_tiles: Option<SourceKey>,
+    /// See [`source_max_zoom`](Self::source_max_zoom).
+    pub(crate) source_max_zoom: Option<u8>,
 }
 
 impl<T: LayerType> UpdateContext<'_, '_, T> {
@@ -445,7 +449,7 @@ impl<T: LayerType> UpdateContext<'_, '_, T> {
             bucket: tile.view()?.bucket_index()?,
             slot: tile.tile.slot(),
             tile: tile.id(),
-            source: self.source?.tiles()?,
+            source: self.source_tiles?,
         })
     }
 
@@ -453,7 +457,7 @@ impl<T: LayerType> UpdateContext<'_, '_, T> {
     /// [`Cover`](crate::source::Cover), once it has one.
     #[must_use]
     pub fn source_max_zoom(&self) -> Option<u8> {
-        self.source.and_then(RenderSource::max_zoom)
+        self.source_max_zoom
     }
 }
 

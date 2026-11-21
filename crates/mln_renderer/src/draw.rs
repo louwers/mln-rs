@@ -34,7 +34,7 @@
 //! [`RenderTarget`].
 
 pub use crate::bucket_geometry::{
-    BucketGeometry, bucket_indexes, bucket_vertices, copied_vertices, derived_vertices, paint_vertices,
+    BucketGeometry, bucket_indexes, bucket_vertices, copied_indexes, copied_vertices, derived_vertices, paint_vertices,
 };
 pub use crate::draw_objects::{DrawGeometry, DrawObjects, Textures, copy_shared_attributes, raw_vertices};
 pub use crate::frame_projection::zero_to_one_clip_z;
@@ -44,7 +44,7 @@ pub use crate::gfx::indexes::{DrawIndexes, Indexes};
 pub use crate::gfx::store::{SharedIndexes, SharedTexture};
 pub use crate::gfx::texture2d::{Texture2D, TextureMut};
 pub use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
-pub use crate::gfx::vertices::{SharedVertices, Vertices};
+pub use crate::gfx::vertices::{SharedVertices, TypedVertices, Vertices};
 pub use crate::layer_composite::Composite;
 pub use crate::layer_drawing::{
     BucketChanges, ChangedBuckets, DrawDepth, DrawGroup, DrawList, DrawObjectsMut, DrawOrder, DrawPriority, FrameDraw,

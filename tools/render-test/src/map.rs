@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use mln_headless::HeadlessFrontend;
 use mln_map::{BoundOptions, Map, MapOptions, ProjectionMode};
-use mln_renderer::text::placement::PlacedSymbols as _;
 use mln_renderer::tile::worker_codec::{RemoteWorkers, ThreadWorkerInstances};
+use mln_rs::mln_layers::symbol::placement::PlacedSymbols as _;
 use mln_storage::{FileSource, FileSourceExt};
 use mln_style::Edit;
 use mln_util::image::PremultipliedImage;
@@ -166,7 +166,7 @@ impl TestRunnerImpl for Impl {
     }
 
     fn get_placed_symbols_data(&mut self) -> Vec<crate::runner::PlacedSymbol> {
-        let to_box = |b: &mln_renderer::text::Aabb| [b.min.x, b.min.y, b.max.x, b.max.y];
+        let to_box = |b: &mln_renderer::placement::Aabb| [b.min.x, b.min.y, b.max.x, b.max.y];
         self.frontend
             .renderer()
             .placed_symbols_data()

@@ -80,10 +80,10 @@ fn discover_records_what_the_layouts_need() {
         layer(json!({"id": "outline", "type": "dot"})),
         layer(json!({"id": "dots", "type": "dot"})),
         layer(json!({"id": "patterned", "type": "dot", "paint": {"dot-pattern": "stripes"}})),
-        layer(json!({"id": "labels", "type": "symbol", "layout": {
-            "text-field": "ab",
-            "text-font": ["Test"],
-            "icon-image": ["coalesce", ["image", "missing"], ["image", "marker"]],
+        layer(json!({"id": "labels", "type": "dot", "layout": {
+            "dot-label": "ab",
+            "dot-font": ["Test"],
+            "dot-icon": ["coalesce", ["image", "missing"], ["image", "marker"]],
         }})),
     ];
     let data = data();
@@ -135,7 +135,7 @@ fn run(layers: &[Arc<dyn ErasedEvaluatedLayer>], available: &[&str], resolved: R
     InlineWorkers::run(run).result
 }
 
-/// A symbol layer whose only feature has no icon, but whose `icon-image`
+/// A layer whose only feature has no icon, but whose `dot-icon`
 /// asked for an unavailable image on the way: its first job needs that
 /// image and nothing else, and a job that knows it missing lays out.
 #[test]
@@ -146,7 +146,7 @@ fn a_layout_waiting_only_for_unavailable_images_finishes() {
         "",
         "marker"
     ]);
-    let layers = [layer(json!({"id": "icons", "type": "symbol", "layout": {"icon-image": icon_image}}))];
+    let layers = [layer(json!({"id": "icons", "type": "dot", "layout": {"dot-icon": icon_image}}))];
     let JobResult::NeedsDeps(needs) = run(&layers, &["marker"], Resolved::default()) else {
         panic!("expected the dependencies");
     };
@@ -188,7 +188,7 @@ fn a_resume_builds_from_the_memo() {
     use crate::tile::job::{DiscoveryMemo, JobTimes, SourceStyle};
 
     let memo = DiscoveryMemo::new(4);
-    let style = crate::tests::style(&[layer(json!({"id": "icons", "type": "symbol", "layout": {"icon-image": "a"}}))]);
+    let style = crate::tests::style(&[layer(json!({"id": "icons", "type": "dot", "layout": {"dot-icon": "a"}}))]);
     let images = Arc::new(VecSet::new());
     let job = |style: &Arc<SourceStyle>, images: &Arc<VecSet<String>>, resolved: Resolved, generation| {
         let tile = TileKey { source: SourceKey(1), id: OverscaledTileID::from_zxy(0, 0, 0) };

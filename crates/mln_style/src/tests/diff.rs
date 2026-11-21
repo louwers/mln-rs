@@ -81,8 +81,8 @@ fn order() {
 
 #[test]
 fn a_moved_layer_that_changed_keeps_its_class() {
-    let (a, b) = (new_layer("symbol", "a", "s"), new_layer("symbol", "b", "s"));
-    let wider = changed(a.clone(), "text-halo-width", r#"["get", "width"]"#);
+    let (a, b) = (new_layer("dot", "a", "s"), new_layer("dot", "b", "s"));
+    let wider = changed(a.clone(), "dot-width", r#"["get", "width"]"#);
     let changes = LayerChanges::between(&list(&[&a, &b]), &list(&[&b, &wider]));
     assert_eq!(Some(LayerChange::Relaid), changes.get("a"));
     assert_eq!(None, changes.get("b"));
@@ -92,23 +92,23 @@ fn a_moved_layer_that_changed_keeps_its_class() {
 #[test]
 fn a_layer_of_another_type_is_replaced() {
     let old = new_layer("plain", "a", "");
-    let new = new_layer("symbol", "a", "s");
+    let new = new_layer("dot", "a", "s");
     assert_eq!(changes(&[&old], &[&new]), [("a".to_owned(), LayerChange::Replaced)]);
 }
 
 #[test]
 fn a_change_tiles_are_laid_out_with_is_relaid() {
-    let symbol = new_layer("symbol", "l", "s");
+    let dot = new_layer("dot", "l", "s");
     let cases = [
-        ("text-color", r##""#ff0000""##, LayerChange::Restyled),
-        ("text-halo-width", r#"["get", "width"]"#, LayerChange::Relaid),
-        ("text-transform", r#""uppercase""#, LayerChange::Relaid),
+        ("dot-color", r##""#ff0000""##, LayerChange::Restyled),
+        ("dot-width", r#"["get", "width"]"#, LayerChange::Relaid),
+        ("dot-alignment", r#""map""#, LayerChange::Relaid),
         ("filter", r#"["==", "class", "road"]"#, LayerChange::Relaid),
         ("visibility", r#""none""#, LayerChange::Relaid),
     ];
     for (name, json, expected) in cases {
-        let edited = changed(symbol.clone(), name, json);
-        assert_eq!(changes(&[&symbol], &[&edited]), [("l".to_owned(), expected)], "{name}");
+        let edited = changed(dot.clone(), name, json);
+        assert_eq!(changes(&[&dot], &[&edited]), [("l".to_owned(), expected)], "{name}");
         assert_eq!(expected.relayouts(), expected == LayerChange::Relaid, "{name}");
     }
 }
@@ -127,7 +127,7 @@ mod versions {
 
     const STYLE: &str = r#"{"version":8,
         "sources":{"c":{"type":"points"},"a":{"type":"points"}},
-        "layers":[{"id":"bg","type":"plain"},{"id":"dots","type":"symbol","source":"a"}]}"#;
+        "layers":[{"id":"bg","type":"plain"},{"id":"dots","type":"dot","source":"a"}]}"#;
 
     fn style() -> crate::Style {
         crate::Style::from_json(&StyleRegistry::with_builtins(), STYLE, None).unwrap()
@@ -210,8 +210,8 @@ mod versions {
     fn each_layer_edit_names_its_layer_and_class() {
         let base = style();
         let cases = [
-            ("text-color", serde_json::json!("#ff0000"), LayerChange::Restyled),
-            ("text-halo-width", serde_json::json!(["get", "radius"]), LayerChange::Relaid),
+            ("dot-color", serde_json::json!("#ff0000"), LayerChange::Restyled),
+            ("dot-width", serde_json::json!(["get", "radius"]), LayerChange::Relaid),
             ("filter", serde_json::json!(["==", "class", "road"]), LayerChange::Relaid),
             ("visibility", serde_json::json!("none"), LayerChange::Relaid),
         ];

@@ -142,72 +142,6 @@ impl<'a, T: LayerType> FindView<'a> for LayerBucket<'a, T> {
     }
 }
 
-/// The copies of buckets that benchmarks' layers place, kept where a tile
-/// store would keep the buckets, by their index, which is their keys'
-/// `bucket`. The benchmarks' entry points pass no store, so the copies are
-/// the thread's, and the layer that places one frees it
-/// ([`HeldBuckets::release`]) when it drops.
-#[cfg(feature = "bench")]
-pub(crate) struct HeldBuckets(Vec<Option<Box<dyn Bucket>>>);
-
-#[cfg(feature = "bench")]
-thread_local! {
-    static HELD_BUCKETS: std::cell::Cell<Vec<Option<Box<dyn Bucket>>>> = const { std::cell::Cell::new(Vec::new()) };
-}
-
-/// A copy of the bucket `bucket` points to, which `HeldBuckets` holds for
-/// a benchmark's layer to place, at the index this returns, until the layer
-/// drops.
-#[cfg(feature = "bench")]
-pub(crate) fn hold_bucket(bucket: &impl std::ops::Deref<Target = dyn Bucket>) -> usize {
-    HeldBuckets::hold(bucket.clone_bucket())
-}
-
-#[cfg(feature = "bench")]
-impl HeldBuckets {
-    /// Keeps `bucket`, and returns its index.
-    pub(crate) fn hold(bucket: Box<dyn Bucket>) -> usize {
-        let mut buckets = Self::take();
-        buckets.0.push(Some(bucket));
-        let index = buckets.0.len() - 1;
-        buckets.restore();
-        index
-    }
-
-    /// Frees the bucket at `index`. The indexes start again once no bucket
-    /// is held.
-    pub(crate) fn release(index: usize) {
-        let mut buckets = Self::take();
-        if let Some(bucket) = buckets.0.get_mut(index) {
-            *bucket = None;
-        }
-        if buckets.0.iter().all(Option::is_none) {
-            buckets.0.clear();
-        }
-        buckets.restore();
-    }
-
-    /// The buckets, lent until `restore`.
-    pub(crate) fn take() -> Self {
-        HeldBuckets(HELD_BUCKETS.take())
-    }
-
-    pub(crate) fn restore(self) {
-        HELD_BUCKETS.set(self.0);
-    }
-}
-
-#[cfg(feature = "bench")]
-impl crate::placement::LaidBuckets for HeldBuckets {
-    fn bucket(&self, key: &crate::placement::BucketKey) -> Option<&dyn Bucket> {
-        Some(&**self.0.get(key.bucket)?.as_ref()?)
-    }
-
-    fn bucket_mut(&mut self, key: &crate::placement::BucketKey) -> Option<&mut dyn Bucket> {
-        Some(&mut **self.0.get_mut(key.bucket)?.as_mut()?)
-    }
-}
-
 /// A source's render tiles in a frame, with what each of them holds, as
 /// the engine sees them.
 #[derive(Clone, Copy)]
@@ -361,22 +295,27 @@ impl<T: LayerType> Layer<T> {
         PlacingLayer { layer: &self.values, state: &self.state }
     }
 
-    /// What the layer's type keeps of it besides its drawing.
+    /// Runs the type's [`LayerType::update`] with `tiles`, the tiles of the
+    /// tile store's `source`, as a frame's update does, without images or
+    /// atlases: for the benchmarks, which make the tiles without a frame.
     #[cfg(feature = "bench")]
-    pub(crate) fn state(&self) -> &T::State {
-        &self.state
-    }
-
-    /// [`state`](Self::state), to change.
-    #[cfg(feature = "bench")]
-    pub(crate) fn state_mut(&mut self) -> &mut T::State {
-        &mut self.state
-    }
-
-    /// The layer's values.
-    #[cfg(feature = "bench")]
-    pub(crate) fn values(&self) -> &LayerValues<T> {
-        &self.values
+    pub(crate) fn update_tiles(
+        &mut self,
+        tiles: &[FrameTile<'_, T>],
+        update_parameters: &UpdateParameters,
+        source: crate::tile::job::SourceKey,
+    ) {
+        let mut cx = UpdateContext {
+            tiles,
+            layer: &self.values,
+            view: &update_parameters.view,
+            update_parameters,
+            images: &crate::image_store::ImageStore::default(),
+            atlases: &mut Atlases::default(),
+            source_tiles: Some(source),
+            source_max_zoom: None,
+        };
+        T::update(&mut self.state, &mut self.drawing, &mut cx);
     }
 
     /// Starts the frame's draws of the layer, which has something to draw,
@@ -643,7 +582,8 @@ impl<T: LayerType> RenderLayer for Layer<T> {
             update_parameters: update.update_parameters,
             images: update.images,
             atlases: update.atlases,
-            source: update.source,
+            source_tiles: update.source.and_then(RenderSource::tiles),
+            source_max_zoom: update.source.and_then(RenderSource::max_zoom),
         };
         T::update(&mut self.state, &mut self.drawing, &mut cx);
     }

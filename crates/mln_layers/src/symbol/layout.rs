@@ -1,7 +1,16 @@
-// The layout keeps the tile's `SourceLayer` (shared tile data) and owned
-// `SymbolFeature`s (see symbol_feature.rs), so it can wait for glyphs and
-// images across worker messages.
-//
+//! A tile's layout of a group of symbol layers: each feature's text and
+//! icon, shaped and placed at its anchors, as the symbol instances of a
+//! bucket.
+//!
+//! The layout keeps the tile's `SourceLayer` (shared tile data) and owned
+//! `SymbolFeature`s (`feature`), so it can wait for glyphs and images across
+//! worker messages.
+
+mod check_max_angle;
+mod clip_lines;
+pub(crate) mod feature;
+mod get_anchors;
+mod merge_lines;
 
 use std::borrow::Cow;
 use std::range::RangeInclusive;
@@ -12,10 +21,13 @@ use glam::Vec2;
 use mln_expression::Value;
 use mln_expression::formatted::K_FORMATTED_SECTION_TEXT_COLOR;
 use mln_map_types::MapMode;
+use mln_renderer::layer::{
+    BucketParameters, BuildParams, EvaluatedLayer, FeatureIndexBuilder, Layout, LayoutParameters, Resolved,
+    ShapeResults, SourceLayer, layers_by_id,
+};
+use mln_renderer::unstable::Indexed;
 use mln_style::evaluated::Evaluated;
 use mln_style::expression::{EvaluationContext, GlobalStateMap};
-use mln_style::layers::Symbol;
-use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 use mln_style::property_value::PropertyValue;
 use mln_style::{PropertyEvaluationParameters, StyleValue as _};
 use mln_style_types::image::{ImagePositions, ImageType};
@@ -37,30 +49,24 @@ use mln_util::range::Range;
 use mln_util::{Padding, i18n};
 use mln_vec_map::VecMap;
 
-use crate::bucket_parameters::BucketParameters;
-use crate::buckets::symbol_bucket::{
+use crate::symbol::anchor::Anchor;
+use crate::symbol::bucket::{
     Buffer, PaintProperties, PlacedSymbol, QuadCorner, SortKeyRange, SymbolBucket, SymbolBucketState,
     SymbolBucketStyle, SymbolLayoutFlags, SymbolSizeBinder,
 };
-use crate::erased_layer::EvaluatedLayer;
-use crate::geometry::anchor::Anchor;
-use crate::geometry::feature_index::FeatureIndexBuilder;
-use crate::gfx::mesh::Indexed;
-use crate::layout::clip_lines::clip_lines;
-use crate::layout::layout::{BuildParams, Layout, LayoutParameters, SourceLayer, layers_by_id};
-use crate::layout::merge_lines::merge_lines;
-use crate::layout::symbol_feature::SymbolFeature;
-use crate::layout::symbol_instance::{
+use crate::symbol::collision_feature::{AlongLine, BoxLayout, CollisionBox, CollisionFeature, IndexedSubfeature};
+use crate::symbol::instance::{
     IconPart, Justification, LaidOutSymbol, ShapedTextOrientations, SymbolInstance, SymbolInstancePools, SymbolQuadSet,
     TextPart, TextRuns, WritingModes,
 };
-use crate::layout::tile_layout::Resolved;
-use crate::text::collision_feature::{AlongLine, BoxLayout, CollisionBox, CollisionFeature, IndexedSubfeature};
-use crate::text::collision_index::OverlapMode;
-use crate::text::get_anchors::{LineLabel, get_anchors, get_center_anchor};
-use crate::text::glyph_store::ShapeResults;
-use crate::text::quads::{SymbolQuad, SymbolQuads, glyph_quads, icon_quads};
-use crate::util::pool::PoolRange;
+use crate::symbol::layout::clip_lines::clip_lines;
+use crate::symbol::layout::feature::SymbolFeature;
+use crate::symbol::layout::get_anchors::{LineLabel, get_anchors, get_center_anchor};
+use crate::symbol::layout::merge_lines::merge_lines;
+use crate::symbol::placement::collision_index::OverlapMode;
+use crate::symbol::pool::PoolRange;
+use crate::symbol::quads::{SymbolQuad, SymbolQuads, glyph_quads, icon_quads};
+use crate::symbol::{Symbol, SymbolLayoutProperties};
 
 /// Whether `text-field` is set: a constant that is not empty, or an
 /// expression.
@@ -493,7 +499,7 @@ impl SymbolLayout {
             symbol_instance_pools: SymbolInstancePools::default(),
             sort_key_ranges: Vec::new(),
             compare_text: VecMap::new(),
-            source_layer_name: Arc::from(source_layer.name.as_str()),
+            source_layer_name: Arc::from(source_layer.name()),
             source_layer,
             overscaling,
             zoom,
@@ -574,7 +580,7 @@ impl SymbolLayout {
             leader.filter.evaluate(&EvaluationContext { feature: Some(feature), ..context })
         };
         let selected = layout_parameters.filter_groups.select(
-            &source_layer.name,
+            source_layer.name(),
             &geometry_layer,
             &leader.filter,
             &context,
@@ -1711,10 +1717,37 @@ impl SymbolLayout {
 mod tests {
     use std::num::NonZeroU16;
 
+    use geometry::Point;
     use mln_text::glyph::{FontFace, FontFaces, GlyphIDType};
+    use mln_tile_id::GeometryCoordinates;
     use mln_util::i18n::char_in_supported_script;
 
     use super::{BASELINE_OFFSET, GlyphTypeTable, SymbolAnchorType, SymbolLayout, evaluate_radial_offset};
+    use crate::symbol::anchor::Anchor;
+
+    // gtest: calculateTileDistances.Point
+    #[test]
+    fn tile_distances_of_a_point() {
+        let line: GeometryCoordinates = vec![Point::new(1i16, 1)];
+        let distances = SymbolLayout::tile_distances(&line, &Anchor::new(1.0, 1.0, 0.0, Some(0)));
+        assert_eq!(distances, vec![0.0f32]);
+    }
+
+    // gtest: calculateTileDistances.Line
+    #[test]
+    fn tile_distances_along_a_line() {
+        let line: GeometryCoordinates = vec![Point::new(1i16, 1), Point::new(1, 2), Point::new(1, 3), Point::new(1, 4)];
+        let distances = SymbolLayout::tile_distances(&line, &Anchor::new(1.0, 3.0, 0.0, Some(2)));
+        assert_eq!(distances, vec![2.0f32, 1.0, 0.0, 1.0]);
+    }
+
+    // gtest: calculateTileDistances.EmptySegment
+    #[test]
+    fn tile_distances_of_an_empty_segment() {
+        let line: GeometryCoordinates = Vec::new();
+        let distances = SymbolLayout::tile_distances(&line, &Anchor::new(1.0, 1.0, 0.0, None));
+        assert_eq!(distances, Vec::<f32>::new());
+    }
 
     #[test]
     fn variable_offset_distinguishes_cartesian_and_radial_offsets() {

@@ -116,17 +116,20 @@ impl Dependencies {
 /// the text that font faces draw. No bitmaps or pixels.
 #[derive(Debug, Default, mln_wire::Wire)]
 pub struct Resolved {
-    /// `None` for a glyph that no font has, or whose range failed.
-    pub(crate) glyphs: GlyphPositions,
-    pub(crate) shaping: ShapeResults,
+    /// Where the glyphs are, by font stack; `None` for a glyph that no font
+    /// has, or whose range failed.
+    pub glyphs: GlyphPositions,
+    /// The shaping of the text that font faces draw.
+    pub shaping: ShapeResults,
+    /// Where the icons are.
     #[wire(with = "sorted::map")]
-    pub(crate) icons: ImagePositions,
+    pub icons: ImagePositions,
     /// Where the patterns are.
     #[wire(with = "sorted::map")]
     pub patterns: ImagePositions,
     /// The requested images that are missing, which a layout lays out
     /// without.
-    pub(crate) missing_images: VecSet<String>,
+    pub missing_images: VecSet<String>,
 }
 
 /// A tile's layer groups, as [`discover`] left them for [`build`].
@@ -154,8 +157,8 @@ pub(crate) struct Built {
 }
 
 /// Groups the layers, builds the layouts of the groups that can need glyphs
-/// or images (symbol layers, and fill, line and fill-extrusion layers with a
-/// pattern), and records what they need. It builds no bucket.
+/// or images ([`LayerType::layout_can_need_dependencies`](crate::layer::LayerType::layout_can_need_dependencies)),
+/// and records what they need. It builds no bucket.
 pub(crate) fn discover(input: &LayoutInput<'_>) -> Result<Discovered, Error> {
     let mut discovered = Discovered {
         groups: Vec::new(),

@@ -321,7 +321,6 @@ pub(crate) const fn entry<T: LayerType>() -> &'static dyn ErasedLayerType {
 #[cfg(test)]
 mod tests {
     use mln_style::evaluated::Evaluated;
-    use mln_style::layers::Symbol;
 
     use super::*;
     use crate::tests::fixture_layer::{Dot, DotBucket, Tint, TintPaintProperties};
@@ -349,7 +348,5 @@ mod tests {
         let dots = entry::<Dot>();
         assert!(!dots.layout_can_need_dependencies(std::slice::from_ref(&layer)));
         assert_eq!(dots.query_radius(&DotBucket::default(), &layer), 0.0);
-        let symbols = entry::<Symbol>();
-        assert!(!symbols.layout_can_need_dependencies(&[layer]));
     }
 }

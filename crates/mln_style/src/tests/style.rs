@@ -8,11 +8,11 @@ use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 use mln_util::{Color, LatLng};
 
+use super::fixture_layer::Dot;
 use super::util::{FixtureLog, new_layer, parse_json};
 use crate::edit::Edit;
 use crate::expression::Functions;
 use crate::layer_type::LayerStyle;
-use crate::layers::Symbol;
 use crate::projection::Projection;
 use crate::property_value::{PropertyValue, StyleValue as _};
 use crate::sky::Sky;
@@ -174,17 +174,17 @@ fn add_remove_remove_image() {
 fn layer_transition_refreshes_immutable_collection() {
     let mut style = stub_style();
     style.load_json(r#"{"version":8,"sources":{},"layers":[]}"#);
-    edit(&mut style, Edit::AddLayer { layer: new_layer("symbol", "symbol", "source"), before: None });
+    edit(&mut style, Edit::AddLayer { layer: new_layer("dot", "dot", "source"), before: None });
     let before = Arc::clone(style.get_layer_list());
 
     let transition = serde_json::json!({"duration": 123, "delay": 45});
-    set_layer_property(&mut style, "symbol", "text-color-transition", transition).unwrap();
+    set_layer_property(&mut style, "dot", "dot-color-transition", transition).unwrap();
     let after = Arc::clone(style.get_layer_list());
     assert!(!Arc::ptr_eq(&before, &after));
     assert_eq!(1, after.len());
-    let impl_ = LayerStyle::<Symbol>::recover_ref(&**after.first().unwrap().style()).unwrap();
-    assert_eq!(Some(Duration::from_millis(123)), impl_.paint.text_color.options.duration);
-    assert_eq!(Some(Duration::from_millis(45)), impl_.paint.text_color.options.delay);
+    let impl_ = LayerStyle::<Dot>::recover_ref(&**after.first().unwrap().style()).unwrap();
+    assert_eq!(Some(Duration::from_millis(123)), impl_.paint.dot_color.options.duration);
+    assert_eq!(Some(Duration::from_millis(45)), impl_.paint.dot_color.options.delay);
 }
 
 // gtest: Style.ImageRemovalPublishesUpdates
@@ -199,21 +199,6 @@ fn image_removal_changes_the_images() {
     edit(&mut style, Edit::RemoveImage("image".to_owned()));
     assert_eq!(["images"], *parts_that_differ(&before, &style));
     assert!(style.get_images().is_empty());
-}
-
-#[test]
-fn is_supported_script_of_a_literal_in_a_layout_property() {
-    // Not a C++ test: ffi patch 0093 kept "is-supported-script" from folding,
-    // so this text-field wasn't a literal and property conversion rejected it
-    // (an assertion in debug builds). The port lets it fold (see
-    // REQUIRED_PROPS in mln_expression's parsing_context.rs).
-    let mut style = stub_style();
-    style.load_json(
-        r#"{"version":8,"sources":{"s":{"type":"points"}},
-        "layers":[{"id":"symbol","type":"symbol","source":"s",
-        "layout":{"text-field":["case",["is-supported-script","မြန်မာ"],"local","fallback"]}}]}"#,
-    );
-    assert!(style.get_layer("symbol").is_some());
 }
 
 // gtest: Style.TransitionOptionsPublishUpdates
@@ -266,9 +251,9 @@ fn layer_changes_leave_earlier_versions_unchanged() {
     let loaded = style.clone();
     assert_eq!(["a", "b"], *ids(loaded.get_layer_list()));
 
-    edit(&mut style, Edit::AddLayer { layer: new_layer("symbol", "c", "source"), before: Some("b".to_owned()) });
+    edit(&mut style, Edit::AddLayer { layer: new_layer("dot", "c", "source"), before: Some("b".to_owned()) });
     let error = style
-        .apply(Edit::AddLayer { layer: new_layer("symbol", "a", "source"), before: Some("b".to_owned()) })
+        .apply(Edit::AddLayer { layer: new_layer("dot", "a", "source"), before: Some("b".to_owned()) })
         .unwrap_err();
     assert_eq!(mln_util::ErrorKind::AlreadyExists, error.kind);
     assert_eq!("Layer a already exists", error.message);
@@ -454,13 +439,13 @@ fn layer_added_after_global_state_update_uses_current_state() {
     style.load_json(r#"{"version": 8, "sources": {}, "layers": []}"#);
     set_state(&mut style, "showLayer", Value::Bool(false));
 
-    let mut layer = new_layer("symbol", "symbol", "source");
+    let mut layer = new_layer("dot", "dot", "source");
     let json = parse_json(r#"["case", ["to-boolean", ["global-state", "showLayer"]], "visible", "none"]"#);
     assert!(layer.set_property("visibility", &Convertible::from(&json), None).is_none());
     assert_eq!(VisibilityType::Visible, layer.get_visibility());
 
     edit(&mut style, Edit::AddLayer { layer, before: None });
-    assert_eq!(VisibilityType::None, style.get_layer("symbol").unwrap().get_visibility());
+    assert_eq!(VisibilityType::None, style.get_layer("dot").unwrap().get_visibility());
 }
 
 // gtest: Style.VisibilityExpressionRejectsOtherDependencies

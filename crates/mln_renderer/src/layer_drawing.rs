@@ -51,11 +51,12 @@ pub struct BucketChanges {
 }
 
 impl BucketChanges {
-    pub(crate) const ALL: BucketChanges = BucketChanges { paint: true, opacity: true, dynamic: true, sort: true };
+    /// Everything changed.
+    pub const ALL: BucketChanges = BucketChanges { paint: true, opacity: true, dynamic: true, sort: true };
 
     /// Whether anything changed.
     #[must_use]
-    pub(crate) fn any(self) -> bool {
+    pub fn any(self) -> bool {
         self != BucketChanges::default()
     }
 }
@@ -588,7 +589,7 @@ impl<U> DrawList<U> {
 
 impl<U, P: Copy> DrawList<U, P> {
     /// Drops the list's draws.
-    pub(crate) fn clear(&mut self) {
+    pub fn clear(&mut self) {
         self.draws.clear();
         self.uniforms.clear();
         self.parts.clear();

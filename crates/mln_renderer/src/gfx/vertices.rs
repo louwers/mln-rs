@@ -322,7 +322,7 @@ impl SharedVertices {
 /// ([`Context::update_vertices`]).
 ///
 /// [`Context::update_vertices`]: crate::gfx::context::Context::update_vertices
-pub(crate) struct TypedVertices<V> {
+pub struct TypedVertices<V> {
     shared: SharedVertices,
     vertex_type: PhantomData<fn() -> V>,
 }
@@ -330,7 +330,7 @@ pub(crate) struct TypedVertices<V> {
 impl<V> TypedVertices<V> {
     /// The vertices, as draws bind them.
     #[must_use]
-    pub(crate) fn shared(&self) -> &SharedVertices {
+    pub fn shared(&self) -> &SharedVertices {
         &self.shared
     }
 }

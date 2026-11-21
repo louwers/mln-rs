@@ -1,9 +1,12 @@
-use crate::Home;
 use crate::defaults::{default_value, rust_value};
 use crate::emit_table::Visit;
 use crate::spec::{LayerSpec, Property};
 use crate::types::{EvaluatedType, camelize, evaluated_type, is_color_ramp, is_data_driven, snake};
 use crate::writer::{Writer, imports_for};
+
+/// The path the generated code names the style crate by: it is in
+/// `mln-rs-layers`, beside the layer type's marker type.
+const STYLE: &str = "mln_style";
 
 /// The kind and type of a property in `properties!`: `data_driven Color`.
 fn kind_and_type(property: &Property, layout: bool) -> (&'static str, String) {
@@ -26,8 +29,8 @@ fn kind_and_type(property: &Property, layout: bool) -> (&'static str, String) {
     (kind, evaluated_type(property).rust())
 }
 
-fn emit_set(w: &mut Writer, home: &Home, layer_type: &str, class: &str, scope: &str, properties: &[Property]) {
-    w.line(&format!("{}::properties!(", home.style));
+fn emit_set(w: &mut Writer, layer_type: &str, class: &str, scope: &str, properties: &[Property]) {
+    w.line(&format!("{STYLE}::properties!("));
     w.line(&format!("    /// The {scope} properties of a {layer_type} layer."));
     w.line(&format!("    #[expect(non_snake_case, reason = \"named for the C++ `{class}` type list\")]"));
     w.line(&format!("    pub mod {class}: {scope} {{"));
@@ -47,7 +50,7 @@ fn emit_set(w: &mut Writer, home: &Home, layer_type: &str, class: &str, scope: &
         w.line("        line_floor_width: integer_zoom f32 = 1.0_f32 => line_width,");
         w.line("    }");
     }
-    let mut imports = imports_for(home.style, properties.iter(), false);
+    let mut imports = imports_for(STYLE, properties.iter(), false);
     if properties.iter().any(is_color_ramp) {
         imports.push("mln_util::Color".into());
     }
@@ -60,9 +63,9 @@ fn emit_set(w: &mut Writer, home: &Home, layer_type: &str, class: &str, scope: &
     w.blank();
 }
 
-pub(crate) fn emit(layer: &LayerSpec, home: &Home) -> String {
+pub(crate) fn emit(layer: &LayerSpec) -> String {
     let t = camelize(&layer.type_);
-    let style = home.style;
+    let style = STYLE;
     let has_layout = !layer.layout_properties.is_empty();
     let mut w = Writer::new();
 
@@ -70,7 +73,7 @@ pub(crate) fn emit(layer: &LayerSpec, home: &Home) -> String {
     w.line("// (tools/style-codegen/v8.json). Do not edit.");
     w.blank();
 
-    let mut imports = vec![format!("{style}::layer_type::LayerStyle"), format!("{}::{t}", home.marker_module)];
+    let mut imports = vec![format!("{style}::layer_type::LayerStyle"), format!("super::{t}")];
     imports.extend(crate::emit_table::imports(style, &Visit::Function));
     let heatmap_color = layer.paint_properties.iter().find(|p| p.name == "heatmap-color");
     if heatmap_color.is_some() {
@@ -83,9 +86,9 @@ pub(crate) fn emit(layer: &LayerSpec, home: &Home) -> String {
     w.blank();
 
     if has_layout {
-        emit_set(&mut w, home, &layer.type_, &format!("{t}LayoutProperties"), "layout", &layer.layout_properties);
+        emit_set(&mut w, &layer.type_, &format!("{t}LayoutProperties"), "layout", &layer.layout_properties);
     }
-    emit_set(&mut w, home, &layer.type_, &format!("{t}PaintProperties"), "paint", &layer.paint_properties);
+    emit_set(&mut w, &layer.type_, &format!("{t}PaintProperties"), "paint", &layer.paint_properties);
 
     let entries = crate::emit_table::layer_entries(&layer.paint_properties, &layer.layout_properties);
     crate::emit_table::emit(&mut w, &format!("LayerStyle<{t}>"), &entries, &Visit::Function);

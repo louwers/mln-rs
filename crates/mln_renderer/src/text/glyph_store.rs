@@ -66,7 +66,7 @@ use crate::text::font_face_engine::{FontFaceEngine, FontFaceShaper};
 use crate::tile::inbox::{InboxSender, TileEvent, Waker};
 
 /// Each font-face text of each font stack, shaped by its face.
-pub(crate) type ShapeResults = VecMap<FontStack, VecMap<GlyphIDType, BTreeMap<Vec<char>, Arc<ShapedText>>>>;
+pub type ShapeResults = VecMap<FontStack, VecMap<GlyphIDType, BTreeMap<Vec<char>, Arc<ShapedText>>>>;
 
 /// What a glyph range's response brought.
 pub(crate) enum GlyphData {
