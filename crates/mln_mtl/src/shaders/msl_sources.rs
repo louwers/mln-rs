@@ -591,6 +591,10 @@ struct FragmentStage {
     float segment_length [[flat]];
     // The pixels on the map that a pixel on screen spans across the segment.
     float gamma_scale;
+#if defined(PROJECTION_GLOBE)
+    // The x in tile units on the zoom 0 tile, 0 on other tiles.
+    float tile_x;
+#endif
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
@@ -620,7 +624,8 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float2 offset = float2(vertx.corner.x != 0 ? segment_length + reach : -reach,
                                  vertx.corner.y != 0 ? reach : -reach);
     const float2 base = start + along * (offset.x * units);
-    const float4 corner = projectTile(base + across * (offset.y * units), projection);
+    const float2 tile_pos = base + across * (offset.y * units);
+    const float4 corner = projectTile(tile_pos, projection);
     const float4 middle = projectTile(base, projection);
     const float extent = length((corner.xy - middle.xy) / corner.w * paintParams.units_to_pixels);
 
@@ -629,11 +634,21 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         .offset = offset,
         .segment_length = segment_length,
         .gamma_scale = reach / max(extent, 1e-6),
+#if defined(PROJECTION_GLOBE)
+        // The zoom 0 tile's quads reach past its x extent around the planet
+        // onto the tile itself; the fragment stage discards what lies past it.
+        .tile_x = projection.tile_mercator_coords.z * 8192.0 >= 1.0 ? tile_pos.x : 0.0,
+#endif
     };
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]],
                             device const TileDebugPropsUBO& props [[buffer(idTileDebugPropsUBO)]]) {
+#if defined(PROJECTION_GLOBE)
+    if (in.tile_x < 0.0 || in.tile_x >= 8192.0) {
+        discard_fragment();
+    }
+#endif
 #if defined(OVERDRAW_INSPECTOR)
     return half4(1.0);
 #endif

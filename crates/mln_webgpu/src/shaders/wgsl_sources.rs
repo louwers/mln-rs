@@ -346,6 +346,10 @@ struct VertexOutput {
     @location(1) @interpolate(flat) segment_length: f32,
     // The pixels on the map that a pixel on screen spans across the segment.
     @location(2) gamma_scale: f32,
+#ifdef PROJECTION_GLOBE
+    // The x in tile units on the zoom 0 tile, 0 on other tiles.
+    @location(3) tile_x: f32,
+#endif
 };
 
 struct TileDebugPropsUBO {
@@ -403,7 +407,8 @@ fn main(in: VertexInput) -> VertexOutput {
     let offset = vec2<f32>(select(-reach, segment_length + reach, in.corner.x != 0),
                            select(-reach, reach, in.corner.y != 0));
     let base = start + along * (offset.x * units);
-    let corner = projectTile(base + across * (offset.y * units), projection);
+    let tile_pos = base + across * (offset.y * units);
+    let corner = projectTile(tile_pos, projection);
     let middle = projectTile(base, projection);
     let extent = length((corner.xy - middle.xy) / corner.w * paintParams.units_to_pixels);
 
@@ -411,6 +416,11 @@ fn main(in: VertexInput) -> VertexOutput {
     out.offset = offset;
     out.segment_length = segment_length;
     out.gamma_scale = reach / max(extent, 1e-6);
+#ifdef PROJECTION_GLOBE
+    // The zoom 0 tile's quads reach past its x extent around the planet onto
+    // the tile itself; the fragment stage discards what lies past it.
+    out.tile_x = select(0.0, tile_pos.x, projection.tile_mercator_coords.z * 8192.0 >= 1.0);
+#endif
     return out;
 }
 ",
@@ -424,6 +434,9 @@ struct FragmentInput {
     @location(0) offset: vec2<f32>,
     @location(1) @interpolate(flat) segment_length: f32,
     @location(2) gamma_scale: f32,
+#ifdef PROJECTION_GLOBE
+    @location(3) tile_x: f32,
+#endif
 };
 
 struct TileDebugPropsUBO {
@@ -438,6 +451,11 @@ struct TileDebugPropsUBO {
 
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
+#ifdef PROJECTION_GLOBE
+    if (in.tile_x < 0.0 || in.tile_x >= 8192.0) {
+        discard;
+    }
+#endif
 #ifdef OVERDRAW_INSPECTOR
     return vec4<f32>(1.0);
 #else
