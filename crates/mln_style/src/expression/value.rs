@@ -4,9 +4,9 @@ use feature::{Value as MbglValue, ValueObject};
 use mln_style_types::{
     AlignmentType, CirclePitchScaleType, HillshadeIlluminationAnchorType, HillshadeMethodType, IconOverlapType,
     IconTextFitType, LayerBlendType, LightAnchorType, LineCapType, LineJoinType, Position, ProjectionDefinition,
-    RasterResamplingType, ResamplingType, RotateAnchorType, Rotation, SymbolAnchorType, SymbolPlacementType,
-    SymbolZOrderType, TextJustifyType, TextRotationAlignmentType, TextTransformType, TextWritingModeType,
-    TranslateAnchorType, VariableAnchorOffsetCollection, VisibilityType,
+    RasterResamplingType, ResamplingType, Rotation, SymbolAnchorType, SymbolPlacementType, SymbolZOrderType,
+    TextJustifyType, TextRotationAlignmentType, TextTransformType, TextWritingModeType, TranslateAnchorType,
+    VariableAnchorOffsetCollection, VisibilityType,
 };
 use mln_util::string::to_string_double;
 use mln_util::{Color, Padding};
@@ -651,7 +651,6 @@ enum_value_converter!(
     LineJoinType,
     RasterResamplingType,
     ResamplingType,
-    RotateAnchorType,
     SymbolAnchorType,
     SymbolPlacementType,
     SymbolZOrderType,
