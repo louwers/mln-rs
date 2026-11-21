@@ -128,7 +128,8 @@
 //!   size, composited onto the drape. The drapes of a side share one such
 //!   composite, which those that draw again in a frame use in turn, and
 //!   which drops its textures in a frame where none of them composites,
-//!   and a depth and stencil, kept while a drape has that side. A drape
+//!   and a depth and stencil, kept while a drape has that side and its
+//!   tile has it too: a drape that waits to grow keeps none. A drape
 //!   with a layer that blends in the shader draws into the composite's
 //!   frame texture, which is copied into the drape before its mips. A
 //!   blend's backdrop is the drape's own texels.

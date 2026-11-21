@@ -150,8 +150,13 @@ impl Tiles {
 
 /// [`STYLE`], with what its sources' types know without a fetch.
 fn style() -> Style {
+    style_of(STYLE)
+}
+
+/// The style of `json`, with what its sources' types know without a fetch.
+fn style_of(json: &str) -> Style {
     let registry = Registry::with_builtins();
-    let parsed = Style::from_json(registry.style(), STYLE, None).expect("the style");
+    let parsed = Style::from_json(registry.style(), json, None).expect("the style");
     let mut style = Style::new(Arc::clone(registry.style()));
     for source in parsed.get_sources().iter() {
         style.apply(Edit::AddSource(crate::tests::ready(source.clone()))).unwrap();
@@ -977,6 +982,41 @@ fn a_byte_cap_holds_while_drapes_drawn_in_turn_start_to_composite() {
     frames_until_full(&mut map);
     assert!(map.renderer.rendering_stats().terrain.mem_drape_composite > 0, "the drapes composite");
     assert!(map.frame().1.is_empty(), "the drapes are drawn again once only");
+}
+
+/// The drapes that wait to grow keep their textures at their old side, which
+/// no drape draws at any more, and the cap, which counts them at their new
+/// side, still holds, with the depth and stencil of the side drawn at only.
+/// Here a DEM of 300-pixel tiles makes drapes of at most 1200 texels a side,
+/// no power of two, so a far tile's 1024 is little below it: the bytes a
+/// drape's 1024 texels save on 1200 are less than half a depth and stencil
+/// of 1024.
+#[test]
+fn a_byte_cap_holds_while_drapes_wait_to_grow_alone_at_their_side() {
+    let mut map = DrapedMap::new(Tiles::default());
+    map.style = Arc::new(style_of(&STYLE.replace(r#""tileSize": 256, "maxzoom""#, r#""tileSize": 300, "maxzoom""#)));
+    map.transform.jump_to(&CameraOptions { zoom: Some(1.0), pitch: Some(60.0), ..Default::default() });
+    map.settle();
+    frames_until_full(&mut map);
+    let tile = |x, y| OverscaledTileID::new(1, 0, CanonicalTileID::new(1, x, y));
+    let (near, far) = ([tile(0, 1), tile(1, 1)], [tile(0, 0), tile(1, 0)]);
+    let pitched: BTreeSet<_> = near.map(|tile| (tile, 1200)).into_iter().chain(far.map(|tile| (tile, 1024))).collect();
+    assert_eq!(pitched, sides(&mut map), "the far tiles show at 481 pixels");
+
+    // Zoomed in, the far tiles show at 515 pixels, and their drapes wait
+    // until the camera rests to grow, in turn.
+    map.camera_moving = true;
+    map.set_drape_byte_cap(4 * drape_bytes(1200) + depth_stencil_bytes(1200));
+    map.transform.jump_to(&CameraOptions { zoom: Some(1.1), ..Default::default() });
+    assert!(map.frame().1.is_empty(), "drapes drawn while the camera moves");
+    let whole: BTreeSet<_> = near.iter().chain(&far).map(|&tile| (tile, 1200)).collect();
+    assert_eq!(whole, sides(&mut map));
+    let terrain = map.renderer.rendering_stats().terrain;
+    assert_eq!(depth_stencil_bytes(1200), terrain.mem_drape_depth_stencil, "{terrain:?}");
+    map.camera_moving = false;
+    map.settle();
+    frames_until_full(&mut map);
+    assert_eq!(whole, sides(&mut map));
 }
 
 /// [`STYLE`]'s draped layers, removed, and a circle in their place.

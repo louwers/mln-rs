@@ -417,7 +417,8 @@ pub(crate) struct Drapes {
     /// The most bytes the drapes and what they draw with hold before the
     /// tiles that show smallest take fewer texels.
     byte_cap: u64,
-    /// What the drapes draw with, for each side a drape's texture has.
+    /// What the drapes draw with, for each side that a drape's texture and
+    /// its tile have.
     targets: Vec<Targets>,
     /// The frames that [`choose`](Self::choose) chose drapes for.
     frame: u64,
@@ -776,17 +777,21 @@ impl Drapes {
     /// of their side and of a pattern atlas of `pattern_atlas_size`, and the
     /// masks of the tiles they clip to, through `gpu`, the context of
     /// `parameters`, the frame's. The drapes of a side share what they draw
-    /// with, kept while a drape's texture has that side: a depth and
-    /// stencil, made once one of them draws again, and a layer composite,
-    /// which takes the composited draw groups of those that draw again, and
-    /// drops its textures where there are none.
+    /// with, kept while a drape's texture has that side and its tile's: a
+    /// depth and stencil, made once one of them draws again, and a layer
+    /// composite, which takes the composited draw groups of those that draw
+    /// again, and drops its textures where there are none.
     pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, pattern_atlas_size: Size) {
         if self.drapes.is_empty() {
             self.targets.clear();
             return;
         }
-        let stacks = self.drapes.iter().flat_map(|drape| &drape.stacks);
-        let sides: Vec<u32> = stacks.filter_map(|drape| drape.texture.as_ref().map(|&(_, side)| side)).collect();
+        // A drape that waits to grow draws at its tile's side once it does,
+        // never at its texture's, so what that side draws with goes when
+        // only such drapes have it, as the cap counts them at their tile's.
+        let sides: Vec<u32> = (self.drapes.iter())
+            .flat_map(|drape| drape.stacks.iter().filter_map(StackDrape::side).filter(|&side| side == drape.size))
+            .collect();
         self.targets.retain(|targets| sides.contains(&targets.size));
         for side in sides {
             if self.targets.iter().all(|targets| targets.size != side) {
