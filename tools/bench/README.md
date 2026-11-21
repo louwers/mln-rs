@@ -121,6 +121,7 @@ its sizes are the ones it uses.
 | `macro/load/globe`                      | What does showing the whole world on the globe from nothing take, until the first complete frame?                                                       |
 | `macro/load/cjk`                        | What does showing a city labelled in Japanese script from nothing take, until the first complete frame?                                                 |
 | `macro/load/street-4g`                  | How long does a city's streets take to show complete from nothing over a mobile link, and how much of the view is blank meanwhile?                      |
+| `macro/load/street-z16-4g`              | How long does a city's streets take to show complete from nothing over a mobile link, closer in than its tileset's last zoom?                           |
 | `macro/load/street-pmtiles-4g`          | How long does a city's streets take to show complete from nothing over a mobile link, read from a PMTiles archive by byte ranges?                       |
 | `macro/load/street-slow`                | How long does a city's streets take to show complete from nothing over a slow link, and how much of the view is blank meanwhile?                        |
 | `macro/load/street-warm`                | What does a disk cache that holds a city's streets save a map that shows them again over a mobile link?                                                 |

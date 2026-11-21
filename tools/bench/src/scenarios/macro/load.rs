@@ -45,6 +45,12 @@ pub(crate) const SCENARIOS: &[Scenario] = &[
         run: street_4g,
     },
     Scenario {
+        name: "macro/load/street-z16-4g",
+        kind: Kind::Macro,
+        question: "How long does a city's streets take to show complete from nothing over a mobile link, closer in than its tileset's last zoom?",
+        run: street_z16_4g,
+    },
+    Scenario {
         name: "macro/load/street-pmtiles-4g",
         kind: Kind::Macro,
         question: "How long does a city's streets take to show complete from nothing over a mobile link, read from a PMTiles archive by byte ranges?",
@@ -155,11 +161,18 @@ fn street_4g(bench: &mut Bench) {
     load_online(bench, MOBILE_4G, Cached::Nothing);
 }
 
+/// The question of `macro/load/street-4g` at zoom 16, past the tileset's
+/// last zoom, 14: each tile the view shows is cut from one there, which
+/// the tiles cut from it all need at once.
+fn street_z16_4g(bench: &mut Bench) {
+    load_online_from(bench, 16.0, MOBILE_4G, Cached::Nothing, Serve::Tiles);
+}
+
 /// The question of `macro/load/street-4g`, the tiles read from a PMTiles
 /// archive on the server: the map reads its header and directories before
 /// each tile's range, through the disk cache's place in the loader.
 fn street_pmtiles_4g(bench: &mut Bench) {
-    load_online_from(bench, MOBILE_4G, Cached::Nothing, Serve::Archive);
+    load_online_from(bench, 14.0, MOBILE_4G, Cached::Nothing, Serve::Archive);
 }
 
 /// The question of `macro/load/street-4g` over a slow link.
@@ -190,13 +203,13 @@ const ONLINE_FRAME_LIMIT: u64 = 3_600;
 /// showed. The GPU device and its target, and filling the cache, are left
 /// out.
 fn load_online(bench: &mut Bench, profile: Profile, cached: Cached) {
-    load_online_from(bench, profile, cached, Serve::Tiles);
+    load_online_from(bench, 14.0, profile, cached, Serve::Tiles);
 }
 
-/// [`load_online`], the server serving the tiles as `serve` says.
-fn load_online_from(bench: &mut Bench, profile: Profile, cached: Cached, serve: Serve) {
+/// [`load_online`] at `zoom`, the server serving the tiles as `serve` says.
+fn load_online_from(bench: &mut Bench, zoom: f64, profile: Profile, cached: Cached, serve: Serve) {
     let fixtures = Fixtures::open(bench);
-    let camera = super::street_center(&fixtures, 14.0);
+    let camera = super::street_center(&fixtures, zoom);
     let server = Server::new(&fixtures, Tiles::Street, serve);
     let cache = (cached != Cached::Nothing).then(|| {
         // An earlier visit's, over a link that takes no time, on a map of
