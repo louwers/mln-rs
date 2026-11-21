@@ -22,7 +22,9 @@ parking_lot.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
-# The transform that the recognizer's tests move.
+# The transform that the recognizer's tests move. mln_runtime depends on this
+# crate, so the tests link a second copy of it, whose types differ from
+# theirs: they hand the transform only mln_map_types' values.
 mln_runtime = { package = "mln-rs-runtime", path = "../mln_runtime", default-features = false, features = [
   "webgpu",
 ] }
