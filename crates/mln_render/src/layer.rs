@@ -60,13 +60,15 @@
 //! a time on the renderer's thread, but for a tile's layout
 //! ([`LayerType::layout_can_need_dependencies`],
 //! [`LayerType::create_layout`] and the [`Layout`]), which runs with the
-//! tile's other work: on a tile worker, or on the renderer's thread for a
-//! source whose updates are synchronous. So the layout and the bucket are
-//! `Send`. A native tile worker hands the bucket back as it is. A browser
-//! build's tile workers are other wasm instances: the layer's values go to
-//! them and the bucket comes back through the worker codec
-//! (`mln_wire::Wire`), so the bucket and the style half's property sets
-//! implement `Wire`, which is unstable (`mln_render::unstable`). A layer's
+//! tile's other work where the renderer's tile workers run it: on another
+//! thread, or on the renderer's thread for a source whose updates are
+//! synchronous or when no worker could start. So the layout and the bucket
+//! are `Send`. A worker that shares the renderer's memory hands the bucket
+//! back as it is. One that doesn't, such as a browser's Web Worker with its
+//! own wasm instance, gets the layer's values and sends the bucket back
+//! through the worker codec (`mln_wire::Wire`), so the bucket and the style
+//! half's property sets implement `Wire`, which is unstable
+//! (`mln_render::unstable`). A layer's
 //! [`State`](LayerType::State) and [`Drawing`](LayerType::Drawing) stay on
 //! the renderer's thread.
 //!
