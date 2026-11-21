@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use glam::DVec2;
 use mln_map_types::{Elevation, TileCoordinate};
-use mln_tile_id::{CanonicalTileID, OverscaledTileID};
+use mln_tile_id::{CanonicalTileID, OverscaledTileID, UnwrappedTileID};
 use mln_util::dem::{self, DemCoords, DemUnpack};
 use mln_util::geo::LatLng;
 use mln_util::hash::HashMap;
@@ -53,6 +53,8 @@ pub(crate) struct TerrainElevation {
     /// Where each drawn tile is in `tiles`, the first of its world copies,
     /// which all read the same DEM.
     index: HashMap<CanonicalTileID, usize>,
+    /// Where each drawn tile is in `tiles`, by its world copy.
+    copies: HashMap<UnwrappedTileID, usize>,
     /// [`Elevation::range`]'s.
     range: Option<(f64, f64)>,
     unpack: DemUnpack,
@@ -100,10 +102,12 @@ impl TerrainElevation {
             })
             .collect();
         let mut index = HashMap::default();
+        let mut copies = HashMap::default();
         let mut zooms = Vec::new();
         let mut range: Option<(f64, f64)> = None;
         for (at, tile) in tiles.iter().enumerate().filter(|(_, tile)| tile.drawn) {
             index.entry(tile.id.canonical).or_insert(at);
+            copies.insert(tile.id.to_unwrapped(), at);
             if !zooms.contains(&tile.id.canonical.z) {
                 zooms.push(tile.id.canonical.z);
             }
@@ -114,7 +118,7 @@ impl TerrainElevation {
             range = Some(range.map_or((min, max), |(low, high)| (low.min(min), high.max(max))));
         }
         zooms.sort_unstable_by(|a, b| b.cmp(a));
-        TerrainElevation { tiles, zooms, index, range, unpack, exaggeration }
+        TerrainElevation { tiles, zooms, index, copies, range, unpack, exaggeration }
     }
 
     /// Whether `cover`'s tiles, binding their DEM from `dem`, draw the same
@@ -168,20 +172,26 @@ impl TerrainElevation {
     /// The drawn tile at `world`, a Web Mercator point at zoom 0 whose y is
     /// within the world, and where in it, from 0 to 1 across, y down: the
     /// finest that has it ([`place_in`]'s, which puts a point on an edge
-    /// between tiles in one of them). Every world copy of a tile reads the
-    /// same DEM, so any does.
-    fn drawn_tile_at(&self, world: DVec2) -> Option<(&DrawnTile, [f32; 2])> {
+    /// between tiles in one of them). In `world`'s copy (`in_copy`), else in
+    /// any copy: every world copy of a tile reads the same DEM.
+    fn drawn_tile_at(&self, world: DVec2, in_copy: bool) -> Option<(&DrawnTile, [f32; 2])> {
         if !world.x.is_finite() {
             return None;
         }
-        let (_, x) = world_copy(world.x);
+        let (copy, x) = world_copy(world.x);
         self.zooms.iter().find_map(|&z| {
             let tiles = f64::from(1u32 << z);
             let (u, v) = (x * tiles, world.y * tiles);
             // The world's bottom edge is in the last row's tiles.
             let (column, row) = (u.floor(), v.floor().min(tiles - 1.0));
-            let at = *self.index.get(&CanonicalTileID::new(z, column as u32, row as u32))?;
-            Some((&self.tiles[at], [(u - column) as f32, (v - row) as f32]))
+            let canonical = CanonicalTileID::new(z, column as u32, row as u32);
+            let at = if in_copy {
+                // `as` saturates a copy past the range of wraps, where no tile is.
+                self.copies.get(&UnwrappedTileID::with_wrap(copy as i16, canonical))
+            } else {
+                self.index.get(&canonical)
+            };
+            Some((&self.tiles[*at?], [(u - column) as f32, (v - row) as f32]))
         })
     }
 
@@ -190,7 +200,7 @@ impl TerrainElevation {
     fn tile_at_location(&self, location: LatLng) -> Option<(&DrawnTile, [f32; 2])> {
         let world = TileCoordinate::from_lat_lng(0.0, &location).p;
         let world = DVec2::new(world.x, world.y.clamp(0.0, 1.0));
-        self.drawn_tile_at(world).or_else(|| {
+        self.drawn_tile_at(world, false).or_else(|| {
             let center = self.tiles.last().filter(|tile| !tile.drawn)?;
             let [u, v] = place_in(center.id.canonical, [world.x, world.y])?;
             Some((center, [u as f32, v as f32]))
@@ -207,6 +217,19 @@ impl TerrainElevation {
             Some((tile, [u as f32, v as f32]))
         });
         found.map_or((None, None), |(tile, uv)| (self.height_of(tile, uv), Some(self.min_of(tile))))
+    }
+
+    /// [`Elevation::surface_at`] as the drawn tiles of `world`'s copy,
+    /// scanned in order, give it, which the index must agree with.
+    #[cfg(test)]
+    pub(crate) fn scanned_surface(&self, world: DVec2) -> Option<f64> {
+        let copy = world_copy(world.x).0;
+        let found = self.tiles.iter().filter(|tile| tile.drawn && f64::from(tile.id.wrap) == copy).find_map(|tile| {
+            let [u, v] = place_in(tile.id.canonical, [world.x, world.y])?;
+            Some((tile, [u as f32, v as f32]))
+        });
+        let (tile, uv) = found?;
+        Some(tile.dem.as_ref().map_or(0.0, |dem| self.height(dem, uv)))
     }
 
     /// The height `tile` gives at `uv`: `None` while its own DEM tile loads
@@ -253,7 +276,7 @@ impl Elevation for TerrainElevation {
         if !(0.0..=1.0).contains(&world.y) {
             return None;
         }
-        let (tile, uv) = self.drawn_tile_at(world)?;
+        let (tile, uv) = self.drawn_tile_at(world, true)?;
         Some(tile.dem.as_ref().map_or(0.0, |dem| self.height(dem, uv)))
     }
 

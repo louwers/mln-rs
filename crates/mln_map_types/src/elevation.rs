@@ -19,10 +19,11 @@ pub trait Elevation: fmt::Debug + Send + Sync {
     fn min_at(&self, location: LatLng) -> Option<f64>;
 
     /// The height of the surface the frame drew at `world`, a Web Mercator
-    /// point at zoom 0 (from 0 to 1 across, y south, x in any world copy), in
-    /// meters with the exaggeration: as [`at`](Self::at), but `Some(0.0)`
-    /// where a drawn tile has no DEM data yet, which draws flat meanwhile.
-    /// `None` where no tile was drawn.
+    /// point at zoom 0 (from 0 to 1 across, y south, x in the world copy the
+    /// view shows it in), in meters with the exaggeration: as
+    /// [`at`](Self::at), but `Some(0.0)` where a drawn tile has no DEM data
+    /// yet, which draws flat meanwhile, and only of the tiles drawn in
+    /// `world`'s copy. `None` where no tile was drawn there.
     fn surface_at(&self, world: DVec2) -> Option<f64>;
 
     /// The lowest and highest ground of the tiles the frame drew, in meters

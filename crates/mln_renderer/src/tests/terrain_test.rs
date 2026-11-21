@@ -751,9 +751,9 @@ fn the_ground_the_map_stands_on_is_the_height_rule_on_the_drawn_dem() {
     assert_eq!(Some(f64::from(height)), ground.at(center));
     assert!(height.fract() != 0.0, "{height} reads between pixels");
     assert_eq!(Some(f64::from(data.range().0 * 1.5)), ground.min_at(center));
-    // The surface drawn there, in any world copy.
+    // The surface drawn there, and none in a world copy the frame didn't draw.
     assert_eq!(Some(f64::from(height)), ground.surface_at(DVec2::new(world.x, world.y)));
-    assert_eq!(Some(f64::from(height)), ground.surface_at(DVec2::new(world.x - 2.0, world.y)));
+    assert_eq!(None, ground.surface_at(DVec2::new(world.x - 2.0, world.y)));
     // Ground far from the view, where no tile drew.
     let far = LatLng::new(-45.0, -170.0).unwrap();
     let far_world = mln_util::projection::Projection::project(&far, 1.0 / mln_util::constants::TILE_SIZE_D);
@@ -973,6 +973,44 @@ fn the_index_finds_the_tiles_the_scan_found() {
     let center = LatLng::new(45.0, 10.0).unwrap();
     assert_eq!((Some(3_000_000.0), Some(3_000_000.0)), ground.scanned(center));
     assert_eq!(ground.scanned(center), (ground.at(center), ground.min_at(center)));
+}
+
+/// The surface is that of the tiles drawn in the world copy of the point:
+/// none in a copy the frame didn't draw, and where copies draw the same
+/// place at different zooms, each copy's own. Seen from a low zoom, the
+/// view shows more than one copy.
+#[test]
+fn the_surface_is_the_one_drawn_in_the_points_world_copy() {
+    let mut load = TerrainLoad::new((0, 14), 1.0);
+    load.transform.jump_to(&CameraOptions {
+        center: Some(LatLng::new(30.0, 150.0).unwrap()),
+        zoom: Some(0.7),
+        pitch: Some(60.0),
+        bearing: Some(80.0),
+        ..Default::default()
+    });
+    load.frame();
+    load.answer(|_| Some(terrarium_slope()));
+    let cover = load.terrain.cover().unwrap();
+    let wraps: BTreeSet<i16> = cover.tiles.iter().map(|tile| tile.id.wrap).collect();
+    assert!(wraps.len() > 1, "{wraps:?}");
+    let ground = snapshot(&load, 1.0);
+    let (mut drawn, mut undrawn) = (0, 0);
+    for row in 0..60 {
+        for column in 0..300 {
+            let f = |at: u32, of: u32| (f64::from(at) + 0.5) / f64::from(of) + std::f64::consts::SQRT_2 * 1e-4;
+            let world = DVec2::new(-2.0 + 5.0 * f(column, 300), f(row, 60).min(1.0));
+            let surface = ground.surface_at(world);
+            assert_eq!(ground.scanned_surface(world), surface, "{world}");
+            match surface {
+                Some(_) => drawn += 1,
+                // A copy of a tile the frame drew elsewhere.
+                None if ground.at(location_of(world)).is_some() => undrawn += 1,
+                None => {}
+            }
+        }
+    }
+    assert!(drawn > 0 && undrawn > 0, "{drawn} points on drawn tiles, {undrawn} on tiles drawn in another copy");
 }
 
 /// Every tile drawn flat while its DEM loads draws at sea level, which the

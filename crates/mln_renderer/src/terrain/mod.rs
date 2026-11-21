@@ -142,7 +142,9 @@
 //!   rays, the eye's clearance and screen points over terrain meet; and the
 //!   range of the drawn heights, which bounds a ray. It finds the tile at a
 //!   point through an index of the drawn tiles by zoom, finest first, which
-//!   a ray samples hundreds of times. The renderer
+//!   a ray samples hundreds of times: for the surface, of the tiles drawn
+//!   in the point's world copy, and for the height and floor, which the
+//!   center reads, of any copy. The renderer
 //!   makes a new one only when the tiles, the DEM images they read, where
 //!   they read them, whether their own DEM loads, or the decode change: a
 //!   fixed camera over loaded tiles keeps one snapshot. It reaches the map
