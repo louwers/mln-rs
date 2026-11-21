@@ -1,4 +1,4 @@
-//! A copy of a map's state, which [`Map::snapshot`](crate::map::Map::snapshot)
+//! A copy of a map's state, which [`MapCore::snapshot`](crate::map::MapCore::snapshot)
 //! takes.
 
 use glam::{DQuat, DVec3};
@@ -28,7 +28,7 @@ pub struct MapSnapshot {
     pub view: MapView,
     /// Whether the map draws as a globe, alone or blending into Mercator.
     pub globe_rendering: bool,
-    /// The setting of [`Map::set_globe_free_bearing`](crate::map::Map::set_globe_free_bearing).
+    /// The setting of [`MapCore::set_globe_free_bearing`](crate::map::MapCore::set_globe_free_bearing).
     pub globe_free_bearing: bool,
 }
 

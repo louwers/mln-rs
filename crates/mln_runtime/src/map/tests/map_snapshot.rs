@@ -1,4 +1,4 @@
-//! `Map::snapshot`, the map's generation counters, and projections from a
+//! `MapCore::snapshot`, the map's generation counters, and projections from a
 //! snapshot's view.
 
 use std::sync::Arc;
@@ -16,12 +16,12 @@ use mln_util::size::Size;
 use crate::map::map_snapshot::{CameraBounds, FreeCamera, TileSettings};
 use crate::map::{
     AnimationOptions, BoundOptions, CameraDelta, CameraOptions, CameraUpdate, CameraUpdateMode, ConstrainMode,
-    FreeCameraOptions, GesturePhase, Map, MapDebugOptions, MapMode, MapOptions, MapProjection, MapView,
+    FreeCameraOptions, GesturePhase, MapCore, MapCoreOptions, MapDebugOptions, MapMode, MapProjection, MapView,
     NorthOrientation, ProjectionMode, TileLodMode, UpdateReader, Viewport, ViewportMode,
 };
 
-fn map(options: MapOptions, run_loop: &Queue<()>) -> Map {
-    Map::new(
+fn map(options: MapCoreOptions, run_loop: &Queue<()>) -> MapCore {
+    MapCore::new(
         StubFileSource::on_queue(run_loop, ResponseType::Asynchronous),
         options,
         crate::map::tests::registry(),
@@ -46,7 +46,7 @@ fn assert_near(actual: f64, expected: f64) {
 fn snapshot_reports_every_member() {
     let run_loop = Queue::<()>::new();
     let mut map = map(
-        MapOptions {
+        MapCoreOptions {
             size: Size::new(512, 256),
             pixel_ratio: 2.0,
             constrain_mode: ConstrainMode::WidthAndHeight,
@@ -171,7 +171,7 @@ fn snapshot_reports_every_member() {
 #[test]
 fn bounds_that_cross_the_current_limits_change_nothing() {
     let run_loop = Queue::<()>::new();
-    let mut map = map(MapOptions { size: Size::new(256, 256), ..Default::default() }, &run_loop);
+    let mut map = map(MapCoreOptions { size: Size::new(256, 256), ..Default::default() }, &run_loop);
     map.set_bounds(&BoundOptions { min_zoom: Some(2.0), max_zoom: Some(10.0), ..Default::default() }).unwrap();
     let generation = map.generation();
 
@@ -190,10 +190,10 @@ fn bounds_that_cross_the_current_limits_change_nothing() {
 #[test]
 fn generation_grows_with_each_change() {
     let run_loop = Queue::<()>::new();
-    let mut map = map(MapOptions { size: Size::new(256, 256), ..Default::default() }, &run_loop);
+    let mut map = map(MapCoreOptions { size: Size::new(256, 256), ..Default::default() }, &run_loop);
 
     let mut last = map.generation();
-    let mut assert_changed = |map: &Map, changed: bool, what: &str| {
+    let mut assert_changed = |map: &MapCore, changed: bool, what: &str| {
         let generation = map.generation();
         assert_eq!(map.snapshot().generation, generation);
         if changed {
@@ -236,7 +236,7 @@ fn generation_grows_with_each_change() {
 #[test]
 fn a_source_that_reloads_its_description_changes_the_generation() {
     let run_loop = Queue::<()>::new();
-    let mut map = map(MapOptions { size: Size::new(256, 256), ..Default::default() }, &run_loop);
+    let mut map = map(MapCoreOptions { size: Size::new(256, 256), ..Default::default() }, &run_loop);
     map.load_style_json(
         r#"{"version":8,"sources":{"points":{"type":"geojson","data":{"type":"FeatureCollection","features":[]}}},"layers":[]}"#,
     );
@@ -251,7 +251,7 @@ fn a_source_that_reloads_its_description_changes_the_generation() {
 }
 
 /// A reader of `map`'s updates, and the times that it woke.
-fn count_wakes(map: &Map) -> (UpdateReader, Arc<AtomicU64>) {
+fn count_wakes(map: &MapCore) -> (UpdateReader, Arc<AtomicU64>) {
     let reader = map.update_reader();
     let wakes = Arc::new(AtomicU64::new(0));
     let counter = Arc::clone(&wakes);
@@ -264,7 +264,7 @@ fn count_wakes(map: &Map) -> (UpdateReader, Arc<AtomicU64>) {
 #[test]
 fn update_generation_counts_the_updates_published() {
     let run_loop = Queue::<()>::new();
-    let mut map = map(MapOptions { size: Size::new(256, 256), ..Default::default() }, &run_loop);
+    let mut map = map(MapCoreOptions { size: Size::new(256, 256), ..Default::default() }, &run_loop);
     let before = map.update_generation();
     let (_reader, wakes) = count_wakes(&map);
 
@@ -283,7 +283,7 @@ fn update_generation_counts_the_updates_published() {
 fn a_static_map_changes_without_publishing_updates() {
     let run_loop = Queue::<()>::new();
     let mut map =
-        map(MapOptions { size: Size::new(256, 256), map_mode: MapMode::Static, ..Default::default() }, &run_loop);
+        map(MapCoreOptions { size: Size::new(256, 256), map_mode: MapMode::Static, ..Default::default() }, &run_loop);
     let (_reader, wakes) = count_wakes(&map);
 
     let before = map.snapshot();
@@ -299,7 +299,7 @@ fn a_static_map_changes_without_publishing_updates() {
 #[test]
 fn projection_from_a_view_matches_the_map() {
     let run_loop = Queue::<()>::new();
-    let mut map = map(MapOptions { size: Size::new(400, 300), pixel_ratio: 1.5, ..Default::default() }, &run_loop);
+    let mut map = map(MapCoreOptions { size: Size::new(400, 300), pixel_ratio: 1.5, ..Default::default() }, &run_loop);
     // Bounds past the antimeridian keep the center's copy of the world, which
     // the view keeps too.
     map.set_bounds(&BoundOptions {
@@ -343,7 +343,7 @@ fn projection_from_a_view_matches_the_map() {
 #[test]
 fn projection_from_a_view_rejects_views_no_map_shows() {
     let run_loop = Queue::<()>::new();
-    let map = map(MapOptions { size: Size::new(256, 256), ..Default::default() }, &run_loop);
+    let map = map(MapCoreOptions { size: Size::new(256, 256), ..Default::default() }, &run_loop);
     let view = map.snapshot().view;
     assert!(MapProjection::from_view(&view).is_ok());
 
@@ -369,7 +369,7 @@ fn projection_from_a_view_rejects_views_no_map_shows() {
 #[test]
 fn projection_from_a_globe_view_matches_the_map() {
     let run_loop = Queue::<()>::new();
-    let mut map = map(MapOptions { size: Size::new(400, 300), ..Default::default() }, &run_loop);
+    let mut map = map(MapCoreOptions { size: Size::new(400, 300), ..Default::default() }, &run_loop);
     map.load_style_json(r#"{"version":8,"sources":{},"layers":[],"projection":{"type":"globe"}}"#);
     map.process_events();
     // The globe lets the zoom fall below 0 toward a pole, and the center past

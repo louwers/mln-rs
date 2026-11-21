@@ -2,7 +2,7 @@ use std::sync::{Arc, OnceLock};
 
 use geojson::{Feature, GeoJson, Geometry};
 use mln_headless::HeadlessFrontend;
-use mln_runtime::map::{CameraOptions, Map, MapMode, MapOptions};
+use mln_runtime::map::{CameraOptions, MapCore, MapCoreOptions, MapMode};
 use mln_sources::CustomGeometrySourceHandle;
 use mln_sources::custom::geometry::{self, Options as CustomGeometrySourceOptions};
 use mln_sources::geojson::GeoJSONOptions;
@@ -43,8 +43,8 @@ fn grid() {
     let pool = Pool::new(4);
 
     let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0, run_loop.queue(), &pool).expect("a headless frontend");
-    let mut map = Map::with_resource_options(
-        MapOptions { map_mode: MapMode::Static, size: frontend.size(), ..Default::default() },
+    let mut map = MapCore::with_resource_options(
+        MapCoreOptions { map_mode: MapMode::Static, size: frontend.size(), ..Default::default() },
         &ResourceOptions {
             asset_path: cpp_root().join("test/fixtures/api/assets").to_str().unwrap().to_owned(),
             ..ResourceOptions::default()
@@ -113,16 +113,16 @@ fn recycle_map_update_images() {
     let pool = Pool::new(4);
 
     let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0, run_loop.queue(), &pool).expect("a headless frontend");
-    let mut map = Map::new(
+    let mut map = MapCore::new(
         StubFileSource::on_queue(run_loop.queue(), ResponseType::Asynchronous),
-        MapOptions { map_mode: MapMode::Static, size: frontend.size(), ..Default::default() },
+        MapCoreOptions { map_mode: MapMode::Static, size: frontend.size(), ..Default::default() },
         registry(),
         &pool,
     )
     .unwrap();
     frontend.attach(&mut map);
 
-    let load_style = |map: &mut Map, marker_name: &str, marker_path: &str| {
+    let load_style = |map: &mut MapCore, marker_name: &str, marker_path: &str| {
         let source = geojson_source_with_data(
             "geometry",
             GeoJSONOptions::default_options(),

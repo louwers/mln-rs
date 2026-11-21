@@ -11,7 +11,7 @@ use std::sync::Arc;
 use mln_headless::HeadlessFrontend;
 use mln_image::{decode_image, encode_png};
 use mln_map_types::CameraOptions;
-use mln_runtime::map::{Map, MapMode, MapOptions};
+use mln_runtime::map::{MapCore, MapCoreOptions, MapMode};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{FileSource, Kind, Resource, Response};
 use mln_util::geo::EdgeInsets;
@@ -65,7 +65,7 @@ fn check_image(base: &str, actual: &PremultipliedImage, image_threshold: f64, pi
 struct LocalGlyphRasterizerTest {
     _run_loop: Queue<()>,
     frontend: HeadlessFrontend,
-    map: Map,
+    map: MapCore,
 }
 
 impl LocalGlyphRasterizerTest {
@@ -91,9 +91,9 @@ impl LocalGlyphRasterizerTest {
         let mut frontend =
             HeadlessFrontend::new(Size::new(256, 256), 1.0, &run_loop, &pool).expect("a headless frontend");
         // `MapAdapter map{frontend, nullObserver, fileSource, MapOptions()...}`.
-        let mut map = Map::new(
+        let mut map = MapCore::new(
             file_source,
-            MapOptions { map_mode: MapMode::Static, size: frontend.size(), ..Default::default() },
+            MapCoreOptions { map_mode: MapMode::Static, size: frontend.size(), ..Default::default() },
             crate::support::registry(),
             &pool,
         )

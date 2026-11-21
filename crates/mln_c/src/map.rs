@@ -165,7 +165,7 @@ unsafe fn map_options(options: *const mln_map_options) -> Result<(MapOptions, f6
         Some(faces.to_owned())
     };
     let options = MapOptions {
-        map: ::mln_runtime::map::MapOptions {
+        map: ::mln_runtime::map::MapCoreOptions {
             map_mode: mode,
             size: Size::new(extent.width, extent.height),
             pixel_ratio: extent.scale_factor as f32,

@@ -24,7 +24,7 @@ fn style(color: &str) -> String {
 
 fn map_of(runtime: &Runtime, color: &str) -> Map {
     let options = MapOptions {
-        map: mln_runtime::map::MapOptions { size: SIZE, map_mode: MapMode::Continuous, ..Default::default() },
+        map: mln_runtime::map::MapCoreOptions { size: SIZE, map_mode: MapMode::Continuous, ..Default::default() },
         ..Default::default()
     };
     let (map, created) = runtime.create_map(options).unwrap();
@@ -1830,7 +1830,7 @@ fn a_still_image_renders_into_a_new_ring_after_a_release() {
     let Some((device, textures)) = webgpu_ring(1) else { return };
     let runtime = runtime();
     let options = MapOptions {
-        map: mln_runtime::map::MapOptions { size: SIZE, map_mode: MapMode::Static, ..Default::default() },
+        map: mln_runtime::map::MapCoreOptions { size: SIZE, map_mode: MapMode::Static, ..Default::default() },
         ..Default::default()
     };
     let (map, created) = runtime.create_map(options).unwrap();

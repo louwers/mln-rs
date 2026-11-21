@@ -1,5 +1,5 @@
 // A direct check of the M1 background render tests
-// (metrics/integration/render-tests/background-*) through Map ->
+// (metrics/integration/render-tests/background-*) through MapCore ->
 // HeadlessFrontend, without the render-test runner: load style.json, jump to
 // the style's default camera, render a still and compare with expected.png
 // using the runner's metric (pixelmatch threshold 0.1285, `allowed` default
@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use mln_headless::HeadlessFrontend;
 use mln_image::decode_image;
-use mln_runtime::map::{Map, MapMode, MapOptions};
+use mln_runtime::map::{MapCore, MapCoreOptions, MapMode};
 use mln_util::pool::Pool;
 use mln_util::queue::Queue;
 use mln_util::size::Size;
@@ -44,8 +44,8 @@ fn run_on(test: &str, frontend: impl FnOnce(Size, f32, &Queue<()>, &Pool) -> Hea
     let run_loop = Queue::new();
     let pool = Pool::new(4);
     let mut frontend = frontend(size, pixel_ratio, &run_loop, &pool);
-    let mut map = Map::with_resource_options(
-        MapOptions { map_mode: MapMode::Static, size, pixel_ratio, ..Default::default() },
+    let mut map = MapCore::with_resource_options(
+        MapCoreOptions { map_mode: MapMode::Static, size, pixel_ratio, ..Default::default() },
         &mln_storage::ResourceOptions::default(),
         crate::support::registry(),
         &pool,
@@ -111,7 +111,7 @@ fn background_color_color_space_hcl() {
 
 /// Needs the render-test runner's `ProxyFileSource`: the style's sprite
 /// (`local://sprites/sprite`) is served cache-only from
-/// metrics/cache-style.db as `http://sprites/sprite.*`. With a plain Map the
+/// metrics/cache-style.db as `http://sprites/sprite.*`. With a plain `MapCore` the
 /// cache misses and the request falls through to the network (C++: an
 /// online request that fails; the port has no online file source yet, so
 /// nothing answers); `//tools/render-test:m1_render_tests` covers it.

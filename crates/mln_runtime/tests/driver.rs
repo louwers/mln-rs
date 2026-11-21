@@ -28,7 +28,7 @@ fn style(color: &str) -> String {
 /// A continuous map with a style of one color.
 fn map_of(runtime: &Runtime, color: &str) -> Map {
     let options = MapOptions {
-        map: mln_runtime::map::MapOptions {
+        map: mln_runtime::map::MapCoreOptions {
             size: Size::new(256, 256),
             map_mode: MapMode::Continuous,
             ..Default::default()
@@ -106,7 +106,7 @@ fn center_pixel(driver: &DriverWork, session: &RenderSession) -> [u8; 4] {
 fn a_demand_made_while_attaching_fails_when_the_map_cant_bind_the_session() {
     let runtime = runtime();
     let options = MapOptions {
-        map: mln_runtime::map::MapOptions { size: Size::new(256, 256), ..Default::default() },
+        map: mln_runtime::map::MapCoreOptions { size: Size::new(256, 256), ..Default::default() },
         fallback_font_faces: Some("not font faces".to_owned()),
         ..Default::default()
     };
@@ -759,7 +759,7 @@ fn each_still_image_ends_its_own_demand() {
         let _ = request.respond(response);
     }));
     let options = MapOptions {
-        map: mln_runtime::map::MapOptions { size: SIZE, map_mode: MapMode::Static, ..Default::default() },
+        map: mln_runtime::map::MapCoreOptions { size: SIZE, map_mode: MapMode::Static, ..Default::default() },
         ..Default::default()
     };
     let (map, created) = runtime.create_map(options).unwrap();

@@ -164,12 +164,12 @@ fn a_map_that_fails_to_build_fails_its_commands() {
 fn creation_rejects_options_that_no_map_can_have() {
     let runtime = runtime();
     let empty = MapOptions {
-        map: mln_runtime::map::MapOptions { size: Size::new(0, 10), ..Default::default() },
+        map: mln_runtime::map::MapCoreOptions { size: Size::new(0, 10), ..Default::default() },
         ..Default::default()
     };
     assert_eq!(ErrorKind::InvalidArgument, runtime.create_map(empty).unwrap_err().kind);
     let scale = MapOptions {
-        map: mln_runtime::map::MapOptions { pixel_ratio: f32::INFINITY, ..Default::default() },
+        map: mln_runtime::map::MapCoreOptions { pixel_ratio: f32::INFINITY, ..Default::default() },
         ..Default::default()
     };
     assert_eq!(ErrorKind::InvalidArgument, runtime.create_map(scale).unwrap_err().kind);
@@ -404,7 +404,7 @@ fn only_a_continuous_map_repaints() {
     let runtime = runtime();
     let options = map_options();
     let still = MapOptions {
-        map: mln_runtime::map::MapOptions { map_mode: mln_runtime::map::MapMode::Static, ..options.map },
+        map: mln_runtime::map::MapCoreOptions { map_mode: mln_runtime::map::MapMode::Static, ..options.map },
         ..options
     };
     let (map, created) = runtime.create_map(still).unwrap();

@@ -28,7 +28,7 @@ const STYLE: &str =
 
 fn map(runtime: &Runtime) -> Map {
     let options = MapOptions {
-        map: mln_runtime::map::MapOptions {
+        map: mln_runtime::map::MapCoreOptions {
             size: Size::new(256, 256),
             map_mode: MapMode::Continuous,
             ..Default::default()

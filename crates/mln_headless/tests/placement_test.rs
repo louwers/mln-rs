@@ -10,7 +10,9 @@ use std::time::{Duration, Instant};
 use feature::Value;
 use geojson::GeoJson;
 use mln_headless::HeadlessFrontend;
-use mln_runtime::map::{CameraOptions, Map, MapDebugOptions, MapMode, MapOptions, RenderFrameStatus, RenderMode};
+use mln_runtime::map::{
+    CameraOptions, MapCore, MapCoreOptions, MapDebugOptions, MapMode, RenderFrameStatus, RenderMode,
+};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style::Edit;
 use mln_style::expression::expr::FeatureState;
@@ -37,7 +39,7 @@ struct ContinuousMap {
     pool: Pool,
     frontend: Rc<RefCell<HeadlessFrontend>>,
     observer: Rc<StubMapObserver>,
-    map: Rc<RefCell<Map>>,
+    map: Rc<RefCell<MapCore>>,
     start: Instant,
     /// The time of the next frame, from `start`.
     time: Cell<Duration>,
@@ -91,9 +93,9 @@ impl ContinuousMap {
             HeadlessFrontend::new(Size::new(256, 256), 1.0, run_loop.queue(), &pool).expect("a headless frontend");
         let file_source = StubFileSource::on_queue(run_loop.queue(), ResponseType::Asynchronous);
         let observer = Rc::new(StubMapObserver::default());
-        let mut map = Map::new(
+        let mut map = MapCore::new(
             file_source,
-            MapOptions { map_mode: MapMode::Continuous, size: Size::new(256, 256), ..Default::default() },
+            MapCoreOptions { map_mode: MapMode::Continuous, size: Size::new(256, 256), ..Default::default() },
             registry(),
             &pool,
         )
@@ -169,7 +171,7 @@ impl ContinuousMap {
     /// Draws frames while the map loads, asks for them or publishes new
     /// updates, until it shows its view complete. The clock stands still
     /// while the map loads, and skips to the frame at or after the time the
-    /// map changes next on its own ([`Map::repaint_at`]). Returns the
+    /// map changes next on its own ([`MapCore::repaint_at`]). Returns the
     /// frames.
     fn settle(&self) -> Vec<RenderFrameStatus> {
         let mut frames = Vec::new();
@@ -208,7 +210,7 @@ impl ContinuousMap {
 }
 
 /// A change to a map, by name.
-type Change = (&'static str, fn(&mut Map));
+type Change = (&'static str, fn(&mut MapCore));
 
 /// Changes that no symbol's placement reads.
 fn changes_that_move_no_label() -> Vec<Change> {

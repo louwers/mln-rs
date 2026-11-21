@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use mln_headless::HeadlessFrontend;
-use mln_runtime::map::{CameraOptions, Map, MapMode, MapOptions};
+use mln_runtime::map::{CameraOptions, MapCore, MapCoreOptions, MapMode};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{Kind, Resource, Response};
 use mln_style::Edit;
@@ -60,10 +60,15 @@ impl MemoryTest {
         MemoryTest { file_source, run_loop, pool }
     }
 
-    fn map(&self, frontend: &mut HeadlessFrontend, ratio: f32) -> Map {
-        let mut map = Map::new(
+    fn map(&self, frontend: &mut HeadlessFrontend, ratio: f32) -> MapCore {
+        let mut map = MapCore::new(
             Arc::<StubFileSource>::clone(&self.file_source),
-            MapOptions { map_mode: MapMode::Static, size: frontend.size(), pixel_ratio: ratio, ..Default::default() },
+            MapCoreOptions {
+                map_mode: MapMode::Static,
+                size: frontend.size(),
+                pixel_ratio: ratio,
+                ..Default::default()
+            },
             crate::support::registry(),
             &self.pool,
         )
@@ -130,7 +135,7 @@ fn get_current_rss() -> usize {
 #[test]
 fn footprint() {
     struct FrontendAndMap {
-        _map: Map,
+        _map: MapCore,
         _frontend: HeadlessFrontend,
     }
 

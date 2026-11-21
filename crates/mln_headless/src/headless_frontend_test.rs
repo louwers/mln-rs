@@ -1,8 +1,8 @@
-// Smoke tests for the HeadlessFrontend + Map still-image path (the C++
+// Smoke tests for the HeadlessFrontend + MapCore still-image path (the C++
 // tree tests this through test/api/*.test.cpp and the render tests), and of
 // the frames the frontend draws when asked.
 
-use mln_runtime::map::{CameraOptions, MapMode, MapOptions};
+use mln_runtime::map::{CameraOptions, MapCoreOptions, MapMode};
 use mln_util::pool::Pool;
 
 use super::*;
@@ -16,8 +16,8 @@ fn render_style(style: &str, size: Size, pixel_ratio: f32) -> PremultipliedImage
     let run_loop = Queue::new();
     let pool = Pool::new(4);
     let mut frontend = HeadlessFrontend::new(size, pixel_ratio, &run_loop, &pool).expect("a headless frontend");
-    let mut map = Map::with_resource_options(
-        MapOptions { map_mode: MapMode::Static, size, pixel_ratio, ..Default::default() },
+    let mut map = MapCore::with_resource_options(
+        MapCoreOptions { map_mode: MapMode::Static, size, pixel_ratio, ..Default::default() },
         &mln_storage::ResourceOptions::default(),
         Arc::clone(mln_rs::builtin_registry().style()),
         &pool,
@@ -42,8 +42,8 @@ fn render_still_in_continuous_mode_is_an_error() {
     let pool = Pool::new(4);
     let size = Size::new(16, 16);
     let mut frontend = HeadlessFrontend::new(size, 1.0, &run_loop, &pool).expect("a headless frontend");
-    let mut map = Map::with_resource_options(
-        MapOptions { size, ..Default::default() },
+    let mut map = MapCore::with_resource_options(
+        MapCoreOptions { size, ..Default::default() },
         &mln_storage::ResourceOptions::default(),
         Arc::clone(mln_rs::builtin_registry().style()),
         &pool,
@@ -62,7 +62,7 @@ fn background_style(color: &str) -> String {
 }
 
 /// How many frames the map's renderer finished since the last call.
-fn frames(map: &mut Map) -> usize {
+fn frames(map: &mut MapCore) -> usize {
     map.drain_events()
         .iter()
         .filter(|event| matches!(event, mln_runtime::map::MapEvent::RenderFrameFinished(_)))
@@ -75,8 +75,8 @@ fn render_update_draws_each_update_of_the_attached_map_once() {
     let pool = Pool::new(4);
     let size = Size::new(16, 16);
     let mut frontend = HeadlessFrontend::new(size, 1.0, &run_loop, &pool).expect("a headless frontend");
-    let mut map = Map::with_resource_options(
-        MapOptions { size, ..Default::default() },
+    let mut map = MapCore::with_resource_options(
+        MapCoreOptions { size, ..Default::default() },
         &mln_storage::ResourceOptions::default(),
         Arc::clone(mln_rs::builtin_registry().style()),
         &pool,
@@ -108,8 +108,8 @@ fn render_update_drops_the_renderer_once_the_map_is_gone() {
     let pool = Pool::new(4);
     let size = Size::new(16, 16);
     let mut frontend = HeadlessFrontend::new(size, 1.0, &run_loop, &pool).expect("a headless frontend");
-    let mut map = Map::with_resource_options(
-        MapOptions { size, ..Default::default() },
+    let mut map = MapCore::with_resource_options(
+        MapCoreOptions { size, ..Default::default() },
         &mln_storage::ResourceOptions::default(),
         Arc::clone(mln_rs::builtin_registry().style()),
         &pool,
@@ -131,15 +131,15 @@ fn attaching_another_map_renders_that_map() {
     let pool = Pool::new(4);
     let size = Size::new(16, 16);
     let mut frontend = HeadlessFrontend::new(size, 1.0, &run_loop, &pool).expect("a headless frontend");
-    let mut first = Map::with_resource_options(
-        MapOptions { size, ..Default::default() },
+    let mut first = MapCore::with_resource_options(
+        MapCoreOptions { size, ..Default::default() },
         &mln_storage::ResourceOptions::default(),
         Arc::clone(mln_rs::builtin_registry().style()),
         &pool,
     )
     .unwrap();
-    let mut second = Map::with_resource_options(
-        MapOptions { size, ..Default::default() },
+    let mut second = MapCore::with_resource_options(
+        MapCoreOptions { size, ..Default::default() },
         &mln_storage::ResourceOptions::default(),
         Arc::clone(mln_rs::builtin_registry().style()),
         &pool,

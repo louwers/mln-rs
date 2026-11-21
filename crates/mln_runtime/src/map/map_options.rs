@@ -15,7 +15,7 @@ pub enum UnusedStyleImagePolicy {
 
 /// How a map renders and lays itself out.
 #[derive(Clone, Copy, Debug)]
-pub struct MapOptions {
+pub struct MapCoreOptions {
     /// Continuous by default, so the map renders as data arrives from the
     /// network and reacts immediately to state changes.
     pub map_mode: MapMode,
@@ -41,9 +41,9 @@ pub struct MapOptions {
     pub unused_style_image_policy: UnusedStyleImagePolicy,
 }
 
-impl Default for MapOptions {
+impl Default for MapCoreOptions {
     fn default() -> Self {
-        MapOptions {
+        MapCoreOptions {
             map_mode: MapMode::Continuous,
             constrain_mode: ConstrainMode::HeightOnly,
             viewport_mode: ViewportMode::Default,

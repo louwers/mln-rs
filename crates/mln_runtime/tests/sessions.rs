@@ -40,7 +40,7 @@ fn style(color: &str) -> String {
 
 fn map_in_mode(runtime: &Runtime, mode: MapMode) -> Map {
     let options = MapOptions {
-        map: mln_runtime::map::MapOptions { size: Size::new(256, 256), map_mode: mode, ..Default::default() },
+        map: mln_runtime::map::MapCoreOptions { size: Size::new(256, 256), map_mode: mode, ..Default::default() },
         ..Default::default()
     };
     let (map, created) = runtime.create_map(options).unwrap();
@@ -691,7 +691,7 @@ fn resizes_apply_in_order_and_publish_generations() {
 fn a_session_renders_at_its_maps_pixel_ratio() {
     let runtime = runtime();
     let options = MapOptions {
-        map: mln_runtime::map::MapOptions { size: SIZE, pixel_ratio: 2.0, ..Default::default() },
+        map: mln_runtime::map::MapCoreOptions { size: SIZE, pixel_ratio: 2.0, ..Default::default() },
         ..Default::default()
     };
     let (map, created) = runtime.create_map(options).unwrap();
@@ -1430,7 +1430,7 @@ fn render_and_return(tile_cache_enabled: Option<bool>) -> (usize, usize) {
     wait(runtime.set_resource_provider(move |request: ResourceRequest| serving.serve(request)));
     let size = Size::new(256, 256);
     let mut options = MapOptions {
-        map: mln_runtime::map::MapOptions { size, map_mode: MapMode::Static, ..Default::default() },
+        map: mln_runtime::map::MapCoreOptions { size, map_mode: MapMode::Static, ..Default::default() },
         ..Default::default()
     };
     if let Some(enabled) = tile_cache_enabled {

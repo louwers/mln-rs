@@ -3,7 +3,7 @@ use std::sync::{Arc, OnceLock};
 
 use geojson::{Feature, Geometry};
 use mln_headless::HeadlessFrontend;
-use mln_runtime::map::{CameraOptions, Map, MapDebugOptions, MapMode, MapOptions, TileSettings};
+use mln_runtime::map::{CameraOptions, MapCore, MapCoreOptions, MapDebugOptions, MapMode, TileSettings};
 use mln_sources::CustomGeometrySourceHandle;
 use mln_sources::custom::geometry::{self, Options as CustomGeometrySourceOptions};
 use mln_storage::ResourceOptions;
@@ -16,7 +16,7 @@ use mln_util::pool::Pool;
 use crate::support::*;
 
 /// Changes the map's tile settings.
-fn set_tile(map: &mut Map, change: impl FnOnce(&mut TileSettings)) {
+fn set_tile(map: &mut MapCore, change: impl FnOnce(&mut TileSettings)) {
     let mut tile = map.snapshot().tile;
     change(&mut tile);
     map.set_tile_settings(&tile);
@@ -25,7 +25,7 @@ fn set_tile(map: &mut Map, change: impl FnOnce(&mut TileSettings)) {
 struct TileLODTest {
     _run_loop: TestLoop,
     frontend: HeadlessFrontend,
-    map: Map,
+    map: MapCore,
     tile_count: Arc<AtomicU32>,
 }
 
@@ -35,8 +35,8 @@ impl TileLODTest {
         let pool = Pool::new(4);
         let mut frontend =
             HeadlessFrontend::with_pixel_ratio(1.0, run_loop.queue(), &pool).expect("a headless frontend");
-        let mut map = Map::with_resource_options(
-            MapOptions { map_mode: MapMode::Static, size: frontend.size(), ..Default::default() },
+        let mut map = MapCore::with_resource_options(
+            MapCoreOptions { map_mode: MapMode::Static, size: frontend.size(), ..Default::default() },
             &ResourceOptions {
                 asset_path: cpp_root().join("test/fixtures/api/assets").to_str().unwrap().to_owned(),
                 ..ResourceOptions::default()

@@ -1,11 +1,11 @@
-// A file source that answers inside `load`, under a `Map` that loads a
+// A file source that answers inside `load`, under a `MapCore` that loads a
 // style through it. A separate test target because it needs `mln_runtime` and
 // `mln_headless`, which depend on `mln_storage`.
 
 use std::sync::Arc;
 
 use mln_headless::HeadlessFrontend;
-use mln_runtime::map::{Map, MapOptions};
+use mln_runtime::map::{MapCore, MapCoreOptions};
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::{FileSource, Resource, Responder, Response};
 use mln_util::hash::HashMap;
@@ -58,7 +58,8 @@ fn load_sync_render() {
     fs.add("maptiler://maps/streets", read_file("test/fixtures/resources/source_vector.json"));
     fs.add("maptiler://sprites/streets/sprite", read_file("test/fixtures/resources/sprite.png"));
     let mut frontend = HeadlessFrontend::new(Size::new(512, 512), 1.0, &queue, &pool).expect("a headless frontend");
-    let mut map = Map::new(fs, MapOptions::default(), Arc::clone(mln_rs::builtin_registry().style()), &pool).unwrap();
+    let mut map =
+        MapCore::new(fs, MapCoreOptions::default(), Arc::clone(mln_rs::builtin_registry().style()), &pool).unwrap();
     frontend.attach(&mut map);
     let style = String::from_utf8(read_file("test/fixtures/resources/style_vector.json")).unwrap();
     map.load_style_json(&style);

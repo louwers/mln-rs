@@ -41,7 +41,7 @@ pub struct MapId(pub u64);
 /// How to create a map.
 #[derive(Clone, Debug)]
 pub struct MapOptions {
-    pub map: crate::map::MapOptions,
+    pub map: crate::map::MapCoreOptions,
     /// The events that the map reports.
     pub event_mask: EventMask,
     /// JSON text of the font faces that the map falls back to for the text
@@ -75,7 +75,7 @@ pub struct MapOptions {
 impl Default for MapOptions {
     fn default() -> Self {
         MapOptions {
-            map: crate::map::MapOptions::default(),
+            map: crate::map::MapCoreOptions::default(),
             event_mask: EventMask::default(),
             fallback_font_faces: None,
             system_fonts: true,
@@ -100,7 +100,7 @@ pub struct Applied {
 }
 
 /// Moves `map`'s camera to the one that fits `area`.
-fn fit(map: &mut crate::map::Map, area: &CameraFitArea, update: CameraFitUpdate) -> Result<CameraCommandId, Error> {
+fn fit(map: &mut crate::map::MapCore, area: &CameraFitArea, update: CameraFitUpdate) -> Result<CameraCommandId, Error> {
     let CameraFitUpdate { mode, fit, animation } = update;
     let camera = camera::camera_for(map, area, &fit)?;
     Ok(map.update_camera(&CameraUpdate { mode, camera, animation, ..CameraUpdate::default() }))
@@ -478,7 +478,7 @@ impl Map {
     /// A command that changes the map.
     pub(crate) fn command(
         &self,
-        apply: impl FnOnce(&mut crate::map::Map) -> Result<(), Error> + Send + 'static,
+        apply: impl FnOnce(&mut crate::map::MapCore) -> Result<(), Error> + Send + 'static,
     ) -> Result<Completion<Applied>, Error> {
         self.send(move |entry, _| apply(&mut entry.core), |(), entry| entry.applied())
     }
@@ -486,7 +486,7 @@ impl Map {
     /// A command that reads the map.
     pub(crate) fn query<T: Send + 'static>(
         &self,
-        read: impl FnOnce(&mut crate::map::Map) -> Result<T, Error> + Send + 'static,
+        read: impl FnOnce(&mut crate::map::MapCore) -> Result<T, Error> + Send + 'static,
     ) -> Result<Completion<T>, Error> {
         self.send(move |entry, _| read(&mut entry.core), |value, _| value)
     }
@@ -497,7 +497,7 @@ impl Map {
     /// before the completion.
     pub fn with_core<R: Send + 'static>(
         &self,
-        f: impl FnOnce(&mut crate::map::Map) -> R + Send + 'static,
+        f: impl FnOnce(&mut crate::map::MapCore) -> R + Send + 'static,
     ) -> Result<Completion<R>, Error> {
         self.query(move |map| Ok(f(map)))
     }
@@ -621,7 +621,7 @@ impl Map {
     /// began. Completes with [`ErrorKind::InvalidState`](mln_util::ErrorKind)
     /// when no group is open.
     pub fn end_command_group(&self) -> Result<Completion<Applied>, Error> {
-        self.command(crate::map::Map::end_command_group)
+        self.command(crate::map::MapCore::end_command_group)
     }
 
     /// Begins a command group that ends when the guard drops, or with
@@ -1081,7 +1081,7 @@ impl Map {
     }
 
     /// Adds a source to the style from its JSON. See
-    /// `crate::map::Map::add_source_json` for the errors.
+    /// `crate::map::MapCore::add_source_json` for the errors.
     pub fn add_style_source_json(
         &self,
         source_id: impl Into<String>,
@@ -1222,7 +1222,7 @@ impl Map {
     /// whose end nobody waits for.
     fn camera_command(
         &self,
-        apply: impl FnOnce(&mut crate::map::Map) -> Result<CameraCommandId, Error> + Send + 'static,
+        apply: impl FnOnce(&mut crate::map::MapCore) -> Result<CameraCommandId, Error> + Send + 'static,
     ) -> Result<Completion<Applied>, Error> {
         self.send_camera(apply, None)
     }
@@ -1233,7 +1233,7 @@ impl Map {
     /// [`ErrorKind::Cancelled`](mln_util::ErrorKind) when the send fails.
     fn camera_command_then(
         &self,
-        apply: impl FnOnce(&mut crate::map::Map) -> Result<CameraCommandId, Error> + Send + 'static,
+        apply: impl FnOnce(&mut crate::map::MapCore) -> Result<CameraCommandId, Error> + Send + 'static,
         on_end: impl FnOnce(Result<TransitionEnd, Error>) + Send + 'static,
     ) -> Result<Completion<Applied>, Error> {
         let (ended, end) = self.shared.runtime.completion();
@@ -1245,7 +1245,7 @@ impl Map {
     /// failure ends it as cancelled.
     fn send_camera(
         &self,
-        apply: impl FnOnce(&mut crate::map::Map) -> Result<CameraCommandId, Error> + Send + 'static,
+        apply: impl FnOnce(&mut crate::map::MapCore) -> Result<CameraCommandId, Error> + Send + 'static,
         end: Option<Resolver<TransitionEnd>>,
     ) -> Result<Completion<Applied>, Error> {
         self.send(
@@ -1435,7 +1435,7 @@ impl Map {
     }
 
     /// Sets whether drags and zooms on a globe turn the bearing, as
-    /// `crate::map::Map::set_globe_free_bearing` describes.
+    /// `crate::map::MapCore::set_globe_free_bearing` describes.
     pub fn set_globe_free_bearing_enabled(&self, enabled: bool) -> Result<Completion<Applied>, Error> {
         self.command(move |map| {
             map.set_globe_free_bearing(enabled);
@@ -1535,7 +1535,7 @@ fn still_image_error(error: Error) -> Error {
 
 /// A map on the runtime's thread.
 pub(crate) struct MapEntry {
-    pub(crate) core: crate::map::Map,
+    pub(crate) core: crate::map::MapCore,
     published: Arc<Published>,
     mask: EventMask,
     /// The sequence number of the last command that ran.
@@ -1558,7 +1558,7 @@ pub(crate) struct MapEntry {
     /// The data that commands gave sources and that is still being prepared.
     pub(crate) source_data_updates: SourceDataUpdates,
     /// The repaint posted for when the map changes next on its own
-    /// ([`crate::map::Map::repaint_at`]).
+    /// ([`crate::map::MapCore::repaint_at`]).
     repaint: Option<(Instant, TimedTask)>,
 }
 
@@ -1629,7 +1629,7 @@ pub(crate) fn create(
     outbox: &mut Outbox,
 ) {
     let registry = Arc::clone(core.registry.style());
-    let mut map = match crate::map::Map::new(Arc::clone(core.loader()), options.map, registry, &core.pool) {
+    let mut map = match crate::map::MapCore::new(Arc::clone(core.loader()), options.map, registry, &core.pool) {
         Ok(map) => map,
         Err(error) => return outbox.resolve(resolver, Err(error)),
     };

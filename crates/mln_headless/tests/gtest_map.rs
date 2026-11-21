@@ -15,7 +15,7 @@ use mln_headless::HeadlessFrontend;
 use mln_render::{OverscaledTileID, TileOperation, UpdateParameters, UpdateReader};
 use mln_rs::mln_layers::Symbol;
 use mln_runtime::map::{
-    AnimationOptions, BoundOptions, CameraOptions, ConstrainMode, Map, MapMode, MapOptions, MapProjection,
+    AnimationOptions, BoundOptions, CameraOptions, ConstrainMode, MapCore, MapCoreOptions, MapMode, MapProjection,
     NorthOrientation, ProjectionMode, RenderFrameStatus, RenderMode, TileLodMode, TileSettings, Viewport, ViewportMode,
 };
 use mln_sources::custom::geometry::{self, CustomGeometrySourceHandle, Options as CustomGeometrySourceOptions};
@@ -1316,8 +1316,8 @@ fn continuous_rendering() {
         });
     }
 
-    let mut map = Map::with_resource_options(
-        MapOptions { map_mode: MapMode::Continuous, size: frontend.size(), ..Default::default() },
+    let mut map = MapCore::with_resource_options(
+        MapCoreOptions { map_mode: MapMode::Continuous, size: frontend.size(), ..Default::default() },
         &ResourceOptions {
             asset_path: cpp_root().join("test/fixtures/api/assets").to_str().unwrap().to_owned(),
             ..ResourceOptions::default()
@@ -2400,8 +2400,8 @@ fn expired_sprite_sheet() {
     let observer = Rc::new(StubMapObserver::default());
     let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0, run_loop.queue(), &pool).expect("a headless frontend");
     let options =
-        MapOptions { map_mode: MapMode::Continuous, size: frontend.size(), pixel_ratio: 1.0, ..Default::default() };
-    let mut map = Map::new(file_source, options, registry(), &pool).unwrap();
+        MapCoreOptions { map_mode: MapMode::Continuous, size: frontend.size(), pixel_ratio: 1.0, ..Default::default() };
+    let mut map = MapCore::new(file_source, options, registry(), &pool).unwrap();
     frontend.attach(&mut map);
     let updates = map.update_reader();
     let map = Rc::new(RefCell::new(map));
@@ -3157,8 +3157,8 @@ fn observe_tile_lifecycle() {
 
     let mut frontend =
         HeadlessFrontend::new(Size::new(512, 512), 1.0, run_loop.queue(), &pool).expect("a headless frontend");
-    let mut map = Map::with_resource_options(
-        MapOptions { map_mode: MapMode::Static, size: frontend.size(), ..Default::default() },
+    let mut map = MapCore::with_resource_options(
+        MapCoreOptions { map_mode: MapMode::Static, size: frontend.size(), ..Default::default() },
         &ResourceOptions {
             asset_path: cpp_root().join("test/fixtures/api/assets").to_str().unwrap().to_owned(),
             ..ResourceOptions::default()
@@ -3402,7 +3402,7 @@ fn globe_hand_off_keeps_tiles() {
         HeadlessFrontend::new(Size::new(512, 512), 1.0, run_loop.queue(), &pool).expect("a headless frontend");
     // C++ runs from the checkout's root; the asset path is relative to it.
     let asset_path = cpp_root().join("test/fixtures/api/assets");
-    let mut map = Map::new(
+    let mut map = MapCore::new(
         Arc::new(Loader::new(
             &ResourceOptions {
                 asset_path: asset_path.to_str().expect("asset path").to_owned(),
@@ -3410,7 +3410,7 @@ fn globe_hand_off_keeps_tiles() {
             },
             &pool,
         )),
-        MapOptions { map_mode: MapMode::Static, size: frontend.size(), ..Default::default() },
+        MapCoreOptions { map_mode: MapMode::Static, size: frontend.size(), ..Default::default() },
         registry(),
         &pool,
     )
@@ -3484,15 +3484,15 @@ fn a_moved_layer_draws_in_its_new_place_without_a_relayout() {
         },
         &pool,
     ));
-    let options = MapOptions { map_mode: MapMode::Static, size: frontend.size(), ..Default::default() };
+    let options = MapCoreOptions { map_mode: MapMode::Static, size: frontend.size(), ..Default::default() };
     let camera = CameraOptions { center: Some(ll(37.8, -122.5)), zoom: Some(10.0), ..Default::default() };
-    let mut render = |map: &mut Map| {
+    let mut render = |map: &mut MapCore| {
         let result = frontend.render(map).unwrap_or_else(|e| panic!("render: {e}"));
         map.drain_events().into_iter().for_each(|event| observer.dispatch(event));
         result.image
     };
 
-    let mut map = Map::new(Arc::clone(&file_source), options, registry(), &pool).unwrap();
+    let mut map = MapCore::new(Arc::clone(&file_source), options, registry(), &pool).unwrap();
     map.load_style_json(&water_layers_in(["fill", "line"]));
     map.jump_to(&camera);
     let before = render(&mut map);
@@ -3504,7 +3504,7 @@ fn a_moved_layer_draws_in_its_new_place_without_a_relayout() {
     assert_eq!(0, parses.get(), "moving a layer laid its tiles out again");
     assert_ne!(before, moved);
 
-    let mut reordered = Map::new(file_source, options, registry(), &pool).unwrap();
+    let mut reordered = MapCore::new(file_source, options, registry(), &pool).unwrap();
     reordered.load_style_json(&water_layers_in(["line", "fill"]));
     reordered.jump_to(&camera);
     assert_eq!(render(&mut reordered), moved);
@@ -3767,7 +3767,7 @@ fn globe_bounded_source_loads_finer_tiles() {
         HeadlessFrontend::new(Size::new(512, 512), 1.0, run_loop.queue(), &pool).expect("a headless frontend");
     // C++ runs from the checkout's root; the asset path is relative to it.
     let asset_path = cpp_root().join("test/fixtures/api/assets");
-    let mut map = Map::new(
+    let mut map = MapCore::new(
         Arc::new(Loader::new(
             &ResourceOptions {
                 asset_path: asset_path.to_str().expect("asset path").to_owned(),
@@ -3775,7 +3775,7 @@ fn globe_bounded_source_loads_finer_tiles() {
             },
             &pool,
         )),
-        MapOptions { map_mode: MapMode::Static, size: frontend.size(), ..Default::default() },
+        MapCoreOptions { map_mode: MapMode::Static, size: frontend.size(), ..Default::default() },
         registry(),
         &pool,
     )
@@ -4627,9 +4627,9 @@ fn layer_added_with_global_state_change_shows_new_state() {
 #[test]
 fn tile_selection_options_publish_updates() {
     fn check<T: PartialEq + std::fmt::Debug + Copy>(
-        map: &mut Map,
+        map: &mut MapCore,
         updates: &UpdateReader,
-        setter: impl Fn(&mut Map, T),
+        setter: impl Fn(&mut MapCore, T),
         member: impl Fn(&UpdateParameters) -> T,
         value: T,
     ) {
@@ -4644,7 +4644,7 @@ fn tile_selection_options_publish_updates() {
     }
 
     /// Sets one tile setting, through the setter of them all.
-    fn set<T>(change: impl Fn(&mut TileSettings, T)) -> impl Fn(&mut Map, T) {
+    fn set<T>(change: impl Fn(&mut TileSettings, T)) -> impl Fn(&mut MapCore, T) {
         move |map, value| {
             let mut tile = map.snapshot().tile;
             change(&mut tile, value);
@@ -4654,9 +4654,9 @@ fn tile_selection_options_publish_updates() {
 
     let run_loop = TestLoop::new();
     let pool = Pool::new(4);
-    let mut map = Map::new(
+    let mut map = MapCore::new(
         StubFileSource::on_queue(run_loop.queue(), ResponseType::Asynchronous),
-        MapOptions { map_mode: MapMode::Continuous, ..Default::default() },
+        MapCoreOptions { map_mode: MapMode::Continuous, ..Default::default() },
         registry(),
         &pool,
     )
@@ -4914,9 +4914,9 @@ fn empty_size_is_an_error() {
     let run_loop = TestLoop::new();
     let pool = Pool::new(4);
     for size in [Size::new(0, 0), Size::new(256, 0), Size::new(0, 256)] {
-        let result = Map::new(
+        let result = MapCore::new(
             StubFileSource::on_queue(run_loop.queue(), ResponseType::Asynchronous),
-            MapOptions { size, ..Default::default() },
+            MapCoreOptions { size, ..Default::default() },
             registry(),
             &pool,
         );

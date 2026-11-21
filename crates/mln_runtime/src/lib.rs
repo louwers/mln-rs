@@ -13,7 +13,7 @@
 //! or on the host's graphics thread through its [`DriverWork`].
 //!
 //! The synchronous, single-thread core that these handles drive is
-//! [`map::Map`], in the [`map`] module with its transform, style loader and
+//! [`map::MapCore`], in the [`map`] module with its transform, style loader and
 //! events, and [`sprite`] parses its sprites; [`Map::with_core`] runs a
 //! closure on it. A source type's own
 //! commands go through the map's generic source paths, such as

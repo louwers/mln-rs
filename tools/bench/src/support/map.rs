@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 pub(crate) use mln_bench_workload::paths::{tile_at, tile_center};
 use mln_headless::HeadlessFrontend;
-use mln_runtime::map::{CameraOptions, Map, MapEvent, MapMode, MapOptions, RenderFrameStatus, RenderMode};
+use mln_runtime::map::{CameraOptions, MapCore, MapCoreOptions, MapEvent, MapMode, RenderFrameStatus, RenderMode};
 use mln_runtime::{BackendRef, Device};
 use mln_sources::geojson::{GeoJSONOptions, GeoJsonSourceType, create_geojson_data, geojson_source, parse_geojson};
 use mln_storage::FileSource;
@@ -149,7 +149,7 @@ impl Frontend {
 /// transitions as a 60 Hz display would, however long a frame took.
 pub(crate) struct HeadlessMap {
     // The map before its frontend, whose renderer reports to it.
-    map: Map,
+    map: MapCore,
     frontend: Frontend,
     /// The time of the next frame. It starts a day ahead of the system's
     /// clock, so the map never takes it for a stale frame time and always
@@ -169,9 +169,9 @@ impl HeadlessMap {
     /// [`Frontend::pool`].
     pub(crate) fn new(mut frontend: Frontend, mode: MapMode, file_source: Arc<dyn FileSource>) -> HeadlessMap {
         let size = frontend.frontend.size();
-        let options = MapOptions { map_mode: mode, size, pixel_ratio: 1.0, ..Default::default() };
+        let options = MapCoreOptions { map_mode: mode, size, pixel_ratio: 1.0, ..Default::default() };
         let registry = Arc::clone(mln_rs::builtin_registry().style());
-        let mut map = Map::new(file_source, options, registry, &frontend.pool).expect("a map");
+        let mut map = MapCore::new(file_source, options, registry, &frontend.pool).expect("a map");
         frontend.frontend.attach(&mut map);
         let clock = Instant::now() + Duration::from_hours(24);
         HeadlessMap { map, frontend, clock, frames: 0, incomplete: 0, last_frame: None, drained: 0 }
@@ -197,7 +197,7 @@ impl HeadlessMap {
         map
     }
 
-    pub(crate) fn map(&mut self) -> &mut Map {
+    pub(crate) fn map(&mut self) -> &mut MapCore {
         &mut self.map
     }
 

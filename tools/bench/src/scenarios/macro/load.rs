@@ -128,7 +128,7 @@ fn runtime(bench: &mut Bench) {
     let options =
         RuntimeOptions { asset_path: Some(fixtures.dir().to_owned()), cache_path: None, network_status: None };
     let map_options = MapOptions {
-        map: mln_runtime::map::MapOptions {
+        map: mln_runtime::map::MapCoreOptions {
             size: VIEW,
             pixel_ratio: 1.0,
             map_mode: MapMode::Static,

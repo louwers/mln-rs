@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use mln_headless::{HeadlessFrontend, RenderResult};
-use mln_runtime::map::{CameraOptions, Map, MapMode, MapOptions, RenderMode};
+use mln_runtime::map::{CameraOptions, MapCore, MapCoreOptions, MapMode, RenderMode};
 use mln_storage::Kind;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style::Edit;
@@ -89,7 +89,7 @@ struct SymbolRenderingTest {
     run_loop: TestLoop,
     frontend: Rc<RefCell<HeadlessFrontend>>,
     observer: Rc<StubMapObserver>,
-    map: Rc<RefCell<Map>>,
+    map: Rc<RefCell<MapCore>>,
 }
 
 impl SymbolRenderingTest {
@@ -115,9 +115,9 @@ impl SymbolRenderingTest {
         // A style URL never answers: the map keeps the style it has.
         file_source.set_response(Kind::Style, |_| None);
         let observer = Rc::new(StubMapObserver::default());
-        let mut map = Map::new(
+        let mut map = MapCore::new(
             file_source,
-            MapOptions { map_mode: mode, size: Size::new(256, 256), ..Default::default() },
+            MapCoreOptions { map_mode: mode, size: Size::new(256, 256), ..Default::default() },
             registry(),
             &pool,
         )

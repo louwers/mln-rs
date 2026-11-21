@@ -9,7 +9,7 @@ use mln_headless::HeadlessFrontend;
 use mln_rs::mln_layers::custom::{
     Custom, CustomLayerHost, CustomLayerPrerenderParameters, CustomLayerRenderParameters,
 };
-use mln_runtime::map::{Map, MapMode, MapOptions};
+use mln_runtime::map::{MapCore, MapCoreOptions, MapMode};
 use mln_runtime::{BackendType, Device, DeviceOptions};
 use mln_util::error::ErrorKind;
 use mln_util::image::PremultipliedImage;
@@ -86,7 +86,7 @@ fn session(
     host: Arc<dyn CustomLayerHost>,
     before: Option<&str>,
     run_loop: &Queue<()>,
-) -> Option<(HeadlessFrontend, Map)> {
+) -> Option<(HeadlessFrontend, MapCore)> {
     let size = Size::new(SIDE, SIDE);
     let pool = Pool::new(4);
     let device = match Device::with_backend(backend, DeviceOptions::default()) {
@@ -99,8 +99,8 @@ fn session(
     };
     let mut frontend =
         HeadlessFrontend::with_device(device, size, 1.0, Arc::default(), run_loop, &pool).expect("a frontend");
-    let mut map = Map::with_resource_options(
-        MapOptions { map_mode: MapMode::Static, size, pixel_ratio: 1.0, ..Default::default() },
+    let mut map = MapCore::with_resource_options(
+        MapCoreOptions { map_mode: MapMode::Static, size, pixel_ratio: 1.0, ..Default::default() },
         &mln_storage::ResourceOptions::default(),
         crate::support::registry(),
         &pool,
@@ -379,7 +379,7 @@ mod gl {
     use khronos_egl as egl;
     use mln_headless::HeadlessFrontend;
     use mln_rs::mln_layers::custom::{CustomLayerPrerenderParameters, CustomLayerRenderParameters};
-    use mln_runtime::map::Map;
+    use mln_runtime::map::MapCore;
     use mln_style::Edit;
 
     use super::{Arc, BackendType, Calls, Custom, CustomLayerHost, Mutex, Ordering, Queue, check, session};
@@ -476,7 +476,7 @@ void main() { color = vec4(0.0, 1.0, 0.0, 1.0); }
     /// Draws a frame with the host's layer, lets go of the layer with
     /// `end`, which can drop the frontend, and checks that the host
     /// deinitialized with the context it drew on current.
-    fn check_end(end: impl FnOnce(&mut Option<HeadlessFrontend>, &mut Map)) {
+    fn check_end(end: impl FnOnce(&mut Option<HeadlessFrontend>, &mut MapCore)) {
         let run_loop = Queue::new();
         let host = Arc::new(Host::default());
         let Some((frontend, mut map)) = session(BackendType::OpenGL, Arc::<Host>::clone(&host), None, &run_loop) else {
@@ -782,7 +782,7 @@ mod ending {
     use mln_style::Edit;
 
     use super::{
-        Arc, AtomicUsize, BackendType, Custom, CustomLayerHost, HeadlessFrontend, Map, Ordering, Queue, session,
+        Arc, AtomicUsize, BackendType, Custom, CustomLayerHost, HeadlessFrontend, MapCore, Ordering, Queue, session,
     };
 
     /// A host that draws nothing, and counts how it ended.
@@ -817,7 +817,7 @@ mod ending {
     /// Draws a frame with the host's layer on each backend, lets go of the
     /// layer with `end`, which can drop the frontend, and checks that the
     /// host deinitialized once and lost nothing.
-    fn check_end(end: impl Fn(&mut Option<HeadlessFrontend>, &mut Map)) {
+    fn check_end(end: impl Fn(&mut Option<HeadlessFrontend>, &mut MapCore)) {
         for &backend in BACKENDS {
             let run_loop = Queue::new();
             let host = Arc::new(Host::default());
