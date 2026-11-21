@@ -630,9 +630,12 @@ impl TileBuilder<'_> {
         binders.bind(evaluated, paint, &mut vertex_attrs, &mut uniforms);
         let mut wall_attrs = VertexAttributeArray::new();
         let mut paint_layout = 0;
+        // The walls drawn as their own quads read four centroids a wall.
+        let quad_centroids =
+            centroids.as_ref().filter(|_| quads.is_some()).map(|centroids| wall_quad_centroids(centroids, walls));
         // The centroids of the bucket's vertices, which the roofs read, and
         // the instanced and pulled walls.
-        let vertex_centroids = centroids.as_ref().map(|centroids| context.add_vertices(centroids.clone()));
+        let vertex_centroids = centroids.map(|centroids| context.add_vertices(centroids));
         let (wall_instance_attrs, wall_vertex_count, wall_segments) = if let Some((quad_vertices, quad_paint)) = &quads
         {
             binders.bind(evaluated, paint, &mut wall_attrs, &mut wall_uniforms);
@@ -642,8 +645,8 @@ impl TileBuilder<'_> {
             if let Some(quad_vertices) = quad_vertices {
                 read_wall_quads(&mut wall_attrs, quad_vertices);
             }
-            if let Some(centroids) = &centroids {
-                let quad_centroids = context.add_vertices(wall_quad_centroids(centroids, walls));
+            if let Some(quad_centroids) = quad_centroids {
+                let quad_centroids = context.add_vertices(quad_centroids);
                 wall_attrs.set_shared(ID_FILL_EXTRUSION_CENTROID_ATTRIBUTE, centroid_attribute(quad_centroids));
             }
             (None, 4 * walls, RenderStaticData::fill_extrusion_wall_segments(walls))
