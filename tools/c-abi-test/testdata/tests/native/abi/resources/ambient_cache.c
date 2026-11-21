@@ -33,8 +33,8 @@ static void ambient_cache_calls_validate_their_arguments(void) {
 typedef enum cached_entry {
   // Kept as it was: the next request revalidates with the stored metadata.
   ENTRY_KEPT,
-  // Kept but marked for revalidation: the next request also carries its bytes,
-  // because the map may not use them until the provider answers.
+  // Kept but stale: the map still shows it, and the next request revalidates
+  // it with an expiry that has passed.
   ENTRY_INVALIDATED,
   // Gone: the next request carries nothing.
   ENTRY_REMOVED,
@@ -131,6 +131,7 @@ static void ambient_cache_changes_reach_the_next_request(void) {
     mln_test_provider_install(runtime, provider);
     mln_map first = load_style(runtime);
     apply_change(runtime, row);
+    const int64_t changed_unix_ms = mln_test_now_unix_ms();
     mln_map second = load_style(runtime);
     // A kept entry loads the style from the cache before its revalidation
     // reaches the provider.
@@ -150,10 +151,16 @@ static void ambient_cache_changes_reach_the_next_request(void) {
         "\"ambient\"", next->prior_etag, row->label
       );
     }
-    TEST_ASSERT_EQUAL_size_t_MESSAGE(
-      row->entry == ENTRY_INVALIDATED ? sizeof(cached_style_json) - 1 : 0,
-      next->prior_data_size, row->label
-    );
+    if (row->entry == ENTRY_INVALIDATED) {
+      TEST_ASSERT_BITS_HIGH_MESSAGE(
+        MLN_RESOURCE_REQUEST_PRIOR_EXPIRES, next->fields, row->label
+      );
+      TEST_ASSERT_LESS_OR_EQUAL_INT64_MESSAGE(
+        changed_unix_ms, next->prior_expires_unix_ms, row->label
+      );
+    }
+    // The map uses whatever entry it has, so no request carries its bytes.
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(0, next->prior_data_size, row->label);
     mln_test_destroy_map(second);
     mln_test_destroy_map(first);
     mln_test_destroy_runtime(runtime);
@@ -172,6 +179,9 @@ static void revalidation_keeps_omitted_cache_validators(void) {
         .byte_count = sizeof(cached_style_json) - 1,
         .modified_unix_ms = 1700000000000,
         .expires_unix_ms = 4102444800000,
+        // Once invalidated, the copy waits for the 304, so the third load
+        // reads what the 304 left in the cache.
+        .must_revalidate = true,
         .etag = MLN_BUFFER_LITERAL("\"validator\"")},
      .has_later_response = true,
      .later_response = {
