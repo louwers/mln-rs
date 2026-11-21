@@ -28,7 +28,7 @@ use mln_storage::network_status::{NetworkStatus, Status as NetworkStatusType};
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{
-    Cache, DatabaseFileSource, FileSource, FileSourceExt, Kind, Loader, LoadingMethod, OnlineFileSource, Resource,
+    Cache, DatabaseFileSource, FileSource, Kind, Loader, LoadingMethod, OnlineFileSource, Resource,
     ResourceOptions, Response, StoragePolicy,
 };
 use mln_style::conversion::layer::convert_layer;
@@ -1067,38 +1067,9 @@ fn style_loaded_signal() {
     assert!(!emitted.get());
 }
 
-/// A map over an `OnlineFileSource` that has made one transfer from
-/// `server`. The process's first transfer sets up the platform's HTTP
-/// stack, and on Apple platforms that reads the test binary's directory,
-/// which holds every crate's object files. In a large build directory on a
-/// busy machine that takes longer than the stack's own request timeout
-/// (30 s), so on Apple platforms a transfer that times out is asked
-/// again, within five minutes in all. Doing it here keeps the setup out of
-/// the tests' timed waits.
-fn online_file_source_test(server: &HttpServer) -> MapTest<OnlineFileSource> {
+fn online_file_source_test() -> MapTest<OnlineFileSource> {
     let run_loop = TestLoop::new();
     let file_source = Arc::new(OnlineFileSource::new(Arc::new(NetworkStatus::new())));
-    let deadline = Instant::now() + Duration::from_secs(300);
-    loop {
-        let started = Instant::now();
-        let (sent, received) = std::sync::mpsc::channel();
-        let _request = file_source.request(&Resource::source(&server.url("/test")), move |response| {
-            let _ = sent.send(response.error);
-        });
-        let left = deadline.saturating_duration_since(started);
-        let error = received.recv_timeout(left).expect("the first transfer finishes within 5 minutes");
-        // Only a transfer that took about the stack's 30 s request timeout.
-        let timed_out = |error: &ResourceError| {
-            cfg!(target_vendor = "apple")
-                && error.reason == Reason::Connection
-                && started.elapsed() >= Duration::from_secs(25)
-        };
-        match error {
-            None => break,
-            Some(error) if timed_out(&error) => {}
-            Some(error) => panic!("the first transfer failed: {error:?}"),
-        }
-    }
     MapTest::create(run_loop, file_source, 1.0, MapMode::Static)
 }
 
@@ -1107,7 +1078,7 @@ fn online_file_source_test(server: &HttpServer) -> MapTest<OnlineFileSource> {
 #[test]
 fn style_network_error_retry() {
     let server = HttpServer::new();
-    let test = online_file_source_test(&server);
+    let test = online_file_source_test();
 
     test.map().load_style_url(&server.url("/style-fail-once-500"));
 
@@ -1121,7 +1092,7 @@ fn style_network_error_retry() {
 #[test]
 fn style_not_found() {
     let server = HttpServer::new();
-    let test = online_file_source_test(&server);
+    let test = online_file_source_test();
 
     test.map().load_style_url(&server.url("/style-fail-once-404"));
 
@@ -1134,7 +1105,6 @@ fn style_not_found() {
         let (timer, run_loop) = (Rc::clone(&timer), test.run_loop.handle());
         test.observer.did_fail_loading_map_callback.set(move |()| {
             let run_loop = run_loop.clone();
-            // Longer than the second a server error waits for its retry.
             timer.start(Duration::from_millis(1100), move || run_loop.stop());
         });
     }
