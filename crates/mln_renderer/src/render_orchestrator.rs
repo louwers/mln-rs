@@ -1346,7 +1346,8 @@ impl RenderOrchestrator {
     ) {
         let (store, render_sources) = (&self.tile_store, &self.render_sources);
         let dem = |id: &str| store.source(render_sources.get(id)?.tiles()?);
-        paint_parameters.ground = self.terrain.prepare_ground(paint_parameters, dem);
+        let stands = frame.terrain && frame.layers.keys().any(|&index| self.layers[index as usize].stands());
+        paint_parameters.ground = self.terrain.prepare_ground(paint_parameters, dem, stands);
         let mut needs_globe_depth = false;
         let mut contents = SourceContents::default();
         for (&index, frame_layer) in &frame.layers {

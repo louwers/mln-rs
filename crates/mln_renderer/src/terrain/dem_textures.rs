@@ -58,6 +58,12 @@ impl DemTextures {
         flat.clone()
     }
 
+    /// How many textures it holds, made or not, but the flat one.
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
+        self.textures.len()
+    }
+
     /// The bytes of the textures it holds that are made, in `context`.
     pub(crate) fn bytes(&self, context: &Context) -> usize {
         let made = |texture: &SharedTexture| {

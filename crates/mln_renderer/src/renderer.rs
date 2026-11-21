@@ -294,6 +294,13 @@ impl Renderer {
         self.orchestrator.projection_variants()
     }
 
+    /// How many DEM textures the terrain holds, made or waiting to upload,
+    /// and how many DEM tiles its drawn tiles read.
+    #[cfg(test)]
+    pub(crate) fn dem_textures(&mut self) -> (usize, usize) {
+        self.orchestrator.terrain().dem_textures()
+    }
+
     /// The tiles of the terrain's drapes and the side their drapes draw at.
     #[cfg(test)]
     pub(crate) fn drape_sizes(&mut self) -> Vec<(mln_tile_id::OverscaledTileID, u32)> {

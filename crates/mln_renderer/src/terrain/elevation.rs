@@ -311,9 +311,12 @@ impl TerrainElevation {
         }
     }
 
-    /// The DEM tiles the tiles read, and those it holds off them, each once.
-    pub(super) fn dems(&self) -> impl Iterator<Item = &DrawnDem> {
-        self.dems.values().filter_map(|&at| self.dem_at(at))
+    /// The DEM tiles the drawn tiles read, and with `held`, those that the
+    /// tile under the center reads and those it holds off the tiles, each
+    /// once.
+    pub(super) fn dems(&self, held: bool) -> impl Iterator<Item = &DrawnDem> {
+        let drawn = |at: usize| self.tiles.get(at).is_some_and(|tile| tile.drawn);
+        self.dems.values().filter(move |&&at| held || drawn(at)).filter_map(|&at| self.dem_at(at))
     }
 
     /// Of the DEM tiles the tiles read, and those it holds off them, the

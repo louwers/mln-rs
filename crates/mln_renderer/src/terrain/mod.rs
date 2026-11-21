@@ -26,8 +26,9 @@
 //!    terrain tile's DEM, and tells the map of the ground the tiles draw, if
 //!    it changed.
 //! 3. In the encode, the ground's DEM textures are made first
-//!    ([`RenderTerrain::prepare_ground`]), for the standing layers and the
-//!    surface. The layers that drape (background, fill, line, hillshade,
+//!    ([`RenderTerrain::prepare_ground`]): those the surface reads, and in a
+//!    frame where a layer stands on the ground, those its parts off the
+//!    cover read too, of the coarse DEM tiles that cull the cover. The layers that drape (background, fill, line, hillshade,
 //!    color relief, and raster, an image source's too) make no draws in the
 //!    frame: they draw in each drape of their stack whose key changed
 //!    ([`RenderTerrain::begin_drapes`]). The surface makes a draw per tile
@@ -518,13 +519,16 @@ impl RenderTerrain {
 
     /// Makes what the encode's draws of the frame of the last update bind of
     /// its ground: the textures of the DEM tiles of the terrain's source,
-    /// which `dem` finds by its id, that the surface reads, for the standing
-    /// layers and the surface. `None`, dropping the DEM textures, for a
-    /// frame without terrain.
+    /// which `dem` finds by its id, that the surface reads, for the surface
+    /// and, where a layer of the frame `stands`, the standing layers, with
+    /// those of the DEM tiles it holds off the drawn tiles, which their parts
+    /// off the cover read. `None`, dropping the DEM textures, for a frame
+    /// without terrain.
     pub(crate) fn prepare_ground<'a>(
         &mut self,
         parameters: &mut PaintParameters<'_>,
         dem: impl FnOnce(&str) -> Option<&'a SourceTiles>,
+        stands: bool,
     ) -> Option<Rc<GroundBindings>> {
         let (Some(ground), Some(cover)) = (&self.elevation, &self.cover) else {
             self.dem_textures = DemTextures::default();
@@ -533,7 +537,7 @@ impl RenderTerrain {
         let context = &mut *parameters.context;
         let tiles = dem(&cover.source_id);
         let mut textures = mln_util::hash::HashMap::default();
-        for read in ground.dems() {
+        for read in ground.dems(stands) {
             if let Some(bucket) = tiles.and_then(|tiles| dem_bucket(tiles.tile(&read.id)?)) {
                 textures.insert(read.id.canonical, (self.dem_textures.texture(context, bucket), read.dim));
             }
@@ -610,6 +614,14 @@ impl RenderTerrain {
     #[cfg(test)]
     pub(crate) fn take_drape_passes(&mut self) -> Vec<(mln_tile_id::OverscaledTileID, usize)> {
         self.drapes.take_passes()
+    }
+
+    /// How many DEM textures it holds, made or waiting to upload, and how
+    /// many DEM tiles the drawn tiles of the last update read.
+    #[cfg(test)]
+    pub(crate) fn dem_textures(&self) -> (usize, usize) {
+        let read = self.elevation.as_ref().map_or(0, |ground| ground.dems(false).count());
+        (self.dem_textures.len(), read)
     }
 
     /// The tiles of the drapes and the side their drapes draw at.

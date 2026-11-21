@@ -1784,6 +1784,26 @@ fn a_map_without_terrain_makes_no_terrain_variant() {
     assert_eq!(0, map.renderer.rendering_stats().terrain.mem_dem_textures);
 }
 
+/// A terrain map whose layers all drape holds DEM textures of the DEM tiles
+/// its surface draws with, and none of the coarse ones it holds to cull the
+/// surface's tiles: only the standing layers' parts off the cover read
+/// those, once a circle stands on the ground.
+#[test]
+fn a_map_without_a_standing_layer_makes_no_texture_of_a_dem_tile_its_surface_doesnt_read() {
+    let mut map = raised(10.0, 0.0);
+    map.settle();
+    map.frame();
+    let (textures, read) = map.renderer.dem_textures();
+    assert!(read > 0);
+    assert_eq!(read, textures, "the DEM tiles the surface reads");
+
+    add_layer(&mut map, &red_circle(LatLng::new(-10.0, 10.0086).unwrap()), None);
+    map.settle();
+    map.frame();
+    let (textures, read) = map.renderer.dem_textures();
+    assert!(textures > read, "{textures} DEM textures, of which {read} the surface reads, and the coarse ones");
+}
+
 /// Once terrain turns off, a circle that stood on it draws with the flat
 /// variant, whose draws are made again without the ground, and the DEM
 /// textures go.
