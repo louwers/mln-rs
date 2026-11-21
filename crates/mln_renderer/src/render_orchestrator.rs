@@ -1613,11 +1613,10 @@ impl RenderOrchestrator {
         // the ground the frame drew, once for every source. Symbols are found
         // where they were placed, on the screen, so a query of symbols alone
         // needs no ground.
-        let symbols_only = filtered_layers.values().all(|layer| layer.base().style.info().cross_tile_index);
         let ground = self
             .terrain
             .ground()
-            .filter(|_| !symbols_only)
+            .filter(|_| !filtered_layers.values().all(|layer| layer.base().style.info().cross_tile_index))
             .map(|elevation| crate::geometry::feature_index::QueryGround::new(&self.view, elevation, geometry));
 
         let mut results_by_layer = crate::geometry::feature_index::QueryResults::default();
