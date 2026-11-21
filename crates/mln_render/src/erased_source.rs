@@ -8,9 +8,7 @@ use std::marker::PhantomData;
 
 use mln_style::Source;
 use mln_style::source_type::{ErasedStyleSourceType, SourceTypeEntry};
-use mln_util::error::Error;
 
-use crate::query::FeatureExtensionValue;
 use crate::source::{Cover, DataOrigin, LoadContext, NewTile, OriginUpdate, SourceType, Supply, TileLoad};
 use crate::tile::source_tiles::SourceTiles;
 use crate::tile::store::StoreContext;
@@ -57,13 +55,6 @@ pub(crate) trait ErasedOrigin {
     fn update_parameters_changed(&mut self, load: &mut dyn TileLoad, tile: &mut TileMut<'_>);
     fn retry(&mut self, load: &mut dyn TileLoad, tile: &mut TileMut<'_>);
     fn take_world_copy(&self, load: &mut dyn TileLoad, from: &dyn TileLoad) -> bool;
-    fn query_feature_extensions(
-        &self,
-        feature: &mln_util::feature::Feature,
-        extension: &str,
-        extension_field: &str,
-        args: Option<&feature::PropertyMap>,
-    ) -> Result<FeatureExtensionValue, Error>;
 }
 
 /// `load` as a load of `O`'s, which every tile of a source has.
@@ -121,15 +112,5 @@ impl<O: DataOrigin> ErasedOrigin for O {
             (Some(load), Some(from)) => DataOrigin::take_world_copy(self, load, from),
             _ => false,
         }
-    }
-
-    fn query_feature_extensions(
-        &self,
-        feature: &mln_util::feature::Feature,
-        extension: &str,
-        extension_field: &str,
-        args: Option<&feature::PropertyMap>,
-    ) -> Result<FeatureExtensionValue, Error> {
-        DataOrigin::query_feature_extensions(self, feature, extension, extension_field, args)
     }
 }

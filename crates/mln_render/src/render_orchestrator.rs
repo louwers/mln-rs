@@ -1403,24 +1403,6 @@ impl RenderOrchestrator {
         source.query_source_features(options, self.global_state.as_deref())
     }
 
-    /// Queries a feature extension of the source `source_id`; a null value
-    /// for a source the style doesn't have.
-    pub(crate) fn query_feature_extensions(
-        &self,
-        source_id: &str,
-        feature: &mln_util::feature::Feature,
-        extension: &str,
-        extension_field: &str,
-        args: Option<&feature::PropertyMap>,
-    ) -> Result<crate::query::FeatureExtensionValue, Error> {
-        match self.render_sources.get(source_id) {
-            Some(source) => {
-                source.query_feature_extensions(&self.tile_store, feature, extension, extension_field, args)
-            }
-            None => Ok(crate::query::FeatureExtensionValue::default()),
-        }
-    }
-
     pub(crate) fn dump_debug_logs(&self) {
         for source in self.render_sources.values() {
             source.dump_debug_logs();

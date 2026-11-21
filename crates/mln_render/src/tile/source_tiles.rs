@@ -32,7 +32,6 @@ use crate::gfx::context::Context;
 use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas;
 use crate::layer_drawing::ChangedBuckets;
 use crate::layout::tile_layout::LayoutParams;
-use crate::query::FeatureExtensionValue;
 use crate::source::Cover;
 use crate::tile::contents::Contents;
 use crate::tile::dem;
@@ -1493,20 +1492,6 @@ impl SourceTiles {
         let cover = origin.update(parts);
         self.info.origin = Some(origin);
         cover
-    }
-
-    /// [`DataOrigin::query_feature_extensions`](crate::source::DataOrigin::query_feature_extensions).
-    pub(crate) fn query_feature_extensions(
-        &self,
-        feature: &mln_util::feature::Feature,
-        extension: &str,
-        extension_field: &str,
-        args: Option<&feature::PropertyMap>,
-    ) -> Result<FeatureExtensionValue, Error> {
-        match &self.info.origin {
-            Some(origin) => origin.query_feature_extensions(feature, extension, extension_field, args),
-            None => Ok(FeatureExtensionValue::default()),
-        }
     }
 
     pub(crate) fn clear_all(&mut self, ctx: &mut StoreContext) {

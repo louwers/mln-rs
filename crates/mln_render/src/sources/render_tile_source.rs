@@ -24,7 +24,6 @@ use mln_style::Source;
 use mln_tile_id::OverscaledTileID;
 use mln_util::Color;
 use mln_util::constants::{EXTENT, TILE_SIZE};
-use mln_util::error::Error;
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecMap;
@@ -37,7 +36,6 @@ use crate::gfx::indexes::DrawIndexes;
 use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::layer_drawing::{DrawDepth, DrawList, DrawObjectsMut, FrameDraw, KeptDraw, LayerDraws};
 use crate::paint_parameters::PaintParameters;
-use crate::query::FeatureExtensionValue;
 use crate::render_source::{RenderSource, RenderSourceBase, RenderTileParameters, TileOrder};
 use crate::render_tile::RenderTile;
 use crate::tile::job::SourceKey;
@@ -486,20 +484,6 @@ impl RenderSource for RenderTileSource {
             TileOrder::ById => &self.order_by_id,
             TileOrder::ByY => &self.order_by_y,
         })
-    }
-
-    fn query_feature_extensions(
-        &self,
-        store: &TileStore,
-        feature: &mln_util::feature::Feature,
-        extension: &str,
-        extension_field: &str,
-        args: Option<&feature::PropertyMap>,
-    ) -> Result<FeatureExtensionValue, Error> {
-        match store.source(self.key) {
-            Some(source) => source.query_feature_extensions(feature, extension, extension_field, args),
-            None => Ok(FeatureExtensionValue::default()),
-        }
     }
 
     fn set_fast_pfor_enabled(&mut self, enable: bool) {
