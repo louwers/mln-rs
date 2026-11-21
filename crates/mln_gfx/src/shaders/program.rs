@@ -401,7 +401,8 @@ pub struct ProgramParameters {
     /// `DEVICE_PIXEL_RATIO`.
     pub pixel_ratio: f32,
     /// Whether draws show how often each pixel is drawn, which shaders
-    /// test as `OVERDRAW_INSPECTOR`.
+    /// test as `OVERDRAW_INSPECTOR`
+    /// ([`source`](crate::shaders::source#the-overdraw-inspector)).
     pub overdraw: bool,
 }
 

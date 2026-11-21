@@ -12,6 +12,15 @@
 //! block, buffer or texture itself, and reads a buffer or a texture by its
 //! name.
 //!
+//! # The overdraw inspector
+//!
+//! With the overdraw inspector on, the engine compiles every program with
+//! `OVERDRAW_INSPECTOR` defined, and a layer's draws into the frame blend
+//! with [`ColorMode::overdraw`](crate::color_mode::ColorMode::overdraw), which adds an eighth of the fragment's
+//! color to the pixel. A fragment stage writes opaque white where
+//! `OVERDRAW_INSPECTOR` is defined, so that each draw over a pixel counts
+//! alike, as the built-in layer types' do.
+//!
 //! # Properties
 //!
 //! A variant of a program reads each of its
