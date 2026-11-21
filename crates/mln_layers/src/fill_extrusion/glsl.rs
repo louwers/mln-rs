@@ -148,6 +148,17 @@ const FILL_EXTRUSION_SHADER_PRELUDE: &str = r"
 #define idFillExtrusionWallVertices             drawableUBOStartId + 5
 #define idFillExtrusionWallPaint                drawableUBOStartId + 6
 
+// The normal at the end of a fill extrusion wall from its outline vertex's
+// packed decimals_ed.x: the one the walls there share, whose angle from -pi
+// its bits 2 to 15 hold where bit 1 is set, or else `own`, the wall's.
+vec2 wall_normal(const uint bits, const vec2 own) {
+    if ((bits & 2u) == 0u) {
+        return own;
+    }
+    const float angle = float(bits >> 2u) * (6.283185307179586 / 16384.0) - 3.141592653589793;
+    return vec2(cos(angle), sin(angle));
+}
+
 ";
 
 const FILL_EXTRUSION_SHADER: Glsl = Glsl {

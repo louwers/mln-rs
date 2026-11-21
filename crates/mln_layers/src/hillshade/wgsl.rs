@@ -351,5 +351,11 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 }
 ",
     ),
-    prelude: None,
+    prelude: Some(
+        r"
+fn radians(degrees: f32) -> f32 {
+    return PI * degrees / 180.0;
+}
+",
+    ),
 };

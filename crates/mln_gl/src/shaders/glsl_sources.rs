@@ -456,22 +456,6 @@ vec2 unpack_float(const float packedValue) {
     return vec2(v0, packedIntValue - v0 * 256);
 }
 
-// The normal at the end of a fill extrusion wall from its outline vertex's
-// packed decimals_ed.x: the one the walls there share, whose angle from -pi
-// its bits 2 to 15 hold where bit 1 is set, or else `own`, the wall's.
-vec2 wall_normal(const float bits, const vec2 own) {
-    if (mod(floor(bits / 2.0), 2.0) == 0.0) {
-        return own;
-    }
-    float angle = floor(bits / 4.0) * (2.0 * PI / 16384.0) - PI;
-    return vec2(cos(angle), sin(angle));
-}
-
-vec2 unpack_opacity(const float packedOpacity) {
-    int intOpacity = int(packedOpacity) / 2;
-    return vec2(float(intOpacity) / 127.0, mod(packedOpacity, 2.0));
-}
-
 // To minimize the number of attributes needed, we encode a 4-component
 // color into a pair of floats (i.e. a vec2) as follows:
 // [ floor(color.r * 255) * 256 + color.g * 255,

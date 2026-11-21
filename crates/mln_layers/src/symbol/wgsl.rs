@@ -16,6 +16,29 @@ use mln_gfx::shaders::source::wgsl::{Attribute, Source, Texture, Wgsl};
 
 use super::programs;
 
+/// `unpack_opacity`, a symbol's fade opacity and whether it fades in, from
+/// the packed value of its vertex.
+macro_rules! unpack_opacity {
+    () => {
+        r"
+fn unpack_opacity(packedOpacity: f32) -> vec2<f32> {
+    let intOpacity = i32(packedOpacity) / 2;
+    return vec2<f32>(f32(intOpacity) / 127.0, glMod(packedOpacity, 2.0));
+}
+"
+    };
+}
+
+/// `SDF_PX`, the scale of the glyphs' signed distance fields: the pixels of
+/// distance per unit of their value.
+macro_rules! sdf_px {
+    () => {
+        r"
+const SDF_PX: f32 = 8.0;
+"
+    };
+}
+
 const SYMBOL_ICON_ATTRIBUTES: &[Attribute] = &[
     Attribute::new(3, ID_SYMBOL_POS_OFFSET_ATTRIBUTE),
     Attribute::new(4, ID_SYMBOL_DATA_ATTRIBUTE),
@@ -568,7 +591,8 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 }
 ",
     ),
-    prelude: Some(
+    prelude: Some(concat!(
+        unpack_opacity!(),
         r"
 // Symbol shader UBO indices
 const idGlobalPaintParamsUBO = 0u;
@@ -651,8 +675,8 @@ struct GlobalIndexUBO {
 };
 
 const c_offscreen_degenerate_triangle_location: f32 = -2.0;
-",
-    ),
+"
+    )),
 };
 
 const SYMBOL_SDF_SHADER: Wgsl = Wgsl {
@@ -929,7 +953,9 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 }
 ",
     ),
-    prelude: Some(
+    prelude: Some(concat!(
+        sdf_px!(),
+        unpack_opacity!(),
         r"
 // Symbol shader UBO indices
 const idGlobalPaintParamsUBO = 0u;
@@ -1012,8 +1038,8 @@ struct GlobalIndexUBO {
 };
 
 const c_offscreen_degenerate_triangle_location: f32 = -2.0;
-",
-    ),
+"
+    )),
 };
 
 const SYMBOL_TEXT_AND_ICON_SHADER: Wgsl = Wgsl {
@@ -1307,7 +1333,9 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 }
 ",
     ),
-    prelude: Some(
+    prelude: Some(concat!(
+        sdf_px!(),
+        unpack_opacity!(),
         r"
 // Symbol shader UBO indices
 const idGlobalPaintParamsUBO = 0u;
@@ -1390,6 +1418,6 @@ struct GlobalIndexUBO {
 };
 
 const c_offscreen_degenerate_triangle_location: f32 = -2.0;
-",
-    ),
+"
+    )),
 };

@@ -22,6 +22,28 @@ use mln_gfx::shaders::source::msl::{Attribute, Msl, Source, Texture};
 
 use super::programs;
 
+/// `unpack_opacity`, a symbol's fade opacity and whether it fades in, from
+/// the packed value of its vertex.
+macro_rules! unpack_opacity {
+    () => {
+        r"
+float2 unpack_opacity(const float packedOpacity) {
+    return float2(float(int(packedOpacity) / 2) / 127.0, glMod(packedOpacity, 2.0));
+}
+"
+    };
+}
+
+/// `SDF_PX`, the scale of the glyphs' signed distance fields: the pixels of
+/// distance per unit of their value.
+macro_rules! sdf_px {
+    () => {
+        r"
+#define SDF_PX 8.0
+"
+    };
+}
+
 const SYMBOL_UBO_COUNT: usize = SYMBOL_LAYER_UBO_COUNT;
 
 const COLLISION_BOX_ATTRIBUTES: &[Attribute] = &[
@@ -376,7 +398,9 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 const SYMBOL_ICON_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
+    prelude: concat!(
+        unpack_opacity!(),
+        r#"
 
 enum {
     idSymbolDrawableUBO = idDrawableReservedVertexOnlyUBO,
@@ -448,7 +472,8 @@ static_assert(sizeof(SymbolEvaluatedPropsUBO) == 6 * 16, "wrong size");
 
 #define c_offscreen_degenerate_triangle_location -2.0
 
-"#,
+"#
+    ),
     source: r"
 
 struct VertexStage {
@@ -639,7 +664,10 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 const SYMBOL_SDF_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
+    prelude: concat!(
+        sdf_px!(),
+        unpack_opacity!(),
+        r#"
 
 enum {
     idSymbolDrawableUBO = idDrawableReservedVertexOnlyUBO,
@@ -711,7 +739,8 @@ static_assert(sizeof(SymbolEvaluatedPropsUBO) == 6 * 16, "wrong size");
 
 #define c_offscreen_degenerate_triangle_location -2.0
 
-"#,
+"#
+    ),
     source: r"
 
 struct VertexStage {
@@ -980,7 +1009,10 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 const SYMBOL_TEXT_AND_ICON_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
+    prelude: concat!(
+        sdf_px!(),
+        unpack_opacity!(),
+        r#"
 
 enum {
     idSymbolDrawableUBO = idDrawableReservedVertexOnlyUBO,
@@ -1052,7 +1084,8 @@ static_assert(sizeof(SymbolEvaluatedPropsUBO) == 6 * 16, "wrong size");
 
 #define c_offscreen_degenerate_triangle_location -2.0
 
-"#,
+"#
+    ),
     source: r"
 
 #define SDF 1.0

@@ -537,7 +537,6 @@ pub(crate) const PRELUDE: Wgsl = Wgsl {
 // Constants
 const PI: f32 = 3.14159265358979323846;
 const LINE_NORMAL_SCALE: f32 = 1.0 / 63.0;  // 1.0 / (127 / 2)
-const SDF_PX: f32 = 8.0;
 
 // WebGPU equivalent of GLSL mod function
 fn glMod(x: f32, y: f32) -> f32 {
@@ -553,21 +552,11 @@ fn gl_mod(x: vec2<f32>, y: vec2<f32>) -> vec2<f32> {
     return glMod2v(x, y);
 }
 
-// Radians conversion
-fn radians(degrees: f32) -> f32 {
-    return PI * degrees / 180.0;
-}
-
 // Helper functions for unpacking data
 fn unpack_float(packedValue: f32) -> vec2<f32> {
     let packedIntValue = i32(packedValue);
     let v0 = packedIntValue / 256;
     return vec2<f32>(f32(v0), f32(packedIntValue - v0 * 256));
-}
-
-fn unpack_opacity(packedOpacity: f32) -> vec2<f32> {
-    let intOpacity = i32(packedOpacity) / 2;
-    return vec2<f32>(f32(intOpacity) / 127.0, glMod(packedOpacity, 2.0));
 }
 
 // Decode a color that has been packed into two floats

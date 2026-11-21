@@ -28,6 +28,19 @@ use mln_gfx::shaders::source::glsl::{Attribute, Glsl, Source, Texture};
 
 use super::programs;
 
+/// `unpack_opacity`, a symbol's fade opacity and whether it fades in, from
+/// the packed value of its vertex.
+macro_rules! unpack_opacity {
+    () => {
+        r"
+vec2 unpack_opacity(const float packedOpacity) {
+    int intOpacity = int(packedOpacity) / 2;
+    return vec2(float(intOpacity) / 127.0, mod(packedOpacity, 2.0));
+}
+"
+    };
+}
+
 const COLLISION_BOX_ATTRIBUTES: &[Attribute] = &[
     Attribute::new(0, Short2, ID_COLLISION_POS_VERTEX_ATTRIBUTE),
     Attribute::new(1, Short2, ID_COLLISION_ANCHOR_POS_VERTEX_ATTRIBUTE),
@@ -348,7 +361,8 @@ void main() {
 ",
 };
 
-const SYMBOL_SHADER_PRELUDE: &str = r"
+const SYMBOL_SHADER_PRELUDE: &str = concat!(
+    r"
 
 #define idSymbolDrawableUBO         idDrawableReservedVertexOnlyUBO
 #define idSymbolTilePropsUBO        idDrawableReservedFragmentOnlyUBO
@@ -356,7 +370,9 @@ const SYMBOL_SHADER_PRELUDE: &str = r"
 
 #define SDF_PX 8.0
 
-";
+",
+    unpack_opacity!()
+);
 
 const SYMBOL_ICON_SHADER: Glsl = Glsl {
     prelude: SYMBOL_SHADER_PRELUDE,

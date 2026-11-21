@@ -115,6 +115,9 @@ const LINE_GRADIENT_SDF_SHADER: Msl = Msl {
     fragment_main_function: r"fragmentMain",
     prelude: r#"
 
+// The attribute conveying progress along a line is scaled to [0, 2^15).
+#define MAX_LINE_DISTANCE 32767.0
+
 enum {
     idLineDrawableUBO = idDrawableReservedVertexOnlyUBO,
     idLineTilePropsUBO = idDrawableReservedFragmentOnlyUBO,
@@ -500,6 +503,9 @@ const LINE_GRADIENT_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
+
+// The attribute conveying progress along a line is scaled to [0, 2^15).
+#define MAX_LINE_DISTANCE 32767.0
 
 enum {
     idLineDrawableUBO = idDrawableReservedVertexOnlyUBO,

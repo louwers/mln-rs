@@ -114,6 +114,9 @@ const LINE_SHADE_PRELUDE: &str = r"
 #define idLineTilePropsUBO          idDrawableReservedFragmentOnlyUBO
 #define idLineEvaluatedPropsUBO     layerUBOStartId
 
+// The attribute conveying progress along a line is scaled to [0, 2^15).
+#define MAX_LINE_DISTANCE 32767.0
+
 ";
 
 const LINE_SHADER: Glsl = Glsl {
