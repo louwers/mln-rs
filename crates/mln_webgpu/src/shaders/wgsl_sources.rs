@@ -1,5 +1,5 @@
 //! The WGSL of the engine's shaders, and the prelude every shader compiles
-//! after, which started as MapLibre Native's.
+//! after.
 
 use mln_gfx::shaders::source::wgsl::Wgsl;
 

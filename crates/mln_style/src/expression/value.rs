@@ -19,12 +19,11 @@ use crate::expression::formatted::Formatted;
 use crate::expression::image::Image;
 use crate::expression::type_::Type;
 
-/// The object alternative of `expression::Value`.
-// C++ uses std::unordered_map, whose iteration order is libstdc++-hash
-// dependent; a VecMap iterates in key order.
+/// The object alternative of `expression::Value`, which iterates in key
+/// order.
 pub type ObjectType = mln_vec_map::VecMap<String, Value>;
 
-/// An expression value, with the variants in the C++ variant's order.
+/// An expression value.
 #[derive(Clone, Debug, Default, PartialEq, mln_wire::Wire)]
 pub enum Value {
     #[default]
@@ -73,14 +72,13 @@ impl Value {
 
     #[must_use]
     pub(crate) const fn is_safe_integer_i64(x: i64) -> bool {
-        // `-x` wraps for INT64_MIN as the C++ compiles.
+        // `i64::MIN` negates to itself, which as a `u64` is 2^63: not safe.
         (if x > 0 { x } else { x.wrapping_neg() }) as u64 <= Self::max_safe_integer()
     }
 
     #[must_use]
     pub(crate) fn is_safe_integer_f64(x: f64) -> bool {
-        // `static_cast<uint64_t>` of |x| >= 2^64 is UB in C++;
-        // `as` saturates.
+        // `as` saturates, so a magnitude of 2^64 or more stays unsafe.
         ((if x > 0.0 { x } else { -x }) as u64) <= Self::max_safe_integer()
     }
 
@@ -435,7 +433,6 @@ impl ValueConverter for Value {
 }
 
 impl ValueConverter for MbglValue {
-    // C++ has no expressionType() for mln::Value.
     fn expression_type() -> Type {
         Type::Value
     }

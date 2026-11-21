@@ -1,20 +1,15 @@
-// Test support for the ported test/map and test/api gtests (gtests-core).
+// Shared helpers of the headless map tests:
+// - `check_image` / `get_image_diff`: pixelmatch against
+//   `<base>/expected.png`; actual and diff images go to target/tmp/<base>/,
+//   never next to the fixture;
+// - `StubMapObserver`, which gets the map's events;
+// - `FakeFileSource`, a file source whose answers the test gives;
+// - `FixtureLog`, the log of the test's thread (tests run on parallel
+//   threads of one process);
+// - `MapTest`, a map over a file source, and the frontend that renders it.
 //
-// Ports, for the tests in this directory:
-// - test/src/mln/test/util.cpp: `checkImage` / `getImageDiff` (pixelmatch
-//   against `<base>/expected.png`; actual and diff images go to
-//   target/tmp/<base>/, never next to the fixture);
-// - test/include/mln/test/stub_map_observer.hpp (`StubMapObserver`, which
-//   gets the map's events as C++ observers get the calls);
-// - test/include/mln/test/fake_file_source.hpp (`FakeFileSource`);
-// - test/include/mln/test/fixture_log_observer.hpp (`FixtureLog`, per
-//   thread: Rust runs tests on parallel threads of one process);
-// - the `MapTest` fixture of test/map/map.test.cpp (C++ `MapAdapter` is
-//   `MapCore::new`).
-//
-// Fixtures are read from the copy of the C++ repository's files in
-// testdata/; paths are written as in C++, relative to the maplibre-native
-// root ("test/fixtures/api/empty.json").
+// Fixtures are read from testdata/, by paths relative to it
+// ("test/fixtures/api/empty.json").
 
 #![expect(dead_code, reason = "each test binary uses some of the shared helpers")]
 

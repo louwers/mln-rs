@@ -1,14 +1,8 @@
 // The GLSL of the engine's shaders, and the preludes every shader compiles
-// after: the C++ core's, copied from the raw string literals of
-//   include/mln/shaders/vulkan/clipping_mask.hpp
-//   include/mln/shaders/vulkan/common.hpp
-//   include/mln/shaders/vulkan/globe_depth.hpp
-//   include/mln/shaders/vulkan/sky.hpp
-// with the port's changes, so that it reads the vertices and UBOs its
-// renderer makes, and compiles with naga's GLSL front end:
+// after. They read the vertices and uniform blocks the renderer makes, and
+// compile with naga's GLSL front end:
 // - The buffers bind where `layout` puts the renderer's packed ids, from
-//   binding 0 for a drawable's uniform buffers. There is no
-//   `GlobalPlatformParamsUBO`.
+//   binding 0 for a drawable's uniform buffers.
 // - A texture and its sampler are two bindings, `<name>_texture` and
 //   `<name>_sampler`, combined where they are sampled.
 // - Atlas positions go through `atlas_pos`.

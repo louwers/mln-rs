@@ -112,8 +112,6 @@ pub struct MapCore {
 }
 
 impl MapCore {
-    // gtests-core: the C++ tests' `MapAdapter` (test/include/mln/test/
-    // map_adapter.hpp): a map over a given file source.
     /// A map whose resources come from `file_source` and whose style parses
     /// against `registry`, on `pool`.
     ///
@@ -1086,8 +1084,6 @@ impl MapCore {
         Ok(())
     }
 
-    // gtests-core: cameraForLatLngBounds, cameraForLatLngs,
-    // latLngBoundsForCameraUnwrapped (test/map/map.test.cpp).
     /// The camera that fits `bounds` in the view, inset by `padding`, at
     /// `bearing` and `pitch` (the current ones for `None`). Fails with
     /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a center that has no
@@ -1316,7 +1312,6 @@ impl MapCore {
         }
     }
 
-    // gtests-core: projection and prefetch zoom delta (test/map, test/api).
     // MARK: - Projection
 
     #[must_use]
@@ -1472,8 +1467,6 @@ fn changed_sources(before: &Style, after: &Style) -> Vec<String> {
         .collect()
 }
 
-// gtests-core: the free function `cameraForLatLngs(latLngs, transform,
-// padding)` of map.cpp (Map::cameraForLatLngs and MapProjection use it).
 pub(crate) fn camera_for_lat_lngs(
     lat_lngs: &[LatLng],
     transform: &Transform,

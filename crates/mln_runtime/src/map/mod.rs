@@ -8,9 +8,8 @@ mod feature_state;
 mod map_core;
 mod map_event;
 mod map_options;
-mod map_snapshot;
-// gtests-core: MapProjection (test/map/map.test.cpp).
 mod map_projection;
+mod map_snapshot;
 mod rendering_stats_view;
 mod style_loader;
 pub mod transform;

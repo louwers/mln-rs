@@ -1,6 +1,5 @@
 //! The MSL of the engine's shaders, and the prelude every shader compiles
-//! after, which started as MapLibre Native's, and reads the vertices and UBOs
-//! the renderer makes.
+//! after. They read the vertices and uniform blocks the renderer makes.
 
 use mln_gfx::shaders::source::msl::Msl;
 
@@ -11,7 +10,7 @@ using namespace metal;
 
 // OpenGL `mod` is `x-y*floor(x/y)` where `floor` rounds down.
 // Metal `fmod` is `x-y*trunc(x/y)` where `trunc` rounds toward zero.
-// This function provides GL-compatible modulus for porting GLSL shaders.
+// glMod is GLSL's `mod`, for the shaders that rely on it.
 template <typename T1, typename T2>
 inline auto glMod(T1 x, T2 y) { return x - y * metal::floor(x/y); }
 

@@ -1,6 +1,3 @@
-// Variant order and discriminants follow the C++ enums.
-// `TextVariableAnchorType` is an alias of `SymbolAnchorType` as in C++.
-
 use std::str::FromStr;
 
 use mln_util::ParseEnumError;

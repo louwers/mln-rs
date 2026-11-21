@@ -1,23 +1,14 @@
-// The GLSL of the engine's shaders, and the prelude every shader compiles
-// after: the C++ core's, copied from the raw string literals of
-//   include/mln/shaders/gl/atmosphere.hpp
-//   include/mln/shaders/gl/clipping_mask.hpp
-//   include/mln/shaders/gl/globe_depth.hpp
-//   include/mln/shaders/gl/prelude.hpp
-//   include/mln/shaders/gl/shader_group_gl.hpp
-//   include/mln/shaders/gl/shader_info.hpp
-//   include/mln/shaders/gl/shader_program_gl.hpp
-//   include/mln/shaders/gl/sky.hpp
-// with the port's changes, so that it reads the vertices its renderer makes
-// and draws what its WGSL does:
+// The GLSL ES of the engine's shaders, and the prelude every shader compiles
+// after. They read the vertices the renderer makes and draw what the WGSL
+// does:
 // - `atlas_pos` (the fragment prelude) places the samples of an atlas image,
 //   in the pattern and symbol shaders.
-// - ClippingMaskProgram projects through the projection block as the other
+// - The clipping mask projects through the projection block as the other
 //   shaders do, and has a globe variant.
 // - Fragment shaders declare the uniform blocks they share with their vertex
 //   shader first, in the vertex shader's order, which SwiftShader needs
-//   (maplibre/maplibre-native#4625, ffi patch 0011).
-// The layer types of mln_layers have their GLSL there.
+//   (maplibre/maplibre-native#4625).
+// The layer types of mln_layers have their GLSL ES there.
 
 use mln_gfx::shaders::source::glsl_es::Glsl;
 

@@ -2,11 +2,8 @@
 //! boxes and circles, in GLSL, which `mln_glsl` parses for `mln_vulkan` and
 //! `mln_d3d12`.
 //!
-//! They are the C++ core's, copied from the raw string literals of
-//! `include/mln/shaders/vulkan/{collision,symbol}.hpp`, with the port's
-//! changes:
-//! - Symbols read vertex attributes, with the port's `tex_origin` and
-//!   `height_offset`, where C++ reads per-instance storage buffers. The
+//! - Symbols read their values from vertex attributes, `tex_origin` and
+//!   `height_offset` among them, not from per-instance storage buffers. The
 //!   collision boxes read `height_offset` too.
 //! - On the globe, a symbol vertex stage puts a screen-aligned label whose
 //!   anchor is behind the horizon outside the clip volume, unless the label
