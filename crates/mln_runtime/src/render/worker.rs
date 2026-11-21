@@ -314,6 +314,12 @@ fn invalidate(events: &RendererEvents) -> Waker {
     Arc::new(move || events.push(RendererEvent::Invalidate))
 }
 
+/// Whether the map fails the still image that waits on `event`: a resource
+/// that failed to load, or a draw that failed.
+fn fails_still_image(event: &RendererEvent) -> bool {
+    matches!(event, RendererEvent::ResourceError(_) | RendererEvent::RenderError(_))
+}
+
 /// In the browser, puts the renderer's tile workers in the instance's Web
 /// Workers, which lay out with `registry`. Elsewhere they stay on the
 /// background threads.
@@ -431,8 +437,9 @@ pub(crate) struct Worker {
     /// The `still_image_request_id` of the last still image that the
     /// session rendered.
     still_rendered: u64,
-    /// The `still_image_request_id` of the still image that a resource error
-    /// on its way to the map fails. The session draws no frame for it.
+    /// The `still_image_request_id` of the still image that a resource or
+    /// render error on its way to the map fails
+    /// ([`fails_still_image`]). The session draws no frame for it.
     still_failing: Cell<u64>,
     /// Whether the target holds a frame since it attached or resized.
     has_frame: bool,
@@ -673,9 +680,9 @@ impl Worker {
 
     fn forward(&self, events: Vec<RendererEvent>) {
         // The map fails the still image that waits when it takes a resource
-        // error, so a frame for that image drawn before the map says so would
-        // show a failed image.
-        if events.iter().any(|event| matches!(event, RendererEvent::ResourceError(_))) {
+        // or render error, so a frame for that image drawn before the map
+        // says so would show a failed image.
+        if events.iter().any(fails_still_image) {
             self.still_failing.set(self.pending_still_image());
         }
         if let Some(map_events) = &self.map_events {
@@ -932,9 +939,10 @@ impl Worker {
             RingPick::Slot(slot) => Some(slot),
         };
         let frame = self.render(None, &update, slot);
-        // A tile that failed during the frame counts as loaded, so the frame
-        // drew the map without it, but the map fails the image on the error.
-        let fails = frame.events.iter().any(|event| matches!(event, RendererEvent::ResourceError(_)));
+        // A tile that failed during the frame counts as loaded, and a draw
+        // that failed is left out, so the frame drew the map without them,
+        // but the map fails the image on the error.
+        let fails = frame.events.iter().any(fails_still_image);
         match frame.result.disposition {
             FrameDisposition::Rendered if fails => {
                 self.still_failing.set(pending);
