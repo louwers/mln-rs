@@ -21,7 +21,7 @@ pub fn compose(program: &Program, glsl: &Glsl, stage: Stage, defines: &str) -> R
     let reserved: String = RESERVED_BINDINGS
         .iter()
         .filter(|(name, _)| named(name))
-        .map(|(_, declaration)| format!("{declaration}\n"))
+        .flat_map(|(_, declaration)| [declaration, "\n"])
         .collect();
     Ok(crate::front_end::compose(stage, defines, &engine, &[&reserved, &own, glsl.prelude].concat(), &source))
 }
