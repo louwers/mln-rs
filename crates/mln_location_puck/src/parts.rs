@@ -219,11 +219,13 @@ mod tests {
 
     #[test]
     fn the_parts_draw_from_the_bottom_up_and_only_with_a_size() {
-        let mut paint = paint::PossiblyEvaluated::default();
-        paint.puck_radius = Evaluated::Constant(8.0);
-        paint.puck_color = Evaluated::Constant(Color::black());
-        paint.bearing_radius = Evaluated::Constant(18.0);
-        paint.bearing_arrow_color = Evaluated::Constant(Color::white());
+        let mut paint = paint::PossiblyEvaluated {
+            puck_radius: Evaluated::Constant(8.0),
+            puck_color: Evaluated::Constant(Color::black()),
+            bearing_radius: Evaluated::Constant(18.0),
+            bearing_arrow_color: Evaluated::Constant(Color::white()),
+            ..Default::default()
+        };
         assert_eq!(vec![(Shape::Disc, true)], shapes(&paint));
 
         paint.bearing_visible = Evaluated::Constant(true);
