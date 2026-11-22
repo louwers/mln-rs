@@ -332,6 +332,17 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
         self.statistics.max()
     }
 
+    /// The largest value of the property: the largest the binder wrote, or
+    /// else `paint`'s, the layer's value, where it is the same for every
+    /// feature; `None` where neither has one.
+    #[must_use]
+    pub fn max_or(&self, paint: &Evaluated<T>) -> Option<f32>
+    where
+        T: Into<f32> + Clone,
+    {
+        self.max().or_else(|| paint.constant().map(Into::into))
+    }
+
     /// Where the binder's values are in each vertex of its set's paint
     /// values, in bytes ([`PaintVertices::stride`]), for a program that
     /// reads them itself; `None` for a value the same for every feature.

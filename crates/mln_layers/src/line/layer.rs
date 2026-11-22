@@ -224,12 +224,9 @@ impl Layer for LineLayer {
     fn query_radius(&self, layer: &LayerValues<Line>, laid: LayerBucket<'_, Line, LineBucket>, _camera: &View) -> f32 {
         type Defaults = LinePaintProperties::Defaults;
         let (paint, binders) = (&layer.evaluated.paint, laid.binders(&laid.bucket.binders));
-        // A data-driven value's largest over the bucket's features, or else
-        // its constant value or default.
-        let offset = binders.line_offset.max().or(paint.line_offset.constant()).unwrap_or(Defaults::line_offset());
-        let width = binders.line_width.max().or(paint.line_width.constant()).unwrap_or(Defaults::line_width());
-        let gap = binders.line_gap_width.max().or(paint.line_gap_width.constant());
-        let gap = gap.unwrap_or(Defaults::line_gap_width());
+        let offset = binders.line_offset.max_or(&paint.line_offset).unwrap_or(Defaults::line_offset());
+        let width = binders.line_width.max_or(&paint.line_width).unwrap_or(Defaults::line_width());
+        let gap = binders.line_gap_width.max_or(&paint.line_gap_width).unwrap_or(Defaults::line_gap_width());
         let width = if gap == 0.0 { width } else { gap + 2.0 * width };
         width / 2.0 + offset.abs() + transform(paint).translation_length()
     }

@@ -80,10 +80,8 @@ impl Layer for CircleLayer {
     ) -> f32 {
         let paint = &layer.evaluated.paint;
         let binders = laid.binders(&laid.bucket.binders);
-        // A data-driven value's largest over the bucket's features, or else
-        // its constant value or default.
-        let radius = binders.circle_radius.max().or(paint.circle_radius.constant());
-        let stroke = binders.circle_stroke_width.max().or(paint.circle_stroke_width.constant());
+        let radius = binders.circle_radius.max_or(&paint.circle_radius);
+        let stroke = binders.circle_stroke_width.max_or(&paint.circle_stroke_width);
         radius.unwrap_or(CirclePaintProperties::Defaults::circle_radius())
             + stroke.unwrap_or(CirclePaintProperties::Defaults::circle_stroke_width())
             + transform(paint).translation_length()
