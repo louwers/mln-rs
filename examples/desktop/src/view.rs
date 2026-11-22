@@ -657,6 +657,7 @@ impl View {
                 self.style_info = info;
                 self.ui_repaint_at = Some(Instant::now());
             }
+            Message::CacheReset => self.clear_renderer(),
         }
     }
 
@@ -896,14 +897,31 @@ impl View {
         Ok(())
     }
 
-    /// Empties the cache database.
-    fn reset_cache(&self) {
+    /// Empties the cache database, then the renderer's tiles, glyphs and
+    /// images, so that the map loads them again from the network.
+    fn reset_cache(&mut self) {
+        let inbox = Arc::clone(&self.inbox);
         match self.runtime.run_cache_database_operation(CacheDatabaseOperation::Reset) {
-            Ok(reset) => reset.on_complete(|result| match result {
-                Ok(()) => Log::info(Event::Database, "Reset the cache"),
-                Err(e) => Log::error(Event::Database, format!("Failed to reset cache: {e}")),
+            Ok(reset) => reset.on_complete(move |result| {
+                match result {
+                    Ok(()) => Log::info(Event::Database, "Reset the cache"),
+                    Err(e) => Log::error(Event::Database, format!("Failed to reset cache: {e}")),
+                }
+                inbox.send(Message::CacheReset);
             }),
-            Err(e) => Log::warning(Event::Database, format!("There is no cache database to reset: {e}")),
+            Err(e) => {
+                Log::warning(Event::Database, format!("There is no cache database to reset: {e}"));
+                self.clear_renderer();
+            }
+        }
+    }
+
+    /// Drops what the renderer has loaded, so that the next frame loads it
+    /// again.
+    fn clear_renderer(&mut self) {
+        if let Some(window) = &self.window {
+            log_failure(window.session().clear_data());
+            self.dirty = true;
         }
     }
 

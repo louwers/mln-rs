@@ -39,7 +39,7 @@ pub(crate) enum Action {
     SetGlobe(bool),
     /// Let drags and zooms on the globe turn the bearing with the planet.
     SetFreeBearing(bool),
-    /// Empty the cache database.
+    /// Empty the cache database and what the renderer has loaded.
     ResetCache,
     /// Render with this backend from the next frame on.
     SetBackend(Kind),
@@ -362,7 +362,7 @@ fn about_panel(ctx: &egui::Context, palette: &Palette, shown: &Shown<'_>, action
                 actions.push(Action::SetFreeBearing(free_bearing));
             }
             let reset = egui::Button::new("Reset the cache").stroke(Stroke::new(1.0, palette.line));
-            if ui.add(reset).on_hover_text("Empty the cache database").clicked() {
+            if ui.add(reset).on_hover_text("Empty the cache database and load the map again").clicked() {
                 actions.push(Action::ResetCache);
             }
             ui.add_space(8.0);
