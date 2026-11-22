@@ -689,7 +689,7 @@ impl RenderTerrain {
 
     /// Makes the draws of the frame of the last update, a set for each stack
     /// of the drapes the encode began ([`begin_drapes`]), which read the DEM
-    /// textures of the frame's ground, `ground` ([`prepare_ground`]), sample
+    /// textures of the frame's ground ([`prepare_ground`]), sample
     /// their stack's drapes and fog as the frame's `sky` says; and, where a
     /// layer of the frame `hides` behind the ground, the draws of the
     /// ground's depth, with its texture at the frame's logical pixels, which
@@ -704,11 +704,11 @@ impl RenderTerrain {
         &mut self,
         gpu: &mut dyn Gpu,
         parameters: &mut PaintParameters<'_>,
-        ground: Option<&GroundBindings>,
         sky: Option<&EvaluatedSky>,
         hides: bool,
     ) {
-        let cover = self.cover.as_ref().zip(ground);
+        let ground = parameters.ground.clone();
+        let cover = self.cover.as_ref().zip(ground.as_deref());
         self.draws.update(gpu, parameters, cover, self.surface, sky, &self.drapes, hides);
         // The depth keeps its texture, and the draws that bind it their
         // bindings, while the frame's size stays.
