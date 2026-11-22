@@ -1,7 +1,8 @@
 use mln_gfx::gpu::conformance::{
     clip_mask_and_background, custom_layers, depth_only, drawn_vertex_texels, foreign_ids, ground_depth,
-    imported_textures, instanced_walls, invalid_calls, mipmapped_targets, pulled_walls, readbacks, resources_in_use,
-    terrain_heights, topologies, transparent_replace, vertex_layouts, wall_quads, written_vertex_texels,
+    imported_textures, instanced_walls, invalid_calls, mipmapped_targets, mipmapped_targets_of, pulled_walls,
+    readbacks, resources_in_use, terrain_heights, topologies, transparent_replace, vertex_layouts, wall_quads,
+    written_vertex_texels,
 };
 use mln_gfx::gpu::{Gpu, TextureDesc, TextureFormat, TextureRegion, TextureUsage};
 use mln_util::size::Size;
@@ -72,6 +73,14 @@ fn ground_depth_through_gpu() {
 fn mipmapped_targets_through_gpu() {
     let device = Device::new(None).expect("WebGPU device");
     mipmapped_targets(&mut WebGpu::new(&device)).expect("the frames");
+}
+
+/// The mips of a format that shaders can't write, which a compute pass
+/// can't make: a pass draws each level.
+#[test]
+fn mipmapped_targets_of_a_format_shaders_cannot_write_through_gpu() {
+    let device = Device::new(None).expect("WebGPU device");
+    mipmapped_targets_of(&mut WebGpu::new(&device), TextureFormat::Bgra8Unorm).expect("the frames");
 }
 
 #[test]

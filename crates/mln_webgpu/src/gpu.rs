@@ -63,6 +63,9 @@ struct Texture {
     /// Of a texture with mips, a view of each level, which passes draw into
     /// level 0 of.
     levels: Vec<wgpu::TextureView>,
+    /// Of a texture whose mips a compute pass writes, what the write of each
+    /// level binds, made when its mips are first written.
+    mip_groups: Vec<wgpu::BindGroup>,
 }
 
 impl Texture {
@@ -268,7 +271,7 @@ impl WebGpu {
     /// reference.
     pub fn import_texture(&mut self, texture: &wgpu::Texture) -> TextureId {
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        self.textures.insert(Texture { texture: texture.clone(), view, levels: Vec::new() })
+        self.textures.insert(Texture { texture: texture.clone(), view, levels: Vec::new(), mip_groups: Vec::new() })
     }
 
     /// The wgpu texture of `texture`.
@@ -679,6 +682,11 @@ impl Gpu for WebGpu {
             usage |= wgpu::TextureUsages::COPY_SRC;
         }
         let format = texture_format(desc.format);
+        // A compute pass writes the mips of a texture that shaders can write
+        // (`generate_mipmaps`).
+        if desc.mipmapped && desc.usage.render_target && format == wgpu::TextureFormat::Rgba8Unorm {
+            usage |= wgpu::TextureUsages::STORAGE_BINDING;
+        }
         let required = format.required_features();
         if !self.device.device().features().contains(required) {
             return Err(GpuError::Unsupported(format!("{:?} textures need {required:?}", desc.format)));
@@ -706,7 +714,7 @@ impl Gpu for WebGpu {
         } else {
             Vec::new()
         };
-        Ok(self.textures.insert(Texture { texture, view, levels }))
+        Ok(self.textures.insert(Texture { texture, view, levels, mip_groups: Vec::new() }))
     }
 
     fn write_texture(&mut self, texture: TextureId, region: TextureRegion, data: &[u8]) -> Result<(), GpuError> {
@@ -741,7 +749,7 @@ impl Gpu for WebGpu {
         if self.pass.is_some() {
             return Err(Self::open_pass("generating mips"));
         }
-        let texture = self.textures.get(texture).ok_or(GpuError::UnknownId("texture"))?;
+        let texture = self.textures.get_mut(texture).ok_or(GpuError::UnknownId("texture"))?;
         if texture.levels.is_empty() {
             return Err(GpuError::Invalid("generating the mips of a texture without them".to_owned()));
         }
@@ -750,6 +758,19 @@ impl Gpu for WebGpu {
             device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("frame") })
         });
         let mipmapper = self.mipmapper.get_or_insert_with(|| Mipmapper::new(device));
+        if texture.texture.usage().contains(wgpu::TextureUsages::STORAGE_BINDING) {
+            let size = texture.texture.size();
+            mipmapper.generate_in_compute(
+                device,
+                encoder,
+                size,
+                &texture.levels,
+                &mut texture.mip_groups,
+                #[cfg(feature = "bench")]
+                self.queries.as_mut(),
+            );
+            return Ok(());
+        }
         mipmapper.generate(
             device,
             encoder,

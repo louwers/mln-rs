@@ -635,9 +635,24 @@ fn check_vertex_texels(pixels: &[u8], texels: [[u8; 4]; 4]) {
 ///
 /// Where a check doesn't hold.
 pub fn mipmapped_targets(gpu: &mut impl Gpu) -> Result<(), GpuError> {
-    let mipmapped = columns(gpu, true)?;
+    mipmapped_targets_of(gpu, TextureFormat::Rgba8Unorm)
+}
+
+/// [`mipmapped_targets`] with textures of `format`, `Rgba8Unorm` or
+/// `Bgra8Unorm`, for a backend that makes the mips of one format otherwise
+/// than those of another.
+///
+/// # Errors
+///
+/// Returns the error of a call that should succeed.
+///
+/// # Panics
+///
+/// Where a check doesn't hold.
+pub fn mipmapped_targets_of(gpu: &mut impl Gpu, format: TextureFormat) -> Result<(), GpuError> {
+    let mipmapped = columns(gpu, true, format)?;
     gpu.generate_mipmaps(mipmapped)?;
-    let plain = columns(gpu, false)?;
+    let plain = columns(gpu, false, format)?;
     assert!(invalid(&gpu.generate_mipmaps(plain)), "the mips of a texture without them");
 
     let trilinear = SamplerState {
@@ -658,33 +673,36 @@ pub fn mipmapped_targets(gpu: &mut impl Gpu) -> Result<(), GpuError> {
 
     let size = Size::new(4, 4);
     let level = read_texels(gpu, mipmapped, TextureRegion::whole(size))?;
+    // The texture's own bytes, blue first in a BGRA format.
+    let stored = |[r, g, b, a]: [u8; 4]| if format == TextureFormat::Bgra8Unorm { [b, g, r, a] } else { [r, g, b, a] };
     for (index, pixel) in level.chunks(4).enumerate() {
-        let expected = if index % 4 == 0 { [255, 0, 0, 255] } else { blue };
+        let expected = stored(if index % 4 == 0 { [255, 0, 0, 255] } else { blue });
         assert_eq!(pixel, expected, "texel {index} of level 0");
     }
     Ok(())
 }
 
-/// A 4×4 texture, with mips if `mipmapped`, that a pass clears to blue and
-/// draws red into the left column of. (A backend may store what a pass
-/// draws bottom row first, so the rows are alike.)
-fn columns(gpu: &mut impl Gpu, mipmapped: bool) -> Result<TextureId, GpuError> {
+/// A 4×4 texture of `format`, with mips if `mipmapped`, that a pass clears
+/// to blue and draws red into the left column of. (A backend may store what
+/// a pass draws bottom row first, so the rows are alike.)
+fn columns(gpu: &mut impl Gpu, mipmapped: bool, format: TextureFormat) -> Result<TextureId, GpuError> {
     let size = Size::new(4, 4);
     let texture = gpu.create_texture(&TextureDesc {
         label: "columns",
         size,
-        format: TextureFormat::Rgba8Unorm,
+        format,
         usage: TextureUsage { sampled: true, render_target: true, copy_src: true },
         mipmapped,
     })?;
     let red = solid(gpu, TextureFormat::Rgba8Unorm, [1.0, 0.0, 0.0, 1.0])?;
+    let pipeline = gpu.create_pipeline(&background(red.shader, TargetFormats { color: Some(format), ..RGBA8 }))?;
     gpu.begin_pass(&PassDesc {
         label: "columns",
         color: Some(ColorAttachment { texture, load: LoadOp::Clear(Color::new_unchecked(0.0, 0.0, 1.0, 1.0)) }),
         depth_stencil: None,
     })?;
     let scissor = Scissor { x: 0, y: 0, width: 1, height: size.height };
-    gpu.draw(&Draw { dynamic: DynamicState { scissor, ..dynamic() }, ..red.draw(red.pipeline) })?;
+    gpu.draw(&Draw { dynamic: DynamicState { scissor, ..dynamic() }, ..red.draw(pipeline) })?;
     gpu.end_pass()?;
     Ok(texture)
 }
