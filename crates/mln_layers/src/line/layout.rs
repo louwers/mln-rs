@@ -91,7 +91,7 @@ impl Layout<Line> for LineLayout {
             }
             cx.index(*i, &geometry);
         }
-        Ok(Some(bucket))
+        Ok((!bucket.triangles.is_empty()).then_some(bucket))
     }
 }
 

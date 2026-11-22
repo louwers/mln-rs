@@ -55,7 +55,7 @@ impl Layout<Fill> for FillLayout {
             cx.index(*i, &geometry);
         }
         bucket.sdf = sdf.layers;
-        Ok(Some(bucket))
+        Ok((!bucket.triangles.is_empty() || !bucket.lines.is_empty()).then_some(bucket))
     }
 }
 
