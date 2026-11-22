@@ -201,8 +201,9 @@ regex = { version = "1.13.1" }
 # values behind their `Arc`s).
 serde = { version = "1.0.229", features = ["derive", "rc"] }
 # The same engine as the C++ core's vendored SQLite, built from source like it
-# where the platform has none (crates/mln_storage).
-rusqlite = ">=0.39.0, <0.42.0"
+# where the platform has none (crates/mln_storage). A range, because an app
+# links only one sqlite3 and picks the rusqlite version for all its crates.
+rusqlite = ">=0.39.0, <0.44"
 # preserve_order: objects keep their members in document order, which the
 # conversions of serde_json values (the C API's filters and expressions) and
 # the order of their expression errors rely on.
