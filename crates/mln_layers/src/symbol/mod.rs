@@ -9,13 +9,14 @@
 //! ([`placement::SymbolPlacement`]) places the frame's symbols on the
 //! engine's schedule, gives them ids that hold across tiles of different
 //! zooms, and fades them, and the layer draws them where placement put them
-//! (`projection`, `render_layer`).
+//! (`projection`, [`SymbolLayer`]).
 
 mod anchor;
 pub(crate) mod bucket;
 mod collision_feature;
 pub(crate) mod format_section_override;
 pub(crate) mod instance;
+mod layer;
 pub(crate) mod layout;
 pub mod placement;
 mod pool;
@@ -27,10 +28,11 @@ mod glsl;
 mod glsl_es;
 mod msl;
 mod quads;
-pub(crate) mod render_layer;
 pub mod ubo;
 mod wgsl;
 
+pub use layer::SymbolLayer;
+use mln_render::{RegisterError, RegistryBuilder};
 use mln_style::layer::FontStack;
 use mln_style::layer_type::{LayerStyle, LayerTypeInfo, SourceKind, StyleLayerType};
 use mln_style::property_table::{PropertyTable, PropertyVisitor};
@@ -42,8 +44,14 @@ pub use properties::{SymbolLayoutProperties, SymbolPaintProperties};
 
 use self::format_section_override::SymbolLayerPaintPropertyOverrides;
 
-/// The `symbol` layer type.
+/// The `symbol` layer type's style half.
 pub struct Symbol;
+
+/// Adds the `symbol` layer type, whose layers place with
+/// [`placement::SymbolPlacement`].
+pub fn register(builder: &mut RegistryBuilder) -> Result<(), RegisterError> {
+    mln_render::placement::register::<SymbolLayer, placement::SymbolPlacement>(builder)
+}
 
 impl StyleLayerType for Symbol {
     const INFO: LayerTypeInfo = LayerTypeInfo { name: "symbol", source: SourceKind::Geometry, from_json: true };
@@ -51,7 +59,7 @@ impl StyleLayerType for Symbol {
 
     type LayoutProperties = SymbolLayoutProperties::Unevaluated;
     type PaintProperties = SymbolPaintProperties::Transitionable;
-    type Extra = ();
+    type Data = ();
 
     fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(slot: usize, visitor: V) -> Option<V::Output> {
         properties::visit(slot, visitor)

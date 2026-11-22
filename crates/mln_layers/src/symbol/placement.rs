@@ -21,11 +21,9 @@ use std::sync::Arc;
 
 use glam::DMat4;
 use mln_map_types::{MapDebugOptions, MapMode, ProjectionData, View};
-use mln_render::draw::{BucketChanges, ChangedBuckets};
-use mln_render::layer::{FeatureIndex, FrameTile};
 use mln_render::placement::{
-    Aabb, BucketKey, CollisionGroups, IndexedFeature, Placed, PlacementBuckets, PlacementContext, PlacementPass,
-    PlacementQuery, PlacingLayer, Prepared, Shape,
+    Aabb, BucketKey, CollisionGroups, FeatureIndex, IndexedFeature, Placed, PlacementBuckets, PlacementContext,
+    PlacementPass, PlacementQuery, PlacingLayer, PlacingTile, Prepared, Shape,
 };
 use mln_render::{Renderer, UpdateParameters};
 use mln_style::TransitionOptions;
@@ -37,8 +35,8 @@ use mln_vec_map::VecSet;
 
 use self::context::{BucketContext, BucketOptions};
 use self::tile::TilePlacementState;
-use crate::symbol::Symbol;
-use crate::symbol::bucket::SortKeyRange;
+use crate::symbol::SymbolLayer;
+use crate::symbol::bucket::{SortKeyRange, SymbolBucket};
 use crate::symbol::collision_feature::IndexedSubfeature;
 use crate::symbol::instance::SymbolInstance;
 use crate::symbol::placement::collision_index::CollisionIndex;
@@ -58,8 +56,7 @@ impl Default for SymbolTranslate {
     }
 }
 
-/// What placement reads of the render tile of a symbol bucket, as the
-/// frame's update that collected the bucket's placement data found it.
+/// What placement reads of the tile of a symbol bucket.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct PlacedTile {
     pub(crate) id: UnwrappedTileID,
@@ -73,13 +70,13 @@ pub(crate) struct PlacedTile {
 impl PlacedTile {
     /// What placement reads of `tile`.
     #[must_use]
-    pub(crate) fn of(tile: FrameTile<'_, Symbol>) -> PlacedTile {
+    pub(crate) fn of(tile: &PlacingTile) -> PlacedTile {
         PlacedTile {
-            id: tile.unwrapped_id(),
-            overscaled_id: tile.id(),
-            hold_for_fade: tile.held_for_fade(),
-            projection: tile.projection(),
-            matrix: tile.matrix(),
+            id: tile.id,
+            overscaled_id: tile.overscaled_id,
+            hold_for_fade: tile.held_for_fade,
+            projection: tile.projection,
+            matrix: tile.projection.main_matrix,
         }
     }
 }
@@ -121,18 +118,82 @@ impl PartialEq for BucketPlacementData {
     }
 }
 
+/// The buckets of one of the frame's symbol layers.
+pub(crate) struct LayerBuckets {
+    pub(crate) id: String,
+    /// The buckets the layer places, as their leader, in placement order.
+    pub(crate) placement_data: Vec<BucketPlacementData>,
+    /// The buckets another layer places and this layer draws.
+    pub(crate) follower_data: Vec<BucketPlacementData>,
+}
+
+impl LayerBuckets {
+    /// The buckets of `layer`'s tiles, of `buckets`: those it leads, with
+    /// their tiles' feature indexes, in order of sort key, and the others.
+    fn of(layer: &PlacingLayer<'_, SymbolLayer>, buckets: &PlacementBuckets<'_>) -> LayerBuckets {
+        let style = &layer.layer.style;
+        let paint = &layer.layer.evaluated.paint;
+        let text_translate =
+            SymbolTranslate { offset: *paint.text_translate.uniform(), anchor: *paint.text_translate_anchor.uniform() };
+        let icon_translate =
+            SymbolTranslate { offset: *paint.icon_translate.uniform(), anchor: *paint.icon_translate_anchor.uniform() };
+        let source_id: Arc<str> = Arc::from(style.source.as_str());
+        let mut layer_buckets =
+            LayerBuckets { id: style.id.clone(), placement_data: Vec::new(), follower_data: Vec::new() };
+        for tile in layer.tiles {
+            let Some(bucket) = buckets.get::<SymbolBucket>(&tile.bucket) else { continue };
+            let data = |feature_index, sort_key_range| BucketPlacementData {
+                bucket: tile.bucket,
+                tile: PlacedTile::of(tile),
+                feature_index,
+                source_id: Arc::clone(&source_id),
+                sort_key_range,
+                text_translate,
+                icon_translate,
+            };
+            if *bucket.bucket_leader_id != *style.id {
+                layer_buckets.follower_data.push(data(None, None));
+                continue;
+            }
+            let feature_index = Some(Arc::clone(&tile.feature_index));
+            if bucket.sort_key_ranges.is_empty() {
+                layer_buckets.placement_data.push(data(feature_index, None));
+                continue;
+            }
+            let placement_data = &mut layer_buckets.placement_data;
+            for sort_key_range in &bucket.sort_key_ranges {
+                let layer_data = data(feature_index.clone(), Some(*sort_key_range));
+                if placement_data
+                    .last()
+                    .is_none_or(|last| last.sort_key_range.is_some_and(|last| last.sort_key <= sort_key_range.sort_key))
+                {
+                    // Already in order, as ranges with a constant sort key always are.
+                    placement_data.push(layer_data);
+                    continue;
+                }
+                // After every range of a sort key no greater, as ranges of
+                // equal keys keep their order.
+                let sort_position = placement_data.partition_point(|lhs| {
+                    let key = lhs.sort_key_range.expect("sort key range").sort_key;
+                    sort_key_range.sort_key.partial_cmp(&key) != Some(std::cmp::Ordering::Less)
+                });
+                placement_data.insert(sort_position, layer_data);
+            }
+        }
+        layer_buckets
+    }
+}
+
 /// The layers of `layers` that place symbol buckets, which lead them, in
 /// their order.
-pub(crate) fn leaders<'a>(
-    layers: &'a [PlacingLayer<'a, Symbol>],
-) -> impl DoubleEndedIterator<Item = &'a PlacingLayer<'a, Symbol>> {
-    layers.iter().filter(|layer| !layer.state.placement_data.is_empty())
+pub(crate) fn leaders(layers: &[LayerBuckets]) -> impl DoubleEndedIterator<Item = &LayerBuckets> {
+    layers.iter().filter(|layer| !layer.placement_data.is_empty())
 }
 
 /// The layers of `layers` that draw symbol buckets that another layer
 /// places, in their order.
-fn followers<'a>(layers: &'a [PlacingLayer<'a, Symbol>]) -> impl Iterator<Item = &'a PlacingLayer<'a, Symbol>> {
-    layers.iter().filter(|layer| !layer.state.follower_data.is_empty())
+fn followers(layers: &[LayerBuckets]) -> impl Iterator<Item = &LayerBuckets> {
+    layers.iter().filter(|layer| !layer.follower_data.is_empty())
 }
 
 /// The opacity of a symbol's text or icon, and whether it fades in or out.
@@ -299,12 +360,12 @@ impl PlacementInputs {
     /// `buckets` that `layers` place, which are ordered bottom to top.
     pub(crate) fn new<'a>(
         update_parameters: &UpdateParameters,
-        layers: impl DoubleEndedIterator<Item = &'a PlacingLayer<'a, Symbol>>,
-        buckets: &PlacementBuckets<'_, Symbol>,
+        layers: impl DoubleEndedIterator<Item = &'a LayerBuckets>,
+        buckets: &PlacementBuckets<'_>,
     ) -> Self {
         let placed = layers.rev().enumerate().flat_map(|(layer, placing)| {
-            placing.state.placement_data.iter().filter_map(move |data| {
-                let bucket = buckets.get(&data.bucket)?;
+            placing.placement_data.iter().filter_map(move |data| {
+                let bucket = buckets.get::<SymbolBucket>(&data.bucket)?;
                 Some(PlacedBucket {
                     layer,
                     instance_id: bucket.bucket_instance_id,
@@ -340,6 +401,8 @@ impl PlacementInputs {
 pub struct SymbolPlacement {
     placement: Placement,
     index: CrossTileSymbolIndex,
+    /// The buckets of the frame's layers, bottom to top, once prepared.
+    layers: Vec<LayerBuckets>,
     /// The inputs of the frame's placement, once prepared.
     inputs: Option<Arc<PlacementInputs>>,
     /// Whether the buckets' opacities follow the placement again in the
@@ -354,6 +417,7 @@ impl Default for SymbolPlacement {
         SymbolPlacement {
             placement: Placement::new_default(),
             index: CrossTileSymbolIndex::default(),
+            layers: Vec::new(),
             inputs: None,
             update_opacities: false,
             collect_data: false,
@@ -361,19 +425,19 @@ impl Default for SymbolPlacement {
     }
 }
 
-impl PlacementPass<Symbol> for SymbolPlacement {
+impl PlacementPass<SymbolLayer> for SymbolPlacement {
     /// Gives the symbols of the buckets the layers place, topmost layer
     /// first, their cross-tile ids, and takes the inputs of the frame's
     /// placement.
-    fn prepare(&mut self, cx: &mut PlacementContext<'_, Symbol>) -> Prepared {
+    fn prepare(&mut self, cx: &mut PlacementContext<'_, SymbolLayer>) -> Prepared {
         let PlacementContext { layers, update_parameters, buckets } = cx;
         let view = &update_parameters.view;
         let longitude = view.center(mln_util::geo::WrapMode::Unwrapped).longitude() as f32;
+        self.layers = layers.iter().map(|layer| LayerBuckets::of(layer, buckets)).collect();
         let mut prepared = Prepared::default();
         let mut removed = false;
-        for layer in leaders(layers).rev() {
-            let placed = &layer.state.placement_data;
-            let result = self.index.index_layer(layer.layer.id(), placed, longitude, view, buckets);
+        for layer in leaders(&self.layers).rev() {
+            let result = self.index.index_layer(&layer.id, &layer.placement_data, longitude, view, buckets);
             prepared.places = true;
             prepared.added |= result.buckets_added;
             removed |= result.buckets_removed;
@@ -381,14 +445,14 @@ impl PlacementPass<Symbol> for SymbolPlacement {
         self.update_opacities = prepared.added || removed;
         self.inputs = None;
         if prepared.places {
-            let inputs = PlacementInputs::new(update_parameters, leaders(layers), buckets);
+            let inputs = PlacementInputs::new(update_parameters, leaders(&self.layers), buckets);
             prepared.changed = self.placement.inputs.as_deref() != Some(&inputs);
             self.inputs = Some(Arc::new(inputs));
         }
         prepared
     }
 
-    fn place(&mut self, cx: &mut PlacementContext<'_, Symbol>, groups: CollisionGroups, fade: f32) -> Placed {
+    fn place(&mut self, cx: &mut PlacementContext<'_, SymbolLayer>, groups: CollisionGroups, fade: f32) -> Placed {
         let Some(inputs) = self.inputs.take() else {
             debug_assert!(false, "a placement that wasn't prepared");
             return Placed::default();
@@ -398,7 +462,7 @@ impl PlacementPass<Symbol> for SymbolPlacement {
         placement.collect_placed_symbol_data(self.collect_data);
         let placed = placement.place(&mut cx.buckets, fade);
         self.placement = placement;
-        let used: VecSet<String> = leaders(cx.layers).map(|layer| layer.layer.id().to_owned()).collect();
+        let used: VecSet<String> = leaders(&self.layers).map(|layer| layer.id.clone()).collect();
         self.index.prune_unused_layers(&used);
         self.update_opacities = true;
         placed
@@ -407,15 +471,16 @@ impl PlacementPass<Symbol> for SymbolPlacement {
     /// Brings the vertices of the buckets the layers place to the
     /// placement, topmost layer first, and then the positions of those that
     /// draw buckets other layers place.
-    fn update_buckets(&mut self, cx: &mut PlacementContext<'_, Symbol>, changed: &mut ChangedBuckets) {
-        let PlacementContext { layers, update_parameters, buckets } = cx;
+    fn update_buckets(&mut self, cx: &mut PlacementContext<'_, SymbolLayer>) {
+        let PlacementContext { update_parameters, buckets, .. } = cx;
         let view = &update_parameters.view;
         let update_opacities = std::mem::take(&mut self.update_opacities);
+        let SymbolPlacement { placement, layers, .. } = self;
         for layer in leaders(layers).rev() {
-            self.placement.update_layer_buckets(layer, view, update_opacities, changed, buckets);
+            placement.update_layer_buckets(layer, view, update_opacities, buckets);
         }
         for layer in followers(layers) {
-            self.placement.update_follower_buckets(layer, view, changed, buckets);
+            placement.update_follower_buckets(layer, view, buckets);
         }
     }
 
@@ -512,13 +577,13 @@ pub trait PlacedSymbols {
 
 impl PlacedSymbols for Renderer {
     fn placed_symbols_data(&self) -> Vec<PlacedSymbolData> {
-        self.placement::<SymbolPlacement>()
+        mln_render::placement::pass::<SymbolPlacement>(self)
             .map(|pass| pass.placement.placed_symbols_data().to_vec())
             .unwrap_or_default()
     }
 
     fn collect_placed_symbol_data(&mut self, enable: bool) {
-        if let Some(pass) = self.placement_mut::<SymbolPlacement>() {
+        if let Some(pass) = mln_render::placement::pass_mut::<SymbolPlacement>(self) {
             pass.collect_data = enable;
         }
     }
@@ -655,7 +720,7 @@ impl Placement {
     /// marks the buckets placed since their tiles showed them as placed,
     /// and commits, fading on from `fade`, how far the fade of the
     /// placement it replaces had come.
-    pub(crate) fn place(&mut self, buckets: &mut PlacementBuckets<'_, Symbol>, fade: f32) -> Placed {
+    pub(crate) fn place(&mut self, buckets: &mut PlacementBuckets<'_>, fade: f32) -> Placed {
         let Some(inputs) = self.inputs.clone() else {
             return Placed::default();
         };
@@ -666,7 +731,7 @@ impl Placement {
             for layer in inputs.layers() {
                 let mut seen_cross_tile_ids = BTreeSet::new();
                 for data in layer {
-                    if let Some(bucket) = buckets.get(&data.bucket) {
+                    if let Some(bucket) = buckets.get::<SymbolBucket>(&data.bucket) {
                         let ctx = self.bucket_context(&inputs, data, bucket, &reloaded_placed);
                         self.place_bucket(&ctx, &mut seen_cross_tile_ids, &mut reloaded_placed);
                     }
@@ -675,7 +740,7 @@ impl Placement {
         }
         let placed = self.commit(fade);
         for key in reloaded_placed {
-            if let Some(bucket) = buckets.get_mut(&key) {
+            if let Some(bucket) = buckets.get_mut::<SymbolBucket>(&key) {
                 bucket.state.just_reloaded = false;
             }
         }
@@ -687,7 +752,7 @@ impl Placement {
         &mut self,
         inputs: &'a PlacementInputs,
         data: &'a BucketPlacementData,
-        bucket: &'a crate::symbol::bucket::SymbolBucket,
+        bucket: &'a SymbolBucket,
         reloaded_placed: &HashSet<BucketKey>,
     ) -> BucketContext<'a> {
         let (tile_borders, avoid_edges) = self.tile_borders(bucket, &data.tile.matrix);
@@ -827,56 +892,51 @@ impl Placement {
     }
 
     /// Brings the vertices of the buckets `layer` places up to date with
-    /// the placement, and adds what changed of them to `changed`.
+    /// the placement; those it changes upload again.
     pub(crate) fn update_layer_buckets(
         &mut self,
-        layer: &PlacingLayer<'_, Symbol>,
+        layer: &LayerBuckets,
         view: &View,
         update_opacities: bool,
-        changed: &mut ChangedBuckets,
-        buckets: &mut PlacementBuckets<'_, Symbol>,
+        buckets: &mut PlacementBuckets<'_>,
     ) {
         let mut seen_cross_tile_ids = BTreeSet::new();
-        for data in &layer.state.placement_data {
+        for data in &layer.placement_data {
             // A bucket split by sort key updates once, from its first range.
             if data.sort_key_range.is_some_and(|range| range.start != 0) {
                 continue;
             }
-            let Some(bucket) = buckets.get_mut(&data.bucket) else {
+            let Some(bucket) = buckets.get_mut::<SymbolBucket>(&data.bucket) else {
                 continue;
             };
-            let sorted = update_opacities && self.update_bucket_opacities(bucket, view, &mut seen_cross_tile_ids);
-            let dynamic = self.update_bucket_positions(bucket, view, data, None);
-            if update_opacities || dynamic {
-                bucket.base.set_uploaded(false);
+            if update_opacities {
+                self.update_bucket_opacities(bucket, view, &mut seen_cross_tile_ids);
             }
-            changed.mark(
-                bucket.base.id(),
-                BucketChanges { paint: false, opacity: update_opacities, dynamic, sort: sorted },
-            );
+            let dynamic = self.update_bucket_positions(bucket, view, data, None);
             if update_opacities && let Some(retained) = self.retained_query_data.get_mut(&bucket.bucket_instance_id) {
                 retained.feature_sort_order.clone_from(&bucket.state.feature_sort_order);
+            }
+            if update_opacities || dynamic {
+                buckets.changed(&data.bucket);
             }
         }
     }
 
     /// Lays out the positions of a layer drawn from buckets other layers
-    /// place, after `update_layer_buckets`, and adds the buckets whose
-    /// positions changed to `changed`.
+    /// place, after `update_layer_buckets`; the buckets whose positions
+    /// changed upload again.
     pub(crate) fn update_follower_buckets(
         &self,
-        layer: &PlacingLayer<'_, Symbol>,
+        layer: &LayerBuckets,
         view: &View,
-        changed: &mut ChangedBuckets,
-        buckets: &mut PlacementBuckets<'_, Symbol>,
+        buckets: &mut PlacementBuckets<'_>,
     ) {
-        for data in &layer.state.follower_data {
-            let Some(bucket) = buckets.get_mut(&data.bucket) else {
+        for data in &layer.follower_data {
+            let Some(bucket) = buckets.get_mut::<SymbolBucket>(&data.bucket) else {
                 continue;
             };
-            if self.update_bucket_positions(bucket, view, data, Some(layer.layer.id())) {
-                bucket.base.set_uploaded(false);
-                changed.mark(bucket.base.id(), BucketChanges { dynamic: true, ..BucketChanges::default() });
+            if self.update_bucket_positions(bucket, view, data, Some(&layer.id)) {
+                buckets.changed(&data.bucket);
             }
         }
     }

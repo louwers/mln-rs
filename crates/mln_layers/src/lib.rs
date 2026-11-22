@@ -30,7 +30,7 @@ pub mod circle;
 // slice: off mod pattern_layout;
 // slice: off pub mod raster;
 mod shaders;
-// slice: off pub mod symbol;
+pub mod symbol;
 // slice: off mod tessellator;
 
 pub use background::{Background, BackgroundLayer, BackgroundPaintProperties};
@@ -45,7 +45,7 @@ pub use circle::{Circle, CircleLayer, CircleLayoutProperties, CirclePaintPropert
 use mln_gfx::shaders::program::Program;
 use mln_render::{RegisterError, RegistryBuilder};
 // slice: off pub use raster::{Raster, RasterPaintProperties};
-// slice: off pub use symbol::{Symbol, SymbolLayoutProperties, SymbolPaintProperties};
+pub use symbol::{Symbol, SymbolLayer, SymbolLayoutProperties, SymbolPaintProperties};
 
 /// Adds the layer types of this crate. Fails for a name that an earlier
 /// call took.
@@ -53,13 +53,13 @@ pub fn register_layer_types(builder: &mut RegistryBuilder) -> Result<(), Registe
     builder.add_layer_type::<BackgroundLayer>()?;
     // slice: off     builder.add_layer_type::<Fill>()?;
     // slice: off     builder.add_layer_type::<Line>()?;
-    builder.add_layer_type::<CircleLayer>()
+    builder.add_layer_type::<CircleLayer>()?;
     // slice: off     builder.add_layer_type::<FillExtrusion>()?;
     // slice: off     builder.add_layer_type::<Heatmap>()?;
     // slice: off     builder.add_layer_type::<Raster>()?;
     // slice: off     builder.add_layer_type::<Hillshade>()?;
     // slice: off     builder.add_layer_type::<ColorRelief>()?;
-    // slice: off     builder.add_layer_type::<Symbol>()?;
+    symbol::register(builder)
     // slice: off     builder.add_layer_type::<Custom>()
 }
 
@@ -94,11 +94,11 @@ pub static PROGRAMS: &[&Program] = &[
     // slice: off     &hillshade::programs::HILLSHADE,
     // slice: off     &hillshade::programs::HILLSHADE_PREPARE,
     // slice: off     &color_relief::programs::COLOR_RELIEF,
-    // slice: off     &symbol::programs::SYMBOL_ICON,
-    // slice: off     &symbol::programs::SYMBOL_SDF,
-    // slice: off     &symbol::programs::SYMBOL_TEXT_AND_ICON,
-    // slice: off     &symbol::programs::COLLISION_BOX,
-    // slice: off     &symbol::programs::COLLISION_CIRCLE,
+    &symbol::programs::SYMBOL_ICON,
+    &symbol::programs::SYMBOL_SDF,
+    &symbol::programs::SYMBOL_TEXT_AND_ICON,
+    &symbol::programs::COLLISION_BOX,
+    &symbol::programs::COLLISION_CIRCLE,
 ];
 
 // slice: off /// Copies a bucket's data-driven attributes into `mesh` again where

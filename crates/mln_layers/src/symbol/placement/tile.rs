@@ -14,7 +14,6 @@ use mln_util::hash::HashSet;
 
 use super::context::BucketContext;
 use super::{JointPlacement, PlacedSymbolData, Placement, PlacementInputs, PlacementKind, VariableOffset};
-use crate::symbol::Symbol;
 use crate::symbol::bucket::SymbolBucket;
 use crate::symbol::collision_feature::CollisionBox;
 use crate::symbol::instance::SymbolInstance;
@@ -167,7 +166,7 @@ impl Placement {
     pub(super) fn tile_place_buckets(
         &mut self,
         inputs: &PlacementInputs,
-        buckets: &PlacementBuckets<'_, Symbol>,
+        buckets: &PlacementBuckets<'_>,
         reloaded_placed: &mut HashSet<BucketKey>,
     ) {
         let Some(tile) = self.tile_state() else {
@@ -180,7 +179,7 @@ impl Placement {
         let mut contexts = Vec::new();
         let mut intersections = Vec::new();
         for data in inputs.buckets() {
-            if let Some(bucket) = buckets.get(&data.bucket) {
+            if let Some(bucket) = buckets.get::<SymbolBucket>(&data.bucket) {
                 let ctx = self.bucket_context(inputs, data, bucket, reloaded_placed);
                 let found = self.intersections(&ctx, contexts.len());
                 if !found.is_empty() {
@@ -224,7 +223,7 @@ impl Placement {
             tile.populate_intersections = false;
         }
         for data in inputs.buckets() {
-            if let Some(bucket) = buckets.get(&data.bucket) {
+            if let Some(bucket) = buckets.get::<SymbolBucket>(&data.bucket) {
                 let ctx = self.bucket_context(inputs, data, bucket, reloaded_placed);
                 self.place_bucket(&ctx, &mut seen_cross_tile_ids, reloaded_placed);
             }

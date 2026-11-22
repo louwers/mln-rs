@@ -1,55 +1,48 @@
 // The bucket is built on a worker and then owned by its tile's contents on
 // the render thread, where placement, cross-tile indexing and sorting
-// change its `state` in the frame's update.
+// change its `state` in the frame's update. What placement writes, the
+// bucket keeps (`Upload::kept`), and its buffers take again.
 
 use std::cmp::Reverse;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use glam::Vec2;
-use mln_gfx::shaders::segment::SegmentBase;
-use mln_render::layer::{
-    Bucket, BucketBase, EvaluatedLayer, FeatureStates, GeometryUpload, GeometryVec, PaintPropertyBinder,
-};
+use mln_gfx::gfx_types::AttributeDataType::{Float, Float2, Float3, Short2, Short4, UShort2, UShort4};
+use mln_render::draw::Vertex;
+use mln_render::layer::{Bucket, GpuVec, Indexes, LayerBinders, PaintPropertyBinder, Upload};
 use mln_style::expression::EvaluationContext;
 use mln_style::property_expression::PropertyExpression;
 use mln_style::property_value::PropertyValue;
 use mln_style_types::TextWritingModeType;
-use mln_style_types::image::ImagePositions;
-use mln_tile::TileLayer;
 use mln_tile_id::geometry_tile_data::{GeometryCoordinate, GeometryCoordinates, GeometryTileFeature};
 use mln_util::Color;
 use mln_util::range::Range;
 use mln_util::serialization::payload::pod;
-use mln_vec_map::VecMap;
 
-use super::programs::{
-    ID_SYMBOL_COLOR_ATTRIBUTE, ID_SYMBOL_HALO_BLUR_ATTRIBUTE, ID_SYMBOL_HALO_COLOR_ATTRIBUTE,
-    ID_SYMBOL_HALO_WIDTH_ATTRIBUTE, ID_SYMBOL_OPACITY_ATTRIBUTE,
-};
 use crate::symbol::format_section_override::SymbolLayerPaintPropertyOverrides;
 use crate::symbol::instance::{SymbolInstance, SymbolInstancePools, WritingModes};
 use crate::symbol::pool::PoolRange;
 use crate::symbol::quads::SymbolQuad;
-use crate::symbol::{Symbol, SymbolLayoutProperties, SymbolPaintProperties};
+use crate::symbol::{SymbolLayoutProperties, SymbolPaintProperties};
 
 mln_render::paint_property_binders!(
     pub(crate) struct SymbolIconBinders for SymbolPaintProperties::PossiblyEvaluated {
-        icon_opacity: PaintPropertyBinder<f32> => [ID_SYMBOL_OPACITY_ATTRIBUTE],
-        icon_color: PaintPropertyBinder<Color> => [ID_SYMBOL_COLOR_ATTRIBUTE],
-        icon_halo_color: PaintPropertyBinder<Color> => [ID_SYMBOL_HALO_COLOR_ATTRIBUTE],
-        icon_halo_width: PaintPropertyBinder<f32> => [ID_SYMBOL_HALO_WIDTH_ATTRIBUTE],
-        icon_halo_blur: PaintPropertyBinder<f32> => [ID_SYMBOL_HALO_BLUR_ATTRIBUTE],
+        icon_opacity: PaintPropertyBinder<f32> => ["opacity"],
+        icon_color: PaintPropertyBinder<Color> => ["fill_color"],
+        icon_halo_color: PaintPropertyBinder<Color> => ["halo_color"],
+        icon_halo_width: PaintPropertyBinder<f32> => ["halo_width"],
+        icon_halo_blur: PaintPropertyBinder<f32> => ["halo_blur"],
     }
 );
 
 mln_render::paint_property_binders!(
     pub(crate) struct SymbolTextBinders for SymbolPaintProperties::PossiblyEvaluated {
-        text_opacity: PaintPropertyBinder<f32> => [ID_SYMBOL_OPACITY_ATTRIBUTE],
-        text_color: PaintPropertyBinder<Color> => [ID_SYMBOL_COLOR_ATTRIBUTE],
-        text_halo_color: PaintPropertyBinder<Color> => [ID_SYMBOL_HALO_COLOR_ATTRIBUTE],
-        text_halo_width: PaintPropertyBinder<f32> => [ID_SYMBOL_HALO_WIDTH_ATTRIBUTE],
-        text_halo_blur: PaintPropertyBinder<f32> => [ID_SYMBOL_HALO_BLUR_ATTRIBUTE],
+        text_opacity: PaintPropertyBinder<f32> => ["opacity"],
+        text_color: PaintPropertyBinder<Color> => ["fill_color"],
+        text_halo_color: PaintPropertyBinder<Color> => ["halo_color"],
+        text_halo_width: PaintPropertyBinder<f32> => ["halo_width"],
+        text_halo_blur: PaintPropertyBinder<f32> => ["halo_blur"],
     }
 );
 
@@ -98,6 +91,31 @@ pub(crate) struct CollisionBoxLayoutVertex {
 pub(crate) struct CollisionBoxDynamicVertex {
     pub(crate) a1: [u16; 2],
     pub(crate) a2: [f32; 2],
+}
+
+impl Vertex for SymbolLayoutVertex {
+    const ATTRIBUTES: &'static [mln_gfx::gfx_types::AttributeDataType] = &[Short4, UShort4, Short4, UShort2, Float];
+    const NAMES: &'static [&'static str] = &["pos_offset", "data", "pixeloffset", "tex_origin", "height_offset"];
+}
+
+impl Vertex for SymbolDynamicLayoutVertex {
+    const ATTRIBUTES: &'static [mln_gfx::gfx_types::AttributeDataType] = &[Float3];
+    const NAMES: &'static [&'static str] = &["projected_pos"];
+}
+
+impl Vertex for SymbolOpacityVertex {
+    const ATTRIBUTES: &'static [mln_gfx::gfx_types::AttributeDataType] = &[Float];
+    const NAMES: &'static [&'static str] = &["fade_opacity"];
+}
+
+impl Vertex for CollisionBoxLayoutVertex {
+    const ATTRIBUTES: &'static [mln_gfx::gfx_types::AttributeDataType] = &[Short2, Short2, Short2, Float];
+    const NAMES: &'static [&'static str] = &["pos", "anchor_pos", "extrude", "height_offset"];
+}
+
+impl Vertex for CollisionBoxDynamicVertex {
+    const ATTRIBUTES: &'static [mln_gfx::gfx_types::AttributeDataType] = &[UShort2, Float2];
+    const NAMES: &'static [&'static str] = &["placed", "shift"];
 }
 
 /// A corner of a quad: its offset from the anchor, its texture coordinate
@@ -296,24 +314,23 @@ pub(crate) struct PlacedSymbol {
     pub(crate) hidden: bool,
 }
 
+/// A kind of a bucket's quads: its vertices, where placement draws and
+/// shows them, and the runs that show together.
 #[derive(Clone, Debug, Default, mln_wire::Wire)]
 pub(crate) struct Buffer {
-    pub(crate) attribute_data: GeometryVec<SymbolLayoutVertex>,
-    #[wire(with = "pod")]
-    pub(crate) dynamic_attribute_data: Vec<SymbolDynamicLayoutVertex>,
+    pub(crate) attribute_data: GpuVec<SymbolLayoutVertex>,
+    /// Where placement draws each vertex.
+    pub(crate) dynamic_attribute_data: GpuVec<SymbolDynamicLayoutVertex>,
     /// Positions for each layer that shares the bucket at another
     /// translation than its leader's. A layer keeps them for the bucket's
-    /// life: draws moved back to the shared positions would keep bindings
-    /// to these. Placement makes them once the bucket is on the
-    /// map side, so they don't cross with it from a worker.
+    /// life, once it has them. Placement makes them once the bucket is on
+    /// the map side, so they don't cross with it from a worker.
     #[wire(skip)]
-    pub(crate) layer_dynamic_attribute_data: BTreeMap<String, Vec<SymbolDynamicLayoutVertex>>,
-    #[wire(with = "pod")]
-    pub(crate) opacity_attribute_data: Vec<SymbolOpacityVertex>,
-    /// Three indices per triangle.
-    #[wire(with = "pod")]
-    pub(crate) triangles: Vec<u16>,
-    pub(crate) segments: Vec<SegmentBase>,
+    pub(crate) layer_dynamic_attribute_data: BTreeMap<String, GpuVec<SymbolDynamicLayoutVertex>>,
+    /// Each vertex's fade opacity, which placement writes.
+    pub(crate) opacity_attribute_data: GpuVec<SymbolOpacityVertex>,
+    /// The quads' triangles, which placement sorts.
+    pub(crate) triangles: Indexes,
     pub(crate) placed_symbols: Vec<PlacedSymbol>,
     pub(crate) pools: PlacedSymbolPools,
 }
@@ -345,7 +362,7 @@ impl PlacedSymbolPools {
 impl Buffer {
     /// The positions `layer_id` draws: its own when it has them, the
     /// leader's otherwise.
-    pub(crate) fn dynamic_attribute_data_for(&self, layer_id: &str) -> &Vec<SymbolDynamicLayoutVertex> {
+    pub(crate) fn dynamic_attribute_data_for(&self, layer_id: &str) -> &GpuVec<SymbolDynamicLayoutVertex> {
         self.layer_dynamic_attribute_data.get(layer_id).unwrap_or(&self.dynamic_attribute_data)
     }
 
@@ -360,13 +377,14 @@ impl Buffer {
             None => &mut self.dynamic_attribute_data,
             Some(layer_id) => self.layer_dynamic_attribute_data.entry(layer_id.to_owned()).or_default(),
         };
-        (positions, &self.placed_symbols, &self.pools)
+        (positions.get_mut(), &self.placed_symbols, &self.pools)
     }
 
     /// Whether any of the `count` opacity vertices from `offset` can draw. A
     /// range that placement hasn't filled yet counts as visible.
     pub(crate) fn has_visible_vertices(&self, offset: usize, count: usize) -> bool {
-        let Some(range) = offset.checked_add(count).and_then(|end| self.opacity_attribute_data.get(offset..end)) else {
+        let opacities = self.opacity_attribute_data.get();
+        let Some(range) = offset.checked_add(count).and_then(|end| opacities.get(offset..end)) else {
             return true;
         };
         // Zero is an unplaced symbol at zero opacity. A placed symbol whose
@@ -379,7 +397,8 @@ impl Buffer {
     pub(crate) fn segment_has_visible_vertices(&self, segment: Option<usize>) -> bool {
         match segment {
             Some(i) => self
-                .segments
+                .triangles
+                .segments()
                 .get(i)
                 .is_none_or(|segment| self.has_visible_vertices(segment.vertex_offset, segment.vertex_length)),
             None => self.has_visible_vertices(0, self.attribute_data.len()),
@@ -390,22 +409,18 @@ impl Buffer {
 /// The vertices and indices of a symbol bucket's collision boxes or circles.
 #[derive(Clone, Debug, Default, mln_wire::Wire)]
 pub(crate) struct CollisionBuffer {
-    #[wire(with = "pod")]
-    pub(crate) vertices: Vec<CollisionBoxLayoutVertex>,
-    #[wire(with = "pod")]
-    pub(crate) dynamic_vertices: Vec<CollisionBoxDynamicVertex>,
-    pub(crate) segments: Vec<SegmentBase>,
-    /// `lines` (box buffers: 2 per line) or `triangles` (circle buffers: 3
-    /// per triangle).
-    #[wire(with = "pod")]
-    pub(crate) indices: Vec<u16>,
+    pub(crate) vertices: GpuVec<CollisionBoxLayoutVertex>,
+    /// Whether each box shows and where it moved, which placement writes.
+    pub(crate) dynamic_vertices: GpuVec<CollisionBoxDynamicVertex>,
+    /// Lines of the boxes' outlines, or triangles of the circles.
+    pub(crate) indices: Indexes,
 }
 
-/// The paint property binders of one layer.
-#[derive(Clone, Debug, mln_wire::Wire)]
-pub(crate) struct PaintProperties {
-    pub(crate) icon_binders: SymbolIconBinders,
-    pub(crate) text_binders: SymbolTextBinders,
+impl CollisionBuffer {
+    /// Whether it has anything to draw.
+    pub(crate) fn has_data(&self) -> bool {
+        !self.indices.is_empty()
+    }
 }
 
 /// The state of a `SymbolBucket` that placement, cross-tile indexing and
@@ -451,7 +466,8 @@ impl SymbolBucketState {
 /// The style of a bucket's symbol layers at its tile's zoom.
 pub(crate) struct SymbolBucketStyle<'a> {
     pub(crate) layout: Arc<SymbolLayoutProperties::PossiblyEvaluated>,
-    pub(crate) paint_properties: &'a VecMap<String, Arc<EvaluatedLayer<Symbol>>>,
+    pub(crate) icon_binders: LayerBinders<SymbolIconBinders>,
+    pub(crate) text_binders: LayerBinders<SymbolTextBinders>,
     pub(crate) text_size: &'a PropertyValue<f32>,
     pub(crate) icon_size: &'a PropertyValue<f32>,
     pub(crate) zoom: f32,
@@ -471,7 +487,6 @@ pub(crate) struct SymbolLayoutFlags {
 
 #[derive(Clone, mln_wire::Wire)]
 pub struct SymbolBucket {
-    pub(crate) base: BucketBase,
     pub(crate) layout: Arc<SymbolLayoutProperties::PossiblyEvaluated>,
     pub(crate) bucket_leader_id: Arc<str>,
 
@@ -482,7 +497,8 @@ pub struct SymbolBucket {
 
     pub(crate) sort_key_ranges: Vec<SortKeyRange>,
 
-    pub(crate) paint_properties: VecMap<String, PaintProperties>,
+    pub(crate) icon_binders: LayerBinders<SymbolIconBinders>,
+    pub(crate) text_binders: LayerBinders<SymbolTextBinders>,
 
     pub(crate) text_size_binder: SymbolSizeBinder,
     pub(crate) icon_size_binder: SymbolSizeBinder,
@@ -517,28 +533,28 @@ impl SymbolBucket {
         symbol_instance_pools: SymbolInstancePools,
         sort_key_ranges: Vec<SortKeyRange>,
     ) -> Self {
-        let SymbolBucketStyle { layout, paint_properties, text_size, icon_size, zoom, tile_pixel_ratio, leader_id } =
-            style;
+        let SymbolBucketStyle {
+            layout,
+            icon_binders,
+            text_binders,
+            text_size,
+            icon_size,
+            zoom,
+            tile_pixel_ratio,
+            leader_id,
+        } = style;
         let icon_size_data_driven_or_zoom =
             icon_size.as_expression().is_some_and(|e| !e.is_feature_constant() || !e.is_zoom_constant());
-        let mut binders = VecMap::new();
-        for (id, properties) in paint_properties {
-            let evaluated = &properties.paint;
-            binders.entry(id.clone()).or_insert_with(|| PaintProperties {
-                icon_binders: SymbolIconBinders::new(evaluated, zoom),
-                text_binders: SymbolTextBinders::new(evaluated, zoom),
-            });
-        }
         let max_height_offset = symbol_instances.iter().map(|symbol| symbol.height_offset).fold(0.0, f32::max);
         SymbolBucket {
-            base: BucketBase::default(),
             layout,
             bucket_leader_id: leader_id,
             icons_need_linear: flags.icons_need_linear || icon_size_data_driven_or_zoom,
             sort_features_by_y: flags.sort_features_by_y,
             icons_in_text: flags.icons_in_text,
             sort_key_ranges,
-            paint_properties: binders,
+            icon_binders,
+            text_binders,
             text_size_binder: SymbolSizeBinder::create(zoom, text_size, SymbolLayoutProperties::Defaults::text_size()),
             icon_size_binder: SymbolSizeBinder::create(zoom, icon_size, SymbolLayoutProperties::Defaults::icon_size()),
             tile_pixel_ratio,
@@ -556,25 +572,31 @@ impl SymbolBucket {
     }
 
     pub(crate) fn has_text_data(&self) -> bool {
-        !self.state.text.segments.is_empty()
+        !self.state.text.triangles.is_empty()
     }
     pub(crate) fn has_icon_data(&self) -> bool {
-        !self.state.icon.segments.is_empty()
+        !self.state.icon.triangles.is_empty()
     }
     pub(crate) fn has_sdf_icon_data(&self) -> bool {
-        !self.state.sdf_icon.segments.is_empty()
-    }
-    pub(crate) fn has_icon_collision_box_data(&self) -> bool {
-        self.state.icon_collision_box.as_ref().is_some_and(|b| !b.segments.is_empty())
+        !self.state.sdf_icon.triangles.is_empty()
     }
     pub(crate) fn has_icon_collision_circle_data(&self) -> bool {
-        self.state.icon_collision_circle.as_ref().is_some_and(|b| !b.segments.is_empty())
-    }
-    pub(crate) fn has_text_collision_box_data(&self) -> bool {
-        self.state.text_collision_box.as_ref().is_some_and(|b| !b.segments.is_empty())
+        self.state.icon_collision_circle.as_ref().is_some_and(CollisionBuffer::has_data)
     }
     pub(crate) fn has_text_collision_circle_data(&self) -> bool {
-        self.state.text_collision_circle.as_ref().is_some_and(|b| !b.segments.is_empty())
+        self.state.text_collision_circle.as_ref().is_some_and(CollisionBuffer::has_data)
+    }
+
+    /// Whether the bucket has anything to draw: text, icons, or collision
+    /// boxes or circles.
+    pub(crate) fn has_data(&self) -> bool {
+        let state = &self.state;
+        let collision =
+            [&state.icon_collision_box, &state.text_collision_box, &state.icon_collision_circle, &state.text_collision_circle];
+        self.has_text_data()
+            || self.has_icon_data()
+            || self.has_sdf_icon_data()
+            || collision.into_iter().flatten().any(CollisionBuffer::has_data)
     }
 
     pub(crate) fn has_format_section_overrides(&self) -> bool {
@@ -589,17 +611,16 @@ impl SymbolBucket {
     }
 
     /// Sorts the symbols by their position along the screen's y axis at
-    /// the map's bearing `angle`, where the layout asks for that, and
-    /// returns whether that changed the order of the triangles.
-    pub(crate) fn sort_features(&mut self, angle: f32) -> bool {
+    /// the map's bearing `angle`, where the layout asks for that.
+    pub(crate) fn sort_features(&mut self, angle: f32) {
         if !self.sort_features_by_y {
-            return false;
+            return;
         }
         debug_assert!(angle != f32::MAX);
 
         let state = &mut self.state;
         if state.sorted_angle == angle {
-            return false;
+            return;
         }
 
         state.sorted_angle = angle;
@@ -607,15 +628,13 @@ impl SymbolBucket {
         // The current approach to sorting doesn't sort across text and icon
         // segments so don't try. Sorting within segments separately seemed
         // not to be worth the complexity.
-        if state.text.segments.len() > 1 || (state.icon.segments.len() > 1 || state.sdf_icon.segments.len() > 1) {
-            return false;
+        if [&state.text, &state.icon, &state.sdf_icon].iter().any(|buffer| buffer.triangles.segments().len() > 1) {
+            return;
         }
 
-        self.base.set_uploaded(false);
-
-        state.text.triangles.clear();
-        state.icon.triangles.clear();
-        state.sdf_icon.triangles.clear();
+        state.text.triangles.get_mut().clear();
+        state.icon.triangles.get_mut().clear();
+        state.sdf_icon.triangles.get_mut().clear();
 
         let mut symbols_sort_order = Vec::with_capacity(state.symbol_instances.len());
 
@@ -627,19 +646,18 @@ impl SymbolBucket {
             symbols_sort_order.push(symbol.data_feature_index);
             if let Some(text) = &symbol.text {
                 for (run, _) in text.runs.all() {
-                    add_placed_symbol(&mut state.text.triangles, &state.text.placed_symbols[run]);
+                    add_placed_symbol(state.text.triangles.get_mut(), &state.text.placed_symbols[run]);
                 }
             }
             if let Some(icon) = &symbol.icon {
                 let buffer = if icon.sdf { &mut state.sdf_icon } else { &mut state.icon };
                 for (run, _) in icon.runs() {
-                    add_placed_symbol(&mut buffer.triangles, &buffer.placed_symbols[run]);
+                    add_placed_symbol(buffer.triangles.get_mut(), &buffer.placed_symbols[run]);
                 }
             }
         }
 
         state.feature_sort_order = Some(Arc::new(symbols_sort_order));
-        true
     }
 
     /// The indices into `symbol_instances` of a sort key range, or all
@@ -743,59 +761,39 @@ pub(crate) fn symbols_by_viewport_y(symbol_instances: &[SymbolInstance], angle: 
 }
 
 impl Bucket for SymbolBucket {
-    fn base(&self) -> &BucketBase {
-        &self.base
-    }
-
-    fn upload(&mut self, geometry: &mut GeometryUpload<'_>) {
+    fn upload(&mut self, up: &mut Upload<'_>) {
         let state = &mut self.state;
         for buffer in [&mut state.text, &mut state.icon, &mut state.sdf_icon] {
-            geometry.move_vertices(&mut buffer.attribute_data);
+            up.vec(&mut buffer.attribute_data);
+            up.kept(&mut buffer.dynamic_attribute_data);
+            for positions in buffer.layer_dynamic_attribute_data.values_mut() {
+                up.kept(positions);
+            }
+            up.kept(&mut buffer.opacity_attribute_data);
+            up.kept_indexes(&mut buffer.triangles);
         }
-        for paint in self.paint_properties.values_mut() {
-            let depends_on_feature_state = paint.icon_binders.depends_on_feature_state();
-            geometry.move_paint(&mut paint.icon_binders.interleaved_vertex_buffer, depends_on_feature_state);
-            let depends_on_feature_state = paint.text_binders.depends_on_feature_state();
-            geometry.move_paint(&mut paint.text_binders.interleaved_vertex_buffer, depends_on_feature_state);
+        let collision = [
+            &mut state.icon_collision_box,
+            &mut state.text_collision_box,
+            &mut state.icon_collision_circle,
+            &mut state.text_collision_circle,
+        ];
+        for buffer in collision.into_iter().flatten() {
+            up.vec(&mut buffer.vertices);
+            up.kept(&mut buffer.dynamic_vertices);
+            up.indexes(&mut buffer.indices);
         }
-        self.base.set_uploaded(true);
-    }
-
-    fn has_data(&self) -> bool {
-        self.has_text_data()
-            || self.has_icon_data()
-            || self.has_sdf_icon_data()
-            || self.has_icon_collision_box_data()
-            || self.has_text_collision_box_data()
-            || self.has_icon_collision_circle_data()
-            || self.has_text_collision_circle_data()
+        up.binders(&mut self.icon_binders);
+        up.binders(&mut self.text_binders);
     }
 
     fn max_elevation(&self) -> f32 {
         self.max_height_offset
     }
-
-    fn update(
-        &mut self,
-        states: &FeatureStates,
-        layer: &TileLayer<'_>,
-        layer_id: &str,
-        image_positions: &ImagePositions,
-    ) -> bool {
-        let Some(binders) = self.paint_properties.get_mut(layer_id) else {
-            return false;
-        };
-        binders.icon_binders.update_vertex_vectors(states, layer, image_positions);
-        binders.text_binders.update_vertex_vectors(states, layer, image_positions);
-        self.base.set_uploaded(false);
-        true
-    }
 }
 
 #[cfg(test)]
 mod tests {
-    use mln_gfx::shaders::segment::SegmentBase;
-
     use super::*;
 
     // gtest: SymbolRendering.KeepFadingSymbolsVisible
@@ -805,7 +803,7 @@ mod tests {
         // Without placement results, leave rendering enabled.
         assert!(buffer.has_visible_vertices(0, 1));
 
-        buffer.opacity_attribute_data.extend([
+        buffer.opacity_attribute_data.get_mut().extend([
             SymbolBucket::opacity_attributes(false, 0.0),
             SymbolBucket::opacity_attributes(true, 0.0),
             SymbolBucket::opacity_attributes(false, 0.5),
@@ -823,14 +821,17 @@ mod tests {
     #[test]
     fn segment_visibility_reads_the_segment_range() {
         let mut buffer = Buffer::default();
-        buffer.opacity_attribute_data.extend([
+        buffer.opacity_attribute_data.get_mut().extend([
             SymbolBucket::opacity_attributes(false, 0.0),
             SymbolBucket::opacity_attributes(false, 0.0),
             SymbolBucket::opacity_attributes(true, 1.0),
             SymbolBucket::opacity_attributes(true, 1.0),
         ]);
-        buffer.segments.push(SegmentBase::with_lengths(0, 0, 2, 0));
-        buffer.segments.push(SegmentBase::with_lengths(2, 0, 2, 0));
+        // Two segments of two vertices each, apart by their sort keys.
+        let mut vertices = vec![0u8; 2];
+        buffer.triangles.add_keyed(&mut vertices, 0, 0.0, [[0, 1, 1]]);
+        vertices.extend([0, 0]);
+        buffer.triangles.add_keyed(&mut vertices, 2, 1.0, [[0, 1, 1]]);
         assert!(!buffer.segment_has_visible_vertices(Some(0)));
         assert!(buffer.segment_has_visible_vertices(Some(1)));
         // An unknown segment draws.

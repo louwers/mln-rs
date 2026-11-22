@@ -34,7 +34,6 @@ use mln_util::constants::EXTENT;
 use mln_util::hash::HashSet;
 use mln_vec_map::{VecMap, VecSet};
 
-use crate::symbol::Symbol;
 use crate::symbol::bucket::SymbolBucket;
 use crate::symbol::instance::{SymbolInstance, SymbolInstancePools};
 use crate::symbol::placement::BucketPlacementData;
@@ -71,7 +70,7 @@ impl CrossTileSymbolIndex {
         placed: &[BucketPlacementData],
         lng: f32,
         view: &View,
-        buckets: &mut PlacementBuckets<'_, Symbol>,
+        buckets: &mut PlacementBuckets<'_>,
     ) -> AddLayerResult {
         let index = self.layers.get_or_insert_with(layer_id, LayerIndex::default);
         index.follow_wrap_jump(lng);
@@ -79,7 +78,7 @@ impl CrossTileSymbolIndex {
         self.current_bucket_ids.clear();
         let mut buckets_added = false;
         for item in placed {
-            let Some(bucket) = buckets.get_mut(&item.bucket) else {
+            let Some(bucket) = buckets.get_mut::<SymbolBucket>(&item.bucket) else {
                 continue;
             };
             if bucket.bucket_instance_id == 0 {
@@ -395,6 +394,8 @@ mod tests {
     use mln_util::size::Size;
 
     use super::*;
+    use mln_render::layer::LayerBinders;
+
     use crate::symbol::SymbolLayoutProperties;
     use crate::symbol::anchor::Anchor;
     use crate::symbol::bucket::{SymbolBucketStyle, SymbolLayoutFlags};
@@ -420,7 +421,8 @@ mod tests {
         let mut bucket = SymbolBucket::new(
             SymbolBucketStyle {
                 layout,
-                paint_properties: &VecMap::new(),
+                icon_binders: LayerBinders::default(),
+                text_binders: LayerBinders::default(),
                 text_size: &PropertyValue::Constant(16.0),
                 icon_size: &PropertyValue::Constant(1.0),
                 zoom: 0.0,

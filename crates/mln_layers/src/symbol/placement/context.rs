@@ -3,7 +3,7 @@
 
 use glam::Vec2;
 use mln_map_types::{ProjectionData, TileProjector, View};
-use mln_render::draw::tile_unit_translation;
+use mln_render::layer::TileTransform;
 use mln_style_types::{
     AlignmentType, IconTextFitType, SymbolPlacementType, SymbolZOrderType, TextRotationAlignmentType,
 };
@@ -27,7 +27,8 @@ pub(crate) fn translation(
     if screen_space {
         return Vec2::ZERO;
     }
-    Vec2::from(tile_unit_translation(tile_id, translate.offset, translate.anchor, view))
+    let how = TileTransform { translate: translate.offset, anchor: translate.anchor, ..TileTransform::default() };
+    Vec2::from(how.tile_units(tile_id, view))
 }
 
 /// The projection without the horizon plane, so nothing on it counts as

@@ -2,9 +2,8 @@
 //! icon, shaped and placed at its anchors, as the symbol instances of a
 //! bucket.
 //!
-//! The layout keeps the tile's `SourceLayer` (shared tile data) and owned
-//! `SymbolFeature`s (`feature`), so it can wait for glyphs and images across
-//! worker messages.
+//! The layout keeps owned `SymbolFeature`s (`feature`), so it can wait for
+//! glyphs and images across worker messages.
 
 mod check_max_angle;
 mod clip_lines;
@@ -19,10 +18,7 @@ use std::sync::Arc;
 use geometry::Point;
 use glam::Vec2;
 use mln_map_types::MapMode;
-use mln_render::layer::{
-    BucketParameters, BuildParams, EvaluatedLayer, FeatureIndexBuilder, Indexed, Layout, LayoutParameters, Resolved,
-    ShapeResults, SourceLayer, layers_by_id,
-};
+use mln_render::layer::{BuildCx, Layout, LayoutCx, Resolved};
 use mln_style::evaluated::Evaluated;
 use mln_style::expression::formatted::K_FORMATTED_SECTION_TEXT_COLOR;
 use mln_style::expression::{EvaluationContext, GlobalStateMap, Value};
@@ -45,12 +41,13 @@ use mln_util::error::Error;
 use mln_util::geometry::FeatureType;
 use mln_util::range::Range;
 use mln_util::{Padding, i18n};
+use mln_render::layer::LayerBinders;
 use mln_vec_map::VecMap;
 
 use crate::symbol::anchor::Anchor;
 use crate::symbol::bucket::{
-    Buffer, PaintProperties, PlacedSymbol, QuadCorner, SortKeyRange, SymbolBucket, SymbolBucketState,
-    SymbolBucketStyle, SymbolLayoutFlags, SymbolSizeBinder,
+    Buffer, PlacedSymbol, QuadCorner, SortKeyRange, SymbolBucket, SymbolBucketState, SymbolBucketStyle,
+    SymbolIconBinders, SymbolLayoutFlags, SymbolSizeBinder, SymbolTextBinders,
 };
 use crate::symbol::collision_feature::{AlongLine, BoxLayout, CollisionBox, CollisionFeature, IndexedSubfeature};
 use crate::symbol::instance::{
@@ -427,7 +424,6 @@ impl FeatureSymbols<'_> {
 }
 
 pub struct SymbolLayout {
-    pub(crate) layer_paint_properties: VecMap<String, Arc<EvaluatedLayer<Symbol>>>,
     /// Shared by every symbol's `IndexedSubfeature`, which placement clones
     /// for each symbol it places.
     pub(crate) bucket_leader_id: Arc<str>,
@@ -437,10 +433,8 @@ pub struct SymbolLayout {
 
     compare_text: VecMap<String, Vec<Anchor>>,
 
-    // Stores the layer so that we can hold on to GeometryTileFeature
-    // instances in SymbolFeature, which may reference data from this object.
-    source_layer: SourceLayer,
-    /// `source_layer`'s name, shared like `bucket_leader_id`.
+    /// The name of the tile's layer of the features, shared like
+    /// `bucket_leader_id`.
     source_layer_name: Arc<str>,
     overscaling: f32,
     zoom: f32,
@@ -470,40 +464,42 @@ pub struct SymbolLayout {
     has_font_text: bool,
 }
 
-impl SymbolLayout {
-    pub(crate) fn new(
-        parameters: &BucketParameters,
-        layers: &[Arc<EvaluatedLayer<Symbol>>],
-        source_layer: SourceLayer,
-        layout_parameters: &mut LayoutParameters<'_>,
-    ) -> Result<Self, Error> {
+impl Layout<Symbol> for SymbolLayout {
+    type Bucket = SymbolBucket;
+
+    /// A symbol layout waits for its glyphs and images.
+    fn needs_resources(_group: &[Arc<mln_render::layer::EvaluatedLayer<Symbol>>]) -> bool {
+        true
+    }
+
+    fn new(cx: &mut LayoutCx<'_, Symbol>) -> Result<Self, Error> {
         fn capture<T>(property_value: &mut PropertyValue<T>, global_state: Option<&Arc<GlobalStateMap>>) {
             if let Some(expression) = property_value.as_expression_mut() {
                 expression.capture_global_state(global_state.cloned());
             }
         }
 
-        let leader = &*layers[0].style;
-        let overscaling = parameters.tile_id.overscale_factor() as f32;
-        let zoom = f32::from(parameters.tile_id.overscaled_z);
+        let leader = Arc::clone(&cx.layers()[0].style);
+        let tile_id = cx.tile();
+        let global_state = cx.parameters().global_state.clone();
+        let overscaling = tile_id.overscale_factor() as f32;
+        let zoom = f32::from(tile_id.overscaled_z);
         let tile_size = (TILE_SIZE_D * f64::from(overscaling)) as u32;
         let tile_pixel_ratio = EXTENT as f32 / tile_size as f32;
-        let layout = Arc::new(create_layout(&leader.layout, zoom, parameters.global_state.clone()));
+        let layout = Arc::new(create_layout(&leader.layout, zoom, global_state.clone()));
 
         let mut this = SymbolLayout {
-            layer_paint_properties: VecMap::new(),
             bucket_leader_id: Arc::from(leader.id.as_str()),
             symbols: Vec::new(),
             symbol_instance_pools: SymbolInstancePools::default(),
             sort_key_ranges: Vec::new(),
             compare_text: VecMap::new(),
-            source_layer_name: Arc::from(source_layer.name()),
-            source_layer,
+            source_layer_name: Arc::from(leader.source_layer.as_str()),
             overscaling,
             zoom,
-            canonical_id: parameters.tile_id.canonical,
-            mode: parameters.mode,
-            pixel_ratio: parameters.pixel_ratio,
+            canonical_id: tile_id.canonical,
+            mode: cx.mode(),
+            pixel_ratio: cx.pixel_ratio(),
             tile_pixel_ratio,
             icons_need_linear: false,
             sort_features_by_y: false,
@@ -523,10 +519,10 @@ impl SymbolLayout {
         // These property values are retained unevaluated; capture the
         // global state so that later evaluations can resolve "global-state"
         // expressions.
-        capture(&mut this.text_size, parameters.global_state.as_ref());
-        capture(&mut this.icon_size, parameters.global_state.as_ref());
-        capture(&mut this.text_radial_offset, parameters.global_state.as_ref());
-        capture(&mut this.text_variable_anchor_offset, parameters.global_state.as_ref());
+        capture(&mut this.text_size, global_state.as_ref());
+        capture(&mut this.icon_size, global_state.as_ref());
+        capture(&mut this.text_radial_offset, global_state.as_ref());
+        capture(&mut this.text_variable_anchor_offset, global_state.as_ref());
 
         let layout = Arc::clone(&this.layout);
         let has_text = has_text_field(&layout) && has_text_font(&layout);
@@ -563,50 +559,18 @@ impl SymbolLayout {
             this.placement_modes = placement_modes;
         }
 
-        this.layer_paint_properties = layers_by_id(layers);
-
-        // Determine glyph dependencies
-        let source_layer = this.source_layer.clone();
-        let geometry_layer = source_layer.layer()?;
-        let feature_count = geometry_layer.len();
         let canonical_id = this.canonical_id;
-        let context = EvaluationContext::new(this.zoom)
-            .with_canonical_tile_id(Some(&parameters.tile_id.canonical))
-            .with_global_state(parameters.global_state.as_deref())
-            .with_font_faces(layout_parameters.font_faces.as_deref());
-        let passes = |feature: &dyn GeometryTileFeature| {
-            leader.filter.evaluate(&EvaluationContext { feature: Some(feature), ..context })
-        };
-        let selected = layout_parameters.filter_groups.select(
-            source_layer.name(),
-            &geometry_layer,
-            &leader.filter,
-            &context,
-            passes,
-        );
-        let mut glyph_type_tables =
-            GlyphTypeTables::new(layout_parameters.font_faces.clone(), layout_parameters.glyph_pbfs);
-        for i in 0..feature_count {
-            if selected.as_ref().is_some_and(|selected| !selected[i]) {
-                continue;
-            }
-            let feature = geometry_layer.feature(i)?;
-            if selected.is_none() && !passes(&feature) {
-                continue;
-            }
-
-            let mut ft = SymbolFeature::new(&feature, feature.geometry()?);
+        let mut glyph_type_tables = GlyphTypeTables::new(cx.font_faces().cloned(), cx.has_glyphs());
+        for i in cx.selected()? {
+            let mut ft = {
+                let feature = cx.feature(i)?;
+                SymbolFeature::new(&feature, feature.geometry()?)
+            };
 
             ft.index = i;
 
             if has_text {
-                let formatted = layout.text_field.evaluate(
-                    &EvaluationContext::with_zoom_feature(zoom, Some(&ft))
-                        .with_available_images(Some(layout_parameters.available_images))
-                        .with_unavailable_images(Some(layout_parameters.unavailable_images))
-                        .with_canonical_tile_id(Some(&canonical_id))
-                        .with_font_faces(layout_parameters.font_faces.as_deref()),
-                );
+                let formatted = layout.text_field.evaluate(&cx.context(&ft));
                 let text_transform = layout.text_transform.evaluate(
                     &EvaluationContext::with_zoom_feature(zoom, Some(&ft)).with_canonical_tile_id(Some(&canonical_id)),
                 );
@@ -635,10 +599,7 @@ impl SymbolLayout {
                         // An empty image name means no image, so it is not an image
                         // dependency.
                         if !image.empty() {
-                            layout_parameters
-                                .image_dependencies
-                                .entry(image.id().to_owned())
-                                .or_insert(ImageType::Icon);
+                            cx.need_image(image.id(), ImageType::Icon);
                         }
                         formatted_text.add_image_section(image.id(), section.vertical_align.unwrap_or_default());
                         continue;
@@ -690,14 +651,7 @@ impl SymbolLayout {
                             formatted_text.add_text_section(sub_string, options);
                             section_table.insert(formatted_text.sections().len() - 1, section_index);
                             if sub_string_type != GlyphIDType::FontPBF {
-                                layout_parameters
-                                    .glyph_dependencies
-                                    .shapes
-                                    .entry(section_font_stack.clone())
-                                    .or_default()
-                                    .entry(sub_string_type)
-                                    .or_default()
-                                    .insert(sub_string.clone());
+                                cx.need_shaping(&section_font_stack, sub_string_type, sub_string);
                             }
                         };
 
@@ -732,20 +686,17 @@ impl SymbolLayout {
                     let section_font_stack =
                         section_table.get(&section_index).and_then(|&i| formatted.sections[i].font_stack.clone());
                     let font_stack = section_font_stack.unwrap_or_else(|| base_font_stack.clone());
-                    let dependencies = layout_parameters.glyph_dependencies.glyphs.entry(font_stack).or_default();
                     if section.type_ == GlyphIDType::FontPBF {
                         // Glyph PBFs have no glyphs beyond the BMP.
                         let c = formatted_text.text()[j];
-                        dependencies.extend(GlyphID::from_char(c));
-                        if can_verticalize_text || (this.allow_vertical_placement && allows_vertical) {
-                            dependencies.extend(i18n::verticalize_punctuation(c).and_then(GlyphID::from_char));
-                        }
+                        let vertical = can_verticalize_text || (this.allow_vertical_placement && allows_vertical);
+                        let vertical = vertical.then(|| i18n::verticalize_punctuation(c).and_then(GlyphID::from_char));
+                        cx.need_glyphs(font_stack, GlyphID::from_char(c).into_iter().chain(vertical.flatten()));
                     } else {
                         // A face's glyph 0 stands for its font file; the
                         // device's fonts have none to load.
-                        if section.type_ != GlyphIDType::SYSTEM {
-                            dependencies.insert(GlyphID::with_type(0, section.type_));
-                        }
+                        let face = (section.type_ != GlyphIDType::SYSTEM).then(|| GlyphID::with_type(0, section.type_));
+                        cx.need_glyphs(font_stack, face);
                         this.has_font_text = true;
                     }
                 }
@@ -753,16 +704,11 @@ impl SymbolLayout {
             }
 
             if has_icon {
-                let icon = layout.icon_image.evaluate(
-                    &EvaluationContext::with_zoom_feature(zoom, Some(&ft))
-                        .with_available_images(Some(layout_parameters.available_images))
-                        .with_unavailable_images(Some(layout_parameters.unavailable_images))
-                        .with_canonical_tile_id(Some(&canonical_id)),
-                );
+                let icon = layout.icon_image.evaluate(&cx.context(&ft));
                 // An empty icon name means no icon, so it is not an image
                 // dependency.
                 if !icon.empty() {
-                    layout_parameters.image_dependencies.entry(icon.id().to_owned()).or_insert(ImageType::Icon);
+                    cx.need_image(icon.id(), ImageType::Icon);
                     ft.icon = Some(icon);
                 }
             }
@@ -782,8 +728,6 @@ impl SymbolLayout {
                 }
             }
         }
-        drop(geometry_layer);
-
         if this.sort_features_by_key && !sort_features {
             // Inserting at the lower bound puts each feature before the
             // earlier ones with an equal key: keep that order without a sort.
@@ -797,6 +741,26 @@ impl SymbolLayout {
         Ok(this)
     }
 
+    /// Once its glyphs and images resolved, applies the shaping of the text
+    /// that font faces draw and prepares the symbols, and has no bucket
+    /// without symbols. A layout without features has an empty bucket.
+    fn build(mut self, cx: &mut BuildCx<'_, Symbol>) -> Result<Option<SymbolBucket>, Error> {
+        if !self.features.is_empty()
+            && let Some(resolved) = cx.resolved()
+        {
+            if self.has_font_text {
+                self.finalize_symbols(resolved);
+            }
+            self.prepare_symbols(&resolved.glyphs, &resolved.icons);
+            if self.symbols.is_empty() {
+                return Ok(None);
+            }
+        }
+        Ok(Some(self.build_bucket(cx)))
+    }
+}
+
+impl SymbolLayout {
     #[must_use]
     pub(crate) fn evaluate_variable_offset(
         anchor: SymbolAnchorType,
@@ -1099,15 +1063,16 @@ impl SymbolLayout {
 }
 
 /// Adds laid-out symbols' quads to a bucket's buffers, as runs.
-struct BucketWriter<'a> {
+struct BucketWriter<'a, 'b> {
+    cx: &'a BuildCx<'b, Symbol>,
     state: &'a mut SymbolBucketState,
-    paint_properties: &'a mut VecMap<String, PaintProperties>,
+    icon_binders: &'a mut LayerBinders<SymbolIconBinders>,
+    text_binders: &'a mut LayerBinders<SymbolTextBinders>,
     text_size: &'a SymbolSizeBinder,
     icon_size: &'a SymbolSizeBinder,
     /// The text's paint varies by section, so binders take each section's.
     section_overrides: bool,
     allow_vertical_placement: bool,
-    canonical: &'a CanonicalTileID,
 }
 
 /// What the quads of a run share.
@@ -1124,7 +1089,7 @@ struct RunInfo {
     sort_key: f32,
 }
 
-impl BucketWriter<'_> {
+impl BucketWriter<'_, '_> {
     /// Adds `laid_out`'s runs, and returns its symbol with them set.
     fn add(&mut self, laid_out: LaidOutSymbol, feature: &SymbolFeature) -> SymbolInstance {
         let LaidOutSymbol { mut symbol, quads, text_offset, icon_offset, .. } = laid_out;
@@ -1158,24 +1123,14 @@ impl BucketWriter<'_> {
             icon.run = add(quads.icon.as_deref().unwrap_or_default(), WritingModes::NONE);
             icon.vertical_run = quads.vertical_icon.as_deref().map(|run_quads| add(run_quads, WritingModes::VERTICAL));
             let length = buffer.attribute_data.len();
-            for binders in self.paint_properties.values_mut() {
-                binders.icon_binders.populate_vertex_vectors(
-                    feature,
-                    length,
-                    symbol.data_feature_index,
-                    &ImagePositions::default(),
-                    None,
-                    self.canonical,
-                    &Value::Null,
-                );
-            }
+            self.cx.populate(self.icon_binders, symbol.data_feature_index, feature, length);
         }
 
         if let Some(text) = &mut symbol.text
             && let Some(formatted_text) = &feature.formatted_text
         {
             let size = self.text_size.vertex_size_data(feature);
-            let BucketWriter { state, paint_properties, canonical, section_overrides, .. } = self;
+            let BucketWriter { cx, state, text_binders, section_overrides, .. } = self;
             let buffer = &mut state.text;
             // The text's runs share its line and the distances along it.
             let distances = SymbolLayout::tile_distances(&quads.line, &anchor);
@@ -1185,17 +1140,7 @@ impl BucketWriter<'_> {
             let mut section = None;
             let mut populate_section = |section: usize, length: usize| {
                 let section = section_options_to_value(&formatted_text.sections()[section]);
-                for binders in paint_properties.values_mut() {
-                    binders.text_binders.populate_vertex_vectors(
-                        feature,
-                        length,
-                        feature.index,
-                        &ImagePositions::default(),
-                        None,
-                        canonical,
-                        &section,
-                    );
-                }
+                cx.populate_section(text_binders, feature.index, feature, length, &section);
             };
             let mut add = |run_quads: &[SymbolQuad], writing_modes| {
                 let info = run(size, text_offset, writing_modes, line, tile_distances);
@@ -1286,10 +1231,9 @@ fn add_quad(buffer: &mut Buffer, run: &RunInfo, quad: &SymbolQuad) -> usize {
         .extend(corners.map(|corner| SymbolBucket::layout_vertex(anchor, quad, corner, run.size, run.height_offset)));
     // Placement writes these before the quad draws; until then they agree
     // in count with the layout vertices.
-    buffer.dynamic_attribute_data.extend([SymbolBucket::dynamic_layout_attributes(anchor, 0.0); 4]);
-    buffer.opacity_attribute_data.extend([SymbolBucket::opacity_attributes(true, 1.0); 4]);
-    let mut triangles = Indexed { indexes: &mut buffer.triangles, segments: &mut buffer.segments };
-    triangles.add_keyed(buffer.attribute_data.get_mut(), first, run.sort_key, [[0, 1, 2], [1, 2, 3]])
+    buffer.dynamic_attribute_data.get_mut().extend([SymbolBucket::dynamic_layout_attributes(anchor, 0.0); 4]);
+    buffer.opacity_attribute_data.get_mut().extend([SymbolBucket::opacity_attributes(true, 1.0); 4]);
+    buffer.triangles.add_keyed(buffer.attribute_data.get_mut(), first, run.sort_key, [[0, 1, 2], [1, 2, 3]])
 }
 
 /// Adds the debug geometry of the collision boxes and circles of `state`'s
@@ -1314,8 +1258,9 @@ fn add_collision_geometry(state: &mut SymbolBucketState) {
             }
             .get_or_insert_with(Default::default);
             for b in symbol_instance_pools.boxes(feature) {
-                let first = buffer.vertices.len();
-                buffer.vertices.extend([(b.x1, b.y1), (b.x2, b.y1), (b.x2, b.y2), (b.x1, b.y2)].map(|corner| {
+                let vertices = buffer.vertices.get_mut();
+                let first = vertices.len();
+                vertices.extend([(b.x1, b.y1), (b.x2, b.y1), (b.x2, b.y2), (b.x1, b.y2)].map(|corner| {
                     SymbolBucket::collision_layout_vertex(
                         b.anchor,
                         symbol.anchor.point,
@@ -1324,53 +1269,26 @@ fn add_collision_geometry(state: &mut SymbolBucketState) {
                     )
                 }));
                 // Placement writes these before the box draws.
-                buffer.dynamic_vertices.extend([SymbolBucket::collision_dynamic_vertex(false, false, Vec2::ZERO); 4]);
+                buffer
+                    .dynamic_vertices
+                    .get_mut()
+                    .extend([SymbolBucket::collision_dynamic_vertex(false, false, Vec2::ZERO); 4]);
                 // A circle along a line draws filled, and a box as its outline.
-                let mut primitives = Indexed { indexes: &mut buffer.indices, segments: &mut buffer.segments };
                 if feature.along_line {
-                    primitives.add(&mut buffer.vertices, first, [[0, 1, 2], [0, 2, 3]]);
+                    buffer.indices.add(vertices, first, [[0, 1, 2], [0, 2, 3]]);
                 } else {
-                    primitives.add(&mut buffer.vertices, first, [[0, 1], [1, 2], [2, 3], [3, 0]]);
+                    buffer.indices.add(vertices, first, [[0, 1], [1, 2], [2, 3], [3, 0]]);
                 }
             }
         }
     }
 }
 
-impl Layout<Symbol> for SymbolLayout {
-    fn has_dependencies(&self) -> bool {
-        !self.features.is_empty()
-    }
-
-    /// With `resolved`, applies the shaping of the text that font faces
-    /// draw and prepares the symbols, and has no bucket without symbols.
-    fn create_bucket(
-        &mut self,
-        resolved: Option<&Resolved>,
-        _feature_index: &mut FeatureIndexBuilder,
-        build: &BuildParams,
-    ) -> Result<Option<SymbolBucket>, Error> {
-        if let Some(resolved) = resolved {
-            if self.has_font_text {
-                self.finalize_symbols(&resolved.shaping);
-            }
-            self.prepare_symbols(&resolved.glyphs, &resolved.icons);
-            if self.symbols.is_empty() {
-                return Ok(None);
-            }
-        }
-        Ok(Some(self.build_bucket(build.first_load, build.show_collision_boxes, &build.canonical)))
-    }
-
-    fn layers(&self) -> &VecMap<String, Arc<EvaluatedLayer<Symbol>>> {
-        &self.layer_paint_properties
-    }
-}
-
 impl SymbolLayout {
-    /// Applies the shaping of the text that font files draw,
-    /// before `prepare_symbols`.
-    fn finalize_symbols(&mut self, results: &ShapeResults) {
+    /// Applies the shaping of the text that font files draw, as `resolved`
+    /// has it, before `prepare_symbols`.
+    fn finalize_symbols(&mut self, resolved: &Resolved) {
+        let results = &resolved.shaping;
         let unshaped = Arc::new(ShapedText::default());
         for feature in &mut self.features {
             if feature.geometry.is_empty() {
@@ -1658,15 +1576,11 @@ impl SymbolLayout {
         self.compare_text.clear();
     }
 
-    fn build_bucket(
-        &mut self,
-        first_load: bool,
-        show_collision_boxes: bool,
-        canonical: &CanonicalTileID,
-    ) -> SymbolBucket {
+    fn build_bucket(&mut self, cx: &BuildCx<'_, Symbol>) -> SymbolBucket {
         let style = SymbolBucketStyle {
             layout: Arc::clone(&self.layout),
-            paint_properties: &self.layer_paint_properties,
+            icon_binders: cx.binders(),
+            text_binders: cx.binders(),
             text_size: &self.text_size,
             icon_size: &self.icon_size,
             zoom: self.zoom,
@@ -1683,15 +1597,16 @@ impl SymbolLayout {
         let pools = std::mem::take(&mut self.symbol_instance_pools);
         let mut bucket = SymbolBucket::new(style, flags, Vec::new(), pools, std::mem::take(&mut self.sort_key_ranges));
         let mut state = std::mem::take(&mut bucket.state);
-        let mut paint_properties = std::mem::take(&mut bucket.paint_properties);
+        let section_overrides = bucket.has_format_section_overrides();
         let mut writer = BucketWriter {
+            cx,
             state: &mut state,
-            paint_properties: &mut paint_properties,
+            icon_binders: &mut bucket.icon_binders,
+            text_binders: &mut bucket.text_binders,
             text_size: &bucket.text_size_binder,
             icon_size: &bucket.icon_size_binder,
-            section_overrides: bucket.has_format_section_overrides(),
+            section_overrides,
             allow_vertical_placement: self.allow_vertical_placement,
-            canonical,
         };
         let symbols: Vec<SymbolInstance> = std::mem::take(&mut self.symbols)
             .into_iter()
@@ -1701,12 +1616,11 @@ impl SymbolLayout {
             })
             .collect();
         state.symbol_instances = symbols;
-        if show_collision_boxes {
+        if cx.collision_boxes() {
             add_collision_geometry(&mut state);
         }
-        state.just_reloaded = !first_load;
+        state.just_reloaded = !cx.first_load();
         bucket.state = state;
-        bucket.paint_properties = paint_properties;
         bucket
     }
 }

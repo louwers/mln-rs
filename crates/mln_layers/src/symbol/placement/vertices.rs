@@ -35,7 +35,7 @@ fn collision_buffer(state: &mut SymbolBucketState, along_line: bool, text: bool)
         (false, true) => state.text_collision_box.as_mut(),
         (false, false) => state.icon_collision_box.as_mut(),
     }
-    .filter(|buffer| !buffer.segments.is_empty())
+    .filter(|buffer| buffer.has_data())
 }
 
 /// The orientation a run of `vertical` text or its icon shows in.
@@ -76,15 +76,15 @@ impl Placement {
     }
 
     /// Sets the opacities of the bucket's symbols from the placement, and
-    /// returns whether sorting the symbols for the map's bearing changed the
-    /// order of the bucket's triangles. A symbol a bucket before it in the
-    /// layer has, by `seen_cross_tile_ids`, is a duplicate, and hides.
+    /// sorts the symbols for the map's bearing where the layout asks. A
+    /// symbol a bucket before it in the layer has, by `seen_cross_tile_ids`,
+    /// is a duplicate, and hides.
     pub(crate) fn update_bucket_opacities(
         &self,
         bucket: &mut SymbolBucket,
         view: &View,
         seen_cross_tile_ids: &mut BTreeSet<NonZeroU32>,
-    ) -> bool {
+    ) {
         let layout = &*bucket.layout;
         let variable_placement = bucket.has_variable_text_anchors();
         let has_icon_text_fit = *layout.icon_text_fit.uniform() != IconTextFitType::None;
@@ -109,7 +109,7 @@ impl Placement {
 
         let state = &mut bucket.state;
         for buffer in [&mut state.text, &mut state.icon, &mut state.sdf_icon] {
-            buffer.opacity_attribute_data.clear();
+            buffer.opacity_attribute_data.get_mut().clear();
         }
         for buffer in [
             &mut state.text_collision_box,
@@ -120,7 +120,7 @@ impl Placement {
         .into_iter()
         .flatten()
         {
-            buffer.dynamic_vertices.clear();
+            buffer.dynamic_vertices.get_mut().clear();
         }
 
         let symbols = std::mem::take(&mut state.symbol_instances);
@@ -164,23 +164,23 @@ impl Placement {
                     if let Some(circles) = self.collision_circles.get(&key) {
                         for circle in circles {
                             let vertex = SymbolBucket::collision_dynamic_vertex(placed, circle.is_none(), Vec2::ZERO);
-                            extend(&mut buffer.dynamic_vertices, 4, vertex);
+                            extend(buffer.dynamic_vertices.get_mut(), 4, vertex);
                         }
                     } else {
                         // Not placed: not loaded yet, or from a fading tile.
                         let vertex = SymbolBucket::collision_dynamic_vertex(placed, false, Vec2::ZERO);
-                        extend(&mut buffer.dynamic_vertices, 4 * box_count, vertex);
+                        extend(buffer.dynamic_vertices.get_mut(), 4 * box_count, vertex);
                     }
                 } else {
                     let used = !is_text || !variable_placement || offset.is_some();
                     let shift = if is_text || has_icon_text_fit { text_shift } else { Vec2::ZERO };
                     let vertex = SymbolBucket::collision_dynamic_vertex(placed, !used, shift);
-                    extend(&mut buffer.dynamic_vertices, 4 * box_count, vertex);
+                    extend(buffer.dynamic_vertices.get_mut(), 4 * box_count, vertex);
                 }
             }
         }
         state.symbol_instances = symbols;
-        bucket.sort_features(view.angle() as f32)
+        bucket.sort_features(view.angle() as f32);
     }
 
     /// Lays out where the bucket's labels draw, for those that follow their
@@ -229,7 +229,7 @@ impl Placement {
                     keep_upright: *layout.icon_keep_upright.uniform(),
                 };
                 for buffer in [&mut bucket.state.sdf_icon, &mut bucket.state.icon] {
-                    if buffer.segments.is_empty() {
+                    if buffer.triangles.is_empty() {
                         continue;
                     }
                     let (positions, runs, pools) = buffer.positions_and_symbols(layer_id);
@@ -471,5 +471,5 @@ impl Placement {
 fn set_run_opacity(buffer: &mut Buffer, run: usize, hidden: bool, vertex: crate::symbol::bucket::SymbolOpacityVertex) {
     let run = &mut buffer.placed_symbols[run];
     run.hidden = hidden;
-    extend(&mut buffer.opacity_attribute_data, 4 * run.glyph_offsets.len(), vertex);
+    extend(buffer.opacity_attribute_data.get_mut(), 4 * run.glyph_offsets.len(), vertex);
 }
