@@ -26,7 +26,7 @@ use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::texture2d::SamplerState;
 use mln_util::logging::{Event, Log};
 
-use crate::gfx::buffer_store::SharedBuffer;
+use crate::gfx::buffer_store::{SharedBuffer, StoredBuffer};
 use crate::gfx::context::Resources;
 use crate::gfx::owned::{Held, Owned};
 use crate::gfx::store::{MeshKey, Shared, SharedTexture};
@@ -379,7 +379,7 @@ impl DrawObjects {
             if parameters.frame.camera.is_globe() { ProjectionVariant::Globe } else { ProjectionVariant::Mercator };
         let context = &mut *parameters.context;
         let shader = self.shader(context, variant).clone();
-        let index_buffer = context.stored_buffer(&self.indexes).and_then(|indexes| indexes.buffer());
+        let index_buffer = context.stored_buffer(&self.indexes).and_then(StoredBuffer::buffer);
         debug_assert!(index_buffer.is_some(), "a draw of {} draws indexes it didn't upload", self.program.name);
         let Some(index_buffer) = index_buffer else {
             return Ok(());

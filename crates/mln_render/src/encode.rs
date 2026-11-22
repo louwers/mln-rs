@@ -188,13 +188,12 @@ impl Group {
     pub fn block<T: UniformBlock>(&mut self, block: &T) -> &mut Self {
         let Pushes { blocks, block_bytes, .. } = &mut self.pushes;
         let bytes = bytemuck::bytes_of(block);
-        match blocks.iter().find(|(given, _)| std::ptr::eq(*given, T::BLOCK)) {
-            Some((_, range)) => block_bytes[range.clone()].copy_from_slice(bytes),
-            None => {
-                let start = block_bytes.len();
-                block_bytes.extend_from_slice(bytes);
-                blocks.push((T::BLOCK, start..block_bytes.len()));
-            }
+        if let Some((_, range)) = blocks.iter().find(|(given, _)| std::ptr::eq(*given, T::BLOCK)) {
+            block_bytes[range.clone()].copy_from_slice(bytes);
+        } else {
+            let start = block_bytes.len();
+            block_bytes.extend_from_slice(bytes);
+            blocks.push((T::BLOCK, start..block_bytes.len()));
         }
         self
     }

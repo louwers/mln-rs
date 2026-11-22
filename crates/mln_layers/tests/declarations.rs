@@ -8,7 +8,7 @@ use mln_render::__private::BinderSet as _;
 use mln_render::layer::PaintPropertyBinder;
 use mln_style::conversion::Convertible;
 use mln_style::evaluated::Evaluated;
-use mln_style::expression::{Functions, Image};
+use mln_style::expression::Functions;
 use mln_style::layer::Layer;
 use mln_style::layer_type::{LayerStyle, LayerTypeInfo, SourceKind, StyleLayerType, style_entry};
 use mln_style::property_table::{PropertyInfo, PropertyTable, PropertyVisitor};

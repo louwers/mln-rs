@@ -557,7 +557,7 @@ impl<T> CrossFadedPaintPropertyBinderKind<T> {
 /// The binder of a `*-pattern` property, whose two attributes are four `u16`s
 /// each.
 #[derive(Clone, Debug, mln_wire::Wire)]
-pub struct CrossFadedPaintPropertyBinder<T> {
+pub(crate) struct CrossFadedPaintPropertyBinder<T> {
     pub(crate) kind: CrossFadedPaintPropertyBinderKind<T>,
 }
 
@@ -567,7 +567,7 @@ const PATTERN_ZOOM_INTERPOLATED_SIZE: usize = 16;
 impl CrossFadedPaintPropertyBinder<Image> {
     /// The binder of `value` in a tile at `zoom`.
     #[must_use]
-    pub fn create(value: &Evaluated<Image>, zoom: f32) -> Self {
+    pub(crate) fn create(value: &Evaluated<Image>, zoom: f32) -> Self {
         let kind = match value {
             Evaluated::Constant(constant) => CrossFadedPaintPropertyBinderKind::Constant {
                 constant: Faded { from: constant.clone(), to: constant.clone() },
@@ -644,12 +644,6 @@ impl CrossFadedPaintPropertyBinder<Image> {
                 *populated_count = (*populated_count).max(length);
             }
         }
-    }
-
-    /// The zoom interpolation factors, always (0, 0) for pattern binders.
-    #[must_use]
-    pub fn interpolation_factor(&self, _current_zoom: f32) -> (f32, f32) {
-        (0.0, 0.0)
     }
 
     /// Where the property's attributes read the pattern values in `shared`,
@@ -893,8 +887,12 @@ pub(crate) struct MeshPaint {
     pub(crate) mixes: Rc<[(usize, Mix)]>,
     /// Writes the properties' values that their uniforms hold, of the
     /// layer's evaluated paint values, for each program property's name.
-    pub(crate) uniforms: fn(&dyn Any, &mut dyn FnMut(&[&str], &[u8])),
+    pub(crate) uniforms: WriteUniforms,
 }
+
+/// Writes the uniform values of a layer's evaluated paint values, as
+/// [`BinderSet::uniforms`] does.
+pub(crate) type WriteUniforms = fn(&dyn Any, &mut dyn FnMut(&[&str], &[u8]));
 
 /// [`BinderSet::uniforms`] of `paint`, `P::Paint`.
 fn uniforms_of<P: BinderSet>(paint: &dyn Any, write: &mut dyn FnMut(&[&str], &[u8])) {

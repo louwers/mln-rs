@@ -46,8 +46,7 @@ use crate::paint_parameters::{DepthTest, DrawTarget, OpenPass};
 use crate::render_static_data::RenderStaticData;
 use crate::shaders::programs;
 use crate::shaders::programs::{
-    ID_LAYER_COMPOSITE_BACKDROP_TEXTURE, ID_LAYER_COMPOSITE_IMAGE_TEXTURE,
-    LAYER_COMPOSITE_PROPS,
+    ID_LAYER_COMPOSITE_BACKDROP_TEXTURE, ID_LAYER_COMPOSITE_IMAGE_TEXTURE, LAYER_COMPOSITE_PROPS,
 };
 use crate::shaders::ubo::{
     LAYER_COMPOSITE_BLEND_COLOR, LAYER_COMPOSITE_BLEND_LUMINOSITY, LAYER_COMPOSITE_BLEND_MULTIPLY,
@@ -67,11 +66,7 @@ fn layout() -> VertexBufferLayout {
     VertexBufferLayout {
         stride: 4,
         step: VertexStep::Vertex,
-        attributes: vec![VertexAttribute {
-            id: 0,
-            format: AttributeDataType::Short2,
-            offset: 0,
-        }],
+        attributes: vec![VertexAttribute { id: 0, format: AttributeDataType::Short2, offset: 0 }],
     }
 }
 

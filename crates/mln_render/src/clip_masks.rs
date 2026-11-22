@@ -31,11 +31,7 @@ fn layout() -> VertexBufferLayout {
     VertexBufferLayout {
         stride: 4,
         step: VertexStep::Vertex,
-        attributes: vec![VertexAttribute {
-            id: 0,
-            format: AttributeDataType::Short2,
-            offset: 0,
-        }],
+        attributes: vec![VertexAttribute { id: 0, format: AttributeDataType::Short2, offset: 0 }],
     }
 }
 

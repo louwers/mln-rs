@@ -15,7 +15,7 @@ use crate::draw_objects::Mesh;
 use crate::encode::{Depth, Draw, Group};
 use crate::gfx::context::Resources;
 use crate::globe::{grid, surface_granularity};
-use crate::handles::{Buffer, IndexBuffer};
+use crate::handles::TileSurface;
 use crate::mesh_desc::MeshDesc;
 use crate::paint_parameters::PaintParameters;
 use crate::shaders::programs;
@@ -34,7 +34,7 @@ pub(crate) struct GlobeDepthPass {
     draws: Group,
     /// The buffers of each grid, which depends only on the zoom and whether
     /// the tile touches a pole.
-    grids: BTreeMap<(u8, bool, bool), (Buffer<[i16; 2]>, IndexBuffer)>,
+    grids: BTreeMap<(u8, bool, bool), TileSurface>,
 }
 
 impl Default for GlobeDepthPass {
@@ -88,9 +88,12 @@ impl GlobeDepthPass {
             if value.is_none() {
                 let canonical = &tile_id.canonical;
                 let key = (canonical.z, canonical.y == 0, canonical.y == (1u32 << canonical.z) - 1);
-                let (vertices, triangles) = self.grids.entry(key).or_insert_with(|| {
+                let TileSurface { vertices, triangles } = self.grids.entry(key).or_insert_with(|| {
                     let grid = grid(canonical, surface_granularity(canonical.z), true);
-                    (context.buffer(&grid.vertices), context.index_buffer(grid.triangles.as_flattened()))
+                    TileSurface {
+                        vertices: context.buffer(&grid.vertices),
+                        triangles: context.index_buffer(grid.triangles.as_flattened()),
+                    }
                 });
                 let mut mesh = MeshDesc::new(&programs::GLOBE_DEPTH, triangles);
                 // The far hemisphere is clockwise on screen on every backend,

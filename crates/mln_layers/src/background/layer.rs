@@ -1,5 +1,7 @@
 use mln_render::draw::{Depth, Draw, Draws, Mesh, MeshDesc};
-use mln_render::layer::{EvaluateCx, Evaluation, FrameTile, Layer, NewCx, PrepareCx, TileCx, UpdateCx, ViewCover};
+use mln_render::layer::{
+    EvaluateCx, Evaluation, FrameTile, Layer, NewCx, PrepareCx, TileCx, TileTransform, UpdateCx, ViewCover,
+};
 use mln_style_types::image::ImagePosition;
 
 use super::Background;
@@ -84,7 +86,7 @@ impl Layer for BackgroundLayer {
             main.block(&BackgroundPropsUBO { color, opacity, ..BackgroundPropsUBO::default() });
             let draw = Draw { opaque: true, depth: Depth::Layer { sub_layer: 0, write: true }, ..Draw::DEFAULT };
             for (tile, (), meshes) in cx.tiles() {
-                main.push_at(&meshes.color, &tile.project(cx.frame, &Default::default()), draw, ());
+                main.push_at(&meshes.color, &tile.project(cx.frame, &TileTransform::default()), draw, ());
             }
             return;
         }
@@ -114,7 +116,7 @@ impl Layer for BackgroundLayer {
                 tile_units_to_pixels: origin.tile_units_to_pixels,
                 ..BackgroundPatternDrawableUBO::default()
             };
-            main.push_at(&meshes.pattern, &tile.project(cx.frame, &Default::default()), draw, block);
+            main.push_at(&meshes.pattern, &tile.project(cx.frame, &TileTransform::default()), draw, block);
         }
     }
 }

@@ -178,17 +178,16 @@ impl Resources {
         if let Some(surface) = self.surfaces.get(&key) {
             return surface.clone();
         }
-        let surface = match key {
-            None => crate::handles::TileSurface {
+        let surface = if key.is_some() {
+            let grid = crate::globe::tile_grid(&canonical);
+            crate::handles::TileSurface {
+                vertices: self.buffer(&grid.vertices),
+                triangles: self.index_buffer(grid.triangles.as_flattened()),
+            }
+        } else {
+            crate::handles::TileSurface {
                 vertices: self.buffer(&RenderStaticData::tile_vertices()),
                 triangles: self.index_buffer(&RenderStaticData::quad_triangle_indices()),
-            },
-            Some(_) => {
-                let grid = crate::globe::tile_grid(&canonical);
-                crate::handles::TileSurface {
-                    vertices: self.buffer(&grid.vertices),
-                    triangles: self.index_buffer(grid.triangles.as_flattened()),
-                }
             }
         };
         self.surfaces.insert(key, surface.clone());
