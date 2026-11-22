@@ -388,14 +388,13 @@ fn key_of<'a>(keys: &'a [u8], symbol: &IndexedSymbol) -> &'a [u8] {
 mod tests {
     use std::sync::Arc;
 
+    use mln_render::layer::LayerBinders;
     use mln_style::property_value::PropertyValue;
     use mln_style_types::ProjectionDefinition;
     use mln_util::geo::LatLng;
     use mln_util::size::Size;
 
     use super::*;
-    use mln_render::layer::LayerBinders;
-
     use crate::symbol::SymbolLayoutProperties;
     use crate::symbol::anchor::Anchor;
     use crate::symbol::bucket::{SymbolBucketStyle, SymbolLayoutFlags};

@@ -4,17 +4,19 @@
 //! A layer makes GPU resources in the renderer's [`Resources`] and keeps
 //! their handles: [`Buffer`]s of vertices or [`IndexBuffer`]s, [`Texture`]s,
 //! and [`Mesh`]es, each a program bound to indexes, buffers and textures
-//! with the state it draws in ([`MeshDesc`]), in the frame's projection. A
-//! tile's surface ([`Resources::tile_surface`]) is a shared buffer of the
-//! engine's. A bucket's buffers take in place what changes in its data
-//! (feature state, placement), and meshes over them see it. An entry of the
-//! resources goes once its last handle drops and the GPU is done with it,
-//! and a mesh holds what it was made from.
+//! with the state it draws in ([`MeshDesc`]), in the frame's projection or,
+//! for geometry of the viewport, Mercator's. A tile's surface
+//! ([`Resources::tile_surface`]) is a shared buffer of the engine's. A
+//! bucket's buffers take in place what changes in its data (feature state,
+//! placement), and meshes over them see it. A mesh made again in its place
+//! ([`Resources::set_mesh`]) keeps its age, and so its draws' order. An
+//! entry of the resources goes once its last handle drops and the GPU is
+//! done with it, and a mesh holds what it was made from.
 //!
-//! Each frame, a layer pushes its draws to [`Draws`]: a [`Draw`] of one of
-//! its meshes, placed in the layer's order, with the values of its
-//! program's blocks of each draw ([`DrawBlocks`]) and, for a draw of a tile,
-//! the tile's projection. The engine writes what the blocks hold of a mesh's
+//! Each frame, a layer pushes its draws to [`Draws`], in its main group or
+//! in the overlay above it: a [`Draw`] of one of its meshes, placed in the
+//! layer's order, with the values of its program's blocks of each draw
+//! ([`DrawBlocks`]) and, for a draw of a tile, the tile's projection. The engine writes what the blocks hold of a mesh's
 //! paint values ([`MeshDesc::paint`]), sorts each [`Group`] by the draws'
 //! order, writes each block once for all of the group's draws, places the
 //! group in the layers' order and depth, and draws it in the frame's passes,

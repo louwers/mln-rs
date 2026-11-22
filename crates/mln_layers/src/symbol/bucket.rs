@@ -591,8 +591,12 @@ impl SymbolBucket {
     /// boxes or circles.
     pub(crate) fn has_data(&self) -> bool {
         let state = &self.state;
-        let collision =
-            [&state.icon_collision_box, &state.text_collision_box, &state.icon_collision_circle, &state.text_collision_circle];
+        let collision = [
+            &state.icon_collision_box,
+            &state.text_collision_box,
+            &state.icon_collision_circle,
+            &state.text_collision_circle,
+        ];
         self.has_text_data()
             || self.has_icon_data()
             || self.has_sdf_icon_data()

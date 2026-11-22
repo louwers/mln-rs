@@ -18,7 +18,7 @@ use std::sync::Arc;
 use geometry::Point;
 use glam::Vec2;
 use mln_map_types::MapMode;
-use mln_render::layer::{BuildCx, Layout, LayoutCx, Resolved};
+use mln_render::layer::{BuildCx, LayerBinders, Layout, LayoutCx, Resolved};
 use mln_style::evaluated::Evaluated;
 use mln_style::expression::formatted::K_FORMATTED_SECTION_TEXT_COLOR;
 use mln_style::expression::{EvaluationContext, GlobalStateMap, Value};
@@ -41,7 +41,6 @@ use mln_util::error::Error;
 use mln_util::geometry::FeatureType;
 use mln_util::range::Range;
 use mln_util::{Padding, i18n};
-use mln_render::layer::LayerBinders;
 use mln_vec_map::VecMap;
 
 use crate::symbol::anchor::Anchor;

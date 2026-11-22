@@ -108,7 +108,11 @@ impl<L: Layer> Hosted<L> {
 
     /// The render layer of the layer `style`, of the type `entry`, before
     /// its values transition, which joins the renderer of `res`.
-    pub(crate) fn new(entry: &'static dyn ErasedLayerType, style: Arc<LayerStyle<L::Style>>, res: &mut Resources) -> Self {
+    pub(crate) fn new(
+        entry: &'static dyn ErasedLayerType,
+        style: Arc<LayerStyle<L::Style>>,
+        res: &mut Resources,
+    ) -> Self {
         let unevaluated = style.paint.untransitioned();
         let evaluated = Arc::new(EvaluatedLayer::with_paint(entry, Arc::clone(&style), Default::default()));
         let values = LayerValues { style, unevaluated, evaluated };

@@ -293,7 +293,8 @@ impl BucketGeometry {
             return;
         }
         let entry = if keep { res.add_buffer(vec.get_mut().clone()) } else { vec.store_buffer(res) };
-        let uploaded: Rc<dyn Any> = Rc::new(IndexBuffer { buffer: Buffer::new(entry), segments: indexes.segments.clone() });
+        let uploaded: Rc<dyn Any> =
+            Rc::new(IndexBuffer { buffer: Buffer::new(entry), segments: indexes.segments.clone() });
         self.buffers.insert(vec.key, uploaded);
     }
 

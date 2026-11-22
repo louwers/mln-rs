@@ -67,7 +67,10 @@ impl<'a> Input<'a> {
             size_of::<V>(),
             "a vertex whose attributes' formats don't add up to its size"
         );
-        debug_assert!(V::NAMES.is_empty() || V::NAMES.len() == V::ATTRIBUTES.len(), "a vertex with names for some attributes");
+        debug_assert!(
+            V::NAMES.is_empty() || V::NAMES.len() == V::ATTRIBUTES.len(),
+            "a vertex with names for some attributes"
+        );
         Input { entry: &buffer.entry, attributes: V::ATTRIBUTES, names: V::NAMES, stride: size_of::<V>() as u32 }
     }
 }
@@ -201,7 +204,8 @@ impl Resources {
                 .buffers
                 .iter()
                 .filter_map(|buffer| match buffer.kind {
-                    BufferKind::Storage { block, .. } | BufferKind::DrawUniform(block) => Some((block.name, block.size)),
+                    BufferKind::Storage { block, .. } | BufferKind::DrawUniform(block) =>
+                        Some((block.name, block.size)),
                     _ => None,
                 })
                 .eq(B::BLOCKS.iter().map(|block| (block.name, block.size))),

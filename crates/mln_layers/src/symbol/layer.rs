@@ -8,8 +8,8 @@ use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_render::draw::{Buffer, Depth, Draw, Draws, IndexBuffer, Mesh, MeshDesc, Resources};
 use mln_render::layer::{
-    EvaluateCx, Evaluation, Features, FrameTile, Layer, LayerBucket, NewCx, PrepareCx, TileProjection,
-    TileTransform, UpdateCx,
+    EvaluateCx, Evaluation, Features, FrameTile, Layer, LayerBucket, NewCx, PrepareCx, TileProjection, TileTransform,
+    UpdateCx,
 };
 use mln_render::placement;
 use mln_style::StyleValue as _;
@@ -85,7 +85,9 @@ enum IconFilter {
     /// Linearly while the camera moves or the images don't lie flat on the
     /// screen: the view is pitched, or they turn with the map. Otherwise
     /// nearest, so that an image drawn at its own size stays sharp.
-    NearestWhenStill { map_aligned: bool },
+    NearestWhenStill {
+        map_aligned: bool,
+    },
 }
 
 impl IconFilter {
@@ -189,7 +191,8 @@ impl Layer for SymbolLayer {
             || colored(&paint.icon_halo_color, SymbolPaintProperties::Defaults::icon_halo_color());
         let text = colored(&paint.text_color, SymbolPaintProperties::Defaults::text_color())
             || colored(&paint.text_halo_color, SymbolPaintProperties::Defaults::text_halo_color());
-        if (paint.icon_opacity.constant_or(&1.0) > 0.0 && icon) || (paint.text_opacity.constant_or(&1.0) > 0.0 && text) {
+        if (paint.icon_opacity.constant_or(&1.0) > 0.0 && icon) || (paint.text_opacity.constant_or(&1.0) > 0.0 && text)
+        {
             Evaluation::TRANSLUCENT
         } else {
             Evaluation::NONE
@@ -203,7 +206,7 @@ impl Layer for SymbolLayer {
     fn update(&mut self, cx: &mut UpdateCx<'_, Self>) {
         let moving = cx.frame.camera_moving || cx.frame.camera.pitch() != 0.0;
         let style = &cx.layer.style;
-        let screen_space = *style.layout.symbol_screen_space.as_constant().unwrap_or(&false);
+        let screen_space = screen_space(&style.layout);
         let sort_by_key = style.layout.symbol_sort_key.is_expression();
         let constant_key = style.layout.symbol_sort_key.is_constant();
         let mut groups = Vec::new();
@@ -234,13 +237,20 @@ impl Layer for SymbolLayer {
             // previous sort-key expression until it is laid out again.
             let by_segment = sort_by_key || (constant_key && !bucket.layout.symbol_sort_key.is_constant());
             let mut serial_key = 1.0;
-            let atlases = [(Kind::Icon, laid.icon_atlas()), (Kind::SdfIcon, laid.icon_atlas()), (Kind::Text, laid.glyph_atlas())];
+            let atlases =
+                [(Kind::Icon, laid.icon_atlas()), (Kind::SdfIcon, laid.icon_atlas()), (Kind::Text, laid.glyph_atlas())];
             for (kind, atlas) in atlases {
                 let triangles = &kind.buffer(bucket).triangles;
                 if triangles.is_empty() || atlas.is_none() {
                     continue;
                 }
-                let group = |sort_key, segment| SegmentGroup { sort_key, kind, tile: index, tile_id: tile.unwrapped_id(), segment };
+                let group = |sort_key, segment| SegmentGroup {
+                    sort_key,
+                    kind,
+                    tile: index,
+                    tile_id: tile.unwrapped_id(),
+                    segment,
+                };
                 if by_segment {
                     let segments = triangles.segments().iter().enumerate();
                     groups.extend(segments.map(|(i, segment)| group(segment.sort_key, Some(i))));
@@ -257,40 +267,43 @@ impl Layer for SymbolLayer {
         // The text draws of a tile's place made in one frame filter its icon
         // atlas as the first of them does, and so do its icon draws.
         let mut first_filters: Vec<(UnwrappedTileID, bool, IconFilter)> = Vec::new();
-        let mut first_filter = |tile, text, own| match first_filters.iter().find(|&&(at, of, _)| at == tile && of == text) {
-            Some(&(_, _, first)) => first,
-            None => {
-                first_filters.push((tile, text, own));
-                own
+        let mut first_filter = |tile, text, own| {
+            if let Some(&(_, _, first)) = first_filters.iter().find(|&&(at, of, _)| at == tile && of == text) {
+                return first;
             }
+            first_filters.push((tile, text, own));
+            own
         };
         let zoom = cx.frame.camera.zoom() as f32;
         for group in &groups {
             let (_, laid, value) = cx.tiles.get_mut(group.tile);
             let (Some(laid), Some(value)) = (laid, value.as_mut()) else { continue };
             let (bucket, paint) = (laid.bucket, &laid.laid_with.paint);
-            let sharp = IconFilter::NearestWhenStill { map_aligned: Alignment::of(group.kind, &bucket.layout).rotate_with_map };
+            let sharp =
+                IconFilter::NearestWhenStill { map_aligned: Alignment::of(group.kind, &bucket.layout).rotate_with_map };
             let colored = |color: &Evaluated<Color>| color.constant_or(&Color::black()).a > 0.0;
-            let (halo, fill, filter) = match group.kind {
+            let (halo, fill, own) = match group.kind {
                 Kind::Text => {
                     let halo = colored(&paint.text_halo_color) && paint.text_halo_width.constant_or(&1.0) != 0.0;
                     // Text whose size changes with the zoom draws scaled.
                     let constant = bucket.text_size_binder.evaluate_for_zoom(zoom).is_zoom_constant;
-                    let filter = first_filter(group.tile_id, true, if constant { sharp } else { IconFilter::Linear });
-                    (halo, colored(&paint.text_color), filter)
+                    (halo, colored(&paint.text_color), if constant { sharp } else { IconFilter::Linear })
                 }
                 kind => {
                     let scaled = bucket.layout.icon_size.constant_or(&1.0) != 1.0 || bucket.icons_need_linear;
                     let own = if kind == Kind::SdfIcon || scaled { IconFilter::Linear } else { sharp };
-                    let filter = first_filter(group.tile_id, false, own);
                     if kind == Kind::Icon {
-                        (false, true, filter)
+                        (false, true, own)
                     } else {
                         let halo = colored(&paint.icon_halo_color) && paint.icon_halo_width.constant_or(&1.0) != 0.0;
-                        (halo, colored(&paint.icon_color), filter)
+                        (halo, colored(&paint.icon_color), own)
                     }
                 }
             };
+            if !halo && !fill {
+                continue;
+            }
+            let filter = first_filter(group.tile_id, group.kind == Kind::Text, own);
             let parts = MeshParts::new(laid, group.kind, group.segment, screen_space);
             let icon_atlas = parts.icon_slot.map(|slot| (slot, filter));
             let sampler = icon_atlas.map(|(_, filter)| filter.sampler(moving));
@@ -358,6 +371,16 @@ impl Layer for SymbolLayer {
     }
 }
 
+/// Whether the layer's symbols draw over the viewport rather than on the
+/// map, by its `symbol-screen-space`.
+fn screen_space(layout: &SymbolLayoutProperties::Unevaluated) -> bool {
+    layout
+        .symbol_screen_space
+        .as_constant()
+        .copied()
+        .unwrap_or_else(SymbolLayoutProperties::Defaults::symbol_screen_space)
+}
+
 /// A `*-translate` and its anchor, as a tile's geometry is placed.
 fn translated(
     translate: &Evaluated<[f32; 2]>,
@@ -380,7 +403,12 @@ struct MeshParts<'a> {
 }
 
 impl<'a> MeshParts<'a> {
-    fn new(laid: LayerBucket<'a, Symbol, SymbolBucket>, kind: Kind, segment: Option<usize>, screen_space: bool) -> Self {
+    fn new(
+        laid: LayerBucket<'a, Symbol, SymbolBucket>,
+        kind: Kind,
+        segment: Option<usize>,
+        screen_space: bool,
+    ) -> Self {
         let buffer = kind.buffer(laid.bucket);
         let program = match kind {
             Kind::Text if laid.bucket.icons_in_text => &SYMBOL_TEXT_AND_ICON,
@@ -443,7 +471,7 @@ impl SymbolDraw {
     ) -> (TileProjection, (SymbolDrawableUBO, SymbolTilePropsUBO)) {
         let (camera, bucket, paint) = (cx.frame.camera, laid.bucket, &cx.layer.evaluated.paint);
         let layout = &cx.layer.style.layout;
-        let screen_space = *layout.symbol_screen_space.as_constant().unwrap_or(&false);
+        let screen_space = screen_space(layout);
         let is_text = self.kind == Kind::Text;
         let how = if is_text {
             translated(&paint.text_translate, &paint.text_translate_anchor)
@@ -514,7 +542,8 @@ impl SymbolDraw {
             is_halo_pass: self.halo.into(),
             ..SymbolDrawableUBO::default()
         };
-        let tile_props = SymbolTilePropsUBO { is_text: is_text.into(), is_halo: self.halo.into(), ..Default::default() };
+        let tile_props =
+            SymbolTilePropsUBO { is_text: is_text.into(), is_halo: self.halo.into(), ..Default::default() };
         (at, (drawable, tile_props))
     }
 }

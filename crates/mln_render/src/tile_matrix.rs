@@ -167,8 +167,8 @@ pub(crate) fn projection_data(tile_id: &UnwrappedTileID, frame: &Frame<'_>, how:
     if how.screen_space {
         let extent = f64::from(EXTENT);
         let [x, y] = how.translate.map(f64::from);
-        let matrix = orthographic(0.0, extent, -extent, 0.0, 0.0, 1.0)
-            * DMat4::from_translation(DVec3::new(x, y - extent, 0.0));
+        let matrix =
+            orthographic(0.0, extent, -extent, 0.0, 0.0, 1.0) * DMat4::from_translation(DVec3::new(x, y - extent, 0.0));
         return Projection::Mercator.projection_data(frame.camera, tile_id, &matrix);
     }
     let origin = how.origin.map(|origin| Point::new(origin.x, origin.y));

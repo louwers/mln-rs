@@ -2683,7 +2683,7 @@ fn placed_symbol_data_of_a_tile() {
     }"#,
     );
     test.map().edit_style(|style| style.apply(Edit::AddImage(style_image("marker", red_image(16, 16), 1.0)))).unwrap();
-    assert!(test.frontend().renderer().placement::<SymbolPlacement>().is_some());
+    assert!(mln_render::placement::pass::<SymbolPlacement>(test.frontend().renderer()).is_some());
     test.frontend().renderer().collect_placed_symbol_data(true);
     test.render();
     let placed = test.frontend().renderer().placed_symbols_data();

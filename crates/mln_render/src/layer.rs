@@ -30,7 +30,8 @@
 //!    bucket ([`LayerBucket`]) with the program the type declares. The
 //!    engine keeps the values with their tiles and drops them when the
 //!    tiles or their data go, or the map switches between Mercator and the
-//!    globe.
+//!    globe. A type whose meshes order across its tiles makes the values in
+//!    [`Layer::update`] instead ([`Tiles::get_mut`]).
 //! 3. Its draws. [`Layer::prepare`] pushes a [`Draw`](crate::draw::Draw)
 //!    of each mesh, with its tile's projection and the values of its
 //!    program's blocks, to [`Draws`]. The engine writes what the blocks
@@ -150,7 +151,8 @@ pub trait Layer: Sized + 'static {
 
     /// The frame's update of the layer, before its tiles' values are made:
     /// what the layer keeps for all its tiles, such as an atlas of images,
-    /// is brought up to date here.
+    /// is brought up to date here, and values of tiles that the layer makes
+    /// in an order of its own.
     fn update(&mut self, _cx: &mut UpdateCx<'_, Self>) {}
 
     /// The value of `tile`, which has `data` for the layer and no value yet:
@@ -714,12 +716,6 @@ impl<'a, S: StyleLayerType, B> LayerBucket<'a, S, B> {
     #[must_use]
     pub fn icon_atlas(self) -> Option<&'a Texture> {
         self.contents.textures.icon()
-    }
-
-    /// The tile's feature index, which queries search.
-    #[must_use]
-    pub(crate) fn feature_index(self) -> &'a Arc<FeatureIndex> {
-        &self.contents.result.feature_index
     }
 }
 

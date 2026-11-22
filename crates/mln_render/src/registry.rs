@@ -63,7 +63,10 @@ impl RegistryBuilder {
     /// Adds the layer type of the layer `L`, as `entry` holds it, as
     /// [`add_layer_type`](Self::add_layer_type) does. Fails too for a second
     /// type whose layers place.
-    pub(crate) fn add_layer_entry<L: Layer>(&mut self, entry: &'static dyn ErasedLayerType) -> Result<(), RegisterError> {
+    pub(crate) fn add_layer_entry<L: Layer>(
+        &mut self,
+        entry: &'static dyn ErasedLayerType,
+    ) -> Result<(), RegisterError> {
         const {
             assert!(
                 <L::Style as StyleLayerType>::INFO.source as u8 == crate::layer::input_source::<L>() as u8,

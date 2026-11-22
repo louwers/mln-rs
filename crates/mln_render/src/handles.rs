@@ -107,7 +107,7 @@ impl IndexBuffer {
     /// or none where there is no such segment.
     #[must_use]
     pub fn segment(&self, index: usize) -> IndexBuffer {
-        IndexBuffer { buffer: self.buffer.clone(), segments: self.segments.get(index).cloned().into_iter().collect() }
+        IndexBuffer { buffer: self.buffer.clone(), segments: self.segments.get(index).copied().into_iter().collect() }
     }
 }
 
