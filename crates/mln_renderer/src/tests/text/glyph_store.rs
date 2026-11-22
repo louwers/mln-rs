@@ -1613,8 +1613,7 @@ fn an_answer_for_an_evicted_stack_is_dropped() {
     test.glyph_store().take_device_fonts(&test_stack(), vec![('a', Some(face))]);
     assert_eq!(test.glyph_store().revision(), revision);
 
-    // The wait resolves again, asks again, since the first choice may have
-    // stopped with its stack, and is answered.
+    // The wait resolves again, asks again, and is answered.
     test.store.answer();
     test.run_until(|| answered.get());
     assert_eq!(fonts.asked().last(), Some(&'a'));

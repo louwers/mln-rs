@@ -112,9 +112,6 @@ struct Entry {
     no_local: BTreeSet<GlyphID>,
     /// The device fonts of the characters asked about.
     device: HashMap<char, DeviceFont>,
-    /// Held as long as the entry: the chooser stops choosing for it once
-    /// the store drops it.
-    alive: Arc<()>,
 }
 
 /// Where the device font of a character of a font stack stands.
@@ -363,20 +360,13 @@ impl GlyphStore {
                 }
             }
             for (font_stack, types) in &dependencies.shapes {
-                for text in types.get(&GlyphIDType::SYSTEM).into_iter().flatten() {
-                    for (i, &c) in text.iter().enumerate() {
-                        // A character that extends the one before it joins its
-                        // piece (`shape_with_system_fonts`).
-                        if i > 0 && i18n::extends_previous(c) {
-                            continue;
+                for &c in types.get(&GlyphIDType::SYSTEM).into_iter().flatten().flatten() {
+                    match self.device_font(font_stack, c) {
+                        DeviceFont::Asked => waits = true,
+                        DeviceFont::Chosen(Some(type_)) => {
+                            needed.push((font_stack, get_glyph_range(GlyphID::with_type(0, type_))));
                         }
-                        match self.device_font(font_stack, c) {
-                            DeviceFont::Asked => waits = true,
-                            DeviceFont::Chosen(Some(type_)) => {
-                                needed.push((font_stack, get_glyph_range(GlyphID::with_type(0, type_))));
-                            }
-                            DeviceFont::Chosen(None) => {}
-                        }
+                        DeviceFont::Chosen(None) => {}
                     }
                 }
             }
@@ -658,19 +648,14 @@ impl GlyphStore {
 
     /// Has the chooser choose the device fonts of the characters asked about
     /// since the last call, one task per font stack on `choices`, each of
-    /// which sends its answer to `inbox`. A task stops once the store drops
-    /// its stack's entry, or the store drops.
+    /// which sends its answer to `inbox`.
     fn ask_device_fonts(&mut self, inbox: &InboxSender) {
         let Some(chooser) = &self.local.chooser else { return };
         for (font_stack, chars) in std::mem::take(&mut self.asks) {
-            let Some(entry) = self.entries.get(&font_stack) else { continue };
-            let alive = Arc::downgrade(&entry.alive);
             let (chooser, inbox) = (Arc::clone(chooser), inbox.clone());
             self.choices.spawn(move || {
-                let choose = |c| (alive.strong_count() > 0).then(|| (c, chooser.choose(&font_stack, c)));
-                if let Some(faces) = chars.into_iter().map(choose).collect() {
-                    inbox.send(TileEvent::DeviceFonts { font_stack, faces });
-                }
+                let faces = chars.into_iter().map(|c| (c, chooser.choose(&font_stack, c))).collect();
+                inbox.send(TileEvent::DeviceFonts { font_stack, faces });
             });
         }
     }
