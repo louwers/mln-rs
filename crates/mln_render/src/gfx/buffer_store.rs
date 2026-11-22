@@ -4,7 +4,8 @@
 //! store makes one, of the entries it adds, so a handle's count is its
 //! entry's. An entry is a vertex or an index buffer as its first upload
 //! says: a GPU buffer is one or the other. New bytes of the same size
-//! replace an entry's, which the next upload writes over its buffer's.
+//! replace an entry's, which the next upload writes over its buffer's; the
+//! entry then keeps their storage for the next.
 
 use std::rc::Rc;
 
@@ -25,6 +26,11 @@ enum BufferData {
     Halves(Vec<u16>),
     Words(Vec<u32>),
     Doubles(Vec<u64>),
+    /// The bytes of an update, which the next upload writes.
+    Updated(Vec<u8>),
+    /// The bytes of an update that the last upload wrote, whose storage the
+    /// next update fills.
+    Written(Vec<u8>),
     /// The bytes in the JS array they arrived in, which the upload writes
     /// from there.
     #[cfg(target_family = "wasm")]
@@ -36,9 +42,10 @@ enum BufferData {
 /// A buffer of the context's store: its elements' bytes until an upload
 /// writes them to a GPU buffer, which frees them, and that buffer. An
 /// update gives it new bytes of as many elements, which the next upload
-/// writes over the GPU buffer's.
+/// writes over the GPU buffer's, keeping their storage for the next update.
 pub(crate) struct StoredBuffer {
-    /// The bytes the next upload writes; `Freed` once it wrote them.
+    /// The bytes the next upload writes; once it wrote them, `Freed`, or
+    /// `Written` for an update's.
     data: BufferData,
     count: usize,
     vertex_size: usize,
@@ -66,9 +73,10 @@ impl BufferData {
             BufferData::Halves(data) => Some(bytemuck::cast_slice_mut(data)),
             BufferData::Words(data) => Some(bytemuck::cast_slice_mut(data)),
             BufferData::Doubles(data) => Some(bytemuck::cast_slice_mut(data)),
+            BufferData::Updated(bytes) => Some(bytes),
             #[cfg(target_family = "wasm")]
             BufferData::Host(_) => None,
-            BufferData::Freed => None,
+            BufferData::Written(_) | BufferData::Freed => None,
         }
     }
 
@@ -79,9 +87,10 @@ impl BufferData {
             BufferData::Halves(data) => Some(bytemuck::cast_slice(data)),
             BufferData::Words(data) => Some(bytemuck::cast_slice(data)),
             BufferData::Doubles(data) => Some(bytemuck::cast_slice(data)),
+            BufferData::Updated(bytes) => Some(bytes),
             #[cfg(target_family = "wasm")]
             BufferData::Host(_) => None,
-            BufferData::Freed => None,
+            BufferData::Written(_) | BufferData::Freed => None,
         }
     }
 }
@@ -124,7 +133,7 @@ impl StoredBuffer {
     /// before then binds them again, and its other attributes with them.
     #[must_use]
     pub(crate) fn needs_upload(&self) -> bool {
-        !matches!(self.data, BufferData::Freed)
+        !matches!(self.data, BufferData::Written(_) | BufferData::Freed)
     }
 
     /// The GPU buffer, once an upload made it.
@@ -147,16 +156,23 @@ impl StoredBuffer {
         if bytes.len() != self.size() {
             return false;
         }
+        if let BufferData::Written(storage) = &mut self.data {
+            self.data = BufferData::Updated(std::mem::take(storage));
+        }
         match self.data.bytes_mut() {
             Some(data) => data.copy_from_slice(bytes),
-            None => self.data = BufferData::Bytes(bytes.to_vec()),
+            None => self.data = BufferData::Updated(bytes.to_vec()),
         }
         true
     }
 
-    /// Frees the bytes, which the upload wrote.
+    /// Frees the bytes, which the upload wrote, or keeps an update's
+    /// storage for the next update.
     fn written(&mut self) {
-        self.data = BufferData::Freed;
+        self.data = match std::mem::replace(&mut self.data, BufferData::Freed) {
+            BufferData::Updated(bytes) | BufferData::Written(bytes) => BufferData::Written(bytes),
+            _ => BufferData::Freed,
+        };
     }
 
     /// The buffer of the vertices of `gpu` through `device`, of `usage`,

@@ -5,6 +5,8 @@ use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 
 use super::with_context;
+use crate::bucket_geometry::{BucketGeometry, GpuVec};
+use crate::gfx::context::Resources;
 use crate::handles::ImageVertex;
 use crate::tile::raster::RasterContents;
 use crate::tile_mask::TileMask;
@@ -192,6 +194,32 @@ fn stored_vertices_free_their_data_once_they_have_a_buffer() {
             context.stored_buffer(&vertices).is_some_and(|stored| !stored.needs_upload() && stored.bytes().is_empty())
         );
         assert_eq!(vertices.count(), 2);
+    });
+}
+
+// A kept vector writes its buffer again only once it changed, as placement
+// changes it through `get_mut`.
+#[test]
+fn a_kept_vector_uploads_again_only_once_it_changed() {
+    with_context(|gpu, context| {
+        let mut vec = GpuVec::new(vec![1.0f32, 2.0]);
+        let mut geometry = BucketGeometry::default();
+        geometry.upload(&mut vec, true, &[], context);
+        let entry = geometry.buffer(&vec).expect("a buffer").entry.clone();
+        context.upload_buffer(gpu, &entry).expect("uploads").expect("a buffer");
+        let needs_upload = |context: &Resources| context.stored_buffer(&entry).is_some_and(|s| s.needs_upload());
+
+        geometry.upload(&mut vec, true, &[], context);
+        assert!(!needs_upload(context), "unchanged");
+
+        vec.get_mut()[0] = 3.0;
+        geometry.upload(&mut vec, true, &[], context);
+        assert!(
+            context.stored_buffer(&entry).is_some_and(|s| s.bytes() == bytemuck::cast_slice::<f32, u8>(&[3.0, 2.0]))
+        );
+        context.upload_buffer(gpu, &entry).expect("uploads").expect("a buffer");
+        assert!(!needs_upload(context), "written");
+        assert_eq!(vec.get(), [3.0, 2.0], "the bucket keeps its data");
     });
 }
 

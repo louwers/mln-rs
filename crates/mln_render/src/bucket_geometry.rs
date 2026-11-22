@@ -43,6 +43,9 @@ pub struct GpuVec<T> {
     /// What `BucketGeometry` keeps the vector's stored geometry under. A
     /// copy keeps it, so the stored geometry of either serves both.
     key: SimpleIdentity,
+    /// Whether [`get_mut`](Self::get_mut) gave out the data since the
+    /// vector last uploaded.
+    changed: bool,
 }
 
 /// Where a [`GpuVec`]'s data is.
@@ -70,7 +73,7 @@ impl<T> GpuVec<T> {
     }
 
     fn of(data: Data<T>) -> Self {
-        GpuVec { data, key: SimpleIdentity::new() }
+        GpuVec { data, key: SimpleIdentity::new(), changed: false }
     }
 
     /// The data, which is gone once it uploaded unless the bucket keeps it
@@ -88,13 +91,14 @@ impl<T> GpuVec<T> {
         }
     }
 
-    /// The data, to fill, or to change where the bucket keeps it. Not after
-    /// it uploaded otherwise.
+    /// The data, to fill, or to change where the bucket keeps it, which
+    /// then uploads again. Not after it uploaded otherwise.
     pub fn get_mut(&mut self) -> &mut Vec<T>
     where
         T: bytemuck::Pod,
     {
         debug_assert!(!self.is_moved(), "geometry modified after it moved to the render thread");
+        self.changed = true;
         self.data.vec_mut()
     }
 
@@ -172,6 +176,11 @@ impl<T: bytemuck::Pod> GpuVec<T> {
         self.take();
     }
 
+    /// A copy of the data, which stays, in memory.
+    fn copy(&mut self) -> Vec<T> {
+        self.data.vec_mut().clone()
+    }
+
     /// The data, moved out into `context`'s store.
     fn store_buffer(&mut self, context: &mut Resources) -> SharedBuffer {
         match self.take() {
@@ -235,8 +244,9 @@ impl BucketGeometry {
     }
 
     /// Uploads `vec`, a bucket's, into a buffer of `res`, freeing its data
-    /// unless `keep`. Where it uploaded before, it writes kept data over the
-    /// buffer's; where a copy of a vector it frees did, in `copies`, the
+    /// unless `keep`. Where it uploaded before, it writes kept data that
+    /// changed since over the buffer's; where a copy of a vector it frees
+    /// did, in `copies`, the
     /// geometry of the tile's other world copies, it shares that buffer. A
     /// kept vector's data may differ by world copy, so each has its own.
     pub(crate) fn upload<V: bytemuck::Pod>(
@@ -250,16 +260,17 @@ impl BucketGeometry {
             return;
         }
         let copies = if keep { &[] } else { copies };
+        let changed = std::mem::take(&mut vec.changed);
         if self.buffers.has_or_takes(vec.key, copies.iter().map(|copy| &copy.buffers)) {
             if !keep {
                 vec.discard();
-            } else if let Some(buffer) = self.buffer(vec) {
+            } else if changed && let Some(buffer) = self.buffer(vec) {
                 let rewrote = res.rewrite(&buffer.entry, bytemuck::cast_slice(vec.get()));
                 debug_assert!(rewrote, "a kept vector whose length changed");
             }
             return;
         }
-        let entry = if keep { res.add_buffer(vec.get_mut().clone()) } else { vec.store_buffer(res) };
+        let entry = if keep { res.add_buffer(vec.copy()) } else { vec.store_buffer(res) };
         let buffer: Rc<dyn Any> = Rc::new(Buffer::<V>::new(entry));
         self.buffers.insert(vec.key, buffer);
     }
@@ -283,16 +294,17 @@ impl BucketGeometry {
             return;
         }
         let copies = if keep { &[] } else { copies };
+        let changed = std::mem::take(&mut vec.changed);
         if self.buffers.has_or_takes(vec.key, copies.iter().map(|copy| &copy.buffers)) {
             if !keep {
                 vec.discard();
-            } else if let Some(uploaded) = self.indexes(indexes) {
+            } else if changed && let Some(uploaded) = self.indexes(indexes) {
                 let rewrote = res.rewrite(&uploaded.buffer.entry, bytemuck::cast_slice(indexes.indexes.get()));
                 debug_assert!(rewrote, "kept indexes whose length changed");
             }
             return;
         }
-        let entry = if keep { res.add_buffer(vec.get_mut().clone()) } else { vec.store_buffer(res) };
+        let entry = if keep { res.add_buffer(vec.copy()) } else { vec.store_buffer(res) };
         let uploaded: Rc<dyn Any> =
             Rc::new(IndexBuffer { buffer: Buffer::new(entry), segments: indexes.segments.clone() });
         self.buffers.insert(vec.key, uploaded);
