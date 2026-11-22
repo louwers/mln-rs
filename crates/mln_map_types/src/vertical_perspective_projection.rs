@@ -180,9 +180,9 @@ impl VerticalPerspectiveProjection {
 
     /// The view-projection matrix that takes unit-sphere positions to clip
     /// space. The camera looks at the center raised by its altitude along
-    /// its vertical, at the scale of heights Mercator places it by
-    /// ([`View::center_altitude_pixels`]), so a point at the center's
-    /// altitude draws at the center of the view on both projections. Its
+    /// its vertical, at the scale of heights Mercator places it by, so a
+    /// point at the center's altitude draws at the center of the view on
+    /// both projections. Its
     /// near plane is half a pixel from the eye, or the terrain's
     /// ([`View::near_z`]) while terrain draws.
     #[must_use]
