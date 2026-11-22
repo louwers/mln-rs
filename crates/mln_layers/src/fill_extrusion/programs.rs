@@ -34,12 +34,8 @@ const PATTERN_FROM: Attribute = Attribute::new("pattern_from", UShort4);
 const PATTERN_TO: Attribute = Attribute::new("pattern_to", UShort4);
 
 const PLAIN: &[Property] = &[Property::float("base"), Property::color("color"), Property::float("height")];
-const PATTERNED: &[Property] = &[
-    Property::float("base"),
-    Property::float("height"),
-    Property::vec4("pattern_from"),
-    Property::vec4("pattern_to"),
-];
+const PATTERNED: &[Property] =
+    &[Property::float("base"), Property::float("height"), Property::vec4("pattern_from"), Property::vec4("pattern_to")];
 
 /// The walls' attributes of an instance, or of each vertex of a wall quad.
 const WALL: &[Attribute] = &[OUTLINE_POS, DECIMALS_ED, COLOR, BASE, HEIGHT, NEXT_OUTLINE_POS, NEXT_DECIMALS_ED];

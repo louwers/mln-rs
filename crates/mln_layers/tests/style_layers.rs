@@ -1,7 +1,7 @@
 //! The style halves of the layer types: their properties as a layer sets
 //! and holds them, and what lays a layer's tiles out again.
 
-// slice: off use std::sync::Arc;
+use std::sync::Arc;
 
 use mln_layers::Circle;
 // slice: off use mln_layers::{Fill, Line, Raster};
@@ -162,12 +162,12 @@ fn circle_properties() {
 // slice: off     paint!(Raster, layer, raster_fade_duration, "raster-fade-duration", "1", c(DURATION));
 // slice: off }
 
-// slice: off // gtest: Layer.FillExtrusionLayoutDifference
-// slice: off #[test]
-// slice: off fn fill_extrusion_layout_difference() {
-// slice: off     let mut layer = new_layer("fill-extrusion", "fill-extrusion", "source");
-// slice: off     let original = Arc::clone(layer.style());
-// slice: off
-// slice: off     set(&mut layer, "fill-extrusion-rounded-corner-distance", "2");
-// slice: off     assert!(layer.style().layout_difference(&*original));
-// slice: off }
+// gtest: Layer.FillExtrusionLayoutDifference
+#[test]
+fn fill_extrusion_layout_difference() {
+    let mut layer = new_layer("fill-extrusion", "fill-extrusion", "source");
+    let original = Arc::clone(layer.style());
+
+    set(&mut layer, "fill-extrusion-rounded-corner-distance", "2");
+    assert!(layer.style().layout_difference(&*original));
+}

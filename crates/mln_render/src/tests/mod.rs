@@ -87,6 +87,7 @@ impl OneTile {
             mode: self.mode,
             pixel_ratio: 1.0,
             show_collision_boxes: false,
+            cpu_rasterizer: false,
             subdivision_granularity: mln_util::subdivision_granularity::SubdivisionGranularitySetting::none(),
             first_load: true,
         }

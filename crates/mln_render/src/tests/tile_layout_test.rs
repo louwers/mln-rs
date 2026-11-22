@@ -52,6 +52,7 @@ fn params() -> LayoutParams {
         mode: MapMode::Static,
         pixel_ratio: 1.0,
         show_collision_boxes: false,
+        cpu_rasterizer: false,
         subdivision_granularity: SubdivisionGranularitySetting::none(),
         first_load: true,
     }

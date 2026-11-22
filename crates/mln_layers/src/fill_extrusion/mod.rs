@@ -1,7 +1,7 @@
 //! The `fill-extrusion` layer type: a layer of a geometry source that
 //! extrudes its polygon features into 3D shapes.
 
-mod bucket;
+pub(crate) mod bucket;
 mod layer;
 mod layout;
 #[rustfmt::skip]
@@ -10,7 +10,7 @@ mod glsl;
 mod glsl_es;
 mod msl;
 pub mod programs;
-mod tessellator;
+pub(crate) mod tessellator;
 pub mod ubo;
 mod wgsl;
 

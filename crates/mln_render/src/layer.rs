@@ -23,7 +23,8 @@
 //!    ([`BuildCx`]): vertices in [`GpuVec`]s, their triangles in
 //!    [`Indexes`], and the values of its data-driven paint properties in
 //!    [`LayerBinders`], declared with
-//!    [`paint_property_binders!`](crate::paint_property_binders!). A layer
+//!    [`paint_property_binders!`](crate::paint_property_binders!), with the
+//!    images of its patterns ([`LayoutCx::need_patterns`]). A layer
 //!    without a source has the input [`ViewCover`].
 //! 2. Its meshes. [`Layer::tile`] makes the value the layer keeps of a
 //!    frame tile, typically a [`Mesh`](crate::draw::Mesh) of the tile's
@@ -105,10 +106,10 @@ pub use crate::image_store::ImageStore;
 use crate::layout::filter_groups::FilterGroups;
 pub use crate::layout::tile_layout::Resolved;
 pub use crate::paint_parameters::Frame;
+use crate::paint_property_binder::PatternDependency;
 pub use crate::paint_property_binder::{
     CrossFadedPaintPropertyBinder, FeaturePatterns, LayerBinders, PaintBinders, PaintPropertyBinder, PaintVertices,
 };
-use crate::paint_property_binder::PatternDependency;
 pub use crate::render_light::EvaluatedLight;
 use crate::render_tile::{TileContent, ViewPlace};
 use crate::tile::contents::GeometryContents;

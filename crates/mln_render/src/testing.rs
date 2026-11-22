@@ -144,6 +144,7 @@ impl OriginTiles {
             mode,
             pixel_ratio: 1.0,
             show_collision_boxes: false,
+            cpu_rasterizer: false,
             subdivision_granularity: SubdivisionGranularitySetting::none(),
             first_load: true,
         };
@@ -296,6 +297,7 @@ impl OneSource {
             tile_lod_zoom_shift: 0.0,
             tile_lod_mode: TileLodMode::Default,
             subdivision_granularity: SubdivisionGranularitySetting::none(),
+            cpu_rasterizer: false,
             global_state: None,
             is_update_synchronous: source.data().is_update_synchronous(),
             font_faces: None,

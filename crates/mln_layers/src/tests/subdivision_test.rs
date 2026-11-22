@@ -1,23 +1,13 @@
-use std::borrow::Cow;
-
-use feature::{Identifier, PropertyMap, Value};
 use geometry::Point;
 use mln_gfx::shaders::segment::MAX_SEGMENT_VERTICES;
-use mln_style_types::image::ImagePositions;
 use mln_tile_id::CanonicalTileID;
-use mln_tile_id::geometry_tile_data::{
-    GeometryCollection, GeometryCoordinate, GeometryCoordinates, GeometryTileFeature,
-};
+use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate, GeometryCoordinates};
 use mln_util::constants::EXTENT;
-use mln_util::geometry::FeatureType;
 use mln_util::subdivision_granularity::{SubdivisionGranularityExpression, SubdivisionGranularitySetting};
-use mln_vec_map::VecMap;
 
 use super::subdivide;
-use crate::fill_extrusion::FillExtrusionLayoutProperties;
 use crate::fill_extrusion::bucket::FillExtrusionBucket;
-use crate::pattern_layout::{PatternBucket, PatternLayerMap};
-use crate::tessellator::Tessellator;
+use crate::fill_extrusion::tessellator::Tessellator;
 
 /// `EXTENT` as a tile coordinate.
 const EXTENT_I16: i16 = EXTENT as i16;
@@ -30,52 +20,17 @@ fn square(x0: i16, y0: i16, x1: i16, y1: i16) -> GeometryCollection {
     GeometryCollection::from(vec![vec![p(x0, y0), p(x1, y0), p(x1, y1), p(x0, y1), p(x0, y0)]])
 }
 
-struct StubGeometryTileFeature {
-    properties: PropertyMap,
-    type_: FeatureType,
-    geometry: GeometryCollection,
-}
-
-impl GeometryTileFeature for StubGeometryTileFeature {
-    fn get_type(&self) -> FeatureType {
-        self.type_
-    }
-    fn get_value(&self, key: &str) -> Option<Value> {
-        self.properties.get(key).cloned()
-    }
-    fn get_id(&self) -> Identifier {
-        Identifier::Null
-    }
-    fn get_geometries(&self) -> Result<Cow<'_, GeometryCollection>, mln_util::error::Error> {
-        Ok(Cow::Borrowed(&self.geometry))
-    }
-}
-
 // Extrudes a polygon on a globe tile and checks that every segment has
 // something to draw, stays within its 16-bit indices and keeps to its own
 // vertices.
 fn extrude_on_the_globe(polygon: &GeometryCollection, tile: &CanonicalTileID) -> FillExtrusionBucket {
-    let mut bucket =
-        FillExtrusionBucket::new(FillExtrusionLayoutProperties::PossiblyEvaluated::default(), &VecMap::new(), 0.0, 1);
-    bucket.set_subdivision_granularity(&SubdivisionGranularitySetting::globe());
-    let feature = StubGeometryTileFeature {
-        properties: PropertyMap::new(),
-        type_: FeatureType::Polygon,
-        geometry: polygon.clone(),
-    };
-    bucket.add_feature(
-        &feature,
-        polygon,
-        &ImagePositions::default(),
-        &PatternLayerMap::default(),
-        0,
-        tile,
-        &mut Tessellator::default(),
-    );
+    let mut bucket = FillExtrusionBucket::default();
+    let granularity = SubdivisionGranularitySetting::globe().fill.granularity_for_zoom_level(tile.z);
+    bucket.add(polygon, tile, granularity, 0.0, &mut Tessellator::default());
     let mut segments_end = 0;
     let mut indices_outside_their_segment = 0;
-    let triangles = bucket.triangles.data();
-    for segment in &bucket.triangle_segments {
+    let triangles = bucket.triangles.get();
+    for segment in bucket.triangles.segments() {
         assert!(segment.vertex_length <= MAX_SEGMENT_VERTICES);
         assert!(segment.index_length > 0);
         assert!(segment.vertex_offset >= segments_end);
@@ -84,7 +39,6 @@ fn extrude_on_the_globe(polygon: &GeometryCollection, tile: &CanonicalTileID) ->
         }
         segments_end = segment.vertex_offset + segment.vertex_length;
     }
-    drop(triangles);
     assert_eq!(0, indices_outside_their_segment);
     assert!(segments_end <= bucket.vertices.len());
     bucket
@@ -110,13 +64,13 @@ fn fine_zigzag() -> GeometryCollection {
 // last; 0 when there is none.
 fn roof_granularity(bucket: &FillExtrusionBucket, polygon: &GeometryCollection, tile: &CanonicalTileID) -> u32 {
     let mut drawn: Vec<[i16; 6]> = Vec::new();
-    let (vertices, triangles) = (bucket.vertices.data(), bucket.triangles.data());
-    for segment in &bucket.triangle_segments {
+    let (vertices, triangles) = (bucket.vertices.get(), bucket.triangles.get());
+    for segment in bucket.triangles.segments() {
         let mut i = segment.index_offset;
         while i + 3 <= segment.index_offset + segment.index_length {
             let mut triangle = [0i16; 6];
             for k in 0..3 {
-                let position = vertices[segment.vertex_offset + usize::from(triangles[i + k])].a1;
+                let position = vertices[segment.vertex_offset + usize::from(triangles[i + k])].pos;
                 triangle[k * 2] = position[0];
                 triangle[k * 2 + 1] = position[1];
             }
@@ -175,7 +129,7 @@ fn fill_extrusion_roof_beside_long_walls_takes_its_own_segment() {
     let tile = CanonicalTileID::new(2, 1, 1);
     let bucket = extrude_on_the_globe(&polygon, &tile);
     let roof = subdivide(&polygon, &tile, 32, false);
-    let last = bucket.triangle_segments.last().expect("segment");
+    let last = bucket.triangles.segments().last().expect("segment");
     assert_eq!(roof.vertices.len(), last.vertex_length);
     assert_eq!(roof.triangles.len() * 3, last.index_length);
     assert_eq!(32, roof_granularity(&bucket, &polygon, &tile));
@@ -191,6 +145,6 @@ fn fill_extrusion_roof_beyond_the_index_limit_keeps_its_granularity() {
     let tile = CanonicalTileID::new(1, 0, 0);
     assert!(subdivide(&polygon, &tile, 64, false).vertices.len() > MAX_SEGMENT_VERTICES);
     let bucket = extrude_on_the_globe(&polygon, &tile);
-    assert!(bucket.triangle_segments.len() >= 2);
+    assert!(bucket.triangles.segments().len() >= 2);
     assert_eq!(64, roof_granularity(&bucket, &polygon, &tile));
 }

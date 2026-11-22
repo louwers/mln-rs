@@ -124,7 +124,8 @@ impl FillExtrusionBucket {
                 continue;
             }
             if granularity >= 2 {
-                let rings: Vec<GeometryCoordinates> = polygon.iter().map(|ring| subdivide_ring(ring, granularity)).collect();
+                let rings: Vec<GeometryCoordinates> =
+                    polygon.iter().map(|ring| subdivide_ring(ring, granularity)).collect();
                 let roof = subdivide_polygon(&polygon, tessellator.triangulate(&polygon), tile, granularity, false);
                 self.add_outline(&rings, corner_distance > 0.0);
                 let vertices = self.vertices.get_mut();

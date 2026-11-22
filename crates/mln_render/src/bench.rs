@@ -134,6 +134,7 @@ impl TileLayout {
                 mode: MapMode::Continuous,
                 pixel_ratio: 1.0,
                 show_collision_boxes: false,
+                cpu_rasterizer: false,
                 subdivision_granularity: style.get_projection().get_subdivision_granularity(),
                 first_load: true,
             },

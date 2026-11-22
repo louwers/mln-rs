@@ -90,8 +90,10 @@ impl Layer for FillExtrusionLayer {
         let pattern = has_pattern(cx.layer);
         let atlas = laid.icon_atlas().filter(|_| pattern).map(|atlas| (atlas, pattern_sampler(cx.frame)));
         let (vertices, paint) = (laid.buffer(&bucket.vertices), laid.binders(&bucket.binders));
-        let mut roofs =
-            MeshDesc::new(if pattern { &FILL_EXTRUSION_PATTERN } else { &FILL_EXTRUSION }, laid.indexes(&bucket.triangles));
+        let mut roofs = MeshDesc::new(
+            if pattern { &FILL_EXTRUSION_PATTERN } else { &FILL_EXTRUSION },
+            laid.indexes(&bucket.triangles),
+        );
         roofs.vertices(vertices).paint(paint, values);
         let mut parts = vec![part(res, &mut roofs, atlas)];
 
@@ -250,7 +252,12 @@ fn drawable(tile: FrameTile, at: &TileProjection, frame: &Frame<'_>, paint_layou
 
 /// The values that every draw of `layer` reads, lit by `light` and seen by
 /// `camera`, at `opacity`.
-fn props(layer: &EvaluatedLayer<FillExtrusion>, light: &EvaluatedLight, camera: &View, opacity: f32) -> FillExtrusionPropsUBO {
+fn props(
+    layer: &EvaluatedLayer<FillExtrusion>,
+    light: &EvaluatedLight,
+    camera: &View,
+    opacity: f32,
+) -> FillExtrusionPropsUBO {
     type Defaults = FillExtrusionPaintProperties::Defaults;
     let paint = &layer.paint;
     let light_color = light.light_color.uniform();

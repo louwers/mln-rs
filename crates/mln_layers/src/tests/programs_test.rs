@@ -6,7 +6,7 @@ use std::ptr;
 use mln_gfx::shaders::program::Program;
 
 use crate::PROGRAMS;
-// slice: off use crate::fill_extrusion::programs::{FILL_EXTRUSION_INSTANCED, FILL_EXTRUSION_PATTERN_INSTANCED};
+use crate::fill_extrusion::programs::{FILL_EXTRUSION_INSTANCED, FILL_EXTRUSION_PATTERN_INSTANCED};
 use crate::symbol::programs::{COLLISION_BOX, COLLISION_CIRCLE};
 
 /// The sources of `program` in the languages of this build: the backends'
@@ -36,14 +36,14 @@ fn every_layer_program_shows_the_overdraw_inspector() {
     }
 }
 
-// slice: off /// A fill extrusion wall reads its next outline vertex from the buffer of
-// slice: off /// its outline vertex, a vertex further on: the last two instance
-// slice: off /// attributes, the next outline vertex's, have the formats of the first
-// slice: off /// two.
-// slice: off #[test]
-// slice: off fn a_walls_next_outline_vertex_has_the_formats_of_its_outline_vertex() {
-// slice: off     for program in [&FILL_EXTRUSION_INSTANCED, &FILL_EXTRUSION_PATTERN_INSTANCED] {
-// slice: off         let formats: Vec<_> = program.instance_attributes.iter().map(|attribute| attribute.format).collect();
-// slice: off         assert_eq!(formats[..2], formats[formats.len() - 2..], "{program:?}");
-// slice: off     }
-// slice: off }
+/// A fill extrusion wall reads its next outline vertex from the buffer of
+/// its outline vertex, a vertex further on: the last two instance
+/// attributes, the next outline vertex's, have the formats of the first
+/// two.
+#[test]
+fn a_walls_next_outline_vertex_has_the_formats_of_its_outline_vertex() {
+    for program in [&FILL_EXTRUSION_INSTANCED, &FILL_EXTRUSION_PATTERN_INSTANCED] {
+        let formats: Vec<_> = program.instance_attributes.iter().map(|attribute| attribute.format).collect();
+        assert_eq!(formats[..2], formats[formats.len() - 2..], "{program:?}");
+    }
+}

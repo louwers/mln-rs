@@ -77,13 +77,7 @@ impl<'a> Input<'a> {
             V::NAMES.is_empty() || V::NAMES.len() == V::ATTRIBUTES.len(),
             "a vertex with names for some attributes"
         );
-        Input {
-            entry: &buffer.entry,
-            first,
-            attributes: V::ATTRIBUTES,
-            names: V::NAMES,
-            stride: size_of::<V>() as u32,
-        }
+        Input { entry: &buffer.entry, first, attributes: V::ATTRIBUTES, names: V::NAMES, stride: size_of::<V>() as u32 }
     }
 
     /// The vertices the input reads.
@@ -311,9 +305,10 @@ fn bind_inputs(program: &Program, attributes: &[Attribute], array: &mut VertexAt
         if input.names.is_empty() {
             bind(array, &mut unnamed, input);
         } else {
-            let mut named = input.names.iter().map(|name| {
-                attributes.iter().position(|attribute| attribute.name == *name).unwrap_or(usize::MAX)
-            });
+            let mut named = input
+                .names
+                .iter()
+                .map(|name| attributes.iter().position(|attribute| attribute.name == *name).unwrap_or(usize::MAX));
             bind(array, &mut named, input);
         }
     }

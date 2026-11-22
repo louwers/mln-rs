@@ -3,11 +3,12 @@
 //!
 //! A layer makes GPU resources in the renderer's [`Resources`] and keeps
 //! their handles: [`Buffer`]s of vertices or [`IndexBuffer`]s, [`Texture`]s,
-//! and [`Mesh`]es, each a program bound to indexes, buffers and textures
-//! with the state it draws in ([`MeshDesc`]), in the frame's projection or,
-//! for geometry of the viewport, Mercator's. A tile's surface
-//! ([`Resources::tile_surface`]) is a shared buffer of the engine's. A
-//! bucket's buffers take in place what changes in its data (feature state,
+//! and [`Mesh`]es, each a program bound to indexes, buffers of vertices or
+//! of instances, and textures with the state it draws in ([`MeshDesc`]), in
+//! the frame's projection or, for geometry of the viewport, Mercator's. A
+//! tile's surface ([`Resources::tile_surface`]) and the indexes of quads
+//! ([`Resources::quads`]) are shared buffers of the engine's. A bucket's
+//! buffers take in place what changes in its data (feature state,
 //! placement), and meshes over them see it. A mesh made again in its place
 //! ([`Resources::set_mesh`]) keeps its age, and so its draws' order. An
 //! entry of the resources goes once its last handle drops and the GPU is

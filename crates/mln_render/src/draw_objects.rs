@@ -703,4 +703,34 @@ mod tests {
         assert_eq!(mercator_pinned, globe_pinned);
         assert_eq!(mercator_pinned, mercator);
     }
+
+    #[test]
+    fn an_instance_attribute_from_a_vertex_on_reads_as_many_instances_as_follow_it() {
+        let mut context = Resources::detached();
+        let corners = context.buffer::<[i16; 2]>(&[[0, 0], [1, 0], [0, 1]]);
+        let points = context.buffer::<[i16; 2]>(&[[0, 0], [1, 1], [2, 2], [3, 3]]);
+        let triangles = context.index_buffer(&[0, 1, 2]);
+        let mut desc = MeshDesc::new(&programs::TILE_DEBUG, &triangles);
+        desc.vertices(&corners).instances(&points).instances_from(&points, 1);
+        let mesh: crate::draw::Mesh = context.mesh(&desc);
+        let objects = context.take_mesh(mesh.key()).expect("a mesh");
+        let instances = objects.instance_attributes.as_ref().expect("instances");
+        let reads: Vec<(usize, u32)> = instances.iter().map(|(at, attribute)| (at, attribute.vertex_offset)).collect();
+        assert_eq!(reads, [(0, 0), (1, 1)]);
+        assert_eq!(instances.min_count(), 3, "an instance for each point but the last");
+        context.restore_mesh(mesh.key(), objects);
+    }
+
+    #[test]
+    fn quads_of_any_count_share_one_buffer_in_segments_of_their_vertices() {
+        let mut context = Resources::detached();
+        let (few, many) = (context.quads(2), context.quads(20_000));
+        assert!(few.buffer == many.buffer);
+        let lengths = |quads: &crate::draw::IndexBuffer| -> Vec<(usize, usize, usize)> {
+            quads.segments.iter().map(|s| (s.vertex_offset, s.vertex_length, s.index_length)).collect()
+        };
+        assert_eq!(lengths(&few), [(0, 8, 12)]);
+        let most = mln_gfx::shaders::segment::MAX_SEGMENT_VERTICES / 4;
+        assert_eq!(lengths(&many), [(0, 4 * most, 6 * most), (4 * most, 4 * (20_000 - most), 6 * (20_000 - most))]);
+    }
 }
