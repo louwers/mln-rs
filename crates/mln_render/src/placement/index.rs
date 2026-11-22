@@ -136,9 +136,11 @@ pub struct CollisionIndex {
     groups: Vec<crate::tile::job::SourceKey>,
 }
 
+/// An empty index, which a placement [begins](CollisionIndex::begin)
+/// before it places anything.
 impl Default for CollisionIndex {
     fn default() -> Self {
-        let mut index = CollisionIndex {
+        CollisionIndex {
             size: DVec2::ZERO,
             padding: 0.0,
             screen_end: Vec2::ZERO,
@@ -151,9 +153,7 @@ impl Default for CollisionIndex {
             records: Vec::new(),
             by_bucket: HashMap::default(),
             groups: Vec::new(),
-        };
-        index.begin(&View::default(), MapMode::Static);
-        index
+        }
     }
 }
 
