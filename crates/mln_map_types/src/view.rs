@@ -756,21 +756,30 @@ impl View {
             };
         }
 
-        self.mercator_screen_coordinate_to_tile_coordinate(point, at_zoom)
+        self.mercator_screen_coordinate_to_tile_coordinate(point, at_zoom, 0.0)
     }
 
-    fn mercator_screen_coordinate_to_tile_coordinate(&self, point: &ScreenCoordinate, at_zoom: u8) -> TileCoordinate {
+    /// The tile coordinate at `at_zoom` where the line of sight through
+    /// `point` (y up) meets the plane `height` meters above sea level; where
+    /// the line doesn't descend, the point at clip depth 0.
+    fn mercator_screen_coordinate_to_tile_coordinate(
+        &self,
+        point: &ScreenCoordinate,
+        at_zoom: u8,
+        height: f64,
+    ) -> TileCoordinate {
         let flipped_y = f64::from(self.params.size.height) - point.y;
 
         // The point's depth isn't known: unproject it at two depths, and take
-        // where the line between them meets the ground.
+        // where the line between them meets the plane.
         let inverted = self.matrices.inverted_from_center;
         let offset0 = inverted.project_point3(DVec3::new(point.x, flipped_y, 0.0));
         let offset1 = inverted.project_point3(DVec3::new(point.x, flipped_y, 1.0));
 
         let z0 = offset0.z;
         let z1 = offset1.z;
-        let t = if z0 <= z1 { 0.0 } else { -z0 / (z1 - z0) };
+        // `z0 - 0.0` is `z0`, so sea level is the flat map's plane to the bit.
+        let t = if z0 <= z1 { 0.0 } else { -(z0 - height) / (z1 - z0) };
 
         let offset = offset0 + (offset1 - offset0) * t;
         let center = self.center_coordinate();
@@ -786,8 +795,29 @@ impl View {
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
     /// NaN or infinite point.
     pub fn screen_coordinate_to_lat_lng(&self, point: &ScreenCoordinate, wrap_mode: WrapMode) -> Result<LatLng, Error> {
+        self.screen_coordinate_to_lat_lng_at(point, 0.0, wrap_mode)
+    }
+
+    /// The location where the line of sight through `point`, measured from
+    /// the bottom edge (y up), meets the plane `height` meters above sea
+    /// level on a Mercator view; where the line doesn't descend, as at sea
+    /// level, the point it passes a little way from the camera. The globe
+    /// reads its points on the sea-level sphere only. Fails as
+    /// [`screen_coordinate_to_lat_lng`], and on the globe for a `height`
+    /// other than 0.
+    ///
+    /// [`screen_coordinate_to_lat_lng`]: Self::screen_coordinate_to_lat_lng
+    pub fn screen_coordinate_to_lat_lng_at(
+        &self,
+        point: &ScreenCoordinate,
+        height: f64,
+        wrap_mode: WrapMode,
+    ) -> Result<LatLng, Error> {
         // Without a size the point is Mercator's, as the tile coordinate is.
         if self.is_globe() && !self.params.size.is_empty() {
+            if height != 0.0 {
+                return Err(Error::invalid_argument("the globe reads points at sea level only"));
+            }
             if point.x.is_nan() || point.y.is_nan() {
                 return Err(Error::invalid_argument("screen coordinate must not be NaN"));
             }
@@ -797,8 +827,36 @@ impl View {
             return VerticalPerspectiveProjection::screen_coordinate_to_lat_lng(self, point, wrap_mode)
                 .ok_or_else(|| Error::invalid_argument("the camera shows no location"));
         }
-        let coord = self.screen_coordinate_to_tile_coordinate(point, 0);
+        let coord = if self.params.size.is_empty() {
+            self.screen_coordinate_to_tile_coordinate(point, 0)
+        } else {
+            self.mercator_screen_coordinate_to_tile_coordinate(point, 0, height)
+        };
         Projection::unproject(&coord.p, 1.0 / TILE_SIZE_D, wrap_mode)
+    }
+
+    /// The line of sight through `point`, measured from the bottom edge (y
+    /// up), from the near plane to the far plane: each end's Web Mercator
+    /// point at zoom 0 (x in the world copy the view shows it in) and its
+    /// height in meters. `None` on the globe, while the view shows nothing,
+    /// and for a point that isn't finite.
+    #[must_use]
+    pub fn line_of_sight(&self, point: &ScreenCoordinate) -> Option<(DVec3, DVec3)> {
+        if self.is_globe() || self.matrices.projection == DMat4::ZERO {
+            return None;
+        }
+        let flipped_y = f64::from(self.params.size.height) - point.y;
+        // The matrices are OpenGL's: clip depth runs from -1 at the near plane
+        // to 1 at the far plane.
+        let inverted = self.matrices.inverted_from_center;
+        let center = self.center_coordinate();
+        let scale = self.params.scale;
+        let world = |depth: f64| {
+            let offset = inverted.project_point3(DVec3::new(point.x, flipped_y, depth));
+            DVec3::new((center.x + offset.x) / scale, (center.y + offset.y) / scale, offset.z)
+        };
+        let (near, far) = (world(-1.0), world(1.0));
+        (near.is_finite() && far.is_finite()).then_some((near, far))
     }
 
     /// How much farther the bottom-left corner of the view is from the
@@ -814,6 +872,7 @@ impl View {
         let corner = self.mercator_screen_coordinate_to_tile_coordinate(
             &ScreenCoordinate::new(0.0, f64::from(self.params.size.height)),
             0,
+            0.0,
         );
         // A point on the screen has a LatLng unless the view holds NaN.
         let Ok(lat_lng) = Projection::unproject(&corner.p, 1.0 / TILE_SIZE_D, WrapMode::Unwrapped) else {
