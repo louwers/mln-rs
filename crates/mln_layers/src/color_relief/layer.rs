@@ -44,15 +44,6 @@ struct Stops {
 
 type ReliefBlocks = (ColorReliefDrawableUBO, ColorReliefTilePropsUBO);
 
-/// How the stops' elevations are sampled: texel by texel.
-const ELEVATIONS: SamplerState = SamplerState {
-    filter: TextureFilterType::Nearest,
-    wrap_u: mln_gfx::types::TextureWrapType::Clamp,
-    wrap_v: mln_gfx::types::TextureWrapType::Clamp,
-    max_anisotropy: 1,
-    mipmapped: false,
-};
-
 impl Layer for ColorReliefLayer {
     type Style = ColorRelief;
     type Input = DemTiles;
@@ -104,7 +95,7 @@ impl Layer for ColorReliefLayer {
         let mut desc = MeshDesc::new(&COLOR_RELIEF, &surface.triangles);
         desc.vertices(&surface.vertices)
             .texture(dem.texture(), &self.resampling)
-            .texture(&self.elevations, ELEVATIONS)
+            .texture(&self.elevations, SamplerState::default())
             .texture(&self.colors, SamplerState { filter: TextureFilterType::Linear, ..SamplerState::default() });
         Some(cx.res.mesh(&desc))
     }

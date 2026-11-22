@@ -27,7 +27,8 @@
 //! places the group in the layers' order and depth, and draws it in the
 //! frame's passes, as the draws' [`Depth`] and clipping say, onto the frame
 //! or as one surface ([`Composite`]). A group may draw with any number of
-//! programs, whose blocks differ.
+//! programs, whose blocks differ. A layer that draws with the backend's own
+//! commands asks the frame to lend them ([`Draws::lend`]).
 //!
 //! The resources and their handles belong to the renderer's thread: they
 //! are neither `Send` nor `Sync`.
