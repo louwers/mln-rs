@@ -8,7 +8,7 @@
 //! `tile`), and commits its results against the placement it replaces. The
 //! buckets' opacity and position vertices then follow it (`vertices`).
 
-pub(crate) mod collision_index;
+pub(crate) mod collision;
 mod context;
 pub(crate) mod cross_tile_index;
 mod symbol;
@@ -22,14 +22,13 @@ use std::sync::Arc;
 use glam::DMat4;
 use mln_map_types::{MapDebugOptions, MapMode, ProjectionData, View};
 use mln_render::placement::{
-    Aabb, BucketKey, CollisionGroups, FeatureIndex, IndexedFeature, Placed, PlacementBuckets, PlacementContext,
-    PlacementPass, PlacementQuery, PlacingLayer, PlacingTile, Prepared, Shape,
+    Aabb, BucketKey, CollisionIndex, FeatureIndex, Placed, PlacementBuckets, PlacementContext, PlacementPass,
+    PlacingLayer, PlacingTile, Prepared, Shape,
 };
 use mln_render::{Renderer, UpdateParameters};
 use mln_style::TransitionOptions;
 use mln_style_types::{SymbolAnchorType, TextWritingModeType, TranslateAnchorType};
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
-use mln_util::error::Error;
 use mln_util::hash::{HashMap, HashSet};
 use mln_vec_map::VecSet;
 
@@ -37,9 +36,7 @@ use self::context::{BucketContext, BucketOptions};
 use self::tile::TilePlacementState;
 use crate::symbol::SymbolLayer;
 use crate::symbol::bucket::{SortKeyRange, SymbolBucket};
-use crate::symbol::collision_feature::IndexedSubfeature;
 use crate::symbol::instance::SymbolInstance;
-use crate::symbol::placement::collision_index::CollisionIndex;
 use crate::symbol::placement::cross_tile_index::CrossTileSymbolIndex;
 
 /// A symbol layer's `*-translate` in pixels, which placement moves the
@@ -85,6 +82,11 @@ impl PlacedTile {
 #[derive(Clone)]
 pub(crate) struct BucketPlacementData {
     pub(crate) bucket: BucketKey,
+    /// Where the bucket's layer is among the frame's placing layers, bottom
+    /// to top, and its tile among the layer's tiles, which name its
+    /// symbols' shapes to the collision index.
+    pub(crate) layer_index: usize,
+    pub(crate) tile_index: u32,
     pub(crate) tile: PlacedTile,
     pub(crate) feature_index: Option<Arc<FeatureIndex>>,
     pub(crate) source_id: Arc<str>,
@@ -95,8 +97,12 @@ pub(crate) struct BucketPlacementData {
 
 impl PartialEq for BucketPlacementData {
     fn eq(&self, other: &Self) -> bool {
+        // Where the bucket is among the frame's layers and tiles names it to
+        // the collision index; it isn't what it places from.
         let BucketPlacementData {
             bucket,
+            layer_index: _,
+            tile_index: _,
             tile,
             feature_index,
             source_id,
@@ -135,15 +141,15 @@ impl LayerBuckets {
     /// in the memory they kept from the frame before.
     pub(crate) fn fill(layers: &mut Vec<LayerBuckets>, cx: &PlacementContext<'_, SymbolLayer>) {
         layers.resize_with(cx.layers.len(), LayerBuckets::default);
-        for (layer_buckets, layer) in layers.iter_mut().zip(cx.layers) {
-            layer_buckets.set(layer, &cx.buckets);
+        for (position, (layer_buckets, layer)) in layers.iter_mut().zip(cx.layers).enumerate() {
+            layer_buckets.set(layer, position, &cx.buckets);
         }
     }
 
     /// Makes these the buckets of `layer`'s tiles, of `buckets`: those it
     /// leads, with their tiles' feature indexes, in order of sort key, and
-    /// the others.
-    fn set(&mut self, layer: &PlacingLayer<'_, SymbolLayer>, buckets: &PlacementBuckets<'_>) {
+    /// the others. The layer is the frame's placing layer `position`.
+    fn set(&mut self, layer: &PlacingLayer<'_, SymbolLayer>, position: usize, buckets: &PlacementBuckets<'_>) {
         let style = &layer.layer.style;
         let paint = &layer.layer.evaluated.paint;
         let text_translate =
@@ -157,10 +163,12 @@ impl LayerBuckets {
         self.placement_data.clear();
         self.follower_data.clear();
         let LayerBuckets { placement_data, follower_data, source_id, .. } = self;
-        for tile in layer.tiles {
+        for (tile_index, tile) in layer.tiles.iter().enumerate() {
             let Some(bucket) = buckets.get::<SymbolBucket>(&tile.bucket) else { continue };
             let data = |feature_index, sort_key_range| BucketPlacementData {
                 bucket: tile.bucket,
+                layer_index: position,
+                tile_index: tile_index as u32,
                 tile: PlacedTile::of(tile),
                 feature_index,
                 source_id: Arc::clone(source_id),
@@ -307,16 +315,6 @@ impl JointPlacement {
     pub(crate) fn placed(self) -> bool {
         self.text || self.icon
     }
-}
-
-#[derive(Debug)]
-pub(crate) struct RetainedQueryData {
-    pub(crate) bucket_instance_id: u32,
-    pub(crate) feature_index: Option<Arc<FeatureIndex>>,
-    pub(crate) tile_id: OverscaledTileID,
-    /// The order of the bucket's features as the last opacity update
-    /// sorted them, for a bucket whose symbols sort by their position.
-    pub(crate) feature_sort_order: Option<Arc<Vec<usize>>>,
 }
 
 /// What tile mode's placement records of a symbol it placed, when its
@@ -468,15 +466,15 @@ impl PlacementPass<SymbolLayer> for SymbolPlacement {
         prepared
     }
 
-    fn place(&mut self, cx: &mut PlacementContext<'_, SymbolLayer>, groups: CollisionGroups, fade: f32) -> Placed {
+    fn place(&mut self, cx: &mut PlacementContext<'_, SymbolLayer>, index: &mut CollisionIndex, fade: f32) -> Placed {
         let Some(inputs) = self.inputs.take() else {
             debug_assert!(false, "a placement that wasn't prepared");
             return Placed::default();
         };
         let prev = std::mem::replace(&mut self.placement, Placement::new_default());
-        let mut placement = Placement::create(inputs, groups, Some(prev));
+        let mut placement = Placement::create(inputs, Some(prev));
         placement.collect_placed_symbol_data(self.collect_data);
-        let placed = placement.place(&mut cx.buckets, fade);
+        let placed = placement.place(&mut cx.buckets, index, fade);
         self.placement = placement;
         let used: VecSet<String> = leaders(&self.layers).map(|layer| layer.id.clone()).collect();
         self.index.prune_unused_layers(&used);
@@ -510,70 +508,6 @@ impl PlacementPass<SymbolLayer> for SymbolPlacement {
         }
         self.index.reset();
     }
-
-    /// The features of the symbols the placement shows within the query's
-    /// geometry, bucket by bucket in the order of their tiles, and in each
-    /// bucket in the order it last drew them.
-    fn query_rendered_features(&self, query: &mut PlacementQuery<'_>) -> Result<(), Error> {
-        let placement = &self.placement;
-        let mut rendered_symbols = placement.collision_index().query_rendered_symbols(&query.geometry.to_vec());
-        let mut bucket_query_data = Vec::with_capacity(rendered_symbols.len());
-        for bucket_instance_id in rendered_symbols.keys() {
-            bucket_query_data.push(placement.query_data(*bucket_instance_id).map_err(Error::native)?);
-        }
-        // Symbols sort only within their bucket, so the buckets go in the
-        // order of their tiles for a predictable order of all of them.
-        bucket_query_data.sort_by(|a, b| {
-            (a.tile_id.canonical.z, a.tile_id.canonical.y, a.tile_id.wrap, a.tile_id.canonical.x).cmp(&(
-                b.tile_id.canonical.z,
-                b.tile_id.canonical.y,
-                b.tile_id.wrap,
-                b.tile_id.canonical.x,
-            ))
-        });
-
-        for query_data in bucket_query_data {
-            let Some(feature_index) = &query_data.feature_index else {
-                continue;
-            };
-            let mut features = rendered_symbols.remove(&query_data.bucket_instance_id).unwrap_or_default();
-            sort_symbol_features(&mut features, query_data.feature_sort_order.as_deref());
-            let features = features.iter().map(|feature| IndexedFeature {
-                index: feature.index,
-                source_layer: &feature.source_layer_name,
-                bucket_leader: &feature.bucket_leader_id,
-            });
-            query.add_features(feature_index, &query_data.tile_id, features)?;
-        }
-        Ok(())
-    }
-}
-
-/// Sorts a bucket's `features`, which the collision index found, in the
-/// order a query returns them: the reverse of the order the bucket last
-/// drew them in, `feature_sort_order`, for a bucket that sorted them, or
-/// else the reverse of their order in the source's data, as for features
-/// that don't place.
-fn sort_symbol_features(features: &mut [IndexedSubfeature], feature_sort_order: Option<&Vec<usize>>) {
-    // A stable sort: features of a symbol's several instances keep their
-    // order.
-    features.sort_by(|a, b| {
-        // Symbol features may have changed their sort order since their
-        // indexed subfeature was added to the collision index. The feature
-        // sort order is relatively inefficient for querying but cheap to
-        // build on every bucket sort.
-        if let Some(order) = feature_sort_order {
-            // There can be several symbol instances per feature, so each
-            // feature sorts by its first instance.
-            let sorted_a = order.iter().position(|&i| i == a.index).unwrap_or(order.len());
-            let sorted_b = order.iter().position(|&i| i == b.index).unwrap_or(order.len());
-            debug_assert_ne!(sorted_a, order.len());
-            debug_assert_ne!(sorted_b, order.len());
-            sorted_b.cmp(&sorted_a)
-        } else {
-            b.sort_index.cmp(&a.sort_index)
-        }
-    });
 }
 
 /// The data of the symbols that tile mode's placement placed, for the
@@ -630,7 +564,6 @@ pub(crate) struct Placement {
 
     /// What the placement places from; `None` for the empty placement.
     inputs: Option<Arc<PlacementInputs>>,
-    collision_index: CollisionIndex,
 
     placement_zoom: f32,
 
@@ -639,14 +572,9 @@ pub(crate) struct Placement {
     variable_offsets: HashMap<NonZeroU32, VariableOffset>,
     placed_orientations: HashMap<NonZeroU32, TextWritingModeType>,
 
-    retained_query_data: HashMap<u32, RetainedQueryData>,
-    collision_groups: CollisionGroups,
     /// The placement this one replaces, which it reads while it places and
     /// drops when it commits.
     prev_placement: Option<Box<Placement>>,
-    /// The collision index of the placement this one replaced, which its
-    /// commit no longer reads; the next placement reuses its grids.
-    spare_collision_index: Option<CollisionIndex>,
     show_collision_boxes: bool,
 
     /// The projected boxes of the symbol being placed, kept between
@@ -661,34 +589,18 @@ impl Placement {
     /// The empty placement, before the first and after a reset.
     #[must_use]
     pub(crate) fn new_default() -> Self {
-        Placement::new(
-            PlacementKind::Continuous,
-            None,
-            CollisionIndex::new(&View::default(), MapMode::Static),
-            CollisionGroups::new(true),
-            None,
-        )
+        Placement::new(PlacementKind::Continuous, None, None)
     }
 
-    fn new(
-        kind: PlacementKind,
-        inputs: Option<Arc<PlacementInputs>>,
-        collision_index: CollisionIndex,
-        collision_groups: CollisionGroups,
-        prev_placement: Option<Placement>,
-    ) -> Self {
+    fn new(kind: PlacementKind, inputs: Option<Arc<PlacementInputs>>, prev_placement: Option<Placement>) -> Self {
         Placement {
             kind,
-            collision_index,
             placement_zoom: inputs.as_ref().map_or(0.0, |inputs| inputs.view.zoom() as f32),
             placements: HashMap::default(),
             opacities: HashMap::default(),
             variable_offsets: HashMap::default(),
             placed_orientations: HashMap::default(),
-            retained_query_data: HashMap::default(),
-            collision_groups,
             prev_placement: prev_placement.map(Box::new),
-            spare_collision_index: None,
             show_collision_boxes: inputs.as_ref().is_some_and(|inputs| inputs.show_collision_boxes),
             text_boxes: Vec::new(),
             icon_boxes: Vec::new(),
@@ -697,15 +609,10 @@ impl Placement {
         }
     }
 
-    /// A new placement from `inputs`, whose symbols collide in `groups`,
-    /// which replaces `prev_placement`: in continuous mode, it fades from
-    /// it, and needs it.
-    pub(crate) fn create(
-        inputs: Arc<PlacementInputs>,
-        groups: CollisionGroups,
-        prev_placement: Option<Placement>,
-    ) -> Placement {
-        let (kind, mut prev_placement) = match inputs.mode {
+    /// A new placement from `inputs`, which replaces `prev_placement`: in
+    /// continuous mode, it fades from it, and needs it.
+    pub(crate) fn create(inputs: Arc<PlacementInputs>, prev_placement: Option<Placement>) -> Placement {
+        let (kind, prev_placement) = match inputs.mode {
             MapMode::Continuous => {
                 debug_assert!(prev_placement.is_some());
                 (PlacementKind::Continuous, prev_placement)
@@ -713,17 +620,11 @@ impl Placement {
             MapMode::Static => (PlacementKind::Static, None),
             MapMode::Tile => (PlacementKind::Tile(Box::default()), None),
         };
-        let spare_index = prev_placement.as_mut().and_then(|prev| prev.spare_collision_index.take());
-        let collision_index = CollisionIndex::reusing(&inputs.view, inputs.mode, spare_index);
-        Placement::new(kind, Some(inputs), collision_index, groups, prev_placement)
+        Placement::new(kind, Some(inputs), prev_placement)
     }
 
     fn prev_placement(&self) -> Option<&Placement> {
         self.prev_placement.as_deref()
-    }
-
-    pub(crate) fn collision_index(&self) -> &CollisionIndex {
-        &self.collision_index
     }
 
     /// How many symbols the placement shows, by their text or their icon.
@@ -733,23 +634,28 @@ impl Placement {
     }
 
     /// Places the symbols of the buckets its inputs name, of `buckets`,
-    /// marks the buckets placed since their tiles showed them as placed,
-    /// and commits, fading on from `fade`, how far the fade of the
-    /// placement it replaces had come.
-    pub(crate) fn place(&mut self, buckets: &mut PlacementBuckets<'_>, fade: f32) -> Placed {
+    /// into `index`, marks the buckets placed since their tiles showed them
+    /// as placed, and commits, fading on from `fade`, how far the fade of
+    /// the placement it replaces had come.
+    pub(crate) fn place(
+        &mut self,
+        buckets: &mut PlacementBuckets<'_>,
+        index: &mut CollisionIndex,
+        fade: f32,
+    ) -> Placed {
         let Some(inputs) = self.inputs.clone() else {
             return Placed::default();
         };
         let mut reloaded_placed = HashSet::default();
         if matches!(self.kind, PlacementKind::Tile(_)) {
-            self.tile_place_buckets(&inputs, &*buckets, &mut reloaded_placed);
+            self.tile_place_buckets(&inputs, &*buckets, index, &mut reloaded_placed);
         } else {
             for layer in inputs.layers() {
                 let mut seen_cross_tile_ids = BTreeSet::new();
                 for data in layer {
                     if let Some(bucket) = buckets.get::<SymbolBucket>(&data.bucket) {
-                        let ctx = self.bucket_context(&inputs, data, bucket, &reloaded_placed);
-                        self.place_bucket(&ctx, &mut seen_cross_tile_ids, &mut reloaded_placed);
+                        let ctx = self.bucket_context(&inputs, data, bucket, index, &reloaded_placed);
+                        self.place_bucket(&ctx, index, &mut seen_cross_tile_ids, &mut reloaded_placed);
                     }
                 }
             }
@@ -769,12 +675,12 @@ impl Placement {
         inputs: &'a PlacementInputs,
         data: &'a BucketPlacementData,
         bucket: &'a SymbolBucket,
+        index: &CollisionIndex,
         reloaded_placed: &HashSet<BucketKey>,
     ) -> BucketContext<'a> {
-        let (tile_borders, avoid_edges) = self.tile_borders(bucket, &data.tile.matrix);
+        let (tile_borders, avoid_edges) = self.tile_borders(bucket, index, &data.tile.matrix);
         let options = BucketOptions {
             just_reloaded: bucket.state.just_reloaded && !reloaded_placed.contains(&data.bucket),
-            collision_group: self.collision_groups.get(&data.source_id),
             tile_borders,
             avoid_edges,
             debug: self.show_collision_boxes,
@@ -787,16 +693,17 @@ impl Placement {
     fn place_bucket(
         &mut self,
         ctx: &BucketContext<'_>,
+        index: &mut CollisionIndex,
         seen_cross_tile_ids: &mut BTreeSet<NonZeroU32>,
         reloaded_placed: &mut HashSet<BucketKey>,
     ) {
         let symbols = &ctx.bucket.state.symbol_instances;
-        for index in self.placement_order(ctx) {
-            let symbol = &symbols[index];
+        for symbol_index in self.placement_order(ctx) {
+            let symbol = &symbols[symbol_index];
             if symbol.cross_tile_id.is_some_and(|id| seen_cross_tile_ids.contains(&id)) {
                 continue;
             }
-            self.place_symbol(index, symbol, ctx);
+            self.place_symbol(symbol_index, symbol, ctx, index);
             // A symbol of a tile held to fade out doesn't keep the tile that
             // replaces it from placing the symbol.
             if let Some(id) = symbol.cross_tile_id
@@ -809,16 +716,6 @@ impl Placement {
         if ctx.just_reloaded {
             reloaded_placed.insert(ctx.data.bucket);
         }
-
-        // Queries read the bucket's features for as long as the placement
-        // shows its symbols.
-        let bucket_instance_id = ctx.bucket.bucket_instance_id;
-        self.retained_query_data.entry(bucket_instance_id).or_insert_with(|| RetainedQueryData {
-            bucket_instance_id,
-            feature_index: ctx.data.feature_index.clone(),
-            tile_id: ctx.tile().overscaled_id,
-            feature_sort_order: None,
-        });
     }
 
     /// The indices of the symbols of `ctx`'s bucket, in the order to place
@@ -897,7 +794,6 @@ impl Placement {
             }
         }
 
-        self.spare_collision_index = Some(prev.collision_index);
         Placed { changed: placement_changed, settled: self.opacities.values().all(JointOpacityState::is_settled) }
     }
 
@@ -929,8 +825,9 @@ impl Placement {
                 self.update_bucket_opacities(bucket, view, &mut seen_cross_tile_ids);
             }
             self.update_bucket_positions(bucket, view, data, None);
-            if update_opacities && let Some(retained) = self.retained_query_data.get_mut(&bucket.bucket_instance_id) {
-                retained.feature_sort_order.clone_from(&bucket.state.feature_sort_order);
+            if update_opacities {
+                let order = bucket.state.feature_sort_order.clone();
+                buckets.set_query_order(&data.bucket, order);
             }
         }
     }
@@ -969,13 +866,6 @@ impl Placement {
             _ => &[],
         }
     }
-
-    /// The query data of a bucket instance; `Err` if there is none.
-    pub(crate) fn query_data(&self, bucket_instance_id: u32) -> Result<&RetainedQueryData, String> {
-        self.retained_query_data
-            .get(&bucket_instance_id)
-            .ok_or_else(|| format!("no query data of the bucket instance {bucket_instance_id}"))
-    }
 }
 
 #[cfg(test)]
@@ -1011,7 +901,7 @@ mod tests {
     /// the symbols of `placed` show; returns whether it is settled.
     fn place(current: &mut Placement, fade: f32, placed: &[u32]) -> bool {
         let prev = std::mem::replace(current, Placement::new_default());
-        let mut placement = Placement::create(Arc::new(inputs()), CollisionGroups::new(true), Some(prev));
+        let mut placement = Placement::create(Arc::new(inputs()), Some(prev));
         for &id in placed {
             let placed = JointPlacement { text: true, icon: true, skip_fade: false };
             placement.placements.insert(NonZeroU32::new(id).unwrap(), placed);

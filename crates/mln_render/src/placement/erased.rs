@@ -2,23 +2,28 @@
 
 use std::any::Any;
 
-use mln_util::error::Error;
 use smallvec::SmallVec;
 
 use super::{
-    BucketKey, CollisionGroups, Placed, PlacementBuckets, PlacementContext, PlacementPass, PlacementQuery,
-    PlacingLayer, PlacingTile, Prepared,
+    BucketKey, CollisionIndex, Placed, PlacementBuckets, PlacementContext, PlacementPass, PlacingLayer, PlacingTile,
+    Prepared,
 };
 use crate::bucket::ErasedBucket;
 use crate::layer::Layer;
 use crate::render_layer::{Hosted, RenderLayer};
+use crate::tile::contents::LayoutResult;
 use crate::update_parameters::UpdateParameters;
 
 /// The buckets of laid-out tiles, by their keys: the tile store's, or the
 /// copies that the benchmarks hold.
 pub(crate) trait LaidBuckets {
-    fn bucket(&self, key: &BucketKey) -> Option<&dyn ErasedBucket>;
+    /// The layout that has the bucket at `key`.
+    fn layout(&self, key: &BucketKey) -> Option<&LayoutResult>;
     fn bucket_mut(&mut self, key: &BucketKey) -> Option<&mut dyn ErasedBucket>;
+
+    fn bucket(&self, key: &BucketKey) -> Option<&dyn ErasedBucket> {
+        self.layout(key)?.layer_render_data.bucket(key.bucket)
+    }
 }
 
 /// A placing layer of a frame, by its index among the renderer's layers,
@@ -30,12 +35,13 @@ pub(crate) struct PlacingLayerTiles {
 }
 
 /// What the engine hands its placement pass of a frame: the frame's layers
-/// of the pass's type, bottom to top, each with its tiles, its update and
-/// its tiles' buckets.
+/// of the pass's type, bottom to top, each with its tiles, its update, its
+/// tiles' buckets and the current placement's index.
 pub(crate) struct ErasedFrame<'a> {
     pub(crate) layers: &'a [(&'a dyn RenderLayer, &'a [PlacingTile])],
     pub(crate) update_parameters: &'a UpdateParameters,
     pub(crate) buckets: &'a mut dyn LaidBuckets,
+    pub(crate) placed: &'a mut CollisionIndex,
 }
 
 /// A [`PlacementPass`], whichever its layer type: its hooks over the
@@ -45,7 +51,7 @@ pub(crate) trait ErasedPlacement {
     fn prepare(&mut self, frame: &mut ErasedFrame<'_>) -> Prepared;
 
     /// See [`PlacementPass::place`].
-    fn place(&mut self, frame: &mut ErasedFrame<'_>, groups: CollisionGroups, fade: f32) -> Placed;
+    fn place(&mut self, frame: &mut ErasedFrame<'_>, index: &mut CollisionIndex, fade: f32) -> Placed;
 
     /// See [`PlacementPass::update_buckets`].
     fn update_buckets(&mut self, frame: &mut ErasedFrame<'_>);
@@ -55,9 +61,6 @@ pub(crate) trait ErasedPlacement {
 
     /// See [`PlacementPass::reset`].
     fn reset(&mut self);
-
-    /// See [`PlacementPass::query_rendered_features`].
-    fn query_rendered_features(&self, query: &mut PlacementQuery<'_>) -> Result<(), Error>;
 
     /// The pass, for a caller that knows its type.
     fn pass(&self) -> &dyn Any;
@@ -90,7 +93,7 @@ fn with_context<T: Layer, R>(frame: &mut ErasedFrame<'_>, hook: impl FnOnce(&mut
     hook(&mut PlacementContext {
         layers: &layers,
         update_parameters: frame.update_parameters,
-        buckets: PlacementBuckets::new(&mut *frame.buckets),
+        buckets: PlacementBuckets::new(&mut *frame.buckets, &mut *frame.placed),
     })
 }
 
@@ -99,8 +102,8 @@ impl<T: Layer> ErasedPlacement for TypedPlacement<T> {
         with_context(frame, |cx| self.0.prepare(cx))
     }
 
-    fn place(&mut self, frame: &mut ErasedFrame<'_>, groups: CollisionGroups, fade: f32) -> Placed {
-        with_context(frame, |cx| self.0.place(cx, groups, fade))
+    fn place(&mut self, frame: &mut ErasedFrame<'_>, index: &mut CollisionIndex, fade: f32) -> Placed {
+        with_context(frame, |cx| self.0.place(cx, index, fade))
     }
 
     fn update_buckets(&mut self, frame: &mut ErasedFrame<'_>) {
@@ -113,10 +116,6 @@ impl<T: Layer> ErasedPlacement for TypedPlacement<T> {
 
     fn reset(&mut self) {
         self.0.reset();
-    }
-
-    fn query_rendered_features(&self, query: &mut PlacementQuery<'_>) -> Result<(), Error> {
-        self.0.query_rendered_features(query)
     }
 
     fn pass(&self) -> &dyn Any {

@@ -254,6 +254,9 @@ pub(crate) struct SymbolInstance {
     pub(crate) key: PoolRange,
     /// The index of the symbol's feature in its tile's layer data.
     pub(crate) data_feature_index: usize,
+    /// Where queries return the symbol's feature among its tile's: the
+    /// later first, unless its bucket sorts its symbols by viewport y.
+    pub(crate) sort_index: u32,
     /// `symbol-height-offset`, in meters above the ground.
     pub(crate) height_offset: f32,
     /// `None` until the cross-tile index assigns one, and for symbols it skips.

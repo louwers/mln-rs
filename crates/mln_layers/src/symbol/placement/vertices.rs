@@ -8,6 +8,7 @@ use std::num::NonZeroU32;
 use geometry::Point;
 use glam::Vec2;
 use mln_map_types::{TileProjector, View};
+use mln_render::placement::Overlap;
 use mln_style_types::{AlignmentType, IconTextFitType, TextRotationAlignmentType, TextWritingModeType};
 use mln_util::constants::ONE_EM;
 
@@ -16,7 +17,7 @@ use super::{BucketPlacementData, JointOpacityState, Placement, VariableOffset};
 use crate::symbol::bucket::{Buffer, CollisionBuffer, SymbolBucket, SymbolBucketState};
 use crate::symbol::instance::{Justification, SymbolInstance, TextPart};
 use crate::symbol::placement::CircleKey;
-use crate::symbol::placement::collision_index::OverlapMode;
+use crate::symbol::placement::collision::{icon_overlap, text_overlap};
 use crate::symbol::projection::{
     LabelPlaneProjector, LineLabelAlignment, add_dynamic_attributes, evaluate_size_for_feature, hide_glyphs,
     reproject_line_labels, tile_skew_vectors,
@@ -90,8 +91,8 @@ impl Placement {
         let has_icon_text_fit = *layout.icon_text_fit.uniform() != IconTextFitType::None;
         let rotate_with_map = *layout.text_rotation_alignment.uniform() == TextRotationAlignmentType::Map;
         let pitch_with_map = *layout.text_pitch_alignment.uniform() == AlignmentType::Map;
-        let text_always = OverlapMode::text(layout) == OverlapMode::Always;
-        let icon_always = OverlapMode::icon(layout) == OverlapMode::Always;
+        let text_always = text_overlap(layout) == Overlap::Always;
+        let icon_always = icon_overlap(layout) == Overlap::Always;
         let has_text = bucket.has_text_data();
         let has_icons = bucket.has_icon_data() || bucket.has_sdf_icon_data();
         let bucket_instance_id = bucket.bucket_instance_id;

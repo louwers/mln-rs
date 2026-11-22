@@ -405,6 +405,7 @@ mod tests {
             anchor: Anchor::new(x, y, 0.0, Some(0)),
             key: PoolRange::extend(&mut pools.keys, key.bytes()),
             data_feature_index: 0,
+            sort_index: 0,
             height_offset: 0.0,
             cross_tile_id: None,
             text: None,

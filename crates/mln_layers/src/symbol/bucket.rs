@@ -484,7 +484,11 @@ pub(crate) struct SymbolBucketState {
     pub(crate) icon_collision_circle: Option<CollisionBuffer>,
     pub(crate) text_collision_circle: Option<CollisionBuffer>,
 
-    pub(crate) feature_sort_order: Option<Arc<Vec<usize>>>,
+    /// The bucket's features in the order it last drew them, where it
+    /// sorts its symbols by viewport y. Only placement sorts them, so the
+    /// worker codec doesn't carry it.
+    #[wire(skip)]
+    pub(crate) feature_sort_order: Option<Arc<[u32]>>,
 }
 
 impl SymbolBucketState {
@@ -679,7 +683,7 @@ impl SymbolBucket {
         // the (unchanged) vertices in the sorted order.
         for index in symbols_by_viewport_y(&state.symbol_instances, angle) {
             let symbol = &state.symbol_instances[index];
-            symbols_sort_order.push(symbol.data_feature_index);
+            symbols_sort_order.push(symbol.data_feature_index as u32);
             if let Some(text) = &symbol.text {
                 for (run, _) in text.runs.all() {
                     add_placed_symbol(state.text.triangles.get_mut(), &state.text.placed_symbols[run]);
@@ -693,7 +697,7 @@ impl SymbolBucket {
             }
         }
 
-        state.feature_sort_order = Some(Arc::new(symbols_sort_order));
+        state.feature_sort_order = Some(Arc::from(symbols_sort_order));
     }
 
     /// The indices into `symbol_instances` of a sort key range, or all

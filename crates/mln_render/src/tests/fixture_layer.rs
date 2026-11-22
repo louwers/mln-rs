@@ -28,7 +28,7 @@ use crate::layer::{
     Bucket, BuildCx, DemTiles, EvaluatedLayer, Features, GpuVec, Layer, LayerBinders, Layout, LayoutCx, NewCx,
     PrepareCx, RasterTiles, Upload, ViewCover,
 };
-use crate::placement::{CollisionGroups, Placed, PlacementContext, PlacementPass, PlacementQuery, Prepared};
+use crate::placement::{CollisionIndex, Placed, PlacementContext, PlacementPass, Prepared};
 
 mln_style::properties!(
     /// The layout properties of a `dot` layer.
@@ -281,7 +281,7 @@ impl<const OTHER: bool> PlacementPass<Mark<OTHER>> for MarkPass {
         Prepared { places: self.places, added: false, changed: true }
     }
 
-    fn place(&mut self, cx: &mut PlacementContext<'_, Mark<OTHER>>, _groups: CollisionGroups, _fade: f32) -> Placed {
+    fn place(&mut self, cx: &mut PlacementContext<'_, Mark<OTHER>>, _index: &mut CollisionIndex, _fade: f32) -> Placed {
         self.calls.push(format!("place {}", cx.layers.len()));
         Placed { changed: false, settled: true }
     }
@@ -296,9 +296,5 @@ impl<const OTHER: bool> PlacementPass<Mark<OTHER>> for MarkPass {
 
     fn reset(&mut self) {
         self.calls.push("reset".to_owned());
-    }
-
-    fn query_rendered_features(&self, _query: &mut PlacementQuery<'_>) -> Result<(), Error> {
-        Ok(())
     }
 }

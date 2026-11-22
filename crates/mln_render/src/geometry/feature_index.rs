@@ -25,7 +25,6 @@ use mln_util::hash::{HashMap, HashSet};
 use mln_vec_map::VecMap;
 
 use crate::layer::Hit;
-use crate::placement::IndexedFeature;
 use crate::query::RenderedQueryOptions;
 use crate::render_layer::{ErasedHitTest, RenderLayer};
 use crate::source_state::SourceFeatureState;
@@ -278,21 +277,30 @@ impl FeatureIndex {
         Ok(())
     }
 
-    /// The features of `features`, which a placement shows, that
-    /// `selection` selects, in their order.
-    pub(crate) fn lookup_features<'f>(
+    /// The features of `features`, indexes into the source layer
+    /// `source_layer` of the bucket that `leader` leads, which a placement
+    /// shows, that `selection` selects, in their order.
+    pub(crate) fn lookup_features(
         &self,
-        features: impl IntoIterator<Item = IndexedFeature<'f>>,
+        features: impl IntoIterator<Item = usize>,
+        source_layer: &str,
+        leader: &str,
         selection: &FeatureSelection<'_>,
     ) -> Result<QueryResults, Error> {
         let mut result = QueryResults::default();
         if self.tile_data.is_none() {
             return Ok(result);
         }
-        for IndexedFeature { index, source_layer, bucket_leader } in features {
-            self.add_feature(&mut result, (index, source_layer, bucket_leader), selection, None)?;
+        for index in features {
+            self.add_feature(&mut result, (index, source_layer, leader), selection, None)?;
         }
         Ok(result)
+    }
+
+    /// Whether the layer `layer_id` leads a bucket of the layout.
+    #[must_use]
+    pub(crate) fn leads(&self, layer_id: &str) -> bool {
+        self.bucket_layer_ids.contains_key(layer_id)
     }
 
     /// Adds the feature `index` of the source layer `source_layer_name`,

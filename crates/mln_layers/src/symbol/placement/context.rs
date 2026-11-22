@@ -4,6 +4,7 @@
 use glam::Vec2;
 use mln_map_types::{ProjectionData, TileProjector, View};
 use mln_render::layer::TileTransform;
+use mln_render::placement::Overlap;
 use mln_style_types::{
     AlignmentType, IconTextFitType, SymbolPlacementType, SymbolZOrderType, TextRotationAlignmentType,
 };
@@ -13,7 +14,7 @@ use mln_util::constants::{EXTENT, TILE_SIZE_D};
 use super::{BucketPlacementData, PlacedTile, SymbolTranslate};
 use crate::symbol::SymbolLayoutProperties;
 use crate::symbol::bucket::{SymbolBucket, ZoomEvaluatedSize, symbols_by_viewport_y};
-use crate::symbol::placement::collision_index::{CollisionBoundaries, OverlapMode, PartCollision};
+use crate::symbol::placement::collision::{CollisionBoundaries, PartCollision, icon_overlap, text_overlap};
 use crate::symbol::projection::LabelPlaneProjector;
 
 /// A symbol layer's `*-translate` in the tile's units.
@@ -43,7 +44,6 @@ fn without_horizon(mut data: ProjectionData) -> ProjectionData {
 pub(crate) struct BucketOptions {
     /// The bucket's symbols skip their fade in.
     pub(crate) just_reloaded: bool,
-    pub(crate) collision_group: Option<u16>,
     /// The tile's borders, in tile mode.
     pub(crate) tile_borders: Option<CollisionBoundaries>,
     pub(crate) avoid_edges: Option<CollisionBoundaries>,
@@ -75,13 +75,13 @@ pub(crate) struct BucketContext<'a> {
     // included.
     text_translation: Vec2,
     icon_translation: Vec2,
-    /// The group the bucket's symbols collide with alone, and their id in
-    /// the grid; `None` for every group, as group 0.
-    pub(crate) collision_group: Option<u16>,
+    /// The cosine of the view's pitch times its camera's distance from the
+    /// center.
+    pitch_factor: f32,
     pub(crate) text_size: ZoomEvaluatedSize,
     pub(crate) icon_size: ZoomEvaluatedSize,
-    pub(crate) text_overlap_mode: OverlapMode,
-    pub(crate) icon_overlap_mode: OverlapMode,
+    pub(crate) text_overlap: Overlap,
+    pub(crate) icon_overlap: Overlap,
     /// A symbol whose parts always overlap shows even where placement left
     /// it out of the grid, as outside it. A part that always overlaps beside
     /// one that doesn't waits for placement, as it may hide with it.
@@ -103,7 +103,7 @@ impl<'a> BucketContext<'a> {
         placement_zoom: f32,
         options: BucketOptions,
     ) -> Self {
-        let BucketOptions { just_reloaded, collision_group, tile_borders, avoid_edges, debug } = options;
+        let BucketOptions { just_reloaded, tile_borders, avoid_edges, debug } = options;
         let tile = &data.tile;
         let overscaled_id = tile.overscaled_id;
         let pixels_to_tile_units = tile.id.pixels_to_tile_units(1.0, placement_zoom);
@@ -125,10 +125,10 @@ impl<'a> BucketContext<'a> {
             LabelPlaneProjector::new(&tile_projector, pitch, rotate, pixels_to_tile_units, translation)
         };
 
-        let text_overlap_mode = OverlapMode::text(layout);
-        let icon_overlap_mode = OverlapMode::icon(layout);
-        let text_always = text_overlap_mode == OverlapMode::Always;
-        let icon_always = icon_overlap_mode == OverlapMode::Always;
+        let text_overlap = text_overlap(layout);
+        let icon_overlap = icon_overlap(layout);
+        let text_always = text_overlap == Overlap::Always;
+        let icon_always = icon_overlap == Overlap::Always;
         let has_icons = bucket.has_icon_data() || bucket.has_sdf_icon_data();
         BucketContext {
             bucket,
@@ -145,11 +145,11 @@ impl<'a> BucketContext<'a> {
             tile_projector,
             text_translation,
             icon_translation,
-            collision_group,
+            pitch_factor: (view.pitch().cos() * view.camera_to_center_distance()) as f32,
             text_size: bucket.text_size_binder.evaluate_for_zoom(placement_zoom),
             icon_size: bucket.icon_size_binder.evaluate_for_zoom(placement_zoom),
-            text_overlap_mode,
-            icon_overlap_mode,
+            text_overlap,
+            icon_overlap,
             always_show_text: text_always && (icon_always || !has_icons || *layout.icon_optional.uniform()),
             always_show_icon: icon_always
                 && (text_always || !bucket.has_text_data() || *layout.text_optional.uniform()),
@@ -170,32 +170,33 @@ impl<'a> BucketContext<'a> {
 
     /// How the bucket's text collides.
     pub(crate) fn text_collision(&self) -> PartCollision<'_> {
-        self.collision(&self.text_plane, self.text_translation, self.text_overlap_mode)
+        self.collision(&self.text_plane, self.text_translation, self.text_overlap)
     }
 
     /// How the bucket's icons collide. Their boxes turn and pitch with the
     /// text's alignment.
     pub(crate) fn icon_collision(&self) -> PartCollision<'_> {
-        self.collision(&self.icon_plane, self.icon_translation, self.icon_overlap_mode)
+        self.collision(&self.icon_plane, self.icon_translation, self.icon_overlap)
     }
 
     fn collision<'s>(
         &'s self,
         label_plane: &'s LabelPlaneProjector<'a>,
         translation: Vec2,
-        overlap_mode: OverlapMode,
+        overlap: Overlap,
     ) -> PartCollision<'s> {
         PartCollision {
+            view: self.view,
+            pitch_factor: self.pitch_factor,
             tile_projector: &self.tile_projector,
             label_plane,
             translation,
             pixel_ratio: self.pixel_ratio,
             scale: self.scale,
-            overlap_mode,
+            overlap,
             pitch_with_map: self.pitch_text_with_map,
             rotate_with_map: self.rotate_text_with_map,
             avoid_edges: self.avoid_edges.as_ref(),
-            collision_group: self.collision_group,
             debug: self.debug,
         }
     }

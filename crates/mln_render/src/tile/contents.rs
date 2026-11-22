@@ -175,6 +175,11 @@ impl LayoutBuckets {
     }
 
     /// The values the layout laid the layer `layer_id` out with.
+    pub(crate) fn layer(&self, layer_id: &str) -> Option<&Arc<dyn ErasedEvaluatedLayer>> {
+        Some(&self.laid.get(self.find(layer_id)?)?.layer)
+    }
+
+    /// [`layer`](Self::layer), to change.
     pub(crate) fn layer_mut(&mut self, layer_id: &str) -> Option<&mut Arc<dyn ErasedEvaluatedLayer>> {
         let index = self.find(layer_id)?;
         Some(&mut self.laid.get_mut(index)?.layer)

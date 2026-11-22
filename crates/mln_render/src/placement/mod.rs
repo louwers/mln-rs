@@ -17,14 +17,14 @@
 //! [prepares](PlacementPass::prepare) the pass, has it
 //! [place](PlacementPass::place) when a placement is due, and then
 //! [brings the layers' buckets](PlacementPass::update_buckets) to the
-//! placement. A pass places into a [`Grid`] of [`Shape`]s, with the
-//! sources' [`CollisionGroups`]. The pass answers rendered-feature queries
-//! of its type's layers from what it placed
-//! ([`PlacementPass::query_rendered_features`]).
+//! placement. A pass places [`Shape`]s into the placement's
+//! [`CollisionIndex`], each standing for an [`Item`]: a feature of one of
+//! its layer's tiles. The engine answers rendered-feature queries of the
+//! placing layers from the index of the current placement.
 
 mod erased;
 mod grid;
-mod groups;
+mod index;
 mod schedule;
 
 use std::any::Any;
@@ -33,23 +33,18 @@ use std::sync::Arc;
 
 use glam::Vec2;
 use mln_map_types::ProjectionData;
-use mln_style::expression::GlobalStateMap;
 use mln_style::expression::functions::RegisterError;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
-use mln_util::error::Error;
-use mln_util::geo::ScreenCoordinate;
 
 pub(crate) use self::erased::{ErasedFrame, ErasedPlacement, LaidBuckets, PlacingLayerTiles};
-pub use self::grid::{Aabb, Grid, Shape};
-pub use self::groups::CollisionGroups;
+pub use self::grid::{Aabb, Shape};
+pub use self::index::{CollisionIndex, Item, Overlap};
 pub(crate) use self::schedule::Schedule;
 use crate::bucket_upload::Upload;
 pub use crate::geometry::feature_index::FeatureIndex;
-use crate::geometry::feature_index::{FeatureSelection, QueryLayers, QueryResults};
 use crate::gfx::mesh::Indexes;
 use crate::layer::{Bucket, GpuVec, Layer, LayerValues};
 use crate::paint_parameters::Frame;
-use crate::query::RenderedQueryOptions;
 use crate::registry::RegistryBuilder;
 use crate::render_source::RenderSource;
 use crate::render_tile::{FoundTile, RenderTile, TileContent, ViewPlace};
@@ -105,12 +100,13 @@ pub trait PlacementPass<T: Layer>: Any {
     fn prepare(&mut self, cx: &mut PlacementContext<'_, T>) -> Prepared;
 
     /// Places `cx`'s layers, topmost first, each where it collides with
-    /// nothing placed before it in `groups`, in a placement that replaces
-    /// the current one, for a frame that the schedule places. `fade` is how
-    /// far the fade of the placement it replaces had come, which a
-    /// continuous map's placement fades on from: 0 as the fade starts, 1
-    /// and past once it is done.
-    fn place(&mut self, cx: &mut PlacementContext<'_, T>, groups: CollisionGroups, fade: f32) -> Placed;
+    /// nothing placed before it in `index`, in a placement that replaces
+    /// the current one, for a frame that the schedule places. Before it
+    /// places a layer's shapes, it [selects](CollisionIndex::select_layer)
+    /// the layer. `fade` is how far the fade of the placement it replaces
+    /// had come, which a continuous map's placement fades on from: 0 as the
+    /// fade starts, 1 and past once it is done.
+    fn place(&mut self, cx: &mut PlacementContext<'_, T>, index: &mut CollisionIndex, fade: f32) -> Placed;
 
     /// Brings `cx`'s layers' buckets to the current placement, in each
     /// frame's update after the schedule placed or didn't. A bucket it
@@ -127,10 +123,6 @@ pub trait PlacementPass<T: Layer>: Any {
     /// [`forget_buckets`](Self::forget_buckets) forgets: no layer has
     /// anything to place.
     fn reset(&mut self);
-
-    /// Adds the features of `query`'s layers that the current placement
-    /// shows within its geometry.
-    fn query_rendered_features(&self, query: &mut PlacementQuery<'_>) -> Result<(), Error>;
 }
 
 /// What a [`PlacementPass`] reads of the frame: its layers of the pass's
@@ -269,11 +261,13 @@ pub struct BucketKey {
 /// changes them, by their [`BucketKey`]s.
 pub struct PlacementBuckets<'a> {
     store: &'a mut dyn LaidBuckets,
+    /// The current placement's index.
+    placed: &'a mut CollisionIndex,
 }
 
 impl<'a> PlacementBuckets<'a> {
-    pub(crate) fn new(store: &'a mut dyn LaidBuckets) -> Self {
-        PlacementBuckets { store }
+    pub(crate) fn new(store: &'a mut dyn LaidBuckets, placed: &'a mut CollisionIndex) -> Self {
+        PlacementBuckets { store, placed }
     }
 
     /// The bucket at `key`, if it is there and is a `B`.
@@ -288,6 +282,15 @@ impl<'a> PlacementBuckets<'a> {
         let bucket = self.store.bucket_mut(key)?;
         bucket.changed();
         bucket.downcast_mut()
+    }
+
+    /// Has queries of the current placement return the features of the
+    /// bucket at `key` in the reverse of `order`, the feature indexes in
+    /// the order the bucket now draws them, rather than by their
+    /// [`Item::sort`]. Does nothing where the placement placed nothing of
+    /// the bucket as it is now.
+    pub fn set_query_order(&mut self, key: &BucketKey, order: Option<Arc<[u32]>>) {
+        self.placed.set_query_order(&*self.store, key, order);
     }
 }
 
@@ -308,55 +311,5 @@ pub fn keep<V: bytemuck::Pod>(up: &mut Upload<'_>, vec: &mut GpuVec<V>) {
 pub fn keep_indexes(up: &mut Upload<'_>, indexes: &mut Indexes) {
     if let crate::bucket_upload::Kind::Geometry { geometry, copies, res } = &mut up.kind {
         geometry.upload_indexes(indexes, true, copies, res);
-    }
-}
-
-/// A rendered-feature query of the layers of a [`PlacementPass`]'s type,
-/// which the pass answers from what it placed.
-pub struct PlacementQuery<'a> {
-    /// The query's geometry, in the view's pixels.
-    pub geometry: &'a [ScreenCoordinate],
-    /// The queried layers of the pass's type, by id.
-    pub(crate) layers: &'a QueryLayers<'a>,
-    pub(crate) options: &'a RenderedQueryOptions,
-    pub(crate) global_state: Option<&'a GlobalStateMap>,
-    /// The features found, by layer id, which the query adds to.
-    pub(crate) results: &'a mut QueryResults,
-}
-
-/// A feature of a tile's [`FeatureIndex`], which a [`PlacementQuery`] looks
-/// up.
-#[derive(Clone, Copy, Debug)]
-pub struct IndexedFeature<'a> {
-    /// The feature's index in its source layer.
-    pub index: usize,
-    /// The name of the feature's source layer.
-    pub source_layer: &'a str,
-    /// The id of the leader of the layers whose bucket has the feature.
-    pub bucket_leader: &'a str,
-}
-
-impl PlacementQuery<'_> {
-    /// Adds `features`, of the tile `tile_id` whose feature index is
-    /// `index`, that the placement shows within the query's geometry, in
-    /// their order, to the results of each queried layer whose bucket has
-    /// them and whose filter takes them.
-    pub fn add_features<'f>(
-        &mut self,
-        index: &FeatureIndex,
-        tile_id: &OverscaledTileID,
-        features: impl IntoIterator<Item = IndexedFeature<'f>>,
-    ) -> Result<(), Error> {
-        let selection = FeatureSelection {
-            layers: self.layers,
-            options: self.options,
-            global_state: self.global_state,
-            tile_id,
-            feature_state: None,
-        };
-        for (layer_id, features) in index.lookup_features(features, &selection)? {
-            self.results.entry(layer_id).or_default().extend(features);
-        }
-        Ok(())
     }
 }

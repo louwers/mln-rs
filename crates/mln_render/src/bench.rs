@@ -34,7 +34,9 @@ use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas;
 use crate::layer::Layer;
 use crate::layout::tile_layout::{Dependencies, LayoutParams, Resolved};
 use crate::paint_parameters::TransformParameters;
-use crate::placement::{BucketKey, LaidBuckets, PlacementBuckets, PlacementContext, PlacingLayer, PlacingTile};
+use crate::placement::{
+    BucketKey, CollisionIndex, LaidBuckets, PlacementBuckets, PlacementContext, PlacingLayer, PlacingTile,
+};
 use crate::render_layer::{Hosted, RenderLayer as _};
 use crate::render_tile::RenderTile;
 use crate::text::glyph_store::ShapeResults;
@@ -223,6 +225,10 @@ pub struct PlacementFrame<L: Layer> {
     tiles: Vec<(OverscaledTileID, LayoutResult)>,
     /// The layers, bottom to top, each with its tiles.
     layers: Vec<(Hosted<L>, Vec<PlacingTile>)>,
+    /// The current placement's collision index, and the one a placement
+    /// fills.
+    placed: CollisionIndex,
+    index: CollisionIndex,
 }
 
 impl<L: Layer> PlacementFrame<L> {
@@ -321,7 +327,13 @@ impl<L: Layer> PlacementFrame<L> {
                 .collect();
             layers.push((render_layer, placing));
         }
-        Ok(PlacementFrame { update, tiles, layers })
+        Ok(PlacementFrame {
+            update,
+            tiles,
+            layers,
+            placed: CollisionIndex::default(),
+            index: CollisionIndex::default(),
+        })
     }
 
     /// Runs `hook` with the frame's placement context: its layers, its
@@ -332,8 +344,28 @@ impl<L: Layer> PlacementFrame<L> {
         hook(&mut PlacementContext {
             layers: &layers,
             update_parameters: &self.update,
-            buckets: PlacementBuckets::new(&mut FrameBuckets(&mut self.tiles)),
+            buckets: PlacementBuckets::new(&mut FrameBuckets(&mut self.tiles), &mut self.placed),
         })
+    }
+
+    /// [`with_context`](Self::with_context), with the collision index of a
+    /// placement of the frame's layers, empty, as a renderer has its
+    /// placement pass place into.
+    pub fn with_index<R>(&mut self, hook: impl FnOnce(&mut PlacementContext<'_, L>, &mut CollisionIndex) -> R) -> R {
+        let layers: Vec<PlacingLayer<'_, L>> =
+            self.layers.iter().map(|(layer, tiles)| PlacingLayer { layer: layer.parts().1, tiles }).collect();
+        let mut buckets = FrameBuckets(&mut self.tiles);
+        self.index.begin(&self.update.view, self.update.mode);
+        let ids = self.layers.iter().map(|(layer, tiles)| (layer.id(), tiles.as_slice()));
+        self.index.add_layers(ids, &buckets, self.update.cross_source_collisions);
+        hook(
+            &mut PlacementContext {
+                layers: &layers,
+                update_parameters: &self.update,
+                buckets: PlacementBuckets::new(&mut buckets, &mut self.placed),
+            },
+            &mut self.index,
+        )
     }
 }
 
@@ -348,8 +380,8 @@ impl FrameBuckets<'_> {
 }
 
 impl LaidBuckets for FrameBuckets<'_> {
-    fn bucket(&self, key: &BucketKey) -> Option<&dyn ErasedBucket> {
-        self.0.get(self.tile(key)?)?.1.layer_render_data.bucket(key.bucket)
+    fn layout(&self, key: &BucketKey) -> Option<&LayoutResult> {
+        Some(&self.0.get(self.tile(key)?)?.1)
     }
 
     fn bucket_mut(&mut self, key: &BucketKey) -> Option<&mut dyn ErasedBucket> {

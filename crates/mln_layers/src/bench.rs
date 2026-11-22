@@ -10,7 +10,6 @@
 use std::sync::Arc;
 
 use mln_render::bench::{LaidOut, PlacementFrame};
-use mln_render::placement::CollisionGroups;
 use mln_style::Style;
 use mln_util::error::Error;
 use mln_util::geo::{LatLng, WrapMode};
@@ -67,15 +66,14 @@ impl SymbolView {
     /// symbols it shows. Their ids come from [`SymbolView::index`]: a symbol
     /// without one shows nowhere.
     pub fn place(&mut self) -> usize {
-        self.0.with_context(|cx| {
+        self.0.with_index(|cx, index| {
             let mut layers = Vec::new();
             LayerBuckets::fill(&mut layers, cx);
             let inputs = PlacementInputs::new(cx.update_parameters, leaders(&layers), &cx.buckets);
-            let groups = CollisionGroups::new(cx.update_parameters.cross_source_collisions);
-            let mut placement = Placement::create(Arc::new(inputs), groups, Some(Placement::new_default()));
+            let mut placement = Placement::create(Arc::new(inputs), Some(Placement::new_default()));
             // The placement it replaces showed nothing, so it has nothing to
             // fade from.
-            placement.place(&mut cx.buckets, 1.0);
+            placement.place(&mut cx.buckets, index, 1.0);
             placement.shown()
         })
     }

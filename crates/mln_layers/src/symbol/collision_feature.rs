@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use glam::Vec2;
 use mln_math::deg2radf;
 use mln_text::PositionedIcon;
@@ -8,24 +6,7 @@ use mln_tile_id::geometry_tile_data::GeometryCoordinate;
 use mln_util::Padding;
 
 use crate::symbol::anchor::{Anchor, segments, vertex_behind};
-use crate::symbol::placement::collision_index::OverlapMode;
 use crate::symbol::pool::PoolRange;
-
-/// A feature of a collision index, which a query looks up in its tile's
-/// feature index.
-#[derive(Clone, Debug, PartialEq, mln_wire::Wire)]
-pub(crate) struct IndexedSubfeature {
-    pub(crate) index: usize,
-    pub(crate) source_layer_name: Arc<str>,
-    pub(crate) bucket_leader_id: Arc<str>,
-    pub(crate) sort_index: usize,
-    pub(crate) bucket_instance_id: u32,
-    pub(crate) collision_group_id: u16,
-    /// The overlap mode the symbol was placed with. It's set only in a
-    /// collision index, so the worker codec doesn't carry it.
-    #[wire(skip)]
-    pub(crate) overlap_mode: OverlapMode,
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, mln_wire::Wire)]
 pub(crate) struct CollisionBox {
@@ -56,7 +37,6 @@ impl CollisionBox {
 pub(crate) struct CollisionFeature {
     /// The feature's boxes, in its bucket's `SymbolInstancePools`.
     pub(crate) boxes: PoolRange,
-    pub(crate) indexed_feature: IndexedSubfeature,
     pub(crate) along_line: bool,
 }
 
@@ -91,13 +71,12 @@ impl CollisionFeature {
         shaped_text: &Shaping,
         along_line: Option<AlongLine<'_>>,
         layout: &BoxLayout,
-        indexed_feature: &IndexedSubfeature,
         pool: &mut Vec<CollisionBox>,
     ) -> Self {
         let bounds = shaped_text.bounds;
         let label = LabelBox::new(bounds.left, bounds.top, bounds.right, bounds.bottom)
             .map(|label| label.scaled(layout.scale).padded(&layout.padding));
-        Self::new(anchor, label, along_line, layout, indexed_feature, pool)
+        Self::new(anchor, label, along_line, layout, pool)
     }
 
     /// The collision feature of a shaped icon: a box around `anchor`, also
@@ -110,7 +89,6 @@ impl CollisionFeature {
         anchor: &Anchor,
         shaped_icon: Option<&PositionedIcon>,
         layout: &BoxLayout,
-        indexed_feature: &IndexedSubfeature,
         pool: &mut Vec<CollisionBox>,
     ) -> Self {
         let label = shaped_icon.and_then(|shaped_icon| {
@@ -126,7 +104,7 @@ impl CollisionFeature {
                 ))
             })
         });
-        Self::new(anchor, label, None, layout, indexed_feature, pool)
+        Self::new(anchor, label, None, layout, pool)
     }
 
     fn new(
@@ -134,7 +112,6 @@ impl CollisionFeature {
         label: Option<LabelBox>,
         along_line: Option<AlongLine<'_>>,
         layout: &BoxLayout,
-        indexed_feature: &IndexedSubfeature,
         pool: &mut Vec<CollisionBox>,
     ) -> Self {
         let boxes = match (label, along_line) {
@@ -156,7 +133,7 @@ impl CollisionFeature {
                 )
             }
         };
-        CollisionFeature { boxes, indexed_feature: indexed_feature.clone(), along_line: along_line.is_some() }
+        CollisionFeature { boxes, along_line: along_line.is_some() }
     }
 }
 

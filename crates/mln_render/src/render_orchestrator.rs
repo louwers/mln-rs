@@ -36,7 +36,7 @@ use crate::image_store::ImageStore;
 use crate::named_target::{Routes, Run};
 use crate::paint_parameters::PaintParameters;
 use crate::placement::{
-    CollisionGroups, ErasedFrame, ErasedPlacement, PlacementQuery, PlacingLayerTiles, PlacingTile, Prepared, Schedule,
+    CollisionIndex, ErasedFrame, ErasedPlacement, PlacingLayerTiles, PlacingTile, Prepared, Schedule,
 };
 use crate::render_layer::{FrameSourceTiles, LayerUpdate, RecordedLayer, RenderLayer};
 use crate::render_pass::Pass;
@@ -164,6 +164,11 @@ pub(crate) struct RenderOrchestrator {
     /// has one, and the schedule that drives it.
     placement: Option<Box<dyn ErasedPlacement>>,
     schedule: Schedule,
+    /// The current placement's collision index, which queries of the
+    /// placing layers read, and the one the next placement fills, which
+    /// keeps the cells of the one before.
+    placed: CollisionIndex,
+    spare_index: CollisionIndex,
     /// The frame's layers whose type places, by their index in the drawing
     /// order, as the update found them.
     placing_layers: Vec<PlacingLayerTiles>,
@@ -232,6 +237,8 @@ impl RenderOrchestrator {
             view: View::default(),
             tile_store,
             schedule: Schedule::default(),
+            placed: CollisionIndex::default(),
+            spare_index: CollisionIndex::default(),
             placing_layers: Vec::new(),
             placing_tiles: Vec::new(),
             found_tiles: Vec::new(),
@@ -399,8 +406,12 @@ impl RenderOrchestrator {
 
         if let Some(pass) = &mut self.placement {
             let layers = placing(&self.layers, &self.placing_layers, &self.placing_tiles);
-            let mut placement_frame = ErasedFrame { layers: &layers, update_parameters, buckets: &mut self.tile_store };
-            pass.update_buckets(&mut placement_frame);
+            pass.update_buckets(&mut ErasedFrame {
+                layers: &layers,
+                update_parameters,
+                buckets: &mut self.tile_store,
+                placed: &mut self.placed,
+            });
         }
 
         Some(frame)
@@ -947,9 +958,12 @@ impl RenderOrchestrator {
         let time_point = update_parameters.time_point;
         let layers = placing(&self.layers, &self.placing_layers, &self.placing_tiles);
         let prepared = match &mut self.placement {
-            Some(pass) => {
-                pass.prepare(&mut ErasedFrame { layers: &layers, update_parameters, buckets: &mut self.tile_store })
-            }
+            Some(pass) => pass.prepare(&mut ErasedFrame {
+                layers: &layers,
+                update_parameters,
+                buckets: &mut self.tile_store,
+                placed: &mut self.placed,
+            }),
             None => Prepared::default(),
         };
         let pass = match &mut self.placement {
@@ -960,6 +974,7 @@ impl RenderOrchestrator {
                     // Nothing to place: the placement and what the pass
                     // keeps go.
                     frame.placement_changed = self.schedule.reset();
+                    self.placed.clear();
                     if let Some(pass) = pass {
                         pass.reset();
                     }
@@ -977,7 +992,6 @@ impl RenderOrchestrator {
             }
         };
 
-        let groups = || CollisionGroups::new(update_parameters.cross_source_collisions);
         let transition_options = update_parameters.style.get_transition_options();
         let zoom = update_parameters.view.zoom() as f32;
         if continuous {
@@ -1003,9 +1017,8 @@ impl RenderOrchestrator {
             frame.placement_changed = stale && due;
             if frame.placement_changed {
                 let fade = self.schedule.fade_change(time_point);
-                let mut placement_frame =
-                    ErasedFrame { layers: &layers, update_parameters, buckets: &mut self.tile_store };
-                let placed = pass.place(&mut placement_frame, groups(), fade);
+                let indexes = (&mut self.placed, &mut self.spare_index);
+                let placed = place(&mut **pass, &layers, update_parameters, &mut self.tile_store, indexes, fade);
                 self.schedule.commit(update_parameters.mode, transition_options, zoom, time_point, placed);
             } else if stale {
                 frame.repaint_at = next_placement_at;
@@ -1014,8 +1027,8 @@ impl RenderOrchestrator {
             frame.needs_repaint = self.has_transitions(time_point);
         } else {
             frame.placement_changed = true;
-            let mut placement_frame = ErasedFrame { layers: &layers, update_parameters, buckets: &mut self.tile_store };
-            let placed = pass.place(&mut placement_frame, groups(), 1.0);
+            let indexes = (&mut self.placed, &mut self.spare_index);
+            let placed = place(&mut **pass, &layers, update_parameters, &mut self.tile_store, indexes, 1.0);
             self.schedule.commit(update_parameters.mode, transition_options, zoom, time_point, placed);
             // A still image keeps nothing of the buckets between frames.
             pass.forget_buckets();
@@ -1407,21 +1420,19 @@ impl RenderOrchestrator {
         }
 
         // What the placement shows of the layers that place.
-        if let Some(pass) = &self.placement {
-            let placing: crate::geometry::feature_index::QueryLayers<'_> = filtered_layers
-                .iter()
-                .filter(|(id, _)| layers.get(*id).is_some_and(|layer| layer.record().places))
-                .map(|(id, layer)| (id.clone(), *layer))
-                .collect();
-            if !placing.is_empty() {
-                pass.query_rendered_features(&mut PlacementQuery {
-                    geometry,
-                    layers: &placing,
-                    options,
-                    global_state: self.global_state.as_deref(),
-                    results: &mut results_by_layer,
-                })?;
-            }
+        let placing: crate::geometry::feature_index::QueryLayers<'_> = filtered_layers
+            .iter()
+            .filter(|(id, _)| layers.get(*id).is_some_and(|layer| layer.record().places))
+            .map(|(id, layer)| (id.clone(), *layer))
+            .collect();
+        if !placing.is_empty() {
+            self.placed.query_rendered_features(
+                geometry,
+                &placing,
+                options,
+                self.global_state.as_deref(),
+                &mut results_by_layer,
+            )?;
         }
 
         for (id, layer) in &filtered_layers {
@@ -1633,6 +1644,28 @@ impl Drop for RenderOrchestrator {
         self.tile_store.clear();
         self.thread_pool.wait();
     }
+}
+
+/// Has `pass` place `layers` of `update_parameters`' frame, whose buckets
+/// are in `store`, into the spare of `(placed, spare)`, the current
+/// placement's index and the spare one, which then swap. `fade` is how far
+/// the current placement's fade had come.
+fn place(
+    pass: &mut dyn ErasedPlacement,
+    layers: &[(&dyn RenderLayer, &[PlacingTile])],
+    update_parameters: &UpdateParameters,
+    store: &mut TileStore,
+    (placed, spare): (&mut CollisionIndex, &mut CollisionIndex),
+    fade: f32,
+) -> crate::placement::Placed {
+    spare.begin(&update_parameters.view, update_parameters.mode);
+    let ids = layers.iter().map(|&(layer, tiles)| (layer.id(), tiles));
+    spare.add_layers(ids, store, update_parameters.cross_source_collisions);
+    let mut frame = ErasedFrame { layers, update_parameters, buckets: store, placed: &mut *placed };
+    let result = pass.place(&mut frame, spare, fade);
+    std::mem::swap(placed, spare);
+    spare.clear_records();
+    result
 }
 
 /// The frame's placing layers among `layers`, each with its run of `tiles`,

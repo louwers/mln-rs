@@ -19,6 +19,7 @@ use geometry::Point;
 use glam::Vec2;
 use mln_map_types::MapMode;
 use mln_render::layer::{BuildCx, LayerBinders, Layout, LayoutCx, Resolved};
+use mln_render::placement::Overlap;
 use mln_style::evaluated::Evaluated;
 use mln_style::expression::formatted::K_FORMATTED_SECTION_TEXT_COLOR;
 use mln_style::expression::{EvaluationContext, GlobalStateMap, Value};
@@ -48,7 +49,7 @@ use crate::symbol::bucket::{
     Buffer, PlacedSymbol, QuadCorner, SortKeyRange, SymbolBucket, SymbolBucketState, SymbolBucketStyle,
     SymbolIconBinders, SymbolLayoutFlags, SymbolSizeBinder, SymbolTextBinders,
 };
-use crate::symbol::collision_feature::{AlongLine, BoxLayout, CollisionBox, CollisionFeature, IndexedSubfeature};
+use crate::symbol::collision_feature::{AlongLine, BoxLayout, CollisionBox, CollisionFeature};
 use crate::symbol::instance::{
     IconPart, Justification, LaidOutSymbol, ShapedTextOrientations, SymbolInstance, SymbolInstancePools, SymbolQuadSet,
     TextPart, TextRuns, WritingModes,
@@ -57,7 +58,7 @@ use crate::symbol::layout::clip_lines::clip_lines;
 use crate::symbol::layout::feature::SymbolFeature;
 use crate::symbol::layout::get_anchors::{LineLabel, get_anchors, get_center_anchor};
 use crate::symbol::layout::merge_lines::merge_lines;
-use crate::symbol::placement::collision_index::OverlapMode;
+use crate::symbol::placement::collision::{icon_overlap, text_overlap};
 use crate::symbol::pool::PoolRange;
 use crate::symbol::quads::{SymbolQuad, SymbolQuads, glyph_quads, icon_quads};
 use crate::symbol::{Symbol, SymbolLayoutProperties};
@@ -324,7 +325,8 @@ struct FeatureSymbols<'a> {
     icon_padding: Padding,
     variable_anchors: Option<VariableAnchorOffsetCollection>,
     height_offset: f32,
-    indexed_feature: IndexedSubfeature,
+    /// Where queries return the feature among the tile's: the later first.
+    sort_index: u32,
     key: &'a str,
     feature_index: usize,
     data_feature_index: usize,
@@ -378,11 +380,11 @@ impl FeatureSymbols<'_> {
             .then_some(AlongLine { line, overscaling: self.overscaling });
         let text_feature = |shaping: &Shaping, rotate: f32, boxes: &mut Vec<CollisionBox>| {
             let layout = BoxLayout { scale: self.text_box_scale, padding: Padding::uniform(self.text_padding), rotate };
-            CollisionFeature::new_text(&anchor, shaping, along_line, &layout, &self.indexed_feature, boxes)
+            CollisionFeature::new_text(&anchor, shaping, along_line, &layout, boxes)
         };
         let icon_feature = |icon: &PositionedIcon, rotate: f32, boxes: &mut Vec<CollisionBox>| {
             let layout = BoxLayout { scale: self.icon_box_scale, padding: self.icon_padding, rotate };
-            CollisionFeature::new_icon(&anchor, Some(icon), &layout, &self.indexed_feature, boxes)
+            CollisionFeature::new_icon(&anchor, Some(icon), &layout, boxes)
         };
         let text = &self.shaped.text;
         let vertical = self.allow_vertical_placement && !text.vertical.is_empty();
@@ -409,6 +411,7 @@ impl FeatureSymbols<'_> {
                 anchor,
                 key: PoolRange::extend(&mut pools.keys, self.key.bytes()),
                 data_feature_index: self.data_feature_index,
+                sort_index: self.sort_index,
                 height_offset: self.height_offset,
                 cross_tile_id: None,
                 text: text_part,
@@ -423,8 +426,6 @@ impl FeatureSymbols<'_> {
 }
 
 pub struct SymbolLayout {
-    /// Shared by every symbol's `IndexedSubfeature`, which placement clones
-    /// for each symbol it places.
     pub(crate) bucket_leader_id: Arc<str>,
     symbols: Vec<LaidOutSymbol>,
     symbol_instance_pools: SymbolInstancePools,
@@ -432,9 +433,6 @@ pub struct SymbolLayout {
 
     compare_text: VecMap<String, Vec<Anchor>>,
 
-    /// The name of the tile's layer of the features, shared like
-    /// `bucket_leader_id`.
-    source_layer_name: Arc<str>,
     overscaling: f32,
     zoom: f32,
     canonical_id: CanonicalTileID,
@@ -493,7 +491,6 @@ impl Layout<Symbol> for SymbolLayout {
             symbol_instance_pools: SymbolInstancePools::default(),
             sort_key_ranges: Vec::new(),
             compare_text: VecMap::new(),
-            source_layer_name: Arc::from(leader.source_layer.as_str()),
             overscaling,
             zoom,
             canonical_id: tile_id.canonical,
@@ -537,8 +534,8 @@ impl Layout<Symbol> for SymbolLayout {
         let z_order_by_viewport_y = *symbol_z_order.uniform() == SymbolZOrderType::ViewportY
             || (*symbol_z_order.uniform() == SymbolZOrderType::Auto && !this.sort_features_by_key);
         this.sort_features_by_y = z_order_by_viewport_y
-            && (OverlapMode::text(&layout) != OverlapMode::Never
-                || OverlapMode::icon(&layout) != OverlapMode::Never
+            && (text_overlap(&layout) != Overlap::Never
+                || icon_overlap(&layout) != Overlap::Never
                 || *layout.text_ignore_placement.uniform()
                 || *layout.icon_ignore_placement.uniform());
         let sort_features = this.sort_features_by_key && !layout.symbol_sort_key.is_constant();
@@ -923,15 +920,7 @@ impl SymbolLayout {
             variable_anchors: self.text_variable_anchor_offset(feature),
             // The spec raises only point-placed symbols.
             height_offset: if placement == SymbolPlacementType::Point { values.symbol_height_offset } else { 0.0 },
-            indexed_feature: IndexedSubfeature {
-                index: feature.index,
-                source_layer_name: Arc::clone(&self.source_layer_name),
-                bucket_leader_id: Arc::clone(&self.bucket_leader_id),
-                sort_index: self.symbols.len(),
-                bucket_instance_id: 0,
-                collision_group_id: 0,
-                overlap_mode: OverlapMode::Never,
-            },
+            sort_index: self.symbols.len() as u32,
             key: &key,
             feature_index,
             data_feature_index: feature.index,

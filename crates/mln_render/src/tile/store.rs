@@ -30,7 +30,7 @@ use crate::renderer_event::RendererEvent;
 use crate::source::NewTile;
 use crate::source_state::SourceFeatureState;
 use crate::text::glyph_store::GlyphStore;
-use crate::tile::contents::{Answer, TileAtlases};
+use crate::tile::contents::{Answer, LayoutResult, TileAtlases};
 use crate::tile::inbox::{Inbox, InboxSender, TileEvent, Waker};
 use crate::tile::job::{SourceKey, TileKey};
 use crate::tile::loading::Load;
@@ -505,9 +505,8 @@ impl TileStore {
 
 /// The buckets of the tiles' layouts.
 impl LaidBuckets for TileStore {
-    fn bucket(&self, key: &BucketKey) -> Option<&dyn ErasedBucket> {
-        let contents = self.sources.get(&key.source)?.contents_at(&key.tile, key.slot)?.geometry()?;
-        contents.result.layer_render_data.bucket(key.bucket)
+    fn layout(&self, key: &BucketKey) -> Option<&LayoutResult> {
+        Some(&self.sources.get(&key.source)?.contents_at(&key.tile, key.slot)?.geometry()?.result)
     }
 
     fn bucket_mut(&mut self, key: &BucketKey) -> Option<&mut dyn ErasedBucket> {
