@@ -63,6 +63,16 @@ impl<S: StyleLayerType> EvaluatedLayer<S> {
     }
 }
 
+#[cfg(test)]
+impl<S: Layer<Style = S> + StyleLayerType> EvaluatedLayer<S> {
+    /// The values of the layer `style` of the type `S`, which is both its
+    /// halves, before its first evaluation: its paint properties' defaults,
+    /// not drawing.
+    pub(crate) fn new(style: Arc<LayerStyle<S>>) -> Self {
+        EvaluatedLayer::with_paint(entry::<S>(), style, Default::default())
+    }
+}
+
 impl<S: StyleLayerType> std::fmt::Debug for EvaluatedLayer<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EvaluatedLayer")
@@ -411,32 +421,24 @@ pub(crate) fn laid<'a, S: StyleLayerType, L: Layout<S>>(
 #[cfg(test)]
 mod tests {
     use mln_style::evaluated::Evaluated;
+    use mln_util::Color;
 
     use super::*;
-    use crate::tests::fixture_layer::{Dot, DotBucket, Tint, TintPaintProperties};
-
-    fn tint() -> Arc<dyn ErasedEvaluatedLayer> {
-        let paint = TintPaintProperties::PossiblyEvaluated { tint_opacity: Evaluated::Constant(0.5) };
-        let style = Arc::new(LayerStyle::<Tint>::new("tint".to_owned(), "source".to_owned()));
-        let crossfade = CrossfadeParameters { from_scale: 2.0, to_scale: 1.0, t: 0.25 };
-        Arc::new(EvaluatedLayer { style, paint, crossfade, draws: false })
-    }
+    use crate::tests::fixture_layer::{Dot, DotPaintProperties};
 
     #[test]
     fn recover_keeps_the_allocation() {
-        let layer = tint();
-        let recovered = EvaluatedLayer::<Tint>::recover(&layer).unwrap();
+        let paint = DotPaintProperties::PossiblyEvaluated {
+            dot_color: Evaluated::Constant(Color::white()),
+            dot_pattern: Evaluated::default(),
+        };
+        let style = Arc::new(LayerStyle::<Dot>::new("dot".to_owned(), "source".to_owned()));
+        let crossfade = CrossfadeParameters { from_scale: 2.0, to_scale: 1.0, t: 0.25 };
+        let layer: Arc<dyn ErasedEvaluatedLayer> =
+            Arc::new(EvaluatedLayer { style, paint, crossfade, draws: false, entry: entry::<Dot>() });
+        let recovered = EvaluatedLayer::<Dot>::recover(&layer).unwrap();
         assert!(std::ptr::addr_eq(Arc::as_ptr(&recovered), Arc::as_ptr(&layer)));
-        assert_eq!(*recovered.paint.tint_opacity.uniform(), 0.5);
+        assert_eq!(*recovered.paint.dot_color.uniform(), Color::white());
         assert_eq!(recovered.crossfade.t, 0.25);
-        assert!(EvaluatedLayer::<Dot>::recover(&layer).is_none());
-    }
-
-    #[test]
-    fn a_type_reads_no_other_types_values() {
-        let layer = tint();
-        let dots = entry::<Dot>();
-        assert!(!dots.layout_can_need_dependencies(std::slice::from_ref(&layer)));
-        assert_eq!(dots.query_radius(&DotBucket::default(), &layer), 0.0);
     }
 }

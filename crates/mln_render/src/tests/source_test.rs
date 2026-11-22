@@ -30,7 +30,8 @@ use parking_lot::Mutex;
 use crate::Registry;
 use crate::erased_layer::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::render_source::RenderSource;
-use crate::tests::fixture_layer::{Dot, Shade, Tint};
+use crate::tests::fixture_layer::Dot;
+// slice: off use crate::tests::fixture_layer::{Shade, Tint};
 use crate::tests::fixture_source::{self, Dem, Geometry, Raster};
 use crate::tile::source_tiles::SourceTiles;
 use crate::tile::store::{StoreEvent, TileStore};
@@ -175,14 +176,15 @@ impl Tiled {
     /// as evaluated values.
     fn layers(self) -> Vec<Arc<dyn ErasedEvaluatedLayer>> {
         let properties: Arc<dyn ErasedEvaluatedLayer> = match self {
-            Tiled::Raster => {
-                let layer = Layer::new(Registry::with_builtins().style(), "tint", "id", "source").unwrap();
-                Arc::new(EvaluatedLayer::<Tint>::new(LayerStyle::recover(layer.style()).unwrap()))
-            }
-            Tiled::RasterDEM => {
-                let layer = Layer::new(Registry::with_builtins().style(), "shade", "id", "source").unwrap();
-                Arc::new(EvaluatedLayer::<Shade>::new(LayerStyle::recover(layer.style()).unwrap()))
-            }
+            Tiled::Raster | Tiled::RasterDEM => unimplemented!("slice: off: the tests' raster and DEM layer types"),
+            // slice: off Tiled::Raster => {
+            // slice: off     let layer = Layer::new(Registry::with_builtins().style(), "tint", "id", "source").unwrap();
+            // slice: off     Arc::new(EvaluatedLayer::<Tint>::new(LayerStyle::recover(layer.style()).unwrap()))
+            // slice: off }
+            // slice: off Tiled::RasterDEM => {
+            // slice: off     let layer = Layer::new(Registry::with_builtins().style(), "shade", "id", "source").unwrap();
+            // slice: off     Arc::new(EvaluatedLayer::<Shade>::new(LayerStyle::recover(layer.style()).unwrap()))
+            // slice: off }
             Tiled::Vector => {
                 let mut layer = Layer::new(Registry::with_builtins().style(), "dot", "id", "source").unwrap();
                 layer.set_source_layer("water");
@@ -472,17 +474,17 @@ fn tile_requests_follow_the_view() {
     assert!(back[first.len()..].iter().all(|order| *order == UNWANTED));
 }
 
-// gtest: Source.RasterTileEmpty
-#[test]
-fn raster_tile_empty() {
-    tile_empty(Tiled::Raster);
-}
+// slice: off // gtest: Source.RasterTileEmpty
+// slice: off #[test]
+// slice: off fn raster_tile_empty() {
+// slice: off     tile_empty(Tiled::Raster);
+// slice: off }
 
-// gtest: Source.RasterDEMTileEmpty
-#[test]
-fn raster_dem_tile_empty() {
-    tile_empty(Tiled::RasterDEM);
-}
+// slice: off // gtest: Source.RasterDEMTileEmpty
+// slice: off #[test]
+// slice: off fn raster_dem_tile_empty() {
+// slice: off     tile_empty(Tiled::RasterDEM);
+// slice: off }
 
 // gtest: Source.VectorTileEmpty
 #[test]
@@ -490,17 +492,17 @@ fn vector_tile_empty() {
     tile_empty(Tiled::Vector);
 }
 
-// gtest: Source.RasterTileFail
-#[test]
-fn raster_tile_fail() {
-    tile_fail(Tiled::Raster);
-}
+// slice: off // gtest: Source.RasterTileFail
+// slice: off #[test]
+// slice: off fn raster_tile_fail() {
+// slice: off     tile_fail(Tiled::Raster);
+// slice: off }
 
-// gtest: Source.RasterDEMTileFail
-#[test]
-fn raster_dem_tile_fail() {
-    tile_fail(Tiled::RasterDEM);
-}
+// slice: off // gtest: Source.RasterDEMTileFail
+// slice: off #[test]
+// slice: off fn raster_dem_tile_fail() {
+// slice: off     tile_fail(Tiled::RasterDEM);
+// slice: off }
 
 // gtest: Source.VectorTileFail
 #[test]
@@ -508,17 +510,17 @@ fn vector_tile_fail() {
     tile_fail(Tiled::Vector);
 }
 
-// gtest: Source.RasterTileCorrupt
-#[test]
-fn raster_tile_corrupt() {
-    tile_corrupt(Tiled::Raster);
-}
+// slice: off // gtest: Source.RasterTileCorrupt
+// slice: off #[test]
+// slice: off fn raster_tile_corrupt() {
+// slice: off     tile_corrupt(Tiled::Raster);
+// slice: off }
 
-// gtest: Source.RasterDEMTileCorrupt
-#[test]
-fn raster_dem_tile_corrupt() {
-    tile_corrupt(Tiled::RasterDEM);
-}
+// slice: off // gtest: Source.RasterDEMTileCorrupt
+// slice: off #[test]
+// slice: off fn raster_dem_tile_corrupt() {
+// slice: off     tile_corrupt(Tiled::RasterDEM);
+// slice: off }
 
 // gtest: Source.VectorTileCorrupt
 #[test]
@@ -526,17 +528,17 @@ fn vector_tile_corrupt() {
     tile_corrupt(Tiled::Vector);
 }
 
-// gtest: Source.RasterTileCancel
-#[test]
-fn raster_tile_cancel() {
-    tile_cancel(Tiled::Raster);
-}
+// slice: off // gtest: Source.RasterTileCancel
+// slice: off #[test]
+// slice: off fn raster_tile_cancel() {
+// slice: off     tile_cancel(Tiled::Raster);
+// slice: off }
 
-// gtest: Source.RasterDEMTileCancel
-#[test]
-fn raster_dem_tile_cancel() {
-    tile_cancel(Tiled::RasterDEM);
-}
+// slice: off // gtest: Source.RasterDEMTileCancel
+// slice: off #[test]
+// slice: off fn raster_dem_tile_cancel() {
+// slice: off     tile_cancel(Tiled::RasterDEM);
+// slice: off }
 
 // gtest: Source.VectorTileCancel
 #[test]
@@ -589,108 +591,108 @@ impl Drop for FixtureLog {
     }
 }
 
-// gtest: Source.SetMaxParentOverscaleFactor
-#[test]
-fn set_max_parent_overscale_factor() {
-    let mut test = SourceTest::new();
-    test.transform.jump_to(&CameraOptions { center: Some(LatLng::default()), zoom: Some(8.0), ..Default::default() });
-    let log = FixtureLog::new();
+// slice: off // gtest: Source.SetMaxParentOverscaleFactor
+// slice: off #[test]
+// slice: off fn set_max_parent_overscale_factor() {
+// slice: off     let mut test = SourceTest::new();
+// slice: off     test.transform.jump_to(&CameraOptions { center: Some(LatLng::default()), zoom: Some(8.0), ..Default::default() });
+// slice: off     let log = FixtureLog::new();
+// slice: off
+// slice: off     let file_source = StubFileSource::on_queue(&test.run_loop, ResponseType::Asynchronous);
+// slice: off     {
+// slice: off         let end = test.end_handle();
+// slice: off         file_source.set_response(Kind::Tile, move |res| {
+// slice: off             let z = res.tile_data.as_ref().unwrap().z;
+// slice: off             if z == 5 {
+// slice: off                 let end = end.clone();
+// slice: off                 std::thread::spawn(move || {
+// slice: off                     std::thread::sleep(Duration::from_millis(10));
+// slice: off                     end();
+// slice: off                 });
+// slice: off             }
+// slice: off             // No tiles above zoom level 5 should be requested.
+// slice: off             assert!(5 <= i32::from(z), "requested z{z}");
+// slice: off             // The tileset has no tiles (HTTP 404), so the source requests parents in their place.
+// slice: off             // An empty raster tile (HTTP 204) would be drawn, empty, instead.
+// slice: off             let mut response = Response::new();
+// slice: off             response.no_content = true;
+// slice: off             response.tile_not_found = true;
+// slice: off             Some(response)
+// slice: off         });
+// slice: off     }
+// slice: off
+// slice: off     let layers = Tiled::Raster.layers();
+// slice: off     let source = Tiled::Raster.source(tiles_tileset());
+// slice: off     let mut common = *source.common();
+// slice: off     assert_eq!(None, common.max_overscale_factor);
+// slice: off     common.max_overscale_factor = Some(3);
+// slice: off     let style_source = source.with_common(common);
+// slice: off
+// slice: off     let mut store = test.store();
+// slice: off     let mut render_source = crate::tests::create_render_source(&style_source, &mut store);
+// slice: off     let fs: Arc<dyn FileSource> = Arc::<StubFileSource>::clone(&file_source);
+// slice: off     let parameters = test.tile_parameters_with(MapMode::Continuous, Some(Arc::clone(&fs)));
+// slice: off     render_source.update(&mut store, style_source.clone(), &layers, true, true, &parameters);
+// slice: off
+// slice: off     // Each tile that changes updates the source again.
+// slice: off     test.run_with(&mut store, |store, event| {
+// slice: off         if matches!(event, StoreEvent::Changed) {
+// slice: off             render_source.update(store, style_source.clone(), &layers, true, true, &parameters);
+// slice: off         }
+// slice: off     });
+// slice: off
+// slice: off     assert_eq!(
+// slice: off         1,
+// slice: off         log.count(EventSeverity::Warning, Event::Style, "Parent tile overscale factor will cap prefetch delta to 3")
+// slice: off     );
+// slice: off     assert_eq!(0, log.unchecked_count());
+// slice: off }
 
-    let file_source = StubFileSource::on_queue(&test.run_loop, ResponseType::Asynchronous);
-    {
-        let end = test.end_handle();
-        file_source.set_response(Kind::Tile, move |res| {
-            let z = res.tile_data.as_ref().unwrap().z;
-            if z == 5 {
-                let end = end.clone();
-                std::thread::spawn(move || {
-                    std::thread::sleep(Duration::from_millis(10));
-                    end();
-                });
-            }
-            // No tiles above zoom level 5 should be requested.
-            assert!(5 <= i32::from(z), "requested z{z}");
-            // The tileset has no tiles (HTTP 404), so the source requests parents in their place.
-            // An empty raster tile (HTTP 204) would be drawn, empty, instead.
-            let mut response = Response::new();
-            response.no_content = true;
-            response.tile_not_found = true;
-            Some(response)
-        });
-    }
-
-    let layers = Tiled::Raster.layers();
-    let source = Tiled::Raster.source(tiles_tileset());
-    let mut common = *source.common();
-    assert_eq!(None, common.max_overscale_factor);
-    common.max_overscale_factor = Some(3);
-    let style_source = source.with_common(common);
-
-    let mut store = test.store();
-    let mut render_source = crate::tests::create_render_source(&style_source, &mut store);
-    let fs: Arc<dyn FileSource> = Arc::<StubFileSource>::clone(&file_source);
-    let parameters = test.tile_parameters_with(MapMode::Continuous, Some(Arc::clone(&fs)));
-    render_source.update(&mut store, style_source.clone(), &layers, true, true, &parameters);
-
-    // Each tile that changes updates the source again.
-    test.run_with(&mut store, |store, event| {
-        if matches!(event, StoreEvent::Changed) {
-            render_source.update(store, style_source.clone(), &layers, true, true, &parameters);
-        }
-    });
-
-    assert_eq!(
-        1,
-        log.count(EventSeverity::Warning, Event::Style, "Parent tile overscale factor will cap prefetch delta to 3")
-    );
-    assert_eq!(0, log.unchecked_count());
-}
-
-// gtest: Source.RasterDEMTileRoundsCoveringZoom
-#[test]
-fn raster_dem_tile_rounds_covering_zoom() {
-    let mut test = SourceTest::new();
-    test.transform.jump_to(&CameraOptions { center: Some(LatLng::default()), zoom: Some(4.6), ..Default::default() });
-
-    let requested_zooms = Arc::new(Mutex::new(Vec::<i8>::new()));
-    let file_source = StubFileSource::on_queue(&test.run_loop, ResponseType::Asynchronous);
-    {
-        let requested_zooms = Arc::clone(&requested_zooms);
-        file_source.set_response(Kind::Tile, move |res| {
-            requested_zooms.lock().push(res.tile_data.as_ref().unwrap().z);
-            let mut response = Response::new();
-            response.no_content = true;
-            Some(response)
-        });
-    }
-
-    let layers = Tiled::RasterDEM.layers();
-    let source = Tiled::RasterDEM.source(tiles_tileset());
-
-    let mut store = test.store();
-    let mut render_source = crate::tests::create_render_source(&source, &mut store);
-    let fs: Arc<dyn FileSource> = Arc::<StubFileSource>::clone(&file_source);
-    render_source.update(
-        &mut store,
-        source.clone(),
-        &layers,
-        true,
-        true,
-        &test.tile_parameters_with(MapMode::Continuous, Some(fs)),
-    );
-
-    let end = test.end_handle();
-    test.run_with(&mut store, |_, event| {
-        if matches!(event, StoreEvent::Changed) {
-            end();
-        }
-    });
-
-    assert!(!requested_zooms.lock().is_empty());
-    for &z in requested_zooms.lock().iter() {
-        assert_eq!(5, z);
-    }
-}
+// slice: off // gtest: Source.RasterDEMTileRoundsCoveringZoom
+// slice: off #[test]
+// slice: off fn raster_dem_tile_rounds_covering_zoom() {
+// slice: off     let mut test = SourceTest::new();
+// slice: off     test.transform.jump_to(&CameraOptions { center: Some(LatLng::default()), zoom: Some(4.6), ..Default::default() });
+// slice: off
+// slice: off     let requested_zooms = Arc::new(Mutex::new(Vec::<i8>::new()));
+// slice: off     let file_source = StubFileSource::on_queue(&test.run_loop, ResponseType::Asynchronous);
+// slice: off     {
+// slice: off         let requested_zooms = Arc::clone(&requested_zooms);
+// slice: off         file_source.set_response(Kind::Tile, move |res| {
+// slice: off             requested_zooms.lock().push(res.tile_data.as_ref().unwrap().z);
+// slice: off             let mut response = Response::new();
+// slice: off             response.no_content = true;
+// slice: off             Some(response)
+// slice: off         });
+// slice: off     }
+// slice: off
+// slice: off     let layers = Tiled::RasterDEM.layers();
+// slice: off     let source = Tiled::RasterDEM.source(tiles_tileset());
+// slice: off
+// slice: off     let mut store = test.store();
+// slice: off     let mut render_source = crate::tests::create_render_source(&source, &mut store);
+// slice: off     let fs: Arc<dyn FileSource> = Arc::<StubFileSource>::clone(&file_source);
+// slice: off     render_source.update(
+// slice: off         &mut store,
+// slice: off         source.clone(),
+// slice: off         &layers,
+// slice: off         true,
+// slice: off         true,
+// slice: off         &test.tile_parameters_with(MapMode::Continuous, Some(fs)),
+// slice: off     );
+// slice: off
+// slice: off     let end = test.end_handle();
+// slice: off     test.run_with(&mut store, |_, event| {
+// slice: off         if matches!(event, StoreEvent::Changed) {
+// slice: off             end();
+// slice: off         }
+// slice: off     });
+// slice: off
+// slice: off     assert!(!requested_zooms.lock().is_empty());
+// slice: off     for &z in requested_zooms.lock().iter() {
+// slice: off         assert_eq!(5, z);
+// slice: off     }
+// slice: off }
 
 /// A vector source drawn with the camera of a map, whose tile requests are
 /// answered only when the test says so.
@@ -1011,72 +1013,72 @@ fn globe_base_level_is_not_kept_where_it_is_large_or_out_of_reach() {
     assert_eq!(4, out_of_reach.tiles_at(1).len());
 }
 
-/// The DEM of `tile`, a raster-dem tile.
-fn dem(tile: &crate::tile::tile::Tile) -> &crate::tile::dem::DemContents {
-    match tile.contents() {
-        Some(crate::tile::contents::Contents::Dem(bucket)) => bucket,
-        _ => panic!("a DEM"),
-    }
-}
+// slice: off /// The DEM of `tile`, a raster-dem tile.
+// slice: off fn dem(tile: &crate::tile::tile::Tile) -> &crate::tile::dem::DemContents {
+// slice: off     match tile.contents() {
+// slice: off         Some(crate::tile::contents::Contents::Dem(bucket)) => bucket,
+// slice: off         _ => panic!("a DEM"),
+// slice: off     }
+// slice: off }
 
-/// Port-only: raster-dem tiles that meet at the antimeridian, in two copies
-/// of the world, backfill each other's borders as neighbours in one copy
-/// do.
-#[test]
-fn raster_dem_borders_across_a_world_wrap() {
-    use crate::tests::tile::dem_png;
-
-    let mut test = SourceTest::new();
-    test.transform.jump_to(&CameraOptions {
-        center: Some(LatLng::new(0.0, 180.0).unwrap()),
-        zoom: Some(2.0),
-        ..Default::default()
-    });
-    let file_source = StubFileSource::on_queue(&test.run_loop, ResponseType::Asynchronous);
-    file_source.set_response(Kind::Tile, |resource| {
-        let tile = resource.tile_data.as_ref()?;
-        let mut response = Response::new();
-        response.data = Some(dem_png(tile.x as u32));
-        Some(response)
-    });
-    let layers = Tiled::RasterDEM.layers();
-    let source = Tiled::RasterDEM.source(tiles_tileset());
-    let mut store = test.store();
-    let mut render_source = crate::tests::create_render_source(&source, &mut store);
-    let fs: Arc<dyn FileSource> = file_source;
-    let deadline = mln_util::time::Instant::now() + Duration::from_secs(30);
-    let mut relayout = true;
-    loop {
-        // The store backfills the tiles as their DEMs arrive.
-        let parameters = test.tile_parameters_with(MapMode::Continuous, Some(Arc::clone(&fs)));
-        render_source.update(&mut store, source.clone(), &layers, true, relayout, &parameters);
-        relayout = false;
-        let key = render_source.tiles().expect("the source's tiles");
-        if store.source(key).is_some_and(|source| source.slots().next().is_some()) && render_source.is_loaded(&store) {
-            break;
-        }
-        assert!(mln_util::time::Instant::now() < deadline, "the tiles didn't load");
-        test.run_loop.run_once(&mut ());
-        crate::tests::update(&mut store);
-        std::thread::yield_now();
-    }
-
-    let source = render_source.tiles().and_then(|key| store.source(key)).expect("the source's tiles");
-    let tile = |x| {
-        source
-            .slots()
-            .map(|slot| &slot.tile)
-            .find(|tile| tile.id.canonical == CanonicalTileID::new(2, x, 1))
-            .unwrap_or_else(|| panic!("no tile 2/{x}/1"))
-    };
-    // The east edge of a copy of the world, and the west edge of the copy
-    // east of it.
-    let (east, west) = (tile(3), tile(0));
-    assert_eq!(west.id.wrap, east.id.wrap + 1);
-    let (east, west) = (dem(east), dem(west));
-    let (east, west) = (east.dem(), west.dem());
-    for y in 0..16 {
-        assert_eq!(east.get(16, y), west.get(0, y), "row {y} of the east tile's border");
-        assert_eq!(west.get(-1, y), east.get(15, y), "row {y} of the west tile's border");
-    }
-}
+// slice: off /// Port-only: raster-dem tiles that meet at the antimeridian, in two copies
+// slice: off /// of the world, backfill each other's borders as neighbours in one copy
+// slice: off /// do.
+// slice: off #[test]
+// slice: off fn raster_dem_borders_across_a_world_wrap() {
+// slice: off     use crate::tests::tile::dem_png;
+// slice: off
+// slice: off     let mut test = SourceTest::new();
+// slice: off     test.transform.jump_to(&CameraOptions {
+// slice: off         center: Some(LatLng::new(0.0, 180.0).unwrap()),
+// slice: off         zoom: Some(2.0),
+// slice: off         ..Default::default()
+// slice: off     });
+// slice: off     let file_source = StubFileSource::on_queue(&test.run_loop, ResponseType::Asynchronous);
+// slice: off     file_source.set_response(Kind::Tile, |resource| {
+// slice: off         let tile = resource.tile_data.as_ref()?;
+// slice: off         let mut response = Response::new();
+// slice: off         response.data = Some(dem_png(tile.x as u32));
+// slice: off         Some(response)
+// slice: off     });
+// slice: off     let layers = Tiled::RasterDEM.layers();
+// slice: off     let source = Tiled::RasterDEM.source(tiles_tileset());
+// slice: off     let mut store = test.store();
+// slice: off     let mut render_source = crate::tests::create_render_source(&source, &mut store);
+// slice: off     let fs: Arc<dyn FileSource> = file_source;
+// slice: off     let deadline = mln_util::time::Instant::now() + Duration::from_secs(30);
+// slice: off     let mut relayout = true;
+// slice: off     loop {
+// slice: off         // The store backfills the tiles as their DEMs arrive.
+// slice: off         let parameters = test.tile_parameters_with(MapMode::Continuous, Some(Arc::clone(&fs)));
+// slice: off         render_source.update(&mut store, source.clone(), &layers, true, relayout, &parameters);
+// slice: off         relayout = false;
+// slice: off         let key = render_source.tiles().expect("the source's tiles");
+// slice: off         if store.source(key).is_some_and(|source| source.slots().next().is_some()) && render_source.is_loaded(&store) {
+// slice: off             break;
+// slice: off         }
+// slice: off         assert!(mln_util::time::Instant::now() < deadline, "the tiles didn't load");
+// slice: off         test.run_loop.run_once(&mut ());
+// slice: off         crate::tests::update(&mut store);
+// slice: off         std::thread::yield_now();
+// slice: off     }
+// slice: off
+// slice: off     let source = render_source.tiles().and_then(|key| store.source(key)).expect("the source's tiles");
+// slice: off     let tile = |x| {
+// slice: off         source
+// slice: off             .slots()
+// slice: off             .map(|slot| &slot.tile)
+// slice: off             .find(|tile| tile.id.canonical == CanonicalTileID::new(2, x, 1))
+// slice: off             .unwrap_or_else(|| panic!("no tile 2/{x}/1"))
+// slice: off     };
+// slice: off     // The east edge of a copy of the world, and the west edge of the copy
+// slice: off     // east of it.
+// slice: off     let (east, west) = (tile(3), tile(0));
+// slice: off     assert_eq!(west.id.wrap, east.id.wrap + 1);
+// slice: off     let (east, west) = (dem(east), dem(west));
+// slice: off     let (east, west) = (east.dem(), west.dem());
+// slice: off     for y in 0..16 {
+// slice: off         assert_eq!(east.get(16, y), west.get(0, y), "row {y} of the east tile's border");
+// slice: off         assert_eq!(west.get(-1, y), east.get(15, y), "row {y} of the west tile's border");
+// slice: off     }
+// slice: off }

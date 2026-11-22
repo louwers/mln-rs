@@ -70,7 +70,12 @@ use mln_map_types::{MapMode, TileProjector, View};
 use mln_style::PropertyEvaluationParameters;
 use mln_style::evaluated::Evaluated;
 use mln_style::expression::expr::FeatureState;
+use mln_style::expression::image_expression::UnavailableImages;
 use mln_style::expression::{EvaluationContext, ValueConverter};
+use mln_style_types::image::{ImageDependencies, ImageType};
+use mln_text::glyph::{GlyphDependencies, GlyphID};
+use mln_util::font_stack::FontStack;
+use mln_vec_map::VecSet;
 use mln_style::layer_type::{LayerStyle, PaintSet, SourceKind, StyleLayerType};
 use mln_style_types::TranslateAnchorType;
 use mln_tile::{Feature, TileLayer};
@@ -686,6 +691,10 @@ pub struct LayoutCx<'a, S: StyleLayerType> {
     pub(crate) parameters: PropertyEvaluationParameters,
     pub(crate) source_layer: TileLayer<'a>,
     pub(crate) filter_groups: &'a mut FilterGroups,
+    pub(crate) glyphs: &'a mut GlyphDependencies,
+    pub(crate) images: &'a mut ImageDependencies,
+    pub(crate) available_images: &'a VecSet<String>,
+    pub(crate) unavailable_images: &'a UnavailableImages,
 }
 
 impl<S: StyleLayerType> LayoutCx<'_, S> {
@@ -724,6 +733,31 @@ impl<S: StyleLayerType> LayoutCx<'_, S> {
     /// The feature at `index` of the tile's source layer.
     pub fn feature(&self, index: usize) -> Result<Feature<'_>, Error> {
         Ok(self.source_layer.feature(index)?)
+    }
+
+    /// What a layout property evaluates with for `feature`: the tile's zoom
+    /// and id, the style's global state and its images. An image that an
+    /// `image` expression finds missing is asked for as an icon.
+    #[must_use]
+    pub fn context<'f>(&'f self, feature: &'f dyn GeometryTileFeature) -> EvaluationContext<'f> {
+        EvaluationContext::with_zoom_feature(f32::from(self.tile.overscaled_z), Some(feature))
+            .with_canonical_tile_id(Some(&self.tile.canonical))
+            .with_global_state(self.parameters.global_state.as_deref())
+            .with_available_images(Some(self.available_images))
+            .with_unavailable_images(Some(self.unavailable_images))
+    }
+
+    /// Asks for the style's image `id`, as `kind`. A layout of a type whose
+    /// [`needs_resources`](Layout::needs_resources) builds once what it
+    /// asked for resolved ([`BuildCx::resolved`]).
+    pub fn need_image(&mut self, id: &str, kind: ImageType) {
+        self.images.entry(id.to_owned()).or_insert(kind);
+    }
+
+    /// Asks for `glyphs` of the font stack `font_stack`, as
+    /// [`need_image`](Self::need_image) asks for an image.
+    pub fn need_glyphs(&mut self, font_stack: FontStack, glyphs: impl IntoIterator<Item = GlyphID>) {
+        self.glyphs.glyphs.entry(font_stack).or_default().extend(glyphs);
     }
 }
 

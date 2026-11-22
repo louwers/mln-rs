@@ -33,7 +33,6 @@ use crate::tile::job::{DataInput, Job, Run, TileKey};
 use crate::tile::pipeline::LayoutWork;
 use crate::tile::tile::{TileKind, TileNecessity, TileOperation};
 use crate::tile::tile_workers::{InlineWorkers, TileWorkers};
-use crate::tile_values::ChangedBuckets;
 
 /// A file source whose requests wait until the test answers them.
 #[derive(Default)]
@@ -404,14 +403,14 @@ fn queries_and_feature_state_read_the_shown_contents() {
     state.insert("hover".to_owned(), feature::Value::Bool(true));
     let (source, _) = tile.store.source_mut(key).expect("the source");
     source.info.feature_state.update_state(None, "1", &state);
-    source.coalesce_feature_state(&mut ChangedBuckets::default());
+    source.coalesce_feature_state();
     let version = source.info.feature_state.version();
     let shown_version = |tile: &OneTile| tile.tile().shown.as_ref().expect("contents").feature_state_version;
     // Not rendered, so the coalesce left it.
     assert_eq!(shown_version(&tile), 0);
     tile.with(|tile| {
         let (info, tile) = tile.parts();
-        info.feature_state.coalesce_changes(tile.shown.as_mut(), &mut ChangedBuckets::default());
+        info.feature_state.coalesce_changes(tile.shown.as_mut());
     });
     assert_eq!(shown_version(&tile), version);
 

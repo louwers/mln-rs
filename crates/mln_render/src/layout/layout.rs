@@ -104,9 +104,13 @@ pub(crate) fn new_layout<S: StyleLayerType, L: Layout<S>>(
         parameters: evaluation,
         source_layer: source_layer.layer()?,
         filter_groups: parameters.filter_groups,
+        glyphs: parameters.glyph_dependencies,
+        images: parameters.image_dependencies,
+        available_images: parameters.available_images,
+        unavailable_images: parameters.unavailable_images,
     };
     let layout = L::new(&mut cx)?;
-    Ok(NewLayout { layout, has_dependencies: false, parameters: bucket_parameters.clone() })
+    Ok(NewLayout { layout, has_dependencies: L::needs_resources(group), parameters: bucket_parameters.clone() })
 }
 
 /// The bucket of `layout`, a layout of `group` on `source_layer`, whose

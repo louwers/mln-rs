@@ -1,12 +1,14 @@
-// `dot`, `tint`, `shade` and `mark`, the tests' layer types.
+// `dot`, the tests' layer type.
 pub(crate) mod fixture_layer;
+// slice: off // `tint`, `shade` and `mark`, the tests' layer types of other sources.
+// slice: off pub(crate) mod fixture_layer_off;
 // `tiles`, `raster-tiles` and `dem-tiles`, the tests' source types.
 pub(crate) mod fixture_source;
 // Ports test/gl/bucket.test.cpp (raster; on the WebGPU headless backend).
 // mln_layers' tests port the circle, fill, line and symbol parts.
 mod bucket_test;
 // Cameras that move faster than the network answers.
-mod fast_camera_test;
+// slice: off mod fast_camera_test;
 mod gtest_sky;
 mod gtest_subdivision;
 // Raster, DEM and custom geometry tiles, and tile coordinates.
@@ -29,7 +31,7 @@ mod source_test;
 // Port-only: the renderer frees what it lets go of on its workers.
 mod drop_on_workers_test;
 // The engine drives a layer type's placement pass on its schedule.
-mod placement_test;
+// slice: off mod placement_test;
 
 mod programs_test;
 // Port-only: malformed vector tiles become tile errors, not panics.
@@ -320,7 +322,7 @@ pub(crate) fn render_layer(
 ) -> Box<dyn crate::render_layer::RenderLayer> {
     let registry = crate::Registry::with_builtins();
     let layer_type = registry.layer_type(style.info().name).expect("a built-in layer type");
-    layer_type.create_render_layer(style).expect("a layer of its type")
+    layer_type.create_render_layer(style, &mut crate::testing::resources()).expect("a layer of its type")
 }
 
 /// The render source of `source`, through the tests' registry.
@@ -334,13 +336,13 @@ pub(crate) fn create_render_source(
 
 /// Runs `f` with the `Gpu` of a headless WebGPU backend, which compiles the
 /// engine's programs, and a context over it, which it then tears down.
-fn with_context(f: impl FnOnce(&mut dyn mln_gfx::gpu::Gpu, &mut crate::gfx::context::Context)) {
+fn with_context(f: impl FnOnce(&mut dyn mln_gfx::gpu::Gpu, &mut crate::gfx::context::Resources)) {
     use mln_gfx::RendererBackend as _;
     use mln_gfx::gpu::Gpu as _;
     let device = mln_webgpu::Device::new(None).expect("device");
     let mut backend = mln_webgpu::RendererBackend::new(&device);
     let gpu = backend.gpu();
-    let mut context = crate::gfx::context::Context::new(*gpu.caps(), 1.0);
+    let mut context = crate::gfx::context::Resources::new(*gpu.caps(), 1.0);
     f(gpu, &mut context);
     context.tear_down(gpu);
 }

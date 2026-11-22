@@ -6,16 +6,11 @@
 //!   [`OriginTiles`] drives tiles of a [`DataOrigin`] that the test names,
 //!   and [`OneSource`] a source, whose tiles cover a view, through a
 //!   registry.
-//! - The draw services on a bare `Gpu` ([`with_context`],
-//!   [`upload_vertices`]) and a layer's values evaluated as the test says
-//!   ([`evaluated_layer`]).
 
 use std::sync::Arc;
 
-use mln_gfx::gpu::{BufferId, Gpu, GpuError};
 use mln_map_types::{MapDebugOptions, MapMode, TileLodMode, TransformState};
 use mln_storage::FileSource;
-use mln_style::layer_type::{LayerStyle, PaintSet};
 use mln_style::{Layer, PropertyEvaluationParameters, Source};
 use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
@@ -24,10 +19,8 @@ use mln_util::pool::TaskGroup;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use crate::Registry;
-use crate::draw::{Context, SharedVertices};
 use crate::erased_layer::ErasedEvaluatedLayer;
 use crate::image_store::ImageStore;
-use crate::layer::{EvaluatedLayer, LayerType};
 use crate::layout::tile_layout::LayoutParams;
 use crate::query::SourceQueryOptions;
 use crate::render_source::RenderSource;
@@ -48,36 +41,6 @@ pub enum Event {
     Action(TileOperation),
     /// A tile failed to load.
     Error { tile: OverscaledTileID, error: Error },
-}
-
-/// Runs `f` with `gpu` and a context of the draw services over it, for
-/// draws at `pixel_ratio` device pixels per logical pixel, and then tears
-/// the context down.
-pub fn with_context<R>(gpu: &mut dyn Gpu, pixel_ratio: f32, f: impl FnOnce(&mut dyn Gpu, &mut Context) -> R) -> R {
-    let mut context = Context::new(*gpu.caps(), pixel_ratio);
-    let result = f(gpu, &mut context);
-    context.tear_down(gpu);
-    result
-}
-
-/// The buffer of the vertices of `shared`, which a draw's upload makes or
-/// writes over.
-pub fn upload_vertices(
-    context: &mut Context,
-    gpu: &mut dyn Gpu,
-    shared: &SharedVertices,
-) -> Result<Option<BufferId>, GpuError> {
-    context.upload_vertices(gpu, shared)
-}
-
-/// The values of the layer `style` with its paint properties evaluated to
-/// `paint`, without a cross-fade, not drawing.
-#[must_use]
-pub fn evaluated_layer<T: LayerType>(
-    style: Arc<LayerStyle<T>>,
-    paint: <T::PaintProperties as PaintSet>::Evaluated,
-) -> EvaluatedLayer<T> {
-    EvaluatedLayer::with_paint(style, paint)
 }
 
 /// A tile store whose jobs run on `workers` and which frees and parses
@@ -115,6 +78,24 @@ fn take_events(store: &mut TileStore) -> Vec<Event> {
         .collect()
 }
 
+/// Resources that no GPU has seen, which a render layer that a test makes
+/// only to evaluate its values joins.
+pub(crate) fn resources() -> crate::gfx::context::Resources {
+    let caps = mln_gfx::gpu::Caps {
+        buffer_offset_alignment: 256,
+        max_texture_size: 4096,
+        half_float_render_targets: false,
+        clip_depth: mln_util::clip_depth::ClipDepthRange::ZeroToOne,
+        render_target_depth: None,
+        clear_stencil_with_pass: false,
+        cpu_rasterizer: false,
+        max_line_width: 1.0,
+        binds_vertex_buffers: false,
+        indexes_storage_buffers: true,
+    };
+    crate::gfx::context::Resources::new(caps, 1.0)
+}
+
 /// The style of `layers`, of the layer types of `registry`, evaluated at
 /// `zoom`. Fails for a layer whose type `registry` lacks.
 fn style(registry: &Registry, layers: &[Layer], zoom: f32) -> Result<Arc<SourceStyle>, Error> {
@@ -124,7 +105,7 @@ fn style(registry: &Registry, layers: &[Layer], zoom: f32) -> Result<Arc<SourceS
         .map(|layer| {
             let mut render_layer = registry
                 .layer_type(layer.info().name)
-                .and_then(|layer_type| layer_type.create_render_layer(layer.style()))
+                .and_then(|layer_type| layer_type.create_render_layer(layer.style(), &mut resources()))
                 .ok_or_else(|| Error::invalid_argument(format!("no render layer for {}", layer.get_id())))?;
             render_layer.evaluate(&parameters);
             Ok(render_layer.evaluated())

@@ -10,7 +10,6 @@ use mln_util::Color;
 use mln_util::size::Size;
 
 use super::with_context;
-use crate::gfx::indexes::{DrawIndexes, Indexes};
 use crate::gfx::owned::Held;
 use crate::shaders::programs;
 use crate::shaders::programs::ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE;
@@ -32,9 +31,8 @@ fn bindings_and_geometry_go_before_what_they_were_made_of() {
         let (texture_id, sampler) = context.texture_binding(gpu, &texture).expect("the texture");
         let vertices = context.add_vertices(vec![[0i16; 2]; 4]);
         let vertices_id = context.upload_vertices(gpu, &vertices).expect("vertices").expect("a buffer");
-        let indexes = context.add_indexes(Indexes::new(vec![0, 1, 2, 3]));
-        context.upload_indexes(gpu, &indexes).expect("indexes");
-        let indices_id = DrawIndexes::Shared(indexes.clone()).buffer(context).expect("a buffer");
+        let indexes = context.add_vertices(vec![0u16, 1, 2, 3]);
+        let indices_id = context.upload_index_buffer(gpu, &indexes).expect("indexes").expect("a buffer");
 
         let shader = context.shader(gpu, &ShaderKey::new(&programs::CLIPPING_MASK, [])).expect("the shader");
         let entries = [
@@ -59,9 +57,9 @@ fn bindings_and_geometry_go_before_what_they_were_made_of() {
             .expect("the geometry");
         let gpu_texture = context.gpu_texture(&texture).cloned().expect("the texture's");
         let bindings = context.own(bindings, vec![Held::Texture(gpu_texture)]);
-        let geometry = context.own(geometry, vec![vertices.held(), Held::Indexes(indexes.clone())]);
+        let geometry = context.own(geometry, vec![vertices.held(), indexes.held()]);
         drop((vertices, indexes));
-        context.texture_mut(&texture).expect("the texture").set_size(Size::new(4, 4));
+        context.stored_texture_mut(&texture).expect("the texture").set_size(Size::new(4, 4));
         context.texture_binding(gpu, &texture).expect("the resized texture");
 
         let stats = context.stats();
