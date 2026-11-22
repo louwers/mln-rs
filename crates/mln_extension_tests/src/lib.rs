@@ -4,8 +4,5 @@
 //!
 //! - [`probe`]: a layer without a source that draws with the backend's own
 //!   commands.
-//! - [`target_copy`]: a layer without a source that reads a named target
-//!   and draws it.
 
 pub mod probe;
-pub mod target_copy;
