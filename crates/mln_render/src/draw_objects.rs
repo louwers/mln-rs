@@ -210,8 +210,9 @@ pub(crate) struct DrawObjects {
     /// The textures it binds, by texture id.
     textures: Textures,
     /// The buffers of its program's blocks of a draw's own, which its draw
-    /// writes.
+    /// writes, and the bytes last written to each, by id.
     own_buffers: UniformBufferArray,
+    own_bytes: SmallVec<[(usize, Vec<u8>); 2]>,
     /// The vertex buffers its program reads as storage buffers, each at its
     /// buffer's id, with the GPU buffer of its last upload.
     pulled: SmallVec<[(usize, SharedBuffer, Option<BufferId>); 2]>,
@@ -266,6 +267,7 @@ impl DrawObjects {
             instance_attributes: instances,
             textures,
             own_buffers: UniformBufferArray::new(),
+            own_bytes: SmallVec::new(),
             pulled: SmallVec::new(),
             color_mode,
             cull_face_mode,
@@ -593,8 +595,19 @@ impl DrawObjects {
     }
 
     /// Writes `bytes` to the draw's own uniform buffer `id`, for its program's
-    /// block of a draw's own at that id.
+    /// block of a draw's own at that id, unless the buffer holds them.
     pub(crate) fn write_own(&mut self, gpu: &mut dyn Gpu, id: usize, bytes: &[u8], device: &mut Device) {
+        let index = match self.own_bytes.iter().position(|(written, _)| *written == id) {
+            Some(index) if self.own_bytes[index].1 == bytes && self.own_buffers.get(id).is_some() => return,
+            Some(index) => index,
+            None => {
+                self.own_bytes.push((id, Vec::new()));
+                self.own_bytes.len() - 1
+            }
+        };
+        let written = &mut self.own_bytes[index].1;
+        written.clear();
+        written.extend_from_slice(bytes);
         self.own_buffers.write_uniform(gpu, id, bytes, device);
     }
 }
