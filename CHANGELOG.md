@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.0.15](https://github.com/louwers/mln-rs/compare/v0.0.14...v0.0.15) - 2026-11-22
+
+- Accept rusqlite 0.42, so apps on sqlite-compressions 0.4 can link mln-rs ([#744](https://github.com/louwers/mln-rs/pull/744))
+- Add format-aware `Accept` headers ([#738](https://github.com/louwers/mln-rs/pull/738))
+- perf(text): choose system fonts off the render thread ([#740](https://github.com/louwers/mln-rs/pull/740))
+
 ## [0.0.14](https://github.com/louwers/mln-rs/compare/v0.0.13...v0.0.14) - 2026-11-22
 
 - fix(storage): show the browser's stored copy when the server can't be reached ([#732](https://github.com/louwers/mln-rs/pull/732))
