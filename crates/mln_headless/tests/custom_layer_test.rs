@@ -74,7 +74,6 @@ mod hosted {
 
     struct Hosted;
 
-
     impl StyleLayerType for Hosted {
         const INFO: LayerTypeInfo = LayerTypeInfo { name: "hosted", source: SourceKind::None, from_json: false };
         type LayoutProperties = NoProperties;

@@ -7,11 +7,11 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use mln_rs::layer::{
-    AfterGpu, Draws, EvaluateCx, Evaluation, FrameQuery, GpuEnd, Hit, Layer, LayerTypeInfo, LendAt, Lent,
-    NewCx, NoProperties, NoTiles, PrepareCx, SourceKind, StyleLayerType, UpdateCx,
-};
 use mln_rs::feature::Identifier;
+use mln_rs::layer::{
+    AfterGpu, Draws, EvaluateCx, Evaluation, FrameQuery, GpuEnd, Hit, Layer, LayerTypeInfo, LendAt, Lent, NewCx,
+    NoProperties, NoTiles, PrepareCx, SourceKind, StyleLayerType, UpdateCx,
+};
 use mln_rs::mln_util::feature::Feature;
 
 /// How far from the view's center, in logical pixels, a query point hits a
@@ -20,7 +20,6 @@ pub const HIT_RADIUS: f64 = 4.0;
 
 /// The `probe` layer type's style half.
 pub struct Probe;
-
 
 impl StyleLayerType for Probe {
     const INFO: LayerTypeInfo = LayerTypeInfo { name: "probe", source: SourceKind::None, from_json: true };
@@ -93,7 +92,10 @@ impl Layer for ProbeLayer {
         let (dx, dy) = (point.x - f64::from(size.width) / 2.0, point.y - f64::from(size.height) / 2.0);
         let distance = dx.hypot(dy);
         if distance <= HIT_RADIUS {
-            hits.push(Hit { feature: Feature { id: Identifier::Uint(1), ..Feature::default() }, distance: distance as f32 });
+            hits.push(Hit {
+                feature: Feature { id: Identifier::Uint(1), ..Feature::default() },
+                distance: distance as f32,
+            });
         }
     }
 }

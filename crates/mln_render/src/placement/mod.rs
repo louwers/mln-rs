@@ -43,9 +43,9 @@ pub(crate) use self::erased::{ErasedFrame, ErasedPlacement, LaidBuckets, Placing
 pub use self::grid::{Aabb, Grid, Shape};
 pub use self::groups::CollisionGroups;
 pub(crate) use self::schedule::Schedule;
+use crate::bucket_upload::Upload;
 pub use crate::geometry::feature_index::FeatureIndex;
 use crate::geometry::feature_index::{FeatureSelection, QueryLayers, QueryResults};
-use crate::bucket_upload::Upload;
 use crate::gfx::mesh::Indexes;
 use crate::layer::{Bucket, GpuVec, Layer, LayerValues};
 use crate::paint_parameters::Frame;

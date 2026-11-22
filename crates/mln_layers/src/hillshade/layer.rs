@@ -149,12 +149,7 @@ impl Layer for HillshadeLayer {
                 num_lights: lights.count,
                 ..HillshadeTilePropsUBO::default()
             };
-            main.push_at(
-                &value.shade,
-                &at,
-                Draw::DEFAULT,
-                (HillshadeDrawableUBO::default(), props),
-            );
+            main.push_at(&value.shade, &at, Draw::DEFAULT, (HillshadeDrawableUBO::default(), props));
         }
     }
 }

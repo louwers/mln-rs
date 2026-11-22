@@ -43,7 +43,6 @@ pub(crate) fn registry() -> Arc<Registry> {
 /// host.
 struct Custom;
 
-
 impl StyleLayerType for Custom {
     const INFO: LayerTypeInfo = LayerTypeInfo { name: "custom", source: SourceKind::None, from_json: false };
 

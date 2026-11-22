@@ -845,7 +845,9 @@ impl<'a, L: Layer> Tiles<'a, L> {
     }
 
     /// [`iter`](Self::iter), with the values to change.
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = (FrameTile, Option<TileData<'a, L>>, &mut Option<L::Tile>)> + '_ {
+    pub fn iter_mut(
+        &mut self,
+    ) -> impl Iterator<Item = (FrameTile, Option<TileData<'a, L>>, &mut Option<L::Tile>)> + '_ {
         // A tile's value is at its index among the tiles.
         self.found.iter().zip(self.values.values_mut()).map(|(found, value)| (found.tile, found.data::<L>(), value))
     }

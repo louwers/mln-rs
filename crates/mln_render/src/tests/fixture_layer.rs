@@ -193,7 +193,6 @@ impl Layer for Dot {
     fn prepare(&self, _cx: &PrepareCx<'_, Self>, _out: &mut Draws) {}
 }
 
-
 /// The `tint` layer type, both its halves.
 pub(crate) struct Tint;
 

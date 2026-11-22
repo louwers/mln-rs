@@ -13,7 +13,6 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use mln_gfx::ColorMode;
-use mln_gfx::shaders::block::DrawBlocks;
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::gpu::{
     BufferId, BufferUsage, Caps, ColorAttachment, DepthStencilAttachment, Gpu, GpuError, LoadOp, PipelineId,
@@ -21,6 +20,7 @@ use mln_gfx::gpu::{
 };
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::rendering_stats::RenderingStats;
+use mln_gfx::shaders::block::DrawBlocks;
 use mln_gfx::shaders::program::{Program, ProgramParameters};
 use mln_gfx::texture2d::{SamplerState, texture_format};
 use mln_gfx::types::{TextureChannelDataType, TexturePixelType};

@@ -234,4 +234,3 @@ pub(crate) fn with_projection_matrix(
     };
     *proj_matrix_ref * *matrix
 }
-

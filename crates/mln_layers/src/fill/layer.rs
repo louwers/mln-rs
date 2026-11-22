@@ -134,12 +134,7 @@ impl Layer for FillLayer {
                     }
                     if let Some(outline) = outline {
                         let draw = at_depth(if outline_is_fill_color { 2 } else { 0 }, false);
-                        main.push_at(
-                            outline,
-                            &at,
-                            draw,
-                            FillOutlineDrawableUBO { paint_layout, ..Default::default() },
-                        );
+                        main.push_at(outline, &at, draw, FillOutlineDrawableUBO { paint_layout, ..Default::default() });
                     }
                 }
                 FillTile::Pattern { fill, outline } => {

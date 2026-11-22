@@ -175,8 +175,7 @@ impl Layer for DotLayer {
         laid: LayerBucket<'_, Dot, DotBucket>,
     ) -> Option<Mesh<DotDraw>> {
         let mut mesh = MeshDesc::new(&DOT, laid.indexes(&laid.bucket.triangles));
-        mesh.vertices(laid.buffer(&laid.bucket.corners))
-            .paint(laid.binders(&laid.bucket.binders));
+        mesh.vertices(laid.buffer(&laid.bucket.corners)).paint(laid.binders(&laid.bucket.binders));
         Some(cx.res.mesh(&mesh))
     }
 
