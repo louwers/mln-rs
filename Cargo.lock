@@ -2676,6 +2676,7 @@ name = "mln-rs-extension-tests"
 version = "0.0.13"
 dependencies = [
  "mln-rs",
+ "parking_lot",
 ]
 
 [[package]]

@@ -5,6 +5,7 @@ mod support;
 
 use std::sync::Arc;
 
+use mln_rs::BackendType;
 use mln_rs::layer::{Convertible, Functions, StyleKey, Value, conversion};
 use mln_rs::mln_layers::BackgroundLayer;
 use mln_rs::mln_render::RegistryBuilder;
@@ -35,7 +36,7 @@ fn fixture() -> Fixture {
     builder.add_style_key(&THEME).unwrap();
     builder.add_style_key(&GROUP).unwrap();
     builder.add_style_key(&GROUP).unwrap();
-    Fixture::new(builder.build(), STYLE)
+    Fixture::new(BackendType::WebGPU, builder.build(), STYLE)
 }
 
 /// The group of the layer `background` as its renderer has it.

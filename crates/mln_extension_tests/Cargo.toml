@@ -15,7 +15,16 @@ name = "mln_extension_tests"
 doctest = false
 
 [dependencies]
-mln_rs = { workspace = true, features = ["webgpu"] }
+mln_rs = { workspace = true, features = [
+  "webgpu",
+  "metal",
+  "vulkan",
+  "d3d12",
+  "gl",
+] }
+
+[dev-dependencies]
+parking_lot.workspace = true
 
 [lints]
 workspace = true

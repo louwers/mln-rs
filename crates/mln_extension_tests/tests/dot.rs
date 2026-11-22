@@ -1,6 +1,6 @@
 //! The `dot` layer type through the facade: a runtime whose registry adds
 //! it to the built-ins draws, queries and edits a style with a dot layer
-//! over a background, offscreen.
+//! over a background, offscreen, on WebGPU: dot's program has WGSL alone.
 
 mod support;
 
@@ -9,7 +9,7 @@ use std::sync::Arc;
 use mln_extension_tests::dot::{Dot, DotLayer};
 use mln_rs::mln_render::{Registry, RegistryBuilder};
 use mln_rs::mln_util::geo::ScreenCoordinate;
-use mln_rs::{RenderedQueryGeometry, RenderedQueryOptions};
+use mln_rs::{BackendType, RenderedQueryGeometry, RenderedQueryOptions};
 use support::{Fixture, SIZE, wait};
 
 const WHITE: [u8; 4] = [255, 255, 255, 255];
@@ -58,7 +58,7 @@ fn hits(fixture: &Fixture, x: f64) -> Vec<(String, mln_rs::feature::Identifier)>
 
 #[test]
 fn a_dot_draws_over_the_background() {
-    let fixture = Fixture::new(registry(), STYLE);
+    let fixture = Fixture::new(BackendType::WebGPU, registry(), STYLE);
     assert_eq!(RED, pixel(&fixture, 0));
     assert_eq!(RED, pixel(&fixture, 6));
     assert_eq!(WHITE, pixel(&fixture, 12));
@@ -66,7 +66,7 @@ fn a_dot_draws_over_the_background() {
 
 #[test]
 fn a_query_hits_a_dot_as_drawn() {
-    let fixture = Fixture::new(registry(), STYLE);
+    let fixture = Fixture::new(BackendType::WebGPU, registry(), STYLE);
     let dot = vec![("dots".to_owned(), mln_rs::feature::Identifier::Uint(1))];
     assert_eq!(dot, hits(&fixture, 0.0));
     assert_eq!(dot, hits(&fixture, 6.0));
@@ -75,7 +75,7 @@ fn a_query_hits_a_dot_as_drawn() {
 
 #[test]
 fn an_edit_of_the_layers_data_scales_its_dots() {
-    let fixture = Fixture::new(registry(), STYLE);
+    let fixture = Fixture::new(BackendType::WebGPU, registry(), STYLE);
     wait(fixture.map.edit_style_layer_data::<Dot>("dots", |data| {
         data.scale = 2.0;
         Ok(())
@@ -101,7 +101,7 @@ fn an_edit_of_the_layers_data_scales_its_dots() {
 
 #[test]
 fn a_removed_layer_goes_and_a_new_source_draws_its_own_data() {
-    let fixture = Fixture::new(registry(), STYLE);
+    let fixture = Fixture::new(BackendType::WebGPU, registry(), STYLE);
     let layer =
         r##"{"id":"dots","type":"dot","source":"points","paint":{"dot-color":"#ff0000","dot-radius":["get","size"]}}"##;
     wait(fixture.map.remove_style_layer("dots"));

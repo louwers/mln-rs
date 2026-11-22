@@ -10,7 +10,7 @@ use mln_rs::feature::Identifier;
 use mln_rs::layer::{GpuEnd, LendAt};
 use mln_rs::mln_render::RegistryBuilder;
 use mln_rs::mln_util::geo::ScreenCoordinate;
-use mln_rs::{RenderedQueryGeometry, RenderedQueryOptions};
+use mln_rs::{BackendType, RenderedQueryGeometry, RenderedQueryOptions};
 use support::{Fixture, SIZE, wait};
 
 const STYLE: &str = r##"{"version":8,"sources":{},"layers":[
@@ -22,7 +22,7 @@ fn a_layer_draws_with_the_commands_lent_it_and_ends_after_the_gpu() {
     let mut builder = RegistryBuilder::new();
     mln_rs::register_builtins(&mut builder).unwrap();
     builder.add_layer_type::<ProbeLayer>().unwrap();
-    let fixture = Fixture::new(builder.build(), STYLE);
+    let fixture = Fixture::new(BackendType::WebGPU, builder.build(), STYLE);
     let ends = ProbeEnds::default();
     let given = ends.clone();
     wait(fixture.map.edit_style_layer_data::<Probe>("probe", move |data| {
@@ -45,7 +45,7 @@ fn a_query_hits_what_a_layer_draws_without_tile_features() {
     let mut builder = RegistryBuilder::new();
     mln_rs::register_builtins(&mut builder).unwrap();
     builder.add_layer_type::<ProbeLayer>().unwrap();
-    let fixture = Fixture::new(builder.build(), STYLE);
+    let fixture = Fixture::new(BackendType::WebGPU, builder.build(), STYLE);
     fixture.render();
     let center = ScreenCoordinate::new(f64::from(SIZE.width) / 2.0, f64::from(SIZE.height) / 2.0);
     let hits = |x: f64| {
