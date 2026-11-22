@@ -2,7 +2,7 @@ use mln_gfx::color_mode::ColorMode;
 use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::draw_mode::DrawMode;
 use mln_gfx::texture2d::SamplerState;
-use mln_gfx::types::{TextureFilterType, TextureWrapType};
+use mln_gfx::types::TextureWrapType;
 use mln_map_types::View;
 use mln_render::draw::{
     Buffer, Composite, Depth, Draw, Draws, IndexBuffer, Mesh, MeshDesc, Resources, Sampler, Texture,
@@ -61,12 +61,17 @@ impl Layer for FillExtrusionLayer {
     }
 
     fn evaluate(&mut self, cx: EvaluateCx<'_, Self>) -> Evaluation {
-        if opacity(cx.evaluated) > 0.0 { Evaluation::TRANSLUCENT } else { Evaluation::NONE }
+        Evaluation::translucent_if(opacity(cx.evaluated) > 0.0)
     }
 
     /// Filters the patterns as the frame asks.
     fn update(&mut self, cx: &mut UpdateCx<'_, Self>) {
-        self.patterns.set(pattern_sampler(cx.frame));
+        self.patterns.set(SamplerState {
+            filter: cx.frame.image_filter(),
+            wrap_u: TextureWrapType::Clamp,
+            wrap_v: TextureWrapType::Clamp,
+            ..SamplerState::default()
+        });
     }
 
     fn tile(
@@ -185,18 +190,6 @@ fn has_pattern(layer: &LayerValues<FillExtrusion>) -> bool {
     !layer.unevaluated.fill_extrusion_pattern.is_undefined()
 }
 
-/// How the tiles' patterns sample their atlas in `frame`: linearly, but
-/// for a still, level view, where a pattern drawn at its own size stays
-/// sharp.
-fn pattern_sampler(frame: &Frame<'_>) -> SamplerState {
-    let linear = frame.camera_moving || frame.camera.pitch() != 0.0;
-    SamplerState {
-        filter: if linear { TextureFilterType::Linear } else { TextureFilterType::Nearest },
-        wrap_u: TextureWrapType::Clamp,
-        wrap_v: TextureWrapType::Clamp,
-        ..SamplerState::default()
-    }
-}
 
 /// The layer's opacity: as `fill-extrusion-opacity` is the same for every
 /// extrusion, both opacities apply to the layer drawn as one surface.

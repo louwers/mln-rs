@@ -67,15 +67,12 @@ impl Layer for LineLayer {
     fn evaluate(&mut self, cx: EvaluateCx<'_, Self>) -> Evaluation {
         self.ramp.evaluate(cx.layer.unevaluated.line_gradient.get_value(), cx.parameters);
         let paint = &cx.evaluated.paint;
-        if *paint.line_layer_opacity.uniform() > 0.0
-            && paint.line_opacity.constant_or(&1.0) > 0.0
-            && paint.line_color.constant_or(&Color::black()).a > 0.0
-            && paint.line_width.constant_or(&1.0) > 0.0
-        {
-            Evaluation::TRANSLUCENT
-        } else {
-            Evaluation::NONE
-        }
+        Evaluation::translucent_if(
+            *paint.line_layer_opacity.uniform() > 0.0
+                && paint.line_opacity.constant_or(&1.0) > 0.0
+                && paint.line_color.constant_or(&Color::black()).a > 0.0
+                && paint.line_width.constant_or(&1.0) > 0.0,
+        )
     }
 
     /// Uploads a new color ramp, and makes the textures of the dash array's

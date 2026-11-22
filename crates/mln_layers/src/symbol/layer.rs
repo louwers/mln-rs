@@ -194,12 +194,9 @@ impl Layer for SymbolLayer {
             || colored(&paint.icon_halo_color, SymbolPaintProperties::Defaults::icon_halo_color());
         let text = colored(&paint.text_color, SymbolPaintProperties::Defaults::text_color())
             || colored(&paint.text_halo_color, SymbolPaintProperties::Defaults::text_halo_color());
-        if (paint.icon_opacity.constant_or(&1.0) > 0.0 && icon) || (paint.text_opacity.constant_or(&1.0) > 0.0 && text)
-        {
-            Evaluation::TRANSLUCENT
-        } else {
-            Evaluation::NONE
-        }
+        Evaluation::translucent_if(
+            (paint.icon_opacity.constant_or(&1.0) > 0.0 && icon) || (paint.text_opacity.constant_or(&1.0) > 0.0 && text),
+        )
     }
 
     /// Makes the draws of the tiles that have none, of all of them in the
@@ -207,9 +204,7 @@ impl Layer for SymbolLayer {
     /// the positions its layer now has of its own, and filters the icon
     /// atlas as the frame's camera asks.
     fn update(&mut self, cx: &mut UpdateCx<'_, Self>) {
-        let moving = cx.frame.camera_moving || cx.frame.camera.pitch() != 0.0;
-        let filter = if moving { TextureFilterType::Linear } else { TextureFilterType::Nearest };
-        self.still.set(SamplerState { filter, ..GLYPHS });
+        self.still.set(SamplerState { filter: cx.frame.image_filter(), ..GLYPHS });
         let style = &cx.layer.style;
         let screen_space = screen_space(&style.layout);
         let sort_by_key = style.layout.symbol_sort_key.is_expression();

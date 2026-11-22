@@ -28,6 +28,7 @@ pub mod hillshade;
 pub mod line;
 mod points;
 pub mod raster;
+mod resampling;
 mod shaders;
 pub mod symbol;
 mod tessellator;

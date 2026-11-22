@@ -5,11 +5,12 @@ use mln_render::layer::{
     EvaluateCx, Evaluation, FrameTile, Layer, NewCx, PrepareCx, RasterTile, RasterTiles, TileCx, TileTransform,
     UpdateCx,
 };
-use mln_style_types::{RasterResamplingType, ResamplingType};
+use mln_style_types::RasterResamplingType;
 
 use super::programs::RASTER;
 use super::ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
 use super::{Raster, RasterPaintProperties};
+use crate::resampling;
 
 /// A raster layer: each tile's image, or an image source's image in each of
 /// its tiles.
@@ -28,15 +29,16 @@ impl Layer for RasterLayer {
     }
 
     fn evaluate(&mut self, cx: EvaluateCx<'_, Self>) -> Evaluation {
-        if *cx.evaluated.paint.raster_opacity.uniform() > 0.0 { Evaluation::TRANSLUCENT } else { Evaluation::NONE }
+        Evaluation::translucent_if(*cx.evaluated.paint.raster_opacity.uniform() > 0.0)
     }
 
     fn update(&mut self, cx: &mut UpdateCx<'_, Self>) {
         let paint = &cx.layer.evaluated.paint;
         // Either property asking for nearest samples nearest.
-        let nearest = *paint.raster_resampling.uniform() == RasterResamplingType::Nearest
-            || *paint.resampling.uniform() == ResamplingType::Nearest;
-        let filter = if nearest { TextureFilterType::Nearest } else { TextureFilterType::Linear };
+        let filter = match *paint.raster_resampling.uniform() {
+            RasterResamplingType::Nearest => TextureFilterType::Nearest,
+            RasterResamplingType::Linear => resampling::filter(*paint.resampling.uniform()),
+        };
         self.resampling.set(SamplerState { filter, ..SamplerState::default() });
     }
 

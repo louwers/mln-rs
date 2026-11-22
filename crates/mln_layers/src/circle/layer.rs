@@ -34,7 +34,7 @@ impl Layer for CircleLayer {
             || paint.circle_stroke_color.constant_or(&Color::black()).a > 0.0;
         let opaque =
             paint.circle_opacity.constant_or(&1.0) > 0.0 || paint.circle_stroke_opacity.constant_or(&1.0) > 0.0;
-        if sized && colored && opaque { Evaluation::TRANSLUCENT } else { Evaluation::NONE }
+        Evaluation::translucent_if(sized && colored && opaque)
     }
 
     fn tile(

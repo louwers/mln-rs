@@ -64,7 +64,7 @@ impl Layer for HeatmapLayer {
         } else {
             self.ramp.evaluate(value, cx.parameters);
         }
-        if *cx.evaluated.paint.heatmap_opacity.uniform() > 0.0 { Evaluation::TRANSLUCENT } else { Evaluation::NONE }
+        Evaluation::translucent_if(*cx.evaluated.paint.heatmap_opacity.uniform() > 0.0)
     }
 
     fn update(&mut self, cx: &mut UpdateCx<'_, Self>) {

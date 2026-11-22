@@ -3,7 +3,7 @@ use mln_gfx::gpu::{
     ColorAttachment, DepthState, DepthStencilAttachment, Gpu, GpuError, LoadOp, PassDesc, Scissor, StencilState,
     StencilTest, TargetFormats,
 };
-use mln_gfx::types::{DepthFunctionType, StencilOpType};
+use mln_gfx::types::{DepthFunctionType, StencilOpType, TextureFilterType};
 use mln_map_types::{ClipDepthRange, FrameProjection, MapDebugOptions, ProjectionData, View, ViewportMode};
 use mln_tile_id::UnwrappedTileID;
 use mln_util::identity::SimpleIdentity;
@@ -173,6 +173,14 @@ pub struct Frame<'a> {
 }
 
 impl Frame<'_> {
+    /// How to filter an image that draws at its own size, such as an icon
+    /// or a pattern: nearest, which keeps it sharp, while the camera stands
+    /// still and looks straight down, and linearly otherwise.
+    #[must_use]
+    pub fn image_filter(&self) -> TextureFilterType {
+        if self.camera_moving || self.camera.pitch() != 0.0 { TextureFilterType::Linear } else { TextureFilterType::Nearest }
+    }
+
     /// The projection of the tile `tile_id` in the frame, pixel-aligned if
     /// `aligned`.
     #[must_use]

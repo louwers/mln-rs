@@ -12,7 +12,7 @@ use mln_render::layer::{
     DemTile, DemTiles, EvaluateCx, EvaluatedLayer, Evaluation, FrameTile, Layer, NewCx, PrepareCx, TileCx,
     TileTransform, UpdateCx,
 };
-use mln_style_types::{HillshadeIlluminationAnchorType, ResamplingType};
+use mln_style_types::HillshadeIlluminationAnchorType;
 use mln_tile_id::UnwrappedTileID;
 use mln_util::Color;
 use mln_util::constants::{EXTENT, TERRAIN_RGB_MAXZOOM};
@@ -25,6 +25,7 @@ use super::ubo::{
     HillshadeTilePropsUBO, MAX_ILLUMINATION_SOURCES,
 };
 use super::{Hillshade, HillshadePaintProperties};
+use crate::resampling;
 
 /// A hillshade layer: each tile's slopes, prepared from its elevations into
 /// a target of the tile's, and shaded as lit from the layer's light sources.
@@ -86,20 +87,12 @@ impl Layer for HillshadeLayer {
     }
 
     fn evaluate(&mut self, cx: EvaluateCx<'_, Self>) -> Evaluation {
-        if *cx.evaluated.paint.hillshade_exaggeration.uniform() > 0.0 {
-            Evaluation::TRANSLUCENT
-        } else {
-            Evaluation::NONE
-        }
+        Evaluation::translucent_if(*cx.evaluated.paint.hillshade_exaggeration.uniform() > 0.0)
     }
 
     fn update(&mut self, cx: &mut UpdateCx<'_, Self>) {
         let paint = &cx.layer.evaluated.paint;
-        let filter = match *paint.resampling.uniform() {
-            ResamplingType::Linear => TextureFilterType::Linear,
-            ResamplingType::Nearest => TextureFilterType::Nearest,
-        };
-        self.resampling.set(SamplerState { filter, ..ELEVATIONS });
+        self.resampling.set(SamplerState { filter: resampling::filter(*paint.resampling.uniform()), ..ELEVATIONS });
         if let Some(max_zoom) = cx.source_max_zoom {
             self.max_zoom = max_zoom;
         }

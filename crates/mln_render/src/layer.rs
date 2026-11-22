@@ -770,6 +770,13 @@ impl Evaluation {
     pub const TRANSLUCENT: Evaluation = Evaluation { draws: true, opaque: false, solid: None };
     /// The layer draws, and may draw opaque.
     pub const OPAQUE: Evaluation = Evaluation { draws: true, opaque: true, solid: None };
+
+    /// [`TRANSLUCENT`](Self::TRANSLUCENT) where the layer `draws`, and
+    /// [`NONE`](Self::NONE) otherwise.
+    #[must_use]
+    pub const fn translucent_if(draws: bool) -> Evaluation {
+        if draws { Evaluation::TRANSLUCENT } else { Evaluation::NONE }
+    }
 }
 
 /// What a layer's update reads of the frame, and the resources it may

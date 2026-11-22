@@ -10,7 +10,6 @@ use mln_render::layer::{
 };
 use mln_style::color_ramp_property_value::ColorRampPropertyValue;
 use mln_style::expression::{EvaluationContext, GlobalStateMap, from_expression_value};
-use mln_style_types::ResamplingType;
 use mln_util::Color;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
@@ -18,7 +17,7 @@ use mln_util::size::Size;
 use super::ColorRelief;
 use super::programs::COLOR_RELIEF;
 use super::ubo::{ColorReliefDrawableUBO, ColorReliefEvaluatedPropsUBO, ColorReliefTilePropsUBO};
-use crate::color_ramp;
+use crate::{color_ramp, resampling};
 
 /// A color-relief layer: each tile's terrain, colored as the stops of
 /// `color-relief-color` say for its elevation.
@@ -72,18 +71,11 @@ impl Layer for ColorReliefLayer {
         {
             self.stops = Rc::new(stops);
         }
-        if *cx.evaluated.paint.color_relief_opacity.uniform() > 0.0 {
-            Evaluation::TRANSLUCENT
-        } else {
-            Evaluation::NONE
-        }
+        Evaluation::translucent_if(*cx.evaluated.paint.color_relief_opacity.uniform() > 0.0)
     }
 
     fn update(&mut self, cx: &mut UpdateCx<'_, Self>) {
-        let filter = match *cx.layer.evaluated.paint.resampling.uniform() {
-            ResamplingType::Linear => TextureFilterType::Linear,
-            ResamplingType::Nearest => TextureFilterType::Nearest,
-        };
+        let filter = resampling::filter(*cx.layer.evaluated.paint.resampling.uniform());
         self.resampling.set(SamplerState { filter, ..SamplerState::default() });
         if !Rc::ptr_eq(&self.written, &self.stops) {
             self.write(cx.res);
