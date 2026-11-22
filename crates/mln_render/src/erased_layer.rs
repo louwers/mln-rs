@@ -69,7 +69,7 @@ impl<S: Layer<Style = S> + StyleLayerType> EvaluatedLayer<S> {
     /// halves, before its first evaluation: its paint properties' defaults,
     /// not drawing.
     pub(crate) fn new(style: Arc<LayerStyle<S>>) -> Self {
-        EvaluatedLayer::with_paint(entry::<S>(), style, Default::default())
+        EvaluatedLayer::with_paint(entry::<S, NoPlacement>(), style, Default::default())
     }
 }
 
@@ -159,7 +159,7 @@ pub(crate) trait ErasedLayerType: Send + Sync + 'static {
     /// The render layer that draws the layer `style`, or `None` if `style`
     /// is another type's.
     fn create_render_layer(
-        &self,
+        &'static self,
         style: &Arc<dyn ErasedLayerStyle>,
         res: &mut crate::gfx::context::Resources,
     ) -> Option<Box<dyn RenderLayer>>;
@@ -192,21 +192,42 @@ pub(crate) trait ErasedLayerType: Send + Sync + 'static {
     fn read_bucket(&self, r: &mut Reader<'_>) -> Option<Box<dyn ErasedBucket>>;
 }
 
-/// The [`ErasedLayerType`] of the layer type `L`, which [`entry`] returns.
-pub(crate) struct LayerEntry<L>(PhantomData<fn() -> L>);
+/// The [`ErasedLayerType`] of the layer type `L`, which [`entry`] returns,
+/// whose layers place with the pass that `P` makes.
+pub(crate) struct LayerEntry<L, P = NoPlacement>(PhantomData<fn() -> (L, P)>);
 
-impl<L: Layer> ErasedLayerType for LayerEntry<L> {
+/// What makes the placement pass of a layer type's layers, if they place.
+pub(crate) trait NewPlacement<L>: 'static {
+    /// Whether the type's layers place.
+    const PLACES: bool;
+
+    /// A new pass; `None` for a type whose layers don't place.
+    fn new_placement() -> Option<Box<dyn ErasedPlacement>>;
+}
+
+/// The [`NewPlacement`] of a layer type whose layers don't place.
+pub(crate) struct NoPlacement;
+
+impl<L> NewPlacement<L> for NoPlacement {
+    const PLACES: bool = false;
+
+    fn new_placement() -> Option<Box<dyn ErasedPlacement>> {
+        None
+    }
+}
+
+impl<L: Layer, P: NewPlacement<L>> ErasedLayerType for LayerEntry<L, P> {
     fn style(&self) -> &'static dyn ErasedStyleLayerType {
         LayerTypeEntry::<L::Style>::INSTANCE
     }
 
     fn create_render_layer(
-        &self,
+        &'static self,
         style: &Arc<dyn ErasedLayerStyle>,
         res: &mut crate::gfx::context::Resources,
     ) -> Option<Box<dyn RenderLayer>> {
         let style = LayerStyle::<L::Style>::recover(style)?;
-        Some(Box::new(Hosted::<L>::new(style, res)))
+        Some(Box::new(Hosted::<L>::new(self, style, res)))
     }
 
     fn layout_can_need_dependencies(&self, group: &[Arc<dyn ErasedEvaluatedLayer>]) -> bool {
@@ -223,11 +244,11 @@ impl<L: Layer> ErasedLayerType for LayerEntry<L> {
     }
 
     fn places(&self) -> bool {
-        false
+        P::PLACES
     }
 
     fn new_placement(&self) -> Option<Box<dyn ErasedPlacement>> {
-        None
+        P::new_placement()
     }
 
     fn read_evaluated(&'static self, r: &mut Reader<'_>) -> Option<Arc<dyn ErasedEvaluatedLayer>> {
@@ -354,13 +375,14 @@ impl<S: StyleLayerType, L: Layout<S>> ErasedLayout for TypedLayout<S, L> {
     }
 }
 
-impl<L: 'static> LayerEntry<L> {
+impl<L: 'static, P: 'static> LayerEntry<L, P> {
     const INSTANCE: &'static Self = &LayerEntry(PhantomData);
 }
 
-/// The layer type `L` as a value.
-pub(crate) const fn entry<L: Layer>() -> &'static dyn ErasedLayerType {
-    LayerEntry::<L>::INSTANCE
+/// The layer type `L` as a value, whose layers place with the pass `P`
+/// makes.
+pub(crate) const fn entry<L: Layer, P: NewPlacement<L>>() -> &'static dyn ErasedLayerType {
+    LayerEntry::<L, P>::INSTANCE
 }
 
 /// The data a tile of `contents` holds for a layer of the style type `S`
@@ -397,7 +419,7 @@ mod tests {
         let style = Arc::new(LayerStyle::<Dot>::new("dot".to_owned(), "source".to_owned()));
         let crossfade = CrossfadeParameters { from_scale: 2.0, to_scale: 1.0, t: 0.25 };
         let layer: Arc<dyn ErasedEvaluatedLayer> =
-            Arc::new(EvaluatedLayer { style, paint, crossfade, draws: false, entry: entry::<Dot>() });
+            Arc::new(EvaluatedLayer { style, paint, crossfade, draws: false, entry: entry::<Dot, NoPlacement>() });
         let recovered = EvaluatedLayer::<Dot>::recover(&layer).unwrap();
         assert!(std::ptr::addr_eq(Arc::as_ptr(&recovered), Arc::as_ptr(&layer)));
         assert_eq!(*recovered.paint.dot_color.uniform(), Color::white());

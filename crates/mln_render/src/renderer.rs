@@ -309,19 +309,15 @@ impl Renderer {
         features
     }
 
-    /// Not a contract yet (see the crate doc): the renderer's placement
-    /// pass, if it is a `P`: the pass of its registry's layer type that
-    /// places, for the type's own API to reach.
-    #[doc(hidden)]
-    #[must_use]
-    pub fn placement<P: 'static>(&self) -> Option<&P> {
-        self.orchestrator.placement()?.pass().downcast_ref()
+    /// The renderer's placement pass, of its registry's layer type that
+    /// places ([`placement::pass`](crate::placement::pass)).
+    pub(crate) fn placement(&self) -> Option<&dyn crate::placement::ErasedPlacement> {
+        self.orchestrator.placement()
     }
 
-    /// [`placement`](Self::placement), to change; not a contract yet.
-    #[doc(hidden)]
-    pub fn placement_mut<P: 'static>(&mut self) -> Option<&mut P> {
-        self.orchestrator.placement_mut()?.pass_mut().downcast_mut()
+    /// [`placement`](Self::placement), to change.
+    pub(crate) fn placement_mut(&mut self) -> Option<&mut (dyn crate::placement::ErasedPlacement + 'static)> {
+        self.orchestrator.placement_mut()
     }
 
     /// Logs every render source's tiles and the image manager's state.

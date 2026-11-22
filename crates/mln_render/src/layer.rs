@@ -75,11 +75,11 @@ use mln_style::PropertyEvaluationParameters;
 use mln_style::evaluated::Evaluated;
 use mln_style::expression::expr::FeatureState;
 use mln_style::expression::image_expression::UnavailableImages;
-use mln_style::expression::{EvaluationContext, ValueConverter};
+use mln_style::expression::{EvaluationContext, Value, ValueConverter};
 use mln_style::layer_type::{LayerStyle, PaintSet, SourceKind, StyleLayerType};
 use mln_style_types::TranslateAnchorType;
 use mln_style_types::image::{ImageDependencies, ImageType};
-use mln_text::glyph::{GlyphDependencies, GlyphID};
+use mln_text::glyph::{FontFaces, GlyphDependencies, GlyphID, GlyphIDType};
 use mln_tile::{Feature, TileLayer};
 use mln_tile_id::geometry_tile_data::{
     GeometryCollection, GeometryCoordinate, GeometryCoordinates, GeometryTileFeature,
@@ -95,7 +95,7 @@ use mln_wire::Wire;
 
 pub use crate::bucket_geometry::GpuVec;
 pub use crate::bucket_upload::Upload;
-use crate::draw::{Buffer, Draws, IndexBuffer, Resources};
+use crate::draw::{Buffer, Draws, IndexBuffer, Resources, Texture};
 pub use crate::erased_layer::EvaluatedLayer;
 use crate::geometry::feature_index::{FeatureIndex, FeatureIndexBuilder};
 pub use crate::gfx::mesh::Indexes;
@@ -318,6 +318,13 @@ pub(crate) mod input {
                 && let Some(order) = source.tile_order()
             {
                 let tiles = source.render_tiles();
+                let placing;
+                let order = if update.places {
+                    placing = crate::placement::tile_order(tiles, update.view.angle() as f32);
+                    &placing
+                } else {
+                    order
+                };
                 for &index in order {
                     let Some(tile) = tiles.get(index) else { continue };
                     let content = update.contents.get(index).copied().flatten();
@@ -694,6 +701,21 @@ impl<'a, S: StyleLayerType, B> LayerBucket<'a, S, B> {
         PaintVertices::new(of_layer, self.contents.bucket_geometry.paint(of_layer.vertices()))
     }
 
+    /// The texture of the tile's atlas of glyphs, where the glyphs that its
+    /// layout asked for are ([`Resolved::glyphs`]), once it uploaded.
+    #[must_use]
+    pub fn glyph_atlas(self) -> Option<&'a Texture> {
+        self.contents.textures.glyph()
+    }
+
+    /// The texture of the tile's atlas of images, where the icons and
+    /// patterns that its layout asked for are ([`Resolved::icons`],
+    /// [`Resolved::patterns`]), once it uploaded.
+    #[must_use]
+    pub fn icon_atlas(self) -> Option<&'a Texture> {
+        self.contents.textures.icon()
+    }
+
     /// The tile's feature index, which queries search.
     #[must_use]
     pub(crate) fn feature_index(self) -> &'a Arc<FeatureIndex> {
@@ -852,7 +874,10 @@ pub struct LayoutCx<'a, S: StyleLayerType> {
     pub(crate) layers: &'a [Arc<EvaluatedLayer<S>>],
     pub(crate) tile: OverscaledTileID,
     pub(crate) mode: MapMode,
+    pub(crate) pixel_ratio: f32,
     pub(crate) parameters: PropertyEvaluationParameters,
+    pub(crate) font_faces: Option<&'a Arc<FontFaces>>,
+    pub(crate) glyph_pbfs: bool,
     pub(crate) source_layer: TileLayer<'a>,
     pub(crate) filter_groups: &'a mut FilterGroups,
     pub(crate) glyphs: &'a mut GlyphDependencies,
@@ -881,11 +906,31 @@ impl<S: StyleLayerType> LayoutCx<'_, S> {
         self.mode
     }
 
+    /// The device pixels per logical pixel that the map draws at.
+    #[must_use]
+    pub fn pixel_ratio(&self) -> f32 {
+        self.pixel_ratio
+    }
+
     /// What the layout properties evaluate with: the tile's zoom and the
     /// style's global state.
     #[must_use]
     pub fn parameters(&self) -> &PropertyEvaluationParameters {
         &self.parameters
+    }
+
+    /// The style's font faces, which draw text in the scripts of their
+    /// ranges, and its fallback faces after them.
+    #[must_use]
+    pub fn font_faces(&self) -> Option<&Arc<FontFaces>> {
+        self.font_faces
+    }
+
+    /// Whether the style has glyphs of its own, a `glyphs` URL, which draw
+    /// the text that no font face does.
+    #[must_use]
+    pub fn has_glyphs(&self) -> bool {
+        self.glyph_pbfs
     }
 
     /// The indexes of the features that the leader's filter selects, in
@@ -900,8 +945,8 @@ impl<S: StyleLayerType> LayoutCx<'_, S> {
     }
 
     /// What a layout property evaluates with for `feature`: the tile's zoom
-    /// and id, the style's global state and its images. An image that an
-    /// `image` expression finds missing is asked for as an icon.
+    /// and id, the style's global state, images and font faces. An image
+    /// that an `image` expression finds missing is asked for as an icon.
     #[must_use]
     pub fn context<'f>(&'f self, feature: &'f dyn GeometryTileFeature) -> EvaluationContext<'f> {
         EvaluationContext::with_zoom_feature(f32::from(self.tile.overscaled_z), Some(feature))
@@ -909,6 +954,7 @@ impl<S: StyleLayerType> LayoutCx<'_, S> {
             .with_global_state(self.parameters.global_state.as_deref())
             .with_available_images(Some(self.available_images))
             .with_unavailable_images(Some(self.unavailable_images))
+            .with_font_faces(self.font_faces.map(|faces| &**faces))
     }
 
     /// Asks for the style's image `id`, as `kind`. A layout of a type whose
@@ -923,6 +969,16 @@ impl<S: StyleLayerType> LayoutCx<'_, S> {
     pub fn need_glyphs(&mut self, font_stack: FontStack, glyphs: impl IntoIterator<Item = GlyphID>) {
         self.glyphs.glyphs.entry(font_stack).or_default().extend(glyphs);
     }
+
+    /// Asks for the shaping of `text` by the font face `face` of the font
+    /// stack `font_stack`, which [`Resolved::shaping`] then holds, as
+    /// [`need_image`](Self::need_image) asks for an image.
+    pub fn need_shaping(&mut self, font_stack: &FontStack, face: GlyphIDType, text: &[char]) {
+        let texts = self.glyphs.shapes.entry(font_stack.clone()).or_default().entry(face).or_default();
+        if !texts.contains(text) {
+            texts.insert(text.to_vec());
+        }
+    }
 }
 
 /// What a layout reads and writes while it builds its bucket.
@@ -931,6 +987,7 @@ pub struct BuildCx<'a, S: StyleLayerType> {
     pub(crate) tile: OverscaledTileID,
     pub(crate) mode: MapMode,
     pub(crate) first_load: bool,
+    pub(crate) collision_boxes: bool,
     pub(crate) source_layer: TileLayer<'a>,
     pub(crate) resolved: Option<&'a Resolved>,
     pub(crate) feature_index: &'a mut FeatureIndexBuilder,
@@ -959,6 +1016,13 @@ impl<S: StyleLayerType> BuildCx<'_, S> {
     #[must_use]
     pub fn first_load(&self) -> bool {
         self.first_load
+    }
+
+    /// Whether the map's debug options show the boxes that placed features
+    /// collide with.
+    #[must_use]
+    pub fn collision_boxes(&self) -> bool {
+        self.collision_boxes
     }
 
     /// What the glyphs and images the layout asked for resolved to; `None`
@@ -990,7 +1054,21 @@ impl<S: StyleLayerType> BuildCx<'_, S> {
         feature: &dyn GeometryTileFeature,
         vertices: usize,
     ) {
-        binders.populate(feature, index, vertices, &self.tile.canonical);
+        binders.populate(feature, index, vertices, &self.tile.canonical, &Value::Null);
+    }
+
+    /// Writes the values of `feature`, as [`populate`](Self::populate) does,
+    /// for vertices that draw `section`, a section of its formatted text,
+    /// whose options a property's `["get", ..]` of the section reads.
+    pub fn populate_section<P: PaintBinders>(
+        &self,
+        binders: &mut LayerBinders<P>,
+        index: usize,
+        feature: &dyn GeometryTileFeature,
+        vertices: usize,
+        section: &Value,
+    ) {
+        binders.populate(feature, index, vertices, &self.tile.canonical, section);
     }
 
     /// Adds `geometry`, the geometry of the feature at `index`, to the

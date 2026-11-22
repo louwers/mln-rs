@@ -1,5 +1,5 @@
 use crate::gfx::dynamic_texture_atlas::{DynamicTextureAtlas, PageId};
-use crate::gfx::store::SharedTexture;
+use crate::handles::Texture;
 
 /// The glyph and icon (+ pattern) atlas textures of a tile's layout: the
 /// pages its glyphs and images are on, and their GPU textures, which the
@@ -8,8 +8,8 @@ use crate::gfx::store::SharedTexture;
 pub(crate) struct TileAtlasTextures {
     glyph_page: Option<PageId>,
     icon_page: Option<PageId>,
-    glyph: Option<SharedTexture>,
-    icon: Option<SharedTexture>,
+    glyph: Option<Texture>,
+    icon: Option<Texture>,
 }
 
 impl TileAtlasTextures {
@@ -21,22 +21,22 @@ impl TileAtlasTextures {
     /// Finds the pages' textures in `atlas`, once it uploaded them.
     pub(crate) fn resolve(&mut self, atlas: &DynamicTextureAtlas) {
         if self.glyph.is_none() {
-            self.glyph = self.glyph_page.and_then(|page| atlas.page_texture(page)).cloned();
+            self.glyph = self.glyph_page.and_then(|page| atlas.page_texture(page)).cloned().map(Texture);
         }
         if self.icon.is_none() {
-            self.icon = self.icon_page.and_then(|page| atlas.page_texture(page)).cloned();
+            self.icon = self.icon_page.and_then(|page| atlas.page_texture(page)).cloned().map(Texture);
         }
     }
 
     /// The glyph page's texture, once uploaded.
     #[must_use]
-    pub(crate) fn glyph(&self) -> Option<&SharedTexture> {
+    pub(crate) fn glyph(&self) -> Option<&Texture> {
         self.glyph.as_ref()
     }
 
     /// The icon and pattern page's texture, once uploaded.
     #[must_use]
-    pub(crate) fn icon(&self) -> Option<&SharedTexture> {
+    pub(crate) fn icon(&self) -> Option<&Texture> {
         self.icon.as_ref()
     }
 }

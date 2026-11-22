@@ -825,8 +825,16 @@ pub trait BinderSet: Clone + Send + Wire + 'static {
     fn vertices_mut(&mut self) -> &mut InterleavedVertexBuffer;
 
     /// Writes the values of `feature`, the feature at `index` of the tile
-    /// `canonical`, into the vertices up to `length`.
-    fn populate(&mut self, feature: &dyn GeometryTileFeature, length: usize, index: usize, canonical: &CanonicalTileID);
+    /// `canonical`, in its text's formatted section `section`, into the
+    /// vertices up to `length`.
+    fn populate(
+        &mut self,
+        feature: &dyn GeometryTileFeature,
+        length: usize,
+        index: usize,
+        canonical: &CanonicalTileID,
+        section: &Value,
+    );
 
     /// Rewrites the values that read feature state for `states`, the states
     /// of the features of `layer`.
@@ -952,6 +960,13 @@ pub struct LayerBinders<P> {
     layers: Vec<(String, P)>,
 }
 
+impl<P> Default for LayerBinders<P> {
+    /// The binders of no layer.
+    fn default() -> Self {
+        LayerBinders { layers: Vec::new() }
+    }
+}
+
 impl<P: PaintBinders> LayerBinders<P> {
     /// The binders of each of `layers`, of their paint values at `zoom`.
     pub(crate) fn new<S: StyleLayerType<PaintProperties: PaintSet<Evaluated = P::Paint>>>(
@@ -975,9 +990,10 @@ impl<P: PaintBinders> LayerBinders<P> {
         index: usize,
         length: usize,
         canonical: &CanonicalTileID,
+        section: &Value,
     ) {
         for (_, binders) in &mut self.layers {
-            binders.populate(feature, length, index, canonical);
+            binders.populate(feature, length, index, canonical, section);
         }
     }
 
@@ -1172,6 +1188,7 @@ macro_rules! paint_property_binders {
                 length: usize,
                 index: usize,
                 canonical: &$crate::__private::mln_tile_id::CanonicalTileID,
+                section: &$crate::__private::mln_style::expression::Value,
             ) {
                 let $name { vertices, $($field,)+ } = self;
                 vertices.populate(length, |vertices| {
@@ -1184,7 +1201,7 @@ macro_rules! paint_property_binders {
                         &::core::default::Default::default(),
                         ::core::option::Option::None,
                         canonical,
-                        &$crate::__private::mln_style::expression::Value::Null,
+                        section,
                     );)+
                 });
             }

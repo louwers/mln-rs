@@ -305,11 +305,13 @@ impl Group {
     }
 }
 
-/// The blocks of each draw of `program`, each with its buffer's id and the
-/// bytes between two draws' elements.
-fn blocks_of_each_draw(program: &Program) -> impl Iterator<Item = (&'static Block, usize, usize)> + '_ {
+/// The blocks of each draw of `program`, in its order, each with its
+/// buffer's id and the bytes between two draws' elements of a storage
+/// buffer, or `None` for a block of a draw's own.
+fn blocks_of_each_draw(program: &Program) -> impl Iterator<Item = (&'static Block, usize, Option<usize>)> + '_ {
     program.buffers.iter().filter_map(|buffer| match buffer.kind {
-        BufferKind::Storage { block, stride } => Some((block, buffer.id, stride)),
+        BufferKind::Storage { block, stride } => Some((block, buffer.id, Some(stride))),
+        BufferKind::DrawUniform(block) => Some((block, buffer.id, None)),
         _ => None,
     })
 }
@@ -368,6 +370,7 @@ impl Pushes {
         let mut strides = [None; FIRST_VERTEX_BUFFER_ID];
         for program in &programs {
             for (_, id, stride) in blocks_of_each_draw(program) {
+                let Some(stride) = stride else { continue };
                 debug_assert!(!written[id], "a group whose programs read buffer {id} as a uniform and per draw");
                 debug_assert!(
                     strides[id].is_none_or(|other| other == stride),
@@ -394,6 +397,29 @@ impl Pushes {
             buffers.write_storage(gpu, id, scratch, context.device());
         }
 
+        // A draw of a program with blocks of its own writes them to its
+        // mesh's buffers.
+        for pushed in pushed.iter() {
+            let program = pushed.program;
+            let own = program.projection == Projection::Own;
+            if !own && blocks_of_each_draw(program).all(|(_, _, stride)| stride.is_some()) {
+                continue;
+            }
+            let Some(mut objects) = context.take_mesh(pushed.mesh) else { continue };
+            let mut start = pushed.blocks;
+            for (block, id, stride) in blocks_of_each_draw(program) {
+                if stride.is_none() {
+                    objects.write_own(gpu, id, &bytes[start..start + block.size], context.device());
+                }
+                start += block.size;
+            }
+            if own {
+                let projection = pushed.projection.unwrap_or_default();
+                objects.write_own(gpu, PROJECTION_BUFFER.id, bytemuck::bytes_of(&projection), context.device());
+            }
+            context.restore_mesh(pushed.mesh, objects);
+        }
+
         if programs.iter().any(|program| program.projection == Projection::PerDraw) {
             scratch.clear();
             for pushed in pushed.iter() {
@@ -408,17 +434,22 @@ impl Pushes {
 }
 
 /// A layer's draws of a frame, in groups: the layer's [`main`](Draws::main)
-/// group in its place in the layers' order. The engine keeps a layer's
-/// groups from frame to frame, with the memory of their draws: the main
-/// group keeps its place in the layers' order and depth while the layer
-/// renders, in frames it draws nothing in too.
+/// group in its place in the layers' order, and its
+/// [`overlay`](Draws::overlay) above it. The engine keeps a layer's groups
+/// from frame to frame, with the memory of their draws: each keeps its
+/// place in the layers' order and depth while the layer renders, in frames
+/// it draws nothing in too, the overlay from the first frame that asks for
+/// it.
 pub struct Draws {
     main: Group,
+    overlay: Option<Group>,
+    /// The overlay's frame, as `begin` started the main group's.
+    frame: (f32, bool, bool),
 }
 
 impl Draws {
     pub(crate) fn new() -> Draws {
-        Draws { main: Group::new() }
+        Draws { main: Group::new(), overlay: None, frame: (0.0, false, false) }
     }
 
     /// The group of the layer's draws in its place in the layers' order.
@@ -426,14 +457,33 @@ impl Draws {
         &mut self.main
     }
 
+    /// The group of the layer's draws over its main group's: in a place of
+    /// its own in the layers' order, right above the layer's, which it takes
+    /// in the first frame that asks for it.
+    pub fn overlay(&mut self) -> &mut Group {
+        let (zoom, opaque, frame_depth) = self.frame;
+        self.overlay.get_or_insert_with(|| {
+            let mut overlay = Group::new();
+            overlay.begin(zoom, opaque, frame_depth);
+            overlay
+        })
+    }
+
     /// Starts the layer's draws of a frame, as [`Group::begin`] does.
     pub(crate) fn begin(&mut self, zoom: f32, opaque: bool, frame_depth: bool) {
+        self.frame = (zoom, opaque, frame_depth);
         self.main.begin(zoom, opaque, frame_depth);
+        if let Some(overlay) = &mut self.overlay {
+            overlay.begin(zoom, opaque, frame_depth);
+        }
     }
 
     /// Drops the frame's draws.
     pub(crate) fn clear(&mut self) {
         self.main.clear();
+        if let Some(overlay) = &mut self.overlay {
+            overlay.clear();
+        }
     }
 
     /// Makes the pushed draws the frame's, as [`Group::finish`] does.
@@ -442,14 +492,17 @@ impl Draws {
         gpu: &mut dyn Gpu,
         context: &mut Resources,
         paint: &dyn Any,
-        tiles: impl IntoIterator<Item = UnwrappedTileID>,
+        tiles: impl IntoIterator<Item = UnwrappedTileID> + Clone,
     ) {
-        self.main.finish(gpu, context, paint, tiles);
+        self.main.finish(gpu, context, paint, tiles.clone());
+        if let Some(overlay) = &mut self.overlay {
+            overlay.finish(gpu, context, paint, tiles);
+        }
     }
 
-    /// The groups, in drawing order.
-    pub(crate) fn groups(&self) -> impl Iterator<Item = &Group> {
-        std::iter::once(&self.main)
+    /// The groups, bottom to top.
+    pub(crate) fn groups(&self) -> impl DoubleEndedIterator<Item = &Group> {
+        std::iter::once(&self.main).chain(&self.overlay)
     }
 }
 

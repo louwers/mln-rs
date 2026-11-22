@@ -48,7 +48,15 @@ impl Upload<'_> {
     /// ([`LayerBucket::indexes`](crate::layer::LayerBucket::indexes)).
     pub fn indexes(&mut self, indexes: &mut Indexes) {
         if let Kind::Geometry { geometry, copies, res } = &mut self.kind {
-            geometry.upload_indexes(indexes, copies, res);
+            geometry.upload_indexes(indexes, false, copies, res);
+        }
+    }
+
+    /// Names `indexes`, as [`indexes`](Self::indexes) does, keeping them,
+    /// as [`kept`](Self::kept) keeps a vector: placement sorts them.
+    pub fn kept_indexes(&mut self, indexes: &mut Indexes) {
+        if let Kind::Geometry { geometry, copies, res } = &mut self.kind {
+            geometry.upload_indexes(indexes, true, copies, res);
         }
     }
 

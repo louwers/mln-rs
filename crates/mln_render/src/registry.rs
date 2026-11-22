@@ -10,7 +10,7 @@ use mln_style::layer_type::{ErasedStyleLayerType, StyleLayerType};
 use mln_style::source_type::ErasedStyleSourceType;
 use mln_vec_map::VecMap;
 
-use crate::erased_layer::{ErasedLayerType, entry};
+use crate::erased_layer::{ErasedLayerType, NoPlacement, entry};
 use crate::erased_source::{self, ErasedSourceType};
 use crate::layer::Layer;
 use crate::placement::ErasedPlacement;
@@ -57,6 +57,12 @@ impl RegistryBuilder {
     /// [`Input`](Layer::Input) is of another kind of source than its style
     /// half's doesn't compile.
     pub fn add_layer_type<L: Layer>(&mut self) -> Result<(), RegisterError> {
+        self.add_layer_entry::<L>(entry::<L, NoPlacement>())
+    }
+
+    /// Adds the layer type of the layer `L`, as `entry` holds it, as
+    /// [`add_layer_type`](Self::add_layer_type) does.
+    pub(crate) fn add_layer_entry<L: Layer>(&mut self, entry: &'static dyn ErasedLayerType) -> Result<(), RegisterError> {
         const {
             assert!(
                 <L::Style as StyleLayerType>::INFO.source as u8 == crate::layer::input_source::<L>() as u8,
@@ -67,7 +73,7 @@ impl RegistryBuilder {
         if self.layer_types.contains_key(name) {
             return Err(RegisterError::Duplicate(name.to_owned()));
         }
-        self.layer_types.insert(name, entry::<L>());
+        self.layer_types.insert(name, entry);
         Ok(())
     }
 

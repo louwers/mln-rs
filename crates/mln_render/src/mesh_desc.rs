@@ -7,7 +7,7 @@ use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::bindings::MAX_TEXTURES;
 use mln_gfx::shaders::block::DrawBlocks;
-use mln_gfx::shaders::program::{BufferKind, Program, Projection};
+use mln_gfx::shaders::program::{BufferKind, Program};
 use mln_gfx::texture2d::SamplerState;
 use smallvec::SmallVec;
 
@@ -54,6 +54,9 @@ pub struct MeshDesc<'a> {
 pub(crate) struct Input<'a> {
     pub(crate) entry: &'a SharedBuffer,
     pub(crate) attributes: &'static [AttributeDataType],
+    /// The names of the program's attributes they bind to; empty to bind
+    /// them in order.
+    pub(crate) names: &'static [&'static str],
     pub(crate) stride: u32,
 }
 
@@ -64,7 +67,8 @@ impl<'a> Input<'a> {
             size_of::<V>(),
             "a vertex whose attributes' formats don't add up to its size"
         );
-        Input { entry: &buffer.entry, attributes: V::ATTRIBUTES, stride: size_of::<V>() as u32 }
+        debug_assert!(V::NAMES.is_empty() || V::NAMES.len() == V::ATTRIBUTES.len(), "a vertex with names for some attributes");
+        Input { entry: &buffer.entry, attributes: V::ATTRIBUTES, names: V::NAMES, stride: size_of::<V>() as u32 }
     }
 }
 
@@ -89,9 +93,8 @@ impl<'a> MeshDesc<'a> {
         }
     }
 
-    /// Binds `buffer`'s vertices to the program's vertex attributes that
-    /// read no paint property, one per attribute of `V`, from the first
-    /// that no earlier call bound.
+    /// Binds `buffer`'s vertices to the program's vertex attributes, as
+    /// [`Vertex`] says.
     pub fn vertices<V: Vertex>(&mut self, buffer: &'a Buffer<V>) -> &mut Self {
         self.vertices.push(Input::of(buffer));
         self
@@ -143,6 +146,13 @@ impl<'a> MeshDesc<'a> {
         self
     }
 
+    /// Draws in Mercator's projection on the globe too, as geometry of the
+    /// viewport rather than the map does
+    /// ([`TileTransform::screen_space`](crate::layer::TileTransform::screen_space)).
+    pub fn screen_space(&mut self) -> &mut Self {
+        self.projection(ProjectionVariant::Mercator)
+    }
+
     /// Draws in `variant`'s projection, whichever the frame's is.
     pub(crate) fn projection(&mut self, variant: ProjectionVariant) -> &mut Self {
         self.projection = Some(variant);
@@ -152,24 +162,46 @@ impl<'a> MeshDesc<'a> {
 
 impl Resources {
     /// The mesh of `desc`, whose draws give the values `B` of its program's
-    /// blocks of each draw. Panics where `B` isn't those blocks, in order,
-    /// or where the program reads blocks of each draw that only a draw's
-    /// own buffer holds ([`BufferKind::DrawUniform`],
-    /// [`Projection::Own`]), which draws don't give.
+    /// blocks of each draw ([`BufferKind::Storage`] and
+    /// [`BufferKind::DrawUniform`]). Panics where `B` isn't those blocks,
+    /// in order. A mesh of a program with blocks of a draw's own, or a
+    /// projection of its own
+    /// ([`Projection::Own`](mln_gfx::shaders::program::Projection::Own)), draws once a frame:
+    /// its draw writes them to the mesh's buffers.
     pub fn mesh<B: DrawBlocks>(&mut self, desc: &MeshDesc<'_>) -> Mesh<B> {
+        let (objects, paint) = self.mesh_objects::<B>(desc);
+        self.add_mesh(objects, paint)
+    }
+
+    /// Makes `mesh` the mesh of `desc`, as [`mesh`](Self::mesh) makes one,
+    /// in its place among the meshes' ages: its draws order among others as
+    /// before.
+    pub fn set_mesh<B: DrawBlocks>(&mut self, mesh: &mut Mesh<B>, desc: &MeshDesc<'_>) {
+        let (objects, paint) = self.mesh_objects::<B>(desc);
+        mesh.replace(objects.program(), paint);
+        drop(self.take_mesh(mesh.key()));
+        self.restore_mesh(mesh.key(), Box::new(objects));
+    }
+
+    /// Samples `mesh`'s texture at `slot` of its program's as `sampler`
+    /// says, from its next draw on.
+    pub fn set_sampler<B>(&mut self, mesh: &Mesh<B>, slot: usize, sampler: SamplerState) {
+        if let Some(mut objects) = self.take_mesh(mesh.key()) {
+            objects.set_sampler(slot, sampler);
+            self.restore_mesh(mesh.key(), objects);
+        }
+    }
+
+    /// The GPU objects of a mesh of `desc`, with what the engine writes of
+    /// its paint values, as [`mesh`](Self::mesh) checks them.
+    fn mesh_objects<B: DrawBlocks>(&mut self, desc: &MeshDesc<'_>) -> (DrawObjects, Option<MeshPaint>) {
         let program = desc.program;
-        assert!(
-            program.projection != Projection::Own
-                && !program.buffers.iter().any(|buffer| matches!(buffer.kind, BufferKind::DrawUniform(_))),
-            "a mesh of {}, whose program reads a block of a draw's own",
-            program.name
-        );
         assert!(
             program
                 .buffers
                 .iter()
                 .filter_map(|buffer| match buffer.kind {
-                    BufferKind::Storage { block, .. } => Some((block.name, block.size)),
+                    BufferKind::Storage { block, .. } | BufferKind::DrawUniform(block) => Some((block.name, block.size)),
                     _ => None,
                 })
                 .eq(B::BLOCKS.iter().map(|block| (block.name, block.size))),
@@ -189,7 +221,14 @@ impl Resources {
             .map(|(index, _)| index);
         for input in &desc.vertices {
             vertex_count = vertex_count.min(input.entry.count());
-            bind(&mut vertices, &mut attributes, input);
+            if input.names.is_empty() {
+                bind(&mut vertices, &mut attributes, input);
+            } else {
+                let mut named = input.names.iter().map(|name| {
+                    program.attributes.iter().position(|attribute| attribute.name == *name).unwrap_or(usize::MAX)
+                });
+                bind(&mut vertices, &mut named, input);
+            }
         }
         let instances = (!desc.instances.is_empty()).then(|| {
             let mut instances = VertexAttributeArray::new();
@@ -213,7 +252,7 @@ impl Resources {
             instances,
         };
         let objects = DrawObjects::new(program, desc.uniforms, desc.projection, blend, desc.cull, geometry, textures);
-        self.add_mesh(objects, desc.mesh_paint.clone())
+        (objects, desc.mesh_paint.clone())
     }
 }
 
@@ -226,7 +265,9 @@ fn bind(array: &mut VertexAttributeArray, attributes: &mut impl Iterator<Item = 
             debug_assert!(false, "a vertex with more attributes than its program");
             return;
         };
-        array.set_shared(attribute, SharedAttribute::new(input.entry.clone(), format, offset, input.stride));
+        if attribute != usize::MAX {
+            array.set_shared(attribute, SharedAttribute::new(input.entry.clone(), format, offset, input.stride));
+        }
         offset += format.stride() as u32;
     }
 }

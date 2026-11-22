@@ -111,6 +111,13 @@ impl LayoutBuckets {
         Some(self.layer_bucket(self.laid.get(index)?))
     }
 
+    /// The index among the layout's buckets of the bucket of the layer at
+    /// `index` among those laid out.
+    #[inline]
+    pub(crate) fn bucket_index(&self, index: usize) -> Option<usize> {
+        Some(self.laid.get(index)?.bucket)
+    }
+
     fn layer_bucket<'a>(&'a self, laid: &'a LaidLayer) -> ErasedLayerBucket<'a> {
         ErasedLayerBucket { bucket: &*self.buckets[laid.bucket], layer: &*laid.layer }
     }

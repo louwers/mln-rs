@@ -61,6 +61,25 @@ impl Indexes {
     pub fn is_empty(&self) -> bool {
         self.segments.is_empty()
     }
+
+    /// The segments, each a draw of a run of the indexes.
+    #[must_use]
+    pub fn segments(&self) -> &[SegmentBase] {
+        &self.segments
+    }
+
+    /// The indexes, each relative to its segment's first vertex: gone once
+    /// they uploaded, unless the bucket keeps them
+    /// ([`Upload::kept_indexes`](crate::layer::Upload::kept_indexes)).
+    #[must_use]
+    pub fn get(&self) -> &[u16] {
+        self.indexes.get()
+    }
+
+    /// [`get`](Self::get), to order the indexes of each segment anew.
+    pub fn get_mut(&mut self) -> &mut Vec<u16> {
+        self.indexes.get_mut()
+    }
 }
 
 /// Indexes being added to, in place: [`Indexes`]' parts.

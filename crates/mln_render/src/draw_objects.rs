@@ -29,6 +29,7 @@ use mln_util::logging::{Event, Log};
 use crate::gfx::buffer_store::{SharedBuffer, StoredBuffer};
 use crate::gfx::context::Resources;
 use crate::gfx::owned::{Held, Owned};
+use crate::gfx::resources::Device;
 use crate::gfx::store::{MeshKey, Shared, SharedTexture};
 use crate::gfx::uniform_buffer::UniformBufferArray;
 use crate::gfx::upload::{self, AttributeBindingArray};
@@ -85,6 +86,13 @@ impl<B> Mesh<B> {
     /// The program the mesh draws with.
     pub(crate) fn program(&self) -> &'static Program {
         self.program
+    }
+
+    /// Makes the mesh draw with `program` and write `paint` into its draws'
+    /// blocks, keeping its handle and age.
+    pub(crate) fn replace(&mut self, program: &'static Program, paint: Option<MeshPaint>) {
+        self.program = program;
+        self.paint = paint;
     }
 }
 
@@ -157,12 +165,13 @@ struct VertexSlot {
 }
 
 /// What a draw's bindings were made of: the epochs of the global uniform
-/// buffers and of those of its frame's draws, and the texture and sampler it
-/// bound at each texture id.
+/// buffers, of those of its frame's draws and of its own, and the texture
+/// and sampler it bound at each texture id.
 #[derive(Clone, Copy, PartialEq)]
 struct BindingsStamp {
     global: u64,
     frame: u64,
+    own: u64,
     textures: [Option<(TextureId, SamplerId)>; MAX_TEXTURES],
 }
 
@@ -194,6 +203,9 @@ pub(crate) struct DrawObjects {
     instance_attributes: Option<VertexAttributeArray>,
     /// The textures it binds, by texture id.
     textures: Textures,
+    /// The buffers of its program's blocks of a draw's own, which its draw
+    /// writes.
+    own_buffers: UniformBufferArray,
     color_mode: ColorMode,
     cull_face_mode: CullFaceMode,
 
@@ -244,6 +256,7 @@ impl DrawObjects {
             vertex_attributes: vertices,
             instance_attributes: instances,
             textures,
+            own_buffers: UniformBufferArray::new(),
             color_mode,
             cull_face_mode,
             mode,
@@ -264,6 +277,13 @@ impl DrawObjects {
     /// The program the objects draw with.
     pub(crate) fn program(&self) -> &'static Program {
         self.program
+    }
+
+    /// Samples the texture at `slot` as `sampler` says, from the next draw.
+    pub(crate) fn set_sampler(&mut self, slot: usize, sampler: SamplerState) {
+        if let Some(Some((_, bound))) = self.textures.get_mut(slot) {
+            *bound = sampler;
+        }
     }
 
     /// The key of the shader it draws with in a frame of `variant`'s
@@ -494,7 +514,8 @@ impl DrawObjects {
             }
         }
         let global = context.global_uniform_buffers();
-        let stamp = BindingsStamp { global: global.epoch(), frame: frame.epoch(), textures };
+        let own = &self.own_buffers;
+        let stamp = BindingsStamp { global: global.epoch(), frame: frame.epoch(), own: own.epoch(), textures };
         if let Some((bindings, made)) = &self.bindings
             && *made == stamp
         {
@@ -503,8 +524,9 @@ impl DrawObjects {
         self.bindings = None;
         let mut entries = Entries::new();
         for id in 0..FIRST_VERTEX_BUFFER_ID {
-            // The frame's buffer wins over the global one.
-            let buffer = frame.get(id).or_else(|| global.get(id));
+            // The draw's own buffer wins over the frame's, and the frame's
+            // over the global one.
+            let buffer = own.get(id).or_else(|| frame.get(id)).or_else(|| global.get(id));
             if let Some(buffer) = buffer {
                 entries.push(BindGroupEntry::Buffer {
                     id: id as u32,
@@ -538,10 +560,16 @@ impl DrawObjects {
     /// array at one of the `retired` epochs.
     pub(crate) fn drop_retired_bindings(&mut self, retired: &[u64]) {
         if let Some((_, made)) = &self.bindings
-            && [made.global, made.frame].iter().any(|epoch| retired.contains(epoch))
+            && [made.global, made.frame, made.own].iter().any(|epoch| retired.contains(epoch))
         {
             self.bindings = None;
         }
+    }
+
+    /// Writes `bytes` to the draw's own uniform buffer `id`, for its program's
+    /// block of a draw's own at that id.
+    pub(crate) fn write_own(&mut self, gpu: &mut dyn Gpu, id: usize, bytes: &[u8], device: &mut Device) {
+        self.own_buffers.write_uniform(gpu, id, bytes, device);
     }
 }
 

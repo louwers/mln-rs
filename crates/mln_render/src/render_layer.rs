@@ -19,7 +19,7 @@ use smallvec::SmallVec;
 
 use crate::bucket::ErasedBucket;
 use crate::encode::{DrawOrder, Draws, FrameDraws};
-use crate::erased_layer::{ErasedEvaluatedLayer, EvaluatedLayer, entry};
+use crate::erased_layer::{ErasedEvaluatedLayer, ErasedLayerType, EvaluatedLayer};
 use crate::gfx::context::Resources;
 use crate::image_store::ImageStore;
 use crate::layer::{
@@ -74,11 +74,17 @@ pub(crate) struct LayerUpdate<'a> {
     /// The tiles of the frame's layers, as their updates find them, which
     /// the update adds the layer's to: those the encode draws.
     pub(crate) found: &'a mut Vec<FoundTile>,
+    /// Whether the layer's type places: its tiles are all its source's,
+    /// those held while placement fades them out included, in placement's
+    /// order ([`placement::tile_order`](crate::placement::tile_order)).
+    pub(crate) places: bool,
 }
 
 /// A render layer of the layer type `L`: the layer, its values, and what
 /// the engine keeps of it.
 pub(crate) struct Hosted<L: Layer> {
+    /// The layer's type, as the registry holds it.
+    entry: &'static dyn ErasedLayerType,
     values: LayerValues<L::Style>,
     layer: L,
     /// The layer's values of the frame's tiles.
@@ -95,24 +101,20 @@ pub(crate) struct Hosted<L: Layer> {
 }
 
 impl<L: Layer> Hosted<L> {
-    /// The layer as its type's placement pass sees it.
-    pub(crate) fn placing(&self) -> crate::placement::PlacingLayer<'_, L> {
-        crate::placement::PlacingLayer { layer: &self.values, state: &self.layer }
-    }
-
     /// The layer and its values.
     pub(crate) fn parts(&self) -> (&L, &LayerValues<L::Style>) {
         (&self.layer, &self.values)
     }
 
-    /// The render layer of the layer `style`, before its values transition,
-    /// which joins the renderer of `res`.
-    pub(crate) fn new(style: Arc<LayerStyle<L::Style>>, res: &mut Resources) -> Self {
+    /// The render layer of the layer `style`, of the type `entry`, before
+    /// its values transition, which joins the renderer of `res`.
+    pub(crate) fn new(entry: &'static dyn ErasedLayerType, style: Arc<LayerStyle<L::Style>>, res: &mut Resources) -> Self {
         let unevaluated = style.paint.untransitioned();
-        let evaluated = Arc::new(EvaluatedLayer::with_paint(entry::<L>(), Arc::clone(&style), Default::default()));
+        let evaluated = Arc::new(EvaluatedLayer::with_paint(entry, Arc::clone(&style), Default::default()));
         let values = LayerValues { style, unevaluated, evaluated };
         let layer = L::new(&mut NewCx { layer: &values, res });
         Hosted {
+            entry,
             style_dependencies: <L::Style as StyleLayerType>::PaintProperties::dependencies(&values.unevaluated),
             values,
             layer,
@@ -368,7 +370,7 @@ impl<L: Layer> RenderLayer for Hosted<L> {
             evaluation,
             draws,
             volume: L::VOLUME,
-            places: false,
+            places: self.entry.places(),
         }
     }
 
@@ -397,7 +399,7 @@ impl<L: Layer> RenderLayer for Hosted<L> {
         type Paint<L> = <<L as Layer>::Style as StyleLayerType>::PaintProperties;
         let values = &mut self.values;
         let paint = Paint::<L>::evaluate_with_previous(&mut values.unevaluated, parameters, &values.evaluated.paint);
-        let mut evaluated = EvaluatedLayer::with_paint(entry::<L>(), Arc::clone(&values.style), paint);
+        let mut evaluated = EvaluatedLayer::with_paint(self.entry, Arc::clone(&values.style), paint);
         if Paint::<L>::CROSSFADES {
             evaluated.crossfade = parameters.get_crossfade_parameters();
         }
@@ -514,11 +516,16 @@ impl<L: Layer> RenderLayer for Hosted<L> {
     }
 
     fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
-        if self.renderable {
-            for group in self.frame_draws.groups() {
-                group.render(gpu, parameters);
-                order.step(parameters);
-            }
+        if !self.renderable {
+            return;
+        }
+        let mut render = |group: &crate::encode::Group| {
+            group.render(gpu, parameters);
+            order.step(parameters);
+        };
+        match order {
+            DrawOrder::BottomUp => self.frame_draws.groups().for_each(&mut render),
+            DrawOrder::TopDown => self.frame_draws.groups().rev().for_each(&mut render),
         }
     }
 

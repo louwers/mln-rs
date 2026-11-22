@@ -36,6 +36,13 @@ impl<V> Buffer<V> {
     }
 }
 
+impl<V> PartialEq for Buffer<V> {
+    /// Whether the handles are of one buffer.
+    fn eq(&self, other: &Self) -> bool {
+        self.entry == other.entry
+    }
+}
+
 impl<V> Clone for Buffer<V> {
     fn clone(&self) -> Self {
         Buffer { entry: self.entry.clone(), element: PhantomData }
@@ -48,14 +55,21 @@ impl<V> std::fmt::Debug for Buffer<V> {
     }
 }
 
-/// A type of vertex that a mesh reads: the formats of its attributes, in
-/// the order that the program's attributes read them, each right after the
-/// last in the vertex. A buffer of them binds to as many of the program's
-/// attributes, from the first that no earlier buffer bound.
+/// A type of vertex that a mesh reads: the formats of its attributes, each
+/// right after the last in the vertex, and the program's attributes they
+/// bind to: those of their [`NAMES`](Vertex::NAMES), or else as many of
+/// the program's attributes that read no paint property, in order, after
+/// those that the mesh's earlier vertices without names bound.
 pub trait Vertex: bytemuck::Pod {
     /// The formats of the vertex's attributes, whose sizes add up to the
     /// vertex's.
     const ATTRIBUTES: &'static [AttributeDataType];
+
+    /// The names of the program's attributes that the vertex's attributes
+    /// bind to, one for each: an attribute whose program has none of its
+    /// name binds to none. Empty for a vertex whose attributes bind in
+    /// order.
+    const NAMES: &'static [&'static str] = &[];
 }
 
 macro_rules! vertices {
@@ -86,6 +100,15 @@ vertices! {
 pub struct IndexBuffer {
     pub(crate) buffer: Buffer<u16>,
     pub(crate) segments: Vec<SegmentBase>,
+}
+
+impl IndexBuffer {
+    /// The same indexes, of which a mesh draws only the segment at `index`,
+    /// or none where there is no such segment.
+    #[must_use]
+    pub fn segment(&self, index: usize) -> IndexBuffer {
+        IndexBuffer { buffer: self.buffer.clone(), segments: self.segments.get(index).cloned().into_iter().collect() }
+    }
 }
 
 /// A texture in the renderer's [`Resources`](crate::draw::Resources), which

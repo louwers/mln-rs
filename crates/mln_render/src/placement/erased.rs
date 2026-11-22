@@ -7,7 +7,7 @@ use smallvec::SmallVec;
 
 use super::{
     BucketKey, CollisionGroups, Placed, PlacementBuckets, PlacementContext, PlacementPass, PlacementQuery,
-    PlacingLayer, Prepared,
+    PlacingLayer, PlacingTile, Prepared,
 };
 use crate::bucket::ErasedBucket;
 use crate::layer::Layer;
@@ -21,10 +21,18 @@ pub(crate) trait LaidBuckets {
     fn bucket_mut(&mut self, key: &BucketKey) -> Option<&mut dyn ErasedBucket>;
 }
 
+/// A placing layer of a frame, by its index among the renderer's layers,
+/// with its tiles that hold a bucket of it.
+pub(crate) struct PlacingLayerTiles {
+    pub(crate) layer: usize,
+    pub(crate) tiles: Vec<PlacingTile>,
+}
+
 /// What the engine hands its placement pass of a frame: the frame's layers
-/// of the pass's type, bottom to top, its update and its tiles' buckets.
+/// of the pass's type, bottom to top, each with its tiles, its update and
+/// its tiles' buckets.
 pub(crate) struct ErasedFrame<'a> {
-    pub(crate) layers: &'a [&'a dyn RenderLayer],
+    pub(crate) layers: &'a [(&'a dyn RenderLayer, &'a [PlacingTile])],
     pub(crate) update_parameters: &'a UpdateParameters,
     pub(crate) buckets: &'a mut dyn LaidBuckets,
 }
@@ -71,9 +79,10 @@ fn with_context<T: Layer, R>(frame: &mut ErasedFrame<'_>, hook: impl FnOnce(&mut
     let layers: SmallVec<[PlacingLayer<'_, T>; 8]> = frame
         .layers
         .iter()
-        .filter_map(|&layer| {
+        .filter_map(|&(layer, tiles)| {
             let layer: &dyn Any = layer;
-            layer.downcast_ref::<Hosted<T>>().map(Hosted::placing)
+            let (_, values) = layer.downcast_ref::<Hosted<T>>()?.parts();
+            Some(PlacingLayer { layer: values, tiles })
         })
         .collect();
     debug_assert_eq!(layers.len(), frame.layers.len(), "a layer of another type than its placement's");

@@ -3,15 +3,17 @@
 //! what it shows between placements. The built-in symbol type places
 //! through it. Anything here can change or go in any release.
 //!
-//! A layer type whose layers place has a [`PlacementPass`]: the pass over
-//! every layer of the type that the frame draws, which owns the order it
-//! places them in and what it keeps of their buckets between frames. The
-//! pass runs on the renderer's thread, and nothing of it crosses the worker
-//! codec.
+//! A layer type whose layers place registers with a [`PlacementPass`]
+//! ([`register`]): the pass over every layer of the type that the frame
+//! draws, which owns the order it places them in and what it keeps of
+//! their buckets between frames. The pass runs on the renderer's thread,
+//! and nothing of it crosses the worker codec. A placing layer draws the
+//! tiles that its source holds while what placement showed of them fades
+//! out, besides those of the frame.
 //!
 //! The engine keeps the placement's schedule: it decides each frame
-//! whether the pass places again, keeps the clock its fade runs on, and
-//! swaps in the placement the pass makes. Each frame, it
+//! whether the pass places again, keeps the clock its fade runs on
+//! ([`fade`]), and swaps in the placement the pass makes. Each frame, it
 //! [prepares](PlacementPass::prepare) the pass, has it
 //! [place](PlacementPass::place) when a placement is due, and then
 //! [brings the layers' buckets](PlacementPass::update_buckets) to the
@@ -26,24 +28,69 @@ mod groups;
 mod schedule;
 
 use std::any::Any;
+use std::marker::PhantomData;
+use std::sync::Arc;
 
+use glam::Vec2;
+use mln_map_types::ProjectionData;
 use mln_style::expression::GlobalStateMap;
-use mln_tile_id::OverscaledTileID;
+use mln_style::expression::functions::RegisterError;
+use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::error::Error;
 use mln_util::geo::ScreenCoordinate;
 
-pub(crate) use self::erased::{ErasedFrame, ErasedPlacement, LaidBuckets};
+pub(crate) use self::erased::{ErasedFrame, ErasedPlacement, LaidBuckets, PlacingLayerTiles};
 pub use self::grid::{Aabb, Grid, Shape};
 pub use self::groups::CollisionGroups;
 pub(crate) use self::schedule::Schedule;
-use crate::geometry::feature_index::{FeatureIndex, FeatureSelection, QueryLayers, QueryResults};
+pub use crate::geometry::feature_index::FeatureIndex;
+use crate::geometry::feature_index::{FeatureSelection, QueryLayers, QueryResults};
 use crate::layer::{Bucket, Layer, LayerValues};
+use crate::paint_parameters::Frame;
 use crate::query::RenderedQueryOptions;
+use crate::registry::RegistryBuilder;
+use crate::render_source::RenderSource;
+use crate::render_tile::{FoundTile, RenderTile, TileContent, ViewPlace};
+use crate::renderer::Renderer;
 use crate::tile::job::SourceKey;
 use crate::update_parameters::UpdateParameters;
 
-/// What makes a [`PlacementPass`] of the layer type `T`.
-pub type NewPlacement<T> = fn() -> Box<dyn PlacementPass<T>>;
+/// Adds the layer type of the layer `L`, as
+/// [`RegistryBuilder::add_layer_type`] does, whose layers place with a pass
+/// `P`, which each renderer makes once. A registry has one placing type.
+pub fn register<L: Layer, P: PlacementPass<L> + Default>(builder: &mut RegistryBuilder) -> Result<(), RegisterError> {
+    builder.add_layer_entry::<L>(crate::erased_layer::entry::<L, Places<P>>())
+}
+
+/// The placement of a layer type whose layers place with a `P`.
+pub(crate) struct Places<P>(PhantomData<fn() -> P>);
+
+impl<L: Layer, P: PlacementPass<L> + Default> crate::erased_layer::NewPlacement<L> for Places<P> {
+    const PLACES: bool = true;
+
+    fn new_placement() -> Option<Box<dyn ErasedPlacement>> {
+        Some(erased::typed::<L>(Box::<P>::default()))
+    }
+}
+
+/// How far the fade of the current placement has come in `frame`: 0 as it
+/// starts, 1 and past once it is done.
+#[must_use]
+pub fn fade(frame: &Frame<'_>) -> f32 {
+    frame.placement_fade
+}
+
+/// `renderer`'s placement pass, if it is a `P`, for its layer type's own
+/// API to reach.
+#[must_use]
+pub fn pass<P: 'static>(renderer: &Renderer) -> Option<&P> {
+    renderer.placement()?.pass().downcast_ref()
+}
+
+/// [`pass`], to change.
+pub fn pass_mut<P: 'static>(renderer: &mut Renderer) -> Option<&mut P> {
+    renderer.placement_mut()?.pass_mut().downcast_mut()
+}
 
 /// The placement pass of the layer type `T`: the capability of a type whose
 /// layers place. The engine makes one pass per renderer, and drives it on
@@ -94,13 +141,85 @@ pub struct PlacementContext<'a, T: Layer> {
     pub buckets: PlacementBuckets<'a>,
 }
 
-/// A layer that a [`PlacementPass`] places: its values, and what its type
-/// keeps of it, which the layer's update filled.
+/// A layer that a [`PlacementPass`] places: its values, and its frame's
+/// tiles that hold a bucket of it, whether that bucket draws or not.
 pub struct PlacingLayer<'a, T: Layer> {
     /// The layer's values.
     pub layer: &'a LayerValues<T::Style>,
-    /// The layer.
-    pub state: &'a T,
+    /// The tiles, the deeper zooms first, then from the top of the screen
+    /// at the camera's bearing to its bottom, and from its left to its
+    /// right: the order the layer places them in.
+    pub tiles: &'a [PlacingTile],
+}
+
+/// One of a [`PlacingLayer`]'s tiles: where its bucket of the layer is, and
+/// where the frame draws it.
+#[derive(Clone)]
+pub struct PlacingTile {
+    /// Where the bucket is among the frame's tiles.
+    pub bucket: BucketKey,
+    /// The tile in the world copy the frame draws it in.
+    pub id: UnwrappedTileID,
+    /// The tile's id.
+    pub overscaled_id: OverscaledTileID,
+    /// Whether the frame no longer needs the tile, which it keeps while
+    /// what placement showed of it fades out.
+    pub held_for_fade: bool,
+    /// How the frame projects the tile.
+    pub projection: ProjectionData,
+    /// The tile's feature index, which queries of what the pass places
+    /// search.
+    pub feature_index: Arc<FeatureIndex>,
+}
+
+/// The order a placing layer draws and places the frame's `tiles`, seen at
+/// `bearing`, in radians: the deeper zooms first, then by y and by x, each
+/// rotated by the bearing.
+pub(crate) fn tile_order(tiles: &[RenderTile], bearing: f32) -> Vec<usize> {
+    let rotation = Vec2::from_angle(bearing);
+    let mut order: Vec<usize> = (0..tiles.len()).collect();
+    order.sort_by(|&a, &b| {
+        let (a, b) = (&tiles[a].id.canonical, &tiles[b].id.canonical);
+        let pa = rotation.rotate(Vec2::new(a.x as f32, a.y as f32));
+        let pb = rotation.rotate(Vec2::new(b.x as f32, b.y as f32));
+        b.z.cmp(&a.z).then(pa.y.total_cmp(&pb.y)).then(pa.x.total_cmp(&pb.x))
+    });
+    order
+}
+
+/// The tiles of a placing layer among `found`, the layer's frame tiles of
+/// `source`, whose tiles hold `contents`: those that hold a bucket of it.
+pub(crate) fn placing_tiles(
+    source: Option<&dyn RenderSource>,
+    contents: &[Option<TileContent<'_>>],
+    found: &[FoundTile],
+) -> Vec<PlacingTile> {
+    let Some((source, key)) = source.and_then(|source| Some((source, source.tiles()?))) else {
+        return Vec::new();
+    };
+    let tiles = source.render_tiles();
+    found
+        .iter()
+        .filter_map(|found| {
+            let Some(ViewPlace::Laid(index)) = found.view else { return None };
+            let tile = tiles.get(found.tile)?;
+            let Some(TileContent::Tile(content)) = contents.get(found.tile).copied().flatten() else { return None };
+            let content = content.geometry()?;
+            Some(PlacingTile {
+                bucket: BucketKey {
+                    bucket: content.result.layer_render_data.bucket_index(index)?,
+                    slot: tile.slot(),
+                    tile: *tile.overscaled_tile_id(),
+                    source: key,
+                },
+                id: tile.id,
+                overscaled_id: *tile.overscaled_tile_id(),
+                held_for_fade: tile.hold_for_fade(),
+                projection: tile.projection,
+                feature_index: Arc::clone(&content.result.feature_index),
+            })
+        })
+        .collect()
 }
 
 /// What a frame's [`PlacementPass::prepare`] tells the schedule.
@@ -161,13 +280,18 @@ impl<'a> PlacementBuckets<'a> {
         self.store.bucket(key)?.downcast_ref()
     }
 
-    /// [`get`](Self::get), to change: the bucket uploads again, and its
-    /// kept vectors ([`Upload::kept`](crate::layer::Upload::kept)) into the
-    /// buffers its meshes read.
+    /// [`get`](Self::get), to change.
     pub fn get_mut<B: Bucket>(&mut self, key: &BucketKey) -> Option<&mut B> {
-        let bucket = self.store.bucket_mut(key)?;
-        bucket.changed();
-        bucket.downcast_mut()
+        self.store.bucket_mut(key)?.downcast_mut()
+    }
+
+    /// Uploads the bucket at `key` again, its kept vectors
+    /// ([`Upload::kept`](crate::layer::Upload::kept)) into the buffers its
+    /// meshes read: the pass changed them.
+    pub fn changed(&mut self, key: &BucketKey) {
+        if let Some(bucket) = self.store.bucket_mut(key) {
+            bucket.changed();
+        }
     }
 }
 

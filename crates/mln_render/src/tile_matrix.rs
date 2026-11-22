@@ -4,11 +4,12 @@
 use std::fmt;
 
 use geometry::Point;
+use glam::dcamera::rh::proj::opengl::orthographic;
 use glam::{DMat4, DVec2, DVec3, Vec2};
 use mln_gfx::gpu::Gpu;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program::PROJECTION_BUFFER;
-use mln_map_types::{ProjectionData, View};
+use mln_map_types::{Projection, ProjectionData, View};
 use mln_style_types::TranslateAnchorType;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::constants::{EXTENT, M2PI};
@@ -53,6 +54,21 @@ pub struct TileTransform {
     /// Whether to project onto the pixel grid, for geometry that draws
     /// crisp while the camera stands still.
     pub aligned: bool,
+    /// Whether the geometry is the viewport's rather than the map's: the
+    /// tile's extent spans the viewport, x right and y up from its bottom
+    /// left corner, moved by `translate` in tile units, on any projection.
+    /// Its meshes draw in Mercator's projection
+    /// ([`MeshDesc::screen_space`](crate::draw::MeshDesc::screen_space)).
+    pub screen_space: bool,
+}
+
+impl TileTransform {
+    /// The translation, `translate` anchored as `anchor` says, in the units
+    /// of `tile` seen by `camera`.
+    #[must_use]
+    pub fn tile_units(&self, tile: &UnwrappedTileID, camera: &View) -> [f32; 2] {
+        tile_unit_translation(tile, self.translate, self.anchor, camera)
+    }
 }
 
 /// Where a tile's geometry draws in a frame, as a [`TileTransform`] places
@@ -148,6 +164,13 @@ pub(crate) fn tile_matrix(
 /// the tile's other projection fields.
 #[must_use]
 pub(crate) fn projection_data(tile_id: &UnwrappedTileID, frame: &Frame<'_>, how: &TileTransform) -> ProjectionData {
+    if how.screen_space {
+        let extent = f64::from(EXTENT);
+        let [x, y] = how.translate.map(f64::from);
+        let matrix = orthographic(0.0, extent, -extent, 0.0, 0.0, 1.0)
+            * DMat4::from_translation(DVec3::new(x, y - extent, 0.0));
+        return Projection::Mercator.projection_data(frame.camera, tile_id, &matrix);
+    }
     let origin = how.origin.map(|origin| Point::new(origin.x, origin.y));
     let (translation, anchor) = (how.translate, how.anchor);
     let matrix =

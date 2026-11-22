@@ -101,7 +101,10 @@ pub(crate) fn new_layout<S: StyleLayerType, L: Layout<S>>(
         layers: group,
         tile: bucket_parameters.tile_id,
         mode: bucket_parameters.mode,
+        pixel_ratio: bucket_parameters.pixel_ratio,
         parameters: evaluation,
+        font_faces: parameters.font_faces.as_ref(),
+        glyph_pbfs: parameters.glyph_pbfs,
         source_layer: source_layer.layer()?,
         filter_groups: parameters.filter_groups,
         glyphs: parameters.glyph_dependencies,
@@ -130,6 +133,7 @@ pub(crate) fn build_layout<S: StyleLayerType, L: Layout<S>>(
         tile: parameters.tile_id,
         mode: parameters.mode,
         first_load: build.first_load,
+        collision_boxes: build.show_collision_boxes,
         source_layer: source_layer.layer()?,
         resolved,
         feature_index: &mut built.feature_index,
@@ -144,7 +148,8 @@ pub(crate) fn select<S: StyleLayerType>(cx: &mut LayoutCx<'_, S>) -> Result<Vec<
     let layer = &cx.source_layer;
     let context = EvaluationContext::new(f32::from(cx.tile.overscaled_z))
         .with_canonical_tile_id(Some(&cx.tile.canonical))
-        .with_global_state(cx.parameters.global_state.as_deref());
+        .with_global_state(cx.parameters.global_state.as_deref())
+        .with_font_faces(cx.font_faces.map(|faces| &**faces));
     let passes = |feature: &dyn GeometryTileFeature| {
         leader.filter.evaluate(&EvaluationContext { feature: Some(feature), ..context })
     };

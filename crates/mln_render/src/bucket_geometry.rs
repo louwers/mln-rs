@@ -73,7 +73,23 @@ impl<T> GpuVec<T> {
         GpuVec { data, key: SimpleIdentity::new() }
     }
 
-    /// The data, to fill. Not after it uploaded.
+    /// The data, which is gone once it uploaded unless the bucket keeps it
+    /// ([`Upload::kept`](crate::layer::Upload::kept)).
+    #[must_use]
+    pub fn get(&self) -> &[T] {
+        match &self.data {
+            Data::Vec(v) => v,
+            #[cfg(target_family = "wasm")]
+            Data::Host(_) => {
+                debug_assert!(false, "the data of a vector still in the JS array it arrived in");
+                &[]
+            }
+            Data::Moved { .. } => &[],
+        }
+    }
+
+    /// The data, to fill, or to change where the bucket keeps it. Not after
+    /// it uploaded otherwise.
     pub fn get_mut(&mut self) -> &mut Vec<T>
     where
         T: bytemuck::Pod,
@@ -238,11 +254,12 @@ impl BucketGeometry {
             if !keep {
                 vec.discard();
             } else if let Some(buffer) = self.buffer(vec) {
-                res.rewrite(&buffer.entry, bytemuck::cast_slice(&vec.data()));
+                let rewrote = res.rewrite(&buffer.entry, bytemuck::cast_slice(vec.get()));
+                debug_assert!(rewrote, "a kept vector whose length changed");
             }
             return;
         }
-        let entry = if keep { res.add_buffer(vec.data().into_owned()) } else { vec.store_buffer(res) };
+        let entry = if keep { res.add_buffer(vec.get_mut().clone()) } else { vec.store_buffer(res) };
         let buffer: Rc<dyn Any> = Rc::new(Buffer::<V>::new(entry));
         self.buffers.insert(vec.key, buffer);
     }
@@ -253,18 +270,31 @@ impl BucketGeometry {
     }
 
     /// Uploads `indexes`, a bucket's, into an index buffer of `res`, freeing
-    /// their data, as [`upload`](Self::upload) does a vector.
-    pub(crate) fn upload_indexes(&mut self, indexes: &mut Indexes, copies: &[&BucketGeometry], res: &mut Resources) {
+    /// their data unless `keep`, as [`upload`](Self::upload) does a vector.
+    pub(crate) fn upload_indexes(
+        &mut self,
+        indexes: &mut Indexes,
+        keep: bool,
+        copies: &[&BucketGeometry],
+        res: &mut Resources,
+    ) {
         let vec = &mut indexes.indexes;
         if vec.is_moved() {
             return;
         }
-        if !self.buffers.has_or_takes(vec.key, copies.iter().map(|copy| &copy.buffers)) {
-            let buffer = Buffer::new(vec.store_buffer(res));
-            let uploaded: Rc<dyn Any> = Rc::new(IndexBuffer { buffer, segments: indexes.segments.clone() });
-            self.buffers.insert(vec.key, uploaded);
+        let copies = if keep { &[] } else { copies };
+        if self.buffers.has_or_takes(vec.key, copies.iter().map(|copy| &copy.buffers)) {
+            if !keep {
+                vec.discard();
+            } else if let Some(uploaded) = self.indexes(indexes) {
+                let rewrote = res.rewrite(&uploaded.buffer.entry, bytemuck::cast_slice(indexes.indexes.get()));
+                debug_assert!(rewrote, "kept indexes whose length changed");
+            }
+            return;
         }
-        vec.discard();
+        let entry = if keep { res.add_buffer(vec.get_mut().clone()) } else { vec.store_buffer(res) };
+        let uploaded: Rc<dyn Any> = Rc::new(IndexBuffer { buffer: Buffer::new(entry), segments: indexes.segments.clone() });
+        self.buffers.insert(vec.key, uploaded);
     }
 
     /// Frees the room that the entries' lists keep for more, where it is
