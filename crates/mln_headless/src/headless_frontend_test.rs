@@ -204,3 +204,52 @@ fn a_viewport_lit_hillshade_turns_its_lights_with_the_map() {
     assert_ne!(render(&[0.0]), turned, "the hillshade shows its lights' direction");
     assert_eq!(render(&[90.0]), turned);
 }
+
+/// A hillshade prepares each DEM tile's slopes once: a second still of the
+/// same view draws the same image without the prepare draws.
+#[test]
+fn a_hillshade_prepares_its_slopes_once() {
+    use mln_storage::stub_file_source::{ResponseType, StubFileSource};
+    use mln_storage::{Kind, Resource, Response};
+
+    // A DEM that rises to the east, in the Terrarium encoding.
+    let mut dem = PremultipliedImage::new(Size::new(256, 256));
+    for (index, pixel) in dem.data.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+        pixel.copy_from_slice(&[128, (index % 256) as u8, 0, 255]);
+    }
+    let dem = Arc::new(mln_image::encode_png(&dem));
+    let file_source = Arc::new(StubFileSource::new(ResponseType::Synchronous));
+    file_source.set_response(Kind::Tile, move |_: &Resource| {
+        let mut response = Response::new();
+        response.data = Some(Arc::clone(&dem));
+        Some(response)
+    });
+    let size = Size::new(64, 64);
+    let run_loop = Queue::new();
+    let pool = Pool::new(4);
+    let mut frontend = HeadlessFrontend::new(size, 1.0, &run_loop, &pool).expect("a headless frontend");
+    let options = MapOptions { map_mode: MapMode::Static, size, ..Default::default() };
+    let mut map = Map::with_file_source(file_source, options, &pool).unwrap();
+    frontend.attach(&mut map);
+    map.load_style_json(
+        r#"{
+        "version": 8,
+        "zoom": 2,
+        "sources": {"dem": {"type": "raster-dem", "encoding": "terrarium", "tiles": ["dem/{z}/{x}/{y}.png"], "maxzoom": 2}},
+        "layers": [{"id": "hillshade", "type": "hillshade", "source": "dem", "paint": {"hillshade-exaggeration": 1}}]
+    }"#,
+    );
+
+    let first = frontend.render(&mut map).expect("the first still");
+    let second = frontend.render(&mut map).expect("the second still");
+    let third = frontend.render(&mut map).expect("the third still");
+    assert_eq!(first.image, second.image);
+    assert_eq!(second.image, third.image);
+    assert!(
+        second.stats.num_draw_calls < first.stats.num_draw_calls,
+        "{} draws, then {}",
+        first.stats.num_draw_calls,
+        second.stats.num_draw_calls
+    );
+    assert_eq!(second.stats.num_draw_calls, third.stats.num_draw_calls);
+}
