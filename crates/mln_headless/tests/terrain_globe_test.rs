@@ -425,3 +425,43 @@ fn a_raster_drapes_on_both_sides_of_the_antimeridian() {
         assert_eq!([255, 0, 0, 255], east, "west of the meridian, east of the view's middle, on the globe: {globe}");
     }
 }
+
+/// At zoom 14, a view pitched 76° over level ground fogs it alike on the
+/// globe and on Mercator: the same tint at the same distance. Below the
+/// horizon, which the globe's curvature lowers by a few pixels, at most 1% of
+/// the pixels differ visibly, where the fog tints the farthest ground most of
+/// the way to its color. The globe's atmosphere is off: it draws over the
+/// ground, as GL JS's does.
+#[test]
+fn the_fog_tints_the_ground_alike_on_the_globe_and_mercator() {
+    // The ground is a green fill 40 km across, which drapes, where a
+    // background would clear the frame.
+    let fogged = |globe: bool| {
+        let sky = r#""pitch": 76,
+            "sky": {"fog-color": "rgb(255, 0, 255)", "fog-ground-blend": 0, "horizon-fog-blend": 1, "atmosphere-blend": 0},"#;
+        let ground =
+            format!(r#""sources": {{"ground": {{"type": "geojson", "data": {}}},"#, square(0.0, 0.0, 40_000.0));
+        let fill =
+            r#"{"id": "ground", "type": "fill", "source": "ground", "paint": {"fill-color": "rgb(0, 128, 0)"}},"#;
+        style(globe).replace(r#""pitch": 55,"#, sky).replacen(r#""sources": {"#, &ground, 1).replacen(
+            r#"{"id": "background", "type": "background", "paint": {"background-color": "white"}},"#,
+            fill,
+            1,
+        )
+    };
+    let (Some(globe), Some(mercator)) =
+        (render_over(&fogged(true), sea_level_png), render_over(&fogged(false), sea_level_png))
+    else {
+        return;
+    };
+    // The sky shows in the top 37 rows on Mercator.
+    let ground = 48 * SIDE as usize..(SIDE * SIDE) as usize;
+    let pixels = |image: &PremultipliedImage| image.data.as_chunks::<4>().0[ground.clone()].to_vec();
+    let (globe, mercator) = (pixels(&globe), pixels(&mercator));
+    let far = &mercator[..SIDE as usize];
+    let red = far.iter().map(|pixel| u32::from(pixel[0])).sum::<u32>() / SIDE;
+    assert!(red > 200, "the fog tints the farthest ground: red {red}");
+    let differing =
+        (globe.iter().zip(&mercator)).filter(|(a, b)| a.iter().zip(b.iter()).any(|(a, b)| a.abs_diff(*b) > 32)).count();
+    assert!(differing <= globe.len() / 100, "{differing} of {} pixels differ by more than 32", globe.len());
+}
