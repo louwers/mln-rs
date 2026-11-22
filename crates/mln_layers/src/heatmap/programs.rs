@@ -1,6 +1,5 @@
-//! The programs of the `heatmap` layer type: the buffers,
-//! attributes, textures and paint properties of its shaders, and their
-//! sources.
+//! The programs of the `heatmap` layer type: the buffers, attributes,
+//! textures and paint properties of its shaders, and their sources.
 
 use mln_gfx::gfx_types::AttributeDataType::{Float2, Short2};
 use mln_gfx::shaders::program::{Attribute, Buffer, Program, Projection, Property, Sources, Stages, Texture};
@@ -8,33 +7,17 @@ use mln_gfx::shaders::program::{Attribute, Buffer, Program, Projection, Property
 use super::ubo::{HeatmapDrawableUBO, HeatmapEvaluatedPropsUBO, HeatmapTexturePropsUBO};
 use super::{glsl, glsl_es, msl, wgsl};
 
-// The ids of the programs' textures and vertex attributes.
-pub(crate) const ID_HEATMAP_IMAGE_TEXTURE: usize = 0;
-pub(crate) const ID_HEATMAP_COLOR_RAMP_TEXTURE: usize = 1;
-pub(crate) const ID_HEATMAP_POS_VERTEX_ATTRIBUTE: usize = 0;
-
-// Data-driven properties.
-pub(crate) const ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE: usize = 1;
-pub(crate) const ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE: usize = 2;
-
-pub(crate) const DRAWABLE: Buffer = Buffer::storage::<HeatmapDrawableUBO>("drawableVector", Stages::Vertex);
-pub(crate) const PROPS: Buffer = Buffer::uniform::<HeatmapEvaluatedPropsUBO>("props", 0);
-pub(crate) const TEXTURE_PROPS: Buffer = Buffer::uniform::<HeatmapTexturePropsUBO>("props", 0);
-
+/// The heat of a tile's points, which draws into the layer's target.
 pub static HEATMAP: Program = Program {
     name: "heatmap",
-    buffers: &[DRAWABLE, PROPS],
-    attributes: &[
-        Attribute { id: ID_HEATMAP_POS_VERTEX_ATTRIBUTE, format: Short2 },
-        Attribute { id: ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE, format: Float2 },
-        Attribute { id: ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE, format: Float2 },
+    buffers: &[
+        Buffer::storage::<HeatmapDrawableUBO>("drawableVector", Stages::Vertex),
+        Buffer::uniform::<HeatmapEvaluatedPropsUBO>("props", 0),
     ],
+    attributes: &[Attribute::new("pos", Short2), Attribute::new("weight", Float2), Attribute::new("radius", Float2)],
     instance_attributes: &[],
     textures: &[],
-    properties: &[
-        Property::float("weight", ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE),
-        Property::float("radius", ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE),
-    ],
+    properties: &[Property::float("weight"), Property::float("radius")],
     projection: Projection::PerDraw,
     sources: Sources::NONE
         .wgsl(&wgsl::HEATMAP_SHADER)
@@ -43,10 +26,11 @@ pub static HEATMAP: Program = Program {
         .glsl(&glsl::HEATMAP_SHADER),
 };
 
+/// The target's heat, colored through the ramp onto the frame.
 pub static HEATMAP_TEXTURE: Program = Program {
     name: "heatmap-texture",
-    buffers: &[TEXTURE_PROPS],
-    attributes: &[Attribute { id: ID_HEATMAP_POS_VERTEX_ATTRIBUTE, format: Short2 }],
+    buffers: &[Buffer::uniform::<HeatmapTexturePropsUBO>("props", 0)],
+    attributes: &[Attribute::new("pos", Short2)],
     instance_attributes: &[],
     textures: &[Texture::new("image"), Texture::new("color_ramp")],
     properties: &[],

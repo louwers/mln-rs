@@ -1,19 +1,16 @@
 use std::rc::Rc;
-use std::sync::Arc;
 
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_map_types::View;
-use mln_render::draw::{Composite, Draw, Draws, Mesh, MeshDesc, Resources, Texture};
+use mln_render::draw::{Composite, Draw, Draws, Mesh, MeshDesc};
 use mln_render::layer::{
     EvaluateCx, Evaluation, Features, FrameTile, HitTest, Layer, LayerBucket, LayerValues, NewCx, PrepareCx, TileCx,
     TileTransform, UpdateCx,
 };
 use mln_style::StyleValue as _;
-use mln_style::expression::{Dependency, GlobalStateMap, global_state_refs_intersect};
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinates};
 use mln_util::Color;
-use mln_util::image::PremultipliedImage;
 use mln_util::intersection_tests::polygon_intersects_buffered_multi_line;
 use mln_util::size::Size;
 
@@ -26,19 +23,14 @@ use super::ubo::{
     LineSDFDrawableUBO, LineSDFTilePropsUBO,
 };
 use super::{Line, LinePaintProperties};
-use crate::color_ramp::apply_color_ramp;
+use crate::color_ramp::ColorRamp;
 use crate::features::PATTERN_SAMPLER;
 
 /// A line layer: each tile's lines, in a color, along a gradient, with a
 /// pattern, or dashed.
 pub struct LineLayer {
-    /// The color ramp of `line-gradient`, and the global state it was made
-    /// with.
-    ramp: Rc<PremultipliedImage>,
-    ramp_state: Option<Arc<GlobalStateMap>>,
-    /// The ramp's texture and the ramp it holds, from the first tile drawn
-    /// along it.
-    ramp_texture: Option<(Texture, Rc<PremultipliedImage>)>,
+    /// The color ramp of `line-gradient`.
+    ramp: ColorRamp,
     /// The patterns of the layer's dash array, where it is the same for
     /// every feature.
     dashes: DashTextures,
@@ -66,40 +58,14 @@ impl Layer for LineLayer {
     type Input = Features<LineLayout>;
     type Tile = LineTile;
 
-    fn new(_cx: &mut NewCx<'_, Self>) -> Self {
-        LineLayer {
-            ramp: Rc::new(PremultipliedImage::new(Size::new(256, 1))),
-            ramp_state: None,
-            ramp_texture: None,
-            dashes: DashTextures::default(),
-        }
+    fn new(cx: &mut NewCx<'_, Self>) -> Self {
+        LineLayer { ramp: ColorRamp::new(cx.res, 256), dashes: DashTextures::default() }
     }
 
     /// Makes the gradient's color ramp again where its value may have
-    /// changed: for a new or restyled layer, or a change of the global
-    /// state that it reads.
+    /// changed.
     fn evaluate(&mut self, cx: EvaluateCx<'_, Self>) -> Evaluation {
-        let (layer, parameters) = (cx.layer, cx.parameters);
-        let state_differs = match (&self.ramp_state, &parameters.global_state) {
-            (None, None) => false,
-            (Some(a), Some(b)) => !Arc::ptr_eq(a, b),
-            _ => true,
-        };
-        let ramp = layer.unevaluated.line_gradient.get_value();
-        let ramp_affected = parameters.layer_changed
-            || (state_differs
-                && ramp.get_dependencies().intersects(Dependency::GLOBAL_STATE)
-                && global_state_refs_intersect(
-                    ramp.get_global_state_refs(),
-                    parameters.changed_global_state_keys.as_deref(),
-                ));
-        self.ramp_state.clone_from(&parameters.global_state);
-        if ramp_affected {
-            let mut image = (*self.ramp).clone();
-            if apply_color_ramp(ramp, &mut image, self.ramp_state.as_deref()) {
-                self.ramp = Rc::new(image);
-            }
-        }
+        self.ramp.evaluate(cx.layer.unevaluated.line_gradient.get_value(), cx.parameters);
         let paint = &cx.evaluated.paint;
         if *paint.line_layer_opacity.uniform() > 0.0
             && paint.line_opacity.constant_or(&1.0) > 0.0
@@ -115,14 +81,7 @@ impl Layer for LineLayer {
     /// Uploads a new color ramp, and makes the textures of the dash array's
     /// patterns that the frame's dashed tiles draw with.
     fn update(&mut self, cx: &mut UpdateCx<'_, Self>) {
-        if let Some((texture, held)) = &mut self.ramp_texture
-            && !Rc::ptr_eq(held, &self.ramp)
-        {
-            if let Some(mut texture) = cx.res.texture_mut(texture) {
-                texture.set_image(Some(Rc::clone(&self.ramp)));
-            }
-            *held = Rc::clone(&self.ramp);
-        }
+        self.ramp.update(cx.res);
         let dasharray = cx.layer.evaluated.paint.line_dasharray.faded();
         for i in 0..cx.tiles.len() {
             let (_, Some(laid), _) = cx.tiles.get_mut(i) else { continue };
@@ -150,7 +109,7 @@ impl Layer for LineLayer {
             desc
         };
         let gradient = !cx.layer.unevaluated.line_gradient.get_value().is_undefined();
-        let ramp = if gradient { Some(self.ramp_texture(res)?) } else { None };
+        let ramp = gradient.then(|| self.ramp.texture());
         let dasharray = &values.line_dasharray;
         if !dasharray.is_constant() || !dasharray.faded().from.is_empty() {
             let feature_dashes = bucket.dashes(cx.layer.id());
@@ -168,7 +127,7 @@ impl Layer for LineLayer {
             if let Some(dashes) = feature_dashes {
                 desc.vertices(laid.buffer(&dashes.vertices));
             }
-            if let Some(ramp) = &ramp {
+            if let Some(ramp) = ramp {
                 desc.texture(ramp, RAMP_SAMPLER);
             }
             desc.texture(&dashes, DASH_SAMPLER);
@@ -179,7 +138,7 @@ impl Layer for LineLayer {
             desc.texture(laid.icon_atlas()?, PATTERN_SAMPLER);
             return Some(LineTile::Pattern(res.mesh(&desc)));
         }
-        if let Some(ramp) = &ramp {
+        if let Some(ramp) = ramp {
             let mut desc = desc(&LINE_GRADIENT);
             desc.texture(ramp, RAMP_SAMPLER);
             return Some(LineTile::Gradient(res.mesh(&desc)));
@@ -300,18 +259,6 @@ impl Layer for LineLayer {
             polygon_intersects_buffered_multi_line(query, test.geometry, half_width)
         };
         hit.then_some(0.0)
-    }
-}
-
-impl LineLayer {
-    /// The texture of the gradient's color ramp, made where the ramp is
-    /// valid.
-    fn ramp_texture(&mut self, res: &mut Resources) -> Option<Texture> {
-        if self.ramp_texture.is_none() && self.ramp.valid() {
-            let texture = res.texture(|texture| texture.set_image(Some(Rc::clone(&self.ramp))));
-            self.ramp_texture = Some((texture, Rc::clone(&self.ramp)));
-        }
-        self.ramp_texture.as_ref().map(|(texture, _)| texture.clone())
     }
 }
 

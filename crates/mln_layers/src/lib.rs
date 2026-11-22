@@ -24,10 +24,11 @@ mod color_ramp;
 mod features;
 pub mod fill;
 pub mod fill_extrusion;
-// slice: off pub mod heatmap;
-// slice: off pub mod hillshade;
+pub mod heatmap;
+pub mod hillshade;
 pub mod line;
 // slice: off mod mesh;
+mod points;
 // slice: off pub mod raster;
 mod shaders;
 pub mod symbol;
@@ -41,8 +42,8 @@ pub use fill::{Fill, FillLayer, FillLayoutProperties, FillPaintProperties};
 pub use fill_extrusion::{
     FillExtrusion, FillExtrusionLayer, FillExtrusionLayoutProperties, FillExtrusionPaintProperties,
 };
-// slice: off pub use heatmap::{Heatmap, HeatmapPaintProperties};
-// slice: off pub use hillshade::{Hillshade, HillshadePaintProperties};
+pub use heatmap::{Heatmap, HeatmapLayer, HeatmapPaintProperties};
+pub use hillshade::{Hillshade, HillshadeLayer, HillshadePaintProperties};
 pub use line::{Line, LineLayer, LineLayoutProperties, LinePaintProperties};
 use mln_gfx::shaders::program::Program;
 use mln_render::{RegisterError, RegistryBuilder};
@@ -57,9 +58,9 @@ pub fn register_layer_types(builder: &mut RegistryBuilder) -> Result<(), Registe
     builder.add_layer_type::<LineLayer>()?;
     builder.add_layer_type::<CircleLayer>()?;
     builder.add_layer_type::<FillExtrusionLayer>()?;
-    // slice: off     builder.add_layer_type::<Heatmap>()?;
+    builder.add_layer_type::<HeatmapLayer>()?;
     // slice: off     builder.add_layer_type::<Raster>()?;
-    // slice: off     builder.add_layer_type::<Hillshade>()?;
+    builder.add_layer_type::<HillshadeLayer>()?;
     // slice: off     builder.add_layer_type::<ColorRelief>()?;
     symbol::register(builder)
     // slice: off     builder.add_layer_type::<Custom>()
@@ -90,11 +91,11 @@ pub static PROGRAMS: &[&Program] = &[
     &fill_extrusion::programs::FILL_EXTRUSION_PATTERN,
     &fill_extrusion::programs::FILL_EXTRUSION_PATTERN_INSTANCED,
     &fill_extrusion::programs::FILL_EXTRUSION_PATTERN_WALL,
-    // slice: off     &heatmap::programs::HEATMAP,
-    // slice: off     &heatmap::programs::HEATMAP_TEXTURE,
+    &heatmap::programs::HEATMAP,
+    &heatmap::programs::HEATMAP_TEXTURE,
     // slice: off     &raster::programs::RASTER,
-    // slice: off     &hillshade::programs::HILLSHADE,
-    // slice: off     &hillshade::programs::HILLSHADE_PREPARE,
+    &hillshade::programs::HILLSHADE,
+    &hillshade::programs::HILLSHADE_PREPARE,
     // slice: off     &color_relief::programs::COLOR_RELIEF,
     &symbol::programs::SYMBOL_ICON,
     &symbol::programs::SYMBOL_SDF,
@@ -102,27 +103,6 @@ pub static PROGRAMS: &[&Program] = &[
     &symbol::programs::COLLISION_BOX,
     &symbol::programs::COLLISION_CIRCLE,
 ];
-
-// slice: off /// Copies a bucket's data-driven attributes into `mesh` again where
-// slice: off /// `changes` says their values changed: `paint(context)` gives the vertices
-// slice: off /// of the values, and `bind(attrs, vertices)` reads them into the mesh's
-// slice: off /// instance attributes where it has them, else into its vertex attributes,
-// slice: off /// which then upload again.
-// slice: off fn refresh_paint_attributes<B>(
-// slice: off     context: &mut Context,
-// slice: off     mesh: &Mesh<B>,
-// slice: off     changes: BucketChanges,
-// slice: off     paint: impl FnOnce(&mut Context) -> Option<SharedVertices>,
-// slice: off     bind: impl FnOnce(&mut VertexAttributeArray, Option<&SharedVertices>),
-// slice: off ) {
-// slice: off     if !changes.paint {
-// slice: off         return;
-// slice: off     }
-// slice: off     let paint = paint(context);
-// slice: off     if let Some(objects) = context.mesh_mut(mesh) {
-// slice: off         bind(objects.paint_attributes_mut(), paint.as_ref());
-// slice: off     }
-// slice: off }
 
 #[cfg(test)]
 mod tests;
