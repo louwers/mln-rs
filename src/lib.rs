@@ -10,14 +10,13 @@
 //!
 //! Each extension point is one module, whose doc states its contract:
 //! layer types ([`mln_render::layer`], drawing with [`mln_render::draw`]
-//! and, on the globe, [`mln_render::globe`]), source types and their tiles'
+//! and, on the globe, [`mln_render::globe`], whose author's names [`layer`]
+//! gathers), source types and their tiles'
 //! data origins ([`mln_render::source`]), expression functions
 //! ([`mln_style::expression::functions`]), the programs a layer type draws
 //! with, which carry their shader sources ([`mln_gfx::shaders::program`]),
 //! and GPU backends ([`mln_gfx::gpu`]). The built-in layer and source types, in
-//! [`mln_layers`] and [`mln_sources`], go through the same contracts, but
-//! for the symbol type's placement, which goes through hidden items of
-//! `mln_render` that aren't a contract yet (its crate doc names them).
+//! [`mln_layers`] and [`mln_sources`], go through the same contracts.
 //! [`register_builtins`] adds them to a [`RegistryBuilder`](mln_render::RegistryBuilder).
 //!
 //! The library crates of <https://github.com/louwers/mln-rs> are re-exported
@@ -38,6 +37,7 @@
 //! only re-exports `mln_storage_offline`.
 
 mod builtins;
+pub mod layer;
 
 #[cfg(feature = "runtime")]
 pub use builtins::start_runtime;

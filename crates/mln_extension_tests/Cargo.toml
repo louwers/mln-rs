@@ -1,0 +1,22 @@
+# Small layer and source types written against the facade alone, as an
+# author outside the engine writes them, and the tests that render with
+# them.
+[package]
+name = "mln-rs-extension-tests"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "mln_extension_tests"
+doctest = false
+
+[dependencies]
+bytemuck.workspace = true
+mln_rs = { workspace = true, features = ["webgpu"] }
+
+[lints]
+workspace = true

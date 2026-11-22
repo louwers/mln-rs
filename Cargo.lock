@@ -2672,6 +2672,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "mln-rs-extension-tests"
+version = "0.0.13"
+dependencies = [
+ "bytemuck",
+ "mln-rs",
+]
+
+[[package]]
 name = "mln-rs-feature"
 version = "0.0.13"
 dependencies = [
