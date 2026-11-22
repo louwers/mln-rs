@@ -98,7 +98,7 @@ impl Layer for HillshadeLayer {
         }
         let evaluated = &cx.layer.evaluated;
         if !self.lights.as_ref().is_some_and(|(of, _)| Arc::ptr_eq(of, evaluated))
-            && (0..cx.tiles.len()).any(|i| cx.tiles.get_mut(i).1.is_some())
+            && cx.tiles.iter().any(|(_, dem, _)| dem.is_some())
         {
             self.lights = Some((Arc::clone(evaluated), Lights::of(&evaluated.paint, cx.frame.camera)));
         }

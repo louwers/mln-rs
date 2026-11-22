@@ -215,8 +215,7 @@ impl Layer for SymbolLayer {
         let sort_by_key = style.layout.symbol_sort_key.is_expression();
         let constant_key = style.layout.symbol_sort_key.is_constant();
         let mut groups = Vec::new();
-        for index in 0..cx.tiles.len() {
-            let (tile, laid, value) = cx.tiles.get_mut(index);
+        for (index, (tile, laid, value)) in cx.tiles.iter_mut().enumerate() {
             let Some(laid) = laid.filter(|laid| laid.bucket.has_data()) else { continue };
             if let Some(kept) = value.as_mut().filter(|kept| !kept.draws.is_empty()) {
                 for draw in &mut kept.draws {

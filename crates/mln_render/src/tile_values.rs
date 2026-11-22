@@ -121,6 +121,11 @@ impl<V> TileMap<V> {
         &mut self.tiles[index].value
     }
 
+    /// The values of the tiles, by index.
+    pub(crate) fn values_mut(&mut self) -> impl Iterator<Item = &mut Option<V>> {
+        self.tiles.iter_mut().map(|entry| &mut entry.value)
+    }
+
     /// Drops the tiles' values. The tiles stay.
     pub(crate) fn clear(&mut self) {
         for entry in &mut self.tiles {

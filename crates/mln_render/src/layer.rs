@@ -818,7 +818,7 @@ impl<'a> Found<'a> {
     }
 }
 
-impl<L: Layer> Tiles<'_, L> {
+impl<'a, L: Layer> Tiles<'a, L> {
     /// The number of tiles.
     #[must_use]
     pub fn len(&self) -> usize {
@@ -833,9 +833,21 @@ impl<L: Layer> Tiles<'_, L> {
 
     /// The `i`th tile, what it holds for the layer to draw, and the layer's
     /// value of it.
-    pub fn get_mut(&mut self, i: usize) -> (FrameTile, Option<TileData<'_, L>>, &mut Option<L::Tile>) {
+    pub fn get_mut(&mut self, i: usize) -> (FrameTile, Option<TileData<'a, L>>, &mut Option<L::Tile>) {
         let found = self.found[i];
         (found.tile, found.data::<L>(), self.values.get_mut(found.tile.index))
+    }
+
+    /// The tiles, each with what it holds for the layer to draw and the
+    /// layer's value of it.
+    pub fn iter(&self) -> impl Iterator<Item = (FrameTile, Option<TileData<'a, L>>, Option<&L::Tile>)> + '_ {
+        self.found.iter().map(|found| (found.tile, found.data::<L>(), self.values.get(found.tile.index)))
+    }
+
+    /// [`iter`](Self::iter), with the values to change.
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (FrameTile, Option<TileData<'a, L>>, &mut Option<L::Tile>)> + '_ {
+        // A tile's value is at its index among the tiles.
+        self.found.iter().zip(self.values.values_mut()).map(|(found, value)| (found.tile, found.data::<L>(), value))
     }
 }
 

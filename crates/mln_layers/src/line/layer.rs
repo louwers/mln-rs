@@ -80,8 +80,8 @@ impl Layer for LineLayer {
     fn update(&mut self, cx: &mut UpdateCx<'_, Self>) {
         self.ramp.update(cx.res);
         let dasharray = cx.layer.evaluated.paint.line_dasharray.faded();
-        for i in 0..cx.tiles.len() {
-            let (_, Some(laid), _) = cx.tiles.get_mut(i) else { continue };
+        for (_, laid, _) in cx.tiles.iter() {
+            let Some(laid) = laid else { continue };
             let laid_dasharray = &laid.laid_with.paint.line_dasharray;
             if laid_dasharray.is_constant() && !laid_dasharray.faded().from.is_empty() {
                 self.dashes.set(cx.res, dasharray.from, dasharray.to, laid.bucket.dash_cap);
