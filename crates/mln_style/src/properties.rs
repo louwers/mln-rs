@@ -298,13 +298,12 @@ macro_rules! __property_info {
 ///
 /// ```ignore
 /// mln_style::properties!(
-///     /// The paint properties of a `dot` layer.
-///     pub mod DotPaintProperties: paint {
-///         dot_color: data_driven Color = Color::black(),
-///         dot_opacity: constant f32 = 1.0,
-///         dot_pattern: cross_faded Image = Image::default(),
+///     /// The paint properties of an `org.maplibre.ngon` layer.
+///     pub mod paint: paint {
+///         ngon_color: data_driven Color = Color::black(),
+///         ngon_translate: constant [f32; 2] = [0.0, 0.0],
 ///     }
-///     use mln_style::expression::Image, mln_util::Color;
+///     use mln_util::Color;
 /// );
 /// ```
 ///

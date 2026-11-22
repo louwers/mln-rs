@@ -1198,9 +1198,9 @@ fn mix_offset(program: &Program, name: &str) -> Option<usize> {
 ///
 /// ```ignore
 /// mln_render::paint_property_binders!(
-///     pub struct DotBinders for DotPaint::PossiblyEvaluated {
-///         dot_color: PaintPropertyBinder<Color> => ["color"],
-///         dot_radius: PaintPropertyBinder<f32> => ["radius"],
+///     pub struct NgonBinders for paint::PossiblyEvaluated {
+///         ngon_color: PaintPropertyBinder<Color> => ["color"],
+///         ngon_radius: PaintPropertyBinder<f32> => ["radius"],
 ///     }
 /// );
 /// ```
