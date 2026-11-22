@@ -6,8 +6,7 @@
 //! stay attached. Before `init`, every request fails.
 //!
 //! A request sends the headers the ureq transport sends (`Range`,
-//! `If-None-Match` or `If-Modified-Since`, `Accept`, user agent
-//! "MapLibreNative/1.0"), plus `Accept-Encoding: identity` with a `Range`,
+//! `If-None-Match` or `If-Modified-Since`, `Accept`, `User-Agent`), plus `Accept-Encoding: identity` with a `Range`,
 //! since a range of a compressed body isn't a range of the resource.
 //! Without one, `HttpURLConnection` asks for gzip and decodes it. The
 //! connection has no cache (the ambient cache is the file source's own), and
@@ -35,7 +34,9 @@ use jni::{Env, JavaVM, jni_sig, jni_str};
 use mln_util::chrono::rfc1123;
 use parking_lot::Mutex;
 
-use crate::http_file_source::{HttpTransport, Transfer, TransferRequest, accept_header, range_header, same_origin};
+use crate::http_file_source::{
+    HttpTransport, Transfer, TransferRequest, USER_AGENT, accept_header, range_header, same_origin,
+};
 use crate::redirect::{has_http_scheme, redirect_url};
 use crate::response::{Reason, ResourceError};
 
@@ -223,7 +224,7 @@ fn open<'local>(
     if let Some(accept) = accept_header(resource, headers) {
         set_header("Accept", accept)?;
     }
-    set_header("User-Agent", "MapLibreNative/1.0")?;
+    set_header("User-Agent", USER_AGENT)?;
     for (name, value) in headers {
         set_header(name, value)?;
     }
