@@ -18,6 +18,9 @@
 //! and GPU backends ([`mln_gfx::gpu`]). The built-in layer and source types, in
 //! [`mln_layers`] and [`mln_sources`], go through the same contracts.
 //! [`register_builtins`] adds them to a [`RegistryBuilder`](mln_render::RegistryBuilder).
+//! The first-party extensions are crates of their own, written against this
+//! facade alone, which a caller adds to its registry as it would a third
+//! party's: `mln_ngon`, `mln_location_puck` and `mln_image_process`.
 //!
 //! The library crates of <https://github.com/louwers/mln-rs> are re-exported
 //! here under their crate names: `mln_rs::mln_style`, `mln_rs::mln_util`,
