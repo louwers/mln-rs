@@ -178,7 +178,11 @@ impl Frame<'_> {
     /// still and looks straight down, and linearly otherwise.
     #[must_use]
     pub fn image_filter(&self) -> TextureFilterType {
-        if self.camera_moving || self.camera.pitch() != 0.0 { TextureFilterType::Linear } else { TextureFilterType::Nearest }
+        if self.camera_moving || self.camera.pitch() != 0.0 {
+            TextureFilterType::Linear
+        } else {
+            TextureFilterType::Nearest
+        }
     }
 
     /// The projection of the tile `tile_id` in the frame, pixel-aligned if

@@ -190,7 +190,6 @@ fn has_pattern(layer: &LayerValues<FillExtrusion>) -> bool {
     !layer.unevaluated.fill_extrusion_pattern.is_undefined()
 }
 
-
 /// The layer's opacity: as `fill-extrusion-opacity` is the same for every
 /// extrusion, both opacities apply to the layer drawn as one surface.
 fn opacity(layer: &EvaluatedLayer<FillExtrusion>) -> f32 {
@@ -262,5 +261,8 @@ fn props(
 /// How the layer's `paint` places a tile's extrusions: moved by its
 /// translate.
 fn transform(paint: &FillExtrusionPaintProperties::PossiblyEvaluated) -> TileTransform {
-    TileTransform::translated(*paint.fill_extrusion_translate.uniform(), *paint.fill_extrusion_translate_anchor.uniform())
+    TileTransform::translated(
+        *paint.fill_extrusion_translate.uniform(),
+        *paint.fill_extrusion_translate_anchor.uniform(),
+    )
 }

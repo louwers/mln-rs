@@ -195,7 +195,8 @@ impl Layer for SymbolLayer {
         let text = colored(&paint.text_color, SymbolPaintProperties::Defaults::text_color())
             || colored(&paint.text_halo_color, SymbolPaintProperties::Defaults::text_halo_color());
         Evaluation::translucent_if(
-            (paint.icon_opacity.constant_or(&1.0) > 0.0 && icon) || (paint.text_opacity.constant_or(&1.0) > 0.0 && text),
+            (paint.icon_opacity.constant_or(&1.0) > 0.0 && icon)
+                || (paint.text_opacity.constant_or(&1.0) > 0.0 && text),
         )
     }
 

@@ -9,7 +9,6 @@ use mln_style::evaluated::Evaluated;
 use mln_util::Color;
 use mln_util::intersection_tests::polygon_intersects_multi_polygon;
 
-use super::{Fill, FillPaintProperties};
 use super::bucket::{FillBinders, FillBucket, LINE_WIDTH, draws_outline_quads};
 use super::layout::FillLayout;
 use super::programs::{
@@ -19,6 +18,7 @@ use super::programs::{
 use super::ubo::{
     FillDrawableUBO, FillEvaluatedPropsUBO, FillOutlineDrawableUBO, FillPatternDrawableUBO, FillPatternTilePropsUBO,
 };
+use super::{Fill, FillPaintProperties};
 use crate::features::PATTERN_SAMPLER;
 
 /// A fill layer: each tile's polygons filled with a color or a pattern, and
