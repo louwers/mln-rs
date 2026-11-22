@@ -111,8 +111,6 @@ mln_storage = { workspace = true, features = ["stub-file-source"] }
 mln_rs = { package = "mln-rs", path = "../..", default-features = false, features = [
   "runtime",
 ] }
-# The custom layer's host API.
-mln_layers.workspace = true
 # Serves the styles of the resource tests.
 httpmock.workspace = true
 pollster.workspace = true

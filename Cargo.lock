@@ -3038,7 +3038,6 @@ dependencies = [
  "mln-rs-gfx",
  "mln-rs-gl",
  "mln-rs-image",
- "mln-rs-layers",
  "mln-rs-map-types",
  "mln-rs-math",
  "mln-rs-mtl",
