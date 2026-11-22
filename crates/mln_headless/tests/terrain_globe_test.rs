@@ -609,6 +609,33 @@ fn a_camera_on_a_ridge_at_zoom_14_sees_alike_on_the_globe_and_mercator() {
     assert!(differing <= allowed, "{differing} pixels differ by more than 32");
 }
 
+/// A rendered query over the ridge on the globe finds the draped square on
+/// the crest at the pixel where it draws, and nothing just above it, where
+/// the line of sight passes over it to the ground beyond.
+#[test]
+fn a_rendered_query_on_the_globe_finds_the_draped_fill_where_it_draws() {
+    use mln_renderer::query::RenderedQueryOptions;
+    use mln_util::geo::ScreenCoordinate;
+
+    let Some((image, _, mut frontend)) = on_the_crest(true) else {
+        return;
+    };
+    let ((x, y), count) = centroid(&image, CREST_SQUARES[0].0);
+    assert!(count > 20, "the square shows: {count} px");
+    let top = (0..SIDE as usize)
+        .find(|&row| {
+            let pixel = image.data.as_chunks::<4>().0[row * SIDE as usize + x.round() as usize];
+            pixel[0] > 200 && pixel[1] < 64 && pixel[2] < 64
+        })
+        .expect("the square's top edge") as f64;
+    let mut query = |x: f64, y: f64| {
+        let options = RenderedQueryOptions::new(Some(vec!["square0".to_owned()]), None);
+        frontend.renderer().query_rendered_features_at_point(&ScreenCoordinate::new(x, y), &options).unwrap().len()
+    };
+    assert_eq!(1, query(x, y), "the square where it draws, at {x}, {y}");
+    assert_eq!(0, query(x, top - 4.0), "nothing above the square's top edge at {top}");
+}
+
 /// Squares 300 m across on a ridge 3 km either side of its crest: one on
 /// the crest at the center, two down its side that faces the camera.
 const HANDOVER_SQUARES: [([u8; 3], f64, f64); 3] =

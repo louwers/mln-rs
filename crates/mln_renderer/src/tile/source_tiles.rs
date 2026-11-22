@@ -1202,8 +1202,6 @@ impl SourceTiles {
             traced.extend(geometry.last().copied());
         }
         let screen_geometry: &[mln_util::geo::ScreenCoordinate] = if traced.is_empty() { geometry } else { &traced };
-        // A query of the globe meets the sea-level sphere, over terrain too.
-        debug_assert!(!globe || ground.is_none(), "a query of the globe over terrain");
         let mut query_geometry: Vec<geometry::Point<f64>> = match ground {
             Some(ground) => ground.world.clone(),
             None => screen_geometry.iter().map(to_world).collect(),
@@ -1219,7 +1217,9 @@ impl SourceTiles {
             (min, max)
         };
 
-        if globe {
+        // Over terrain the ground's points lie side by side already
+        // ([`QueryGround::world`](crate::geometry::feature_index::QueryGround)).
+        if globe && ground.is_none() {
             // The globe has no world copies, so a box across the
             // antimeridian lands on the rest of the world, which shows when
             // its slightly shrunken corners fall outside it. It moves to the
