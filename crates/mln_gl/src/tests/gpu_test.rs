@@ -182,11 +182,7 @@ fn layouts() -> [VertexBufferLayout; 1] {
     [VertexBufferLayout {
         stride: 4,
         step: VertexStep::Vertex,
-        attributes: vec![VertexAttribute {
-            id: BACKGROUND.attributes[0].id as u32,
-            format: AttributeDataType::Short2,
-            offset: 0,
-        }],
+        attributes: vec![VertexAttribute { id: 0, format: AttributeDataType::Short2, offset: 0 }],
     }]
 }
 

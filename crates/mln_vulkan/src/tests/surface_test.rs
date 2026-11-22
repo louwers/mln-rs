@@ -205,7 +205,7 @@ impl Scene {
         let parameters = ProgramParameters { pixel_ratio: 1.0, overdraw: false };
         let key = program.variant_key(&parameters, [], ProjectionVariant::Mercator);
         let shader = gpu.create_shader(&key).expect("the shader");
-        let attribute = program.attributes[0].id;
+        let attribute = 0;
         let layouts = [VertexBufferLayout {
             stride: 4,
             step: VertexStep::Vertex,

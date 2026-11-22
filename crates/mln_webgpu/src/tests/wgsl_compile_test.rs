@@ -115,10 +115,11 @@ fn layouts(program: &Program) -> Vec<VertexBufferLayout> {
             let mut stride = 0;
             let attributes = attributes
                 .iter()
-                .map(|attribute| {
+                .enumerate()
+                .map(|(index, attribute)| {
                     let offset = stride;
                     stride += attribute.format.stride() as u32;
-                    VertexAttribute { id: attribute.id as u32, format: attribute.format, offset }
+                    VertexAttribute { id: index as u32, format: attribute.format, offset }
                 })
                 .collect();
             VertexBufferLayout { stride, step, attributes }

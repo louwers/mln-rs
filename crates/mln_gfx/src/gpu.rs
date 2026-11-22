@@ -11,7 +11,8 @@
 //! records it at once.
 //!
 //! Bindings use the numbering of the shader's [`Program`]: a buffer binds at
-//! its id, a texture at its slot and a vertex attribute at its attribute id.
+//! its id, a texture at its slot and a vertex attribute at its index among
+//! the program's attributes of its step.
 //! Each backend maps them to its own slots, groups, descriptor sets or
 //! shader locations as the program's declaration says.
 //!
@@ -259,10 +260,10 @@ pub enum VertexStep {
     Instance,
 }
 
-/// An attribute of a vertex buffer: the shader input with attribute id
-/// `id` reads `format` from `offset` bytes into each element. The id is of
-/// the shader's per-vertex attributes in a [`VertexStep::Vertex`] buffer,
-/// and of its per-instance ones in a [`VertexStep::Instance`] buffer.
+/// An attribute of a vertex buffer: the shader's attribute at index `id`
+/// reads `format` from `offset` bytes into each element. The index is among
+/// the program's per-vertex attributes in a [`VertexStep::Vertex`] buffer,
+/// and among its per-instance ones in a [`VertexStep::Instance`] buffer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct VertexAttribute {
     pub id: u32,
