@@ -3,6 +3,7 @@
 // tile data and the layer name, from which their contexts borrow the layer
 // again when they run.
 
+use std::cell::OnceCell;
 use std::sync::Arc;
 
 use mln_style::PropertyEvaluationParameters;
@@ -134,7 +135,8 @@ pub(crate) fn build_layout<S: StyleLayerType, L: Layout<S>>(
         collision_boxes: build.show_collision_boxes,
         cpu_rasterizer: build.cpu_rasterizer,
         subdivision_granularity: parameters.subdivision_granularity,
-        source_layer: source_layer.layer()?,
+        source_layer,
+        decoded: OnceCell::new(),
         resolved,
         feature_index: &mut built.feature_index,
     };

@@ -79,6 +79,7 @@
 
 use std::any::Any;
 use std::borrow::Cow;
+use std::cell::OnceCell;
 use std::convert::Infallible;
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -116,6 +117,7 @@ use crate::geometry::feature_index::{FeatureIndex, FeatureIndexBuilder};
 pub use crate::gfx::mesh::Indexes;
 pub use crate::image_store::ImageStore;
 use crate::layout::filter_groups::FilterGroups;
+use crate::layout::layout::SourceLayer;
 pub use crate::layout::tile_layout::Resolved;
 pub use crate::paint_parameters::Frame;
 use crate::paint_property_binder::PatternDependency;
@@ -1382,12 +1384,14 @@ pub struct BuildCx<'a, S: StyleLayerType> {
     pub(crate) collision_boxes: bool,
     pub(crate) cpu_rasterizer: bool,
     pub(crate) subdivision_granularity: SubdivisionGranularitySetting,
-    pub(crate) source_layer: TileLayer<'a>,
+    pub(crate) source_layer: &'a SourceLayer,
+    /// The source layer, decoded once a feature is read.
+    pub(crate) decoded: OnceCell<TileLayer<'a>>,
     pub(crate) resolved: Option<&'a Resolved>,
     pub(crate) feature_index: &'a mut FeatureIndexBuilder,
 }
 
-impl<S: StyleLayerType> BuildCx<'_, S> {
+impl<'a, S: StyleLayerType> BuildCx<'a, S> {
     /// The layers of the group, its leader first.
     #[must_use]
     pub fn layers(&self) -> &[Arc<EvaluatedLayer<S>>] {
@@ -1445,7 +1449,14 @@ impl<S: StyleLayerType> BuildCx<'_, S> {
 
     /// The feature at `index` of the tile's source layer.
     pub fn feature(&self, index: usize) -> Result<Feature<'_>, Error> {
-        Ok(self.source_layer.feature(index)?)
+        let layer = match self.decoded.get() {
+            Some(layer) => layer,
+            None => {
+                let layer = self.source_layer.layer()?;
+                self.decoded.get_or_init(|| layer)
+            }
+        };
+        Ok(layer.feature(index)?)
     }
 
     /// Binders of type `P` for each layer of the group, of its evaluated
