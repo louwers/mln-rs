@@ -120,7 +120,7 @@ impl<L: Layer> Hosted<L> {
         let unevaluated = style.paint.untransitioned();
         let evaluated = Arc::new(EvaluatedLayer::with_paint(entry, Arc::clone(&style), Default::default()));
         let values = LayerValues { style, unevaluated, evaluated };
-        let after_gpu = res.after_gpu.clone();
+        let after_gpu = res.after_gpu.handle().clone();
         let layer = L::new(&mut NewCx { layer: &values, res, after_gpu: &after_gpu });
         Hosted {
             entry,

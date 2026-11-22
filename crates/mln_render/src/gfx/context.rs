@@ -30,7 +30,7 @@ use mln_util::hash::HashMap;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
-use crate::after_gpu::{AfterGpu, GpuEnd};
+use crate::after_gpu::{AfterGpuQueue, GpuEnd};
 use crate::draw_objects::{DrawObjects, Mesh};
 use crate::gfx::buffer::{self, Buffer};
 use crate::gfx::buffer_store::{BufferStore, SharedBuffer, StoredBuffer};
@@ -108,7 +108,7 @@ pub struct Resources {
     /// made.
     torn_down: bool,
     /// The work that waits for the GPU to finish what the context gave it.
-    pub(crate) after_gpu: AfterGpu,
+    pub(crate) after_gpu: AfterGpuQueue,
 }
 
 impl Resources {
@@ -138,7 +138,7 @@ impl Resources {
             releases: Vec::new(),
             doomed: Vec::new(),
             torn_down: false,
-            after_gpu: AfterGpu::default(),
+            after_gpu: AfterGpuQueue::new(),
         }
     }
 
@@ -759,16 +759,19 @@ impl Resources {
         self.torn_down = true;
     }
 
-    /// Runs the work after the GPU ([`AfterGpu`]) once `gpu` finished what
-    /// the context gave it, if any waits.
+    /// Runs the work after the GPU ([`AfterGpu`](crate::layer::AfterGpu))
+    /// once `gpu` finished what the context gave it, if any waits.
     pub(crate) fn finish_after_gpu(&mut self, gpu: &mut dyn Gpu) {
-        if self.after_gpu.is_empty() {
+        let work = self.after_gpu.take();
+        if work.is_empty() {
             return;
         }
         if let Err(error) = gpu.flush(true) {
             Log::error(Event::Render, format!("Waiting for the GPU before the work after it failed: {error}"));
         }
-        self.after_gpu.run(GpuEnd::Finished);
+        for work in work {
+            work(GpuEnd::Finished);
+        }
     }
 }
 
