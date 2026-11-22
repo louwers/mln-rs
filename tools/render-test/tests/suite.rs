@@ -18,8 +18,8 @@ use std::path::{Path, PathBuf};
 use render_test::render_test::{parse_arguments, run_render_tests_with};
 use render_test::runner::ImplFactory;
 
-/// The runner's exit code for `args` (after `--manifestPath`, `--output`
-/// and `--jobs`).
+/// The runner's exit code for the shared suite and `args` (after
+/// `--manifestPath`, `--output` and `--jobs`).
 pub(crate) fn run(name: &str, args: &[&str], factory: Option<ImplFactory>) -> i32 {
     let manifest = if cfg!(target_os = "macos") {
         "manifests/macos-wgpu.json"
@@ -31,6 +31,12 @@ pub(crate) fn run(name: &str, args: &[&str], factory: Option<ImplFactory>) -> i3
             _ => "manifests/linux-wgpu.json",
         }
     };
+    run_manifest(name, manifest, args, factory)
+}
+
+/// The runner's exit code for the tests of `manifest`, a path from the
+/// package's directory, and `args`.
+pub(crate) fn run_manifest(name: &str, manifest: &str, args: &[&str], factory: Option<ImplFactory>) -> i32 {
     let output = Path::new(env!("CARGO_TARGET_TMPDIR")).join(name);
     let jobs = std::env::var("RENDER_TEST_JOBS").unwrap_or_else(|_| "0".to_string());
     let mut argv =

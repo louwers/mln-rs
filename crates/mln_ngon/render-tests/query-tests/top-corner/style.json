@@ -1,0 +1,44 @@
+{
+  "version": 8,
+  "metadata": {
+    "test": {
+      "width": 128,
+      "height": 128,
+      "queryGeometry": [64, 34]
+    }
+  },
+  "center": [0, 0],
+  "zoom": 4,
+  "pitch": 0,
+  "bearing": 0,
+  "sources": {
+    "points": {
+      "type": "geojson",
+      "data": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {},
+            "geometry": {
+              "type": "Point",
+              "coordinates": [0.0, 0.0]
+            },
+            "id": 1
+          }
+        ]
+      }
+    }
+  },
+  "layers": [
+    {
+      "id": "ngon",
+      "type": "org.maplibre.ngon",
+      "source": "points",
+      "paint": {
+        "ngon-radius": 40,
+        "ngon-corners": 3
+      }
+    }
+  ]
+}

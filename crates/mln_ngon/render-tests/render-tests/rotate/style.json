@@ -1,0 +1,137 @@
+{
+  "version": 8,
+  "metadata": {
+    "test": {
+      "width": 320,
+      "height": 64
+    }
+  },
+  "center": [0, 0],
+  "zoom": 4,
+  "sources": {
+    "points": {
+      "type": "geojson",
+      "data": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "n": 3,
+              "angle": 0,
+              "fill": "#e76f51"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [-6.15234375, 0.0]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "n": 3,
+              "angle": 30,
+              "fill": "#f4a261"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [-4.39453125, 0.0]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "n": 3,
+              "angle": 60,
+              "fill": "#e9c46a"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [-2.63671875, 0.0]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "n": 3,
+              "angle": 90,
+              "fill": "#2a9d8f"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [-0.87890625, 0.0]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "n": 3,
+              "angle": 180,
+              "fill": "#457b9d"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [0.87890625, 0.0]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "n": 4,
+              "angle": 0,
+              "fill": "#1d3557"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [2.63671875, 0.0]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "n": 4,
+              "angle": 45,
+              "fill": "#9067c6"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [4.39453125, 0.0]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "n": 5,
+              "angle": -36,
+              "fill": "#ef476f"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [6.15234375, 0.0]
+            }
+          }
+        ]
+      }
+    }
+  },
+  "layers": [
+    {
+      "id": "background",
+      "type": "background",
+      "paint": {
+        "background-color": "#eef2f7"
+      }
+    },
+    {
+      "id": "ngons",
+      "type": "org.maplibre.ngon",
+      "source": "points",
+      "paint": {
+        "ngon-radius": 16,
+        "ngon-corners": ["get", "n"],
+        "ngon-rotate": ["get", "angle"],
+        "ngon-color": ["get", "fill"]
+      }
+    }
+  ]
+}

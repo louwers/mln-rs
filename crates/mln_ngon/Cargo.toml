@@ -1,0 +1,24 @@
+# The `org.maplibre.ngon` layer type, written against the mln-rs facade
+# alone, as a crate outside mln-rs writes a layer type. Its render and query
+# tests (render-tests/) run in tools/render-test's suite.
+[package]
+name = "mln-rs-ngon"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "A layer type for mln-rs that draws a regular polygon at each point of a geometry source"
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+include.workspace = true
+
+[lib]
+name = "mln_ngon"
+doctest = false
+
+[dependencies]
+mln_rs.workspace = true
+
+[lints]
+workspace = true

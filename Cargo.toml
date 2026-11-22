@@ -61,6 +61,7 @@ mln_layers = { package = "mln-rs-layers", path = "crates/mln_layers", version = 
 mln_map_types = { package = "mln-rs-map-types", path = "crates/mln_map_types", version = "=0.0.13" }
 mln_math = { package = "mln-rs-math", path = "crates/mln_math", version = "=0.0.13" }
 mln_mtl = { package = "mln-rs-mtl", path = "crates/mln_mtl", version = "=0.0.13" }
+mln_ngon = { package = "mln-rs-ngon", path = "crates/mln_ngon", version = "=0.0.13" }
 # The facade, without its default features: the packages that depend on it
 # select their backends, and SQLite and the in-process font-face shaper
 # where they want them.

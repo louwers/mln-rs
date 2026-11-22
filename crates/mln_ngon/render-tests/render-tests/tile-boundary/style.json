@@ -1,0 +1,112 @@
+{
+  "version": 8,
+  "metadata": {
+    "test": {
+      "width": 224,
+      "height": 144
+    }
+  },
+  "center": [0, 0],
+  "zoom": 2,
+  "sources": {
+    "points": {
+      "type": "geojson",
+      "data": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "n": 6
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [0.0, 0.0]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "n": 4
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [-1.0546875, 8.23323711]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "n": 5
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [7.734375, -0.87887178]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "n": 3
+            },
+            "geometry": {
+              "type": "MultiPoint",
+              "coordinates": [
+                [-10.546875, -6.31529854],
+                [-3.515625, -7.01366793],
+                [15.46875, -7.01366793]
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "boundaries": {
+      "type": "geojson",
+      "data": {
+        "type": "MultiLineString",
+        "coordinates": [
+          [
+            [0, -80],
+            [0, 80]
+          ],
+          [
+            [-170, 0],
+            [170, 0]
+          ]
+        ]
+      }
+    }
+  },
+  "layers": [
+    {
+      "id": "background",
+      "type": "background",
+      "paint": {
+        "background-color": "#eef2f7"
+      }
+    },
+    {
+      "id": "boundaries",
+      "type": "line",
+      "source": "boundaries",
+      "paint": {
+        "line-color": "#e76f51"
+      }
+    },
+    {
+      "id": "ngons",
+      "type": "org.maplibre.ngon",
+      "source": "points",
+      "paint": {
+        "ngon-radius": 22,
+        "ngon-corners": ["get", "n"],
+        "ngon-color": "#457b9d",
+        "ngon-opacity": 0.5,
+        "ngon-stroke-width": 2,
+        "ngon-stroke-color": "#1d3557",
+        "ngon-stroke-opacity": 0.5
+      }
+    }
+  ]
+}

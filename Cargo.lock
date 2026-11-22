@@ -2910,6 +2910,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "mln-rs-ngon"
+version = "0.0.13"
+dependencies = [
+ "mln-rs",
+]
+
+[[package]]
 name = "mln-rs-pixelmatch"
 version = "0.0.13"
 
@@ -2973,6 +2980,7 @@ dependencies = [
  "mln-rs-image",
  "mln-rs-map-types",
  "mln-rs-math",
+ "mln-rs-ngon",
  "mln-rs-pixelmatch",
  "mln-rs-render",
  "mln-rs-runtime",

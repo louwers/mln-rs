@@ -1,8 +1,9 @@
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use mln_headless::HeadlessFrontend;
 use mln_map_types::{BoundOptions, ProjectionMode};
 use mln_render::tile::worker_codec::{RemoteWorkers, ThreadWorkerInstances};
+use mln_render::{Registry, RegistryBuilder};
 use mln_rs::mln_layers::symbol::placement::PlacedSymbols as _;
 use mln_runtime::map::{MapCore, MapCoreOptions};
 use mln_storage::{FileSource, FileSourceExt};
@@ -18,6 +19,20 @@ use crate::runner::{
     CameraOptions, ImplFactory, ImplOptions, MapError, QueryGeometry, ResourceOptions, TestRunnerImpl,
 };
 use crate::style_ops;
+
+/// The registry the tests draw with: the built-in layer and source types,
+/// and the extension layer types whose tests the suite runs.
+#[must_use]
+pub fn registry() -> Arc<Registry> {
+    static REGISTRY: LazyLock<Arc<Registry>> = LazyLock::new(|| {
+        let mut builder = RegistryBuilder::new();
+        // An empty builder has no name the types could clash with.
+        let registered = mln_rs::register_builtins(&mut builder).and_then(|()| mln_ngon::register(&mut builder));
+        debug_assert_eq!(registered, Ok(()));
+        builder.build()
+    });
+    Arc::clone(&REGISTRY)
+}
 
 fn map_mode(mode: MapMode) -> mln_map_types::MapMode {
     match mode {
@@ -51,9 +66,10 @@ impl Impl {
             cache_path: resource_options.cache_path.clone(),
             ..mln_storage::ResourceOptions::default()
         };
-        let registry = mln_rs::builtin_registry();
+        let registry = registry();
         let mut frontend =
             HeadlessFrontend::new(metadata.size, metadata.pixel_ratio, queue, pool).map_err(|e| e.to_string())?;
+        frontend.set_registry(Arc::clone(&registry));
         if impl_options.tile_worker_codec > 0 {
             let count = impl_options.tile_worker_codec;
             let instances = Arc::clone(&registry);
