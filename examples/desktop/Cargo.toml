@@ -7,10 +7,10 @@ description.workspace = true
 license.workspace = true
 repository.workspace = true
 include.workspace = true
-# The desktop example app: the map in a winit window, on the WebGPU backend
-# (or Metal on macOS, Vulkan elsewhere than on Apple's platforms, D3D12 on
-# Windows, or OpenGL ES on Linux), with egui's controls over it; never
-# released.
+# The desktop example app: the map in a winit window, on the backend that the
+# library picks or that --backend names (Metal on macOS, Vulkan elsewhere than
+# on Apple's platforms, D3D12 on Windows, OpenGL ES on Linux, or WebGPU), with
+# egui's controls over it; never released.
 publish = false
 autotests = false
 

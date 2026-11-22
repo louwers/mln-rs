@@ -203,7 +203,11 @@ pub(crate) fn run(launch: Launch) -> Result<(), String> {
     log_failure(map.set_globe_free_bearing_enabled(settings.free_bearing));
 
     let paint = Rc::new(RefCell::new(Paint::default()));
-    let window = WindowSession::attach(args.backend, None, &map, &surfaces, map_size, Rc::clone(&paint), &inbox)
+    let (kind, device) = match args.backend {
+        Some(kind) => (kind, None),
+        None => backend::default_device().map(|(kind, device)| (kind, Some(device))).map_err(|e| e.message)?,
+    };
+    let window = WindowSession::attach(kind, device, &map, &surfaces, map_size, Rc::clone(&paint), &inbox)
         .map_err(|e| e.message)?;
 
     let style_url = match &args.style {
