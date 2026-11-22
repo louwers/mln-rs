@@ -16,7 +16,7 @@ use crate::gfx::store::SharedTexture;
 /// A buffer of `V`s in the renderer's [`Resources`](crate::draw::Resources):
 /// vertices that a mesh reads ([`MeshDesc::vertices`](crate::draw::MeshDesc::vertices)),
 /// or, of `u16`s, the indexes of its primitives
-/// ([`MeshDesc::indexes`](crate::draw::MeshDesc::indexes)).
+/// ([`MeshDesc::new`](crate::draw::MeshDesc::new)).
 pub struct Buffer<V> {
     pub(crate) entry: SharedBuffer,
     element: PhantomData<fn() -> V>,
@@ -124,7 +124,7 @@ impl Vertex for ImageVertex {
 /// A buffer of `u16` indexes in the renderer's
 /// [`Resources`](crate::draw::Resources), each relative to the first vertex
 /// of its segment, with the segments that draw them: a mesh's primitives
-/// ([`MeshDesc::indexes`](crate::draw::MeshDesc::indexes)).
+/// ([`MeshDesc::new`](crate::draw::MeshDesc::new)).
 #[derive(Clone, Debug)]
 pub struct IndexBuffer {
     pub(crate) buffer: Buffer<u16>,
