@@ -56,16 +56,12 @@ impl Layer for LocationPuckLayer {
             let ground = Ground::new(paint, query.camera, &anchor);
             parts(paint).filter(|part| part.hit).any(|part| {
                 let [center, x, y] = ground.square(&part);
-                let corner = |cx: f64, cy: f64| {
+                let corner = |[cx, cy]: [f64; 2]| {
                     let point = [center[0] + cx * x[0] + cy * y[0], center[1] + cx * x[1] + cy * y[1]];
                     query.to_screen(anchor.tile, point).map(|screen| pixel(screen.x, screen.y))
                 };
-                let square: Option<GeometryCoordinates> =
-                    [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0), (-1.0, -1.0)]
-                        .into_iter()
-                        .map(|(cx, cy)| corner(cx, cy))
-                        .collect();
-                square.is_some_and(|square| polygon_intersects_polygon(&geometry, &square))
+                let outline: Option<GeometryCoordinates> = part.outline().into_iter().map(corner).collect();
+                outline.is_some_and(|outline| polygon_intersects_polygon(&geometry, &outline))
             })
         });
         if hit {

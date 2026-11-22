@@ -62,6 +62,19 @@ pub(crate) struct Part {
     pub(crate) hit: bool,
 }
 
+impl Part {
+    /// Where a query hits the part, in its unit square, as a closed ring:
+    /// the arrow's triangle, or a polygon inside the disc.
+    pub(crate) fn outline(&self) -> Vec<[f64; 2]> {
+        if self.shape == Shape::Arrow {
+            return vec![[0.0, -1.0], [0.39, -0.28], [-0.39, -0.28], [0.0, -1.0]];
+        }
+        let sides = 24;
+        let corner = |i: u32| (f64::from(i) * std::f64::consts::TAU / f64::from(sides)).sin_cos();
+        (0..=sides).map(corner).map(|(sin, cos)| [cos, sin]).collect()
+    }
+}
+
 /// The parts that `paint` shows, from the bottom up.
 pub(crate) fn parts(paint: &paint::PossiblyEvaluated) -> impl Iterator<Item = Part> {
     let value = |value: f32| value.max(0.0);
