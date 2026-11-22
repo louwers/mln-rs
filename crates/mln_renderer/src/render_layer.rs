@@ -601,6 +601,15 @@ pub(crate) trait TypedLayer {
         false
     }
 
+    /// The texels a side of each of the layer's tiles that hold all it
+    /// shows of the tile, where it shows no more however large it draws: a
+    /// drape then takes no more texels than its tiles have across it. `None`
+    /// for a layer that draws shapes, which show sharper the more texels
+    /// they take.
+    fn drape_texels(&self) -> Option<u32> {
+        None
+    }
+
     /// Whether the layer, with its values `evaluated`, blends with what is
     /// under it otherwise than by covering it: a layer blend other than
     /// `normal`, whose backdrop over terrain is its drape's own texels.
@@ -765,6 +774,10 @@ pub(crate) trait LayerParts {
     /// covering it, with its values of the frame
     /// ([`TypedLayer::blends_with_backdrop`]).
     fn blends_with_backdrop(&self) -> bool;
+
+    /// The texels a side of each of the layer's tiles that hold all it
+    /// shows of the tile ([`TypedLayer::drape_texels`]).
+    fn drape_texels(&self) -> Option<u32>;
 
     /// An empty drawing of the layer's type, which a drape keeps of the
     /// layer.
@@ -995,6 +1008,10 @@ impl<L: TypedLayer> LayerParts for L {
 
     fn blends_with_backdrop(&self) -> bool {
         TypedLayer::blends_with_backdrop(self, &self.parts().values.evaluated)
+    }
+
+    fn drape_texels(&self) -> Option<u32> {
+        TypedLayer::drape_texels(self)
     }
 
     fn new_drape_drawing(&self) -> DrapeDrawing {

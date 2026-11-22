@@ -287,7 +287,10 @@
 //!   physical pixel, whichever is more: GL JS's side (twice the terrain
 //!   tile's), or the device's largest
 //!   texture's if that is smaller, where the tile shows at half its size or
-//!   larger, down to a sixteenth of it. Where the drapes with a texture,
+//!   larger, down to a sixteenth of it. A drape whose layers show no more
+//!   with more texels takes at most those they have across its tile: a
+//!   stack of hillshades alone, the texels of its deepest DEM tile there,
+//!   which a drape of that side takes as they are. Where the drapes with a texture,
 //!   with the depth and stencil of each side and the layer composite of a
 //!   side whose drapes composite, would hold more than a byte cap (256 MiB
 //!   on phones and in the browser, 384 MiB elsewhere), the largest side

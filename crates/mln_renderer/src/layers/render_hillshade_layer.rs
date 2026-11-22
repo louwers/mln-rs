@@ -142,6 +142,9 @@ pub(crate) struct RenderHillshadeLayer {
     /// The illumination of the evaluation the draws last drew with, before
     /// a viewport anchor turns it by the map's bearing.
     illumination: Option<(Arc<EvaluatedLayer<Hillshade>>, Illumination)>,
+    /// The texels a side of the largest DEM of the frame's tiles, without
+    /// its border: 0 while they have none.
+    dem_texels: u32,
 }
 
 impl RenderHillshadeLayer {
@@ -159,6 +162,7 @@ impl RenderHillshadeLayer {
             bucket_render_targets: HashMap::default(),
             live_buckets: HashSet::default(),
             illumination: None,
+            dem_texels: 0,
         }
     }
 }
@@ -312,6 +316,12 @@ impl TypedLayer for RenderHillshadeLayer {
 
     fn drapes_by_bearing(&self, evaluated: &EvaluatedLayer<Hillshade>) -> bool {
         *evaluated.paint.hillshade_illumination_anchor.uniform() == HillshadeIlluminationAnchorType::Viewport
+    }
+
+    /// A tile shades the slopes of its DEM, a texel each, so it shows no
+    /// more with more texels than the DEM has.
+    fn drape_texels(&self) -> Option<u32> {
+        Some(self.dem_texels)
     }
 
     fn passes(&self, evaluated: &EvaluatedLayer<Hillshade>) -> RenderPass {
@@ -490,6 +500,8 @@ impl TypedLayer for RenderHillshadeLayer {
         let live_buckets = &mut self.live_buckets;
         live_buckets.clear();
         live_buckets.extend(tiles.iter().filter_map(|tile| Some(tile.bucket()?.base.bucket_id)));
+        let dems = tiles.iter().filter_map(|tile| tile.bucket().filter(|bucket| bucket.has_data()));
+        self.dem_texels = dems.map(|bucket| bucket.dem_data().dim.max(0) as u32).max().unwrap_or(0);
         self.bucket_render_targets.retain(|id, _| live_buckets.contains(id));
     }
 

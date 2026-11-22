@@ -1543,6 +1543,23 @@ fn a_rotation_draws_only_a_viewport_lit_hillshade_again_in_every_frame() {
     assert!(map.frame_passes().1.is_empty(), "a drape drawn again at rest");
 }
 
+/// A hillshade's drape takes no more texels than its DEM has across the
+/// drape's tile: the stack of the hillshade alone, lit from the viewport,
+/// draws at the side of its two DEM tiles of 256 texels, where the stack
+/// under it takes two texels a pixel.
+#[test]
+fn a_hillshade_drape_takes_the_texels_of_its_dem() {
+    let (mut map, drapes) = settled(Tiles::default());
+    let shapes = map.renderer.rendering_stats().terrain.mem_drapes;
+    assert_eq!(drapes.len() * drape_bytes(1024), shapes);
+    map.edit(hillshade());
+    map.settle();
+    frames_until_full(&mut map);
+    let terrain = map.renderer.rendering_stats().terrain;
+    assert_eq!(2 * drapes.len(), terrain.drapes);
+    assert_eq!(drapes.len() * drape_bytes(512), terrain.mem_drapes - shapes, "the hillshade's drapes");
+}
+
 /// A hillshade lit from the map draws the same at every bearing: it shares
 /// the stack of the layers under it, whose drapes a rotation keeps.
 #[test]
