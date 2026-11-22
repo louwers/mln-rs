@@ -84,7 +84,14 @@ declare -A allowed=(
     # 58, which pass, with the hillshade on a copy of the source declared
     # 512 px. The label hidden or missing: 1160 (RADV). Seams where DEM tiles
     # of two overscaled zooms meet: 481 (RADV).
-    [terrain/symbol-height-offset-occluded-ground]=0.0012
+    #
+    # The fixture's hillshade is lit from the viewport, so the surface lights
+    # its slopes a screen pixel at a time, where GL JS shades each texel of
+    # the drape and filters the colors: along the far ridges, where a pixel
+    # takes many texels, 60 to 70 more single pixels differ. 271 px on RADV
+    # (WebGPU, Vulkan and OpenGL), 318 on Mesa 26.0.8's lavapipe, 314 on Mesa
+    # 26.1.8's and 310 on its llvmpipe.
+    [terrain/symbol-height-offset-occluded-ground]=0.0015
     # Terrain on the globe. The numbers here are WebGPU's, on RADV and on Mesa
     # 26.0.8's lavapipe; "flat" is the same fixture before terrain drew on the
     # globe, which drew the layers on the sphere without drapes.
