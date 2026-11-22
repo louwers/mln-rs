@@ -106,6 +106,8 @@ pub(crate) enum Message {
         info: view::StyleInfo,
         loaded: bool,
     },
+    /// The cache database finished resetting, on the runtime's thread.
+    CacheReset,
 }
 
 /// What the render thread asks of the main thread.

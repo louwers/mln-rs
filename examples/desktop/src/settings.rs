@@ -3,6 +3,8 @@
 
 use mln_util::constants::DEFAULT_FOV;
 
+use crate::network::Network;
+
 /// The camera and options the app starts with: central Amsterdam, as the
 /// web demo opens.
 #[derive(Clone, Debug)]
@@ -17,7 +19,9 @@ pub(crate) struct Settings {
     pub fov: f64,
     pub max_pitch: f64,
     pub debug: u32,
-    pub online: bool,
+    pub network: Network,
+    /// Don't keep what the map loads in the cache database.
+    pub cache_disabled: bool,
     /// Drags and zooms on the globe turn the bearing with the planet.
     pub free_bearing: bool,
 }
@@ -36,7 +40,8 @@ impl Default for Settings {
             // Past the map's default of 60°, where fog shows over terrain.
             max_pitch: 85.0,
             debug: 0,
-            online: true,
+            network: Network::Online,
+            cache_disabled: false,
             free_bearing: false,
         }
     }
