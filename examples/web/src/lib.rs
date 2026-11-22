@@ -50,10 +50,14 @@ fn start() {
 }
 
 /// The registrations of the map's runtime and of the tile workers, which
-/// must agree.
+/// must agree: the built-ins and the first-party extensions.
 fn registry() -> Arc<Registry> {
     let mut builder = RegistryBuilder::new();
-    register_builtins(&mut builder).expect("the built-ins register into no registrations");
+    register_builtins(&mut builder)
+        .and_then(|()| mln_ngon::register(&mut builder))
+        .and_then(|()| mln_location_puck::register(&mut builder))
+        .and_then(|()| mln_image_process::register(&mut builder))
+        .expect("the built-ins and the extensions register into no registrations");
     builder.build()
 }
 

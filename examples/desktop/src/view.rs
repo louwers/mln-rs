@@ -147,7 +147,7 @@ pub(crate) fn run(launch: Launch) -> Result<(), String> {
         let cache_db = args.cache.clone().map_or_else(|| std::env::temp_dir().join("mbgl-cache.db"), PathBuf::from);
         RuntimeOptions { cache_path: Some(cache_db), ..RuntimeOptions::default() }
     };
-    let runtime = mln_rs::start_runtime(&runtime_options).map_err(|e| e.message)?;
+    let runtime = Runtime::new(&runtime_options, registry()).map_err(|e| e.message)?;
     if !settings.online || benchmark.is_some() {
         // The cache still serves what it has.
         log_failure(runtime.set_resource_provider(|request: ResourceRequest| {
@@ -1185,4 +1185,17 @@ impl View {
 /// key does.
 fn zoom_step(position: ScreenCoordinate, levels: f64) -> Input {
     Input::Delta { position, discrete: true, pan: ScreenCoordinate::default(), zoom: levels, bearing: 0.0, pitch: 0.0 }
+}
+
+/// The registry the app's runtime starts with: the built-ins and the
+/// first-party extensions, so that a style may draw any of them.
+fn registry() -> Arc<mln_rs::mln_render::Registry> {
+    let mut builder = mln_rs::mln_render::RegistryBuilder::new();
+    // An empty builder has no name the types could clash with.
+    let registered = mln_rs::register_builtins(&mut builder)
+        .and_then(|()| mln_ngon::register(&mut builder))
+        .and_then(|()| mln_location_puck::register(&mut builder))
+        .and_then(|()| mln_image_process::register(&mut builder));
+    debug_assert_eq!(registered, Ok(()));
+    builder.build()
 }

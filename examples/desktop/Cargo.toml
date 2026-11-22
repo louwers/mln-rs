@@ -30,7 +30,11 @@ mln_bench_workload.workspace = true
 mln_frame_pacer.workspace = true
 mln_gestures.workspace = true
 mln_image.workspace = true
+# The first-party extensions, which the app's registry adds to the built-ins.
+mln_image_process.workspace = true
+mln_location_puck.workspace = true
 mln_math.workspace = true
+mln_ngon.workspace = true
 # The built-in registrations, every backend, and the sessions shape the
 # style's font faces, and the system's fonts that the map falls back to,
 # in-process.

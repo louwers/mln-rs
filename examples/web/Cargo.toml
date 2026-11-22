@@ -34,10 +34,14 @@ webgl = ["mln_rs/gl", "dep:mln_gl"]
 js-sys.workspace = true
 mln_gestures.workspace = true
 mln_gfx.workspace = true
+# The first-party extensions, which the registry adds to the built-ins.
+mln_image_process.workspace = true
 # gpu-conformance: the host writes case, which check/check.mjs runs on a
 # backend of the map's kind (src/gpu_check.rs).
 mln_layers = { workspace = true, features = ["gpu-conformance"] }
 mln_gl = { workspace = true, optional = true }
+mln_location_puck.workspace = true
+mln_ngon.workspace = true
 # The built-in registrations, and the backend of the module's kind.
 mln_rs.workspace = true
 mln_runtime.workspace = true
