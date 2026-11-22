@@ -25,6 +25,7 @@ use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::texture2d::SamplerState;
 use mln_util::logging::{Event, Log};
+use smallvec::SmallVec;
 
 use crate::gfx::buffer_store::{SharedBuffer, StoredBuffer};
 use crate::gfx::context::Resources;
@@ -130,10 +131,10 @@ pub(crate) struct DrawGeometry {
 }
 
 /// The most entries bindings have.
-const MAX_ENTRIES: usize = FIRST_VERTEX_BUFFER_ID + MAX_TEXTURES;
+const MAX_ENTRIES: usize = FIRST_VERTEX_BUFFER_ID + MAX_PULLED + MAX_TEXTURES;
 
 /// The entries of bindings, on the stack: at most a buffer at each uniform
-/// buffer id and a texture at each texture id.
+/// buffer id and each vertex buffer id, and a texture at each texture id.
 pub(crate) struct Entries {
     entries: [BindGroupEntry; MAX_ENTRIES],
     len: usize,
@@ -165,15 +166,20 @@ struct VertexSlot {
 }
 
 /// What a draw's bindings were made of: the epochs of the global uniform
-/// buffers, of those of its frame's draws and of its own, and the texture
-/// and sampler it bound at each texture id.
+/// buffers, of those of its frame's draws and of its own, the texture and
+/// sampler it bound at each texture id, and the vertex buffers it reads as
+/// storage buffers.
 #[derive(Clone, Copy, PartialEq)]
 struct BindingsStamp {
     global: u64,
     frame: u64,
     own: u64,
     textures: [Option<(TextureId, SamplerId)>; MAX_TEXTURES],
+    pulled: [Option<BufferId>; MAX_PULLED],
 }
+
+/// The most vertex buffers a program reads as storage buffers.
+const MAX_PULLED: usize = mln_gfx::shaders::bindings::MAX_VERTEX_BUFFERS;
 
 /// What, besides the draw's own state, a draw's pipeline depends on.
 #[derive(Clone, Copy, PartialEq)]
@@ -206,6 +212,9 @@ pub(crate) struct DrawObjects {
     /// The buffers of its program's blocks of a draw's own, which its draw
     /// writes.
     own_buffers: UniformBufferArray,
+    /// The vertex buffers its program reads as storage buffers, each at its
+    /// buffer's id, with the GPU buffer of its last upload.
+    pulled: SmallVec<[(usize, SharedBuffer, Option<BufferId>); 2]>,
     color_mode: ColorMode,
     cull_face_mode: CullFaceMode,
 
@@ -257,6 +266,7 @@ impl DrawObjects {
             instance_attributes: instances,
             textures,
             own_buffers: UniformBufferArray::new(),
+            pulled: SmallVec::new(),
             color_mode,
             cull_face_mode,
             mode,
@@ -277,6 +287,13 @@ impl DrawObjects {
     /// The program the objects draw with.
     pub(crate) fn program(&self) -> &'static Program {
         self.program
+    }
+
+    /// Makes the draws read `buffer` as the program's vertex buffer `id`
+    /// that its vertex stage reads as a storage buffer.
+    pub(crate) fn pull(&mut self, id: usize, buffer: SharedBuffer) {
+        debug_assert!(id >= FIRST_VERTEX_BUFFER_ID && self.pulled.len() < MAX_PULLED);
+        self.pulled.push((id, buffer, None));
     }
 
     /// Samples the texture at `slot` as `sampler` says, from the next draw.
@@ -354,6 +371,10 @@ impl DrawObjects {
                 self.geometry = None;
             }
             updated?;
+        }
+
+        for (_, buffer, uploaded) in &mut self.pulled {
+            *uploaded = context.upload_buffer(gpu, buffer)?;
         }
 
         for (texture, _) in self.textures.iter().flatten() {
@@ -515,7 +536,11 @@ impl DrawObjects {
         }
         let global = context.global_uniform_buffers();
         let own = &self.own_buffers;
-        let stamp = BindingsStamp { global: global.epoch(), frame: frame.epoch(), own: own.epoch(), textures };
+        let mut pulled = [None; MAX_PULLED];
+        for (slot, (_, _, uploaded)) in pulled.iter_mut().zip(&self.pulled) {
+            *slot = *uploaded;
+        }
+        let stamp = BindingsStamp { global: global.epoch(), frame: frame.epoch(), own: own.epoch(), textures, pulled };
         if let Some((bindings, made)) = &self.bindings
             && *made == stamp
         {
@@ -537,6 +562,13 @@ impl DrawObjects {
             }
         }
         let mut held = Vec::new();
+        for (id, buffer, uploaded) in &self.pulled {
+            let size = context.stored_buffer(buffer).map_or(0, |stored| stored.count() * stored.vertex_size());
+            if let Some(uploaded) = uploaded.filter(|_| size > 0) {
+                entries.push(BindGroupEntry::Buffer { id: *id as u32, buffer: uploaded, offset: 0, size: size as u64 });
+                held.push(buffer.held());
+            }
+        }
         for (id, binding) in textures.iter().enumerate() {
             if let Some((texture, sampler)) = *binding {
                 entries.push(BindGroupEntry::Texture { id: id as u32, texture, sampler });

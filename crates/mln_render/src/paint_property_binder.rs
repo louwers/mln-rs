@@ -37,6 +37,15 @@ use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms};
 use crate::handles::Buffer;
 use crate::paint_property_statistics::{PaintPropertyStatistics, StatisticValue};
 
+/// The patterns of a feature for each layer of its group whose `*-pattern`
+/// value differs by feature, which
+/// [`LayoutCx::need_patterns`](crate::layer::LayoutCx::need_patterns) asks
+/// for and
+/// [`BuildCx::populate_patterns`](crate::layer::BuildCx::populate_patterns)
+/// writes where they are.
+#[derive(Clone, Debug, Default)]
+pub struct FeaturePatterns(pub(crate) Vec<(String, PatternDependency)>);
+
 /// The images of a feature's `*-pattern` value one zoom level below the
 /// tile's, at it, and one above.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -313,6 +322,14 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
         self.statistics.max()
     }
 
+    /// Where the binder's values are in each vertex of its set's paint
+    /// values, in bytes ([`PaintVertices::stride`]), for a program that
+    /// reads them itself; `None` for a value the same for every feature.
+    #[must_use]
+    pub fn offset(&self) -> Option<usize> {
+        self.kind.vertex_offset()
+    }
+
     /// The binder of `value` in a tile at `zoom`.
     #[must_use]
     pub fn create(value: &Evaluated<T>, zoom: f32) -> Self {
@@ -554,10 +571,12 @@ impl<T> CrossFadedPaintPropertyBinderKind<T> {
     }
 }
 
-/// The binder of a `*-pattern` property, whose two attributes are four `u16`s
-/// each.
+/// The binder of a `*-pattern` property, a cross-faded image, which writes
+/// where each feature's pattern is in its tile's atlas
+/// ([`LayoutCx::need_patterns`](crate::layer::LayoutCx::need_patterns)):
+/// four `u16`s, the values of both of its program's properties.
 #[derive(Clone, Debug, mln_wire::Wire)]
-pub(crate) struct CrossFadedPaintPropertyBinder<T> {
+pub struct CrossFadedPaintPropertyBinder<T> {
     pub(crate) kind: CrossFadedPaintPropertyBinderKind<T>,
 }
 
@@ -567,7 +586,7 @@ const PATTERN_ZOOM_INTERPOLATED_SIZE: usize = 16;
 impl CrossFadedPaintPropertyBinder<Image> {
     /// The binder of `value` in a tile at `zoom`.
     #[must_use]
-    pub(crate) fn create(value: &Evaluated<Image>, zoom: f32) -> Self {
+    pub fn create(value: &Evaluated<Image>, zoom: f32) -> Self {
         let kind = match value {
             Evaluated::Constant(constant) => CrossFadedPaintPropertyBinderKind::Constant {
                 constant: Faded { from: constant.clone(), to: constant.clone() },
@@ -825,8 +844,10 @@ pub trait BinderSet: Clone + Send + Wire + 'static {
     fn vertices_mut(&mut self) -> &mut InterleavedVertexBuffer;
 
     /// Writes the values of `feature`, the feature at `index` of the tile
-    /// `canonical`, in its text's formatted section `section`, into the
+    /// `canonical`, in its text's formatted section `section`, with the
+    /// images of its patterns `pattern` among `positions`, into the
     /// vertices up to `length`.
+    #[expect(clippy::too_many_arguments, reason = "the feature, its vertices, its tile, its section and its patterns")]
     fn populate(
         &mut self,
         feature: &dyn GeometryTileFeature,
@@ -834,6 +855,8 @@ pub trait BinderSet: Clone + Send + Wire + 'static {
         index: usize,
         canonical: &CanonicalTileID,
         section: &Value,
+        positions: &ImagePositions,
+        pattern: Option<&PatternDependency>,
     );
 
     /// Rewrites the values that read feature state for `states`, the states
@@ -982,8 +1005,9 @@ impl<P: PaintBinders> LayerBinders<P> {
         LayerBinders { layers: binders }
     }
 
-    /// Writes `feature`'s values into each layer's binders, as
-    /// [`BinderSet::populate`] does.
+    /// Writes `feature`'s values into each layer's binders, with its
+    /// `patterns` among `positions`, as [`BinderSet::populate`] does.
+    #[expect(clippy::too_many_arguments, reason = "the feature, its vertices, its tile, its section and its patterns")]
     pub(crate) fn populate(
         &mut self,
         feature: &dyn GeometryTileFeature,
@@ -991,9 +1015,12 @@ impl<P: PaintBinders> LayerBinders<P> {
         length: usize,
         canonical: &CanonicalTileID,
         section: &Value,
+        positions: &ImagePositions,
+        patterns: &FeaturePatterns,
     ) {
-        for (_, binders) in &mut self.layers {
-            binders.populate(feature, length, index, canonical, section);
+        for (id, binders) in &mut self.layers {
+            let pattern = patterns.0.iter().find(|(layer, _)| layer == id).map(|(_, pattern)| pattern);
+            binders.populate(feature, length, index, canonical, section, positions, pattern);
         }
     }
 
@@ -1030,6 +1057,21 @@ impl<'a, P: PaintBinders> PaintVertices<'a, P> {
         PaintVertices { binders, buffer }
     }
 
+    /// The buffer of the values, which a program that reads them itself
+    /// binds ([`MeshDesc::pulled`](crate::draw::MeshDesc::pulled)); `None`
+    /// where every value is the same for every feature.
+    #[must_use]
+    pub fn buffer(&self) -> Option<&'a Buffer<u8>> {
+        self.buffer
+    }
+
+    /// The bytes of the values of each vertex, where each binder's are at
+    /// its [`offset`](PaintPropertyBinder::offset).
+    #[must_use]
+    pub fn stride(&self) -> usize {
+        self.binders.vertices().stride()
+    }
+
     /// Binds the values to `program`'s properties in `attributes`, or records
     /// those that `paint` has the same for every feature in `uniforms`, and
     /// returns what the engine writes of them into the draws' blocks.
@@ -1037,7 +1079,7 @@ impl<'a, P: PaintBinders> PaintVertices<'a, P> {
         self,
         program: &'static Program,
         paint: &P::Paint,
-        attributes: &mut Vec<(usize, SharedAttribute)>,
+        attributes: &mut Vec<(VertexStep, usize, SharedAttribute)>,
         uniforms: &mut Uniforms,
     ) -> MeshPaint {
         let shared = self.buffer.map(|buffer| &buffer.entry);
@@ -1059,18 +1101,19 @@ impl<P> std::ops::Deref for PaintVertices<'_, P> {
 pub struct Bind<'a> {
     program: &'static Program,
     shared: Option<&'a SharedBuffer>,
-    attributes: &'a mut Vec<(usize, SharedAttribute)>,
+    attributes: &'a mut Vec<(VertexStep, usize, SharedAttribute)>,
     uniforms: &'a mut Uniforms,
     mixes: &'a mut Vec<(usize, Mix)>,
 }
 
 impl Bind<'_> {
     /// Binds `binder`'s values among `buffer`'s to the attributes of the
-    /// program's properties `properties`, or records them as read from
-    /// their uniforms where `constant` or the binder wrote none, and
-    /// records where each mixed property's factor goes among the bytes of
-    /// the blocks of each draw. A property the program doesn't read is
-    /// skipped.
+    /// program's properties `properties`, of a vertex or of an instance, or
+    /// records them as read from their uniforms where `constant` or the
+    /// binder wrote none, and records where each mixed property's factor
+    /// goes among the bytes of the blocks of each draw. A property the
+    /// program doesn't read is skipped, and one without an attribute is
+    /// read by the program itself.
     pub fn property(
         &mut self,
         binder: &dyn PaintPropertyBinderBase,
@@ -1090,10 +1133,8 @@ impl Bind<'_> {
                 continue;
             };
             match (&values, self.program.property_attribute(property)) {
-                (Some(values), Some((VertexStep::Vertex, attribute))) => {
-                    self.attributes.push((attribute, values.clone()));
-                }
-                (Some(_), _) => debug_assert!(false, "the values of property {name} in an instance attribute"),
+                (Some(values), Some((step, attribute))) => self.attributes.push((step, attribute, values.clone())),
+                (Some(_), None) => {}
                 (None, _) => self.uniforms.insert(index),
             }
             if let Some(mix) = binder.mix().filter(|_| matches!(property.ty, PropertyType::Float | PropertyType::Color))
@@ -1189,6 +1230,8 @@ macro_rules! paint_property_binders {
                 index: usize,
                 canonical: &$crate::__private::mln_tile_id::CanonicalTileID,
                 section: &$crate::__private::mln_style::expression::Value,
+                positions: &$crate::__private::ImagePositions,
+                pattern: ::core::option::Option<&$crate::__private::PatternDependency>,
             ) {
                 let $name { vertices, $($field,)+ } = self;
                 vertices.populate(length, |vertices| {
@@ -1198,8 +1241,8 @@ macro_rules! paint_property_binders {
                         feature,
                         length,
                         index,
-                        &::core::default::Default::default(),
-                        ::core::option::Option::None,
+                        positions,
+                        pattern,
                         canonical,
                         section,
                     );)+

@@ -4,10 +4,11 @@ use mln_gfx::color_mode::ColorMode;
 use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::draw_mode::DrawMode;
 use mln_gfx::gfx_types::AttributeDataType;
+use mln_gfx::gpu::VertexStep;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::bindings::MAX_TEXTURES;
 use mln_gfx::shaders::block::DrawBlocks;
-use mln_gfx::shaders::program::{BufferKind, Program};
+use mln_gfx::shaders::program::{Attribute, BufferKind, Program};
 use mln_gfx::texture2d::SamplerState;
 use smallvec::SmallVec;
 
@@ -19,8 +20,8 @@ use crate::handles::{Buffer, IndexBuffer, Texture, Vertex};
 use crate::paint_property_binder::{MeshPaint, PaintBinders, PaintVertices};
 
 /// What a [`Mesh`] is made of: a program, the indexes of its primitives and
-/// the buffers its attributes read, the paint values it reads per vertex,
-/// its textures, and the state it draws in. The resources make the mesh
+/// the buffers its attributes read, per vertex or per instance, the paint
+/// values it reads, its textures, and the state it draws in. The resources make the mesh
 /// ([`Resources::mesh`]), which then holds what it was made of.
 ///
 /// A mesh draws triangles, blended as premultiplied colors over the frame
@@ -32,11 +33,14 @@ pub struct MeshDesc<'a> {
     /// The buffers of the vertex attributes, in the program's order.
     pub(crate) vertices: SmallVec<[Input<'a>; 2]>,
     /// The buffers of the instance attributes, in the program's order.
-    pub(crate) instances: SmallVec<[Input<'a>; 1]>,
+    pub(crate) instances: SmallVec<[Input<'a>; 2]>,
+    /// The buffers of the program's vertex buffers that it reads as storage
+    /// buffers, in the program's order.
+    pub(crate) pulled: SmallVec<[&'a SharedBuffer; 2]>,
     pub(crate) indexes: &'a IndexBuffer,
-    /// The paint values' attributes, by attribute index, and the
+    /// The paint values' attributes, by step and attribute index, and the
     /// properties, by index, read from their uniforms instead.
-    pub(crate) paint: Vec<(usize, SharedAttribute)>,
+    pub(crate) paint: Vec<(VertexStep, usize, SharedAttribute)>,
     pub(crate) uniforms: Uniforms,
     /// What the engine writes of the paint values into the draws' blocks.
     pub(crate) mesh_paint: Option<MeshPaint>,
@@ -49,10 +53,12 @@ pub struct MeshDesc<'a> {
     pub(crate) projection: Option<ProjectionVariant>,
 }
 
-/// A buffer that a mesh's attributes read, with the formats of its vertex.
+/// A buffer that a mesh's attributes read from its vertex `first` on, with
+/// the formats of its vertex.
 #[derive(Clone, Copy)]
 pub(crate) struct Input<'a> {
     pub(crate) entry: &'a SharedBuffer,
+    pub(crate) first: u32,
     pub(crate) attributes: &'static [AttributeDataType],
     /// The names of the program's attributes they bind to; empty to bind
     /// them in order.
@@ -61,7 +67,7 @@ pub(crate) struct Input<'a> {
 }
 
 impl<'a> Input<'a> {
-    fn of<V: Vertex>(buffer: &'a Buffer<V>) -> Input<'a> {
+    fn of<V: Vertex>(buffer: &'a Buffer<V>, first: u32) -> Input<'a> {
         debug_assert_eq!(
             V::ATTRIBUTES.iter().map(|format| format.stride()).sum::<usize>(),
             size_of::<V>(),
@@ -71,7 +77,18 @@ impl<'a> Input<'a> {
             V::NAMES.is_empty() || V::NAMES.len() == V::ATTRIBUTES.len(),
             "a vertex with names for some attributes"
         );
-        Input { entry: &buffer.entry, attributes: V::ATTRIBUTES, names: V::NAMES, stride: size_of::<V>() as u32 }
+        Input {
+            entry: &buffer.entry,
+            first,
+            attributes: V::ATTRIBUTES,
+            names: V::NAMES,
+            stride: size_of::<V>() as u32,
+        }
+    }
+
+    /// The vertices the input reads.
+    fn count(&self) -> usize {
+        self.entry.count().saturating_sub(self.first as usize)
     }
 }
 
@@ -84,6 +101,7 @@ impl<'a> MeshDesc<'a> {
             program,
             vertices: SmallVec::new(),
             instances: SmallVec::new(),
+            pulled: SmallVec::new(),
             indexes,
             paint: Vec::new(),
             uniforms: Uniforms::default(),
@@ -99,24 +117,48 @@ impl<'a> MeshDesc<'a> {
     /// Binds `buffer`'s vertices to the program's vertex attributes, as
     /// [`Vertex`] says.
     pub fn vertices<V: Vertex>(&mut self, buffer: &'a Buffer<V>) -> &mut Self {
-        self.vertices.push(Input::of(buffer));
+        self.vertices.push(Input::of(buffer, 0));
         self
     }
 
     /// Binds `buffer`'s vertices to the program's instance attributes, as
     /// [`vertices`](Self::vertices) does to its vertex attributes: the mesh
-    /// draws an instance of its primitives per vertex of the buffer.
-    pub(crate) fn instances<V: Vertex>(&mut self, buffer: &'a Buffer<V>) -> &mut Self {
-        self.instances.push(Input::of(buffer));
+    /// draws an instance of its primitives per vertex of the buffer, as
+    /// many as the instance attributes' buffers have, the fewest of them.
+    pub fn instances<V: Vertex>(&mut self, buffer: &'a Buffer<V>) -> &mut Self {
+        self.instances_from(buffer, 0)
+    }
+
+    /// Binds `buffer`'s vertices from the `first` on to the program's
+    /// instance attributes, as [`instances`](Self::instances) does from
+    /// the first: an instance reads the vertex `first` places after its
+    /// own, as of a neighbor. It binds the buffer at an offset, which every
+    /// backend can.
+    pub fn instances_from<V: Vertex>(&mut self, buffer: &'a Buffer<V>, first: u32) -> &mut Self {
+        self.instances.push(Input::of(buffer, first));
+        self
+    }
+
+    /// Binds `buffer` to the program's next vertex buffer that its vertex
+    /// stage reads as a storage buffer
+    /// ([`Buffer::vertices`](mln_gfx::shaders::program::Buffer::vertices)),
+    /// in the program's order, to read any of its vertices by index. A
+    /// program reads such buffers only where the backend binds them
+    /// ([`Caps::binds_vertex_buffers`](mln_gfx::gpu::Caps::binds_vertex_buffers)).
+    pub fn pulled<V: bytemuck::Pod>(&mut self, buffer: &'a Buffer<V>) -> &mut Self {
+        self.pulled.push(&buffer.entry);
         self
     }
 
     /// Binds the values of the data-driven paint properties that `paint`
-    /// holds to the program's properties, and reads those that `values`,
-    /// the layer's evaluated paint values, has the same for every feature
-    /// from their uniforms instead. The engine then writes what the
-    /// program's blocks hold of the properties into each draw of the mesh
-    /// ([`Group::push`](crate::draw::Group::push)).
+    /// holds to the program's attributes of the properties' names, of a
+    /// vertex or of an instance, and reads those that `values`, the layer's
+    /// evaluated paint values, has the same for every feature from their
+    /// uniforms instead. A program without an attribute of a property's
+    /// name reads its values itself, from the paint's buffer
+    /// ([`PaintVertices::buffer`], [`pulled`](Self::pulled)). The engine
+    /// then writes what the program's blocks hold of the properties into
+    /// each draw of the mesh ([`Group::push`](crate::draw::Group::push)).
     pub fn paint<P: PaintBinders>(&mut self, paint: PaintVertices<'a, P>, values: &P::Paint) -> &mut Self {
         let MeshDesc { program, paint: attributes, uniforms, mesh_paint, .. } = self;
         *mesh_paint = Some(paint.bind(program, values, attributes, uniforms));
@@ -213,35 +255,22 @@ impl Resources {
             program.name
         );
         let mut vertices = VertexAttributeArray::new();
-        for (id, attribute) in &desc.paint {
-            vertices.set_shared(*id, attribute.clone());
+        let mut instances = (!desc.instances.is_empty()).then(VertexAttributeArray::new);
+        for (step, id, attribute) in &desc.paint {
+            match (step, &mut instances) {
+                (VertexStep::Vertex, _) => vertices.set_shared(*id, attribute.clone()),
+                (VertexStep::Instance, Some(instances)) => instances.set_shared(*id, attribute.clone()),
+                (VertexStep::Instance, None) => debug_assert!(false, "per-instance paint of a mesh without instances"),
+            }
         }
         let mut vertex_count = usize::MAX;
-        let mut attributes = program
-            .attributes
-            .iter()
-            .enumerate()
-            .filter(|(_, attribute)| program.properties.iter().all(|property| property.name != attribute.name))
-            .map(|(index, _)| index);
         for input in &desc.vertices {
-            vertex_count = vertex_count.min(input.entry.count());
-            if input.names.is_empty() {
-                bind(&mut vertices, &mut attributes, input);
-            } else {
-                let mut named = input.names.iter().map(|name| {
-                    program.attributes.iter().position(|attribute| attribute.name == *name).unwrap_or(usize::MAX)
-                });
-                bind(&mut vertices, &mut named, input);
-            }
+            vertex_count = vertex_count.min(input.count());
         }
-        let instances = (!desc.instances.is_empty()).then(|| {
-            let mut instances = VertexAttributeArray::new();
-            let mut attributes = 0..program.instance_attributes.len();
-            for input in &desc.instances {
-                bind(&mut instances, &mut attributes, input);
-            }
-            instances
-        });
+        bind_inputs(program, program.attributes, &mut vertices, &desc.vertices);
+        if let Some(instances) = &mut instances {
+            bind_inputs(program, program.instance_attributes, instances, &desc.instances);
+        }
         let mut textures = Textures::default();
         for (slot, (texture, sampler)) in textures.iter_mut().zip(&desc.textures) {
             *slot = Some((texture.0.clone(), *sampler));
@@ -255,8 +284,38 @@ impl Resources {
             segments: desc.indexes.segments.clone(),
             instances,
         };
-        let objects = DrawObjects::new(program, desc.uniforms, desc.projection, blend, desc.cull, geometry, textures);
+        let mut objects =
+            DrawObjects::new(program, desc.uniforms, desc.projection, blend, desc.cull, geometry, textures);
+        let mut pulled = program.buffers.iter().filter(|buffer| matches!(buffer.kind, BufferKind::Vertices { .. }));
+        for entry in &desc.pulled {
+            let Some(buffer) = pulled.next() else {
+                debug_assert!(false, "a mesh of {} that pulls more buffers than its program reads", program.name);
+                break;
+            };
+            objects.pull(buffer.id, (*entry).clone());
+        }
         (objects, desc.mesh_paint.clone())
+    }
+}
+
+/// Binds `inputs` to `attributes`, the program's attributes of one step:
+/// those of an input's vertex's names, or else, in order, those that read
+/// no paint property.
+fn bind_inputs(program: &Program, attributes: &[Attribute], array: &mut VertexAttributeArray, inputs: &[Input<'_>]) {
+    let mut unnamed = attributes
+        .iter()
+        .enumerate()
+        .filter(|(_, attribute)| program.properties.iter().all(|property| property.name != attribute.name))
+        .map(|(index, _)| index);
+    for input in inputs {
+        if input.names.is_empty() {
+            bind(array, &mut unnamed, input);
+        } else {
+            let mut named = input.names.iter().map(|name| {
+                attributes.iter().position(|attribute| attribute.name == *name).unwrap_or(usize::MAX)
+            });
+            bind(array, &mut named, input);
+        }
     }
 }
 
@@ -270,7 +329,8 @@ fn bind(array: &mut VertexAttributeArray, attributes: &mut impl Iterator<Item = 
             return;
         };
         if attribute != usize::MAX {
-            array.set_shared(attribute, SharedAttribute::new(input.entry.clone(), format, offset, input.stride));
+            let shared = SharedAttribute::new(input.entry.clone(), format, offset, input.stride);
+            array.set_shared(attribute, shared.starting_at(input.first));
         }
         offset += format.stride() as u32;
     }

@@ -76,10 +76,10 @@ use mln_style::PropertyEvaluationParameters;
 use mln_style::evaluated::Evaluated;
 use mln_style::expression::expr::FeatureState;
 use mln_style::expression::image_expression::UnavailableImages;
-use mln_style::expression::{EvaluationContext, Value, ValueConverter};
+use mln_style::expression::{EvaluationContext, Image, Value, ValueConverter};
 use mln_style::layer_type::{LayerStyle, PaintSet, SourceKind, StyleLayerType};
 use mln_style_types::TranslateAnchorType;
-use mln_style_types::image::{ImageDependencies, ImageType};
+use mln_style_types::image::{ImageDependencies, ImagePosition, ImagePositions, ImageType};
 use mln_text::glyph::{FontFaces, GlyphDependencies, GlyphID, GlyphIDType};
 use mln_tile::{Feature, TileLayer};
 use mln_tile_id::geometry_tile_data::{
@@ -91,6 +91,7 @@ use mln_util::constants::TILE_SIZE_D;
 use mln_util::error::Error;
 use mln_util::font_stack::FontStack;
 use mln_util::geo::ScreenCoordinate;
+use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
 use mln_wire::Wire;
 
@@ -104,7 +105,10 @@ pub use crate::image_store::ImageStore;
 use crate::layout::filter_groups::FilterGroups;
 pub use crate::layout::tile_layout::Resolved;
 pub use crate::paint_parameters::Frame;
-pub use crate::paint_property_binder::{LayerBinders, PaintBinders, PaintPropertyBinder, PaintVertices};
+pub use crate::paint_property_binder::{
+    CrossFadedPaintPropertyBinder, FeaturePatterns, LayerBinders, PaintBinders, PaintPropertyBinder, PaintVertices,
+};
+use crate::paint_property_binder::PatternDependency;
 pub use crate::render_light::EvaluatedLight;
 use crate::render_tile::{TileContent, ViewPlace};
 use crate::tile::contents::GeometryContents;
@@ -717,6 +721,13 @@ impl<'a, S: StyleLayerType, B> LayerBucket<'a, S, B> {
     pub fn icon_atlas(self) -> Option<&'a Texture> {
         self.contents.textures.icon()
     }
+
+    /// Where the pattern `id` that the tile's layout asked for is in its
+    /// [`icon_atlas`](Self::icon_atlas).
+    #[must_use]
+    pub fn pattern(self, id: &str) -> Option<&'a ImagePosition> {
+        self.contents.pattern_positions()?.get(id)
+    }
 }
 
 /// A feature of a tile that a rendered-feature query tests a layer `L`
@@ -960,6 +971,70 @@ impl<S: StyleLayerType> LayoutCx<'_, S> {
         self.images.entry(id.to_owned()).or_insert(kind);
     }
 
+    /// Asks for the patterns of the `*-pattern` property that `pattern`
+    /// picks of a layer's paint values, for each layer of the group: a
+    /// value the same for every feature once, and for each of `features`,
+    /// by index, a value that differs by feature, one zoom level below the
+    /// tile's, at it and one above, which a pattern crossing zoom levels
+    /// fades between. Returns each feature's patterns, in order, which its
+    /// binders' values take ([`BuildCx::populate_patterns`]).
+    pub fn need_patterns(
+        &mut self,
+        pattern: fn(&<S::PaintProperties as PaintSet>::Evaluated) -> &Evaluated<Image>,
+        features: &[usize],
+    ) -> Result<Vec<FeaturePatterns>, Error> {
+        let mut need = |id: &str| {
+            if !self.images.contains_key(id) {
+                self.images.insert(id.to_owned(), ImageType::Pattern);
+            }
+        };
+        for layer in self.layers {
+            let value = pattern(&layer.paint);
+            let faded = value.faded();
+            if value.is_constant() && !faded.to.id().is_empty() {
+                need(faded.to.id());
+                need(faded.from.id());
+            }
+        }
+        let mut patterns = vec![FeaturePatterns::default(); features.len()];
+        if self.layers.iter().all(|layer| pattern(&layer.paint).is_constant()) {
+            return Ok(patterns);
+        }
+        let zoom = f32::from(self.tile.overscaled_z);
+        for (&index, patterns) in features.iter().zip(&mut patterns) {
+            let feature = self.source_layer.feature(index)?;
+            for layer in self.layers {
+                let value = pattern(&layer.paint);
+                if value.is_constant() {
+                    continue;
+                }
+                let at = |zoom| {
+                    value.evaluate_faded(
+                        &EvaluationContext::with_zoom_feature(zoom, Some(&feature))
+                            .with_available_images(Some(self.available_images))
+                            .with_unavailable_images(Some(self.unavailable_images))
+                            .with_canonical_tile_id(Some(&self.tile.canonical)),
+                    )
+                };
+                let [min, mid, max] = [at(zoom - 1.0), at(zoom), at(zoom + 1.0)];
+                for image in [&min.to, &mid.to, &max.to].into_iter().filter(|image| !image.empty()) {
+                    if !self.images.contains_key(image.id()) {
+                        self.images.insert(image.id().to_owned(), ImageType::Pattern);
+                    }
+                }
+                if !patterns.0.iter().any(|(id, _)| *id == layer.style.id) {
+                    let dependency = PatternDependency {
+                        min: min.to.id().to_owned(),
+                        mid: mid.to.id().to_owned(),
+                        max: max.to.id().to_owned(),
+                    };
+                    patterns.0.push((layer.style.id.clone(), dependency));
+                }
+            }
+        }
+        Ok(patterns)
+    }
+
     /// Asks for `glyphs` of the font stack `font_stack`, as
     /// [`need_image`](Self::need_image) asks for an image.
     pub fn need_glyphs(&mut self, font_stack: FontStack, glyphs: impl IntoIterator<Item = GlyphID>) {
@@ -984,6 +1059,8 @@ pub struct BuildCx<'a, S: StyleLayerType> {
     pub(crate) mode: MapMode,
     pub(crate) first_load: bool,
     pub(crate) collision_boxes: bool,
+    pub(crate) cpu_rasterizer: bool,
+    pub(crate) subdivision_granularity: SubdivisionGranularitySetting,
     pub(crate) source_layer: TileLayer<'a>,
     pub(crate) resolved: Option<&'a Resolved>,
     pub(crate) feature_index: &'a mut FeatureIndexBuilder,
@@ -1021,6 +1098,23 @@ impl<S: StyleLayerType> BuildCx<'_, S> {
         self.collision_boxes
     }
 
+    /// Whether the renderer's device rasterizes on the CPU
+    /// ([`Caps::cpu_rasterizer`](mln_gfx::gpu::Caps::cpu_rasterizer)), where
+    /// an instance of a mesh costs about as much as a mesh of its own: a
+    /// bucket may hold copies of what it draws as instances elsewhere.
+    #[must_use]
+    pub fn cpu_rasterizer(&self) -> bool {
+        self.cpu_rasterizer
+    }
+
+    /// How finely geometry splits to follow the globe's curve: the cells of
+    /// a tile's grid per axis at each zoom level, which split nothing on
+    /// Mercator ([`globe`](crate::globe)).
+    #[must_use]
+    pub fn subdivision_granularity(&self) -> &SubdivisionGranularitySetting {
+        &self.subdivision_granularity
+    }
+
     /// What the glyphs and images the layout asked for resolved to; `None`
     /// for a layout that asked for none.
     #[must_use]
@@ -1050,7 +1144,31 @@ impl<S: StyleLayerType> BuildCx<'_, S> {
         feature: &dyn GeometryTileFeature,
         vertices: usize,
     ) {
-        binders.populate(feature, index, vertices, &self.tile.canonical, &Value::Null);
+        binders.populate(
+            feature,
+            index,
+            vertices,
+            &self.tile.canonical,
+            &Value::Null,
+            &ImagePositions::default(),
+            &FeaturePatterns::default(),
+        );
+    }
+
+    /// Writes the values of `feature`, as [`populate`](Self::populate) does,
+    /// with its `patterns` ([`LayoutCx::need_patterns`]) where the layout's
+    /// resolved patterns put them.
+    pub fn populate_patterns<P: PaintBinders>(
+        &self,
+        binders: &mut LayerBinders<P>,
+        index: usize,
+        feature: &dyn GeometryTileFeature,
+        vertices: usize,
+        patterns: &FeaturePatterns,
+    ) {
+        let none = ImagePositions::default();
+        let positions = self.resolved.map_or(&none, |resolved| &resolved.patterns);
+        binders.populate(feature, index, vertices, &self.tile.canonical, &Value::Null, positions, patterns);
     }
 
     /// Writes the values of `feature`, as [`populate`](Self::populate) does,
@@ -1064,7 +1182,8 @@ impl<S: StyleLayerType> BuildCx<'_, S> {
         vertices: usize,
         section: &Value,
     ) {
-        binders.populate(feature, index, vertices, &self.tile.canonical, section);
+        let (positions, patterns) = (ImagePositions::default(), FeaturePatterns::default());
+        binders.populate(feature, index, vertices, &self.tile.canonical, section, &positions, &patterns);
     }
 
     /// Adds `geometry`, the geometry of the feature at `index`, to the

@@ -101,8 +101,10 @@ pub mod __private {
     pub use mln_wire;
 
     pub use crate::bucket::FeatureStates;
+    pub use mln_style_types::image::ImagePositions;
+
     pub use crate::paint_property_binder::{
-        Bind, BinderSet, InterleavedVertexBuffer, PaintPropertyBinderBase, UniformValue,
+        Bind, BinderSet, InterleavedVertexBuffer, PaintPropertyBinderBase, PatternDependency, UniformValue,
     };
 }
 

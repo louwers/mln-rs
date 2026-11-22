@@ -9,11 +9,12 @@ use glam::{DMat4, DVec2, DVec3, Vec2};
 use mln_gfx::gpu::Gpu;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program::PROJECTION_BUFFER;
-use mln_map_types::{Projection, ProjectionData, View};
+use mln_map_types::{ClipDepthRange, Projection, ProjectionData, View};
 use mln_style_types::TranslateAnchorType;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::constants::{EXTENT, M2PI};
 
+use crate::frame_projection::zero_to_one_clip_z;
 use crate::gfx::context::Resources;
 use crate::gfx::uniform_buffer::UniformBufferArray;
 use crate::paint_parameters::{Frame, TransformParameters};
@@ -44,10 +45,12 @@ pub struct TileTransform {
     /// Where the geometry's origin is in the tile, in tile units, if not at
     /// the tile's corner.
     pub origin: Option<DVec2>,
-    /// Whether to project with the near plane moved out to a tenth of the
-    /// camera's distance to the center, for draws that test the depth of 3D
-    /// geometry, which then spends less of its precision near the camera.
-    pub near_clipped: bool,
+    /// Whether the geometry is 3D, drawn with
+    /// [`Depth::Volume`](crate::draw::Depth::Volume): projected with the
+    /// near plane moved out to a tenth of the camera's distance to the
+    /// center, which spends less of the depth's precision near the camera,
+    /// into the depth that the frame's 3D geometry shares on every backend.
+    pub volume: bool,
     /// Whether the translation is in viewport pixels rather than tile
     /// units, for geometry in pixels.
     pub viewport_pixels: bool,
@@ -173,9 +176,14 @@ pub(crate) fn projection_data(tile_id: &UnwrappedTileID, frame: &Frame<'_>, how:
     }
     let origin = how.origin.map(|origin| Point::new(origin.x, origin.y));
     let (translation, anchor) = (how.translate, how.anchor);
-    let matrix =
-        tile_matrix(tile_id, frame, translation, anchor, how.near_clipped, how.viewport_pixels, origin, how.aligned);
+    let matrix = tile_matrix(tile_id, frame, translation, anchor, how.volume, how.viewport_pixels, origin, how.aligned);
     let mut data = frame.camera.projection_data_for_matrix(tile_id, &matrix);
+    // OpenGL's clip depth runs from -1: its 3D geometry writes the depth
+    // that the other backends' does. The globe projects in its shaders.
+    if how.volume && frame.clip_depth == ClipDepthRange::NegativeOneToOne && !frame.camera.is_globe() {
+        zero_to_one_clip_z(&mut data.main_matrix);
+        zero_to_one_clip_z(&mut data.fallback_matrix);
+    }
     if !how.viewport_pixels {
         let translate = tile_unit_translation(tile_id, translation, anchor, frame.camera);
         data.translate = DVec2::new(f64::from(translate[0]), f64::from(translate[1]));

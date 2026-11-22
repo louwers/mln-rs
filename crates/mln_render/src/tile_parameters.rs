@@ -23,6 +23,9 @@ pub(crate) struct TileParameters<'a> {
     pub(crate) tile_lod_zoom_shift: f64,
     pub(crate) tile_lod_mode: TileLodMode,
     pub(crate) subdivision_granularity: SubdivisionGranularitySetting,
+    /// Whether the renderer's device rasterizes on the CPU
+    /// (`Caps::cpu_rasterizer`), which the tiles' layouts read.
+    pub(crate) cpu_rasterizer: bool,
     pub(crate) global_state: Option<Arc<GlobalStateMap>>,
     pub(crate) is_update_synchronous: bool,
     /// The style's font faces, which the tiles' layouts shape text with.

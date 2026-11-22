@@ -40,9 +40,9 @@ impl SharedAttribute {
 }
 
 impl SharedAttribute {
-    /// The number of vertices the attribute reads.
+    /// The number of vertices the attribute reads, from its first.
     pub(crate) fn count(&self) -> usize {
-        self.vertices.count()
+        self.vertices.count().saturating_sub(self.vertex_offset as usize)
     }
 
     /// Whether the next upload writes the vertices the attribute reads:

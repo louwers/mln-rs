@@ -78,6 +78,9 @@ pub struct Resources {
     /// The tiles' surfaces: the extent's quad, and the globe's grid of each
     /// zoom, by whether it touches the north and the south pole.
     surfaces: HashMap<Option<(u8, bool, bool)>, crate::handles::TileSurface>,
+    /// The indexes of quads, each four vertices after the last
+    /// ([`quads`](Self::quads)), once a layer asked for them.
+    quads: Option<crate::draw::Buffer<u16>>,
     /// What a [`destroy_released`](Self::destroy_released) takes from the
     /// queue, and what it destroys, kept for their storage.
     releases: Vec<Release>,
@@ -107,6 +110,7 @@ impl Resources {
             meshes: Store::default(),
             next_mesh_seq: 0,
             surfaces: HashMap::default(),
+            quads: None,
             releases: Vec::new(),
             doomed: Vec::new(),
             torn_down: false,
@@ -192,6 +196,21 @@ impl Resources {
         };
         self.surfaces.insert(key, surface.clone());
         surface
+    }
+
+    /// The indexes of `count` quads, each the four vertices after the
+    /// last's, of the corners 0 and 1 above 2 and 3: the counter-clockwise
+    /// triangles 0, 2, 1 and 1, 2, 3 of each, in as many segments as their
+    /// vertices need. Every such index buffer shares one buffer.
+    pub fn quads(&mut self, count: usize) -> crate::draw::IndexBuffer {
+        let buffer = match &self.quads {
+            Some(buffer) => buffer.clone(),
+            None => {
+                let buffer = self.buffer(&RenderStaticData::quad_indices());
+                self.quads.insert(buffer).clone()
+            }
+        };
+        crate::draw::IndexBuffer { buffer, segments: RenderStaticData::quad_segments(count) }
     }
 
     /// The size of `texture`, in texels.
@@ -608,6 +627,7 @@ impl Resources {
         // The meshes first, which hold entries of the other stores.
         self.meshes.clear();
         self.surfaces.clear();
+        self.quads = None;
         self.textures.clear();
         self.buffers.clear();
         self.release_shaders();

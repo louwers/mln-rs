@@ -4,7 +4,7 @@ use mln_gfx::gpu::{
     StencilTest, TargetFormats,
 };
 use mln_gfx::types::{DepthFunctionType, StencilOpType};
-use mln_map_types::{FrameProjection, MapDebugOptions, ProjectionData, View, ViewportMode};
+use mln_map_types::{ClipDepthRange, FrameProjection, MapDebugOptions, ProjectionData, View, ViewportMode};
 use mln_tile_id::UnwrappedTileID;
 use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, Log};
@@ -162,6 +162,8 @@ pub struct Frame<'a> {
     /// a pass can draw into them together with the layer composite's
     /// texture.
     pub(crate) composites_with_frame_depth: bool,
+    /// The clip depth of the backend's API.
+    pub(crate) clip_depth: ClipDepthRange,
     /// How far the fade of the current placement has come: from 0 when it
     /// was committed to 1 once its fade is done, and past 1 after that; 1
     /// where placements don't fade.
@@ -243,6 +245,7 @@ impl<'a> PaintParameters<'a> {
             pixels_to_gl_units[1] *= -1.0;
         }
 
+        let clip_depth = context.caps().clip_depth;
         PaintParameters {
             context,
             open_pass: None,
@@ -254,6 +257,7 @@ impl<'a> PaintParameters<'a> {
                 pixels_to_clip: pixels_to_gl_units,
                 light: &frame.light,
                 composites_with_frame_depth,
+                clip_depth,
                 placement_fade: frame.placement_fade,
                 transform: transform_params,
             },

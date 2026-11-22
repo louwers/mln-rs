@@ -376,7 +376,9 @@ impl Texture {
 /// reads it from there, otherwise from the values a layer binds to the
 /// program's attribute of its name, which a source reads through the
 /// directives that [`source`](crate::shaders::source#properties)
-/// describes.
+/// describes, or, in a program without one that reads vertex buffers as
+/// storage buffers ([`Buffer::vertices`]), from such a buffer, as its
+/// source reads it.
 ///
 /// A vertex stage mixes the values of a [`Float`](PropertyType::Float) or a
 /// [`Color`](PropertyType::Color) at two zooms by the member `<name>_t` of
@@ -547,7 +549,9 @@ impl Program {
 
     /// Checks the rules this declaration's doc states, which a backend checks
     /// before it compiles the program: distinct attribute names, an
-    /// attribute of each property's name, buffers at ids of their kinds, as [`Buffer`]'s constructors
+    /// attribute of each property's name unless the program reads vertex
+    /// buffers as storage buffers, and so a property's values itself,
+    /// buffers at ids of their kinds, as [`Buffer`]'s constructors
     /// give them, each id once, vertex buffers of the formats
     /// [`BufferKind::Vertices`] names, no more attributes and textures than
     /// a program can have, and distinct names of the buffers, the textures
@@ -567,7 +571,10 @@ impl Program {
                 return invalid(format!("two attributes are named {}", attribute.name));
             }
         }
-        if let Some(property) = self.properties.iter().find(|property| self.property_attribute(property).is_none()) {
+        let pulls = self.buffers.iter().any(|buffer| matches!(buffer.kind, BufferKind::Vertices { .. }));
+        if let Some(property) =
+            self.properties.iter().find(|property| !pulls && self.property_attribute(property).is_none())
+        {
             return invalid(format!("no attribute of property {}", property.name));
         }
         let attributes = self.attributes.len() + self.instance_attributes.len();
@@ -770,6 +777,12 @@ mod tests {
         let fails = |program: Program| assert!(program.check().is_err(), "{:?}", program.buffers);
         fails(Program { attributes: &[POSITION, POSITION], ..EMPTY });
         fails(Program { properties: const { &[Property::color("color")] }, ..EMPTY });
+        let pulling = Program {
+            buffers: const { &[Buffer::vertices("vertices", 0, Short2)] },
+            properties: const { &[Property::color("color")] },
+            ..EMPTY
+        };
+        assert!(pulling.check().is_ok(), "a program that pulls its properties' values");
         fails(Program {
             buffers: const { &[Buffer::uniform::<ViewUBO>("props", 0), Buffer::uniform::<ViewUBO>("other", 0)] },
             ..EMPTY

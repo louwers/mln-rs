@@ -34,6 +34,9 @@ pub(crate) struct LayoutParams {
     pub(crate) mode: MapMode,
     pub(crate) pixel_ratio: f32,
     pub(crate) show_collision_boxes: bool,
+    /// Whether the renderer's device rasterizes on the CPU
+    /// (`Caps::cpu_rasterizer`).
+    pub(crate) cpu_rasterizer: bool,
     pub(crate) subdivision_granularity: SubdivisionGranularitySetting,
     /// Whether the tile has had no layout yet.
     pub(crate) first_load: bool,
@@ -218,8 +221,8 @@ pub(crate) fn build(discovered: Discovered, input: &LayoutInput<'_>, resolved: &
     };
     // Room for every layer of the groups, of which those with data keep it.
     built.buckets = LayoutBuckets::with_capacity(groups.iter().map(|group| group.layers.len()).sum());
-    let LayoutParams { first_load, show_collision_boxes, .. } = input.params;
-    let build = BuildParams { first_load, show_collision_boxes };
+    let LayoutParams { first_load, show_collision_boxes, cpu_rasterizer, .. } = input.params;
+    let build = BuildParams { first_load, show_collision_boxes, cpu_rasterizer };
     let bucket_parameters = input.bucket_parameters();
 
     let mut waiting = Vec::new();

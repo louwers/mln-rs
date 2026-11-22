@@ -284,6 +284,7 @@ impl RenderablesContext for CoverContext<'_, '_, '_> {
             mode: parameters.mode,
             pixel_ratio: parameters.pixel_ratio,
             show_collision_boxes: parameters.debug_options.contains(MapDebugOptions::COLLISION),
+            cpu_rasterizer: parameters.cpu_rasterizer,
             subdivision_granularity: parameters.subdivision_granularity,
             first_load: true,
         };

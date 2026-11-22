@@ -50,6 +50,8 @@ pub(crate) struct BuildParams {
     pub(crate) first_load: bool,
     /// Whether the map shows collision boxes.
     pub(crate) show_collision_boxes: bool,
+    /// Whether the renderer's device rasterizes on the CPU.
+    pub(crate) cpu_rasterizer: bool,
 }
 
 /// What a tile's layout reads, and where it records the glyphs and images
@@ -130,6 +132,8 @@ pub(crate) fn build_layout<S: StyleLayerType, L: Layout<S>>(
         mode: parameters.mode,
         first_load: build.first_load,
         collision_boxes: build.show_collision_boxes,
+        cpu_rasterizer: build.cpu_rasterizer,
+        subdivision_granularity: parameters.subdivision_granularity,
         source_layer: source_layer.layer()?,
         resolved,
         feature_index: &mut built.feature_index,

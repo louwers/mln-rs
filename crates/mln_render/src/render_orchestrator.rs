@@ -336,6 +336,7 @@ impl RenderOrchestrator {
 
         let will_render = self.update_sources(
             update_parameters,
+            res.caps().cpu_rasterizer,
             &layers,
             &layer_changes,
             &constants_mask_changed,
@@ -772,6 +773,7 @@ impl RenderOrchestrator {
     fn update_sources(
         &mut self,
         update_parameters: &UpdateParameters,
+        cpu_rasterizer: bool,
         layers: &LayerList,
         layer_changes: &LayerChanges,
         constants_mask_changed: &VecSet<String>,
@@ -793,6 +795,7 @@ impl RenderOrchestrator {
             tile_lod_zoom_shift: update_parameters.tile_lod_zoom_shift,
             tile_lod_mode: update_parameters.tile_lod_mode,
             subdivision_granularity: update_parameters.subdivision_granularity,
+            cpu_rasterizer,
             global_state: self.global_state.clone(),
             is_update_synchronous: false,
             font_faces: update_parameters.style.get_font_faces().cloned(),
