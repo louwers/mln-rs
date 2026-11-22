@@ -333,6 +333,18 @@ pub(crate) struct Buffer {
     pub(crate) triangles: Indexes,
     pub(crate) placed_symbols: Vec<PlacedSymbol>,
     pub(crate) pools: PlacedSymbolPools,
+    /// What of the buffer can draw at the opacities placement last wrote,
+    /// once it wrote them.
+    #[wire(skip)]
+    pub(crate) visible: Option<Visible>,
+}
+
+/// Which of a buffer's segments have a vertex that can draw, and whether
+/// any of its vertices can.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Visible {
+    segments: Vec<bool>,
+    any: bool,
 }
 
 /// The geometry of a buffer's placed symbols, which they hold ranges of.
@@ -395,6 +407,25 @@ impl Buffer {
     /// Whether the draw of `segment` (one segment, or `None` for the
     /// whole buffer) has any vertex that can draw.
     pub(crate) fn segment_has_visible_vertices(&self, segment: Option<usize>) -> bool {
+        match (&self.visible, segment) {
+            (Some(visible), Some(i)) => visible.segments.get(i).copied().unwrap_or(true),
+            (Some(visible), None) => visible.any,
+            (None, segment) => self.finds_visible_vertices(segment),
+        }
+    }
+
+    /// Notes what of the buffer can draw at the opacities placement just
+    /// wrote, which [`segment_has_visible_vertices`](Self::segment_has_visible_vertices)
+    /// then reads.
+    pub(crate) fn opacities_written(&mut self) {
+        let segments = (0..self.triangles.segments().len()).map(|i| self.finds_visible_vertices(Some(i))).collect();
+        let any = self.finds_visible_vertices(None);
+        self.visible = Some(Visible { segments, any });
+    }
+
+    /// [`segment_has_visible_vertices`](Self::segment_has_visible_vertices),
+    /// from the opacities.
+    fn finds_visible_vertices(&self, segment: Option<usize>) -> bool {
         match segment {
             Some(i) => self
                 .triangles
@@ -836,9 +867,14 @@ mod tests {
         buffer.triangles.add_keyed(&mut vertices, 0, 0.0, [[0, 1, 1]]);
         vertices.extend([0, 0]);
         buffer.triangles.add_keyed(&mut vertices, 2, 1.0, [[0, 1, 1]]);
-        assert!(!buffer.segment_has_visible_vertices(Some(0)));
-        assert!(buffer.segment_has_visible_vertices(Some(1)));
-        // An unknown segment draws.
-        assert!(buffer.segment_has_visible_vertices(Some(2)));
+        for written in [false, true] {
+            if written {
+                buffer.opacities_written();
+            }
+            assert!(!buffer.segment_has_visible_vertices(Some(0)));
+            assert!(buffer.segment_has_visible_vertices(Some(1)));
+            // An unknown segment draws.
+            assert!(buffer.segment_has_visible_vertices(Some(2)));
+        }
     }
 }

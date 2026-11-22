@@ -180,6 +180,9 @@ impl Placement {
             }
         }
         state.symbol_instances = symbols;
+        for buffer in [&mut state.text, &mut state.icon, &mut state.sdf_icon] {
+            buffer.opacities_written();
+        }
         bucket.sort_features(view.angle() as f32);
     }
 
