@@ -1,5 +1,5 @@
 //! A runtime of a registry with the extension types, a map of `SIZE` and an
-//! offscreen session of it, through the facade.
+//! offscreen session of it on WebGPU, through the facade.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -7,14 +7,16 @@ use std::time::{Duration, Instant};
 use mln_rs::mln_render::Registry;
 use mln_rs::mln_util::size::Size;
 use mln_rs::{
-    AttachOptions, Completion, DemandMode, Error, FrameDemand, FrameDisposition, Map, MapOptions, RenderSession,
-    RenderTarget, Runtime, RuntimeOptions,
+    AttachOptions, BackendType, Completion, DemandMode, Device, DeviceOptions, Error, FrameDemand, FrameDisposition,
+    Map, MapOptions, RenderSession, RenderTarget, Runtime, RuntimeOptions,
 };
 
 pub(crate) const SIZE: Size = Size { width: 64, height: 64 };
 
 /// A runtime of a registry, a map of `SIZE` with a style, and an offscreen
-/// session of it that shows the style loaded.
+/// session of it that shows the style loaded. The session draws with
+/// WebGPU, whatever the build's default backend, since the extension types'
+/// programs have WGSL alone.
 pub(crate) struct Fixture {
     pub(crate) session: RenderSession,
     pub(crate) map: Map,
@@ -29,8 +31,9 @@ impl Fixture {
         let (map, created) = runtime.create_map(options).unwrap();
         created.wait().unwrap();
         wait(map.set_style_json(style));
-        let (session, attached) =
-            map.attach(RenderTarget::Offscreen { size: SIZE, device: None }, AttachOptions::default()).unwrap();
+        let device = Device::with_backend(BackendType::WebGPU, DeviceOptions::default()).unwrap();
+        let target = RenderTarget::Offscreen { size: SIZE, device: Some(device) };
+        let (session, attached) = map.attach(target, AttachOptions::default()).unwrap();
         attached.wait().unwrap();
         let fixture = Fixture { session, map, runtime };
         fixture.render_loaded();
