@@ -70,7 +70,7 @@ impl Indexes {
 
     /// The indexes, each relative to its segment's first vertex: gone once
     /// they uploaded, unless the bucket keeps them
-    /// ([`Upload::kept_indexes`](crate::layer::Upload::kept_indexes)).
+    /// ([`placement::keep_indexes`](crate::placement::keep_indexes)).
     #[must_use]
     pub fn get(&self) -> &[u16] {
         self.indexes.get()

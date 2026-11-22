@@ -45,7 +45,9 @@ pub use self::groups::CollisionGroups;
 pub(crate) use self::schedule::Schedule;
 pub use crate::geometry::feature_index::FeatureIndex;
 use crate::geometry::feature_index::{FeatureSelection, QueryLayers, QueryResults};
-use crate::layer::{Bucket, Layer, LayerValues};
+use crate::bucket_upload::Upload;
+use crate::gfx::mesh::Indexes;
+use crate::layer::{Bucket, GpuVec, Layer, LayerValues};
 use crate::paint_parameters::Frame;
 use crate::query::RenderedQueryOptions;
 use crate::registry::RegistryBuilder;
@@ -280,18 +282,32 @@ impl<'a> PlacementBuckets<'a> {
         self.store.bucket(key)?.downcast_ref()
     }
 
-    /// [`get`](Self::get), to change.
+    /// [`get`](Self::get), to change: the bucket's kept vectors ([`keep`])
+    /// that the pass changes upload again, into the buffers its meshes read.
     pub fn get_mut<B: Bucket>(&mut self, key: &BucketKey) -> Option<&mut B> {
-        self.store.bucket_mut(key)?.downcast_mut()
+        let bucket = self.store.bucket_mut(key)?;
+        bucket.changed();
+        bucket.downcast_mut()
     }
+}
 
-    /// Uploads the bucket at `key` again, its kept vectors
-    /// ([`Upload::kept`](crate::layer::Upload::kept)) into the buffers its
-    /// meshes read: the pass changed them.
-    pub fn changed(&mut self, key: &BucketKey) {
-        if let Some(bucket) = self.store.bucket_mut(key) {
-            bucket.changed();
-        }
+/// Names `vec` to `up`, as [`Upload::vec`] does, keeping its data, which
+/// the pass changes ([`GpuVec::get_mut`]) in the buckets it takes
+/// ([`PlacementBuckets::get_mut`]): the engine then uploads it again into
+/// the same buffer. A tile's world copies each have a buffer of their own
+/// of it. Its length stays the one it first uploaded with, as the buffer's
+/// and its meshes' do.
+pub fn keep<V: bytemuck::Pod>(up: &mut Upload<'_>, vec: &mut GpuVec<V>) {
+    if let crate::bucket_upload::Kind::Geometry { geometry, copies, res } = &mut up.kind {
+        geometry.upload(vec, true, copies, res);
+    }
+}
+
+/// Names `indexes` to `up`, as [`Upload::indexes`] does, keeping them, as
+/// [`keep`] keeps a vector: the pass orders them anew ([`Indexes::get_mut`]).
+pub fn keep_indexes(up: &mut Upload<'_>, indexes: &mut Indexes) {
+    if let crate::bucket_upload::Kind::Geometry { geometry, copies, res } = &mut up.kind {
+        geometry.upload_indexes(indexes, true, copies, res);
     }
 }
 

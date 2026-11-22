@@ -1,7 +1,7 @@
 // The bucket is built on a worker and then owned by its tile's contents on
 // the render thread, where placement, cross-tile indexing and sorting
 // change its `state` in the frame's update. What placement writes, the
-// bucket keeps (`Upload::kept`), and its buffers take again.
+// bucket keeps (`placement::keep`), and its buffers take again.
 
 use std::cmp::Reverse;
 use std::collections::BTreeMap;
@@ -11,6 +11,7 @@ use glam::Vec2;
 use mln_gfx::gfx_types::AttributeDataType::{Float, Float2, Float3, Short2, Short4, UShort2, UShort4};
 use mln_render::draw::Vertex;
 use mln_render::layer::{Bucket, GpuVec, Indexes, LayerBinders, PaintPropertyBinder, Upload};
+use mln_render::placement;
 use mln_style::expression::EvaluationContext;
 use mln_style::property_expression::PropertyExpression;
 use mln_style::property_value::PropertyValue;
@@ -800,12 +801,12 @@ impl Bucket for SymbolBucket {
         let state = &mut self.state;
         for buffer in [&mut state.text, &mut state.icon, &mut state.sdf_icon] {
             up.vec(&mut buffer.attribute_data);
-            up.kept(&mut buffer.dynamic_attribute_data);
+            placement::keep(up, &mut buffer.dynamic_attribute_data);
             for positions in buffer.layer_dynamic_attribute_data.values_mut() {
-                up.kept(positions);
+                placement::keep(up, positions);
             }
-            up.kept(&mut buffer.opacity_attribute_data);
-            up.kept_indexes(&mut buffer.triangles);
+            placement::keep(up, &mut buffer.opacity_attribute_data);
+            placement::keep_indexes(up, &mut buffer.triangles);
         }
         let collision = [
             &mut state.icon_collision_box,
@@ -815,7 +816,7 @@ impl Bucket for SymbolBucket {
         ];
         for buffer in collision.into_iter().flatten() {
             up.vec(&mut buffer.vertices);
-            up.kept(&mut buffer.dynamic_vertices);
+            placement::keep(up, &mut buffer.dynamic_vertices);
             up.indexes(&mut buffer.indices);
         }
         up.binders(&mut self.icon_binders);

@@ -908,7 +908,7 @@ impl Placement {
     }
 
     /// Brings the vertices of the buckets `layer` places up to date with
-    /// the placement; those it changes upload again.
+    /// the placement.
     pub(crate) fn update_layer_buckets(
         &mut self,
         layer: &LayerBuckets,
@@ -928,19 +928,15 @@ impl Placement {
             if update_opacities {
                 self.update_bucket_opacities(bucket, view, &mut seen_cross_tile_ids);
             }
-            let dynamic = self.update_bucket_positions(bucket, view, data, None);
+            self.update_bucket_positions(bucket, view, data, None);
             if update_opacities && let Some(retained) = self.retained_query_data.get_mut(&bucket.bucket_instance_id) {
                 retained.feature_sort_order.clone_from(&bucket.state.feature_sort_order);
-            }
-            if update_opacities || dynamic {
-                buckets.changed(&data.bucket);
             }
         }
     }
 
     /// Lays out the positions of a layer drawn from buckets other layers
-    /// place, after `update_layer_buckets`; the buckets whose positions
-    /// changed upload again.
+    /// place, after `update_layer_buckets`.
     pub(crate) fn update_follower_buckets(
         &self,
         layer: &LayerBuckets,
@@ -951,9 +947,7 @@ impl Placement {
             let Some(bucket) = buckets.get_mut::<SymbolBucket>(&data.bucket) else {
                 continue;
             };
-            if self.update_bucket_positions(bucket, view, data, Some(&layer.id)) {
-                buckets.changed(&data.bucket);
-            }
+            self.update_bucket_positions(bucket, view, data, Some(&layer.id));
         }
     }
 

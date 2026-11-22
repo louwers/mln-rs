@@ -77,7 +77,7 @@ impl<T> GpuVec<T> {
     }
 
     /// The data, which is gone once it uploaded unless the bucket keeps it
-    /// ([`Upload::kept`](crate::layer::Upload::kept)).
+    /// ([`placement::keep`](crate::placement::keep)).
     #[must_use]
     pub fn get(&self) -> &[T] {
         match &self.data {
@@ -91,8 +91,9 @@ impl<T> GpuVec<T> {
         }
     }
 
-    /// The data, to fill, or to change where the bucket keeps it, which
-    /// then uploads again. Not after it uploaded otherwise.
+    /// The data, to fill before it uploads, or to change where placement
+    /// keeps it ([`placement::keep`](crate::placement::keep)), which then
+    /// uploads again.
     pub fn get_mut(&mut self) -> &mut Vec<T>
     where
         T: bytemuck::Pod,
@@ -266,7 +267,7 @@ impl BucketGeometry {
                 vec.discard();
             } else if changed && let Some(buffer) = self.buffer(vec) {
                 let rewrote = res.rewrite(&buffer.entry, bytemuck::cast_slice(vec.get()));
-                debug_assert!(rewrote, "a kept vector whose length changed");
+                assert!(rewrote, "a kept vector whose length changed");
             }
             return;
         }
@@ -300,7 +301,7 @@ impl BucketGeometry {
                 vec.discard();
             } else if changed && let Some(uploaded) = self.indexes(indexes) {
                 let rewrote = res.rewrite(&uploaded.buffer.entry, bytemuck::cast_slice(indexes.indexes.get()));
-                debug_assert!(rewrote, "kept indexes whose length changed");
+                assert!(rewrote, "kept indexes whose length changed");
             }
             return;
         }

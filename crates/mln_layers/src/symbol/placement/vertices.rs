@@ -187,8 +187,7 @@ impl Placement {
     }
 
     /// Lays out where the bucket's labels draw, for those that follow their
-    /// lines, take variable anchors or turn upright, and returns whether it
-    /// did. With a layer ID, lays out that layer's own positions, which it
+    /// lines, take variable anchors or turn upright. With a layer ID, lays out that layer's own positions, which it
     /// needs only at another translation than the leader's.
     pub(crate) fn update_bucket_positions(
         &self,
@@ -196,7 +195,7 @@ impl Placement {
         view: &View,
         data: &BucketPlacementData,
         layer_id: Option<&str>,
-    ) -> bool {
+    ) {
         let layout = &*bucket.layout;
         let tile = &data.tile;
         let along_line = *layout.symbol_placement.uniform() != mln_style_types::SymbolPlacementType::Point;
@@ -217,14 +216,13 @@ impl Placement {
                 if (!along_line && !has_variable_anchors)
                     || (!state.has_layer_dynamic_attribute_data(layer_id) && !moved)
                 {
-                    return false;
+                    return;
                 }
             }
         }
 
         let tile_projector = TileProjector::with_data(view, &tile.id, tile.projection);
         if along_line {
-            let mut laid_out = false;
             if *layout.icon_rotation_alignment.uniform() == AlignmentType::Map {
                 let alignment = LineLabelAlignment {
                     pitch_with_map: *layout.icon_pitch_alignment.uniform() == AlignmentType::Map,
@@ -245,7 +243,6 @@ impl Placement {
                         icon_translation,
                         alignment,
                     );
-                    laid_out = true;
                 }
             }
             let rotation_alignment = *layout.text_rotation_alignment.uniform();
@@ -264,17 +261,11 @@ impl Placement {
                         keep_upright: *layout.text_keep_upright.uniform(),
                     },
                 );
-                laid_out = true;
             }
-            laid_out
         } else if has_variable_anchors {
             self.lay_out_variable_anchors(bucket, view, data, layer_id, &tile_projector, text_translation);
-            true
         } else if bucket.allow_vertical_placement && has_text {
             self.lay_out_orientations(bucket, layer_id);
-            true
-        } else {
-            false
         }
     }
 
