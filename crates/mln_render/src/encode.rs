@@ -324,6 +324,24 @@ impl Group {
         self.frame.upload(gpu, context);
     }
 
+    /// Draws `mesh` into the open pass of `gpu`, the context's, with `depth`
+    /// and `stencil`, reading the buffers of the frame's draws of its
+    /// program as their draw at `element` among them.
+    pub(crate) fn draw_mesh<B>(
+        &self,
+        gpu: &mut dyn Gpu,
+        parameters: &mut PaintParameters<'_>,
+        mesh: &Mesh<B>,
+        element: u32,
+        depth: DepthTest,
+        stencil: Stencil,
+    ) {
+        let Some(run) = self.frame.runs.iter().find(|run| std::ptr::eq(run.program, mesh.program())) else { return };
+        let Some(mut objects) = parameters.context.take_mesh(mesh.key()) else { return };
+        objects.draw(gpu, parameters, &run.buffers, depth, stencil, element);
+        parameters.context.restore_mesh(mesh.key(), objects);
+    }
+
     /// Draws the pass's draws of the frame into the open pass of `gpu`, the
     /// context's.
     pub(crate) fn render(&self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {

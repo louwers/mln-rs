@@ -26,7 +26,7 @@ use crate::render_orchestrator::RenderOrchestrator;
 use crate::render_pass::Pass;
 use crate::renderer_event::{RenderMode, RendererEvent, RendererEvents};
 use crate::tile::worker_codec::RemoteWorkers;
-use crate::tile_matrix::to_projection_ubo;
+use crate::tile_matrix::TileProjection;
 use crate::update_parameters::UpdateParameters;
 use crate::{Registry, frame_projection};
 
@@ -523,7 +523,7 @@ impl Encoder {
         let draw_groups = DrawGroups::of(orchestrator, &parameters);
         let (proj_state, transform) = (parameters.frame.camera, parameters.frame.transform);
         parameters.clip_masks.update(gpu, parameters.context, proj_state.is_globe(), &draw_groups.clip_tiles, |tile| {
-            to_projection_ubo(&transform.projection_data_for_tile(tile, false))
+            TileProjection::of(tile, proj_state, &transform.projection_data_for_tile(tile, false), None)
         });
         parameters.layer_composite.update(
             gpu,

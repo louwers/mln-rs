@@ -1,39 +1,22 @@
 use std::collections::BTreeMap;
 
-use mln_gfx::gpu::{
-    BindGroupEntry, BindingsDesc, BindingsId, BufferUsage, DepthState, Draw, DynamicState, FixedState, GeometryDesc,
-    GeometryId, Gpu, GpuError, PipelineId, PipelineKey, Scissor, ShaderId, ShaderKey, StencilState, StencilTest,
-    TargetFormats, VertexAttribute, VertexBufferLayout, VertexStep,
-};
+use mln_gfx::gpu::{Gpu, StencilState, StencilTest};
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::bindings::FIRST_VERTEX_BUFFER_ID;
-use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::program::PROJECTION_BUFFER;
-use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::types::StencilOpType;
-use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawModeType};
+use mln_gfx::{ColorMode, CullFaceMode};
 use mln_tile_id::UnwrappedTileID;
-use mln_util::logging::{Event, Log};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
-use crate::draw_objects::Entries;
-use crate::gfx::buffer::Buffer;
+use crate::draw_objects::Mesh;
+use crate::encode::{Depth, Draw, Group};
 use crate::gfx::context::Resources;
-use crate::gfx::owned::Owned;
-use crate::gfx::vertex_attribute::Uniforms;
 use crate::globe::grid;
-use crate::paint_parameters::{DepthTest, DrawTarget};
+use crate::handles::TileSurface;
+use crate::mesh_desc::MeshDesc;
+use crate::paint_parameters::{DepthTest, PaintParameters, Stencil};
 use crate::render_static_data::RenderStaticData;
 use crate::shaders::programs;
-
-/// The vertex layout of the masks' meshes: a tile position of two shorts.
-fn layout() -> VertexBufferLayout {
-    VertexBufferLayout {
-        stride: 4,
-        step: VertexStep::Vertex,
-        attributes: vec![VertexAttribute { id: 0, format: AttributeDataType::Short2, offset: 0 }],
-    }
-}
+use crate::tile_matrix::TileProjection;
 
 /// What a mask's mesh is of: on the globe the zoom, whether the tile is on
 /// the top or the bottom row (with a pole cap) and whether it has a border;
@@ -43,75 +26,34 @@ type MeshKey = (u8, bool, bool, bool);
 /// The key of the square, which every mask off the globe draws.
 const SQUARE: MeshKey = (0, false, false, false);
 
-/// A mesh that masks draw, and its geometry, made at its first draw.
-struct Mesh {
-    vertices: Buffer,
-    indices: Buffer,
-    segments: Vec<SegmentBase>,
-    geometry: Option<Owned<GeometryId>>,
-}
-
-impl Mesh {
-    fn new(
-        gpu: &mut dyn Gpu,
-        context: &mut Resources,
-        vertices: &[u8],
-        indices: &[u16],
-        segments: Vec<SegmentBase>,
-    ) -> Option<Mesh> {
-        let device = context.device();
-        let made = device.buffer(gpu, BufferUsage::Vertex, vertices).and_then(|vertices| {
-            Ok((vertices, device.buffer(gpu, BufferUsage::Index, bytemuck::cast_slice(indices))?))
-        });
-        match made {
-            Ok((vertices, indices)) => Some(Mesh { vertices, indices, segments, geometry: None }),
-            Err(error) => {
-                Log::warning(Event::Render, format!("Making a clipping mask's mesh failed: {error}"));
-                None
-            }
-        }
-    }
-
-    fn geometry(&mut self, gpu: &mut dyn Gpu, context: &Resources, shader: ShaderId) -> Result<GeometryId, GpuError> {
-        if let Some(geometry) = &self.geometry {
-            return Ok(geometry.id());
-        }
-        let geometry = gpu.create_geometry(&GeometryDesc {
-            shader,
-            layouts: &[layout()],
-            vertex_buffers: &[(self.vertices.id(), 0)],
-            index_buffer: self.indices.id(),
-        })?;
-        self.geometry = Some(context.own(geometry, Vec::new()));
-        Ok(geometry)
-    }
-}
+/// A mask writes its value over its tile, whatever the stencil holds there.
+const WRITE: StencilState = StencilState {
+    test: StencilTest::Always,
+    write_mask: 0xFF,
+    fail: StencilOpType::Keep,
+    depth_fail: StencilOpType::Keep,
+    pass: StencilOpType::Replace,
+};
 
 /// The tile clipping masks: for each tile that the frame's draw groups can
-/// clip to, a mesh of the clipping mask shader that writes a stencil value
-/// over the tile and nothing else.
-#[derive(Default)]
+/// clip to, the meshes of the clipping mask program that write a stencil
+/// value over the tile and nothing else.
 pub(crate) struct ClipMasks {
     /// Whether the masks are the globe's.
     globe: bool,
-    shader: Option<ShaderKey>,
-    shader_id: Option<ShaderId>,
-    /// The meshes of the masks.
-    meshes: BTreeMap<MeshKey, Mesh>,
-    /// Each tile's slot of `projections` and the keys of its meshes: on the
-    /// globe with a border and then without, elsewhere the square twice.
-    masks: BTreeMap<UnwrappedTileID, (usize, [MeshKey; 2])>,
-    /// The masks' projections, each at an offset the GPU can bind, in the
-    /// order of their tiles: one write a frame.
-    projections: Option<Buffer>,
-    /// The bytes of `projections`, kept between frames.
-    bytes: Vec<u8>,
-    /// The bindings of each slot of `projections`, which go with the
-    /// projections' buffer, and the epoch of the global buffers they were
-    /// made at.
-    bindings: Vec<Owned<BindingsId>>,
-    bindings_made: Option<u64>,
-    pipelines: Vec<(TargetFormats, PipelineId)>,
+    /// The vertices and triangles of the masks, which tiles alike share.
+    surfaces: BTreeMap<MeshKey, TileSurface>,
+    /// Each tile's meshes, each with the tile's projection: on the globe
+    /// with a border and then without, elsewhere the square.
+    masks: BTreeMap<UnwrappedTileID, Vec<Mesh>>,
+    /// A draw of each of the masks' meshes, which writes its projection.
+    draws: Group,
+}
+
+impl Default for ClipMasks {
+    fn default() -> Self {
+        ClipMasks { globe: false, surfaces: BTreeMap::new(), masks: BTreeMap::new(), draws: Group::new() }
+    }
 }
 
 impl ClipMasks {
@@ -124,214 +66,88 @@ impl ClipMasks {
         context: &mut Resources,
         globe: bool,
         tiles: &[UnwrappedTileID],
-        projection: impl Fn(&UnwrappedTileID) -> ProjectionUBO,
+        projection: impl Fn(&UnwrappedTileID) -> TileProjection,
     ) {
         if globe != self.globe {
             *self = ClipMasks { globe, ..ClipMasks::default() };
         }
-        self.shader.get_or_insert_with(|| {
-            let variant = if globe { ProjectionVariant::Globe } else { ProjectionVariant::Mercator };
-            context.shader_key(&programs::CLIPPING_MASK, Uniforms::default(), variant)
-        });
-        if tiles.is_empty() {
-            self.masks.clear();
-            self.meshes.clear();
-            self.projections = None;
-            self.bindings.clear();
-            self.bindings_made = None;
-            return;
-        }
-        let size = size_of::<ProjectionUBO>();
-        let stride = size.next_multiple_of(context.caps().buffer_offset_alignment as usize);
-        self.bytes.clear();
-        self.bytes.resize(tiles.len() * stride, 0);
-        let tiles_before = self.masks.len();
         self.masks.retain(|tile, _| tiles.binary_search(tile).is_ok());
-        let tiles_gone = self.masks.len() < tiles_before;
-        for (slot, tile) in tiles.iter().enumerate() {
-            self.bytes[slot * stride..][..size].copy_from_slice(bytemuck::bytes_of(&projection(tile)));
-            if let Some((kept, _)) = self.masks.get_mut(tile) {
-                *kept = slot;
-                continue;
-            }
-            let keys = if globe {
+        self.draws.begin(0.0, false, false);
+        for tile in tiles {
+            let ClipMasks { surfaces, masks, draws, .. } = self;
+            let meshes = masks.entry(*tile).or_insert_with(|| {
                 let canonical = &tile.canonical;
-                [true, false]
-                    .map(|borders| (canonical.z, canonical.y == 0, canonical.y == (1u32 << canonical.z) - 1, borders))
-            } else {
-                [SQUARE; 2]
-            };
-            for key in keys {
-                if self.meshes.contains_key(&key) {
-                    continue;
-                }
-                let mesh = if globe {
-                    let (_, _, _, borders) = key;
-                    let canonical = &tile.canonical;
-                    let granularity =
-                        SubdivisionGranularitySetting::globe().stencil.granularity_for_zoom_level(canonical.z);
-                    let grid = grid(canonical, granularity, borders);
-                    let indices = grid.triangles.as_flattened();
-                    let segment = SegmentBase::with_lengths(0, 0, grid.vertices.len(), indices.len());
-                    Mesh::new(gpu, context, bytemuck::cast_slice(&grid.vertices), indices, vec![segment])
+                let keys = if globe {
+                    let (top, bottom) = (canonical.y == 0, canonical.y == (1u32 << canonical.z) - 1);
+                    vec![(canonical.z, top, bottom, true), (canonical.z, top, bottom, false)]
                 } else {
-                    let vertices = RenderStaticData::tile_vertices();
-                    let indices = RenderStaticData::quad_triangle_indices();
-                    let segment = SegmentBase::with_lengths(0, 0, vertices.len(), indices.len());
-                    Mesh::new(gpu, context, bytemuck::cast_slice(&vertices), &indices, vec![segment])
+                    vec![SQUARE]
                 };
-                if let Some(mesh) = mesh {
-                    self.meshes.insert(key, mesh);
-                }
+                keys.into_iter()
+                    .map(|key| {
+                        let surface = surfaces.entry(key).or_insert_with(|| surface(context, tile, key, globe));
+                        mesh(context, surface, globe)
+                    })
+                    .collect()
+            });
+            let at = projection(tile);
+            for mesh in meshes {
+                draws.push_at(mesh, &at, Draw { depth: Depth::Off, ..Draw::DEFAULT }, ());
             }
-            self.masks.insert(*tile, (slot, keys));
         }
-        // Those of the tiles gone go with them.
-        if tiles_gone {
-            let masks = &self.masks;
-            self.meshes.retain(|key, _| masks.values().any(|(_, keys)| keys.contains(key)));
-        }
-        if context.device().write_uniforms(gpu, &mut self.projections, &self.bytes, false) {
-            self.bindings.clear();
-            self.bindings_made = None;
+        self.draws.finish(gpu, context, &(), []);
+        self.draws.upload(gpu, context);
+        if self.masks.is_empty() {
+            self.surfaces.clear();
         }
     }
 
-    /// Draws the mask of each tile of `masks` with its stencil value, which
-    /// it writes over the tile whatever the stencil buffer holds there.
-    /// Every tile must be one `update` made a mask for.
-    pub(crate) fn draw(
-        &mut self,
-        gpu: &mut dyn Gpu,
-        masks: &[(UnwrappedTileID, i32)],
-        target: DrawTarget,
-        context: &mut Resources,
-    ) {
-        if let Err(error) = self.draw_in(gpu, masks, target, context) {
-            Log::warning(Event::Render, format!("Drawing the clipping masks failed: {error}"));
-        }
-    }
-
-    fn draw_in(
-        &mut self,
-        gpu: &mut dyn Gpu,
-        masks: &[(UnwrappedTileID, i32)],
-        target: DrawTarget,
-        context: &mut Resources,
-    ) -> Result<(), GpuError> {
-        let (Some(shader), Some(projections)) = (&self.shader, &self.projections) else {
-            return Ok(());
-        };
-        let DrawTarget { size, targets, scissor } = target;
-        let shader_id = match self.shader_id {
-            Some(id) => id,
-            None => *self.shader_id.insert(context.shader(gpu, shader)?),
-        };
-
-        let made = context.global_uniform_buffers().epoch();
-        if self.bindings_made != Some(made) || self.bindings.len() < self.masks.len() {
-            self.bindings.clear();
-            self.bindings_made = None;
-            let global = context.global_uniform_buffers();
-            let size = size_of::<ProjectionUBO>();
-            let stride = size.next_multiple_of(context.caps().buffer_offset_alignment as usize);
-            for slot in 0..projections.size() / stride {
-                let mut entries = Entries::new();
-                for id in 0..FIRST_VERTEX_BUFFER_ID {
-                    let (buffer, offset, size) = if id == PROJECTION_BUFFER.id {
-                        (projections, (slot * stride) as u64, size as u64)
-                    } else if let Some(buffer) = global.get(id) {
-                        (buffer, 0, buffer.size() as u64)
-                    } else {
-                        continue;
-                    };
-                    entries.push(BindGroupEntry::Buffer { id: id as u32, buffer: buffer.id(), offset, size });
-                }
-                let bindings = gpu.create_bindings(&BindingsDesc {
-                    label: "clipping mask",
-                    shader: shader_id,
-                    entries: entries.as_slice(),
-                })?;
-                self.bindings.push(context.own(bindings, Vec::new()));
-            }
-            self.bindings_made = Some(made);
-        }
-
-        let stencil = StencilState {
-            test: StencilTest::Always,
-            write_mask: 0xFF,
-            fail: StencilOpType::Keep,
-            depth_fail: StencilOpType::Keep,
-            pass: StencilOpType::Replace,
-        };
-        let pipeline = if let Some(&(_, id)) = self.pipelines.iter().find(|(cached, _)| *cached == targets) {
-            id
-        } else {
-            let disabled = ColorMode::disabled();
-            let key = PipelineKey {
-                shader: shader_id,
-                vertex_buffers: vec![layout()],
-                state: FixedState {
-                    primitive: DrawModeType::Triangles,
-                    // The far side of a limb tile projects inside the disc;
-                    // cull it or it overwrites the tile in front.
-                    cull: if self.globe { CullFaceMode::back_ccw() } else { CullFaceMode::disabled() },
-                    blend: disabled.blend_function,
-                    color_mask: disabled.mask,
-                    depth: DepthState::DISABLED,
-                    stencil,
-                },
-                targets,
-            };
-            let id = context.pipeline(gpu, &key)?;
-            self.pipelines.push((targets, id));
-            id
-        };
-
-        let full = Scissor { x: 0, y: 0, width: size.width, height: size.height };
-        let dynamic = DynamicState {
-            depth_range: DepthTest::DISABLED.range,
-            scissor: scissor.unwrap_or(full),
-            stencil_reference: 0,
-            blend_constant: ColorMode::disabled().blend_color,
-            line_width: 1.0,
-        };
+    /// Draws the mask of each tile of `masks` with its stencil value into
+    /// `parameters`' open pass. Every tile must be one `update` made a mask
+    /// for.
+    pub(crate) fn draw(&self, gpu: &mut dyn Gpu, masks: &[(UnwrappedTileID, i32)], parameters: &mut PaintParameters<'_>) {
         // On the globe each mask is drawn with a border first, then exactly:
         // where a tile meets finer ones, its coarser edge leaves a sliver
         // between the masks that only a neighbor's border covers.
         let passes = if self.globe { 2 } else { 1 };
-        let mut draws = 0;
         for pass in 0..passes {
-            for (tile, stencil_ref) in masks {
-                let Some((slot, keys)) = self.masks.get(tile) else {
+            for (tile, reference) in masks {
+                let Some(mesh) = self.masks.get(tile).and_then(|meshes| meshes.get(pass)) else {
                     debug_assert!(false, "no clipping mask for {tile:?}");
                     continue;
                 };
-                let Some(mesh) = self.meshes.get_mut(&keys[pass]) else {
-                    continue;
-                };
-                let geometry = mesh.geometry(gpu, context, shader_id)?;
-                let bindings = self.bindings[*slot].id();
-                for segment in &mesh.segments {
-                    gpu.draw(&Draw {
-                        pipeline,
-                        bindings,
-                        geometry,
-                        first_index: segment.index_offset as u32,
-                        index_count: segment.index_length as u32,
-                        base_vertex: segment.vertex_offset as i32,
-                        first_instance: 0,
-                        instance_count: 1,
-                        global_index: 0,
-                        dynamic: DynamicState { stencil_reference: *stencil_ref as u32, ..dynamic },
-                    })?;
-                    draws += 1;
-                }
+                let stencil = Stencil { state: WRITE, reference: *reference as u32 };
+                self.draws.draw_mesh(gpu, parameters, mesh, 0, DepthTest::DISABLED, stencil);
             }
         }
-        let stats = context.rendering_stats();
-        stats.num_draw_calls += draws;
-        stats.total_draw_calls += draws;
-        Ok(())
     }
+}
+
+/// The vertices and triangles of the masks of `key`, as `tile`'s are: on
+/// the globe its grid, elsewhere the square.
+fn surface(context: &mut Resources, tile: &UnwrappedTileID, key: MeshKey, globe: bool) -> TileSurface {
+    if globe {
+        let (_, _, _, borders) = key;
+        let canonical = &tile.canonical;
+        let granularity = SubdivisionGranularitySetting::globe().stencil.granularity_for_zoom_level(canonical.z);
+        let grid = grid(canonical, granularity, borders);
+        TileSurface { vertices: context.buffer(&grid.vertices), triangles: context.index_buffer(grid.triangles.as_flattened()) }
+    } else {
+        TileSurface {
+            vertices: context.buffer(&RenderStaticData::tile_vertices()),
+            triangles: context.index_buffer(&RenderStaticData::quad_triangle_indices()),
+        }
+    }
+}
+
+/// A mask's mesh of `surface`, whose draws write the projection of their
+/// tile to its buffers.
+fn mesh(context: &mut Resources, surface: &TileSurface, globe: bool) -> Mesh {
+    let mut mesh = MeshDesc::new(&programs::CLIPPING_MASK, &surface.triangles);
+    // The far side of a limb tile projects inside the disc; cull it or it
+    // overwrites the tile in front.
+    let cull = if globe { CullFaceMode::back_ccw() } else { CullFaceMode::disabled() };
+    let variant = if globe { ProjectionVariant::Globe } else { ProjectionVariant::Mercator };
+    mesh.vertices(&surface.vertices).blend(ColorMode::disabled()).cull(cull).projection(variant);
+    context.mesh(&mesh)
 }

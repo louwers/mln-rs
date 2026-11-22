@@ -451,9 +451,9 @@ impl<'a> PaintParameters<'a> {
     }
 
     fn draw_clip_masks(&mut self, gpu: &mut dyn Gpu, masks: &[(UnwrappedTileID, i32)]) {
-        if let Some(target) = self.draw_target() {
-            self.clip_masks.draw(gpu, masks, target, self.context);
-        }
+        let clip_masks = std::mem::take(self.clip_masks);
+        clip_masks.draw(gpu, masks, self);
+        *self.clip_masks = clip_masks;
     }
 
     /// Renders the clipping masks of `tile_ids`, unless the stencil buffer
