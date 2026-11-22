@@ -30,8 +30,7 @@ use parking_lot::Mutex;
 use crate::Registry;
 use crate::erased_layer::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::render_source::RenderSource;
-use crate::tests::fixture_layer::{Dot, Shade};
-// slice: off use crate::tests::fixture_layer::Tint;
+use crate::tests::fixture_layer::{Dot, Shade, Tint};
 use crate::tests::fixture_source::{self, Dem, Geometry, Raster};
 use crate::tile::source_tiles::SourceTiles;
 use crate::tile::store::{StoreEvent, TileStore};
@@ -177,11 +176,10 @@ impl Tiled {
     /// as evaluated values.
     fn layers(self) -> Vec<Arc<dyn ErasedEvaluatedLayer>> {
         let properties: Arc<dyn ErasedEvaluatedLayer> = match self {
-            Tiled::Raster => unimplemented!("slice: off: the tests' raster layer type"),
-            // slice: off Tiled::Raster => {
-            // slice: off     let layer = Layer::new(Registry::with_builtins().style(), "tint", "id", "source").unwrap();
-            // slice: off     Arc::new(EvaluatedLayer::<Tint>::new(LayerStyle::recover(layer.style()).unwrap()))
-            // slice: off }
+            Tiled::Raster => {
+                let layer = Layer::new(Registry::with_builtins().style(), "tint", "id", "source").unwrap();
+                Arc::new(EvaluatedLayer::<Tint>::new(LayerStyle::recover(layer.style()).unwrap()))
+            }
             Tiled::RasterDEM => {
                 let layer = Layer::new(Registry::with_builtins().style(), "shade", "id", "source").unwrap();
                 Arc::new(EvaluatedLayer::<Shade>::new(LayerStyle::recover(layer.style()).unwrap()))
@@ -475,11 +473,11 @@ fn tile_requests_follow_the_view() {
     assert!(back[first.len()..].iter().all(|order| *order == UNWANTED));
 }
 
-// slice: off // gtest: Source.RasterTileEmpty
-// slice: off #[test]
-// slice: off fn raster_tile_empty() {
-// slice: off     tile_empty(Tiled::Raster);
-// slice: off }
+// gtest: Source.RasterTileEmpty
+#[test]
+fn raster_tile_empty() {
+    tile_empty(Tiled::Raster);
+}
 
 // gtest: Source.RasterDEMTileEmpty
 #[test]
@@ -493,11 +491,11 @@ fn vector_tile_empty() {
     tile_empty(Tiled::Vector);
 }
 
-// slice: off // gtest: Source.RasterTileFail
-// slice: off #[test]
-// slice: off fn raster_tile_fail() {
-// slice: off     tile_fail(Tiled::Raster);
-// slice: off }
+// gtest: Source.RasterTileFail
+#[test]
+fn raster_tile_fail() {
+    tile_fail(Tiled::Raster);
+}
 
 // gtest: Source.RasterDEMTileFail
 #[test]
@@ -511,11 +509,11 @@ fn vector_tile_fail() {
     tile_fail(Tiled::Vector);
 }
 
-// slice: off // gtest: Source.RasterTileCorrupt
-// slice: off #[test]
-// slice: off fn raster_tile_corrupt() {
-// slice: off     tile_corrupt(Tiled::Raster);
-// slice: off }
+// gtest: Source.RasterTileCorrupt
+#[test]
+fn raster_tile_corrupt() {
+    tile_corrupt(Tiled::Raster);
+}
 
 // gtest: Source.RasterDEMTileCorrupt
 #[test]
@@ -529,11 +527,11 @@ fn vector_tile_corrupt() {
     tile_corrupt(Tiled::Vector);
 }
 
-// slice: off // gtest: Source.RasterTileCancel
-// slice: off #[test]
-// slice: off fn raster_tile_cancel() {
-// slice: off     tile_cancel(Tiled::Raster);
-// slice: off }
+// gtest: Source.RasterTileCancel
+#[test]
+fn raster_tile_cancel() {
+    tile_cancel(Tiled::Raster);
+}
 
 // gtest: Source.RasterDEMTileCancel
 #[test]
@@ -592,62 +590,62 @@ impl Drop for FixtureLog {
     }
 }
 
-// slice: off // gtest: Source.SetMaxParentOverscaleFactor
-// slice: off #[test]
-// slice: off fn set_max_parent_overscale_factor() {
-// slice: off     let mut test = SourceTest::new();
-// slice: off     test.transform.jump_to(&CameraOptions { center: Some(LatLng::default()), zoom: Some(8.0), ..Default::default() });
-// slice: off     let log = FixtureLog::new();
-// slice: off
-// slice: off     let file_source = StubFileSource::on_queue(&test.run_loop, ResponseType::Asynchronous);
-// slice: off     {
-// slice: off         let end = test.end_handle();
-// slice: off         file_source.set_response(Kind::Tile, move |res| {
-// slice: off             let z = res.tile_data.as_ref().unwrap().z;
-// slice: off             if z == 5 {
-// slice: off                 let end = end.clone();
-// slice: off                 std::thread::spawn(move || {
-// slice: off                     std::thread::sleep(Duration::from_millis(10));
-// slice: off                     end();
-// slice: off                 });
-// slice: off             }
-// slice: off             // No tiles above zoom level 5 should be requested.
-// slice: off             assert!(5 <= i32::from(z), "requested z{z}");
-// slice: off             // The tileset has no tiles (HTTP 404), so the source requests parents in their place.
-// slice: off             // An empty raster tile (HTTP 204) would be drawn, empty, instead.
-// slice: off             let mut response = Response::new();
-// slice: off             response.no_content = true;
-// slice: off             response.tile_not_found = true;
-// slice: off             Some(response)
-// slice: off         });
-// slice: off     }
-// slice: off
-// slice: off     let layers = Tiled::Raster.layers();
-// slice: off     let source = Tiled::Raster.source(tiles_tileset());
-// slice: off     let mut common = *source.common();
-// slice: off     assert_eq!(None, common.max_overscale_factor);
-// slice: off     common.max_overscale_factor = Some(3);
-// slice: off     let style_source = source.with_common(common);
-// slice: off
-// slice: off     let mut store = test.store();
-// slice: off     let mut render_source = crate::tests::create_render_source(&style_source, &mut store);
-// slice: off     let fs: Arc<dyn FileSource> = Arc::<StubFileSource>::clone(&file_source);
-// slice: off     let parameters = test.tile_parameters_with(MapMode::Continuous, Some(Arc::clone(&fs)));
-// slice: off     render_source.update(&mut store, style_source.clone(), &layers, true, true, &parameters);
-// slice: off
-// slice: off     // Each tile that changes updates the source again.
-// slice: off     test.run_with(&mut store, |store, event| {
-// slice: off         if matches!(event, StoreEvent::Changed) {
-// slice: off             render_source.update(store, style_source.clone(), &layers, true, true, &parameters);
-// slice: off         }
-// slice: off     });
-// slice: off
-// slice: off     assert_eq!(
-// slice: off         1,
-// slice: off         log.count(EventSeverity::Warning, Event::Style, "Parent tile overscale factor will cap prefetch delta to 3")
-// slice: off     );
-// slice: off     assert_eq!(0, log.unchecked_count());
-// slice: off }
+// gtest: Source.SetMaxParentOverscaleFactor
+#[test]
+fn set_max_parent_overscale_factor() {
+    let mut test = SourceTest::new();
+    test.transform.jump_to(&CameraOptions { center: Some(LatLng::default()), zoom: Some(8.0), ..Default::default() });
+    let log = FixtureLog::new();
+
+    let file_source = StubFileSource::on_queue(&test.run_loop, ResponseType::Asynchronous);
+    {
+        let end = test.end_handle();
+        file_source.set_response(Kind::Tile, move |res| {
+            let z = res.tile_data.as_ref().unwrap().z;
+            if z == 5 {
+                let end = end.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_millis(10));
+                    end();
+                });
+            }
+            // No tiles above zoom level 5 should be requested.
+            assert!(5 <= i32::from(z), "requested z{z}");
+            // The tileset has no tiles (HTTP 404), so the source requests parents in their place.
+            // An empty raster tile (HTTP 204) would be drawn, empty, instead.
+            let mut response = Response::new();
+            response.no_content = true;
+            response.tile_not_found = true;
+            Some(response)
+        });
+    }
+
+    let layers = Tiled::Raster.layers();
+    let source = Tiled::Raster.source(tiles_tileset());
+    let mut common = *source.common();
+    assert_eq!(None, common.max_overscale_factor);
+    common.max_overscale_factor = Some(3);
+    let style_source = source.with_common(common);
+
+    let mut store = test.store();
+    let mut render_source = crate::tests::create_render_source(&style_source, &mut store);
+    let fs: Arc<dyn FileSource> = Arc::<StubFileSource>::clone(&file_source);
+    let parameters = test.tile_parameters_with(MapMode::Continuous, Some(Arc::clone(&fs)));
+    render_source.update(&mut store, style_source.clone(), &layers, true, true, &parameters);
+
+    // Each tile that changes updates the source again.
+    test.run_with(&mut store, |store, event| {
+        if matches!(event, StoreEvent::Changed) {
+            render_source.update(store, style_source.clone(), &layers, true, true, &parameters);
+        }
+    });
+
+    assert_eq!(
+        1,
+        log.count(EventSeverity::Warning, Event::Style, "Parent tile overscale factor will cap prefetch delta to 3")
+    );
+    assert_eq!(0, log.unchecked_count());
+}
 
 // gtest: Source.RasterDEMTileRoundsCoveringZoom
 #[test]

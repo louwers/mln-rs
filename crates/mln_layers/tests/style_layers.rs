@@ -3,8 +3,7 @@
 
 use std::sync::Arc;
 
-use mln_layers::{Circle, Fill, Line};
-// slice: off use mln_layers::Raster;
+use mln_layers::{Circle, Fill, Line, Raster};
 use mln_rs::builtin_registry;
 use mln_style::conversion::Convertible;
 use mln_style::expression::Image;
@@ -144,22 +143,22 @@ fn line_properties() {
     paint!(Line, layer, line_pattern, "line-pattern", r#""foo""#, pattern());
 }
 
-// slice: off // gtest: Layer.RasterProperties
-// slice: off #[test]
-// slice: off fn raster_properties() {
-// slice: off     let mut layer = new_layer("raster", "raster", "source");
-// slice: off     assert_eq!("raster", layer.info().name);
-// slice: off
-// slice: off     // Paint properties
-// slice: off
-// slice: off     paint!(Raster, layer, raster_opacity, "raster-opacity", "1", c(OPACITY));
-// slice: off     paint!(Raster, layer, raster_hue_rotate, "raster-hue-rotate", "1", c(HUE_ROTATE));
-// slice: off     paint!(Raster, layer, raster_brightness_min, "raster-brightness-min", "1", c(BRIGHTNESS));
-// slice: off     paint!(Raster, layer, raster_brightness_max, "raster-brightness-max", "1", c(BRIGHTNESS));
-// slice: off     paint!(Raster, layer, raster_saturation, "raster-saturation", "1", c(SATURATION));
-// slice: off     paint!(Raster, layer, raster_contrast, "raster-contrast", "1", c(CONTRAST));
-// slice: off     paint!(Raster, layer, raster_fade_duration, "raster-fade-duration", "1", c(DURATION));
-// slice: off }
+// gtest: Layer.RasterProperties
+#[test]
+fn raster_properties() {
+    let mut layer = new_layer("raster", "raster", "source");
+    assert_eq!("raster", layer.info().name);
+
+    // Paint properties
+
+    paint!(Raster, layer, raster_opacity, "raster-opacity", "1", c(OPACITY));
+    paint!(Raster, layer, raster_hue_rotate, "raster-hue-rotate", "1", c(HUE_ROTATE));
+    paint!(Raster, layer, raster_brightness_min, "raster-brightness-min", "1", c(BRIGHTNESS));
+    paint!(Raster, layer, raster_brightness_max, "raster-brightness-max", "1", c(BRIGHTNESS));
+    paint!(Raster, layer, raster_saturation, "raster-saturation", "1", c(SATURATION));
+    paint!(Raster, layer, raster_contrast, "raster-contrast", "1", c(CONTRAST));
+    paint!(Raster, layer, raster_fade_duration, "raster-fade-duration", "1", c(DURATION));
+}
 
 // gtest: Layer.FillExtrusionLayoutDifference
 #[test]

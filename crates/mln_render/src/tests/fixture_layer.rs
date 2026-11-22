@@ -8,11 +8,11 @@
 //! `dot-font`. `dot-size` changes nothing but the layout. A `dot` layer
 //! draws nothing.
 //!
-//! `shade` is a layer type of a raster-dem source that draws nothing.
+//! `tint` is a layer type of a raster source, and `shade` one of a
+//! raster-dem source, both drawing nothing.
 //!
 //! `mark` is a layer type without a source whose layers place, with a pass
-//! (`MarkPass`) that records the hooks the engine calls. The tests' layer
-//! type of a raster source is switched off (`fixture_layer_off`).
+//! (`MarkPass`) that records the hooks the engine calls.
 
 use std::sync::Arc;
 
@@ -26,7 +26,7 @@ use mln_util::error::Error;
 use crate::draw::Draws;
 use crate::layer::{
     Bucket, BuildCx, DemTiles, EvaluatedLayer, Features, GpuVec, Layer, LayerBinders, Layout, LayoutCx, NewCx,
-    PrepareCx, Upload, ViewCover,
+    PrepareCx, RasterTiles, Upload, ViewCover,
 };
 use crate::placement::{CollisionGroups, Placed, PlacementContext, PlacementPass, PlacementQuery, Prepared};
 
@@ -195,6 +195,34 @@ impl Layer for Dot {
 }
 
 static NO_PROPERTIES: PropertyTable = PropertyTable::new(&[], &[]);
+
+/// The `tint` layer type, both its halves.
+pub(crate) struct Tint;
+
+impl StyleLayerType for Tint {
+    const INFO: LayerTypeInfo = LayerTypeInfo { name: "tint", source: SourceKind::Raster, from_json: true };
+    const PROPERTIES: &'static PropertyTable = &NO_PROPERTIES;
+
+    type LayoutProperties = NoProperties;
+    type PaintProperties = NoProperties;
+    type Data = ();
+
+    fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(_slot: usize, _visitor: V) -> Option<V::Output> {
+        None
+    }
+}
+
+impl Layer for Tint {
+    type Style = Tint;
+    type Input = RasterTiles;
+    type Tile = ();
+
+    fn new(_cx: &mut NewCx<'_, Self>) -> Self {
+        Tint
+    }
+
+    fn prepare(&self, _cx: &PrepareCx<'_, Self>, _out: &mut Draws) {}
+}
 
 /// The `shade` layer type, both its halves.
 pub(crate) struct Shade;

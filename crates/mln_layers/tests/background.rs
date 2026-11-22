@@ -231,16 +231,16 @@ fn background_opacity_color() {
     assert_background(&evaluated, Color::parse("red").unwrap(), 0.5);
 }
 
-// slice: off #[test]
-// slice: off fn background_opacity_overlay() {
-// slice: off     // The raster source and the raster layer type are registered, so both
-// slice: off     // layers and the source parse.
-// slice: off     let style = load("background-opacity/overlay");
-// slice: off     assert_eq!(2, style.get_layer_list().len());
-// slice: off     assert_eq!(1, style.get_sources().len());
-// slice: off     let evaluated = evaluate_static(&style, "background_overlay");
-// slice: off     assert_background(&evaluated, Color::parse("green").unwrap(), 0.5);
-// slice: off }
+#[test]
+fn background_opacity_overlay() {
+    // The raster source and the raster layer type are registered, so both
+    // layers and the source parse.
+    let style = load("background-opacity/overlay");
+    assert_eq!(2, style.get_layer_list().len());
+    assert_eq!(1, style.get_sources().len());
+    let evaluated = evaluate_static(&style, "background_overlay");
+    assert_background(&evaluated, Color::parse("green").unwrap(), 0.5);
+}
 
 #[test]
 fn background_visibility_none() {

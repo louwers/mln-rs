@@ -1,7 +1,7 @@
 //! The tests of the layer types' buckets, layouts and meshes.
 
 // The custom layer's host, as its layer keeps it.
-// slice: off mod custom_test;
+mod custom_test;
 // The meshes of fills and their outlines.
 mod fill_mesh_test;
 // The symbol layer type's format sections that override its paint.
@@ -26,7 +26,7 @@ fn subdivide(
     let triangles = tessellator.triangulate(polygon);
     mln_render::globe::subdivide_polygon(polygon, triangles, tile, granularity, outline)
 }
-// slice: off
+
 /// The built-in expression functions and the layer types of this crate, as
 /// this build has them: the tests' layers must be of its types, not of
 /// those of the copy of this crate that the facade registers.

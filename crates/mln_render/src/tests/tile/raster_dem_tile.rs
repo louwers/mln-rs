@@ -151,11 +151,15 @@ fn decode_and_backfill_through_the_codec() {
 
 // What the layers make of a DEM goes when its border or the part of the
 // tile it draws changes: its contents take a new identity, and keep it
-// through a mask that changes nothing.
+// through a mask that changes nothing. Its texture, which the contents make
+// once they upload, goes with its border.
 #[test]
 fn contents_take_a_new_identity_when_their_border_or_mask_changes() {
+    let mut context = crate::gfx::context::Resources::detached();
     let image = PremultipliedImage::new(Size::new(16, 16));
     let mut contents = DemContents::new(DemData::new(&image, RasterEncoding::Mapbox).expect("DemData"));
+    contents.upload(&mut context);
+    let texture = contents.texture().cloned().expect("a texture once uploaded");
     let first = contents.id();
     contents.set_mask([mln_tile_id::CanonicalTileID::new(0, 0, 0)].into());
     assert_eq!(first, contents.id(), "the whole tile, as before");
@@ -164,6 +168,7 @@ fn contents_take_a_new_identity_when_their_border_or_mask_changes() {
     assert_ne!(first, masked);
     contents.unmask();
     assert_ne!(masked, contents.id());
+    assert_eq!(Some(&texture), contents.texture(), "the masks keep the texture");
 
     let border = DemContents::new(DemData::new(&image, RasterEncoding::Mapbox).expect("DemData"));
     let (mut tile, mut border) = (Contents::Dem(contents), Contents::Dem(border));
@@ -177,4 +182,8 @@ fn contents_take_a_new_identity_when_their_border_or_mask_changes() {
         _ => unreachable!(),
     });
     assert!(before.iter().zip(&after).all(|(before, after)| before != after));
+    let Contents::Dem(tile) = &mut tile else { unreachable!() };
+    assert!(tile.texture().is_none(), "the border went into the image");
+    tile.upload(&mut context);
+    assert!(tile.texture().is_some_and(|new| *new != texture));
 }

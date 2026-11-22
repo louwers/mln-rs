@@ -1,14 +1,12 @@
-// `dot`, the tests' layer type.
+// `dot`, `tint`, `shade` and `mark`, the tests' layer types.
 pub(crate) mod fixture_layer;
-// slice: off // `tint`, the tests' layer type of a raster source.
-// slice: off pub(crate) mod fixture_layer_off;
 // `tiles`, `raster-tiles` and `dem-tiles`, the tests' source types.
 pub(crate) mod fixture_source;
 // Ports test/gl/bucket.test.cpp (raster; on the WebGPU headless backend).
 // mln_layers' tests port the circle, fill, line and symbol parts.
 mod bucket_test;
 // Cameras that move faster than the network answers.
-// slice: off mod fast_camera_test;
+mod fast_camera_test;
 mod gtest_sky;
 mod gtest_subdivision;
 // The surfaces that tiles' images drape over: the globe's grids of masked

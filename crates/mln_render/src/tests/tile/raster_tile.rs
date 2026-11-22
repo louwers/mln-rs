@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use mln_tile_id::OverscaledTileID;
+use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
@@ -10,6 +10,7 @@ use crate::tests::OneTile;
 use crate::tests::tile_jobs_test::Manual;
 use crate::tile::contents::Contents;
 use crate::tile::job::JobResult;
+use crate::tile::raster::RasterContents;
 use crate::tile::tile::TileKind;
 use crate::tile::tile_workers::InlineWorkers;
 
@@ -167,4 +168,30 @@ fn an_empty_load_during_a_decode_keeps_one_decode_in_flight() {
     tiles.update();
     assert_eq!(image_size(&tiles, &id), Some(Size::new(8, 8)));
     assert!(tiles.tile().is_complete());
+}
+
+// What the layers make of a raster tile's image goes when the part of the
+// tile it draws changes: its contents take a new identity, and keep it
+// through a mask that changes nothing. Its texture, which the contents make
+// once they upload, stays.
+#[test]
+fn contents_take_a_new_identity_when_their_geometry_changes_and_keep_their_texture() {
+    let mut context = crate::gfx::context::Resources::detached();
+    let mut contents = RasterContents::new(PremultipliedImage::new(Size::new(4, 4)));
+    assert!(contents.texture().is_none(), "no texture before the upload");
+    contents.upload(&mut context);
+    let texture = contents.texture().cloned().expect("a texture once uploaded");
+    let first = contents.id();
+    contents.set_mask([CanonicalTileID::new(0, 0, 0)].into());
+    assert_eq!(first, contents.id(), "the whole tile, as before");
+    contents.set_mask([CanonicalTileID::new(1, 0, 0)].into());
+    let masked = contents.id();
+    assert_ne!(first, masked);
+    contents.unmask();
+    assert_ne!(masked, contents.id());
+    let warped = contents.id();
+    contents.set_geometry(Vec::new(), Vec::new(), Vec::new());
+    assert_ne!(warped, contents.id(), "an image source's image warped again");
+    contents.upload(&mut context);
+    assert_eq!(Some(&texture), contents.texture());
 }
