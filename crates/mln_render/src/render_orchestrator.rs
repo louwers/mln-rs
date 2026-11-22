@@ -770,6 +770,7 @@ impl RenderOrchestrator {
     /// Chooses the layers the frame draws, into `frame`, and updates each
     /// source's tiles for the layers it has: whether it needs tiles at all,
     /// and whether they lay out again. Returns whether each layer draws.
+    #[expect(clippy::too_many_arguments, reason = "the update's inputs, each from another part of the update")]
     fn update_sources(
         &mut self,
         update_parameters: &UpdateParameters,

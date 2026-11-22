@@ -23,7 +23,6 @@ use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::bindings::{FIRST_VERTEX_BUFFER_ID, MAX_TEXTURES};
 use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::segment::SegmentBase;
-
 use mln_util::logging::{Event, Log};
 use smallvec::SmallVec;
 

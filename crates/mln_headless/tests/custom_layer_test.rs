@@ -502,7 +502,7 @@ mod gl {
     use mln_runtime::map::MapCore;
     use mln_style::Edit;
 
-    use super::{Arc, BackendType, Calls, CustomLayerHost, hosted, Mutex, Ordering, Queue, check, session};
+    use super::{Arc, BackendType, Calls, CustomLayerHost, Mutex, Ordering, Queue, check, hosted, session};
 
     const VERTEX: &str = "#version 300 es
 const vec2 corners[6] = vec2[6](
@@ -902,7 +902,7 @@ mod ending {
     use mln_style::Edit;
 
     use super::{
-        Arc, AtomicUsize, BackendType, CustomLayerHost, hosted, HeadlessFrontend, MapCore, Ordering, Queue, session,
+        Arc, AtomicUsize, BackendType, CustomLayerHost, HeadlessFrontend, MapCore, Ordering, Queue, hosted, session,
     };
 
     /// A host that draws nothing, and counts how it ended.

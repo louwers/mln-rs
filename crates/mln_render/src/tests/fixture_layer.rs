@@ -157,7 +157,6 @@ impl Layout<Dot> for DotLayout {
             let icon = layout.dot_icon.evaluate(&context);
             let label = (!leader.style.layout.dot_label.is_undefined())
                 .then(|| (layout.dot_font.evaluate(&context), layout.dot_label.evaluate(&context)));
-            drop(feature);
             if !icon.empty() {
                 cx.need_image(icon.id(), ImageType::Icon);
             }

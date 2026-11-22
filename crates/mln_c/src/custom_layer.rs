@@ -130,26 +130,22 @@ impl Host {
     /// Draws with `lent`: a prerender before the frame's passes, which lend
     /// no layer depth, and a render in the pass.
     fn draw(&self, lent: Lent<'_>) {
-        let frame = self.frame(&lent);
-        match lent.layer_depth {
-            None => self.prerender(lent.raw, frame),
-            Some(layer_depth) => self.render(lent.raw, frame, layer_depth),
-        }
-    }
-
-    fn frame(&self, lent: &Lent<'_>) -> mln_custom_layer_frame {
-        let frame = lent.frame;
+        let Lent { raw, frame, projection: frame_projection, layer_depth } = lent;
         let mut view = projection::from_map_view(&frame.camera.map_view(f64::from(frame.pixel_ratio)));
         view.extent.scale_factor = map::exact_scale_factor(self.scale_factor, view.extent.scale_factor);
-        mln_custom_layer_frame {
+        let frame = mln_custom_layer_frame {
             view,
-            frame_projection: render_session::frame_projection(lent.projection),
+            frame_projection: render_session::frame_projection(frame_projection),
             width: frame.target_size.width,
             height: frame.target_size.height,
+        };
+        match layer_depth {
+            None => self.prerender(raw, &frame),
+            Some(layer_depth) => self.render(raw, &frame, layer_depth),
         }
     }
 
-    fn prerender(&self, encoder: &mut dyn Any, frame: mln_custom_layer_frame) {
+    fn prerender(&self, encoder: &mut dyn Any, frame: &mln_custom_layer_frame) {
         let Some((backend, encoder)) = native::encoder(encoder) else {
             return;
         };
@@ -159,14 +155,14 @@ impl Host {
             size: size_of::<mln_custom_layer_prerender_parameters>() as u32,
             backend,
             encoder,
-            frame,
+            frame: *frame,
         };
         // SAFETY: the host's callback, with its user data and parameters that
         // stay valid until it returns.
         unsafe { callback(self.registration.user_data().get(), &raw const parameters) };
     }
 
-    fn render(&self, pass: &mut dyn Any, frame: mln_custom_layer_frame, layer_depth: f64) {
+    fn render(&self, pass: &mut dyn Any, frame: &mln_custom_layer_frame, layer_depth: f64) {
         let Some((backend, pass)) = native::pass(pass) else {
             return;
         };
@@ -176,7 +172,7 @@ impl Host {
             size: size_of::<mln_custom_layer_render_parameters>() as u32,
             backend,
             pass,
-            frame,
+            frame: *frame,
             layer_depth,
         };
         // SAFETY: as for `prerender`.

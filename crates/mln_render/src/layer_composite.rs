@@ -16,6 +16,7 @@
 //! its own, copied into a second texture before each such layer and onto the
 //! frame's target at the end.
 
+use mln_gfx::ColorMode;
 use mln_gfx::color_mode::{BlendFunction, LinearBlend};
 use mln_gfx::gpu::{
     ColorAttachment, DepthStencilAttachment, Gpu, GpuError, LoadOp, TargetFormats, TextureFormat, TextureId,
@@ -23,7 +24,6 @@ use mln_gfx::gpu::{
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::ColorBlendFactorType;
-use mln_gfx::ColorMode;
 use mln_style_types::LayerBlendType;
 use mln_util::Color;
 use mln_util::identity::SimpleIdentity;
@@ -372,7 +372,13 @@ impl LayerComposite {
 
     /// Composites the texture onto `parameters`' open pass, as the draw
     /// group `group` does, testing `depth`.
-    pub(crate) fn draw(&self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, depth: DepthTest, group: SimpleIdentity) {
+    pub(crate) fn draw(
+        &self,
+        gpu: &mut dyn Gpu,
+        parameters: &mut PaintParameters<'_>,
+        depth: DepthTest,
+        group: SimpleIdentity,
+    ) {
         if let Some(slot) = self.groups.iter().position(|(id, _)| *id == group) {
             self.draw_slot(gpu, parameters, slot, depth);
         }

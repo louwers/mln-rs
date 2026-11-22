@@ -34,8 +34,8 @@ fn extrude_on_the_globe(polygon: &GeometryCollection, tile: &CanonicalTileID) ->
         assert!(segment.vertex_length <= MAX_SEGMENT_VERTICES);
         assert!(segment.index_length > 0);
         assert!(segment.vertex_offset >= segments_end);
-        for i in segment.index_offset..segment.index_offset + segment.index_length {
-            indices_outside_their_segment += usize::from(usize::from(triangles[i]) >= segment.vertex_length);
+        for &index in &triangles[segment.index_offset..segment.index_offset + segment.index_length] {
+            indices_outside_their_segment += usize::from(usize::from(index) >= segment.vertex_length);
         }
         segments_end = segment.vertex_offset + segment.vertex_length;
     }

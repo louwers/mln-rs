@@ -8,8 +8,7 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use mln_map_types::MapMode;
-use mln_map_types::{MapDebugOptions, TileLodMode, TransformState};
+use mln_map_types::{MapDebugOptions, MapMode, TileLodMode, TransformState};
 use mln_storage::Resource;
 use mln_style::Style;
 use mln_style::layer_type::{LayerStyle, StyleLayerType};
@@ -28,12 +27,10 @@ use mln_util::time::Instant;
 use mln_vec_map::VecSet;
 
 use crate::Registry;
-use crate::bucket::LayerFeatureStates;
-use crate::bucket::ErasedBucket;
-use crate::erased_layer::ErasedEvaluatedLayer;
-use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas;
-use crate::erased_layer::NoPlacement;
+use crate::bucket::{ErasedBucket, LayerFeatureStates};
+use crate::erased_layer::{ErasedEvaluatedLayer, NoPlacement};
 use crate::gfx::context::Resources;
+use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas;
 use crate::layer::Layer;
 use crate::layout::tile_layout::{Dependencies, LayoutParams, Resolved};
 use crate::paint_parameters::TransformParameters;
@@ -113,9 +110,7 @@ impl TileLayout {
             }
             let mut render_layer = registry
                 .layer_type(layer.info().name)
-                .and_then(|layer_type| {
-                    layer_type.create_render_layer(layer.style(), &mut Resources::detached())
-                })
+                .and_then(|layer_type| layer_type.create_render_layer(layer.style(), &mut Resources::detached()))
                 .ok_or_else(|| Error::invalid_argument(format!("no render layer for {}", layer.get_id())))?;
             render_layer.evaluate(&parameters);
             layers.push(render_layer.evaluated());

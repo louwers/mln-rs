@@ -19,8 +19,8 @@ use mln_util::Color;
 use mln_util::size::Size;
 
 use super::{
-    BACKGROUND_POSITION, EXTENT, SIZE, buffer, attribute_id, buffer_id, draw, fixed, position_layout, quad, tile_matrix,
-    whole,
+    BACKGROUND_POSITION, EXTENT, SIZE, attribute_id, buffer, buffer_id, draw, fixed, position_layout, quad,
+    tile_matrix, whole,
 };
 use crate::background::programs::{BACKGROUND, BACKGROUND_PATTERN};
 use crate::background::ubo::BackgroundPropsUBO;
@@ -174,12 +174,7 @@ pub fn invalid_calls(gpu: &mut impl Gpu) -> Result<(), GpuError> {
     let uniform =
         gpu.create_buffer(&mln_gfx::gpu::BufferDesc { label: "uniform", usage: BufferUsage::Uniform, size: 2 * unit })?;
     let props_id = buffer_id(&BACKGROUND, "props")? as u32;
-    let props = |buffer, offset, size| BindGroupEntry::Buffer {
-        id: props_id,
-        buffer,
-        offset,
-        size,
-    };
+    let props = |buffer, offset, size| BindGroupEntry::Buffer { id: props_id, buffer, offset, size };
     let with = |entry: Option<BindGroupEntry>| -> Vec<BindGroupEntry> {
         frame.entries[..1].iter().copied().chain(entry).collect()
     };
@@ -289,8 +284,12 @@ pub fn foreign_ids<G: Gpu>(first: &mut G, second: &mut G) -> Result<(), GpuError
 
     let unknown = |result: Result<(), GpuError>, what| matches!(result, Err(GpuError::UnknownId(kind)) if kind == what);
     assert!(unknown(second.write_buffer(theirs.quad, 0, &[0; 4]), "buffer"), "a write to their buffer");
-    let entries =
-        [BindGroupEntry::Buffer { id: buffer_id(&BACKGROUND, "props")? as u32, buffer: theirs.quad, offset: 0, size: 4 }];
+    let entries = [BindGroupEntry::Buffer {
+        id: buffer_id(&BACKGROUND, "props")? as u32,
+        buffer: theirs.quad,
+        offset: 0,
+        size: 4,
+    }];
     let bindings = second.create_bindings(&BindingsDesc { label: "theirs", shader: ours.shader, entries: &entries });
     assert!(unknown(bindings.map(drop), "buffer"), "bindings of their buffer");
     let bindings =

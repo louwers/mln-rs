@@ -117,7 +117,7 @@ fn a_change_of_data_alone_keeps_the_layer() {
     let plain = new_layer("plain", "p", "");
     let mut edited = plain.clone();
     crate::layer_type::LayerStyle::<crate::tests::fixture_layer::Plain>::edit_data(edited.style_mut(), |data| {
-        *data = 7
+        *data = 7;
     })
     .unwrap();
     let data_changes = LayerChanges::between(&list(&[&plain]), &list(&[&edited]));
@@ -187,7 +187,7 @@ mod versions {
             Ok(())
         })
         .unwrap();
-        let error = old.edit_layer_data::<Dot>("bg", |_| Ok(())).unwrap_err();
+        let error = old.edit_layer_data::<Dot>("bg", |()| Ok(())).unwrap_err();
         assert_eq!(mln_util::ErrorKind::NotFound, error.kind);
         let mut new = style();
         new.keep_layer_data(&old);

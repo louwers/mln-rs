@@ -111,11 +111,7 @@ fragment half4 fragmentMain() { return half4(1.0); }
     let layouts = [VertexBufferLayout {
         stride: 4,
         step: VertexStep::Vertex,
-        attributes: vec![GpuVertexAttribute {
-            id: 0,
-            format: AttributeDataType::Short2,
-            offset: 0,
-        }],
+        attributes: vec![GpuVertexAttribute { id: 0, format: AttributeDataType::Short2, offset: 0 }],
     }];
     let desc = PipelineDesc {
         shader,

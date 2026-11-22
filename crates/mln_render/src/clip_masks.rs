@@ -105,7 +105,12 @@ impl ClipMasks {
     /// Draws the mask of each tile of `masks` with its stencil value into
     /// `parameters`' open pass. Every tile must be one `update` made a mask
     /// for.
-    pub(crate) fn draw(&self, gpu: &mut dyn Gpu, masks: &[(UnwrappedTileID, i32)], parameters: &mut PaintParameters<'_>) {
+    pub(crate) fn draw(
+        &self,
+        gpu: &mut dyn Gpu,
+        masks: &[(UnwrappedTileID, i32)],
+        parameters: &mut PaintParameters<'_>,
+    ) {
         // On the globe each mask is drawn with a border first, then exactly:
         // where a tile meets finer ones, its coarser edge leaves a sliver
         // between the masks that only a neighbor's border covers.
@@ -131,7 +136,10 @@ fn surface(context: &mut Resources, tile: &UnwrappedTileID, key: MeshKey, globe:
         let canonical = &tile.canonical;
         let granularity = SubdivisionGranularitySetting::globe().stencil.granularity_for_zoom_level(canonical.z);
         let grid = grid(canonical, granularity, borders);
-        TileSurface { vertices: context.buffer(&grid.vertices), triangles: context.index_buffer(grid.triangles.as_flattened()) }
+        TileSurface {
+            vertices: context.buffer(&grid.vertices),
+            triangles: context.index_buffer(grid.triangles.as_flattened()),
+        }
     } else {
         TileSurface {
             vertices: context.buffer(&RenderStaticData::tile_vertices()),
