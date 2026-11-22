@@ -1,18 +1,18 @@
 //! The atlas of a background layer's patterns.
 
+use std::rc::Rc;
 use std::sync::Arc;
 
 use etagere::{AllocId, BucketedAtlasAllocator, size2};
 use geometry::Point;
-use mln_gfx::gpu::{Gpu, TextureFormat};
+use mln_gfx::gpu::TextureFormat;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
-use mln_render::draw::{Context, SharedTexture};
+use mln_render::draw::{Resources, Texture};
 use mln_render::layer::ImageStore;
 use mln_style_types::image::{ImagePosition, Impl as ImageImpl, RectU16};
 use mln_util::hash::HashMap;
 use mln_util::image::PremultipliedImage;
-use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 /// When copied into the atlas texture, image data is padded by one pixel on
@@ -29,28 +29,37 @@ struct Pattern {
 }
 
 /// Pattern images packed into one texture, each with a padding that wraps
-/// it, which the layer's draws upload.
+/// it.
 pub(crate) struct PatternAtlas {
     allocator: BucketedAtlasAllocator,
     patterns: HashMap<String, Pattern>,
     atlas_image: PremultipliedImage,
-    texture: Option<SharedTexture>,
+    /// The texture that the atlas image uploads to.
+    pub(crate) texture: Texture,
     dirty: bool,
 }
 
-impl Default for PatternAtlas {
-    fn default() -> Self {
+impl PatternAtlas {
+    /// An empty atlas, whose texture `res` makes.
+    pub(crate) fn new(res: &mut Resources) -> Self {
+        let texture = res.texture(|texture| {
+            texture.set_format(TextureFormat::Rgba8Unorm);
+            texture.set_sampler(SamplerState {
+                filter: TextureFilterType::Linear,
+                wrap_u: TextureWrapType::Clamp,
+                wrap_v: TextureWrapType::Clamp,
+                ..Default::default()
+            });
+        });
         PatternAtlas {
             allocator: BucketedAtlasAllocator::new(size2(64, 64)),
             patterns: HashMap::default(),
             atlas_image: PremultipliedImage::new(Size::new(0, 0)),
-            texture: None,
+            texture,
             dirty: true,
         }
     }
-}
 
-impl PatternAtlas {
     /// Where the pattern `id` is in the atlas, if it holds it.
     #[must_use]
     pub(crate) fn pattern(&self, id: &str) -> Option<ImagePosition> {
@@ -164,39 +173,16 @@ impl PatternAtlas {
         }
     }
 
-    /// Uploads the atlas image to its texture, first making the texture,
-    /// unless the atlas is unchanged since the last upload.
-    pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
-        let texture = match &self.texture {
-            None => {
-                let texture = context.add_texture_with(|texture| {
-                    texture.set_format(TextureFormat::Rgba8Unorm);
-                    texture.set_sampler(SamplerState {
-                        filter: TextureFilterType::Linear,
-                        wrap_u: TextureWrapType::Clamp,
-                        wrap_v: TextureWrapType::Clamp,
-                        ..Default::default()
-                    });
-                });
-                &*self.texture.insert(texture)
-            }
-            Some(texture) if self.dirty => texture,
-            Some(_) => return,
-        };
-        let image = &self.atlas_image;
-        if let Err(error) = context.upload_texture_data(gpu, texture, &image.data, image.size) {
-            Log::error(Event::Render, format!("Uploading the pattern atlas failed: {error}"));
+    /// Gives the texture the atlas image, unless the atlas is unchanged
+    /// since the last call.
+    pub(crate) fn upload(&mut self, res: &mut Resources) {
+        if std::mem::take(&mut self.dirty) {
+            res.texture_mut(&self.texture).set_image(Some(Rc::new(self.atlas_image.clone())));
         }
-        self.dirty = false;
     }
 
-    /// The atlas's texture, once `upload` made it.
-    #[must_use]
-    pub(crate) fn texture(&self) -> Option<&SharedTexture> {
-        self.texture.as_ref()
-    }
-
-    /// The size of the atlas image, which `upload` gives the texture.
+    /// The size of the atlas image, which [`upload`](Self::upload) gives the
+    /// texture.
     #[must_use]
     pub(crate) fn size(&self) -> Size {
         self.atlas_image.size

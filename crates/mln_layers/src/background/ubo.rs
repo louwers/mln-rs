@@ -1,5 +1,3 @@
-use bytemuck::{Pod, Zeroable};
-
 mln_gfx::uniform_block! {
     /// The background shader's per-drawable uniform block.
     pub struct BackgroundDrawableUBO {
@@ -57,36 +55,5 @@ mln_gfx::uniform_block! {
         pub pad1: f32,
         #[padding]
         pub pad2: f32,
-    }
-}
-
-/// Either background per-drawable uniform block, for consolidated UBOs: the
-/// size of the larger member, 96 bytes. Write either member with
-/// `from_drawable` / `from_pattern_drawable`; the rest stays zero.
-#[derive(Clone, Copy, Debug, PartialEq, Pod, Zeroable)]
-#[repr(C, align(16))]
-pub struct BackgroundDrawableUnionUBO {
-    bytes: [u8; 96],
-}
-
-impl Default for BackgroundDrawableUnionUBO {
-    fn default() -> Self {
-        Self::zeroed()
-    }
-}
-
-impl BackgroundDrawableUnionUBO {
-    #[must_use]
-    pub fn from_drawable(ubo: &BackgroundDrawableUBO) -> Self {
-        let mut u = Self::zeroed();
-        u.bytes[..64].copy_from_slice(bytemuck::bytes_of(ubo));
-        u
-    }
-
-    #[must_use]
-    pub fn from_pattern_drawable(ubo: &BackgroundPatternDrawableUBO) -> Self {
-        let mut u = Self::zeroed();
-        u.bytes.copy_from_slice(bytemuck::bytes_of(ubo));
-        u
     }
 }
