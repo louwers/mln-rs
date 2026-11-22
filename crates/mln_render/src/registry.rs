@@ -8,6 +8,7 @@ use mln_style::expression::Functions;
 use mln_style::expression::functions::RegisterError;
 use mln_style::layer_type::{ErasedStyleLayerType, StyleLayerType};
 use mln_style::source_type::ErasedStyleSourceType;
+use mln_style::style_key::{StyleKey, StyleKeys};
 use mln_vec_map::VecMap;
 
 use crate::erased_layer::{ErasedLayerType, NoPlacement, entry};
@@ -17,7 +18,7 @@ use crate::placement::ErasedPlacement;
 use crate::source::SourceType;
 
 /// What a [`Registry`] is built from: the expression functions, the layer
-/// types and their programs' shader sources, and the source types.
+/// types, the source types and the style keys.
 ///
 /// An app fills a builder by explicit calls and builds the [`Registry`]
 /// once. Tile workers in other wasm instances make the same calls, since
@@ -28,6 +29,7 @@ pub struct RegistryBuilder {
     functions: Functions,
     layer_types: VecMap<&'static str, &'static dyn ErasedLayerType>,
     source_types: VecMap<&'static str, &'static dyn ErasedSourceType>,
+    style_keys: StyleKeys,
 }
 
 impl std::fmt::Debug for RegistryBuilder {
@@ -36,6 +38,7 @@ impl std::fmt::Debug for RegistryBuilder {
             .field("functions", &self.functions)
             .field("layer_types", &self.layer_types.keys().collect::<Vec<_>>())
             .field("source_types", &self.source_types.keys().collect::<Vec<_>>())
+            .field("style_keys", &self.style_keys)
             .finish()
     }
 }
@@ -53,7 +56,8 @@ impl RegistryBuilder {
     }
 
     /// Adds the layer type of the layer `L`, both its halves. Fails for a
-    /// name that an earlier type took. A layer whose
+    /// name that an earlier type took, and for a property named as a style
+    /// key. A layer whose
     /// [`Input`](Layer::Input) is of another kind of source than its style
     /// half's doesn't compile.
     pub fn add_layer_type<L: Layer>(&mut self) -> Result<(), RegisterError> {
@@ -80,8 +84,21 @@ impl RegistryBuilder {
         if entry.places() && self.layer_types.values().any(|layer_type| layer_type.places()) {
             return Err(RegisterError::RoleTaken(name.to_owned()));
         }
+        self.style_keys.add_layer_type::<L::Style>()?;
         self.layer_types.insert(name, entry);
         Ok(())
+    }
+
+    /// Adds the style key `key` ([`StyleKey`]). Adding a key again changes
+    /// nothing, so two extensions may both add a key they share. Fails for a
+    /// name that another key or a property of a layer type has, and for a
+    /// value type that another key has: the style reads a key's value by its
+    /// type.
+    pub fn add_style_key<T: PartialEq + std::fmt::Debug + Send + Sync + 'static>(
+        &mut self,
+        key: &'static StyleKey<T>,
+    ) -> Result<(), RegisterError> {
+        self.style_keys.add(key)
     }
 
     /// Adds the source type `T`. Fails for a name that an earlier type took.
@@ -96,7 +113,7 @@ impl RegistryBuilder {
 
     #[must_use]
     pub fn build(self) -> Arc<Registry> {
-        Registry::new(Arc::new(self.functions), self.layer_types, self.source_types)
+        Registry::new(Arc::new(self.functions), self.layer_types, self.source_types, self.style_keys)
     }
 }
 
@@ -108,9 +125,9 @@ fn style_source_half(source_type: &'static dyn ErasedSourceType) -> &'static dyn
     source_type
 }
 
-/// The expression functions, layer types and source types that a style
-/// parses against, its renderer draws and its tile workers lay out, built by
-/// a [`RegistryBuilder`]. It doesn't change once built.
+/// The expression functions, layer types, source types and style keys that
+/// a style parses against, its renderer draws and its tile workers lay out,
+/// built by a [`RegistryBuilder`]. It doesn't change once built.
 ///
 /// A map and the renderer and tile workers that draw it must be given
 /// registries filled by the same calls: they identify functions, layer
@@ -152,10 +169,11 @@ impl Registry {
         functions: Arc<Functions>,
         layer_types: VecMap<&'static str, &'static dyn ErasedLayerType>,
         source_types: VecMap<&'static str, &'static dyn ErasedSourceType>,
+        style_keys: StyleKeys,
     ) -> Arc<Registry> {
         let style_halves = layer_types.values().map(|&layer_type| style_half(layer_type));
         let style_source_halves = source_types.values().map(|&source_type| style_source_half(source_type));
-        let style = StyleRegistry::new(functions, style_halves, style_source_halves);
+        let style = StyleRegistry::new(functions, style_halves, style_source_halves, style_keys);
         Arc::new(Registry { style: Arc::new(style), layer_types, source_types })
     }
 
@@ -197,7 +215,14 @@ impl mln_wire::Context for &Registry {
 
 #[cfg(test)]
 mod tests {
+    use mln_style::LayerTypeInfo;
+    use mln_style::conversion::Error;
+    use mln_style::layer_type::{NoProperties, SourceKind};
+    use mln_style::property_table::{PropertyInfo, PropertyTable};
+
     use super::*;
+    use crate::draw::Draws;
+    use crate::layer::{NewCx, PrepareCx, ViewCover};
     use crate::tests::fixture_layer::Dot;
     use crate::tests::fixture_source::{Geometry, Tiles};
 
@@ -213,5 +238,62 @@ mod tests {
         let mut builder = RegistryBuilder::new();
         builder.add_layer_type::<Dot>().unwrap();
         assert_eq!(builder.add_layer_type::<Dot>(), Err(RegisterError::Duplicate("dot".to_owned())));
+    }
+
+    #[derive(Debug, PartialEq)]
+    struct Mark(f64);
+
+    static MARK: StyleKey<Mark> = StyleKey::layer(
+        "test:mark",
+        |value, _| value.to_double().map(Mark).ok_or_else(|| Error::new("expected a number")),
+        |mark| feature::Value::Double(mark.0),
+    );
+
+    /// A layer type with a property named as [`MARK`].
+    struct Marked;
+
+    impl StyleLayerType for Marked {
+        const INFO: LayerTypeInfo = LayerTypeInfo { name: "marked", source: SourceKind::None, from_json: true };
+        const PROPERTIES: &'static PropertyTable = &PropertyTable::unsorted(&[PropertyInfo::paint("test:mark")]);
+        type LayoutProperties = NoProperties;
+        type PaintProperties = NoProperties;
+        type Data = ();
+    }
+
+    impl Layer for Marked {
+        type Style = Marked;
+        type Input = ViewCover;
+        type Tile = ();
+
+        fn new(_cx: &mut NewCx<'_, Self>) -> Self {
+            Marked
+        }
+
+        fn prepare(&self, _cx: &PrepareCx<'_, Self>, _out: &mut Draws) {}
+    }
+
+    #[test]
+    fn a_style_key_registers_once_and_reaches_the_style() {
+        let mut builder = RegistryBuilder::new();
+        builder.add_layer_type::<Dot>().unwrap();
+        builder.add_style_key(&MARK).unwrap();
+        builder.add_style_key(&MARK).unwrap();
+        let registry = builder.build();
+        let json = r#"{"version":8,"layers":[{"id":"d","type":"dot","source":"s","test:mark":2}]}"#;
+        let style = mln_style::Style::from_json(registry.style(), json, None).unwrap();
+        assert_eq!(Some(&Mark(2.0)), style.get_layer("d").unwrap().style().base().extra::<Mark>());
+    }
+
+    #[test]
+    fn a_style_key_and_a_layer_property_cant_share_a_name() {
+        let duplicate = Err(RegisterError::Duplicate("test:mark".to_owned()));
+        let mut builder = RegistryBuilder::new();
+        builder.add_layer_type::<Marked>().unwrap();
+        assert_eq!(duplicate, builder.add_style_key(&MARK));
+
+        let mut builder = RegistryBuilder::new();
+        builder.add_style_key(&MARK).unwrap();
+        assert_eq!(duplicate, builder.add_layer_type::<Marked>());
+        assert!(builder.build().layer_type("marked").is_none());
     }
 }

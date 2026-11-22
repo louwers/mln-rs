@@ -4,6 +4,7 @@ use super::{Convertible, Error};
 use crate::layer::{Layer, PropertyScope};
 use crate::layer_type::SourceKind;
 use crate::registry::StyleRegistry;
+use crate::style_key::Place;
 
 fn set_object_member(layer: &mut Layer, value: &Convertible<'_>, member: &str, error: &mut Error) -> bool {
     if let Some(member_value) = value.object_member(member)
@@ -128,5 +129,34 @@ pub(crate) fn convert_layer_with(
         return None;
     }
 
+    if let Some(error_) = set_keys(registry, &mut layer, value, invalid) {
+        *error = error_;
+        return None;
+    }
+
     Some(layer)
+}
+
+/// Sets each member of the layer's style JSON `value` whose name has a `:`
+/// as a style key of `layer`.
+fn set_keys(
+    registry: &StyleRegistry,
+    layer: &mut Layer,
+    value: &Convertible<'_>,
+    invalid: InvalidProperty,
+) -> Option<Error> {
+    value.each_member(|name, member| {
+        if !name.contains(':') {
+            return None;
+        }
+        let set = registry.keys().at(name, Place::Layer(layer.info().name)).and_then(|key| layer.set_key(key, member));
+        let error = Error::new(format!("layer '{}': {}", layer.get_id(), set.err()?.message));
+        match invalid {
+            InvalidProperty::Fail => Some(error),
+            InvalidProperty::Skip => {
+                Log::warning(Event::ParseStyle, &error.message);
+                None
+            }
+        }
+    })
 }

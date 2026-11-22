@@ -27,8 +27,8 @@ pub enum LayerChange {
     /// source lays them out again.
     Relaid,
     /// In both, with other [`Data`](crate::layer_type::StyleLayerType::Data)
-    /// alone: the layer keeps its tiles and its transitions, and evaluates
-    /// again.
+    /// or style keys' values alone: the layer keeps its tiles and its
+    /// transitions, and evaluates again.
     Data,
 }
 

@@ -12,6 +12,7 @@ use mln_style::expression::Functions;
 use mln_style::layer::Layer;
 use mln_style::layer_type::{LayerStyle, LayerTypeInfo, SourceKind, StyleLayerType, style_entry};
 use mln_style::property_table::{PropertyInfo, PropertyTable, PropertyVisitor};
+use mln_style::style_key::StyleKeys;
 use mln_style::style_property::Kind;
 use mln_style::{PropertyEvaluationParameters, PropertyValue, StyleRegistry};
 use mln_util::Color;
@@ -84,7 +85,7 @@ mln_render::paint_property_binders!(
 
 /// A `dot` layer with the paint and layout properties `properties` set.
 fn layer(properties: &[(&str, serde_json::Value)]) -> Layer {
-    let registry = StyleRegistry::new(Functions::with_builtins(), [style_entry::<Dot>()], []);
+    let registry = StyleRegistry::new(Functions::with_builtins(), [style_entry::<Dot>()], [], StyleKeys::default());
     let mut layer = Layer::new(&registry, "dot", "dot", "source").unwrap();
     for (name, value) in properties {
         let error = layer.set_property(name, &Convertible::from(value), None);

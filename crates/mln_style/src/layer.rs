@@ -19,6 +19,7 @@ use crate::filter::Filter;
 use crate::layer_type::{ErasedLayerStyle, LayerBase, LayerTypeInfo, SourceKind};
 use crate::property_table::SetPropertyError;
 use crate::registry::StyleRegistry;
+use crate::style_key::AnyKey;
 use crate::style_property::StyleProperty;
 
 /// A font stack: the names of its fonts, in order.
@@ -130,6 +131,8 @@ impl Layer {
             result.insert("maxzoom".to_owned(), Value::Double(f64::from(self.get_max_zoom())));
         }
 
+        self.style.base().extras.serialize(&mut result);
+
         if let Some(expression) = &self.style.base().visibility_expression {
             let mut layout = ValueObject::new();
             layout.insert("visibility".to_owned(), expression.serialize());
@@ -213,6 +216,16 @@ impl Layer {
             return None;
         }
         Some(error)
+    }
+
+    /// Sets the style key `key` from a style JSON value; undefined or null
+    /// unsets it. Returns why the value doesn't parse.
+    pub(crate) fn set_key(&mut self, key: &'static dyn AnyKey, value: &Convertible<'_>) -> Result<(), Error> {
+        let value = key.value_of(value, &self.functions)?;
+        if !self.style.base().extras.holds(key, value.as_ref()) {
+            self.mutate_base(&mut |base| base.extras.set(key, value.clone()));
+        }
+        Ok(())
     }
 
     fn set_visibility_value(&mut self, value: &Convertible<'_>) -> Option<Error> {

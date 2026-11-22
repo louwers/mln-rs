@@ -22,6 +22,7 @@ use crate::source_list::SourceList;
 use crate::source_type::Source;
 use crate::sprite::Sprite;
 use crate::style_json::check_layer_type;
+use crate::style_key::{Extras, Place};
 use crate::transition_options::TransitionOptions;
 
 /// Why a style failed to load.
@@ -52,9 +53,9 @@ pub(crate) type ImageList = Vec<Arc<image::Impl>>;
 ///
 /// A style is a value. [`apply`](Self::apply) makes an [`Edit`]; nothing
 /// else changes it. Its parts (layers, sources, images, light, sky,
-/// projection, global state and the document's own members) sit behind
-/// their own `Arc`s, so a clone is cheap and an edit copies only the part it
-/// changes. Two versions whose part `Arc`s are the same pointer have the
+/// projection, global state, style keys and the document's own members) sit
+/// behind their own `Arc`s, so a clone is cheap and an edit copies only the
+/// part it changes. Two versions whose part `Arc`s are the same pointer have the
 /// same part, which [`is_same_version`](Self::is_same_version) and
 /// [`StyleDiff::between`](crate::diff::StyleDiff::between) read.
 #[derive(Clone)]
@@ -71,6 +72,8 @@ pub struct Style {
     light: Arc<Light>,
     sky: Option<Arc<Sky>>,
     projection: Arc<Projection>,
+    /// The values of the root's style keys.
+    extras: Arc<Extras>,
     transition: TransitionOptions,
     /// What the `global-state` expressions read.
     global_state: Arc<GlobalStateMap>,
@@ -115,6 +118,7 @@ impl Style {
             light: Arc::default(),
             sky: None,
             projection: Arc::default(),
+            extras: Arc::default(),
             transition: TransitionOptions::default(),
             global_state: Arc::default(),
             global_state_defaults: Arc::default(),
@@ -182,6 +186,7 @@ impl Style {
         style.light = Arc::new(std::mem::take(&mut parser.light));
         style.sky = parser.sky.take().map(Arc::new);
         style.projection = Arc::new(std::mem::take(&mut parser.projection));
+        style.extras = Arc::new(std::mem::take(&mut parser.extras));
 
         style.sprites = Arc::from(std::mem::take(&mut parser.sprites));
         style.glyph_url = Arc::from(parser.glyph_url.as_str());
@@ -250,6 +255,19 @@ impl Style {
     #[must_use]
     pub fn get_projection(&self) -> &Arc<Projection> {
         &self.projection
+    }
+
+    /// The value of the root's style key whose value type is `T`, if the
+    /// style sets it ([`StyleKey`](crate::StyleKey)).
+    #[must_use]
+    pub fn extra<T: 'static>(&self) -> Option<&T> {
+        self.extras.get()
+    }
+
+    /// The style JSON value of the root's style key `name`, if the style sets
+    /// it.
+    pub(crate) fn extra_json(&self, name: &str) -> Option<Value> {
+        self.extras.json(name)
     }
 
     /// What the style's `global-state` expressions read.
@@ -351,7 +369,8 @@ impl Style {
                 })?;
             }
             Edit::SetLayerProperty { layer, name, value } => {
-                self.update_layer(&layer, |target| set_layer_property(target, &name, &value))?;
+                let registry = Arc::clone(&self.registry);
+                self.update_layer(&layer, |target| set_layer_property(&registry, target, &name, &value))?;
             }
             Edit::SetLayerFilter { layer, filter } => {
                 self.update_layer(&layer, |target| {
@@ -383,6 +402,16 @@ impl Style {
                     return Err(Error::invalid_argument(format!("{context}: {}", error.message)));
                 }
                 self.light = light;
+            }
+            Edit::SetRootKey { name, value } => {
+                let set =
+                    self.registry.keys().at(&name, Place::Root).and_then(|key| {
+                        Ok((key, key.value_of(&Convertible::from(&value), self.registry.functions())?))
+                    });
+                let (key, value) = set.map_err(|error| Error::invalid_argument(error.message))?;
+                if !self.extras.holds(key, value.as_ref()) {
+                    Arc::make_mut(&mut self.extras).set(key, value);
+                }
             }
             Edit::SetSky(sky) => self.sky = sky.map(Arc::new),
             Edit::SetProjection(projection) => self.projection = Arc::new(projection),
@@ -508,6 +537,7 @@ impl Style {
             && Arc::ptr_eq(&self.light, &other.light)
             && same_option(self.sky.as_ref(), other.sky.as_ref())
             && Arc::ptr_eq(&self.projection, &other.projection)
+            && Arc::ptr_eq(&self.extras, &other.extras)
             && self.transition == other.transition
             && Arc::ptr_eq(&self.global_state, &other.global_state)
             && Arc::ptr_eq(&self.registry, &other.registry)
@@ -595,11 +625,23 @@ fn source_not_found(id: &str) -> Error {
 }
 
 /// Sets the property `name` of `layer` to the style JSON `value`: a layer
-/// type's property or transition, or `filter`, `minzoom`, `maxzoom`,
-/// `source` or `source-layer`, where null resets the ones with a default.
-fn set_layer_property(layer: &mut Layer, name: &str, value: &serde_json::Value) -> Result<(), Error> {
+/// type's property or transition, `filter`, `minzoom`, `maxzoom`, `source`
+/// or `source-layer`, or one of `registry`'s style keys, where null resets
+/// the ones with a default and unsets a key.
+fn set_layer_property(
+    registry: &StyleRegistry,
+    layer: &mut Layer,
+    name: &str,
+    value: &serde_json::Value,
+) -> Result<(), Error> {
     let type_info = layer.info();
     let id = layer.get_id().to_owned();
+    if registry.keys().get(name).is_some() {
+        let set = registry.keys().at(name, Place::Layer(type_info.name));
+        return set.and_then(|key| layer.set_key(key, &Convertible::from(value))).map_err(|error| {
+            Error::invalid_argument(format!("property \"{name}\" of layer \"{id}\": {}", error.message))
+        });
+    }
     if (name == "source" || name == "source-layer") && type_info.source == SourceKind::None {
         // A layer that takes no source would ignore the value.
         return Err(Error::invalid_argument(format!("{} layer \"{id}\" does not take a {name}", type_info.name)));

@@ -24,6 +24,7 @@ use crate::projection::Projection;
 use crate::property_table::{Properties, defined_properties};
 use crate::registry::StyleRegistry;
 use crate::style::Style;
+use crate::style_key::Place;
 use crate::style_property::{Kind, StyleProperty};
 use crate::transition_options::TransitionOptions;
 
@@ -128,9 +129,11 @@ impl Style {
     /// value `json`.
     ///
     /// `name` is one of the layer's layout or paint
-    /// [properties](https://maplibre.org/maplibre-style-spec/layers/), or
-    /// `filter`, `minzoom`, `maxzoom`, `source` or `source-layer`. A `null`
-    /// resets any of these but `source` and `source-layer` to its default.
+    /// [properties](https://maplibre.org/maplibre-style-spec/layers/),
+    /// `filter`, `minzoom`, `maxzoom`, `source` or `source-layer`, or a
+    /// registered style key of the layer ([`StyleKey`](crate::StyleKey)). A
+    /// `null` resets any of these but `source` and `source-layer` to its
+    /// default, and unsets a key.
     ///
     /// Fails with [`ErrorKind::NotFound`](mln_util::ErrorKind) if the style has no layer named
     /// `layer_id`, and with `InvalidArgument` if `json` isn't valid JSON,
@@ -170,10 +173,10 @@ impl Style {
                 let zoom = layer.get_max_zoom();
                 (zoom != f32::INFINITY).then_some(Value::Double(zoom.into()))
             }
-            _ => {
+            _ => layer.style().base().extras.json(name).or_else(|| {
                 let property = layer.get_property(name);
                 (property.get_kind() != Kind::Undefined).then(|| property.get_value().clone())
-            }
+            }),
         };
         Ok(value.as_ref().map(json_text))
     }
@@ -182,10 +185,11 @@ impl Style {
     /// `name` to the JSON value `json`, without reloading the style. A `null`
     /// resets it to its default, as if the style didn't set it.
     ///
-    /// `light`, `sky`, `projection`, `state` and `transition` change. A
-    /// `state` sets every global state property to its new default. A
-    /// `transition` keeps whether placements fade, which the style spec's
-    /// transition doesn't hold.
+    /// `light`, `sky`, `projection`, `state`, `transition` and the
+    /// registered style keys of the root ([`StyleKey`](crate::StyleKey))
+    /// change. A `state` sets every global state property to its new
+    /// default. A `transition` keeps whether placements fade, which the style
+    /// spec's transition doesn't hold.
     ///
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) if
     /// `name` isn't a root property, or is `sources` or `layers`, or if
@@ -194,8 +198,12 @@ impl Style {
     /// glyphs and font faces, and the metadata) and for `terrain`, which the
     /// map doesn't draw.
     pub fn set_root_property_json(&mut self, name: &str, json: &str) -> Result<(), Error> {
-        require_root_property(name)?;
         let context = format!("style root property {}", quote(name));
+        if name.contains(':') {
+            let value = parse_value(json, &context)?;
+            return self.apply(Edit::SetRootKey { name: name.to_owned(), value });
+        }
+        require_root_property(name)?;
         let value = parse(json, &context)?;
         let convertible = Convertible::from(&value);
         let mut error = crate::conversion::Error::default();
@@ -260,8 +268,14 @@ impl Style {
     /// can't change read as the style loaded them.
     ///
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) if
-    /// `name` isn't a root property, or is `sources` or `layers`.
+    /// `name` isn't a root property or a registered style key of the root,
+    /// or is `sources` or `layers`.
     pub fn root_property_json(&self, name: &str) -> Result<Option<String>, Error> {
+        if name.contains(':') {
+            let key = self.registry().keys().at(name, Place::Root);
+            key.map_err(|error| Error::invalid_argument(error.message))?;
+            return Ok(self.extra_json(name).as_ref().map(json_text));
+        }
         require_root_property(name)?;
         let value = match name {
             "light" => defined_properties_json(&**self.get_light()),

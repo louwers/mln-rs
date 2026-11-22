@@ -25,6 +25,7 @@ use crate::property_value::PropertyValue;
 use crate::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
 use crate::renderer::transition_parameters::TransitionParameters;
 use crate::serialization::optional_expression;
+use crate::style_key::Extras;
 use crate::style_property::StyleProperty;
 
 /// Where a layer type's layers get their data.
@@ -226,6 +227,9 @@ pub struct LayerBase {
     pub min_zoom: f32,
     pub max_zoom: f32,
     pub visibility: VisibilityType,
+    /// The values of the layer's style keys, which tile workers don't get.
+    #[wire(skip)]
+    pub(crate) extras: Extras,
 }
 
 impl LayerBase {
@@ -240,10 +244,18 @@ impl LayerBase {
             min_zoom: f32::NEG_INFINITY,
             max_zoom: f32::INFINITY,
             visibility: VisibilityType::Visible,
+            extras: Extras::default(),
         }
     }
 
-    /// Whether `other` has the same members.
+    /// The value of the layer's style key whose value type is `T`, if the
+    /// layer sets it ([`StyleKey`](crate::StyleKey)).
+    #[must_use]
+    pub fn extra<T: 'static>(&self) -> Option<&T> {
+        self.extras.get()
+    }
+
+    /// Whether `other` has the same members, its style keys aside.
     fn same_as(&self, other: &LayerBase) -> bool {
         let same_expression = match (&self.visibility_expression, &other.visibility_expression) {
             (Some(a), Some(b)) => Arc::ptr_eq(a, b) || a == b,
@@ -401,7 +413,9 @@ pub trait ErasedLayerStyle: Any + Send + Sync {
 
     /// Whether `other` is a layer of the same type with the same members
     /// and properties, which may differ from `self` in its
-    /// [`Data`](StyleLayerType::Data). False for a type without data.
+    /// [`Data`](StyleLayerType::Data) and its style keys' values. False
+    /// where neither can differ: for a type without data, of the same keys'
+    /// values.
     fn only_data_differs(&self, other: &dyn ErasedLayerStyle) -> bool;
 }
 
@@ -459,9 +473,11 @@ impl<T: StyleLayerType> ErasedLayerStyle for LayerStyle<T> {
     }
 
     fn only_data_differs(&self, other: &dyn ErasedLayerStyle) -> bool {
-        size_of::<T::Data>() != 0
-            && LayerStyle::<T>::recover_ref(other)
-                .is_some_and(|other| self.base.same_as(&other.base) && property_table::properties_equal(self, other))
+        LayerStyle::<T>::recover_ref(other).is_some_and(|other| {
+            (size_of::<T::Data>() != 0 || self.base.extras != other.base.extras)
+                && self.base.same_as(&other.base)
+                && property_table::properties_equal(self, other)
+        })
     }
 }
 

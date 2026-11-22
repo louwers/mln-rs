@@ -19,6 +19,7 @@ mod property_expression;
 mod style;
 mod style_image;
 mod style_json;
+mod style_key;
 mod style_layer;
 mod style_parser;
 mod util;

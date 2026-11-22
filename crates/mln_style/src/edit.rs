@@ -39,8 +39,9 @@ pub enum Edit {
     /// Replaces the layer with `layer`'s id.
     SetLayer(Layer),
     /// Sets a layer type's property, `<name>-transition`, `filter`,
-    /// `minzoom`, `maxzoom`, `visibility`, `source` or `source-layer` from a
-    /// style JSON value; null resets the ones that have a default.
+    /// `minzoom`, `maxzoom`, `visibility`, `source`, `source-layer` or a
+    /// style key of layers from a style JSON value; null resets the ones
+    /// that have a default and unsets a key.
     SetLayerProperty {
         layer: String,
         name: String,
@@ -62,6 +63,12 @@ pub enum Edit {
     SetLight(Light),
     /// Sets a property of the light from a style JSON value; null resets it.
     SetLightProperty {
+        name: String,
+        value: serde_json::Value,
+    },
+    /// Sets the style key `name` of the style's root from a style JSON
+    /// value; null unsets it.
+    SetRootKey {
         name: String,
         value: serde_json::Value,
     },

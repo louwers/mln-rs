@@ -22,6 +22,7 @@ use crate::registry::StyleRegistry;
 use crate::sky::Sky;
 use crate::source_type::Source;
 use crate::sprite::Sprite;
+use crate::style_key::{Extras, Place};
 use crate::transition_options::TransitionOptions;
 
 /// What `Parser::parse` returns: a style that isn't one fails with
@@ -42,6 +43,8 @@ pub struct Parser {
     pub(crate) light: Light,
     pub(crate) sky: Option<Sky>,
     pub(crate) projection: Projection,
+    /// The values of the root's style keys.
+    pub(crate) extras: Extras,
 
     /// Default values of the root "state" property, keyed by state property
     /// name, used by the "global-state" expression.
@@ -71,6 +74,7 @@ impl Parser {
             light: Light::new(),
             sky: None,
             projection: Projection::new(),
+            extras: Extras::default(),
             global_state_defaults: GlobalStateMap::new(),
             name: String::new(),
             lat_lng: LatLng::default(),
@@ -205,6 +209,12 @@ impl Parser {
             self.font_faces = Some(Arc::new(parse_font_faces(faces)));
         }
 
+        for (name, value) in members(object) {
+            if name.contains(':') {
+                self.parse_key(name, value);
+            }
+        }
+
         // Call for side effect of logging warnings for invalid values.
         let _ = self.font_stacks();
 
@@ -250,6 +260,18 @@ impl Parser {
         };
 
         self.projection = converted;
+    }
+
+    fn parse_key(&mut self, name: &str, value: &Json<'_>) {
+        let set = self
+            .registry
+            .keys()
+            .at(name, Place::Root)
+            .and_then(|key| Ok((key, key.value_of(&Convertible::from(value), self.registry.functions())?)));
+        match set {
+            Ok((key, value)) => self.extras.set(key, value),
+            Err(error) => Log::warning(Event::ParseStyle, &error.message),
+        }
     }
 
     fn parse_state(&mut self, value: &Json<'_>) {
